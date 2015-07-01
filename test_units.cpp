@@ -15,15 +15,13 @@ int main() {
     "1 len.u.=" <<unit.to_Kpc <<" Kpc, "
     "1 time u.="<<unit.to_Myr <<" Myr, "
     "1 vel.u.=" <<unit.to_kms <<" km/s\n";
-  //const potential::BasePotential pot;
   const potential::PlummerPotential pot(mass, scale_radius);
   double solar_radius=8.0*unit.from_Kpc;
   const coord::PosSph point(solar_radius, 1., 2.);
-  const coord::PosCyl point_cyl=coord::toPosCyl(point);
-  double poten_value = potential::Phi(pot, point_cyl);
+  double poten_value = potential::Phi(pot, point);
   double v_escape = sqrt(-2*poten_value);
   double v_circ   = potential::v_circ(pot, solar_radius);
-  double dens     = pot.density(point_cyl);
+  double dens     = pot.density(coord::toPosCyl(point));
   double galactic_year = 2*M_PI*solar_radius / v_circ;
   std::cout <<
     "V_esc="<<v_escape*unit.to_kms<<" km/s, "

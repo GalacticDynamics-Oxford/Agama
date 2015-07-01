@@ -8,9 +8,9 @@ namespace actions{
         AxisymIntegrals Ints;
         Ints.H = potential::totalEnergy(pot, point);
         Ints.Lz= coord::Lz(point);
-        const coord::CoordSysProlateSpheroidal& coordsys=pot.coordsys();
-        coord::PosDerivProlSph derivs;
-        coord::PosProlSph coords= coord::toPosProlSph(point, coordsys, &derivs);
+        const coord::ProlSph& coordsys=pot.coordsys();
+        coord::PosDerivCylProlSph derivs;
+        const coord::PosProlSph coords= coord::toPosDerivProlSph(point, coordsys, &derivs);
         double lambdadot = derivs.dlambdadR*point.vR + derivs.dlambdadz*point.vz;
         double Glambda   = pot.eval_G(coords.lambda);
         Ints.I3 = (coords.lambda+coordsys.gamma) * (Ints.H - pow_2(Ints.Lz)/2/(coords.lambda+coordsys.alpha) + Glambda) -

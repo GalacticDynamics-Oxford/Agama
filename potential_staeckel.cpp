@@ -7,19 +7,19 @@ namespace potential{
 
     StaeckelOblatePerfectEllipsoid::StaeckelOblatePerfectEllipsoid
         (double _mass, double major_axis, double minor_axis) :
-        mass(_mass), CS(-major_axis*major_axis, -minor_axis*minor_axis)
+        mass(_mass), CS(-pow_2(major_axis), -pow_2(minor_axis))
     {
-        if(minor_axis>=major_axis)
+        if(minor_axis<=0 || minor_axis>=major_axis)
             throw std::runtime_error("Error in StaeckelOblatePerfectEllipsoid: "
-                "minor axis must be strictly smaller than major axis");
+                "minor axis must be positive and strictly smaller than major axis");
     }
 
     void StaeckelOblatePerfectEllipsoid::eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
     {
-        coord::PosDerivProlSph coordDerivs;
-        coord::PosDeriv2ProlSph coordDerivs2;
-        const coord::PosProlSph coords = coord::toPosProlSph(pos, CS, 
+        coord::PosDerivCylProlSph coordDerivs;
+        coord::PosDeriv2CylProlSph coordDerivs2;
+        const coord::PosProlSph coords = coord::toPosDerivProlSph(pos, CS, 
             deriv!=NULL || deriv2!=NULL ? &coordDerivs : NULL,
             deriv2!=NULL ? &coordDerivs2 : NULL);   // compute only necessary derivatives
         double lmn = coords.lambda-coords.nu;

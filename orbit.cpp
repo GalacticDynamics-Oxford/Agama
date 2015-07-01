@@ -39,7 +39,7 @@ namespace orbit{
     template<typename coordT>
     int derivs(double t, const double y[], double f[],void *params){
         potential::BasePotential *Pot = static_cast<potential::BasePotential*>(params);
-        coordT pos(y[0], y[1], y[2]);
+        coord::PosT <coordT> pos(y[0], y[1], y[2]);
         coord::GradT<coordT> grad;
         Pot->eval(pos, NULL, &grad);
         apply_ode<coordT>(y, grad, f);

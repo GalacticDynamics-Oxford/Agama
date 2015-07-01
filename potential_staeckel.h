@@ -11,7 +11,7 @@ namespace potential{
     private:
         const double mass;
         /** prolate spheroidal coordinate system corresponding to the oblate density profile */
-        const coord::CoordSysProlateSpheroidal CS;
+        const coord::ProlSph CS;
 
         virtual void eval_cyl(const coord::PosCyl &pos,
             double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -21,7 +21,7 @@ namespace potential{
 
         virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
 
-        const coord::CoordSysProlateSpheroidal& coordsys() const { return CS; }
+        const coord::ProlSph& coordsys() const { return CS; }
 
         /** evaluates the function G(tau) and up to two its derivatives,
             if the supplied output arguments are not NULL */
