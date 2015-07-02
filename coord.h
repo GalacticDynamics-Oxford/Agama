@@ -1,3 +1,39 @@
+/** \file    coord.h 
+    \brief   General-purpose coordinate types and routines
+    \author  Eugene Vasiliev
+    \date    2015
+ 
+ This module provides the general framework for working with different coordinate systems.
+ 
+ It is heavily templated but this shouldn't intimidate the end user, because 
+ the most important data structures and routines have dedicated non-templated aliases.
+ 
+ The fundamental data types are the following:
+ 
+ - coordinate systems (the simplest ones have no parameters at all);
+ - positions and position-velocity pairs in different coordinate systems;
+ - an abstract class for a scalar function defined in a particular coordinate system;
+ - gradients and hessians of scalar functions in different coordinate systems;
+ - coefficients of coordinate transformations between different systems:
+   derivatives of destination coords by source coords (i.e. the jacobian matrix) and 
+   second derivatives of destination coords by source coords.
+ 
+ The fundamental routines operating on these structures are the following:
+ 
+ - conversion of position and position-velocity from one coordinate system to another;
+ - computation of coefficients of coordinate transformation (first/second derivatives);
+ - transformation of gradients and hessians;
+ - the "all-mighty function" that uses the above primitives to perform the following task:
+   suppose we have a class that computes the value, gradient and hessian of a scalar function 
+   in a particular coordinate system ("evaluation CS"), and we need these quantities 
+   in a different system ("output CS").
+   The routine transforms the input coordinates from outputCS to evalCS, along with their 
+   derivatives; computes the value, gradient and hessian in evalCS, transforms them back 
+   to outputCS. A modification of this routine uses another intermediate CS for the situation 
+   when a direct transformation is not implemented.
+   The main application of this routine is the computation of potentials and forces 
+   in different coordinate systems.
+*/
 #pragma once
 
 /// convenience function for squaring a number, used in many places
@@ -11,13 +47,13 @@ namespace coord{
     /// trivial coordinate systems don't have any parameters, 
     /// their class names are simply used as tags in the rest of the code
 
-    /// cartesian coordinate system
+    /// cartesian coordinate system (galactocentric)
     struct Car{};
 
-    /// cylindrical coordinate system
+    /// cylindrical coordinate system (galactocentric)
     struct Cyl{};
 
-    /// spherical coordinate system
+    /// spherical coordinate system (galactocentric)
     struct Sph{};
 
     //  less trivial:
@@ -69,9 +105,9 @@ namespace coord{
     /// position in prolate spheroidal coordinates
     template<> struct PosT<ProlSph>{
         double lambda, nu, phi;
-        const ProlSph& CS;    ///< a point means nothing without specifying its coordinate system
-        PosT<ProlSph>(double _lambda, double _nu, double _phi, const ProlSph& _CS):
-            lambda(_lambda), nu(_nu), phi(_phi), CS(_CS) {};
+        const ProlSph& coordsys;    ///< a point means nothing without specifying its coordinate system
+        PosT<ProlSph>(double _lambda, double _nu, double _phi, const ProlSph& _coordsys):
+            lambda(_lambda), nu(_nu), phi(_phi), coordsys(_coordsys) {};
     };
     typedef struct PosT<ProlSph> PosProlSph;
 
@@ -143,6 +179,12 @@ namespace coord{
     };
     typedef struct GradT<Sph> GradSph;
 
+    /// gradient of scalar function in prolate spheroidal coordinates
+    template<> struct GradT<ProlSph>{
+        double dlambda, dnu;  ///< note: derivative by phi in assumed to be zero
+    };
+    typedef struct GradT<ProlSph> GradProlSph;
+
 ///@}
 /// \name   Primitive data types: hessian of a scalar function in different coordinate systems
 ///@{
@@ -167,6 +209,12 @@ namespace coord{
         double dr2, dtheta2, dphi2, drdtheta, dthetadphi, drdphi;
     };
     typedef struct HessT<Sph> HessSph;
+
+    /// Hessian of scalar function in prolate spheroidal coordinates
+    template<> struct HessT<ProlSph>{
+        double dlambda2, dnu2, dlambdadnu;  ///< note: derivatives by phi are assumed to be zero
+    };
+    typedef struct HessT<ProlSph> HessProlSph;
 
 ///@}
 /// \name   Abstract interface class: a scalar function evaluated in a particular coordinate systems
@@ -215,7 +263,6 @@ namespace coord{
     template<> struct PosDerivT<Cyl, ProlSph> {
         double dlambdadR, dlambdadz, dnudR, dnudz;
     };
-    typedef struct PosDerivT<Cyl, ProlSph> PosDerivCylProlSph;  ///< human-readable alias
 
 
     /** second derivatives of coordinate transformation from source to destination 
@@ -246,9 +293,8 @@ namespace coord{
         double d2rdR2, d2rdRdz, d2rdz2, d2thetadR2, d2thetadRdz, d2thetadz2;
     };
     template<> struct PosDeriv2T<Cyl, ProlSph> {
-        double d2lambdadR2, d2lambdadz2, d2lambdadRdz, d2nudR2, d2nudz2, d2nudRdz;
+        double d2lambdadR2, d2lambdadRdz, d2lambdadz2, d2nudR2, d2nudRdz, d2nudz2;
     };
-    typedef struct PosDeriv2T<Cyl, ProlSph> PosDeriv2CylProlSph; ///< alias
 
 ///@}
 /// \name   Routines for conversion between position/velocity in different coordinate systems
@@ -263,8 +309,8 @@ namespace coord{
     PosT<destCS> toPos(const PosT<srcCS>& from);
 
     /** templated conversion taking the parameters of coordinate system into account */
-    //template<typename srcCS, typename destCS>
-    //PosT<destCS> toPos(const PosT<srcCS>& from, const srcCS& coordsys);
+    template<typename srcCS, typename destCS>
+    PosT<destCS> toPos(const PosT<srcCS>& from, const destCS& coordsys);
 
     /** templated conversion functions for positions 
         with names reflecting the target coordinate system. */
@@ -274,9 +320,6 @@ namespace coord{
     inline PosCyl toPosCyl(const PosT<srcCS>& from) { return toPos<srcCS, Cyl>(from); }
     template<typename srcCS>
     inline PosSph toPosSph(const PosT<srcCS>& from) { return toPos<srcCS, Sph>(from); }
-
-    /** convert position from prolate spheroidal to cylindrical coordinates */
-    //PosCyl toPosCyl(const PosProlSph& from, const ProlSph& coordsys);
 
     /** universal templated conversion function for coordinates and velocities:
         template parameters srcCS and destCS may be any of the coordinate system names */
@@ -315,12 +358,10 @@ namespace coord{
     PosT<destCS> toPosDeriv(const PosT<srcCS>& from, 
         PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=0);
 
-    /** a special case of transformation that needs the parameters of coordinate system:
-        convert from cylindrical to prolate spheroidal coordinates;
-        if derivs!=NULL, it will contain derivatives of coordinate transformation;
-        if derivs2!=NULL, it will contain its second derivatives. */
-    PosProlSph toPosDerivProlSph(const PosCyl& from, const ProlSph& coordsys,
-        PosDerivCylProlSph* deriv, PosDeriv2CylProlSph* deriv2=0);
+    /** templated conversion with derivatives, taking the parameters of coordinate system into account */
+    template<typename srcCS, typename destCS>
+    PosT<destCS> toPosDeriv(const PosT<srcCS>& from, const destCS& coordsys,
+        PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=0);
 
 ///@}
 /// \name   Routines for conversion of gradients and hessians between coordinate systems
@@ -336,19 +377,47 @@ namespace coord{
         const PosDerivT<destCS, srcCS>& deriv, const PosDeriv2T<destCS, srcCS>& deriv2);
 
     /** All-mighty routine for evaluating the value of a scalar function and its derivatives 
-        in a different coordinate system (evalCS), and converting them to the target coordinate system (outputCS). */
+        in a different coordinate system (evalCS), and converting them to the target 
+        coordinate system (outputCS). */
     template<typename evalCS, typename outputCS>
     inline void eval_and_convert(const ScalarFunction<evalCS>& F,
-        const PosT<outputCS>& pos, double* value, GradT<outputCS>* deriv, HessT<outputCS>* deriv2=0)
+        const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
     {
+        bool needDeriv = deriv!=0 || deriv2!=0;
+        bool needDeriv2= deriv2!=0;
         GradT<evalCS> evalGrad;
         HessT<evalCS> evalHess;
         PosDerivT <outputCS, evalCS> coordDeriv;
         PosDeriv2T<outputCS, evalCS> coordDeriv2;
-        const PosT<evalCS> evalPos = toPosDeriv<outputCS, evalCS>(pos, 
-            &coordDeriv, deriv2!=0 ? &coordDeriv2 : 0);
+        const PosT<evalCS> evalPos = needDeriv ? 
+            toPosDeriv<outputCS, evalCS>(pos, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
+            toPos<outputCS, evalCS>(pos);
         // compute the function in transformed coordinates
-        F.evaluate(evalPos, value, &evalGrad, deriv2!=0 ? &evalHess : 0);
+        F.evaluate(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+        if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
+            *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
+        if(deriv2)
+            *deriv2 = toHess<evalCS, outputCS> (evalGrad, evalHess, coordDeriv, coordDeriv2);
+    };
+
+    /** The same routine for conversion of gradient and hessian 
+        in the case that the computation requires the parameters of coordinate system evalCS */
+    template<typename evalCS, typename outputCS>
+    inline void eval_and_convert(const ScalarFunction<evalCS>& F,
+        const PosT<outputCS>& pos, const evalCS& coordsys,
+        double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    {
+        bool needDeriv = deriv!=0 || deriv2!=0;
+        bool needDeriv2= deriv2!=0;
+        GradT<evalCS> evalGrad;
+        HessT<evalCS> evalHess;
+        PosDerivT <outputCS, evalCS> coordDeriv;
+        PosDeriv2T<outputCS, evalCS> coordDeriv2;
+        const PosT<evalCS> evalPos = needDeriv ? 
+            toPosDeriv<outputCS, evalCS>(pos, coordsys, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
+            toPos<outputCS, evalCS>(pos, coordsys);
+        // compute the function in transformed coordinates
+        F.evaluate(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
         if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
             *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
         if(deriv2)
@@ -361,11 +430,75 @@ namespace coord{
         double* value, GradT<CS>* deriv, HessT<CS>* deriv2)
     {  F.evaluate(pos, value, deriv, deriv2); }
 
-    /** A less-mighty function that only computes the value of scalar function in a different coordinate system */
-    template<typename evalCS, typename outputCS>
-    inline void eval_and_convert(const ScalarFunction<evalCS>& F, 
-        const PosT<outputCS>& pos, double* value) {
-        F.evaluate(toPos<outputCS,evalCS>(pos), value);
+    /** An even mightier routine for evaluating the value of a scalar function,
+        its gradient and hessian, in a different coordinate system (evalCS), 
+        and converting them to the target coordinate system (outputCS)
+        through an intermediate coordinate system (intermedCS), 
+        for the situation when a direct transformation is not available. */
+    template<typename evalCS, typename intermedCS, typename outputCS>
+    inline void eval_and_convert_twostep(const ScalarFunction<evalCS>& F,
+        const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    {
+        bool needDeriv = deriv!=0 || deriv2!=0;
+        bool needDeriv2= deriv2!=0;
+        GradT<evalCS> evalGrad;
+        HessT<evalCS> evalHess;
+        GradT<intermedCS> intermedGrad;
+        HessT<intermedCS> intermedHess;
+        PosDerivT <outputCS, intermedCS> coordDerivOI;
+        PosDeriv2T<outputCS, intermedCS> coordDeriv2OI;
+        PosDerivT <intermedCS, evalCS> coordDerivIE;
+        PosDeriv2T<intermedCS, evalCS> coordDeriv2IE;
+        const PosT<intermedCS> intermedPos = needDeriv ? 
+            toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0) :
+            toPos<outputCS, intermedCS>(pos);
+        const PosT<evalCS> evalPos = needDeriv ? 
+            toPosDeriv<intermedCS, evalCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
+            toPos<intermedCS, evalCS>(intermedPos);
+        // compute the function in transformed coordinates
+        F.evaluate(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+        if(needDeriv)  // may be needed for either grad or hess (or both)
+            intermedGrad=toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
+        if(deriv)
+            *deriv  = toGrad<intermedCS, outputCS> (intermedGrad, coordDerivOI);
+        if(deriv2) {
+            intermedHess = toHess<evalCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
+            *deriv2 = toHess<intermedCS, outputCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
+        }
+    };
+
+    /** The same routine for the case that evalCS requires the parameters of coordinate system */
+    template<typename evalCS, typename intermedCS, typename outputCS>
+    inline void eval_and_convert_twostep(const ScalarFunction<evalCS>& F,
+        const PosT<outputCS>& pos, const evalCS& coordsys,
+        double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    {
+        bool needDeriv = deriv!=0 || deriv2!=0;
+        bool needDeriv2= deriv2!=0;
+        GradT<evalCS> evalGrad;
+        HessT<evalCS> evalHess;
+        GradT<intermedCS> intermedGrad;
+        HessT<intermedCS> intermedHess;
+        PosDerivT <outputCS, intermedCS> coordDerivOI;
+        PosDeriv2T<outputCS, intermedCS> coordDeriv2OI;
+        PosDerivT <intermedCS, evalCS> coordDerivIE;
+        PosDeriv2T<intermedCS, evalCS> coordDeriv2IE;
+        const PosT<intermedCS> intermedPos = needDeriv ? 
+            toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0) :
+            toPos<outputCS, intermedCS>(pos);
+        const PosT<evalCS> evalPos = needDeriv ? 
+            toPosDeriv<intermedCS, evalCS>(intermedPos, coordsys, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
+            toPos<intermedCS, evalCS>(intermedPos, coordsys);
+        // compute the function in transformed coordinates
+        F.evaluate(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+        if(needDeriv)  // may be needed for either grad or hess (or both)
+            intermedGrad=toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
+        if(deriv)
+            *deriv  = toGrad<intermedCS, outputCS> (intermedGrad, coordDerivOI);
+        if(deriv2) {
+            intermedHess = toHess<evalCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
+            *deriv2 = toHess<intermedCS, outputCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
+        }
     };
 
 ///@}

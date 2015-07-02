@@ -9,16 +9,18 @@ namespace actions{
         Ints.H = potential::totalEnergy(pot, point);
         Ints.Lz= coord::Lz(point);
         const coord::ProlSph& coordsys=pot.coordsys();
-        coord::PosDerivCylProlSph derivs;
-        const coord::PosProlSph coords= coord::toPosDerivProlSph(point, coordsys, &derivs);
+        coord::PosDerivT<coord::Cyl, coord::ProlSph> derivs;
+        const coord::PosProlSph coords= coord::toPosDeriv<coord::Cyl, coord::ProlSph>
+            (point, coordsys, &derivs);
         double lambdadot = derivs.dlambdadR*point.vR + derivs.dlambdadz*point.vz;
         double Glambda   = pot.eval_G(coords.lambda);
-        Ints.I3 = (coords.lambda+coordsys.gamma) * (Ints.H - pow_2(Ints.Lz)/2/(coords.lambda+coordsys.alpha) + Glambda) -
-            pow_2(lambdadot*(coords.lambda-coords.nu)) / (8*(coords.lambda+coordsys.alpha)*(coords.lambda+coordsys.gamma));
+        Ints.I3 = (coords.lambda+coordsys.gamma) * 
+            (Ints.H - pow_2(Ints.Lz)/2/(coords.lambda+coordsys.alpha) + Glambda) -
+            pow_2(lambdadot*(coords.lambda-coords.nu)) / 
+            (8*(coords.lambda+coordsys.alpha)*(coords.lambda+coordsys.gamma));
         return Ints;
     }
 
-    
 #if 0
 // ============================================================================
 // Oblate Stackel Angle-action calculator

@@ -1,4 +1,4 @@
-#include "potential_spherical.h"
+#include "potential_analytic.h"
 #include <cmath>
 
 namespace potential{

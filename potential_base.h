@@ -40,7 +40,7 @@ namespace potential{
     ///@}
     /// \name  Main public interface methods
     ///@{
-    
+
         BasePotential() {};
 
         virtual ~BasePotential() {};
@@ -64,22 +64,14 @@ namespace potential{
             but the derived classes may instead provide an explicit expression for it. */
         template<typename coordSysT>
         double density(const coord::PosT<coordSysT> &pos) const;
-        
+
         /// returns symmetry type of this potential
         virtual SYMMETRYTYPE symmetry() const=0;
-    
+
     ///@}
     protected:
     /// \name  Protected members: virtual methods for `eval` and `density` in different coordinate systems
     ///@{
-#if 0
-        /** universal conversion function: evaluate potential and possibly its derivatives
-            in coordinate system specified by evalCS, and convert them to another
-            coordinate system specified by outputCS. */
-        template<typename evalCS, typename outputCS>
-        void eval_and_convert(const coord::PosT<outputCS>& pos,
-            double* potential, coord::GradT<outputCS>* deriv, coord::HessT<outputCS>* deriv2) const;
-#endif
 
         /** evaluate potential and up to two its derivatives in cartesian coordinates;
             must be implemented in derived classes */
@@ -104,16 +96,18 @@ namespace potential{
         virtual double density_sph(const coord::PosSph &pos) const;
 
     ///@}
-    /// \name  Copy constructor and assignment operators are not allowed
+    /** \name  Copy constructor and assignment operators are not allowed,
+               because their inadvertent application would lead to a complex derived class 
+               being assigned to a variable of base class, thus destroying its internal state. */
         BasePotential(const BasePotential& src);
         BasePotential& operator=(const BasePotential&);
     ///@}
     };  // class BasePotential
-    
+
     // Template specializations for `BasePotential::eval` and `BasePotential::density` 
     // in particular coordinate systems 
     // (need to be declared outside the scope of class definition)
-    
+
     /// Evaluate potential and up to two its derivatives in cartesian coordinates
     template<> inline void BasePotential::eval(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
@@ -143,7 +137,7 @@ namespace potential{
 
 
 ///@}
-/// \name   Base classes for potentials that are easier to evaluate in a particular coordinate system
+/// \name   Base classes for potentials that implement the computations in a particular coordinate system
 ///@{
 
     /** Parent class for potentials that are evaluated in cartesian coordinates.
@@ -156,11 +150,15 @@ namespace potential{
     private:
         /** Evaluate potential and up to two its derivatives in cylindrical coordinates. */
         virtual void eval_cyl(const coord::PosCyl &pos,
-            double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+            double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
+            coord::eval_and_convert<coord::Car, coord::Cyl>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** Evaluate potential and up to two its derivatives in spherical coordinates. */
         virtual void eval_sph(const coord::PosSph &pos,
-            double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
+            double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
+            coord::eval_and_convert<coord::Car, coord::Sph>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** abstract function inherited from ScalarFunction interface */
         virtual void evaluate(const coord::PosCar& pos,
@@ -179,16 +177,21 @@ namespace potential{
     private:
         /** Evaluate potential and up to two its derivatives in cartesian coordinates. */
         virtual void eval_car(const coord::PosCar &pos,
-            double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
+            double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
+            coord::eval_and_convert<coord::Cyl, coord::Car>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** Evaluate potential and up to two its derivatives in spherical coordinates. */
         virtual void eval_sph(const coord::PosSph &pos,
-            double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
+            double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
+            coord::eval_and_convert<coord::Cyl, coord::Sph>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** abstract function inherited from ScalarFunction interface */
         virtual void evaluate(const coord::PosCyl& pos,
-            double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
-        { eval_cyl(pos, value, deriv, deriv2); }        
+            double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
+            eval_cyl(pos, value, deriv, deriv2);
+        }
     };  // class BasePotentialCyl
 
 
@@ -202,16 +205,21 @@ namespace potential{
     private:
         /** Evaluate potential and up to two its derivatives in cartesian coordinates. */
         virtual void eval_car(const coord::PosCar &pos,
-            double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
+            double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
+            coord::eval_and_convert<coord::Sph, coord::Car>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** Evaluate potential and up to two its derivatives in cylindrical coordinates. */
         virtual void eval_cyl(const coord::PosCyl &pos,
-            double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+            double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
+            coord::eval_and_convert<coord::Sph, coord::Cyl>(*this, pos, potential, deriv, deriv2);
+        }
 
         /** abstract function inherited from ScalarFunction interface */
         virtual void evaluate(const coord::PosSph& pos,
-            double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
-        { eval_sph(pos, value, deriv, deriv2); }        
+            double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const { 
+            eval_sph(pos, value, deriv, deriv2); 
+        }
     };  // class BasePotentialSph
 
 ///@}

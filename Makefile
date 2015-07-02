@@ -2,12 +2,15 @@ CXX       = g++
 CXXFLAGS += -Wall -O3 $(DEFINES) -fPIC -fdata-sections -ffunction-sections
 LINK      = g++
 LFLAGS   += -fPIC -lgsl -lgslcblas
-SOURCES   = coord.cpp potential_base.cpp potential_spherical.cpp potential_staeckel.cpp \
+SOURCES   = coord.cpp potential_base.cpp potential_analytic.cpp potential_staeckel.cpp \
             actions_staeckel.cpp orbit.cpp
             
 OBJECTS   = $(SOURCES:.cpp=.o)
 
-all:    test_units test_staeckel
+all:    test_coord test_units test_staeckel
+
+test_coord:    coord.o test_coord.o
+	$(LINK) $(LFLAGS) -o test_coord.exe coord.o test_coord.o
 
 test_units:    $(OBJECTS) test_units.o
 	$(LINK) $(LFLAGS) -o test_units.exe $(OBJECTS) test_units.o

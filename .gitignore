@@ -1,0 +1,9 @@
+*~
+*.exe
+*.o
+*.a
+*.tmp
+old/*
+dev/*
+temp/*
+xcode/*

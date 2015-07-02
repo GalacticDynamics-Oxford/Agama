@@ -5,7 +5,7 @@
 
 namespace coord{
 
-// angular momentum functions
+//--------  angular momentum functions --------//
     template<> double Ltotal(const PosVelCar& p) {
         return sqrt(pow_2(p.y*p.vz-p.z*p.vy) + pow_2(p.z*p.vx-p.x*p.vz) + pow_2(p.x*p.vy-p.y*p.vx));
     }
@@ -42,9 +42,25 @@ namespace coord{
         return PosSph(sqrt(pow_2(pos.R)+pow_2(pos.z)), atan2(pos.R, pos.z), pos.phi);
     }
     template<> PosCyl toPos(const PosProlSph& p) {
-        const double R = sqrt((p.lambda+p.CS.alpha)*(p.nu+p.CS.alpha)/(p.CS.alpha-p.CS.gamma));
-        const double z = sqrt((p.lambda+p.CS.gamma)*(p.nu+p.CS.gamma)/(p.CS.gamma-p.CS.alpha));
+        const double R = sqrt((p.lambda+p.coordsys.alpha)*(p.nu+p.coordsys.alpha)/
+            (p.coordsys.alpha-p.coordsys.gamma));
+        const double z = sqrt((p.lambda+p.coordsys.gamma)*(p.nu+p.coordsys.gamma)/
+            (p.coordsys.gamma-p.coordsys.alpha));
         return PosCyl(R, z, p.phi);
+    }
+    template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
+        // lambda and mu are roots "t" of equation  R^2/(t+alpha) + z^2/(t+gamma) = 1
+        double R2=pow_2(from.R), z2=pow_2(from.z);
+        double b = cs.alpha+cs.gamma - R2 - z2;
+        double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
+        double det = b*b-4*c;
+        if(det<=0)
+            throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: det<=0");
+        double sqD=sqrt(det);
+        // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
+        double lambda = 0.5*(-b+sqD);
+        double nu     = 0.5*(-b-sqD);
+        return PosProlSph(lambda, nu, from.phi, cs);
     }
 
 //--------  position+velocity conversion functions  ---------//
@@ -97,7 +113,6 @@ namespace coord{
     }
 
     template<> PosVelSph toPosVel(const PosVelCyl& p) {
-//        throw std::runtime_error("Cyl=>Sph: Not implemented");
         const double r=sqrt(pow_2(p.R)+pow_2(p.z));
         if(r==0)
             throw std::runtime_error("PosVel Cyl=>Sph: r=0, fixme!");
@@ -149,7 +164,7 @@ namespace coord{
             throw std::runtime_error("PosDeriv Car=>Sph: second derivative not implemented");
         return PosSph(r, atan2(R, p.z), atan2(p.y, p.x));
     }
-        
+
     template<>
     PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2) {
         const double cosphi=cos(p.phi), sinphi=sin(p.phi);
@@ -227,8 +242,9 @@ namespace coord{
         return PosCyl(R, z, p.phi);
     }
 
-    PosProlSph toPosDerivProlSph(const PosCyl& from, const ProlSph& cs,
-        PosDerivCylProlSph* derivs, PosDeriv2CylProlSph* derivs2)
+    template<>
+    PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
+        PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2)
     {
         // lambda and mu are roots "t" of equation  R^2/(t+alpha) + z^2/(t+gamma) = 1
         double R2=pow_2(from.R), z2=pow_2(from.z);
@@ -261,7 +277,7 @@ namespace coord{
         }
         return PosProlSph(lambda, nu, from.phi, cs);
     }
-    
+
 //-------- implementations of functions that convert gradients --------//
 // note: the code below is machine-generated
 
@@ -316,6 +332,15 @@ namespace coord{
         dest.dr = src.dR*deriv.dRdr + src.dz*deriv.dzdr;
         dest.dtheta = src.dR*deriv.dRdtheta + src.dz*deriv.dzdtheta;
         dest.dphi = src.dphi;
+        return dest;
+    }
+
+    template<>
+    GradCyl toGrad(const GradProlSph& src, const PosDerivT<Cyl, ProlSph>& deriv) {
+        GradCyl dest;
+        dest.dR = src.dlambda*deriv.dlambdadR + src.dnu*deriv.dnudR;
+        dest.dz = src.dlambda*deriv.dlambdadz + src.dnu*deriv.dnudz;
+        dest.dphi = 0;
         return dest;
     }
 
@@ -492,6 +517,26 @@ namespace coord{
             srcHess.dRdphi*deriv.dRdtheta + 
             srcHess.dzdphi*deriv.dzdtheta;
         dest.dphi2 = srcHess.dphi2;
+        return dest;
+    }
+
+    template<>
+    HessCyl toHess(const GradProlSph& srcGrad, const HessProlSph& srcHess,
+        const PosDerivT<Cyl, ProlSph>& deriv, const PosDeriv2T<Cyl, ProlSph>& deriv2) {
+        HessCyl dest;
+        dest.dR2 = 
+            (srcHess.dlambda2*deriv.dlambdadR + srcHess.dlambdadnu*deriv.dnudR)*deriv.dlambdadR + 
+            (srcHess.dlambdadnu*deriv.dlambdadR + srcHess.dnu2*deriv.dnudR)*deriv.dnudR + 
+            srcGrad.dlambda*deriv2.d2lambdadR2 + srcGrad.dnu*deriv2.d2nudR2;
+        dest.dRdz = 
+            (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadR + 
+            (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudR + 
+            srcGrad.dlambda*deriv2.d2lambdadRdz + srcGrad.dnu*deriv2.d2nudRdz;
+        dest.dz2 = 
+            (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadz + 
+            (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudz + 
+            srcGrad.dlambda*deriv2.d2lambdadz2 + srcGrad.dnu*deriv2.d2nudz2;
+        dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;
         return dest;
     }
 

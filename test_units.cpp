@@ -1,5 +1,5 @@
 #include "units.h"
-#include "potential_spherical.h"
+#include "potential_analytic.h"
 #include <iostream>
 #include <cmath>
 

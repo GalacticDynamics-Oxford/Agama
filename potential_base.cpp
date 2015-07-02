@@ -32,65 +32,6 @@ namespace potential{
         return (deriv2.dr2 + deriv.dr*2/pos.r +
             (deriv2.dtheta2 + deriv.dtheta*cottheta + deriv2.dphi2/pow_2(sintheta))/pow_2(pos.r) ) / (4*M_PI);
     }
-#if 0
-    // this function is used in derived specialized classes
-    template<typename evalCS, typename outputCS>
-    void BasePotential::eval_and_convert(const coord::PosT<outputCS>& pos,
-        double* potential, coord::GradT<outputCS>* deriv, coord::HessT<outputCS>* deriv2) const
-    {
-        const coord::PosT<evalCS> evalPos(coord::toPos<outputCS,evalCS>(pos));
-        coord::GradT<evalCS> myGrad;
-        coord::HessT<evalCS> myHess;
-        // even if output requires only Hessian, gradient still needs to be computed
-        coord::GradT<evalCS>* evalGrad = deriv!=NULL || deriv2!=NULL ? &myGrad : NULL;
-        coord::HessT<evalCS>* evalHess = deriv2!=NULL ? &myHess : NULL;
-        eval(evalPos, potential, evalGrad, evalHess);
-        if(deriv!=NULL || deriv2!=NULL)
-            coord::toDeriv<evalCS,outputCS>(evalPos, evalGrad, evalHess, deriv, deriv2);
-    }
-#endif
-
-    /*  since template virtual functions are not allowed, we have to define 
-        virtual overloaded functions for each coordinate system with different names.
-        They all use the universal templated transformation function defined 
-        in the base class, with different template arguments. */
-    void BasePotentialCar::eval_cyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
-    {
-        coord::eval_and_convert<coord::Car, coord::Cyl>(*this, pos, potential, deriv, deriv2);
-    }
-
-    void BasePotentialCar::eval_sph(const coord::PosSph &pos,
-        double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const
-    {
-        coord::eval_and_convert<coord::Car, coord::Sph>(*this, pos, potential, deriv, deriv2);
-    }
-
-
-    void BasePotentialCyl::eval_car(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
-    {
-        coord::eval_and_convert<coord::Cyl, coord::Car>(*this, pos, potential, deriv, deriv2);
-    }
-
-    void BasePotentialCyl::eval_sph(const coord::PosSph &pos,
-        double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const
-    {
-        coord::eval_and_convert<coord::Cyl, coord::Sph>(*this, pos, potential, deriv, deriv2);
-    }
-
-
-    void BasePotentialSph::eval_car(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
-    {
-        coord::eval_and_convert<coord::Sph, coord::Car>(*this, pos, potential, deriv, deriv2);
-    }
-
-    void BasePotentialSph::eval_cyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
-    {
-        coord::eval_and_convert<coord::Sph, coord::Cyl>(*this, pos, potential, deriv, deriv2);
-    }
 
 
     void BasePotentialSphericallySymmetric::eval_sph(const coord::PosSph &pos,
