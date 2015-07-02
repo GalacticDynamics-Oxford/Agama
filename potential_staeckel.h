@@ -17,7 +17,7 @@ namespace potential{
         virtual void eval_car(const coord::PosCar &pos,
             double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
             coord::eval_and_convert_twostep<coord::ProlSph, coord::Cyl, coord::Car>
-                (*this, pos, coordSys, potential, deriv, deriv2);
+                (*this, pos, coordSys, potential, deriv, deriv2);  // no direct conversion exists, use two-step
         }
         virtual void eval_cyl(const coord::PosCyl &pos,
             double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
@@ -27,7 +27,7 @@ namespace potential{
         virtual void eval_sph(const coord::PosSph &pos,
             double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
             coord::eval_and_convert_twostep<coord::ProlSph, coord::Cyl, coord::Sph>
-                (*this, pos, coordSys, potential, deriv, deriv2);
+                (*this, pos, coordSys, potential, deriv, deriv2);  // use two-step conversion
         }
 
         /** the function that does the actual computation in prolate spheroidal coordinates  */

@@ -121,8 +121,12 @@ namespace coord{
     /// combined position and velocity in cartesian coordinates
     template<> struct PosVelT<Car>: public PosCar{
         double vx, vy, vz;
+        /// initialize from explicitly given numbers
         PosVelT<Car>(double _x, double _y, double _z, double _vx, double _vy, double _vz) :
             PosCar(_x, _y, _z), vx(_vx), vy(_vy), vz(_vz) {};
+        /// initialize from an array of 6 floats
+        explicit PosVelT<Car>(const double p[]) :
+            PosCar(p[0], p[1], p[2]), vx(p[3]), vy(p[4]), vz(p[5]) {};
         void unpack_to(double *out) const {
             out[0]=x; out[1]=y; out[2]=z; out[3]=vx; out[4]=vy; out[5]=vz; }
     };
@@ -136,6 +140,8 @@ namespace coord{
         double vR, vz, vphi;
         PosVelT<Cyl>(double _R, double _z, double _phi, double _vR, double _vz, double _vphi) :
             PosCyl(_R, _z, _phi), vR(_vR), vz(_vz), vphi(_vphi) {};
+        explicit PosVelT<Cyl>(const double p[]) :
+            PosCyl(p[0], p[1], p[2]), vR(p[3]), vz(p[4]), vphi(p[5]) {};
         void unpack_to(double *out) const {
             out[0]=R; out[1]=z; out[2]=phi; out[3]=vR; out[4]=vz; out[5]=vphi; }
     };
@@ -148,6 +154,8 @@ namespace coord{
         double vr, vtheta, vphi;
         PosVelT<Sph>(double _r, double _theta, double _phi, double _vr, double _vtheta, double _vphi) :
             PosSph(_r, _theta, _phi), vr(_vr), vtheta(_vtheta), vphi(_vphi) {};
+        explicit PosVelT<Sph>(const double p[]) :
+            PosSph(p[0], p[1], p[2]), vr(p[3]), vtheta(p[4]), vphi(p[5]) {};
         void unpack_to(double *out) const {
             out[0]=r; out[1]=theta; out[2]=phi; out[3]=vr; out[4]=vtheta; out[5]=vphi; }
     };
@@ -220,11 +228,14 @@ namespace coord{
 /// \name   Abstract interface class: a scalar function evaluated in a particular coordinate systems
 ///@{
 
+    /** Prototype of a scalar function which is computed in a particular coordinate system */
     template<typename coordSysT>
     class ScalarFunction {
     public:
         ScalarFunction() {};
         virtual ~ScalarFunction() {};
+        /** Evaluate any combination of value, gradient and hessian of the function at a given point.
+            Each of these quantities is computed and stored in the output pointer if it was not NULL. */
         virtual void evaluate(const PosT<coordSysT>& x,
             double* value=0,
             GradT<coordSysT>* deriv=0,
@@ -271,12 +282,12 @@ namespace coord{
 
     /** instantiations of the general template for second derivatives of coordinate transformations */
     template<> struct PosDeriv2T<Cyl, Car> {
-        double d2xdR2, d2xdRdphi, d2xdphi2, d2ydR2, d2ydRdphi, d2ydphi2;
+        double d2xdRdphi, d2xdphi2, d2ydRdphi, d2ydphi2;
     };
     template<> struct PosDeriv2T<Sph, Car> {
-        double d2xdr2, d2xdrdtheta, d2xdrdphi, d2xdtheta2, d2xdthetadphi, d2xdphi2,
-            d2ydr2, d2ydrdtheta, d2ydrdphi, d2ydtheta2, d2ydthetadphi, d2ydphi2,
-            d2zdr2, d2zdrdtheta, d2zdtheta2;
+        double d2xdrdtheta, d2xdrdphi, d2xdtheta2, d2xdthetadphi, d2xdphi2,
+               d2ydrdtheta, d2ydrdphi, d2ydtheta2, d2ydthetadphi, d2ydphi2,
+               d2zdrdtheta, d2zdtheta2;
     };
     template<> struct PosDeriv2T<Car, Cyl> {
         double d2Rdx2, d2Rdxdy, d2Rdy2, d2phidx2, d2phidxdy, d2phidy2;

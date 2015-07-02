@@ -84,8 +84,8 @@ namespace coord{
 
     template<> PosVelCyl toPosVel(const PosVelCar& p) {
         const double R=sqrt(pow_2(p.x)+pow_2(p.y));
-        if(R==0)
-            throw std::runtime_error("PosVel Car=>Cyl: R=0, fixme!");
+        if(R==0)  // determine phi from vy/vx rather than y/x
+            return PosVelCyl(R, p.z, atan2(p.vx, p.vy), sqrt(pow_2(p.vx)+pow_2(p.vy)), p.vz, 0);
         const double cosphi=p.x/R, sinphi=p.y/R;
         const double vR  = p.vx*cosphi+p.vy*sinphi;
         const double vphi=-p.vx*sinphi+p.vy*cosphi;
@@ -103,8 +103,13 @@ namespace coord{
     template<> PosVelSph toPosVel(const PosVelCar& p) {
         const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
         const double r2=R2+pow_2(p.z), r=sqrt(r2), invr=1/r;
-        if(R==0)
-            throw std::runtime_error("PosVel Car=>Sph: R=0, fixme!");
+        if(R==0) {
+            const double vR=sqrt(pow_2(p.vx)+pow_2(p.vy));
+            const double phi=atan2(p.vy, p.vx);
+            if(p.z==0) 
+                return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(vR*vR+p.vz*p.vz), 0, 0);
+            return PosVelSph(r, p.z>0?0:M_PI, phi, p.vz*(p.z>0?1:-1), vR*(p.z>0?1:-1), 0);
+        }
         const double temp   = p.x*p.vx+p.y*p.vy;
         const double vr     = (temp+p.z*p.vz)*invr;
         const double vtheta = (temp*p.z/R-p.vz*R)*invr;
@@ -114,8 +119,9 @@ namespace coord{
 
     template<> PosVelSph toPosVel(const PosVelCyl& p) {
         const double r=sqrt(pow_2(p.R)+pow_2(p.z));
-        if(r==0)
-            throw std::runtime_error("PosVel Cyl=>Sph: r=0, fixme!");
+        if(r==0) {
+            return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(p.vR*p.vR+p.vz*p.vz), 0, 0);
+        }
         const double rinv= 1./r;
         const double costheta=p.z*rinv, sintheta=p.R*rinv;
         const double vr=p.vR*sintheta+p.vz*costheta;
@@ -138,15 +144,22 @@ namespace coord{
             deriv->dphidx=-sinphi/R;
             deriv->dphidy=cosphi/R;
         }
-        if(deriv2!=NULL) 
-            throw std::runtime_error("PosDeriv Car=>Cyl: second derivative not implemented");
+        if(deriv2!=NULL) {
+            deriv2->d2Rdx2 =pow_2(sinphi)/R;
+            deriv2->d2Rdy2 =pow_2(cosphi)/R;
+            deriv2->d2Rdxdy=-sinphi*cosphi/R;
+            deriv2->d2phidx2 =2*sinphi*cosphi/R2;
+            deriv2->d2phidy2 =-deriv2->d2phidx2;
+            deriv2->d2phidxdy=(pow_2(sinphi)-pow_2(cosphi))/R2;
+        }
         return PosCyl(R, p.z, atan2(p.y, p.x));
     };
 
     template<>
     PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, Sph>* deriv2) {
-        const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
-        const double r2=R2+pow_2(p.z), r=sqrt(r2), invr=1/r;
+        const double x2=pow_2(p.x), y2=pow_2(p.y), z2=pow_2(p.z);
+        const double R2=x2+y2, R=sqrt(R2);
+        const double r2=R2+z2, r=sqrt(r2), invr=1/r;
         if(R==0)
             throw std::runtime_error("PosDeriv Car=>Sph: R=0, degenerate case!");
         if(deriv!=NULL) {
@@ -160,23 +173,47 @@ namespace coord{
             deriv->dphidx=-p.y/R2;
             deriv->dphidy=p.x/R2;
         }
-        if(deriv2!=NULL) 
-            throw std::runtime_error("PosDeriv Car=>Sph: second derivative not implemented");
+        if(deriv2!=NULL) {
+            const double invr3=invr/r2;
+            deriv2->d2rdx2=(r2-x2)*invr3;
+            deriv2->d2rdy2=(r2-y2)*invr3;
+            deriv2->d2rdz2=R2*invr3;
+            deriv2->d2rdxdy=-p.x*p.y*invr3;
+            deriv2->d2rdxdz=-p.x*p.z*invr3;
+            deriv2->d2rdydz=-p.y*p.z*invr3;
+            const double invr4=1/(r2*r2);
+            const double temp=p.z*invr4/(R*R2);
+            deriv2->d2thetadx2=(r2*y2-2*R2*x2)*temp;
+            deriv2->d2thetady2=(r2*x2-2*R2*y2)*temp;
+            deriv2->d2thetadz2=2*R*p.z*invr4;
+            deriv2->d2thetadxdy=-p.x*p.y*(r2+2*R2)*temp;
+            const double temp2=(R2-z2)*invr4/R;
+            deriv2->d2thetadxdz=p.x*temp2;
+            deriv2->d2thetadydz=p.y*temp2;
+            deriv2->d2phidx2=2*p.x*p.y/pow_2(R2);
+            deriv2->d2phidy2=-deriv2->d2phidx2;
+            deriv2->d2phidxdy=(y2-x2)/pow_2(R2);
+        }
         return PosSph(r, atan2(R, p.z), atan2(p.y, p.x));
     }
 
     template<>
     PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2) {
         const double cosphi=cos(p.phi), sinphi=sin(p.phi);
+        const double x=p.R*cosphi, y=p.R*sinphi;
         if(deriv!=NULL) {
             deriv->dxdR=cosphi;
             deriv->dydR=sinphi;
-            deriv->dxdphi=-p.R*sinphi;
-            deriv->dydphi= p.R*cosphi;
+            deriv->dxdphi=-y;
+            deriv->dydphi= x;
         }
-        if(deriv2!=NULL) 
-            throw std::runtime_error("PosDeriv Cyl=>Car: second derivative not implemented");
-        return PosCar(p.R*cosphi, p.R*sinphi, p.z);
+        if(deriv2!=NULL) {
+            deriv2->d2xdRdphi=-sinphi;
+            deriv2->d2ydRdphi=cosphi;
+            deriv2->d2xdphi2=-x;
+            deriv2->d2ydphi2=-y;
+        }
+        return PosCar(x, y, p.z);
     }
 
     template<>
@@ -218,8 +255,20 @@ namespace coord{
             deriv->dxdphi=-y;
             deriv->dydphi= x;
         }
-        if(deriv2!=NULL)
-            throw std::runtime_error("PosDeriv Sph=>Car: second derivative not implemented");
+        if(deriv2!=NULL) {
+            deriv2->d2xdrdtheta=costheta*cosphi;
+            deriv2->d2ydrdtheta=costheta*sinphi;
+            deriv2->d2zdrdtheta=-sintheta;
+            deriv2->d2xdrdphi=-sintheta*sinphi;
+            deriv2->d2ydrdphi= sintheta*cosphi;
+            deriv2->d2xdtheta2=-x;
+            deriv2->d2ydtheta2=-y;
+            deriv2->d2zdtheta2=-z;
+            deriv2->d2xdthetadphi=-z*sinphi;
+            deriv2->d2ydthetadphi= z*cosphi;
+            deriv2->d2xdphi2=-x;
+            deriv2->d2ydphi2=-y;
+        }
         return PosCar(x, y, z); 
     };
 
@@ -414,8 +463,7 @@ namespace coord{
         HessCyl dest;
         dest.dR2 = 
             (srcHess.dx2*deriv.dxdR + srcHess.dxdy*deriv.dydR)*deriv.dxdR + 
-            (srcHess.dxdy*deriv.dxdR + srcHess.dy2*deriv.dydR)*deriv.dydR + 
-            srcGrad.dx*deriv2.d2xdR2 + srcGrad.dy*deriv2.d2ydR2;
+            (srcHess.dxdy*deriv.dxdR + srcHess.dy2*deriv.dydR)*deriv.dydR;
         dest.dRdz = 
             srcHess.dxdz*deriv.dxdR + 
             srcHess.dydz*deriv.dydR;
@@ -466,8 +514,7 @@ namespace coord{
         dest.dr2 = 
             (srcHess.dx2*deriv.dxdr + srcHess.dxdy*deriv.dydr + srcHess.dxdz*deriv.dzdr)*deriv.dxdr + 
             (srcHess.dxdy*deriv.dxdr + srcHess.dy2*deriv.dydr + srcHess.dydz*deriv.dzdr)*deriv.dydr + 
-            (srcHess.dxdz*deriv.dxdr + srcHess.dydz*deriv.dydr + srcHess.dz2*deriv.dzdr)*deriv.dzdr + 
-            srcGrad.dx*deriv2.d2xdr2 + srcGrad.dy*deriv2.d2ydr2 + srcGrad.dz*deriv2.d2zdr2;
+            (srcHess.dxdz*deriv.dxdr + srcHess.dydz*deriv.dydr + srcHess.dz2*deriv.dzdr)*deriv.dzdr;
         dest.drdtheta = 
             (srcHess.dx2*deriv.dxdtheta + srcHess.dxdy*deriv.dydtheta + srcHess.dxdz*deriv.dzdtheta)*deriv.dxdr + 
             (srcHess.dxdy*deriv.dxdtheta + srcHess.dy2*deriv.dydtheta + srcHess.dydz*deriv.dzdtheta)*deriv.dydr + 
