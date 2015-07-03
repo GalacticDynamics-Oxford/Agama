@@ -1,0 +1,2005 @@
+/***************************************************************************//**
+\file Numerics.templates
+\brief Lots of useful templated functions. Rootfinding, polynomial 
+interpolation, splines...
+ 
+*                                                                              *
+* Numerics.templates                                                           *
+*                                                                              *
+* C++ code written by Walter Dehnen, 1994,                                     *
+* Oxford University, Department of Physics, Theoretical Physics                *
+* address: 1 Keble Road, Oxford OX1 3NP, United Kingdom                        *
+* e-mail : dehnen@thphys.ox.ac.uk                                              *
+*                                                                              *
+*------------------------------------------------------------------------------*
+*  In the following                                                            *
+*                                                                              *
+* C  denotes  any user defined class                                           *
+* S  denotes  a scalar: a type for which the following operators are defined   *
+*             =, +=, -=, *=, /=, +, -, *, /, <, >, <=, >=, !=, and ==          *
+*             between S and which allows for explicit conversion from a float  *
+* R  denotes  a scalar for which additionally to the operators a S allows all  *
+*             the standard mathematical functions are defined.                 *
+* T  denotes  a type for which the following operators are defined             *
+*             =, +=, -=, +, -, !=, and ==  between T                           *
+*             =, *=, /=, *, and /  between a T and a S or R                    *
+*             (e.g. a Vector or a Matrix)                                      *
+*                                                                              *
+********************************************************************************
+*                                                                              *
+* the following NON-INLINE FUNCTION TEMPLATES are defined:                     *
+*                                                                              *
+* template<class S>                                                            *
+* S rtsafe(void(*)(S,S&,S&), const S, const S, const S)                        *
+*    root finding using Newton-Raphson. The first argument is a void which     *
+*    given x returns f and df/dx.                                              *
+*                                                                              *
+* template<class C, class S>                                                   *
+* S Rtsafe(C*, void(C::*)(S,S&,S&), const S, const S, const S)                 *
+*    root finding using Newton-Raphson. The first argument is a pointer to an  *
+*    object of class C, the second a member function of that object, a void    *
+*    that given x returns f and df/dx.                                         *
+*                                                                              *
+* template<class S>                                                            *
+* int hunt(S*xarr, const int n, S x, const int j);                             *
+*    hunts the ordered table xarr for jlo such that xarr[jlo]<=x<xarr[jlo+1]   *
+*    on input j provides a guess for the final value of jlo.                   *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T polint(S *xa, T *ya, const int n, S x)                                     *
+*    polynom interpolation using n values: returns y(x) given x_i, y_i         *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T polev(S x, S*xarr, T*yarr, const int n, const int m=4)                     *
+*    given the arrays xarr, yarr, polev returns y(x) using m of n values.      *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T polev_2d(S x1, S x2, S*x1arr, S *x2arr, T**yarr, const int n1,             *
+*            const int n2, const int m1=4, const int m2=4)                     *
+*    2D polynomial interpolation                                               *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T polev_3d(S x1, S x2, S x3, S*x1arr, S *x2arr, S *x3arr, T***yarr,          *
+*            const int n1, const int n2, const int n3,                         *
+*            const int m1=4, const int m2=4, const int m3=4)                   *
+*    3D polynomial interpolation                                               *
+*                                                                              *
+* template<class S, class T>                                                   *
+* void spline(S *x, T *y, const int n, const S yp1, const S ypn, T *y2,        *
+*             const int nat1=0, const int natn=0)                              *
+*    computes spline coefficients                                              *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T splout(S *x, T *y, const int n, const S yp1, const S ypn, const S xi,      *
+*             const int nat1=0, const int natn=0)                              *
+*    computes spline coefficients AND value of spline at xi, no coeffs. output *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T splev(S *x, T* y, T *y2, const int n, const S xi)                          *
+*    given spline coeffs computes spline, tries old values for KLO, KHI        *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T splev(S *x, T* y, T *y2, const int n, const S xi, T& dy)                   *
+*    given spline coeffs computes spline & first derivative                    *
+*                                                                              *
+* template<class S, class T>                                                   *
+* T splev(S *x, T* y, T *y2, const int n, const S xi, T& dy, T& d2y)           *
+*    given spline coeffs computes spline & first+second derivative             *
+*                                                                              *
+* template<class C, class S>                                                   *
+* S qbulir(C*, S(C::*)(S), const S, const S, const S)                          *
+*    integrates a member function                                              *
+*                                                                              *
+* template<class S>                                                            *
+* void HeapIndex(S*, const int, int*);                                         *
+*                                                                              *
+* template<class S, int N>                                                     *
+* void HeapIndex(const Vector<S,N>&, Vector<int,N>&);                          *
+*                                                                              *
+* template<class S, int N>                                                     *
+* void HeapIndexAbs(const Vector<S,N>&, Vector<int,N>&);                       *
+*                                                                              *
+* template<class S, int N>                                                     *
+* void HeapIndex(const Vector<S,N>&, Vector<S,N>&);                            *
+*                                                                              *
+* template<class S, int N>                                                     *
+* void HeapIndexAbs(const Vector<S,N>&, Vector<S,N>&);                         *
+*                                                                              *
+* template<class S>                                                            *
+* void HeapIndexF(S(*)(const int), const int, int*);                           *
+*                                                                              *
+* template<class S>                                                            *
+* void HeapIndexAbs(S*, const int, int*);                                      *
+*                                                                              *
+* template<class S>                                                            *
+* void HeapIndexAbsF(S(*)(const int), const int, int*);                        *
+*                                                                              *
+********************************************************************************
+*                                                                              *
+* dependencies:                                                                *
+* rtsafe()        WDabs()                                                      *
+* hunt()           -                                                           *
+* poline()         -                                                           *
+* polev()         polint(), hunt()                                             *
+* polev_2d()      polint(), hunt()                                             *
+* polev_3d()      polint(), hunt()                                             *
+* spline()         -                                                           *
+* splout()         -                                                           *
+* splev()         hunt()                                                       *
+* qbulir()        WDabs()                                                      *
+* HeapIndex()      -                                                           *
+* HeapIndexAbs()  WDabs()                                                      *
+*******************************************************************************/
+
+#ifndef _Numerics_templates_def_
+#define _Numerics_templates_def_ 1
+
+#include <iostream>
+#include <algorithm>
+#include "WDVector.h"
+#include "WDMatrix.h"
+using std::cerr; 
+
+namespace WDmath{
+////////////////////////////////////////////////////////////////////////////////
+
+#define polev2D  polev_2d
+#define polev3D  polev_3d
+#define spline2D spline_2d
+#define spline3D spline_3d
+#define splev2D  splev_2d
+#define splev3D  splev_3d
+
+
+
+inline void Numerics_error(const char* msgs)
+{
+    cerr << " ERROR in Numerics: " << msgs << '\n';
+    std::exit(1);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+inline int Numerics_message(const char* msgs)
+{
+  cerr << " WARNING in Numerics: " << msgs << '\n';
+  return -1;
+}
+
+template<class S>  S    WDabs  (const S x)   
+               { return (x<0)? -x : x; }
+template<class S>  int  sign(const S x)            
+               { return (x<0)? -1:((x>0)? 1:0 ); }
+template<class S>  S    sign(const S x, const S s) 
+               { return (s>0)? WDabs(x) : -WDabs(x);}
+
+
+////////////////////////////////////////////////////////////////////////////////
+template <class S>
+S rtsafe(void(*funcd)(S,S&,S&), const S x1, const S x2, const S xacc)
+{
+    int j;
+    const int maxit=100;
+    S   xh,xl,dx,dxo,f,df,fh,fl,rts,swap,temp;
+
+    (*funcd)(x1,fl,df);
+    (*funcd)(x2,fh,df);
+    if(fl*fh >= 0.) Numerics_error("root must be bracketed in rtsafe");
+    if(fl<0.) {
+        xl  = x1;
+        xh  = x2;
+    } else {
+        xh  = x1;
+        xl  = x2;
+        swap= fl;
+        fl  = fh;
+        fh  = swap;
+
+    }
+    rts = 0.5*(x1+x2);
+    dxo = WDabs(x2-x1);
+    dx  = dxo;
+    (*funcd)(rts,f,df);
+    for (j=1;j<=maxit;j++)
+    {
+        if((((rts-xh)*df-f)*((rts-xl)*df-f)>= 0.) || (WDabs(2.*f)>WDabs(dxo*df))) {
+            dxo = dx;
+            dx  = 0.5*(xh-xl);
+            rts = xl+dx;
+            if(xl==rts) return rts;
+        } else {
+            dxo = dx;
+            dx  = f/df;
+            temp=rts;
+            rts-= dx;
+            if(temp==rts) return rts;
+        }
+        if(WDabs(dx)<xacc) return rts;
+        (*funcd)(rts,f,df);
+        if(f<0.) {
+            xl  = rts;
+            fl  = f;
+        } else {
+            xh  = rts;
+            fh  = f;
+        }
+    }
+    Numerics_error("maximum number of iterations exceeded in rtsafe");
+    return rts;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template <class C, class S>
+S rtsafe(const C* const o, void(C::*funcd)(S,S&,S&) const, const S x1, const S x2, const S xacc)
+{
+    int j;
+    const int maxit=100;
+    S   xh,xl,dx,dxo,f,df,fh,fl,rts,swap,temp;
+
+    (o->*funcd)(x1,fl,df);
+    (o->*funcd)(x2,fh,df);
+    if(fl*fh >= 0.)  Numerics_error("root must be bracketed in rtsafe");
+    if(fl<0.) {
+        xl  = x1;
+        xh  = x2;
+    } else {
+        xh  = x1;
+        xl  = x2;
+        swap= fl;
+        fl  = fh;
+        fh  = swap;
+
+    }
+    rts = 0.5*(x1+x2);
+    dxo = WDabs(x2-x1);
+    dx  = dxo;
+    (o->*funcd)(rts,f,df);
+    for (j=1;j<=maxit;j++)
+    {
+        if((((rts-xh)*df-f)*((rts-xl)*df-f)>= 0.) || (WDabs(2.*f)>WDabs(dxo*df))) {
+            dxo = dx;
+            dx  = 0.5*(xh-xl);
+            rts = xl+dx;
+            if(xl==rts) return rts;
+        } else {
+            dxo = dx;
+            dx  = f/df;
+            temp=rts;
+            rts-= dx;
+            if(temp==rts) return rts;
+        }
+        if(WDabs(dx)<xacc) return rts;
+        (o->*funcd)(rts,f,df);
+        if(f<0.) {
+            xl  = rts;
+            fl  = f;
+        } else {
+            xh  = rts;
+            fh  = f;
+        }
+    }
+    Numerics_error("maximum number of iterations exceeded in rtsafe");
+    return rts;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+int hunt(const S*xarr, const int n, const S x, const int j)
+// hunts the ordered table xarr for jlo such that xarr[jlo]<=x<xarr[jlo+1]
+// on input j provides a guess for the final value of jlo.
+// for an ascendingly ordered array, we return
+//  -1 for         x < x[0]
+//   i for x[i] <= x < x[i+1]  if  0<=i<n
+// n-1 for         x == x[n-1]
+// n   for         x >  x[n-1]
+{
+    int jm,jlo=j,jhi,l=n-1;
+    int ascnd=(xarr[l]>xarr[0]);
+
+    if(!ascnd && xarr[l]==xarr[0] ) return -1;  // x_0 = x_l
+    if( (ascnd && x<xarr[0]) || (!ascnd && x>xarr[0]) ) return -1;
+    if( (ascnd && x>xarr[l]) || (!ascnd && x<xarr[l]) ) return  n;
+
+    if(jlo<0 || jlo>l) {                   // input guess not useful,
+        jlo = -1;                          //    go to bisection below
+        jhi = n;
+    } else {
+        int inc = 1;
+        if(x>=xarr[jlo] == ascnd) {        // hunt upward
+            if(jlo == l) return (x==xarr[l])? l : n;
+            jhi = jlo+1;
+            while(x>=xarr[jhi] == ascnd) { // not done hunting
+                jlo =jhi;
+                inc+=inc;                  // so double the increment
+                jhi =jlo+inc;
+                if(jhi>l) {                // off end of table
+                    jhi=n;
+                    break;
+                }
+            }
+        } else {                           // hunt downward
+            if(jlo == 0) return -1;
+            jhi = jlo;
+            jlo-= 1;
+            while(x<xarr[jlo] == ascnd) {  // not done hunting
+                jhi = jlo;
+                inc+= inc;                 // so double the increment
+                jlo = jhi-inc;
+                if(jlo < 0) {              // off end of table
+                    jlo = 0;
+                    break;
+                }
+            }
+        }
+    }
+    while (jhi-jlo != 1) {                 // bisection phase
+        jm=(jhi+jlo) >> 1;
+        if(x>=xarr[jm] == ascnd) jlo=jm;
+        else jhi=jm;
+    }
+    return jlo;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+inline void find(int& klo, const int n, S const *x, const S xi)
+{
+    if(klo<0 || klo>=n-1 || x[klo]>xi || x[klo+1]<xi) {
+        klo = int( (xi-x[0]) / (x[n-1]-x[0]) * (n-1) );
+        klo = hunt(x,n,xi,klo);
+        if(klo<0 || klo>=n){
+        std::cerr << ' ' << xi << ' ' << x[0] << ' ' << x[n-1];             
+        Numerics_error("find: x out of range");
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+inline int find_for_polev(int& j, const int n, const int m, const S *x, const S xi)
+{
+    int M=m;
+    j = int( (xi-x[0]) / (x[n-1]-x[0]) * (n-1) );
+    j = hunt(x,n,xi,j) - (m+1)/2 + 1;
+    if(j>=0 && j<n && x[j]==xi)  M = 1;         // no interpolation required
+    else if(j<0)                 j = 0;
+    else if(j>n-M)               j = n-M;
+    return M;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T polint(const S *xa, const T *ya, const int n, const S x)
+// polynom interpolation using n values
+{
+    int i,m;
+    T   y, *P=new T[n];
+
+    for(i=0;i<n;i++) P[i]=ya[i];
+    for(m=1;m<n;m++)
+        for(i=0;i<n-m;i++) {
+            if(xa[i]==xa[i+m]) Numerics_error("x's not distinct in polint");
+            P[i]= ( (x-xa[i+m])*P[i] + (xa[i]-x)*P[i+1] ) / (xa[i] - xa[i+m]);
+        }
+    y = P[0];    
+    delete[] P;
+    return y;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T polev(S x, S*xarr, T*yarr, const int n, const int m=4)
+// given the arrays xarr, yarr, polev returns y(x) using m of n values.
+{
+    int j, M=find_for_polev(j,n,m,xarr,x);
+    return polint(xarr+j, yarr+j, M, x);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T polev_2d(const S xi[2], S* const xarr[2], T**yarr, const int n[2], const int m[2]=0)
+// polynomial interpolation in 2 dimensions using m1xm2 of n1xn2 values
+{
+    int j[2], M[2];
+    if(m) {
+        M[0] = find_for_polev(j[0],n[0],m[0],xarr[0],xi[0]);
+        M[1] = find_for_polev(j[1],n[1],m[1],xarr[1],xi[1]);
+    } else {
+        M[0] = find_for_polev(j[0],n[0],4,xarr[0],xi[0]);
+        M[1] = find_for_polev(j[1],n[1],4,xarr[1],xi[1]);
+    }
+
+    int l;
+    T *y0 = new T[M[0]];
+    for(l=0;l<M[0];l++)
+        y0[l] = polint(xarr[1]+j[1], yarr[j[0]+l]+j[1], M[1], xi[1]);
+    T y = polint(xarr[0]+j[0], y0, M[0], xi[0]);
+    delete[] y0;
+    return y;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T polev_3d(S    const xi[3],
+           S*   const xarr[3],
+           T***       yarr,
+           int  const n[3],
+           int  const m[3]=0)
+// polynomial interpolation in 3 dimensions using m1xm2xm3 of n1xn2xn3 values
+{
+    int j[3], M[3];
+    if(m) {
+      M[0] = find_for_polev(j[0],n[0],m[0],xarr[0],xi[0]);
+      M[1] = find_for_polev(j[1],n[1],m[1],xarr[1],xi[1]);
+      M[2] = find_for_polev(j[2],n[2],m[2],xarr[2],xi[2]);
+    } else {
+      M[0] = find_for_polev(j[0],n[0],4,xarr[0],xi[0]);
+      M[1] = find_for_polev(j[1],n[1],4,xarr[1],xi[1]);
+      M[2] = find_for_polev(j[2],n[2],4,xarr[2],xi[2]);
+    }
+    int k0,k1;
+    T *y0 = new T[M[0]];
+    T *y1 = new T[M[1]];
+    for(k0=0; k0<M[0]; k0++) {
+      for(k1=0; k1<M[1]; k1++)
+        y1[k1] = polint(xarr[2]+j[2],yarr[j[0]+k0][j[1]+k1]+j[2],M[2],xi[2]);
+      y0[k0] = polint(xarr[1]+j[1],y1,M[1],xi[1]);
+    }
+    T y = polint(xarr[0]+j[0],y0,M[0],xi[0]);
+    delete[] y0;
+    delete[] y1;
+    return y;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+void Spline(S*  const x,        // input:   table of points
+            T*  const y,        // input:   table of function values
+            int const n,        // input:   size of above tables
+            T*        y2,       // output:  table of y''
+            T*  const yp1=0,    // input:   y'(x[0])    nat if=0;
+            T*  const ypn=0)    // input:   y'(x[n-1])  nat if=0;
+// pre-computes spline coefficients, modified NR routine:
+// - x,y,y2 run from 0 to n-1 rather than from 1 to n;
+// - option for natural spline explicit;
+// - y can be of more general type than scalar, e.g., Vector, Matrix.
+{ 
+    const S  zero=0., half=0.5, one=1., two=2., three=3., six=6.;
+    int i;
+    S   qn,p,sig,dx,dx1,dx2;
+             T   un,dy,dy1;
+    T *u = new T[n-1];
+    S *v = new S[n-1];
+    dx   = x[1] - x[0];
+    dy   = y[1] - y[0];
+    if(yp1) {
+        v[0] =-half;
+        u[0] = three/dx * (dy/dx- *yp1);
+    } else
+        u[0] = v[0] = zero;
+    for(i=1; i<n-1; i++) {
+        dx1  = x[i+1]-x[i];
+        dx2  = x[i+1]-x[i-1];
+        dy1  = y[i+1]-y[i];
+        sig  = dx/dx2;
+        p    = sig*v[i-1]+two;
+        v[i] = (sig-one)/p;
+        u[i] = ( six*(dy1/dx1-dy/dx)/dx2 - sig*u[i-1] ) / p;
+        dx   = dx1;
+        dy   = dy1;
+    }
+    if(ypn) {
+        qn = half;
+        un = three/dx * (*ypn - dy/dx);
+    } else
+        un = qn = zero;
+    y2[n-1]= (un-qn*u[n-2]) / (qn*v[n-2]+one);
+    for(i=n-2; i>=0; i--)
+        y2[i] = v[i]*y2[i+1] + u[i];
+    delete[] u;
+    delete[] v;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+void SplinedY(S*  const x,      // input:   table of points
+              T*  const y,      // input:   table of function values
+              int const n,      // input:   size of above tables
+              T*        y1,     // output:  table of y'
+              T*  const yp1=0,  // input:   y'(x[0])    nat if=0;
+              T*  const ypn=0)  // input:   y'(x[n-1])  nat if=0;
+// computes dy/dx of a cubic spline that passes through the given points
+{ 
+    const S  zero=0., half=0.5, one=1., two=2., three=3., six=6.;
+    int i;
+    S   qn,p,sig,dx,dx1,dx2;
+    T   un,dy,dy1;
+    T *u = new T[n-1];
+    T *y2= new T[n-1];
+    S *v = new S[n-1];
+    dx   = x[1] - x[0];
+    dy   = y[1] - y[0];
+    if(yp1) {
+        v[0] =-half;
+        u[0] = three/dx * (dy/dx- *yp1);
+    } else
+        u[0] = v[0] = zero;
+    for(i=1; i<n-1; i++) {
+        dx1  = x[i+1]-x[i];
+        dx2  = x[i+1]-x[i-1];
+        dy1  = y[i+1]-y[i];
+        sig  = dx/dx2;
+        p    = sig*v[i-1]+two;
+        v[i] = (sig-one)/p;
+        u[i] = ( six*(dy1/dx1-dy/dx)/dx2 - sig*u[i-1] ) / p;
+        dx   = dx1;
+        dy   = dy1;
+    }
+    if(ypn) {
+        qn = half;
+        un = three/dx * (*ypn - dy/dx);
+    } else
+        un = qn = zero;
+    y2[n-1]= (un-qn*u[n-2]) / (qn*v[n-2]+one);
+    for(i=n-2; i>=0; i--)
+        y2[i] = v[i]*y2[i+1] + u[i];
+    for(i=1; i<n; i++) {
+        dx    = x[i]-x[i-1];
+        dy    = y[i]-y[i-1];
+        if(i==1) y1[0] = dy/dx - (y2[0] + half*y2[1])*dx/three;
+        y1[i] = y1[i-1] + half*dx*(y2[i]+y2[i-1]);
+    }
+    delete[] v;
+    delete[] y2;
+    delete[] u;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+void spline(S*  const x,        // input:   table of points
+            T*  const y,        // input:   table of function values
+            int const n,        // input:   size of above tables
+            T   const yp1,      // input:   y'(x[0])
+            T   const ypn,      // input:   y'(x[n-1])
+            T*        y2,       // output:  table of y''
+            int const nat1=0,   // input:   natural spline at x[0] ?
+            int const natn=0)   // input:   natural spline at x[n-1] ?
+// pre-computes spline coefficients, modified NR routine:
+// - x,y,y2 run from 0 to n-1 rather than from 1 to n;
+// - option for natural spline explicit;
+// - y can be of more general type than scalar, e.g., Vector, Matrix.
+{ 
+    const S  zero=0., half=0.5, one=1., two=2., three=3., six=6.;
+    int i;
+    S   qn,p,sig,dx,dx1,dx2;
+             T   un,dy,dy1;
+    T *u = new T[n-1];
+    S *v = new S[n-1];
+    dx   = x[1] - x[0];
+    dy   = y[1] - y[0];
+    if(nat1)
+        u[0] = v[0] = zero;
+    else {
+        v[0] =-half;
+        u[0] = three/dx * (dy/dx-yp1);
+    }
+    for(i=1; i<n-1; i++) {
+        dx1  = x[i+1]-x[i];
+        dx2  = x[i+1]-x[i-1];
+        dy1  = y[i+1]-y[i];
+        sig  = dx/dx2;
+        p    = sig*v[i-1]+two;
+        v[i] = (sig-one)/p;
+        u[i] = ( six*(dy1/dx1-dy/dx)/dx2 - sig*u[i-1] ) / p;
+        dx   = dx1;
+        dy   = dy1;
+    }
+    if(natn)
+        un = qn = zero;
+    else {
+        qn = half;
+        un = three/dx * (ypn - dy/dx);
+    }
+    y2[n-1]= (un-qn*u[n-2]) / (qn*v[n-2]+one);
+    for(i=n-2; i>=0; i--)
+        y2[i] = v[i]*y2[i+1] + u[i];
+    delete[] u;
+    delete[] v;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T splout(                       // return:  y(xi)
+         S   const *x,          // input:   table of points
+         T   const *y,          // input:   table of function values
+         int const n,           // input:   size of above tables
+         T   const yp1,         // input:   y'(x[0])
+         T   const ypn,         // input:   y'(x[n-1])
+         S   const xi,          // input:   x-value where y is wanted
+         int const nat1=0,      // input:   natural spline at x[0] ?
+         int const natn=0)      // input:   natural spline at x[n-1] ?
+// computes and interpolates spline, useful if only a single
+// interpolation is required.
+// modified from NR routines spline and splint:
+// - x,y,y2 run from 0 to n-1 rather than from 1 to n;
+// - option for natural spline explicit;
+// - y can be of more general type than scalar, e.g., Vector, Matrix.
+{
+    const S  zero=0., half=0.5, one=1., two=2., three=3., six=6.;
+    int i, k, klo=0, khi=n-1;
+    S   a,b,h,qn,p,sig,dx,dx1,dx2;
+    while(khi-klo > 1) {
+        k=(khi+klo)/2;
+        if(x[k]>xi) khi=k;
+            else    klo=k;
+    }
+    if((h=x[khi]-x[klo])==zero) Numerics_error("splout: bad X input");
+    if(x[klo]==xi) return y[klo];
+
+    T   Y,un,dy,dy1;
+    T *y2= new T[n-1];
+    T *u = new T[n-1];
+    S *v = new S[n-1];
+    dx   = x[1] - x[0];
+    dy   = y[1] - y[0];
+    if(nat1)
+        u[0] = v[0] = zero;
+    else {
+        v[0] =-half;
+        u[0] = three/dx * (dy/dx-yp1);
+    }
+    for(i=1; i<n-1; i++) {
+        dx1  = x[i+1]-x[i];
+        dx2  = x[i+1]-x[i-1];
+        dy1  = y[i+1]-y[i];
+        sig  = dx/dx2;
+        p    = sig*v[i-1]+two;
+        v[i] = (sig-one)/p;
+        u[i] = ( six*(dy1/dx1-dy/dx)/dx2 - sig*u[i-1] ) / p;
+        dx   = dx1;
+        dy   = dy1;
+    }
+    if(natn)
+        un = qn = zero;
+    else {
+        qn = half;
+        un = three/dx * (ypn - dy/dx);
+    }
+    y2[n-1]= (un-qn*u[n-2]) / (qn*v[n-2]+one);
+    for(i=n-2; i>=0; i--)
+        y2[i] = v[i]*y2[i+1] + u[i];
+    delete[] u;
+    delete[] v;
+
+    a = (x[khi]-xi) / h;
+    b = (xi-x[klo]) / h;
+    Y = a*y[klo] + b*y[khi] + ((a*a*a-a)*y2[klo]+(b*b*b-b)*y2[khi])*(h*h/six);
+    delete[] y2;
+    return Y;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T splint(                       // return:  y(xi)
+         S const *x,            // input:   table of points at x[lo]
+         T const *y,            // input:   table of function values at y[lo]
+         T const *y2,           // input:   table of y'' at y2[lo]
+         const S xi,            // input:   x-value where y is wanted
+         T* dy=0,               // output:  dy/dx(xi)     if dy  != 0
+         T* d2y=0)              // output:  d^2y/d^2x(xi) if d2y != 0
+{
+    const    S   zero=0., one=1., three=3., six=6.;
+    S   h,h6,A,B;
+    if((h=x[1]-x[0])==zero) Numerics_error("splint bad X input");
+    h6 = h / six;
+    A  = (x[1]-xi) / h;
+    B  = one - A;
+    if(dy) {
+        S Aq=A*A, Bq=B*B;
+        *dy = (y[1]-y[0])/h + h6*((three*Bq-one)*y2[1]-(three*Aq-one)*y2[0]);
+        if(d2y) *d2y = A*y2[0] + B*y2[1];
+        return A*y[0] +B*y[1] +((Aq-one)*A*y2[0]+(Bq-one)*B*y2[1])*(h*h6);
+    }
+    return A*y[0] +B*y[1] +(((A*A-one)*A)*y2[0]+((B*B-one)*B)*y2[1])*(h*h6);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T splinT(                       // return:  y(xi)
+         const S xlo,           // input:   xlo < x
+         const S xhi,           // input:   x < xhi
+         const T ylo,           // input:   y(xlo)
+         const T yhi,           // input:   y(xhi)
+         const T y2lo,          // input:   y2(xlo)
+         const T y2hi,          // input:   y2(xhi)
+         const S xi,            // input:   xlo <= xi < xhi
+         T* dy=0,               // output:  dy/dx(xi)     if dy  != 0
+         T* d2y=0)              // output:  d^2y/d^2x(xi) if d2y != 0
+{
+    const    S   zero=0., one=1., three=3., six=6.;
+    S   h,h6,A,B;
+    if((h=xhi-xlo)==zero) Numerics_error("splint bad X input");
+    h6 = h / six;
+    A  = (xhi-xi) / h;
+    B  = one - A;
+    if(dy) {
+        S Aq=A*A, Bq=B*B;
+        *dy = (yhi-ylo)/h + h6*((three*Bq-one)*y2hi-(three*Aq-one)*y2lo);
+        if(d2y) *d2y = A*y2lo + B*y2hi;
+        return A*ylo +B*yhi +((Aq-one)*A*y2lo+(Bq-one)*B*y2hi)*(h*h6);
+    }
+    return A*ylo +B*yhi +(((A*A-one)*A)*y2lo+((B*B-one)*B)*y2hi)*(h*h6);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+void splinTarr(
+         S   const xl,          // input:   xl < x
+         S   const xh,          // input:   x < xh
+         S   const xi,          // input:   xlo <= xi < xhi
+         T*  const yl,          // input:   y_k(xl)
+         T*  const yh,          // input:   y_k(xh)
+         T*  const y2l,         // input:   y2_k(xl)
+         T*  const y2h,         // input:   y2_k(xh)
+         int const K,           // input:   k=0,...,K-1
+         T*  y,                 // output:  y_k(xi)
+         T*  dy=0,              // output:  dy_k/dx(xi)     if dy  != 0
+         T*  d2y=0)             // output:  d^2y_k/d^2x(xi) if d2y != 0
+{
+// computes K splines simultaneously
+    const    S   zero=0., one=1., three=3., six=6.;
+    T   *Y=y, *Yl=yl, *Yh=yh, *Y2l=y2l, *Y2h=y2h, *YK=y+K;
+    S   h,h6,hh,A,B,Aq,Bq,Ap,Bp;
+    if((h=xh-xl)==zero) Numerics_error("splinTarr bad X input");
+    h6=h/six;
+    hh=h*h6;
+    A =(xh-xi)/h;  Aq=A*A;  Ap=(Aq-one)*A*hh;
+    B =one-A;      Bq=B*B;  Bp=(Bq-one)*B*hh;
+    if(d2y) {
+        T *dY=dy, *d2Y=d2y;
+        S Au=h6*(three*Aq-one), Bu=h6*(three*Bq-one);
+        for(; Y<YK; Y++,Yl++,Yh++,Y2l++,Y2h++,dY++,d2Y++) {
+            *Y   = A**Yl+B**Yh+Ap**Y2l+Bp**Y2h;
+            *dY  = (*Yh-*Yl)/h + Bu**Y2h-Au**Y2l;
+            *d2Y = A**Y2l + B**Y2h;
+        }
+    } else if(dy) {
+        T *dY=dy;
+        S Au=h6*(three*Aq-one), Bu=h6*(three*Bq-one);
+        for(; Y<YK; Y++,Yl++,Yh++,Y2l++,Y2h++,dY++) {
+            *Y   = A**Yl+B**Yh+Ap**Y2l+Bp**Y2h;
+            *dY  = (*Yh-*Yl)/h + Bu**Y2h-Au**Y2l;
+        }
+    } else {
+        for(; Y<YK; Y++,Yl++,Yh++,Y2l++,Y2h++)
+            *Y   = A**Yl+B**Yh+Ap**Y2l+Bp**Y2h;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T splev(                        // return:  y(xi)
+         S const *x,            // input:   table of points
+         T const *y,            // input:   table of function values
+         T const *y2,           // input:   table of y''
+         const int n,           // input:   size of above tables
+         const S xi,            // input:   x-value where y is wanted
+         T* dy=0,               // output:  y'(xi)   if dy != 0
+         T* d2y=0)              // output:  y''(xi)  if d2y!= 0
+// interpolates spline & gives first derivative;
+// - x,y,y2 run from 0 to n-1 rather than from 1 to n;
+// - y can be of more general type than scalar, e.g., Vector, Matrix.
+// - takes old values of KLO and KHI to look whether they work again, else the
+//   search for KLO, KHI is done using 'hunt' (NR) starting from linear 
+//   interpolation.
+{
+    static int lo=0;
+    find(lo,n,x,xi);
+    return splint(x+lo,y+lo,y2+lo,xi,dy,d2y);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+void spline_2d(
+        S*   const x[2],    // input:   tables of points x[0][i], x[1][j]
+        T**  const y,       // input:   table of function values y[i][j]
+        int* const n,       // input:   sizes of above tables: n[0],n[1]
+        T**        a[3],    // output:  tables of coeffs a[0],a[1],a[2]
+        T*   const yp10=0,  // input:   dy/dx0(x0[0], x1[j])     nat if yp10 = 0
+        T*   const ypn0=0,  // input:   dy/dx0(x0[n0-1], x1[j])  nat if ypn0 = 0
+        T*   const yp11=0,  // input:   dy/dx0(x0[i], x1[0])     nat if yp11 = 0
+        T*   const ypn1=0)  // input:   dy/dx0(x0[i], x1[n1-1])  nat if ypn1 = 0
+{
+    int i,j;
+    T   yp1,ypn;
+    T *t = new T[n[0]];
+    T *t2= new T[n[0]];
+// 1. for each x1 do 1D spline for y in x0
+    for(j=0; j<n[1]; j++) {
+        for(i=0; i<n[0]; i++)
+            t[i] = y[i][j];
+        yp1 = (yp10)? yp10[j] : 0.;
+        ypn = (ypn0)? ypn0[j] : 0.;
+        spline(x[0],t,n[0],yp1,ypn,t2,int(yp10),int(ypn0));
+        for(i=0; i<n[0]; i++)
+            a[1][i][j] = t2[i];
+    }
+// 2. do 1D splines for y and c0 in x1
+    for(i=0; i<n[0]; i++) {
+        spline(x[1],a[1][i],n[1],0.,0.,a[2][i],1,1);
+        yp1 = (yp11)? yp11[i] : 0.;
+        ypn = (ypn1)? ypn1[i] : 0.;
+        spline(x[1],y[i],n[1],yp1,ypn,a[0][i],int(yp11),int(ypn1));
+    }
+    delete[] t;
+    delete[] t2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, class T>
+T splev_2d(                     // return:  y(x0i,x1i)
+        S*   const x[2],        // input:   tables of points x[0][i], x[1][j]
+        T**  const y,           // input:   table of function values y[i][j]
+        T**  const a[3],        // input:   tables of coeffs a[0],a[1]
+        int* const n,           // input:   sizes of above tables: n[0],n[1]
+        S*   const xi,          // input:   (x0,x1)-value where y is wanted
+        T*         dy=0,        // output:  gradient of y   if dy != 0
+        T**        d2y=0)       // output:  d^2y/dxi/dxj    if d2y!= 0
+{
+    static int l0=0, l1=0;
+    T yl,yh,y2l,y2h;
+    find(l0,n[0],x[0],xi[0]);
+    find(l1,n[1],x[1],xi[1]);
+    if(d2y) {
+        T dyl,dyh,dy2l,dy2h, d2yl,d2yh,d2y2l,d2y2h;
+        yl = splint(x[1]+l1,y[l0]+l1,a[0][l0]+l1,xi[1],&dyl,&d2yl);
+        yh = splint(x[1]+l1,y[l0+1]+l1,a[0][l0+1]+l1,xi[1],&dyh,&d2yh);
+        y2l= splint(x[1]+l1,a[1][l0]+l1,a[2][l0]+l1,xi[1],&dy2l,&d2y2l);
+        y2h= splint(x[1]+l1,a[1][l0+1]+l1,a[2][l0+1]+l1,xi[1],&dy2h,&d2y2h);
+        dy[1]= splinT(x[0][l0],x[0][l0+1],dyl,dyh,dy2l,dy2h,xi[0],d2y[0]+1);
+        d2y[1][0]= d2y[0][1];
+        d2y[1][1]= splinT(x[0][l0],x[0][l0+1],d2yl,d2yh,d2y2l,d2y2h,xi[0]);
+        return splinT(x[0][l0],x[0][l0+1],yl,yh,y2l,y2h,xi[0],dy,d2y[0]);
+    } else if(dy) {
+        T dyl,dyh,dy2l,dy2h;
+        yl = splint(x[1]+l1,y[l0]+l1,a[0][l0]+l1,xi[1],&dyl);
+        yh = splint(x[1]+l1,y[l0+1]+l1,a[0][l0+1]+l1,xi[1],&dyh);
+        y2l= splint(x[1]+l1,a[1][l0]+l1,a[2][l0]+l1,xi[1],&dy2l);
+        y2h= splint(x[1]+l1,a[1][l0+1]+l1,a[2][l0+1]+l1,xi[1],&dy2h);
+        dy[1]= splinT(x[0][l0],x[0][l0+1],dyl,dyh,dy2l,dy2h,xi[0]);
+        return splinT(x[0][l0],x[0][l0+1],yl,yh,y2l,y2h,xi[0],dy);
+    }
+    yl = splint(x[1]+l1,y[l0]+l1,a[0][l0]+l1,xi[1]);
+    yh = splint(x[1]+l1,y[l0+1]+l1,a[0][l0+1]+l1,xi[1]);
+    y2l= splint(x[1]+l1,a[1][l0]+l1,a[2][l0]+l1,xi[1]);
+    y2h= splint(x[1]+l1,a[1][l0+1]+l1,a[2][l0+1]+l1,xi[1]);
+    return splinT(x[0][l0],x[0][l0+1],yl,yh,y2l,y2h,xi[0]);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+/*
+template<class C, class S>
+S qbulir(C* o, S(C::*func)(S), const S a, const S b, const S eps_, S& err)
+//------------------------------------------------------------------------------
+// Quadrature program using the Bulirsch sequence and rational extrapolation.
+// The algorithm is puplished in Bulirsch & Stoer, Num. Math. 9, 271-278 (1967),
+// where a routine in ALGOL is given. This routine is a straightforward
+// translation into C++.
+// CAUTION: 
+// Do not use this routine for integrating low order polynomials (up to fourth
+// order) or periodic functions with period equal to the interval of integration
+// or linear combinations of both.
+// INPUT:  o      object of class C
+//      func   pointer to member of object o: function to be integrated.
+//      a,b    lower and upper boundaries of the integration interval;
+//      eps    desired relativ accuracy;
+// OUTPUT: return approximated value for the integral;
+//      err    actual relative error of the return value.
+//------------------------------------------------------------------------------
+{
+    S ba=b-a;
+    if(ba==0.) return 0.;
+
+    int    i,n=2,nn=3,mx=25,m,mr, bo,bu=0,odd=1;
+    S      c,d[7],d1,ddt,den,dt[7],e,eps,eta=S(1.e-7),
+                    gr,hm,nt,sm,t,t1,t2,t2a,ta,tab,tb,v,w;
+
+    while(eta+1. != 1.) eta *=S(0.5);
+    eta  *=S(2.);                    // eta = actual computing accuracy
+
+    eps   = fmax(eps_,eta);
+    sm    = 0.;
+    gr    = 0.;
+    t1    = 0.;
+    t2    = S(0.5)*((o->*func)(a)+(o->*func)(b));
+    t2a   = t2;
+    tb    = WDabs(t2a);
+    c     = t2*ba;
+    dt[0] = c;
+
+    for(m=1;m<=mx;m++)             // iterate over the refinements
+    {
+        bo = (m>=7);
+        hm = ba/n;
+        if(odd) {
+            for(i=1;i<=n;i+=2)
+            {
+                w  = (o->*func)(a+i*hm);
+                t2+= w;
+                tb+= WDabs(w);
+            }
+            nt   = t2;
+            tab  = tb * WDabs(hm);
+            d[1] = S(16./9.);
+            d[3] = S(64./9.);
+            d[5] = S(256./9.);
+        } else {
+            for(i=1;i<=n;i+=6)
+            {
+                w  = i*hm;
+                t1+= (o->*func)(a+w) + (o->*func)(b-w);
+            }
+            nt   = t1+t2a;
+            t2a  = t2;
+            d[1] = S(2.25);
+            d[3] = S(9.);
+            d[5] = S(36.);
+        }
+        ddt   = dt[0];
+        t     = nt*hm;
+        dt[0] = t;
+        nt    = dt[0];
+        if(bo) {
+            mr   = 6;
+            d[6] = S(64.);
+            w    = S(144.);
+        } else {
+            mr   = m;
+            d[m] = n*n;
+            w    = d[m];
+        }
+        for(i=1;i<=mr;i++)
+        {
+            d1  = d[i]*ddt;
+            den = d1-nt;
+            e   = nt-ddt;
+            if(den != S(0.)) {
+                e /= den;
+                v  = nt*e;
+                nt = d1*e;
+                t += v;
+            } else {
+                nt = S(0.);
+                v  = S(0.);
+            }
+            ddt   = dt[i];
+            dt[i] = v;
+        }
+        ta = c;
+        c  = t;
+        if(!bo) t -= v;
+        v   = t-ta;
+        t  += v;
+        err = WDabs(v);
+        if(ta<t) {
+            d1 = ta;
+            ta = t;
+            t  = d1;
+        }
+        bo = bo || (ta<gr && t>sm);
+        if(bu && bo && err < eps*tab*w) break;
+        gr   = ta;
+        sm   = t;
+        odd  = !odd;
+        i    = n;
+        n    = nn;
+        nn   = i+i;
+        bu   = bo;
+        d[2] = S(4.);
+        d[4] = S(16.);
+    }
+    v = tab*eta;
+    if(err<v) err = v;
+    if(m==mx) cerr << " qbulir exceeding maximum of iterations\n";
+    return c;
+}
+*/
+////////////////////////////////////////////////////////////////////////////////
+template<class C, class S>
+S qbulir(const C* const o, S(C::*func)(S) const, const S a, const S b, const S eps_)
+// as qbulir() above, but without return of an error estimate.
+{
+    S ba=b-a;
+    if(ba==0.) return 0.;
+
+    int    i,n=2,nn=3,mx=25,m,mr, bo,bu=0,odd=1;
+             S      d[7],dt[7];
+    S      c,d1,ddt,den,e,eps,err,eta=S(1.e-7),
+                    gr,hm,nt,sm,t,t1,t2,t2a,ta,tab=0.,tb,v=0.,w;
+
+    while(eta+1. != 1.) eta *=S(0.5);
+    eta  *=S(2.);                    // eta = actual computing accuracy
+
+    eps   = fmax(eps_,eta);
+    sm    = 0.;
+    gr    = 0.;
+    t1    = 0.;
+    t2    = S(0.5)*((o->*func)(a)+(o->*func)(b));
+    t2a   = t2;
+    tb    = WDabs(t2a);
+    c     = t2*ba;
+    dt[0] = c;
+
+    for(m=1;m<=mx;m++)             // iterate over the refinements
+    {
+        bo = (m>=7);
+        hm = ba/n;
+        if(odd) {
+            for(i=1;i<=n;i+=2)
+            {
+                w  = (o->*func)(a+i*hm);
+                t2+= w;
+                tb+= WDabs(w);
+            }
+            nt   = t2;
+            tab  = tb * WDabs(hm);
+            d[1] = S(16./9.);
+            d[3] = S(64./9.);
+            d[5] = S(256./9.);
+        } else {
+            for(i=1;i<=n;i+=6)
+            {
+                w  = i*hm;
+                t1+= (o->*func)(a+w) + (o->*func)(b-w);
+            }
+            nt   = t1+t2a;
+            t2a  = t2;
+            d[1] = S(2.25);
+            d[3] = S(9.);
+            d[5] = S(36.);
+        }
+        ddt   = dt[0];
+        t     = nt*hm;
+        dt[0] = t;
+        nt    = dt[0];
+        if(bo) {
+            mr   = 6;
+            d[6] = S(64.);
+            w    = S(144.);
+        } else {
+            mr   = m;
+            d[m] = n*n;
+            w    = d[m];
+        }
+        for(i=1;i<=mr;i++)
+        {
+            d1  = d[i]*ddt;
+            den = d1-nt;
+            e   = nt-ddt;
+            if(den != S(0.)) {
+                e /= den;
+                v  = nt*e;
+                nt = d1*e;
+                t += v;
+            } else {
+                nt = S(0.);
+                v  = S(0.);
+            }
+            ddt   = dt[i];
+            dt[i] = v;
+        }
+        ta = c;
+        c  = t;
+        if(!bo) t -= v;
+        v   = t-ta;
+        t  += v;
+        err = WDabs(v);
+        if(ta<t) {
+            d1 = ta;
+            ta = t;
+            t  = d1;
+        }
+        bo = bo || (ta<gr && t>sm);
+        if(bu && bo && err < eps*tab*w) break;
+        gr   = ta;
+        sm   = t;
+        odd  = !odd;
+        i    = n;
+        n    = nn;
+        nn   = i+i;
+        bu   = bo;
+        d[2] = S(4.);
+        d[4] = S(16.);
+    }
+    v = tab*eta;
+    if(m==mx) cerr << " qbulir exceeding maximum of iterations\n";
+    return c;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+void HeapIndex(const S* A, const int n, int *indx)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A(i)
+{
+    if(n<=0) return;
+    if(n==1) { indx[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<n; j++) indx[j] = j;
+    l = n>>1;
+    ir= n-1;
+    for(;;) {
+        if(l>0)
+            q = A[indxt=indx[--l]];
+        else {
+            q = A[indxt=indx[ir]];
+            indx[ir] = indx[0];
+            if(--ir == 0) {
+                indx[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && A[indx[j]] < A[indx[j+1]] ) j++;
+            if(q < A[indx[j]] ) {
+                indx[i] = indx[j];
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        indx[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, int N>
+void HeapIndex(const Vector<S,N>& A, Vector<int,N>& INDX)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A(i)
+{
+    if(N<=0) return;
+    if(N==1) { INDX[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<N; j++) INDX[j] = j;
+    l = N>>1;
+    ir= N-1;
+    for(;;) {
+        if(l>0)
+            q = A(indxt=INDX(--l));
+        else {
+            q = A(indxt=INDX(ir));
+            INDX[ir] = INDX(0);
+            if(--ir == 0) {
+                INDX[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && A(INDX(j)) < A(INDX(j+1)) ) j++;
+            if(q < A(INDX(j)) ) {
+                INDX[i] = INDX(j);
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        INDX[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, int N>
+void HeapIndexAbs(const Vector<S,N>& A, Vector<int,N>& INDX)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A(i)
+{
+    if(N<=0) return;
+    if(N==1) { INDX[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<N; j++) INDX[j] = j;
+    l = N>>1;
+    ir= N-1;
+    for(;;) {
+        if(l>0)
+            q = WDabs(A(indxt=INDX(--l)));
+        else {
+            q = WDabs(A(indxt=INDX(ir)));
+            INDX[ir] = INDX(0);
+            if(--ir == 0) {
+                INDX[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && WDabs(A(INDX(j))) < WDabs(A(INDX(j+1))) ) j++;
+            if(q < WDabs(A(INDX(j))) ) {
+                INDX[i] = INDX(j);
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        INDX[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, int N>
+void HeapSort(Vector<S,N>& A)
+{
+    Vector<int,N> INDX;
+    Vector<S,N>   B=A;
+    HeapIndex(B,INDX);
+    for(int j=0; j<N; j++) A[j] = B(INDX(j));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S, int N>
+void HeapSortAbs(Vector<S,N>& A)
+{
+    Vector<int,N> INDX;
+    Vector<S,N>   B=A;
+    HeapIndexAbs(B,INDX);
+    for(int j=0; j<N; j++) A[j] = B(INDX(j));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+void HeapIndexF(S(*A)(const int), const int n, int *indx)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A[i]
+{
+    if(n<=0) return;
+    if(n==1) { indx[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<n; j++) indx[j] = j;
+    l = n>>1;
+    ir= n-1;
+    for(;;) {
+        if(l>0)
+            q = (*A)(indxt=indx[--l]);
+        else {
+            q = (*A)(indxt=indx[ir]);
+            indx[ir] = indx[0];
+            if(--ir == 0) {
+                indx[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && (*A)(indx[j]) < (*A)(indx[j+1]) ) j++;
+            if(q < (*A)(indx[j]) ) {
+                indx[i] = indx[j];
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        indx[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+void HeapIndexAbs(S *A, const int n, int *indx)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A[i]
+{
+    if(n<=0) return;
+    if(n==1) { indx[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<n; j++) indx[j] = j;
+    l = n>>1;
+    ir= n-1;
+    for(;;) {
+        if(l>0)
+            q = WDabs(A[indxt=indx[--l]]);
+        else {
+            q = WDabs(A[indxt=indx[ir]]);
+            indx[ir] = indx[0];
+            if(--ir == 0) {
+                indx[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && WDabs(A[indx[j]]) < WDabs(A[indx[j+1]]) ) j++;
+            if(q < WDabs(A[indx[j]]) ) {
+                indx[i] = indx[j];
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        indx[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class S>
+void HeapIndexAbsF(S(*A)(const int), const int n, int *indx)
+// based on a routine given in NR
+// the numbers 0 to n-1 are ordered in ascending order of A(i)
+{
+    if(n<=0) return;
+    if(n==1) { indx[0]=0; return; }
+    int l,j,ir,indxt,i;
+    S   q;
+    for(j=0; j<n; j++) indx[j] = j;
+    l = n>>1;
+    ir= n-1;
+    for(;;) {
+        if(l>0)
+            q = WDabs((*A)(indxt=indx[--l]));
+        else {
+            q = WDabs((*A)(indxt=indx[ir]));
+            indx[ir] = indx[0];
+            if(--ir == 0) {
+                indx[0] = indxt;
+                return;
+            }
+        }
+        i = l;
+        j = (l<<1) + 1;
+        while(j<=ir) {
+            if(j < ir && WDabs((*A)(indx[j])) < WDabs((*A)(indx[j+1])) ) j++;
+            if(q < WDabs((*A)(indx[j])) ) {
+                indx[i] = indx[j];
+                j+= 1+(i=j);
+            } else
+                j = ir+1;
+        }
+        indx[i] = indxt;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+template<class FLOAT, int N>
+void Balance(Matrix<FLOAT,N,N>& A)
+{
+    const    FLOAT  radix=2., sqrdx=radix*radix, zero=0., one=1.;
+    int    last=0,j,i;
+    FLOAT  s,r,g,f,c;
+
+    while(last==0) {
+        last=1;
+        for(i=0; i<N; i++) {
+            r = c = zero;
+            for(j=0; j<N; j++)
+                if(j!=i) {
+                    c += WDabs(A(j,i));
+                    r += WDabs(A(i,j));
+                }
+            if(c&&r) {
+                g = r/radix;
+                f = one;
+                s = c+r;
+                while(c<g) {
+                    f *= radix;
+                    c *= sqrdx;
+                }
+                g = r * radix;
+                while(c>g) {
+                    f /= radix;
+                    c /= sqrdx;
+                }
+                if((c+r)/f < 0.95*s) {
+                    last = 0;
+                    g    = one / f;
+                    for(j=0; j<N; j++) A[i][j] *= g;
+                    for(j=0; j<N; j++) A[j][i] *= f;
+                }
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class FLOAT, int N>
+void Hessenberg(Matrix<FLOAT,N,N>& A)
+{
+    const    FLOAT  zero=0.;
+    int    m,j,i;
+    FLOAT  y,x;
+    for(m=1; m<N-1; m++) {
+        x = zero;
+        i = m;
+        for(j=m; j<N; j++)
+            if(WDabs(A(j,m-1)) > WDabs(x)) {
+                x = A(j,m-1);
+                i = j;
+            }
+        if(i!=m) {
+            for(j=m-1; j<N; j++) swap(A[i][j],A[m][j]);
+            for(j=0;   j<N; j++) swap(A[j][i],A[j][m]);
+        }
+        if(x) {
+            for(i=m+1; i<N ;i++)
+                if((y=A(i,m-1)) != 0.) {
+                    y        /= x;
+                    A[i][m-1] = y;
+                    for(j=m; j<N; j++) A[i][j]-= y * A(m,j);
+                    for(j=0; j<N; j++) A[j][m]+= y * A(j,i);
+                }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+#ifdef __COMPLEX__
+template<class FLOAT, int N>
+void QRHessenberg(Matrix<FLOAT,N,N>& A, Vector<complex<FLOAT>,N>& LAM)
+{
+    const    FLOAT  zero=0., half=0.5;
+    int    nn,m,l,k,j,its,i,mmin;
+    FLOAT  z,y,x,w,v,u,t,s,r,q,p,anrm;
+
+    z = y = x = w = v = u = t = s = r = q = p = zero;
+    anrm = WDabs(A(0,0));
+    for(i=1; i<N; i++)
+        for(j=(i-1); j<N; j++)
+            anrm += WDabs(A(i,j));
+    nn = N-1;
+    while(nn >= 0) {
+        its = 0;
+        do {
+            for(l=nn; l>=1; l--) {
+                s = WDabs(A(l-1,l-1)) + WDabs(A(l,l));
+                if(s==zero) s = anrm;
+                if(WDabs(A(l,l-1))+s == s) break;
+            }
+            x = A(nn,nn);
+            if(l==nn) 
+                LAM[nn--] = complex<FLOAT>(x+t, zero);
+            else {
+                y = A(nn-1,nn-1);
+                w = A(nn,nn-1) * A(nn-1,nn);
+                if(l==(nn-1)) {
+                    p = half*(y-x);
+                    q = p*p + w;
+                    z = sqrt(WDabs(q));
+                    x+= t;
+                    if(q>=zero) {
+                        z             = p+sign(z,p);
+                        LAM[nn-1]     = complex<FLOAT>(x+z, zero);
+                        if(z) LAM[nn] = complex<FLOAT>(x-w/z, zero);
+                        else  LAM[nn] = LAM(nn-1);
+                    } else
+                        LAM[nn] = conj(LAM[nn-1]=complex<FLOAT>(x+p,-z));
+                    nn-= 2;
+                } else {
+                    if(its==30) Numerics_error("hqr: exceeding iterations");
+                    if(its==10 || its==20) {
+                        t += x;
+                        for(i=0; i<nn; i++) A[i][i] -= x;
+                        s = WDabs(A(nn,nn-1)) + WDabs(A(nn-1,nn-2));
+                        y = x = FLOAT(0.75) * s;
+                        w = FLOAT(-0.4375) * s * s;
+                    }
+                    ++its;
+                    for(m=(nn-2); m>=l; m--) {
+                        z = A(m,m);
+                        r = x-z;
+                        s = y-z;
+                        p = (r*s-w) / A(m+1,m) + A(m,m+1);
+                        q = A(m+1,m+1) - z - r - s;
+                        r = A(m+2,m+1);
+                        s = WDabs(p)+WDabs(q)+WDabs(r);
+                        p/= s;
+                        q/= s;
+                        r/= s;
+                        if(m==l) break;
+                        u = WDabs(A(m,m-1)) * (WDabs(q)+WDabs(r));
+                        v = WDabs(p) * (WDabs(A(m-1,m-1))+WDabs(z)+WDabs(A(m+1,m+1)));
+                        if(u+v == v) break;
+                    }
+                    for(i=m+2; i<=nn; i++) {
+                        A[i][i-2] = zero;
+                        if(i!=(m+2)) A[i][i-3] = zero;
+                    }
+                    for(k=m; k<=nn-1; k++) {
+                        if(k != m) {
+                            p = A(k,k-1);
+                            q = A(k+1,k-1);
+                            r = zero;
+                            if(k!=(nn-1)) r = A(k+2,k-1);
+                            if((x=WDabs(p)+WDabs(q)+WDabs(r))!=zero) {
+                                p /= x;
+                                q /= x;
+                                r /= x;
+                            }
+                        }
+                        if((s=sign(sqrt(p*p+q*q+r*r),p))!=zero) {
+                            if(k==m) {
+                                if(l!=m) A[k][k-1] = -A(k,k-1);
+                            } else
+                                A[k][k-1] = -s*x;
+                            p+= s;
+                            x = p/s;
+                            y = q/s;
+                            z = r/s;
+                            q/= p;
+                            r/= p;
+                            for(j=k; j<=nn; j++) {
+                                p = A(k,j) + q * A(k+1,j);
+                                if(k!=(nn-1)) {
+                                    p        += r*A(k+2,j);
+                                    A[k+2][j]-= p*z;
+                                }
+                                A[k+1][j]-= p*y;
+                                A[k][j]  -= p*x;
+                            }
+                            mmin = nn<k+3 ? nn : k+3;
+                            for(i=l; i<=mmin; i++) {
+                                p = x * A(i,k) + y * A(i,k+1);
+                                if(k!=(nn-1)) {
+                                    p        += z*A(i,k+2);
+                                    A[i][k+2]-= p*r;
+                                }
+                                A[i][k+1]-= p*q;
+                                A[i][k]  -= p;
+                            }
+                        }
+                    }
+                }
+            }
+        } while (l<nn-1);
+    }
+}
+#endif
+
+template<class FLOAT,int N>
+void Tred2(Matrix<FLOAT,N,N>& A, Vector<FLOAT,N>& D, Vector<FLOAT,N>& E,
+           const char EV=1)
+{
+    int     l,k,j,i;
+    const    FLOAT   zero=0, one=1;
+    FLOAT   scale,hh,h,g,f;
+    for(i=N-1; i>0; i--) {
+        l = i - 1;
+        h = scale = zero;
+        if(l>0) {
+            for(k=0; k<=l; k++)
+                scale += WDabs(A(i,k));
+            if(scale==zero)
+                E[i] = A(i,l);
+            else {
+                for(k=0; k<=l; k++) {
+                    A[i][k] /= scale;
+                    h       += pow(A(i,k),2);
+                }
+                f       = A(i,l);
+                g       = (f>=zero)? -sqrt(h) : sqrt(h);
+                E[i]    = scale * g;
+                h      -= f * g;
+                A[i][l] = f - g;
+                f       = zero;
+                for(j=0; j<=l; j++) {
+                    if(EV) A[j][i] = A(i,j) / h;
+                    for(k=0,g=zero; k<=j; k++)
+                        g += A(j,k)*A(i,k);
+                    for(k=j+1; k<=l; k++)
+                        g += A(k,j)*A(i,k);
+                    E[j] = g/h;
+                    f += E(j)*A(i,j);
+                }
+                hh=f/(h+h);
+                for(j=0; j<=l; j++) {
+                    f=A(i,j);
+                    E[j]=g=E(j)-hh*f;
+                    for(k=0; k<=j; k++)
+                        A[j][k] -= f*E(k)+g*A(i,k);
+                }
+            }
+        } else
+            E[i]=A(i,l);
+        D[i]=h;
+    }
+    D[0] = E[0] = zero;
+    if(EV) {
+        for(i=0; i<N; i++) {
+            l=i-1;
+            if(D(i)) {
+                for(j=0; j<=l; j++) {
+                    for(k=0,g=zero; k<=l; k++)
+                        g += A(i,k)*A(k,j);
+                    for(k=0; k<=l; k++)
+                        A[k][j] -= g*A(k,i);
+                }
+            }
+            D[i]=A(i,i);
+            A[i][i]=one;
+            for(j=0; j<=l; j++)
+                A[j][i] = A[i][j] = zero;
+        }
+    } else
+        for(i=0; i<N; i++)
+            D[i] = A(i,i);
+}
+
+template<class FLOAT,int N>
+void Tqli(Vector<FLOAT,N>& D, Vector<FLOAT,N>& E, Matrix<FLOAT,N,N>& Z,
+          const char EV=1)
+{
+    int    m,l,iter,i,k;
+    const    FLOAT  zero=0;
+    FLOAT  s,r,p,g,f,dd,c,b;
+    for(i=1; i<N; i++)
+        E[i-1] = E(i);
+    E[N-1] = zero;
+    for(l=0; l<N; l++) {
+        iter = 0;
+        do {
+            for(m=l; m<N-1; m++) {
+                dd = WDabs(D(m)) + WDabs(D(m+1));
+                if( WDabs(E(m))+dd == dd ) break;
+            }
+            if(m != l) {
+                if(iter++ == 30) Numerics_error("Tqli: too many iterations");
+                g = (D(l+1)-D(l))/(2.*E(l));
+                r = (g==zero)? 1. : hypot(g,1.);
+                g = D(m)-D(l)+E(l)/(g+sign(r,g));
+                s = c = 1.;
+                p = zero;
+                for(i=m-1; i>=l; i--) {
+                    f = s*E(i);
+                    b = c*E(i);
+                    E[i+1] = r = hypot(f,g);
+                    if(r==zero) {
+                        D[i+1] -= p;
+                        E[m]    = zero;
+                        break;
+                    }
+                    s = f/r;
+                    c = g/r;
+                    g = D(i+1)-p;
+                    r = (D(i)-g)*s+2.*c*b;
+                    p = s*r;
+                    D[i+1] = g+p;
+                    g = c*r-b;
+                    if(EV)
+                        for(k=0; k<N; k++) {
+                            f         = Z(k,i+1);
+                            Z[k][i+1] = s*Z(k,i) + c*f;
+                            Z[k][i]   = c*Z(k,i) - s*f;
+                        }
+                }
+                if(r==zero && i>=l) continue;
+                D[l]-= p;
+                E[l] = g;
+                E[m] = zero;
+            }
+        } while(m != l);
+    }
+}
+
+#define ROTATE(a,i,j,k,l) g=a[i][j];h=a[k][l];a[i][j]=g-s*(h+g*tau);\
+        a[k][l]=h+s*(g-h*tau);
+
+template<class FLOAT, int N>
+void Jacobi(Matrix<FLOAT,N,N>& A, Vector<FLOAT,N>& D,
+            Matrix<FLOAT,N,N>& V, int& nrot)
+{
+    int    iq,ip,i,j;
+    const    FLOAT  zero=0, half=0.5, one=1, fifth=0.2, hundred=100;
+    FLOAT  tresh,theta,tau,t,sm,s,h,g,c;
+    Vector<FLOAT,N> B,Z=zero;
+    for (ip=0; ip<N; ip++) {
+        for (iq=0; iq<N; iq++) V[ip][iq]=zero;
+        V[ip][ip] = one;
+        B[ip]     = D[ip] = A(ip,ip);
+    }
+
+    for (i=nrot=0; i<50; i++) {
+        sm = zero;
+        for(ip=0; ip<N-1; ip++)
+            for(iq=ip+1; iq<N; iq++)
+                sm += WDabs(A(ip,iq));
+        if(sm == zero) return;
+        if(i<3) tresh = fifth * sm / (N*N);
+        else    tresh = zero;
+        for(ip=0; ip<N-1; ip++) {
+            for(iq=ip+1; iq<N; iq++) {
+                g=hundred*WDabs(A(ip,iq));
+                if(i>3 && WDabs(D(ip))+g == WDabs(D(ip))
+                       && WDabs(D(iq))+g == WDabs(D(iq)) )
+                    A[ip][iq] = zero;
+                else if (WDabs(A(ip,iq)) > tresh) {
+                    h = D(iq)-D(ip);
+                    if(WDabs(h)+g == WDabs(h))
+                        t = A(ip,iq)/h;
+                    else {
+                        theta = half*h/(A(ip,iq));
+                        t     = one/(WDabs(theta)+hypot(one,theta));
+                        if(theta < zero) t = -t;
+                    }
+                    c         = one/hypot(one,t);
+                    s         = t*c;
+                    tau       = s/(one+c);
+                    h         = t*A(ip,iq);
+                    Z[ip]    -= h;
+                    Z[iq]    += h;
+                    D[ip]    -= h;
+                    D[iq]    += h;
+                    A[ip][iq] = zero;
+                    for(j=0;    j<=ip-1; j++) { ROTATE(A,j,ip,j,iq) }
+                    for(j=ip+1; j<=iq-1; j++) { ROTATE(A,ip,j,j,iq) }
+                    for(j=iq+1; j<N;     j++) { ROTATE(A,ip,j,iq,j) }
+                    for(j=0;    j<N;     j++) { ROTATE(V,j,ip,j,iq) }
+                    nrot++;
+                }
+            }
+        }
+        D  = (B += Z);
+        Z  = zero;
+    }
+    Numerics_error("Jacobi(): too many iterations");
+}
+#undef ROTATE
+
+template<class FLOAT,int N>
+int GaussBack(Matrix<FLOAT,N,N>& a, Vector<FLOAT,N>& b)
+{
+    int    i,irow,j,l;
+    FLOAT  pivinv, temp;
+    for(i=0; i<N; i++) {
+        irow = i;
+        for(j=i+1; j<N; j++)
+            if(WDabs(a[j][i]) > WDabs(a[irow][i])) irow = j;
+        if(a[irow][i] == 0.) {
+            Numerics_message("GaussBack: Singular Matrix");
+            return -1;
+        }
+        if(irow != i) {
+            temp=b[i]; b[i]=b[irow]; b[irow]=temp;
+            for(l=i; l<N; l++)
+                { temp=a[i][l]; a[i][l]=a[irow][l]; a[irow][l]=temp; }
+        }
+        pivinv  = 1./a[i][i];
+        a[i][i] = 1.;
+        b[i]   *= pivinv;
+        for(l=i+1; l<N; l++)
+            a[i][l] *= pivinv;
+        for(j=i+1; j<N; j++)
+            if(a[j][i] != 0.) {
+                temp    = a[j][i];
+                a[j][i] = 0.;
+                b[j]   -= temp * b[i];
+                for(l=i+1; l<N; l++)
+                    a[j][l] -= temp * a[i][l];
+            }
+    }
+    for(i=N-2; i>=0; i--)
+        for(j=i+1; j<N; j++)
+            b[i] -= a[i][j] * b[j];
+    return 0;
+}
+
+template<class FLOAT, int N>
+int RofQR(Matrix<FLOAT,N,N>& A)
+// replaces A by R of its QR decomposition
+{
+    const    FLOAT zero=0., one=1.;
+    int   i,j,k;
+    FLOAT beta,s,sigma,sum;
+    Vector<FLOAT,N> d;
+    for(j=0; j<N; j++) {
+        for(i=j,sigma=zero; i<N; i++)
+            sigma += pow(A(i,j),2);
+        if(sigma==zero) return -1;
+        d[j] = s = (A(j,j)<zero) ? sqrt(sigma) : -sqrt(sigma);
+        beta = one / (s*A(j,j)-sigma);
+        A[j][j]-= s;
+        for(k=j+1; k<N; k++) {
+            for(i=j,sum=zero; i<N; i++)
+                sum += A(i,j) * A(i,k);
+            sum *= beta;
+            for(i=j; i<N; i++)
+                A[i][k] += A(i,j)*sum;
+        }
+    }
+    for(j=0; j<N; j++) {
+        A[j][j] = d[j];
+        for(k=0; k<j; k++)
+            A[j][k] = 0.;
+    }
+    return 0;
+    
+/*
+    const    FLOAT zero=0.;
+    int   i,j,k;
+    FLOAT scale,sigma,sum,tau;
+    Vector<FLOAT,N> c(zero),d(zero);
+    for (k=0; k<N-1; k++) {
+        for(i=k,scale=zero; i<N; i++)
+            scale = fmax(scale,WDabs(A(i,k)));
+        if(scale == zero)
+            c[k] = d[k] = zero;
+        else {
+            for(i=k; i<N; i++)
+                A[i][k] /= scale;
+            for(sum=zero,i=k; i<N; i++)
+                sum += pow(A(i,k),2);
+            sigma=sign(sqrt(sum),A(k,k));
+            A[k][k]+= sigma;
+            c[k]    = sigma*A(k,k);
+            d[k]    =-scale*sigma;
+            for(j=k+1; j<N; j++) {
+                for(sum=zero,i=k; i<N; i++)
+                    sum+= A(i,k)*A(i,j);
+                tau = sum/c(k);
+                for(i=k; i<N; i++) 
+                    A[i][j]-= tau*A(i,k);
+            }
+        }
+    }
+    for(k=0; k<N-1; k++)
+        A[k][k] = d[k];
+*/
+}
+////////////////////////////////////////////////////////////////////////////////
+template<class S, int N>
+void LegendrePeven(Vector<S,N>& p, const double x)
+// based on a routine from J.J. Binney
+// evaluates even Legendre Polys up to l=2*(N-1) at x
+{
+    int    n,l,l2;
+    double x2=x*x;
+    p[0] = 1.;
+    p[1] = 1.5*x2-0.5;
+    for(n=2; n<N; n++) {
+        l    = 2*(n-1);
+        l2   = 2*l;
+        p[n] = - p[n-2] * l*(l-1)/double((l2+1)*(l2-1))
+               + p[n-1] * (x2 - (l2*l+l2-1)/double((l2-1)*(l2+3)) );
+        p[n]*= (l2+1)*(l2+3) / double((l+1)*(l+2));
+    }
+}
+template<class S, int N>
+void dLegendrePeven(Vector<S,N>& p, Vector<S,N>& d, const double x)
+// based on a routine from J.J. Binney
+// evaluates even Legendre Polys and its derivs up to l=2*(N-1) at x
+{
+    int    n,l,l2;
+    double x2=x*x;
+    p[0] = 1.;
+    d[0] = 0.;
+    p[1] = 1.5*x2-0.5;
+    d[1] = 1.5;
+    for(n=2; n<N; n++) {
+        l    = 2*(n-1);
+        l2   = 2*l;
+        p[n] = - p[n-2] * l*(l-1)/double((l2+1)*(l2-1))
+               + p[n-1] * (x2 - (l2*l+l2-1)/double((l2-1)*(l2+3)) );
+        p[n]*= (l2+1)*(l2+3) / double((l+1)*(l+2));
+        d[n] = - d[n-2] * l*(l-1)/double((l2+1)*(l2-1))
+               + d[n-1] * (x2 - (l2*l+l2-1)/double((l2-1)*(l2+3)) )
+               + p[n-1];
+        d[n]*= (l2+1)*(l2+3) / double((l+1)*(l+2));
+    }
+    x2 = 2*x;
+    for(n=0; n<N; n++)
+        d[n] *= x2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class T, int N>
+int CholeskyDecomposition(Matrix<T,N,N>& A)
+// given a positive definite symmetric matrix a[0...n-1][0...n-1] this routine
+// constructs its Cholesky decomposition A = L L^t. On output L is returned in
+// the lower triangle. (only the upper one has been used, however, the diagonal
+// elements will be overwritten).
+{
+    int    i,j,k;
+    double sum;
+    for(i=0; i<N; i++)
+        for(j=i; j<N; j++) {
+            sum = A(i,j);
+            for(k=i-1; k>=0; k--)
+                sum -= A(i,k)*A(j,k);
+            if(i==j) {
+                if(sum <= 0.)
+                    return Numerics_message("CholeskyDecomposition: Matrix not pos def");
+                A[i][i] = sqrt(sum);
+            } else
+                A[j][i] = sum / A(i,i);
+        }
+    return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class T, int N>
+void CholeskySolution(const Matrix<T,N,N>& A, Vector<T,N>& B)
+{
+    int    i,k;
+    double sum;
+    for(i=0; i<N; i++) {
+        sum  = B(i);
+        for(k=i-1; k>=0; k--) sum -= A(i,k)*B(k);
+        B[i] = sum / A(i,i);
+    }
+    for(i=N-1; i>=0; i--) {
+        sum  = B(i);
+        for(k=i+1; k<N; k++) sum -= A(k,i)*B(k);
+        B[i] = sum / A(i,i);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class T, int N>
+void CholeskyInvertL(Matrix<T,N,N>& A)
+// given a, the output of CholeskyDecomposition(), we compute in place the
+// inverse of the lower triangular matrix L
+{
+    int i,j,k;
+    double sum;
+    for(i=0; i<N; i++) {
+        A[i][i] = 1./A(i,i);
+        for(j=i+1; j<N; j++) {
+            for(k=i,sum=0.; k<j; k++) sum -= A(j,k)*A(k,i);
+            A[j][i] = sum/A(j,j);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class T, int N>
+void CholeskyInvertF(Matrix<T,N,N>& A)
+// given a, the output of CholeskyInvertL(), we compute in place the
+// inverse fo the original input matrix to CholeskyDecomposition().
+{
+    int i,j,k;
+    double sum;
+// 1st compute L^-1^T * L^-1 in upper right triangle
+    for(i=0; i<N; i++)
+        for(j=N-1; j>=i; j--) {
+            for(k=j,sum=0.; k<N; k++) sum += A(k,i)*A(k,j);
+            A[i][j] = sum;
+        }
+// 2nd use symmetry to fill in lower left triangle
+    for(i=0; i<N; i++)
+    for(j=i+1; j<N; j++) A[j][i] = A(i,j);  
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class T, int N>
+inline void CholeskyInvert(Matrix<T,N,N>& A)
+{
+    CholeskyInvertL(A); CholeskyInvertF(A);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+template<class X, class Y>  // X == scalar, Y == vector like
+inline Y rk4(const Y y, const Y dy0, const X x, const X h,
+             Y(*derivs)(const X, const Y))
+{
+  const    X   hh=0.5*h, h6=h/6., xh=x+hh;
+  Y   yt,dym,dyt;
+  dyt = derivs(xh,y+hh*dy0);
+  dym = derivs(xh,y+hh*dyt);
+  yt  = y+h*dym;
+  dym+= dyt;
+  dyt = derivs(x+h,yt);
+  return y+h6*(dy0+dyt+dym+dym);
+}
+
+template<class X, class Y>  // X == scalar, Y == vector like
+inline Y rk4(const Y y, const X x, const X h,Y(*derivs)(const X, const Y))
+{
+  return rk4(y,derivs(x,y),x,h,derivs);
+}
+
+} // namespace
+#endif

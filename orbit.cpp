@@ -1,6 +1,6 @@
 #include "orbit.h"
 #include <stdexcept>
-#include "GSLInterface.hpp"
+#include "GSLInterface.h"
 
 namespace orbit{
 
@@ -56,7 +56,7 @@ namespace orbit{
     {
         int nsteps = static_cast<int>(total_time/output_timestep);
         output_trajectory.reserve(nsteps+1);
-        ode ODE(derivs<coordT>, 6, accuracy, const_cast<potential::BasePotential*>(&poten));
+        GSLmath::ode ODE(derivs<coordT>, 6, accuracy, const_cast<potential::BasePotential*>(&poten));
         double vars[6];
         initial_conditions.unpack_to(vars);
         for(int i=0; i<=nsteps; i++){

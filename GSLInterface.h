@@ -22,9 +22,9 @@
 #include <gsl/gsl_sf_ellint.h>
 #include <gsl/gsl_monte_vegas.h>
 #include <gsl/gsl_siman.h>
-#include <stdlib.h>
-#include <iostream>
 #include <vector>
+
+namespace GSLmath{
 //=================================================================================================
 // RANDOM NUMBERS //
 // random number generators - rand_uniform returns random numbers uniformly distributed in the
@@ -341,10 +341,10 @@ class minimiser{
 				if(status)break;
 				size = gsl_multimin_fminimizer_size (s);
 				status = gsl_multimin_test_size (size, eps);
-				if(vocal){	std::cout<<iter<<" ";
-							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
-							std::cout<<s->fval<<" "<<size<<std::endl;
-							}
+//				if(vocal){	std::cout<<iter<<" ";
+//							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
+//							std::cout<<s->fval<<" "<<size<<std::endl;
+//							}
 			}
 			while (status == GSL_CONTINUE && iter < maxiter);
 			for(int i=0;i<N_params;i++){results[i] = gsl_vector_get(s->x,i);}
@@ -358,10 +358,10 @@ class minimiser{
 				if(status)break;
 				size = gsl_multimin_fminimizer_size (s);
 				status = gsl_multimin_test_size (size, eps);
-				if(vocal){	std::cout<<iter<<" ";
-							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
-							std::cout<<s->fval<<" "<<size<<std::endl;
-							}
+//				if(vocal){	std::cout<<iter<<" ";
+//							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
+//							std::cout<<s->fval<<" "<<size<<std::endl;
+//							}
 			}
 			while (status == GSL_CONTINUE && iter < maxiter);
 			for(int i=0;i<N_params;i++) results->push_back(gsl_vector_get(s->x,i));
@@ -468,4 +468,6 @@ inline double ellint_second(double phi, double k){ return gsl_sf_ellint_E(phi,k,
 // E(\phi,k) = \int_0^\phi \d t \, \sqrt{1-k^2\sin^2 t}
 inline double ellint_third(double phi, double k, double n){ return gsl_sf_ellint_P(phi,k,n,(gsl_mode_t)1e-15);}
 // \Pi(\phi,k,n) = \int_0^\phi \d t \, \frac{1}{(1+n\sin^2 t)\sqrt{1-k^2\sin^2 t}}
+
+}  // namespace
 #endif

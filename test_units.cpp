@@ -15,7 +15,7 @@ int main() {
     "1 len.u.=" <<unit.to_Kpc <<" Kpc, "
     "1 time u.="<<unit.to_Myr <<" Myr, "
     "1 vel.u.=" <<unit.to_kms <<" km/s\n";
-  const potential::PlummerPotential pot(mass, scale_radius);
+  const potential::Plummer pot(mass, scale_radius);
   double solar_radius=8.0*unit.from_Kpc;
   const coord::PosSph point(solar_radius, 1., 2.);
   double poten_value = potential::Phi(pot, point);

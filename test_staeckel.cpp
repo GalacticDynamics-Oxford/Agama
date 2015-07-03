@@ -17,14 +17,14 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     actions::AxisymIntegrals intAvg, intDisp;
     intAvg.H=intAvg.Lz=intAvg.I3=intDisp.H=intDisp.Lz=intDisp.I3=0;
     for(size_t i=0; i<traj.size(); i++) {
-        double xv[6];
-        coord::toPosVelCar(traj[i]).unpack_to(xv);
-        const actions::AxisymIntegrals ints = 
+        const actions::AxisymIntegrals ints =
             actions::findIntegralsOfMotionOblatePerfectEllipsoid(potential, coord::toPosVelCyl(traj[i]));
         intAvg.H +=ints.H;  intDisp.H +=pow_2(ints.H);
         intAvg.Lz+=ints.Lz; intDisp.Lz+=pow_2(ints.Lz);
         intAvg.I3+=ints.I3; intDisp.I3+=pow_2(ints.I3);
         if(output) {
+            double xv[6];
+            coord::toPosVelCar(traj[i]).unpack_to(xv);
             std::cout << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
                 xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"   "<<
                 ints.H<<" "<<ints.Lz<<" "<<ints.I3<<"\n";
