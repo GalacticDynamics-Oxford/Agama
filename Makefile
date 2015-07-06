@@ -1,7 +1,11 @@
 CXX       = g++
 CXXFLAGS += -Wall -O3 $(DEFINES) -fPIC -fdata-sections -ffunction-sections
-LINK      = g++
 LFLAGS   += -fPIC -lgsl -lgslcblas
+ARC       = ar
+
+SRCDIR    = src
+OBJDIR    = obj
+TESTSDIR  = tests
 SOURCES   = coord.cpp \
             potential_base.cpp \
             potential_analytic.cpp \
@@ -11,28 +15,30 @@ SOURCES   = coord.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
             orbit.cpp
-#            WDMath.cpp \
+#            WDMath.cpp 
+TESTSRCS  = test_coord.cpp \
+            test_units.cpp \
+            test_potentials.cpp \
+            test_staeckel.cpp
 
-OBJECTS   = $(SOURCES:.cpp=.o)
+LIBNAME   = libfJ.a
 
-all:    test_coord test_units test_potentials test_staeckel
+HEADERS   = $(SOURCES:.cpp=.h)
+OBJECTS   = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES)) 
+TESTEXE   = $(patsubst %.cpp,%.exe,$(TESTSRCS))
 
-test_coord:    coord.o test_coord.o
-	$(LINK) $(LFLAGS) -o test_coord.exe coord.o test_coord.o
+all:      $(LIBNAME) $(TESTEXE)
 
-test_units:    $(OBJECTS) test_units.o
-	$(LINK) $(LFLAGS) -o test_units.exe $(OBJECTS) test_units.o
+$(LIBNAME):  $(OBJECTS)
+	ar rv $(LIBNAME) $(OBJECTS)
 
-test_potentials:    $(OBJECTS) test_potentials.o
-	$(LINK) $(LFLAGS) -o test_potentials.exe $(OBJECTS) test_potentials.o
-
-test_staeckel:    $(OBJECTS) test_staeckel.o
-	$(LINK) $(LFLAGS) -o test_staeckel.exe $(OBJECTS) test_staeckel.o
+%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
+	$(CXX) $(CXXFLAGS) -I$(SRCDIR) $(LFLAGS) $(LIBNAME) -o "$@" "$<"
 
 clean:
-	rm -f *.o *.exe
+	rm -f $(OBJECTS) *.exe
 
-%.o:    %.cpp %.h
+$(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
 	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
 .PHONY: clean
