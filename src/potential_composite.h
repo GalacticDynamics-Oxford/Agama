@@ -11,7 +11,7 @@ namespace potential{
 class CompositeDensity: public BaseDensity{
 public:
     /** Construct from the provided array of components; 
-     note that they are 'taken over' and will be deleted in the destructor */
+        note that they are 'taken over' and will be deleted in the destructor */
     CompositeDensity(const std::vector<const BaseDensity*> _components) : 
         BaseDensity(), components(_components) {};
 
@@ -28,11 +28,11 @@ private:
     virtual double density_sph(const coord::PosSph &pos) const;
 };
 
-/** A trivial collection of several potential objects */
+/** A trivial collection of several potential objects, evaluated in cylindrical coordinates */
 class CompositeCyl: public BasePotentialCyl{
 public:
     /** Construct from the provided array of components; 
-     note that they are 'taken over' and will be deleted in the destructor */
+        note that they are 'taken over' and will be deleted in the destructor */
     CompositeCyl(const std::vector<const BasePotential*> _components) : 
         BasePotentialCyl(), components(_components) {};
 

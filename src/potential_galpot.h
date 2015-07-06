@@ -59,11 +59,6 @@ is provided, which takes the name of parameter file and the Units object as para
 
 namespace potential{
 
-const int    GALPOT_LMAX=80;     ///< maximum l for the Multipole expansion 
-const int    GALPOT_NRAD=201;    ///< DEFAULT number of radial points in Multipole 
-const double GALPOT_RMIN=1.e-4,  ///< DEFAULT min radius of logarithmic radial grid in Multipole
-             GALPOT_RMAX=1.e3;   ///< DEFAULT max radius of logarithmic radial grid
-
 /// parameters that describe a disk component
 struct DiskParam{
     double surfaceDensity;      ///< surface density normalisation Sigma_0 [Msun/kpc^2]
@@ -85,38 +80,39 @@ struct SphrParam{
     double outerCutoffRadius;   ///< outer cut-off radius r_t [kpc] 
 };
 
-/** Specification of a disk density profile separable in R and z.
-    This interface is used by both DiskAnsatz potential and DiskResidual density classes.
-    It provides two functions, which describe the radial (f(R)) and vertical (h(z)) 
-    density profiles, and compute their derivatives. 
+/** Specification of a disk density profile separable in R and z requires two auxiliary function,
+    f(R) and H(z)  (the former essentially describes the surface density of the disk,
+    and the latter is the second antiderivative of vertical density profile h(z) ).
+    They are used by both DiskAnsatz potential and DiskResidual density classes.
     In the present implementation they are the same as in GalPot:
 
     \f$  f(R) = \Sigma_0  \exp [ -R_0/R - R/R_d + \epsilon \cos(R/R_d) ]  \f$,
+
     \f$  h(z) = \delta(z)                 \f$  for  h=0, or 
     \f$  h(z) = 1/(2 h)  * exp(-|z/h|)    \f$  for  h>0, or
     \f$  h(z) = 1/(4|h|) * sech^2(|z/2h|) \f$  for  h<0.
 
     The corresponding second antiderivatives of h(z) are given in Table 2 of Dehnen&Binney 1998.
 */
-class SeparableDiskDensity {
-public:
-    SeparableDiskDensity(const DiskParam& _params): params(_params) {};
-protected:
-    /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
-    double disk_f(double R, double* fprime=NULL, double* fpprime=NULL) const;
-    /**  evaluate  h(z) and optionally its two antiderivatives:  H(z), H'(z), H''(z)==h(z)  */
-    double disk_h(double z, double* H=NULL, double* Hprime=NULL) const;
-private:
-    DiskParam params;
-};
+
+/** helper routine to create an instance of radial density function */
+const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params);
+
+/** helper routine to create an instance of vertical density function */
+const coord::ISimpleFunction* createVerticalDiskFnc(const DiskParam& params);
 
 /** Residual density profile of a disk component (eq.9 in Dehnen&Binney 1998) */
-class DiskResidual: public BaseDensity, SeparableDiskDensity{
+class DiskResidual: public BaseDensity {
 public:
-    DiskResidual (const DiskParam& _params) : 
-        BaseDensity(), SeparableDiskDensity(_params) {};
+    DiskResidual (const DiskParam& params) : 
+        BaseDensity(), 
+        radial_fnc  (createRadialDiskFnc(params)),
+        vertical_fnc(createVerticalDiskFnc(params)) {};
+    ~DiskResidual() { delete radial_fnc; delete vertical_fnc; }
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
 private:
+    const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
     virtual double density_cyl(const coord::PosCyl &pos) const;
     virtual double density_car(const coord::PosCar &pos) const
     {  return density_cyl(coord::toPosCyl(pos)); }
@@ -125,12 +121,17 @@ private:
 };
 
 /** Part of the disk potential provided analytically as  4\pi f(r) H(z) */
-class DiskAnsatz: public BasePotentialCyl, SeparableDiskDensity{
+class DiskAnsatz: public BasePotentialCyl {
 public:
-    DiskAnsatz (const DiskParam& _params) : 
-        BasePotentialCyl(), SeparableDiskDensity(_params) {};
+    DiskAnsatz (const DiskParam& params) : 
+        BasePotentialCyl(),
+        radial_fnc  (createRadialDiskFnc(params)),
+        vertical_fnc(createVerticalDiskFnc(params)) {};
+    ~DiskAnsatz() { delete radial_fnc; delete vertical_fnc; }
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
 private:
+    const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
     /** Compute _part_ of disk potential: f(r)*H(z) */
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -145,8 +146,7 @@ private:
 */
 class SpheroidDensity: public BaseDensity{
 public:
-    SpheroidDensity (const SphrParam &_params) :
-        BaseDensity(), params(_params) {};
+    SpheroidDensity (const SphrParam &_params);
     virtual SYMMETRYTYPE symmetry() const { 
         return params.axisRatio==1?ST_SPHERICAL:ST_AXISYMMETRIC; }
 private:
@@ -206,14 +206,10 @@ private:
 const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units);
 
 /** Construct a CompositeCyl potential consisting of a Multipole and a number of DiskAnsatz 
-    components, using the provided parameters.
+    components, using the provided arrays of parameters for disks and spheroids
 */
 const potential::BasePotential* createGalaxyPotential(
-    const std::vector<DiskParam>& DiskParams, ///< parameters of disks 
-    const std::vector<SphrParam>& SphrParams, ///< parameters of spheroids 
-    const double gridRadiusMin = GALPOT_RMIN, ///< min radius of radial grid 
-    const double gridRadiusMax = GALPOT_RMAX, ///< max radius of radial grid 
-    const int    gridNumPoints = GALPOT_NRAD  ///< No of radial grid points
-);
+    const std::vector<DiskParam>& DiskParams,
+    const std::vector<SphrParam>& SphrParams);
 
 } // namespace potential

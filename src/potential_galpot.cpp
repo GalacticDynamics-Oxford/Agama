@@ -37,70 +37,146 @@ Version 0.8    24. June      2005  explicit construction of tupel
 #include <stdexcept>
 
 namespace potential{
-
+    
 inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 
-//----- disk density and potential -----//
+const int    GALPOT_LMAX=80;     ///< maximum l for the Multipole expansion 
+const int    GALPOT_NRAD=201;    ///< DEFAULT number of radial points in Multipole 
+const double GALPOT_RMIN=1.e-4,  ///< DEFAULT min radius of logarithmic radial grid in Multipole
+             GALPOT_RMAX=1.e3;   ///< DEFAULT max radius of logarithmic radial grid
 
-double SeparableDiskDensity::disk_f(double x, double* fprime, double* fpprime) const{
-    if(params.innerCutoffRadius && x==0.) {
-        if(fprime)  *fprime=0;
-        if(fpprime) *fpprime=0;
-        return 0;
+//----- disk density and potential -----//
+    
+/** simple exponential radial density profile without inner hole or wiggles */
+class DiskDensityRadialExp: public coord::ISimpleFunction {
+public:
+    DiskDensityRadialExp(double _surfaceDensity, double _scaleLength): 
+        surfaceDensity(_surfaceDensity), scaleLength(_scaleLength) {};
+private:
+    const double surfaceDensity, scaleLength;
+    /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
+    virtual void eval_simple(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+        double val = surfaceDensity * exp(-R/scaleLength);
+        if(f)
+            *f = val;
+        if(fprime)
+            *fprime = -val/scaleLength;
+        if(fpprime)
+            *fpprime = val/pow_2(scaleLength);
     }
-    const double xrel = x/params.scaleLength;
-    const double cr = params.modulationAmplitude ? params.modulationAmplitude*cos(xrel) : 0;
-    const double sr = params.modulationAmplitude ? params.modulationAmplitude*sin(xrel) : 0;
-    double f  = params.surfaceDensity * exp(-params.innerCutoffRadius/x-xrel+cr);
-    double fp = params.innerCutoffRadius/(x*x)-(1+sr)/params.scaleLength;
-    if(fpprime)
-        *fpprime = (fp*fp-2*params.innerCutoffRadius/(x*x*x)-cr/pow_2(params.scaleLength))*f;
-    if(fprime)
-        *fprime  = fp*f;
-    return f;
+};
+
+/** more convoluted radial density profile - exponential with possible inner hole and modulation */
+class DiskDensityRadialRichExp: public coord::ISimpleFunction {
+public:
+    DiskDensityRadialRichExp(const DiskParam& _params): params(_params) {};
+private:
+    const DiskParam params;
+    /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
+    virtual void eval_simple(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+        if(params.innerCutoffRadius && R==0.) {
+            if(f) *f=0;
+            if(fprime)  *fprime=0;
+            if(fpprime) *fpprime=0;
+            return;
+        }
+        const double Rrel = R/params.scaleLength;
+        const double cr = params.modulationAmplitude ? params.modulationAmplitude*cos(Rrel) : 0;
+        const double sr = params.modulationAmplitude ? params.modulationAmplitude*sin(Rrel) : 0;
+        double val = params.surfaceDensity * exp(-params.innerCutoffRadius/R-Rrel+cr);
+        double fp  = params.innerCutoffRadius/(R*R)-(1+sr)/params.scaleLength;
+        if(fpprime)
+            *fpprime = (fp*fp-2*params.innerCutoffRadius/(R*R*R)-cr/pow_2(params.scaleLength))*val;
+        if(fprime)
+            *fprime  = fp*val;
+        if(f) 
+            *f = val;
+    }    
+};
+
+/** exponential vertical disk density profile */
+class DiskDensityVerticalExp: public coord::ISimpleFunction {
+public:
+    DiskDensityVerticalExp(double _scaleHeight): scaleHeight(_scaleHeight) {};
+private:
+    const double scaleHeight;
+    /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
+    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+        double      x        = fabs(z/scaleHeight);
+        double      h        = exp(-x);
+        if(H)       *H       = scaleHeight/2*(h-1+x);
+        if(Hprime)  *Hprime  = sign(z)*(1.-h)/2;
+        if(Hpprime) *Hpprime = h/(2*scaleHeight);
+    }
+};
+
+/** isothermal (sech^2) vertical disk density profile */
+class DiskDensityVerticalIsothermal: public coord::ISimpleFunction {
+public:
+    DiskDensityVerticalIsothermal(double _scaleHeight): scaleHeight(_scaleHeight) {};
+private:
+    const double scaleHeight;
+    /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
+    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+        double      x        = fabs(z/scaleHeight);
+        double      h        = exp(-x);
+        double      sh1      = 1.+h;
+        if(H)       *H       = scaleHeight*(0.5*x+log(0.5*sh1));
+        if(Hprime)  *Hprime  = 0.5*sign(z)*(1.-h)/sh1;
+        if(Hpprime) *Hpprime = h/(sh1*sh1*scaleHeight);
+    }
+};
+
+/** vertically thin disk profile */
+class DiskDensityVerticalThin: public coord::ISimpleFunction {
+public:
+    DiskDensityVerticalThin() {};
+private:
+    /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
+    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+        if(H)       *H       = fabs(z)/2;
+        if(Hprime)  *Hprime  = sign(z)/2;
+        if(Hpprime) *Hpprime = 0;
+    }
+};
+
+/** helper routine to create an instance of radial density function */
+const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params) {
+    if(params.scaleLength<=0)
+        throw std::runtime_error("Disk scale length cannot be <=0");
+    if(params.innerCutoffRadius<0)
+        throw std::runtime_error("Disk inner cutoff radius cannot be <0");
+    if(params.innerCutoffRadius==0 && params.modulationAmplitude==0)
+        return new DiskDensityRadialExp(params.surfaceDensity, params.scaleLength);
+    else
+        return new DiskDensityRadialRichExp(params);
 }
 
-double SeparableDiskDensity::disk_h(double z, double* H, double* Hprime) const{
-    double g, gp, gpp;
-    if(params.scaleHeight==0) {        // vertically thin disk
-        g   = fabs(z)/2;
-        gp  = sign(z)/2;
-        gpp = 0.;
-    } else if(params.scaleHeight<0) {  // vertically isothermal disk
-        double x,sh1;
-        x   = fabs(z/params.scaleHeight);
-        gpp = exp(-x);
-        sh1 = 1.+gpp;
-        g   = (-params.scaleHeight)*(0.5*x+log(0.5*sh1));
-        gp  = 0.5*sign(z)*(1.-gpp)/sh1;
-        gpp/= sh1*sh1*(-params.scaleHeight);
-    } else {                           // vertically exponential disk
-        double x;
-        x   = fabs(z/params.scaleHeight);
-        gpp = exp(-x);
-        g   = params.scaleHeight/2*(gpp-1+x);
-        gp  = sign(z)*(1.-gpp)/2;
-        gpp/= 2*params.scaleHeight;
-    }
-    if(H) *H=g;
-    if(Hprime) *Hprime=gp;
-    return gpp;
+/** helper routine to create an instance of vertical density function */
+const coord::ISimpleFunction* createVerticalDiskFnc(const DiskParam& params) {
+    if(params.scaleHeight>0)
+        return new DiskDensityVerticalExp(params.scaleHeight);
+    if(params.scaleHeight<0)
+        return new DiskDensityVerticalIsothermal(-params.scaleHeight);
+    else
+        return new DiskDensityVerticalThin();
 }
 
 double DiskResidual::density_cyl(const coord::PosCyl &pos) const
 {
     if(pos.z==0) return 0;
-    double h, H, Hp, f, fp, fpp, r=hypot(pos.R, pos.z);
-    h=disk_h(pos.z, &H, &Hp);
-    f=disk_f(r, &fp, &fpp);    
-    return (disk_f(pos.R)-f)*h - 2*fp*(H+pos.z*Hp)/r - fpp*H;
+    double h, H, Hp, F, f, fp, fpp, r=hypot(pos.R, pos.z);
+    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
+    radial_fnc  ->eval_simple(pos.R, &F);
+    return (F-f)*h - 2*fp*(H+pos.z*Hp)/r - fpp*H;
 }
 
 double DiskAnsatz::density_cyl(const coord::PosCyl &pos) const
 {
     double h, H, Hp, f, fp, fpp, r=hypot(pos.R, pos.z);
-    h=disk_h(pos.z, &H, &Hp);
-    f=disk_f(r, &fp, &fpp);    
+    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
     return f*h + (pos.z!=0 ? 2*fp*(H+pos.z*Hp)/r : 0) + fpp*H;
 }
 
@@ -108,9 +184,9 @@ void DiskAnsatz::eval_cyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
     const double r=hypot(pos.R, pos.z);
-    double h,H,Hp,f,fp,fpp;
-    h=disk_h(pos.z, &H, &Hp);  // vertical part
-    f=disk_f(r, &fp, &fpp);    // radial part
+    double h, H, Hp, f, fp, fpp;
+    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
     f*=4*M_PI; fp*=4*M_PI; fpp*=4*M_PI;
     double Rr=pos.R/r, zr=pos.z/r;
     if(r==0) { Rr=0; zr=0; }
@@ -131,6 +207,17 @@ void DiskAnsatz::eval_cyl(const coord::PosCyl &pos,
 }
 
 //----- spheroid density -----//
+SpheroidDensity::SpheroidDensity (const SphrParam &_params) :
+    BaseDensity(), params(_params)
+{
+    if(params.scaleRadius<=0)
+        throw std::runtime_error("Spheroid scale radius cannot be <=0");
+    if(params.axisRatio<=0)
+        throw std::runtime_error("Spheroid axis ratio cannot be <=0");
+    if(params.outerCutoffRadius<0)
+        throw std::runtime_error("Spheroid outer cutoff radius cannot be <0");
+};
+
 double SpheroidDensity::density_cyl(const coord::PosCyl &pos) const
 {
     double m   = hypot(pos.R, pos.z/params.axisRatio);
@@ -450,35 +537,55 @@ void Multipole::eval_cyl(const coord::PosCyl &pos,
 //----- GalaxyPotential refactored into a Composite potential -----//
 const potential::BasePotential* createGalaxyPotential(
     const std::vector<DiskParam>& DiskParams, 
-    const std::vector<SphrParam>& SphrParams,
-    const double rmin,
-    const double rmax,
-    const int num_grid_points)
+    const std::vector<SphrParam>& SphrParams)
 {
+    // keep track of inner/outer slopes of spheroid density profiles..
+    double gamma=0, beta=1.e3;
+    // ..and the length scales of all components
+    double lengthMin=1e100, lengthMax=0;
+    
     // first create a set of density components for the multipole
     // (all spheroids and residual part of disks)
     std::vector<const BaseDensity*> componentsDens;
-    for(size_t i=0; i<DiskParams.size(); i++)
+    for(size_t i=0; i<DiskParams.size(); i++) {
         componentsDens.push_back(new DiskResidual(DiskParams[i]));
-    double gamma=0, beta=1.e3;
+        lengthMin = fmin(lengthMin, DiskParams[i].scaleLength);
+        lengthMax = fmax(lengthMax, DiskParams[i].scaleLength);
+        if(DiskParams[i].innerCutoffRadius>0)
+            lengthMin = fmin(lengthMin, DiskParams[i].innerCutoffRadius);
+    }
     for(size_t i=0; i<SphrParams.size(); i++) {
         componentsDens.push_back(new SpheroidDensity(SphrParams[i]));
-        gamma=fmax(gamma, SphrParams[i].gamma);
-        // if cutoff radius is provided, outer slope is undetermined
-        beta =fmin(beta , SphrParams[i].outerCutoffRadius ? 1.e3 : SphrParams[i].beta);
+        gamma = fmax(gamma, SphrParams[i].gamma);
+        lengthMin = fmin(lengthMin, SphrParams[i].scaleRadius);
+        lengthMax = fmax(lengthMax, SphrParams[i].scaleRadius);
+        if(SphrParams[i].outerCutoffRadius) 
+            lengthMax = fmax(lengthMax, SphrParams[i].outerCutoffRadius);
+        else
+            beta = fmin(beta, SphrParams[i].beta);
     }
+    // if cutoff radius is provided or there are no spheroidal components, outer slope is undetermined
     if(beta==1.e3) beta=-1;
+    if(componentsDens.size()==0)
+        throw std::runtime_error("Empty parameters in GalPot");
     const CompositeDensity dens(componentsDens);
 
     // create multipole potential from this combined density
-    const BasePotential* mult=new Multipole(dens, rmin, rmax,num_grid_points, gamma, beta);
+    double rmin = GALPOT_RMIN * lengthMin;
+    double rmax = GALPOT_RMAX * lengthMax;
+    const BasePotential* mult=new Multipole(dens, rmin, rmax, GALPOT_NRAD, gamma, beta);
 
     // now create a composite potential from the multipole and non-residual part of disk potential
     std::vector<const BasePotential*> componentsPot;
     componentsPot.push_back(mult);
-    for(size_t i=0; i<DiskParams.size(); i++)
+    for(size_t i=0; i<DiskParams.size(); i++)  // note that we create another class of objects than above
         componentsPot.push_back(new DiskAnsatz(DiskParams[i]));
     return new CompositeCyl(componentsPot);
+}
+
+void SwallowRestofLine(std::ifstream& from) {
+    char c;
+    do from.get(c); while( from.good() && c !='\n');
 }
 
 const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {
@@ -490,10 +597,12 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
     bool ok=true;
     int num;
     strm>>num;
+    SwallowRestofLine(strm);
     if(num<0 || num>10 || !strm) ok=false;
     for(int i=0; i<num && ok; i++) {
         DiskParam dp;
         strm>>dp.surfaceDensity >> dp.scaleLength >> dp.scaleHeight >> dp.innerCutoffRadius >> dp.modulationAmplitude;
+        SwallowRestofLine(strm);
         dp.surfaceDensity *= units.from_Msun_per_Kpc2;
         dp.scaleLength *= units.from_Kpc;
         dp.scaleHeight *= units.from_Kpc;
@@ -502,10 +611,12 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
         else ok=false;
     }
     strm>>num;
+    SwallowRestofLine(strm);
     ok=ok && strm;
     for(int i=0; i<num && ok; i++) {
         SphrParam sp;
         strm>>sp.densityNorm >> sp.axisRatio >> sp.gamma >> sp.beta >> sp.scaleRadius >> sp.outerCutoffRadius;
+        SwallowRestofLine(strm);
         sp.densityNorm *= units.from_Msun_per_Kpc3;
         sp.scaleRadius *= units.from_Kpc;
         sp.outerCutoffRadius *= units.from_Kpc;

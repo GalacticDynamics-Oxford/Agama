@@ -1,17 +1,25 @@
+/** Test conversion between spherical, cylindrical and cartesian coordinates
+    1) positions/velocities,
+    2) gradients and hessians.
+    In both cases take a value in one coordinate system (source), convert to another (destination),
+    then convert back and compare.
+    In the second case, also check that two-staged conversion involving a third (intermediate) 
+    coordinate system gives the identical result to a direct conversion.
+*/
 #include "coord.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
 
-const double eps=1e-12;  // accuracy of comparison
+const double eps=1e-10;  // accuracy of comparison
 namespace coord{
 
-// some test functions that compute values, gradients and hessians in various coord systems
-template<> class ScalarFunction<Car> {
+/// some test functions that compute values, gradients and hessians in various coord systems
+template<> class IScalarFunction<Car> {
 public:
-    ScalarFunction() {};
-    virtual ~ScalarFunction() {};
-    virtual void evaluate(const PosCar& p, double* value=0, GradCar* deriv=0, HessCar* deriv2=0) const
+    IScalarFunction() {};
+    virtual ~IScalarFunction() {};
+    virtual void eval_scalar(const PosCar& p, double* value=0, GradCar* deriv=0, HessCar* deriv2=0) const
     {  // this is loosely based on Henon-Heiles potential..
         if(value) *value=(p.x*p.x+p.y*p.y)/2+p.z*(p.x*p.x-p.y*p.y/3)*p.y;
         if(deriv) {
@@ -30,11 +38,11 @@ public:
     }
 };
 
-template<> class ScalarFunction<Cyl> {
+template<> class IScalarFunction<Cyl> {
 public:
-    ScalarFunction() {};
-    virtual ~ScalarFunction() {};
-    virtual void evaluate(const PosCyl& p, double* value=0, GradCyl* deriv=0, HessCyl* deriv2=0) const
+    IScalarFunction() {};
+    virtual ~IScalarFunction() {};
+    virtual void eval_scalar(const PosCyl& p, double* value=0, GradCyl* deriv=0, HessCyl* deriv2=0) const
     {  // and this is just the stuff above with relabelled variables
         if(value) *value=(p.R*p.R+p.phi*p.phi)/2+p.z*(p.R*p.R-p.phi*p.phi/3)*cos(p.phi);
         if(deriv) {
@@ -53,11 +61,11 @@ public:
     }
 };
 
-template<> class ScalarFunction<Sph> {
+template<> class IScalarFunction<Sph> {
 public:
-    ScalarFunction() {};
-    virtual ~ScalarFunction() {};
-    virtual void evaluate(const PosSph& p, double* value=0, GradSph* deriv=0, HessSph* deriv2=0) const
+    IScalarFunction() {};
+    virtual ~IScalarFunction() {};
+    virtual void eval_scalar(const PosSph& p, double* value=0, GradSph* deriv=0, HessSph* deriv2=0) const
     {  // and this is the same stuff with intentionally confounded variables
         if(value) *value=(p.r*p.r+p.phi*p.phi)/2+p.theta*(p.r*p.r-p.phi*p.phi/3)*sin(p.phi);
         if(deriv) {
@@ -76,10 +84,20 @@ public:
     }
 };
 
+/// need to define templated comparison functions for positions, gradients and hessians
+template<typename coordSys> 
+bool equalPos(const PosT<coordSys>& p1, const PosT<coordSys>& p2);
 template<typename coordSys> 
 bool equalGrad(const GradT<coordSys>& g1, const GradT<coordSys>& g2);
 template<typename coordSys> 
 bool equalHess(const HessT<coordSys>& g1, const HessT<coordSys>& g2);
+
+template<> bool equalPos(const PosCar& p1, const PosCar& p2) {
+    return fabs(p1.x-p2.x)<eps && fabs(p1.y-p2.y)<eps && fabs(p1.z-p2.z)<eps; }
+template<> bool equalPos(const PosCyl& p1, const PosCyl& p2) {
+    return fabs(p1.R-p2.R)<eps && fabs(p1.z-p2.z)<eps && fabs(p1.phi-p2.phi)<eps; }
+template<> bool equalPos(const PosSph& p1, const PosSph& p2) {
+    return fabs(p1.r-p2.r)<eps && fabs(p1.theta-p2.theta)<eps && fabs(p1.phi-p2.phi)<eps; }
 
 template<> bool equalGrad(const GradCar& g1, const GradCar& g2) {
     return fabs(g1.dx-g2.dx)<eps && fabs(g1.dy-g2.dy)<eps && fabs(g1.dz-g2.dz)<eps; }
@@ -99,46 +117,12 @@ template<> bool equalHess(const HessSph& h1, const HessSph& h2) {
         fabs(h1.drdtheta-h2.drdtheta)<eps && fabs(h1.drdphi-h2.drdphi)<eps && fabs(h1.dthetadphi-h2.dthetadphi)<eps; }
 }
 
-template<typename srcCS, typename destCS, typename intermedCS>
-bool test_conv_posvel(double x[])
+/** the test itself: perform conversion of position/velocity from one coord system to the other and back */
+template<typename srcCS, typename destCS>
+bool test_conv_posvel(const coord::PosVelT<srcCS>& srcpoint)
 {
-    const coord::PosVelT<srcCS>  srcpoint (x);
     const coord::PosVelT<destCS> destpoint=coord::toPosVel<srcCS,destCS>(srcpoint);
     const coord::PosVelT<srcCS>  invpoint =coord::toPosVel<destCS,srcCS>(destpoint);
-    coord::PosDerivT<srcCS,destCS> derivStoD;
-    coord::PosDerivT<destCS,srcCS> derivDtoI;
-    coord::PosDeriv2T<srcCS,destCS> deriv2StoD;
-    coord::PosDeriv2T<destCS,srcCS> deriv2DtoI;
-    try{
-        coord::toPosDeriv<srcCS,destCS>(srcpoint, &derivStoD, &deriv2StoD);
-    }
-    catch(std::runtime_error& e) {
-        std::cerr << "    toPosDeriv failed: " << e.what() << "\n";
-    }
-    try{
-        coord::toPosDeriv<destCS,srcCS>(destpoint, &derivDtoI, &deriv2DtoI);
-    }
-    catch(std::runtime_error& e) {
-        std::cerr << "    toPosDeriv failed: " << e.what() << "\n";
-    }
-    coord::GradT<srcCS> srcgrad;
-    coord::HessT<srcCS> srchess;
-    coord::GradT<destCS> destgrad2step;
-    coord::HessT<destCS> desthess2step;
-    coord::ScalarFunction<srcCS> Fnc;
-    double srcvalue, destvalue;
-    Fnc.evaluate(srcpoint, &srcvalue, &srcgrad, &srchess);
-    const coord::GradT<destCS> destgrad=coord::toGrad<srcCS,destCS>(srcgrad, derivDtoI);
-    const coord::HessT<destCS> desthess=coord::toHess<srcCS,destCS>(srcgrad, srchess, derivDtoI, deriv2DtoI);
-    const coord::GradT<srcCS> invgrad=coord::toGrad<destCS,srcCS>(destgrad, derivStoD);
-    const coord::HessT<srcCS> invhess=coord::toHess<destCS,srcCS>(destgrad, desthess, derivStoD, deriv2StoD);
-    try{
-        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
-    }
-    catch(std::exception& e) {
-        std::cerr << "    2-step conversion: " << e.what() << "\n";
-    }
-
     double src[6],dest[6],inv[6];
     srcpoint.unpack_to(src);
     destpoint.unpack_to(dest);
@@ -156,40 +140,132 @@ bool test_conv_posvel(double x[])
     bool sameLz=(fabs(Lzsrc-Lzdest)<eps);
     bool sameLt=(fabs(Ltsrc-Ltdest)<eps);
     bool sameV2=(fabs(V2src-V2dest)<eps);
+    bool ok=samepos && samevel && sameLz && sameLt && sameV2;
+    std::cout << (ok?"OK  ":"FAILED  ");
+    if(!samepos) std::cout << "pos  ";
+    if(!samevel) std::cout << "vel  ";
+    if(!sameLz) std::cout << "L_z  ";
+    if(!sameLt) std::cout << "L_total  ";
+    if(!sameV2) std::cout << "v^2  ";
+    std::cout<<coord::CoordSysName<srcCS>()<<" => "<<
+        coord::CoordSysName<destCS>()<<" => "<<coord::CoordSysName<srcCS>();
+    if(!ok) {
+        for(int i=0; i<6; i++) std::cout<<" "<<src[i];
+        std::cout << " => ";
+        for(int i=0; i<6; i++) std::cout<<" "<<dest[i];
+        std::cout << " => ";
+        for(int i=0; i<6; i++) std::cout<<" "<<inv[i];
+    }
+    std::cout << "\n";
+    return ok;
+}
+
+template<typename srcCS, typename destCS, typename intermedCS>
+bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
+{
+    coord::PosT<destCS> destpoint;
+    coord::PosT<srcCS> invpoint;
+    coord::PosDerivT<srcCS,destCS> derivStoD;
+    coord::PosDerivT<destCS,srcCS> derivDtoI;
+    coord::PosDeriv2T<srcCS,destCS> deriv2StoD;
+    coord::PosDeriv2T<destCS,srcCS> deriv2DtoI;
+    try{
+        destpoint=coord::toPosDeriv<srcCS,destCS>(srcpoint, &derivStoD, &deriv2StoD);
+    }
+    catch(std::runtime_error& e) {
+        std::cout << "    toPosDeriv failed: " << e.what() << "\n";
+    }
+    try{
+        invpoint=coord::toPosDeriv<destCS,srcCS>(destpoint, &derivDtoI, &deriv2DtoI);
+    }
+    catch(std::runtime_error& e) {
+        std::cout << "    toPosDeriv failed: " << e.what() << "\n";
+    }
+    coord::GradT<srcCS> srcgrad;
+    coord::HessT<srcCS> srchess;
+    coord::GradT<destCS> destgrad2step;
+    coord::HessT<destCS> desthess2step;
+    coord::IScalarFunction<srcCS> Fnc;
+    double srcvalue, destvalue;
+    Fnc.eval_scalar(srcpoint, &srcvalue, &srcgrad, &srchess);
+    const coord::GradT<destCS> destgrad=coord::toGrad<srcCS,destCS>(srcgrad, derivDtoI);
+    const coord::HessT<destCS> desthess=coord::toHess<srcCS,destCS>(srcgrad, srchess, derivDtoI, deriv2DtoI);
+    const coord::GradT<srcCS> invgrad=coord::toGrad<destCS,srcCS>(destgrad, derivStoD);
+    const coord::HessT<srcCS> invhess=coord::toHess<destCS,srcCS>(destgrad, desthess, derivStoD, deriv2StoD);
+    try{
+        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
+    }
+    catch(std::exception& e) {
+        std::cout << "    2-step conversion: " << e.what() << "\n";
+    }
+
+    bool samepos=equalPos(srcpoint,invpoint);
     bool samegrad=equalGrad(srcgrad, invgrad);
     bool samehess=equalHess(srchess, invhess);
     bool samevalue2step=(fabs(destvalue-srcvalue)<eps);
     bool samegrad2step=equalGrad(destgrad, destgrad2step);
     bool samehess2step=equalHess(desthess, desthess2step);
-    bool ok=samepos && samevel && sameLz && sameLt && sameV2 && 
-        samegrad && samehess && samevalue2step && samegrad2step && samehess2step;
-    std::cerr << (ok?"OK  ":"FAILED  ");
-    if(!samepos) std::cerr << "pos  ";
-    if(!samevel) std::cerr << "vel  ";
-    if(!sameLz) std::cerr << "L_z  ";
-    if(!sameLt) std::cerr << "L_total  ";
-    if(!sameV2) std::cerr << "v^2  ";
-    if(!samegrad) std::cerr << "gradient  ";
-    if(!samehess) std::cerr << "hessian  ";
-    if(!samevalue2step) std::cerr << "2-step conversion value  ";
-    if(!samegrad2step) std::cerr << "2-step gradient  ";
-    if(!samehess2step) std::cerr << "2-step hessian  ";
-    std::cerr<<coord::CoordSysName<srcCS>()<<" => "<<
+    bool ok=samepos && samegrad && samehess && samevalue2step && samegrad2step && samehess2step;
+    std::cout << (ok?"OK  ":"FAILED  ");
+    if(!samepos) std::cout << "pos  ";
+    if(!samegrad) std::cout << "gradient  ";
+    if(!samehess) std::cout << "hessian  ";
+    if(!samevalue2step) std::cout << "2-step conversion value  ";
+    if(!samegrad2step) std::cout << "2-step gradient  ";
+    if(!samehess2step) std::cout << "2-step hessian  ";
+    std::cout<<coord::CoordSysName<srcCS>()<<" => "<<
         coord::CoordSysName<destCS>()<<" => "<<coord::CoordSysName<srcCS>()<<"\n";
     return ok;
 }
 
+/// define test suite in terms of points for various coord systems
+const int numtestpoints=5;
+const double PI=M_PI;
+const double posvel_car[numtestpoints][6] = {
+    {1, 2, 3, 4, 5, 6},   // ordinary point
+    {0,-1, 2,-3, 4,-5},   // point in y-z plane 
+    {2, 0,-1, 0, 3,-4},   // point in x-z plane
+    {0, 0, 1, 2, 3, 4},   // point along z axis
+    {0, 0, 0,-1,-2,-3}};  // point at origin with nonzero velocity
+const double posvel_cyl[numtestpoints][6] = {   // order: R, z, phi
+    {1, 2, 3, 4, 5, 6},   // ordinary point
+    {2,-1, 0,-3, 4,-5},   // point in x-z plane
+    {0, 2, 0, 0,-1, 0},   // point along z axis, vphi must be zero
+    {0,-1, 2, 1, 2, 0},   // point along z axis, vphi must be zero, but vR is non-zero
+    {0, 0, 0, 1,-2, 0}};  // point at origin with nonzero velocity in R and z
+const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
+    {1, 2, 3, 4, 5, 6},   // ordinary point
+    {2, 1, 0,-3, 4,-5},   // point in x-z plane
+    {1, 0, 0,-1, 0, 0},   // point along z axis, vphi must be zero
+    {1,PI, 2, 1, 2, 0},   // point along z axis, vphi must be zero, but vtheta is non-zero
+    {0, 2,-1, 2, 0, 0}};  // point at origin with nonzero velocity in R
+
 int main() {
     bool passed=true;
-    for(int n=0; n<1; n++) {
-        double pv[6]={1,2,3,4,5,6};
-        passed &= test_conv_posvel<coord::Car, coord::Cyl, coord::Sph>(pv);
-        passed &= test_conv_posvel<coord::Car, coord::Sph, coord::Cyl>(pv);
-        passed &= test_conv_posvel<coord::Cyl, coord::Car, coord::Sph>(pv);
-        passed &= test_conv_posvel<coord::Cyl, coord::Sph, coord::Car>(pv);
-        passed &= test_conv_posvel<coord::Sph, coord::Car, coord::Cyl>(pv);
-        passed &= test_conv_posvel<coord::Sph, coord::Cyl, coord::Car>(pv);
+    std::cout << " ======= Testing conversion of position/velocity points =======\n";
+    for(int n=0; n<numtestpoints; n++) {
+        std::cout << " :::Cartesian point::: ";     for(int d=0; d<6; d++) std::cout << posvel_car[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_posvel<coord::Car, coord::Cyl>(coord::PosVelCar(posvel_car[n]));
+        passed &= test_conv_posvel<coord::Car, coord::Sph>(coord::PosVelCar(posvel_car[n]));
+        std::cout << " :::Cylindrical point::: ";   for(int d=0; d<6; d++) std::cout << posvel_cyl[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_posvel<coord::Cyl, coord::Car>(coord::PosVelCyl(posvel_cyl[n]));
+        passed &= test_conv_posvel<coord::Cyl, coord::Sph>(coord::PosVelCyl(posvel_cyl[n]));
+        std::cout << " :::Spherical point::: ";     for(int d=0; d<6; d++) std::cout << posvel_sph[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_posvel<coord::Sph, coord::Car>(coord::PosVelSph(posvel_sph[n]));
+        passed &= test_conv_posvel<coord::Sph, coord::Cyl>(coord::PosVelSph(posvel_sph[n]));
     }
-    if(passed) std::cerr << "ALL TESTS PASSED\n";
+    std::cout << " ======= Testing conversion of gradients and hessians =======\n";
+    for(int n=0; n<numtestpoints; n++) {
+        std::cout << " :::Cartesian point::: ";     for(int d=0; d<6; d++) std::cout << posvel_car[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_deriv<coord::Car, coord::Cyl, coord::Sph>(coord::PosCar(posvel_car[n][0], posvel_car[n][1], posvel_car[n][2]));
+        passed &= test_conv_deriv<coord::Car, coord::Sph, coord::Cyl>(coord::PosCar(posvel_car[n][0], posvel_car[n][1], posvel_car[n][2]));
+        std::cout << " :::Cylindrical point::: ";   for(int d=0; d<6; d++) std::cout << posvel_cyl[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_deriv<coord::Cyl, coord::Car, coord::Sph>(coord::PosCyl(posvel_cyl[n][0], posvel_cyl[n][1], posvel_cyl[n][2]));
+        passed &= test_conv_deriv<coord::Cyl, coord::Sph, coord::Car>(coord::PosCyl(posvel_cyl[n][0], posvel_cyl[n][1], posvel_cyl[n][2]));
+        std::cout << " :::Spherical point::: ";     for(int d=0; d<6; d++) std::cout << posvel_sph[n][d]<<" ";  std::cout<<"\n";
+        passed &= test_conv_deriv<coord::Sph, coord::Car, coord::Cyl>(coord::PosSph(posvel_sph[n][0], posvel_sph[n][1], posvel_sph[n][2]));
+        passed &= test_conv_deriv<coord::Sph, coord::Cyl, coord::Car>(coord::PosSph(posvel_sph[n][0], posvel_sph[n][1], posvel_sph[n][2]));
+    }
+    if(passed) std::cout << "ALL TESTS PASSED\n";
     return 0;
 }

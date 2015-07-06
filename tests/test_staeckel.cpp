@@ -14,41 +14,42 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 {
     std::vector<coord::PosVelT<coordSysT> > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
-    actions::AxisymIntegrals intAvg, intDisp;
-    intAvg.H=intAvg.Lz=intAvg.I3=intDisp.H=intDisp.Lz=intDisp.I3=0;
+    actions::ActionFinderAxisymmetricStaeckel actionfinder(potential);
+    actions::Actions actAvg, actDisp;
+    actAvg.Jr=actAvg.Jz=actAvg.Jphi=actDisp.Jr=actDisp.Jz=actDisp.Jphi=0;
     for(size_t i=0; i<traj.size(); i++) {
-        const actions::AxisymIntegrals ints =
-            actions::findIntegralsOfMotionOblatePerfectEllipsoid(potential, coord::toPosVelCyl(traj[i]));
-        intAvg.H +=ints.H;  intDisp.H +=pow_2(ints.H);
-        intAvg.Lz+=ints.Lz; intDisp.Lz+=pow_2(ints.Lz);
-        intAvg.I3+=ints.I3; intDisp.I3+=pow_2(ints.I3);
+        const actions::Actions acts = actionfinder.actions(coord::toPosVelCar(traj[i]));
+        actAvg.Jr  +=acts.Jr;   actDisp.Jr  +=pow_2(acts.Jr);
+        actAvg.Jz  +=acts.Jz;   actDisp.Jz  +=pow_2(acts.Jz);
+        actAvg.Jphi+=acts.Jphi; actDisp.Jphi+=pow_2(acts.Jphi);
         if(output) {
             double xv[6];
             coord::toPosVelCar(traj[i]).unpack_to(xv);
             std::cout << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
                 xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"   "<<
-                ints.H<<" "<<ints.Lz<<" "<<ints.I3<<"\n";
+                acts.Jr<<" "<<acts.Jz<<" "<<acts.Jphi<<"\n";
         }
     }
-    intAvg.H/=traj.size();
-    intAvg.Lz/=traj.size();
-    intAvg.I3/=traj.size();
-    intDisp.H/=traj.size();
-    intDisp.Lz/=traj.size();
-    intDisp.I3/=traj.size();
-    intDisp.H= sqrt(std::max<double>(0, intDisp.H -pow_2(intAvg.H)));
-    intDisp.Lz=sqrt(std::max<double>(0, intDisp.Lz-pow_2(intAvg.Lz)));
-    intDisp.I3=sqrt(std::max<double>(0, intDisp.I3-pow_2(intAvg.I3)));
+    actAvg.Jr/=traj.size();
+    actAvg.Jz/=traj.size();
+    actAvg.Jphi/=traj.size();
+    actDisp.Jr/=traj.size();
+    actDisp.Jz/=traj.size();
+    actDisp.Jphi/=traj.size();
+    actDisp.Jr  =sqrt(std::max<double>(0, actDisp.Jr  -pow_2(actAvg.Jr)));
+    actDisp.Jz  =sqrt(std::max<double>(0, actDisp.Jz  -pow_2(actAvg.Jz)));
+    actDisp.Jphi=sqrt(std::max<double>(0, actDisp.Jphi-pow_2(actAvg.Jphi)));
     std::cout << coord::CoordSysName<coordSysT>() << 
-    ":  E=" <<intAvg.H <<" +- "<<intDisp.H<<
-    ",  Lz="<<intAvg.Lz<<" +- "<<intDisp.Lz<<
-    ",  I3="<<intAvg.I3<<" +- "<<intDisp.I3<<"\n";
-    return intDisp.H<eps && intDisp.Lz<eps && intDisp.I3<eps;
+    ":  Jr="  <<actAvg.Jr  <<" +- "<<actDisp.Jr<<
+    ",  Jz="  <<actAvg.Jz  <<" +- "<<actDisp.Jz<<
+    ",  Jphi="<<actAvg.Jphi<<" +- "<<actDisp.Jphi<<"\n";
+    return actDisp.Jr<eps && actDisp.Jz<eps && actDisp.Jphi<eps;
 }
 
 int main() {
-    const potential::StaeckelOblatePerfectEllipsoid poten(1.0, 1.6, 0.8);
-    const coord::PosVelCar initcond(1, 0.5, 0.2, 0.1, 0.2, 0.3);
+    const potential::StaeckelOblatePerfectEllipsoid poten(1.0, 1.6, 1.0);
+    //const coord::PosVelCar initcond(1, 0.5, 0.2, 0.1, 0.2, 0.3);
+    const coord::PosVelCar initcond(1, 0.3, 0.1, 0.1, 0.4, 0.1);
     const double total_time=100.;
     const double timestep=1./8;
     bool allok=true;
