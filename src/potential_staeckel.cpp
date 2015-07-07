@@ -10,7 +10,7 @@ StaeckelOblatePerfectEllipsoid::StaeckelOblatePerfectEllipsoid
     mass(_mass), coordSys(-pow_2(major_axis), -pow_2(minor_axis))
 {
     if(minor_axis<=0 || minor_axis>=major_axis)
-        throw std::runtime_error("Error in StaeckelOblatePerfectEllipsoid: "
+        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
             "minor axis must be positive and strictly smaller than major axis");
 }
 
@@ -22,7 +22,7 @@ void StaeckelOblatePerfectEllipsoid::eval_scalar(const coord::PosProlSph& pos,
     double lpg = pos.lambda+coordSys.gamma;
     double npg = pos.nu+coordSys.gamma;
     if(npg<0 || lpg<=npg)
-        throw std::runtime_error("Error in StaeckelOblatePerfectEllipsoid: "
+        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
             "incorrect values of spheroidal coordinates");
     double Glambda, dGdlambda, d2Gdlambda2, Gnu, dGdnu, d2Gdnu2;
     // values and derivatives of G(lambda) and G(nu)
@@ -46,7 +46,9 @@ void StaeckelOblatePerfectEllipsoid::eval_simple(double tau, double* G, double* 
 {
     // G is defined by eq.27 in de Zeeuw(1985)
     double sqmg = sqrt(-coordSys.gamma), tpg=tau+coordSys.gamma;
-    assert(tpg>=0);
+    if(tpg<0)
+        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
+            "incorrect value of tau");
     if(tpg==0) {  // handling a special case
         if(G     !=NULL) *G     = mass*2./M_PI/sqmg;
         if(deriv !=NULL) *deriv = mass*2./(3*M_PI)*sqmg/coordSys.gamma;

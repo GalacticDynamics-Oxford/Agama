@@ -56,11 +56,13 @@ template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
     double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
     double det = b*b-4*c;
     if(det<=0)
-        throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: det<=0");
+        throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<=0");
     double sqD=sqrt(det);
     // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
     double lambda = 0.5*(-b+sqD);
     double nu     = 0.5*(-b-sqD);
+    lambda=fmax(-cs.alpha, lambda);
+    nu=fmin(-cs.alpha, fmax(nu, -cs.gamma));  // prevent roundoff errors
     return PosProlSph(lambda, nu, from.phi, cs);
 }
 
@@ -302,11 +304,13 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
     double det = b*b-4*c;
     if(det<=0)
-        throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: det<=0");
+        throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<=0");
     double sqD=sqrt(det);
     // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
     double lambda = 0.5*(-b+sqD);
     double nu     = 0.5*(-b-sqD);
+    lambda=fmax(-cs.alpha, lambda);
+    nu=fmin(-cs.alpha, fmax(nu, -cs.gamma));  // prevent roundoff errors
     double kalpha = (2*cs.alpha-b)/sqD;  // intermediate coefs
     double kgamma = (2*cs.gamma-b)/sqD;
     if(derivs!=NULL) {

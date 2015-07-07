@@ -1,6 +1,7 @@
 #include "orbit.h"
 #include <stdexcept>
-#include "GSLInterface.h"
+#include <cmath>
+#include "mathutils.h"
 
 namespace orbit{
 
@@ -43,11 +44,11 @@ int derivs(double /*t*/, const double y[], double f[],void *params) {
     coord::GradT<coordT> grad;
     Pot->eval(pos, NULL, &grad);
     apply_ode<coordT>(y, grad, f);
-    return GSL_SUCCESS;
+    return 0; //GSL_SUCCESS
 }
 
 template<typename coordT>
-void integrate(const potential::BasePotential& poten,
+int integrate(const potential::BasePotential& poten,
     const coord::PosVelT<coordT>& initial_conditions,
     const double total_time,
     const double output_timestep,
@@ -56,22 +57,24 @@ void integrate(const potential::BasePotential& poten,
 {
     int nsteps = static_cast<int>(total_time/output_timestep);
     output_trajectory.reserve(nsteps+1);
-    GSLmath::ode ODE(derivs<coordT>, 6, accuracy, const_cast<potential::BasePotential*>(&poten));
+    mathutils::odesolver ODE(derivs<coordT>, const_cast<potential::BasePotential*>(&poten), 6, accuracy);
     double vars[6];
     initial_conditions.unpack_to(vars);
+    int numsteps=0;
     for(int i=0; i<=nsteps; i++){
         output_trajectory.push_back(coord::PosVelT<coordT>(vars));
         double time = output_timestep*i;
-        ODE.step(time, time+output_timestep, vars, output_timestep);
+        numsteps += ODE.advance(time, time+output_timestep, vars);
     }
+    return numsteps;
 }
 
 // explicit template instantiations to make sure all of them get compiled
-template void integrate(const potential::BasePotential&, const coord::PosVelCar&,
+template int integrate(const potential::BasePotential&, const coord::PosVelCar&,
     const double, const double, std::vector<coord::PosVelCar>&, const double);
-template void integrate(const potential::BasePotential&, const coord::PosVelCyl&,
+template int integrate(const potential::BasePotential&, const coord::PosVelCyl&,
     const double, const double, std::vector<coord::PosVelCyl>&, const double);
-template void integrate(const potential::BasePotential&, const coord::PosVelSph&,
+template int integrate(const potential::BasePotential&, const coord::PosVelSph&,
     const double, const double, std::vector<coord::PosVelSph>&, const double);
 
 }  // namespace orbit

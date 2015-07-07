@@ -49,7 +49,8 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 int main() {
     const potential::StaeckelOblatePerfectEllipsoid poten(1.0, 1.6, 1.0);
     //const coord::PosVelCar initcond(1, 0.5, 0.2, 0.1, 0.2, 0.3);
-    const coord::PosVelCar initcond(1, 0.3, 0.1, 0.1, 0.4, 0.1);
+    //const coord::PosVelCar initcond(1, 0.3, 0.1, 0.1, 0.4, 0.1);
+    const coord::PosVelCar initcond(1, 0.3, 0., 0.1, 0.4, 1e-4);
     const double total_time=100.;
     const double timestep=1./8;
     bool allok=true;

@@ -14,6 +14,7 @@ SOURCES   = coord.cpp \
             potential_galpot.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
+            mathutils.cpp \
             orbit.cpp
 #            WDMath.cpp 
 TESTSRCS  = test_coord.cpp \

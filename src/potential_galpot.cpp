@@ -143,9 +143,9 @@ private:
 /** helper routine to create an instance of radial density function */
 const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params) {
     if(params.scaleLength<=0)
-        throw std::runtime_error("Disk scale length cannot be <=0");
+        throw std::invalid_argument("Disk scale length cannot be <=0");
     if(params.innerCutoffRadius<0)
-        throw std::runtime_error("Disk inner cutoff radius cannot be <0");
+        throw std::invalid_argument("Disk inner cutoff radius cannot be <0");
     if(params.innerCutoffRadius==0 && params.modulationAmplitude==0)
         return new DiskDensityRadialExp(params.surfaceDensity, params.scaleLength);
     else
@@ -211,11 +211,11 @@ SpheroidDensity::SpheroidDensity (const SphrParam &_params) :
     BaseDensity(), params(_params)
 {
     if(params.scaleRadius<=0)
-        throw std::runtime_error("Spheroid scale radius cannot be <=0");
+        throw std::invalid_argument("Spheroid scale radius cannot be <=0");
     if(params.axisRatio<=0)
-        throw std::runtime_error("Spheroid axis ratio cannot be <=0");
+        throw std::invalid_argument("Spheroid axis ratio cannot be <=0");
     if(params.outerCutoffRadius<0)
-        throw std::runtime_error("Spheroid outer cutoff radius cannot be <0");
+        throw std::invalid_argument("Spheroid outer cutoff radius cannot be <0");
 };
 
 double SpheroidDensity::density_cyl(const coord::PosCyl &pos) const
@@ -264,7 +264,7 @@ Multipole::Multipole(const BaseDensity& source_density,
                      const double _gamma, const double _beta)
 {
     if(source_density.symmetry() & ST_AXISYMMETRIC != ST_AXISYMMETRIC)
-        throw new std::runtime_error("Error in Multipole expansion: source density must be axially symmetric");
+        throw std::invalid_argument("Error in Multipole expansion: source density must be axially symmetric");
     K[0] = num_grid_points;
     K[1] = N2;
     AllocArrays();
@@ -567,7 +567,7 @@ const potential::BasePotential* createGalaxyPotential(
     // if cutoff radius is provided or there are no spheroidal components, outer slope is undetermined
     if(beta==1.e3) beta=-1;
     if(componentsDens.size()==0)
-        throw std::runtime_error("Empty parameters in GalPot");
+        throw std::invalid_argument("Empty parameters in GalPot");
     const CompositeDensity dens(componentsDens);
 
     // create multipole potential from this combined density
@@ -591,7 +591,7 @@ void SwallowRestofLine(std::ifstream& from) {
 const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {
     std::ifstream strm(filename);
     if(!strm) 
-        throw std::runtime_error("Cannot open file "+std::string(filename));
+        throw std::invalid_argument("Cannot open file "+std::string(filename));
     std::vector<DiskParam> diskpars;
     std::vector<SphrParam> sphrpars;
     bool ok=true;
