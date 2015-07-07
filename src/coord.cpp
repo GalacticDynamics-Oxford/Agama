@@ -66,72 +66,6 @@ template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
     return PosProlSph(lambda, nu, from.phi, cs);
 }
 
-//--------  position+velocity conversion functions  ---------//
-
-template<> PosVelCar toPosVel(const PosVelCyl& p) {
-    const double cosphi=cos(p.phi), sinphi=sin(p.phi);
-    const double vx=p.vR*cosphi-p.vphi*sinphi;
-    const double vy=p.vR*sinphi+p.vphi*cosphi;
-    return PosVelCar(p.R*cosphi, p.R*sinphi, p.z, vx, vy, p.vz);
-}
-
-template<> PosVelCar toPosVel(const PosVelSph& p) {
-    const double sintheta=sin(p.theta), costheta=cos(p.theta);
-    const double sinphi=sin(p.phi), cosphi=cos(p.phi);
-    const double R=p.r*sintheta, vmer=p.vr*sintheta + p.vtheta*costheta;
-    const double vx=vmer*cosphi - p.vphi*sinphi;
-    const double vy=vmer*sinphi + p.vphi*cosphi;
-    const double vz=p.vr*costheta - p.vtheta*sintheta;
-    return PosVelCar(R*cosphi, R*sinphi, p.r*costheta, vx, vy, vz); 
-}
-
-template<> PosVelCyl toPosVel(const PosVelCar& p) {
-    const double R=sqrt(pow_2(p.x)+pow_2(p.y));
-    if(R==0)  // determine phi from vy/vx rather than y/x
-        return PosVelCyl(R, p.z, atan2(p.vy, p.vx), sqrt(pow_2(p.vx)+pow_2(p.vy)), p.vz, 0);
-    const double cosphi=p.x/R, sinphi=p.y/R;
-    const double vR  = p.vx*cosphi+p.vy*sinphi;
-    const double vphi=-p.vx*sinphi+p.vy*cosphi;
-    return PosVelCyl(R, p.z, atan2(p.y, p.x), vR, p.vz, vphi);
-}
-
-template<> PosVelCyl toPosVel(const PosVelSph& p) {
-    const double costheta=cos(p.theta), sintheta=sin(p.theta);
-    const double R=p.r*sintheta, z=p.r*costheta;
-    const double vR=p.vr*sintheta+p.vtheta*costheta;
-    const double vz=p.vr*costheta-p.vtheta*sintheta;
-    return PosVelCyl(R, z, p.phi, vR, vz, p.vphi);
-}
-
-template<> PosVelSph toPosVel(const PosVelCar& p) {
-    const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
-    const double r2=R2+pow_2(p.z), r=sqrt(r2), invr=1/r;
-    if(R==0) {
-        const double vR=sqrt(pow_2(p.vx)+pow_2(p.vy));
-        const double phi=atan2(p.vy, p.vx);
-        if(p.z==0) 
-            return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(vR*vR+p.vz*p.vz), 0, 0);
-        return PosVelSph(r, p.z>0?0:M_PI, phi, p.vz*(p.z>0?1:-1), vR*(p.z>0?1:-1), 0);
-    }
-    const double temp   = p.x*p.vx+p.y*p.vy;
-    const double vr     = (temp+p.z*p.vz)*invr;
-    const double vtheta = (temp*p.z/R-p.vz*R)*invr;
-    const double vphi   = (p.x*p.vy-p.y*p.vx)/R;
-    return PosVelSph(r, atan2(R, p.z), atan2(p.y, p.x), vr, vtheta, vphi);
-}
-
-template<> PosVelSph toPosVel(const PosVelCyl& p) {
-    const double r=sqrt(pow_2(p.R)+pow_2(p.z));
-    if(r==0) {
-        return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(p.vR*p.vR+p.vz*p.vz), 0, 0);
-    }
-    const double rinv= 1./r;
-    const double costheta=p.z*rinv, sintheta=p.R*rinv;
-    const double vr=p.vR*sintheta+p.vz*costheta;
-    const double vtheta=p.vR*costheta-p.vz*sintheta;
-    return PosVelSph(r, atan2(p.R, p.z), p.phi, vr, vtheta, p.vphi);
-}
-
 //-------- position conversion with derivatives --------//
 
 template<>
@@ -310,8 +244,8 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     double lambda = 0.5*(-b+sqD);
     double nu     = 0.5*(-b-sqD);
     lambda=fmax(-cs.alpha, lambda);
-    nu=fmin(-cs.alpha, fmax(nu, -cs.gamma));  // prevent roundoff errors
-    double kalpha = (2*cs.alpha-b)/sqD;  // intermediate coefs
+    nu=fmin(-cs.alpha, fmax(nu, -cs.gamma)); // prevent roundoff errors
+    double kalpha = (2*cs.alpha-b)/sqD;      // intermediate coefs
     double kgamma = (2*cs.gamma-b)/sqD;
     if(derivs!=NULL) {
         derivs->dlambdadR = from.R*(1+kgamma);
@@ -330,6 +264,81 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
         derivs2->d2nudRdz    = -derivs2->d2lambdadRdz;
     }
     return PosProlSph(lambda, nu, from.phi, cs);
+}
+
+//--------  position+velocity conversion functions  ---------//
+
+template<> PosVelCar toPosVel(const PosVelCyl& p) {
+    const double cosphi=cos(p.phi), sinphi=sin(p.phi);
+    const double vx=p.vR*cosphi-p.vphi*sinphi;
+    const double vy=p.vR*sinphi+p.vphi*cosphi;
+    return PosVelCar(p.R*cosphi, p.R*sinphi, p.z, vx, vy, p.vz);
+}
+
+template<> PosVelCar toPosVel(const PosVelSph& p) {
+    const double sintheta=sin(p.theta), costheta=cos(p.theta);
+    const double sinphi=sin(p.phi), cosphi=cos(p.phi);
+    const double R=p.r*sintheta, vmer=p.vr*sintheta + p.vtheta*costheta;
+    const double vx=vmer*cosphi - p.vphi*sinphi;
+    const double vy=vmer*sinphi + p.vphi*cosphi;
+    const double vz=p.vr*costheta - p.vtheta*sintheta;
+    return PosVelCar(R*cosphi, R*sinphi, p.r*costheta, vx, vy, vz); 
+}
+
+template<> PosVelCyl toPosVel(const PosVelCar& p) {
+    const double R=sqrt(pow_2(p.x)+pow_2(p.y));
+    if(R==0)  // determine phi from vy/vx rather than y/x
+        return PosVelCyl(R, p.z, atan2(p.vy, p.vx), sqrt(pow_2(p.vx)+pow_2(p.vy)), p.vz, 0);
+    const double cosphi=p.x/R, sinphi=p.y/R;
+    const double vR  = p.vx*cosphi+p.vy*sinphi;
+    const double vphi=-p.vx*sinphi+p.vy*cosphi;
+    return PosVelCyl(R, p.z, atan2(p.y, p.x), vR, p.vz, vphi);
+}
+
+template<> PosVelCyl toPosVel(const PosVelSph& p) {
+    const double costheta=cos(p.theta), sintheta=sin(p.theta);
+    const double R=p.r*sintheta, z=p.r*costheta;
+    const double vR=p.vr*sintheta+p.vtheta*costheta;
+    const double vz=p.vr*costheta-p.vtheta*sintheta;
+    return PosVelCyl(R, z, p.phi, vR, vz, p.vphi);
+}
+
+template<> PosVelSph toPosVel(const PosVelCar& p) {
+    const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
+    const double r2=R2+pow_2(p.z), r=sqrt(r2), invr=1/r;
+    if(R==0) {
+        const double vR=sqrt(pow_2(p.vx)+pow_2(p.vy));
+        const double phi=atan2(p.vy, p.vx);
+        if(p.z==0) 
+            return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(vR*vR+p.vz*p.vz), 0, 0);
+        return PosVelSph(r, p.z>0?0:M_PI, phi, p.vz*(p.z>0?1:-1), vR*(p.z>0?1:-1), 0);
+    }
+    const double temp   = p.x*p.vx+p.y*p.vy;
+    const double vr     = (temp+p.z*p.vz)*invr;
+    const double vtheta = (temp*p.z/R-p.vz*R)*invr;
+    const double vphi   = (p.x*p.vy-p.y*p.vx)/R;
+    return PosVelSph(r, atan2(R, p.z), atan2(p.y, p.x), vr, vtheta, vphi);
+}
+
+template<> PosVelSph toPosVel(const PosVelCyl& p) {
+    const double r=sqrt(pow_2(p.R)+pow_2(p.z));
+    if(r==0) {
+        return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(p.vR*p.vR+p.vz*p.vz), 0, 0);
+    }
+    const double rinv= 1./r;
+    const double costheta=p.z*rinv, sintheta=p.R*rinv;
+    const double vr=p.vR*sintheta+p.vz*costheta;
+    const double vtheta=p.vR*costheta-p.vz*sintheta;
+    return PosVelSph(r, atan2(p.R, p.z), p.phi, vr, vtheta, p.vphi);
+}
+
+template<> PosVelProlSph toPosVel(const PosVelCyl& from, const ProlSph& cs) {
+    PosDerivT<Cyl, ProlSph> derivs;
+    const PosProlSph pprol = toPosDeriv<Cyl, ProlSph> (from, cs, &derivs);
+    double lambdadot = derivs.dlambdadR*from.vR + derivs.dlambdadz*from.vz;
+    double nudot     = derivs.dnudR    *from.vR + derivs.dnudz    *from.vz;
+    double phidot    = from.vphi/from.R;
+    return PosVelProlSph(pprol, lambdadot, nudot, phidot);
 }
 
 //-------- implementations of functions that convert gradients --------//

@@ -6,6 +6,10 @@ ARC       = ar
 SRCDIR    = src
 OBJDIR    = obj
 TESTSDIR  = tests
+LEGACYDIR = src/legacy
+LEGACYSRC = Stackel_JS.cpp \
+            coordsys.cpp 
+
 SOURCES   = coord.cpp \
             potential_base.cpp \
             potential_analytic.cpp \
@@ -15,8 +19,8 @@ SOURCES   = coord.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
             mathutils.cpp \
-            orbit.cpp
-#            WDMath.cpp 
+            orbit.cpp 
+
 TESTSRCS  = test_coord.cpp \
             test_units.cpp \
             test_potentials.cpp \
@@ -27,11 +31,12 @@ LIBNAME   = libfJ.a
 HEADERS   = $(SOURCES:.cpp=.h)
 OBJECTS   = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES)) 
 TESTEXE   = $(patsubst %.cpp,%.exe,$(TESTSRCS))
+LEGACYOBJ = $(patsubst %.cpp,$(LEGACYDIR)/%.o,$(LEGACYSRC)) 
 
 all:      $(LIBNAME) $(TESTEXE)
 
-$(LIBNAME):  $(OBJECTS)
-	ar rv $(LIBNAME) $(OBJECTS)
+$(LIBNAME):  $(OBJECTS) $(LEGACYOBJ)
+	ar rv $(LIBNAME) $(OBJECTS) $(LEGACYOBJ)
 
 %.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
 	$(CXX) $(CXXFLAGS) -I$(SRCDIR) $(LFLAGS) $(LIBNAME) -o "$@" "$<"
@@ -40,6 +45,9 @@ clean:
 	rm -f $(OBJECTS) *.exe
 
 $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
-	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
+	$(CXX) -c $(CXXFLAGS) -I$(SRCDIR) -o "$@" "$<"
+
+$(LEGACYDIR)/%.o:  $(LEGACYDIR)/%.cpp
+	$(CXX) -c $(CXXFLAGS) -I$(SRCDIR) -o "$@" "$<"
 
 .PHONY: clean

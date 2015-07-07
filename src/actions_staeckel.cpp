@@ -2,47 +2,63 @@
 #include "mathutils.h"
 #include <stdexcept>
 #include <cmath>
+#include "legacy/BaseClasses.hpp"
+#include "legacy/Stackel_JS.hpp"
 
 namespace actions{
     
 const double ACCURACY_ACTION=1e-6;
 
+/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
+    for the AxisymmetricStaeckel action finder */
 struct AxisymStaeckelParam {
     const coord::ProlSph& coordsys;
     const coord::ISimpleFunction& fncG;
+    double lambda, nu;  ///< coordinates in prolate spheroidal coord.sys.
     double E;     ///< total energy
     double Lz;    ///< z-component of angular momentum
     double I3;    ///< third integral
-    double lambda, nu;  ///< coordinates in prolate spheroidal coord.sys.
     AxisymStaeckelParam(const coord::ProlSph& cs, const coord::ISimpleFunction& G,
-        double _E, double _Lz, double _I3, double _lambda, double _nu) :
-        coordsys(cs), fncG(G), E(_E), Lz(_Lz), I3(_I3), lambda(_lambda), nu(_nu) {};
+        double _lambda, double _nu, double _E, double _Lz, double _I3) :
+        coordsys(cs), fncG(G), lambda(_lambda), nu(_nu), E(_E), Lz(_Lz), I3(_I3) {};
 };
 
+/** squared canonical momentum p(tau), with the argument tau replaced by tau+gamma */
 static double axisymStaeckelMomentumSq(double tauplusgamma, void* v_param)
 {
     AxisymStaeckelParam* param=static_cast<AxisymStaeckelParam*>(v_param);
     double G;
     param->fncG.eval_simple(tauplusgamma-param->coordsys.gamma, &G);
     double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
+    // p^2(tau), eq.4 in Sanders(2012)
     return (param->E
           - param->Lz*param->Lz / (2*tauplusalpha)
           - param->I3 / tauplusgamma
           + G) / (2*tauplusalpha);
 }
 
+/** generic parameters for computing the action I = \int p(x) dx */
 struct ActionIntParam {
+    /// pointer to the function returning p^2(x)  (squared canonical momentum)
     double(*fncMomentumSq)(double,void*);
-    void* param;
-    double xmin, xmax;
+    void* param;       ///< additional parameters for the momentum function
+    double xmin, xmax; ///< limits of integration
 };
 
+/** interface function for computing the action by integration.
+    The integral \int_{xmin}^{xmax} p(x) dx is transformed into 
+    \int_0^1 p(x(y)) (dx/dy) dy,  where x(y) = xmin + (xmax-xmin) y^2 (3-2y).
+    The action is computed by filling the parameters ActionIntParam 
+    with the pointer to function computing p^2(x) and the integration limits, 
+    and calling mathutils::integrate(fncMomentum, aiparams, 0, 1).
+*/
 static double fncMomentum(double y, void* aiparam) {
     ActionIntParam* param=static_cast<ActionIntParam*>(aiparam);
     const double x = param->xmin + (param->xmax-param->xmin) * y*y*(3-2*y);
     const double dx = (param->xmax-param->xmin) * 6*y*(1-y);
     double val=(*(param->fncMomentumSq))(x, param->param);
-    if(val<=0 || !mathutils::is_finite(val)) return 0;
+    if(val<=0 || !mathutils::is_finite(val))
+        return 0;
     return sqrt(val) * dx;
 }
 
@@ -56,24 +72,24 @@ AxisymStaeckelParam findIntegralsOfMotionOblatePerfectEllipsoid
         throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: E>=0");
     double Lz= coord::Lz(point);
     const coord::ProlSph& coordsys=poten.coordsys();
-    coord::PosDerivT<coord::Cyl, coord::ProlSph> derivs;
-    const coord::PosProlSph pprol = coord::toPosDeriv<coord::Cyl, coord::ProlSph>
-        (point, coordsys, &derivs);
-    double lambdadot = derivs.dlambdadR*point.vR + derivs.dlambdadz*point.vz;
+    const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
     double Glambda;
     poten.eval_simple(pprol.lambda, &Glambda);
-    double I3 = point.z==0 ? 
-        0.5 * pow_2(point.vz) * (pow_2(point.R)+coordsys.gamma-coordsys.alpha) : // special case nu=0
-        (pprol.lambda+coordsys.gamma) * 
-        (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha) + Glambda) -
-        pow_2(lambdadot*(pprol.lambda-pprol.nu)) / 
-        (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma));
-    I3=fmax(I3, 0);
-    return AxisymStaeckelParam(coordsys, poten, E, Lz, I3, pprol.lambda, pprol.nu);
+    double I3;
+    if(point.z==0)   // special case: nu=0
+        I3 = 0.5 * pow_2(point.vz) * (pow_2(point.R)+coordsys.gamma-coordsys.alpha);
+    else   // general case: eq.3 in Sanders(2012)
+        I3 = fmax(0,
+            (pprol.lambda+coordsys.gamma) * 
+            (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha) + Glambda) -
+            pow_2(pprol.lambdadot*(pprol.lambda-pprol.nu)) / 
+            (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma)) );
+    return AxisymStaeckelParam(coordsys, poten, pprol.lambda, pprol.nu, E, Lz, I3);
 }
 
 Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point) const
 {
+    // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
     AxisymStaeckelParam data = findIntegralsOfMotionOblatePerfectEllipsoid(
         poten, coord::toPosVelCyl(point));
     
@@ -106,6 +122,19 @@ Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point)
     
     // Jphi:  simply Lz
     acts.Jphi = data.Lz;
+    
+    return acts;
+}
+
+//---------- Axisymmetric FUDGE JS --------//
+Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) const
+{
+    Actions_AxisymmetricStackel_Fudge aaf(poten, -2.56);
+    VecDoub ac=aaf.actions(toPosVelCyl(point));
+    Actions acts;
+    acts.Jr=ac[0];
+    acts.Jz=ac[2];
+    acts.Jphi=ac[1];
     return acts;
 }
 

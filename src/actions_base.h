@@ -9,6 +9,12 @@ struct Actions{
     double Jphi; ///< azimuthal action (z-component of angular momentum in axisymmetric case)
 };
 
+struct ActionAngles: public Actions{
+    double thetar;
+    double thetaz;
+    double thetaphi;
+};
+
 /** Base class for action finders */
 class BaseActionFinder{
 public:

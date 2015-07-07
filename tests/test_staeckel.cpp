@@ -14,7 +14,8 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 {
     std::vector<coord::PosVelT<coordSysT> > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
-    actions::ActionFinderAxisymmetricStaeckel actionfinder(potential);
+//    actions::ActionFinderAxisymmetricStaeckel actionfinder(potential);
+    actions::ActionFinderAxisymmetricFudgeJS actionfinder(potential);
     actions::Actions actAvg, actDisp;
     actAvg.Jr=actAvg.Jz=actAvg.Jphi=actDisp.Jr=actDisp.Jz=actDisp.Jphi=0;
     for(size_t i=0; i<traj.size(); i++) {
@@ -49,8 +50,8 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 int main() {
     const potential::StaeckelOblatePerfectEllipsoid poten(1.0, 1.6, 1.0);
     //const coord::PosVelCar initcond(1, 0.5, 0.2, 0.1, 0.2, 0.3);
-    //const coord::PosVelCar initcond(1, 0.3, 0.1, 0.1, 0.4, 0.1);
-    const coord::PosVelCar initcond(1, 0.3, 0., 0.1, 0.4, 1e-4);
+    const coord::PosVelCar initcond(1, 0.3, 0.1, 0.1, 0.4, 0.1);
+    //const coord::PosVelCar initcond(1, 0.3, 0., 0.1, 0.4, 1e-4);
     const double total_time=100.;
     const double timestep=1./8;
     bool allok=true;

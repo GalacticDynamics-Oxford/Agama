@@ -167,6 +167,14 @@ template<> struct PosVelT<Sph>: public PosSph{
 };
 typedef struct PosVelT<Sph> PosVelSph;
 
+/// position and velocity in prolate spheroidal coordinates
+template<> struct PosVelT<ProlSph>: public PosProlSph{
+    double lambdadot, nudot, phidot;
+    PosVelT<ProlSph>(const PosProlSph& pos, double _lambdadot, double _nudot, double _phidot):
+        PosProlSph(pos), lambdadot(_lambdadot), nudot(_nudot), phidot(_phidot) {};
+};
+typedef struct PosVelT<ProlSph> PosVelProlSph;
+    
 ///@}
 /// \name   Primitive data types: gradient of a scalar function in different coordinate systems
 ///@{
@@ -362,6 +370,10 @@ inline PosVelCyl toPosVelCyl(const PosVelT<srcCS>& from) { return toPosVel<srcCS
 template<typename srcCS>
 inline PosVelSph toPosVelSph(const PosVelT<srcCS>& from) { return toPosVel<srcCS, Sph>(from); }
 
+/** templated conversion taking the parameters of coordinate system into account */
+template<typename srcCS, typename destCS>
+PosVelT<destCS> toPosVel(const PosVelT<srcCS>& from, const destCS& coordsys);
+    
 /** trivial conversions */
 template<> inline PosCar toPosCar(const PosCar& p) { return p;}
 template<> inline PosCyl toPosCyl(const PosCyl& p) { return p;}
