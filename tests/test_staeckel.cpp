@@ -4,8 +4,9 @@
 #include <iostream>
 #include <cmath>
 
-const double integr_eps=1e-8;  // integration accuracy parameter
-const double eps=1e-6;  // accuracy of comparison
+const double integr_eps=1e-8;        // integration accuracy parameter
+const double eps=1e-6;               // accuracy of comparison
+const double axis_a=1.6, axis_c=1.0; // axes of perfect ellipsoid
 
 // helper class to compute scatter in actions
 class actionstat{
@@ -37,7 +38,7 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     std::vector<coord::PosVelT<coordSysT> > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
     actions::ActionFinderAxisymmetricStaeckel afs(potential);
-    actions::ActionFinderAxisymmetricFudgeJS aff(potential);
+    actions::ActionFinderAxisymmetricFudgeJS aff(potential, -pow_2(axis_a), -pow_2(axis_c));
     actionstat stats, statf;
     bool ex_afs=false, ex_aff=false;
     for(size_t i=0; i<traj.size(); i++) {
@@ -71,7 +72,7 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     std::cout << coord::CoordSysName<coordSysT>() << ", Fudge"
     ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.disp.Jr<<
     ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.disp.Jz<<
-    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi<< (ex_afs ? ",  CAUGHT EXCEPTION\n":"\n");
+    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
     return stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps;
 }
 
@@ -89,7 +90,7 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, c
 }
 
 int main() {
-    const potential::StaeckelOblatePerfectEllipsoid potential(1.0, 1.6, 1.0);
+    const potential::StaeckelOblatePerfectEllipsoid potential(1.0, axis_a, axis_c);
     bool allok=true;
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1), "ordinary case");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0.0, 0.0, 0, 0.2, 0.3486), "thin orbit (Jr~0)");

@@ -124,7 +124,7 @@ double findroot_guess(function fnc, void* params, double x1, double x2,
             niter++;
             if(fy*finit>0)  // go further right
                 y = (y-1)/2;
-        } while(fy*finit>0 && niter<50);
+        } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
             throw std::range_error("findRootGuess: cannot bracket root");
         return findroot(fnc, params, x, xinit, reltoler);
@@ -140,7 +140,7 @@ double findroot_guess(function fnc, void* params, double x1, double x2,
             niter++;
             if(fy*finit>0)  // go further left
                 y = (y+1)/2;
-        } while(fy*finit>0 && niter<50);
+        } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
             throw std::range_error("findRootGuess: cannot bracket root");
         return findroot(fnc, params, xinit, x, reltoler);

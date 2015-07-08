@@ -18,9 +18,10 @@ public:
 class ActionFinderAxisymmetricFudgeJS : public BaseActionFinder{
 private:
     const potential::BasePotential& poten;
+    double alpha, gamma;
 public:
-    ActionFinderAxisymmetricFudgeJS(const potential::BasePotential& _poten) :
-        BaseActionFinder(), poten(_poten) {};
+    ActionFinderAxisymmetricFudgeJS(const potential::BasePotential& _poten, double _alpha, double _gamma) :
+        BaseActionFinder(), poten(_poten), alpha(_alpha), gamma(_gamma) {};
     virtual Actions actions(const coord::PosVelCar& point) const;
 };
 
