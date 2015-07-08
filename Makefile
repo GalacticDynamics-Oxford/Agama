@@ -42,7 +42,7 @@ $(LIBNAME):  $(OBJECTS) $(LEGACYOBJ)
 	$(CXX) $(CXXFLAGS) -I$(SRCDIR) $(LFLAGS) $(LIBNAME) -o "$@" "$<"
 
 clean:
-	rm -f $(OBJECTS) *.exe
+	rm -f $(OBJECTS) $(LEGACYOBJ) *.exe
 
 $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
 	$(CXX) -c $(CXXFLAGS) -I$(SRCDIR) -o "$@" "$<"

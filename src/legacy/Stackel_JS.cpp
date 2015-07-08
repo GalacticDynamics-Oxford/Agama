@@ -119,10 +119,12 @@ VecDoub Actions_AxisymmetricStackel_Fudge::find_limits(const coord::PosVelProlSp
 	root_struct_axi_fudge RS_l(this,ints,tau,0);
 
 	// find roots of p^2(lam)
+    int niter=0;
 	double laminner=lambda;
-	while(ptau2ROOT_AxiSym_Fudge(laminner, &RS_l)>0.0)	laminner-=.1*(laminner+CS.alpha);
+	while(ptau2ROOT_AxiSym_Fudge(laminner, &RS_l)>0.0 && niter<1000) { niter++;	laminner-=.1*(laminner+CS.alpha); }
 	double lamouter=lambda;
-	while(ptau2ROOT_AxiSym_Fudge(lamouter, &RS_l)>0.)	lamouter*=1.1;
+    niter=0;
+	while(ptau2ROOT_AxiSym_Fudge(lamouter, &RS_l)>0. && niter<1000) { niter++;	lamouter*=1.1; }
 
 	root_find RF(SMALL,100);
 	limits[0] = (RF.findroot(&ptau2ROOT_AxiSym_Fudge,laminner,lambda,&RS_l));
@@ -133,7 +135,8 @@ VecDoub Actions_AxisymmetricStackel_Fudge::find_limits(const coord::PosVelProlSp
 	double nuouter=nu;
 	ints[2]   = Kt[1];
 	root_struct_axi_fudge RS_n(this,ints,tau,1);
-	while(ptau2ROOT_AxiSym_Fudge(nuouter, &RS_n)<0.)	nuouter+=0.1*(-CS.alpha-nuouter);
+    niter=0;
+	while(ptau2ROOT_AxiSym_Fudge(nuouter, &RS_n)<0.  && niter<100) { niter++;	nuouter+=0.1*(-CS.alpha-nuouter); }
 	limits[3] = (RF.findroot(&ptau2ROOT_AxiSym_Fudge,nu,nuouter,&RS_n));
 	return limits;
 }

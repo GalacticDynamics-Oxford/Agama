@@ -6,7 +6,7 @@
 #include "legacy/Stackel_JS.hpp"
 
 namespace actions{
-    
+
 const double ACCURACY_ACTION=1e-6;
 
 /** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
@@ -23,18 +23,39 @@ struct AxisymStaeckelParam {
         coordsys(cs), fncG(G), lambda(_lambda), nu(_nu), E(_E), Lz(_Lz), I3(_I3) {};
 };
 
-/** squared canonical momentum p(tau), with the argument tau replaced by tau+gamma */
-static double axisymStaeckelMomentumSq(double tauplusgamma, void* v_param)
+/** auxiliary function for computing the integration limits for momentum in case Lz=0 */
+static double axisymStaeckelAuxNoLz(double tauplusgamma, void* v_param)
+{
+    AxisymStaeckelParam* param=static_cast<AxisymStaeckelParam*>(v_param);
+    double G;
+    param->fncG.eval_simple(tauplusgamma-param->coordsys.gamma, &G);
+    return (param->E + G) * tauplusgamma - param->I3;
+}
+
+/** auxiliary function that enters the definition of canonical momentum for 
+    for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
+    the argument tau is replaced by tau+gamma >= 0. */
+static double axisymStaeckelAux(double tauplusgamma, void* v_param)
 {
     AxisymStaeckelParam* param=static_cast<AxisymStaeckelParam*>(v_param);
     double G;
     param->fncG.eval_simple(tauplusgamma-param->coordsys.gamma, &G);
     double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
-    // p^2(tau), eq.4 in Sanders(2012)
-    return (param->E
-          - param->Lz*param->Lz / (2*tauplusalpha)
-          - param->I3 / tauplusgamma
-          + G) / (2*tauplusalpha);
+    return (param->E + G) * tauplusalpha*tauplusgamma
+          - param->Lz*param->Lz/2 * tauplusgamma
+          - param->I3 * tauplusalpha;
+}
+
+/** squared canonical momentum p^(tau), eq.4 in Sanders(2012);
+    the argument tau is replaced by tau+gamma */
+static double axisymStaeckelMomentumSq(double tauplusgamma, void* v_param)
+{
+    AxisymStaeckelParam* param=static_cast<AxisymStaeckelParam*>(v_param);
+    double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
+    if(tauplusalpha==0 || tauplusgamma==0) 
+        return 0;   // avoid accidental infinities in the integral
+    return axisymStaeckelAux(tauplusgamma, v_param) / 
+        (2*tauplusalpha*tauplusalpha*tauplusgamma);
 }
 
 /** generic parameters for computing the action I = \int p(x) dx */
@@ -68,8 +89,6 @@ AxisymStaeckelParam findIntegralsOfMotionOblatePerfectEllipsoid
     (const potential::StaeckelOblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
 {
     double E = potential::totalEnergy(poten, point);
-    if(E>=0)
-        throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: E>=0");
     double Lz= coord::Lz(point);
     const coord::ProlSph& coordsys=poten.coordsys();
     const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
@@ -92,44 +111,75 @@ Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point)
     // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
     AxisymStaeckelParam data = findIntegralsOfMotionOblatePerfectEllipsoid(
         poten, coord::toPosVelCyl(point));
-    
+    if(E>=0)
+        throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: E>=0");
+
     Actions acts;
+    acts.Jr = acts.Jz = 0;
+    acts.Jphi = fabs(data.Lz);
     ActionIntParam aiparam;
-    const coord::ProlSph& coordsys=poten.coordsys();
+    const double gamma=poten.coordsys().gamma, alpha=poten.coordsys().alpha;
     aiparam.fncMomentumSq = &axisymStaeckelMomentumSq;
     aiparam.param = &data;
-    
+
     // to find the actions, we integrate p(tau) over tau in two different intervals (for Jz and for Jr);
     // to avoid roundoff errors when tau is close to -gamma we replace tau with x=tau+gamma>=0
-    double gminusa = coordsys.gamma-coordsys.alpha;
     
-    // Jz:  0 <= x <= xmax < -alpha+gamma
+    // precautionary measures: need to find a point x_0, close to lambda+gamma, 
+    // at which p^2>0 (or equivalently a_0>0); 
+    // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
+    double x_0 = gamma+data.lambda;
+    double a_0 = axisymStaeckelAux(x_0, &data);
+    int num_iter_adjustment=0;
+    while(a_0<=0 && num_iter_adjustment<3)
+    {  // inequality could happen due to numerical roundoff, equality is a normal situation
+        double der_a=mathutils::deriv(axisymStaeckelAux, &data, x_0, x_0*1e-6, 1);
+        x_0-= a_0/der_a*1.1;
+        x_0 = fmax(x_0, gamma-alpha);
+        a_0 = axisymStaeckelAux(x_0, &data);
+        num_iter_adjustment++;
+    }
+    double x_min_Jr=0;  // lower integration limit for Jr (0 is not yet determined)
+
+    // J_z
     if(data.I3>0) {
-        aiparam.xmin = 0;
-        double guess = fmax(data.nu+coordsys.gamma, gminusa*1e-3);
-        aiparam.xmax = mathutils::findroot_guess(&axisymStaeckelMomentumSq, &data, 
-            0, gminusa, guess, false);
+        aiparam.xmin=0;
+        if(data.Lz==0) {  // special case: may have either tube or box orbit in the meridional plane
+            // using an auxiliary function A(tau) = (tau+gamma)(E+G(tau))-I3 such that 
+            // p^2(tau)=A(tau)/(2(tau+alpha)(tau+gamma)).  Since E+G(tau)<0 and p^2(x_0)>=0, we have
+            // A(-gamma)=-I3<0, A(x_0)>=0, A(infinity)<0.  Thus A(tau) must have two roots on (0,inf)
+            double root = mathutils::findroot(&axisymStaeckelAuxNoLz, &data, 0, x_0);
+            if(root<gamma-alpha) {  // box orbit
+                aiparam.xmax=root;
+                x_min_Jr=gamma-alpha;
+            } else {  // tube orbit
+                aiparam.xmax=gamma-alpha;
+                x_min_Jr=root;
+            }
+        } else {  // Lz!=0, I3!=0
+            aiparam.xmax = mathutils::findroot(&axisymStaeckelAux, &data, 0, gamma-alpha);
+        }
         acts.Jz = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) * 2/M_PI;
-    } else 
-        acts.Jz=0;
-    
-    // Jr:  -alpha+gamma < xmin <= x <= xmax < infinity
-    aiparam.xmin = mathutils::findroot_guess(&axisymStaeckelMomentumSq, &data, 
-        gminusa, data.lambda+coordsys.gamma, data.lambda+coordsys.gamma, true);
-    aiparam.xmax = mathutils::findroot_guess(&axisymStaeckelMomentumSq, &data, 
-        data.lambda+coordsys.gamma, HUGE_VAL, data.lambda+coordsys.gamma, false);
-    acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
-    
-    // Jphi:  simply Lz
-    acts.Jphi = data.Lz;
-    
+    }
+
+    // J_r
+    if(a_0>0) {
+        if(x_min_Jr==0)  // has not been determined yet
+            x_min_Jr = mathutils::findroot_guess(&axisymStaeckelAux, &data, 
+                gamma-alpha, x_0, (gamma-alpha+x_0)/2, true);
+        aiparam.xmin = x_min_Jr;
+        aiparam.xmax = mathutils::findroot_guess(&axisymStaeckelAux, &data,
+            aiparam.xmin, HUGE_VAL, x_0, false);
+        if(aiparam.xmin<aiparam.xmax)
+            acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
+    }
     return acts;
 }
 
 //---------- Axisymmetric FUDGE JS --------//
 Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) const
 {
-    Actions_AxisymmetricStackel_Fudge aaf(poten, -2.56);
+    Actions_AxisymmetricStackel_Fudge aaf(poten, -2.56, -1);
     VecDoub ac=aaf.actions(toPosVelCyl(point));
     Actions acts;
     acts.Jr=ac[0];

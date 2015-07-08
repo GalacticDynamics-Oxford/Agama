@@ -113,7 +113,7 @@ class root_find{
      		// finds root in interval [xlo1,xhi1]
     		F.function = func;F.params=p;xhi = xhi1; xlo = xlo1;
      	    if(GSL_FN_EVAL(&F,xlo)*GSL_FN_EVAL(&F,xhi)>0.){
-     			bracket();
+     			//bracket();
      		}
        		gsl_root_fsolver_set (s, &F, xlo, xhi);
 			do{

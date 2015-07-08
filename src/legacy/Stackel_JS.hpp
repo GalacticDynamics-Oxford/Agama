@@ -45,8 +45,8 @@ private:
     void integrals(const coord::PosVelProlSph& tau);
 public:
     const coord::ProlSph CS;
-    Actions_AxisymmetricStackel_Fudge(const potential::BasePotential &pot,double a): 
-            poten(pot), CS(a,-1) {}
+    Actions_AxisymmetricStackel_Fudge(const potential::BasePotential &pot,double alpha, double gamma=-1): 
+            poten(pot), CS(alpha,gamma) {}
 		/*inline double Phi_tau(VecDoub_I tau) const{
 			return Pot->Phi(CS->tau2x(tau));
 		}

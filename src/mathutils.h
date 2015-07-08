@@ -46,6 +46,12 @@ double findroot_guess(function F, void* params, double x1, double x2,
 /** integrate a (well-behaved) function on a finite interval */
 double integrate(function F, void* params, double x1, double x2, double rel_toler=ACCURACY_INTEGR);
 
+/** numerically find a derivative of a function at a given point.
+    h is the initial step-size of differentiation, 
+    dir is the direction (1 - forward, -1 - backward, 0 - symmetric)
+*/
+double deriv(function F, void* params, double x, double h, int dir);
+
 /** solve a system of differential equations */
 class odesolver {
 public:

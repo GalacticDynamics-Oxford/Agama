@@ -28,6 +28,7 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_integration.h>
+#include <gsl/gsl_deriv.h>
 #include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
 
@@ -157,6 +158,21 @@ double integrate(function fnc, void* params, double x1, double x2, double reltol
     return result;
 }
 
+double deriv(function fnc, void* params, double x, double h, int dir)
+{
+    gsl_function F;
+    F.function=fnc;
+    F.params=params;
+    double result, error;
+    if(dir==0)
+        gsl_deriv_central(&F, x, h, &result, &error);
+    else if(dir>0)
+        gsl_deriv_forward(&F, x, h, &result, &error);
+    else
+        gsl_deriv_backward(&F, x, h, &result, &error);
+    return result;
+}
+    
 // Simple ODE integrator using Runge-Kutta Dormand-Prince 8 adaptive stepping
 // dy_i/dt = f_i(t) where int (*f)(double t, const double y, double f, void *params)
 struct ode_impl{
