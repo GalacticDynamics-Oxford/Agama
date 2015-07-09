@@ -50,7 +50,10 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 //            std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
         try{
-            statf.add(aff.actions(coord::toPosVelCar(traj[i])));
+            actions::Actions a=aff.actions(coord::toPosVelCar(traj[i]));
+            statf.add(a);
+            if(fabs(a.Jr-statf.avg.Jr/statf.N)>1e-4)
+                std::cout << a.Jr <<"!="<<(statf.avg.Jr/statf.N)  <<"\n";
         }
         catch(std::exception &e) {
             ex_aff=true;

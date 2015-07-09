@@ -28,7 +28,10 @@ bool is_finite(double x);
 int fcmp(double x, double y, double eps=1e-15);
 
 /** find a root of function on the interval [x1,x2].
-    function must be finite at the ends of interval and have opposite signs (or be zero).
+    function must be finite at the ends of interval and have opposite signs (or be zero),
+    otherwise NaN is returned.
+    Throws an exception if the function evaluates to a non-finite number inside the interval,
+    or if there are other problems in locating the root.
 */
 double findroot(function F, void* params, double x1, double x2, double rel_toler=ACCURACY_ROOT);
 
@@ -38,7 +41,7 @@ double findroot(function F, void* params, double x1, double x2, double rel_toler
     However, one must provide some information about the function, namely: 
     whether it is expected to decrease or increase on the interval, and 
     an initial guess (used to determine whether to look left or right of this point).
-    Throws an exception if cannot bracket the root on the interval.
+    \return the root, or NaN if cannot bracket the root on the interval. 
 */
 double findroot_guess(function F, void* params, double x1, double x2, 
     double xinit, bool increasing, double rel_toler=ACCURACY_ROOT);
@@ -46,11 +49,27 @@ double findroot_guess(function F, void* params, double x1, double x2,
 /** integrate a (well-behaved) function on a finite interval */
 double integrate(function F, void* params, double x1, double x2, double rel_toler=ACCURACY_INTEGR);
 
+/** integrate a function with a transformation that removes possible singularities
+    at the endpoints [x_low,x_upp], and the integral is computed over the interval [x1,x2] 
+    such than x_low<=x1<=x2<=x_upp.
+*/
+double integrate_scaled(function F, void* params, double x1, double x2, 
+    double x_low, double x_upp, double rel_toler=ACCURACY_INTEGR);
+    
 /** numerically find a derivative of a function at a given point.
-    h is the initial step-size of differentiation, 
-    dir is the direction (1 - forward, -1 - backward, 0 - symmetric)
+    \param[in] h is the initial step-size of differentiation, 
+    \param[in] dir is the direction (1 - forward, -1 - backward, 0 - symmetric)
 */
 double deriv(function F, void* params, double x, double h, int dir);
+
+/** find a point x_1 where a function attains a strictly positive value.
+    \param[in]  x_0 is the initial guess point,
+    \param[out] f_1 if not NULL, will contain the value F(x_1);
+    \param[out] der if not NULL, and if the initial value was non-positive, 
+    an estimate of function derivative at x_1 will be returned in this variable;
+    \return x_1 such that F(x_1)>0, or NaN if cannot find such point. 
+*/
+double find_positive_value(function F, void* params, double x_0, double* f_1=0, double* der=0);
 
 /** solve a system of differential equations */
 class odesolver {

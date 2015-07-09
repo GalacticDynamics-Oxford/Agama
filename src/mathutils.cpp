@@ -31,10 +31,11 @@
 #include <gsl/gsl_deriv.h>
 #include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
+#include <cassert>
 
 namespace mathutils{
 
-void exceptional_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
+void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
         gsl_errno == GSL_ETOL ||
@@ -53,7 +54,7 @@ void exceptional_gsl_error_handler (const char *reason, const char * /*file*/, i
 }
 
 // a static variable that initializes our error handler
-bool error_handler_set = gsl_set_error_handler(&exceptional_gsl_error_handler);
+bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_handler);
 
 bool is_finite(double x) {
     return gsl_finite(x);
@@ -69,9 +70,11 @@ double findroot(function fnc, void* params, double xlower, double xupper, double
     if(reltoler<=0)
         throw std::invalid_argument("findRoot: relative tolerance must be positive");
     if(!gsl_finite(f1) || !gsl_finite(f2))
-        throw std::invalid_argument("findRoot: function value is not finite");
+        return gsl_nan();
+        //throw std::invalid_argument("findRoot: function value is not finite");
     if(f1 * f2 > 0)
-        throw std::invalid_argument("findRoot: endpoints do not enclose root");
+        return gsl_nan();
+        //throw std::invalid_argument("findRoot: endpoints do not enclose root");
     if(f1==0)
         return xlower;
     if(f2==0)
@@ -147,8 +150,69 @@ double findroot_guess(function fnc, void* params, double x1, double x2,
     }
 }
 
+double find_positive_value(function fnc, void* params, double x_0, double* f_1, double* der)
+{
+    double f_0 = fnc(x_0, params);
+    if(f_1!=NULL) *f_1=f_0;  // store the initial value even if don't succeed in finding a better one
+    if(f_0>0) {
+        return x_0;
+    }
+    double delta = fmax(fabs(x_0) * GSL_SQRT_DBL_EPSILON, GSL_DBL_EPSILON);
+    int niter=0;
+    do {
+        double f_minus= fnc(x_0-delta, params);
+        double f_plus = fnc(x_0+delta, params);
+        if(f_plus>0) {
+            if(f_1!=NULL) *f_1=f_plus;
+            if(der!=NULL) *der=(1.5*f_plus-2*f_0+0.5*f_minus)/delta;
+            return x_0+delta;
+        }
+        if(f_minus>0) {
+            if(f_1!=NULL) *f_1=f_minus;
+            if(der!=NULL) *der=(2*f_0-1.5*f_minus-0.5*f_plus)/delta;
+            return x_0-delta;
+        }
+        // simple recipes didn't work; estimate the first and the second derivatives..
+        double der_0 = (f_plus-f_minus)/(2*delta);
+        double der2_0= (f_plus+f_minus-2*f_0)/(delta*delta);
+        // ..and try to guess the point of zero crossing by solving a quadratic equation
+        double D=der_0*der_0-2*f_0*der2_0;  
+        double x_new;
+        if(D>=0) {
+            D=sqrt(D);
+            double x_1=(-der_0+D)/der2_0;
+            double x_2=(-der_0-D)/der2_0;
+            x_new = (fabs(x_1-x_0)<fabs(x_2-x_0)) ? x_1 : x_2;
+        } else {  // no luck with quadratic extrapolation, try a linear one
+            x_new = x_0 - (f_0-GSL_SQRT_DBL_EPSILON)/der_0;
+        }
+        double f_new = fnc(x_new, params);
+        if(f_new>0) {
+            if(f_1!=NULL) *f_1=f_new;
+            if(der!=NULL) *der = (f_new-f_0)/(x_new-x_0);  // be satisfied with 1st order rule
+            return x_new;
+        }
+        if(f_new>fmax(f_minus, f_plus)) {  // move to a better location
+            delta=fabs(x_0-x_new)*2;
+            x_0=x_new;
+            f_0=f_new;
+        } else if(f_minus>f_0) { 
+            x_0-=delta;
+            f_0=f_minus;
+        } else if(f_plus>f_0) {
+            x_0+=delta;
+            f_0=f_plus;
+        } else
+            return gsl_nan();
+        niter++;
+    } while(niter<3);
+    return gsl_nan();
+}
+
 double integrate(function fnc, void* params, double x1, double x2, double reltoler)
 {
+    if(x1==x2)
+        return 0;
     gsl_function F;
     F.function=fnc;
     F.params=params;
@@ -156,6 +220,54 @@ double integrate(function fnc, void* params, double x1, double x2, double reltol
     size_t neval;
     gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
     return result;
+}
+
+/** The integral \int_{x1}^{x2} f(x) dx is transformed into 
+    \int_{y1}^{y2} f(x(y)) (dx/dy) dy,  where x(y) = x_low + (x_upp-x_low) y^2 (3-2y),
+    and x1=x(y1), x2=x(y2).   */
+struct ScaledIntParam {
+    function F;
+    void* param;
+    double x_low, x_upp;
+};
+
+static double scaled_integrand(double y, void* vparam) {
+    ScaledIntParam* param=static_cast<ScaledIntParam*>(vparam);
+    const double x = param->x_low + (param->x_upp-param->x_low) * y*y*(3-2*y);
+    const double dx = (param->x_upp-param->x_low) * 6*y*(1-y);
+    double val=(*(param->F))(x, param->param);
+    return val*dx;
+}
+
+// invert the above relation between x and y by solving a cubic equation
+static double solve_for_scaled_y(double x, const ScaledIntParam& param) {
+    assert(x>=param.x_low && x<=param.x_upp);
+    if(x==param.x_low) return 0;
+    if(x==param.x_upp) return 1;
+    double phi=acos(1-2*x)/3.0;
+    return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
+}
+
+double integrate_scaled(function fnc, void* params, double x1, double x2, 
+    double x_low, double x_upp, double rel_toler)
+{
+    if(x1==x2) return 0;
+    if(x1>x2 || x1<x_low || x2>x_upp)
+        throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
+    gsl_function F;
+    ScaledIntParam param;
+    F.function=&scaled_integrand;
+    F.params=&param;
+    param.F=fnc;
+    param.param=params;
+    param.x_low=x_low;
+    param.x_upp=x_upp;
+    double y1=solve_for_scaled_y(x1, param);
+    double y2=solve_for_scaled_y(x2, param);
+    double result, error;
+    size_t neval;
+    gsl_integration_qng(&F, y1, y2, 0, rel_toler, &result, &error, &neval);
+    return result;    
 }
 
 double deriv(function fnc, void* params, double x, double h, int dir)

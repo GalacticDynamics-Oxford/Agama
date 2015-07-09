@@ -9,6 +9,12 @@ namespace actions{
 
 const double ACCURACY_ACTION=1e-6;
 
+/** integration intervals for actions and angles: x=tau+gamma, and tau=lambda or nu */
+struct AxisymActionIntLimits {
+    double xlambda_min, xlambda_max, xnu_min, xnu_max;
+    AxisymActionIntLimits(): xlambda_min(0), xlambda_max(0), xnu_min(0), xnu_max(0) {};
+};
+
 /** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
     for the AxisymmetricStaeckel action finder */
 struct AxisymStaeckelParam {
@@ -84,7 +90,7 @@ static double fncMomentum(double y, void* aiparam) {
 
 /** compute integrals of motion in the Staeckel potential of an oblate perfect ellipsoid, 
     together with the coordinates in its prolate spheroidal coordinate system */
-AxisymStaeckelParam findIntegralsOfMotionOblatePerfectEllipsoid
+static AxisymStaeckelParam findIntegralsOfMotionOblatePerfectEllipsoid
     (const potential::StaeckelOblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
 {
     double E = potential::totalEnergy(poten, point);
@@ -127,20 +133,12 @@ Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point)
     // precautionary measures: need to find a point x_0, close to lambda+gamma, 
     // at which p^2>0 (or equivalently a_0>0); 
     // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
-    double x_0 = gamma+data.lambda;
-    double a_0 = axisymStaeckelAux(x_0, &data);
-    int num_iter_adjustment=0;
-    while(a_0<=0 && num_iter_adjustment<3)
-    {  // inequality could happen due to numerical roundoff, equality is a normal situation
-        double der_a=mathutils::deriv(axisymStaeckelAux, &data, x_0, x_0*1e-6, 1);
-        x_0-= a_0/der_a*1.1;
-        x_0 = fmax(x_0, gamma-alpha);
-        a_0 = axisymStaeckelAux(x_0, &data);
-        num_iter_adjustment++;
-    }
+    double a_0;
+    double x_0 = mathutils::find_positive_value(&axisymStaeckelAux, &data, 
+        gamma+data.lambda, &a_0);
     double x_min_Jr=0;  // lower integration limit for Jr (0 is not yet determined)
 
-    // J_z
+    // J_z = J_nu
     if(data.I3>0) {
         aiparam.xmin=0;
         if(data.Lz==0) {  // special case: may have either tube or box orbit in the meridional plane
@@ -161,7 +159,7 @@ Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point)
         acts.Jz = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) * 2/M_PI;
     }
 
-    // J_r
+    // J_r = J_lambda
     if(a_0>0) {
         if(x_min_Jr==0)  // has not been determined yet
             x_min_Jr = mathutils::findroot_guess(&axisymStaeckelAux, &data, 
@@ -169,8 +167,7 @@ Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point)
         aiparam.xmin = x_min_Jr;
         aiparam.xmax = mathutils::findroot_guess(&axisymStaeckelAux, &data,
             aiparam.xmin, HUGE_VAL, x_0, false);
-        if(aiparam.xmin<aiparam.xmax)
-            acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
+        acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
     }
     return acts;
 }
@@ -190,7 +187,7 @@ Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) 
 #else 
 
 /** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
-    for the AxisymmetricStaeckel action finder */
+    for the AxisymmetricStaeckelFudge action finder */
 struct AxisymStaeckelFudgeParam {
     const coord::ProlSph& coordsys;
     const potential::BasePotential& poten;
@@ -198,14 +195,17 @@ struct AxisymStaeckelFudgeParam {
     double E;            ///< total energy
     double Lz;           ///< z-component of angular momentum
     double Klambda, Knu; ///< approximate integrals of motion for two quasi-separable directions
+    double n, a, c;      ///< power-law indices for A, (tau+alpha), (tau+gamma)
     AxisymStaeckelFudgeParam(const coord::ProlSph& cs, const potential::BasePotential& _poten,
         double _lambda, double _nu, double _E, double _Lz, double _Klambda, double _Knu) :
-        coordsys(cs), poten(_poten), lambda(_lambda), nu(_nu), E(_E), Lz(_Lz), Klambda(_Klambda), Knu(_Knu) {};
+        coordsys(cs), poten(_poten), lambda(_lambda), nu(_nu), E(_E), Lz(_Lz), 
+        Klambda(_Klambda), Knu(_Knu), n(1), a(0), c(0) {};
 };
+
 /** compute true (E, Lz) and approximate (Klambda, Knu) integrals of motion in an arbitrary 
     potential used for the Staeckel Fudge, 
     together with the coordinates in its prolate spheroidal coordinate system */
-AxisymStaeckelFudgeParam findIntegralsOfMotionAxisymStaeckelFudge
+static AxisymStaeckelFudgeParam findIntegralsOfMotionAxisymStaeckelFudge
     (const potential::BasePotential& poten, const coord::PosVelCyl& point, const coord::ProlSph& coordsys)
 {
     double Phi;
@@ -215,13 +215,13 @@ AxisymStaeckelFudgeParam findIntegralsOfMotionAxisymStaeckelFudge
     const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
     double Klambda, Knu;
     Klambda = (pprol.lambda+coordsys.gamma) *
-            (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha)) -
-            pow_2(pprol.lambdadot*(pprol.lambda-pprol.nu)) /
-            (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma)) -
-            (pprol.lambda-pprol.nu)*Phi;
-    Knu =   (pprol.nu+coordsys.gamma) *
-            (E - pow_2(Lz)/2/(pprol.nu+coordsys.alpha)) +
-            (pprol.lambda-pprol.nu)*Phi;
+          (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha)) -
+          pow_2(pprol.lambdadot*(pprol.lambda-pprol.nu)) /
+          (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma)) -
+          (pprol.lambda-pprol.nu)*Phi;
+    Knu = (pprol.nu+coordsys.gamma) *
+          (E - pow_2(Lz)/2/(pprol.nu+coordsys.alpha)) +
+          (pprol.lambda-pprol.nu)*Phi;
     if(pprol.nu+coordsys.gamma<=0)  // z==0
         Knu += pow_2(point.vz)*(pprol.lambda-pprol.nu)/2;
     else
@@ -248,20 +248,48 @@ static double axisymStaeckelFudgeAux(double tauplusgamma, void* v_param)
     double Phi;
     param->poten.eval(coord::toPosCyl(coord::PosProlSph(lambda, nu, 0., param->coordsys)), &Phi);
     const double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
-    return ( param->E * tauplusalpha - pow_2(param->Lz)/2 ) * tauplusgamma
-           - (K + Phi * mult) * tauplusalpha;
+    double A = ( ( param->E * tauplusalpha - pow_2(param->Lz)/2 ) * tauplusgamma
+        - (K + Phi * mult) * tauplusalpha) * 0.5;
+    if(param->n==1)
+        return A;
+    A = pow(fmax(0, A/pow_2(tauplusalpha)/tauplusgamma), param->n);
+    if(param->a!=0)
+        A *= pow(tauplusalpha, param->a);
+    if(param->c!=0)
+        A *= pow(tauplusgamma, param->c);
+    if(!mathutils::is_finite(A))
+        A=0;  // ad hoc fix to avoid problems in integration
+    return A;
 }
 
-/** squared canonical momentum p^(tau), 
-    the argument tau is replaced by tau+gamma */
-static double axisymStaeckelFudgeMomentumSq(double tauplusgamma, void* v_param)
+AxisymActionIntLimits findIntegrationLimitsAxisymStaeckelFudge(
+    mathutils::function fnc, AxisymStaeckelFudgeParam& data)
 {
-    AxisymStaeckelFudgeParam* param=static_cast<AxisymStaeckelFudgeParam*>(v_param);
-    const double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
-    if(tauplusalpha==0 || tauplusgamma==0) 
-        return 0;   // avoid accidental infinities in the integral
-    return axisymStaeckelFudgeAux(tauplusgamma, v_param) / 
-        (2*tauplusalpha*tauplusalpha*tauplusgamma);
+    AxisymActionIntLimits lim;
+    const double gamma=data.coordsys.gamma, alpha=data.coordsys.alpha;
+
+    // precautionary measures: need to find a point x_0, close to lambda+gamma, 
+    // at which p^2>0 (or equivalently a_0>0); 
+    // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
+    double a_0;
+    double x_0 = mathutils::find_positive_value(fnc, &data, 
+        gamma+data.lambda, &a_0);
+
+    // find range for J_nu = J_z
+    {//if(point.z!=0 || point.vz!=0) {   // otherwise assume that motion is confined to x-y plane, and J_z=0
+        lim.xnu_max = mathutils::findroot(fnc, &data, 0, gamma-alpha);
+        if(!mathutils::is_finite(lim.xnu_max))
+            lim.xnu_max = lim.xnu_min;
+    }
+
+    // range for J_lambda = J_r
+    if(a_0>0) {
+        lim.xlambda_min = mathutils::findroot_guess(fnc, &data, 
+            gamma-alpha, x_0, (gamma-alpha+x_0)/2, true);
+        lim.xlambda_max = mathutils::findroot_guess(fnc, &data,
+            lim.xlambda_min, HUGE_VAL, x_0, false);
+    }
+    return lim;
 }
 
 Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) const
@@ -273,65 +301,17 @@ Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) 
     if(data.E>=0)
         throw std::invalid_argument("Error in Axisymmetric Staeckel Fudge action finder: E>=0");
 
+    AxisymActionIntLimits lim = findIntegrationLimitsAxisymStaeckelFudge(axisymStaeckelFudgeAux, data);
     Actions acts;
     acts.Jr = acts.Jz = 0;
     acts.Jphi = fabs(data.Lz);
-    ActionIntParam aiparam;
-    aiparam.fncMomentumSq = &axisymStaeckelFudgeMomentumSq;
-    aiparam.param = &data;
 
-    // to find the actions, we integrate p(tau) over tau in two different intervals (for Jz and for Jr);
-    // to avoid roundoff errors when tau is close to -gamma we replace tau with x=tau+gamma>=0
+    data.n = 1./2;
+    acts.Jr = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / M_PI;
+    acts.Jz = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) * 2/M_PI;
 
-    // precautionary measures: need to find a point x_0, close to lambda+gamma, 
-    // at which p^2>0 (or equivalently a_0>0); 
-    // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
-    double x_0 = gamma+data.lambda;
-    double a_0 = axisymStaeckelFudgeAux(x_0, &data);
-    int num_iter_adjustment=0;
-    while(a_0<=0 && num_iter_adjustment<3)
-    {  // inequality could happen due to numerical roundoff, equality is a normal situation
-        double der_a=mathutils::deriv(axisymStaeckelFudgeAux, &data, x_0, x_0*1e-6, 1);
-        x_0-= a_0/der_a*1.1;
-        x_0 = fmax(x_0, gamma-alpha);
-        a_0 = axisymStaeckelAux(x_0, &data);
-        num_iter_adjustment++;
-    }
-    double x_min_Jr=0;  // lower integration limit for Jr (0 is not yet determined)
-
-    // J_z
-    if(/*data.I3>0*/ 1) {
-        aiparam.xmin=0;
-#if 0
-        if(data.Lz==0) {  // special case: may have either tube or box orbit in the meridional plane
-            // using an auxiliary function A(tau) = (tau+gamma)(E+G(tau))-I3 such that 
-            // p^2(tau)=A(tau)/(2(tau+alpha)(tau+gamma)).  Since E+G(tau)<0 and p^2(x_0)>=0, we have
-            // A(-gamma)=-I3<0, A(x_0)>=0, A(infinity)<0.  Thus A(tau) must have two roots on (0,inf)
-            double root = mathutils::findroot(&axisymStaeckelAuxNoLz, &data, 0, x_0);
-            if(root<gamma-alpha) {  // box orbit
-                aiparam.xmax=root;
-                x_min_Jr=gamma-alpha;
-            } else {  // tube orbit
-                aiparam.xmax=gamma-alpha;
-                x_min_Jr=root;
-            }
-        } else {  // Lz!=0, I3!=0
-#endif
-        aiparam.xmax = mathutils::findroot(&axisymStaeckelFudgeAux, &data, 0, gamma-alpha);
-        acts.Jz = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) * 2/M_PI;
-    }
-
-    // J_r
-    if(a_0>0) {
-        if(x_min_Jr==0)  // has not been determined yet
-            x_min_Jr = mathutils::findroot_guess(&axisymStaeckelFudgeAux, &data, 
-                gamma-alpha, x_0, (gamma-alpha+x_0)/2, true);
-        aiparam.xmin = x_min_Jr;
-        aiparam.xmax = mathutils::findroot_guess(&axisymStaeckelFudgeAux, &data,
-            aiparam.xmin, HUGE_VAL, x_0, false);
-        if(aiparam.xmin<aiparam.xmax)
-            acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
-    }
     return acts;
 }
 
