@@ -16,7 +16,7 @@ public:
         BaseDensity(), components(_components) {};
 
     virtual ~CompositeDensity() {
-        for(size_t i=0; i<components.size(); i++) delete components[i]; }
+        for(unsigned int i=0; i<components.size(); i++) delete components[i]; }
 
     /** provides the 'least common denominator' for the symmetry degree */
     virtual SYMMETRYTYPE symmetry() const;
@@ -37,7 +37,7 @@ public:
         BasePotentialCyl(), components(_components) {};
 
     virtual ~CompositeCyl() {
-        for(size_t i=0; i<components.size(); i++) delete components[i]; }
+        for(unsigned int i=0; i<components.size(); i++) delete components[i]; }
 
     /** provides the 'least common denominator' for the symmetry degree */
     virtual SYMMETRYTYPE symmetry() const;

@@ -50,7 +50,7 @@ double BasePotential::density_sph(const coord::PosSph &pos) const
 // convenience function
 double v_circ(const BasePotential& potential, double radius)
 {
-    if(potential.symmetry() & BasePotential::ST_ZROTSYM != BasePotential::ST_ZROTSYM)
+    if((potential.symmetry() & BasePotential::ST_ZROTSYM) != BasePotential::ST_ZROTSYM)
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular velocity is possible");
     coord::GradCyl deriv;

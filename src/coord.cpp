@@ -19,6 +19,15 @@ template<> double Ltotal(const PosVelSph& p) {
 template<> double Lz(const PosVelCar& p) { return p.x*p.vy-p.y*p.vx; }
 template<> double Lz(const PosVelCyl& p) { return p.R*p.vphi; }
 template<> double Lz(const PosVelSph& p) { return p.r*sin(p.theta)*p.vphi; }
+// now the stupid part: spell out these names once again but without <>,
+// to make sure they are included in the obj file and you don't get linker errors:
+// the above were template specializations, and now we make template instantiations...
+template double Ltotal(const PosVelCar& p);
+template double Ltotal(const PosVelCyl& p);
+template double Ltotal(const PosVelSph& p);
+template double Lz(const PosVelCar& p);
+template double Lz(const PosVelCyl& p);
+template double Lz(const PosVelSph& p);
 
 //--------  position conversion functions ---------//
 
@@ -65,6 +74,15 @@ template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
     nu=fmin(-cs.alpha, fmax(nu, -cs.gamma));  // prevent roundoff errors
     return PosProlSph(lambda, nu, from.phi, cs);
 }
+// instantiations...
+template PosCar toPos(const PosCyl&);
+template PosCar toPos(const PosCyl&);
+template PosCyl toPos(const PosCar&);
+template PosCyl toPos(const PosSph&);
+template PosSph toPos(const PosCar&);
+template PosSph toPos(const PosCyl&);
+template PosCyl toPos(const PosProlSph&);
+template PosProlSph toPos(const PosCyl&, const ProlSph&);
 
 //-------- position conversion with derivatives --------//
 
@@ -245,6 +263,7 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     double nu     = 0.5*(-b-sqD);
     lambda=fmax(-cs.alpha, lambda);
     nu=fmin(-cs.alpha, fmax(nu, -cs.gamma)); // prevent roundoff errors
+    if(z2==0) nu=-cs.gamma;
     double kalpha = (2*cs.alpha-b)/sqD;      // intermediate coefs
     double kgamma = (2*cs.gamma-b)/sqD;
     if(derivs!=NULL) {
@@ -265,6 +284,14 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     }
     return PosProlSph(lambda, nu, from.phi, cs);
 }
+
+template PosCyl toPosDeriv(const PosCar&, PosDerivT<Car, Cyl>*, PosDeriv2T<Car, Cyl>*);
+template PosSph toPosDeriv(const PosCar&, PosDerivT<Car, Sph>*, PosDeriv2T<Car, Sph>*);
+template PosCar toPosDeriv(const PosCyl&, PosDerivT<Cyl, Car>*, PosDeriv2T<Cyl, Car>*);
+template PosSph toPosDeriv(const PosCyl&, PosDerivT<Cyl, Sph>*, PosDeriv2T<Cyl, Sph>*);
+template PosCar toPosDeriv(const PosSph&, PosDerivT<Sph, Car>*, PosDeriv2T<Sph, Car>*);
+template PosCyl toPosDeriv(const PosSph&, PosDerivT<Sph, Cyl>*, PosDeriv2T<Sph, Cyl>*);
+template PosProlSph toPosDeriv(const PosCyl&, const ProlSph&, PosDerivT<Cyl, ProlSph>*, PosDeriv2T<Cyl, ProlSph>*);
 
 //--------  position+velocity conversion functions  ---------//
 
@@ -337,9 +364,17 @@ template<> PosVelProlSph toPosVel(const PosVelCyl& from, const ProlSph& cs) {
     const PosProlSph pprol = toPosDeriv<Cyl, ProlSph> (from, cs, &derivs);
     double lambdadot = derivs.dlambdadR*from.vR + derivs.dlambdadz*from.vz;
     double nudot     = derivs.dnudR    *from.vR + derivs.dnudz    *from.vz;
-    double phidot    = from.vphi/from.R;
+    double phidot    = from.vphi!=0 ? from.vphi/from.R : 0;
     return PosVelProlSph(pprol, lambdadot, nudot, phidot);
 }
+
+template PosVelCar toPosVel(const PosVelCyl&);
+template PosVelCar toPosVel(const PosVelCyl&);
+template PosVelCyl toPosVel(const PosVelCar&);
+template PosVelCyl toPosVel(const PosVelSph&);
+template PosVelSph toPosVel(const PosVelCar&);
+template PosVelSph toPosVel(const PosVelCyl&);
+template PosVelProlSph toPosVel(const PosVelCyl&, const ProlSph&);
 
 //-------- implementations of functions that convert gradients --------//
 // note: the code below is machine-generated
@@ -406,6 +441,14 @@ GradCyl toGrad(const GradProlSph& src, const PosDerivT<Cyl, ProlSph>& deriv) {
     dest.dphi = 0;
     return dest;
 }
+
+template GradCar toGrad(const GradCyl&, const PosDerivT<Car, Cyl>&);
+template GradCar toGrad(const GradSph&, const PosDerivT<Car, Sph>&);
+template GradCyl toGrad(const GradCar&, const PosDerivT<Cyl, Car>&);
+template GradCyl toGrad(const GradSph&, const PosDerivT<Cyl, Sph>&);
+template GradSph toGrad(const GradCar&, const PosDerivT<Sph, Car>&);
+template GradSph toGrad(const GradCyl&, const PosDerivT<Sph, Cyl>&);
+template GradCyl toGrad(const GradProlSph&, const PosDerivT<Cyl, ProlSph>&);
 
 //-------- implementations of functions that convert hessians --------//
 // note: the code below is machine-generated and is not intended to be human-readable
@@ -601,6 +644,14 @@ HessCyl toHess(const GradProlSph& srcGrad, const HessProlSph& srcHess,
     dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;
     return dest;
 }
+
+template HessCar toHess(const GradCyl&, const HessCyl&, const PosDerivT<Car, Cyl>&, const PosDeriv2T<Car, Cyl>&);
+template HessCar toHess(const GradSph&, const HessSph&, const PosDerivT<Car, Sph>&, const PosDeriv2T<Car, Sph>&);
+template HessCyl toHess(const GradCar&, const HessCar&, const PosDerivT<Cyl, Car>&, const PosDeriv2T<Cyl, Car>&);
+template HessCyl toHess(const GradSph&, const HessSph&, const PosDerivT<Cyl, Sph>&, const PosDeriv2T<Cyl, Sph>&);
+template HessSph toHess(const GradCar&, const HessCar&, const PosDerivT<Sph, Car>&, const PosDeriv2T<Sph, Car>&);
+template HessSph toHess(const GradCyl&, const HessCyl&, const PosDerivT<Sph, Cyl>&, const PosDeriv2T<Sph, Cyl>&);
+template HessCyl toHess(const GradProlSph&, const HessProlSph&, const PosDerivT<Cyl, ProlSph>&, const PosDeriv2T<Cyl, ProlSph>&);
 
 //------ conversion of derivatives of f(r) into gradients/hessians in different coord.sys. ------//
 template<>

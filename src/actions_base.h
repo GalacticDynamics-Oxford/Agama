@@ -22,6 +22,6 @@ public:
     virtual ~BaseActionFinder() {};
 
     /** Evaluate actions for a given position/velocity point in cartesian coordinates */
-    virtual Actions actions(const coord::PosVelCar& point) const = 0;
+    virtual Actions actions(const coord::PosVelCyl& point) const = 0;
 };
 }  // namespace action

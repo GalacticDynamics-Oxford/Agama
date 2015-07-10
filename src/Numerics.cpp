@@ -425,7 +425,7 @@ double qbulir(double(*func)(double), const double a, const double b,
               const double eps_, double& err)
 /*------------------------------------------------------------------------------
 Quadrature program using the Bulirsch sequence and rational extrapolation. The
-algorithm is puplished in Bulirsch & Stoer, Num. Math. 9, 271-278 (1967), where
+algorithm is published in Bulirsch & Stoer, Num. Math. 9, 271-278 (1967), where
 a routine in ALGOL is given. This routine is a straightforward translation into
 C++.
 CAUTION: 
@@ -445,7 +445,7 @@ OUTPUT: return approximated value for the integral;
     int    i,n=2,nn=3,mx=25,m,mr, bo,bu=0,odd=1;
     double c,d1,ddt,den,e,eps,eta=1.e-7,gr,hm,nt,
                     sm,t,t1,t2,t2a,ta,tab=0.,tb,v=0.,w;
-    double d[7],dt[7];
+    double d[7]={0},dt[7]={0};
 
     while(eta+1. != 1.) eta *=0.5;
     eta  *=2.;                       // eta = actual computing accuracy

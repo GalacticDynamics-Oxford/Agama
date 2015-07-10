@@ -48,13 +48,19 @@ namespace coord{
 /// their class names are simply used as tags in the rest of the code
 
 /// cartesian coordinate system (galactocentric)
-struct Car{};
+struct Car{
+    static const char* name() { return "Cartesian"; }
+};
 
 /// cylindrical coordinate system (galactocentric)
-struct Cyl{};
+struct Cyl{
+    static const char* name() { return "Cylindrical"; }
+};
 
 /// spherical coordinate system (galactocentric)
-struct Sph{};
+struct Sph{
+    static const char* name() { return "Spherical"; }
+};
 
 //  less trivial:
 /// prolate spheroidal coordinate system
@@ -62,14 +68,8 @@ struct ProlSph{
     double alpha;  ///< alpha=-a^2, where a is major axis
     double gamma;  ///< gamma=-c^2, where c is minor axis
     ProlSph(double _alpha, double _gamma): alpha(_alpha), gamma(_gamma) {};
+    static const char* name() { return "Prolate spheroidal"; }
 };
-
-/// templated routine that tells the name of coordinate system
-template<typename coordSysT> const char* CoordSysName();
-template<> static const char* CoordSysName<Car>() { return "Cartesian"; }
-template<> static const char* CoordSysName<Cyl>() { return "Cylindrical"; }
-template<> static const char* CoordSysName<Sph>() { return "Spherical"; }
-template<> static const char* CoordSysName<ProlSph>() { return "Prolate spheroidal"; }
 
 ///@}
 /// \name   Primitive data types: position in different coordinate systems
@@ -419,7 +419,7 @@ HessT<destCS> toHess(const GradT<srcCS>& srcGrad, const HessT<srcCS>& srcHess,
     in a different coordinate system (evalCS), and converting them to the target 
     coordinate system (outputCS). */
 template<typename evalCS, typename outputCS>
-inline void eval_and_convert(const IScalarFunction<evalCS>& F,
+void eval_and_convert(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
     bool needDeriv = deriv!=0 || deriv2!=0;
@@ -475,7 +475,7 @@ inline void eval_and_convert(const IScalarFunction<CS>& F, const PosT<CS>& pos,
     through an intermediate coordinate system (intermedCS), 
     for the situation when a direct transformation is not available. */
 template<typename evalCS, typename intermedCS, typename outputCS>
-inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
+void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
     bool needDeriv = deriv!=0 || deriv2!=0;
@@ -497,7 +497,7 @@ inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
     // compute the function in transformed coordinates
     F.eval_scalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
     if(needDeriv)  // may be needed for either grad or hess (or both)
-        intermedGrad=toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
+        intermedGrad = toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
     if(deriv)
         *deriv  = toGrad<intermedCS, outputCS> (intermedGrad, coordDerivOI);
     if(deriv2) {

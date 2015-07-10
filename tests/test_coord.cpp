@@ -147,8 +147,8 @@ bool test_conv_posvel(const coord::PosVelT<srcCS>& srcpoint)
     if(!sameLz) std::cout << "L_z  ";
     if(!sameLt) std::cout << "L_total  ";
     if(!sameV2) std::cout << "v^2  ";
-    std::cout<<coord::CoordSysName<srcCS>()<<" => "<<
-        coord::CoordSysName<destCS>()<<" => "<<coord::CoordSysName<srcCS>();
+    std::cout<<srcCS::name()<<" => "<<
+        destCS::name()<<" => "<<srcCS::name();
     if(!ok) {
         for(int i=0; i<6; i++) std::cout<<" "<<src[i];
         std::cout << " => ";
@@ -186,14 +186,35 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     coord::GradT<destCS> destgrad2step;
     coord::HessT<destCS> desthess2step;
     coord::IScalarFunction<srcCS> Fnc;
-    double srcvalue, destvalue;
+    double srcvalue, destvalue=0;
     Fnc.eval_scalar(srcpoint, &srcvalue, &srcgrad, &srchess);
     const coord::GradT<destCS> destgrad=coord::toGrad<srcCS,destCS>(srcgrad, derivDtoI);
     const coord::HessT<destCS> desthess=coord::toHess<srcCS,destCS>(srcgrad, srchess, derivDtoI, deriv2DtoI);
     const coord::GradT<srcCS> invgrad=coord::toGrad<destCS,srcCS>(destgrad, derivStoD);
     const coord::HessT<srcCS> invhess=coord::toHess<destCS,srcCS>(destgrad, desthess, derivStoD, deriv2StoD);
     try{
-        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
+//        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
+        bool needDeriv = true;//deriv!=0 || deriv2!=0;
+        bool needDeriv2= true;//deriv2!=0;
+        coord::GradT<srcCS> evalGrad;
+        coord::HessT<srcCS> evalHess;
+        coord::GradT<intermedCS> intermedGrad;
+        coord::HessT<intermedCS> intermedHess;
+        coord::PosDerivT <destCS, intermedCS> coordDerivOI;
+        coord::PosDeriv2T<destCS, intermedCS> coordDeriv2OI;
+        coord::PosDerivT <intermedCS, srcCS> coordDerivIE;
+        coord::PosDeriv2T<intermedCS, srcCS> coordDeriv2IE;
+        const coord::PosT<intermedCS> intermedPos =  
+        coord::toPosDeriv<destCS, intermedCS>(destpoint, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0);
+        const coord::PosT<srcCS> evalPos = needDeriv ? 
+        coord::toPosDeriv<intermedCS, srcCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
+        coord::toPos<intermedCS, srcCS>(intermedPos);
+        // compute the function in transformed coordinates
+        Fnc.eval_scalar(evalPos, &destvalue, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+        intermedGrad=coord::toGrad<srcCS, intermedCS> (evalGrad, coordDerivIE);
+        destgrad2step  = coord::toGrad<intermedCS, destCS> (intermedGrad, coordDerivOI);
+        intermedHess = coord::toHess<srcCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
+        desthess2step = coord::toHess<intermedCS, destCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
     }
     catch(std::exception& e) {
         std::cout << "    2-step conversion: " << e.what() << "\n";
@@ -213,8 +234,8 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     if(!samevalue2step) std::cout << "2-step conversion value  ";
     if(!samegrad2step) std::cout << "2-step gradient  ";
     if(!samehess2step) std::cout << "2-step hessian  ";
-    std::cout<<coord::CoordSysName<srcCS>()<<" => "<<
-        coord::CoordSysName<destCS>()<<" => "<<coord::CoordSysName<srcCS>()<<"\n";
+    std::cout<<srcCS::name()<<" => "<<
+        destCS::name()<<" => "<<srcCS::name()<<"\n";
     return ok;
 }
 

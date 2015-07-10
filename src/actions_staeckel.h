@@ -11,7 +11,7 @@ private:
 public:
     ActionFinderAxisymmetricStaeckel(const potential::StaeckelOblatePerfectEllipsoid& _poten) :
         BaseActionFinder(), poten(_poten) {};
-    virtual Actions actions(const coord::PosVelCar& point) const;
+    virtual Actions actions(const coord::PosVelCyl& point) const;
 };
 
 /// Action finder for arbitrary axisymmetric potential using Jason Sander's method
@@ -22,7 +22,8 @@ private:
 public:
     ActionFinderAxisymmetricFudgeJS(const potential::BasePotential& _poten, double _alpha, double _gamma) :
         BaseActionFinder(), poten(_poten), alpha(_alpha), gamma(_gamma) {};
-    virtual Actions actions(const coord::PosVelCar& point) const;
+    virtual Actions actions(const coord::PosVelCyl& point) const;
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const;
 };
 
 }  // namespace actions

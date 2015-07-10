@@ -2,6 +2,8 @@
 #include "actions_staeckel.h"
 #include "orbit.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cmath>
 
 const double integr_eps=1e-8;        // integration accuracy parameter
@@ -41,16 +43,25 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     actions::ActionFinderAxisymmetricFudgeJS aff(potential, -pow_2(axis_a), -pow_2(axis_c));
     actionstat stats, statf;
     bool ex_afs=false, ex_aff=false;
+    std::ofstream strm;
+    if(output) {
+        std::ostringstream s;
+        double x[6];
+        initial_conditions.unpack_to(x);
+        s<<coordSysT::name()<<"_"<<x[0]<<x[1]<<x[2]<<x[3]<<x[4]<<x[5];
+        strm.open(s.str().c_str());
+    }
     for(size_t i=0; i<traj.size(); i++) {
         try{
-            stats.add(afs.actions(coord::toPosVelCar(traj[i])));
+            stats.add(afs.actions(coord::toPosVelCyl(traj[i])));
         }
         catch(std::exception &e) {
             ex_afs=true;
 //            std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
+        actions::ActionAngles a;
         try{
-            actions::Actions a=aff.actions(coord::toPosVelCar(traj[i]));
+            a=aff.actionAngles(coord::toPosVelCyl(traj[i]));
             statf.add(a);
             if(fabs(a.Jr-statf.avg.Jr/statf.N)>1e-4)
                 std::cout << a.Jr <<"!="<<(statf.avg.Jr/statf.N)  <<"\n";
@@ -61,18 +72,19 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
         }
         if(output) {
             double xv[6];
-            coord::toPosVelCar(traj[i]).unpack_to(xv);
-            std::cout << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
-                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"\n";
+            traj[i].unpack_to(xv);
+            strm << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
+                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"  "<<
+                a.thetar<<" "<<a.thetaz<<" "<<a.thetaphi<<"\n";
         }
     }
     stats.finish();
     statf.finish();
-    std::cout << coord::CoordSysName<coordSysT>() << ", Exact"
+    std::cout << coordSysT::name() << ", Exact"
     ":  Jr="  <<stats.avg.Jr  <<" +- "<<stats.disp.Jr<<
     ",  Jz="  <<stats.avg.Jz  <<" +- "<<stats.disp.Jz<<
     ",  Jphi="<<stats.avg.Jphi<<" +- "<<stats.disp.Jphi<< (ex_afs ? ",  CAUGHT EXCEPTION\n":"\n");
-    std::cout << coord::CoordSysName<coordSysT>() << ", Fudge"
+    std::cout << coordSysT::name() << ", Fudge"
     ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.disp.Jr<<
     ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.disp.Jz<<
     ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
@@ -83,7 +95,7 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, c
 {
     const double total_time=100.;
     const double timestep=1./8;
-    bool output=false;
+    bool output=true;
     bool ok=true;
     std::cout << "   ===== "<<title<<" =====\n";
     ok &= test_oblate_staeckel(potential, coord::toPosVelCar(initcond), total_time, timestep, output);

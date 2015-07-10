@@ -5,26 +5,26 @@ namespace potential{
 
 double CompositeDensity::density_car(const coord::PosCar &pos) const {
     double sum=0; 
-    for(size_t i=0; i<components.size(); i++) 
+    for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
     return sum;
 }
 double CompositeDensity::density_cyl(const coord::PosCyl &pos) const {
     double sum=0; 
-    for(size_t i=0; i<components.size(); i++) 
+    for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
     return sum;
 }
 double CompositeDensity::density_sph(const coord::PosSph &pos) const {
     double sum=0; 
-    for(size_t i=0; i<components.size(); i++) 
+    for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
     return sum;
 }
 
 BaseDensity::SYMMETRYTYPE CompositeDensity::symmetry() const {
     int sym=static_cast<int>(ST_SPHERICAL);
-    for(size_t index=0; index<components.size(); index++)
+    for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
     return static_cast<SYMMETRYTYPE>(sym);
 };
@@ -35,11 +35,11 @@ void CompositeCyl::eval_cyl(const coord::PosCyl &pos,
     if(potential) *potential=0;
     if(deriv)  deriv->dR=deriv->dz=deriv->dphi=0;
     if(deriv2) deriv2->dR2=deriv2->dz2=deriv2->dphi2=deriv2->dRdz=deriv2->dRdphi=deriv2->dzdphi=0;
-    for(size_t i=0; i<components.size(); i++) {
+    for(unsigned int i=0; i<components.size(); i++) {
         coord::GradCyl der;
         coord::HessCyl der2;
         double pot;
-        components[i]->eval(pos, potential?&pot:NULL, deriv?&der:NULL, deriv2?&der2:NULL);
+        components[i]->eval(pos, potential?&pot:0, deriv?&der:0, deriv2?&der2:0);
         if(potential) *potential+=pot;
         if(deriv) { 
             deriv->dR  +=der.dR;
@@ -59,7 +59,7 @@ void CompositeCyl::eval_cyl(const coord::PosCyl &pos,
 
 BaseDensity::SYMMETRYTYPE CompositeCyl::symmetry() const {
     int sym=static_cast<int>(ST_SPHERICAL);
-    for(size_t index=0; index<components.size(); index++)
+    for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
     return static_cast<SYMMETRYTYPE>(sym);
 };

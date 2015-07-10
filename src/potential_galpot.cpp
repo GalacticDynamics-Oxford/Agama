@@ -37,7 +37,7 @@ Version 0.8    24. June      2005  explicit construction of tupel
 #include <stdexcept>
 
 namespace potential{
-    
+
 inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 
 const int    GALPOT_LMAX=80;     ///< maximum l for the Multipole expansion 
@@ -46,7 +46,7 @@ const double GALPOT_RMIN=1.e-4,  ///< DEFAULT min radius of logarithmic radial g
              GALPOT_RMAX=1.e3;   ///< DEFAULT max radius of logarithmic radial grid
 
 //----- disk density and potential -----//
-    
+
 /** simple exponential radial density profile without inner hole or wiggles */
 class DiskDensityRadialExp: public coord::ISimpleFunction {
 public:
@@ -91,7 +91,7 @@ private:
             *fprime  = fp*val;
         if(f) 
             *f = val;
-    }    
+    }
 };
 
 /** exponential vertical disk density profile */
@@ -263,7 +263,7 @@ Multipole::Multipole(const BaseDensity& source_density,
                      const int num_grid_points,
                      const double _gamma, const double _beta)
 {
-    if(source_density.symmetry() & ST_AXISYMMETRIC != ST_AXISYMMETRIC)
+    if((source_density.symmetry() & ST_AXISYMMETRIC) != ST_AXISYMMETRIC)
         throw std::invalid_argument("Error in Multipole expansion: source density must be axially symmetric");
     K[0] = num_grid_points;
     K[1] = N2;

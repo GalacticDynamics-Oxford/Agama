@@ -304,10 +304,10 @@ int hunt(const S*xarr, const int n, const S x, const int j)
         jhi = n;
     } else {
         int inc = 1;
-        if(x>=xarr[jlo] == ascnd) {        // hunt upward
+        if((x>=xarr[jlo]) == ascnd) {        // hunt upward
             if(jlo == l) return (x==xarr[l])? l : n;
             jhi = jlo+1;
-            while(x>=xarr[jhi] == ascnd) { // not done hunting
+            while((x>=xarr[jhi]) == ascnd) { // not done hunting
                 jlo =jhi;
                 inc+=inc;                  // so double the increment
                 jhi =jlo+inc;
@@ -320,7 +320,7 @@ int hunt(const S*xarr, const int n, const S x, const int j)
             if(jlo == 0) return -1;
             jhi = jlo;
             jlo-= 1;
-            while(x<xarr[jlo] == ascnd) {  // not done hunting
+            while((x<xarr[jlo]) == ascnd) {  // not done hunting
                 jhi = jlo;
                 inc+= inc;                 // so double the increment
                 jlo = jhi-inc;
@@ -333,7 +333,7 @@ int hunt(const S*xarr, const int n, const S x, const int j)
     }
     while (jhi-jlo != 1) {                 // bisection phase
         jm=(jhi+jlo) >> 1;
-        if(x>=xarr[jm] == ascnd) jlo=jm;
+        if((x>=xarr[jm]) == ascnd) jlo=jm;
         else jhi=jm;
     }
     return jlo;

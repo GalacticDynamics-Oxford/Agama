@@ -2,8 +2,6 @@
 #include "mathutils.h"
 #include <stdexcept>
 #include <cmath>
-#include "legacy/BaseClasses.hpp"
-#include "legacy/Stackel_JS.hpp"
 
 namespace actions{
 
@@ -111,11 +109,11 @@ static AxisymStaeckelParam findIntegralsOfMotionOblatePerfectEllipsoid
     return AxisymStaeckelParam(coordsys, poten, pprol.lambda, pprol.nu, E, Lz, I3);
 }
 
-Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCar& point) const
+Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCyl& point) const
 {
     // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
     AxisymStaeckelParam data = findIntegralsOfMotionOblatePerfectEllipsoid(
-        poten, coord::toPosVelCyl(point));
+        poten, point);
     if(data.E>=0)
         throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: E>=0");
 
@@ -196,10 +194,11 @@ struct AxisymStaeckelFudgeParam {
     double Lz;           ///< z-component of angular momentum
     double Klambda, Knu; ///< approximate integrals of motion for two quasi-separable directions
     double n, a, c;      ///< power-law indices for A, (tau+alpha), (tau+gamma)
+    double ldot, ndot;
     AxisymStaeckelFudgeParam(const coord::ProlSph& cs, const potential::BasePotential& _poten,
-        double _lambda, double _nu, double _E, double _Lz, double _Klambda, double _Knu) :
+        double _lambda, double _nu, double _E, double _Lz, double _Klambda, double _Knu, double _ldot, double _ndot) :
         coordsys(cs), poten(_poten), lambda(_lambda), nu(_nu), E(_E), Lz(_Lz), 
-        Klambda(_Klambda), Knu(_Knu), n(1), a(0), c(0) {};
+        Klambda(_Klambda), Knu(_Knu), n(1), a(0), c(0), ldot(_ldot), ndot(_ndot) {};
 };
 
 /** compute true (E, Lz) and approximate (Klambda, Knu) integrals of motion in an arbitrary 
@@ -227,7 +226,7 @@ static AxisymStaeckelFudgeParam findIntegralsOfMotionAxisymStaeckelFudge
     else
         Knu -= pow_2(pprol.nudot*(pprol.lambda-pprol.nu)) /
             (8*(pprol.nu+coordsys.alpha)*(pprol.nu+coordsys.gamma));
-    return AxisymStaeckelFudgeParam(coordsys, poten, pprol.lambda, pprol.nu, E, Lz, Klambda, Knu);
+    return AxisymStaeckelFudgeParam(coordsys, poten, pprol.lambda, pprol.nu, E, Lz, Klambda, Knu, pprol.lambdadot, pprol.nudot);
 }
 
 static double axisymStaeckelFudgeAux(double tauplusgamma, void* v_param)
@@ -292,12 +291,12 @@ AxisymActionIntLimits findIntegrationLimitsAxisymStaeckelFudge(
     return lim;
 }
 
-Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) const
+Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCyl& point) const
 {
     const coord::ProlSph coordsys(alpha, gamma);
     // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
     AxisymStaeckelFudgeParam data = findIntegralsOfMotionAxisymStaeckelFudge(
-        poten, coord::toPosVelCyl(point), coordsys);
+        poten, point, coordsys);
     if(data.E>=0)
         throw std::invalid_argument("Error in Axisymmetric Staeckel Fudge action finder: E>=0");
 
@@ -315,5 +314,92 @@ Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCar& point) 
     return acts;
 }
 
+ActionAngles ActionFinderAxisymmetricFudgeJS::actionAngles(const coord::PosVelCyl& point) const
+{
+    const coord::ProlSph coordsys(alpha, gamma);
+    // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
+    AxisymStaeckelFudgeParam data = findIntegralsOfMotionAxisymStaeckelFudge(
+        poten, point, coordsys);
+    if(data.E>=0)
+        throw std::invalid_argument("Error in Axisymmetric Staeckel Fudge action finder: E>=0");
+    
+    AxisymActionIntLimits lim = findIntegrationLimitsAxisymStaeckelFudge(axisymStaeckelFudgeAux, data);
+    ActionAngles acts;
+    acts.Jr = acts.Jz = 0;
+    acts.Jphi = fabs(data.Lz);
+    
+    data.n = 1./2;
+    acts.Jr = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / M_PI;
+    acts.Jz = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) * 2/M_PI;
+    
+    double dJrdE, dJrdI3, dJrdLz, dJzdE, dJzdI3, dJzdLz;
+    double dSdE=0, dSdI3=0, dSdLz=point.phi;
+    const double signldot=data.ldot>=0?+1:-1;
+    const double signndot=data.ndot>=0?+1:-1;
+    data.n = -1./2;  // momentum goes into the denominator
+
+    // derivatives w.r.t. E
+    data.a = -1.;
+    data.c = 0;
+    dJrdE = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
+    dJzdE = mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    dSdE += signldot*mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, data.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4;
+    dSdE += signndot*mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, data.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+    
+    // derivatives w.r.t. I3
+    data.a = -1.;
+    data.c = -1.;
+    dJrdI3 = -mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
+    dJzdI3 = -mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    dSdI3 += signldot*-mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, data.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4;
+    dSdI3 += signndot*-mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, data.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+    
+    // derivatives w.r.t. Lz
+    data.a = -2.;
+    data.c = 0;
+    dJrdLz = -data.Lz * mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
+    dJzdLz = -data.Lz * mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    dSdLz += signldot*-data.Lz * mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xlambda_min, data.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4;
+    dSdLz += signndot*-data.Lz * mathutils::integrate_scaled(axisymStaeckelFudgeAux, &data, 
+        lim.xnu_min, data.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+
+    if(lim.xnu_min==lim.xnu_max)  // z==0: motion in z is irrelevant, but we could not compute dJzdI3 which is not zero
+        dJzdI3=1;  // set it to an arbitrary value which would not affect any result but will prevent a zero determinant
+    double signLz  = mathutils::sign(data.Lz);
+    double det     = dJrdE*dJzdI3-dJrdI3*dJzdE;
+    double dEdJr   = dJzdI3/det;
+    double dEdJz   =-dJrdI3/det;
+    double dEdJphi = (dJrdI3*dJzdLz-dJrdLz*dJzdI3)/det * signLz;
+    double dI3dJr  =-dJzdE/det;
+    double dI3dJz  = dJrdE/det;
+    double dI3dJphi=-(dJrdE*dJzdLz-dJrdLz*dJzdE)/det * signLz;
+    double dLzdJr  = 0;
+    double dLzdJz  = 0;
+    double dLzdJphi= signLz;
+    
+    acts.thetar   = dSdE*dEdJr   + dSdI3*dI3dJr   + dSdLz*dLzdJr;
+    acts.thetaz   = dSdE*dEdJz   + dSdI3*dI3dJz   + dSdLz*dLzdJz;
+    acts.thetaphi = dSdE*dEdJphi + dSdI3*dI3dJphi + dSdLz*dLzdJphi;
+    acts.thetar   = mathutils::wrap_angle(acts.thetar);
+    acts.thetaz   = mathutils::wrap_angle(acts.thetaz + M_PI*(point.z<0) + M_PI*(signndot<0));
+    if(lim.xnu_min==lim.xnu_max) 
+        acts.thetaz=0;
+    acts.thetaphi = mathutils::wrap_angle(acts.thetaphi);
+    return acts;
+}
+    
 #endif
 }  // namespace actions

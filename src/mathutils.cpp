@@ -26,6 +26,7 @@
 #include "mathutils.h"
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_math.h>
+#include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_deriv.h>
@@ -62,6 +63,10 @@ bool is_finite(double x) {
 
 int fcmp(double x, double y, double eps) {
     return gsl_fcmp(x, y, eps);
+}
+
+double wrap_angle(double x) {
+    return gsl_sf_angle_restrict_pos(x);
 }
 
 double findroot(function fnc, void* params, double xlower, double xupper, double reltoler)
@@ -244,7 +249,7 @@ static double solve_for_scaled_y(double x, const ScaledIntParam& param) {
     assert(x>=param.x_low && x<=param.x_upp);
     if(x==param.x_low) return 0;
     if(x==param.x_upp) return 1;
-    double phi=acos(1-2*x)/3.0;
+    double phi=acos(1-2*(x-param.x_low)/(param.x_upp-param.x_low))/3.0;
     return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
 }
 
@@ -252,7 +257,7 @@ double integrate_scaled(function fnc, void* params, double x1, double x2,
     double x_low, double x_upp, double rel_toler)
 {
     if(x1==x2) return 0;
-    if(x1>x2 || x1<x_low || x2>x_upp)
+    if(x1>x2 || x1<x_low || x2>x_upp || x_low>=x_upp)
         throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
     gsl_function F;
     ScaledIntParam param;

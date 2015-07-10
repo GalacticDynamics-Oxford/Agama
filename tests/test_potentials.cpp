@@ -37,10 +37,10 @@ bool test_orbit_int(const potential::BasePotential& potential,
     dispLz/=traj.size();
     dispH= sqrt(std::max<double>(0, dispH -pow_2(avgH)));
     dispLz=sqrt(std::max<double>(0, dispLz-pow_2(avgLz)));
-    std::cout << coord::CoordSysName<coordSysT>() << 
+    std::cout << coordSysT::name() << 
     ":  E=" <<avgH <<" +- "<<dispH<<
     ",  Lz="<<avgLz<<" +- "<<dispLz<<"\n";
-    return dispH<eps && (dispLz<eps || (potential.symmetry() & potential::BasePotential::ST_AXISYMMETRIC == 0));
+    return dispH<eps && (dispLz<eps || ((potential.symmetry() & potential::BasePotential::ST_AXISYMMETRIC) == 0));
 }
 
 bool test_potential(const potential::BasePotential& potential,

@@ -27,6 +27,12 @@ bool is_finite(double x);
     \return -1 if x<y, +1 if x>y, or 0 if x and y are approximately equal */
 int fcmp(double x, double y, double eps=1e-15);
 
+/** return sign of a number */
+inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
+
+/** ensure that the angle lies in [0,2pi) */
+double wrap_angle(double x);
+
 /** find a root of function on the interval [x1,x2].
     function must be finite at the ends of interval and have opposite signs (or be zero),
     otherwise NaN is returned.
