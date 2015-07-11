@@ -5,6 +5,13 @@
 
 namespace coord{
 
+ProlSph::ProlSph(double _alpha, double _gamma): 
+    alpha(_alpha), gamma(_gamma) 
+{
+    if(gamma>=0 || alpha>=gamma)
+        throw std::invalid_argument("Invalid parameters for Prolate Spheroidal coordinate system");
+};
+
 //--------  angular momentum functions --------//
 
 template<> double Ltotal(const PosVelCar& p) {
@@ -58,21 +65,11 @@ template<> PosCyl toPos(const PosProlSph& p) {
         (p.coordsys.gamma-p.coordsys.alpha));
     return PosCyl(R, z, p.phi);
 }
+// declare an instantiation which will be defined later
+template<> PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
+    PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2);
 template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
-    // lambda and mu are roots "t" of equation  R^2/(t+alpha) + z^2/(t+gamma) = 1
-    double R2=pow_2(from.R), z2=pow_2(from.z);
-    double b = cs.alpha+cs.gamma - R2 - z2;
-    double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
-    double det = b*b-4*c;
-    if(det<=0)
-        throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<=0");
-    double sqD=sqrt(det);
-    // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
-    double lambda = 0.5*(-b+sqD);
-    double nu     = 0.5*(-b-sqD);
-    lambda=fmax(-cs.alpha, lambda);
-    nu=fmin(-cs.alpha, fmax(nu, -cs.gamma));  // prevent roundoff errors
-    return PosProlSph(lambda, nu, from.phi, cs);
+    return toPosDeriv<Cyl,ProlSph>(from, cs, NULL, NULL);
 }
 // instantiations...
 template PosCar toPos(const PosCyl&);
@@ -90,8 +87,8 @@ template<>
 PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, Cyl>* deriv2) 
 {
     const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
-    if(R==0)
-        throw std::runtime_error("PosDeriv Car=>Cyl: R=0, degenerate case!");
+//    if(R==0)
+//        throw std::runtime_error("PosDeriv Car=>Cyl: R=0, degenerate case!");
     const double cosphi=p.x/R, sinphi=p.y/R;
     if(deriv!=NULL) {
         deriv->dRdx=cosphi;
@@ -115,8 +112,8 @@ PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, S
     const double x2=pow_2(p.x), y2=pow_2(p.y), z2=pow_2(p.z);
     const double R2=x2+y2, R=sqrt(R2);
     const double r2=R2+z2, r=sqrt(r2), invr=1/r;
-    if(R==0)
-        throw std::runtime_error("PosDeriv Car=>Sph: R=0, degenerate case!");
+//    if(R==0)
+//        throw std::runtime_error("PosDeriv Car=>Sph: R=0, degenerate case!");
     if(deriv!=NULL) {
         deriv->drdx=p.x*invr;
         deriv->drdy=p.y*invr;
@@ -174,8 +171,8 @@ PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, C
 template<>
 PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, Sph>* deriv2) {
     const double r=sqrt(pow_2(p.R)+pow_2(p.z));
-    if(r==0)
-        throw std::runtime_error("PosDeriv Cyl=>Sph: r=0, degenerate case!");
+//    if(r==0)
+//        throw std::runtime_error("PosDeriv Cyl=>Sph: r=0, degenerate case!");
     const double rinv= 1./r;
     const double costheta=p.z*rinv, sintheta=p.R*rinv;
     if(deriv!=NULL) {
@@ -255,32 +252,47 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     double b = cs.alpha+cs.gamma - R2 - z2;
     double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
     double det = b*b-4*c;
-    if(det<=0)
-        throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<=0");
+    if(det<0)
+        throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<0");
     double sqD=sqrt(det);
     // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
     double lambda = 0.5*(-b+sqD);
     double nu     = 0.5*(-b-sqD);
     lambda=fmax(-cs.alpha, lambda);
     nu=fmin(-cs.alpha, fmax(nu, -cs.gamma)); // prevent roundoff errors
-    if(z2==0) nu=-cs.gamma;
-    double kalpha = (2*cs.alpha-b)/sqD;      // intermediate coefs
-    double kgamma = (2*cs.gamma-b)/sqD;
-    if(derivs!=NULL) {
-        derivs->dlambdadR = from.R*(1+kgamma);
-        derivs->dlambdadz = from.z*(1+kalpha);
-        derivs->dnudR     = from.R*(1-kgamma);
-        derivs->dnudz     = from.z*(1-kalpha);
+    if(z2==0) 
+        nu=-cs.gamma;
+    if(R2==0) {
+        if(z2>=cs.gamma-cs.alpha) { 
+            lambda=z2-cs.gamma; 
+            nu=-cs.alpha; 
+        } else { 
+            lambda=-cs.alpha; 
+            nu=z2-cs.gamma;
+        }
     }
-    if(derivs2!=NULL) {
-        double kR = 2*R2*(1-pow_2(kgamma))/sqD + kgamma;
-        double kz = 2*z2*(1-pow_2(kalpha))/sqD + kalpha;
-        derivs2->d2lambdadR2 = 1+kR;
-        derivs2->d2lambdadz2 = 1+kz;
-        derivs2->d2nudR2     = 1-kR;
-        derivs2->d2nudz2     = 1-kz;
-        derivs2->d2lambdadRdz= 2*from.R*from.z*(1-kalpha*kgamma)/sqD;
-        derivs2->d2nudRdz    = -derivs2->d2lambdadRdz;
+    if(derivs!=NULL || derivs2!=NULL) {
+        if(det==0)
+            throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: "
+                "the special case lambda==nu==-alpha is not implemented");
+        double kalpha = (2*cs.alpha-b)/sqD;      // intermediate coefs
+        double kgamma = (2*cs.gamma-b)/sqD;
+        if(derivs!=NULL) {
+            derivs->dlambdadR = from.R*(1+kgamma);
+            derivs->dlambdadz = from.z*(1+kalpha);
+            derivs->dnudR     = from.R*(1-kgamma);
+            derivs->dnudz     = from.z*(1-kalpha);
+        }
+        if(derivs2!=NULL) {
+            double kR = 2*R2*(1-pow_2(kgamma))/sqD + kgamma;
+            double kz = 2*z2*(1-pow_2(kalpha))/sqD + kalpha;
+            derivs2->d2lambdadR2 = 1+kR;
+            derivs2->d2lambdadz2 = 1+kz;
+            derivs2->d2nudR2     = 1-kR;
+            derivs2->d2nudz2     = 1-kz;
+            derivs2->d2lambdadRdz= 2*from.R*from.z*(1-kalpha*kgamma)/sqD;
+            derivs2->d2nudRdz    = -derivs2->d2lambdadRdz;
+        }
     }
     return PosProlSph(lambda, nu, from.phi, cs);
 }

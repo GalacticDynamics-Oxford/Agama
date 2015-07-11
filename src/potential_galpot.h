@@ -110,6 +110,8 @@ public:
         vertical_fnc(createVerticalDiskFnc(params)) {};
     ~DiskResidual() { delete radial_fnc; delete vertical_fnc; }
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "DiskResidual"; };
 private:
     const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
     const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
@@ -129,6 +131,8 @@ public:
         vertical_fnc(createVerticalDiskFnc(params)) {};
     ~DiskAnsatz() { delete radial_fnc; delete vertical_fnc; }
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "DiskAnsatz"; };
 private:
     const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
     const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
@@ -149,6 +153,8 @@ public:
     SpheroidDensity (const SphrParam &_params);
     virtual SYMMETRYTYPE symmetry() const { 
         return params.axisRatio==1?ST_SPHERICAL:ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "TwoPowerLawSpheroid"; };
 private:
     SphrParam params;
     virtual double density_cyl(const coord::PosCyl &pos) const;
@@ -163,16 +169,18 @@ private:
 */
 class Multipole: public BasePotentialCyl{
 private:
-  int    K[2];  // dimensions of 2d spline
-  double Rmin, Rmax, gamma, beta, Phi0;
-  double lRmin, lRmax, g2;
-  double lzmin, lzmax, tg3, g3h;
-  double *logr; 
-  double *X[2], **Y[3], **Z[4];
-  void   AllocArrays();
-  void   setup(const BaseDensity& source_density,
-               const double r_min, const double r_max,
-               const double gamma, const double beta);
+    int    K[2];  // dimensions of 2d spline
+    double Rmin, Rmax, gamma, beta, Phi0;
+    double lRmin, lRmax, g2;
+    double lzmin, lzmax, tg3, g3h;
+    double *logr; 
+    double *X[2], **Y[3], **Z[4];
+    void   AllocArrays();
+    void   setup(const BaseDensity& source_density,
+                 const double r_min, const double r_max,
+                 const double gamma, const double beta);
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "AxisymmetricMultipole"; };
 public:
     /** Compute the potential using the multi expansion and approximate it 
         by a two-dimensional spline in (R,z) plane. 

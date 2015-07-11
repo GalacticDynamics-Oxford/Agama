@@ -63,8 +63,6 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
         try{
             a=aff.actionAngles(coord::toPosVelCyl(traj[i]));
             statf.add(a);
-            if(fabs(a.Jr-statf.avg.Jr/statf.N)>1e-4)
-                std::cout << a.Jr <<"!="<<(statf.avg.Jr/statf.N)  <<"\n";
         }
         catch(std::exception &e) {
             ex_aff=true;
@@ -95,7 +93,7 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, c
 {
     const double total_time=100.;
     const double timestep=1./8;
-    bool output=true;
+    bool output=false;
     bool ok=true;
     std::cout << "   ===== "<<title<<" =====\n";
     ok &= test_oblate_staeckel(potential, coord::toPosVelCar(initcond), total_time, timestep, output);
@@ -107,14 +105,15 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, c
 int main() {
     const potential::StaeckelOblatePerfectEllipsoid potential(1.0, axis_a, axis_c);
     bool allok=true;
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1), "ordinary case");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.0, 0.0, 0, 0.2, 0.3486), "thin orbit (Jr~0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.0, 0.0, 0.0, 0, 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.0, 0.0, 0.0, 0, 0.4097), "tube orbit in x-z plane near separatrix");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.0, 0.0, 0.0, 0, 0.4096), "box orbit in x-z plane near separatrix");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0., 0.1, 0.4, 1e-3), "almost in-plane orbit (Jz~0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0., 0.1, 0.4, 0), "exactly in-plane orbit (Jz=0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0, 0, 0, 0.296, 0), "almost circular in-plane orbit (Jz=0,Jr~0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1   ), "ordinary case");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0  , 0.2, 0.3486), "thin orbit (Jr~0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4097), "tube orbit in x-z plane near separatrix");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4096), "box orbit in x-z plane near separatrix");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 1e-6,0.4097), "orbit with Jphi<<J_z");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-3  ), "almost in-plane orbit (Jz~0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4,  0    ), "exactly in-plane orbit (Jz=0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , .296, 0    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
     if(allok)
         std::cout << "ALL TESTS PASSED\n";
     return 0;

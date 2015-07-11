@@ -57,7 +57,7 @@ void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /
 // a static variable that initializes our error handler
 bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_handler);
 
-bool is_finite(double x) {
+bool isFinite(double x) {
     return gsl_finite(x);
 }
 
@@ -65,11 +65,11 @@ int fcmp(double x, double y, double eps) {
     return gsl_fcmp(x, y, eps);
 }
 
-double wrap_angle(double x) {
+double wrapAngle(double x) {
     return gsl_sf_angle_restrict_pos(x);
 }
 
-double findroot(function fnc, void* params, double xlower, double xupper, double reltoler)
+double findRoot(function fnc, void* params, double xlower, double xupper, double reltoler)
 {
     double f1=fnc(xlower, params), f2=fnc(xupper, params);
     if(reltoler<=0)
@@ -107,7 +107,7 @@ double findroot(function fnc, void* params, double xlower, double xupper, double
     return xroot;
 }
 
-double findroot_guess(function fnc, void* params, double x1, double x2, 
+double findRootGuess(function fnc, void* params, double x1, double x2, 
     double xinit, bool increasing, double reltoler)
 {
     double finit=fnc(xinit, params);
@@ -135,7 +135,7 @@ double findroot_guess(function fnc, void* params, double x1, double x2,
         } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
             throw std::range_error("findRootGuess: cannot bracket root");
-        return findroot(fnc, params, x, xinit, reltoler);
+        return findRoot(fnc, params, x, xinit, reltoler);
     } else {  // search right
         // map the interval x:(xinit,x2) onto y:(0,1) as  y=1/(1 + 1/(x-xinit) - 1/(x2-xinit) )
         double y=0.5, x, fy;
@@ -151,11 +151,11 @@ double findroot_guess(function fnc, void* params, double x1, double x2,
         } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
             throw std::range_error("findRootGuess: cannot bracket root");
-        return findroot(fnc, params, xinit, x, reltoler);
+        return findRoot(fnc, params, xinit, x, reltoler);
     }
 }
 
-double find_positive_value(function fnc, void* params, double x_0, double* f_1, double* der)
+double findPositiveValue(function fnc, void* params, double x_0, double* f_1, double* der)
 {
     double f_0 = fnc(x_0, params);
     if(f_1!=NULL) *f_1=f_0;  // store the initial value even if don't succeed in finding a better one
@@ -185,8 +185,8 @@ double find_positive_value(function fnc, void* params, double x_0, double* f_1, 
         double x_new;
         if(D>=0) {
             D=sqrt(D);
-            double x_1=(-der_0+D)/der2_0;
-            double x_2=(-der_0-D)/der2_0;
+            double x_1=x_0+(-der_0+D)/der2_0;
+            double x_2=x_0+(-der_0-D)/der2_0;
             x_new = (fabs(x_1-x_0)<fabs(x_2-x_0)) ? x_1 : x_2;
         } else {  // no luck with quadratic extrapolation, try a linear one
             x_new = x_0 - (f_0-GSL_SQRT_DBL_EPSILON)/der_0;
@@ -236,7 +236,7 @@ struct ScaledIntParam {
     double x_low, x_upp;
 };
 
-static double scaled_integrand(double y, void* vparam) {
+static double scaledIntegrand(double y, void* vparam) {
     ScaledIntParam* param=static_cast<ScaledIntParam*>(vparam);
     const double x = param->x_low + (param->x_upp-param->x_low) * y*y*(3-2*y);
     const double dx = (param->x_upp-param->x_low) * 6*y*(1-y);
@@ -245,7 +245,7 @@ static double scaled_integrand(double y, void* vparam) {
 }
 
 // invert the above relation between x and y by solving a cubic equation
-static double solve_for_scaled_y(double x, const ScaledIntParam& param) {
+static double solveForScaled_y(double x, const ScaledIntParam& param) {
     assert(x>=param.x_low && x<=param.x_upp);
     if(x==param.x_low) return 0;
     if(x==param.x_upp) return 1;
@@ -253,7 +253,7 @@ static double solve_for_scaled_y(double x, const ScaledIntParam& param) {
     return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
 }
 
-double integrate_scaled(function fnc, void* params, double x1, double x2, 
+double integrateScaled(function fnc, void* params, double x1, double x2, 
     double x_low, double x_upp, double rel_toler)
 {
     if(x1==x2) return 0;
@@ -261,14 +261,14 @@ double integrate_scaled(function fnc, void* params, double x1, double x2,
         throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
     gsl_function F;
     ScaledIntParam param;
-    F.function=&scaled_integrand;
+    F.function=&scaledIntegrand;
     F.params=&param;
     param.F=fnc;
     param.param=params;
     param.x_low=x_low;
     param.x_upp=x_upp;
-    double y1=solve_for_scaled_y(x1, param);
-    double y2=solve_for_scaled_y(x2, param);
+    double y1=solveForScaled_y(x1, param);
+    double y2=solveForScaled_y(x2, param);
     double result, error;
     size_t neval;
     gsl_integration_qng(&F, y1, y2, 0, rel_toler, &result, &error, &neval);
@@ -300,19 +300,19 @@ struct ode_impl{
     gsl_odeiv2_system sys;
 };
 
-odesolver::odesolver(odefunction fnc, void* params, int numvars, double reltoler) {
+OdeSolver::OdeSolver(odefunction fnc, void* params, int numvars, double abstoler, double reltoler) {
     ode_impl* data=new ode_impl;
     data->sys.function=fnc;
     data->sys.jacobian=NULL;
     data->sys.dimension=numvars;
     data->sys.params=params;
     data->s=gsl_odeiv2_step_alloc(gsl_odeiv2_step_rk8pd, numvars);
-    data->c=gsl_odeiv2_control_y_new(0.0, reltoler);
+    data->c=gsl_odeiv2_control_y_new(abstoler, reltoler);
     data->e=gsl_odeiv2_evolve_alloc(numvars);
     impl=data;
 }
 
-odesolver::~odesolver() {
+OdeSolver::~OdeSolver() {
     ode_impl* data=static_cast<ode_impl*>(impl);
     gsl_odeiv2_evolve_free(data->e);
     gsl_odeiv2_control_free(data->c);
@@ -320,14 +320,21 @@ odesolver::~odesolver() {
     delete data;
 }
 
-int odesolver::advance(double tstart, double tfinish, double *y){
+int OdeSolver::advance(double tstart, double tfinish, double *y){
     ode_impl* data=static_cast<ode_impl*>(impl);
     double h=tfinish-tstart;
     double direction=(h>0?1.:-1.);
     int numstep=0;
     while ((tfinish-tstart)*direction>0 && numstep<ODE_MAX_NUM_STEP) {
         int status = gsl_odeiv2_evolve_apply (data->e, data->c, data->s, &(data->sys), &tstart, tfinish, &h, y);
-        if (status != GSL_SUCCESS) break;
+        // check if computation is broken
+        double test=0;
+        for(unsigned int i=0; i<data->sys.dimension; i++) 
+            test+=y[i];
+        if (status != GSL_SUCCESS || !isFinite(test)) {
+            numstep=-1;
+            break;
+        }
         numstep++;
     }
     if(numstep>=ODE_MAX_NUM_STEP)

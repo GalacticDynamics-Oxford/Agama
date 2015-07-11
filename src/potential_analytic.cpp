@@ -1,5 +1,6 @@
 #include "potential_analytic.h"
 #include <cmath>
+#include <cassert>
 
 namespace potential{
 

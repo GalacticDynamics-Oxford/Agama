@@ -20,6 +20,9 @@ public:
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
 
     const coord::ProlSph& coordsys() const { return coordSys; }
+    
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "OblatePerfectEllipsoid"; };
 
     /** evaluates the function G(tau) and up to two its derivatives,
         if the supplied output arguments are not NULL 

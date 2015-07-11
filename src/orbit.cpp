@@ -57,14 +57,19 @@ int integrate(const potential::BasePotential& poten,
 {
     int nsteps = static_cast<int>(total_time/output_timestep);
     output_trajectory.reserve(nsteps+1);
-    mathutils::odesolver ODE(derivs<coordT>, const_cast<potential::BasePotential*>(&poten), 6, accuracy);
     double vars[6];
     initial_conditions.unpack_to(vars);
-    int numsteps=0;
-    for(int i=0; i<=nsteps; i++){
+    double norm=0;  // magnitude of variables used to compute absolute error tolerance
+    for(int i=0; i<6; i++) 
+        norm+=fabs(vars[i]);
+    mathutils::OdeSolver ODE(derivs<coordT>, const_cast<potential::BasePotential*>(&poten), 6, accuracy*norm, accuracy);
+    int numsteps=0, result=0;
+    for(int i=0; i<=nsteps && result>=0; i++){
         output_trajectory.push_back(coord::PosVelT<coordT>(vars));
         double time = output_timestep*i;
-        numsteps += ODE.advance(time, time+output_timestep, vars);
+        result = ODE.advance(time, time+output_timestep, vars);
+        if(result>0) 
+            numsteps+=result;
     }
     return numsteps;
 }

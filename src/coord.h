@@ -67,7 +67,7 @@ struct Sph{
 struct ProlSph{
     double alpha;  ///< alpha=-a^2, where a is major axis
     double gamma;  ///< gamma=-c^2, where c is minor axis
-    ProlSph(double _alpha, double _gamma): alpha(_alpha), gamma(_gamma) {};
+    ProlSph(double _alpha, double _gamma);
     static const char* name() { return "Prolate spheroidal"; }
 };
 

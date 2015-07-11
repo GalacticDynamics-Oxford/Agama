@@ -21,6 +21,9 @@ public:
     /** provides the 'least common denominator' for the symmetry degree */
     virtual SYMMETRYTYPE symmetry() const;
 
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "CompositeDensity"; };
+
 private:
     std::vector<const BaseDensity*> components;
     virtual double density_car(const coord::PosCar &pos) const;
@@ -41,6 +44,9 @@ public:
 
     /** provides the 'least common denominator' for the symmetry degree */
     virtual SYMMETRYTYPE symmetry() const;
+
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "CompositePotential"; };
 
 private:
     std::vector<const BasePotential*> components;

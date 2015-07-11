@@ -32,6 +32,9 @@ public:
     /// returns symmetry type of this potential
     virtual SYMMETRYTYPE symmetry() const=0;
 
+    /// return the name of density or potential model
+    virtual const char* name() const=0;
+
 protected:
 //  Protected members: virtual methods for `density` in different coordinate systems
     /** evaluate density at the position specified in cartesian coordinates */

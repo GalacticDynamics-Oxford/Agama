@@ -20,20 +20,22 @@ public:
     IScalarFunction() {};
     virtual ~IScalarFunction() {};
     virtual void eval_scalar(const PosCar& p, double* value=0, GradCar* deriv=0, HessCar* deriv2=0) const
-    {  // this is loosely based on Henon-Heiles potential..
-        if(value) *value=(p.x*p.x+p.y*p.y)/2+p.z*(p.x*p.x-p.y*p.y/3)*p.y;
+    {  // this is loosely based on Henon-Heiles potential, shifted from origin..
+        double x=p.x-0.5, y=p.y+1.5, z=p.z+0.25;
+        if(value) 
+            *value = (x*x+y*y)/2+z*(x*x-y*y/3)*y;
         if(deriv) {
-            deriv->dx=p.x*(1+2*p.z*p.y);
-            deriv->dy=p.y+p.z*(p.x*p.x-p.y*p.y);
-            deriv->dz=(p.x*p.x-p.y*p.y/3)*p.y;
+            deriv->dx = x*(1+2*z*y);
+            deriv->dy = y+z*(x*x-y*y);
+            deriv->dz = (x*x-y*y/3)*y;
         }
         if(deriv2) {
-            deriv2->dx2=(1+2*p.z*p.y);
-            deriv2->dxdy=2*p.z*p.x;
-            deriv2->dxdz=2*p.y*p.x;
-            deriv2->dy2=1-2*p.z*p.y;
-            deriv2->dydz=p.x*p.x-p.y*p.y;
-            deriv2->dz2=0;
+            deriv2->dx2 = (1+2*z*y);
+            deriv2->dxdy= 2*z*x;
+            deriv2->dxdz= 2*y*x;
+            deriv2->dy2 = 1-2*z*y;
+            deriv2->dydz= x*x-y*y;
+            deriv2->dz2 = 0;
         }
     }
 };
@@ -43,20 +45,22 @@ public:
     IScalarFunction() {};
     virtual ~IScalarFunction() {};
     virtual void eval_scalar(const PosCyl& p, double* value=0, GradCyl* deriv=0, HessCyl* deriv2=0) const
-    {  // and this is just the stuff above with relabelled variables
-        if(value) *value=(p.R*p.R+p.phi*p.phi)/2+p.z*(p.R*p.R-p.phi*p.phi/3)*cos(p.phi);
+    {  // same potential expressed in different coordinates
+        double sinphi = sin(p.phi), cosphi = cos(p.phi), sin2=pow_2(sinphi), R2=pow_2(p.R), R3=p.R*R2;
+        if(value) 
+            *value = R2*(3+p.R*p.z*sinphi*(6-8*sin2))/6;
         if(deriv) {
-            deriv->dR=p.R*(1+2*p.z*p.phi);
-            deriv->dphi=p.phi+p.z*(p.R*p.R-p.phi*p.phi);
-            deriv->dz=(p.R*p.R-p.phi*p.phi/3)*p.phi;
+            deriv->dR  = p.R*(1+p.R*p.z*sinphi*(3-4*sin2));
+            deriv->dphi= R3*p.z*cosphi*(1-4*sin2);
+            deriv->dz  = R3*sinphi*(3-4*sin2)/3;
         }
         if(deriv2) {
-            deriv2->dR2=(1+2*p.z*p.phi);
-            deriv2->dRdphi=2*p.z*p.R;
-            deriv2->dRdz=2*p.phi*p.R;
-            deriv2->dphi2=1-2*p.z*p.phi;
-            deriv2->dzdphi=p.R*p.R-p.phi*p.phi;
-            deriv2->dz2=exp(p.z);
+            deriv2->dR2   = 1+2*p.R*p.z*sinphi*(3-4*sin2);
+            deriv2->dRdphi= R2*p.z*cosphi*(3-12*sin2);
+            deriv2->dRdz  = R2*sinphi*(3-4*sin2);
+            deriv2->dphi2 = R3*p.z*sinphi*(-9+12*sin2);
+            deriv2->dzdphi= R3*cosphi*(1-4*sin2);
+            deriv2->dz2   = 0;
         }
     }
 };
@@ -66,20 +70,21 @@ public:
     IScalarFunction() {};
     virtual ~IScalarFunction() {};
     virtual void eval_scalar(const PosSph& p, double* value=0, GradSph* deriv=0, HessSph* deriv2=0) const
-    {  // and this is the same stuff with intentionally confounded variables
-        if(value) *value=(p.r*p.r+p.phi*p.phi)/2+p.theta*(p.r*p.r-p.phi*p.phi/3)*sin(p.phi);
+    {  // some obscure combination of spherical harmonics
+        if(value) 
+            *value = pow(p.r,2.5)*sin(p.theta)*sin(p.phi+2) - pow_2(p.r)*pow_2(sin(p.theta))*cos(2*p.phi-3);
         if(deriv) {
-            deriv->dtheta=p.r*(1+2*p.theta*p.phi);
-            deriv->dphi=p.phi+p.theta*(p.r*p.r-p.phi*p.phi);
-            deriv->dr=(p.r*p.r-p.phi*p.phi/3)*p.phi;
+            deriv->dr    = 2.5*pow(p.r,1.5)*sin(p.theta)*sin(p.phi+2) - 2*p.r*pow_2(sin(p.theta))*cos(2*p.phi-3);
+            deriv->dtheta= pow(p.r,2.5)*cos(p.theta)*sin(p.phi+2) - pow_2(p.r)*sin(2*p.theta)*cos(2*p.phi-3);
+            deriv->dphi  = pow(p.r,2.5)*sin(p.theta)*cos(p.phi+2) + pow_2(p.r)*pow_2(sin(p.theta))*2*sin(2*p.phi-3);;
         }
         if(deriv2) {
-            deriv2->dtheta2=(1+2*p.theta*p.phi);
-            deriv2->dthetadphi=2*p.theta*p.r;
-            deriv2->dr2=2*p.phi*p.r;
-            deriv2->dphi2=1-2*p.theta*p.phi;
-            deriv2->drdtheta=p.r*p.r-p.phi*p.phi;
-            deriv2->drdphi=cos(p.theta+1.23456);
+            deriv2->dr2       = 3.75*sqrt(p.r)*sin(p.theta)*sin(p.phi+2) - 2*pow_2(sin(p.theta))*cos(2*p.phi-3);
+            deriv2->dtheta2   = pow(p.r,2.5)*sin(-p.theta)*sin(p.phi+2) - pow_2(p.r)*2*cos(2*p.theta)*cos(2*p.phi-3);
+            deriv2->dphi2     = pow(p.r,2.5)*sin(-p.theta)*sin(p.phi+2) + pow_2(p.r)*pow_2(sin(p.theta))*4*cos(2*p.phi-3);
+            deriv2->drdtheta  = 2.5*pow(p.r,1.5)*cos(p.theta)*sin(p.phi+2) - 2*p.r*sin(2*p.theta)*cos(2*p.phi-3);
+            deriv2->drdphi    = 2.5*pow(p.r,1.5)*sin(p.theta)*cos(p.phi+2) + 4*p.r*pow_2(sin(p.theta))*sin(2*p.phi-3);
+            deriv2->dthetadphi= pow(p.r,2.5)*cos(p.theta)*cos(p.phi+2) + pow_2(p.r)*sin(2*p.theta)*2*sin(2*p.phi-3);
         }
     }
 };
@@ -116,6 +121,15 @@ template<> bool equalHess(const HessSph& h1, const HessSph& h2) {
     return fabs(h1.dr2-h2.dr2)<eps && fabs(h1.dtheta2-h2.dtheta2)<eps && fabs(h1.dphi2-h2.dphi2)<eps &&
         fabs(h1.drdtheta-h2.drdtheta)<eps && fabs(h1.drdphi-h2.drdphi)<eps && fabs(h1.dthetadphi-h2.dthetadphi)<eps; }
 }
+
+/** check if we expect singularities in coordinate transformations */
+template<typename coordSys> bool isSingular(const coord::PosT<coordSys>& p);
+template<> bool isSingular(const coord::PosCar& p) {
+    return (p.x==0&&p.y==0); }
+template<> bool isSingular(const coord::PosCyl& p) {
+    return (p.R==0); }
+template<> bool isSingular(const coord::PosSph& p) {
+    return (p.r==0||sin(p.theta)==0); }
 
 /** the test itself: perform conversion of position/velocity from one coord system to the other and back */
 template<typename srcCS, typename destCS>
@@ -193,28 +207,7 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     const coord::GradT<srcCS> invgrad=coord::toGrad<destCS,srcCS>(destgrad, derivStoD);
     const coord::HessT<srcCS> invhess=coord::toHess<destCS,srcCS>(destgrad, desthess, derivStoD, deriv2StoD);
     try{
-//        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
-        bool needDeriv = true;//deriv!=0 || deriv2!=0;
-        bool needDeriv2= true;//deriv2!=0;
-        coord::GradT<srcCS> evalGrad;
-        coord::HessT<srcCS> evalHess;
-        coord::GradT<intermedCS> intermedGrad;
-        coord::HessT<intermedCS> intermedHess;
-        coord::PosDerivT <destCS, intermedCS> coordDerivOI;
-        coord::PosDeriv2T<destCS, intermedCS> coordDeriv2OI;
-        coord::PosDerivT <intermedCS, srcCS> coordDerivIE;
-        coord::PosDeriv2T<intermedCS, srcCS> coordDeriv2IE;
-        const coord::PosT<intermedCS> intermedPos =  
-        coord::toPosDeriv<destCS, intermedCS>(destpoint, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0);
-        const coord::PosT<srcCS> evalPos = needDeriv ? 
-        coord::toPosDeriv<intermedCS, srcCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
-        coord::toPos<intermedCS, srcCS>(intermedPos);
-        // compute the function in transformed coordinates
-        Fnc.eval_scalar(evalPos, &destvalue, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
-        intermedGrad=coord::toGrad<srcCS, intermedCS> (evalGrad, coordDerivIE);
-        destgrad2step  = coord::toGrad<intermedCS, destCS> (intermedGrad, coordDerivOI);
-        intermedHess = coord::toHess<srcCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
-        desthess2step = coord::toHess<intermedCS, destCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
+        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
     }
     catch(std::exception& e) {
         std::cout << "    2-step conversion: " << e.what() << "\n";
@@ -227,21 +220,26 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     bool samegrad2step=equalGrad(destgrad, destgrad2step);
     bool samehess2step=equalHess(desthess, desthess2step);
     bool ok=samepos && samegrad && samehess && samevalue2step && samegrad2step && samehess2step;
-    std::cout << (ok?"OK  ":"FAILED  ");
-    if(!samepos) std::cout << "pos  ";
-    if(!samegrad) std::cout << "gradient  ";
-    if(!samehess) std::cout << "hessian  ";
-    if(!samevalue2step) std::cout << "2-step conversion value  ";
-    if(!samegrad2step) std::cout << "2-step gradient  ";
-    if(!samehess2step) std::cout << "2-step hessian  ";
-    std::cout<<srcCS::name()<<" => "<<
+    std::cout << (ok?"OK  ": isSingular(srcpoint)?"EXPECTEDLY FAILED  ":"FAILED  ");
+    if(!samepos) 
+        std::cout << "pos  ";
+    if(!samegrad) 
+        std::cout << "gradient  ";
+    if(!samehess) 
+        std::cout << "hessian  ";
+    if(!samevalue2step) 
+        std::cout << "2-step conversion value  ";
+    if(!samegrad2step) 
+        std::cout << "2-step gradient  ";
+    if(!samehess2step) 
+        std::cout << "2-step hessian  ";
+    std::cout<<srcCS::name()<<" => "<<" [=> "<<intermedCS::name()<<"] => "<<
         destCS::name()<<" => "<<srcCS::name()<<"\n";
-    return ok;
+    return ok||isSingular(srcpoint);
 }
 
 /// define test suite in terms of points for various coord systems
 const int numtestpoints=5;
-const double PI=M_PI;
 const double posvel_car[numtestpoints][6] = {
     {1, 2, 3, 4, 5, 6},   // ordinary point
     {0,-1, 2,-3, 4,-5},   // point in y-z plane 
@@ -258,7 +256,7 @@ const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
     {1, 2, 3, 4, 5, 6},   // ordinary point
     {2, 1, 0,-3, 4,-5},   // point in x-z plane
     {1, 0, 0,-1, 0, 0},   // point along z axis, vphi must be zero
-    {1,PI, 2, 1, 2, 0},   // point along z axis, vphi must be zero, but vtheta is non-zero
+    {1,3.14159, 2, 1, 2, 1e-4},   // point almost along z axis, vphi must be small, but vtheta is non-zero
     {0, 2,-1, 2, 0, 0}};  // point at origin with nonzero velocity in R
 
 int main() {

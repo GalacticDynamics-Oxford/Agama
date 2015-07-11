@@ -12,6 +12,7 @@ public:
     ActionFinderAxisymmetricStaeckel(const potential::StaeckelOblatePerfectEllipsoid& _poten) :
         BaseActionFinder(), poten(_poten) {};
     virtual Actions actions(const coord::PosVelCyl& point) const;
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const;
 };
 
 /// Action finder for arbitrary axisymmetric potential using Jason Sander's method

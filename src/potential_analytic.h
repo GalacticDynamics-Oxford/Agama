@@ -9,6 +9,8 @@ class Plummer: public BasePotentialSphericallySymmetric{
 public:
     Plummer(double _mass, double _scaleRadius) :
         BasePotentialSphericallySymmetric(), mass(_mass), scaleRadius(_scaleRadius) {};
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "Plummer"; };
 private:
     const double mass;         ///< total mass  (M)
     const double scaleRadius;  ///< scale radius of the Plummer model  (b)
@@ -28,6 +30,8 @@ class NFW: public BasePotentialSphericallySymmetric{
 public:
     NFW(double _mass, double _scaleRadius) :
     BasePotentialSphericallySymmetric(), mass(_mass), scaleRadius(_scaleRadius) {};
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "NFW"; };
 private:
     const double mass;         ///< total mass  (M)
     const double scaleRadius;  ///< scale radius of the NFW model  (r_s)
@@ -43,6 +47,8 @@ public:
     MiyamotoNagai(double _mass, double _scaleRadiusA, double _scaleRadiusB) :
         BasePotentialCyl(), mass(_mass), scaleRadiusA(_scaleRadiusA), scaleRadiusB(_scaleRadiusB) {};
     virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "MiyamotoNagai"; };
 private:
     const double mass;         ///< total mass  (M)
     const double scaleRadiusA; ///< first scale radius  (A),  determines the extent in the disk plane
@@ -61,6 +67,8 @@ public:
         q2(pow_2(axisRatioYtoX)), p2(pow_2(axisRatioZtoX)) {};
     virtual SYMMETRYTYPE symmetry() const { 
         return p2==1 ? (q2==1 ? ST_SPHERICAL : ST_AXISYMMETRIC) : ST_TRIAXIAL; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "Logarithmic"; };
 private:
     const double sigma2;       ///< squared asymptotic circular velocity (sigma)
     const double coreRadius2;  ///< squared core radius (r_c)
@@ -79,6 +87,8 @@ public:
         BasePotentialCar(), Omega2(pow_2(Omega)), q2(pow_2(axisRatioYtoX)), p2(pow_2(axisRatioZtoX)) {};
     virtual SYMMETRYTYPE symmetry() const { 
         return p2==1 ? (q2==1 ? ST_SPHERICAL : ST_AXISYMMETRIC) : ST_TRIAXIAL; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "Harmonic"; };
 private:
     const double Omega2;       ///< squared oscillation frequency (Omega)
     const double q2;           ///< squared y/x axis ratio (q)
