@@ -248,10 +248,11 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2)
 {
     // lambda and mu are roots "t" of equation  R^2/(t+alpha) + z^2/(t+gamma) = 1
-    double R2=pow_2(from.R), z2=pow_2(from.z);
+    double R2=pow_2(from.R), z2=pow_2(from.z), del=z2-cs.gamma+cs.alpha;
     double b = cs.alpha+cs.gamma - R2 - z2;
-    double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
-    double det = b*b-4*c;
+    //double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
+    //double det = b*b-4*c;    // <-- bad method, subject to dangerous cancellation errors
+    double det = pow_2(R2+del) + 4*R2*(cs.gamma-cs.alpha);  // positive-semidefinite
     if(det<0)
         throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<0");
     double sqD=sqrt(det);
@@ -263,7 +264,7 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     if(z2==0) 
         nu=-cs.gamma;
     if(R2==0) {
-        if(z2>=cs.gamma-cs.alpha) { 
+        if(del>=0) { 
             lambda=z2-cs.gamma; 
             nu=-cs.alpha; 
         } else { 
@@ -275,22 +276,23 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
         if(det==0)
             throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: "
                 "the special case lambda==nu==-alpha is not implemented");
-        double kalpha = (2*cs.alpha-b)/sqD;      // intermediate coefs
-        double kgamma = (2*cs.gamma-b)/sqD;
+        // intermediate coefs
+        double zkalpha = from.z*(R2+del)/sqD;
+        double Rkgamma = from.R*(2*cs.gamma-b)/sqD;
         if(derivs!=NULL) {
-            derivs->dlambdadR = from.R*(1+kgamma);
-            derivs->dlambdadz = from.z*(1+kalpha);
-            derivs->dnudR     = from.R*(1-kgamma);
-            derivs->dnudz     = from.z*(1-kalpha);
+            derivs->dlambdadR = from.R+Rkgamma;
+            derivs->dlambdadz = from.z+zkalpha;
+            derivs->dnudR     = from.R-Rkgamma;
+            derivs->dnudz     = from.z-zkalpha;
         }
         if(derivs2!=NULL) {
-            double kR = 2*R2*(1-pow_2(kgamma))/sqD + kgamma;
-            double kz = 2*z2*(1-pow_2(kalpha))/sqD + kalpha;
+            double kR = 2*(R2-pow_2(Rkgamma))/sqD + Rkgamma/from.R;
+            double kz = 2*(z2-pow_2(zkalpha))/sqD + zkalpha/from.z;
             derivs2->d2lambdadR2 = 1+kR;
             derivs2->d2lambdadz2 = 1+kz;
             derivs2->d2nudR2     = 1-kR;
             derivs2->d2nudz2     = 1-kz;
-            derivs2->d2lambdadRdz= 2*from.R*from.z*(1-kalpha*kgamma)/sqD;
+            derivs2->d2lambdadRdz= 2*(from.R*from.z-Rkgamma*zkalpha)/sqD;
             derivs2->d2nudRdz    = -derivs2->d2lambdadRdz;
         }
     }

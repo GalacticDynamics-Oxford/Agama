@@ -1,3 +1,19 @@
+/** \brief   Action-angle finders using Staeckel potential approximation
+    \author  Eugene Vasiliev
+    \date    2015
+ 
+Computation of actions and angles for axisymmetric systems, using two related methods:
+1) exact expressions for Staeckel potentials  (e.g. for the Perfect Ellipsoid),
+2) "Staeckel Fudge" approximation applicable for any axisymmetric potential.
+To avoid confusion, the latter is called simply "Fudge" in what follows.
+
+Most sub-steps are shared between the two methods; 
+only the computation of integrals of motion, and the auxiliary function that enters 
+the expression for canonical momentum, are specific to each method.
+
+The implementation is inspired by the code written by Jason Sanders, but virtually nothing 
+of the original code remains.
+*/
 #pragma once
 #include "actions_base.h"
 #include "potential_staeckel.h"

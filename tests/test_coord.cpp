@@ -8,6 +8,7 @@
 */
 #include "coord.h"
 #include <iostream>
+#include <iomanip>
 #include <cmath>
 #include <stdexcept>
 
@@ -238,6 +239,15 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     return ok||isSingular(srcpoint);
 }
 
+bool test_prol(double lambda, double nu, double alpha, double gamma) {
+    const coord::ProlSph cs(alpha, gamma);
+    const coord::PosProlSph pp(lambda, nu, 0, cs);
+    const coord::PosCyl pc=coord::toPosCyl(pp);
+    const coord::PosProlSph ppnew=coord::toPos<coord::Cyl,coord::ProlSph>(pc, cs);
+    //std::cout << std::setprecision(16) <<ppnew.lambda<<","<<ppnew.nu<<"\n";
+    return fabs(ppnew.lambda-lambda)<1e-16 && fabs(ppnew.nu-nu)<1e-16;
+}
+
 /// define test suite in terms of points for various coord systems
 const int numtestpoints=5;
 const double posvel_car[numtestpoints][6] = {
@@ -261,6 +271,9 @@ const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
 
 int main() {
     bool passed=true;
+    passed &= test_prol(2.5600000000780003, 2.5599999701470493, -(1.6*1.6), -1);  // testing a certain bugfix
+    if(!passed) std::cout << "ProlSph => Cyl => ProlSph failed for a nearly-degenerate case\n";
+
     std::cout << " ======= Testing conversion of position/velocity points =======\n";
     for(int n=0; n<numtestpoints; n++) {
         std::cout << " :::Cartesian point::: ";     for(int d=0; d<6; d++) std::cout << posvel_car[n][d]<<" ";  std::cout<<"\n";

@@ -2,7 +2,6 @@
 #include "mathutils.h"
 #include <stdexcept>
 #include <cmath>
-#include <iostream>
 
 namespace actions{
 
@@ -10,7 +9,7 @@ namespace actions{
 ///@{ 
 
 /** relative accuracy in integrals for computing actions and angles */
-const double ACCURACY_ACTION=1e-6;
+const double ACCURACY_ACTION=1e-3;  // this is more than enough
 
 /** integration intervals for actions and angles: x=tau+gamma, and tau is lambda or nu 
     (shared between Staeckel and Fudge action finders). */
@@ -25,10 +24,11 @@ struct AxisymActionIntLimits {
 */
 struct AxisymData {
     coord::PosVelProlSph point;             ///< position/derivative in prolate spheroidal coordinates
+    const double signz;                     ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
     const double E;                         ///< total energy
     const double Lz;                        ///< z-component of angular momentum
-    AxisymData(const coord::PosVelProlSph& _point, double _E, double _Lz) :
-        point(_point), E(_E), Lz(_Lz) {};
+    AxisymData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz) :
+        point(_point), signz(_signz), E(_E), Lz(_Lz) {};
 };
 
 /** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
@@ -36,9 +36,9 @@ struct AxisymData {
 struct AxisymStaeckelData: public AxisymData {
     const double I3;                        ///< third integral
     const coord::ISimpleFunction& fncG;     ///< single-variable function of a Staeckel potential
-    AxisymStaeckelData(const coord::PosVelProlSph& _point, double _E, double _Lz,
+    AxisymStaeckelData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
         double _I3, const coord::ISimpleFunction& _fncG) :
-        AxisymData(_point, _E, _Lz), I3(_I3), fncG(_fncG) {};
+        AxisymData(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
 };
 
 /** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
@@ -46,20 +46,22 @@ struct AxisymStaeckelData: public AxisymData {
 struct AxisymFudgeData: public AxisymData {
     const double Ilambda, Inu;              ///< approximate integrals of motion for two quasi-separable directions
     const potential::BasePotential& poten;  ///< gravitational potential
-    AxisymFudgeData(const coord::PosVelProlSph& _point, double _E, double _Lz,
+    AxisymFudgeData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
         double _Ilambda, double _Inu, const potential::BasePotential& _poten) :
-        AxisymData(_point, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
+        AxisymData(_point, _signz, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
 };
 
 /** parameters for the function that computes actions and angles
     by integrating an auxiliary function "fnc" as follows:
     the canonical momentum is   p^2(tau) = fnc(tau) / [2 (tau+alpha)^2 (tau+gamma)];
-    the integrand is given by   p^n * (tau+alpha)^a * (tau+gamma)^b  if p^2>0, otherwise 0.
+    the integrand is given by   p^n * (tau+alpha)^a * (tau+gamma)^c  if p^2>0, otherwise 0.
 */
 struct AxisymIntegrandParam {
-    mathutils::function fnc;  ///< auxilary function
-    const AxisymData* data;   ///< parameters of aux.fnc.
-    double n, a, c;           ///< powers of r p, (tau+alpha), (tau+gamma) in the integrand
+    mathutils::function fnc;                ///< auxilary function
+    const AxisymData* data;                 ///< parameters of aux.fnc.
+    enum { nplus1, nminus1 } n;             ///< power of p: +1 or -1
+    enum { azero, aminus1, aminus2 } a;     ///< power of (tau+alpha): 0, -1, -2
+    enum { czero, cminus1 } c;              ///< power of (tau+gamma): 0 or -1
 };
 
 /** Derivatives of integrals of motion over actions (do not depend on angles) */
@@ -96,7 +98,7 @@ static AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid
             (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha) + Glambda) -
             pow_2(pprol.lambdadot*(pprol.lambda-pprol.nu)) / 
             (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma)) );
-    return AxisymStaeckelData(pprol, E, Lz, I3, poten);
+    return AxisymStaeckelData(pprol, mathutils::sign(point.z), E, Lz, I3, poten);
 }
 
 /** auxiliary function that enters the definition of canonical momentum for 
@@ -111,106 +113,6 @@ static double axisymStaeckelFnc(double tauplusgamma, void* v_param)
     return ( (param->E + G) * tauplusgamma - param->I3 ) * tauplusalpha
           - param->Lz*param->Lz/2 * tauplusgamma;
 }
-    
-#if 0
-/** squared canonical momentum p^(tau), eq.4 in Sanders(2012);
-    the argument tau is replaced by tau+gamma */
-static double axisymStaeckelMomentumSq(double tauplusgamma, void* v_param)
-{
-    AxisymStaeckelData* param=static_cast<AxisymStaeckelData*>(v_param);
-    const double tauplusalpha = tauplusgamma+param->coordsys.alpha-param->coordsys.gamma;
-    if(tauplusalpha==0 || tauplusgamma==0) 
-        return 0;   // avoid accidental infinities in the integral
-    return axisymStaeckelAux(tauplusgamma, v_param) / 
-        (2*tauplusalpha*tauplusalpha*tauplusgamma);
-}
-
-/** generic parameters for computing the action I = \int p(x) dx */
-struct ActionIntParam {
-    /// pointer to the function returning p^2(x)  (squared canonical momentum)
-    double(*fncMomentumSq)(double,void*);
-    void* param;       ///< additional parameters for the momentum function
-    double xmin, xmax; ///< limits of integration
-};
-
-/** interface function for computing the action by integration.
-    The integral \int_{xmin}^{xmax} p(x) dx is transformed into 
-    \int_0^1 p(x(y)) (dx/dy) dy,  where x(y) = xmin + (xmax-xmin) y^2 (3-2y).
-    The action is computed by filling the parameters ActionIntParam 
-    with the pointer to function computing p^2(x) and the integration limits, 
-    and calling mathutils::integrate(fncMomentum, aiparams, 0, 1).
-*/
-static double fncMomentum(double y, void* aiparam) {
-    ActionIntParam* param=static_cast<ActionIntParam*>(aiparam);
-    const double x = param->xmin + (param->xmax-param->xmin) * y*y*(3-2*y);
-    const double dx = (param->xmax-param->xmin) * 6*y*(1-y);
-    double val=(*(param->fncMomentumSq))(x, param->param);
-    if(val<=0 || !mathutils::isFinite(val))
-        return 0;
-    return sqrt(val) * dx;
-}
-
-Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCyl& point) const
-{
-    // find integrals of motion, along with the prolate-spheroidal coordinates lambda,nu
-    AxisymStaeckelData data = findIntegralsOfMotionOblatePerfectEllipsoid(
-        poten, point);
-    if(data.E>=0)
-        throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: E>=0");
-
-    Actions acts;
-    acts.Jr = acts.Jz = 0;
-    acts.Jphi = fabs(data.Lz);
-    ActionIntParam aiparam;
-    const double gamma=poten.coordsys().gamma, alpha=poten.coordsys().alpha;
-    aiparam.fncMomentumSq = &axisymStaeckelMomentumSq;
-    aiparam.param = &data;
-
-    // to find the actions, we integrate p(tau) over tau in two different intervals (for Jz and for Jr);
-    // to avoid roundoff errors when tau is close to -gamma we replace tau with x=tau+gamma>=0
-
-    // precautionary measures: need to find a point x_0, close to lambda+gamma, 
-    // at which p^2>0 (or equivalently a_0>0); 
-    // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
-    double a_0;
-    double x_0 = mathutils::findPositiveValue(&axisymStaeckelAux, &data, 
-        gamma+data.lambda, &a_0);
-    double x_min_Jr=0;  // lower integration limit for Jr (0 is not yet determined)
-
-    // J_z = J_nu
-    if(data.I3>0) {
-        aiparam.xmin=0;
-        if(data.Lz==0) {  // special case: may have either tube or box orbit in the meridional plane
-            // using an auxiliary function A(tau) = (tau+gamma)(E+G(tau))-I3 such that 
-            // p^2(tau)=A(tau)/(2(tau+alpha)(tau+gamma)).  Since E+G(tau)<0 and p^2(x_0)>=0, we have
-            // A(-gamma)=-I3<0, A(x_0)>=0, A(infinity)<0.  Thus A(tau) must have two roots on (0,inf)
-            double root = mathutils::findRoot(&axisymStaeckelAuxNoLz, &data, 0, x_0);
-            if(root<gamma-alpha) {  // box orbit
-                aiparam.xmax=root;
-                x_min_Jr=gamma-alpha;
-            } else {  // tube orbit
-                aiparam.xmax=gamma-alpha;
-                x_min_Jr=root;
-            }
-        } else {  // Lz!=0, I3!=0
-            aiparam.xmax = mathutils::findRoot(&axisymStaeckelAux, &data, 0, gamma-alpha);
-        }
-        acts.Jz = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) * 2/M_PI;
-    }
-
-    // J_r = J_lambda
-    if(a_0>0) {
-        if(x_min_Jr==0)  // has not been determined yet
-            x_min_Jr = mathutils::findRootGuess(&axisymStaeckelAux, &data, 
-                gamma-alpha, x_0, (gamma-alpha+x_0)/2, true);
-        aiparam.xmin = x_min_Jr;
-        aiparam.xmax = mathutils::findRootGuess(&axisymStaeckelAux, &data,
-            aiparam.xmin, HUGE_VAL, x_0, false);
-        acts.Jr = mathutils::integrate(fncMomentum, &aiparam, 0, 1, ACCURACY_ACTION) / M_PI;
-    }
-    return acts;
-}
-#endif
 
 ///@}
 /// \name -------- SPECIALIZED functions for the Axisymmetric Fudge action finder --------
@@ -239,9 +141,15 @@ static AxisymFudgeData findIntegralsOfMotionAxisymFudge
     else
         Inu-= pow_2(pprol.nudot*(pprol.lambda-pprol.nu)) /
               (8*(pprol.nu+coordsys.alpha)*(pprol.nu+coordsys.gamma));
-    return AxisymFudgeData(pprol, E, Lz, Ilambda, Inu, poten);
+    return AxisymFudgeData(pprol, mathutils::sign(point.z), E, Lz, Ilambda, Inu, poten);
 }
 
+/** Auxiliary function F analogous to that of Staeckel action finder:
+    namely, the momentum is given by  p_tau^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma)),
+    where  -gamma<=tau<=-alpha  for the  nu-component of momentum, 
+    and   -alpha<=tau<infinity  for the  lambda-component of momentum.
+    For numerical convenience, tau is replaced by x=tau+gamma.
+*/
 static double axisymFudgeFnc(double tauplusgamma, void* v_data)
 {
     const AxisymFudgeData* data=static_cast<AxisymFudgeData*>(v_data);
@@ -269,6 +177,10 @@ static double axisymFudgeFnc(double tauplusgamma, void* v_data)
 /// \name -------- COMMON routines for Staeckel and Fudge action finders --------
 ///@{
 
+/** integrand for the expressions for actions and their derivatives 
+    (e.g.Sanders 2012, eqs. A1, A4-A12).  It uses the auxiliary function to compute momentum,
+    and multiplies it by some powers of (tau+alpha) and (tau+gamma).
+*/
 static double axisymIntegrand(double tauplusgamma, void* i_param)
 {
     const AxisymIntegrandParam* param = static_cast<AxisymIntegrandParam*>(i_param);
@@ -277,16 +189,25 @@ static double axisymIntegrand(double tauplusgamma, void* i_param)
     const double p2 = param->fnc(tauplusgamma, const_cast<AxisymData*>(param->data)) / 
         (2*pow_2(tauplusalpha)*tauplusgamma);
     if(p2<0) return 0;
-    double result = pow(p2, param->n/2);
-    if(param->a!=0)
-        result *= pow(tauplusalpha, param->a);
-    if(param->c!=0)
-        result *= pow(tauplusgamma, param->c);
+    double result = sqrt(p2);
+    if(param->n==AxisymIntegrandParam::nminus1)
+        result = 1/result;
+    if(param->a==AxisymIntegrandParam::aminus1)
+        result /= tauplusalpha;
+    else if(param->a==AxisymIntegrandParam::aminus2)
+        result /= pow_2(tauplusalpha);
+    if(param->c==AxisymIntegrandParam::cminus1)
+        result /= tauplusgamma;
     if(!mathutils::isFinite(result))
-        result=0;  // ad hoc fix to avoid problems in integration
+        result=0;  // ad hoc fix to avoid problems at the boundaries of integration interval
     return result;
 }
 
+/** Compute the intervals of tau for which p^2(tau)>=0, 
+    where  -gamma = tau_nu_min <= tau <= tau_nu_max <= -alpha  is the interval for the "nu" branch,
+    and  -alpha <= tau_lambda_min <= tau <= tau_lambda_max < infinity  is the interval for "lambda".
+    For numerical convenience, we replace tau with  x=tau+gamma.
+*/
 AxisymActionIntLimits findIntegrationLimitsAxisym(
     mathutils::function fnc, AxisymData& data)
 {
@@ -295,10 +216,6 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
     AxisymActionIntLimits lim;
     const double gamma=data.point.coordsys.gamma, alpha=data.point.coordsys.alpha;
     const double tol=(gamma-alpha)*1e-10;  // if an interval is smaller than this, discard it altogether
-    if(gamma>0) {
-        for(double tau=0; tau<3; tau+=0.01) 
-            std::cout << tau << " " << fnc(tau, &data) << "\n";
-    }
     
     // precautionary measures: need to find a point x_0, close to lambda+gamma, 
     // at which p^2>0 (or equivalently a_0>0); 
@@ -356,30 +273,32 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
     return lim;
 }
 
+/** Compute the derivatives of integrals of motion (E, Lz, I3) over actions (Jr, Jz, Jphi),
+    using the expressions A4-A9 in Sanders(2012).  These quantities are independent of angles. */
 AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
     AxisymIntegrandParam param;
     param.fnc = fnc;
     param.data = &data;
-    param.n = -1;  // momentum goes into the denominator
+    param.n = AxisymIntegrandParam::nminus1;  // momentum goes into the denominator
     // derivatives w.r.t. E
-    param.a = -1.;
-    param.c = 0;
+    param.a = AxisymIntegrandParam::aminus1;
+    param.c = AxisymIntegrandParam::czero;
     double dJrdE = mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
     double dJzdE = mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
     // derivatives w.r.t. I3
-    param.a = -1.;
-    param.c = -1.;
+    param.a = AxisymIntegrandParam::aminus1;
+    param.c = AxisymIntegrandParam::cminus1;
     double dJrdI3 = -mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
     double dJzdI3 = -mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
     // derivatives w.r.t. Lz
-    param.a = -2.;
-    param.c = 0;
+    param.a = AxisymIntegrandParam::aminus2;
+    param.c = AxisymIntegrandParam::czero;
     double dJrdLz = -data.Lz * mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
     double dJzdLz = -data.Lz * mathutils::integrateScaled(axisymIntegrand, &param, 
@@ -388,9 +307,11 @@ AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc,
     double signLz  = mathutils::sign(data.Lz);
     AxisymIntDerivatives der;
     // invert the matrix of derivatives
-    if(lim.xnu_min==lim.xnu_max) { // z==0: motion in z is irrelevant, but we could not compute dJzdI3 which is not zero
+    if(lim.xnu_min==lim.xnu_max) {
+        // special case z==0: motion in z is irrelevant, but we could not compute dJzdI3 which is not zero
         der.dEdJr   = 1/dJrdE;
-        der.dI3dJr  = der.dI3dJz = der.dI3dJphi = der.dEdJz = der.dI3dJz = 0;
+        der.dEdJphi =-dJrdLz/dJrdE;
+        der.dI3dJr  = der.dI3dJz = der.dI3dJphi = der.dEdJz = 0;
     } else {  // everything as normal
         double det  = dJrdE*dJzdI3-dJrdI3*dJzdE;
         der.dEdJr   = dJzdI3/det;
@@ -406,6 +327,8 @@ AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc,
     return der;
 }
 
+/** Compute the derivatives of generating function S over integrals of motion (E, Lz, I3),
+    using the expressions A10-A12 in Sanders(2012).  These quantities do depend on angles. */
 AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
@@ -416,26 +339,26 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc,
     AxisymIntegrandParam param;
     param.fnc = fnc;
     param.data = &data;
-    param.n = -1;  // momentum goes into the denominator
+    param.n = AxisymIntegrandParam::nminus1;  // momentum goes into the denominator
     // derivatives w.r.t. E
-    param.a = -1.;
-    param.c = 0;
+    param.a = AxisymIntegrandParam::aminus1;
+    param.c = AxisymIntegrandParam::czero;
     der.dSdE =
         signldot * mathutils::integrateScaled(axisymIntegrand, &param, 
             lim.xlambda_min, data.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
       + signndot * mathutils::integrateScaled(axisymIntegrand, &param, 
             lim.xnu_min, data.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
     // derivatives w.r.t. I3
-    param.a = -1.;
-    param.c = -1.;
+    param.a = AxisymIntegrandParam::aminus1;
+    param.c = AxisymIntegrandParam::cminus1;
     der.dSdI3 = 
         signldot * -mathutils::integrateScaled(axisymIntegrand, &param, 
             lim.xlambda_min, data.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
       + signndot * -mathutils::integrateScaled(axisymIntegrand, &param, 
             lim.xnu_min, data.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
     // derivatives w.r.t. Lz
-    param.a = -2.;
-    param.c = 0;
+    param.a = AxisymIntegrandParam::aminus2;
+    param.c = AxisymIntegrandParam::czero;
     der.dSdLz = data.point.phi +
         signldot * -data.Lz * mathutils::integrateScaled(axisymIntegrand, &param, 
             lim.xlambda_min, data.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
@@ -444,6 +367,8 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc,
     return der;
 }
 
+/** Compute actions by integrating the momentum over the range of tau on which it is positive,
+    separately for the "nu" and "lambda" branches (equation A1 in Sanders 2012). */
 Actions computeActions(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
@@ -451,8 +376,9 @@ Actions computeActions(mathutils::function fnc,
     AxisymIntegrandParam param;
     param.fnc = fnc;
     param.data = &data;
-    param.n = +1;  // momentum goes into the numerator
-    param.a = param.c = 0;
+    param.n = AxisymIntegrandParam::nplus1;  // momentum goes into the numerator
+    param.a = AxisymIntegrandParam::azero;
+    param.c = AxisymIntegrandParam::czero;
     acts.Jr = mathutils::integrateScaled(axisymIntegrand, &param, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / M_PI;
     acts.Jz = mathutils::integrateScaled(axisymIntegrand, &param, 
@@ -461,27 +387,32 @@ Actions computeActions(mathutils::function fnc,
     return acts;
 }
 
-Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDerivatives& derS)
+/** Compute angles from the derivatives of integrals of motion and the generating function
+    (equation A3 in Sanders 2012). */
+Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDerivatives& derS, bool addPiToThetaZ)
 {
     Angles angs;
     angs.thetar   = derS.dSdE*derI.dEdJr   + derS.dSdI3*derI.dI3dJr   + derS.dSdLz*derI.dLzdJr;
     angs.thetaz   = derS.dSdE*derI.dEdJz   + derS.dSdI3*derI.dI3dJz   + derS.dSdLz*derI.dLzdJz;
     angs.thetaphi = derS.dSdE*derI.dEdJphi + derS.dSdI3*derI.dI3dJphi + derS.dSdLz*derI.dLzdJphi;
     angs.thetar   = mathutils::wrapAngle(angs.thetar);
-    angs.thetaz   = mathutils::wrapAngle(angs.thetaz);// + M_PI*((point.z<0) ^ (data.point.nudot<0)) );
-   // if(lim.xnu_min==lim.xnu_max)
-   //     angs.thetaz=0;
+    angs.thetaz   = mathutils::wrapAngle(angs.thetaz + M_PI*addPiToThetaZ);
     angs.thetaphi = mathutils::wrapAngle(angs.thetaphi);
     return angs;
 }
 
+/** The sequence of operations needed to compute both actions and angles.
+    Note that for a given orbit, only the derivatives of the generating function depend 
+    on the angles (assuming that the actions are constant); in principle, this may be used 
+    to skip the computation of the derivatives matrix of integrals (not presently implemented). */
 ActionAngles computeActionAngles(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
     Actions acts = computeActions(fnc, data, lim);
     AxisymIntDerivatives derI = computeIntDerivatives(fnc, data, lim);
     AxisymGenFuncDerivatives derS = computeGenFuncDerivatives(fnc, data, lim);
-    Angles angs = computeAngles(derI, derS);
+    bool addPiToThetaZ = ((data.signz<0)^(data.point.nudot<0)) && acts.Jz!=0;
+    Angles angs = computeAngles(derI, derS, addPiToThetaZ);
     return ActionAngles(acts, angs);
 }
 

@@ -1,9 +1,11 @@
 #include "potential_staeckel.h"
 #include "actions_staeckel.h"
 #include "orbit.h"
+#include "mathutils.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
+//#include <vector>
 #include <cmath>
 
 const double integr_eps=1e-8;        // integration accuracy parameter
@@ -42,6 +44,7 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     actions::ActionFinderAxisymmetricStaeckel afs(potential);
     actions::ActionFinderAxisymmetricFudgeJS aff(potential, -pow_2(axis_a), -pow_2(axis_c));
     actionstat stats, statf;
+    actions::Angles angf;
     bool ex_afs=false, ex_aff=false;
     std::ofstream strm;
     if(output) {
@@ -52,28 +55,33 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
         strm.open(s.str().c_str());
     }
     for(size_t i=0; i<traj.size(); i++) {
-        try{
-            stats.add(afs.actions(coord::toPosVelCyl(traj[i])));
+        try {
+            stats.add(afs.actionAngles(coord::toPosVelCyl(traj[i])));
         }
         catch(std::exception &e) {
             ex_afs=true;
-//            std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
+            std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
-        actions::ActionAngles a;
-        try{
-            a=aff.actionAngles(coord::toPosVelCyl(traj[i]));
+        try {
+            actions::ActionAngles a=aff.actionAngles(coord::toPosVelCyl(traj[i]));
             statf.add(a);
+            if(1 || i==0) angf=a;
+            else {
+                angf.thetar   = mathutils::unwrapAngle(a.thetar, angf.thetar);
+                angf.thetaz   = mathutils::unwrapAngle(a.thetaz, angf.thetaz);
+                angf.thetaphi = mathutils::unwrapAngle(a.thetaphi, angf.thetaphi);
+            }
+            if(output) {
+                double xv[6];
+                traj[i].unpack_to(xv);
+                strm << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
+                    xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"  "<<
+                    angf.thetar<<" "<<angf.thetaz<<" "<<angf.thetaphi<<"\n";
+            }
         }
         catch(std::exception &e) {
             ex_aff=true;
-//            std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
-        }
-        if(output) {
-            double xv[6];
-            traj[i].unpack_to(xv);
-            strm << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
-                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"  "<<
-                a.thetar<<" "<<a.thetaz<<" "<<a.thetaphi<<"\n";
+            std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
         }
     }
     stats.finish();
@@ -86,10 +94,12 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.disp.Jr<<
     ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.disp.Jz<<
     ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
-    return stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps;
+    return stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps && !ex_afs
+        && statf.disp.Jr<eps && statf.disp.Jz<eps && statf.disp.Jphi<eps && !ex_aff;
 }
 
-bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, const coord::PosVelCar& initcond, const char* title)
+bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const coord::PosVelCar& initcond, const char* title)
 {
     const double total_time=100.;
     const double timestep=1./8;
@@ -110,10 +120,10 @@ int main() {
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4097), "tube orbit in x-z plane near separatrix");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4096), "box orbit in x-z plane near separatrix");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 1e-6,0.4097), "orbit with Jphi<<J_z");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. ,1e-6, 0.4097), "orbit with Jphi<<J_z");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-3  ), "almost in-plane orbit (Jz~0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4,  0    ), "exactly in-plane orbit (Jz=0)");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , .296, 0    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 0.    ), "exactly in-plane orbit (Jz=0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. ,.296, 0.    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
     if(allok)
         std::cout << "ALL TESTS PASSED\n";
     return 0;

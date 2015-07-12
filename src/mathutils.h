@@ -30,6 +30,13 @@ inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 /** ensure that the angle lies in [0,2pi) */
 double wrapAngle(double x);
 
+/** create a nearly monotonic sequence of angles by adding or subtracting 2Pi
+    as many times as needed to bring the current angle to within Pi from the previous one.
+    This may be used in a loop over elements of an array, by providing the previous 
+    element, already processed by this function, as xprev. 
+    Note that this usage scenario is not stable against error accumulation. */
+double unwrapAngle(double x, double xprev);
+
 /** find a root of function on the interval [x1,x2].
     function must be finite at the ends of interval and have opposite signs (or be zero),
     otherwise NaN is returned.

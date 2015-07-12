@@ -69,6 +69,16 @@ double wrapAngle(double x) {
     return gsl_sf_angle_restrict_pos(x);
 }
 
+double unwrapAngle(double x, double xprev) {
+    double diff=(x-xprev)/(2*M_PI);
+    double nwraps=0;
+    if(diff>0.5) 
+        modf(diff+0.5, &nwraps);
+    else if(diff<-0.5) 
+        modf(diff-0.5, &nwraps);
+    return x - 2*M_PI * nwraps;
+}
+
 double findRoot(function fnc, void* params, double xlower, double xupper, double reltoler)
 {
     double f1=fnc(xlower, params), f2=fnc(xupper, params);
