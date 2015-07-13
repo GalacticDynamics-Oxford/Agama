@@ -655,7 +655,7 @@ HessCyl toHess(const GradProlSph& srcGrad, const HessProlSph& srcHess,
         (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadz + 
         (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudz + 
         srcGrad.dlambda*deriv2.d2lambdadz2 + srcGrad.dnu*deriv2.d2nudz2;
-    dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;
+    dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;  // assuming no dependence on phi
     return dest;
 }
 

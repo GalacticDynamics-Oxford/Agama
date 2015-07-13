@@ -41,8 +41,6 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
 {
     std::vector<coord::PosVelT<coordSysT> > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
-    actions::ActionFinderAxisymmetricStaeckel afs(potential);
-    actions::ActionFinderAxisymmetricFudgeJS aff(potential, -pow_2(axis_a), -pow_2(axis_c));
     actionstat stats, statf;
     actions::Angles angf;
     bool ex_afs=false, ex_aff=false;
@@ -55,17 +53,18 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
         strm.open(s.str().c_str());
     }
     for(size_t i=0; i<traj.size(); i++) {
+        const coord::PosVelCyl p = coord::toPosVelCyl(traj[i]);
         try {
-            stats.add(afs.actionAngles(coord::toPosVelCyl(traj[i])));
+            stats.add(actions::axisymStaeckelActions(potential, p));
         }
         catch(std::exception &e) {
             ex_afs=true;
             std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
         try {
-            actions::ActionAngles a=aff.actionAngles(coord::toPosVelCyl(traj[i]));
+            actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p);
             statf.add(a);
-            if(1 || i==0) angf=a;
+            if(1 || i==0) angf=a;  // 1 to disable unwrapping
             else {
                 angf.thetar   = mathutils::unwrapAngle(a.thetar, angf.thetar);
                 angf.thetaz   = mathutils::unwrapAngle(a.thetaz, angf.thetaz);

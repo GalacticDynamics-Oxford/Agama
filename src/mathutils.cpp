@@ -30,6 +30,7 @@
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_deriv.h>
+#include <gsl/gsl_fit.h>
 #include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
 #include <cassert>
@@ -144,7 +145,7 @@ double findRootGuess(function fnc, void* params, double x1, double x2,
                 y = (y-1)/2;
         } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
-            throw std::range_error("findRootGuess: cannot bracket root");
+            return gsl_nan();
         return findRoot(fnc, params, x, xinit, reltoler);
     } else {  // search right
         // map the interval x:(xinit,x2) onto y:(0,1) as  y=1/(1 + 1/(x-xinit) - 1/(x2-xinit) )
@@ -160,7 +161,7 @@ double findRootGuess(function fnc, void* params, double x1, double x2,
                 y = (y+1)/2;
         } while(fy*finit>0 && niter<60);
         if(fy*finit>0)
-            throw std::range_error("findRootGuess: cannot bracket root");
+            return gsl_nan();
         return findRoot(fnc, params, xinit, x, reltoler);
     }
 }
@@ -299,7 +300,14 @@ double deriv(function fnc, void* params, double x, double h, int dir)
         gsl_deriv_backward(&F, x, h, &result, &error);
     return result;
 }
-    
+
+double linearFitZero(unsigned int N, const double x[], const double y[])
+{
+    double c, cov, sumsq;
+    gsl_fit_mul(x, 1, y, 1, N, &c, &cov, &sumsq);
+    return c;
+}
+
 // Simple ODE integrator using Runge-Kutta Dormand-Prince 8 adaptive stepping
 // dy_i/dt = f_i(t) where int (*f)(double t, const double y, double f, void *params)
 struct ode_impl{

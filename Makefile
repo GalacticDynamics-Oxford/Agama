@@ -26,7 +26,8 @@ TESTSRCS  = test_mathutils.cpp \
             test_coord.cpp \
             test_units.cpp \
             test_potentials.cpp \
-            test_staeckel.cpp
+            test_staeckel.cpp \
+            test_actionfinder.cpp
 
 LIBNAME   = libfJ.a
 

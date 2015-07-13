@@ -5,51 +5,8 @@
 
 namespace actions{
 
-/// \name ------ Data structures for both Axisymmetric Staeckel and Fudge action-angle finders ------
-///@{ 
-
 /** relative accuracy in integrals for computing actions and angles */
 const double ACCURACY_ACTION=1e-3;  // this is more than enough
-
-/** integration intervals for actions and angles: x=tau+gamma, and tau is lambda or nu 
-    (shared between Staeckel and Fudge action finders). */
-struct AxisymActionIntLimits {
-    double xlambda_min, xlambda_max, xnu_min, xnu_max;
-};
-
-/** aggregate structure that contains the point in prolate spheroidal coordinates,
-    integrals of motion, and reference to the potential,
-    shared between Axisymmetric Staeckel  and Axisymmetric Fudge action finders;
-    only the coordinates and the two classical integrals are in common between them.
-*/
-struct AxisymData {
-    coord::PosVelProlSph point;             ///< position/derivative in prolate spheroidal coordinates
-    const double signz;                     ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
-    const double E;                         ///< total energy
-    const double Lz;                        ///< z-component of angular momentum
-    AxisymData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz) :
-        point(_point), signz(_signz), E(_E), Lz(_Lz) {};
-};
-
-/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
-    SPECIALIZED for the Axisymmetric Staeckel action finder */
-struct AxisymStaeckelData: public AxisymData {
-    const double I3;                        ///< third integral
-    const coord::ISimpleFunction& fncG;     ///< single-variable function of a Staeckel potential
-    AxisymStaeckelData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
-        double _I3, const coord::ISimpleFunction& _fncG) :
-        AxisymData(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
-};
-
-/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
-    SPECIALIZED for the Axisymmetric Fudge action finder */
-struct AxisymFudgeData: public AxisymData {
-    const double Ilambda, Inu;              ///< approximate integrals of motion for two quasi-separable directions
-    const potential::BasePotential& poten;  ///< gravitational potential
-    AxisymFudgeData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
-        double _Ilambda, double _Inu, const potential::BasePotential& _poten) :
-        AxisymData(_point, _signz, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
-};
 
 /** parameters for the function that computes actions and angles
     by integrating an auxiliary function "fnc" as follows:
@@ -57,30 +14,18 @@ struct AxisymFudgeData: public AxisymData {
     the integrand is given by   p^n * (tau+alpha)^a * (tau+gamma)^c  if p^2>0, otherwise 0.
 */
 struct AxisymIntegrandParam {
-    mathutils::function fnc;                ///< auxilary function
-    const AxisymData* data;                 ///< parameters of aux.fnc.
+    mathutils::function fnc;                ///< auxilary function: either axisymStaeckelFnc or axisymFudgeFnc
+    const AxisymData* data;                 ///< parameters of aux.fnc.: may be either AxisymStaeckelData or AxisymFudgeData
     enum { nplus1, nminus1 } n;             ///< power of p: +1 or -1
     enum { azero, aminus1, aminus2 } a;     ///< power of (tau+alpha): 0, -1, -2
     enum { czero, cminus1 } c;              ///< power of (tau+gamma): 0 or -1
 };
 
-/** Derivatives of integrals of motion over actions (do not depend on angles) */
-struct AxisymIntDerivatives {
-    double dEdJr, dEdJz, dEdJphi, dI3dJr, dI3dJz, dI3dJphi, dLzdJr, dLzdJz, dLzdJphi;
-};
-
-/** Derivatives of generating function over integrals of motion (depend on angles) */
-struct AxisymGenFuncDerivatives {
-    double dSdE, dSdI3, dSdLz;
-};
-
-///@}
-/// \name ------ SPECIALIZED functions for Staeckel action finder -------
-///@{
+// ------ SPECIALIZED functions for Staeckel action finder -------
 
 /** compute integrals of motion in the Staeckel potential of an oblate perfect ellipsoid, 
     together with the coordinates in its prolate spheroidal coordinate system */
-static AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid
+AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid
     (const potential::StaeckelOblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
 {
     double E = potential::totalEnergy(poten, point);
@@ -104,7 +49,7 @@ static AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid
 /** auxiliary function that enters the definition of canonical momentum for 
     for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
     the argument tau is replaced by tau+gamma >= 0. */
-static double axisymStaeckelFnc(double tauplusgamma, void* v_param)
+double axisymStaeckelFnc(double tauplusgamma, void* v_param)
 {
     AxisymStaeckelData* param=static_cast<AxisymStaeckelData*>(v_param);
     double G;
@@ -114,14 +59,12 @@ static double axisymStaeckelFnc(double tauplusgamma, void* v_param)
           - param->Lz*param->Lz/2 * tauplusgamma;
 }
 
-///@}
-/// \name -------- SPECIALIZED functions for the Axisymmetric Fudge action finder --------
-///@{
+// -------- SPECIALIZED functions for the Axisymmetric Fudge action finder --------
 
 /** compute true (E, Lz) and approximate (Ilambda, Inu) integrals of motion in an arbitrary 
     potential used for the Staeckel Fudge, 
     together with the coordinates in its prolate spheroidal coordinate system */
-static AxisymFudgeData findIntegralsOfMotionAxisymFudge
+AxisymFudgeData findIntegralsOfMotionAxisymFudge
     (const potential::BasePotential& poten, const coord::PosVelCyl& point, const coord::ProlSph& coordsys)
 {
     double Phi;
@@ -136,7 +79,7 @@ static AxisymFudgeData findIntegralsOfMotionAxisymFudge
               (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma));
     Inu     = (pprol.nu+coordsys.gamma) * (E - pow_2(Lz)/2/(pprol.nu+coordsys.alpha))
             + (pprol.lambda-pprol.nu)*Phi;
-    if(pprol.nu+coordsys.gamma<=0)  // z==0
+    if(pprol.nu+coordsys.gamma<=1e-12*(coordsys.gamma-coordsys.alpha))  // z==0, nearly
         Inu+= pow_2(point.vz)*(pprol.lambda-pprol.nu)/2;
     else
         Inu-= pow_2(pprol.nudot*(pprol.lambda-pprol.nu)) /
@@ -150,7 +93,7 @@ static AxisymFudgeData findIntegralsOfMotionAxisymFudge
     and   -alpha<=tau<infinity  for the  lambda-component of momentum.
     For numerical convenience, tau is replaced by x=tau+gamma.
 */
-static double axisymFudgeFnc(double tauplusgamma, void* v_data)
+double axisymFudgeFnc(double tauplusgamma, void* v_data)
 {
     const AxisymFudgeData* data=static_cast<AxisymFudgeData*>(v_data);
     const double gamma=data->point.coordsys.gamma, alpha=data->point.coordsys.alpha;
@@ -173,9 +116,7 @@ static double axisymFudgeFnc(double tauplusgamma, void* v_data)
          - (I + Phi * mult) * tauplusalpha;
 }
 
-///@}
-/// \name -------- COMMON routines for Staeckel and Fudge action finders --------
-///@{
+// -------- COMMON routines for Staeckel and Fudge action finders --------
 
 /** integrand for the expressions for actions and their derivatives 
     (e.g.Sanders 2012, eqs. A1, A4-A12).  It uses the auxiliary function to compute momentum,
@@ -216,7 +157,7 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
     AxisymActionIntLimits lim;
     const double gamma=data.point.coordsys.gamma, alpha=data.point.coordsys.alpha;
     const double tol=(gamma-alpha)*1e-10;  // if an interval is smaller than this, discard it altogether
-    
+
     // precautionary measures: need to find a point x_0, close to lambda+gamma, 
     // at which p^2>0 (or equivalently a_0>0); 
     // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
@@ -251,7 +192,7 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
     }
     if(lim.xnu_max==lim.xnu_min && data.point.nu>-gamma)
         data.point.nu=-gamma;
-    
+
     // range for J_lambda = J_r
     if(a_0>0) {
         double a_lambda = fnc(gamma+data.point.lambda, &data);
@@ -274,7 +215,8 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
 }
 
 /** Compute the derivatives of integrals of motion (E, Lz, I3) over actions (Jr, Jz, Jphi),
-    using the expressions A4-A9 in Sanders(2012).  These quantities are independent of angles. */
+    using the expressions A4-A9 in Sanders(2012).  These quantities are independent of angles,
+    and in particular, the derivatives of energy w.r.t. the three actions are the frequencies. */
 AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
@@ -416,39 +358,169 @@ ActionAngles computeActionAngles(mathutils::function fnc,
     return ActionAngles(acts, angs);
 }
 
-///@}
-/// \name -------- CLASS MEMBER FUNCTIONS --------
-///@{
+// -------- THE DRIVER ROUTINES --------
 
-Actions ActionFinderAxisymmetricStaeckel::actions(const coord::PosVelCyl& point) const
+Actions axisymStaeckelActions(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const coord::PosVelCyl& point)
 {
-    AxisymStaeckelData data = findIntegralsOfMotionOblatePerfectEllipsoid(poten, point);
+    AxisymStaeckelData data = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
     AxisymActionIntLimits lim = findIntegrationLimitsAxisym(axisymStaeckelFnc, data);
     return computeActions(axisymStaeckelFnc, data, lim);
 }
-    
-ActionAngles ActionFinderAxisymmetricStaeckel::actionAngles(const coord::PosVelCyl& point) const
+
+ActionAngles axisymStaeckelActionAngles(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const coord::PosVelCyl& point)
 {
-    AxisymStaeckelData data = findIntegralsOfMotionOblatePerfectEllipsoid(poten, point);
+    AxisymStaeckelData data = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
     AxisymActionIntLimits lim = findIntegrationLimitsAxisym(axisymStaeckelFnc, data);
     return computeActionAngles(axisymStaeckelFnc, data, lim);
-}        
+}
 
-Actions ActionFinderAxisymmetricFudgeJS::actions(const coord::PosVelCyl& point) const
+Actions axisymFudgeActions(const potential::BasePotential& potential, 
+    const coord::PosVelCyl& point, double interfocalDistance)
 {
-    const coord::ProlSph coordsys(alpha, gamma);
-    AxisymFudgeData data = findIntegralsOfMotionAxisymFudge(poten, point, coordsys);
+    if((potential.symmetry() & potential.ST_AXISYMMETRIC) != potential.ST_AXISYMMETRIC)
+        throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
+    if(interfocalDistance==0)
+        interfocalDistance = estimateInterfocalDistance(potential, point);
+    const coord::ProlSph coordsys(-pow_2(interfocalDistance)-1., -1.);
+    AxisymFudgeData data = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
     AxisymActionIntLimits lim = findIntegrationLimitsAxisym(axisymFudgeFnc, data);
     return computeActions(axisymFudgeFnc, data, lim);
 }
-    
-ActionAngles ActionFinderAxisymmetricFudgeJS::actionAngles(const coord::PosVelCyl& point) const
+
+ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential, 
+    const coord::PosVelCyl& point, double interfocalDistance)
 {
-    const coord::ProlSph coordsys(alpha, gamma);
-    AxisymFudgeData data = findIntegralsOfMotionAxisymFudge(poten, point, coordsys);    
+    if((potential.symmetry() & potential.ST_AXISYMMETRIC) != potential.ST_AXISYMMETRIC)
+        throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
+    if(interfocalDistance==0)
+        interfocalDistance = estimateInterfocalDistance(potential, point);
+    const coord::ProlSph coordsys(-pow_2(interfocalDistance)-1., -1.);
+    AxisymFudgeData data = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);    
     AxisymActionIntLimits lim = findIntegrationLimitsAxisym(axisymFudgeFnc, data);
     return computeActionAngles(axisymFudgeFnc, data, lim);
 }
 
-///@}
+// ------ Estimation of interfocal distance -------
+
+struct OrbitSizeParam {
+    const potential::BasePotential& potential;
+    double R;
+    double phi;
+    double E;
+    double Lz2;
+    explicit OrbitSizeParam(const potential::BasePotential& p) : potential(p) {};
+};
+
+static double findOrbitVerticalExtent(double z, void* v_param)
+{
+    double Phi;
+    const OrbitSizeParam* param = static_cast<OrbitSizeParam*>(v_param);
+    param->potential.eval(coord::PosCyl(param->R, z, param->phi), &Phi);
+    return Phi-param->E;
+}
+
+static double findOrbitRadialExtent(double R, void* v_param)
+{
+    double Phi;
+    const OrbitSizeParam* param = static_cast<OrbitSizeParam*>(v_param);
+    param->potential.eval(coord::PosCyl(R, 0, param->phi), &Phi);
+    return Phi + param->Lz2/pow_2(R) - param->E;
+}
+
+bool estimateOrbitExtent(const potential::BasePotential& potential, const coord::PosVelCyl& point,
+    double& Rmin, double& Rmax, double& zmaxRmin, double& zmaxRmax)
+{
+    double Phi_R_z, Phi_R_0;  // potential at the initial position, and at the same radius and z=0
+    OrbitSizeParam param(potential);
+    param.Lz2=pow_2(coord::Lz(point))/2;
+    param.R=point.R;
+    param.phi=point.phi;
+    // estimate radial extent
+    Rmin=0; Rmax=0;
+    potential.eval(coord::PosCyl(point.R, 0, point.phi), &Phi_R_0);
+    param.E = Phi_R_0 + pow_2(point.vR)/2 + param.Lz2/pow_2(point.R);
+    if(param.Lz2>0)
+        Rmin = mathutils::findRootGuess(findOrbitRadialExtent, &param, 
+            0, point.R, point.R/2, false, 1e-3);
+    Rmax = mathutils::findRootGuess(findOrbitRadialExtent, &param, 
+        point.R, HUGE_VAL, point.R>0 ? point.R*2 : 1., true, 1e-3);
+    if(!mathutils::isFinite(Rmin+Rmax))
+        return false;  // likely reason: energy is positive
+    // estimate vertical extent at R=R_0
+    double zmax=abs(point.z);
+    potential.eval(point, &Phi_R_z);
+    param.E = Phi_R_z + pow_2(point.vz)/2;  // "vertical energy"
+    if(point.vz!=0) {
+        zmax = mathutils::findRootGuess(findOrbitVerticalExtent, &param, 
+            point.z, HUGE_VAL, point.z>0 ? point.z*2 : 1., true, 1e-3);
+        if(!mathutils::isFinite(zmax))
+            return false;
+    }
+    zmaxRmin=zmaxRmax=zmax;
+    if(zmax>0) {
+        // a first-order correction for vertical extent
+        param.E -= Phi_R_0;  // energy in vertical oscillation at R_0, equals to Phi(R_0,zmax)-Phi(R_0,0)
+        double Phi_Rmin_0, Phi_Rmin_zmax;
+        potential.eval(coord::PosCyl(Rmin, 0, point.phi), &Phi_Rmin_0);
+        potential.eval(coord::PosCyl(Rmin, zmax, point.phi), &Phi_Rmin_zmax);
+        // assuming that the potential varies quadratically with z, estimate corrected zmax at Rmin
+        double corr=param.E/(Phi_Rmin_zmax-Phi_Rmin_0);
+        if(corr>0.1 && corr<10)
+            zmaxRmin = zmax*sqrt(corr);
+        // same at Rmax
+        double Phi_Rmax_0, Phi_Rmax_zmax;
+        potential.eval(coord::PosCyl(Rmax, 0, point.phi), &Phi_Rmax_0);
+        potential.eval(coord::PosCyl(Rmax, zmax, point.phi), &Phi_Rmax_zmax);
+        corr = param.E/(Phi_Rmax_zmax-Phi_Rmax_0);
+        if(corr>0.1 && corr<10)
+            zmaxRmax = zmax*sqrt(corr);
+    }
+    return true;
+}
+
+double estimateInterfocalDistanceBox(const potential::BasePotential& potential, 
+    double R1, double R2, double z1, double z2)
+{
+    if(z1+z2<=(R1+R2)*1e-8)   // orbit in x-y plane, any (non-zero) result will go
+        return (R1+R1)/2;
+    const int nR=4, nz=2, numpoints=nR*nz;
+    double x[numpoints], y[numpoints];
+    const double r1=sqrt(R1*R1+z1*z1), r2=sqrt(R2*R2+z2*z2);
+    const double a1=atan2(z1, R1), a2=atan2(z2, R2);
+    double sumsqx=0, sumsqy=0;
+    for(int iR=0; iR<nR; iR++) {
+        double r=r1+(r2-r1)*iR/(nR-1);
+        for(int iz=0; iz<nz; iz++) {
+            const int ind=iR*nz+iz;
+            double a=(iz+1.)/nz * (a1+(a2-a1)*iR/(nR-1));
+            coord::GradCyl grad;
+            coord::HessCyl hess;
+            coord::PosCyl pos(r*cos(a), r*sin(a), 0);
+            potential.eval(pos, NULL, &grad, &hess);
+            x[ind] = hess.dRdz;
+            y[ind] = 3*pos.z*grad.dR - 3*pos.R*grad.dz + pos.R*pos.z*(hess.dR2-hess.dz2)
+                   + (pos.z*pos.z-pos.R*pos.R) * hess.dRdz;
+            sumsqx+=pow_2(x[ind]);
+            sumsqy+=pow_2(y[ind]);
+        }
+    }
+    double coef1 = sumsqx>0 ? mathutils::linearFitZero(numpoints, x, y) : 0;  // fit y=c1*x
+    double coef2 = sumsqy>0?1/mathutils::linearFitZero(numpoints, y, x) : 0;  // fit x=c2*y
+    coef1 = fmax(coef1, fmin(R1*R1,R2*R2)*0.1);
+    coef2 = fmax(coef2, fmin(R1*R1,R2*R2)*0.1);
+    return sqrt((coef1+coef2)/2);  // naive but good enough
+}
+
+double estimateInterfocalDistance(
+    const potential::BasePotential& potential, const coord::PosVelCyl& point)
+{
+    double R1, R2, z1, z2;
+    if(!estimateOrbitExtent(potential, point, R1, R2, z1, z2)) {
+        R1=R2=point.R; z1=z2=point.z;
+    }
+    return estimateInterfocalDistanceBox(potential, R1, R2, z1, z2);
+}
+
 }  // namespace actions

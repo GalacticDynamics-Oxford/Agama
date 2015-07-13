@@ -81,6 +81,9 @@ double deriv(function F, void* params, double x, double h, int dir);
 */
 double findPositiveValue(function F, void* params, double x_0, double* f_1=0, double* der=0);
 
+/** perform a linear least-square fit without constant term (i.e., y=c*x) */
+double linearFitZero(unsigned int N, const double x[], const double y[]);
+
 /** solve a system of differential equations */
 class OdeSolver {
 public:
