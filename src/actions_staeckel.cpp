@@ -3,10 +3,17 @@
 #include <stdexcept>
 #include <cmath>
 
+int numeval_eoe=0, numeval_eidb=0, numeval_fil=0, numeval_ca=0, numeval_cid=0, numeval_cgfd=0, numeval_other=0;
+int* numeval=&numeval_other;
+
 namespace actions{
 
 /** relative accuracy in integrals for computing actions and angles */
-const double ACCURACY_ACTION=1e-3;  // this is more than enough
+const double ACCURACY_ACTION = 0e-3;  // this is more than enough
+
+/** relative tolerance in determining the range of variables (nu,lambda) to integrate over,
+    also determined the minimum range that will be considered non-zero (relative to gamma-alpha) */
+const double ACCURACY_RANGE = 1e-5;
 
 /** parameters for the function that computes actions and angles
     by integrating an auxiliary function "fnc" as follows:
@@ -51,6 +58,8 @@ AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid
     the argument tau is replaced by tau+gamma >= 0. */
 double axisymStaeckelFnc(double tauplusgamma, void* v_param)
 {
+    if(!mathutils::isFinite(tauplusgamma))
+        return -1;  // used in the root-finder on an infinite interval
     AxisymStaeckelData* param=static_cast<AxisymStaeckelData*>(v_param);
     double G;
     param->fncG.eval_simple(tauplusgamma-param->point.coordsys.gamma, &G);
@@ -95,6 +104,8 @@ AxisymFudgeData findIntegralsOfMotionAxisymFudge
 */
 double axisymFudgeFnc(double tauplusgamma, void* v_data)
 {
+    if(!mathutils::isFinite(tauplusgamma))
+        return -1;  // used in the root-finder on an infinite interval
     const AxisymFudgeData* data=static_cast<AxisymFudgeData*>(v_data);
     const double gamma=data->point.coordsys.gamma, alpha=data->point.coordsys.alpha;
     double lambda, nu, I, mult;
@@ -152,50 +163,51 @@ static double axisymIntegrand(double tauplusgamma, void* i_param)
 AxisymActionIntLimits findIntegrationLimitsAxisym(
     mathutils::function fnc, AxisymData& data)
 {
+    numeval=&numeval_fil;
+
     if(data.E>=0)
         throw std::invalid_argument("Error in Axisymmetric Staeckel/Fudge action finder: E>=0");
     AxisymActionIntLimits lim;
     const double gamma=data.point.coordsys.gamma, alpha=data.point.coordsys.alpha;
-    const double tol=(gamma-alpha)*1e-10;  // if an interval is smaller than this, discard it altogether
+    const double toler=(gamma-alpha)*ACCURACY_RANGE;  // if an interval is smaller than this, discard it altogether
 
     // precautionary measures: need to find a point x_0, close to lambda+gamma, 
     // at which p^2>0 (or equivalently a_0>0); 
     // this condition may not hold at precisely x=lambda+gamma due to numerical inaccuracies
-    double a_0;
+    double a_lambda, a_0;
     double x_0 = mathutils::findPositiveValue(fnc, &data, 
-        gamma+data.point.lambda, &a_0);
+        gamma+data.point.lambda, &a_lambda, &a_0);
     double a_alpha = fnc(gamma-alpha, &data);
     double a_gamma = fnc(0, &data);
 
     lim.xnu_min = lim.xnu_max = lim.xlambda_min = lim.xlambda_max = 0;  // 0 means not set
     if(a_alpha==0) {  // special case: L_z==0, may have either tube or box orbit in the meridional plane
-        double der = mathutils::deriv(fnc, &data, gamma-alpha, tol, 0);
+        double der = mathutils::deriv(fnc, &data, gamma-alpha, toler, 0);
         if(der>0) {   // box orbit 
             if(a_gamma>0)
                 lim.xnu_max = mathutils::findRootGuess(fnc, &data, 
-                    0, gamma-alpha, (gamma-alpha)/2, false);
+                    0, gamma-alpha, (gamma-alpha)/2, false, ACCURACY_RANGE);
             else 
                 lim.xnu_max = lim.xnu_min;
             lim.xlambda_min = gamma-alpha;
         } else {      // tube orbit 
             lim.xnu_max = gamma-alpha;
             lim.xlambda_min = a_0>0 ? mathutils::findRootGuess(fnc, &data, 
-                gamma-alpha, x_0, (gamma-alpha+x_0)/2, true) : 0;
+                gamma-alpha, x_0, (gamma-alpha+x_0)/2, true, ACCURACY_RANGE) : 0;
         }
     }
 
     // find range for J_nu = J_z if it has not been determined at the previous stage
     if(a_gamma>0 && lim.xnu_max==0) {  // otherwise assume that motion is confined to x-y plane, and J_z=0
-        lim.xnu_max = mathutils::findRoot(fnc, &data, 0, gamma-alpha);
-        if(!mathutils::isFinite(lim.xnu_max) || lim.xnu_max<(gamma-alpha)*1e-10) 
+        lim.xnu_max = mathutils::findRoot(fnc, &data, data.point.nu+gamma, gamma-alpha, ACCURACY_RANGE);
+        if(!mathutils::isFinite(lim.xnu_max) || lim.xnu_max<toler) 
             lim.xnu_max = lim.xnu_min;
     }
-    if(lim.xnu_max==lim.xnu_min && data.point.nu>-gamma)
+    if(lim.xnu_max==lim.xnu_min && data.point.nu+gamma>lim.xnu_max)
         data.point.nu=-gamma;
 
     // range for J_lambda = J_r
     if(a_0>0) {
-        double a_lambda = fnc(gamma+data.point.lambda, &data);
         if(a_lambda==0) {
             if(x_0>gamma+data.point.lambda) {
                 lim.xlambda_min = gamma+data.point.lambda;
@@ -204,11 +216,13 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
             }
         }
         if(lim.xlambda_min==0)  // not yet determined 
-            lim.xlambda_min = mathutils::findRoot(fnc, &data, gamma-alpha, x_0);
+            lim.xlambda_min = mathutils::findRoot(fnc, &data, gamma-alpha, x_0, ACCURACY_RANGE);
         if(lim.xlambda_max==0)
-            lim.xlambda_max = mathutils::findRootGuess(fnc, &data,
-                lim.xlambda_min, HUGE_VAL, x_0, false);
-    } else {
+            lim.xlambda_max = mathutils::findRoot(fnc, &data, x_0, HUGE_VAL, ACCURACY_RANGE);
+        if(!mathutils::isFinite(lim.xlambda_min+lim.xlambda_max))
+           a_0=0;
+    }
+    if(a_0<=0) {
         lim.xlambda_min = lim.xlambda_max = data.point.lambda+gamma;
     }
     return lim;
@@ -220,6 +234,8 @@ AxisymActionIntLimits findIntegrationLimitsAxisym(
 AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
+    numeval=&numeval_cid;
+
     AxisymIntegrandParam param;
     param.fnc = fnc;
     param.data = &data;
@@ -274,6 +290,8 @@ AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc,
 AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
+    numeval=&numeval_cgfd;
+
     const double signldot = data.point.lambdadot>=0?+1:-1;
     const double signndot = data.point.nudot>=0?+1:-1;
     const double gamma=data.point.coordsys.gamma;
@@ -314,6 +332,8 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc,
 Actions computeActions(mathutils::function fnc, 
     const AxisymData& data, const AxisymActionIntLimits& lim)
 {
+    numeval=&numeval_ca;
+
     Actions acts;
     AxisymIntegrandParam param;
     param.fnc = fnc;
@@ -415,51 +435,106 @@ struct OrbitSizeParam {
 
 static double findOrbitVerticalExtent(double z, void* v_param)
 {
-    double Phi;
+    double Phi=0;
     const OrbitSizeParam* param = static_cast<OrbitSizeParam*>(v_param);
-    param->potential.eval(coord::PosCyl(param->R, z, param->phi), &Phi);
+    if(mathutils::isFinite(z))
+        param->potential.eval(coord::PosCyl(param->R, z, param->phi), &Phi);
     return Phi-param->E;
 }
 
-static double findOrbitRadialExtent(double R, void* v_param)
+static double findOrbitRadialExtentPeri(double R, void* v_param)
 {
     double Phi;
     const OrbitSizeParam* param = static_cast<OrbitSizeParam*>(v_param);
     param->potential.eval(coord::PosCyl(R, 0, param->phi), &Phi);
-    return Phi + param->Lz2/pow_2(R) - param->E;
+    return (Phi-param->E)*R*R + param->Lz2/2;
+}
+
+static double findOrbitRadialExtentApo(double R, void* v_param)
+{
+    double Phi=0;
+    const OrbitSizeParam* param = static_cast<OrbitSizeParam*>(v_param);
+    if(mathutils::isFinite(R))   // otherwise we are at infinity, Phi=0 (presumably?)
+        param->potential.eval(coord::PosCyl(R, 0, param->phi), &Phi);
+    Phi -= param->E;
+    if(param->Lz2>0)  // means that R cannot be zero
+        Phi += param->Lz2/(2*R*R);
+    return Phi;
 }
 
 bool estimateOrbitExtent(const potential::BasePotential& potential, const coord::PosVelCyl& point,
     double& Rmin, double& Rmax, double& zmaxRmin, double& zmaxRmax)
 {
+    numeval=&numeval_eoe;
+    
+    const double toler=1e-2;  // relative tolerance in root-finder, don't need high accuracy here
     double Phi_R_z, Phi_R_0;  // potential at the initial position, and at the same radius and z=0
+    double absz=fabs(point.z), absR=fabs(point.R);
     OrbitSizeParam param(potential);
-    param.Lz2=pow_2(coord::Lz(point))/2;
-    param.R=point.R;
+    param.Lz2=pow_2(point.R*point.vphi);
+    param.R=absR;
     param.phi=point.phi;
+    Rmin=Rmax=absR;
+
     // estimate radial extent
-    Rmin=0; Rmax=0;
-    potential.eval(coord::PosCyl(point.R, 0, point.phi), &Phi_R_0);
-    param.E = Phi_R_0 + pow_2(point.vR)/2 + param.Lz2/pow_2(point.R);
-    if(param.Lz2>0)
-        Rmin = mathutils::findRootGuess(findOrbitRadialExtent, &param, 
-            0, point.R, point.R/2, false, 1e-3);
-    Rmax = mathutils::findRootGuess(findOrbitRadialExtent, &param, 
-        point.R, HUGE_VAL, point.R>0 ? point.R*2 : 1., true, 1e-3);
+    coord::GradCyl grad;
+    coord::HessCyl hess;
+    potential.eval(coord::PosCyl(absR, 0, point.phi), &Phi_R_0, &grad, &hess);
+    param.E = Phi_R_0 + (pow_2(point.vR)+pow_2(point.vphi))/2;
+    // we seek the roots of the function f(R) = -(1/2)V_R^2 = Phi(R)-E+Lz^2/2/R^2
+    // but we need to be careful if f(R_0) is close to zero
+    double der = grad.dR - (point.vphi!=0 ? pow_2(point.vphi)/absR : 0);
+    double deltaR = pow_2(point.vR)/2/der;  // rough estimate of the offset from R_0 to the root
+    bool needPeri=true, needApo=true;
+    double maxPeri=absR, minApo=absR;  // endpoints of interval for locating peri/apocenter radii
+    // check if we are at (or near) either peri- or apocenter
+    if(fabs(deltaR) < absR*toler || fabs(point.vR) < fabs(point.vphi)*toler) {
+        double der2 = hess.dR2 + (point.vphi!=0 ? 3*pow_2(point.vphi/absR) : 0);
+        double discr = der2>0 ? sqrt(pow_2(der) + der2*pow_2(point.vR)) : 0;
+        double deltaR1 = -deltaR;  // offset to the other root
+        if(der>=0) {
+            needApo = false;  // we are already at apocenter
+            deltaR1 = -(der+discr)/fmax(der2, 0);
+        }
+        if(der<=0) {
+            needPeri= false; // we are at pericenter
+            deltaR1 = (discr-der)/fmax(der2, 0);
+        }
+        if(needPeri) {
+            maxPeri = fmax(absR+deltaR1*0.5, absR*(1-toler));  // 0.5 is a safety factor
+            if(maxPeri > absR*(1-toler))
+                needPeri = false;  // don't need it either (we are on a near-circular orbit)
+        }
+        if(needApo) {
+            minApo = fmin(absR+deltaR1*0.5, absR*(1+toler));
+            if(minApo < absR*(1+toler))
+                needApo = false;
+        }
+    }
+    if(param.Lz2>0) {
+        if(needPeri)
+            Rmin = mathutils::findRoot(findOrbitRadialExtentPeri, &param, 0., maxPeri, toler);
+    } else  // angular momentum is zero
+        Rmin = 0;
+    if(needApo)  // else Rmax is already equal to R
+        Rmax = mathutils::findRoot(findOrbitRadialExtentApo, &param, minApo, HUGE_VAL, toler);
     if(!mathutils::isFinite(Rmin+Rmax))
         return false;  // likely reason: energy is positive
+
     // estimate vertical extent at R=R_0
-    double zmax=abs(point.z);
-    potential.eval(point, &Phi_R_z);
+    double zmax=absz;
+    if(point.z!=0)
+        potential.eval(point, &Phi_R_z);
+    else
+        Phi_R_z=Phi_R_0;
     param.E = Phi_R_z + pow_2(point.vz)/2;  // "vertical energy"
     if(point.vz!=0) {
-        zmax = mathutils::findRootGuess(findOrbitVerticalExtent, &param, 
-            point.z, HUGE_VAL, point.z>0 ? point.z*2 : 1., true, 1e-3);
+        zmax = mathutils::findRoot(findOrbitVerticalExtent, &param, absz, HUGE_VAL, toler);
         if(!mathutils::isFinite(zmax))
             return false;
     }
     zmaxRmin=zmaxRmax=zmax;
-    if(zmax>0) {
+    if(zmax>0 && Rmin<Rmax*0.9) {
         // a first-order correction for vertical extent
         param.E -= Phi_R_0;  // energy in vertical oscillation at R_0, equals to Phi(R_0,zmax)-Phi(R_0,0)
         double Phi_Rmin_0, Phi_Rmin_zmax;
@@ -483,13 +558,15 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
 double estimateInterfocalDistanceBox(const potential::BasePotential& potential, 
     double R1, double R2, double z1, double z2)
 {
+    numeval = &numeval_eidb;
+
     if(z1+z2<=(R1+R2)*1e-8)   // orbit in x-y plane, any (non-zero) result will go
-        return (R1+R1)/2;
+        return (R1+R2)/2;
     const int nR=4, nz=2, numpoints=nR*nz;
     double x[numpoints], y[numpoints];
     const double r1=sqrt(R1*R1+z1*z1), r2=sqrt(R2*R2+z2*z2);
     const double a1=atan2(z1, R1), a2=atan2(z2, R2);
-    double sumsqx=0, sumsqy=0;
+    double sumsq=0;
     for(int iR=0; iR<nR; iR++) {
         double r=r1+(r2-r1)*iR/(nR-1);
         for(int iz=0; iz<nz; iz++) {
@@ -502,15 +579,12 @@ double estimateInterfocalDistanceBox(const potential::BasePotential& potential,
             x[ind] = hess.dRdz;
             y[ind] = 3*pos.z*grad.dR - 3*pos.R*grad.dz + pos.R*pos.z*(hess.dR2-hess.dz2)
                    + (pos.z*pos.z-pos.R*pos.R) * hess.dRdz;
-            sumsqx+=pow_2(x[ind]);
-            sumsqy+=pow_2(y[ind]);
+            sumsq += pow_2(x[ind]);
         }
     }
-    double coef1 = sumsqx>0 ? mathutils::linearFitZero(numpoints, x, y) : 0;  // fit y=c1*x
-    double coef2 = sumsqy>0?1/mathutils::linearFitZero(numpoints, y, x) : 0;  // fit x=c2*y
-    coef1 = fmax(coef1, fmin(R1*R1,R2*R2)*0.1);
-    coef2 = fmax(coef2, fmin(R1*R1,R2*R2)*0.1);
-    return sqrt((coef1+coef2)/2);  // naive but good enough
+    double coef = sumsq>0 ? mathutils::linearFitZero(numpoints, x, y) : 0;
+    coef = fmax(coef, fmin(R1*R1+z1*z1,R2*R2+z2*z2)*0.0001);  // prevent it from going below or around zero
+    return sqrt(coef);
 }
 
 double estimateInterfocalDistance(

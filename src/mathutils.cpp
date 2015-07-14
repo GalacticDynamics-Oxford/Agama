@@ -80,29 +80,62 @@ double unwrapAngle(double x, double xprev) {
     return x - 2*M_PI * nwraps;
 }
 
+struct RootFinderParam {
+    function fnc;
+    void* param;
+    double x_edge, x_scaling;
+    bool inf_lower, inf_upper;
+};
+
+double scaledArgumentFnc(double y, void* v_param)
+{
+    RootFinderParam* param = static_cast<RootFinderParam*>(v_param);
+    double x = param->inf_upper ? (param->inf_lower ? 
+        param->x_scaling*(1/(1-y)-1/y) :            // (-inf,inf)
+        param->x_edge + y/(1-y)*param->x_scaling) : // [x_edge, inf)
+        param->x_edge - param->x_scaling*(1-y)/y;   // (-inf, x_edge]
+    return param->fnc(x, param->param);
+}
+
 double findRoot(function fnc, void* params, double xlower, double xupper, double reltoler)
 {
-    double f1=fnc(xlower, params), f2=fnc(xupper, params);
     if(reltoler<=0)
         throw std::invalid_argument("findRoot: relative tolerance must be positive");
-    if(!gsl_finite(f1) || !gsl_finite(f2))
-        return gsl_nan();
-        //throw std::invalid_argument("findRoot: function value is not finite");
-    if(f1 * f2 > 0)
-        return gsl_nan();
-        //throw std::invalid_argument("findRoot: endpoints do not enclose root");
-    if(f1==0)
-        return xlower;
-    if(f2==0)
-        return xupper;
+    if(xlower>=xupper)
+        throw std::invalid_argument("findRoot: invalid interval (xlower>=xupper)");
     gsl_function F;
-    F.function=fnc;
-    F.params=params;
+    RootFinderParam par;
+    par.inf_lower = xlower==gsl_neginf();
+    par.inf_upper = xupper==gsl_posinf();
+    if(par.inf_upper || par.inf_lower) {  // apply internal scaling procedure
+        F.function = &scaledArgumentFnc;
+        F.params = &par;
+        par.fnc = fnc;
+        par.param = params;
+        if(par.inf_upper && !par.inf_lower) {
+            par.x_edge = xlower;
+            par.x_scaling = fmax(xlower*2, 1.);  // quite an arbitrary choice
+        } else if(par.inf_lower && !par.inf_upper) {
+            par.x_edge = xupper;
+            par.x_scaling = fmax(-xupper*2, 1.);
+        } else
+            par.x_scaling=1;
+        xlower = 0;
+        xupper = 1;
+    } else {  // no scaling
+        F.function = fnc;
+        F.params = params;
+    }
     gsl_root_fsolver *solv = gsl_root_fsolver_alloc(gsl_root_fsolver_brent);
-    gsl_root_fsolver_set(solv, &F, xlower, xupper);
+    try{
+        gsl_root_fsolver_set(solv, &F, xlower, xupper);
+    }
+    catch(std::invalid_argument&) {  // endpoints do not enclose root, or function is infinite there
+        return gsl_nan();
+    }
     int status=0, iter=0;
     double abstoler=fabs(xlower-xupper)*reltoler;
-    double absftoler=fmax(fabs(f1), fabs(f2)) * reltoler;
+    //double absftoler=fmax(fabs(f1), fabs(f2)) * reltoler;
     double xroot=(xlower+xupper)/2;
     do{
         iter++;
@@ -113,8 +146,15 @@ double findRoot(function fnc, void* params, double xlower, double xupper, double
         xupper = gsl_root_fsolver_x_upper(solv);
         status = gsl_root_test_interval (xlower, xupper, abstoler, reltoler);
     }
-    while((status == GSL_CONTINUE || fabs(fnc(xroot, params))>absftoler) && iter < 50);
+    while((status == GSL_CONTINUE /*|| fabs(fnc(xroot, params))>absftoler*/) && iter < 50);
     gsl_root_fsolver_free(solv);
+    if(par.inf_upper) {
+        if(par.inf_lower)
+            xroot = par.x_scaling*(1/(1-xroot)-1/xroot);
+        else
+            xroot = par.x_edge + xroot/(1-xroot)*par.x_scaling;
+    } else if(par.inf_lower)
+        xroot = par.x_edge - par.x_scaling*(1-xroot)/xroot;
     return xroot;
 }
 
@@ -166,10 +206,13 @@ double findRootGuess(function fnc, void* params, double x1, double x2,
     }
 }
 
-double findPositiveValue(function fnc, void* params, double x_0, double* f_1, double* der)
+double findPositiveValue(function fnc, void* params, double x_0, 
+                         double* out_f_0, double* out_f_p, double* out_der)
 {
     double f_0 = fnc(x_0, params);
-    if(f_1!=NULL) *f_1=f_0;  // store the initial value even if don't succeed in finding a better one
+    if(out_f_0!=NULL) *out_f_0 = f_0;
+    // store the initial value even if don't succeed in finding a better one
+    if(out_f_p!=NULL) *out_f_p = f_0;
     if(f_0>0) {
         return x_0;
     }
@@ -179,13 +222,13 @@ double findPositiveValue(function fnc, void* params, double x_0, double* f_1, do
         double f_minus= fnc(x_0-delta, params);
         double f_plus = fnc(x_0+delta, params);
         if(f_plus>0) {
-            if(f_1!=NULL) *f_1=f_plus;
-            if(der!=NULL) *der=(1.5*f_plus-2*f_0+0.5*f_minus)/delta;
+            if(out_f_p!=NULL) *out_f_p = f_plus;
+            if(out_der!=NULL) *out_der = (1.5*f_plus-2*f_0+0.5*f_minus)/delta;
             return x_0+delta;
         }
         if(f_minus>0) {
-            if(f_1!=NULL) *f_1=f_minus;
-            if(der!=NULL) *der=(2*f_0-1.5*f_minus-0.5*f_plus)/delta;
+            if(out_f_p!=NULL) *out_f_p = f_minus;
+            if(out_der!=NULL) *out_der = (2*f_0-1.5*f_minus-0.5*f_plus)/delta;
             return x_0-delta;
         }
         // simple recipes didn't work; estimate the first and the second derivatives..
@@ -204,8 +247,9 @@ double findPositiveValue(function fnc, void* params, double x_0, double* f_1, do
         }
         double f_new = fnc(x_new, params);
         if(f_new>0) {
-            if(f_1!=NULL) *f_1=f_new;
-            if(der!=NULL) *der = (f_new-f_0)/(x_new-x_0);  // be satisfied with 1st order rule
+            if(out_f_p!=NULL) *out_f_p=f_new;
+            // be satisfied with 1st order rule, at least the sign will be correct
+            if(out_der!=NULL) *out_der = (f_new-f_0)/(x_new-x_0);
             return x_new;
         }
         if(f_new>fmax(f_minus, f_plus)) {  // move to a better location
@@ -233,8 +277,20 @@ double integrate(function fnc, void* params, double x1, double x2, double reltol
     F.function=fnc;
     F.params=params;
     double result, error;
-    size_t neval;
-    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
+    if(reltoler==0) {  // don't care about accuracy -- use the fastest integration rule
+#if 1
+        const int N=10;  // tables up to N=20 are hard-coded in the library, no overhead
+        gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
+        result = gsl_integration_glfixed(&F, x1, x2, t);
+        gsl_integration_glfixed_table_free(t);
+#else
+        double dummy;  // 15-point Gauss-Kronrod
+        gsl_integration_qk15(&F, x1, x2, &result, &error, &dummy, &dummy);
+#endif
+    } else {  // use adaptive method with limited max # of points (87)
+        size_t neval;
+        gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
+    }
     return result;
 }
 
@@ -270,20 +326,14 @@ double integrateScaled(function fnc, void* params, double x1, double x2,
     if(x1==x2) return 0;
     if(x1>x2 || x1<x_low || x2>x_upp || x_low>=x_upp)
         throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
-    gsl_function F;
     ScaledIntParam param;
-    F.function=&scaledIntegrand;
-    F.params=&param;
     param.F=fnc;
     param.param=params;
     param.x_low=x_low;
     param.x_upp=x_upp;
     double y1=solveForScaled_y(x1, param);
     double y2=solveForScaled_y(x2, param);
-    double result, error;
-    size_t neval;
-    gsl_integration_qng(&F, y1, y2, 0, rel_toler, &result, &error, &neval);
-    return result;    
+    return integrate(scaledIntegrand, &param, y1, y2, rel_toler);
 }
 
 double deriv(function fnc, void* params, double x, double h, int dir)

@@ -40,8 +40,9 @@ double unwrapAngle(double x, double xprev);
 /** find a root of function on the interval [x1,x2].
     function must be finite at the ends of interval and have opposite signs (or be zero),
     otherwise NaN is returned.
-    Throws an exception if the function evaluates to a non-finite number inside the interval,
-    or if there are other problems in locating the root.
+    Interval can be (semi-)infinite, in which case an appropriate transformation is applied
+    to the variable (but the function still should return finite value for an infinite argument).
+    \param[in] rel_toler  determines the accuracy of root location, relative to the range |x2-x1|
 */
 double findRoot(function F, void* params, double x1, double x2, double rel_toler=ACCURACY_ROOT);
 
@@ -72,14 +73,15 @@ double integrateScaled(function F, void* params, double x1, double x2,
 */
 double deriv(function F, void* params, double x, double h, int dir);
 
-/** find a point x_1 where a function attains a strictly positive value.
+/** find a point x_p where a function attains a strictly positive value.
     \param[in]  x_0 is the initial guess point,
-    \param[out] f_1 if not NULL, will contain the value F(x_1);
+    \param[out] f_0 if not NULL, will contain the value F(x_0);
+    \param[out] f_p if not NULL, will contain the value F(x_p);
     \param[out] der if not NULL, and if the initial value was non-positive, 
     an estimate of function derivative at x_1 will be returned in this variable;
     \return x_1 such that F(x_1)>0, or NaN if cannot find such point. 
 */
-double findPositiveValue(function F, void* params, double x_0, double* f_1=0, double* der=0);
+double findPositiveValue(function F, void* params, double x_0, double* f_0, double* f_p, double* der=0);
 
 /** perform a linear least-square fit without constant term (i.e., y=c*x) */
 double linearFitZero(unsigned int N, const double x[], const double y[]);

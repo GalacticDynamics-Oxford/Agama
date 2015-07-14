@@ -201,3 +201,6 @@ double estimateInterfocalDistance(
 
 ///@}
 }  // namespace actions
+
+extern int numeval_eoe, numeval_eidb, numeval_fil, numeval_ca, numeval_cid, numeval_cgfd, numeval_other;
+extern int* numeval;
