@@ -28,6 +28,7 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_roots.h>
+#include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_deriv.h>
 #include <gsl/gsl_fit.h>
@@ -37,7 +38,9 @@
 
 namespace mathutils{
 
-void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
+// ------ error handling ------ //
+
+static void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
         gsl_errno == GSL_ETOL ||
@@ -58,6 +61,22 @@ void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /
 // a static variable that initializes our error handler
 bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_handler);
 
+// ------ math primitives -------- //
+
+static double functionWrapper(double x, void* param){
+    return static_cast<IFunction*>(param)->value(x);
+}
+#if 0
+static double functionDerivWrapper(double x, void* param){
+    double der;
+    static_cast<IFunction*>(param)->eval_deriv(x, NULL, &der);
+    return der;
+}
+
+static void functionAndDerivWrapper(double x, void* param, double* f, double *df) {
+    static_cast<IFunction*>(param)->eval_deriv(x, f, df);
+}
+#endif
 bool isFinite(double x) {
     return gsl_finite(x);
 }
@@ -79,203 +98,228 @@ double unwrapAngle(double x, double xprev) {
         modf(diff-0.5, &nwraps);
     return x - 2*M_PI * nwraps;
 }
+    
+// ------ root finder routines ------//
 
-struct RootFinderParam {
-    function fnc;
-    void* param;
-    double x_edge, x_scaling;
-    bool inf_lower, inf_upper;
-};
-
-double scaledArgumentFnc(double y, void* v_param)
+// used in hybrid root-finder to predict the root location by Hermite interpolation
+inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx1, 
+    double x2, double f2, double dfdx2)
 {
-    RootFinderParam* param = static_cast<RootFinderParam*>(v_param);
-    double x = param->inf_upper ? (param->inf_lower ? 
-        param->x_scaling*(1/(1-y)-1/y) :            // (-inf,inf)
-        param->x_edge + y/(1-y)*param->x_scaling) : // [x_edge, inf)
-        param->x_edge - param->x_scaling*(1-y)/y;   // (-inf, x_edge]
-    return param->fnc(x, param->param);
+    if(!gsl_finite(dfdx1+dfdx2) || dfdx1*dfdx2<0)  // derivatives must exist and have the same sign
+        return NAN;
+    const double dx = x2-x1, sixdf = 6*(f2-f1);
+    const double t = (x-x1)/dx;
+    // check if the interpolant is monotonic on t=[0:1]
+    double t1, t2;
+    int nroots = gsl_poly_solve_quadratic(-sixdf+3*dx*(dfdx1+dfdx2), 
+        sixdf-2*dx*(2*dfdx1+dfdx2), dx*dfdx1, &t1, &t2);
+    if(nroots>0 && ((t1>=0 && t1<=1) || (t2>=0 && t2<=1)) )
+        return NAN;   // will not produce a non-monotonic result
+    return pow_2(1-t) * ( (1+2*t)*f1 + t * dfdx1*dx )
+         + pow_2(t) * ( (3-2*t)*f2 + (t-1)*dfdx2*dx );
 }
 
-double findRoot(function fnc, void* params, double xlower, double xupper, double reltoler)
+// a hybrid between Brent's method and interpolation of root using function derivatives
+double findRootHybrid(const IFunction& fnc, 
+    const double x_lower, const double x_upper, const double reltoler)
+{
+    double a = x_lower;
+    double b = x_upper;
+    double fa, fb;
+    double fdera = NAN, fderb = NAN;
+    bool have_derivs = fnc.numDerivs()>=1;
+    fnc.eval_deriv(a, &fa, have_derivs? &fdera : NULL);
+    fnc.eval_deriv(b, &fb, have_derivs? &fderb : NULL);
+    
+    if ((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0))
+        return NAN;   // endpoints do not bracket root
+    /*  b  is the current estimate of the root,
+        c  is the counter-point (i.e. f(b)*f(c)<0, and |f(b)|<|f(c)| ),
+        a  is the previous estimate of the root:  either
+           (1) a==c, or 
+           (2) f(a) has the same sign as f(b), |f(a)|>|f(b)|,
+               and 'a, b, c' form a monotonic sequence.
+    */
+    double c = a;
+    double fc = fa;
+    double fderc = fdera;
+    double d = b - c;   // always holds the (signed) length of current interval
+    double e = b - c;   // this is used to estimate roundoff (?)
+    if (fabs (fc) < fabs (fb)) {  // swap b and c so that |f(b)| < |f(c)|
+        a = b;
+        b = c;
+        c = a;
+        fa = fb;
+        fb = fc;
+        fc = fa;
+        fdera = fderb;
+        fderb = fderc;
+        fderc = fdera;
+    }    
+    int numIter = 0;
+    bool converged = false;
+    double abstoler = fabs(x_lower-x_upper) * reltoler;
+    do {
+        double tol = 0.5 * GSL_DBL_EPSILON * fabs (b);
+        double m = 0.5 * (c - b);
+        if (fb == 0 || fabs (m) <= tol) 
+            return b;  // the ROOT
+        if (fabs (e) < tol || fabs (fa) <= fabs (fb)) { 
+            d = m;            /* use bisection */
+            e = m;
+        } else {
+            double dd = NAN;
+            if(have_derivs && fderb*fderc>0)  // derivs exist and have the same sign
+            {  // attempt to obtain the approximation by Hermite interpolation
+                dd = interpHermiteMonotonic(0, fb, 0, 1/fderb, fc, 2*m, 1/fderc);
+            }
+            if(gsl_finite(dd)) {  // Hermite interpolation is successful
+                d = dd;
+            } else {  // proceed as usual in the Brent method
+                double p, q, r;
+                double s = fb / fa;
+                if (a == c) {   // secant method (linear interpolation)
+                    p = 2 * m * s;
+                    q = 1 - s;
+                } else {          // inverse quadratic interpolation
+                    q = fa / fc;
+                    r = fb / fc;
+                    p = s * (2 * m * q * (q - r) - (b - a) * (r - 1));
+                    q = (q - 1) * (r - 1) * (s - 1);
+                }
+                if (p > 0)
+                    q = -q;
+                else
+                    p = -p;
+                if (2 * p < GSL_MIN (3 * m * q - fabs (tol * q), fabs (e * q))) { 
+                    e = d;
+                    d = p / q;
+                } else {
+                    /* interpolation failed, fall back to bisection */
+                    d = m;
+                    e = m;
+                }
+            }
+        }
+        
+        a = b;
+        fa = fb;
+        fdera = fderb;
+        if (fabs (d) > tol)
+            b += d;
+        else
+            b += (m > 0 ? +tol : -tol);
+
+        fnc.eval_deriv(b, &fb, have_derivs? &fderb : NULL);
+
+        /* Update the best estimate of the root and bounds on each iteration */
+        if ((fb < 0 && fc < 0) || (fb > 0 && fc > 0)) {   // the root is between 'a' and the new 'b'
+            c = a;       // so the new counterpoint is moved to the old 'a'
+            fc = fa;
+            fderc = fdera;
+            d = b - c;
+            e = b - c;
+        }
+        if (fabs (fc) < fabs (fb)) {   // ensure that 'b' is close to zero than 'c'
+            a = b;
+            b = c;
+            c = a;
+            fa = fb;
+            fb = fc;
+            fc = fa;
+            fdera = fderb;
+            fderb = fderc;
+            fderc = fdera;
+        }
+        
+        numIter++;
+        if(fabs(b-c) <= abstoler) { // convergence criterion from bracketing algorithm
+            converged = true;
+            double offset = fb*(b-c)/(fc-fb);  // offset from b to the root via secant
+            if((offset>0 && offset<c-b) || (offset<0 && offset>c-b))      
+                b += offset;        // final secant step
+        } else if(have_derivs) {    // convergence from derivatives
+            double offset = -fb / fderb;       // offset from b to the root via Newton's method
+            bool bracketed = (offset>0 && offset<c-b) || (offset<0 && offset>c-b);
+            if(bracketed && fabs(offset) < abstoler) {
+                converged = true;
+                b += offset;        // final Newton step
+            }
+        }
+        if(numIter >= 42)
+            converged = true;  // not quite ready, but can't loop forever
+    } while(!converged);
+    return b;  // best approximation
+}
+
+class ScaledRootFinder: public IFunction {
+public:
+    const IFunction& F;
+    double x_edge, x_scaling;
+    bool inf_lower, inf_upper;
+    explicit ScaledRootFinder(const IFunction& _F) : F(_F) {};
+    virtual int numDerivs() const { return F.numDerivs(); }
+    double scaledArg(const double y) const {      // x(y) where y is the scaled argument in [0,1]
+        return inf_upper ? (inf_lower ? 
+            x_scaling*(1/(1-y)-1/y) :             // x in (-inf,inf)
+            x_edge + y/(1-y)*x_scaling) :         // x in [x_edge, inf)
+            x_edge - x_scaling*(1-y)/y;           // x in (-inf, x_edge]
+    }
+    double scaledDer(const double y) const {      // dx/dy
+        return inf_upper ? (inf_lower ? 
+            x_scaling*(1/pow_2(1-y)+1/pow_2(y)) : // (-inf,inf)
+            x_scaling/pow_2(1-y) ) :              // [x_edge, inf)
+            x_scaling/pow_2(y);                   // (-inf, x_edge]
+    }
+    virtual void eval_deriv(const double y, double* val=0, double* der=0, double* der2=0) const {
+        double x = scaledArg(y), f, dfdx;
+        F.eval_deriv(x, val ? &f : NULL, der ? &dfdx : NULL);
+        if(val)
+            *val = f;
+        if(der)
+            *der = dfdx * scaledDer(y);
+        if(der2)
+            *der2= NAN;
+    }
+};
+
+double findRoot(const IFunction& fnc, double xlower, double xupper, double reltoler)
 {
     if(reltoler<=0)
         throw std::invalid_argument("findRoot: relative tolerance must be positive");
-    if(xlower>=xupper)
-        throw std::invalid_argument("findRoot: invalid interval (xlower>=xupper)");
-    gsl_function F;
-    RootFinderParam par;
-    par.inf_lower = xlower==gsl_neginf();
-    par.inf_upper = xupper==gsl_posinf();
-    if(par.inf_upper || par.inf_lower) {  // apply internal scaling procedure
-        F.function = &scaledArgumentFnc;
-        F.params = &par;
-        par.fnc = fnc;
-        par.param = params;
-        if(par.inf_upper && !par.inf_lower) {
-            par.x_edge = xlower;
-            par.x_scaling = fmax(xlower*2, 1.);  // quite an arbitrary choice
-        } else if(par.inf_lower && !par.inf_upper) {
-            par.x_edge = xupper;
-            par.x_scaling = fmax(-xupper*2, 1.);
+    if(xlower>=xupper) {
+        double z=xlower;
+        xlower=xupper;
+        xupper=z;
+    }
+    if(xlower==gsl_neginf() || xupper==gsl_posinf()) {   // apply internal scaling procedure
+        ScaledRootFinder srf(fnc);
+        srf.inf_lower = xlower==gsl_neginf();
+        srf.inf_upper = xupper==gsl_posinf();
+        if(srf.inf_upper && !srf.inf_lower) {
+            srf.x_edge = xlower;
+            srf.x_scaling = fmax(xlower, 1.);  // quite an arbitrary choice
+        } else if(srf.inf_lower && !srf.inf_upper) {
+            srf.x_edge = xupper;
+            srf.x_scaling = fmax(-xupper, 1.);
         } else
-            par.x_scaling=1;
-        xlower = 0;
-        xupper = 1;
-    } else {  // no scaling
-        F.function = fnc;
-        F.params = params;
-    }
-    gsl_root_fsolver *solv = gsl_root_fsolver_alloc(gsl_root_fsolver_brent);
-    try{
-        gsl_root_fsolver_set(solv, &F, xlower, xupper);
-    }
-    catch(std::invalid_argument&) {  // endpoints do not enclose root, or function is infinite there
-        return gsl_nan();
-    }
-    int status=0, iter=0;
-    double abstoler=fabs(xlower-xupper)*reltoler;
-    //double absftoler=fmax(fabs(f1), fabs(f2)) * reltoler;
-    double xroot=(xlower+xupper)/2;
-    do{
-        iter++;
-        status = gsl_root_fsolver_iterate(solv);
-        if(status!=GSL_SUCCESS) break;
-        xroot  = gsl_root_fsolver_root(solv);
-        xlower = gsl_root_fsolver_x_lower(solv);
-        xupper = gsl_root_fsolver_x_upper(solv);
-        status = gsl_root_test_interval (xlower, xupper, abstoler, reltoler);
-    }
-    while((status == GSL_CONTINUE /*|| fabs(fnc(xroot, params))>absftoler*/) && iter < 50);
-    gsl_root_fsolver_free(solv);
-    if(par.inf_upper) {
-        if(par.inf_lower)
-            xroot = par.x_scaling*(1/(1-xroot)-1/xroot);
-        else
-            xroot = par.x_edge + xroot/(1-xroot)*par.x_scaling;
-    } else if(par.inf_lower)
-        xroot = par.x_edge - par.x_scaling*(1-xroot)/xroot;
-    return xroot;
-}
-
-double findRootGuess(function fnc, void* params, double x1, double x2, 
-    double xinit, bool increasing, double reltoler)
-{
-    double finit=fnc(xinit, params);
-    if(finit==0) 
-        return xinit;
-    if(!gsl_finite(finit))
-        throw std::invalid_argument("findRootGuess: initial function value is not finite");
-    if(x1>=x2)
-        throw std::invalid_argument("findRootGuess: interval is non-positive");
-    if(xinit<x1 || xinit>x2)
-        throw std::invalid_argument("findRootGuess: initial guess is outside interval");
-    bool searchleft = (finit<0) ^ increasing;
-    if(searchleft) {
-        // map the interval x:(x1,xinit) onto y:(-1,0) as  y=1/(-1 + 1/(x-xinit) - 1/(x1-xinit) )
-        double y=-0.5, x, fy;
-        int niter=0;
-        do{
-            x=1/(1/y+1/(x1-xinit)+1)+xinit;
-            fy=fnc(x, params);
-            if(fy==0)
-                return x;
-            niter++;
-            if(fy*finit>0)  // go further right
-                y = (y-1)/2;
-        } while(fy*finit>0 && niter<60);
-        if(fy*finit>0)
-            return gsl_nan();
-        return findRoot(fnc, params, x, xinit, reltoler);
-    } else {  // search right
-        // map the interval x:(xinit,x2) onto y:(0,1) as  y=1/(1 + 1/(x-xinit) - 1/(x2-xinit) )
-        double y=0.5, x, fy;
-        int niter=0;
-        do{
-            x=1/(1/y+1/(x2-xinit)-1)+xinit;
-            fy=fnc(x, params);
-            if(fy==0)
-                return x;
-            niter++;
-            if(fy*finit>0)  // go further left
-                y = (y+1)/2;
-        } while(fy*finit>0 && niter<60);
-        if(fy*finit>0)
-            return gsl_nan();
-        return findRoot(fnc, params, xinit, x, reltoler);
+            srf.x_scaling=1;
+        double scroot = findRootHybrid(srf, 0., 1., reltoler);
+        return srf.scaledArg(scroot);
+    } else {  // no scaling - use the original function
+        return findRootHybrid(fnc, xlower, xupper, reltoler);
     }
 }
 
-double findPositiveValue(function fnc, void* params, double x_0, 
-                         double* out_f_0, double* out_f_p, double* out_der)
-{
-    double f_0 = fnc(x_0, params);
-    if(out_f_0!=NULL) *out_f_0 = f_0;
-    // store the initial value even if don't succeed in finding a better one
-    if(out_f_p!=NULL) *out_f_p = f_0;
-    if(f_0>0) {
-        return x_0;
-    }
-    double delta = fmax(fabs(x_0) * GSL_SQRT_DBL_EPSILON, GSL_DBL_EPSILON);
-    int niter=0;
-    do {
-        double f_minus= fnc(x_0-delta, params);
-        double f_plus = fnc(x_0+delta, params);
-        if(f_plus>0) {
-            if(out_f_p!=NULL) *out_f_p = f_plus;
-            if(out_der!=NULL) *out_der = (1.5*f_plus-2*f_0+0.5*f_minus)/delta;
-            return x_0+delta;
-        }
-        if(f_minus>0) {
-            if(out_f_p!=NULL) *out_f_p = f_minus;
-            if(out_der!=NULL) *out_der = (2*f_0-1.5*f_minus-0.5*f_plus)/delta;
-            return x_0-delta;
-        }
-        // simple recipes didn't work; estimate the first and the second derivatives..
-        double der_0 = (f_plus-f_minus)/(2*delta);
-        double der2_0= (f_plus+f_minus-2*f_0)/(delta*delta);
-        // ..and try to guess the point of zero crossing by solving a quadratic equation
-        double D=der_0*der_0-2*f_0*der2_0;  
-        double x_new;
-        if(D>=0) {
-            D=sqrt(D);
-            double x_1=x_0+(-der_0+D)/der2_0;
-            double x_2=x_0+(-der_0-D)/der2_0;
-            x_new = (fabs(x_1-x_0)<fabs(x_2-x_0)) ? x_1 : x_2;
-        } else {  // no luck with quadratic extrapolation, try a linear one
-            x_new = x_0 - (f_0-GSL_SQRT_DBL_EPSILON)/der_0;
-        }
-        double f_new = fnc(x_new, params);
-        if(f_new>0) {
-            if(out_f_p!=NULL) *out_f_p=f_new;
-            // be satisfied with 1st order rule, at least the sign will be correct
-            if(out_der!=NULL) *out_der = (f_new-f_0)/(x_new-x_0);
-            return x_new;
-        }
-        if(f_new>fmax(f_minus, f_plus)) {  // move to a better location
-            delta=fabs(x_0-x_new)*2;
-            x_0=x_new;
-            f_0=f_new;
-        } else if(f_minus>f_0) { 
-            x_0-=delta;
-            f_0=f_minus;
-        } else if(f_plus>f_0) {
-            x_0+=delta;
-            f_0=f_plus;
-        } else
-            return gsl_nan();
-        niter++;
-    } while(niter<3);
-    return gsl_nan();
-}
+// ------- integration routines ------- //
 
-double integrate(function fnc, void* params, double x1, double x2, double reltoler)
+double integrate(const IFunction& fnc, double x1, double x2, double reltoler)
 {
     if(x1==x2)
         return 0;
     gsl_function F;
-    F.function=fnc;
-    F.params=params;
+    F.function = functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
     double result, error;
     if(reltoler==0) {  // don't care about accuracy -- use the fastest integration rule
 #if 1
@@ -297,91 +341,162 @@ double integrate(function fnc, void* params, double x1, double x2, double reltol
 /** The integral \int_{x1}^{x2} f(x) dx is transformed into 
     \int_{y1}^{y2} f(x(y)) (dx/dy) dy,  where x(y) = x_low + (x_upp-x_low) y^2 (3-2y),
     and x1=x(y1), x2=x(y2).   */
-struct ScaledIntParam {
-    function F;
-    void* param;
+
+class ScaledIntegrand: public IFunction {
+public:
+    ScaledIntegrand(const IFunction& _F, double low, double upp) : 
+        F(_F), x_low(low), x_upp(upp) {};
+    virtual int numDerivs() const { return 0; }
+private:
+    const IFunction& F;
     double x_low, x_upp;
+    virtual void eval_deriv(const double y, double* val=0, double* =0, double* =0) const {
+        const double x = x_low + (x_upp-x_low) * y*y*(3-2*y);
+        const double dx = (x_upp-x_low) * 6*y*(1-y);
+        *val = F.value(x) * dx;
+    }
 };
 
-static double scaledIntegrand(double y, void* vparam) {
-    ScaledIntParam* param=static_cast<ScaledIntParam*>(vparam);
-    const double x = param->x_low + (param->x_upp-param->x_low) * y*y*(3-2*y);
-    const double dx = (param->x_upp-param->x_low) * 6*y*(1-y);
-    double val=(*(param->F))(x, param->param);
-    return val*dx;
-}
-
 // invert the above relation between x and y by solving a cubic equation
-static double solveForScaled_y(double x, const ScaledIntParam& param) {
-    assert(x>=param.x_low && x<=param.x_upp);
-    if(x==param.x_low) return 0;
-    if(x==param.x_upp) return 1;
-    double phi=acos(1-2*(x-param.x_low)/(param.x_upp-param.x_low))/3.0;
+static double solveForScaled_y(double x, double x_low, double x_upp) {
+    assert(x>=x_low && x<=x_upp);
+    if(x==x_low) return 0;
+    if(x==x_upp) return 1;
+    double phi=acos(1-2*(x-x_low)/(x_upp-x_low))/3.0;
     return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
 }
 
-double integrateScaled(function fnc, void* params, double x1, double x2, 
+double integrateScaled(const IFunction& fnc, double x1, double x2, 
     double x_low, double x_upp, double rel_toler)
 {
     if(x1==x2) return 0;
     if(x1>x2 || x1<x_low || x2>x_upp || x_low>=x_upp)
         throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
-    ScaledIntParam param;
-    param.F=fnc;
-    param.param=params;
-    param.x_low=x_low;
-    param.x_upp=x_upp;
-    double y1=solveForScaled_y(x1, param);
-    double y2=solveForScaled_y(x2, param);
-    return integrate(scaledIntegrand, &param, y1, y2, rel_toler);
+    ScaledIntegrand transf(fnc, x_low, x_upp);
+    double y1=solveForScaled_y(x1, x_low, x_upp);
+    double y2=solveForScaled_y(x2, x_low, x_upp);
+    return integrate(transf, y1, y2, rel_toler);
 }
 
-double deriv(function fnc, void* params, double x, double h, int dir)
+// ----- derivatives and related fncs ------- //
+
+PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
 {
-    gsl_function F;
-    F.function=fnc;
-    F.params=params;
-    double result, error;
-    if(dir==0)
-        gsl_deriv_central(&F, x, h, &result, &error);
-    else if(dir>0)
-        gsl_deriv_forward(&F, x, h, &result, &error);
-    else
-        gsl_deriv_backward(&F, x, h, &result, &error);
-    return result;
+    delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
+    // we assume that the function can be computed at all points, but the derivatives not necessarily can
+    double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
+    f0 = fder = fder2=NAN;
+    if(fnc.numDerivs()>=2) {
+        fnc.eval_deriv(x0, &f0, &fder, &fder2);
+        if(isFinite(fder+fder2))
+            return;  // no further action necessary
+    }
+    if(!isFinite(f0))  // haven't called it yet
+        fnc.eval_deriv(x0, &f0, fnc.numDerivs()>=1 ? &fder : NULL);
+    fnc.eval_deriv(x0+delta, &fplusd, fnc.numDerivs()>=1 ? &fderplusd : NULL);
+    if(isFinite(fder)) {
+        if(isFinite(fderplusd)) {  // have 1st derivative at both points
+            fder2 = (6*(fplusd-f0)/delta - (4*fder+2*fderplusd))/delta;
+            return;
+        }
+    } else if(isFinite(fderplusd)) {  // have 1st derivative at one point only
+        fder = 2*(fplusd-f0)/delta - fderplusd;
+        fder2= 2*( fderplusd - (fplusd-f0)/delta )/delta;
+        return;
+    }
+    // otherwise we don't have any derivatives computed
+    fminusd= fnc.value(x0-delta);
+    fder = (fplusd-fminusd)/(2*delta);
+    fder2= (fplusd+fminusd-2*f0)/(delta*delta);
 }
 
-double linearFitZero(unsigned int N, const double x[], const double y[])
+double PointNeighborhood::dx_to_posneg(double sgn) const
+{
+    double s0 = sgn*f0, sder = sgn*fder, sder2 = sgn*fder2;
+    if(s0>0)
+        return 0;  // already there
+    if(sder==0) {
+        if(sder2<=0)
+            return NAN;  // we are at a maximum already
+        else
+            return fmax(sqrt(-s0/sder2), delta);
+    }
+    // now we know that s0<=0 and sder!=0
+    if(sder2>=0)  // may only curve towards zero, so a tangent is a safe estimate
+        return -s0/sder + delta*sign(sder);
+    double discr = sder*sder - 2*s0*sder2;
+    if(discr<=0)
+        return NAN;  // never cross zero
+    return sign(sder) * (delta + 2*s0/(sqrt(discr)+abs(sder)) );
+}
+
+double PointNeighborhood::dx_to_nearest_root() const
+{
+    double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation
+    //dx_farthest_root= dx_nearest_root>0 ? gsl_neginf() : gsl_posinf();
+    if(f0*fder2<0) {  // use quadratic equation to find two nearest roots
+        double discr = sqrt(fder*fder - 2*f0*fder2);
+        if(fder<0) {
+            dx_nearest_root = 2*f0/(discr-fder);
+            //dx_farthest_root = (discr-fder)/fder2;
+        } else {
+            dx_nearest_root = 2*f0/(-discr-fder);
+            //dx_farthest_root = (-discr-fder)/fder2;
+        }
+    }
+    return dx_nearest_root;
+}
+
+// ----- other stuff ------- //
+double linearFitZero(unsigned int N, const double x[], const double y[], double* rms)
 {
     double c, cov, sumsq;
     gsl_fit_mul(x, 1, y, 1, N, &c, &cov, &sumsq);
+    if(rms!=NULL)
+        *rms = sqrt(sumsq/N);
     return c;
 }
 
+void linearFit(unsigned int N, const double x[], const double y[], 
+    double& slope, double& intercept, double* rms)
+{
+    double cov00, cov11, cov01, sumsq;
+    gsl_fit_linear(x, 1, y, 1, N, &intercept, &slope, &cov00, &cov01, &cov11, &sumsq);
+    if(rms!=NULL)
+        *rms = sqrt(sumsq/N);
+}
+
+// ------ ODE solver ------- //
 // Simple ODE integrator using Runge-Kutta Dormand-Prince 8 adaptive stepping
 // dy_i/dt = f_i(t) where int (*f)(double t, const double y, double f, void *params)
-struct ode_impl{
-    const gsl_odeiv2_step_type * T;
+  
+static int functionWrapperODE(double t, const double y[], double dydt[], void* param){
+    static_cast<IOdeSystem*>(param)->eval(t, y, dydt);
+    return GSL_SUCCESS;
+}
+
+struct OdeImpl{
     gsl_odeiv2_step * s;
     gsl_odeiv2_control * c;
     gsl_odeiv2_evolve * e;
     gsl_odeiv2_system sys;
 };
-
-OdeSolver::OdeSolver(odefunction fnc, void* params, int numvars, double abstoler, double reltoler) {
-    ode_impl* data=new ode_impl;
-    data->sys.function=fnc;
-    data->sys.jacobian=NULL;
-    data->sys.dimension=numvars;
-    data->sys.params=params;
-    data->s=gsl_odeiv2_step_alloc(gsl_odeiv2_step_rk8pd, numvars);
-    data->c=gsl_odeiv2_control_y_new(abstoler, reltoler);
-    data->e=gsl_odeiv2_evolve_alloc(numvars);
+    
+OdeSolver::OdeSolver(const IOdeSystem& F, double abstoler, double reltoler)
+{
+    OdeImpl* data = new OdeImpl;
+    data->sys.function  = functionWrapperODE;
+    data->sys.jacobian  = NULL;
+    data->sys.dimension = F.size();
+    data->sys.params    = const_cast<IOdeSystem*>(&F);
+    data->s = gsl_odeiv2_step_alloc(gsl_odeiv2_step_rk8pd, data->sys.dimension);
+    data->c = gsl_odeiv2_control_y_new(abstoler, reltoler);
+    data->e = gsl_odeiv2_evolve_alloc(data->sys.dimension);
     impl=data;
 }
 
 OdeSolver::~OdeSolver() {
-    ode_impl* data=static_cast<ode_impl*>(impl);
+    OdeImpl* data=static_cast<OdeImpl*>(impl);
     gsl_odeiv2_evolve_free(data->e);
     gsl_odeiv2_control_free(data->c);
     gsl_odeiv2_step_free(data->s);
@@ -389,8 +504,8 @@ OdeSolver::~OdeSolver() {
 }
 
 int OdeSolver::advance(double tstart, double tfinish, double *y){
-    ode_impl* data=static_cast<ode_impl*>(impl);
-    double h=tfinish-tstart;
+    OdeImpl* data = static_cast<OdeImpl*>(impl);
+    double h = tfinish-tstart;
     double direction=(h>0?1.:-1.);
     int numstep=0;
     while ((tfinish-tstart)*direction>0 && numstep<ODE_MAX_NUM_STEP) {
@@ -398,9 +513,9 @@ int OdeSolver::advance(double tstart, double tfinish, double *y){
         // check if computation is broken
         double test=0;
         for(unsigned int i=0; i<data->sys.dimension; i++) 
-            test+=y[i];
+            test += y[i];
         if (status != GSL_SUCCESS || !isFinite(test)) {
-            numstep=-1;
+            numstep = -1;
             break;
         }
         numstep++;

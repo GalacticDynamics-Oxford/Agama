@@ -4,7 +4,7 @@
 
 namespace potential{
 
-void Plummer::eval_simple(double r,
+void Plummer::eval_deriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
     double rsq = pow_2(r) + pow_2(scaleRadius);
@@ -23,7 +23,7 @@ double Plummer::density_sph(const coord::PosSph &pos) const
 }
 #endif
 
-void NFW::eval_simple(double r,
+void NFW::eval_deriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
     double ln = log(1 + r/scaleRadius);

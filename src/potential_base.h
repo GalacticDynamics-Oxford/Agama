@@ -252,10 +252,10 @@ private:
 
 /** Parent class for analytic spherically-symmetric potentials.
     Derived classes should implement a single function defined in 
-    the `coord::ISimpleFunction::eval_simple` interface, that computes
+    the `mathutils::IFunction::eval_deriv` interface, that computes
     the potential and up to two its derivatives as functions of spherical radius.
     Conversion into other coordinate systems is implemented in this class. */
-class BasePotentialSphericallySymmetric: public BasePotential, coord::ISimpleFunction{
+class BasePotentialSphericallySymmetric: public BasePotential, mathutils::IFunction{
 public:
     BasePotentialSphericallySymmetric() : BasePotential() {}
 
@@ -273,6 +273,8 @@ private:
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
         coord::eval_and_convert_sph(*this, pos, potential, deriv, deriv2); }
+
+    virtual int numDerivs() const { return 2; }
 };
 
 ///@}

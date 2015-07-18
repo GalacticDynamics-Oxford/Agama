@@ -96,10 +96,10 @@ struct SphrParam{
 */
 
 /** helper routine to create an instance of radial density function */
-const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params);
+const mathutils::IFunction* createRadialDiskFnc(const DiskParam& params);
 
 /** helper routine to create an instance of vertical density function */
-const coord::ISimpleFunction* createVerticalDiskFnc(const DiskParam& params);
+const mathutils::IFunction* createVerticalDiskFnc(const DiskParam& params);
 
 /** Residual density profile of a disk component (eq.9 in Dehnen&Binney 1998) */
 class DiskResidual: public BaseDensity {
@@ -113,8 +113,8 @@ public:
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "DiskResidual"; };
 private:
-    const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
-    const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
+    const mathutils::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const mathutils::IFunction* vertical_fnc;  ///< function describing vertical density profile
     virtual double density_cyl(const coord::PosCyl &pos) const;
     virtual double density_car(const coord::PosCar &pos) const
     {  return density_cyl(coord::toPosCyl(pos)); }
@@ -134,8 +134,8 @@ public:
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "DiskAnsatz"; };
 private:
-    const coord::ISimpleFunction* radial_fnc;    ///< function describing radial dependence of surface density
-    const coord::ISimpleFunction* vertical_fnc;  ///< function describing vertical density profile
+    const mathutils::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const mathutils::IFunction* vertical_fnc;  ///< function describing vertical density profile
     /** Compute _part_ of disk potential: f(r)*H(z) */
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;

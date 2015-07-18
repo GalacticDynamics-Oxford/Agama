@@ -15,7 +15,7 @@ StaeckelOblatePerfectEllipsoid::StaeckelOblatePerfectEllipsoid
 }
 
 void StaeckelOblatePerfectEllipsoid::eval_scalar(const coord::PosProlSph& pos,
-    double* value, coord::GradProlSph* deriv, coord::HessProlSph* deriv2) const
+    double* val, coord::GradProlSph* deriv, coord::HessProlSph* deriv2) const
 {
     assert(&(pos.coordsys)==&coordSys);  // make sure we're not bullshited
     double lmn = pos.lambda-pos.nu;
@@ -26,14 +26,15 @@ void StaeckelOblatePerfectEllipsoid::eval_scalar(const coord::PosProlSph& pos,
             "incorrect values of spheroidal coordinates");
     double Glambda, dGdlambda, d2Gdlambda2, Gnu, dGdnu, d2Gdnu2;
     // values and derivatives of G(lambda) and G(nu)
-    eval_simple(pos.lambda, &Glambda, &dGdlambda, &d2Gdlambda2);
-    eval_simple(pos.nu,     &Gnu,     &dGdnu,     &d2Gdnu2);
+    eval_deriv(pos.lambda, &Glambda, &dGdlambda, &d2Gdlambda2);
+    eval_deriv(pos.nu,     &Gnu,     &dGdnu,     &d2Gdnu2);
     double coef=(Glambda-Gnu)/pow_2(lmn);  // common subexpression
-    if(value!=NULL) 
-        *value = (npg*Gnu - lpg*Glambda) / lmn;
+    if(val!=NULL) 
+        *val = (npg*Gnu - lpg*Glambda) / lmn;
     if(deriv!=NULL) {
         deriv->dlambda =  coef*npg - dGdlambda*lpg/lmn;
         deriv->dnu     = -coef*lpg + dGdnu*npg/lmn;
+        deriv->dphi    = 0;
     }
     if(deriv2!=NULL) {
         deriv2->dlambda2   = (2*npg*(-coef + dGdlambda/lmn) - d2Gdlambda2*lpg) / lmn;
@@ -42,7 +43,7 @@ void StaeckelOblatePerfectEllipsoid::eval_scalar(const coord::PosProlSph& pos,
     }
 }
 
-void StaeckelOblatePerfectEllipsoid::eval_simple(double tau, double* G, double* deriv, double* deriv2) const
+void StaeckelOblatePerfectEllipsoid::eval_deriv(double tau, double* G, double* deriv, double* deriv2) const
 {
     // G is defined by eq.27 in de Zeeuw(1985)
     double sqmg = sqrt(-coordSys.gamma), tpg=tau+coordSys.gamma;

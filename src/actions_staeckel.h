@@ -17,7 +17,7 @@ of the original code remains.
 #pragma once
 #include "actions_base.h"
 #include "potential_staeckel.h"
-#include "mathutils.h"
+#include "math_base.h"
 
 namespace actions{
 
@@ -26,7 +26,7 @@ namespace actions{
 
 /** integration intervals for actions and angles: x=tau+gamma, and tau is lambda or nu 
     (shared between Staeckel and Fudge action finders). */
-struct AxisymActionIntLimits {
+struct AxisymIntLimits {
     double xlambda_min, xlambda_max, xnu_min, xnu_max;
 };
 
@@ -41,101 +41,112 @@ struct AxisymGenFuncDerivatives {
     double dSdE, dSdI3, dSdLz;
 };
 
-/** aggregate structure that contains the point in prolate spheroidal coordinates,
+/** aggregate class that contains the point in prolate spheroidal coordinates,
     integrals of motion, and reference to the potential,
     shared between Axisymmetric Staeckel  and Axisymmetric Fudge action finders;
     only the coordinates and the two classical integrals are in common between them.
+    It also implements the IFunction interface, providing the "auxiliary function" 
+    that is used in finding the integration limits and computing actions and angles;
+    this function F(tau) is related to the canonical momentum p(tau)  as 
+    \f$  p(tau)^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma))  \f$,
+    and the actual implementation of this function is specific to each descendant class.
 */
-struct AxisymData {
-    coord::PosVelProlSph point;             ///< position/derivative in prolate spheroidal coordinates
-    const double signz;                     ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
-    const double E;                         ///< total energy
-    const double Lz;                        ///< z-component of angular momentum
-    AxisymData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz) :
+class AxisymFunctionBase: public mathutils::IFunction {
+public:
+    coord::PosVelProlSph point; ///< position/derivative in prolate spheroidal coordinates
+    const double signz;         ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
+    const double E;             ///< total energy
+    const double Lz;            ///< z-component of angular momentum
+    AxisymFunctionBase(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz) :
         point(_point), signz(_signz), E(_E), Lz(_Lz) {};
 };
 
-/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
-    SPECIALIZED for the Axisymmetric Staeckel action finder */
-struct AxisymStaeckelData: public AxisymData {
-    const double I3;                        ///< third integral
-    const coord::ISimpleFunction& fncG;     ///< single-variable function of a Staeckel potential
-    AxisymStaeckelData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
-        double _I3, const coord::ISimpleFunction& _fncG) :
-        AxisymData(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
-};
-
-/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
-    SPECIALIZED for the Axisymmetric Fudge action finder */
-struct AxisymFudgeData: public AxisymData {
-    const double Ilambda, Inu;              ///< approximate integrals of motion for two quasi-separable directions
-    const potential::BasePotential& poten;  ///< gravitational potential
-    AxisymFudgeData(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
-        double _Ilambda, double _Inu, const potential::BasePotential& _poten) :
-        AxisymData(_point, _signz, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
-};
 
 ///@}
 /// \name ------ SPECIALIZED functions for Staeckel action finder -------
 ///@{
 
+/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
+    SPECIALIZED for the Axisymmetric Staeckel action finder */
+class AxisymFunctionStaeckel: public AxisymFunctionBase {
+public:
+    const double I3;                        ///< third integral
+    const mathutils::IFunction& fncG;       ///< single-variable function of a Staeckel potential
+    AxisymFunctionStaeckel(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
+        double _I3, const mathutils::IFunction& _fncG) :
+        AxisymFunctionBase(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
+
+    /** auxiliary function that enters the definition of canonical momentum for 
+        for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
+        the argument tau is replaced by tau+gamma >= 0. */    
+    virtual void eval_deriv(const double tauplusgamma, 
+        double* value=0, double* deriv=0, double* deriv2=0) const;
+    virtual int numDerivs() const { return 2; }
+};
+
 /** compute integrals of motion in the Staeckel potential of an oblate perfect ellipsoid, 
-    together with the coordinates in its prolate spheroidal coordinate system */
-AxisymStaeckelData findIntegralsOfMotionOblatePerfectEllipsoid(
+    together with the coordinates in its prolate spheroidal coordinate system 
+*/
+AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid(
     const potential::StaeckelOblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
-
-/** auxiliary function that enters the definition of canonical momentum for 
-    for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
-    the argument tau is replaced by tau+gamma >= 0. */
-double axisymStaeckelFnc(double tauplusgamma, void* v_param);
 
 ///@}
 /// \name -------- SPECIALIZED functions for the Axisymmetric Fudge action finder --------
 ///@{
 
+/** parameters of potential, integrals of motion, and prolate spheroidal coordinates 
+    SPECIALIZED for the Axisymmetric Fudge action finder */
+class AxisymFunctionFudge: public AxisymFunctionBase {
+public:
+    const double Ilambda, Inu;              ///< approximate integrals of motion for two quasi-separable directions
+    const potential::BasePotential& poten;  ///< gravitational potential
+    AxisymFunctionFudge(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
+        double _Ilambda, double _Inu, const potential::BasePotential& _poten) :
+        AxisymFunctionBase(_point, _signz, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
+
+    /** Auxiliary function F analogous to that of Staeckel action finder:
+        namely, the momentum is given by  p_tau^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma)),
+        where  -gamma<=tau<=-alpha  for the  nu-component of momentum, 
+        and   -alpha<=tau<infinity  for the  lambda-component of momentum.
+        For numerical convenience, tau is replaced by x=tau+gamma. */
+    virtual void eval_deriv(const double tauplusgamma, 
+        double* value=0, double* deriv=0, double* deriv2=0) const;
+    virtual int numDerivs() const { return 1; }
+};
+
 /** compute true (E, Lz) and approximate (Ilambda, Inu) integrals of motion in an arbitrary 
     potential used for the Staeckel Fudge, 
-    together with the coordinates in its prolate spheroidal coordinate system */
-AxisymFudgeData findIntegralsOfMotionAxisymFudge(
+    together with the coordinates in its prolate spheroidal coordinate system 
+*/
+AxisymFunctionFudge findIntegralsOfMotionAxisymFudge(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, 
     const coord::ProlSph& coordsys);
 
-/** Auxiliary function F analogous to that of Staeckel action finder:
-    namely, the momentum is given by  p_tau^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma)),
-    where  -gamma<=tau<=-alpha  for the  nu-component of momentum, 
-    and   -alpha<=tau<infinity  for the  lambda-component of momentum.
-    For numerical convenience, tau is replaced by x=tau+gamma. */
-double axisymFudgeFnc(double tauplusgamma, void* v_data);
-
 ///@}
 /// \name -------- COMMON routines for Staeckel and Fudge action finders --------
 ///@{
-///     In what follows, "fnc" refers to either "axisymStaeckelFnc" or "axisymFudgeFnc",
-///     and "data" could be either "AxisymStaeckelData" or "AxisymFudgeData", correspondingly.
+///   In what follows, "data" refers to either "AxisymFunctionStaeckel" or "AxisymFunctionFudge"
 
 /** Compute the intervals of tau for which p^2(tau)>=0, 
     where  -gamma = tau_nu_min <= tau <= tau_nu_max <= -alpha  is the interval for the "nu" branch,
     and  -alpha <= tau_lambda_min <= tau <= tau_lambda_max < infinity  is the interval for "lambda".
     For numerical convenience, we replace tau with  x=tau+gamma. */
-AxisymActionIntLimits findIntegrationLimitsAxisym(mathutils::function fnc, AxisymData& data);
+AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc);
 
 /** Compute the derivatives of integrals of motion (E, Lz, I3) over actions (Jr, Jz, Jphi),
     using the expressions A4-A9 in Sanders(2012).  These quantities are independent of angles,
     and in particular, the derivatives of energy w.r.t. the three actions are the frequencies. */
-AxisymIntDerivatives computeIntDerivatives(mathutils::function fnc, 
-    const AxisymData& data, const AxisymActionIntLimits& lim);
+AxisymIntDerivatives computeIntDerivatives(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
 
 /** Compute the derivatives of generating function S over integrals of motion (E, Lz, I3),
     using the expressions A10-A12 in Sanders(2012).  These quantities do depend on angles. */
-AxisymGenFuncDerivatives computeGenFuncDerivatives(mathutils::function fnc, 
-    const AxisymData& data, const AxisymActionIntLimits& lim);
+AxisymGenFuncDerivatives computeGenFuncDerivatives(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
 
 /** Compute actions by integrating the momentum over the range of tau on which it is positive,
     separately for the "nu" and "lambda" branches (equation A1 in Sanders 2012). */
-Actions computeActions(mathutils::function fnc, 
-    const AxisymData& data, const AxisymActionIntLimits& lim);
+Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
 
 /** Compute angles from the derivatives of integrals of motion and the generating function
     (equation A3 in Sanders 2012). */
@@ -146,8 +157,7 @@ Angles computeAngles(const AxisymIntDerivatives& derI,
     Note that for a given orbit, only the derivatives of the generating function depend 
     on the angles (assuming that the actions are constant); in principle, this may be used 
     to skip the computation of the derivatives matrix of integrals (not presently implemented). */
-ActionAngles computeActionAngles(mathutils::function fnc, 
-    const AxisymData& data, const AxisymActionIntLimits& lim);
+ActionAngles computeActionAngles(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
 
 ///@}
 /// \name  ------- The driver routines that combine the above steps -------
@@ -201,6 +211,3 @@ double estimateInterfocalDistance(
 
 ///@}
 }  // namespace actions
-
-extern int numeval_eoe, numeval_eidb, numeval_fil, numeval_ca, numeval_cid, numeval_cgfd, numeval_other;
-extern int* numeval;

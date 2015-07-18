@@ -1,6 +1,5 @@
 // composite density and potential classes
 #include "potential_composite.h"
-extern int* numeval;
 
 namespace potential{
 
@@ -33,7 +32,6 @@ BaseDensity::SYMMETRYTYPE CompositeDensity::symmetry() const {
 void CompositeCyl::eval_cyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
-    (*numeval)++;
     if(potential) *potential=0;
     if(deriv)  deriv->dR=deriv->dz=deriv->dphi=0;
     if(deriv2) deriv2->dR2=deriv2->dz2=deriv2->dphi2=deriv2->dRdz=deriv2->dRdphi=deriv2->dzdphi=0;

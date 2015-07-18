@@ -35,9 +35,7 @@ The fundamental routines operating on these structures are the following:
   in different coordinate systems.
 */
 #pragma once
-
-/// convenience function for squaring a number, used in many places
-inline double pow_2(double x) { return x*x; }
+#include "math_base.h"
 
 namespace coord{
 
@@ -203,7 +201,7 @@ typedef struct GradT<Sph> GradSph;
 
 /// gradient of scalar function in prolate spheroidal coordinates
 template<> struct GradT<ProlSph>{
-    double dlambda, dnu;  ///< note: derivative by phi in assumed to be zero
+    double dlambda, dnu, dphi;
 };
 typedef struct GradT<ProlSph> GradProlSph;
 
@@ -239,18 +237,8 @@ template<> struct HessT<ProlSph>{
 typedef struct HessT<ProlSph> HessProlSph;
 
 ///@}
-/// \name   Abstract interface classes for functions
+/// \name   Abstract interface classes for scalar functions
 ///@{
-
-/** Prototype of a simple function that depends on one variable and provides up to two derivatives */
-class ISimpleFunction {
-public:
-    ISimpleFunction() {};
-    virtual ~ISimpleFunction() {};
-    /** Compute any combination of function, first and second derivative;
-     each one is computed if the corresponding output parameter is not NULL. */
-    virtual void eval_simple(const double x, double* value=0, double* deriv=0, double* deriv2=0) const=0;
-};
 
 /** Prototype of a scalar function which is computed in a particular coordinate system */
 template<typename coordSysT>
@@ -298,7 +286,10 @@ template<> struct PosDerivT<Sph, Cyl> {
 template<> struct PosDerivT<Cyl, ProlSph> {
     double dlambdadR, dlambdadz, dnudR, dnudz;
 };
-
+template<> struct PosDerivT<ProlSph, Cyl> {
+    double dRdlambda, dzdlambda, dRdnu, dzdnu;
+};
+    
 
 /** second derivatives of coordinate transformation from source to destination 
     coordinate systems (srcCS=>destCS): d^2(dest_coord)/d(source_coord1)d(source_coord2) */
@@ -330,7 +321,10 @@ template<> struct PosDeriv2T<Cyl, Sph> {
 template<> struct PosDeriv2T<Cyl, ProlSph> {
     double d2lambdadR2, d2lambdadRdz, d2lambdadz2, d2nudR2, d2nudRdz, d2nudz2;
 };
-
+template<> struct PosDeriv2T<ProlSph, Cyl> {
+    double d2Rdlambda2, d2Rdlambdadnu, d2Rdnu2, d2zdlambda2, d2zdlambdadnu, d2zdnu2;
+};
+    
 ///@}
 /// \name   Routines for conversion between position/velocity in different coordinate systems
 ///@{
@@ -544,7 +538,7 @@ inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
     Convert the derivatives of a simple function that only depends on the spherical radius 
     into gradients and hessians in a target coordinate system (outputCS). */
 template<typename outputCS>
-void eval_and_convert_sph(const ISimpleFunction& F,
+void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0);
 
 ///@}

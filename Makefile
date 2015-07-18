@@ -19,8 +19,8 @@ SOURCES   = coord.cpp \
             mathutils.cpp \
             orbit.cpp 
 
-LEGACYSRC = Stackel_JS.cpp \
-            coordsys.cpp 
+#LEGACYSRC = Stackel_JS.cpp \
+#            coordsys.cpp 
 
 TESTSRCS  = test_mathutils.cpp \
             test_coord.cpp \

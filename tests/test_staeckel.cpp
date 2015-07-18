@@ -85,6 +85,8 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     }
     stats.finish();
     statf.finish();
+    bool ok= stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps && !ex_afs
+          && statf.disp.Jr<eps && statf.disp.Jz<eps && statf.disp.Jphi<eps && !ex_aff;
     std::cout << coordSysT::name() << ", Exact"
     ":  Jr="  <<stats.avg.Jr  <<" +- "<<stats.disp.Jr<<
     ",  Jz="  <<stats.avg.Jz  <<" +- "<<stats.disp.Jz<<
@@ -92,9 +94,8 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     std::cout << coordSysT::name() << ", Fudge"
     ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.disp.Jr<<
     ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.disp.Jz<<
-    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
-    return stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps && !ex_afs
-        && statf.disp.Jr<eps && statf.disp.Jz<eps && statf.disp.Jphi<eps && !ex_aff;
+    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi << (ok?"":" ***")<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
+    return ok;
 }
 
 bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, 
@@ -119,8 +120,8 @@ int main() {
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4097), "tube orbit in x-z plane near separatrix");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4096), "box orbit in x-z plane near separatrix");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. ,1e-6, 0.4097), "orbit with Jphi<<J_z");
-    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-3  ), "almost in-plane orbit (Jz~0)");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. ,1e-8, 0.4097), "orbit with Jphi<<J_z");
+    allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-4  ), "almost in-plane orbit (Jz~0)");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 0.    ), "exactly in-plane orbit (Jz=0)");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0. ,.296, 0.    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
     if(allok)

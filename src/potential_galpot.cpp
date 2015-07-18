@@ -48,14 +48,14 @@ const double GALPOT_RMIN=1.e-4,  ///< DEFAULT min radius of logarithmic radial g
 //----- disk density and potential -----//
 
 /** simple exponential radial density profile without inner hole or wiggles */
-class DiskDensityRadialExp: public coord::ISimpleFunction {
+class DiskDensityRadialExp: public mathutils::IFunction {
 public:
     DiskDensityRadialExp(double _surfaceDensity, double _scaleLength): 
         surfaceDensity(_surfaceDensity), scaleLength(_scaleLength) {};
 private:
     const double surfaceDensity, scaleLength;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_simple(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+    virtual void eval_deriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
         double val = surfaceDensity * exp(-R/scaleLength);
         if(f)
             *f = val;
@@ -64,16 +64,17 @@ private:
         if(fpprime)
             *fpprime = val/pow_2(scaleLength);
     }
+    virtual int numDerivs() const { return 2; }
 };
 
 /** more convoluted radial density profile - exponential with possible inner hole and modulation */
-class DiskDensityRadialRichExp: public coord::ISimpleFunction {
+class DiskDensityRadialRichExp: public mathutils::IFunction {
 public:
     DiskDensityRadialRichExp(const DiskParam& _params): params(_params) {};
 private:
     const DiskParam params;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_simple(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+    virtual void eval_deriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
         if(params.innerCutoffRadius && R==0.) {
             if(f) *f=0;
             if(fprime)  *fprime=0;
@@ -92,32 +93,34 @@ private:
         if(f) 
             *f = val;
     }
+    virtual int numDerivs() const { return 2; }
 };
 
 /** exponential vertical disk density profile */
-class DiskDensityVerticalExp: public coord::ISimpleFunction {
+class DiskDensityVerticalExp: public mathutils::IFunction {
 public:
     DiskDensityVerticalExp(double _scaleHeight): scaleHeight(_scaleHeight) {};
 private:
     const double scaleHeight;
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         double      x        = fabs(z/scaleHeight);
         double      h        = exp(-x);
         if(H)       *H       = scaleHeight/2*(h-1+x);
         if(Hprime)  *Hprime  = sign(z)*(1.-h)/2;
         if(Hpprime) *Hpprime = h/(2*scaleHeight);
     }
+    virtual int numDerivs() const { return 2; }
 };
 
 /** isothermal (sech^2) vertical disk density profile */
-class DiskDensityVerticalIsothermal: public coord::ISimpleFunction {
+class DiskDensityVerticalIsothermal: public mathutils::IFunction {
 public:
     DiskDensityVerticalIsothermal(double _scaleHeight): scaleHeight(_scaleHeight) {};
 private:
     const double scaleHeight;
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         double      x        = fabs(z/scaleHeight);
         double      h        = exp(-x);
         double      sh1      = 1.+h;
@@ -125,23 +128,25 @@ private:
         if(Hprime)  *Hprime  = 0.5*sign(z)*(1.-h)/sh1;
         if(Hpprime) *Hpprime = h/(sh1*sh1*scaleHeight);
     }
+    virtual int numDerivs() const { return 2; }
 };
 
 /** vertically thin disk profile */
-class DiskDensityVerticalThin: public coord::ISimpleFunction {
+class DiskDensityVerticalThin: public mathutils::IFunction {
 public:
     DiskDensityVerticalThin() {};
 private:
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_simple(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         if(H)       *H       = fabs(z)/2;
         if(Hprime)  *Hprime  = sign(z)/2;
         if(Hpprime) *Hpprime = 0;
     }
+    virtual int numDerivs() const { return 2; }
 };
 
 /** helper routine to create an instance of radial density function */
-const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params) {
+const mathutils::IFunction* createRadialDiskFnc(const DiskParam& params) {
     if(params.scaleLength<=0)
         throw std::invalid_argument("Disk scale length cannot be <=0");
     if(params.innerCutoffRadius<0)
@@ -153,7 +158,7 @@ const coord::ISimpleFunction* createRadialDiskFnc(const DiskParam& params) {
 }
 
 /** helper routine to create an instance of vertical density function */
-const coord::ISimpleFunction* createVerticalDiskFnc(const DiskParam& params) {
+const mathutils::IFunction* createVerticalDiskFnc(const DiskParam& params) {
     if(params.scaleHeight>0)
         return new DiskDensityVerticalExp(params.scaleHeight);
     if(params.scaleHeight<0)
@@ -166,17 +171,17 @@ double DiskResidual::density_cyl(const coord::PosCyl &pos) const
 {
     if(pos.z==0) return 0;
     double h, H, Hp, F, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
-    radial_fnc  ->eval_simple(pos.R, &F);
+    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
+    radial_fnc  ->eval_deriv(pos.R, &F);
     return (F-f)*h - 2*fp*(H+pos.z*Hp)/r - fpp*H;
 }
 
 double DiskAnsatz::density_cyl(const coord::PosCyl &pos) const
 {
     double h, H, Hp, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
+    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
     return f*h + (pos.z!=0 ? 2*fp*(H+pos.z*Hp)/r : 0) + fpp*H;
 }
 
@@ -185,8 +190,8 @@ void DiskAnsatz::eval_cyl(const coord::PosCyl &pos,
 {
     const double r=hypot(pos.R, pos.z);
     double h, H, Hp, f, fp, fpp;
-    vertical_fnc->eval_simple(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_simple(r, &f, &fp, &fpp);
+    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
     f*=4*M_PI; fp*=4*M_PI; fpp*=4*M_PI;
     double Rr=pos.R/r, zr=pos.z/r;
     if(r==0) { Rr=0; zr=0; }

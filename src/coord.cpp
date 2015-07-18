@@ -243,6 +243,31 @@ PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, C
     return PosCyl(R, z, p.phi);
 }
 
+template<> 
+PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2T<ProlSph, Cyl>* deriv2)
+{
+    const double lplusa = p.lambda+p.coordsys.alpha, nplusa = p.nu+p.coordsys.alpha;  // note: nu+alpha<=0
+    const double lplusg = p.lambda+p.coordsys.gamma, nplusg = p.nu+p.coordsys.gamma;
+    const double gminusa = p.coordsys.gamma-p.coordsys.alpha;
+    const double R = sqrt( lplusa * nplusa / -gminusa );
+    const double z = sqrt( lplusg * nplusg /  gminusa );
+    if(deriv!=NULL) {
+        deriv->dRdlambda = 0.5*R/lplusa;
+        deriv->dRdnu     = 0.5*R/nplusa;
+        deriv->dzdlambda = 0.5*z/lplusg;
+        deriv->dzdnu     = 0.5*z/nplusg;
+    }
+    if(deriv2!=NULL) {
+        deriv2->d2Rdlambda2   = -0.25*R/pow_2(lplusa);
+        deriv2->d2Rdnu2       = -0.25*R/pow_2(nplusa);
+        deriv2->d2Rdlambdadnu = -0.25*R/(lplusa*nplusa);
+        deriv2->d2zdlambda2   = -0.25*z/pow_2(lplusg);
+        deriv2->d2zdnu2       = -0.25*z/pow_2(nplusg);
+        deriv2->d2zdlambdadnu = -0.25*z/(lplusg*nplusg);        
+    }
+    return PosCyl(R, z, p.phi);
+}
+
 template<>
 PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2)
@@ -253,12 +278,12 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     //double c = cs.alpha*cs.gamma - R2*cs.gamma - z2*cs.alpha;
     //double det = b*b-4*c;    // <-- bad method, subject to dangerous cancellation errors
     double det = pow_2(R2+del) + 4*R2*(cs.gamma-cs.alpha);  // positive-semidefinite
-    if(det<0)
+    if(det<0)   // can't happen anymore
         throw std::invalid_argument("Error in coordinate conversion Cyl=>ProlSph: det<0");
     double sqD=sqrt(det);
     // lambda and mu are roots of quadratic equation  t^2+b*t+c=0
-    double lambda = 0.5*(-b+sqD);
-    double nu     = 0.5*(-b-sqD);
+    double lambda = 0.5*(-b+sqD);   // not using more numerically stable expressions because 
+    double nu     = 0.5*(-b-sqD);   // the roots are known to land far from zero anyway.
     lambda=fmax(-cs.alpha, lambda);
     nu=fmin(-cs.alpha, fmax(nu, -cs.gamma)); // prevent roundoff errors
     if(z2==0) 
@@ -450,9 +475,18 @@ GradSph toGrad(const GradCyl& src, const PosDerivT<Sph, Cyl>& deriv) {
 template<>
 GradCyl toGrad(const GradProlSph& src, const PosDerivT<Cyl, ProlSph>& deriv) {
     GradCyl dest;
-    dest.dR = src.dlambda*deriv.dlambdadR + src.dnu*deriv.dnudR;
-    dest.dz = src.dlambda*deriv.dlambdadz + src.dnu*deriv.dnudz;
-    dest.dphi = 0;
+    dest.dR   = src.dlambda*deriv.dlambdadR + src.dnu*deriv.dnudR;
+    dest.dz   = src.dlambda*deriv.dlambdadz + src.dnu*deriv.dnudz;
+    dest.dphi = src.dphi;
+    return dest;
+}
+
+template<>
+GradProlSph toGrad(const GradCyl& src, const PosDerivT<ProlSph, Cyl>& deriv) {
+    GradProlSph dest;
+    dest.dlambda = src.dR*deriv.dRdlambda + src.dz*deriv.dzdlambda;
+    dest.dnu     = src.dR*deriv.dRdnu     + src.dz*deriv.dzdnu;
+    dest.dphi    = src.dphi;
     return dest;
 }
 
@@ -669,16 +703,17 @@ template HessCyl toHess(const GradProlSph&, const HessProlSph&, const PosDerivT<
 
 //------ conversion of derivatives of f(r) into gradients/hessians in different coord.sys. ------//
 template<>
-void eval_and_convert_sph(const ISimpleFunction& F,
+void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosCar& pos, double* value, GradCar* deriv, HessCar* deriv2)
 {
+    assert(F.numDerivs()>=2);
     const double r=sqrt(pow_2(pos.x)+pow_2(pos.y)+pow_2(pos.z));
     if(deriv==NULL && deriv2==NULL) {
-        F.eval_simple(r, value);
+        F.eval_deriv(r, value);
         return;
     }
     double der, der2;
-    F.eval_simple(r, value, &der, deriv2!=NULL ? &der2 : 0);
+    F.eval_deriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
     double x_over_r=pos.x/r, y_over_r=pos.y/r, z_over_r=pos.z/r;
     if(r==0) {
         x_over_r=y_over_r=z_over_r=0;
@@ -704,16 +739,17 @@ void eval_and_convert_sph(const ISimpleFunction& F,
 }
 
 template<>
-void eval_and_convert_sph(const ISimpleFunction& F,
+void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosCyl& pos, double* value, GradCyl* deriv, HessCyl* deriv2)
 {
+    assert(F.numDerivs()>=2);
     const double r=sqrt(pow_2(pos.R)+pow_2(pos.z));
     if(deriv==NULL && deriv2==NULL) {
-        F.eval_simple(r, value);
+        F.eval_deriv(r, value);
         return;
     }
     double der, der2;
-    F.eval_simple(r, value, &der, deriv2!=NULL ? &der2 : 0);
+    F.eval_deriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
     double R_over_r=pos.R/r, z_over_r=pos.z/r;
     if(r==0) {
         R_over_r=z_over_r=0;
@@ -737,11 +773,12 @@ void eval_and_convert_sph(const ISimpleFunction& F,
 }
 
 template<>
-void eval_and_convert_sph(const ISimpleFunction& F,
+void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosSph& pos, double* value, GradSph* deriv, HessSph* deriv2)
 {
+    assert(F.numDerivs()>=2);
     double der, der2;
-    F.eval_simple(pos.r, value, deriv!=NULL ? &der : NULL, deriv2!=NULL ? &der2 : NULL);
+    F.eval_deriv(pos.r, value, deriv!=NULL ? &der : NULL, deriv2!=NULL ? &der2 : NULL);
     if(deriv) {
         deriv->dr = der;
         deriv->dtheta = deriv->dphi = 0;
@@ -755,11 +792,11 @@ void eval_and_convert_sph(const ISimpleFunction& F,
 /* explicit _instantiations_ of these templated functions 
    (as opposed to _specializations_ above), needed to make sure all of them get compiled.
    That's the extra boilerplate needed by C++ standard... */
-template void eval_and_convert_sph(const ISimpleFunction& F,
+template void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosCar& pos, double* value, GradCar* deriv, HessCar* deriv2);
-template void eval_and_convert_sph(const ISimpleFunction& F,
+template void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosCyl& pos, double* value, GradCyl* deriv, HessCyl* deriv2);
-template void eval_and_convert_sph(const ISimpleFunction& F,
+template void eval_and_convert_sph(const mathutils::IFunction& F,
     const PosSph& pos, double* value, GradSph* deriv, HessSph* deriv2);
     
 }  // namespace coord

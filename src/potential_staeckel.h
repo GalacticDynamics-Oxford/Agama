@@ -13,7 +13,7 @@ namespace potential{
     \f$  -\gamma \le \nu \le -\alpha \le \lambda < \infty  \f$.
 */
 class StaeckelOblatePerfectEllipsoid: public BasePotential, 
-    public coord::IScalarFunction<coord::ProlSph>, public coord::ISimpleFunction {
+    public coord::IScalarFunction<coord::ProlSph>, public mathutils::IFunction {
 public:
     StaeckelOblatePerfectEllipsoid(double _mass, double major_axis, double minor_axis);
 
@@ -26,8 +26,8 @@ public:
 
     /** evaluates the function G(tau) and up to two its derivatives,
         if the supplied output arguments are not NULL 
-        (implements the coord::ISimpleFunction interface) */
-    virtual void eval_simple(double tau, double* G=0, double* Gderiv=0, double* Gderiv2=0) const;
+        (implements the mathutils::IFunction interface) */
+    virtual void eval_deriv(double tau, double* G=0, double* Gderiv=0, double* Gderiv2=0) const;
 
 private:
     const double mass;
@@ -55,6 +55,8 @@ private:
         (implements the coord::IScalarFunction<ProlSph> interface) */
     virtual void eval_scalar(const coord::PosProlSph& pos,
         double* value=0, coord::GradProlSph* deriv=0, coord::HessProlSph* deriv2=0) const;
+
+    virtual int numDerivs() const { return 2; }
 };
 
 }  // namespace potential
