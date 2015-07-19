@@ -3,6 +3,13 @@
 /// convenience function for squaring a number, used in many places
 inline double pow_2(double x) { return x*x; }
 
+#ifndef INFINITY
+#define INFINITY 1e10000
+#endif
+#ifndef NAN
+#define NAN (INFINITY/INFINITY)
+#endif
+
 namespace mathutils{
 
 /** Prototype of a function of one variable that may provide up to two derivatives.

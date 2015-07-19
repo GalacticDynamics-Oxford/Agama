@@ -17,6 +17,9 @@ SOURCES   = coord.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
             mathutils.cpp \
+            math_spline.cpp \
+            math_spline_approx.cpp \
+            math_grid.cpp \
             orbit.cpp 
 
 #LEGACYSRC = Stackel_JS.cpp \

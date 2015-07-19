@@ -12,7 +12,6 @@
 #include <gsl/gsl_ieee_utils.h>
 #include <gsl/gsl_multimin.h>
 #include <gsl/gsl_math.h>
-#include <gsl/gsl_min.h>
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_sf_bessel.h>
 #include <gsl/gsl_sf_erf.h>
@@ -28,15 +27,17 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_roots.h>
+#include <gsl/gsl_min.h>
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
-#include <gsl/gsl_deriv.h>
 #include <gsl/gsl_fit.h>
 #include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
 #include <cassert>
 
 namespace mathutils{
+
+const int MAXITER = 42;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
 
 // ------ error handling ------ //
 
@@ -120,7 +121,8 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
 }
 
 // a hybrid between Brent's method and interpolation of root using function derivatives
-double findRootHybrid(const IFunction& fnc, 
+// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
+static double findRootHybrid(const IFunction& fnc, 
     const double x_lower, const double x_upper, const double reltoler)
 {
     double a = x_lower;
@@ -130,7 +132,7 @@ double findRootHybrid(const IFunction& fnc,
     bool have_derivs = fnc.numDerivs()>=1;
     fnc.eval_deriv(a, &fa, have_derivs? &fdera : NULL);
     fnc.eval_deriv(b, &fb, have_derivs? &fderb : NULL);
-    
+
     if ((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0))
         return NAN;   // endpoints do not bracket root
     /*  b  is the current estimate of the root,
@@ -155,7 +157,7 @@ double findRootHybrid(const IFunction& fnc,
         fdera = fderb;
         fderb = fderc;
         fderc = fdera;
-    }    
+    }
     int numIter = 0;
     bool converged = false;
     double abstoler = fabs(x_lower-x_upper) * reltoler;
@@ -170,15 +172,15 @@ double findRootHybrid(const IFunction& fnc,
         } else {
             double dd = NAN;
             if(have_derivs && fderb*fderc>0)  // derivs exist and have the same sign
-            {  // attempt to obtain the approximation by Hermite interpolation
+            {   // attempt to obtain the approximation by Hermite interpolation
                 dd = interpHermiteMonotonic(0, fb, 0, 1/fderb, fc, 2*m, 1/fderc);
             }
-            if(gsl_finite(dd)) {  // Hermite interpolation is successful
+            if(dd == dd) {  // Hermite interpolation is successful
                 d = dd;
-            } else {  // proceed as usual in the Brent method
+            } else {        // proceed as usual in the Brent method
                 double p, q, r;
                 double s = fb / fa;
-                if (a == c) {   // secant method (linear interpolation)
+                if (a == c) {     // secant method (linear interpolation)
                     p = 2 * m * s;
                     q = 1 - s;
                 } else {          // inverse quadratic interpolation
@@ -201,7 +203,7 @@ double findRootHybrid(const IFunction& fnc,
                 }
             }
         }
-        
+
         a = b;
         fa = fb;
         fdera = fderb;
@@ -231,7 +233,7 @@ double findRootHybrid(const IFunction& fnc,
             fderb = fderc;
             fderc = fdera;
         }
-        
+
         numIter++;
         if(fabs(b-c) <= abstoler) { // convergence criterion from bracketing algorithm
             converged = true;
@@ -246,43 +248,105 @@ double findRootHybrid(const IFunction& fnc,
                 b += offset;        // final Newton step
             }
         }
-        if(numIter >= 42)
+        if(numIter >= MAXITER)
             converged = true;  // not quite ready, but can't loop forever
     } while(!converged);
     return b;  // best approximation
 }
 
-class ScaledRootFinder: public IFunction {
+/** scaling transformation of input function for the case that the interval is (semi-)infinite:
+    it replaces the original argument  x  with  y in the range [0:1],  and implements the transformation of derivative.
+*/
+class ScaledFunction: public IFunction {
 public:
     const IFunction& F;
     double x_edge, x_scaling;
     bool inf_lower, inf_upper;
-    explicit ScaledRootFinder(const IFunction& _F) : F(_F) {};
-    virtual int numDerivs() const { return F.numDerivs(); }
-    double scaledArg(const double y) const {      // x(y) where y is the scaled argument in [0,1]
-        return inf_upper ? (inf_lower ? 
-            x_scaling*(1/(1-y)-1/y) :             // x in (-inf,inf)
-            x_edge + y/(1-y)*x_scaling) :         // x in [x_edge, inf)
-            x_edge - x_scaling*(1-y)/y;           // x in (-inf, x_edge]
+    ScaledFunction(const IFunction& _F, double xlower, double xupper) : F(_F) {
+        assert(xlower < xupper);
+        inf_lower = xlower==-INFINITY;
+        inf_upper = xupper== INFINITY;
+        if(inf_upper) {
+            if(inf_lower) {
+                x_scaling = 1;
+            } else {
+                x_edge = xlower;
+                x_scaling = fmax(xlower, 1.);  // quite an arbitrary choice
+            }
+        } else {
+            if(inf_lower) {
+                x_edge = xupper;
+                x_scaling = fmax(-xupper, 1.);
+            } else {
+                x_edge = xlower;
+                x_scaling = xupper;
+            }
+        }
+    };
+
+    virtual int numDerivs() const { return F.numDerivs()>1 ? 1 : F.numDerivs(); }
+
+    // return the scaled variable y for the given original variable x
+    double y_from_x(const double x) const {
+        if(inf_upper) {
+            if(inf_lower) {                   // x in (-inf,inf)
+                return  fabs(x/x_scaling)<1 ? // two cases depending on whether |x| is small or large
+                    1/(1 + sqrt(1+pow_2(x*0.5/x_scaling)) - x*0.5/x_scaling) :  // x is close to zero
+                    0.5 + sqrt(0.25+pow_2(x_scaling/x))*sign(x) - x_scaling/x;  // x is large
+            } else {                          // x in [x_edge, inf)
+                assert(x>=x_edge);
+                return 1 - 1/(1 + (x-x_edge)/x_scaling);
+            }
+        } else {
+            if(inf_lower) {                   // x in (-inf, x_edge]
+                assert(x<=x_edge);
+                return 1/(1 + (x_edge-x)/x_scaling);
+            } else {                          // x in [x_edge, x_scaling]
+                assert(x>=x_edge && x<=x_scaling);
+                return (x-x_edge) / (x_scaling-x_edge);
+            }
+        }
     }
-    double scaledDer(const double y) const {      // dx/dy
-        return inf_upper ? (inf_lower ? 
-            x_scaling*(1/pow_2(1-y)+1/pow_2(y)) : // (-inf,inf)
-            x_scaling/pow_2(1-y) ) :              // [x_edge, inf)
-            x_scaling/pow_2(y);                   // (-inf, x_edge]
+
+    // return the original variable x for the given scaled variable y in [0,1]
+    double x_from_y(const double y) const {
+        assert(y>=0 && y<=1);
+        return inf_upper ?
+            (  inf_lower ?
+                x_scaling*(1/(1-y)-1/y) :     // x in (-inf,inf)
+                x_edge + y/(1-y)*x_scaling    // x in [x_edge, inf)
+            ) : ( inf_lower ?
+                x_edge - x_scaling*(1-y)/y :  // x in (-inf, x_edge]
+                x_edge*(1-y) + x_scaling*y    // x in [x_edge, x_scaling]
+            );
     }
+
+    // return the derivative of the original variable over the scaled one
+    double dxdy_from_y(const double y) const {
+        return inf_upper ?
+            (  inf_lower ?
+                x_scaling*(1/pow_2(1-y)+1/(y*y)) : // (-inf,inf)
+                x_scaling/pow_2(1-y)               // [x_edge, inf)
+            ) : ( inf_lower ?
+                x_scaling/pow_2(y) :               // (-inf, x_edge]
+                x_scaling-x_edge                   // [x_edge, x_scaling]
+            );
+    }
+
+    // compute the original function for the given value of scaled argument
     virtual void eval_deriv(const double y, double* val=0, double* der=0, double* der2=0) const {
-        double x = scaledArg(y), f, dfdx;
+        double x = x_from_y(y), f, dfdx;
         F.eval_deriv(x, val ? &f : NULL, der ? &dfdx : NULL);
         if(val)
             *val = f;
         if(der)
-            *der = dfdx * scaledDer(y);
+            *der = dfdx * dxdy_from_y(y);
         if(der2)
-            *der2= NAN;
+            *der2= NAN;  // not implemented
     }
 };
 
+// root-finder with optional scaling
 double findRoot(const IFunction& fnc, double xlower, double xupper, double reltoler)
 {
     if(reltoler<=0)
@@ -292,23 +356,91 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
         xlower=xupper;
         xupper=z;
     }
-    if(xlower==gsl_neginf() || xupper==gsl_posinf()) {   // apply internal scaling procedure
-        ScaledRootFinder srf(fnc);
-        srf.inf_lower = xlower==gsl_neginf();
-        srf.inf_upper = xupper==gsl_posinf();
-        if(srf.inf_upper && !srf.inf_lower) {
-            srf.x_edge = xlower;
-            srf.x_scaling = fmax(xlower, 1.);  // quite an arbitrary choice
-        } else if(srf.inf_lower && !srf.inf_upper) {
-            srf.x_edge = xupper;
-            srf.x_scaling = fmax(-xupper, 1.);
-        } else
-            srf.x_scaling=1;
-        double scroot = findRootHybrid(srf, 0., 1., reltoler);
-        return srf.scaledArg(scroot);
+    if(xlower==-INFINITY || xupper==INFINITY) {   // apply internal scaling procedure
+        ScaledFunction F(fnc, xlower, xupper);
+        double scroot = findRootHybrid(F, 0., 1., reltoler);
+        return F.x_from_y(scroot);
     } else {  // no scaling - use the original function
         return findRootHybrid(fnc, xlower, xupper, reltoler);
     }
+}
+
+// 1d minimizer
+static double findMinKnown(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
+{
+    gsl_function F;
+    F.function = &functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
+    gsl_min_fminimizer *minser = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
+    double xroot=xinit;
+    double abstoler = reltoler*fabs(xupper-xlower);
+    if(gsl_min_fminimizer_set(minser, &F, xinit, xlower, xupper) == GSL_SUCCESS)
+    {
+        int status=0, iter=0;
+        do{
+            iter++;
+            status = gsl_min_fminimizer_iterate (minser);
+            if(status!=GSL_SUCCESS) break;
+            xroot  = gsl_min_fminimizer_x_minimum (minser);
+            xlower = gsl_min_fminimizer_x_lower (minser);
+            xupper = gsl_min_fminimizer_x_upper (minser);
+            status = gsl_root_test_interval (xlower, xupper, 0, reltoler);
+        }
+        while (fabs(xlower-xupper) < abstoler && iter < MAXITER);
+    }
+    gsl_min_fminimizer_free(minser);
+    return xroot;
+}
+
+// 1d minimizer without prior knowledge of minimum location
+double findMin(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
+{
+    if(reltoler<=0)
+        throw std::invalid_argument("findMin: relative tolerance must be positive");
+    if(xlower>=xupper) {
+        double z=xlower;
+        xlower=xupper;
+        xupper=z;
+    }
+    if(xinit==xinit && (xinit<xlower || xinit>xupper))
+        throw std::invalid_argument("findMin: initial guess is outside the search interval");
+    ScaledFunction F(fnc, xlower, xupper);  // transform the original range into [0,1], even if it was (semi-)infinite
+    xlower = F.y_from_x(xlower);
+    xupper = F.y_from_x(xupper);
+    xinit  = F.y_from_x(xinit);
+    if(xinit != xinit) {    // initial guess not provided
+        xinit = (xlower+xupper)/2;
+        double ylower = F.value(xlower);
+        double yupper = F.value(xupper);
+        double yinit  = F.value(xinit);
+        double abstoler = reltoler*fabs(xupper-xlower);
+        int iter = 0;
+        while( (yinit>ylower || yinit>yupper) && iter<MAXITER && fabs(xlower-xupper)>abstoler) {
+            if(yinit<ylower) {
+                xlower=xinit;
+                ylower=yinit;
+            } else {
+                if(yinit<yupper) {
+                    xupper=xinit;
+                    yupper=yinit;
+                } else {  // pathological case - initial guess was higher than both ends
+                    double xmin1 = findMin(F, xlower, xinit,  NAN, reltoler);
+                    double xmin2 = findMin(F, xinit,  xupper, NAN, reltoler);
+                    double ymin1 = F.value(xmin1);
+                    double ymin2 = F.value(xmin2);
+                    return F.x_from_y(ymin1<ymin2 ? xmin1 : xmin2);
+                }
+            }
+            xinit=(xlower+xupper)/2;
+            yinit=F.value(xinit);
+            iter++;
+        }
+        if(yinit>=ylower && yinit<=yupper)  // couldn't locate a minimum inside the interval,
+            return F.x_from_y(xlower);
+        if(yinit>=yupper && yinit<=ylower)  // so return one of endpoints
+            return F.x_from_y(xupper);
+    }
+    return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, reltoler));  // normal min-search
 }
 
 // ------- integration routines ------- //
@@ -469,7 +601,7 @@ void linearFit(unsigned int N, const double x[], const double y[],
 // ------ ODE solver ------- //
 // Simple ODE integrator using Runge-Kutta Dormand-Prince 8 adaptive stepping
 // dy_i/dt = f_i(t) where int (*f)(double t, const double y, double f, void *params)
-  
+
 static int functionWrapperODE(double t, const double y[], double dydt[], void* param){
     static_cast<IOdeSystem*>(param)->eval(t, y, dydt);
     return GSL_SUCCESS;
@@ -481,7 +613,7 @@ struct OdeImpl{
     gsl_odeiv2_evolve * e;
     gsl_odeiv2_system sys;
 };
-    
+
 OdeSolver::OdeSolver(const IOdeSystem& F, double abstoler, double reltoler)
 {
     OdeImpl* data = new OdeImpl;
@@ -526,362 +658,6 @@ int OdeSolver::advance(double tstart, double tfinish, double *y){
 }
 
 #if 0
-//=================================================================================================
-// RANDOM NUMBERS //
-// random number generators - rand_uniform returns random numbers uniformly distributed in the
-// interval [0,1], rand_gaussian returns gaussian distributed random numbers with sd = sigma
-
-class rand_base{
-	private:
-		const gsl_rng_type * TYPE;
-		unsigned long int seed;
-    public:
-       	gsl_rng * r;
-     	rand_base(unsigned long int s){
-     	// construct random number generator with seed s
-     		seed = s;
-     		gsl_rng_env_setup();
-     	    TYPE = gsl_rng_default;
-       		r    = gsl_rng_alloc (TYPE);
-       		gsl_rng_set(r, seed);
-       		}
-       	~rand_base(){gsl_rng_free (r);}
-       	void reseed(unsigned long int newseed){
-       	// give new seed
-       		seed = newseed;
-       		gsl_rng_set(r,newseed);
-       		}
-};
-
-class rand_uniform:public rand_base{
-	public:
-		rand_uniform(unsigned long int SEED=0):rand_base(SEED){}
-		~rand_uniform(){}
-		// return uniformly distributed random numbers
-		double nextnumber(){return gsl_rng_uniform (r);}
-};
-
-class rand_gaussian:public rand_base{
-	public:
-		double sigma;
-		rand_gaussian(double s, unsigned long int SEED=0):rand_base(SEED){sigma = s;}
-		~rand_gaussian(){}
-		// return gaussian distributed random numbers
-		double nextnumber(){return gsl_ran_gaussian (r,sigma);}
-		void newsigma(double newsigma){sigma=newsigma;}
-};
-
-class rand_exponential:public rand_base{
-    public:
-        double scale;
-        rand_exponential(double scale, unsigned long int SEED=0):rand_base(SEED),scale(scale){}
-        ~rand_exponential(){}
-        // return exponentially distributed random numbers
-        double nextnumber(){return gsl_ran_exponential (r,scale);}
-        void new_scale(double newscale){scale=newscale;}
-};
-
-//=================================================================================================
-// ROOT FINDING	  //
-// finds root by Brent's method. Constructor initialises function and tolerances, findroot finds
-// root in given interval. Function must be of form double(*func)(double,void*)
-
-class root_find{
-	private:
-};
-
-//=================================================================================================
-// INTEGRATION //
-// Simple 1d numerical integration using adaptive Gauss-Kronrod which can deal with singularities
-// constructor takes function and tolerances and integrate integrates over specified region.
-// integrand function must be of the form double(*func)(double,void*)
-class integrator{
-	private:
-		gsl_integration_workspace *w;
-		void *p;
-		double result,err,eps;
-		gsl_function F;
-		size_t neval;
-	public:
-		integrator(double eps): eps(eps){
-			neval    = 1000;
-			w        = gsl_integration_workspace_alloc (neval);
-			F.params = &p;
-       		}
-		~integrator(){gsl_integration_workspace_free (w);}
-		double integrate(double(*func)(double,void*),double xa, double xb){
-		    F.function = func;
-			gsl_integration_qags (&F, xa, xb, 0, eps, neval,w, &result, &err);
-			//gsl_integration_qng(&F, xa, xb, 0, eps, &result, &err, &neval);
-			return result;
-			}
-		double error(){return err;}
-};
-
-inline double integrate(double(*func)(double,void*),double xa, double xb, double eps){
-	double result,err; size_t neval;void *p;gsl_function F;F.function = func;F.params = &p;
-	gsl_integration_qng(&F, xa, xb, 0, eps, &result, &err, &neval);
-	return result;
-}
-
-class MCintegrator{
-	private:
-		gsl_monte_vegas_state *s;
-		const gsl_rng_type *T;
- 		gsl_rng *r;
- 		size_t dim;
- 	public:
- 		MCintegrator(size_t Dim){
- 			dim=Dim;
- 			gsl_rng_env_setup ();
-  			T = gsl_rng_default;
-  			r = gsl_rng_alloc (T);
- 			s = gsl_monte_vegas_alloc(Dim);
- 		}
- 		~MCintegrator(){
- 			gsl_monte_vegas_free(s);
- 			gsl_rng_free(r);
- 		}
- 		double integrate(double(*func)(double*,size_t,void*),double *xlow, double *xhigh,
- 		size_t calls, double *err, int burnin=10000){
- 			gsl_monte_function G = { func, dim, 0 }; double res;
- 			if(burnin)gsl_monte_vegas_integrate(&G,xlow,xhigh,dim,burnin,r,s,&res,err);
- 			gsl_monte_vegas_integrate(&G,xlow,xhigh,dim,calls,r,s,&res,err);
- 			return res;
- 		}
-};
-
-//=================================================================================================
-// 1D INTERPOLATION //
-// Interpolation using cubic splines
-
-class interpolator{
-	private:
-		gsl_interp_accel *acc;
-		gsl_spline *spline;
-	public:
-		interpolator(double *x, double *y, int n){
-			acc = gsl_interp_accel_alloc();
-			spline = gsl_spline_alloc(gsl_interp_cspline,n);
-			gsl_spline_init (spline, x, y, n);
-		}
-		~interpolator(){
-			gsl_spline_free (spline);
-         	gsl_interp_accel_free (acc);
-        }
-        double interpolate(double xi){
-        	return gsl_spline_eval (spline, xi, acc);
-        }
-        double derivative(double xi){
-        	return gsl_spline_eval_deriv(spline, xi, acc);
-        }
-        void new_arrays(double *x, double *y,int n){
-        	spline = gsl_spline_alloc(gsl_interp_cspline,n);
-        	gsl_spline_init (spline, x, y, n);
-        }
-};
-
-//=================================================================================================
-// SORTING //
-// sorting algorithm
-// sort2 sorts first argument and then applies the sorted permutation to second list
-class sorter{
-	private:
-		const gsl_rng_type * T;
-       	gsl_rng * r;
-    public:
-    	sorter(){
-    		gsl_rng_env_setup();
-            T = gsl_rng_default;
-     		r = gsl_rng_alloc (T);
-     		}
-     	~sorter(){gsl_rng_free (r);}
-     	void sort(double *data, int n){
-     		gsl_sort(data,1,n);
-     	}
-     	void sort2(double *data, int n, double *data2){
-     		size_t p[n];
-     		gsl_sort_index(p,data,1,n);
-     		gsl_permute(p,data2,1,n);
-     	}
-
-};
-
-//=================================================================================================
-// ODE SOLVER //
-
-
-//=================================================================================================
-// MINIMISER //
-// finds a minimum of a function of the form double(*func)(const gsl_vector *v, void *params)
-// using a downhill simplex algorithm. Setup minimiser with initial guesses and required tolerance
-// with constructor and then minimise with minimise().
-class minimiser{
-	private:
-		const gsl_multimin_fminimizer_type *T; ;
-		gsl_multimin_fminimizer *s;
-		gsl_vector *ss, *x;
-		gsl_multimin_function minex_func;
-		size_t iter; int status,N_params; double size;
-		double eps;
-	public:
-		minimiser(double(*func)(const gsl_vector *v, void *params),double *parameters,
-		 int N, double *sizes, double eps, void *params):N_params(N), eps(eps){
-
-			T = gsl_multimin_fminimizer_nmsimplex2rand;
-			ss = gsl_vector_alloc (N_params);x = gsl_vector_alloc (N_params);
-			for(int i=0;i<N_params;i++){
-				gsl_vector_set (x, i, parameters[i]);gsl_vector_set(ss,i,sizes[i]);}
-
-			minex_func.n = N_params; minex_func.f = func; minex_func.params = params;
-			s = gsl_multimin_fminimizer_alloc (T, N_params);
-			gsl_multimin_fminimizer_set (s, &minex_func, x, ss);
-			status = 0; iter = 0;
-
-		}
-
-		minimiser(double(*func)(const gsl_vector *v, void *params),std::vector<double> parameters,
-		 std::vector<double> sizes, double eps,void *params): eps(eps){
-
-			N_params = parameters.size();
-			T = gsl_multimin_fminimizer_nmsimplex2rand;
-			ss = gsl_vector_alloc (N_params);x = gsl_vector_alloc (N_params);
-			for(int i=0;i<N_params;i++){
-				gsl_vector_set (x, i, parameters[i]);gsl_vector_set(ss,i,sizes[i]);}
-
-			minex_func.n = N_params; minex_func.f = func; minex_func.params = params;
-			s = gsl_multimin_fminimizer_alloc (T, N_params);
-			gsl_multimin_fminimizer_set (s, &minex_func, x, ss);
-			status = 0; iter = 0;
-		}
-
-		~minimiser(){
-			gsl_vector_free(x);
-			gsl_vector_free(ss);
-			gsl_multimin_fminimizer_free (s);
-		}
-
-		double minimise(double *results,unsigned int maxiter,bool vocal){
-			do
-			  {
-				iter++; status = gsl_multimin_fminimizer_iterate(s);
-				if(status)break;
-				size = gsl_multimin_fminimizer_size (s);
-				status = gsl_multimin_test_size (size, eps);
-//				if(vocal){	std::cout<<iter<<" ";
-//							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
-//							std::cout<<s->fval<<" "<<size<<std::endl;
-//							}
-			}
-			while (status == GSL_CONTINUE && iter < maxiter);
-			for(int i=0;i<N_params;i++){results[i] = gsl_vector_get(s->x,i);}
-			return s->fval;
-		}
-
-		double minimise(std::vector<double> *results,unsigned int maxiter,bool vocal){
-			do
-			  {
-				iter++; status = gsl_multimin_fminimizer_iterate(s);
-				if(status)break;
-				size = gsl_multimin_fminimizer_size (s);
-				status = gsl_multimin_test_size (size, eps);
-//				if(vocal){	std::cout<<iter<<" ";
-//							for(int i=0; i<N_params;i++)std::cout<<gsl_vector_get(s->x,i)<<" ";
-//							std::cout<<s->fval<<" "<<size<<std::endl;
-//							}
-			}
-			while (status == GSL_CONTINUE && iter < maxiter);
-			for(int i=0;i<N_params;i++) results->push_back(gsl_vector_get(s->x,i));
-			return s->fval;
-		}
-};
-
-class minimiser1D{
-	private:
-		const gsl_min_fminimizer_type *T; ;
-		gsl_min_fminimizer *s;
-		size_t iter; int status;
-		double m, a, b, eps;
-	public:
-		minimiser1D(double(*func)(double, void *params), double m, double a, double b, double eps, void* params)
-			:m(m), a(a), b(b), eps(eps){
-
-			gsl_function F;F.function = func;F.params = params;
-			T = gsl_min_fminimizer_brent;
-			s = gsl_min_fminimizer_alloc (T);
-			gsl_min_fminimizer_set (s, &F, m, a, b);
-			status = 0; iter = 0;
-		}
-		~minimiser1D(){
-			gsl_min_fminimizer_free (s);
-		}
-		double minimise(unsigned int maxiter){
-			do
-			  {
-				iter++;
-				status = gsl_min_fminimizer_iterate(s);
-				m = gsl_min_fminimizer_x_minimum (s);
-           		a = gsl_min_fminimizer_x_lower (s);
-           		b = gsl_min_fminimizer_x_upper (s);
-				status = gsl_min_test_interval (a, b, eps, 0.0);
-			}
-			while (status == GSL_CONTINUE && iter < maxiter);
-			return m;
-		}
-};
-/*
-double Distance(void *xp, void *yp){
-       double x = *((double *) xp);
-       double y = *((double *) yp);
-       return fabs(x - y);
-}
-
-void Step(const gsl_rng * r, void *xp, double step_size){
-    double old_x = *((double *) xp);
-    double new_x;
-
-    double u = gsl_rng_uniform(r);
-    new_x = u * 2 * step_size - step_size + old_x;
-
-    memcpy(xp, &new_x, sizeof(new_x));
-}
-
-void Print(void *xp){
-    printf ("%12g", *((double *) xp));
-}
-
-class sim_anneal{
-	private:
-		const gsl_rng_type * T;
-    	gsl_rng * r;
-    	int N_TRIES, ITER_FIXED_T;
-    	double STEP_SIZE, K, T_INITIAL, MU_T, T_MIN;
-    	gsl_siman_params_t params;
-    public:
-    	sim_anneal(int N_TRIES, int ITER_FIXED_T, double STEP_SIZE):
-    	N_TRIES(N_TRIES), ITER_FIXED_T(ITER_FIXED_T),STEP_SIZE(STEP_SIZE){
-    		gsl_rng_env_setup();
-            T = gsl_rng_default;
-     	  	r = gsl_rng_alloc(T);
-     	  	//params[0]=N_TRIES;params[1]=ITER_FIZED_T;params[2]=STEP_SIZE;
-     	  	//K=1.; params[3]=K; T_INITIAL=0.008; params[4]=T_INITIAL;
-     	  	//MU_T=1.003; params[5]=MU_T; T_MIN=2.0e-6; params[6]=T_MIN;
-     	  	gsl_siman_params_t params
-       = {N_TRIES, ITERS_FIXED_T, STEP_SIZE,
-          K, T_INITIAL, MU_T, T_MIN};
-    	}
-    	~sim_anneal(){
-    		gsl_rng_free(r);
-    	}
-    	double minimise(double(*func)(void *xp), double x){
-    		double x_initial=x;
-    		gsl_siman_solve(r, &x_initial, &func, Step, Distance, Print,
-                       		NULL, NULL, NULL,
-                       		sizeof(double), params);
-    		return x_initial;
-    	}
-};*/
-
 //=================================================================================================
 // SPECIAL FUNCTIONS //
 inline double erf(double x){return gsl_sf_erf (x);}

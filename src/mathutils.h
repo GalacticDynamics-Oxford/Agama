@@ -12,6 +12,9 @@ const double ACCURACY_INTEGR=1e-6;
 /** limit on the maximum number of steps in ODE solver */
 const int ODE_MAX_NUM_STEP=1e6;
 
+/// \name  ---- Miscellaneous utility functions -----
+///@{
+
 /** test if a number is not infinity or NaN */
 bool isFinite(double x);
 
@@ -33,36 +36,47 @@ double wrapAngle(double x);
     Note that this usage scenario is not stable against error accumulation. */
 double unwrapAngle(double x, double xprev);
 
+///@}
+/// \name  ----- root-finding and minimization routines -----
+///@{
 
 /** find a root of function on the interval [x1,x2].
     function must be finite at the ends of interval and have opposite signs (or be zero),
     otherwise NaN is returned.
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
     to the variable (but the function still should return finite value for an infinite argument).
-    \param[in] rel_toler  determines the accuracy of root location, relative to the range |x2-x1|
+    If the function interface provides derivatives, this may speed up the search.
+    \param[in] rel_toler  determines the accuracy of root localization, relative to the range |x2-x1|.
 */
-double findRoot(const IFunction& F, double x1, double x2, double rel_toler=ACCURACY_ROOT);
+double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
 
+/** Find a local minimum on the interval [x1,x2]/
+    \param[in] xinit  is the optional initial guess point: 
+    if provided (not NaN), this speeds up the determination of minimum, 
+    but results in error if F(xinit) was not strictly lower than both F(x1) and F(x2). 
+    Alternatively, if the location of the minimum is not known in advance, 
+    xinit is set to NaN, and the function first performs a binary search to determine 
+    the interval enclosing the minimum, and returns one of the endpoints if the function 
+    turns out to be monotonic on the entire interval.
+    \param[in] rel_toler  determines the accuracy of minimum localization, relative to the range |x2-x1|.
+ */
+double findMin(const IFunction& F, double x1, double x2, double xinit, double rel_toler);
 
-/** integrate a (well-behaved) function on a finite interval */
-double integrate(const IFunction& F, double x1, double x2, double rel_toler=ACCURACY_INTEGR);
-
-/** integrate a function with a transformation that removes possible singularities
-    at the endpoints [x_low,x_upp], and the integral is computed over the interval [x1,x2] 
-    such than x_low<=x1<=x2<=x_upp.
-*/
-double integrateScaled(const IFunction& F, double x1, double x2, 
-    double x_low, double x_upp, double rel_toler=ACCURACY_INTEGR);
-
-
-/** description of function behavior near a given point: the value and two derivatives,
+/** Description of function behavior near a given point: the value and two derivatives,
     and the estimates of nearest points where the function takes on 
     strictly positive or negative values, or crosses zero.
-    These estimates may be used to safely determine the interval of locating a root: 
+
+    These estimates may be used to safely determine the interval of locating a root or minimum: 
     for instance, if one knows that f(x_1)=0 or very nearly zero (to within roundoff errors), 
     f(x_neg) is strictly negative,  and f(x) is positive at some interval between x_1 and x_neg,
     then one needs to find x_pos close to x_1 such that the root is strictly bracketed between 
     x_pos and x_neg (i.e. f(x_pos)>0). This is exactly the task for this little helper class.
+
+    Note that the function is only computed at the given point (or, if its implementation 
+    does not provide derivatives itself, they are computed numerically using one or two 
+    nearby points);  thus the estimates provided by this utility class are only valid 
+    as long as f(x0) is close to zero, or, more precisely, if the offsets ~|f/f'| are 
+    much smaller than the scale of function variation ~|f'/f''|.
 */
 class PointNeighborhood {
 public:
@@ -82,6 +96,23 @@ private:
     double dx_to_posneg(double sgn) const;
 };
 
+///@}
+/// \name ------ integration routines -------
+///@{
+
+/** integrate a (well-behaved) function on a finite interval */
+double integrate(const IFunction& F, double x1, double x2, double rel_toler);
+
+/** integrate a function with a transformation that removes possible singularities
+    at the endpoints [x_low,x_upp], and the integral is computed over the interval [x1,x2] 
+    such than x_low<=x1<=x2<=x_upp.
+*/
+double integrateScaled(const IFunction& F, double x1, double x2, 
+    double x_low, double x_upp, double rel_toler);
+
+///@}
+/// \name ------ linear regression -----
+///@{
 
 /** perform a linear least-square fit (i.e., y=c*x+b);
     store the best-fit slope and intercept of the relation in the corresponding output arguments, 
@@ -94,6 +125,9 @@ void linearFit(unsigned int N, const double x[], const double y[],
     in the output argument 'rms' if it is not NULL. */
 double linearFitZero(unsigned int N, const double x[], const double y[], double* rms=0);
 
+///@}
+/// \name ----- systems of ordinary differential equations ------
+///@{
 
 /** Prototype of a function that is used in integration of ordinary differential equation systems:
     dy/dt = f(t, y), where y is an N-dimensional vector. */
@@ -121,5 +155,6 @@ public:
 private:
     void* impl;   ///< implementation details are hidden
 };
+///@}
 
 }  // namespace

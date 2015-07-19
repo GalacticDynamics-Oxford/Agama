@@ -285,7 +285,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     }
     if(lim.xlambda_max!=lim.xlambda_max)
         lim.xlambda_max = mathutils::findRoot(AxisymScaledForRootfinder(fnc), 
-            xlambda_pos, HUGE_VAL, ACCURACY_RANGE);
+            xlambda_pos, INFINITY, ACCURACY_RANGE);
 
     if(!mathutils::isFinite(lim.xlambda_min+lim.xlambda_max+lim.xnu_max+lim.xnu_min)
         || fnc.point.nu+gamma>lim.xnu_max
@@ -578,7 +578,7 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
         Rmin = 0;
     if(mathutils::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
-        Rmax = mathutils::findRoot(fnc, minApo, HUGE_VAL, toler);
+        Rmax = mathutils::findRoot(fnc, minApo, INFINITY, toler);
     }   // else Rmax=absR
 
     if(!mathutils::isFinite(Rmin+Rmax))
@@ -594,7 +594,7 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
     fnc.E = Phi_R_z + pow_2(point.vz)/2;  // "vertical energy"
     if(point.vz != 0) {
         fnc.mode = OrbitSizeFunction::FIND_ZMAX;
-        zmax = mathutils::findRoot(fnc, absz, HUGE_VAL, toler);
+        zmax = mathutils::findRoot(fnc, absz, INFINITY, toler);
         if(!mathutils::isFinite(zmax))
             return false;
     }
