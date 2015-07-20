@@ -79,7 +79,7 @@ public:
     /** auxiliary function that enters the definition of canonical momentum for 
         for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
         the argument tau is replaced by tau+gamma >= 0. */    
-    virtual void eval_deriv(const double tauplusgamma, 
+    virtual void evalDeriv(const double tauplusgamma, 
         double* value=0, double* deriv=0, double* deriv2=0) const;
     virtual int numDerivs() const { return 2; }
 };
@@ -110,7 +110,7 @@ public:
         where  -gamma<=tau<=-alpha  for the  nu-component of momentum, 
         and   -alpha<=tau<infinity  for the  lambda-component of momentum.
         For numerical convenience, tau is replaced by x=tau+gamma. */
-    virtual void eval_deriv(const double tauplusgamma, 
+    virtual void evalDeriv(const double tauplusgamma, 
         double* value=0, double* deriv=0, double* deriv2=0) const;
     virtual int numDerivs() const { return 1; }
 };

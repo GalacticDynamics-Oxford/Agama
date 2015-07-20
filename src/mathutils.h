@@ -50,7 +50,9 @@ double unwrapAngle(double x, double xprev);
 */
 double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
 
-/** Find a local minimum on the interval [x1,x2]/
+/** Find a local minimum on the interval [x1,x2].
+    Interval can be (semi-)infinite, in which case an appropriate transformation is applied
+    to the variable (but the function still should return finite value for an infinite argument).
     \param[in] xinit  is the optional initial guess point: 
     if provided (not NaN), this speeds up the determination of minimum, 
     but results in error if F(xinit) was not strictly lower than both F(x1) and F(x2). 

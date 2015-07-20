@@ -16,7 +16,7 @@ private:
     const double scaleRadius;  ///< scale radius of the Plummer model  (b)
 
     /** Evaluate potential and up to two its derivatives by spherical radius. */
-    virtual void eval_deriv(double r,
+    virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
 #if 0   // not required
     /** Evaluate density at the position specified in spherical coordinates. */
@@ -36,7 +36,7 @@ private:
     const double mass;         ///< total mass  (M)
     const double scaleRadius;  ///< scale radius of the NFW model  (r_s)
 
-    virtual void eval_deriv(double r,
+    virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
 };
 

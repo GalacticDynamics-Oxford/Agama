@@ -27,7 +27,7 @@ public:
     /** evaluates the function G(tau) and up to two its derivatives,
         if the supplied output arguments are not NULL 
         (implements the mathutils::IFunction interface) */
-    virtual void eval_deriv(double tau, double* G=0, double* Gderiv=0, double* Gderiv2=0) const;
+    virtual void evalDeriv(double tau, double* G=0, double* Gderiv=0, double* Gderiv2=0) const;
 
 private:
     const double mass;

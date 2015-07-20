@@ -709,11 +709,11 @@ void eval_and_convert_sph(const mathutils::IFunction& F,
     assert(F.numDerivs()>=2);
     const double r=sqrt(pow_2(pos.x)+pow_2(pos.y)+pow_2(pos.z));
     if(deriv==NULL && deriv2==NULL) {
-        F.eval_deriv(r, value);
+        F.evalDeriv(r, value);
         return;
     }
     double der, der2;
-    F.eval_deriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
+    F.evalDeriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
     double x_over_r=pos.x/r, y_over_r=pos.y/r, z_over_r=pos.z/r;
     if(r==0) {
         x_over_r=y_over_r=z_over_r=0;
@@ -745,11 +745,11 @@ void eval_and_convert_sph(const mathutils::IFunction& F,
     assert(F.numDerivs()>=2);
     const double r=sqrt(pow_2(pos.R)+pow_2(pos.z));
     if(deriv==NULL && deriv2==NULL) {
-        F.eval_deriv(r, value);
+        F.evalDeriv(r, value);
         return;
     }
     double der, der2;
-    F.eval_deriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
+    F.evalDeriv(r, value, &der, deriv2!=NULL ? &der2 : 0);
     double R_over_r=pos.R/r, z_over_r=pos.z/r;
     if(r==0) {
         R_over_r=z_over_r=0;
@@ -778,7 +778,7 @@ void eval_and_convert_sph(const mathutils::IFunction& F,
 {
     assert(F.numDerivs()>=2);
     double der, der2;
-    F.eval_deriv(pos.r, value, deriv!=NULL ? &der : NULL, deriv2!=NULL ? &der2 : NULL);
+    F.evalDeriv(pos.r, value, deriv!=NULL ? &der : NULL, deriv2!=NULL ? &der2 : NULL);
     if(deriv) {
         deriv->dr = der;
         deriv->dtheta = deriv->dphi = 0;

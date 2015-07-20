@@ -55,7 +55,7 @@ public:
 private:
     const double surfaceDensity, scaleLength;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_deriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+    virtual void evalDeriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
         double val = surfaceDensity * exp(-R/scaleLength);
         if(f)
             *f = val;
@@ -74,7 +74,7 @@ public:
 private:
     const DiskParam params;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_deriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
+    virtual void evalDeriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
         if(params.innerCutoffRadius && R==0.) {
             if(f) *f=0;
             if(fprime)  *fprime=0;
@@ -103,7 +103,7 @@ public:
 private:
     const double scaleHeight;
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void evalDeriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         double      x        = fabs(z/scaleHeight);
         double      h        = exp(-x);
         if(H)       *H       = scaleHeight/2*(h-1+x);
@@ -120,7 +120,7 @@ public:
 private:
     const double scaleHeight;
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void evalDeriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         double      x        = fabs(z/scaleHeight);
         double      h        = exp(-x);
         double      sh1      = 1.+h;
@@ -137,7 +137,7 @@ public:
     DiskDensityVerticalThin() {};
 private:
     /**  evaluate  H(z) and optionally its two derivatives, if these arguments are not NULL  */
-    virtual void eval_deriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
+    virtual void evalDeriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         if(H)       *H       = fabs(z)/2;
         if(Hprime)  *Hprime  = sign(z)/2;
         if(Hpprime) *Hpprime = 0;
@@ -171,17 +171,17 @@ double DiskResidual::density_cyl(const coord::PosCyl &pos) const
 {
     if(pos.z==0) return 0;
     double h, H, Hp, F, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
-    radial_fnc  ->eval_deriv(pos.R, &F);
+    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
+    radial_fnc  ->evalDeriv(pos.R, &F);
     return (F-f)*h - 2*fp*(H+pos.z*Hp)/r - fpp*H;
 }
 
 double DiskAnsatz::density_cyl(const coord::PosCyl &pos) const
 {
     double h, H, Hp, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
+    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
     return f*h + (pos.z!=0 ? 2*fp*(H+pos.z*Hp)/r : 0) + fpp*H;
 }
 
@@ -190,8 +190,8 @@ void DiskAnsatz::eval_cyl(const coord::PosCyl &pos,
 {
     const double r=hypot(pos.R, pos.z);
     double h, H, Hp, f, fp, fpp;
-    vertical_fnc->eval_deriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->eval_deriv(r, &f, &fp, &fpp);
+    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
     f*=4*M_PI; fp*=4*M_PI; fpp*=4*M_PI;
     double Rr=pos.R/r, zr=pos.z/r;
     if(r==0) { Rr=0; zr=0; }

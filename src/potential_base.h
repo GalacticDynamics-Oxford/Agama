@@ -252,7 +252,7 @@ private:
 
 /** Parent class for analytic spherically-symmetric potentials.
     Derived classes should implement a single function defined in 
-    the `mathutils::IFunction::eval_deriv` interface, that computes
+    the `mathutils::IFunction::evalDeriv` interface, that computes
     the potential and up to two its derivatives as functions of spherical radius.
     Conversion into other coordinate systems is implemented in this class. */
 class BasePotentialSphericallySymmetric: public BasePotential, mathutils::IFunction{

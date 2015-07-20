@@ -65,17 +65,17 @@ bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_
 // ------ math primitives -------- //
 
 static double functionWrapper(double x, void* param){
-    return static_cast<IFunction*>(param)->value(x);
+    return static_cast<IFunction*>(param)->operator()(x);
 }
 #if 0
 static double functionDerivWrapper(double x, void* param){
     double der;
-    static_cast<IFunction*>(param)->eval_deriv(x, NULL, &der);
+    static_cast<IFunction*>(param)->evalDeriv(x, NULL, &der);
     return der;
 }
 
 static void functionAndDerivWrapper(double x, void* param, double* f, double *df) {
-    static_cast<IFunction*>(param)->eval_deriv(x, f, df);
+    static_cast<IFunction*>(param)->evalDeriv(x, f, df);
 }
 #endif
 bool isFinite(double x) {
@@ -130,10 +130,10 @@ static double findRootHybrid(const IFunction& fnc,
     double fa, fb;
     double fdera = NAN, fderb = NAN;
     bool have_derivs = fnc.numDerivs()>=1;
-    fnc.eval_deriv(a, &fa, have_derivs? &fdera : NULL);
-    fnc.eval_deriv(b, &fb, have_derivs? &fderb : NULL);
+    fnc.evalDeriv(a, &fa, have_derivs? &fdera : NULL);
+    fnc.evalDeriv(b, &fb, have_derivs? &fderb : NULL);
 
-    if ((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0))
+    if ((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0) || !isFinite(fa+fb))
         return NAN;   // endpoints do not bracket root
     /*  b  is the current estimate of the root,
         c  is the counter-point (i.e. f(b)*f(c)<0, and |f(b)|<|f(c)| ),
@@ -212,7 +212,9 @@ static double findRootHybrid(const IFunction& fnc,
         else
             b += (m > 0 ? +tol : -tol);
 
-        fnc.eval_deriv(b, &fb, have_derivs? &fderb : NULL);
+        fnc.evalDeriv(b, &fb, have_derivs? &fderb : NULL);
+        if(!isFinite(fb))
+            return NAN;
 
         /* Update the best estimate of the root and bounds on each iteration */
         if ((fb < 0 && fc < 0) || (fb > 0 && fc > 0)) {   // the root is between 'a' and the new 'b'
@@ -310,6 +312,8 @@ public:
 
     // return the original variable x for the given scaled variable y in [0,1]
     double x_from_y(const double y) const {
+        if(y!=y)
+            return NAN;
         assert(y>=0 && y<=1);
         return inf_upper ?
             (  inf_lower ?
@@ -334,9 +338,9 @@ public:
     }
 
     // compute the original function for the given value of scaled argument
-    virtual void eval_deriv(const double y, double* val=0, double* der=0, double* der2=0) const {
+    virtual void evalDeriv(const double y, double* val=0, double* der=0, double* der2=0) const {
         double x = x_from_y(y), f, dfdx;
-        F.eval_deriv(x, val ? &f : NULL, der ? &dfdx : NULL);
+        F.evalDeriv(x, val ? &f : NULL, der ? &dfdx : NULL);
         if(val)
             *val = f;
         if(der)
@@ -372,15 +376,19 @@ static double findMinKnown(const IFunction& fnc, double xlower, double xupper, d
     F.function = &functionWrapper;
     F.params = const_cast<IFunction*>(&fnc);
     gsl_min_fminimizer *minser = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
-    double xroot=xinit;
+    double xroot = NAN;
     double abstoler = reltoler*fabs(xupper-xlower);
-    if(gsl_min_fminimizer_set(minser, &F, xinit, xlower, xupper) == GSL_SUCCESS)
-    {
+    if(gsl_min_fminimizer_set(minser, &F, xinit, xlower, xupper) == GSL_SUCCESS) {
         int status=0, iter=0;
-        do{
+        do {
             iter++;
-            status = gsl_min_fminimizer_iterate (minser);
-            if(status!=GSL_SUCCESS) break;
+            try {
+                gsl_min_fminimizer_iterate (minser);
+            }
+            catch(std::runtime_error&) {
+                xroot = NAN;
+                break;
+            }
             xroot  = gsl_min_fminimizer_x_minimum (minser);
             xlower = gsl_min_fminimizer_x_lower (minser);
             xupper = gsl_min_fminimizer_x_upper (minser);
@@ -404,15 +412,18 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     }
     if(xinit==xinit && (xinit<xlower || xinit>xupper))
         throw std::invalid_argument("findMin: initial guess is outside the search interval");
-    ScaledFunction F(fnc, xlower, xupper);  // transform the original range into [0,1], even if it was (semi-)infinite
+    ScaledFunction F(fnc, xlower, xupper);  // transform the original range into [0:1], even if it was (semi-)infinite
     xlower = F.y_from_x(xlower);
     xupper = F.y_from_x(xupper);
-    xinit  = F.y_from_x(xinit);
-    if(xinit != xinit) {    // initial guess not provided
+    if(xinit == xinit) 
+        xinit  = F.y_from_x(xinit);
+    else {    // initial guess not provided
         xinit = (xlower+xupper)/2;
-        double ylower = F.value(xlower);
-        double yupper = F.value(xupper);
-        double yinit  = F.value(xinit);
+        double ylower = F(xlower);
+        double yupper = F(xupper);
+        double yinit  = F(xinit);
+        if(!isFinite(ylower+yupper+yinit))
+            return NAN;
         double abstoler = reltoler*fabs(xupper-xlower);
         int iter = 0;
         while( (yinit>ylower || yinit>yupper) && iter<MAXITER && fabs(xlower-xupper)>abstoler) {
@@ -426,13 +437,17 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
                 } else {  // pathological case - initial guess was higher than both ends
                     double xmin1 = findMin(F, xlower, xinit,  NAN, reltoler);
                     double xmin2 = findMin(F, xinit,  xupper, NAN, reltoler);
-                    double ymin1 = F.value(xmin1);
-                    double ymin2 = F.value(xmin2);
+                    double ymin1 = F(xmin1);
+                    double ymin2 = F(xmin2);
+                    if(!isFinite(ymin1+ymin2))
+                        return NAN;
                     return F.x_from_y(ymin1<ymin2 ? xmin1 : xmin2);
                 }
             }
             xinit=(xlower+xupper)/2;
-            yinit=F.value(xinit);
+            yinit=F(xinit);
+            if(!isFinite(yinit))
+                return NAN;
             iter++;
         }
         if(yinit>=ylower && yinit<=yupper)  // couldn't locate a minimum inside the interval,
@@ -482,10 +497,10 @@ public:
 private:
     const IFunction& F;
     double x_low, x_upp;
-    virtual void eval_deriv(const double y, double* val=0, double* =0, double* =0) const {
+    virtual void evalDeriv(const double y, double* val=0, double* =0, double* =0) const {
         const double x = x_low + (x_upp-x_low) * y*y*(3-2*y);
         const double dx = (x_upp-x_low) * 6*y*(1-y);
-        *val = F.value(x) * dx;
+        *val = F(x) * dx;
     }
 };
 
@@ -519,13 +534,13 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
     double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
     f0 = fder = fder2=NAN;
     if(fnc.numDerivs()>=2) {
-        fnc.eval_deriv(x0, &f0, &fder, &fder2);
+        fnc.evalDeriv(x0, &f0, &fder, &fder2);
         if(isFinite(fder+fder2))
             return;  // no further action necessary
     }
     if(!isFinite(f0))  // haven't called it yet
-        fnc.eval_deriv(x0, &f0, fnc.numDerivs()>=1 ? &fder : NULL);
-    fnc.eval_deriv(x0+delta, &fplusd, fnc.numDerivs()>=1 ? &fderplusd : NULL);
+        fnc.evalDeriv(x0, &f0, fnc.numDerivs()>=1 ? &fder : NULL);
+    fnc.evalDeriv(x0+delta, &fplusd, fnc.numDerivs()>=1 ? &fderplusd : NULL);
     if(isFinite(fder)) {
         if(isFinite(fderplusd)) {  // have 1st derivative at both points
             fder2 = (6*(fplusd-f0)/delta - (4*fder+2*fderplusd))/delta;
@@ -537,7 +552,7 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
         return;
     }
     // otherwise we don't have any derivatives computed
-    fminusd= fnc.value(x0-delta);
+    fminusd= fnc(x0-delta);
     fder = (fplusd-fminusd)/(2*delta);
     fder2= (fplusd+fminusd-2*f0)/(delta*delta);
 }

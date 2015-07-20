@@ -25,7 +25,7 @@ AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
     const coord::ProlSph& coordsys=poten.coordsys();
     const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
     double Glambda;
-    poten.eval_deriv(pprol.lambda, &Glambda);
+    poten.evalDeriv(pprol.lambda, &Glambda);
     double I3;
     if(point.z==0)   // special case: nu=0
         I3 = 0.5 * pow_2(point.vz) * (pow_2(point.R)+coordsys.gamma-coordsys.alpha);
@@ -41,7 +41,7 @@ AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
 /** auxiliary function that enters the definition of canonical momentum for 
     for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
     the argument tau is replaced by tau+gamma >= 0. */
-void AxisymFunctionStaeckel::eval_deriv(const double tauplusgamma, 
+void AxisymFunctionStaeckel::evalDeriv(const double tauplusgamma, 
     double* val, double* der, double* der2) const
 {
     assert(tauplusgamma>=0);
@@ -58,7 +58,7 @@ void AxisymFunctionStaeckel::eval_deriv(const double tauplusgamma,
         return;
     }
     double G, dG, d2G;
-    fncG.eval_deriv(tauplusgamma-point.coordsys.gamma, &G, der? &dG : NULL, der2? &d2G : NULL);
+    fncG.evalDeriv(tauplusgamma-point.coordsys.gamma, &G, der? &dG : NULL, der2? &d2G : NULL);
     const double tauplusalpha = tauplusgamma+point.coordsys.alpha-point.coordsys.gamma;
     if(val)
         *val = ( (E + G) * tauplusgamma - I3 ) * tauplusalpha - Lz*Lz/2 * tauplusgamma;
@@ -102,7 +102,7 @@ AxisymFunctionFudge findIntegralsOfMotionAxisymFudge
     and   -alpha<=tau<infinity  for the  lambda-component of momentum.
     For numerical convenience, tau is replaced by x=tau+gamma.
 */
-void AxisymFunctionFudge::eval_deriv(const double tauplusgamma, 
+void AxisymFunctionFudge::evalDeriv(const double tauplusgamma, 
     double* val, double* der, double* der2) const
 {
     assert(tauplusgamma>=0);
@@ -158,7 +158,7 @@ void AxisymFunctionFudge::eval_deriv(const double tauplusgamma,
     the canonical momentum is   p^2(tau) = fnc(tau) / [2 (tau+alpha)^2 (tau+gamma)];
     the integrand is given by   p^n * (tau+alpha)^a * (tau+gamma)^c  if p^2>0, otherwise 0.
 */
-class AxisymIntegrand: public mathutils::IFunction {
+class AxisymIntegrand: public mathutils::IFunctionNoDeriv {
 public:
     const AxisymFunctionBase& fnc;          ///< parameters of aux.fnc.: may be either AxisymFunctionStaeckel or AxisymFunctionFudge
     enum { nplus1, nminus1 } n;             ///< power of p: +1 or -1
@@ -166,24 +166,18 @@ public:
     enum { czero, cminus1 } c;              ///< power of (tau+gamma): 0 or -1
     explicit AxisymIntegrand(const AxisymFunctionBase& d) : fnc(d) {};
 
-    virtual int numDerivs() const { return 0; }    
     /** integrand for the expressions for actions and their derivatives 
         (e.g.Sanders 2012, eqs. A1, A4-A12).  It uses the auxiliary function to compute momentum,
         and multiplies it by some powers of (tau+alpha) and (tau+gamma).
     */
-    virtual void eval_deriv(const double tauplusgamma, 
-        double* val=0, double* =0, double* =0) const
-    {
-        assert(val!=NULL);
+    virtual double value(const double tauplusgamma) const {
         assert(tauplusgamma>=0);
         const coord::ProlSph& CS = fnc.point.coordsys;
         const double tauplusalpha = tauplusgamma+CS.alpha-CS.gamma;
-        const double p2 = fnc.value(tauplusgamma) / 
+        const double p2 = fnc(tauplusgamma) / 
             (2*pow_2(tauplusalpha)*tauplusgamma);
-        if(p2<0) {
-            *val = 0;
-            return;
-        }
+        if(p2<0)
+            return 0;
         double result = sqrt(p2);
         if(n==nminus1)
             result = 1/result;
@@ -195,7 +189,7 @@ public:
             result /= tauplusgamma;
         if(!mathutils::isFinite(result))
             result=0;  // ad hoc fix to avoid problems at the boundaries of integration interval
-        *val = result;
+        return result;
     }
 };
 
@@ -207,10 +201,12 @@ public:
     const AxisymFunctionBase& fnc;
     explicit AxisymScaledForRootfinder(const AxisymFunctionBase& d) : fnc(d) {};
     virtual int numDerivs() const { return fnc.numDerivs(); }    
-    virtual void eval_deriv(const double tauplusgamma, 
-        double* val=0, double* der=0, double* =0) const
+    virtual void evalDeriv(const double tauplusgamma, 
+        double* val=0, double* der=0, double* der2=0) const
     {
         assert(tauplusgamma>=0);
+        if(der2)
+            *der2 = NAN;
         if(!mathutils::isFinite(tauplusgamma)) {
             if(val)
                 *val = fnc.E; // the asymptotic value
@@ -219,7 +215,7 @@ public:
             return;
         }
         double fval, fder;
-        fnc.eval_deriv(tauplusgamma, &fval, der? &fder : NULL);
+        fnc.evalDeriv(tauplusgamma, &fval, der? &fder : NULL);
         if(val)
             *val = fval / pow_2(tauplusgamma);
         if(der)
@@ -240,7 +236,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     const double gamma=fnc.point.coordsys.gamma, alpha=fnc.point.coordsys.alpha;
 
     // figure out the value of function at and around some important points
-    double fnc_gamma = fnc.value(0);
+    double fnc_gamma = fnc(0);
     const mathutils::PointNeighborhood pn_alpha (fnc, gamma-alpha);
     assert(pn_alpha.f0<=0);  // this is -0.5 Lz^2 so may not be positive
     const mathutils::PointNeighborhood pn_lambda(fnc, gamma+fnc.point.lambda);
@@ -494,7 +490,7 @@ public:
         in the radial direction, it returns -(1/2) v_R^2, and in the vertical direction -(1/2) v_z^2 .
         Moreover, to compute the location of pericenter this is multiplied by R^2 to curb the sharp rise 
         of effective potential at zero, which is problematic for root-finder. */
-    virtual void eval_deriv(const double x, 
+    virtual void evalDeriv(const double x, 
         double* val=0, double* deriv=0, double* deriv2=0) const
     {
         double Phi=0;

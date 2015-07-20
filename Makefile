@@ -14,21 +14,22 @@ SOURCES   = coord.cpp \
             potential_staeckel.cpp \
             potential_composite.cpp \
             potential_galpot.cpp \
+            potential_sphharm.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
             mathutils.cpp \
             math_spline.cpp \
-            math_spline_approx.cpp \
-            math_grid.cpp \
             orbit.cpp 
 
 #LEGACYSRC = Stackel_JS.cpp \
 #            coordsys.cpp 
 
 TESTSRCS  = test_mathutils.cpp \
+            test_math_spline.cpp \
             test_coord.cpp \
             test_units.cpp \
             test_potentials.cpp \
+            test_potential_sphharm.cpp \
             test_staeckel.cpp \
             test_actionfinder.cpp
 
