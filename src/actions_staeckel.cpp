@@ -1,5 +1,5 @@
 #include "actions_staeckel.h"
-#include "mathutils.h"
+#include "math_core.h"
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
@@ -35,7 +35,7 @@ AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
             (E - pow_2(Lz)/2/(pprol.lambda+coordsys.alpha) + Glambda) -
             pow_2(pprol.lambdadot*(pprol.lambda-pprol.nu)) / 
             (8*(pprol.lambda+coordsys.alpha)*(pprol.lambda+coordsys.gamma)) );
-    return AxisymFunctionStaeckel(pprol, mathutils::sign(point.z), E, Lz, I3, poten);
+    return AxisymFunctionStaeckel(pprol, math::sign(point.z), E, Lz, I3, poten);
 }
 
 /** auxiliary function that enters the definition of canonical momentum for 
@@ -45,7 +45,7 @@ void AxisymFunctionStaeckel::evalDeriv(const double tauplusgamma,
     double* val, double* der, double* der2) const
 {
     assert(tauplusgamma>=0);
-    if(!mathutils::isFinite(tauplusgamma)) {
+    if(!math::isFinite(tauplusgamma)) {
         if(val) { // used in the root-finder on an infinite interval
             // need to return a negative number of a reasonable magnitude
             double bigtau = 10*(point.coordsys.gamma-point.coordsys.alpha);
@@ -93,7 +93,7 @@ AxisymFunctionFudge findIntegralsOfMotionAxisymFudge
     else
         Inu-= pow_2(pprol.nudot*(pprol.lambda-pprol.nu)) /
               (8*(pprol.nu+coordsys.alpha)*(pprol.nu+coordsys.gamma));
-    return AxisymFunctionFudge(pprol, mathutils::sign(point.z), E, Lz, Ilambda, Inu, poten);
+    return AxisymFunctionFudge(pprol, math::sign(point.z), E, Lz, Ilambda, Inu, poten);
 }
 
 /** Auxiliary function F analogous to that of Staeckel action finder:
@@ -109,7 +109,7 @@ void AxisymFunctionFudge::evalDeriv(const double tauplusgamma,
     const double gamma=point.coordsys.gamma, alpha=point.coordsys.alpha;
     if(der2)
         *der2 = NAN;    // shouldn't be used
-    if(!mathutils::isFinite(tauplusgamma)) {
+    if(!math::isFinite(tauplusgamma)) {
         if(val) { // used in the root-finder on an infinite interval:
             // need to return a negative number of a reasonable magnitude
             double bigtau = 10*(gamma-alpha);
@@ -158,7 +158,7 @@ void AxisymFunctionFudge::evalDeriv(const double tauplusgamma,
     the canonical momentum is   p^2(tau) = fnc(tau) / [2 (tau+alpha)^2 (tau+gamma)];
     the integrand is given by   p^n * (tau+alpha)^a * (tau+gamma)^c  if p^2>0, otherwise 0.
 */
-class AxisymIntegrand: public mathutils::IFunctionNoDeriv {
+class AxisymIntegrand: public math::IFunctionNoDeriv {
 public:
     const AxisymFunctionBase& fnc;          ///< parameters of aux.fnc.: may be either AxisymFunctionStaeckel or AxisymFunctionFudge
     enum { nplus1, nminus1 } n;             ///< power of p: +1 or -1
@@ -187,7 +187,7 @@ public:
             result /= pow_2(tauplusalpha);
         if(c==cminus1)
             result /= tauplusgamma;
-        if(!mathutils::isFinite(result))
+        if(!math::isFinite(result))
             result=0;  // ad hoc fix to avoid problems at the boundaries of integration interval
         return result;
     }
@@ -196,7 +196,7 @@ public:
 /** A simple function that facilitates locating the root of auxiliary function 
     on a semi-infinite interval for lambda: instead of F(tau) we consider 
     F1(tau)=F(tau)/tau^2, which tends to a finite negative limit as tau tends to infinity. */
-class AxisymScaledForRootfinder: public mathutils::IFunction {
+class AxisymScaledForRootfinder: public math::IFunction {
 public:
     const AxisymFunctionBase& fnc;
     explicit AxisymScaledForRootfinder(const AxisymFunctionBase& d) : fnc(d) {};
@@ -207,7 +207,7 @@ public:
         assert(tauplusgamma>=0);
         if(der2)
             *der2 = NAN;
-        if(!mathutils::isFinite(tauplusgamma)) {
+        if(!math::isFinite(tauplusgamma)) {
             if(val)
                 *val = fnc.E; // the asymptotic value
             if(der)
@@ -237,9 +237,9 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
 
     // figure out the value of function at and around some important points
     double fnc_gamma = fnc(0);
-    const mathutils::PointNeighborhood pn_alpha (fnc, gamma-alpha);
+    const math::PointNeighborhood pn_alpha (fnc, gamma-alpha);
     assert(pn_alpha.f0<=0);  // this is -0.5 Lz^2 so may not be positive
-    const mathutils::PointNeighborhood pn_lambda(fnc, gamma+fnc.point.lambda);
+    const math::PointNeighborhood pn_lambda(fnc, gamma+fnc.point.lambda);
     lim.xnu_min = 0;
     lim.xnu_max = lim.xlambda_min = lim.xlambda_max = NAN;  // means not yet determined
     double xnu_upper = gamma-alpha;      // upper bound on the interval to locate the root for nu_max
@@ -256,11 +256,11 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
             lim.xnu_max = gamma-alpha;
         }
     }
-    if(!mathutils::isFinite(lim.xnu_max)) 
+    if(!math::isFinite(lim.xnu_max)) 
     {   // find range for J_nu = J_z if it has not been determined at the previous stage
         if(fnc_gamma>0)
-            lim.xnu_max = mathutils::findRoot(fnc, fnc.point.nu+gamma, xnu_upper, ACCURACY_RANGE);
-        if(!mathutils::isFinite(lim.xnu_max))   // means that the value f(nu) was just very slightly negative, or f(gamma)<=0
+            lim.xnu_max = math::findRoot(fnc, fnc.point.nu+gamma, xnu_upper, ACCURACY_RANGE);
+        if(!math::isFinite(lim.xnu_max))   // means that the value f(nu) was just very slightly negative, or f(gamma)<=0
             lim.xnu_max = fnc.point.nu+gamma;   // i.e. this is a clear upper boundary of the range of allowed nu
     }
 
@@ -277,13 +277,13 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     // in this case we need to estimate the value of lambda at which it is strictly positive (for root-finder)
     double xlambda_pos = gamma+fnc.point.lambda + pn_lambda.dx_to_positive();
     if(lim.xlambda_min!=lim.xlambda_min) {  // not yet determined 
-        lim.xlambda_min = mathutils::findRoot(fnc, xlambda_lower, xlambda_pos, ACCURACY_RANGE);
+        lim.xlambda_min = math::findRoot(fnc, xlambda_lower, xlambda_pos, ACCURACY_RANGE);
     }
     if(lim.xlambda_max!=lim.xlambda_max)
-        lim.xlambda_max = mathutils::findRoot(AxisymScaledForRootfinder(fnc), 
+        lim.xlambda_max = math::findRoot(AxisymScaledForRootfinder(fnc), 
             xlambda_pos, INFINITY, ACCURACY_RANGE);
 
-    if(!mathutils::isFinite(lim.xlambda_min+lim.xlambda_max+lim.xnu_max+lim.xnu_min)
+    if(!math::isFinite(lim.xlambda_min+lim.xlambda_max+lim.xnu_max+lim.xnu_min)
         || fnc.point.nu+gamma>lim.xnu_max
         || fnc.point.lambda+gamma<lim.xlambda_min
         || fnc.point.lambda+gamma>lim.xlambda_max)
@@ -303,26 +303,26 @@ AxisymIntDerivatives computeIntDerivatives(
     // derivatives w.r.t. E
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::czero;
-    double dJrdE = mathutils::integrateScaled(integrand, 
+    double dJrdE = math::integrateScaled(integrand, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdE = mathutils::integrateScaled(integrand, 
+    double dJzdE = math::integrateScaled(integrand, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
-    double dJrdI3 = -mathutils::integrateScaled(integrand, 
+    double dJrdI3 = -math::integrateScaled(integrand, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdI3 = -mathutils::integrateScaled(integrand, 
+    double dJzdI3 = -math::integrateScaled(integrand, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
-    double dJrdLz = -fnc.Lz * mathutils::integrateScaled(integrand, 
+    double dJrdLz = -fnc.Lz * math::integrateScaled(integrand, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdLz = -fnc.Lz * mathutils::integrateScaled(integrand, 
+    double dJzdLz = -fnc.Lz * math::integrateScaled(integrand, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
 
-    double signLz  = mathutils::sign(fnc.Lz);
+    double signLz  = math::sign(fnc.Lz);
     AxisymIntDerivatives der;
     // invert the matrix of derivatives
     if(lim.xnu_min==lim.xnu_max) {
@@ -360,25 +360,25 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::czero;
     der.dSdE =
-        signldot * mathutils::integrateScaled(integrand, 
+        signldot * math::integrateScaled(integrand, 
             lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * mathutils::integrateScaled(integrand, 
+      + signndot * math::integrateScaled(integrand, 
             lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
     der.dSdI3 = 
-        signldot * -mathutils::integrateScaled(integrand, 
+        signldot * -math::integrateScaled(integrand, 
             lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * -mathutils::integrateScaled(integrand, 
+      + signndot * -math::integrateScaled(integrand, 
             lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
     der.dSdLz = fnc.point.phi +
-        signldot * -fnc.Lz * mathutils::integrateScaled(integrand, 
+        signldot * -fnc.Lz * math::integrateScaled(integrand, 
             lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * -fnc.Lz * mathutils::integrateScaled(integrand, 
+      + signndot * -fnc.Lz * math::integrateScaled(integrand, 
             lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
     return der;
 }
@@ -392,9 +392,9 @@ Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim
     integrand.n = AxisymIntegrand::nplus1;  // momentum goes into the numerator
     integrand.a = AxisymIntegrand::azero;
     integrand.c = AxisymIntegrand::czero;
-    acts.Jr = mathutils::integrateScaled(integrand, 
+    acts.Jr = math::integrateScaled(integrand, 
         lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / M_PI;
-    acts.Jz = mathutils::integrateScaled(integrand, 
+    acts.Jz = math::integrateScaled(integrand, 
         lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) * 2/M_PI;
     acts.Jphi = fabs(fnc.Lz);
     return acts;
@@ -408,9 +408,9 @@ Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDeriva
     angs.thetar   = derS.dSdE*derI.dEdJr   + derS.dSdI3*derI.dI3dJr   + derS.dSdLz*derI.dLzdJr;
     angs.thetaz   = derS.dSdE*derI.dEdJz   + derS.dSdI3*derI.dI3dJz   + derS.dSdLz*derI.dLzdJz;
     angs.thetaphi = derS.dSdE*derI.dEdJphi + derS.dSdI3*derI.dI3dJphi + derS.dSdLz*derI.dLzdJphi;
-    angs.thetar   = mathutils::wrapAngle(angs.thetar);
-    angs.thetaz   = mathutils::wrapAngle(angs.thetaz + M_PI*addPiToThetaZ);
-    angs.thetaphi = mathutils::wrapAngle(angs.thetaphi);
+    angs.thetar   = math::wrapAngle(angs.thetar);
+    angs.thetaz   = math::wrapAngle(angs.thetaz + M_PI*addPiToThetaZ);
+    angs.thetaphi = math::wrapAngle(angs.thetaphi);
     return angs;
 }
 
@@ -450,7 +450,7 @@ ActionAngles axisymStaeckelActionAngles(const potential::StaeckelOblatePerfectEl
 Actions axisymFudgeActions(const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, double interfocalDistance)
 {
-    if((potential.symmetry() & potential.ST_AXISYMMETRIC) != potential.ST_AXISYMMETRIC)
+    if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
     if(interfocalDistance==0)
         interfocalDistance = estimateInterfocalDistance(potential, point);
@@ -463,7 +463,7 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
 ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, double interfocalDistance)
 {
-    if((potential.symmetry() & potential.ST_AXISYMMETRIC) != potential.ST_AXISYMMETRIC)
+    if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
     if(interfocalDistance==0)
         interfocalDistance = estimateInterfocalDistance(potential, point);
@@ -476,7 +476,7 @@ ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential,
 // ------ Estimation of interfocal distance -------
 
 /** Helper function for finding the roots of (effective) potential in either R or z direction */
-class OrbitSizeFunction: public mathutils::IFunction {
+class OrbitSizeFunction: public math::IFunction {
 public:
     const potential::BasePotential& potential;
     double R;
@@ -496,7 +496,7 @@ public:
         double Phi=0;
         coord::GradCyl grad;
         coord::HessCyl hess;
-        if(mathutils::isFinite(x)) {
+        if(math::isFinite(x)) {
             if(mode == FIND_ZMAX)
                 potential.eval(coord::PosCyl(R, x, phi), &Phi, deriv? &grad : NULL, deriv2? &hess: NULL);
             else
@@ -547,7 +547,7 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
     // then compute the total energy and subtract it from the preliminary value of the function at R_0.
     // in this way we call the potential evaluation function only once.
     fnc.E   = 0;                                       // assign a temporary value
-    mathutils::PointNeighborhood nh(fnc, absR);        // compute the potential and its derivatives at point
+    math::PointNeighborhood nh(fnc, absR);        // compute the potential and its derivatives at point
     double Phi_R_0 = nh.f0 - 0.5*pow_2(point.vphi);    // nh.f0 contained  Phi(R_0) + Lz^2 / (2 R_0^2)
     fnc.E   = nh.f0 + 0.5*pow_2(point.vR);             // compute the correct value of energy of in-plane motion (excluding v_z)
     nh.f0   = Phi_R_0 - fnc.E + 0.5*pow_2(point.vphi); // and store the correct value of Phi_eff(R_0) - E
@@ -566,18 +566,18 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
         }
     }
     if(fnc.Lz2>0) {
-        if(mathutils::isFinite(maxPeri)) {
+        if(math::isFinite(maxPeri)) {
             fnc.mode = OrbitSizeFunction::FIND_RMIN;
-            Rmin = mathutils::findRoot(fnc, 0., maxPeri, toler);
+            Rmin = math::findRoot(fnc, 0., maxPeri, toler);
         }
     } else  // angular momentum is zero
         Rmin = 0;
-    if(mathutils::isFinite(minApo)) {
+    if(math::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
-        Rmax = mathutils::findRoot(fnc, minApo, INFINITY, toler);
+        Rmax = math::findRoot(fnc, minApo, INFINITY, toler);
     }   // else Rmax=absR
 
-    if(!mathutils::isFinite(Rmin+Rmax))
+    if(!math::isFinite(Rmin+Rmax))
         return false;  // likely reason: energy is positive
 
     // estimate vertical extent at R=R_0
@@ -590,8 +590,8 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
     fnc.E = Phi_R_z + pow_2(point.vz)/2;  // "vertical energy"
     if(point.vz != 0) {
         fnc.mode = OrbitSizeFunction::FIND_ZMAX;
-        zmax = mathutils::findRoot(fnc, absz, INFINITY, toler);
-        if(!mathutils::isFinite(zmax))
+        zmax = math::findRoot(fnc, absz, INFINITY, toler);
+        if(!math::isFinite(zmax))
             return false;
     }
     zmaxRmin=zmaxRmax=zmax;
@@ -643,7 +643,7 @@ double estimateInterfocalDistanceBox(const potential::BasePotential& potential,
             sumsq += pow_2(x[ind]);
         }
     }
-    double coef = sumsq>0 ? mathutils::linearFitZero(numpoints, x, y) : 0;
+    double coef = sumsq>0 ? math::linearFitZero(numpoints, x, y) : 0;
     coef = fmax(coef, fmin(R1*R1+z1*z1,R2*R2+z2*z2)*0.0001);  // prevent it from going below or around zero
     return sqrt(coef);
 }

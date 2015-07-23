@@ -1,7 +1,12 @@
+/** \file   math_core.h
+    \brief  essential math routines (e.g. root-finding, integration)
+    \date   2015
+    \author Eugene Vasiliev
+*/
 #pragma once
 #include "math_base.h"
 
-namespace mathutils{
+namespace math{
 
 /** default relative accuracy of root-finder */
 const double ACCURACY_ROOT=1e-6;

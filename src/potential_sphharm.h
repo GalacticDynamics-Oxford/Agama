@@ -10,17 +10,16 @@ namespace potential {
 class BasePotentialSphericalHarmonic: public BasePotentialSph {
 public:
     BasePotentialSphericalHarmonic(unsigned int _Ncoefs_angular) :
-        BasePotentialSph(), Ncoefs_angular(_Ncoefs_angular), mysymmetry(ST_TRIAXIAL) { 
-        assignlmrange(); 
-    }
+        BasePotentialSph(), Ncoefs_angular(_Ncoefs_angular) {}
+    virtual SymmetryType symmetry() const { return mysymmetry; };
+    unsigned int getNumCoefsAngular() const { return Ncoefs_angular; }
 
-    virtual SYMMETRYTYPE symmetry() const { return mysymmetry; };
-    unsigned int getNcoefs_angular() const { return Ncoefs_angular; }
 protected:
     unsigned int Ncoefs_angular;         ///< l_max, the order of angular expansion (0 means spherically symmetric model)
-    SYMMETRYTYPE mysymmetry;             ///< may have different type of symmetry
     int lmax, lstep, mmin, mmax, mstep;  ///< range of angular coefficients used for given symmetry
-    void assignlmrange();                ///< assigns the above variables based on mysymmetry, should be called whenever mysymmetry has changed
+    
+    /// assigns the range for angular coefficients based on mysymmetry
+    void setSymmetry(SymmetryType sym);
 
     /** The function that computes spherical-harmonic coefficients for potential 
         and its radial (first/second) derivative at given radius.
@@ -29,6 +28,9 @@ protected:
     */
     virtual void computeSHCoefs(const double r, double coefsF[], double coefsdFdr[], double coefsd2Fdr2[]) const = 0;
 
+private:
+    SymmetryType mysymmetry;             ///< may have different type of symmetry
+    
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
 };
@@ -39,7 +41,7 @@ public:
     /// init coefficients from a discrete point mass set
     template<typename CoordT> 
     BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassSet<CoordT> &points, SYMMETRYTYPE _sym=ST_TRIAXIAL);
+        const particles::PointMassSet<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL);
 
     /// load coefficients from stored values
     BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs);
@@ -59,7 +61,7 @@ public:
     double getAlpha() const { return Alpha; };
 
     /// return the number of radial basis functions
-    unsigned int getNcoefs_radial() const { return Ncoefs_radial; }
+    unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }
 private:
     unsigned int Ncoefs_radial;                 ///< number of radial basis functions [ =SHcoefs.size() ]
     std::vector<std::vector<double> > SHcoefs;  ///< array of coefficients A_nlm of potential expansion
@@ -89,7 +91,7 @@ public:
     /// may also provide desired grid radii (otherwise assigned automatically)
     template<typename CoordT>
     SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassSet<CoordT> &points, SYMMETRYTYPE _sym=ST_TRIAXIAL, double smoothfactor=0, 
+        const particles::PointMassSet<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
         const std::vector<double>  *_gridradii=NULL);
 
     /// init potential from stored SHE coefficients at given radii
@@ -104,7 +106,7 @@ public:
     static const char* myName() { return "Spline"; };
 
     // get functions
-    unsigned int getNcoefs_radial() const { return Ncoefs_radial; }   ///< return the number of radial points in the spline (excluding r=0)
+    unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }   ///< return the number of radial points in the spline (excluding r=0)
 
     /** compute SHE coefficients at given radii.
         \param[in] useNodes tells whether the radii in question are 
@@ -121,7 +123,7 @@ private:
     double gammain,  coefin;                 ///< slope and coef. for extrapolating potential inside minr (spherically-symmetric part, l=0)
     double gammaout, coefout, der2out;       ///< slope and coef. for extrapolating potential outside maxr (spherically-symmetric part, l=0)
     double potcenter, potmax, potminr;       ///< (abs.value) potential in the center (for transformation of l=0 spline), at the outermost spline node, and at 1st spline node
-    std::vector<mathutils::CubicSpline> splines;  ///< spline coefficients at each harmonic
+    std::vector<math::CubicSpline> splines;  ///< spline coefficients at each harmonic
     std::vector<double> slopein, slopeout;   ///< slope of coefs for l>0 for extrapolating inside rmin/outside rmax
 
     /// reimplemented function to compute the coefficients of angular expansion of potential at the given radius

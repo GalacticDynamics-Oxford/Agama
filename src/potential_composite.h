@@ -19,7 +19,7 @@ public:
         for(unsigned int i=0; i<components.size(); i++) delete components[i]; }
 
     /** provides the 'least common denominator' for the symmetry degree */
-    virtual SYMMETRYTYPE symmetry() const;
+    virtual SymmetryType symmetry() const;
 
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "CompositeDensity"; };
@@ -43,7 +43,7 @@ public:
         for(unsigned int i=0; i<components.size(); i++) delete components[i]; }
 
     /** provides the 'least common denominator' for the symmetry degree */
-    virtual SYMMETRYTYPE symmetry() const;
+    virtual SymmetryType symmetry() const;
 
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "CompositePotential"; };

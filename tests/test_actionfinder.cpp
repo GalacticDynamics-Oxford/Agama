@@ -1,8 +1,8 @@
 #include "orbit.h"
 #include "actions_staeckel.h"
-#include "potential_galpot.h"
+#include "potential_factory.h"
 #include "units.h"
-#include "mathutils.h"
+#include "math_core.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -43,7 +43,7 @@ void add_unwrap(const double val, std::vector<double>& vec)
     if(vec.size()==0)
         vec.push_back(val);
     else
-        vec.push_back(mathutils::unwrapAngle(val, vec.back()));
+        vec.push_back(math::unwrapAngle(val, vec.back()));
 }
 
 class anglestat{
@@ -59,9 +59,9 @@ public:
     }
     void finish() {
         double bla;
-        mathutils::linearFit(time.size(), &(time.front()), &(thetar.front()), freqr, bla, &dispr);
-        mathutils::linearFit(time.size(), &(time.front()), &(thetaz.front()), freqz, bla, &dispz);
-        mathutils::linearFit(time.size(), &(time.front()), &(thetaphi.front()), freqphi, bla, &dispphi);
+        math::linearFit(time.size(), &(time.front()), &(thetar.front()), freqr, bla, &dispr);
+        math::linearFit(time.size(), &(time.front()), &(thetaz.front()), freqz, bla, &dispz);
+        math::linearFit(time.size(), &(time.front()), &(thetaphi.front()), freqphi, bla, &dispphi);
     }
 };
 

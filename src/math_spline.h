@@ -8,7 +8,7 @@
 #include "math_base.h"
 #include <vector>
 
-namespace mathutils{
+namespace math{
 
 /** Class that defines a cubic spline with natural or clamped boundary conditions */
 class CubicSpline: public IFunction {

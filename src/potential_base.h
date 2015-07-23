@@ -2,23 +2,26 @@
 #include "coord.h"
 
 namespace potential{
+
+/** defines the symmetry properties of density or potential */
+enum SymmetryType{ 
+    ST_NONE         = 0, ///< no symmetry whatsoever
+    ST_REFLECTION   = 1, ///< reflection about origin (change of sign of all coordinates simultaneously)
+    ST_PLANESYM     = 2, ///< reflection about principal planes (change of sign of any coordinate)
+    ST_ZROTSYM      = 4, ///< rotation about z axis
+    ST_SPHSYM       = 8, ///< rotation about arbitrary axis
+    ST_TRIAXIAL     = ST_REFLECTION | ST_PLANESYM, ///< triaxial symmetry
+    ST_AXISYMMETRIC = ST_TRIAXIAL | ST_ZROTSYM,    ///< axial symmetry
+    ST_SPHERICAL    = ST_AXISYMMETRIC | ST_SPHSYM, ///< spherical symmetry
+    ST_DEFAULT      = ST_TRIAXIAL                  ///< a default value
+};
+
 /// \name  Base class for all density models
 ///@{
 
 /** Abstract class defining a density profile without a corresponding potential. */
 class BaseDensity{
 public:
-    /** defines the symmetry properties of the potential */
-    enum SYMMETRYTYPE{ 
-        ST_NONE = 0,       ///< no symmetry whatsoever
-        ST_REFLECTION = 1, ///< reflection about origin (change of sign of all coordinates simultaneously)
-        ST_PLANESYM = 2,   ///< reflection about principal planes (change of sign of any coordinate)
-        ST_ZROTSYM = 4,    ///< rotation about z axis
-        ST_SPHSYM = 8,     ///< rotation about arbitrary axis
-        ST_TRIAXIAL = ST_REFLECTION | ST_PLANESYM,    ///< triaxial symmetry
-        ST_AXISYMMETRIC = ST_TRIAXIAL | ST_ZROTSYM,   ///< axial symmetry
-        ST_SPHERICAL = ST_AXISYMMETRIC | ST_SPHSYM,   ///< spherical symmetry
-    };
 
     BaseDensity() {};
     virtual ~BaseDensity() {};
@@ -29,8 +32,8 @@ public:
     template<typename coordSysT>
     double density(const coord::PosT<coordSysT> &pos) const;
 
-    /// returns symmetry type of this potential
-    virtual SYMMETRYTYPE symmetry() const=0;
+    /// returns the symmetry type of this density or potential
+    virtual SymmetryType symmetry() const=0;
 
     /// return the name of density or potential model
     virtual const char* name() const=0;
@@ -252,14 +255,14 @@ private:
 
 /** Parent class for analytic spherically-symmetric potentials.
     Derived classes should implement a single function defined in 
-    the `mathutils::IFunction::evalDeriv` interface, that computes
+    the `math::IFunction::evalDeriv` interface, that computes
     the potential and up to two its derivatives as functions of spherical radius.
     Conversion into other coordinate systems is implemented in this class. */
-class BasePotentialSphericallySymmetric: public BasePotential, mathutils::IFunction{
+class BasePotentialSphericallySymmetric: public BasePotential, math::IFunction{
 public:
     BasePotentialSphericallySymmetric() : BasePotential() {}
 
-    virtual SYMMETRYTYPE symmetry() const { return ST_SPHERICAL; }
+    virtual SymmetryType symmetry() const { return ST_SPHERICAL; }
 
 private:
     virtual void eval_car(const coord::PosCar &pos,

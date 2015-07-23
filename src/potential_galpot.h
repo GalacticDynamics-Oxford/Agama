@@ -54,7 +54,6 @@ is provided, which takes the name of parameter file and the Units object as para
 
 #pragma once
 #include "potential_base.h"
-#include "units.h"
 #include <vector>
 
 namespace potential{
@@ -96,10 +95,10 @@ struct SphrParam{
 */
 
 /** helper routine to create an instance of radial density function */
-const mathutils::IFunction* createRadialDiskFnc(const DiskParam& params);
+const math::IFunction* createRadialDiskFnc(const DiskParam& params);
 
 /** helper routine to create an instance of vertical density function */
-const mathutils::IFunction* createVerticalDiskFnc(const DiskParam& params);
+const math::IFunction* createVerticalDiskFnc(const DiskParam& params);
 
 /** Residual density profile of a disk component (eq.9 in Dehnen&Binney 1998) */
 class DiskResidual: public BaseDensity {
@@ -109,12 +108,12 @@ public:
         radial_fnc  (createRadialDiskFnc(params)),
         vertical_fnc(createVerticalDiskFnc(params)) {};
     ~DiskResidual() { delete radial_fnc; delete vertical_fnc; }
-    virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "DiskResidual"; };
 private:
-    const mathutils::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
-    const mathutils::IFunction* vertical_fnc;  ///< function describing vertical density profile
+    const math::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const math::IFunction* vertical_fnc;  ///< function describing vertical density profile
     virtual double density_cyl(const coord::PosCyl &pos) const;
     virtual double density_car(const coord::PosCar &pos) const
     {  return density_cyl(coord::toPosCyl(pos)); }
@@ -130,12 +129,12 @@ public:
         radial_fnc  (createRadialDiskFnc(params)),
         vertical_fnc(createVerticalDiskFnc(params)) {};
     ~DiskAnsatz() { delete radial_fnc; delete vertical_fnc; }
-    virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "DiskAnsatz"; };
 private:
-    const mathutils::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
-    const mathutils::IFunction* vertical_fnc;  ///< function describing vertical density profile
+    const math::IFunction* radial_fnc;    ///< function describing radial dependence of surface density
+    const math::IFunction* vertical_fnc;  ///< function describing vertical density profile
     /** Compute _part_ of disk potential: f(r)*H(z) */
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -151,7 +150,7 @@ private:
 class SpheroidDensity: public BaseDensity{
 public:
     SpheroidDensity (const SphrParam &_params);
-    virtual SYMMETRYTYPE symmetry() const { 
+    virtual SymmetryType symmetry() const { 
         return params.axisRatio==1?ST_SPHERICAL:ST_AXISYMMETRIC; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "TwoPowerLawSpheroid"; };
@@ -197,21 +196,11 @@ public:
                const int num_grid_points,
                const double gamma, const double beta);
     ~Multipole();
-    virtual SYMMETRYTYPE symmetry() const { return ST_AXISYMMETRIC; }
+    virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
 private:
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 };
-
-/** Utility function providing a legacy interface compatible with the original GalPot.
-    It reads the parameters from a text file and converts them into the internal unit system, 
-    then constructs the potential using `createGalaxyPotential` routine.
-    \param[in]  filename is the name of parameter file;
-    \param[in]  units is the specification of internal unit system;
-    \returns    the new CompositeCyl potential, or raises a std::runtime_error exception 
-                if file is not readable or does not contain valid parameters.
-*/
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units);
 
 /** Construct a CompositeCyl potential consisting of a Multipole and a number of DiskAnsatz 
     components, using the provided arrays of parameters for disks and spheroids

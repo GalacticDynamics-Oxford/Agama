@@ -1,7 +1,12 @@
 CXX       = g++
-CXXFLAGS += -Wall -O3 $(DEFINES) -fPIC -fdata-sections -ffunction-sections
+CXXFLAGS += -Wall -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
 LFLAGS   += -fPIC -lgsl -lgslcblas
 ARC       = ar
+
+# uncomment (and possibly modify) the three lines below to use UNSIO library for input/output of N-body snapshots
+DEFINES  += -DHAVE_UNSIO
+CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
+LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
 
 SRCDIR    = src
 OBJDIR    = obj
@@ -10,21 +15,25 @@ LEGACYDIR = src/legacy
 
 SOURCES   = coord.cpp \
             potential_base.cpp \
+            potential_factory.cpp \
             potential_analytic.cpp \
-            potential_staeckel.cpp \
             potential_composite.cpp \
+            potential_dehnen.cpp \
             potential_galpot.cpp \
             potential_sphharm.cpp \
+            potential_staeckel.cpp \
+            particles_io.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
-            mathutils.cpp \
+            math_core.cpp \
             math_spline.cpp \
-            orbit.cpp 
+            orbit.cpp \
+            utils.cpp \
 
 #LEGACYSRC = Stackel_JS.cpp \
 #            coordsys.cpp 
 
-TESTSRCS  = test_mathutils.cpp \
+TESTSRCS  = test_math_core.cpp \
             test_math_spline.cpp \
             test_coord.cpp \
             test_units.cpp \
@@ -46,16 +55,16 @@ $(LIBNAME):  $(OBJECTS) $(LEGACYOBJ)
 	ar rv $(LIBNAME) $(OBJECTS) $(LEGACYOBJ)
 
 %.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
-	$(CXX) -o "$@" "$<" $(CXXFLAGS) -I$(SRCDIR) $(LIBNAME) $(LFLAGS)
+	$(CXX) -o "$@" "$<" $(CXXFLAGS) $(LIBNAME) $(LFLAGS)
 
 clean:
 	rm -f $(OBJECTS) $(LEGACYOBJ) *.exe
 
 $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
 	@mkdir -p $(OBJDIR)
-	$(CXX) -c $(CXXFLAGS) -I$(SRCDIR) -o "$@" "$<"
+	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
 $(OBJDIR)/%.o:  $(LEGACYDIR)/%.cpp
-	$(CXX) -c $(CXXFLAGS) -I$(SRCDIR) -o "$@" "$<"
+	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
 .PHONY: clean

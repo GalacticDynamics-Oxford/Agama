@@ -1,11 +1,10 @@
 #include "potential_staeckel.h"
 #include "actions_staeckel.h"
 #include "orbit.h"
-#include "mathutils.h"
+#include "math_core.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
-//#include <vector>
 #include <cmath>
 
 const double integr_eps=1e-8;        // integration accuracy parameter
@@ -66,9 +65,9 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
             statf.add(a);
             if(1 || i==0) angf=a;  // 1 to disable unwrapping
             else {
-                angf.thetar   = mathutils::unwrapAngle(a.thetar, angf.thetar);
-                angf.thetaz   = mathutils::unwrapAngle(a.thetaz, angf.thetaz);
-                angf.thetaphi = mathutils::unwrapAngle(a.thetaphi, angf.thetaphi);
+                angf.thetar   = math::unwrapAngle(a.thetar, angf.thetar);
+                angf.thetaz   = math::unwrapAngle(a.thetaz, angf.thetaz);
+                angf.thetaphi = math::unwrapAngle(a.thetaphi, angf.thetaphi);
             }
             if(output) {
                 double xv[6];

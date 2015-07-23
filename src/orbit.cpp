@@ -1,13 +1,13 @@
 #include "orbit.h"
 #include <stdexcept>
 #include <cmath>
-#include "mathutils.h"
+#include "math_core.h"
 
 namespace orbit{
 
 /* evaluate r.h.s. of ODE in different coordinate systems */
 template<typename coordT>
-class OrbitIntegrator: public mathutils::IOdeSystem {
+class OrbitIntegrator: public math::IOdeSystem {
 public:
     OrbitIntegrator(const potential::BasePotential& p) :
         potential(p) {};
@@ -72,7 +72,7 @@ int integrate(const potential::BasePotential& potential,
     for(int i=0; i<6; i++) 
         norm+=fabs(vars[i]);
     OrbitIntegrator<coordT>  orbint(potential);
-    mathutils::OdeSolver     ode(orbint, accuracy*norm, accuracy);
+    math::OdeSolver     ode(orbint, accuracy*norm, accuracy);
     int numsteps=0, result=0;
     for(int i=0; i<=nsteps && result>=0; i++){
         output_trajectory.push_back(coord::PosVelT<coordT>(vars));

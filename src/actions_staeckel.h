@@ -51,7 +51,7 @@ struct AxisymGenFuncDerivatives {
     \f$  p(tau)^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma))  \f$,
     and the actual implementation of this function is specific to each descendant class.
 */
-class AxisymFunctionBase: public mathutils::IFunction {
+class AxisymFunctionBase: public math::IFunction {
 public:
     coord::PosVelProlSph point; ///< position/derivative in prolate spheroidal coordinates
     const double signz;         ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
@@ -71,9 +71,9 @@ public:
 class AxisymFunctionStaeckel: public AxisymFunctionBase {
 public:
     const double I3;                        ///< third integral
-    const mathutils::IFunction& fncG;       ///< single-variable function of a Staeckel potential
+    const math::IFunction& fncG;       ///< single-variable function of a Staeckel potential
     AxisymFunctionStaeckel(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
-        double _I3, const mathutils::IFunction& _fncG) :
+        double _I3, const math::IFunction& _fncG) :
         AxisymFunctionBase(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
 
     /** auxiliary function that enters the definition of canonical momentum for 

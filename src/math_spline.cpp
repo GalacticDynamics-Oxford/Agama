@@ -1,5 +1,5 @@
 #include "math_spline.h"
-#include "mathutils.h"
+#include "math_core.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
@@ -9,7 +9,7 @@
 #include <gsl/gsl_blas.h>
 #include <gsl/gsl_multifit.h>
 
-namespace mathutils {
+namespace math {
 
 //-------------- PENALIZED SPLINE APPROXIMATION ---------------//
 
@@ -580,6 +580,8 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
 
 bool CubicSpline::isMonotonic() const
 {
+    if(xval.size()==0)
+        throw std::range_error("Empty spline");
     bool ismonotonic=true;
     for(size_t index=0; ismonotonic && index < xval.size()-1; index++) {
         double dx = xval[index + 1] - xval[index];

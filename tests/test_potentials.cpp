@@ -1,6 +1,6 @@
 #include "orbit.h"
 #include "potential_analytic.h"
-#include "potential_galpot.h"
+#include "potential_factory.h"
 #include "units.h"
 #include <cstdio>
 #include <iostream>
@@ -52,7 +52,7 @@ bool test_potential(const potential::BasePotential* potential,
         std::cout <<"FAILED,  ";
     std::cout << "E=" <<avgH <<" +- "<<dispH<<",  Lz="<<avgLz<<" +- "<<dispLz<<"\n";
     return completed && dispH<eps && 
-        (dispLz<eps || ((potential->symmetry() & potential::BasePotential::ST_AXISYMMETRIC) == 0));
+        (dispLz<eps || ((potential->symmetry() & potential::ST_AXISYMMETRIC) == 0));
 }
 
 const potential::BasePotential* make_galpot(const char* params)

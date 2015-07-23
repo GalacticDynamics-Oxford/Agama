@@ -7,20 +7,21 @@
     coordinate system gives the identical result to a direct conversion.
 */
 #include "coord.h"
-#include <iostream>
+#include "coord_utils.h"
 #include <iomanip>
-#include <cmath>
 #include <stdexcept>
 
 const double eps=1e-10;  // accuracy of comparison
-namespace coord{
 
 /// some test functions that compute values, gradients and hessians in various coord systems
-template<> class IScalarFunction<Car> {
+template<typename CoordT>
+class MyScalarFunction;
+
+template<> class MyScalarFunction<coord::Car>: public coord::IScalarFunction<coord::Car> {
 public:
-    IScalarFunction() {};
-    virtual ~IScalarFunction() {};
-    virtual void eval_scalar(const PosCar& p, double* value=0, GradCar* deriv=0, HessCar* deriv2=0) const
+    MyScalarFunction() {};
+    virtual ~MyScalarFunction() {};
+    virtual void eval_scalar(const coord::PosCar& p, double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
     {  // this is loosely based on Henon-Heiles potential, shifted from origin..
         double x=p.x-0.5, y=p.y+1.5, z=p.z+0.25;
         if(value) 
@@ -41,11 +42,11 @@ public:
     }
 };
 
-template<> class IScalarFunction<Cyl> {
+template<> class MyScalarFunction<coord::Cyl>: public coord::IScalarFunction<coord::Cyl> {
 public:
-    IScalarFunction() {};
-    virtual ~IScalarFunction() {};
-    virtual void eval_scalar(const PosCyl& p, double* value=0, GradCyl* deriv=0, HessCyl* deriv2=0) const
+    MyScalarFunction() {};
+    virtual ~MyScalarFunction() {};
+    virtual void eval_scalar(const coord::PosCyl& p, double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
     {  // same potential expressed in different coordinates
         double sinphi = sin(p.phi), cosphi = cos(p.phi), sin2=pow_2(sinphi), R2=pow_2(p.R), R3=p.R*R2;
         if(value) 
@@ -66,11 +67,11 @@ public:
     }
 };
 
-template<> class IScalarFunction<Sph> {
+template<> class MyScalarFunction<coord::Sph>: public coord::IScalarFunction<coord::Sph> {
 public:
-    IScalarFunction() {};
-    virtual ~IScalarFunction() {};
-    virtual void eval_scalar(const PosSph& p, double* value=0, GradSph* deriv=0, HessSph* deriv2=0) const
+    MyScalarFunction() {};
+    virtual ~MyScalarFunction() {};
+    virtual void eval_scalar(const coord::PosSph& p, double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
     {  // some obscure combination of spherical harmonics
         if(value) 
             *value = pow(p.r,2.5)*sin(p.theta)*sin(p.phi+2) - pow_2(p.r)*pow_2(sin(p.theta))*cos(2*p.phi-3);
@@ -89,39 +90,6 @@ public:
         }
     }
 };
-
-/// need to define templated comparison functions for positions, gradients and hessians
-template<typename coordSys> 
-bool equalPos(const PosT<coordSys>& p1, const PosT<coordSys>& p2);
-template<typename coordSys> 
-bool equalGrad(const GradT<coordSys>& g1, const GradT<coordSys>& g2);
-template<typename coordSys> 
-bool equalHess(const HessT<coordSys>& g1, const HessT<coordSys>& g2);
-
-template<> bool equalPos(const PosCar& p1, const PosCar& p2) {
-    return fabs(p1.x-p2.x)<eps && fabs(p1.y-p2.y)<eps && fabs(p1.z-p2.z)<eps; }
-template<> bool equalPos(const PosCyl& p1, const PosCyl& p2) {
-    return fabs(p1.R-p2.R)<eps && fabs(p1.z-p2.z)<eps && fabs(p1.phi-p2.phi)<eps; }
-template<> bool equalPos(const PosSph& p1, const PosSph& p2) {
-    return fabs(p1.r-p2.r)<eps && fabs(p1.theta-p2.theta)<eps && fabs(p1.phi-p2.phi)<eps; }
-
-template<> bool equalGrad(const GradCar& g1, const GradCar& g2) {
-    return fabs(g1.dx-g2.dx)<eps && fabs(g1.dy-g2.dy)<eps && fabs(g1.dz-g2.dz)<eps; }
-template<> bool equalGrad(const GradCyl& g1, const GradCyl& g2) {
-    return fabs(g1.dR-g2.dR)<eps && fabs(g1.dphi-g2.dphi)<eps && fabs(g1.dz-g2.dz)<eps; }
-template<> bool equalGrad(const GradSph& g1, const GradSph& g2) {
-    return fabs(g1.dr-g2.dr)<eps && fabs(g1.dtheta-g2.dtheta)<eps && fabs(g1.dphi-g2.dphi)<eps; }
-
-template<> bool equalHess(const HessCar& h1, const HessCar& h2) {
-    return fabs(h1.dx2-h2.dx2)<eps && fabs(h1.dy2-h2.dy2)<eps && fabs(h1.dz2-h2.dz2)<eps &&
-        fabs(h1.dxdy-h2.dxdy)<eps && fabs(h1.dydz-h2.dydz)<eps && fabs(h1.dxdz-h2.dxdz)<eps; }
-template<> bool equalHess(const HessCyl& h1, const HessCyl& h2) {
-    return fabs(h1.dR2-h2.dR2)<eps && fabs(h1.dphi2-h2.dphi2)<eps && fabs(h1.dz2-h2.dz2)<eps &&
-        fabs(h1.dRdphi-h2.dRdphi)<eps && fabs(h1.dzdphi-h2.dzdphi)<eps && fabs(h1.dRdz-h2.dRdz)<eps; }
-template<> bool equalHess(const HessSph& h1, const HessSph& h2) {
-    return fabs(h1.dr2-h2.dr2)<eps && fabs(h1.dtheta2-h2.dtheta2)<eps && fabs(h1.dphi2-h2.dphi2)<eps &&
-        fabs(h1.drdtheta-h2.drdtheta)<eps && fabs(h1.drdphi-h2.drdphi)<eps && fabs(h1.dthetadphi-h2.dthetadphi)<eps; }
-}
 
 /** check if we expect singularities in coordinate transformations */
 template<typename coordSys> bool isSingular(const coord::PosT<coordSys>& p);
@@ -200,7 +168,7 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     coord::HessT<srcCS> srchess;
     coord::GradT<destCS> destgrad2step;
     coord::HessT<destCS> desthess2step;
-    coord::IScalarFunction<srcCS> Fnc;
+    MyScalarFunction<srcCS> Fnc;
     double srcvalue, destvalue=0;
     Fnc.eval_scalar(srcpoint, &srcvalue, &srcgrad, &srchess);
     const coord::GradT<destCS> destgrad=coord::toGrad<srcCS,destCS>(srcgrad, derivDtoI);
@@ -214,12 +182,12 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
         std::cout << "    2-step conversion: " << e.what() << "\n";
     }
 
-    bool samepos=equalPos(srcpoint,invpoint);
-    bool samegrad=equalGrad(srcgrad, invgrad);
-    bool samehess=equalHess(srchess, invhess);
-    bool samevalue2step=(fabs(destvalue-srcvalue)<eps);
-    bool samegrad2step=equalGrad(destgrad, destgrad2step);
-    bool samehess2step=equalHess(desthess, desthess2step);
+    bool samepos  = coord::equalPos(srcpoint,invpoint, eps);
+    bool samegrad = coord::equalGrad(srcgrad, invgrad, eps);
+    bool samehess = coord::equalHess(srchess, invhess, eps);
+    bool samevalue2step= (fabs(destvalue-srcvalue)<eps);
+    bool samegrad2step = coord::equalGrad(destgrad, destgrad2step, eps);
+    bool samehess2step = coord::equalHess(desthess, desthess2step, eps);
     bool ok=samepos && samegrad && samehess && samevalue2step && samegrad2step && samehess2step;
     std::cout << (ok?"OK  ": isSingular(srcpoint)?"EXPECTEDLY FAILED  ":"FAILED  ");
     if(!samepos) 

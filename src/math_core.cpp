@@ -1,28 +1,4 @@
-// An interface to GSL - hides all the gsl calls behind easier to use functions
-// Jason Sanders
-#if 0
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_randist.h>
-#include <gsl/gsl_roots.h>
-#include <gsl/gsl_integration.h>
-#include <gsl/gsl_spline.h>
-#include <gsl/gsl_sort_double.h>
-#include <gsl/gsl_permute.h>
-#include <gsl/gsl_odeiv2.h>
-#include <gsl/gsl_ieee_utils.h>
-#include <gsl/gsl_multimin.h>
-#include <gsl/gsl_math.h>
-#include <gsl/gsl_vector.h>
-#include <gsl/gsl_sf_bessel.h>
-#include <gsl/gsl_sf_erf.h>
-#include <gsl/gsl_sf_gamma.h>
-#include <gsl/gsl_sf_ellint.h>
-#include <gsl/gsl_monte_vegas.h>
-#include <gsl/gsl_siman.h>
-#include <vector>
-#endif
-
-#include "mathutils.h"
+#include "math_core.h"
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
@@ -35,7 +11,7 @@
 #include <stdexcept>
 #include <cassert>
 
-namespace mathutils{
+namespace math{
 
 const int MAXITER = 42;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
 

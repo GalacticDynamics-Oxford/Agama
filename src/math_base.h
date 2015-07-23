@@ -1,8 +1,10 @@
 #pragma once
 
 /// convenience function for squaring a number, used in many places
-template<typename T>
-T pow_2(const T& x) { return x*x; }
+inline double pow_2(double x) { return x*x; }
+inline float pow_2(float x) { return x*x; }
+inline int pow_2(int x) { return x*x; }
+inline unsigned int pow_2(unsigned int x) { return x*x; }
 
 #ifndef INFINITY
 #define INFINITY 1e10000
@@ -11,7 +13,7 @@ T pow_2(const T& x) { return x*x; }
 #define NAN (INFINITY/INFINITY)
 #endif
 
-namespace mathutils{
+namespace math{
 
 /** Prototype of a function of one variable that may provide up to two derivatives.
     This interface serves as the base for many mathematical routines throughout the code,
@@ -73,4 +75,4 @@ public:
 
 };
     
-}  // namespace mathutils
+}  // namespace math

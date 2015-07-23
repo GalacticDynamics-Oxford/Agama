@@ -1,5 +1,5 @@
 #include "potential_sphharm.h"
-#include "mathutils.h"
+#include "math_core.h"
 #include <cmath>
 #include <algorithm>
 #include <cassert>
@@ -38,8 +38,9 @@ const double SPLINE_MIN_RADIUS=1e-10;
 //----------------------------------------------------------------------------//
 // BasePotentialSphericalHarmonic -- parent class for all potentials 
 // using angular expansion in spherical harmonics
-void BasePotentialSphericalHarmonic::assignlmrange()
+void BasePotentialSphericalHarmonic::setSymmetry(SymmetryType sym)
 {
+    mysymmetry = sym;
     lmax = (mysymmetry & ST_SPHSYM)    ==ST_SPHSYM     ? 0 : static_cast<int>(Ncoefs_angular);  // if spherical model, use only l=0,m=0 term
     lstep= (mysymmetry & ST_REFLECTION)==ST_REFLECTION ? 2 : 1;  // if reflection symmetry, use only even l
     mmax = (mysymmetry & ST_ZROTSYM)   ==ST_ZROTSYM    ? 0 : 1;  // if axisymmetric model, use only m=0 terms, otherwise all terms up to l (1 is the multiplying factor)
@@ -75,7 +76,7 @@ double intSH_theta(double theta, void* params)
     gsl_function F;
     F.function=&intSH_phi;
     F.params=params;
-    if( (((CPotentialParamSH*)params)->P->symmetry() & BaseDensity::ST_AXISYMMETRIC) == BaseDensity::ST_AXISYMMETRIC)
+    if( (((CPotentialParamSH*)params)->P->symmetry() & ST_AXISYMMETRIC) == ST_AXISYMMETRIC)
     {   // don't integrate in phi
         result = ((CPotentialParamSH*)params)->sh_m != 0 ? 0 :
             ((CPotentialParamSH*)params)->phi_max * 
@@ -209,13 +210,12 @@ void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
 template<typename NumT> 
 BasisSetExp::BasisSetExp(
     double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<NumT> &points, SYMMETRYTYPE _sym):
+    const particles::PointMassSet<NumT> &points, SymmetryType _sym):
   BasePotentialSphericalHarmonic(_Ncoefs_angular), 
   Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
   Alpha(_Alpha)
 {
-    mysymmetry=_sym;
-    assignlmrange();
+    setSymmetry(_sym);
     if(points.size()==0)
         throw std::invalid_argument("BasisSetExp: input particle set is empty");
     prepareCoefsDiscrete(points);
@@ -223,14 +223,8 @@ BasisSetExp::BasisSetExp(
 }
 template 
 BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Car>&points, BaseDensity::SYMMETRYTYPE _sym);
-template 
-BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Cyl>&points, BaseDensity::SYMMETRYTYPE _sym);
-template 
-BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Sph>&points, BaseDensity::SYMMETRYTYPE _sym);
-    
+    const particles::PointMassSet<coord::Car>&points, SymmetryType _sym);
+
 BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs):
   BasePotentialSphericalHarmonic((assert(coefs.size()>0), static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1))), 
   Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, static_cast<size_t>(coefs.size()-1))),
@@ -249,15 +243,14 @@ BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned in
   Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
   Alpha(_Alpha)
 {
-    mysymmetry=srcdensity.symmetry();
-    assignlmrange();
+    setSymmetry(srcdensity.symmetry());
     prepareCoefsAnalytic(srcdensity);
     checkSymmetry();
 }
 
 void BasisSetExp::checkSymmetry()
 { 
-    SYMMETRYTYPE sym=ST_SPHERICAL;  // too optimistic:))
+    SymmetryType sym=ST_SPHERICAL;  // too optimistic:))
     const double MINCOEF=1e-8;
     for(size_t n=0; n<=Ncoefs_radial; n++)
     {
@@ -265,10 +258,10 @@ void BasisSetExp::checkSymmetry()
             for(int m=-l; m<=l; m++)
                 if(fabs(SHcoefs[n][l*(l+1)+m])>MINCOEF) 
                 {   // nonzero coef.: check if that breaks any symmetry
-                    if(l%2==1)  sym = (SYMMETRYTYPE)(sym & ~ST_REFLECTION);
-                    if(m<0 || m%2==1)  sym = (SYMMETRYTYPE)(sym & ~ST_PLANESYM);
-                    if(m!=0) sym = (SYMMETRYTYPE)(sym & ~ST_ZROTSYM);
-                    if(l>0) sym = (SYMMETRYTYPE)(sym & ~ST_SPHSYM);
+                    if(l%2==1)  sym = (SymmetryType)(sym & ~ST_REFLECTION);
+                    if(m<0 || m%2==1)  sym = (SymmetryType)(sym & ~ST_PLANESYM);
+                    if(m!=0) sym = (SymmetryType)(sym & ~ST_ZROTSYM);
+                    if(l>0) sym = (SymmetryType)(sym & ~ST_SPHSYM);
                 }
     }
     // now set all coefs excluded by the inferred symmetry  to zero
@@ -282,8 +275,7 @@ void BasisSetExp::checkSymmetry()
                     (l%2==1 && (sym & ST_REFLECTION)) ) 
                         SHcoefs[n][l*(l+1)+m] = 0;
     }
-    mysymmetry = sym; 
-    assignlmrange();
+    setSymmetry(sym);
 #if 0
     bool densityNonzero = checkDensityNonzero();
     bool massMonotonic  = checkMassMonotonic();
@@ -326,10 +318,10 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
     CPotentialParamSH PP;
     PP.P = &srcdensity;
     PP.Alpha = Alpha;
-    PP.theta_max = (mysymmetry & ST_REFLECTION)==ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
-    PP.phi_max   = (mysymmetry & ST_PLANESYM)==ST_PLANESYM ? M_PI_2 : 2*M_PI;
-    int multfactor = ((mysymmetry & ST_PLANESYM)==ST_PLANESYM ? 4 : 1) * 
-        ((mysymmetry & ST_REFLECTION)==ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
+    PP.theta_max = (symmetry() & ST_REFLECTION)==ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
+    PP.phi_max   = (symmetry() & ST_PLANESYM)==ST_PLANESYM ? M_PI_2 : 2*M_PI;
+    int multfactor = ((symmetry() & ST_PLANESYM)==ST_PLANESYM ? 4 : 1) * 
+        ((symmetry() & ST_REFLECTION)==ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
     gsl_integration_workspace * ws = gsl_integration_workspace_alloc (1000);
     double interval[2]={-1.0, 1.0};
     gsl_function F;
@@ -354,8 +346,8 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
     gsl_integration_workspace_free (ws);
 }
 
-template<typename NumT> 
-void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassSet<NumT> &points)
+template<typename CoordT> 
+void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &points)
 {
     SHcoefs.resize(Ncoefs_radial+1);
     for(size_t n=0; n<=Ncoefs_radial; n++)
@@ -467,18 +459,17 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
 
 template<typename CoordT>
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<CoordT> &points, SYMMETRYTYPE _sym, 
+    const particles::PointMassSet<CoordT> &points, SymmetryType _sym, 
     double smoothfactor, const std::vector<double> *radii):  // init coefs from point mass set
     BasePotentialSphericalHarmonic(_Ncoefs_angular),
     Ncoefs_radial(std::max<size_t>(5,_Ncoefs_radial))
 {
-    mysymmetry=_sym;
-    assignlmrange();
+    setSymmetry(_sym);
     prepareCoefsDiscrete(points, smoothfactor, radii);
 }
 template
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Car> &points, SYMMETRYTYPE _sym, 
+    const particles::PointMassSet<coord::Car> &points, SymmetryType _sym, 
     double smoothfactor, const std::vector<double> *radii);
 
 SplineExp::SplineExp(
@@ -495,8 +486,7 @@ SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular,
     BasePotentialSphericalHarmonic(_Ncoefs_angular), 
     Ncoefs_radial(std::max<unsigned int>(5,_Ncoefs_radial))
 {
-    mysymmetry = srcdensity.symmetry();
-    assignlmrange();
+    setSymmetry(srcdensity.symmetry());
     prepareCoefsAnalytic(srcdensity, radii);
 }
 
@@ -570,14 +560,14 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
 #else
         double rout = 1e3, rin = 1e-3; ///!!!
 #endif
-        mathutils::createNonuniformGrid(Ncoefs_radial+1, rin, rout, true, radii); 
+        math::createNonuniformGrid(Ncoefs_radial+1, rin, rout, true, radii); 
     }
     gsl_integration_workspace * w = gsl_integration_workspace_alloc (1000);
     CPotentialParamSH PP;
     PP.P = &srcdensity;
-    PP.theta_max= mysymmetry & ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
-    PP.phi_max= mysymmetry & ST_PLANESYM ? M_PI_2 : 2*M_PI;
-    int multfactor = (mysymmetry & ST_PLANESYM ? 4 : 1) * (mysymmetry & ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
+    PP.theta_max = symmetry() & ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
+    PP.phi_max = symmetry() & ST_PLANESYM ? M_PI_2 : 2*M_PI;
+    int multfactor = (symmetry() & ST_PLANESYM ? 4 : 1) * (symmetry() & ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
     gsl_function F;
     F.function=&intSpline_r;
     F.params=&PP;
@@ -666,8 +656,8 @@ struct ParticleSph{
 };
 /// \endcond
 
-template<typename NumT>
-void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<NumT> &srcpoints, 
+template<typename CoordT>
+void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &srcpoints, 
     const std::vector<double>* srcradii, std::vector<double>* outradii, std::vector< std::vector<double> > *outcoefs)
 {
     assert(outcoefs!=NULL);
@@ -818,7 +808,7 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &srcp
         size_t npointsOuterGrid = npoints - std::max<size_t>(minBinPoints, npointsMargin);   // number of points within outermost grid radius
         double innerBinRadius = pointRadii[npointsInnerGrid];
         double outerBinRadius = pointRadii[npointsOuterGrid];
-        mathutils::createNonuniformGrid(Ncoefs_radial+1, innerBinRadius, outerBinRadius, true, radii);
+        math::createNonuniformGrid(Ncoefs_radial+1, innerBinRadius, outerBinRadius, true, radii);
     }
     // find index of the inner- and outermost points which are used in b-spline fitting
     size_t npointsInnerSpline = 0;
@@ -848,7 +838,7 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &srcp
             scaledPointRadii[i] = log(pointRadii[i+npointsInnerSpline]);
             scaledPointCoefs[i] = log(1/(1/potcenter - 1/pointCoefs[0][i+npointsInnerSpline]));
         }
-        mathutils::SplineApprox appr(scaledPointRadii, scaledKnotRadii);
+        math::SplineApprox appr(scaledPointRadii, scaledKnotRadii);
 //        if(appr.isSingular())
 //            my_message(FUNCNAME, 
 //                "Warning, in Spline potential initialization: singular matrix for least-square fitting; fallback to a slow algorithm");
@@ -877,7 +867,7 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &srcp
         scaledKnotRadii[Ncoefs_radial+1] = log(1+outerRadiusSpline);
         for(size_t i=0; i<numPointsUsed; i++)
             scaledPointRadii[i] = log(1+pointRadii[i+npointsInnerSpline]);
-        mathutils::SplineApprox appr(scaledPointRadii, scaledKnotRadii);
+        math::SplineApprox appr(scaledPointRadii, scaledKnotRadii);
 //        if(appr.status()==CSplineApprox::AS_SINGULAR)
 //            my_message(FUNCNAME, 
 //                "Warning, in Spline potential initialization: singular matrix for least-square fitting; fallback to a slow algorithm without smoothing");
@@ -918,7 +908,7 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &srcp
 
 void SplineExp::checkSymmetry(const std::vector< std::vector<double> > &coefsArray)
 { 
-    SYMMETRYTYPE sym=ST_SPHERICAL;  // too optimistic:))
+    SymmetryType sym=ST_SPHERICAL;  // too optimistic:))
     const double MINCOEF=1e-8;   // if ALL coefs of a certain subset of indices are below this value, assume some symmetry
     for(size_t n=0; n<=Ncoefs_radial; n++)
     {
@@ -926,19 +916,18 @@ void SplineExp::checkSymmetry(const std::vector< std::vector<double> > &coefsArr
             for(int m=-l; m<=l; m++)
                 if(fabs(coefsArray[n][l*(l+1)+m])>MINCOEF) 
                 {   // nonzero coef.: check if that breaks any symmetry
-                    if(l%2==1)  sym = (SYMMETRYTYPE)(sym & ~ST_REFLECTION);
-                    if(m<0 || m%2==1)  sym = (SYMMETRYTYPE)(sym & ~ST_PLANESYM);
-                    if(m!=0) sym = (SYMMETRYTYPE)(sym & ~ST_ZROTSYM);
-                    if(l>0) sym = (SYMMETRYTYPE)(sym & ~ST_SPHSYM);
+                    if(l%2==1)  sym = (SymmetryType)(sym & ~ST_REFLECTION);
+                    if(m<0 || m%2==1)  sym = (SymmetryType)(sym & ~ST_PLANESYM);
+                    if(m!=0) sym = (SymmetryType)(sym & ~ST_ZROTSYM);
+                    if(l>0) sym = (SymmetryType)(sym & ~ST_SPHSYM);
                 }
     }
-    mysymmetry = sym; 
-    assignlmrange();
+    setSymmetry(sym); 
 }
 
 /// \cond INTERNAL_DOCS
 // auxiliary functions to find outer slope and 1st order correction to inner power-law slope for potential
-class FindGammaOut: public mathutils::IFunctionNoDeriv {
+class FindGammaOut: public math::IFunctionNoDeriv {
 private:
     double r1,r2,r3,K;
 public:
@@ -948,7 +937,7 @@ public:
         return( pow(r2, 3-y) - pow(r1, 3-y))/( pow(r3, 3-y) - pow(r2, 3-y)) - K;
     }
 };
-class FindBcorrIn: public mathutils::IFunctionNoDeriv {
+class FindBcorrIn: public math::IFunctionNoDeriv {
 private:
     double r1,r2,r3,K2,K3;
 public:
@@ -999,9 +988,9 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
           coefsArray[Ncoefs_radial-1][0] * radii[Ncoefs_radial-1] ) / 
         ( coefsArray[Ncoefs_radial-1][0] * radii[Ncoefs_radial-1] - 
           coefsArray[Ncoefs_radial-2][0] * radii[Ncoefs_radial-2] );
-    if(mathutils::isFinite(Kout)) {
+    if(math::isFinite(Kout)) {
         FindGammaOut fout(radii[Ncoefs_radial], radii[Ncoefs_radial-1], radii[Ncoefs_radial-2], Kout);
-        gammaout = mathutils::findRoot(fout, 3.01, 10., mathutils::ACCURACY_ROOT);
+        gammaout = math::findRoot(fout, 3.01, 10., math::ACCURACY_ROOT);
         if(gammaout != gammaout)
             gammaout = 4.0;
         coefout = fmax(0,
@@ -1017,7 +1006,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     const double K2 = log((coefsArray[2][0]-potcenter)/(coefsArray[1][0]-potcenter));
     const double K3 = log((coefsArray[3][0]-potcenter)/(coefsArray[1][0]-potcenter));
     FindBcorrIn fin(radii[1], radii[2], radii[3], K2, K3);
-    double B = mathutils::findRoot(fin, 0, 0.9/radii[3], mathutils::ACCURACY_ROOT);
+    double B = math::findRoot(fin, 0, 0.9/radii[3], math::ACCURACY_ROOT);
     if(B!=B)
         B = 0.;
     gammain = 2. - ( log((coefsArray[2][0]-potcenter)/(coefsArray[1][0]-potcenter)) - 
@@ -1042,7 +1031,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     }
     double derivLeft  = -(2-gammain)*potcenter/coefsArray[1][0];   // derivative at leftmost node
     double derivRight = - (1+coefout*(3-gammaout))/(1 - potmax/potcenter);  // derivative at rightmost node
-    splines[0] = mathutils::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
+    splines[0] = math::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
     coef0(maxr, NULL, NULL, &der2out);
     // next init all higher-order splines which have radial scaling log(a+r) and value scaled to l=0,m=0 coefficient
     const double ascale=1.0;
@@ -1065,7 +1054,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
             if(gsl_isnan(slopeout[coefind])) slopeout[coefind]=-1.0;  // default
             slopeout[coefind] = std::min<double>(slopeout[coefind], std::max<double>(-l, 3-gammaout));
             derivRight = spvalues[Ncoefs_radial-1] * (1+ascale/maxr) * slopeout[coefind];   // derivative at outermost node
-            splines[coefind] = mathutils::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
+            splines[coefind] = math::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
 #ifdef DEBUGPRINT
             my_message(FUNCNAME, "l="+convertToString(l)+", m="+convertToString(m)+
                 " - inner="+convertToString(slopein[coefind])+", outer="+convertToString(slopeout[coefind]));

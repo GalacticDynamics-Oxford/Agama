@@ -33,7 +33,6 @@ Version 0.8    24. June      2005  explicit construction of tupel
 #include "Pspline.h"
 #include "WDVector.h"
 #include <cmath>
-#include <fstream>
 #include <stdexcept>
 
 namespace potential{
@@ -48,7 +47,7 @@ const double GALPOT_RMIN=1.e-4,  ///< DEFAULT min radius of logarithmic radial g
 //----- disk density and potential -----//
 
 /** simple exponential radial density profile without inner hole or wiggles */
-class DiskDensityRadialExp: public mathutils::IFunction {
+class DiskDensityRadialExp: public math::IFunction {
 public:
     DiskDensityRadialExp(double _surfaceDensity, double _scaleLength): 
         surfaceDensity(_surfaceDensity), scaleLength(_scaleLength) {};
@@ -68,7 +67,7 @@ private:
 };
 
 /** more convoluted radial density profile - exponential with possible inner hole and modulation */
-class DiskDensityRadialRichExp: public mathutils::IFunction {
+class DiskDensityRadialRichExp: public math::IFunction {
 public:
     DiskDensityRadialRichExp(const DiskParam& _params): params(_params) {};
 private:
@@ -97,7 +96,7 @@ private:
 };
 
 /** exponential vertical disk density profile */
-class DiskDensityVerticalExp: public mathutils::IFunction {
+class DiskDensityVerticalExp: public math::IFunction {
 public:
     DiskDensityVerticalExp(double _scaleHeight): scaleHeight(_scaleHeight) {};
 private:
@@ -114,7 +113,7 @@ private:
 };
 
 /** isothermal (sech^2) vertical disk density profile */
-class DiskDensityVerticalIsothermal: public mathutils::IFunction {
+class DiskDensityVerticalIsothermal: public math::IFunction {
 public:
     DiskDensityVerticalIsothermal(double _scaleHeight): scaleHeight(_scaleHeight) {};
 private:
@@ -132,7 +131,7 @@ private:
 };
 
 /** vertically thin disk profile */
-class DiskDensityVerticalThin: public mathutils::IFunction {
+class DiskDensityVerticalThin: public math::IFunction {
 public:
     DiskDensityVerticalThin() {};
 private:
@@ -146,7 +145,7 @@ private:
 };
 
 /** helper routine to create an instance of radial density function */
-const mathutils::IFunction* createRadialDiskFnc(const DiskParam& params) {
+const math::IFunction* createRadialDiskFnc(const DiskParam& params) {
     if(params.scaleLength<=0)
         throw std::invalid_argument("Disk scale length cannot be <=0");
     if(params.innerCutoffRadius<0)
@@ -158,7 +157,7 @@ const mathutils::IFunction* createRadialDiskFnc(const DiskParam& params) {
 }
 
 /** helper routine to create an instance of vertical density function */
-const mathutils::IFunction* createVerticalDiskFnc(const DiskParam& params) {
+const math::IFunction* createVerticalDiskFnc(const DiskParam& params) {
     if(params.scaleHeight>0)
         return new DiskDensityVerticalExp(params.scaleHeight);
     if(params.scaleHeight<0)
@@ -586,49 +585,6 @@ const potential::BasePotential* createGalaxyPotential(
     for(size_t i=0; i<DiskParams.size(); i++)  // note that we create another class of objects than above
         componentsPot.push_back(new DiskAnsatz(DiskParams[i]));
     return new CompositeCyl(componentsPot);
-}
-
-void SwallowRestofLine(std::ifstream& from) {
-    char c;
-    do from.get(c); while( from.good() && c !='\n');
-}
-
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {
-    std::ifstream strm(filename);
-    if(!strm) 
-        throw std::invalid_argument("Cannot open file "+std::string(filename));
-    std::vector<DiskParam> diskpars;
-    std::vector<SphrParam> sphrpars;
-    bool ok=true;
-    int num;
-    strm>>num;
-    SwallowRestofLine(strm);
-    if(num<0 || num>10 || !strm) ok=false;
-    for(int i=0; i<num && ok; i++) {
-        DiskParam dp;
-        strm>>dp.surfaceDensity >> dp.scaleLength >> dp.scaleHeight >> dp.innerCutoffRadius >> dp.modulationAmplitude;
-        SwallowRestofLine(strm);
-        dp.surfaceDensity *= units.from_Msun_per_Kpc2;
-        dp.scaleLength *= units.from_Kpc;
-        dp.scaleHeight *= units.from_Kpc;
-        dp.innerCutoffRadius *= units.from_Kpc;
-        if(strm) diskpars.push_back(dp);
-        else ok=false;
-    }
-    strm>>num;
-    SwallowRestofLine(strm);
-    ok=ok && strm;
-    for(int i=0; i<num && ok; i++) {
-        SphrParam sp;
-        strm>>sp.densityNorm >> sp.axisRatio >> sp.gamma >> sp.beta >> sp.scaleRadius >> sp.outerCutoffRadius;
-        SwallowRestofLine(strm);
-        sp.densityNorm *= units.from_Msun_per_Kpc3;
-        sp.scaleRadius *= units.from_Kpc;
-        sp.outerCutoffRadius *= units.from_Kpc;
-        if(strm) sphrpars.push_back(sp);
-        else ok=false;
-    }
-    return createGalaxyPotential(diskpars, sphrpars);
 }
 
 } // namespace

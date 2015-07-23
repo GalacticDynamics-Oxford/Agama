@@ -538,7 +538,7 @@ inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
     Convert the derivatives of a simple function that only depends on the spherical radius 
     into gradients and hessians in a target coordinate system (outputCS). */
 template<typename outputCS>
-void eval_and_convert_sph(const mathutils::IFunction& F,
+void eval_and_convert_sph(const math::IFunction& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0);
 
 ///@}
