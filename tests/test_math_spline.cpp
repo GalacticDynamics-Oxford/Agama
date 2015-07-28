@@ -1,4 +1,5 @@
 #include "math_spline.h"
+#include "math_core.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -45,6 +46,53 @@ int main()
         for(size_t i=0; i<xvalues.size(); i++)
             strm << xvalues[i] << "\t" << yvalues1[i] << "\t" << yvalues2[i] << "\t" <<
                 fit1(xvalues[i]) << "\t" << fit2(xvalues[i]) << "\n";
+    }
+
+    // test 2d spline
+    const int NNODESX=8;
+    const int NNODESY=4;
+    std::vector<double> xval(NNODESX,0);
+    std::vector<double> yval(NNODESY,0);
+    std::vector< std::vector<double> > zval(NNODESX);
+    for(int i=1; i<NNODESX; i++)
+        xval[i] = xval[i-1] + rand()*1.0/RAND_MAX + 0.5;
+    for(int j=1; j<NNODESY; j++)
+        yval[j] = yval[j-1] + rand()*1.0/RAND_MAX + 0.5;
+    for(int i=0; i<NNODESX; i++) {
+        zval[i].resize(NNODESY);
+        for(int j=0; j<NNODESY; j++)
+            zval[i][j] = rand()*1.0/RAND_MAX;
+    }
+    math::CubicSpline2d spl2d(xval, yval, zval, 0., NAN, 1., -1.);
+    for(int i=0; i<NNODESX; i++) {
+        double z, dy;
+        spl2d.eval(xval[i], yval.front(), &z, NULL, &dy);
+        ok &= math::fcmp(dy, 1., 1e-13)==0 && math::fcmp(z, zval[i].front(), 1e-13)==0;
+        spl2d.eval(xval[i], yval.back(), &z, NULL, &dy);
+        ok &= math::fcmp(dy, -1., 1e-13)==0 && math::fcmp(z, zval[i].back(), 1e-13)==0;
+    }
+    for(int j=0; j<NNODESY; j++) {
+        double z, dx;
+        spl2d.eval(xval.front(), yval[j], &z, &dx);
+        ok &= math::fcmp(dx, 0)==0 && math::fcmp(z, zval.front()[j], 1e-13)==0;
+        spl2d.eval(xval.back(), yval[j], &z, &dx);
+        ok &= fabs(dx)<10 && math::fcmp(z, zval.back()[j], 1e-13)==0;
+    }
+
+    if(OUTPUT) {
+        std::ofstream strm("test_math_spline2d.dat");
+        const int NN=99;
+        for(int i=0; i<=NN; i++) {  // output for Gnuplot splot routine
+            double x = i*xval.back()/NN;
+            for(int j=0; j<=NN; j++) {
+                double y = j*yval.back()/NN;
+                double z, dx, dy, dxy;
+                spl2d.eval(x, y, &z, &dx, &dy, NULL, &dxy, NULL);
+                ok &= z>=-1 && z<=2;
+                strm << x << " " << y << " " << z << " " << dx << " " << dy << " " << dxy << "\n";
+            }
+            strm << "\n";
+        }
     }
 
     if(ok)

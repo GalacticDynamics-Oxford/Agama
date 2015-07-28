@@ -48,8 +48,8 @@ to initialize the Multipole potential. Of course this input may be generalized t
 other density components, and the Composite potential may also contain some other potential 
 models apart from DiskAnsatz and Multipole. 
 
-For compatibility with the original implementation, an utility function `createGalaxyPotential`
-is provided, which takes the name of parameter file and the Units object as parameters.
+For compatibility with the original implementation, an utility function `readGalaxyPotential`
+is provided in potential_factory.h, taking the name of parameter file and the Units object as parameters.
 */
 
 #pragma once

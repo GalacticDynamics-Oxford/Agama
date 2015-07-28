@@ -3,6 +3,8 @@
     \author  Eugene Vasiliev
     \date    2011-2015
 
+Spline interpolation class is based on the GSL implementation by G.Jungman;
+2d spline is based on interp2d library by D.Zaslavsky.
 */
 #pragma once
 #include "math_base.h"
@@ -13,12 +15,13 @@ namespace math{
 /** Class that defines a cubic spline with natural or clamped boundary conditions */
 class CubicSpline: public IFunction {
 public:
+    /** empty constructor is required for the class to be used in std::vector and alike places */
     CubicSpline() {};
 
     /** Initialize a cubic spline from the provided values of x and y
         (which should be arrays of equal length, and x values must be monotonically increasing).
         If deriv_left or deriv_right are provided, they set the slope at the lower or upper boundary
-        (so-called clamped spline); if either of them is NaN, it means natural boundary condition.
+        (so-called clamped spline); if either of them is NaN, it means a natural boundary condition.
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
         double deriv_left=NAN, double deriv_right=NAN);
@@ -40,6 +43,34 @@ public:
 
 private:
     std::vector<double> xval, yval, cval;
+};
+
+
+/** Two-dimensional cubic spline */
+class CubicSpline2d {
+public:
+    CubicSpline2d() {};
+    /** Initialize a 2d cubic spline from the provided values of x, y and z.
+        The latter is 2d array with the following indexing convention:  z[i][j] = f(x[i],y[j]).
+        Values of x and y arrays should monotonically increase.
+        Derivatives at the boundaries of definition region may be provided as optional arguments
+        (currently a single value per entire side of the rectangle is supported);
+        if any of them is NaN this means a natural boundary condition.
+    */
+    CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
+        const std::vector< std::vector<double> >& zvalues,
+        double deriv_xmin=NAN, double deriv_xmax=NAN, double deriv_ymin=NAN, double deriv_ymax=NAN);
+    
+    /** compute the value of spline and optionally its derivatives at point x,y;
+        if the input location is outside the definition region, the result is NaN. 
+        Any combination of value, first and second derivatives is possible: 
+        if any of them is not needed, the corresponding pointer should be set to NULL. 
+    */
+    void eval(const double x, const double y, 
+        double* value=0, double* deriv_x=0, double* deriv_y=0,
+        double* deriv_xx=0, double* deriv_xy=0, double* deriv_yy=0) const;
+private:
+    std::vector<double> xval, yval, zval, zx, zy, zxy;
 };
 
 

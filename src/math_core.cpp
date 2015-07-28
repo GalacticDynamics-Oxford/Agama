@@ -59,6 +59,10 @@ bool isFinite(double x) {
 }
 
 int fcmp(double x, double y, double eps) {
+    if(x==0)
+        return y<-eps ? -1 : y>eps ? +1 : 0;
+    if(y==0)
+        return x<-eps ? -1 : x>eps ? +1 : 0;
     return gsl_fcmp(x, y, eps);
 }
 

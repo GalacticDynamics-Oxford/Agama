@@ -1,21 +1,13 @@
 #include "potential_sphharm.h"
 #include "math_core.h"
+#include "math_specfunc.h"
 #include <cmath>
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include <gsl/gsl_integration.h>
-#include <gsl/gsl_math.h>
-#include <gsl/gsl_errno.h>
-#include <gsl/gsl_sf_legendre.h>
 #include <gsl/gsl_sf_gegenbauer.h>
 #include <gsl/gsl_sf_gamma.h>
-#include <gsl/gsl_sf_hyperg.h>
-#include <gsl/gsl_sf_bessel.h>
-#include <gsl/gsl_sf_trig.h>
-#include <gsl/gsl_sf_ellint.h>
-#include <gsl/gsl_fit.h>
-#include <gsl/gsl_multifit.h>
 #ifdef HAVE_CUBATURE
 #include <cubature.h>
 #endif
@@ -26,12 +18,6 @@ namespace potential {
 const unsigned int MAX_NCOEFS_ANGULAR = 100;
 const unsigned int MAX_NCOEFS_RADIAL  = 100;
 
-/// relative accuracy of potential computation (integration tolerance parameter)
-const double EPSREL_POTENTIAL_INT = 1e-6;
-
-/// absolute error in potential computation (supercedes the relative error in case of very small coefficients)
-const double EPSABS_POTENTIAL_INT = 1e-15;
-
 /// auxiliary softening parameter for Spline potential to avoid singularities in some odd cases
 const double SPLINE_MIN_RADIUS=1e-10;
 
@@ -41,7 +27,8 @@ const double SPLINE_MIN_RADIUS=1e-10;
 void BasePotentialSphericalHarmonic::setSymmetry(SymmetryType sym)
 {
     mysymmetry = sym;
-    lmax = (mysymmetry & ST_SPHSYM)    ==ST_SPHSYM     ? 0 : static_cast<int>(Ncoefs_angular);  // if spherical model, use only l=0,m=0 term
+    lmax = (mysymmetry & ST_SPHSYM)    ==ST_SPHSYM     ? 0 :     // if spherical model, use only l=0,m=0 term
+        static_cast<int>(std::min<unsigned int>(Ncoefs_angular, MAX_NCOEFS_ANGULAR));
     lstep= (mysymmetry & ST_REFLECTION)==ST_REFLECTION ? 2 : 1;  // if reflection symmetry, use only even l
     mmax = (mysymmetry & ST_ZROTSYM)   ==ST_ZROTSYM    ? 0 : 1;  // if axisymmetric model, use only m=0 terms, otherwise all terms up to l (1 is the multiplying factor)
     mmin = (mysymmetry & ST_PLANESYM)  ==ST_PLANESYM   ? 0 :-1;  // if triaxial symmetry, do not use sine terms which correspond to m<0
@@ -62,10 +49,9 @@ double intSH_phi(double phi, void* params)
     double sintheta= ((CPotentialParamSH*)params)->sintheta;
     double r= ((CPotentialParamSH*)params)->r;
     const BaseDensity* P=((CPotentialParamSH*)params)->P;
-    int sh_l=((CPotentialParamSH*)params)->sh_l;
     int sh_m=((CPotentialParamSH*)params)->sh_m;
     return P->density(coord::PosCar(r*sintheta*cos(phi), r*sintheta*sin(phi), r*costheta))
-        * gsl_sf_legendre_sphPlm(sh_l, abs(sh_m), costheta) * (sh_m>=0 ? cos(sh_m*phi) : sin(-sh_m*phi));
+        * (sh_m>=0 ? cos(sh_m*phi) : sin(-sh_m*phi));
 }
 double intSH_theta(double theta, void* params)
 {
@@ -80,51 +66,19 @@ double intSH_theta(double theta, void* params)
     {   // don't integrate in phi
         result = ((CPotentialParamSH*)params)->sh_m != 0 ? 0 :
             ((CPotentialParamSH*)params)->phi_max * 
-            gsl_sf_legendre_sphPlm(((CPotentialParamSH*)params)->sh_l, 0, ((CPotentialParamSH*)params)->costheta)* 
+            math::legendrePoly(((CPotentialParamSH*)params)->sh_l, 0, theta)* 
             ((CPotentialParamSH*)params)->P->density(coord::PosCar(
                 ((CPotentialParamSH*)params)->r*((CPotentialParamSH*)params)->sintheta, 0, 
                 ((CPotentialParamSH*)params)->r*((CPotentialParamSH*)params)->costheta));
-    } else
-        gsl_integration_qng(&F, 0, ((CPotentialParamSH*)params)->phi_max, 0, EPSREL_POTENTIAL_INT, &result, &error, &neval);
+    } else {
+        gsl_integration_qng(&F, 0, ((CPotentialParamSH*)params)->phi_max, 
+            0, EPSREL_POTENTIAL_INT, &result, &error, &neval);
+        result *= math::legendrePoly(((CPotentialParamSH*)params)->sh_l, abs(((CPotentialParamSH*)params)->sh_m), theta);
+    }
     return result * sin(theta) / (2*M_SQRTPI);   // factor \sqrt{4\pi} coming from the definition of spherical function Y_l^m
 }
 /// \endcond
-#if 0
-double BasePotentialSphericalHarmonic::Rho(double X, double Y, double Z, double /*t*/) const
-{
-    double costheta=(X==0&&Y==0&&Z==0)?0:(Z/sqrt(pow_2(X)+pow_2(Y)+pow_2(Z)));
-    double phi=atan2(Y, X);
-    double r=sqrt(X*X+Y*Y+Z*Z);
-    double result=0;
-    // arrays where angular expansion coefficients will be accumulated by calling computeSHcoefs() for derived classes
-    double coefsF[MAX_NCOEFS_ANGULAR*MAX_NCOEFS_ANGULAR];      // F(theta,phi)
-    double coefsdFdr[MAX_NCOEFS_ANGULAR*MAX_NCOEFS_ANGULAR];   // dF(theta,phi)/dr
-    double coefsd2Fdr2[MAX_NCOEFS_ANGULAR*MAX_NCOEFS_ANGULAR]; // d2F(theta,phi)/dr2
-    computeSHCoefs(r, coefsF, coefsdFdr, coefsd2Fdr2);         // implemented in derived classes
-    double legendre_array[MAX_NCOEFS_ANGULAR];
-    for(int m=0; m<=mmax*lmax; m+=mstep)
-    {
-        gsl_sf_legendre_sphPlm_array(lmax, m, costheta, legendre_array);
-        int lmin = lstep==2 ? (m+1)/2*2 : m;   // if lstep is even and m is odd, start from next even number greater than m
-        double cosmphi = (m==0 ? 1 : cos(m*phi)*M_SQRT2) * 2*M_SQRTPI;   // factor \sqrt{4\pi} from the definition of spherical function Y_l^m absorbed into this term
-        for(int l=lmin; l<=lmax; l+=lstep)
-        {
-            result += (coefsd2Fdr2[l*(l+1)+m] + 2/r*coefsdFdr[l*(l+1)+m] - l*(l+1)/(r*r)*coefsF[l*(l+1)+m]) 
-                * legendre_array[l-m] * cosmphi;
-        }
-        if(mmin<0 && m>0)  // use sin terms as well
-        {
-            double sinmphi = sin(m*phi)*M_SQRT2 * 2*M_SQRTPI;
-            for(int l=lmin; l<=lmax; l+=mstep)
-                result += (coefsd2Fdr2[l*(l+1)-m] + 2/r*coefsdFdr[l*(l+1)-m] - l*(l+1)/(r*r)*coefsF[l*(l+1)-m]) 
-                    * legendre_array[l-m] * sinmphi;
-        }
-    }
-    result *= 1/(4*M_PI);
-    if(result<0 || gsl_isnan(result)) result=0;
-    return result;
-}
-#endif
+
 void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
     double* potential, coord::GradSph* grad, coord::HessSph* hess) const
 {
@@ -141,23 +95,11 @@ void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
         hess!=NULL? coefsd2Fdr2 : NULL);  // implemented in derived classes
     double legendre_array[MAX_NCOEFS_ANGULAR];
     double legendre_deriv_array[MAX_NCOEFS_ANGULAR];
-    const double costheta = cos(pos.theta);
-    const double sintheta = sin(pos.theta);
+    double legendre_deriv2_array[MAX_NCOEFS_ANGULAR];
     for(int m=0; m<=mmax*lmax; m+=mstep) {
-#ifdef NO_OPTIMIZATION
-        gsl_sf_legendre_sphPlm_deriv_array(lmax, m, costheta, legendre_array, legendre_deriv_array);
-#else
-        // compute unnormalized polynomials and then normalize manually, which is faster than computing normalized ones.
-        // This is not suitable for large l,m (when overflow may occur), but in our application we aren't going to have such large values.
-        gsl_sf_legendre_Plm_deriv_array(lmax, m, costheta, legendre_array, legendre_deriv_array);
-        double prefact=sqrt(1.0/4/M_PI/gsl_sf_fact(2*m));
-        for(int l=m; l<=lmax; l++) {
-            double prefactl=sqrt(2*l+1.0)*prefact;
-            legendre_array[l-m] *= prefactl;
-            legendre_deriv_array[l-m] *= prefactl;
-            prefact *= sqrt((l+1.0-m)/(l+1.0+m));
-        }
-#endif
+        math::legendrePolyArray(lmax, m, pos.theta, legendre_array, 
+            grad!=NULL||hess!=NULL ? legendre_deriv_array : NULL, 
+            hess!=NULL ? legendre_deriv2_array : NULL);
         double cosmphi = (m==0 ? 1 : cos(m*pos.phi)*M_SQRT2) * 2*M_SQRTPI;   // factor \sqrt{4\pi} from the definition of spherical function Y_l^m absorbed into this term
         double sinmphi = (sin(m*pos.phi)*M_SQRT2) * 2*M_SQRTPI;
         int lmin = lstep==2 ? (m+1)/2*2 : m;   // if lstep is even and m is odd, start from next even number greater than m
@@ -166,15 +108,15 @@ void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
             result += coefsF[indx] * legendre_array[l-m] * cosmphi;
             if(grad!=NULL) {
                 grad->dr +=  coefsdFdr[indx] * legendre_array[l-m] * cosmphi;
-                grad->dtheta += coefsF[indx] * legendre_deriv_array[l-m] * (-sintheta) * cosmphi;
+                grad->dtheta += coefsF[indx] * legendre_deriv_array[l-m] * cosmphi;
                 grad->dphi   += coefsF[indx] * legendre_array[l-m] * (-m)*sinmphi;
             }
             if(hess!=NULL) {
                 hess->dr2 +=  coefsd2Fdr2[indx] * legendre_array[l-m] * cosmphi;
-                hess->drdtheta+=coefsdFdr[indx] * legendre_deriv_array[l-m] * (-sintheta) * cosmphi;
+                hess->drdtheta+=coefsdFdr[indx] * legendre_deriv_array[l-m] * cosmphi;
                 hess->drdphi  +=coefsdFdr[indx] * legendre_array[l-m] * (-m)*sinmphi;
-                hess->dtheta2   += coefsF[indx] * (costheta * legendre_deriv_array[l-m] - (l*(l+1)-pow_2(m/sintheta)) * legendre_array[l-m]) * cosmphi;
-                hess->dthetadphi+= coefsF[indx] * legendre_deriv_array[l-m] * (-sintheta) * (-m)*sinmphi;
+                hess->dtheta2   += coefsF[indx] * legendre_deriv2_array[l-m] * cosmphi;
+                hess->dthetadphi+= coefsF[indx] * legendre_deriv_array[l-m] * (-m)*sinmphi;
                 hess->dphi2     += coefsF[indx] * legendre_array[l-m] * cosmphi * -m*m;
             }
             if(mmin<0 && m>0) {
@@ -182,24 +124,20 @@ void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
                 result += coefsF[indx] * legendre_array[l-m] * sinmphi;
                 if(grad!=NULL) {
                     grad->dr +=  coefsdFdr[indx] * legendre_array[l-m] * sinmphi;
-                    grad->dtheta += coefsF[indx] * legendre_deriv_array[l-m] * (-sintheta) * sinmphi;
+                    grad->dtheta += coefsF[indx] * legendre_deriv_array[l-m] * sinmphi;
                     grad->dphi   += coefsF[indx] * legendre_array[l-m] * m*cosmphi;
                 }
                 if(hess!=NULL) {
                     hess->dr2 +=  coefsd2Fdr2[indx] * legendre_array[l-m] * sinmphi;
-                    hess->drdtheta+=coefsdFdr[indx] * legendre_deriv_array[l-m] * (-sintheta) * sinmphi;
+                    hess->drdtheta+=coefsdFdr[indx] * legendre_deriv_array[l-m] * sinmphi;
                     hess->drdphi  +=coefsdFdr[indx] * legendre_array[l-m] * m*cosmphi;
-                    hess->dtheta2   += coefsF[indx] * (costheta * legendre_deriv_array[l-m] - (l*(l+1)-pow_2(m/sintheta)) * legendre_array[l-m]) * sinmphi;
-                    hess->dthetadphi+= coefsF[indx] * legendre_deriv_array[l-m] * (-sintheta) * m*cosmphi;
+                    hess->dtheta2   += coefsF[indx] * legendre_deriv2_array[l-m] * sinmphi;
+                    hess->dthetadphi+= coefsF[indx] * legendre_deriv_array[l-m] * m*cosmphi;
                     hess->dphi2     += coefsF[indx] * legendre_array[l-m] * sinmphi * -m*m;
                 }
             }
         }
     }
-    /*if((mysymmetry & ST_TRIAXIAL) == ST_TRIAXIAL) {
-        if((X==0)||(Y==0)) dFdPhi=0; // to avoid singularity
-        if(Z==0) dFdTheta=0;
-    }*/
     if(potential!=NULL)
         *potential = result;
 }
@@ -370,11 +308,10 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &po
     {
         double massi = points[i].second;
         const coord::PosVelSph point = coord::toPosVelSph(points[i].first);
-        double costheta = cos(point.theta);
         double ralpha=pow(point.r, 1/Alpha);
         double xi=(ralpha-1)/(ralpha+1);
         for(int m=0; m<=lmax; m+=mstep)
-            gsl_sf_legendre_sphPlm_array(lmax, m, costheta, legendre_array[m]);
+            math::legendrePolyArray(lmax, m, point.theta, legendre_array[m]);
 
         for(int l=0; l<=lmax; l+=lstep)
         {
@@ -639,21 +576,9 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
 
 /// \cond INTERNAL_DOCS
 // auxiliary structure to sort particles in radius
-struct ParticleSph{
-    double r, costheta, phi, mass;
-    ParticleSph() : r(0) {}
-
-    template<typename CoordT>
-    ParticleSph(const std::pair< coord::PosVelT<CoordT>, double> &src) { 
-        const coord::PosVelSph p(coord::toPosVelSph(src.first));
-        r = p.r;
-        costheta = cos(p.theta);
-        phi = p.phi;
-        mass = src.second;
-    }
-    inline bool operator<(ParticleSph p) const
-    { return (r<p.r); }
-};
+typedef std::pair<coord::PosSph, double> ParticleSph;
+inline bool compareParticleSph(const ParticleSph& val1, const ParticleSph& val2)
+{  return val1.first.r < val2.first.r;  }
 /// \endcond
 
 template<typename CoordT>
@@ -678,13 +603,13 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
         for(size_t i=0; i<npoints; i++)
         {
             if(srcpoints[i].second>0)  // don't consider zero-mass points
-                points.push_back(ParticleSph(srcpoints[i]));
+                points.push_back(ParticleSph(coord::toPosSph(srcpoints[i].first), srcpoints[i].second));
             if(srcpoints[i].second<0) 
                 throw std::invalid_argument("SplineExp: input particles have negative mass");
-            if(points.back().r<=0)
+            if(points.back().first.r<=0)
                 throw std::invalid_argument("SplineExp: particles at r=0 are not allowed");
         }
-        std::sort(points.begin(), points.end());
+        std::sort(points.begin(), points.end(), compareParticleSph);
         npoints=points.size();   // may be smaller than before if we throw out zero masses
         if(npoints<=Ncoefs_radial*10)
             throw std::invalid_argument("SplineExp: number of particles is too small");
@@ -693,7 +618,7 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
         {
             outradii->resize(npoints);
             for(size_t i=0; i<npoints; i++)
-                outradii->at(i)=points[i].r;
+                outradii->at(i)=points[i].first.r;
             outcoefs->resize(pow_2(Ncoefs_angular+1));   // note that array indexing is swapped w.r.t. coefsArray - to save memory by not initializing unnecessary coefs
             CoefsOuter = outcoefs;   // re-use memory allocated for target coefs array  for the intermediate calculations
         }
@@ -711,17 +636,17 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
         for(size_t i=0; i<npoints; i++)
         {
             for(int m=0; m<=lmax; m+=mstep)
-                gsl_sf_legendre_sphPlm_array(lmax, m, points[i].costheta, legendre_array[m]);
+                math::legendrePolyArray(lmax, m, points[i].first.theta, legendre_array[m]);
             for(int l=0; l<=lmax; l+=lstep)
                 for(int m=l*mmin; m<=l*mmax; m+=mstep)
                 {
                     int coefind=l*(l+1)+m;
                     int absm=abs(m);  // negative m correspond to sine, positive - to cosine
-                    double mult= -sqrt(4*M_PI)/(2*l+1) * (m==0 ? 1 : M_SQRT2) * points[i].mass *
+                    double mult= -sqrt(4*M_PI)/(2*l+1) * (m==0 ? 1 : M_SQRT2) * points[i].second *
                         legendre_array[absm][l-absm] * 
-                        (m>=0 ? cos(m*points[i].phi) : sin(-m*points[i].phi));
-                    CoefsOuter->at(coefind)[i] = mult * pow(points[i].r, -(1+l));
-                    CoefsInner->at(coefind)[i] = mult * pow(points[i].r, l);
+                        (m>=0 ? cos(m*points[i].first.phi) : sin(-m*points[i].first.phi));
+                    CoefsOuter->at(coefind)[i] = mult * pow(points[i].first.r, -(1+l));
+                    CoefsInner->at(coefind)[i] = mult * pow(points[i].first.r, l);
                 }
         }
         // sum inner coefs interior and outer coefs exterior to each point's location
@@ -741,7 +666,7 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
             for(size_t indGrid=0; indGrid<srcradii->size(); indGrid++)
             {   // find indPoint so that points[indPoint-1].r <= srcRadii[indGrid] < points[indPoint].r
                 double radGrid=srcradii->at(indGrid);
-                while(indPoint<npoints && points[indPoint].r<=radGrid) indPoint++;
+                while(indPoint<npoints && points[indPoint].first.r<=radGrid) indPoint++;
                 for(int l=0; l<=lmax; l+=lstep)
                     for(int m=l*mmin; m<=l*mmax; m+=mstep)
                     {
@@ -759,8 +684,8 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
                     {
                         int coefind=l*(l+1)+m;
                         outcoefs->at(coefind)[i] = 
-                            (i>0 ? CoefsInner->at(coefind)[i-1] * pow(points[i].r, -(1+l)) : 0) + 
-                            (i<npoints-1 ? CoefsOuter->at(coefind)[i+1] * pow(points[i].r, l) : 0);
+                            (i>0 ? CoefsInner->at(coefind)[i-1] * pow(points[i].first.r, -(1+l)) : 0) + 
+                            (i<npoints-1 ? CoefsOuter->at(coefind)[i+1] * pow(points[i].first.r, l) : 0);
                     }
             }
         }

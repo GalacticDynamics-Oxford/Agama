@@ -74,7 +74,7 @@ private:
         is used which is based on the GSL multifit routine, which performs SVD of bsplineMatrix.
         It is much slower and cannot accomodate nonzero smoothing. */
     void computeWeightsSingular();
-    
+
     SplineApproxImpl& operator= (const SplineApproxImpl&);  ///< assignment operator forbidden
     SplineApproxImpl(const SplineApproxImpl&);              ///< copy constructor forbidden
 };
@@ -521,13 +521,27 @@ CubicSpline::CubicSpline(const std::vector<double>& xa, const std::vector<double
     }
 }
 
+// binary search to determine the spline segment that contains x
+static size_t binSearch(double x, const std::vector<double>& arr)
+{
+    size_t index = 0;
+    size_t indhi = arr.size()-1;
+    while(indhi > index + 1) {
+        size_t i = (indhi + index)/2;
+        if(arr[i] > x)
+            indhi = i;
+        else
+            index = i;
+    }
+    return index;
+}
+
 // evaluate spline value, derivative and 2nd derivative at once (faster than doing it separately)
 void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
 {
-    const size_t size = xval.size();
-    if(size==0)
+    if(xval.size() == 0)
         throw std::range_error("Empty spline");
-    if(x <= xval[0]) {
+    if(x <= xval.front()) {
         double dx  =  xval[1]-xval[0];
         double der = (yval[1]-yval[0])/dx - dx*(cval[1]+2*cval[0])/3.0;
         if(val)
@@ -538,7 +552,8 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
             *deriv2= 0;
         return;
     }
-    if(x >= xval[size-1]) {
+    if(x >= xval.back()) {
+        const size_t size = xval.size();
         double dx  =  xval[size-1]-xval[size-2];
         double der = (yval[size-1]-yval[size-2])/dx + dx*(cval[size-2]+2*cval[size-1])/3.0;
         if(val)
@@ -550,15 +565,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
         return;
     }
 
-    size_t index = 0;
-    size_t indhi = size-1;
-    while(indhi > index + 1) {    // binary search to determine the spline segment that contains x
-        size_t i = (indhi + index)/2;
-        if(xval[i] > x)
-            indhi = i;
-        else
-            index = i;
-    }
+    size_t index = binSearch(x, xval);
     double x_hi = xval[index + 1];
     double x_lo = xval[index];
     double dx   = x_hi - x_lo;
@@ -603,6 +610,225 @@ bool CubicSpline::isMonotonic() const
     return ismonotonic;
 }
 
+//------------ 2D CUBIC SPLINE -------------//
+// based on interp2d library by David Zaslavsky
+
+inline size_t INDEX_2D(size_t xi, size_t yi, size_t xsize) {
+    return yi * xsize + xi;
+}
+
+CubicSpline2d::CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
+    const std::vector< std::vector<double> >& zvalues,
+    double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax)
+{
+    const size_t xsize = xvalues.size();
+    const size_t ysize = yvalues.size();
+    if(xsize<4 || ysize<4)
+        throw std::invalid_argument("Error in 2d spline initialization: number of nodes should be >=4 in each direction");
+    if(zvalues.size() != xsize)
+        throw std::invalid_argument("Error in 2d spline initialization: x and z array lengths differ");
+    xval = xvalues;
+    yval = yvalues;
+    zval.resize(xsize*ysize);
+    zx.resize(xsize*ysize);
+    zy.resize(xsize*ysize);
+    zxy.resize(xsize*ysize);
+    std::vector<double> tmpvalues(ysize);
+    for(size_t i=0; i<xsize; i++) {
+        if(zvalues[i].size() != ysize)
+            throw std::invalid_argument("Error in 2d spline initialization: y and z array lengths differ");
+        for(size_t j=0; j<ysize; j++) {
+            tmpvalues[j] = zvalues[i][j];
+            zval[INDEX_2D(i, j, xsize)] = zvalues[i][j];
+        }
+        CubicSpline spl(yvalues, tmpvalues, deriv_ymin, deriv_ymax);
+        for(size_t j=0; j<ysize; j++)
+            spl.evalDeriv(yvalues[j], NULL, &(zy[INDEX_2D(i, j, xsize)]));
+    }
+    tmpvalues.resize(xsize);
+    for(size_t j=0; j<ysize; j++) {
+        for(size_t i=0; i<xsize; i++)
+            tmpvalues[i] = zvalues[i][j];
+        CubicSpline spl(xvalues, tmpvalues, deriv_xmin, deriv_xmax);
+        for(size_t i=0; i<xsize; i++)
+            spl.evalDeriv(xvalues[i], NULL, &(zx[INDEX_2D(i, j, xsize)]));
+    }
+    for(size_t j=0; j<ysize; j++) {
+        for(size_t i=0; i<xsize; i++)
+            tmpvalues[i] = zy[INDEX_2D(i, j, xsize)];
+        CubicSpline spl(xvalues, tmpvalues);
+        for(size_t i=0; i<xsize; i++)
+            spl.evalDeriv(xvalues[i], NULL, &(zxy[INDEX_2D(i, j, xsize)]));
+    }
+}
+
+void CubicSpline2d::eval(const double x, const double y, 
+    double *z, double *z_x, double *z_y, double *z_xx, double *z_xy, double *z_yy) const
+{
+    if(xval.size()==0 || yval.size()==0)
+        throw std::range_error("Empty 2d spline");
+    if(x<xval.front() || x>xval.back() || y<yval.front() || y>yval.back()) {
+        if(z)
+            *z = NAN;
+        if(z_x)
+            *z_x = NAN;
+        if(z_y)
+            *z_y = NAN;
+        if(z_xx)
+            *z_xx = NAN;
+        if(z_xy)
+            *z_xy = NAN;
+        if(z_yy)
+            *z_yy = NAN;
+        return;
+    }
+    const size_t xsize = xval.size();
+    double v;
+    // First compute the indices into the data arrays where we are interpolating
+    const size_t xi = binSearch(x, xval);
+    const size_t yi = binSearch(y, yval);
+    // Find the minimum and maximum values on the grid cell in each dimension
+    const double xmin = xval[xi];
+    const double xmax = xval[xi + 1];
+    const double ymin = yval[yi];
+    const double ymax = yval[yi + 1];
+    const double zminmin = zval[INDEX_2D(xi, yi, xsize)];
+    const double zminmax = zval[INDEX_2D(xi, yi + 1, xsize)];
+    const double zmaxmin = zval[INDEX_2D(xi + 1, yi, xsize)];
+    const double zmaxmax = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
+    // Get the width and height of the grid cell
+    const double dx = xmax - xmin;
+    const double dy = ymax - ymin;
+    // t and u are the positions within the grid cell at which we are computing
+    // the interpolation, in units of grid cell size
+    const double t = (x - xmin)/dx;
+    const double u = (y - ymin)/dy;
+    const double dt = 1./dx; // partial t / partial x
+    const double du = 1./dy; // partial u / partial y
+    const double zxminmin  = zx [INDEX_2D(xi, yi, xsize)]/dt;
+    const double zxminmax  = zx [INDEX_2D(xi, yi + 1, xsize)]/dt;
+    const double zxmaxmin  = zx [INDEX_2D(xi + 1, yi, xsize)]/dt;
+    const double zxmaxmax  = zx [INDEX_2D(xi + 1, yi + 1, xsize)]/dt;
+    const double zyminmin  = zy [INDEX_2D(xi, yi, xsize)]/du;
+    const double zyminmax  = zy [INDEX_2D(xi, yi + 1, xsize)]/du;
+    const double zymaxmin  = zy [INDEX_2D(xi + 1, yi, xsize)]/du;
+    const double zymaxmax  = zy [INDEX_2D(xi + 1, yi + 1, xsize)]/du;
+    const double zxyminmin = zxy[INDEX_2D(xi, yi, xsize)]/(dt*du);
+    const double zxyminmax = zxy[INDEX_2D(xi, yi + 1, xsize)]/(dt*du);
+    const double zxymaxmin = zxy[INDEX_2D(xi + 1, yi, xsize)]/(dt*du);
+    const double zxymaxmax = zxy[INDEX_2D(xi + 1, yi + 1, xsize)]/(dt*du);
+    const double t0 = 1;
+    const double t1 = t;
+    const double t2 = t*t;
+    const double t3 = t*t2;
+    const double u0 = 1;
+    const double u1 = u;
+    const double u2 = u*u;
+    const double u3 = u*u2;
+    const double t0u0 = t0*u0, t0u1=t0*u1, t0u2=t0*u2, t0u3=t0*u3;
+    const double t1u0 = t1*u0, t1u1=t1*u1, t1u2=t1*u2, t1u3=t1*u3;
+    const double t2u0 = t2*u0, t2u1=t2*u1, t2u2=t2*u2, t2u3=t2*u3;
+    const double t3u0 = t3*u0, t3u1=t3*u1, t3u2=t3*u2, t3u3=t3*u3;
+
+    double zvalue=0;
+    double zderx=0;
+    double zdery=0;
+    double zd_xx=0;
+    double zd_xy=0;
+    double zd_yy=0;
+    v = zminmin;
+    zvalue += v*t0u0;
+    v = zyminmin;
+    zvalue += v*t0u1;
+    zdery  += v*t0u0;
+    v = -3*zminmin + 3*zminmax - 2*zyminmin - zyminmax;
+    zvalue += v*t0u2;
+    zdery  += 2*v*t0u1;
+    zd_yy  += 2*v*t0u0;
+    v = 2*zminmin - 2*zminmax + zyminmin + zyminmax;
+    zvalue += v*t0u3;
+    zdery  += 3*v*t0u2;
+    zd_yy  += 6*v*t0u1;
+    v = zxminmin;
+    zvalue += v*t1u0;
+    zderx  += v*t0u0;
+    v = zxyminmin;
+    zvalue += v*t1u1;
+    zderx  += v*t0u1;
+    zdery  += v*t1u0;
+    zd_xy  += v*t0u0;
+    v = -3*zxminmin + 3*zxminmax - 2*zxyminmin - zxyminmax;
+    zvalue += v*t1u2;
+    zderx  += v*t0u2;
+    zdery  += 2*v*t1u1;
+    zd_xy  += 2*v*t0u1;
+    zd_yy  += 2*v*t1u0;
+    v = 2*zxminmin - 2*zxminmax + zxyminmin + zxyminmax;
+    zvalue += v*t1u3;
+    zderx  += v*t0u3;
+    zdery  += 3*v*t1u2;
+    zd_xy  += 3*v*t0u2;
+    zd_yy  += 6*v*t1u1;
+    v = -3*zminmin + 3*zmaxmin - 2*zxminmin - zxmaxmin;
+    zvalue += v*t2u0;
+    zderx  += 2*v*t1u0;
+    zd_xx  += 2*v*t0u0;
+    v = -3*zyminmin + 3*zymaxmin - 2*zxyminmin - zxymaxmin;
+    zvalue += v*t2u1;
+    zderx  += 2*v*t1u1;
+    zdery  += v*t2u0;
+    zd_xx  += 2*v*t0u1;
+    zd_xy  += 2*v*t1u0;
+    v = 9*zminmin - 9*zmaxmin + 9*zmaxmax - 9*zminmax + 6*zxminmin + 3*zxmaxmin - 3*zxmaxmax - 6*zxminmax 
+      + 6*zyminmin - 6*zymaxmin - 3*zymaxmax + 3*zyminmax + 4*zxyminmin + 2*zxymaxmin + zxymaxmax + 2*zxyminmax;
+    zvalue += v*t2u2;
+    zderx  += 2*v*t1u2;
+    zdery  += 2*v*t2u1;
+    zd_xx  += 2*v*t0u2;
+    zd_xy  += 4*v*t1u1;
+    zd_yy  += 2*v*t2u0;
+    v = -6*zminmin + 6*zmaxmin - 6*zmaxmax + 6*zminmax - 4*zxminmin - 2*zxmaxmin + 2*zxmaxmax + 4*zxminmax 
+      - 3*zyminmin + 3*zymaxmin + 3*zymaxmax - 3*zyminmax - 2*zxyminmin - zxymaxmin - zxymaxmax - 2*zxyminmax;
+    zvalue += v*t2u3;
+    zderx  += 2*v*t1u3;
+    zdery  += 3*v*t2u2;
+    zd_xx  += 2*v*t0u3;
+    zd_xy  += 6*v*t1u2;
+    zd_yy  += 6*v*t2u1;
+    v = 2*zminmin - 2*zmaxmin + zxminmin + zxmaxmin;
+    zvalue += v*t3u0;
+    zderx  += 3*v*t2u0;
+    zd_xx  += 6*v*t1u0;
+    v = 2*zyminmin - 2*zymaxmin + zxyminmin + zxymaxmin;
+    zvalue += v*t3u1;
+    zderx  += 3*v*t2u1;
+    zdery  += v*t3u0;
+    zd_xx  += 6*v*t1u1;
+    zd_xy  += 3*v*t2u0;
+    v = -6*zminmin + 6*zmaxmin - 6*zmaxmax + 6*zminmax - 3*zxminmin - 3*zxmaxmin + 3*zxmaxmax + 3*zxminmax 
+      - 4*zyminmin + 4*zymaxmin + 2*zymaxmax - 2*zyminmax - 2*zxyminmin - 2*zxymaxmin - zxymaxmax - zxyminmax;
+    zvalue += v*t3u2;
+    zderx  += 3*v*t2u2;
+    zdery  += 2*v*t3u1;
+    zd_xx  += 6*v*t1u2;
+    zd_xy  += 6*v*t2u1;
+    zd_yy  += 2*v*t3u0;
+    v = 4*zminmin - 4*zmaxmin + 4*zmaxmax - 4*zminmax + 2*zxminmin + 2*zxmaxmin - 2*zxmaxmax - 2*zxminmax 
+      + 2*zyminmin - 2*zymaxmin - 2*zymaxmax + 2*zyminmax + zxyminmin + zxymaxmin + zxymaxmax + zxyminmax;
+    zvalue += v*t3u3;
+    zderx  += 3*v*t2u3;
+    zdery  += 3*v*t3u2;
+    zd_xx  += 6*v*t1u3;
+    zd_xy  += 9*v*t2u2;
+    zd_yy  += 6*v*t3u1;
+
+    if(z   !=NULL) *z=zvalue;
+    if(z_x !=NULL) *z_x=zderx*dt;
+    if(z_y !=NULL) *z_y=zdery*du;
+    if(z_xx!=NULL) *z_xx=zd_xx*dt*dt;
+    if(z_xy!=NULL) *z_xy=zd_xy*dt*du;
+    if(z_yy!=NULL) *z_yy=zd_yy*du*du;
+}
 
 //------------ GENERATION OF UNEQUALLY SPACED GRIDS ------------//
 

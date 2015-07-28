@@ -16,6 +16,12 @@ enum SymmetryType{
     ST_DEFAULT      = ST_TRIAXIAL                  ///< a default value
 };
 
+/// relative accuracy of potential computation (integration tolerance parameter)
+const double EPSREL_POTENTIAL_INT = 1e-6;
+
+/// absolute error in potential computation (supercedes the relative error in case of very small coefficients)
+const double EPSABS_POTENTIAL_INT = 1e-15;
+    
 /// \name  Base class for all density models
 ///@{
 

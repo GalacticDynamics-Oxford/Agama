@@ -5,9 +5,6 @@
 
 namespace potential {
 
-/// relative accuracy of potential computation (integration tolerance parameter)
-const double EPSREL_POTENTIAL_INT = 1e-6;
-
 // Dehnen potential
 Dehnen::Dehnen(double _mass, double _scalerad, double _q, double _p, double _gamma): 
     BasePotentialCar(), mass(_mass), scalerad(_scalerad), q(_q), p(_p), gamma(_gamma)

@@ -80,7 +80,7 @@ template<typename coordSysT> struct PosT;
 
 /// position in cartesian coordinates
 template<> struct PosT<Car>{
-    double x, y, z;
+    double x, y, z;   ///< three cartesian coordinates
     PosT<Car>() {};
     PosT<Car>(double _x, double _y, double _z) : x(_x), y(_y), z(_z) {};
 };
@@ -89,7 +89,9 @@ typedef struct PosT<Car> PosCar;
 
 /// position in cylindrical coordinates
 template<> struct PosT<Cyl>{
-    double R, z, phi;
+    double R;   ///< cylindrical radius = sqrt(x^2+y^2)
+    double z;   ///< z coordinate
+    double phi; ///< azimuthal angle in x-y plane [0:2pi)
     PosT<Cyl>() {};
     PosT<Cyl>(double _R, double _z, double _phi) : R(_R), z(_z), phi(_phi) {};
 };
@@ -97,7 +99,9 @@ typedef struct PosT<Cyl> PosCyl;
 
 /// position in spherical coordinates
 template<> struct PosT<Sph>{
-    double r, theta, phi;
+    double r;     ///< spherical radius
+    double theta; ///< polar angle [0:pi) - 0 means along z axis in positive direction, pi is along z in negative direction, pi/2 is in x-y plane
+    double phi;   ///< azimuthal angle in x-y plane
     PosT<Sph>() {};
     PosT<Sph>(double _r, double _theta, double _phi) : r(_r), theta(_theta), phi(_phi) {};
 };
@@ -105,8 +109,10 @@ typedef struct PosT<Sph> PosSph;
 
 /// position in prolate spheroidal coordinates
 template<> struct PosT<ProlSph>{
-    double lambda, nu, phi;
-    const ProlSph& coordsys;    ///< a point means nothing without specifying its coordinate system
+    double lambda;  ///< lies in the range [-alpha:infinity)
+    double nu;      ///< lies in the range [-gamma:-alpha]
+    double phi;     ///< usual azimuthal angle
+    const ProlSph& coordsys;  ///< a point means nothing without specifying its coordinate system
     PosT<ProlSph>(double _lambda, double _nu, double _phi, const ProlSph& _coordsys):
         lambda(_lambda), nu(_nu), phi(_phi), coordsys(_coordsys) {};
 };
@@ -167,7 +173,7 @@ typedef struct PosVelT<Sph> PosVelSph;
 
 /// position and velocity in prolate spheroidal coordinates
 template<> struct PosVelT<ProlSph>: public PosProlSph{
-    double lambdadot, nudot, phidot;
+    double lambdadot, nudot, phidot;  ///< time derivatives of position variables
     PosVelT<ProlSph>(const PosProlSph& pos, double _lambdadot, double _nudot, double _phidot):
         PosProlSph(pos), lambdadot(_lambdadot), nudot(_nudot), phidot(_phidot) {};
 };

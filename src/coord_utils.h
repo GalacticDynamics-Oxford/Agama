@@ -1,3 +1,8 @@
+/** \file    coord_utils.h 
+    \brief   Auxiliary routines for comparing and printing data types from coord.h
+    \author  Eugene Vasiliev
+    \date    2015
+*/ 
 #pragma once
 #include "coord.h"
 #include <cmath>

@@ -1,7 +1,11 @@
 #include "utils.h"
+#include <sstream>
+#include <iomanip>
 #include <iostream>
-#include <cassert>
 #include <cmath>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
 
 namespace utils {
 
@@ -41,6 +45,109 @@ show_message_type* my_error_ptr   = &my_stderr_show_message;
 show_message_type* my_message_ptr = &my_stderr_show_message;
 
 #endif
+
+#if 0
+// old version, slow
+    
+/** The StringVariant class is a simple string-based variant implementation that allows
+ the user to easily convert between simple numeric/string types.
+ */
+class StringVariant
+{
+private:
+    std::string data;
+public:
+    StringVariant() : data() {}
+    StringVariant(const std::string &src) : data(src) {};
+    template<typename ValueType> StringVariant(ValueType val) {
+        std::ostringstream stream;
+        stream << val;
+        data.assign(stream.str());
+    };
+    template<typename ValueType> StringVariant(ValueType val, unsigned int width) {
+        std::ostringstream stream;
+        stream << std::setprecision(width) << val;
+        data.assign(stream.str());
+    };
+    template<typename ValueType> StringVariant& operator=(const ValueType val) {
+        std::ostringstream stream;
+        stream << val;
+        data.assign(stream.str());
+        return *this;
+    };
+    template<typename NumberType> NumberType toNumber() const {
+        NumberType result = 0;
+        std::istringstream stream(data);
+        if(stream >> result)
+            return result;
+        else if(data == "yes" || data == "true")
+            return 1;
+        return 0;
+    };
+    bool toBool() const { return(data == "yes" || data == "Yes" || data == "true" || data == "True" || data == "t" || data == "1"); }
+    double toDouble() const { return toNumber<double>(); }
+    float toFloat() const { return toNumber<float>(); }
+    int toInt() const { return toNumber<int>(); }
+    std::string toString() const { return data; }
+};
+
+int convertToInt(const char* val) {
+    return StringVariant(val).toNumber<int>();
+}
+float convertToFloat(const char* val) {
+    return StringVariant(val).toNumber<float>();
+}
+double convertToDouble(const char* val) {
+    return StringVariant(val).toNumber<double>();
+}
+template<typename ValueType> std::string convertToString(ValueType val) { 
+    return StringVariant(val).toString();
+}
+template<typename ValueType> std::string convertToString(ValueType val, unsigned int width) { 
+    return StringVariant(val,width).toString(); }
+
+#else
+// old-fashioned way, faster
+
+int convertToInt(const char* val) {
+    return strtol(val, NULL, 10);
+}
+float convertToFloat(const char* val) {
+    return strtod(val, NULL);
+}
+double convertToDouble(const char* val) {
+    return strtod(val, NULL);
+}
+template<typename ValueType> std::string convertToString(ValueType val, unsigned int width=6) {
+    char buf[100];
+    int len=snprintf(buf, 100, "%*g", width, val);
+    int offset=0;
+    while(offset<len && buf[offset]==' ') offset++;
+    return std::string(buf+offset);
+}
+template<> std::string convertToString(int val, unsigned int width) {
+    char buf[100];
+    int len=snprintf(buf, 100, "%*i", width, val);
+    int offset=0;
+    while(offset<len && buf[offset]==' ') offset++;
+    return std::string(buf+offset);
+}
+#endif
+
+template std::string convertToString(int, unsigned int);
+template std::string convertToString(float, unsigned int);
+template std::string convertToString(double, unsigned int);
+
+bool convertToBool(const char* val) {
+    return 
+        strncmp(val, "yes", 3)==0 ||
+        strncmp(val, "Yes", 3)==0 ||
+        strncmp(val, "true", 4)==0 ||
+        strncmp(val, "True", 4)==0 ||
+        strncmp(val, "t", 1)==0 ||
+        strncmp(val, "1", 1)==0;
+}
+
 /* ----------- string/number conversion and parsing routines ----------------- */
 //  Pretty-print - convert float (and integer) numbers to string of fixed width.
 //  Uses some sophisticated techniques to fit the number into a string of exactly the given length.
@@ -116,14 +223,13 @@ std::string pp(double num, unsigned int width)
     return result;
 }
 
-void splitString(const std::string& src, const std::string& delim, std::vector<std::string> *result)
+void splitString(const std::string& src, const std::string& delim, std::vector<std::string>& result)
 {
-    result->clear();
+    result.clear();
     std::string str(src);
     std::string::size_type indx=str.find_first_not_of(delim);
-    if(indx==std::string::npos) 
-    {
-        result->push_back("");   // ensure that result contains at least one element
+    if(indx==std::string::npos) {
+        result.push_back("");   // ensure that result contains at least one element
         return;
     }
     if(indx>0)  // remove unnecessary delimiters at the beginning
@@ -131,34 +237,40 @@ void splitString(const std::string& src, const std::string& delim, std::vector<s
     while(!str.empty())
     {
         indx=str.find_first_of(delim);
-        if(indx==std::string::npos) indx=str.size();
-        result->push_back(str.substr(0, indx));
+        if(indx==std::string::npos)
+            indx=str.size();
+        result.push_back(str.substr(0, indx));
         str=str.erase(0, indx);
         indx=str.find_first_not_of(delim);
-        if(indx==std::string::npos) return;
+        if(indx==std::string::npos)
+            return;
         str=str.erase(0, indx);
     }
 }
 
-bool ends_with_str(const std::string& str, const std::string& end)
+bool endsWithStr(const std::string& str, const std::string& end)
 {
     return end.size()<=str.size() && str.find(end, str.size()-end.size())!=str.npos;
 }
 
-bool strings_equal(const std::string& str1, const std::string& str2)
+bool stringsEqual(const std::string& str1, const std::string& str2)
 {
     std::string::size_type len=str1.size();
-    if(len!=str2.size()) return false;
+    if(len!=str2.size())
+        return false;
     for(std::string::size_type i=0; i<len; i++)
-        if(tolower(str1[i]) != tolower(str2[i])) return false;
+        if(tolower(str1[i]) != tolower(str2[i]))
+            return false;
     return true;
 }
 
-bool strings_equal(const std::string& str1, const char* str2)
+bool stringsEqual(const std::string& str1, const char* str2)
 {
-    if(str2==NULL) return false;
+    if(str2==NULL)
+        return false;
     for(std::string::size_type i=0; i<str1.size(); i++)
-        if(str2[i]==0 || tolower(str1[i]) != tolower(str2[i])) return false;
+        if(str2[i]==0 || tolower(str1[i]) != tolower(str2[i]))
+            return false;
     return str2[str1.size()]==0;  // ensure that the 2nd string length is the same as the 1st
 }
 

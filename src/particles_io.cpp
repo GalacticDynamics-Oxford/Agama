@@ -19,18 +19,18 @@ void IOSnapshotText::readSnapshot(PointMassSet<coord::Car>& points)
     bool noMasses=false, nonzeroMasses=false;
     while(std::getline(strm, buffer) && !strm.eof())
     {
-        utils::splitString(buffer, "%# \t", &fields);
+        utils::splitString(buffer, "%# \t", fields);
         size_t numFields=fields.size();
         if(numFields>=3 && ((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
         {
-            double mass=numFields>6 ? utils::convertTo<double>(fields[6]):(noMasses=true,1.0);
+            double mass=numFields>6 ? utils::convertToDouble(fields[6]):(noMasses=true,1.0);
             points.add(coord::PosVelCar(
-                utils::convertTo<double>(fields[0]), 
-                utils::convertTo<double>(fields[1]), 
-                utils::convertTo<double>(fields[2]), 
-                numFields>=6 ? utils::convertTo<double>(fields[3]) : 0, 
-                numFields>=6 ? utils::convertTo<double>(fields[4]) : 0, 
-                numFields>=6 ? utils::convertTo<double>(fields[5]) : 0),
+                utils::convertToDouble(fields[0]), 
+                utils::convertToDouble(fields[1]), 
+                utils::convertToDouble(fields[2]), 
+                numFields>=6 ? utils::convertToDouble(fields[3]) : 0, 
+                numFields>=6 ? utils::convertToDouble(fields[4]) : 0, 
+                numFields>=6 ? utils::convertToDouble(fields[5]) : 0),
                 mass);
             if(mass>0) nonzeroMasses=true;
         }

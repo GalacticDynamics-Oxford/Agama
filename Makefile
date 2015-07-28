@@ -18,6 +18,7 @@ SOURCES   = coord.cpp \
             potential_factory.cpp \
             potential_analytic.cpp \
             potential_composite.cpp \
+            potential_cylspline.cpp \
             potential_dehnen.cpp \
             potential_galpot.cpp \
             potential_sphharm.cpp \
@@ -27,6 +28,7 @@ SOURCES   = coord.cpp \
             actions_staeckel.cpp \
             math_core.cpp \
             math_spline.cpp \
+            math_specfunc.cpp \
             orbit.cpp \
             utils.cpp \
 
@@ -67,4 +69,7 @@ $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
 $(OBJDIR)/%.o:  $(LEGACYDIR)/%.cpp
 	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
-.PHONY: clean
+test:
+	./test_all.pl
+
+.PHONY: clean test

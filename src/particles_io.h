@@ -81,12 +81,19 @@ extern std::vector< std::string > formatsIOSnapshot;
 #endif
 
 /// creates an instance of appropriate snapshot reader, according to the file format 
-/// determined by reading first few bytes, or NULL if a file doesn't exist
+/// determined by reading first few bytes, or throw a std::runtime_error if a file doesn't exist
 BaseIOSnapshot* createIOSnapshotRead (const std::string &fileName);
 
 /// creates an instance of snapshot writer for a given format name, 
-/// or NULL if the format name string is incorrect
+/// or throw a std::runtime_error if the format name string is incorrect or file name is empty
 BaseIOSnapshot* createIOSnapshotWrite(const std::string &fileFormat, const std::string &fileName, 
     const std::string& header="", const double time=0, const bool append=false);
+
+/// convenience function for reading an N-body snapshot in arbitrary format
+inline void readSnapshot(const std::string& fileName, PointMassSet<coord::Car>& points) {
+    BaseIOSnapshot* snap = createIOSnapshotRead(fileName);
+    snap->readSnapshot(points);
+    delete snap;
+}
 
 };  // namespace

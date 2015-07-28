@@ -1,3 +1,8 @@
+/** \file    potential_sphharm.h
+    \brief   potential approximations based on spherical-harmonic expansion
+    \author  Eugene Vasiliev
+    \date    2010-2015
+**/
 #pragma once
 #include "potential_base.h"
 #include "particles_base.h"
