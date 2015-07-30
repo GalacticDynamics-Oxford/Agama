@@ -23,11 +23,10 @@ namespace potential {
 /// \name Definitions of all known potential types and parameters
 ///@{
 
-/// List of all known potential and density types
+/// List of all known potential and density types (borrowed from SMILE, not everything is implemented here)
 enum PotentialType {
     PT_UNKNOWN,     ///< undefined
     PT_COEFS,       ///< not an actual density model, but a way to load pre-computed coefficients of potential expansion
-    PT_DIRECT,      ///< direct evaluation of potential from Poisson equaiton:  CPotentialDirect
     PT_COMPOSITE,   ///< a superposition of multiple potential instances:  CPotentialComposite
     PT_NB,          ///< a set of frozen particles:  CPotentialNB
     PT_BSE,         ///< basis-set expansion for infinite systems:  CPotentialBSE
@@ -84,6 +83,12 @@ struct ConfigPotential
     double binary_ecc;                       ///< binary BH eccentricity (0<=ecc<1)
     double binary_phase;                     ///< binary BH orbital phase (0<=phase<2*pi)
 #endif
+    /// default constructor initializes the fields to some reasonable values
+    ConfigPotential() : 
+        mass(1.), scalerad(1.), scalerad2(1.), q(1.), p(1.), gamma(1.), sersicIndex(4.),
+        numCoefsRadial(20), numCoefsAngular(0), numCoefsVertical(20), alpha(0.),
+        potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(ST_DEFAULT),
+        splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0) {};
 };
 
 ///@}

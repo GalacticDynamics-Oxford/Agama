@@ -209,17 +209,17 @@ template const BasePotential* createPotentialFromPoints(const ConfigPotential& c
 // attempt to load coefficients stored in a text file
 static const BasePotential* createPotentialExpFromCoefs(ConfigPotential& config)
 {        
-    std::ifstream strmText(config.fileName.c_str(), std::ios::in);
+    std::ifstream strm(config.fileName.c_str(), std::ios::in);
     std::string buffer;
     std::vector<std::string> fields;
-    bool ok = std::getline(strmText, buffer);
-    ok &= std::getline(strmText, buffer).good();
+    bool ok = std::getline(strm, buffer);
+    ok &= std::getline(strm, buffer).good();
     utils::splitString(buffer, "# \t", fields);
     unsigned int ncoefsRadial = utils::convertToInt(fields[0]);
-    ok &= std::getline(strmText, buffer).good();
+    ok &= std::getline(strm, buffer).good();
     utils::splitString(buffer, "# \t", fields);
     unsigned int ncoefsAngular = utils::convertToInt(fields[0]);
-    ok &= std::getline(strmText, buffer).good();
+    ok &= std::getline(strm, buffer).good();
     utils::splitString(buffer, "# \t", fields);
     double param = utils::convertToDouble(fields[0]);   // meaning of this parameter depends on potential type
     if(/*ncoefsRadial==0 || ncoefsAngular==0 || */  // zero values are possible, means just a single term in expansion
@@ -232,14 +232,14 @@ static const BasePotential* createPotentialExpFromCoefs(ConfigPotential& config)
     std::vector< double > radii;
     //if(ncoefsRadial>MAX_NCOEFS_RADIAL) ncoefsRadial=MAX_NCOEFS_RADIAL;
     //if(ncoefsAngular>MAX_NCOEFS_ANGULAR) ncoefsAngular=MAX_NCOEFS_ANGULAR;
-    while(ok && std::getline(strmText, buffer))  // time, ignored
+    while(ok && std::getline(strm, buffer))  // time, ignored
     {
-        std::getline(strmText, buffer);  // comments, ignored
+        std::getline(strm, buffer);  // comments, ignored
         radii.clear();
         coefs.clear();
         for(unsigned int n=0; ok && n<=ncoefsRadial; n++)
         {
-            std::getline(strmText, buffer);
+            std::getline(strm, buffer);
             utils::splitString(buffer, "# \t", fields);
             radii.push_back(utils::convertToDouble(fields[0]));
             // for BSE this field is basis function index, for spline the radii should be in increasing order
@@ -275,75 +275,79 @@ static const BasePotential* createPotentialExpFromCoefs(ConfigPotential& config)
     }
     config.numCoefsRadial  = ncoefsRadial; 
     config.numCoefsAngular = ncoefsAngular;
-    config.symmetryType = pot->symmetry();
+    config.symmetryType    = pot->symmetry();
+    config.densityType     = PT_COEFS;
     return pot;
 }
 
 static const BasePotential* createPotentialCylExpFromCoefs(ConfigPotential& config)
 {
-#if 0
+    std::ifstream strm(config.fileName.c_str(), std::ios::in);
+    std::string buffer;
+    std::vector<std::string> fields;
     // read coefs for cylindrical spline potential
-    if(!std::getline(strmText, buffer)) valid=false;
-    utils::splitString(buffer, "# \t", &fields);
-    size_t size_R=utils::convertToInt(fields[0]);
-    if(!std::getline(strmText, buffer)) valid=false;
-    utils::splitString(buffer, "# \t", &fields);
-    size_t ncoefsAngular=utils::convertToInt(fields[0]);
-    if(!std::getline(strmText, buffer)) valid=false;
-    utils::splitString(buffer, "# \t", &fields);
-    size_t size_z=utils::convertToInt(fields[0]);
-    std::getline(strmText, buffer);  // time, ignored
-    if(size_R==0 || size_z==0) valid=false;
+    bool ok = std::getline(strm, buffer);  // header line
+    ok &= std::getline(strm, buffer).good();
+    utils::splitString(buffer, "# \t", fields);
+    size_t size_R = utils::convertToInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();
+    utils::splitString(buffer, "# \t", fields);
+    size_t ncoefsAngular = utils::convertToInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();
+    utils::splitString(buffer, "# \t", fields);
+    size_t size_z = utils::convertToInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();  // time, ignored
+    ok &= size_R>0 && size_z>0;
     std::vector<double> gridR, gridz;
-    std::vector<std::vector<double>> coefs(2*ncoefsAngular+1);
-    while(valid && std::getline(strmText, buffer) && !strmText.eof()) {
-        utils::splitString(buffer, "# \t", &fields);
-        int m=utils::convertToInt(fields[0]);  // m (azimuthal harmonic index)
-        if(m<-static_cast<int>(ncoefsAngular) || m>static_cast<int>(ncoefsAngular)) valid=false;
-        std::getline(strmText, buffer);  // radii
+    std::vector<std::vector<double> > coefs(2*ncoefsAngular+1);
+    while(ok && std::getline(strm, buffer) && !strm.eof()) {
+        utils::splitString(buffer, "# \t", fields);
+        int m = utils::convertToInt(fields[0]);  // m (azimuthal harmonic index)
+        if(m < -static_cast<int>(ncoefsAngular) || m > static_cast<int>(ncoefsAngular))
+            ok=false;
+        std::getline(strm, buffer);  // radii
         if(gridR.size()==0) {  // read values of R only once
-            utils::splitString(buffer, "# \t", &fields);
+            utils::splitString(buffer, "# \t", fields);
             for(size_t i=1; i<fields.size(); i++)
                 gridR.push_back(utils::convertToDouble(fields[i]));
-            if(gridR.size()!=size_R) valid=false;
+            if(gridR.size() != size_R)
+                ok=false;
         }
         gridz.clear();
         coefs[m+ncoefsAngular].assign(size_R*size_z,0);
-        for(size_t iz=0; valid && iz<size_z; iz++)
-        {
-            std::getline(strmText, buffer);
-            utils::splitString(buffer, "# \t", &fields);
+        for(size_t iz=0; ok && iz<size_z; iz++) {
+            std::getline(strm, buffer);
+            utils::splitString(buffer, "# \t", fields);
             gridz.push_back(utils::convertToDouble(fields[0]));
             if(iz>0 && gridz.back()<=gridz[iz-1]) 
-                valid=false;  // the values of z should be in increasing order
-            for(size_t iR=0; iR<size_R; iR++) 
-            {
-                double val=iR+1<fields.size() ? utils::convertToDouble(fields[iR+1]) : (valid=false, 0);
+                ok=false;  // the values of z should be in increasing order
+            for(size_t iR=0; iR<size_R; iR++) {
+                double val=0;
+                if(iR+1<fields.size())
+                    val = utils::convertToDouble(fields[iR+1]);
+                else
+                    ok=false;
                 coefs[m+ncoefsAngular][iz*size_R+iR]=val;
             }
         }
     }
-    if(!valid || (config->PotentialType != CPotential::PT_UNKNOWN && ptype!=config->PotentialType))
-    {   // load coefs only if potential type is the same as requested, or if request is not specific
-        my_error(FUNCNAME,
-            "Error loading potential "+std::string(getPotentialNameByType(config->PotentialType))+
-            " coefs from file "+fileName);
-        return NULL;
-    }
-    const CPotential* pot=new CPotentialCylSpline(gridR, gridz, coefs);
-    config->numCoefsRadial=size_R; 
-    config->numCoefsAngular=ncoefsAngular;
-    config->numCoefsVertical=(size_z+1)/2;
-    config->symmetry=pot->symmetry();
+    if(!ok)
+        throw std::runtime_error(std::string("Error loading potential ") +
+            getPotentialNameByType(config.potentialType)+
+            " coefs from file "+config.fileName);
+    const BasePotential* pot = new CylSplineExp(gridR, gridz, coefs);
+    config.numCoefsRadial    = size_R; 
+    config.numCoefsAngular   = ncoefsAngular;
+    config.numCoefsVertical  = (size_z+1)/2;
+    config.symmetryType      = pot->symmetry();
+    config.densityType       = PT_COEFS;
     return pot;
-#endif
-    throw std::runtime_error("Not implemented");
 }
 
 static const BasePotential* createPotentialExpFromEllMGE(ConfigPotential& config)
 {
 #if 0
-    std::ifstream strmText(fileName.c_str(), std::ios::in);
+    std::ifstream strm(fileName.c_str(), std::ios::in);
     if((config->PotentialType == CPotential::PT_SPLINE ||
         //config->PotentialType == CPotential::PT_CYLSPLINE || 
         config->PotentialType == CPotential::PT_BSE ||
@@ -352,10 +356,10 @@ static const BasePotential* createPotentialExpFromEllMGE(ConfigPotential& config
          config->DensityType == CPotential::PT_MGE))
     {   // attempt to load ellipsoidal or MGE mass model from a text file
         const CDensity* dens=NULL;
-        std::getline(strmText, buffer);
+        std::getline(strm, buffer);
         if(buffer.substr(0, 11)=="Ellipsoidal") {
             std::vector<double> radii, inmass, axesradii, axesq, axesp;  // for loading Ellipsoidal mass profile
-            while(std::getline(strmText, buffer) && !strmText.eof())
+            while(std::getline(strm, buffer) && !strm.eof())
             {
                 utils::splitString(buffer, "# \t", fields);
                 if(fields.size()>=2 && ((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
@@ -378,7 +382,7 @@ static const BasePotential* createPotentialExpFromEllMGE(ConfigPotential& config
         } else 
         if(buffer.substr(0, 3)=="MGE") {
             CDensityMGE::vectorg data;
-            while(std::getline(strmText, buffer) && !strmText.eof())
+            while(std::getline(strm, buffer) && !strm.eof())
             {
                 utils::splitString(buffer, "# \t", &fields);
                 if(fields.size()>=2 && ((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
@@ -420,7 +424,7 @@ static const BasePotential* createPotentialExpFromEllMGE(ConfigPotential& config
         return pot;
     }   // PT_ELLIPSOIDAL or PT_MGE
 #else
-    throw std::runtime_error("Ellipsoidal/MGE not implemented");
+    throw std::runtime_error(std::string(getPotentialNameByType(config.potentialType))+" not implemented");
 #endif
 }
 
@@ -431,14 +435,14 @@ const BasePotential* readPotential(ConfigPotential& config)
     if(fileName.empty()) {
         throw std::runtime_error("readPotential: empty file name");
     }
-    std::ifstream strmText(fileName.c_str(), std::ios::in);
-    if(!strmText) {
+    std::ifstream strm(fileName.c_str(), std::ios::in);
+    if(!strm) {
         throw std::runtime_error("readPotential: cannot read from file "+fileName);
     }
     // check header
     std::string buffer;
-    bool ok = std::getline(strmText, buffer);
-    strmText.close();
+    bool ok = std::getline(strm, buffer);
+    strm.close();
     if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
         std::vector<std::string> fields;
         utils::splitString(buffer, "# \t", fields);
@@ -476,10 +480,9 @@ const BasePotential* readPotential(ConfigPotential& config)
 
 static void writePotentialExp(const std::string &fileName, const BasePotential& potential)
 {
-    std::ofstream strmText(fileName.c_str(), std::ios::out);
-    if(!strmText) 
+    std::ofstream strm(fileName.c_str(), std::ios::out);
+    if(!strm) 
         throw std::runtime_error("Cannot write potential coefs to file "+fileName);  // file not writable
-
     std::vector<double> indices;
     std::vector< std::vector<double> > coefs;
     size_t ncoefsAngular=0;
@@ -487,43 +490,43 @@ static void writePotentialExp(const std::string &fileName, const BasePotential& 
     {
 #if 0
     case PT_SCALEFREESH: {
-        const CPotentialScaleFreeSH* potSH=static_cast<const CPotentialScaleFreeSH*>(potential);
+        const CPotentialScaleFreeSH* potSH=dynamic_cast<const CPotentialScaleFreeSH*>(potential);
         indices.assign(1, 0);
         coefs.resize(1);
         potSH->getCoefs(&(coefs[0]));
         ncoefsAngular=potSH->getnumCoefsAngular();
-        strmText << "SFcoefs\t#header\n" << 0 << "\t#n_radial\n" << ncoefsAngular << "\t#n_angular\n" << 
+        strm << "SFcoefs\t#header\n" << 0 << "\t#n_radial\n" << ncoefsAngular << "\t#n_angular\n" << 
             potential->getGamma() << "\t#gamma\n0\t#time\n";
-        strmText << "#index";
+        strm << "#index";
         break; 
     }
 #endif
     case PT_BSE: {
-        const BasisSetExp* potBSE = dynamic_cast<const BasisSetExp*>(&potential);
-        indices.resize(potBSE->getNumCoefsRadial()+1);
+        const BasisSetExp& potBSE = dynamic_cast<const BasisSetExp&>(potential);
+        indices.resize(potBSE.getNumCoefsRadial()+1);
         for(size_t i=0; i<indices.size(); i++) indices[i]=i*1.0;
-        potBSE->getCoefs(&coefs);
-        assert(coefs.size()==indices.size());
-        ncoefsAngular = potBSE->getNumCoefsAngular();
-        strmText << "BSEcoefs\t#header\n" << 
-            potBSE->getNumCoefsRadial() << "\t#n_radial\n" << 
+        potBSE.getCoefs(&coefs);
+        assert(coefs.size() == indices.size());
+        ncoefsAngular = potBSE.getNumCoefsAngular();
+        strm << "BSEcoefs\t#header\n" << 
+            potBSE.getNumCoefsRadial() << "\t#n_radial\n" << 
             ncoefsAngular << "\t#n_angular\n" << 
-            potBSE->getAlpha() <<"\t#alpha\n0\t#time\n";
-        strmText << "#index";
+            potBSE.getAlpha() <<"\t#alpha\n0\t#time\n";
+        strm << "#index";
         break; 
     }
     case PT_SPLINE: {
-        const SplineExp* potSpline = dynamic_cast<const SplineExp*>(&potential);
-        potSpline->getCoefs(&indices, &coefs);
-        assert(coefs.size()==indices.size());
-        assert(indices[0]==0);  // leftmost radius is 0
+        const SplineExp& potSpline = dynamic_cast<const SplineExp&>(potential);
+        potSpline.getCoefs(&indices, &coefs);
+        assert(coefs.size() == indices.size());
+        assert(indices[0] == 0);  // leftmost radius is 0
         coefs[0].resize(1);     // retain only l=0 term for r=0, the rest is supposed to be zero
-        ncoefsAngular = potSpline->getNumCoefsAngular();
-        strmText << "SHEcoefs\t#header\n" << 
-            potSpline->getNumCoefsRadial() << "\t#n_radial\n" << 
+        ncoefsAngular = potSpline.getNumCoefsAngular();
+        strm << "SHEcoefs\t#header\n" << 
+            potSpline.getNumCoefsRadial() << "\t#n_radial\n" << 
             ncoefsAngular << "\t#n_angular\n" <<
             0 <<"\t#unused\n0\t#time\n";
-        strmText << "#radius";
+        strm << "#radius";
         break; 
     }
     default:
@@ -531,49 +534,46 @@ static void writePotentialExp(const std::string &fileName, const BasePotential& 
     }
     for(int l=0; l<=static_cast<int>(ncoefsAngular); l++)
         for(int m=-l; m<=l; m++)
-            strmText << "\tl="<<l<<",m="<<m;  // header line
-    strmText << "\n";
+            strm << "\tl="<<l<<",m="<<m;  // header line
+    strm << "\n";
     for(size_t n=0; n<indices.size(); n++)
     {
-        strmText << indices[n];
-        strmText << "\t" << std::setprecision(14) << coefs[n][0] << std::setprecision(7);   // leading coeft should be high-accuracy at least for spline potential
+        strm << indices[n];
+        strm << "\t" << std::setprecision(14) << coefs[n][0] << std::setprecision(7);   // leading coeft should be high-accuracy at least for spline potential
         for(size_t i=1; i<coefs[n].size(); i++)
-            strmText << "\t" << coefs[n][i];
-        strmText << "\n";
+            strm << "\t" << coefs[n][i];
+        strm << "\n";
     }
-    if(!strmText.good())
+    if(!strm.good())
         throw std::runtime_error("Cannot write potential coefs to file "+fileName);
 }
 
-static void writePotentialCylExp(const std::string &fileName, const BasePotential& potential)
+static void writePotentialCylExp(const std::string &fileName, const CylSplineExp& potential)
 {
-#ifdef HAVE_INTERP2D
-    if(potential->PotentialType()==PT_CYLSPLINE) {
-        std::vector<double> gridR, gridz;
-        std::vector<std::vector<double>> coefs;
-        static_cast<const CPotentialCylSpline*>(potential)->getCoefs(&gridR, &gridz, &coefs);
-        int mmax=coefs.size()/2;
-        strmText << "CylSpline\t#header\n" << gridR.size() << "\t#size_R\n" << mmax << "\t#m_max\n" <<
-            gridz.size() << "\t#size_z\n0\t#time\n" << std::setprecision(16);
-        for(int m=0; m<static_cast<int>(coefs.size()); m++) 
-            if(coefs[m].size()>0) {
-                strmText << (m-mmax) << "\t#m\n#z\\R";
+    std::ofstream strm(fileName.c_str(), std::ios::out);
+    if(!strm) 
+        throw std::runtime_error("Cannot write potential coefs to file "+fileName);  // file not writable
+    std::vector<double> gridR, gridz;
+    std::vector<std::vector<double> > coefs;
+    potential.getCoefs(gridR, gridz, coefs);
+    int mmax = coefs.size()/2;
+    strm << "CylSpline\t#header\n" << gridR.size() << "\t#size_R\n" << mmax << "\t#m_max\n" <<
+        gridz.size() << "\t#size_z\n0\t#time\n" << std::setprecision(16);
+    for(int m=0; m<static_cast<int>(coefs.size()); m++) 
+        if(coefs[m].size()>0) {
+            strm << (m-mmax) << "\t#m\n#z\\R";
+            for(size_t iR=0; iR<gridR.size(); iR++)
+                strm << "\t" << gridR[iR];
+            strm << "\n";
+            for(size_t iz=0; iz<gridz.size(); iz++) {
+                strm << gridz[iz];
                 for(size_t iR=0; iR<gridR.size(); iR++)
-                    strmText << "\t" << gridR[iR];
-                strmText << "\n";
-                for(size_t iz=0; iz<gridz.size(); iz++) {
-                    strmText << gridz[iz];
-                    for(size_t iR=0; iR<gridR.size(); iR++)
-                        strmText << "\t" << coefs[m][iz*gridR.size()+iR];
-                    strmText << "\n";
-                }
-            } 
-        if(!strmText) return false;
-        return true;
-    }
-#else
-    throw std::runtime_error("Not implemented");
-#endif
+                    strm << "\t" << coefs[m][iz*gridR.size()+iR];
+                strm << "\n";
+            }
+        } 
+    if(!strm.good())
+        throw std::runtime_error("Cannot write potential coefs to file "+fileName);
 }
 
 void writePotential(const std::string &fileName, const BasePotential& potential)
@@ -584,7 +584,7 @@ void writePotential(const std::string &fileName, const BasePotential& potential)
         writePotentialExp(fileName, potential);
         break;
     case PT_CYLSPLINE:
-        writePotentialCylExp(fileName, potential);
+        writePotentialCylExp(fileName, dynamic_cast<const CylSplineExp&>(potential));
         break;
     default:
         throw std::runtime_error("Unknown type of potential to write");
@@ -595,7 +595,9 @@ void writePotential(const std::string &fileName, const BasePotential& potential)
 
 static void SwallowRestofLine(std::ifstream& from) {
     char c;
-    do from.get(c); while( from.good() && c !='\n');
+    do {
+        from.get(c);
+    } while( from.good() && c !='\n');
 }
 
 const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {

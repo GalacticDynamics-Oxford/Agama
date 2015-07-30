@@ -23,7 +23,7 @@ template<typename CoordT> struct PointMassSet {
     template<typename OtherCoordT> PointMassSet(const PointMassSet<OtherCoordT> &src) {
         data.reserve(src.size());
         for(size_t i=0; i<src.size(); i++)
-            data.push_back(ElemType(coord::toPosVel<CoordT>(src[i].first), src[i].second));
+            data.push_back(ElemType(coord::toPosVel<OtherCoordT,CoordT>(src[i].first), src[i].second));
     }
     inline ElemType& at(size_t index) { return data.at(index); }             // convenience shorthand
     inline const ElemType& at(size_t index) const { return data.at(index); } // convenience shorthand

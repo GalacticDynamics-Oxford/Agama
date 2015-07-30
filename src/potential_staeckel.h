@@ -37,23 +37,23 @@ private:
     /** implementations of the standard triad of coordinate transformations */
     virtual void eval_car(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
-        coord::eval_and_convert_twostep<coord::ProlSph, coord::Cyl, coord::Car>
+        coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Car>
             (*this, pos, coordSys, potential, deriv, deriv2);  // no direct conversion exists, use two-step
     }
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
-        coord::eval_and_convert<coord::ProlSph, coord::Cyl>
+        coord::evalAndConvert<coord::ProlSph, coord::Cyl>
             (*this, pos, coordSys, potential, deriv, deriv2);
     }
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
-        coord::eval_and_convert_twostep<coord::ProlSph, coord::Cyl, coord::Sph>
+        coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Sph>
             (*this, pos, coordSys, potential, deriv, deriv2);  // use two-step conversion
     }
 
     /** the function that does the actual computation in prolate spheroidal coordinates 
         (implements the coord::IScalarFunction<ProlSph> interface) */
-    virtual void eval_scalar(const coord::PosProlSph& pos,
+    virtual void evalScalar(const coord::PosProlSph& pos,
         double* value=0, coord::GradProlSph* deriv=0, coord::HessProlSph* deriv2=0) const;
 
     virtual int numDerivs() const { return 2; }

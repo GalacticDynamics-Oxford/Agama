@@ -30,6 +30,8 @@ int fcmp(double x, double y, double eps=1e-15);
 /** return sign of a number */
 inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 
+/** return an integer power of a number */
+double powInt(double x, int n);
 
 /** ensure that the angle lies in [0,2pi) */
 double wrapAngle(double x);
@@ -107,13 +109,24 @@ private:
 /// \name ------ integration routines -------
 ///@{
 
-/** integrate a (well-behaved) function on a finite interval */
+/** integrate a function on a finite interval, using an adaptive 
+    Gauss-Kronrod rule with maximum order up to 87. 
+    If the function is well-behaved, this is the fastest method, 
+    but if it cannot reach the required accuracy even using the highest-order rule,
+    no further improvement can be made. */
 double integrate(const IFunction& F, double x1, double x2, double rel_toler);
+
+/** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
+    without error estimate. */
+double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
+
+/** integrate a function on a finite interval, using a fully adaptive integration routine 
+    to reach the required tolerance; integrable singularities are handled properly. */
+double integrateAdaptive(const IFunction& F, double x1, double x2, double rel_toler);
 
 /** integrate a function with a transformation that removes possible singularities
     at the endpoints [x_low,x_upp], and the integral is computed over the interval [x1,x2] 
-    such than x_low<=x1<=x2<=x_upp.
-*/
+    such than x_low<=x1<=x2<=x_upp. */
 double integrateScaled(const IFunction& F, double x1, double x2, 
     double x_low, double x_upp, double rel_toler);
 

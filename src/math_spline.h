@@ -33,16 +33,21 @@ public:
     virtual int numDerivs() const { return 2; }
 
     /** return the lower end of definition interval */
-    double xlower() const { return xval.size()? xval.front() : NAN; }
+    double xmin() const { return xval.size()? xval.front() : NAN; }
 
     /** return the upper end of definition interval */
-    double xupper() const { return xval.size()? xval.back() : NAN; }
+    double xmax() const { return xval.size()? xval.back() : NAN; }
+
+    /** check if the spline is initialized */
+    bool isEmpty() const { return xval.size()==0; }
 
     /** check if the spline is everywhere monotonic on the given interval */
     bool isMonotonic() const;
 
 private:
-    std::vector<double> xval, yval, cval;
+    std::vector<double> xval;  ///< grid nodes
+    std::vector<double> yval;  ///< values of function at grid nodes
+    std::vector<double> cval;  ///< second derivatives of function at grid nodes
 };
 
 
@@ -66,11 +71,30 @@ public:
         Any combination of value, first and second derivatives is possible: 
         if any of them is not needed, the corresponding pointer should be set to NULL. 
     */
-    void eval(const double x, const double y, 
+    void evalDeriv(const double x, const double y, 
         double* value=0, double* deriv_x=0, double* deriv_y=0,
         double* deriv_xx=0, double* deriv_xy=0, double* deriv_yy=0) const;
+
+    /** shortcut for computing the value of spline */
+    double value(const double x, const double y) const {
+        double v;
+        evalDeriv(x, y, &v);
+        return v;
+    }
+
+    /** return the boundaries of definition region */
+    double xmin() const { return xval.size()? xval.front(): NAN; }
+    double xmax() const { return xval.size()? xval.back() : NAN; }
+    double ymin() const { return yval.size()? yval.front(): NAN; }
+    double ymax() const { return yval.size()? yval.back() : NAN; }
+
+    /** check if the spline is initialized */
+    bool isEmpty() const { return xval.size()==0 || yval.size()==0; }
+
 private:
-    std::vector<double> xval, yval, zval, zx, zy, zxy;
+    std::vector<double> xval, yval;  ///< grid nodes in x and y directions
+    std::vector<double> zval;        ///< flattened 2d array of z values
+    std::vector<double> zx, zy, zxy; ///< flattened 2d arrays of derivatives in x and y directions, and mixed 2nd derivatives
 };
 
 
@@ -164,8 +188,8 @@ private:
 /** generates a grid with exponentially growing spacing.
     x[k] = (exp(Z k) - 1)/(exp(Z) - 1),
     and the value of Z is computed so the the 1st element is at xmin and last at xmax.
-    \param[in]  nnodes -- total number of grid points
-    \param[in]  xmin, xmax -- location of the first and the last node
+    \param[in]  nnodes>=2 -- total number of grid points
+    \param[in]  xmin>0, xmax>xmin -- location of the first and the last node
     \param[in]  zeroelem -- if true, 0th node is at zero (otherwise at xmin)
     \param[out] grid -- array of grid nodes created by this routine
 */

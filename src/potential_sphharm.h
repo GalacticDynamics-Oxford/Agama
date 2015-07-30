@@ -67,6 +67,10 @@ public:
 
     /// return the number of radial basis functions
     unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }
+
+    /// a faster estimate of M(r) from the l=0 harmonic only
+    double enclosedMass(const double radius) const;
+
 private:
     unsigned int Ncoefs_radial;                 ///< number of radial basis functions [ =SHcoefs.size() ]
     std::vector<std::vector<double> > SHcoefs;  ///< array of coefficients A_nlm of potential expansion
@@ -121,6 +125,10 @@ public:
         \param[out] coefsArray is filled by the computed coefficients (must point to an existing array)
     */
     void getCoefs(std::vector<double> *radii, std::vector< std::vector<double> > *coefsArray, bool useNodes=true) const;
+
+    /// a faster estimate of M(r) from the l=0 harmonic only
+    double enclosedMass(const double radius) const;
+
 private:
     unsigned int Ncoefs_radial;              ///< number of radial coefficients (excluding the one at r=0)
     std::vector<double>  gridradii;          ///< defines nodes of radial grid in splines

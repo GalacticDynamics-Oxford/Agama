@@ -21,7 +21,10 @@ const double EPSREL_POTENTIAL_INT = 1e-6;
 
 /// absolute error in potential computation (supercedes the relative error in case of very small coefficients)
 const double EPSABS_POTENTIAL_INT = 1e-15;
-    
+
+/// relative accuracy of density computation
+const double EPSREL_DENSITY_INT = 1e-4;
+
 /// \name  Base class for all density models
 ///@{
 
@@ -43,6 +46,16 @@ public:
 
     /// return the name of density or potential model
     virtual const char* name() const=0;
+
+    /** estimate the mass enclosed within a given spherical radius;
+        default implementation integrates density over volume, but derived classes
+        may provide a cheaper alternative (not necessarily a very precise one). */
+    virtual double enclosedMass(const double radius) const;
+    
+    /** return the total mass of the density model (possibly infinite);
+        default implementation estimates the asymptotic behaviour of density at large radii,
+        but derived classes may instead return a specific value. */
+    virtual double totalMass() const;
 
 protected:
 //  Protected members: virtual methods for `density` in different coordinate systems
@@ -163,18 +176,18 @@ private:
     /** evaluate potential and up to two its derivatives in cylindrical coordinates. */
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
-        coord::eval_and_convert<coord::Car, coord::Cyl>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Car, coord::Cyl>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in spherical coordinates. */
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
-        coord::eval_and_convert<coord::Car, coord::Sph>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Car, coord::Sph>(*this, pos, potential, deriv, deriv2);
     }
 
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Cartesian) coordinate system. */
-    virtual void eval_scalar(const coord::PosCar& pos,
+    virtual void evalScalar(const coord::PosCar& pos,
         double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
     { eval_car(pos, value, deriv, deriv2); }
 #if 0  // testing
@@ -198,18 +211,18 @@ private:
     /** evaluate potential and up to two its derivatives in cartesian coordinates. */
     virtual void eval_car(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
-        coord::eval_and_convert<coord::Cyl, coord::Car>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Cyl, coord::Car>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in spherical coordinates. */
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
-        coord::eval_and_convert<coord::Cyl, coord::Sph>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Cyl, coord::Sph>(*this, pos, potential, deriv, deriv2);
     }
 
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Cylindrical) coordinate system. */
-    virtual void eval_scalar(const coord::PosCyl& pos,
+    virtual void evalScalar(const coord::PosCyl& pos,
         double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
         eval_cyl(pos, value, deriv, deriv2);
     }
@@ -234,18 +247,18 @@ private:
     /** evaluate potential and up to two its derivatives in cartesian coordinates. */
     virtual void eval_car(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
-        coord::eval_and_convert<coord::Sph, coord::Car>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Sph, coord::Car>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in cylindrical coordinates. */
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
-        coord::eval_and_convert<coord::Sph, coord::Cyl>(*this, pos, potential, deriv, deriv2);
+        coord::evalAndConvert<coord::Sph, coord::Cyl>(*this, pos, potential, deriv, deriv2);
     }
 
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Spherical) coordinate system. */
-    virtual void eval_scalar(const coord::PosSph& pos,
+    virtual void evalScalar(const coord::PosSph& pos,
         double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const { 
         eval_sph(pos, value, deriv, deriv2); 
     }
@@ -270,18 +283,21 @@ public:
 
     virtual SymmetryType symmetry() const { return ST_SPHERICAL; }
 
+    /** find the mass enclosed within a given radius from Poisson equation */
+    virtual double enclosedMass(double radius) const;
+
 private:
     virtual void eval_car(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
-        coord::eval_and_convert_sph(*this, pos, potential, deriv, deriv2); }
+        coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
 
     virtual void eval_cyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
-        coord::eval_and_convert_sph(*this, pos, potential, deriv, deriv2); }
+        coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
 
     virtual void eval_sph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
-        coord::eval_and_convert_sph(*this, pos, potential, deriv, deriv2); }
+        coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
 
     virtual int numDerivs() const { return 2; }
 };
@@ -317,6 +333,12 @@ inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph
 
 /** Compute circular velocity at a given radius in equatorial plane */
 double v_circ(const BasePotential& potential, double radius);
+
+/** Find radius corresponding to the given enclosed mass */
+double getRadiusByMass(const BaseDensity& dens, const double mass);
+
+/** Find the asymptotic power-law index of density profile at r->0 */
+double getInnerDensitySlope(const BaseDensity& dens);
 
 ///@}
 }  // namespace potential

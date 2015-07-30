@@ -654,18 +654,25 @@ CubicSpline2d::CubicSpline2d(const std::vector<double>& xvalues, const std::vect
             spl.evalDeriv(xvalues[i], NULL, &(zx[INDEX_2D(i, j, xsize)]));
     }
     for(size_t j=0; j<ysize; j++) {
-        for(size_t i=0; i<xsize; i++)
-            tmpvalues[i] = zy[INDEX_2D(i, j, xsize)];
-        CubicSpline spl(xvalues, tmpvalues);
-        for(size_t i=0; i<xsize; i++)
-            spl.evalDeriv(xvalues[i], NULL, &(zxy[INDEX_2D(i, j, xsize)]));
+        // if derivs at the boundary are specified, 2nd deriv must be zero
+        if( (j==0 && isFinite(deriv_ymin)) || (j==ysize-1 && isFinite(deriv_ymax)) ) {
+            for(size_t i=0; i<xsize; i++)
+                zxy[INDEX_2D(i, j, xsize)] = 0.;
+        } else {
+            for(size_t i=0; i<xsize; i++)
+                tmpvalues[i] = zy[INDEX_2D(i, j, xsize)];
+            CubicSpline spl(xvalues, tmpvalues,
+                isFinite(deriv_xmin) ? 0. : NAN, isFinite(deriv_xmax) ? 0. : NAN);
+            for(size_t i=0; i<xsize; i++)
+                spl.evalDeriv(xvalues[i], NULL, &(zxy[INDEX_2D(i, j, xsize)]));
+        }
     }
 }
 
-void CubicSpline2d::eval(const double x, const double y, 
+void CubicSpline2d::evalDeriv(const double x, const double y, 
     double *z, double *z_x, double *z_y, double *z_xx, double *z_xy, double *z_yy) const
 {
-    if(xval.size()==0 || yval.size()==0)
+    if(isEmpty())
         throw std::range_error("Empty 2d spline");
     if(x<xval.front() || x>xval.back() || y<yval.front() || y>yval.back()) {
         if(z)
@@ -683,40 +690,39 @@ void CubicSpline2d::eval(const double x, const double y,
         return;
     }
     const size_t xsize = xval.size();
-    double v;
     // First compute the indices into the data arrays where we are interpolating
     const size_t xi = binSearch(x, xval);
     const size_t yi = binSearch(y, yval);
     // Find the minimum and maximum values on the grid cell in each dimension
-    const double xmin = xval[xi];
-    const double xmax = xval[xi + 1];
-    const double ymin = yval[yi];
-    const double ymax = yval[yi + 1];
-    const double zminmin = zval[INDEX_2D(xi, yi, xsize)];
-    const double zminmax = zval[INDEX_2D(xi, yi + 1, xsize)];
-    const double zmaxmin = zval[INDEX_2D(xi + 1, yi, xsize)];
-    const double zmaxmax = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
+    const double xlow = xval[xi];
+    const double xupp = xval[xi + 1];
+    const double ylow = yval[yi];
+    const double yupp = yval[yi + 1];
+    const double zlowlow = zval[INDEX_2D(xi, yi, xsize)];
+    const double zlowupp = zval[INDEX_2D(xi, yi + 1, xsize)];
+    const double zupplow = zval[INDEX_2D(xi + 1, yi, xsize)];
+    const double zuppupp = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
     // Get the width and height of the grid cell
-    const double dx = xmax - xmin;
-    const double dy = ymax - ymin;
+    const double dx = xupp - xlow;
+    const double dy = yupp - ylow;
     // t and u are the positions within the grid cell at which we are computing
     // the interpolation, in units of grid cell size
-    const double t = (x - xmin)/dx;
-    const double u = (y - ymin)/dy;
+    const double t = (x - xlow)/dx;
+    const double u = (y - ylow)/dy;
     const double dt = 1./dx; // partial t / partial x
     const double du = 1./dy; // partial u / partial y
-    const double zxminmin  = zx [INDEX_2D(xi, yi, xsize)]/dt;
-    const double zxminmax  = zx [INDEX_2D(xi, yi + 1, xsize)]/dt;
-    const double zxmaxmin  = zx [INDEX_2D(xi + 1, yi, xsize)]/dt;
-    const double zxmaxmax  = zx [INDEX_2D(xi + 1, yi + 1, xsize)]/dt;
-    const double zyminmin  = zy [INDEX_2D(xi, yi, xsize)]/du;
-    const double zyminmax  = zy [INDEX_2D(xi, yi + 1, xsize)]/du;
-    const double zymaxmin  = zy [INDEX_2D(xi + 1, yi, xsize)]/du;
-    const double zymaxmax  = zy [INDEX_2D(xi + 1, yi + 1, xsize)]/du;
-    const double zxyminmin = zxy[INDEX_2D(xi, yi, xsize)]/(dt*du);
-    const double zxyminmax = zxy[INDEX_2D(xi, yi + 1, xsize)]/(dt*du);
-    const double zxymaxmin = zxy[INDEX_2D(xi + 1, yi, xsize)]/(dt*du);
-    const double zxymaxmax = zxy[INDEX_2D(xi + 1, yi + 1, xsize)]/(dt*du);
+    const double zxlowlow  = zx [INDEX_2D(xi, yi, xsize)]/dt;
+    const double zxlowupp  = zx [INDEX_2D(xi, yi + 1, xsize)]/dt;
+    const double zxupplow  = zx [INDEX_2D(xi + 1, yi, xsize)]/dt;
+    const double zxuppupp  = zx [INDEX_2D(xi + 1, yi + 1, xsize)]/dt;
+    const double zylowlow  = zy [INDEX_2D(xi, yi, xsize)]/du;
+    const double zylowupp  = zy [INDEX_2D(xi, yi + 1, xsize)]/du;
+    const double zyupplow  = zy [INDEX_2D(xi + 1, yi, xsize)]/du;
+    const double zyuppupp  = zy [INDEX_2D(xi + 1, yi + 1, xsize)]/du;
+    const double zxylowlow = zxy[INDEX_2D(xi, yi, xsize)]/(dt*du);
+    const double zxylowupp = zxy[INDEX_2D(xi, yi + 1, xsize)]/(dt*du);
+    const double zxyupplow = zxy[INDEX_2D(xi + 1, yi, xsize)]/(dt*du);
+    const double zxyuppupp = zxy[INDEX_2D(xi + 1, yi + 1, xsize)]/(dt*du);
     const double t0 = 1;
     const double t1 = t;
     const double t2 = t*t;
@@ -729,92 +735,91 @@ void CubicSpline2d::eval(const double x, const double y,
     const double t1u0 = t1*u0, t1u1=t1*u1, t1u2=t1*u2, t1u3=t1*u3;
     const double t2u0 = t2*u0, t2u1=t2*u1, t2u2=t2*u2, t2u3=t2*u3;
     const double t3u0 = t3*u0, t3u1=t3*u1, t3u2=t3*u2, t3u3=t3*u3;
-
     double zvalue=0;
     double zderx=0;
     double zdery=0;
     double zd_xx=0;
     double zd_xy=0;
     double zd_yy=0;
-    v = zminmin;
+    double v = zlowlow;
     zvalue += v*t0u0;
-    v = zyminmin;
+    v = zylowlow;
     zvalue += v*t0u1;
     zdery  += v*t0u0;
-    v = -3*zminmin + 3*zminmax - 2*zyminmin - zyminmax;
+    v = -3*zlowlow + 3*zlowupp - 2*zylowlow - zylowupp;
     zvalue += v*t0u2;
     zdery  += 2*v*t0u1;
     zd_yy  += 2*v*t0u0;
-    v = 2*zminmin - 2*zminmax + zyminmin + zyminmax;
+    v = 2*zlowlow - 2*zlowupp + zylowlow + zylowupp;
     zvalue += v*t0u3;
     zdery  += 3*v*t0u2;
     zd_yy  += 6*v*t0u1;
-    v = zxminmin;
+    v = zxlowlow;
     zvalue += v*t1u0;
     zderx  += v*t0u0;
-    v = zxyminmin;
+    v = zxylowlow;
     zvalue += v*t1u1;
     zderx  += v*t0u1;
     zdery  += v*t1u0;
     zd_xy  += v*t0u0;
-    v = -3*zxminmin + 3*zxminmax - 2*zxyminmin - zxyminmax;
+    v = -3*zxlowlow + 3*zxlowupp - 2*zxylowlow - zxylowupp;
     zvalue += v*t1u2;
     zderx  += v*t0u2;
     zdery  += 2*v*t1u1;
     zd_xy  += 2*v*t0u1;
     zd_yy  += 2*v*t1u0;
-    v = 2*zxminmin - 2*zxminmax + zxyminmin + zxyminmax;
+    v = 2*zxlowlow - 2*zxlowupp + zxylowlow + zxylowupp;
     zvalue += v*t1u3;
     zderx  += v*t0u3;
     zdery  += 3*v*t1u2;
     zd_xy  += 3*v*t0u2;
     zd_yy  += 6*v*t1u1;
-    v = -3*zminmin + 3*zmaxmin - 2*zxminmin - zxmaxmin;
+    v = -3*zlowlow + 3*zupplow - 2*zxlowlow - zxupplow;
     zvalue += v*t2u0;
     zderx  += 2*v*t1u0;
     zd_xx  += 2*v*t0u0;
-    v = -3*zyminmin + 3*zymaxmin - 2*zxyminmin - zxymaxmin;
+    v = -3*zylowlow + 3*zyupplow - 2*zxylowlow - zxyupplow;
     zvalue += v*t2u1;
     zderx  += 2*v*t1u1;
     zdery  += v*t2u0;
     zd_xx  += 2*v*t0u1;
     zd_xy  += 2*v*t1u0;
-    v = 9*zminmin - 9*zmaxmin + 9*zmaxmax - 9*zminmax + 6*zxminmin + 3*zxmaxmin - 3*zxmaxmax - 6*zxminmax 
-      + 6*zyminmin - 6*zymaxmin - 3*zymaxmax + 3*zyminmax + 4*zxyminmin + 2*zxymaxmin + zxymaxmax + 2*zxyminmax;
+    v = 9*zlowlow - 9*zupplow + 9*zuppupp - 9*zlowupp + 6*zxlowlow + 3*zxupplow - 3*zxuppupp - 6*zxlowupp 
+      + 6*zylowlow - 6*zyupplow - 3*zyuppupp + 3*zylowupp + 4*zxylowlow + 2*zxyupplow + zxyuppupp + 2*zxylowupp;
     zvalue += v*t2u2;
     zderx  += 2*v*t1u2;
     zdery  += 2*v*t2u1;
     zd_xx  += 2*v*t0u2;
     zd_xy  += 4*v*t1u1;
     zd_yy  += 2*v*t2u0;
-    v = -6*zminmin + 6*zmaxmin - 6*zmaxmax + 6*zminmax - 4*zxminmin - 2*zxmaxmin + 2*zxmaxmax + 4*zxminmax 
-      - 3*zyminmin + 3*zymaxmin + 3*zymaxmax - 3*zyminmax - 2*zxyminmin - zxymaxmin - zxymaxmax - 2*zxyminmax;
+    v = -6*zlowlow + 6*zupplow - 6*zuppupp + 6*zlowupp - 4*zxlowlow - 2*zxupplow + 2*zxuppupp + 4*zxlowupp 
+      - 3*zylowlow + 3*zyupplow + 3*zyuppupp - 3*zylowupp - 2*zxylowlow - zxyupplow - zxyuppupp - 2*zxylowupp;
     zvalue += v*t2u3;
     zderx  += 2*v*t1u3;
     zdery  += 3*v*t2u2;
     zd_xx  += 2*v*t0u3;
     zd_xy  += 6*v*t1u2;
     zd_yy  += 6*v*t2u1;
-    v = 2*zminmin - 2*zmaxmin + zxminmin + zxmaxmin;
+    v = 2*zlowlow - 2*zupplow + zxlowlow + zxupplow;
     zvalue += v*t3u0;
     zderx  += 3*v*t2u0;
     zd_xx  += 6*v*t1u0;
-    v = 2*zyminmin - 2*zymaxmin + zxyminmin + zxymaxmin;
+    v = 2*zylowlow - 2*zyupplow + zxylowlow + zxyupplow;
     zvalue += v*t3u1;
     zderx  += 3*v*t2u1;
     zdery  += v*t3u0;
     zd_xx  += 6*v*t1u1;
     zd_xy  += 3*v*t2u0;
-    v = -6*zminmin + 6*zmaxmin - 6*zmaxmax + 6*zminmax - 3*zxminmin - 3*zxmaxmin + 3*zxmaxmax + 3*zxminmax 
-      - 4*zyminmin + 4*zymaxmin + 2*zymaxmax - 2*zyminmax - 2*zxyminmin - 2*zxymaxmin - zxymaxmax - zxyminmax;
+    v = -6*zlowlow + 6*zupplow - 6*zuppupp + 6*zlowupp - 3*zxlowlow - 3*zxupplow + 3*zxuppupp + 3*zxlowupp 
+      - 4*zylowlow + 4*zyupplow + 2*zyuppupp - 2*zylowupp - 2*zxylowlow - 2*zxyupplow - zxyuppupp - zxylowupp;
     zvalue += v*t3u2;
     zderx  += 3*v*t2u2;
     zdery  += 2*v*t3u1;
     zd_xx  += 6*v*t1u2;
     zd_xy  += 6*v*t2u1;
     zd_yy  += 2*v*t3u0;
-    v = 4*zminmin - 4*zmaxmin + 4*zmaxmax - 4*zminmax + 2*zxminmin + 2*zxmaxmin - 2*zxmaxmax - 2*zxminmax 
-      + 2*zyminmin - 2*zymaxmin - 2*zymaxmax + 2*zyminmax + zxyminmin + zxymaxmin + zxymaxmax + zxyminmax;
+    v = 4*zlowlow - 4*zupplow + 4*zuppupp - 4*zlowupp + 2*zxlowlow + 2*zxupplow - 2*zxuppupp - 2*zxlowupp 
+      + 2*zylowlow - 2*zyupplow - 2*zyuppupp + 2*zylowupp + zxylowlow + zxyupplow + zxyuppupp + zxylowupp;
     zvalue += v*t3u3;
     zderx  += 3*v*t2u3;
     zdery  += 3*v*t3u2;
@@ -847,6 +852,8 @@ private:
 
 void createNonuniformGrid(size_t nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid)
 {   // create grid so that x_k = B*(exp(A*k)-1)
+    if(nnodes<2 || xmin<=0 || xmax<=xmin)
+        throw std::invalid_argument("Invalid parameters for grid creation");
     double A, B, dynrange=xmax/xmin;
     grid.resize(nnodes);
     int indexstart=zeroelem?1:0;

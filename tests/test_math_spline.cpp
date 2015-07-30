@@ -51,6 +51,7 @@ int main()
     // test 2d spline
     const int NNODESX=8;
     const int NNODESY=4;
+    const int NN=99;    // number of intermediate points for checking the values
     std::vector<double> xval(NNODESX,0);
     std::vector<double> yval(NNODESY,0);
     std::vector< std::vector<double> > zval(NNODESX);
@@ -64,30 +65,43 @@ int main()
             zval[i][j] = rand()*1.0/RAND_MAX;
     }
     math::CubicSpline2d spl2d(xval, yval, zval, 0., NAN, 1., -1.);
+    // compare values and derivatives at grid nodes
     for(int i=0; i<NNODESX; i++) {
         double z, dy;
-        spl2d.eval(xval[i], yval.front(), &z, NULL, &dy);
+        spl2d.evalDeriv(xval[i], yval.front(), &z, NULL, &dy);
         ok &= math::fcmp(dy, 1., 1e-13)==0 && math::fcmp(z, zval[i].front(), 1e-13)==0;
-        spl2d.eval(xval[i], yval.back(), &z, NULL, &dy);
+        spl2d.evalDeriv(xval[i], yval.back(), &z, NULL, &dy);
         ok &= math::fcmp(dy, -1., 1e-13)==0 && math::fcmp(z, zval[i].back(), 1e-13)==0;
     }
     for(int j=0; j<NNODESY; j++) {
         double z, dx;
-        spl2d.eval(xval.front(), yval[j], &z, &dx);
-        ok &= math::fcmp(dx, 0)==0 && math::fcmp(z, zval.front()[j], 1e-13)==0;
-        spl2d.eval(xval.back(), yval[j], &z, &dx);
+        spl2d.evalDeriv(xval.front(), yval[j], &z, &dx);
+        ok &= math::fcmp(dx, 0.)==0 && math::fcmp(z, zval.front()[j], 1e-13)==0;
+        spl2d.evalDeriv(xval.back(), yval[j], &z, &dx);
         ok &= fabs(dx)<10 && math::fcmp(z, zval.back()[j], 1e-13)==0;
+    }
+    // compare derivatives on the entire edge
+    for(int i=0; i<=NN; i++) {
+        double x = i*xval.back()/NN;
+        double dy;
+        spl2d.evalDeriv(x, yval.front(), NULL, NULL, &dy);
+        ok &= math::fcmp(dy, 1., 1e-13)==0;
+        spl2d.evalDeriv(xval[i], yval.back(), NULL, NULL, &dy);
+        ok &= math::fcmp(dy, -1., 1e-13)==0;
+        double y = i*yval.back()/NN;
+        double dx;
+        spl2d.evalDeriv(xval.front(), y, NULL, &dx);
+        ok &= math::fcmp(dx, 0.)==0;
     }
 
     if(OUTPUT) {
         std::ofstream strm("test_math_spline2d.dat");
-        const int NN=99;
         for(int i=0; i<=NN; i++) {  // output for Gnuplot splot routine
             double x = i*xval.back()/NN;
             for(int j=0; j<=NN; j++) {
                 double y = j*yval.back()/NN;
                 double z, dx, dy, dxy;
-                spl2d.eval(x, y, &z, &dx, &dy, NULL, &dxy, NULL);
+                spl2d.evalDeriv(x, y, &z, &dx, &dy, NULL, &dxy, NULL);
                 ok &= z>=-1 && z<=2;
                 strm << x << " " << y << " " << z << " " << dx << " " << dy << " " << dxy << "\n";
             }

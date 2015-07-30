@@ -254,7 +254,7 @@ public:
     virtual ~IScalarFunction() {};
     /** Evaluate any combination of value, gradient and hessian of the function at a given point.
         Each of these quantities is computed and stored in the output pointer if it was not NULL. */
-    virtual void eval_scalar(const PosT<coordSysT>& x,
+    virtual void evalScalar(const PosT<coordSysT>& x,
         double* value=0,
         GradT<coordSysT>* deriv=0,
         HessT<coordSysT>* deriv2=0) const=0;
@@ -419,7 +419,7 @@ HessT<destCS> toHess(const GradT<srcCS>& srcGrad, const HessT<srcCS>& srcHess,
     in a different coordinate system (evalCS), and converting them to the target 
     coordinate system (outputCS). */
 template<typename evalCS, typename outputCS>
-void eval_and_convert(const IScalarFunction<evalCS>& F,
+void evalAndConvert(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
     bool needDeriv = deriv!=0 || deriv2!=0;
@@ -432,7 +432,7 @@ void eval_and_convert(const IScalarFunction<evalCS>& F,
         toPosDeriv<outputCS, evalCS>(pos, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
         toPos<outputCS, evalCS>(pos);
     // compute the function in transformed coordinates
-    F.eval_scalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
     if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
@@ -442,7 +442,7 @@ void eval_and_convert(const IScalarFunction<evalCS>& F,
 /** The same routine for conversion of gradient and hessian 
     in the case that the computation requires the parameters of coordinate system evalCS */
 template<typename evalCS, typename outputCS>
-inline void eval_and_convert(const IScalarFunction<evalCS>& F,
+void evalAndConvert(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, const evalCS& coordsys,
     double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
@@ -456,7 +456,7 @@ inline void eval_and_convert(const IScalarFunction<evalCS>& F,
         toPosDeriv<outputCS, evalCS>(pos, coordsys, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
         toPos<outputCS, evalCS>(pos, coordsys);
     // compute the function in transformed coordinates
-    F.eval_scalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
     if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
@@ -465,9 +465,9 @@ inline void eval_and_convert(const IScalarFunction<evalCS>& F,
 
 /// trivial instantiation of the above function for the case that conversion is not necessary
 template<typename CS> 
-inline void eval_and_convert(const IScalarFunction<CS>& F, const PosT<CS>& pos, 
+void evalAndConvert(const IScalarFunction<CS>& F, const PosT<CS>& pos, 
     double* value, GradT<CS>* deriv, HessT<CS>* deriv2)
-{  F.eval_scalar(pos, value, deriv, deriv2); }
+{  F.evalScalar(pos, value, deriv, deriv2); }
 
 /** An even mightier routine for evaluating the value of a scalar function,
     its gradient and hessian, in a different coordinate system (evalCS), 
@@ -475,7 +475,7 @@ inline void eval_and_convert(const IScalarFunction<CS>& F, const PosT<CS>& pos,
     through an intermediate coordinate system (intermedCS), 
     for the situation when a direct transformation is not available. */
 template<typename evalCS, typename intermedCS, typename outputCS>
-void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
+void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
     bool needDeriv = deriv!=0 || deriv2!=0;
@@ -495,7 +495,7 @@ void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
         toPosDeriv<intermedCS, evalCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
         toPos<intermedCS, evalCS>(intermedPos);
     // compute the function in transformed coordinates
-    F.eval_scalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
     if(needDeriv)  // may be needed for either grad or hess (or both)
         intermedGrad = toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
     if(deriv)
@@ -508,7 +508,7 @@ void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
 
 /** The same routine for the case that evalCS requires the parameters of coordinate system */
 template<typename evalCS, typename intermedCS, typename outputCS>
-inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
+void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, const evalCS& coordsys,
     double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
 {
@@ -529,9 +529,9 @@ inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
         toPosDeriv<intermedCS, evalCS>(intermedPos, coordsys, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
         toPos<intermedCS, evalCS>(intermedPos, coordsys);
     // compute the function in transformed coordinates
-    F.eval_scalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
     if(needDeriv)  // may be needed for either grad or hess (or both)
-        intermedGrad=toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
+        intermedGrad = toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
     if(deriv)
         *deriv  = toGrad<intermedCS, outputCS> (intermedGrad, coordDerivOI);
     if(deriv2) {
@@ -544,7 +544,7 @@ inline void eval_and_convert_twostep(const IScalarFunction<evalCS>& F,
     Convert the derivatives of a simple function that only depends on the spherical radius 
     into gradients and hessians in a target coordinate system (outputCS). */
 template<typename outputCS>
-void eval_and_convert_sph(const math::IFunction& F,
+void evalAndConvertSph(const math::IFunction& F,
     const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0);
 
 ///@}

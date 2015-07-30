@@ -15,6 +15,8 @@ namespace math{
 
 const int MAXITER = 42;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
 
+const int MAXINTEGRPOINTS = 1000;  ///< size of workspace for adaptive integration
+
 // ------ error handling ------ //
 
 static void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
@@ -64,6 +66,10 @@ int fcmp(double x, double y, double eps) {
     if(y==0)
         return x<-eps ? -1 : x>eps ? +1 : 0;
     return gsl_fcmp(x, y, eps);
+}
+
+double powInt(double x, int n) {
+    return gsl_pow_int(x, n);
 }
 
 double wrapAngle(double x) {
@@ -448,20 +454,22 @@ double integrate(const IFunction& fnc, double x1, double x2, double reltoler)
     F.function = functionWrapper;
     F.params = const_cast<IFunction*>(&fnc);
     double result, error;
-    if(reltoler==0) {  // don't care about accuracy -- use the fastest integration rule
-#if 1
-        const int N=10;  // tables up to N=20 are hard-coded in the library, no overhead
-        gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
-        result = gsl_integration_glfixed(&F, x1, x2, t);
-        gsl_integration_glfixed_table_free(t);
-#else
-        double dummy;  // 15-point Gauss-Kronrod
-        gsl_integration_qk15(&F, x1, x2, &result, &error, &dummy, &dummy);
-#endif
-    } else {  // use adaptive method with limited max # of points (87)
-        size_t neval;
-        gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
-    }
+    size_t neval;
+    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
+    return result;
+}
+
+double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
+{
+    if(x1==x2)
+        return 0;
+    gsl_function F;
+    F.function = functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
+    // tables up to N=20 are hard-coded in the library, no overhead
+    gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
+    double result = gsl_integration_glfixed(&F, x1, x2, t);
+    gsl_integration_glfixed_table_free(t);
     return result;
 }
 
@@ -503,6 +511,21 @@ double integrateScaled(const IFunction& fnc, double x1, double x2,
     double y1=solveForScaled_y(x1, x_low, x_upp);
     double y2=solveForScaled_y(x2, x_low, x_upp);
     return integrate(transf, y1, y2, rel_toler);
+}
+
+double integrateAdaptive(const IFunction& fnc, double x1, double x2, double reltoler)
+{
+    if(x1==x2)
+        return 0;
+    gsl_function F;
+    F.function = functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
+    double result, error;
+    size_t neval;
+    gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);
+    gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, &error, &neval);
+    gsl_integration_cquad_workspace_free(ws);
+    return result;
 }
 
 // ----- derivatives and related fncs ------- //

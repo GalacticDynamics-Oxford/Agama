@@ -14,7 +14,7 @@ StaeckelOblatePerfectEllipsoid::StaeckelOblatePerfectEllipsoid
             "minor axis must be positive and strictly smaller than major axis");
 }
 
-void StaeckelOblatePerfectEllipsoid::eval_scalar(const coord::PosProlSph& pos,
+void StaeckelOblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     double* val, coord::GradProlSph* deriv, coord::HessProlSph* deriv2) const
 {
     assert(&(pos.coordsys)==&coordSys);  // make sure we're not bullshited

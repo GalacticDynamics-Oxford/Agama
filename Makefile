@@ -1,12 +1,16 @@
 CXX       = g++
 CXXFLAGS += -Wall -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
-LFLAGS   += -fPIC -lgsl -lgslcblas
+LFLAGS   += -fPIC -Wl,-dead_strip -lgsl -lgslcblas
 ARC       = ar
 
 # uncomment (and possibly modify) the three lines below to use UNSIO library for input/output of N-body snapshots
 DEFINES  += -DHAVE_UNSIO
 CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
 LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
+
+#DEFINES  += -DHAVE_CUBATURE
+#CXXFLAGS += -I/Users/user/Documents/soft/cubature-1.0
+#LFLAGS   +=   /Users/user/Documents/soft/cubature-1.0/hcubature.o
 
 SRCDIR    = src
 OBJDIR    = obj

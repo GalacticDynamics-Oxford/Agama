@@ -21,7 +21,7 @@ template<> class MyScalarFunction<coord::Car>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void eval_scalar(const coord::PosCar& p, double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
+    virtual void evalScalar(const coord::PosCar& p, double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
     {  // this is loosely based on Henon-Heiles potential, shifted from origin..
         double x=p.x-0.5, y=p.y+1.5, z=p.z+0.25;
         if(value) 
@@ -46,7 +46,7 @@ template<> class MyScalarFunction<coord::Cyl>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void eval_scalar(const coord::PosCyl& p, double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
+    virtual void evalScalar(const coord::PosCyl& p, double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
     {  // same potential expressed in different coordinates
         double sinphi = sin(p.phi), cosphi = cos(p.phi), sin2=pow_2(sinphi), R2=pow_2(p.R), R3=p.R*R2;
         if(value) 
@@ -71,7 +71,7 @@ template<> class MyScalarFunction<coord::Sph>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void eval_scalar(const coord::PosSph& p, double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
+    virtual void evalScalar(const coord::PosSph& p, double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
     {  // some obscure combination of spherical harmonics
         if(value) 
             *value = pow(p.r,2.5)*sin(p.theta)*sin(p.phi+2) - pow_2(p.r)*pow_2(sin(p.theta))*cos(2*p.phi-3);
@@ -170,13 +170,13 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     coord::HessT<destCS> desthess2step;
     MyScalarFunction<srcCS> Fnc;
     double srcvalue, destvalue=0;
-    Fnc.eval_scalar(srcpoint, &srcvalue, &srcgrad, &srchess);
+    Fnc.evalScalar(srcpoint, &srcvalue, &srcgrad, &srchess);
     const coord::GradT<destCS> destgrad=coord::toGrad<srcCS,destCS>(srcgrad, derivDtoI);
     const coord::HessT<destCS> desthess=coord::toHess<srcCS,destCS>(srcgrad, srchess, derivDtoI, deriv2DtoI);
     const coord::GradT<srcCS> invgrad=coord::toGrad<destCS,srcCS>(destgrad, derivStoD);
     const coord::HessT<srcCS> invhess=coord::toHess<destCS,srcCS>(destgrad, desthess, derivStoD, deriv2StoD);
     try{
-        coord::eval_and_convert_twostep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
+        coord::evalAndConvertTwoStep<srcCS,intermedCS,destCS>(Fnc, destpoint, &destvalue, &destgrad2step, &desthess2step);
     }
     catch(std::exception& e) {
         std::cout << "    2-step conversion: " << e.what() << "\n";
@@ -212,7 +212,6 @@ bool test_prol(double lambda, double nu, double alpha, double gamma) {
     const coord::PosProlSph pp(lambda, nu, 0, cs);
     const coord::PosCyl pc=coord::toPosCyl(pp);
     const coord::PosProlSph ppnew=coord::toPos<coord::Cyl,coord::ProlSph>(pc, cs);
-    //std::cout << std::setprecision(16) <<ppnew.lambda<<","<<ppnew.nu<<"\n";
     return fabs(ppnew.lambda-lambda)<1e-16 && fabs(ppnew.nu-nu)<1e-16;
 }
 

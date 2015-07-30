@@ -149,9 +149,9 @@ template<typename NumT>
 BasisSetExp::BasisSetExp(
     double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
     const particles::PointMassSet<NumT> &points, SymmetryType _sym):
-  BasePotentialSphericalHarmonic(_Ncoefs_angular), 
-  Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
-  Alpha(_Alpha)
+    BasePotentialSphericalHarmonic(_Ncoefs_angular), 
+    Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
+    Alpha(_Alpha)
 {
     setSymmetry(_sym);
     if(points.size()==0)
@@ -164,22 +164,24 @@ BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned in
     const particles::PointMassSet<coord::Car>&points, SymmetryType _sym);
 
 BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs):
-  BasePotentialSphericalHarmonic((assert(coefs.size()>0), static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1))), 
-  Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, static_cast<size_t>(coefs.size()-1))),
-  Alpha(std::max<double>(0.5,_Alpha))  // here Alpha!=0 - no autodetect
+    BasePotentialSphericalHarmonic(coefs.size()>0 ? static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1) : 0), 
+    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, static_cast<size_t>(coefs.size()-1))),
+    Alpha(_Alpha)  // here Alpha!=0 - no autodetect
 {
     if(_Alpha<0.5) 
         throw std::invalid_argument("BasisSetExp: invalid parameter Alpha");
-    assert(coefs[0].size()==pow_2(Ncoefs_angular+1));
-    SHcoefs = coefs;  // do not check array size -- assumed to be done beforehand (in load routine)...
+    for(size_t n=0; n<coefs.size(); n++)
+        if(coefs[n].size()!=pow_2(Ncoefs_angular+1))
+            throw std::invalid_argument("BasisSetExp: incorrect size of coefficients array");
+    SHcoefs = coefs;
     checkSymmetry();
 }
 
 BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
     const BaseDensity& srcdensity):    // init potential from analytic mass model
-  BasePotentialSphericalHarmonic(_Ncoefs_angular), 
-  Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
-  Alpha(_Alpha)
+    BasePotentialSphericalHarmonic(_Ncoefs_angular), 
+    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
+    Alpha(_Alpha)
 {
     setSymmetry(srcdensity.symmetry());
     prepareCoefsAnalytic(srcdensity);
@@ -214,15 +216,6 @@ void BasisSetExp::checkSymmetry()
                         SHcoefs[n][l*(l+1)+m] = 0;
     }
     setSymmetry(sym);
-#if 0
-    bool densityNonzero = checkDensityNonzero();
-    bool massMonotonic  = checkMassMonotonic();
-    if(!massMonotonic || !densityNonzero) 
-        my_message(FUNCNAME, "Warning, " + 
-        std::string(!massMonotonic ? "mass does not monotonically increase with radius" : "") +
-        std::string(!massMonotonic && !densityNonzero ? " and " : "") + 
-        std::string(!densityNonzero ? "density drops to zero at a finite radius" : "") + "!");
-#endif
 }
 
 /// \cond INTERNAL_DOCS
@@ -331,8 +324,7 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &po
     }
 }
 
-#if 0
-double BasisSetExp::Mass(const double r) const
+double BasisSetExp::enclosedMass(const double r) const
 {
     if(r<=0) return 0;
     double ralpha=pow(r, 1/Alpha);
@@ -341,16 +333,14 @@ double BasisSetExp::Mass(const double r) const
     gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), Alpha+0.5, xi, gegenpoly_array);
     double multr = pow(1+ralpha, -Alpha);
     double multdr= -ralpha/((ralpha+1)*r);
-    if(gsl_isnan(multdr)) multdr=0;  // safety measure to avoid NaN
     double result=0;
     for(int n=0; n<=static_cast<int>(Ncoefs_radial); n++)
     {
         double dGdr=(n>0 ? (-n*xi*gegenpoly_array[n] + (n+2*Alpha)*gegenpoly_array[n-1])/(2*Alpha*r) : 0);
         result += SHcoefs[n][0] * multr * (multdr * gegenpoly_array[n] + dGdr);
     }
-    return -result * r*r;   // d Phi(r)/d r = - G M(r) /r^2
+    return -result * r*r;   // d Phi(r)/d r = G M(r) / r^2
 }
-#endif
 
 void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdFdr[], double coefsd2Fdr2[]) const
 {
@@ -366,7 +356,6 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
         gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), w, xi, gegenpoly_array);
         double multr = -pow(r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
         double multdr= (l-(l+1)*ralpha)/((ralpha+1)*r);
-        if(gsl_isnan(multdr)) multdr=0;  // safety measure to avoid NaN
         for(int n=0; n<=(int)Ncoefs_radial; n++)
         {
             double multdFdr=0, multd2Fdr2=0, dGdr=0;
@@ -375,9 +364,9 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
                 multdFdr= multdr * gegenpoly_array[n] + dGdr;
                 if(coefsd2Fdr2!=NULL)
                     multd2Fdr2 = ( (l+1)*(l+2)*pow_2(ralpha) + 
-                                   ((1-2*l*(l+1)) - (2*n+1)*(2*l+1)/Alpha - n*(n+1)/pow_2(Alpha))*ralpha + 
+                                   ( (1-2*l*(l+1)) - (2*n+1)*(2*l+1)/Alpha - n*(n+1)/pow_2(Alpha))*ralpha + 
                                    l*(l-1) 
-                                 )/pow_2((1+ralpha)*r)*gegenpoly_array[n] - dGdr*2/r;
+                                 ) / pow_2( (1+ralpha)*r ) * gegenpoly_array[n] - dGdr*2/r;
             }
             for(int m=l*mmin; m<=l*mmax; m+=mstep)
             {
@@ -411,10 +400,12 @@ SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular,
 
 SplineExp::SplineExp(
     const std::vector<double> &_gridradii, const std::vector< std::vector<double> > &_coefs):
-    BasePotentialSphericalHarmonic((assert(_coefs.size()>0), static_cast<size_t>(sqrt(_coefs[0].size()*1.0)-1))), 
+    BasePotentialSphericalHarmonic(_coefs.size()>0 ? static_cast<size_t>(sqrt(_coefs[0].size()*1.0)-1) : 0), 
     Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _coefs.size()-1))  // init from existing coefs
 {
-    assert(_coefs[0].size()==pow_2(Ncoefs_angular+1));
+    for(size_t n=0; n<_coefs.size(); n++)
+        if(_coefs[n].size()!=pow_2(Ncoefs_angular+1))
+            throw std::invalid_argument("SplineExp: incorrect size of coefficients array");
     initSpline(_gridradii, _coefs);
 }
 
@@ -446,7 +437,7 @@ double intSpline_r(double r, void* params)
 }
 /// \endcond
 
-#ifdef HAVE_CUBATURE
+#if 0 //#ifdef HAVE_CUBATURE
 int intSplineCubature(unsigned int ndim, const double coords[],
     void* params, unsigned int /*fdim*/, double* output)
 {
@@ -485,18 +476,18 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
         throw std::invalid_argument("Invalid call to constructor of Spline potential");
     if(initUserRadii)
         radii= *srcradii;
-    else
-    {
+    else {
         // find inner/outermost radius
-#if 0
-        double totalMass=density->totalMass();
-        double epsout = 0.1/sqrt(pow_2(Ncoefs_radial)+0.01*pow(Ncoefs_radial*1.0,4.0));      // how far should be the outer node (leave out this fraction of mass)
-        double epsin = 5.0/pow(Ncoefs_radial*1.0,3.0);                                       // how close can we get to zero, in terms of innermost grid node
-        double rout = totalMass<0 ? 10 : density->getRadiusByMass(totalMass*(1-epsout));     // totalMass<0 should not really happen! means that mass is infinite
-        double rin = std::min<double>(epsin, density->getRadiusByMass(totalMass*epsin*0.1)); // somewhat arbitrary choice for min/max radii, but probably reasonable
-#else
-        double rout = 1e3, rin = 1e-3; ///!!!
-#endif
+        double totalmass = srcdensity.totalMass();
+        if(!math::isFinite(totalmass))
+            throw std::invalid_argument("SplineExp: source density model has infinite mass");
+        // how far should be the outer node (leave out this fraction of mass)
+        double epsout = 0.1/sqrt(pow_2(Ncoefs_radial)+0.01*pow(Ncoefs_radial*1.0,4.0));
+        // how close can we get to zero, in terms of innermost grid node
+        double epsin = 5.0/pow(Ncoefs_radial*1.0,3.0);
+        // somewhat arbitrary choice for min/max radii, but probably reasonable
+        double rout = getRadiusByMass(srcdensity, totalmass*(1-epsout));
+        double rin = std::min<double>(epsin, getRadiusByMass(srcdensity, totalmass*epsin*0.1));
         math::createNonuniformGrid(Ncoefs_radial+1, rin, rout, true, radii); 
     }
     gsl_integration_workspace * w = gsl_integration_workspace_alloc (1000);
@@ -1046,7 +1037,7 @@ void SplineExp::coeflm(unsigned int lm, double r, double xi, double *val, double
         }
         else  // power-law asymptotics at r<minr
         {
-            cval = splines[lm](splines[lm].xlower()) * potminr;
+            cval = splines[lm](splines[lm].xmin()) * potminr;
             if(val!=NULL)  *val = cval * pow(r/minr, slopein[lm]);
             if(der!=NULL){ *der = (*val) * slopein[lm]/r;
             if(der2!=NULL) *der2= (*der) * (slopein[lm]-1)/r; }
@@ -1055,7 +1046,7 @@ void SplineExp::coeflm(unsigned int lm, double r, double xi, double *val, double
     }
     else  // power-law asymptotics for r>maxr
     {     // god knows what happens here...
-        double ximax = splines[lm].xupper();
+        double ximax = splines[lm].xmax();
         double mval, mder, mder2;
         splines[lm].evalDeriv(ximax, &mval, &mder, &mder2);
         cval = mval * pow(r/maxr, slopeout[lm]);
@@ -1126,6 +1117,14 @@ void SplineExp::computeSHCoefs(const double r, double coefsF[], double coefsdFdr
                 val00, der00, der200);
         }
     }
+}
+
+double SplineExp::enclosedMass(const double r) const
+{
+    if(r<=0) return 0;
+    double der;
+    coef0(r, NULL, &der, NULL);
+    return der * r*r;   // d Phi(r)/d r = G M(r) / r^2
 }
 
 }; // namespace

@@ -703,7 +703,7 @@ template HessCyl toHess(const GradProlSph&, const HessProlSph&, const PosDerivT<
 
 //------ conversion of derivatives of f(r) into gradients/hessians in different coord.sys. ------//
 template<>
-void eval_and_convert_sph(const math::IFunction& F,
+void evalAndConvertSph(const math::IFunction& F,
     const PosCar& pos, double* value, GradCar* deriv, HessCar* deriv2)
 {
     assert(F.numDerivs()>=2);
@@ -739,7 +739,7 @@ void eval_and_convert_sph(const math::IFunction& F,
 }
 
 template<>
-void eval_and_convert_sph(const math::IFunction& F,
+void evalAndConvertSph(const math::IFunction& F,
     const PosCyl& pos, double* value, GradCyl* deriv, HessCyl* deriv2)
 {
     assert(F.numDerivs()>=2);
@@ -773,7 +773,7 @@ void eval_and_convert_sph(const math::IFunction& F,
 }
 
 template<>
-void eval_and_convert_sph(const math::IFunction& F,
+void evalAndConvertSph(const math::IFunction& F,
     const PosSph& pos, double* value, GradSph* deriv, HessSph* deriv2)
 {
     assert(F.numDerivs()>=2);
@@ -792,11 +792,11 @@ void eval_and_convert_sph(const math::IFunction& F,
 /* explicit _instantiations_ of these templated functions 
    (as opposed to _specializations_ above), needed to make sure all of them get compiled.
    That's the extra boilerplate needed by C++ standard... */
-template void eval_and_convert_sph(const math::IFunction& F,
+template void evalAndConvertSph(const math::IFunction& F,
     const PosCar& pos, double* value, GradCar* deriv, HessCar* deriv2);
-template void eval_and_convert_sph(const math::IFunction& F,
+template void evalAndConvertSph(const math::IFunction& F,
     const PosCyl& pos, double* value, GradCyl* deriv, HessCyl* deriv2);
-template void eval_and_convert_sph(const math::IFunction& F,
+template void evalAndConvertSph(const math::IFunction& F,
     const PosSph& pos, double* value, GradSph* deriv, HessSph* deriv2);
     
 }  // namespace coord
