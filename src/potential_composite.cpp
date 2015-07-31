@@ -1,21 +1,20 @@
-// composite density and potential classes
 #include "potential_composite.h"
 
 namespace potential{
 
-double CompositeDensity::density_car(const coord::PosCar &pos) const {
+double CompositeDensity::densityCar(const coord::PosCar &pos) const {
     double sum=0; 
     for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
     return sum;
 }
-double CompositeDensity::density_cyl(const coord::PosCyl &pos) const {
+double CompositeDensity::densityCyl(const coord::PosCyl &pos) const {
     double sum=0; 
     for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
     return sum;
 }
-double CompositeDensity::density_sph(const coord::PosSph &pos) const {
+double CompositeDensity::densitySph(const coord::PosSph &pos) const {
     double sum=0; 
     for(unsigned int i=0; i<components.size(); i++) 
         sum+=components[i]->density(pos); 
@@ -29,7 +28,7 @@ SymmetryType CompositeDensity::symmetry() const {
     return static_cast<SymmetryType>(sym);
 };
 
-void CompositeCyl::eval_cyl(const coord::PosCyl &pos,
+void CompositeCyl::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
     if(potential) *potential=0;

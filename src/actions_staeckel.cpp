@@ -7,7 +7,8 @@
 namespace actions{
 
 /** relative accuracy in integrals for computing actions and angles */
-const double ACCURACY_ACTION = 0e-3;  // this is more than enough
+//const double ACCURACY_ACTION = 1e-3;  // this is more than enough
+const unsigned int INTEGR_ORDER = 10;   ///< Number of points in fixed-order Gauss-Legendre scheme
 
 /** relative tolerance in determining the range of variables (nu,lambda) to integrate over,
     also determined the minimum range that will be considered non-zero (relative to gamma-alpha) */
@@ -247,12 +248,12 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     if(pn_alpha.f0==0) {        // special case: L_z==0, may have either tube or box orbit in the meridional plane
         if(pn_alpha.fder>0) {   // box orbit: f(alpha)=0 and f'(alpha)>0, so f<0 at some interval left of alpha
             if(fnc_gamma>0)     // there must be a range of nu where the function is positive
-                xnu_upper = fmax((gamma-alpha)*0.9, gamma-alpha+pn_alpha.dx_to_negative());
+                xnu_upper = fmax((gamma-alpha)*0.9, gamma-alpha+pn_alpha.dxToNegative());
             else 
                 lim.xnu_max = lim.xnu_min;
             lim.xlambda_min = gamma-alpha;
         } else {      // tube orbit: f(alpha)=0, f'(alpha)<0, f must be negative on some interval right of alpha
-            xlambda_lower = gamma-alpha + fmin((alpha+fnc.point.lambda)*0.1, pn_alpha.dx_to_negative());
+            xlambda_lower = gamma-alpha + fmin((alpha+fnc.point.lambda)*0.1, pn_alpha.dxToNegative());
             lim.xnu_max = gamma-alpha;
         }
     }
@@ -275,7 +276,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     }
     // due to roundoff errors, it may actually happen that f(lambda) is a very small negative number
     // in this case we need to estimate the value of lambda at which it is strictly positive (for root-finder)
-    double xlambda_pos = gamma+fnc.point.lambda + pn_lambda.dx_to_positive();
+    double xlambda_pos = gamma+fnc.point.lambda + pn_lambda.dxToPositive();
     if(lim.xlambda_min!=lim.xlambda_min) {  // not yet determined 
         lim.xlambda_min = math::findRoot(fnc, xlambda_lower, xlambda_pos, ACCURACY_RANGE);
     }
@@ -299,30 +300,25 @@ AxisymIntDerivatives computeIntDerivatives(
     const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
 {
     AxisymIntegrand integrand(fnc);
+    math::ScaledIntegrandEndpointSing transf_l(integrand, lim.xlambda_min, lim.xlambda_max);
+    math::ScaledIntegrandEndpointSing transf_n(integrand, lim.xnu_min, lim.xnu_max);
     integrand.n = AxisymIntegrand::nminus1;  // momentum goes into the denominator
     // derivatives w.r.t. E
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::czero;
-    double dJrdE = math::integrateScaled(integrand, 
-        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdE = math::integrateScaled(integrand, 
-        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    double dJrdE = math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) / (4*M_PI);
+    double dJzdE = math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
-    double dJrdI3 = -math::integrateScaled(integrand, 
-        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdI3 = -math::integrateScaled(integrand, 
-        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    double dJrdI3 = -math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) / (4*M_PI);
+    double dJzdI3 = -math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
-    double dJrdLz = -fnc.Lz * math::integrateScaled(integrand, 
-        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / (4*M_PI);
-    double dJzdLz = -fnc.Lz * math::integrateScaled(integrand, 
-        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / (2*M_PI);
+    double dJrdLz = -fnc.Lz * math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) / (4*M_PI);
+    double dJzdLz = -fnc.Lz * math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
 
-    double signLz  = math::sign(fnc.Lz);
     AxisymIntDerivatives der;
     // invert the matrix of derivatives
     if(lim.xnu_min==lim.xnu_max) {
@@ -334,14 +330,14 @@ AxisymIntDerivatives computeIntDerivatives(
         double det  = dJrdE*dJzdI3-dJrdI3*dJzdE;
         der.dEdJr   = dJzdI3/det;
         der.dEdJz   =-dJrdI3/det;
-        der.dEdJphi = (dJrdI3*dJzdLz-dJrdLz*dJzdI3)/det * signLz;
+        der.dEdJphi = (dJrdI3*dJzdLz-dJrdLz*dJzdI3)/det;
         der.dI3dJr  =-dJzdE/det;
         der.dI3dJz  = dJrdE/det;
-        der.dI3dJphi=-(dJrdE*dJzdLz-dJrdLz*dJzdE)/det * signLz;
+        der.dI3dJphi=-(dJrdE*dJzdLz-dJrdLz*dJzdE)/det;
     }
     der.dLzdJr  = 0;
     der.dLzdJz  = 0;
-    der.dLzdJphi= signLz;
+    der.dLzdJphi= 1;
     return der;
 }
 
@@ -355,31 +351,29 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     const double gamma    = fnc.point.coordsys.gamma;
     AxisymGenFuncDerivatives der;
     AxisymIntegrand integrand(fnc);
+    math::ScaledIntegrandEndpointSing transf_l(integrand, lim.xlambda_min, lim.xlambda_max);
+    math::ScaledIntegrandEndpointSing transf_n(integrand, lim.xnu_min, lim.xnu_max);
+    const double yl = transf_l.y_from_x(fnc.point.lambda+gamma);
+    const double yn = transf_n.y_from_x(fnc.point.nu+gamma);
     integrand.n = AxisymIntegrand::nminus1;  // momentum goes into the denominator
     // derivatives w.r.t. E
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::czero;
     der.dSdE =
-        signldot * math::integrateScaled(integrand, 
-            lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * math::integrateScaled(integrand, 
-            lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+        signldot * math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
+      + signndot * math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
     der.dSdI3 = 
-        signldot * -math::integrateScaled(integrand, 
-            lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * -math::integrateScaled(integrand, 
-            lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+        signldot * -math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
+      + signndot * -math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
     der.dSdLz = fnc.point.phi +
-        signldot * -fnc.Lz * math::integrateScaled(integrand, 
-            lim.xlambda_min, fnc.point.lambda+gamma, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / 4
-      + signndot * -fnc.Lz * math::integrateScaled(integrand, 
-            lim.xnu_min, fnc.point.nu+gamma, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) / 4;
+        signldot * -fnc.Lz * math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
+      + signndot * -fnc.Lz * math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
     return der;
 }
 
@@ -389,14 +383,14 @@ Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim
 {
     Actions acts;
     AxisymIntegrand integrand(fnc);
+    math::ScaledIntegrandEndpointSing transf_l(integrand, lim.xlambda_min, lim.xlambda_max);
+    math::ScaledIntegrandEndpointSing transf_n(integrand, lim.xnu_min, lim.xnu_max);
     integrand.n = AxisymIntegrand::nplus1;  // momentum goes into the numerator
     integrand.a = AxisymIntegrand::azero;
     integrand.c = AxisymIntegrand::czero;
-    acts.Jr = math::integrateScaled(integrand, 
-        lim.xlambda_min, lim.xlambda_max, lim.xlambda_min, lim.xlambda_max, ACCURACY_ACTION) / M_PI;
-    acts.Jz = math::integrateScaled(integrand, 
-        lim.xnu_min, lim.xnu_max, lim.xnu_min, lim.xnu_max, ACCURACY_ACTION) * 2/M_PI;
-    acts.Jphi = fabs(fnc.Lz);
+    acts.Jr = math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) / M_PI;
+    acts.Jz = math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) * 2/M_PI;
+    acts.Jphi = fnc.Lz;
     return acts;
 }
 
@@ -554,15 +548,15 @@ bool estimateOrbitExtent(const potential::BasePotential& potential, const coord:
     
     // estimate radial extent
     Rmin = Rmax = absR;
-    double dR_to_zero = nh.dx_to_nearest_root();
+    double dR_to_zero = nh.dxToNearestRoot();
     double maxPeri = absR, minApo = absR;  // endpoints of interval for locating peri/apocenter radii
     if(fabs(dR_to_zero) < absR*toler) {    // we are already near peri- or apocenter radius
         if(dR_to_zero > 0) {
             minApo  = NAN;
-            maxPeri = absR + nh.dx_to_negative();
+            maxPeri = absR + nh.dxToNegative();
         } else {
             maxPeri = NAN;
-            minApo  = absR + nh.dx_to_negative();
+            minApo  = absR + nh.dxToNegative();
         }
     }
     if(fnc.Lz2>0) {

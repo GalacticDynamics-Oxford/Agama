@@ -1,8 +1,14 @@
+/** \file    orbit.h
+    \brief   Orbit integration
+    \author  Eugene Vasiliev
+    \date    2009-2015
+*/
 #pragma once
 #include "potential_base.h"
 #include <vector>
 
-namespace orbit{
+/** Orbit integration routines and classes */
+namespace orbit {
 
 /** Perform orbit integration in the specific coordinate system.
     Currently is implemented through GSL odeint2 solver with 8th order Runge Kutta method.

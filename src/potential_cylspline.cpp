@@ -20,7 +20,7 @@ const unsigned int CYLSPLINE_MAX_ANGULAR_HARMONIC = 64;
 //------- Auxiliary math --------//
 
 /** Compute the following integral for a fixed integer value of m>=0 and arbitrary a>=0, b>=0, c:
-    \f$  \int_0^\infinity J_m(a*x)*J_m(b*x)*exp(-|c|*x) dx  \f$,  where J_m are Bessel functions.
+    \f$  \int_0^\infty J_m(a x) J_m(b x) \exp(-|c| x) dx  \f$,  where J_m are Bessel functions.
 */
 class BesselIntegral {
 public:
@@ -93,7 +93,8 @@ public:
     DirectPotential(const BaseDensity& _density, unsigned int mmax);
 
     /// init potential from N-body snapshot
-    DirectPotential(const particles::PointMassSet<coord::Car>& _points, unsigned int mmax, SymmetryType sym);
+    template<typename CoordT>
+    DirectPotential(const particles::PointMassArray<CoordT>& _points, unsigned int mmax, SymmetryType sym);
 
     virtual ~DirectPotential() {};
     virtual const char* name() const { return myName(); };
@@ -113,7 +114,7 @@ public:
 
 private:
     const BaseDensity* density;                 ///< input density model (if provided)
-    particles::PointMassSet<coord::Cyl> points; ///< input discrete point mass set (if provided)
+    particles::PointMassArray<coord::Cyl> points; ///< input discrete point mass set (if provided)
     SymmetryType mysymmetry;                    ///< symmetry type (axisymmetric or not)
     std::vector<math::CubicSpline2d> splines;   ///< interpolating splines for Fourier harmonics Rho_m(R,z)
     std::vector<BesselIntegral> besselInts;     ///< objects that compute a particular integral involving Bessel fncs
@@ -122,10 +123,10 @@ private:
     /// over angle phi with weight factor cos(m phi) or sin(m phi)
     double computeRho_m(double R, double z, int m) const;
 
-    virtual void eval_cyl(const coord::PosCyl& pos,
+    virtual void evalCyl(const coord::PosCyl& pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 
-    virtual double density_cyl(const coord::PosCyl& pos) const;
+    virtual double densityCyl(const coord::PosCyl& pos) const;
 };
 
 DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax) :
@@ -181,7 +182,9 @@ DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax
     }
 }
 
-DirectPotential::DirectPotential(const particles::PointMassSet<coord::Car>& _points, unsigned int _mmax, SymmetryType sym) :
+template<typename CoordT>
+DirectPotential::DirectPotential(const particles::PointMassArray<CoordT>& _points, 
+    unsigned int _mmax, SymmetryType sym) :
     density(NULL), points(_points), mysymmetry(sym) 
 {
     if(points.size()==0)
@@ -197,7 +200,7 @@ double DirectPotential::totalMass() const
         return density->totalMass();
     else {
         double mass=0;
-        for(particles::PointMassSet<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
+        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
             pt!=points.data.end(); pt++) 
             mass+=pt->second;
         return mass;
@@ -211,7 +214,7 @@ double DirectPotential::enclosedMass(const double r) const
         return density->enclosedMass(r);
     else {
         double mass=0;
-        for(particles::PointMassSet<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
+        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
             pt!=points.data.end(); pt++) 
         {
             if(pow_2(pt->first.R)+pow_2(pt->first.z) <= pow_2(r))
@@ -221,7 +224,7 @@ double DirectPotential::enclosedMass(const double r) const
     }
 }
 
-double DirectPotential::density_cyl(const coord::PosCyl& pos) const
+double DirectPotential::densityCyl(const coord::PosCyl& pos) const
 {
     assert(density!=NULL);  // not applicable in discrete point set mode
     if(splines.size()==0)   // no interpolation
@@ -336,7 +339,7 @@ double DirectPotential::Phi_m(double R, double Z, int m) const
     if(density==NULL) {  // invoked in the discrete point set mode
         assert(points.size()>0);
         double val=0;
-        for(particles::PointMassSet<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
+        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
             pt!=points.data.end(); pt++) 
         {
             const coord::PosVelCyl& pc = pt->first;
@@ -365,7 +368,7 @@ double DirectPotential::Phi_m(double R, double Z, int m) const
     return result;
 };
 
-void DirectPotential::eval_cyl(const coord::PosCyl& pos,
+void DirectPotential::evalCyl(const coord::PosCyl& pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
     if(deriv!=NULL || deriv2!=NULL)
@@ -395,8 +398,9 @@ CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigne
     initPot(Ncoefs_R, Ncoefs_z, Ncoefs_phi, potential, radius_min, radius_max, z_min, z_max);
 }
 
+template<typename CoordT>
 CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
-    const particles::PointMassSet<coord::Car>& points, SymmetryType _sym, 
+    const particles::PointMassArray<CoordT>& points, SymmetryType _sym, 
     double radius_min, double radius_max, double z_min, double z_max)
 {
     mysymmetry=_sym;
@@ -405,7 +409,14 @@ CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigne
     DirectPotential pot_tmp(points, Ncoefs_phi, mysymmetry);
     initPot(Ncoefs_R, Ncoefs_z, Ncoefs_phi, pot_tmp, radius_min, radius_max, z_min, z_max);
 }
-
+// instantiations
+template CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
+    const particles::PointMassArray<coord::Car>& points, SymmetryType _sym, 
+    double radius_min, double radius_max, double z_min, double z_max);
+template CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
+    const particles::PointMassArray<coord::Cyl>& points, SymmetryType _sym, 
+    double radius_min, double radius_max, double z_min, double z_max);
+    
 CylSplineExp::CylSplineExp(const std::vector<double> &gridR, const std::vector<double>& gridz, 
     const std::vector< std::vector<double> > &coefs)
 {
@@ -633,82 +644,8 @@ void CylSplineExp::getCoefs(std::vector<double>& gridR, std::vector<double>& gri
                 }
         }
 }
-#if 0
-double CylSplineExp::Mass(const double r) const
-{
-    if(r<=0) return 0;
-    gsl_function F;
-    BaseDensityParam params;
-    F.function=&getDensityRcyl;
-    F.params=&params;
-    params.P=this;
-    params.r=r;  // upper limit of the integration
-    params.mumble=grid_z.back();  // upper limit on integration in Z
-    double R=std::min<double>(r, grid_R.back());
-    double result, error;
-    size_t neval;
-    gsl_integration_qng(&F, 0, R/(1+R), 0, EPSREL_DENSITY_INT, &result, &error, &neval);
-    return result;
-}
 
-double CylSplineExp::Phi(double X, double Y, double Z, double /*t*/) const
-{
-    double R=sqrt(X*X+Y*Y);
-    if(R>=grid_R.back() || Z<=grid_z.front() || Z>=grid_z.back()) 
-    { // fallback mechanism for extrapolation beyond grid definition region
-        double r2=X*X+Y*Y+Z*Z;
-        return (C00 + ((2*Z*Z-R*R)*C20 + (X*X-Y*Y)*C22 + (35*pow_2(Z*Z/r2)-30*Z*Z/r2+3)*C40)/pow_2(r2))/sqrt(r2);
-    }
-    double S=1/sqrt(pow_2(Rscale)+pow_2(R)+pow_2(Z));  // scaling
-    double phi=atan2(Y,X);
-    double Rscaled=log(1+R/Rscale);
-    double zscaled=log(1+fabs(Z)/Rscale)*(Z>=0?1:-1);
-    double val=0;
-    int mmax=splines.size()/2;
-    for(int m=-mmax; m<=mmax; m++)
-        if(splines[m+mmax]!=NULL) {
-            val += interp2d_spline_eval(splines[m+mmax], Rscaled, zscaled, NULL, NULL) * (m>=0 ? cos(m*phi) : sin(-m*phi));
-        }
-    return val*S;
-}
-
-double CylSplineExp::Rho(double X, double Y, double Z, double /*t*/) const
-{
-    double R=sqrt(X*X+Y*Y);
-    if(R>=grid_R.back() || fabs(Z)>=grid_z.back())
-        return 0;  // no extrapolation beyong grid 
-    double phi=atan2(Y,X);
-    double Rscaled=log(1+R/Rscale);
-    double zscaled=log(1+fabs(Z)/Rscale)*(Z>=0?1:-1);
-    double dRscaleddR=1/(Rscale+R), d2RscaleddR2=-pow_2(dRscaleddR);
-    double dzscaleddz=1/(Rscale+fabs(Z)), d2zscaleddz2=-pow_2(dzscaleddz)*(Z>=0?1:-1);
-    double Phi_tot=0, dPhidRscaled=0, dPhidzscaled=0, d2PhidRscaled2=0, d2Phidzscaled2=0, d2Phidphi2=0;
-    int mmax=splines.size()/2;
-    for(int m=-mmax; m<=mmax; m++)
-        if(splines[m+mmax]!=NULL) { 
-            double cosmphi=m>=0 ? cos(m*phi) : sin(-m*phi);
-            double Phi_m, dPhi_m_dRscaled, dPhi_m_dzscaled, d2Phi_m_dRscaled2, d2Phi_m_dzscaled2;
-            interp2d_spline_eval_all(splines[m+mmax], Rscaled, zscaled, 
-                &Phi_m, &dPhi_m_dRscaled, &dPhi_m_dzscaled, &d2Phi_m_dRscaled2, NULL, &d2Phi_m_dzscaled2);
-            dPhidRscaled+=dPhi_m_dRscaled * cosmphi;
-            dPhidzscaled+=dPhi_m_dzscaled * cosmphi;
-            d2PhidRscaled2+=d2Phi_m_dRscaled2 * cosmphi;
-            d2Phidzscaled2+=d2Phi_m_dzscaled2 * cosmphi;
-            Phi_tot+=Phi_m*cosmphi;
-            d2Phidphi2+=Phi_m * -m*m*cosmphi;
-        }
-    double S=1/sqrt(pow_2(Rscale)+pow_2(R)+pow_2(Z));  // scaling
-    double dSdr_over_r=-S*S*S;
-    double d2Sdr2=(pow_2(Rscale)-2*(R*R+Z*Z))*dSdr_over_r*S*S;
-    double ddd=R*dPhidRscaled*dRscaleddR + Z*dPhidzscaled*dzscaleddz + Phi_tot;
-    double LaplacePhi = (R>0 ? dPhidRscaled*(dRscaleddR/R+d2RscaleddR2) + d2Phidphi2/R/R : 0)
-        + d2PhidRscaled2*pow_2(dRscaleddR) + dPhidzscaled*d2zscaleddz2 + d2Phidzscaled2*pow_2(dzscaleddz);
-    double result = S*LaplacePhi + 2*dSdr_over_r*ddd + d2Sdr2*Phi_tot;
-    return std::max<double>(0, result)/(4*M_PI);
-}
-#endif
-
-void CylSplineExp::eval_cyl(const coord::PosCyl &pos,
+void CylSplineExp::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* grad, coord::HessCyl* hess) const
 {
     if(pos.R>=grid_R.back() || fabs(pos.z)>=grid_z.back()) 

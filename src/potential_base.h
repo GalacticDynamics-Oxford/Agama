@@ -1,6 +1,20 @@
+/** \file    potential_base.h
+    \brief   Base density and potential classes
+    \author  Eugene Vasiliev
+    \date    2009-2015
+*/
 #pragma once
 #include "coord.h"
 
+/** Classes and auxiliary routines related to creation and manipulation of 
+    density models and gravitational potential models.
+    
+    These two concepts are related in such a way that a density model does not need 
+    to provide potential and forces, while a potential model does. 
+    Thus the latter is derived from the former.
+    General-purpose potential expansions can be constructed both from density or 
+    from potential classes.
+*/
 namespace potential{
 
 /** defines the symmetry properties of density or potential */
@@ -35,11 +49,14 @@ public:
     BaseDensity() {};
     virtual ~BaseDensity() {};
 
-    /** Evaluate density at the position in a specified coordinate system.
-        Template parameter may be Car, Cyl, or Sph, and the actual computation 
-        is implemented in separately-named protected virtual functions. */
-    template<typename coordSysT>
-    double density(const coord::PosT<coordSysT> &pos) const;
+    /** Evaluate density at the position in a specified coordinate system (Car, Cyl, or Sph)
+        The actual computation is implemented in separately-named protected virtual functions. */
+    double density(const coord::PosCar &pos) const {
+        return densityCar(pos); }
+    double density(const coord::PosCyl &pos) const {
+        return densityCyl(pos); }
+    double density(const coord::PosSph &pos) const {
+        return densitySph(pos); }
 
     /// returns the symmetry type of this density or potential
     virtual SymmetryType symmetry() const=0;
@@ -60,13 +77,13 @@ public:
 protected:
 //  Protected members: virtual methods for `density` in different coordinate systems
     /** evaluate density at the position specified in cartesian coordinates */
-    virtual double density_car(const coord::PosCar &pos) const=0;
+    virtual double densityCar(const coord::PosCar &pos) const=0;
 
     /** evaluate density at the position specified in cylindrical coordinates */
-    virtual double density_cyl(const coord::PosCyl &pos) const=0;
+    virtual double densityCyl(const coord::PosCyl &pos) const=0;
 
     /** Evaluate density at the position specified in spherical coordinates */
-    virtual double density_sph(const coord::PosSph &pos) const=0;
+    virtual double densitySph(const coord::PosSph &pos) const=0;
 
 /** Copy constructor and assignment operators are not allowed, because 
     their inadvertent application (slicing) would lead to a complex derived class 
@@ -88,7 +105,8 @@ protected:
     on the type of input coordinates. 
     They internally call three protected virtual functions, named after 
     each coordinate system. These functions are implemented in derived classes.
-    Density is computed from Laplacian in each coordinate system.
+    Density is computed from Laplacian in each coordinate system, but derived 
+    classes may override this behaviour and provide the density explicitly.
 */
 class BasePotential: public BaseDensity{
 public:
@@ -103,84 +121,57 @@ public:
                     in the variable addressed by this pointer.
         \param[out] deriv2 - if not NULL, store the Hessian (matrix of second derivatives)
                     of potential in the variable addressed by this pointer.  */
-    template<typename coordSysT>
-    void eval(const coord::PosT<coordSysT> &pos,
-        double* potential=0, 
-        coord::GradT<coordSysT>* deriv=0, 
-        coord::HessT<coordSysT>* deriv2=0) const;
-
+    void eval(const coord::PosCar &pos,
+        double* potential=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const {
+        return evalCar(pos, potential, deriv, deriv2); }
+    void eval(const coord::PosCyl &pos,
+        double* potential=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
+        return evalCyl(pos, potential, deriv, deriv2); }
+    void eval(const coord::PosSph &pos,
+        double* potential=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const {
+        return evalSph(pos, potential, deriv, deriv2); }
+    
 protected:
     /** evaluate potential and up to two its derivatives in cartesian coordinates;
         must be implemented in derived classes */
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const=0;
 
     /** evaluate potential and up to two its derivatives in cylindrical coordinates */
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const=0;
 
     /** evaluate potential and up to two its derivatives in spherical coordinates */
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const=0;
 
     /** Default implementation computes the density from Laplacian of the potential,
         but the derived classes may instead provide an explicit expression for it. */
-    virtual double density_car(const coord::PosCar &pos) const;
-    virtual double density_cyl(const coord::PosCyl &pos) const;
-    virtual double density_sph(const coord::PosSph &pos) const;
+    virtual double densityCar(const coord::PosCar &pos) const;
+    virtual double densityCyl(const coord::PosCyl &pos) const;
+    virtual double densitySph(const coord::PosSph &pos) const;
 };  // class BasePotential
-
-// Template specializations for `BaseDensity::density` and `BasePotential::eval` 
-// in particular coordinate systems 
-// (need to be declared outside the scope of class definition)
-
-/// Evaluate density at the position specified in cartesian coordinates
-template<> inline double BaseDensity::density(const coord::PosCar &pos) const
-{  return density_car(pos); };
-
-/// Evaluate density at the position specified in cylindrical coordinates
-template<> inline double BaseDensity::density(const coord::PosCyl &pos) const
-{  return density_cyl(pos); };
-
-/// Evaluate density at the position specified in spherical coordinates
-template<> inline double BaseDensity::density(const coord::PosSph &pos) const
-{  return density_sph(pos); };
-
-/// Evaluate potential and up to two its derivatives in cartesian coordinates
-template<> inline void BasePotential::eval(const coord::PosCar &pos,
-    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
-{  eval_car(pos, potential, deriv, deriv2); };
-
-/// Evaluate potential and up to two its derivatives in cylindrical coordinates
-template<> inline void BasePotential::eval(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
-{  eval_cyl(pos, potential, deriv, deriv2); };
-
-/// Evaluate potential and up to two its derivatives in spherical coordinates
-template<> inline void BasePotential::eval(const coord::PosSph &pos,
-    double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const
-{  eval_sph(pos, potential, deriv, deriv2); };
 
 ///@}
 /// \name   Base classes for potentials that implement the computations in a particular coordinate system
 ///@{
 
 /** Parent class for potentials that are evaluated in cartesian coordinates.
-    It leaves the implementation of `eval_car` member function for cartesian coordinates undefined, 
-    but provides the conversion from cartesian to cylindrical and spherical coordinates in eval_cyl and eval_sph. */
+    It leaves the implementation of `evalCar` member function for cartesian coordinates undefined, 
+    but provides the conversion from cartesian to cylindrical and spherical coordinates in evalCyl and evalSph. */
 class BasePotentialCar: public BasePotential, coord::IScalarFunction<coord::Car>{
 public:
     BasePotentialCar() : BasePotential() {}
 
 private:
     /** evaluate potential and up to two its derivatives in cylindrical coordinates. */
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
         coord::evalAndConvert<coord::Car, coord::Cyl>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in spherical coordinates. */
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
         coord::evalAndConvert<coord::Car, coord::Sph>(*this, pos, potential, deriv, deriv2);
     }
@@ -189,19 +180,18 @@ private:
         in the preferred (Cartesian) coordinate system. */
     virtual void evalScalar(const coord::PosCar& pos,
         double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
-    { eval_car(pos, value, deriv, deriv2); }
-#if 0  // testing
-    /** reimplement density computation via Laplacian in more suitable coordinates */
-    virtual double density_cyl(const coord::PosCyl &pos) const
-    {  return density_car(coord::toPosCar(pos)); }
-    virtual double density_sph(const coord::PosSph &pos) const
-    {  return density_car(coord::toPosCar(pos)); }
-#endif
+    { evalCar(pos, value, deriv, deriv2); }
+
+    /** redirect density computation to a Laplacian in more suitable coordinates */
+    virtual double densityCyl(const coord::PosCyl &pos) const
+    {  return densityCar(coord::toPosCar(pos)); }
+    virtual double densitySph(const coord::PosSph &pos) const
+    {  return densityCar(coord::toPosCar(pos)); }
 };  // class BasePotentialCar
 
 
 /** Parent class for potentials that are evaluated in cylindrical coordinates.
-    It leaves the implementation of `eval_cyl` member function for cylindrical coordinates undefined, 
+    It leaves the implementation of `evalCyl` member function for cylindrical coordinates undefined, 
     but provides the conversion from cylindrical to cartesian and spherical coordinates. */
 class BasePotentialCyl: public BasePotential, coord::IScalarFunction<coord::Cyl>{
 public:
@@ -209,13 +199,13 @@ public:
 
 private:
     /** evaluate potential and up to two its derivatives in cartesian coordinates. */
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
         coord::evalAndConvert<coord::Cyl, coord::Car>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in spherical coordinates. */
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
         coord::evalAndConvert<coord::Cyl, coord::Sph>(*this, pos, potential, deriv, deriv2);
     }
@@ -224,20 +214,19 @@ private:
         in the preferred (Cylindrical) coordinate system. */
     virtual void evalScalar(const coord::PosCyl& pos,
         double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
-        eval_cyl(pos, value, deriv, deriv2);
+        evalCyl(pos, value, deriv, deriv2);
     }
-#if 0  // testing
-    /** reimplement density computation in more suitable coordinates */
-    virtual double density_car(const coord::PosCar &pos) const
-    {  return density_cyl(coord::toPosCyl(pos)); }
-    virtual double density_sph(const coord::PosSph &pos) const
-    {  return density_cyl(coord::toPosCyl(pos)); }
-#endif
+
+    /** redirect density computation to more suitable coordinates */
+    virtual double densityCar(const coord::PosCar &pos) const
+    {  return densityCyl(coord::toPosCyl(pos)); }
+    virtual double densitySph(const coord::PosSph &pos) const
+    {  return densityCyl(coord::toPosCyl(pos)); }
 };  // class BasePotentialCyl
 
 
 /** Parent class for potentials that are evaluated in spherical coordinates.
-    It leaves the implementation of `eval_sph member` function for spherical coordinates undefined, 
+    It leaves the implementation of `evalSph member` function for spherical coordinates undefined, 
     but provides the conversion from spherical to cartesian and cylindrical coordinates. */
 class BasePotentialSph: public BasePotential, coord::IScalarFunction<coord::Sph>{
 public:
@@ -245,13 +234,13 @@ public:
 
 private:
     /** evaluate potential and up to two its derivatives in cartesian coordinates. */
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
         coord::evalAndConvert<coord::Sph, coord::Car>(*this, pos, potential, deriv, deriv2);
     }
 
     /** evaluate potential and up to two its derivatives in cylindrical coordinates. */
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
         coord::evalAndConvert<coord::Sph, coord::Cyl>(*this, pos, potential, deriv, deriv2);
     }
@@ -260,15 +249,14 @@ private:
         in the preferred (Spherical) coordinate system. */
     virtual void evalScalar(const coord::PosSph& pos,
         double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const { 
-        eval_sph(pos, value, deriv, deriv2); 
+        evalSph(pos, value, deriv, deriv2); 
     }
-#if 0  // testing
-    /** reimplement density computation in more suitable coordinates */
-    virtual double density_car(const coord::PosCar &pos) const
-    {  return density_sph(coord::toPosSph(pos)); }
-    virtual double density_cyl(const coord::PosCyl &pos) const
-    {  return density_sph(coord::toPosSph(pos)); }
-#endif
+
+    /** redirect density computation to more suitable coordinates */
+    virtual double densityCar(const coord::PosCar &pos) const
+    {  return densitySph(coord::toPosSph(pos)); }
+    virtual double densityCyl(const coord::PosCyl &pos) const
+    {  return densitySph(coord::toPosSph(pos)); }
 };  // class BasePotentialSph
 
 
@@ -287,17 +275,24 @@ public:
     virtual double enclosedMass(double radius) const;
 
 private:
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
         coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
 
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
         coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
 
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
         coord::evalAndConvertSph(*this, pos, potential, deriv, deriv2); }
+
+    /** redirect density computation to spherical coordinates */
+    virtual double densityCar(const coord::PosCar &pos) const
+    {  return densitySph(coord::toPosSph(pos)); }
+
+    virtual double densityCyl(const coord::PosCyl &pos) const
+    {  return densitySph(coord::toPosSph(pos)); }
 
     virtual int numDerivs() const { return 2; }
 };
@@ -308,7 +303,7 @@ private:
 
 /** Shorthand for evaluating the value of potential at a given point */
 template<typename coordT>
-double Phi(const BasePotential& potential, const coordT& point) {
+double value(const BasePotential& potential, const coordT& point) {
     double val;
     potential.eval(point, &val);
     return val;
@@ -320,15 +315,15 @@ double totalEnergy(const BasePotential& potential, const coord::PosVelT<coordT>&
 
 template<>
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelCar& p)
-{  return Phi(potential, p) + 0.5*(p.vx*p.vx+p.vy*p.vy+p.vz*p.vz); }
+{  return value(potential, p) + 0.5*(p.vx*p.vx+p.vy*p.vy+p.vz*p.vz); }
 
 template<>
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelCyl& p)
-{  return Phi(potential, p) + 0.5*(pow_2(p.vR)+pow_2(p.vz)+pow_2(p.vphi)); }
+{  return value(potential, p) + 0.5*(pow_2(p.vR)+pow_2(p.vz)+pow_2(p.vphi)); }
 
 template<>
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph& p)
-{  return Phi(potential, p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
+{  return value(potential, p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
 
 
 /** Compute circular velocity at a given radius in equatorial plane */

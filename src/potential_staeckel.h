@@ -1,3 +1,8 @@
+/** \file    potential_staeckel.h
+    \brief   Potential for Oblate Perfect Ellipsoid model
+    \author  Eugene Vasiliev
+    \date    2015
+*/
 #pragma once
 #include "potential_base.h"
 
@@ -35,17 +40,17 @@ private:
     const coord::ProlSph coordSys;
 
     /** implementations of the standard triad of coordinate transformations */
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
         coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Car>
             (*this, pos, coordSys, potential, deriv, deriv2);  // no direct conversion exists, use two-step
     }
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
         coord::evalAndConvert<coord::ProlSph, coord::Cyl>
             (*this, pos, coordSys, potential, deriv, deriv2);
     }
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
         coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Sph>
             (*this, pos, coordSys, potential, deriv, deriv2);  // use two-step conversion

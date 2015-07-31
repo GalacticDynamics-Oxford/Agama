@@ -1,5 +1,11 @@
+/** \file    units.h
+    \brief   Unit systems
+    \author  Eugene Vasiliev
+    \date    2015
+*/
 #pragma once
 
+/** Unit systems */
 namespace units {
 
   // base astronomical units expressed in CGS units
@@ -22,6 +28,7 @@ namespace units {
     Gev_per_cm3  = 1.782662e-24,     ///< volume density in g/cm^3
     Grav  = 6.67384e-8;              ///< gravitational constant in CGS
 
+  /** Unit system and conversion class */
   class Units {
   private:
     const double 

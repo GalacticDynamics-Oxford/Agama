@@ -1,3 +1,8 @@
+/** \file    math_base.h
+    \brief   Base class for mathematical functions of one variable
+    \author  Eugene Vasiliev
+    \date    2015
+*/
 #pragma once
 
 /// convenience function for squaring a number, used in many places
@@ -13,6 +18,7 @@ inline unsigned int pow_2(unsigned int x) { return x*x; }
 #define NAN (INFINITY/INFINITY)
 #endif
 
+/** Functions and classes for basic and advanced math operations */
 namespace math{
 
 /** Prototype of a function of one variable that may provide up to two derivatives.

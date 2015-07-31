@@ -79,7 +79,7 @@ double intSH_theta(double theta, void* params)
 }
 /// \endcond
 
-void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
+void BasePotentialSphericalHarmonic::evalSph(const coord::PosSph &pos,
     double* potential, coord::GradSph* grad, coord::HessSph* hess) const
 {
     double result = 0;
@@ -148,7 +148,7 @@ void BasePotentialSphericalHarmonic::eval_sph(const coord::PosSph &pos,
 template<typename NumT> 
 BasisSetExp::BasisSetExp(
     double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<NumT> &points, SymmetryType _sym):
+    const particles::PointMassArray<NumT> &points, SymmetryType _sym):
     BasePotentialSphericalHarmonic(_Ncoefs_angular), 
     Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
     Alpha(_Alpha)
@@ -161,7 +161,7 @@ BasisSetExp::BasisSetExp(
 }
 template 
 BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Car>&points, SymmetryType _sym);
+    const particles::PointMassArray<coord::Car>&points, SymmetryType _sym);
 
 BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs):
     BasePotentialSphericalHarmonic(coefs.size()>0 ? static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1) : 0), 
@@ -278,7 +278,7 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
 }
 
 template<typename CoordT> 
-void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &points)
+void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &points)
 {
     SHcoefs.resize(Ncoefs_radial+1);
     for(size_t n=0; n<=Ncoefs_radial; n++)
@@ -385,7 +385,7 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
 
 template<typename CoordT>
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<CoordT> &points, SymmetryType _sym, 
+    const particles::PointMassArray<CoordT> &points, SymmetryType _sym, 
     double smoothfactor, const std::vector<double> *radii):  // init coefs from point mass set
     BasePotentialSphericalHarmonic(_Ncoefs_angular),
     Ncoefs_radial(std::max<size_t>(5,_Ncoefs_radial))
@@ -395,7 +395,7 @@ SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular,
 }
 template
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassSet<coord::Car> &points, SymmetryType _sym, 
+    const particles::PointMassArray<coord::Car> &points, SymmetryType _sym, 
     double smoothfactor, const std::vector<double> *radii);
 
 SplineExp::SplineExp(
@@ -573,7 +573,7 @@ inline bool compareParticleSph(const ParticleSph& val1, const ParticleSph& val2)
 /// \endcond
 
 template<typename CoordT>
-void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &srcpoints, 
+void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<CoordT> &srcpoints, 
     const std::vector<double>* srcradii, std::vector<double>* outradii, std::vector< std::vector<double> > *outcoefs)
 {
     assert(outcoefs!=NULL);
@@ -694,7 +694,7 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassSet<CoordT> &sr
 
 
 template<typename CoordT>
-void SplineExp::prepareCoefsDiscrete(const particles::PointMassSet<CoordT> &srcpoints, 
+void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &srcpoints, 
     double smoothfactor, const std::vector<double> *userradii)
 {
     std::vector<double> pointRadii;      // radii of each point and coefficients of expansion at each point

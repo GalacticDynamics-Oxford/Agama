@@ -8,7 +8,7 @@
 
 namespace particles {
 
-void IOSnapshotText::readSnapshot(PointMassSet<coord::Car>& points)
+void IOSnapshotText::readSnapshot(PointMassArrayCar& points)
 {
     std::ifstream strm(fileName.c_str(), std::ios::in);
     if(!strm) 
@@ -43,7 +43,7 @@ void IOSnapshotText::readSnapshot(PointMassSet<coord::Car>& points)
     }
 };
 
-void IOSnapshotText::writeSnapshot(const PointMassSet<coord::Car>& points)
+void IOSnapshotText::writeSnapshot(const PointMassArrayCar& points)
 {
     std::ofstream strm(fileName.c_str(), std::ios::out);
     if(!strm) 
@@ -63,7 +63,7 @@ void IOSnapshotText::writeSnapshot(const PointMassSet<coord::Car>& points)
 
 #ifdef HAVE_UNSIO
 
-void readSnapshotUNSIO(const std::string& fileName, PointMassSet<coord::Car>& points) 
+void readSnapshotUNSIO(const std::string& fileName, PointMassArrayCar& points) 
 { 
     uns::CunsIn input(fileName, "all", "all");
     if(input.isValid() && input.snapshot->nextFrame("xvm")) {
@@ -92,7 +92,7 @@ void readSnapshotUNSIO(const std::string& fileName, PointMassSet<coord::Car>& po
 };
 
 void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
-    const PointMassSet<coord::Car>& points)
+    const PointMassArrayCar& points)
 {
     uns::CunsOut output(fileName, type);
     bool result = 1 || output.isValid();  // this flag is apparently not initialized properly
@@ -118,21 +118,21 @@ void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
         throw std::runtime_error("IOSnapshotUNSIO: cannot write to file "+fileName);
 };
 
-void IOSnapshotGadget::readSnapshot(PointMassSet<coord::Car>& points) {
+void IOSnapshotGadget::readSnapshot(PointMassArrayCar& points) {
     readSnapshotUNSIO(fileName, points);
 }
 
-void IOSnapshotGadget::writeSnapshot(const PointMassSet<coord::Car>& points) {
+void IOSnapshotGadget::writeSnapshot(const PointMassArrayCar& points) {
     writeSnapshotUNSIO(fileName, "gadget2", points);
 }
 
-void IOSnapshotNemo::readSnapshot(PointMassSet<coord::Car>& points) {
+void IOSnapshotNemo::readSnapshot(PointMassArrayCar& points) {
     readSnapshotUNSIO(fileName, points);
 }
 
 #else
 // no UNSIO
-void IOSnapshotNemo::readSnapshot(PointMassSet<coord::Car>&)
+void IOSnapshotNemo::readSnapshot(PointMassArrayCar&)
 {
     throw std::runtime_error("Error, compiled without support for reading NEMO snapshots");
 };
@@ -210,7 +210,7 @@ public:
             putString("History",new_h.c_str());
     }
     /// write phase space (positions and velocities)
-    template<typename NumT> void writePhase(const PointMassSet<coord::Car>& points, double time) {
+    template<typename NumT> void writePhase(const PointMassArrayCar& points, double time) {
         int nbody    = static_cast<int>(points.size());
         NumT* phase = new NumT[nbody * 6];
         NumT* mass  = new NumT[nbody];
@@ -253,7 +253,7 @@ template<> char CNemoSnapshotWriter::typeLetter<float>() { return 'f'; };
 template<> char CNemoSnapshotWriter::typeLetter<double>(){ return 'd'; };
 template<> char CNemoSnapshotWriter::typeLetter<char>()  { return 'c'; };
 
-void IOSnapshotNemo::writeSnapshot(const PointMassSet<coord::Car>& points)
+void IOSnapshotNemo::writeSnapshot(const PointMassArrayCar& points)
 {
     CNemoSnapshotWriter SnapshotWriter(fileName, append);
     bool result = SnapshotWriter.ok();

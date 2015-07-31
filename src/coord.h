@@ -37,7 +37,11 @@ The fundamental routines operating on these structures are the following:
 #pragma once
 #include "math_base.h"
 
-namespace coord{
+/** Classes and routines for representing position/velocity points, 
+    gradients and hessians of scalar functions (e.g., gravitational potential), 
+    and transformations between coordinate systems.
+*/
+namespace coord {
 
 /// \name   Primitive data types: coordinate systems
 ///@{

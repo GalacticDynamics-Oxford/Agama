@@ -1,3 +1,8 @@
+/** \file    potential_analytic.h
+    \brief   Several common analytic potential models
+    \author  Eugene Vasiliev
+    \date    2009-2015
+*/
 #pragma once
 #include "potential_base.h"
 
@@ -18,10 +23,6 @@ private:
     /** Evaluate potential and up to two its derivatives by spherical radius. */
     virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
-#if 0   // not required
-    /** Evaluate density at the position specified in spherical coordinates. */
-    virtual double density_sph(const coord::PosSph &pos) const;
-#endif
 };
 
 /** Spherical Navarro-Frenk-White potential:
@@ -56,7 +57,7 @@ private:
     const double scaleRadiusA; ///< first scale radius  (A),  determines the extent in the disk plane
     const double scaleRadiusB; ///< second scale radius (B),  determines the vertical extent
 
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 };
 
@@ -78,7 +79,7 @@ private:
     const double q2;           ///< squared y/x axis ratio (q)
     const double p2;           ///< squared z/x axis ratio (p)
 
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
 };
 
@@ -98,7 +99,7 @@ private:
     const double q2;           ///< squared y/x axis ratio (q)
     const double p2;           ///< squared z/x axis ratio (p)
     
-    virtual void eval_car(const coord::PosCar &pos,
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
 };
 

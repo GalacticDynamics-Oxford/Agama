@@ -5,14 +5,14 @@
 
 namespace potential{
 
-double BasePotential::density_car(const coord::PosCar &pos) const
+double BasePotential::densityCar(const coord::PosCar &pos) const
 {
     coord::HessCar deriv2;
     eval(pos, NULL, (coord::GradCar*)NULL, &deriv2);
     return (deriv2.dx2 + deriv2.dy2 + deriv2.dz2) / (4*M_PI);
 }
 
-double BasePotential::density_cyl(const coord::PosCyl &pos) const
+double BasePotential::densityCyl(const coord::PosCyl &pos) const
 {
     coord::GradCyl deriv;
     coord::HessCyl deriv2;
@@ -27,7 +27,7 @@ double BasePotential::density_cyl(const coord::PosCyl &pos) const
     return (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2) / (4*M_PI);
 }
 
-double BasePotential::density_sph(const coord::PosSph &pos) const
+double BasePotential::densitySph(const coord::PosSph &pos) const
 {
     coord::GradSph deriv;
     coord::HessSph deriv2;

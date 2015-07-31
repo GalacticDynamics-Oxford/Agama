@@ -31,8 +31,9 @@ public:
         const std::vector< std::vector<double> >& coefs);
 
     /// init potential from N-body snapshot
+    template<typename CoordT>
     CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsigned int _Ncoefs_phi, 
-        const particles::PointMassSet<coord::Car> &points, SymmetryType _sym=ST_TRIAXIAL, 
+        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, 
         double radius_min=0, double radius_max=0, double z_min=0, double z_max=0);
 
     ~CylSplineExp() {};
@@ -57,7 +58,7 @@ private:
     double C00, C20, C40, C22;                ///< multipole coefficients for extrapolation beyond the grid
 
     /// compute potential and its derivatives
-    virtual void eval_cyl(const coord::PosCyl &pos,
+    virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 
     /// create interpolation grid and compute potential at grid nodes

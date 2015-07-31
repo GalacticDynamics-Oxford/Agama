@@ -5,7 +5,7 @@
 
     The base class, particles::BaseIOSnapshot, is used as the common interface 
     for reading and writing Nbody snapshots to disk. 
-    The snapshots are provided by particles::PointMassSet.
+    The snapshots are provided by particles::PointMassArray.
     Derived classes implement the data storage in various formats.
     Helper routines create an instance of the class corresponding to a given 
     format string or to the actual file format.
@@ -23,21 +23,21 @@ class BaseIOSnapshot {
 public:
     virtual ~BaseIOSnapshot() {};
     /** read a snapshot from the file; 
-        \param[out] points is an instance of PointMassSet class,
+        \param[out] points is an instance of PointMassArray class,
         its contents are replaced by the loaded data.
         \return success or failure; in the latter case points may contain garbage.
     */
-    virtual void readSnapshot(PointMassSet<coord::Car>& points)=0;
+    virtual void readSnapshot(PointMassArrayCar& points)=0;
     /** write a snapshot to the file; return success or failure. */
-    virtual void writeSnapshot(const PointMassSet<coord::Car>& points)=0;
+    virtual void writeSnapshot(const PointMassArrayCar& points)=0;
 };
 
 /// Text file with three coordinates, possibly three velocities and mass, space or tab-separated.
 class IOSnapshotText: public BaseIOSnapshot {
 public:
     IOSnapshotText(const std::string &_fileName): fileName(_fileName) {};
-    virtual void readSnapshot(PointMassSet<coord::Car>& points);
-    virtual void writeSnapshot(const PointMassSet<coord::Car>& points);
+    virtual void readSnapshot(PointMassArrayCar& points);
+    virtual void writeSnapshot(const PointMassArrayCar& points);
 private:
     const std::string fileName;
 };
@@ -52,8 +52,8 @@ public:
     /// and choose whether to append to file if it already exists
     IOSnapshotNemo(const std::string &_fileName, const std::string &_header="", double _time=0, bool _append=false) :
       fileName(_fileName), header(_header), time(_time), append(_append) {};
-    virtual void readSnapshot(PointMassSet<coord::Car>& points);
-    virtual void writeSnapshot(const PointMassSet<coord::Car>& points);
+    virtual void readSnapshot(PointMassArrayCar& points);
+    virtual void writeSnapshot(const PointMassArrayCar& points);
 private:
     const std::string fileName;
     const std::string header;    ///< header string which will be written to the file
@@ -66,8 +66,8 @@ private:
 class IOSnapshotGadget: public BaseIOSnapshot {
 public:
     IOSnapshotGadget(const std::string &_fileName): fileName(_fileName) {};
-    virtual void readSnapshot(PointMassSet<coord::Car>& points);
-    virtual void writeSnapshot(const PointMassSet<coord::Car>& points);
+    virtual void readSnapshot(PointMassArrayCar& points);
+    virtual void writeSnapshot(const PointMassArrayCar& points);
 private:
     const std::string fileName;
 };
@@ -90,7 +90,7 @@ BaseIOSnapshot* createIOSnapshotWrite(const std::string &fileFormat, const std::
     const std::string& header="", const double time=0, const bool append=false);
 
 /// convenience function for reading an N-body snapshot in arbitrary format
-inline void readSnapshot(const std::string& fileName, PointMassSet<coord::Car>& points) {
+inline void readSnapshot(const std::string& fileName, PointMassArrayCar& points) {
     BaseIOSnapshot* snap = createIOSnapshotRead(fileName);
     snap->readSnapshot(points);
     delete snap;

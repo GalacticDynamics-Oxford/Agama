@@ -24,6 +24,7 @@ SOURCES   = coord.cpp \
             potential_composite.cpp \
             potential_cylspline.cpp \
             potential_dehnen.cpp \
+            potential_ferrers.cpp \
             potential_galpot.cpp \
             potential_sphharm.cpp \
             potential_staeckel.cpp \
@@ -46,7 +47,8 @@ TESTSRCS  = test_math_core.cpp \
             test_potentials.cpp \
             test_potential_sphharm.cpp \
             test_staeckel.cpp \
-            test_actionfinder.cpp
+            test_actionfinder.cpp \
+            test_actions_nbody.cpp \
 
 LIBNAME   = libfJ.a
 

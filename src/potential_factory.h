@@ -118,7 +118,7 @@ const BasePotential* createPotential(ConfigPotential& config);
     \return    a new instance of potential on success, or NULL on failure (e.g. if potential type is inappropriate).
 */
 template<typename CoordT>
-const BasePotential* createPotentialFromPoints(const ConfigPotential& configPotential, const particles::PointMassSet<CoordT>& points);
+const BasePotential* createPotentialFromPoints(const ConfigPotential& configPotential, const particles::PointMassArray<CoordT>& points);
 
 /** load a potential from a text or snapshot file.
 

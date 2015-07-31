@@ -166,31 +166,31 @@ const math::IFunction* createVerticalDiskFnc(const DiskParam& params) {
         return new DiskDensityVerticalThin();
 }
 
-double DiskResidual::density_cyl(const coord::PosCyl &pos) const
+double DiskResidual::densityCyl(const coord::PosCyl &pos) const
 {
     if(pos.z==0) return 0;
     double h, H, Hp, F, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
-    radial_fnc  ->evalDeriv(pos.R, &F);
+    verticalFnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radialFnc  ->evalDeriv(r, &f, &fp, &fpp);
+    radialFnc  ->evalDeriv(pos.R, &F);
     return (F-f)*h - 2*fp*(H+pos.z*Hp)/r - fpp*H;
 }
 
-double DiskAnsatz::density_cyl(const coord::PosCyl &pos) const
+double DiskAnsatz::densityCyl(const coord::PosCyl &pos) const
 {
     double h, H, Hp, f, fp, fpp, r=hypot(pos.R, pos.z);
-    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
+    verticalFnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radialFnc  ->evalDeriv(r, &f, &fp, &fpp);
     return f*h + (pos.z!=0 ? 2*fp*(H+pos.z*Hp)/r : 0) + fpp*H;
 }
 
-void DiskAnsatz::eval_cyl(const coord::PosCyl &pos,
+void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
     const double r=hypot(pos.R, pos.z);
     double h, H, Hp, f, fp, fpp;
-    vertical_fnc->evalDeriv(pos.z, &H, &Hp, &h);
-    radial_fnc  ->evalDeriv(r, &f, &fp, &fpp);
+    verticalFnc->evalDeriv(pos.z, &H, &Hp, &h);
+    radialFnc  ->evalDeriv(r, &f, &fp, &fpp);
     f*=4*M_PI; fp*=4*M_PI; fpp*=4*M_PI;
     double Rr=pos.R/r, zr=pos.z/r;
     if(r==0) { Rr=0; zr=0; }
@@ -222,7 +222,7 @@ SpheroidDensity::SpheroidDensity (const SphrParam &_params) :
         throw std::invalid_argument("Spheroid outer cutoff radius cannot be <0");
 };
 
-double SpheroidDensity::density_cyl(const coord::PosCyl &pos) const
+double SpheroidDensity::densityCyl(const coord::PosCyl &pos) const
 {
     double m   = hypot(pos.R, pos.z/params.axisRatio);
     double m0  = m/params.scaleRadius;
@@ -480,7 +480,7 @@ void Multipole::setup(const BaseDensity& source_density,
   WDmath::Pspline2D(X,Y,K,Z);
 }
 
-void Multipole::eval_cyl(const coord::PosCyl &pos,
+void Multipole::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
     double r=hypot(pos.R, pos.z);

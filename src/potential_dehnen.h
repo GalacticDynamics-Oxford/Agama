@@ -1,5 +1,5 @@
 /** \file    potential_dehnen.h
-    \brief   implementation of triaxial Dehnen potential
+    \brief   Triaxial Dehnen potential
     \author  Eugene Vasiliev
     \date    2009-2015
 **/
@@ -9,8 +9,7 @@
 namespace potential {
 
 /** Dehnen(1993) double power-law model **/
-class Dehnen: public BasePotentialCar
-{
+class Dehnen: public BasePotentialCar {
 public:
     Dehnen(double _mass, double _scalerad, double _q, double _p, double _gamma);
     virtual const char* name() const { return myName(); };
@@ -22,13 +21,10 @@ private:
     const double scalerad;   ///< scale radius
     const double q, p;       ///< axis ratio (y/x and z/x) of equidensity surfaces
     const double gamma;      ///< cusp exponent for Dehnen potential
-    virtual void eval_car(const coord::PosCar &pos,
+
+    virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
-    virtual double density_car(const coord::PosCar &pos) const;
-    virtual double density_cyl(const coord::PosCyl &pos) const {
-        return density_car(coord::toPosCar(pos)); }
-    virtual double density_sph(const coord::PosSph &pos) const {
-        return density_car(coord::toPosCar(pos)); }
+    virtual double densityCar(const coord::PosCar &pos) const;
 };
 
 }  // namespace

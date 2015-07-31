@@ -1,13 +1,13 @@
 /** \file    utils.h
     \brief   several string formatting and error reporting routines
     \author  EV
-    \date    2009-2014
-
+    \date    2009-2015
 */
 #pragma once
 #include <string>
 #include <vector>
 
+/** Helper routines for string handling and miscellaneous other tasks.  */
 namespace utils {
 #if 0
 /* ------- message and error reporting routines ------- */

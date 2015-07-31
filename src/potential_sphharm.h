@@ -36,7 +36,7 @@ protected:
 private:
     SymmetryType mysymmetry;             ///< may have different type of symmetry
     
-    virtual void eval_sph(const coord::PosSph &pos,
+    virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
 };
 
@@ -46,7 +46,7 @@ public:
     /// init coefficients from a discrete point mass set
     template<typename CoordT> 
     BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassSet<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL);
+        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL);
 
     /// load coefficients from stored values
     BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs);
@@ -82,7 +82,7 @@ private:
     /// compute coefficients from a discrete point mass set; 
     /// if Alpha=0 then it is computed automatically from the data
     template<typename CoordT> 
-    void prepareCoefsDiscrete(const particles::PointMassSet<CoordT>& points);
+    void prepareCoefsDiscrete(const particles::PointMassArray<CoordT>& points);
 
     /// compute coefficients from a smooth mass profile; 
     /// if Alpha=0 then it is chosen automatically from density->getGamma()
@@ -100,7 +100,7 @@ public:
     /// may also provide desired grid radii (otherwise assigned automatically)
     template<typename CoordT>
     SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassSet<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
+        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
         const std::vector<double>  *_gridradii=NULL);
 
     /// init potential from stored SHE coefficients at given radii
@@ -172,7 +172,7 @@ private:
         \param[out] outcoefs points to an existing 2d array that will contain computed coefficients.
     */
     template<typename CoordT> 
-    void computeCoefsFromPoints(const particles::PointMassSet<CoordT>& points, 
+    void computeCoefsFromPoints(const particles::PointMassArray<CoordT>& points, 
         const std::vector<double> * srcradii, 
         std::vector<double> * outradii, std::vector<std::vector<double> > *outcoefs);
 
@@ -185,7 +185,7 @@ private:
                    (good results are obtained for smoothfactor=1-2). 
     */
     template<typename CoordT>
-    void prepareCoefsDiscrete(const particles::PointMassSet<CoordT>& points, 
+    void prepareCoefsDiscrete(const particles::PointMassArray<CoordT>& points, 
         double smoothfactor, const std::vector<double> * userradii);
 
     /** compute expansion coefficients from an analytical mass profile.

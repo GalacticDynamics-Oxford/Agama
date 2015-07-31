@@ -6,7 +6,8 @@
 #pragma once
 #include "math_base.h"
 
-namespace math{
+namespace math {
+
 /** Normalized associated Legendre polynomial (or, rather, function) of the first kind:
     \f$  P_l^m(\cos(\theta))  \f$.
     These functions are used in spherical-harmonic expansion as follows: 
@@ -34,5 +35,13 @@ double gamma(const double x);
 /** Psi (digamma) function */
 double digamma(const double x);
 double digamma(const int x);
+
+/** Complete elliptic integrals of the first K(k) and the second E(k) kinds*/
+double ellintK(const double k);
+double ellintE(const double k);
+
+/** Incomplete elliptic integrals of the first F(phi,k) and the second E(phi,k) kinds */
+double ellintF(const double phi, const double k);
+double ellintE(const double phi, const double k);
 
 }  // namespace

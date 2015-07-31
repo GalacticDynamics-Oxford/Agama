@@ -4,6 +4,7 @@
 #include "potential_analytic.h"
 #include "potential_cylspline.h"
 #include "potential_dehnen.h"
+#include "potential_ferrers.h"
 #include "potential_galpot.h"
 #include "potential_staeckel.h"
 #include "potential_sphharm.h"
@@ -159,7 +160,7 @@ const CPotential* createPotential(CConfigPotential* config)
 /* ------- auxiliary function to create potential of a given type from a set of point masses ------ */
 template<typename CoordT> 
 const BasePotential* createPotentialFromPoints(const ConfigPotential& config, 
-                                               const particles::PointMassSet<CoordT>& points)
+    const particles::PointMassArray<CoordT>& points)
 {
     const BasePotential* pot=NULL;
 /*    if(config.PotentialType==PT_NB) 
@@ -203,7 +204,7 @@ const BasePotential* createPotentialFromPoints(const ConfigPotential& config,
     return pot;
 }
 // instantiations
-template const BasePotential* createPotentialFromPoints(const ConfigPotential& config, const particles::PointMassSet<coord::Car>& points);
+template const BasePotential* createPotentialFromPoints(const ConfigPotential& config, const particles::PointMassArray<coord::Car>& points);
 
 
 // attempt to load coefficients stored in a text file
@@ -464,7 +465,7 @@ const BasePotential* readPotential(ConfigPotential& config)
     }
 
     // if the above didn't work, try to load a point mass set from the file
-    particles::PointMassSet<coord::Car> points;
+    particles::PointMassArrayCar points;
     particles::readSnapshot(fileName, points);
     if(points.size()==0)
         throw std::runtime_error("readPotential: error loading N-body snapshot from "+fileName);
@@ -670,7 +671,7 @@ void initPotentialAndSymmetryNameMap()
     PotentialNames[PT_CYLSPLINE] = CylSplineExp::myName();
 //    PotentialNames[PT_SPHERICAL] = CPotentialSpherical::myName();
     PotentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
-//    PotentialNames[PT_FERRERS] = CPotentialFerrers::myName();
+    PotentialNames[PT_FERRERS] = Ferrers::myName();
 //    PotentialNames[PT_NB] = CPotentialNB::myName();
     PotentialNames[PT_GALPOT] = "GalPot";
 
@@ -688,7 +689,7 @@ void initPotentialAndSymmetryNameMap()
 //    DensityNames[PT_EXPDISK] = CDensityExpDisk::myName();
     DensityNames[PT_NFW] = NFW::myName();
 //    DensityNames[PT_SERSIC] = CDensitySersic::myName();
-//    DensityNames[PT_FERRERS] = CPotentialFerrers::myName();
+    DensityNames[PT_FERRERS] = Ferrers::myName();
 
     SymmetryNames[ST_NONE]         = "None";
     SymmetryNames[ST_REFLECTION]   = "Reflection";

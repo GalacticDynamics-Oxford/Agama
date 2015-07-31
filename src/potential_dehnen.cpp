@@ -15,7 +15,7 @@ Dehnen::Dehnen(double _mass, double _scalerad, double _q, double _p, double _gam
         throw std::invalid_argument("Error in Dehnen potential: gamma must lie in the range [0:2]");
 }
 
-double Dehnen::density_car(const coord::PosCar& pos) const
+double Dehnen::densityCar(const coord::PosCar& pos) const
 {
     double m = sqrt(pow_2(pos.x) + pow_2(pos.y/q) + pow_2(pos.z/p));
     return mass*scalerad*(3-gamma)/(4*M_PI*p*q) * pow(m, -gamma) * pow(scalerad+m, gamma-4);
@@ -64,7 +64,7 @@ public:
 };
 /// \endcond
 
-void Dehnen::eval_car(const coord::PosCar &pos,
+void Dehnen::evalCar(const coord::PosCar &pos,
     double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
 {
     if(q==1 && p==1) {  // analytical expression for spherical potential

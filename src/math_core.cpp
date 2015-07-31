@@ -243,7 +243,8 @@ static double findRootHybrid(const IFunction& fnc,
 }
 
 /** scaling transformation of input function for the case that the interval is (semi-)infinite:
-    it replaces the original argument  x  with  y in the range [0:1],  and implements the transformation of derivative.
+    it replaces the original argument  x  with  y in the range [0:1],  
+    and implements the transformation of 1st derivative.
 */
 class ScaledFunction: public IFunction {
 public:
@@ -473,46 +474,6 @@ double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
     return result;
 }
 
-/** The integral \int_{x1}^{x2} f(x) dx is transformed into 
-    \int_{y1}^{y2} f(x(y)) (dx/dy) dy,  where x(y) = x_low + (x_upp-x_low) y^2 (3-2y),
-    and x1=x(y1), x2=x(y2).   */
-
-class ScaledIntegrand: public IFunction {
-public:
-    ScaledIntegrand(const IFunction& _F, double low, double upp) : 
-        F(_F), x_low(low), x_upp(upp) {};
-    virtual int numDerivs() const { return 0; }
-private:
-    const IFunction& F;
-    double x_low, x_upp;
-    virtual void evalDeriv(const double y, double* val=0, double* =0, double* =0) const {
-        const double x = x_low + (x_upp-x_low) * y*y*(3-2*y);
-        const double dx = (x_upp-x_low) * 6*y*(1-y);
-        *val = F(x) * dx;
-    }
-};
-
-// invert the above relation between x and y by solving a cubic equation
-static double solveForScaled_y(double x, double x_low, double x_upp) {
-    assert(x>=x_low && x<=x_upp);
-    if(x==x_low) return 0;
-    if(x==x_upp) return 1;
-    double phi=acos(1-2*(x-x_low)/(x_upp-x_low))/3.0;
-    return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
-}
-
-double integrateScaled(const IFunction& fnc, double x1, double x2, 
-    double x_low, double x_upp, double rel_toler)
-{
-    if(x1==x2) return 0;
-    if(x1>x2 || x1<x_low || x2>x_upp || x_low>=x_upp)
-        throw std::invalid_argument("Error in integrate_scaled: arguments out of range");
-    ScaledIntegrand transf(fnc, x_low, x_upp);
-    double y1=solveForScaled_y(x1, x_low, x_upp);
-    double y2=solveForScaled_y(x2, x_low, x_upp);
-    return integrate(transf, y1, y2, rel_toler);
-}
-
 double integrateAdaptive(const IFunction& fnc, double x1, double x2, double reltoler)
 {
     if(x1==x2)
@@ -526,6 +487,33 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
     gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, &error, &neval);
     gsl_integration_cquad_workspace_free(ws);
     return result;
+}
+
+// integration transformation classes
+
+double ScaledIntegrandEndpointSing::x_from_y(const double y) const 
+{
+    if(y<0 || y>1)
+        throw std::invalid_argument("value out of range [0,1]");
+    return x_low + (x_upp-x_low) * y*y*(3-2*y);
+}
+
+// invert the transformation relation between x and y by solving a cubic equation
+double ScaledIntegrandEndpointSing::y_from_x(const double x) const 
+{
+    if(x<x_low || x>x_upp)
+        throw std::invalid_argument("value out of range [x_low,x_upp]");
+    if(x==x_low) return 0;
+    if(x==x_upp) return 1;
+    double phi=acos(1-2*(x-x_low)/(x_upp-x_low))/3.0;
+    return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
+}
+
+double ScaledIntegrandEndpointSing::value(const double y) const 
+{
+    const double x = x_from_y(y);
+    const double dx = (x_upp-x_low) * 6*y*(1-y);
+    return F(x) * dx;
 }
 
 // ----- derivatives and related fncs ------- //
@@ -560,7 +548,7 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
     fder2= (fplusd+fminusd-2*f0)/(delta*delta);
 }
 
-double PointNeighborhood::dx_to_posneg(double sgn) const
+double PointNeighborhood::dxToPosneg(double sgn) const
 {
     double s0 = sgn*f0, sder = sgn*fder, sder2 = sgn*fder2;
     if(s0>0)
@@ -580,7 +568,7 @@ double PointNeighborhood::dx_to_posneg(double sgn) const
     return sign(sder) * (delta + 2*s0/(sqrt(discr)+abs(sder)) );
 }
 
-double PointNeighborhood::dx_to_nearest_root() const
+double PointNeighborhood::dxToNearestRoot() const
 {
     double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation
     //dx_farthest_root= dx_nearest_root>0 ? gsl_neginf() : gsl_posinf();

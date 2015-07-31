@@ -1,5 +1,5 @@
 /** \file   math_core.h
-    \brief  essential math routines (e.g. root-finding, integration)
+    \brief  essential math routines (e.g., root-finding, integration)
     \date   2015
     \author Eugene Vasiliev
 */
@@ -93,16 +93,16 @@ public:
     PointNeighborhood(const IFunction& fnc, double x0);
 
     /// return the estimated offset from x0 to the value of x where the function is positive
-    double dx_to_positive() const {
-        return dx_to_posneg(+1); }
+    double dxToPositive() const {
+        return dxToPosneg(+1); }
     /// return the estimated offset from x0 to the value of x where the function is negative
-    double dx_to_negative() const {
-        return dx_to_posneg(-1); }
+    double dxToNegative() const {
+        return dxToPosneg(-1); }
     /// return the estimated offset from x0 to the nearest root of f(x)=0
-    double dx_to_nearest_root() const;
+    double dxToNearestRoot() const;
 private:
     double delta;   ///< a reasonably small value
-    double dx_to_posneg(double sgn) const;
+    double dxToPosneg(double sgn) const;
 };
 
 ///@}
@@ -124,12 +124,43 @@ double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
     to reach the required tolerance; integrable singularities are handled properly. */
 double integrateAdaptive(const IFunction& F, double x1, double x2, double rel_toler);
 
-/** integrate a function with a transformation that removes possible singularities
-    at the endpoints [x_low,x_upp], and the integral is computed over the interval [x1,x2] 
-    such than x_low<=x1<=x2<=x_upp. */
-double integrateScaled(const IFunction& F, double x1, double x2, 
-    double x_low, double x_upp, double rel_toler);
+/** Helper class for integrand transformations.
+    A function defined on a finite interval [x_low,x_upp], with possible integrable 
+    singularities at endpoints, can be integrated on the interval [x1,x2] 
+    (which may be narrower, i.e., x_low <= x1 <= x2 <= x_upp),
+    by applying the following transformation.
+    The integral  \f$  \int_{x1}^{x2} f(x) dx  \f$  is transformed into 
+    \f$  \int_{y1}^{y2} f(x(y)) (dx/dy) dy  \f$,  where  0 <= y <= 1,
+    \f$  x(y) = x_{low} + (x_{upp}-x_{low}) y^2 (3-2y)  \f$, and x1=x(y1), x2=x(y2). 
 
+    This class may be used with any integration routine as follows:
+    ~~~~
+    ScaledIntegrandEndpointSing transf(fnc, x_low, x_upp);
+    integrate*** (transf, transf.y_from_x(x1), transf.y_from_x(x2), ...)
+    ~~~~
+    Note that if x1==x_low then one may simply put 0 as the lower integration limit,
+    and similarly 1 for the upper limit if x2==x_upp.
+*/
+class ScaledIntegrandEndpointSing: public IFunctionNoDeriv {
+public:
+    ScaledIntegrandEndpointSing(const IFunction& _F, double low, double upp) : 
+        F(_F), x_low(low), x_upp(upp) {};
+
+    /// return the value of input function at the unscaled coordinate x(y)
+    /// times the conversion factor dx/dy
+    virtual double value(const double y) const;
+
+    // return the scaled variable y for the given original variable x
+    double y_from_x(const double x) const;
+
+    // return the original variable x for the given scaled variable y in [0,1]
+    double x_from_y(const double y) const;
+
+private:
+    const IFunction& F;
+    double x_low, x_upp;
+};
+    
 ///@}
 /// \name ------ linear regression -----
 ///@{

@@ -1,6 +1,8 @@
 #include "orbit.h"
 #include "potential_analytic.h"
 #include "potential_factory.h"
+#include "potential_dehnen.h"
+#include "potential_ferrers.h"
 #include "units.h"
 #include <cstdio>
 #include <iostream>
@@ -118,8 +120,10 @@ int main() {
     pots[2] = new potential::MiyamotoNagai(5.,2.,0.2);
     pots[3] = new potential::Logarithmic(1.,0.01,.8,.5);
     pots[4] = new potential::Logarithmic(1.,.7,.5);
-    pots[5] = make_galpot(test_galpot_params[0]);
-    pots[6] = make_galpot(test_galpot_params[1]);
+    pots[5] = new potential::Ferrers(1.,0.9,.7,.5);
+    pots[6] = new potential::Dehnen(2.,1.,.7,.5,1.5);
+    pots[7] = make_galpot(test_galpot_params[0]);
+    pots[8] = make_galpot(test_galpot_params[1]);
     std::cout<<std::setprecision(10);
     const double total_time=1000.;
     const double timestep=1.;

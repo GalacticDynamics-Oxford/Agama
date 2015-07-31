@@ -1,4 +1,5 @@
-/** \brief   Action-angle finders using Staeckel potential approximation
+/** \file    actions_staeckel.h
+    \brief   Action-angle finders using Staeckel potential approximation
     \author  Eugene Vasiliev
     \date    2015
  
@@ -19,7 +20,7 @@ of the original code remains.
 #include "potential_staeckel.h"
 #include "math_base.h"
 
-namespace actions{
+namespace actions {
 
 /// \name ------ Data structures for both Axisymmetric Staeckel and Fudge action-angle finders ------
 ///@{
@@ -127,7 +128,7 @@ AxisymFunctionFudge findIntegralsOfMotionAxisymFudge(
 ///@}
 /// \name -------- COMMON routines for Staeckel and Fudge action finders --------
 ///@{
-///   In what follows, "data" refers to either "AxisymFunctionStaeckel" or "AxisymFunctionFudge"
+///   In what follows, "fnc" refers to either "AxisymFunctionStaeckel" or "AxisymFunctionFudge"
 
 /** Compute the intervals of tau for which p^2(tau)>=0, 
     where  -gamma = tau_nu_min <= tau <= tau_nu_max <= -alpha  is the interval for the "nu" branch,
@@ -160,7 +161,7 @@ Angles computeAngles(const AxisymIntDerivatives& derI,
 ActionAngles computeActionAngles(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
 
 ///@}
-/// \name  ------- The driver routines that combine the above steps -------
+/// \name  ------- Stand-alone driver routines that combine the above steps -------
 ///@{
 
 /** Find exact actions in the Staeckel potential of oblate Perfect Ellipsoid */
@@ -188,6 +189,38 @@ ActionAngles axisymFudgeActionAngles(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, 
     double interfocalDistance=0);
+
+///@}
+/// \name  ------- Class interface to action/angle finders  -------
+///@{
+
+/// Action/angle finder for an Oblate Perfect Ellipsoid potential
+class ActionFinderAxisymStaeckel: public BaseActionFinder {
+public:
+    ActionFinderAxisymStaeckel(const potential::StaeckelOblatePerfectEllipsoid& potential) :
+        pot(potential) {};
+    virtual ~ActionFinderAxisymStaeckel() {};
+    virtual Actions actions(const coord::PosVelCyl& point) const {
+        return axisymStaeckelActions(pot, point); }
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
+        return axisymStaeckelActionAngles(pot, point); }
+private:
+    const potential::StaeckelOblatePerfectEllipsoid& pot;
+};
+
+/// Action/angle finder for a generic axisymmetric potential, based on Staeckel Fudge approximation
+class ActionFinderAxisymFudge: public BaseActionFinder {
+public:
+    ActionFinderAxisymFudge(const potential::BasePotential& potential) :
+        pot(potential) {};
+    virtual ~ActionFinderAxisymFudge() {};
+    virtual Actions actions(const coord::PosVelCyl& point) const {
+        return axisymFudgeActions(pot, point); }
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
+        return axisymFudgeActionAngles(pot, point); }
+private:
+    const potential::BasePotential& pot;
+};
 
 ///@}
 /// \name  ------- Routines for estimating the interfocal distance for the Fudge approximation -------

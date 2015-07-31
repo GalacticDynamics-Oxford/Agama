@@ -7,11 +7,11 @@
 #include <gsl/gsl_sf_hyperg.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
+#include <gsl/gsl_sf_ellint.h>
 
 namespace math {
 
-double legendrePoly(const int l, const int m, const double theta)
-{
+double legendrePoly(const int l, const int m, const double theta) {
     return gsl_sf_legendre_sphPlm(l, m, cos(theta));
 }
 
@@ -75,23 +75,36 @@ double hypergeom2F1(const double a, const double b, const double c, const double
     return NAN;  // not defined for x>=1
 }
 
-double factorial(const unsigned int n)
-{
+double factorial(const unsigned int n) {
     return gsl_sf_fact(n);
 }
 
-double gamma(const double x)
-{
+double gamma(const double x) {
     return gsl_sf_gamma(x);
 }
 
-double digamma(const double x)
-{
+double digamma(const double x) {
     return gsl_sf_psi(x);
 }
 
-double digamma(const int x)
-{
+double digamma(const int x) {
     return gsl_sf_psi_int(x);
 }
+
+double ellintK(const double k) {
+    return gsl_sf_ellint_Kcomp(k, GSL_PREC_SINGLE);
+}
+
+double ellintE(const double k) {
+    return gsl_sf_ellint_Ecomp(k, GSL_PREC_SINGLE);
+}
+
+double ellintF(const double phi, const double k) {
+    return gsl_sf_ellint_F(phi, k, GSL_PREC_SINGLE);
+}
+
+double ellintE(const double phi, const double k) {
+    return gsl_sf_ellint_E(phi, k, GSL_PREC_SINGLE);
+}
+
 }  // namespace

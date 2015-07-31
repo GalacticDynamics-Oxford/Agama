@@ -111,7 +111,7 @@ bool test_actions(const potential::BasePotential& potential,
     acts.finish();
     angs.finish();
     double scatter = (acts.disp.Jr+acts.disp.Jz) / (acts.avg.Jr+acts.avg.Jz);
-    double scatterNorm = 0.33 * sqrt( (acts.avg.Jr+acts.avg.Jz) / (acts.avg.Jr+acts.avg.Jz+acts.avg.Jphi) );
+    double scatterNorm = 0.33 * sqrt( (acts.avg.Jr+acts.avg.Jz) / (acts.avg.Jr+acts.avg.Jz+fabs(acts.avg.Jphi)) );
     bool tolerable = scatter < scatterNorm && 
         angs.dispr < 0.1 && angs.dispz < 1.0 && angs.dispphi < 0.05;
     axis_a/=traj.size();
@@ -172,7 +172,7 @@ const char* test_galpot_params =
 //double ic[6] = {11.3472, 0, 1.88637, -103.99, 172.338, 64.0454};     // Jr=Jz=0.2,Jphi=2
 //double ic[6] = {11.2429, 0, -4.34075, -183.643, 173.937, -42.1339};  // fish orbit R=6-20, z<=12, in PJM11_best, Jr=Jz=0.5,Jphi=2
 //double ic[6] = {5.04304, 0, 3.72763, -232.44, 193.886, -2.35769};    // Jr=Jz=0.5, Jphi=1
-double ic[6] = {3.46726, 0, -0.133605, -84.7102, 282.002, 31.8277};
+double ic[6] = {3.46726, 0, -0.133605, -84.7102, -282.002, 31.8277};
 
 double ics[30][6] = {
 {5.06616, 0, -0.312879, 71.3196, 193.001, 1.10671},

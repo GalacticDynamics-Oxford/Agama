@@ -32,7 +32,7 @@ const potential::BasePotential* write_read(const potential::BasePotential& pot)
 }
 
 /// create a triaxial Hernquist model
-void make_hernquist(int nbody, double q, double p, particles::PointMassSet<coord::Car>& output)
+void make_hernquist(int nbody, double q, double p, particles::PointMassArrayCar& output)
 {
     output.data.clear();
     for(int i=0; i<nbody; i++) {
@@ -46,7 +46,7 @@ void make_hernquist(int nbody, double q, double p, particles::PointMassSet<coord
 }
 
 const potential::BasePotential* create_from_file(
-    const particles::PointMassSet<coord::Car>& points, const potential::PotentialType type)
+    const particles::PointMassArrayCar& points, const potential::PotentialType type)
 {
     const std::string fileName = "test.txt";
     particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite("Text", fileName);
@@ -112,7 +112,7 @@ int main() {
     ok &= test_suite(potential::SplineExp(20, 6, deh0), deh0, 5e-5);
     ok &= test_suite(potential::CylSplineExp(20, 20, 6, 
         static_cast<const potential::BaseDensity&>(deh0)), deh0, 1e-4);  // this forces potential to be computed via integration of density over volume
-    particles::PointMassSet<coord::Car> points;
+    particles::PointMassArrayCar points;
     const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
     make_hernquist(100000, 0.8, 0.6, points);
     const potential::BasePotential* p = create_from_file(points, potential::PT_BSE);
