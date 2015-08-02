@@ -1,42 +1,60 @@
+#include "orbit.h"
 #include "potential_analytic.h"
 #include "potential_factory.h"
 #include "potential_dehnen.h"
 #include "potential_ferrers.h"
 #include "units.h"
-#include "math_core.h"
-#include "coord_utils.h"
+#include <cstdio>
 #include <iostream>
 #include <iomanip>
 #include <fstream>
 #include <cmath>
 
+const double integr_eps=1e-8;  // integration accuracy parameter
 const double eps=1e-6;  // accuracy of comparison
 
 template<typename coordSysT>
 bool test_potential(const potential::BasePotential* potential,
-    const coord::PosVelT<coordSysT>& point)
+    const coord::PosVelT<coordSysT>& initial_conditions,
+    const double total_time, const double timestep, const bool output)
 {
     if(potential==NULL) return true;
-    bool ok=true;
-    std::cout << potential->name()<<"  "<<coordSysT::name()<<"  " << point;
-    double E = potential::totalEnergy(*potential, point);
-    if((potential->symmetry() & potential::ST_ZROTSYM) == potential::ST_ZROTSYM) {  // test only axisymmetric potentials
-        try{
-            double Rc  = potential::R_circ(*potential, E);
-            double vc  = potential::v_circ(*potential, Rc);
-            double E1  = potential::value(*potential, coord::PosCyl(Rc, 0, 0)) + 0.5*vc*vc;
-            double Lc1 = potential::L_circ(*potential, E);
-            double Rc1 = potential::R_from_Lz(*potential, Lc1);
-            ok &= math::fcmp(Rc, Rc1, 1e-11)==0 && math::fcmp(E, E1, 1e-11)==0;
-            if(!ok) std::cout << "\033[1;31m ** \033[0m"
-                "E="<<E<<", Rc(E)="<<Rc<<", E(Rc)="<<E1<<", Lc(E)="<<Lc1<<", Rc(Lc)="<<Rc1;
-        }
-        catch(std::exception &e) {
-            std::cout << e.what();
+    std::cout << potential->name()<<"  "<<coordSysT::name()<<" (";
+    double ic[6];
+    initial_conditions.unpack_to(ic);
+    for(int k=0; k<6; k++) std::cout<<" "<<ic[k];
+    std::cout << "):  "<<std::flush;
+    std::vector<coord::PosVelT<coordSysT> > traj;
+    int numsteps = orbit::integrate(*potential, initial_conditions, total_time, timestep, traj, integr_eps);
+    double avgH=0, avgLz=0, dispH=0, dispLz=0;
+    for(size_t i=0; i<traj.size(); i++) {
+        double H =potential::totalEnergy(*potential, traj[i]);
+        double Lz=coord::Lz(traj[i]);
+        avgH +=H;  dispH +=pow_2(H);
+        avgLz+=Lz; dispLz+=pow_2(Lz);
+        if(output) {
+            double xv[6];
+            coord::toPosVelCar(traj[i]).unpack_to(xv);
+            std::cout << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
+                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"   "<<H<<" "<<Lz<<" "<<potential->density(traj[i])<<"\n";
         }
     }
-    std::cout << "\n";
-    return ok;
+    avgH/=traj.size();
+    avgLz/=traj.size();
+    dispH/=traj.size();
+    dispLz/=traj.size();
+    dispH= sqrt(std::max<double>(0, dispH -pow_2(avgH)));
+    dispLz=sqrt(std::max<double>(0, dispLz-pow_2(avgLz)));
+    bool completed = traj.size()>0.99*total_time/timestep;
+    if(completed)
+        std::cout <<numsteps<<" steps,  ";
+    else if(numsteps>0)
+        std::cout <<"CRASHED after "<<numsteps<<" steps,  ";
+    else 
+        std::cout <<"FAILED,  ";
+    std::cout << "E=" <<avgH <<" +- "<<dispH<<",  Lz="<<avgLz<<" +- "<<dispLz<<"\n";
+    return completed && dispH<eps && 
+        (dispLz<eps || ((potential->symmetry() & potential::ST_AXISYMMETRIC) == 0));
 }
 
 const potential::BasePotential* make_galpot(const char* params)
@@ -106,13 +124,16 @@ int main() {
     pots[6] = new potential::Dehnen(2.,1.,.7,.5,1.5);
     pots[7] = make_galpot(test_galpot_params[0]);
     pots[8] = make_galpot(test_galpot_params[1]);
+    std::cout<<std::setprecision(10);
+    const double total_time=1000.;
+    const double timestep=1.;
+    bool output=false;
     bool allok=true;
-    std::cout << std::setprecision(10);
     for(int ip=0; ip<numpotentials; ip++) {
         for(int ic=0; ic<numtestpoints; ic++) {
-            allok &= test_potential(pots[ip], coord::PosVelCar(posvel_car[ic]));
-            allok &= test_potential(pots[ip], coord::PosVelCyl(posvel_cyl[ic]));
-            allok &= test_potential(pots[ip], coord::PosVelSph(posvel_sph[ic]));
+            allok &= test_potential(pots[ip], coord::PosVelCar(posvel_car[ic]), total_time, timestep, output);
+            allok &= test_potential(pots[ip], coord::PosVelCyl(posvel_cyl[ic]), total_time, timestep, output);
+            allok &= test_potential(pots[ip], coord::PosVelSph(posvel_sph[ic]), total_time, timestep, output);
         }
     }
     if(allok)

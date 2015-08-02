@@ -22,7 +22,6 @@ double Dehnen::densityCar(const coord::PosCar& pos) const
 }
 
 /// \cond INTERNAL_DOCS
-double pow_3(double x) { return x*x*x; }
 
 class DehnenIntegrandPhi: public math::IFunctionNoDeriv {
     double X2, Y2, Z2, gamma, q2, p2;

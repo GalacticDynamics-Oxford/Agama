@@ -10,6 +10,8 @@ inline double pow_2(double x) { return x*x; }
 inline float pow_2(float x) { return x*x; }
 inline int pow_2(int x) { return x*x; }
 inline unsigned int pow_2(unsigned int x) { return x*x; }
+/// convenience function for raising a number to the 3rd power
+inline double pow_3(double x) { return x*x*x; }
 
 #ifndef INFINITY
 #define INFINITY 1e10000

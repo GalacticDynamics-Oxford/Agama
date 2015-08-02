@@ -66,6 +66,79 @@ double v_circ(const BasePotential& potential, double radius)
     return sqrt(radius*deriv.dR);
 }
 
+class RcircRootFinder: public math::IFunction {
+public:
+    RcircRootFinder(const BasePotential& _poten, double _E) :
+        poten(_poten), E(_E) {};
+    virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
+        double Phi;
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
+        if(val) {
+            if(R==INFINITY && !math::isFinite(Phi))
+                *val = -1-fabs(E);  // safely negative value
+            else
+                *val = 2*(E-Phi) - (R>0 && R!=INFINITY ? R*grad.dR : 0);
+        }
+        if(deriv)
+            *deriv = -3*grad.dR - R*hess.dR2;
+        if(deriv2)
+            *deriv2=NAN;
+    }
+    virtual int numDerivs() const { return 1; }
+private:
+    const BasePotential& poten;
+    const double E;
+};
+
+class RfromLzRootFinder: public math::IFunction {
+public:
+    RfromLzRootFinder(const BasePotential& _poten, double _Lz) :
+        poten(_poten), Lz2(_Lz*_Lz) {};
+    virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
+        double Phi;
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
+        if(val) {
+            if(R==INFINITY)
+                *val = -1-Lz2;  // safely negative value
+            else
+                *val = Lz2 - (R>0 ? pow_3(R)*grad.dR : 0);
+        }
+        if(deriv)
+            *deriv = pow_2(R)*( 3*grad.dR - R*hess.dR2);
+        if(deriv2)
+            *deriv2=NAN;
+    }
+    virtual int numDerivs() const { return 1; }
+private:
+    const BasePotential& poten;
+    const double Lz2;
+};
+    
+double R_circ(const BasePotential& potential, double energy) {
+    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+        throw std::invalid_argument("Potential is not axisymmetric, "
+            "no meaningful definition of circular orbit is possible");
+    return math::findRoot(RcircRootFinder(potential, energy), 0, INFINITY, EPSREL_POTENTIAL_INT);
+}
+
+double L_circ(const BasePotential& potential, double energy) {
+    double R = R_circ(potential, energy);
+    return R * v_circ(potential, R);
+}
+
+double R_from_Lz(const BasePotential& potential, double Lz) {
+    if(Lz==0)
+        return 0;
+    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+        throw std::invalid_argument("Potential is not axisymmetric, "
+            "no meaningful definition of circular orbit is possible");
+    return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_POTENTIAL_INT);
+}
+
 
 // routines for integrating density over volume
 class DensityAzimuthalIntegrand: public math::IFunctionNoDeriv {

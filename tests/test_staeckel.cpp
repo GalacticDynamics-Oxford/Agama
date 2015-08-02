@@ -8,8 +8,9 @@
 #include <cmath>
 
 const double integr_eps=1e-8;        // integration accuracy parameter
-const double eps=1e-6;               // accuracy of comparison
+const double eps=1e-7;               // accuracy of comparison
 const double axis_a=1.6, axis_c=1.0; // axes of perfect ellipsoid
+const bool output=false;             // whether to create text files with orbits
 
 // helper class to compute scatter in actions
 class actionstat{
@@ -36,7 +37,7 @@ public:
 template<typename coordSysT>
 bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& potential,
     const coord::PosVelT<coordSysT>& initial_conditions,
-    const double total_time, const double timestep, const bool output)
+    const double total_time, const double timestep)
 {
     std::vector<coord::PosVelT<coordSysT> > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
@@ -70,11 +71,13 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
                 angf.thetaphi = math::unwrapAngle(a.thetaphi, angf.thetaphi);
             }
             if(output) {
-                double xv[6];
-                traj[i].unpack_to(xv);
-                strm << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
-                    xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"  "<<
-                    angf.thetar<<" "<<angf.thetaz<<" "<<angf.thetaphi<<"\n";
+                const coord::PosVelCyl pc = coord::toPosVelCyl(traj[i]);
+                const coord::PosVelProlSph pp = coord::toPosVel<coord::Cyl,coord::ProlSph>
+                    (pc, potential.coordsys());
+                strm << i*timestep<<"   "<<
+                    pc.phi<<" "<<pc.vphi<<" "<<pp.lambda<<" "<<pp.nu<<" "<<pp.lambdadot<<" "<<pp.nudot<<"  "<<
+                    angf.thetar<<" "<<angf.thetaz<<" "<<angf.thetaphi<<"  "<<
+                "\n";
             }
         }
         catch(std::exception &e) {
@@ -85,7 +88,10 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     stats.finish();
     statf.finish();
     bool ok= stats.disp.Jr<eps && stats.disp.Jz<eps && stats.disp.Jphi<eps && !ex_afs
-          && statf.disp.Jr<eps && statf.disp.Jz<eps && statf.disp.Jphi<eps && !ex_aff;
+          && statf.disp.Jr<eps && statf.disp.Jz<eps && statf.disp.Jphi<eps && !ex_aff
+          && fabs(stats.avg.Jr-statf.avg.Jr)<eps
+          && fabs(stats.avg.Jz-statf.avg.Jz)<eps
+          && fabs(stats.avg.Jphi-statf.avg.Jphi)<eps;
     std::cout << coordSysT::name() << ", Exact"
     ":  Jr="  <<stats.avg.Jr  <<" +- "<<stats.disp.Jr<<
     ",  Jz="  <<stats.avg.Jz  <<" +- "<<stats.disp.Jz<<
@@ -102,12 +108,11 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential,
 {
     const double total_time=100.;
     const double timestep=1./8;
-    bool output=false;
     bool ok=true;
     std::cout << "   ===== "<<title<<" =====\n";
-    ok &= test_oblate_staeckel(potential, coord::toPosVelCar(initcond), total_time, timestep, output);
-    ok &= test_oblate_staeckel(potential, coord::toPosVelCyl(initcond), total_time, timestep, output);
-    ok &= test_oblate_staeckel(potential, coord::toPosVelSph(initcond), total_time, timestep, output);
+    ok &= test_oblate_staeckel(potential, coord::toPosVelCar(initcond), total_time, timestep);
+    ok &= test_oblate_staeckel(potential, coord::toPosVelCyl(initcond), total_time, timestep);
+    ok &= test_oblate_staeckel(potential, coord::toPosVelSph(initcond), total_time, timestep);
     return ok;
 }
 

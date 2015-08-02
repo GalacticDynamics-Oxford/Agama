@@ -38,6 +38,7 @@ private:
     const double mass;
     /** prolate spheroidal coordinate system corresponding to the oblate density profile */
     const coord::ProlSph coordSys;
+    const double minorAxis;
 
     /** implementations of the standard triad of coordinate transformations */
     virtual void evalCar(const coord::PosCar &pos,

@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <stdexcept>
 
+
 const double eps=1e-10;  // accuracy of comparison
 
 /// some test functions that compute values, gradients and hessians in various coord systems
@@ -207,12 +208,33 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     return ok||isSingular(srcpoint);
 }
 
-bool test_prol(double lambda, double nu, double alpha, double gamma) {
-    const coord::ProlSph cs(alpha, gamma);
+bool test_prol() {
+    const coord::ProlSph cs(1.6*1.6-1);
+    double lambda=1.5600000000780003, nu=-1.5599999701470495;
     const coord::PosProlSph pp(lambda, nu, 0, cs);
     const coord::PosCyl pc=coord::toPosCyl(pp);
     const coord::PosProlSph ppnew=coord::toPos<coord::Cyl,coord::ProlSph>(pc, cs);
-    return fabs(ppnew.lambda-lambda)<1e-16 && fabs(ppnew.nu-nu)<1e-16;
+    return fabs(ppnew.lambda-lambda)<3e-16 && fabs(ppnew.nu-nu)<3e-16;
+}
+
+bool test_prol2(const coord::PosCyl& src) {
+    const coord::ProlSph cs(1.6*1.6-1);
+    coord::PosDerivT <coord::Cyl, coord::ProlSph> derivCtoP;
+    coord::PosDeriv2T<coord::Cyl, coord::ProlSph> deriv2CtoP;
+    const coord::PosProlSph pp = coord::toPosDeriv<coord::Cyl, coord::ProlSph>(src, cs, &derivCtoP, &deriv2CtoP);
+    coord::PosDerivT <coord::ProlSph, coord::Cyl> derivPtoC;
+    coord::PosDeriv2T<coord::ProlSph, coord::Cyl> deriv2PtoC;
+    const coord::PosCyl pc = coord::toPosDeriv<coord::ProlSph, coord::Cyl>(pp, &derivPtoC, &deriv2PtoC);
+    coord::GradCyl gradCyl, gradCylNew;
+    coord::HessCyl hessCyl;
+    coord::GradProlSph gradProl;
+    MyScalarFunction<coord::Cyl> Fnc;
+    Fnc.evalScalar(src, NULL, &gradCyl, &hessCyl);
+    gradProl   = coord::toGrad<coord::Cyl, coord::ProlSph> (gradCyl, derivPtoC);
+    gradCylNew = coord::toGrad<coord::ProlSph, coord::Cyl> (gradProl, derivCtoP);
+    bool samepos  = coord::equalPos(src, pc, eps);
+    bool samegrad = coord::equalGrad(gradCyl, gradCylNew, eps);
+    return samepos && samegrad;
 }
 
 /// define test suite in terms of points for various coord systems
@@ -238,8 +260,10 @@ const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
 
 int main() {
     bool passed=true;
-    passed &= test_prol(2.5600000000780003, 2.5599999701470493, -(1.6*1.6), -1);  // testing a certain bugfix
+    passed &= test_prol();  // testing a certain bugfix
     if(!passed) std::cout << "ProlSph => Cyl => ProlSph failed for a nearly-degenerate case\n";
+    passed &= test_prol2(coord::PosCyl(1.2,-2.3,3.4));  // testing negative z
+    if(!passed) std::cout << "ProlSph => Cyl => ProlSph failed for z<0\n";
 
     std::cout << " ======= Testing conversion of position/velocity points =======\n";
     for(int n=0; n<numtestpoints; n++) {

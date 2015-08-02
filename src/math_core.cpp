@@ -513,7 +513,7 @@ double ScaledIntegrandEndpointSing::value(const double y) const
 {
     const double x = x_from_y(y);
     const double dx = (x_upp-x_low) * 6*y*(1-y);
-    return F(x) * dx;
+    return dx==0 ? 0 : F(x)*dx;
 }
 
 // ----- derivatives and related fncs ------- //

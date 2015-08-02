@@ -326,14 +326,24 @@ inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph
 {  return value(potential, p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
 
 
-/** Compute circular velocity at a given radius in equatorial plane */
-double v_circ(const BasePotential& potential, double radius);
-
-/** Find radius corresponding to the given enclosed mass */
+/** Find (spherical) radius corresponding to the given enclosed mass */
 double getRadiusByMass(const BaseDensity& dens, const double mass);
 
 /** Find the asymptotic power-law index of density profile at r->0 */
 double getInnerDensitySlope(const BaseDensity& dens);
+
+
+/** Compute circular velocity at a given (cylindrical) radius in equatorial plane */
+double v_circ(const BasePotential& potential, double radius);
+
+/** Compute angular momentum of a circular orbit in equatorial plane for a given value of energy */
+double L_circ(const BasePotential& potential, double energy);
+
+/** Compute cylindrical radius of a circular orbit in equatorial plane for a given value of energy */
+double R_circ(const BasePotential& potential, double energy);
+
+/** Compute cylindrical radius of an orbit in equatorial plane for a given z-component of angular momentum */
+double R_from_Lz(const BasePotential& potential, double L_z);
 
 ///@}
 }  // namespace potential

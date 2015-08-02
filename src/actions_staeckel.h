@@ -17,18 +17,18 @@ of the original code remains.
 */
 #pragma once
 #include "actions_base.h"
+#include "actions_interfocal_distance_finder.h"
 #include "potential_staeckel.h"
-#include "math_base.h"
 
 namespace actions {
 
 /// \name ------ Data structures for both Axisymmetric Staeckel and Fudge action-angle finders ------
 ///@{
 
-/** integration intervals for actions and angles: x=tau+gamma, and tau is lambda or nu 
+/** integration intervals for actions and angles
     (shared between Staeckel and Fudge action finders). */
 struct AxisymIntLimits {
-    double xlambda_min, xlambda_max, xnu_min, xnu_max;
+    double lambda_min, lambda_max, nu_min, nu_max;
 };
 
 /** Derivatives of integrals of motion over actions (do not depend on angles).
@@ -55,11 +55,10 @@ struct AxisymGenFuncDerivatives {
 class AxisymFunctionBase: public math::IFunction {
 public:
     coord::PosVelProlSph point; ///< position/derivative in prolate spheroidal coordinates
-    const double signz;         ///< sign of z coordinate (needed because it is lost in prolate spheroidal coords)
     const double E;             ///< total energy
     const double Lz;            ///< z-component of angular momentum
-    AxisymFunctionBase(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz) :
-        point(_point), signz(_signz), E(_E), Lz(_Lz) {};
+    AxisymFunctionBase(const coord::PosVelProlSph& _point, double _E, double _Lz) :
+        point(_point), E(_E), Lz(_Lz) {};
 };
 
 
@@ -73,9 +72,9 @@ class AxisymFunctionStaeckel: public AxisymFunctionBase {
 public:
     const double I3;                        ///< third integral
     const math::IFunction& fncG;       ///< single-variable function of a Staeckel potential
-    AxisymFunctionStaeckel(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
+    AxisymFunctionStaeckel(const coord::PosVelProlSph& _point, double _E, double _Lz,
         double _I3, const math::IFunction& _fncG) :
-        AxisymFunctionBase(_point, _signz, _E, _Lz), I3(_I3), fncG(_fncG) {};
+        AxisymFunctionBase(_point, _E, _Lz), I3(_I3), fncG(_fncG) {};
 
     /** auxiliary function that enters the definition of canonical momentum for 
         for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
@@ -102,9 +101,9 @@ class AxisymFunctionFudge: public AxisymFunctionBase {
 public:
     const double Ilambda, Inu;              ///< approximate integrals of motion for two quasi-separable directions
     const potential::BasePotential& poten;  ///< gravitational potential
-    AxisymFunctionFudge(const coord::PosVelProlSph& _point, double _signz, double _E, double _Lz,
+    AxisymFunctionFudge(const coord::PosVelProlSph& _point, double _E, double _Lz,
         double _Ilambda, double _Inu, const potential::BasePotential& _poten) :
-        AxisymFunctionBase(_point, _signz, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
+        AxisymFunctionBase(_point, _E, _Lz), Ilambda(_Ilambda), Inu(_Inu), poten(_poten) {};
 
     /** Auxiliary function F analogous to that of Staeckel action finder:
         namely, the momentum is given by  p_tau^2 = F(tau) / (2*(tau+alpha)^2*(tau+gamma)),
@@ -208,39 +207,25 @@ private:
     const potential::StaeckelOblatePerfectEllipsoid& pot;
 };
 
-/// Action/angle finder for a generic axisymmetric potential, based on Staeckel Fudge approximation
+/** Action/angle finder for a generic axisymmetric potential, based on Staeckel Fudge approximation.
+    It is more suitable for massive computation in a fixed potential than just using 
+    the standalone routines, because it estimates the interfocal distance using a pre-computed 
+    interpolation grid, rather than doing it individually for each point. This results in 
+    up to 40% speedup in action computation, for a negligible overhead during initialization.
+*/
 class ActionFinderAxisymFudge: public BaseActionFinder {
 public:
     ActionFinderAxisymFudge(const potential::BasePotential& potential) :
-        pot(potential) {};
+        pot(potential), finder(potential) {};
     virtual ~ActionFinderAxisymFudge() {};
     virtual Actions actions(const coord::PosVelCyl& point) const {
-        return axisymFudgeActions(pot, point); }
+        return axisymFudgeActions(pot, point, finder.value(point)); }
     virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
-        return axisymFudgeActionAngles(pot, point); }
+        return axisymFudgeActionAngles(pot, point, finder.value(point)); }
 private:
-    const potential::BasePotential& pot;
+    const potential::BasePotential& pot;    ///< the generic axisymmetric potential in which actions are computed
+    const InterfocalDistanceFinder finder;  ///< fast estimator of interfocal distance
 };
-
-///@}
-/// \name  ------- Routines for estimating the interfocal distance for the Fudge approximation -------
-///@{
-
-/** Estimate the orbit extent in R and z directions; on success, return true 
-    and fill the output arguments with the coordinates of closest and farthest corner point */
-bool estimateOrbitExtent(
-    const potential::BasePotential& potential, const coord::PosVelCyl& point,
-    double& R1, double& R2, double& z1, double& z2);
-
-/** Estimate the interfocal distance using the potential derivatives (equation 9 in Sanders 2012)
-    averaged over the given box in the meridional plane  */
-double estimateInterfocalDistanceBox(
-    const potential::BasePotential& potential, 
-    double R1, double R2, double z1, double z2);
-
-/** Estimate the orbit extent and then estimate the best-fit interfocal distance over this region */
-double estimateInterfocalDistance(
-    const potential::BasePotential& potential, const coord::PosVelCyl& point);
 
 ///@}
 }  // namespace actions

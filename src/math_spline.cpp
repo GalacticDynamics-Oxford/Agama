@@ -835,6 +835,67 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
     if(z_yy!=NULL) *z_yy=zd_yy*du*du;
 }
 
+// ------ LINEAR INTERPOLATION IN 2D ------ //
+
+LinearInterpolator2d::LinearInterpolator2d(
+    const std::vector<double>& xvalues, const std::vector<double>& yvalues,
+    const std::vector< std::vector<double> >& zvalues)
+{
+    const size_t xsize = xvalues.size();
+    const size_t ysize = yvalues.size();
+    if(xsize<2 || ysize<2)
+        throw std::invalid_argument("Error in 2d interpolator initialization: number of nodes should be >=2 in each direction");
+    if(zvalues.size() != xsize)
+        throw std::invalid_argument("Error in 2d interpolator initialization: x and z array lengths differ");
+    xval = xvalues;
+    yval = yvalues;
+    zval.resize(xsize*ysize);
+    for(size_t i=0; i<xsize; i++) {
+        if(zvalues[i].size() != ysize)
+            throw std::invalid_argument("Error in 2d interpolator initialization: y and z array lengths differ");
+        for(size_t j=0; j<ysize; j++)
+            zval[INDEX_2D(i, j, xsize)] = zvalues[i][j];
+    }
+}
+
+void LinearInterpolator2d::evalDeriv(const double x, const double y, 
+    double *z, double *z_x, double *z_y) const
+{
+    if(isEmpty())
+        throw std::range_error("Empty 2d interpolator");
+    if(x<xval.front() || x>xval.back() || y<yval.front() || y>yval.back()) {
+        if(z)
+            *z = NAN;
+        if(z_x)
+            *z_x = NAN;
+        if(z_y)
+            *z_y = NAN;
+        return;
+    }
+    const size_t xsize = xval.size();
+    // First compute the indices into the data arrays where we are interpolating
+    const size_t xi = binSearch(x, xval);
+    const size_t yi = binSearch(y, yval);
+    // Find the minimum and maximum values on the grid cell in each dimension
+    const double zlowlow = zval[INDEX_2D(xi, yi, xsize)];
+    const double zlowupp = zval[INDEX_2D(xi, yi + 1, xsize)];
+    const double zupplow = zval[INDEX_2D(xi + 1, yi, xsize)];
+    const double zuppupp = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
+    // Get the width and height of the grid cell
+    const double dx = xval[xi+1] - xval[xi];
+    const double dy = yval[yi+1] - yval[yi];
+    // t and u are the positions within the grid cell at which we are computing
+    // the interpolation, in units of grid cell size
+    const double t = (x - xval[xi]) / dx;
+    const double u = (y - yval[yi]) / dy;
+    if(z)
+        *z = (1-t)*(1-u)*zlowlow + t*(1-u)*zupplow + (1-t)*u*zlowupp + t*u*zuppupp;
+    if(z_x)
+        *z_x = (-(1-u)*zlowlow + (1-u)*zupplow - u*zlowupp + u*zuppupp) / dx;
+    if(z_y)
+        *z_y = (-(1-t)*zlowlow - t*zupplow + (1-t)*zlowupp + t*zuppupp) / dy;
+}
+
 //------------ GENERATION OF UNEQUALLY SPACED GRIDS ------------//
 
 // Creation of grid with exponentially increasing cells

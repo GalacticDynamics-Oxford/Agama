@@ -13,8 +13,10 @@
 const double integr_eps=1e-8;  // integration accuracy parameter
 const double eps=1e-6;  // accuracy of comparison
 const units::Units unit(0.2*units::Kpc, 100*units::Myr);
-//#define SINGLEORBIT
 int numActionEval=0;
+
+//#define SINGLEORBIT
+//#define INPUTFILE
 
 // helper class to compute scatter in actions
 class actionstat{
@@ -67,7 +69,7 @@ public:
 
 bool test_actions(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions,
-    const double total_time, const double timestep)
+    const double total_time, const double timestep, const actions::BaseActionFinder& actFinder)
 {
     std::vector<coord::PosVelCar > traj;
     clock_t t_begin = std::clock();
@@ -82,16 +84,19 @@ bool test_actions(const potential::BasePotential& potential,
     anglestat angs;
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl p=coord::toPosVelCyl(traj[i]);
+#if 0
         double R1, R2, z1, z2;
         if(!actions::estimateOrbitExtent(potential, p, R1, R2, z1, z2)) {
             R1=R2=p.R; z1=z2=p.z;
         }
         double ifd=actions::estimateInterfocalDistanceBox(potential, R1, R2, z1, z2);
         axis_a+=ifd;
-        //actions::Actions a=actions::axisymFudgeActions(potential, p, ifd);
         actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p, ifd);
-        acts.add(a);
+#else
+        actions::ActionAngles a=actFinder.actionAngles(p);
+#endif
         angs.add(i*timestep*unit.to_Kpc/unit.to_kms, a);
+        acts.add(a);
         numActionEval++;
 #ifdef SINGLEORBIT
         coord::GradCyl grad;
@@ -176,7 +181,7 @@ double ic[6] = {3.46726, 0, -0.133605, -84.7102, -282.002, 31.8277};
 
 double ics[30][6] = {
 {5.06616, 0, -0.312879, 71.3196, 193.001, 1.10671},
-{8.0978, 0, 0.547581, 6.45421, 241.492, 10.9483},
+{8.0978, 0, 0.547581, 6.45421, -241.492, 10.9483},
 {8.44679, 0, -1.20714, -9.07666, 231.514, -71.0561},
 {8.62508, 0, 0.0394613, -10.2208, 226.728, 10.8331},
 {8.05243, 0, -1.02207, 16.3575, 242.852, 44.3512},
@@ -203,7 +208,7 @@ double ics[30][6] = {
 {31.2967, 0, -4.05745, 108.374, 93.7265, 217.896},
 {60.7817, 0, 13.4328, 144.552, 48.2601, 4.20559},
 {43.6769, 0, -46.8767, -53.9903, 67.1596, 208.135},
-{28.0207, 0, -19.3931, -101.342, 139.579, 30.7491},
+{28.0207, 0, -19.3931, -101.342, -139.579, 30.7491},
 {36.3541, 0, -58.4024, 37.6475, 107.584, -191.881} };
 
 int main() {
@@ -213,11 +218,12 @@ int main() {
     const double total_time=4. * unit.from_Kpc/unit.from_kms;
     const int numsteps=1000;
     const double timestep=total_time/numsteps;
+    actions::ActionFinderAxisymFudge actFinder(*pot);
     clock_t clockbegin=std::clock();
 #ifndef SINGLEORBIT
 #ifdef INPUTFILE
     std::ifstream icfile("ic.dat");
-    while(icfile) {
+    while(!icfile.eof()) {
         double J[3],ic[6];
         icfile >> ic[0]>>ic[1]>>ic[2]>>ic[3]>>ic[4]>>ic[5]>>J[0]>>J[1]>>J[2];
         std::cout<<J[0]<<" "<<J[1]<<" "<<J[2]<<"  ";
@@ -233,7 +239,7 @@ int main() {
             ic[i]   *= unit.from_Kpc;
             ic[i+3] *= unit.from_kms;
         }
-        allok &= test_actions(*pot, coord::PosVelCar(ic), total_time, timestep);
+        allok &= test_actions(*pot, coord::PosVelCar(ic), total_time, timestep, actFinder);
     }
     std::cout << numActionEval * 1.0*CLOCKS_PER_SEC / (std::clock()-clockbegin) << " actions per second\n";
     if(allok)

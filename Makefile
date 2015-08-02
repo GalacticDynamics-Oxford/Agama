@@ -31,6 +31,7 @@ SOURCES   = coord.cpp \
             particles_io.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \
+            actions_interfocal_distance_finder.cpp \
             math_core.cpp \
             math_spline.cpp \
             math_specfunc.cpp \

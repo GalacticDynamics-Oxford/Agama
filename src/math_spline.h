@@ -98,6 +98,47 @@ private:
 };
 
 
+/** Two-dimensional bilinear interpolator */
+class LinearInterpolator2d {
+public:
+    LinearInterpolator2d() {};
+    /** Initialize a 2d linear interpolator from the provided values of x, y and z.
+        The latter is 2d array with the following indexing convention:  z[i][j] = f(x[i],y[j]).
+        Values of x and y arrays should monotonically increase.
+    */
+    LinearInterpolator2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
+        const std::vector< std::vector<double> >& zvalues);
+    
+    /** compute the value of interpolator and optionally its derivatives at point x,y;
+        if the input location is outside the definition region, the result is NaN. 
+        Any combination of value and first derivatives is possible: 
+        if any of them is not needed, the corresponding pointer should be set to NULL. 
+     */
+    void evalDeriv(const double x, const double y, 
+                   double* value=0, double* deriv_x=0, double* deriv_y=0) const;
+    
+    /** shortcut for computing the value of interpolator */
+    double value(const double x, const double y) const {
+        double v;
+        evalDeriv(x, y, &v);
+        return v;
+    }
+    
+    /** return the boundaries of definition region */
+    double xmin() const { return xval.size()? xval.front(): NAN; }
+    double xmax() const { return xval.size()? xval.back() : NAN; }
+    double ymin() const { return yval.size()? yval.front(): NAN; }
+    double ymax() const { return yval.size()? yval.back() : NAN; }
+    
+    /** check if the interpolator is initialized */
+    bool isEmpty() const { return xval.size()==0 || yval.size()==0; }
+    
+private:
+    std::vector<double> xval, yval;  ///< grid nodes in x and y directions
+    std::vector<double> zval;        ///< flattened 2d array of z values
+};
+    
+
 /// opaque internal data for SplineApprox
 class SplineApproxImpl;
 

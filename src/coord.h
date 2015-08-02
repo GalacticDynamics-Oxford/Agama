@@ -65,11 +65,14 @@ struct Sph{
 };
 
 //  less trivial:
-/// prolate spheroidal coordinate system
+/** prolate spheroidal coordinate system, defined by a single parameter 
+    delta>0 (squared interfocal distance).
+    The traditionally used two parameters alpha and gamma (e.g., de Zeeuw 1985) 
+    are not independent, so we define  delta = gamma - alpha.
+*/
 struct ProlSph{
-    double alpha;  ///< alpha=-a^2, where a is major axis
-    double gamma;  ///< gamma=-c^2, where c is minor axis
-    ProlSph(double _alpha, double _gamma);
+    const double delta;      ///< = gamma - alpha > 0
+    ProlSph(double _delta);  ///< delta is _squared_ interfocal distance
     static const char* name() { return "Prolate spheroidal"; }
 };
 
@@ -105,16 +108,19 @@ typedef struct PosT<Cyl> PosCyl;
 template<> struct PosT<Sph>{
     double r;     ///< spherical radius
     double theta; ///< polar angle [0:pi) - 0 means along z axis in positive direction, pi is along z in negative direction, pi/2 is in x-y plane
-    double phi;   ///< azimuthal angle in x-y plane
+    double phi;   ///< azimuthal angle in x-y plane [0:2pi)
     PosT<Sph>() {};
     PosT<Sph>(double _r, double _theta, double _phi) : r(_r), theta(_theta), phi(_phi) {};
 };
 typedef struct PosT<Sph> PosSph;
 
-/// position in prolate spheroidal coordinates
+/** position in prolate spheroidal coordinates.
+    We use a somewhat different definition from de Zeeuw 1985, namely: 
+    the value of `nu` keeps track of the sign of z, so that the conversion between cylindrical
+    and prolate spheroidal coordinates is invertible. */
 template<> struct PosT<ProlSph>{
-    double lambda;  ///< lies in the range [-alpha:infinity)
-    double nu;      ///< lies in the range [-gamma:-alpha]
+    double lambda;  ///< lies in the range [delta:infinity)
+    double nu;      ///< lies in the range [-delta:delta]; negative for z<0
     double phi;     ///< usual azimuthal angle
     const ProlSph& coordsys;  ///< a point means nothing without specifying its coordinate system
     PosT<ProlSph>(double _lambda, double _nu, double _phi, const ProlSph& _coordsys):
@@ -180,6 +186,8 @@ template<> struct PosVelT<ProlSph>: public PosProlSph{
     double lambdadot, nudot, phidot;  ///< time derivatives of position variables
     PosVelT<ProlSph>(const PosProlSph& pos, double _lambdadot, double _nudot, double _phidot):
         PosProlSph(pos), lambdadot(_lambdadot), nudot(_nudot), phidot(_phidot) {};
+    void unpack_to(double *out) const {
+        out[0]=lambda; out[1]=nu; out[2]=phi; out[3]=lambdadot; out[4]=nudot; out[5]=phidot; }
 };
 typedef struct PosVelT<ProlSph> PosVelProlSph;
     
