@@ -97,10 +97,9 @@ public:
     RfromLzRootFinder(const BasePotential& _poten, double _Lz) :
         poten(_poten), Lz2(_Lz*_Lz) {};
     virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
-        double Phi;
         coord::GradCyl grad;
         coord::HessCyl hess;
-        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
+        poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
         if(val) {
             if(R==INFINITY)
                 *val = -1-Lz2;  // safely negative value
@@ -139,6 +138,20 @@ double R_from_Lz(const BasePotential& potential, double Lz) {
     return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_POTENTIAL_INT);
 }
 
+void epicycleFreqs(const BasePotential& potential, const double R,
+    double& kappa, double& nu, double& Omega)
+{
+    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+        throw std::invalid_argument("Potential is not axisymmetric, "
+            "no meaningful definition of circular orbit is possible");
+    coord::GradCyl grad;
+    coord::HessCyl hess;
+    potential.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
+    //!!! no attempt to check if the expressions under sqrt are non-negative, or that R>0
+    kappa = sqrt(hess.dR2 + 3*grad.dR/R);
+    nu    = sqrt(hess.dz2);
+    Omega = sqrt(grad.dR/R);
+}
 
 // routines for integrating density over volume
 class DensityAzimuthalIntegrand: public math::IFunctionNoDeriv {

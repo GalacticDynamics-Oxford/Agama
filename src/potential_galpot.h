@@ -60,6 +60,9 @@ is provided in potential_factory.h, taking the name of parameter file and the Un
 
 namespace potential{
 
+/// \name  Parameters of disk and spheroidal components
+///@{
+
 /// parameters that describe a disk component
 struct DiskParam{
     double surfaceDensity;      ///< surface density normalisation Sigma_0 [Msun/kpc^2]
@@ -80,6 +83,8 @@ struct SphrParam{
     double scaleRadius;         ///< transition radius r_0 [kpc] 
     double outerCutoffRadius;   ///< outer cut-off radius r_t [kpc] 
 };
+///@}
+/// \name  Disk components
 
 /** Specification of a disk density profile separable in R and z requires two auxiliary function,
     f(R) and H(z)  (the former essentially describes the surface density of the disk,
@@ -95,6 +100,7 @@ struct SphrParam{
 
     The corresponding second antiderivatives of h(z) are given in Table 2 of Dehnen&Binney 1998.
 */
+///@{
 
 /** helper routine to create an instance of radial density function */
 const math::IFunction* createRadialDiskFnc(const DiskParam& params);
@@ -142,6 +148,10 @@ private:
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
     virtual double densityCyl(const coord::PosCyl &pos) const;
 };
+
+///@}
+/// \name  Spheroical components
+///@{
 
 /** Two-power-law spheroidal density profile with optional cutoff and flattening 
     along the minor axis.
@@ -203,6 +213,7 @@ private:
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 };
+///@}
 
 /** Construct a CompositeCyl potential consisting of a Multipole and a number of DiskAnsatz 
     components, using the provided arrays of parameters for disks and spheroids

@@ -257,6 +257,7 @@ public:
         inf_upper = xupper== INFINITY;
         if(inf_upper) {
             if(inf_lower) {
+                x_edge = 0;
                 x_scaling = 1;
             } else {
                 x_edge = xlower;
@@ -366,7 +367,7 @@ static double findMinKnown(const IFunction& fnc, double xlower, double xupper, d
     double xroot = NAN;
     double abstoler = reltoler*fabs(xupper-xlower);
     if(gsl_min_fminimizer_set(minser, &F, xinit, xlower, xupper) == GSL_SUCCESS) {
-        int status=0, iter=0;
+        int iter=0;
         do {
             iter++;
             try {
@@ -379,7 +380,6 @@ static double findMinKnown(const IFunction& fnc, double xlower, double xupper, d
             xroot  = gsl_min_fminimizer_x_minimum (minser);
             xlower = gsl_min_fminimizer_x_lower (minser);
             xupper = gsl_min_fminimizer_x_upper (minser);
-            status = gsl_root_test_interval (xlower, xupper, 0, reltoler);
         }
         while (fabs(xlower-xupper) < abstoler && iter < MAXITER);
     }

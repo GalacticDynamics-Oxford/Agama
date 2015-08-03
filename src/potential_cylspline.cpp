@@ -195,7 +195,7 @@ DirectPotential::DirectPotential(const particles::PointMassArray<CoordT>& _point
 
 double DirectPotential::totalMass() const
 {
-    assert(density!=NULL ^ points.size()!=0);  // either of the two regimes
+    assert((density!=NULL) ^ (points.size()!=0));  // either of the two regimes
     if(density!=NULL) 
         return density->totalMass();
     else {
@@ -209,7 +209,7 @@ double DirectPotential::totalMass() const
 
 double DirectPotential::enclosedMass(const double r) const
 {
-    assert(density!=NULL ^ points.size()!=0);  // either of the two regimes
+    assert((density!=NULL) ^ (points.size()!=0));  // either of the two regimes
     if(density!=NULL)
         return density->enclosedMass(r);
     else {

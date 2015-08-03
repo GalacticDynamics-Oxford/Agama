@@ -911,7 +911,7 @@ private:
     int nnodes;
 };
 
-void createNonuniformGrid(size_t nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid)
+void createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid)
 {   // create grid so that x_k = B*(exp(A*k)-1)
     if(nnodes<2 || xmin<=0 || xmax<=xmin)
         throw std::invalid_argument("Invalid parameters for grid creation");
@@ -962,7 +962,7 @@ static void makegrid(std::vector<double>::iterator begin, std::vector<double>::i
     *(end-1)=endval;  // exact value
 }
 
-void createAlmostUniformGrid(const std::vector<double> &srcpoints, size_t minbin, size_t& gridsize, std::vector<double>& grid)
+void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int minbin, unsigned int& gridsize, std::vector<double>& grid)
 {
     if(srcpoints.size()==0)
         throw std::invalid_argument("Error in creating a grid: input points array is empty");

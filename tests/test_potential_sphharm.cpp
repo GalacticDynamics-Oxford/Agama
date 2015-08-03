@@ -5,6 +5,8 @@
 #include "potential_factory.h"
 #include "particles_io.h"
 #include "coord_utils.h"
+#include <cstdlib>
+#include <cstdio>
 
 /// define test suite in terms of points for various coord systems
 const int numtestpoints=8;

@@ -1,8 +1,10 @@
 CXX       = g++
-CXXFLAGS += -Wall -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
-LFLAGS   += -fPIC -Wl,-dead_strip -lgsl -lgslcblas
+CXXFLAGS += -Wall -Wno-overflow -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
+LFLAGS   += -fPIC -lgsl -lgslcblas
 ARC       = ar
 
+# this flag apparently is only relevant for MacOS
+#LFLAGS  += -Wl,-dead_strip
 # uncomment (and possibly modify) the three lines below to use UNSIO library for input/output of N-body snapshots
 DEFINES  += -DHAVE_UNSIO
 CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns

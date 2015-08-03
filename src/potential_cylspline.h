@@ -11,7 +11,12 @@
 
 namespace potential {
 
-/** angular expansion of potential in azimuthal angle with coefficients being 2d spline functions of R,z **/
+/** Angular expansion of potential in azimuthal angle 
+    with coefficients being 2d spline functions of R,z.
+    This is a very flexible and powerful potential approximation that can be used 
+    to represent arbitrarily flattened axisymmetric or non-axisymmetric 
+    (if the number of azimuthal terms is >0) density profiles.
+*/
 class CylSplineExp: public BasePotentialCyl
 {
 public:

@@ -3,8 +3,8 @@
     \author  EV
     \date    2010-2015
 
-    This file provides several utility function to manage instances of CDensity and CPotential: 
-    creating a density or potential model from parameters provided in CConfigPotential, 
+    This file provides several utility function to manage instances of BaseDensity and BasePotential: 
+    creating a density or potential model from parameters provided in ConfigPotential, 
     creating a potential from a set of point masses or from an N-body snapshot file,
     loading potential coefficients from a text file, 
     writing expansion coefficients to a text file,
@@ -61,8 +61,9 @@ struct ConfigPotential
     double q, p;                             ///< axis ratio of the model (if applicable)
     double gamma;                            ///< central cusp slope (for Dehnen and scale-free models)
     double sersicIndex;                      ///< Sersic index (for Sersic density model)
-    size_t numCoefsRadial, numCoefsAngular;  ///< number of radial and angular coefficients in spherical-harmonic expansion
-    size_t numCoefsVertical;                 ///< number of coefficients in z-direction for Cylindrical potential
+    unsigned int numCoefsRadial;             ///< number of radial terms in BasisSetExp or grid points in spline potentials
+    unsigned int numCoefsAngular;            ///< number of angular terms in spherical-harmonic expansion
+    unsigned int numCoefsVertical;           ///< number of coefficients in z-direction for Cylindrical potential
     double alpha;                            ///< shape parameter for BSE potential
 #if 0
     double rmax;                             ///< radius of finite density model for BSECompact potential
@@ -96,29 +97,34 @@ struct ConfigPotential
 ///@{
 
 /** create a density model according to the parameters. 
-    This only deals witj finite-mass models, including some of the CPotential descendants.
-    \param[in] configPotential contains the parameters (density type, mass, shape, etc.)
-    \return    the instance of CDensity, or NULL in case of incorrect parameters
+    This only deals with finite-mass models, including some of the Potential descendants.
+    \param[in] config  contains the parameters (density type, mass, shape, etc.)
+    \return    the instance of a class derived from BaseDensity
+    \throw     std::invalid_argument exception if the parameters don't make sense,
+    or any other exception that may occur in the constructor of a particular density model
 */
 const BaseDensity* createDensity(const ConfigPotential& config);
 
-/** create an instance of CPotential according to the parameters passed. 
+/** create an instance of potential model according to the parameters passed. 
     \param[in,out] config specifies the potential parameters, which could be modified, 
                    e.g. if the potential coefficients are loaded from a file.
                    Massive black hole (config->Mbh) is not included in the potential 
-                   (the returned potential is always non-composite)
-    \return        the instance of potential, or NULL in case of failure
+                   (the returned potential is non-composite)
+    \return        the instance of potential
+    \throw         std::invalid_argument exception if the parameters don't make sense,
+    or any other exception that may occur in the constructor of a particular potential model
 */
 const BasePotential* createPotential(ConfigPotential& config);
 
 /** create a potential of a generic expansion kind from a set of point masses.
     \param[in] configPotential contains the parameters (potential type, number of terms in expansion, etc.)
     \param[in] points is the array of particles that are used in computing the coefficients; 
-               if potential type is PT_NB, then an instance of tree-code potential is created.
-    \return    a new instance of potential on success, or NULL on failure (e.g. if potential type is inappropriate).
+    \return    a new instance of potential
+    \throw     std::invalid_argument exception if the potential type is incorrect,
+    or any other potential-specific exception that may occur in the constructor
 */
 template<typename CoordT>
-const BasePotential* createPotentialFromPoints(const ConfigPotential& configPotential, const particles::PointMassArray<CoordT>& points);
+const BasePotential* createPotentialFromPoints(const ConfigPotential& config, const particles::PointMassArray<CoordT>& points);
 
 /** load a potential from a text or snapshot file.
 
@@ -140,7 +146,8 @@ const BasePotential* createPotentialFromPoints(const ConfigPotential& configPote
                    BSE coefficients or a description of MGE model), an error is returned.
                    configPotential->NbodyFile contains the file name from which the data is loaded.
     \return        a new instance of BasePotential* on success
-    \throws        std::runtime_error or other potential-specific exception on failure
+    \throws        std::invalid_argument or std::runtime_error or other potential-specific exception
+    on failure (e.g., if potential type is inappropriate, or a file does not exist)
 */
 const BasePotential* readPotential(ConfigPotential& configPotential);
     
@@ -157,11 +164,12 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
 /** write potential expansion coefficients to a text file.
 
     The potential must be one of the following expansion classes: 
-    CPotentialBSE, CPotentialBSECompact, CPotentialSpline, CPotentialCylSpline, CPotentialScaleFreeSH. 
+    BasisSetExp, SplineExp, CylSplineExp.
     The coefficients stored in a file may be later loaded by readPotential() function.
     \param[in] fileName is the output file
     \param[in] potential is the pointer to potential
-    \throws std::runtime_error on failure (file not writeable or potential is of inappropriate type).
+    \throws    std::invalid_argument if the potential is of inappropriate type,
+    or std::runtime error if the file is not writeable.
 */
 void writePotential(const std::string &fileName, const BasePotential& potential);
 

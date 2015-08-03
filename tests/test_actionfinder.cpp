@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <fstream>
 #include <cmath>
-#include <cstdlib>
+#include <ctime>
 #include <vector>
 
 const double integr_eps=1e-8;  // integration accuracy parameter
@@ -72,11 +72,9 @@ bool test_actions(const potential::BasePotential& potential,
     const double total_time, const double timestep, const actions::BaseActionFinder& actFinder)
 {
     std::vector<coord::PosVelCar > traj;
-    clock_t t_begin = std::clock();
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
     double dim=unit.to_Kpc*unit.to_Kpc/unit.to_Myr; //unit.to_Kpc_kms;
     double axis_a=0;
-    t_begin = std::clock();
 #ifdef SINGLEORBIT
     std::ofstream fout("orbit.dat");
 #endif

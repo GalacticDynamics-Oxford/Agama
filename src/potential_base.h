@@ -12,8 +12,8 @@
     These two concepts are related in such a way that a density model does not need 
     to provide potential and forces, while a potential model does. 
     Thus the latter is derived from the former.
-    General-purpose potential expansions can be constructed both from density or 
-    from potential classes.
+    General-purpose potential expansions (BasisSetExp, SplineExp, CylSplineExp)
+    can be constructed both from density or from potential classes.
 */
 namespace potential{
 
@@ -42,7 +42,13 @@ const double EPSREL_DENSITY_INT = 1e-4;
 /// \name  Base class for all density models
 ///@{
 
-/** Abstract class defining a density profile without a corresponding potential. */
+/** Abstract class defining a density profile without a corresponding potential. 
+    It provides overloaded functions for computing density in three different coordinate systems 
+    ([Car]tesian, [Cyl]indrical and [Sph]erical); the derived classes typically should 
+    implement the actual computation in one of them (in the most suitable coordinate system), 
+    and provide a 'redirection' to it in the other two functions, by converting the input 
+    coordinates to the most suitable system.
+*/
 class BaseDensity{
 public:
 
@@ -105,6 +111,11 @@ protected:
     on the type of input coordinates. 
     They internally call three protected virtual functions, named after 
     each coordinate system. These functions are implemented in derived classes.
+    Typically the potential and its derivatives are most easily computed in 
+    one particular coordinate system, and the implementation of other two functions 
+    simply convert the input coordinates to the most suitable system, and likewise 
+    transforms the output values back to the requested coordinates, using 
+    the `coord::evalAndConvert` function.
     Density is computed from Laplacian in each coordinate system, but derived 
     classes may override this behaviour and provide the density explicitly.
 */
@@ -298,7 +309,7 @@ private:
 };
 
 ///@}
-/// \name   Convenience functions
+/// \name   Non-member functions for all potential classes
 ///@{
 
 /** Shorthand for evaluating the value of potential at a given point */
@@ -333,8 +344,8 @@ double getRadiusByMass(const BaseDensity& dens, const double mass);
 double getInnerDensitySlope(const BaseDensity& dens);
 
 
-/** Compute circular velocity at a given (cylindrical) radius in equatorial plane */
-double v_circ(const BasePotential& potential, double radius);
+/** Compute circular velocity at a given (cylindrical) radius R in equatorial plane */
+double v_circ(const BasePotential& potential, double R);
 
 /** Compute angular momentum of a circular orbit in equatorial plane for a given value of energy */
 double L_circ(const BasePotential& potential, double energy);
@@ -344,6 +355,15 @@ double R_circ(const BasePotential& potential, double energy);
 
 /** Compute cylindrical radius of an orbit in equatorial plane for a given z-component of angular momentum */
 double R_from_Lz(const BasePotential& potential, double L_z);
+
+/** Compute epicycle frequencies for a circular orbit in the equatorial plane with radius R.
+    \param[in]  R is the cylindrical radius 
+    \param[out] kappa is the epicycle frequency of radial oscillations
+    \param[out] nu    is the frequency of vertical oscillations
+    \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R)
+*/
+void epicycleFreqs(const BasePotential& potential, const double R,
+    double& kappa, double& nu, double& Omega);
 
 ///@}
 }  // namespace potential

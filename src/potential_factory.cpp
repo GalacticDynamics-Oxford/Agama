@@ -15,15 +15,16 @@
 #include <map>
 
 namespace potential {
-#if 0
-const CDensity* createDensity(const CConfigPotential* config)
+
+const BaseDensity* createDensity(const ConfigPotential& config)
 {
-    switch(config->DensityType) 
+    switch(config.densityType) 
     {
     case PT_DEHNEN: 
-        return new CPotentialDehnen(config->mass, config->scalerad, config->q, config->p, config->Gamma); 
+        return new Dehnen(config.mass, config.scalerad, config.q, config.p, config.gamma); 
+#if 0
     case PT_PLUMMER:
-        return new CDensityPlummer(config->mass, config->scalerad, config->q, config->p);
+        return new Plummer(config->mass, config->scalerad, config->q, config->p);
     case PT_ISOCHRONE:
         return new CDensityIsochrone(config->mass, config->scalerad, config->q, config->p);
     case PT_PERFECTELLIPSOID:
@@ -34,37 +35,40 @@ const CDensity* createDensity(const CConfigPotential* config)
     }
     case PT_SERSIC:
         return new CDensitySersic(config->mass, config->scalerad, config->q, config->p, config->sersicIndex);
-    case PT_FERRERS:
-        return new CPotentialFerrers(config->mass, config->scalerad, config->q, config->p);
-    case PT_MIYAMOTONAGAI:
-        return new CPotentialMiyamotoNagai(config->mass, config->scalerad, config->scalerad2);
     case PT_EXPDISK:
         return new CDensityExpDisk(config->mass, config->scalerad, fabs(config->scalerad2),
             config->scalerad2>0 ? CDensityExpDisk::ED_EXP : CDensityExpDisk::ED_SECH2);
-    default: return NULL;
+#endif
+    case PT_FERRERS:
+        return new Ferrers(config.mass, config.scalerad, config.q, config.p);
+    case PT_MIYAMOTONAGAI:
+        return new MiyamotoNagai(config.mass, config.scalerad, config.scalerad2);
+    default:
+        throw std::invalid_argument("Unknown density type");
     }
 }
 
-const CPotential* createPotential(CConfigPotential* config)
+const BasePotential* createPotential(ConfigPotential& config)
 {
-    const CPotential* potential=NULL;
-    switch(config->PotentialType)
+    const BasePotential* potential=NULL;
+    switch(config.potentialType)
     {
     case PT_LOG:
-        potential=new CPotentialLog(config->mass, config->q, config->p, config->scalerad);
-        break;
+        potential = new Logarithmic(config.mass, config.scalerad, config.q, config.p);
+        break;  // NB: it's not really 'mass' here but 'sigma'
     case PT_HARMONIC:
-        potential=new CPotentialHarmonic(config->mass, config->q, config->p);
-        break;
+        potential = new Harmonic(config.mass, config.q, config.p);
+        break;  // NB: it's not really 'mass' here but 'Omega'
     case PT_DEHNEN:
-        potential=new CPotentialDehnen(config->mass, config->scalerad, config->q, config->p, config->Gamma);
+        potential = new Dehnen(config.mass, config.scalerad, config.q, config.p, config.gamma);
         break;
     case PT_MIYAMOTONAGAI:
-        potential=new CPotentialMiyamotoNagai(config->mass, config->scalerad, config->scalerad2);
+        potential = new MiyamotoNagai(config.mass, config.scalerad, config.scalerad2);
         break;
     case PT_FERRERS:
-        potential = new CPotentialFerrers(config->mass, config->scalerad, config->q, config->p); 
+        potential = new Ferrers(config.mass, config.scalerad, config.q, config.p); 
         break;
+#if 0
     case PT_SCALEFREE:
         potential=new CPotentialScaleFree(config->mass, config->scalerad, config->q, config->p, config->Gamma);
         break;
@@ -74,119 +78,99 @@ const CPotential* createPotential(CConfigPotential* config)
         else
             potential=new CPotentialScaleFreeSH(config->mass, config->scalerad, config->q, config->p, config->Gamma, config->numCoefsAngular);
         break;
-#ifdef HAVE_GALPOT
-    case PT_GALPOT:
-#endif
     case PT_NB:
             potential=readPotential(config);
         break;
+#endif
     case PT_SPLINE:
     case PT_BSE:
-    case PT_BSECOMPACT:
-    case PT_CYLSPLINE:
-    case PT_SPHERICAL:
+    case PT_CYLSPLINE: {
         // two possible variants: either init from analytic density model or from Nbody/coef/massmodel file
-        if( config->DensityType==PT_NB || 
-            config->DensityType==PT_ELLIPSOIDAL || 
-            config->DensityType==PT_MGE || 
-            config->DensityType==PT_COEFS )
+        if( config.densityType == PT_NB || 
+            config.densityType == PT_ELLIPSOIDAL || 
+            config.densityType == PT_MGE || 
+            config.densityType == PT_COEFS )
         {
-            potential=readPotential(config);
+            potential = readPotential(config);
         } else {
             // create a temporary instance of density model, use it for computing expansion coefs
-            const CDensity* densModel = createDensity(config);
-            if(densModel!=NULL) 
-            {
-                if(config->PotentialType==CPotential::PT_BSE)
-                    potential = new CPotentialBSE(
-                        config->Alpha, config->numCoefsRadial, config->numCoefsAngular, densModel);
-                else if(config->PotentialType==CPotential::PT_BSECOMPACT)
-                    potential = new CPotentialBSECompact(
-                        config->Rmax, config->numCoefsRadial, config->numCoefsAngular, densModel);
-                else if(config->PotentialType==CPotential::PT_SPLINE) {
-                    if(config->splineRMin>0 && config->splineRMax>0)
-                    {
-                        std::vector<double> grid;
-                        createNonuniformGrid(config->numCoefsRadial+1, 
-                            config->splineRMin, config->splineRMax, true, &grid);
-                        potential = new CPotentialSpline(
-                            config->numCoefsRadial, config->numCoefsAngular, densModel, &grid);
-                    } else  // no user-supplied grid extent -- will be assigned by default
-                        potential = new CPotentialSpline(
-                            config->numCoefsRadial, config->numCoefsAngular, densModel);
-                }
-#ifdef HAVE_INTERP2D
-                else if(config->PotentialType==CPotential::PT_CYLSPLINE) {
-                    if(config->DensityType==PT_DEHNEN || config->DensityType==PT_FERRERS ||
-                        config->DensityType==PT_MIYAMOTONAGAI) { // use potential for initialization, without intermediate CPotentialDirect step
-                        potential = new CPotentialCylSpline(
-                            config->numCoefsRadial, config->numCoefsVertical, config->numCoefsAngular, 
-                            static_cast<const CPotential*>(densModel), // explicitly type cast to CPotential to call an appropriate constructor
-                            config->splineRMin, config->splineRMax, config->splineZMin, config->splineZMax);
-                    } else {
-                        potential = new CPotentialCylSpline(
-                            config->numCoefsRadial, config->numCoefsVertical, config->numCoefsAngular, densModel, 
-                            config->splineRMin, config->splineRMax, config->splineZMin, config->splineZMax);
-                    }
-                }
-#endif
-                else if(config->PotentialType==CPotential::PT_SPHERICAL) {
-                    const CMassModel* massModel=createMassModel(densModel, config->numCoefsRadial, config->splineRMin, config->splineRMax);
-                    if(massModel) { 
-                        potential = new CPotentialSpherical(*massModel);
-                        delete massModel;
-                    }
-                }
-                else 
-                    my_error(FUNCNAME, "Unknown type of potential expansion");
-                delete densModel;
+            const BaseDensity* densModel = createDensity(config);
+            switch(config.potentialType) {
+            case PT_BSE:
+                potential = new BasisSetExp(
+                    config.alpha, config.numCoefsRadial, config.numCoefsAngular, *densModel);
+                break;
+            case PT_SPLINE: {
+                if(config.splineRMin>0 && config.splineRMax>0)
+                {
+                    std::vector<double> grid;
+                    math::createNonuniformGrid(config.numCoefsRadial+1, 
+                        config.splineRMin, config.splineRMax, true, grid);
+                    potential = new SplineExp(
+                        config.numCoefsRadial, config.numCoefsAngular, *densModel, &grid);
+                } else  // no user-supplied grid extent -- will be assigned by default
+                    potential = new SplineExp(
+                        config.numCoefsRadial, config.numCoefsAngular, *densModel);
+                break;
             }
+            case PT_CYLSPLINE: {
+                if( config.densityType == PT_DEHNEN || 
+                    config.densityType == PT_FERRERS ||
+                    config.densityType == PT_MIYAMOTONAGAI ) 
+                {   // use potential for initialization, without intermediate DirectPotential step
+                    potential = new CylSplineExp(
+                        config.numCoefsRadial, config.numCoefsVertical, config.numCoefsAngular,
+                        // explicitly type cast to BasePotential to call an appropriate constructor
+                        dynamic_cast<const BasePotential&>(*densModel),
+                        config.splineRMin, config.splineRMax, config.splineZMin, config.splineZMax);
+                } else {
+                    potential = new CylSplineExp(
+                        config.numCoefsRadial, config.numCoefsVertical, config.numCoefsAngular, 
+                        *densModel, 
+                        config.splineRMin, config.splineRMax, config.splineZMin, config.splineZMax);
+                }
+                break;
+            }
+            default: ;
+            }
+            delete densModel;
         }
         break;
+    }
     default: ;
     }
     if(!potential)
-        return NULL;  // signal of error
-    config->PotentialType = potential->PotentialType();
-    config->symmetry  = potential->symmetry();
-#ifdef DEBUGPRINT
-    my_message(FUNCNAME, 
-        "Gamma="+utils::convertToString(potential->getGamma())+", total mass="+utils::convertToString(potential->totalMass()));
-#endif
+        throw std::invalid_argument("Unknown potential type");
+    config.potentialType = getPotentialType(*potential);
+    config.symmetryType  = potential->symmetry();
     return potential;
 }
-#endif
 
 /* ------- auxiliary function to create potential of a given type from a set of point masses ------ */
 template<typename CoordT> 
 const BasePotential* createPotentialFromPoints(const ConfigPotential& config, 
     const particles::PointMassArray<CoordT>& points)
 {
-    const BasePotential* pot=NULL;
-/*    if(config.PotentialType==PT_NB) 
-    {
-        pot = new CPotentialNB(config.treecodeEps, config.treecodeTheta, *points);
-    } 
-    else*/ if(config.potentialType == PT_SPLINE)
-    {
+    switch(config.potentialType) {
+    case PT_SPLINE: {
         if(config.splineRMin>0 && config.splineRMax>0) 
         {
             std::vector<double> radii;
             math::createNonuniformGrid(config.numCoefsRadial+1, config.splineRMin, 
                 config.splineRMax, true, radii);
-            pot = new SplineExp(config.numCoefsRadial, config.numCoefsAngular, 
+            return new SplineExp(config.numCoefsRadial, config.numCoefsAngular, 
                 points, config.symmetryType, config.splineSmoothFactor, &radii);
         } else
-            pot = new SplineExp(config.numCoefsRadial, config.numCoefsAngular, 
+            return new SplineExp(config.numCoefsRadial, config.numCoefsAngular, 
                 points, config.symmetryType, config.splineSmoothFactor);
     }
-    else if(config.potentialType==PT_CYLSPLINE)
-        pot = new CylSplineExp(config.numCoefsRadial, config.numCoefsVertical,
+    case PT_CYLSPLINE:
+        return new CylSplineExp(config.numCoefsRadial, config.numCoefsVertical,
             config.numCoefsAngular, points, config.symmetryType, 
             config.splineRMin, config.splineRMax,
             config.splineZMin, config.splineZMax);
-    else if(config.potentialType == PT_BSE)
-        pot = new BasisSetExp(config.alpha, config.numCoefsRadial, 
+    case PT_BSE:
+        return new BasisSetExp(config.alpha, config.numCoefsRadial, 
             config.numCoefsAngular, points, config.symmetryType);
 /*    else if(config.potentialType==PT_BSECOMPACT)
         pot = new CPotentialBSECompact(config.Rmax, config.numCoefsRadial, 
@@ -201,10 +185,14 @@ const BasePotential* createPotentialFromPoints(const ConfigPotential& config,
         } else
             pot = new CPotentialSpherical(*points, config.splineSmoothFactor);
     }*/
-    return pot;
+    default:
+        throw std::invalid_argument(std::string("Unknown potential type in createPotentialFromPoints: ")
+            + getPotentialNameByType(config.potentialType));
+    }
 }
 // instantiations
-template const BasePotential* createPotentialFromPoints(const ConfigPotential& config, const particles::PointMassArray<coord::Car>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::Car>& points);
 
 
 // attempt to load coefficients stored in a text file
@@ -271,7 +259,7 @@ static const BasePotential* createPotentialExpFromCoefs(ConfigPotential& config)
         pot = new SplineExp(radii, coefs); 
         break;
     default:
-        throw std::runtime_error(std::string("Unknown potential type to load: ") +
+        throw std::invalid_argument(std::string("Unknown potential type to load: ") +
             getPotentialNameByType(config.potentialType));
     }
     config.numCoefsRadial  = ncoefsRadial; 
@@ -470,16 +458,14 @@ const BasePotential* readPotential(ConfigPotential& config)
     if(points.size()==0)
         throw std::runtime_error("readPotential: error loading N-body snapshot from "+fileName);
     const BasePotential* pot = createPotentialFromPoints(config, points);
-  //  if(config.potentialType != PT_NB)
-    {   // store coefficients in a text file, later may load this file instead for faster initialization
-        writePotential(fileName + getCoefFileExtension(config.potentialType), *pot);
-    }
+    // store coefficients in a text file, later may load this file instead for faster initialization
+    writePotential(fileName + getCoefFileExtension(config.potentialType), *pot);
     return pot;
 }
 
 /* ------ writing potential expansion coefficients to a text file -------- */
 
-static void writePotentialExp(const std::string &fileName, const BasePotential& potential)
+static void writePotentialExp(const std::string &fileName, const BasePotentialSphericalHarmonic& potential)
 {
     std::ofstream strm(fileName.c_str(), std::ios::out);
     if(!strm) 
@@ -489,19 +475,6 @@ static void writePotentialExp(const std::string &fileName, const BasePotential& 
     size_t ncoefsAngular=0;
     switch(getPotentialTypeByName(potential.name()))
     {
-#if 0
-    case PT_SCALEFREESH: {
-        const CPotentialScaleFreeSH* potSH=dynamic_cast<const CPotentialScaleFreeSH*>(potential);
-        indices.assign(1, 0);
-        coefs.resize(1);
-        potSH->getCoefs(&(coefs[0]));
-        ncoefsAngular=potSH->getnumCoefsAngular();
-        strm << "SFcoefs\t#header\n" << 0 << "\t#n_radial\n" << ncoefsAngular << "\t#n_angular\n" << 
-            potential->getGamma() << "\t#gamma\n0\t#time\n";
-        strm << "#index";
-        break; 
-    }
-#endif
     case PT_BSE: {
         const BasisSetExp& potBSE = dynamic_cast<const BasisSetExp&>(potential);
         indices.resize(potBSE.getNumCoefsRadial()+1);
@@ -531,7 +504,7 @@ static void writePotentialExp(const std::string &fileName, const BasePotential& 
         break; 
     }
     default:
-        throw std::runtime_error("Unknown type of potential to write");
+        throw std::invalid_argument("Unknown type of potential to write");
     }
     for(int l=0; l<=static_cast<int>(ncoefsAngular); l++)
         for(int m=-l; m<=l; m++)
@@ -582,19 +555,19 @@ void writePotential(const std::string &fileName, const BasePotential& potential)
     switch(getPotentialTypeByName(potential.name())) {
     case PT_BSE:
     case PT_SPLINE:
-        writePotentialExp(fileName, potential);
+        writePotentialExp(fileName, dynamic_cast<const BasePotentialSphericalHarmonic&>(potential));
         break;
     case PT_CYLSPLINE:
         writePotentialCylExp(fileName, dynamic_cast<const CylSplineExp&>(potential));
         break;
     default:
-        throw std::runtime_error("Unknown type of potential to write");
+        throw std::invalid_argument("Unknown type of potential to write");
     }
 }
 
 // load GalPot parameter file
 
-static void SwallowRestofLine(std::ifstream& from) {
+static void swallowRestofLine(std::ifstream& from) {
     char c;
     do {
         from.get(c);
@@ -604,18 +577,18 @@ static void SwallowRestofLine(std::ifstream& from) {
 const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {
     std::ifstream strm(filename);
     if(!strm) 
-        throw std::invalid_argument("Cannot open file "+std::string(filename));
+        throw std::runtime_error("Cannot open file "+std::string(filename));
     std::vector<DiskParam> diskpars;
     std::vector<SphrParam> sphrpars;
     bool ok=true;
     int num;
     strm>>num;
-    SwallowRestofLine(strm);
+    swallowRestofLine(strm);
     if(num<0 || num>10 || !strm) ok=false;
     for(int i=0; i<num && ok; i++) {
         DiskParam dp;
         strm>>dp.surfaceDensity >> dp.scaleLength >> dp.scaleHeight >> dp.innerCutoffRadius >> dp.modulationAmplitude;
-        SwallowRestofLine(strm);
+        swallowRestofLine(strm);
         dp.surfaceDensity *= units.from_Msun_per_Kpc2;
         dp.scaleLength *= units.from_Kpc;
         dp.scaleHeight *= units.from_Kpc;
@@ -624,12 +597,12 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
         else ok=false;
     }
     strm>>num;
-    SwallowRestofLine(strm);
+    swallowRestofLine(strm);
     ok=ok && strm;
     for(int i=0; i<num && ok; i++) {
         SphrParam sp;
         strm>>sp.densityNorm >> sp.axisRatio >> sp.gamma >> sp.beta >> sp.scaleRadius >> sp.outerCutoffRadius;
-        SwallowRestofLine(strm);
+        swallowRestofLine(strm);
         sp.densityNorm *= units.from_Msun_per_Kpc3;
         sp.scaleRadius *= units.from_Kpc;
         sp.outerCutoffRadius *= units.from_Kpc;

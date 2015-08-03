@@ -5,7 +5,8 @@
 #include "actions_staeckel.h"
 #include <iostream>
 #include <fstream>
-#include <cstdlib>
+#include <ctime>
+
 //#include "units.h"
 //const units::Units unit(0.2*units::Kpc, 100*units::Myr);
 int main() {

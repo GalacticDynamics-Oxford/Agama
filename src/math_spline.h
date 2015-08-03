@@ -65,7 +65,7 @@ public:
     CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
         const std::vector< std::vector<double> >& zvalues,
         double deriv_xmin=NAN, double deriv_xmax=NAN, double deriv_ymin=NAN, double deriv_ymax=NAN);
-    
+
     /** compute the value of spline and optionally its derivatives at point x,y;
         if the input location is outside the definition region, the result is NaN. 
         Any combination of value, first and second derivatives is possible: 
@@ -200,7 +200,7 @@ public:
         2<=EDF<=numKnots+2.  */
     void fitData(const std::vector<double> &yvalues, const double lambda, 
         std::vector<double>& splineValues, double& derivLeft, double& derivRight,
-        double *rmserror=NULL, double* edf=NULL);
+        double *rmserror=0, double* edf=0);
 
     /** perform fitting with adaptive choice of smoothing parameter lambda, to minimize AIC.
         AIC (Akaike information criterion) is defined as 
@@ -209,7 +209,7 @@ public:
         and best-choice value of lambda. */
     void fitDataOptimal(const std::vector<double> &yvalues, 
         std::vector<double>& splineValues, double& derivLeft, double& derivRight,
-        double *rmserror=NULL, double* edf=NULL, double *lambda=NULL);
+        double *rmserror=0, double* edf=0, double *lambda=0);
 
     /** perform an 'oversmooth' fitting with adaptive choice of smoothing parameter lambda.
         The difference in AIC (Akaike information criterion) between the solution with no smoothing 
@@ -217,7 +217,7 @@ public:
         return spline values Y, rms error, equivalent degrees of freedom and best-choice value of lambda. */
     void fitDataOversmooth(const std::vector<double> &yvalues, const double deltaAIC, 
         std::vector<double>& splineValues, double& derivLeft, double& derivRight,
-        double *rmserror=NULL, double* edf=NULL, double *lambda=NULL);
+        double *rmserror=0, double* edf=0, double *lambda=0);
 
 private:
     SplineApproxImpl* impl;       ///< internal data hiding the implementation details
@@ -234,7 +234,7 @@ private:
     \param[in]  zeroelem -- if true, 0th node is at zero (otherwise at xmin)
     \param[out] grid -- array of grid nodes created by this routine
 */
-void createNonuniformGrid(size_t nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid);
+void createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid);
 
 /** creates an almost uniform grid so that each bin contains at least minbin points from input array.
     input points are in srcpoints array and MUST BE SORTED in ascending order (assumed but not cheched).
@@ -242,6 +242,6 @@ void createNonuniformGrid(size_t nnodes, double xmin, double xmax, bool zeroelem
     NB: in the present implementation, the algorithm is not very robust and works well only for gridsize*minbin << srcpoints.size,
     assuming that 'problematic' bins only are found close to endpoints but not in the middle of the grid.
 */
-void createAlmostUniformGrid(const std::vector<double> &srcpoints, size_t minbin, size_t& gridsize, std::vector<double>& grid);
+void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int minbin, unsigned int& gridsize, std::vector<double>& grid);
 
 }  // namespace

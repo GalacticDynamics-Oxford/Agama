@@ -22,7 +22,7 @@ public:
 protected:
     unsigned int Ncoefs_angular;         ///< l_max, the order of angular expansion (0 means spherically symmetric model)
     int lmax, lstep, mmin, mmax, mstep;  ///< range of angular coefficients used for given symmetry
-    
+
     /// assigns the range for angular coefficients based on mysymmetry
     void setSymmetry(SymmetryType sym);
 
@@ -35,7 +35,7 @@ protected:
 
 private:
     SymmetryType mysymmetry;             ///< may have different type of symmetry
-    
+
     virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
 };
@@ -60,7 +60,7 @@ public:
     //  get functions:
     /// return BSE coefficients array
     void getCoefs(std::vector< std::vector<double>  > *coefsArray) const
-    { if(coefsArray!=NULL) *coefsArray=SHcoefs; };
+    { if(coefsArray!=0) *coefsArray=SHcoefs; };
 
     /// return the shape parameter of basis set
     double getAlpha() const { return Alpha; };
@@ -101,7 +101,7 @@ public:
     template<typename CoordT>
     SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
         const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
-        const std::vector<double>  *_gridradii=NULL);
+        const std::vector<double>  *_gridradii=0);
 
     /// init potential from stored SHE coefficients at given radii
     SplineExp(const std::vector<double>  &_gridradii, const std::vector< std::vector<double>  > &_coefs);
@@ -109,7 +109,7 @@ public:
     /// init potential from analytic mass model, 
     /// may also provide desired grid radii (if not given, assign automatically)
     SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const BaseDensity& density, const std::vector<double>  *_gridradii=NULL);
+        const BaseDensity& density, const std::vector<double>  *_gridradii=0);
 
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "Spline"; };

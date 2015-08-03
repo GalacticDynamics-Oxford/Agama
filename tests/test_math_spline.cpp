@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <cstdlib>
 
 const int NNODES  = 20;
 const int NPOINTS = 10000;
