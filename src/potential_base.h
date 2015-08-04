@@ -357,7 +357,8 @@ double R_circ(const BasePotential& potential, double energy);
 double R_from_Lz(const BasePotential& potential, double L_z);
 
 /** Compute epicycle frequencies for a circular orbit in the equatorial plane with radius R.
-    \param[in]  R is the cylindrical radius 
+    \param[in]  potential is the instance of potential (must have axial symmetry)
+    \param[in]  R     is the cylindrical radius 
     \param[out] kappa is the epicycle frequency of radial oscillations
     \param[out] nu    is the frequency of vertical oscillations
     \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R)

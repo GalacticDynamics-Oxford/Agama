@@ -16,30 +16,22 @@ void IOSnapshotText::readSnapshot(PointMassArrayCar& points)
     points.data.clear();
     std::string buffer;
     std::vector<std::string> fields;
-    bool noMasses=false, nonzeroMasses=false;
     while(std::getline(strm, buffer) && !strm.eof())
     {
         utils::splitString(buffer, "%# \t", fields);
-        size_t numFields=fields.size();
-        if(numFields>=3 && ((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
+        size_t numFields = fields.size();
+        if(numFields>=7 && 
+            ((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
         {
-            double mass=numFields>6 ? utils::convertToDouble(fields[6]):(noMasses=true,1.0);
             points.add(coord::PosVelCar(
-                utils::convertToDouble(fields[0]), 
-                utils::convertToDouble(fields[1]), 
-                utils::convertToDouble(fields[2]), 
-                numFields>=6 ? utils::convertToDouble(fields[3]) : 0, 
-                numFields>=6 ? utils::convertToDouble(fields[4]) : 0, 
-                numFields>=6 ? utils::convertToDouble(fields[5]) : 0),
-                mass);
-            if(mass>0) nonzeroMasses=true;
+                utils::convertToDouble(fields[0]) * conv.lengthUnit, 
+                utils::convertToDouble(fields[1]) * conv.lengthUnit, 
+                utils::convertToDouble(fields[2]) * conv.lengthUnit, 
+                utils::convertToDouble(fields[3]) * conv.velocityUnit, 
+                utils::convertToDouble(fields[4]) * conv.velocityUnit, 
+                utils::convertToDouble(fields[5]) * conv.velocityUnit),
+                utils::convertToDouble(fields[6]) * conv.massUnit);
         }
-    }
-    if(noMasses || !nonzeroMasses)
-    {
-        double mass=1.0/points.size();
-        for(size_t i=0; i<points.size(); i++)
-            points[i].second=mass;
     }
 };
 
@@ -51,11 +43,15 @@ void IOSnapshotText::writeSnapshot(const PointMassArrayCar& points)
     strm << "x\ty\tz\tvx\tvy\tvz\tm" << std::endl;
     for(size_t indx=0; indx<points.size(); indx++)
     {
-        const coord::PosVelCar& pt=points[indx].first;
+        const coord::PosVelCar& pt = points.point(indx);
         strm << 
-            pt.x  << "\t" << pt.y  << "\t" << pt.z  << "\t" << 
-            pt.vx << "\t" << pt.vy << "\t" << pt.vz << "\t" <<
-            points[indx].second << std::endl;
+            pt.x  / conv.lengthUnit << "\t" <<
+            pt.y  / conv.lengthUnit << "\t" <<
+            pt.z  / conv.lengthUnit << "\t" <<
+            pt.vx / conv.velocityUnit << "\t" <<
+            pt.vy / conv.velocityUnit << "\t" <<
+            pt.vz / conv.velocityUnit << "\t" <<
+            points.mass(indx) / conv.massUnit << std::endl;
     }
     if(!strm.good())
         throw std::runtime_error("IOSnapshotText: cannot read from file "+fileName);
@@ -63,7 +59,8 @@ void IOSnapshotText::writeSnapshot(const PointMassArrayCar& points)
 
 #ifdef HAVE_UNSIO
 
-void readSnapshotUNSIO(const std::string& fileName, PointMassArrayCar& points) 
+static void readSnapshotUNSIO(const std::string& fileName, 
+    const units::ExternalUnits& conv, PointMassArrayCar& points) 
 { 
     uns::CunsIn input(fileName, "all", "all");
     if(input.isValid() && input.snapshot->nextFrame("xvm")) {
@@ -83,16 +80,21 @@ void readSnapshotUNSIO(const std::string& fileName, PointMassArrayCar& points)
             points.data.clear();
             points.data.reserve(nbodyp);
             for(int i=0; i<nbodyp; i++)
-                points.add(coord::PosVelCar(pos[i*3], pos[i*3+1], pos[i*3+2],
-                    vel ? vel[i*3] : 0, vel ? vel[i*3+1] : 0, vel ? vel[i*3+2] : 0),
-                    mass? mass[i] : 1.0/nbodyp );
+                points.add(coord::PosVelCar(
+                    pos[i*3]   * conv.lengthUnit, 
+                    pos[i*3+1] * conv.lengthUnit, 
+                    pos[i*3+2] * conv.lengthUnit,
+                    vel ? vel[i*3]   * conv.velocityUnit : 0, 
+                    vel ? vel[i*3+1] * conv.velocityUnit : 0, 
+                    vel ? vel[i*3+2] * conv.velocityUnit : 0),
+                    mass? mass[i] * conv.massUnit : 0 );
         }
     } else
         throw std::runtime_error("IOSnapshotUNSIO: cannot read from file "+fileName);
 };
 
-void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
-    const PointMassArrayCar& points)
+static void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
+    const units::ExternalUnits& conv, const PointMassArrayCar& points)
 {
     uns::CunsOut output(fileName, type);
     bool result = 1 || output.isValid();  // this flag is apparently not initialized properly
@@ -100,14 +102,14 @@ void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
         int nbody=static_cast<int>(points.size());
         std::vector<float> pos(nbody*3), vel(nbody*3), mass(nbody);
         for(int i=0; i<nbody; i++) {
-            const coord::PosVelCar& pt=points[i].first;
-            pos[i*3]  = static_cast<float>(pt.x);
-            pos[i*3+1]= static_cast<float>(pt.y);
-            pos[i*3+2]= static_cast<float>(pt.z);
-            vel[i*3]  = static_cast<float>(pt.vx);
-            vel[i*3+1]= static_cast<float>(pt.vy);
-            vel[i*3+2]= static_cast<float>(pt.vz);
-            mass[i]   = static_cast<float>(points[i].second);
+            const coord::PosVelCar& pt = points.point(i);
+            pos[i*3]  = static_cast<float>(pt.x  / conv.lengthUnit);
+            pos[i*3+1]= static_cast<float>(pt.y  / conv.lengthUnit);
+            pos[i*3+2]= static_cast<float>(pt.z  / conv.lengthUnit);
+            vel[i*3]  = static_cast<float>(pt.vx / conv.velocityUnit);
+            vel[i*3+1]= static_cast<float>(pt.vy / conv.velocityUnit);
+            vel[i*3+2]= static_cast<float>(pt.vz / conv.velocityUnit);
+            mass[i]   = static_cast<float>(points.mass(i) / conv.massUnit);
         }
         result &= output.snapshot->setData("halo", "pos", nbody, &(pos.front()), true)>0;
         result &= output.snapshot->setData("halo", "vel", nbody, &(vel.front()), true)>0;
@@ -119,15 +121,15 @@ void writeSnapshotUNSIO(const std::string& fileName, const std::string& type,
 };
 
 void IOSnapshotGadget::readSnapshot(PointMassArrayCar& points) {
-    readSnapshotUNSIO(fileName, points);
+    readSnapshotUNSIO(fileName, conv, points);
 }
 
 void IOSnapshotGadget::writeSnapshot(const PointMassArrayCar& points) {
-    writeSnapshotUNSIO(fileName, "gadget2", points);
+    writeSnapshotUNSIO(fileName, "gadget2", conv, points);
 }
 
 void IOSnapshotNemo::readSnapshot(PointMassArrayCar& points) {
-    readSnapshotUNSIO(fileName, points);
+    readSnapshotUNSIO(fileName, conv, points);
 }
 
 #else
@@ -209,19 +211,21 @@ public:
         if (new_h.size() > 0)
             putString("History",new_h.c_str());
     }
-    /// write phase space (positions and velocities)
-    template<typename NumT> void writePhase(const PointMassArrayCar& points, double time) {
+    /// write phase space (positions and velocities); NumT may be float or double
+    template<typename NumT> 
+    void writePhase(const PointMassArrayCar& points, double time, const units::ExternalUnits& conv) 
+    {
         int nbody    = static_cast<int>(points.size());
         NumT* phase = new NumT[nbody * 6];
         NumT* mass  = new NumT[nbody];
         for(int i = 0 ; i < nbody ; i++) {
-            phase[i*6  ] = static_cast<NumT>(points[i].first.x);
-            phase[i*6+1] = static_cast<NumT>(points[i].first.y);
-            phase[i*6+2] = static_cast<NumT>(points[i].first.z);
-            phase[i*6+3] = static_cast<NumT>(points[i].first.vx);
-            phase[i*6+4] = static_cast<NumT>(points[i].first.vy);
-            phase[i*6+5] = static_cast<NumT>(points[i].first.vz);
-            mass[i] = points[i].second;
+            phase[i*6  ] = static_cast<NumT>(points.point(i).x  / conv.lengthUnit);
+            phase[i*6+1] = static_cast<NumT>(points.point(i).y  / conv.lengthUnit);
+            phase[i*6+2] = static_cast<NumT>(points.point(i).z  / conv.lengthUnit);
+            phase[i*6+3] = static_cast<NumT>(points.point(i).vx / conv.velocityUnit);
+            phase[i*6+4] = static_cast<NumT>(points.point(i).vy / conv.velocityUnit);
+            phase[i*6+5] = static_cast<NumT>(points.point(i).vz / conv.velocityUnit);
+            mass[i] = static_cast<NumT>(points.mass(i) / conv.massUnit);
         }
         startLevel("SnapShot");
         startLevel("Parameters");
@@ -259,7 +263,7 @@ void IOSnapshotNemo::writeSnapshot(const PointMassArrayCar& points)
     bool result = SnapshotWriter.ok();
     if(result) {
         SnapshotWriter.writeHistory(header);
-        SnapshotWriter.writePhase<float>(points, time); 
+        SnapshotWriter.writePhase<float>(points, time, conv); 
         result = SnapshotWriter.ok();
     }
     if(!result) 
@@ -286,7 +290,8 @@ std::vector< std::string > formatsIOSnapshot = initFormatsIOSnapshot();
 
 // creates an instance of appropriate snapshot reader, according to the file format 
 // determined by reading first few bytes, or throw an exception if a file doesn't exist
-BaseIOSnapshot* createIOSnapshotRead (const std::string &fileName)
+BaseIOSnapshot* createIOSnapshotRead (const std::string &fileName, 
+    const units::ExternalUnits& unitConverter)
 {
     std::ifstream strm(fileName.c_str(), std::ios::in);
     if(!strm)
@@ -297,7 +302,7 @@ BaseIOSnapshot* createIOSnapshotRead (const std::string &fileName)
     if(buffer[0]==-110 &&  // NEMO signature: open block
         (buffer[2]=='c' || buffer[2]=='i' || buffer[2]=='f' || buffer[2]=='d' || buffer[2]=='('))  // nemo block type
     {
-        return new IOSnapshotNemo(fileName);
+        return new IOSnapshotNemo(fileName, unitConverter);
     } else
 #ifdef HAVE_UNSIO
     if( (buffer[0]==8 && buffer[1]==0 && buffer[2]==0 && buffer[3]==0) ||
@@ -305,30 +310,31 @@ BaseIOSnapshot* createIOSnapshotRead (const std::string &fileName)
         (buffer[0]==0 && buffer[1]==0 && buffer[2]==8 && buffer[3]==0) ||
         (buffer[0]==0 && buffer[1]==0 && buffer[2]==0 && buffer[3]==1) )
     {
-        return new IOSnapshotGadget(fileName);
+        return new IOSnapshotGadget(fileName, unitConverter);
     } else
 #endif
     {   // anything else is a text file by default (might not work out anyway)
-        return new IOSnapshotText(fileName);
+        return new IOSnapshotText(fileName, unitConverter);
     }
 };
 
 // creates an instance of snapshot writer for a given format name, 
 // or throw an exception if the format name string is incorrect
 BaseIOSnapshot* createIOSnapshotWrite(const std::string &fileFormat, const std::string &fileName, 
+    const units::ExternalUnits& unitConverter, 
     const std::string& header, const double time, const bool append)
 {
     if(fileFormat.empty() || fileName.empty())
         throw std::runtime_error("Snapshot file name or format is empty");
     if(tolower(fileFormat[0])=='t')
-        return new IOSnapshotText(time==0 ? fileName : (fileName + utils::convertToString(time)));
+        return new IOSnapshotText(time==0 ? fileName : (fileName + utils::convertToString(time)), unitConverter);
     else 
     if(tolower(fileFormat[0])=='n')
-        return new IOSnapshotNemo(fileName, header, time, append);
+        return new IOSnapshotNemo(fileName, unitConverter, header, time, append);
 #ifdef HAVE_UNSIO
     else 
     if(tolower(fileFormat[0])=='g')
-        return new IOSnapshotGadget(time==0 ? fileName : (fileName + utils::convertToString(time)));
+        return new IOSnapshotGadget(time==0 ? fileName : (fileName + utils::convertToString(time)), unitConverter);
 #endif
     else
         throw std::runtime_error("Snapshot file format not recognized");   // error - format name not found

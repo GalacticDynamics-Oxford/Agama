@@ -1,20 +1,20 @@
-#include "potential_staeckel.h"
+#include "potential_perfect_ellipsoid.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
 
 namespace potential{
 
-StaeckelOblatePerfectEllipsoid::StaeckelOblatePerfectEllipsoid
+OblatePerfectEllipsoid::OblatePerfectEllipsoid
     (double _mass, double major_axis, double minor_axis) :
     mass(_mass), coordSys(pow_2(major_axis)-pow_2(minor_axis)), minorAxis(minor_axis)
 {
     if(minor_axis<=0 || minor_axis>=major_axis)
-        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
+        throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "minor axis must be positive and strictly smaller than major axis");
 }
 
-void StaeckelOblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
+void OblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     double* val, coord::GradProlSph* deriv, coord::HessProlSph* deriv2) const
 {
     assert(&(pos.coordsys)==&coordSys);  // make sure we're not bullshited
@@ -22,7 +22,7 @@ void StaeckelOblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     double signu = pos.nu>0 ? 1 : -1;
     double lmn = pos.lambda-absnu;
     if(absnu>coordSys.delta || pos.lambda<coordSys.delta)
-        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
+        throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "incorrect values of spheroidal coordinates");
     double Glambda, dGdlambda, d2Gdlambda2, Gnu, dGdnu, d2Gdnu2;
     // values and derivatives of G(lambda) and G(|nu|)
@@ -43,13 +43,13 @@ void StaeckelOblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     }
 }
 
-void StaeckelOblatePerfectEllipsoid::evalDeriv(double tau, double* G, double* deriv, double* deriv2) const
+void OblatePerfectEllipsoid::evalDeriv(double tau, double* G, double* deriv, double* deriv2) const
 {
     // G is defined by eq.27 in de Zeeuw(1985), except that we use 
     // tau = {tau_deZeeuw}+{gamma_deZeeuw}, which ranges from 0 to inf.
     double c2 = pow_2(minorAxis);
     if(tau<0)
-        throw std::invalid_argument("Error in StaeckelOblatePerfectEllipsoid: "
+        throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "incorrect value of tau");
     if(tau==0) {  // handling a special case
         double val = mass*2./M_PI/minorAxis;

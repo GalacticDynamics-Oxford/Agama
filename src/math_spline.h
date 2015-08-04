@@ -229,16 +229,20 @@ private:
 /** generates a grid with exponentially growing spacing.
     x[k] = (exp(Z k) - 1)/(exp(Z) - 1),
     and the value of Z is computed so the the 1st element is at xmin and last at xmax.
-    \param[in]  nnodes>=2 -- total number of grid points
-    \param[in]  xmin>0, xmax>xmin -- location of the first and the last node
-    \param[in]  zeroelem -- if true, 0th node is at zero (otherwise at xmin)
-    \param[out] grid -- array of grid nodes created by this routine
+    \param[in]  nnodes   is the total number of grid points (>=2)
+    \param[in]  xmin     is the location of the innermost nonzero node (>0)     
+    \param[in]  xmax     is location of the last node (should be >=nnodes*xmin)
+    \param[in]  zeroelem -- if true, 0th node in the output array is placed at zero (otherwise at xmin)
+    \param[out] grid     is the array of grid nodes created by this routine
 */
 void createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool zeroelem, std::vector<double>& grid);
 
 /** creates an almost uniform grid so that each bin contains at least minbin points from input array.
     input points are in srcpoints array and MUST BE SORTED in ascending order (assumed but not cheched).
-    \param[out] grid  is the array of grid nodes which will have length at most gridsize. 
+    \param[in]  srcpoints is the input array of points,
+    \param[in]  minbin    is the minimum number of points per bin,
+    \param[in]  gridsize  is the required length of the output array,
+    \param[out] grid      will contain the array of grid nodes. 
     NB: in the present implementation, the algorithm is not very robust and works well only for gridsize*minbin << srcpoints.size,
     assuming that 'problematic' bins only are found close to endpoints but not in the middle of the grid.
 */

@@ -53,6 +53,9 @@ double unwrapAngle(double x, double xprev);
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
     to the variable (but the function still should return finite value for an infinite argument).
     If the function interface provides derivatives, this may speed up the search.
+    \param[in] F  is the input function
+    \param[in] x1 is the lower end of the interval (may be -INFINITY),
+    \param[in] x2 is the upper end of the interval (may be +INFINITY),
     \param[in] rel_toler  determines the accuracy of root localization, relative to the range |x2-x1|.
 */
 double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
@@ -60,6 +63,9 @@ double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
 /** Find a local minimum on the interval [x1,x2].
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
     to the variable (but the function still should return finite value for an infinite argument).
+    \param[in] F  is the input function
+    \param[in] x1 is the lower end of the interval (may be -INFINITY),
+    \param[in] x2 is the upper end of the interval (may be +INFINITY),
     \param[in] xinit  is the optional initial guess point: 
     if provided (not NaN), this speeds up the determination of minimum, 
     but results in error if F(xinit) was not strictly lower than both F(x1) and F(x2). 

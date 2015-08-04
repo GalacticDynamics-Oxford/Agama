@@ -50,11 +50,11 @@ void make_hernquist(int nbody, double q, double p, particles::PointMassArrayCar&
 const potential::BasePotential* create_from_file(
     const particles::PointMassArrayCar& points, const potential::PotentialType type)
 {
+    potential::ConfigPotential config;
     const std::string fileName = "test.txt";
-    particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite("Text", fileName);
+    particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite("Text", fileName, config.units);
     snap->writeSnapshot(points);
     delete snap;
-    potential::ConfigPotential config;
     config.fileName = fileName;
     config.potentialType   = type;
     config.numCoefsRadial  = 20;

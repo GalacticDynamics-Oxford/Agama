@@ -44,9 +44,8 @@ private:
 class BasisSetExp: public BasePotentialSphericalHarmonic {
 public:
     /// init coefficients from a discrete point mass set
-    template<typename CoordT> 
     BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL);
+        const particles::PointMassArray<coord::PosSph> &points, SymmetryType _sym=ST_TRIAXIAL);
 
     /// load coefficients from stored values
     BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs);
@@ -81,8 +80,7 @@ private:
 
     /// compute coefficients from a discrete point mass set; 
     /// if Alpha=0 then it is computed automatically from the data
-    template<typename CoordT> 
-    void prepareCoefsDiscrete(const particles::PointMassArray<CoordT>& points);
+    void prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph>& points);
 
     /// compute coefficients from a smooth mass profile; 
     /// if Alpha=0 then it is chosen automatically from density->getGamma()
@@ -98,9 +96,9 @@ class SplineExp: public BasePotentialSphericalHarmonic
 public:
     /// init potential from N point masses with given assumed symmetry type, 
     /// may also provide desired grid radii (otherwise assigned automatically)
-    template<typename CoordT>
     SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
+        const particles::PointMassArray<coord::PosSph> &points, 
+        SymmetryType _sym=ST_TRIAXIAL, double smoothfactor=0, 
         const std::vector<double>  *_gridradii=0);
 
     /// init potential from stored SHE coefficients at given radii
@@ -148,33 +146,18 @@ private:
 
     /// create spline objects for all non-zero spherical harmonics from the supplied radii and coefficients.
     /// radii should have "Ncoefs_radial" elements and coefsArray - "Ncoefs_radial * (Ncoefs_angular+1)^2" elements
-    void initSpline(const std::vector<double>&  radii, const std::vector<std::vector<double> >& coefsArray);
+    void initSpline(const std::vector<double>& radii, const std::vector<std::vector<double> >& coefsArray);
 
     /** calculate (non-smoothed) spherical harmonic coefs for a discrete point mass set.
-        \param[in] points contains the positions and masses of particles that serve as the input.
-        There are two modes of operation, depending on the content of "outradii" vector: 
-
-        - in the context of initialization of potential from a discrete point set, "srcradii"=NULL;
-        "outradii" will be initialized with radii of all particles sorted in ascending order, 
-        and "outcoefs" will contain coefficients of SH expansion for all points, 
-        "outradii" and "outcoefs" should point to existing arrays; in case of error outcoefs is set to zero length.
-        \note: the order of indexes in outcoefs is swapped w.r.t. standard convention in this file:
-        outcoefs[coefind][pointind] - this is done to save memory by not allocating arrays for unused coefind'ices.
-
-        - in the context of SHgrid Schwarzschild modelling, this is called from a quasi-constructor 
-        for the purpose of computing SH coefs at a given set of radii. 
-        This set is passed as "srcradii" array, and coefs are returned in "outcoefs"
-        in the standard way: outcoefs[pointind][coefind]. 
-        "outcoefs" should point to an existing array, in case of error it is filled with zeroes.
-
-        \param[in] srcradii may contain user-defined set of radii to compute the expansion coefficients.
-        \param[out] outradii points to an existing array to be filled with radial grid points.
-        \param[out] outcoefs points to an existing 2d array that will contain computed coefficients.
+        \param[in]  points contains the positions and masses of particles that serve as the input.
+        \param[out] outradii will contain radii of particles sorted in ascending order,
+        \param[out] outcoefs will contain coefficients of SH expansion for all particles
+        in a 'swapped' order, namely: the size of this array is numCoefs^2,
+        and elements of this array are `outcoefs[coefIndex][particleIndex]`
+        this is done to save memory by not allocating arrays for unused coefficients.
     */
-    template<typename CoordT> 
-    void computeCoefsFromPoints(const particles::PointMassArray<CoordT>& points, 
-        const std::vector<double> * srcradii, 
-        std::vector<double> * outradii, std::vector<std::vector<double> > *outcoefs);
+    void computeCoefsFromPoints(const particles::PointMassArray<coord::PosSph>& points, 
+        std::vector<double>& outradii, std::vector<std::vector<double> >& outcoefs);
 
     /** create smoothing splines from the coefficients computed at each particle's radius.
         \param[in] points is the array of particle coordinates and masses
@@ -184,8 +167,7 @@ private:
         \param[in] smoothfactor determines how much smoothing is applied to the spline 
                    (good results are obtained for smoothfactor=1-2). 
     */
-    template<typename CoordT>
-    void prepareCoefsDiscrete(const particles::PointMassArray<CoordT>& points, 
+    void prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph>& points, 
         double smoothfactor, const std::vector<double> * userradii);
 
     /** compute expansion coefficients from an analytical mass profile.

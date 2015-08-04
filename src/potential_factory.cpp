@@ -6,7 +6,7 @@
 #include "potential_dehnen.h"
 #include "potential_ferrers.h"
 #include "potential_galpot.h"
-#include "potential_staeckel.h"
+#include "potential_perfect_ellipsoid.h"
 #include "potential_sphharm.h"
 #include <cassert>
 #include <stdexcept>
@@ -147,9 +147,9 @@ const BasePotential* createPotential(ConfigPotential& config)
 }
 
 /* ------- auxiliary function to create potential of a given type from a set of point masses ------ */
-template<typename CoordT> 
+template<typename ParticleT> 
 const BasePotential* createPotentialFromPoints(const ConfigPotential& config, 
-    const particles::PointMassArray<CoordT>& points)
+    const particles::PointMassArray<ParticleT>& points)
 {
     switch(config.potentialType) {
     case PT_SPLINE: {
@@ -192,7 +192,17 @@ const BasePotential* createPotentialFromPoints(const ConfigPotential& config,
 }
 // instantiations
 template const BasePotential* createPotentialFromPoints(
-    const ConfigPotential& config, const particles::PointMassArray<coord::Car>& points);
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosCar>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosVelCar>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosCyl>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosVelCyl>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosSph>& points);
+template const BasePotential* createPotentialFromPoints(
+    const ConfigPotential& config, const particles::PointMassArray<coord::PosVelSph>& points);
 
 
 // attempt to load coefficients stored in a text file
@@ -454,7 +464,7 @@ const BasePotential* readPotential(ConfigPotential& config)
 
     // if the above didn't work, try to load a point mass set from the file
     particles::PointMassArrayCar points;
-    particles::readSnapshot(fileName, points);
+    particles::readSnapshot(fileName, config.units, points);
     if(points.size()==0)
         throw std::runtime_error("readPotential: error loading N-body snapshot from "+fileName);
     const BasePotential* pot = createPotentialFromPoints(config, points);
@@ -574,7 +584,7 @@ static void swallowRestofLine(std::ifstream& from) {
     } while( from.good() && c !='\n');
 }
 
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units) {
+const potential::BasePotential* readGalaxyPotential(const char* filename, const units::InternalUnits& units) {
     std::ifstream strm(filename);
     if(!strm) 
         throw std::runtime_error("Cannot open file "+std::string(filename));

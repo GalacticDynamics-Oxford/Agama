@@ -28,8 +28,8 @@ SOURCES   = coord.cpp \
             potential_dehnen.cpp \
             potential_ferrers.cpp \
             potential_galpot.cpp \
+            potential_perfect_ellipsoid.cpp \
             potential_sphharm.cpp \
-            potential_staeckel.cpp \
             particles_io.cpp \
             Numerics.cpp \
             actions_staeckel.cpp \

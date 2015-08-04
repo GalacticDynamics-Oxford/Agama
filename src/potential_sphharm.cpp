@@ -145,10 +145,9 @@ void BasePotentialSphericalHarmonic::evalSph(const coord::PosSph &pos,
 //----------------------------------------------------------------------------//
 // Basis-set expansion for arbitrary potential (using Zhao(1995) basis set)
 
-template<typename NumT> 
 BasisSetExp::BasisSetExp(
     double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassArray<NumT> &points, SymmetryType _sym):
+    const particles::PointMassArray<coord::PosSph> &points, SymmetryType _sym):
     BasePotentialSphericalHarmonic(_Ncoefs_angular), 
     Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
     Alpha(_Alpha)
@@ -159,10 +158,7 @@ BasisSetExp::BasisSetExp(
     prepareCoefsDiscrete(points);
     checkSymmetry();
 }
-template 
-BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassArray<coord::Car>&points, SymmetryType _sym);
-
+    
 BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs):
     BasePotentialSphericalHarmonic(coefs.size()>0 ? static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1) : 0), 
     Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, static_cast<size_t>(coefs.size()-1))),
@@ -277,8 +273,7 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
     gsl_integration_workspace_free (ws);
 }
 
-template<typename CoordT> 
-void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &points)
+void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph> &points)
 {
     SHcoefs.resize(Ncoefs_radial+1);
     for(size_t n=0; n<=Ncoefs_radial; n++)
@@ -299,8 +294,8 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &
     }
     for(size_t i=0; i<npoints; i++)
     {
-        double massi = points[i].second;
-        const coord::PosVelSph point = coord::toPosVelSph(points[i].first);
+        const coord::PosSph& point = points.point(i);
+        double massi = points.mass(i);
         double ralpha=pow(point.r, 1/Alpha);
         double xi=(ralpha-1)/(ralpha+1);
         for(int m=0; m<=lmax; m+=mstep)
@@ -383,25 +378,22 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
 //----------------------------------------------------------------------------//
 // Spherical-harmonic expansion of arbitrary potential, radial part is spline interpolated on a grid
 
-template<typename CoordT>
+// init coefs from point mass set
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassArray<CoordT> &points, SymmetryType _sym, 
-    double smoothfactor, const std::vector<double> *radii):  // init coefs from point mass set
+    const particles::PointMassArray<coord::PosSph> &points, SymmetryType _sym, 
+    double smoothfactor, const std::vector<double> *radii):
     BasePotentialSphericalHarmonic(_Ncoefs_angular),
     Ncoefs_radial(std::max<size_t>(5,_Ncoefs_radial))
 {
     setSymmetry(_sym);
     prepareCoefsDiscrete(points, smoothfactor, radii);
 }
-template
-SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const particles::PointMassArray<coord::Car> &points, SymmetryType _sym, 
-    double smoothfactor, const std::vector<double> *radii);
 
+// init from existing coefs
 SplineExp::SplineExp(
     const std::vector<double> &_gridradii, const std::vector< std::vector<double> > &_coefs):
     BasePotentialSphericalHarmonic(_coefs.size()>0 ? static_cast<size_t>(sqrt(_coefs[0].size()*1.0)-1) : 0), 
-    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _coefs.size()-1))  // init from existing coefs
+    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _coefs.size()-1))
 {
     for(size_t n=0; n<_coefs.size(); n++)
         if(_coefs[n].size()!=pow_2(Ncoefs_angular+1))
@@ -409,8 +401,9 @@ SplineExp::SplineExp(
     initSpline(_gridradii, _coefs);
 }
 
+// init potential from analytic mass model
 SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
-    const BaseDensity& srcdensity, const std::vector<double> *radii):    // init potential from analytic mass model
+    const BaseDensity& srcdensity, const std::vector<double> *radii):
     BasePotentialSphericalHarmonic(_Ncoefs_angular), 
     Ncoefs_radial(std::max<unsigned int>(5,_Ncoefs_radial))
 {
@@ -566,141 +559,107 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
 }
 
 /// \cond INTERNAL_DOCS
-// auxiliary structure to sort particles in radius
-typedef std::pair<coord::PosSph, double> ParticleSph;
-inline bool compareParticleSph(const ParticleSph& val1, const ParticleSph& val2)
-{  return val1.first.r < val2.first.r;  }
+inline bool compareParticleSph(
+    const particles::PointMassArray<coord::PosSph>::ElemType& val1, 
+    const particles::PointMassArray<coord::PosSph>::ElemType& val2) {
+    return val1.first.r < val2.first.r;  }
 /// \endcond
 
-template<typename CoordT>
-void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<CoordT> &srcpoints, 
-    const std::vector<double>* srcradii, std::vector<double>* outradii, std::vector< std::vector<double> > *outcoefs)
+void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<coord::PosSph> &srcPoints, 
+    std::vector<double>& outputRadii, std::vector< std::vector<double> >& outputCoefs)
 {
-    assert(outcoefs!=NULL);
-    bool initUserRadii = srcradii!=NULL;   // if true, then it was called in the context of SHgrid Schwarzschild model
-    std::vector< std::vector<double> > *CoefsInner=NULL, *CoefsOuter=NULL;  // coefficients of expansion at each point
-    try{
-        if(initUserRadii) 
-        {
-            outcoefs->resize(srcradii->size());
-            for(size_t i=0; i<outcoefs->size(); i++)
-                outcoefs->at(i).assign(pow_2(Ncoefs_angular+1), 0);
-        }
-        double legendre_array[MAX_NCOEFS_ANGULAR][MAX_NCOEFS_ANGULAR-1];
-        size_t npoints=srcpoints.size();
-        if(npoints==0) return;
-        std::vector<ParticleSph> points;
-        points.reserve(npoints);
-        for(size_t i=0; i<npoints; i++)
-        {
-            if(srcpoints[i].second>0)  // don't consider zero-mass points
-                points.push_back(ParticleSph(coord::toPosSph(srcpoints[i].first), srcpoints[i].second));
-            if(srcpoints[i].second<0) 
-                throw std::invalid_argument("SplineExp: input particles have negative mass");
-            if(points.back().first.r<=0)
-                throw std::invalid_argument("SplineExp: particles at r=0 are not allowed");
-        }
-        std::sort(points.begin(), points.end(), compareParticleSph);
-        npoints=points.size();   // may be smaller than before if we throw out zero masses
-        if(npoints<=Ncoefs_radial*10)
-            throw std::invalid_argument("SplineExp: number of particles is too small");
-        // having sorted particles in radius, may now initialize coefs
-        if(!initUserRadii)  // will need to output coefs at each particle's radius
-        {
-            outradii->resize(npoints);
-            for(size_t i=0; i<npoints; i++)
-                outradii->at(i)=points[i].first.r;
-            outcoefs->resize(pow_2(Ncoefs_angular+1));   // note that array indexing is swapped w.r.t. coefsArray - to save memory by not initializing unnecessary coefs
-            CoefsOuter = outcoefs;   // re-use memory allocated for target coefs array  for the intermediate calculations
-        }
-        else 
-            CoefsOuter = new std::vector< std::vector<double> > (pow_2(Ncoefs_angular+1));
-        CoefsInner = new std::vector< std::vector<double> > (pow_2(Ncoefs_angular+1)); 
-        for(int l=0; l<=lmax; l+=lstep)
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-                CoefsOuter->at(l*(l+1)+m).assign(npoints, 0);  // reserve memory only for those coefs that will be used
-        for(int l=0; l<=lmax; l+=lstep)
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-                CoefsInner->at(l*(l+1)+m).assign(npoints, 0);  // yes do it separately from the above, to allow contiguous block of memory to be freed after deleting CoefsInner
+    double legendre_array[MAX_NCOEFS_ANGULAR][MAX_NCOEFS_ANGULAR-1];
+    size_t npoints = srcPoints.size();
+    for(size_t i=0; i<npoints; i++) {
+        if(srcPoints.point(i).r<=0)
+            throw std::invalid_argument("SplineExp: particles at r=0 are not allowed");
+        if(srcPoints.mass(i)<0) 
+            throw std::invalid_argument("SplineExp: input particles have negative mass");
+    }
+    
+    // make a copy of input array to allow it to be sorted
+    particles::PointMassArray<coord::PosSph> points(srcPoints);
+    std::sort(points.data.begin(), points.data.end(), compareParticleSph);
+    
+    // having sorted particles in radius, may now initialize coefs
+    outputRadii.resize(npoints);
+    for(size_t i=0; i<npoints; i++)
+        outputRadii[i] = points.point(i).r;
+    
+    // we need two intermediate arrays of inner and outer coefficients for each particle,
+    // and in the end we output one array of 'final' coefficients for each particle.
+    // We can use a trick to save memory, by allocating only one temporary array, 
+    // and using the output array as the second intermediate one.
+    std::vector< std::vector<double> > coefsInner(pow_2(Ncoefs_angular+1));  // this is the 1st temp array
+    outputCoefs.resize(pow_2(Ncoefs_angular+1));  // this will be the final array
+    // instead of allocating 2nd temp array, we use a reference to the already existing array
+    std::vector< std::vector<double> >& coefsOuter = outputCoefs;
+    // reserve memory only for those coefficients that are actually needed
+    for(int l=0; l<=lmax; l+=lstep)
+        for(int m=l*mmin; m<=l*mmax; m+=mstep)
+            coefsOuter[l*(l+1)+m].assign(npoints, 0);  // reserve memory only for those coefs that will be used
+    for(int l=0; l<=lmax; l+=lstep)
+        for(int m=l*mmin; m<=l*mmax; m+=mstep)
+            coefsInner[l*(l+1)+m].assign(npoints, 0);  // yes do it separately from the above, to allow contiguous block of memory to be freed after deleting CoefsInner
 
-        // initialize SH expansion coefs at each point's location
-        for(size_t i=0; i<npoints; i++)
-        {
-            for(int m=0; m<=lmax; m+=mstep)
-                math::legendrePolyArray(lmax, m, points[i].first.theta, legendre_array[m]);
-            for(int l=0; l<=lmax; l+=lstep)
-                for(int m=l*mmin; m<=l*mmax; m+=mstep)
-                {
-                    int coefind=l*(l+1)+m;
-                    int absm=abs(m);  // negative m correspond to sine, positive - to cosine
-                    double mult= -sqrt(4*M_PI)/(2*l+1) * (m==0 ? 1 : M_SQRT2) * points[i].second *
-                        legendre_array[absm][l-absm] * 
-                        (m>=0 ? cos(m*points[i].first.phi) : sin(-m*points[i].first.phi));
-                    CoefsOuter->at(coefind)[i] = mult * pow(points[i].first.r, -(1+l));
-                    CoefsInner->at(coefind)[i] = mult * pow(points[i].first.r, l);
-                }
-        }
-        // sum inner coefs interior and outer coefs exterior to each point's location
+    // initialize SH expansion coefs at each point's location
+    for(size_t i=0; i<npoints; i++) {
+        for(int m=0; m<=lmax; m+=mstep)
+            math::legendrePolyArray(lmax, m, points.point(i).theta, legendre_array[m]);
         for(int l=0; l<=lmax; l+=lstep)
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-            {
-                int coefind=l*(l+1)+m;
-                for(size_t i=1; i<npoints; i++)
-                    CoefsInner->at(coefind)[i] += CoefsInner->at(coefind)[i-1];
-                for(size_t i=npoints-1; i>0; i--)
-                    CoefsOuter->at(coefind)[i-1] += CoefsOuter->at(coefind)[i];
+            for(int m=l*mmin; m<=l*mmax; m+=mstep) {
+                int coefind = l*(l+1)+m;
+                int absm = abs(m);  // negative m correspond to sine, positive - to cosine
+                double mult = -sqrt(4*M_PI)/(2*l+1) * (m==0 ? 1 : M_SQRT2) * points.mass(i) *
+                    legendre_array[absm][l-absm] * 
+                    (m>=0 ? cos(m*points.point(i).phi) : sin(-m*points.point(i).phi));
+                coefsOuter[coefind][i] = mult * pow(points.point(i).r, -(1+l));
+                coefsInner[coefind][i] = mult * pow(points.point(i).r, l);
             }
-        // initialize potential expansion coefs by multiplying inner and outer coefs by r^(-1-l) and r^l, correspondingly
-        if(initUserRadii)   // if using manually supplied srcradii, output coefficients only at these radii
+    }
+
+    // sum inner coefs interior and outer coefs exterior to each point's location
+    for(int l=0; l<=lmax; l+=lstep)
+        for(int m=l*mmin; m<=l*mmax; m+=mstep)
         {
-            size_t indPoint=0;
-            for(size_t indGrid=0; indGrid<srcradii->size(); indGrid++)
-            {   // find indPoint so that points[indPoint-1].r <= srcRadii[indGrid] < points[indPoint].r
-                double radGrid=srcradii->at(indGrid);
-                while(indPoint<npoints && points[indPoint].first.r<=radGrid) indPoint++;
-                for(int l=0; l<=lmax; l+=lstep)
-                    for(int m=l*mmin; m<=l*mmax; m+=mstep)
-                    {
-                        int coefind=l*(l+1)+m;
-                        outcoefs->at(indGrid)[coefind] = 
-                            (indPoint>0 ? CoefsInner->at(coefind)[indPoint-1] * pow(radGrid, -(1+l)) : 0) + 
-                            (indPoint<npoints ? CoefsOuter->at(coefind)[indPoint] * pow(radGrid, l) : 0);
-                    }
-            }
-        } else {   // compute coefs at every particle radius
-            for(size_t i=0; i<npoints; i++)
-            {
-                for(int l=0; l<=lmax; l+=lstep)
-                    for(int m=l*mmin; m<=l*mmax; m+=mstep)
-                    {
-                        int coefind=l*(l+1)+m;
-                        outcoefs->at(coefind)[i] = 
-                            (i>0 ? CoefsInner->at(coefind)[i-1] * pow(points[i].first.r, -(1+l)) : 0) + 
-                            (i<npoints-1 ? CoefsOuter->at(coefind)[i+1] * pow(points[i].first.r, l) : 0);
-                    }
-            }
+            int coefind=l*(l+1)+m;
+            for(size_t i=1; i<npoints; i++)
+                coefsInner[coefind][i] += coefsInner[coefind][i-1];
+            for(size_t i=npoints-1; i>0; i--)
+                coefsOuter[coefind][i-1] += coefsOuter[coefind][i];
         }
-        if(CoefsOuter!=NULL && initUserRadii) delete CoefsOuter;   // if !initUserRadii, this array actually holds the output coefs so it should not be deleted
-        if(CoefsInner!=NULL) delete CoefsInner;
+
+    // initialize potential expansion coefs by multiplying 
+    // inner and outer coefs by r^(-1-l) and r^l, correspondingly
+    for(size_t i=0; i<npoints; i++) {
+        for(int l=0; l<=lmax; l+=lstep)
+            for(int m=l*mmin; m<=l*mmax; m+=mstep) {
+                int coefind = l*(l+1)+m;
+                // note that here we are destroying the values of CoefsOuter, because this array
+                // is aliased with outcoefs; but we do it from inside out, and for each i-th point
+                // the coefficients from i+1 till the end of array are still valid.
+                outputCoefs[coefind][i] = 
+                    (i>0 ? coefsInner[coefind][i-1] * pow(points.point(i).r, -(1+l)) : 0) + 
+                    (i<npoints-1 ? coefsOuter[coefind][i+1] * pow(points.point(i).r, l) : 0);
+            }
     }
-    catch(...)   // there could well be an out-of-memory exception, but for the sake of generality we catch everything including an asteroid hitting earth
-    {
-        outcoefs->clear();
-        if(CoefsInner!=NULL && initUserRadii) delete CoefsInner;   // in any case we need to free temporary arrays
-        if(CoefsOuter!=NULL) delete CoefsOuter;
-        throw;
-    }
+    // local variable coefsInner will be automatically freed, but outputCoefs will remain
 }
 
 
-template<typename CoordT>
-void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &srcpoints, 
+void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph> &points, 
     double smoothfactor, const std::vector<double> *userradii)
 {
-    std::vector<double> pointRadii;      // radii of each point and coefficients of expansion at each point
-    std::vector< std::vector<double> > pointCoefs;   // note that array indexing is swapped w.r.t. coefsArray - to save memory by not initializing unnecessary coefs
-    computeCoefsFromPoints(srcpoints, NULL, &pointRadii, &pointCoefs);
-    size_t npoints=pointRadii.size();
+    if(points.size() <= Ncoefs_radial*10)
+        throw std::invalid_argument("SplineExp: number of particles is too small");
+    // radii of each point in ascending order
+    std::vector<double> pointRadii;
+    // note that array indexing is swapped w.r.t. coefsArray (i.e. pointCoefs[coefIndex][pointIndex])
+    // to save memory by not initializing unnecessary coefs
+    std::vector< std::vector<double> > pointCoefs;
+    computeCoefsFromPoints(points, pointRadii, pointCoefs);
+
+    size_t npoints = pointRadii.size();
     std::vector<double> radii(Ncoefs_radial+1);                         // radii of grid nodes to pass to initspline routine
     std::vector< std::vector<double> > coefsArray(Ncoefs_radial+1);     // SHE coefficients to pass to initspline routine
     for(size_t i=0; i<=Ncoefs_radial; i++)
@@ -712,9 +671,6 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<CoordT> &sr
     bool initUserRadii = (userradii!=NULL && userradii->size()==Ncoefs_radial+1 && userradii->front()==0 && userradii->at(1)>= pointRadii[minBinPoints]);
     if(userradii!=NULL && !initUserRadii)  // something went wrong with manually supplied radii
         throw std::invalid_argument("SplineExp: invalid radial grid");
-//        my_error(FUNCNAME, "Warning, invalid radial grid (" +
-//            (userradii->size()>0 ? convertToString(userradii->at(1))+":"+convertToString(userradii->back()) : "empty") +
-//            ") provided to constructor of SHGrid Schwarzschild model");
     if(initUserRadii)
         radii= *userradii;
     else

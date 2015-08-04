@@ -21,7 +21,7 @@ namespace orbit {
                 which doesn't influence the integration accuracy;
                 if set to zero, output will be produced after each internal integrator timestep;
     \param[out] output_trajectory  will contain the trajectory in the given c.s.;
-    \param[in]  integration_accuracy  is the accuracy parameter for ODE integrator.
+    \param[in]  accuracy  is the accuracy parameter for ODE integrator.
     \returns    number of elementary integration steps completed. */
 template<typename coordT>
 int integrate(const potential::BasePotential& potential,

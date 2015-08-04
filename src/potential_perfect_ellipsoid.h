@@ -1,4 +1,4 @@
-/** \file    potential_staeckel.h
+/** \file    potential_perfect_ellipsoid.h
     \brief   Potential for Oblate Perfect Ellipsoid model
     \author  Eugene Vasiliev
     \date    2015
@@ -17,10 +17,10 @@ namespace potential{
     and the coordinates  \f$  \lambda, \nu  \f$  in this system satisfy
     \f$  -\gamma \le \nu \le -\alpha \le \lambda < \infty  \f$.
 */
-class StaeckelOblatePerfectEllipsoid: public BasePotential, 
+class OblatePerfectEllipsoid: public BasePotential, 
     public coord::IScalarFunction<coord::ProlSph>, public math::IFunction {
 public:
-    StaeckelOblatePerfectEllipsoid(double _mass, double major_axis, double minor_axis);
+    OblatePerfectEllipsoid(double _mass, double major_axis, double minor_axis);
 
     virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
 

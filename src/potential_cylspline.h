@@ -22,13 +22,13 @@ class CylSplineExp: public BasePotentialCyl
 public:
     /// init potential from analytic mass model specified by its density profile
     /// (using CPotentialDirect for intermediate potential computation)
-    CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, 
-        unsigned int _Ncoefs_phi, const BaseDensity& density, 
+    CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsigned int _Ncoefs_phi, 
+        const BaseDensity& density, 
         double radius_min=0, double radius_max=0, double z_min=0, double z_max=0);
 
     /// init potential from analytic mass model specified by a potential-density pair
-    CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, 
-        unsigned int _Ncoefs_phi, const BasePotential& potential, 
+    CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsigned int _Ncoefs_phi, 
+        const BasePotential& potential, 
         double radius_min=0, double radius_max=0, double z_min=0, double z_max=0);
 
     /// init potential from stored coefficients
@@ -36,9 +36,8 @@ public:
         const std::vector< std::vector<double> >& coefs);
 
     /// init potential from N-body snapshot
-    template<typename CoordT>
     CylSplineExp(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsigned int _Ncoefs_phi, 
-        const particles::PointMassArray<CoordT> &points, SymmetryType _sym=ST_TRIAXIAL, 
+        const particles::PointMassArray<coord::PosCyl>& points, SymmetryType _sym=ST_TRIAXIAL, 
         double radius_min=0, double radius_max=0, double z_min=0, double z_max=0);
 
     ~CylSplineExp() {};

@@ -84,12 +84,14 @@ struct ConfigPotential
     double binary_ecc;                       ///< binary BH eccentricity (0<=ecc<1)
     double binary_phase;                     ///< binary BH orbital phase (0<=phase<2*pi)
 #endif
+    units::ExternalUnits units;              ///< specification of length, velocity and mass units for N-body snapshot, in internal code units
     /// default constructor initializes the fields to some reasonable values
     ConfigPotential() : 
         mass(1.), scalerad(1.), scalerad2(1.), q(1.), p(1.), gamma(1.), sersicIndex(4.),
         numCoefsRadial(20), numCoefsAngular(0), numCoefsVertical(20), alpha(0.),
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(ST_DEFAULT),
-        splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0) {};
+        splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0),
+        units()  {};
 };
 
 ///@}
@@ -106,7 +108,7 @@ struct ConfigPotential
 const BaseDensity* createDensity(const ConfigPotential& config);
 
 /** create an instance of potential model according to the parameters passed. 
-    \param[in,out] config specifies the potential parameters, which could be modified, 
+    \param[in,out] config  specifies the potential parameters, which could be modified, 
                    e.g. if the potential coefficients are loaded from a file.
                    Massive black hole (config->Mbh) is not included in the potential 
                    (the returned potential is non-composite)
@@ -117,39 +119,41 @@ const BaseDensity* createDensity(const ConfigPotential& config);
 const BasePotential* createPotential(ConfigPotential& config);
 
 /** create a potential of a generic expansion kind from a set of point masses.
-    \param[in] configPotential contains the parameters (potential type, number of terms in expansion, etc.)
-    \param[in] points is the array of particles that are used in computing the coefficients; 
+    \param[in] config  contains the parameters (potential type, number of terms in expansion, etc.)
+    \param[in] points  is the array of particles that are used in computing the coefficients; 
     \return    a new instance of potential
     \throw     std::invalid_argument exception if the potential type is incorrect,
     or any other potential-specific exception that may occur in the constructor
 */
-template<typename CoordT>
-const BasePotential* createPotentialFromPoints(const ConfigPotential& config, const particles::PointMassArray<CoordT>& points);
+template<typename ParticleT>
+const BasePotential* createPotentialFromPoints(const ConfigPotential& config, 
+    const particles::PointMassArray<ParticleT>& points);
 
 /** load a potential from a text or snapshot file.
 
     The input file may contain one of the following kinds of data:
-    - a Nbody snapshot in a text or binary format, handled by classes derived from CBasicIOSnapshot;
-    - a potential coefficients file for CPotentialBSE, CPotentialBSECompact, CPotentialSpline, or CPotentialCylSpline;
+    - a Nbody snapshot in a text or binary format, handled by classes derived from particles::BasicIOSnapshot;
+    - a potential coefficients file for BasisSetExp, SplineExp, or CylSplineExp;
     - a density model described by CDensityEllipsoidal or CDensityMGE.
     The data format is determined from the first line of the file, and 
-    if it is allowed by the parameters passed in configPotential, then 
+    if it is allowed by the parameters passed in `config`, then 
     the file is read and the instance of a corresponding potential is created. 
     If the input data was not the potential coefficients and the new potential 
-    is of BSE or Spline type, then a new file with potential coefficients is 
-    created and written via writePotential(), so that later one may load this 
-    coef file instead of the original one, which speeds up initialization.
-    \param[in,out] configPotential contains the potential parameters and may be updated 
+    is of BasisSetExp, SplineExp or CylSplineExp type, then a new file with 
+    potential coefficients is created and written via `writePotential()`, 
+    so that later one may load this coef file instead of the original one, 
+    which speeds up initialization.
+    \param[in,out] config  contains the potential parameters and may be updated 
                    upon reading the file (e.g. the number of expansion coefficients 
                    may change). If the file doesn't contain appropriate kind of potential
-                   (i.e. if configPotential->PotentialType is PT_NB but the file contains 
+                   (i.e. if config.potentialType is PT_NB but the file contains 
                    BSE coefficients or a description of MGE model), an error is returned.
-                   configPotential->NbodyFile contains the file name from which the data is loaded.
+                   `config.fileName` contains the file name from which the data is loaded.
     \return        a new instance of BasePotential* on success
     \throws        std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if potential type is inappropriate, or a file does not exist)
 */
-const BasePotential* readPotential(ConfigPotential& configPotential);
+const BasePotential* readPotential(ConfigPotential& config);
     
 /** Utility function providing a legacy interface compatible with the original GalPot.
     It reads the parameters from a text file and converts them into the internal unit system, 
@@ -159,7 +163,7 @@ const BasePotential* readPotential(ConfigPotential& configPotential);
     \returns    the new CompositeCyl potential
     \throws     a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::Units& units);
+const potential::BasePotential* readGalaxyPotential(const char* filename, const units::InternalUnits& units);
     
 /** write potential expansion coefficients to a text file.
 

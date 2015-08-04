@@ -3,7 +3,7 @@
 #include <iostream>
 #include <cmath>
 
-bool test_units(const units::Units& unit) {
+bool test_units(const units::InternalUnits& unit) {
   double mass=5e11*unit.from_Msun;
   double scale_radius=10.*unit.from_Kpc;
   double scale_height=2. *unit.from_Kpc;
@@ -41,7 +41,7 @@ int main()
 {
   if(test_units(units::galactic_Myr) &&
      test_units(units::galactic_kms) &&
-     test_units(units::Units(units::pc, units::yr*40000)))
+     test_units(units::InternalUnits(units::pc, units::yr*40000)))
       std::cout << "ALL TESTS PASSED\n";
   return 0;
 }

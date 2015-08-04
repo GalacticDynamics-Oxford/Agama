@@ -21,7 +21,7 @@ const double MINIMUM_RANGE = 1e-12;
 /** compute integrals of motion in the Staeckel potential of an oblate perfect ellipsoid, 
     together with the coordinates in its prolate spheroidal coordinate system */
 AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
-    (const potential::StaeckelOblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
+    (const potential::OblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
 {
     double E = potential::totalEnergy(poten, point);
     double Lz= coord::Lz(point);
@@ -413,7 +413,7 @@ ActionAngles computeActionAngles(
 
 // -------- THE DRIVER ROUTINES --------
 
-Actions axisymStaeckelActions(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+Actions axisymStaeckelActions(const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point)
 {
     const AxisymFunctionStaeckel fnc = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
@@ -421,7 +421,7 @@ Actions axisymStaeckelActions(const potential::StaeckelOblatePerfectEllipsoid& p
     return computeActions(fnc, lim);
 }
 
-ActionAngles axisymStaeckelActionAngles(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+ActionAngles axisymStaeckelActionAngles(const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point)
 {
     const AxisymFunctionStaeckel fnc = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);

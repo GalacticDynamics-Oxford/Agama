@@ -1,4 +1,4 @@
-#include "potential_staeckel.h"
+#include "potential_perfect_ellipsoid.h"
 #include "actions_staeckel.h"
 #include "orbit.h"
 #include "math_core.h"
@@ -35,7 +35,7 @@ public:
 };
 
 template<typename coordSysT>
-bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& potential,
+bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     const coord::PosVelT<coordSysT>& initial_conditions,
     const double total_time, const double timestep)
 {
@@ -103,7 +103,7 @@ bool test_oblate_staeckel(const potential::StaeckelOblatePerfectEllipsoid& poten
     return ok;
 }
 
-bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential, 
+bool test_three_cs(const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCar& initcond, const char* title)
 {
     const double total_time=100.;
@@ -117,7 +117,7 @@ bool test_three_cs(const potential::StaeckelOblatePerfectEllipsoid& potential,
 }
 
 int main() {
-    const potential::StaeckelOblatePerfectEllipsoid potential(1.0, axis_a, axis_c);
+    const potential::OblatePerfectEllipsoid potential(1.0, axis_a, axis_c);
     bool allok=true;
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1   ), "ordinary case");
     allok &= test_three_cs(potential, coord::PosVelCar(1, 0. , 0. , 0  , 0.2, 0.3486), "thin orbit (Jr~0)");

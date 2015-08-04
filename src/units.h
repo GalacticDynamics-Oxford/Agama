@@ -8,32 +8,53 @@
 /** Unit systems */
 namespace units {
 
-  // base astronomical units expressed in CGS units
-  const double 
-    pc           = 3.08568e18,       ///< parsec in cm
-    Msun         = 1.98855e33,       ///< solar mass in gram
-    yr           = 60*60*24*365.25,  ///< Julian year in seconds
-    kms          = 1.e5,             ///< velocity in km/s
-    Kpc          = 1.e3*pc,          ///< kiloparsec
-    Mpc          = 1.e6*pc,          ///< megaparsec
-    c_light      = 2.99792458e10,    ///< speed of light
-    ly           = c_light*yr,       ///< light-year in cm
-    Myr          = 1.e6*yr,          ///< megayear
-    Gyr          = 1.e9*yr,          ///< megayear
-    Kpc_kms      = Kpc*kms,          ///< angular momentum
-    Msun_per_pc2 = Msun/(pc*pc),     ///< surface density
-    Msun_per_pc3 = Msun/(pc*pc*pc),  ///< volume density
-    Msun_per_Kpc2= Msun/(Kpc*Kpc),   ///< surface density
+/// \name   base astronomical units expressed in CGS units
+///@{
+const double 
+    pc           = 3.08568e18,        ///< parsec in cm
+    Msun         = 1.98855e33,        ///< solar mass in gram
+    yr           = 60*60*24*365.25,   ///< Julian year in seconds
+    kms          = 1.e5,              ///< velocity in km/s
+    Kpc          = 1.e3*pc,           ///< kiloparsec
+    Mpc          = 1.e6*pc,           ///< megaparsec
+    c_light      = 2.99792458e10,     ///< speed of light
+    ly           = c_light*yr,        ///< light-year in cm
+    Myr          = 1.e6*yr,           ///< megayear
+    Gyr          = 1.e9*yr,           ///< megayear
+    Kpc_kms      = Kpc*kms,           ///< angular momentum
+    Msun_per_pc2 = Msun/(pc*pc),      ///< surface density
+    Msun_per_pc3 = Msun/(pc*pc*pc),   ///< volume density
+    Msun_per_Kpc2= Msun/(Kpc*Kpc),    ///< surface density
     Msun_per_Kpc3= Msun/(Kpc*Kpc*Kpc),///< volume density
-    Gev_per_cm3  = 1.782662e-24,     ///< volume density in g/cm^3
-    Grav  = 6.67384e-8;              ///< gravitational constant in CGS
+    Gev_per_cm3  = 1.782662e-24,      ///< volume density in Gev/cm^3
+    Grav         = 6.67384e-8;        ///< gravitational constant in CGS
+///@}
 
-  /** Unit system and conversion class */
-  class Units {
-  private:
+/** Unit system and conversion class.
+    A global instance of this class should be used throughout the code for conversion
+    between internal units (in which there are two independent dimensional scales,
+    namely length and time, and the gravitational constant equals unity)
+    and physical units.
+    The choice of two dimensional scales should not matter for computing any quantity
+    that is correctly converted to physical units; this freedom of choice enables 
+    to check the invariance of results w.r.t the internal unit system.
+    Once this choice is made at the beginning of the program, by creating an instance 
+    of `units::InternalUnits` class (let it be named `modelUnit`), the following rules apply:
+    to convert from physical units to internal units, one should multiply the dimensional 
+    quantity (e.g. velocity of a star, expressed in km/s) by `modelUnit.from_***` 
+    (in this case, `from_kms`).
+    To convert back from model units to physical units, one multiplies by `modelUnit.to_***`.
+    These multiplications can be chained to represent a dimensional unit that is not 
+    listed as a member of this class, for instance, one may multiply by 
+    `modelUnit.to_Kpc/modelUnit.to_Myr` to obtain the velocity expressed in Kpc/Myr.
+    Finally, one may simply use e.g. `1.0*modelUnit.to_Msun` to obtain the value of 
+    scaling parameters in requested physical units.
+*/
+struct InternalUnits {
+private:
     const double 
       length_unit, mass_unit, time_unit;
-  public:
+public:
     const double
       from_Msun,
       from_pc,
@@ -65,7 +86,8 @@ namespace units {
       to_Msun_per_Kpc2,
       to_Msun_per_Kpc3,
       to_Gev_per_cm3;
-    Units(double length_unit_in_cm, double time_unit_in_s) :
+    /// Create an internal unit system from two scaling parameters -- length and time scales
+    InternalUnits(double length_unit_in_cm, double time_unit_in_s) :
       length_unit(length_unit_in_cm),
       mass_unit(length_unit_in_cm*length_unit_in_cm*length_unit_in_cm/time_unit_in_s/time_unit_in_s/units::Grav),
       time_unit(time_unit_in_s),
@@ -100,10 +122,45 @@ namespace units {
       to_Msun_per_Kpc3(1./from_Msun_per_Kpc3),
       to_Gev_per_cm3(1./from_Gev_per_cm3)
     {};  // empty constructor, apart from the initialization list
-  };
+};
 
-  static const Units galactic_Myr(units::Kpc, units::Myr);
-  static const Units galactic_kms(units::Kpc, units::Kpc/units::kms);
-  static const Units weird_units(2.71828*units::pc, 42*units::ly/units::kms);
+/// standard galactic units with length scale of 1 kpc and time scale of 1 Myr
+static const InternalUnits galactic_Myr(units::Kpc, units::Myr);
 
+/// standard galactic units with length scale of 1 kpc and velocity scale of 1 km/s
+static const InternalUnits galactic_kms(units::Kpc, units::Kpc/units::kms);
+
+/// manifestly non-standard units for testing the invariance of results w.r.t the choice of unit system
+static const InternalUnits weird_units(2.71828*units::pc, 42.*units::ly/units::kms);
+
+
+/** Specification of external unit system for converting external data to internal units.
+    The input data that arrives from various sources can have different conventions regarding 
+    the dimensional units. In particular, it does not need to comply to the 'pure dynamical'
+    convention adopted throughout the code, namely that G=1, thus it has in general three 
+    free parameters, which could be taken to be e.g. length, velocity and mass scales.
+    This class is designed to convert between positions, velocities and masses of an N-body 
+    snapshot and the internal unit system, according to the following procedure.
+    To load a snapshot in which these quantities are expressed e.g. 
+    in kiloparsecs, km/s and solar masses, and convert the data into the internal unit system 
+    specified by a global instance  of `units::InternalUnits` class (let's name it `modelUnit`), 
+    one has to create an instance of the conversion class 
+    `units::ExternalUnits extUnit (modelUnit, 1.0*units::Kpc, 1.0*units.kms, 1.0*units.Msun);`.
+    This conversion class would need to be passed to routines for reading/writing N-body snapshots
+    (in particles_io.h) and for constructing a potential approximation from N-body snapshots 
+    (in potential_factory.h, in this case, as a member of potential::ConfigPotential class).
+*/
+struct ExternalUnits {
+    const double lengthUnit;   ///< length unit of the external dataset, expressed in internal units
+    const double velocityUnit; ///< velocity unit of the external dataset, expressed in internal units
+    const double massUnit;     ///< mass unit of the external dataset, expressed in internal units
+    /// construct a trivial converter, for the case that no conversion is actually needed
+    ExternalUnits() :
+        lengthUnit(1.), velocityUnit(1.), massUnit(1.) {};
+    /// construct a converter for the given internal unit system and specified external units
+    ExternalUnits(const InternalUnits& unit, double _lengthUnit, double _velocityUnit, double _massUnit) :
+        lengthUnit(unit.from_pc*_lengthUnit/pc), 
+        velocityUnit(unit.from_kms*_velocityUnit/kms), 
+        massUnit(unit.from_Msun*_massUnit/Msun) {};
+};
 }  // namespace units

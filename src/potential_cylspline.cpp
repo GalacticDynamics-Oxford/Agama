@@ -85,7 +85,17 @@ double BesselIntegral::value(double a, double b, double c) const
 
 /** Direct computation of potential for any density profile, using double integration over space.
     Not suitable for orbit integration, as it does not provide expressions for forces;
-    only used for computing potential on a grid for Cylindrical Spline potential approximation. */
+    only used for computing potential harmonics (coefficients of Fourier expansion in 
+    azimuthal angle phi) at any point in (R,z) plane, for initializing the Cylindrical Spline 
+    potential approximation. 
+    It can be used in either of the two modes: 
+    1) with a smooth input density model, which may or may not be axisymmetric itself;
+       in the latter case an intermediate representation of its angular(azimuthal) harmonics
+       is created and interpolated on a 2d grid covering almost all of (R,z) plane,
+       to speed up computation of potential integral.
+    2) with a discrete point mass array, in which case the integral is evaluated by summing 
+       the contribution from each particle
+*/
 class DirectPotential: public BasePotentialCyl
 {
 public:
@@ -93,8 +103,8 @@ public:
     DirectPotential(const BaseDensity& _density, unsigned int mmax);
 
     /// init potential from N-body snapshot
-    template<typename CoordT>
-    DirectPotential(const particles::PointMassArray<CoordT>& _points, unsigned int mmax, SymmetryType sym);
+    DirectPotential(const particles::PointMassArray<coord::PosCyl>& _points, 
+        unsigned int mmax, SymmetryType sym);
 
     virtual ~DirectPotential() {};
     virtual const char* name() const { return myName(); };
@@ -113,11 +123,20 @@ public:
     double totalMass() const;
 
 private:
-    const BaseDensity* density;                 ///< input density model (if provided)
-    particles::PointMassArray<coord::Cyl> points; ///< input discrete point mass set (if provided)
-    SymmetryType mysymmetry;                    ///< symmetry type (axisymmetric or not)
-    std::vector<math::CubicSpline2d> splines;   ///< interpolating splines for Fourier harmonics Rho_m(R,z)
-    std::vector<BesselIntegral> besselInts;     ///< objects that compute a particular integral involving Bessel fncs
+    /// input density model (if provided)
+    const BaseDensity* density;
+
+    /// input discrete point mass set (if provided)
+    const particles::PointMassArray<coord::PosCyl>* points;
+
+    /// symmetry type of the input density model (axisymmetric or not)
+    SymmetryType mysymmetry;
+
+    /// interpolating splines for Fourier harmonics Rho_m(R,z), in case that the input density is not axisymmetric
+    std::vector<math::CubicSpline2d> splines;
+
+    /// objects that compute a particular integral involving Bessel fncs
+    std::vector<BesselIntegral> besselInts;
 
     /// Compute m-th azimuthal harmonic of density profile by averaging the density 
     /// over angle phi with weight factor cos(m phi) or sin(m phi)
@@ -130,7 +149,7 @@ private:
 };
 
 DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax) :
-    density(&_density), mysymmetry(_density.symmetry())
+    density(&_density), points(NULL), mysymmetry(_density.symmetry())
 {
     // initialize approximating spline for faster hypergeometric function evaluation
     for(unsigned int m=0; m<=_mmax; m++)
@@ -182,12 +201,11 @@ DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax
     }
 }
 
-template<typename CoordT>
-DirectPotential::DirectPotential(const particles::PointMassArray<CoordT>& _points, 
+DirectPotential::DirectPotential(const particles::PointMassArray<coord::PosCyl>& _points, 
     unsigned int _mmax, SymmetryType sym) :
-    density(NULL), points(_points), mysymmetry(sym) 
+    density(NULL), points(&_points), mysymmetry(sym) 
 {
-    if(points.size()==0)
+    if(points->size()==0)
         throw std::invalid_argument("DirectPotential: empty input array of particles");
     for(unsigned int m=0; m<=_mmax; m++)
         besselInts.push_back(BesselIntegral(m));
@@ -195,13 +213,13 @@ DirectPotential::DirectPotential(const particles::PointMassArray<CoordT>& _point
 
 double DirectPotential::totalMass() const
 {
-    assert((density!=NULL) ^ (points.size()!=0));  // either of the two regimes
+    assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL) 
         return density->totalMass();
     else {
         double mass=0;
-        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
-            pt!=points.data.end(); pt++) 
+        for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
+            pt!=points->data.end(); pt++) 
             mass+=pt->second;
         return mass;
     }
@@ -209,13 +227,13 @@ double DirectPotential::totalMass() const
 
 double DirectPotential::enclosedMass(const double r) const
 {
-    assert((density!=NULL) ^ (points.size()!=0));  // either of the two regimes
+    assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL)
         return density->enclosedMass(r);
     else {
         double mass=0;
-        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
-            pt!=points.data.end(); pt++) 
+        for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
+            pt!=points->data.end(); pt++) 
         {
             if(pow_2(pt->first.R)+pow_2(pt->first.z) <= pow_2(r))
                 mass+=pt->second;
@@ -337,12 +355,12 @@ private:
 double DirectPotential::Phi_m(double R, double Z, int m) const
 {
     if(density==NULL) {  // invoked in the discrete point set mode
-        assert(points.size()>0);
+        assert(points->size()>0);
         double val=0;
-        for(particles::PointMassArray<coord::Cyl>::Type::const_iterator pt=points.data.begin(); 
-            pt!=points.data.end(); pt++) 
+        for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
+            pt!=points->data.end(); pt++) 
         {
-            const coord::PosVelCyl& pc = pt->first;
+            const coord::PosCyl& pc = pt->first;
             double val1 = besselInts[abs(m)].value(R, pc.R, Z-pc.z);
             if((mysymmetry & ST_PLANESYM)==ST_PLANESYM)   // add symmetric contribution from -Z
                 val1 = (val1 + besselInts[abs(m)].value(R, pc.R, Z+pc.z))/2.;
@@ -398,9 +416,8 @@ CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigne
     initPot(Ncoefs_R, Ncoefs_z, Ncoefs_phi, potential, radius_min, radius_max, z_min, z_max);
 }
 
-template<typename CoordT>
 CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
-    const particles::PointMassArray<CoordT>& points, SymmetryType _sym, 
+    const particles::PointMassArray<coord::PosCyl>& points, SymmetryType _sym, 
     double radius_min, double radius_max, double z_min, double z_max)
 {
     mysymmetry=_sym;
@@ -409,14 +426,7 @@ CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigne
     DirectPotential pot_tmp(points, Ncoefs_phi, mysymmetry);
     initPot(Ncoefs_R, Ncoefs_z, Ncoefs_phi, pot_tmp, radius_min, radius_max, z_min, z_max);
 }
-// instantiations
-template CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
-    const particles::PointMassArray<coord::Car>& points, SymmetryType _sym, 
-    double radius_min, double radius_max, double z_min, double z_max);
-template CylSplineExp::CylSplineExp(unsigned int Ncoefs_R, unsigned int Ncoefs_z, unsigned int Ncoefs_phi, 
-    const particles::PointMassArray<coord::Cyl>& points, SymmetryType _sym, 
-    double radius_min, double radius_max, double z_min, double z_max);
-    
+
 CylSplineExp::CylSplineExp(const std::vector<double> &gridR, const std::vector<double>& gridz, 
     const std::vector< std::vector<double> > &coefs)
 {

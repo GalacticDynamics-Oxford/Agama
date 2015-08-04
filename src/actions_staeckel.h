@@ -18,7 +18,7 @@ of the original code remains.
 #pragma once
 #include "actions_base.h"
 #include "actions_interfocal_distance_finder.h"
-#include "potential_staeckel.h"
+#include "potential_perfect_ellipsoid.h"
 
 namespace actions {
 
@@ -88,7 +88,7 @@ public:
     together with the coordinates in its prolate spheroidal coordinate system 
 */
 AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid(
-    const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
 
 ///@}
@@ -165,12 +165,12 @@ ActionAngles computeActionAngles(const AxisymFunctionBase& fnc, const AxisymIntL
 
 /** Find exact actions in the Staeckel potential of oblate Perfect Ellipsoid */
 Actions axisymStaeckelActions(
-    const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
 
 /** Find exact actions and angles in the Staeckel potential of oblate Perfect Ellipsoid */
 ActionAngles axisymStaeckelActionAngles(
-    const potential::StaeckelOblatePerfectEllipsoid& potential, 
+    const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
 
 /** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method;
@@ -196,7 +196,7 @@ ActionAngles axisymFudgeActionAngles(
 /// Action/angle finder for an Oblate Perfect Ellipsoid potential
 class ActionFinderAxisymStaeckel: public BaseActionFinder {
 public:
-    ActionFinderAxisymStaeckel(const potential::StaeckelOblatePerfectEllipsoid& potential) :
+    ActionFinderAxisymStaeckel(const potential::OblatePerfectEllipsoid& potential) :
         pot(potential) {};
     virtual ~ActionFinderAxisymStaeckel() {};
     virtual Actions actions(const coord::PosVelCyl& point) const {
@@ -204,7 +204,7 @@ public:
     virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
         return axisymStaeckelActionAngles(pot, point); }
 private:
-    const potential::StaeckelOblatePerfectEllipsoid& pot;
+    const potential::OblatePerfectEllipsoid& pot;
 };
 
 /** Action/angle finder for a generic axisymmetric potential, based on Staeckel Fudge approximation.
