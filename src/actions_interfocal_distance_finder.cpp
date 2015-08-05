@@ -18,7 +18,7 @@ public:
     double Lz2;
     enum { FIND_RMIN, FIND_RMAX, FIND_ZMAX } mode;
     explicit OrbitSizeFunction(const potential::BasePotential& p) : potential(p), mode(FIND_RMAX) {};
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
     /** This function is used in the root-finder to determine the turnaround points of an orbit:
         in the radial direction, it returns -(1/2) v_R^2, and in the vertical direction -(1/2) v_z^2 .
         Moreover, to compute the location of pericenter this is multiplied by R^2 to curb the sharp rise 
@@ -68,7 +68,7 @@ public:
 bool estimateOrbitExtent(const potential::BasePotential& potential, const coord::PosVelCyl& point,
     double& Rmin, double& Rmax, double& zmaxRmin, double& zmaxRmax)
 {
-    const double toler = 1e-2;  // relative tolerance in root-finder, don't need high accuracy here
+    const double toler = 1e-4;  // relative tolerance in root-finder
     double absz = fabs(point.z), absR = fabs(point.R);
     OrbitSizeFunction fnc(potential);
     fnc.Lz2 = pow_2(point.R*point.vphi);
@@ -210,7 +210,7 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
     double halfMassRadius = potential::getRadiusByMass(potential, 0.5*totalMass);
     double E0 = potential::value(potential, coord::PosCar(0, 0, 0));
     double EhalfMass = potential::value(potential, coord::PosCyl(halfMassRadius, 0, 0));
-    double Einfinity = 0; // potential::value(potential, coord::PosCyl(INFINITY, 0, 0));
+    double Einfinity = 0;
     if((!math::isFinite(E0) && E0!=-INFINITY) || !math::isFinite(EhalfMass) || 
         E0>=EhalfMass || EhalfMass>=Einfinity)
         throw std::runtime_error("InterfocalDistanceFinder: weird behaviour of potential");
@@ -244,6 +244,7 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
 
     // fill a 2d grid in (E, Lz/Lcirc(E) )
     std::vector< std::vector<double> > grid2d(gridE.size());
+    
     for(unsigned int iE=0; iE<gridE.size(); iE++) {
         grid2d[iE].resize(gridLzrel.size());
         const double x  = xLcirc(gridE[iE]);

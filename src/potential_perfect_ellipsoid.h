@@ -28,12 +28,12 @@ public:
     
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "OblatePerfectEllipsoid"; };
+    virtual double totalMass(double) const { return mass; }
 
     /** evaluates the function G(tau) and up to two its derivatives,
         if the supplied output arguments are not NULL 
         (implements the math::IFunction interface) */
     virtual void evalDeriv(double tau, double* G=0, double* Gderiv=0, double* Gderiv2=0) const;
-
 private:
     const double mass;
     /** prolate spheroidal coordinate system corresponding to the oblate density profile */
@@ -62,7 +62,7 @@ private:
     virtual void evalScalar(const coord::PosProlSph& pos,
         double* value=0, coord::GradProlSph* deriv=0, coord::HessProlSph* deriv2=0) const;
 
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 }  // namespace potential

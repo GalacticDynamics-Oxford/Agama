@@ -8,9 +8,6 @@
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_sf_gegenbauer.h>
 #include <gsl/gsl_sf_gamma.h>
-#ifdef HAVE_CUBATURE
-#include <cubature.h>
-#endif
 
 namespace potential {
 
@@ -18,8 +15,57 @@ namespace potential {
 const unsigned int MAX_NCOEFS_ANGULAR = 100;
 const unsigned int MAX_NCOEFS_RADIAL  = 100;
 
-/// auxiliary softening parameter for Spline potential to avoid singularities in some odd cases
-const double SPLINE_MIN_RADIUS=1e-10;
+/// max number of function evaluations in multidimensional integration
+const unsigned int MAX_NUM_EVAL = 4096;
+
+/** helper class for integrating the density weighted with spherical harmonics over 3d volume;
+    angular part is shared between BasisSetExp and SplineExp, 
+    which further define additional functions for radial multiplication factor. 
+    The integration is carried over  scaled r  and  cos(theta). */
+class DensitySphHarmIntegrand: public math::IFunctionNdim {
+public:
+    DensitySphHarmIntegrand(const BaseDensity& _dens, int _l, int _m, 
+        const math::IFunction& _radialMultFactor, double _rscale) :
+        dens(_dens), l(_l), m(_m), radialMultFactor(_radialMultFactor), rscale(_rscale) {};
+
+    /// evaluate the m-th azimuthal harmonic of density at a point in (scaled r, cos(theta)) plane
+    virtual void eval(const double vars[], double values[]) const 
+    {   // input array is [scaled coordinate r, cos(theta)]
+        const double scaled_r = vars[0], costheta = vars[1];
+        if(scaled_r == 1) {
+            values[0] = 0;  // we're at infinity
+            return;
+        }
+        const double r = rscale * scaled_r / (1-scaled_r);
+        const double R = r * sqrt(1-pow_2(costheta));
+        const double z = r * costheta;
+        const double mult =            // overall multiplication factor
+            r*r *                      // jacobian of transformation to spherical coordinates
+            rscale/pow_2(1-scaled_r) * // un-scaling the radial coordinate
+            ( 2*M_PI /                 // integration over phi
+            (2*M_SQRTPI) ) *           // definition of spherical function Y_l^m
+            radialMultFactor(r);       // additional radius-dependent factor
+        const double Plm = math::legendrePoly(l, abs(m), acos(costheta));
+        double val = computeRho_m(dens, R, z, m) * Plm;
+        if((dens.symmetry() & ST_PLANESYM) == ST_PLANESYM)   // symmetric w.r.t. change of sign in z
+            val *= (l%2==0 ? 2 : 0);  // only even-l terms survive
+        else
+            val += computeRho_m(dens, R, -z, m) * Plm * (l%2==0 ? 1 : -1);
+        values[0] = val * mult;
+    }
+    /// return the scaled radial variable (useful for determining the integration interval)
+    double scaledr(double r) const {
+        return r==INFINITY ? 1. : r/(r+rscale); }
+    /// dimension of space to integrate over (R,theta)
+    virtual unsigned int numVars() const { return 2; }
+    /// integrate a single function at a time
+    virtual unsigned int numValues() const { return 1; }
+protected:
+    const BaseDensity& dens;                  ///< input density to integrate
+    const int l, m;                           ///< multipole indices
+    const math::IFunction& radialMultFactor;  ///< additional radius-dependent multiplier
+    const double rscale;                      ///< scaling factor for integration in radius
+};
 
 //----------------------------------------------------------------------------//
 // BasePotentialSphericalHarmonic -- parent class for all potentials 
@@ -34,50 +80,6 @@ void BasePotentialSphericalHarmonic::setSymmetry(SymmetryType sym)
     mmin = (mysymmetry & ST_PLANESYM)  ==ST_PLANESYM   ? 0 :-1;  // if triaxial symmetry, do not use sine terms which correspond to m<0
     mstep= (mysymmetry & ST_PLANESYM)  ==ST_PLANESYM   ? 2 : 1;  // if triaxial symmetry, use only even m
 }
-
-/// \cond INTERNAL_DOCS
-// helper functions for integration over angles (common for BSE and Spline potentials), used in computing coefficients from analytic density model
-struct CPotentialParamSH{
-    const BaseDensity* P;
-    int sh_n, sh_l, sh_m;
-    double costheta, sintheta, r, Alpha;
-    double theta_max, phi_max;    // Pi/2, Pi or even 2*Pi, depending on potential symmetry
-};
-double intSH_phi(double phi, void* params)
-{
-    double costheta= ((CPotentialParamSH*)params)->costheta;
-    double sintheta= ((CPotentialParamSH*)params)->sintheta;
-    double r= ((CPotentialParamSH*)params)->r;
-    const BaseDensity* P=((CPotentialParamSH*)params)->P;
-    int sh_m=((CPotentialParamSH*)params)->sh_m;
-    return P->density(coord::PosCar(r*sintheta*cos(phi), r*sintheta*sin(phi), r*costheta))
-        * (sh_m>=0 ? cos(sh_m*phi) : sin(-sh_m*phi));
-}
-double intSH_theta(double theta, void* params)
-{
-    double result, error;
-    size_t neval;
-    ((CPotentialParamSH*)params)->costheta=cos(theta);
-    ((CPotentialParamSH*)params)->sintheta=sin(theta);
-    gsl_function F;
-    F.function=&intSH_phi;
-    F.params=params;
-    if( (((CPotentialParamSH*)params)->P->symmetry() & ST_AXISYMMETRIC) == ST_AXISYMMETRIC)
-    {   // don't integrate in phi
-        result = ((CPotentialParamSH*)params)->sh_m != 0 ? 0 :
-            ((CPotentialParamSH*)params)->phi_max * 
-            math::legendrePoly(((CPotentialParamSH*)params)->sh_l, 0, theta)* 
-            ((CPotentialParamSH*)params)->P->density(coord::PosCar(
-                ((CPotentialParamSH*)params)->r*((CPotentialParamSH*)params)->sintheta, 0, 
-                ((CPotentialParamSH*)params)->r*((CPotentialParamSH*)params)->costheta));
-    } else {
-        gsl_integration_qng(&F, 0, ((CPotentialParamSH*)params)->phi_max, 
-            0, EPSREL_POTENTIAL_INT, &result, &error, &neval);
-        result *= math::legendrePoly(((CPotentialParamSH*)params)->sh_l, abs(((CPotentialParamSH*)params)->sh_m), theta);
-    }
-    return result * sin(theta) / (2*M_SQRTPI);   // factor \sqrt{4\pi} coming from the definition of spherical function Y_l^m
-}
-/// \endcond
 
 void BasePotentialSphericalHarmonic::evalSph(const coord::PosSph &pos,
     double* potential, coord::GradSph* grad, coord::HessSph* hess) const
@@ -158,15 +160,15 @@ BasisSetExp::BasisSetExp(
     prepareCoefsDiscrete(points);
     checkSymmetry();
 }
-    
+
 BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> > &coefs):
-    BasePotentialSphericalHarmonic(coefs.size()>0 ? static_cast<size_t>(sqrt(coefs[0].size()*1.0)-1) : 0), 
-    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, static_cast<size_t>(coefs.size()-1))),
+    BasePotentialSphericalHarmonic(coefs.size()>0 ? static_cast<unsigned int>(sqrt(coefs[0].size()*1.0)-1) : 0), 
+    Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, static_cast<unsigned int>(coefs.size()-1))),
     Alpha(_Alpha)  // here Alpha!=0 - no autodetect
 {
     if(_Alpha<0.5) 
         throw std::invalid_argument("BasisSetExp: invalid parameter Alpha");
-    for(size_t n=0; n<coefs.size(); n++)
+    for(unsigned int n=0; n<coefs.size(); n++)
         if(coefs[n].size()!=pow_2(Ncoefs_angular+1))
             throw std::invalid_argument("BasisSetExp: incorrect size of coefficients array");
     SHcoefs = coefs;
@@ -176,7 +178,7 @@ BasisSetExp::BasisSetExp(double _Alpha, const std::vector< std::vector<double> >
 BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
     const BaseDensity& srcdensity):    // init potential from analytic mass model
     BasePotentialSphericalHarmonic(_Ncoefs_angular), 
-    Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
+    Ncoefs_radial(std::min<unsigned int>(MAX_NCOEFS_RADIAL-1, _Ncoefs_radial)),
     Alpha(_Alpha)
 {
     setSymmetry(srcdensity.symmetry());
@@ -187,9 +189,8 @@ BasisSetExp::BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned in
 void BasisSetExp::checkSymmetry()
 { 
     SymmetryType sym=ST_SPHERICAL;  // too optimistic:))
-    const double MINCOEF=1e-8;
-    for(size_t n=0; n<=Ncoefs_radial; n++)
-    {
+    const double MINCOEF = 1e-8 * fabs(SHcoefs[0][0]);
+    for(unsigned int n=0; n<=Ncoefs_radial; n++) {
         for(int l=0; l<=(int)Ncoefs_angular; l++)
             for(int m=-l; m<=l; m++)
                 if(fabs(SHcoefs[n][l*(l+1)+m])>MINCOEF) 
@@ -201,8 +202,7 @@ void BasisSetExp::checkSymmetry()
                 }
     }
     // now set all coefs excluded by the inferred symmetry  to zero
-    for(size_t n=0; n<=Ncoefs_radial; n++)
-    {
+    for(size_t n=0; n<=Ncoefs_radial; n++) {
         for(int l=0; l<=(int)Ncoefs_angular; l++)
             for(int m=-l; m<=l; m++)
                 if( (l>0 && (sym & ST_SPHSYM)) ||
@@ -214,26 +214,20 @@ void BasisSetExp::checkSymmetry()
     setSymmetry(sym);
 }
 
-/// \cond INTERNAL_DOCS
-double intBSE_xi(double xi, void* params)   // integrate over scaled radial variable
-{
-    if(xi>=1.0 || xi<=-1.0) return 0;
-    double Alpha=((CPotentialParamSH*)params)->Alpha;
-    double ralpha=(1+xi)/(1-xi);
-    double r=pow(ralpha, Alpha);
-    int n=((CPotentialParamSH*)params)->sh_n;
-    int l=((CPotentialParamSH*)params)->sh_l;
-    double phi_nl = gsl_sf_gegenpoly_n(n, (2*l+1)*Alpha+0.5, xi) * pow(r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
-    ((CPotentialParamSH*)params)->r=r;
-    gsl_function F;
-    F.function=&intSH_theta;
-    F.params=params;
-    double result, error;
-    size_t neval;
-    gsl_integration_qng(&F, 0, ((CPotentialParamSH*)params)->theta_max, 0, EPSREL_POTENTIAL_INT, &result, &error, &neval);
-    return result * phi_nl * 8*M_PI*Alpha *r*r*r/(1-xi*xi);
-}
-/// \endcond
+/// radius-dependent multiplication factor for density integration in BasisSetExp potential
+class BasisSetExpRadialMult: public math::IFunctionNoDeriv {
+public:
+    BasisSetExpRadialMult(int _n, int _l, double _alpha) :
+        n(_n), l(_l), alpha(_alpha), w((2*l+1)*alpha+0.5) {};
+    virtual double value(double r) const {
+        const double r1alpha = pow(r, 1./alpha);
+        const double xi = (r1alpha-1)/(r1alpha+1);
+        return gsl_sf_gegenpoly_n(n, w, xi) * math::powInt(r, l) * pow(1+r1alpha, -(2*l+1)*alpha) * 4*M_PI;
+    }
+private:
+    const int n, l;
+    const double alpha, w;
+};
 
 void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
 {
@@ -242,43 +236,33 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
     SHcoefs.resize(Ncoefs_radial+1);
     for(size_t n=0; n<=Ncoefs_radial; n++)
         SHcoefs[n].assign(pow_2(Ncoefs_angular+1), 0);
-    CPotentialParamSH PP;
-    PP.P = &srcdensity;
-    PP.Alpha = Alpha;
-    PP.theta_max = (symmetry() & ST_REFLECTION)==ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
-    PP.phi_max   = (symmetry() & ST_PLANESYM)==ST_PLANESYM ? M_PI_2 : 2*M_PI;
-    int multfactor = ((symmetry() & ST_PLANESYM)==ST_PLANESYM ? 4 : 1) * 
-        ((symmetry() & ST_REFLECTION)==ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
-    gsl_integration_workspace * ws = gsl_integration_workspace_alloc (1000);
-    double interval[2]={-1.0, 1.0};
-    gsl_function F;
-    F.function=&intBSE_xi;
-    F.params=&PP;
-    for(size_t n=0; n<=Ncoefs_radial; n++)
-        for(int l=0; l<=lmax; l+=lstep)
-        {
-            PP.sh_n=static_cast<int>(n);  PP.sh_l=l;
+    const double rscale = 1.0;
+    for(unsigned int n=0; n<=Ncoefs_radial; n++)
+        for(int l=0; l<=lmax; l+=lstep) {
             double w=(2*l+1)*Alpha+0.5;
             double Knl = (4*pow_2(n+w)-1)/8/pow_2(Alpha);
             double Inl = Knl * 4*M_PI*Alpha * 
-                exp( gsl_sf_lngamma(n+2*w) - 2*gsl_sf_lngamma(w) - gsl_sf_lnfact(PP.sh_n) - 4*w*log(2.0)) / (n+w);
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-            {
-                PP.sh_m=m;
+                exp( gsl_sf_lngamma(n+2*w) - 2*gsl_sf_lngamma(w) - gsl_sf_lnfact(n) - 4*w*log(2.0)) / (n+w);
+            for(int m=l*mmin; m<=l*mmax; m+=mstep) {
+                BasisSetExpRadialMult rmult(n, l, Alpha);
+                DensitySphHarmIntegrand fnc(srcdensity, l, m, rmult, rscale);
+                double xlower[2] = {fnc.scaledr(0), 0};
+                double xupper[2] = {fnc.scaledr(INFINITY), 1};
                 double result, error;
-                gsl_integration_qagp(&F, interval, 2, 0, EPSREL_POTENTIAL_INT, 1000, ws, &result, &error);
-                SHcoefs[n][l*(l+1)+m] = result * multfactor * (m==0 ? 1 : M_SQRT2) / Inl;
+                int numEval;
+                math::integrateNdim(fnc, 
+                    xlower, xupper, EPSREL_POTENTIAL_INT, MAX_NUM_EVAL, &result, &error, &numEval);
+                SHcoefs[n][l*(l+1)+m] = result * (m==0 ? 1 : M_SQRT2) / Inl;
             }
         }
-    gsl_integration_workspace_free (ws);
 }
 
 void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph> &points)
 {
     SHcoefs.resize(Ncoefs_radial+1);
-    for(size_t n=0; n<=Ncoefs_radial; n++)
+    for(unsigned int n=0; n<=Ncoefs_radial; n++)
         SHcoefs[n].assign(pow_2(1+Ncoefs_angular), 0);
-    size_t npoints=points.size();
+    unsigned int npoints=points.size();
     if(Alpha<0.5)
         Alpha=1.;
     double legendre_array[MAX_NCOEFS_ANGULAR][MAX_NCOEFS_ANGULAR-1];
@@ -292,22 +276,18 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::Po
               exp( gsl_sf_lngamma(n+2*w) - 2*gsl_sf_lngamma(w) - gsl_sf_lnfact(n) - 4*w*log(2.0)) /
               (n+w) * (4*(n+w)*(n+w)-1)/(8*Alpha*Alpha);
     }
-    for(size_t i=0; i<npoints; i++)
-    {
+    for(unsigned int i=0; i<npoints; i++) {
         const coord::PosSph& point = points.point(i);
         double massi = points.mass(i);
         double ralpha=pow(point.r, 1/Alpha);
         double xi=(ralpha-1)/(ralpha+1);
         for(int m=0; m<=lmax; m+=mstep)
             math::legendrePolyArray(lmax, m, point.theta, legendre_array[m]);
-
-        for(int l=0; l<=lmax; l+=lstep)
-        {
+        for(int l=0; l<=lmax; l+=lstep) {
             double w=(2*l+1)*Alpha+0.5;
             double phil=pow(point.r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
             gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), w, xi, gegenpoly_array);
-            for(size_t n=0; n<=Ncoefs_radial; n++)
-            {
+            for(size_t n=0; n<=Ncoefs_radial; n++) {
                 double mult= massi * gegenpoly_array[n] * phil * 2*M_SQRTPI / Inl[n][l];
                 for(int m=0; m<=l*mmax; m+=mstep)
                     SHcoefs[n][l*(l+1)+m] += mult * legendre_array[m][l-m] * cos(m*point.phi) * (m==0 ? 1 : M_SQRT2);
@@ -319,7 +299,7 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::Po
     }
 }
 
-double BasisSetExp::enclosedMass(const double r) const
+double BasisSetExp::enclosedMass(const double r, const double) const
 {
     if(r<=0) return 0;
     double ralpha=pow(r, 1/Alpha);
@@ -329,8 +309,7 @@ double BasisSetExp::enclosedMass(const double r) const
     double multr = pow(1+ralpha, -Alpha);
     double multdr= -ralpha/((ralpha+1)*r);
     double result=0;
-    for(int n=0; n<=static_cast<int>(Ncoefs_radial); n++)
-    {
+    for(int n=0; n<=static_cast<int>(Ncoefs_radial); n++) {
         double dGdr=(n>0 ? (-n*xi*gegenpoly_array[n] + (n+2*Alpha)*gegenpoly_array[n-1])/(2*Alpha*r) : 0);
         result += SHcoefs[n][0] * multr * (multdr * gegenpoly_array[n] + dGdr);
     }
@@ -345,17 +324,15 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
     if(coefsF)      for(size_t k=0; k<pow_2(Ncoefs_angular+1); k++) coefsF     [k] = 0;
     if(coefsdFdr)   for(size_t k=0; k<pow_2(Ncoefs_angular+1); k++) coefsdFdr  [k] = 0;
     if(coefsd2Fdr2) for(size_t k=0; k<pow_2(Ncoefs_angular+1); k++) coefsd2Fdr2[k] = 0;
-    for(int l=0; l<=lmax; l+=lstep)
-    {
+    for(int l=0; l<=lmax; l+=lstep) {
         double w=(2*l+1)*Alpha+0.5;
         gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), w, xi, gegenpoly_array);
         double multr = -pow(r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
         double multdr= (l-(l+1)*ralpha)/((ralpha+1)*r);
-        for(int n=0; n<=(int)Ncoefs_radial; n++)
-        {
+        for(unsigned int n=0; n<=Ncoefs_radial; n++) {
             double multdFdr=0, multd2Fdr2=0, dGdr=0;
             if(coefsdFdr!=NULL) {
-                dGdr=(n>0 ? (-n*xi*gegenpoly_array[n] + (n+2*w-1)*gegenpoly_array[n-1])/(2*Alpha*r) : 0);
+                dGdr=(n>0 ? (-xi*n*gegenpoly_array[n] + (n+2*w-1)*gegenpoly_array[n-1])/(2*Alpha*r) : 0);
                 multdFdr= multdr * gegenpoly_array[n] + dGdr;
                 if(coefsd2Fdr2!=NULL)
                     multd2Fdr2 = ( (l+1)*(l+2)*pow_2(ralpha) + 
@@ -363,8 +340,7 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
                                    l*(l-1) 
                                  ) / pow_2( (1+ralpha)*r ) * gegenpoly_array[n] - dGdr*2/r;
             }
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-            {
+            for(int m=l*mmin; m<=l*mmax; m+=mstep) {
                 int indx=l*(l+1)+m;
                 double coef = SHcoefs[n][indx] * multr;
                 if(coefsF)      coefsF     [indx] += coef * gegenpoly_array[n];
@@ -395,7 +371,7 @@ SplineExp::SplineExp(
     BasePotentialSphericalHarmonic(_coefs.size()>0 ? static_cast<size_t>(sqrt(_coefs[0].size()*1.0)-1) : 0), 
     Ncoefs_radial(std::min<size_t>(MAX_NCOEFS_RADIAL-1, _coefs.size()-1))
 {
-    for(size_t n=0; n<_coefs.size(); n++)
+    for(unsigned int n=0; n<_coefs.size(); n++)
         if(_coefs[n].size()!=pow_2(Ncoefs_angular+1))
             throw std::invalid_argument("SplineExp: incorrect size of coefficients array");
     initSpline(_gridradii, _coefs);
@@ -411,53 +387,17 @@ SplineExp::SplineExp(unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular,
     prepareCoefsAnalytic(srcdensity, radii);
 }
 
-/// \cond INTERNAL_DOCS
-double intSpline_r(double r, void* params)
-{
-    if(r==0) return 0;
-    int n=((CPotentialParamSH*)params)->sh_n;  // power index for s^n, either l+2 or 1-l
-    double result, error;
-    size_t neval;
-    ((CPotentialParamSH*)params)->r=r;
-    gsl_function F;
-    F.function=&intSH_theta;
-    F.params=params;
-    gsl_integration_qng(&F, 0, ((CPotentialParamSH*)params)->theta_max, 0, EPSREL_POTENTIAL_INT, &result, &error, &neval);
-    // workaround for the case when a coefficient is very small due to unnoticed symmetry (maybe a better solution exists?)
-    if(((CPotentialParamSH*)params)->sh_l>2 && fabs(result)<EPSABS_POTENTIAL_INT)
-        result=0;  // to avoid huge drop in performance for very small coef values
-    return result * pow(r, n*1.0);
-}
-/// \endcond
-
-#if 0 //#ifdef HAVE_CUBATURE
-int intSplineCubature(unsigned int ndim, const double coords[],
-    void* params, unsigned int /*fdim*/, double* output)
-{
-    const double r=coords[0]/(1-coords[0]);
-    if(r==0) return 0;
-    const double costheta=coords[1];
-    const double rsintheta=r*sqrt(1-pow_2(costheta));
-    const BaseDensity* P=((CPotentialParamSH*)params)->P;
-    int n=((CPotentialParamSH*)params)->sh_n;  // power index for s^n, either l+2 or 1-l
-    int sh_l=((CPotentialParamSH*)params)->sh_l;
-    int sh_m=((CPotentialParamSH*)params)->sh_m;
-    double result;
-    if(ndim==N_DIM) {  // use phi only for non-axisymmetric potentials
-        const double phi=coords[2];
-        result = P->Rho(rsintheta*cos(phi), rsintheta*sin(phi), r*costheta) *
-            gsl_sf_legendre_sphPlm(sh_l, abs(sh_m), costheta) * 
-            (sh_m>=0 ? cos(sh_m*phi) : sin(-sh_m*phi));
-    } else {
-        result = P->Rho(rsintheta, 0, r*costheta) *
-            gsl_sf_legendre_sphPlm(sh_l, 0, costheta) *
-            (sh_m==0 ? ((CPotentialParamSH*)params)->phi_max : 0);
+/// radius-dependent multiplication factor for density integration in SplineExp potential
+class SplineExpRadialMult: public math::IFunctionNoDeriv {
+public:
+    SplineExpRadialMult(int _n) : n(_n) {};
+    virtual double value(double r) const {
+        return math::powInt(r, n);
     }
-    *output = result * pow(r, n*1.0) / pow_2(1-coords[0]) / (2*M_SQRTPI);   // factor \sqrt{4\pi} coming from the definition of spherical function Y_l^m
-    return 0;
-}
-#endif
-
+private:
+    const int n;
+};
+    
 void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::vector<double> *srcradii)
 {
     std::vector< std::vector<double> > coefsArray(Ncoefs_radial+1);  // SHE coefficients to pass to initspline routine
@@ -466,87 +406,59 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
         coefsArray[i].assign(pow_2(1+Ncoefs_angular), 0);
     bool initUserRadii = (srcradii!=NULL && srcradii->size()==Ncoefs_radial+1 && srcradii->front()==0);
     if(srcradii!=NULL && !initUserRadii)  // something went wrong with manually supplied radii
-        throw std::invalid_argument("Invalid call to constructor of Spline potential");
+        throw std::invalid_argument("Invalid call to constructor of SplineExp potential");
+    // find inner/outermost radius
+    double totalmass = srcdensity.totalMass();
+    if(!math::isFinite(totalmass))
+        throw std::invalid_argument("SplineExp: source density model has infinite mass");
     if(initUserRadii)
         radii= *srcradii;
     else {
-        // find inner/outermost radius
-        double totalmass = srcdensity.totalMass();
-        if(!math::isFinite(totalmass))
-            throw std::invalid_argument("SplineExp: source density model has infinite mass");
         // how far should be the outer node (leave out this fraction of mass)
         double epsout = 0.1/sqrt(pow_2(Ncoefs_radial)+0.01*pow(Ncoefs_radial*1.0,4.0));
         // how close can we get to zero, in terms of innermost grid node
         double epsin = 5.0/pow(Ncoefs_radial*1.0,3.0);
         // somewhat arbitrary choice for min/max radii, but probably reasonable
         double rout = getRadiusByMass(srcdensity, totalmass*(1-epsout));
-        double rin = std::min<double>(epsin, getRadiusByMass(srcdensity, totalmass*epsin*0.1));
+        double rin  = getRadiusByMass(srcdensity, totalmass*epsin*0.1);
         math::createNonuniformGrid(Ncoefs_radial+1, rin, rout, true, radii); 
     }
-    gsl_integration_workspace * w = gsl_integration_workspace_alloc (1000);
-    CPotentialParamSH PP;
-    PP.P = &srcdensity;
-    PP.theta_max = symmetry() & ST_REFLECTION ? M_PI_2 : M_PI;  // if symmetries exist, no need to integrate over whole space
-    PP.phi_max = symmetry() & ST_PLANESYM ? M_PI_2 : 2*M_PI;
-    int multfactor = (symmetry() & ST_PLANESYM ? 4 : 1) * (symmetry() & ST_REFLECTION ? 2 : 1);  // compensates integration of only half- or 1/8-space
-    gsl_function F;
-    F.function=&intSpline_r;
-    F.params=&PP;
+    const double rscale = getRadiusByMass(srcdensity, 0.5*totalmass);  // scaling factor for integration in radius
     std::vector<double> coefsInner, coefsOuter;
-    radii.front()=SPLINE_MIN_RADIUS*radii[1];  // to prevent log divergence for gamma=2 potentials
-    for(int l=0; l<=lmax; l+=lstep)
-    {
-        PP.sh_l=l;
-        for(int m=l*mmin; m<=l*mmax; m+=mstep)
-        {
-            PP.sh_m=m;
+    const double SPLINE_MIN_RADIUS = 1e-10;
+    radii.front() = SPLINE_MIN_RADIUS*radii[1];  // to prevent log divergence for gamma=2 potentials
+    for(int l=0; l<=lmax; l+=lstep) {
+        for(int m=l*mmin; m<=l*mmax; m+=mstep) {
             // first precompute inner and outer density integrals at each radial grid point, summing contributions from each interval of radial grid
             coefsInner.assign(Ncoefs_radial+1, 0);
             coefsOuter.assign(Ncoefs_radial+1, 0);
             // loop over inner intervals
             double result, error;
-            PP.sh_n = l+2;
-            for(size_t c=0; c<Ncoefs_radial; c++)
-            {
-#if 0 //#ifdef HAVE_CUBATURE
-                double bmin[3]={radii[c]/(1+radii[c]), PP.theta_max>3.?-1.:0., 0.};  // integrate in theta up to pi/2 or pi
-                double bmax[3]={radii[c+1]/(1+radii[c+1]), 1., PP.phi_max};  // integration box
-                int ndim=(mysymmetry & ST_AXISYMMETRIC) == ST_AXISYMMETRIC ? 2 : 3;  // whether to integrate over phi or not
-                hcubature(1, &intSplineCubature, &PP, ndim, bmin, bmax, 65536/*max_eval*/, 
-                    EPSABS_POTENTIAL_INT, EPSREL_POTENTIAL_INT, ERROR_L1/*ignored*/, &result, &error);
-#else                
-                // the reason we give absolute error threshold is that for flat-density-core profiles 
-                // the high-l,m coefs at small radii are extremely tiny and their exact calculation is impractically slow
-                gsl_integration_qags(&F, radii[c], radii[c+1], EPSABS_POTENTIAL_INT, EPSREL_POTENTIAL_INT, 1000, w, &result, &error);
-#endif
+            for(size_t c=0; c<Ncoefs_radial; c++) {
+                SplineExpRadialMult rmult(l);
+                DensitySphHarmIntegrand fnc(srcdensity, l, m, rmult, rscale);
+                double xlower[2] = {fnc.scaledr(radii[c]), 0};
+                double xupper[2] = {fnc.scaledr(radii[c+1]), 1};
+                int numEval;
+                math::integrateNdim(fnc, 
+                    xlower, xupper, EPSREL_POTENTIAL_INT, MAX_NUM_EVAL, &result, &error, &numEval);
                 coefsInner[c+1] = result + coefsInner[c];
             }
             // loop over outer intervals, starting from infinity backwards
-            PP.sh_n = 1-l;
-            for(size_t c=Ncoefs_radial+1; c>static_cast<size_t>(l==0 ? 0 : 1); c--)
-            {
-#if 0 //#ifdef HAVE_CUBATURE
-                double bmin[3]={radii[c-1]/(1+radii[c-1]), PP.theta_max>3.?-1.:0., 0.};
-                double bmax[3]={c>Ncoefs_radial ? 1.: radii[c]/(1+radii[c]), 1., PP.phi_max};
-                int ndim=(mysymmetry & ST_AXISYMMETRIC) == ST_AXISYMMETRIC ? 2 : 3;
-                hcubature(1, &intSplineCubature, &PP, ndim, bmin, bmax, 65536/*max_eval*/, 
-                    EPSABS_POTENTIAL_INT*(c<=Ncoefs_radial?fabs(coefsOuter[c]):1), 
-                    EPSREL_POTENTIAL_INT, ERROR_L1/*ignored*/, &result, &error);
-#else
-                if(c==Ncoefs_radial+1)
-                    gsl_integration_qagiu(&F, radii.back(), EPSABS_POTENTIAL_INT, 
-                        EPSREL_POTENTIAL_INT, 1000, w, &result, &error);
-                else
-                    gsl_integration_qags(&F, radii[c-1], radii[c], EPSREL_POTENTIAL_INT*fabs(coefsOuter[c]), 
-                        EPSREL_POTENTIAL_INT, 1000, w, &result, &error);
-#endif
+            for(size_t c=Ncoefs_radial+1; c>(l==0 ? 0 : 1); c--) {
+                SplineExpRadialMult rmult(-l-1);
+                DensitySphHarmIntegrand fnc(srcdensity, l, m, rmult, rscale);
+                double xlower[2] = {fnc.scaledr(radii[c-1]), 0};
+                double xupper[2] = {fnc.scaledr(c>Ncoefs_radial ? INFINITY : radii[c]), 1};
+                int numEval;
+                math::integrateNdim(fnc,
+                    xlower, xupper, EPSREL_POTENTIAL_INT, MAX_NUM_EVAL, &result, &error, &numEval);
                 coefsOuter[c-1] = result + (c>Ncoefs_radial?0:coefsOuter[c]);
             }
             // now compute the coefs of potential expansion themselves
-            for(size_t c=0; c<=Ncoefs_radial; c++)
-            {
+            for(size_t c=0; c<=Ncoefs_radial; c++) {
                 coefsArray[c][l*(l+1) + m] = ((c>0 ? coefsInner[c]*pow(radii[c], -l-1.0) : 0) + coefsOuter[c]*pow(radii[c], l*1.0)) *
-                    multfactor* -4*M_PI/(2*l+1) * (m==0 ? 1 : M_SQRT2);
+                    -4*M_PI/(2*l+1) * (m==0 ? 1 : M_SQRT2);
             }
 #ifdef DEBUGPRINT
             my_message(FUNCNAME, "l="+convertToString(l)+",m="+convertToString(m));
@@ -554,7 +466,6 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
         }
     }
     radii.front()=0;
-    gsl_integration_workspace_free (w);
     initSpline(radii, coefsArray);
 }
 
@@ -646,7 +557,25 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<coord::Po
     // local variable coefsInner will be automatically freed, but outputCoefs will remain
 }
 
-
+/** obtain the value of scaling radius for non-spherical harmonic coefficients `ascale`
+    from the radial dependence of the l=0 coefficient, by finding the radius at which
+    the value of this coefficient equals half of its value at r=0 */
+double get_ascale(const std::vector<double>& radii, const std::vector<std::vector<double> >& coefsArray)
+{
+    assert(radii.size() == coefsArray.size());
+    double targetVal = fabs(coefsArray[0][0])*0.5;
+    double targetRad = NAN;
+    for(size_t i=1; i<radii.size() && targetRad!=targetRad; i++) 
+        if(fabs(coefsArray[i][0]) < targetVal && fabs(coefsArray[i-1][0]) >= targetVal) {
+            // linearly interpolate
+            targetRad = radii[i-1] + (radii[i]-radii[i-1]) *
+                (targetVal-fabs(coefsArray[i-1][0])) / (fabs(coefsArray[i][0])-fabs(coefsArray[i-1][0]));
+        }
+    if(targetRad!=targetRad)  // shouldn't occur, but if it does, return some sensible value
+        targetRad = radii[radii.size()/2];
+    return targetRad;
+}
+    
 void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosSph> &points, 
     double smoothfactor, const std::vector<double> *userradii)
 {
@@ -734,11 +663,12 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosS
             "Estimated slope: inner="+convertToString(gammaInner)+", outer="+convertToString(gammaOuter));
 #endif
         // init x-coordinates from scaling transformation
+        ascale = get_ascale(radii, coefsArray);  // this uses only the l=0 term
         for(size_t p=0; p<=Ncoefs_radial; p++)
-            scaledKnotRadii[p] = log(1+radii[p]);
-        scaledKnotRadii[Ncoefs_radial+1] = log(1+outerRadiusSpline);
+            scaledKnotRadii[p] = log(ascale+radii[p]);
+        scaledKnotRadii[Ncoefs_radial+1] = log(ascale+outerRadiusSpline);
         for(size_t i=0; i<numPointsUsed; i++)
-            scaledPointRadii[i] = log(1+pointRadii[i+npointsInnerSpline]);
+            scaledPointRadii[i] = log(ascale+pointRadii[i+npointsInnerSpline]);
         math::SplineApprox appr(scaledPointRadii, scaledKnotRadii);
 //        if(appr.status()==CSplineApprox::AS_SINGULAR)
 //            my_message(FUNCNAME, 
@@ -751,8 +681,7 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosS
                 int coefind=l*(l+1) + m;
                 // init matrix of values to fit
                 for(size_t i=0; i<numPointsUsed; i++)
-                    scaledPointCoefs[i] = pointCoefs[coefind][i+npointsInnerSpline]/pointCoefs[0][i+npointsInnerSpline];// *
-                    //pow(std::min<double>(1.0, pointRadii[i+npointsInnerSpline]/radii[2]), gammaInner);    // a trick to downplay wild fluctuations at r->0
+                    scaledPointCoefs[i] = pointCoefs[coefind][i+npointsInnerSpline]/pointCoefs[0][i+npointsInnerSpline];
                 double derivLeft, derivRight;
                 double edf=0;  // equivalent number of free parameters in the fit; if it is ~2, fit is oversmoothed to death (i.e. to a linear regression, which means we should ignore it)
                 appr.fitDataOversmooth(scaledPointCoefs, smoothfactor, scaledSplineValues, derivLeft, derivRight, NULL, &edf);
@@ -781,7 +710,8 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosS
 void SplineExp::checkSymmetry(const std::vector< std::vector<double> > &coefsArray)
 { 
     SymmetryType sym=ST_SPHERICAL;  // too optimistic:))
-    const double MINCOEF=1e-8;   // if ALL coefs of a certain subset of indices are below this value, assume some symmetry
+    // if ALL coefs of a certain subset of indices are below this value, assume some symmetry
+    const double MINCOEF = 1e-8 * fabs(coefsArray[0][0]);
     for(size_t n=0; n<=Ncoefs_radial; n++)
     {
         for(int l=0; l<=(int)Ncoefs_angular; l++)
@@ -832,7 +762,8 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     std::vector<double> newRadii;
     std::vector< std::vector<double> > newCoefsArray;
     size_t nskip=0;
-    while(nskip+1<_coefsArray.size() && _coefsArray[nskip+1][0]==potcenter) nskip++;
+    while(nskip+1<_coefsArray.size() && _coefsArray[nskip+1][0]==potcenter)
+        nskip++;   // values of potential at r>0 should be strictly larger than at r=0
     if(nskip>0) {  // skip some elements
         newRadii=_radii;
         newRadii.erase(newRadii.begin()+1, newRadii.begin()+nskip+1);
@@ -893,6 +824,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     my_message(FUNCNAME, "gammain="+convertToString(gammain)+
         " ("+convertToString(gammainuncorr)+");  gammaout="+convertToString(gammaout));
 #endif
+
     potmax  = coefsArray.back()[0];
     potminr = coefsArray[1][0];
     // first init l=0 spline which has radial scaling "log(r)" and nontrivial transformation 1/(1/phi-1/phi0)
@@ -905,10 +837,11 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     double derivRight = - (1+coefout*(3-gammaout))/(1 - potmax/potcenter);  // derivative at rightmost node
     splines[0] = math::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
     coef0(maxr, NULL, NULL, &der2out);
-    // next init all higher-order splines which have radial scaling log(a+r) and value scaled to l=0,m=0 coefficient
-    const double ascale=1.0;
+
+    // next init all higher-order splines which have radial scaling log(ascale+r) and value scaled to l=0,m=0 coefficient
+    ascale = get_ascale(radii, coefsArray);
     for(size_t i=0; i<Ncoefs_radial; i++)
-        spnodes[i]=log(ascale+gridradii[i+1]);
+        spnodes[i] = log(ascale+gridradii[i+1]);
     double C00val, C00der;
     coef0(minr, &C00val, &C00der, NULL);
     for(int l=lstep; l<=lmax; l+=lstep)
@@ -919,11 +852,13 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
             for(size_t i=0; i<Ncoefs_radial; i++)
                 spvalues[i] = coefsArray[i+1][coefind]/coefsArray[i+1][0];
             slopein[coefind] = log(coefsArray[2][coefind]/coefsArray[1][coefind]) / log(gridradii[2]/gridradii[1]);   // estimate power-law slope of Clm(r) at r->0
-            if(gsl_isnan(slopein[coefind])) slopein[coefind]=1.0;  // default
+            if(gsl_isnan(slopein[coefind]))
+                slopein[coefind]=1.0;  // default
             slopein[coefind] = std::max<double>(slopein[coefind], std::min<double>(l, 2-gammain));  // the asymptotic power-law behaviour of the coefficient expected for power-law density profile
             derivLeft = spvalues[0] * (1+ascale/minr) * (slopein[coefind] - minr*C00der/C00val);   // derivative at innermost node
             slopeout[coefind] = log(coefsArray[Ncoefs_radial][coefind]/coefsArray[Ncoefs_radial-1][coefind]) / log(gridradii[Ncoefs_radial]/gridradii[Ncoefs_radial-1]) + 1;   // estimate slope of Clm(r)/C00(r) at r->infinity (+1 is added because C00(r) ~ 1/r at large r)
-            if(gsl_isnan(slopeout[coefind])) slopeout[coefind]=-1.0;  // default
+            if(gsl_isnan(slopeout[coefind]))
+                slopeout[coefind]=-1.0;  // default
             slopeout[coefind] = std::min<double>(slopeout[coefind], std::max<double>(-l, 3-gammaout));
             derivRight = spvalues[Ncoefs_radial-1] * (1+ascale/maxr) * slopeout[coefind];   // derivative at outermost node
             splines[coefind] = math::CubicSpline(spnodes, spvalues, derivLeft, derivRight);
@@ -947,25 +882,22 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
 void SplineExp::getCoefs(std::vector<double> *radii, std::vector< std::vector<double> > *coefsArray, bool useNodes) const
 {
     if(radii==NULL || coefsArray==NULL) return;
-    if(useNodes)
-    {
+    if(useNodes) {
         radii->resize(Ncoefs_radial+1);
         for(size_t i=0; i<=Ncoefs_radial; i++)
             (*radii)[i] = gridradii[i];
     }
-    size_t numrad=radii->size();
+    size_t numrad = radii->size();
     coefsArray->resize(numrad);
-    for(size_t i=0; i<numrad; i++)
-    {
-        double rad=(*radii)[i];
-        double xi=log(1+rad);
+    for(size_t i=0; i<numrad; i++) {
+        double rad = (*radii)[i];
+        double xi = log(ascale+rad);
         double Coef00;
         coef0(rad, &Coef00, NULL, NULL);
         (*coefsArray)[i].assign(pow_2(Ncoefs_angular+1), 0);
         (*coefsArray)[i][0] = Coef00;
         for(int l=lstep; l<=lmax; l+=lstep)
-            for(int m=l*mmin; m<=l*mmax; m+=mstep)
-            {
+            for(int m=l*mmin; m<=l*mmax; m+=mstep) {
                 int coefind=l*(l+1)+m;
                 coeflm(coefind, rad, xi, &((*coefsArray)[i][l*(l+1)+m]), NULL, NULL, Coef00);
             }
@@ -974,7 +906,6 @@ void SplineExp::getCoefs(std::vector<double> *radii, std::vector< std::vector<do
 
 void SplineExp::coeflm(unsigned int lm, double r, double xi, double *val, double *der, double *der2, double c0val, double c0der, double c0der2) const  // works only for l2>0
 {
-    const double ascale=1.0;
     double cval=0, cder=0, cder2=0;   // value and derivatives of \tilde Clm = Clm(r)/C00(r)
     if(r < maxr)
     {
@@ -1054,7 +985,6 @@ void SplineExp::coef0(double r, double *val, double *der, double *der2) const  /
 
 void SplineExp::computeSHCoefs(const double r, double coefsF[], double coefsdFdr[], double coefsd2Fdr2[]) const
 {
-    const double ascale=1.0;
     double xi = log(r+ascale);
     double val00, der00, der200;
     coef0(r, &val00, &der00, &der200);  // compute value and two derivatives of l=0,m=0 spline
@@ -1075,7 +1005,7 @@ void SplineExp::computeSHCoefs(const double r, double coefsF[], double coefsdFdr
     }
 }
 
-double SplineExp::enclosedMass(const double r) const
+double SplineExp::enclosedMass(const double r, const double) const
 {
     if(r<=0) return 0;
     double der;

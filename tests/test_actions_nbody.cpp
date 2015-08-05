@@ -1,6 +1,7 @@
 #include "potential_cylspline.h"
 #include "potential_sphharm.h"
 #include "potential_composite.h"
+#include "potential_factory.h"
 #include "particles_io.h"
 #include "actions_staeckel.h"
 #include "units.h"
@@ -23,6 +24,8 @@ int main() {
     tbegin=std::clock();
     const potential::BasePotential* halo = new potential::SplineExp(20, 2, haloparticles, potential::ST_AXISYMMETRIC);
     const potential::BasePotential* disk = new potential::CylSplineExp(20, 20, 0, diskparticles, potential::ST_AXISYMMETRIC);
+    potential::writePotential(std::string("disk") + potential::getCoefFileExtension(getPotentialType(*disk)), *disk);
+    potential::writePotential(std::string("halo") + potential::getCoefFileExtension(getPotentialType(*halo)), *halo);
     std::vector<const potential::BasePotential*> components(2);
     components[0] = halo;
     components[1] = disk;
@@ -31,15 +34,17 @@ int main() {
         "Potential at origin:  "
         "disk=" << potential::value(*disk, coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2, "
         "halo=" << potential::value(*halo, coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2\n";
-    actions::ActionFinderAxisymFudge actfinder(poten);
+    tbegin=std::clock();
+    actions::ActionFinderAxisymFudge actFinder(poten);
+    std::cout << (std::clock()-tbegin)*1.0/CLOCKS_PER_SEC << " s to init action finder\n";
     std::ofstream strm("disk_actions.txt");
     strm << "R[Kpc]\tz[Kpc]\tJ_r[Kpc*km/s]\tJ_z[Kpc*km/s]\tJ_phi[Kpc*km/s]\tE[(km/s)^2]\n";
     tbegin=std::clock();
     unsigned int numBadPoints = 0;
     for(size_t i=0; i<diskparticles.size(); i++) {
-        const coord::PosVelCyl point = coord::toPosVelCyl(diskparticles[i].first);
         try{
-            actions::Actions acts = actfinder.actions(point);
+            const coord::PosVelCyl point = coord::toPosVelCyl(diskparticles[i].first);
+            actions::Actions acts = actFinder.actions(point);
             strm << point.R*unit.to_Kpc << "\t" << point.z*unit.to_Kpc << "\t" <<
                 acts.Jr*unit.to_Kpc_kms << "\t" << acts.Jz*unit.to_Kpc_kms << "\t" << acts.Jphi*unit.to_Kpc_kms << "\t" << 
                 potential::totalEnergy(poten, point)*pow_2(unit.to_kms) << "\n";

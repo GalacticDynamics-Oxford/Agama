@@ -7,15 +7,15 @@
 #include <stdexcept>
 #include <gsl/gsl_fit.h>
 #include <gsl/gsl_multifit.h>
-#ifdef HAVE_CUBATURE
-#include <cubature.h>
-#endif
 
 namespace potential {
 
 const unsigned int CYLSPLINE_MIN_GRID_SIZE = 4;
 const unsigned int CYLSPLINE_MAX_GRID_SIZE = 1024;
 const unsigned int CYLSPLINE_MAX_ANGULAR_HARMONIC = 64;
+
+/// max number of function evaluations in multidimensional integration
+const unsigned int MAX_NUM_EVAL = 10000;
 
 //------- Auxiliary math --------//
 
@@ -119,8 +119,8 @@ public:
     double Phi_m(double R, double z, int m) const;
 
     /// redefine the following two routines to count particles in the point-mass-set regime
-    double enclosedMass(const double radius) const;
-    double totalMass() const;
+    virtual double enclosedMass(const double radius, const double rel_toler) const;
+    virtual double totalMass(const double rel_toler) const;
 
 private:
     /// input density model (if provided)
@@ -137,10 +137,6 @@ private:
 
     /// objects that compute a particular integral involving Bessel fncs
     std::vector<BesselIntegral> besselInts;
-
-    /// Compute m-th azimuthal harmonic of density profile by averaging the density 
-    /// over angle phi with weight factor cos(m phi) or sin(m phi)
-    double computeRho_m(double R, double z, int m) const;
 
     virtual void evalCyl(const coord::PosCyl& pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -167,32 +163,33 @@ DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax
     double Rmin = getRadiusByMass(*density, totalmass*0.01)*0.02;
     double Rmax = getRadiusByMass(*density, totalmass*0.99)*50.0;
     double delta=0.05;  // relative difference between grid nodes = log(x[n+1]/x[n]) 
-    size_t numNodes = static_cast<size_t>(log(Rmax/Rmin)/delta);
+    unsigned int numNodes = static_cast<unsigned int>(log(Rmax/Rmin)/delta);
     std::vector<double> grid;
     math::createNonuniformGrid(numNodes, Rmin, Rmax, true, grid);
     std::vector<double> gridz(2*grid.size()-1);
-    for(size_t i=0; i<grid.size(); i++) {
+    for(unsigned int i=0; i<grid.size(); i++) {
         gridz[grid.size()-1-i] =-grid[i];
         gridz[grid.size()-1+i] = grid[i];
     }
     std::vector< std::vector<double> > values(grid.size());
-    for(size_t iR=0; iR<grid.size(); iR++)
+    for(unsigned int iR=0; iR<grid.size(); iR++)
         values[iR].resize(gridz.size());
     bool zsymmetry = (density->symmetry()&ST_PLANESYM)==ST_PLANESYM;      // whether densities at z and -z are different
     int mmin = (density->symmetry() & ST_PLANESYM)==ST_PLANESYM ? 0 :-1;  // if triaxial symmetry, do not use sine terms which correspond to m<0
     int mstep= (density->symmetry() & ST_PLANESYM)==ST_PLANESYM ? 2 : 1;  // if triaxial symmetry, use only even m
     for(int m=mmax*mmin; m<=mmax; m+=mstep) {
-        for(size_t iR=0; iR<grid.size(); iR++)
-            for(size_t iz=0; iz<grid.size(); iz++) {
-                double val = computeRho_m(grid[iR], grid[iz], m);
+        for(unsigned int iR=0; iR<grid.size(); iR++)
+            for(unsigned int iz=0; iz<grid.size(); iz++) {
+                double val = computeRho_m(*density, grid[iR], grid[iz], m);
                 if(!math::isFinite(val)) {
                     if(iR==0 && iz==0)  // may have a singularity at origin, substitute the infinite density with something reasonable
-                        val = std::max<double>(computeRho_m(grid[1], grid[0], m), computeRho_m(grid[0], grid[1], m));
+                        val = std::max<double>(computeRho_m(*density, grid[1], grid[0], m), 
+                                               computeRho_m(*density, grid[0], grid[1], m));
                     else val=0;
                 }
                 values[iR][grid.size()-1+iz] = val;
                 if(!zsymmetry && iz>0) {
-                    val = computeRho_m(grid[iR], -grid[iz], m);
+                    val = computeRho_m(*density, grid[iR], -grid[iz], m);
                     if(!math::isFinite(val)) val=0;  // don't let rubbish in
                 }
                 values[iR][grid.size()-1-iz] = val;
@@ -211,11 +208,11 @@ DirectPotential::DirectPotential(const particles::PointMassArray<coord::PosCyl>&
         besselInts.push_back(BesselIntegral(m));
 };
 
-double DirectPotential::totalMass() const
+double DirectPotential::totalMass(const double rel_toler) const
 {
     assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL) 
-        return density->totalMass();
+        return density->totalMass(rel_toler);
     else {
         double mass=0;
         for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
@@ -225,11 +222,11 @@ double DirectPotential::totalMass() const
     }
 }
 
-double DirectPotential::enclosedMass(const double r) const
+double DirectPotential::enclosedMass(const double r, const double rel_toler) const
 {
     assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL)
-        return density->enclosedMass(r);
+        return density->enclosedMass(r, rel_toler);
     else {
         double mass=0;
         for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
@@ -258,7 +255,7 @@ double DirectPotential::densityCyl(const coord::PosCyl& pos) const
 
 double DirectPotential::Rho_m(double R, double z, int m) const
 {
-    if(splines.size()==0) {
+    if(splines.size()==0) {  // source density is axisymmetric
         assert(m==0 && density!=NULL);
         return density->density(coord::PosCyl(R, z, 0));
     }
@@ -267,90 +264,43 @@ double DirectPotential::Rho_m(double R, double z, int m) const
         return 0;
     if( R<splines[mmax+m].xmin() || R>splines[mmax+m].xmax() || 
         z<splines[mmax+m].ymin() || z>splines[mmax+m].ymax() )
-        return computeRho_m(R, z, m);  // outside interpolating grid -- compute directly by integration
+        return computeRho_m(*density, R, z, m);  // outside interpolating grid -- compute directly by integration
     else
         return splines[mmax+m].value(R, z);
 }
 
-class DensityAzimuthalAverageIntegrand: public math::IFunctionNoDeriv {
-public:
-    DensityAzimuthalAverageIntegrand(const BaseDensity& _dens, double _R, double _z, int _m) :
-    dens(_dens), R(_R), z(_z), m(_m) {};
-    virtual double value(double phi) const {
-        return dens.density(coord::PosCyl(R, z, phi)) *
-           (m==0 ? 1 : m>0 ? 2*cos(m*phi) : 2*sin(-m*phi));
-    }
-private:
-    const BaseDensity& dens;
-    double R, z, m;
-};
-    
-double DirectPotential::computeRho_m(double R, double z, int m) const
-{   // compute azimuthal Fourier harmonic coefficient for the given m by averaging the input potential over phi
-    double phimax = (density->symmetry() & ST_PLANESYM)==ST_PLANESYM ? M_PI_2 : 2*M_PI;
-    return math::integrate(DensityAzimuthalAverageIntegrand(*density, R, z, m),
-        0, phimax, EPSREL_DENSITY_INT) / phimax;
-}
 
 /// integration for potential computation
-class DirectPotentialIntegrand {
+class DirectPotentialIntegrand: public math::IFunctionNdim {
 public:
     DirectPotentialIntegrand(const DirectPotential& _potential, const BesselIntegral& _besselInt, 
         double _R, double _z, int _m) :
         potential(_potential), besselInt(_besselInt), R(_R), z(_z), m(_m) {};
-    double value(double R1, double z1) const {
-        if(R1==R && z1==z)
-            return 0;   // actually the value is infinite, but this is an integrable singularity
-        return -2*M_PI*R1 * (
+    // evaluate the function at a given (R1,z1) point (scaled)
+    virtual void eval(const double Rz[], double values[]) const
+    {
+        if(Rz[0]>=1. || Rz[1]>=1.) {  // scaled coords point at infinity
+            values[0] = 0;
+            return;
+        }
+        const double R1 = Rz[0]/(1-Rz[0]);  // un-scale input coordinates
+        const double z1 = Rz[1]/(1-Rz[1]);
+        const double jac = pow_2((1-Rz[0])*(1-Rz[1]));  // jacobian of scaled coord transformation
+        double result = 0;
+        if(R1!=R || z1!=z)
+            result = -2*M_PI*R1 * (m==0 ? 1 : 2) * (
             potential.Rho_m(R1, z1, m) * besselInt.value(R, R1, z-z1) +
-            potential.Rho_m(R1,-z1, m) * besselInt.value(R, R1, z+z1) );
+            potential.Rho_m(R1,-z1, m) * besselInt.value(R, R1, z+z1) ) / jac;
+        values[0] = result;
     }
+    virtual unsigned int numVars() const { return 2; }
+    virtual unsigned int numValues() const { return 1; }
 private:
     const DirectPotential& potential;
     const BesselIntegral& besselInt;
     double R, z;
     int m;
 };
-
-#ifdef HAVE_CUBATURE
-int integrandPotentialDirectCubature(unsigned int /*ndim*/, const double Rz[],
-    void* param, unsigned int /*fdim*/, double* output)
-{
-    if(Rz[0]>=1. || Rz[1]>=1.)   // scaled coords point at infinity
-        *output = 0;
-    else
-        *output = static_cast<DirectPotentialIntegrand*>(param)->
-            value( Rz[0]/(1-Rz[0]), Rz[1]/(1-Rz[1]) ) / 
-            pow_2((1-Rz[0])*(1-Rz[1]));  // jacobian of scaled coord transformation
-    return 0; // no error
-}
-#else
-class DirectPotentialIntegrandR: public math::IFunctionNoDeriv {
-public:
-    DirectPotentialIntegrandR(const DirectPotentialIntegrand& _fnc, double _z1) :
-        fnc(_fnc), z1(_z1) {};
-    virtual double value(double scaledR) const {
-        double R1 = scaledR / (1-scaledR);
-        return fnc.value(R1, z1) / pow_2(1-scaledR);
-    }
-private:
-    const DirectPotentialIntegrand& fnc;
-    double z1;
-};
-
-class DirectPotentialIntegrandZ: public math::IFunctionNoDeriv {
-public:
-    DirectPotentialIntegrandZ(const DirectPotentialIntegrand& _fnc) :
-        fnc(_fnc) {};
-    virtual double value(double scaledZ) const {
-        double z1 = scaledZ / (1-scaledZ);
-        return math::integrate(DirectPotentialIntegrandR(fnc, z1), 0, 1, EPSREL_POTENTIAL_INT) /
-            pow_2(1-scaledZ);
-    }
-private:
-    const DirectPotentialIntegrand& fnc;
-};
-#endif
 
 double DirectPotential::Phi_m(double R, double Z, int m) const
 {
@@ -373,16 +323,12 @@ double DirectPotential::Phi_m(double R, double Z, int m) const
     int mmax = splines.size()/2;
     if(splines.size()>0 && splines[mmax+m].isEmpty())
         return 0;  // using splines for m-components of density but it is identically zero at this m
-    DirectPotentialIntegrand fncXi(*this, besselInts[abs(m)], R, Z, m);
-    double result;
-#ifdef HAVE_CUBATURE
+    DirectPotentialIntegrand fnc(*this, besselInts[abs(m)], R, Z, m);
     double Rzmin[2]={0.,0.}, Rzmax[2]={1.,1.}; // integration box in scaled coords
-    double error;
-    hcubature(1, &integrandPotentialDirectCubature, &fncXi, 2, Rzmin, Rzmax, 65536/*max_eval*/, 
-        EPSABS_POTENTIAL_INT, EPSREL_POTENTIAL_INT, ERROR_L1/*ignored*/, &result, &error);
-#else
-    result = math::integrate(DirectPotentialIntegrandZ(fncXi), 0, 1, EPSREL_POTENTIAL_INT);
-#endif
+    double result, error;
+    int numEval;
+    math::integrateNdim(fnc, Rzmin, Rzmax, 
+        EPSREL_POTENTIAL_INT, MAX_NUM_EVAL, &result, &error, &numEval);
     return result;
 };
 
@@ -524,7 +470,9 @@ void CylSplineExp::initPot(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsig
     // for some unknown reason, switching on the OpenMP parallelization makes the results 
     // of computation of m=4 coef irreproducible (adds a negligible random error). 
     // Assumed to be unimportant, thus OpenMP is enabled...
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for(int iR=0; iR<static_cast<int>(Ncoefs_R); iR++) {
         for(size_t iz=0; iz<=Ncoefs_z/2; iz++) {
             for(int m=mmax*mmin; m<=mmax; m+=mstep) {

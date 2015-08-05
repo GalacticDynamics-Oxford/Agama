@@ -63,7 +63,7 @@ private:
         if(fpprime)
             *fpprime = val/pow_2(scaleLength);
     }
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** more convoluted radial density profile - exponential with possible inner hole and modulation */
@@ -92,7 +92,7 @@ private:
         if(f) 
             *f = val;
     }
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** exponential vertical disk density profile */
@@ -109,7 +109,7 @@ private:
         if(Hprime)  *Hprime  = sign(z)*(1.-h)/2;
         if(Hpprime) *Hpprime = h/(2*scaleHeight);
     }
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** isothermal (sech^2) vertical disk density profile */
@@ -127,7 +127,7 @@ private:
         if(Hprime)  *Hprime  = 0.5*sign(z)*(1.-h)/sh1;
         if(Hpprime) *Hpprime = h/(sh1*sh1*scaleHeight);
     }
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** vertically thin disk profile */
@@ -141,7 +141,7 @@ private:
         if(Hprime)  *Hprime  = sign(z)/2;
         if(Hpprime) *Hpprime = 0;
     }
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** helper routine to create an instance of radial density function */

@@ -30,7 +30,7 @@ public:
         if the input location is outside the definition interval, a linear extrapolation is performed. */
     virtual void evalDeriv(const double x, double* value=0, double* deriv=0, double* deriv2=0) const;
 
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 
     /** return the lower end of definition interval */
     double xmin() const { return xval.size()? xval.front() : NAN; }

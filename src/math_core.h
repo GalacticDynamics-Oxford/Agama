@@ -20,7 +20,7 @@ const int ODE_MAX_NUM_STEP=1e6;
 /// \name  ---- Miscellaneous utility functions -----
 ///@{
 
-/** test if a number is not infinity or NaN */
+/** test if a number is neither infinity nor NaN */
 bool isFinite(double x);
 
 /** compare two numbers with a relative accuracy eps: 
@@ -33,7 +33,7 @@ inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 /** return an integer power of a number */
 double powInt(double x, int n);
 
-/** ensure that the angle lies in [0,2pi) */
+/** wraps the input argument into the range [0,2pi) */
 double wrapAngle(double x);
 
 /** create a nearly monotonic sequence of angles by adding or subtracting 2Pi
@@ -56,9 +56,9 @@ double unwrapAngle(double x, double xprev);
     \param[in] F  is the input function
     \param[in] x1 is the lower end of the interval (may be -INFINITY),
     \param[in] x2 is the upper end of the interval (may be +INFINITY),
-    \param[in] rel_toler  determines the accuracy of root localization, relative to the range |x2-x1|.
+    \param[in] relToler  determines the accuracy of root localization, relative to the range |x2-x1|.
 */
-double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
+double findRoot(const IFunction& F, double x1, double x2, double relToler);
 
 /** Find a local minimum on the interval [x1,x2].
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
@@ -73,9 +73,9 @@ double findRoot(const IFunction& F, double x1, double x2, double rel_toler);
     xinit is set to NaN, and the function first performs a binary search to determine 
     the interval enclosing the minimum, and returns one of the endpoints if the function 
     turns out to be monotonic on the entire interval.
-    \param[in] rel_toler  determines the accuracy of minimum localization, relative to the range |x2-x1|.
+    \param[in] relToler  determines the accuracy of minimum localization, relative to the range |x2-x1|.
  */
-double findMin(const IFunction& F, double x1, double x2, double xinit, double rel_toler);
+double findMin(const IFunction& F, double x1, double x2, double xinit, double relToler);
 
 /** Description of function behavior near a given point: the value and two derivatives,
     and the estimates of nearest points where the function takes on 
@@ -120,7 +120,7 @@ private:
     If the function is well-behaved, this is the fastest method, 
     but if it cannot reach the required accuracy even using the highest-order rule,
     no further improvement can be made. */
-double integrate(const IFunction& F, double x1, double x2, double rel_toler);
+double integrate(const IFunction& F, double x1, double x2, double relToler);
 
 /** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
     without error estimate. */
@@ -128,7 +128,7 @@ double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
 
 /** integrate a function on a finite interval, using a fully adaptive integration routine 
     to reach the required tolerance; integrable singularities are handled properly. */
-double integrateAdaptive(const IFunction& F, double x1, double x2, double rel_toler);
+double integrateAdaptive(const IFunction& F, double x1, double x2, double relToler);
 
 /** Helper class for integrand transformations.
     A function defined on a finite interval [x_low,x_upp], with possible integrable 
@@ -166,7 +166,46 @@ private:
     const IFunction& F;
     double x_low, x_upp;
 };
+
+/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values. */
+class IFunctionNdim {
+public:
+    IFunctionNdim() {};
+    virtual ~IFunctionNdim() {};
+
+    /** Evaluate the function.
+        \param[in]  vars   is the N-dimensional point at which the function should be computed.
+        \param[out] values us the M-dimensional array (possibly M=1) that will contain
+                    the vector of function values. 
+    */
+    virtual void eval(const double vars[], double values[]) const = 0;
     
+    /// return the dimensionality of the input point (N)
+    virtual unsigned int numVars() const = 0;
+    
+    /// return the number of elements in the output array of values (M)
+    virtual unsigned int numValues() const = 0;
+};
+
+/** N-dimensional integration (aka cubature).
+    It computes the integral of a vector-valued function (each component is treated independently).
+    The dimensions of integration volume and the length of result array are provided by 
+    F.numVars() and F.numValues(), respectively. Integration boundaries should be finite.
+    \param[in]  F  is the input function of N variables that produces a vector of M values,
+    \param[in]  xlower  is the lower boundary of integration volume (vector of length N);
+    \param[in]  xupper  is the upper boundary of integration volume (vector of length N);
+    \param[in]  relToler  is the required relative error in each of the computed component of F;
+    \param[in]  maxNumEval  is the upper limit on the number of function calls;
+    \param[out] result  is the vector of length M, containing the values of integral for each component;
+    \param[out] error  is the vector of length M, containing error estimates of the computed values,
+                if this argument is set to NULL then no error information is stored;
+    \param[out] numEval  is the actual number of function calls
+                (if set to NULL, this information is not stored).
+*/
+void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
+    const double relToler, const int maxNumEval, 
+    double result[], double error[]=0, int* numEval=0);
+
 ///@}
 /// \name ------ linear regression -----
 ///@{

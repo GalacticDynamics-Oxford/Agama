@@ -10,6 +10,13 @@
 #include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
 #include <cassert>
+#include <vector>
+
+#ifdef HAVE_CUBA
+#include <cuba.h>
+#else
+#include "cubature.h"
+#endif
 
 namespace math{
 
@@ -85,10 +92,10 @@ double unwrapAngle(double x, double xprev) {
         modf(diff-0.5, &nwraps);
     return x - 2*M_PI * nwraps;
 }
-    
+
 // ------ root finder routines ------//
 
-// used in hybrid root-finder to predict the root location by Hermite interpolation
+/// used in hybrid root-finder to predict the root location by Hermite interpolation
 inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx1, 
     double x2, double f2, double dfdx2)
 {
@@ -106,8 +113,8 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
          + pow_2(t) * ( (3-2*t)*f2 + (t-1)*dfdx2*dx );
 }
 
-// a hybrid between Brent's method and interpolation of root using function derivatives
-// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
+/// a hybrid between Brent's method and interpolation of root using function derivatives;
+/// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
 static double findRootHybrid(const IFunction& fnc, 
     const double x_lower, const double x_upper, const double reltoler)
 {
@@ -274,7 +281,7 @@ public:
         }
     };
 
-    virtual int numDerivs() const { return F.numDerivs()>1 ? 1 : F.numDerivs(); }
+    virtual unsigned int numDerivs() const { return F.numDerivs()>1 ? 1 : F.numDerivs(); }
 
     // return the scaled variable y for the given original variable x
     double y_from_x(const double x) const {
@@ -516,7 +523,97 @@ double ScaledIntegrandEndpointSing::value(const double y) const
     return dx==0 ? 0 : F(x)*dx;
 }
 
-// ----- derivatives and related fncs ------- //
+// ------- multidimensional integration ------- //
+#ifdef HAVE_CUBA
+// wrapper for Cuba library
+struct CubaParams {
+    const IFunctionNdim& F; ///< the original function
+    const double* xlower;   ///< lower limits of integration
+    const double* xupper;   ///< upper limits of integration
+    double* xvalue;         ///< temporary storage for un-scaling input point from [0:1]^N to the original range
+    CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper, double* _xvalue) :
+        F(_F), xlower(_xlower), xupper(_xupper), xvalue(_xvalue) {};
+};
+static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
+    const int *ncomp, double fval[], void *v_param)
+{
+    CubaParams* param = static_cast<CubaParams*>(v_param);
+    assert(*ndim == (int)param->F.numVars() && *ncomp == (int)param->F.numValues());
+    try {
+        for(int n=0; n< *ndim; n++)
+            param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
+        param->F.eval(param->xvalue, fval);
+        return 0;   // success
+    }
+    catch(...) {    // should we catch everything here?
+        return -1;  // signal of error
+    }
+}
+#else
+// wrapper for Cubature library
+struct CubatureParams {
+    const IFunctionNdim& F; ///< the original function
+    int numEval;            ///< count the number of function evaluations
+    explicit CubatureParams(const IFunctionNdim& _F) :
+        F(_F), numEval(0){};
+};
+static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_param,
+    unsigned fdim, double *fval)
+{
+    CubatureParams* param = static_cast<CubatureParams*>(v_param);
+    assert(ndim == param->F.numVars() && fdim == param->F.numValues());
+    try {
+        param->numEval++;
+        param->F.eval(x, fval);
+        return 0;   // success
+    }
+    catch(...) {    // should we catch everything here?
+        return -1;  // signal of error
+    }
+}
+#endif
+
+void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
+    const double relToler, const int maxNumEval, 
+    double result[], double outError[], int* numEval)
+{
+    const unsigned int numVars = F.numVars();
+    const unsigned int numValues = F.numValues();
+    const double absToler = 0;  // maybe should be more flexible?
+    std::vector<double> tempError(numValues);  // storage for errors in the case that user doesn't need them
+    double* error = outError!=NULL ? outError : &(tempError.front());
+#ifdef HAVE_CUBA
+    std::vector<double> tempX(numVars);       // storage for scaled variables
+    CubaParams param(F, xlower, xupper, &(tempX.front()));
+    std::vector<double> tempProb(numValues);
+    int nregions, neval, fail;
+    const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
+    cubacores(1, 10);
+    Cuhre(numVars, numValues, &integrandNdimWrapperCuba, &param, NVEC,
+          relToler, absToler, FLAGS, minNumEval, maxNumEval, 
+          KEY, NULL/*STATEFILE*/, NULL/*spin*/,
+          &nregions, numEval!=NULL ? numEval : &neval, &fail, 
+          result, error, &(tempProb.front()) );
+    // need to scale the result to account for coordinate transformation [xlower:xupper] => [0:1]
+    double scaleFactor = 1.;
+    for(unsigned int n=0; n<numVars; n++)
+        scaleFactor *= (xupper[n]-xlower[n]);
+    for(unsigned int m=0; m<numValues; m++) {
+        result[m] *= scaleFactor;
+        error[m] *= scaleFactor;
+    }
+#else
+    CubatureParams params(F);
+    hcubature(numValues, &integrandNdimWrapperCubature, &params,
+              numVars, xlower, xupper, maxNumEval, absToler, relToler,
+              ERROR_INDIVIDUAL, result, error);
+    if(numEval!=NULL)
+        *numEval = params.numEval;
+#endif
+    return;
+}
+    
+// ------- derivatives and related fncs ------- //
 
 PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
 {

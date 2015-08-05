@@ -33,7 +33,7 @@ public:
     BasePotentialSphericallySymmetric(), mass(_mass), scaleRadius(_scaleRadius) {}
     virtual const char* name() const { return myName(); }
     static const char* myName() { return "NFW"; }
-    virtual double totalMass() const { return INFINITY; }
+    virtual double totalMass(double) const { return INFINITY; }
 private:
     const double mass;         ///< normalization factor  (M);  equals to mass enclosed within ~5.3r_s
     const double scaleRadius;  ///< scale radius of the NFW model  (r_s)
@@ -51,7 +51,7 @@ public:
     virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "MiyamotoNagai"; };
-    virtual double totalMass() const { return mass; }
+    virtual double totalMass(double) const { return mass; }
 private:
     const double mass;         ///< total mass  (M)
     const double scaleRadiusA; ///< first scale radius  (A),  determines the extent in the disk plane
@@ -72,7 +72,7 @@ public:
         return p2==1 ? (q2==1 ? ST_SPHERICAL : ST_AXISYMMETRIC) : ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "Logarithmic"; };
-    virtual double totalMass() const { return INFINITY; }
+    virtual double totalMass(double) const { return INFINITY; }
 private:
     const double sigma2;       ///< squared asymptotic circular velocity (sigma)
     const double coreRadius2;  ///< squared core radius (r_c)
@@ -93,7 +93,7 @@ public:
         return p2==1 ? (q2==1 ? ST_SPHERICAL : ST_AXISYMMETRIC) : ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "Harmonic"; };
-    virtual double totalMass() const { return INFINITY; }
+    virtual double totalMass(double) const { return INFINITY; }
 private:
     const double Omega2;       ///< squared oscillation frequency (Omega)
     const double q2;           ///< squared y/x axis ratio (q)

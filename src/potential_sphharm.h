@@ -34,7 +34,7 @@ protected:
     virtual void computeSHCoefs(const double r, double coefsF[], double coefsdFdr[], double coefsd2Fdr2[]) const = 0;
 
 private:
-    SymmetryType mysymmetry;             ///< may have different type of symmetry
+    SymmetryType mysymmetry;    ///< may have different type of symmetry
 
     virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const;
@@ -68,7 +68,7 @@ public:
     unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }
 
     /// a faster estimate of M(r) from the l=0 harmonic only
-    double enclosedMass(const double radius) const;
+    double enclosedMass(const double radius, const double /*rel_toler*/) const;
 
 private:
     unsigned int Ncoefs_radial;                 ///< number of radial basis functions [ =SHcoefs.size() ]
@@ -125,12 +125,13 @@ public:
     void getCoefs(std::vector<double> *radii, std::vector< std::vector<double> > *coefsArray, bool useNodes=true) const;
 
     /// a faster estimate of M(r) from the l=0 harmonic only
-    double enclosedMass(const double radius) const;
+    double enclosedMass(const double radius, const double /*rel_toler*/) const;
 
 private:
     unsigned int Ncoefs_radial;              ///< number of radial coefficients (excluding the one at r=0)
-    std::vector<double>  gridradii;          ///< defines nodes of radial grid in splines
+    std::vector<double> gridradii;           ///< defines nodes of radial grid in splines
     double minr, maxr;                       ///< definition range of splines; extrapolation beyond this radius 
+    double ascale;                           ///< value of scaling radius for non-spherical expansion coefficients which are tabulated as functions of log(r+ascale)
     double gammain,  coefin;                 ///< slope and coef. for extrapolating potential inside minr (spherically-symmetric part, l=0)
     double gammaout, coefout, der2out;       ///< slope and coef. for extrapolating potential outside maxr (spherically-symmetric part, l=0)
     double potcenter, potmax, potminr;       ///< (abs.value) potential in the center (for transformation of l=0 spline), at the outermost spline node, and at 1st spline node
@@ -142,7 +143,7 @@ private:
 
     /// assigns symmetry class if some coefficients are (near-)zero.
     /// called on an intermediate step after computing coefs but before initializing splines
-    void checkSymmetry(const std::vector< std::vector<double>  > &coefsArray);
+    void checkSymmetry(const std::vector< std::vector<double> > &coefsArray);
 
     /// create spline objects for all non-zero spherical harmonics from the supplied radii and coefficients.
     /// radii should have "Ncoefs_radial" elements and coefsArray - "Ncoefs_radial * (Ncoefs_angular+1)^2" elements

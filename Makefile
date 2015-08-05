@@ -10,9 +10,9 @@ DEFINES  += -DHAVE_UNSIO
 CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
 LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
 
-#DEFINES  += -DHAVE_CUBATURE
-#CXXFLAGS += -I/Users/user/Documents/soft/cubature-1.0
-#LFLAGS   +=   /Users/user/Documents/soft/cubature-1.0/hcubature.o
+#DEFINES  += -DHAVE_CUBA
+#CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
+#LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
 
 SRCDIR    = src
 OBJDIR    = obj
@@ -37,6 +37,7 @@ SOURCES   = coord.cpp \
             math_core.cpp \
             math_spline.cpp \
             math_specfunc.cpp \
+            cubature.cpp \
             orbit.cpp \
             utils.cpp \
 
@@ -71,7 +72,7 @@ $(LIBNAME):  $(OBJECTS) $(LEGACYOBJ)
 clean:
 	rm -f $(OBJECTS) $(LEGACYOBJ) *.exe
 
-$(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
+$(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h Makefile
 	@mkdir -p $(OBJDIR)
 	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 

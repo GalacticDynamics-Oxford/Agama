@@ -72,13 +72,17 @@ public:
 
     /** estimate the mass enclosed within a given spherical radius;
         default implementation integrates density over volume, but derived classes
-        may provide a cheaper alternative (not necessarily a very precise one). */
-    virtual double enclosedMass(const double radius) const;
+        may provide a cheaper alternative (not necessarily a very precise one; 
+        the relative accuracy is controlled by `rel_toler` parameter)
+    */
+    virtual double enclosedMass(const double radius, const double rel_toler=EPSREL_DENSITY_INT) const;
     
     /** return the total mass of the density model (possibly infinite);
         default implementation estimates the asymptotic behaviour of density at large radii,
-        but derived classes may instead return a specific value. */
-    virtual double totalMass() const;
+        but derived classes may instead return a specific value. 
+        \param[in] rel_toler is the accuracy of mass computation
+    */
+    virtual double totalMass(const double rel_toler=EPSREL_DENSITY_INT) const;
 
 protected:
 //  Protected members: virtual methods for `density` in different coordinate systems
@@ -283,7 +287,7 @@ public:
     virtual SymmetryType symmetry() const { return ST_SPHERICAL; }
 
     /** find the mass enclosed within a given radius from Poisson equation */
-    virtual double enclosedMass(double radius) const;
+    virtual double enclosedMass(const double radius, const double /*rel_toler*/) const;
 
 private:
     virtual void evalCar(const coord::PosCar &pos,
@@ -305,7 +309,7 @@ private:
     virtual double densityCyl(const coord::PosCyl &pos) const
     {  return densitySph(coord::toPosSph(pos)); }
 
-    virtual int numDerivs() const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 ///@}
@@ -338,11 +342,16 @@ inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph
 
 
 /** Find (spherical) radius corresponding to the given enclosed mass */
-double getRadiusByMass(const BaseDensity& dens, const double mass);
+double getRadiusByMass(const BaseDensity& dens, const double mass, 
+    const double rel_toler=EPSREL_DENSITY_INT);
 
 /** Find the asymptotic power-law index of density profile at r->0 */
 double getInnerDensitySlope(const BaseDensity& dens);
 
+/** Compute m-th azimuthal harmonic of density profile by averaging the density over angle phi 
+    with weight factor cos(m phi) or sin(m phi), at the given point in (R,z) plane */
+double computeRho_m(const BaseDensity& dens, double R, double z, int m);
+    
 
 /** Compute circular velocity at a given (cylindrical) radius R in equatorial plane */
 double v_circ(const BasePotential& potential, double R);

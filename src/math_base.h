@@ -43,7 +43,7 @@ public:
     virtual void evalDeriv(const double x, double* value=0, double* deriv=0, double* deriv2=0) const=0;
 
     /** Query the number of derivatives implemented by this class */
-    virtual int numDerivs() const=0;
+    virtual unsigned int numDerivs() const=0;
 
     /** Convenience shorthand for computing only the value of the function */
     virtual double value(const double x) const {
@@ -79,7 +79,7 @@ public:
     }
 
     /** No derivatives, as one might guess */
-    virtual int numDerivs() const { return 0; }
+    virtual unsigned int numDerivs() const { return 0; }
 
 };
     

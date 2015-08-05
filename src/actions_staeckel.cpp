@@ -180,7 +180,7 @@ class AxisymScaledForRootfinder: public math::IFunction {
 public:
     const AxisymFunctionBase& fnc;
     explicit AxisymScaledForRootfinder(const AxisymFunctionBase& d) : fnc(d) {};
-    virtual int numDerivs() const { return fnc.numDerivs(); }    
+    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }    
     virtual void evalDeriv(const double tau, 
         double* val=0, double* der=0, double* der2=0) const
     {

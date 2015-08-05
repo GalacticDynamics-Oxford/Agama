@@ -5,6 +5,8 @@
 #include "potential_factory.h"
 #include "particles_io.h"
 #include "coord_utils.h"
+#include "utils.h"
+#include <fstream>
 #include <cstdlib>
 #include <cstdio>
 
@@ -19,6 +21,8 @@ const double pos_sph[numtestpoints][3] = {   // order: R, theta, phi
     {111, 0.7, 2},   // point at a large radius
     {.01, 2.5,-1},   // point at a small radius origin
     {0  , 0  , 0} }; // point at origin
+
+const bool output = false;
 
 /// write potential coefs into file, load them back and create a new potential from these coefs
 const potential::BasePotential* write_read(const potential::BasePotential& pot)
@@ -68,15 +72,21 @@ const potential::BasePotential* create_from_file(
     return newpot;
 }
 
+particles::PointMassArrayCar points;  // sampling points
+
 /// compare potential and its derivatives between the original model and its spherical-harmonic approximation
 bool test_suite(const potential::BasePotential& p, const potential::BasePotential& orig, double eps_pot)
 {
     bool ok=true;
     const potential::BasePotential* newpot = write_read(p);
+    double gamma = potential::getInnerDensitySlope(orig);
     std::cout << "\033[1;32m---- testing "<<p.name()<<
         " with "<<potential::getSymmetryNameByType(orig.symmetry())<<" "<<orig.name()<<
-        " (gamma="<<potential::getInnerDensitySlope(orig)<<") ----\033[0m\n";
+        " (gamma="<<gamma<<") ----\033[0m\n";
     const char* err = "\033[1;31m **\033[0m";
+    std::string fileName = std::string("test_") + p.name() + "_" + orig.name() + 
+        "_gamma" + utils::convertToString(gamma);
+    potential::writePotential(fileName + potential::getCoefFileExtension(potential::getPotentialType(p)), p);
     for(int ic=0; ic<numtestpoints; ic++) {
         double pot, pot_orig;
         coord::GradCyl der,  der_orig;
@@ -95,6 +105,21 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
             "Force sphharm: " << der  << "\nForce origin.: " << der_orig  << (der_ok ?"":err) << "\n"
             "Deriv sphharm: " << der2 << "\nDeriv origin.: " << der2_orig << (der2_ok?"":err) << "\n";
     }
+    if(output) {
+        std::ofstream strmSample((fileName+".samples").c_str());
+        for(unsigned int ic=0; ic<points.size(); ic++) {
+            double pot, pot_orig;
+            coord::GradCyl der,  der_orig;
+            coord::HessCyl der2, der2_orig;
+            newpot->eval(coord::toPosCyl(points.point(ic)), &pot, &der, &der2);
+            orig.eval(coord::toPosCyl(points.point(ic)), &pot_orig, &der_orig, &der2_orig);
+            strmSample << coord::toPosSph(points.point(ic)).r << "\t" <<
+            fabs((pot-pot_orig)/pot_orig) << "\t" <<
+            fabs((der.dR-der_orig.dR)/der_orig.dR) << "\t" <<
+            fabs((der.dz-der_orig.dz)/der_orig.dz) << "\t" <<
+            fabs(1-newpot->density(points.point(ic))/orig.density(points.point(ic))) << "\n";
+        }
+    }
     delete newpot;
     return ok;
 }
@@ -102,21 +127,23 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
 int main() {
     srand(42);
     bool ok=true;
-    const potential::Plummer plum(10., 5.);
-    ok &= test_suite(potential::BasisSetExp(0., 30, 2, plum), plum, 1e-5);
+    const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
+    make_hernquist(100000, 0.8, 0.6, points);
+    const potential::Plummer plum(10., 5.);  // spherical, cored
+    ok &= test_suite(potential::BasisSetExp(0., 20, 2, plum), plum, 1e-5);
     ok &= test_suite(potential::SplineExp(20, 2, plum), plum, 1e-5);
-    ok &= test_suite(potential::CylSplineExp(20, 20, 0, plum), plum, 1e-4);
-    const potential::Dehnen deh15(3., 1.2, 0.8, 0.6, 1.5);
+    ok &= test_suite(potential::CylSplineExp(20, 20, 0, 
+        static_cast<const potential::BaseDensity&>(plum)), plum, 1e-4);  // this forces potential to be computed via integration of density over volume
+    const potential::Dehnen deh15(3., 1.2, 0.8, 0.6, 1.5);  // mildly triaxial, cuspy
     ok &= test_suite(potential::BasisSetExp(2., 20, 6, deh15), deh15, 2e-4);
     ok &= test_suite(potential::SplineExp(20, 6, deh15), deh15, 2e-4);
-    const potential::Dehnen deh0(1., 1., 0.8, 0.6, 0.);
+/*    ok &= test_suite(potential::CylSplineExp(20, 20, 6, 
+        static_cast<const potential::BaseDensity&>(deh15)), deh15, 2e-4);*/
+    const potential::Dehnen deh0(1., 1., 0.8, 0.6, 0.);  // mildly triaxial, cored
     ok &= test_suite(potential::BasisSetExp(1., 20, 6, deh0), deh0, 5e-5);
     ok &= test_suite(potential::SplineExp(20, 6, deh0), deh0, 5e-5);
     ok &= test_suite(potential::CylSplineExp(20, 20, 6, 
-        static_cast<const potential::BaseDensity&>(deh0)), deh0, 1e-4);  // this forces potential to be computed via integration of density over volume
-    particles::PointMassArrayCar points;
-    const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
-    make_hernquist(100000, 0.8, 0.6, points);
+        static_cast<const potential::BaseDensity&>(deh0)), deh0, 1e-4);
     const potential::BasePotential* p = create_from_file(points, potential::PT_BSE);
     ok &= test_suite(*p, hernq, 2e-2);
     delete p;
