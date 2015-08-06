@@ -3,8 +3,8 @@
 #include "potential_factory.h"
 #include "units.h"
 #include "math_core.h"
+#include "utils_config.h"
 #include <iostream>
-#include <iomanip>
 #include <fstream>
 #include <cmath>
 #include <ctime>
@@ -209,10 +209,16 @@ double ics[30][6] = {
 {28.0207, 0, -19.3931, -101.342, -139.579, 30.7491},
 {36.3541, 0, -58.4024, 37.6475, 107.584, -191.881} };
 
-int main() {
-    //std::cout<<std::setprecision(10);
+int main(int argc, const char* argv[]) {
     bool allok = true;
-    const potential::BasePotential* pot = make_galpot(test_galpot_params);
+    const potential::BasePotential* pot;
+    if(argc>1) {
+        utils::KeyValueMap params(argc, argv);
+        potential::ConfigPotential config;
+        potential::parseConfigPotential(params, config);
+        pot = potential::createPotential(config);
+    } else
+        pot = make_galpot(test_galpot_params);
     const double total_time=4. * unit.from_Kpc/unit.from_kms;
     const int numsteps=1000;
     const double timestep=total_time/numsteps;

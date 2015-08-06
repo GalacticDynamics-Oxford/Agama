@@ -1,6 +1,4 @@
 #include "potential_factory.h"
-#include "particles_io.h"
-#include "utils.h"
 #include "potential_analytic.h"
 #include "potential_cylspline.h"
 #include "potential_dehnen.h"
@@ -8,6 +6,9 @@
 #include "potential_galpot.h"
 #include "potential_perfect_ellipsoid.h"
 #include "potential_sphharm.h"
+#include "particles_io.h"
+#include "utils.h"
+#include "utils_config.h"
 #include <cassert>
 #include <stdexcept>
 #include <fstream>
@@ -621,9 +622,60 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
     }
     return createGalaxyPotential(diskpars, sphrpars);
 }
-    
+
 //----------------------------------------------------------------------------//
-// 'class factory'  (makes correspondence between enum potential and symmetry types and string names)
+// ConfigPotential <=> KeyValueMap
+
+void parseConfigPotential(const utils::KeyValueMap& params, ConfigPotential& config)
+{
+    config.potentialType = getPotentialTypeByName(params.getString("Type"));
+    config.densityType = getDensityTypeByName(params.getStringAlt("DensityModel", "Density"));
+    config.mass = std::max<double>(0, params.getDouble("Mass", config.mass));
+    config.q = std::max<double>(0, params.getDoubleAlt("q_YtoX", "q", config.q));
+    config.p = std::max<double>(0, params.getDoubleAlt("p_ZtoX", "p", config.p));
+    config.scalerad = std::max<double>(0, params.getDoubleAlt("scalerad", "rscale", config.scalerad));
+    config.scalerad2= std::max<double>(0, params.getDoubleAlt("scalerad2","rscale2",config.scalerad2));
+    config.gamma = std::max<double>(0, params.getDouble("Gamma", config.gamma));
+    config.sersicIndex = std::max<double>(0, params.getDouble("SersicIndex", config.sersicIndex));
+    config.numCoefsRadial = std::max<int>(0, params.getInt("Ncoefs_radial", config.numCoefsRadial));
+    config.numCoefsVertical = std::max<int>(0, params.getInt("Ncoefs_vertical", config.numCoefsVertical));
+    config.numCoefsAngular = std::min<int>(0, params.getInt("Ncoefs_angular", config.numCoefsAngular));
+    config.alpha = std::max<double>(0, params.getDouble("Alpha", config.alpha));
+    config.fileName = params.getStringAlt("NbodyFile", "File");
+    config.symmetryType = getSymmetryTypeByName(params.getString("Symmetry"));
+    config.splineSmoothFactor = std::max<double>(0, params.getDouble("splineSmoothFactor", config.splineSmoothFactor));
+    config.splineRMin = params.getDouble("splineRMin", 0);
+    config.splineRMax = params.getDouble("splineRMax", 0);
+    config.splineZMin = params.getDouble("splineZMin", 0);
+    config.splineZMax = params.getDouble("splineZMax", 0);
+}
+
+void storeConfigPotential(const ConfigPotential& config, utils::KeyValueMap& params)
+{
+    params.set("Type", getPotentialNameByType(config.potentialType));
+    params.set("Density", getDensityNameByType(config.densityType));
+    params.set("Mass", config.mass);
+    params.set("q_YtoX", config.q);
+    params.set("p_ZtoX", config.p);
+    params.set("scalerad", config.scalerad);
+    params.set("scalerad2", config.scalerad2);
+    params.set("Gamma", config.gamma);
+    params.set("SersicIndex", config.sersicIndex);
+    params.set("Ncoefs_radial",  config.numCoefsRadial);
+    params.set("Ncoefs_angular", config.numCoefsAngular);
+    params.set("Ncoefs_vertical",config.numCoefsVertical);
+    params.set("Alpha", config.alpha);
+    params.set("Symmetry", getSymmetryNameByType(config.symmetryType));
+    params.set("NbodyFile", config.fileName);
+    params.set("splineSmoothFactor", config.splineSmoothFactor);
+    params.set("splineRMin", config.splineRMin);
+    params.set("splineRMax", config.splineRMax);
+    params.set("splineZMin", config.splineZMin);
+    params.set("splineZMax", config.splineZMax);
+}
+
+//----------------------------------------------------------------------------//
+// correspondence between enum potential and symmetry types and string names
 /// lists all 'true' potentials, i.e. those providing a complete density-potential(-force) pair
 typedef std::map<PotentialType, const char*> PotentialNameMapType;
 
@@ -682,7 +734,7 @@ void initPotentialAndSymmetryNameMap()
 
     mapinitialized=true;
 }
-   
+
 const char* getPotentialNameByType(PotentialType type)
 {
     if(!mapinitialized) initPotentialAndSymmetryNameMap();

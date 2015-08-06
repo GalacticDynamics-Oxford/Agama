@@ -18,6 +18,9 @@
 #include "units.h"
 #include <string>
 
+// forward declaration
+namespace utils { class KeyValueMap; }
+
 namespace potential {
 
 /// \name Definitions of all known potential types and parameters
@@ -86,13 +89,19 @@ struct ConfigPotential
 #endif
     units::ExternalUnits units;              ///< specification of length, velocity and mass units for N-body snapshot, in internal code units
     /// default constructor initializes the fields to some reasonable values
-    ConfigPotential() : 
+    ConfigPotential() :
         mass(1.), scalerad(1.), scalerad2(1.), q(1.), p(1.), gamma(1.), sersicIndex(4.),
         numCoefsRadial(20), numCoefsAngular(0), numCoefsVertical(20), alpha(0.),
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(ST_DEFAULT),
         splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0),
         units()  {};
 };
+
+/// parse the potential parameters contained in a text array of "key=value" pairs
+void parseConfigPotential(const utils::KeyValueMap& params, ConfigPotential& config);
+
+/// store the potential parameters into a text array of "key=value" pairs
+void storeConfigPotential(const ConfigPotential& config, utils::KeyValueMap& params);
 
 ///@}
 /// \name Factory routines that create an instance of specific potential from a set of parameters

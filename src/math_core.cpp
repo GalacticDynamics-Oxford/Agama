@@ -546,7 +546,7 @@ static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
         return 0;   // success
     }
     catch(...) {    // should we catch everything here?
-        return -1;  // signal of error
+        return -999;  // signal of error
     }
 }
 #else
@@ -588,7 +588,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     std::vector<double> tempProb(numValues);
     int nregions, neval, fail;
     const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
-    cubacores(1, 10);
+    cubacores(0, 0);
     Cuhre(numVars, numValues, &integrandNdimWrapperCuba, &param, NVEC,
           relToler, absToler, FLAGS, minNumEval, maxNumEval, 
           KEY, NULL/*STATEFILE*/, NULL/*spin*/,

@@ -10,9 +10,9 @@ DEFINES  += -DHAVE_UNSIO
 CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
 LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
 
-#DEFINES  += -DHAVE_CUBA
-#CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
-#LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
+DEFINES  += -DHAVE_CUBA
+CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
+LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
 
 SRCDIR    = src
 OBJDIR    = obj
@@ -40,6 +40,7 @@ SOURCES   = coord.cpp \
             cubature.cpp \
             orbit.cpp \
             utils.cpp \
+            utils_config.cpp
 
 #LEGACYSRC = Stackel_JS.cpp \
 #            coordsys.cpp 

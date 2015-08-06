@@ -132,6 +132,13 @@ template<> std::string convertToString(int val, unsigned int width) {
     while(offset<len && buf[offset]==' ') offset++;
     return std::string(buf+offset);
 }
+template<> std::string convertToString(unsigned int val, unsigned int width) {
+    char buf[100];
+    int len=snprintf(buf, 100, "%*u", width, val);
+    int offset=0;
+    while(offset<len && buf[offset]==' ') offset++;
+    return std::string(buf+offset);
+}
 #endif
 
 template std::string convertToString(int, unsigned int);
