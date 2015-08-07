@@ -1,5 +1,5 @@
 /**
-\file WDMath.h
+\file WD_Math.h
 \brief Useful mathematic functions & values
 
 *                                                                              *
@@ -25,7 +25,7 @@
 // (1) constants
 ////////////////////////////////////////////////////////////////////////////////
 
-namespace WDmath{
+namespace WD{
 
 const double EulerGamma  = 0.577215664901532860606512090082;
 const double LogofTwo    = 0.693147180559945309417232121458;

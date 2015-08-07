@@ -23,9 +23,9 @@ const double MINIMUM_RANGE = 1e-12;
 AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
     (const potential::OblatePerfectEllipsoid& poten, const coord::PosVelCyl& point)
 {
-    double E = potential::totalEnergy(poten, point);
+    double E = totalEnergy(poten, point);
     double Lz= coord::Lz(point);
-    const coord::ProlSph& coordsys=poten.coordsys();
+    const coord::ProlSph& coordsys = poten.coordsys();
     const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
     double Glambda;
     poten.evalDeriv(pprol.lambda, &Glambda);
@@ -69,7 +69,7 @@ AxisymFunctionFudge findIntegralsOfMotionAxisymFudge
 {
     double Phi;
     poten.eval(point, &Phi);
-    double E=Phi+(pow_2(point.vR)+pow_2(point.vz)+pow_2(point.vphi))/2;
+    double E = Phi+(pow_2(point.vR)+pow_2(point.vz)+pow_2(point.vphi))/2;
     double Lz= coord::Lz(point);
     const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
     double absnu = fabs(pprol.nu);

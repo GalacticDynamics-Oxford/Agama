@@ -145,6 +145,14 @@ public:
     void eval(const coord::PosSph &pos,
         double* potential=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const {
         return evalSph(pos, potential, deriv, deriv2); }
+
+    /** Shorthand for evaluating the value of potential at a given point in any coordinate system */
+    template<typename coordT>
+    inline double value(const coordT& point) const {
+        double val;
+        eval(point, &val);
+        return val;
+    }
     
 protected:
     /** evaluate potential and up to two its derivatives in cartesian coordinates;
@@ -194,14 +202,14 @@ private:
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Cartesian) coordinate system. */
     virtual void evalScalar(const coord::PosCar& pos,
-        double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
-    { evalCar(pos, value, deriv, deriv2); }
+        double* val=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
+    { evalCar(pos, val, deriv, deriv2); }
 
     /** redirect density computation to a Laplacian in more suitable coordinates */
     virtual double densityCyl(const coord::PosCyl &pos) const
-    {  return densityCar(coord::toPosCar(pos)); }
+    {  return densityCar(toPosCar(pos)); }
     virtual double densitySph(const coord::PosSph &pos) const
-    {  return densityCar(coord::toPosCar(pos)); }
+    {  return densityCar(toPosCar(pos)); }
 };  // class BasePotentialCar
 
 
@@ -228,15 +236,15 @@ private:
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Cylindrical) coordinate system. */
     virtual void evalScalar(const coord::PosCyl& pos,
-        double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
-        evalCyl(pos, value, deriv, deriv2);
+        double* val=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const {
+        evalCyl(pos, val, deriv, deriv2);
     }
 
     /** redirect density computation to more suitable coordinates */
     virtual double densityCar(const coord::PosCar &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
     virtual double densitySph(const coord::PosSph &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
 };  // class BasePotentialCyl
 
 
@@ -263,15 +271,15 @@ private:
     /** implements the IScalarFunction interface for evaluating the potential and its derivatives 
         in the preferred (Spherical) coordinate system. */
     virtual void evalScalar(const coord::PosSph& pos,
-        double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const { 
-        evalSph(pos, value, deriv, deriv2); 
+        double* val=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const { 
+        evalSph(pos, val, deriv, deriv2); 
     }
 
     /** redirect density computation to more suitable coordinates */
     virtual double densityCar(const coord::PosCar &pos) const
-    {  return densitySph(coord::toPosSph(pos)); }
+    {  return densitySph(toPosSph(pos)); }
     virtual double densityCyl(const coord::PosCyl &pos) const
-    {  return densitySph(coord::toPosSph(pos)); }
+    {  return densitySph(toPosSph(pos)); }
 };  // class BasePotentialSph
 
 
@@ -304,10 +312,10 @@ private:
 
     /** redirect density computation to spherical coordinates */
     virtual double densityCar(const coord::PosCar &pos) const
-    {  return densitySph(coord::toPosSph(pos)); }
+    {  return densitySph(toPosSph(pos)); }
 
     virtual double densityCyl(const coord::PosCyl &pos) const
-    {  return densitySph(coord::toPosSph(pos)); }
+    {  return densitySph(toPosSph(pos)); }
 
     virtual unsigned int numDerivs() const { return 2; }
 };
@@ -316,29 +324,15 @@ private:
 /// \name   Non-member functions for all potential classes
 ///@{
 
-/** Shorthand for evaluating the value of potential at a given point */
-template<typename coordT>
-double value(const BasePotential& potential, const coordT& point) {
-    double val;
-    potential.eval(point, &val);
-    return val;
-}
-
-/** Convenience function for evaluating total energy of a given position/velocity pair */
-template<typename coordT>
-double totalEnergy(const BasePotential& potential, const coord::PosVelT<coordT>& posvel);
-
-template<>
+/** Convenience functions for evaluating total energy of a given position/velocity pair */
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelCar& p)
-{  return value(potential, p) + 0.5*(p.vx*p.vx+p.vy*p.vy+p.vz*p.vz); }
+{  return potential.value(p) + 0.5*(p.vx*p.vx+p.vy*p.vy+p.vz*p.vz); }
 
-template<>
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelCyl& p)
-{  return value(potential, p) + 0.5*(pow_2(p.vR)+pow_2(p.vz)+pow_2(p.vphi)); }
+{  return potential.value(p) + 0.5*(pow_2(p.vR)+pow_2(p.vz)+pow_2(p.vphi)); }
 
-template<>
 inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph& p)
-{  return value(potential, p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
+{  return potential.value(p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
 
 
 /** Find (spherical) radius corresponding to the given enclosed mass */

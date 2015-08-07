@@ -7,7 +7,7 @@
     coordinate system gives the identical result to a direct conversion.
 */
 #include "coord.h"
-#include "coord_utils.h"
+#include "debug_utils.h"
 #include <iomanip>
 #include <stdexcept>
 

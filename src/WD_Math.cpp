@@ -1,6 +1,6 @@
 /*******************************************************************************
 *                                                                              *
-* WDMath.cc                                                                    *
+* WD_Math.cc                                                                    *
 *                                                                              *
 * C++ code written by Walter Dehnen, 1994/95,                                  *
 * Oxford University, Department of Physics, Theoretical Physics.               *
@@ -17,10 +17,10 @@
 #include <complex>
 using std::complex;
 using std::cerr;
-#include "WDMath.h"
+#include "WD_Math.h"
 #include <cstdlib>
 
-namespace WDmath{
+namespace WD{
 
 const complex<double> IMAG = complex<double>(0,1);      // i
 const complex<double> ITPi = IMAG * (2*M_PI);           // 2 i Pi

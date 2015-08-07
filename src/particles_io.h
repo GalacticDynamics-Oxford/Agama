@@ -106,4 +106,4 @@ inline void readSnapshot(const std::string& fileName,
     delete snap;
 }
 
-};  // namespace
+}  // namespace

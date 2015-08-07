@@ -30,7 +30,7 @@ struct ActionAngles: Actions, Angles {
     ActionAngles(const Actions& acts, const Angles& angs) : Actions(acts), Angles(angs) {};
 };
 
-/** Base class for action finders */
+/** Base class for action finders, which convert position/velocity pair to action/angle pair */
 class BaseActionFinder{
 public:
     BaseActionFinder() {};
@@ -41,6 +41,16 @@ public:
 
     /** Evaluate actions and angles for a given position/velocity point in cylindrical coordinates */
     virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const = 0;
+};
+
+/** Base class for action/angle mappers, which convert action/angle variables to position/velocity point */
+class BaseActionMapper{
+public:
+    BaseActionMapper() {};
+    virtual ~BaseActionMapper() {};
+
+    /** Map a point in action/angle space to a position/velocity in physical space */
+    virtual coord::PosVelCyl map(const ActionAngles& actAng) const = 0;
 };
 
 }  // namespace action

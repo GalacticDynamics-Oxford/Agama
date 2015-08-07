@@ -101,4 +101,4 @@ private:
     std::vector< std::pair<std::string, KeyValueMap> > sections;   ///< list of all sections with their names
 };
 
-}; // namespace
+} // namespace

@@ -1,5 +1,5 @@
 /**
-\file FreeMemory.h 
+\file WD_FreeMemory.h 
 \brief Templates AllocxD and FreexD (where 1<x<=4)
 Allocates and deallocates x dimensional arrays.
 
@@ -35,7 +35,7 @@ de-allocation:
 
 #ifndef FreeMemory
 #define FreeMemory
-namespace WDmath{
+namespace WD{
 
 template <class ALLOCTYPE>
 inline int Alloc1D(ALLOCTYPE* &A, const int N)

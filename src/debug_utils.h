@@ -1,11 +1,14 @@
-/** \file    coord_utils.h 
-    \brief   Auxiliary routines for comparing and printing data types from coord.h
+/** \file    debug_utils.h 
+    \brief   Auxiliary routines for comparing and printing data types from coord.h and actions_base.h
     \author  Eugene Vasiliev
     \date    2015
 */ 
 #pragma once
 #include "coord.h"
+#include "actions_base.h"
+#include "math_core.h"
 #include <cmath>
+#include <vector>
 #include <iostream>
 
 namespace coord {
@@ -102,5 +105,68 @@ std::ostream& operator<< (std::ostream& s, const coord::HessCyl& p) {
 std::ostream& operator<< (std::ostream& s, const coord::HessSph& p) {
     s << "dr2: "<<p.dr2 <<"  dtheta2: "<<p.dtheta2 <<"  dphi2: "<<p.dphi2<< "  "
         "drdtheta: "<< p.drdtheta << "  drdphi: "<< p.drdphi << "  dthetaphi: "<< p.dthetadphi<< "   ";
+    return s;
+}
+
+// helper class to compute scatter in actions
+class actionstat{
+public:
+    actions::Actions avg, disp;
+    int N;
+    actionstat() { avg.Jr=avg.Jz=avg.Jphi=0; disp=avg; N=0; }
+    void add(const actions::Actions& act) {
+        avg.Jr  +=act.Jr;   disp.Jr  +=pow_2(act.Jr);
+        avg.Jz  +=act.Jz;   disp.Jz  +=pow_2(act.Jz);
+        avg.Jphi+=act.Jphi; disp.Jphi+=pow_2(act.Jphi);
+        N++;
+    }
+    void finish() {
+        avg.Jr/=N;
+        avg.Jz/=N;
+        avg.Jphi/=N;
+        disp.Jr  =sqrt(std::max<double>(0, disp.Jr/N  -pow_2(avg.Jr)));
+        disp.Jz  =sqrt(std::max<double>(0, disp.Jz/N  -pow_2(avg.Jz)));
+        disp.Jphi=sqrt(std::max<double>(0, disp.Jphi/N-pow_2(avg.Jphi)));
+    }
+};
+
+void add_unwrap(const double val, std::vector<double>& vec)
+{
+    if(vec.size()==0)
+        vec.push_back(val);
+    else
+        vec.push_back(math::unwrapAngle(val, vec.back()));
+}
+
+class anglestat{
+public:
+    std::vector<double> thetar, thetaz, thetaphi, time;
+    double freqr, freqz, freqphi;
+    double dispr, dispz, dispphi;
+    void add(double t, const actions::Angles& a) {
+        time.push_back(t);
+        add_unwrap(a.thetar, thetar);
+        add_unwrap(a.thetaz, thetaz);
+        add_unwrap(a.thetaphi, thetaphi);
+    }
+    void finish() {
+        double bla;
+        math::linearFit(time.size(), &(time.front()), &(thetar.front()), freqr, bla, &dispr);
+        math::linearFit(time.size(), &(time.front()), &(thetaz.front()), freqz, bla, &dispz);
+        math::linearFit(time.size(), &(time.front()), &(thetaphi.front()), freqphi, bla, &dispphi);
+    }
+};
+
+std::ostream& operator<< (std::ostream& s, const actions::Actions& a) {
+    s << "Jr: "<< a.Jr <<"  Jz: "<< a.Jz <<"  Jphi: "<< a.Jphi <<"  ";
+    return s;
+}
+std::ostream& operator<< (std::ostream& s, const actions::Angles& a) {
+    s << "thetar: "<< a.thetar <<"  thetaz: "<< a.thetaz <<"  thetaphi: "<< a.thetaphi <<"  ";
+    return s;
+}
+std::ostream& operator<< (std::ostream& s, const actions::ActionAngles& a) {
+    s << "Jr: "<< a.Jr <<"  Jz: "<< a.Jz <<"  Jphi: "<< a.Jphi <<"  "<<
+         "thetar: "<< a.thetar <<"  thetaz: "<< a.thetaz <<"  thetaphi: "<< a.thetaphi <<"  ";
     return s;
 }

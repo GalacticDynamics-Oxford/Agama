@@ -4,7 +4,7 @@
 #include "potential_ferrers.h"
 #include "units.h"
 #include "math_core.h"
-#include "coord_utils.h"
+#include "debug_utils.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -22,11 +22,11 @@ bool test_potential(const potential::BasePotential* potential,
     double E = potential::totalEnergy(*potential, point);
     if((potential->symmetry() & potential::ST_ZROTSYM) == potential::ST_ZROTSYM) {  // test only axisymmetric potentials
         try{
-            double Rc  = potential::R_circ(*potential, E);
-            double vc  = potential::v_circ(*potential, Rc);
-            double E1  = potential::value(*potential, coord::PosCyl(Rc, 0, 0)) + 0.5*vc*vc;
-            double Lc1 = potential::L_circ(*potential, E);
-            double Rc1 = potential::R_from_Lz(*potential, Lc1);
+            double Rc  = R_circ(*potential, E);
+            double vc  = v_circ(*potential, Rc);
+            double E1  = potential->value(coord::PosCyl(Rc, 0, 0)) + 0.5*vc*vc;
+            double Lc1 = L_circ(*potential, E);
+            double Rc1 = R_from_Lz(*potential, Lc1);
             ok &= math::fcmp(Rc, Rc1, 1e-11)==0 && math::fcmp(E, E1, 1e-11)==0;
             if(!ok) std::cout << "\033[1;31m ** \033[0m"
                 "E="<<E<<", Rc(E)="<<Rc<<", E(Rc)="<<E1<<", Lc(E)="<<Lc1<<", Rc(Lc)="<<Rc1;

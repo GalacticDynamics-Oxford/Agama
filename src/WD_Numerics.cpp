@@ -11,10 +11,10 @@
 
 #include <cmath>
 #include <algorithm>
-#include "Numerics.h"
-#include "FreeMemory.h"
+#include "WD_Numerics.h"
+#include "WD_FreeMemory.h"
 
-namespace WDmath{
+namespace WD{
 
 ////////////////////////////////////////////////////////////////////////////////
 typedef int*     Pint;

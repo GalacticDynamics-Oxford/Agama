@@ -124,9 +124,9 @@ private:
     const math::IFunction* verticalFnc;  ///< function describing vertical density profile
     virtual double densityCyl(const coord::PosCyl &pos) const;
     virtual double densityCar(const coord::PosCar &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
     virtual double densitySph(const coord::PosSph &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
 };
 
 /** Part of the disk potential provided analytically as  4 pi f(r) H(z) */
@@ -170,9 +170,9 @@ private:
     SphrParam params;
     virtual double densityCyl(const coord::PosCyl &pos) const;
     virtual double densityCar(const coord::PosCar &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
     virtual double densitySph(const coord::PosSph &pos) const
-    {  return densityCyl(coord::toPosCyl(pos)); }
+    {  return densityCyl(toPosCyl(pos)); }
 };
 
 /** Multipole expansion for axisymmetric potentials, generated from a given axisymmetric 

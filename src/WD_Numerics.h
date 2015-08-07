@@ -1,5 +1,5 @@
 /**
-\file Numerics.h
+\file WD_Numerics.h
 \brief Various useful mathsy functions
 
 *                                                                              *
@@ -15,12 +15,12 @@
 #ifndef _Numerics_def_
 #define _Numerics_def_ 1
 
-#include "WDVector.h"
-#include "WDMatrix.h"
-#include "WDMath.h"
-#include "Numerics.templates"
+#include "WD_Vector.h"
+#include "WD_Matrix.h"
+#include "WD_Math.h"
+#include "WD_Numerics.templates"
 
-namespace WDmath{
+namespace WD{
 ////////////////////////////////////////////////////////////////////////////////
 // here only the non-inline non-template functions are listed: /////////////////
 ////////////////////////////////////////////////////////////////////////////////

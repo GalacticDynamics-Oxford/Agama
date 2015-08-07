@@ -1,5 +1,5 @@
 /***************************************************************************//**
-\file Vector.h
+\file WD_Vector.h
 \brief Contains templated class Vector.
 Useful when working with vectors of known size.
 
@@ -20,7 +20,8 @@ Useful when working with vectors of known size.
 #include <cstdlib>
 using std::cerr;
 
-namespace WDmath{
+namespace WD{
+
 template<class T, int N>
 class Vector {
 protected:

@@ -8,8 +8,8 @@
     creating a potential from a set of point masses or from an N-body snapshot file,
     loading potential coefficients from a text file, 
     writing expansion coefficients to a text file,
-    and creating a spherical mass model that approximates the given density model.
-    Note that potential here is elementary (non-composite, no central black hole).
+    converting between potential parameters in `potential::ConfigPotential` structure and 
+    a text array of key=value pairs (`utils::KeyValueMap`).
 */
 
 #pragma once
@@ -186,20 +186,7 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
 */
 void writePotential(const std::string &fileName, const BasePotential& potential);
 
-#if 0
-/** create an equivalent spherical mass model for the given density profile. 
-    \param[in] density is the non-spherical density model to be approximated
-    \param[in] poten (optional) another spherical mass model that provides the potential 
-               (if it is not given self-consistently by this density profile).
-    \param[in] numNodes specifies the number of radial grid points in the M(r) profile
-    \param[in] Rmin is the radius of the innermost non-zero grid node (0 means auto-select)
-    \param[in] Rmax is the radius outermost grid node (0 means auto-select)
-    \return    new instance of CMassModel on success, or NULL on fail (e.g. if the density model was infinite) 
-*/
-CMassModel* createMassModel(const CDensity* density, int numNodes=NUM_RADIAL_POINTS_SPHERICAL_MODEL, 
-    double Rmin=0, double Rmax=0, const CMassModel* poten=NULL);
-#endif
-
+///@}
 /// \name Correspondence between potential/density names and corresponding classes
 ///@{
 
@@ -224,10 +211,15 @@ PotentialType getDensityTypeByName(const std::string& DensityName);
 /// return the type of symmetry by its name, or ST_DEFAULT if unavailable
 SymmetryType getSymmetryTypeByName(const std::string& SymmetryName);
 
-/// return file extension for writing the coefficients of potential of the given type
+/// return file extension for writing the coefficients of potential of the given type,
+/// or empty string if the potential type is not one of the expansion types
 const char* getCoefFileExtension(PotentialType potType);
 
-/// find potential type by file extension
+/// return file extension for writing the coefficients of a given potential object (overload)
+inline const char* getCoefFileExtension(const BasePotential& p) {
+    return getCoefFileExtension(getPotentialType(p)); }
+
+/// find potential type by file extension, return PT_UNKNOWN if the extension is not recognized
 PotentialType getCoefFileType(const std::string& fileName);
 
 ///@}

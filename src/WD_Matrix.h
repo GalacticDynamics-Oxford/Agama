@@ -1,5 +1,5 @@
 /**
-\file Matrix.h
+\file WD_Matrix.h
 \brief Contains templated class Matrix.
 Useful for working with matrices if size is known in advance. 
 Various operations (e.g. Gaussian inversion) made convenient.
@@ -17,10 +17,10 @@ Various operations (e.g. Gaussian inversion) made convenient.
 #ifndef Matrix_h
 #define Matrix_h 1
 
-#include "WDVector.h"
+#include "WD_Vector.h"
 
 using std::cerr;
-namespace WDmath{
+namespace WD{
 
 template<class T, int N1, int N2>
 class Matrix {

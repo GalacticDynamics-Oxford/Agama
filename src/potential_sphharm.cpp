@@ -445,7 +445,7 @@ void SplineExp::prepareCoefsAnalytic(const BaseDensity& srcdensity, const std::v
                 coefsInner[c+1] = result + coefsInner[c];
             }
             // loop over outer intervals, starting from infinity backwards
-            for(size_t c=Ncoefs_radial+1; c>(l==0 ? 0 : 1); c--) {
+            for(size_t c=Ncoefs_radial+1; c>(l==0 ? 0 : 1u); c--) {
                 SplineExpRadialMult rmult(-l-1);
                 DensitySphHarmIntegrand fnc(srcdensity, l, m, rmult, rscale);
                 double xlower[2] = {fnc.scaledr(radii[c-1]), 0};

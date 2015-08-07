@@ -4,7 +4,7 @@
 #include "potential_sphharm.h"
 #include "potential_factory.h"
 #include "particles_io.h"
-#include "coord_utils.h"
+#include "debug_utils.h"
 #include "utils.h"
 #include <fstream>
 #include <cstdlib>
@@ -28,26 +28,26 @@ const bool output = false;
 const potential::BasePotential* write_read(const potential::BasePotential& pot)
 {
     std::string coefFile("test_potential_sphharm");
-    coefFile += potential::getCoefFileExtension(getPotentialType(pot));
-    potential::writePotential(coefFile, pot);
+    coefFile += getCoefFileExtension(pot);
+    writePotential(coefFile, pot);
     potential::ConfigPotential config;
     config.fileName = coefFile;
-    const potential::BasePotential* newpot = potential::readPotential(config);
+    const potential::BasePotential* newpot = readPotential(config);
     std::remove(coefFile.c_str());
     return newpot;
 }
 
 /// create a triaxial Hernquist model
-void make_hernquist(int nbody, double q, double p, particles::PointMassArrayCar& output)
+void make_hernquist(int nbody, double q, double p, particles::PointMassArrayCar& out)
 {
-    output.data.clear();
+    out.data.clear();
     for(int i=0; i<nbody; i++) {
         double m = rand()*1.0/RAND_MAX;
         double r = 1/(1/sqrt(m)-1);
         double costheta = rand()*2.0/RAND_MAX - 1;
         double sintheta = sqrt(1-pow_2(costheta));
         double phi = rand()*2*M_PI/RAND_MAX;
-        output.add(coord::PosVelCar(r*sintheta*cos(phi), r*sintheta*sin(phi)*q, r*costheta*p, 0, 0, 0), 1./nbody);
+        out.add(coord::PosVelCar(r*sintheta*cos(phi), r*sintheta*sin(phi)*q, r*costheta*p, 0, 0, 0), 1./nbody);
     }
 }
 
@@ -79,21 +79,21 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
 {
     bool ok=true;
     const potential::BasePotential* newpot = write_read(p);
-    double gamma = potential::getInnerDensitySlope(orig);
+    double gamma = getInnerDensitySlope(orig);
     std::cout << "\033[1;32m---- testing "<<p.name()<<
-        " with "<<potential::getSymmetryNameByType(orig.symmetry())<<" "<<orig.name()<<
+        " with "<<getSymmetryNameByType(orig.symmetry())<<" "<<orig.name()<<
         " (gamma="<<gamma<<") ----\033[0m\n";
     const char* err = "\033[1;31m **\033[0m";
     std::string fileName = std::string("test_") + p.name() + "_" + orig.name() + 
         "_gamma" + utils::convertToString(gamma);
-    potential::writePotential(fileName + potential::getCoefFileExtension(potential::getPotentialType(p)), p);
+    writePotential(fileName + getCoefFileExtension(p), p);
     for(int ic=0; ic<numtestpoints; ic++) {
         double pot, pot_orig;
         coord::GradCyl der,  der_orig;
         coord::HessCyl der2, der2_orig;
         coord::PosSph point(pos_sph[ic][0], pos_sph[ic][1], pos_sph[ic][2]);
-        newpot->eval(coord::toPosCyl(point), &pot, &der, &der2);
-        orig.eval(coord::toPosCyl(point), &pot_orig, &der_orig, &der2_orig);
+        newpot->eval(toPosCyl(point), &pot, &der, &der2);
+        orig.eval(toPosCyl(point), &pot_orig, &der_orig, &der2_orig);
         double eps_der = eps_pot*100/point.r;
         double eps_der2= eps_der*10;
         bool pot_ok = (pot==pot) && fabs(pot-pot_orig)<eps_pot;
@@ -111,9 +111,9 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
             double pot, pot_orig;
             coord::GradCyl der,  der_orig;
             coord::HessCyl der2, der2_orig;
-            newpot->eval(coord::toPosCyl(points.point(ic)), &pot, &der, &der2);
-            orig.eval(coord::toPosCyl(points.point(ic)), &pot_orig, &der_orig, &der2_orig);
-            strmSample << coord::toPosSph(points.point(ic)).r << "\t" <<
+            newpot->eval(toPosCyl(points.point(ic)), &pot, &der, &der2);
+            orig.eval(toPosCyl(points.point(ic)), &pot_orig, &der_orig, &der2_orig);
+            strmSample << toPosSph(points.point(ic)).r << "\t" <<
             fabs((pot-pot_orig)/pot_orig) << "\t" <<
             fabs((der.dR-der_orig.dR)/der_orig.dR) << "\t" <<
             fabs((der.dz-der_orig.dz)/der_orig.dz) << "\t" <<

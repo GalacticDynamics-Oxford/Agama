@@ -1,5 +1,5 @@
 /**
-\file Pspline.h
+\file WD_Pspline.h
 \brief Contains templated spline classes needed by GalaxyPotential
 
  Pspline.h 
@@ -65,10 +65,10 @@ analogy to cubic splines.
 #ifndef _Pspline_def_
 #define _Pspline_def_ 1
 
-#include "FreeMemory.h"
-#include "Numerics.h"
+#include "WD_FreeMemory.h"
+#include "WD_Numerics.h"
 
-namespace WDmath{
+namespace WD{
 ////////////////////////////////////////////////////////////////////////////////
 template<class S>
 inline void find_for_Pspline(int& klo, const int n, S const *x, const S xi)

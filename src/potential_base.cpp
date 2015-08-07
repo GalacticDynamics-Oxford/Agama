@@ -116,7 +116,7 @@ private:
     const BasePotential& poten;
     const double Lz2;
 };
-    
+
 double R_circ(const BasePotential& potential, double energy) {
     if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
         throw std::invalid_argument("Potential is not axisymmetric, "
@@ -177,9 +177,8 @@ double computeRho_m(const BaseDensity& dens, double R, double z, int m)
     if(m==0)
         return math::integrate(DensityAzimuthalAverageIntegrand(dens, R, z, m),
             0, phimax, EPSREL_DENSITY_INT) / phimax;
-    else 
-        return math::integrateGL(DensityAzimuthalAverageIntegrand(dens, R, z, m),
-            0, phimax, std::max<int>(8,abs(m))) / phimax;
+    return math::integrateGL(DensityAzimuthalAverageIntegrand(dens, R, z, m),
+        0, phimax, std::max<int>(8, std::abs(m))) / phimax;
 }
 
 /// helper class for integrating density over volume

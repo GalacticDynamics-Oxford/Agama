@@ -16,24 +16,24 @@ int main() {
     const units::ExternalUnits extUnits(unit, units::Kpc, units::kms, 1e10*units::Msun);
     clock_t tbegin=std::clock();
     particles::PointMassArrayCar diskparticles, haloparticles;
-    particles::readSnapshot("temp/disk.gadget", extUnits, diskparticles);
-    particles::readSnapshot("temp/halo.gadget", extUnits, haloparticles);
+    readSnapshot("temp/disk.gadget", extUnits, diskparticles);
+    readSnapshot("temp/halo.gadget", extUnits, haloparticles);
     std::cout << (std::clock()-tbegin)*1.0/CLOCKS_PER_SEC << " s to load snapshots;  "
         "disk mass=" << diskparticles.totalMass()*unit.to_Msun << " Msun, N=" << diskparticles.size() << ";  "
         "halo mass=" << haloparticles.totalMass()*unit.to_Msun << " Msun, N=" << haloparticles.size() <<"\n";
     tbegin=std::clock();
     const potential::BasePotential* halo = new potential::SplineExp(20, 2, haloparticles, potential::ST_AXISYMMETRIC);
     const potential::BasePotential* disk = new potential::CylSplineExp(20, 20, 0, diskparticles, potential::ST_AXISYMMETRIC);
-    potential::writePotential(std::string("disk") + potential::getCoefFileExtension(getPotentialType(*disk)), *disk);
-    potential::writePotential(std::string("halo") + potential::getCoefFileExtension(getPotentialType(*halo)), *halo);
+    writePotential(std::string("disk") + getCoefFileExtension(*disk), *disk);
+    writePotential(std::string("halo") + getCoefFileExtension(*halo), *halo);
     std::vector<const potential::BasePotential*> components(2);
     components[0] = halo;
     components[1] = disk;
     const potential::CompositeCyl poten(components);
     std::cout << (std::clock()-tbegin)*1.0/CLOCKS_PER_SEC << " s to init potential;  "
         "Potential at origin:  "
-        "disk=" << potential::value(*disk, coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2, "
-        "halo=" << potential::value(*halo, coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2\n";
+        "disk=" << disk->value(coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2, "
+        "halo=" << halo->value(coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2\n";
     tbegin=std::clock();
     actions::ActionFinderAxisymFudge actFinder(poten);
     std::cout << (std::clock()-tbegin)*1.0/CLOCKS_PER_SEC << " s to init action finder\n";
@@ -43,11 +43,11 @@ int main() {
     unsigned int numBadPoints = 0;
     for(size_t i=0; i<diskparticles.size(); i++) {
         try{
-            const coord::PosVelCyl point = coord::toPosVelCyl(diskparticles[i].first);
+            const coord::PosVelCyl point = toPosVelCyl(diskparticles[i].first);
             actions::Actions acts = actFinder.actions(point);
             strm << point.R*unit.to_Kpc << "\t" << point.z*unit.to_Kpc << "\t" <<
                 acts.Jr*unit.to_Kpc_kms << "\t" << acts.Jz*unit.to_Kpc_kms << "\t" << acts.Jphi*unit.to_Kpc_kms << "\t" << 
-                potential::totalEnergy(poten, point)*pow_2(unit.to_kms) << "\n";
+                totalEnergy(poten, point)*pow_2(unit.to_kms) << "\n";
         }
         catch(...){
             numBadPoints++;  // probably because energy is positive

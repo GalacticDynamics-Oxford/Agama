@@ -15,7 +15,7 @@ bool test_units(const units::InternalUnits& unit) {
   const potential::MiyamotoNagai pot(mass, scale_radius, scale_height);
   double solar_radius=8.0*unit.from_Kpc;
   const coord::PosCar point(solar_radius, 0., 0.);
-  double poten_value = potential::value(pot, point);
+  double poten_value = pot.value(point);
   double v_escape = sqrt(-2*poten_value);
   double v_circ   = potential::v_circ(pot, solar_radius);
   double dens     = pot.density(coord::toPosCyl(point));

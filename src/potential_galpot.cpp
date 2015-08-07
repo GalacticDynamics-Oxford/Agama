@@ -28,10 +28,10 @@ Version 0.8    24. June      2005  explicit construction of tupel
 ----------------------------------------------------------------------*/
 #include "potential_galpot.h" 
 #include "potential_composite.h"
-#include "FreeMemory.h"
-#include "Numerics.h"
-#include "Pspline.h"
-#include "WDVector.h"
+#include "WD_FreeMemory.h"
+#include "WD_Numerics.h"
+#include "WD_Pspline.h"
+#include "WD_Vector.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -247,19 +247,19 @@ const int N =GALPOT_LMAX/2+1; // number of multipoles
 const int N2=3*N/2;           // number of grid point for cos[theta] in [0,1]
 const int N4=5*N/2;           // number of points used to integrate over cos[theta]
 
-typedef WDmath::Vector<double,N> DBN;
+typedef WD::Vector<double,N> DBN;
 
 void Multipole::AllocArrays()
 {
     X[0] = new double[K[0]];
     X[1] = new double[K[1]];
-    WDmath::Alloc2D(Y[0],K);
-    WDmath::Alloc2D(Y[1],K);
-    WDmath::Alloc2D(Y[2],K);
-    WDmath::Alloc2D(Z[0],K);
-    WDmath::Alloc2D(Z[1],K);
-    WDmath::Alloc2D(Z[2],K);
-    WDmath::Alloc2D(Z[3],K);
+    WD::Alloc2D(Y[0],K);
+    WD::Alloc2D(Y[1],K);
+    WD::Alloc2D(Y[2],K);
+    WD::Alloc2D(Z[0],K);
+    WD::Alloc2D(Z[1],K);
+    WD::Alloc2D(Z[2],K);
+    WD::Alloc2D(Z[3],K);
 }
 
 Multipole::Multipole(const BaseDensity& source_density,
@@ -279,13 +279,13 @@ Multipole::~Multipole()
 {
     delete[] X[0]; 
     delete[] X[1];
-    WDmath::Free2D(Y[0]);
-    WDmath::Free2D(Y[1]);
-    WDmath::Free2D(Y[2]);
-    WDmath::Free2D(Z[0]);
-    WDmath::Free2D(Z[1]);
-    WDmath::Free2D(Z[2]);
-    WDmath::Free2D(Z[3]);
+    WD::Free2D(Y[0]);
+    WD::Free2D(Y[1]);
+    WD::Free2D(Y[2]);
+    WD::Free2D(Z[0]);
+    WD::Free2D(Z[1]);
+    WD::Free2D(Z[2]);
+    WD::Free2D(Z[3]);
 }
 
 void Multipole::setup(const BaseDensity& source_density,
@@ -332,12 +332,12 @@ void Multipole::setup(const BaseDensity& source_density,
   //
   // 1.1 set points and weights for integration over cos(theta)
   //
-  WDmath::GaussLegendre(ct,wi,N4);
+  WD::GaussLegendre(ct,wi,N4);
   for(i=0; i<N4; i++) {
     ct[i] = 0.5 * (ct[i]+1.);
     st[i] = sqrt(1.-ct[i]*ct[i]);
     wi[i] = 0.5 * wi[i];
-    WDmath::LegendrePeven(W[i],ct[i]);
+    WD::LegendrePeven(W[i],ct[i]);
     W[i] *= wi[i] * 4*M_PI;
   }
   //
@@ -357,7 +357,7 @@ void Multipole::setup(const BaseDensity& source_density,
   //
   // 1.3 establish spline in r needed for integration
   //
-  WDmath::spline(r,rhol,K[0],(-gamma/r[0])*rhol[0],Zero,rhl2,0,1);
+  WD::spline(r,rhol,K[0],(-gamma/r[0])*rhol[0],Zero,rhl2,0,1);
   //
   // 2. compute potential's expansion
   //
@@ -465,7 +465,7 @@ void Multipole::setup(const BaseDensity& source_density,
   // 4.2 set dPhi/dlogr & dPhi/dcos[theta] 
   //
   for(i=0; i<N2; i++) {
-    WDmath::dLegendrePeven(P2l,dP2l,X[1][i]);
+    WD::dLegendrePeven(P2l,dP2l,X[1][i]);
     for(k=0; k<K[0]; k++) {
       Y[0][k][i] = Phil[k] * P2l;         // Phi
       Y[1][k][i] = dPhl[k] * P2l;         // d Phi / d logR
@@ -477,7 +477,7 @@ void Multipole::setup(const BaseDensity& source_density,
   //
   // 4.3 establish 2D Pspline of Phi in log[r] & cos[theta]
   //
-  WDmath::Pspline2D(X,Y,K,Z);
+  WD::Pspline2D(X,Y,K,Z);
 }
 
 void Multipole::evalCyl(const coord::PosCyl &pos,
@@ -494,9 +494,9 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
     double der2a[2],der2b[2]; 
     double* der2[]={der2a,der2b};  // second derivatives from spline, if required
     if(deriv2)
-        Phi = WDmath::Psplev2D(X,Y,Z,K,Xi,der,der2);
+        Phi = WD::Psplev2D(X,Y,Z,K,Xi,der,der2);
     else
-        Phi = WDmath::Psplev2D(X,Y,Z,K,Xi,der);
+        Phi = WD::Psplev2D(X,Y,Z,K,Xi,der);
     if(deriv) der[1]*= sign(ct);
     if(deriv2) der2[0][1]*= sign(ct);
     if(lr < lRmin) {

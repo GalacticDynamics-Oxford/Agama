@@ -1,5 +1,5 @@
 /***************************************************************************//**
-\file Numerics.templates
+\file WD_Numerics.templates
 \brief Lots of useful templated functions. Rootfinding, polynomial 
 interpolation, splines...
  
@@ -136,11 +136,11 @@ interpolation, splines...
 
 #include <iostream>
 #include <algorithm>
-#include "WDVector.h"
-#include "WDMatrix.h"
+#include "WD_Vector.h"
+#include "WD_Matrix.h"
 using std::cerr; 
 
-namespace WDmath{
+namespace WD{
 ////////////////////////////////////////////////////////////////////////////////
 
 #define polev2D  polev_2d

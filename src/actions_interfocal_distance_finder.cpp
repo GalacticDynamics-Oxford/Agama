@@ -207,9 +207,9 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
         throw std::invalid_argument("InterfocalDistanceFinder: model has infinite mass");
     
     // find out characteristic energy values
-    double halfMassRadius = potential::getRadiusByMass(potential, 0.5*totalMass);
-    double E0 = potential::value(potential, coord::PosCar(0, 0, 0));
-    double EhalfMass = potential::value(potential, coord::PosCyl(halfMassRadius, 0, 0));
+    double halfMassRadius = getRadiusByMass(potential, 0.5*totalMass);
+    double E0 = potential.value(coord::PosCar(0, 0, 0));
+    double EhalfMass = potential.value(coord::PosCyl(halfMassRadius, 0, 0));
     double Einfinity = 0;
     if((!math::isFinite(E0) && E0!=-INFINITY) || !math::isFinite(EhalfMass) || 
         E0>=EhalfMass || EhalfMass>=Einfinity)
@@ -251,8 +251,8 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
         const double Lc = Lscale * x / (1-x);
         for(unsigned int iL=0; iL<gridLzrel.size(); iL++) {
             double Lz = gridLzrel[iL] * Lc;
-            double rad= potential::R_from_Lz(potential, Lz);
-            double v2 = 2 * (gridE[iE] - potential::value(potential, coord::PosCyl(rad, 0, 0)) ) 
+            double rad= R_from_Lz(potential, Lz);
+            double v2 = 2 * (gridE[iE] - potential.value(coord::PosCyl(rad, 0, 0)) ) 
                 - (Lz>0 ? pow_2(Lz/rad) : 0);
             double vmer = sqrt(fmax(v2, 0));  // velocity component in meridional plane
             if(!math::isFinite(vmer))
@@ -277,7 +277,7 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
 
 double InterfocalDistanceFinder::value(const coord::PosVelCyl& point) const
 {
-    double E  = potential::totalEnergy(potential, point);
+    double E  = totalEnergy(potential, point);
     E = fmin(fmax(E, interp.xmin()), interp.xmax());
     double Lz = fabs(point.R*point.vphi);
     double x  = xLcirc(E);
