@@ -107,4 +107,8 @@ double ellintE(const double phi, const double k) {
     return gsl_sf_ellint_E(phi, k, GSL_PREC_SINGLE);
 }
 
+double ellintP(const double phi, const double k, const double n) {
+    return gsl_sf_ellint_P(phi, k, n, GSL_PREC_SINGLE);
+}
+
 }  // namespace

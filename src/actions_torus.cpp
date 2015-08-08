@@ -8,6 +8,7 @@
 
 namespace actions{
 
+/// Auxiliary class for using any of BasePotential-derived potentials with Torus code
 class TorusPotentialWrapper: public Torus::Potential{
 public:
     TorusPotentialWrapper(const potential::BasePotential& _poten) : poten(_poten) {};
@@ -50,6 +51,8 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
     Torus::Torus* torus=NULL;
     try{
         torus = new Torus::Torus();
+        // the actual potential is used only during torus fitting, but not required 
+        // later in angle mapping - so we create a temporary object
         TorusPotentialWrapper potwrap(poten);
         Torus::Actions act;
         act[0] = acts.Jr;
@@ -69,14 +72,22 @@ ActionMapperTorus::~ActionMapperTorus()
     delete static_cast<Torus::Torus*>(data);
 }
 
-coord::PosVelCyl ActionMapperTorus::map(const ActionAngles& actAng) const
+coord::PosVelCyl ActionMapperTorus::map(const ActionAngles& actAng, Frequencies* freq) const
 {
     Torus::Torus* torus = static_cast<Torus::Torus*>(data);
+    // make sure that the input actions are the same as in the Torus object
     if( math::fcmp(actAng.Jr,   torus->action(0)) != 0 ||
         math::fcmp(actAng.Jz,   torus->action(1)) != 0 ||
         math::fcmp(actAng.Jphi, torus->action(2)) != 0 )
         throw std::invalid_argument("ActionMapperTorus: "
             "values of actions are different from those provided to the constructor");
+    // frequencies are constant for a given torus (depend only on actions, not on angles)    
+    if(freq!=NULL) {
+        Torus::Frequencies tfreq = torus->omega();
+        freq->Omegar   = tfreq[0];
+        freq->Omegaz   = tfreq[1];
+        freq->Omegaphi = tfreq[2];
+    }
     Torus::Angles ang;
     ang[0] = actAng.thetar;
     ang[1] = actAng.thetaz;

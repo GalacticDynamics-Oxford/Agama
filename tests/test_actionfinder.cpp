@@ -29,8 +29,8 @@ bool test_actions(const potential::BasePotential& potential,
 #ifdef SINGLEORBIT
     std::ofstream fout("orbit.dat");
 #endif
-    actionstat acts;
-    anglestat angs;
+    actions::ActionStat acts;
+    actions::AngleStat angs;
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl p=coord::toPosVelCyl(traj[i]);
 #if 0

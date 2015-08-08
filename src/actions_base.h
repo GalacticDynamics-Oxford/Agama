@@ -30,6 +30,13 @@ struct ActionAngles: Actions, Angles {
     ActionAngles(const Actions& acts, const Angles& angs) : Actions(acts), Angles(angs) {};
 };
 
+/** Frequencies of motion (Omega = dH/dJ) */
+struct Frequencies {
+    double Omegar;    ///< frequency of radial motion, dH/dJr
+    double Omegaz;    ///< frequency of vertical motion, dH/dJz
+    double Omegaphi;  ///< frequency of azimuthal motion, dH/dJphi
+};
+
 /** Base class for action finders, which convert position/velocity pair to action/angle pair */
 class BaseActionFinder{
 public:
@@ -39,8 +46,9 @@ public:
     /** Evaluate actions for a given position/velocity point in cylindrical coordinates */
     virtual Actions actions(const coord::PosVelCyl& point) const = 0;
 
-    /** Evaluate actions and angles for a given position/velocity point in cylindrical coordinates */
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const = 0;
+    /** Evaluate actions and angles for a given position/velocity point in cylindrical coordinates;
+        if the output argument freq!=NULL, also store the frequencies */
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=0) const = 0;
 };
 
 /** Base class for action/angle mappers, which convert action/angle variables to position/velocity point */
@@ -49,8 +57,9 @@ public:
     BaseActionMapper() {};
     virtual ~BaseActionMapper() {};
 
-    /** Map a point in action/angle space to a position/velocity in physical space */
-    virtual coord::PosVelCyl map(const ActionAngles& actAng) const = 0;
+    /** Map a point in action/angle space to a position/velocity in physical space;
+        if the output argument freq!=NULL, also store the frequencies */
+    virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=0) const = 0;
 };
 
 }  // namespace action

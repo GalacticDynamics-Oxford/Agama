@@ -32,9 +32,11 @@ struct AxisymIntLimits {
 };
 
 /** Derivatives of integrals of motion over actions (do not depend on angles).
-    Note that dE/dJ are the frequencies of oscillations in three directions. */
-struct AxisymIntDerivatives {
-    double dEdJr, dEdJz, dEdJphi, dI3dJr, dI3dJz, dI3dJphi, dLzdJr, dLzdJz, dLzdJphi;
+    Note that dE/dJ are the frequencies of oscillations in three directions, 
+    so that we reuse the `Frequencies` struct members (Omega***), 
+    and add other derivatives with a somewhat different naming convention. */
+struct AxisymIntDerivatives: public Frequencies {
+    double dI3dJr, dI3dJz, dI3dJphi, dLzdJr, dLzdJz, dLzdJphi;
 };
 
 /** Derivatives of generating function over integrals of motion (depend on angles) */
@@ -156,38 +158,72 @@ Angles computeAngles(const AxisymIntDerivatives& derI,
 /** The sequence of operations needed to compute both actions and angles.
     Note that for a given orbit, only the derivatives of the generating function depend 
     on the angles (assuming that the actions are constant); in principle, this may be used 
-    to skip the computation of the derivatives matrix of integrals (not presently implemented). */
-ActionAngles computeActionAngles(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim);
+    to skip the computation of the derivatives matrix of integrals (not presently implemented). 
+    \param[in]  fnc  is the instance of `AxisymFunctionStaeckel` or `AxisymFunctionFudge`;
+    \param[in]  lim  are the limits of motion in auxiliary coordinate system;
+    \param[out] freq if not NULL, store frequencies of motion in this variable
+*/
+ActionAngles computeActionAngles(const AxisymFunctionBase& fnc, 
+    const AxisymIntLimits& lim, Frequencies* freq=0);
 
 ///@}
 /// \name  ------- Stand-alone driver routines that combine the above steps -------
 ///@{
 
-/** Find exact actions in the Staeckel potential of oblate Perfect Ellipsoid */
+/** Find exact actions in the Staeckel potential of oblate Perfect Ellipsoid.
+    \param[in]  potential is the input Staeckel potential;
+    \param[in]  point     is the position/velocity point;
+    \return     actions for the given point;
+    \throw      std::invalid_argument exception if energy is positive, or some other error occurs.
+*/    
 Actions axisymStaeckelActions(
     const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
 
-/** Find exact actions and angles in the Staeckel potential of oblate Perfect Ellipsoid */
+/** Find exact actions and angles in the Staeckel potential of oblate Perfect Ellipsoid.
+    \param[in]  potential is the input Staeckel potential;
+    \param[in]  point     is the position/velocity point;
+    \param[out] freq      if not NULL, store the frequencies of motion in this variable;
+    \return     actions and angles for the given point;
+    \throw      std::invalid_argument exception if energy is positive, or some other error occurs.
+*/
 ActionAngles axisymStaeckelActionAngles(
     const potential::OblatePerfectEllipsoid& potential, 
-    const coord::PosVelCyl& point);
+    const coord::PosVelCyl& point,
+    Frequencies* freq=0);
 
-/** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method;
-    the accuracy of the method depends on the "interfocal distance" parameter, 
-    if it is not provided, an estimate will be made based on the potential derivatives
-    averaged over the area in the meridional plane that the orbit probably covers. */
+/** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method.
+    \param[in]  potential is the arbitrary axisymmetric potential;
+    \param[in]  point     is the position/velocity point;
+    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system;
+    the accuracy of the method depends on this parameter, and if it is not provided (set to zero),
+    `estimateInterfocalDistance` is called to determine a plausible value based on the potential 
+    derivatives averaged over the area in the meridional plane that the orbit probably covers.
+    \return     actions for the given point;
+    \throw      std::invalid_argument exception if the potential is not axisymmetric, 
+    or the energy is positive, or some other error occurs.
+*/
 Actions axisymFudgeActions(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point,
     double interfocalDistance=0);
 
 /** Find approximate actions and angles in a given axisymmetric potential, 
-    using the Staeckel Fudge method */
+    using the Staeckel Fudge method.
+    \param[in]  potential is the arbitrary axisymmetric potential;
+    \param[in]  point     is the position/velocity point;
+    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system;
+    default value (0) means that it will be determined by `estimateInterfocalDistance` function.
+    \param[out] freq      if not NULL, store the frequencies of motion in this variable;
+    \return     actions and angles for the given point;
+    \throw      std::invalid_argument exception if the potential is not axisymmetric, 
+    or the energy is positive, or some other error occurs.
+*/
 ActionAngles axisymFudgeActionAngles(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, 
-    double interfocalDistance=0);
+    double interfocalDistance=0, 
+    Frequencies* freq=0);
 
 ///@}
 /// \name  ------- Class interface to action/angle finders  -------
@@ -201,8 +237,8 @@ public:
     virtual ~ActionFinderAxisymStaeckel() {};
     virtual Actions actions(const coord::PosVelCyl& point) const {
         return axisymStaeckelActions(pot, point); }
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
-        return axisymStaeckelActionAngles(pot, point); }
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=0) const {
+        return axisymStaeckelActionAngles(pot, point, freq); }
 private:
     const potential::OblatePerfectEllipsoid& pot;
 };
@@ -220,8 +256,8 @@ public:
     virtual ~ActionFinderAxisymFudge() {};
     virtual Actions actions(const coord::PosVelCyl& point) const {
         return axisymFudgeActions(pot, point, finder.value(point)); }
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point) const {
-        return axisymFudgeActionAngles(pot, point, finder.value(point)); }
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=0) const {
+        return axisymFudgeActionAngles(pot, point, finder.value(point), freq); }
 private:
     const potential::BasePotential& pot;    ///< the generic axisymmetric potential in which actions are computed
     const InterfocalDistanceFinder finder;  ///< fast estimator of interfocal distance

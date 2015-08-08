@@ -390,9 +390,9 @@ void Multipole::setup(const BaseDensity& source_density,
       xl_ll = r[k]*EX(l);
       xh_ll = r[k+1];
       for(i=0,lli1=ll+1,dP=0.; i<4; i++,lli1++) {
-    xl_ll*= r[k];
-    xh_ll*= r[k+1];
-    dP   += A[i](l) * (xh_ll - xl_ll) / lli1;
+        xl_ll*= r[k];
+        xh_ll*= r[k+1];
+        dP   += A[i](l) * (xh_ll - xl_ll) / lli1;
       }
       P1[k+1][l] = EX(l) * P1[k](l) + dP / dx;
     }
@@ -429,10 +429,10 @@ void Multipole::setup(const BaseDensity& source_density,
       xl_ll = r[k];
       xh_ll = r[k+1]*EX(l);
       for(i=0,lli1=ll+1,dP=0.; i<4; i++,lli1++) {
-    xl_ll *= r[k];
-    xh_ll *= r[k+1];
-    if(lli1) dP += A[i](l) * (xh_ll - xl_ll) / lli1;
-    else     dP += A[i](l) * ril2 * dlr;
+        xl_ll *= r[k];
+        xh_ll *= r[k+1];
+        if(lli1) dP += A[i](l) * (xh_ll - xl_ll) / lli1;
+        else     dP += A[i](l) * ril2 * dlr;
       }
       P2[k][l] = EX(l) * P2[k+1](l) + dP / dx;
     }

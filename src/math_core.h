@@ -36,8 +36,8 @@ double powInt(double x, int n);
 /** wraps the input argument into the range [0,2pi) */
 double wrapAngle(double x);
 
-/** create a nearly monotonic sequence of angles by adding or subtracting 2Pi
-    as many times as needed to bring the current angle to within Pi from the previous one.
+/** create a nearly monotonic sequence of angles by adding or subtracting 2Pi as many times 
+    as needed to bring the current angle `x` to within Pi from the previous one `xprev`.
     This may be used in a loop over elements of an array, by providing the previous 
     element, already processed by this function, as xprev. 
     Note that this usage scenario is not stable against error accumulation. */
@@ -53,9 +53,9 @@ double unwrapAngle(double x, double xprev);
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
     to the variable (but the function still should return finite value for an infinite argument).
     If the function interface provides derivatives, this may speed up the search.
-    \param[in] F  is the input function
-    \param[in] x1 is the lower end of the interval (may be -INFINITY),
-    \param[in] x2 is the upper end of the interval (may be +INFINITY),
+    \param[in] F  is the input function;
+    \param[in] x1 is the lower end of the interval (may be -INFINITY);
+    \param[in] x2 is the upper end of the interval (may be +INFINITY);
     \param[in] relToler  determines the accuracy of root localization, relative to the range |x2-x1|.
 */
 double findRoot(const IFunction& F, double x1, double x2, double relToler);
@@ -63,9 +63,9 @@ double findRoot(const IFunction& F, double x1, double x2, double relToler);
 /** Find a local minimum on the interval [x1,x2].
     Interval can be (semi-)infinite, in which case an appropriate transformation is applied
     to the variable (but the function still should return finite value for an infinite argument).
-    \param[in] F  is the input function
-    \param[in] x1 is the lower end of the interval (may be -INFINITY),
-    \param[in] x2 is the upper end of the interval (may be +INFINITY),
+    \param[in] F  is the input function;
+    \param[in] x1 is the lower end of the interval (may be -INFINITY);
+    \param[in] x2 is the upper end of the interval (may be +INFINITY);
     \param[in] xinit  is the optional initial guess point: 
     if provided (not NaN), this speeds up the determination of minimum, 
     but results in error if F(xinit) was not strictly lower than both F(x1) and F(x2). 
@@ -119,16 +119,38 @@ private:
     Gauss-Kronrod rule with maximum order up to 87. 
     If the function is well-behaved, this is the fastest method, 
     but if it cannot reach the required accuracy even using the highest-order rule,
-    no further improvement can be made. */
-double integrate(const IFunction& F, double x1, double x2, double relToler);
-
-/** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
-    without error estimate. */
-double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
+    no further improvement can be made. 
+    \param[in] F  is the input function;
+    \param[in] x1 is the lower end of the interval;
+    \param[in] x2 is the upper end of the interval;
+    \param[in] relToler is the relative error tolerance;
+    \param[out] error - if not NULL, output the error estimate in this variable;
+    \param[out] numEval - if not NULL, output the number of function evaluations in this variable.
+*/
+double integrate(const IFunction& F, double x1, double x2, double relToler, 
+    double* error=0, int* numEval=0);
 
 /** integrate a function on a finite interval, using a fully adaptive integration routine 
-    to reach the required tolerance; integrable singularities are handled properly. */
-double integrateAdaptive(const IFunction& F, double x1, double x2, double relToler);
+    to reach the required tolerance; integrable singularities are handled properly. 
+    \param[in] F  is the input function;
+    \param[in] x1 is the lower end of the interval;
+    \param[in] x2 is the upper end of the interval;
+    \param[in] relToler is the relative error tolerance;
+    \param[out] error - if not NULL, output the error estimate in this variable;
+    \param[out] numEval - if not NULL, output the number of function evaluations in this variable.
+*/
+double integrateAdaptive(const IFunction& F, double x1, double x2, double relToler, 
+    double* error=0, int* numEval=0);
+
+/** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
+    without error estimate. 
+    \param[in] F  is the input function;
+    \param[in] x1 is the lower end of the interval;
+    \param[in] x2 is the upper end of the interval;
+    \param[in] N  is the number of points in Gauss-Legendre quadrature; 
+    values up to 20 use pre-computed tables, and higher ones compute them on-the-fly (less efficient).
+*/
+double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
 
 /** Helper class for integrand transformations.
     A function defined on a finite interval [x_low,x_upp], with possible integrable 
@@ -156,10 +178,10 @@ public:
     /// times the conversion factor dx/dy
     virtual double value(const double y) const;
 
-    // return the scaled variable y for the given original variable x
+    /// return the scaled variable y for the given original variable x
     double y_from_x(const double x) const;
 
-    // return the original variable x for the given scaled variable y in [0,1]
+    /// return the original variable x for the given scaled variable y in [0,1]
     double x_from_y(const double y) const;
 
 private:
@@ -247,6 +269,11 @@ class OdeSolver {
 public:
     OdeSolver(const IOdeSystem& F, double abstoler, double reltoler);
     ~OdeSolver();
+    /** evolve the ODE from time `tstart` to `tfinish`, using one or more intermediate timesteps, 
+        determined by internal tolerance parameters; 
+        \param[in,out]  y is the system state, which is evolved in time;
+        \return   the number of intermediate timesteps taken.
+    */
     int advance(double tstart, double tfinish, double *y);
 private:
     void* impl;   ///< implementation details are hidden

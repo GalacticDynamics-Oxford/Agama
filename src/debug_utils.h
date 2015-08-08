@@ -11,6 +11,7 @@
 #include <vector>
 #include <iostream>
 
+// Coordinate tools
 namespace coord {
 /// comparison functions for positions, gradients and hessians
 
@@ -108,12 +109,15 @@ std::ostream& operator<< (std::ostream& s, const coord::HessSph& p) {
     return s;
 }
 
-// helper class to compute scatter in actions
-class actionstat{
+// Action tools
+namespace actions{
+
+/// Helper class to compute scatter in actions
+class ActionStat{
 public:
     actions::Actions avg, disp;
     int N;
-    actionstat() { avg.Jr=avg.Jz=avg.Jphi=0; disp=avg; N=0; }
+    ActionStat() { avg.Jr=avg.Jz=avg.Jphi=0; disp=avg; N=0; }
     void add(const actions::Actions& act) {
         avg.Jr  +=act.Jr;   disp.Jr  +=pow_2(act.Jr);
         avg.Jz  +=act.Jz;   disp.Jz  +=pow_2(act.Jz);
@@ -138,7 +142,8 @@ void add_unwrap(const double val, std::vector<double>& vec)
         vec.push_back(math::unwrapAngle(val, vec.back()));
 }
 
-class anglestat{
+/// Helper class to check linearity of angles evolution
+class AngleStat{
 public:
     std::vector<double> thetar, thetaz, thetaphi, time;
     double freqr, freqz, freqphi;
@@ -156,7 +161,9 @@ public:
         math::linearFit(time.size(), &(time.front()), &(thetaphi.front()), freqphi, bla, &dispphi);
     }
 };
+}  // namespace
 
+// printout functions are declared outside the namespace
 std::ostream& operator<< (std::ostream& s, const actions::Actions& a) {
     s << "Jr: "<< a.Jr <<"  Jz: "<< a.Jz <<"  Jphi: "<< a.Jphi <<"  ";
     return s;
@@ -168,5 +175,9 @@ std::ostream& operator<< (std::ostream& s, const actions::Angles& a) {
 std::ostream& operator<< (std::ostream& s, const actions::ActionAngles& a) {
     s << "Jr: "<< a.Jr <<"  Jz: "<< a.Jz <<"  Jphi: "<< a.Jphi <<"  "<<
          "thetar: "<< a.thetar <<"  thetaz: "<< a.thetaz <<"  thetaphi: "<< a.thetaphi <<"  ";
+    return s;
+}
+std::ostream& operator<< (std::ostream& s, const actions::Frequencies& f) {
+    s << "Omegar: "<< f.Omegar <<"  Omegaz: "<< f.Omegaz <<"  Omegaphi: "<< f.Omegaphi <<"  ";
     return s;
 }

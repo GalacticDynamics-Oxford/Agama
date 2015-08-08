@@ -312,16 +312,16 @@ AxisymIntDerivatives computeIntDerivatives(
     double det  = dJrdE*dJzdI3-dJrdI3*dJzdE;
     if(lim.nu_min==lim.nu_max || det==0) {
         // special case z==0: motion in z is irrelevant, but we could not compute dJzdI3 which is not zero
-        der.dEdJr   = 1/dJrdE;
-        der.dEdJphi =-dJrdLz/dJrdE;
-        der.dI3dJr  = der.dI3dJz = der.dI3dJphi = der.dEdJz = 0;
+        der.Omegar   = 1/dJrdE;
+        der.Omegaphi =-dJrdLz/dJrdE;
+        der.dI3dJr   = der.dI3dJz = der.dI3dJphi = der.Omegaz = 0;
     } else {  // everything as normal
-        der.dEdJr   = dJzdI3/det;
-        der.dEdJz   =-dJrdI3/det;
-        der.dEdJphi = (dJrdI3*dJzdLz-dJrdLz*dJzdI3)/det;
-        der.dI3dJr  =-dJzdE/det;
-        der.dI3dJz  = dJrdE/det;
-        der.dI3dJphi=-(dJrdE*dJzdLz-dJrdLz*dJzdE)/det;
+        der.Omegar   = dJzdI3/det;  // dE/dJr
+        der.Omegaz   =-dJrdI3/det;  // dE/dJz
+        der.Omegaphi = (dJrdI3*dJzdLz-dJrdLz*dJzdI3)/det;  // dE/dJphi
+        der.dI3dJr   =-dJzdE/det;
+        der.dI3dJz   = dJrdE/det;
+        der.dI3dJphi =-(dJrdE*dJzdLz-dJrdLz*dJzdE)/det;
     }
     der.dLzdJr  = 0;
     der.dLzdJz  = 0;
@@ -387,9 +387,9 @@ Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim
 Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDerivatives& derS, bool addPiToThetaZ)
 {
     Angles angs;
-    angs.thetar   = derS.dSdE*derI.dEdJr   + derS.dSdI3*derI.dI3dJr   + derS.dSdLz*derI.dLzdJr;
-    angs.thetaz   = derS.dSdE*derI.dEdJz   + derS.dSdI3*derI.dI3dJz   + derS.dSdLz*derI.dLzdJz;
-    angs.thetaphi = derS.dSdE*derI.dEdJphi + derS.dSdI3*derI.dI3dJphi + derS.dSdLz*derI.dLzdJphi;
+    angs.thetar   = derS.dSdE*derI.Omegar   + derS.dSdI3*derI.dI3dJr   + derS.dSdLz*derI.dLzdJr;
+    angs.thetaz   = derS.dSdE*derI.Omegaz   + derS.dSdI3*derI.dI3dJz   + derS.dSdLz*derI.dLzdJz;
+    angs.thetaphi = derS.dSdE*derI.Omegaphi + derS.dSdI3*derI.dI3dJphi + derS.dSdLz*derI.dLzdJphi;
     angs.thetar   = math::wrapAngle(angs.thetar);
     angs.thetaz   = math::wrapAngle(angs.thetaz + M_PI*addPiToThetaZ);
     angs.thetaphi = math::wrapAngle(angs.thetaphi);
@@ -401,13 +401,15 @@ Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDeriva
     on the angles (assuming that the actions are constant); in principle, this may be used 
     to skip the computation of the derivatives matrix of integrals (not presently implemented). */
 ActionAngles computeActionAngles(
-    const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
+    const AxisymFunctionBase& fnc, const AxisymIntLimits& lim, Frequencies* freq)
 {
     Actions acts = computeActions(fnc, lim);
     AxisymIntDerivatives derI = computeIntDerivatives(fnc, lim);
     AxisymGenFuncDerivatives derS = computeGenFuncDerivatives(fnc, lim);
     bool addPiToThetaZ = fnc.point.nudot<0 && acts.Jz!=0;
     Angles angs = computeAngles(derI, derS, addPiToThetaZ);
+    if(freq!=NULL)
+        *freq = derI;  // store frequencies which are the first row of the derivatives matrix
     return ActionAngles(acts, angs);
 }
 
@@ -422,11 +424,11 @@ Actions axisymStaeckelActions(const potential::OblatePerfectEllipsoid& potential
 }
 
 ActionAngles axisymStaeckelActionAngles(const potential::OblatePerfectEllipsoid& potential, 
-    const coord::PosVelCyl& point)
+    const coord::PosVelCyl& point, Frequencies* freq)
 {
     const AxisymFunctionStaeckel fnc = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActionAngles(fnc, lim);
+    return computeActionAngles(fnc, lim, freq);
 }
 
 Actions axisymFudgeActions(const potential::BasePotential& potential, 
@@ -443,7 +445,7 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
 }
 
 ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential, 
-    const coord::PosVelCyl& point, double interfocalDistance)
+    const coord::PosVelCyl& point, double interfocalDistance, Frequencies* freq)
 {
     if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
@@ -452,7 +454,7 @@ ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential,
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);    
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActionAngles(fnc, lim);
+    return computeActionAngles(fnc, lim, freq);
 }
 
 }  // namespace actions

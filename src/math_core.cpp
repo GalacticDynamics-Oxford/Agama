@@ -454,16 +454,37 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
 
 // ------- integration routines ------- //
 
-double integrate(const IFunction& fnc, double x1, double x2, double reltoler)
+double integrate(const IFunction& fnc, double x1, double x2, double reltoler, 
+    double* error, int* numEval)
 {
     if(x1==x2)
         return 0;
     gsl_function F;
     F.function = functionWrapper;
     F.params = const_cast<IFunction*>(&fnc);
-    double result, error;
+    double result, dummy;
     size_t neval;
-    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, &error, &neval);
+    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, error!=NULL ? error : &dummy, &neval);
+    if(numEval!=NULL)
+        *numEval = neval;
+    return result;
+}
+
+double integrateAdaptive(const IFunction& fnc, double x1, double x2, double reltoler, 
+    double* error, int* numEval)
+{
+    if(x1==x2)
+        return 0;
+    gsl_function F;
+    F.function = functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
+    double result, dummy;
+    size_t neval;
+    gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);
+    gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, error!=NULL ? error : &dummy, &neval);
+    gsl_integration_cquad_workspace_free(ws);
+    if(numEval!=NULL)
+        *numEval = neval;
     return result;
 }
 
@@ -478,21 +499,6 @@ double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
     gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
     double result = gsl_integration_glfixed(&F, x1, x2, t);
     gsl_integration_glfixed_table_free(t);
-    return result;
-}
-
-double integrateAdaptive(const IFunction& fnc, double x1, double x2, double reltoler)
-{
-    if(x1==x2)
-        return 0;
-    gsl_function F;
-    F.function = functionWrapper;
-    F.params = const_cast<IFunction*>(&fnc);
-    double result, error;
-    size_t neval;
-    gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);
-    gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, &error, &neval);
-    gsl_integration_cquad_workspace_free(ws);
     return result;
 }
 
@@ -647,7 +653,8 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
 
 double PointNeighborhood::dxToPosneg(double sgn) const
 {
-    double s0 = sgn*f0, sder = sgn*fder, sder2 = sgn*fder2;
+    double s0 = sgn*f0 * 1.1;  // safety factor to make sure we overshoot in finding the value of opposite sign
+    double sder = sgn*fder, sder2 = sgn*fder2;
     if(s0>0)
         return 0;  // already there
     if(sder==0) {
@@ -662,7 +669,7 @@ double PointNeighborhood::dxToPosneg(double sgn) const
     double discr = sder*sder - 2*s0*sder2;
     if(discr<=0)
         return NAN;  // never cross zero
-    return sign(sder) * (delta + 2*s0/(sqrt(discr)+abs(sder)) );
+    return sign(sder) * (delta - 2*s0/(sqrt(discr)+abs(sder)) );
 }
 
 double PointNeighborhood::dxToNearestRoot() const
@@ -759,21 +766,5 @@ int OdeSolver::advance(double tstart, double tfinish, double *y){
         throw std::runtime_error("ODE solver: number of sub-steps exceeds maximum");
     return numstep;
 }
-
-#if 0
-//=================================================================================================
-// SPECIAL FUNCTIONS //
-inline double erf(double x){return gsl_sf_erf (x);}
-inline double erfc(double x){return gsl_sf_erfc (x);}
-inline double besselI(double x, int n){return gsl_sf_bessel_In (n,x);}
-inline double besselJ(double x, int n){return gsl_sf_bessel_Jn (n,x);}
-inline double gamma(double x){return gsl_sf_gamma (x);}
-inline double ellint_first(double phi, double k){ return gsl_sf_ellint_F(phi,k,(gsl_mode_t)1e-15);}
-// F(\phi,k) = \int_0^\phi \d t \, \frac{1}{\sqrt{1-k^2\sin^2 t}}
-inline double ellint_second(double phi, double k){ return gsl_sf_ellint_E(phi,k,(gsl_mode_t)1e-15);}
-// E(\phi,k) = \int_0^\phi \d t \, \sqrt{1-k^2\sin^2 t}
-inline double ellint_third(double phi, double k, double n){ return gsl_sf_ellint_P(phi,k,n,(gsl_mode_t)1e-15);}
-// \Pi(\phi,k,n) = \int_0^\phi \d t \, \frac{1}{(1+n\sin^2 t)\sqrt{1-k^2\sin^2 t}}
-#endif
 
 }  // namespace

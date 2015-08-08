@@ -17,14 +17,18 @@ const bool output = true;
 bool test_actions(const potential::BasePotential& poten,
     const actions::BaseActionFinder& finder, const actions::BaseActionMapper& mapper, const actions::Actions actions)
 {
-    actionstat acts;
-    anglestat angs;
+    actions::ActionStat acts;
+    actions::AngleStat  angs;
+    actions::Frequencies freq;
+    actions::Angles angles;
+    angles.thetar = angles.thetaz = angles.thetaphi = 0;
+    coord::PosVelCyl xv = mapper.map(actions::ActionAngles(actions, angles), &freq);  // obtain the values of frequencies
+    double fr0 = fmax(freq.Omegar, fmax(freq.Omegaz, freq.Omegaphi));
     for(unsigned int i=0; i<NUM_ANGLE_SAMPLES; i++) {
-        actions::Angles angles;
-        angles.thetar   = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 6.27 );
-        angles.thetaz   = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 8.45 );
-        angles.thetaphi = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 4.96 );
-        coord::PosVelCyl xv = mapper.map(actions::ActionAngles(actions, angles));
+        angles.thetar   = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 2*M_PI * freq.Omegar/fr0 );
+        angles.thetaz   = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 2*M_PI * freq.Omegaz/fr0 );
+        angles.thetaphi = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 2*M_PI * freq.Omegaphi/fr0 );
+        xv = mapper.map(actions::ActionAngles(actions, angles));
         actions::ActionAngles aa = finder.actionAngles(xv);
         angs.add(i*1.0, aa);
         acts.add(aa);
@@ -82,13 +86,13 @@ int main(int argc, const char* argv[]) {
         pot = potential::createPotential(config);
     } else
         pot = make_galpot(test_galpot_params);
-    double Jr   = params.getDouble("Jr", 100);
-    double Jz   = params.getDouble("Jz", 100);
-    double Jphi = params.getDouble("Jphi", 1000);
+    double Jr   = params.getDouble("Jr", 0.1);
+    double Jz   = params.getDouble("Jz", 0.1);
+    double Jphi = params.getDouble("Jphi", 1);
     actions::Actions acts;
-    acts.Jr   = Jr   * unit.from_Kpc_kms;
-    acts.Jz   = Jz   * unit.from_Kpc_kms;
-    acts.Jphi = Jphi * unit.from_Kpc_kms;
+    acts.Jr   = Jr   * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
+    acts.Jz   = Jz   * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
+    acts.Jphi = Jphi * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
     actions::ActionMapperTorus mapper(*pot, acts);
     actions::ActionFinderAxisymFudge finder(*pot);
     allok &= test_actions(*pot, finder, mapper, acts);

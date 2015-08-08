@@ -40,8 +40,16 @@ double digamma(const int x);
 double ellintK(const double k);
 double ellintE(const double k);
 
-/** Incomplete elliptic integrals of the first F(phi,k) and the second E(phi,k) kinds */
+/** Incomplete elliptic integrals of the first kind:
+    \f$  F(\phi,k) = \int_0^\phi \d t \, \frac{1}{\sqrt{1-k^2\sin^2 t}}  \f$  */
 double ellintF(const double phi, const double k);
+
+/** Incomplete elliptic integrals of the second kind:
+    \f$  E(\phi,k) = \int_0^\phi \d t \, \sqrt{1-k^2\sin^2 t}  \f$  */
 double ellintE(const double phi, const double k);
 
+/** Incomplete elliptic integrals of the third kind:
+    \f$  \Pi(\phi,k,n) = \int_0^\phi \d t \, \frac{1}{(1+n\sin^2 t)\sqrt{1-k^2\sin^2 t}}  \f$  */
+double ellintP(const double phi, const double k, const double n);
+    
 }  // namespace
