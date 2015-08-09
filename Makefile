@@ -1,24 +1,11 @@
-CXX       = g++
-CXXFLAGS += -Wall -Wno-overflow -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
-LFLAGS   += -fPIC -lgsl -lgslcblas
-ARC       = ar
-
-# this flag apparently is only relevant for MacOS and reduces the size of executable files by removing unused code
-#LFLAGS  += -Wl,-dead_strip
-
-# uncomment (and possibly modify) the three lines below  to use UNSIO library for input/output of N-body snapshots
-DEFINES  += -DHAVE_UNSIO
-CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
-LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
-
-# uncomment the three lines below and adjust the paths  to use Cuba library for multidimensional integration 
-# (otherwise use Cubature library bundled with the code)
-DEFINES  += -DHAVE_CUBA
-CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
-LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
+# this file is for general settings such as file list, etc.
+# machine-specific settings such as include paths and #defines are in Makefile.local
+include Makefile.local
 
 SRCDIR    = src
 OBJDIR    = obj
+LIBDIR    = lib
+EXEDIR    = exe
 TESTSDIR  = tests
 LEGACYDIR = src/legacy
 TORUSDIR  = src/torus
@@ -76,26 +63,30 @@ TESTSRCS  = test_math_core.cpp \
             test_actions_nbody.cpp \
             test_torus.cpp \
 
-LIBNAME   = libfJ.a
+LIBNAME   = $(LIBDIR)/libfJ.a
+PY_WRAPPER= $(LIBDIR)/py_wrapper.so
 
 HEADERS   = $(SOURCES:.cpp=.h)
 OBJECTS   = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES)) 
-TESTEXE   = $(patsubst %.cpp,%.exe,$(TESTSRCS))
+TESTEXE   = $(patsubst %.cpp,$(EXEDIR)/%.exe,$(TESTSRCS))
 LEGACYOBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(LEGACYSRC)) 
 TORUSOBJ  = $(patsubst %.cc, $(OBJDIR)/%.o,$(TORUSSRC)) 
 
-all:      $(LIBNAME) $(TESTEXE)
+all:      $(LIBNAME) $(TESTEXE) $(PY_WRAPPER)
 
-$(LIBNAME):  $(OBJECTS) $(LEGACYOBJ) $(TORUSOBJ)
+$(LIBNAME):  $(OBJECTS) $(LEGACYOBJ) $(TORUSOBJ) Makefile Makefile.local
+	@mkdir -p $(LIBDIR)
 	ar rv $(LIBNAME) $(OBJECTS) $(LEGACYOBJ) $(TORUSOBJ)
 
-%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
+$(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
+	@mkdir -p $(EXEDIR)
 	$(CXX) -o "$@" "$<" $(CXXFLAGS) $(LIBNAME) $(LFLAGS)
 
-clean:
-	rm -f $(OBJECTS) $(LEGACYOBJ) $(TORUSOBJ) *.exe
+$(PY_WRAPPER): $(SRCDIR)/py_wrapper.cpp $(LIBNAME)
+	$(CXX) -c $(CXXFLAGS) $(PYFLAGS) $(SRCDIR)/py_wrapper.cpp -o $(OBJDIR)/py_wrapper.o
+	$(CXX) -shared -o $(PY_WRAPPER) $(OBJDIR)/py_wrapper.o $(LIBNAME) $(LFLAGS) $(PYFLAGS)
 
-$(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h Makefile
+$(OBJDIR)/%.o:  $(SRCDIR)/%.cpp $(SRCDIR)/%.h
 	@mkdir -p $(OBJDIR)
 	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
@@ -105,7 +96,11 @@ $(OBJDIR)/%.o:  $(LEGACYDIR)/%.cpp
 $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc
 	$(CXX) -c $(CXXFLAGS) -Wno-unused-variable -o "$@" "$<"
 
+clean:
+	rm -f $(OBJDIR)/*.o $(EXEDIR)/*.exe $(LIBNAME) $(PY_WRAPPER)
+
 test:
-	./test_all.pl
+	cp $(TESTSDIR)/test_all.pl $(EXEDIR)/
+	(cd $(EXEDIR); ./test_all.pl)
 
 .PHONY: clean test

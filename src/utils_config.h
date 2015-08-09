@@ -46,6 +46,10 @@ public:
     /// return an integer value from the map
     int getInt(const std::string& key, int defaultValue=0) const;
 
+    /// return an integer from either of the two variants of key
+    double getIntAlt(const std::string& key1, const std::string& key2,
+        int defaultValue=0) const;
+    
     /// return a boolean value from the map
     bool getBool(const std::string& key, bool defaultValue=false) const;
 

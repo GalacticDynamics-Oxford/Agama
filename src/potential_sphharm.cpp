@@ -299,7 +299,7 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::Po
     }
 }
 
-double BasisSetExp::enclosedMass(const double r, const double) const
+double BasisSetExp::enclosedMass(const double r) const
 {
     if(r<=0) return 0;
     double ralpha=pow(r, 1/Alpha);
@@ -1005,7 +1005,7 @@ void SplineExp::computeSHCoefs(const double r, double coefsF[], double coefsdFdr
     }
 }
 
-double SplineExp::enclosedMass(const double r, const double) const
+double SplineExp::enclosedMass(const double r) const
 {
     if(r<=0) return 0;
     double der;

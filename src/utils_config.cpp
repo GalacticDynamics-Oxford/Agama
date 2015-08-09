@@ -96,6 +96,16 @@ int KeyValueMap::getInt(const std::string& key, int defaultValue) const
         return utils::convertToInt(result);
 }
 
+double KeyValueMap::getIntAlt(const std::string& key1, 
+    const std::string& key2, int defaultValue) const
+{
+    std::string result = getString(key1);
+    if(result.empty())
+        return getInt(key2, defaultValue);
+    else
+        return utils::convertToInt(result);
+}
+
 bool KeyValueMap::getBool(const std::string& key, bool defaultValue) const
 {
     return utils::convertToBool(getString(key, defaultValue?"True":"False"));

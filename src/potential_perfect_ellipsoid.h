@@ -28,7 +28,7 @@ public:
     
     virtual const char* name() const { return myName(); };
     static const char* myName() { return "OblatePerfectEllipsoid"; };
-    virtual double totalMass(double) const { return mass; }
+    virtual double totalMass() const { return mass; }
 
     /** evaluates the function G(tau) and up to two its derivatives,
         if the supplied output arguments are not NULL 

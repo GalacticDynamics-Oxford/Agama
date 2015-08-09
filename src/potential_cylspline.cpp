@@ -119,8 +119,8 @@ public:
     double Phi_m(double R, double z, int m) const;
 
     /// redefine the following two routines to count particles in the point-mass-set regime
-    virtual double enclosedMass(const double radius, const double rel_toler) const;
-    virtual double totalMass(const double rel_toler) const;
+    virtual double enclosedMass(const double radius) const;
+    virtual double totalMass() const;
 
 private:
     /// input density model (if provided)
@@ -208,11 +208,11 @@ DirectPotential::DirectPotential(const particles::PointMassArray<coord::PosCyl>&
         besselInts.push_back(BesselIntegral(m));
 };
 
-double DirectPotential::totalMass(const double rel_toler) const
+double DirectPotential::totalMass() const
 {
     assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL) 
-        return density->totalMass(rel_toler);
+        return density->totalMass();
     else {
         double mass=0;
         for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 
@@ -222,11 +222,11 @@ double DirectPotential::totalMass(const double rel_toler) const
     }
 }
 
-double DirectPotential::enclosedMass(const double r, const double rel_toler) const
+double DirectPotential::enclosedMass(const double r) const
 {
     assert((density!=NULL) ^ (points!=NULL));  // either of the two regimes
     if(density!=NULL)
-        return density->enclosedMass(r, rel_toler);
+        return density->enclosedMass(r);
     else {
         double mass=0;
         for(particles::PointMassArray<coord::PosCyl>::ArrayType::const_iterator pt=points->data.begin(); 

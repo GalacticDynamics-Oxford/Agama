@@ -28,87 +28,100 @@ namespace potential {
 
 /// List of all known potential and density types (borrowed from SMILE, not everything is implemented here)
 enum PotentialType {
-    PT_UNKNOWN,     ///< undefined
-    PT_COEFS,       ///< not an actual density model, but a way to load pre-computed coefficients of potential expansion
-    PT_COMPOSITE,   ///< a superposition of multiple potential instances:  CPotentialComposite
-    PT_NB,          ///< a set of frozen particles:  CPotentialNB
-    PT_BSE,         ///< basis-set expansion for infinite systems:  CPotentialBSE
-    PT_BSECOMPACT,  ///< basis-set expansion for systems with non-singular density and finite extent:  CPotentialBSECompact
-    PT_SPLINE,      ///< spline spherical-harmonic expansion:  CPotentialSpline
-    PT_CYLSPLINE,   ///< expansion in azimuthal angle with two-dimensional meridional-plane interpolating splines:  CPotentialCylSpline
-    PT_LOG,         ///< logaritmic potential:  CPotentialLog
-    PT_HARMONIC,    ///< simple harmonic oscillator:  CPotentialHarmonic
-    PT_SCALEFREE,   ///< single power-law density profile:  CPotentialScaleFree
-    PT_SCALEFREESH, ///< spherical-harmonic approximation to a power-law density:  CPotentialScaleFreeSH
-    PT_SPHERICAL,   ///< arbitrary spherical mass model:  CPotentialSpherical
-    PT_DEHNEN,      ///< Dehnen(1993) density model:  CPotentialDehnen
-    PT_MIYAMOTONAGAI,///< Miyamoto-Nagai(1975) flattened model:  CPotentialMiyamotoNagai
-    PT_FERRERS,     ///< Ferrers finite-extent profile:  CPotentialFerrers
-    PT_PLUMMER,     ///< Plummer model:  CDensityPlummer
-    PT_ISOCHRONE,   ///< isochrone model:  CDensityIsochrone
-    PT_PERFECTELLIPSOID,  ///< Kuzmin/de Zeeuw integrable potential:  CDensityPerfectEllipsoid
-    PT_NFW,         ///< Navarro-Frenk-White profile:  CDensityNFW
-    PT_SERSIC,      ///< Sersic density profile:  CDensitySersic
-    PT_EXPDISK,     ///< exponential (in R) disk with a choice of vertical density profile:  CDensityExpDisk
-    PT_ELLIPSOIDAL, ///< a generalization of spherical mass profile with arbitrary axis ratios:  CDensityEllipsoidal
-    PT_MGE,         ///< Multi-Gaussian expansion:  CDensityMGE
-    PT_GALPOT,      ///< Walter Dehnen's GalPot (exponential discs and spheroids)
+
+    //  Generic values that don't correspond to a concrete class
+    PT_UNKNOWN,      ///< undefined
+    PT_COEFS,        ///< pre-computed coefficients of potential expansion loaded from a coefs file
+    PT_NBODY,        ///< N-body snapshot that is used for initializing a potential expansion
+
+    //  Density models without a corresponding potential
+    PT_ELLIPSOIDAL,  ///< a generalization of spherical mass profile with arbitrary axis ratios:  CDensityEllipsoidal
+    PT_MGE,          ///< Multi-Gaussian expansion:  CDensityMGE
+//    PT_SERSIC,       ///< Sersic density profile:  CDensitySersic
+//    PT_EXPDISK,      ///< exponential (in R) disk with a choice of vertical density profile:  CDensityExpDisk
+
+    //  Generic potential expansions
+    PT_BSE,          ///< basis-set expansion for infinite systems:  `BasisSetExp`
+    PT_SPLINE,       ///< spline spherical-harmonic expansion:  `SplineExp`
+    PT_CYLSPLINE,    ///< expansion in azimuthal angle with two-dimensional meridional-plane interpolating splines:  `CylSplineExp`
+    PT_MULTIPOLE,    ///< axisymmetric multipole expansion from GalPot:  `Multipole`
+
+    //  Potentials with possibly infinite mass that can't be used as source density for a potential expansion
+    PT_GALPOT,       ///< Walter Dehnen's GalPot (exponential discs and spheroids)
+    PT_COMPOSITE,    ///< a superposition of multiple potential instances:  `CompositeCyl`
+    PT_LOG,          ///< triaxial logaritmic potential:  `Logarithmic`
+    PT_HARMONIC,     ///< triaxial simple harmonic oscillator:  `Harmonic`
+//    PT_SCALEFREE,    ///< triaxial single power-law density profile:  CPotentialScaleFree
+//    PT_SCALEFREESH,  ///< spherical-harmonic approximation to a triaxial power-law density:  CPotentialScaleFreeSH
+    PT_NFW,          ///< spherical Navarro-Frenk-White profile:  `NFW`
+
+    //  Analytic finite-mass potential models that can also be used as source density for a potential expansion
+//    PT_SPHERICAL,    ///< arbitrary spherical mass model:  CPotentialSpherical
+    PT_MIYAMOTONAGAI,///< axisymmetric Miyamoto-Nagai(1975) model:  `MiyamotoNagai`
+    PT_DEHNEN,       ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
+    PT_FERRERS,      ///< triaxial Ferrers model with finite extent:  `Ferrers`
+    PT_PLUMMER,      ///< spherical Plummer model:  `Plummer`
+//    PT_ISOCHRONE,    ///< spherical isochrone model:  `Isochrone`
+    PT_PERFECT_ELLIPSOID,  ///< oblate axisymmetric Perfect Ellipsoid of Kuzmin/de Zeeuw :  `OblatePerfectEllipsoid`
 };
 
 /// structure that contains parameters for all possible potentials
 struct ConfigPotential
 {
-    double mass;                             ///< total mass of the model (not applicable to all potential types)
-    double scalerad;                         ///< scale radius of the model (if applicable)
-    double scalerad2;                        ///< second scale radius of the model (if applicable)
-    double q, p;                             ///< axis ratio of the model (if applicable)
-    double gamma;                            ///< central cusp slope (for Dehnen and scale-free models)
-    double sersicIndex;                      ///< Sersic index (for Sersic density model)
-    unsigned int numCoefsRadial;             ///< number of radial terms in BasisSetExp or grid points in spline potentials
-    unsigned int numCoefsAngular;            ///< number of angular terms in spherical-harmonic expansion
-    unsigned int numCoefsVertical;           ///< number of coefficients in z-direction for Cylindrical potential
-    double alpha;                            ///< shape parameter for BSE potential
-#if 0
-    double rmax;                             ///< radius of finite density model for BSECompact potential
-    double treecodeEps;                      ///< treecode smooothing length (negative means adaptive smoothing based on local density, absolute value is the proportionality coefficient between eps and mean interparticle distance)
-    double treecodeTheta;                    ///< tree cell opening angle
-#endif
-    PotentialType potentialType;             ///< currently selected potential type
-    PotentialType densityType;               ///< if pot.type == BSE or Spline, this gives the underlying density profile approximated by these expansions or flags that an Nbody file should be used
-    SymmetryType symmetryType;               ///< if using Nbody file with the above two potential expansions, may assume certain symmetry on the coefficients (do not compute them but just assign to zero)
-    double splineSmoothFactor;               ///< for smoothing Spline potential coefs initialized from discrete point mass set
-    double splineRMin, splineRMax;           ///< if nonzero, specifies the inner- and outermost grid node radii
-    double splineZMin, splineZMax;           ///< if nonzero, gives the grid extent in z direction for Cylindrical spline potential
-    std::string fileName;                    ///< name of file with coordinates of points, or coefficients of expansion, or any other external data array
-#if 0
-    double mbh;                              ///< mass of central black hole (in the composite potential)
-    double binary_q;                         ///< binary BH mass ratio (0<=q<=1)
-    double binary_sma;                       ///< binary BH semimajor axis
-    double binary_ecc;                       ///< binary BH eccentricity (0<=ecc<1)
-    double binary_phase;                     ///< binary BH orbital phase (0<=phase<2*pi)
-#endif
-    units::ExternalUnits units;              ///< specification of length, velocity and mass units for N-body snapshot, in internal code units
+    PotentialType potentialType;   ///< type of the potential
+    PotentialType densityType;     ///< specifies the density model used for initializing a potential expansion
+    SymmetryType symmetryType;     ///< degree of symmetry (mainly used to explicitly disregard certain terms in a potential expansion)
+    double mass;                   ///< total mass of the model (not applicable to all potential types)
+    double scaleRadius;            ///< scale radius of the model (if applicable)
+    double scaleRadius2;           ///< second scale radius of the model (if applicable)
+    double q, p;                   ///< axis ratio of the model (if applicable)
+    double gamma;                  ///< central cusp slope (for Dehnen and scale-free models)
+    double sersicIndex;            ///< Sersic index (for Sersic density model)
+    unsigned int numCoefsRadial;   ///< number of radial terms in BasisSetExp or grid points in spline potentials
+    unsigned int numCoefsAngular;  ///< number of angular terms in spherical-harmonic expansion
+    unsigned int numCoefsVertical; ///< number of coefficients in z-direction for CylSplineExp potential
+    double alpha;                  ///< shape parameter for BasisSetExp potential
+    double splineSmoothFactor;     ///< amount of smoothing in SplineExp initialized from an N-body snapshot
+    double splineRMin, splineRMax; ///< if nonzero, specifies the inner- and outermost grid node radii for SplineExp and CylSplineExp
+    double splineZMin, splineZMax; ///< if nonzero, gives the grid extent in z direction for CylSplineExp
+    std::string fileName;          ///< name of file with coordinates of points, or coefficients of expansion, or any other external data array
+    units::ExternalUnits units;    ///< specification of length, velocity and mass units for N-body snapshot, in internal code units
     /// default constructor initializes the fields to some reasonable values
     ConfigPotential() :
-        mass(1.), scalerad(1.), scalerad2(1.), q(1.), p(1.), gamma(1.), sersicIndex(4.),
-        numCoefsRadial(20), numCoefsAngular(0), numCoefsVertical(20), alpha(0.),
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(ST_DEFAULT),
-        splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0),
+        mass(1.), scaleRadius(1.), scaleRadius2(1.), q(1.), p(1.), gamma(1.), sersicIndex(4.),
+        numCoefsRadial(20), numCoefsAngular(6), numCoefsVertical(20),
+        alpha(0.), splineSmoothFactor(1.), splineRMin(0), splineRMax(0), splineZMin(0), splineZMax(0),
         units()  {};
 };
 
-/// parse the potential parameters contained in a text array of "key=value" pairs
+/** Parse the potential parameters contained in a text array of "key=value" pairs.
+    \param[in]     params  is the array of string pairs "key" and "value", for instance,
+    created from command-line arguments, or read from an INI file.
+    \param[in,out] config  is the structure containing all parameters of potential;
+    only those members are updated which have been found in the `params` array,
+    except for potential/density/symmetryType and fileName which are initialized by default values.
+*/
 void parseConfigPotential(const utils::KeyValueMap& params, ConfigPotential& config);
 
-/// store the potential parameters into a text array of "key=value" pairs
+/** Store the potential parameters into a text array of "key=value" pairs.
+    \param[in]     config  is the structure containing all parameters of potential;
+    \param[in,out] params  is the textual representation of these parameters, in terms of 
+    array of string pairs "key" and "value". 
+    All parameters of `config` are added to this array, possibly replacing pre-existing 
+    elements with the same name; existing elements with key names that do not correspond 
+    to any of potential parameters are not modified.
+*/
 void storeConfigPotential(const ConfigPotential& config, utils::KeyValueMap& params);
 
 ///@}
 /// \name Factory routines that create an instance of specific potential from a set of parameters
 ///@{
 
-/** create a density model according to the parameters. 
+/** Create a density model according to the parameters. 
     This only deals with finite-mass models, including some of the Potential descendants.
+    This function is rarely needed by itself, and is used within `createPotential()` to construct 
+    temporary density models for initializing a potential expansion.
     \param[in] config  contains the parameters (density type, mass, shape, etc.)
     \return    the instance of a class derived from BaseDensity
     \throw     std::invalid_argument exception if the parameters don't make sense,
@@ -116,18 +129,19 @@ void storeConfigPotential(const ConfigPotential& config, utils::KeyValueMap& par
 */
 const BaseDensity* createDensity(const ConfigPotential& config);
 
-/** create an instance of potential model according to the parameters passed. 
+
+/** Create an instance of potential model according to the parameters passed. 
+    This is the main 'factory' function that can construct a potential from a variety of sources.
     \param[in,out] config  specifies the potential parameters, which could be modified, 
-                   e.g. if the potential coefficients are loaded from a file.
-                   Massive black hole (config->Mbh) is not included in the potential 
-                   (the returned potential is non-composite)
+                   e.g., if the potential coefficients are loaded from a file.
     \return        the instance of potential
     \throw         std::invalid_argument exception if the parameters don't make sense,
     or any other exception that may occur in the constructor of a particular potential model
 */
 const BasePotential* createPotential(ConfigPotential& config);
 
-/** create a potential of a generic expansion kind from a set of point masses.
+
+/** Create a potential of a generic expansion kind from a set of point masses.
     \param[in] config  contains the parameters (potential type, number of terms in expansion, etc.)
     \param[in] points  is the array of particles that are used in computing the coefficients; 
     \return    a new instance of potential
@@ -138,47 +152,79 @@ template<typename ParticleT>
 const BasePotential* createPotentialFromPoints(const ConfigPotential& config, 
     const particles::PointMassArray<ParticleT>& points);
 
-/** load a potential from a text or snapshot file.
+
+/** Load a potential from a text or snapshot file.
 
     The input file may contain one of the following kinds of data:
-    - a Nbody snapshot in a text or binary format, handled by classes derived from particles::BasicIOSnapshot;
+    - a Nbody snapshot in a text or binary format, handled by classes derived from particles::BaseIOSnapshot;
     - a potential coefficients file for BasisSetExp, SplineExp, or CylSplineExp;
     - a density model described by CDensityEllipsoidal or CDensityMGE.
-    The data format is determined from the first line of the file, and 
-    if it is allowed by the parameters passed in `config`, then 
-    the file is read and the instance of a corresponding potential is created. 
-    If the input data was not the potential coefficients and the new potential 
-    is of BasisSetExp, SplineExp or CylSplineExp type, then a new file with 
-    potential coefficients is created and written via `writePotential()`, 
-    so that later one may load this coef file instead of the original one, 
-    which speeds up initialization.
+
+    The data format is determined from the file: the last two cases have 
+    their specific signatures in the first line of the file, and if none is found, 
+    the file is assumed to be an Nbody snapshot.
+
+    In the second case, the file format determines the potential expansion type,
+    and all other parameters are read from the coefficients file, so the only required element 
+    in `config` is `fileName`. Upon reading the coefficients file, the relevant potential 
+    parameters in `config` (e.g., `potentialType`, `numCoefsRadial`, etc.) are updated.
+
+    In the other two cases, `config.potentialType` must be specified a priori,
+    and `config.densityType` will be set to `PT_NB` (in the former case) or 
+    `PT_ELLIPSOIDAL`, `PT_MGE` (in the latter case).
+    Parameters of potential expansion (e.g., number of terms) must also be specified in `config`.
+    Upon creating an instance of potential expansion class, its coefficients are stored 
+    in a file with the same name and an appropriate extension for the given potential type,
+    using `writePotential()` function, so that later one may instead load this coefficients file
+    to speed up initialization.
+
     \param[in,out] config  contains the potential parameters and may be updated 
-                   upon reading the file (e.g. the number of expansion coefficients 
-                   may change). If the file doesn't contain appropriate kind of potential
-                   (i.e. if config.potentialType is PT_NB but the file contains 
-                   BSE coefficients or a description of MGE model), an error is returned.
-                   `config.fileName` contains the file name from which the data is loaded.
-    \return        a new instance of BasePotential* on success
+                   upon reading the file. The only parameter required in all cases is
+                   `config.fileName`, which specifies the file to read.
+    \return        a new instance of BasePotential* on success.
     \throws        std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if potential type is inappropriate, or a file does not exist)
+                   on failure (e.g., if potential type is inappropriate, or a file does not exist).
 */
 const BasePotential* readPotential(ConfigPotential& config);
     
+
+/** Utility function providing a legacy interface compatible with the original GalPot.
+    It reads the parameters from a text file and converts them into the internal unit system,
+    using the conversion factors in the provided `units::ExternalUnits` object,
+    then constructs the potential using `createGalaxyPotential()` routine.
+    Standard GalPot units are Kpc and Msun, so to simplify matters, one may instead use 
+    the overloaded function `readGalaxyPotential()` that takes the instance of internal units
+    as the second argument, and creates a converter from standard GalPot to these internal units.
+    \param[in]  filename  is the name of parameter file;
+    \param[in]  converter provides the conversion from GalPot to internal units;
+    \returns    the new CompositeCyl potential;
+    \throws     a std::runtime_error exception if file is not readable or does not contain valid parameters.
+*/
+const potential::BasePotential* readGalaxyPotential(
+    const char* filename, const units::ExternalUnits& converter);
+
 /** Utility function providing a legacy interface compatible with the original GalPot.
     It reads the parameters from a text file and converts them into the internal unit system, 
-    then constructs the potential using `createGalaxyPotential` routine.
+    then constructs the potential using `createGalaxyPotential()` routine.
+    This function creates the instance of unit converter from standard GalPot units (Kpc and Msun)
+    into the provided internal units, and calls the overloaded function `readGalaxyPotential()` 
+    with this converter object as the second argument. 
     \param[in]  filename is the name of parameter file;
-    \param[in]  units is the specification of internal unit system;
+    \param[in]  unit     is the specification of internal unit system;
     \returns    the new CompositeCyl potential
     \throws     a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::InternalUnits& units);
-    
-/** write potential expansion coefficients to a text file.
+inline const potential::BasePotential* readGalaxyPotential(
+    const char* filename, const units::InternalUnits& unit) {  // create a temporary converter; velocity unit is not used
+    return readGalaxyPotential(filename, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
+}
+
+
+/** Write potential expansion coefficients to a text file.
 
     The potential must be one of the following expansion classes: 
-    BasisSetExp, SplineExp, CylSplineExp.
-    The coefficients stored in a file may be later loaded by readPotential() function.
+    `BasisSetExp`, `SplineExp`, `CylSplineExp`.
+    The coefficients stored in a file may be later loaded by `readPotential()` function.
     \param[in] fileName is the output file
     \param[in] potential is the pointer to potential
     \throws    std::invalid_argument if the potential is of inappropriate type,

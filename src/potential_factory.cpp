@@ -22,28 +22,34 @@ const BaseDensity* createDensity(const ConfigPotential& config)
     switch(config.densityType) 
     {
     case PT_DEHNEN: 
-        return new Dehnen(config.mass, config.scalerad, config.q, config.p, config.gamma); 
-#if 0
+        return new Dehnen(config.mass, config.scaleRadius, config.q, config.p, config.gamma); 
     case PT_PLUMMER:
-        return new Plummer(config->mass, config->scalerad, config->q, config->p);
+        if(config.q==1 && config.p==1)
+            return new Plummer(config.mass, config.scaleRadius);
+        else
+            throw std::invalid_argument("Non-spherical Plummer is not yet supported");
+    case PT_PERFECT_ELLIPSOID:
+        if(config.q==1 && config.p<1)
+            return new OblatePerfectEllipsoid(config.mass, config.scaleRadius, config.scaleRadius*config.p); 
+        else
+            throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
+    case PT_FERRERS:
+        return new Ferrers(config.mass, config.scaleRadius, config.q, config.p);
+    case PT_MIYAMOTONAGAI:
+        return new MiyamotoNagai(config.mass, config.scaleRadius, config.scaleRadius2);
+#if 0
     case PT_ISOCHRONE:
-        return new CDensityIsochrone(config->mass, config->scalerad, config->q, config->p);
-    case PT_PERFECTELLIPSOID:
-        return new CDensityPerfectEllipsoid(config->mass, config->scalerad, config->q, config->p); 
+        return new CDensityIsochrone(config->mass, config->scaleRadius, config->q, config->p);
     case PT_NFW: {
-        double concentration = std::max<double>(config->scalerad2/config->scalerad, 1.0);
-        return new CDensityNFW(config->mass, config->scalerad, config->q, config->p, concentration);
+        double concentration = std::max<double>(config->scaleRadius2/config->scaleRadius, 1.0);
+        return new CDensityNFW(config->mass, config->scaleRadius, config->q, config->p, concentration);
     }
     case PT_SERSIC:
-        return new CDensitySersic(config->mass, config->scalerad, config->q, config->p, config->sersicIndex);
+        return new CDensitySersic(config->mass, config->scaleRadius, config->q, config->p, config->sersicIndex);
     case PT_EXPDISK:
-        return new CDensityExpDisk(config->mass, config->scalerad, fabs(config->scalerad2),
-            config->scalerad2>0 ? CDensityExpDisk::ED_EXP : CDensityExpDisk::ED_SECH2);
+        return new CDensityExpDisk(config->mass, config->scaleRadius, fabs(config->scaleRadius2),
+            config->scaleRadius2>0 ? CDensityExpDisk::ED_EXP : CDensityExpDisk::ED_SECH2);
 #endif
-    case PT_FERRERS:
-        return new Ferrers(config.mass, config.scalerad, config.q, config.p);
-    case PT_MIYAMOTONAGAI:
-        return new MiyamotoNagai(config.mass, config.scalerad, config.scalerad2);
     default:
         throw std::invalid_argument("Unknown density type");
     }
@@ -55,29 +61,47 @@ const BasePotential* createPotential(ConfigPotential& config)
     switch(config.potentialType)
     {
     case PT_LOG:
-        potential = new Logarithmic(config.mass, config.scalerad, config.q, config.p);
+        potential = new Logarithmic(config.mass, config.scaleRadius, config.q, config.p);
         break;  // NB: it's not really 'mass' here but 'sigma'
     case PT_HARMONIC:
         potential = new Harmonic(config.mass, config.q, config.p);
         break;  // NB: it's not really 'mass' here but 'Omega'
-    case PT_DEHNEN:
-        potential = new Dehnen(config.mass, config.scalerad, config.q, config.p, config.gamma);
-        break;
     case PT_MIYAMOTONAGAI:
-        potential = new MiyamotoNagai(config.mass, config.scalerad, config.scalerad2);
+        potential = new MiyamotoNagai(config.mass, config.scaleRadius, config.scaleRadius2);
+        break;
+    case PT_DEHNEN:
+        potential = new Dehnen(config.mass, config.scaleRadius, config.q, config.p, config.gamma);
         break;
     case PT_FERRERS:
-        potential = new Ferrers(config.mass, config.scalerad, config.q, config.p); 
+        potential = new Ferrers(config.mass, config.scaleRadius, config.q, config.p); 
         break;
+    case PT_PLUMMER:
+        if(config.q==1 && config.p==1)
+            potential = new Plummer(config.mass, config.scaleRadius);
+        else
+            throw std::invalid_argument("Non-spherical Plummer is not yet supported");
+        break;
+    case PT_NFW:
+        if(config.q==1 && config.p==1)
+            potential = new NFW(config.mass, config.scaleRadius);
+        else
+            throw std::invalid_argument("Non-spherical Navarro-Frenk-White is not yet supported");
+        break;
+    case PT_PERFECT_ELLIPSOID:
+        if(config.q==1 && config.p<1)
+            potential = new OblatePerfectEllipsoid(config.mass, config.scaleRadius, config.scaleRadius*config.p); 
+        else
+            throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
+        break;        
 #if 0
     case PT_SCALEFREE:
-        potential=new CPotentialScaleFree(config->mass, config->scalerad, config->q, config->p, config->Gamma);
+        potential=new CPotentialScaleFree(config->mass, config->scaleRadius, config->q, config->p, config->Gamma);
         break;
     case PT_SCALEFREESH:
         if(config->DensityType==PT_COEFS)
             potential=readPotential(config);   // load coefs from a text file
         else
-            potential=new CPotentialScaleFreeSH(config->mass, config->scalerad, config->q, config->p, config->Gamma, config->numCoefsAngular);
+            potential=new CPotentialScaleFreeSH(config->mass, config->scaleRadius, config->q, config->p, config->Gamma, config->numCoefsAngular);
         break;
     case PT_NB:
             potential=readPotential(config);
@@ -87,7 +111,7 @@ const BasePotential* createPotential(ConfigPotential& config)
     case PT_BSE:
     case PT_CYLSPLINE: {
         // two possible variants: either init from analytic density model or from Nbody/coef/massmodel file
-        if( config.densityType == PT_NB || 
+        if( config.densityType == PT_NBODY || 
             config.densityType == PT_ELLIPSOIDAL || 
             config.densityType == PT_MGE || 
             config.densityType == PT_COEFS )
@@ -431,6 +455,8 @@ static const BasePotential* createPotentialExpFromEllMGE(ConfigPotential& config
 /* ----- reading potential from a text or snapshot file ---- */
 const BasePotential* readPotential(ConfigPotential& config)
 {
+    if(config.potentialType == PT_GALPOT)
+        return readGalaxyPotential(config.fileName.c_str(), config.units);
     const std::string& fileName = config.fileName;
     if(fileName.empty()) {
         throw std::runtime_error("readPotential: empty file name");
@@ -469,8 +495,12 @@ const BasePotential* readPotential(ConfigPotential& config)
     if(points.size()==0)
         throw std::runtime_error("readPotential: error loading N-body snapshot from "+fileName);
     const BasePotential* pot = createPotentialFromPoints(config, points);
+    config.densityType  = PT_NBODY;
     // store coefficients in a text file, later may load this file instead for faster initialization
-    writePotential(fileName + getCoefFileExtension(config.potentialType), *pot);
+    try{
+        writePotential(fileName + getCoefFileExtension(config.potentialType), *pot);
+    }
+    catch(std::runtime_error&) {};  // ignore possible write errors
     return pot;
 }
 
@@ -585,7 +615,8 @@ static void swallowRestofLine(std::ifstream& from) {
     } while( from.good() && c !='\n');
 }
 
-const potential::BasePotential* readGalaxyPotential(const char* filename, const units::InternalUnits& units) {
+const potential::BasePotential* readGalaxyPotential(const char* filename, const units::ExternalUnits& conv) 
+{
     std::ifstream strm(filename);
     if(!strm) 
         throw std::runtime_error("Cannot open file "+std::string(filename));
@@ -600,10 +631,10 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
         DiskParam dp;
         strm>>dp.surfaceDensity >> dp.scaleLength >> dp.scaleHeight >> dp.innerCutoffRadius >> dp.modulationAmplitude;
         swallowRestofLine(strm);
-        dp.surfaceDensity *= units.from_Msun_per_Kpc2;
-        dp.scaleLength *= units.from_Kpc;
-        dp.scaleHeight *= units.from_Kpc;
-        dp.innerCutoffRadius *= units.from_Kpc;
+        dp.surfaceDensity *= conv.massUnit/pow_2(conv.lengthUnit);
+        dp.scaleLength *= conv.lengthUnit;
+        dp.scaleHeight *= conv.lengthUnit;
+        dp.innerCutoffRadius *= conv.lengthUnit;
         if(strm) diskpars.push_back(dp);
         else ok=false;
     }
@@ -614,9 +645,9 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
         SphrParam sp;
         strm>>sp.densityNorm >> sp.axisRatio >> sp.gamma >> sp.beta >> sp.scaleRadius >> sp.outerCutoffRadius;
         swallowRestofLine(strm);
-        sp.densityNorm *= units.from_Msun_per_Kpc3;
-        sp.scaleRadius *= units.from_Kpc;
-        sp.outerCutoffRadius *= units.from_Kpc;
+        sp.densityNorm *= conv.massUnit/pow_3(conv.lengthUnit);
+        sp.scaleRadius *= conv.lengthUnit;
+        sp.outerCutoffRadius *= conv.lengthUnit;
         if(strm) sphrpars.push_back(sp);
         else ok=false;
     }
@@ -628,50 +659,50 @@ const potential::BasePotential* readGalaxyPotential(const char* filename, const 
 
 void parseConfigPotential(const utils::KeyValueMap& params, ConfigPotential& config)
 {
-    config.potentialType = getPotentialTypeByName(params.getString("Type"));
-    config.densityType = getDensityTypeByName(params.getStringAlt("DensityModel", "Density"));
-    config.mass = std::max<double>(0, params.getDouble("Mass", config.mass));
-    config.q = std::max<double>(0, params.getDoubleAlt("q_YtoX", "q", config.q));
-    config.p = std::max<double>(0, params.getDoubleAlt("p_ZtoX", "p", config.p));
-    config.scalerad = std::max<double>(0, params.getDoubleAlt("scalerad", "rscale", config.scalerad));
-    config.scalerad2= std::max<double>(0, params.getDoubleAlt("scalerad2","rscale2",config.scalerad2));
-    config.gamma = std::max<double>(0, params.getDouble("Gamma", config.gamma));
-    config.sersicIndex = std::max<double>(0, params.getDouble("SersicIndex", config.sersicIndex));
-    config.numCoefsRadial = std::max<int>(0, params.getInt("Ncoefs_radial", config.numCoefsRadial));
-    config.numCoefsVertical = std::max<int>(0, params.getInt("Ncoefs_vertical", config.numCoefsVertical));
-    config.numCoefsAngular = std::min<int>(0, params.getInt("Ncoefs_angular", config.numCoefsAngular));
-    config.alpha = std::max<double>(0, params.getDouble("Alpha", config.alpha));
-    config.fileName = params.getStringAlt("NbodyFile", "File");
-    config.symmetryType = getSymmetryTypeByName(params.getString("Symmetry"));
-    config.splineSmoothFactor = std::max<double>(0, params.getDouble("splineSmoothFactor", config.splineSmoothFactor));
-    config.splineRMin = params.getDouble("splineRMin", 0);
-    config.splineRMax = params.getDouble("splineRMax", 0);
-    config.splineZMin = params.getDouble("splineZMin", 0);
-    config.splineZMax = params.getDouble("splineZMax", 0);
+    config.potentialType = getPotentialTypeByName(params.getStringAlt("Type", "PotentialType"));
+    config.densityType   = getDensityTypeByName(params.getStringAlt("Density", "DensityType"));
+    config.symmetryType  = getSymmetryTypeByName(params.getStringAlt("Symmetry", "SymmetryType"));
+    config.fileName    = params.getStringAlt("FileName", "File");
+    config.mass        = params.getDouble   ("Mass", config.mass);
+    config.q           = params.getDoubleAlt("q_YtoX", "q", config.q);
+    config.p           = params.getDoubleAlt("p_ZtoX", "p", config.p);
+    config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius);
+    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","rscale2",config.scaleRadius2);
+    config.gamma       = params.getDouble   ("Gamma", config.gamma);
+    config.sersicIndex = params.getDouble   ("SersicIndex", config.sersicIndex);
+    config.numCoefsRadial  = params.getIntAlt("NumCoefsRadial",  "Ncoefs_radial",  config.numCoefsRadial);
+    config.numCoefsVertical= params.getIntAlt("NumCoefsVertical","Ncoefs_vertical",config.numCoefsVertical);
+    config.numCoefsAngular = params.getIntAlt("NumCoefsAngular", "Ncoefs_angular", config.numCoefsAngular);
+    config.alpha              = params.getDouble("Alpha", config.alpha);
+    config.splineSmoothFactor = params.getDouble("splineSmoothFactor", config.splineSmoothFactor);
+    config.splineRMin = params.getDouble("splineRMin", config.splineRMin);
+    config.splineRMax = params.getDouble("splineRMax", config.splineRMax);
+    config.splineZMin = params.getDouble("splineZMin", config.splineZMin);
+    config.splineZMax = params.getDouble("splineZMax", config.splineZMax);
 }
 
 void storeConfigPotential(const ConfigPotential& config, utils::KeyValueMap& params)
 {
     params.set("Type", getPotentialNameByType(config.potentialType));
     params.set("Density", getDensityNameByType(config.densityType));
+    params.set("Symmetry", getSymmetryNameByType(config.symmetryType));
+    params.set("FileName", config.fileName);
     params.set("Mass", config.mass);
     params.set("q_YtoX", config.q);
     params.set("p_ZtoX", config.p);
-    params.set("scalerad", config.scalerad);
-    params.set("scalerad2", config.scalerad2);
+    params.set("ScaleRadius",  config.scaleRadius);
+    params.set("ScaleRadius2", config.scaleRadius2);
     params.set("Gamma", config.gamma);
     params.set("SersicIndex", config.sersicIndex);
-    params.set("Ncoefs_radial",  config.numCoefsRadial);
-    params.set("Ncoefs_angular", config.numCoefsAngular);
-    params.set("Ncoefs_vertical",config.numCoefsVertical);
+    params.set("NumCoefsRadial",  config.numCoefsRadial);
+    params.set("NumCoefsAngular", config.numCoefsAngular);
+    params.set("NumCoefsVertical",config.numCoefsVertical);
     params.set("Alpha", config.alpha);
-    params.set("Symmetry", getSymmetryNameByType(config.symmetryType));
-    params.set("NbodyFile", config.fileName);
-    params.set("splineSmoothFactor", config.splineSmoothFactor);
-    params.set("splineRMin", config.splineRMin);
-    params.set("splineRMax", config.splineRMax);
-    params.set("splineZMin", config.splineZMin);
-    params.set("splineZMax", config.splineZMax);
+    params.set("SplineSmoothFactor", config.splineSmoothFactor);
+    params.set("SplineRMin", config.splineRMin);
+    params.set("SplineRMax", config.splineRMax);
+    params.set("SplineZMin", config.splineZMin);
+    params.set("SplineZMax", config.splineZMax);
 }
 
 //----------------------------------------------------------------------------//
@@ -695,36 +726,36 @@ bool mapinitialized = false;
 void initPotentialAndSymmetryNameMap()
 {
     PotentialNames.clear();
-    PotentialNames[PT_LOG] = Logarithmic::myName();
-    PotentialNames[PT_HARMONIC] = Harmonic::myName();
-    PotentialNames[PT_DEHNEN] = Dehnen::myName();
+    PotentialNames[PT_LOG]       = Logarithmic::myName();
+    PotentialNames[PT_HARMONIC]  = Harmonic::myName();
+    PotentialNames[PT_NFW]       = NFW::myName();
+    PotentialNames[PT_PLUMMER]   = Plummer::myName();
+    PotentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
+    PotentialNames[PT_DEHNEN]    = Dehnen::myName();
+    PotentialNames[PT_FERRERS]   = Ferrers::myName();
+    PotentialNames[PT_PERFECT_ELLIPSOID] = OblatePerfectEllipsoid::myName();
+    PotentialNames[PT_BSE]       = BasisSetExp::myName();
+    PotentialNames[PT_SPLINE]    = SplineExp::myName();
+    PotentialNames[PT_CYLSPLINE] = CylSplineExp::myName();
 //    PotentialNames[PT_SCALEFREE] = CPotentialScaleFree::myName();
 //    PotentialNames[PT_SCALEFREESH] = CPotentialScaleFreeSH::myName();
-    PotentialNames[PT_BSE] = BasisSetExp::myName();
-//    PotentialNames[PT_BSECOMPACT] = CPotentialBSECompact::myName();
-    PotentialNames[PT_SPLINE] = SplineExp::myName();
-    PotentialNames[PT_CYLSPLINE] = CylSplineExp::myName();
 //    PotentialNames[PT_SPHERICAL] = CPotentialSpherical::myName();
-    PotentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
-    PotentialNames[PT_FERRERS] = Ferrers::myName();
-//    PotentialNames[PT_NB] = CPotentialNB::myName();
-    PotentialNames[PT_GALPOT] = "GalPot";
+    PotentialNames[PT_GALPOT]    = "GalPot";
 
     // list of density models available for BSE and Spline approximation
     DensityNames.clear();
-//    DensityNames[PT_NB] = CPotentialNB::myName();   // denotes not the actual tree-code potential, but rather the fact that the density model comes from discrete points in Nbody file
 //    DensityNames[PT_ELLIPSOIDAL] = CDensityEllipsoidal::myName();
 //    DensityNames[PT_MGE] = CDensityMGE::myName();
-    DensityNames[PT_COEFS] = "Coefs";  // denotes that potential expansion coefs are loaded from a text file rather than computed from a density model
-    DensityNames[PT_DEHNEN] = Dehnen::myName();
-    DensityNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
+    DensityNames[PT_COEFS]   = "Coefs";  // denotes that potential expansion coefs are loaded from a text file rather than computed from a density model
+    DensityNames[PT_NBODY]   = "Nbody"; // denotes a density model from discrete points in Nbody file
     DensityNames[PT_PLUMMER] = Plummer::myName();
-//    DensityNames[PT_PERFECTELLIPSOID] = CDensityPerfectEllipsoid::myName();
+    DensityNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
+    DensityNames[PT_DEHNEN]  = Dehnen::myName();
+    DensityNames[PT_FERRERS] = Ferrers::myName();
+    DensityNames[PT_PERFECT_ELLIPSOID] = OblatePerfectEllipsoid::myName();
 //    DensityNames[PT_ISOCHRONE] = CDensityIsochrone::myName();
 //    DensityNames[PT_EXPDISK] = CDensityExpDisk::myName();
-    DensityNames[PT_NFW] = NFW::myName();
 //    DensityNames[PT_SERSIC] = CDensitySersic::myName();
-    DensityNames[PT_FERRERS] = Ferrers::myName();
 
     SymmetryNames[ST_NONE]         = "None";
     SymmetryNames[ST_REFLECTION]   = "Reflection";
@@ -815,11 +846,10 @@ const char* getCoefFileExtension(PotentialType pottype)
 {
     switch(pottype) {
         case PT_BSE:        return ".coef_bse";
-        case PT_BSECOMPACT: return ".coef_bsec";
         case PT_SPLINE:     return ".coef_spl";
         case PT_CYLSPLINE:  return ".coef_cyl";
-        case PT_SCALEFREESH:return ".coef_sf";
-        case PT_SPHERICAL:  return ".mass";
+//        case PT_SCALEFREESH:return ".coef_sf";
+//        case PT_SPHERICAL:  return ".mass";
         case PT_GALPOT:     return ".Tpot";
         default: return "";
     }
@@ -829,16 +859,14 @@ PotentialType getCoefFileType(const std::string& fileName)
 {
     if(utils::endsWithStr(fileName, ".coef_bse"))
         return PT_BSE;
-    else if(utils::endsWithStr(fileName, ".coef_bsec"))
-        return PT_BSECOMPACT;
     else if(utils::endsWithStr(fileName, ".coef_spl"))
         return PT_SPLINE;
     else if(utils::endsWithStr(fileName, ".coef_cyl"))
         return PT_CYLSPLINE;
-    else if(utils::endsWithStr(fileName, ".coef_sf"))
-        return PT_SCALEFREESH;
-    else if(utils::endsWithStr(fileName, ".mass") || utils::endsWithStr(fileName, ".tab"))
-        return PT_SPHERICAL;
+//    else if(utils::endsWithStr(fileName, ".coef_sf"))
+//        return PT_SCALEFREESH;
+//    else if(utils::endsWithStr(fileName, ".mass") || utils::endsWithStr(fileName, ".tab"))
+//        return PT_SPHERICAL;
     else if(utils::endsWithStr(fileName, ".Tpot"))
         return PT_GALPOT;
     else

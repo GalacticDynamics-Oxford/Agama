@@ -72,17 +72,15 @@ public:
 
     /** estimate the mass enclosed within a given spherical radius;
         default implementation integrates density over volume, but derived classes
-        may provide a cheaper alternative (not necessarily a very precise one; 
-        the relative accuracy is controlled by `rel_toler` parameter)
+        may provide a cheaper alternative (not necessarily a very precise one)
     */
-    virtual double enclosedMass(const double radius, const double rel_toler=EPSREL_DENSITY_INT) const;
+    virtual double enclosedMass(const double radius) const;
     
     /** return the total mass of the density model (possibly infinite);
         default implementation estimates the asymptotic behaviour of density at large radii,
         but derived classes may instead return a specific value. 
-        \param[in] rel_toler is the accuracy of mass computation
     */
-    virtual double totalMass(const double rel_toler=EPSREL_DENSITY_INT) const;
+    virtual double totalMass() const;
 
 protected:
 //  Protected members: virtual methods for `density` in different coordinate systems
@@ -294,8 +292,8 @@ public:
 
     virtual SymmetryType symmetry() const { return ST_SPHERICAL; }
 
-    /** find the mass enclosed within a given radius from Poisson equation */
-    virtual double enclosedMass(const double radius, const double /*rel_toler*/) const;
+    /** find the mass enclosed within a given radius from the radial component of force */
+    virtual double enclosedMass(const double radius) const;
 
 private:
     virtual void evalCar(const coord::PosCar &pos,

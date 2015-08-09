@@ -68,7 +68,7 @@ public:
     unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }
 
     /// a faster estimate of M(r) from the l=0 harmonic only
-    double enclosedMass(const double radius, const double /*rel_toler*/) const;
+    double enclosedMass(const double radius) const;
 
 private:
     unsigned int Ncoefs_radial;                 ///< number of radial basis functions [ =SHcoefs.size() ]
@@ -125,7 +125,7 @@ public:
     void getCoefs(std::vector<double> *radii, std::vector< std::vector<double> > *coefsArray, bool useNodes=true) const;
 
     /// a faster estimate of M(r) from the l=0 harmonic only
-    double enclosedMass(const double radius, const double /*rel_toler*/) const;
+    double enclosedMass(const double radius) const;
 
 private:
     unsigned int Ncoefs_radial;              ///< number of radial coefficients (excluding the one at r=0)

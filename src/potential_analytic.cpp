@@ -17,6 +17,11 @@ void Plummer::evalDeriv(double r,
         *deriv2 = pot*(2*pow_2(r)-pow_2(scaleRadius))/pow_2(rsq);
 }
 
+double Plummer::enclosedMass(double r) const
+{
+    return mass / pow_3(sqrt(pow_2(scaleRadius/r) + 1));  // should give correct result in all limiting cases
+}
+
 void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {

@@ -86,7 +86,8 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
     const char* err = "\033[1;31m **\033[0m";
     std::string fileName = std::string("test_") + p.name() + "_" + orig.name() + 
         "_gamma" + utils::convertToString(gamma);
-    writePotential(fileName + getCoefFileExtension(p), p);
+    if(output)
+        writePotential(fileName + getCoefFileExtension(p), p);
     for(int ic=0; ic<numtestpoints; ic++) {
         double pot, pot_orig;
         coord::GradCyl der,  der_orig;

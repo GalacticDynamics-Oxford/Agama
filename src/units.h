@@ -157,7 +157,8 @@ struct ExternalUnits {
     /// construct a trivial converter, for the case that no conversion is actually needed
     ExternalUnits() :
         lengthUnit(1.), velocityUnit(1.), massUnit(1.) {};
-    /// construct a converter for the given internal unit system and specified external units
+    /** construct a converter for the given internal unit system and specified external units,
+        the latter expressed in CGS unit system using the constants defined in this header file */
     ExternalUnits(const InternalUnits& unit, double _lengthUnit, double _velocityUnit, double _massUnit) :
         lengthUnit(unit.from_pc*_lengthUnit/pc), 
         velocityUnit(unit.from_kms*_velocityUnit/kms), 
