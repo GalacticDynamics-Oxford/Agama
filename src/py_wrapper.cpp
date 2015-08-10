@@ -1,3 +1,8 @@
+/** \file   py_wrapper.cpp
+    \brief  Python wrapper for the library
+    \author Eugene Vasiliev
+    \date   2015
+*/
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 //#define DEBUGPRINT
@@ -34,34 +39,8 @@ static const size_t MAX_NUM_KEYWORDS = 64;
 /// max size of docstring
 static const size_t MAX_LEN_DOCSTRING = 4096;
 
-/// return size of array-like type
-static int listOrArraySize(PyObject* a)
-{
-    if(a && PyList_Check(a))
-        return static_cast<int>(PyList_Size(a));
-    if(a && PyArray_Check((PyArrayObject *)a) &&
-        PyArray_ISFLOAT(const_cast<const PyArrayObject*>((PyArrayObject*)a)) &&
-        PyArray_NDIM(const_cast<const PyArrayObject*>((PyArrayObject*)a))==1 )
-        return static_cast<int>(*PyArray_DIMS((PyArrayObject*)a));
-    return -1;
-}
-
-static double listOrArrayElem(PyObject* a, int index)
-{
-    if(PyList_Check(a))
-        return PyFloat_AsDouble(PyList_GetItem(a, index));
-    else {
-        npy_intp i=static_cast<npy_intp>(index);
-        void* data=PyArray_GetPtr((PyArrayObject*)a, &i);
-        if(PyArray_TYPE((PyArrayObject*)a)==NPY_FLOAT) return *((float*)data);
-        if(PyArray_TYPE((PyArrayObject*)a)==NPY_DOUBLE) return *((double*)data);
-        PyErr_SetString(PyExc_ValueError, "Unknown data type in array");
-        return 0;
-    }
-}
-
 ///@}
-/// \name   Potential class and related data
+/// \name  ---------- Potential class and related data ------------
 ///@{
 
 /// Python type corresponding to Potential class
@@ -98,7 +77,9 @@ static const ArgDescription potentialArgs[] = {
     {"type",              's', "potential type, such as 'Plummer', 'Ferrers', or potential expansion type, such as 'SplineExp'"},
     {"density",           's', "density model for potential expansion, like 'Dehnen', 'MGE'"},
     {"symmetry",          's', "assumed symmetry for potential expansion constructed from an N-body snapshot"},
-    {"points",            'O', "array of point masses to be used in construction of a potential expansion"},
+    {"points",            'O', "array of point masses to be used in construction of a potential expansion: "
+        "should be a tuple with two arrays - coordinates and mass, where the first one "
+        "is a two-dimensional Nx3 array and the second one is a one-dimensional array of length N"},
     {"mass",              'd', "total mass of the model"},
     {"scaleradius",       'd', "scale radius of the model (if applicable)"},
     {"scaleradius2",      'd', "second scale radius of the model (if applicable)"},
@@ -160,7 +141,8 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
     const char* symmetry="";
     PyObject* points=NULL;
 
-    // it is VITALLY IMPORTANT to list all data fields in exactly the same order as appeared in the `potentialArgs` array!!!
+    // it is VITALLY IMPORTANT to list all data fields in exactly the same order
+    // as appeared in the `potentialArgs` array!!!
     if(!PyArg_ParseTupleAndKeywords(args, namedargs, keywordTypesPotential, const_cast<char**>(keywordsPotential),
         &file, &type, &density, &symmetry,
         &points,
@@ -201,20 +183,42 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
                 PyErr_SetString(PyExc_ValueError, "Potential should be of an expansion type");
                 return -1;
             }
-            // check type
-            int numpt = listOrArraySize(points);
-            if(numpt<=0 || numpt%4!=0) {
-                PyErr_SetString(PyExc_ValueError, "Empty array of points");
+            PyObject *pointCoordObj, *pointMassObj;
+            if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
+                PyErr_SetString(PyExc_ValueError, "'points' must be a tuple with two arrays - "
+                    "coordinates and mass, where the first one is a two-dimensional Nx3 array "
+                    "and the second one is a one-dimensional array of length N");
                 return -1;
             }
-            numpt/=4;
+            PyArrayObject *pointCoordArr = (PyArrayObject*)
+                PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+            PyArrayObject *pointMassArr  = (PyArrayObject*)
+                PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+            if(pointCoordArr == NULL || pointMassArr == NULL) {
+                Py_XDECREF(pointCoordArr);
+                Py_XDECREF(pointMassArr);
+                PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays");
+                return -1;
+            }
+            int numpt = 0;
+            if(PyArray_NDIM(pointMassArr) == 1)
+                numpt = PyArray_DIM(pointMassArr, 0);
+            if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 || 
+                PyArray_DIM(pointCoordArr, 0) != numpt || PyArray_DIM(pointCoordArr, 1) != 3)
+            {
+                Py_XDECREF(pointCoordArr);
+                Py_XDECREF(pointMassArr);
+                PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays "
+                    "(the first one must be 2d array of shape Nx3 and the second one must be 1d array of length N)");
+                return -1;
+            }
             particles::PointMassArray<coord::PosCar> pointArray;
             pointArray.data.reserve(numpt);
             for(int i=0; i<numpt; i++) {
-                double x=listOrArrayElem(points, i);
-                double y=listOrArrayElem(points, i+numpt);
-                double z=listOrArrayElem(points, i+numpt*2);
-                double m=listOrArrayElem(points, i+numpt*3);
+                double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0));
+                double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1));
+                double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2));
+                double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i));
                 pointArray.add(coord::PosCar(x,y,z), m);
             }
             if(PyErr_Occurred()) {  // numerical conversion error
@@ -259,42 +263,140 @@ static bool Potential_isCorrect(PyObject* self)
     return true;
 }
 
-static PyObject* Potential_potential(PyObject* self, PyObject* args)
+/// any function that evaluates something for a given potential object
+/// and stores one or more values in the `result` array
+typedef void (*potentialFunction) 
+    (const potential::BasePotential* pot, const coord::PosCar& pos, double *result);
+
+/// potentialFunction output type
+enum OUTPUT_VALUE {
+    OUTPUT_VALUE_SINGLE,   ///< potential or density (scalar values)
+    OUTPUT_VALUE_TRIPLET,  ///< potential derivatives
+    OUTPUT_VALUE_TRIPLET_AND_SEXTET  ///< derivatives and second derivatives
+};
+
+/// function that computes something from the Potential object for one or many input points
+static PyObject* Potential_AnyFunction(PyObject* self, PyObject* args, 
+    potentialFunction fnc, OUTPUT_VALUE outputValue)
 {
     coord::PosCar pos;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z))
+    if(!Potential_isCorrect(self))
         return NULL;
-    return Py_BuildValue("d", ((PotentialObject*)self)->pot->value(pos));
+    if(PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z)) {  // one point
+        double result[9];
+        fnc(((PotentialObject*)self)->pot, pos, result);
+        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
+            return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
+                result[3], result[4], result[5], result[6], result[7], result[8]);
+        else if(outputValue == OUTPUT_VALUE_TRIPLET)
+            return Py_BuildValue("ddd", result[0], result[1], result[2]);
+        else
+            return Py_BuildValue("d", result[0]);
+    }
+    PyErr_Clear();
+    PyObject* obj;
+    if(PyArg_ParseTuple(args, "O", &obj)) {
+        PyArrayObject *arr  = (PyArrayObject*) PyArray_FROM_OTF(obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+        if(arr == NULL) {
+            PyErr_SetString(PyExc_ValueError, "Input does not contain valid array");
+            return NULL;
+        }
+        int numpt = 0;
+        if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == 3) {  // 1d array of length 3 - a single point
+            pos.x = *static_cast<double*>(PyArray_GETPTR1(arr, 0));
+            pos.y = *static_cast<double*>(PyArray_GETPTR1(arr, 1));
+            pos.z = *static_cast<double*>(PyArray_GETPTR1(arr, 2));
+            Py_DECREF(arr);
+            double result[9];
+            fnc(((PotentialObject*)self)->pot, pos, result);
+            if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
+                return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
+                    result[3], result[4], result[5], result[6], result[7], result[8]);
+            else if(outputValue == OUTPUT_VALUE_TRIPLET)
+                return Py_BuildValue("ddd", result[0], result[1], result[2]);
+            else
+                return Py_BuildValue("d", result[0]);
+        }
+        if(PyArray_NDIM(arr) == 2 && PyArray_DIM(arr, 1) == 3)
+            numpt = PyArray_DIM(arr, 0);
+        else {
+            PyErr_SetString(PyExc_ValueError, "Input does not contain valid Nx3 array");
+            Py_DECREF(arr);
+            return NULL;
+        }
+        npy_intp dims1[2] = {numpt, 3};  // either a 1d array or a 2d array Nx3
+        npy_intp dims2[2] = {numpt, 6};  // 2d array Nx6, used only for second derivatives of potential
+        PyArrayObject* out1 = (PyArrayObject*)PyArray_SimpleNew(
+            outputValue == OUTPUT_VALUE_SINGLE ? 1 : 2, dims1, NPY_DOUBLE);
+        PyArrayObject* out2 = NULL;
+        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
+            out2 = (PyArrayObject*)PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
+        for(int i=0; i<numpt; i++) {
+            pos.x = *static_cast<double*>(PyArray_GETPTR2(arr, i, 0));
+            pos.y = *static_cast<double*>(PyArray_GETPTR2(arr, i, 1));
+            pos.z = *static_cast<double*>(PyArray_GETPTR2(arr, i, 2));
+            double result[9];
+            fnc(((PotentialObject*)self)->pot, pos, result);
+            if(outputValue == OUTPUT_VALUE_SINGLE)
+                ((double*)PyArray_DATA(out1))[i] = result[0];
+            else for(int d=0; d<3; d++)
+                ((double*)PyArray_DATA(out1))[i*3+d] = result[d];
+            if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET) 
+                for(int d=0; d<6; d++)
+                    ((double*)PyArray_DATA(out2))[i*6+d] = result[d+3];
+        }
+        Py_DECREF(arr);
+        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
+            return Py_BuildValue("NN", out1, out2);
+        else
+            return PyArray_Return(out1);        
+    }
+    PyErr_SetString(PyExc_ValueError, "Input does not contain valid data "
+        "(either 3 coordinates of a single point or a Nx3 array)");
+    return NULL;
 }
 
-static PyObject* Potential_density(PyObject* self, PyObject* args)
-{
-    coord::PosCar pos;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z))
-        return NULL;
-    return Py_BuildValue("d", ((PotentialObject*)self)->pot->density(pos));
+void potfuncPotential(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
+    result[0] = pot->value(pos);
+}
+static PyObject* Potential_potential(PyObject* self, PyObject* args) {
+    return Potential_AnyFunction(self, args, potfuncPotential, OUTPUT_VALUE_SINGLE);
 }
 
-static PyObject* Potential_force(PyObject* self, PyObject* args)
-{
-    coord::PosCar pos;
+void potfuncDensity(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
+    result[0] = pot->density(pos);
+}
+static PyObject* Potential_density(PyObject* self, PyObject* args) {
+    return Potential_AnyFunction(self, args, potfuncDensity, OUTPUT_VALUE_SINGLE);
+}
+
+void potfuncForce(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
     coord::GradCar grad;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z))
-        return NULL;
-    ((PotentialObject*)self)->pot->eval(pos, 0, &grad);
-    return Py_BuildValue("ddd", -grad.dx, -grad.dy, -grad.dz);
+    pot->eval(pos, NULL, &grad);
+    result[0] = -grad.dx;
+    result[1] = -grad.dy;
+    result[2] = -grad.dz;
+}
+static PyObject* Potential_force(PyObject* self, PyObject* args) {
+    return Potential_AnyFunction(self, args, potfuncForce, OUTPUT_VALUE_TRIPLET);
 }
 
-static PyObject* Potential_force_deriv(PyObject* self, PyObject* args)
-{
-    coord::PosCar pos;
+void potfuncForceDeriv(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
     coord::GradCar grad;
     coord::HessCar hess;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z))
-        return NULL;
-    ((PotentialObject*)self)->pot->eval(pos, 0, &grad, &hess);
-    return Py_BuildValue("(ddd)(dddddd)", -grad.dx, -grad.dy, -grad.dz,
-         -hess.dx2, -hess.dy2, -hess.dz2, -hess.dxdy, -hess.dydz, -hess.dxdz);
+    pot->eval(pos, NULL, &grad, &hess);
+    result[0] = -grad.dx;
+    result[1] = -grad.dy;
+    result[2] = -grad.dz;
+    result[3] = -hess.dx2;
+    result[4] = -hess.dy2;
+    result[5] = -hess.dz2;
+    result[6] = -hess.dxdy;
+    result[7] = -hess.dydz;
+    result[8] = -hess.dxdz;
+}
+static PyObject* Potential_force_deriv(PyObject* self, PyObject* args) {
+    return Potential_AnyFunction(self, args, potfuncForceDeriv, OUTPUT_VALUE_TRIPLET_AND_SEXTET);
 }
 
 static PyObject* Potential_name(PyObject* self)
@@ -355,7 +457,7 @@ static PyTypeObject PotentialType = {
 };
 
 ///@}
-/// \name  SplineApprox class
+/// \name  --------- SplineApprox class -----------
 ///@{
 
 typedef struct {
@@ -370,43 +472,68 @@ static void SplineApprox_dealloc(SplineApproxObject* self)
     self->ob_type->tp_free((PyObject*)self);
 }
 
-const char* class_docstring_spline = 
-    "SplineApprox is a class that deals with smoothing splines\n";
+const char* docstringSplineApprox = 
+    "SplineApprox is a class that deals with smoothing splines.\n"
+    "It approximates a large set of (x,y) points by a smooth curve with "
+    "a rather small number of knots, which should encompass the entire range "
+    "of input x values, but preferrably in such a way that each interval "
+    "between knots contains at least one x-value from the set of input points.\n"
+    "The smoothness of the approximating spline is adjusted by an optional "
+    "input parameter `smooth`, which determines the tradeoff between smoothness "
+    "and approximation error; zero means no additional smoothing (beyond the one "
+    "resulting from discreteness of the spacing of knots), and values around "
+    "unity usually yield a reasonable smoothing of noise without sacrificing "
+    "too much of accuracy.\n"
+    "Values of the spline and up to its second derivative are computed using "
+    "the () operator with the first argument being a single x-point or an array "
+    "of points, and optional second argument being the derivative index (0, 1, or 2).";
 
 static int SplineApprox_init(PyObject* self, PyObject* args, PyObject* namedargs)
 {
     ((SplineApproxObject*)self)->spl=NULL;
-    static const char* keywords[] = {"x","y","k","s",NULL};
-    PyObject* ptx=NULL;
-    PyObject* pty=NULL;
-    PyObject* ptk=NULL;
+    static const char* keywords[] = {"x","y","knots","smooth",NULL};
+    PyObject* objx=NULL;
+    PyObject* objy=NULL;
+    PyObject* objk=NULL;
     double smoothfactor=0;
     if(!PyArg_ParseTupleAndKeywords(args, namedargs, "OOO|d", const_cast<char **>(keywords),
-        &ptx, &pty, &ptk, &smoothfactor)) {
-        PyErr_SetString(PyExc_ValueError, "Incorrect parameters passed to the SplineApprox constructor");
+        &objx, &objy, &objk, &smoothfactor)) {
+        PyErr_SetString(PyExc_ValueError, "Incorrect parameters passed to the SplineApprox constructor: "
+            "must provide two arrays of equal length (input x and y points), "
+            "a third array of spline knots, and optionally a float (smooth factor)");
         return -1;
     }
-    int numx=listOrArraySize(ptx);
-    int numy=listOrArraySize(pty);
-    int numk=listOrArraySize(ptk);
-    if(numx<=0 || numy<=0 || numx!=numy || numk<4) {
+    PyArrayObject *arrx = (PyArrayObject*) PyArray_FROM_OTF(objx, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *arry = (PyArrayObject*) PyArray_FROM_OTF(objy, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *arrk = (PyArrayObject*) PyArray_FROM_OTF(objk, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(arrx == NULL || arry == NULL || arrk == NULL) {
+        Py_XDECREF(arrx);
+        Py_XDECREF(arry);
+        Py_XDECREF(arrk);
+        PyErr_SetString(PyExc_ValueError, "Input does not contain valid arrays");
+        return -1;
+    }
+    int numpt = 0;
+    if(PyArray_NDIM(arrx) == 1)
+        numpt = PyArray_DIM(arrx, 0);
+    int numknots = 0;
+    if(PyArray_NDIM(arrk) == 1)
+        numknots = PyArray_DIM(arrk, 0);
+    if(numpt <= 0 || numknots <= 4|| PyArray_NDIM(arry) != 1 || PyArray_DIM(arry, 0) != numpt) {
+        Py_DECREF(arrx);
+        Py_DECREF(arry);
+        Py_DECREF(arrk);
         PyErr_SetString(PyExc_ValueError, 
-        "Arguments must be two arrays of equal length (x and y) and a third array (knots, at least 4), "
-        "and optionally a float (smooth factor)");
+            "Arguments must be two arrays of equal length (x and y) and a third array (knots, at least 4)");
         return -1;
     }
-    std::vector<double> xvalues(numx), yvalues(numx), knots(numk), splinevals;
-    double der1, der2;  // endpoint derivatives
-    for(int i=0; i<numx; i++) {
-        xvalues[i]=listOrArrayElem(ptx, i);
-        yvalues[i]=listOrArrayElem(pty, i);
-    }
-    for(int i=0; i<numk; i++) 
-        knots[i]=listOrArrayElem(ptk, i);
-    if(PyErr_Occurred())  // numerical conversion error
-        return -1;
+    std::vector<double> xvalues((double*)PyArray_DATA(arrx), (double*)PyArray_DATA(arrx) + numpt);
+    std::vector<double> yvalues((double*)PyArray_DATA(arry), (double*)PyArray_DATA(arry) + numpt);
+    std::vector<double> knots((double*)PyArray_DATA(arrk), (double*)PyArray_DATA(arrk) + numknots);
     try{
         math::SplineApprox spl(xvalues, knots);
+        std::vector<double> splinevals;
+        double der1, der2;
         if(smoothfactor>0)
             spl.fitDataOversmooth(yvalues, smoothfactor, splinevals, der1, der2);
         else
@@ -444,16 +571,17 @@ static PyObject* SplineApprox_value(PyObject* self, PyObject* args, PyObject* /*
     if(PyFloat_Check(ptx))  // one value
         return Py_BuildValue("d", spl_eval(((SplineApproxObject*)self)->spl, PyFloat_AsDouble(ptx), der) );
     // else an array of values
-    int num=listOrArraySize(ptx);
-    if(num<=0) {
+    PyArrayObject *arr = (PyArrayObject*) 
+        PyArray_FROM_OTF(ptx, NPY_DOUBLE, NPY_ARRAY_OUT_ARRAY | NPY_ARRAY_ENSURECOPY);
+    if(arr == NULL) {
         PyErr_SetString(PyExc_ValueError, "Argument must be either float, list or numpy array");
         return NULL;
     }
-    npy_intp dims[1]={num};
-    PyArrayObject* ptv = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
-    for(int i=0; i<num; i++)
-        ((double*)PyArray_DATA(ptv))[i] = spl_eval(((SplineApproxObject*)self)->spl, listOrArrayElem(ptx, i), der);
-    return PyArray_Return(ptv);
+    // replace elements of the copy of input array with computed values
+    for(int i=0; i<PyArray_SIZE(arr); i++)
+        ((double*)PyArray_DATA(arr))[i] = 
+            spl_eval(((SplineApproxObject*)self)->spl, ((double*)PyArray_DATA(arr))[i], der);
+    return PyArray_Return(arr);
 }
 
 static PyMethodDef SplineApprox_methods[] = {
@@ -464,8 +592,8 @@ static PyTypeObject SplineApproxType = {
     PyObject_HEAD_INIT(NULL)
     0, "py_wrapper.SplineApprox",
     sizeof(SplineApproxObject), 0, (destructor)SplineApprox_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, SplineApprox_value, /*SplineApprox_status*/0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, class_docstring_spline, 
+    0, 0, 0, 0, 0, 0, 0, 0, 0, SplineApprox_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringSplineApprox, 
     0, 0, 0, 0, 0, 0, SplineApprox_methods, 0, 0, 0, 0, 0, 0, 0,
     SplineApprox_init, 0, 
 };
