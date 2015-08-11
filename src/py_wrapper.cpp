@@ -1,14 +1,15 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the library
     \author Eugene Vasiliev
-    \date   2015
+    \date   2014-2015
 */
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 //#define DEBUGPRINT
 #include <numpy/arrayobject.h>
-#include "utils_config.h"
 #include "potential_factory.h"
+#include "actions_staeckel.h"
+#include "actions_torus.h"
 #include "math_spline.h"
 
 /// \name  Some general definitions and utility functions
@@ -39,6 +40,204 @@ static const size_t MAX_NUM_KEYWORDS = 64;
 /// max size of docstring
 static const size_t MAX_LEN_DOCSTRING = 4096;
 
+// ----- a truly general interface for evaluating some function -----
+// ----- for some input data and storing its output somewhere   -----
+
+/// any function that evaluates something for a given object and an `input` array of floats,
+/// and stores one or more values in the `result` array of floats
+typedef void (*anyFunction) 
+    (PyObject* obj, const double input[], double *result);
+
+/// maximum possible length of input array specifying a single point
+static const int MAX_SIZE_INPUT  = 64;
+
+/// maximum possible length of output array of data computed for a single point
+static const int MAX_SIZE_OUTPUT = 64;
+
+/// anyFunction input type; numerical value is equal to the length of input array
+enum INPUT_VALUE {
+    INPUT_VALUE_SINGLE = 1,  ///< a single number
+    INPUT_VALUE_TRIPLET= 3,  ///< three numbers
+    INPUT_VALUE_SEXTET = 6   ///< six numbers   
+};
+
+/// anyFunction output type; numerical value is arbitrary
+enum OUTPUT_VALUE {
+    OUTPUT_VALUE_SINGLE              = 1,  ///< scalar value
+    OUTPUT_VALUE_TRIPLET             = 3,  ///< a triplet of numbers
+    OUTPUT_VALUE_SEXTET              = 6,  ///< a sextet of numbers
+    OUTPUT_VALUE_TRIPLET_AND_TRIPLET = 33, ///< a triplet and another triplet -- two separate arrays
+    OUTPUT_VALUE_TRIPLET_AND_SEXTET  = 36  ///< a triplet and a sextet
+};
+
+/// parse a list of numArgs floating-point arguments for a Python function, and store them in inputArray[]
+template<int numArgs>
+int parseTuple(PyObject* args, double inputArray[]);
+
+/// error message for an input array of incorrect size
+template<int numArgs>
+const char* errStrInvalidArrayDim();
+
+/// error message for an input array of incorrect size or an invalid list of arguments
+template<int numArgs>
+const char* errStrInvalidInput();
+
+/// construct an output tuple containing the given result data computed for a single input point
+template<int numOutput>
+PyObject* formatTuple(const double result[]);
+
+/// construct an output array, or several arrays, that will store the output for many input points
+template<int numOutput>
+PyObject* allocOutputArr(int size);
+
+/// store the 'result' data computed for a single input point in an output array 'resultObj' at 'index'
+template<int numOutput>
+void formatOutputArr(const double result[], const int index, PyObject* resultObj);
+
+// ---- template instantiations for input parameters ----
+
+template<> int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
+    return PyArg_ParseTuple(args, "ddd", &input[0], &input[1], &input[2]);
+}
+template<> int parseTuple<INPUT_VALUE_SEXTET>(PyObject* args, double input[]) {
+    return PyArg_ParseTuple(args, "dddddd",
+        &input[0], &input[1], &input[2], &input[3], &input[4], &input[5]);
+}
+
+template<> const char* errStrInvalidArrayDim<INPUT_VALUE_TRIPLET>() {
+    return "Input does not contain valid Nx3 array";
+}
+template<> const char* errStrInvalidArrayDim<INPUT_VALUE_SEXTET>() {
+    return "Input does not contain valid Nx6 array";
+}
+
+template<> const char* errStrInvalidInput<INPUT_VALUE_TRIPLET>() {
+    return "Input does not contain valid data (either 3 numbers for a single point or a Nx3 array)";
+}
+template<> const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
+    return "Input does not contain valid data (either 6 numbers for a single point or a Nx6 array)";
+}
+
+// ---- template instantiations for output parameters ----
+
+template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
+    return Py_BuildValue("d", result[0]);
+}
+template<> PyObject* formatTuple<OUTPUT_VALUE_TRIPLET>(const double result[]) {
+    return Py_BuildValue("ddd", result[0], result[1], result[2]);
+}
+template<> PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(const double result[]) {
+    return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
+        result[3], result[4], result[5], result[6], result[7], result[8]);
+}
+
+template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(int size) {
+    npy_intp dims[] = {size};
+    return PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+}
+template<> PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(int size) {
+    npy_intp dims[] = {size, 3};
+    return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
+}
+template<> PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(int size) {
+    npy_intp dims1[] = {size, 3};
+    npy_intp dims2[] = {size, 6};
+    PyObject* arr1 = PyArray_SimpleNew(2, dims1, NPY_DOUBLE);
+    PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
+    return Py_BuildValue("NN", arr1, arr2);
+}
+
+template<> void formatOutputArr<OUTPUT_VALUE_SINGLE>(
+    const double result[], const int index, PyObject* resultObj) 
+{
+    ((double*)PyArray_DATA((PyArrayObject*)resultObj))[index] = result[0];
+}
+template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
+    const double result[], const int index, PyObject* resultObj) 
+{
+    for(int d=0; d<3; d++)
+        ((double*)PyArray_DATA((PyArrayObject*)resultObj))[index*3+d] = result[d];
+}
+template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
+    const double result[], const int index, PyObject* resultObj) 
+{
+    PyArrayObject* arr1 = (PyArrayObject*) PyTuple_GET_ITEM(resultObj, 0);
+    PyArrayObject* arr2 = (PyArrayObject*) PyTuple_GET_ITEM(resultObj, 1);
+    for(int d=0; d<3; d++)
+        ((double*)PyArray_DATA(arr1))[index*3+d] = result[d];
+    for(int d=0; d<6; d++)
+        ((double*)PyArray_DATA(arr2))[index*6+d] = result[d+3];
+}
+
+/** A general function that computes something for one or many input points.
+    \param[in]  fnc  is the function pointer to the routine that actually computes something,
+    taking a pointer to an instance of Python object, an array of floats as the input point,
+    and producing another array of floats as the output.
+    \tparam numArgs  is the size of array that contains the value of a single input point.
+    \tparam numOutput is the identifier (not literally the size) of output data format 
+    for a single input point: it may be a single number, an array of floats, or even several arrays.
+    \param[in] self  is the pointer to Python object that is passed to the 'fnc' routine
+    \param[in] args  is the arguments of the function call: it may be a sequence of numArg floats 
+    that represents a single input point, or a 1d array of the same length and same meaning,
+    or a 2d array of dimensions N * numArgs, representing N input points.
+    \returns  the result of applying 'fnc' to one or many input points, in the form determined 
+    both by the number of input points, and the output data format. 
+    The output for a single point may be a sequence of numbers (tuple or 1d array), 
+    or several such arrays forming a tuple (e.g., [ [1,2,3], [1,2,3,4,5,6] ]). 
+    The output for an array of input points would be one or several 2d arrays of length N and 
+    shape determined by the output format, i.e., for the above example it would be ([N,3], [N,6]).
+*/
+template<int numArgs, int numOutput>
+static PyObject* callAnyFunctionOnArray(PyObject* self, PyObject* args, anyFunction fnc)
+{
+    double input [MAX_SIZE_INPUT];
+    double result[MAX_SIZE_OUTPUT];
+    try{
+        if(parseTuple<numArgs>(args, input)) {  // one point
+            fnc(self, input, result);
+            return formatTuple<numOutput>(result);
+        }
+        PyErr_Clear();  // clear error if the argument list is not a tuple of a proper type
+        PyObject* obj;
+        if(PyArg_ParseTuple(args, "O", &obj)) {
+            PyArrayObject *arr  = (PyArrayObject*) PyArray_FROM_OTF(obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+            if(arr == NULL) {
+                PyErr_SetString(PyExc_ValueError, "Input does not contain a valid array");
+                return NULL;
+            }
+            int numpt = 0;
+            if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == numArgs) 
+            {   // 1d array of length numArgs - a single point
+                fnc(self, static_cast<double*>(PyArray_GETPTR1(arr, 0)), result);
+                Py_DECREF(arr);
+                return formatTuple<numOutput>(result);
+            }
+            if(PyArray_NDIM(arr) == 2 && PyArray_DIM(arr, 1) == numArgs)
+                numpt = PyArray_DIM(arr, 0);
+            else {
+                PyErr_SetString(PyExc_ValueError, errStrInvalidArrayDim<numArgs>());
+                Py_DECREF(arr);
+                return NULL;
+            }
+            // allocate an appropriate output object
+            PyObject* resultObj = allocOutputArr<numOutput>(numpt);
+            // loop over input array
+            for(int i=0; i<numpt; i++) {
+                fnc(self, static_cast<double*>(PyArray_GETPTR2(arr, i, 0)), result);
+                formatOutputArr<numOutput>(result, i, resultObj);
+            }                
+            Py_DECREF(arr);
+            return resultObj;
+        }
+        PyErr_SetString(PyExc_ValueError, errStrInvalidInput<numArgs>());
+        return NULL;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, (std::string("Exception occured: ")+e.what()).c_str());
+        return NULL;
+    }
+}
+
 ///@}
 /// \name  ---------- Potential class and related data ------------
 ///@{
@@ -49,13 +248,13 @@ typedef struct {
     const potential::BasePotential* pot;
 } PotentialObject;
 
-/*static PyObject* PotentialObject_new(PyTypeObject *type, PyObject*, PyObject*)
+static PyObject* Potential_new(PyTypeObject *type, PyObject*, PyObject*)
 {
     PotentialObject *self = (PotentialObject*)type->tp_alloc(type, 0);
-    if(self) self->pot=NULL;
-    printf("Allocated a new Potential object\n");
+    if(self)
+        self->pot=NULL;
     return (PyObject*)self;
-}*/
+}
 
 static void Potential_dealloc(PotentialObject* self)
 {
@@ -132,8 +331,88 @@ static void buildDocstringPotential()
     }
 }
 
-static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
+/// construct potential::BasePotential* object from particles
+static const potential::BasePotential* Potential_initFromParticles(
+    const potential::ConfigPotential& cfg, PyObject* points)
 {
+    if( !cfg.fileName.empty() ) {
+        PyErr_SetString(PyExc_ValueError, "Cannot provide both points and filename");
+        return NULL;
+    }
+    if( cfg.potentialType != potential::PT_BSE &&
+        cfg.potentialType != potential::PT_SPLINE &&
+        cfg.potentialType != potential::PT_CYLSPLINE ) {
+        PyErr_SetString(PyExc_ValueError, "Potential should be of an expansion type");
+        return NULL;
+    }
+    PyObject *pointCoordObj, *pointMassObj;
+    if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
+        PyErr_SetString(PyExc_ValueError, "'points' must be a tuple with two arrays - "
+            "coordinates and mass, where the first one is a two-dimensional Nx3 array "
+            "and the second one is a one-dimensional array of length N");
+        return NULL;
+    }
+    PyArrayObject *pointCoordArr = (PyArrayObject*)
+        PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *pointMassArr  = (PyArrayObject*)
+        PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(pointCoordArr == NULL || pointMassArr == NULL) {
+        Py_XDECREF(pointCoordArr);
+        Py_XDECREF(pointMassArr);
+        PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays");
+        return NULL;
+    }
+    int numpt = 0;
+    if(PyArray_NDIM(pointMassArr) == 1)
+        numpt = PyArray_DIM(pointMassArr, 0);
+    if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 || 
+        PyArray_DIM(pointCoordArr, 0) != numpt || PyArray_DIM(pointCoordArr, 1) != 3)
+    {
+        Py_XDECREF(pointCoordArr);
+        Py_XDECREF(pointMassArr);
+        PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays "
+            "(the first one must be 2d array of shape Nx3 and the second one must be 1d array of length N)");
+        return NULL;
+    }
+    particles::PointMassArray<coord::PosCar> pointArray;
+    pointArray.data.reserve(numpt);
+    for(int i=0; i<numpt; i++) {
+        double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0));
+        double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1));
+        double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2));
+        double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i));
+        pointArray.add(coord::PosCar(x,y,z), m);
+    }
+    if(PyErr_Occurred()) {  // numerical conversion error
+        return NULL;
+    }
+    return potential::createPotentialFromPoints(cfg, pointArray);
+}
+
+/// finalize the call to constructor by assigning the member variable 'pot'
+static void Potential_initMemberVar(PyObject* self, const potential::BasePotential* pot)
+{
+#ifdef DEBUGPRINT
+    printf("Created an instance of %s potential\n", pot->name());
+#endif
+    if(((PotentialObject*)self)->pot) {  // check if this is not the first time that constructor is called
+#ifdef DEBUGPRINT
+        printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
+#endif
+        delete ((PotentialObject*)self)->pot;
+    }
+    ((PotentialObject*)self)->pot = pot;
+}
+
+/// the generic constructor of Potential object
+static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
+{    
+    // check if the input was a tuple of Potential objects
+    if(PyTuple_CheckExact(args)) {
+        printf("Input arguments: %i\n", (int)PyTuple_Size(args));
+    }
+    //if(PyArg_ParseTuple(args, "O!"));
+
     potential::ConfigPotential cfg;
     const char* file="";
     const char* type="";
@@ -154,11 +433,6 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
             "type 'help(Potential)' to get the list of possible arguments and their types");
         return -1;
     }
-#ifdef DEBUGPRINT
-    utils::KeyValueMap kv;
-    storeConfigPotential(cfg, kv);
-    printf("%s", kv.dump().c_str());
-#endif
     cfg.fileName = std::string(file);
     cfg.potentialType = potential::getPotentialTypeByName(type);
     cfg.densityType = potential::getDensityTypeByName(density);
@@ -171,77 +445,14 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
         return -1;
     }
     try{  // the code below may generate exceptions which shouldn't propagate to Python
-        const potential::BasePotential* pot=NULL;
+        const potential::BasePotential* pot = NULL;
         if(points!=NULL) {  // a list of particles was provided
-            if( file[0]!=0 ) {
-                PyErr_SetString(PyExc_ValueError, "Cannot provide both points and filename");
-                return -1;
-            }
-            if( cfg.potentialType != potential::PT_BSE &&
-                cfg.potentialType != potential::PT_SPLINE &&
-                cfg.potentialType != potential::PT_CYLSPLINE ) {
-                PyErr_SetString(PyExc_ValueError, "Potential should be of an expansion type");
-                return -1;
-            }
-            PyObject *pointCoordObj, *pointMassObj;
-            if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
-                PyErr_SetString(PyExc_ValueError, "'points' must be a tuple with two arrays - "
-                    "coordinates and mass, where the first one is a two-dimensional Nx3 array "
-                    "and the second one is a one-dimensional array of length N");
-                return -1;
-            }
-            PyArrayObject *pointCoordArr = (PyArrayObject*)
-                PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-            PyArrayObject *pointMassArr  = (PyArrayObject*)
-                PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-            if(pointCoordArr == NULL || pointMassArr == NULL) {
-                Py_XDECREF(pointCoordArr);
-                Py_XDECREF(pointMassArr);
-                PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays");
-                return -1;
-            }
-            int numpt = 0;
-            if(PyArray_NDIM(pointMassArr) == 1)
-                numpt = PyArray_DIM(pointMassArr, 0);
-            if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 || 
-                PyArray_DIM(pointCoordArr, 0) != numpt || PyArray_DIM(pointCoordArr, 1) != 3)
-            {
-                Py_XDECREF(pointCoordArr);
-                Py_XDECREF(pointMassArr);
-                PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays "
-                    "(the first one must be 2d array of shape Nx3 and the second one must be 1d array of length N)");
-                return -1;
-            }
-            particles::PointMassArray<coord::PosCar> pointArray;
-            pointArray.data.reserve(numpt);
-            for(int i=0; i<numpt; i++) {
-                double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0));
-                double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1));
-                double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2));
-                double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i));
-                pointArray.add(coord::PosCar(x,y,z), m);
-            }
-            if(PyErr_Occurred()) {  // numerical conversion error
-                return -1;
-            }
-            pot = potential::createPotentialFromPoints(cfg, pointArray);
-        } else {
-            pot = potential::createPotential(cfg);  // attempt to create potential from configuration parameters
+            pot = Potential_initFromParticles(cfg, points);
+        } else {   // attempt to create potential from configuration parameters
+            pot = potential::createPotential(cfg);
         }
-        if(!pot) {  // shouldn't get here -- either everything is ok, or we got a C++ exception already
-            PyErr_SetString(PyExc_ValueError, "Incorrect parameters for the potential");
-            return -1;
-        }
-#ifdef DEBUGPRINT
-        printf("Created an instance of %s potential\n", pot->name());
-#endif
-        if(((PotentialObject*)self)->pot) {
-#ifdef DEBUGPRINT
-            printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
-#endif
-            delete ((PotentialObject*)self)->pot;
-        }
-        ((PotentialObject*)self)->pot = pot;
+        assert(pot!=NULL);
+        Potential_initMemberVar(self, pot);
         return 0;
     }
     catch(std::exception& e) {
@@ -263,128 +474,50 @@ static bool Potential_isCorrect(PyObject* self)
     return true;
 }
 
-/// any function that evaluates something for a given potential object
-/// and stores one or more values in the `result` array
-typedef void (*potentialFunction) 
-    (const potential::BasePotential* pot, const coord::PosCar& pos, double *result);
 
-/// potentialFunction output type
-enum OUTPUT_VALUE {
-    OUTPUT_VALUE_SINGLE,   ///< potential or density (scalar values)
-    OUTPUT_VALUE_TRIPLET,  ///< potential derivatives
-    OUTPUT_VALUE_TRIPLET_AND_SEXTET  ///< derivatives and second derivatives
-};
-
-/// function that computes something from the Potential object for one or many input points
-static PyObject* Potential_AnyFunction(PyObject* self, PyObject* args, 
-    potentialFunction fnc, OUTPUT_VALUE outputValue)
-{
-    coord::PosCar pos;
-    if(!Potential_isCorrect(self))
-        return NULL;
-    if(PyArg_ParseTuple(args, "ddd", &pos.x, &pos.y, &pos.z)) {  // one point
-        double result[9];
-        fnc(((PotentialObject*)self)->pot, pos, result);
-        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
-            return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
-                result[3], result[4], result[5], result[6], result[7], result[8]);
-        else if(outputValue == OUTPUT_VALUE_TRIPLET)
-            return Py_BuildValue("ddd", result[0], result[1], result[2]);
-        else
-            return Py_BuildValue("d", result[0]);
-    }
-    PyErr_Clear();
-    PyObject* obj;
-    if(PyArg_ParseTuple(args, "O", &obj)) {
-        PyArrayObject *arr  = (PyArrayObject*) PyArray_FROM_OTF(obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-        if(arr == NULL) {
-            PyErr_SetString(PyExc_ValueError, "Input does not contain valid array");
-            return NULL;
-        }
-        int numpt = 0;
-        if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == 3) {  // 1d array of length 3 - a single point
-            pos.x = *static_cast<double*>(PyArray_GETPTR1(arr, 0));
-            pos.y = *static_cast<double*>(PyArray_GETPTR1(arr, 1));
-            pos.z = *static_cast<double*>(PyArray_GETPTR1(arr, 2));
-            Py_DECREF(arr);
-            double result[9];
-            fnc(((PotentialObject*)self)->pot, pos, result);
-            if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
-                return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
-                    result[3], result[4], result[5], result[6], result[7], result[8]);
-            else if(outputValue == OUTPUT_VALUE_TRIPLET)
-                return Py_BuildValue("ddd", result[0], result[1], result[2]);
-            else
-                return Py_BuildValue("d", result[0]);
-        }
-        if(PyArray_NDIM(arr) == 2 && PyArray_DIM(arr, 1) == 3)
-            numpt = PyArray_DIM(arr, 0);
-        else {
-            PyErr_SetString(PyExc_ValueError, "Input does not contain valid Nx3 array");
-            Py_DECREF(arr);
-            return NULL;
-        }
-        npy_intp dims1[2] = {numpt, 3};  // either a 1d array or a 2d array Nx3
-        npy_intp dims2[2] = {numpt, 6};  // 2d array Nx6, used only for second derivatives of potential
-        PyArrayObject* out1 = (PyArrayObject*)PyArray_SimpleNew(
-            outputValue == OUTPUT_VALUE_SINGLE ? 1 : 2, dims1, NPY_DOUBLE);
-        PyArrayObject* out2 = NULL;
-        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
-            out2 = (PyArrayObject*)PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
-        for(int i=0; i<numpt; i++) {
-            pos.x = *static_cast<double*>(PyArray_GETPTR2(arr, i, 0));
-            pos.y = *static_cast<double*>(PyArray_GETPTR2(arr, i, 1));
-            pos.z = *static_cast<double*>(PyArray_GETPTR2(arr, i, 2));
-            double result[9];
-            fnc(((PotentialObject*)self)->pot, pos, result);
-            if(outputValue == OUTPUT_VALUE_SINGLE)
-                ((double*)PyArray_DATA(out1))[i] = result[0];
-            else for(int d=0; d<3; d++)
-                ((double*)PyArray_DATA(out1))[i*3+d] = result[d];
-            if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET) 
-                for(int d=0; d<6; d++)
-                    ((double*)PyArray_DATA(out2))[i*6+d] = result[d+3];
-        }
-        Py_DECREF(arr);
-        if(outputValue == OUTPUT_VALUE_TRIPLET_AND_SEXTET)
-            return Py_BuildValue("NN", out1, out2);
-        else
-            return PyArray_Return(out1);        
-    }
-    PyErr_SetString(PyExc_ValueError, "Input does not contain valid data "
-        "(either 3 coordinates of a single point or a Nx3 array)");
-    return NULL;
-}
-
-void potfuncPotential(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
-    result[0] = pot->value(pos);
+static void fncPotential(PyObject* obj, const double input[], double *result) {
+    result[0] = ((PotentialObject*)obj)->pot->value(coord::PosCar(input[0], input[1], input[2]));
 }
 static PyObject* Potential_potential(PyObject* self, PyObject* args) {
-    return Potential_AnyFunction(self, args, potfuncPotential, OUTPUT_VALUE_SINGLE);
+    if(!Potential_isCorrect(self))
+        return NULL;
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
+        (self, args, fncPotential);
+}
+static PyObject* Potential_value(PyObject* self, PyObject* args, PyObject* /*namedargs*/) {
+    if(!Potential_isCorrect(self))
+        return NULL;
+    return Potential_potential(self, args);
 }
 
-void potfuncDensity(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
-    result[0] = pot->density(pos);
+static void fncDensity(PyObject* obj, const double input[], double *result) {
+    result[0] = ((PotentialObject*)obj)->pot->density(coord::PosCar(input[0], input[1], input[2]));
 }
 static PyObject* Potential_density(PyObject* self, PyObject* args) {
-    return Potential_AnyFunction(self, args, potfuncDensity, OUTPUT_VALUE_SINGLE);
+    if(!Potential_isCorrect(self))
+        return NULL;
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
+        (self, args, fncDensity);
 }
 
-void potfuncForce(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
+static void fncForce(PyObject* obj, const double input[], double *result) {
     coord::GradCar grad;
-    pot->eval(pos, NULL, &grad);
+    ((PotentialObject*)obj)->pot->eval(coord::PosCar(input[0], input[1], input[2]), NULL, &grad);
     result[0] = -grad.dx;
     result[1] = -grad.dy;
     result[2] = -grad.dz;
 }
 static PyObject* Potential_force(PyObject* self, PyObject* args) {
-    return Potential_AnyFunction(self, args, potfuncForce, OUTPUT_VALUE_TRIPLET);
+    if(!Potential_isCorrect(self))
+        return NULL;
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET>
+        (self, args, fncForce);
 }
 
-void potfuncForceDeriv(const potential::BasePotential* pot, const coord::PosCar& pos, double *result) {
+static void fncForceDeriv(PyObject* obj, const double input[], double *result) {
     coord::GradCar grad;
     coord::HessCar hess;
-    pot->eval(pos, NULL, &grad, &hess);
+    ((PotentialObject*)obj)->pot->eval(coord::PosCar(input[0], input[1], input[2]), NULL, &grad, &hess);
     result[0] = -grad.dx;
     result[1] = -grad.dy;
     result[2] = -grad.dz;
@@ -396,7 +529,10 @@ void potfuncForceDeriv(const potential::BasePotential* pot, const coord::PosCar&
     result[8] = -hess.dxdz;
 }
 static PyObject* Potential_force_deriv(PyObject* self, PyObject* args) {
-    return Potential_AnyFunction(self, args, potfuncForceDeriv, OUTPUT_VALUE_TRIPLET_AND_SEXTET);
+    if(!Potential_isCorrect(self))
+        return NULL;
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET_AND_SEXTET>
+        (self, args, fncForceDeriv);
 }
 
 static PyObject* Potential_name(PyObject* self)
@@ -431,18 +567,32 @@ static PyObject* Potential_export(PyObject* self, PyObject* args)
 
 static PyMethodDef Potential_methods[] = {
     { "name", (PyCFunction)Potential_name, METH_NOARGS, 
-      "Return the name of the potential\nNo arguments\nReturns: string" },
+      "Return the name of the potential\n"
+      "No arguments\n"
+      "Returns: string" },
     { "potential", Potential_potential, METH_VARARGS, 
-      "Compute potential at given point\nArguments: x,y,z (float)\nReturns: float" },
+      "Compute potential at a given point or array of points\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Returns: float or array of floats" },
     { "density", Potential_density, METH_VARARGS, 
-      "Compute density at given point\nArguments: x,y,z (float)\nReturns: float" },
+      "Compute density at a given point or array of points\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Returns: float or array of floats" },
     { "force", Potential_force, METH_VARARGS, 
-      "Compute force at given point\nArguments: x,y,z (float)\nReturns: float[3] - x,y,z components of force" },
+      "Compute force at a given point or array of points\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Returns: float[3] - x,y,z components of force, or array of such triplets" },
     { "force_deriv", Potential_force_deriv, METH_VARARGS, 
-      "Compute force and its derivatives at given point\nArguments: x,y,z (float)\nReturns: (float[3],float[6]) - "
-      "x,y,z components of force, and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx" },
-    { "export", (PyCFunction)Potential_export, METH_VARARGS, 
-      "Export potential expansion coefficients to a text file\nArguments: filename (string)\nReturns: none" },
+      "Compute force and its derivatives at a given point or array of points\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Returns: (float[3],float[6]) - x,y,z components of force, "
+      "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
+      "or if the input was an array of N points, then both items in the tuple are 2d arrays "
+      "with sizes Nx3 and Nx6, respectively"},
+    { "export", Potential_export, METH_VARARGS, 
+      "Export potential expansion coefficients to a text file\n"
+      "Arguments: filename (string)\n"
+      "Returns: none" },
     { NULL, NULL, 0, NULL }
 };
 
@@ -450,20 +600,131 @@ static PyTypeObject PotentialType = {
     PyObject_HEAD_INIT(NULL)
     0, "py_wrapper.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Potential_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, Potential_value, Potential_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringPotential, 
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, 0, 0, 0, 0, 0,
-    Potential_init, 0, /*Potential_new*/
+    Potential_init, 0, Potential_new
+};
+
+///@}
+/// \name  ---------- ActionFinder class and related data ------------
+///@{
+
+/// Python type corresponding to ActionFinder class
+typedef struct {
+    PyObject_HEAD
+    const actions::BaseActionFinder* finder;  // C++ class for action finder
+    PyObject* pot;  // Python object for potential
+} ActionFinderObject;
+
+static PyObject* ActionFinder_new(PyTypeObject *type, PyObject*, PyObject*)
+{
+    ActionFinderObject *self = (ActionFinderObject*)type->tp_alloc(type, 0);
+    if(self) {
+        self->finder=NULL;
+        self->pot=NULL;
+    }
+    return (PyObject*)self;
+}
+
+static void ActionFinder_dealloc(ActionFinderObject* self)
+{
+    if(self->finder)
+        delete self->finder;
+    Py_XDECREF(self->pot);
+    self->ob_type->tp_free((PyObject*)self);
+}
+
+static const char* docstringActionFinder = "Action finder";
+
+static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs)
+{
+    PyObject* objPot=NULL;
+    if(!PyArg_ParseTuple(args, "O", &objPot)) {
+        PyErr_SetString(PyExc_ValueError, "Incorrect parameters for ActionFinder constructor: "
+            "must provide an instance of Potential to work with.");
+        return -1;
+    }
+    if(!PyObject_TypeCheck(objPot, &PotentialType) || 
+        ((PotentialObject*)objPot)->pot==NULL ) {
+        PyErr_SetString(PyExc_TypeError, "Argument must be a valid instance of Potential class");
+        return -1;
+    }
+    try{
+        const actions::BaseActionFinder* finder = 
+            new actions::ActionFinderAxisymFudge(*((PotentialObject*)objPot)->pot);
+        // ensure valid cleanup if the constructor was called more than once
+        if(((ActionFinderObject*)self)->finder!=NULL)
+            delete ((ActionFinderObject*)self)->finder;
+        Py_XDECREF(((ActionFinderObject*)self)->pot);
+        // replace the member variables with freshly created ones
+        ((ActionFinderObject*)self)->finder = finder;
+        ((ActionFinderObject*)self)->pot = objPot;
+        Py_INCREF(objPot);
+        return 0;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, 
+            (std::string("Error in ActionFinder initialization: ")+e.what()).c_str());
+        return -1;
+    }
+}
+
+static void fncActions(PyObject* obj, const double input[], double *result) {
+    try{
+        coord::PosVelCar point(input);
+        actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
+        result[0] = acts.Jr;
+        result[1] = acts.Jz;
+        result[2] = acts.Jphi;
+    }
+    catch(std::exception& ) {  // indicates an error, e.g., positive value of energy
+        result[0] = result[1] = result[2] = NAN;
+    }
+}
+static PyObject* ActionFinder_actions(PyObject* self, PyObject* args)
+{
+    if(((ActionFinderObject*)self)->finder==NULL)
+        return NULL;
+    return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
+        (self, args, fncActions);
+}
+
+static PyMethodDef ActionFinder_methods[] = {
+    { "actions", ActionFinder_actions, METH_VARARGS, 
+      "Compute actions for a given position/velocity point, or array of points\n"
+      "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets\n"
+      "Returns: float or array of floats" },
+    { NULL, NULL, 0, NULL }
+};
+
+static PyTypeObject ActionFinderType = {
+    PyObject_HEAD_INIT(NULL)
+    0, "py_wrapper.ActionFinder",
+    sizeof(ActionFinderObject), 0, (destructor)ActionFinder_dealloc,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringActionFinder, 
+    0, 0, 0, 0, 0, 0, ActionFinder_methods, 0, 0, 0, 0, 0, 0, 0,
+    ActionFinder_init, 0, ActionFinder_new
 };
 
 ///@}
 /// \name  --------- SplineApprox class -----------
 ///@{
 
+/// Python type corresponding to SplineApprox class
 typedef struct {
     PyObject_HEAD
     math::CubicSpline* spl;
 } SplineApproxObject;
+       
+static PyObject* SplineApprox_new(PyTypeObject *type, PyObject*, PyObject*)
+{
+    SplineApproxObject *self = (SplineApproxObject*)type->tp_alloc(type, 0);
+    if(self)
+        self->spl=NULL;
+    return (PyObject*)self;
+}
 
 static void SplineApprox_dealloc(SplineApproxObject* self)
 {
@@ -472,7 +733,7 @@ static void SplineApprox_dealloc(SplineApproxObject* self)
     self->ob_type->tp_free((PyObject*)self);
 }
 
-const char* docstringSplineApprox = 
+static const char* docstringSplineApprox = 
     "SplineApprox is a class that deals with smoothing splines.\n"
     "It approximates a large set of (x,y) points by a smooth curve with "
     "a rather small number of knots, which should encompass the entire range "
@@ -490,7 +751,6 @@ const char* docstringSplineApprox =
 
 static int SplineApprox_init(PyObject* self, PyObject* args, PyObject* namedargs)
 {
-    ((SplineApproxObject*)self)->spl=NULL;
     static const char* keywords[] = {"x","y","knots","smooth",NULL};
     PyObject* objx=NULL;
     PyObject* objy=NULL;
@@ -538,16 +798,19 @@ static int SplineApprox_init(PyObject* self, PyObject* args, PyObject* namedargs
             spl.fitDataOversmooth(yvalues, smoothfactor, splinevals, der1, der2);
         else
             spl.fitData(yvalues, -smoothfactor, splinevals, der1, der2);
+        if(((SplineApproxObject*)self)->spl)  // check if this is not the first time that constructor is called
+            delete ((SplineApproxObject*)self)->spl;
         ((SplineApproxObject*)self)->spl = new math::CubicSpline(knots, splinevals, der1, der2);
+        return 0;
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, (std::string("Error in spline initialization: ")+e.what()).c_str());
+        PyErr_SetString(PyExc_ValueError, 
+            (std::string("Error in SplineApprox initialization: ")+e.what()).c_str());
         return -1;
     }
-    return 0;
 }
 
-double spl_eval(const math::CubicSpline* spl, double x, int der=0)
+static double spl_eval(const math::CubicSpline* spl, double x, int der=0)
 {
     double result;
     switch(der) {
@@ -595,7 +858,7 @@ static PyTypeObject SplineApproxType = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, SplineApprox_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringSplineApprox, 
     0, 0, 0, 0, 0, 0, SplineApprox_methods, 0, 0, 0, 0, 0, 0, 0,
-    SplineApprox_init, 0, 
+    SplineApprox_init, 0, SplineApprox_new
 };
 ///@}
 
@@ -611,12 +874,14 @@ initpy_wrapper(void)
 
     // Potential class
     buildDocstringPotential();
-    PotentialType.tp_new = PyType_GenericNew;
     if (PyType_Ready(&PotentialType) < 0) return;
     Py_INCREF(&PotentialType);
     PyModule_AddObject(mod, "Potential", (PyObject *)&PotentialType);
 
-    SplineApproxType.tp_new = PyType_GenericNew;
+    if (PyType_Ready(&ActionFinderType) < 0) return;
+    Py_INCREF(&ActionFinderType);
+    PyModule_AddObject(mod, "ActionFinder", (PyObject *)&ActionFinderType);
+    
     if (PyType_Ready(&SplineApproxType) < 0) return;
     Py_INCREF(&SplineApproxType);
     PyModule_AddObject(mod, "SplineApprox", (PyObject *)&SplineApproxType);

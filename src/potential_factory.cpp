@@ -554,7 +554,8 @@ static void writePotentialExp(const std::string &fileName, const BasePotentialSp
     for(size_t n=0; n<indices.size(); n++)
     {
         strm << indices[n];
-        strm << "\t" << std::setprecision(14) << coefs[n][0] << std::setprecision(7);   // leading coeft should be high-accuracy at least for spline potential
+        // leading coeft should be high-accuracy at least for spline potential
+        strm << "\t" << std::setprecision(14) << coefs[n][0] << std::setprecision(7);
         for(size_t i=1; i<coefs[n].size(); i++)
             strm << "\t" << coefs[n][i];
         strm << "\n";

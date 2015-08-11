@@ -18,18 +18,25 @@
 
 namespace particles {
 
-/// The abstract class implementing reading and writing snapshots; 
-/// derived classes take the filename as the argument of the constructor.
+/** The abstract class implementing reading and writing snapshots.
+    Derived classes take the filename as the argument of the constructor,
+    and an instance of unit converter for transforming between 
+    the "external" units of the file and the "internal" units of the library 
+    (a trivial conversion is also possible).
+*/
 class BaseIOSnapshot {
 public:
     virtual ~BaseIOSnapshot() {};
-    /** read a snapshot from the file; 
+    /** read a snapshot from the file;
         \param[out] points is an instance of PointMassArray class,
         its contents are replaced by the loaded data.
-        \return success or failure; in the latter case points may contain garbage.
+        \throws  std::runtime_error in case of error (e.g., file doesn't exist)
     */
     virtual void readSnapshot(PointMassArrayCar& points)=0;
-    /** write a snapshot to the file; return success or failure. */
+    /** write a snapshot to the file;  
+        \param[in] points is an instance of PointMassArray class to be stored;
+        \throws  std::runtime_error in case of error (e.g., file is not writable)
+    */
     virtual void writeSnapshot(const PointMassArrayCar& points)=0;
 };
 
