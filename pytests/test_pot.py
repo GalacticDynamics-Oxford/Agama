@@ -9,14 +9,11 @@ a = py_unsio.CunsIn("../temp/disk.gadget","all","all")
 a.nextFrame("")
 ok,pos = a.getArrayF("all","pos")
 pos = pos.reshape(-1,3)
-ok,vel = a.getArrayF("all","vel")
-vel = vel.reshape(-1,3)
-vel *= 1e-3
 ok,mass = a.getArrayF("all","mass")
 print "Loaded",len(mass),"points"
 
-#2. create an axisymmetric potential from this snapshot
-p = py_wrapper.Potential(type="Spline", points=(pos,mass), symmetry='a')
+#2. create a potential from this snapshot
+p = py_wrapper.Potential(type="Spline", points=(pos,mass))
 print "Created a",p.name(),"potential"
 
 #3. compute something interesting
@@ -38,7 +35,4 @@ knots = [0,0.5,1,1.5,2,3,4,5,6,7,8,10,15,20,30,50,100]
 spl = py_wrapper.SplineApprox(rad,pot,knots)
 print "RMS error in Phi(r) approximating spline =", ( ((pot-spl(rad))**2).mean() )**0.5
 
-#6. test action finder
-af = py_wrapper.ActionFinder(p)
-act = af.actions(numpy.hstack((pos,vel)))
-print act
+print "ALL TESTS PASSED"

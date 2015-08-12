@@ -154,14 +154,16 @@ struct ExternalUnits {
     const double lengthUnit;   ///< length unit of the external dataset, expressed in internal units
     const double velocityUnit; ///< velocity unit of the external dataset, expressed in internal units
     const double massUnit;     ///< mass unit of the external dataset, expressed in internal units
+    const double timeUnit;     ///< time unit of the external dataset, expressed in internal units
     /// construct a trivial converter, for the case that no conversion is actually needed
     ExternalUnits() :
-        lengthUnit(1.), velocityUnit(1.), massUnit(1.) {};
+        lengthUnit(1.), velocityUnit(1.), massUnit(1.), timeUnit(1.) {};
     /** construct a converter for the given internal unit system and specified external units,
         the latter expressed in CGS unit system using the constants defined in this header file */
     ExternalUnits(const InternalUnits& unit, double _lengthUnit, double _velocityUnit, double _massUnit) :
         lengthUnit(unit.from_pc*_lengthUnit/pc), 
         velocityUnit(unit.from_kms*_velocityUnit/kms), 
-        massUnit(unit.from_Msun*_massUnit/Msun) {};
+        massUnit(unit.from_Msun*_massUnit/Msun),
+        timeUnit(lengthUnit/velocityUnit) {};
 };
 }  // namespace units

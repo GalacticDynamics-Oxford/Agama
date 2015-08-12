@@ -13,11 +13,25 @@ inline unsigned int pow_2(unsigned int x) { return x*x; }
 /// convenience function for raising a number to the 3rd power
 inline double pow_3(double x) { return x*x*x; }
 
+// some useful definitions
 #ifndef INFINITY
 #define INFINITY 1e10000
 #endif
+
 #ifndef NAN
 #define NAN (INFINITY/INFINITY)
+#endif
+
+#ifndef M_PI
+#define M_PI       3.14159265358979323846264338328
+#endif
+
+#ifndef M_SQRTPI
+#define M_SQRTPI   1.77245385090551602729816748334
+#endif
+
+#ifndef M_SQRT2
+#define M_SQRT2    1.41421356237309504880168872421
 #endif
 
 /** Functions and classes for basic and advanced math operations */

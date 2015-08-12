@@ -4,6 +4,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <gsl/gsl_sf_legendre.h>
+#include <gsl/gsl_sf_gegenbauer.h>
 #include <gsl/gsl_sf_hyperg.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
@@ -56,6 +57,14 @@ void legendrePolyArray(const int lmax, const int m, const double theta,
     }
 }
 
+double gegenbauer(const int n, double lambda, double x) {
+    return gsl_sf_gegenpoly_n(n, lambda, x);
+}
+
+void gegenbauerArray(const int nmax, double lambda, double x, double* result_array) {
+    gsl_sf_gegenpoly_array(nmax, lambda, x, result_array);
+}
+
 double hypergeom2F1(const double a, const double b, const double c, const double x)
 {
     if (-1.<=x and x<1.)
@@ -79,8 +88,16 @@ double factorial(const unsigned int n) {
     return gsl_sf_fact(n);
 }
 
+double lnfactorial(const unsigned int n) {
+    return gsl_sf_lnfact(n);
+}
+
 double gamma(const double x) {
     return gsl_sf_gamma(x);
+}
+
+double lngamma(const double x) {
+    return gsl_sf_lngamma(x);
 }
 
 double digamma(const double x) {

@@ -23,15 +23,27 @@ double legendrePoly(const int l, const int m, const double theta);
 void legendrePolyArray(const int lmax, const int m, const double theta,
     double* result_array, double* deriv_array=0, double* deriv2_array=0);
 
+/** Gegenbauer (ultraspherical) polynomial:  \f$ C_n^{(\lambda)}(x) \f$ */
+double gegenbauer(const int n, double lambda, double x);
+
+/** Array of Gegenbauer (ultraspherical) polynomials for n=0,1,...,nmax */
+void gegenbauerArray(const int nmax, double lambda, double x, double* result_array);
+    
 /** Gauss's hypergeometric function 2F1(a, b; c; x) */
 double hypergeom2F1(const double a, const double b, const double c, const double x);
 
 /** Factorial of an integer number */
 double factorial(const unsigned int n);
 
+/** Logarithm of factorial of an integer number (doesn't overflow quite that easy) */
+double lnfactorial(const unsigned int n);
+
 /** Gamma function */
 double gamma(const double x);
 
+/** Logarithm of gamma function (doesn't overflow quite that easy) */
+double lngamma(const double n);
+    
 /** Psi (digamma) function */
 double digamma(const double x);
 double digamma(const int x);

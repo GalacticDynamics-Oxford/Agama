@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
-
+#include "debug_utils.h"
 namespace actions{
 
 /** Accuracy of integrals for computing actions and angles
@@ -438,6 +438,7 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
     if(interfocalDistance==0)
         interfocalDistance = estimateInterfocalDistance(potential, point);
+    std::cout<<point<<"D="<<interfocalDistance<<"\n";
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);

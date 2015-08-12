@@ -5,9 +5,6 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
-#include <gsl/gsl_integration.h>
-#include <gsl/gsl_sf_gegenbauer.h>
-#include <gsl/gsl_sf_gamma.h>
 
 namespace potential {
 
@@ -222,7 +219,7 @@ public:
     virtual double value(double r) const {
         const double r1alpha = pow(r, 1./alpha);
         const double xi = (r1alpha-1)/(r1alpha+1);
-        return gsl_sf_gegenpoly_n(n, w, xi) * math::powInt(r, l) * pow(1+r1alpha, -(2*l+1)*alpha) * 4*M_PI;
+        return math::gegenbauer(n, w, xi) * math::powInt(r, l) * pow(1+r1alpha, -(2*l+1)*alpha) * 4*M_PI;
     }
 private:
     const int n, l;
@@ -242,7 +239,7 @@ void BasisSetExp::prepareCoefsAnalytic(const BaseDensity& srcdensity)
             double w=(2*l+1)*Alpha+0.5;
             double Knl = (4*pow_2(n+w)-1)/8/pow_2(Alpha);
             double Inl = Knl * 4*M_PI*Alpha * 
-                exp( gsl_sf_lngamma(n+2*w) - 2*gsl_sf_lngamma(w) - gsl_sf_lnfact(n) - 4*w*log(2.0)) / (n+w);
+                exp( math::lngamma(n+2*w) - 2*math::lngamma(w) - math::lnfactorial(n) - 4*w*log(2.0)) / (n+w);
             for(int m=l*mmin; m<=l*mmax; m+=mstep) {
                 BasisSetExpRadialMult rmult(n, l, Alpha);
                 DensitySphHarmIntegrand fnc(srcdensity, l, m, rmult, rscale);
@@ -273,7 +270,7 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::Po
         double w=(2*l+1)*Alpha+0.5;
         for(unsigned int n=0; n<=Ncoefs_radial; n++)
             Inl[n][l] = 4*M_PI*Alpha * 
-              exp( gsl_sf_lngamma(n+2*w) - 2*gsl_sf_lngamma(w) - gsl_sf_lnfact(n) - 4*w*log(2.0)) /
+              exp( math::lngamma(n+2*w) - 2*math::lngamma(w) - math::lnfactorial(n) - 4*w*log(2.0)) /
               (n+w) * (4*(n+w)*(n+w)-1)/(8*Alpha*Alpha);
     }
     for(unsigned int i=0; i<npoints; i++) {
@@ -286,7 +283,7 @@ void BasisSetExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::Po
         for(int l=0; l<=lmax; l+=lstep) {
             double w=(2*l+1)*Alpha+0.5;
             double phil=pow(point.r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
-            gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), w, xi, gegenpoly_array);
+            math::gegenbauerArray(Ncoefs_radial, w, xi, gegenpoly_array);
             for(size_t n=0; n<=Ncoefs_radial; n++) {
                 double mult= massi * gegenpoly_array[n] * phil * 2*M_SQRTPI / Inl[n][l];
                 for(int m=0; m<=l*mmax; m+=mstep)
@@ -305,7 +302,7 @@ double BasisSetExp::enclosedMass(const double r) const
     double ralpha=pow(r, 1/Alpha);
     double xi=(ralpha-1)/(ralpha+1);
     double gegenpoly_array[MAX_NCOEFS_RADIAL];
-    gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), Alpha+0.5, xi, gegenpoly_array);
+    math::gegenbauerArray(Ncoefs_radial, Alpha+0.5, xi, gegenpoly_array);
     double multr = pow(1+ralpha, -Alpha);
     double multdr= -ralpha/((ralpha+1)*r);
     double result=0;
@@ -326,7 +323,7 @@ void BasisSetExp::computeSHCoefs(const double r, double coefsF[], double coefsdF
     if(coefsd2Fdr2) for(size_t k=0; k<pow_2(Ncoefs_angular+1); k++) coefsd2Fdr2[k] = 0;
     for(int l=0; l<=lmax; l+=lstep) {
         double w=(2*l+1)*Alpha+0.5;
-        gsl_sf_gegenpoly_array(static_cast<int>(Ncoefs_radial), w, xi, gegenpoly_array);
+        math::gegenbauerArray(Ncoefs_radial, w, xi, gegenpoly_array);
         double multr = -pow(r, l) * pow(1+ralpha, -(2*l+1)*Alpha);
         double multdr= (l-(l+1)*ralpha)/((ralpha+1)*r);
         for(unsigned int n=0; n<=Ncoefs_radial; n++) {
@@ -491,7 +488,7 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<coord::Po
     // make a copy of input array to allow it to be sorted
     particles::PointMassArray<coord::PosSph> points(srcPoints);
     std::sort(points.data.begin(), points.data.end(), compareParticleSph);
-    
+
     // having sorted particles in radius, may now initialize coefs
     outputRadii.resize(npoints);
     for(size_t i=0; i<npoints; i++)
@@ -658,10 +655,6 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosS
         // this was the estimate of density slope. Now we need to convert it to the estimate of power-law slope of l>0 coefs
         gammaInner = 2.0-gammaInner;   // the same recipe as used later in initSpline
         double gammaOuter = -1.0;      // don't freak out, assume default value
-#ifdef DEBUGPRINT
-        my_message(FUNCNAME, 
-            "Estimated slope: inner="+convertToString(gammaInner)+", outer="+convertToString(gammaOuter));
-#endif
         // init x-coordinates from scaling transformation
         ascale = get_ascale(radii, coefsArray);  // this uses only the l=0 term
         for(size_t p=0; p<=Ncoefs_radial; p++)
@@ -687,10 +680,6 @@ void SplineExp::prepareCoefsDiscrete(const particles::PointMassArray<coord::PosS
                 appr.fitDataOversmooth(scaledPointCoefs, smoothfactor, scaledSplineValues, derivLeft, derivRight, NULL, &edf);
                 if(edf<3.0)   // in case of error or an oversmoothed fit fallback to zero values
                     scaledSplineValues.assign(Ncoefs_radial+1, 0);
-#ifdef DEBUGPRINT
-                my_message(FUNCNAME, 
-                    "l="+convertToString(l)+", m="+convertToString(m)+" - EDF="+convertToString(edf));
-#endif
                 // now store fitted values in coefsArray to pass to initspline routine
                 coefsArray[0][coefind] = 0;  // unused
                 for(size_t c=1; c<=Ncoefs_radial; c++)
@@ -852,12 +841,12 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
             for(size_t i=0; i<Ncoefs_radial; i++)
                 spvalues[i] = coefsArray[i+1][coefind]/coefsArray[i+1][0];
             slopein[coefind] = log(coefsArray[2][coefind]/coefsArray[1][coefind]) / log(gridradii[2]/gridradii[1]);   // estimate power-law slope of Clm(r) at r->0
-            if(gsl_isnan(slopein[coefind]))
+            if(!math::isFinite(slopein[coefind]))
                 slopein[coefind]=1.0;  // default
             slopein[coefind] = std::max<double>(slopein[coefind], std::min<double>(l, 2-gammain));  // the asymptotic power-law behaviour of the coefficient expected for power-law density profile
             derivLeft = spvalues[0] * (1+ascale/minr) * (slopein[coefind] - minr*C00der/C00val);   // derivative at innermost node
             slopeout[coefind] = log(coefsArray[Ncoefs_radial][coefind]/coefsArray[Ncoefs_radial-1][coefind]) / log(gridradii[Ncoefs_radial]/gridradii[Ncoefs_radial-1]) + 1;   // estimate slope of Clm(r)/C00(r) at r->infinity (+1 is added because C00(r) ~ 1/r at large r)
-            if(gsl_isnan(slopeout[coefind]))
+            if(!math::isFinite(slopeout[coefind]))
                 slopeout[coefind]=-1.0;  // default
             slopeout[coefind] = std::min<double>(slopeout[coefind], std::max<double>(-l, 3-gammaout));
             derivRight = spvalues[Ncoefs_radial-1] * (1+ascale/maxr) * slopeout[coefind];   // derivative at outermost node

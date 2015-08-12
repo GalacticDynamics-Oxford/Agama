@@ -7,12 +7,14 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 //#define DEBUGPRINT
 #include <numpy/arrayobject.h>
+#include "units.h"
 #include "potential_factory.h"
+#include "potential_composite.h"
 #include "actions_staeckel.h"
 #include "actions_torus.h"
 #include "math_spline.h"
 
-/// \name  Some general definitions and utility functions
+/// \name  Some general definitions
 ///@{
 
 /// arguments of functions
@@ -40,21 +42,81 @@ static const size_t MAX_NUM_KEYWORDS = 64;
 /// max size of docstring
 static const size_t MAX_LEN_DOCSTRING = 4096;
 
-// ----- a truly general interface for evaluating some function -----
-// ----- for some input data and storing its output somewhere   -----
+///@}
+/// \name  ------- Unit handling routines --------
+///@{
+
+/// internal working units
+static const units::InternalUnits unit(units::Kpc, units::Myr);
+
+/// external units that are used in the calling code
+static const units::ExternalUnits* conv;
+
+/// description of set_units function
+static const char* docstringUnits = 
+    "Inform the library about the physical units that are used in Python code\n"
+    "Arguments should be any three independent physical quantities that define "
+    "'mass', 'length', 'velocity' or 'time' scales "
+    "(note that the latter three are not all independent).\n"
+    "Their values specify the units in terms of "
+    "'Solar mass', 'Kiloparsec', 'km/s' and 'Megayear', correspondingly.\n"
+    "Example: standard GADGET units are defined as\n"
+    "    setUnits(mass=1e10, length=1, velocity=1)\n";
+
+/// define the unit conversion
+static PyObject* set_units(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"mass", "length", "velocity", "time", NULL};
+    double mass = 0, length = 0, velocity = 0, time = 0;
+    if(!PyArg_ParseTupleAndKeywords(
+        args, namedArgs, "|dddd", const_cast<char**>(keywords),
+        &mass, &length, &velocity, &time) ||
+        mass<0 || length<0 || velocity<0 || time<0)
+    {
+        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to setUnits()");
+        return NULL;
+    }
+    if(length>0 && velocity>0 && time>0) {
+        PyErr_SetString(PyExc_ValueError, 
+            "You may not assign length, velocity and time units simultaneously");
+        return NULL;
+    }
+    if(mass==0) {
+        PyErr_SetString(PyExc_ValueError, "You must specify mass unit");
+        return NULL;
+    }
+    const units::ExternalUnits* newConv = NULL;
+    if(length>0 && time>0)
+        newConv = new units::ExternalUnits(unit,
+            length*units::Kpc, length/time * units::Kpc/units::Myr, mass*units::Msun);
+    else if(length>0 && velocity>0)
+        newConv = new units::ExternalUnits(unit,
+            length*units::Kpc, velocity*units::kms, mass*units::Msun);
+    else if(time>0 && velocity>0)
+        newConv = new units::ExternalUnits(unit,
+            velocity*time * units::kms*units::Myr, velocity*units::kms, mass*units::Msun);
+    else {
+        PyErr_SetString(PyExc_ValueError,
+            "You must specify exactly two out of three units: length, time and velocity");
+        return NULL;
+    }
+    delete conv;
+    conv = newConv;
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+///@}
+/// \name ----- a truly general interface for evaluating some function 
+///             for some input data and storing its output somewhere -----
+///@{
 
 /// any function that evaluates something for a given object and an `input` array of floats,
 /// and stores one or more values in the `result` array of floats
 typedef void (*anyFunction) 
     (PyObject* obj, const double input[], double *result);
 
-/// maximum possible length of input array specifying a single point
-static const int MAX_SIZE_INPUT  = 64;
-
-/// maximum possible length of output array of data computed for a single point
-static const int MAX_SIZE_OUTPUT = 64;
-
-/// anyFunction input type; numerical value is equal to the length of input array
+/// anyFunction input type
 enum INPUT_VALUE {
     INPUT_VALUE_SINGLE = 1,  ///< a single number
     INPUT_VALUE_TRIPLET= 3,  ///< three numbers
@@ -70,6 +132,10 @@ enum OUTPUT_VALUE {
     OUTPUT_VALUE_TRIPLET_AND_SEXTET  = 36  ///< a triplet and a sextet
 };
 
+/// size of input array for a single point
+template<int numArgs>
+static size_t inputLength();
+
 /// parse a list of numArgs floating-point arguments for a Python function, and store them in inputArray[]
 template<int numArgs>
 int parseTuple(PyObject* args, double inputArray[]);
@@ -81,6 +147,10 @@ const char* errStrInvalidArrayDim();
 /// error message for an input array of incorrect size or an invalid list of arguments
 template<int numArgs>
 const char* errStrInvalidInput();
+
+/// size of output array for a single point
+template<int numOutput>
+static size_t outputLength();
 
 /// construct an output tuple containing the given result data computed for a single input point
 template<int numOutput>
@@ -95,6 +165,10 @@ template<int numOutput>
 void formatOutputArr(const double result[], const int index, PyObject* resultObj);
 
 // ---- template instantiations for input parameters ----
+
+template<> static size_t inputLength<INPUT_VALUE_SINGLE>()  {return 1;}
+template<> static size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
+template<> static size_t inputLength<INPUT_VALUE_SEXTET>()  {return 6;}
 
 template<> int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
     return PyArg_ParseTuple(args, "ddd", &input[0], &input[1], &input[2]);
@@ -119,6 +193,12 @@ template<> const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
 }
 
 // ---- template instantiations for output parameters ----
+
+template<> static size_t outputLength<OUTPUT_VALUE_SINGLE>()  {return 1;}
+template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET>() {return 3;}
+template<> static size_t outputLength<OUTPUT_VALUE_SEXTET>()  {return 6;}
+template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {return 6;}
+template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
 
 template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
     return Py_BuildValue("d", result[0]);
@@ -190,8 +270,8 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
 template<int numArgs, int numOutput>
 static PyObject* callAnyFunctionOnArray(PyObject* self, PyObject* args, anyFunction fnc)
 {
-    double input [MAX_SIZE_INPUT];
-    double result[MAX_SIZE_OUTPUT];
+    double input [inputLength<numArgs>()];
+    double result[outputLength<numOutput>()];
     try{
         if(parseTuple<numArgs>(args, input)) {  // one point
             fnc(self, input, result);
@@ -270,6 +350,9 @@ static void Potential_dealloc(PotentialObject* self)
     self->ob_type->tp_free((PyObject*)self);
 }
 
+/// pointer to the Potential type object (will be initialized below)
+static PyTypeObject* PotentialTypePtr;
+
 /// list of all possible arguments of Potential class constructor
 static const ArgDescription potentialArgs[] = {
     {"file",              's', "the name of ini file, potential coefficients file, or N-body snapshot file"},
@@ -298,11 +381,14 @@ static const ArgDescription potentialArgs[] = {
     {NULL,0,NULL}
 };
 
-/// this string will contain full list of parameters and other relevant info to be printed out via `help(Potential)`
+/// this string will contain full list of parameters and other relevant info 
+/// to be printed out via `help(Potential)`; it is filled during module initialization
 static char docstringPotential[MAX_LEN_DOCSTRING];
 
+/// list of keywords extracted from potentialArgs 
 static const char* keywordsPotential[MAX_NUM_KEYWORDS] = {NULL};
 
+/// list of keyword types extracted from potentialArgs
 static char keywordTypesPotential[MAX_NUM_KEYWORDS+1] = "|";
 
 /// build the docstring for Potential class
@@ -323,7 +409,11 @@ static void buildDocstringPotential()
     }
     if(bufIndex < MAX_LEN_DOCSTRING) {
         bufIndex += snprintf(docstringPotential + bufIndex, MAX_LEN_DOCSTRING - bufIndex,
-            "\nRequired parameters are either 'type' or 'file' (or both)\n");
+            "\nRequired parameters are either 'type' or 'file' (or both)\n"
+            "Alternatively, a composite potential may be created by passing a tuple "
+            "of Potential objects as the argument list for the constructor; "
+            "NOTE that these components will no longer be usable after being incorporated "
+            "into the composite potential!");
     }
     if(bufIndex >= MAX_LEN_DOCSTRING || argIndex >= MAX_NUM_KEYWORDS)
     {   // overflow shouldn't occur, but if it does, issue a warning
@@ -331,26 +421,80 @@ static void buildDocstringPotential()
     }
 }
 
+/// finalize the call to constructor by assigning the member variable 'pot'
+static void Potential_initMemberVar(PyObject* self, const potential::BasePotential* pot)
+{
+#ifdef DEBUGPRINT
+    printf("Created an instance of %s potential\n", pot->name());
+#endif
+    if(((PotentialObject*)self)->pot)
+    {  // check if this is not the first time that constructor is called
+#ifdef DEBUGPRINT
+        printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
+#endif
+        delete ((PotentialObject*)self)->pot;
+    }
+    ((PotentialObject*)self)->pot = pot;
+}
+
+/// attempt to construct a composite potential from a tuple of Potential objects
+static int Potential_initComposite(PyObject* self, PyObject* args)
+{
+    if(PyTuple_CheckExact(args) && PyTuple_Size(args)>0) {
+        bool correct = true;
+        for(Py_ssize_t i=0; correct && i<PyTuple_Size(args); i++) 
+            correct &= PyObject_TypeCheck(PyTuple_GET_ITEM(args, i), PotentialTypePtr);
+        if(!correct) {
+            PyErr_SetString(PyExc_ValueError, 
+                "The arguments of constructor are not a tuple of Potential objects");
+            return -1;
+        }
+        /* in the present implementation, creating a composite potential from an array 
+           of BasePotential* pointers means that they are "taken over" by the new composite
+           potential and will be deleted when the latter is destroyed. 
+           Since we must not delete the same object twice, we make sure that the original 
+           Potential objects in Python will no longer be usable after creating a composite, 
+           but they won't be automatically deleted until their refcounter drops to zero.
+        */
+        std::vector<const potential::BasePotential*> components;
+        for(Py_ssize_t i=0; i<PyTuple_Size(args); i++) {
+            components.push_back(((PotentialObject*)PyTuple_GET_ITEM(args, i))->pot);
+            ((PotentialObject*)PyTuple_GET_ITEM(args, i))->pot = NULL;  // won't be usable anymore
+        }
+        try{
+            const potential::BasePotential* pot = new potential::CompositeCyl(components);
+            Potential_initMemberVar(self, pot);
+            return 0;
+        }
+        catch(std::exception& e) {
+            PyErr_SetString(PyExc_ValueError, 
+                (std::string("Error in creating composite potential: ")+e.what()).c_str());
+            return -1;
+        }
+    }
+    return -1;  // not successful
+}
+
 /// construct potential::BasePotential* object from particles
-static const potential::BasePotential* Potential_initFromParticles(
+static int Potential_initFromParticles(PyObject* self, 
     const potential::ConfigPotential& cfg, PyObject* points)
 {
     if( !cfg.fileName.empty() ) {
         PyErr_SetString(PyExc_ValueError, "Cannot provide both points and filename");
-        return NULL;
+        return -1;
     }
     if( cfg.potentialType != potential::PT_BSE &&
         cfg.potentialType != potential::PT_SPLINE &&
         cfg.potentialType != potential::PT_CYLSPLINE ) {
         PyErr_SetString(PyExc_ValueError, "Potential should be of an expansion type");
-        return NULL;
+        return -1;
     }
     PyObject *pointCoordObj, *pointMassObj;
     if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
         PyErr_SetString(PyExc_ValueError, "'points' must be a tuple with two arrays - "
             "coordinates and mass, where the first one is a two-dimensional Nx3 array "
             "and the second one is a one-dimensional array of length N");
-        return NULL;
+        return -1;
     }
     PyArrayObject *pointCoordArr = (PyArrayObject*)
         PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
@@ -360,7 +504,7 @@ static const potential::BasePotential* Potential_initFromParticles(
         Py_XDECREF(pointCoordArr);
         Py_XDECREF(pointMassArr);
         PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays");
-        return NULL;
+        return -1;
     }
     int numpt = 0;
     if(PyArray_NDIM(pointMassArr) == 1)
@@ -368,51 +512,44 @@ static const potential::BasePotential* Potential_initFromParticles(
     if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 || 
         PyArray_DIM(pointCoordArr, 0) != numpt || PyArray_DIM(pointCoordArr, 1) != 3)
     {
-        Py_XDECREF(pointCoordArr);
-        Py_XDECREF(pointMassArr);
+        Py_DECREF(pointCoordArr);
+        Py_DECREF(pointMassArr);
         PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays "
             "(the first one must be 2d array of shape Nx3 and the second one must be 1d array of length N)");
-        return NULL;
+        return -1;
     }
-    particles::PointMassArray<coord::PosCar> pointArray;
-    pointArray.data.reserve(numpt);
-    for(int i=0; i<numpt; i++) {
-        double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0));
-        double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1));
-        double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2));
-        double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i));
-        pointArray.add(coord::PosCar(x,y,z), m);
+    try{
+        particles::PointMassArray<coord::PosCar> pointArray;
+        pointArray.data.reserve(numpt);
+        for(int i=0; i<numpt; i++) {
+            double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0)) * conv->lengthUnit;
+            double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1)) * conv->lengthUnit;
+            double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2)) * conv->lengthUnit;
+            double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i)) * conv->massUnit;
+            pointArray.add(coord::PosCar(x,y,z), m);
+        }
+        const potential::BasePotential* pot = potential::createPotentialFromPoints(cfg, pointArray);
+        assert(pot!=NULL);
+        Potential_initMemberVar(self, pot);
+        Py_DECREF(pointCoordArr);
+        Py_DECREF(pointMassArr);
+        return 0;
     }
-    if(PyErr_Occurred()) {  // numerical conversion error
-        return NULL;
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, 
+            (std::string("Error in creating potential from points: ")+e.what()).c_str());
+        Py_DECREF(pointCoordArr);
+        Py_DECREF(pointMassArr);
+        return -1;
     }
-    return potential::createPotentialFromPoints(cfg, pointArray);
-}
-
-/// finalize the call to constructor by assigning the member variable 'pot'
-static void Potential_initMemberVar(PyObject* self, const potential::BasePotential* pot)
-{
-#ifdef DEBUGPRINT
-    printf("Created an instance of %s potential\n", pot->name());
-#endif
-    if(((PotentialObject*)self)->pot) {  // check if this is not the first time that constructor is called
-#ifdef DEBUGPRINT
-        printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
-#endif
-        delete ((PotentialObject*)self)->pot;
-    }
-    ((PotentialObject*)self)->pot = pot;
 }
 
 /// the generic constructor of Potential object
-static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
+static int Potential_init(PyObject* self, PyObject* args, PyObject* namedArgs)
 {    
-    // check if the input was a tuple of Potential objects
-    if(PyTuple_CheckExact(args)) {
-        printf("Input arguments: %i\n", (int)PyTuple_Size(args));
-    }
-    //if(PyArg_ParseTuple(args, "O!"));
-
+    // check if the input was a tuple of Potential objects, and if so, return a composite potential
+    if(Potential_initComposite(self, args) == 0)
+        return 0;
     potential::ConfigPotential cfg;
     const char* file="";
     const char* type="";
@@ -422,7 +559,7 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
 
     // it is VITALLY IMPORTANT to list all data fields in exactly the same order
     // as appeared in the `potentialArgs` array!!!
-    if(!PyArg_ParseTupleAndKeywords(args, namedargs, keywordTypesPotential, const_cast<char**>(keywordsPotential),
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, keywordTypesPotential, const_cast<char**>(keywordsPotential),
         &file, &type, &density, &symmetry,
         &points,
         &(cfg.mass), &(cfg.scaleRadius), &(cfg.scaleRadius2), &(cfg.q), &(cfg.p), &(cfg.gamma), &(cfg.sersicIndex),
@@ -433,27 +570,30 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedargs)
             "type 'help(Potential)' to get the list of possible arguments and their types");
         return -1;
     }
-    cfg.fileName = std::string(file);
+    cfg.fileName      = std::string(file);
     cfg.potentialType = potential::getPotentialTypeByName(type);
-    cfg.densityType = potential::getDensityTypeByName(density);
-    cfg.symmetryType = potential::getSymmetryTypeByName(symmetry);
-    if(cfg.potentialType == potential::PT_UNKNOWN) {
-        if(type[0]==0)
-            PyErr_SetString(PyExc_ValueError, "Should provide type='...' or file='...' parameter");
-        else
-            PyErr_SetString(PyExc_ValueError, "Incorrect type='...' parameter");
-        return -1;
-    }
+    cfg.densityType   = potential::getDensityTypeByName(density);
+    cfg.symmetryType  = potential::getSymmetryTypeByName(symmetry);
+    cfg.mass         *= conv->massUnit;
+    cfg.scaleRadius  *= conv->lengthUnit;
+    cfg.scaleRadius2 *= conv->lengthUnit;
+    cfg.splineRMin   *= conv->lengthUnit;
+    cfg.splineRMax   *= conv->lengthUnit;
+    cfg.splineZMin   *= conv->lengthUnit;
+    cfg.splineZMax   *= conv->lengthUnit;
     try{  // the code below may generate exceptions which shouldn't propagate to Python
-        const potential::BasePotential* pot = NULL;
         if(points!=NULL) {  // a list of particles was provided
-            pot = Potential_initFromParticles(cfg, points);
+            return Potential_initFromParticles(self, cfg, points);
         } else {   // attempt to create potential from configuration parameters
-            pot = potential::createPotential(cfg);
+            if(type[0]==0 && file[0]==0) {
+                PyErr_SetString(PyExc_ValueError, "Should provide type='...' or file='...' parameter");
+                return -1;
+            }
+            const potential::BasePotential* pot = potential::createPotential(cfg);
+            assert(pot!=NULL);
+            Potential_initMemberVar(self, pot);
+            return 0;
         }
-        assert(pot!=NULL);
-        Potential_initMemberVar(self, pot);
-        return 0;
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, (std::string("Error in creating potential: ")+e.what()).c_str());
@@ -474,9 +614,17 @@ static bool Potential_isCorrect(PyObject* self)
     return true;
 }
 
+// function that do actually compute something from the potential object,
+// applying appropriate unit conversions
 
 static void fncPotential(PyObject* obj, const double input[], double *result) {
-    result[0] = ((PotentialObject*)obj)->pot->value(coord::PosCar(input[0], input[1], input[2]));
+    const coord::PosCar point(
+        input[0] * conv->lengthUnit, 
+        input[1] * conv->lengthUnit, 
+        input[2] * conv->lengthUnit);
+    result[0] =
+        ((PotentialObject*)obj)->pot->value(point)
+        / pow_2(conv->velocityUnit);   // unit of potential is V^2
 }
 static PyObject* Potential_potential(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
@@ -491,7 +639,13 @@ static PyObject* Potential_value(PyObject* self, PyObject* args, PyObject* /*nam
 }
 
 static void fncDensity(PyObject* obj, const double input[], double *result) {
-    result[0] = ((PotentialObject*)obj)->pot->density(coord::PosCar(input[0], input[1], input[2]));
+    const coord::PosCar point(
+        input[0] * conv->lengthUnit, 
+        input[1] * conv->lengthUnit, 
+        input[2] * conv->lengthUnit);
+    result[0] =
+        ((PotentialObject*)obj)->pot->density(point)
+        / (conv->massUnit / pow_2(conv->lengthUnit));  // unit of density is M/L^3
 }
 static PyObject* Potential_density(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
@@ -501,11 +655,17 @@ static PyObject* Potential_density(PyObject* self, PyObject* args) {
 }
 
 static void fncForce(PyObject* obj, const double input[], double *result) {
+    const coord::PosCar point(
+        input[0] * conv->lengthUnit, 
+        input[1] * conv->lengthUnit, 
+        input[2] * conv->lengthUnit);
     coord::GradCar grad;
-    ((PotentialObject*)obj)->pot->eval(coord::PosCar(input[0], input[1], input[2]), NULL, &grad);
-    result[0] = -grad.dx;
-    result[1] = -grad.dy;
-    result[2] = -grad.dz;
+    ((PotentialObject*)obj)->pot->eval(point, NULL, &grad);
+    // unit of force per unit mass is V/T
+    const double convF = 1 / (conv->velocityUnit/conv->timeUnit);
+    result[0] = -grad.dx * convF;
+    result[1] = -grad.dy * convF;
+    result[2] = -grad.dz * convF;
 }
 static PyObject* Potential_force(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
@@ -515,18 +675,26 @@ static PyObject* Potential_force(PyObject* self, PyObject* args) {
 }
 
 static void fncForceDeriv(PyObject* obj, const double input[], double *result) {
+    const coord::PosCar point(
+        input[0] * conv->lengthUnit, 
+        input[1] * conv->lengthUnit, 
+        input[2] * conv->lengthUnit);
     coord::GradCar grad;
     coord::HessCar hess;
-    ((PotentialObject*)obj)->pot->eval(coord::PosCar(input[0], input[1], input[2]), NULL, &grad, &hess);
-    result[0] = -grad.dx;
-    result[1] = -grad.dy;
-    result[2] = -grad.dz;
-    result[3] = -hess.dx2;
-    result[4] = -hess.dy2;
-    result[5] = -hess.dz2;
-    result[6] = -hess.dxdy;
-    result[7] = -hess.dydz;
-    result[8] = -hess.dxdz;
+    ((PotentialObject*)obj)->pot->eval(point, NULL, &grad, &hess);
+    // unit of force per unit mass is V/T
+    const double convF = 1 / (conv->velocityUnit/conv->timeUnit);
+    // unit of force deriv per unit mass is V/T^2
+    const double convD = 1 / (conv->velocityUnit/pow_2(conv->timeUnit));
+    result[0] = -grad.dx * convF;
+    result[1] = -grad.dy * convF;
+    result[2] = -grad.dz * convF;
+    result[3] = -hess.dx2  * convD;
+    result[4] = -hess.dy2  * convD;
+    result[5] = -hess.dz2  * convD;
+    result[6] = -hess.dxdy * convD;
+    result[7] = -hess.dydz * convD;
+    result[8] = -hess.dxdz * convD;
 }
 static PyObject* Potential_force_deriv(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
@@ -672,11 +840,19 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs
 
 static void fncActions(PyObject* obj, const double input[], double *result) {
     try{
-        coord::PosVelCar point(input);
+        const coord::PosVelCar point(
+            input[0] * conv->lengthUnit, 
+            input[1] * conv->lengthUnit, 
+            input[2] * conv->lengthUnit,
+            input[3] * conv->velocityUnit, 
+            input[4] * conv->velocityUnit, 
+            input[5] * conv->velocityUnit);
         actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
-        result[0] = acts.Jr;
-        result[1] = acts.Jz;
-        result[2] = acts.Jphi;
+        // unit of action is V*L
+        const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
+        result[0] = acts.Jr   * convA;
+        result[1] = acts.Jz   * convA;
+        result[2] = acts.Jphi * convA;
     }
     catch(std::exception& ) {  // indicates an error, e.g., positive value of energy
         result[0] = result[1] = result[2] = NAN;
@@ -863,6 +1039,7 @@ static PyTypeObject SplineApproxType = {
 ///@}
 
 static PyMethodDef py_wrapper_methods[] = {
+    {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringUnits}, 
     {NULL}
 };
 
@@ -871,9 +1048,11 @@ initpy_wrapper(void)
 {
     PyObject* mod = Py_InitModule("py_wrapper", py_wrapper_methods);
     if(!mod) return;
+    conv = new units::ExternalUnits();
 
     // Potential class
     buildDocstringPotential();
+    PotentialTypePtr = &PotentialType;
     if (PyType_Ready(&PotentialType) < 0) return;
     Py_INCREF(&PotentialType);
     PyModule_AddObject(mod, "Potential", (PyObject *)&PotentialType);

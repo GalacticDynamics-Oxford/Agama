@@ -162,7 +162,9 @@ const BasePotential* createPotential(ConfigPotential& config)
         }
         break;
     }
-    default: ;
+    default: 
+        if(!config.fileName.empty())  // if the file contains potential coefs, then type is determined automatically
+            potential = readPotential(config);  // otherwise an exception will occur
     }
     if(!potential)
         throw std::invalid_argument("Unknown potential type");
