@@ -12,6 +12,7 @@
 #include "potential_composite.h"
 #include "actions_staeckel.h"
 #include "actions_torus.h"
+#include "orbit.h"
 #include "math_spline.h"
 
 /// \name  Some general definitions
@@ -73,7 +74,7 @@ static PyObject* set_units(PyObject* /*self*/, PyObject* args, PyObject* namedAr
         &mass, &length, &velocity, &time) ||
         mass<0 || length<0 || velocity<0 || time<0)
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to setUnits()");
+        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to set_units()");
         return NULL;
     }
     if(length>0 && velocity>0 && time>0) {
@@ -781,7 +782,8 @@ static PyTypeObject PotentialType = {
 /// Python type corresponding to ActionFinder class
 typedef struct {
     PyObject_HEAD
-    const actions::BaseActionFinder* finder;  // C++ class for action finder
+    const actions::InterfocalDistanceFinder* finder;
+    //const actions::BaseActionFinder* finder;  // C++ class for action finder
     PyObject* pot;  // Python object for potential
 } ActionFinderObject;
 
@@ -819,8 +821,10 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs
         return -1;
     }
     try{
-        const actions::BaseActionFinder* finder = 
-            new actions::ActionFinderAxisymFudge(*((PotentialObject*)objPot)->pot);
+        //const actions::BaseActionFinder* finder = 
+        //    new actions::ActionFinderAxisymFudge(*((PotentialObject*)objPot)->pot);
+        const actions::InterfocalDistanceFinder* finder = 
+            new actions::InterfocalDistanceFinder(*((PotentialObject*)objPot)->pot);
         // ensure valid cleanup if the constructor was called more than once
         if(((ActionFinderObject*)self)->finder!=NULL)
             delete ((ActionFinderObject*)self)->finder;
@@ -840,14 +844,19 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs
 
 static void fncActions(PyObject* obj, const double input[], double *result) {
     try{
-        const coord::PosVelCar point(
+        const coord::PosVelCyl point = coord::toPosVelCyl( coord::PosVelCar(
             input[0] * conv->lengthUnit, 
             input[1] * conv->lengthUnit, 
             input[2] * conv->lengthUnit,
             input[3] * conv->velocityUnit, 
             input[4] * conv->velocityUnit, 
-            input[5] * conv->velocityUnit);
-        actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
+            input[5] * conv->velocityUnit) );
+        //actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
+        double ifd = actions::estimateInterfocalDistance(*((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point);
+        //((ActionFinderObject*)obj)->finder->value(point);
+        //printf("Delta=%f\n", ifd/conv->lengthUnit);
+        actions::Actions acts = actions::axisymFudgeActions(
+            *((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point, ifd);
         // unit of action is V*L
         const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
         result[0] = acts.Jr   * convA;
@@ -1037,9 +1046,86 @@ static PyTypeObject SplineApproxType = {
     SplineApprox_init, 0, SplineApprox_new
 };
 ///@}
+/// \name  ----- Orbit integration -----
+///@{
+
+/// description of orbit function
+static const char* docstringOrbit = 
+    "Compute an orbit starting from the given initial conditions in the given potential\n"
+    "Arguments:\n"
+    "    ic=float[6] : initial conditions - an array of 6 numbers "
+    "(3 positions and 3 velocities in Cartesian coordinates);\n"
+    "    pot=Potential object that defines the gravitational potential;\n"
+    "    time=float : total integration time;\n"
+    "    step=float : output timestep (does not affect the integration accuracy);\n"
+    "    acc=float, optional : relative accuracy parameter (default 1e-10).\n"
+    "Returns: an array of Nx6 numbers, where N=time/step is the number of output points "
+    "in the trajectory, and each point consists of position and velocity in Cartesian coordinates.";
+
+/// orbit integration
+static PyObject* integrate_orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"ic", "pot", "time", "step", "acc", NULL};
+    double time = 0, step = 0, acc = 1e-10;
+    PyObject *ic_obj = NULL, *pot_obj = NULL;
+    if(!PyArg_ParseTupleAndKeywords(
+        args, namedArgs, "|OOddd", const_cast<char**>(keywords),
+        &ic_obj, &pot_obj, &time, &step, &acc) ||
+        time<=0 || step<=0 || acc<=0)
+    {
+        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to orbit()");
+        return NULL;
+    }
+    if(!PyObject_TypeCheck(pot_obj, &PotentialType) || 
+        ((PotentialObject*)pot_obj)->pot==NULL ) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'pot' must be a valid instance of Potential class");
+        return NULL;
+    }
+    PyArrayObject *ic_arr  = (PyArrayObject*) PyArray_FROM_OTF(ic_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(ic_arr == NULL || PyArray_NDIM(ic_arr) != 1 || PyArray_DIM(ic_arr, 0) != 6) {
+        Py_XDECREF(ic_arr);
+        PyErr_SetString(PyExc_ValueError, "Argument 'ic' does not contain a valid array of length 6");
+        return NULL;
+    }
+    // initialize
+    const coord::PosVelCar ic_point(
+        ((double*)PyArray_DATA(ic_arr))[0] * conv->lengthUnit, 
+        ((double*)PyArray_DATA(ic_arr))[1] * conv->lengthUnit, 
+        ((double*)PyArray_DATA(ic_arr))[2] * conv->lengthUnit,
+        ((double*)PyArray_DATA(ic_arr))[3] * conv->velocityUnit, 
+        ((double*)PyArray_DATA(ic_arr))[4] * conv->velocityUnit, 
+        ((double*)PyArray_DATA(ic_arr))[5] * conv->velocityUnit);
+    std::vector<coord::PosVelCar> traj;
+    Py_DECREF(ic_arr);
+    // integrate
+    try{
+        orbit::integrate( *((PotentialObject*)pot_obj)->pot, ic_point, 
+            time * conv->timeUnit, step * conv->timeUnit, traj, acc);
+        // build an appropriate output array
+        const size_t size = traj.size();
+        npy_intp dims[] = {size, 6};
+        PyArrayObject* result = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
+        for(size_t index=0; index<size; index++) {
+            ((double*)PyArray_DATA(result))[index*6  ] = traj[index].x / conv->lengthUnit;
+            ((double*)PyArray_DATA(result))[index*6+1] = traj[index].y / conv->lengthUnit;
+            ((double*)PyArray_DATA(result))[index*6+2] = traj[index].z / conv->lengthUnit;
+            ((double*)PyArray_DATA(result))[index*6+3] = traj[index].vx / conv->velocityUnit;
+            ((double*)PyArray_DATA(result))[index*6+4] = traj[index].vy / conv->velocityUnit;
+            ((double*)PyArray_DATA(result))[index*6+5] = traj[index].vz / conv->velocityUnit;
+        }
+        return (PyObject*)result;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, 
+            (std::string("Error in orbit computation: ")+e.what()).c_str());
+        return NULL;
+    }
+}
+///@}
 
 static PyMethodDef py_wrapper_methods[] = {
     {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringUnits}, 
+    {"orbit", (PyCFunction)integrate_orbit, METH_VARARGS | METH_KEYWORDS, docstringOrbit}, 
     {NULL}
 };
 

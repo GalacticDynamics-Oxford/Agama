@@ -14,9 +14,6 @@ const double ACCURACY_ROOT=1e-6;
 /** default relative accuracy of integration */
 const double ACCURACY_INTEGR=1e-6;
 
-/** limit on the maximum number of steps in ODE solver */
-const int ODE_MAX_NUM_STEP=1e6;
-
 /// \name  ---- Miscellaneous utility functions -----
 ///@{
 
@@ -243,41 +240,6 @@ void linearFit(unsigned int N, const double x[], const double y[],
     in the output argument 'rms' if it is not NULL. */
 double linearFitZero(unsigned int N, const double x[], const double y[], double* rms=0);
 
-///@}
-/// \name ----- systems of ordinary differential equations ------
-///@{
-
-/** Prototype of a function that is used in integration of ordinary differential equation systems:
-    dy/dt = f(t, y), where y is an N-dimensional vector. */
-class IOdeSystem {
-public:
-    IOdeSystem() {};
-    virtual ~IOdeSystem() {};
-    
-    /** compute the r.h.s. of the differential equation: 
-        \param[in]  t    is the integration variable (time),
-        \param[in]  y    is the vector of values of dependent variables, 
-        \param[out] dydt should return the time derivatives of these variables */
-    virtual void eval(const double t, const double y[], double* dydt) const=0;
-    
-    /** return the size of ODE system (number of variables) */
-    virtual int size() const=0;
-};
-
-/** solve a system of differential equations */
-class OdeSolver {
-public:
-    OdeSolver(const IOdeSystem& F, double abstoler, double reltoler);
-    ~OdeSolver();
-    /** evolve the ODE from time `tstart` to `tfinish`, using one or more intermediate timesteps, 
-        determined by internal tolerance parameters; 
-        \param[in,out]  y is the system state, which is evolved in time;
-        \return   the number of intermediate timesteps taken.
-    */
-    int advance(double tstart, double tfinish, double *y);
-private:
-    void* impl;   ///< implementation details are hidden
-};
 ///@}
 
 }  // namespace

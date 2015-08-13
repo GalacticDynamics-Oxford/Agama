@@ -1,5 +1,6 @@
 #include "actions_interfocal_distance_finder.h"
 #include "math_core.h"
+#include "orbit.h"
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
@@ -181,6 +182,39 @@ double estimateInterfocalDistanceBox(const potential::BasePotential& potential,
     return sqrt(coef);
 }
 
+// estimate IFD for a thin (shell) orbit in R-z plane
+double estimateInterfocalDistanceThin(
+    const potential::BasePotential& potential, double R, double vz, double vphi)
+{
+    if(vz==0)
+        return R;  // arbitrary; for orbits in x-y plane this doesn't matter anyway
+    const coord::PosVelCyl ic(R, 0, 0, 0, vz, vphi);
+    double kappa, nu, Omega;
+    epicycleFreqs(potential, R, kappa, nu, Omega);
+    double intTime = M_PI/fmin(kappa, nu);
+    double timeStep= intTime/16;
+    std::vector<coord::PosVelCyl> traj;
+    orbit::integrate(potential, ic, intTime, timeStep, traj);
+    // find the turnaround point (where z=maximum)
+    unsigned int maxind=0;
+    while(maxind+1<traj.size() && traj[maxind].vz>0)
+        maxind++;
+    std::vector<double> x(maxind), y(maxind);
+    double sumsq=0;
+    for(unsigned int i=0; i<maxind; i++) {
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        potential.eval(traj[i], NULL, &grad, &hess);
+        x[i] = hess.dRdz;
+        y[i] = 3*traj[i].z*grad.dR - 3*traj[i].R*grad.dz + traj[i].R*traj[i].z*(hess.dR2-hess.dz2)
+        + (traj[i].z*traj[i].z-traj[i].R*traj[i].R) * hess.dRdz;
+        sumsq += pow_2(x[i]);
+    }
+    double coef = sumsq>0 ? math::linearFitZero(maxind, &x.front(), &y.front()) : 0;
+    coef = fmax(coef, R*R * 0.0001);  // prevent it from going below or around zero
+    return sqrt(coef);
+}
+
 double estimateInterfocalDistance(
     const potential::BasePotential& potential, const coord::PosVelCyl& point)
 {
@@ -189,7 +223,14 @@ double estimateInterfocalDistance(
         R1=R2=point.R; z1=z2=point.z;
     }
     return estimateInterfocalDistanceBox(potential, R1, R2, z1, z2);
+    double Lz  = coord::Lz(point);
+    double E   = totalEnergy(potential, point);
+    double R   = R_from_Lz(potential, Lz);
+    double vphi= Lz>0 ? Lz/R : 0;
+    double vz  = sqrt(fmax(2 * (E - potential.value(coord::PosCyl(R, 0, 0))) - pow_2(vphi), 0) );
+    return estimateInterfocalDistanceThin(potential, R, vz, vphi);
 }
+
 
 // ----------- Interpolation of interfocal distance in E,Lz plane ------------ //
 InterfocalDistanceFinder::InterfocalDistanceFinder(
@@ -202,17 +243,18 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
     
     if(gridSizeE<10 || gridSizeE>500)
         throw std::invalid_argument("InterfocalDistanceFinder: incorrect grid size");
-    double totalMass = potential.totalMass();
-    if(!math::isFinite(totalMass))
-        throw std::invalid_argument("InterfocalDistanceFinder: model has infinite mass");
     
     // find out characteristic energy values
-    double halfMassRadius = getRadiusByMass(potential, 0.5*totalMass);
     double E0 = potential.value(coord::PosCar(0, 0, 0));
-    double EhalfMass = potential.value(coord::PosCyl(halfMassRadius, 0, 0));
+    double Ehalf = E0*0.5;
+    double totalMass = potential.totalMass();
+    if(math::isFinite(totalMass)) {
+        double halfMassRadius = getRadiusByMass(potential, 0.5*totalMass);
+        Ehalf = potential.value(coord::PosCyl(halfMassRadius, 0, 0));
+    }
     double Einfinity = 0;
-    if((!math::isFinite(E0) && E0!=-INFINITY) || !math::isFinite(EhalfMass) || 
-        E0>=EhalfMass || EhalfMass>=Einfinity)
+    if((!math::isFinite(E0) && E0!=-INFINITY) || !math::isFinite(Ehalf) || 
+        E0>=Ehalf || Ehalf>=Einfinity)
         throw std::runtime_error("InterfocalDistanceFinder: weird behaviour of potential");
 
     // create a somewhat non-uniform grid in energy
@@ -222,9 +264,9 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
     std::vector<double> gridE(gridSizeE);
     for(unsigned int i=0; i<(gridSizeE+1)/2; i++) {
         // inner part of the model
-        gridE[i] = math::isFinite(E0) ? E0 + (EhalfMass-E0)*energyBins[i] : EhalfMass/energyBins[i];
+        gridE[i] = math::isFinite(E0) ? E0 + (Ehalf-E0)*energyBins[i] : Ehalf/energyBins[i];
         // outer part of the model
-        gridE[gridSizeE-1-i] = Einfinity - (Einfinity-EhalfMass)*energyBins[i];
+        gridE[gridSizeE-1-i] = Einfinity - (Einfinity-Ehalf)*energyBins[i];
     }
 
     // fill a 1d interpolator for Lcirc(E)

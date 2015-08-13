@@ -27,6 +27,7 @@ SOURCES   = coord.cpp \
             actions_staeckel.cpp \
             actions_torus.cpp \
             math_core.cpp \
+            math_ode.cpp \
             math_spline.cpp \
             math_specfunc.cpp \
             cubature.cpp \
@@ -56,6 +57,7 @@ TESTSRCS  = test_math_core.cpp \
             test_math_spline.cpp \
             test_coord.cpp \
             test_units.cpp \
+            test_orbit_integr.cpp \
             test_potentials.cpp \
             test_potential_sphharm.cpp \
             test_staeckel.cpp \

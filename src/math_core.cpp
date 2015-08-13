@@ -7,7 +7,6 @@
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_fit.h>
-#include <gsl/gsl_odeiv2.h>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
@@ -706,65 +705,6 @@ void linearFit(unsigned int N, const double x[], const double y[],
     gsl_fit_linear(x, 1, y, 1, N, &intercept, &slope, &cov00, &cov01, &cov11, &sumsq);
     if(rms!=NULL)
         *rms = sqrt(sumsq/N);
-}
-
-// ------ ODE solver ------- //
-// Simple ODE integrator using Runge-Kutta Dormand-Prince 8 adaptive stepping
-// dy_i/dt = f_i(t) where int (*f)(double t, const double y, double f, void *params)
-
-static int functionWrapperODE(double t, const double y[], double dydt[], void* param){
-    static_cast<IOdeSystem*>(param)->eval(t, y, dydt);
-    return GSL_SUCCESS;
-}
-
-struct OdeImpl{
-    gsl_odeiv2_step * s;
-    gsl_odeiv2_control * c;
-    gsl_odeiv2_evolve * e;
-    gsl_odeiv2_system sys;
-};
-
-OdeSolver::OdeSolver(const IOdeSystem& F, double abstoler, double reltoler)
-{
-    OdeImpl* data = new OdeImpl;
-    data->sys.function  = functionWrapperODE;
-    data->sys.jacobian  = NULL;
-    data->sys.dimension = F.size();
-    data->sys.params    = const_cast<IOdeSystem*>(&F);
-    data->s = gsl_odeiv2_step_alloc(gsl_odeiv2_step_rk8pd, data->sys.dimension);
-    data->c = gsl_odeiv2_control_y_new(abstoler, reltoler);
-    data->e = gsl_odeiv2_evolve_alloc(data->sys.dimension);
-    impl=data;
-}
-
-OdeSolver::~OdeSolver() {
-    OdeImpl* data=static_cast<OdeImpl*>(impl);
-    gsl_odeiv2_evolve_free(data->e);
-    gsl_odeiv2_control_free(data->c);
-    gsl_odeiv2_step_free(data->s);
-    delete data;
-}
-
-int OdeSolver::advance(double tstart, double tfinish, double *y){
-    OdeImpl* data = static_cast<OdeImpl*>(impl);
-    double h = tfinish-tstart;
-    double direction=(h>0?1.:-1.);
-    int numstep=0;
-    while ((tfinish-tstart)*direction>0 && numstep<ODE_MAX_NUM_STEP) {
-        int status = gsl_odeiv2_evolve_apply (data->e, data->c, data->s, &(data->sys), &tstart, tfinish, &h, y);
-        // check if computation is broken
-        double test=0;
-        for(unsigned int i=0; i<data->sys.dimension; i++) 
-            test += y[i];
-        if (status != GSL_SUCCESS || !isFinite(test)) {
-            numstep = -1;
-            break;
-        }
-        numstep++;
-    }
-    if(numstep>=ODE_MAX_NUM_STEP)
-        throw std::runtime_error("ODE solver: number of sub-steps exceeds maximum");
-    return numstep;
 }
 
 }  // namespace

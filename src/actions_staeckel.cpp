@@ -3,15 +3,15 @@
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
-#include "debug_utils.h"
+
 namespace actions{
 
 /** Accuracy of integrals for computing actions and angles
     is determined by the number of points in fixed-order Gauss-Legendre scheme */
-const unsigned int INTEGR_ORDER = 10;  // good enough
+const unsigned int INTEGR_ORDER = 20;  // good enough
 
 /** relative tolerance in determining the range of variables (nu,lambda) to integrate over */
-const double ACCURACY_RANGE = 1e-6;
+const double ACCURACY_RANGE = 1e-8;
 
 /** minimum range of variation of nu, lambda that is considered to be non-zero */
 const double MINIMUM_RANGE = 1e-12;
@@ -438,7 +438,6 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
     if(interfocalDistance==0)
         interfocalDistance = estimateInterfocalDistance(potential, point);
-    std::cout<<point<<"D="<<interfocalDistance<<"\n";
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
