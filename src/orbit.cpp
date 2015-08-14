@@ -6,7 +6,7 @@
 namespace orbit{
 
 /** limit on the maximum number of steps in ODE solver */
-static const int ODE_MAX_NUM_STEP = 1e6;
+static const unsigned int ODE_MAX_NUM_STEP = 1e6;
 
 
 /* evaluate r.h.s. of ODE in different coordinate systems */
@@ -20,8 +20,9 @@ public:
     virtual void eval(const double t, const math::OdeStateType& y, math::OdeStateType& dydt) const;
     
     /** return the size of ODE system - three coordinates and three velocities */
-    virtual int size() const { return 6;}
+    virtual unsigned int size() const { return 6;}
     
+    virtual bool isStdHamiltonian() const;
 private:
     const potential::BasePotential& potential;
 };
@@ -39,6 +40,8 @@ void OrbitIntegrator<coord::Car>::eval(const double /*t*/,
     dydt[4] = -grad.dy;
     dydt[5] = -grad.dz;
 }
+template<>
+bool OrbitIntegrator<coord::Car>::isStdHamiltonian() const { return true; }
 
 template<>
 void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/,
@@ -47,14 +50,17 @@ void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/,
     const coord::PosVelCyl p(&y.front());
     coord::GradCyl grad;
     potential.eval(p, NULL, &grad);
+    double Rsafe = p.R!=0 ? p.R : 1e-100;  // avoid NAN in degenerate cases
     dydt[0] = p.vR;
     dydt[1] = p.vz;
-    dydt[2] = p.vphi/p.R;
-    dydt[3] = -grad.dR + pow_2(p.vphi) / p.R;
+    dydt[2] = p.vphi/Rsafe;
+    dydt[3] = -grad.dR + pow_2(p.vphi) / Rsafe;
     dydt[4] = -grad.dz;
-    dydt[5] = -(grad.dphi + p.vR*p.vphi) / p.R;
+    dydt[5] = -(grad.dphi + p.vR*p.vphi) / Rsafe;
 }
-
+template<>
+bool OrbitIntegrator<coord::Cyl>::isStdHamiltonian() const { return false; }
+        
 template<>
 void OrbitIntegrator<coord::Sph>::eval(const double /*t*/,
     const math::OdeStateType& y, math::OdeStateType& dydt) const
@@ -62,14 +68,19 @@ void OrbitIntegrator<coord::Sph>::eval(const double /*t*/,
     const coord::PosVelSph p(&y.front());
     coord::GradSph grad;
     potential.eval(p, NULL, &grad);
-    const double sintheta=sin(p.theta), cottheta=cos(p.theta)/sintheta;
+    double rsafe = p.r!=0 ? p.r : 1e-100;
+    double sintheta = sin(p.theta);
+    if(sintheta == 0) sintheta = 1e-100;
+    double cottheta = cos(p.theta)/sintheta;
     dydt[0] = p.vr;
-    dydt[1] = p.vtheta/p.r;
-    dydt[2] = p.vphi/(p.r*sintheta);
-    dydt[3] = -grad.dr + (pow_2(p.vtheta) + pow_2(p.vphi)) / p.r;
-    dydt[4] = (-grad.dtheta + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) / p.r;
-    dydt[5] = (-grad.dphi/sintheta - (p.vr+p.vtheta*cottheta)*p.vphi) / p.r;
+    dydt[1] = p.vtheta/rsafe;
+    dydt[2] = p.vphi/(rsafe*sintheta);
+    dydt[3] = -grad.dr + (pow_2(p.vtheta) + pow_2(p.vphi)) / rsafe;
+    dydt[4] = (-grad.dtheta + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) / rsafe;
+    dydt[5] = (-grad.dphi/sintheta - (p.vr+p.vtheta*cottheta)*p.vphi) / rsafe;
 }
+template<>
+bool OrbitIntegrator<coord::Sph>::isStdHamiltonian() const { return false; }
 
 template<typename coordT>
 class TrajectoryOutput {
@@ -102,7 +113,7 @@ private:
 };
 
 template<typename coordT>
-int integrate(const potential::BasePotential& potential,
+unsigned int integrate(const potential::BasePotential& potential,
     const coord::PosVelT<coordT>& initialConditions,
     const double totalTime,
     const double outputTimestep,
@@ -119,15 +130,15 @@ int integrate(const potential::BasePotential& potential,
     try{
         solver->init(vars);
         bool finished = false;
-        int numSteps = 0;
+        unsigned int numSteps = 0;
         while(!finished) {
             if(solver->step() <= 0 || numSteps >= ODE_MAX_NUM_STEP)  // signal of error
                 finished = true;
             else {
-                trajOutput.processStep();
                 numSteps++;
                 finished = solver->getTime() >= totalTime;
             }
+            trajOutput.processStep();
         }
         delete solver;
         return numSteps;
@@ -139,11 +150,11 @@ int integrate(const potential::BasePotential& potential,
 }
 
 // explicit template instantiations to make sure all of them get compiled
-template int integrate(const potential::BasePotential&, const coord::PosVelCar&,
+template unsigned int integrate(const potential::BasePotential&, const coord::PosVelCar&,
     const double, const double, std::vector<coord::PosVelCar>&, const double);
-template int integrate(const potential::BasePotential&, const coord::PosVelCyl&,
+template unsigned int integrate(const potential::BasePotential&, const coord::PosVelCyl&,
     const double, const double, std::vector<coord::PosVelCyl>&, const double);
-template int integrate(const potential::BasePotential&, const coord::PosVelSph&,
+template unsigned int integrate(const potential::BasePotential&, const coord::PosVelSph&,
     const double, const double, std::vector<coord::PosVelSph>&, const double);
 
 }  // namespace orbit

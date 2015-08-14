@@ -12,11 +12,11 @@
 
 const double integr_eps=1e-8;  // integration accuracy parameter
 const double eps=1e-6;  // accuracy of comparison
-const units::InternalUnits unit(0.2*units::Kpc, 100*units::Myr);
+const units::InternalUnits unit(units::galactic_Myr);//(0.2*units::Kpc, 100*units::Myr);
 int numActionEval=0;
 
 //#define SINGLEORBIT
-//#define INPUTFILE
+#define INPUTFILE
 
 bool test_actions(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions,

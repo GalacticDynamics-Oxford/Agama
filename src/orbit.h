@@ -24,7 +24,7 @@ namespace orbit {
     \param[in]  accuracy  is the accuracy parameter for ODE integrator.
     \returns    number of elementary integration steps completed. */
 template<typename coordT>
-int integrate(const potential::BasePotential& potential,
+unsigned int integrate(const potential::BasePotential& potential,
     const coord::PosVelT<coordT>& initial_conditions,
     const double total_time,
     const double output_timestep,

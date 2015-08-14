@@ -3,6 +3,11 @@
 
 namespace math{
 
+inline bool isFinite(double x) {
+    const double y = x - x;
+    return y == y;  // false for +-INFINITY or NAN
+}
+
 /* ----------------- ODE integrators ------------- */
 
 #ifdef HAVE_ODEINT
@@ -371,6 +376,8 @@ double OdeSolverDOP853::initTimeStep()
         dny += sqre*sqre;
     }
     double h = sqrt (dny/dnf) * 0.01;
+    if(!isFinite(dnf+dny) || (dnf <= 1e-15) || (dny <= 1e-15))  // safety measures
+        h = 1e-6;  // some arbitrary but small value
 
     /* perform an explicit Euler step */
     for (unsigned int i = 0; i < stateCurr.size(); i++)
@@ -388,7 +395,7 @@ double OdeSolverDOP853::initTimeStep()
     
     /* step size is computed such that h^8 * max(norm(der),norm(der2)) = 0.01 */
     double der12 = fmax(fabs(der2), sqrt(dnf));
-    double h1 = pow (0.01/der12, 1./8);
+    double h1 = der12 > 1e-15 ? pow (0.01/der12, 1./8) : fmax(1e-6, h*1e-3);
     h = fmin(100.0 * h, h1);
     return h;
     
@@ -527,7 +534,7 @@ double OdeSolverDOP853::step()
     fac2 = 6.0;
     const unsigned int n = stateCurr.size();
     do {
-        if(timeStep <= fabs(timeCurr)*1e-15 || timeStep != timeStep || fabs(timeStep) == INFINITY)
+        if(timeStep <= fabs(timeCurr)*1e-15 || !isFinite(timeStep))
             return 0;   // error, integration must be terminated
 
         /* the twelve RK stages */

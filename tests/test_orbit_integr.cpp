@@ -49,9 +49,9 @@ bool test_potential(const potential::BasePotential* potential,
     if(completed)
         std::cout <<numsteps<<" steps,  ";
     else if(numsteps>0)
-        std::cout <<"CRASHED after "<<numsteps<<" steps,  ";
+        std::cout <<"\033[1;33mCRASHED\033[0m after "<<numsteps<<" steps,  ";
     else 
-        std::cout <<"FAILED,  ";
+        std::cout <<"\033[1;31mFAILED\033[0m,  ";
     std::cout << "E=" <<avgH <<" +- "<<dispH<<",  Lz="<<avgLz<<" +- "<<dispLz<<"\n";
     return completed && dispH<eps && 
         (dispLz<eps || ((potential->symmetry() & potential::ST_AXISYMMETRIC) == 0));

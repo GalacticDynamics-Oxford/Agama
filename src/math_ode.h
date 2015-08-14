@@ -37,13 +37,13 @@ public:
     virtual void eval(double t, const OdeStateType& y, OdeStateType& dydt) const = 0;
 
     /** Return the size of ODE system (number of variables) */
-    virtual int size() const = 0;
+    virtual unsigned int size() const = 0;
 
     /** Inform whether the ODE is in the 'standard Hamiltonian' form,
         i.e. if the time derivatives of the first half of variables (coordinates)
         are given by the values of the second half of variables (velocity components).
         If true, this allows for simplifications in some ODE solvers */
-    virtual bool isStdHamiltonian() { return false; };
+    virtual bool isStdHamiltonian() const { return false; };
 };
 
 #if 0
@@ -74,7 +74,7 @@ enum STEPPERKIND {
 class BaseOdeSolver
 {
 public:
-    BaseOdeSolver(IOdeSystem& _odeSystem):
+    BaseOdeSolver(const IOdeSystem& _odeSystem):
         odeSystem(_odeSystem), timePrev(0), timeCurr(0) {};
 
     virtual ~BaseOdeSolver() {};
@@ -94,7 +94,7 @@ public:
     virtual double value(double t, unsigned int c) const = 0;
 
 protected:
-    IOdeSystem& odeSystem;
+    const IOdeSystem& odeSystem;
     double timePrev, timeCurr;      //< previous and current value of time to which the integration has advanced
 };
 
