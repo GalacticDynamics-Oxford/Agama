@@ -21,21 +21,23 @@
 namespace actions {
 //  ------- Routines for estimating the interfocal distance for the Fudge approximation -------
 
-/** Estimate the orbit extent in R and z directions; on success, return true 
-    and fill the output arguments with the coordinates of closest and farthest corner point */
-bool estimateOrbitExtent(
-    const potential::BasePotential& potential, const coord::PosVelCyl& point,
-    double& R1, double& R2, double& z1, double& z2);
+/** Estimate the squared interfocal distance using the potential derivatives 
+    (equation 9 in Sanders 2012), averaged over the given array of points in R,z plane.
+    \param[in] potential  is the instance of potential, which must be axisymmetric;
+    \param[in] traj  is the array of points (e.g., obtained by orbit integration);
+    \tparam PointT  may be PosCyl or PosVelCyl
+    \return  best-fit value of Delta^2, which may turn out to be negative (in that case, 
+    the user should replace it with some small positive value to use the Staeckel Fudge).
+*/
+template<typename PointT>
+double estimateSquaredInterfocalDistancePoints(
+    const potential::BasePotential& potential, const std::vector<PointT>& traj);
 
-/** Estimate the interfocal distance using the potential derivatives (equation 9 in Sanders 2012)
-    averaged over the given box in the meridional plane  */
-double estimateInterfocalDistanceBox(
-    const potential::BasePotential& potential, 
-    double R1, double R2, double z1, double z2);
+template<typename PointT>
+double estimateSquaredInterfocalDistanceThinOrbit(const std::vector<PointT>& traj);
 
-/** Estimate the orbit extent and then estimate the best-fit interfocal distance over this region */
-double estimateInterfocalDistance(
-    const potential::BasePotential& potential, const coord::PosVelCyl& point);
+void findClosedOrbitRZplane(const potential::BasePotential& poten, double E, double Lz, 
+    double &Rthin, double& Jr, double& Jz, double &IFD);
 
 /** Class that provides a faster evaluation of interfocal distance via smooth interpolation 
     over pre-computed grid in energy (E) and z-component of angular momentum (L_z) plane */
@@ -43,14 +45,26 @@ class InterfocalDistanceFinder {
 public:
     explicit InterfocalDistanceFinder(
         const potential::BasePotential& potential, const unsigned int gridSize=50);
+
     /// Return an estimate of interfocal distance for the given point, based on the values of E and L_z
     double value(const coord::PosVelCyl& point) const;
+
+    /** Return several key quantities as functions of energy and L_z:
+        \param[out] maxJr: maximum value of Jr (for a planar orbit in x-y plane)
+        \param[out] maxJz: maximum value of Jz (for a thin orbit in R-z plane)
+        \param[out] Rthin: radius of this thin orbit
+    */
+    void params(double E, double Lz, double& maxJr, double& maxJz, double& Rthin) const;
+
 private:
     const potential::BasePotential& potential;  ///< reference to the potential
     math::CubicSpline xLcirc;                   ///< interpolator for x(E) = Lcirc(E) / (Lcirc(E)+Lscale)
     double Lscale;                              ///< scaling factor for Lcirc = Lscale * x / (1-x)
     /// 2d interpolator for interfocal distance on the grid in E, Lz/Lcirc(E) plane
     math::LinearInterpolator2d interp;
+    math::LinearInterpolator2d interpJr;
+    math::LinearInterpolator2d interpJz;
+    math::LinearInterpolator2d interpRt;
 };
 
 }  // namespace actions

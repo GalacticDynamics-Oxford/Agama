@@ -20,12 +20,14 @@ int numActionEval=0;
 
 bool test_actions(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions,
-    const double total_time, const double timestep, const actions::BaseActionFinder& actFinder)
+    const double total_time, const double timestep, double ifd_est)
 {
     std::vector<coord::PosVelCar > traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
-    double dim=unit.to_Kpc*unit.to_Kpc/unit.to_Myr; //unit.to_Kpc_kms;
-    double axis_a=0;
+    //double ifd_est  = ifdFinder.value(coord::toPosVelCyl(initial_conditions));
+    double ifd_traj = sqrt( fmax(pow_2(ifd_est), 
+        actions::estimateSquaredInterfocalDistancePoints(potential, traj) ) );
+    double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr; //unit.to_Kpc_kms;
 #ifdef SINGLEORBIT
     std::ofstream fout("orbit.dat");
 #endif
@@ -33,18 +35,9 @@ bool test_actions(const potential::BasePotential& potential,
     actions::AngleStat angs;
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl p=coord::toPosVelCyl(traj[i]);
-#if 0
-        double R1, R2, z1, z2;
-        if(!actions::estimateOrbitExtent(potential, p, R1, R2, z1, z2)) {
-            R1=R2=p.R; z1=z2=p.z;
-        }
-        double ifd=actions::estimateInterfocalDistanceBox(potential, R1, R2, z1, z2);
-        axis_a+=ifd;
-        actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p, ifd);
-#else
-        actions::ActionAngles a=actFinder.actionAngles(p);
-#endif
-        angs.add(i*timestep*unit.to_Kpc/unit.to_kms, a);
+//        actions::ActionAngles a = actions::axisymFudgeActionAngles(potential, p, ifd_traj);
+        actions::Actions a = actions::axisymFudgeActions(potential, p, ifd_traj);
+        //angs.add(i*timestep*unit.to_Kpc/unit.to_kms, a);
         acts.add(a);
         numActionEval++;
 #ifdef SINGLEORBIT
@@ -56,9 +49,8 @@ bool test_actions(const potential::BasePotential& potential,
             p.vR*unit.to_kms<<" "<<p.vz*unit.to_kms<<"   "<<
             a.Jr*dim<<" "<<a.Jz*dim<<"  "<<
             (3*p.z*grad.dR - 3*p.R*grad.dz + p.R*p.z*(hess.dR2-hess.dz2)
-            + hess.dRdz*(p.z*p.z-p.R*p.R)) * pow_2(unit.to_Kpc) <<" "<< hess.dRdz <<" "
-            "  "<<R1<<" "<<R2<<" "<<z1<<" "<<z2<<"  "<<ifd<<
-            "  "<<angs.thetar.back()<<" "<<angs.thetaz.back()<<" "<<angs.thetaphi.back()<<
+            + hess.dRdz*(p.z*p.z-p.R*p.R)) * pow_2(unit.to_Kpc) <<" "<< hess.dRdz <<"  "<<
+            angs.thetar.back()<<" "<<angs.thetaz.back()<<" "<<angs.thetaphi.back()<<
             "\n";
 #endif
     }
@@ -66,16 +58,21 @@ bool test_actions(const potential::BasePotential& potential,
     angs.finish();
     double scatter = (acts.disp.Jr+acts.disp.Jz) / (acts.avg.Jr+acts.avg.Jz);
     double scatterNorm = 0.33 * sqrt( (acts.avg.Jr+acts.avg.Jz) / (acts.avg.Jr+acts.avg.Jz+fabs(acts.avg.Jphi)) );
-    bool tolerable = scatter < scatterNorm && 
-        angs.dispr < 0.1 && angs.dispz < 1.0 && angs.dispphi < 0.05;
-    axis_a/=traj.size();
+    bool tolerable = scatter < scatterNorm ; 
+    //    && angs.dispr < 0.1 && angs.dispz < 1.0 && angs.dispphi < 0.05;
+    double E = totalEnergy(potential, initial_conditions);
     std::cout << 
+        E*pow_2(unit.to_Kpc/unit.to_Myr) <<" "<<
+        L_circ(potential, E)*dim << "  " << 
+        acts.avg.Jphi*dim <<" "<<
         acts.avg.Jr*dim <<" "<< acts.disp.Jr*dim <<" "<< 
-        acts.avg.Jz*dim <<" "<< acts.disp.Jz*dim <<" "<< 
-        acts.avg.Jphi*dim <<" "<< acts.disp.Jphi*dim <<"  "<< 
-        angs.freqr <<" "<< angs.freqz <<" "<< angs.freqphi <<"  "<<
-        angs.dispr <<" "<< angs.dispz <<" "<< angs.dispphi <<"  "<<
-        axis_a*unit.to_Kpc << (tolerable?"":" ***") << std::endl;
+        acts.avg.Jz*dim <<" "<< acts.disp.Jz*dim <<" ";
+        //acts.avg.Jphi*dim <<" "<< acts.disp.Jphi*dim <<"  "<< 
+        //angs.freqr <<" "<< angs.freqz <<" "<< angs.freqphi <<"  "<<
+        //angs.dispr <<" "<< angs.dispz <<" "<< angs.dispphi <<"  "<<
+        //maxJr*dim << " " << maxJz*dim << "  "<<
+        //ifd_traj*unit.to_Kpc <<" "<< ifd_est*unit.to_Kpc; 
+        //        (tolerable?"":" \033[1;31m **\033[0m") << std::endl;
     return tolerable;
 }
 
@@ -170,11 +167,14 @@ int main(int argc, const char* argv[]) {
         pot = potential::createPotential(config);
     } else
         pot = make_galpot(test_galpot_params);
-    const double total_time=4. * unit.from_Kpc/unit.from_kms;
-    const int numsteps=1000;
-    const double timestep=total_time/numsteps;
-    actions::ActionFinderAxisymFudge actFinder(*pot);
-    clock_t clockbegin=std::clock();
+    double total_time = 4. * unit.from_Kpc/unit.from_kms;
+    int numsteps = 1000;
+    double timestep = total_time/numsteps;
+    clock_t clockbegin = std::clock();
+    actions::InterfocalDistanceFinder ifdFinder(*pot, 100);
+    std::cout << (std::clock()-clockbegin)*1.0/CLOCKS_PER_SEC << " seconds to init Delta-finder\n";
+    clockbegin=std::clock();
+/*
 #ifndef SINGLEORBIT
 #ifdef INPUTFILE
     std::ifstream icfile("ic.dat");
@@ -182,6 +182,7 @@ int main(int argc, const char* argv[]) {
         double J[3],ic[6];
         icfile >> ic[0]>>ic[1]>>ic[2]>>ic[3]>>ic[4]>>ic[5]>>J[0]>>J[1]>>J[2];
         std::cout<<J[0]<<" "<<J[1]<<" "<<J[2]<<"  ";
+                
 #else
     for(int k=0; k<30; k++) {
         for(int i=0; i<6; i++)
@@ -190,11 +191,41 @@ int main(int argc, const char* argv[]) {
 #else
     {
 #endif
-        for(int i=0; i<3; i++) {
+ */
+        for(double E=pot->value(coord::PosCyl(0,0,0))*0.95, dE=-E*0.063; E<0; E+=dE) {
+            double Rc = R_circ(*pot, E);
+            double k,n,o;
+            epicycleFreqs(*pot, Rc, k, n, o);
+            total_time = 2*M_PI/k * 50;
+            timestep = total_time/500;
+            double Lc = v_circ(*pot, Rc) * Rc;
+            for(int iLz=0; iLz<16; iLz++) {
+                double Lz   = (iLz+0.5)/16 * Lc;
+                double maxJr, maxJz, R, IFD;
+                actions::findClosedOrbitRZplane(*pot, E, Lz, maxJr, maxJz, R, IFD);
+                double vphi = Lz/R;
+                double vmer = sqrt(2*(E-pot->value(coord::PosCyl(R,0,0)))-vphi*vphi);
+                if(vmer!=vmer) {
+                    std::cout << "Can't assign ICs!\n";
+                    continue;
+                }
+                for(int a=0; a<8; a++) {
+                    double ang=(a+0.01)/7.02 * M_PI/2;
+                    ic[0]=R;
+                    ic[1]=0;
+                    ic[2]=0;
+                    ic[3]=vmer*cos(ang);
+                    ic[5]=vmer*sin(ang);
+                    ic[4]=vphi;
+        /*for(int i=0; i<3; i++) {
             ic[i]   *= unit.from_Kpc;
             ic[i+3] *= unit.from_kms;
-        }
-        allok &= test_actions(*pot, coord::PosVelCar(ic), total_time, timestep, actFinder);
+        }*/
+        allok &= test_actions(*pot, coord::PosVelCar(ic), total_time, timestep, IFD);
+                    std::cout << maxJr*unit.to_Kpc*unit.to_Kpc/unit.to_Myr << " " <<
+                    maxJz*unit.to_Kpc*unit.to_Kpc/unit.to_Myr << std::endl;
+                }
+            }
     }
     std::cout << numActionEval * 1.0*CLOCKS_PER_SEC / (std::clock()-clockbegin) << " actions per second\n";
     if(allok)

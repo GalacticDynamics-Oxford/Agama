@@ -52,6 +52,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
         s<<coordSysT::name()<<"_"<<x[0]<<x[1]<<x[2]<<x[3]<<x[4]<<x[5];
         strm.open(s.str().c_str());
     }
+    double ifd = sqrt(actions::estimateSquaredInterfocalDistancePoints(potential, traj) );
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl p = coord::toPosVelCyl(traj[i]);
         try {
@@ -62,7 +63,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
             std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
         try {
-            actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p);
+            actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p, ifd);
             statf.add(a);
             if(1 || i==0) angf=a;  // 1 to disable unwrapping
             else {

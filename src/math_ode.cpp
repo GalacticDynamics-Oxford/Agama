@@ -655,6 +655,8 @@ double OdeSolverDOP853::value(double t, unsigned int i) const
         return NAN;
     if(t==timeCurr)
         return stateCurr[i];
+    if(t==timePrev)
+        return rcont1[i];
     double s = (t - timePrev) / (timeCurr-timePrev);
     double s1= 1.0 - s;
     return rcont1[i] + s*(rcont2[i] + s1*(rcont3[i] + s*(rcont4[i]

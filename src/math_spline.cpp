@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
-#include <gsl/gsl_spline.h>
 #include <gsl/gsl_bspline.h>
 #include <gsl/gsl_linalg.h>
 #include <gsl/gsl_blas.h>

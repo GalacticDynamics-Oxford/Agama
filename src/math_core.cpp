@@ -7,6 +7,7 @@
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_fit.h>
+#include <gsl/gsl_multifit.h>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
@@ -622,7 +623,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
 
 PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
 {
-    delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
+    double delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
     // we assume that the function can be computed at all points, but the derivatives not necessarily can
     double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
     f0 = fder = fder2=NAN;
@@ -654,6 +655,7 @@ double PointNeighborhood::dxToPosneg(double sgn) const
 {
     double s0 = sgn*f0 * 1.1;  // safety factor to make sure we overshoot in finding the value of opposite sign
     double sder = sgn*fder, sder2 = sgn*fder2;
+    const double delta = fmin(fabs(fder/fder2)*0.5, GSL_SQRT_DBL_EPSILON);
     if(s0>0)
         return 0;  // already there
     if(sder==0) {
@@ -689,22 +691,61 @@ double PointNeighborhood::dxToNearestRoot() const
 }
 
 // ----- other stuff ------- //
-double linearFitZero(unsigned int N, const double x[], const double y[], double* rms)
+double linearFitZero(const std::vector<double>& x, const std::vector<double>& y, double* rms)
 {
+    if(x.size() != y.size())
+        throw std::invalid_argument("LinearFit: input arrays are not of equal length");
     double c, cov, sumsq;
-    gsl_fit_mul(x, 1, y, 1, N, &c, &cov, &sumsq);
+    gsl_fit_mul(&x.front(), 1, &y.front(), 1, y.size(), &c, &cov, &sumsq);
     if(rms!=NULL)
-        *rms = sqrt(sumsq/N);
+        *rms = sqrt(sumsq/y.size());
     return c;
 }
 
-void linearFit(unsigned int N, const double x[], const double y[], 
+void linearFit(const std::vector<double>& x, const std::vector<double>& y, 
     double& slope, double& intercept, double* rms)
 {
+    if(x.size() != y.size())
+        throw std::invalid_argument("LinearFit: input arrays are not of equal length");
     double cov00, cov11, cov01, sumsq;
-    gsl_fit_linear(x, 1, y, 1, N, &intercept, &slope, &cov00, &cov01, &cov11, &sumsq);
+    gsl_fit_linear(&x.front(), 1, &y.front(), 1, y.size(),
+        &intercept, &slope, &cov00, &cov01, &cov11, &sumsq);
     if(rms!=NULL)
-        *rms = sqrt(sumsq/N);
+        *rms = sqrt(sumsq/y.size());
+}
+
+void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
+    std::vector<double>& result, double* rms)
+{
+    if(coefs.numRows() != rhs.size())
+        throw std::invalid_argument(
+            "LinearMultiFit: number of rows in matrix is different from the length of RHS vector");
+    result.assign(coefs.numCols(), 0);
+    gsl_matrix* covarMatrix =
+        gsl_matrix_alloc(coefs.numCols(), coefs.numCols());
+    gsl_multifit_linear_workspace* fitWorkspace =
+        gsl_multifit_linear_alloc(coefs.numRows(),coefs.numCols());
+    if(covarMatrix==NULL || fitWorkspace==NULL) {
+        if(fitWorkspace)
+            gsl_multifit_linear_free(fitWorkspace);
+        if(covarMatrix)
+            gsl_matrix_free(covarMatrix);
+        throw std::bad_alloc();
+    }
+    // create gsl-compatible vector and matrix structures (no copying of data involved)
+    gsl_vector_const_view rhs_vec =
+        gsl_vector_const_view_array(&rhs.front(), rhs.size());
+    gsl_matrix_const_view coefs_mat =
+        gsl_matrix_const_view_array(coefs.getData(), coefs.numRows(), coefs.numCols());
+    gsl_vector_view result_vec =
+        gsl_vector_view_array(&result.front(), result.size());
+    double sumsq;
+    gsl_multifit_linear(&coefs_mat.matrix, &rhs_vec.vector, &result_vec.vector, 
+        covarMatrix, &sumsq, fitWorkspace);
+    gsl_multifit_linear_free(fitWorkspace);
+    gsl_matrix_free(covarMatrix);
+    if(rms!=NULL)
+        *rms = sqrt(sumsq/rhs.size());
 }
 
 }  // namespace

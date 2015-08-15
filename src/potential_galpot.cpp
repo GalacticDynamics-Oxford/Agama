@@ -187,13 +187,13 @@ double DiskAnsatz::densityCyl(const coord::PosCyl &pos) const
 void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
-    const double r=hypot(pos.R, pos.z);
+    double r=hypot(pos.R, pos.z);
     double h, H, Hp, f, fp, fpp;
     verticalFnc->evalDeriv(pos.z, &H, &Hp, &h);
     radialFnc  ->evalDeriv(r, &f, &fp, &fpp);
     f*=4*M_PI; fp*=4*M_PI; fpp*=4*M_PI;
     double Rr=pos.R/r, zr=pos.z/r;
-    if(r==0) { Rr=0; zr=0; }
+    if(r==0) { Rr=0; zr=0; r=1e-100; }
     if(potential) {
         *potential = f*H;
     }
@@ -521,6 +521,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
     }
     if(potential)
         *potential=Phi;
+    if(r==0) r=1e-100;  // safety measure
     if(deriv) {
         deriv->dR=(der[0]-der[1]*ct)*st/r;
         deriv->dz=(der[0]*ct+der[1]*st*st)/r;

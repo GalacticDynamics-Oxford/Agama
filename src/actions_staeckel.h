@@ -195,10 +195,9 @@ ActionAngles axisymStaeckelActionAngles(
 /** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method.
     \param[in]  potential is the arbitrary axisymmetric potential;
     \param[in]  point     is the position/velocity point;
-    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system;
-    the accuracy of the method depends on this parameter, and if it is not provided (set to zero),
-    `estimateInterfocalDistance` is called to determine a plausible value based on the potential 
-    derivatives averaged over the area in the meridional plane that the orbit probably covers.
+    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system:
+    the accuracy of the method depends on this parameter, which should be estimated by one of 
+    the methods from actions_interfocal_distance_finder.h;
     \return     actions for the given point;
     \throw      std::invalid_argument exception if the potential is not axisymmetric, 
     or the energy is positive, or some other error occurs.
@@ -206,14 +205,13 @@ ActionAngles axisymStaeckelActionAngles(
 Actions axisymFudgeActions(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point,
-    double interfocalDistance=0);
+    double interfocalDistance);
 
 /** Find approximate actions and angles in a given axisymmetric potential, 
     using the Staeckel Fudge method.
     \param[in]  potential is the arbitrary axisymmetric potential;
     \param[in]  point     is the position/velocity point;
     \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system;
-    default value (0) means that it will be determined by `estimateInterfocalDistance` function.
     \param[out] freq      if not NULL, store the frequencies of motion in this variable;
     \return     actions and angles for the given point;
     \throw      std::invalid_argument exception if the potential is not axisymmetric, 
@@ -222,7 +220,7 @@ Actions axisymFudgeActions(
 ActionAngles axisymFudgeActionAngles(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, 
-    double interfocalDistance=0, 
+    double interfocalDistance, 
     Frequencies* freq=0);
 
 ///@}

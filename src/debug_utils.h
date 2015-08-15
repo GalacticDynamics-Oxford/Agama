@@ -156,9 +156,9 @@ public:
     }
     void finish() {
         double bla;
-        math::linearFit(time.size(), &(time.front()), &(thetar.front()), freqr, bla, &dispr);
-        math::linearFit(time.size(), &(time.front()), &(thetaz.front()), freqz, bla, &dispz);
-        math::linearFit(time.size(), &(time.front()), &(thetaphi.front()), freqphi, bla, &dispphi);
+        math::linearFit(time, thetar, freqr, bla, &dispr);
+        math::linearFit(time, thetaz, freqz, bla, &dispz);
+        math::linearFit(time, thetaphi, freqphi, bla, &dispphi);
     }
 };
 }  // namespace

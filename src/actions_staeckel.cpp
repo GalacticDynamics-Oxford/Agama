@@ -8,10 +8,10 @@ namespace actions{
 
 /** Accuracy of integrals for computing actions and angles
     is determined by the number of points in fixed-order Gauss-Legendre scheme */
-const unsigned int INTEGR_ORDER = 20;  // good enough
+const unsigned int INTEGR_ORDER = 10;  // good enough
 
 /** relative tolerance in determining the range of variables (nu,lambda) to integrate over */
-const double ACCURACY_RANGE = 1e-8;
+const double ACCURACY_RANGE = 1e-6;
 
 /** minimum range of variation of nu, lambda that is considered to be non-zero */
 const double MINIMUM_RANGE = 1e-12;
@@ -38,6 +38,9 @@ AxisymFunctionStaeckel findIntegralsOfMotionOblatePerfectEllipsoid
             (E - pow_2(Lz) / 2 / (pprol.lambda - coordsys.delta) + Glambda) -
             pow_2( pprol.lambdadot * (pprol.lambda - fabs(pprol.nu)) ) / 
             (8 * (pprol.lambda - coordsys.delta) * pprol.lambda) );
+    if(!math::isFinite(E+I3+Lz))
+        throw std::invalid_argument("Error in Axisymmetric Staeckel action finder: "
+            "cannot compute integrals of motion");
     return AxisymFunctionStaeckel(pprol, E, Lz, I3, poten);
 }
 
@@ -85,6 +88,9 @@ AxisymFunctionFudge findIntegralsOfMotionAxisymFudge
     else
         Inu+= pow_2(pprol.nudot * (pprol.lambda - absnu)) /
               (8 * (coordsys.delta - absnu) * absnu );
+    if(!math::isFinite(E+Ilambda+Inu+Lz))
+        throw std::invalid_argument("Error in Axisymmetric Fudge action finder: "
+            "cannot compute integrals of motion");
     return AxisymFunctionFudge(pprol, E, Lz, Ilambda, Inu, poten);
 }
 
@@ -258,12 +264,17 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     // due to roundoff errors, it may actually happen that f(lambda) is a very small negative number
     // in this case we need to estimate the value of lambda at which it is strictly positive (for root-finder)
     double lambda_pos = fnc.point.lambda + pn_lambda.dxToPositive();
-    if(!math::isFinite(lim.lambda_min)) {  // not yet determined 
-        lim.lambda_min = math::findRoot(fnc, lambda_lower, lambda_pos, ACCURACY_RANGE);
+    if(math::isFinite(lambda_pos)) {
+        if(!math::isFinite(lim.lambda_min)) {  // not yet determined 
+            lim.lambda_min = math::findRoot(fnc, lambda_lower, lambda_pos, ACCURACY_RANGE);
+        }
+        if(!math::isFinite(lim.lambda_max)) {
+            lim.lambda_max = math::findRoot(AxisymScaledForRootfinder(fnc), 
+                lambda_pos, INFINITY, ACCURACY_RANGE);
+        }
+    } else {  // can't find a value of lambda with positive p^2(lambda) -- dominated by roundoff errors
+        lim.lambda_min = lim.lambda_max = fnc.point.lambda;
     }
-    if(!math::isFinite(lim.lambda_max))
-        lim.lambda_max = math::findRoot(AxisymScaledForRootfinder(fnc), 
-            lambda_pos, INFINITY, ACCURACY_RANGE);
 
     // sanity check
     if(!math::isFinite(lim.lambda_min+lim.lambda_max+lim.nu_max+lim.nu_min)
@@ -436,8 +447,6 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
 {
     if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
-    if(interfocalDistance==0)
-        interfocalDistance = estimateInterfocalDistance(potential, point);
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
@@ -449,8 +458,6 @@ ActionAngles axisymFudgeActionAngles(const potential::BasePotential& potential,
 {
     if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
-    if(interfocalDistance==0)
-        interfocalDistance = estimateInterfocalDistance(potential, point);
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);    
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);

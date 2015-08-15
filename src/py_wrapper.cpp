@@ -852,8 +852,8 @@ static void fncActions(PyObject* obj, const double input[], double *result) {
             input[4] * conv->velocityUnit, 
             input[5] * conv->velocityUnit) );
         //actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
-        double ifd = actions::estimateInterfocalDistance(*((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point);
-        //((ActionFinderObject*)obj)->finder->value(point);
+        double ifd = //actions::estimateInterfocalDistance(*((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point);
+        ((ActionFinderObject*)obj)->finder->value(point);
         //printf("Delta=%f\n", ifd/conv->lengthUnit);
         actions::Actions acts = actions::axisymFudgeActions(
             *((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point, ifd);
