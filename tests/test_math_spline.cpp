@@ -55,31 +55,30 @@ int main()
     const int NN=99;    // number of intermediate points for checking the values
     std::vector<double> xval(NNODESX,0);
     std::vector<double> yval(NNODESY,0);
-    std::vector< std::vector<double> > zval(NNODESX);
+    math::Matrix<double> zval(NNODESX,NNODESY);
     for(int i=1; i<NNODESX; i++)
         xval[i] = xval[i-1] + rand()*1.0/RAND_MAX + 0.5;
     for(int j=1; j<NNODESY; j++)
         yval[j] = yval[j-1] + rand()*1.0/RAND_MAX + 0.5;
     for(int i=0; i<NNODESX; i++) {
-        zval[i].resize(NNODESY);
         for(int j=0; j<NNODESY; j++)
-            zval[i][j] = rand()*1.0/RAND_MAX;
+            zval(i, j) = rand()*1.0/RAND_MAX;
     }
     math::CubicSpline2d spl2d(xval, yval, zval, 0., NAN, 1., -1.);
     // compare values and derivatives at grid nodes
     for(int i=0; i<NNODESX; i++) {
         double z, dy;
         spl2d.evalDeriv(xval[i], yval.front(), &z, NULL, &dy);
-        ok &= math::fcmp(dy, 1., 1e-13)==0 && math::fcmp(z, zval[i].front(), 1e-13)==0;
+        ok &= math::fcmp(dy, 1., 1e-13)==0 && math::fcmp(z, zval(i, 0), 1e-13)==0;
         spl2d.evalDeriv(xval[i], yval.back(), &z, NULL, &dy);
-        ok &= math::fcmp(dy, -1., 1e-13)==0 && math::fcmp(z, zval[i].back(), 1e-13)==0;
+        ok &= math::fcmp(dy, -1., 1e-13)==0 && math::fcmp(z, zval(i, NNODESY-1), 1e-13)==0;
     }
     for(int j=0; j<NNODESY; j++) {
         double z, dx;
         spl2d.evalDeriv(xval.front(), yval[j], &z, &dx);
-        ok &= math::fcmp(dx, 0.)==0 && math::fcmp(z, zval.front()[j], 1e-13)==0;
+        ok &= math::fcmp(dx, 0.)==0 && math::fcmp(z, zval(0, j), 1e-13)==0;
         spl2d.evalDeriv(xval.back(), yval[j], &z, &dx);
-        ok &= fabs(dx)<10 && math::fcmp(z, zval.back()[j], 1e-13)==0;
+        ok &= fabs(dx)<10 && math::fcmp(z, zval(NNODESX-1, j), 1e-13)==0;
     }
     // compare derivatives on the entire edge
     for(int i=0; i<=NN; i++) {

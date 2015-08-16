@@ -5,7 +5,6 @@
 */
 #pragma once
 #include "math_base.h"
-#include <vector>
 
 namespace math{
 
@@ -40,28 +39,6 @@ double wrapAngle(double x);
     element, already processed by this function, as xprev. 
     Note that this usage scenario is not stable against error accumulation. */
 double unwrapAngle(double x, double xprev);
-
-///@}
-/// \name  ----- matrix class - a missing part of STL -----
-///@{
-
-template<typename NumT>
-class Matrix {
-public:
-    Matrix(unsigned int _nRows, unsigned int _nCols) :
-        nRows(_nRows), nCols(_nCols), data(nRows*nCols) {};
-    const NumT& operator() (unsigned int row, unsigned int column) const {
-        return data[row*nCols+column]; }
-    NumT& operator() (unsigned int row, unsigned int column) {
-        return data[row*nCols+column]; }
-    unsigned int numRows() const { return nRows; }
-    unsigned int numCols() const { return nCols; }
-    const NumT* getData() const { return &data.front(); }
-private:
-    unsigned int nRows;
-    unsigned int nCols;
-    std::vector<NumT> data;
-};
 
 ///@}
 /// \name  ----- root-finding and minimization routines -----
@@ -246,30 +223,6 @@ public:
 void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
     const double relToler, const int maxNumEval, 
     double result[], double error[]=0, int* numEval=0);
-
-///@}
-/// \name ------ linear regression -----
-///@{
-
-/** perform a linear least-square fit (i.e., y=c*x+b);
-    store the best-fit slope and intercept of the relation in the corresponding output arguments, 
-    and store the rms scatter in the output argument 'rms' if it is not NULL. */
-void linearFit(const std::vector<double>& x, const std::vector<double>& y, 
-    double& slope, double& intercept, double* rms=0);
-
-/** perform a linear least-square fit without constant term (i.e., y=c*x);
-    return the best-fit slope of the relation, and store the rms scatter 
-    in the output argument 'rms' if it is not NULL. */
-double linearFitZero(const std::vector<double>& x, const std::vector<double>& y,
-    double* rms=0);
-
-/** perform a multi-parameter linear least-square fit:
- solve the system of equations  `C x = y`, where `y` is the vector of M values,
- `x` is the vector of N unknown parameters, and `C` is the matrix of coefficients
- with M rows and N columns, 
-*/
-void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
-    std::vector<double>& result, double* rms=0);
 
 ///@}
 

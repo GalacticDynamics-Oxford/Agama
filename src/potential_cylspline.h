@@ -7,7 +7,6 @@
 #include "potential_base.h"
 #include "particles_base.h"
 #include "math_spline.h"
-#include <vector>
 
 namespace potential {
 

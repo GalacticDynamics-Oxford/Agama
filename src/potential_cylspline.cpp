@@ -1,12 +1,11 @@
 #include "potential_cylspline.h"
 #include "math_core.h"
+#include "math_spline.h"
 #include "math_specfunc.h"
 #include "utils.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
-#include <gsl/gsl_fit.h>
-#include <gsl/gsl_multifit.h>
 
 namespace potential {
 
@@ -171,9 +170,7 @@ DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax
         gridz[grid.size()-1-i] =-grid[i];
         gridz[grid.size()-1+i] = grid[i];
     }
-    std::vector< std::vector<double> > values(grid.size());
-    for(unsigned int iR=0; iR<grid.size(); iR++)
-        values[iR].resize(gridz.size());
+    math::Matrix<double> values(grid.size(), gridz.size());
     bool zsymmetry = (density->symmetry()&ST_PLANESYM)==ST_PLANESYM;      // whether densities at z and -z are different
     int mmin = (density->symmetry() & ST_PLANESYM)==ST_PLANESYM ? 0 :-1;  // if triaxial symmetry, do not use sine terms which correspond to m<0
     int mstep= (density->symmetry() & ST_PLANESYM)==ST_PLANESYM ? 2 : 1;  // if triaxial symmetry, use only even m
@@ -187,12 +184,12 @@ DirectPotential::DirectPotential(const BaseDensity& _density, unsigned int _mmax
                                                computeRho_m(*density, grid[0], grid[1], m));
                     else val=0;
                 }
-                values[iR][grid.size()-1+iz] = val;
+                values(iR, grid.size()-1+iz) = val;
                 if(!zsymmetry && iz>0) {
                     val = computeRho_m(*density, grid[iR], -grid[iz], m);
                     if(!math::isFinite(val)) val=0;  // don't let rubbish in
                 }
-                values[iR][grid.size()-1-iz] = val;
+                values(iR, grid.size()-1-iz) = val;
             }
         splines[mmax+m] = math::CubicSpline2d(grid, gridz, values);
     }
@@ -477,7 +474,7 @@ void CylSplineExp::initPot(unsigned int _Ncoefs_R, unsigned int _Ncoefs_z, unsig
         for(size_t iz=0; iz<=Ncoefs_z/2; iz++) {
             for(int m=mmax*mmin; m<=mmax; m+=mstep) {
                 double val=computePhi_m(grid_R[iR], grid_z[Ncoefs_z/2+iz], m, potential);
-                if(!gsl_finite(val)) {
+                if(!math::isFinite(val)) {
                     throw std::runtime_error("CylSplineExp: error in computing potential at R=" +
                         utils::convertToString(grid_R[iR]) + ", z=" + 
                         utils::convertToString(grid_z[iz+Ncoefs_z/2])+", m=" + utils::convertToString(m));
@@ -504,9 +501,9 @@ void CylSplineExp::initSplines(const std::vector< std::vector<double> > &coefs)
     C00=C20=C22=C40=0;
     bool fitm2=mmax>=2 && coefs[mmax+2].size()==Ncoefs_R*Ncoefs_z;  // whether to fit m=2
     size_t npointsboundary=2*(Ncoefs_R-1)+Ncoefs_z;
-    gsl_matrix* X0=gsl_matrix_alloc(npointsboundary, 3);  // matrix of coefficients  for m=0
-    gsl_vector* Y0=gsl_vector_alloc(npointsboundary);     // vector of r.h.s. values for m=0
-    gsl_vector* W0=gsl_vector_alloc(npointsboundary);     // vector of weights
+    math::Matrix<double> X0(npointsboundary, 3); // matrix of coefficients  for m=0
+    std::vector<double> Y0(npointsboundary);     // vector of r.h.s. values for m=0
+    std::vector<double> W0(npointsboundary);     // vector of weights
     std::vector<double> X2(npointsboundary);     // vector of coefficients  for m=2
     std::vector<double> Y2(npointsboundary);     // vector of r.h.s. values for m=2
     for(size_t i=0; i<npointsboundary; i++) {
@@ -515,36 +512,26 @@ void CylSplineExp::initSplines(const std::vector< std::vector<double> > &coefs)
         double R=grid_R[iR];
         double z=grid_z[iz];
         double oneoverr=1/sqrt(R*R+z*z);
-        gsl_vector_set(Y0, i, coefs[mmax][iz*Ncoefs_R+iR]);
-        gsl_matrix_set(X0, i, 0, oneoverr);
-        gsl_matrix_set(X0, i, 1, pow(oneoverr,5.0)*(2*z*z-R*R));
-        gsl_matrix_set(X0, i, 2, pow(oneoverr,9.0)*(8*pow(z,4.0)-24*z*z*R*R+3*pow(R,4.0)) );
+        Y0[i] = coefs[mmax][iz*Ncoefs_R+iR];
+        X0(i, 0) = oneoverr;
+        X0(i, 1) = pow(oneoverr,5.0) * (2*z*z-R*R);
+        X0(i, 2) = pow(oneoverr,9.0) * (8*pow(z,4.0)-24*z*z*R*R+3*pow(R,4.0));
         // weight proportionally to the value of potential itself (so that we minimize sum of squares of relative differences)
-        gsl_vector_set(W0, i, 1.0/pow_2(coefs[mmax][iz*Ncoefs_R+iR]));
+        W0[i] = 1.0/pow_2(coefs[mmax][iz*Ncoefs_R+iR]);
         if(fitm2) {
-            X2[i]=R*R*pow(oneoverr,5.0);
-            Y2[i]=coefs[mmax+2][iz*Ncoefs_R+iR];
+            X2[i] = R*R*pow(oneoverr,5.0);
+            Y2[i] = coefs[mmax+2][iz*Ncoefs_R+iR];
         }
     }
     // fit m=0 by three parameters
-    gsl_vector* fit=gsl_vector_alloc(3);
-    gsl_matrix* cov=gsl_matrix_alloc(3,3);
-    double chisq;
-    gsl_multifit_linear_workspace* ws=gsl_multifit_linear_alloc(npointsboundary, 3);
-    if(gsl_multifit_wlinear(X0, W0, Y0, fit, cov, &chisq, ws) == GSL_SUCCESS) {
-        C00=gsl_vector_get(fit, 0);  // C00 ~= -Mtotal
-        C20=gsl_vector_get(fit, 1);
-        C40=gsl_vector_get(fit, 2);
-    }
-    gsl_multifit_linear_free(ws);
-    gsl_vector_free(fit);
-    gsl_matrix_free(cov);
+    std::vector<double> fit;
+    math::linearMultiFit(X0, Y0, &W0, fit);
+    C00 = fit[0];  // C00 ~= -Mtotal
+    C20 = fit[1];
+    C40 = fit[2];
     // fit m=2 if necessary
-    if(fitm2) {
-        double dummy1, dummy2;
-        if(gsl_fit_mul(&(X2.front()), 1, &(Y2.front()), 1, npointsboundary, &C22, &dummy1, &dummy2) != GSL_SUCCESS)
-            C22=0;
-    }
+    if(fitm2)
+        C22 = math::linearFitZero(X2, Y2, NULL);
     // assign Rscale so that it approximately equals -Mtotal/Phi(r=0)
     Rscale=C00/coefs[mmax][(Ncoefs_z/2)*Ncoefs_R];
     if(Rscale<=0 || !math::isFinite(Rscale+C00+C20+C40+C22))
@@ -563,9 +550,7 @@ void CylSplineExp::initSplines(const std::vector< std::vector<double> > &coefs)
         grid_zscaled[i] = log(1+fabs(grid_z[i])/Rscale)*(grid_z[i]>=0?1:-1);
     }
     splines.resize(coefs.size());
-    std::vector< std::vector<double> > values(Ncoefs_R);
-    for(size_t iR=0; iR<Ncoefs_R; iR++)
-        values[iR].resize(Ncoefs_z);
+    math::Matrix<double> values(Ncoefs_R, Ncoefs_z);
     for(size_t m=0; m<coefs.size(); m++) {
         if(coefs[m].size() != Ncoefs_R*Ncoefs_z) 
             continue;
@@ -574,7 +559,7 @@ void CylSplineExp::initSplines(const std::vector< std::vector<double> > &coefs)
             for(size_t iz=0; iz<Ncoefs_z; iz++) {
                 double scaling = sqrt(pow_2(Rscale)+pow_2(grid_R[iR])+pow_2(grid_z[iz]));
                 double val = coefs[m][iz*Ncoefs_R+iR] * scaling;
-                values[iR][iz] = val;
+                values(iR, iz) = val;
                 allzero &= (val==0);
             }
         }

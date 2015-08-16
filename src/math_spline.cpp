@@ -4,9 +4,6 @@
 #include <cassert>
 #include <stdexcept>
 #include <gsl/gsl_bspline.h>
-#include <gsl/gsl_linalg.h>
-#include <gsl/gsl_blas.h>
-#include <gsl/gsl_multifit.h>
 
 namespace math {
 
@@ -15,26 +12,23 @@ namespace math {
 /// Implementation of penalized spline approximation
 class SplineApproxImpl {
 private:
-    const size_t numDataPoints;     ///< number of x[i],y[i] pairs (original data)
-    const size_t numKnots;          ///< number of X[k] knots in the fitting spline; the number of basis functions is numKnots+2
-    gsl_vector* knots;              ///< b-spline knots  X[k], k=0..numKnots-1
-    gsl_vector* xvalues;            ///< x[i], i=0..numDataPoints-1
-    gsl_vector* yvalues;            ///< y[i], overwritten each time loadYvalues is called
-    gsl_vector* weightCoefs;        ///< w_p, weight coefficients for basis functions to be found in the process of fitting 
-    gsl_vector* zRHS;               ///< z_p = C^T y, right hand side of linear system
-    gsl_matrix* bsplineMatrix;      ///< matrix "C_ip" used in fitting process; i=0..numDataPoints-1, p=0..numBasisFnc-1
-    gsl_matrix* LMatrix;            ///< lower triangular matrix L is Cholesky decomposition of matrix A = C^T C, of size numBasisFnc*numBasisFnc
-    gsl_matrix* MMatrix;            ///< matrix "M" which is the transformed version of roughness matrix "R_pq" of integrals of product of second derivatives of basis functions; p,q=0..numBasisFnc-1
-    gsl_vector* singValues;         ///< part of the decomposition of the roughness matrix
-    gsl_vector* MTz;                ///< pre-computed M^T z
+    const size_t numDataPoints;        ///< number of x[i],y[i] pairs (original data)
+    const size_t numKnots;             ///< number of X[k] knots in the fitting spline; the number of basis functions is numKnots+2
+    std::vector<double> knots;         ///< b-spline knots  X[k], k=0..numKnots-1
+    std::vector<double> xvalues;       ///< x[i], i=0..numDataPoints-1
+    std::vector<double> yvalues;       ///< y[i], overwritten each time loadYvalues is called
+    std::vector<double> weightCoefs;   ///< w_p, weight coefficients for basis functions to be found in the process of fitting 
+    std::vector<double> zRHS;          ///< z_p = C^T y, right hand side of linear system
+    Matrix<double> bsplineMatrix;      ///< matrix "C_ip" used in fitting process; i=0..numDataPoints-1, p=0..numBasisFnc-1
+    Matrix<double> LMatrix;            ///< lower triangular matrix L is Cholesky decomposition of matrix A = C^T C, of size numBasisFnc*numBasisFnc
+    Matrix<double> MMatrix;            ///< matrix "M" which is the transformed version of roughness matrix "R_pq" of integrals of product of second derivatives of basis functions; p,q=0..numBasisFnc-1
+    std::vector<double> singValues;    ///< part of the decomposition of the roughness matrix
+    std::vector<double> MTz;           ///< pre-computed M^T z
     gsl_bspline_workspace*
-        bsplineWorkspace;           ///< workspace for b-spline evaluation
-    gsl_vector* bsplineValues;      ///< to compute values of all b-spline basis functions at a given point x
+        bsplineWorkspace;              ///< workspace for b-spline evaluation
     gsl_bspline_deriv_workspace*
-        bsplineDerivWorkspace;      ///< workspace for derivative computation
-    gsl_matrix* bsplineDerivValues; ///< to compute values and derivatives of basis functions
-    gsl_vector* tempv;              ///< some routines require temporary storage
-    double ynorm2;                  ///< |y|^2 - used to compute residual sum of squares (RSS)
+        bsplineDerivWorkspace;         ///< workspace for derivative computation
+    double ynorm2;                     ///< |y|^2 - used to compute residual sum of squares (RSS)
 
 public:
     SplineApproxImpl(const std::vector<double> &_xvalues, const std::vector<double> &_knots);
@@ -63,10 +57,10 @@ public:
     void computeYvalues(std::vector<double>& splineValues, double& der_left, double& der_right) const;
 
     /** compute values of spline at an arbitrary set of points  */
-    void computeRegressionAtPoints(const std::vector<double> &xpoints, std::vector<double> &ypoints) const;
+    //void computeRegressionAtPoints(const std::vector<double> &xpoints, std::vector<double> &ypoints) const;
 
     /** check if the basis matrix L is singular */
-    bool isSingular() const { return LMatrix==NULL; }
+    bool isSingular() const { return LMatrix.numRows()==0; }
 
 private:
     /** In the unfortunate case that the fit matrix appears to be singular, another algorithm
@@ -81,8 +75,6 @@ private:
 SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_xvalues, const std::vector<double> &_knots) :
     numDataPoints(_xvalues.size()), numKnots(_knots.size())
 {
-    knots=xvalues=yvalues=singValues=weightCoefs=zRHS=bsplineValues=NULL;
-    bsplineMatrix=LMatrix=MMatrix=NULL;
     bsplineWorkspace=NULL;
     bsplineDerivWorkspace=NULL;
 
@@ -92,69 +84,48 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_xvalues, const st
         range_ok &= (_knots[k-1]<_knots[k]);  // knots must be in ascending order
     if(!range_ok)
         throw std::invalid_argument("Error in SplineApprox initialization: knots must be in ascending order");
-    xvalues = gsl_vector_alloc(numDataPoints);
-    knots = gsl_vector_alloc(numKnots);
-    if(xvalues==NULL || knots==NULL) {
-        gsl_vector_free(xvalues);
-        gsl_vector_free(knots);
-        throw std::bad_alloc();
+    xvalues = _xvalues;
+    knots = _knots;
+    for(size_t v=0; v<xvalues.size(); v++) {
+        if(xvalues[v] < knots.front() || xvalues[v] > knots.back()) 
+            throw std::invalid_argument("Error in SplineApprox initialization: "
+                "source data points must lie within spline definition region");
     }
-    for(size_t i=0; i<numDataPoints; i++)
-        gsl_vector_set(xvalues, i, _xvalues[i]);
-    for(size_t k=0; k<numKnots; k++)
-        gsl_vector_set(knots, k, _knots[k]);
-    if(gsl_vector_min(xvalues) < _knots.front() || gsl_vector_max(xvalues) > _knots.back()) 
-        throw std::invalid_argument("Error in SplineApprox initialization: "
-            "source data points must lie within spline definition region");
+    ynorm2 = gsl_nan();  // to indicate that no y-values have been loaded yet
 
     // next allocate b-splines and other matrices
+    bsplineMatrix.resize(numDataPoints, numKnots+2); // matrix C_ip -- this is the largest chunk of memory to be used
+    LMatrix      .resize(numKnots+2, numKnots+2);    // lower triangular matrix L obtained by Cholesky decomposition of matrix A = C^T C
+    weightCoefs  .assign(numKnots+2, 0);             // weight coefficients at basis functions, which are the unknowns in the linear system
+    zRHS         .resize(numKnots+2);                // z = C^T y, RHS of the linear system
+    MTz          .resize(numKnots+2);
     bsplineWorkspace      = gsl_bspline_alloc(4, numKnots);
-    bsplineValues         = gsl_vector_alloc(numKnots+2);
     bsplineDerivWorkspace = gsl_bspline_deriv_alloc(4);
-    bsplineDerivValues    = gsl_matrix_alloc(numKnots+2, 3);
-    bsplineMatrix= gsl_matrix_alloc(numDataPoints, numKnots+2); // matrix C_ip -- this is the largest chunk of memory to be used
-    yvalues      = gsl_vector_alloc(numDataPoints);
-    LMatrix      = gsl_matrix_alloc(numKnots+2, numKnots+2);    // lower triangular matrix L obtained by Cholesky decomposition of matrix A = C^T C
-    weightCoefs  = gsl_vector_calloc(numKnots+2);               // weight coefficients at basis functions, which are the unknowns in the linear system
-    zRHS         = gsl_vector_alloc(numKnots+2);                // z = C^T y, RHS of the linear system
-    MTz          = gsl_vector_alloc(numKnots+2);
-    tempv        = gsl_vector_alloc(numKnots+2);
-    if(bsplineWorkspace==NULL || bsplineValues==NULL || bsplineDerivWorkspace==NULL || 
-        bsplineDerivValues==NULL || yvalues==NULL || bsplineMatrix==NULL || LMatrix==NULL || 
-        weightCoefs==NULL || zRHS==NULL || MTz==NULL || tempv==NULL) {
+    gsl_vector* bsplineValues = gsl_vector_alloc(numKnots+2);
+    if(bsplineWorkspace==NULL || bsplineDerivWorkspace==NULL || bsplineValues==NULL) {
         gsl_bspline_free(bsplineWorkspace);
         gsl_bspline_deriv_free(bsplineDerivWorkspace);
         gsl_vector_free(bsplineValues);
-        gsl_matrix_free(bsplineDerivValues);
-        gsl_vector_free(xvalues);
-        gsl_vector_free(yvalues);
-        gsl_vector_free(knots);
-        gsl_vector_free(weightCoefs);
-        gsl_vector_free(zRHS);
-        gsl_vector_free(MTz);
-        gsl_vector_free(tempv);
-        gsl_matrix_free(bsplineMatrix);
-        gsl_matrix_free(LMatrix);
         throw std::bad_alloc();
     }
-    ynorm2=gsl_nan();  // to indicate that no y-values have been loaded yet
 
     // initialize b-spline matrix C 
-    gsl_bspline_knots(knots, bsplineWorkspace);
+    gsl_bspline_knots(&gsl_vector_const_view_array
+        (&knots.front(), knots.size()).vector, bsplineWorkspace);
     for(size_t i=0; i<numDataPoints; i++) {
         gsl_bspline_eval(_xvalues[i], bsplineValues, bsplineWorkspace);
         for(size_t p=0; p<numKnots+2; p++)
-            gsl_matrix_set(bsplineMatrix, i, p, gsl_vector_get(bsplineValues, p));
+            bsplineMatrix(i, p) = gsl_vector_get(bsplineValues, p);
     }
+    gsl_vector_free(bsplineValues);
 
     // pre-compute matrix L
-    gsl_blas_dgemm(CblasTrans, CblasNoTrans, 1, bsplineMatrix, bsplineMatrix, 0, LMatrix);
+    blas_dgemm(CblasTrans, CblasNoTrans, 1, bsplineMatrix, bsplineMatrix, 0, LMatrix);
     try {
-        gsl_linalg_cholesky_decomp(LMatrix);
+        choleskyDecomp(LMatrix);
     }
     catch(std::domain_error&) {   // means that the matrix is not positive definite, i.e. fit is singular
-        gsl_matrix_free(LMatrix);
-        LMatrix = NULL;
+        LMatrix = Matrix<double>();
     }
 }
 
@@ -162,107 +133,83 @@ SplineApproxImpl::~SplineApproxImpl()
 {
     gsl_bspline_free(bsplineWorkspace);
     gsl_bspline_deriv_free(bsplineDerivWorkspace);
-    gsl_vector_free(bsplineValues);
-    gsl_matrix_free(bsplineDerivValues);
-    gsl_vector_free(xvalues);
-    gsl_vector_free(yvalues);
-    gsl_vector_free(knots);
-    gsl_vector_free(weightCoefs);
-    gsl_vector_free(zRHS);
-    gsl_vector_free(MTz);
-    gsl_vector_free(tempv);
-    gsl_matrix_free(bsplineMatrix);
-    gsl_matrix_free(LMatrix);
-    gsl_matrix_free(MMatrix);
-    gsl_vector_free(singValues);
 }
 
 void SplineApproxImpl::loadyvalues(const std::vector<double> &_yvalues)
 {
     if(_yvalues.size() != numDataPoints) 
         throw std::invalid_argument("SplineApprox: input array sizes do not match");
-    ynorm2=0;
-    for(size_t i=0; i<numDataPoints; i++) {
-        gsl_vector_set(yvalues, i, _yvalues[i]);
-        ynorm2 += pow_2(_yvalues[i]);
+    yvalues = _yvalues;
+    ynorm2  = pow_2(blas_dnrm2(yvalues));
+    if(!isSingular()) {   // precompute z = C^T y
+        blas_dgemv(CblasTrans, 1, bsplineMatrix, yvalues, 0, zRHS);
     }
-    if(!isSingular())    // precompute z = C^T y
-        gsl_blas_dgemv(CblasTrans, 1, bsplineMatrix, yvalues, 0, zRHS);
 }
 
 /// convenience function returning values from band matrix or zero if indexes are outside the band
-double getVal(const gsl_matrix* deriv, size_t row, size_t col)
+double getVal(const Matrix<double>& deriv, size_t row, size_t col)
 {
     if(row<col || row>=col+3) return 0; 
-    else return gsl_matrix_get(deriv, row-col, col);
+    else return deriv(row-col, col);
 }
 
 void SplineApproxImpl::initRoughnessMatrix()
 {
-    if(MMatrix != NULL) {  // already computed
-        gsl_blas_dgemv(CblasTrans, 1, MMatrix, zRHS, 0, MTz);  // precompute M^T z
+    if(MMatrix.numRows()>0) {  // already computed
+        blas_dgemv(CblasTrans, 1, MMatrix, zRHS, 0, MTz);  // precompute M^T z
         return;
     }
     // init matrix with roughness penalty (integrals of product of second derivatives of basis functions)
-    MMatrix = gsl_matrix_calloc(numKnots+2, numKnots+2);   // matrix R_pq
-    singValues = gsl_vector_alloc(numKnots+2);   // vector S
-    gsl_matrix* tempm  = gsl_matrix_alloc(numKnots+2, numKnots+2);
-    gsl_matrix* derivs = gsl_matrix_calloc(3, numKnots);
-    if(MMatrix==NULL || singValues==NULL || tempm==NULL || derivs==NULL) { 
-        gsl_matrix_free(derivs);
-        gsl_matrix_free(tempm);
-        gsl_matrix_free(MMatrix);
-        gsl_vector_free(singValues);
-        throw std::bad_alloc();
-    }
+    MMatrix = Matrix<double>(numKnots+2, numKnots+2, 0.);   // matrix R_pq
+    Matrix<double> derivs(3, numKnots, 0.);
     for(size_t k=0; k<numKnots; k++)
     {
         size_t istart, iend;
-        gsl_bspline_deriv_eval_nonzero(gsl_vector_get(knots, k), 2, bsplineDerivWorkspace->dB, &istart, &iend, bsplineWorkspace, bsplineDerivWorkspace);
+        gsl_bspline_deriv_eval_nonzero(knots[k], 2, bsplineDerivWorkspace->dB, &istart, &iend, bsplineWorkspace, bsplineDerivWorkspace);
         for(size_t b=0; b<3; b++)
-            gsl_matrix_set(derivs, b, k, gsl_matrix_get(bsplineDerivWorkspace->dB, b+k-istart, 2));
+            derivs(b, k) = gsl_matrix_get(bsplineDerivWorkspace->dB, b+k-istart, 2);
     }
     for(size_t p=0; p<numKnots+2; p++)
     {
         size_t kmin = p>3 ? p-3 : 0;
-        size_t kmax = std::min<size_t>(p+3,knots->size-1);
+        size_t kmax = std::min<size_t>(p+3, knots.size()-1);
         for(size_t q=p; q<std::min<size_t>(p+4,numKnots+2); q++)
         {
             double result=0;
             for(size_t k=kmin; k<kmax; k++)
             {
-                double x0 = gsl_vector_get(knots, k);
-                double x1 = gsl_vector_get(knots, k+1);
+                double x0 = knots[k];
+                double x1 = knots[k+1];
                 double Gp = getVal(derivs,p,k)*x1 - getVal(derivs,p,k+1)*x0;
                 double Hp = getVal(derivs,p,k+1)  - getVal(derivs,p,k);
                 double Gq = getVal(derivs,q,k)*x1 - getVal(derivs,q,k+1)*x0;
                 double Hq = getVal(derivs,q,k+1)  - getVal(derivs,q,k);
                 result += (Hp*Hq*(pow(x1,3.0)-pow(x0,3.0))/3.0 + (Gp*Hq+Gq*Hp)*(pow_2(x1)-pow_2(x0))/2.0 + Gp*Gq*(x1-x0)) / pow_2(x1-x0);
             }
-            gsl_matrix_set(MMatrix, p, q, result);
-            gsl_matrix_set(MMatrix, q, p, result);  // it is symmetric
+            MMatrix(p, q) = result;
+            MMatrix(q, p) = result;  // it is symmetric
         }
     }
 
     // now transform the roughness matrix R into more suitable form (so far MMatrix contains R)
     // obtain Q = L^{-1} R L^{-T}, where R is the roughness penalty matrix (store Q instead of R)
-    gsl_blas_dtrsm(CblasLeft, CblasLower, CblasNoTrans, CblasNonUnit, 1, LMatrix, MMatrix);
-    gsl_blas_dtrsm(CblasRight, CblasLower, CblasTrans, CblasNonUnit, 1, LMatrix, MMatrix);   // now MMatrix contains Q = L^{-1} R L^(-T}
+    blas_dtrsm(CblasLeft, CblasLower, CblasNoTrans, CblasNonUnit, 1, LMatrix, MMatrix);
+    blas_dtrsm(CblasRight, CblasLower, CblasTrans, CblasNonUnit, 1, LMatrix, MMatrix);   // now MMatrix contains Q = L^{-1} R L^(-T}
 
     // next decompose this Q via singular value decomposition: Q = U * diag(SV) * V^T
-    gsl_linalg_SV_decomp(MMatrix, tempm, singValues, tempv);   // now MMatrix contains U, and workm contains V^T
+    singValues = std::vector<double>(numKnots+2);   // vector SV
+    Matrix<double> tempm(numKnots+2, numKnots+2);
+    singularValueDecomp(MMatrix, tempm, singValues);   // now MMatrix contains U, and tempm contains V^T
+
     // Because Q was symmetric and positive definite, we expect that U=V, but don't actually check it.
-    gsl_vector_set(singValues, numKnots, 0);   // the smallest two singular values must be zero; set explicitly to avoid roundoff error
-    gsl_vector_set(singValues, numKnots+1, 0);
+    singValues[numKnots] = 0;   // the smallest two singular values must be zero; set explicitly to avoid roundoff error
+    singValues[numKnots+1] = 0;
 
     // precompute M = L^{-T} U  which is used in computing basis weight coefs.
-    gsl_blas_dtrsm(CblasLeft, CblasLower, CblasTrans, CblasNonUnit, 1, LMatrix, MMatrix);   // now M is finally in place
+    blas_dtrsm(CblasLeft, CblasLower, CblasTrans, CblasNonUnit, 1, LMatrix, MMatrix);   // now M is finally in place
     // now the weight coefs for any lambda are given by  w = M (I + lambda*diag(singValues))^{-1} M^T  z
 
-    gsl_matrix_free(tempm);
-    gsl_matrix_free(derivs);
-
-    gsl_blas_dgemv(CblasTrans, 1, MMatrix, zRHS, 0, MTz);  // precompute M^T z
+    blas_dgemv(CblasTrans, 1, MMatrix, zRHS, 0, MTz);  // precompute M^T z
 }
 
 // obtain solution of linear system for the given smoothing parameter, store the weights of basis functions in weightCoefs
@@ -273,32 +220,23 @@ void SplineApproxImpl::computeWeights(double lambda)
         return;
     }
     if(lambda==0)  // simple case, no need to use roughness penalty matrix
-        gsl_linalg_cholesky_solve(LMatrix, zRHS, weightCoefs);
+        linearSystemSolveCholesky(LMatrix, zRHS, weightCoefs);
     else {
+        std::vector<double>tempv(numKnots+2);
         for(size_t p=0; p<numKnots+2; p++) {
-            double sv = gsl_vector_get(singValues, p);
-            gsl_vector_set(tempv, p, gsl_vector_get(MTz, p) / (1 + (sv>0 ? sv*lambda : 0)));
+            double sv = singValues[p];
+            tempv[p] = MTz[p] / (1 + (sv>0 ? sv*lambda : 0));
         }
-        gsl_blas_dgemv(CblasNoTrans, 1, MMatrix, tempv, 0, weightCoefs);
+        blas_dgemv(CblasNoTrans, 1, MMatrix, tempv, 0, weightCoefs);
     }
 }
 
 // compute weights of basis functions in the case that the matrix is singular
 void SplineApproxImpl::computeWeightsSingular()
 {
-    gsl_matrix* covarMatrix  = gsl_matrix_alloc(numKnots+2, numKnots+2);
-    gsl_multifit_linear_workspace* fitWorkspace = gsl_multifit_linear_alloc(numDataPoints, numKnots+2);
-    if(covarMatrix==NULL || fitWorkspace==NULL) {
-        gsl_multifit_linear_free(fitWorkspace);
-        gsl_matrix_free(covarMatrix);
-        throw std::bad_alloc();
-    }
-    double chisq;
-    size_t rank;
-    gsl_multifit_linear_svd(bsplineMatrix, yvalues, 1e-8, &rank, weightCoefs, covarMatrix, &chisq, fitWorkspace);
-    gsl_multifit_linear_free(fitWorkspace);
-    gsl_matrix_free(covarMatrix);
-    ynorm2 = chisq/numDataPoints;
+    double rms;
+    linearMultiFit(bsplineMatrix, yvalues, NULL, weightCoefs, &rms);
+    ynorm2 = pow_2(rms);
 }
 
 void SplineApproxImpl::computeRMSandEDF(double lambda, double* rmserror, double* edf) const
@@ -312,12 +250,11 @@ void SplineApproxImpl::computeRMSandEDF(double lambda, double* rmserror, double*
             *edf = static_cast<double>(numKnots+2);
         return;
     }
-    gsl_vector_memcpy(tempv, weightCoefs);
-    gsl_blas_dtrmv(CblasLower, CblasTrans, CblasNonUnit, LMatrix, tempv);
-    double wTz;
-    gsl_blas_ddot(weightCoefs, zRHS, &wTz);
+    std::vector<double>tempv(weightCoefs);
+    blas_dtrmv(CblasLower, CblasTrans, CblasNonUnit, LMatrix, tempv);
+    double wTz = blas_ddot(weightCoefs, zRHS);
     if(rmserror)
-        *rmserror = (ynorm2 - 2*wTz + pow_2(gsl_blas_dnrm2(tempv))) / numDataPoints;
+        *rmserror = (ynorm2 - 2*wTz + pow_2(blas_dnrm2(tempv))) / numDataPoints;
     if(edf == NULL)
         return;
     // equivalent degrees of freedom
@@ -326,7 +263,7 @@ void SplineApproxImpl::computeRMSandEDF(double lambda, double* rmserror, double*
         *edf = 2;
     else if(lambda>0) 
         for(size_t c=0; c<numKnots+2; c++)
-            *edf += 1/(1+lambda*gsl_vector_get(singValues, c));
+            *edf += 1 / (1 + lambda * singValues[c]);
     else
         *edf = static_cast<double>(numKnots+2);
 }
@@ -343,19 +280,21 @@ double SplineApproxImpl::computeAIC(double lambda) {
 void SplineApproxImpl::computeYvalues(std::vector<double>& splineValues, double& der_left, double& der_right) const
 {
     splineValues.assign(numKnots, 0);
+    gsl_vector* bsplineValues = gsl_vector_alloc(numKnots+2);
+    gsl_matrix* bsplineDerivValues = gsl_matrix_alloc(numKnots+2, 3);
     for(size_t k=1; k<numKnots-1; k++) {  // loop over interior nodes
-        gsl_bspline_eval(gsl_vector_get(knots, k), bsplineValues, bsplineWorkspace);
+        gsl_bspline_eval(knots[k], bsplineValues, bsplineWorkspace);
         double val=0;
         for(size_t p=0; p<numKnots+2; p++)
-            val += gsl_vector_get(bsplineValues, p) * gsl_vector_get(weightCoefs, p);
+            val += gsl_vector_get(bsplineValues, p) * weightCoefs[p];
         splineValues[k] = val;
     }
     for(size_t k=0; k<numKnots; k+=numKnots-1) {  // two endpoints: values and derivatives
-        gsl_bspline_deriv_eval(gsl_vector_get(knots, k), 1, bsplineDerivValues, bsplineWorkspace, bsplineDerivWorkspace);
+        gsl_bspline_deriv_eval(knots[k], 1, bsplineDerivValues, bsplineWorkspace, bsplineDerivWorkspace);
         double val=0, der=0;
         for(size_t p=0; p<numKnots+2; p++) {
-            val += gsl_matrix_get(bsplineDerivValues, p, 0) * gsl_vector_get(weightCoefs, p);
-            der += gsl_matrix_get(bsplineDerivValues, p, 1) * gsl_vector_get(weightCoefs, p);
+            val += gsl_matrix_get(bsplineDerivValues, p, 0) * weightCoefs[p];
+            der += gsl_matrix_get(bsplineDerivValues, p, 1) * weightCoefs[p];
         }
         splineValues[k] = val;
         if(k==0)
@@ -363,19 +302,8 @@ void SplineApproxImpl::computeYvalues(std::vector<double>& splineValues, double&
         else
             der_right = der;
     }
-}
-
-void SplineApproxImpl::computeRegressionAtPoints(const std::vector<double> &xpoints, std::vector<double> &ypoints) const
-{
-    ypoints.assign(xpoints.size(), NAN);  // default value for nodes outside the definition range
-    for(size_t i=0; i<xpoints.size(); i++)  // loop over interior nodes
-        if(xpoints[i]>=gsl_vector_get(knots, 0) && xpoints[i]<=gsl_vector_get(knots, numKnots-1)) {
-            gsl_bspline_eval(xpoints[i], bsplineValues, bsplineWorkspace);
-            double val=0;
-            for(size_t p=0; p<numKnots+2; p++)
-                val += gsl_vector_get(bsplineValues, p) * gsl_vector_get(weightCoefs, p);
-            ypoints[i] = val;
-        }
+    gsl_matrix_free(bsplineDerivValues);
+    gsl_vector_free(bsplineValues);
 }
 
 //-------- helper class for root-finder -------//
@@ -474,7 +402,6 @@ CubicSpline::CubicSpline(const std::vector<double>& xa, const std::vector<double
         throw std::invalid_argument("Error in spline initialization: number of nodes should be >=3");
     size_t max_index = num_points - 1;  /* Engeln-Mullges + Uhlig "n" */
     size_t sys_size = max_index - 1;    /* linear system is sys_size x sys_size */
-    cval.assign(num_points, 0);
     std::vector<double> g(sys_size), diag(sys_size), offdiag(sys_size);  // temporary arrays
 
     for (size_t i = 0; i < sys_size; i++) {
@@ -502,21 +429,16 @@ CubicSpline::CubicSpline(const std::vector<double>& xa, const std::vector<double
     if (sys_size == 1) {
         cval[1] = g[0] / diag[0];
     } else {
-        gsl_vector_view g_vec = gsl_vector_view_array(&(g.front()), sys_size);
-        gsl_vector_view diag_vec = gsl_vector_view_array(&(diag.front()), sys_size);
-        gsl_vector_view offdiag_vec = gsl_vector_view_array(&(offdiag.front()), sys_size - 1);
-        gsl_vector_view solution_vec = gsl_vector_view_array(&(cval[1]), sys_size); 
-        int status = gsl_linalg_solve_symm_tridiag(&diag_vec.vector, &offdiag_vec.vector, &g_vec.vector, &solution_vec.vector);
-        if(status != GSL_SUCCESS)
-            throw std::runtime_error("Error in spline initialization");
-        if(der1==der1) 
+        offdiag.resize(sys_size-1);
+        linearSystemSolveTridiagSymm(diag, offdiag, g, cval);
+        cval.insert(cval.begin(), 0.);
+        cval.push_back(0.);
+        if(isFinite(der1)) 
             cval[0] = ( 3.0*(ya[1]-ya[0])/(xa[1]>xa[0] ? xa[1]-xa[0] : 1) 
                 - 3.0*der1 - cval[1]*(xa[1]-xa[0]) )*0.5/(xa[1]>xa[0] ? xa[1]-xa[0] : 1);
-        else cval[0]=0.0;
-        if(der2==der2)
+        if(isFinite(der2))
             cval[max_index] = -( 3*(ya[max_index]-ya[max_index-1])/(xa[max_index]-xa[max_index-1]) 
                 - 3*der2 + cval[max_index-1]*(xa[max_index]-xa[max_index-1]) )*0.5/(xa[max_index]-xa[max_index-1]);
-        else cval[max_index]=0.0;
     }
 }
 
@@ -612,58 +534,52 @@ bool CubicSpline::isMonotonic() const
 //------------ 2D CUBIC SPLINE -------------//
 // based on interp2d library by David Zaslavsky
 
-inline size_t INDEX_2D(size_t xi, size_t yi, size_t xsize) {
-    return yi * xsize + xi;
-}
-
 CubicSpline2d::CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-    const std::vector< std::vector<double> >& zvalues,
+    const Matrix<double>& zvalues,
     double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax)
 {
     const size_t xsize = xvalues.size();
     const size_t ysize = yvalues.size();
     if(xsize<4 || ysize<4)
         throw std::invalid_argument("Error in 2d spline initialization: number of nodes should be >=4 in each direction");
-    if(zvalues.size() != xsize)
+    if(zvalues.numRows() != xsize)
         throw std::invalid_argument("Error in 2d spline initialization: x and z array lengths differ");
+    if(zvalues.numCols() != ysize)
+        throw std::invalid_argument("Error in 2d spline initialization: y and z array lengths differ");
     xval = xvalues;
     yval = yvalues;
-    zval.resize(xsize*ysize);
-    zx.resize(xsize*ysize);
-    zy.resize(xsize*ysize);
-    zxy.resize(xsize*ysize);
+    zval = zvalues;
+    zx = Matrix<double>(xsize, ysize);
+    zy = Matrix<double>(xsize, ysize);
+    zxy= Matrix<double>(xsize, ysize);
     std::vector<double> tmpvalues(ysize);
     for(size_t i=0; i<xsize; i++) {
-        if(zvalues[i].size() != ysize)
-            throw std::invalid_argument("Error in 2d spline initialization: y and z array lengths differ");
-        for(size_t j=0; j<ysize; j++) {
-            tmpvalues[j] = zvalues[i][j];
-            zval[INDEX_2D(i, j, xsize)] = zvalues[i][j];
-        }
+        for(size_t j=0; j<ysize; j++)
+            tmpvalues[j] = zvalues(i, j);
         CubicSpline spl(yvalues, tmpvalues, deriv_ymin, deriv_ymax);
         for(size_t j=0; j<ysize; j++)
-            spl.evalDeriv(yvalues[j], NULL, &(zy[INDEX_2D(i, j, xsize)]));
+            spl.evalDeriv(yvalues[j], NULL, &zy(i, j));
     }
     tmpvalues.resize(xsize);
     for(size_t j=0; j<ysize; j++) {
         for(size_t i=0; i<xsize; i++)
-            tmpvalues[i] = zvalues[i][j];
+            tmpvalues[i] = zvalues(i, j);
         CubicSpline spl(xvalues, tmpvalues, deriv_xmin, deriv_xmax);
         for(size_t i=0; i<xsize; i++)
-            spl.evalDeriv(xvalues[i], NULL, &(zx[INDEX_2D(i, j, xsize)]));
+            spl.evalDeriv(xvalues[i], NULL, &zx(i, j));
     }
     for(size_t j=0; j<ysize; j++) {
         // if derivs at the boundary are specified, 2nd deriv must be zero
         if( (j==0 && isFinite(deriv_ymin)) || (j==ysize-1 && isFinite(deriv_ymax)) ) {
             for(size_t i=0; i<xsize; i++)
-                zxy[INDEX_2D(i, j, xsize)] = 0.;
+                zxy(i, j) = 0.;
         } else {
             for(size_t i=0; i<xsize; i++)
-                tmpvalues[i] = zy[INDEX_2D(i, j, xsize)];
+                tmpvalues[i] = zy(i, j);
             CubicSpline spl(xvalues, tmpvalues,
                 isFinite(deriv_xmin) ? 0. : NAN, isFinite(deriv_xmax) ? 0. : NAN);
             for(size_t i=0; i<xsize; i++)
-                spl.evalDeriv(xvalues[i], NULL, &(zxy[INDEX_2D(i, j, xsize)]));
+                spl.evalDeriv(xvalues[i], NULL, &zxy(i, j));
         }
     }
 }
@@ -688,7 +604,6 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
             *z_yy = NAN;
         return;
     }
-    const size_t xsize = xval.size();
     // First compute the indices into the data arrays where we are interpolating
     const size_t xi = binSearch(x, xval);
     const size_t yi = binSearch(y, yval);
@@ -697,10 +612,10 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
     const double xupp = xval[xi + 1];
     const double ylow = yval[yi];
     const double yupp = yval[yi + 1];
-    const double zlowlow = zval[INDEX_2D(xi, yi, xsize)];
-    const double zlowupp = zval[INDEX_2D(xi, yi + 1, xsize)];
-    const double zupplow = zval[INDEX_2D(xi + 1, yi, xsize)];
-    const double zuppupp = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
+    const double zlowlow = zval(xi, yi);
+    const double zlowupp = zval(xi, yi + 1);
+    const double zupplow = zval(xi + 1, yi);
+    const double zuppupp = zval(xi + 1, yi + 1);
     // Get the width and height of the grid cell
     const double dx = xupp - xlow;
     const double dy = yupp - ylow;
@@ -710,18 +625,18 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
     const double u = (y - ylow)/dy;
     const double dt = 1./dx; // partial t / partial x
     const double du = 1./dy; // partial u / partial y
-    const double zxlowlow  = zx [INDEX_2D(xi, yi, xsize)]/dt;
-    const double zxlowupp  = zx [INDEX_2D(xi, yi + 1, xsize)]/dt;
-    const double zxupplow  = zx [INDEX_2D(xi + 1, yi, xsize)]/dt;
-    const double zxuppupp  = zx [INDEX_2D(xi + 1, yi + 1, xsize)]/dt;
-    const double zylowlow  = zy [INDEX_2D(xi, yi, xsize)]/du;
-    const double zylowupp  = zy [INDEX_2D(xi, yi + 1, xsize)]/du;
-    const double zyupplow  = zy [INDEX_2D(xi + 1, yi, xsize)]/du;
-    const double zyuppupp  = zy [INDEX_2D(xi + 1, yi + 1, xsize)]/du;
-    const double zxylowlow = zxy[INDEX_2D(xi, yi, xsize)]/(dt*du);
-    const double zxylowupp = zxy[INDEX_2D(xi, yi + 1, xsize)]/(dt*du);
-    const double zxyupplow = zxy[INDEX_2D(xi + 1, yi, xsize)]/(dt*du);
-    const double zxyuppupp = zxy[INDEX_2D(xi + 1, yi + 1, xsize)]/(dt*du);
+    const double zxlowlow  = zx (xi, yi)/dt;
+    const double zxlowupp  = zx (xi, yi + 1)/dt;
+    const double zxupplow  = zx (xi + 1, yi)/dt;
+    const double zxuppupp  = zx (xi + 1, yi + 1)/dt;
+    const double zylowlow  = zy (xi, yi)/du;
+    const double zylowupp  = zy (xi, yi + 1)/du;
+    const double zyupplow  = zy (xi + 1, yi)/du;
+    const double zyuppupp  = zy (xi + 1, yi + 1)/du;
+    const double zxylowlow = zxy(xi, yi)/(dt*du);
+    const double zxylowupp = zxy(xi, yi + 1)/(dt*du);
+    const double zxyupplow = zxy(xi + 1, yi)/(dt*du);
+    const double zxyuppupp = zxy(xi + 1, yi + 1)/(dt*du);
     const double t0 = 1;
     const double t1 = t;
     const double t2 = t*t;
@@ -838,23 +753,19 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
 
 LinearInterpolator2d::LinearInterpolator2d(
     const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-    const std::vector< std::vector<double> >& zvalues)
+    const Matrix<double>& zvalues)
 {
     const size_t xsize = xvalues.size();
     const size_t ysize = yvalues.size();
     if(xsize<2 || ysize<2)
         throw std::invalid_argument("Error in 2d interpolator initialization: number of nodes should be >=2 in each direction");
-    if(zvalues.size() != xsize)
+    if(zvalues.numRows() != xsize)
         throw std::invalid_argument("Error in 2d interpolator initialization: x and z array lengths differ");
+    if(zvalues.numCols() != ysize)
+        throw std::invalid_argument("Error in 2d interpolator initialization: y and z array lengths differ");
     xval = xvalues;
     yval = yvalues;
-    zval.resize(xsize*ysize);
-    for(size_t i=0; i<xsize; i++) {
-        if(zvalues[i].size() != ysize)
-            throw std::invalid_argument("Error in 2d interpolator initialization: y and z array lengths differ");
-        for(size_t j=0; j<ysize; j++)
-            zval[INDEX_2D(i, j, xsize)] = zvalues[i][j];
-    }
+    zval = zvalues;
 }
 
 void LinearInterpolator2d::evalDeriv(const double x, const double y, 
@@ -871,15 +782,14 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
             *z_y = NAN;
         return;
     }
-    const size_t xsize = xval.size();
     // First compute the indices into the data arrays where we are interpolating
     const size_t xi = binSearch(x, xval);
     const size_t yi = binSearch(y, yval);
     // Find the minimum and maximum values on the grid cell in each dimension
-    const double zlowlow = zval[INDEX_2D(xi, yi, xsize)];
-    const double zlowupp = zval[INDEX_2D(xi, yi + 1, xsize)];
-    const double zupplow = zval[INDEX_2D(xi + 1, yi, xsize)];
-    const double zuppupp = zval[INDEX_2D(xi + 1, yi + 1, xsize)];
+    const double zlowlow = zval(xi, yi);
+    const double zlowupp = zval(xi, yi + 1);
+    const double zupplow = zval(xi + 1, yi);
+    const double zuppupp = zval(xi + 1, yi + 1);
     // Get the width and height of the grid cell
     const double dx = xval[xi+1] - xval[xi];
     const double dy = yval[yi+1] - yval[yi];

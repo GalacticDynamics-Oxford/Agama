@@ -52,15 +52,16 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
         s<<coordSysT::name()<<"_"<<x[0]<<x[1]<<x[2]<<x[3]<<x[4]<<x[5];
         strm.open(s.str().c_str());
     }
-    double ifd = sqrt(actions::estimateSquaredInterfocalDistancePoints(potential, traj) );
+    double ifd = actions::estimateInterfocalDistancePoints(potential, traj);
+    std::cout << ifd << "  ";
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl p = coord::toPosVelCyl(traj[i]);
         try {
             stats.add(actions::axisymStaeckelActions(potential, p));
         }
         catch(std::exception &e) {
+            if(!ex_afs) std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
             ex_afs=true;
-            std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
         }
         try {
             actions::ActionAngles a=actions::axisymFudgeActionAngles(potential, p, ifd);
@@ -82,8 +83,8 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
             }
         }
         catch(std::exception &e) {
+            if(!ex_aff) std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
             ex_aff=true;
-            std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
         }
     }
     stats.finish();
@@ -96,11 +97,13 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     std::cout << coordSysT::name() << ", Exact"
     ":  Jr="  <<stats.avg.Jr  <<" +- "<<stats.disp.Jr<<
     ",  Jz="  <<stats.avg.Jz  <<" +- "<<stats.disp.Jz<<
-    ",  Jphi="<<stats.avg.Jphi<<" +- "<<stats.disp.Jphi<< (ex_afs ? ",  CAUGHT EXCEPTION\n":"\n");
+    ",  Jphi="<<stats.avg.Jphi<<" +- "<<stats.disp.Jphi<<
+    (ex_afs ? ",  \033[1;33mCAUGHT EXCEPTION\033[0m\n":"\n");
     std::cout << coordSysT::name() << ", Fudge"
     ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.disp.Jr<<
     ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.disp.Jz<<
-    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi << (ok?"":" ***")<< (ex_aff ? ",  CAUGHT EXCEPTION\n":"\n");
+    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.disp.Jphi << (ok?"":" \033[1;31m**\033[0m")<<
+    (ex_aff ? ",  \033[1;33mCAUGHT EXCEPTION\033[0m\n":"\n");
     return ok;
 }
 

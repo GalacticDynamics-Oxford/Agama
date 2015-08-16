@@ -7,8 +7,8 @@
 #include "coord.h"
 #include "actions_base.h"
 #include "math_core.h"
+#include "math_linalg.h"
 #include <cmath>
-#include <vector>
 #include <iostream>
 
 // Coordinate tools
@@ -156,9 +156,9 @@ public:
     }
     void finish() {
         double bla;
-        math::linearFit(time, thetar, freqr, bla, &dispr);
-        math::linearFit(time, thetaz, freqz, bla, &dispz);
-        math::linearFit(time, thetaphi, freqphi, bla, &dispphi);
+        math::linearFit(time, thetar, NULL, freqr, bla, &dispr);
+        math::linearFit(time, thetaz, NULL, freqz, bla, &dispz);
+        math::linearFit(time, thetaphi, NULL, freqphi, bla, &dispphi);
     }
 };
 }  // namespace

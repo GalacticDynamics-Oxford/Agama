@@ -6,11 +6,8 @@
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
-#include <gsl/gsl_fit.h>
-#include <gsl/gsl_multifit.h>
 #include <stdexcept>
 #include <cassert>
-#include <vector>
 
 #ifdef HAVE_CUBA
 #include <cuba.h>
@@ -388,7 +385,7 @@ static double findMinKnown(const IFunction& fnc, double xlower, double xupper, d
             xlower = gsl_min_fminimizer_x_lower (minser);
             xupper = gsl_min_fminimizer_x_upper (minser);
         }
-        while (fabs(xlower-xupper) < abstoler && iter < MAXITER);
+        while (fabs(xlower-xupper) > abstoler && iter < MAXITER);
     }
     gsl_min_fminimizer_free(minser);
     return xroot;
@@ -420,7 +417,7 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
             return NAN;
         double abstoler = reltoler*fabs(xupper-xlower);
         int iter = 0;
-        while( (yinit>ylower || yinit>yupper) && iter<MAXITER && fabs(xlower-xupper)>abstoler) {
+        while( (yinit>=ylower || yinit>=yupper) && iter<MAXITER && fabs(xlower-xupper)>abstoler) {
             if(yinit<ylower) {
                 xlower=xinit;
                 ylower=yinit;
@@ -444,10 +441,8 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
                 return NAN;
             iter++;
         }
-        if(yinit>=ylower && yinit<=yupper)  // couldn't locate a minimum inside the interval,
-            return F.x_from_y(xlower);
-        if(yinit>=yupper && yinit<=ylower)  // so return one of endpoints
-            return F.x_from_y(xupper);
+        if(yinit>=ylower || yinit>=yupper)  // couldn't locate a minimum inside the interval,
+            return F.x_from_y(ylower<yupper ? xlower : xupper);  // so return one of endpoints
     }
     return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, reltoler));  // normal min-search
 }
@@ -586,12 +581,13 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
     const double absToler = 0;  // maybe should be more flexible?
-    std::vector<double> tempError(numValues);  // storage for errors in the case that user doesn't need them
-    double* error = outError!=NULL ? outError : &(tempError.front());
+    double* error = outError;
+    if(error==NULL)
+        error = new double[numValues];  // storage for errors in the case that user doesn't need them
 #ifdef HAVE_CUBA
-    std::vector<double> tempX(numVars);       // storage for scaled variables
-    CubaParams param(F, xlower, xupper, &(tempX.front()));
-    std::vector<double> tempProb(numValues);
+    double* tempX = new double[numVars];       // storage for scaled variables
+    CubaParams param(F, xlower, xupper, tempX);
+    double* tempProb = new double[numValues];
     int nregions, neval, fail;
     const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
     cubacores(0, 0);
@@ -599,7 +595,9 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
           relToler, absToler, FLAGS, minNumEval, maxNumEval, 
           KEY, NULL/*STATEFILE*/, NULL/*spin*/,
           &nregions, numEval!=NULL ? numEval : &neval, &fail, 
-          result, error, &(tempProb.front()) );
+          result, error, tempProb);
+    delete[] tempProb;
+    delete[] tempX;
     // need to scale the result to account for coordinate transformation [xlower:xupper] => [0:1]
     double scaleFactor = 1.;
     for(unsigned int n=0; n<numVars; n++)
@@ -616,6 +614,8 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     if(numEval!=NULL)
         *numEval = params.numEval;
 #endif
+    if(outError==NULL)
+        delete[] error;
     return;
 }
     
@@ -688,64 +688,6 @@ double PointNeighborhood::dxToNearestRoot() const
         }
     }
     return dx_nearest_root;
-}
-
-// ----- other stuff ------- //
-double linearFitZero(const std::vector<double>& x, const std::vector<double>& y, double* rms)
-{
-    if(x.size() != y.size())
-        throw std::invalid_argument("LinearFit: input arrays are not of equal length");
-    double c, cov, sumsq;
-    gsl_fit_mul(&x.front(), 1, &y.front(), 1, y.size(), &c, &cov, &sumsq);
-    if(rms!=NULL)
-        *rms = sqrt(sumsq/y.size());
-    return c;
-}
-
-void linearFit(const std::vector<double>& x, const std::vector<double>& y, 
-    double& slope, double& intercept, double* rms)
-{
-    if(x.size() != y.size())
-        throw std::invalid_argument("LinearFit: input arrays are not of equal length");
-    double cov00, cov11, cov01, sumsq;
-    gsl_fit_linear(&x.front(), 1, &y.front(), 1, y.size(),
-        &intercept, &slope, &cov00, &cov01, &cov11, &sumsq);
-    if(rms!=NULL)
-        *rms = sqrt(sumsq/y.size());
-}
-
-void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
-    std::vector<double>& result, double* rms)
-{
-    if(coefs.numRows() != rhs.size())
-        throw std::invalid_argument(
-            "LinearMultiFit: number of rows in matrix is different from the length of RHS vector");
-    result.assign(coefs.numCols(), 0);
-    gsl_matrix* covarMatrix =
-        gsl_matrix_alloc(coefs.numCols(), coefs.numCols());
-    gsl_multifit_linear_workspace* fitWorkspace =
-        gsl_multifit_linear_alloc(coefs.numRows(),coefs.numCols());
-    if(covarMatrix==NULL || fitWorkspace==NULL) {
-        if(fitWorkspace)
-            gsl_multifit_linear_free(fitWorkspace);
-        if(covarMatrix)
-            gsl_matrix_free(covarMatrix);
-        throw std::bad_alloc();
-    }
-    // create gsl-compatible vector and matrix structures (no copying of data involved)
-    gsl_vector_const_view rhs_vec =
-        gsl_vector_const_view_array(&rhs.front(), rhs.size());
-    gsl_matrix_const_view coefs_mat =
-        gsl_matrix_const_view_array(coefs.getData(), coefs.numRows(), coefs.numCols());
-    gsl_vector_view result_vec =
-        gsl_vector_view_array(&result.front(), result.size());
-    double sumsq;
-    gsl_multifit_linear(&coefs_mat.matrix, &rhs_vec.vector, &result_vec.vector, 
-        covarMatrix, &sumsq, fitWorkspace);
-    gsl_multifit_linear_free(fitWorkspace);
-    gsl_matrix_free(covarMatrix);
-    if(rms!=NULL)
-        *rms = sqrt(sumsq/rhs.size());
 }
 
 }  // namespace

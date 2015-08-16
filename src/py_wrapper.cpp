@@ -115,7 +115,7 @@ static PyObject* set_units(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 /// any function that evaluates something for a given object and an `input` array of floats,
 /// and stores one or more values in the `result` array of floats
 typedef void (*anyFunction) 
-    (PyObject* obj, const double input[], double *result);
+    (void* obj, const double input[], double *result);
 
 /// anyFunction input type
 enum INPUT_VALUE {
@@ -269,7 +269,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
     shape determined by the output format, i.e., for the above example it would be ([N,3], [N,6]).
 */
 template<int numArgs, int numOutput>
-static PyObject* callAnyFunctionOnArray(PyObject* self, PyObject* args, anyFunction fnc)
+static PyObject* callAnyFunctionOnArray(void* self, PyObject* args, anyFunction fnc)
 {
     double input [inputLength<numArgs>()];
     double result[outputLength<numOutput>()];
@@ -279,8 +279,12 @@ static PyObject* callAnyFunctionOnArray(PyObject* self, PyObject* args, anyFunct
             return formatTuple<numOutput>(result);
         }
         PyErr_Clear();  // clear error if the argument list is not a tuple of a proper type
-        PyObject* obj;
-        if(PyArg_ParseTuple(args, "O", &obj)) {
+        PyObject* obj=NULL;
+        if(PyArray_Check(args))
+            obj = args;
+        else if(PyTuple_Check(args) && PyTuple_Size(args)==1)
+            obj = PyTuple_GET_ITEM(args, 0);
+        if(obj) {
             PyArrayObject *arr  = (PyArrayObject*) PyArray_FROM_OTF(obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
             if(arr == NULL) {
                 PyErr_SetString(PyExc_ValueError, "Input does not contain a valid array");
@@ -306,7 +310,7 @@ static PyObject* callAnyFunctionOnArray(PyObject* self, PyObject* args, anyFunct
             for(int i=0; i<numpt; i++) {
                 fnc(self, static_cast<double*>(PyArray_GETPTR2(arr, i, 0)), result);
                 formatOutputArr<numOutput>(result, i, resultObj);
-            }                
+            }
             Py_DECREF(arr);
             return resultObj;
         }
@@ -547,7 +551,7 @@ static int Potential_initFromParticles(PyObject* self,
 
 /// the generic constructor of Potential object
 static int Potential_init(PyObject* self, PyObject* args, PyObject* namedArgs)
-{    
+{
     // check if the input was a tuple of Potential objects, and if so, return a composite potential
     if(Potential_initComposite(self, args) == 0)
         return 0;
@@ -618,7 +622,7 @@ static bool Potential_isCorrect(PyObject* self)
 // function that do actually compute something from the potential object,
 // applying appropriate unit conversions
 
-static void fncPotential(PyObject* obj, const double input[], double *result) {
+static void fncPotential(void* obj, const double input[], double *result) {
     const coord::PosCar point(
         input[0] * conv->lengthUnit, 
         input[1] * conv->lengthUnit, 
@@ -639,7 +643,7 @@ static PyObject* Potential_value(PyObject* self, PyObject* args, PyObject* /*nam
     return Potential_potential(self, args);
 }
 
-static void fncDensity(PyObject* obj, const double input[], double *result) {
+static void fncDensity(void* obj, const double input[], double *result) {
     const coord::PosCar point(
         input[0] * conv->lengthUnit, 
         input[1] * conv->lengthUnit, 
@@ -655,7 +659,7 @@ static PyObject* Potential_density(PyObject* self, PyObject* args) {
         (self, args, fncDensity);
 }
 
-static void fncForce(PyObject* obj, const double input[], double *result) {
+static void fncForce(void* obj, const double input[], double *result) {
     const coord::PosCar point(
         input[0] * conv->lengthUnit, 
         input[1] * conv->lengthUnit, 
@@ -675,7 +679,7 @@ static PyObject* Potential_force(PyObject* self, PyObject* args) {
         (self, args, fncForce);
 }
 
-static void fncForceDeriv(PyObject* obj, const double input[], double *result) {
+static void fncForceDeriv(void* obj, const double input[], double *result) {
     const coord::PosCar point(
         input[0] * conv->lengthUnit, 
         input[1] * conv->lengthUnit, 
@@ -782,8 +786,7 @@ static PyTypeObject PotentialType = {
 /// Python type corresponding to ActionFinder class
 typedef struct {
     PyObject_HEAD
-    const actions::InterfocalDistanceFinder* finder;
-    //const actions::BaseActionFinder* finder;  // C++ class for action finder
+    const actions::InterfocalDistanceFinder* finder;  // C++ object for interfocal distance finder
     PyObject* pot;  // Python object for potential
 } ActionFinderObject;
 
@@ -805,7 +808,11 @@ static void ActionFinder_dealloc(ActionFinderObject* self)
     self->ob_type->tp_free((PyObject*)self);
 }
 
-static const char* docstringActionFinder = "Action finder";
+static const char* docstringActionFinder =
+    "ActionFinder object is created for a given potential, and its () operator "
+    "computes actions for a given position/velocity point, or array of points\n"
+    "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets\n"
+    "Returns: float or array of floats (for each point: Jr, Jz, Jphi)";
 
 static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs)
 {
@@ -821,8 +828,6 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs
         return -1;
     }
     try{
-        //const actions::BaseActionFinder* finder = 
-        //    new actions::ActionFinderAxisymFudge(*((PotentialObject*)objPot)->pot);
         const actions::InterfocalDistanceFinder* finder = 
             new actions::InterfocalDistanceFinder(*((PotentialObject*)objPot)->pot);
         // ensure valid cleanup if the constructor was called more than once
@@ -842,19 +847,16 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedargs
     }
 }
 
-static void fncActions(PyObject* obj, const double input[], double *result) {
+static void fncActions(void* obj, const double input[], double *result) {
     try{
         const coord::PosVelCyl point = coord::toPosVelCyl( coord::PosVelCar(
-            input[0] * conv->lengthUnit, 
-            input[1] * conv->lengthUnit, 
+            input[0] * conv->lengthUnit,
+            input[1] * conv->lengthUnit,
             input[2] * conv->lengthUnit,
-            input[3] * conv->velocityUnit, 
-            input[4] * conv->velocityUnit, 
+            input[3] * conv->velocityUnit,
+            input[4] * conv->velocityUnit,
             input[5] * conv->velocityUnit) );
-        //actions::Actions acts = ((ActionFinderObject*)obj)->finder->actions(coord::toPosVelCyl(point));
-        double ifd = //actions::estimateInterfocalDistance(*((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point);
-        ((ActionFinderObject*)obj)->finder->value(point);
-        //printf("Delta=%f\n", ifd/conv->lengthUnit);
+        double ifd = ((ActionFinderObject*)obj)->finder->value(point);
         actions::Actions acts = actions::axisymFudgeActions(
             *((PotentialObject*)((ActionFinderObject*)obj)->pot)->pot, point, ifd);
         // unit of action is V*L
@@ -867,7 +869,7 @@ static void fncActions(PyObject* obj, const double input[], double *result) {
         result[0] = result[1] = result[2] = NAN;
     }
 }
-static PyObject* ActionFinder_actions(PyObject* self, PyObject* args)
+static PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
 {
     if(((ActionFinderObject*)self)->finder==NULL)
         return NULL;
@@ -875,23 +877,75 @@ static PyObject* ActionFinder_actions(PyObject* self, PyObject* args)
         (self, args, fncActions);
 }
 
-static PyMethodDef ActionFinder_methods[] = {
-    { "actions", ActionFinder_actions, METH_VARARGS, 
-      "Compute actions for a given position/velocity point, or array of points\n"
-      "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets\n"
-      "Returns: float or array of floats" },
-    { NULL, NULL, 0, NULL }
-};
 
 static PyTypeObject ActionFinderType = {
     PyObject_HEAD_INIT(NULL)
     0, "py_wrapper.ActionFinder",
     sizeof(ActionFinderObject), 0, (destructor)ActionFinder_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringActionFinder, 
-    0, 0, 0, 0, 0, 0, ActionFinder_methods, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ActionFinder_init, 0, ActionFinder_new
 };
+
+// standalone action finder
+
+typedef struct {
+    const potential::BasePotential* pot;
+    double ifd;
+} ActionFinderParams;
+
+static void fncActionsStandalone(void* obj, const double input[], double *result) {
+    try{
+        const coord::PosVelCyl point = coord::toPosVelCyl( coord::PosVelCar(
+            input[0] * conv->lengthUnit,
+            input[1] * conv->lengthUnit,
+            input[2] * conv->lengthUnit,
+            input[3] * conv->velocityUnit,
+            input[4] * conv->velocityUnit,
+            input[5] * conv->velocityUnit) );
+        double ifd = ((ActionFinderParams*)obj)->ifd * conv->lengthUnit;
+        actions::Actions acts = actions::axisymFudgeActions(
+            *((ActionFinderParams*)obj)->pot, point, ifd);
+        // unit of action is V*L
+        const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
+        result[0] = acts.Jr   * convA;
+        result[1] = acts.Jz   * convA;
+        result[2] = acts.Jphi * convA;
+    }
+    catch(std::exception& ) {  // indicates an error, e.g., positive value of energy
+        result[0] = result[1] = result[2] = NAN;
+    }
+}
+
+static const char* docstringActions = 
+    "Compute actions for a given position/velocity point, or array of points\n"
+    "Arguments: \n"
+    "    point : a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets;\n"
+    "    pot=Potential object that defines the gravitational potential;\n"
+    "    ifd=float : interfocal distance for the prolate spheroidal coordinate system.\n"
+    "Returns: float or array of floats (for each point: Jr, Jz, Jphi)";
+static PyObject* find_actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"point", "pot", "ifd", NULL};
+    double ifd = 0;
+    PyObject *points_obj = NULL, *pot_obj = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOd", const_cast<char**>(keywords),
+        &points_obj, &pot_obj, &ifd) || ifd<=0)
+    {
+        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to actions()");
+        return NULL;
+    }
+    if(!PyObject_TypeCheck(pot_obj, &PotentialType) || ((PotentialObject*)pot_obj)->pot==NULL) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'pot' must be a valid instance of Potential class");
+        return NULL;
+    }
+    ActionFinderParams params;
+    params.pot = ((PotentialObject*)pot_obj)->pot;
+    params.ifd = ifd;
+    return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
+        ((PyObject*)(&params), points_obj, fncActionsStandalone);
+}
 
 ///@}
 /// \name  --------- SplineApprox class -----------
@@ -902,7 +956,7 @@ typedef struct {
     PyObject_HEAD
     math::CubicSpline* spl;
 } SplineApproxObject;
-       
+
 static PyObject* SplineApprox_new(PyTypeObject *type, PyObject*, PyObject*)
 {
     SplineApproxObject *self = (SplineApproxObject*)type->tp_alloc(type, 0);
@@ -1045,6 +1099,8 @@ static PyTypeObject SplineApproxType = {
     0, 0, 0, 0, 0, 0, SplineApprox_methods, 0, 0, 0, 0, 0, 0, 0,
     SplineApprox_init, 0, SplineApprox_new
 };
+
+
 ///@}
 /// \name  ----- Orbit integration -----
 ///@{
@@ -1124,8 +1180,9 @@ static PyObject* integrate_orbit(PyObject* /*self*/, PyObject* args, PyObject* n
 ///@}
 
 static PyMethodDef py_wrapper_methods[] = {
-    {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringUnits}, 
-    {"orbit", (PyCFunction)integrate_orbit, METH_VARARGS | METH_KEYWORDS, docstringOrbit}, 
+    {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringUnits},
+    {"orbit", (PyCFunction)integrate_orbit, METH_VARARGS | METH_KEYWORDS, docstringOrbit},
+    {"actions", (PyCFunction)find_actions, METH_VARARGS | METH_KEYWORDS, docstringActions},
     {NULL}
 };
 
@@ -1146,7 +1203,7 @@ initpy_wrapper(void)
     if (PyType_Ready(&ActionFinderType) < 0) return;
     Py_INCREF(&ActionFinderType);
     PyModule_AddObject(mod, "ActionFinder", (PyObject *)&ActionFinderType);
-    
+
     if (PyType_Ready(&SplineApproxType) < 0) return;
     Py_INCREF(&SplineApproxType);
     PyModule_AddObject(mod, "SplineApprox", (PyObject *)&SplineApproxType);

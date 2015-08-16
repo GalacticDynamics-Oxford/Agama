@@ -40,7 +40,7 @@ def compare(ic, time, numsteps):
     plt.show()
 
     g_act = g_actfinder(g_orb[:,0],g_orb[:,1],g_orb[:,2],g_orb[:,3],g_orb[:,4],fixed_quad=True)
-    c_act = c_actfinder.actions(c_orb_car)
+    c_act = c_actfinder(c_orb_car)
     plt.plot(g_act[0],g_act[2])
     plt.plot(c_act[:,0],c_act[:,1])
     plt.show()

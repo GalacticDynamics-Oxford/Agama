@@ -8,7 +8,7 @@ Spline interpolation class is based on the GSL implementation by G.Jungman;
 */
 #pragma once
 #include "math_base.h"
-#include <vector>
+#include "math_linalg.h"
 
 namespace math{
 
@@ -56,14 +56,14 @@ class CubicSpline2d {
 public:
     CubicSpline2d() {};
     /** Initialize a 2d cubic spline from the provided values of x, y and z.
-        The latter is 2d array with the following indexing convention:  z[i][j] = f(x[i],y[j]).
+        The latter is 2d array (Matrix) with the following indexing convention:  z(i,j) = f(x[i],y[j]).
         Values of x and y arrays should monotonically increase.
         Derivatives at the boundaries of definition region may be provided as optional arguments
         (currently a single value per entire side of the rectangle is supported);
         if any of them is NaN this means a natural boundary condition.
     */
     CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const std::vector< std::vector<double> >& zvalues,
+        const Matrix<double>& zvalues,
         double deriv_xmin=NAN, double deriv_xmax=NAN, double deriv_ymin=NAN, double deriv_ymax=NAN);
 
     /** compute the value of spline and optionally its derivatives at point x,y;
@@ -93,8 +93,8 @@ public:
 
 private:
     std::vector<double> xval, yval;  ///< grid nodes in x and y directions
-    std::vector<double> zval;        ///< flattened 2d array of z values
-    std::vector<double> zx, zy, zxy; ///< flattened 2d arrays of derivatives in x and y directions, and mixed 2nd derivatives
+    Matrix<double> zval;             ///< flattened 2d array of z values
+    Matrix<double> zx, zy, zxy;      ///< flattened 2d arrays of derivatives in x and y directions, and mixed 2nd derivatives
 };
 
 
@@ -107,7 +107,7 @@ public:
         Values of x and y arrays should monotonically increase.
     */
     LinearInterpolator2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const std::vector< std::vector<double> >& zvalues);
+        const Matrix<double>& zvalues);
     
     /** compute the value of interpolator and optionally its derivatives at point x,y;
         if the input location is outside the definition region, the result is NaN. 
@@ -135,7 +135,7 @@ public:
     
 private:
     std::vector<double> xval, yval;  ///< grid nodes in x and y directions
-    std::vector<double> zval;        ///< flattened 2d array of z values
+    Matrix<double> zval;             ///< flattened 2d array of z values
 };
     
 

@@ -51,7 +51,7 @@ actFinder  = py_wrapper.ActionFinder(totalPot)
 print (time.clock()-tbegin),"s to init action finder"
 
 tbegin     = time.clock()
-actions    = actFinder.actions(diskPart)
+actions    = actFinder(diskPart)
 print (time.clock()-tbegin),"s to compute actions for",len(diskMass),"particles"
 
 #5. write out data

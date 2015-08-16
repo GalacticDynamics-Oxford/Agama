@@ -27,9 +27,10 @@ SOURCES   = coord.cpp \
             actions_staeckel.cpp \
             actions_torus.cpp \
             math_core.cpp \
+            math_linalg.cpp \
             math_ode.cpp \
-            math_spline.cpp \
             math_specfunc.cpp \
+            math_spline.cpp \
             cubature.cpp \
             orbit.cpp \
             utils.cpp \
