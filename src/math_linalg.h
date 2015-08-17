@@ -7,7 +7,8 @@
 #include <vector>
 
 namespace math{
-
+/// \name Matrix class
+///@{
 /** a simple class for two-dimensional matrices */
 template<typename NumT>
 class Matrix {
@@ -55,6 +56,7 @@ private:
     std::vector<NumT> data;  ///< flattened data storage
 };
 
+///@}
 /// \name ------ BLAS wrappers - same calling conventions as GSL BLAS but with STL vector and our matrix types ------
 ///@{
 

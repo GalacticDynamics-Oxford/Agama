@@ -46,10 +46,14 @@ double lngamma(const double n);
     
 /** Psi (digamma) function */
 double digamma(const double x);
+
+/** Psi (digamma) function for integer argument */
 double digamma(const int x);
 
-/** Complete elliptic integrals of the first K(k) and the second E(k) kinds*/
+/** Complete elliptic integrals of the first kind K(k) = F(pi/2, k) */
 double ellintK(const double k);
+
+/** Complete elliptic integrals of the second kind K(k) = E(pi/2, k) */
 double ellintE(const double k);
 
 /** Incomplete elliptic integrals of the first kind:

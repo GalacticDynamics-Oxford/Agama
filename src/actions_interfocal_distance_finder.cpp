@@ -354,29 +354,18 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
         throw std::invalid_argument("InterfocalDistanceFinder: incorrect grid size");
     
     // find out characteristic energy values
-    double E0 = potential.value(coord::PosCar(0, 0, 0));
-    double Ehalf = E0*0.5;
-    double totalMass = potential.totalMass();
-    if(math::isFinite(totalMass)) {
-        double halfMassRadius = getRadiusByMass(potential, 0.5*totalMass);
-        Ehalf = potential.value(coord::PosCyl(halfMassRadius, 0, 0));
-    }
-    double Einfinity = 0;
-    if((!math::isFinite(E0) && E0!=-INFINITY) || !math::isFinite(Ehalf) || 
-        E0>=Ehalf || Ehalf>=Einfinity)
+    double Ein  = potential.value(coord::PosCar(0, 0, 0));
+    double Eout = potential.value(coord::PosCar(INFINITY, 0, 0));
+    if(!math::isFinite(Eout))  // not all potentials may give sensible results for r=infinity
+        Eout = 0;  // default assumption
+    if(!math::isFinite(Ein) || Ein>=Eout)
         throw std::runtime_error("InterfocalDistanceFinder: weird behaviour of potential");
 
-    // create a somewhat non-uniform grid in energy
-    const double minBin = 0.5/gridSizeE;
-    std::vector<double> energyBins;
-    math::createNonuniformGrid((gridSizeE+1)/2, minBin, 1-1./gridSizeE, false, energyBins);
+    // create a grid in energy
+    Ein *= 1-0.5/gridSizeE;  // slightly offset from zero
     std::vector<double> gridE(gridSizeE);
-    for(unsigned int i=0; i<(gridSizeE+1)/2; i++) {
-        // inner part of the model
-        gridE[i] = math::isFinite(E0) ? E0 + (Ehalf-E0)*energyBins[i] : Ehalf/energyBins[i];
-        // outer part of the model
-        gridE[gridSizeE-1-i] = Einfinity - (Einfinity-Ehalf)*energyBins[i];
-    }
+    for(unsigned int i=0; i<gridSizeE; i++) 
+        gridE[i] = Ein + i*(Eout-Ein)/gridSizeE;
 
     // fill a 1d interpolator for Lcirc(E)
     Lscale = potential::L_circ(potential, gridE[gridSizeE/2]);

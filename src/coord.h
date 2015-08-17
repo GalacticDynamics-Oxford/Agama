@@ -163,6 +163,31 @@ template<> struct VelT<Sph> {
 typedef struct VelT<Sph> VelSph;
 
 ///@}
+/// \name   Primitive data types: second moments of velocity in different coordinate systems
+///@{
+
+/// second moment of velocity in arbitrary coordinates
+template<typename coordSysT> struct Vel2T;
+
+/// velocity in cartesian coordinates
+template<> struct Vel2T<Car> {
+    double vx2, vy2, vz2, vxvy, vxvz, vyvz;
+};
+typedef struct Vel2T<Car> Vel2Car;
+
+/// second moment of velocity in cylindrical coordinates 
+template<> struct Vel2T<Cyl> {
+    double vR2, vz2, vphi2, vRvz, vRvphi, vzvphi;
+};
+typedef struct Vel2T<Cyl> Vel2Cyl;
+
+/// second moment of velocity in spherical coordinates
+template<> struct Vel2T<Sph> {
+    double vr2, vtheta2, vphi2, vrvtheta, vrvphi, vthetavphi;
+};
+typedef struct Vel2T<Sph> Vel2Sph;
+
+///@}
 /// \name   Primitive data types: position-velocity pairs in different coordinate systems
 ///@{
 
@@ -172,12 +197,14 @@ template<typename coordSysT> struct PosVelT;
 /// combined position and velocity in cartesian coordinates
 template<> struct PosVelT<Car>: public PosCar, public VelCar {
     PosVelT<Car>() {};
+    /// initialize from position and velocity
+    PosVelT<Car>(const PosCar& pos, const VelCar& vel) : PosCar(pos), VelCar(vel) {}
     /// initialize from explicitly given numbers
     PosVelT<Car>(double _x, double _y, double _z, double _vx, double _vy, double _vz) :
-        PosCar(_x, _y, _z), VelCar(_vx, _vy, _vz) {};
+        PosCar(_x, _y, _z), VelCar(_vx, _vy, _vz) {}
     /// initialize from an array of 6 floats (i.e., from a serialized array)
     PosVelT<Car>(const double p[]) :
-        PosCar(p[0], p[1], p[2]), VelCar(p[3], p[4], p[5]) {};
+        PosCar(p[0], p[1], p[2]), VelCar(p[3], p[4], p[5]) {}
     /// serialize into an array of 6 floating-point numbers
     void unpack_to(double *out) const {
         out[0]=x; out[1]=y; out[2]=z; out[3]=vx; out[4]=vy; out[5]=vz; }
@@ -188,6 +215,8 @@ typedef struct PosVelT<Car> PosVelCar;
 /// combined position and velocity in cylindrical coordinates
 template<> struct PosVelT<Cyl>: public PosCyl, public VelCyl {
     PosVelT<Cyl>() {};
+    /// initialize from position and velocity
+    PosVelT<Cyl>(const PosCyl& pos, const VelCyl& vel) : PosCyl(pos), VelCyl(vel) {}
     /// initialize from explicitly given numbers
     PosVelT<Cyl>(double _R, double _z, double _phi, double _vR, double _vz, double _vphi) :
         PosCyl(_R, _z, _phi), VelCyl(_vR, _vz, _vphi) {};
@@ -203,6 +232,8 @@ typedef struct PosVelT<Cyl> PosVelCyl;
 /// combined position and velocity in spherical coordinates
 template<> struct PosVelT<Sph>: public PosSph, public VelSph {
     PosVelT<Sph>() {};
+    /// initialize from position and velocity
+    PosVelT<Sph>(const PosSph& pos, const VelSph& vel) : PosSph(pos), VelSph(vel) {}
     /// initialize from explicitly given numbers
     PosVelT<Sph>(double _r, double _theta, double _phi, double _vr, double _vtheta, double _vphi) :
         PosSph(_r, _theta, _phi), VelSph(_vr, _vtheta, _vphi) {};

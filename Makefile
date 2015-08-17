@@ -11,28 +11,32 @@ LEGACYDIR = src/legacy
 TORUSDIR  = src/torus
 
 # sources of the main library
-SOURCES   = coord.cpp \
-            potential_base.cpp \
-            potential_factory.cpp \
-            potential_analytic.cpp \
-            potential_composite.cpp \
-            potential_cylspline.cpp \
-            potential_dehnen.cpp \
-            potential_ferrers.cpp \
-            potential_galpot.cpp \
-            potential_perfect_ellipsoid.cpp \
-            potential_sphharm.cpp \
-            particles_io.cpp \
+SOURCES   = \
             actions_interfocal_distance_finder.cpp \
             actions_staeckel.cpp \
             actions_torus.cpp \
+            coord.cpp \
+            cubature.cpp \
             math_core.cpp \
             math_linalg.cpp \
             math_ode.cpp \
             math_specfunc.cpp \
             math_spline.cpp \
-            cubature.cpp \
+            df_base.cpp \
+            df_halo.cpp \
+            galaxymodel.cpp \
             orbit.cpp \
+            particles_io.cpp \
+            potential_analytic.cpp \
+            potential_base.cpp \
+            potential_composite.cpp \
+            potential_cylspline.cpp \
+            potential_dehnen.cpp \
+            potential_factory.cpp \
+            potential_ferrers.cpp \
+            potential_galpot.cpp \
+            potential_perfect_ellipsoid.cpp \
+            potential_sphharm.cpp \
             utils.cpp \
             utils_config.cpp \
             WD_Numerics.cpp
@@ -65,6 +69,7 @@ TESTSRCS  = test_math_core.cpp \
             test_actionfinder.cpp \
             test_actions_nbody.cpp \
             test_torus.cpp \
+            test_distributionfunction.cpp \
 
 LIBNAME   = $(LIBDIR)/libfJ.a
 PY_WRAPPER= $(LIBDIR)/py_wrapper.so
