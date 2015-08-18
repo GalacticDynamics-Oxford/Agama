@@ -1,5 +1,6 @@
 #include "actions_interfocal_distance_finder.h"
 #include "math_core.h"
+#include "math_fit.h"
 #include "math_ode.h"
 #include <cassert>
 #include <stdexcept>
@@ -88,7 +89,7 @@ public:
     double E;
     double Lz2;
     enum { FIND_RMIN, FIND_RMAX, FIND_ZMAX, FIND_JR, FIND_JZ } mode;
-    explicit OrbitSizeFunction(const potential::BasePotential& p) : potential(p), mode(FIND_RMAX) {};
+    explicit OrbitSizeFunction(const potential::BasePotential& p) : potential(p), mode(FIND_RMIN) {};
     virtual unsigned int numDerivs() const { return 2; }
     /** This function is used in the root-finder to determine the turnaround points of an orbit:
         in the radial direction, it returns -(1/2) v_R^2, and in the vertical direction -(1/2) v_z^2 .
@@ -151,6 +152,18 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
     fnc.E   = E;
     math::PointNeighborhood nh(fnc, fnc.R);
     double dR_to_zero = nh.dxToNearestRoot();
+    int nIter = 0;
+    while(nh.f0<0 && nIter<4) {  // safety measure to avoid roundoff errors
+        if(fnc.R+dR_to_zero == fnc.R)  // delta-step too small
+            fnc.R *= (1 + 1e-15*math::sign(dR_to_zero));
+        else
+            fnc.R += dR_to_zero;
+        nh = math::PointNeighborhood(fnc, fnc.R);
+        dR_to_zero = nh.dxToNearestRoot();
+        nIter++;
+    }
+    if(nh.f0<0)
+        throw std::runtime_error("Error in findPlanarOrbitExtent: E and Lz have incompatible values");
     Rmin = Rmax = fnc.R;
     double maxPeri = fnc.R, minApo = fnc.R;    // endpoints of interval for locating peri/apocenter radii
     if(fabs(dR_to_zero) < fnc.R*ACCURACY) {    // we are already near peri- or apocenter radius
@@ -168,14 +181,32 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
             Rmin = math::findRoot(fnc, 0., maxPeri, ACCURACY);
             // ensure that E-Phi(Rmin) >= 0
             // (due to finite accuracy in root-finding, a small adjustment may be needed)
-            Rmin += math::PointNeighborhood(fnc, Rmin).dxToPositive();
+            math::PointNeighborhood pn(fnc, Rmin);
+            if(pn.f0<0) {   // ensure that E>=Phi(Rmax)
+                double dx = pn.dxToPositive();
+                if(math::isFinite(dx) && fnc(Rmin+dx)>=0)
+                    Rmin += dx;
+                else  // most likely due to some roundoff errors
+                    Rmin = fnc.R;  // safe value
+            }
+            if(!math::isFinite(Rmin))
+                throw std::runtime_error("Error in locating Rmin in findPlanarOrbitExtent");
         }
     } else  // angular momentum is zero
         Rmin = 0;
     if(math::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
         Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY);
-        Rmax += math::PointNeighborhood(fnc, Rmax).dxToPositive();  // ensure that E>=Phi(Rmax)
+        math::PointNeighborhood pn(fnc, Rmax);
+        if(pn.f0<0) {   // ensure that E>=Phi(Rmax)
+            double dx = pn.dxToPositive();
+            if(math::isFinite(dx) && fnc(Rmax+dx)>=0)
+                Rmax += dx;
+            else  // most likely due to some roundoff errors
+                Rmax = fnc.R;  // safe value
+        }
+        if(!math::isFinite(Rmax))
+            throw std::runtime_error("Error in locating Rmax in findPlanarOrbitExtent");
     }   // else Rmax=absR
     if(Jr!=NULL) {  // compute radial action
         fnc.mode = OrbitSizeFunction::FIND_JR;

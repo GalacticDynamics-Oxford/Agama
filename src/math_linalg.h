@@ -1,5 +1,5 @@
 /** \file   math_linalg.h
-    \brief  linear algebra routines (including BLAS) and fitting routines
+    \brief  linear algebra routines (including BLAS)
     \date   2015
     \author Eugene Vasiliev
 */
@@ -127,45 +127,6 @@ void linearSystemSolveTridiag(const std::vector<double>& diag, const std::vector
     in two vectors `diag` and `offDiag` */
 void linearSystemSolveTridiagSymm(const std::vector<double>& diag, const std::vector<double>& offDiag,
     const std::vector<double>& y, std::vector<double>& x);
-
-///@}
-/// \name ------ linear regression ------
-///@{
-
-/** perform a linear least-square fit (i.e., c * x + b = y).
-    \param[in]  x  is the array of independent variables;
-    \param[in]  y  is the array of dependent variables;
-    \param[in]  w  is the optional array of weight coefficients (= inverse square error in y values),
-                if set to NULL this means equal weights;
-    \param[out] slope  stores the best-fit slope of linear regression;
-    \param[out] intercept  stores the best-fit intercept (value at x=0);
-    \param[out] rms  optionally stores the rms scatter (if not NULL).
-*/
-void linearFit(const std::vector<double>& x, const std::vector<double>& y, 
-    const std::vector<double>* w, double& slope, double& intercept, double* rms=0);
-
-/** perform a linear least-square fit without constant term (i.e., c * x = y).
-    \param[in]  x  is the array of independent variables;
-    \param[in]  y  is the array of dependent variables;
-    \param[in]  w  is the optional array of weight coefficients (= inverse square error in y values),
-                if set to NULL this means equal weights;
-    \param[out] rms  optionally stores the rms scatter (if not NULL).
-    \return  the best-fit slope of linear regression. 
-*/
-double linearFitZero(const std::vector<double>& x, const std::vector<double>& y, 
-    const std::vector<double>* w, double* rms=0);
-
-/** perform a multi-parameter linear least-square fit, i.e., solve the system of equations
-    `X c = y`  in the least-square sense (using singular-value decomposition).
-    \param[in]  coefs  is the matrix of coefficients (X) with M rows and N columns;
-    \param[in]  rhs  is the the array of M values (y);
-    \param[in]  w  is the optional array of weights (= inverse square error in y values), 
-               if set to NULL this means equal weights;
-    \param[out] result  stores the solution (array of N coefficients in the regression);
-    \param[out] rms  optionally stores the rms scatter (if not NULL).
-*/
-void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
-    const std::vector<double>* w, std::vector<double>& result, double* rms=0);
 
 ///@}
 

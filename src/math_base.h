@@ -34,6 +34,8 @@ inline double pow_3(double x) { return x*x*x; }
 #define M_SQRT2    1.41421356237309504880168872421
 #endif
 
+#define TWO_PI_CUBE 248.050213442398561403810520537
+
 /** Functions and classes for basic and advanced math operations */
 namespace math{
 

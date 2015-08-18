@@ -69,7 +69,8 @@ void Dehnen::evalCar(const coord::PosCar &pos,
     if(q==1 && p==1) {  // analytical expression for spherical potential
         double r = sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
         if(potential!=NULL)
-            *potential = mass/scalerad * (gamma==2 ? log(r/(r+scalerad)) : (1-pow(r/(r+scalerad), 2-gamma))/(gamma-2) );
+            *potential = r==INFINITY ? 0 :
+                mass/scalerad * (gamma==2 ? log(r/(r+scalerad)) : (1-pow(r/(r+scalerad), 2-gamma))/(gamma-2) );
         double val = mass*pow(r, -gamma)*pow(r+scalerad, gamma-3);
         if(deriv!=NULL) {
             deriv->dx = val*pos.x;

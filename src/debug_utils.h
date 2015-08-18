@@ -7,7 +7,7 @@
 #include "coord.h"
 #include "actions_base.h"
 #include "math_core.h"
-#include "math_linalg.h"
+#include "math_fit.h"
 #include <cmath>
 #include <iostream>
 

@@ -15,6 +15,10 @@ public:
     /// output a single value (DF multiplied by the jacobian of scaling transformation)
     virtual void eval(const double vars[], double values[]) const
     {
+        if(vars[0]==1 || vars[1]==1 || vars[2]==1) {  // we're at infinity
+            values[0] = 0;
+            return;
+        }
         actions::Actions acts;
         acts.Jr    = Jscale * vars[0] / (1-vars[0]);
         acts.Jz    = Jscale * vars[1] / (1-vars[1]);
@@ -23,7 +27,7 @@ public:
         acts.Jphi *= -1;  // Jphi may take both positive and negative values, sum the contribution of both
         val       += df.value(acts);
         double jac = pow_3(Jscale) / (pow_2(1-vars[0]) * pow_2(1-vars[1]) * pow_2(1-vars[2]) );
-        values[0]  = val * jac * pow_3(2*M_PI);   // integral over three angles
+        values[0]  = val * jac * TWO_PI_CUBE;   // integral over three angles
     }
 
     /// number of variables (3 actions)

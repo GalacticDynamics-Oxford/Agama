@@ -426,6 +426,21 @@ ActionAngles computeActionAngles(
 
 // -------- THE DRIVER ROUTINES --------
 
+// a special case of spherical potential does not require any fudge
+static Actions sphericalActions(const potential::BasePotential& potential,
+    const coord::PosVelCyl& point)
+{
+    if((potential.symmetry() & potential::ST_SPHERICAL) != potential::ST_SPHERICAL)
+        throw std::invalid_argument("This routine only can deal with actions in a spherical potential");
+    Actions acts;
+    double Ltot = Ltotal(point);
+    acts.Jphi = Lz(point);
+    acts.Jz = Ltot - fabs(acts.Jphi);
+    double R1, R2;
+    findPlanarOrbitExtent(potential, totalEnergy(potential, point), Ltot, R1, R2, &acts.Jr);
+    return acts;
+}
+
 Actions axisymStaeckelActions(const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point)
 {
@@ -447,6 +462,8 @@ Actions axisymFudgeActions(const potential::BasePotential& potential,
 {
     if((potential.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
+    if((potential.symmetry() & potential::ST_SPHERICAL) == potential::ST_SPHERICAL)
+        return sphericalActions(potential, point);
     const coord::ProlSph coordsys(pow_2(interfocalDistance));
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);

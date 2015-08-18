@@ -1,5 +1,6 @@
 #include "math_spline.h"
 #include "math_core.h"
+#include "math_fit.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>

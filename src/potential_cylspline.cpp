@@ -1,5 +1,6 @@
 #include "potential_cylspline.h"
 #include "math_core.h"
+#include "math_fit.h"
 #include "math_spline.h"
 #include "math_specfunc.h"
 #include "utils.h"

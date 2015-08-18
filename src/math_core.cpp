@@ -2,7 +2,6 @@
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
-#include <gsl/gsl_roots.h>
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
@@ -361,7 +360,7 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
     }
 }
 
-// 1d minimizer
+// 1d minimizer with known initial point
 static double findMinKnown(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
 {
     gsl_function F;
@@ -540,15 +539,15 @@ static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
 {
     CubaParams* param = static_cast<CubaParams*>(v_param);
     assert(*ndim == (int)param->F.numVars() && *ncomp == (int)param->F.numValues());
-    try {
+    //try {
         for(int n=0; n< *ndim; n++)
             param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
         param->F.eval(param->xvalue, fval);
         return 0;   // success
-    }
-    catch(...) {    // should we catch everything here?
+    /*}
+    catch(std::exception& e) {    // should we catch everything here?
         return -999;  // signal of error
-    }
+    }*/
 }
 #else
 // wrapper for Cubature library
@@ -563,14 +562,14 @@ static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
     assert(ndim == param->F.numVars() && fdim == param->F.numValues());
-    try {
+    //try {
         param->numEval++;
         param->F.eval(x, fval);
         return 0;   // success
-    }
+    /*}
     catch(...) {    // should we catch everything here?
         return -1;  // signal of error
-    }
+    }*/
 }
 #endif
 
@@ -675,8 +674,8 @@ double PointNeighborhood::dxToPosneg(double sgn) const
 
 double PointNeighborhood::dxToNearestRoot() const
 {
-    double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation
-    //dx_farthest_root= dx_nearest_root>0 ? gsl_neginf() : gsl_posinf();
+    if(f0==0) return 0;  // already there
+    double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation, if fder!=0
     if(f0*fder2<0) {  // use quadratic equation to find two nearest roots
         double discr = sqrt(fder*fder - 2*f0*fder2);
         if(fder<0) {
