@@ -792,7 +792,7 @@ T splev(                        // return:  y(xi)
 //   search for KLO, KHI is done using 'hunt' (NR) starting from linear 
 //   interpolation.
 {
-    static int lo=0;
+    int lo=0;
     find(lo,n,x,xi);
     return splint(x+lo,y+lo,y2+lo,xi,dy,d2y);
 }
@@ -845,7 +845,7 @@ T splev_2d(                     // return:  y(x0i,x1i)
         T*         dy=0,        // output:  gradient of y   if dy != 0
         T**        d2y=0)       // output:  d^2y/dxi/dxj    if d2y!= 0
 {
-    static int l0=0, l1=0;
+    int l0=0, l1=0;
     T yl,yh,y2l,y2h;
     find(l0,n[0],x[0],xi[0]);
     find(l1,n[1],x[1],xi[1]);

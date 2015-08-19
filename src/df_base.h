@@ -5,6 +5,7 @@
 */
 #pragma once
 #include "actions_base.h"
+#include <vector>
 
 /** Classes for dealing with action-base distribution functions */
 namespace df{
@@ -28,18 +29,23 @@ public:
         \param[out] numEval (optional) if not NULL, store the actual number of DF evaluations.
         \returns    total mass
     */
-    virtual double totalMass(const double reqRelError, const int maxNumEval,
+    virtual double totalMass(const double reqRelError=1e-3, const int maxNumEval=100000,
         double* error=0, int* numEval=0) const;
 
     /** Value of distribution function for the given set of actions
         \param[in] J - actions
     */
     virtual double value(const actions::Actions &J) const=0;
-
-    /** Maximum possible value of DF */
-    virtual double maxValue() const=0;
 };
 
-}  // namespace distributionfunction
+/** Sample the distribution function in actions.
+    In other words, draw N sampling points from the action space, so that the density of points 
+    in the neighborhood of any point is proportional to the value of DF at this point (point = triplet of actions).
+    \param[in]  DF  is the distribution function;
+    \param[in]  numSamples  is the required number of sampling points;
+    \param[out] samples is the array to be filled with the sampled actions.
+*/
+void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
+    std::vector<actions::Actions>& samples);
 
-
+}  // namespace df

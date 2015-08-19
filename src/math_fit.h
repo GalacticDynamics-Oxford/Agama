@@ -4,8 +4,8 @@
     \author Eugene Vasiliev
 */
 #pragma once
-#include "math_linalg.h"
-#include "math_core.h"
+#include "math_ndim.h"
+
 namespace math{
 
 /// \name ------ linear regression ------

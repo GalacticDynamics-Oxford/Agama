@@ -48,17 +48,7 @@ bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_
 static double functionWrapper(double x, void* param){
     return static_cast<IFunction*>(param)->operator()(x);
 }
-#if 0
-static double functionDerivWrapper(double x, void* param){
-    double der;
-    static_cast<IFunction*>(param)->evalDeriv(x, NULL, &der);
-    return der;
-}
 
-static void functionAndDerivWrapper(double x, void* param, double* f, double *df) {
-    static_cast<IFunction*>(param)->evalDeriv(x, f, df);
-}
-#endif
 bool isFinite(double x) {
     return gsl_finite(x);
 }
@@ -87,6 +77,85 @@ double unwrapAngle(double x, double xprev) {
     else if(diff<-0.5) 
         modf(diff-0.5, &nwraps);
     return x - 2*M_PI * nwraps;
+}
+
+double random() {
+    return rand()/RAND_MAX;  // should replace it with a better routine...
+}
+
+// ------- tools for analyzing the behaviour of a function around a particular point ------- //
+// this comes handy in root-finding and related applications, when one needs to ensure that 
+// the endpoints of an interval strictly bracked the root: 
+// if f(x) is exactly zero at one of the endpoints, and we want to locate the root inside the interval,
+// then we need to shift slightly the endpoint to ensure that f(x) is strictly positive (or negative).
+
+PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
+{
+    double delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
+    // we assume that the function can be computed at all points, but the derivatives not necessarily can
+    double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
+    f0 = fder = fder2=NAN;
+    if(fnc.numDerivs()>=2) {
+        fnc.evalDeriv(x0, &f0, &fder, &fder2);
+        if(isFinite(fder+fder2))
+            return;  // no further action necessary
+    }
+    if(!isFinite(f0))  // haven't called it yet
+        fnc.evalDeriv(x0, &f0, fnc.numDerivs()>=1 ? &fder : NULL);
+    fnc.evalDeriv(x0+delta, &fplusd, fnc.numDerivs()>=1 ? &fderplusd : NULL);
+    if(isFinite(fder)) {
+        if(isFinite(fderplusd)) {  // have 1st derivative at both points
+            fder2 = (6*(fplusd-f0)/delta - (4*fder+2*fderplusd))/delta;
+            return;
+        }
+    } else if(isFinite(fderplusd)) {  // have 1st derivative at one point only
+        fder = 2*(fplusd-f0)/delta - fderplusd;
+        fder2= 2*( fderplusd - (fplusd-f0)/delta )/delta;
+        return;
+    }
+    // otherwise we don't have any derivatives computed
+    fminusd= fnc(x0-delta);
+    fder = (fplusd-fminusd)/(2*delta);
+    fder2= (fplusd+fminusd-2*f0)/(delta*delta);
+}
+
+double PointNeighborhood::dxToPosneg(double sgn) const
+{
+    double s0 = sgn*f0 * 1.1;  // safety factor to make sure we overshoot in finding the value of opposite sign
+    double sder = sgn*fder, sder2 = sgn*fder2;
+    const double delta = fmin(fabs(fder/fder2)*0.5, GSL_SQRT_DBL_EPSILON);
+    if(s0>0)
+        return 0;  // already there
+    if(sder==0) {
+        if(sder2<=0)
+            return NAN;  // we are at a maximum already
+        else
+            return fmax(sqrt(-s0/sder2), delta);
+    }
+    // now we know that s0<=0 and sder!=0
+    if(sder2>=0)  // may only curve towards zero, so a tangent is a safe estimate
+        return -s0/sder + delta*sign(sder);
+    double discr = sder*sder - 2*s0*sder2;
+    if(discr<=0)
+        return NAN;  // never cross zero
+    return sign(sder) * (delta - 2*s0/(sqrt(discr)+abs(sder)) );
+}
+
+double PointNeighborhood::dxToNearestRoot() const
+{
+    if(f0==0) return 0;  // already there
+    double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation, if fder!=0
+    if(f0*fder2<0) {  // use quadratic equation to find two nearest roots
+        double discr = sqrt(fder*fder - 2*f0*fder2);
+        if(fder<0) {
+            dx_nearest_root = 2*f0/(discr-fder);
+            //dx_farthest_root = (discr-fder)/fder2;
+        } else {
+            dx_nearest_root = 2*f0/(-discr-fder);
+            //dx_farthest_root = (-discr-fder)/fder2;
+        }
+    }
+    return dx_nearest_root;
 }
 
 // ------ root finder routines ------//
@@ -229,7 +298,7 @@ static double findRootHybrid(const IFunction& fnc,
         if(fabs(b-c) <= abstoler) { // convergence criterion from bracketing algorithm
             converged = true;
             double offset = fb*(b-c)/(fc-fb);  // offset from b to the root via secant
-            if((offset>0 && offset<c-b) || (offset<0 && offset>c-b))      
+            if((offset>0 && offset<c-b) || (offset<0 && offset>c-b))
                 b += offset;        // final secant step
         } else if(have_derivs) {    // convergence from derivatives
             double offset = -fb / fderb;       // offset from b to the root via Newton's method
@@ -574,15 +643,16 @@ static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_
 #endif
 
 void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
-    const double relToler, const int maxNumEval, 
+    const double relToler, const unsigned int maxNumEval, 
     double result[], double outError[], int* numEval)
 {
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
     const double absToler = 0;  // maybe should be more flexible?
     double* error = outError;
+    std::vector<double> tempError(numValues);
     if(error==NULL)
-        error = new double[numValues];  // storage for errors in the case that user doesn't need them
+        error = &tempError.front();  // storage for errors in the case that user doesn't need them
 #ifdef HAVE_CUBA
     double* tempX = new double[numVars];       // storage for scaled variables
     CubaParams param(F, xlower, xupper, tempX);
@@ -613,80 +683,12 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     if(numEval!=NULL)
         *numEval = params.numEval;
 #endif
-    if(outError==NULL)
-        delete[] error;
-    return;
-}
-    
-// ------- derivatives and related fncs ------- //
-
-PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
-{
-    double delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
-    // we assume that the function can be computed at all points, but the derivatives not necessarily can
-    double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
-    f0 = fder = fder2=NAN;
-    if(fnc.numDerivs()>=2) {
-        fnc.evalDeriv(x0, &f0, &fder, &fder2);
-        if(isFinite(fder+fder2))
-            return;  // no further action necessary
-    }
-    if(!isFinite(f0))  // haven't called it yet
-        fnc.evalDeriv(x0, &f0, fnc.numDerivs()>=1 ? &fder : NULL);
-    fnc.evalDeriv(x0+delta, &fplusd, fnc.numDerivs()>=1 ? &fderplusd : NULL);
-    if(isFinite(fder)) {
-        if(isFinite(fderplusd)) {  // have 1st derivative at both points
-            fder2 = (6*(fplusd-f0)/delta - (4*fder+2*fderplusd))/delta;
-            return;
-        }
-    } else if(isFinite(fderplusd)) {  // have 1st derivative at one point only
-        fder = 2*(fplusd-f0)/delta - fderplusd;
-        fder2= 2*( fderplusd - (fplusd-f0)/delta )/delta;
-        return;
-    }
-    // otherwise we don't have any derivatives computed
-    fminusd= fnc(x0-delta);
-    fder = (fplusd-fminusd)/(2*delta);
-    fder2= (fplusd+fminusd-2*f0)/(delta*delta);
 }
 
-double PointNeighborhood::dxToPosneg(double sgn) const
+void sampleNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
+    const unsigned int numSamples, Matrix<double>& samples, int* numTrialPoints, double* integral)
 {
-    double s0 = sgn*f0 * 1.1;  // safety factor to make sure we overshoot in finding the value of opposite sign
-    double sder = sgn*fder, sder2 = sgn*fder2;
-    const double delta = fmin(fabs(fder/fder2)*0.5, GSL_SQRT_DBL_EPSILON);
-    if(s0>0)
-        return 0;  // already there
-    if(sder==0) {
-        if(sder2<=0)
-            return NAN;  // we are at a maximum already
-        else
-            return fmax(sqrt(-s0/sder2), delta);
-    }
-    // now we know that s0<=0 and sder!=0
-    if(sder2>=0)  // may only curve towards zero, so a tangent is a safe estimate
-        return -s0/sder + delta*sign(sder);
-    double discr = sder*sder - 2*s0*sder2;
-    if(discr<=0)
-        return NAN;  // never cross zero
-    return sign(sder) * (delta - 2*s0/(sqrt(discr)+abs(sder)) );
-}
-
-double PointNeighborhood::dxToNearestRoot() const
-{
-    if(f0==0) return 0;  // already there
-    double dx_nearest_root = -f0/fder;  // nearest root by linear extrapolation, if fder!=0
-    if(f0*fder2<0) {  // use quadratic equation to find two nearest roots
-        double discr = sqrt(fder*fder - 2*f0*fder2);
-        if(fder<0) {
-            dx_nearest_root = 2*f0/(discr-fder);
-            //dx_farthest_root = (discr-fder)/fder2;
-        } else {
-            dx_nearest_root = 2*f0/(-discr-fder);
-            //dx_farthest_root = (-discr-fder)/fder2;
-        }
-    }
-    return dx_nearest_root;
+    throw std::runtime_error("sampleNdim not implemented");
 }
 
 }  // namespace

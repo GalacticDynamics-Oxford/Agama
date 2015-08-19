@@ -25,15 +25,15 @@ double Plummer::enclosedMass(double r) const
 void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
-    double ln = log(1 + r/scaleRadius);
+    double ln_over_r = r!=0 ? log(1 + r/scaleRadius) / r : 1/scaleRadius;
     if(potential)
-        *potential = -mass/r*ln;
+        *potential = -mass * ln_over_r;
     if(deriv)
         *deriv = mass * (r==0 ? 0.5/pow_2(scaleRadius) :
-            (ln/r - 1/(r+scaleRadius))/r );
+            (ln_over_r - 1/(r+scaleRadius))/r );
     if(deriv2)
         *deriv2 = -mass * (r==0 ? 2./(3*scaleRadius*pow_2(scaleRadius)) :
-            (2*ln/r - (2*scaleRadius+3*r)/pow_2(scaleRadius+r) )/pow_2(r) );
+            (2*ln_over_r - (2*scaleRadius+3*r)/pow_2(scaleRadius+r) )/pow_2(r) );
 }
 
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,

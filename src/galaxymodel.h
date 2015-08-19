@@ -13,16 +13,16 @@ namespace galaxymodel{
 /** Class defining a galaxy model: combination of potential, action finder, and distribution function */
 class GalaxyModel{
 private:
-    const potential::BasePotential &pot;           ///< gravitational potential
+    const potential::BasePotential &poten;         ///< gravitational potential
     const actions::BaseActionFinder &actFinder;    ///< action finder for the given potential
     const df::BaseDistributionFunction &distrFunc; ///< distribution function expressed in terms of actions
 public:
     /** Create an instance of the galaxy model from the three ingredients */
     GalaxyModel(
-        const potential::BasePotential& inpot,
-        const actions::BaseActionFinder& inaf,
-        const df::BaseDistributionFunction& indf) :
-        pot(inpot), actFinder(inaf), distrFunc(indf) {}
+        const potential::BasePotential& pot,
+        const actions::BaseActionFinder& af,
+        const df::BaseDistributionFunction& df) :
+        poten(pot), actFinder(af), distrFunc(df) {}
 
     /** Computes density, first-order, and second-order moments of velocity 
         in polar cyclindrical coordinates; if some of them are not needed,
@@ -51,7 +51,7 @@ public:
         \param[out] actions (optional) will be filled with values of actions
         corresponding to each point; if not needed may pass NULL as this argument.
     */
-    void computeActionSamples(const int nsamp, particles::PointMassArrayCar &points,
+    void computeActionSamples(const unsigned int nsamp, particles::PointMassArrayCar &points,
         std::vector<actions::Actions>* actions=0) const;
 
     /** Generate N-body samples of the distribution function 
@@ -64,7 +64,7 @@ public:
         \param[out] actions (optional) will be filled with values of actions
         corresponding to each point; if not needed may pass NULL as this argument.
     */
-    void computePosVelSamples(const int nsamp, particles::PointMassArrayCar &points,
+    void computePosVelSamples(const unsigned int nsamp, particles::PointMassArrayCar &points,
         std::vector<actions::Actions>* actions=0) const;
 };
 

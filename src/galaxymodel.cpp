@@ -1,5 +1,6 @@
 #include "galaxymodel.h"
 #include "math_core.h"
+#include "actions_torus.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -89,10 +90,10 @@ void GalaxyModel::computeMoments(const coord::PosCyl& point,
     DFMomentsIntegrandNdim fnc(actFinder, distrFunc, point, mode);
 
     // compute the escape velocity
-    double Phi_inf = pot.value(coord::PosCar(INFINITY, 0, 0));
+    double Phi_inf = poten.value(coord::PosCar(INFINITY, 0, 0));
     if(!math::isFinite(Phi_inf))
         Phi_inf = 0;  // default assumption
-    double V_esc = sqrt(2. * (Phi_inf - pot.value(point)));
+    double V_esc = sqrt(2. * (Phi_inf - poten.value(point)));
     if(!math::isFinite(V_esc))
         throw std::invalid_argument("Error in computing moments: escape velocity is undetermined");
 
@@ -115,6 +116,7 @@ void GalaxyModel::computeMoments(const coord::PosCyl& point,
     if(velocityFirstMoment!=NULL) {
         *velocityFirstMoment = coord::VelCyl(result[1]/result[0], result[2]/result[0], result[3]/result[0]);
         if(velocityFirstMomentErr!=NULL) {
+            // relative errors in moments are summed in quadrature from errors in rho and rho*v
             velocityFirstMomentErr->vR = 
                 sqrt(pow_2(error[1]/result[1]) + densRelErr2) * fabs(velocityFirstMoment->vR);
             velocityFirstMomentErr->vz =
@@ -147,4 +149,40 @@ void GalaxyModel::computeMoments(const coord::PosCyl& point,
     }
 }
 
+void GalaxyModel::computeActionSamples(const unsigned int nSamp, particles::PointMassArrayCar &points,
+    std::vector<actions::Actions>* actsOutput) const
+{
+    // first sample points from the action space:
+    // we use nAct << nSamp  distinct values for actions, and construct tori for these actions;
+    // then each torus is sampled with nAng = nSamp/nAct  distinct values of angles,
+    // and the action/angles are converted to position/velocity points
+    unsigned int nAng = std::min<unsigned int>(nSamp/100+1, 16);   // number of sample angles per torus
+    unsigned int nAct = nSamp / nAng + 1;
+    std::vector<actions::Actions> actions;
+    df::sampleActions(distrFunc, nAct, actions);   // do the sampling in actions space
+    nAct = actions.size();                         // could be different from requested?
+    // sampling procedure does not provide the total mass, need to compute it via deterministic integration
+    double totalMass = distrFunc.totalMass();
+    double pointMass = totalMass / (nAct*nAng);
+    
+    // next sample angles from each torus
+    if(actsOutput!=NULL) {
+        actsOutput->clear();
+        actsOutput->reserve(nAct*nAng);
+    }
+    for(unsigned int t=0; t<nAct; t++) {
+        actions::ActionMapperTorus torus(poten, actions[t]);
+        for(unsigned int a=0; a<nAng; a++) {
+            actions::Angles ang;
+            ang.thetar   = 2*M_PI*math::random();
+            ang.thetar   = 2*M_PI*math::random();
+            ang.thetaphi = 2*M_PI*math::random();
+            points.add( coord::toPosVelCar(
+                torus.map(actions::ActionAngles(actions[t], ang)) ), pointMass );
+            if(actsOutput!=NULL)
+                actsOutput->push_back(actions[t]);
+        }
+    }
 }
+
+}  // namespace

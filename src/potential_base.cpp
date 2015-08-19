@@ -24,7 +24,11 @@ double BasePotential::densityCyl(const coord::PosCyl &pos) const
             derivR_over_R = deriv2.dR2;
         deriv2phi_over_R2 = 0;
     }
-    return (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2) / (4*M_PI);
+    double result = (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2);
+    if(fabs(result) < 1e-12 * (fabs(deriv2.dR2) + fabs(derivR_over_R) +
+        fabs(deriv2.dz2) + fabs(deriv2phi_over_R2)) )
+        result = 0;  // dominated by roundoff errors
+    return result / (4*M_PI);
 }
 
 double BasePotential::densitySph(const coord::PosSph &pos) const
@@ -44,7 +48,10 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
             derivr_over_r = deriv2.dr2;
         angular_part=0; ///!!! is this correct assumption?
     }
-    return (deriv2.dr2 + 2*derivr_over_r + angular_part) / (4*M_PI);
+    double result = deriv2.dr2 + 2*derivr_over_r + angular_part;
+    if(fabs(result) < 1e-12 * (fabs(deriv2.dr2) + fabs(2*derivr_over_r) + fabs(angular_part)) )
+        result = 0;  // dominated by roundoff errors
+    return result / (4*M_PI);
 }
 
 double BasePotentialSphericallySymmetric::enclosedMass(const double radius) const
@@ -62,24 +69,44 @@ public:
     // compute azimuthal integrand of density at a given point in (R,z) plane
     virtual void eval(const double vars[], double values[]) const 
     {   // input array is [scaled coordinate r, cos(theta)]
-        const double rscaled = vars[0], costheta = vars[1];
-        if(rscaled==1) {
+        const double scaledr = vars[0], costheta = vars[1];
+#if 0
+        if(scaledr==1 || scaledr==0) {
             values[0] = 0;  // we're at infinity
             return;
         }
-        const double r = rscaled/(1-rscaled);
-        const double R = r*sqrt(1-pow_2(costheta));
-        const double z = r*costheta;
-        const double mult = 2*M_PI * r*r/pow_2(1-rscaled);
+        const double r = scaledr / (1-scaledr);
+        const double jac = 2*M_PI * r*r / pow_2(1-scaledr);
+#else
+        if(scaledr>=0.96 || scaledr<=0.04) {  // cutoff at r<4e-11 or r>2.5e+10 to avoid overflows
+            values[0] = 0;  // we're at infinity
+            return;
+        }
+        const double r = exp( 1/(1-scaledr) - 1/scaledr );
+        double jac = 2*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
+#endif
+        const double R = r * sqrt(1-pow_2(costheta));
+        const double z = r * costheta;
         double val = computeRho_m(dens, R, z, 0);
         if((dens.symmetry() & ST_PLANESYM) == ST_PLANESYM)
             val *= 2;
         else
             val += computeRho_m(dens, R, -z, 0);
-        values[0] = val * mult;
+        values[0] = val * jac;
     }
     virtual unsigned int numVars() const { return 2; }
     virtual unsigned int numValues() const { return 1; }
+    /// return the scaled radius variable to be used as the integration limit
+    double scaledr_from_r(const double r) const {
+#if 0
+        return 1/(1/r+1);  // valid even for r=0 or r=inf
+#else
+        const double y = log(r);
+        return  fabs(y)<1 ? // two cases depending on whether |y| is small or large
+            1/(1 + sqrt(1+pow_2(y*0.5)) - y*0.5) :      // y is close to zero
+            0.5 + sqrt(0.25+pow_2(1/y))*math::sign(y) - 1/y;  // y is large
+#endif
+    }
 private:
     const BaseDensity& dens;
 };
@@ -89,12 +116,13 @@ double BaseDensity::enclosedMass(const double r) const
     if(r<=0) return 0;   // this assumes no central point mass! overriden in Plummer density model
     // default implementation is to integrate over density inside given radius;
     // may be replaced by cheaper and more approximate evaluation for derived classes
+    DensityNdimIntegrand fnc(*this);
     double xlower[2] = {0, 0};
-    double xupper[2] = {r/(1+r), 1};
+    double xupper[2] = {fnc.scaledr_from_r(r), 1};
     double result, error;
     int numEval;
     const int maxNumEval = 10000;
-    math::integrateNdim(DensityNdimIntegrand(*this), xlower, xupper, EPSREL_DENSITY_INT, maxNumEval,
+    math::integrateNdim(fnc, xlower, xupper, EPSREL_DENSITY_INT, maxNumEval,
         &result, &error, &numEval);
     return result;
 }
@@ -293,7 +321,8 @@ void epicycleFreqs(const BasePotential& potential, const double R,
     coord::GradCyl grad;
     coord::HessCyl hess;
     potential.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
-    //!!! no attempt to check if the expressions under sqrt are non-negative, or that R>0
+    //!!! no attempt to check if the expressions under sqrt are non-negative - 
+    // they could well be for a physically plausible potential of a flat disk with an inner hole
     kappa = sqrt(hess.dR2 + 3*grad.dR/R);
     nu    = sqrt(hess.dz2);
     Omega = sqrt(grad.dR/R);

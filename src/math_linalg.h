@@ -4,59 +4,10 @@
     \author Eugene Vasiliev
 */
 #pragma once
-#include <vector>
+#include "math_ndim.h"
 
 namespace math{
-/// \name Matrix class
-///@{
-/** a simple class for two-dimensional matrices */
-template<typename NumT>
-class Matrix {
-public:
-    /// create an empty matrix
-    Matrix() : nRows(0), nCols(0) {};
 
-    /// create a matrix of given size
-    Matrix(unsigned int _nRows, unsigned int _nCols) :
-        nRows(_nRows), nCols(_nCols), data(nRows*nCols) {};
-
-    /// create a matrix of given size and fill it with a value
-    Matrix(unsigned int _nRows, unsigned int _nCols, double val) :
-        nRows(_nRows), nCols(_nCols), data(nRows*nCols, val) {};
-
-    /// resize an existing matrix
-    void resize(unsigned int newRows, unsigned int newCols) {
-        nRows = newRows;
-        nCols = newCols;
-        data.resize(nRows*nCols);
-    }
-
-    /// access the matrix element for reading (bound checks are performed by the underlying vector)
-    const NumT& operator() (unsigned int row, unsigned int column) const {
-        return data[row*nCols+column]; }
-
-    /// access the matrix element for writing
-    NumT& operator() (unsigned int row, unsigned int column) {
-        return data[row*nCols+column]; }
-
-    /// number of matrix rows
-    unsigned int numRows() const { return nRows; }
-
-    /// number of matrix columns
-    unsigned int numCols() const { return nCols; }
-
-    /// access raw data for reading (2d array in row-major order)
-    const NumT* getData() const { return &data.front(); }
-
-    /// access raw data for writing (2d array in row-major order)
-    NumT* getData() { return &data.front(); }
-private:
-    unsigned int nRows;      ///< number of rows (first index)
-    unsigned int nCols;      ///< number of columns (second index)
-    std::vector<NumT> data;  ///< flattened data storage
-};
-
-///@}
 /// \name ------ BLAS wrappers - same calling conventions as GSL BLAS but with STL vector and our matrix types ------
 ///@{
 

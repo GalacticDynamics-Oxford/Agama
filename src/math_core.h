@@ -5,6 +5,7 @@
 */
 #pragma once
 #include "math_base.h"
+#include "math_ndim.h"
 
 namespace math{
 
@@ -29,6 +30,9 @@ inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 
 /** return an integer power of a number */
 double powInt(double x, int n);
+
+/** return a pseudo-random number in the range [0,1) */
+double random();
 
 /** wraps the input argument into the range [0,2pi) */
 double wrapAngle(double x);
@@ -83,6 +87,10 @@ double findMin(const IFunction& F, double x1, double x2, double xinit, double re
     f(x_neg) is strictly negative,  and f(x) is positive at some interval between x_1 and x_neg,
     then one needs to find x_pos close to x_1 such that the root is strictly bracketed between 
     x_pos and x_neg (i.e. f(x_pos)>0). This is exactly the task for this little helper class.
+    Another application is to post-process the result obtained by a root-finding routine,
+    which ensures only that f(x_root) is approximately zero, but does not guarantee is sign,
+    or even its magnitude (it only ensures that the root is located to a certain accuracy).
+    If we need a point close to x_root with a known sign of f(x), this class can do the job.
 
     Note that the function is only computed at the given point (or, if its implementation 
     does not provide derivatives itself, they are computed numerically using one or two 
@@ -185,26 +193,6 @@ private:
     double x_low, x_upp;
 };
 
-/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values. */
-class IFunctionNdim {
-public:
-    IFunctionNdim() {};
-    virtual ~IFunctionNdim() {};
-
-    /** Evaluate the function.
-        \param[in]  vars   is the N-dimensional point at which the function should be computed.
-        \param[out] values us the M-dimensional array (possibly M=1) that will contain
-                    the vector of function values. 
-    */
-    virtual void eval(const double vars[], double values[]) const = 0;
-    
-    /// return the dimensionality of the input point (N)
-    virtual unsigned int numVars() const = 0;
-    
-    /// return the number of elements in the output array of values (M)
-    virtual unsigned int numValues() const = 0;
-};
-
 /** N-dimensional integration (aka cubature).
     It computes the integral of a vector-valued function (each component is treated independently).
     The dimensions of integration volume and the length of result array are provided by 
@@ -221,8 +209,32 @@ public:
                 (if set to NULL, this information is not stored).
 */
 void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
-    const double relToler, const int maxNumEval, 
+    const double relToler, const unsigned int maxNumEval, 
     double result[], double error[]=0, int* numEval=0);
+
+/** Sample points from an N-dimensional probability distribution function F.
+    F should be non-negative in the given region, and the integral of F over this region should exist;
+    still better is if F is bounded from above everywhere in the region. 
+    The output consists of M sampling points from the given region, such that the density 
+    of points in the neighborhood of any location X is proportional to the value of F(X).
+    The samples are drawn from the probability distribution described by F using the standard 
+    rejection sampling; the key algorithmic challenge is to make it efficient, i.e., minimize 
+    the number of discarded trial points. This is achieved by adaptive importance sampling method.
+    \param[in]  F  is the probability distribution, the dimensionality N of the problem 
+                is given by F->numVars();
+    \param[in]  xlower  is the lower boundary of sampling volume (vector of length N);
+    \param[in]  xupper  is the upper boundary of sampling volume;
+    \param[in]  numSamples  is the required number of sampling points (M);
+    \param[out] samples  will be filled by samples, i.e. contain the matrix of M rows and N columns;
+    \param[out] numTrialPoints (optional) if not NULL, will store the actual number of function
+                evaluations (so that the efficiency of sampling is estimated as the ratio 
+                numSamples/numTrialPoints);
+    \param[out] integral (optional) if not NULL, will store the Monte Carlo estimate of the integral
+                of F over the given region (this could be compared with the exact value, if known,
+                to estimate the bias/error in sampling scheme). 
+*/
+void sampleNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
+    const unsigned int numSamples, Matrix<double>& samples, int* numTrialPoints=0, double* integral=0);
 
 ///@}
 

@@ -242,8 +242,8 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
   // Could improve - starting radius should be guessed from Jz+Jphi
 
   double Rstart0 = Phi->RfromLc(Lz), Rstart = Rstart0, dr=0.1*Rstart, Rstop,
-    E = Phi->eff(Rstart,0.), dE, tiny=1.e-9, small=1.e-5, odiff,odiffJ,
-    delt=0.002*Rstart*Rstart/Lz, dt,ot,pot, tJl, *psi, *psisq, *tbth2, 
+    E = Phi->eff(Rstart,0.), dE, tiny=1.e-9, odiff,odiffJ,
+    delt=0.002*Rstart*Rstart/Lz, pot, tJl, *psi, *psisq, *tbth2, 
     Escale = Phi->eff(2.*Rstart,0.)-E; // positive number
   PSPD  clo;
   Cheby rr2;

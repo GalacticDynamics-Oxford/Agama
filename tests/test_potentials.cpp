@@ -12,8 +12,25 @@
 
 const double eps=1e-6;  // accuracy of comparison
 
+bool testPotential(const potential::BasePotential* potential)
+{
+    if(potential==NULL) return true;
+    bool ok=true;
+    std::cout << potential->name();
+    double val0 = potential->value(coord::PosCar(0,0,0));
+    std::cout << " at origin is "<<val0;
+    ok &= math::isFinite(val0);
+    double mtot = potential->totalMass();
+    double minf = potential->enclosedMass(INFINITY);
+    std::cout << "; total mass is "<<mtot<<
+        ", or enclosed mass M(r<inf) is "<<minf<<
+        ", M(r<=0) is "<<potential->enclosedMass(0)<<
+        ", M(r<1e9) is "<<potential->enclosedMass(1e9)<<"\n";
+    return ok;
+}
+
 template<typename coordSysT>
-bool test_potential(const potential::BasePotential* potential,
+bool testPotentialAtPoint(const potential::BasePotential* potential,
     const coord::PosVelT<coordSysT>& point)
 {
     if(potential==NULL) return true;
@@ -109,10 +126,11 @@ int main() {
     bool allok=true;
     std::cout << std::setprecision(10);
     for(int ip=0; ip<numpotentials; ip++) {
+        allok &= testPotential(pots[ip]);
         for(int ic=0; ic<numtestpoints; ic++) {
-            allok &= test_potential(pots[ip], coord::PosVelCar(posvel_car[ic]));
-            allok &= test_potential(pots[ip], coord::PosVelCyl(posvel_cyl[ic]));
-            allok &= test_potential(pots[ip], coord::PosVelSph(posvel_sph[ic]));
+            allok &= testPotentialAtPoint(pots[ip], coord::PosVelCar(posvel_car[ic]));
+            allok &= testPotentialAtPoint(pots[ip], coord::PosVelCyl(posvel_cyl[ic]));
+            allok &= testPotentialAtPoint(pots[ip], coord::PosVelSph(posvel_sph[ic]));
         }
     }
     if(allok)
