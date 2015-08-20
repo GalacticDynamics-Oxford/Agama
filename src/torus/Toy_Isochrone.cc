@@ -15,6 +15,9 @@
 
 namespace Torus{
 
+inline double pow_2(double x) {return x*x;}
+inline double pow_3(double x) {return x*x*x;}
+    
 ////////////////////////////////////////////////////////////////////////////////
 // class ToyIsochrone
 
@@ -38,6 +41,7 @@ void ToyIsochrone::psisolve() const
         cpsi = cos(psi);
         return;
     }
+#if 0
     register double ps=psi;
     if(ps<Pi) ps = rtsafe(this,&ToyIsochrone::psifunc,ps,Pi,tol);
 	else  ps = rtsafe(this,&ToyIsochrone::psifunc,Pi,ps,tol);
@@ -46,6 +50,25 @@ void ToyIsochrone::psisolve() const
         spsi = sin(psi);
         cpsi = cos(psi);
     }
+#else
+    // modification of the original code from Eugene Vasiliev
+    bool signpsi=tr>M_PI;
+    psi=M_PI_2+(M_PI/8)/eps*(sqrt(M_PI*M_PI-8*M_PI*eps+16*eps*(eps+(signpsi?2*M_PI-tr:tr)))-M_PI);
+    if(signpsi) psi=2*M_PI-psi;
+    double deltapsi=0;
+    int niter=0;
+    do {  // Newton's method for solving the Kepler equation (f=0)
+        spsi=sin(psi);
+        cpsi=cos(psi);
+        double f=psi-eps*spsi-tr;
+        double df=1.-eps*cpsi;
+        deltapsi=-f/df;
+        deltapsi=-f/(df+0.5*deltapsi*eps*spsi);  // refinement using second derivative (thanks to A.Gurkan)
+        psi+=deltapsi;
+        niter++;
+    } while(fabs(deltapsi)>tol && niter<42);
+#endif
+    
 }
 
 double ToyIsochrone::catan(const double& aa) const
@@ -179,7 +202,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
     }
 // Set up auxilliary variables independent of the angles tr and tt.
     at  = this->jp+jt;
-    sGam= (this->jp==0.) ? 1. : sqrt(1.-pow(this->jp/at,2));
+    sGam= (this->jp==0.) ? 1. : sqrt(1.-pow_2(this->jp/at));
     sq  = hypot(2.,at);
     fac = at/sq;
     HH  = 2./(2.*jr+at+sq);
@@ -188,7 +211,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
     a   = 1./H2-1.;
     if(at==0.) e = 1.;
     else {
-        e2    = 1. - pow(at/a,2)/H2;
+        e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
         if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in ForwardWithDerivs",2);
     }
@@ -243,7 +266,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
     }
 // Set up auxilliary variables independent of the angles tr and tt.
     at  = this->jp+jt;
-    sGam= (this->jp==0.) ? 1. : sqrt(1.-pow(this->jp/at,2));
+    sGam= (this->jp==0.) ? 1. : sqrt(1.-pow_2(this->jp/at));
     sq  = hypot(2.,at);
     fac = at/sq;
     HH  = 2./(2.*jr+at+sq);
@@ -252,7 +275,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
     a   = 1./H2-1.;
     if(at==0.) e = 1.;
     else {
-        e2    = 1. - pow(at/a,2)/H2;
+        e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
         if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in ForwardWithDerivs",2);
     }
@@ -316,7 +339,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2]) const
     HxH = 0.5*Hx/H;
     ax  = HxH/H;
     axa = ax/a;
-    ex  = pow(at/a,2) / (e*H2) * (HxH+axa);
+    ex  = pow_2(at/a) / (e*H2) * (HxH+axa);
     exe = ex/e;
     axe = ax*e;
     exa = ex*a;
@@ -328,18 +351,18 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2]) const
     dQPdJ[0][0] = (u+1.)/r*ux;
     dQPdJ[1][0] = sGam*cchi*chix/csth;
     dQPdJ[2][0] = pr*(HxH -dQPdJ[0][0]/r +axa +exe) + HH*ae*cpsi/r*psix;
-    dQPdJ[3][0] = at*sGam*(-schi/csth*chix +cchi*sith/pow(csth,2)*dQPdJ[1][0]);
+    dQPdJ[3][0] = at*sGam*(-schi/csth*chix +cchi*sith/pow_2(csth)*dQPdJ[1][0]);
     dQPdJ[0][0]/= sMob;
     dQPdJ[1][0]/= sMb;
     dQPdJ[2][0]/= b;
 // w.r.t. Jt:
     Hx  = wt;
     wrx = wtx;
-    wtx = wt0r*wrx + 2.*wr/pow(sq,3);
+    wtx = wt0r*wrx + 2.*wr/pow_3(sq);
     HxH = 0.5*Hx/H;
     ax  = HxH/H;
     axa = ax/a;
-    ex  = pow(at/a,2) / (e*H2) * (HxH+axa-1./at);
+    ex  = pow_2(at/a) / (e*H2) * (HxH+axa-1./at);
     exe = ex/e;
     axe = ax*e;
     exa = ex*a;
@@ -357,7 +380,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2]) const
         xGam= cGam/(sGam*at);
         dQPdJ[1][1] = (sGam*cchi*chix+schi*cGam*xGam)/csth;
         dQPdJ[3][1] = pt/at + at *( cchi*cGam/csth*xGam + sGam 
-		      * (-schi/csth*chix +cchi*sith/pow(csth,2)*dQPdJ[1][1]));
+		      * (-schi/csth*chix +cchi*sith/pow_2(csth)*dQPdJ[1][1]));
     }
     dQPdJ[0][1] = (u+1.)/r*ux;
     dQPdJ[2][1] = pr*(HxH -dQPdJ[0][1]/r +axa +exe) + HH*ae*cpsi/r*psix;
@@ -390,7 +413,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
     HxH = 0.5*Hx/H;
     ax  = HxH/H;
     axa = ax/a;
-    ex  = pow(at/a,2) / (e*H2) * (HxH+axa);
+    ex  = pow_2(at/a) / (e*H2) * (HxH+axa);
     exe = ex/e;
     axe = ax*e;
     exa = ex*a;
@@ -402,18 +425,18 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
     dQPdJ[0][0] = (u+1.)/r*ux;
     dQPdJ[1][0] = sGam*cchi*chix/csth;
     dQPdJ[2][0] = pr*(HxH -dQPdJ[0][0]/r +axa +exe) + HH*ae*cpsi/r*psix;
-    dQPdJ[3][0] = at*sGam*(-schi/csth*chix +cchi*sith/pow(csth,2)*dQPdJ[1][0]);
+    dQPdJ[3][0] = at*sGam*(-schi/csth*chix +cchi*sith/pow_2(csth)*dQPdJ[1][0]);
     dQPdJ[0][0]/= sMob;
     dQPdJ[1][0]/= sMb;
     dQPdJ[2][0]/= b;
 // w.r.t. Jt:
     Hx  = wt;
     wrx = wtx;
-    wtx = wt0r*wrx + 2.*wr/pow(sq,3);
+    wtx = wt0r*wrx + 2.*wr/pow_3(sq);
     HxH = 0.5*Hx/H;
     ax  = HxH/H;
     axa = ax/a;
-    ex  = pow(at/a,2) / (e*H2) * (HxH+axa-1./at);
+    ex  = pow_2(at/a) / (e*H2) * (HxH+axa-1./at);
     exe = ex/e;
     axe = ax*e;
     exa = ex*a;
@@ -431,7 +454,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
         xGam= cGam/(sGam*at);
         dQPdJ[1][1] = (sGam*cchi*chix+schi*cGam*xGam)/csth;
         dQPdJ[3][1] = pt/at + at *( cchi*cGam/csth*xGam + sGam 
-		      * (-schi/csth*chix +cchi*sith/pow(csth,2)*dQPdJ[1][1]));
+		      * (-schi/csth*chix +cchi*sith/pow_2(csth)*dQPdJ[1][1]));
     }
     dQPdJ[0][1] = (u+1.)/r*ux;
     dQPdJ[2][1] = pr*(HxH -dQPdJ[0][1]/r +axa +exe) + HH*ae*cpsi/r*psix;
@@ -446,7 +469,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
         xGam= (cGam-1.)/(sGam*at);
         dQPdA[1][2] = (sGam*cchi*chix+schi*cGam*xGam)/csth;
         dQPdA[3][2] = pt/at + at *( cchi*cGam/csth*xGam + sGam *
-		      (-schi/csth*chix +cchi*sith/pow(csth,2)*dQPdA[1][2]));
+		      (-schi/csth*chix +cchi*sith/pow_2(csth)*dQPdA[1][2]));
     }
     dQPdA[0][2] = dQPdJ[0][1];
     dQPdA[2][2] = dQPdJ[2][1];
@@ -501,7 +524,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
     }
 // Set up auxilliary variables independent of the angles tr and tt.
     at  = jp+jt;
-    sGam= (jp==0.) ? 1. : sqrt(1.-pow(jp/at,2));
+    sGam= (jp==0.) ? 1. : sqrt(1.-pow_2(jp/at));
     sq  = hypot(2.,at);
     fac = at/sq;
     HH  = 2./(2.*jr+at+sq);
@@ -510,7 +533,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
     a   = 1./H2-1.;
     if(at==0.) e = 1.;
     else {
-        e2    = 1. - pow(at/a,2)/H2;
+        e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
         if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in Forward",2);
     }
@@ -562,10 +585,10 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
     at  = (jp==0.)?  fabs(pt) : hypot(pt,jp/csth);
     sq  = hypot(2.,at);
     wt0r= 0.5*(1.+at/sq);
-    sGam= (jp==0.)? 1. : sqrt(1.-pow(jp/at,2));
+    sGam= (jp==0.)? 1. : sqrt(1.-pow_2(jp/at));
     u   = hypot(r,1.)-1.;
-    H2  = (pt==0.)? -pr*pr : -pr*pr-pow(pt/r,2);
-    if(jp!=0.) H2 -= pow(jp/(r*csth),2);
+    H2  = (pt==0.)? -pr*pr : -pr*pr-pow_2(pt/r);
+    if(jp!=0.) H2 -= pow_2(jp/(r*csth));
     H2 += 2./(u+2.);
     if(H2<=0.) {
 	TorusError("ToyIsochrone: H>=0 in Backward",2);
@@ -576,7 +599,7 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
     a   = 1./H2-1.;
     if(at==0.) e = 1.;
     else {
-        e2 = 1. - pow(at/a,2)/H2;
+        e2 = 1. - pow_2(at/a)/H2;
         e  = (e2>0) ? sqrt(e2) : 0;
     }
     ae  = a*e;

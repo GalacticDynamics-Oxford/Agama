@@ -130,7 +130,25 @@ int dSbyInteg(          // return:	error flag (see below)
 //		       	-4		neg. Omega => reduce Energy tolerance
 //		       	-5		M^tM not pos.def. => something wrong
  
-
+/**  \brief given both output of SbyLevMar and an estimate of Omega with 
+ given uncertainty, computes dS/dJ and frequencies subject to   
+ the constraint of the given Omega and its uncertainty.
+ same interface as dSbyInteg, but use a different method
+ */
+int dSbySampling(       // return:	error flag (see below)
+    const Actions&,     // input:	Actions of Torus to be fit
+    Potential*,         // input:	pointer to Potential
+    const int,          // input:	# of grid cells in Pi
+    const GenPar&,      // input:	parameters of generating function
+    const PoiTra&,      // input:	canonical map with parameters
+    const ToyMap&,      // input:	toy-potential map with parameters
+    const double,       // input:	estimate of delta Omega
+    Frequencies&,	// in/output:	estimate of / fitted (Omega_r, Omega_l)
+    Errors&,	        // output:	0:empty, 1,2,3: chi_rms for fit dSn/dJi
+    AngPar&,            // output:	dSn/dJr & dSn/dJl & dSn/dJphi
+    const int   =200,   // input:	max. tolerated steps on average per cell
+    const int   =0);    // input:	error output ?
+    
 //------------------------------------------------------------------------------
 
 /** \brief dSbyInteg for the special case of Jz=0 (where the problem
@@ -187,7 +205,8 @@ int AllFit(		// return:	error flag (see below)
     const int     =200, // input:	max. tolerated steps on average per cell
     const double  =0.,  // input:	estimate of expected <H>
     const int     =24,  // input:	min No of theta (per dim) for 1. fit
-    const int     =0);	// input:	error output?
+    const int     =0,   // input:	error output?
+    const bool useNewAngMap=false);  // input:   whether to use new method for angle mapping
 
 //  meaning of return:	 0		everything seemed to go well
 //			-1		something wrong with input, usually
@@ -228,7 +247,8 @@ int LowJzFit(		// return:	error flag (see below)
     const int     =200, // input:	max. tolerated steps on average per cell
     const double  =0.,  // input:	estimate of expected <H>
     const int     =24,  // input:	min No of theta (per dim) for 1. fit
-    const int     =0);	// input:	error output?
+    const int     =0,   // input:	error output?
+    const bool useNewAngMap=false);  // input:   whether to use new method for angle mapping
 
 //  meaning of return:	 0		everything seemed to go well
 //			-1		something wrong with input, usually
@@ -265,7 +285,8 @@ int PTFit(		// return:	error flag (see below)
     const int     =200, // input:	max. tolerated steps on average per cell
     const double  =0.,  // input:	estimate of expected <H>
     const int     =24,  // input:	min No of theta (per dim) for 1. fit
-    const int     =0);	// input:	error output?
+    const int     =0,   // input:	error output?
+    const bool useNewAngMap=false);  // input:   whether to use new method for angle mapping
 
 //  meaning of return:	 0		everything seemed to go well
 //			-1		something wrong with input, usually

@@ -1061,9 +1061,9 @@ int dSbyInteg(               // return:     error flag (see below)
       for(i1=0; i1<Nr  && !fail; i1++) if(!g[i1][i2]) {
 	  // Make sure there's points everywhere on the grid (either start 
 	  // point or gets orbit integrated to). 0 < theta < Pi.
-        Jt3[3] = Pi*(i1+.6)/double(Nr);
-        Jt3[4] = Pi*(i2+.6)/double(Nr);
-	Jt3[5] = Pi*((Nr-1-i2)+.6)/double(Nr); // no, it doesn't really matter
+        Jt3[3] = Pi*(i1+.0)/double(Nr);
+        Jt3[4] = Pi*(i2+.0)/double(Nr);
+	Jt3[5] = 0*Pi*((Nr-1-i2)+.6)/double(Nr); // no, it doesn't really matter
         F=AddStrip(Jt3,Phi,Sn,GF,PT,TM,dtm,M,T1,T2,T3,Kl,g,I,K,Tdim,Nr,Mdim,Nm,
 		   integ,INTOL,err);
         if(integ > INTOL) {
@@ -1350,7 +1350,8 @@ int AllFit(	            // return:	error flag (see below)
     const int     ipc,	    // input:   max tol steps on average per cell
     const double  eH,       // input:	estimate of expected mean H
     const int     Nth,	    // input:	min. No of theta per dimension
-    const int     err)	    // input:	error output?
+    const int     err,	    // input:	error output?
+    const bool useNewAngMap)// input:   whether to use new method for angle mapping
 {
 
   const    int    Ni0 = 10;            // max. No of iteration in 0. fit
@@ -1445,7 +1446,10 @@ int AllFit(	            // return:	error flag (see below)
     if(err) cerr<<" Fit of dS/dJi.\n";
     while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
     if(!J(1)) nrs = OD*(SN.NumberofTerms());
-    F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
+      if(useNewAngMap)
+          F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
+      else
+          F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
     if(F) {
       if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
       fail = true;
@@ -1457,7 +1461,10 @@ int AllFit(	            // return:	error flag (see below)
       if(J(1) == 0.) SN.Jz0();
       while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
       if(!J(1)) nrs = OD*(SN.NumberofTerms());
-      F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+        if(useNewAngMap)
+            F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+        else
+            F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
       if(F) {
 	if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	fail=true;
@@ -1563,7 +1570,10 @@ int AllFit(	            // return:	error flag (see below)
 	nrs = Nrs;
 	while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	if(!J(1)) nrs = OD*(SN.NumberofTerms());
-	F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+          if(useNewAngMap)
+              F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+          else
+              F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	if(F) {
 	  if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	}
@@ -1574,7 +1584,10 @@ int AllFit(	            // return:	error flag (see below)
 	  if(J(1) == 0.) SN.Jz0();
 	  while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	  if(!J(1)) nrs = OD*(SN.NumberofTerms());
-	  F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+      if(useNewAngMap)
+          F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+      else
+          F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	  if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	  if(F) {
 	    return -4;
@@ -1616,25 +1629,26 @@ int LowJzFit(	            // return:	error flag (see below)
     const int     ipc,	    // input:     max tol steps on average per cell
     double const  eH,       // input:	estimate of expected mean H
     const int     Nth,	    // input:	min. No of theta per dimension
-    const int     err)	    // input:	error output?
+    const int     err,	    // input:	error output?
+    const bool useNewAngMap)// input:   whether to use new method for angle mapping
 {
   if(J(1) == 0.) {
     if(Ni>800)
       return AllFit(J,Phi,tol,Max,Ni,OD,Nrs,PT,TM,SN,AP,
-		    Om,Hav,d,type,false,Ni-3,ipc,eH,Nth,err); 
+		    Om,Hav,d,type,false,Ni-3,ipc,eH,Nth,err,useNewAngMap); 
     else 
       return AllFit(J,Phi,tol,Max,800,OD,Nrs,PT,TM,SN,AP,
-		    Om,Hav,d,type,false,100,ipc,eH,Nth,err); // Let it run on
+		    Om,Hav,d,type,false,100,ipc,eH,Nth,err,useNewAngMap); // Let it run on
   }
   int F;
   double tolJz0 = tol*J(1)/J(0); // Alter tolerance for planar fit
   Actions Jz0=J; Jz0[1] = 0.;
   F = AllFit(Jz0,Phi,tolJz0,Max,Ni,OD,Nrs,PT,TM,SN,AP,
-  	     Om,Hav,d,type,false,25,ipc,eH,Nth,err);// Orbit in plane, precise
+  	     Om,Hav,d,type,false,25,ipc,eH,Nth,err,useNewAngMap);// Orbit in plane, precise
   int nadd = 4 + SN.NumberofTerms()/10;
   SN.addn1eq0(nadd);  // add terms with n1=0
   return AllFit(J,Phi,tol,Max,Ni,OD,Nrs,PT,TM,SN,AP,
-		Om,Hav,d,type,false,Nta,ipc,eH,Nth,err); 
+		Om,Hav,d,type,false,Nta,ipc,eH,Nth,err,useNewAngMap); 
 
 }
 
@@ -1660,7 +1674,8 @@ int PTFit(	            // return:	error flag (see below)
     const int     ipc,	    // input:   max tol steps on average per cell
     const double  eH,       // input:	estimate of expected mean H
     const int     Nth,	    // input:	min. No of theta per dimension
-    const int     err)	    // input:	error output?
+    const int     err,	    // input:	error output?
+    const bool useNewAngMap)// input:   whether to use new method for angle mapping
 {
 
   const    int    Ni0 = 10;            // max. No of iteration in 0. fit
@@ -1786,7 +1801,10 @@ int PTFit(	            // return:	error flag (see below)
     if(err) cerr<<" Fit of dS/dJi.\n";
     while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
     if(!J(1)) nrs = OD*(SN.NumberofTerms());
-    F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
+      if(useNewAngMap)
+          F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
+      else
+          F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);      
     if(F) {
       if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
       fail = true;
@@ -1798,6 +1816,9 @@ int PTFit(	            // return:	error flag (see below)
       if(J(1) == 0.) SN.Jz0();
       while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
       if(!J(1)) nrs = OD*(SN.NumberofTerms());
+        if(useNewAngMap)
+            F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+        else
       F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
       if(F) {
 	if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
@@ -1903,6 +1924,9 @@ int PTFit(	            // return:	error flag (see below)
 	nrs = Nrs;
 	while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	if(!J(1)) nrs = OD*(SN.NumberofTerms());
+          if(useNewAngMap)
+              F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+          else
 	F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	if(F) {
 	  if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
@@ -1914,6 +1938,9 @@ int PTFit(	            // return:	error flag (see below)
 	  if(J(1) == 0.) SN.Jz0();
 	  while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	  if(!J(1)) nrs = OD*(SN.NumberofTerms());
+        if(useNewAngMap)
+            F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+        else
 	  F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	  if(F) {
 	    if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';

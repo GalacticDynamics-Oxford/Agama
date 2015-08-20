@@ -21,6 +21,7 @@ SOURCES   = \
             math_fit.cpp \
             math_linalg.cpp \
             math_ode.cpp \
+            math_sample.cpp \
             math_specfunc.cpp \
             math_spline.cpp \
             df_base.cpp \
@@ -49,6 +50,7 @@ SOURCES   = \
 # ancient Torus code
 TORUSSRC  = CHB.cc \
             Fit.cc \
+            Fit2.cc \
             GeneratingFunction.cc \
             Orb.cc \
             PJMCoords.cc \
@@ -70,6 +72,7 @@ TESTSRCS  = test_math_core.cpp \
             test_actionfinder.cpp \
             test_actions_nbody.cpp \
             test_torus.cpp \
+            test_torus_new.cpp \
             test_distributionfunction.cpp \
             test_df_fit.cpp \
 

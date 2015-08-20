@@ -50,7 +50,7 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
         throw std::invalid_argument("ActionMapperTorus only works for axisymmetric potentials");
     Torus::Torus* torus=NULL;
     try{
-        torus = new Torus::Torus();
+        torus = new Torus::Torus(true);  // using a new angular mapping method
         // the actual potential is used only during torus fitting, but not required 
         // later in angle mapping - so we create a temporary object
         TorusPotentialWrapper potwrap(poten);

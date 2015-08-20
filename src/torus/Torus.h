@@ -63,6 +63,7 @@ member function of GenPar).
  */
 class Torus : public PhaseSpaceMap {
 private:
+  bool useNewAngMap;
   Actions	J;                            // Torus actions
   double	E, Fs, Rmin, Rmax, zmax;      // Energy, df_value
                                               // approx limits in R, z
@@ -144,7 +145,7 @@ private:
 
 
 public:
-    Torus();
+    Torus(bool useNewAngMap=false);
     Torus(const Torus&);
     Torus&	 operator= (const Torus&);
   // Constructors
@@ -429,7 +430,8 @@ in the given */
 
 // **************************** inline functions **************************** //
 
-inline Torus::Torus() : J(0.), E(0.), Fs(0.), Om(0.), dc(0.), PT(0), TM(0) {}
+inline Torus::Torus(bool newangmap) : J(0.), E(0.), Fs(0.), Om(0.), dc(0.), PT(0), TM(0), 
+    useNewAngMap(newangmap) {}
 
 inline Torus::Torus(const Torus& T)
     : PhaseSpaceMap(), J(T.J), E(T.E), Fs(T.Fs), Om(T.Om), dc(T.dc)
@@ -943,14 +945,14 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
   GenPar SN=GF.parameters();
   AngPar AP=AM.parameters();
   F = AllFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP,
-	       Om,E,dc,0,false,Nta,ipc,E,Nth,err); 
+	       Om,E,dc,0,false,Nta,ipc,E,Nth,err,useNewAngMap); 
   if(F && J(1)<0.005*J(0)) {
     Frequencies tmpOm = Om; double tmpE = E; Errors tmpdc = dc;
     vec4 tmpIP = TM->parameters();
     GenPar tmpSN = SN; AngPar tmpAP = AP; int oF = F;
     SN=GF.parameters();
     F = LowJzFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP,
-		 Om,E,dc,0,Nta,ipc,E,Nth,err);
+		 Om,E,dc,0,Nta,ipc,E,Nth,err,useNewAngMap);
     if(F && ((dc(0) > tmpdc(0) && oF!=-4 && oF!=-1) || (F==-4 || F== -1))) { 
       Om = tmpOm; E = tmpE; dc = tmpdc; SN = tmpSN; AP = tmpAP; 
       TM->set_parameters(tmpIP); F=oF;
@@ -966,7 +968,7 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
     AutoPTTorus(Phi,J,3.);
     if(err) cerr << "using PTFit\n";
     F = PTFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP,
-	      Om,E,dc,0,Nta,ipc,E,Nth,err);
+	      Om,E,dc,0,Nta,ipc,E,Nth,err,useNewAngMap);
     if(F && ((dc(0) > tmpdc(0) && oF!=-4 && oF!=-1) ||
 	     ((F==-4 && oF!=-1) || F== -1))) {
       Om = tmpOm; E = tmpE; dc = tmpdc; SN = tmpSN; AP = tmpAP;

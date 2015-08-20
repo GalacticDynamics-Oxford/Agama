@@ -1,5 +1,6 @@
 #include "df_base.h"
 #include "math_core.h"
+#include "math_sample.h"
 #include <cmath>
 
 namespace df{
@@ -67,7 +68,7 @@ void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
     double xupper[3] = {1, 1, 1};
     math::Matrix<double> result;   // the result array of actions
     DFIntegrandNdim fnc(DF);
-    math::sampleNdim(fnc, xlower, xupper, numSamples, result);
+    math::sampleNdim(fnc, xlower, xupper, numSamples, NULL, result);
     samples.resize(numSamples);
     for(int i=0; i<numSamples; i++) {
         const double point[3] = {result(i,0), result(i,1), result(i,2)};

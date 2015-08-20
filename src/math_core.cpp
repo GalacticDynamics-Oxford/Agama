@@ -5,6 +5,8 @@
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
+#include <gsl/gsl_rng.h>
+#include <gsl/gsl_monte_vegas.h>
 #include <stdexcept>
 #include <cassert>
 
@@ -79,8 +81,32 @@ double unwrapAngle(double x, double xprev) {
     return x - 2*M_PI * nwraps;
 }
 
+/* --------- random numbers -------- */
+// global random number generator
+gsl_rng* randgen = NULL;
+
+// randomly init random number generator
+void randomize() {
+    if(randgen==NULL)
+        randgen = gsl_rng_alloc(gsl_rng_default);
+    gsl_rng_set(randgen, (unsigned int)time( NULL ));
+}
+
+// convenience function to generate a random number using global generator
 double random() {
-    return rand()/RAND_MAX;  // should replace it with a better routine...
+    if(randgen==NULL)
+        randgen = gsl_rng_alloc(gsl_rng_default);  // note: it never gets deallocated..
+    return gsl_rng_uniform(randgen);
+}
+
+// generate 2 random numbers with normal distribution, using Box-Muller approach
+void getNormalRandomNumbers(double& num1, double& num2) {
+    double p1 = random();
+    double p2 = random();
+    if(p1>0&&p1<=1)
+        p1 = sqrt(-2*log(p1));
+    num1 = p1*sin(2*M_PI*p2);
+    num2 = p1*cos(2*M_PI*p2);
 }
 
 // ------- tools for analyzing the behaviour of a function around a particular point ------- //
@@ -596,33 +622,37 @@ double ScaledIntegrandEndpointSing::value(const double y) const
 #ifdef HAVE_CUBA
 // wrapper for Cuba library
 struct CubaParams {
-    const IFunctionNdim& F; ///< the original function
-    const double* xlower;   ///< lower limits of integration
-    const double* xupper;   ///< upper limits of integration
-    double* xvalue;         ///< temporary storage for un-scaling input point from [0:1]^N to the original range
-    CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper, double* _xvalue) :
-        F(_F), xlower(_xlower), xupper(_xupper), xvalue(_xvalue) {};
+    const IFunctionNdim& F;      ///< the original function
+    const double* xlower;        ///< lower limits of integration
+    const double* xupper;        ///< upper limits of integration
+    std::vector<double> xvalue;  ///< temporary storage for un-scaling input point from [0:1]^N to the original range
+    std::string error;           ///< store error message in case of exception
+    CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper) :
+        F(_F), xlower(_xlower), xupper(_xupper) 
+    { xvalue.resize(F.numVars()); };
 };
 static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
     const int *ncomp, double fval[], void *v_param)
 {
     CubaParams* param = static_cast<CubaParams*>(v_param);
     assert(*ndim == (int)param->F.numVars() && *ncomp == (int)param->F.numValues());
-    //try {
+    try {
         for(int n=0; n< *ndim; n++)
             param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
-        param->F.eval(param->xvalue, fval);
+        param->F.eval(&param->xvalue.front(), fval);
         return 0;   // success
-    /*}
-    catch(std::exception& e) {    // should we catch everything here?
+    }
+    catch(std::exception& e) {
+        param->error = std::string(" ")+e.what();
         return -999;  // signal of error
-    }*/
+    }
 }
 #else
 // wrapper for Cubature library
 struct CubatureParams {
     const IFunctionNdim& F; ///< the original function
     int numEval;            ///< count the number of function evaluations
+    std::string error;      ///< store error message in case of exception
     explicit CubatureParams(const IFunctionNdim& _F) :
         F(_F), numEval(0){};
 };
@@ -631,14 +661,15 @@ static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
     assert(ndim == param->F.numVars() && fdim == param->F.numValues());
-    //try {
+    try {
         param->numEval++;
         param->F.eval(x, fval);
         return 0;   // success
-    /*}
-    catch(...) {    // should we catch everything here?
+    }
+    catch(std::exception& e) {
+        param->error = std::string(" ")+e.what();
         return -1;  // signal of error
-    }*/
+    }
 }
 #endif
 
@@ -654,9 +685,8 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     if(error==NULL)
         error = &tempError.front();  // storage for errors in the case that user doesn't need them
 #ifdef HAVE_CUBA
-    double* tempX = new double[numVars];       // storage for scaled variables
-    CubaParams param(F, xlower, xupper, tempX);
-    double* tempProb = new double[numValues];
+    CubaParams param(F, xlower, xupper);
+    std::vector<double> tempProb(numValues);  // unused
     int nregions, neval, fail;
     const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
     cubacores(0, 0);
@@ -664,9 +694,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
           relToler, absToler, FLAGS, minNumEval, maxNumEval, 
           KEY, NULL/*STATEFILE*/, NULL/*spin*/,
           &nregions, numEval!=NULL ? numEval : &neval, &fail, 
-          result, error, tempProb);
-    delete[] tempProb;
-    delete[] tempX;
+          result, error, &tempProb.front());
     // need to scale the result to account for coordinate transformation [xlower:xupper] => [0:1]
     double scaleFactor = 1.;
     for(unsigned int n=0; n<numVars; n++)
@@ -675,20 +703,18 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
         result[m] *= scaleFactor;
         error[m] *= scaleFactor;
     }
+    if(!param.error.empty())
+        throw std::runtime_error("Error in integrateNdim"+param.error);
 #else
-    CubatureParams params(F);
-    hcubature(numValues, &integrandNdimWrapperCubature, &params,
+    CubatureParams param(F);
+    hcubature(numValues, &integrandNdimWrapperCubature, &param,
               numVars, xlower, xupper, maxNumEval, absToler, relToler,
               ERROR_INDIVIDUAL, result, error);
     if(numEval!=NULL)
-        *numEval = params.numEval;
+        *numEval = param.numEval;
+    if(!param.error.empty())
+        throw std::runtime_error("Error in integrateNdim"+param.error);
 #endif
-}
-
-void sampleNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
-    const unsigned int numSamples, Matrix<double>& samples, int* numTrialPoints, double* integral)
-{
-    throw std::runtime_error("sampleNdim not implemented");
 }
 
 }  // namespace
