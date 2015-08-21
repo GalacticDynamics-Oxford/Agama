@@ -36,9 +36,4 @@ double DoublePowerLaw::value(const actions::Actions &J) const {
     return prob;
 }
 
-double DoublePowerLaw::maxValue() const {
-    double maxprob = pow(1 + par.j0/par.jcore, par.alpha) / pow_3(par.j0);
-    return maxprob;  // may well be infinite if jcore==0
-}
-
 }  // namespace df

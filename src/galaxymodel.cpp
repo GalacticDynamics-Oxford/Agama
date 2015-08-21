@@ -175,7 +175,7 @@ void GalaxyModel::computeActionSamples(const unsigned int nSamp, particles::Poin
         for(unsigned int a=0; a<nAng; a++) {
             actions::Angles ang;
             ang.thetar   = 2*M_PI*math::random();
-            ang.thetar   = 2*M_PI*math::random();
+            ang.thetaz   = 2*M_PI*math::random();
             ang.thetaphi = 2*M_PI*math::random();
             points.add( coord::toPosVelCar(
                 torus.map(actions::ActionAngles(actions[t], ang)) ), pointMass );

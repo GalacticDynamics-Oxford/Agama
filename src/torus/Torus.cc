@@ -371,8 +371,7 @@ int Torus::containsPoint(    // return:	    error flag (see below)
     while(fabs(QP(0)-Q(0))>rtiny){
       LevCof(Jt,Q,1.,1.,QP,chio,B,A,dQdt);
       Jt[2] -= (QP(0)-Q(0))/sqrt(A(0,0));
-      while (Jt(2)< 0. ) Jt[2] += TPi;
-      while (Jt(2)> TPi) Jt[2] -= TPi;
+        Jt[2] = math::wrapAngle(Jt(2));
       if(Jt(2)>Pi) Jt[2] = TPi - Jt(2);
       it++;
       if((rmin-QP(0))*(QP(0)-rmax) < 0.) {

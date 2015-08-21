@@ -1328,10 +1328,8 @@ PSPD AngMap::NewtonStep(double& F, double& dF1, double& dF2, const PSPD Jt,
       f1 = 0.001; // just in case
     if(std::isnan(f2) || std::isinf(f2) || fabs(f2)>INT_MAX)
       f2 = 0.001; // just in case
-    while(f1<-Pi) f1+=TPi;
-    while(f1> Pi) f1-=TPi;
-    while(f2<-Pi) f2+=TPi;
-    while(f2> Pi) f2-=TPi;
+    f1 = math::wrapAngle(f1+Pi)-Pi;
+    f2 = math::wrapAngle(f2+Pi)-Pi;
     det    = f11*f22 - f12*f21;
     dJt[2] = (f2*f12-f1*f22) / det;
     dJt[3] = (f1*f21-f2*f11) / det;
@@ -1366,10 +1364,8 @@ PSPD AngMap::Forward(const PSPD& Input) const
 	      dJT[2] = 0.001;
 	    if(std::isnan(dJT(3)) || std::isinf(dJT(3)) || fabs(dJT(3))>INT_MAX)
 	      dJT[3] = 0.001;
-            while(dJT(2)<-Pi) dJT[2]+=TPi;
-            while(dJT(2)> Pi) dJT[2]-=TPi;
-            while(dJT(3)<-Pi) dJT[3]+=TPi;
-            while(dJT(3)> Pi) dJT[3]-=TPi;
+        dJT[2] = math::wrapAngle(dJT(2)+Pi)-Pi;
+        dJT[3] = math::wrapAngle(dJT(3)+Pi)-Pi;
             Fn = 0.5*(dJT(2)*dJT(2)+dJT(3)*dJT(3));
 	    if( Fn<=F0+alpha*lam*slp || lam<=LIN ) break;
 	    if(lam==1.) {

@@ -63,7 +63,6 @@ member function of GenPar).
  */
 class Torus : public PhaseSpaceMap {
 private:
-  bool useNewAngMap;
   Actions	J;                            // Torus actions
   double	E, Fs, Rmin, Rmax, zmax;      // Energy, df_value
                                               // approx limits in R, z
@@ -73,6 +72,7 @@ private:
   ToyMap       *TM;                           // Toy Map (e.g. isochrone)
   GenFnc	GF;                           // Generating function (J,thT->JT)
   AngMap	AM;                           // Angle Mapping (th->thT)
+  bool useNewAngMap;  // choice of the method for angle mapping (old/new)
 
   Angles      mirror_Angles(Angles,double) const; 
   // For given angles & coord phi, find angles giving same x, -vR, -vz, vphi  
@@ -578,8 +578,7 @@ inline Angles Torus::mirror_Angles(Angles A, double phi) const {
   out[1] = Pi-A[1];
   out[2] = 2*phi-A[2];
   for(int i=0;i!=3;i++) {
-    while(out[i]>TPi) out[i] -= TPi;
-    while(out[i]<0)   out[i] += TPi;
+      out[i] = math::wrapAngle(out[i]);
   }
   return out;
 }

@@ -68,8 +68,15 @@ int main(){
     particles::PointMassArrayCar particles;
     readSnapshot("../temp/hernquist.dat", units::ExternalUnits(), particles);
     ActionArray particleActions(particles.size());
-    for(unsigned int i=0; i<particles.size(); i++)
-        particleActions[i] = actf.actions(toPosVelCyl(particles.point(i)));
+    for(unsigned int i=0; i<particles.size(); i++) {
+        try{
+            particleActions[i] = actf.actions(toPosVelCyl(particles.point(i)));
+        }
+        catch(std::exception& e) {
+            std::cout << e.what() << std::endl;
+            particleActions[i] = particleActions[i>0?i-1:0];  // put something reasonable (unless i==0)
+        }
+    }
 
     // do a parameter search to find best-fit distribution function describing these particles
     ModelSearchFnc fnc(particleActions);

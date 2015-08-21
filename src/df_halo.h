@@ -44,9 +44,6 @@ public:
     /** return value of DF for the given set of actions (not scaled by total mass).
         \param[in] J are the actions  */
     virtual double value(const actions::Actions &J) const;
-
-    /** The maximum probability (not scaled by total mass). */
-    virtual double maxValue() const;
 };
 
 ///@}

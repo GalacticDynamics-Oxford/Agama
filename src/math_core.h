@@ -44,6 +44,36 @@ double wrapAngle(double x);
     Note that this usage scenario is not stable against error accumulation. */
 double unwrapAngle(double x, double xprev);
 
+/** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
+    to locate the index of bin that contains a given value x 
+    (which must lie in the interval x_0 <= x <= x_N).
+    \returns the index k of the bin such that x_k <= x < x_{k+1}, 
+    where the last inequality may be inexact for the last bin 
+    (x=x_N still returns N-1). */
+unsigned int binSearch(const double x, const std::vector<double>& arr);
+
+/** Class for computing running average and dispersion for a sequence of numbers */
+class Averager {
+public:
+    Averager() : meanval(0.), sumsqrs(0.), count(0) {}
+    /** Add a number to the list (the number itself is not stored) */
+    void add(const double value) {
+        double diff = value - meanval;
+        meanval += diff / (count+1);       // use Welford's stable recurrence relation
+        sumsqrs += diff * (value-meanval); // for computing mean and variance of weighted function values
+        count++;
+    }
+    /** Return the mean value of all elements added so far: 
+        \f$  < x > = (1/N) \sum_{i=1}^N  x_i  \f$.  */
+    double mean() const { return meanval; }
+    /** Return the dispersion of all elements added so far:
+        \f$  D = (1/N) \sum_{i=1}^N  ( x_i - < x > )^2  \f$.  */
+    double disp() const { return count>1 ? sumsqrs / (count-1) : 0; }
+private:
+    double meanval, sumsqrs;
+    unsigned int count;
+};
+    
 ///@}
 /// \name  ----- root-finding and minimization routines -----
 ///@{

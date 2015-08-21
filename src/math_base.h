@@ -46,8 +46,16 @@ namespace math{
     the actual number of derivatives that can be produces is returned by a dedicated method 
     `numDerivs()`, which should be queried beforehand, and if necessary, the derivatives 
     must be estimated by the calling code itself from finite differences.
-    Descendant classes should implement 'evalDeriv()' and 'numDerivs()' methods, 
-    while 'value()' and the operator() are simple shorthands provided by this base class. */
+    Descendant classes should implement `evalDeriv()` and `numDerivs()` methods, 
+    while `value()` and the `operator()` are simple shorthands provided by this base class.
+
+    Note on the naming conventions here and throughout the code:
+    `value(x)` stands for a member function returning a single number, where `x` may be 
+    one or more arguments; whereas `eval***(x, *val, ...)` stands for a member function with 
+    void return type, which computes something for the argument(s) `x` and stores the result(s)
+    in output arguments(s) `*val`, ..., which optionally may be NULL to indicate that 
+    the corresponding quantity needs not be computed.
+*/
 class IFunction {
 public:
     IFunction() {};

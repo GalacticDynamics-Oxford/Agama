@@ -22,23 +22,23 @@ public:
         }
         double jac;  // will be initialized by the following call
         double val = df.value(getActions(vars, &jac));
-        values[0]  = val * jac;
+        values[0]  = val * jac * TWO_PI_CUBE;   // integral over three angles
     }
 
     /// convert from scaled variables to the actual actions to be passed to DF
     /// if jac!=NULL, store the value of jacobian of transformation in this variable
     actions::Actions getActions(const double vars[], double* jac=0) const {
         // scaled variables p, q and s lie in the range [0:1];
-        // we define J0 = exp( 1/(1-s) - 1/s), and set
-        // J1 = J0 p, J2 = J0 (1-p) q, J3 = J0 (1-p-q+pq), so that Jr+Jz+|Jphi| = J0.
+        // we define J0 = exp( 1/(1-s) - 1/s), q' = 2*q-1, and set
+        // Jr = J0 p, Jphi = J0 (1-p) q', Jz = J0 (1-p) (1-|q'|), so that Jr+Jz+|Jphi| = J0.
         const double s  = vars[0], p = vars[1], q = vars[2];
         const double J0 = exp( 1/(1-s) - 1/s );
         if(jac)
-            *jac = (1-p) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s));
+            *jac = 2*(1-p) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s));
         actions::Actions acts;
         acts.Jr   = J0 * p;
-        acts.Jz   = J0 * (1-p) * q;
-        acts.Jphi = J0 * (1-p-q+p*q);
+        acts.Jphi = J0 * (1-p) * (2*q-1);
+        acts.Jz   = J0 * (1-p) * (1-fabs(2*q-1));
         return acts;
     }
 
@@ -58,7 +58,7 @@ double BaseDistributionFunction::totalMass(const double reqRelError, const int m
     double xupper[3] = {1, 1, 1};
     double result;  // store the value of integral
     math::integrateNdim(DFIntegrandNdim(*this), xlower, xupper, reqRelError, maxNumEval, &result, error, numEval);
-    return result * TWO_PI_CUBE;   // integral over three angles
+    return result;
 }
 
 void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
@@ -69,8 +69,8 @@ void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
     math::Matrix<double> result;   // the result array of actions
     DFIntegrandNdim fnc(DF);
     math::sampleNdim(fnc, xlower, xupper, numSamples, NULL, result);
-    samples.resize(numSamples);
-    for(int i=0; i<numSamples; i++) {
+    samples.resize(result.numRows());
+    for(unsigned int i=0; i<result.numRows(); i++) {
         const double point[3] = {result(i,0), result(i,1), result(i,2)};
         samples[i] = fnc.getActions(point);  // transform from scaled vars to actions
     }

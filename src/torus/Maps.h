@@ -52,6 +52,7 @@ Base classes for all the transformations needed to describe a Torus
 #include "Pi.h"
 #include "Err.h"
 #include "Types.h"
+#include "math_core.h"
 #include <climits>
 
 namespace Torus{
@@ -129,10 +130,8 @@ inline void AlignAngles(PSPD& JT)
     JT[2] = 0.;        // in case of major failure
   if(std::isnan(JT(3)) || std::isinf(JT(3)) || fabs(JT(3))>INT_MAX)
     JT[3] = 0.;        // in case of major failure
-    while(JT(2)< 0.) JT[2]+=TPi;
-    while(JT(2)>TPi) JT[2]-=TPi;
-    while(JT(3)< 0.) JT[3]+=TPi;
-    while(JT(3)>TPi) JT[3]-=TPi;
+    JT[2] = math::wrapAngle(JT(2));
+    JT[3] = math::wrapAngle(JT(3));
 }
 inline void AlignAngles3D(PSPT& JT)
 {
@@ -142,12 +141,9 @@ inline void AlignAngles3D(PSPT& JT)
     JT[4] = 0.;        // in case of major failure
   if(std::isnan(JT(5)) || std::isinf(JT(5)) || fabs(JT(5))>INT_MAX)
     JT[5] = 0.;        // in case of major failure
-    while(JT(3)< 0.) JT[3]+=TPi;
-    while(JT(3)>TPi) JT[3]-=TPi;
-    while(JT(4)< 0.) JT[4]+=TPi;
-    while(JT(4)>TPi) JT[4]-=TPi;
-    while(JT(5)< 0.) JT[5]+=TPi;
-    while(JT(5)>TPi) JT[5]-=TPi;
+    JT[3] = math::wrapAngle(JT(3));
+    JT[4] = math::wrapAngle(JT(4));
+    JT[5] = math::wrapAngle(JT(5));
 }
 
 } // namespace

@@ -3,6 +3,7 @@
 #include "actions_staeckel.h"
 #include "df_halo.h"
 #include "galaxymodel.h"
+#include "particles_io.h"
 #include "math_specfunc.h"
 #include "debug_utils.h"
 
@@ -101,5 +102,14 @@ int main(){
 
     if(ok)
         std::cout << "ALL TESTS PASSED\n";
+#if 0
+    std::vector<actions::Actions> actions;
+    particles::PointMassArrayCar points;
+    galmod.computeActionSamples(1e5, points);
+    particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
+        "Text", "sampled_actions.txt", units::ExternalUnits());
+    snap->writeSnapshot(points);
+    delete snap;
+#endif
     return 0;
 }

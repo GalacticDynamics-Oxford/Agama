@@ -48,7 +48,7 @@ bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_
 // ------ math primitives -------- //
 
 static double functionWrapper(double x, void* param){
-    return static_cast<IFunction*>(param)->operator()(x);
+    return static_cast<IFunction*>(param)->value(x);
 }
 
 bool isFinite(double x) {
@@ -81,6 +81,21 @@ double unwrapAngle(double x, double xprev) {
     return x - 2*M_PI * nwraps;
 }
 
+unsigned int binSearch(const double x, const std::vector<double>& arr)
+{
+    assert(x>=arr.front() && x<=arr.back());
+    unsigned int index = 0;
+    unsigned int indhi = arr.size()-1;
+    while(indhi > index + 1) {
+        unsigned int i = (indhi + index)/2;
+        if(arr[i] > x)
+            indhi = i;
+        else
+            index = i;
+    }
+    return index;
+}
+    
 /* --------- random numbers -------- */
 // global random number generator
 gsl_rng* randgen = NULL;

@@ -200,8 +200,12 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
             else  // most likely due to some roundoff errors
                 Rmax = Rinit;  // safe value
         }
-        if(!math::isFinite(Rmax))
-            throw std::runtime_error("Error in locating Rmax in findPlanarOrbitExtent");
+        if(!math::isFinite(Rmax)) {
+            if(E>=0 && fnc(INFINITY)>0)   // could not find the upper limit because it simply does not exist!
+                throw std::invalid_argument("findPlanarOrbitExtent: E>=0");
+            else
+                throw std::runtime_error("Error in locating Rmax in findPlanarOrbitExtent");
+        }
     }   // else Rmax=absR
     assert(Rmin>=0 && Rmin<=Rinit && Rinit<=Rmax);
     if(Jr!=NULL) {  // compute radial action

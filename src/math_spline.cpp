@@ -396,16 +396,16 @@ void SplineApprox::fitDataOptimal(const std::vector<double> &yvalues,
 CubicSpline::CubicSpline(const std::vector<double>& xa, const std::vector<double>& ya, double der1, double der2) :
     xval(xa), yval(ya)
 {
-    size_t num_points = xa.size();
+    unsigned int num_points = xa.size();
     if(ya.size() != num_points)
         throw std::invalid_argument("Error in spline initialization: input arrays are not equal in length");
     if(num_points < 3)
         throw std::invalid_argument("Error in spline initialization: number of nodes should be >=3");
-    size_t max_index = num_points - 1;  /* Engeln-Mullges + Uhlig "n" */
-    size_t sys_size = max_index - 1;    /* linear system is sys_size x sys_size */
+    unsigned int max_index = num_points - 1;  /* Engeln-Mullges + Uhlig "n" */
+    unsigned int sys_size = max_index - 1;    /* linear system is sys_size x sys_size */
     std::vector<double> g(sys_size), diag(sys_size), offdiag(sys_size);  // temporary arrays
 
-    for (size_t i = 0; i < sys_size; i++) {
+    for(unsigned int i = 0; i < sys_size; i++) {
         const double h_i   = xa[i + 1] - xa[i];
         const double h_ip1 = xa[i + 2] - xa[i + 1];
         if(h_i<=0 || h_ip1<=0)
@@ -443,21 +443,6 @@ CubicSpline::CubicSpline(const std::vector<double>& xa, const std::vector<double
     }
 }
 
-// binary search to determine the spline segment that contains x
-static size_t binSearch(double x, const std::vector<double>& arr)
-{
-    size_t index = 0;
-    size_t indhi = arr.size()-1;
-    while(indhi > index + 1) {
-        size_t i = (indhi + index)/2;
-        if(arr[i] > x)
-            indhi = i;
-        else
-            index = i;
-    }
-    return index;
-}
-
 // evaluate spline value, derivative and 2nd derivative at once (faster than doing it separately)
 void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
 {
@@ -475,7 +460,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
         return;
     }
     if(x >= xval.back()) {
-        const size_t size = xval.size();
+        const unsigned int size = xval.size();
         double dx  =  xval[size-1]-xval[size-2];
         double der = (yval[size-1]-yval[size-2])/dx + dx*(cval[size-2]+2*cval[size-1])/3.0;
         if(val)
@@ -487,7 +472,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
         return;
     }
 
-    size_t index = binSearch(x, xval);
+    unsigned int index = binSearch(x, xval);
     double x_hi = xval[index + 1];
     double x_lo = xval[index];
     double dx   = x_hi - x_lo;
@@ -512,7 +497,7 @@ bool CubicSpline::isMonotonic() const
     if(xval.size()==0)
         throw std::range_error("Empty spline");
     bool ismonotonic=true;
-    for(size_t index=0; ismonotonic && index < xval.size()-1; index++) {
+    for(unsigned int index=0; ismonotonic && index < xval.size()-1; index++) {
         double dx = xval[index + 1] - xval[index];
         double dy = yval[index + 1] - yval[index];
         double c_i   = cval[index];
@@ -539,8 +524,8 @@ CubicSpline2d::CubicSpline2d(const std::vector<double>& xvalues, const std::vect
     const Matrix<double>& zvalues,
     double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax)
 {
-    const size_t xsize = xvalues.size();
-    const size_t ysize = yvalues.size();
+    const unsigned int xsize = xvalues.size();
+    const unsigned int ysize = yvalues.size();
     if(xsize<4 || ysize<4)
         throw std::invalid_argument("Error in 2d spline initialization: number of nodes should be >=4 in each direction");
     if(zvalues.numRows() != xsize)
@@ -554,32 +539,32 @@ CubicSpline2d::CubicSpline2d(const std::vector<double>& xvalues, const std::vect
     zy = Matrix<double>(xsize, ysize);
     zxy= Matrix<double>(xsize, ysize);
     std::vector<double> tmpvalues(ysize);
-    for(size_t i=0; i<xsize; i++) {
-        for(size_t j=0; j<ysize; j++)
+    for(unsigned int i=0; i<xsize; i++) {
+        for(unsigned int j=0; j<ysize; j++)
             tmpvalues[j] = zvalues(i, j);
         CubicSpline spl(yvalues, tmpvalues, deriv_ymin, deriv_ymax);
-        for(size_t j=0; j<ysize; j++)
+        for(unsigned int j=0; j<ysize; j++)
             spl.evalDeriv(yvalues[j], NULL, &zy(i, j));
     }
     tmpvalues.resize(xsize);
-    for(size_t j=0; j<ysize; j++) {
-        for(size_t i=0; i<xsize; i++)
+    for(unsigned int j=0; j<ysize; j++) {
+        for(unsigned int i=0; i<xsize; i++)
             tmpvalues[i] = zvalues(i, j);
         CubicSpline spl(xvalues, tmpvalues, deriv_xmin, deriv_xmax);
-        for(size_t i=0; i<xsize; i++)
+        for(unsigned int i=0; i<xsize; i++)
             spl.evalDeriv(xvalues[i], NULL, &zx(i, j));
     }
-    for(size_t j=0; j<ysize; j++) {
+    for(unsigned int j=0; j<ysize; j++) {
         // if derivs at the boundary are specified, 2nd deriv must be zero
         if( (j==0 && isFinite(deriv_ymin)) || (j==ysize-1 && isFinite(deriv_ymax)) ) {
-            for(size_t i=0; i<xsize; i++)
+            for(unsigned int i=0; i<xsize; i++)
                 zxy(i, j) = 0.;
         } else {
-            for(size_t i=0; i<xsize; i++)
+            for(unsigned int i=0; i<xsize; i++)
                 tmpvalues[i] = zy(i, j);
             CubicSpline spl(xvalues, tmpvalues,
                 isFinite(deriv_xmin) ? 0. : NAN, isFinite(deriv_xmax) ? 0. : NAN);
-            for(size_t i=0; i<xsize; i++)
+            for(unsigned int i=0; i<xsize; i++)
                 spl.evalDeriv(xvalues[i], NULL, &zxy(i, j));
         }
     }
@@ -606,8 +591,8 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
         return;
     }
     // First compute the indices into the data arrays where we are interpolating
-    const size_t xi = binSearch(x, xval);
-    const size_t yi = binSearch(y, yval);
+    const unsigned int xi = binSearch(x, xval);
+    const unsigned int yi = binSearch(y, yval);
     // Find the minimum and maximum values on the grid cell in each dimension
     const double xlow = xval[xi];
     const double xupp = xval[xi + 1];
@@ -756,8 +741,8 @@ LinearInterpolator2d::LinearInterpolator2d(
     const std::vector<double>& xvalues, const std::vector<double>& yvalues,
     const Matrix<double>& zvalues)
 {
-    const size_t xsize = xvalues.size();
-    const size_t ysize = yvalues.size();
+    const unsigned int xsize = xvalues.size();
+    const unsigned int ysize = yvalues.size();
     if(xsize<2 || ysize<2)
         throw std::invalid_argument("Error in 2d interpolator initialization: number of nodes should be >=2 in each direction");
     if(zvalues.numRows() != xsize)
@@ -784,8 +769,8 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
         return;
     }
     // First compute the indices into the data arrays where we are interpolating
-    const size_t xi = binSearch(x, xval);
-    const size_t yi = binSearch(y, yval);
+    const unsigned int xi = binSearch(x, xval);
+    const unsigned int yi = binSearch(y, yval);
     // Find the minimum and maximum values on the grid cell in each dimension
     const double zlowlow = zval(xi, yi);
     const double zlowupp = zval(xi, yi + 1);
@@ -833,7 +818,7 @@ void createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool ze
         nnodes--;
     }
     if(fcmp(static_cast<double>(nnodes), dynrange, 1e-6)==0) { // no need for non-uniform grid
-        for(size_t i=0; i<nnodes; i++)
+        for(unsigned int i=0; i<nnodes; i++)
             grid[i+indexstart] = xmin+(xmax-xmin)*i/(nnodes-1);
         return;
     }
@@ -855,7 +840,7 @@ void createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool ze
     }
     A = findRoot(F, Amin, Amax, 1e-4);
     B = xmin / (exp(A)-1);
-    for(size_t i=0; i<nnodes; i++)
+    for(unsigned int i=0; i<nnodes; i++)
         grid[i+indexstart] = B*(exp(A*(i+1))-1);
     grid[nnodes-1+indexstart] = xmax;
 }
@@ -872,7 +857,8 @@ static void makegrid(std::vector<double>::iterator begin, std::vector<double>::i
     *(end-1)=endval;  // exact value
 }
 
-void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int minbin, unsigned int& gridsize, std::vector<double>& grid)
+void createAlmostUniformGrid(const std::vector<double> &srcpoints, 
+    unsigned int minbin, unsigned int& gridsize, std::vector<double>& grid)
 {
     if(srcpoints.size()==0)
         throw std::invalid_argument("Error in creating a grid: input points array is empty");
@@ -889,9 +875,9 @@ void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int 
         ok=true; 
         // find the index of bin with the largest number of points
         int largestbin=-1;
-        size_t maxptperbin=0;
+        unsigned int maxptperbin=0;
         for(srciter=srcbegin, griditer=gridbegin; griditer!=gridend-1; griditer++) {
-            size_t ptperbin=0;
+            unsigned int ptperbin=0;
             while(srciter+ptperbin!=srcend && *(srciter+ptperbin) < *(griditer+1)) 
                 ptperbin++;
             if(ptperbin>maxptperbin) {
@@ -905,7 +891,7 @@ void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int 
             srciter = srcbegin;
             griditer = gridbegin;
             while(ok && griditer!=gridend-1) {
-                size_t ptperbin=0;
+                unsigned int ptperbin=0;
                 while(srciter+ptperbin!=srcend && *(srciter+ptperbin) < *(griditer+1)) 
                     ptperbin++;
                 if(ptperbin>=minbin)  // ok, move to the next one
@@ -933,7 +919,7 @@ void createAlmostUniformGrid(const std::vector<double> &srcpoints, unsigned int 
             srciter = srcend-1;
             griditer = gridend-1;
             while(ok && griditer!=gridbegin) {
-                size_t ptperbin=0;
+                unsigned int ptperbin=0;
                 while(srciter+1-ptperbin!=srcbegin && *(srciter-ptperbin) >= *(griditer-1))
                     ptperbin++;
                 if(ptperbin>=minbin)  // ok, move to the previous one

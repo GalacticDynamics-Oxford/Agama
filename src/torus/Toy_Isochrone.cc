@@ -194,8 +194,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
     tt = double(JT(3));
     if(std::isnan(tr) || std::isinf(tr) || fabs(tr)>INT_MAX) 
       tr = 0.; // just in case  
-    while(tr<0.)  tr+=TPi;
-    while(tr>TPi) tr-=TPi;
+    tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| this->jp<0.) {
         TorusError("ToyIsochrone: negative action(s)",2); 
 	return PSPD(0.);
@@ -258,8 +257,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
     tt = double(JT(3));
     if(std::isnan(tr) || std::isinf(tr) || fabs(tr)>INT_MAX) 
       tr = 0.; // just in case  
-    while(tr<0.)  tr+=TPi;
-    while(tr>TPi) tr-=TPi;
+    tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| this->jp<0.) {
         TorusError("ToyIsochrone: negative action(s)",2); 
 	return PSPD(0.);
@@ -516,8 +514,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
 // Make sure that tr is in the correct range
     if(std::isnan(tr) || std::isinf(tr) || fabs(tr)>INT_MAX) 
       tr = 0.; // just in case  
-    while(tr<0.)  tr+=TPi;
-    while(tr>TPi) tr-=TPi;
+    tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| jp<0.) {
         TorusError("ToyIsochrone: negative action(s)",2); 
 	return PSPD(0.);
@@ -639,8 +636,7 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
     }
     if(std::isnan(tt) || std::isinf(tt) || fabs(tt)>INT_MAX) 
       tt = 0.; // just in case  
-    while(tt<0.)  tt+=TPi;
-    while(tt>TPi) tt-=TPi;
+    tt = math::wrapAngle(tt);
 // re-scale and return
     return PSPD(jr*sMb, jt*sMb, tr, tt);
 }
@@ -687,8 +683,7 @@ PSPT ToyIsochrone::Forward3D(const PSPT& JT3) const
     QP3[2] = (QP3(5)>0.)? JT3(5)+wh-wt0r*JT3(3) : JT3(5)-wh+wt0r*JT3(3);
     if(std::isnan(QP3[2]) || std::isinf(QP3[2]) || fabs(QP3[2])>INT_MAX) 
       QP3[2] = 0.; // just in case  
-    while(QP3(2)<0. ) QP3[2] += TPi; 
-    while(QP3(2)>TPi) QP3[2] -= TPi;
+      QP3[2] = math::wrapAngle(QP3(2));
     return QP3;
   }
 
@@ -701,8 +696,7 @@ PSPT ToyIsochrone::Forward3D(const PSPT& JT3) const
   QP3[2] -= (JT3(2)>0.)? JT3(4) : -JT3(4); // Note opposite sign to Backward
   if(std::isnan(QP3[2]) || std::isinf(QP3[2]) || fabs(QP3[2])>INT_MAX) 
     QP3[2] = 0.; // just in case  
-  while(QP3(2)<0. ) QP3[2] += TPi; 
-  while(QP3(2)>TPi) QP3[2] -= TPi; 
+    QP3[2] = math::wrapAngle(QP3(2));
 
   return QP3;
 }
