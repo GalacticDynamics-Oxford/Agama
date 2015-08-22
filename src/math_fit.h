@@ -4,7 +4,8 @@
     \author Eugene Vasiliev
 */
 #pragma once
-#include "math_ndim.h"
+#include "math_base.h"
+#include "math_linalg.h"
 
 namespace math{
 
@@ -49,6 +50,31 @@ void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs,
 ///@}
 /// \name ------ multidimensional minimization -------
 ///@{
+
+/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values,
+    and derivatives of these values w.r.t.the input variables (aka jacobian). */
+class IFunctionNdimDeriv: public IFunctionNdim {
+public:
+    IFunctionNdimDeriv() {};
+    virtual ~IFunctionNdimDeriv() {};
+
+    /** evaluate the function and the derivatives.
+        \param[in]  vars   is the N-dimensional point at which the function should be computed.
+        \param[out] values is the M-dimensional array (possibly M=1) that will contain
+                    the vector of function values.
+        \param[out] derivs is the M-by-N matrix (M rows, N columns) of partial derivatives 
+                    of the vector-valued function by the input variables;
+                    if a NULL pointer is passed, this does not need to be computed,
+                    otherwise the shape of matrix will be resized as needed
+                    (i.e. one may pass a pointer to an empty matrix and it will be resized).
+    */
+    virtual void evalDeriv(const double vars[], double values[], Matrix<double>* derivs=0) const = 0;
+
+    /** reimplement the evaluate function without derivatives */
+    virtual void eval(const double vars[], double values[]) const {
+        evalDeriv(vars, values, NULL);
+    }
+};
 
 /** perform a multidimensional minimization of a function of N variables,
     using the Simplex algorithm of Nelder and Mead.

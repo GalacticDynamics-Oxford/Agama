@@ -5,21 +5,30 @@
 */
 #pragma once
 #include "math_base.h"
-#include "math_ndim.h"
 
 namespace math{
 
 /** default relative accuracy of root-finder */
-const double ACCURACY_ROOT=1e-6;
+const double ACCURACY_ROOT = 1e-6;
 
 /** default relative accuracy of integration */
-const double ACCURACY_INTEGR=1e-6;
+const double ACCURACY_INTEGR = 1e-6;
+
+/** maximum magnitude of numbers considered to be 'reasonable' */
+const double UNREASONABLY_LARGE_VALUE = 1e10;
 
 /// \name  ---- Miscellaneous utility functions -----
 ///@{
 
 /** test if a number is neither infinity nor NaN */
-bool isFinite(double x);
+inline bool isFinite(double x) { 
+    const volatile double y = x - x;  // 'volatile' prevents it from being optimized away
+    return y == y;  // false for +-INFINITY or NAN
+}
+
+/** test if a number is not too big or too small */
+inline bool withinReasonableRange(double x) { 
+    return x<UNREASONABLY_LARGE_VALUE && x>1/UNREASONABLY_LARGE_VALUE; }
 
 /** compare two numbers with a relative accuracy eps: 
     \return -1 if x<y, +1 if x>y, or 0 if x and y are approximately equal */
@@ -45,12 +54,14 @@ double wrapAngle(double x);
 double unwrapAngle(double x, double xprev);
 
 /** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
-    to locate the index of bin that contains a given value x 
-    (which must lie in the interval x_0 <= x <= x_N).
-    \returns the index k of the bin such that x_k <= x < x_{k+1}, 
-    where the last inequality may be inexact for the last bin 
-    (x=x_N still returns N-1). */
-unsigned int binSearch(const double x, const std::vector<double>& arr);
+    to locate the index of bin that contains a given value x .
+    \param[in]  x is the position, which must lie in the interval x_0 <= x <= x_N;
+    \param[in]  arr is the array of bin boundaries sorted in ascending order (NOT CHECKED!)
+    \param[in]  size is the number of elements in the array (i.e., number of bins plus 1).
+    \returns the index k of the bin such that x_k <= x < x_{k+1}, where the last inequality
+    may be inexact for the last bin (x=x_N still returns N-1).
+    \throws std::invalid_argument exception if the point is outside the interval */
+unsigned int binSearch(const double x, const double arr[], const unsigned int size);
 
 /** Class for computing running average and dispersion for a sequence of numbers */
 class Averager {

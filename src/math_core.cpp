@@ -9,6 +9,7 @@
 #include <gsl/gsl_monte_vegas.h>
 #include <stdexcept>
 #include <cassert>
+#include <vector>
 
 #ifdef HAVE_CUBA
 #include <cuba.h>
@@ -51,10 +52,6 @@ static double functionWrapper(double x, void* param){
     return static_cast<IFunction*>(param)->value(x);
 }
 
-bool isFinite(double x) {
-    return gsl_finite(x);
-}
-
 int fcmp(double x, double y, double eps) {
     if(x==0)
         return y<-eps ? -1 : y>eps ? +1 : 0;
@@ -81,11 +78,14 @@ double unwrapAngle(double x, double xprev) {
     return x - 2*M_PI * nwraps;
 }
 
-unsigned int binSearch(const double x, const std::vector<double>& arr)
+unsigned int binSearch(const double x, const double arr[], unsigned int size)
 {
-    assert(x>=arr.front() && x<=arr.back());
+    if(size<2)
+        throw std::invalid_argument("Error in binSearch: should have at least one bin");
+    if(x<arr[0] && x>arr[size-1])
+        throw std::invalid_argument("Error in binSearch: point is outside the interval");
     unsigned int index = 0;
-    unsigned int indhi = arr.size()-1;
+    unsigned int indhi = size-1;
     while(indhi > index + 1) {
         unsigned int i = (indhi + index)/2;
         if(arr[i] > x)
@@ -97,21 +97,28 @@ unsigned int binSearch(const double x, const std::vector<double>& arr)
 }
     
 /* --------- random numbers -------- */
-// global random number generator
-gsl_rng* randgen = NULL;
-
-// randomly init random number generator
-void randomize() {
-    if(randgen==NULL)
+class RandGenStorage{
+public:
+    RandGenStorage() {
         randgen = gsl_rng_alloc(gsl_rng_default);
-    gsl_rng_set(randgen, (unsigned int)time( NULL ));
-}
+    }
+    ~RandGenStorage() {
+        gsl_rng_free(randgen);
+    }
+    void randomize() {
+        gsl_rng_set(randgen, (unsigned int)time( NULL ));
+    }
+    inline double random() {
+        return gsl_rng_uniform(randgen);
+    }
+private:
+    gsl_rng* randgen;
+};
+static RandGenStorage randgen;  // global random number generator
 
 // convenience function to generate a random number using global generator
 double random() {
-    if(randgen==NULL)
-        randgen = gsl_rng_alloc(gsl_rng_default);  // note: it never gets deallocated..
-    return gsl_rng_uniform(randgen);
+    return randgen.random();
 }
 
 // generate 2 random numbers with normal distribution, using Box-Muller approach

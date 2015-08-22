@@ -10,7 +10,7 @@ LFLAGS   += -fPIC -lgsl -lgslcblas
 PYFLAGS  += -I/usr/include/python2.6 -I/Library/Python/2.6/site-packages/numpy/core/include -lpython
 
 # this flag apparently is only relevant for MacOS and reduces the size of executable files by removing unused code
-#LFLAGS  += -Wl,-dead_strip
+LFLAGS  += -Wl,-dead_strip
 
 # uncomment (and possibly modify) the three lines below  to use UNSIO library for input/output of N-body snapshots
 DEFINES  += -DHAVE_UNSIO

@@ -77,7 +77,7 @@ int main(){
     double density, densityErr;
     coord::VelCyl velocityFirstMoment, velocityFirstMomentErr;
     coord::Vel2Cyl velocitySecondMoment, velocitySecondMomentErr;
-    galmod.computeMoments(point, reqRelError, maxNumEval,
+    computeMoments(galmod, point, reqRelError, maxNumEval,
         &density, &velocityFirstMoment, &velocitySecondMoment,
         &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr);
     double dens_an  = pot.density(point);  // analytical value of density
@@ -103,9 +103,8 @@ int main(){
     if(ok)
         std::cout << "ALL TESTS PASSED\n";
 #if 0
-    std::vector<actions::Actions> actions;
     particles::PointMassArrayCar points;
-    galmod.computeActionSamples(1e5, points);
+    generatePosVelSamples(galmod, 1e5, points);
     particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
         "Text", "sampled_actions.txt", units::ExternalUnits());
     snap->writeSnapshot(points);

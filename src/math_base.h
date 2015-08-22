@@ -75,7 +75,7 @@ public:
         evalDeriv(x, &val);
         return val;
     }
-    
+
     double operator()(const double x) const { 
         return value(x); }
 };
@@ -88,7 +88,7 @@ public:
 class IFunctionNoDeriv: public IFunction {
 public:
     IFunctionNoDeriv() {};
-    
+
     /** This needs to be implemented in the derived classes */
     virtual double value(const double x) const=0;
 
@@ -106,5 +106,26 @@ public:
     virtual unsigned int numDerivs() const { return 0; }
 
 };
-    
+
+/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values. */
+class IFunctionNdim {
+public:
+    IFunctionNdim() {};
+    virtual ~IFunctionNdim() {};
+
+    /** evaluate the function.
+        \param[in]  vars   is the N-dimensional point at which the function should be computed.
+        \param[out] values is the M-dimensional array (possibly M=1) that will contain
+                    the vector of function values.
+                    Should point to an existing array of length at least M.
+    */
+    virtual void eval(const double vars[], double values[]) const = 0;
+
+    /// return the dimensionality of the input point (N)
+    virtual unsigned int numVars() const = 0;
+
+    /// return the number of elements in the output array of values (M)
+    virtual unsigned int numValues() const = 0;
+};
+
 }  // namespace math

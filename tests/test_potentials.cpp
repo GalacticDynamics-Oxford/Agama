@@ -25,6 +25,8 @@ bool testPotential(const potential::BasePotential* potential)
     std::cout << "; total mass is "<<mtot<<
         ", or enclosed mass M(r<inf) is "<<minf<<
         ", M(r<=0) is "<<potential->enclosedMass(0)<<
+        ", M(r<1) is "<<potential->enclosedMass(1)<<
+        ", M(r<10) is "<<potential->enclosedMass(10)<<
         ", M(r<1e9) is "<<potential->enclosedMass(1e9)<<"\n";
     return ok;
 }
@@ -35,7 +37,6 @@ bool testPotentialAtPoint(const potential::BasePotential* potential,
 {
     if(potential==NULL) return true;
     bool ok=true;
-    std::cout << potential->name()<<"  "<<coordSysT::name()<<"  " << point;
     double E = potential::totalEnergy(*potential, point);
     if((potential->symmetry() & potential::ST_ZROTSYM) == potential::ST_ZROTSYM) {  // test only axisymmetric potentials
         try{
@@ -44,15 +45,15 @@ bool testPotentialAtPoint(const potential::BasePotential* potential,
             double E1  = potential->value(coord::PosCyl(Rc, 0, 0)) + 0.5*vc*vc;
             double Lc1 = L_circ(*potential, E);
             double Rc1 = R_from_Lz(*potential, Lc1);
-            ok &= math::fcmp(Rc, Rc1, 1e-11)==0 && math::fcmp(E, E1, 1e-11)==0;
-            if(!ok) std::cout << "\033[1;31m ** \033[0m"
-                "E="<<E<<", Rc(E)="<<Rc<<", E(Rc)="<<E1<<", Lc(E)="<<Lc1<<", Rc(Lc)="<<Rc1;
+            ok &= math::fcmp(Rc, Rc1, 2e-10)==0 && math::fcmp(E, E1, 1e-11)==0;
+            if(!ok)
+                std::cout << potential->name()<<"  "<<coordSysT::name()<<"  " << point << "\033[1;31m ** \033[0m"
+                "E="<<E<<", Rc(E)="<<Rc<<", E(Rc)="<<E1<<", Lc(E)="<<Lc1<<", Rc(Lc)="<<Rc1 << "\n";
         }
         catch(std::exception &e) {
-            std::cout << e.what();
+            std::cout << potential->name()<<"  "<<coordSysT::name()<<"  " << point << e.what() << "\n";
         }
     }
-    std::cout << "\n";
     return ok;
 }
 

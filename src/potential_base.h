@@ -367,5 +367,13 @@ double R_from_Lz(const BasePotential& potential, double L_z);
 void epicycleFreqs(const BasePotential& potential, const double R,
     double& kappa, double& nu, double& Omega);
 
+
+/** Scaling transformation for 3-dimensional integration over volume:
+    \param[in]  vars are three scaled variables that lie in the range [0:1];
+    \param[out] jac (optional) is the jacobian of transformation (if set to NULL, it is not computed);
+    \return  the un-scaled coordinates corresponding to the scaled variables.
+*/
+coord::PosCyl unscaleCoords(const double vars[], double* jac=0);
+
 ///@}
 }  // namespace potential

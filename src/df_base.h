@@ -40,12 +40,21 @@ public:
 
 /** Sample the distribution function in actions.
     In other words, draw N sampling points from the action space, so that the density of points 
-    in the neighborhood of any point is proportional to the value of DF at this point (point = triplet of actions).
+    in the neighborhood of any point is proportional to the value of DF at this point 
+    (point = triplet of actions).
     \param[in]  DF  is the distribution function;
     \param[in]  numSamples  is the required number of sampling points;
     \param[out] samples is the array to be filled with the sampled actions.
-*/
+    \param[out] totalMass (optional) if not NULL, will store the Monte Carlo estimate 
+    of the integral of the distribution function (i.e., the same quantity as computed by 
+    BaseDistributionFunction::totalMass(), but calculated with a different method).
+    \param[out] totalMassErr (optional) if not NULL, will store the error estimate of the integral.
+ */
 void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
-    std::vector<actions::Actions>& samples);
+    std::vector<actions::Actions>& samples, double* totalMass=0, double* totalMassErr=0);
+
+/// convert from scaled variables to the actual actions to be passed to DF
+/// if jac!=NULL, store the value of jacobian of transformation in this variable
+actions::Actions unscaleActions(const double vars[], double* jac=0);
 
 }  // namespace df

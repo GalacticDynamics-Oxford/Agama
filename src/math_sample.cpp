@@ -197,7 +197,7 @@ Sampler::CellEnum Sampler::cellIndex(const double coords[]) const
     CellEnum cellInd = 0;
     for(unsigned int d=0; d<Ndim; d++) {
         cellInd *= binBoundaries[d].size()-1;
-        cellInd += binSearch(coords[d], binBoundaries[d]);
+        cellInd += binSearch(coords[d], &binBoundaries[d].front(), binBoundaries[d].size());
     }
     return cellInd;
 }
@@ -379,7 +379,8 @@ void sampleNdim(const IFunctionNdim& fnc, const double xlower[], const double xu
             numBins[d] = numBinsInput[d];
             totalNumBins *= numBinsInput[d];
         }
-        if(totalNumBins >= numSamples && totalNumBins >= powInt(2, fnc.numVars()))
+        if( totalNumBins >= std::max<unsigned int>(numSamples, 10000) && 
+            totalNumBins >= powInt(2, fnc.numVars()))
             throw std::invalid_argument("sampleNdim: requested number of bins is too large");
     } else {   // nothing provided for the number of bins - determine automatically
         const unsigned int numBinsPerDim = static_cast<unsigned int>( fmax(
@@ -395,7 +396,7 @@ void sampleNdim(const IFunctionNdim& fnc, const double xlower[], const double xu
     sampler.readjustBins();
 
     // second run to collect samples distributed more uniformly inside the bins
-    const unsigned int numCollectSamples = std::max<unsigned int>(numSamples*(fnc.numVars()), 10000);
+    const unsigned int numCollectSamples = std::max<unsigned int>(numSamples*(fnc.numVars()+1), 10000);
     sampler.runPass(numCollectSamples);
 
     // make sure that no sampling point has too large weight, 

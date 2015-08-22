@@ -472,7 +472,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
         return;
     }
 
-    unsigned int index = binSearch(x, xval);
+    unsigned int index = binSearch(x, &xval.front(), xval.size());
     double x_hi = xval[index + 1];
     double x_lo = xval[index];
     double dx   = x_hi - x_lo;
@@ -591,8 +591,8 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
         return;
     }
     // First compute the indices into the data arrays where we are interpolating
-    const unsigned int xi = binSearch(x, xval);
-    const unsigned int yi = binSearch(y, yval);
+    const unsigned int xi = binSearch(x, &xval.front(), xval.size());
+    const unsigned int yi = binSearch(y, &yval.front(), yval.size());
     // Find the minimum and maximum values on the grid cell in each dimension
     const double xlow = xval[xi];
     const double xupp = xval[xi + 1];
@@ -769,8 +769,8 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
         return;
     }
     // First compute the indices into the data arrays where we are interpolating
-    const unsigned int xi = binSearch(x, xval);
-    const unsigned int yi = binSearch(y, yval);
+    const unsigned int xi = binSearch(x, &xval.front(), xval.size());
+    const unsigned int yi = binSearch(y, &yval.front(), yval.size());
     // Find the minimum and maximum values on the grid cell in each dimension
     const double zlowlow = zval(xi, yi);
     const double zlowupp = zval(xi, yi + 1);

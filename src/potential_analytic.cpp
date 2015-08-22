@@ -25,7 +25,8 @@ double Plummer::enclosedMass(double r) const
 void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
-    double ln_over_r = r!=0 ? log(1 + r/scaleRadius) / r : 1/scaleRadius;
+    double ln_over_r = (r==0) ? (1/scaleRadius) : (r==INFINITY) ? 0 :
+        log(1 + r/scaleRadius) / r;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)

@@ -4,7 +4,8 @@
     \author  Eugene Vasiliev
 */
 #pragma once
-#include "math_ndim.h"
+#include "math_base.h"
+#include "math_linalg.h"
 
 namespace math{
 

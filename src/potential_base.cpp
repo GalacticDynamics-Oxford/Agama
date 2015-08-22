@@ -5,6 +5,8 @@
 
 namespace potential{
 
+// -------- Computation of density from Laplacian in various coordinate systems -------- //
+
 double BasePotential::densityCar(const coord::PosCar &pos) const
 {
     coord::HessCar deriv2;
@@ -61,54 +63,50 @@ double BasePotentialSphericallySymmetric::enclosedMass(const double radius) cons
     return pow_2(radius)*dPhidr;
 }
 
+// ---------- Integration of density by volume ---------- //
+
+// scaling transformation for integration over volume
+coord::PosCyl unscaleCoords(const double vars[], double* jac)
+{
+    const double scaledr  = vars[0];
+    const double costheta = vars[1] * 2 - 1;
+    const double r = exp( 1/(1-scaledr) - 1/scaledr );
+    if(jac)
+        *jac = 4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
+    return coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
+}
+
+// return the scaled radius variable to be used as the integration limit
+static double scaledr_from_r(const double r) {
+    const double y = log(r);
+    return  fabs(y)<1 ? // two cases depending on whether |y| is small or large
+        1/(1 + sqrt(1+pow_2(y*0.5)) - y*0.5) :            // y is close to zero
+        0.5 + sqrt(0.25+pow_2(1/y))*math::sign(y) - 1/y;  // y is large (or even +-infinity)
+}
+
 /// helper class for integrating density over volume
 class DensityNdimIntegrand: public math::IFunctionNdim {
 public:
     DensityNdimIntegrand(const BaseDensity& _dens) :
-        dens(_dens) {};
-    // compute azimuthal integrand of density at a given point in (R,z) plane
+        dens(_dens), axisym((_dens.symmetry() & ST_ZROTSYM) == ST_ZROTSYM) {}
+
+    /// integrand for the density at a given point (R,z,phi) with appropriate coordinate scaling
     virtual void eval(const double vars[], double values[]) const 
-    {   // input array is [scaled coordinate r, cos(theta)]
-        const double scaledr = vars[0], costheta = vars[1];
-#if 0
-        if(scaledr==1 || scaledr==0) {
-            values[0] = 0;  // we're at infinity
-            return;
-        }
-        const double r = scaledr / (1-scaledr);
-        const double jac = 2*M_PI * r*r / pow_2(1-scaledr);
-#else
-        if(scaledr>=0.96 || scaledr<=0.04) {  // cutoff at r<4e-11 or r>2.5e+10 to avoid overflows
-            values[0] = 0;  // we're at infinity
-            return;
-        }
-        const double r = exp( 1/(1-scaledr) - 1/scaledr );
-        double jac = 2*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
-#endif
-        const double R = r * sqrt(1-pow_2(costheta));
-        const double z = r * costheta;
-        double val = computeRho_m(dens, R, z, 0);
-        if((dens.symmetry() & ST_PLANESYM) == ST_PLANESYM)
-            val *= 2;
-        else
-            val += computeRho_m(dens, R, -z, 0);
-        values[0] = val * jac;
+    {
+        double scvars[3] = {vars[0], vars[1], axisym ? 0. : vars[2]};
+        double jac;  // jacobian of coordinate scaling
+        const coord::PosCyl pos = unscaleCoords(scvars, &jac);
+        if(math::withinReasonableRange(pos.R+fabs(pos.z)))
+            values[0] = dens.density(pos) * jac;
+        else                // we're almost at infinity or nearly at zero (in both cases,
+            values[0] = 0;  // the result is negligibly small, but difficult to compute accurately)
     }
-    virtual unsigned int numVars() const { return 2; }
+    /// dimensions of integration: only integrate in phi if density is not axisymmetric
+    virtual unsigned int numVars() const { return axisym ? 2 : 3; }
     virtual unsigned int numValues() const { return 1; }
-    /// return the scaled radius variable to be used as the integration limit
-    double scaledr_from_r(const double r) const {
-#if 0
-        return 1/(1/r+1);  // valid even for r=0 or r=inf
-#else
-        const double y = log(r);
-        return  fabs(y)<1 ? // two cases depending on whether |y| is small or large
-            1/(1 + sqrt(1+pow_2(y*0.5)) - y*0.5) :      // y is close to zero
-            0.5 + sqrt(0.25+pow_2(1/y))*math::sign(y) - 1/y;  // y is large
-#endif
-    }
 private:
     const BaseDensity& dens;
+    const bool axisym;
 };
 
 double BaseDensity::enclosedMass(const double r) const
@@ -117,8 +115,8 @@ double BaseDensity::enclosedMass(const double r) const
     // default implementation is to integrate over density inside given radius;
     // may be replaced by cheaper and more approximate evaluation for derived classes
     DensityNdimIntegrand fnc(*this);
-    double xlower[2] = {0, 0};
-    double xupper[2] = {fnc.scaledr_from_r(r), 1};
+    double xlower[3] = {0, 0, 0};
+    double xupper[3] = {scaledr_from_r(r), 1, 1};
     double result, error;
     int numEval;
     const int maxNumEval = 10000;
@@ -229,6 +227,7 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     return gamma1;
 }
 
+// -------- Various routines for potential --------- //
 
 double v_circ(const BasePotential& potential, double radius)
 {
@@ -240,6 +239,9 @@ double v_circ(const BasePotential& potential, double radius)
     return sqrt(radius*deriv.dR);
 }
 
+/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
+    (i.e. the radius R of a circular orbit with the given energy E).
+*/
 class RcircRootFinder: public math::IFunction {
 public:
     RcircRootFinder(const BasePotential& _poten, double _E) :
@@ -258,7 +260,7 @@ public:
         if(deriv)
             *deriv = -3*grad.dR - R*hess.dR2;
         if(deriv2)
-            *deriv2=NAN;
+            *deriv2 = NAN;
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
@@ -266,6 +268,11 @@ private:
     const double E;
 };
 
+/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
+    (i.e. the radius R of a circular orbit with the given angular momentum L_z).
+    For the reason of accuracy, we multiply the equation by  1/(R+1), 
+    which ensures that the value stays finite as R -> infinity or R -> 0.
+*/
 class RfromLzRootFinder: public math::IFunction {
 public:
     RfromLzRootFinder(const BasePotential& _poten, double _Lz) :
@@ -273,17 +280,21 @@ public:
     virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
         coord::GradCyl grad;
         coord::HessCyl hess;
-        poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
-        if(val) {
-            if(R==INFINITY)
-                *val = -1-Lz2;  // safely negative value
-            else
-                *val = Lz2 - (R>0 ? pow_3(R)*grad.dR : 0);
-        }
-        if(deriv)
-            *deriv = pow_2(R)*( 3*grad.dR - R*hess.dR2);
+        if(R < math::UNREASONABLY_LARGE_VALUE) {
+            poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
+            if(val)
+                *val = ( Lz2 - (R>0 ? pow_3(R)*grad.dR : 0) ) / (R+1);
+            if(deriv)
+                *deriv = -(Lz2 + pow_2(R)*( (3+2*R)*grad.dR + R*(R+1)*hess.dR2) ) / pow_2(R+1);
+        } else {   // at large R, Phi(R) ~ -M/R, we may use this asymptotic approximation even at infinity
+            poten.eval(coord::PosCyl(math::UNREASONABLY_LARGE_VALUE,0,0), NULL, &grad);
+            if(val)
+                *val = Lz2/(R+1) - pow_2(math::UNREASONABLY_LARGE_VALUE) * grad.dR / (1+1/R);
+            if(deriv)
+                *deriv = NAN;
+        } 
         if(deriv2)
-            *deriv2=NAN;
+            *deriv2 = NAN;
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
