@@ -75,8 +75,9 @@ const potential::BasePotential* create_from_file(
 particles::PointMassArrayCar points;  // sampling points
 
 /// compare potential and its derivatives between the original model and its spherical-harmonic approximation
-bool test_suite(const potential::BasePotential& p, const potential::BasePotential& orig, double eps_pot)
+bool test_suite(const potential::BasePotential* pp, const potential::BasePotential& orig, double eps_pot)
 {
+    const potential::BasePotential& p = *pp;
     bool ok=true;
     const potential::BasePotential* newpot = write_read(p);
     double gamma = getInnerDensitySlope(orig);
@@ -128,31 +129,53 @@ bool test_suite(const potential::BasePotential& p, const potential::BasePotentia
 int main() {
     srand(42);
     bool ok=true;
-    const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
     make_hernquist(100000, 0.8, 0.6, points);
-    const potential::Plummer plum(10., 5.);  // spherical, cored
-    ok &= test_suite(potential::BasisSetExp(0., 20, 2, plum), plum, 1e-5);
-    ok &= test_suite(potential::SplineExp(20, 2, plum), plum, 1e-5);
-    ok &= test_suite(potential::CylSplineExp(20, 20, 0, 
-        static_cast<const potential::BaseDensity&>(plum)), plum, 1e-4);  // this forces potential to be computed via integration of density over volume
-    const potential::Dehnen deh15(3., 1.2, 0.8, 0.6, 1.5);  // mildly triaxial, cuspy
-    ok &= test_suite(potential::BasisSetExp(2., 20, 6, deh15), deh15, 2e-4);
-    ok &= test_suite(potential::SplineExp(20, 6, deh15), deh15, 2e-4);
-/*    ok &= test_suite(potential::CylSplineExp(20, 20, 6, 
-        static_cast<const potential::BaseDensity&>(deh15)), deh15, 2e-4);*/
-    const potential::Dehnen deh0(1., 1., 0.8, 0.6, 0.);  // mildly triaxial, cored
-    ok &= test_suite(potential::BasisSetExp(1., 20, 6, deh0), deh0, 5e-5);
-    ok &= test_suite(potential::SplineExp(20, 6, deh0), deh0, 5e-5);
-    ok &= test_suite(potential::CylSplineExp(20, 20, 6, 
-        static_cast<const potential::BaseDensity&>(deh0)), deh0, 1e-4);
-    const potential::BasePotential* p = create_from_file(points, potential::PT_BSE);
-    ok &= test_suite(*p, hernq, 2e-2);
+    const potential::BasePotential* p=0;
+
+    // spherical, cored
+    const potential::Plummer plum(10., 5.);
+    p = new potential::BasisSetExp(0., 20, 2, plum);
+    ok &= test_suite(p, plum, 1e-5);
+    delete p;
+    p = new potential::SplineExp(20, 2, plum);
+    ok &= test_suite(p, plum, 1e-5);
+    delete p;
+    // this forces potential to be computed via integration of density over volume
+    p = new potential::CylSplineExp(20, 20, 0, static_cast<const potential::BaseDensity&>(plum));
+    ok &= test_suite(p, plum, 1e-4);
+    delete p;
+
+    // mildly triaxial, cuspy
+    const potential::Dehnen deh15(3., 1.2, 0.8, 0.6, 1.5);
+    p = new potential::BasisSetExp(2., 20, 6, deh15);
+    ok &= test_suite(p, deh15, 2e-4);
+    delete p;
+    p = new potential::SplineExp(20, 6, deh15);
+    ok &= test_suite(p, deh15, 2e-4);
+    delete p;
+
+    // mildly triaxial, cored
+    const potential::Dehnen deh0(1., 1., 0.8, 0.6, 0.);
+    p = new potential::BasisSetExp(1., 20, 6, deh0);
+    ok &= test_suite(p, deh0, 5e-5);
+    delete p;
+    p = new potential::SplineExp(20, 6, deh0);
+    ok &= test_suite(p, deh0, 5e-5);
+    delete p;
+    p = new potential::CylSplineExp(20, 20, 6, static_cast<const potential::BaseDensity&>(deh0));
+    ok &= test_suite(p, deh0, 1e-4);
+    delete p;
+
+    // mildly triaxial, created from N-body samples
+    const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
+    p = create_from_file(points, potential::PT_BSE);
+    ok &= test_suite(p, hernq, 2e-2);
     delete p;
     p = new potential::SplineExp(20, 4, points, potential::ST_TRIAXIAL);  // create_from_file(points, potential::PT_SPLINE);
-    ok &= test_suite(*p, hernq, 2e-2);
+    ok &= test_suite(p, hernq, 2e-2);
     delete p;
     p = create_from_file(points, potential::PT_CYLSPLINE);
-    ok &= test_suite(*p, hernq, 2e-2);
+    ok &= test_suite(p, hernq, 2e-2);
     delete p;
     if(ok)
         std::cout << "ALL TESTS PASSED\n";

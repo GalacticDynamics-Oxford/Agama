@@ -73,9 +73,9 @@ void Dehnen::evalCar(const coord::PosCar &pos,
                 mass/scalerad * (gamma==2 ? log(r/(r+scalerad)) : (1-pow(r/(r+scalerad), 2-gamma))/(gamma-2) );
         double val = mass*pow(r, -gamma)*pow(r+scalerad, gamma-3);
         if(deriv!=NULL) {
-            deriv->dx = val*pos.x;
-            deriv->dy = val*pos.y;
-            deriv->dz = val*pos.z;
+            deriv->dx = r>0 ? val*pos.x : 0;
+            deriv->dy = r>0 ? val*pos.y : 0;
+            deriv->dz = r>0 ? val*pos.z : 0;
         }
         if(deriv2!=NULL) {
             double val2 = val*(scalerad*(1-gamma)-2*r)/(r*r*(r+scalerad));

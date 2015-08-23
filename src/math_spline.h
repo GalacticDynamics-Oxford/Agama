@@ -17,7 +17,7 @@ class CubicSpline: public IFunction {
 public:
     /** empty constructor is required for the class to be used in std::vector and alike places */
     CubicSpline() {};
-
+    
     /** Initialize a cubic spline from the provided values of x and y
         (which should be arrays of equal length, and x values must be monotonically increasing).
         If deriv_left or deriv_right are provided, they set the slope at the lower or upper boundary

@@ -42,7 +42,7 @@ public:
             ( 2*M_PI /                 // integration over phi
             (2*M_SQRTPI) ) *           // definition of spherical function Y_l^m
             radialMultFactor(r);       // additional radius-dependent factor
-        const double Plm = math::legendrePoly(l, abs(m), acos(costheta));
+        const double Plm = math::legendrePoly(l, math::abs(m), acos(costheta));
         double val = computeRho_m(dens, R, z, m) * Plm;
         if((dens.symmetry() & ST_PLANESYM) == ST_PLANESYM)   // symmetric w.r.t. change of sign in z
             val *= (l%2==0 ? 2 : 0);  // only even-l terms survive
@@ -517,7 +517,7 @@ void SplineExp::computeCoefsFromPoints(const particles::PointMassArray<coord::Po
         for(int l=0; l<=lmax; l+=lstep)
             for(int m=l*mmin; m<=l*mmax; m+=mstep) {
                 int coefind = l*(l+1)+m;
-                int absm = abs(m);  // negative m correspond to sine, positive - to cosine
+                int absm = math::abs(m);  // negative m correspond to sine, positive - to cosine
                 double mult = -sqrt(4*M_PI)/(2*l+1) * (m==0 ? 1 : M_SQRT2) * points.mass(i) *
                     legendre_array[absm][l-absm] * 
                     (m>=0 ? cos(m*points.point(i).phi) : sin(-m*points.point(i).phi));

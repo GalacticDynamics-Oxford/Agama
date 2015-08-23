@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <set>
+#include <algorithm>
 
 #include <iostream>
 namespace math{
@@ -117,9 +118,9 @@ private:
     ///< where initially w = Vc(x) * Nc / V, i.e., proportional to the volume of 
     ///< the N-dimensional cell from which the point was sampled,
     ///< and later w may be reduced if this cell gets refined
-    double integValue;         ///< estimate of the integral of f(x) over H          [ EI ]
-    double integError;         ///< estimate of the error in the integral            [ EE ]
-    typedef long int CellEnum; ///< the way to enumerate all cells, should be a large enough type
+    double integValue;           ///< estimate of the integral of f(x) over H        [ EI ]
+    double integError;           ///< estimate of the error in the integral          [ EE ]
+    typedef long unsigned int CellEnum; ///< the way to enumerate all cells, should be a large enough type
 
     /** randomly sample an N-dimensional point, such that it has equal probability 
         of falling into each cell, and its location within the given cell
@@ -180,7 +181,7 @@ double Sampler::samplePoint(double coords[]) const
 
 double Sampler::samplePointFromCell(CellEnum cellInd, double coords[]) const
 {
-    assert(cellInd>=0 && cellInd<numCells);
+    assert(cellInd<numCells);
     double binVol = 1.0;
     for(unsigned int d=Ndim; d>0; d--) {
         unsigned int b = cellInd % (binBoundaries[d-1].size()-1);
@@ -321,9 +322,12 @@ void Sampler::ensureEnoughSamples(const unsigned int numOutputSamples)
             iterCell != cellsForRefinement.end(); ++iterCell) 
         {
             CellEnum indexCell = *iterCell;
-            for(int i=0; i<samplesPerCell; i++) {
+            // since # of samplesPerCell may not be an integer number,
+            // we randomly choose this number for each cell to provide the correct average value
+            int samplesPerThisCell = static_cast<int>(floor(samplesPerCell+random()));
+            for(int i=0; i<samplesPerThisCell; i++) {
                 sampleCoords.resize(sampleCoords.numRows()+1, Ndim);
-                double* coords = &(sampleCoords(sampleCoords.numRows()-1, 0));
+                double* coords = &(sampleCoords(sampleCoords.numRows()-1, 0));  // taking the entire row
                 double weight  = samplePointFromCell(indexCell, coords) * sampleWeight;
                 assert(cellIndex(coords) == indexCell);
                 double wval    = evalFnc(coords) * weight;  // function value times the weight coefficient

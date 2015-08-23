@@ -13,7 +13,7 @@ inline unsigned int pow_2(unsigned int x) { return x*x; }
 /// convenience function for raising a number to the 3rd power
 inline double pow_3(double x) { return x*x*x; }
 
-// some useful definitions
+// some useful numbers (or even not-a-numbers)
 #ifndef INFINITY
 #define INFINITY 1e10000
 #endif

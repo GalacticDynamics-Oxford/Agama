@@ -309,9 +309,9 @@ double DirectPotential::Phi_m(double R, double Z, int m) const
             pt!=points->data.end(); pt++) 
         {
             const coord::PosCyl& pc = pt->first;
-            double val1 = besselInts[abs(m)].value(R, pc.R, Z-pc.z);
+            double val1 = besselInts[math::abs(m)].value(R, pc.R, Z-pc.z);
             if((mysymmetry & ST_PLANESYM)==ST_PLANESYM)   // add symmetric contribution from -Z
-                val1 = (val1 + besselInts[abs(m)].value(R, pc.R, Z+pc.z))/2.;
+                val1 = (val1 + besselInts[math::abs(m)].value(R, pc.R, Z+pc.z))/2.;
             if(math::isFinite(val1))
                 val += pt->second * val1 * (m==0 ? 1 : m>0 ? 2*cos(m*pc.phi) : 2*sin(-m*pc.phi) );
         }
@@ -321,7 +321,7 @@ double DirectPotential::Phi_m(double R, double Z, int m) const
     int mmax = splines.size()/2;
     if(splines.size()>0 && splines[mmax+m].isEmpty())
         return 0;  // using splines for m-components of density but it is identically zero at this m
-    DirectPotentialIntegrand fnc(*this, besselInts[abs(m)], R, Z, m);
+    DirectPotentialIntegrand fnc(*this, besselInts[math::abs(m)], R, Z, m);
     double Rzmin[2]={0.,0.}, Rzmax[2]={1.,1.}; // integration box in scaled coords
     double result, error;
     int numEval;

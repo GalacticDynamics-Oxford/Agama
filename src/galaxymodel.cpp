@@ -59,114 +59,180 @@ static coord::PosVelCyl unscalePosVel(const double vars[],
         *jac *= jacPos;
     return coord::PosVelCyl(pos, vel);
 }
-    
-/// helper class for integrating distribution function over 3d velocity or 6d position/velocity space
+
+
+/** Base helper class for integrating the distribution function 
+    over 3d velocity or 6d position/velocity space.
+    The integration is carried over in scaled coordinates which range from 0 to 1;
+    the task for converting them to position/velocity point lies on the derived classes.
+    The actions corresponding to the given point are computed with the action finder object
+    from the GalaxyModel, and the distribution function value for these actions is provided
+    by the eponimous member object from the GalaxyModel.
+    The output may consist of one or more values, determined by the derived classes.
+*/
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
-    /// mode of operation - first three options are for 3d integration over velocities at a fixed position
-    enum MODE {
-        ZEROTH_MOMENT,  ///< 0th moment only (i.e., density)
-        FIRST_MOMENT,   ///< 0th and 1st moments (density and three velocity components)
-        SECOND_MOMENT,  ///< 0th, 1st and 2nd moments (density, velocity and outer product of velocity components)
-        DF_VALUE        ///< same as ZEROTH_MOMENT, but integrating over the entire 6d phase volume
-    };
-
-    /// prepare for integration in 3d velocity space for a fixed position
-    DFIntegrandNdim(const GalaxyModel& _model, const coord::PosCyl& _point, const MODE _mode) :
-        model(_model), point(_point), mode(_mode), velmag(escapeVel(_point, _model.potential)) {}
-
-    /// prepare for integration in 6d position/velocity space
     explicit DFIntegrandNdim(const GalaxyModel& _model) :
-        model(_model), point(0,0,0), mode(DF_VALUE), velmag(0) {}
+        model(_model) {}
 
-    /** compute one or more moments of distribution function.
-        Input array defines 3 components of velocity (if computing moments of DF at a fixed position),
-        or 6 components of position+velocity (if sampling the DF over the entire phase space).
-        In both cases these components are obtained by a suitable 
-        scaling transformation from the input array.
-        Output array contains the value of distribution function (f),
-        multiplied by various combinations of velocity components (depending on MODE):
-        {f, [f*vR, f*vz, f*vphi, [f*vR^2, f*vz^2, f*vphi^2, f*vR*vz, f*vR*vphi, f*vz*vphi] ] }.
-    */
+    /** compute one or more moments of distribution function. */
     virtual void eval(const double vars[], double values[]) const
     {
         // 1. get the position/velocity components in cylindrical coordinates
-        double jac;                // jacobian of variable transformation
-        coord::PosVelCyl posvel =
-            (mode == DF_VALUE) ?   // we are integrating over 6d position/velocity space
-            unscalePosVel(vars, model.potential, &jac)
-            :   // we are integrating over 3d velocity at a fixed position
-            coord::PosVelCyl(point, unscaleVelocity(vars, velmag, &jac));
-    
+        double jac;   // jacobian of variable transformation
+        coord::PosVelCyl posvel = unscaleVars(vars, &jac);
+        if(jac == 0) {  // we can't compute actions, but pretend that DF*jac is zero
+            outputValues(posvel, 0, values);
+            return;
+        }
+        
         // 2. determine the actions
-        double dfval=0;
-        try{
-            actions::Actions acts;
-            if(math::withinReasonableRange(posvel.R+fabs(posvel.z)))
-                acts = model.actFinder.actions(posvel);
-            else {
-                jac = 0;
-                acts.Jr = acts.Jz = acts.Jphi = 1;  // doesn't matter since jac=0
-            }
+        actions::Actions acts = model.actFinder.actions(posvel);
 
-            // 3. compute the value of distribution function times the jacobian
-            dfval = model.distrFunc.value(acts) * jac;
-        }
-        catch(std::exception& e) {
-            dfval=0;
-            std::cout << posvel << e.what() <<std::endl;
-        }
-
-        // 4. output the value, optionally multiplied by various combinations of velocity components
-        values[0] = dfval;
-        if(mode == FIRST_MOMENT || mode == SECOND_MOMENT) {
-            values[1] = dfval * posvel.vR;
-            values[2] = dfval * posvel.vz;
-            values[3] = dfval * posvel.vphi;
-        }
-        if(mode == SECOND_MOMENT) {
-            values[4] = dfval * posvel.vR   * posvel.vR;
-            values[5] = dfval * posvel.vz   * posvel.vz;
-            values[6] = dfval * posvel.vphi * posvel.vphi;
-            values[7] = dfval * posvel.vR   * posvel.vz;
-            values[8] = dfval * posvel.vR   * posvel.vphi;
-            values[9] = dfval * posvel.vz   * posvel.vphi;
-        }
+        // 3. compute the value of distribution function times the jacobian
+        double dfval = model.distrFunc.value(acts) * jac;
+        
+        // 4. output the value(s) to the integration routine
+        outputValues(posvel, dfval, values);
     }
 
-    /// number of variables (3 velocity components or 6 position/velocity components)
-    virtual unsigned int numVars()   const { return mode == DF_VALUE ? 6 : 3; }
+    /** convert from scaled variables used in the integration routine 
+        to the actual position/velocity point.
+        \param[in]  vars  is the array of scaled variables;
+        \param[out] jac (optional)  is the jacobian of transformation, if NULL it is not computed;
+        \return  the position and velocity in cylindrical coordinates.
+    */
+    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const = 0;
 
-    /// number of values to compute
-    virtual unsigned int numValues() const {
-        return mode == SECOND_MOMENT ? 10 :
-               mode == FIRST_MOMENT ? 4 : 1;
-    }
-private:
-    const GalaxyModel& model;
-    const coord::PosCyl point;
-    const MODE mode;
-    const double velmag;
+protected:
+    /** output the value(s) computed at a given point to the integration routine.
+        \param[in]  point  is the position/velocity point;
+        \param[in]  dfval  is the value of distribution function at this point;
+        \param[out] values is the array of one or more values that are computed
+    */
+    virtual void outputValues(const coord::PosVelCyl& point, const double dfval, 
+        double values[]) const = 0;
+
+    const GalaxyModel& model;  ///< reference to the galaxy model to work with
 };
+
+
+/** helper class for integrating the distribution function over velocity at a fixed position */
+class DFIntegrandAtPoint: public DFIntegrandNdim {
+public:
+    DFIntegrandAtPoint(const GalaxyModel& _model, const coord::PosCyl& _point) :
+        DFIntegrandNdim(_model), point(_point), v_esc(escapeVel(_point, _model.potential)) {}
+
+    /// input variables define 3 components of velocity, suitably scaled
+    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const { 
+        return coord::PosVelCyl(point, unscaleVelocity(vars, v_esc, jac));
+    }
+    
+protected:
+    /// dimension of the input array (3 scaled velocity components)
+    virtual unsigned int numVars()   const { return 3; }
+
+    /// dimension of the output array
+    virtual unsigned int numValues() const { return 1; }
+
+    /// output array contains one element - the value of DF
+    virtual void outputValues(const coord::PosVelCyl& , const double dfval, 
+        double values[]) const {
+        values[0] = dfval;
+    }
+    
+    const coord::PosCyl point;  ///< fixed position
+    const double v_esc ;        ///< escape velocity at this position
+};
+
+
+/** helper class for integrating the distribution function and its first moments
+    over velocity at a fixed position */
+class DFIntegrandAtPointFirstMoment: public DFIntegrandAtPoint {
+public:
+    DFIntegrandAtPointFirstMoment(const GalaxyModel& _model, const coord::PosCyl& _point) :
+        DFIntegrandAtPoint(_model, _point) {}
+
+protected:
+    virtual unsigned int numValues() const { return 4; }
+
+    /// output array contains four elements - the value of DF 
+    /// itself and multiplied by three components of velocity
+    virtual void outputValues(const coord::PosVelCyl& pt, const double dfval, 
+        double values[]) const {
+        DFIntegrandAtPoint::outputValues(pt, dfval, values);
+        values[1] = dfval * pt.vR;
+        values[2] = dfval * pt.vz;
+        values[3] = dfval * pt.vphi;
+    }
+};
+
+/** helper class for integrating the distribution function and its first 
+    and second moments over velocity at a fixed position */
+class DFIntegrandAtPointFirstAndSecondMoment: public DFIntegrandAtPointFirstMoment {
+public:
+    DFIntegrandAtPointFirstAndSecondMoment(const GalaxyModel& _model, const coord::PosCyl& _point) :
+        DFIntegrandAtPointFirstMoment(_model, _point) {}
+        
+protected:
+    virtual unsigned int numValues() const { return 10; }
+
+    /** output array contains ten elements - the value of DF 
+        itself, multiplied by various combinations of velocity components:
+        {f, f*vR, f*vz, f*vphi, f*vR^2, f*vz^2, f*vphi^2, f*vR*vz, f*vR*vphi, f*vz*vphi }.  */
+    virtual void outputValues(const coord::PosVelCyl& pt, const double dfval, 
+        double values[]) const {
+        DFIntegrandAtPointFirstMoment::outputValues(pt, dfval, values);
+        values[4] = dfval * pt.vR   * pt.vR;
+        values[5] = dfval * pt.vz   * pt.vz;
+        values[6] = dfval * pt.vphi * pt.vphi;
+        values[7] = dfval * pt.vR   * pt.vz;
+        values[8] = dfval * pt.vR   * pt.vphi;
+        values[9] = dfval * pt.vz   * pt.vphi;
+    }
+};
+
+/** helper class for integrating the distribution function over the entire 6d phase space */
+class DFIntegrand6dim: public DFIntegrandNdim {
+public:
+    DFIntegrand6dim(const GalaxyModel& _model) :
+        DFIntegrandNdim(_model) {}
+    
+    /// input variables define 6 components of position and velocity, suitably scaled
+    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const { 
+        return unscalePosVel(vars, model.potential, jac);
+    }
+    
+protected:
+    virtual unsigned int numVars()   const { return 6; }
+    virtual unsigned int numValues() const { return 1; }
+    
+    /// output array contains one element - the value of DF
+    virtual void outputValues(const coord::PosVelCyl& , const double dfval, 
+        double values[]) const {
+        values[0] = dfval;
+    }
+};
+
 
 void computeMoments(const GalaxyModel& model,
     const coord::PosCyl& point, const double reqRelError, const int maxNumEval,
     double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
     double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr)
 {
-    DFIntegrandNdim::MODE  mode =
-        velocitySecondMoment!=NULL ? DFIntegrandNdim::SECOND_MOMENT :
-        velocityFirstMoment !=NULL ? DFIntegrandNdim::FIRST_MOMENT : DFIntegrandNdim::ZEROTH_MOMENT;
-    DFIntegrandNdim fnc(model, point, mode);
-
     // define the integration region in scaled velocities
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {1, 1, 1};
     double result[10], error[10];  // the values of integrals and their error estimates
     int numEval; // actual number of evaluations
 
-    // perform the multidimensional integration
-    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error, &numEval);
+    // perform the multidimensional integration using a suitable helper function, 
+    // depending on the requested combination of output arguments
+    const DFIntegrandNdim* fnc = 
+        velocitySecondMoment!=NULL ? new DFIntegrandAtPointFirstAndSecondMoment(model, point) :
+        velocityFirstMoment !=NULL ? new DFIntegrandAtPointFirstMoment(model, point) :
+        new DFIntegrandAtPoint(model, point);
+    math::integrateNdim(*fnc, xlower, xupper, reqRelError, maxNumEval, result, error, &numEval);
 
     // store the results
     if(density!=NULL) {
@@ -211,6 +277,7 @@ void computeMoments(const GalaxyModel& model,
     }
 }
 
+
 void generateActionSamples(const GalaxyModel& model, const unsigned int nSamp,
     particles::PointMassArrayCar &points, std::vector<actions::Actions>* actsOutput)
 {
@@ -248,10 +315,11 @@ void generateActionSamples(const GalaxyModel& model, const unsigned int nSamp,
     }
 }
 
+
 void generatePosVelSamples(const GalaxyModel& model, const unsigned int numSamples, 
     particles::PointMassArrayCar &points)
 {
-    DFIntegrandNdim fnc(model);
+    DFIntegrand6dim fnc(model);
     math::Matrix<double> result;      // sampled scaled coordinates/velocities
     double totalMass, errorMass;      // total normalization of the distribution function and its estimated error
     double xlower[6] = {0,0,0,0,0,0}; // boundaries of sampling region in scaled coordinates
@@ -262,10 +330,34 @@ void generatePosVelSamples(const GalaxyModel& model, const unsigned int numSampl
     unsigned int numBins[6] = {NB, NB, 1, NB, 1, 1};
     math::sampleNdim(fnc, xlower, xupper, numSamples, numBins, result, NULL, &totalMass, &errorMass);
     const double pointMass = totalMass / result.numRows();
+    points.data.clear();
     for(unsigned int i=0; i<result.numRows(); i++) {
+        double scaledvars[6] = {result(i,0), result(i,1), result(i,2),
+            result(i,3), result(i,4), result(i,5)};
         // transform from scaled vars (array of 6 numbers) to real pos/vel
-        const coord::PosVelCyl pt = unscalePosVel(&result(i,0), model.potential);
+        const coord::PosVelCyl pt = fnc.unscaleVars(scaledvars);
         points.add(coord::toPosVelCar(pt), pointMass);
+    }
+}
+
+
+void generateDensitySamples(const potential::BaseDensity& dens, const unsigned int numPoints,
+    particles::PointMassArray<coord::PosCyl>& points)
+{
+    const double axisym = isAxisymmetric(dens);
+    potential::DensityIntegrandNdim fnc(dens);
+    math::Matrix<double> result;      // sampled scaled coordinates
+    double totalMass, errorMass;      // total mass and its estimated error
+    double xlower[3] = {0,0,0};       // boundaries of sampling region in scaled coordinates
+    double xupper[3] = {1,1,1};
+    math::sampleNdim(fnc, xlower, xupper, numPoints, NULL, result, NULL, &totalMass, &errorMass);
+    const double pointMass = totalMass / result.numRows();
+    points.data.clear();
+    for(unsigned int i=0; i<result.numRows(); i++) {
+        double scaledvars[3] = {result(i,0), result(i,1), 
+            axisym ? 2*M_PI*math::random() : result(i,2)};
+        // transform from scaled coordinates to the real ones, and store the point into the array
+        points.add(fnc.unscaleVars(scaledvars), pointMass);
     }
 }
 

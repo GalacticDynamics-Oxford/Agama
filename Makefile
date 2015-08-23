@@ -59,6 +59,8 @@ TORUSSRC  = CHB.cc \
             Point_None.cc \
             Torus.cc \
             Toy_Isochrone.cc
+# disable several warnings - not that they're ungrounded, but just the code is too messy to try correcting them
+TORUSFLAGS = -Wmaybe-uninitialized -Wno-unused-variable -Wunused-but-set-variable -Wreorder
 
 # test programs
 TESTSRCS  = test_math_core.cpp \
@@ -107,7 +109,7 @@ $(OBJDIR)/%.o:  $(LEGACYDIR)/%.cpp
 	$(CXX) -c $(CXXFLAGS) -o "$@" "$<"
 
 $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc
-	$(CXX) -c $(CXXFLAGS) -Wno-unused-variable -o "$@" "$<"
+	$(CXX) -c $(CXXFLAGS) $(TORUSFLAGS) -o "$@" "$<"
 
 clean:
 	rm -f $(OBJDIR)/*.o $(EXEDIR)/*.exe $(LIBNAME) $(PY_WRAPPER)

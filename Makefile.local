@@ -7,7 +7,7 @@ CXXFLAGS += -Wall -Wno-overflow -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections
 LFLAGS   += -fPIC -lgsl -lgslcblas
 
 # check the dirnames
-PYFLAGS  += -I/usr/include/python2.6 -I/Library/Python/2.6/site-packages/numpy/core/include -lpython
+PYFLAGS  += -I/usr/include/python2.6 -I/Library/Python/2.6/site-packages/numpy/core/include -lpython -fno-strict-aliasing
 
 # this flag apparently is only relevant for MacOS and reduces the size of executable files by removing unused code
 LFLAGS  += -Wl,-dead_strip

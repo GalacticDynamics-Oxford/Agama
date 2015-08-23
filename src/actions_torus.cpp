@@ -46,7 +46,7 @@ private:
 ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, const Actions& acts) :
     data(NULL)
 {
-    if((poten.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
+    if(!isAxisymmetric(poten))
         throw std::invalid_argument("ActionMapperTorus only works for axisymmetric potentials");
     Torus::Torus* torus=NULL;
     try{

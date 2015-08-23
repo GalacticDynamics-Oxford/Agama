@@ -137,7 +137,7 @@ public:
 void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, double Lz, 
     double& Rmin, double& Rmax, double* Jr)
 {
-    if((poten.symmetry() & potential::ST_AXISYMMETRIC) != potential::ST_AXISYMMETRIC)
+    if(!isAxisymmetric(poten))
         throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
     // the function to use in root-finder for locating the roots of v_R^2=0
     OrbitSizeFunction fnc(poten, E, Lz);
@@ -377,7 +377,7 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
     const potential::BasePotential& _potential, const unsigned int gridSizeE) :
     potential(_potential)
 {
-    if((potential.symmetry() & potential::ST_ZROTSYM) != potential::ST_ZROTSYM)
+    if(!isAxisymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "interfocal distance estimator is not suitable for this case");
     

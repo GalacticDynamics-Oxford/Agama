@@ -72,7 +72,8 @@ coord::PosCyl unscaleCoords(const double vars[], double* jac)
     const double costheta = vars[1] * 2 - 1;
     const double r = exp( 1/(1-scaledr) - 1/scaledr );
     if(jac)
-        *jac = 4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
+        *jac = math::withinReasonableRange(r) ?   // if near r=0 or infinity, set jacobian to zero
+            4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr)) : 0;
     return coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
 }
 
@@ -85,36 +86,23 @@ static double scaledr_from_r(const double r) {
 }
 
 /// helper class for integrating density over volume
-class DensityNdimIntegrand: public math::IFunctionNdim {
-public:
-    DensityNdimIntegrand(const BaseDensity& _dens) :
-        dens(_dens), axisym((_dens.symmetry() & ST_ZROTSYM) == ST_ZROTSYM) {}
-
-    /// integrand for the density at a given point (R,z,phi) with appropriate coordinate scaling
-    virtual void eval(const double vars[], double values[]) const 
-    {
-        double scvars[3] = {vars[0], vars[1], axisym ? 0. : vars[2]};
-        double jac;  // jacobian of coordinate scaling
-        const coord::PosCyl pos = unscaleCoords(scvars, &jac);
-        if(math::withinReasonableRange(pos.R+fabs(pos.z)))
-            values[0] = dens.density(pos) * jac;
-        else                // we're almost at infinity or nearly at zero (in both cases,
-            values[0] = 0;  // the result is negligibly small, but difficult to compute accurately)
-    }
-    /// dimensions of integration: only integrate in phi if density is not axisymmetric
-    virtual unsigned int numVars() const { return axisym ? 2 : 3; }
-    virtual unsigned int numValues() const { return 1; }
-private:
-    const BaseDensity& dens;
-    const bool axisym;
-};
+void DensityIntegrandNdim::eval(const double vars[], double values[]) const 
+{
+    double scvars[3] = {vars[0], vars[1], axisym ? 0. : vars[2]};
+    double jac;         // jacobian of coordinate scaling
+    const coord::PosCyl pos = unscaleVars(scvars, &jac);
+    if(jac!=0)
+        values[0] = dens.density(pos) * jac;
+    else                // we're almost at infinity or nearly at zero (in both cases,
+        values[0] = 0;  // the result is negligibly small, but difficult to compute accurately)
+}
 
 double BaseDensity::enclosedMass(const double r) const
 {
     if(r<=0) return 0;   // this assumes no central point mass! overriden in Plummer density model
     // default implementation is to integrate over density inside given radius;
     // may be replaced by cheaper and more approximate evaluation for derived classes
-    DensityNdimIntegrand fnc(*this);
+    DensityIntegrandNdim fnc(*this);
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {scaledr_from_r(r), 1, 1};
     double result, error;
@@ -170,14 +158,14 @@ private:
 double computeRho_m(const BaseDensity& dens, double R, double z, int m)
 {   // compute m-th azimuthal Fourier harmonic coefficient
     // by averaging the input density over phi, if this is necessary at all
-    if((dens.symmetry() & ST_AXISYMMETRIC) == ST_AXISYMMETRIC)
+    if(isAxisymmetric(dens))
         return (m==0 ? dens.density(coord::PosCyl(R, z, 0)) : 0);
     double phimax = (dens.symmetry() & ST_PLANESYM) == ST_PLANESYM ? M_PI_2 : 2*M_PI;
     if(m==0)
         return math::integrate(DensityAzimuthalAverageIntegrand(dens, R, z, m),
             0, phimax, EPSREL_DENSITY_INT) / phimax;
     return math::integrateGL(DensityAzimuthalAverageIntegrand(dens, R, z, m),
-        0, phimax, std::max<int>(8, std::abs(m))) / phimax;
+        0, phimax, std::max<int>(8, math::abs(m))) / phimax;
 }
 
 class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
@@ -231,7 +219,7 @@ double getInnerDensitySlope(const BaseDensity& dens) {
 
 double v_circ(const BasePotential& potential, double radius)
 {
-    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+    if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular velocity is possible");
     coord::GradCyl deriv;
@@ -303,7 +291,7 @@ private:
 };
 
 double R_circ(const BasePotential& potential, double energy) {
-    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+    if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
     return math::findRoot(RcircRootFinder(potential, energy), 0, INFINITY, EPSREL_POTENTIAL_INT);
@@ -317,7 +305,7 @@ double L_circ(const BasePotential& potential, double energy) {
 double R_from_Lz(const BasePotential& potential, double Lz) {
     if(Lz==0)
         return 0;
-    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+    if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
     return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_POTENTIAL_INT);
@@ -326,7 +314,7 @@ double R_from_Lz(const BasePotential& potential, double Lz) {
 void epicycleFreqs(const BasePotential& potential, const double R,
     double& kappa, double& nu, double& Omega)
 {
-    if((potential.symmetry() & ST_ZROTSYM) != ST_ZROTSYM)
+    if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
     coord::GradCyl grad;

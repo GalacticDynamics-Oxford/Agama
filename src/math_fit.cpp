@@ -124,9 +124,10 @@ int findMinNdim(const IFunctionNdim& F, const double xinit[], const double xstep
     fnc.f = functionWrapperNdim;
     fnc.params = const_cast<IFunctionNdim*>(&F);
     int numIter = 0;
+    gsl_vector_const_view v_xinit = gsl_vector_const_view_array(xinit, Ndim);
+    gsl_vector_const_view v_xstep = gsl_vector_const_view_array(xstep, Ndim);
     if(gsl_multimin_fminimizer_set(mizer, &fnc,
-        &gsl_vector_const_view_array(xinit, Ndim).vector,
-        &gsl_vector_const_view_array(xstep, Ndim).vector ) == GSL_SUCCESS)
+        &v_xinit.vector, &v_xstep.vector ) == GSL_SUCCESS)
     {   // iterate
         double sizePrev = gsl_multimin_fminimizer_size(mizer);
         int numIterStall = 0;

@@ -186,7 +186,7 @@ double PointNeighborhood::dxToPosneg(double sgn) const
     double discr = sder*sder - 2*s0*sder2;
     if(discr<=0)
         return NAN;  // never cross zero
-    return sign(sder) * (delta - 2*s0/(sqrt(discr)+abs(sder)) );
+    return sign(sder) * (delta - 2*s0/(sqrt(discr)+fabs(sder)) );
 }
 
 double PointNeighborhood::dxToNearestRoot() const

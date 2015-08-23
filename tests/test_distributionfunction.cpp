@@ -63,7 +63,7 @@ int main(){
 
     // compare standard f(E) for the Hernquist model and the action-based df f(J),
     // normalized by total mass equal to unity
-    coord::PosVelCyl point(.0, 1, 0, 0, 0, 0.5);  // some point
+    coord::PosVelCyl point(0, 1, 0, 0, 0, 0.5);  // some point
     const actions::Actions J = actf.actions(point);
     double energy = totalEnergy(pot, point);
     double df_value_J = dpl.value(J)/mass;   // raw value of f(J) divided by normalizing constant
@@ -104,9 +104,19 @@ int main(){
         std::cout << "ALL TESTS PASSED\n";
 #if 0
     particles::PointMassArrayCar points;
-    generatePosVelSamples(galmod, 1e5, points);
+    galaxymodel::generatePosVelSamples(galmod, 1e5, points);
     particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
         "Text", "sampled_actions.txt", units::ExternalUnits());
+    snap->writeSnapshot(points);
+    delete snap;
+
+    particles::PointMassArray<coord::PosCyl> points1;
+    galaxymodel::generateDensitySamples(galmod.potential, 1e5, points1);
+    points.data.clear();
+    for(unsigned int i=0; i<points1.size(); i++)
+        points.add(coord::PosVelCar(coord::toPosCar(points1.point(i)), coord::VelCar(0,0,0)), points1.mass(i));
+    snap = particles::createIOSnapshotWrite(
+        "Text", "sampled_density.txt", units::ExternalUnits());
     snap->writeSnapshot(points);
     delete snap;
 #endif

@@ -15,7 +15,8 @@ actions::Actions unscaleActions(const double vars[], double* jac)
     const double s  = vars[0], p = vars[1], q = vars[2];
     const double J0 = exp( 1/(1-s) - 1/s );
     if(jac)
-        *jac = 2*(1-p) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s));
+        *jac = math::withinReasonableRange(J0) ?   // if near J=0 or infinity, set jacobian to zero
+            2*(1-p) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s)) : 0;
     actions::Actions acts;
     acts.Jr   = J0 * p;
     acts.Jphi = J0 * (1-p) * (2*q-1);
@@ -37,7 +38,7 @@ public:
         double jac;  // will be initialized by the following call
         const actions::Actions act = unscaleActions(vars, &jac);
         double val = 0;
-        if(math::withinReasonableRange(act.Jr+act.Jz+fabs(act.Jphi)))
+        if(jac!=0)
             val = df.value(act) * jac * TWO_PI_CUBE;   // integral over three angles
         else {
             // we're (almost) at zero or infinity in terms of magnitude of J
@@ -73,7 +74,7 @@ void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
     double xupper[3] = {1, 1, 1};
     math::Matrix<double> result;   // the result array of actions
     DFIntegrandNdim fnc(DF);
-    math::sampleNdim(fnc, xlower, xupper, numSamples, NULL, result, NULL, totalMass, totalMassErr);
+    math::sampleNdim(fnc, xlower, xupper, numSamples, 0, result, 0, totalMass, totalMassErr);
     samples.resize(result.numRows());
     for(unsigned int i=0; i<result.numRows(); i++) {
         const double point[3] = {result(i,0), result(i,1), result(i,2)};

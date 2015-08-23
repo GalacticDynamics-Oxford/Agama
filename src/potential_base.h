@@ -93,6 +93,7 @@ protected:
     /** Evaluate density at the position specified in spherical coordinates */
     virtual double densitySph(const coord::PosSph &pos) const=0;
 
+private:
 /** Copy constructor and assignment operators are not allowed, because 
     their inadvertent application (slicing) would lead to a complex derived class 
     being assigned to a variable of base class, thus destroying its internal state. */
@@ -333,6 +334,29 @@ inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph
 {  return potential.value(p) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
 
 
+/** check if the density model is spherically symmetric */
+inline bool isSpherical(const BaseDensity& dens) {
+    return (dens.symmetry() & ST_SPHERICAL) == ST_SPHERICAL;
+}
+
+/** check if the density model is 'commonly axisymmetric' 
+    (i.e., invariant under rotation about z axis and under change of sign in z) */
+inline bool isAxisymmetric(const BaseDensity& dens) {
+    return (dens.symmetry() & ST_AXISYMMETRIC) == ST_AXISYMMETRIC;
+}
+
+/** check if the density model is rotationally symmetric about z axis */
+inline bool isZRotSymmetric(const BaseDensity& dens) {
+    return (dens.symmetry() & ST_ZROTSYM) == ST_ZROTSYM;
+}
+
+/** check if the density model is triaxial 
+    (symmetric under reflection about any of the three principal planes) */
+inline bool isTriaxial(const BaseDensity& dens) {
+    return (dens.symmetry() & ST_TRIAXIAL) == ST_TRIAXIAL;
+}
+
+
 /** Find (spherical) radius corresponding to the given enclosed mass */
 double getRadiusByMass(const BaseDensity& dens, const double mass, 
     const double rel_toler=EPSREL_DENSITY_INT);
@@ -375,5 +399,29 @@ void epicycleFreqs(const BasePotential& potential, const double R,
 */
 coord::PosCyl unscaleCoords(const double vars[], double* jac=0);
 
+/// helper class for integrating density over volume
+class DensityIntegrandNdim: public math::IFunctionNdim {
+public:
+    DensityIntegrandNdim(const BaseDensity& _dens) :
+        dens(_dens), axisym((_dens.symmetry() & ST_ZROTSYM) == ST_ZROTSYM) {}
+
+    /// integrand for the density at a given point (R,z,phi) with appropriate coordinate scaling
+    virtual void eval(const double vars[], double values[]) const;
+    
+    /// dimensions of integration: only integrate in phi if density is not axisymmetric
+    virtual unsigned int numVars() const { return axisym ? 2 : 3; }
+
+    /// output a single value (the density)
+    virtual unsigned int numValues() const { return 1; }
+
+    /// convert from scaled variables to the real position;
+    /// optionally compute the jacobian of transformation if jac!=NULL
+    inline coord::PosCyl unscaleVars(const double vars[], double* jac=0) const {
+        return unscaleCoords(vars, jac); }
+private:
+    const BaseDensity& dens;  ///< the density model to be integrated over
+    const bool axisym;        ///< flag determining if the density is axisymmetric
+};
+    
 ///@}
 }  // namespace potential

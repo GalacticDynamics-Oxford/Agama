@@ -111,8 +111,8 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_xvalues, const st
     }
 
     // initialize b-spline matrix C 
-    gsl_bspline_knots(&gsl_vector_const_view_array
-        (&knots.front(), knots.size()).vector, bsplineWorkspace);
+    gsl_vector_const_view v_knots = gsl_vector_const_view_array(&knots.front(), knots.size());
+    gsl_bspline_knots(&v_knots.vector, bsplineWorkspace);
     for(size_t i=0; i<numDataPoints; i++) {
         gsl_bspline_eval(_xvalues[i], bsplineValues, bsplineWorkspace);
         for(size_t p=0; p<numKnots+2; p++)

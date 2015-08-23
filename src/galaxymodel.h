@@ -83,5 +83,5 @@ void generatePosVelSamples(const GalaxyModel& model,
 */
 void generateDensitySamples(const potential::BaseDensity& dens,
     const unsigned int numPoints, particles::PointMassArray<coord::PosCyl>& points);
-    
+
 }  // namespace

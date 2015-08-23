@@ -38,10 +38,10 @@ static const char* argTypeDescr(char type)
 }
 
 /// max number of keywords
-static const size_t MAX_NUM_KEYWORDS = 64;
+static const unsigned int MAX_NUM_KEYWORDS = 64;
 
 /// max size of docstring
-static const size_t MAX_LEN_DOCSTRING = 4096;
+static const unsigned int MAX_LEN_DOCSTRING = 4096;
 
 ///@}
 /// \name  ------- Unit handling routines --------
@@ -167,9 +167,9 @@ void formatOutputArr(const double result[], const int index, PyObject* resultObj
 
 // ---- template instantiations for input parameters ----
 
-template<> static size_t inputLength<INPUT_VALUE_SINGLE>()  {return 1;}
-template<> static size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
-template<> static size_t inputLength<INPUT_VALUE_SEXTET>()  {return 6;}
+template<> inline size_t inputLength<INPUT_VALUE_SINGLE>()  {return 1;}
+template<> inline size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
+template<> inline size_t inputLength<INPUT_VALUE_SEXTET>()  {return 6;}
 
 template<> int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
     return PyArg_ParseTuple(args, "ddd", &input[0], &input[1], &input[2]);
@@ -195,11 +195,11 @@ template<> const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
 
 // ---- template instantiations for output parameters ----
 
-template<> static size_t outputLength<OUTPUT_VALUE_SINGLE>()  {return 1;}
-template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET>() {return 3;}
-template<> static size_t outputLength<OUTPUT_VALUE_SEXTET>()  {return 6;}
-template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {return 6;}
-template<> static size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
+template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE>()  {return 1;}
+template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET>() {return 3;}
+template<> inline size_t outputLength<OUTPUT_VALUE_SEXTET>()  {return 6;}
+template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {return 6;}
+template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
 
 template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
     return Py_BuildValue("d", result[0]);
@@ -1158,10 +1158,10 @@ static PyObject* integrate_orbit(PyObject* /*self*/, PyObject* args, PyObject* n
         orbit::integrate( *((PotentialObject*)pot_obj)->pot, ic_point, 
             time * conv->timeUnit, step * conv->timeUnit, traj, acc);
         // build an appropriate output array
-        const size_t size = traj.size();
+        const unsigned int size = traj.size();
         npy_intp dims[] = {size, 6};
         PyArrayObject* result = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
-        for(size_t index=0; index<size; index++) {
+        for(unsigned int index=0; index<size; index++) {
             ((double*)PyArray_DATA(result))[index*6  ] = traj[index].x / conv->lengthUnit;
             ((double*)PyArray_DATA(result))[index*6+1] = traj[index].y / conv->lengthUnit;
             ((double*)PyArray_DATA(result))[index*6+2] = traj[index].z / conv->lengthUnit;

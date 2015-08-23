@@ -267,7 +267,7 @@ Multipole::Multipole(const BaseDensity& source_density,
                      const int num_grid_points,
                      const double _gamma, const double _beta)
 {
-    if((source_density.symmetry() & ST_AXISYMMETRIC) != ST_AXISYMMETRIC)
+    if(!isAxisymmetric(source_density))
         throw std::invalid_argument("Error in Multipole expansion: source density must be axially symmetric");
     K[0] = num_grid_points;
     K[1] = N2;

@@ -37,6 +37,9 @@ int fcmp(double x, double y, double eps=1e-15);
 /** return sign of a number */
 inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
 
+/** return absolute value of a number */
+inline int abs(int x) { return x<0?-x:x; }
+
 /** return an integer power of a number */
 double powInt(double x, int n);
 

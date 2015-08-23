@@ -72,7 +72,7 @@ public:
 
     /** reimplement the evaluate function without derivatives */
     virtual void eval(const double vars[], double values[]) const {
-        evalDeriv(vars, values, NULL);
+        evalDeriv(vars, values);
     }
 };
 
