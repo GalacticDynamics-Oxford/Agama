@@ -26,7 +26,13 @@ namespace potential {
 /// \name Definitions of all known potential types and parameters
 ///@{
 
-/// List of all known potential and density types (borrowed from SMILE, not everything is implemented here)
+/** List of all known potential and density types 
+    (borrowed from SMILE, not everything is implemented here).
+    Note that this type is not a substitute for the real class hierarchy:
+    it is intended only to be used in factory methods such as 
+    creating an instance of potential from its name 
+    (e.g., passed as a string, or loaded from an ini file).
+*/
 enum PotentialType {
 
     //  Generic values that don't correspond to a concrete class

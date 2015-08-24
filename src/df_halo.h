@@ -11,10 +11,11 @@ namespace df{
 
 /// Parameters that describe a double power law distribution function.
 struct DoublePowerLawParam{
-    double jcore; ///< core action in inner part
+    double norm;  ///< normalization factor with the dimension of mass
+    double j0;    ///< break action (defines the transition between inner and outer regions)
+    double jcore; ///< core action (sets upper limit on DF at J<Jcore)
     double alpha; ///< power-law index for actions below the break action
     double beta;  ///< power-law index for actions above the break action
-    double j0;    ///< break action
     double ar;    ///< weight on radial actions below the break action
     double az;    ///< weight on z actions below the break action
     double aphi;  ///< weight oh angular actions below the break action
@@ -41,7 +42,7 @@ public:
     */
     explicit DoublePowerLaw(const DoublePowerLawParam &params);
 
-    /** return value of DF for the given set of actions (not scaled by total mass).
+    /** return value of DF for the given set of actions.
         \param[in] J are the actions  */
     virtual double value(const actions::Actions &J) const;
 };

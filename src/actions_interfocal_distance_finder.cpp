@@ -162,7 +162,7 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
     Rmin = Rmax = Rinit;
     double maxPeri = Rinit, minApo = Rinit;    // endpoints of interval for locating peri/apocenter radii
     if(fabs(dR_to_zero) < Rinit*ACCURACY) {    // we are already near peri- or apocenter radius
-        if(dR_to_zero > 0) {
+        if(nh.fder < 0) {
             minApo  = NAN;  // will skip the search for Rmax
             maxPeri = Rinit + nh.dxToPositive();
         } else {
@@ -174,6 +174,8 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
         if(math::isFinite(maxPeri)) {
             fnc.mode = OrbitSizeFunction::FIND_RMIN;
             Rmin = math::findRoot(fnc, 0., maxPeri, ACCURACY);
+            if(!math::isFinite(Rmin))  // could be that our initial upper bound was wrong
+                Rmin = math::findRoot(fnc, maxPeri, Rinit, ACCURACY);
             // ensure that E-Phi(Rmin) >= 0
             // (due to finite accuracy in root-finding, a small adjustment may be needed)
             math::PointNeighborhood pn(fnc, Rmin);
@@ -192,6 +194,8 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
     if(math::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
         Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY);
+        if(!math::isFinite(Rmax))  // could be that our initial lower bound was wrong
+            Rmax = math::findRoot(fnc, Rinit, minApo, ACCURACY);
         math::PointNeighborhood pn(fnc, Rmax);
         if(pn.f0<0) {   // ensure that E>=Phi(Rmax)
             double dx = pn.dxToPositive();

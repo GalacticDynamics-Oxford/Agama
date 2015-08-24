@@ -22,13 +22,10 @@
 //
 // --------------------------------------------------------------------------------------
 
-#include <cassert>
 #include "Toy_Isochrone.h"
 #include "Fit.h"
-#include "Orb.h"
-#include "WD_Numerics.h"
+#include <cassert>
 #include <cmath>
-//#include "Potential.h"
 #include <gsl/gsl_multifit.h>
 #include <gsl/gsl_linalg.h>
 #include <gsl/gsl_blas.h>
@@ -36,9 +33,6 @@
 /////////////////////////////////////////////////////////////////////////////////////////
 // typedefs and constants
 namespace Torus{
-
-typedef Matrix<double,2,2> DB22;
-typedef Vector<double,2>   DB2;
 
 /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -75,11 +69,11 @@ int dHdj_toy(const ToyMap &TM, const PSPD& jt, const PoiTra &PT, const Potential
         }
     }
     dHdj[0] = dHdj[1] = 0.;
-    dHdj[2] = Jphi / (xv(0) * xv(0));  // H = ... + Lz^2/(2R^2), so dH/dLz = Lz/R^2
+    dHdj[2] = Jphi / (xv(0) * xv(0));  // H = ... + Lz^2/(2R^2), so dH/dLz = ... + Lz/R^2
     for(int k=0; k<4; k++) {
         dHdj[0] += dHdqp[k] * dqpdj[k][0];
         dHdj[1] += dHdqp[k] * dqpdj[k][1];
-        dHdj[2] += dHdqp[k] * dqpdAp[k][2];
+        dHdj[2] += dHdqp[k] * dqpdAp[k][2] * (Jphi>0?1:-1);  // derivs w.r.t. Jphi (=Lz)
     }
     return 0;
 }
@@ -158,7 +152,6 @@ int dSbySampling (            // return:     error flag (see below)
     for (int i2 = 0; i2 < Nr; i2++){
         for (int i1 = 0; i1 < Nr; i1++) {
             // Make sure there's point everywhere on the grid, 0 < theta < pi
-            
             GenPar dj1dS(GF.parameters()), dj2dS(GF.parameters());
             PSPD jt;
             
@@ -166,6 +159,8 @@ int dSbySampling (            // return:     error flag (see below)
             // by applying generating function
             
             jt = GF.MapWithDerivs(J(0),J(1),i1,i2,dj1dS,dj2dS);
+            if(jt(0)<0.) jt[0]=0;  // ensure that toy actions are non-negative
+            if(jt(1)<0.) jt[1]=0;
             
             // 2. Compute dHdj and dHdSk for each point in toy angle space
             

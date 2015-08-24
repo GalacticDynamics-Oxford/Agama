@@ -27,13 +27,13 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
 
 double DoublePowerLaw::value(const actions::Actions &J) const {
     // linear combination of actions in the inner part of the model (for J<J0)
-    double hJ   = par.ar*J.Jr + par.az*J.Jz + par.aphi*fabs(J.Jphi);
+    double hJ  = par.ar*J.Jr + par.az*J.Jz + par.aphi*fabs(J.Jphi);
     // linear combination of actions in the outer part of the model (for J>J0)
-    double gJ   = par.br*J.Jr + par.bz*J.Jz + par.bphi*fabs(J.Jphi);
-    double prob = 1./pow_3(par.j0) *
-        pow(1. + par.j0 / (hJ + par.jcore), par.alpha) *
-        pow(1. + gJ / par.j0, -par.beta);
-    return prob;
+    double gJ  = par.br*J.Jr + par.bz*J.Jz + par.bphi*fabs(J.Jphi);
+    double val = par.norm / pow_3(par.j0) *                // overall normalization factor
+        pow(1. + par.j0 / (hJ + par.jcore), par.alpha) *   // numerator
+        pow(1. + gJ / par.j0, -par.beta);                  // denominator
+    return val;
 }
 
 }  // namespace df

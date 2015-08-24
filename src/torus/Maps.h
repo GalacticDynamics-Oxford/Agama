@@ -50,7 +50,7 @@ Base classes for all the transformations needed to describe a Torus
 #include <iostream>
 #include <cmath>
 #include "Pi.h"
-#include "Err.h"
+#include <stdexcept>
 #include "Types.h"
 #include "math_core.h"
 #include <climits>

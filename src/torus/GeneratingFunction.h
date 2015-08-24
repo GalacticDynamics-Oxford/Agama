@@ -173,7 +173,7 @@ public:
 
 inline void AngPar::CheckTerms() const
 	{ if(!dS1.same_terms_as(dS2) || !dS1.same_terms_as(dS3))
-	      TorusError(" mismatch between dS1/2/3 in AngPar",-4); }
+	      throw std::runtime_error("Torus Error -4: mismatch between dS1/2/3 in AngPar"); }
 inline AngPar::AngPar(const int n): dS1(n), dS2(n), dS3(n) {}
 inline AngPar::AngPar(const AngPar& a): 
 	      dS1(a.dS1),dS2(a.dS2),dS3(a.dS3)
@@ -198,9 +198,9 @@ inline int AngPar::operator== (const AngPar& a) const
 inline int AngPar::operator!= (const AngPar& a) const
 	{ return (dS1!=a.dS1 || dS2!=a.dS2 || dS3!=a.dS3); }
 inline double AngPar::operator() (const int i) const
-	{ TorusError(" AngPar::operator() called",-4); return dS1(i); }
+	{ throw std::runtime_error("Torus Error -4: AngPar::operator() called"); return dS1(i); }
 inline double& AngPar::operator[] (const int i)
-	{ TorusError(" AngPar::operator[] called",-4); return dS1[i]; }
+	{ throw std::runtime_error("Torus Error -4: AngPar::operator[] called"); return dS1[i]; }
 inline int AngPar::NumberofTerms() const { return dS1.NumberofTerms(); }
 inline void AngPar::put(ostream& to) const
 	{ dS1.put(to); to<<'\n'; dS2.put(to); dS3.put(to); to<<'\n'; }

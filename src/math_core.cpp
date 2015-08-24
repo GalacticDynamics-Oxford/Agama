@@ -662,6 +662,13 @@ static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
         for(int n=0; n< *ndim; n++)
             param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
         param->F.eval(&param->xvalue.front(), fval);
+        double result=0;
+        for(unsigned int i=0; i<param->F.numValues(); i++)
+            result+=fval[i];
+        if(!isFinite(result)) {
+            param->error = "Invalid function value encountered";
+            return -1;
+        }        
         return 0;   // success
     }
     catch(std::exception& e) {
@@ -686,6 +693,13 @@ static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_
     try {
         param->numEval++;
         param->F.eval(x, fval);
+        double result=0;
+        for(unsigned int i=0; i<param->F.numValues(); i++)
+            result+=fval[i];
+        if(!isFinite(result)) {
+            param->error = "Invalid function value encountered";
+            return -1;
+        }
         return 0;   // success
     }
     catch(std::exception& e) {

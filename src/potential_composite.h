@@ -2,6 +2,11 @@
     \brief   Composite density and potential classes
     \author  Eugene Vasiliev
     \date    2014-2015
+ 
+\note: the semantics of creating a composite density and potential classes
+is far from ideal because the user needs to create each component manually,
+then create the composite, and _do_not_ delete the components - this will 
+be done by the composite's destructor. A better design approach is needed.
 */
 #pragma once
 #include "potential_base.h"

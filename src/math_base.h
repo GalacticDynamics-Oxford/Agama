@@ -58,7 +58,6 @@ namespace math{
 */
 class IFunction {
 public:
-    IFunction() {};
     virtual ~IFunction() {};
 
     /** Compute any combination of function, first and second derivative;
@@ -76,6 +75,8 @@ public:
         return val;
     }
 
+    /** Overloaded () operator enables to use derived classes as functors
+        (in this case, as functions of one input argument returning one value) */
     double operator()(const double x) const { 
         return value(x); }
 };
@@ -87,7 +88,6 @@ public:
 */
 class IFunctionNoDeriv: public IFunction {
 public:
-    IFunctionNoDeriv() {};
 
     /** This needs to be implemented in the derived classes */
     virtual double value(const double x) const=0;
@@ -110,7 +110,6 @@ public:
 /** Prototype of a function of N>=1 variables that computes a vector of M>=1 values. */
 class IFunctionNdim {
 public:
-    IFunctionNdim() {};
     virtual ~IFunctionNdim() {};
 
     /** evaluate the function.

@@ -5,9 +5,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "debug_utils.h"
-#include <iostream>
-
 namespace galaxymodel{
 
 /** convert from scaled velocity variables to the actual velocity.
@@ -307,8 +304,8 @@ void generateActionSamples(const GalaxyModel& model, const unsigned int nSamp,
             ang.thetar   = 2*M_PI*math::random();
             ang.thetaz   = 2*M_PI*math::random();
             ang.thetaphi = 2*M_PI*math::random();
-            points.add( coord::toPosVelCar(
-                torus.map(actions::ActionAngles(actions[t], ang)) ), pointMass );
+            const coord::PosVelCyl pt = torus.map(actions::ActionAngles(actions[t], ang));
+            points.add(coord::toPosVelCar(pt), pointMass);
             if(actsOutput!=NULL)
                 actsOutput->push_back(actions[t]);
         }
@@ -344,7 +341,7 @@ void generatePosVelSamples(const GalaxyModel& model, const unsigned int numSampl
 void generateDensitySamples(const potential::BaseDensity& dens, const unsigned int numPoints,
     particles::PointMassArray<coord::PosCyl>& points)
 {
-    const double axisym = isAxisymmetric(dens);
+    const bool axisym = isAxisymmetric(dens);
     potential::DensityIntegrandNdim fnc(dens);
     math::Matrix<double> result;      // sampled scaled coordinates
     double totalMass, errorMass;      // total mass and its estimated error
@@ -354,8 +351,9 @@ void generateDensitySamples(const potential::BaseDensity& dens, const unsigned i
     const double pointMass = totalMass / result.numRows();
     points.data.clear();
     for(unsigned int i=0; i<result.numRows(); i++) {
+        // if the system is axisymmetric, phi is not provided by the sampling routine
         double scaledvars[3] = {result(i,0), result(i,1), 
-            axisym ? 2*M_PI*math::random() : result(i,2)};
+            axisym ? math::random() : result(i,2)};
         // transform from scaled coordinates to the real ones, and store the point into the array
         points.add(fnc.unscaleVars(scaledvars), pointMass);
     }

@@ -32,14 +32,15 @@ public:
     in polar cyclindrical coordinates; if some of them are not needed,
     pass NULL as the corresponding argument, and it will not be computed.
     \param[in]  model  is the galaxy model (potential + DF + action finder);
-    \param[in]  required relative error in the integral;
-    \param[in]  maximum number of evaluations in integral;
-    \param[out] density;
-    \param[out] 1st-order velocity moments;
-    \param[out] 2nd-order velocity moments;
-    \param[out] density error;
-    \param[out] 1st-order velocity moment errors;
-    \param[out] 2nd-order velocity moment errors;
+    \param[in]  point  is the position at which the quantities should be computed;
+    \param[in]  reqRelError is the required relative error in the integral;
+    \param[in]  maxNumEval is the maximum number of evaluations in integral;
+    \param[out] density  will contain the integral of DF over all velocities;
+    \param[out] velocityFirstMoment  will contain the mean streaming velocity;
+    \param[out] velocitySecondMoment will contain the tensor of mean squared velocity components;
+    \param[out] densityErr  will contain the error estimate of density;
+    \param[out] velocityFirstMomentErr  will contain the error estimate of 1st velocity moment;
+    \param[out] velocitySecondMomentErr will contain the error estimate of 2nd velocity moment;
 */
 void computeMoments(const GalaxyModel& model,
     const coord::PosCyl& point, const double reqRelError, const int maxNumEval,

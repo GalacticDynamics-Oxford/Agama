@@ -89,7 +89,7 @@ PSPT PoiNone::Backward3D(const PSPT& W3) const
 void PoiNone::Derivatives(double dWdw[4][4]) const
 {
     if(!derivs_ok)
-	TorusError(" PoiNone::Derivatives() called without (For/Back)ward",-3);
+	throw std::runtime_error("Torus Error -3: PoiNone::Derivatives() called without (For/Back)ward");
  
     dWdw[0][0] = ct;    	       	// dR/dr
     dWdw[0][1] = -z;    		// dR/dth

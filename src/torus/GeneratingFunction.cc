@@ -23,10 +23,6 @@ using std::setw;
 
 
 ////////////////////////////////////////////////////////////////////////////////
-
-const int errGen_ = 4;
-
-////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 // class GenPar
 
@@ -239,7 +235,7 @@ void GenPar::read(istream& from)
 {
     short newtot;
     from >> newtot;
-    if(newtot <= 0) TorusError("GenPar: number of terms <= 0",-errGen_);
+    if(newtot <= 0) throw std::runtime_error("Torus Error -4: GenPar: number of terms <= 0");
     if(newtot != ntot) {
 	if(ntot>0) {
 	    delete[] N1;
@@ -255,9 +251,9 @@ void GenPar::read(istream& from)
     for(i=0; i<ntot; i++) {
 	from >> N1[i] >> N2[i] >> S[i];
 	if(N2[i]%2 != 0)
-	    TorusError("GenPar: odd n2 in read()",-errGen_);
+	    throw std::runtime_error("Torus Error -4: GenPar: odd n2 in read()");
 	if(N1[i]==0 && N2[i]>=0)
-	  TorusError("GenPar: +ve n2 with n1==0 in read()",-errGen_);
+	  throw std::runtime_error("Torus Error -4: GenPar: +ve n2 with n1==0 in read()");
     }
     sortSn();
     SanityCheck();
@@ -266,7 +262,7 @@ void GenPar::read(istream& from)
 
 void GenPar::read(int *N1in, int *N2in, double *Snin, short newtot)
 {
-    if(newtot <= 0) TorusError("GenPar: number of terms <= 0",-errGen_);
+    if(newtot <= 0) throw std::runtime_error("Torus Error -4: GenPar: number of terms <= 0");
     if(newtot != ntot) {
 	if(ntot>0) {
 	    delete[] N1;
@@ -284,9 +280,9 @@ void GenPar::read(int *N1in, int *N2in, double *Snin, short newtot)
       N2[i] = N2in[i];
       S[i]  = Snin[i];
       if(N2[i]%2 != 0)
-	TorusError("GenPar: odd n2 in read()",-errGen_);
+	throw std::runtime_error("Torus Error -4: GenPar: odd n2 in read()");
       if(N1[i]==0 && N2[i]>=0)
-	TorusError("GenPar: +ve n2 with n1==0 in read()",-errGen_);
+	throw std::runtime_error("Torus Error -4: GenPar: +ve n2 with n1==0 in read()");
     }
     sortSn();
     SanityCheck();
@@ -958,7 +954,7 @@ GenPar& GenPar::operator*=(const double x)
 ////////////////////////////////////////////////////////////////////////////////
 GenPar& GenPar::operator/=(const double x)
 {
-    if(x==0.) TorusError("GenPar: division by zero",-errGen_);
+    if(x==0.) throw std::runtime_error("Torus Error -4: GenPar: division by zero");
     for(register short i=0; i<ntot; i++) S[i] *= x;
     return *this;
 }
@@ -1032,7 +1028,7 @@ void GenPar::get(istream& from)
 {
     short newtot;
     from >> newtot;
-    if(newtot <= 0) TorusError("GenPar: number of terms <= 0",-errGen_);
+    if(newtot <= 0) throw std::runtime_error("Torus Error -4: GenPar: number of terms <= 0");
     if(newtot != ntot) {
 	if(ntot>0) {
 	    delete[] N1;
@@ -1048,7 +1044,7 @@ void GenPar::get(istream& from)
     for(i=0; i<ntot; i++) from >> N1[i];
     for(i=0; i<ntot; i++) {
 	from >> N2[i];
-	if(N2[i]%2 != 0) TorusError("GenPar: odd n2 in get()",-errGen_);
+	if(N2[i]%2 != 0) throw std::runtime_error("Torus Error -4: GenPar: odd n2 in get()");
     }
     get_terms(from);
     SanityCheck();
@@ -1065,7 +1061,7 @@ int GenPar::skip(istream& from) const
     short n, n12;
     from>>n;				// get number of terms
     if(n <= 0)
-	TorusError("GenPar: number of terms <= 0",-errGen_);
+	throw std::runtime_error("Torus Error -4: GenPar: number of terms <= 0");
     register short i;
     for(i=0; i<n; i++) from>>n12;	// skip n_1
     for(i=0; i<n; i++) from>>n12;	// skip n_2
@@ -1227,7 +1223,7 @@ const
 {
     const double acc = 1.e-10;
     if(t1<0 || t1>=Nth1 || t2<0 || t2>=Nth2)
-	TorusError("GenFncFit: (t1,t2) out of range",errGen_);
+	throw std::runtime_error("Torus Error -4: GenFncFit: (t1,t2) out of range");
     register PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
     register double sncos;
     for(register short i=0; i<Sn.NumberofTerms(); i++) if(Sn(i)!=0.) { 
@@ -1247,7 +1243,7 @@ const
 {
     const double acc = 1.e-10;
     if(t1<0 || t1>=Nth1 || t2<0 || t2>=Nth2)
-	TorusError("GenFncFit: (t1,t2) out of range",errGen_);
+	throw std::runtime_error("Torus Error -4: GenFncFit: (t1,t2) out of range");
     register PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
     register double costn;
     for(register short i=0; i<Sn.NumberofTerms(); i++) {

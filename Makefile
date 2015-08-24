@@ -17,6 +17,10 @@ SOURCES   = \
             actions_torus.cpp \
             coord.cpp \
             cubature.cpp \
+            df_base.cpp \
+            df_disk.cpp \
+            df_halo.cpp \
+            galaxymodel.cpp \
             math_core.cpp \
             math_fit.cpp \
             math_linalg.cpp \
@@ -24,9 +28,6 @@ SOURCES   = \
             math_sample.cpp \
             math_specfunc.cpp \
             math_spline.cpp \
-            df_base.cpp \
-            df_halo.cpp \
-            galaxymodel.cpp \
             orbit.cpp \
             particles_io.cpp \
             potential_analytic.cpp \
@@ -59,8 +60,9 @@ TORUSSRC  = CHB.cc \
             Point_None.cc \
             Torus.cc \
             Toy_Isochrone.cc
-# disable several warnings - not that they're ungrounded, but just the code is too messy to try correcting them
-TORUSFLAGS = -Wmaybe-uninitialized -Wno-unused-variable -Wunused-but-set-variable -Wreorder
+# disable several warnings - shouldn't be taken as an endorsement to ignore them, but as a sign of negligence for code maintenance
+TORUSFLAGS = -Wreorder -Wno-unused-variable 
+# -Wunused-but-set-variable -Wmaybe-uninitialized
 
 # test programs
 TESTSRCS  = test_math_core.cpp \

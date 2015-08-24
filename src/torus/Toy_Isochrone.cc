@@ -139,8 +139,8 @@ void ToyIsochrone::Set()
 {
     M = gamma*gamma;
     b = beta*beta;
-    if(b==0.) TorusError("ToyIsochrone: scale radius = 0 not allowed",2);
-    if(M==0.) TorusError("ToyIsochrone: mass = 0 not allowed",2);
+    if(b==0.) throw std::runtime_error("Torus Error -2: ToyIsochrone: scale radius = 0 not allowed");
+    if(M==0.) throw std::runtime_error("Torus Error -2: ToyIsochrone: mass = 0 not allowed");
     if(b>0. && M>0.) {
 	sMb  = sqrt(M*b);
 	sMob = sMb/b;
@@ -196,7 +196,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
       tr = 0.; // just in case  
     tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| this->jp<0.) {
-        TorusError("ToyIsochrone: negative action(s)",2); 
+        throw std::runtime_error("Torus Error -2: ToyIsochrone: negative action(s)"); 
 	return PSPD(0.);
     }
 // Set up auxilliary variables independent of the angles tr and tt.
@@ -212,7 +212,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
     else {
         e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
-        if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in ForwardWithDerivs",2);
+        if(e2<-1.e-3) throw std::runtime_error("Torus Error -2: ToyIsochrone: bad e in ForwardWithDerivs");
     }
     ae  = a*e;
     eps = ae*H2;
@@ -259,7 +259,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
       tr = 0.; // just in case  
     tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| this->jp<0.) {
-        TorusError("ToyIsochrone: negative action(s)",2); 
+       throw std::runtime_error("Torus Error -2: ToyIsochrone: negative action(s)"); 
 	return PSPD(0.);
     }
 // Set up auxilliary variables independent of the angles tr and tt.
@@ -275,7 +275,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
     else {
         e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
-        if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in ForwardWithDerivs",2);
+        if(e2<-1.e-3) throw std::runtime_error("Torus Error -2: ToyIsochrone: bad e in ForwardWithDerivs");
     }
     ae  = a*e;
     eps = ae*H2;
@@ -319,7 +319,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2]) const
 // Jr,Jt. A call of one of Forward() or ForwardWithDerivs() has to be preceeded.
 {
   if(!derivs_ok)
-      TorusError(" `ToyIsochrone::Derivatives()' called without For/Backward",-2);
+      throw std::runtime_error("Torus Error -2:  `ToyIsochrone::Derivatives()' called without For/Backward");
 
     register double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
 		    schi,cchi,sith,csth,fac,cGam;
@@ -393,7 +393,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
 // has to be preceeded.
 {
     if(!derivs_ok)
-      TorusError(" `ToyIsochrone::Derivatives()' called without For/Backward",-2);
+      throw std::runtime_error("Torus Error -2:  `ToyIsochrone::Derivatives()' called without For/Backward");
 
     register double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
 		    schi,cchi,sith,csth,fac,cGam,temp;
@@ -516,7 +516,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
       tr = 0.; // just in case  
     tr = math::wrapAngle(tr);
     if(jr<0. || jt<0.|| jp<0.) {
-        TorusError("ToyIsochrone: negative action(s)",2); 
+        throw std::runtime_error("Torus Error -2: ToyIsochrone: negative action(s)"); 
 	return PSPD(0.);
     }
 // Set up auxilliary variables independent of the angles tr and tt.
@@ -532,7 +532,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
     else {
         e2    = 1. - pow_2(at/a)/H2;
         e     = (e2>0) ? sqrt(e2) : 0;
-        if(e2<-1.e-3) TorusError("ToyIsochrone: bad e in Forward",2);
+        if(e2<-1.e-3) throw std::runtime_error("Torus Error -2: ToyIsochrone: bad e in Forward");
     }
     ae  = a*e;
     eps = ae*H2;
@@ -571,11 +571,11 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
     csth= cos(th);
 // Perform some consistency checks
     if(csth==0.&&jp!=0.) {
-	TorusError("ToyIsochrone: Jp!=0 && R=0 in Backward",2);
+	throw std::runtime_error("Torus Error -2: ToyIsochrone: Jp!=0 && R=0 in Backward");
 	return PSPD(0.);
     }
     if(r==0. && pt!=0.) {
-	TorusError("ToyIsochrone: pt!=0 && r=0 in Backward",2);
+	throw std::runtime_error("Torus Error -2: ToyIsochrone: pt!=0 && r=0 in Backward");
 	return PSPD(0.);
     }
 // Set up auxialiary variables
@@ -588,7 +588,7 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
     if(jp!=0.) H2 -= pow_2(jp/(r*csth));
     H2 += 2./(u+2.);
     if(H2<=0.) {
-	TorusError("ToyIsochrone: H>=0 in Backward",2);
+	throw std::runtime_error("Torus Error -2: ToyIsochrone: H>=0 in Backward");
 	return PSPD(0.);
     }
     H   =-0.5*H2;

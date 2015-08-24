@@ -44,7 +44,8 @@ df::DoublePowerLawParam dfparams(const double vars[])
     double br    = 1.;
     double bz    = 1.;
     double bphi  = 1.;
-    df::DoublePowerLawParam params = {jcore,alpha,beta,j0,ar,az,aphi,br,bz,bphi};
+    double norm  = 1.;
+    df::DoublePowerLawParam params = {norm,j0,jcore,alpha,beta,ar,az,aphi,br,bz,bphi};
     return params;
 }
 

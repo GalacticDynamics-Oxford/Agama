@@ -51,7 +51,7 @@ void test(bool useNewAngleMapping, Torus::Potential *Phi,
     Torus::Angles theta;
     J[0]     = 0.01; // actions in whatever units
     J[1]     = 2.;
-    J[2]     = 3.;
+    J[2]     = -3.;
     theta[0] = 1.; // angles in radians
     theta[1] = 2.;
     theta[2] = 3.;

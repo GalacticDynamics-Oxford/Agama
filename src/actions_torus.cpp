@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
+#include <iostream>
 
 namespace actions{
 
@@ -60,7 +61,9 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
         act[2] = acts.Jphi;
         torus->AutoFit(act, &potwrap);
     }
-    catch(std::runtime_error&) {
+    catch(std::runtime_error& e) {
+        std::cerr << "Error in creating a torus for "
+            "Jr="<<acts.Jr<<", Jz="<<acts.Jz<<", Jphi="<<acts.Jphi<<": "<<e.what()<<std::endl;
         delete torus;
         throw;
     }
