@@ -155,6 +155,8 @@ public:
         return dxToPosneg(-1); }
     /// return the estimated offset from x0 to the nearest root of f(x)=0
     double dxToNearestRoot() const;
+    /// return the estimated distance between two roots of f(x)=0 if they exist
+    double dxBetweenRoots() const;
 private:
     double dxToPosneg(double sgn) const;
 };

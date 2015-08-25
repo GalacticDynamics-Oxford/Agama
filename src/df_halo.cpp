@@ -1,4 +1,5 @@
 #include "df_halo.h"
+#include "math_specfunc.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -23,6 +24,8 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
             "DoublePowerLaw DF: mass diverges at large J (outer slope beta must be > 3");
     if(par.jcore==0 && par.alpha>=3)
         throw std::invalid_argument("DoublePowerLaw DF: mass diverges at J->0");
+    par.norm /= pow_3(2*M_PI) * 
+        math::gamma(3-par.alpha) * math::gamma(par.beta-3) / math::gamma(par.beta-par.alpha);
 }
 
 double DoublePowerLaw::value(const actions::Actions &J) const {

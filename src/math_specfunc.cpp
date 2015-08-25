@@ -9,6 +9,10 @@
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
 #include <gsl/gsl_sf_ellint.h>
+#include <gsl/gsl_sf_bessel.h>
+
+/* Most of the functions here are implemented by calling corresponding routines from GSL,
+   but having library-independent wrappers makes it possible to switch the back-end if necessary */
 
 namespace math {
 
@@ -126,6 +130,22 @@ double ellintE(const double phi, const double k) {
 
 double ellintP(const double phi, const double k, const double n) {
     return gsl_sf_ellint_P(phi, k, n, GSL_PREC_SINGLE);
+}
+
+double besselJ(const int n, const double x) {
+    return gsl_sf_bessel_Jn(n, x);
+}
+
+double besselY(const int n, const double x) {
+    return gsl_sf_bessel_Yn(n, x);
+}
+
+double besselI(const int n, const double x) {
+    return gsl_sf_bessel_In(n, x);
+}
+
+double besselK(const int n, const double x) {
+    return gsl_sf_bessel_Kn(n, x);
 }
 
 }  // namespace

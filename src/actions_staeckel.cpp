@@ -281,7 +281,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     // due to roundoff errors, it may actually happen that f(lambda) is a very small negative number
     // in this case we need to estimate the value of lambda at which it is strictly positive (for root-finder)
     double lambda_pos = fnc.point.lambda + pn_lambda.dxToPositive();
-    if(math::isFinite(lambda_pos)) {
+    if(math::isFinite(lambda_pos) && pn_lambda.dxBetweenRoots() > fnc.point.lambda * ACCURACY_RANGE) {
         if(!math::isFinite(lim.lambda_min)) {  // not yet determined 
             lim.lambda_min = math::findRoot(fnc, lambda_lower, lambda_pos, ACCURACY_RANGE);
         }
@@ -290,7 +290,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
                 lambda_pos, INFINITY, ACCURACY_RANGE);
         }
     } else {  // can't find a value of lambda with positive p^2(lambda) -- dominated by roundoff errors
-        lim.lambda_min = lim.lambda_max = fnc.point.lambda;
+        lim.lambda_min = lim.lambda_max = fnc.point.lambda;  // means that we are on a (nearly)-circular orbit
     }
 
     // sanity check

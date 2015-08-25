@@ -31,6 +31,8 @@ static coord::VelCyl unscaleVelocity(const double vars[], const double velmag, d
 /** compute the escape velocity at a given position in the given ponential */
 static double escapeVel(const coord::PosCyl& pos, const potential::BasePotential& poten)
 {
+    if(pow_2(pos.R)+pow_2(pos.z) == INFINITY)
+        return 0;
     const double Phi_inf = 0;   // assume that the potential is zero at infinity
     const double vesc = sqrt(2. * (Phi_inf - poten.value(pos)));
     if(!math::isFinite(vesc))

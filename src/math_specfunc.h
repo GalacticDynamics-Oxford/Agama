@@ -67,5 +67,17 @@ double ellintE(const double phi, const double k);
 /** Incomplete elliptic integrals of the third kind:
     \f$  \Pi(\phi,k,n) = \int_0^\phi d t \, \frac{1}{(1+n\sin^2 t)\sqrt{1-k^2\sin^2 t}}  \f$  */
 double ellintP(const double phi, const double k, const double n);
-    
+
+/** Bessel J_n(x) function (regular at x=0) */
+double besselJ(const int n, const double x);
+
+/** Bessel Y_n(x) function (singular at x=0) */
+double besselY(const int n, const double x);
+
+/** Modified Bessel function I_n(x) (regular) */
+double besselI(const int n, const double x);
+
+/** Modified Bessel function K_n(x) (singular) */
+double besselK(const int n, const double x);
+
 }  // namespace

@@ -1,12 +1,10 @@
 #include <iostream>
+#include <fstream>
 #include "potential_dehnen.h"
-#include "potential_galpot.h"
 #include "actions_staeckel.h"
 #include "df_halo.h"
-#include "df_disk.h"
 #include "galaxymodel.h"
 #include "particles_io.h"
-#include "math_specfunc.h"
 #include "debug_utils.h"
 
 const double reqRelError = 1e-4;
@@ -20,6 +18,10 @@ bool testTotalMass(const galaxymodel::GalaxyModel& galmod, double massExact)
     double err;
     int numEval;
     double mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval, &err, &numEval);
+    if(err > mass*0.01) {
+        std::cout << "Mass=" << mass << " +- " << err << " in " << numEval << " DF evaluations\n";
+        mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval*10, &err, &numEval);
+    }
     bool ok = math::fcmp(mass, massExact, 0.05) == 0; // 5% relative error allowed because ar!=az
     std::cout <<
         "Mass=" << mass << " +- " << err << " in " << numEval << " DF evaluations"
@@ -52,7 +54,7 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
         math::fcmp(velocitySecondMoment.vR2,   sigmaExact, 0.05) == 0 &&
         math::fcmp(velocitySecondMoment.vz2,   sigmaExact, 0.05) == 0 &&
         math::fcmp(velocitySecondMoment.vphi2, sigmaExact, 0.05) == 0;
-    
+
     std::cout << 
         "density=" << density << " +- " << densityErr << 
         "  compared to analytic value " << densExact << (densok?"":errmsg) <<"\n"
@@ -97,11 +99,10 @@ const double testPointsH[NUM_POINTS_H][6] = {
 
 int main(){
     bool ok = true;
-    
-    // ----------------------------- //
-    // 1. test double-power-law distribution function in a spherical Hernquist potential
+
+    // test double-power-law distribution function in a spherical Hernquist potential
     // NB: parameters obtained by fitting (test_df_fit.cpp)
-    double norm  = 1./42.42;
+    double norm  = 0.956;
     double alpha = 1.407;
     double beta  = 5.628;
     double j0    = 1.745;
@@ -118,81 +119,18 @@ int main(){
     const df::DoublePowerLaw dfH(paramDPL);                  // distribution function
     const galaxymodel::GalaxyModel galmodH(potH, actH, dfH); // all together - the mighty triad
 
-    // the analytic value of total mass for the case ar=az=aphi=br=bz=bphi=1 and jcore=0
-    double massExact = norm * pow_3(2*M_PI) * math::gamma(3-alpha) * math::gamma(beta-3) / math::gamma(beta-alpha);
-    ok &= testTotalMass(galmodH, massExact);
+    // the analytic value of total mass for the case ar=az=aphi=br=bz=bphi=1 and jcore=0 is just 'norm'
+    ok &= testTotalMass(galmodH, norm);
 
     for(int i=0; i<NUM_POINTS_H; i++) {
-        const coord::PosVelCyl& point = testPointsH[i];
+        const coord::PosVelCyl point(testPointsH[i]);
         double dfExact    = dfHernquist(1, 1, totalEnergy(potH, point));     // f(E) for the Hernquist model
         double densExact  = potH.density(point);                             // analytical value of density
         double sigmaExact = sigmaHernquist(1, 1, coord::toPosSph(point).r);  // analytical value of sigma^2
         ok &= testDFmoments(galmodH, point, dfExact, densExact, sigmaExact);
     }
 
-    // ----------------------------- //
-    // 2. test pseudo-isothermal distribution function in an exponential-disk potential
-    if(0){
-    norm = 1.0;
-    double Rdisk   = 2.5;
-    double Hdisk   = 0.1;
-    double L0      = 0.0;
-    double Sigma0  = norm/(2*M_PI * pow_2(Rdisk));
-    double sigmar0 = 0.1;
-    double sigmaz0 = 0.1;
-    const df::PseudoIsothermalParam paramD = {norm,Rdisk,L0,Sigma0,sigmar0,sigmaz0};
-    const potential::DiskParam paramPotD   = {Sigma0, Rdisk, -Hdisk, 0, 0};
-    const potential::BasePotential* potD   = potential::createGalaxyPotential(
-        std::vector<potential::DiskParam>(1, paramPotD),
-        std::vector<potential::SphrParam>() );
-    const actions::ActionFinderAxisymFudge actD(*potD);        // action finder
-    const df::PseudoIsothermal dfD(paramD, *potD);             // distribution function
-    const galaxymodel::GalaxyModel galmodD(*potD, actD, dfD);  // all together - the mighty triad
-    
-    // the analytic value of total mass for the case ar=az=aphi=br=bz=bphi=1 and jcore=0
-    massExact = norm * (2*M_PI * pow_2(Rdisk));
-    ok &= testTotalMass(galmodD, massExact);
-    
-    for(int i=0; i<NUM_POINTS_H; i++) {
-        const coord::PosVelCyl& point = testPointsH[i];
-        double dfExact    = 1;
-        double densExact  = potD->density(point);                              // analytical value of density
-        double sigmaExact = sigmaHernquist(1, 1, coord::toPosSph(point).r);  // analytical value of sigma^2
-        ok &= testDFmoments(galmodD, point, dfExact, densExact, sigmaExact);
-    }
-    delete potD;
-    }
-
     if(ok)
         std::cout << "ALL TESTS PASSED\n";
-
-    if(0) {  // test sampling of DF in 3d action space
-        particles::PointMassArrayCar points;
-        galaxymodel::generateActionSamples(galmodH, 1e5, points);
-        particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
-            "Text", "sampled_actions.txt", units::ExternalUnits());
-        snap->writeSnapshot(points);
-        delete snap;
-    }
-    if(0) {  // test sampling of DF in 6d phase space
-        particles::PointMassArrayCar points;
-        galaxymodel::generatePosVelSamples(galmodH, 1e5, points);
-        particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
-            "Text", "sampled_posvel.txt", units::ExternalUnits());
-        snap->writeSnapshot(points);
-        delete snap;
-    }
-    if(0) {  // test sampling of 3d density
-        particles::PointMassArray<coord::PosCyl> points_cyl;
-        galaxymodel::generateDensitySamples(galmodH.potential, 1e5, points_cyl);
-        particles::PointMassArrayCar points;
-        for(unsigned int i=0; i<points_cyl.size(); i++)
-            points.add(coord::PosVelCar(coord::toPosCar(points_cyl.point(i)), 
-                coord::VelCar(0,0,0)), points_cyl.mass(i));
-        particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
-            "Text", "sampled_density.txt", units::ExternalUnits());
-        snap->writeSnapshot(points);
-        delete snap;
-    }
     return 0;
 }

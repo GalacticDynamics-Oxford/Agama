@@ -343,8 +343,8 @@ void Sampler::ensureEnoughSamples(const unsigned int numOutputSamples)
         std::cout << "Integral = "<<integValue<<" +- "<<integError<<
         " after refining "<<numRefinedCells<<
         " cells because of "<<numOverflows<<" overweight samples\n";
-    } while(++nIter<10);
-    throw std::runtime_error("Error in sampleNdim: refinement procedure did not converge in 10 iterations");
+    } while(++nIter<16);
+    throw std::runtime_error("Error in sampleNdim: refinement procedure did not converge in 16 iterations");
 }
     
 void Sampler::drawSamples(const unsigned int numOutputSamples, Matrix<double>& outputSamples) const
@@ -397,6 +397,8 @@ void sampleNdim(const IFunctionNdim& fnc, const double xlower[], const double xu
     // first warmup run to collect statistics and adjust bins
     const unsigned int numWarmupSamples = std::max<unsigned int>(numSamples*0.2, 10000);
     sampler.runPass(numWarmupSamples);
+    sampler.readjustBins();
+    sampler.runPass(numWarmupSamples*4);
     sampler.readjustBins();
 
     // second run to collect samples distributed more uniformly inside the bins

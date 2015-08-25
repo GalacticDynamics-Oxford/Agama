@@ -162,7 +162,9 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
     Rmin = Rmax = Rinit;
     double maxPeri = Rinit, minApo = Rinit;    // endpoints of interval for locating peri/apocenter radii
     if(fabs(dR_to_zero) < Rinit*ACCURACY) {    // we are already near peri- or apocenter radius
-        if(nh.fder < 0) {
+        if(nh.dxBetweenRoots() < Rinit*ACCURACY) {  // the range between Rmin and Rmax is too small
+            maxPeri = minApo = NAN;  // do not attempt to locate them
+        } else if(nh.fder < 0) {
             minApo  = NAN;  // will skip the search for Rmax
             maxPeri = Rinit + nh.dxToPositive();
         } else {
@@ -190,7 +192,7 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
                 throw std::runtime_error("Error in locating Rmin in findPlanarOrbitExtent");
         }
     } else  // angular momentum is zero
-        Rmin = 0;
+        Rmin = 0; // !! this assumes a monotonic potential !! 
     if(math::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
         Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY);
@@ -210,7 +212,7 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
             else
                 throw std::runtime_error("Error in locating Rmax in findPlanarOrbitExtent");
         }
-    }   // else Rmax=absR
+    }   // else Rmax=Rinit
     assert(Rmin>=0 && Rmin<=Rinit && Rinit<=Rmax);
     if(Jr!=NULL) {  // compute radial action
         fnc.mode = OrbitSizeFunction::FIND_JR;

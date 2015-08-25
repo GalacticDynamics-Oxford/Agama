@@ -14,6 +14,7 @@ actions::Actions unscaleActions(const double vars[], double* jac)
     // Jr = J0 p, Jphi = J0 (1-p) q', Jz = J0 (1-p) (1-|q'|), so that Jr+Jz+|Jphi| = J0.
     const double s  = vars[0], p = vars[1], q = vars[2];
     const double J0 = exp( 1/(1-s) - 1/s );
+#if 1
     if(jac)
         *jac = math::withinReasonableRange(J0) ?   // if near J=0 or infinity, set jacobian to zero
             2*(1-p) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s)) : 0;
@@ -21,6 +22,15 @@ actions::Actions unscaleActions(const double vars[], double* jac)
     acts.Jr   = J0 * p;
     acts.Jphi = J0 * (1-p) * (2*q-1);
     acts.Jz   = J0 * (1-p) * (1-fabs(2*q-1));
+#else
+    if(jac)
+        *jac = math::withinReasonableRange(J0) ?   // if near J=0 or infinity, set jacobian to zero
+        2*(1-fabs(2*p-1)) * pow_3(J0) * (1/pow_2(1-s) + 1/pow_2(s)) : 0;
+    actions::Actions acts;
+    acts.Jphi = J0 * (2*p-1);
+    acts.Jr   = J0 * (1-fabs(2*p-1)) * q;
+    acts.Jz   = J0 * (1-fabs(2*p-1)) * (1-q);
+#endif
     return acts;
 }
 

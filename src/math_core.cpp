@@ -25,7 +25,8 @@ const int MAXINTEGRPOINTS = 1000;  ///< size of workspace for adaptive integrati
 
 // ------ error handling ------ //
 
-static void exceptionally_awesome_gsl_error_handler (const char *reason, const char * /*file*/, int /*line*/, int gsl_errno)
+static void exceptionally_awesome_gsl_error_handler(const char *reason, 
+    const char * /*file*/, int /*line*/, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
         gsl_errno == GSL_ETOL ||
@@ -169,7 +170,8 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
 
 double PointNeighborhood::dxToPosneg(double sgn) const
 {
-    double s0 = sgn*f0 * 1.1;  // safety factor to make sure we overshoot in finding the value of opposite sign
+    // safety factor to make sure we overshoot in finding the value of opposite sign
+    double s0 = sgn*f0 * 1.1;
     double sder = sgn*fder, sder2 = sgn*fder2;
     const double delta = fmin(fabs(fder/fder2)*0.5, GSL_SQRT_DBL_EPSILON);
     if(s0>0)
@@ -204,6 +206,12 @@ double PointNeighborhood::dxToNearestRoot() const
         }
     }
     return dx_nearest_root;
+}
+
+double PointNeighborhood::dxBetweenRoots() const
+{
+    if(f0==0 && fder==0) return 0;  // degenerate case
+    return sqrt(fder*fder - 2*f0*fder2) / fabs(fder2);  // NaN if discriminant<0 - no roots
 }
 
 // ------ root finder routines ------//
@@ -478,7 +486,8 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
 }
 
 // 1d minimizer with known initial point
-static double findMinKnown(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
+static double findMinKnown(const IFunction& fnc, 
+    double xlower, double xupper, double xinit, double reltoler)
 {
     gsl_function F;
     F.function = &functionWrapper;
@@ -519,7 +528,8 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     }
     if(xinit==xinit && (xinit<xlower || xinit>xupper))
         throw std::invalid_argument("findMin: initial guess is outside the search interval");
-    ScaledFunction F(fnc, xlower, xupper);  // transform the original range into [0:1], even if it was (semi-)infinite
+    // transform the original range into [0:1], even if it was (semi-)infinite
+    ScaledFunction F(fnc, xlower, xupper);
     xlower = F.y_from_x(xlower);
     xupper = F.y_from_x(xupper);
     if(xinit == xinit) 
@@ -647,7 +657,8 @@ struct CubaParams {
     const IFunctionNdim& F;      ///< the original function
     const double* xlower;        ///< lower limits of integration
     const double* xupper;        ///< upper limits of integration
-    std::vector<double> xvalue;  ///< temporary storage for un-scaling input point from [0:1]^N to the original range
+    std::vector<double> xvalue;  ///< temporary storage for un-scaling input point 
+                                 ///< from [0:1]^N to the original range
     std::string error;           ///< store error message in case of exception
     CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper) :
         F(_F), xlower(_xlower), xupper(_xupper) 
@@ -740,7 +751,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
         error[m] *= scaleFactor;
     }
     if(!param.error.empty())
-        throw std::runtime_error("Error in integrateNdim"+param.error);
+        throw std::runtime_error("Error in integrateNdim: "+param.error);
 #else
     CubatureParams param(F);
     hcubature(numValues, &integrandNdimWrapperCubature, &param,
@@ -749,7 +760,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     if(numEval!=NULL)
         *numEval = param.numEval;
     if(!param.error.empty())
-        throw std::runtime_error("Error in integrateNdim"+param.error);
+        throw std::runtime_error("Error in integrateNdim: "+param.error);
 #endif
 }
 
