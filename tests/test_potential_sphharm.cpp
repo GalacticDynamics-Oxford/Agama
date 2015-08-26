@@ -6,6 +6,7 @@
 #include "particles_io.h"
 #include "debug_utils.h"
 #include "utils.h"
+#include "utils_config.h"
 #include <fstream>
 #include <cstdlib>
 #include <cstdio>
@@ -29,10 +30,8 @@ const potential::BasePotential* write_read(const potential::BasePotential& pot)
 {
     std::string coefFile("test_potential_sphharm");
     coefFile += getCoefFileExtension(pot);
-    writePotential(coefFile, pot);
-    potential::ConfigPotential config;
-    config.fileName = coefFile;
-    const potential::BasePotential* newpot = readPotential(config);
+    writePotentialCoefs(coefFile, pot);
+    const potential::BasePotential* newpot = potential::readPotentialCoefs(coefFile);
     std::remove(coefFile.c_str());
     return newpot;
 }
@@ -52,23 +51,41 @@ void make_hernquist(int nbody, double q, double p, particles::PointMassArrayCar&
 }
 
 const potential::BasePotential* create_from_file(
-    const particles::PointMassArrayCar& points, const potential::PotentialType type)
+    const particles::PointMassArrayCar& points, const std::string& potType)
 {
-    potential::ConfigPotential config;
     const std::string fileName = "test.txt";
-    particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite("Text", fileName, config.units);
+    particles::BaseIOSnapshot* snap = particles::createIOSnapshotWrite(
+        "Text", fileName, units::ExternalUnits());
     snap->writeSnapshot(points);
     delete snap;
-    config.fileName = fileName;
-    config.potentialType   = type;
-    config.numCoefsRadial  = 20;
-    config.numCoefsAngular = 4;
-    config.numCoefsVertical= 20;
-    config.alpha           = 1.0;
-    config.symmetryType    = potential::ST_TRIAXIAL;
-    const potential::BasePotential* newpot = potential::readPotential(config);
+    const potential::BasePotential* newpot = NULL;
+
+    // illustrates two possible ways of creating a potential from points
+    if(potType == "BasisSetExp") {
+        particles::PointMassArrayCar pts;
+        particles::readSnapshot(fileName, units::ExternalUnits(), pts);
+        newpot = new potential::BasisSetExp(
+            1.0, /*alpha*/
+            20,  /*numCoefsRadial*/
+            4,   /*numCoefsAngular*/
+            pts, /*points*/
+            potential::ST_TRIAXIAL);  /*symmetry (default value)*/
+    } else {
+        // a rather lengthy way of setting parameters, used only for illustration:
+        // normally these would be read from an INI file or from command line;
+        // to create an instance of potential expansion of a known type, 
+        // use directly its constructor as shown above
+        utils::KeyValueMap params;
+        params.set("file", fileName);
+        params.set("type", potType);
+        params.set("numCoefsRadial", 20);
+        params.set("numCoefsAngular", 4);
+        params.set("numCoefsVertical", 20);
+        params.set("Density", "Nbody");
+        newpot = potential::createPotential(params);
+    }
     std::remove(fileName.c_str());
-    std::remove((fileName+potential::getCoefFileExtension(type)).c_str());
+    std::remove((fileName+potential::getCoefFileExtension(potType)).c_str());
     return newpot;
 }
 
@@ -81,14 +98,13 @@ bool test_suite(const potential::BasePotential* pp, const potential::BasePotenti
     bool ok=true;
     const potential::BasePotential* newpot = write_read(p);
     double gamma = getInnerDensitySlope(orig);
-    std::cout << "\033[1;32m---- testing "<<p.name()<<
-        " with "<<getSymmetryNameByType(orig.symmetry())<<" "<<orig.name()<<
+    std::cout << "\033[1;32m---- testing "<<p.name()<<" with "<<orig.name()<<
         " (gamma="<<gamma<<") ----\033[0m\n";
     const char* err = "\033[1;31m **\033[0m";
     std::string fileName = std::string("test_") + p.name() + "_" + orig.name() + 
         "_gamma" + utils::convertToString(gamma);
     if(output)
-        writePotential(fileName + getCoefFileExtension(p), p);
+        writePotentialCoefs(fileName + getCoefFileExtension(p), p);
     for(int ic=0; ic<numtestpoints; ic++) {
         double pot, pot_orig;
         coord::GradCyl der,  der_orig;
@@ -168,13 +184,13 @@ int main() {
 
     // mildly triaxial, created from N-body samples
     const potential::Dehnen hernq(1., 1., 0.8, 0.6, 1.0);
-    p = create_from_file(points, potential::PT_BSE);
+    p = create_from_file(points, potential::BasisSetExp::myName());
     ok &= test_suite(p, hernq, 2e-2);
     delete p;
-    p = new potential::SplineExp(20, 4, points, potential::ST_TRIAXIAL);  // create_from_file(points, potential::PT_SPLINE);
+    p = new potential::SplineExp(20, 4, points, potential::ST_TRIAXIAL);  // or maybe create_from_file(points, "SplineExp");
     ok &= test_suite(p, hernq, 2e-2);
     delete p;
-    p = create_from_file(points, potential::PT_CYLSPLINE);
+    p = create_from_file(points, potential::CylSplineExp::myName());
     ok &= test_suite(p, hernq, 2e-2);
     delete p;
     if(ok)

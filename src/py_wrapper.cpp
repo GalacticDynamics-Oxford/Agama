@@ -7,6 +7,7 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 //#define DEBUGPRINT
 #include <numpy/arrayobject.h>
+#include <stdexcept>
 #include "units.h"
 #include "potential_factory.h"
 #include "potential_composite.h"
@@ -14,6 +15,7 @@
 #include "actions_torus.h"
 #include "orbit.h"
 #include "math_spline.h"
+#include "utils_config.h"
 
 /// \name  Some general definitions
 ///@{
@@ -43,6 +45,24 @@ static const unsigned int MAX_NUM_KEYWORDS = 64;
 /// max size of docstring
 static const unsigned int MAX_LEN_DOCSTRING = 4096;
 
+std::string toString(PyObject* obj)
+{
+    if(PyString_Check(obj))
+        return std::string(PyString_AsString(obj));
+    PyObject* s = PyObject_Str(obj);
+    std::string str = PyString_AsString(s);
+    Py_DECREF(s);
+    return str;
+}
+
+void convertPyDictToKeyValueMap(PyObject* args, utils::KeyValueMap& params)
+{
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(args, &pos, &key, &value))
+        params.set(toString(key), toString(value));
+}
+
 ///@}
 /// \name  ------- Unit handling routines --------
 ///@{
@@ -54,7 +74,7 @@ static const units::InternalUnits unit(units::Kpc, units::Myr);
 static const units::ExternalUnits* conv;
 
 /// description of set_units function
-static const char* docstringUnits = 
+static const char* docstringSetUnits = 
     "Inform the library about the physical units that are used in Python code\n"
     "Arguments should be any three independent physical quantities that define "
     "'mass', 'length', 'velocity' or 'time' scales "
@@ -103,6 +123,25 @@ static PyObject* set_units(PyObject* /*self*/, PyObject* args, PyObject* namedAr
     }
     delete conv;
     conv = newConv;
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+/// description of set_units function
+static const char* docstringResetUnits = 
+    "Reset the unit conversion system to a trivial one "
+    "(i.e., no conversion involved and all quantities are assumed to be in N-body units, "
+    "with the gravitational constant equal to 1\n";
+
+/// reset the unit conversion
+static PyObject* reset_units(PyObject* /*self*/, PyObject* args)
+{
+    if(PyTuple_Check(args) && PyTuple_Size(args)>0) {
+        PyErr_SetString(PyExc_ValueError, "No arguments are expected");
+        return NULL;
+    }
+    delete conv;
+    conv = new units::ExternalUnits();
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -426,80 +465,16 @@ static void buildDocstringPotential()
     }
 }
 
-/// finalize the call to constructor by assigning the member variable 'pot'
-static void Potential_initMemberVar(PyObject* self, const potential::BasePotential* pot)
+/// attempt to construct potential::BasePotential* from an array of particles
+static const potential::BasePotential* Potential_initFromParticles(const utils::KeyValueMap& params, PyObject* points)
 {
-#ifdef DEBUGPRINT
-    printf("Created an instance of %s potential\n", pot->name());
-#endif
-    if(((PotentialObject*)self)->pot)
-    {  // check if this is not the first time that constructor is called
-#ifdef DEBUGPRINT
-        printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
-#endif
-        delete ((PotentialObject*)self)->pot;
-    }
-    ((PotentialObject*)self)->pot = pot;
-}
-
-/// attempt to construct a composite potential from a tuple of Potential objects
-static int Potential_initComposite(PyObject* self, PyObject* args)
-{
-    if(PyTuple_CheckExact(args) && PyTuple_Size(args)>0) {
-        bool correct = true;
-        for(Py_ssize_t i=0; correct && i<PyTuple_Size(args); i++) 
-            correct &= PyObject_TypeCheck(PyTuple_GET_ITEM(args, i), PotentialTypePtr);
-        if(!correct) {
-            PyErr_SetString(PyExc_ValueError, 
-                "The arguments of constructor are not a tuple of Potential objects");
-            return -1;
-        }
-        /* in the present implementation, creating a composite potential from an array 
-           of BasePotential* pointers means that they are "taken over" by the new composite
-           potential and will be deleted when the latter is destroyed. 
-           Since we must not delete the same object twice, we make sure that the original 
-           Potential objects in Python will no longer be usable after creating a composite, 
-           but they won't be automatically deleted until their refcounter drops to zero.
-        */
-        std::vector<const potential::BasePotential*> components;
-        for(Py_ssize_t i=0; i<PyTuple_Size(args); i++) {
-            components.push_back(((PotentialObject*)PyTuple_GET_ITEM(args, i))->pot);
-            ((PotentialObject*)PyTuple_GET_ITEM(args, i))->pot = NULL;  // won't be usable anymore
-        }
-        try{
-            const potential::BasePotential* pot = new potential::CompositeCyl(components);
-            Potential_initMemberVar(self, pot);
-            return 0;
-        }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_ValueError, 
-                (std::string("Error in creating composite potential: ")+e.what()).c_str());
-            return -1;
-        }
-    }
-    return -1;  // not successful
-}
-
-/// construct potential::BasePotential* object from particles
-static int Potential_initFromParticles(PyObject* self, 
-    const potential::ConfigPotential& cfg, PyObject* points)
-{
-    if( !cfg.fileName.empty() ) {
-        PyErr_SetString(PyExc_ValueError, "Cannot provide both points and filename");
-        return -1;
-    }
-    if( cfg.potentialType != potential::PT_BSE &&
-        cfg.potentialType != potential::PT_SPLINE &&
-        cfg.potentialType != potential::PT_CYLSPLINE ) {
-        PyErr_SetString(PyExc_ValueError, "Potential should be of an expansion type");
-        return -1;
-    }
+    if(params.contains("file"))
+        throw std::invalid_argument("Cannot provide both 'points' and 'file' arguments");
     PyObject *pointCoordObj, *pointMassObj;
     if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
-        PyErr_SetString(PyExc_ValueError, "'points' must be a tuple with two arrays - "
+        throw std::invalid_argument("'points' must be a tuple with two arrays - "
             "coordinates and mass, where the first one is a two-dimensional Nx3 array "
             "and the second one is a one-dimensional array of length N");
-        return -1;
     }
     PyArrayObject *pointCoordArr = (PyArrayObject*)
         PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
@@ -508,8 +483,7 @@ static int Potential_initFromParticles(PyObject* self,
     if(pointCoordArr == NULL || pointMassArr == NULL) {
         Py_XDECREF(pointCoordArr);
         Py_XDECREF(pointMassArr);
-        PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays");
-        return -1;
+        throw std::invalid_argument("'points' does not contain valid arrays");
     }
     int numpt = 0;
     if(PyArray_NDIM(pointMassArr) == 1)
@@ -519,86 +493,108 @@ static int Potential_initFromParticles(PyObject* self,
     {
         Py_DECREF(pointCoordArr);
         Py_DECREF(pointMassArr);
-        PyErr_SetString(PyExc_ValueError, "'points' does not contain valid arrays "
+        throw std::invalid_argument("'points' does not contain valid arrays "
             "(the first one must be 2d array of shape Nx3 and the second one must be 1d array of length N)");
-        return -1;
     }
+    particles::PointMassArray<coord::PosCar> pointArray;
+    pointArray.data.reserve(numpt);
+    for(int i=0; i<numpt; i++) {
+        double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0)) * conv->lengthUnit;
+        double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1)) * conv->lengthUnit;
+        double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2)) * conv->lengthUnit;
+        double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i)) * conv->massUnit;
+        pointArray.add(coord::PosCar(x,y,z), m);
+    }
+    Py_DECREF(pointCoordArr);
+    Py_DECREF(pointMassArr);
+    return potential::createPotentialFromPoints(params, *conv, pointArray);
+}
+
+/// attempt to construct an elementary potential from the parameters provided in dictionary
+static const potential::BasePotential* Potential_initFromDict(PyObject* args)
+{
+    utils::KeyValueMap params;
+    convertPyDictToKeyValueMap(args, params);
+    // check if the list of arguments contains points
+    PyObject* points = PyDict_GetItemString(args, "points");
+    if(points) {
+        params.unset("points");
+        return Potential_initFromParticles(params, points);
+    }
+    return potential::createPotential(params, *conv);
+}
+
+/// attempt to construct a composite potential from a tuple of Potential objects or dictionaries with potential parameters
+static const potential::BasePotential* Potential_initComposite(PyObject* tuple)
+{
+    bool correct = true;
+    // first check the types of tuple elements
+    for(Py_ssize_t i=0; correct && i<PyTuple_Size(tuple); i++)
+        correct &=
+            (PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr) &&
+             ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot != NULL) ||  // an existing Potential object
+            PyDict_Check(PyTuple_GET_ITEM(tuple, i));  // a dictionary with param=value pairs
+    if(!correct)
+        throw std::invalid_argument(
+            "The tuple should contain Potential objects or dictionaries with potential parameters");
+
+    // next try to create potential components for the elements specified as dictionaries
+    std::vector<const potential::BasePotential*> components (PyTuple_Size(tuple));
     try{
-        particles::PointMassArray<coord::PosCar> pointArray;
-        pointArray.data.reserve(numpt);
-        for(int i=0; i<numpt; i++) {
-            double x = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 0)) * conv->lengthUnit;
-            double y = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 1)) * conv->lengthUnit;
-            double z = *static_cast<double*>(PyArray_GETPTR2(pointCoordArr, i, 2)) * conv->lengthUnit;
-            double m = *static_cast<double*>(PyArray_GETPTR1(pointMassArr, i)) * conv->massUnit;
-            pointArray.add(coord::PosCar(x,y,z), m);
+        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++)
+            if(PyDict_Check(PyTuple_GET_ITEM(tuple, i))) {    // process only dict elements of tuple
+                components[i] = Potential_initFromDict(PyTuple_GET_ITEM(tuple, i));
+            }
+    }
+    catch(std::exception&) {    // some of the potential components failed to be created
+        for(unsigned int i=0; i<components.size(); i++)
+            delete components[i];    // dispose of any existing components that were created (does nothing for NULL elements)
+        throw;  // propagate the exception further up
+    }
+    /*  In the present implementation, creating a composite potential from an array
+        of BasePotential* pointers means that they are "taken over" by the new composite
+        potential and will be deleted when the latter is destroyed.
+        Since we must not delete the same object twice, we make sure that the original
+        Potential objects in Python will no longer be usable after creating a composite,
+        but they won't be automatically deleted until their refcounter drops to zero.
+    */
+    for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
+        if(PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr)) {   // process only Potential elements of tuple
+            components[i] = ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot;
+            ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot = NULL;  // won't be usable anymore
         }
-        const potential::BasePotential* pot = potential::createPotentialFromPoints(cfg, pointArray);
-        assert(pot!=NULL);
-        Potential_initMemberVar(self, pot);
-        Py_DECREF(pointCoordArr);
-        Py_DECREF(pointMassArr);
-        return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
-            (std::string("Error in creating potential from points: ")+e.what()).c_str());
-        Py_DECREF(pointCoordArr);
-        Py_DECREF(pointMassArr);
-        return -1;
-    }
+    return new potential::CompositeCyl(components);
 }
 
 /// the generic constructor of Potential object
 static int Potential_init(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    // check if the input was a tuple of Potential objects, and if so, return a composite potential
-    if(Potential_initComposite(self, args) == 0)
-        return 0;
-    potential::ConfigPotential cfg;
-    const char* file="";
-    const char* type="";
-    const char* density="";
-    const char* symmetry="";
-    PyObject* points=NULL;
-
-    // it is VITALLY IMPORTANT to list all data fields in exactly the same order
-    // as appeared in the `potentialArgs` array!!!
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, keywordTypesPotential, const_cast<char**>(keywordsPotential),
-        &file, &type, &density, &symmetry,
-        &points,
-        &(cfg.mass), &(cfg.scaleRadius), &(cfg.scaleRadius2), &(cfg.q), &(cfg.p), &(cfg.gamma), &(cfg.sersicIndex),
-        &(cfg.numCoefsRadial), &(cfg.numCoefsAngular), &(cfg.numCoefsVertical), 
-        &(cfg.alpha), &(cfg.splineSmoothFactor), &(cfg.splineRMin), &(cfg.splineRMax), &(cfg.splineZMin), &(cfg.splineZMax) ))
-    {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to the Potential constructor;\n"
-            "type 'help(Potential)' to get the list of possible arguments and their types");
-        return -1;
-    }
-    cfg.fileName      = std::string(file);
-    cfg.potentialType = potential::getPotentialTypeByName(type);
-    cfg.densityType   = potential::getDensityTypeByName(density);
-    cfg.symmetryType  = potential::getSymmetryTypeByName(symmetry);
-    cfg.mass         *= conv->massUnit;
-    cfg.scaleRadius  *= conv->lengthUnit;
-    cfg.scaleRadius2 *= conv->lengthUnit;
-    cfg.splineRMin   *= conv->lengthUnit;
-    cfg.splineRMax   *= conv->lengthUnit;
-    cfg.splineZMin   *= conv->lengthUnit;
-    cfg.splineZMax   *= conv->lengthUnit;
-    try{  // the code below may generate exceptions which shouldn't propagate to Python
-        if(points!=NULL) {  // a list of particles was provided
-            return Potential_initFromParticles(self, cfg, points);
-        } else {   // attempt to create potential from configuration parameters
-            if(type[0]==0 && file[0]==0) {
-                PyErr_SetString(PyExc_ValueError, "Should provide type='...' or file='...' parameter");
-                return -1;
-            }
-            const potential::BasePotential* pot = potential::createPotential(cfg);
-            assert(pot!=NULL);
-            Potential_initMemberVar(self, pot);
-            return 0;
+    const potential::BasePotential* pot=NULL;
+    try{
+        // check if we have only a tuple of potential components as arguments
+        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && namedArgs==NULL)
+            pot = Potential_initComposite(args);
+        else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+            pot = Potential_initFromDict(namedArgs);
+        else
+            throw std::invalid_argument("Potential may be initialized either "
+                "from a tuple of existing Potential objects or dictionaries containing potential parameters, "
+                "in which case a Composite potential is created, "
+                "or from a set of named arguments (which are the parameters for a single instance of Potential)");
+        assert(pot!=NULL);
+#ifdef DEBUGPRINT
+        printf("Created an instance of %s potential\n", pot->name());
+#endif
+        if(((PotentialObject*)self)->pot)
+        {  // check if this is not the first time that constructor is called
+#ifdef DEBUGPRINT
+            printf("Deleted previous instance of %s potential\n", ((PotentialObject*)self)->pot->name());
+#endif
+            delete ((PotentialObject*)self)->pot;
         }
+        ((PotentialObject*)self)->pot = pot;
+        return 0;
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, (std::string("Error in creating potential: ")+e.what()).c_str());
@@ -720,15 +716,8 @@ static PyObject* Potential_export(PyObject* self, PyObject* args)
     const char* filename=NULL;
     if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "s", &filename))
         return NULL;
-    potential::PotentialType t = potential::getPotentialType(*((PotentialObject*)self)->pot);
-    if (t != potential::PT_BSE &&
-        t != potential::PT_SPLINE &&
-        t != potential::PT_CYLSPLINE ) {
-        PyErr_SetString(PyExc_ValueError, "Potential is not of an expansion type");
-        return NULL;
-    }
     try{
-        writePotential(filename, *((PotentialObject*)self)->pot);
+        writePotentialCoefs(filename, *((PotentialObject*)self)->pot);
         Py_INCREF(Py_None);
         return Py_None;
     }
@@ -1180,7 +1169,8 @@ static PyObject* integrate_orbit(PyObject* /*self*/, PyObject* args, PyObject* n
 ///@}
 
 static PyMethodDef py_wrapper_methods[] = {
-    {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringUnits},
+    {"set_units", (PyCFunction)set_units, METH_VARARGS | METH_KEYWORDS, docstringSetUnits},
+    {"reset_units", reset_units, METH_NOARGS, docstringResetUnits},
     {"orbit", (PyCFunction)integrate_orbit, METH_VARARGS | METH_KEYWORDS, docstringOrbit},
     {"actions", (PyCFunction)find_actions, METH_VARARGS | METH_KEYWORDS, docstringActions},
     {NULL}

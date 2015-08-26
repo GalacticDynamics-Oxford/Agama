@@ -53,7 +53,7 @@ public:
     BasisSetExp(double _Alpha, unsigned int _Ncoefs_radial, unsigned int _Ncoefs_angular, 
         const BaseDensity& density);
     virtual const char* name() const { return myName(); };
-    static const char* myName() { return "BSE"; };
+    static const char* myName() { return "BasisSetExp"; };
 
     //  get functions:
     /// return BSE coefficients array
@@ -109,7 +109,7 @@ public:
         const BaseDensity& density, const std::vector<double>  *_gridradii=0);
 
     virtual const char* name() const { return myName(); };
-    static const char* myName() { return "Spline"; };
+    static const char* myName() { return "SplineExp"; };
 
     // get functions
     unsigned int getNumCoefsRadial() const { return Ncoefs_radial; }   ///< return the number of radial points in the spline (excluding r=0)

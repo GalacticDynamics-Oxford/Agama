@@ -29,6 +29,9 @@ public:
     /// initialize map from command-line-like arguments
     KeyValueMap(const int numParams, const char* const* params);
 
+    /// check if a key exists in the list
+    bool contains(const std::string& key) const;
+
     /// return a string value from the map
     std::string getString(const std::string& key, const std::string& defaultValue="") const;
 
@@ -56,6 +59,9 @@ public:
     /// set a string value
     void set(const std::string& key, const std::string& value);
 
+    /// set a string value
+    void set(const std::string& key, const char* value);
+    
     /// set a floating-point value
     void set(const std::string& key, const double value, unsigned int width=6);
 
@@ -68,11 +74,17 @@ public:
     /// set a boolean value
     void set(const std::string& key, const bool value);
 
+    /// attempt to delete a key from the list; return true if it existed
+    bool unset(const std::string& key);
+
     /// parse a key=value pair and append it to the map (does not change `modified` flag)
     void add(const char* keyValue);
 
     /// dump the entire map into a single string (with line breaks between items)
     std::string dump() const;
+
+    /// return the list of all keys that contain any values
+    std::vector<std::string> keys() const;
 
     /// check if any items were modified by a call to set method
     bool isModified() const { return modified; }
@@ -88,14 +100,15 @@ private:
 */
 class ConfigFile {
 public:
-    /// open an INI file with the given name; if it exists, read its contents on initialization
+    /// open an INI file with the given name and read its contents
+    /// \throw std::runtime_error if the file does not exist
     ConfigFile(const std::string& fileName);
 
     /// destroy the class and write unsaved data back to INI file, if it was modified
     ~ConfigFile();
 
     /// return a list of all sections in the INI file
-    void listGroups(std::vector<std::string>& list) const;
+    void listSections(std::vector<std::string>& list) const;
 
     /// find section by name, if it does not exist then first create it
     KeyValueMap& findSection(const std::string& sec);

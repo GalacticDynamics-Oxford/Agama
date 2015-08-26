@@ -41,7 +41,7 @@ public:
 
     ~CylSplineExp() {};
     virtual const char* name() const { return myName(); };
-    static const char* myName() { return "CylSpline"; };
+    static const char* myName() { return "CylSplineExp"; };
     virtual SymmetryType symmetry() const { return mysymmetry; };
 
     /** retrieve coefficients of potential approximation.

@@ -42,7 +42,7 @@ bool test_actions(const potential::BasePotential& poten,
     double scatterNorm = 0.33 * sqrt( (acts.avg.Jr+acts.avg.Jz) / (acts.avg.Jr+acts.avg.Jz+fabs(acts.avg.Jphi)) );
     bool tolerable = scatter < scatterNorm && 
         angs.dispr < 0.1 && angs.dispz < 1.0 && angs.dispphi < 0.05;
-    const double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr;//unit.to_Kpc_kms;
+    const double dim = unit.to_Kpc_kms;
     std::cout << 
         acts.avg.Jr*dim <<" "<< acts.disp.Jr*dim <<" "<< 
         acts.avg.Jz*dim <<" "<< acts.disp.Jz*dim <<" "<< 
@@ -81,18 +81,16 @@ int main(int argc, const char* argv[]) {
     const potential::BasePotential* pot;
     utils::KeyValueMap params(argc, argv);
     if(argc>1) {
-        potential::ConfigPotential config;
-        potential::parseConfigPotential(params, config);
-        pot = potential::createPotential(config);
+        pot = potential::createPotential(params, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
     } else
         pot = make_galpot(test_galpot_params);
-    double Jr   = params.getDouble("Jr", 0.1);
-    double Jz   = params.getDouble("Jz", 0.1);
-    double Jphi = params.getDouble("Jphi", 1);
+    double Jr   = params.getDouble("Jr", 100);
+    double Jz   = params.getDouble("Jz", 100);
+    double Jphi = params.getDouble("Jphi", 1000);
     actions::Actions acts;
-    acts.Jr   = Jr   * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
-    acts.Jz   = Jz   * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
-    acts.Jphi = Jphi * unit.from_Kpc*unit.from_Kpc/unit.from_Myr;
+    acts.Jr   = Jr   * unit.from_Kpc_kms;
+    acts.Jz   = Jz   * unit.from_Kpc_kms;
+    acts.Jphi = Jphi * unit.from_Kpc_kms;
     actions::ActionMapperTorus mapper(*pot, acts);
     actions::ActionFinderAxisymFudge finder(*pot);
     allok &= test_actions(*pot, finder, mapper, acts);

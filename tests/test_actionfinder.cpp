@@ -117,13 +117,7 @@ const char* test_galpot_params =
 int main(int argc, const char* argv[]) {
     bool allok = true;
     const potential::BasePotential* pot;
-    if(argc>1) {
-        utils::KeyValueMap params(argc, argv);
-        potential::ConfigPotential config;
-        potential::parseConfigPotential(params, config);
-        pot = potential::createPotential(config);
-    } else
-        pot = make_galpot(test_galpot_params);
+    pot = make_galpot(test_galpot_params);
     clock_t clockbegin = std::clock();
     actions::InterfocalDistanceFinder ifdFinder(*pot);
     std::cout << (std::clock()-clockbegin)*1.0/CLOCKS_PER_SEC << " seconds to init Delta-finder\n";

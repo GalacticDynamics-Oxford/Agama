@@ -1,6 +1,7 @@
 #include "utils_config.h"
 #include "utils.h"
 #include <fstream>
+#include <stdexcept>
 
 namespace utils {
 
@@ -49,6 +50,14 @@ void KeyValueMap::add(const char* line)
         items.push_back(std::pair<std::string, std::string>(key, buffer));
     } else  // line without '=' or starting with a comment is not a key-value pair, but must be stored anyway
         items.push_back(std::pair<std::string, std::string>("", buffer));  // store with empty key (non-retrievable via get methods)
+}
+
+bool KeyValueMap::contains(const std::string& key) const
+{
+    for(unsigned int ik=0; ik<items.size(); ik++)
+        if(!items[ik].first.empty() && comparestr(items[ik].first, key))
+            return true;
+    return false;
 }
 
 std::string KeyValueMap::getString(const std::string& key, const std::string& defaultValue) const
@@ -122,6 +131,11 @@ void KeyValueMap::set(const std::string& key, const std::string& value)
     items.push_back(std::pair<std::string, std::string>(key, value));  // key not found -- add new
 }
 
+void KeyValueMap::set(const std::string& key, const char* value)
+{
+   set(key, std::string(value));
+}
+
 void KeyValueMap::set(const std::string& key, const double value, unsigned int width)
 {
     set(key, utils::convertToString(value, width));
@@ -142,12 +156,31 @@ void KeyValueMap::set(const std::string& key, const bool value)
     set(key, utils::convertToString(value));
 }
 
+bool KeyValueMap::unset(const std::string& key)
+{
+    for(unsigned int ik=0; ik<items.size(); ik++)
+        if(!items[ik].first.empty() && comparestr(items[ik].first, key)) {
+            items.erase(items.begin()+ik);
+            return true;
+        }
+    return false;
+}
+
 std::string KeyValueMap::dump() const
 {
     std::string str;
     for(unsigned int i=0; i<items.size(); i++)
         str += items[i].first+'='+items[i].second+'\n';
     return str;
+}
+
+std::vector<std::string> KeyValueMap::keys() const
+{
+    std::vector<std::string> result;
+    for(unsigned int i=0; i<items.size(); i++)
+        if(!items[i].first.empty())
+            result.push_back(items[i].first);
+    return result;
 }
 
 // -------- ConfigFile -------- //
@@ -157,7 +190,7 @@ ConfigFile::ConfigFile(const std::string& _fileName) :
 {
     std::ifstream strm(fileName.c_str());
     if(!strm)
-        return;  // file does not exist
+        throw std::runtime_error("File does not exist: "+_fileName);
     std::string buffer, key;
     int secIndex = -1;
     while(std::getline(strm, buffer)) {
@@ -211,7 +244,7 @@ ConfigFile::~ConfigFile()
     }
 }
 
-void ConfigFile::listGroups(std::vector<std::string>& list) const
+void ConfigFile::listSections(std::vector<std::string>& list) const
 {
     list.resize(sections.size());
     for(unsigned int i=0; i<sections.size(); i++)
