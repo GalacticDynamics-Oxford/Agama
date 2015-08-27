@@ -1,3 +1,39 @@
 SUMMARY
 
-This is a redesigned version of action-based galaxy modelling framework
+This is a redesigned version of action-based galaxy modelling framework. To get it working on your computer:
+
+1. Download the repository (will download as a tarball).
+2. Although not compulsory, you may want to download the UNISO library for reading N-body snapshots (the format is assumed to be text otherwise), galpy for comparison purposes, and the Cuba library if you would rather use this than the Cubature library for integration.
+3. You need to recompile any external libraries with the -FPIC flag.
+4. You need to create a file called Makefile.local, which is read by the Makefiles and contains path names specific to your own computer. An example is given below (you will need to change the pathnames). In order to make python path permanently available you can add the line exporting the path in the makefile to your bash file.
+5. Typing make compiles everything.
+
+Makefile.local (copy and paste everything below into your file and change where required)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# machine-specific settings
+
+# compiler and linker
+CXX       = g++
+ARC       = ar
+CXXFLAGS += -Wall -Wno-overflow -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
+LFLAGS   += -fPIC -lgsl -lgslcblas
+
+# check the dirnames
+PYFLAGS  += -I/usr/include/python2.6 -I/Library/Python/2.6/site-packages/numpy/core/include -lpython -fno-strict-aliasing
+
+# this flag apparently is only relevant for MacOS and reduces the size of executable files by removing unused code
+LFLAGS  += -Wl,-dead_strip
+
+# uncomment (and possibly modify) the three lines below  to use UNSIO library for input/output of N-body snapshots
+DEFINES  += -DHAVE_UNSIO
+CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
+LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
+
+# uncomment the three lines below and adjust the paths  to use Cuba library for multidimensional integration 
+# (otherwise use Cubature library bundled with the code)
+DEFINES  += -DHAVE_CUBA
+CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
+LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
+
+
