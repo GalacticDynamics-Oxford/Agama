@@ -1,3 +1,9 @@
 SUMMARY
 
-This is a redesigned version of action-based galaxy modelling framework
+This is a redesigned version of action-based galaxy modelling framework. To get it working on your computer:
+
+1. Download the repository (will download as a tarball).
+2. Although not compulsory, you may want to download the UNISO library for reading N-body snapshots (the format is assumed to be text otherwise), galpy for comparison purposes, and the Cuba library if you would rather use this than the Cubature library for integration.
+3. You need to recompile any external libraries with the -FPIC flag.
+4. The Makefile.local is read by the Makefile and contains path names specific to your own computer. You will need to adapt the path names here. In order to make python path permanently available you can add the line exporting the path in the makefile to your bash file.
+5. Typing make compiles everything.
