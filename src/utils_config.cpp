@@ -198,7 +198,7 @@ ConfigFile::ConfigFile(const std::string& _fileName) :
         std::string::size_type indx1= buffer.find(']');
         if(indx!=std::string::npos && indx1!=std::string::npos && indx1>indx)
         {   // section start - parse section name
-            buffer = buffer.substr(indx, indx1-indx-1);
+            buffer = buffer.substr(indx+1, indx1-indx-1);
             indx = buffer.find_first_not_of(" \t\n\r");
             if(indx!=std::string::npos && indx>0)
                 buffer.erase(0, indx);

@@ -13,7 +13,7 @@ ok,mass = a.getArrayF("all","mass")
 print "Loaded",len(mass),"points"
 
 #2. create a potential from this snapshot
-p = py_wrapper.Potential(type="Spline", points=(pos,mass))
+p = py_wrapper.Potential(type="SplineExp", points=(pos,mass))
 print "Created a",p.name(),"potential"
 
 #3. compute something interesting

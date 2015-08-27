@@ -26,7 +26,7 @@ Version 0.7    23. September 2004  fixed "find(): x out of range" error
 Version 0.8    24. June      2005  explicit construction of tupel 
 
 ----------------------------------------------------------------------*/
-#include "potential_galpot.h" 
+#include "potential_galpot.h"
 #include "potential_composite.h"
 #include "WD_FreeMemory.h"
 #include "WD_Numerics.h"
@@ -80,15 +80,17 @@ private:
             if(fpprime) *fpprime=0;
             return;
         }
-        const double Rrel = R/params.scaleLength;
+        const double Rrel = R/params.scaleRadius;
         const double cr = params.modulationAmplitude ? params.modulationAmplitude*cos(Rrel) : 0;
         const double sr = params.modulationAmplitude ? params.modulationAmplitude*sin(Rrel) : 0;
+        if(R==0 && params.innerCutoffRadius==0)
+            R = 1e-100;  // avoid 0/0 indeterminacy
         double val = params.surfaceDensity * exp(-params.innerCutoffRadius/R-Rrel+cr);
-        double fp  = params.innerCutoffRadius/(R*R)-(1+sr)/params.scaleLength;
+        double fp  = params.innerCutoffRadius/(R*R)-(1+sr)/params.scaleRadius;
         if(fpprime)
-            *fpprime = (fp*fp-2*params.innerCutoffRadius/(R*R*R)-cr/pow_2(params.scaleLength))*val;
+            *fpprime = val ? (fp*fp-2*params.innerCutoffRadius/(R*R*R)-cr/pow_2(params.scaleRadius))*val : 0;
         if(fprime)
-            *fprime  = fp*val;
+            *fprime  = val ? fp*val : 0;
         if(f) 
             *f = val;
     }
@@ -146,12 +148,12 @@ private:
 
 /** helper routine to create an instance of radial density function */
 const math::IFunction* createRadialDiskFnc(const DiskParam& params) {
-    if(params.scaleLength<=0)
-        throw std::invalid_argument("Disk scale length cannot be <=0");
+    if(params.scaleRadius<=0)
+        throw std::invalid_argument("Disk scale radius cannot be <=0");
     if(params.innerCutoffRadius<0)
         throw std::invalid_argument("Disk inner cutoff radius cannot be <0");
     if(params.innerCutoffRadius==0 && params.modulationAmplitude==0)
-        return new DiskDensityRadialExp(params.surfaceDensity, params.scaleLength);
+        return new DiskDensityRadialExp(params.surfaceDensity, params.scaleRadius);
     else
         return new DiskDensityRadialRichExp(params);
 }
@@ -485,7 +487,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
 {
     double r=hypot(pos.R, pos.z);
     double ct=pos.z/r, st=pos.R/r;  // cos(theta), sin(theta)
-    if(r==0) {ct=st=0;}
+    if(r==0 || r==INFINITY) {ct=st=0;}
     double Xi[2];
     double lr=log(r), Phi;
     Xi[0] = fmin(lRmax,fmax(lRmin,lr));
@@ -499,7 +501,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
         Phi = WD::Psplev2D(X,Y,Z,K,Xi,der);
     if(deriv) der[1]*= sign(ct);
     if(deriv2) der2[0][1]*= sign(ct);
-    if(lr < lRmin) {
+    if(lr < lRmin) {  // extrapolation at small radii
         if(g2>0.) {
             Phi = (Phi-Phi0)*exp(g2*(lr-Xi[0]));
             if(deriv) der[0] = g2*Phi;
@@ -514,14 +516,17 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
             if(deriv) der[0] = g2*Phi;
             if(deriv2) der2[0][0] = g2*g2*Phi;
         }
-    } else if(lr > lRmax) {
-        Phi *= Rmax/r;
-        if(deriv) der[0] =-Phi;
-        if(deriv2) der2[0][0] = Phi;
+    } else if(lr > lRmax)  // extrapolation at large radii
+    {  // use monopole+quadrupole terms; more accurate than in the original code
+        double M = (1.5*Phi + 0.5*der[0]) * Rmax/r;      // compute them from the spline value
+        double Q = -0.5*(Phi + der[0]) * pow_3(Rmax/r);  // and derivative at r=Rmax
+        Phi = M+Q;
+        if(deriv) der[0] = -M-3*Q;
+        if(deriv2) der2[0][0] = M+9*Q;
     }
     if(potential)
         *potential=Phi;
-    if(r==0) r=1e-100;  // safety measure
+    if(r==0) r=1e-100;  // safety measure to avoid 0/0
     if(deriv) {
         deriv->dR=(der[0]-der[1]*ct)*st/r;
         deriv->dz=(der[0]*ct+der[1]*st*st)/r;
@@ -540,7 +545,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
 }
 
 //----- GalaxyPotential refactored into a Composite potential -----//
-const potential::BasePotential* createGalaxyPotential(
+std::vector<const BasePotential*> createGalaxyPotentialComponents(
     const std::vector<DiskParam>& DiskParams, 
     const std::vector<SphrParam>& SphrParams)
 {
@@ -552,14 +557,14 @@ const potential::BasePotential* createGalaxyPotential(
     // first create a set of density components for the multipole
     // (all spheroids and residual part of disks)
     std::vector<const BaseDensity*> componentsDens;
-    for(size_t i=0; i<DiskParams.size(); i++) {
+    for(unsigned int i=0; i<DiskParams.size(); i++) {
         componentsDens.push_back(new DiskResidual(DiskParams[i]));
-        lengthMin = fmin(lengthMin, DiskParams[i].scaleLength);
-        lengthMax = fmax(lengthMax, DiskParams[i].scaleLength);
+        lengthMin = fmin(lengthMin, DiskParams[i].scaleRadius);
+        lengthMax = fmax(lengthMax, DiskParams[i].scaleRadius);
         if(DiskParams[i].innerCutoffRadius>0)
             lengthMin = fmin(lengthMin, DiskParams[i].innerCutoffRadius);
     }
-    for(size_t i=0; i<SphrParams.size(); i++) {
+    for(unsigned int i=0; i<SphrParams.size(); i++) {
         componentsDens.push_back(new SpheroidDensity(SphrParams[i]));
         gamma = fmax(gamma, SphrParams[i].gamma);
         lengthMin = fmin(lengthMin, SphrParams[i].scaleRadius);
@@ -573,6 +578,8 @@ const potential::BasePotential* createGalaxyPotential(
     if(beta==1.e3) beta=-1;
     if(componentsDens.size()==0)
         throw std::invalid_argument("Empty parameters in GalPot");
+    // create an composite density object to be passed to Multipole;
+    // the temporary density objects will be destroyed once this gets out of scope
     const CompositeDensity dens(componentsDens);
 
     // create multipole potential from this combined density
@@ -583,9 +590,19 @@ const potential::BasePotential* createGalaxyPotential(
     // now create a composite potential from the multipole and non-residual part of disk potential
     std::vector<const BasePotential*> componentsPot;
     componentsPot.push_back(mult);
-    for(size_t i=0; i<DiskParams.size(); i++)  // note that we create another class of objects than above
+    for(unsigned int i=0; i<DiskParams.size(); i++)  // note that we create another class of objects than above
         componentsPot.push_back(new DiskAnsatz(DiskParams[i]));
-    return new CompositeCyl(componentsPot);
+    // this array should be passed to the constructor of CompositeCyl potential;
+    // instances of potential components created here are taken over by the composite
+    // and will be deallocated when the latter is destroyed, so we don't do it here
+    return componentsPot;
+}
+
+const potential::BasePotential* createGalaxyPotential(
+    const std::vector<DiskParam>& DiskParams,
+    const std::vector<SphrParam>& SphrParams)
+{
+    return new CompositeCyl(createGalaxyPotentialComponents(DiskParams, SphrParams));
 }
 
 } // namespace

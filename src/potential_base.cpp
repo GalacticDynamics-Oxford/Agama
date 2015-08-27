@@ -4,6 +4,8 @@
 #include <stdexcept>
 
 namespace potential{
+/// relative accuracy of locating the radius of circular orbit
+const double EPSREL_RCIRC = 1e-10;
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
@@ -294,7 +296,7 @@ double R_circ(const BasePotential& potential, double energy) {
     if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
-    return math::findRoot(RcircRootFinder(potential, energy), 0, INFINITY, EPSREL_POTENTIAL_INT);
+    return math::findRoot(RcircRootFinder(potential, energy), 0, INFINITY, EPSREL_RCIRC);
 }
 
 double L_circ(const BasePotential& potential, double energy) {
@@ -308,7 +310,7 @@ double R_from_Lz(const BasePotential& potential, double Lz) {
     if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
-    return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_POTENTIAL_INT);
+    return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_RCIRC);
 }
 
 void epicycleFreqs(const BasePotential& potential, const double R,

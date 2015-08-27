@@ -98,7 +98,8 @@ bool test_suite(const potential::BasePotential* pp, const potential::BasePotenti
     bool ok=true;
     const potential::BasePotential* newpot = write_read(p);
     double gamma = getInnerDensitySlope(orig);
-    std::cout << "\033[1;32m---- testing "<<p.name()<<" with "<<orig.name()<<
+    std::cout << "\033[1;32m---- testing "<<p.name()<<" with "<<
+        (isSpherical(orig) ? "spherical " : "triaxial ") <<orig.name()<<
         " (gamma="<<gamma<<") ----\033[0m\n";
     const char* err = "\033[1;31m **\033[0m";
     std::string fileName = std::string("test_") + p.name() + "_" + orig.name() + 
@@ -150,7 +151,7 @@ int main() {
 
     // spherical, cored
     const potential::Plummer plum(10., 5.);
-    p = new potential::BasisSetExp(0., 20, 2, plum);
+    p = new potential::BasisSetExp(0., 30, 2, plum);
     ok &= test_suite(p, plum, 1e-5);
     delete p;
     p = new potential::SplineExp(20, 2, plum);

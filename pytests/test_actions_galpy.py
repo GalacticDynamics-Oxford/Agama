@@ -9,15 +9,21 @@ from galpy.actionAngle import *
 from galpy.orbit import *
 import matplotlib.pyplot as plt
 
-#1. set up 
-g_bulge = PowerSphericalPotentialwCutoff(alpha=1.8,rc=1.9/8,amp=0.03)
-g_disk  = MiyamotoNagaiPotential(a=3./8,b=0.28/8,amp=0.755)
-g_halo  = NFWPotential(a=2,amp=4.85)
+#1. set up galpy potential
+g_bulge = PowerSphericalPotentialwCutoff(alpha=1.8, rc=1.9/8, amp=0.03)
+g_disk  = MiyamotoNagaiPotential(a=3./8, b=0.28/8, amp=0.755)
+g_halo  = NFWPotential(a=2., amp=4.85)
 g_pot   = [g_bulge,g_disk,g_halo]   # same as MWPotential2014
 
-c_disk  = py_wrapper.Potential(type="MiyamotoNagai",mass=0.755,scaleradius=3./8,scaleradius2=0.28/8)
-c_spher = py_wrapper.Potential(type="GalPot",file="MWPotential2014.Tpot")
-c_pot   = py_wrapper.Potential(c_disk,c_spher)
+#2. set up equivalent potential
+py_wrapper.set_units( mass=1., length=8., velocity=345.67)
+p_bulge = {"type":"TwoPowerLawSpheroid", "densityNorm":6.669e9,
+    "gamma":1.8, "beta":1.8, "scaleRadius":1, "outerCutoffRadius":1.9/8};
+p_disk  = {"type":"MiyamotoNagai", "mass":1.678e11, "scaleradius":3./8, "scaleheight":0.28/8};
+p_halo  = {"type":"TwoPowerLawSpheroid", "densityNorm":1.072e10,
+    "gamma":1.0, "beta":3.0, "scaleRadius":2.};
+#c_pot   = py_wrapper.Potential("MWPotential2014.ini")
+c_pot   = py_wrapper.Potential(p_bulge, p_disk, p_halo)
 c_actfinder = py_wrapper.ActionFinder(c_pot)
 
 # ic is the array of initial conditions: R, z, phi, vR, vz, vphi

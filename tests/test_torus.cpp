@@ -80,12 +80,16 @@ int main(int argc, const char* argv[]) {
     bool allok = true;
     const potential::BasePotential* pot;
     utils::KeyValueMap params(argc, argv);
-    if(argc>1) {
+    if(argc==2 && std::string(argv[1]).find('=')==std::string::npos)
+    {   // probably passed the ini file name
+        pot = potential::createPotential(argv[1], units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
+    } else if(argc>1 && std::string(argv[1]).find('=')!=std::string::npos)
+    {   // probably passed several key=value parameters
         pot = potential::createPotential(params, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
     } else
         pot = make_galpot(test_galpot_params);
-    double Jr   = params.getDouble("Jr", 100);
-    double Jz   = params.getDouble("Jz", 100);
+    double Jr   = params.getDouble("Jr",   100);
+    double Jz   = params.getDouble("Jz",   100);
     double Jphi = params.getDouble("Jphi", 1000);
     actions::Actions acts;
     acts.Jr   = Jr   * unit.from_Kpc_kms;

@@ -28,14 +28,14 @@ print (time.clock()-tbegin),"s to load",len(diskMass),"disk particles and",len(h
 
 #3. create an axisymmetric potential from these snapshots
 tbegin     = time.clock()
-haloPot    = py_wrapper.Potential(type="Spline", points=(haloPos,haloMass),
-             symmetry='a', numcoefsradial=20, numcoefsangular=2)
+haloPot    = py_wrapper.Potential(type="SplineExp", points=(haloPos,haloMass),
+             symmetry='a', numCoefsRadial=20, numCoefsAngular=2)
 ##haloPot    = py_wrapper.Potential(file="halo.coef_spl")  # could load previously stored coefs instead of computing them
 print (time.clock()-tbegin),"s to init",haloPot.name(),"potential for the halo; ", \
     "value at origin=",haloPot(0,0,0),"(km/s)^2"
 
 tbegin     = time.clock()
-diskPot    = py_wrapper.Potential(type="CylSpline", points=(diskPos,diskMass),
+diskPot    = py_wrapper.Potential(type="CylSplineExp", points=(diskPos,diskMass),
              numcoefsradial=20, numcoefsvertical=20, numcoefsangular=0)
 ##diskPot    = py_wrapper.Potential(file="disk.coef_cyl")
 print (time.clock()-tbegin),"s to init",diskPot.name(),"potential for the disk; ", \

@@ -19,7 +19,7 @@
 
 namespace math{
 
-const int MAXITER = 42;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
+const int MAXITER = 64;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
 
 const int MAXINTEGRPOINTS = 1000;  ///< size of workspace for adaptive integration
 

@@ -281,7 +281,17 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     // due to roundoff errors, it may actually happen that f(lambda) is a very small negative number
     // in this case we need to estimate the value of lambda at which it is strictly positive (for root-finder)
     double lambda_pos = fnc.point.lambda + pn_lambda.dxToPositive();
-    if(math::isFinite(lambda_pos) && pn_lambda.dxBetweenRoots() > fnc.point.lambda * ACCURACY_RANGE) {
+    /*  now two more problems may occur:
+        1. lambda_pos = NaN means that it could not be found, i.e., 
+        f(lambda)<0, f'(lambda) is very small and f''(lambda)<0, we are near the top of inverse parabola 
+        that does not cross zero. This means that within roundoff errors the range of lambda with positive f()
+        is negligibly small, so we discard it.
+        2. we are still near the top of parabola that crosses zero in two points which are very close to each other.
+        Then again the range of lambda with positive f() is too small to be tracked accurately.
+        Note that dxBetweenRoots() may be NaN in a perfectly legitimate case that f(lambda)>0 and f''>0, so that
+        the parabola is curved upward and never crosses zero; thus we test an inverse condition which is valid for NaN.
+    */
+    if(math::isFinite(lambda_pos) && !(pn_lambda.dxBetweenRoots() < fnc.point.lambda * ACCURACY_RANGE)) {
         if(!math::isFinite(lim.lambda_min)) {  // not yet determined 
             lim.lambda_min = math::findRoot(fnc, lambda_lower, lambda_pos, ACCURACY_RANGE);
         }

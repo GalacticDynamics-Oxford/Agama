@@ -23,6 +23,35 @@ namespace utils { class KeyValueMap; }
 
 namespace potential {
 
+/** Create an instance of potential according to the parameters contained in the key-value map.
+    \param[in] params is the list of parameters;
+    \param[in] converter is the unit converter for transforming the dimensional quantities 
+    in parameters (such as mass and radii) into internal units; can be a trivial converter.
+    \return    a new instance of BasePotential* on success.
+    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
+*/
+const BasePotential* createPotential(
+    const utils::KeyValueMap& params,
+    const units::ExternalUnits& converter = units::ExternalUnits());
+
+/** Create an instance of composite potential according to the parameters contained in the 
+    array of key-value maps for each component. Note that there is no 1:1 correspondence 
+    between the parameters and the components of the resulting potential, since the parameters 
+    may contain several density models that would be used for initializing a single potential 
+    expansion object (like in the case of GalPot).
+    \param[in] params is the array of parameter lists, one per component (since vectors
+    of references cannot exist, these are actual KeyValueMap objects rather than references).
+    \param[in] converter is the unit converter for transforming the dimensional quantities 
+    in parameters (such as mass and radii) into internal units; can be a trivial converter.
+    \return    a new instance of BasePotential* on success.
+    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
+*/
+const BasePotential* createPotential(
+    const std::vector<utils::KeyValueMap>& params,
+    const units::ExternalUnits& converter = units::ExternalUnits());
+
 /** Create an instance of potential according to the parameters contained in an INI file.
     \param[in] iniFileName is the name of an INI file that contains one or more sections 
     with potential parameters, named as [Potential], [Potential1], ...
@@ -34,18 +63,8 @@ namespace potential {
     on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
 */
 const BasePotential* createPotential(
-    const std::string& iniFileName, const units::ExternalUnits& converter = units::ExternalUnits());
-
-/** Create an instance of potential according to the parameters contained in the key-value map.
-    \param[in] params is the list of parameters;
-    \param[in] converter is the unit converter for transforming the dimensional quantities 
-    in parameters (such as mass and radii) into internal units; can be a trivial converter.
-    \return    a new instance of BasePotential* on success.
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
-*/
-const BasePotential* createPotential(
-    const utils::KeyValueMap& params, const units::ExternalUnits& converter = units::ExternalUnits());
+    const std::string& iniFileName,
+    const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of potential expansion from the provided particle snapshot.
     \param[in] params is the list of required parameters (e.g., the type of potential expansion,
@@ -63,10 +82,11 @@ const BasePotential* createPotential(
 */
 template<typename ParticleT>
 const BasePotential* createPotentialFromPoints(
-    const utils::KeyValueMap& params, const units::ExternalUnits& converter, 
+    const utils::KeyValueMap& params,
+    const units::ExternalUnits& converter, 
     const particles::PointMassArray<ParticleT>& points);
 
-/** Utility function providing a legacy interface compatible with the original GalPot.
+/** Utility function providing a legacy interface compatible with the original GalPot (deprecated).
     It reads the parameters from a text file and converts them into the internal unit system,
     using the conversion factors in the provided `units::ExternalUnits` object,
     then constructs the potential using `createGalaxyPotential()` routine.
@@ -81,7 +101,7 @@ const BasePotential* createPotentialFromPoints(
 const potential::BasePotential* readGalaxyPotential(
     const std::string& filename, const units::ExternalUnits& converter);
 
-/** Utility function providing a legacy interface compatible with the original GalPot.
+/** Utility function providing a legacy interface compatible with the original GalPot (deprecated).
     It reads the parameters from a text file and converts them into the internal unit system, 
     then constructs the potential using `createGalaxyPotential()` routine.
     This function creates the instance of unit converter from standard GalPot units (Kpc and Msun)
@@ -109,7 +129,6 @@ inline const potential::BasePotential* readGalaxyPotential(
 const BasePotential* readPotentialCoefs(const std::string& coefFileName);
 
 /** Write potential expansion coefficients to a text file.
-
     The potential must be one of the following expansion classes: 
     `BasisSetExp`, `SplineExp`, `CylSplineExp`.
     The coefficients stored in a file may be later loaded by `readPotential()` function.

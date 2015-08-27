@@ -66,12 +66,15 @@ namespace potential{
 /// parameters that describe a disk component
 struct DiskParam{
     double surfaceDensity;      ///< surface density normalisation Sigma_0 [Msun/kpc^2]
-    double scaleLength;         ///< scale length R_d [kpc]
+    double scaleRadius;         ///< scale length R_d [kpc]
     double scaleHeight;         ///< scale height h [kpc]: 
     ///< For h<0 an isothermal (sech^2) profile is used, for h>0 an exponential one, 
     ///< and for h=0 the disk is infinitesimal thin
     double innerCutoffRadius;   ///< if nonzero, specifies the radius of a hole at the center R_0
     double modulationAmplitude; ///< a term eps*cos(R/R_d) is added to the exponent
+    DiskParam() :
+        surfaceDensity(0), scaleRadius(0), scaleHeight(0),
+        innerCutoffRadius(0), modulationAmplitude(0) {};
 };
 
 /// parameters describing a spheroidal component
@@ -82,6 +85,9 @@ struct SphrParam{
     double beta;                ///< outer power slope beta 
     double scaleRadius;         ///< transition radius r_0 [kpc] 
     double outerCutoffRadius;   ///< outer cut-off radius r_t [kpc] 
+    SphrParam() :
+        densityNorm(0), axisRatio(1), gamma(0), beta(0),
+        scaleRadius(0), outerCutoffRadius(0) {};
 };
 ///@}
 /// \name  Disk components
@@ -190,8 +196,6 @@ private:
     void   setup(const BaseDensity& source_density,
                  const double r_min, const double r_max,
                  const double gamma, const double beta);
-    virtual const char* name() const { return myName(); };
-    static const char* myName() { return "AxisymmetricMultipole"; };
 public:
     /** Compute the potential using the multi expansion and approximate it 
         by a two-dimensional spline in (R,z) plane. 
@@ -209,17 +213,30 @@ public:
                const double gamma, const double beta);
     ~Multipole();
     virtual SymmetryType symmetry() const { return ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); };
+    static const char* myName() { return "AxisymmetricMultipole"; };
 private:
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
 };
 ///@}
 
+/** Construct an array of potential components consisting of a Multipole and a number of 
+    DiskAnsatz components, using the provided arrays of parameters for disks and spheroids;
+    this array should be passed to the constructor of CompositeCyl potential,
+    after more components being added to it if needed.
+*/
+std::vector<const BasePotential*> createGalaxyPotentialComponents(
+    const std::vector<DiskParam>& DiskParams,
+    const std::vector<SphrParam>& SphrParams);
+
 /** Construct a CompositeCyl potential consisting of a Multipole and a number of DiskAnsatz 
     components, using the provided arrays of parameters for disks and spheroids
+    (a simplified interface for the previous routine in the case that no additional 
+    components are needed).
 */
 const potential::BasePotential* createGalaxyPotential(
     const std::vector<DiskParam>& DiskParams,
     const std::vector<SphrParam>& SphrParams);
-
+    
 } // namespace potential

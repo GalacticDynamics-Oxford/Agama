@@ -525,46 +525,43 @@ static const potential::BasePotential* Potential_initFromDict(PyObject* args)
 }
 
 /// attempt to construct a composite potential from a tuple of Potential objects or dictionaries with potential parameters
-static const potential::BasePotential* Potential_initComposite(PyObject* tuple)
+static const potential::BasePotential* Potential_initFromTuple(PyObject* tuple)
 {
-    bool correct = true;
+    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
+    {   // assuming that we have one parameter which is the INI file name
+        return potential::createPotential(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
+    }
+    bool onlyPot = true, onlyDict = true;
     // first check the types of tuple elements
-    for(Py_ssize_t i=0; correct && i<PyTuple_Size(tuple); i++)
-        correct &=
-            (PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr) &&
-             ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot != NULL) ||  // an existing Potential object
-            PyDict_Check(PyTuple_GET_ITEM(tuple, i));  // a dictionary with param=value pairs
-    if(!correct)
-        throw std::invalid_argument(
-            "The tuple should contain Potential objects or dictionaries with potential parameters");
-
-    // next try to create potential components for the elements specified as dictionaries
-    std::vector<const potential::BasePotential*> components (PyTuple_Size(tuple));
-    try{
-        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++)
-            if(PyDict_Check(PyTuple_GET_ITEM(tuple, i))) {    // process only dict elements of tuple
-                components[i] = Potential_initFromDict(PyTuple_GET_ITEM(tuple, i));
-            }
+    for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
+        onlyPot &= PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr) &&
+             ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot != NULL;  // an existing Potential object
+        onlyDict &= PyDict_Check(PyTuple_GET_ITEM(tuple, i));  // a dictionary with param=value pairs
     }
-    catch(std::exception&) {    // some of the potential components failed to be created
-        for(unsigned int i=0; i<components.size(); i++)
-            delete components[i];    // dispose of any existing components that were created (does nothing for NULL elements)
-        throw;  // propagate the exception further up
-    }
+    if(onlyPot) {
     /*  In the present implementation, creating a composite potential from an array
         of BasePotential* pointers means that they are "taken over" by the new composite
         potential and will be deleted when the latter is destroyed.
         Since we must not delete the same object twice, we make sure that the original
         Potential objects in Python will no longer be usable after creating a composite,
-        but they won't be automatically deleted until their refcounter drops to zero.
-    */
-    for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-        if(PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr)) {   // process only Potential elements of tuple
-            components[i] = ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot;
+        but they won't be automatically deleted until their refcounter drops to zero. */
+        std::vector<const potential::BasePotential*> components;
+        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
+            components.push_back(((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot);
             ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot = NULL;  // won't be usable anymore
         }
-    }
-    return new potential::CompositeCyl(components);
+        return new potential::CompositeCyl(components);
+    } else if(onlyDict) {
+        std::vector<utils::KeyValueMap> paramsArr;
+        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
+            utils::KeyValueMap params;
+            convertPyDictToKeyValueMap(PyTuple_GET_ITEM(tuple, i), params);
+            paramsArr.push_back(params);
+        }
+        return potential::createPotential(paramsArr, *conv);
+    } else
+        throw std::invalid_argument(
+            "The tuple should contain either Potential objects or dictionaries with potential parameters");
 }
 
 /// the generic constructor of Potential object
@@ -574,14 +571,11 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedArgs)
     try{
         // check if we have only a tuple of potential components as arguments
         if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && namedArgs==NULL)
-            pot = Potential_initComposite(args);
+            pot = Potential_initFromTuple(args);
         else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             pot = Potential_initFromDict(namedArgs);
         else
-            throw std::invalid_argument("Potential may be initialized either "
-                "from a tuple of existing Potential objects or dictionaries containing potential parameters, "
-                "in which case a Composite potential is created, "
-                "or from a set of named arguments (which are the parameters for a single instance of Potential)");
+            throw std::invalid_argument("Invalid parameters passed to the constructor, type help(Potential) for details");
         assert(pot!=NULL);
 #ifdef DEBUGPRINT
         printf("Created an instance of %s potential\n", pot->name());

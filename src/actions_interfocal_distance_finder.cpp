@@ -10,8 +10,10 @@ namespace actions{
 
 /// number of sampling points for a shell orbit (equally spaced in time)
 static const unsigned int NUM_STEPS_TRAJ = 16;
-/// accuracy of root-finding and orbit integration for the functions in this module
-static const double ACCURACY = 1e-6;
+/// accuracy of root-finding for the functions in this module
+static const double ACCURACY_ROOT = 1e-10;
+/// accuracy of orbit integration in this module
+static const double ACCURACY_INTEGR = 1e-8;
 /// upper limit on the number of timesteps in ODE solver (should be enough to track half of the orbit)
 static const unsigned int MAX_NUM_STEPS_ODE = 100;
 
@@ -161,8 +163,8 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
         throw std::runtime_error("Error in findPlanarOrbitExtent: E and Lz have incompatible values");
     Rmin = Rmax = Rinit;
     double maxPeri = Rinit, minApo = Rinit;    // endpoints of interval for locating peri/apocenter radii
-    if(fabs(dR_to_zero) < Rinit*ACCURACY) {    // we are already near peri- or apocenter radius
-        if(nh.dxBetweenRoots() < Rinit*ACCURACY) {  // the range between Rmin and Rmax is too small
+    if(fabs(dR_to_zero) < Rinit*ACCURACY_ROOT) {    // we are already near peri- or apocenter radius
+        if(nh.dxBetweenRoots() < Rinit*ACCURACY_ROOT) {  // the range between Rmin and Rmax is too small
             maxPeri = minApo = NAN;  // do not attempt to locate them
         } else if(nh.fder < 0) {
             minApo  = NAN;  // will skip the search for Rmax
@@ -175,9 +177,9 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
     if(fnc.Lz2>0) {
         if(math::isFinite(maxPeri)) {
             fnc.mode = OrbitSizeFunction::FIND_RMIN;
-            Rmin = math::findRoot(fnc, 0., maxPeri, ACCURACY);
+            Rmin = math::findRoot(fnc, 0., maxPeri, ACCURACY_ROOT);
             if(!math::isFinite(Rmin))  // could be that our initial upper bound was wrong
-                Rmin = math::findRoot(fnc, maxPeri, Rinit, ACCURACY);
+                Rmin = math::findRoot(fnc, maxPeri, Rinit, ACCURACY_ROOT);
             // ensure that E-Phi(Rmin) >= 0
             // (due to finite accuracy in root-finding, a small adjustment may be needed)
             math::PointNeighborhood pn(fnc, Rmin);
@@ -195,9 +197,9 @@ void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, doub
         Rmin = 0; // !! this assumes a monotonic potential !! 
     if(math::isFinite(minApo)) {
         fnc.mode = OrbitSizeFunction::FIND_RMAX;
-        Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY);
+        Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY_ROOT);
         if(!math::isFinite(Rmax))  // could be that our initial lower bound was wrong
-            Rmax = math::findRoot(fnc, Rinit, minApo, ACCURACY);
+            Rmax = math::findRoot(fnc, Rinit, minApo, ACCURACY_ROOT);
         math::PointNeighborhood pn(fnc, Rmax);
         if(pn.f0<0) {   // ensure that E>=Phi(Rmax)
             double dx = pn.dxToPositive();
@@ -281,7 +283,7 @@ static double findCrossingPointR(
     vars[1] = 0;
     vars[2] = 0;
     vars[3] = vz;
-    math::OdeSolverDOP853 solver(odeSystem, 0, ACCURACY);
+    math::OdeSolverDOP853 solver(odeSystem, 0, ACCURACY_INTEGR);
     solver.init(vars);
     bool finished = false;
     unsigned int numStepsODE = 0;
@@ -311,7 +313,7 @@ static double findCrossingPointR(
             if(solver.value(timeCurr, 1) < 0) {  // z<0 - we're done
                 finished = true;
                 timeCurr = math::findRoot(FindCrossingPointZequal0(solver),
-                    timePrev, timeCurr, ACCURACY);
+                    timePrev, timeCurr, ACCURACY_ROOT);
             }
             if(Jz!=NULL)
             {   // compute vertical action  (very crude approximation! one integration point per timestep)
@@ -368,7 +370,7 @@ double estimateInterfocalDistanceShellOrbit(
     FindClosedOrbitRZplane fnc(poten, E, Lz, Rmin, Rmax, &timeCross, &traj, Jz);
     // locate the radius of thin orbit;
     // as a by-product, store the orbit in 'traj' and the vertical action in Jz (if necessary)
-    double Rthin = math::findRoot(fnc, Rmin, Rmax, ACCURACY);
+    double Rthin = math::findRoot(fnc, Rmin, Rmax, ACCURACY_ROOT);
     if(R!=NULL)
         *R=Rthin;
     if(Rthin!=Rthin || traj.size()==0)
