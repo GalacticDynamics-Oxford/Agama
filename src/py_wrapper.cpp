@@ -570,12 +570,19 @@ static int Potential_init(PyObject* self, PyObject* args, PyObject* namedArgs)
     const potential::BasePotential* pot=NULL;
     try{
         // check if we have only a tuple of potential components as arguments
-        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && namedArgs==NULL)
+        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && 
+            (namedArgs==NULL || PyDict_Size(namedArgs)==0))
             pot = Potential_initFromTuple(args);
         else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             pot = Potential_initFromDict(namedArgs);
-        else
+        else {
+            printf("Received %d positional arguments", (int)PyTuple_Size(args));
+            if(namedArgs==NULL)
+                printf(" and no named arguments\n");
+            else
+                printf(" and %d named arguments\n", (int)PyDict_Size(namedArgs));
             throw std::invalid_argument("Invalid parameters passed to the constructor, type help(Potential) for details");
+        }
         assert(pot!=NULL);
 #ifdef DEBUGPRINT
         printf("Created an instance of %s potential\n", pot->name());
