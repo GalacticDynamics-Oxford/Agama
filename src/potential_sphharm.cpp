@@ -9,11 +9,17 @@
 namespace potential {
 
 /// max number of basis-function expansion members (radial and angular).
-const unsigned int MAX_NCOEFS_ANGULAR = 100;
-const unsigned int MAX_NCOEFS_RADIAL  = 100;
+static const unsigned int MAX_NCOEFS_ANGULAR = 100;
+static const unsigned int MAX_NCOEFS_RADIAL  = 100;
 
 /// max number of function evaluations in multidimensional integration
-const unsigned int MAX_NUM_EVAL = 4096;
+static const unsigned int MAX_NUM_EVAL = 4096;
+
+/// relative accuracy of potential computation (integration tolerance parameter)
+static const double EPSREL_POTENTIAL_INT = 1e-6;
+
+/// relative accuracy in auxiliary root-finding routines
+const double ACCURACY_ROOT = 1e-6;
 
 /** helper class for integrating the density weighted with spherical harmonics over 3d volume;
     angular part is shared between BasisSetExp and SplineExp, 
@@ -782,7 +788,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
           coefsArray[Ncoefs_radial-2][0] * radii[Ncoefs_radial-2] );
     if(math::isFinite(Kout)) {
         FindGammaOut fout(radii[Ncoefs_radial], radii[Ncoefs_radial-1], radii[Ncoefs_radial-2], Kout);
-        gammaout = math::findRoot(fout, 3.01, 10., math::ACCURACY_ROOT);
+        gammaout = math::findRoot(fout, 3.01, 10., ACCURACY_ROOT);
         if(gammaout != gammaout)
             gammaout = 4.0;
         coefout = fmax(0,
@@ -798,7 +804,7 @@ void SplineExp::initSpline(const std::vector<double> &_radii, const std::vector<
     const double K2 = log((coefsArray[2][0]-potcenter)/(coefsArray[1][0]-potcenter));
     const double K3 = log((coefsArray[3][0]-potcenter)/(coefsArray[1][0]-potcenter));
     FindBcorrIn fin(radii[1], radii[2], radii[3], K2, K3);
-    double B = math::findRoot(fin, 0, 0.9/radii[3], math::ACCURACY_ROOT);
+    double B = math::findRoot(fin, 0, 0.9/radii[3], ACCURACY_ROOT);
     if(B!=B)
         B = 0.;
     gammain = 2. - ( log((coefsArray[2][0]-potcenter)/(coefsArray[1][0]-potcenter)) - 

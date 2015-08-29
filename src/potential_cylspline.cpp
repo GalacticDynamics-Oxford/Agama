@@ -10,12 +10,15 @@
 
 namespace potential {
 
-const unsigned int CYLSPLINE_MIN_GRID_SIZE = 4;
-const unsigned int CYLSPLINE_MAX_GRID_SIZE = 1024;
-const unsigned int CYLSPLINE_MAX_ANGULAR_HARMONIC = 64;
+static const unsigned int CYLSPLINE_MIN_GRID_SIZE = 4;
+static const unsigned int CYLSPLINE_MAX_GRID_SIZE = 1024;
+static const unsigned int CYLSPLINE_MAX_ANGULAR_HARMONIC = 64;
 
 /// max number of function evaluations in multidimensional integration
-const unsigned int MAX_NUM_EVAL = 10000;
+static const unsigned int MAX_NUM_EVAL = 10000;
+
+/// relative accuracy of potential computation (integration tolerance parameter)
+static const double EPSREL_POTENTIAL_INT = 1e-6;    
 
 //------- Auxiliary math --------//
 

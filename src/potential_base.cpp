@@ -4,8 +4,12 @@
 #include <stdexcept>
 
 namespace potential{
+
+/// relative accuracy of density computation
+static const double EPSREL_DENSITY_INT = 1e-4;
+    
 /// relative accuracy of locating the radius of circular orbit
-const double EPSREL_RCIRC = 1e-10;
+static const double EPSREL_RCIRC = 1e-10;
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
@@ -182,8 +186,8 @@ private:
     const double m, mtot;
 };
 
-double getRadiusByMass(const BaseDensity& dens, const double m, const double rel_toler) {
-    return math::findRoot(RadiusByMassRootFinder(dens, m), 0, INFINITY, rel_toler);
+double getRadiusByMass(const BaseDensity& dens, const double mass) {
+    return math::findRoot(RadiusByMassRootFinder(dens, mass), 0, INFINITY, EPSREL_DENSITY_INT);
 }
 
 double getInnerDensitySlope(const BaseDensity& dens) {

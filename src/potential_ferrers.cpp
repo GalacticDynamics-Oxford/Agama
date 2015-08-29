@@ -6,6 +6,9 @@
 
 namespace potential {
 
+/// relative accuracy of root-finder for lambda
+const double ACCURACY_ROOT = 1e-6;
+    
 // Ferrers n=2 potential
 
 Ferrers::Ferrers(double _mass, double _R, double _q, double _p):
@@ -69,7 +72,7 @@ void Ferrers::evalCar(const coord::PosCar &pos,
     const double *W;   // coefs used in computation (either pre-computed or temp.)
     if(m2>1) {
         FerrersLambdaRootFinder fnc(pos.x, pos.y, pos.z, a, b, c);
-        double lambda = math::findRoot(fnc, 0, INFINITY, math::ACCURACY_ROOT);
+        double lambda = math::findRoot(fnc, 0, INFINITY, ACCURACY_ROOT);
         computeW(lambda, Wcurr);
         W = Wcurr;
     } else 

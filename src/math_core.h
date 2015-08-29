@@ -8,12 +8,6 @@
 
 namespace math{
 
-/** default relative accuracy of root-finder */
-const double ACCURACY_ROOT = 1e-6;
-
-/** default relative accuracy of integration */
-const double ACCURACY_INTEGR = 1e-6;
-
 /** maximum magnitude of numbers considered to be 'reasonable' */
 const double UNREASONABLY_LARGE_VALUE = 1e10;
 
@@ -26,7 +20,7 @@ inline bool isFinite(double x) {
     return y == y;  // false for +-INFINITY or NAN
 }
 
-/** test if a number is not too big or too small */
+/** test if a number is not too big or too small (admittedly a subjective definition...) */
 inline bool withinReasonableRange(double x) { 
     return x<UNREASONABLY_LARGE_VALUE && x>1/UNREASONABLY_LARGE_VALUE; }
 

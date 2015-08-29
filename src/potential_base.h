@@ -30,15 +30,6 @@ enum SymmetryType{
     ST_DEFAULT      = ST_TRIAXIAL                  ///< a default value
 };
 
-/// relative accuracy of potential computation (integration tolerance parameter)
-const double EPSREL_POTENTIAL_INT = 1e-6;
-
-/// absolute error in potential computation (supercedes the relative error in case of very small coefficients)
-const double EPSABS_POTENTIAL_INT = 1e-15;
-
-/// relative accuracy of density computation
-const double EPSREL_DENSITY_INT = 1e-4;
-
 /// \name  Base class for all density models
 ///@{
 
@@ -358,8 +349,7 @@ inline bool isTriaxial(const BaseDensity& dens) {
 
 
 /** Find (spherical) radius corresponding to the given enclosed mass */
-double getRadiusByMass(const BaseDensity& dens, const double mass, 
-    const double rel_toler=EPSREL_DENSITY_INT);
+double getRadiusByMass(const BaseDensity& dens, const double enclosedMass);
 
 /** Find the asymptotic power-law index of density profile at r->0 */
 double getInnerDensitySlope(const BaseDensity& dens);
