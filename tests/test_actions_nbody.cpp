@@ -1,3 +1,20 @@
+/** \file    test_actions_nbody.cpp
+    \author  Eugene Vasiliev
+    \date    August 2015
+
+    This example demonstrates the use of action finder (Staeckel fudge approximation)
+    to compute actions for particles from an N-body simulation.
+    The N-body system consists of a disk and a halo, the two components being
+    stored in separate GADGET files.
+    The potential is computed from the snapshot itself, by creating a suitable
+    potential expansion for each component: SplineExp for the halo and CylSplineExp
+    for the disk. This actually takes most of the time.
+    Then we compute actions for all particles from the disk component,
+    and store them in a text file.
+
+    An equivalent example in Python is located in pytests folder;
+    it uses the same machinery through a Python extension of the C++ library.
+*/
 #include "potential_cylspline.h"
 #include "potential_sphharm.h"
 #include "potential_composite.h"

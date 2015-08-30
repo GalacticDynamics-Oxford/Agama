@@ -1,3 +1,19 @@
+/** \file    test_df_fit.cpp
+    \author  Eugene Vasiliev
+    \date    August 2015
+
+    This example demonstrates how to find best-fit parameters of an action-based
+    distribution function that matches the given N-body snapshot.
+
+    The N-body model itself corresponds to a spherically-symmetric isotropic
+    Hernquist profile, and we fit it with a double-power-law distribution function
+    of Posti et al.2015. We use the exact potential (i.e., do not compute it
+    from the N-body model itself, nor try to vary its parameters, although
+    both options are possible), and compute actions for all particles only once.
+    Then we scan the parameter space of DF, finding the maximum of the likelihood
+    function with a multidimensional minimization algorithm.
+    This takes a few hundred iterations to converge.
+*/
 #include <iostream>
 #include "potential_dehnen.h"
 #include "actions_staeckel.h"

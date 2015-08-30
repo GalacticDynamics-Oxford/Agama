@@ -1,11 +1,11 @@
-//
-//  main.cpp
-//  Torus2
-//
-//  Created by Brian Jia Jiunn Khor on 07/08/2015.
-//  Copyright (c) 2015 Brian Jia Jiunn Khor. All rights reserved.
-//
+/** \file    test_torus_new.cpp
+    \author  Brian Jia Jiunn Khor
+    \date    07/08/2015
 
+    This test compares two methods for angle mapping in Torus machinery -
+    the original one from McMillan&Binney 2008, and the one suggested in
+    Laakso&Kaasalainen 2013 (a faster one).
+*/
 #include <iostream>
 #include <iomanip>
 #include <fstream>

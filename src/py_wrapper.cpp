@@ -2,10 +2,26 @@
     \brief  Python wrapper for the library
     \author Eugene Vasiliev
     \date   2014-2015
+
+    This is a Python extension module that provides the interface to
+    some of the classes and functions from the C++ library.
+    It needs to be compiled into a dynamic library and placed in a folder
+    that Python is aware of (e.g., through the PYTHONPATH= environment variable).
+
+    Currently this module provides access to potential classes, orbit integration
+    routine, action finders, and smoothing splines.
+    Unit conversion is also part of the calling convention: the quantities 
+    received from Python are assumed to be in some physical units and converted
+    into internal units inside this module, and the output from the library 
+    routines is converted back to physical units. The physical units are assigned
+    by `set_units` and `reset_units` functions.
+
+    Type `help(py_wrapper)` in Python to get a list of exported routines and classes,
+    and `help(py_wrapper.whatever)` to get the usage syntax for each of them.
 */
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-//#define DEBUGPRINT
+// note: for some versions of NumPy, it seems necessary to replace constants starting with NPY_ARRAY_*** by NPY_***
 #include <numpy/arrayobject.h>
 #include <stdexcept>
 #include "units.h"
@@ -17,33 +33,10 @@
 #include "math_spline.h"
 #include "utils_config.h"
 
+//#define DEBUGPRINT
+
 /// \name  Some general definitions
 ///@{
-
-/// arguments of functions
-struct ArgDescription {
-    const char* name;  ///< argument name
-    char type;         ///< letter that determines argument type ('s','d','i','O')
-    const char* descr; ///< textual description
-};
-
-/// argument type in human-readable words
-static const char* argTypeDescr(char type)
-{
-    switch(type) {
-        case 's': return "string";
-        case 'i': return "int";
-        case 'd': return "float";
-        case 'O': return "object";
-        default:  return "unknown type";
-    }
-}
-
-/// max number of keywords
-static const unsigned int MAX_NUM_KEYWORDS = 64;
-
-/// max size of docstring
-static const unsigned int MAX_LEN_DOCSTRING = 4096;
 
 std::string toString(PyObject* obj)
 {
@@ -160,7 +153,7 @@ typedef void (*anyFunction)
 enum INPUT_VALUE {
     INPUT_VALUE_SINGLE = 1,  ///< a single number
     INPUT_VALUE_TRIPLET= 3,  ///< three numbers
-    INPUT_VALUE_SEXTET = 6   ///< six numbers   
+    INPUT_VALUE_SEXTET = 6   ///< six numbers
 };
 
 /// anyFunction output type; numerical value is arbitrary
@@ -397,73 +390,83 @@ static void Potential_dealloc(PotentialObject* self)
 /// pointer to the Potential type object (will be initialized below)
 static PyTypeObject* PotentialTypePtr;
 
-/// list of all possible arguments of Potential class constructor
-static const ArgDescription potentialArgs[] = {
-    {"file",              's', "the name of ini file, potential coefficients file, or N-body snapshot file"},
-    {"type",              's', "potential type, such as 'Plummer', 'Ferrers', or potential expansion type, such as 'SplineExp'"},
-    {"density",           's', "density model for potential expansion, like 'Dehnen', 'MGE'"},
-    {"symmetry",          's', "assumed symmetry for potential expansion constructed from an N-body snapshot"},
-    {"points",            'O', "array of point masses to be used in construction of a potential expansion: "
-        "should be a tuple with two arrays - coordinates and mass, where the first one "
-        "is a two-dimensional Nx3 array and the second one is a one-dimensional array of length N"},
-    {"mass",              'd', "total mass of the model"},
-    {"scaleradius",       'd', "scale radius of the model (if applicable)"},
-    {"scaleradius2",      'd', "second scale radius of the model (if applicable)"},
-    {"q",                 'd', "axis ratio y/x, i.e., intermediate to long axis (if applicable)"},
-    {"p",                 'd', "axis ratio z/x, i.e., short to long axis (if applicable)"},
-    {"gamma",             'd', "central cusp slope (applicable for Dehnen model)"},
-    {"sersicindex",       'd', "Sersic index (applicable for Sersic density model)"},
-    {"numcoefsradial",    'i', "number of radial terms in BasisSetExp or grid points in spline potentials"},
-    {"numcoefsangular",   'i', "order of spherical-harmonic expansion (max.index of angular harmonic coefficient)"},
-    {"numcoefsvertical",  'i', "number of coefficients in z-direction for CylSplineExp potential"},
-    {"alpha",             'd', "parameter that determines functional form of BasisSetExp potential"},
-    {"splinesmoothfactor",'d', "amount of smoothing in SplineExp initialized from an N-body snapshot"},
-    {"splinermin",        'd', "if nonzero, specifies the innermost grid node radius for SplineExp and CylSplineExp"},
-    {"splinermax",        'd', "if nonzero, specifies the outermost grid node radius for SplineExp and CylSplineExp"},
-    {"splinezmin",        'd', "if nonzero, specifies the z-value of the innermost grid node in CylSplineExp"},
-    {"splinezmax",        'd', "if nonzero, specifies the z-value of the outermost grid node in CylSplineExp"},
-    {NULL,0,NULL}
-};
-
-/// this string will contain full list of parameters and other relevant info 
-/// to be printed out via `help(Potential)`; it is filled during module initialization
-static char docstringPotential[MAX_LEN_DOCSTRING];
-
-/// list of keywords extracted from potentialArgs 
-static const char* keywordsPotential[MAX_NUM_KEYWORDS] = {NULL};
-
-/// list of keyword types extracted from potentialArgs
-static char keywordTypesPotential[MAX_NUM_KEYWORDS+1] = "|";
-
-/// build the docstring for Potential class
-static void buildDocstringPotential()
-{
-    // header line, store the number of symbols printed
-    unsigned int bufIndex = snprintf(docstringPotential, MAX_LEN_DOCSTRING,
-        "Potential is a class that represents a wide range of gravitational potentials\n"
-        "There are a number of possible named arguments for the constructor:\n\n");
-    unsigned int argIndex = 0;
-    while(potentialArgs[argIndex].name != NULL && bufIndex < MAX_LEN_DOCSTRING && argIndex < MAX_NUM_KEYWORDS) {
-        bufIndex += snprintf(docstringPotential + bufIndex, MAX_LEN_DOCSTRING - bufIndex,
-            "    %s (%s) - %s\n", potentialArgs[argIndex].name,
-            argTypeDescr(potentialArgs[argIndex].type), potentialArgs[argIndex].descr);
-        keywordsPotential[argIndex] = potentialArgs[argIndex].name;
-        keywordTypesPotential[argIndex+1] = potentialArgs[argIndex].type;
-        argIndex++;
-    }
-    if(bufIndex < MAX_LEN_DOCSTRING) {
-        bufIndex += snprintf(docstringPotential + bufIndex, MAX_LEN_DOCSTRING - bufIndex,
-            "\nRequired parameters are either 'type' or 'file' (or both)\n"
-            "Alternatively, a composite potential may be created by passing a tuple "
-            "of Potential objects as the argument list for the constructor; "
-            "NOTE that these components will no longer be usable after being incorporated "
-            "into the composite potential!");
-    }
-    if(bufIndex >= MAX_LEN_DOCSTRING || argIndex >= MAX_NUM_KEYWORDS)
-    {   // overflow shouldn't occur, but if it does, issue a warning
-        printf("WARNING: Could not properly initialize Potential class docstring\n");
-    }
-}
+/// description of Potential class
+static const char* docstringPotential = 
+    "Potential is a class that represents a wide range of gravitational potentials\n"
+    "There are several ways of initializing the potential instance:\n"
+    "  - from a list of key=value arguments that specify an elementary potential class;\n"
+    "  - from a tuple of dictionary objects that contain the same list of possible "
+    "key/value pairs for each component of a composite potential;\n"
+    "  - from an INI file with these parameters for one or several components;\n"
+    "  - from a tuple of existing Potential objects created previously: "
+    "in this case a composite potential is created from these components, "
+    "but the original objects cannot be used anymore.\n"
+    "Note that all keywords and their values are not case-sensitive.\n\n"
+    "List of possible keywords for a single component:\n"
+    "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
+    "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
+    "OblatePerfectEllipsoid, DiskAnsatz, TwoPowerLawSpheroid;\n"
+    "    or one of the expansion types:  BasisSetExp, SplineExp, CylSplineExp - "
+    "in these cases, one should provide either a density model, file name, "
+    "or an array of points.\n"
+    "  mass=...   total mass of the model, if applicable.\n"
+    "  scaleRadius=...   scale radius of the model (if applicable).\n"
+    "  scaleHeight=...   scale height of the model (currently applicable to "
+    "Dehnen, MiyamotoNagai and DiskAnsatz).\n"
+    "  axisRatio=...   axis ratio z/R for TwoPowerLawSpheroid density profiles.\n"
+    "  q=...   axis ratio y/x, i.e., intermediate to long axis (applicable to triaxial "
+    "potential models such as Dehnen and Ferrers).\n"
+    "  p=...   axis ratio z/x, i.e., short to long axis (if applicable, same as axisRatio).\n"
+    "  gamma=...   central cusp slope (applicable for Dehnen and TwoPowerLawSpheroid).\n"
+    "  beta=...   outer density slope (TwoPowerLawSpheroid).\n"
+    "  innerCutoffRadius=...   radius of inner hole (DiskAnsatz).\n"
+    "  outerCutoffRadius=...   radius of outer exponential cutoff (TwoPowerLawSpheroid).\n"
+    "  surfaceDensity=...   central surface density (or its value if no inner cutoff exists), "
+    "for DiskAnsatz.\n"
+    "  densityNorm=...   normalization of density profile for TwoPowerLawSpheroid (the value "
+    "at scaleRadius).\n"
+    "Parameters for potential expansions:\n"
+    "  density='...'   the density model for a potential expansion "
+    "(most of the above elementary potentials can be used as density models, "
+    "except those with infinite mass; in addition, a selection of density models"
+    "without a corresponding potential will be available soon).\n"
+    "  file='...'   the name of a file with potential coefficients for a potential "
+    "expansion (an alternative to density='...'), or with an N-body snapshot that "
+    "will be used to compute the coefficients.\n"
+    "  points=(coords, mass)   array of point masses to be used in construction "
+    "of a potential expansion (an alternative to density='...' or file='...' options): "
+    "should be a tuple with two arrays - coordinates and mass, where the first one is "
+    "a two-dimensional Nx3 array and the second one is a one-dimensional array of length N.\n"
+    "  symmetry='...'   assumed symmetry for potential expansion constructed from "
+    "an N-body snapshot (possible options, in order of decreasing symmetry: "
+    "'Spherical', 'Axisymmetric', 'Triaxial', 'Reflection', 'None').\n"
+    "  numCoefsRadial=...   number of radial terms in BasisSetExp or grid points in spline potentials.\n"
+    "  numCoefsAngular=...   order of spherical-harmonic expansion (max.index of angular harmonic coefficient).\n"
+    "  numCoefsVertical=...   number of coefficients in z-direction for CylSplineExp potential.\n"
+    "  alpha=...   parameter that determines functional form of BasisSetExp potential.\n"
+    "  splineSmoothfactor=...   amount of smoothing in SplineExp initialized from an N-body snapshot.\n"
+    "  splineRmin=...   if nonzero, specifies the innermost grid node radius for SplineExp and CylSplineExp.\n"
+    "  splineRmax=...   if nonzero, specifies the outermost grid node radius for SplineExp and CylSplineExp.\n"
+    "  splineZmin=...   if nonzero, specifies the z-value of the innermost grid node in CylSplineExp.\n"
+    "  splineZmax=...   if nonzero, specifies the z-value of the outermost grid node in CylSplineExp.\n"
+    "\nMost of these parameters have reasonable default values; the only necessary ones are "
+    "`type`, and for a potential expansion, `density` or `file` or `points`.\n\n"
+    "Examples:\n\n"
+    ">>> pot_halo = Potential(type='Dehnen', mass=1e12, gamma=1, scaleRadius=100, q=0.8, p=0.6)\n"
+    ">>> pot_disk = Potential(type='MiyamotoNagai', mass=5e10, scaleRadius=5, scaleHeight=0.5)\n"
+    ">>> pot_from_ini = Potential('my_potential.ini')\n"
+    ">>> pot_composite = Potential(pot_halo, pot_disk)\n"
+    ">>> disk_par = dict(type='DiskAnsatz', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
+    ">>> halo_par = dict(type='TwoPowerLawSpheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
+    "outerCutoffRadius=150, axisRatio=0.8)\n"
+    ">>> pot_galpot = Potential(disk_par, halo_par)\n"
+    "\nThe latter example illustrates the use of GalPot components (exponential disks and spheroids) "
+    "from Dehnen&Binney 1998; these are internally implemented using another variant of potential expansion, "
+    "but may also be combined with any other component if needed.\n"
+    "The numerical values in the above examples are given in solar masses and kiloparsecs; "
+    "a call to `set_units` should precede the construction of potentials in this approach. "
+    "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
+    "(this is the default regime and is restored by `reset_units`).\n";
 
 /// attempt to construct potential::BasePotential* from an array of particles
 static const potential::BasePotential* Potential_initFromParticles(const utils::KeyValueMap& params, PyObject* points)
@@ -1185,7 +1188,6 @@ initpy_wrapper(void)
     conv = new units::ExternalUnits();
 
     // Potential class
-    buildDocstringPotential();
     PotentialTypePtr = &PotentialType;
     if (PyType_Ready(&PotentialType) < 0) return;
     Py_INCREF(&PotentialType);

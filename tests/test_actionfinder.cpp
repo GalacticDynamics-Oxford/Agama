@@ -1,3 +1,28 @@
+/** \file    test_actionfinder.cpp
+    \author  Eugene Vasiliev
+    \date    July 2015
+
+    This test demonstrates the accuracy of action/angle determination using
+    the Staeckel fudge approximation.
+
+    We create an instance of realistic galactic potential,
+    and scan the entire phase space by looping over energy, angular momentum
+    and the third integral (the latter is explored by varying the direction
+    of velocity in meridional plane as the orbit crosses the equatorial plane).
+    For each initial condition, we numerically compute the orbit,
+    and for each point on the trajectory, determine the values of actions
+    and angles using the Staeckel fudge.
+    The accuracy of action determination is assessed by the scatter in
+    the values reported by the routine for different points on the same orbit;
+    the quality of angle determination is assessed by checking how closely
+    the angles follow a linear trend with time.
+
+    In general, the approximation works fairly well for orbits with either
+    J_r or J_z being small compared to the other two actions,
+    but even for less favourable cases it is typically accurate to within
+    a few percent. Except when the orbit appears to be in or near a resonance,
+    in which case the rms error may be larger than 10%.
+*/
 #include "orbit.h"
 #include "actions_staeckel.h"
 #include "potential_factory.h"
@@ -49,7 +74,14 @@ bool test_actions(const potential::BasePotential& potential,
         ifd = actions::estimateInterfocalDistancePoints(potential, traj);
 
     BestIFDFinder fnc(potential, traj, avg, disp);
-    //ifd = math::findMin(fnc, 0.1, 10, NAN, 0.001);
+    // uncommenting the line below enables the search of best-fit interfocal distance,
+    // i.e. the one that minimizes the variation in actions over the entire orbit.
+    // It turns out that the value provided by InterfocalDistanceFinder is good enough,
+    // so that the difference in the quality of action recovery between the true 
+    // best-fit IFD and the one provided by InterfocalDistanceFinder is rather minor.
+#if 0
+    ifd = math::findMin(fnc, 0.1, 10, NAN, 0.001);
+#endif
     fnc.value(ifd);
     double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr; //unit.to_Kpc_kms;
     double scatter = (disp.Jr+disp.Jz) / (avg.Jr+avg.Jz);
@@ -125,13 +157,13 @@ int main(int argc, const char* argv[]) {
     for(double E=pot->value(coord::PosCyl(0,0,0))*0.95, dE=-E*0.063; E<0; E+=dE) {
         double Rc = R_circ(*pot, E);
         double k,n,o;
-        epicycleFreqs(*pot, Rc, k, n, o);
-        double totalTime = 2*M_PI/k * 50;
+        epicycleFreqs(*pot, Rc, k, n, o);  // an estimate for orbit frequencies
+        double totalTime = 2*M_PI/k * 50;  // needed to assign the integration time interval
         double timeStep  = totalTime / 500;
         double Lc = v_circ(*pot, Rc) * Rc;
-        for(int iLz=0; iLz<16; iLz++) {
+        for(int iLz=0; iLz<16; iLz++) {    // explore the range of angular momentum for a fixed energy
             double Lz   = (iLz+0.5)/16 * Lc;
-            double R;   // radius of shell orbit
+            double R;                      // radius of a shell orbit
             double IFD  = actions::estimateInterfocalDistanceShellOrbit(*pot, E, Lz, &R);
             double vphi = Lz/R;
             double vmer = sqrt(2*(E-pot->value(coord::PosCyl(R,0,0)))-vphi*vphi);
@@ -139,10 +171,10 @@ int main(int argc, const char* argv[]) {
                 std::cerr << "Can't assign ICs!\n";
                 continue;
             }
-            for(int a=0; a<8; a++) {
-                double ang=(a+0.01)/7.02 * M_PI/2;
+            for(int a=0; a<8; a++) {   // explore the range of third integral by varying the direction
+                double ang=(a+0.01)/7.02 * M_PI/2;  // of velocity in the meridional plane
                 coord::PosVelCar ic(R, 0, 0, vmer*cos(ang), vphi, vmer*sin(ang));
-                double ifd = ifdFinder.value(coord::toPosVelCyl(ic));
+                double ifd = ifdFinder.value(coord::toPosVelCyl(ic));   // interfocal distance to be used in Fudge
                 allok &= test_actions(*pot, ic, totalTime, timeStep, ifd);
                 std::cout << " "<<IFD<<"\n";
             }

@@ -1,3 +1,21 @@
+/** \file    test_staeckel.cpp
+    \author  Eugene Vasiliev
+    \date    July 2015
+
+    This example shows the correctness of action/angle determination by the Staeckel fudge.
+
+    We create an instance of Staeckel potential (in this example, oblate perfect ellipsoid),
+    perform numerical orbit integration in this potential, and for each point
+    on the trajectory, compute the values of actions and angles.
+    Two related methods are employed - the first is valid only for a Staeckel potential,
+    and the second (fudge) is an approximation which essentially turns out to be exact
+    for this potential.
+    We test that the values of actions are nearly constant (to the limit of orbit
+    integration accuracy), and that angles increase linearly with time.
+    We use several initial conditions corresponding to various generic and extreme cases
+    (e.g., an in-plane orbit, or an orbit with very small radial action, or an orbit
+    close to the separatrix between box and tube orbits in x-z plane).
+*/
 #include "potential_perfect_ellipsoid.h"
 #include "actions_staeckel.h"
 #include "orbit.h"

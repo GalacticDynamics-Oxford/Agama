@@ -1,3 +1,13 @@
+/** \file    test_distributionfunction.cpp
+    \author  Eugene Vasiliev
+    \date    August 2015
+
+    This test demonstrates that the action-based double-power-law distribution function
+    corresponds rather well to the ergodic distribution function obtained by
+    the Eddington inversion formula for the known spherically-symmetric isotropic model.
+    We create an instance of DF and compute several quantities (such as density and 
+    velocity dispersion), comparing them to the standard analytical expressions.
+*/
 #include <iostream>
 #include <fstream>
 #include "potential_dehnen.h"

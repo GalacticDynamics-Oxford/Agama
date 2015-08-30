@@ -1,3 +1,21 @@
+/** \file    test_torus.cpp
+    \date    August 2015
+    \author  Eugene Vasiliev
+
+    This example demonstrates the conversion between action/angle and position/velocity
+    phase spaces, in both directions, using the Staeckel fudge and the Torus machinery.
+
+    We create an instance of potential and a Torus, which is a complete description
+    of a particular orbit, specified by three actions.
+    Then we generate the trajectory using the angle mapping from the torus,
+    without actually doing orbit integration in the real potential
+    (the accuracy of such representation is checked elsewhere).
+    For each point on the trajectory, we compute the actions and angles using
+    the Staeckel fudge, and compare them to the values used to create the torus.
+    They should agree to within reasonable limits, demonstrating the accuracy
+    of action recovery by the fudge approximation (we assume that the torus
+    provides 'exact' values, and the fudge returns an approximation to these).
+*/
 #include "actions_staeckel.h"
 #include "actions_torus.h"
 #include "potential_factory.h"
