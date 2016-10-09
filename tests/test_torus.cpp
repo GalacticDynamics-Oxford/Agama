@@ -20,6 +20,7 @@
 #include "actions_torus.h"
 #include "potential_factory.h"
 #include "units.h"
+#include "utils.h"
 #include "debug_utils.h"
 #include "utils_config.h"
 #include <iostream>
@@ -30,7 +31,7 @@
 const units::InternalUnits unit(units::galactic_Myr);//(1.*units::Kpc, 977.8*units::Myr);
 const unsigned int NUM_ANGLE_SAMPLES = 64;
 const double NUM_ANGLE_PERIODS = 4;
-const bool output = true;
+const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 
 bool test_actions(const potential::BasePotential& poten,
     const actions::BaseActionFinder& finder, const actions::BaseActionMapper& mapper, const actions::Actions actions)
@@ -56,30 +57,30 @@ bool test_actions(const potential::BasePotential& poten,
     }
     acts.finish();
     angs.finish();
-    double scatter = (acts.disp.Jr+acts.disp.Jz) / (acts.avg.Jr+acts.avg.Jz);
+    double scatter = (acts.rms.Jr+acts.rms.Jz) / (acts.avg.Jr+acts.avg.Jz);
     double scatterNorm = 0.33 * sqrt( (acts.avg.Jr+acts.avg.Jz) / (acts.avg.Jr+acts.avg.Jz+fabs(acts.avg.Jphi)) );
     bool tolerable = scatter < scatterNorm && 
         angs.dispr < 0.1 && angs.dispz < 1.0 && angs.dispphi < 0.05;
     const double dim = unit.to_Kpc_kms;
     std::cout << 
-        acts.avg.Jr*dim <<" "<< acts.disp.Jr*dim <<" "<< 
-        acts.avg.Jz*dim <<" "<< acts.disp.Jz*dim <<" "<< 
-        acts.avg.Jphi*dim <<" "<< acts.disp.Jphi*dim <<"  "<< 
+        acts.avg.Jr*dim <<" "<< acts.rms.Jr*dim <<" "<< 
+        acts.avg.Jz*dim <<" "<< acts.rms.Jz*dim <<" "<< 
+        acts.avg.Jphi*dim <<" "<< acts.rms.Jphi*dim <<"  "<< 
         angs.freqr <<" "<< angs.freqz <<" "<< angs.freqphi <<"  "<<
         angs.dispr <<" "<< angs.dispz <<" "<< angs.dispphi <<"  "<<
         std::endl;
     return tolerable;
 }
 
-const potential::BasePotential* make_galpot(const char* params)
+potential::PtrPotential make_galpot(const char* params)
 {
     const char* params_file="test_galpot_params.pot";
     std::ofstream out(params_file);
     out<<params;
     out.close();
-    const potential::BasePotential* gp = potential::readGalaxyPotential(params_file, unit);
+    potential::PtrPotential gp = potential::readGalaxyPotential(params_file, unit);
     std::remove(params_file);
-    if(gp==NULL)
+    if(gp.get()==NULL)
         std::cout<<"Potential not created\n";
     return gp;
 }
@@ -96,7 +97,7 @@ const char* test_galpot_params =
 
 int main(int argc, const char* argv[]) {
     bool allok = true;
-    const potential::BasePotential* pot;
+    potential::PtrPotential pot;
     utils::KeyValueMap params(argc, argv);
     if(argc==2 && std::string(argv[1]).find('=')==std::string::npos)
     {   // probably passed the ini file name
@@ -114,10 +115,11 @@ int main(int argc, const char* argv[]) {
     acts.Jz   = Jz   * unit.from_Kpc_kms;
     acts.Jphi = Jphi * unit.from_Kpc_kms;
     actions::ActionMapperTorus mapper(*pot, acts);
-    actions::ActionFinderAxisymFudge finder(*pot);
+    actions::ActionFinderAxisymFudge finder(pot);
     allok &= test_actions(*pot, finder, mapper, acts);
     if(allok)
-        std::cout << "ALL TESTS PASSED\n";
-    delete pot;
+        std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
+    else
+        std::cout << "\033[1;31mSOME TESTS FAILED\033[0m\n";
     return 0;
 }

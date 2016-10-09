@@ -6,7 +6,7 @@
 namespace orbit{
 
 /** limit on the maximum number of steps in ODE solver */
-static const unsigned int ODE_MAX_NUM_STEP = 1e6;
+static const unsigned int ODE_MAX_NUM_STEPS = 1e6;
 
 
 /* evaluate r.h.s. of ODE in different coordinate systems */
@@ -15,13 +15,13 @@ class OrbitIntegrator: public math::IOdeSystem {
 public:
     OrbitIntegrator(const potential::BasePotential& p) :
         potential(p) {};
-    
+
     /** apply the equations of motion */
     virtual void eval(const double t, const math::OdeStateType& y, math::OdeStateType& dydt) const;
-    
+
     /** return the size of ODE system - three coordinates and three velocities */
     virtual unsigned int size() const { return 6;}
-    
+
     virtual bool isStdHamiltonian() const;
 private:
     const potential::BasePotential& potential;
@@ -47,6 +47,7 @@ template<>
 void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/,
     const math::OdeStateType& y, math::OdeStateType& dydt) const
 {
+    // TODO: handle the case R<0
     const coord::PosVelCyl p(&y.front());
     coord::GradCyl grad;
     potential.eval(p, NULL, &grad);
@@ -65,6 +66,7 @@ template<>
 void OrbitIntegrator<coord::Sph>::eval(const double /*t*/,
     const math::OdeStateType& y, math::OdeStateType& dydt) const
 {
+    // TODO: the integrator may well provide a point with r<0, which can't be handled properly
     const coord::PosVelSph p(&y.front());
     coord::GradSph grad;
     potential.eval(p, NULL, &grad);
@@ -83,36 +85,6 @@ template<>
 bool OrbitIntegrator<coord::Sph>::isStdHamiltonian() const { return false; }
 
 template<typename coordT>
-class TrajectoryOutput {
-public:
-    TrajectoryOutput(const math::BaseOdeSolver& _solver,
-        double _timeStep,
-        std::vector<coord::PosVelT<coordT> >& _outputTraj) :
-    solver(_solver), timeStep(_timeStep), outputTraj(_outputTraj), timePrev(0) {};
-    void processStep() {
-        double timeCurr = solver.getTime();
-        int i1 = static_cast<int>(timePrev/timeStep);
-        int i2 = static_cast<int>(timeCurr/timeStep);
-        // store trajectory at regular intervals of time
-        for(int i=i1; i<=i2; i++) {
-            double t = timeStep*i;
-            if(timePrev==0 || (t>timePrev && t<=timeCurr)) {
-                double data[6];
-                for(int c=0; c<6; c++)
-                    data[c] = solver.value(t, c);
-                outputTraj.push_back(coord::PosVelT<coordT>(data));
-            }
-        }
-        timePrev = timeCurr;
-    }
-private:
-    const math::BaseOdeSolver& solver;
-    const double timeStep;
-    std::vector<coord::PosVelT<coordT> >& outputTraj;
-    double timePrev;
-};
-
-template<typename coordT>
 unsigned int integrate(const potential::BasePotential& potential,
     const coord::PosVelT<coordT>& initialConditions,
     const double totalTime,
@@ -125,28 +97,24 @@ unsigned int integrate(const potential::BasePotential& potential,
     OrbitIntegrator<coordT> odeSystem(potential);
     math::OdeStateType vars(odeSystem.size());
     initialConditions.unpack_to(&vars.front());
-    math::BaseOdeSolver* solver = new math::OdeSolverDOP853(odeSystem, 0, accuracy);
-    TrajectoryOutput<coordT> trajOutput(*solver, outputTimestep, outputTrajectory);
-    try{
-        solver->init(vars);
-        bool finished = false;
-        unsigned int numSteps = 0;
-        while(!finished) {
-            if(solver->step() <= 0 || numSteps >= ODE_MAX_NUM_STEP)  // signal of error
-                finished = true;
-            else {
-                numSteps++;
-                finished = solver->getTime() >= totalTime;
-            }
-            trajOutput.processStep();
+    math::OdeSolverDOP853 solver(odeSystem, accuracy);
+    solver.init(vars);
+    unsigned int numSteps = 0, outputIndex = 0;
+    double timeCurr = 0;
+    while(timeCurr < totalTime) {
+        if(solver.doStep() <= 0 || numSteps >= ODE_MAX_NUM_STEPS)  // signal of error
+            break;
+        numSteps++;
+        timeCurr = fmin(solver.getTime(), totalTime);
+        // store trajectory at regular intervals of time
+        while(outputTimestep * outputIndex <= timeCurr) {
+            double data[6];
+            solver.getSol(outputTimestep * outputIndex, data);
+            outputTrajectory.push_back(coord::PosVelT<coordT>(data));
+            outputIndex++;
         }
-        delete solver;
-        return numSteps;
     }
-    catch(...) {
-        delete solver;
-        throw;
-    }
+    return numSteps;
 }
 
 // explicit template instantiations to make sure all of them get compiled

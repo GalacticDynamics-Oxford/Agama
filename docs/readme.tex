@@ -1,0 +1,1140 @@
+\documentclass[12pt]{article}
+\usepackage{xspace}
+\usepackage[table,dvipsnames]{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{underscore}
+\usepackage{ulem}
+\usepackage{mathrsfs}
+\newcommand{\Agama}{\textsc{Agama}\xspace}
+\newcommand{\Amuse}{\textsc{Amuse}\xspace}
+\newcommand{\Galpy}{\textsc{Galpy}\xspace}
+\newcommand{\Nemo} {\textsc{Nemo}\xspace}
+\newcommand{\Raga} {\textsc{Raga}\xspace}
+\newcommand{\Gsl}  {\textsc{Gsl}\xspace}
+\newcommand{\Eigen}{\textsc{Eigen}\xspace}
+\newcommand{\Nbody}{\textsl{N}-body\xspace}
+\newcommand{\Cpp}  {\texttt{C++}\xspace}
+\newcommand{\CppII}{\texttt{C++11}\xspace}
+\newcommand{\Python}{\texttt{Python}\xspace}
+\newcommand{\Fortran}{\texttt{Fortran}\xspace}
+\definecolor{darkviolet}{rgb}{0.3,0.0,0.5}
+\definecolor{darkolive} {rgb}{0.3,0.5,0.0}
+\newcommand{\ttt}[1]{\textcolor{darkviolet}{\texttt{#1}}}
+\newcommand{\ppp}[1]{\textcolor{darkolive} {\texttt{#1}}}
+\renewcommand{\d}{\partial}
+\newcommand{\bA}{\boldsymbol{A}}
+\newcommand{\bv}{\boldsymbol{v}}
+\newcommand{\bx}{\boldsymbol{x}}
+\newcommand{\by}{\boldsymbol{y}}
+\newcommand{\bJ}{\boldsymbol{J}}
+\newcommand{\bt}{\boldsymbol{\theta}}
+\newcommand{\scE}{\mathscr E}
+\newcommand{\Beta}{\mathrm B}
+\newcommand{\dvpar}{\langle \Delta v_\| \rangle}
+\newcommand{\dvsqpar}{\langle \Delta v^2_\| \rangle}
+\newcommand{\dvsqper}{\langle \Delta v^2_\bot \rangle}
+\DeclareMathOperator{\trig}{trig}
+\textwidth=16.5cm
+\textheight=20cm
+\oddsidemargin=0cm
+\topmargin=-1cm
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+\title{\includegraphics[width=8cm]{agama.jpg}\protect\\[0.5cm]\Agama reference}
+\author{Eugene Vasiliev\\
+%\normalsize\textit{Lebedev Physical Institute, Moscow, Russia}\\
+\normalsize\textit{Oxford University}\\
+\normalsize\textrm{email: eugvas@lpi.ru} }
+
+%\date{Version 1.1$\beta$\\ May 1, 2015}
+
+\maketitle
+\tableofcontents
+\newpage
+
+%%%%%%%%%
+\section{Overview}
+
+%%%%%%%%%%%
+%\subsection{Scope}
+\Agama (Action-based Galaxy Modelling Architecture) is a software library intended for a broad range of tasks within the field of stellar dynamics. As the name suggests, it is centered around the use of action/angle formalism to describe the structure of stellar systems, but this is only one of its many facets. The library contains a powerful framework for dealing with arbitrary density/potential profiles and distribution functions (analytic, extracted from \Nbody models, or fitted to the data), a vast collection of general-purpose mathematical routines, and covers many aspects of galaxy dynamics up to the very high-level interface for constructing self-consistent galaxy models. It does not provide any methods for performing \Nbody simulations, but may assist in their analysis.
+%This document contains the complete user's guide and many technical details about various aspects of the code.
+
+%%%%%%%%%%%
+%\subsection{Overall structure}
+The core of the library is written in \Cpp and is organized into several modules, which are considered in turn in Section~\ref{sec:Structure}:
+\begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item Low-level interfaces and generic routines, which are not particularly tied to stellar dynamics: various mathematical tasks, coordinate systems, unit conversion, input/output of particle collections and configuration data, and other utilities.
+\item Gravitational potential and density interface: the hierarchy of classes representing density and potential models, including two very general and powerful approximations of any user-defined profile, and associated utility functions.
+\item Routines for numerical computation of orbits and their classification.
+\item Action/angle interface: classes and routines for conversion between position/velocity and action/angle variables.
+\item Distribution functions expressed in terms of actions.
+\item Galaxy modelling framework: computation of moments of distribution functions, interface for creating gravitationally self-consistent multicomponent galaxy models, construction of \Nbody models and mock data catalogues.
+\item Data handling interface, selection functions, etc.
+\end{itemize}
+
+A large part of this functionality is available in \Python through the eponymous extension module. Many high-level tasks are more conveniently expressed in \Python, e.g., finding best-fit parameters of potential and distribution function describing a set of data points, or constructing self-consistent models with arbitrary combination of components and constraints.
+A more restricted subset of functionality is provided as plugins to several other stellar-dynamical software packages (Section~\ref{sec:Interfaces}).
+
+The library comes with an extensive collection of test and demonstration programs; some of them are internal tests that check the correctness of various code sections, others are example programs illustrating various applications and usage aspects of the library. There are both \Cpp and \Python programs, sometimes covering exactly the same topic; a brief review is provided in Section~\ref{sec:ExamplesTests}.
+
+The main part of this document presents a comprehensive overview of various features of the library and a user's guide. The appendix contains a developer's guide and most technical aspects and mathematical details.
+
+The code can be downloaded from \url{https://github.com/GalacticDynamics-Oxford/Agama}.
+
+%%%%%%%%%
+\section{Structure of the \Agama \Cpp library}  \label{sec:Structure}
+
+%%%%%%%%%%%
+\subsection{Low-level foundations}
+
+%%%%%%%%%%%%%%
+\subsubsection{Math routines}  \label{sec:Math}
+\Agama contains an extensive mathematical subsystem covering many basic and advanced tasks. Some of the methods are implemented in external libraries (\Gsl, \Eigen) and have wrappers in \Agama that isolate the details of implementation, so that the back-end may be switched without any changes in the higher-level code; other parts of this subsystem are self-contained developments.
+All classes and routines in this section belong to the \ttt{math::} namespace.
+
+\paragraph{Fundamental objects}
+throughout the entire library are functions of one or many variables, vectors and matrices.
+Any class derived from the \ttt{IFunction} interface should provide a method for computing the value and up to two derivatives of a function of one variable $f(x)$; \ttt{IFunctionNdim} represents the interface for a vector of functions of many variables $\boldsymbol{f}(\bx)$, and \ttt{IFunctionNdimDeriv} additionally provides the Jacobian of this function (the matrix $\d f_i /\d x_k$). Many mathematical routines operate on an instance of a class derived from one of these interfaces.
+
+For one-dimensional vectors we use \ttt{std::vector} when a dynamically-sized array is needed; some routines take input arguments of type \ttt{const double[]} or store the output in \ttt{double[]} variables which may be also statically-sized arrays (for instance, allocated on the stack, which is more efficient in tight loops).
+
+For two-dimensional matrices there is a dedicated \ttt{math::Matrix} class, which provides a simple fixed interface to an implementation-dependent structure (either the \Eigen matrix type, or a custom-coded flattened array with 2d indexing, if \Eigen is not available).
+Matrices may be dense and sparse; the former provide full read-write access, while the latter are constructed from the list of non-zero elements and provide read-only access. Sparse matrices are implemented in \Eigen or, in its absense, in \Gsl starting from version 2.0; for older versions we substitute them internally with dense matrices (which, of course, defeats the purpose of having a separate sparse matrix interface, but at least allows the code to compile without any modifications).
+
+\paragraph{Numerical linear algebra}  routines in \Agama are wrappers for either \Eigen (considerably more efficient) or \Gsl library.
+There are a few standard BLAS functions (matrix-vector and matrix-matrix multiplication for both dense and sparse matrices) and several matrix decomposition classes (\ttt{LUDecomp}, \ttt{CholeskyDecomp}, \ttt{SVDecomp}) that can be used to solve systems of linear equations $\mathsf{A}\bx=\boldsymbol{b}$.
+
+\textsl{LU} decomposition of a non-degenerate square matrix $\mathsf{A}$ (dense or sparse) into a product of lower and upper triangular matrices is the standard tool for solving full-rank systems of linear equations. Once a decomposition is created, it may be used several times with different r.h.s.\ vectors $\boldsymbol{b}$.
+
+Cholesky decomposition of a symmetric positive-definite dense matrix $\mathsf{A} = \mathsf{L}\mathsf{L}^T$ serves the same purpose in this more specialized case (being twice more efficient). It is informally known as ``taking the square root of a matrix'': for instance, a quadratic form $\bx^T \mathsf{A} \bx$ may be written as $|\mathsf{L}^T\bx|^2$ -- this is used in the context of dealing with correlated random variables, where $\mathsf{A}$ would represent the correlation matrix.
+
+Singular-value decomposition (SVD) represents a generic $M\times N$ matrix ($M$ rows, $N$ columns; here $M\ge N$) as $\mathsf{A}=\mathsf{U}\,\mathrm{diag}(\boldsymbol{S})\,\mathsf{V}^T$, where $\mathsf{U}$ is a $M\times N$ orthogonal matrix (i.e., $\mathsf{U}\mathsf{U}^T=\mathsf{I}$), $\mathsf{V}$ is a $N\times N$ orthogonal matrix, and the vector $\boldsymbol{S}$ contains singular values, sorted in descending order. In the case of a symmetric positive definite matrix $\mathsf{A}$, SVD is identical to the eigenvalue decomposition, and $\mathsf{U}=\mathsf{V}$.
+SVD is considerably more costly than the other two decompositions, but it is a more powerful tool that may be applied for solving over-determined and/or rank-deficient linear systems while maintaining numerical stability.
+If $M>N$, there are more equations than variables, and the solution is obtained in the least-square sense; if the nullspace of the system is non-trivial (i.e., $\mathsf{A}\bx=\boldsymbol{0}$ for a non-zero $\bx$), the solution with the lowest possible norm is returned.
+%The ratio of maximal to minimal singular values is called the condition number of the matrix $\mathsf{A}$, and the larger it is, the more degenerate is the matrix.
+
+\paragraph{Root-finding}  is handled differently in one or many dimensions.
+\ttt{findRoot} searches for a root of a continuous one-dimensional function $f(x)$ on an interval $[a..b]$, which may be finite or infinite, provided that $f(a)\,f(b) \le 0$ (i.e., the interval encloses the root). It uses a combination of Brent's method with an optional Hermite interpolation in the case that the function provides derivatives.
+\ttt{findRootNdim} searches for zeros of an $N$-dimensional function of $N$ variables, which must provide the Jacobian, using a hybrid Newton-type method.
+
+\paragraph{Integration}  of one-dimensional functions can be performed in several ways. \ttt{integrateGL} uses fixed-order Gauss--Legendre quadrature without error estimate. \ttt{integrate} uses variable-order Gauss--Kronrod scheme with the order of quadrature doubled each time until it attains the required accuracy or reaches the maximum; it is a good balance between fixed-order and fully adaptive methods, and is very accurate for smooth analytic functions. \ttt{integrateAdaptive} handles more sophisticated integrands, possibly with singularities, using a fully adaptive recursive scheme to reach the required accuracy, but is also more expensive.
+
+Multidimensional integration over an $N$-dimensional hypercube is performed by the \ttt{integrateNdim} routine, which serves as a unified interface to either \textsc{Cubature} or \textsc{Cuba} library; the former is actually included into the \Agama codebase. Both methods are fully adaptive and have similar performance (either one is better on certain classes of functions). The input function may provide $M\ge 1$ values, i.e., several functions may be integrated simultaneously over the same domain.
+
+\paragraph{Sampling} \label{sec:Sampling}  from a probability distribution (\ttt{sampleNdim}) serves the following task: given a $N$-dimensional function $f(\bx)\ge 0$ over a hypercube domain, construct an array of $M$ random sample points $\bx_k$ such that the density of samples in the neighborhood of any point is proportional to the value of $f$ at that point. Obviously, the function $f$ must have a finite integral over the entire domain, and in fact the integral may be estimated from these samples (however it is not as accurate as the deterministic cubature routines, which are allowed to attribute different weights to each sampled point). This routine uses a multidimensional variant of rejection algorithm with adaptive subdivision of the entire domain into smaller regions, and performing the rejection sampling in each region.
+
+\paragraph{Optimization methods}
+A broad range of tasks may be loosely named ``optimization problems'', i.e., finding a minimum of a certain function (objective) of one or many variables under certain constraints.
+
+For a function of one variable, there is a straightforward minimization routine \ttt{findMin} that can operate on any finite or (semi-)infinite interval $[a..b]$, and finds $\min f(x)$ on this interval (including endpoints); if there are multiple minima, then one of them will be found (not necessarily the global one), depending on the initial guess. The starting point $x_0$ such that  $f(x_0)<f(a), f(x_0)<f(b)$ may be optionally be provided by the caller; in its absense the routine will try to come up with a guess itself. Only the function values are needed by the algorithm.
+
+For a function of $N$ variables $\bx$, there are several possibilities. If only the values of the function $f(\bx)$ are available, then the Nelder--Mead (simplex, or amoeba) algorithm provided by the routine \ttt{findMinNdim} may be used. 
+If the partial derivatives $\d f/\d\bx$ are available, they may be used in a more efficient quasi-Newton BFGS algorithm provided by the routine \ttt{findMinNdimDeriv}.
+
+A special case of optimization problem is a non-linear least-square fit: given a function $g(\bx; \boldsymbol{d})$, where $x_i$ are $N$ parameters that are being optimized, and $d_k$ are $M$ data points, minimize the sum of squared differences between the values of $g$ at these points and target values $v_k$: $\min f(\bx) = \sum_{k=1}^M [g(\bx; d_k) - v_k]^2$. This task is solved by the Levenberg--Marquardt algorithm, which needs the Jacobian matrix of partial derivatives of $g$ w.r.t.\ its parameters $\boldsymbol x$ at each data point $d_k$. It is provided by the routine \ttt{nonlinearMultiFit}.
+Of course, if the function $g$ is linear w.r.t.\ its parameters, this reduces to a simpler linear algebra problem, solved by the routine \ttt{linearMultiFit}. And if there is only one or two parameters (i.e., a linear regression with or without a constant term), this is solved by the routines \ttt{linearFit} and \ttt{linearFitZero}.
+
+In the above sequence, more specialized problems require more knowledge about the function, but generally converge faster, although all of them may be recast in terms of a general (unconstrained) minimization problem, as demonstrated in \texttt{test_math_core.cpp}.
+All of them (except the linear regression routines) need a starting point or a $N$-dimensional neighborhood, but may move away from it in the direction of (one of possible) minima; again there is no guarantee to find the global minimum.
+
+If there are restrictions on the values of $\bx$ in the form of a matrix $\mathsf{A}$ of element-wise linear inequality constraints $\mathsf{A}\bx \preccurlyeq \boldsymbol{b}$, and if the objective function $f$ is linear or quadratic in the input variables, these cases are handled by the routines \ttt{linearOptimizationSolve} and \ttt{quadraticOptimizationSolve}. They depend on external libraries (GLPK and/or CVXOPT; the former can only handle linear optimization problems). 
+
+\paragraph{Interpolation} \label{sec:SplineInterpolation}
+There are various classes for performing interpolation in one, two or three dimensions.
+All methods are based on the concept of piecewise-polynomial functions defined by the nodes of a grid $x_0<x_1<\dots<x_{N_x-1}$; in the case of multidimensional interpolation the grid is regular, i.e., aligned with the coordinate lines in each dimension. The advantages of this approach are locality (grid nodes may be more densely placed in the region of interest) and efficiency (the cost of evaluation scales as $\log(N_x)$ -- time needed to locate the grid segment containing the point $x$, plus a constant additional cost to evaluate the interpolating polynomial on this segment).
+
+In one or two dimensions there are linear, cubic and quintic (fifth-order) interpolation schemes. The former two are defined by the values of the interpolant at grid nodes, and the last one additionally requires its (partial) derivatives w.r.t.\ each coordinate at grid nodes. All these classes compute the function value and up to two (three for quintic splines) derivatives at any point inside the grid; 1d functions are linearly extrapolated outside the grid.
+
+An alternative formulation of the piecewise-polynomial interpolation methods is in terms of B-splines -- $N_x+N-1$ basis functions defined by the grid nodes, which are polynomials of degree $N$ on each of at most $N+1$ consecutive segments of the grid, and are zero otherwise. The case $N=1$ corresponds to linear interpolation, $N=3$ -- to (clamped) cubic splines%
+\footnote{A cubic spline in 1d is defined by $N_x+2$ parameters: they may be taken to be the values of spline at $N_x$ grid nodes plus two endpoint derivatives, which is called a clamped spline. The more familiar case of a natural cubic spline instead has these two additional parameters defined implicitly, by requiring that the second derivative of the spline is zero at both ends.}.
+The interpolating function is defined as $f(\bx) = \sum_\alpha\,A_\alpha\,B_\alpha(\bx)$, where $\alpha$ is a combined index in all dimensions, $A_\alpha$ are the amplitudes and $B_\alpha$ are the basis functions (in more than one dimension, they are formed as tensor products of 1d B-splines, i.e., $B_{ij}(x,y) = B_i(x)\,B_j(y)$). Again, the evaluation of interpolant only requires $O(\log(N_x)+N)$ operations per dimension to locate the grid segment and compute all $N$ possibly nonzero basis functions.
+
+In three dimensions, this is the only available interpolation method, and it is implemented for $N=1$ and $N=3$. In the latter case, the construction of interpolator from the array of function values at grid nodes involves the solution of a sparse matrix equation to find the amplitudes $A_\alpha$, so it may be costly if $N_xN_yN_z\gtrsim 10^3$ (but the interpolation itself is still efficient). 
+
+Spline interpolation is heavily used throughout the entire \Agama library as an efficient and accurate method for approximating various quantities that are expensive to evaluate directly. By performing suitable additional scaling transformations on the argument and/or value of the interpolator, it is possible to achieve an exquisite accuracy (sometimes down to machine precision) with a moderate ($\mathcal O(10^2)$) number of nodes covering the region of interest; for one-dimensional splines a linear extrapolation beyond that region often remains quite accurate under a carefully chosen scaling. Quintic splines are employed when it is possible to compute analytically the derivatives (or partial derivatives in the 2d case) of the approximated function at grid nodes during the spline construction in addition to its values -- in this case the accuracy of approximation becomes $1-2$ orders of magnitude better than that of a cubic spline. (Of course, computing the derivatives by finite-differencing or from a cubic spline does not achieve the goal).
+
+\paragraph{Penalized spline fitting}  \label{sec:SplineFitting}
+There are two kinds of tasks that involve the construction of a spline curve from an irregular set of points (as opposed to the values of the curve at grid nodes, as in the previous section).
+
+The first task is to create a smooth least-square approximation $f(x)$ to a set of points $\{x_i, y_i\}$: 
+minimize $\sum_i [y_i-f(x_i)]^2 + \lambda \int [f''(x)]^2\,dx$, where $\lambda$ is the smoothing parameter controlling the tradeoff between approximation error (the first term) and the curvature penalty (the second term). The solution is given by a cubic spline with grid nodes placed at all input points $\{x_i\}$ \cite{GreenSilverman}; however, it is not practical in the case of a large number of points. Instead, we approximate it with a cubic spline having a much smaller number of grid nodes $\{X_k\}$ specified by the user. The class \ttt{SplineApprox} is constructed for the given grid  $\{X_k\}$ and $x$-coordinates of input points; after preparing the ground, it may be used to find the amplitudes of B-splines for any $\{y_i\}$ and $\lambda$, and there is a method for automatically choosing the suitable amount of smoothing.
+
+The second task is to determine a density function $P(x)$ from an array of samples $\{x_i\}$, possibly with individual weights $\{w_i\}$. It is also solved with the help of B-splines, this time for $\ln P(x)$, which is represented as a B-spline of degree $N$ defined by user-specified grid nodes $\{X_k\}$. The routine \ttt{splineLogDensity} constructs an approximation for $\ln P$ for the given grid nodes and samples, with adjustable smoothing parameter $\lambda$.
+
+Both tasks are presently implemented only for the 1d case, but in the future may be generalized to multidimensional data represented by tensor-product B-splines. More details on the mathematical formulation is given in the Appendix~\ref{sec:MathSplineApproxDetails}.
+
+%%%%%%%%%%%%%%
+\subsubsection{Units}  \label{sec:Units}
+
+Handling of units is a surprisingly difficult and error-prone task. \Agama adopts a somewhat clumsy but consistent approach to unit handling, which mandates a clear separation between internal units inside the library and external units used to import/export the data. This alone is a rather natural idea; what makes it peculiar is that we do not fix our internal units to any particular values. There are three independent physical base units -- mass, length, and time, or velocity instead of time. The only convention used throughout the library is that $G=1$, which is customary for any stellar-dynamical code. This leaves only two independent base units, and we mandate that the results of all calculations should be independent of the choice of base units (up to insignificant roundoff errors at the level $\sim 10^{-4}\div 10^{-6}$ -- typical values for root-finder or integration tolerance parameters). This places heavier demand on the implementation -- in particular, all dimensional quantities should generally be converted to logarithms before being used in a scale-free context such as finding a root on the interval $[0..\infty)$. But the reward is greater robustness in various applications.
+
+In practice, the \ttt{units::} namespace defines \textit{two} separate unit classes. The first is \ttt{InternalUnits}, defining the two independent physical scales (taken to be length and time) used as the internal units of the library. Typically, a single instance of this class (let's call it \texttt{intUnit}) is created for the entire program. It does not provide any methods -- only conversion constants such as \texttt{from_xxx} and \texttt{to_xxx}, where xxx stands for some physical quantity. For instance, to obtain the value of potential expressed in (km/s)${}^2$ at the galactocentric radius of 8~kpc, one needs to write something like \\
+\texttt{double E = myPotential.value(coord::PosCyl( 8 * intUnit.from_Kpc, 0, 0 ));}\\
+\texttt{std::cout << E * pow_2(intUnit.to_kms);}
+
+The second is \ttt{ExternalUnits}, which is used to convert physical quantities between the external datasets and internal variables. External units, of course, do not need to follow the convention $G=1$, thus they are defined by three fundamental physical scales (length, velocity and mass) plus an instance of \ttt{InternalUnits} class that describes the working units of the library. An instance of unit converter is supplied as an argument to all functions that interface with external data: read/write potential and distribution function parameters, \Nbody snapshots, and any other kinds of data. Thus the dimensional quantities ingested by the library are always in internal units, and are converted back to physical units on output.
+
+When the external data follows the convention $G=1$ in whatever units, no conversion is necessary, thus one may provide an \ttt{ExternalUnits} object with a default constructor wherever required (it is usually a default value for this argument); in this case also no \ttt{InternalUnits} need to be defined. The reason for existence of two classes is that neither of them can fulfill both roles: to serve as an arbitrary internal ruler for testing the scale-invariance of calculations, and to have three independent fundamental physical scales (possibly different for various external data sources). In practice, one may create a single global instance of \ttt{ExternalUnits} with a temporary instance of arbitrary \ttt{InternalUnits} as an argument; however, having a separate global instance of the latter class is handy because its conversion constants indicate the direction (to or from physical units).
+
+The \Python interface supports the unit conversion internally: the user may set up a global instance of \ttt{ExternalUnits}, and all dimensional quantities passed to the library will be converted to internal library units and then back to physical units on output. Or, if no such conversion has been set up, all data is assumed to follow the convention $G=1$.
+
+%%%%%%%%%%%%%%
+\subsubsection{Coordinates}  \label{sec:Coords}
+The \ttt{coords::} namespace contains classes and routines for representing various mathematical objects in several coordinate systems in three-dimensional space.
+
+There are several built-in coordinate systems: \ttt{Car}tesian, \ttt{Cyl}indrical, \ttt{Sph}erical, and \ttt{ProlSph} -- prolate spheroidal. Their names are used as tags in other templated classes and conversion routines; only the last one has an adjustable parameter (interfocal distance).
+
+Templated classes include position, velocity, a combination of the two, an abstract interface \ttt{IScalarFunction} for a scalar function evaluated in a particular coordinate system, gradient and hessian of a scalar function, and coefficients for coordinate transformations from one system to the other. Templated functions convert these objects from one coordinate system to the other: for instance, \ttt{toPosVelCyl} converts the position and velocity from any source coordinate system into cylindrical coordinates; these routines should be called explicitly, to make the code self-documenting. An even more powerful family of functions \ttt{evalAndConvert} take the position in one (output) coordinate system and a scalar function defined in the other (evaluation) system, calls the function with transformed coordinates, and perform the transformation of gradient and hessian back to the output system. The primary use of these routines is in the potential framework (Section~\ref{sec:Potential}) -- each potential defines a method for computing it in the optimal system, and uses the conversion routines to provide the remaining ones. Another use is for transformation of probability distributions, which involve Jacobian matrices of coordinate conversions.
+
+%%%%%%%%%%%%%%
+\subsubsection{Particles}  \label{sec:Particles}
+A particle is an object with phase-space coordinates and mass; the latter is just a single number, and the former may be either just the position or the position and velocity in any coordinate system. Particles are grouped in arrays (templated struct \ttt{ParticleArray<ParticleT>}).
+Particle arrays in different coordinate systems can be implicitly converted to each other, to simplify the calling convention of routines that use one particular kind of coordinate system, but accept all other ones with the same syntax.
+
+\Agama provides routines for storing and loading particle arrays in files (\ttt{readSnapshot} and \ttt{writeSnapshot}), with several file formats available, depending on compilation options. Text files are built-in, and support for \Nemo and \textsc{Gadget} binary formats is provided through the \textsc{Unsio} library (optional).
+
+Particle arrays are also used in constructing a potential expansion (\ttt{Multipole} or \ttt{CylSpline}) from an \Nbody snapshot, and created by routines from the \texttt{galaxymodel} module (Section~\ref{sec:GalaxyModel}), e.g., by sampling from a distribution function.
+
+The particle array type and input/output routines belong to the \ttt{particles::} name\-space.
+
+%%%%%%%%%%%%%%
+\subsubsection{Utilities}  \label{sec:Utilities}
+
+There are quite a few general-purpose utility functions that do not belong to any other module, and are grouped in the \ttt{utils::} namespace. 
+Apart from several routines for string manipulation (e.g., converting between numbers and strings), and logging, there is a self-sufficient mechanism for dealing with configuration files. These files have a standard INI format, i.e., each line contains \ppp{name=value}, and parameters belonging to the same subject domain may be grouped in sections, with a preceding line \ppp{[section name]}. Values may be strings or numbers, names are case-insensitive, and lines starting with a comment symbol \texttt{\#} or \texttt{;} are ignored.
+
+The class \ttt{KeyValueMap} is responsible for a list of values belonging to a single section; this list may be read from an INI file, or created by parsing a single string like \ppp{"param1=value1 param2=1.0"}, or from an array of command-line arguments. Various methods return the values converted to a particular type (number, string or boolean) or set/replace values.
+The class \ttt{ConfigFile} operates with a collection of sections, each represented by its own \ttt{KeyValueMap}; it can read and write INI files.
+
+%%%%%%%%%%%
+\subsection{Potentials}  \label{sec:Potential}
+
+\Agama provides a versatile collection of density and potential models, including two very general and efficient approximations that can represent almost any well-behaved profile of an isolated stellar system. All classes and routines in this section are located in the \ttt{potential::} namespace.
+
+All density models are derived from the \ttt{BaseDensity} class, which defines methods for computing the density in three standard coordinate systems (derived classes choose the most convenient one to implement directly, and the two other ones use coordinate transformations), a function returning the symmetry properties of the model, and two convenience methods for computing mass within a given radius and the total mass (by default they integrate the density over volume, but derived classes may provide a cheaper alternative).
+
+All potential models are derived from the \ttt{BasePotential} class, which itself descends from \ttt{BaseDensity}. It defines methods for computing the potential, its first derivative (gradient vector) and second derivative (hessian tensor) in three standard coordinate systems. By default, density is computed from the hessian, but derived classes may override this behaviour.
+Furthermore there are several derived abstract classes serving as bases for potentials that are easier to evaluate in a particular coordinate system (Section~\ref{sec:Coords}): the function \ttt{eval()} for this system remains to be implemented in descendant classes, and the other two functions use coordinate and derivative transformations to convert the computed value to the target coordinate system.
+For instance, a triaxial harmonic potential is easier to evaluate in Cartesian coordinates, while the St\"ackel potential is naturally expressed in prolate spheroidal coordinate system.
+
+Any number of density components may be combined into a single \ttt{CompositeDensity} class, and similarly for potential components.
+
+%%%%%%%%%%%%%%
+\subsubsection{Analytic potentials}  \label{sec:PotentialAnalytic}
+
+There are several commonly used models with known expressions for the potential and its derivatives. 
+
+Spherical models include the \ttt{Plummer}, \ttt{Isochrone} and \ttt{NFW} (Navarro--Frenk--White) potentials. Moreover there is a wrapper class that turns any user-provided function $\Phi(r)$ with two known derivatives into a form compatible with the potential interface.
+
+Axisymmetric models include the \ttt{MiyamotoNagai} and \ttt{OblatePerfectEllipsoid} potentials (the latter belongs to a more general class of St\"ackel potentials \cite{deZeeuw1985}, but is the only one implemented at present).
+There is another type of axisymmetric models that have a dedicated potential class, namely a separable \ttt{DiskDensity} profile ($\rho(R,z) = \Sigma(R) h(z)$). A direct evaluation of potential requires 2d numerical quadrature, or 1d in special cases such as the exponential radial profile, which is still too costly. Instead, we use the approach introduced in \cite{KuijkenDubinski1995, DehnenBinney1998} (\textsc{GalPot}): the potential is split into two parts, \ttt{DiskAnsatz} that has an analytic expression for the potential of the strongly flattened component, and the residual part that is represented with the \ttt{Multipole} expansion.
+
+Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cite{Dehnen1993} and \ttt{Ferrers} potentials. The first two have infinite extent and are usable only in certain contexts (such as orbit integration), because most routines expect the potential to vanish at infinity.
+Dehnen models may have any symmetry from spherical to triaxial; in non-spherical cases, the potential and its derivatives are computed using a 1d numerical quadrature \cite{MerrittFridman1996}, so this is rather costly (and also inaccurate at large distances). A preferred way of using an axisymmetric or triaxial Dehnen model is through the \ttt{Multipole} expansion. Ferrers ($n=2$) models are strictly triaxial, and have analytic expressions for the potential and its derivatives \cite{Pfenniger1984}.
+There is also a \ttt{SpheroidDensity} class that describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles \cite{Zhao1996} with an optional exponential cutoff. Dehnen, Plummer, Isochrone and NFW profiles are all special cases of this model; however, this class only provides the density profile and not the potential.
+
+%%%%%%%%%%%%%%
+\subsubsection{Multipole expansion}  \label{sec:PotentialMultipole}
+
+\ttt{Multipole} is a general-purpose potential approximation that delivers highly accurate results for density profiles with axis ratio not very different from unity (say, at most a factor of few). It represents the potential as a sum of spherical-harmonic functions of angles multiplied by arbitrary functions of radius: $\Phi(r,\theta,\phi) = \sum_{l,m}\, \Phi_{l,m}(r)\, Y_l^m(\theta,\phi)$. The radial dependence of each term is given by a quintic spline, defined by a rather small number of grid nodes ($N_r\sim 10\div 50$), typically spaced equally in $\log r$ over a range $r_\mathrm{max}/r_\mathrm{min} \gtrsim 10^6$; the suitable order of angular expansion $l_\mathrm{max}$ depends on the shape of the density profile, and is usually $\lesssim 10$.
+
+The potential approximation may be constructed in several ways:
+\begin{itemize} \setlength{\parskip}{0pt} \setlength{\itemsep}{2pt}
+\item from another potential (makes sense if the latter is expensive to compute, e.g., a triaxial \ttt{Dehnen} model);
+\item from a smooth density profile, thereby solving the Poisson equation in spherical coordinates;
+\item from an \Nbody model (an array of particle coordinates and masses) -- in this case a temporary smooth density model is created and used in the same way as in the second scenario;
+\item by loading a previously computed array of coefficients from a text file.
+\end{itemize}
+
+This type of potential is rather inexpensive to initialize, very efficient to compute, provides an accurate extrapolation to small and large radii beyond the extent of its radial grid, and is the right choice for ``spheroidal'' density models -- from spherical to mildly triaxial, and even beyond (i.e., a model may have a twist in the direction of principal axes, or contain an off-centered odd-$m$ mode).
+
+As a side note, a related class of potential approximations is based on expanding the radial dependence of spherical-harmonic terms $\Phi_{l,m}(r)$ into a sum over functions from a suitable basis set \cite{HernquistOstriker1992,Zhao1996}. For several reasons, this approach is less efficient: the choice of the family of basis functions implies certain biases in the approximation, and the need to compute a full set of them (involving rather expensive algebraic operations) at each radius is contrasted with a much faster evaluation of a spline (essentially using only a few adjacent grid points). \cite{Vasiliev2013} demonstrated the superiority of a previous implementation of spline-interpolated spherical-harmonic expansion over the basis-set approach, and \ttt{Multipole} is improved even further. 
+
+%%%%%%%%%%%%%%
+\subsubsection{Azimuthal harmonic expansion}  \label{sec:PotentialCylSpline}
+
+\ttt{CylSpline}\footnote{an improved version of the method presented in \cite{VasilievAthanassoula2015}} is another general-purpose potential approximation that is more effective for strongly flattened (disky) systems, whether axisymmetric or not. It represents the potential as a sum of Fourier terms in the azimuthal angle ($\phi$), with coefficients of each term interpolated via a 2d quintic spline spanning a finite region in the $R,z$ plane. The accuracy of approximation is determined by the number and extent of the grid nodes in $R$ and $z$ (also scaled logarithmically to achieve a high dynamic range) and the order $m_\mathrm{max}$ of angular expansion; in the axisymmetric case only one term is used, but generally it may represent any geometry, e.g., spiral arms and a triaxial bar.
+
+This potential may also be constructed in the same four ways as \ttt{Multipole}, but the solution of Poisson equation is much more expensive in this case; still, for typical grid sizes of a few dozen in each direction, it takes between a few seconds and minutes on a single CPU core (and is almost ideally parallelized). After initialization, the computation of potential and forces is as efficient as \ttt{Multipole}. In many cases, it delivers comparable or better accuracy than the latter, but is not suitable for cuspy density profiles and for extended tails of density at large radii, since it may only represent it over a finite region (the potential and its first derivative is still quite accurately extrapolated outside the grid, but the density is identically zero there). Its main advantage is the ability to handle disky systems which are not suitable for a spherical-harmonic expansion%
+\footnote{Potential of separable axisymmetric disk density profiles can be efficiently computed using a combination of \ttt{DiskAnsatz} and \ttt{Multipole} (the \textsc{GalPot} approach), but this applies only to this restricted class of systems, and is comparable to \ttt{CylSpline} in both speed and accuracy.}.
+
+To summarize, both potential approximations have wide, partially overlapping range of applicability, are equally efficient in evaluation (but not construction), and deliver good accuracy (see Figures~\ref{fig:PotentialAccuracy1},~\ref{fig:PotentialAccuracy2} in the Appendix, with more technical details given in Section~\ref{sec:PotentialDetails}).
+We note that application of these methods to represent the potential of a galaxy like the Milky Way is computationally more demanding than simple models based e.g.\ on a combination of Miyamoto--Nagai disks and spherically-symmetric two-power-law profiles, but only moderately (by a factor of 2--3), and allows much greater flexibility and realism (especially if non-axisymmetric features are required).
+
+%%%%%%%%%%%%%%
+\subsubsection{Potential factory}  \label{sec:PotentialFactory}
+
+All density and potential classes may be constructed using a universal ``factory'' interface -- several routines \ttt{createDensity} and \ttt{createPotential} that return new instances of \ttt{PtrDensity} or \ttt{PtrPotential} according to the provided parameters.
+The parameters can be supplied in several ways. One is an INI file with one or several components of the potential described in separate sections \ppp{[Potential]}, \ppp{[Potential2]}, \ppp{[Potential disk]}, etc. (all section names should start with ``Potential''). Another possibility is to provide a \ttt{KeyValueMap} object (Section~\ref{sec:Utilities}) corresponding to a single section from an INI file (it may be read from the file, or constructed manually, e.g., from named arguments in the \Python interface, or from command-line parameters for console programs, or from a single string like \ppp{"key1=value1 key2=value2"}). These parameters may describe the potential completely (e.g., if this is one of the known analytical models), or define the parameters of Multipole or CylSpline potential expansions to be constructed from the user-provided density or potential object, or from an array of particles -- in the latter case these objects are also passed to the factory routine. Finally, the coefficients of a potential or density expansion may be stored into a text file and subsequently used to load and construct a new object, using \ttt{writePotential}/\ttt{readPotential} routines.
+
+Here is the list of possible parameters of a single potential or density component for the factory routines (not all of them make sense for all models, but unknown or irrelevant parameters will simply be ignored); see Table~\ref{tab:PotentialParams} for complete information:
+\begin{itemize}
+\item \ppp{type} -- determines the type of potential used; should be the name of a class derived from \ttt{BasePotential} -- either an analytic potential or an expansion (Multipole or CylSpline). It is usually required, except if the potential is loaded from a coefficients file -- in that case the name of the potential appears in the first line of this text file, so is determined automatically.
+\item \ppp{density} -- if \ppp{type} is a potential expansion, this parameter determines the density model to be used; should be the name of a class derived from \ttt{BaseDensity} (or, by consequence, the name of an analytic potential), except that it cannot be a model with unbound potential (Logarithmic or Harmonic) or another potential expansion.\\
+There is one exception to the rule that \ppp{type} must encode a potential class: it may also contain the names of two density profiles originally used in \textsc{GalPot} -- \ttt{DiskDensity} or \ttt{SpheroidDensity}. All such components are collected first, and used to construct a \textit{single} instance of \ttt{Multipole} potential with default parameters, plus zero or more instances of \ttt{DiskAnsatz} potentials (according to the number of disk profiles). The source density for this Multipole potential contains all SpheroidDensity and DiskDensity components, plus \textit{negative} contributions of DiskAnsatz potentials (i.e., with inverted sign of their masses). Of course, one may use them also as regular \ppp{density} components (e.g., \ppp{type=CylSpline density=DiskDensity}, which yields comparable accuracy), but in that case each one would create a separate potential expansion, which is of course not efficient. In order to lift this limitation, one may construct all density components individually, manually combine them into a single composite model, and pass it to the constructor of a potential expansion (this approach is used for self-consistent multicomponent models, Section~\ref{sec:SCM}).
+\item \ppp{symmetry} -- defines the symmetry properties of the density model passed to the potential expansion. All built-in models report this property automatically; this parameter is useful if the input is given by an array of particles, or by a user-defined routine returning the density or potential in \Python and \Fortran interfaces. It could be either a text string with one of the standard choices (``spherical``, ``axisymmetric``, ``triaxial``, ``none`` -- only the first letter is used), or a number encoding a more complicated symmetry (see the definitions in \ttt{coords.h}).
+\item \ppp{file} -- the name of a file with potential expansion coefficients, or with an \Nbody snapshot to be used for creating a potential expansion. In the former case the type of potential expansion is stored in the first line of the file, so the \ppp{type} parameter is not required.
+\end{itemize}
+Parameters defining an analytic density or potential model (if \ppp{type} is a potential expansion, they refer to the \ppp{density} argument, otherwise to \ppp{type}); default values are given in brackets:
+\begin{itemize}
+\item \ppp{mass} [1] -- total mass of an analytic model.
+\item \ppp{scaleRadius} [1] -- the first (sometimes the only) parameter with the dimension of length that defines the profile.
+\item \ppp{scaleRadius2} [1] or \ppp{scaleHeight} [0] -- the second such parameter (e.g., for Miyamoto--Nagai or exponential disk models).
+\item \ppp{outerCutoffRadius} [0] -- another length-scale parameter defining the radius of exponential cut-off, used for \ttt{SpheroidDensity} models (0 means no cutoff).
+\item \ppp{innerCutoffRadius} [0] -- similar parameter for \ttt{DiskDensity} that defines the radius of an inner hole.
+\item \ppp{surfaceDensity} [0] -- value of surface density at $R=0$ for the exponential \ttt{DiskDensity} profile.
+\item \ppp{densityNorm} [0] -- value that defines the volume density at the scale radius for the \ttt{SpheroidDensity} profile. Alternatively, instead of this or the previous parameter, one may provide the total mass of the corresponding model (these two parameters have a priority over mass).
+\item \ppp{alpha} [1] -- parameter controlling the steepness of transition between two asymptotic power-law slopes for \ttt{SpheroidDensity}.
+\item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{SpheroidDensity}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
+\item \ppp{gamma} [1] -- power-law index of the inner density profile $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{SpheroidDensity} models (should be $\gamma<3$).
+\item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{SpheroidDensity} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
+\item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$. 
+\end{itemize}
+Parameters defining the potential expansions (default values in brackets are all sensible and only occasionally need to be changed):
+\begin{itemize}
+\item \ppp{gridSizeR} [25] -- the number of grid nodes in spherical (\ttt{Multipole}) or cylindrical (\ttt{CylSpline}) radius; in the latter case this includes the 0th node at $R=0$. 
+\item \ppp{gridSizeZ} [25] -- same for the grid in $z$ direction in \ttt{CylSpline}, including the $z=0$ node.
+\item \ppp{rmin} [0] -- the radius of the innermost nonzero node in the radial grid (for both potential expansions).
+\item \ppp{rmax} [0] -- same for the outermost node; zero values mean automatic determination.
+\item \ppp{zmin} [0], \ppp{zmax} [0] -- same for the vertical grid in \ttt{CylSpline}; zero values mean take them from the radial grid.
+\item \ppp{lmax} [6] -- the order of \ttt{Multipole} expansion in $\cos\theta$; 0 means spherical symmetry. 
+\item \ppp{mmax} [lmax] -- the order of azimuthal Fourier expansion in $\phi$ for both  \ttt{CylSpline} and \ttt{Multipole}; 0 means axisymmetry, and $m_\mathrm{max}$ should be $\le l_\mathrm{max}$. Of course, the actual order of expansion in all cases is also determined by the symmetry properties of the input density model -- if it reports to be axisymmetric, no $m\ne 0$ terms will be used anyway.
+\item \ppp{smoothing} [1] -- the amount of smoothing applied during construction of the \ttt{Multipole} potential from an array of particles.
+\end{itemize}
+
+\begin{table}
+\caption{Available density and potential models and their parameters}  \label{tab:PotentialParams}
+\begin{tabular}{l m{5cm} >{\raggedright\arraybackslash}m{6cm}}
+Name & Formula & Parameters \\
+\hline
+\multicolumn{3}{c}{Density-only models} \\[2mm]
+\ttt{DiskDensity} & $\rho = \Sigma_0\,\exp\big(-\frac{R}{R_\mathrm{disk}}-\frac{R_\mathrm{cut}}{R}\big)\times$
+$\left\{ \begin{array}{ll} \delta(z) & \mbox{if } h=0 \\[1mm]
+\frac{1}{2h} \exp\big(-\big|\frac{z}{h}\big|\big) & \mbox{if } h>0 \\[1mm]
+\frac{1}{4|h|}\, \mathrm{sech}^2\big(\big|\frac{z}{2h}\big|\big) & \mbox{if } h<0 \end{array} \right. $ &
+\ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($R_\mathrm{disk}$), \ppp{scaleHeight}~($h$), \ppp{innerCutoffRadius}~($R_\mathrm{cut}$)\\
+\ttt{SpheroidDensity} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^2\Big] $ &
+\ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{gamma}~($\gamma$), \ppp{beta}~($\beta$), \ppp{alpha}~($\alpha$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\multicolumn{3}{c}{Density/potential models} \\[2mm]
+\ttt{Plummer} & $\Phi = -\frac{M}{\sqrt{a^2+r^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{Isochrone} & $\Phi = - \frac{M}{a + \sqrt{r^2 + a^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{NFW} & $\Phi = -\frac{M}{r} \ln\left(1 + \frac{r}{a}\right)$ & \ppp{mass}~($M$, {\footnotesize note that the total mass is infinite}), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2}~($b$) \\[2mm]
+\ttt{OblatePerfectEllipsoid}\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Logarithmic} & $\Phi = \sigma^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{mass}~($\sigma$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{mass}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\multicolumn{3}{l}{\footnotesize $R=\sqrt{x^2+y^2}$ is the cylindrical radius and $\tilde r=\sqrt{x^2+(y/p)^2+(z/q)^2}$ is the ellipsoidal radius}
+\end{tabular}
+\end{table}
+
+These keywords, with some modifications, are also used in potential construction routines in \Python and \Fortran interfaces and in the \Amuse and \Galpy plugins (Sections~\ref{sec:Python}, \ref{sec:Fortran}, \ref{sec:Amuse}, \ref{sec:Galpy}). For instance, \Python interface allows to provide a user-defined function specifying the density profile in the \ppp{density=} argument, or an array of particles in the \ppp{particles=} argument.
+
+All dimensional values in the potential factory routines can optionally be specified in physical units and converted into internal units by providing an extra unit conversion parameter (Section~\ref{sec:Units}). For instance, masses and radii in the INI file may be given in solar masses and parsecs. This conversion also applies during write/read of density or potential coefficients to/from text files. Of course, if all data is given in the same units and follows the convention $G=1$, no conversion is needed.
+
+%%%%%%%%%%%%%%
+\subsubsection{Utility functions}  \label{sec:PotentialUtility}
+
+There are several frequently used functions that operate on any potential object: conversion between energy $E$, angular momentum of a circular orbit $L_\mathrm{circ}$, and radius; epicyclic frequencies $\kappa,\nu,\Omega$ as functions of radius%
+\footnote{defined as $\displaystyle \kappa^2\equiv \frac{\d^2\Phi}{\d R^2} + \frac 3 R \frac{\d\Phi}{\d R},\;\; \nu^2\equiv \frac{\d^2\Phi}{\d z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\d R} = \left(\frac{L_\mathrm{circ}^2}{R}\right)^2,\;$ evaluated at $z=0$.};
+peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane of an axisymmetric potential), etc. They are implemented as standalone functions (generally using a root-finding routine to solve equations such as $\Phi(r)=E$ for $r$), and as two interpolator classes that pre-compute these values on a 1d or 2d grid in $E$ or $E,L$, and provide a faster (but still very accurate) alternative to the standalone functions. These interpolators are used, e.g., in the spherical action finder/mapper class (Section~\ref{sec:ActionsSpherical}).
+
+%%%%%%%%%%%
+\subsection{Orbit integration and analysis}  \label{sec:Orbits}
+
+Orbits of particles in the smooth time-independent potential are computed using the routine \ttt{orbit::integrate} in any of the three standard coordinate systems. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}. The trajectory is stored at regular intervals of time, which is unrelated to the internal timestep of ODE solver (that is, the  position/\-velocity at any time is obtained by interpolation provided by the solver -- so-called dense output feature). Currently we have one method available -- 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have rather similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
+
+Orbit analysis refers to the determination of orbit class (box, tube, resonant boxlet, etc.) and degree of chaoticity. This is performed using a Fourier transform of position as a function of time and detecting the most prominent ``spectral lines''; the ratio between their frequencies is an indicator of orbit type \cite{BinneySpergel1984, CarpinteroAguilar1998}, and their rate of change with time is a measure of chaos \cite{ValluriMerritt1998}. A finite-time estimate of Lyapunov exponent is another measure of stochasticity (see \cite{Carpintero2014, Skokos2010} for reviews of methods based on variational equations). These methods are implemented in \cite{Vasiliev2013}, but as the focus of \Agama in galaxy modelling is shifted from discrete orbits to smooth distribution functions, we have not yet included them in the library.
+
+%%%%%%%%%%%
+\subsection{Action/angle variables}  \label{sec:ActionAngle}
+
+As the name implies, \Agama deals with models of stellar system described in terms of action/angle variables. They are defined, e.g., in Section 3.5 of \cite{BinneyTremaine}.
+
+In a spherical or axisymmetric potential, the most convenient choice for actions is the triplet $\{J_r, J_z, J_\phi\}$, where $J_r\ge 0$ (radial action) describes the motion in cylindrical radius, $J_z\ge 0$ (vertical action) describes the motion in $z$ direction, and $J_\phi \equiv R v_\phi$ (azimuthal action) is the conserved component $L_z$ of angular momentum (it may have any sign). In a spherical potential, the sum $J_z + |J_\phi|$ is the total angular momentum $L$.
+%The corresponding angles are defined such that $\theta_r=0$ corresponds to the pericenter, $\theta_z=0$ -- to the passage through the $x-y$ plane with positive vertical velocity, and $\theta_\phi=0$ -- to [?]. 
+
+The \ttt{actions::} namespace introduces several concepts: \ttt{Actions} and \ttt{Angles} are the triplet of action and angle variables, \ttt{ActionAngles} is their combination, \ttt{Frequencies} is the triplet of frequencies $\boldsymbol{\Omega}\equiv \d H/\d\bJ$ (derivatives of Hamiltonian w.r.t.\ actions). 
+The transformation from $\{\bx,\bv\}$ to $\{\bJ,\bt\}$ is provided by action finders, and the inverse transformation -- by action mappers. There are several distinct methods discussed later in this section, and they may exist as standalone routines and/or instances of classes derived from the \ttt{BaseActionFinder} and \ttt{BaseActionMapper} classes. The action finder routines exist in two variants: computing only the actions (the most common usage), or in addition the angles and frequencies (more expensive).
+
+The following sections describe the methods suitable for specific cases of spherical or axisymmetric potentials (see \cite{SandersBinney2016} for a review and comparison of various approaches).
+At present, \Agama does not contain any methods for action/angle computation in non\--axi\-sym\-met\-ric potentials, but they may be added in the future within the same general framework.
+
+%%%%%%%%%%%%%%
+\subsubsection{Isochrone mapping}  \label{sec:ActionsIsochrone}
+
+The spherical isochrone potential, specified by two parameters (mass $M$ and scale radius $b$) admits analytic expressions for the transformation between $\{\bx,\bv\}$ and $\{\bJ,\bt\}$ in both directions. These expression are given, e.g., in Eqs.~3.225--3.241 of \cite{BinneyTremaine}.
+The standalone routines providing these transformations, optionally with partial derivatives of $\{\bx,\bv\}$ w.r.t.\ $\bJ, M, b$, are located in \ttt{actions_isochrone.h}.
+
+%%%%%%%%%%%%%%
+\subsubsection{Spherical potentials}  \label{sec:ActionsSpherical}
+
+In a more general case of an arbitrary spherical potential, the radial action is given by 
+\begin{align*}
+J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;dr,
+\end{align*}
+where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
+The standalone routines in \ttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$.
+
+%%%%%%%%%%%%%%
+\subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
+
+In a still more general axisymmetric case, the action/angle variables can be exactly computed for a special class of St\"ackel potentials, in which the motion is fully integrable and separable in a prolate spheroidal coordinate system. This computation is performed by the standalone routines \ttt{actionsAxisymStaeckel} and \ttt{actionAnglesAxisymStaeckel} in \ttt{actions_staeckel.h}, which operate on an instance of \ttt{potential::OblatePerfectEllipsoid} class (the only example of a St\"ackel potential in \Agama). The procedure consists of several steps: numerically find the extent of oscillations in the meridional plane in both coordinates $\lambda, \nu$ of the prolate spheroidal system; numerically compute the 1d integrals for $J_\lambda, J_\nu$ (which correspond to $J_r, J_z$); and if necessary, find the frequencies and angles (again by 1d numerical integration).
+
+For the most interesting practical case of a non-St\"ackel axisymmetric potential, the actions can only be approximated under the assumption that the motion is integrable and is locally well described by a St\"ackel potential. This is the essence of the ``St\"ackel fudge'' approach \cite{Binney2012}. In a nutshell, it pretends that the potential \textit{is} of a St\"ackel form (without explicitly constructing it), computes the would-be integrals of motion in this presumed potential, and then performs essentially the same steps as the routines for the genuine St\"ackel potential. Actions computed in this way are approximate, in the sense that even for a regular (non-chaotic) motion, they are not exactly conserved along the orbit; the variation of $\bJ$ is smallest for nearly-circular orbits close to the equatorial plane, but typically remains $\lesssim 1-10\%$ even for rather eccentric orbits that stray far from the plane (note that the method does not provide any error estimate), see Figure~\ref{fig:StaeckelAccuracy}. However, if the actual orbit is chaotic or belongs to one of minor resonant families, the variation of estimated actions along the orbit is rather large because the method does not account for resonant motion.
+
+In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the interfocal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Crucially, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
+The most accurate result is obtained by averaging the potential derivatives over the region covered by the (numerically computed) orbit. This is of course impractical, and a suitable approximation is provided by the \ttt{InterfocalDistanceFinder} class, which constructs an interpolation table for $\Delta(E,L)$ by pre-computing these values for thin (shell) orbits located for each pair of two classical integrals of motion $E, L$ in a 2d grid; the initialization of this table takes $\mathcal{O}(1~\mathrm{s})$. The \ttt{ActionFinderAxisymFudge} class encapsulates this $\Delta$-finder and provides methods for computing actions, angles and frequencies for any $\{\bx,\bv\}$ in the given potential. This is the main workhorse for many higher-level tasks in the \Agama library. 
+The computation of a single triplet of actions costs $\sim 50$ potential evaluations. In the future, we plan to introduce a faster approximation based on 3d interpolation for $\bJ$ as a function of three integrals of motion (one of them itself being approximate).
+
+%%%%%%%%%%%%%%
+\subsubsection{Torus mapping}  \label{sec:ActionsTorus}
+
+The transformation from $\{\bJ, \bt\}$ to $\{\bx,\bv\}$ in an arbitrary axisymmetric potential is performed using the Torus mapping approach \cite{BinneyMcMillan2016}. An instance of \ttt{ActionMapperTorus} class is constructed for any choice of $\bJ$ and allows to perform this mapping for multiple values of $\bt$; however, the cost of torus construction is rather high, and it may not always succeed (depending on the properties of potential and required accuracy). The code is adapted from the original \textsc{tm} package, with several modifications enabling the use of an arbitrary potential and a more efficient angle mapping approach; however, it does not quite comply to the coding standards adopted in \Agama (Section~\ref{sec:DeveloperGuide}) and in the future will be replaced by a fresh implementation. 
+
+%%%%%%%%%%%
+\subsection{Distribution functions}  \label{sec:DF}
+
+By Jeans' theorem, a steady-state distribution of stars or other species in a stationary potential may depend only on integrals of motion, taken here to be the actions $\bJ$. The \ttt{df::} namespace contains the classes and methods for working with such distribution functions (DFs) formulated in terms of actions. They are derived from the \ttt{BaseDistributionFunction} class, which provides a single method for computing the value $f(\bJ)$ at the given triplet of actions. All physically valid DFs must have a finite mass $M = (2\pi)^3 \iiint f(\bJ)\,d^3J$, by default computed by numerical integration (the pre-factor comes from a trivial integration over angles).
+The same DF corresponds to different density profiles in different potentials (Section~\ref{sec:Moments}), but the total mass of the density profile is always the same.
+
+\Agama provides several DFs suitable for various components of a galaxy, described in the following sections. In addition there is a concept of a multi-component DF: since computing the actions -- arguments of the DF -- is a non-negligible cost, it is often advantageous to evaluate several DFs at the same set of actions at once.
+There is also a ``DF factory'' routine \ttt{createDistributionFunction} for constructing various DF classes from a set of named parameters described by a \ttt{KeyValueMap} object (Section~\ref{sec:Utilities}).
+
+Importantly, the DF formulated in terms of actions does not depend on the potential. However, some models use the concept of epicyclic frequencies to compute the value of $f(\bJ)$. These frequencies are represented by a special proxy class \ttt{potential::Interpolator}, which is constructed from a given potential, but then serves as an independent entity (essentially an array of arbitrary functions of one variable), so that $f(\bJ)$ has the same value in any other potential. This is important in the context of iterative construction of self-consistent models (Section~\ref{sec:SCM}).
+
+%%%%%%%%%%%%%%
+\subsubsection{Spheroidal components}  \label{sec:DFspheroid}
+
+A suitable choice for DFs of elliptical galaxies, bulges or haloes is the double-power-law model, which is similar to the one presented in \cite{Posti2015}, with a different notation:
+\begin{align*}
+f(\bJ) &= \frac{M}{(2\pi\, J_0)^3} \left(\frac{h(\bJ)}{J_0}\right)^{-\Gamma}
+\left[1 + \left(\frac{g(\bJ)}{J_0}\right)^\eta \right]^{\frac{\Gamma-\Beta}{\eta}}
+\exp\bigg[-\left(\frac{g(\bJ)}{J_\mathrm{max}}\right)^2\bigg],  \quad\mbox{where} \\
+g(\bJ) &\equiv g_r J_r + g_z J_z + (3-g_r-g_z) |J_\phi|, \quad
+h(\bJ)  \equiv h_r J_r + h_z J_z + (3-h_r-h_z) |J_\phi|
+\end{align*}
+are linear combinations of actions that control the anisotropy of the model in the outer region (above the break action $J_0$) and the inner region (below $J_0$), respectively, the power-law indices $\Beta>3$ and $\Gamma<3$ control the slope of the density profile, $\eta$ determines the steepness of the transition between the two regimes, and $J_\mathrm{max}$ additionally suppresses the DF at large $J$. This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{SpheroidDensity} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ . The \ttt{DoublePowerLawParams} structure contains all parameters of these DF families, and the \ttt{DoublePowerLaw} class represents an actual DF model.
+
+%%%%%%%%%%%%%%
+\subsubsection{Disky components}  \label{sec:DFdisk}
+
+Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks expressed in terms of actions is provided by the \ttt{PseudoIsothermal} class, with many tunable parameters contained in a \ttt{PseudoIsothermalParam} structure. The DF for a single population is given by \cite{BinneyMcMillan2011}:
+\begin{align*}
+f(J) &= f_r(J_r, J_\phi)\; f_z(J_z, J_\phi)\; f_\phi(J_\phi) , \quad \mbox{ where} \\
+f_r  &\equiv \frac{\Omega\, \Sigma}{\pi\, \kappa\, \sigma_r^2}\, \exp\left(-\frac{\kappa\,J_r}{\sigma_r^2}\right) ,\quad
+f_z  \equiv \frac{\nu}{2\pi\, \sigma_z^2 }\,\exp\left(-\frac{\nu\,J_z}{\sigma_z^2}\right) , \quad
+f_\phi \equiv 1 + \tanh\left( \frac{J_\phi}{J_{\phi,0}} \right) , \\
+\Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \quad
+\sigma_r(R_c) \equiv \sigma_{r,0} \exp( -R_c / R_{\sigma,r} ) , \quad
+\sigma_z(R_c) \equiv \sigma_{z,0} \exp( -R_c / R_{\sigma,z} ) .
+\end{align*}
+Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\phi$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\phi)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$ and radial scale length $R_\mathrm{disk}$) match those of the DF. The parameter $J_{\phi,0}$ controls the streaming motion (if $J_\phi \ll J_{\phi,0}$, both clockwise and counter-clockwise orbits are equally populated, and in the opposite case only the orbits with positive $J_\phi$ are present).
+A still more general model can describe a composition of populations with different velocity dispersions (see \texttt{df_disk.h} for more details).
+
+%%%%%%%%%%%%%%
+\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
+
+A general way of representing an arbitrary DF in a three-dimensional action space is through an  \hyperref[sec:SplineInterpolation]{interpolating spline} in suitably scaled coordinates. The formulation in terms of B-splines is also an example of a multi-component DF, where each basis function, formed as a tensor product of one-dimensional B-splines, is a separate component. These DFs are used as building blocks in self-consistent models (work in preparation).
+
+%%%%%%%%%%%%%%
+\subsubsection{Spherical isotropic models}  \label{sec:DFspherical}
+
+There is an alternative framework for a special case of a spherically-symmetric potential and an isotropic DF in the velocity space. Such DFs depend only on energy, which is a certain function of $J_r$ and $L\equiv J_z+|J_\phi|$. To avoid the need to express this function explicitly, and to retain the convenience of action formalism, we instead use the phase volume $h$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
+\begin{align*}
+h(E) &\equiv \iiint d^3x \iiint d^3v\, H\Big[E - \big(\Phi(|\bx|)+|\bv|^2/2\big)\Big] \;,\quad
+\mbox{where $H$ is the step function,} \\
+&= \int_0^{r_\mathrm{max}(E)} 4\pi\,r^2\,dr \int_0^{v_\mathrm{max}(E,r)} 4\pi\, v^2\,dv =
+\frac{16\pi^2}{3} \int_0^{r_\mathrm{max}(E)} r^2\, \Big[2\big(E-\Phi(r)\big)\Big]^{3/2}\;dr.
+\end{align*}
+
+The advantages of using $h$ instead of $E$ are that the total mass of the model is simply $M=\int_0^\infty f(h)\,dh$, that the same DF may be used in different potentials, etc. The bi-directional correspondence between $E$ and $h$ is provided by a helper class \ttt{PhaseVolume}, constructed for a given potential. The derivative $dh(E)/dE \equiv g(E)$ is called the density of states (\cite{BinneyTremaine}, eq.~4.56), and is given by
+\begin{align*}
+g(E) \equiv 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, \sqrt{2\big(E-\Phi(r)\big)}\;dr 
+= 4\pi^2\,L^2_\mathrm{circ}(E)\,T_\mathrm{rad}(E).
+\end{align*}
+More information on these models is given in section~\ref{sec:DFsphericalDetails}.
+
+%%%%%%%%%%%
+\subsection{Galaxy modelling framework}  \label{sec:GalaxyModel}
+
+This module (namespace \ttt{galaxymodel::}) broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
+As stressed previously, using $\bJ$ as the argument of $f$ has the advantage that the DF may be used with an arbitrary potenial without any modifications (because the possible range of actions does not depend on the potential, unlike, e.g., the possible range of energy).
+
+%%%%%%%%%%%%%%
+\subsubsection{Moments of distribution functions}  \label{sec:Moments}
+
+The most basic task is the computation of DF moments (density, velocity dispersion, etc.), defined as
+\begin{align*}
+\rho(\bx) \equiv \int d^3v\, f\big(\bJ(\bx,\bv)\big), \quad
+\overline{\bv} \equiv \rho^{-1} \int d^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \quad
+\overline{v_{ij}} \equiv \rho^{-1} \int d^3v \,v_{ij}\, f\big(\bJ(\bx,\bv)\big).
+\end{align*}
+The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
+This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}).
+The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ -- this involves an additional integration over $z$.
+\textcolor{red}{[Currently there are no analogous routines for spherical isotropic DFs].}
+
+%%%%%%%%%%%%%%
+\subsubsection{Conversion to/from \Nbody models}  \label{sec:Nbody}
+
+As the DF is a probability distribution function (PDF), it can be sampled with a large number of points to create an \Nbody model of the system. There are two possible ways of doing this:
+\begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item Draw samples of actions from $f(\bJ)$, used as a three-dimensional PDF. Then create (possibly several) $\{\bx,\bv\}$ points for each value of actions with a random choice of angles, using the torus mapping approach (Section~\ref{sec:ActionsTorus}). This is performed by the routine \ttt{generateActionSamples}.
+\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\{\bx,\bv\})\big)$ with the help of an action finder. This is performed by the routine \ttt{generatePosVelSamples}.
+\end{itemize}
+Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred.
+
+There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{generateDensitySamples} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
+
+The inverse procedure for constructing a DF from a given \Nbody model is less well defined. In the case of a spherical isotropic system (Section~\ref{sec:DFspherical}), the one-dimensional function of phase volume $f(h)$ is estimated non-parametrically with the \hyperref[sec:SplineFitting]{penalized density fitting method} and represented as a spline in scaled coordinate (the routine \ttt{fitSphericalDF}). In principle this may be generalized for the case of a three-dimensional $f(\bJ)$, but this has not been implemented yet. The alternative is to fit a parametric DF to the array of actions, computed for the \Nbody particles in the given potential (of course, a suitable self-consistent \ttt{Multipole} or \ttt{CylSpline} potential itself may also be constructed from the same \Nbody model). This approach is demonstrated by one of the example programs (Section~\ref{sec:ExamplesTests}).
+
+%%%%%%%%%%%%%%
+\subsubsection{Iterative self-consistent modelling}  \label{sec:SCM}
+
+As explained above, the same DF gives rise to a different density profile in each potential. A natural question is whether there always exists a unique potential-density pair $\rho,\Phi$ such that $\rho(\bx)=\int d^3v\,f\big(\bJ(\bx,\bv\;|\Phi)\big)$ corresponds to $\Phi(\bx)$ via the Poisson equation, with the mapping $\{\bx,\bv\}\implies \bJ$ constructed for the same potential.
+While we are not aware of a strict mathematical proof, in most practical cases the answer is positive, and such potential may be constructed by the iterative self-consistent modelling approach \cite{Binney2014,Piffl2015}. 
+In a more general formulation, one may have several DF components $f_c(\bJ), c=1..N_\mathrm{comp}$ and optionally several additional (external) density or potential components. The procedure consists of several steps, which use various pieces of machinery described previously:
+\begin{enumerate}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item Create a plausible initial guess for the total potential $\Phi(\bx)$.
+\item Construct the action finder for this potential (Section~\ref{sec:ActionAngle}).
+\item Compute the density profiles $\rho_c(\bx)$ of all components with DFs (Section~\ref{sec:Moments}).
+\item Calculate the updated potential by solving the Poisson equation $\nabla^2\Phi = 4\pi\sum_c\rho_c$ for the combined density of all components (plus any external density or potential components, which are called static since they are not updated throughout the iterative procedure), using one or both general-purpose potential expansions (Sections~\ref{sec:PotentialMultipole},~\ref{sec:PotentialCylSpline}).
+\item If desired, add new components or replace a static component with a DF-based one.
+\item Repeat from step 2, until the potential changes negligibly between iterations. This typically requires $\mathcal{O}(10)$ steps.
+\end{enumerate}
+
+The only non-trivial aspect of this procedure is to choose whether the density of a given component is better described as spheroidal (not strongly flattened, possibly with a central cusp or an extended envelope) or disky (possibly strongly flattened, but with a finite-density core and a finite extent, or at least sharply declining at large radii). In the first case it will contribute to the potential represented by the \ttt{Multipole} expansion, and in the second -- by the \ttt{CylSpline} expansion. This applies to both DF-based and static density components; in addition there may be static components with already known potentials, which will be added directly to the total potential. Importantly, all disky components will be represented by a single \ttt{CylSpline} object, and similarly all spheroidal components by a single \ttt{Multipole} object.
+The density of each DF-based component is first computed on a suitable grid of $\mathcal{O}(10^2-10^3)$ points, and a corresponding density interpolator (\ttt{DensitySphericalHarmonic} -- Section~\ref{sec:PotentialMultipoleDetails}, or \ttt{DensityAzimuthalHarmonic} -- Section~\ref{sec:PotentialCylSplineDetails}) is created that will be used in solving the Poisson equation. 
+Presently this method is restricted to axisymmetric models, due to the lack of more general action finders.
+
+This approach is implemented with the help of several classes derived from \ttt{BaseComponent}, the \ttt{SelfConsistentModel} structure which binds together the array of components, the potential, the action finder, and the parameters of potential expansions, and finally the routine \ttt{doIteration}, all defined in \ttt{galaxymodel_selfconsistent.h}. All these concepts are also available in the \Python wrapper (Section~\ref{sec:Python}), and a complete annotated example illustrating the entire workflow is presented both in the \Cpp and \Python variants.
+
+%%%%%%%%%%%
+\subsection{Data handling}
+\subsubsection{Selection functions}
+
+%%%%%%%%
+\section{Interfaces with other languages and frameworks}  \label{sec:Interfaces}
+
+%%%%%%%%%%%
+\subsection{\Python interface}  \label{sec:Python}
+
+The \Python interface provides a large subset of \Agama functionality expressed as Python classes and routines. Presently, this includes:
+\begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item A few mathematical tasks such as multidimensional integration and sampling, and penalized spline fitting.
+\item Unit handling.
+\item Potential and density classes.
+\item Orbit integration.
+\item Action finders (both classes and standalone routines).
+\item Distribution functions.
+\item Galaxy modelling framework: computation of DF moments, drawing samples from density profiles and DFs, iterative self-consistent modelling.
+\end{itemize}
+
+The shared library \texttt{agama.so} can be used directly as a \Python extension module, by writing \texttt{import agama} in the \texttt{.py} file. The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (as usual, writing \texttt{help(agama.Whatever)} brings a complete description of the class or routine and its arguments). Additionally, density and DF object may also be represented by an arbitrary user-defined Python function -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation. There are several example programs demonstrating the usage of various aspects of the library (some of them have exact \Cpp equivalents).
+
+%%%%%%%%%%%
+\subsection{\Fortran interface}  \label{sec:Fortran}
+
+The \Fortran interface is much more limited compared to the \Python interface, and provides access to the potential solvers only. 
+
+One may create a potential in several ways:
+\begin{enumerate}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item Load the parameters from an INI file (one or several potential components).
+\item Pass the parameters for one component directly as a single string argument.
+\item Provide a \Fortran routine that returns a density at a given point, and use it to create a potential approximation with the parameters provided in a text string.
+\item Provide a \Fortran routine that returns potential and force at a given point, and create a potential approximation for it in the same way as above (this is useful if the original routine is expensive).
+\end{enumerate}
+Once the potential is constructed, the routines that compute the potential, force and its derivatives (including density) at any point can be called from the \Fortran code. No unit conversion is performed (i.e., $G=1$ is implied).
+There is an example program showing all these modes of operation.
+
+%%%%%%%%%%%
+\subsection{\Amuse plugin}  \label{sec:Amuse}
+
+\Amuse \cite{PortegiesZwart2013} is a heterogeneous framework for performing and analyzing \Nbody simulations using a uniform approach to a variety of third-party codes. The core of the framework and the user scripts are written in \Python, while the community modules are written in various programming languages and interact with each other using a standartized interface.
+
+\Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. The plugin interface allows to construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin.
+An example script is provided in the \Amuse plugin folder.
+
+%%%%%%%%%%%
+\subsection{\Galpy plugin}  \label{sec:Galpy}
+
+\Galpy \cite{Bovy2015} is a \Python-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action finders, distribution functions and more. 
+The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a thin compatibility layer on top of the standard \Agama \Python interface. This layer introduces a \Galpy-compatible potential object that can be constructed in the same way as the \ttt{agama.Potential} class in \Python, but provides the methods suitable for use in \Galpy. Orbit integration and action finders can only be used with \Agama potentials, but they produce results in the form compatible with \Galpy. 
+
+An example, comparing the native \Galpy action finder with that from \Agama, is provided in the file \texttt{pytests/test_actions_galpy.py}. Overall, the potential approximations and action finders in \Agama are more versatile, accurate and computationally efficient, while \Galpy provides a convenient plotting interface.
+
+%%%%%%%%%%%
+\subsection{\Nemo plugin}  \label{sec:Nemo}
+
+\Nemo \cite{Teuben1995} is a collection of programs for performing and analyzing \Nbody simulations, which use common data exchange format and UNIX-style pipeline approach to chain together several processing steps. The centerpiece of this framework is the \Nbody simulation code \textsc{gyrfalcON} \cite{Dehnen2000}. It computes the gravitational force between particles using the fast multipole method, and can optionally include an external potential.
+
+The \Nemo plugin allows to use any \Agama potential as an external potential in \textsc{gyrfalcON} and other \Nemo programs (in a similar context as the \Amuse plugin). The potential may be specified either as a file with coefficients (for potential expansions), or more generally, as an INI file with parameters of possibly several components defined in groups \ppp{[Potential1]}, \ppp{[Potential whatever]}, \dots
+
+To build the plugin, one needs to have \Nemo installed (obviously) and the environment variable \$NEMO defined; then \texttt{make nemo} will compile the plugin and place it in \texttt{\$NEMO/obj/acc} folder, where it can be found by \Nemo programs. For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\\
+\texttt{\$ gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\
+where the last optional argument specifies the pattern speed $\Omega$ (frequency of rotation of the potential figure about $z$ axis). All units in the INI or coefs file here should follow the convention $G=1$.
+
+%%%%%%%%
+\section{Tests and example programs}  \label{sec:ExamplesTests}
+
+The \Agama library itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Some of them are described below \textcolor{red}{[not everything is ready yet]}.
+
+\paragraph{example_actions_nbody} shows how to determine the actions for particles from an \Nbody snapshot taken from a simulation of a disk+halo system. It first reads the snapshot and constructs two potential approximations -- \ttt{Multipole} for the halo component and \ttt{CylSpline} for the disk component -- from the particles themselves. Then it computes the actions for each particle and writes them to another file. This program exists both in \Cpp and \Python variants that perform the same task.
+
+\paragraph{example_df_fit} shows how to find the parameters of a DF belonging to a particular family from a collection of points drawn from this DF in a known potential. It first computes the actions for these points, and then uses the multidimensional minimization routine \ttt{findMinNdim} to locate the parameters which maximize the likelihood of the DF given the data.
+The \Python equivalent of this program additionally determines the confidence intervals on these parameters by running a MCMC algorithm starting around the best-fit parameters.
+
+A more elaborate example in \Python determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
+This example is inspired by one of the Gaia Challenge assignments [ref].
+
+\paragraph{example_self_consistent_model} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with a static density profile of the disk and a DF-based halo component, and performs a few iterations to find the potential generated by the halo. It then replaces the disk component with a DF-based one (the expressions for $f(\bJ)$ use epicyclic frequencies computed in the approximate potential delivered by the first stage), and performs a few more iterations, updating the density of both disk and halo components. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
+
+\paragraph{example_galpy} is a \Python program showing the use of \Agama plugin for \Galpy to construct a potential, integrate orbits, and compare the accuracy of action finders between the two libraries. 
+
+\paragraph{example_fortran} demonstrates how to create and use \Agama potentials in \Fortran, both for built-in density or potential models, or for user-defined \Fortran functions that provide the density or potential.
+
+\newpage
+%%%%%%%%%
+\appendix
+
+%%%%%%%%
+\section{Technical details}
+
+%%%%%%%%%%%
+\subsection{Developer's guide}  \label{sec:DeveloperGuide}
+
+Any large piece of software needs to follow a number of generic programming rules, which are well-known standards in commercial software development, but unfortunately are insufficiently widespread in the scientific community. Here we outline the most important guidelines adopted in the development of \Agama. Some of them are \Cpp-specific \cite{Meyers,SutterAlexandrescu}, others are more general \cite{Martin,McConnell}.
+As a practical matter, we do not use any of \CppII features, except \hyperref[sec:SmartPointers]{smart pointers}, to keep compatibility with older compilers.
+
+\paragraph{Code readability} is extremely important in long-term projects developed and used by several persons. All public classes, types and routines in \Agama are documented in-code, using the \textsc{Doxygen} syntax for comments that can be parsed and used to automatically generate a collection of HTML pages. These comments mostly describe the intent of each class and function and the meaning of each argument or variable, at least in their public interface -- in other words, a programmer's reference to the library. Sometimes a more technical description is also provided in these comments, but generally it is more likely to be presented in this document rather than in the code (with the inevitable risk of de-synchronizing as the code development progresses...)
+
+\paragraph{Modularity} is an essential approach for keeping the overall complexity at a reasonable level. What this means in practice is that each unit of the code (a class or a function) should be responsible for a single well-defined task and provide a minimal and clean interface to it, isolating all internal details. The calling code should make no assumptions about the implementation of the task that this unit of code is promised to deliver. On many occasions, there are several interchangeable back-ends for the same interface -- this naturally applies to all class hierarchies descending from a base abstract class such as \ttt{BasePotential}, but also to the choice of back-end third-party libraries dictated by compilation options, with a single wrapper interface to all alternatives implementations.
+
+Another facet of modularity is loose coupling, that is, instead of a single large objects that manages many aspects of its internal state, it is better to create a number of smaller objects with minimal necessary interaction. For instance, composition (when one class has another class as a member variable) is preferred over inheritance (when the class has full access to the parent class's private members), as it reduces the strength of coupling.
+
+\paragraph{Programming paradigm} throughout the library is a mixture of object-oriented and procedural, gently spiced with template metaprogramming.\\
+Generally, when there is a need to provide a common interface to a variety of implementations, the choice between compile-time (templates) and run-time (virtual functions) polymorphism is dictated by the following considerations.\\
+Templates are more efficient because the actual code path is hardwired at the compilation time, which allows for more optimizations and diagnoses more possible errors already at this stage. On the other hand, it is applicable when the actual workflow is syntactically the same, or the number of possible variants is known in advance -- for instance, conversion between all built-in coordinate systems (Section~\ref{sec:Coords}) is hard-coded in the library. Each function that uses a templated argument produces a separate compiled fragment; therefore it is impossible for the user to extend built-in library functions with a new variety of template parameter.\\
+Abstract classes (or, rather, ``interfaces'') providing virtual functions that are fleshed out in descendant classes offer more flexibility, at the expense of a small overhead (negligible in all but the tighest loops) and impossibility to securely prevent some errors. This is the only way to provide a fully extensible mechanism for supplying a user-defined object (e.g., a mathematical function implementing a \ttt{IFunction} interface) into a pre-compiled library function such as \ttt{findRoot}.
+
+The boundary between object-oriented and procedural paradigms is less well-defined. There are several possible ways of coupling the code and the data:
+\begin{enumerate} \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item data fields are encapsulated as private members of a class, and all operations are provided through public methods of that class;
+\item a collection of assorted variables is kept in a structure or array, and there is a standalone function performing some operation on this data;
+\item a standalone function takes an instance of a class and performs some operation using public member functions of this class;
+\item a class contains a pointer, reference or a copy of another class or structure, and its member functions follow either of the two previous patterns.
+\end{enumerate}
+
+The first approach is used for most classes that provide nontrivial functionality and can be treated as \hyperref[sec:Const]{immutable objects}, or at least objects with full control on their internal state. If the data needs to be modified, it is usually kept in a structure with public member fields and no methods, so that it may be accessed by non-member functions (which need to check the correctness of data on each call). The third approach is used mostly for classes that are derived from an abstract base class that declares only virtual methods; since any non-trivial operation on this class only uses this public interface, it does not need to be a part of the class itself, thus loosening the coupling strength. That's why we have many non-member functions operating on \ttt{BasePotential} descendants. Finally, the fourth scenario is the preferred way of creating layered and weakly coupled design.
+
+\paragraph{Naming conventions}  are quite straightforward: class names start with a capital letter and variable names or function arguments -- with a lowercase, constants are in all capital with underscores, and other names are in CamelCase without underscores. Longer and more descriptive names are preferred -- as a matter of fact, we read the code much more than write, so it's better to aid reading than to spare a few keystrokes in writing.
+
+We use several namespaces, roughly corresponding to the overall structure of the library as described in Section~\ref{sec:Structure}: this improves readability of the code and helps to avoid naming collisions, e.g., there could be two different \ttt{Isochrone} classes -- as a potential and as a concept in stellar evolution, living in separate namespaces. A feature of \Cpp called ``argument-dependent lookup'' allows to omit the namespace prefix if it can be deduced from the function arguments: for instance, if \texttt{pot} is an instance of class derived from \ttt{potential::BasePotential}, we may call \texttt{\sout{potential::}writePotential(fileName, pot)} without the prefix. This doesn't apply to name resolution of classes and templates, and to functions which operate on builtin types (e.g., in the \ttt{math::} namespace). We also do not use the \texttt{auto} keyword which is only available in \CppII.
+
+When several different quantities need to be grouped together, we use \texttt{struct} with all public members and no methods (except possibly a constructor and a couple of trivial convenience functions). If something has an internal state that needs to be maintained consistently, and provides a nontrivial behaviour, this should be a \texttt{class} with private member variables. We prefer to have named fields in structures rather than arrays, e.g., a position in any coordinate system is specified by three numbers, but they are not just a \texttt{double pos[3]} -- rather, each case has its own dedicated type such as \texttt{struct PosCyl \{ double R,z,phi; \};} (Section~\ref{sec:Coords}). This eliminates ambiguity in ordering the fields (e.g., what is the 3rd coordinate in a cylindrical system -- $z$ or $\phi$? different codes may use different conventions, but naming is unique) and makes impossible to accidentally mis-use a variable of an incorrect type which has the same length.
+
+\paragraph{Immutability} \label{sec:Const}  of objects is a very powerful paradigm that leads to simpler design and greater robustness of programs. We allow only ``primitive'' variables -- builtin types, \texttt{struct}s with all public member fields, or arrays (including vectors and matrices) -- to change their content. Almost all instances of non-trivial classes are read-only: once created, they may not be changed anymore; if any modification is needed, a new object should be constructed. All nontrivial work in setting up the internal state is done in the constructor, and all member functions are marked as \texttt{const}. This convention is a strong constraint that allows to pass around complex objects between different parts of the code and be sure that they always do the same thing, and that there are no side effects from calling a method of a class. This also simplifies the design of parallel programs: if an object needs a temporary workspace for some function to operate, it should not be allocated as a private variable in the class, but rather as a temporary variable on the stack in each function; thus concurrent calls to the same routine from different threads do not interfere, because each one has its own temporary variable, and only share constant member variables of the class instance.
+There are, of course, some exceptions, for instance, in classes that manage the input/output, or string collections (\ttt{utils::KeyValueMap}).
+
+Another aspect of the same rule is \texttt{const} correctness of the entire code. Instances of read-only classes may safely be declared as \texttt{const} variables, and all input arguments for functions are also marked as \texttt{const} (see \hyperref[sec:CallingConventions]{below}).
+These rules improve readability and allow many safety checks to be performed at compile time -- an incorrect usage scenario will not even compile, rather than produce an unexpected error at runtime.
+
+\paragraph{Memory management}  is a non-trivial issue in \texttt{C} and a source of innumerable bugs in poorly written software. Fortunately, \Cpp has very powerful features that almost eliminate these problems, if followed consistently. The key element is the automatic management of object lifetimes for all classes or structures. Namely, if a variable of some class is created in a block of code, the destructor of this class is guaranteed to be called when the variable goes out of scope -- whether it occurs in a normal code path or after an exception has occurred (see \hyperref[sec:Exceptions]{below}). Thus if some memory allocation for a member variable was done in the constructor, it should be freed in the destructor and not in any other place. And of course the rule applies recursively, i.e., if a member variable of a class is a complex structure itself, its destructor is called automatically from the destructor of this class, and then the destructor of the parent class (if it exists) is invoked. In practice, it is almost never necessary to deal with these issues explicitly -- by using standard containers such as \texttt{string}s and \texttt{vector}s instead of \texttt{char*} or \texttt{double*} arrays, one transfers the hassle of dynamic memory management entirely to the standard library classes.
+
+\phantomsection\label{sec:SmartPointers}
+The picture gets more complicated if we have objects that represent a hierarchy of descendants of an abstract base class, and need to create and pass around instances of the derived types without knowing their actual type. In this case the object must be created dynamically, and a correct destructor will be automatically called when an object is deleted -- but the problem is that a raw pointer to a dynamically-allocated object is not an object and must be manually deallocated before it goes out of scope, which is precisely what we want to avoid. The solution is simple -- instead of raw pointers, use ``smart pointers'', which are proxy objects that manage the resource themselves. There are several kinds of smart pointers, but we generally use only one -- \texttt{shared_ptr}. Its main feature is automatic reference counting: if we dynamically create an object derived from \ttt{BasePotential} and wrap the pointer into \ttt{PtrPotential} (which is defined as \texttt{shared_ptr<const BasePotential>}), we may keep multiple copies of this shared pointer in different routines and objects, and the underlying potential object will stay alive as long as it is used in at least one place, and will be automatically deallocated once all shared pointers go out of scope and are destroyed. If a new value is assigned to the same shared pointer, the reference counter for the old object is also decreased, and it is deallocated if necessary. Thus we never need to care about the lifetime of our dynamically created objects; this semantics is similar to \Python.
+Of course, if we know the actual type of potential that we only need locally, we may create it on the stack without dynamical allocation; most routines only need a (\texttt{const}) reference to a potential object -- does not matter whether it is an automatic local variable or a dereferenced pointer.
+
+Finally, it's better to avoid dynamical memory allocation (including creation of \texttt{std::vector}s) in routines that are expected to be called frequently (such as \ttt{BasePotential::eval()}). All temporary variables should be created on the stack; if the size of an array is not known at compile time (e.g., it depends on the parameters of potential), we either reserve an array of maximum permitted size, or use \texttt{alloca()} routine which creates a variable-length array on the stack.
+
+\paragraph{Calling conventions} \label{sec:CallingConventions}  refer to the way of passing and returning data between various parts of the code. Arguments of a function can be input, output, or both. All input arguments are either passed by value (for simple built-in types) or as a \texttt{const} reference (for more complex structures or classes); if an argument may be empty, then it is passed as a const pointer which may take the \texttt{NULL} value. Output and input/output arguments are passes as non-\texttt{const} references to existing objects. Thus the function signature unambiguously defines what is input and what is not, but does not indicate whether a mixed-intent argument must have any meaningful value on input -- this should be explained in the \textsc{Doxygen} comment accompanying the definition. Unfortunately there is no indication of the direction of arguments at the point where the function is called.
+
+Usually the input arguments come first, followed by output arguments, except the cases of input arguments with default values, which must remain at the end of the list. (Unfortunately, \Cpp does not have named arguments, which would be more descriptive, but we encourage their use in the \Python interface).
+When the function outputs a single entity (even if it is a complex object), it is usually a return type, not an output argument; in most contexts, there is no extra cost because temporary objects are not created (copy elision and return-value optimization rules). However, extra output information may be stored in output arguments (sometimes optional, i.e., they may be \texttt{NULL}, indicating that this extra information is not required by the caller). When the return value is not a copyable type (e.g., if a function creates a new instance of a class derived from an abstract base class), then it is returned as a smart pointer.
+
+These conventions apply to ordinary non-member functions and class methods; for constructors they are somewhat different. If we create an object A which has a link to another object B, it usually should not be just a reference or a raw pointer -- because the lifetime of B may be shorter than the newly created A. In these cases, B is either copied by value (like a \texttt{std::vector}), or else it should be provided as a shared pointer to the actual object, and a copy of this pointer is stored in A, increasing its reference counter. This ensures that the actual instance of B continues to exist as long as it is used anywhere, and is automatically destroyed when it is no longer needed.
+Thus, if a class constructor takes a shared pointer as an argument, this indicates that a copy of this pointer will be kept in the class instance during its lifetime; if it takes a reference, then it is only used within the constructor but not any longer.
+This rule also has exceptions -- several wrapper classes used as proxy object for type conversion. For instance, when a certain routine (e.g., \ttt{math::integrate}) expects an argument of \ttt{const math::IFunction\&} type to perform some calculations on it without storing the object anywhere else, this argument could be a temporary instance of a wrapper class (e.g., \ttt{potential::DensityWrapper}) taking a reference to a \ttt{const potential::BaseDensity\&} object in the constructor. In other words, instances of these wrapper classes should only be created as unnamed temporary objects passed as an argument to another function, but not as stack- or heap-allocated variables -- even local ones.
+
+\paragraph{Numerical issues} -- efficiency and accuracy -- are taken very seriously throughout the code. Floating-point operations often require great care in re-arranging expressions in a way that avoids catastrophic cancellation errors. A classic example is the formula for the roots of a quadratic equation: $x_{1,2} = (-b \pm\sqrt{b^2-4ac})/(2a)$. In the case of $ac\ll b^2$, one of the two roots is a difference between two very close numbers, thus it may suffer from the loss of precision. Another mathematically equivalent expression is $2c/(-b \mp\sqrt{b^2-4ac})$, and a numerically robust approach is to use both expressions -- each one for the root that has two numbers of the same sign \textit{added}, not subtracted. Going one step further, if the coefficients $a,b,c$ are themselves obtained from other expressions, it may be necessary to reformulate them in such a way as to avoid subtraction under the radical, etc. These details are necessary to ensure robust behaviour in all special and limiting cases; a good example are coordinate conversion routines.
+
+Efficiency is also a prime goal: this includes a careful consideration of algorithmic complexity and minimization of computational effort. Some mathematically equivalent functions have rather different computational cost: for instance, generating two Gaussian random numbers with the Box--Muller algorithm is a few times faster than using the inverse error function; finding a given quantile (e.g., median) of an array can be done in $\mathcal{O}(N)$ operations without sorting the entire array (which costs $\mathcal{O}(N\,\log N)$ operations); and computing potential and three components of force simultaneously is faster than doing it separately. For numerical integration, a suitable coordinate transformation may dramatically improve the accuracy -- or reduce the number of function calls in the adaptive integration routine; often a fixed-order Gauss--Legendre integration is enough in a particular case, with the degree of quadrature selected by extensive numerical experiments.
+
+A few words about \texttt{INFINITY} and \texttt{NAN} values. Infinities are valid floating-point numbers and are quite useful in some contexts where a really large number is required (for instance, as the endpoint of the root-finder interval); they propagate correctly through most expressions and some functions (e.g., \texttt{exp}, \texttt{log}, comparison operators). The infamous \texttt{NAN} is a different story: it usually%
+\footnote{In some functions, \texttt{NAN} it is used as a special, usually a default value of an input argument, indicating something like ``value is unknown''.}
+indicates an incorrect result of some operation, and is infectious -- it propagates through all floating-point operations, including comparison operators (that is, \texttt{a>b} and \texttt{a<b} are \textit{both} false if \texttt{b} is \texttt{NAN}; however, \texttt{!(a<b)} and \texttt{b!=b} are true in this case). This feature is useful to pass the indication of an error to the upper-level routines, but it does not allow to tag the origin of the offensive operation. This brings us to the next topic:
+
+\paragraph{Error handling} \label{sec:Exceptions}  is an indispensable part of any software. Whenever something goes wrong, this must be reported to the upper-level code -- unless there is a safe fallback value that may be returned without compromising the integrity of calculation. The standard approach in \Cpp is the mechanism of exceptions. They propagate through the entire call stack, until handled in a \texttt{catch} statement -- or terminate the program if no handler was found. They also carry upward any user-defined diagnostic information (e.g., a string with error description), and most importantly, they ensure a correct disposal of all temporary objects created in intermediate routines (of course, if these are real objects with destructors, not just raw pointers to dynamically-allocated memory -- which are bad anyway). 
+Thus a routine does not need to care about a possible exception occurring at a lower level, if it cannot handle it in a meaningful way -- it should simply let it propagate upwards. Exceptions should be used to check that the input parameters are correct and consistent with the internal state of an object, or perhaps to signal an un-implemented special case. Within a constructor of a class, they are the only available mechanism for error handling -- since a constructor cannot return a value, and storing an error code as a class member variable doesn't make sense, because the object is not usable anyway. Instead, if a constructor fails, the object is immediately and correctly destroyed.
+
+On the other hand, if a certain condition is never expected to occur, this may be expressed as an \texttt{assert} statement -- which terminates the program unconditionally if violated, and this clearly indicates some internal inconsistency in the code, e.g., a memory corruption. It also promotes a self-documenting code -- all assumptions on input parameters and (preferrably) results of calculation (pre- and post-conditions) are clearly visible. This mechanism should only be used within a single unit of code (e.g., a class), which has a full control on its internal state; if a function is part of public interface, it may not assume that the passed arguments are valid and should check them, but in the case of incorrect values should raise an exception rather than terminate the entire program.
+
+Finally, it should be noted that exceptions do incur some run-time penalty if triggered, so they should not be used just to inform about something that may routinely occur, e.g., in a function that searches for a substring and does not find it. Sometimes propagating a \texttt{NAN} is a cheaper alternative, used, for instance, in action finders if the energy is positive (does not correspond to bound motion).
+
+\paragraph{Diagnostic output}  is a separate issue from error handling, and is handled by a dedicated printout routine \ttt{utils::msg} that may be used with different levels of verbosity and write the messages to console or a log file. Its behaviour is controlled at runtime by the environment variables \texttt{LOGLEVEL} (ranging from 0 to 3; default 0 means print only necessary messages, 1 adds some non-critical warnings, 2 prints ordinary debugging information, 3 dumps even more debugging information) and \texttt{LOGFILE} (if set, redirects output to the given file, otherwise it is printed to \texttt{stderr}). The library's default handler may be reassigned to a user-provided function.
+
+\paragraph{Parallelization}  in \Agama is using the \texttt{OpenMP} model, which is nearly transparent for the developer and user. Only a few operations that are supposed to occur in a serial context have internal loops parallelized: this includes the construction of \ttt{Multipole} and \ttt{CylSpline} potentials from density profiles or from \ttt{ParticleArray}s, and \hyperref[sec:Sampling]{sampling} from a multidimensional probability density. The former situation occurs, for instance, in the context self-consistent modelling (Section~\ref{sec:SCM}), when the evaluation of density at each point is a costly operation involving multidimensional integration of distribution function over velocities and thousands of calls to an action finder, and the values of density at different points are collected in parallel.
+Other typical operations, such as computation of potential or action for many points simultaneously, should be paralellized in the caller code itself. Almost all classes and functions provided by the library can be used from multiple threads simultaneously, because they operate with read-only or thread-local data (exceptions from this rule are linear and quadratic optimization routines, which are not thread-safe, but hardly would need to be called in parallel); we do not have any mutex locks in the library routines.
+For instance, in the \Python interface, a single call to the potential or action finder may provide an array of points to work with, and the loop is internally parallelized in the \Cpp extension module. 
+
+An important thing to keep in mind is that an exception that may occur in a parallel section should be handled in the same section, otherwise the program immediately aborts. Thus in such loops it is customary to provide a general handler that stores the error text, and then re-throws an exception when the loop is finished.
+Also, the \Python interface provides a way to supply a user-defined \Python callback function to some of the routines implemented in \Cpp, but the standard \Python interpreter has a global locking mechanism preventing its simultaneous usage from multiple threads. Therefore, when such callback functions are used with \Cpp routines, this temporarily disables \texttt{OpenMP} parallelization. (An alternative that is not yet implemented is to allow this callback function to handle a vectorized input instead of one point at a time).
+
+%%%%%%%%%%%
+\subsection{Mathematical methods}
+
+%%%%%%%%%%%%%%
+\subsubsection{Penalized spline regression}  \label{sec:MathSplineApproxDetails}
+
+Suppose we have $N_\mathrm{data}$ points $\{x_i, y_i\}$, and we need to find a smooth function $y=f(x)$ that approximates the data in the least-square sense, but does not fluctuate too much -- in other words, minimize the functional
+\begin{align}  \label{eq:ObjectiveSplineFit}
+\mathcal{Q} &\equiv \sum_{i=1}^{N_\mathrm{data}} \left[y_i - f(x_i)\right]^2 + \lambda \int \left[f''(x)\right]^2 \,dx .
+\end{align}
+Here $\lambda\ge 0$ is the smoothing parameter that controls the tradeoff between approximation error and wiggliness of the function \cite{GreenSilverman}; its choice is discussed below.
+
+We represent $f(x)$ as a sum of basis functions $B_k(x)$ with adjustable amplitudes $A_k$:
+\begin{align}  \label{eq:FncSplineFit}
+f(x) &\equiv \sum_{k=1}^{N_\mathrm{basis}} A_k\,B_k(x) .
+\end{align}
+
+These basis functions are taken to be B-splines of degree $N$, defined by an array of grid nodes $\{X_j\}$, $j=1..N_\mathrm{grid}$. They are computed recursively using the de Boor's formula:
+\begin{align}  \label{eq:Bspline}
+B_{j;0} \equiv \left\{ \begin{array}{ll}1 &\mbox{if }X_j\le x\le X_{j+1} \\ 0 &\mbox{otherwise} \end{array} \right. ,\quad
+B_{j;N} \equiv B_{j;N-1} \frac{x-X_j}{X_{j+N}-X_j} + B_{j+1;N-1} \frac{X_{j+N+1}-x}{X_{j+N+1}-X_{j+1}} \;.
+\end{align}
+
+The number of basis functions is $N_\mathrm{basis} \equiv N_\mathrm{grid}+N-1$. Each function is nonzero (positive) on at most $N+1$ consecutive intervals between grid nodes, and has piecewise-continuous $N$-th derivative. At each $x$ there are at most $N+1$ nonzero functions, with their sum always being unity (Figure~\ref{fig:Bsplines}). These properties make B-splines an attractive choice for approximating an arbitrary one-dimensional function, even though the basis set is not orthogonal. 
+
+Let the matrix $\mathsf{B}$ with $N_\mathrm{data}$ rows and $N_\mathrm{basis}$ columns contain the values of basis functions at data points: $B_{ik} = B_k(x_i)$. Due to the locality of B-splines, this matrix is sparse -- each row contains at most $N+1$ nonzero elements. The grid in $x$ does not need to encompass all data points -- the function $f(x)$ is linearly extrapolated outside the grid boundaries.
+Define the ``roughness matrix'' $\mathsf{R}$ containing the integrals of products of second derivatives of basis functions: $R_{kl} \equiv \int B_k''(x) \, B_l''(x)\, dx$. This matrix is also sparse (band-diagonal) and symmetric.
+The minimum of $\mathcal{Q}\equiv (\by - \mathsf{B} \bA)^{T} (\by - \mathsf{B} \bA) + \lambda 
+\bA^T\mathsf{R} \bA$ (\ref{eq:ObjectiveSplineFit}) is then obtained by solving for $\d\mathcal{Q}/\d\bA=0$:
+\begin{align}  \label{eq:SplineFitSol}
+\left(\mathsf{B}^T\mathsf{B} + \lambda \mathsf{R} \right) \bA &= \mathsf{B}^T\by .
+\end{align}
+Note that the size of this linear system is only $N_\mathrm{basis}\times N_\mathrm{basis}$, possibly much smaller than the number of data points $N_\mathrm{data}$. If one needs to solve the system for several values of $\lambda$ and/or different vectors $\by$, there is an efficient algorithm for this \cite{RuppertWandCarroll}:
+\begin{enumerate}
+\item Compute the Cholesky decomposition of the matrix $\mathsf{B}^T\mathsf{B}$, representing it as $\mathsf{L}\mathsf{L}^T$, where $\mathsf{L}$ is a lower triangular matrix with size $N_\mathrm{basis}$. To avoid problems when $\mathsf{B}^T\mathsf{B}$ is singular (which occurs when some grid segments contain no points), we add a small multiple of $\mathsf{R}$ before computing the decomposition.\\
+Then compute the singular-value decomposition of the matrix symmetric positive definite matrix $\mathsf{L}^{-1} \mathsf{R} \mathsf{L}^{-T}$, representing it as $\mathsf{U}\, \mathrm{diag}(\boldsymbol{S})\, \mathsf{U}^T$, where $\mathsf{U}$ is a square orthogonal matrix (i.e., $\mathsf{U}\mathsf{U}^T=\mathsf{I}$) with size $N_\mathrm{basis}$, and $\boldsymbol{S}$ is the vector of singular values.\\
+Now the matrix in the l.h.s.\ of (\ref{eq:SplineFitSol}) can be written as\\
+$\mathsf{B}^T\mathsf{B}+\lambda \mathsf{R} = \mathsf{L} \mathsf{L}^T + \mathsf{L} \mathsf{L}^{-1} \mathsf{R} \mathsf{L}^{-T} \mathsf{L}^T = \mathsf{L} \mathsf{U} \mathsf{U}^T \mathsf{L}^T + \mathsf{L} \mathsf{U}\, \mathrm{diag}(\boldsymbol{S})\, \mathsf{U}^T \mathsf{L}^T$.\\
+Finally, compute a matrix $\mathsf{M}\equiv \mathsf{L}^{-T}\mathsf{U}$.
+\item For any vector of $\by$ values, pre-compute $\boldsymbol{p}\equiv \mathsf{B}^T\by$ and $\boldsymbol{q}\equiv \mathsf{M}^T\boldsymbol{p}$ (vectors of length $N_\mathrm{basis}$).
+\item Now for any choice of $\lambda$, the solution is given by
+\begin{align}
+\bA = \mathsf{M}\, [\mathsf{I}+\lambda\,\mathrm{diag}(\boldsymbol{S})]^{-1}\,\boldsymbol{q},
+\end{align}
+i.e., involves only a multiplication of a vector by inverse elements of a diagonal matrix and a single general matrix-vector multiplication.
+\end{enumerate}
+
+The residual sum of squares -- first term in (\ref{eq:ObjectiveSplineFit}) -- is given by
+\begin{align}
+\mathrm{RSS} \equiv |\by - \mathsf{B}\bA|^2 = |\by|^2 - 2\bA^T\boldsymbol{p} + |\mathsf{L}^T\bA|^2.
+\end{align}
+
+In case of non-zero smoothing, the effective number of free parameters is lower than the number of basis functions, and is given by the number of equivalent degrees of freedom:
+\begin{align}
+\mathrm{EDF} \equiv \mathrm{tr}[\mathsf{I} + \lambda\,\mathrm{diag}(\boldsymbol{S})]^{-1} =
+\sum_{k=1}^{N_\mathrm{basis}} \frac{1}{1+\lambda S_k} \;,
+\end{align}
+and it varies from $N_\mathsf{basis}$ for $\lambda=0$ to 2 for $\lambda\to\infty$ (which corresponds to a two-parameter linear least-square fit). The amount of smoothing thus may be specified by EDF, which has a more direct interpretation than $\lambda$. The optimal choice of smoothing parameter is given by minimization of Akaike information criterion:
+\begin{align}
+\mathrm{AIC} \equiv \ln(\mathrm{RSS}) + \frac{2\,\mathrm{EDF}}{N_\mathrm{data}-\mathrm{EDF}-1}.
+\end{align}
+
+Often one may wish to apply a somewhat stronger smoothing than the one given by minimizing AIC, for instance, by allowing it to be larger than the minimum value by a specified amount $\Delta\mathrm{AIC}\sim \mathcal{O}(1)$. In both cases, the corresponding value of $\lambda$ is  obtained by standard one-dimensional minimization or root-finding routines.
+
+%%%%%%%%%%%%%%
+\subsubsection{Penalized spline density estimate}  \label{sec:MathSplineDensityDetails}
+
+Let $P(x)>0$ be a density function defined on the entire real axis, a semi-infinite interval $[x_\mathrm{min},+\infty)$ or $(-\infty,x_\mathrm{max}]$, or a finite interval $[x_\mathrm{min},x_\mathrm{max}]$.
+Let $\{x_i, w_i\}$ be an array of $N_\mathrm{data}$ samples drawn from this distribution, where $x_i$ are their coordinates, and $w_i\ge 0$ are weights. We follow the convention that $\int P(x)\,dx$ over its domain is equal to $M\equiv \sum_i w_i$ (not necessarily unity).
+
+We estimate $P(x)$ using a B-spline approximation to $\ln P$ constructed for a grid of $N_\mathrm{grid}$ nodes $\{X_j\}$, that is,
+\begin{align}
+\ln P(x;\,\bA) = \sum_k  A_k\, B_k(x) - \ln G_0 + \ln M \equiv Q(x; \bA) - \ln G_0(\bA) + \ln M ,
+\end{align}
+where $A_k$ are the amplitudes -- free parameters that are adjusted during the fit,\\
+$B_k(x)$  are  basis functions (B-splines of degree $N$ defined by grid nodes, $N_\mathrm{basis} = N_\mathrm{grid}+N-1$),\\
+$Q(x; \bA) \equiv \sum_k  A_k\, B_k(x)$  is the weighted sum of basis function, \\
+and $G_0(\bA) \equiv \int \exp[Q(x; \bA)]\, dx$  is the normalization constant determined from the condition that $\int P(x)\,dx = M$.
+There is a gauge freedom in the choice of amplitudes $A_k$: if we add a constant to $Q(x; \bA)$, it would not have any effect on $\ln\mathcal{L}$ because this shift will be counterbalanced by $G_0$. We eliminate this freedom by fixing the amplitude of the last basis function to zero ($A_{N_\mathrm{basis}}=0$), thus retaining $N_\mathrm{ampl}\equiv N_\mathrm{basis}-1$ free parameters.
+
+As in the case of penalized spline regression, we first compute the matrix $\mathsf{B}$ of weighted basis-function values at each input point: $B_{ik} \equiv w_i\,B_k(x_i)$. This matrix is large ($N_\mathrm{data}$ rows, $N_\mathrm{ampl}$ columns) but sparse, and is further transformed into two vectors of length $N_\mathrm{ampl}$ and a square matrix of the same size:
+$\boldsymbol{V} \equiv \mathsf{B}^T\boldsymbol{1}_{N_\mathrm{data}}$ (i.e., $V_k = \sum_i w_i\,B_k(x_i)$), $\boldsymbol{W} \equiv \mathsf{B}^T\boldsymbol{w}$, $\mathsf{U} \equiv \mathsf{B}^T\,\mathsf{B}$. In the remaining steps of the procedure, only vectors and matrices of size $N_\mathrm{ampl}$ rather than $N_\mathrm{data}$ are involved, which allows to deal efficiently even with very large arrays of samples described by a moderate number of parameters (such as fitting the density profile of an \Nbody model with $\mathcal{O}(10)$ grid points).
+
+The total penalized likelihood of the model given the vector of amplitudes $\bA$ is
+\begin{align}
+\ln\mathcal{L}\; &\equiv\; \ln\mathcal{L}_\mathrm{data} - \lambda \mathcal{R}(\bA) \;\equiv\;
+\sum_{i=1}^{N_\mathrm{data}}  w_i  \ln P(x_i;\,\bA) - \lambda \int \left[\ln P''(x_i)\right]^2 \,dx \nonumber \\
+&= \sum_{i=1}^{N_\mathrm{data}} w_i \left(\sum_{k=1}^{N_\mathrm{ampl}} A_k B_k(x_i) - \ln G_0(\bA) + \ln M \right) - \lambda \sum_{k=1}^{N_\mathrm{ampl}} \sum_{l=1}^{N_\mathrm{ampl}} A_k\,A_l\,R_{kl}  \nonumber\\
+&= \big[ \boldsymbol{V}^T\bA - M\, \ln G_0(\bA)  + M\, \ln M \big] - \lambda\,\bA^T\,\mathsf{R}\,\bA ,
+\label{eq:MaxLikelihoodDensity}
+\end{align}
+where $\lambda \mathcal{R}$ is the roughness penalty term, and the matrix $R_{kl}\equiv \int B_k''(x)\,B_l''(x)\,dx$ is also pre-computed at the beginning of the procedure%
+\footnote{It may be advantageous to use third derivatives here \cite{Silverman1982}, in which case the solution in the limit of infinite smoothing ($\mathcal{R}\to 0$) corresponds to a Gaussian density profile.}.
+The smoothing parameter $\lambda$ controls the tradeoff between the likelihood of the data and the wiggliness of the estimated density; its choice is discussed below.
+
+Unlike the penalized spline regression problem, in which the amplitudes are obtained from a linear equation, the problem of penalized spline density estimation is nonlinear because of the normalization factor $G_0(\bA)$. The amplitudes $\bA$ that minimize $-\!\ln\mathcal{L}$ (\ref{eq:MaxLikelihoodDensity}) are found by solving the system of equations $\d \ln\mathcal{L}/\d A_k=0$ iteratively, using a multidimensional Newton method with explicit expressions for the gradient and hessian:
+\begin{subequations}
+\begin{align}
+-\frac{\d \ln\mathcal{L}}{\d A_k} &= -V_k + M \frac{\d \ln G_0}{\d A_k} + 2\lambda \sum_l R_{kl}\,A_l \;, \label{eq:lnLgrad} \\
+-\frac{\d^2 \ln\mathcal{L}}{\d A_k\, \d A_l} &= M \frac{\d^2 \ln G_0}{\d A_k\, \d A_l} + 2\lambda R_{kl} \,\equiv H_{kl}\;, \\
+\mbox{where }G_0 &\equiv \int \exp[Q(x; \bA)]\,dx \;, \quad
+Q(x; \bA) \equiv \sum_k  A_k\, B_k(x) \;, \nonumber \\
+\frac{\d \ln G_0}{\d A_k} &= \frac{\int B_k(x)\,\exp[Q(x; \bA)]\,dx}{G_0} \;, \nonumber\\
+\frac{\d^2 \ln G_0}{\d A_k\, \d A_l} &= \frac{\int B_k(x)\,B_l(x)\,\exp[Q(x; \bA)]\,dx}{G_0} - \frac{\d \ln G_0}{\d A_k}\; \frac{\d \ln G_0}{\d A_l} \;. \nonumber
+\end{align}
+\end{subequations}
+
+The choice of smoothing parameter $\lambda$ may be done by cross-validation: for each sample $i$, we compute its likelihood using best-fit parameters $\bA^{(i)}$ calculated for all samples except this one, and then sum these values over all samples. 
+\begin{align}  \label{eq:CrossValidation}
+\ln\mathcal{L}_\mathrm{CV}(\lambda) &\equiv \sum_{i=1}^{N_\mathrm{data}} w_i \, \ln P(x_i;\, \bA^{(i)}) =
+\sum_{i=1}^{N_\mathrm{data}} w_i \left(\sum_{k=1}^{N_\mathrm{basis}} A_k^{(i)} B_k(x_i) - \ln G_0(\bA^{(i)}) \right) + M\ln M.
+\end{align}
+
+Of course, it would be prohibitively expensive to compute the best-fit amplitudes $\bA^{(i)}$ separately for each omitted point; instead, we express them as small perturbations of $\bA$, by demanding that the l.h.s. of (\ref{eq:lnLgrad}) is zero for each $i$ at the corresponding $\bA^{(i)}$:
+\begin{align*}
+0 &= -V_k + w_i\,B_k(x_i) + M \frac{\d \ln G_0}{\d A_k} + M \frac{\d^2 \ln G_0}{\d A_k\,\d A_l}(A_l^{(i)}-A_l) + 2\lambda \sum_l R_{kl}\,A_l^{(i)} \;, \\
+\delta A^{(i)}_l &\equiv A^{(i)}_l - A_l = - \left[ M \frac{\d^2 \ln G_0}{\d A_k\,\d A_l} + 2\lambda R_{kl} \right]^{-1} w_i\,B_k(x_i) \;,\mbox{ or }\;
+\delta \bA = -\mathsf{H}^{-1} \mathsf{B}^T .
+\end{align*}
+
+Here the gradient and hessian of $G_0$ are taken at the overall best-fit amplitudes $\bA$ for the entire sample, computed for the given value of $\lambda$. The matrix $\delta \bA$ with $N_\mathrm{ampl}$ rows and $N_\mathrm{data}$ columns needs not be computed explicitly each time. Finally, the cross-validation score (\ref{eq:CrossValidation}) is expressed as
+\begin{align}  \label{eq:CrossValidation2}
+\ln\mathcal{L}_\mathrm{CV}(\lambda) = \ln\mathcal{L}_\mathrm{data}
+- \mathrm{tr}(\mathsf{H}^{-1}\mathsf{U}) + \frac{\d\ln G_0(\bA)}{d\bA}\, \mathsf{H}^{-1}\, \boldsymbol{W} .
+\end{align}
+
+Here $\ln\mathcal{L}_\mathrm{data}$ is the expression in brackets in (\ref{eq:MaxLikelihoodDensity}). The optimal value of $\lambda>0$ that maximizes the cross-validation score is found by a simple one-dimensional search. We first assign a reasonable initial guess for amplitudes (approximating the density as a Gaussian with the mean and dispersion computed from input samples). At each step, the multidimensional nonlinear root-finder routine is invoked to find best-fit amplitudes $\bA$ for the given $\lambda$, starting from the current initial guess. If it was successful and $\ln\mathcal{L}_\mathrm{CV}(\lambda)$ is higher than the current best estimate, the initial guess is replaced with the best-fit amplitudes: this not only speeds up the root-finder, but also improves the convergence. The range of $\lambda$ is progressively narrowed until the maximum has been located with sufficient accuracy, at which point we return the last successful array of $\bA$. 
+
+Figure~\ref{fig:SplineLogDensity} illustrates the application of linear (non-smoothed) and cubic spline with optimal smoothing to a test problem. In this case the grid spacing was deliberately too dense for the given number of samples, so that some grid segments do not contain any samples, but nevertheless the penalized density estimate comes out rather close to the true one.
+This regime is not very stable, though, and for normal operation the grid should be assigned in such a way that each segment contains at least a few samples -- this ensures that even the un-smoothed estimate is mathematically well defined.
+
+Maximization of cross-validation score is considered to be ``optimal'' smoothing; however, in some cases the inferred $\ln P(x)$ may still be too wiggly. An alternative approach is to estimate the expected scatter in $\ln\mathcal{L}_\mathrm{data}$ for a sample of finite size $N_\mathrm{data}$. In the case of uniform-weight samples and zero smoothing, the mean and dispersion in $\ln\mathcal{L}$ are
+\begin{align}
+\big\langle\ln\mathcal{L}\big\rangle &=
+  \int P(x)\,\ln P(x)\, dx = M\,\left[\frac{G_1}{G_0} + \ln M - \ln G_0\right] ,\\
+\Big\langle\big(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle\big)^2\Big\rangle &=
+  N_\mathrm{data}^{-1} \left( M\!\int\! P(x)\,[\ln P(x)]^2\, dx - \big\langle\ln\mathcal{L}\big\rangle^2 \right) =
+  M^2 N_\mathrm{data}^{-1} \left[\frac{G_2}{G_0} - \left(\frac{G_1}{G_0}\right)^{\!2}\right]\! , \nonumber\\
+\mbox{where }\; G_n &\equiv \int \big[Q(x)\big]^n\, \exp\big[Q(x)\big]\,dx\;.  \nonumber
+\end{align}
+
+We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
+
+\begin{figure}
+\begin{center}
+\includegraphics[width=12cm]{SplineLogDensity.pdf}
+\end{center}
+\caption{Penalized spline estimate of density from sample points. Here $N_\mathrm{data}=1000$ were drawn from the original density profile (shown in dashed blue) described by a sum of two gaussians, with dispersions equal to 0.1 and 1. We reconstruct the logarithm of density using a linear ($N=1$) and cubic ($N=3$) B-splines with 50 nodes uniformly placed on the interval $[0..6]$, so that it is linearly extrapolated beyond the extent of this grid. The linear B-spline estimate (shown in red) is rather wiggly, because the grid spacing is intentionally made too fine for the given number of samples -- some elements do not contain any samples. The non-penalized cubic B-spline (not shown) is very close to the linear one, and also close to a standard Gaussian kernel density estimate with the same bandwidth as the grid spacing (also not shown). By contrast, the penalized cubic B-spline with the smoothing parameter determined automatically in order to maximize the cross-validation likelihood (shown in blue) is much closer to the true density.
+} \label{fig:SplineLogDensity}
+\end{figure}
+
+%%%%%%%%%%%
+\subsection{Potentials}  \label{sec:PotentialDetails}
+
+%%%%%%%%%%%
+%\subsubsection{Analytic potentials}  \label{sec:PotentialAnalyticDetails}
+
+%%%%%%%%%%%%%%
+\subsubsection{Multipole expansion}  \label{sec:PotentialMultipoleDetails}
+
+The potential in the multipole expansion approach is represented as a sum of individual spherical-harmonic terms with coefficients being arbitrary functions of radius:
+\begin{align}
+\Phi(r,\theta,\phi) &= \sum_{l=0}^{l_\mathrm{max}}\sum_{m=-m_0(l)}^{m_0(l)}
+\Phi_{l,m}(r)\: \sqrt{4\pi} \tilde P_l^m(\cos\theta)\:\trig m\phi, \\
+\trig m\phi &\equiv \left\{\begin{array}{rcl} 
+  1 &,& m=0 \\
+  \sqrt{2}\,\cos  m \phi &,& m > 0 \\
+  \sqrt{2}\,\sin |m|\phi &,& m < 0 
+\end{array}\right.   \nonumber
+\end{align}
+Here $\tilde P_l^m(x) \equiv \sqrt{\frac{2l+1}{4\pi}\frac{(l-|m|)!}{(l+|m|)!}} \;P_l^{|m|}(x)$ 
+are normalized associated Legendre polynomials, $l_\mathrm{max}$ is the order of expansion in meridional angle $\theta$, and $m_0(l) = \mathrm{min}(l, m_\mathrm{max})$, where $m_\mathrm{max} \le l_\mathrm{max}$ is the order of expansion in azimuthal angle $\phi$ (they do not need to coincide, e.g., if the model is considerably flattened but only weakly triaxial, then $m_\mathrm{max}=2$ may be sufficient, while $l_\mathrm{max}$ may be set to 6 or 8). The normalization is chosen so that for a spherically-symmetric potential, $\Phi_{0,0}(r)=\Phi(r)$, and that for each $l$, the sum of squared coefficients over all $m$ is invariant under rotations of coordinate system.
+
+In the \ttt{Multipole} class, individual terms are approximated as scaled spline functions in scaled radius: $\Phi_{l,m}(r) = A(r)\,S_{l,m}(\ln r)$, where $A(r)\equiv (r^2+r_0^2)^{-1/2}$ is a scaling factor that allows to reach higher accuracy at large radii (where the actual potential is $\propto r^{-1}$, so the scaled term $S_{0,0}(r)$ tends to a constant), and $S_{l,m}$ are quintic splines in log-radius. These functions are defined by the values and first derivatives at nodes of a radial grid; usually this grid would be linear in log-radius, with a constant ratio between consecutive radii $f\equiv r_{k+1}/r_k$.
+
+If the minimum/maximum grid radii are not provided, they are assigned automatically using the following approach. First the half-mass radius $r_{1/2}$ of the density profile is determined (this obviously can be done only for models with a finite total mass). Then a suitable grid spacing factor $f$ is assigned. Finally, we set $r_\mathrm{max/min} = r_{1/2}\: f^{\pm N_R/2}$. As $N_R$ gets larger, both the dynamical range $D\equiv r_\mathrm{max}/r_\mathrm{min}$ is increased, and the resolution gets better (nodes are spaced more densely); e.g., for $N_R=20$, these are $D\sim 10^6$ and $f\sim 2$.
+
+To compute the potential and its derivatives at a given point, one needs to sum the contributions of each harmonic term. For systems with certain symmetries, many of these terms are identically zero, and this is taken into account thereby reducing the amount of computation. By convention, negative $m$ correspond to sine terms and positive -- to cosine; if a triaxial model is aligned with the principal axes, all sine terms must be zero; symmetry w.r.t. reflection about one of the principal planes also zeroes down some terms, and axisymmetry retains only $m=0$ terms. All possible combinations of symmetries are encoded in the \ttt{coords::SymmetryType} class, and each one corresponds to a certain combination of non-trivial spherical-harmonic terms (\ttt{math::SphHarmIndices}). For instance, a model of a disk galaxy with two spiral arms is symmetric w.r.t. $z$-reflection (change of sign of $z$ coordinate) and $xy$-reflection (change of sign of both $x$ and $y$ simultaneously), and this retains only terms with even $l$ and even $m$ (both positive and negative).
+
+At each nontrivial $m$, we may need to compute up to $l_\mathrm{max}-|m|$ 1d interpolating splines in $r$ multiplied with Legendre polynomials in $\cos\theta$. This may be replaced with a single evaluation of a 2d interpolation spline in $\ln r,\theta$ plane (in fact a suitably scaled analog of $\theta$ is used to avoid singularities along $z$ axis), which was pre-computed during potential initialization -- this is more efficient for $l_\mathrm{max}>2$. 
+
+Extrapolation to small and large radii (beyond the extent of the grid) is performed using the assumption of a power-law behaviour of individual multipole components: $\Phi_{l,m}(r) = U_{l,m}\, r^{s_{l,m}} + W_{l,m}\, r^{v}$, where $v\equiv l$ or $-1-l$ for the inward or outward extrapolation, correspondingly. The term with $r^v$ represents the ``principal'' component with a zero Laplacian, while $r^s$ corresponds to a power-law density profile $\rho_{l,m}\propto r^{s-2}$, and is typically much smaller in magnitude. This allows to describe very accurately the asymptotic behaviour of potential beyond the extent of the grid, if the coefficients $U,W$ and $s$ can be determined reliably. In order to do so, we use the value and derivative of each harmonic coefficient at the first or the last grid node, plus its value at the adjacent node, to obtain a system of 3 equations for these variables. Thus the value and derivative of each term are continuous at the boundaries. 
+
+A \ttt{Multipole} potential may be constructed either from an existing potential object (in which case it simply computes a spherical-harmonic transform of the original potential at radial grid nodes), or from a density profile (thereby solving the Poisson equation).
+%For the case of a smooth density model,
+\begin{align}
+\Phi_{l,m}(r) &= -\frac{4\pi}{2l+1} \left[ r^{-l-1} \int_0^r \rho_{l,m}(r')\,{r'}^{\,l+2}\,dr' + r^l\int_r^\infty \rho_{l,m}(r')\,{r'}^{\,1-l}\,dr' \right],  \label{eq:SphHarmPoisson} \\
+\rho_{l,m}(r) &\equiv \frac{1}{\sqrt{4\pi}} \int_{-1}^1 d\cos\theta\, \tilde P_l^m(\cos\theta) \int_0^{2\pi}d\phi\:\trig m\phi\:\rho(r,\theta,\phi) .  \label{eq:SphHarmDensity}
+\end{align}
+%For the case of an array of particles,
+%\begin{align}
+%\Phi_{l,m}(r) &= -\frac{4\pi}{2l+1} \left[ r^{-l-1} \sum_{r_k\le r} \rho_{l,m;k}\,r_k^l + r^l %\sum_{r_k>r} \rho_{l,m;k}\,r_k^{-l-1} \right] , \label{eq:SphHarmParticles} \\
+%\rho_{l,m;k} &\equiv m_k\,\sqrt{4\pi}\,\tilde P_l^m(\cos\theta_k)\,\trig m\phi_k .  \nonumber
+%\end{align}
+%Both the potential and its radial derivative can be computed from the above expressions.
+%In this case, we first compute the inner and outer sum in Equation~(\ref{eq:SphHarmParticles}) at each particle's radius, then construct a penalized smoothing spline \cite{GreenSilverman} that passes through a set of control points (nodes of radial grid) and approximates the values of these sums while avoiding large fluctuations. The tradeoff between smoothness and accuracy of approximation is controlled by a smoothing parameter (see the discussion in \cite{Vasiliev2013}). 
+
+A separate class \ttt{DensitySphericalHarmonic} serves to approximate any density profile with its spherical-harmonic expansion, with coefficients being cubic splines in $\ln r$. 
+Similarly to the Multipole potential class, we extrapolate the profile to small or large radii using power-law asymptotes, with slopes deduces from the values of the $l=0$ coefficient at two inner- or outermost grid points. This class is mainly used in self-consistent modelling (Section~\ref{sec:SCM}) to provide a computationally cheap way of evaluating the density at any point in space, once it is initialized by computing the costly integrals over distribution function at a small number of points (grid nodes in radius and nodes of Gauss--Legendre quadrature rule in $\cos\theta$). This interpolated density is then used to construct the Multipole potential: the solution of Poisson equation requires integration of harmonic terms in radius using a more densely spaced internal grid, and the values of these terms are easily evaluated from the density interpolator. Note that this process involves two forward and one reverse spherical-harmonic transformation (first time during the construction of density interpolator, then the reverse transformation to obtain the interpolated values at the required spatial points, and then again in the Multipole potential). However, since the spherical-harmonic transformation is invertible (reproduces the source density at this special set of points to machine precision), this double work does not add to error, and incurs negligible overhead.
+
+\ttt{DensitySphericalHarmonic} may also be constructed from an array of particles, and then used to create the \ttt{Multipole} potential in a usual way. To do so, we first compute the spherical-harmonic expansion coefficients at each particle's radius:
+\begin{align*}
+\rho_{l,m;i} &\equiv m_i\,\sqrt{4\pi}\,\tilde P_l^m(\cos\theta_i)\,\trig m\phi_i .
+\end{align*}
+Then the $l=0$ coefficients (which contain just particle masses) are used to determine the spherically-symmetric part of the density profile. We use penalized spline log-density fit (Section~\ref{sec:MathSplineDensityDetails}) to estimate the logarithm of an auxiliary quantity $P(\ln r) \equiv dM(<r)/d\ln r$ from the array of point masses and log-radii; the actual density is $\rho_{0,0}(r) = P(\ln r) / (4\pi\,r^3)$. Finally, we create smoothing splines (Section~\ref{sec:MathSplineApproxDetails}) for all non-trivial $\rho_{l,m}(\ln r)$ terms.
+This temporary density model is used to construct the \ttt{Multipole} potential from an \Nbody model -- even though the Poisson equation (\ref{eq:SphHarmPoisson},\ref{eq:SphHarmDensity}) can be solved directly by summing over particles (an approach used in \cite{Vasiliev2013}), this results in a noisier and less accurate potential than the intermediate smoothed density can provide.
+
+%%%%%%%%%%%%%%
+\subsubsection{CylSpline expansion}  \label{sec:PotentialCylSplineDetails}
+
+The \ttt{CylSpline} potential is represented as a sum of azimuthal Fourier harmonics in $\phi$, with coefficients of each term intepolated on a 2d grid in $R,z$ plane with suitable scaling.
+Namely, both $R$ and $z$ coordinates are transformed to $\tilde R \equiv \ln(1+R/R_0), \tilde z \equiv \ln(1+z/R_0)$, where $R_0$ is a characteristic radius. The amplitude of each interpolated term is additionally multiplied by a factor $\sqrt{R^2+z^2+R_0^2}$ to obtain the actual potential; this serves the same purpose as in \ttt{Multipole} -- improving the accuracy of interpolation at large radii, where the $m=0$ harmonic of the potential tends to $-M/r$, so that the scaled interpolant tends to a constant. We use either 2d quintic splines or 2d cubic splines to construct the interpolator, depending on whether the partial derivatives of potential by $R$ and $z$ are available. Normally, if the potential is constructed from a smooth density profile or from a known potential, it is advantageous to use 5th order interpolation to improve accuracy, even though this increases the computational cost of construction (but not of evaluation of the potential). On the other hand, in the case of a potential constructed from an array of particles, estimates of derivatives are too noisy and in fact deteriorate the quality of approximation.
+
+Unlike the \ttt{Multipole} potential, which can handle a power-law asymptotic behaviour of density both at small and large radii, \ttt{CylSpline} is more restricted -- since the grid covers the origin, it can only represent a model with finite density at $r=0$. Extrapolation to large radii (beyond the extent of the rectangular grid in $R,z$) is performed using a similar approach to \ttt{Multipole}, but keeping only the principal spherical-harmonic terms $W r^{-l-1}$ with zero Laplacian, i.e., corresponds to a zero density outside the grid. The coefficients for a few low-order multipoles are determined from a least-square fit to the values of potential at the outer boundary of the grid; thus the potential values inside and outside the boundary are not exactly the same, but still are quite close -- the relative error in potential and force in the extrapolated regime is typically $\lesssim 10^{-3}$ (see Figures~\ref{fig:PotentialAccuracy1},~\ref{fig:PotentialAccuracy2}).
+
+Since the grid spacing is near-uniform at small and near-exponential at large $R,z$, the dynamical range of \ttt{CylSpline} is also very broad. If the values of first/last grid nodes are not specified, they are determined automatically using the same approach as for \ttt{Multipole}. Typically, $20-25$ grid nodes are enough to span a range from 0 to $\gtrsim 10^3\,r_\mathrm{half-mass}$.
+Symmetries of the model are taken into account in the choice of non-trivial azimuthal Fourier terms (in the case of axisymmetry, only $m=0$ term is retained; for triaxial models only even $m\ge 0$ are used, etc.); and for models with $z$-reflection symmetry, coefficients are computed and stored only for the $z\ge 0$ half-space.
+
+The main advantage of \ttt{CylSpline} is in its ability to efficiently represent even very flattened density profiles, which are not suitable for \ttt{Multipole} expansion. When \ttt{CylSpline} approximation is constructed from another potential, this boils down to taking the Fourier transform in $\phi$ of potential and forces of the original potential at the nodes of 2d grid in $R,z$ plane. When it is constructed from a density profile, this involves the solution of Poisson equation in cylindrical coordinates, which is performed in two steps. First, a Fourier transform of the source model is created (if it was neither axisymmetric nor a \ttt{DensityCylGrid} class, see \hyperref[sec:DensityCylGrid]{below}). Next, for each $m$-th harmonic $\rho_m$, the potential is computed at each node $R,z$ of the 2d grid using the following approach \cite{CohlTohline1999}:
+\begin{align}
+\Phi_m(R,z) &= -\int_{-\infty}^{+\infty} dz' \int_0^{\infty} dR' \,2\pi R'\,\rho_m(R',z')  
+  \,\Xi_m(R,z,R',z')\;,  \label{eq:PoissonCylindric} \\
+\Xi_m &\equiv \int_0^\infty dk\, J_m(kR)\, J_m(kR')\, \exp(-k|z-z'|) \;,\quad
+  \mbox{which evaluates to} \\
+\Xi_m&= \frac{1}{\pi\sqrt{RR'}}\, Q_{m-1/2}\left( \frac{R^2+R'^2+(z-z')^2}{2RR'} \right) \quad
+  \mbox{if }R>0,R'>0,  \nonumber \\
+\Xi_m&= \frac{1}{\sqrt{R^2+R'^2+(z-z')^2}}\quad
+  \mbox{if }R=0\mbox{ or }R'=0\mbox{, and }m=0\mbox{, otherwise 0}. \nonumber
+\end{align}
+Here $Q$ is the Legendre function of the second kind, which is computed using a Pad\'e approximation for $m\le 12$ or Gauss' hypergeometric function otherwise (more expensive).
+%The two-dimensional integral in (\ref{eq:PoissonCylindric}) is calculated numerically with the \texttt{integrateNdim} routine (Section~\ref{sec:MathDetails}) to an accuracy of $10^{-6}$.
+For an array of particles, 
+\begin{align}  \label{eq:PoissonCylindricParticles}
+\Phi_m(R,z) = -\sum_k m_k\,\Xi_m(R,z,R_k,z_k)\,\trig m\phi_k .
+\end{align}
+
+The computation of \ttt{CylSpline} coefficients is much more expensive than that of \ttt{Multipole}, because at each of $\mathcal{O}(N_R\times N_z \times m_\mathrm{max})$ nodes we need to evaluate a 2d integral in (\ref{eq:PoissonCylindric}) or a sum over all particles in (\ref{eq:PoissonCylindricParticles}). On a typical workstation, this may take from from a few seconds to a few minutes, depending on the resolution and the number of CPU cores. Nevertheless, this is a one-time cost; once the coefficients are calculated, the evaluation of both \ttt{Multipole} and \ttt{CylSpline} potentials is very fast -- the cost depends very weakly on the number of grid nodes, and is proportional to the number of azimuthal-harmonic terms ($m_\mathrm{max}$, but not $l_\mathrm{max}$ in the case of Multipole).
+
+Figure~\ref{fig:PotentialAccuracy1} demonstrates that the accuracy of both approximations is fairly good (relative error in force $\lesssim 10^{-3}$) with default settings ($N_R=25, l_\mathrm{max}=m_\mathrm{max}=6$) and improves with resolution. For the case of initialization from an array of particles, discreteness noise is the main limiting factor.
+Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential expansions has its weak points: \ttt{Multipole} is not suitable for strongly flattened systems and \ttt{CylSpline} performs poorly in systems with density cusps; but for most density profiles at least one of them should deliver a good accuracy.
+
+\phantomsection\label{sec:DensityCylGrid} A separate class \ttt{DensityCylGrid} serves the same task as \ttt{DensitySphericalHarmonic}: provides an interpolated density model that is initialized from the values of source density at nodes of a 2d grid in $R,z$ plane (for an axisymmetric model) or 3d grid in $R,z,\phi$ (in general). The density is represented as a Fourier expansion in $\phi$, with each term being a 2d cubic spline in $\tilde R, \tilde z$ coordinates (scaled in the same way as in \ttt{CylSpline}). Interpolated density is zero outside the grid. This class serves as a counterpart to \ttt{DensitySphericalHarmonic} in the context of DF-based self-consistent models for disk-like components: the values of density at grid nodes are computed by (expensive) integration of DF over velocities, and density in the entire space, necessary for computing the potential, is given by the interpolator.
+
+\begin{figure}
+\includegraphics[width=16cm]{D0.pdf}
+\includegraphics[width=16cm]{D0nb.pdf}
+\caption{Accuracy of potential approximations in the case of initialization from a smooth density profile (top panels) and from an array of $N$ particles (bottom panels). In both cases we compare the potential (red), force (green) and density (blue) computed using the potential expansions (left: Multipole, right: CylSpline) with the ``exact'' values for a triaxial $\gamma=0$ Dehnen profile ($x:y:z=1:0.8:0.5$), obtained by numerical integration, and plot the relative errors as functions of radius. In the top panels we vary the order of spherical-harmonic expansion and the number of grid nodes. Both potential approximations deliver fairly high accuracy, which increases with resolution. In the bottom panels we additionally show these quantities computed with a conventional \Nbody approach (direct-summation and SPH density estimate). Here the error is dominated by noise in computing the potential from discrete samples, and not by the approximation accuracy (it is almost independent of the grid parameters, but decreases with $N$). Notably, both smooth potential approximations are closer to the true potential than the \Nbody estimate.
+}  \label{fig:PotentialAccuracy1}
+\end{figure}
+
+\begin{figure}
+\includegraphics[width=16cm]{D1.pdf}
+\includegraphics[width=16cm]{MN.pdf}
+\caption{Accuracy of potential approximations for different types of density profiles. As in the previous figure, we plot the relative errors in potential (red), force (green) and density (blue) for Multipole (left) and CylSpline (right) potential expansions. Top panels are for a triaxial $\gamma=1$ Dehnen model, and bottom -- for a Miyamoto--Nagai disk. In the former case, CylSpline cannot efficiently deal with cuspy density profiles, while Multipole is able to deliver accurate results even for a $\gamma=2$ cusp without any difficulty. On the other hand, in the latter case the strongly flattened density model is poorly represented by the spherical-harmonic expansion even with $l_\mathrm{max}=50$, whereas CylSpline performs well, especially with manually assigned grid boundaries.
+}  \label{fig:PotentialAccuracy2}
+\end{figure}
+
+%%%%%%%%%%%
+%\subsection{Action/angle transformation}  \label{sec:ActionDetails}
+
+\begin{figure}
+\includegraphics[width=16cm]{StaeckelFudgeAccuracy.pdf}
+\caption{Accuracy of actions determined by the St\"ackel approximation method. \protect\\
+Actions are computed at $10^3$ points on a numerically computed orbit, and the error is estimated as the r.m.s.\ variation of actions (which in reality should stay constant for each orbit). The potential used this experiment is the same as in \cite{SandersBinney2016}, consists of several disky and spheroidal components, and is intended to represent the Milky Way. \protect\\
+Left panel shows the relative error in radial ($J_r$, solid lines) and vertical ($J_z$, dashed lines) actions as a function of $(J_r+J_z)/J_\phi$, which serves as a proxy for orbit eccentricity. It is computed for a sequence of orbits launched at solar radius with the same tangential velocity (equal to the local circular speed), and varying meridional velocity (always directed at $\sim40^\circ$ to the disk plane, so that $J_r/J_z\simeq 2-3$). The initial conditions are equivalent to those used in Fig.~3 of \cite{SandersBinney2016}, and the red and blue curves are the same as in that plot, except that the vertical axis shows the relative, not absolute error. These two curves show the error in the St\"ackel fudge as implemented in two variants in that paper; the thicker green curve is the implementation from \Agama, which generally yields equal or better accuracy and is $\sim 2\times$ faster, requiring correspondingly fewer potential evaluations. The strong peaks are located at resonances, where the St\"ackel approximation breaks down. \protect\\
+The right panel shows the relative error in the sum of two actions as a function of the same proxy for eccentricity, computed for $10^3$ orbits drawn from a distribution function describing the stellar components of this galaxy model (thin and thick disks and the stellar halo); they span the range of radii from 1 to 100 kpc. It illustrates that the relative errors are typically $\lesssim 1\%$ for thin-disk orbits and $\lesssim 10\%$ for other orbits, although again they may be larger at resonances.
+}  \label{fig:StaeckelAccuracy}
+\end{figure}
+
+
+%%%%%%%%%%%
+\subsection{Distribution functions}  \label{sec:DFdetails}
+
+\subsubsection{Spherical isotropic DFs}  \label{sec:DFsphericalDetails}
+
+The correspondence between energy $E$ and phase volume $h$ in the given potential is provided by the class \ttt{PhaseVolume}. Phase volume $h(E)$ and its derivative (density of states) $g(E)\equiv dh(E)/dE$ are defined as
+\begin{subequations}
+\begin{align}
+h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, dr = \int_{\Phi(0)}^E g(E')\, dE'  ,\\
+g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, dr = 4\pi^2\, L_\mathrm{circ}^2(E)\, T_\mathrm{rad}(E) ,
+\end{align}
+\end{subequations}
+where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E) = 2 \int_0^{r_\mathrm{max}(E)} dr/v$  is the period of a radial orbit with this energy. In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.
+
+The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$. The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any well-behaved potential), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
+The interpolation in scaled coordinates typically attains a level of accuracy better than $10^{-9}$ over the range of $h$ covered by the spline, and $\sim 10^{-5}$ in the extrapolated regime (if the potential indeed has a power-law asymptotic behaviour).
+
+Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, dh$ is finite. The class \ttt{SphericalIsotropic} defines one such representation in terms of an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$).
+One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{makeEddingtonDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalDF}.
+
+The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
+In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
+
+The local (position-dependent) drift and diffusion coefficients in velocity are given by
+\begin{subequations}
+\begin{align}
+v\dvpar &= \textstyle -2\Gamma\, J_{1/2} \;,\\
+\dvsqpar&= \textstyle \;\frac{2}{3}\Gamma\, \left(I_0 + J_{3/2}\right) , \\
+\dvsqper&= \textstyle \;\frac{2}{3}\Gamma\, \left(2 I_0 + 3 J_{1/2} - J_{3/2}\right) , \quad\mbox{where} \\
+I_0(E)     &\equiv \int_E^0 f(E')\, dE' = \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, dh', \\
+J_{n/2}(E,\Phi) &\equiv \int_{\Phi(r)}^E f(E') \left(\frac{E'-\Phi}{E-\Phi}\right)^{n/2} dE' = 
+ \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \left(\frac{E'(h')-\Phi}{E-\Phi}\right)^{n/2} dh'.
+\end{align}
+\end{subequations}
+
+Orbit-averaged energy drift and diffusion coefficients are given by
+\begin{subequations}
+\begin{align}
+\langle \Delta E   \rangle_\mathrm{av} &= \phantom{2} \Gamma\; \left[I_0 - K_g/g \right], \\
+\langle \Delta E^2 \rangle_\mathrm{av} &= 2\Gamma\; \left[I_0\,h + K_h\right]/g, \\
+K_g(E) &\equiv \int_{\Phi(0)}^E f(E')\,g(E')\,dE' = \int_0^{h(E)} f(h')\,dh', \\
+K_h(E) &\equiv \int_{\Phi(0)}^E f(E')\,h(E')\,dE' = \int_0^{h(E)} \frac{f(h')\,h'}{g(h')}\,dh'.
+\end{align}
+\end{subequations}
+
+In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\star^{-1}\ln\Lambda)$, where the term in brackets is the amplitude of relaxation term for the given number of stars $N_\star$ representing the stellar system ($\Lambda \sim N$ is the Coulomb logarithm). We note that $K_g(E)$ is the mass of stars with energies less than $E$ (and thus $M_\mathrm{total} = K_g(0)$), and $K_h(E)$ is their kinetic energy (up to a factor 3/2).
+
+Of course, an efficient evaluation of diffusion coefficients again requires interpolation from a pre-computed table. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
+Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
+
+\newpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{thebibliography}{99} \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+
+\bibitem{odeint}
+Ahnert K., Mulansky M., 2011, AIP Conf. Proc. 1389, 1586
+
+\bibitem{Binney2012}
+Binney J., 2012, MNRAS, 426, 1324
+
+\bibitem{Binney2014}
+Binney J., 2014, MNRAS, 440, 787
+
+\bibitem{BinneyMcMillan2011}
+Binney J., McMillan P., 2011, MNRAS, 413, 1889
+
+\bibitem{BinneyMcMillan2016}
+Binney J., McMillan P., 2016, MNRAS, 456, 1982
+
+\bibitem{BinneySpergel1984}
+Binney J., Spergel D., 1984, MNRAS, 206, 159
+
+\bibitem{BinneyTremaine}
+Binney J., Tremaine S., 2008, \textsl{Galactic Dynamics}, Princeton Univ.\ press
+
+\bibitem{Bovy2015}
+Bovy J., 2015, ApJS, 216, 29
+
+\bibitem{CarpinteroAguilar1998}
+Carpintero D., Aguilar L., 1998, MNRAS, 298, 1
+
+\bibitem{Carpintero2014}
+Carpintero D., Maffione N., Darriba L., 2014, Astronomy \& computing, 5, 19.
+
+\bibitem{CohlTohline1999}
+Cohl H., Tohline J., 1999, ApJ, 527, 86
+
+\bibitem{Dehnen1993}
+Dehnen W.  1993, MNRAS, 265, 250
+
+\bibitem{Dehnen2000}
+Dehnen W.  2000, ApJL, 536, L39
+
+\bibitem{DehnenBinney1998}
+Dehnen W., Binney J., 1998, MNRAS, 294, 429
+
+\bibitem{deZeeuw1985}
+de Zeeuw T., 1985, MNRAS, 216, 273
+
+\bibitem{GreenSilverman}
+Green P., Silverman B., 1994, \textsl{Nonparametric regression and generalized linear models}, Chapman\&Hall, London
+
+\bibitem{DOP853}
+Hairer E., N{\o}rsett S., Wanner G., 1993, \textsl{Solving ordinary differential equations}, Springer-Verlag
+
+\bibitem{HernquistOstriker1992}
+Hernquist L., Ostriker J., 1992, ApJ, 386, 375
+
+\bibitem{KuijkenDubinski1995}
+Kuijken K., Dubinski J., 1995, MNRAS, 277, 1341
+
+\bibitem{Hermite}
+%Makino J., 1991, ApJ, 369, 200
+Makino J., Aarseth S., 1992, PASJ, 44, 141
+
+\bibitem{Martin}
+Martin R., 2008, \textsl{Clean code}, Prentice Hall
+
+\bibitem{McConnell}
+McConnell S., 2004, \textsl{Code complete}, Microsoft press
+
+\bibitem{MerrittFridman1996}
+Merritt D., Fridman T., 1996, ApJ, 460, 136
+
+\bibitem{MerrittTremblay1994}
+Merritt D., Tremblay B., 1994, AJ, 108, 514
+
+\bibitem{Meyers}
+Meyers S., 2005, \textsl{Effective C++}, Addison--Wesley
+
+\bibitem{Pfenniger1984}
+Pfenniger D., 1984, A\&A, 134, 373
+
+\bibitem{Piffl2015}
+Piffl T., Penoyre Z., Binney J., 2015, MNRAS, 451, 639
+
+\bibitem{PortegiesZwart2013}
+Portegies Zwart S., McMillan S., van Elteren E., Pelupessy I., de Vries N., 2013, Comput.\ Phys.\ Commun., 184, 3, 456
+
+\bibitem{Posti2015}
+Posti L., Binney J., Nipoti C., Ciotti L., 2015, MNRAS, 447, 3060
+
+\bibitem{IAS15}
+Rein H., Spiegel D., 2015, MNRAS, 446, 1424
+
+\bibitem{RuppertWandCarroll}
+Ruppert D., Wand M.P., Carroll R.J., 2003, \textsl{Semiparametric regression}, Cambridge Univ.\ press
+
+\bibitem{SandersBinney2016}
+Sanders J., Binney J., 2016, MNRAS, 457, 2017
+
+\bibitem{Skokos2010}
+Skokos Ch., 2010, LNP, 790, 63
+
+\bibitem{Silverman1982}
+Silverman B., 1982, Annals of statistics, 10, 795.
+
+\bibitem{SutterAlexandrescu}
+Sutter H., Alexandrescu A., 2004, \textsl{C++ coding standards}, Addison--Wesley
+
+\bibitem{Teuben1995}
+Teuben P., 1995, in Shaw R. A., Payne H. E., Hayes J. J. E., eds, ASP Conf. Ser. 77,
+\textsl{Astronomical data analysis software and systems IV}, p.398, San Francisco
+
+\bibitem{ValluriMerritt1998}
+Valluri M., Merritt D., 1998, ApJ, 506, 686
+
+\bibitem{Vasiliev2013}
+Vasiliev E., 2013, MNRAS, 434, 3174
+
+\bibitem{Vasiliev2015}
+Vasiliev E., 2015, MNRAS, 446, 3150
+
+\bibitem{VasilievAthanassoula2015}
+Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
+
+\bibitem{Zhao1996}
+Zhao H.-S., 1996, MNRAS, 278, 488
+
+\end{thebibliography}
+
+\end{document}

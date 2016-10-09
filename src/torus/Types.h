@@ -96,7 +96,7 @@ inline PSPD::PSPD(const PSPD& V)
     { for(register int i=0; i<4; i++) a[i] = V.a[i]; }
 
 inline PSPD::PSPD(const double x0, const double x1, const double x2,
-		  const double x3)
+	  const double x3)
     { a[0]=x0; a[1]=x1; a[2]=x2; a[3]=x3; }
 
 inline PSPD& PSPD::operator= (const PSPD& V)
@@ -211,7 +211,7 @@ public:
     PSPT               (const double);
     PSPT               (const PSPT&);
     PSPT               (const double, const double, const double, 
-			const double, const double, const double);
+	    const double, const double, const double);
    ~PSPT               () {}
 
     PSPT&   operator=  (const PSPT&);
@@ -261,7 +261,7 @@ inline PSPT::PSPT(const PSPT& V)
     { for(register int i=0; i<6; i++) a[i] = V.a[i]; }
 
 inline PSPT::PSPT(const double x0, const double x1, const double x2,
-		  const double x3, const double x4, const double x5)
+	  const double x3, const double x4, const double x5)
     { a[0]=x0; a[1]=x1; a[2]=x2; a[3]=x3; a[4]=x4; a[5]=x5;}
 
 inline PSPT& PSPT::operator= (const PSPT& V)

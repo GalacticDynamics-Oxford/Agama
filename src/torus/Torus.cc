@@ -96,24 +96,25 @@ void Torus::DelMaps()
 
 void Torus::show(ostream& out) const
 {
-    out <<" Actions                = "<<J<<'\n'
+    out //<<" Actions                = "<<J(0)<<','<<J(1)<<','<<J(2)<<'\n'
 	<<" E, dE                  = "<<E<<' ';
     if(J(0) && J(1))
       out << (  hypot(Om(0),Om(1)) * sqrt(J(0)*J(1)) * dc(0) ) <<'\n';
     else
       out << (  hypot(Om(0),Om(1)) * (J(0) + J(1)) * dc(0) ) <<'\n';
-    out <<" Frequencies            = "<<Om<<'\n'
-	<<" dJ, chi_rms            = "<<dc<<'\n'
+    out //<<" Frequencies            = "<<Om(0)<<','<<Om(1)<<','<<Om(2)<<'\n'
+	<<" dJ, chi_rms            = "<<dc(0)<<','<<dc(1)<<','<<dc(2)<<','<<dc(3)<<'\n'
       //<<" parameters of PoiTra   = "<<PP()<<'\n'
-	<<" parameters of ToyMap   = "<<TP()<<'\n'
-	<<" number of Sn, log|Sn|  : ";
+	<<" parameters of ToyMap   : M="<<pow_2(TP()(0))<<", b="<<pow_2(TP()(1))<<", Lz="<<TP()(2)<<", r0="<<TP()(3)
+    <<";  # of terms in GF = " << SN().NumberofTerms()<<'\n';
+	/*<<" number of Sn, log|Sn|  : ";
 	SN().write_log(out);
     out <<"\n log|dSn/dJr|           : ";
 	AM.dSdJ1().write_log(out);
     out <<"\n log|dSn/dJl|           : ";
 	AM.dSdJ2().write_log(out);
     out <<"\n log|dSn/dJp|           : ";
-	AM.dSdJ3().write_log(out);	
+	AM.dSdJ3().write_log(out);	*/
 }
 
 

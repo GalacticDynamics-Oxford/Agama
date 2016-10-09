@@ -1,7 +1,7 @@
 /** \file    utils.h
     \brief   several string formatting and error reporting routines
     \author  EV
-    \date    2009-2015
+    \date    2009-2016
 */
 #pragma once
 #include <string>
@@ -9,75 +9,92 @@
 
 /** Helper routines for string handling and miscellaneous other tasks.  */
 namespace utils {
-#if 0
-/* ------- message and error reporting routines ------- */
-// the following definitions ensure that function name will appear with full class qualifier in my_message calls
+
+/* ------- logging routines ------- */
+// the following definitions ensure that function name will appear
+// with full class qualifier in logmsg calls
 #ifdef __GNUC__
 #define FUNCNAME __PRETTY_FUNCTION__
 #else
 #define FUNCNAME __FUNCTION__
 #endif
 
-/// a function that shows a given message string.
-/// implementation is program-specific, may dump text to stderr or do something else.
-/// \param[in] origin is the name of calling function
-/// \param[in] message is the text to be displayed
-typedef void show_message_type(const std::string &origin, const std::string &message);
+/// level of verbosity for logging messages
+enum VerbosityLevel {
+    VL_MESSAGE = 0,   ///< information messages that are always printed
+    VL_WARNING = 1,   ///< important but non-critical warnings indicating possible problems
+    VL_DEBUG   = 2,   ///< ordinary debugging messages
+    VL_VERBOSE = 3,   ///< copious amount of debugging messages
+};
 
-/// global variable to the routine that displays errors (if it is NULL then nothing is done)
-extern show_message_type* my_error_ptr;
+/** Prototype of a function that displays a message.
+    The default routine prints the message if its level does not exceed the global 
+    verbosityLevel variable (initialized from the environment variable LOGLEVEL);
+    the text is sent to stderr or to a log file, depending on the environment variable LOGFILE.
+    \param[in] level is the verbosity level of the message;
+    \param[in] origin is the name of calling function (should contain the value of FUNCNAME macro);
+    \param[in] message is the text to be displayed.
+*/        
+typedef void MsgType(VerbosityLevel level, const char* origin, const std::string &message);
 
-/// global variable to the routine that shows information messages.
-/// called by various time-consuming routines to display progress, if NULL then no messaging is done
-extern show_message_type* my_message_ptr;
+/** global pointer to the logging routine;
+    by default it prints messages to stderr or to a file defined by the environment variable LOGFILE,
+    but it may be replaced with any user-defined routine.
+*/
+extern MsgType* msg;
 
-/// the interface routine for error reporting (redirects the call to my_error_ptr if it is defined)
-inline static void my_error(const std::string &origin, const std::string &message)
-{ if(my_error_ptr!=NULL) my_error_ptr(origin, message); }
-
-/// the interface routine for message reporting (redirects the call to my_message_ptr if it is defined)
-inline static void my_message(const std::string &origin, const std::string &message)
-{ if(my_message_ptr!=NULL) my_message_ptr(origin, message); }
-
-/// default message printing routine
-void my_stderr_show_message(const std::string &origin, const std::string &message);
-#endif
+/** global settings for the verbosity level of information or debugging messages;
+    initialized at startup from the environment variable LOGLEVEL
+    (if it exists, otherwise set to default VL_MESSAGE).
+*/
+extern VerbosityLevel verbosityLevel;
 
 /*------------- string functions ------------*/
 
 /// convert a string to a number
-int convertToInt(const char* val);
-float convertToFloat(const char* val);
-double convertToDouble(const char* val);
+int toInt(const char* val);
+float toFloat(const char* val);
+double toDouble(const char* val);
 // handy overloads
-inline int convertToInt(const std::string& val) {
-    return convertToInt(val.c_str()); }
-inline float convertToFloat(const std::string& val) {
-    return convertToFloat(val.c_str()); }
-inline double convertToDouble(const std::string& val) {
-    return convertToDouble(val.c_str()); }
+inline int toInt(const std::string& val)
+{ return toInt(val.c_str()); }
+inline float toFloat(const std::string& val)
+{ return toFloat(val.c_str()); }
+inline double toDouble(const std::string& val)
+{ return toDouble(val.c_str()); }
 
 /// convert a string to a bool
-bool convertToBool(const char* val);
-inline bool convertToBool(const std::string& val) {
-    return convertToBool(val.c_str()); }
-
-/// convert a number to a string with a given precision
-template<typename ValueType> std::string convertToString(ValueType val, unsigned int width=6);
+bool toBool(const char* val);
+inline bool toBool(const std::string& val)
+{ return toBool(val.c_str()); }
 
 /// convert a bool to a string
-inline static const char* convertToString(bool val)
+inline static std::string toString(bool val)
 { return val?"true":"false"; }
 
+/// convert a number to a string with a given precision (number of significant digits)
+std::string toString(double val, unsigned int width=6);
+std::string toString(float val, unsigned int width=6);
+std::string toString(int val);
+std::string toString(unsigned int val);
+/// convert a pointer to a string
+std::string toString(const void* val);
+/// convert any typed pointer to a string
+template<typename T> inline std::string toString(const T* val) {
+    return toString(static_cast<const void*>(val));
+}
+
 /// Pretty-print: convert floating-point or integer numbers to a string of exactly fixed length.
+/// Choose fixed-point or exponential format depending on which one is more accurate;
+/// if the number does not fit into the given width, return a string with # symbols.
 std::string pp(double num, unsigned int width);
 
 /** routine that splits one line from a text file into several items.
-    \param[in]  src -- string to be split
-    \param[in]  delim -- array of characters used as delimiters
-    \param[out] result -- array of strings in which the elements will be stored
+    \param[in]  src -- string to be split;
+    \param[in]  delim -- array of characters used as delimiters;
+    \return  an array of strings
 */
-void splitString(const std::string& src, const std::string& delim, std::vector<std::string>& result);
+std::vector<std::string> splitString(const std::string& src, const std::string& delim);
 
 /// routine that checks if a string ends with another string
 bool endsWithStr(const std::string& str, const std::string& end);

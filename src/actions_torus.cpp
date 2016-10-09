@@ -1,11 +1,10 @@
 #include "actions_torus.h"
 #include "math_core.h"
+#include "potential_utils.h"
+#include "utils.h"
 #include "torus/Torus.h"
 #include "torus/Potential.h"
 #include <stdexcept>
-#include <cassert>
-#include <cmath>
-#include <iostream>
 
 namespace actions{
 
@@ -44,47 +43,35 @@ private:
     const potential::BasePotential& poten;
 };
 
-ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, const Actions& acts) :
-    data(NULL)
+ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, const Actions& acts, double tol)
 {
     if(!isAxisymmetric(poten))
         throw std::invalid_argument("ActionMapperTorus only works for axisymmetric potentials");
-    Torus::Torus* torus=NULL;
-    try{
-        torus = new Torus::Torus(true);  // using a new angular mapping method
-        // the actual potential is used only during torus fitting, but not required 
-        // later in angle mapping - so we create a temporary object
-        TorusPotentialWrapper potwrap(poten);
-        Torus::Actions act;
-        act[0] = acts.Jr;
-        act[1] = acts.Jz;
-        act[2] = acts.Jphi;
-        torus->AutoFit(act, &potwrap);
+    torus = Torus::PtrTorus(new Torus::Torus(true));
+    // the actual potential is used only during torus fitting, but not required 
+    // later in angle mapping - so we create a temporary object
+    TorusPotentialWrapper potwrap(poten);
+    Torus::Actions act;
+    act[0] = acts.Jr;
+    act[1] = acts.Jz;
+    act[2] = acts.Jphi;
+    int result = torus->AutoFit(act, &potwrap, tol, 600, 150, 12, 3, 16, 200, 12,
+        (int)utils::verbosityLevel);
+    if(result!=0) {
+        utils::msg(utils::VL_WARNING, "Torus", "Not converged: "+utils::toString(result));
+        //torus->show(std::cout);
     }
-    catch(std::runtime_error& e) {
-        std::cerr << "Error in creating a torus for "
-            "Jr="<<acts.Jr<<", Jz="<<acts.Jz<<", Jphi="<<acts.Jphi<<": "<<e.what()<<std::endl;
-        delete torus;
-        throw;
-    }
-    data = torus;
-}
-
-ActionMapperTorus::~ActionMapperTorus()
-{
-    delete static_cast<Torus::Torus*>(data);
 }
 
 coord::PosVelCyl ActionMapperTorus::map(const ActionAngles& actAng, Frequencies* freq) const
 {
-    Torus::Torus* torus = static_cast<Torus::Torus*>(data);
     // make sure that the input actions are the same as in the Torus object
     if( math::fcmp(actAng.Jr,   torus->action(0)) != 0 ||
         math::fcmp(actAng.Jz,   torus->action(1)) != 0 ||
         math::fcmp(actAng.Jphi, torus->action(2)) != 0 )
         throw std::invalid_argument("ActionMapperTorus: "
             "values of actions are different from those provided to the constructor");
-    // frequencies are constant for a given torus (depend only on actions, not on angles)    
+    // frequencies are constant for a given torus (depend only on actions, not on angles)
     if(freq!=NULL) {
         Torus::Frequencies tfreq = torus->omega();
         freq->Omegar   = tfreq[0];

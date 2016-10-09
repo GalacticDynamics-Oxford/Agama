@@ -1,14 +1,358 @@
 #include "math_ode.h"
 #include <cmath>
+#include <stdexcept>
 
 namespace math{
 
 inline bool isFinite(double x) {
-    const double y = x - x;
-    return y == y;  // false for +-INFINITY or NAN
+    return x==x && 1/x!=0;  // false for +-INFINITY or NAN
 }
 
 /* ----------------- ODE integrators ------------- */
+
+/* --- DOP853 high-accuracy Runge-Kutta integrator --- */
+
+OdeSolverDOP853::OdeSolverDOP853(const IOdeSystem& _odeSystem, double _accRel, double _accAbs):
+    BaseOdeSolver(_odeSystem), accRel(_accRel), accAbs(_accAbs), timeStep(0)
+{
+    const unsigned int n = odeSystem.size();
+    statePrev.assign(n, 0);
+    stateCurr.assign(n, 0);
+    /* allocate storage for intermediate calculations */
+    ytemp.resize(n);
+    k1.resize(n);
+    k2.resize(n);
+    k3.resize(n);
+    k4.resize(n);
+    k5.resize(n);
+    k6.resize(n);
+    k7.resize(n);
+    k8.resize(n);
+    k9.resize(n);
+    k10.resize(n);
+    rcont1.resize(n);
+    rcont2.resize(n);
+    rcont3.resize(n);
+    rcont4.resize(n);
+    rcont5.resize(n);
+    rcont6.resize(n);
+    rcont7.resize(n);
+    rcont8.resize(n);
+}
+
+double OdeSolverDOP853::initTimeStep()
+{
+    // on entering this routine, stateCurr contains the current values of variables,
+    // and k1 - their derivatives
+    double dnf = 0, dny = 0;
+    for (unsigned int i = 0; i < stateCurr.size(); i++) {
+        double sk = accAbs + accRel * fabs(stateCurr[i]);
+        if(sk==0) continue;
+        double sqre = k1[i] / sk;
+        dnf += sqre*sqre;
+        sqre = stateCurr[i] / sk;
+        dny += sqre*sqre;
+    }
+    double h = sqrt (dny/dnf) * 0.01;
+    if(!isFinite(dnf+dny) || (dnf <= 1e-15) || (dny <= 1e-15))  // safety measures
+        h = 1e-6;  // some arbitrary but small value
+
+    /* perform an explicit Euler step */
+    for (unsigned int i = 0; i < stateCurr.size(); i++)
+        ytemp[i] = stateCurr[i] + h * k1[i];
+    odeSystem.eval(timeCurr+h, ytemp, k2);
+    
+    /* estimate the second derivative of the solution */
+    double der2 = 0.0;
+    for (unsigned int i = 0; i < stateCurr.size(); i++) {
+        double sk = accAbs + accRel * fabs(stateCurr[i]);
+        double sqre = (k2[i] - k1[i]) / sk;
+        if(sk!=0) der2 += sqre*sqre;
+    }
+    der2 = sqrt (der2) / h;
+    
+    /* step size is computed such that h^8 * max(norm(der),norm(der2)) = 0.01 */
+    double der12 = fmax(fabs(der2), sqrt(dnf));
+    double h1 = der12 > 1e-15 ? pow (0.01/der12, 1./8) : fmax(1e-6, h*1e-3);
+    h = fmin(100.0 * h, h1);
+    return h;
+    
+}
+    
+void OdeSolverDOP853::init(const OdeStateType& state)
+{
+    if(stateCurr.size() != state.size())
+        throw std::runtime_error("ODE system size should not change");
+    stateCurr = state;
+    odeSystem.eval(timeCurr, stateCurr, k1);
+    if(timeStep == 0)
+        timeStep = initTimeStep();
+}
+    
+double OdeSolverDOP853::doStep()
+{
+    // initialize some internal constants
+    static const double
+    c2  = 0.526001519587677318785587544488E-01,
+    c3  = 0.789002279381515978178381316732E-01,
+    c4  = 0.118350341907227396726757197510E+00,
+    c5  = 0.281649658092772603273242802490E+00,
+    c6  = 0.333333333333333333333333333333E+00,
+    c7  = 0.25E+00,
+    c8  = 0.307692307692307692307692307692E+00,
+    c9  = 0.651282051282051282051282051282E+00,
+    c10 = 0.6E+00,
+    c11 = 0.857142857142857142857142857142E+00,
+    b1  =  5.42937341165687622380535766363E-2,
+    b6  =  4.45031289275240888144113950566E0,
+    b7  =  1.89151789931450038304281599044E0,
+    b8  = -5.8012039600105847814672114227E0,
+    b9  =  3.1116436695781989440891606237E-1,
+    b10 = -1.52160949662516078556178806805E-1,
+    b11 =  2.01365400804030348374776537501E-1,
+    b12 =  4.47106157277725905176885569043E-2,
+    bhh1=  0.244094488188976377952755905512E+00,
+    bhh2=  0.733846688281611857341361741547E+00,
+    bhh3=  0.220588235294117647058823529412E-01,
+    er1 =   0.1312004499419488073250102996E-01,
+    er6 =  -0.1225156446376204440720569753E+01,
+    er7 =  -0.4957589496572501915214079952E+00,
+    er8 =   0.1664377182454986536961530415E+01,
+    er9 =  -0.3503288487499736816886487290E+00,
+    er10=   0.3341791187130174790297318841E+00,
+    er11=   0.8192320648511571246570742613E-01,
+    er12=  -0.2235530786388629525884427845E-01,
+    a21 =    5.26001519587677318785587544488E-2,
+    a31 =    1.97250569845378994544595329183E-2,
+    a32 =    5.91751709536136983633785987549E-2,
+    a41 =    2.95875854768068491816892993775E-2,
+    a43 =    8.87627564304205475450678981324E-2,
+    a51 =    2.41365134159266685502369798665E-1,
+    a53 =   -8.84549479328286085344864962717E-1,
+    a54 =    9.24834003261792003115737966543E-1,
+    a61 =    3.7037037037037037037037037037E-2,
+    a64 =    1.70828608729473871279604482173E-1,
+    a65 =    1.25467687566822425016691814123E-1,
+    a71 =    3.7109375E-2,
+    a74 =    1.70252211019544039314978060272E-1,
+    a75 =    6.02165389804559606850219397283E-2,
+    a76 =   -1.7578125E-2,
+    a81 =    3.70920001185047927108779319836E-2,
+    a84 =    1.70383925712239993810214054705E-1,
+    a85 =    1.07262030446373284651809199168E-1,
+    a86 =   -1.53194377486244017527936158236E-2,
+    a87 =    8.27378916381402288758473766002E-3,
+    a91 =    6.24110958716075717114429577812E-1,
+    a94 =   -3.36089262944694129406857109825E0,
+    a95 =   -8.68219346841726006818189891453E-1,
+    a96 =    2.75920996994467083049415600797E1,
+    a97 =    2.01540675504778934086186788979E1,
+    a98 =   -4.34898841810699588477366255144E1,
+    a101 =   4.77662536438264365890433908527E-1,
+    a104 =  -2.48811461997166764192642586468E0,
+    a105 =  -5.90290826836842996371446475743E-1,
+    a106 =   2.12300514481811942347288949897E1,
+    a107 =   1.52792336328824235832596922938E1,
+    a108 =  -3.32882109689848629194453265587E1,
+    a109 =  -2.03312017085086261358222928593E-2,
+    a111 =  -9.3714243008598732571704021658E-1,
+    a114 =   5.18637242884406370830023853209E0,
+    a115 =   1.09143734899672957818500254654E0,
+    a116 =  -8.14978701074692612513997267357E0,
+    a117 =  -1.85200656599969598641566180701E1,
+    a118 =   2.27394870993505042818970056734E1,
+    a119 =   2.49360555267965238987089396762E0,
+    a1110=  -3.0467644718982195003823669022E0,
+    a121 =   2.27331014751653820792359768449E0,
+    a124 =  -1.05344954667372501984066689879E1,
+    a125 =  -2.00087205822486249909675718444E0,
+    a126 =  -1.79589318631187989172765950534E1,
+    a127 =   2.79488845294199600508499808837E1,
+    a128 =  -2.85899827713502369474065508674E0,
+    a129 =  -8.87285693353062954433549289258E0,
+    a1210=   1.23605671757943030647266201528E1,
+    a1211=   6.43392746015763530355970484046E-1,
+    // coefficients for 6th order interpolation instead of the original 8th order
+    d41  = -5.40685903845352664250302,
+    d46  = +367.268892700041893590281,
+    d47  = +154.609958204083905482676,
+    d48  = -505.920283865412564024766,
+    d49  = +15.5975154819608130688200,
+    d410 = -26.1936204184402805956691,
+    d411 = -.740035123641222308447206,
+    d412 = +1.11776539319431476294221,
+    d413 = -.333333333333333333333333,
+    d51  = +6.51987095363079615048119,
+    d56  = -1066.34956011730205278592,
+    d57  = -351.864047514639508625601,
+    d58  = +1363.51955696662884408368,
+    d59  = -112.727669432657582669864,
+    d510 = +159.796191868560289612921,
+    d511 = -2.13865100308788816220259,
+    d512 = -3.75569172113289760348584,
+    d513 = +7.00000000000000000000000,
+    d61  = +10.4698004763293477204238,
+    d66  = -1380.01473607038123167155,
+    d67  = -531.219827862514074379012,
+    d68  = +1866.98964341870892451324,
+    d69  = -53.3302605020547902574560,
+    d610 = +82.4147560258671369782481,
+    d611 = +7.38443654502992069572676,
+    d612 = +.417299080125877511498426,
+    d613 = -3.11111111111111111111111,
+    d71  = -16.6338582677165354330709,
+    d76  = +4516.16568914956011730205,
+    d77  = +1393.85185384057776465219,
+    d78  = -5687.52042419481539670071,
+    d79  = +473.965563750151263163661,
+    d710 = -661.810776942355889724311,
+    d711 = -18.0180473354013232598119,
+    d712 = 0,
+    d713 = 0,
+    safe = 0.9,   // safety factor
+    fac1 = 0.333, // parameters for step size selection
+    fac2 = 6.0;
+    const unsigned int n = stateCurr.size();
+    do {
+        if(timeStep <= fabs(timeCurr)*1e-15 || !isFinite(timeStep))
+            return 0;   // error, integration must be terminated
+
+        /* the twelve Runge-Kutta stages */
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                a21 * k1[i];
+        odeSystem.eval(timeCurr+c2*timeStep, ytemp, k2);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a31*k1[i] + a32*k2[i]);
+        odeSystem.eval(timeCurr+c3*timeStep, ytemp, k3);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a41*k1[i] + a43*k3[i]);
+        odeSystem.eval(timeCurr+c4*timeStep, ytemp, k4);
+        for (unsigned int i = 0; i <n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a51*k1[i] + a53*k3[i] + a54*k4[i]);
+        odeSystem.eval(timeCurr+c5*timeStep, ytemp, k5);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a61*k1[i] + a64*k4[i] + a65*k5[i]);
+        odeSystem.eval(timeCurr+c6*timeStep, ytemp, k6);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a71*k1[i] + a74*k4[i] + a75*k5[i] + a76*k6[i]);
+        odeSystem.eval(timeCurr+c7*timeStep, ytemp, k7);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a81*k1[i] + a84*k4[i] + a85*k5[i] + a86*k6[i] + a87*k7[i]);
+        odeSystem.eval(timeCurr+c8*timeStep, ytemp, k8);
+        for (unsigned int i = 0; i <n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a91*k1[i] + a94*k4[i] + a95*k5[i] + a96*k6[i] + a97*k7[i] + a98*k8[i]);
+        odeSystem.eval(timeCurr+c9*timeStep, ytemp, k9);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a101*k1[i] + a104*k4[i] + a105*k5[i] + a106*k6[i] + a107*k7[i] + 
+                 a108*k8[i] + a109*k9[i]);
+        odeSystem.eval(timeCurr+c10*timeStep, ytemp, k10);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a111*k1[i] + a114*k4[i] + a115*k5[i] + a116*k6[i] + a117*k7[i] + 
+                 a118*k8[i] + a119*k9[i] + a1110*k10[i]);
+        odeSystem.eval(timeCurr+c11*timeStep, ytemp, k2);
+        for (unsigned int i = 0; i < n; i++)
+            ytemp[i] = stateCurr[i] + timeStep * 
+                (a121*k1[i] + a124*k4[i] + a125*k5[i] + a126*k6[i] + a127*k7[i] + 
+                 a128*k8[i] + a129*k9[i] + a1210*k10[i] + a1211*k2[i]);
+        odeSystem.eval(timeCurr+timeStep, ytemp, k3);
+        for (unsigned int i = 0; i < n; i++) {
+            k4[i] = b1*k1[i] + b6*k6[i] + b7*k7[i] + b8*k8[i] + b9*k9[i] +
+                    b10*k10[i] + b11*k2[i] + b12*k3[i];
+            k5[i] = stateCurr[i] + timeStep * k4[i];
+        }
+     
+        /* error estimation */
+        double err = 0.0, err2 = 0.0;
+        for (unsigned int i = 0; i < n; i++) {
+            double sk = accAbs + accRel * fmax(fabs(stateCurr[i]), fabs(k5[i]));
+            if(sk==0) continue;
+            double erri = k4[i] - bhh1*k1[i] - bhh2*k9[i] - bhh3*k3[i];
+            double sqre = erri / sk;
+            err2 += sqre*sqre;
+            erri = er1*k1[i] + er6*k6[i] + er7*k7[i] + er8*k8[i] + er9*k9[i] +
+                   er10 * k10[i] + er11*k2[i] + er12*k3[i];
+            sqre = erri / sk;
+            err += sqre*sqre;
+        }
+        double deno = err + 0.01 * err2;
+        if (deno <= 0.0)
+            deno = 1.0;
+        err *= timeStep / sqrt(deno*n);
+
+        /* computation of hnew */
+        double fac = pow(err, 1./8);
+        /* we require fac1 <= hnew/h <= fac2 */
+        fac = fmax(1.0/fac2, fmin(1.0/fac1, fac/safe));
+
+        if (err <= 1.0) { // step accepted
+            // make the full step, finally
+            odeSystem.eval(timeCurr+timeStep, k5, k4);
+            // preparation for dense output
+            for(unsigned int i = 0; i < n; i++) {
+                rcont1[i] = stateCurr[i];
+                double ydiff = k5[i] - stateCurr[i];
+                rcont2[i] = ydiff;
+                double bspl = timeStep * k1[i] - ydiff;
+                rcont3[i] = bspl;
+                rcont4[i] = ydiff - timeStep*k4[i] - bspl;
+                rcont5[i] = timeStep * (d41*k1[i] + d46*k6[i] + d47*k7[i] + d48*k8[i] +
+                          d49*k9[i] + d410*k10[i] +d411*k2[i] +d412*k3[i] +d413*k4[i]);
+                rcont6[i] = timeStep * (d51*k1[i] + d56*k6[i] + d57*k7[i] + d58*k8[i] +
+                          d59*k9[i] + d510*k10[i] +d511*k2[i] +d512*k3[i] +d513*k4[i]);
+                rcont7[i] = timeStep * (d61*k1[i] + d66*k6[i] + d67*k7[i] + d68*k8[i] +
+                          d69*k9[i] + d610*k10[i] +d611*k2[i] +d612*k3[i] +d613*k4[i]);
+                rcont8[i] = timeStep * (d71*k1[i] + d76*k6[i] + d77*k7[i] + d78*k8[i] +
+                          d79*k9[i] + d710*k10[i] +d711*k2[i] +d712*k3[i] +d713*k4[i]);
+            }
+            k1 = k4;
+            statePrev = stateCurr;
+            stateCurr = k5;
+            timePrev  = timeCurr;
+            timeCurr += timeStep;
+            timeStep /= fac;
+            return timeCurr-timePrev;
+        }
+
+        // otherwise step rejected, make it smaller
+        timeStep /= fmin(1.0/fac1, fac/safe);
+    } while(1);
+}
+
+// dense output function
+void OdeSolverDOP853::getSol(double t, double x[]) const
+{
+    const unsigned int n = stateCurr.size();
+    if(t<timePrev || t>timeCurr) {
+        for(unsigned int i=0; i<n; i++)
+            x[i] = NAN;
+        return;
+    }
+    if(t==timeCurr) {
+        for(unsigned int i=0; i<n; i++)
+            x[i] = stateCurr[i];
+        return;
+    }
+    if(t==timePrev) {
+        for(unsigned int i=0; i<n; i++)
+            x[i] = rcont1[i];
+        return;
+    }
+    double s = (t - timePrev) / (timeCurr-timePrev);
+    double s1= 1.0 - s;
+    for(unsigned int i=0; i<n; i++)
+        x[i]   =  rcont1[i] + s * (rcont2[i] + s1 * (rcont3[i] + s * (rcont4[i] +
+            s1 * (rcont5[i] + s * (rcont6[i] + s1 * (rcont7[i] + s *  rcont8[i]))))));
+}
 
 #ifdef HAVE_ODEINT
 // Fancy C++ ODE integrator from boost
@@ -332,336 +676,6 @@ double COdeIntegratorOdeint<Stepper>::getInterpolatedSolutionImpl(unsigned int c
     return stateIntermediate[c];
 }
 #endif
-
-/* --- DOP853 high-accuracy Runge-Kutta integrator --- */
-
-OdeSolverDOP853::OdeSolverDOP853(IOdeSystem& _odeSystem, double _accAbs, double _accRel):
-    BaseOdeSolver(_odeSystem), accAbs(_accAbs), accRel(_accRel), timeStep(0)
-{
-    const unsigned int n = odeSystem.size();
-    statePrev.assign(n, 0);
-    stateCurr.assign(n, 0);
-    /* allocate storage for intermediate calculations */
-    ytemp.resize(n);
-    k1.resize(n);
-    k2.resize(n);
-    k3.resize(n);
-    k4.resize(n);
-    k5.resize(n);
-    k6.resize(n);
-    k7.resize(n);
-    k8.resize(n);
-    k9.resize(n);
-    k10.resize(n);
-    rcont1.resize(n);
-    rcont2.resize(n);
-    rcont3.resize(n);
-    rcont4.resize(n);
-    rcont5.resize(n);
-    rcont6.resize(n);
-    rcont7.resize(n);
-    rcont8.resize(n);
-}
-
-double OdeSolverDOP853::initTimeStep()
-{
-    // on entering this routine, stateCurr contains the current values of variables, and k1 - their derivatives
-    double dnf = 0, dny = 0;
-    for (unsigned int i = 0; i < stateCurr.size(); i++) {
-        double sk = accAbs + accRel * fabs(stateCurr[i]);
-        if(sk==0) continue;
-        double sqre = k1[i] / sk;
-        dnf += sqre*sqre;
-        sqre = stateCurr[i] / sk;
-        dny += sqre*sqre;
-    }
-    double h = sqrt (dny/dnf) * 0.01;
-    if(!isFinite(dnf+dny) || (dnf <= 1e-15) || (dny <= 1e-15))  // safety measures
-        h = 1e-6;  // some arbitrary but small value
-
-    /* perform an explicit Euler step */
-    for (unsigned int i = 0; i < stateCurr.size(); i++)
-        ytemp[i] = stateCurr[i] + h * k1[i];
-    odeSystem.eval(timeCurr+h, ytemp, k2);
-    
-    /* estimate the second derivative of the solution */
-    double der2 = 0.0;
-    for (unsigned int i = 0; i < stateCurr.size(); i++) {
-        double sk = accAbs + accRel * fabs(stateCurr[i]);
-        double sqre = (k2[i] - k1[i]) / sk;
-        if(sk!=0) der2 += sqre*sqre;
-    }
-    der2 = sqrt (der2) / h;
-    
-    /* step size is computed such that h^8 * max(norm(der),norm(der2)) = 0.01 */
-    double der12 = fmax(fabs(der2), sqrt(dnf));
-    double h1 = der12 > 1e-15 ? pow (0.01/der12, 1./8) : fmax(1e-6, h*1e-3);
-    h = fmin(100.0 * h, h1);
-    return h;
-    
-}
-    
-void OdeSolverDOP853::init(const OdeStateType& state)
-{
-    stateCurr = state;
-    odeSystem.eval(timeCurr, stateCurr, k1);
-    if(timeStep == 0)
-        timeStep = initTimeStep();
-}
-    
-double OdeSolverDOP853::step()
-{
-    // initialize some internal constants
-    static const double
-    c2  = 0.526001519587677318785587544488E-01,
-    c3  = 0.789002279381515978178381316732E-01,
-    c4  = 0.118350341907227396726757197510E+00,
-    c5  = 0.281649658092772603273242802490E+00,
-    c6  = 0.333333333333333333333333333333E+00,
-    c7  = 0.25E+00,
-    c8  = 0.307692307692307692307692307692E+00,
-    c9  = 0.651282051282051282051282051282E+00,
-    c10 = 0.6E+00,
-    c11 = 0.857142857142857142857142857142E+00,
-    b1  =  5.42937341165687622380535766363E-2,
-    b6  =  4.45031289275240888144113950566E0,
-    b7  =  1.89151789931450038304281599044E0,
-    b8  = -5.8012039600105847814672114227E0,
-    b9  =  3.1116436695781989440891606237E-1,
-    b10 = -1.52160949662516078556178806805E-1,
-    b11 =  2.01365400804030348374776537501E-1,
-    b12 =  4.47106157277725905176885569043E-2,
-    bhh1=  0.244094488188976377952755905512E+00,
-    bhh2=  0.733846688281611857341361741547E+00,
-    bhh3=  0.220588235294117647058823529412E-01,
-    er1 =   0.1312004499419488073250102996E-01,
-    er6 =  -0.1225156446376204440720569753E+01,
-    er7 =  -0.4957589496572501915214079952E+00,
-    er8 =   0.1664377182454986536961530415E+01,
-    er9 =  -0.3503288487499736816886487290E+00,
-    er10=   0.3341791187130174790297318841E+00,
-    er11=   0.8192320648511571246570742613E-01,
-    er12=  -0.2235530786388629525884427845E-01,
-    a21 =    5.26001519587677318785587544488E-2,
-    a31 =    1.97250569845378994544595329183E-2,
-    a32 =    5.91751709536136983633785987549E-2,
-    a41 =    2.95875854768068491816892993775E-2,
-    a43 =    8.87627564304205475450678981324E-2,
-    a51 =    2.41365134159266685502369798665E-1,
-    a53 =   -8.84549479328286085344864962717E-1,
-    a54 =    9.24834003261792003115737966543E-1,
-    a61 =    3.7037037037037037037037037037E-2,
-    a64 =    1.70828608729473871279604482173E-1,
-    a65 =    1.25467687566822425016691814123E-1,
-    a71 =    3.7109375E-2,
-    a74 =    1.70252211019544039314978060272E-1,
-    a75 =    6.02165389804559606850219397283E-2,
-    a76 =   -1.7578125E-2,
-    a81 =    3.70920001185047927108779319836E-2,
-    a84 =    1.70383925712239993810214054705E-1,
-    a85 =    1.07262030446373284651809199168E-1,
-    a86 =   -1.53194377486244017527936158236E-2,
-    a87 =    8.27378916381402288758473766002E-3,
-    a91 =    6.24110958716075717114429577812E-1,
-    a94 =   -3.36089262944694129406857109825E0,
-    a95 =   -8.68219346841726006818189891453E-1,
-    a96 =    2.75920996994467083049415600797E1,
-    a97 =    2.01540675504778934086186788979E1,
-    a98 =   -4.34898841810699588477366255144E1,
-    a101 =   4.77662536438264365890433908527E-1,
-    a104 =  -2.48811461997166764192642586468E0,
-    a105 =  -5.90290826836842996371446475743E-1,
-    a106 =   2.12300514481811942347288949897E1,
-    a107 =   1.52792336328824235832596922938E1,
-    a108 =  -3.32882109689848629194453265587E1,
-    a109 =  -2.03312017085086261358222928593E-2,
-    a111 =  -9.3714243008598732571704021658E-1,
-    a114 =   5.18637242884406370830023853209E0,
-    a115 =   1.09143734899672957818500254654E0,
-    a116 =  -8.14978701074692612513997267357E0,
-    a117 =  -1.85200656599969598641566180701E1,
-    a118 =   2.27394870993505042818970056734E1,
-    a119 =   2.49360555267965238987089396762E0,
-    a1110=  -3.0467644718982195003823669022E0,
-    a121 =   2.27331014751653820792359768449E0,
-    a124 =  -1.05344954667372501984066689879E1,
-    a125 =  -2.00087205822486249909675718444E0,
-    a126 =  -1.79589318631187989172765950534E1,
-    a127 =   2.79488845294199600508499808837E1,
-    a128 =  -2.85899827713502369474065508674E0,
-    a129 =  -8.87285693353062954433549289258E0,
-    a1210=   1.23605671757943030647266201528E1,
-    a1211=   6.43392746015763530355970484046E-1,
-    // coefficients for 6th order interpolation instead of the original 8th order
-    d41  = -5.40685903845352664250302,
-    d46  = +367.268892700041893590281,
-    d47  = +154.609958204083905482676,
-    d48  = -505.920283865412564024766,
-    d49  = +15.5975154819608130688200,
-    d410 = -26.1936204184402805956691,
-    d411 = -.740035123641222308447206,
-    d412 = +1.11776539319431476294221,
-    d413 = -.333333333333333333333333,
-    d51  = +6.51987095363079615048119,
-    d56  = -1066.34956011730205278592,
-    d57  = -351.864047514639508625601,
-    d58  = +1363.51955696662884408368,
-    d59  = -112.727669432657582669864,
-    d510 = +159.796191868560289612921,
-    d511 = -2.13865100308788816220259,
-    d512 = -3.75569172113289760348584,
-    d513 = +7.00000000000000000000000,
-    d61  = +10.4698004763293477204238,
-    d66  = -1380.01473607038123167155,
-    d67  = -531.219827862514074379012,
-    d68  = +1866.98964341870892451324,
-    d69  = -53.3302605020547902574560,
-    d610 = +82.4147560258671369782481,
-    d611 = +7.38443654502992069572676,
-    d612 = +.417299080125877511498426,
-    d613 = -3.11111111111111111111111,
-    d71  = -16.6338582677165354330709,
-    d76  = +4516.16568914956011730205,
-    d77  = +1393.85185384057776465219,
-    d78  = -5687.52042419481539670071,
-    d79  = +473.965563750151263163661,
-    d710 = -661.810776942355889724311,
-    d711 = -18.0180473354013232598119,
-    d712 = 0,
-    d713 = 0,
-    safe = 0.9,   // safety factor
-    fac1 = 0.333, // parameters for step size selection
-    fac2 = 6.0;
-    const unsigned int n = stateCurr.size();
-    do {
-        if(timeStep <= fabs(timeCurr)*1e-15 || !isFinite(timeStep))
-            return 0;   // error, integration must be terminated
-
-        /* the twelve RK stages */
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                a21 * k1[i];
-        odeSystem.eval(timeCurr+c2*timeStep, ytemp, k2);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a31*k1[i] + a32*k2[i]);
-        odeSystem.eval(timeCurr+c3*timeStep, ytemp, k3);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a41*k1[i] + a43*k3[i]);
-        odeSystem.eval(timeCurr+c4*timeStep, ytemp, k4);
-        for (unsigned int i = 0; i <n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a51*k1[i] + a53*k3[i] + a54*k4[i]);
-        odeSystem.eval(timeCurr+c5*timeStep, ytemp, k5);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a61*k1[i] + a64*k4[i] + a65*k5[i]);
-        odeSystem.eval(timeCurr+c6*timeStep, ytemp, k6);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a71*k1[i] + a74*k4[i] + a75*k5[i] + a76*k6[i]);
-        odeSystem.eval(timeCurr+c7*timeStep, ytemp, k7);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a81*k1[i] + a84*k4[i] + a85*k5[i] + a86*k6[i] + a87*k7[i]);
-        odeSystem.eval(timeCurr+c8*timeStep, ytemp, k8);
-        for (unsigned int i = 0; i <n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a91*k1[i] + a94*k4[i] + a95*k5[i] + a96*k6[i] + a97*k7[i] + a98*k8[i]);
-        odeSystem.eval(timeCurr+c9*timeStep, ytemp, k9);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a101*k1[i] + a104*k4[i] + a105*k5[i] + a106*k6[i] + a107*k7[i] + 
-                 a108*k8[i] + a109*k9[i]);
-        odeSystem.eval(timeCurr+c10*timeStep, ytemp, k10);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a111*k1[i] + a114*k4[i] + a115*k5[i] + a116*k6[i] + a117*k7[i] + 
-                 a118*k8[i] + a119*k9[i] + a1110*k10[i]);
-        odeSystem.eval(timeCurr+c11*timeStep, ytemp, k2);
-        for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a121*k1[i] + a124*k4[i] + a125*k5[i] + a126*k6[i] + a127*k7[i] + 
-                 a128*k8[i] + a129*k9[i] + a1210*k10[i] + a1211*k2[i]);
-        odeSystem.eval(timeCurr+timeStep, ytemp, k3);
-        for (unsigned int i = 0; i < n; i++) {
-            k4[i] = b1*k1[i] + b6*k6[i] + b7*k7[i] + b8*k8[i] + b9*k9[i] +
-                    b10*k10[i] + b11*k2[i] + b12*k3[i];
-            k5[i] = stateCurr[i] + timeStep * k4[i];
-        }
-     
-        /* error estimation */
-        double err = 0.0, err2 = 0.0;
-        for (unsigned int i = 0; i < n; i++) {
-            double sk = accAbs + accRel * fmax(fabs(stateCurr[i]), fabs(k5[i]));
-            if(sk==0) continue;
-            double erri = k4[i] - bhh1*k1[i] - bhh2*k9[i] - bhh3*k3[i];
-            double sqre = erri / sk;
-            err2 += sqre*sqre;
-            erri = er1*k1[i] + er6*k6[i] + er7*k7[i] + er8*k8[i] + er9*k9[i] +
-                   er10 * k10[i] + er11*k2[i] + er12*k3[i];
-            sqre = erri / sk;
-            err += sqre*sqre;
-        }
-        double deno = err + 0.01 * err2;
-        if (deno <= 0.0)
-            deno = 1.0;
-        err *= timeStep / sqrt(deno*n);
-
-        /* computation of hnew */
-        double fac = pow(err, 1./8);
-        /* we require fac1 <= hnew/h <= fac2 */
-        fac = fmax(1.0/fac2, fmin(1.0/fac1, fac/safe));
-
-        if (err <= 1.0) { // step accepted
-            // make the full step, finally
-            odeSystem.eval(timeCurr+timeStep, k5, k4);
-            // preparation for dense output
-            for(unsigned int i = 0; i < n; i++) {
-                rcont1[i] = stateCurr[i];
-                double ydiff = k5[i] - stateCurr[i];
-                rcont2[i] = ydiff;
-                double bspl = timeStep * k1[i] - ydiff;
-                rcont3[i] = bspl;
-                rcont4[i] = ydiff - timeStep*k4[i] - bspl;
-                rcont5[i] = timeStep * (d41*k1[i] + d46*k6[i] + d47*k7[i] + d48*k8[i] +
-                          d49*k9[i] + d410*k10[i] +d411*k2[i] +d412*k3[i] +d413*k4[i]);
-                rcont6[i] = timeStep * (d51*k1[i] + d56*k6[i] + d57*k7[i] + d58*k8[i] +
-                          d59*k9[i] + d510*k10[i] +d511*k2[i] +d512*k3[i] +d513*k4[i]);
-                rcont7[i] = timeStep * (d61*k1[i] + d66*k6[i] + d67*k7[i] + d68*k8[i] +
-                          d69*k9[i] + d610*k10[i] +d611*k2[i] +d612*k3[i] +d613*k4[i]);
-                rcont8[i] = timeStep * (d71*k1[i] + d76*k6[i] + d77*k7[i] + d78*k8[i] +
-                          d79*k9[i] + d710*k10[i] +d711*k2[i] +d712*k3[i] +d713*k4[i]);
-            }
-            k1 = k4;
-            statePrev = stateCurr;
-            stateCurr = k5;
-            timePrev  = timeCurr;
-            timeCurr += timeStep;
-            timeStep /= fac;
-            return timeCurr-timePrev;
-        }
-
-        // otherwise step rejected, make it smaller
-        timeStep /= fmin(1.0/fac1, fac/safe);
-    } while(1);
-}
-
-// dense output function
-double OdeSolverDOP853::value(double t, unsigned int i) const
-{
-    if(t<timePrev || t>timeCurr || i>=stateCurr.size())
-        return NAN;
-    if(t==timeCurr)
-        return stateCurr[i];
-    if(t==timePrev)
-        return rcont1[i];
-    double s = (t - timePrev) / (timeCurr-timePrev);
-    double s1= 1.0 - s;
-    return rcont1[i] + s*(rcont2[i] + s1*(rcont3[i] + s*(rcont4[i]
-      +s1*(rcont5[i] + s*(rcont6[i] + s1*(rcont7[i] + s*rcont8[i]))))));
-}
 
 /* ----- IAS15 ----- */
 #if 0

@@ -1,4 +1,4 @@
-This is the C++ library for action-based modeling of galaxies.
+This is the AGAMA library for galaxy modelling.
 
 Its main tasks include:
 
@@ -6,40 +6,14 @@ Its main tasks include:
   - Orbit integration and analysis;
   - Conversion between position/velocity and action/angle coordinates;
   - Distribution functions;
+  - Self-consistent multi-component galaxy models;
   - Framework for dealing with observational data and selection functions;
-  - Framework for finding best-fit parameters of a model;
+  - Framework for finding best-fit parameters of a model from data;
   - Auxiliary utilities (e.g., various mathematical routines).
 
-The library is structured into several levels with clearly defined interfaces:
+The core of the library is written in C++, and there are Python and Fortran interfaces.
+It comes with a collection of examples and test programs both in C++ and Python.
 
-  - Lower-level interfaces:
-    * Unit conversion (see units.h for details)
-    * Coordinate conversion (coords.h)
-    * Math routines (math_***.h, also in WD_***.h)
-    * Configuration files, string manipulation, error reporting, etc. (utils_***.h)
-
-  - Intermediate-level interfaces:
-    * Gravitational potentials (potential_***.h)
-    * Orbit integration (orbit.h) and analysis [not yet part of the library]
-    * Particle collections and handling of N-body snapshots (particle_***.h)
-    * Selection functions (sf_***.h)
-    * Distribution functions (DF) expressed in terms of actions (df_***.h)
-
-  - Higher-level interfaces:
-    * Action/angle finders (conversion from position/velocity to action/angle)
-      and action/angle mappers (reverse conversion) - action_***.h
-
-  - Still higher-level:
-    'Galaxy Model' - a combination of gravitational potential, action finder, and DF
-    (galaxymodel.h), with the following features:
-    * Moments of distribution functions (density, velocity ellipsoid)
-    * Generation of N-body models and mock observations
-    * Fitting the model to the data
-    * Self-consistent models (potential/density pair corresponding to the given DF)
-
-In addition, there is a Python interface to some of the library classes and routines.
-
-Test programs that check the correctness of various parts of library,
-and demonstrate its usage, are in a separate folder (tests).
-
+A detailed documentation for the AGAMA library is presented in a separate file docs/readme.pdf,
+and more technical description may be extracted from source files with Doxygen.
 Instructions for compilation are in the file INSTALL.

@@ -1,152 +1,126 @@
 #include "utils.h"
-#include <sstream>
-#include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <cmath>
-#include <cstring>
-#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace utils {
 
-#if 0
 /* -------- error reporting routines ------- */
 
-/// remove common prefix if it is the namespace "smile::", and remove function signature from GCC __PRETTY_FUNCTION__
-std::string undecorateFunction(std::string origin)
+namespace{  // internal
+
+/// remove function signature from GCC __PRETTY_FUNCTION__
+static std::string undecorateFunction(std::string origin)
 {
 #ifdef __GNUC__
     // parse the full function signature returned by __PRETTY_FUNCTION__
     std::string::size_type ind=origin.find('(');
-    if(ind!=std::string::npos) origin.erase(ind);
+    if(ind!=std::string::npos)
+        origin.erase(ind);
     ind=origin.rfind(' ');
-    if(ind!=std::string::npos) origin.erase(0, ind+1);
+    if(ind!=std::string::npos)
+        origin.erase(0, ind+1);
 #endif
-    if(origin.substr(0, 7)=="smile::") origin.erase(0, 7);
-    std::string::size_type indc=origin.find(':');
-    if(indc!=std::string::npos && indc+1==origin.size()/2 && origin[indc+1]==':') {
-        if(origin.substr(0, indc)==origin.substr(indc+2)) origin.replace(indc+2, std::string::npos, "Ctor");
-        if(origin[indc+2]=='~' && origin.substr(0, indc)==origin.substr(indc+3)) origin.replace(indc+2, std::string::npos, "Dtor");
-    }
     return origin;
 }
 
-/// default routine that dumps text messages to stderr
-void my_stderr_show_message(const std::string &origin, const std::string &message)
+static char verbosityText(VerbosityLevel level)
 {
-    std::cerr << ((origin.empty() ? "" : "{"+undecorateFunction(origin)+"} ") + message+"\n"); 
+    switch(level) {
+        case VL_MESSAGE: return '.';
+        case VL_WARNING: return '!';
+        case VL_DEBUG:   return '-';
+        case VL_VERBOSE: return '=';
+        default: return '?';
+    }
 }
 
-/// global variable to the routine that displays errors (if it is NULL then nothing is done)
-show_message_type* my_error_ptr   = &my_stderr_show_message;
-
-/// global variable to the routine that shows information messages 
-/// (emitted by various time-consuming routines to display progress), if NULL then no messaging is done
-show_message_type* my_message_ptr = &my_stderr_show_message;
-
-#endif
-
-#if 0
-// old version, slow
+/// file to store the messages sent to msg() routine;
+/// if not open, they are printed to stderr
+static std::ofstream logfile;
     
-/** The StringVariant class is a simple string-based variant implementation that allows
- the user to easily convert between simple numeric/string types.
- */
-class StringVariant
+/// read the environment variables controlling the verbosity level and log file redirection
+static VerbosityLevel initVerbosityLevel()
 {
-private:
-    std::string data;
-public:
-    StringVariant() : data() {}
-    StringVariant(const std::string &src) : data(src) {};
-    template<typename ValueType> StringVariant(ValueType val) {
-        std::ostringstream stream;
-        stream << val;
-        data.assign(stream.str());
-    };
-    template<typename ValueType> StringVariant(ValueType val, unsigned int width) {
-        std::ostringstream stream;
-        stream << std::setprecision(width) << val;
-        data.assign(stream.str());
-    };
-    template<typename ValueType> StringVariant& operator=(const ValueType val) {
-        std::ostringstream stream;
-        stream << val;
-        data.assign(stream.str());
-        return *this;
-    };
-    template<typename NumberType> NumberType toNumber() const {
-        NumberType result = 0;
-        std::istringstream stream(data);
-        if(stream >> result)
-            return result;
-        else if(data == "yes" || data == "true")
-            return 1;
-        return 0;
-    };
-    bool toBool() const { return(data == "yes" || data == "Yes" || data == "true" || data == "True" || data == "t" || data == "1"); }
-    double toDouble() const { return toNumber<double>(); }
-    float toFloat() const { return toNumber<float>(); }
-    int toInt() const { return toNumber<int>(); }
-    std::string toString() const { return data; }
-};
+    const char* env = std::getenv("LOGFILE");
+    if(env) {
+        logfile.open(env);
+    }
+    env = std::getenv("LOGLEVEL");
+    if(env && env[0] >= '0' && env[0] <= '3')
+        return static_cast<VerbosityLevel>(env[0]-'0');
+    return VL_MESSAGE;  // default
+}
 
-int convertToInt(const char* val) {
-    return StringVariant(val).toNumber<int>();
+/// default routine that dumps text messages to stderr
+static void defaultmsg(VerbosityLevel level, const char* origin, const std::string &message)
+{
+    if(level > verbosityLevel)
+        return;
+    std::string msg = verbosityText(level) + 
+        (origin==NULL || *origin=='\0' ? "" : "{"+undecorateFunction(origin)+"} ") + message + '\n';
+    if(logfile.is_open())
+        logfile << msg << std::flush;
+    else
+        std::cerr << msg << std::flush;
 }
-float convertToFloat(const char* val) {
-    return StringVariant(val).toNumber<float>();
-}
-double convertToDouble(const char* val) {
-    return StringVariant(val).toNumber<double>();
-}
-template<typename ValueType> std::string convertToString(ValueType val) { 
-    return StringVariant(val).toString();
-}
-template<typename ValueType> std::string convertToString(ValueType val, unsigned int width) { 
-    return StringVariant(val,width).toString(); }
+    
+}  // namespace
 
-#else
-// old-fashioned way, faster
+/// global pointer to the routine that displays or logs information messages
+MsgType* msg = &defaultmsg;
 
-int convertToInt(const char* val) {
+/// global variable controlling the verbosity of printout
+VerbosityLevel verbosityLevel = initVerbosityLevel();
+
+/* ----------- string/number conversion and parsing routines ----------------- */
+
+int toInt(const char* val) {
     return strtol(val, NULL, 10);
 }
-float convertToFloat(const char* val) {
+
+float toFloat(const char* val) {
+    return strtof(val, NULL);
+}
+
+double toDouble(const char* val) {
     return strtod(val, NULL);
 }
-double convertToDouble(const char* val) {
-    return strtod(val, NULL);
-}
-template<typename ValueType> std::string convertToString(ValueType val, unsigned int width=6) {
-    char buf[100];
-    int len=snprintf(buf, 100, "%*g", width, val);
-    int offset=0;
-    while(offset<len && buf[offset]==' ') offset++;
-    return std::string(buf+offset);
-}
-template<> std::string convertToString(int val, unsigned int width) {
-    char buf[100];
-    int len=snprintf(buf, 100, "%*i", width, val);
-    int offset=0;
-    while(offset<len && buf[offset]==' ') offset++;
-    return std::string(buf+offset);
-}
-template<> std::string convertToString(unsigned int val, unsigned int width) {
-    char buf[100];
-    int len=snprintf(buf, 100, "%*u", width, val);
-    int offset=0;
-    while(offset<len && buf[offset]==' ') offset++;
-    return std::string(buf+offset);
-}
-#endif
 
-template std::string convertToString(int, unsigned int);
-template std::string convertToString(float, unsigned int);
-template std::string convertToString(double, unsigned int);
+std::string toString(double val, unsigned int width) {
+    char buf[100];
+    snprintf(buf, 100, "%-.*g", width, val);
+    return std::string(buf);
+}
 
-bool convertToBool(const char* val) {
-    return 
+std::string toString(float val, unsigned int width) {
+    char buf[100];
+    snprintf(buf, 100, "%-.*g", width, val);
+    return std::string(buf);
+}
+
+std::string toString(int val) {
+    char buf[100];
+    snprintf(buf, 100, "%i", val);
+    return std::string(buf);
+}
+
+std::string toString(unsigned int val) {
+    char buf[100];
+    snprintf(buf, 100, "%u", val);
+    return std::string(buf);
+}
+
+std::string toString(const void* val) {
+    char buf[100];
+    snprintf(buf, 100, "%p", val);
+    return std::string(buf);
+}
+
+bool toBool(const char* val) {
+    return
         strncmp(val, "yes", 3)==0 ||
         strncmp(val, "Yes", 3)==0 ||
         strncmp(val, "true", 4)==0 ||
@@ -155,94 +129,125 @@ bool convertToBool(const char* val) {
         strncmp(val, "1", 1)==0;
 }
 
-/* ----------- string/number conversion and parsing routines ----------------- */
 //  Pretty-print - convert float (and integer) numbers to string of fixed width.
-//  Uses some sophisticated techniques to fit the number into a string of exactly the given length.
-std::string pp(double num, unsigned int width)
+//  Employ sophisticated techniques to fit the number into a string of exactly the given length.
+std::string pp(double num, unsigned int uwidth)
 {
-    std::string result, tmp;
-    if(num==0) { 
-        for(int i=0; i<static_cast<int>(width)-1; i++) result+=' ';
-        result+='0';
+    const int MAXWIDTH = 31;  // rather arbitrary restriction, but doubles never are that long
+    std::string result;
+    int width = std::min<int>(uwidth, MAXWIDTH);
+    if(width<1)
+        return result;
+    unsigned int sign = num<0;
+    if(num==0) {  // no difference between +0 and -0
+        result = "0";
+        if(width>1) result+='.';
+        result.resize(width, '0');
         return result;
     }
-    unsigned int sign=num<0;
-    double mag=log10(fabs(num));
-    std::ostringstream stream;
-    if(num!=num || num/2==num || num+0!=num)
-    {
-        if(width>=4) stream << std::setw(width) << num;
-        else stream << "#ERR";
+    if(num!=num || num==INFINITY || num==-INFINITY) {
+        result = num==INFINITY ? "+INF" : num==-INFINITY ? "-INF" : "NAN";
+        result.resize(width, '#');
+        return result;
     }
-    else if(width<=2+sign)  // display int if possible
-    {
-        if(mag<0) stream << (sign?"-":"+") << 0;
-        else if(mag>=2-sign) stream << (sign?"-":"+") << "!";
-        else stream << (int)floor(num+0.5);
+    // separate out sign, and reduce the available width
+    if(sign) {
+        result = "-";
+        width--;
     }
-    else if(mag>=0 && mag+sign<width && mag<6)  // try fixed-point for |x|>=1
-    {
-        stream << std::setw(width) << std::setprecision(width-1-sign) << num;
-        if(stream.str().find('e')!=std::string::npos) { 
-            //std::string x=stream.str();
-            //size_t e=x.find('e');
-            stream.str(""); 
-            stream << (int)floor(num+0.5); 
+    if(width==0) {
+        return result;
+    }
+    num = fabs(num);
+
+    // decimal exponent
+    int expon = (int)floor(log10(num));
+    char buf[MAXWIDTH+1];
+
+    // now we have three possibilities:
+    // 1) exponential notation:  2.34e5 or 6e-7 - at least one digit before the 'e' symbol
+    // 2) fixed-point notation:  234321.2 or 0.0000006321
+    // 3) "#" if none of the above fits into the available space
+
+    // try to print the number x>=1 in fixed-point format
+    if(expon >= 0 && expon <= width-1) {
+        int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2-expon, 0), num);
+        if(len == width+1 && buf[width] == '.') {
+            // exceeds the required width, but the final decimal point may be removed
+            buf[width] = '\0';
+            len--;
+        }
+        if(len == width) {
+            result += buf;
+            return result;
+        }
+        // otherwise we may have encountered the situation of rounding up
+        // a number 9.x to 10. and exceeding the width
+    }
+
+    // expected length of the exponent part of the string if we choose exponential notation
+    // (including the 'e' symbol, and removing the sign of exponent if it is positive)
+    int  len_exp = expon<=-100 ? 5 : expon<=-10 ? 4 : expon<0 ? 3 : expon<10 ? 2 : expon<100 ? 3 : 4;
+
+    // expected # of significant digits in mantissa in the exp format (including the leading digit)
+    int  dig_exp = std::max<int>(width-len_exp-1, 1);  // (one position is occupied by decimal point)
+
+    // expected number of significant digits in fixed-point format if |x|<1
+    // (first two symbols are "0.", and then possibly a few more zeros before the number begins)
+    int  dig_lt1 = width-1+expon;  // e.g. if expon=-2 and width=6, we may have 0.0234 - 3 digit accuracy
+
+    // try to print the number x<1 in fixed-point format if the expected precision is no less than
+    // in the exponential format, or in the special case of a number 0.5<=x<1 rounded up to 1.
+    if(expon < 0 && (dig_lt1 >= dig_exp || (num>=0.5 && width<=2))) {
+        int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2, 0), num);
+        if(len > width) {
+            buf[width] = '\0';
+            len--;
+        }
+        result += buf;
+        return result;
+    }
+    
+    // try to print the number in exponential format
+    if(width >= len_exp+1) {
+        // strip out exponent, so that the number is within [1:10)
+        num = fmax(num / pow(10., expon), 1.);  // it might be <1 due to roundoff error
+        int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2-len_exp, 0), num);
+        if(len >= 2 && buf[0] == '1' && buf[1] == '0') {
+            // a number 9.x is rounded up to 10, so we should replace it with 1. and increase the exponent
+            expon++;
+            buf[1] = '.';
+            if(len>2)
+                buf[2] = '0';
+        }
+        char buf_exp[8] = {'e'};
+        len_exp = snprintf(buf_exp+1, 6, "%-i", expon)+1;
+        if(len_exp < width) {
+            if(len > width-len_exp)
+                buf[width-len_exp] = '\0';
+            result += buf;
+            result += buf_exp;
+            return result;
         }
     }
-    else if(mag<0 && -mag+sign<width-2 && mag>=-4) // try fixed-point for |x|<1
-    {
-        stream << std::setw(width) << std::setprecision(width-1-sign+(int)floor(mag)) << num;
-    }
-    else
-    {
-        std::ostringstream strexp;
-        int expon=static_cast<int>(floor(mag));
-        strexp << std::setiosflags(std::ios_base::showpos) << expon;
-        std::string expstr=strexp.str();
-        size_t w=(width-expstr.size()-1);
-        double mant=num*pow(10.0, -expon);
-        if(w<sign)  // no luck with exp-format -- try fixed 
-        {
-            stream << (sign?"-":"+") << (mag<0 ? "0" : "!");
-        }
-        else 
-        {
-            if(w==sign) 
-                stream << (sign?"-":""); // skip mantissa
-            else if(w<=2+sign)
-            { 
-                int mantint=(int)floor(fabs(mant)+0.5);
-                if(mantint>=10) mantint=9;  // hack
-                stream << (sign?"-":"") << mantint;
-            }
-            else
-                stream << std::setprecision(w-1-sign) << mant;
-            stream << "e" << expstr;
-        }
-    }
-    result=stream.str();
-    // padding if necessary (add spaces after string)
-    while(result.length()<static_cast<size_t>(width))
-        result+=" ";
-    if(result.length()>static_cast<size_t>(width))  // cut tail if necessary (no warning given!)
-        result=result.substr(0,width);
+    
+    // can't use any of these - display a jail symbol
+    result.resize(sign+width, '#');
     return result;
 }
 
-void splitString(const std::string& src, const std::string& delim, std::vector<std::string>& result)
+std::vector<std::string> splitString(const std::string& src, const std::string& delim)
 {
-    result.clear();
+    std::vector<std::string> result;
     std::string str(src);
     std::string::size_type indx=str.find_first_not_of(delim);
     if(indx==std::string::npos) {
         result.push_back("");   // ensure that result contains at least one element
-        return;
+        return result;
     }
     if(indx>0)  // remove unnecessary delimiters at the beginning
         str=str.erase(0, indx);
-    while(!str.empty())
-    {
+    while(!str.empty()) {
         indx=str.find_first_of(delim);
         if(indx==std::string::npos)
             indx=str.size();
@@ -250,9 +255,10 @@ void splitString(const std::string& src, const std::string& delim, std::vector<s
         str=str.erase(0, indx);
         indx=str.find_first_not_of(delim);
         if(indx==std::string::npos)
-            return;
+            break;
         str=str.erase(0, indx);
     }
+    return result;
 }
 
 bool endsWithStr(const std::string& str, const std::string& end)

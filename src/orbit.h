@@ -11,23 +11,22 @@
 namespace orbit {
 
 /** Perform orbit integration in the specific coordinate system.
-    Currently is implemented through GSL odeint2 solver with 8th order Runge Kutta method.
-    \param[in]  potential  is the reference to the galactic potential;
-    \param[in]  initial_conditions  is the initial position/velocity pair in the given 
-                coordinate system (which determines the choice of c.s. for 
-                orbit integration, so make sure you pick up a reasonable one);
-    \param[in]  total_time  is the duration of integration interval;
-    \param[in]  output_timestep  determines the frequency of trajectory output, 
+    \param[in]  potential  is the reference to the gravitational potential;
+    \param[in]  initialConditions  is the initial position/velocity pair in the given 
+                coordinate system (the same c.s. is used for orbit integration and for output);
+    \param[in]  totalTime  is the duration of integration interval;
+    \param[in]  outputTimestep  determines the frequency of trajectory output, 
                 which doesn't influence the integration accuracy;
-                if set to zero, output will be produced after each internal integrator timestep;
-    \param[out] output_trajectory  will contain the trajectory in the given c.s.;
+    \param[out] outputTrajectory  will contain the trajectory in the given c.s.;
     \param[in]  accuracy  is the accuracy parameter for ODE integrator.
-    \returns    number of elementary integration steps completed. */
+    \returns    number of elementary integration steps completed.
+*/
 template<typename coordT>
 unsigned int integrate(const potential::BasePotential& potential,
-    const coord::PosVelT<coordT>& initial_conditions,
-    const double total_time,
-    const double output_timestep,
-    std::vector<coord::PosVelT<coordT> >& output_trajectory,
+    const coord::PosVelT<coordT>& initialConditions,
+    const double totalTime,
+    const double outputTimestep,
+    std::vector<coord::PosVelT<coordT> >& outputTrajectory,
     const double accuracy=1e-10);
+
 };

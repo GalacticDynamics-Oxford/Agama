@@ -40,7 +40,7 @@ struct Converter {
     that only need position/mass arrays, but not the other way round.
 */
 template<typename ParticleT>
-struct PointMassArray {
+struct ParticleArray {
     /// templated typedef of a single particle
     typedef std::pair<ParticleT, double> ElemType;
 
@@ -51,18 +51,19 @@ struct PointMassArray {
     ArrayType data;
 
     ///  default empty constructor
-    PointMassArray() {};
-    
+    ParticleArray() {};
+
     /** a seamless conversion constructor from another point mass set 
         with a possibly different template argument.
-        \tparam OtherParticleT is a particle type of the source PointMassArray */
-    template<typename OtherParticleT> PointMassArray(const PointMassArray<OtherParticleT> &src) {
+        \tparam OtherParticleT is a particle type of the source ParticleArray.
+    */
+    template<typename OtherParticleT> ParticleArray(const ParticleArray<OtherParticleT> &src) {
         data.reserve(src.size());
         Converter<OtherParticleT, ParticleT> conv;  // this is the mighty thing
         for(unsigned int i=0; i<src.size(); i++)
             data.push_back(ElemType(conv(src[i].first), src[i].second));
     }
-    
+
     /// return the array size
     inline unsigned int size() const {
         return data.size(); }
@@ -105,9 +106,9 @@ struct PointMassArray {
 };
 
 /// more readable typenames for the three coordinate systems
-typedef PointMassArray<coord::PosVelCar>  PointMassArrayCar;
-typedef PointMassArray<coord::PosVelCyl>  PointMassArrayCyl;
-typedef PointMassArray<coord::PosVelSph>  PointMassArraySph;
+typedef ParticleArray<coord::PosVelCar>  ParticleArrayCar;
+typedef ParticleArray<coord::PosVelCyl>  ParticleArrayCyl;
+typedef ParticleArray<coord::PosVelSph>  ParticleArraySph;
 
 /// specializations of conversion operator for the case that both SrcT and DestT
 /// are pos/vel/mass particle types in possibly different coordinate systems

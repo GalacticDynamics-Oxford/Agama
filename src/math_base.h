@@ -1,5 +1,5 @@
 /** \file    math_base.h
-    \brief   Base class for mathematical functions of one variable
+    \brief   Base class for mathematical functions
     \author  Eugene Vasiliev
     \date    2015
 */
@@ -13,7 +13,14 @@ inline unsigned int pow_2(unsigned int x) { return x*x; }
 /// convenience function for raising a number to the 3rd power
 inline double pow_3(double x) { return x*x*x; }
 
+/// test if a number is neither infinity nor NaN
+inline bool isFinite(double x) { return x==x && 1/x!=0; }
+
 // some useful numbers (or even not-a-numbers)
+#ifndef NULL
+#define NULL 0
+#endif
+
 #ifndef INFINITY
 #define INFINITY 1e10000
 #endif
@@ -23,15 +30,15 @@ inline double pow_3(double x) { return x*x*x; }
 #endif
 
 #ifndef M_PI
-#define M_PI       3.14159265358979323846264338328
+#define M_PI     3.14159265358979323846264338328
 #endif
 
 #ifndef M_SQRTPI
-#define M_SQRTPI   1.77245385090551602729816748334
+#define M_SQRTPI 1.77245385090551602729816748334
 #endif
 
 #ifndef M_SQRT2
-#define M_SQRT2    1.41421356237309504880168872421
+#define M_SQRT2  1.41421356237309504880168872421
 #endif
 
 #define TWO_PI_CUBE 248.050213442398561403810520537
@@ -63,7 +70,8 @@ public:
     /** Compute any combination of function, first and second derivative;
         each one is computed if the corresponding output parameter is not NULL.
         If the computation of a given derivative is not implemented, should return NaN. */
-    virtual void evalDeriv(const double x, double* value=0, double* deriv=0, double* deriv2=0) const=0;
+    virtual void evalDeriv(const double x,
+        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const=0;
 
     /** Query the number of derivatives implemented by this class */
     virtual unsigned int numDerivs() const=0;
@@ -93,7 +101,7 @@ public:
     virtual double value(const double x) const=0;
 
     /** Compute the value of the function only, by calling 'value()', derivatives are not available */
-    virtual void evalDeriv(const double x, double* val=0, double* der=0, double* der2=0) const {
+    virtual void evalDeriv(const double x, double* val=NULL, double* der=NULL, double* der2=NULL) const {
         if(val)
             *val = value(x);
         if(der)
@@ -105,6 +113,15 @@ public:
     /** No derivatives, as one might guess */
     virtual unsigned int numDerivs() const { return 0; }
 
+};
+
+/** Prototype for a definite integral of a function */
+class IFunctionIntegral {
+public:
+    virtual ~IFunctionIntegral() {};
+
+    /** Compute the value of integral of the function times x^n on the interval [x1..x2] */
+    virtual double integrate(double x1, double x2, int n=0) const=0;
 };
 
 /** Prototype of a function of N>=1 variables that computes a vector of M>=1 values. */
@@ -125,6 +142,31 @@ public:
 
     /// return the number of elements in the output array of values (M)
     virtual unsigned int numValues() const = 0;
+};
+
+/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values,
+    and derivatives of these values w.r.t.the input variables (aka jacobian). */
+class IFunctionNdimDeriv: public IFunctionNdim {
+public:
+    IFunctionNdimDeriv() {};
+    virtual ~IFunctionNdimDeriv() {};
+
+    /** evaluate the function and the derivatives.
+        \param[in]  vars   is the N-dimensional point at which the function should be computed.
+        \param[out] values is the M-dimensional array (possibly M=1) that will contain
+                    the vector of function values.
+        \param[out] derivs is the M-by-N matrix (M rows, N columns) of partial derivatives 
+                    of the vector-valued function by the input variables;
+                    if a NULL pointer is passed, this does not need to be computed,
+                    otherwise it must point to an existing array of sufficient length;
+                    the indexing scheme is derivs[m*N+n] = df_m/dx_n.
+    */
+    virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const = 0;
+
+    /** reimplement the evaluate function without derivatives */
+    virtual void eval(const double vars[], double values[]) const {
+        evalDeriv(vars, values);
+    }
 };
 
 }  // namespace math

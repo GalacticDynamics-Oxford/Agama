@@ -1,5 +1,4 @@
 #include "df_halo.h"
-#include "math_specfunc.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -9,34 +8,40 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
     par(inparams)
 {
     // sanity checks on parameters
-    if( par.ar<=0 || par.az<=0 || par.aphi<=0 ||
-        par.br<=0 || par.bz<=0 || par.bphi<=0 )
+    if(par.norm<=0)
+        throw std::invalid_argument("DoublePowerLaw DF: normalization should be positive");
+    if(par.J0<=0)
+        throw std::invalid_argument("DoublePowerLaw DF: break action J0 must be positive");
+    if(par.Jcutoff<0)
+        throw std::invalid_argument("DoublePowerLaw DF: cutoff action Jcutoff must be non-negative");
+    if(par.slopeOut<=3 && par.Jcutoff==0)
         throw std::invalid_argument(
-            "DoublePowerLaw DF: coefficients in the linear combination of actions must be positive");
-    if(par.j0<=0)
-        throw std::invalid_argument("DoublePowerLaw DF: break action j0 must be positive");
-    if(par.jcore<0)
-        throw std::invalid_argument("DoublePowerLaw DF: core action jcore must be non-negative");
-    if(par.alpha<0)
-        throw std::invalid_argument("DoublePowerLaw DF: inner slope alpha must be non-negative");
-    if(par.beta<=3)
+            "DoublePowerLaw DF: mass diverges at large J (outer slope must be > 3)");
+    if(par.slopeIn>=3)
         throw std::invalid_argument(
-            "DoublePowerLaw DF: mass diverges at large J (outer slope beta must be > 3");
-    if(par.jcore==0 && par.alpha>=3)
-        throw std::invalid_argument("DoublePowerLaw DF: mass diverges at J->0");
-    par.norm /= pow_3(2*M_PI) * 
-        math::gamma(3-par.alpha) * math::gamma(par.beta-3) / math::gamma(par.beta-par.alpha);
+            "DoublePowerLaw DF: mass diverges at J->0 (inner slope must be < 3)");
+    if(par.steepness<=0)
+        throw std::invalid_argument("DoublePowerLaw DF: invalid transition steepness parameter");
+    if( par.coefJrIn <=0 || par.coefJzIn <=0 || par.coefJrIn + par.coefJzIn>=3 || 
+        par.coefJrOut<=0 || par.coefJzOut<=0 || par.coefJrOut+par.coefJzOut>=3 )
+        throw std::invalid_argument(
+            "DoublePowerLaw DF: invalid weights in the linear combination of actions");
 }
-
+        
 double DoublePowerLaw::value(const actions::Actions &J) const {
     // linear combination of actions in the inner part of the model (for J<J0)
-    double hJ  = par.ar*J.Jr + par.az*J.Jz + par.aphi*fabs(J.Jphi);
+    double hJ  = par.coefJrIn * J.Jr + par.coefJzIn * J.Jz +
+        (3-par.coefJrIn -par.coefJzIn) * fabs(J.Jphi);
     // linear combination of actions in the outer part of the model (for J>J0)
-    double gJ  = par.br*J.Jr + par.bz*J.Jz + par.bphi*fabs(J.Jphi);
-    double val = par.norm / pow_3(par.j0) *                // overall normalization factor
-        pow(1. + par.j0 / (hJ + par.jcore), par.alpha) *   // numerator
-        pow(1. + gJ / par.j0, -par.beta);                  // denominator
+    double gJ  = par.coefJrOut* J.Jr + par.coefJzOut* J.Jz +
+        (3-par.coefJrOut-par.coefJzOut)* fabs(J.Jphi);
+    double val = par.norm / pow_3(2*M_PI * par.J0) *
+        pow(hJ / par.J0, -par.slopeIn) *
+        pow(1 + pow(gJ / par.J0, par.steepness), (par.slopeIn - par.slopeOut) / par.steepness);
+    if(par.Jcutoff>0)    // exponential cutoff at large J
+        val *= exp(-pow_2(gJ / par.Jcutoff));
     return val;
 }
+
 
 }  // namespace df

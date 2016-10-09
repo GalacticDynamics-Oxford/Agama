@@ -1,0 +1,20 @@
+This is the plugin for AMUSE N-body simulation framework.
+
+Agama is a module that provides methods for computing gravitational potential and forces corresponding
+to a variety of static density profiles (either analytic or constructed from N-body snapshots,
+in the latter case creating a smooth non-parametric representation of the N-body model).
+The potential solvers are taken from the SMILE code [Vasiliev, 2013], and this module can be used
+as an external potential in the Bridge scheme (see example 'galactic_center_agama.py')
+
+The potential is constructed using
+>>> from amuse.community.agama.interface import Agama
+>>> pot = Agama(type='type', other_params=...)
+where type may be either one of the known analytic potential models (see a full list in readme_agama.pdf),
+or, more likely, one of the general-purpose potential approximations ('Multipole' or 'CylSpline',
+the former is based on spherical-harmonic expansion and is suitable for not too flattened density profiles,
+and the latter is more appropriate for highly flattened density profiles without a cusp in the center).
+In the case of type='Multipole' or type='CylSpline', one needs to provide additionally the name of density profile
+(e.g., density='Dehnen'), or the array of particles that are used to construct a smooth density profile from
+an N-body snapshot (e.g., points=new_plummer_model(10000) ). The default parameters controlling the accuracy of
+potential approximation are suitable in most cases, but sometimes need to be adjusted
+(e.g., lmax=10 or symmetry='Axisymmetric').

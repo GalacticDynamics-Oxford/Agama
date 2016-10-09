@@ -93,26 +93,26 @@ definition of chi to be minimized w.r.t. the parameters:
 
              SUM_angles A(angles,..)
 with < A > = -----------------------   and H = H(angles, parameters p).
-		Number of angles
+             Number of angles
 
 Then
                          2
                  1  d chi               dH               dH
         b_k = - --- ------ = < H > * < ---- >  -  < H * ---- >
-		 2   dp_k              dp_k             dp_k
+                 2   dp_k              dp_k             dp_k
 
 and (neglecting second derivatives of H, see Press et al.)
 
                       2   2
-		1    d chi        dH     dH         dH         dH
-	a_kl = --- --------- = < ---- * ---- > - < ---- > * < ---- >.
-		2  dp_k dp_l     dp_k   dp_l       dp_k       dp_l
+                1    d chi        dH     dH         dH         dH
+        a_kl = --- --------- = < ---- * ---- > - < ---- > * < ---- >.
+                2  dp_k dp_l     dp_k   dp_l       dp_k       dp_l
 
 Also
         |      2 |
         | d chi  |  
         | -----  | = 2 Sqrt{ SUM_k (b_k)^2 }.
-	| d p_k  |
+        | d p_k  |
 
 The function H(angles, parameters) and its derivatives are obtained as follows
 (upper-case letters denote target and lower-case toy coordinates, J are actions,
@@ -124,7 +124,7 @@ t angles, q usual phase space co-ordinates, and p their conjugate momenta).
 2. (j,t) -> (q,p)  by toy-potential mapping, parameters alpha
 3. (q,p) -> (Q,P)  by canonical transformation, parameters beta
 
-	                          2             2            2
+                                  2             2            2
 H(J,t)        = H_eff(Q,P) = 1/2 P  + Pot(Q) + J_phi / (2 * R ) 
 dH/dbeta      = dH_eff/d(Q,P) * d(Q,P)/dbeta
 dH/dalpha     = dH_eff/d(Q,P) * d(Q,P)/d(q,p) * d(q,p)/dalpha
@@ -440,7 +440,7 @@ int SbyLevMar(               // return:        error flag (see below)
       cerr<<" lam, <H>, dH, dch = "
           <<lambda<<' ' <<mean_H<<' '<<delta_H<<' '<< dchisq //<<'\n';
 	//<<"  a=" << cpy 
-	  <<"; b="<<tpy<<'\n';
+	  <<"; b="<<tpy(0)<<','<<tpy(1)<<','<<tpy(2)<<','<<tpy(3)<<'\n';
 
 //##############################################################################
 // iteration (i.e. the main part of this routine)
@@ -493,7 +493,7 @@ int SbyLevMar(               // return:        error flag (see below)
 	    if (err)
 	      cerr<<"SbyLevMar: it "<<iterations<<": NEG. ACTIONS;   "
 	        //<< cpy << 
-		" b=" << tpy <<'\n';
+		" b=" << tpy(0)<<','<<tpy(1)<<','<<tpy(2)<<','<<tpy(3) <<'\n';
 	  } else 
 	    if(err)
 	    cerr<<"SbyLevMar: it "<<iterations<<": |dCHI^2/dA|>TOLERANCE\n";
@@ -507,7 +507,7 @@ int SbyLevMar(               // return:        error flag (see below)
 	    cerr<<"SbyLevMar: it "<<iterations
 	    <<": lam, <H>, dH, dch = "<<lambda<<' '<<mean_H
 		<<' '<<delta_H<<' '<< dchisq//<<"  a="<< cpy 
-		<<"; b="<<tpy<<'\n';
+		<<"; b="<<tpy(0)<<','<<tpy(1)<<','<<tpy(2)<<','<<tpy(3)<<'\n';
 	  lambda *= 0.5;
 	  //if(fit[2]) cp = PT.parameters();
 	  if(fit[1]) tp = TM.parameters();
@@ -520,7 +520,7 @@ int SbyLevMar(               // return:        error flag (see below)
 	} else {
 	  if(err){
 	    cerr<<"SbyLevMar: it "<<iterations<<": no improvement;"//a="<<cpy<<
-		<< " dH = "<<delta_H<<"; b="<<tpy<<'\n';
+		<< " dH = "<<delta_H<<"; b="<<tpy(0)<<','<<tpy(1)<<','<<tpy(2)<<','<<tpy(3)<<'\n';
 	  }
 	    lambda *= 4.;
         }
@@ -1388,8 +1388,8 @@ int AllFit(	            // return:	error flag (see below)
 //----------------------------------------------------------------------------
 // pre-fit  (no fit yet of the Sn)
 //
-  if(err) cerr<<" 0. Fit of ToyPar & CanPar\n"; // NOTE 0 below: temporary
-  F = SbyLevMar(J,Phi,5,n1,n2,Ni0,BIG,0.,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+  if(err>=2) cerr<<" 0. Fit of ToyPar & CanPar\n"; // NOTE 0 below: temporary
+  F = SbyLevMar(J,Phi,5,n1,n2,Ni0,BIG,0.,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   // Function (above) which does the Levenberg-Marquad iteration
   // return value is #iterations or negative number for error
   if(F<0) { 
@@ -1401,13 +1401,13 @@ int AllFit(	            // return:	error flag (see below)
 // first fit
 //
 //    if estimates for the frequencies given, use them to constrain dH
-  if(err) cerr<<" 1. Fit: max. "<<Ni1<<" iterations.\n";
+  if(err>=2) cerr<<" 1. Fit: max. "<<Ni1<<" iterations.\n";
   if(Om(0) && (Om(1) || !(J(1)))) {
     tlH = hypot(Om(0),Om(1)) * Jabs * tl9;
     tlC = (Om(0)*J(0) + Om(1)*J(1)) * tl8;// switch out ,4,s with ,6,s
-    F = SbyLevMar(J,Phi,4+sf,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+    F = SbyLevMar(J,Phi,4+sf,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   } else  //    otherwise don't constrain dH
-    F = SbyLevMar(J,Phi,4+sf,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+    F = SbyLevMar(J,Phi,4+sf,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   if(F<0) { 
     if(err) {cerr<<" 1. Fit: max. "<<Ni1<<" iterations.\n";
       cerr<<" SbyLevMar() returned "<<F<<'\n';}
@@ -1433,7 +1433,9 @@ int AllFit(	            // return:	error flag (see below)
     }
   } else if(!Om(0) || !Om(1) || !Om(2))                 // if no estimates
     Om = Phi->KapNuOm(Phi->RfromLc(WDabs(J(2))));         // and doing angle fit
-  if(err) cerr << "Omega estimate: "<< Om << "\n";
+    if(!isFinite(Om(0)+Om(1)+Om(2)))
+        cerr << "**BAD** ";
+  if(err>=2) cerr << "Omega estimate: "<< Om(0)<<','<<Om(1)<<','<<Om(2) << "\n";
   fac  = 1. / ( hypot(Om(0),Om(1))*Jabs );
   d[0] = dH*fac;
 
@@ -1443,7 +1445,7 @@ int AllFit(	            // return:	error flag (see below)
   bool fail = false, tryang=false;
   if(type==0 && d(0) <= tol){// if doing angle fit, and worth try
     tryang = true;
-    if(err) cerr<<" Fit of dS/dJi.\n";
+    if(err>=2) cerr<<" Fit of dS/dJi.\n";
     while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
     if(!J(1)) nrs = OD*(SN.NumberofTerms());
       if(useNewAngMap)
@@ -1472,7 +1474,7 @@ int AllFit(	            // return:	error flag (see below)
     }
     fac    = 1. / ( hypot(Om(0),Om(1))*Jabs );
     d[0] = dH*fac;
-    if(err) cerr<<" dJ = "<<d(0)<<'\n';
+    if(err) cerr<<"Angle fit done; dJ="<<d(0)<<", Omega="<<Om(0)<<','<<Om(1)<<','<<Om(2)<<'\n';
   }
 
   if(d(0) <= tol && !fail) return 0; // DONE!
@@ -1481,7 +1483,8 @@ int AllFit(	            // return:	error flag (see below)
 // cutting the SN. And repeating if needed (indefinitely).                   |
 //---------------------------------------------------------------------------/
 
-  if(err) cerr<<" dJ="<<d(0)<<" --> 2. Fit: tailor set of Sn, max. "
+  if(err) cerr<<" dJ="<<d(0)<<" --> 2. Fit: tailor set of Sn ("<<
+      SN.NumberofTerms()<<" terms), max. "
 	      <<Ni2<<" iterations.\n";
   double tmp = 1./double(SN.NumberofTerms());
   ta *= tmp;    tb *= tmp;    off *= tmp;
@@ -1498,7 +1501,7 @@ int AllFit(	            // return:	error flag (see below)
   if(l>l0) { l/=256; if(l<l0) l=l0; }
   tlH = dH*tl9/d(0);
   tlC = (Om(0)*J(0) + Om(1)*J(1)) * tl8;
-  F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+  F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   if(F<0) { 
     if(err) {cerr<<" dJ="<<d(0)<<" --> 2. Fit: tailor set of Sn, max. "
 		 <<Ni2<<" iterations.\n";
@@ -1517,9 +1520,9 @@ int AllFit(	            // return:	error flag (see below)
   bool done=false;
   for(int i=0;(i< (Nta-2) && !done);i++) {
     //    if still not converged: enlarge the set of SN and fit again
-    if(err) cerr<<" dJ="<<d(0)<<" --> "<< i+1 <<"th tailor set of SN (of "
-		<< Nta-2 << "), max. "
-		<<Ni2<<" iterations.\n";
+    if(err) cerr<<" dJ="<<d(0)<<" --> "<< i+1 <<"th tailor set of SN (of"
+		<<Nta-2 << ", "<<SN.NumberofTerms()<<" GF terms), max. "
+		<<Ni2<<" iterations: ";
     if((d[0]=dH*fac)>=tol) {
       oSN = SN;
       odJ = d[0];
@@ -1536,7 +1539,9 @@ int AllFit(	            // return:	error flag (see below)
       n1=fmax(Nth, 6*(SN.NumberofN1()/4+1));
       n2=fmax(Nth, 6*(SN.NumberofN2()/4+1));
       tlH = dH*tl9/d(0);
-      F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+      F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
+        cerr<<" => M="<<pow_2(TM.parameters()[0])<<", b="<<pow_2(TM.parameters()[1])
+        <<", Lz="<<TM.parameters()[2]<<", r0="<<TM.parameters()[3]<<'\n';
       if(F<0) { 
 	if(err) {cerr<<" dJ="<<d(0)<<" --> again tailor set of SN, max. "
 		     <<Ni2<<" iterations.\n";
@@ -1566,14 +1571,14 @@ int AllFit(	            // return:	error flag (see below)
 
 //    Determine the dS/dJ for the angle map
       if(type==0) {
-	if(err) cerr<<" Fit of dS/dJi.\n";
+	if(err>=2) cerr<<" Fit of dS/dJi.\n";
 	nrs = Nrs;
 	while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	if(!J(1)) nrs = OD*(SN.NumberofTerms());
           if(useNewAngMap)
-              F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+              F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err>=2);
           else
-              F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+              F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err>=2);
 	if(F) {
 	  if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	}
@@ -1738,7 +1743,7 @@ int PTFit(	            // return:	error flag (see below)
 // pre-fit  (no fit yet of the Sn)
 //
   //if(err) cerr<<" 0. Fit of ToyPar & CanPar\n"; // NOTE 0 below: temporary
-  F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni0,BIG,0.,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+  F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni0,BIG,0.,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   // Function (above) which does the Levenberg-Marquad iteration
   // return value is #iterations or negative number for error
   if(F<0) { 
@@ -1755,12 +1760,12 @@ int PTFit(	            // return:	error flag (see below)
     tlH = hypot(Om(0),Om(1)) * Jabs * tl9;
     tlC = (Om(0)*J(0) + Om(1)*J(1)) * tl8;// switch out ,4,s with ,6,s
     if(sf==0)
-      F = SbyLevMar(J,Phi,6,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
-    F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+      F = SbyLevMar(J,Phi,6,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
+    F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni1,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   } else { //    otherwise don't constrain dH
     if(sf==0)
-      F = SbyLevMar(J,Phi,6,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
-    F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+      F = SbyLevMar(J,Phi,6,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
+    F = SbyLevMar(J,Phi,5+sf,n1,n2,Ni1,BIG,tl1,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   }
   if(F<0) { 
     if(err) {cerr<<" 1. Fit: max. "<<Ni1<<" iterations.\n";
@@ -1852,7 +1857,7 @@ int PTFit(	            // return:	error flag (see below)
   if(l>l0) { l/=256; if(l<l0) l=l0; }
   tlH = dH*tl9/d(0);
   tlC = (Om(0)*J(0) + Om(1)*J(1)) * tl8;
-  F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+  F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
   if(F<0) { 
     if(err) {cerr<<" dJ="<<d(0)<<" --> 2. Fit: tailor set of Sn, max. "
 		 <<Ni2<<" iterations.\n";
@@ -1891,7 +1896,7 @@ int PTFit(	            // return:	error flag (see below)
       n1=fmax(Nth, 6*(SN.NumberofN1()/4+1));
       n2=fmax(Nth, 6*(SN.NumberofN2()/4+1));
       tlH = dH*tl9/d(0);
-      F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err);
+      F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
       if(F<0) { 
 	if(err) {cerr<<" dJ="<<d(0)<<" --> again tailor set of SN, max. "
 		     <<Ni2<<" iterations.\n";

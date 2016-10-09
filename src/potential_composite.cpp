@@ -1,32 +1,48 @@
 #include "potential_composite.h"
+#include <stdexcept>
 
 namespace potential{
 
+CompositeDensity::CompositeDensity(const std::vector<PtrDensity>& _components) : 
+    BaseDensity(), components(_components)
+{
+    if(_components.empty())
+        throw std::invalid_argument("List of density components cannot be empty");
+}
+
 double CompositeDensity::densityCar(const coord::PosCar &pos) const {
-    double sum=0; 
+    double sum=0;
     for(unsigned int i=0; i<components.size(); i++) 
-        sum+=components[i]->density(pos); 
+        sum += components[i]->density(pos); 
     return sum;
 }
 double CompositeDensity::densityCyl(const coord::PosCyl &pos) const {
-    double sum=0; 
+    double sum=0;
     for(unsigned int i=0; i<components.size(); i++) 
-        sum+=components[i]->density(pos); 
+        sum += components[i]->density(pos); 
     return sum;
 }
 double CompositeDensity::densitySph(const coord::PosSph &pos) const {
-    double sum=0; 
+    double sum=0;
     for(unsigned int i=0; i<components.size(); i++) 
-        sum+=components[i]->density(pos); 
+        sum += components[i]->density(pos); 
     return sum;
 }
 
-SymmetryType CompositeDensity::symmetry() const {
-    int sym=static_cast<int>(ST_SPHERICAL);
+coord::SymmetryType CompositeDensity::symmetry() const {
+    int sym = static_cast<int>(coord::ST_SPHERICAL);
     for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
-    return static_cast<SymmetryType>(sym);
+    return static_cast<coord::SymmetryType>(sym);
 };
+
+
+CompositeCyl::CompositeCyl(const std::vector<PtrPotential>& _components) : 
+    BasePotentialCyl(), components(_components)
+{
+    if(_components.empty())
+        throw std::invalid_argument("List of potential components cannot be empty");
+}
 
 void CompositeCyl::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
@@ -56,11 +72,11 @@ void CompositeCyl::evalCyl(const coord::PosCyl &pos,
     }
 }
 
-SymmetryType CompositeCyl::symmetry() const {
-    int sym=static_cast<int>(ST_SPHERICAL);
+coord::SymmetryType CompositeCyl::symmetry() const {
+    int sym = static_cast<int>(coord::ST_SPHERICAL);
     for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
-    return static_cast<SymmetryType>(sym);
+    return static_cast<coord::SymmetryType>(sym);
 };
 
 } // namespace potential

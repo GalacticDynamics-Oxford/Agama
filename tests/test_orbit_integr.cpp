@@ -1,9 +1,19 @@
+/** \file    test_orbit_integr.cpp
+    \date    2015-2016
+    \author  Eugene Vasiliev
+
+    Test orbit integration in various potentials and coordinate systems.
+    Note: not all tests pass at the moment.
+*/
 #include "orbit.h"
 #include "potential_analytic.h"
-#include "potential_factory.h"
+#include "potential_composite.h"
 #include "potential_dehnen.h"
+#include "potential_factory.h"
 #include "potential_ferrers.h"
 #include "units.h"
+#include "utils.h"
+#include "debug_utils.h"
 #include <cstdio>
 #include <iostream>
 #include <iomanip>
@@ -12,23 +22,21 @@
 
 const double integr_eps=1e-8;  // integration accuracy parameter
 const double eps=1e-6;  // accuracy of comparison
+const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 
 template<typename coordSysT>
-bool test_potential(const potential::BasePotential* potential,
+bool test_potential(const potential::BasePotential& potential,
     const coord::PosVelT<coordSysT>& initial_conditions,
-    const double total_time, const double timestep, const bool output)
+    const double total_time, const double timestep)
 {
-    if(potential==NULL) return true;
-    std::cout << potential->name()<<"  "<<coordSysT::name()<<" (";
+    std::cout << potential.name()<<"  "<<coordSysT::name()<<" ("<<initial_conditions<<")\n";
     double ic[6];
     initial_conditions.unpack_to(ic);
-    for(int k=0; k<6; k++) std::cout<<" "<<ic[k];
-    std::cout << "):  "<<std::flush;
     std::vector<coord::PosVelT<coordSysT> > traj;
-    int numsteps = orbit::integrate(*potential, initial_conditions, total_time, timestep, traj, integr_eps);
+    int numsteps = orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
     double avgH=0, avgLz=0, dispH=0, dispLz=0;
     for(size_t i=0; i<traj.size(); i++) {
-        double H =potential::totalEnergy(*potential, traj[i]);
+        double H =totalEnergy(potential, traj[i]);
         double Lz=coord::Lz(traj[i]);
         avgH +=H;  dispH +=pow_2(H);
         avgLz+=Lz; dispLz+=pow_2(Lz);
@@ -36,7 +44,7 @@ bool test_potential(const potential::BasePotential* potential,
             double xv[6];
             coord::toPosVelCar(traj[i]).unpack_to(xv);
             std::cout << i*timestep<<"   " <<xv[0]<<" "<<xv[1]<<" "<<xv[2]<<"  "<<
-                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"   "<<H<<" "<<Lz<<" "<<potential->density(traj[i])<<"\n";
+                xv[3]<<" "<<xv[4]<<" "<<xv[5]<<"   "<<H<<" "<<Lz<<" "<<potential.density(traj[i])<<"\n";
         }
     }
     avgH/=traj.size();
@@ -46,26 +54,38 @@ bool test_potential(const potential::BasePotential* potential,
     dispH= sqrt(std::max<double>(0, dispH -pow_2(avgH)));
     dispLz=sqrt(std::max<double>(0, dispLz-pow_2(avgLz)));
     bool completed = traj.size()>0.99*total_time/timestep;
+    bool ok = dispH<eps && (dispLz<eps || !isAxisymmetric(potential));
     if(completed)
         std::cout <<numsteps<<" steps,  ";
-    else if(numsteps>0)
+    else if(numsteps>0) {
         std::cout <<"\033[1;33mCRASHED\033[0m after "<<numsteps<<" steps,  ";
-    else 
-        std::cout <<"\033[1;31mFAILED\033[0m,  ";
-    std::cout << "E=" <<avgH <<" +- "<<dispH<<",  Lz="<<avgLz<<" +- "<<dispLz<<"\n";
-    return completed && dispH<eps && 
-        (dispLz<eps || ((potential->symmetry() & potential::ST_AXISYMMETRIC) == 0));
+        // this may naturally happen in the degenerate case when an orbit with zero angular momentum
+        // approaches the origin -- not all combinations of potential and coordinate system
+        // can cope with this. If that happens for a non-degenerate case, this is an error.
+        if(avgLz!=0) ok=false;
+    }
+    else {
+        // this may happen for an orbit started at r==0 in some potentials where the force is singular,
+        // otherwise it's an error
+        if(toPosSph(initial_conditions).r != 0) {
+            std::cout <<"\033[1;31mFAILED\033[0m,  ";
+            ok = false;
+        }
+    }
+    std::cout << "E=" <<avgH <<" +- "<<dispH<<",  Lz="<<avgLz<<" +- "<<dispLz<<
+        (ok? "" : " \033[1;31m**\033[0m") << "\n";
+    return ok;
 }
 
-const potential::BasePotential* make_galpot(const char* params)
+potential::PtrPotential make_galpot(const char* params)
 {
     const char* params_file="test_galpot_params.pot";
     std::ofstream out(params_file);
     out<<params;
     out.close();
-    const potential::BasePotential* gp = potential::readGalaxyPotential(params_file, units::galactic_Myr);
+    potential::PtrPotential gp = potential::readGalaxyPotential(params_file, units::galactic_Myr);
     std::remove(params_file);
-    if(gp==NULL)
+    if(!gp.get())
         std::cout<<"Potential not created\n";
     return gp;
 }
@@ -84,12 +104,6 @@ const char* test_galpot_params[] = {
 "1\n"
 "1e12 0.8 1 2 0.04 10\n"  };// log density profile with cutoff
 
-/*const int numtestpoints=3;
-const double init_cond[numtestpoints][6] = {
-  {1, 0.5, 0.2, 0.1, 0.2, 0.3},
-  {2, 0, 0, 0, 0, 0},
-  {0, 0, 1, 0, 0, 0} };
-*/
 /// define test suite in terms of points for various coord systems
 const int numtestpoints=5;
 const double posvel_car[numtestpoints][6] = {
@@ -111,34 +125,33 @@ const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
     {1,3.14159, 2, 0.5, 0.3, 1e-4},   // point almost along z axis, vphi must be small, but vtheta is non-zero
     {0, 2,-1, 0.5, 0,   0  }};  // point at origin with nonzero velocity in R
 
-const int numpotentials=10;
-const potential::BasePotential* pots[numpotentials] = {NULL};
 
 int main() {
-    pots[0] = new potential::Plummer(10.,5.);
-    pots[1] = new potential::NFW(10.,10.);
-    pots[2] = new potential::MiyamotoNagai(5.,2.,0.2);
-    pots[3] = new potential::Logarithmic(1.,0.01,.8,.5);
-    pots[4] = new potential::Logarithmic(1.,.7,.5);
-    pots[5] = new potential::Ferrers(1.,0.9,.7,.5);
-    pots[6] = new potential::Dehnen(2.,1.,.7,.5,1.5);
-    pots[7] = make_galpot(test_galpot_params[0]);
-    pots[8] = make_galpot(test_galpot_params[1]);
+    std::vector<potential::PtrPotential> pots;
+    pots.push_back(potential::PtrPotential(new potential::Plummer(10.,5.)));
+    pots.push_back(potential::PtrPotential(new potential::Isochrone(6.,3.)));
+    pots.push_back(potential::PtrPotential(new potential::NFW(10.,10.)));
+    pots.push_back(potential::PtrPotential(new potential::MiyamotoNagai(5.,2.,0.2)));
+    pots.push_back(potential::PtrPotential(new potential::Logarithmic(1.,0.01,.8,.5)));
+    pots.push_back(potential::PtrPotential(new potential::Logarithmic(1.,.7,.5)));
+    pots.push_back(potential::PtrPotential(new potential::Ferrers(1.,0.9,.7,.5)));
+    pots.push_back(potential::PtrPotential(new potential::Dehnen(2.,1.,1.5,.7,.5)));
+    pots.push_back(make_galpot(test_galpot_params[0]));
+    pots.push_back(make_galpot(test_galpot_params[1]));
     std::cout<<std::setprecision(10);
-    const double total_time=1000.;
+    const double total_time=100.;
     const double timestep=1.;
-    bool output=false;
-    bool allok=true;
-    for(int ip=0; ip<numpotentials; ip++) {
+    bool allok = true;
+    for(unsigned int ip=0; ip<pots.size(); ip++) {
         for(int ic=0; ic<numtestpoints; ic++) {
-            allok &= test_potential(pots[ip], coord::PosVelCar(posvel_car[ic]), total_time, timestep, output);
-            allok &= test_potential(pots[ip], coord::PosVelCyl(posvel_cyl[ic]), total_time, timestep, output);
-            allok &= test_potential(pots[ip], coord::PosVelSph(posvel_sph[ic]), total_time, timestep, output);
+            allok &= test_potential(*pots[ip], coord::PosVelCar(posvel_car[ic]), total_time, timestep);
+            allok &= test_potential(*pots[ip], coord::PosVelCyl(posvel_cyl[ic]), total_time, timestep);
+            allok &= test_potential(*pots[ip], coord::PosVelSph(posvel_sph[ic]), total_time, timestep);
         }
     }
     if(allok)
-        std::cout << "ALL TESTS PASSED\n";
-    for(int ip=0; ip<numpotentials; ip++)
-        delete pots[ip];
+        std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
+    else
+        std::cout << "\033[1;31mSOME TESTS FAILED\033[0m\n";
     return 0;
 }

@@ -9,6 +9,7 @@
 */
 #include "units.h"
 #include "potential_analytic.h"
+#include "potential_utils.h"
 #include <iostream>
 #include <cmath>
 
@@ -87,6 +88,8 @@ int main()
         galaxyMass, galaxyRadius, galaxyHeight, solarRadius, "km/s");
 
     if(ok)
-        std::cout << "ALL TESTS PASSED\n";
+        std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
+    else
+        std::cout << "\033[1;31mSOME TESTS FAILED\033[0m\n";
     return 0;
 }

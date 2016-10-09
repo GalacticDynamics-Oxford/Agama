@@ -19,7 +19,7 @@ void OblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
 {
     assert(&(pos.coordsys)==&coordSys);  // make sure we're not bullshited
     double absnu = fabs(pos.nu);
-    double signu = pos.nu>0 ? 1 : -1;
+    double signu = pos.nu>=0 ? 1 : -1;
     double lmn = pos.lambda-absnu;
     if(absnu>coordSys.delta || pos.lambda<coordSys.delta)
         throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
@@ -47,25 +47,27 @@ void OblatePerfectEllipsoid::evalDeriv(double tau, double* G, double* deriv, dou
 {
     // G is defined by eq.27 in de Zeeuw(1985), except that we use 
     // tau = {tau_deZeeuw}+{gamma_deZeeuw}, which ranges from 0 to inf.
-    double c2 = pow_2(minorAxis);
     if(tau<0)
         throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "incorrect value of tau");
-    if(tau==0) {  // handling a special case
-        double val = mass*2./M_PI/minorAxis;
-        if(G     !=NULL) *G     = val;
-        if(deriv !=NULL) *deriv = val*(-1./3)/c2;
-        if(deriv2!=NULL) *deriv2= val*( 2./5)/pow_2(c2);
-    } else {
-        double sqrttau = sqrt(tau);
-        double arct = atan(sqrttau/minorAxis)/sqrttau;
-        if(G     !=NULL)
-            *G     = mass*2./M_PI * arct;
-        if(deriv !=NULL)
-            *deriv = mass*1./M_PI * (minorAxis / (tau+c2) - arct) / tau;
-        if(deriv2!=NULL)
-            *deriv2= mass*.5/M_PI * (-minorAxis * (5*tau+3*c2) / pow_2(tau+c2) + 3*arct) / pow_2(tau);
+    double c2   = pow_2(minorAxis);
+    double fac  = mass/minorAxis*(2./M_PI);
+    double tauc = tau/c2;
+    double arct = 1;  // value for the limiting case tau==0
+    if(tau > 1e-16) {
+        double sqtc = sqrt(tauc);
+        arct = atan(sqtc)/sqtc;
     }
+    if(G)
+        *G = fac * arct;
+    if(deriv)
+        *deriv = tauc > 1e-8 ?
+            fac * 0.5 * (1 / (1+tauc) - arct) / tau :
+            fac * (-1./3 + 2./5 * tauc) / c2;    // asymptotic expansion for tau->0
+    if(deriv2!=NULL)
+        *deriv2 = tauc > 1e-5 ?
+            fac * 0.75 * (arct - (1+(5./3)*tauc) / pow_2(1+tauc)) / pow_2(tau) :
+            fac * (2./5 - 6./7 * tauc) / pow_2(c2);
 }
 
 }  // namespace potential

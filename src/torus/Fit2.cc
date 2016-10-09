@@ -5,8 +5,9 @@
 //  Created by Brian Jia Jiunn Khor on 16/07/2015.
 //  Copyright (c) 2015 Brian Jia Jiunn Khor. All rights reserved.
 //
-//  This code implements method of computing frequencies and dS/dJT introduced by Mikko
-//  Kaasalainen & Laakso Teemu (2014), and James Binney & Sanjiv Kumar (1992)
+//  This code implements method of computing frequencies and dS/dJ introduced by Mikko
+//  Kaasalainen & Laakso Teemu (2014), supervised by James Binney, Payel Das, and
+//  Eugene Vasilyev in 2015 (Oxford Theoretical Galactic Dynamics Research Group)
 //
 //  This code is built on previous torus machinery developed by Paul McMillan and
 //  Walter Dehnen
@@ -220,19 +221,27 @@ int dSbySampling (            // return:     error flag (see below)
     }
     
     // Computing error, T1, T2, T3 will be overwriten here but it doesn't matter
-    
     gsl_blas_dgemv (CblasNoTrans, 1., Xprime, T1, -1., y1); // X*T1 - y1
     gsl_blas_dgemv (CblasNoTrans, 1., Xprime, T2, -1., y2); // X*T2 - y2
     gsl_blas_dgemv (CblasNoTrans, 1., Xprime, T3, -1., y3); // X*T3 - y3
-    gsl_blas_ddot (y1, y1, &chi[0]); // | X*T1 - y1 | = chi (for dSn/dJ1)
-    gsl_blas_ddot (y2, y2, &chi[1]); // | X*T2 - y2 | = chi (for dSn/dJ2)
-    gsl_blas_ddot (y3, y3, &chi[2]); // | X*T3 - y3 | = chi (for dSn/dJ3)
+    // Then take dot product of residual, this results in sum of residual squared
+    // which is chi_square
+    gsl_blas_ddot (y1, y1, &chi[1]); // (X*T1 - y1)*(X*T1 - y1) = sum(chi^2) (for dSn/dJ1)
+    gsl_blas_ddot (y2, y2, &chi[2]); // (X*T2 - y2)*(X*T2 - y2) = sum(chi^2) (for dSn/dJ2)
+    gsl_blas_ddot (y3, y3, &chi[3]); // (X*T3 - y3)*(X*T3 - y3) = sum(chi^2) (for dSn/dJ3)
+    // Then divide by total no. of equations and take square root
+    chi[1] = sqrt(chi[1]/(Nr*Nr)); // real error estimate
+    chi[2] = sqrt(chi[2]/(Nr*Nr));
+    chi[3] = sqrt(chi[3]/(Nr*Nr));
+    chi[0] = 0;  // not used
     
     // 5. clean up
     gsl_vector_free(T1);
     gsl_vector_free(T2);
+    gsl_vector_free(T3);
     gsl_vector_free(y1);
     gsl_vector_free(y2);
+    gsl_vector_free(y3);
     gsl_vector_free(S);
     gsl_vector_free(work);
     gsl_matrix_free(X);

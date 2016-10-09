@@ -27,6 +27,14 @@ KeyValueMap::KeyValueMap(const int numParams, const char* const* params) : modif
         add(params[i]);
 }
 
+KeyValueMap::KeyValueMap(const std::string& params, const std::string& whitespace) :
+    modified(false)
+{
+    std::vector<std::string> arr = splitString(params, whitespace);
+    for(unsigned int i=0; i<arr.size(); i++)
+        add(arr[i].c_str());
+}
+
 void KeyValueMap::add(const char* line)
 {
     std::string buffer(line);
@@ -83,7 +91,7 @@ double KeyValueMap::getDouble(const std::string& key, double defaultValue) const
     if(result=="DEFAULT")
         return defaultValue;
     else
-        return utils::convertToDouble(result);
+        return toDouble(result);
 }
 
 double KeyValueMap::getDoubleAlt(const std::string& key1, 
@@ -93,7 +101,7 @@ double KeyValueMap::getDoubleAlt(const std::string& key1,
     if(result.empty())
         return getDouble(key2, defaultValue);
     else
-        return utils::convertToDouble(result);
+        return toDouble(result);
 }
 
 int KeyValueMap::getInt(const std::string& key, int defaultValue) const
@@ -102,7 +110,7 @@ int KeyValueMap::getInt(const std::string& key, int defaultValue) const
     if(result=="DEFAULT")
         return defaultValue;
     else
-        return utils::convertToInt(result);
+        return toInt(result);
 }
 
 double KeyValueMap::getIntAlt(const std::string& key1, 
@@ -112,12 +120,12 @@ double KeyValueMap::getIntAlt(const std::string& key1,
     if(result.empty())
         return getInt(key2, defaultValue);
     else
-        return utils::convertToInt(result);
+        return toInt(result);
 }
 
 bool KeyValueMap::getBool(const std::string& key, bool defaultValue) const
 {
-    return utils::convertToBool(getString(key, defaultValue?"True":"False"));
+    return toBool(getString(key, defaultValue?"True":"False"));
 }
 
 void KeyValueMap::set(const std::string& key, const std::string& value)
@@ -138,22 +146,22 @@ void KeyValueMap::set(const std::string& key, const char* value)
 
 void KeyValueMap::set(const std::string& key, const double value, unsigned int width)
 {
-    set(key, utils::convertToString(value, width));
+    set(key, toString(value, width));
 }
 
 void KeyValueMap::set(const std::string& key, const int value)
 {
-    set(key, utils::convertToString(value));
+    set(key, toString(value));
 }
 
 void KeyValueMap::set(const std::string& key, const unsigned int value)
 {
-    set(key, utils::convertToString(value));
+    set(key, toString(value));
 }
 
 void KeyValueMap::set(const std::string& key, const bool value)
 {
-    set(key, utils::convertToString(value));
+    set(key, toString(value));
 }
 
 bool KeyValueMap::unset(const std::string& key)
@@ -191,9 +199,12 @@ ConfigFile::ConfigFile(const std::string& _fileName) :
     std::ifstream strm(fileName.c_str());
     if(!strm)
         throw std::runtime_error("File does not exist: "+_fileName);
-    std::string buffer, key;
+    std::string buffer;
     int secIndex = -1;
     while(std::getline(strm, buffer)) {
+        // remove all comment lines
+        if(buffer.size()>0 && (buffer[0] == '#' || buffer[0] == ';'))
+            continue;
         std::string::size_type indx = buffer.find('[');
         std::string::size_type indx1= buffer.find(']');
         if(indx!=std::string::npos && indx1!=std::string::npos && indx1>indx)
@@ -244,11 +255,12 @@ ConfigFile::~ConfigFile()
     }
 }
 
-void ConfigFile::listSections(std::vector<std::string>& list) const
+std::vector<std::string> ConfigFile::listSections() const
 {
-    list.resize(sections.size());
+    std::vector<std::string> list(sections.size());
     for(unsigned int i=0; i<sections.size(); i++)
         list[i] = sections[i].first;
+    return list;
 }
 
 KeyValueMap& ConfigFile::findSection(const std::string& sec)

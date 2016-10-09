@@ -1,5 +1,6 @@
 #include "potential_base.h"
 #include "math_core.h"
+#include "math_spline.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -7,9 +8,6 @@ namespace potential{
 
 /// relative accuracy of density computation
 static const double EPSREL_DENSITY_INT = 1e-4;
-    
-/// relative accuracy of locating the radius of circular orbit
-static const double EPSREL_RCIRC = 1e-10;
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
@@ -64,6 +62,8 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
 
 double BasePotentialSphericallySymmetric::enclosedMass(const double radius) const
 {
+    if(radius==INFINITY)
+        return totalMass();
     double dPhidr;
     evalDeriv(radius, NULL, &dPhidr);
     return pow_2(radius)*dPhidr;
@@ -78,8 +78,8 @@ coord::PosCyl unscaleCoords(const double vars[], double* jac)
     const double costheta = vars[1] * 2 - 1;
     const double r = exp( 1/(1-scaledr) - 1/scaledr );
     if(jac)
-        *jac = math::withinReasonableRange(r) ?   // if near r=0 or infinity, set jacobian to zero
-            4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr)) : 0;
+        *jac = (r<1e-100 || r>1e100) ? 0 :  // if near r=0 or infinity, set jacobian to zero
+            4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
     return coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
 }
 
@@ -101,6 +101,8 @@ void DensityIntegrandNdim::eval(const double vars[], double values[]) const
         values[0] = dens.density(pos) * jac;
     else                // we're almost at infinity or nearly at zero (in both cases,
         values[0] = 0;  // the result is negligibly small, but difficult to compute accurately)
+    if(nonnegative && values[0]<0)
+        values[0] = 0;  // a non-negative result is required sometimes, e.g., for density sampling
 }
 
 double BaseDensity::enclosedMass(const double r) const
@@ -137,7 +139,7 @@ double BaseDensity::totalMass() const
         }
         massEstPrev = massEst>0 ? massEst : mass3;
         massEst = (mass2*mass2-mass1*mass3)/(2*mass2-mass1-mass3);
-        if(!math::isFinite(massEst) || massEst<=0)
+        if(!isFinite(massEst) || massEst<=0)
             numNeg++;  // increase counter of 'bad' attempts (negative means that mass is growing at least logarithmically with radius)
         numIter++;
     } while(numIter<maxNumIter && numNeg<maxNumNeg && mass2!=mass3 &&
@@ -166,7 +168,7 @@ double computeRho_m(const BaseDensity& dens, double R, double z, int m)
     // by averaging the input density over phi, if this is necessary at all
     if(isAxisymmetric(dens))
         return (m==0 ? dens.density(coord::PosCyl(R, z, 0)) : 0);
-    double phimax = (dens.symmetry() & ST_PLANESYM) == ST_PLANESYM ? M_PI_2 : 2*M_PI;
+    double phimax = (dens.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? M_PI_2 : 2*M_PI;
     if(m==0)
         return math::integrate(DensityAzimuthalAverageIntegrand(dens, R, z, m),
             0, phimax, EPSREL_DENSITY_INT) / phimax;
@@ -198,7 +200,7 @@ double getInnerDensitySlope(const BaseDensity& dens) {
         if(mass2<=0) rad*=2;
     } while(rad<1 && mass2==0);
     mass3 = dens.enclosedMass(rad*2);
-    if(!math::isFinite(mass2+mass3))
+    if(!isFinite(mass2+mass3))
         return NAN; // apparent error
     double alpha1, alpha2=log(mass3/mass2)/log(2.), gamma1=-1, gamma2=3-alpha2;
     int numIter=0;
@@ -206,7 +208,7 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     do{
         rad /= 2;
         mass1 = dens.enclosedMass(rad);
-        if(!math::isFinite(mass1))
+        if(!isFinite(mass1))
             return gamma2;
         alpha1 = log(mass2/mass1)/log(2.);
         gamma2 = gamma1<0 ? 3-alpha1 : gamma1;  // rough estimate
@@ -219,118 +221,6 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     if(fabs(gamma1)<1e-3)
         gamma1=0;
     return gamma1;
-}
-
-// -------- Various routines for potential --------- //
-
-double v_circ(const BasePotential& potential, double radius)
-{
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular velocity is possible");
-    coord::GradCyl deriv;
-    potential.eval(coord::PosCyl(radius, 0, 0), NULL, &deriv);
-    return sqrt(radius*deriv.dR);
-}
-
-/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
-    (i.e. the radius R of a circular orbit with the given energy E).
-*/
-class RcircRootFinder: public math::IFunction {
-public:
-    RcircRootFinder(const BasePotential& _poten, double _E) :
-        poten(_poten), E(_E) {};
-    virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
-        double Phi;
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
-        if(val) {
-            if(R==INFINITY && !math::isFinite(Phi))
-                *val = -1-fabs(E);  // safely negative value
-            else
-                *val = 2*(E-Phi) - (R>0 && R!=INFINITY ? R*grad.dR : 0);
-        }
-        if(deriv)
-            *deriv = -3*grad.dR - R*hess.dR2;
-        if(deriv2)
-            *deriv2 = NAN;
-    }
-    virtual unsigned int numDerivs() const { return 1; }
-private:
-    const BasePotential& poten;
-    const double E;
-};
-
-/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
-    (i.e. the radius R of a circular orbit with the given angular momentum L_z).
-    For the reason of accuracy, we multiply the equation by  1/(R+1), 
-    which ensures that the value stays finite as R -> infinity or R -> 0.
-*/
-class RfromLzRootFinder: public math::IFunction {
-public:
-    RfromLzRootFinder(const BasePotential& _poten, double _Lz) :
-        poten(_poten), Lz2(_Lz*_Lz) {};
-    virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        if(R < math::UNREASONABLY_LARGE_VALUE) {
-            poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
-            if(val)
-                *val = ( Lz2 - (R>0 ? pow_3(R)*grad.dR : 0) ) / (R+1);
-            if(deriv)
-                *deriv = -(Lz2 + pow_2(R)*( (3+2*R)*grad.dR + R*(R+1)*hess.dR2) ) / pow_2(R+1);
-        } else {   // at large R, Phi(R) ~ -M/R, we may use this asymptotic approximation even at infinity
-            poten.eval(coord::PosCyl(math::UNREASONABLY_LARGE_VALUE,0,0), NULL, &grad);
-            if(val)
-                *val = Lz2/(R+1) - pow_2(math::UNREASONABLY_LARGE_VALUE) * grad.dR / (1+1/R);
-            if(deriv)
-                *deriv = NAN;
-        } 
-        if(deriv2)
-            *deriv2 = NAN;
-    }
-    virtual unsigned int numDerivs() const { return 1; }
-private:
-    const BasePotential& poten;
-    const double Lz2;
-};
-
-double R_circ(const BasePotential& potential, double energy) {
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
-    return math::findRoot(RcircRootFinder(potential, energy), 0, INFINITY, EPSREL_RCIRC);
-}
-
-double L_circ(const BasePotential& potential, double energy) {
-    double R = R_circ(potential, energy);
-    return R * v_circ(potential, R);
-}
-
-double R_from_Lz(const BasePotential& potential, double Lz) {
-    if(Lz==0)
-        return 0;
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
-    return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, EPSREL_RCIRC);
-}
-
-void epicycleFreqs(const BasePotential& potential, const double R,
-    double& kappa, double& nu, double& Omega)
-{
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
-    coord::GradCyl grad;
-    coord::HessCyl hess;
-    potential.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
-    //!!! no attempt to check if the expressions under sqrt are non-negative - 
-    // they could well be for a physically plausible potential of a flat disk with an inner hole
-    kappa = sqrt(hess.dR2 + 3*grad.dR/R);
-    nu    = sqrt(hess.dz2);
-    Omega = sqrt(grad.dR/R);
 }
 
 }  // namespace potential

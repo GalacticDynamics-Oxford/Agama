@@ -29,6 +29,10 @@ public:
     /// initialize map from command-line-like arguments
     KeyValueMap(const int numParams, const char* const* params);
 
+    /// initialize map from a single string in which all parameters are listed together,
+    /// separated by any of white characters listed in the second argument
+    KeyValueMap(const std::string& params, const std::string& whitespace=", \t");
+
     /// check if a key exists in the list
     bool contains(const std::string& key) const;
 
@@ -52,7 +56,7 @@ public:
     /// return an integer from either of the two variants of key
     double getIntAlt(const std::string& key1, const std::string& key2,
         int defaultValue=0) const;
-    
+
     /// return a boolean value from the map
     bool getBool(const std::string& key, bool defaultValue=false) const;
 
@@ -108,7 +112,7 @@ public:
     ~ConfigFile();
 
     /// return a list of all sections in the INI file
-    void listSections(std::vector<std::string>& list) const;
+    std::vector<std::string> listSections() const;
 
     /// find section by name, if it does not exist then first create it
     KeyValueMap& findSection(const std::string& sec);

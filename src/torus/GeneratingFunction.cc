@@ -1344,6 +1344,7 @@ PSPD AngMap::Forward(const PSPD& Input) const
     register double Fo,lam,laq,lom=1.,loq,lax,lin,slp,a,b,r1,r2,disc;
     AlignAngles(JT);         //set angles to be between 0 and 2pi
     Jt = JT;
+    int numIter=0;
     do {
 	lam = 1;
 	dJt = NewtonStep(F0,dF1,dF2,Jt,JT); // see above
@@ -1363,7 +1364,7 @@ PSPD AngMap::Forward(const PSPD& Input) const
         dJT[2] = math::wrapAngle(dJT(2)+Pi)-Pi;
         dJT[3] = math::wrapAngle(dJT(3)+Pi)-Pi;
             Fn = 0.5*(dJT(2)*dJT(2)+dJT(3)*dJT(3));
-	    if( Fn<=F0+alpha*lam*slp || lam<=LIN ) break;
+	    if( Fn<=F0+alpha*lam*slp || lam<=LIN || ++numIter>42) break;
 	    if(lam==1.) {
 	        lom = lam;
 	        lam =-0.5*slp/(Fn-F0-slp);

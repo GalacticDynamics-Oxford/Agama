@@ -507,8 +507,8 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
     register double e2;
     static   double fac;
 // Extract and scale the actions and angles.
-    jr = double(JT(0)) / sMb;
-    jt = double(JT(1)) / sMb;
+    jr = fmax(0, double(JT(0)) / sMb);
+    jt = fmax(0, double(JT(1)) / sMb);
     tr = double(JT(2));
     tt = double(JT(3));
 // Make sure that tr is in the correct range

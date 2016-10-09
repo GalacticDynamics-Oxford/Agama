@@ -15,9 +15,6 @@
 
 #pragma once
 #include <vector>
-#ifdef HAVE_ODEINT
-#include <boost/numeric/odeint.hpp>
-#endif
 
 namespace math{
 
@@ -46,30 +43,6 @@ public:
     virtual bool isStdHamiltonian() const { return false; };
 };
 
-#if 0
-/// result of processing of a timestep 
-//    virtual STEPRESULT processStep(double timePrev, double timeCurr, OdeStateType& state) = 0;
-enum STEPRESULT {
-    SR_CONTINUE,   ///< need to continue integration
-    SR_TERMINATE,  ///< may terminate integration if necessary
-    SR_REINIT      ///< variables have changed, need to re-initialize integrator
-};
-    /// list of various ODE stepper types
-enum STEPPERKIND {
-    SK_DEFAULT,
-    SK_LEAPFROG_NB,
-    SK_DOP853,
-    SK_IAS15,
-    SK_HERMITE,
-    SK_ODEINT_CK5,
-    SK_ODEINT_DP5,
-    SK_ODEINT_BS3,
-    SK_ODEINT_BS,
-    SK_ODEINT_RK4,
-    SK_ODEINT_SYMPL4
-};
-#endif
-
 /** basic class for numerical integrators of ODE system */
 class BaseOdeSolver
 {
@@ -84,31 +57,32 @@ public:
 
     /** perform one timestep of variable length, determined by internal accuracy requirements;
         \return the length of timestep taken, or zero on error */
-    virtual double step() = 0;
+    virtual double doStep() = 0;
 
     /** return the time to which the integration has proceeded so far */
     double getTime() const { return timeCurr; }
 
-    /** return interpolated value of c-th variable at time t, where t must lie within current timestep interval;
-        called from various runtime functions that need to obtain x(t) at arbitrary times */
-    virtual double value(double t, unsigned int c) const = 0;
+    /** return interpolated solution at time t, which must lie within current timestep interval */
+    virtual void getSol(double t, double x[]) const = 0;
 
 protected:
     const IOdeSystem& odeSystem;
-    double timePrev, timeCurr;      //< previous and current value of time to which the integration has advanced
+    /// values of integration variable (time) at the beginning and the end of the current timestep
+    double timePrev, timeCurr;
 };
 
-/** 8th order Runge-Kutta integrator from Hairer,Norsett&Wanner. */
+/** 8th order Runge-Kutta integrator from Hairer,Norsett&Wanner */
 class OdeSolverDOP853: public BaseOdeSolver
 {
 public:
-    OdeSolverDOP853(IOdeSystem& _odeSystem, double _accAbs, double _accRel);
+    OdeSolverDOP853(const IOdeSystem& _odeSystem, double _accRel, double _accAbs=0);
     virtual void init(const OdeStateType& state);
-    virtual double step();
-    virtual double value(double t, unsigned int c) const;
+    virtual double doStep();
+    /** dense output with 6th order interpolation (modification of the original algorithm) */
+    virtual void getSol(double t, double x[]) const;
     static const char* myName() { return "DOP853"; };
 private:
-    const double accAbs, accRel; ///< relative and absolute accuracy for the integrator
+    const double accRel, accAbs; ///< relative and absolute tolerance parameters
     double timeStep;             ///< length of next timestep (not the one just taken)
     OdeStateType statePrev;      ///< variables at the beginning of timestep
     OdeStateType stateCurr;      ///< current (end-of-timestep) values of variables inside the integrator
@@ -121,7 +95,8 @@ private:
 };
 
 #if 0
-/** 15-th order implicit Runge-Kutta scheme from Rein & Spiegel, 2014, MNRAS (adapted from Rebound).
+/** 15-th order implicit Gauss-Radau scheme from Rein & Spiegel, 2015, MNRAS, 446, 1424
+    (adapted from Rebound).
     It has its own accuracy parameter, with typical values 10^-4..10^-3 providing relative accuracy 
     in the range 10^-15(almost machine precision)..10^-10. 
     It works only for "Standard Hamiltonian" systems (position+velocity variables). */
@@ -182,9 +157,6 @@ private:
     OdeStateType snapcrac;              ///< snap and crackle (2nd and 3rd derivatives of acceleration) at the beginning of timestep
     void hermite_step();     ///< perform one predictor-corrector step and readjust the timestep
 };
-#endif
-
-#ifdef HAVE_ODEINT
 
 /** A template class for integrators based on the boost::numeric::odeint library.
     The argument of template class is the class name of the stepper algorithm from odeint. */

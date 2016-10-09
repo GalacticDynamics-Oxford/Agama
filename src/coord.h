@@ -43,6 +43,82 @@ The fundamental routines operating on these structures are the following:
 */
 namespace coord {
 
+/// \name   Primitive data types: symmetry in 3d space
+///@{
+    
+/** defines the symmetry properties of a function in three-dimensional space */
+enum SymmetryType{ 
+    ST_NONE         = 0, ///< no symmetry whatsoever
+    // basic symmetries:
+    ST_XREFLECTION  = 1, ///< change of sign in x (flip about yz plane)
+    ST_YREFLECTION  = 2, ///< change of sign in y
+    ST_ZREFLECTION  = 4, ///< change of sign in z
+    ST_REFLECTION   = 8, ///< mirror reflection about origin (change of sign of all coordinates simultaneously)
+    ST_ZROTATION    =16, ///< rotation about z axis
+    ST_ROTATION     =32, ///< rotation about arbitrary axis
+    // composite symmetries:
+    /// mirror symmetry in xy-plane - change of sign in x and y simultaneously,
+    /// equivalent to the combination of z-reflection and mirror symmetry about origin
+    ST_XYREFLECTION = ST_ZREFLECTION | ST_REFLECTION,
+    /// triaxial - reflection about principal planes (change of sign of any coordinate):
+    /// note that while the combination of reflection symmetries about all three principal planes
+    /// implies the reflection symmetry about origin (mirroring), the converse is not true, 
+    /// that's why these are separate concepts; if all three plane-reflection symmetries are present,
+    /// then mirror-reflection is implied, and this all is encoded in the ST_TRIAXIAL value
+    ST_TRIAXIAL     = ST_XREFLECTION | ST_YREFLECTION | ST_ZREFLECTION | ST_REFLECTION, 
+    ST_AXISYMMETRIC = ST_TRIAXIAL | ST_ZROTATION,    ///< axial symmetry combined with plane symmetry
+    ST_SPHERICAL    = ST_AXISYMMETRIC | ST_ROTATION, ///< spherical symmetry
+    ST_DEFAULT      = ST_TRIAXIAL   ///< default choice when no symmetry is specified
+};
+
+/** test for symmetry w.r.t.change of sign in x */
+inline bool isXReflSymmetric(const SymmetryType sym) {
+    return (sym & ST_XREFLECTION) == ST_XREFLECTION;
+}
+
+/** test for symmetry w.r.t.change of sign in y */
+inline bool isYReflSymmetric(const SymmetryType sym) {
+    return (sym & ST_YREFLECTION) == ST_YREFLECTION;
+}
+
+/** test for symmetry w.r.t.change of sign in z */
+inline bool isZReflSymmetric(const SymmetryType sym) {
+    return (sym & ST_ZREFLECTION) == ST_ZREFLECTION;
+}
+
+/** test for symmetry w.r.t.mirror reflection */
+inline bool isReflSymmetric(const SymmetryType sym) {
+    return (sym & ST_REFLECTION) == ST_REFLECTION;
+}
+
+/** test for rotational symmetry about z axis */
+inline bool isZRotSymmetric(const SymmetryType sym) {
+    return (sym & ST_ZROTATION) == ST_ZROTATION;
+}
+
+/** test for symmetry under xy-reflection */
+inline bool isXYReflSymmetric(const SymmetryType sym) {
+    return (sym & ST_XYREFLECTION) == ST_XYREFLECTION;
+}
+
+/** test for triaxial symmetry
+    (reflection about any of the three principal planes) */
+inline bool isTriaxial(const SymmetryType sym) {
+    return (sym & ST_TRIAXIAL) == ST_TRIAXIAL;
+}
+
+/** test for axisymmetry in the 'common definition'
+    (i.e., invariance under rotation about z axis and under change of sign in z) */
+inline bool isAxisymmetric(const SymmetryType sym) {
+    return (sym & ST_AXISYMMETRIC) == ST_AXISYMMETRIC;
+}
+
+/** test for spherical symmetry */
+inline bool isSpherical(const SymmetryType sym) {
+    return (sym & ST_SPHERICAL) == ST_SPHERICAL;
+}
+
+///@}
 /// \name   Primitive data types: coordinate systems
 ///@{
 
@@ -64,6 +140,11 @@ struct Sph{
     static const char* name() { return "Spherical"; }
 };
 
+/// spherical coordinate system with modified polar angle variable
+struct SphMod{
+    static const char* name() { return "Modified spherical"; }
+};
+
 //  less trivial:
 /** prolate spheroidal coordinate system, defined by a single parameter 
     delta>0 (squared interfocal distance).
@@ -76,6 +157,12 @@ struct ProlSph{
     static const char* name() { return "Prolate spheroidal"; }
 };
 
+struct ProlMod{
+    const double D;
+    ProlMod(double _D) : D(_D) {};
+    static const char* name() { return "Modified prolate spheroidal"; }
+};
+
 ///@}
 /// \name   Primitive data types: position in different coordinate systems
 ///@{
@@ -83,7 +170,7 @@ struct ProlSph{
 /// position in arbitrary coordinates:
 /// the data types are defined as templates with the template parameter
 /// being any of the coordinate system names defined above
-template<typename coordSysT> struct PosT;
+template<typename CoordSysT> struct PosT;
 
 /// position in cartesian coordinates
 template<> struct PosT<Car>{
@@ -107,12 +194,23 @@ typedef struct PosT<Cyl> PosCyl;
 /// position in spherical coordinates
 template<> struct PosT<Sph>{
     double r;     ///< spherical radius
-    double theta; ///< polar angle [0:pi) - 0 means along z axis in positive direction, pi is along z in negative direction, pi/2 is in x-y plane
+    double theta; ///< polar angle [0:pi) - 0 means along z axis in positive direction,
+                  ///< pi is along z in negative direction, pi/2 is in x-y plane
     double phi;   ///< azimuthal angle in x-y plane [0:2pi)
     PosT<Sph>() {};
     PosT<Sph>(double _r, double _theta, double _phi) : r(_r), theta(_theta), phi(_phi) {};
 };
 typedef struct PosT<Sph> PosSph;
+
+/// position in modified spherical coordinates
+template<> struct PosT<SphMod>{
+    double r;   ///< spherical radius
+    double tau; ///< replacement for polar angle theta: tau = cos(theta) / (1 + sin(theta)); -1<=tau<=1
+    double phi; ///< azimuthal angle in x-y plane [0:2pi)
+    PosT<SphMod>() {};
+    PosT<SphMod>(double _r, double _tau, double _phi) : r(_r), tau(_tau), phi(_phi) {};
+};
+typedef struct PosT<SphMod> PosSphMod;
 
 /** position in prolate spheroidal coordinates.
     We use a somewhat different definition from de Zeeuw 1985, namely: 
@@ -128,12 +226,33 @@ template<> struct PosT<ProlSph>{
 };
 typedef struct PosT<ProlSph> PosProlSph;
 
+/** position in prolate spheroidal coordinates (alternative version).
+    The original formulation in terms of u and v variables, such that the cylindrical coordinates
+    are given by  R = D sinh(u) sin(v), z = D cosh(u) cos(v),
+    is replaced by  rho = D sinh(u), tau = cos(v) / (1 + sin(v)).
+    Here D is the interfocal distance of the coordinate system, which may even be zero.
+    An auxiliary variable chi is set equal to D cosh(u) = sqrt(D^2 + rho^2);
+    as all member variables are declared const, this assignment may not be accidentally changed.
+*/
+template<> struct PosT<ProlMod>{
+    const double rho;  ///< lies in the range [0:infinity), equal to cylindrical radius when z=0
+    const double tau;  ///< lies in the range [-1:1], analog of tau in SphMod coords
+    const double phi;  ///< usual azimuthal angle
+    const double chi;  ///< equal to sqrt(rho^2 + D^2), where D is the interfocal distance of coord.sys.
+    PosT<ProlMod>(double _rho, double _tau, double _phi) : 
+        rho(_rho), tau(_tau), phi(_phi), chi(_rho) {};
+    PosT<ProlMod>(double _rho, double _tau, double _phi, double _chi) : 
+        rho(_rho), tau(_tau), phi(_phi), chi(_chi) {};
+    PosT<ProlMod>(double _rho, double _tau, double _phi, const ProlMod& coordsys);
+};
+typedef struct PosT<ProlMod> PosProlMod;
+
 ///@}
 /// \name   Primitive data types: velocity in different coordinate systems
 ///@{
 
 /// velocity in arbitrary coordinates
-template<typename coordSysT> struct VelT;
+template<typename CoordSysT> struct VelT;
 
 /// velocity in cartesian coordinates
 template<> struct VelT<Car> {
@@ -162,12 +281,20 @@ template<> struct VelT<Sph> {
 };
 typedef struct VelT<Sph> VelSph;
 
+/// momentum in prolate spheroidal coordinates, canonically conjugate to the position
+template<> struct VelT<ProlMod> {
+    double prho, ptau, pphi;
+    VelT<ProlMod>() {};
+    VelT<ProlMod>(double _prho, double _ptau, double _pphi) : prho(_prho), ptau(_ptau), pphi(_pphi) {};
+};
+typedef struct VelT<ProlMod> VelProlMod;
+
 ///@}
 /// \name   Primitive data types: second moments of velocity in different coordinate systems
 ///@{
 
 /// second moment of velocity in arbitrary coordinates
-template<typename coordSysT> struct Vel2T;
+template<typename CoordSysT> struct Vel2T;
 
 /// velocity in cartesian coordinates
 template<> struct Vel2T<Car> {
@@ -192,7 +319,7 @@ typedef struct Vel2T<Sph> Vel2Sph;
 ///@{
 
 /// combined position and velocity in arbitrary coordinates
-template<typename coordSysT> struct PosVelT;
+template<typename CoordSysT> struct PosVelT;
 
 /// combined position and velocity in cartesian coordinates
 template<> struct PosVelT<Car>: public PosCar, public VelCar {
@@ -246,6 +373,17 @@ template<> struct PosVelT<Sph>: public PosSph, public VelSph {
 };
 typedef struct PosVelT<Sph> PosVelSph;
 
+/// canonically conjugate coordinate and momenta in modified spherical coordinates
+template<> struct PosVelT<SphMod>: public PosSphMod {
+    double pr;   ///< p_r   = v_r = dr/dt
+    double ptau; ///< p_tau = -2 * r * v_theta / (1+tau^2)
+    double pphi; ///< p_phi = R * v_phi
+    PosVelT<SphMod>() {};
+    PosVelT<SphMod>(double _r, double _tau, double _phi, double _pr, double _ptau, double _pphi) :
+    PosSphMod(_r, _tau, _phi), pr(_pr), ptau(_ptau), pphi(_pphi) {};
+};
+typedef struct PosVelT<SphMod> PosVelSphMod;
+
 /// position and velocity in prolate spheroidal coordinates
 template<> struct PosVelT<ProlSph>: public PosProlSph{
     double lambdadot, nudot, phidot;  ///< time derivatives of position variables
@@ -255,13 +393,19 @@ template<> struct PosVelT<ProlSph>: public PosProlSph{
         out[0]=lambda; out[1]=nu; out[2]=phi; out[3]=lambdadot; out[4]=nudot; out[5]=phidot; }
 };
 typedef struct PosVelT<ProlSph> PosVelProlSph;
-    
+
+/// canonically conjugate coordinate and momenta in modified prolate spherical coordinates
+template<> struct PosVelT<ProlMod>: public PosProlMod, public VelProlMod {
+    PosVelT<ProlMod>(const PosProlMod& pos, const VelProlMod& vel) : PosProlMod(pos), VelProlMod(vel) {}
+};
+typedef struct PosVelT<ProlMod> PosVelProlMod;
+
 ///@}
 /// \name   Primitive data types: gradient of a scalar function in different coordinate systems
 ///@{
 
 /// components of a gradient in a given coordinate system
-template<typename coordSysT> struct GradT;
+template<typename CoordSysT> struct GradT;
 
 /// gradient of scalar function in cartesian coordinates
 template<> struct GradT<Car>{
@@ -288,12 +432,17 @@ template<> struct GradT<ProlSph>{
 };
 typedef struct GradT<ProlSph> GradProlSph;
 
+template<> struct GradT<ProlMod>{
+    double drho, dtau, dphi;
+};
+typedef struct GradT<ProlMod> GradProlMod;
+    
 ///@}
 /// \name   Primitive data types: hessian of a scalar function in different coordinate systems
 ///@{
 
 /// components of a hessian of a scalar function (matrix of its second derivatives)
-template<typename coordSysT> struct HessT;
+template<typename CoordSysT> struct HessT;
 
 /// Hessian of scalar function F in cartesian coordinates: d2F/dx^2, d2F/dxdy, etc
 template<> struct HessT<Car>{
@@ -319,22 +468,28 @@ template<> struct HessT<ProlSph>{
 };
 typedef struct HessT<ProlSph> HessProlSph;
 
+/// Hessian of scalar function in modified prolate spheroidal coordinates
+template<> struct HessT<ProlMod>{
+    double drho2, dtau2, drhodtau;  ///< note: derivatives by phi are assumed to be zero
+};
+typedef struct HessT<ProlMod> HessProlMod;
+
 ///@}
 /// \name   Abstract interface classes for scalar functions
 ///@{
 
 /** Prototype of a scalar function which is computed in a particular coordinate system */
-template<typename coordSysT>
+template<typename CoordSysT>
 class IScalarFunction {
 public:
     IScalarFunction() {};
     virtual ~IScalarFunction() {};
     /** Evaluate any combination of value, gradient and hessian of the function at a given point.
         Each of these quantities is computed and stored in the output pointer if it was not NULL. */
-    virtual void evalScalar(const PosT<coordSysT>& x,
-        double* value=0,
-        GradT<coordSysT>* deriv=0,
-        HessT<coordSysT>* deriv2=0) const=0;
+    virtual void evalScalar(const PosT<CoordSysT>& x,
+        double* value=NULL,
+        GradT<CoordSysT>* deriv=NULL,
+        HessT<CoordSysT>* deriv2=NULL) const=0;
 };
 
 ///@}
@@ -370,9 +525,15 @@ template<> struct PosDerivT<Cyl, ProlSph> {
     double dlambdadR, dlambdadz, dnudR, dnudz;
 };
 template<> struct PosDerivT<ProlSph, Cyl> {
-    double dRdlambda, dzdlambda, dRdnu, dzdnu;
+    double dRdlambda, dRdnu, dzdlambda, dzdnu;
 };
-    
+template<> struct PosDerivT<Cyl, ProlMod> {
+    double drhodR, drhodz, dtaudR, dtaudz;
+};
+template<> struct PosDerivT<ProlMod, Cyl> {
+    double dRdrho, dRdtau, dzdrho, dzdtau;
+};
+
 
 /** second derivatives of coordinate transformation from source to destination 
     coordinate systems (srcCS=>destCS): d^2(dest_coord)/d(source_coord1)d(source_coord2) */
@@ -407,7 +568,13 @@ template<> struct PosDeriv2T<Cyl, ProlSph> {
 template<> struct PosDeriv2T<ProlSph, Cyl> {
     double d2Rdlambda2, d2Rdlambdadnu, d2Rdnu2, d2zdlambda2, d2zdlambdadnu, d2zdnu2;
 };
-    
+template<> struct PosDeriv2T<ProlMod, Cyl>{
+    double d2Rdrho2, d2Rdrhodtau, d2Rdtau2, d2zdrho2, d2zdrhodtau, d2zdtau2;
+};
+template<> struct PosDeriv2T<Cyl, ProlMod>{
+    double d2rhodR2, d2rhodRdz, d2rhodz2, d2taudR2, d2taudRdz, d2taudz2;
+};
+
 ///@}
 /// \name   Routines for conversion between position/velocity in different coordinate systems
 ///@{
@@ -472,12 +639,12 @@ template<> inline PosVelSph toPosVel<Sph,Sph>(const PosVelSph& p) { return p;}
     \return     point in destCS coordinate system. */
 template<typename srcCS, typename destCS>
 PosT<destCS> toPosDeriv(const PosT<srcCS>& from, 
-    PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=0);
+    PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=NULL);
 
 /** templated conversion with derivatives, taking the parameters of coordinate system into account */
 template<typename srcCS, typename destCS>
 PosT<destCS> toPosDeriv(const PosT<srcCS>& from, const destCS& coordsys,
-    PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=0);
+    PosDerivT<srcCS, destCS>* deriv, PosDeriv2T<srcCS, destCS>* deriv2=NULL);
 
 ///@}
 /// \name   Routines for conversion of gradients and hessians between coordinate systems
@@ -497,10 +664,13 @@ HessT<destCS> toHess(const GradT<srcCS>& srcGrad, const HessT<srcCS>& srcHess,
     coordinate system (outputCS). */
 template<typename evalCS, typename outputCS>
 void evalAndConvert(const IScalarFunction<evalCS>& F,
-    const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    const PosT<outputCS>& pos,
+    double* value=NULL,
+    GradT<outputCS>* deriv=NULL,
+    HessT<outputCS>* deriv2=NULL)
 {
-    bool needDeriv = deriv!=0 || deriv2!=0;
-    bool needDeriv2= deriv2!=0;
+    bool needDeriv = deriv!=NULL || deriv2!=NULL;
+    bool needDeriv2= deriv2!=NULL;
     GradT<evalCS> evalGrad;
     HessT<evalCS> evalHess;
     PosDerivT <outputCS, evalCS> coordDeriv;
@@ -521,10 +691,10 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
 template<typename evalCS, typename outputCS>
 void evalAndConvert(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, const evalCS& coordsys,
-    double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    double* value=NULL, GradT<outputCS>* deriv=NULL, HessT<outputCS>* deriv2=NULL)
 {
-    bool needDeriv = deriv!=0 || deriv2!=0;
-    bool needDeriv2= deriv2!=0;
+    bool needDeriv = deriv!=NULL || deriv2!=NULL;
+    bool needDeriv2= deriv2!=NULL;
     GradT<evalCS> evalGrad;
     HessT<evalCS> evalHess;
     PosDerivT <outputCS, evalCS> coordDeriv;
@@ -553,10 +723,13 @@ void evalAndConvert(const IScalarFunction<CS>& F, const PosT<CS>& pos,
     for the situation when a direct transformation is not available. */
 template<typename evalCS, typename intermedCS, typename outputCS>
 void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
-    const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    const PosT<outputCS>& pos,
+    double* value=NULL,
+    GradT<outputCS>* deriv=NULL,
+    HessT<outputCS>* deriv2=NULL)
 {
-    bool needDeriv = deriv!=0 || deriv2!=0;
-    bool needDeriv2= deriv2!=0;
+    bool needDeriv = deriv!=NULL || deriv2!=NULL;
+    bool needDeriv2= deriv2!=NULL;
     GradT<evalCS> evalGrad;
     HessT<evalCS> evalHess;
     GradT<intermedCS> intermedGrad;
@@ -587,10 +760,10 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
 template<typename evalCS, typename intermedCS, typename outputCS>
 void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos, const evalCS& coordsys,
-    double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0)
+    double* value=NULL, GradT<outputCS>* deriv=NULL, HessT<outputCS>* deriv2=NULL)
 {
-    bool needDeriv = deriv!=0 || deriv2!=0;
-    bool needDeriv2= deriv2!=0;
+    bool needDeriv = deriv!=NULL || deriv2!=NULL;
+    bool needDeriv2= deriv2!=NULL;
     GradT<evalCS> evalGrad;
     HessT<evalCS> evalHess;
     GradT<intermedCS> intermedGrad;
@@ -622,12 +795,21 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     into gradients and hessians in a target coordinate system (outputCS). */
 template<typename outputCS>
 void evalAndConvertSph(const math::IFunction& F,
-    const PosT<outputCS>& pos, double* value=0, GradT<outputCS>* deriv=0, HessT<outputCS>* deriv2=0);
+    const PosT<outputCS>& pos,
+    double* value=NULL,
+    GradT<outputCS>* deriv=NULL,
+    HessT<outputCS>* deriv2=NULL);
 
 ///@}
 
 /// convenience functions to extract the value of angular momentum and its z-component
-template<typename coordT> double Ltotal(const PosVelT<coordT>& p);
-template<typename coordT> double Lz(const PosVelT<coordT>& p);
+template<typename coordT> double Ltotal(const PosVelT<coordT> &p);
+template<typename coordT> double Lz(const PosVelT<coordT> &p);
 
+/** evaluate the kinetic energy from position/momentum in the given coordinate system;
+    optionally also output its derivative w.r.t each coordinate/momentum in the second argument
+*/
+template<typename coordT>
+double Ekin(const PosVelT<coordT> &p, coord::GradT<coordT> *dEbyPos=NULL, coord::VelT<coordT> *dEbyVel=NULL);
+    
 }  // namespace coord

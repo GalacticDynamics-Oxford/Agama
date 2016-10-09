@@ -1,4 +1,5 @@
 #include "math_core.h"
+#include "utils.h"
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
@@ -6,7 +7,6 @@
 #include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_rng.h>
-#include <gsl/gsl_monte_vegas.h>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
@@ -15,6 +15,19 @@
 #include <cuba.h>
 #else
 #include "cubature.h"
+#endif
+
+#ifdef _OPENMP
+#if defined(__APPLE__) && __GNUC__==4 && __GNUC_MINOR__==2
+// this is apparently a bug in Apple compiler that forces us to disable correct OpenMP support in this context
+// (linker reports undefined symbols _gomp_thread_attr and _gomp_tls_key)
+#warning Use of random() is not thread-safe due to broken OpenMP implementation
+#else
+#define HAVE_VALID_OPENMP
+#endif
+#endif
+#ifdef HAVE_VALID_OPENMP
+#include <omp.h>
 #endif
 
 namespace math{
@@ -41,7 +54,7 @@ static void exceptionally_awesome_gsl_error_handler(const char *reason,
         throw std::domain_error(std::string("GSL domain error: ")+reason);
     if( gsl_errno == GSL_EINVAL )
         throw std::invalid_argument(std::string("GSL invalid argument error: ")+reason);
-    throw std::runtime_error(std::string("GSL error: ")+reason);
+    throw std::runtime_error("GSL error "+utils::toString(gsl_errno)+": "+reason);
 }
 
 // a static variable that initializes our error handler
@@ -49,27 +62,36 @@ bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_
 
 // ------ math primitives -------- //
 
-static double functionWrapper(double x, void* param){
+static double functionWrapper(double x, void* param)
+{
     return static_cast<IFunction*>(param)->value(x);
 }
 
-int fcmp(double x, double y, double eps) {
+int fcmp(double x, double y, double eps)
+{
     if(x==0)
         return y<-eps ? -1 : y>eps ? +1 : 0;
     if(y==0)
         return x<-eps ? -1 : x>eps ? +1 : 0;
+    if(x!=x)
+        return -2;
+    if(y!=y)
+        return +2;
     return gsl_fcmp(x, y, eps);
 }
 
-double powInt(double x, int n) {
+double powInt(double x, int n)
+{
     return gsl_pow_int(x, n);
 }
 
-double wrapAngle(double x) {
-    return gsl_sf_angle_restrict_pos(x);
+double wrapAngle(double x)
+{
+    return isFinite(x) ? gsl_sf_angle_restrict_pos(x) : x;
 }
 
-double unwrapAngle(double x, double xprev) {
+double unwrapAngle(double x, double xprev)
+{
     double diff=(x-xprev)/(2*M_PI);
     double nwraps=0;
     if(diff>0.5) 
@@ -79,14 +101,26 @@ double unwrapAngle(double x, double xprev) {
     return x - 2*M_PI * nwraps;
 }
 
-unsigned int binSearch(const double x, const double arr[], unsigned int size)
+template<typename NumT>
+unsigned int binSearch(const NumT x, const NumT arr[], unsigned int size)
 {
     if(size<2)
         throw std::invalid_argument("Error in binSearch: should have at least one bin");
     if(x<arr[0] && x>arr[size-1])
         throw std::invalid_argument("Error in binSearch: point is outside the interval");
-    unsigned int index = 0;
+    // first guess the likely location in the case that the input grid is equally-spaced
+    unsigned int index = static_cast<unsigned int>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
     unsigned int indhi = size-1;
+    if(index==size-1)
+        return size-2;     // special case -- we are exactly at the end of array, return the previous node
+    if(x>=arr[index]) {
+        if(x<arr[index+1])
+            return index;  // guess correct, exiting
+        // otherwise the search is restricted to [ index .. indhi ]
+    } else {
+        indhi = index;  // search restricted to [ 0 .. index ]
+        index = 0;
+    }
     while(indhi > index + 1) {
         unsigned int i = (indhi + index)/2;
         if(arr[i] > x)
@@ -96,9 +130,48 @@ unsigned int binSearch(const double x, const double arr[], unsigned int size)
     }
     return index;
 }
-    
+
+// template instantiations
+template unsigned int binSearch(const double x, const double arr[], unsigned int size);
+template unsigned int binSearch(const float x, const float arr[], unsigned int size);
+template unsigned int binSearch(const int x, const int arr[], unsigned int size);
+template unsigned int binSearch(const long x, const long arr[], unsigned int size);
+template unsigned int binSearch(const unsigned int x, const unsigned int arr[], unsigned int size);
+template unsigned int binSearch(const unsigned long x, const unsigned long arr[], unsigned int size);
+
 /* --------- random numbers -------- */
 class RandGenStorage{
+#ifdef HAVE_VALID_OPENMP
+    // in the case of OpenMP, we have as many independent pseudo-random number generators
+    // as there are threads, and each thread uses its own instance, to avoid race condition
+    // and maintain deterministic output
+    int maxThreads;
+    std::vector<gsl_rng*> randgen;
+public:
+    RandGenStorage() {
+        maxThreads = std::max(1, omp_get_max_threads());
+        randgen.resize(maxThreads);
+        for(int i=0; i<maxThreads; i++) {
+            randgen[i] = gsl_rng_alloc(gsl_rng_default);
+            gsl_rng_set(randgen[i], i);  // assign a different but deterministic seed to each thread
+        }
+    }
+    ~RandGenStorage() {
+        for(int i=0; i<maxThreads; i++)
+            gsl_rng_free(randgen[i]);
+    }
+    void randomize(unsigned int seed) {
+        if(!seed)
+            seed = (unsigned int)time(NULL);
+        for(int i=0; i<maxThreads; i++)
+            gsl_rng_set(randgen[i], seed+i);
+    }
+    inline double random() {
+        int i = std::min(omp_get_thread_num(), maxThreads-1);
+        return gsl_rng_uniform(randgen[i]);
+    }
+#else
+    gsl_rng* randgen;
 public:
     RandGenStorage() {
         randgen = gsl_rng_alloc(gsl_rng_default);
@@ -106,24 +179,37 @@ public:
     ~RandGenStorage() {
         gsl_rng_free(randgen);
     }
-    void randomize() {
-        gsl_rng_set(randgen, (unsigned int)time( NULL ));
+    void randomize(unsigned int seed) {
+        gsl_rng_set(randgen, seed ? seed : (unsigned int)time(NULL));
     }
     inline double random() {
         return gsl_rng_uniform(randgen);
     }
-private:
-    gsl_rng* randgen;
+#endif
 };
-static RandGenStorage randgen;  // global random number generator
 
-// convenience function to generate a random number using global generator
-double random() {
+// global instance of random number generator -- created at program startup and destroyed
+// at program exit. Note that the order of initialization of different modules is undefined,
+// thus no other static variable initializer may use the random() function.
+// Moving the initializer into the first call of random() is not a remedy either,
+// since it may already be called from a parallel section and will not determine
+// the number of threads correctly.
+static RandGenStorage randgen;
+
+void randomize(unsigned int seed)
+{
+    randgen.randomize(seed);
+}
+
+// generate a random number using the global generator
+double random()
+{
     return randgen.random();
 }
 
 // generate 2 random numbers with normal distribution, using Box-Muller approach
-void getNormalRandomNumbers(double& num1, double& num2) {
+void getNormalRandomNumbers(double& num1, double& num2)
+{
     double p1 = random();
     double p2 = random();
     if(p1>0&&p1<=1)
@@ -132,15 +218,27 @@ void getNormalRandomNumbers(double& num1, double& num2) {
     num2 = p1*cos(2*M_PI*p2);
 }
 
+double quasiRandomHalton(unsigned int ind, unsigned int base)
+{
+    double val = 0, fac = 1.;
+    while(ind > 0) {
+        fac /= base;
+        val += fac * (ind % base);
+        ind /= base;
+    }
+    return val;
+}
+
 // ------- tools for analyzing the behaviour of a function around a particular point ------- //
 // this comes handy in root-finding and related applications, when one needs to ensure that 
 // the endpoints of an interval strictly bracked the root: 
 // if f(x) is exactly zero at one of the endpoints, and we want to locate the root inside the interval,
 // then we need to shift slightly the endpoint to ensure that f(x) is strictly positive (or negative).
 
-PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0)
+PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0) : absx0(fabs(x0))
 {
-    double delta = fmax(fabs(x0) * GSL_SQRT_DBL_EPSILON, 16*GSL_DBL_EPSILON);
+    // small offset used in computing numerical derivatives, if the analytic ones are not available
+    double delta = fmax(fabs(x0) * GSL_ROOT3_DBL_EPSILON, 16*GSL_DBL_EPSILON);
     // we assume that the function can be computed at all points, but the derivatives not necessarily can
     double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
     f0 = fder = fder2=NAN;
@@ -173,7 +271,10 @@ double PointNeighborhood::dxToPosneg(double sgn) const
     // safety factor to make sure we overshoot in finding the value of opposite sign
     double s0 = sgn*f0 * 1.1;
     double sder = sgn*fder, sder2 = sgn*fder2;
-    const double delta = fmin(fabs(fder/fder2)*0.5, GSL_SQRT_DBL_EPSILON);
+    // offset should be no larger than the scale of variation of the function,
+    // but no smaller than the minimum resolvable distance between floating point numbers
+    const double delta = fmin(fabs(fder/fder2)*0.5,
+        fmax(1000*GSL_DBL_EPSILON * absx0, fabs(f0)) / fabs(sder));  //TODO!! this is not satisfactory
     if(s0>0)
         return 0;  // already there
     if(sder==0) {
@@ -214,13 +315,34 @@ double PointNeighborhood::dxBetweenRoots() const
     return sqrt(fder*fder - 2*f0*fder2) / fabs(fder2);  // NaN if discriminant<0 - no roots
 }
 
+double deriv2(double x0, double x1, double x2, double f0, double f1, double f2,
+    double df0, double df1, double df2)
+{
+    // construct a divided difference table to evaluate 2nd derivative via Hermite interpolation
+    double dx10 = x1-x0, dx21 = x2-x1, dx20 = x2-x0;
+    double df10 = (f1   - f0  ) / dx10;
+    double df21 = (f2   - f1  ) / dx21;
+    double dd10 = (df10 - df0 ) / dx10;
+    double dd11 = (df1  - df10) / dx10;
+    double dd21 = (df21 - df1 ) / dx21;
+    double dd22 = (df2  - df21) / dx21;
+    return ( -2 * (pow_2(dx21)*(dd10-2*dd11) + pow_2(dx10)*(dd22-2*dd21)) +
+            4*dx10*dx21 * (dx10*dd21 + dx21*dd11) / dx20 ) / pow_2(dx20);
+}
+
 // ------ root finder routines ------//
 
-/// used in hybrid root-finder to predict the root location by Hermite interpolation
-inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx1, 
+/// used in hybrid root-finder to predict the root location by Hermite interpolation:
+/// compute the value of f(x) given its values and derivatives at two points x1,x2
+/// (x1<=x<=x2 or x1>=x>=x2 is implied but not checked), if the function is expected to be
+/// monotonic on this interval (i.e. its derivative does not have roots on x1..x2),
+/// otherwise return NAN
+inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx1,
     double x2, double f2, double dfdx2)
 {
-    if(!gsl_finite(dfdx1+dfdx2) || dfdx1*dfdx2<0)  // derivatives must exist and have the same sign
+    // derivatives must exist and have the same sign
+    // (but shouldn't bee too large, otherwise we have an overflow -- apparently a bug in gsl_poly_solve)
+    if(!gsl_finite(dfdx1+dfdx2) || dfdx1*dfdx2<0 || dfdx1*dfdx1>1e100)
         return NAN;
     const double dx = x2-x1, sixdf = 6*(f2-f1);
     const double t = (x-x1)/dx;
@@ -229,7 +351,7 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
     int nroots = gsl_poly_solve_quadratic(-sixdf+3*dx*(dfdx1+dfdx2), 
         sixdf-2*dx*(2*dfdx1+dfdx2), dx*dfdx1, &t1, &t2);
     if(nroots>0 && ((t1>=0 && t1<=1) || (t2>=0 && t2<=1)) )
-        return NAN;   // will not produce a non-monotonic result
+        return NAN;   // will produce a non-monotonic result
     return pow_2(1-t) * ( (1+2*t)*f1 + t * dfdx1*dx )
          + pow_2(t) * ( (3-2*t)*f2 + (t-1)*dfdx2*dx );
 }
@@ -364,8 +486,10 @@ static double findRootHybrid(const IFunction& fnc,
                 b += offset;        // final Newton step
             }
         }
-        if(numIter >= MAXITER)
+        if(numIter >= MAXITER) {
             converged = true;  // not quite ready, but can't loop forever
+            utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded");
+        }
     } while(!converged);
     return b;  // best approximation
 }
@@ -373,6 +497,8 @@ static double findRootHybrid(const IFunction& fnc,
 /** scaling transformation of input function for the case that the interval is (semi-)infinite:
     it replaces the original argument  x  with  y in the range [0:1],  
     and implements the transformation of 1st derivative.
+    TODO: change the transformation to logarithmic in case of infinite intervals,
+    to promote a (nearly) scale-free behaviour.
 */
 class ScaledFunction: public IFunction {
 public:
@@ -487,7 +613,8 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
 
 // 1d minimizer with known initial point
 static double findMinKnown(const IFunction& fnc, 
-    double xlower, double xupper, double xinit, double reltoler)
+    double xlower, double xupper, double xinit,
+    double flower, double fupper, double finit, double reltoler)
 {
     gsl_function F;
     F.function = &functionWrapper;
@@ -495,25 +622,33 @@ static double findMinKnown(const IFunction& fnc,
     gsl_min_fminimizer *minser = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
     double xroot = NAN;
     double abstoler = reltoler*fabs(xupper-xlower);
-    if(gsl_min_fminimizer_set(minser, &F, xinit, xlower, xupper) == GSL_SUCCESS) {
-        int iter=0;
-        do {
-            iter++;
-            try {
-                gsl_min_fminimizer_iterate (minser);
-            }
-            catch(std::runtime_error&) {
-                xroot = NAN;
-                break;
-            }
-            xroot  = gsl_min_fminimizer_x_minimum (minser);
-            xlower = gsl_min_fminimizer_x_lower (minser);
-            xupper = gsl_min_fminimizer_x_upper (minser);
+    gsl_min_fminimizer_set_with_values(minser, &F, xinit, finit, xlower, flower, xupper, fupper);
+    int iter=0;
+    do {
+        iter++;
+        try {
+            gsl_min_fminimizer_iterate (minser);
         }
-        while (fabs(xlower-xupper) > abstoler && iter < MAXITER);
+        catch(std::runtime_error&) {
+            xroot = NAN;
+            break;
+        }
+        xroot  = gsl_min_fminimizer_x_minimum (minser);
+        xlower = gsl_min_fminimizer_x_lower (minser);
+        xupper = gsl_min_fminimizer_x_upper (minser);
     }
+    while (fabs(xlower-xupper) > abstoler && iter < MAXITER);
     gsl_min_fminimizer_free(minser);
     return xroot;
+}
+
+static inline double minGuess(double x1, double x2, double y1, double y2)
+{
+    const double golden = 0.618034;
+    if(y1<y2)
+        return x1 * golden + x2 * (1-golden);
+    else
+        return x2 * golden + x1 * (1-golden);
 }
 
 // 1d minimizer without prior knowledge of minimum location
@@ -532,45 +667,35 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     ScaledFunction F(fnc, xlower, xupper);
     xlower = F.y_from_x(xlower);
     xupper = F.y_from_x(xupper);
-    if(xinit == xinit) 
+    double ylower = F(xlower);
+    double yupper = F(xupper);
+    if(xinit == xinit) {
         xinit  = F.y_from_x(xinit);
-    else {    // initial guess not provided
-        xinit = (xlower+xupper)/2;
-        double ylower = F(xlower);
-        double yupper = F(xupper);
-        double yinit  = F(xinit);
-        if(!isFinite(ylower+yupper+yinit))
-            return NAN;
-        double abstoler = reltoler*fabs(xupper-xlower);
-        int iter = 0;
-        while( (yinit>=ylower || yinit>=yupper) && iter<MAXITER && fabs(xlower-xupper)>abstoler) {
-            if(yinit<ylower) {
-                xlower=xinit;
-                ylower=yinit;
-            } else {
-                if(yinit<yupper) {
-                    xupper=xinit;
-                    yupper=yinit;
-                } else {  // pathological case - initial guess was higher than both ends
-                    double xmin1 = findMin(F, xlower, xinit,  NAN, reltoler);
-                    double xmin2 = findMin(F, xinit,  xupper, NAN, reltoler);
-                    double ymin1 = F(xmin1);
-                    double ymin2 = F(xmin2);
-                    if(!isFinite(ymin1+ymin2))
-                        return NAN;
-                    return F.x_from_y(ymin1<ymin2 ? xmin1 : xmin2);
-                }
-            }
-            xinit=(xlower+xupper)/2;
-            yinit=F(xinit);
-            if(!isFinite(yinit))
-                return NAN;
-            iter++;
-        }
-        if(yinit>=ylower || yinit>=yupper)  // couldn't locate a minimum inside the interval,
-            return F.x_from_y(ylower<yupper ? xlower : xupper);  // so return one of endpoints
+    } else {    // initial guess not provided - try to find it somewhere inside the interval
+        xinit = minGuess(xlower, xupper, ylower, yupper);
     }
-    return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, reltoler));  // normal min-search
+    double yinit  = F(xinit);
+    if(!isFinite(ylower+yupper+yinit))
+        return NAN;
+    int iter = 0;
+    while( (yinit>=ylower || yinit>=yupper) && iter<MAXITER && fabs(xlower-xupper)>reltoler) {
+        // if the initial guess does not enclose minimum, provide a new guess inside a smaller range
+        if(ylower<yupper) {
+            xupper = xinit;
+            yupper = yinit;
+        } else {
+            xlower = xinit;
+            ylower = yinit;
+        }
+        xinit = minGuess(xlower, xupper, ylower, yupper);
+        yinit = F(xinit);
+        if(!isFinite(yinit))
+            return NAN;
+        iter++;
+    }
+    if(yinit>=ylower || yinit>=yupper)  // couldn't locate a minimum inside the interval,
+        return F.x_from_y(ylower<yupper ? xlower : xupper);  // so return one of endpoints
+    return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, ylower, yupper, yinit, reltoler));
 }
 
 // ------- integration routines ------- //
@@ -623,6 +748,14 @@ double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
     return result;
 }
 
+void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights)
+{
+    gsl_integration_glfixed_table* gltable = gsl_integration_glfixed_table_alloc(N);
+    for(int i=0; i<N; i++)
+        gsl_integration_glfixed_point(x1, x2, i, &(coords[i]), &(weights[i]), gltable);
+    gsl_integration_glfixed_table_free(gltable);
+}
+
 // integration transformation classes
 
 double ScaledIntegrandEndpointSing::x_from_y(const double y) const 
@@ -655,8 +788,8 @@ double ScaledIntegrandEndpointSing::value(const double y) const
 // wrapper for Cuba library
 struct CubaParams {
     const IFunctionNdim& F;      ///< the original function
-    const double* xlower;        ///< lower limits of integration
-    const double* xupper;        ///< upper limits of integration
+    const double xlower[];        ///< lower limits of integration
+    const double xupper[];        ///< upper limits of integration
     std::vector<double> xvalue;  ///< temporary storage for un-scaling input point 
                                  ///< from [0:1]^N to the original range
     std::string error;           ///< store error message in case of exception
@@ -674,16 +807,18 @@ static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
             param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
         param->F.eval(&param->xvalue.front(), fval);
         double result=0;
-        for(unsigned int i=0; i<param->F.numValues(); i++)
+        for(int i=0; i< *ncomp; i++)
             result+=fval[i];
         if(!isFinite(result)) {
-            param->error = "Invalid function value encountered";
+            param->error = "integrateNdim: invalid function value encountered at";
+            for(int n=0; n< *ndim; n++)
+                param->error += " "+utils::toString(param->xvalue[n], 15);
             return -1;
-        }        
+        }
         return 0;   // success
     }
     catch(std::exception& e) {
-        param->error = std::string(" ")+e.what();
+        param->error = std::string("integrateNdim: ") + e.what();
         return -999;  // signal of error
     }
 }
@@ -696,8 +831,8 @@ struct CubatureParams {
     explicit CubatureParams(const IFunctionNdim& _F) :
         F(_F), numEval(0){};
 };
-static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_param,
-    unsigned fdim, double *fval)
+static int integrandNdimWrapperCubature(unsigned int ndim, const double *x, void *v_param,
+    unsigned int fdim, double *fval)
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
     assert(ndim == param->F.numVars() && fdim == param->F.numValues());
@@ -705,16 +840,18 @@ static int integrandNdimWrapperCubature(unsigned ndim, const double *x, void *v_
         param->numEval++;
         param->F.eval(x, fval);
         double result=0;
-        for(unsigned int i=0; i<param->F.numValues(); i++)
+        for(unsigned int i=0; i<fdim; i++)
             result+=fval[i];
         if(!isFinite(result)) {
-            param->error = "Invalid function value encountered";
+            param->error = "integrateNdim: invalid function value encountered at";
+            for(unsigned int n=0; n<ndim; n++)
+                param->error += " "+utils::toString(x[n], 15);
             return -1;
         }
         return 0;   // success
     }
     catch(std::exception& e) {
-        param->error = std::string(" ")+e.what();
+        param->error = std::string("integrateNdim: ") + e.what();
         return -1;  // signal of error
     }
 }
@@ -727,10 +864,9 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
     const double absToler = 0;  // maybe should be more flexible?
-    double* error = outError;
+    // storage for errors in the case that user doesn't need them
     std::vector<double> tempError(numValues);
-    if(error==NULL)
-        error = &tempError.front();  // storage for errors in the case that user doesn't need them
+    double* error = outError!=NULL ? outError : &tempError.front();
 #ifdef HAVE_CUBA
     CubaParams param(F, xlower, xupper);
     std::vector<double> tempProb(numValues);  // unused
@@ -738,10 +874,14 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
     cubacores(0, 0);
     Cuhre(numVars, numValues, &integrandNdimWrapperCuba, &param, NVEC,
-          relToler, absToler, FLAGS, minNumEval, maxNumEval, 
-          KEY, NULL/*STATEFILE*/, NULL/*spin*/,
-          &nregions, numEval!=NULL ? numEval : &neval, &fail, 
-          result, error, &tempProb.front());
+        relToler, absToler, FLAGS, minNumEval, maxNumEval, 
+        KEY, NULL/*STATEFILE*/, NULL/*spin*/,
+        &nregions, numEval!=NULL ? numEval : &neval, &fail, 
+        result, error, &tempProb.front());
+    if(fail==-1)
+        throw std::runtime_error("integrateNdim: number of dimensions is too large");
+    if(fail==-2)
+        throw std::runtime_error("integrateNdim: number of components is too large");
     // need to scale the result to account for coordinate transformation [xlower:xupper] => [0:1]
     double scaleFactor = 1.;
     for(unsigned int n=0; n<numVars; n++)
@@ -751,16 +891,16 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
         error[m] *= scaleFactor;
     }
     if(!param.error.empty())
-        throw std::runtime_error("Error in integrateNdim: "+param.error);
+        throw std::runtime_error(param.error);
 #else
     CubatureParams param(F);
     hcubature(numValues, &integrandNdimWrapperCubature, &param,
-              numVars, xlower, xupper, maxNumEval, absToler, relToler,
-              ERROR_INDIVIDUAL, result, error);
+        numVars, xlower, xupper, maxNumEval, absToler, relToler,
+        ERROR_INDIVIDUAL, result, error);
     if(numEval!=NULL)
         *numEval = param.numEval;
     if(!param.error.empty())
-        throw std::runtime_error("Error in integrateNdim: "+param.error);
+        throw std::runtime_error(param.error);
 #endif
 }
 

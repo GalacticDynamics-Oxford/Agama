@@ -7,38 +7,60 @@
 #include "math_base.h"
 
 namespace math{
-
-/** maximum magnitude of numbers considered to be 'reasonable' */
-const double UNREASONABLY_LARGE_VALUE = 1e10;
-
+    
 /// \name  ---- Miscellaneous utility functions -----
 ///@{
 
-/** test if a number is neither infinity nor NaN */
-inline bool isFinite(double x) { 
-    const volatile double y = x - x;  // 'volatile' prevents it from being optimized away
-    return y == y;  // false for +-INFINITY or NAN
-}
-
-/** test if a number is not too big or too small (admittedly a subjective definition...) */
-inline bool withinReasonableRange(double x) { 
-    return x<UNREASONABLY_LARGE_VALUE && x>1/UNREASONABLY_LARGE_VALUE; }
-
 /** compare two numbers with a relative accuracy eps: 
-    \return -1 if x<y, +1 if x>y, or 0 if x and y are approximately equal */
+    \return -1 if x<y, +1 if x>y, -2 if x==NAN, +2 if y==NAN, or 0 if x and y are approximately equal
+*/
 int fcmp(double x, double y, double eps=1e-15);
 
 /** return sign of a number */
-inline double sign(double x) { return x>0?1.:x<0?-1.:0; }
+template<typename T>
+inline T sign(T x) { return x>0 ? 1 : x<0 ? -1 : 0; }
 
 /** return absolute value of a number */
-inline int abs(int x) { return x<0?-x:x; }
+template<typename T>
+inline T abs(T x) { return x<0 ? -x : x; }
 
 /** return an integer power of a number */
 double powInt(double x, int n);
 
-/** return a pseudo-random number in the range [0,1) */
+
+/** initialize the pseudo-random number generator with the given value,
+    or a completely arbitrary value (depending on system time) if seed==0.
+    In a multi-threaded case, each thread is initialized with a different seed.
+    At startup (without any call to randomize()), the random seed always has the same value.
+*/
+void randomize(unsigned int seed=0);
+
+/** return a pseudo-random number in the range [0,1).
+    In a multi-threaded environment, each thread has access to its own instance of 
+    pseudo-random number generator, which are initialized with different (but fixed) seeds.
+    Therefore, if several threads process the data in an orderly way (using a static schedule),
+    they will receive the same sequence of numbers on each run of the program,
+    unless randomize(0) is called and as long as the number of threads is fixed.
+*/
 double random();
+
+/** return two uncorrelated random numbers from the standard normal distribution */
+void getNormalRandomNumbers(double& num1, double& num2);
+
+/** return a quasirandom number from the Halton sequence.
+    \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
+    \param[in]  base   is the base of the sequence, must be a prime number;
+    if one needs an N-dimensional vector of ostensibly independent quasirandom numbers,
+    one may call this function N times with different prime numbers as bases.
+    \return  a number between 0 and 1.
+    \note that that the numbers get increasingly more correlated as the base increases,
+    thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
+*/
+double quasiRandomHalton(unsigned int index, unsigned int base);
+
+/** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
+static const unsigned int MAX_PRIMES = 10;  // not that there aren't more!
+static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 
 /** wraps the input argument into the range [0,2pi) */
 double wrapAngle(double x);
@@ -50,38 +72,85 @@ double wrapAngle(double x);
     Note that this usage scenario is not stable against error accumulation. */
 double unwrapAngle(double x, double xprev);
 
+
 /** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
-    to locate the index of bin that contains a given value x .
+    to locate the index of bin that contains a given value x.
+    \tparam  NumT is the numeric type of data in the array (double, float, int or unsigned int);
     \param[in]  x is the position, which must lie in the interval x_0 <= x <= x_N;
     \param[in]  arr is the array of bin boundaries sorted in ascending order (NOT CHECKED!)
-    \param[in]  size is the number of elements in the array (i.e., number of bins plus 1).
-    \returns the index k of the bin such that x_k <= x < x_{k+1}, where the last inequality
-    may be inexact for the last bin (x=x_N still returns N-1).
+    \param[in]  size is the number of elements in the array (i.e., number of bins plus 1);
+    since this header does not include <vector>, we shall pass the array in the traditional
+    way, as a pointer to the first element plus the number of elements.
+    \returns the index k of the bin such that x_k <= x < x_{k+1}, where the last strict inequality
+    is replaced by <= for the last bin (x=x_N still returns N-1).
     \throws std::invalid_argument exception if the point is outside the interval */
-unsigned int binSearch(const double x, const double arr[], const unsigned int size);
+template<typename NumT>
+unsigned int binSearch(const NumT x, const NumT arr[], const unsigned int size);
+
+/** linearly interpolate the value y(x) between y1 and y2, for x between x1 and x2 */
+inline double linearInterp(double x, double x1, double x2, double y1, double y2) {
+    return ((x-x1)*y2 + (x2-x)*y1) / (x2-x1); }
+
+/** cubic Hermite interpolation of y(x) for x1<=x<=x2 given the values (y1,y2) 
+    and derivatives (dy1, dy2) of y at the boundaries of interval x1 and x2 */
+inline double hermiteInterp(double x, double x1, double x2,
+    double y1, double y2, double dy1, double dy2) {
+    const double t = (x-x1) / (x2-x1);
+    return pow_2(1-t) * ( (1+2*t) * y1 +   t   * dy1 * (x2-x1) )
+         + pow_2(t)   * ( (3-2*t) * y2 + (t-1) * dy2 * (x2-x1) );
+}
+
 
 /** Class for computing running average and dispersion for a sequence of numbers */
 class Averager {
 public:
-    Averager() : meanval(0.), sumsqrs(0.), count(0) {}
+    Averager() : avg(0.), ssq(0.), num(0) {}
     /** Add a number to the list (the number itself is not stored) */
     void add(const double value) {
-        double diff = value - meanval;
-        meanval += diff / (count+1);       // use Welford's stable recurrence relation
-        sumsqrs += diff * (value-meanval); // for computing mean and variance of weighted function values
-        count++;
+        double diff =  value-avg;
+        avg += diff / (num+1);     // use Welford's stable recurrence relation
+        ssq += diff * (value-avg); // for computing mean and variance of weighted function values
+        num++;
     }
     /** Return the mean value of all elements added so far: 
         \f$  < x > = (1/N) \sum_{i=1}^N  x_i  \f$.  */
-    double mean() const { return meanval; }
+    double mean() const { return avg; }
     /** Return the dispersion of all elements added so far:
         \f$  D = (1/N) \sum_{i=1}^N  ( x_i - < x > )^2  \f$.  */
-    double disp() const { return count>1 ? sumsqrs / (count-1) : 0; }
+    double disp() const { return num>1 ? ssq / (num-1) : 0; }
+    /** Return the number of elements */
+    unsigned int count() const { return num; }
 private:
-    double meanval, sumsqrs;
-    unsigned int count;
+    double avg, ssq;
+    unsigned int num;
 };
-    
+
+/** A product of two functions, to be used as a temporary object passed to
+    integration or root-finding routines */
+class FncProduct: public IFunction {
+    const IFunction &f1, &f2; ///< references to two functions
+public:
+    FncProduct(const IFunction& fnc1, const IFunction& fnc2) :
+        f1(fnc1), f2(fnc2) {}
+
+    virtual unsigned int numDerivs() const {
+        return f1.numDerivs() < f2.numDerivs() ? f1.numDerivs() : f2.numDerivs();
+    }
+
+    virtual void evalDeriv(const double x, double *val, double *der, double *der2) const {
+        double v1, v2, d1, d2, dd1, dd2;
+        bool needDer = der!=NULL || der2!=NULL, needDer2 = der2!=NULL;
+        f1.evalDeriv(x, &v1, needDer ? &d1 : 0, needDer2 ? &dd1 : 0);
+        f2.evalDeriv(x, &v2, needDer ? &d2 : 0, needDer2 ? &dd2 : 0);
+        if(val)
+            *val = v1 * v2;
+        if(der)
+            *der = v1 * d2 + v2 * d1;
+        if(der2)
+            *der2 = v1 * dd2 + 2 * d1 * d2 + v2 * dd1;
+    }
+};
+
 ///@}
 /// \name  ----- root-finding and minimization routines -----
 ///@{
@@ -116,6 +185,10 @@ double findRoot(const IFunction& F, double x1, double x2, double relToler);
  */
 double findMin(const IFunction& F, double x1, double x2, double xinit, double relToler);
 
+///@}
+/// \name ------ numerical derivatives -------
+///@{
+
 /** Description of function behavior near a given point: the value and two derivatives,
     and the estimates of nearest points where the function takes on 
     strictly positive or negative values, or crosses zero.
@@ -138,6 +211,7 @@ double findMin(const IFunction& F, double x1, double x2, double xinit, double re
 */
 class PointNeighborhood {
 public:
+    double absx0;            ///< the abs.value of coordinate of the given point
     double f0, fder, fder2;  ///< the value, first and second derivative at the given point
     PointNeighborhood(const IFunction& fnc, double x0);
 
@@ -155,6 +229,16 @@ private:
     double dxToPosneg(double sgn) const;
 };
 
+/** Evaluate the second derivative of a function from its values and first derivatives
+    at three consecutive points, using high-accuracy Hermite interpolation.
+    \param[in] x0, x1, x2 are the abscissa points (assuming that x1 is between x0 and x2);
+    \param[in] f0, f1, f2 are the function values at these points;
+    \param[in] df0, df1, df2 are the function derivatives at these points;
+    \return the second derivative of function at x1
+*/
+double deriv2(double x0, double x1, double x2, double f0, double f1, double f2,
+    double df0, double df1, double df2);
+
 ///@}
 /// \name ------ integration routines -------
 ///@{
@@ -171,8 +255,8 @@ private:
     \param[out] error - if not NULL, output the error estimate in this variable;
     \param[out] numEval - if not NULL, output the number of function evaluations in this variable.
 */
-double integrate(const IFunction& F, double x1, double x2, double relToler, 
-    double* error=0, int* numEval=0);
+double integrate(const IFunction& F, double x1, double x2, double relToler,
+    double* error=NULL, int* numEval=NULL);
 
 /** integrate a function on a finite interval, using a fully adaptive integration routine 
     to reach the required tolerance; integrable singularities are handled properly. 
@@ -184,7 +268,7 @@ double integrate(const IFunction& F, double x1, double x2, double relToler,
     \param[out] numEval - if not NULL, output the number of function evaluations in this variable.
 */
 double integrateAdaptive(const IFunction& F, double x1, double x2, double relToler, 
-    double* error=0, int* numEval=0);
+    double* error=NULL, int* numEval=NULL);
 
 /** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
     without error estimate. 
@@ -195,6 +279,21 @@ double integrateAdaptive(const IFunction& F, double x1, double x2, double relTol
     values up to 20 use pre-computed tables, and higher ones compute them on-the-fly (less efficient).
 */
 double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
+
+/** prepare a table for Gauss-Legendre integration of one or many functions on the same interval.
+    The integral is approximated by a weighted sum of function values over the array of points:
+    \f$  \int_{x1}^{x2} f(x) dx = \sum_{i=0}^{N-1}  w_i f(x_i)  \f$.
+    This function computes the coordinates x_i and weights w_i of these points 
+    for the given order of quadrature; the user then may perform the above summation
+    for as many functions as necessary, using the same table.
+    \param[in]  x1  is the lower end of interval;
+    \param[in]  x2  is the upper end of interval;
+    \param[in]  N   is the number of points in the tables;
+    \param[out] coords   points to the array that will be filled with coordinates of the points
+    (it should be allocated before the call to this routine);
+    \param[out] weights  will be filled with weights (array should be allocated beforehand).
+*/
+void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights);
 
 /** Helper class for integrand transformations.
     A function defined on a finite interval [x_low,x_upp], with possible integrable 
@@ -248,9 +347,9 @@ private:
     \param[out] numEval  is the actual number of function calls
                 (if set to NULL, this information is not stored).
 */
-void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
-    const double relToler, const unsigned int maxNumEval, 
-    double result[], double error[]=0, int* numEval=0);
+void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[],
+    const double relToler, const unsigned int maxNumEval,
+    double result[], double error[]=NULL, int* numEval=NULL);
 
 ///@}
 

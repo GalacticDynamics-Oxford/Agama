@@ -2,7 +2,7 @@
     \brief   Estimation of interfocal distance for Staeckel fudge action/angle finder
     \author  Eugene Vasiliev
     \date    2015
- 
+
     Routines in this file estimate the "interfocal distance" - the parameter of auxiliary
     prolate spheroidal coordinate system that is used in the Staeckel fudge approximation.
     There are two methods:
@@ -18,6 +18,7 @@
 */
 #pragma once
 #include "potential_base.h"
+#include "potential_utils.h"
 #include "math_spline.h"
 
 namespace actions {
@@ -33,21 +34,6 @@ namespace actions {
 template<typename PointT>
 double estimateInterfocalDistancePoints(
     const potential::BasePotential& potential, const std::vector<PointT>& traj);
-
-
-/** Find the minimum and maximum radii of an orbit in the equatorial plane 
-    with given energy and angular momentum (which are the roots of equation
-    \f$  2 (E - \Phi(R,z=0)) - L_z^2/R^2 = 0  \f$ ).
-    \param[in] poten  is the instance of axisymmetric potential;
-    \param[in] E is the total energy of the orbit;
-    \param[in] Lz is the angular momentum of the orbit;
-    \param[out] Rmin will contain the minimum value of cylindrical radius;
-    \param[out] Rmax will contain the maximum value of cylindrical radius;
-    \param[out] Jr (optional) - if not NULL, will store the computed value of radial action.
-*/
-void findPlanarOrbitExtent(
-    const potential::BasePotential& poten, double E, double Lz, 
-    double& Rmin, double& Rmax, double* Jr=0);
 
 
 /** Estimate the interfocal distance by locating a thin (shell) orbit in R-z plane 
@@ -75,21 +61,28 @@ double estimateInterfocalDistanceShellOrbit(
 
 
 /** Class that provides a faster evaluation of interfocal distance via smooth interpolation 
-    over pre-computed grid in energy (E) and z-component of angular momentum (L_z) plane */
+    over pre-computed grid in energy (E) and z-component of angular momentum (L_z) plane;
+    as a by-product, it also provides the interpolated value of radius R of a thin (shell) orbit
+    with given E and Lz.
+*/
 class InterfocalDistanceFinder {
 public:
+    /// Initialize the internal interpolation table (the potential is not used thereafter)
     explicit InterfocalDistanceFinder(
         const potential::BasePotential& potential, const unsigned int gridSize=50);
 
     /// Return an estimate of interfocal distance for the given point, based on the values of E and L_z
-    double value(const coord::PosVelCyl& point) const;
+    double value(double E, double Lz) const;
+
+    /// Return the location of a thin orbit with given E and L_z (radius R at which it crosses z=0 plane)
+    double Rthin(double E, double Lz) const;
 
 private:
-    const potential::BasePotential& potential;  ///< reference to the potential
-    math::CubicSpline xLcirc;                   ///< interpolator for x(E) = Lcirc(E) / (Lcirc(E)+Lscale)
-    double Lscale;                              ///< scaling factor for Lcirc = Lscale * x / (1-x)
+    const potential::Interpolator interpLcirc;   ///< interpolator for Lcirc(E)
     /// 2d interpolator for interfocal distance on the grid in E, Lz/Lcirc(E) plane
-    math::LinearInterpolator2d interp;
+    math::LinearInterpolator2d interpD;
+    /// 2d interpolator for the radius (in the equatorial plane) of a thin (shell) orbit
+    math::LinearInterpolator2d interpR;
 };
 
 }  // namespace actions

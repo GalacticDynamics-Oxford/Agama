@@ -22,7 +22,7 @@ namespace math{
     \param[out] rms  optionally stores the rms scatter (if not NULL).
 */
 void linearFit(const std::vector<double>& x, const std::vector<double>& y, 
-    const std::vector<double>* w, double& slope, double& intercept, double* rms=0);
+    const std::vector<double>* w, double& slope, double& intercept, double* rms=NULL);
 
 /** perform a linear least-square fit without constant term (i.e., c * x = y).
     \param[in]  x  is the array of independent variables;
@@ -33,48 +33,72 @@ void linearFit(const std::vector<double>& x, const std::vector<double>& y,
     \return  the best-fit slope of linear regression. 
 */
 double linearFitZero(const std::vector<double>& x, const std::vector<double>& y, 
-    const std::vector<double>* w, double* rms=0);
+    const std::vector<double>* w, double* rms=NULL);
 
 /** perform a multi-parameter linear least-square fit, i.e., solve the system of equations
     `X c = y`  in the least-square sense (using singular-value decomposition).
     \param[in]  coefs  is the matrix of coefficients (X) with M rows and N columns;
     \param[in]  rhs  is the the array of M values (y);
     \param[in]  w  is the optional array of weights (= inverse square error in y values), 
-               if set to NULL this means equal weights;
+                if set to NULL this means equal weights;
     \param[out] result  stores the solution (array of N coefficients in the regression);
     \param[out] rms  optionally stores the rms scatter (if not NULL).
 */
 void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
-    const std::vector<double>* w, std::vector<double>& result, double* rms=0);
+    const std::vector<double>* w, std::vector<double>& result, double* rms=NULL);
+
+///@}
+/// \name ------ nonlinear regression ------
+///@{
+
+/** perform a multi-parameter nonlinear least-square fit by the Levenberg--Marquardt method.
+    Let `f(d; x)` be a single-valued function of data point `d` that depends on
+    a vector of parameters `x` (of length N).
+    We want to fit M data points with N parameters, minimizing the difference between `f(d_k; x)`
+    and its target value `y_k` at this data point, for each k=1..M, by varying the parameters `x`.
+    Define a multi-valued function F of N arguments (the parameters `x`) that provides M values,
+    so that \f$  F_k(x) = f(d_k; x) - y_k  \f$, and also provides the Jacobian matrix of
+    derivatives w.r.t. each parameter `x_i`, i=1..N, at each data point `d_k`, k=1..M.
+    The fitting procedure varies the parameters `x` until the L2-norm of F, i.e.
+    \f$ \sum_{i=k}^M [F_k(\vec x)]^2  \f$, reaches minimum.
+    \param[in]  F  is the function whose L2-norm is minimized: its arguments are the values
+    of parameters `x`, and its output values are `y_k - f(d_k; x)`, where the original nonlinear
+    function `f`, data points `d_k` and the target values `y_k` must all be handled within F --
+    the fitting algorithm only needs to know the difference at each point and the gradient
+    w.r.t. each parameter at each point.
+    It should throw an exception if the parameter values `x` are outside an acceptable range.
+    \param[in]  xinit  is the array of starting values of parameters `x` (length N).
+    \param[in]  relToler  is the stopping criterion: the change in parameter values during
+    the step must satisfy |dx| < relToler * |x| to end the iterative procedure.
+    \param[in]  maxNumIter  is the upper limit on the number of iterations.
+    \param[out] result  is the array of best-fit parameters (length N).
+    \return     the number of iterations taken.
+*/
+int nonlinearMultiFit(const IFunctionNdimDeriv& F, const double xinit[],
+    const double relToler, const int maxNumIter, double result[]);
+
+///@}
+/// \name ------ multidimensional root-finding -------
+///@{
+
+/** solve a multidimensional system of equation.
+    \param[in]  F  is the multivalued function of many variables that defines the NxN
+    equation system (that is, `F.numVars() == F.numValues()`, where each equation involving
+    N variables is represented by one element of the array of output values).
+    It must provide the Jacobian matrix of derivatives of each function by all input vars.
+    The equation system is \f$  F_i( \{x_k\} ) = 0, i=0..N-1, k=0..N-1  \f$.
+    \param[in]  xinit  is the starting N-dimensional point for root finding;
+    \param[in]  absToler  is the required tolerance on the value of each function at root;
+    \param[in]  maxNumIter  is the upper limit on the number of iterations;
+    \param[out] result will contain the array of variables that solve F(x)=0.
+    \returns  the number of iterations taken.
+*/
+int findRootNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[],
+    const double absToler, const int maxNumIter, double result[]);
 
 ///@}
 /// \name ------ multidimensional minimization -------
 ///@{
-
-/** Prototype of a function of N>=1 variables that computes a vector of M>=1 values,
-    and derivatives of these values w.r.t.the input variables (aka jacobian). */
-class IFunctionNdimDeriv: public IFunctionNdim {
-public:
-    IFunctionNdimDeriv() {};
-    virtual ~IFunctionNdimDeriv() {};
-
-    /** evaluate the function and the derivatives.
-        \param[in]  vars   is the N-dimensional point at which the function should be computed.
-        \param[out] values is the M-dimensional array (possibly M=1) that will contain
-                    the vector of function values.
-        \param[out] derivs is the M-by-N matrix (M rows, N columns) of partial derivatives 
-                    of the vector-valued function by the input variables;
-                    if a NULL pointer is passed, this does not need to be computed,
-                    otherwise the shape of matrix will be resized as needed
-                    (i.e. one may pass a pointer to an empty matrix and it will be resized).
-    */
-    virtual void evalDeriv(const double vars[], double values[], Matrix<double>* derivs=0) const = 0;
-
-    /** reimplement the evaluate function without derivatives */
-    virtual void eval(const double vars[], double values[]) const {
-        evalDeriv(vars, values);
-    }
-};
 
 /** perform a multidimensional minimization of a function of N variables,
     using the Simplex algorithm of Nelder and Mead.
@@ -93,6 +117,20 @@ public:
     \returns  the number of iterations taken.
 */
 int findMinNdim(const IFunctionNdim& F, const double xinit[], const double xstep[],
+    const double absToler, const int maxNumIter, double result[]);
+
+/** perform a gradient-based multidimensional minimization of a function of N variables.
+    \param[in]  F  is the function to be minimized (it may take N>=1 arguments 
+    but must provide a single value and a vector of derivatives w.r.t.each input variable);
+    \param[in]  xinit  is the starting N-dimensional point for minimization;
+    \param[in]  xstep  is the initial stepsize (same for each dimension);
+    \param[in]  absToler  is the required tolerance on the location of minimum,
+    defined as the norm of gradient vector;
+    \param[in]  maxNumIter  is the upper limit on the number of iterations;
+    \param[out] result will contain the array of variables that minimize F.
+    \returns  the number of iterations taken.
+*/
+int findMinNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[], const double xstep,
     const double absToler, const int maxNumIter, double result[]);
 
 ///@}

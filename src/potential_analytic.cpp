@@ -19,14 +19,31 @@ void Plummer::evalDeriv(double r,
 
 double Plummer::enclosedMass(double r) const
 {
-    return mass / pow_3(sqrt(pow_2(scaleRadius/r) + 1));  // should give correct result in all limiting cases
+    // should give correct result in all limiting cases
+    return mass / pow_3(sqrt(pow_2(scaleRadius/r) + 1));
+}
+
+void Isochrone::evalDeriv(double r,
+    double* potential, double* deriv, double* deriv2) const
+{
+    double rb  = sqrt(pow_2(r) + pow_2(scaleRadius));
+    double brb = scaleRadius + rb;
+    double pot = -mass / brb;
+    if(potential)
+        *potential = pot;
+    if(deriv)
+        *deriv = -pot * r / (rb * brb);
+    if(deriv2)
+        *deriv2 = pot * (2*pow_2(r) - pow_2(scaleRadius) * (1 + scaleRadius / rb)) / pow_2(rb * brb);
 }
 
 void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
-    double ln_over_r = (r==0) ? (1/scaleRadius) : (r==INFINITY) ? 0 :
-        log(1 + r/scaleRadius) / r;
+    double ln_over_r = r==INFINITY ? 0 :
+        r > scaleRadius*5e-5 ? log(1 + r/scaleRadius) / r :
+        // accurate asymptotic expansion at r->0
+        (1 - 0.5 * r/scaleRadius * (1 - 2./3 * r/scaleRadius)) / scaleRadius;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)

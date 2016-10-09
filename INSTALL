@@ -1,50 +1,96 @@
-This is the action-based galaxy modelling framework. To get it working on your computer:
+This is the AGAMA galaxy modelling framework. To get it working on your computer:
 
-1.  Download the repository (will download as a tarball).
-2a. Install the required libraries (presently only GSL: 
+1.  Download the repository.
+2a. Install the required libraries (presently only GSL).
 2b. Although not compulsory, you may want to download and install optional libraries:
-    - UNSIO library for reading/writing N-body snapshots in various formats: http://projets.lam.fr/projects/unsio
+    - Eigen library for highly optimized linear algebra routines
+    (in its absense the ones from GSL will be used);
+    its use slows down compilation quite dramatically, but this more than pays off at runtime.
+    http://eigen.tuxfamily.org/
+    - GLPK for solving linear optimization problems:
+    http://www.gnu.org/software/glpk/
+    - CVXOPT for solving linear and quadratic optimization problems (requires Python):
+    http://cvxopt.org/
+    either GLPK or (preferrably) CVXOPT are required for non-parametric DF modelling.
+    - UNSIO library for reading/writing N-body snapshots in various formats:
+    http://projets.lam.fr/projects/unsio
     (without it only the text format is supported).
-    - Cuba library for multidimensional integration (the alternative is Cubature library that is bundled with this 
-    distribution): http://www.feynarts.de/cuba/
-    - galpy - this distribution contains a module for galpy, that can be used instead of its built-in potentials,
-    orbit integration and action-finding routines.
-Note: to use the Python extension, any external libraries to be statically linked with it need to be compiled with
-    -fPIC flag.
-3.  You need to create a file called Makefile.local, which is included by the Makefile and contains path names
-    and compiler flags specific to your own computer.
+    - Cuba library for multidimensional integration (the alternative is Cubature library
+    that is bundled with this distribution):
+    http://www.feynarts.de/cuba/
+    - galpy - this distribution contains a module for galpy, that can be used instead of
+    its built-in potentials, orbit integration and action-finding routines.
+Note: to use the Python extension, any external libraries to be statically linked with it
+    need to be compiled with -fPIC flag.
+3.  You need to create a file called Makefile.local, which is included by the Makefile
+    and contains path names and compiler flags specific to your own computer.
     An example is given below (you will need to change the pathnames).
-4.  In order to make the Python extension available for import, it should be either copied to its site-packages 
-    folder, or the path to it be added to PYTHONPATH environment variable, as shown in the example below.
+4.  In order to make the Python extension available for import, it should be either copied
+    to its site-packages folder, or the path to it be added to PYTHONPATH environment variable,
+    as shown in the example below.
     To make it permanently available, you may add this line to .bashrc or its analog.
 5.  Typing make compiles everything.
+    First the library itself is built and placed into lib/agama.so (shared library) and
+    lib/libagama.a (static library).
+    The former one may be used as the python extension module, if it is found in PYTHONPATH.
+    Then the test and example programs are compiled and placed into exe folder.
 
 Makefile.local (copy and paste everything below into your file and change where required)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
 # machine-specific settings
 
 # compiler and linker
-CXX       = g++
-ARC       = ar
-CXXFLAGS += -Wall -Wno-overflow -O3 -I$(SRCDIR) $(DEFINES) -fPIC -fdata-sections -ffunction-sections
-LFLAGS   += -fPIC -lgsl -lgslcblas
+CXX  = g++
+FC   = gfortran
+ARC  = ar
+LINK = $(CXX)
 
-# check the dirnames
-PYFLAGS  += -I/usr/include/python2.6 -I/Library/Python/2.6/site-packages/numpy/core/include -lpython -fno-strict-aliasing
+# compilation flags:
+# CXXFLAGS apply to the complilation of both the AGAMA library and all programs that use it;
+# LFLAGS   determine the linker option for both the AGAMA library and any programs that use it;
+# DEFINES  are only relevant  for the compilation of the AGAMA library, and determine the available features;
+# INCLUDES are also used only for the compilation of the AGAMA library, should match the DEFINES;
+# LIBS     list the external libraries for the compilation of the AGAMA shared library only.
+CXXFLAGS += -fPIC -fopenmp -Wall -Wno-overflow -O3 -march=native -I$(SRCDIR)
+LFLAGS   += -fPIC -fopenmp
 
-# this flag apparently is only relevant for MacOS and reduces the size of executable files by removing unused code
-LFLAGS  += -Wl,-dead_strip
+# uncomment if you have a C++11-compatible compiler (it is not required but may be more efficient)
+CXXFLAGS += -std=c++11
 
-# uncomment (and possibly modify) the three lines below  to use UNSIO library for input/output of N-body snapshots
-DEFINES  += -DHAVE_UNSIO
-CXXFLAGS += -I/Users/user/Documents/nemo/inc -I/Users/user/Documents/nemo/inc/uns
-LFLAGS   += -L/Users/user/Documents/nemo/lib -lunsio -lnemo
+# GSL library is required; check the path names
+INCLUDES += -I/path/to/gsl
+LIBS     += -L/path/to/gsl -lgsl -lgslcblas
 
-# uncomment the three lines below and adjust the paths  to use Cuba library for multidimensional integration 
+# uncomment and check the dirnames to build the Python plugin
+DEFINES  += -DHAVE_PYTHON
+INCLUDES += -I/usr/include/python -I/path/to/numpy/core/include
+LIBS     += -lpython
+
+# uncomment the three lines below and adjust the paths  to use Cuba library for multidimensional integration
 # (otherwise use Cubature library bundled with the code)
-DEFINES  += -DHAVE_CUBA
-CXXFLAGS += -I/Users/user/Documents/soft/cuba-4.2
-LFLAGS   +=   /Users/user/Documents/soft/cuba-4.2/libcuba.a
+#DEFINES  += -DHAVE_CUBA
+#INCLUDES += -I/path/to/cuba
+#LIBS     += -L/path/to/cuba -lcuba
 
+# uncomment the lines below to use Eigen library for optimized linear algebra operations
+# (otherwise slower internal and GSL analogues will be used)
+DEFINES  += -DHAVE_EIGEN
+INCLUDES += -I/path/to/eigen
 
+# uncomment to use the GNU linear programming library (needed for linear optimization solver)
+DEFINES  += -DHAVE_GLPK
+INCLUDES += -I/path/to/glpk
+LIBS     += -L/path/to/glpk -lglpk
+
+# uncomment to enable the quadratic optimization solver CVXOPT (written in Python);
+# this only has effect if HAVE_PYTHON is defined
+DEFINES  += -DHAVE_CVXOPT
+INCLUDES += -I/path/to/cvxopt
+
+# uncomment the lines below to use UNSIO library for input/output of N-body snapshots in NEMO and GADGET formats
+# (in its absense only the text format is available)
+DEFINES  += -DHAVE_UNSIO
+INCLUDES += -I/path/to/unsio
+LIBS     += -L/path/to/unsio -lunsio -lnemo

@@ -2,16 +2,19 @@
 #include "math_core.h"
 #include "math_fit.h"
 #include "math_ode.h"
+#include "utils.h"
 #include <cassert>
 #include <stdexcept>
 #include <cmath>
+// debugging
+#include <fstream>
 
 namespace actions{
 
+using potential::BasePotential;
+
 /// number of sampling points for a shell orbit (equally spaced in time)
 static const unsigned int NUM_STEPS_TRAJ = 16;
-/// accuracy of root-finding for Rmin/Rmax
-static const double ACCURACY_RMINMAX = 1e-10;
 /// accuracy of root-finding for the radius of thin (shell) orbit
 static const double ACCURACY_RTHIN = 1e-6;
 /// accuracy of orbit integration for shell orbit
@@ -23,7 +26,7 @@ static const unsigned int MAX_NUM_STEPS_ODE = 100;
 // estimate IFD for a series of points in R-z plane
 template<typename PointT>
 double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<PointT>& traj)
+    const BasePotential& potential, const std::vector<PointT>& traj)
 {
     if(traj.size()==0)
         throw std::invalid_argument("Error in finding interfocal distance: empty array of points");
@@ -46,17 +49,17 @@ double estimateInterfocalDistancePoints(
 }
 
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosCar>& traj);
+    const BasePotential& potential, const std::vector<coord::PosCar>& traj);
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosVelCar>& traj);
+    const BasePotential& potential, const std::vector<coord::PosVelCar>& traj);
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosCyl>& traj);
+    const BasePotential& potential, const std::vector<coord::PosCyl>& traj);
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosVelCyl>& traj);
+    const BasePotential& potential, const std::vector<coord::PosVelCyl>& traj);
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosSph>& traj);
+    const BasePotential& potential, const std::vector<coord::PosSph>& traj);
 template double estimateInterfocalDistancePoints(
-    const potential::BasePotential& potential, const std::vector<coord::PosVelSph>& traj);
+    const BasePotential& potential, const std::vector<coord::PosVelSph>& traj);
 
 
 /** find the best-fit value of interfocal distance for a shell orbit.
@@ -84,153 +87,12 @@ static double fitInterfocalDistanceShellOrbit(const std::vector<coord::PosCyl>& 
 }
 
 
-/** Helper function for finding the roots of (effective) potential in R direction */
-class OrbitSizeFunction: public math::IFunction {
-public:
-    const potential::BasePotential& potential;
-    double E;
-    double Lz2;
-    enum { FIND_RMIN, FIND_RMAX, FIND_JR } mode;
-    explicit OrbitSizeFunction(const potential::BasePotential& p, double _E, double _Lz) :
-        potential(p), E(_E), Lz2(_Lz*_Lz), mode(FIND_RMIN) {};
-    virtual unsigned int numDerivs() const { return 2; }
-    /** This function is used in the root-finder for Rmin/Rmax, and in computing the radial action.
-        In the regime for locating the turnaround points of a planar orbit, it returns (1/2) v_R^2.
-        Moreover, to compute the location of pericenter this is multiplied by R^2 to curb the sharp rise 
-        of effective potential at zero, which is problematic for root-finder.
-        In the regime for computing the radial action, it returns v_R.
-    */
-    virtual void evalDeriv(const double R, 
-        double* val=0, double* deriv=0, double* deriv2=0) const
-    {
-        double Phi=0;
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        if(math::isFinite(R)) {
-            potential.eval(coord::PosCyl(R, 0, 0), &Phi, deriv? &grad : NULL, deriv2? &hess: NULL);
-        } else {  // we're at infinity in root-finder
-            if(deriv) 
-                grad.dR = NAN;
-            if(deriv2)
-                hess.dR2 = NAN;
-        }
-        if(mode == FIND_RMIN) {    // f(R) = (1/2) v_R^2 * R^2
-            if(val)
-                *val = (E-Phi)*R*R - Lz2/2;
-            if(deriv) 
-                *deriv = 2*R*(E-Phi) - R*R*grad.dR;
-            if(deriv2)
-                *deriv2 = 2*(E-Phi) - 4*R*grad.dR - R*R*hess.dR2;
-        } else if(mode == FIND_RMAX) {  // f(R) = (1/2) v_R^2 = E - Phi(R) - Lz^2/(2 R^2)
-            if(val)
-                *val = Lz2>0 && R<INFINITY ? 
-                    // the bizarre expression should yield the same roundoff error as for FIND_RMIN
-                    ((E-Phi)*R*R - Lz2/2) / (R*R) :
-                    E-Phi;
-            if(deriv)
-                *deriv = -grad.dR + (Lz2>0 ? Lz2/(R*R*R) : 0);
-            if(deriv2)
-                *deriv2 = -hess.dR2 - (Lz2>0 ? 3*Lz2/(R*R*R*R) : 0);
-        } else if(mode == FIND_JR) {  // f(R) = v_R
-            *val = sqrt(fmax(0, 2*(E-Phi) - (Lz2>0 ? Lz2/(R*R) : 0) ) );
-        } else
-            assert("Invalid operation mode in OrbitSizeFunction"==0);
-    }
-};
-
-void findPlanarOrbitExtent(const potential::BasePotential& poten, double E, double Lz, 
-    double& Rmin, double& Rmax, double* Jr)
-{
-    if(!isAxisymmetric(poten))
-        throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
-    // the function to use in root-finder for locating the roots of v_R^2=0
-    OrbitSizeFunction fnc(poten, E, Lz);
-    // first guess for the radius that should lie between Rmin and Rmax
-    double Rinit = R_from_Lz(poten, Lz);
-    assert(Rinit>=0);
-    // we make sure that f(R)>=0, since otherwise we cannot initiate root-finding
-    math::PointNeighborhood nh(fnc, Rinit);
-    double dR_to_zero = nh.dxToNearestRoot();
-    int nIter = 0;
-    while(nh.f0<0 && nIter<4) {  // safety measure to avoid roundoff errors
-        if(Rinit+dR_to_zero == Rinit)  // delta-step too small
-            Rinit *= (1 + 1e-15*math::sign(dR_to_zero));
-        else
-            Rinit += dR_to_zero;
-        nh = math::PointNeighborhood(fnc, Rinit);
-        dR_to_zero = nh.dxToNearestRoot();
-        nIter++;
-    }
-    if(nh.f0<0)
-        throw std::runtime_error("Error in findPlanarOrbitExtent: E and Lz have incompatible values");
-    Rmin = Rmax = Rinit;
-    double maxPeri = Rinit, minApo = Rinit;    // endpoints of interval for locating peri/apocenter radii
-    if(fabs(dR_to_zero) < Rinit*ACCURACY_RMINMAX) {    // we are already near peri- or apocenter radius
-        if(nh.dxBetweenRoots() < Rinit*ACCURACY_RMINMAX) {  // the range between Rmin and Rmax is too small
-            maxPeri = minApo = NAN;  // do not attempt to locate them
-        } else if(nh.fder < 0) {
-            minApo  = NAN;  // will skip the search for Rmax
-            maxPeri = Rinit + nh.dxToPositive();
-        } else {
-            maxPeri = NAN;  // will skip the search for Rmin
-            minApo  = Rinit + nh.dxToPositive();
-        }
-    }
-    if(fnc.Lz2>0) {
-        if(math::isFinite(maxPeri)) {
-            fnc.mode = OrbitSizeFunction::FIND_RMIN;
-            Rmin = math::findRoot(fnc, 0., maxPeri, ACCURACY_RMINMAX);
-            if(!math::isFinite(Rmin))  // could be that our initial upper bound was wrong
-                Rmin = math::findRoot(fnc, maxPeri, Rinit, ACCURACY_RMINMAX);
-            // ensure that E-Phi(Rmin) >= 0
-            // (due to finite accuracy in root-finding, a small adjustment may be needed)
-            math::PointNeighborhood pn(fnc, Rmin);
-            if(pn.f0<0) {   // ensure that E>=Phi(Rmin)
-                double dx = pn.dxToPositive();
-                if(Rmin+dx>=0 && Rmin+dx<=maxPeri)
-                    Rmin += dx;
-                else  // most likely due to some roundoff errors
-                    Rmin = Rinit;  // safe value
-            }
-            if(!math::isFinite(Rmin))
-                throw std::runtime_error("Error in locating Rmin in findPlanarOrbitExtent");
-        }
-    } else  // angular momentum is zero
-        Rmin = 0; // !! this assumes a monotonic potential !! 
-    if(math::isFinite(minApo)) {
-        fnc.mode = OrbitSizeFunction::FIND_RMAX;
-        Rmax = math::findRoot(fnc, minApo, INFINITY, ACCURACY_RMINMAX);
-        if(!math::isFinite(Rmax))  // could be that our initial lower bound was wrong
-            Rmax = math::findRoot(fnc, Rinit, minApo, ACCURACY_RMINMAX);
-        math::PointNeighborhood pn(fnc, Rmax);
-        if(pn.f0<0) {   // ensure that E>=Phi(Rmax)
-            double dx = pn.dxToPositive();
-            if(Rmax+dx>=Rmin)
-                Rmax += dx;
-            else  // most likely due to some roundoff errors
-                Rmax = Rinit;  // safe value
-        }
-        if(!math::isFinite(Rmax)) {
-            if(E>=0 && fnc(INFINITY)>0)   // could not find the upper limit because it simply does not exist!
-                throw std::invalid_argument("findPlanarOrbitExtent: E>=0");
-            else
-                throw std::runtime_error("Error in locating Rmax in findPlanarOrbitExtent");
-        }
-    }   // else Rmax=Rinit
-    assert(Rmin>=0 && Rmin<=Rinit && Rinit<=Rmax);
-    if(Jr!=NULL) {  // compute radial action
-        fnc.mode = OrbitSizeFunction::FIND_JR;
-        *Jr = math::integrateGL(fnc, Rmin, Rmax, 10) / M_PI;
-    }
-}
-
-
 /// function to use in ODE integrator
 class OrbitIntegratorMeridionalPlane: public math::IOdeSystem {
 public:
-    OrbitIntegratorMeridionalPlane(const potential::BasePotential& p, double Lz) :
+    OrbitIntegratorMeridionalPlane(const BasePotential& p, double Lz) :
         poten(p), Lz2(Lz*Lz) {};
-    
+
     /** apply the equations of motion in R,z plane without tracking the azimuthal motion */
     virtual void eval(const double /*t*/, const math::OdeStateType& y, math::OdeStateType& dydt) const
     {
@@ -241,11 +103,11 @@ public:
         dydt[2] = -grad.dR + (Lz2>0 ? Lz2/pow_3(y[0]) : 0);
         dydt[3] = -grad.dz;
     }
-    
+
     /** return the size of ODE system: R, z, vR, vz */
     virtual unsigned int size() const { return 4;}
 private:
-    const potential::BasePotential& poten;
+    const BasePotential& poten;
     const double Lz2;
 };
 
@@ -255,12 +117,14 @@ public:
     FindCrossingPointZequal0(const math::BaseOdeSolver& _solver) :
         solver(_solver) {};
     /** used in root-finder to locate the root z(t)=0 */
-    virtual void evalDeriv(const double time, 
-        double* val=0, double* der=0, double* /*der2*/=0) const {
+    virtual void evalDeriv(const double time, double* val, double* der, double*) const
+    {
+        double vars[4];
+        solver.getSol(time, vars);
         if(val)
-            *val = solver.value(time, 1);  // z
+            *val = vars[1];  // z
         if(der)
-            *der = solver.value(time, 3);  // vz
+            *der = vars[3];  // vz
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
@@ -275,7 +139,7 @@ private:
     \return  the crossing radius
 */
 static double findCrossingPointR(
-    const potential::BasePotential& poten, double E, double Lz, double R,
+    const BasePotential& poten, double E, double Lz, double R,
     double* timeCross, std::vector<coord::PosCyl>* traj, double* Jz)
 {
     double vz = sqrt(fmax( 2 * (E-poten.value(coord::PosCyl(R, 0, 0))) - (Lz>0 ? pow_2(Lz/R) : 0), R*R*1e-16));
@@ -285,7 +149,7 @@ static double findCrossingPointR(
     vars[1] = 0;
     vars[2] = 0;
     vars[3] = vz;
-    math::OdeSolverDOP853 solver(odeSystem, 0, ACCURACY_INTEGR);
+    math::OdeSolverDOP853 solver(odeSystem, ACCURACY_INTEGR);
     solver.init(vars);
     bool finished = false;
     unsigned int numStepsODE = 0;
@@ -298,7 +162,7 @@ static double findCrossingPointR(
     if(Jz!=NULL)
         *Jz = 0;
     while(!finished) {
-        if(solver.step() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE)  // signal of error
+        if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE)  // signal of error
             finished = true;
         else {
             numStepsODE++;
@@ -307,36 +171,42 @@ static double findCrossingPointR(
             if(timeStepTraj!=INFINITY && traj!=NULL)
             {   // store trajectory
                 while(timeTraj <= timeCurr && traj->size() < NUM_STEPS_TRAJ) {
-                    traj->push_back(coord::PosCyl(  // store R and z at equal intervals of time
-                        fabs(solver.value(timeTraj, 0)), solver.value(timeTraj, 1), 0)); 
+                    // store R and z at equal intervals of time
+                    double vtraj[4];
+                    solver.getSol(timeTraj, vtraj);
+                    traj->push_back(coord::PosCyl(vtraj[0], vtraj[1], 0));
                     timeTraj += timeStepTraj;
                 }
             }
-            if(solver.value(timeCurr, 1) < 0) {  // z<0 - we're done
+            double vcurr[4];
+            solver.getSol(timeCurr, vcurr);
+            if(vcurr[1] < 0) {  // z<0 - we're done
                 finished = true;
                 timeCurr = math::findRoot(FindCrossingPointZequal0(solver),
                     timePrev, timeCurr, ACCURACY_RTHIN);
             }
             if(Jz!=NULL)
             {   // compute vertical action  (very crude approximation! one integration point per timestep)
-                *Jz +=
-                 (  solver.value((timePrev+timeCurr)/2, 2) *   // vR at the mid-timestep
-                   (solver.value(timeCurr, 0) - solver.value(timePrev, 0))  // delta R over timestep
-                  + solver.value((timePrev+timeCurr)/2, 3) *   // vz at the mid-timestep
-                   (solver.value(timeCurr, 1) - solver.value(timePrev, 1))  // delta z over timestep
-                  ) / M_PI;
+                double vprev[4], vmid[4];
+                solver.getSol(timePrev, vprev);
+                solver.getSol((timePrev+timeCurr)/2, vmid);
+                *Jz += 1 / M_PI * (
+                    vmid[2] * (vcurr[0]-vprev[0]) +  // vR at the mid-timestep * delta R over timestep
+                    vmid[3] * (vcurr[1]-vprev[1]) ); // vz at the mid-timestep * delta z over timestep
             }
         }
     }
     if(timeCross!=NULL)
         *timeCross = timeCurr;
-    return fabs(solver.value(timeCurr, 0));   // value of R at the moment of crossing x-y plane
+    double vroot[4];
+    solver.getSol(timeCurr, vroot);    
+    return fabs(vroot[0]);   // value of R at the moment of crossing x-y plane
 }
 
 /// function to be used in root-finder for locating the thin orbit in R-z plane
 class FindClosedOrbitRZplane: public math::IFunctionNoDeriv {
 public:
-    FindClosedOrbitRZplane(const potential::BasePotential& p, 
+    FindClosedOrbitRZplane(const BasePotential& p, 
         double _E, double _Lz, double _Rmin, double _Rmax,
         double* _timeCross, std::vector<coord::PosCyl>* _traj, double* _Jz) :
         poten(p), E(_E), Lz(_Lz), Rmin(_Rmin), Rmax(_Rmax), 
@@ -352,7 +222,7 @@ public:
         return R-R1;
     }
 private:
-    const potential::BasePotential& poten;
+    const BasePotential& poten;
     const double E, Lz;               ///< parameters of motion in the R-z plane
     const double Rmin, Rmax;          ///< boundaries of interval in R (to skip the first two calls)
     double* timeCross;                ///< keep track of time required to complete orbit
@@ -362,7 +232,7 @@ private:
 
 
 double estimateInterfocalDistanceShellOrbit(
-    const potential::BasePotential& poten, double E, double Lz, 
+    const BasePotential& poten, double E, double Lz, 
     double* R, double* Jz)
 {
     double Rmin, Rmax;
@@ -375,8 +245,12 @@ double estimateInterfocalDistanceShellOrbit(
     double Rthin = math::findRoot(fnc, Rmin, Rmax, ACCURACY_RTHIN);
     if(R!=NULL)
         *R=Rthin;
-    if(Rthin!=Rthin || traj.size()==0)
+    if(!isFinite(Rthin) || traj.size()==0) {
+        utils::msg(utils::VL_WARNING, FUNCNAME,
+            "Could not find a thin orbit for E="+utils::toString(E)+", Lz="+utils::toString(Lz)+
+            " - returning "+utils::toString(Rmin));
         return Rmin;  // anything
+    }
     // now find the best-fit value of delta for this orbit
     return fitInterfocalDistanceShellOrbit(traj);
 }
@@ -384,22 +258,20 @@ double estimateInterfocalDistanceShellOrbit(
 
 // ----------- Interpolation of interfocal distance in E,Lz plane ------------ //
 InterfocalDistanceFinder::InterfocalDistanceFinder(
-    const potential::BasePotential& _potential, const unsigned int gridSizeE) :
-    potential(_potential)
+    const BasePotential& potential, const unsigned int gridSizeE) :
+    interpLcirc(potential)
 {
     if(!isAxisymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "interfocal distance estimator is not suitable for this case");
-    
+
     if(gridSizeE<10 || gridSizeE>500)
         throw std::invalid_argument("InterfocalDistanceFinder: incorrect grid size");
-    
+
     // find out characteristic energy values
     double Ein  = potential.value(coord::PosCar(0, 0, 0));
-    double Eout = potential.value(coord::PosCar(INFINITY, 0, 0));
-    if(!math::isFinite(Eout))  // not all potentials may give sensible results for r=infinity
-        Eout = 0;  // default assumption
-    if(!math::isFinite(Ein) || Ein>=Eout)
+    double Eout = 0;  // default assumption for Phi(r=infinity)
+    if(!isFinite(Ein) || Ein>=Eout)
         throw std::runtime_error("InterfocalDistanceFinder: weird behaviour of potential");
 
     // create a grid in energy
@@ -408,15 +280,6 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
     for(unsigned int i=0; i<gridSizeE; i++) 
         gridE[i] = Ein + i*(Eout-Ein)/gridSizeE;
 
-    // fill a 1d interpolator for Lcirc(E)
-    Lscale = potential::L_circ(potential, gridE[gridSizeE/2]);
-    std::vector<double> gridLcirc(gridSizeE);
-    for(unsigned int i=0; i<gridSizeE; i++) {
-        double Lc = potential::L_circ(potential, gridE[i]);
-        gridLcirc[i] = Lc / (Lc + Lscale);
-    }
-    xLcirc = math::CubicSpline(gridE, gridLcirc);
-
     // create a uniform grid in Lz/Lcirc(E)
     const unsigned int gridSizeLzrel = gridSizeE<80 ? gridSizeE/4 : 20;
     std::vector<double> gridLzrel(gridSizeLzrel);
@@ -424,29 +287,55 @@ InterfocalDistanceFinder::InterfocalDistanceFinder(
         gridLzrel[i] = (i+0.01) / (gridSizeLzrel-0.98);
 
     // fill a 2d grid in (E, Lz/Lcirc(E) )
-    math::Matrix<double> grid2d(gridE.size(), gridLzrel.size());
-    for(unsigned int iE=0; iE<gridE.size(); iE++) {
-        const double x  = xLcirc(gridE[iE]);
-        const double Lc = Lscale * x / (1-x);
-        for(unsigned int iL=0; iL<gridLzrel.size(); iL++) {
+    math::Matrix<double> grid2dD(gridSizeE, gridSizeLzrel);  // 2d grid for interfocal distance
+    math::Matrix<double> grid2dR(gridSizeE, gridSizeLzrel);  // 2d grid for Rthin
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for(int iE=0; iE<(int)gridSizeE; iE++) {
+        double Rc = R_circ(potential, gridE[iE]);
+        double Lc = Rc * v_circ(potential, Rc);  // almost the same as interpLcirc(gridE[iE]);
+        for(unsigned int iL=0; iL<gridSizeLzrel; iL++) {
             double Lz = gridLzrel[iL] * Lc;
-            grid2d(iE, iL) = estimateInterfocalDistanceShellOrbit(potential, gridE[iE], Lz);
+            double Rthin;
+            grid2dD(iE, iL) = estimateInterfocalDistanceShellOrbit(potential, gridE[iE], Lz, &Rthin);
+            grid2dR(iE, iL) = Rthin / Rc;
         }
     }
-    
-    // create a 2d interpolator
-    interp = math::LinearInterpolator2d(gridE, gridLzrel, grid2d);
+
+    // debugging output
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("ifd");
+        for(unsigned int iE=0; iE<gridE.size(); iE++) {
+            double Rc = R_circ(potential, gridE[iE]);
+            for(unsigned int iL=0; iL<gridLzrel.size(); iL++) {
+                strm << Rc << '\t' << gridLzrel[iL] << '\t' <<
+                grid2dD(iE, iL) << '\t' << grid2dR(iE, iL) << '\n';
+            }
+            strm << '\n';
+        }
+    }
+
+    // create 2d interpolators
+    interpD = math::LinearInterpolator2d(gridE, gridLzrel, grid2dD);
+    interpR = math::LinearInterpolator2d(gridE, gridLzrel, grid2dR);
 }
 
-double InterfocalDistanceFinder::value(const coord::PosVelCyl& point) const
+double InterfocalDistanceFinder::value(double E, double Lz) const
 {
-    double E  = totalEnergy(potential, point);
-    E = fmin(fmax(E, interp.xmin()), interp.xmax());
-    double Lz = fabs(point.R*point.vphi);
-    double x  = xLcirc(E);
-    double Lc = Lscale * x / (1-x);
-    double Lzrel = fmin(fmax(Lz/Lc, interp.ymin()), interp.ymax());
-    return interp.value(E, Lzrel);
+    E = fmin(fmax(E, interpD.xmin()), interpD.xmax());
+    double Lc = interpLcirc.L_circ(E);
+    double Lzrel = fmin(fmax(fabs(Lz)/Lc, interpD.ymin()), interpD.ymax());
+    return interpD.value(E, Lzrel);
+}
+
+double InterfocalDistanceFinder::Rthin(double E, double Lz) const
+{
+    E = fmin(fmax(E, interpR.xmin()), interpR.xmax());
+    double Lc = interpLcirc.L_circ(E);
+    double Rc = interpLcirc.R_circ(E);
+    double Lzrel = fmin(fmax(fabs(Lz)/Lc, interpR.ymin()), interpR.ymax());
+    return fmax(interpR.value(E, Lzrel), 0) * Rc;
 }
 
 }  // namespace actions

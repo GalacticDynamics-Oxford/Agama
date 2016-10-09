@@ -1,11 +1,21 @@
 #include "math_fit.h"
+#include "math_core.h"
 #include <gsl/gsl_fit.h>
 #include <gsl/gsl_multifit.h>
 #include <gsl/gsl_multimin.h>
 #include <stdexcept>
 
+#ifdef HAVE_EIGEN
+#include <Eigen/Dense>
+#include <unsupported/Eigen/NonLinearOptimization>
+#else
+#include <gsl/gsl_multifit_nlin.h>
+#include <gsl/gsl_multiroots.h>
+#endif
+
 namespace math{
 
+namespace {
 // ---- wrappers for GSL vector and matrix views (access the data arrays without copying) ----- //
 struct Vec {
     explicit Vec(std::vector<double>& vec) :
@@ -23,24 +33,177 @@ private:
     gsl_vector_const_view v;
 };
 
-struct Mat {
-    explicit Mat(Matrix<double>& mat) :
-        m(gsl_matrix_view_array(mat.getData(), mat.numRows(), mat.numCols())) {}
-    operator gsl_matrix* () { return &m.matrix; }
-private:
-    gsl_matrix_view m;
-};
-
 struct MatC {
     explicit MatC(const Matrix<double>& mat) :
-        m(gsl_matrix_const_view_array(mat.getData(), mat.numRows(), mat.numCols())) {}
+        m(gsl_matrix_const_view_array(mat.data(), mat.rows(), mat.cols())) {}
     operator const gsl_matrix* () const { return &m.matrix; }
 private:
     gsl_matrix_const_view m;
 };
 
-// ----- linear regression ------- //
+// ----- wrappers for multidimensional minimization routines ----- //
+template <class T>
+struct FncWrapper {
+    const T& F;
+    std::string error;
+    int numCalls;
+    explicit FncWrapper(const T& _F) : F(_F), numCalls(0) {}
+};
 
+static double functionWrapperNdim(const gsl_vector* x, void* param) {
+    double val;
+    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    p->numCalls++;
+    p->F.eval(x->data, &val);
+    return val;
+}
+
+static void functionWrapperNdimDer(const gsl_vector* x, void* param, gsl_vector* df) {
+    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    p->numCalls++;
+    p->F.evalDeriv(x->data, NULL, df->data);
+}
+
+static void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_vector* df) {
+    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    p->numCalls++;
+    p->F.evalDeriv(x->data, f, df->data);
+}
+
+// ----- wrappers for multidimensional nonlinear fitting ----- //
+#ifndef HAVE_EIGEN
+static int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df) {
+    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    try{
+        p->numCalls++;
+        p->F.evalDeriv(x->data, f? f->data : NULL, df? df->data : NULL);
+        // check that values and/or derivatives are ok
+        bool ok=true;
+        for(unsigned int i=0; f && i<p->F.numValues(); i++)
+            ok &= isFinite(f->data[i]);
+        for(unsigned int i=0; df && i<p->F.numVars()*p->F.numValues(); i++)
+            ok &= isFinite(df->data[i]);
+        if(!ok) {
+            /*p->error = "Function is not finite";
+            return GSL_FAILURE;*/
+            for(unsigned int i=0; f && i<p->F.numValues(); i++)
+                f->data[i] = 1e10;
+        }
+        return GSL_SUCCESS;
+    }
+    catch(std::exception& e){
+        p->error = e.what();
+        return GSL_FAILURE;
+    }
+}
+    
+static int functionWrapperNdimMval(const gsl_vector* x, void* param, gsl_vector* f) {
+    return functionWrapperNdimMvalFncDer(x, param, f, NULL);
+}
+
+static int functionWrapperNdimMvalDer(const gsl_vector* x, void* param, gsl_matrix* df) {
+    return functionWrapperNdimMvalFncDer(x, param, NULL, df);
+}
+
+#else
+template <class T>
+struct EigenFncWrapper {
+    const T& F;
+    mutable std::string error;
+    mutable int numCalls;
+    explicit EigenFncWrapper(const T& _F) : F(_F), numCalls(0) {}
+
+    int operator()(const Eigen::VectorXd &x, Eigen::VectorXd &f) const {
+        try{
+            numCalls++;
+            F.eval(x.data(), f.data());
+            for(unsigned int i=0; i<F.numValues(); i++)
+                if(!isFinite(f[i])) {
+                    for(unsigned int j=0; j<F.numValues(); j++)
+                        f[j] = 1e10;
+                    return 0;
+                    /*error = "Function is not finite";
+                    return -1;*/
+                }
+            return 0;
+        }
+        catch(std::exception& e){
+            error = e.what();
+            return -1;
+        }
+        return 0;
+    }
+
+    int df(const Eigen::VectorXd &x, Eigen::MatrixXd &df) const {
+        try{
+            numCalls++;
+            F.evalDeriv(x.data(), NULL, df.data());
+            /*for(unsigned int i=0; i<F.numVars()*F.numValues(); i++)
+                if(!isFinite(df.data()[i])) {
+                    error = "Derivative is not finite";
+                    return -1;
+                }*/
+            return 0;
+        }
+        catch(std::exception& e){
+            error = e.what();
+            return -1;
+        }
+        return 0;
+    }
+
+    int inputs() const { return F.numVars(); }
+    int values() const { return F.numValues(); }
+
+    // definitions for automatic numerical differentiation framework
+    typedef double Scalar;
+	enum {
+        InputsAtCompileTime = Eigen::Dynamic,
+        ValuesAtCompileTime = Eigen::Dynamic
+	};
+	typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
+	typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
+	typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
+};
+#endif
+
+//!!!!DEBUGGING!!!!
+#if 0
+void printoutD(const math::IFunctionNdimDeriv &fnc, const double params[]){
+    std::vector<double> jac(fnc.numVars()*fnc.numValues());
+    fnc.evalDeriv(params, NULL, &jac[0]);
+    std::ofstream strm("jac_analytic");
+    for(unsigned int v=0; v<fnc.numValues(); v++) {
+        for(unsigned int p=0; p<fnc.numVars(); p++)
+            strm<<jac[v*fnc.numVars()+p]<<' ';
+        strm<<'\n';
+    }
+}
+
+void printoutN(const math::IFunctionNdim &fnc, const double params[]){
+    std::vector<double> jac(fnc.numVars()*fnc.numValues());
+    std::vector<double> var(params, params+fnc.numVars());
+    std::vector<double> val0(fnc.numValues());
+    fnc.eval(params, &val0[0]);
+    for(unsigned int p=0; p<fnc.numVars(); p++) {
+        std::vector<double> var(params, params+fnc.numVars());
+        std::vector<double> val(fnc.numValues());
+        var[p]+=1e-8;
+        fnc.eval(&var[0], &val[0]);
+        for(unsigned int v=0; v<fnc.numValues(); v++)
+            jac[v*fnc.numVars()+p] = (val[v]-val0[v])/1e-8;
+    }
+    std::ofstream strm("jac_finitedif");
+    for(unsigned int v=0; v<fnc.numValues(); v++) {
+        for(unsigned int p=0; p<fnc.numVars(); p++)
+            strm<<jac[v*fnc.numVars()+p]<<' ';
+        strm<<'\n';
+    }
+}
+#endif
+}  // internal namespace
+
+// ----- linear least-square fit ------- //
 double linearFitZero(const std::vector<double>& x, const std::vector<double>& y,
     const std::vector<double>* w, double* rms)
 {
@@ -72,17 +235,18 @@ void linearFit(const std::vector<double>& x, const std::vector<double>& y,
         *rms = sqrt(sumsq/y.size());
 }
 
+// ----- multi-parameter linear least-square fit ----- //
 void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
     const std::vector<double>* w, std::vector<double>& result, double* rms)
 {
-    if(coefs.numRows() != rhs.size())
+    if(static_cast<unsigned int>(coefs.rows()) != rhs.size())
         throw std::invalid_argument(
             "LinearMultiFit: number of rows in matrix is different from the length of RHS vector");
-    result.assign(coefs.numCols(), 0);
+    result.assign(coefs.cols(), 0);
     gsl_matrix* covarMatrix =
-        gsl_matrix_alloc(coefs.numCols(), coefs.numCols());
+        gsl_matrix_alloc(coefs.cols(), coefs.cols());
     gsl_multifit_linear_workspace* fitWorkspace =
-        gsl_multifit_linear_alloc(coefs.numRows(),coefs.numCols());
+        gsl_multifit_linear_alloc(coefs.rows(),coefs.cols());
     if(covarMatrix==NULL || fitWorkspace==NULL) {
         if(fitWorkspace)
             gsl_multifit_linear_free(fitWorkspace);
@@ -94,40 +258,155 @@ void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs,
     if(w==NULL)
         gsl_multifit_linear(MatC(coefs), VecC(rhs), Vec(result), covarMatrix, &sumsq, fitWorkspace);
     else
-        gsl_multifit_wlinear(MatC(coefs), VecC(*w), VecC(rhs), Vec(result), covarMatrix, &sumsq, fitWorkspace);
+        gsl_multifit_wlinear(MatC(coefs), VecC(*w), VecC(rhs), Vec(result),
+            covarMatrix, &sumsq, fitWorkspace);
     gsl_multifit_linear_free(fitWorkspace);
     gsl_matrix_free(covarMatrix);
     if(rms!=NULL)
         *rms = sqrt(sumsq/rhs.size());
 }
 
-// ----- multidimensional minimization ------ //
-
-static double functionWrapperNdim(const gsl_vector* x, void* param)
+// ----- nonlinear least-square fit ----- //
+int nonlinearMultiFit(const IFunctionNdimDeriv& F, const double xinit[],
+    const double relToler, const int maxNumIter, double result[])
 {
-    double val;
-    static_cast<IFunctionNdim*>(param)->eval(x->data, &val);
-    return val;
+    const unsigned int Nparam = F.numVars();   // number of parameters to vary
+    const unsigned int Ndata  = F.numValues(); // number of data points to fit
+    if(Ndata < Nparam)
+        throw std::invalid_argument(
+            "nonlinearMultiFit: number of data points is less than the number of parameters to fit");
+    for(unsigned int i=0; i<Nparam; i++)
+        result[i] = xinit[i];
+#ifdef HAVE_EIGEN
+    EigenFncWrapper<IFunctionNdimDeriv> params(F);
+    Eigen::VectorXd data = Eigen::Map<const Eigen::VectorXd>(xinit, Nparam);
+    //Eigen::NumericalDiff< EigenFncWrapper<IFunctionNdimDeriv> > fw(params);
+    //Eigen::LevenbergMarquardt< Eigen::NumericalDiff< EigenFncWrapper<IFunctionNdimDeriv> >, double > solver(fw);
+    Eigen::LevenbergMarquardt< EigenFncWrapper<IFunctionNdimDeriv> , double > solver(params);
+    if(solver.minimizeInit(data) == Eigen::LevenbergMarquardtSpace::ImproperInputParameters)
+        params.error = "invalid input parameters";
+#else
+    FncWrapper<IFunctionNdimDeriv> params(F);
+    gsl_multifit_function_fdf fnc;
+    fnc.params = &params;
+    fnc.p = Nparam;
+    fnc.n = Ndata;
+    fnc.f = functionWrapperNdimMval;
+    fnc.df = functionWrapperNdimMvalDer;
+    fnc.fdf = functionWrapperNdimMvalFncDer;
+    gsl_multifit_fdfsolver* solver = gsl_multifit_fdfsolver_alloc(
+        gsl_multifit_fdfsolver_lmsder, Ndata, Nparam);
+    gsl_vector_const_view v_xinit = gsl_vector_const_view_array(xinit, Nparam);
+    if(gsl_multifit_fdfsolver_set(solver, &fnc, &v_xinit.vector) != GSL_SUCCESS)
+        params.error = "invalid input parameters";
+    const double* data = solver->x->data;
+#endif
+    bool carryon = true, converged = false;
+    while(params.error.empty() && carryon && !converged) {
+#ifdef HAVE_EIGEN
+        carryon = solver.minimizeOneStep(data) == Eigen::LevenbergMarquardtSpace::Running;
+#else
+        carryon = gsl_multifit_fdfsolver_iterate(solver) == GSL_SUCCESS;
+#endif
+        carryon &= params.numCalls < maxNumIter;
+        // store the current result and test for convergence
+        converged = true;
+        for(unsigned int i=0; i<Nparam; i++) {
+            converged &= fabs(data[i] - result[i]) <= relToler * fabs(data[i]);
+            result[i] = data[i];
+        }
+    }
+    if(!converged)
+        params.numCalls *= -1;  // signal of non-convergence
+#ifndef HAVE_EIGEN
+    gsl_multifit_fdfsolver_free(solver);
+#endif
+    if(!params.error.empty())
+        throw std::runtime_error("Error in nonlinearMultiFit: "+params.error);
+    return params.numCalls;
 }
+
+// ----- multidimensional root-finding ----- //
+
+int findRootNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[],
+    const double absToler, const int maxNumIter, double result[])
+{
+    const unsigned int Ndim = F.numVars();
+    if(F.numValues() != F.numVars())
+        throw std::invalid_argument(
+            "findRootNdimDeriv: number of equations must be equal to the number of variables");
+#ifdef HAVE_EIGEN
+    EigenFncWrapper<IFunctionNdimDeriv> fnc(F);
+    Eigen::VectorXd vars = Eigen::Map<const Eigen::VectorXd>(xinit, Ndim);
+    Eigen::HybridNonLinearSolver< EigenFncWrapper<IFunctionNdimDeriv> , double > solver(fnc);
+    if(solver.solveInit(vars) == Eigen::HybridNonLinearSolverSpace::ImproperInputParameters)
+        fnc.error = "invalid input parameters";
+    solver.parameters.maxfev = maxNumIter;
+    solver.useExternalScaling= true;
+    solver.diag.setConstant(Ndim, 1.);
+    const double* values = solver.fvec.data();
+#else
+    FncWrapper<IFunctionNdimDeriv> fnc(F);
+    gsl_multiroot_function_fdf gfnc;
+    gfnc.params = &fnc;
+    gfnc.n = Ndim;
+    gfnc.f = functionWrapperNdimMval;
+    gfnc.df = functionWrapperNdimMvalDer;
+    gfnc.fdf = functionWrapperNdimMvalFncDer;
+    gsl_multiroot_fdfsolver* solver = gsl_multiroot_fdfsolver_alloc(
+        gsl_multiroot_fdfsolver_hybridsj, Ndim);
+    gsl_vector_const_view v_xinit = gsl_vector_const_view_array(xinit, Ndim);
+    if(gsl_multiroot_fdfsolver_set(solver, &gfnc, &v_xinit.vector) != GSL_SUCCESS)
+        fnc.error = "invalid input parameters";
+    const double* vars = solver->x->data;
+    const double* values = solver->f->data;
+#endif
+    bool carryon = true, converged = false;
+    while(fnc.error.empty() && carryon && !converged) {   // iterate
+#ifdef HAVE_EIGEN
+        carryon  = solver.solveOneStep(vars) == Eigen::HybridNonLinearSolverSpace::Running;
+#else
+        carryon  = gsl_multiroot_fdfsolver_iterate(solver) == GSL_SUCCESS;
+#endif
+        carryon &= fnc.numCalls < maxNumIter;
+        // test for convergence
+        converged = true;
+        for(unsigned int i=0; i<Ndim; i++)
+            converged &= fabs(values[i]) <= absToler;
+    }
+    if(!converged)
+        fnc.numCalls *= -1;  // signal of error
+    // store the found location of minimum
+    for(unsigned int i=0; i<Ndim; i++)
+        result[i] = vars[i];
+#ifndef HAVE_EIGEN
+    gsl_multiroot_fdfsolver_free(solver);
+#endif
+    if(!fnc.error.empty())
+        throw std::runtime_error("Error in findRootNdimDeriv: "+fnc.error);
+    return fnc.numCalls;
+}
+
+// ----- multidimensional minimization ----- //
 
 int findMinNdim(const IFunctionNdim& F, const double xinit[], const double xstep[],
     const double absToler, const int maxNumIter, double result[])
 {
     if(F.numValues() != 1)
-        throw std::invalid_argument("N-dimensional minimization: function must provide a single output value");
+        throw std::invalid_argument("findMinNdim: function must provide a single output value");
     const unsigned int Ndim = F.numVars();
     // instance of minimizer algorithm
     gsl_multimin_fminimizer* mizer = gsl_multimin_fminimizer_alloc(
         gsl_multimin_fminimizer_nmsimplex2, Ndim);
     gsl_multimin_function fnc;
+    FncWrapper<IFunctionNdim> params(F);
+    fnc.params = &params;
     fnc.n = Ndim;
     fnc.f = functionWrapperNdim;
-    fnc.params = const_cast<IFunctionNdim*>(&F);
     int numIter = 0;
     gsl_vector_const_view v_xinit = gsl_vector_const_view_array(xinit, Ndim);
     gsl_vector_const_view v_xstep = gsl_vector_const_view_array(xstep, Ndim);
-    if(gsl_multimin_fminimizer_set(mizer, &fnc,
-        &v_xinit.vector, &v_xstep.vector ) == GSL_SUCCESS)
+    if(gsl_multimin_fminimizer_set(mizer, &fnc, &v_xinit.vector, &v_xstep.vector ) == GSL_SUCCESS)
     {   // iterate
         double sizePrev = gsl_multimin_fminimizer_size(mizer);
         int numIterStall = 0;
@@ -152,6 +431,44 @@ int findMinNdim(const IFunctionNdim& F, const double xinit[], const double xstep
     for(unsigned int i=0; i<Ndim; i++)
         result[i] = mizer->x->data[i];
     gsl_multimin_fminimizer_free(mizer);
+    if(!params.error.empty())
+        throw std::runtime_error("Error in findMinNdim: "+params.error);
+    return numIter;
+}
+
+int findMinNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[], const double xstep,
+    const double absToler, const int maxNumIter, double result[])
+{
+    if(F.numValues() != 1)
+        throw std::invalid_argument("findMinNdimDeriv: function must provide a single output value");
+    const unsigned int Ndim = F.numVars();
+    // instance of minimizer algorithm
+    gsl_multimin_fdfminimizer* mizer = gsl_multimin_fdfminimizer_alloc(
+        gsl_multimin_fdfminimizer_vector_bfgs2, Ndim);
+    gsl_multimin_function_fdf fnc;
+    FncWrapper<IFunctionNdimDeriv> params(F);
+    fnc.params = &params;
+    fnc.n = Ndim;
+    fnc.f = functionWrapperNdim;
+    fnc.df = functionWrapperNdimDer;
+    fnc.fdf = functionWrapperNdimFncDer;
+    int numIter = 0;
+    gsl_vector_const_view v_xinit = gsl_vector_const_view_array(xinit, Ndim);
+    if(gsl_multimin_fdfminimizer_set(mizer, &fnc, &v_xinit.vector, xstep, 0.1) == GSL_SUCCESS)
+    {   // iterate
+        do {
+            numIter++;
+            if(gsl_multimin_fdfminimizer_iterate(mizer) != GSL_SUCCESS)
+                break;
+        } while(numIter<maxNumIter && 
+            gsl_multimin_test_gradient(mizer->gradient, absToler) == GSL_CONTINUE);
+    }
+    // store the found location of minimum
+    for(unsigned int i=0; i<Ndim; i++)
+        result[i] = mizer->x->data[i];
+    gsl_multimin_fdfminimizer_free(mizer);
+    if(!params.error.empty())
+        throw std::runtime_error("Error in findMinNdimDeriv: "+params.error);
     return numIter;
 }
 
