@@ -16,11 +16,15 @@
 #include "galaxymodel.h"
 #include "particles_io.h"
 #include "math_specfunc.h"
+#include "math_spline.h"
 #include "debug_utils.h"
+#include "utils.h"
 
 const double reqRelError = 1e-4;
 const int maxNumEval = 1e5;
+const unsigned int numBins = 20;
 const char* errmsg = "\033[1;31m **\033[0m";
+std::string histograms;
 
 bool testTotalMass(const galaxymodel::GalaxyModel& galmod, double massExact)
 {
@@ -81,17 +85,55 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
     double density, densityErr;
     coord::VelCyl velocityFirstMoment, velocityFirstMomentErr;
     coord::Vel2Cyl velocitySecondMoment, velocitySecondMomentErr;
-    computeMoments(galmod, point, reqRelError, maxNumEval,
+    computeMoments(galmod, point,
         &density, &velocityFirstMoment, &velocitySecondMoment,
-        &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr);
+        &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr,
+        reqRelError, maxNumEval);
     bool densok = math::fcmp(density, densExact, 0.05) == 0;
     bool sigmaok =
         math::fcmp(velocitySecondMoment.vR2,   sigmaExact, 0.05) == 0 &&
         math::fcmp(velocitySecondMoment.vz2,   sigmaExact, 0.05) == 0 &&
         math::fcmp(velocitySecondMoment.vphi2, sigmaExact, 0.05) == 0;
 
+    // compute velocity distributions
+    double vmax = sqrt(-2*galmod.potential.value(point));
+    std::vector<double> gridVR   = math::createUniformGrid(41, -vmax, vmax);
+    std::vector<double> gridVz   = math::createUniformGrid(41, -vmax, vmax);
+    std::vector<double> gridVphi = math::createUniformGrid(41, -vmax, vmax);
+    std::vector<double> amplVR, amplVz, amplVphi/*, projVR, projVz, projVphi*/;
+    const int ORDER = 3;
+    math::BsplineInterpolator1d<ORDER> intVR(gridVR), intVz(gridVz), intVphi(gridVphi);
+    double densvdf = galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, false,
+        gridVR, gridVz, gridVphi, amplVR, amplVz, amplVphi);
+    // skip the projected ones for the moment -- they are more expensive
+    //galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, true,
+    //    gridVR, gridVz, gridVphi, projVR, projVz, projVphi, /*accuracy*/1e-2, /*maxNumEval*/1e6);
+    // output the profiles
+    for(int i=-100; i<=100; i++) {
+        double v = i*vmax/100;
+        histograms +=
+        utils::pp(v, 9)+'\t'+
+        utils::pp(intVR.  interpolate(v, amplVR),   9)+' '+
+        utils::pp(intVz.  interpolate(v, amplVz),   9)+' '+
+        utils::pp(intVphi.interpolate(v, amplVphi), 9)+'\n';
+        //utils::pp(intVR.  interpolate(v, projVR),   9)+' '+
+        //utils::pp(intVz.  interpolate(v, projVz),   9)+' '+
+        //utils::pp(intVphi.interpolate(v, projVphi), 9)+'\n';
+    }
+    histograms+='\n';
+    // compute the dispersions from the VDF (integrate with the weight factor v^2)
+    double sigmaR  = intVR.  integrate(-vmax, vmax, amplVR, 2 /*power index for the weighting*/);
+    double sigmaz  = intVz.  integrate(-vmax, vmax, amplVz, 2);
+    double sigmaphi= intVphi.integrate(-vmax, vmax, amplVphi, 2);
+    // they should agree with the velocity moments computed above
+    bool densvdfok = math::fcmp(densvdf, density, 2e-5) == 0;
+    bool sigmavdfok= 
+        math::fcmp(sigmaR,   velocitySecondMoment.vR2,   2e-5) == 0 &&
+        math::fcmp(sigmaz,   velocitySecondMoment.vz2,   2e-5) == 0 &&
+        math::fcmp(sigmaphi, velocitySecondMoment.vphi2, 2e-5) == 0;
+
     std::cout << 
-        "density=" << density << " +- " << densityErr << 
+        "density=" << density << " +- " << densityErr << (densvdfok?"":errmsg) <<
         "  compared to analytic value " << densExact << (densok?"":errmsg) <<"\n"
         //"velocity"
         //"  vR=" << velocityFirstMoment.vR << " +- " << velocityFirstMomentErr.vR <<
@@ -101,11 +143,12 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
         "  vR2="    << velocitySecondMoment.vR2    << " +- " << velocitySecondMomentErr.vR2 <<
         ", vz2="    << velocitySecondMoment.vz2    << " +- " << velocitySecondMomentErr.vz2 <<
         ", vphi2="  << velocitySecondMoment.vphi2  << " +- " << velocitySecondMomentErr.vphi2 <<
+        (sigmavdfok?"":errmsg) <<
         //", vRvz="   << velocitySecondMoment.vRvz   << " +- " << velocitySecondMomentErr.vRvz <<
         //", vRvphi=" << velocitySecondMoment.vRvphi << " +- " << velocitySecondMomentErr.vRvphi <<
         //", vzvphi=" << velocitySecondMoment.vzvphi << " +- " << velocitySecondMomentErr.vzvphi <<
         "   compared to analytic value " << sigmaExact << (sigmaok?"":errmsg) <<"\n";
-    return dfok && densok && sigmaok;
+    return dfok && densok && sigmaok && densvdfok && sigmavdfok;
 }
 
 /// analytic expression for the ergodic distribution function f(E)
@@ -138,17 +181,17 @@ int main(){
     ok &= testActionSpaceScaling(df::ActionSpaceScalingRect(0.765432,0.234567));
 
     // test double-power-law distribution function in a spherical Hernquist potential
-    // NB: parameters obtained by fitting (test_df_fit.cpp)
+    // NB: parameters obtained by fitting (example_df_fit.cpp)
     df::DoublePowerLawParam paramDPL;
-    paramDPL.slopeIn   = 1.5;
-    paramDPL.slopeOut  = 5.0;
-    paramDPL.steepness = 1.3;
-    paramDPL.J0        = 1.25;
-    paramDPL.coefJrIn  = 1.4;
+    paramDPL.slopeIn   = 1.55;
+    paramDPL.slopeOut  = 5.25;
+    paramDPL.steepness = 1.24;
+    paramDPL.J0        = 1.53;
+    paramDPL.coefJrIn  = 1.56;
     paramDPL.coefJzIn  = (3-paramDPL.coefJrIn)/2;
     paramDPL.coefJrOut = 1.0;
     paramDPL.coefJzOut = 1.0;
-    paramDPL.norm = 2.328;
+    paramDPL.norm      = 2.7;
     potential::PtrPotential potH(new potential::Dehnen(1., 1., 1., 1., 1.));  // potential
     const actions::ActionFinderAxisymFudge actH(potH);        // action finder
     const df::DoublePowerLaw dfH(paramDPL);                   // distribution function
@@ -162,6 +205,11 @@ int main(){
         double densExact  = potH->density(point);                            // analytical value of density
         double sigmaExact = sigmaHernquist(1, 1, coord::toPosSph(point).r);  // analytical value of sigma^2
         ok &= testDFmoments(galmodH, point, dfExact, densExact, sigmaExact);
+    }
+
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("test_df_halo.dat");
+        strm << histograms;
     }
 
     if(ok)

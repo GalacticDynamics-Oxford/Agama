@@ -145,9 +145,12 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     int   stage = 0;   // 0 means scan inward, 1 - outward, 2 - done
     while(stage<2) {   // first scan inward in radius, then outward, then stop
         double R = exp(logR);
-        double E = pot(R);
         double G = math::integrate(PotIntegrand(pot, R, 0.5), 0, 1, ACCURACY);
         double H = math::integrate(PotIntegrand(pot, R, 1.5), 0, 1, ACCURACY);
+        double E, dPhidR;
+        pot.evalDeriv(R, &E, &dPhidR);
+        if(!(H>0 && G>0 && H<INFINITY && G<INFINITY) || dPhidR<=0)
+            throw std::runtime_error("PhaseVolume: potential is not monotonic in radius");
         double scaledE, dEdscaledE;
         scaleE(E, invPhi0, scaledE, dEdscaledE);
         gridE.push_back(scaledE);

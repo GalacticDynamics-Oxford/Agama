@@ -368,8 +368,12 @@ Interpolator::Interpolator(const BasePotential& potential)
                 gridR[np-3], gridR[np-2], gridR[np-1], gridRder[np-3], gridRder[np-2], gridRder[np-1]);
             double der2L = math::deriv2(gridE[np-3], gridE[np-2], gridE[np-1],
                 gridL[np-3], gridL[np-2], gridL[np-1], gridLder[np-3], gridLder[np-2], gridLder[np-1]);
-            // check if converged, or if the covered range of radii is too large (>1e6)
-            if((fabs(der2R) < EPS && fabs(der2L) < EPS) || fabs(logR - logRinit)>=15) {
+            // check if converged, or if the covered range of radii is too large (>1e6),
+            // or we are suffering from loss of precision (too close to the origin and potential is too flat)
+            if((fabs(der2R) < EPS && fabs(der2L) < EPS) || 
+                fabs(logR - logRinit) >= 15 ||
+                (isFinite(Phi0) && Phival-Phi0 < -Phi0*1e-12) )
+            {
                 if(stage==0) {   // we've been assembling the arrays inward, now need to reverse them
                     for(int i=0; i<NUM_ARRAYS; i++)
                         std::reverse(grids[i].begin(), grids[i].end());

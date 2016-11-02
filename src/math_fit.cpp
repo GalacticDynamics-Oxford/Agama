@@ -4,6 +4,7 @@
 #include <gsl/gsl_multifit.h>
 #include <gsl/gsl_multimin.h>
 #include <stdexcept>
+#include <string>
 
 #ifdef HAVE_EIGEN
 #include <Eigen/Dense>

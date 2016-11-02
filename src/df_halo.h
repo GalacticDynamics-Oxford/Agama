@@ -33,16 +33,17 @@ DoublePowerLawParam() :  ///< set default values for all fields
 
 /** General double power-law model.
     The distribution function is given by
-    \f$  f(J) = norm / (2\pi J_0)^3  (h(J)/J_0)^{-\Gamma}
-         (1 + (g(J)/J_0)^\eta )^{ (\Beta-\Gamma) / \eta }
+    \f$  f(J) = norm / (2\pi J_0)^3
+         (1 + (J_0 /h(J))^\eta )^{\Gamma / \eta}
+         (1 + (g(J)/ J_0)^\eta )^{-B / \eta }
          \exp[ - (g(J) / J_{cutoff})^2 ] \f$,  where
     \f$  g(J) = g_r J_r + g_z J_z + g_\phi |J_\phi|  \f$,
     \f$  h(J) = h_r J_r + h_z J_z + h_\phi |J_\phi|  \f$.
     Gamma is the power-law slope of DF at small J (slopeIn), and Beta -- at large J (slopeOut),
     the transition occurs around J=J0, and its steepness is adjusted by the parameter eta.
-    h_r, h_z and h_\phi control the anisotropy of the DF at small J (their sum is always taken
+    h_r, h_z and h_phi control the anisotropy of the DF at small J (their sum is always taken
     to be unity, so that there are two free parameters -- coefJrIn = h_r, coefJzIn = h_z),
-    and g_r, g_z, g_\phi do the same for large J (coefJrOut = g_r, coefJzOut = g_z).
+    and g_r, g_z, g_phi do the same for large J (coefJrOut = g_r, coefJzOut = g_z).
 */
 class DoublePowerLaw: public BaseDistributionFunction{
     const DoublePowerLawParam par;  ///< parameters of DF

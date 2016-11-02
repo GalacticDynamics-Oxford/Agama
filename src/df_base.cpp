@@ -16,9 +16,11 @@ actions::Actions ActionSpaceScalingTriangLog::toActions(const double vars[], dou
     const double
     Jsum = exp( 1/(1-u) - 1/u ),                         // Jr+Jz+|Jphi|
     Jm   = v==0 || v==1 ? 0 : Jsum * (1 - fabs(2*v-1));  // Jr+Jz
-    if(jac)
-        *jac  = (Jsum>1e-100 && Jsum<1e100) ?   // if near J=0 or infinity, set jacobian to zero
-            (2 - fabs(4*v-2)) * pow_3(Jsum) * (1/pow_2(1-u) + 1/pow_2(u)) : 0;
+    if(jac) {
+        *jac = (2 - fabs(4*v-2)) * pow_3(Jsum) * (1/pow_2(1-u) + 1/pow_2(u));
+        if(!(*jac > 1e-100 && *jac < 1e100))  // if near J=0 or infinity, set jacobian to zero
+            *jac = 0;
+    }
     return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), v==0.5 ? 0 : Jsum * (2*v-1));
 }
 
@@ -49,8 +51,11 @@ actions::Actions ActionSpaceScalingRect::toActions(const double vars[3], double 
     const double u = vars[0], v = vars[1], w = vars[2], Jm = v / (1-v) * scaleJm;
     if(u<0 || u>1 || v<0 || v>1 || w<0 || w>1)
         throw std::range_error("ActionSpaceScaling: input variables outside unit cube");
-    if(jac)
+    if(jac) {
         *jac = pow_2(scaleJm) * scaleJphi * v / pow_3(1-v) * (1/pow_2(1-u) + 1/pow_2(u));
+        if(!(*jac > 1e-100 && *jac < 1e100))
+            *jac = 0;
+    }
     return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), scaleJphi * (1/(1-u) - 1/u));
 }
 

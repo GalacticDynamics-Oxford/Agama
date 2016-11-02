@@ -77,8 +77,6 @@ may be converted into its values and derivatives, and used to construct a 2d qui
 In the 3d case, the amplitudes are directly used with a cubic (N=3) 3d B-spline interpolator.
 
 ###  Code origin
-1d cubic spline is based on the GSL implementation by G.Jungman;
-2d cubic spline is based on the interp2d library by D.Zaslavsky;
 1d and 2d quintic splines are based on the code by W.Dehnen.
 */
 #pragma once
@@ -231,6 +229,117 @@ private:
     std::vector<double> fder3; ///< third derivatives of function at grid nodes
 };
 
+
+/** One-dimensional B-spline interpolator class.
+    The value of interpolant is given by a weighted sum of components:
+    \f$  f(x) = \sum_n  A_n  B_n(x) ,  0 <= n < numComp  \f$,
+    where A_n are the amplitudes and B_n are basis functions, which are piecewise polynomials
+    (B-splines) of degree N>=1 that are nonzero on a finite interval between at most N+1 grid points.
+    The interpolation is local - at any point, at most (N+1) basis functions are non-zero.
+    The total number of components numComp = (N_x+N-1), where N_x is the size of the grid.
+    This class does not itself hold the amplitudes of components, it only manages
+    the basis functions for interpolation - e.g., `nonzeroBsplines()` computes the values
+    of all possibly non-zero basis functions at the given point, the method `eval()`
+    implementing IFunctionNdim interface computes the values of all numComp basis functions
+    at the given point, and `interpolate()` computes the value of interpolant at the given
+    point from the provided array of amplitudes, summing only over the non-trivial B-splines.
+    The sum of all basis functions is always unity, and each function is non-negative.
+    This class holds only the grid nodes and computes the values of basis functions,
+    but does not hold their amplitudes -- these may be provided as the argument to the `interpolate()`
+    function.
+    \tparam  N is the degree of 1d B-splines: possible values are
+    N=0 (rectangular histogram), N=1 (linear interpolator), N=2, and N=3 (clamped cubic spline).
+*/
+template<int N>
+class BsplineInterpolator1d: public math::IFunctionNdim {
+public:
+    /** Initialize a 1d interpolator from the provided arrays of grid nodes in x.
+        \param[in] xnodes, ynodes, znodes are the nodes of grid in each dimension,
+        sorted in increasing order, must have at least 2 elements.
+        There is no work done in the constructor apart from checking the validity of parameters.
+        \throw std::invalid_argument if the 1d grids are invalid.
+    */
+    BsplineInterpolator1d(const std::vector<double>& xnodes);
+
+    /** Compute the values of all potentially non-zero interpolating basis functions
+        at the given point, needed to obtain the value of interpolant f(x) at this point.
+        \param[in]  x is the point (which may lie outside the grid);
+        \param[out] values  is the array of (N+1) values of interpolation B-splines;
+        The sum of values of all B-splines is always 1, and values are non-negative.
+        The special case when one of these weigths is 1 and the rest are 0 occurs at the corners of
+        the interval, or, for a linear intepolator (N=1) also at all grid nodes,
+        and means that the value of interpolant `f` is equal to the single element of the amplitudes
+        array, which in the case N=1 should contain the values of the original function at grid nodes.
+        If any of the coordinates of input point falls outside grid boundaries in the respective
+        dimension, all weights are zero.
+        \return  the index of the first basis function for which the values are stored.
+    */
+    unsigned int nonzeroComponents(const double x, double values[]) const;
+
+    /** Compute the values of all numComp basis functions at the given point.
+        \param[in]  x is the point (which may lie outside the grid);
+        \param[out] values will contain the values of all basis functions at the given point
+        (many of them may be zero); must point to an existing array of length numComp
+        (no range check performed!).
+        If the input point is outside the grid, all values will contain zeros.
+    */
+    virtual void eval(const double* x, double values[]) const;
+
+    /** Compute the value of the interpolant `f` at the given point.
+        \param[in] x is the point (which may lie outside the grid);
+        \param[in] amplitudes is the array of numComp amplitudes of each basis function;
+        \return    the weighted sum of all potentially non-zero basis functions at this point,
+        multiplied by their respective amplitudes, or 0 if the input location is outside
+        the grid definition region.
+        \throw std::range_error if the length of `amplitudes` does not correspond to numComp.
+    */
+    double interpolate(const double x, const std::vector<double> &amplitudes) const;
+
+    /** Compute the integral of f(x) * x^n over the interval [x1..x2], where f(x) is given
+        by the weighted sum of basis functions, with weights provided in the array of amplitudes.
+        \param[in]  x1  is the lower limit of integration;
+        \param[in]  x2  is the upper limit;
+        \param[in]  amplitudes  is the array of numComp amplitudes of basis functions;
+        \param[in]  n   is the power-law index for the optional multiplier x^n;
+        \return     the value of integral (computed exactly up to machine precision).
+    */
+    double integrate(double x1, double x2, const std::vector<double> &amplitudes, int n=0) const;
+
+    /** Compute the symmetric matrix of overlap integrals:
+        \f$  M_{ij} = \int_{x_{min}}^{x_{max}} B^(D)_i(x) B^(D)_j(x) dx  \f$,
+        where \f$  B^(D)_i(x)  \f$ is the D-th derivative of i-th basis function.
+        This matrix (for D=0) may be used to compute the amplitudes of basis functions
+        that yield the best approximation \f$ \tilde f(x) \f$ to the function f(x):
+        let \f$  \tilde f(x) = \sum_{i=1}^{numComp} A_i B_i(x)  \f$,
+        and \f$  C_j = \int_{x_{min}}^{x_{max}} f(x) B_j(x) dx  \f$.
+        Then the amplitudes A_i are obtained from the linear equation system
+        \f$  M_{ij} A_i = C_j  \f$.
+        The overlap integrals of derivatives are used in the context of penalized
+        smoothing splines and provide the roughness penalty term.
+        \param[in]  derivOrder = D -- order of the derivatives (should be 0, 1, or 2).
+        \return  the square symmetric matrix M_ij with size numComp.
+        \throw   std::invalid_argument if the order of derivative is incorrect.
+    */
+    Matrix<double> computeOverlapMatrix(const unsigned int derivOrder) const;
+
+    /** The dimensions of interpolator (1) */
+    virtual unsigned int numVars()   const { return 1; }
+
+    /** The number of components (basis functions) */
+    virtual unsigned int numValues() const { return numComp; }
+
+    /** return the boundaries of grid definition region */
+    double xmin() const { return xnodes.front(); }
+    double xmax() const { return xnodes.back();  }
+
+private:
+    std::vector<double> xnodes;  ///< grid nodes
+    const unsigned int numComp;  ///< number of basis functions
+};
+
+template<int N>
+std::vector<double> createBsplineInterpolator1dArray(const IFunction& F,
+    const std::vector<double>& xnodes, int NpointsPerSegment=0);
 
 ///@}
 /// \name Two-dimensional interpolation
@@ -493,7 +602,7 @@ public:
         indices[1] = indComp / NN_z % NN_y,
         indices[0] = indComp / NN_z / NN_y;
     }
-    
+
     /** return the boundaries of grid definition region */
     double xmin() const { return xnodes.front(); }
     double xmax() const { return xnodes.back();  }
@@ -534,7 +643,7 @@ typedef BsplineInterpolator3d<3> CubicInterpolator3d;
     or possibly other exceptions that might arise in the solution of linear system in the case N>1.
 */
 template<int N>
-std::vector<double> createInterpolator3dArray(const IFunctionNdim& F,
+std::vector<double> createBsplineInterpolator3dArray(const IFunctionNdim& F,
     const std::vector<double>& xnodes,
     const std::vector<double>& ynodes,
     const std::vector<double>& znodes);
@@ -550,7 +659,7 @@ std::vector<double> createInterpolator3dArray(const IFunctionNdim& F,
     of other possible problems.
 */
 template<int N>
-std::vector<double> createInterpolator3dArrayFromSamples(
+std::vector<double> createBsplineInterpolator3dArrayFromSamples(
     const Matrix<double>& points, const std::vector<double>& weights,
     const std::vector<double>& xnodes,
     const std::vector<double>& ynodes,
@@ -685,11 +794,12 @@ enum FitOptions {
 
     \tparam  N is the degree of B-splines
     (implemented for 1 or 3, smoothing is possible only for N>1).
- 
+
     \param[in]  grid     are the grid nodes defining the interpolated ln(P),
     should be in increasing order.
     \param[in]  xvalues  are the coordinates x[i] of input samples.
     \param[in]  weights  are the weights w[i] of samples; should be non-negative.
+    If not provided (empty array), all weights are assumed to be equal to 1.0/xvalues.size().
     \param[in]  options  is a bit field specifying several parameters for the fitting procedure:
     the choice between second and third derivative in the penalty term, and
     the extent of the domain for the estimated density beyond each of the two grid endpoints:
@@ -723,7 +833,7 @@ enum FitOptions {
 */
 template<int N>
 std::vector<double> splineLogDensity(const std::vector<double> &grid,
-    const std::vector<double> &xvalues, const std::vector<double> &weights,
+    const std::vector<double> &xvalues, const std::vector<double> &weights=std::vector<double>(),
     FitOptions options=FitOptions(), double smoothing=0);
 
 ///@}

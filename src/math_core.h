@@ -79,11 +79,12 @@ double unwrapAngle(double x, double xprev);
     \param[in]  x is the position, which must lie in the interval x_0 <= x <= x_N;
     \param[in]  arr is the array of bin boundaries sorted in ascending order (NOT CHECKED!)
     \param[in]  size is the number of elements in the array (i.e., number of bins plus 1);
-    since this header does not include <vector>, we shall pass the array in the traditional
+    since this header file does not #include <vector>, we shall pass the array in the traditional
     way, as a pointer to the first element plus the number of elements.
     \returns the index k of the bin such that x_k <= x < x_{k+1}, where the last strict inequality
-    is replaced by <= for the last bin (x=x_N still returns N-1).
-    \throws std::invalid_argument exception if the point is outside the interval */
+    is replaced by <= for the last bin (x=x_N still returns N-1);
+    or -1 if x<x_0, or N if x>x_N.
+*/
 template<typename NumT>
 unsigned int binSearch(const NumT x, const NumT arr[], const unsigned int size);
 

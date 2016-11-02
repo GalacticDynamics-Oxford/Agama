@@ -471,14 +471,31 @@ As stressed previously, using $\bJ$ as the argument of $f$ has the advantage tha
 
 The most basic task is the computation of DF moments (density, velocity dispersion, etc.), defined as
 \begin{align*}
-\rho(\bx) \equiv \int d^3v\, f\big(\bJ(\bx,\bv)\big), \quad
-\overline{\bv} \equiv \rho^{-1} \int d^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \quad
-\overline{v_{ij}} \equiv \rho^{-1} \int d^3v \,v_{ij}\, f\big(\bJ(\bx,\bv)\big).
+\rho(\bx) &\equiv \iiint d^3v\, f\big(\bJ(\bx,\bv)\big), \\
+\overline{\bv} &\equiv \rho^{-1} \iiint d^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \\
+\overline{v_{ij}} &\equiv \rho^{-1} \iiint d^3v \,v_{ij}\, f\big(\bJ(\bx,\bv)\big).
 \end{align*}
 The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
 This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}).
-The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ -- this involves an additional integration over $z$.
+
+The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ (currently for axisymmetric systems only) -- this involves an additional integration over $z$:
+\begin{align*}
+\Sigma(R) \equiv \int_{z=-\infty}^\infty dz\, \rho(R,z), \qquad
+\sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty dz\, \rho(R,z)\, v_z^2 .
+\end{align*}
 \textcolor{red}{[Currently there are no analogous routines for spherical isotropic DFs].}
+
+%%%%%%%%%%%%%%
+\subsubsection{Velocity distribution functions}  \label{sec:VDF}
+
+Instead of just a few DF moments at a given point, one may consider one-dimensional velocity distribution functions (VDFs):
+\begin{align*}
+\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint dv_2\,dv_3\, f\big(\bJ(\bx,\bv)\big) ,\\
+\mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int dx_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
+\end{align*}
+Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$.
+VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the standard approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
+The VDFs or projected VDFs are computed by the routine \ttt{computeVelocityDistribution<N>}.
 
 %%%%%%%%%%%%%%
 \subsubsection{Conversion to/from \Nbody models}  \label{sec:Nbody}
@@ -964,8 +981,11 @@ The right panel shows the relative error in the sum of two actions as a function
 The correspondence between energy $E$ and phase volume $h$ in the given potential is provided by the class \ttt{PhaseVolume}. Phase volume $h(E)$ and its derivative (density of states) $g(E)\equiv dh(E)/dE$ are defined as
 \begin{subequations}
 \begin{align}
-h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, dr = \int_{\Phi(0)}^E g(E')\, dE'  ,\\
-g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, dr = 4\pi^2\, L_\mathrm{circ}^2(E)\, T_\mathrm{rad}(E) ,
+h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, dr =
+  4\pi^2\int_0^{L^2_\mathrm{circ}(E)} J_r(E,L)\,dL^2 =
+  \int_{\Phi(0)}^E g(E')\, dE' ,\\
+g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, dr =
+  4\pi^2\, L_\mathrm{circ}^2(E)\, T_\mathrm{rad}(E) ,
 \end{align}
 \end{subequations}
 where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E) = 2 \int_0^{r_\mathrm{max}(E)} dr/v$  is the period of a radial orbit with this energy. In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.

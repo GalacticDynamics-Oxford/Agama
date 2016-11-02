@@ -104,10 +104,10 @@ double unwrapAngle(double x, double xprev)
 template<typename NumT>
 unsigned int binSearch(const NumT x, const NumT arr[], unsigned int size)
 {
-    if(size<2)
-        throw std::invalid_argument("Error in binSearch: should have at least one bin");
-    if(x<arr[0] && x>arr[size-1])
-        throw std::invalid_argument("Error in binSearch: point is outside the interval");
+    if(size<1 || x<arr[0])
+        return -1;
+    if(x>arr[size-1] || size<2)
+        return size;
     // first guess the likely location in the case that the input grid is equally-spaced
     unsigned int index = static_cast<unsigned int>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
     unsigned int indhi = size-1;
@@ -342,7 +342,7 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
 {
     // derivatives must exist and have the same sign
     // (but shouldn't bee too large, otherwise we have an overflow -- apparently a bug in gsl_poly_solve)
-    if(!gsl_finite(dfdx1+dfdx2) || dfdx1*dfdx2<0 || dfdx1*dfdx1>1e100)
+    if(!isFinite(dfdx1+dfdx2) || dfdx1*dfdx2<0 || fabs(dfdx1)>1e100 || fabs(dfdx2)>1e100)
         return NAN;
     const double dx = x2-x1, sixdf = 6*(f2-f1);
     const double t = (x-x1)/dx;
@@ -488,7 +488,10 @@ static double findRootHybrid(const IFunction& fnc,
         }
         if(numIter >= MAXITER) {
             converged = true;  // not quite ready, but can't loop forever
-            utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded");
+            utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded: "
+                "x="+utils::toString(b,15)+" +- "+utils::toString(b-c)+
+                " on interval ["+utils::toString(x_lower,15)+":"+utils::toString(x_upper,15)+
+                "], req.toler.="+utils::toString(abstoler));
         }
     } while(!converged);
     return b;  // best approximation
@@ -556,7 +559,11 @@ public:
     double x_from_y(const double y) const {
         if(y!=y)
             return NAN;
-        assert(y>=0 && y<=1);
+        if(y<0 || y>1) {  // FIXME: this should not happen, but it does....
+            utils::msg(utils::VL_MESSAGE, "x_from_y", "y="+utils::toString(y));
+            return NAN;
+        }
+        assert(y>=0 && y<=1);  // this should remain in place after the lines above are deleted
         return inf_upper ?
             (  inf_lower ?
                 x_scaling*(1/(1-y)-1/y) :     // x in (-inf,inf)

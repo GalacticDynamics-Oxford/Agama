@@ -51,7 +51,7 @@ private:
     /// compute the density as the integral of DF over velocity at a given position
     virtual double densityCyl(const coord::PosCyl &point) const {
         double result;
-        computeMoments(model, point, relError, maxNumEval, &result, NULL, NULL, NULL, NULL, NULL);
+        computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, relError, maxNumEval);
         return result;
     }
 };

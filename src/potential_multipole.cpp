@@ -229,7 +229,7 @@ static void computeSphericalHarmonicsFromParticles(
 }
 
 
-// auto-assign min/max radii of the grid if they were not provided
+/// auto-assign min/max radii of the grid if they were not provided, for a smooth density model
 static void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
     double& rmin, double& rmax)
 {
@@ -247,6 +247,7 @@ static void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
 }
 
+/// auto-assign min/max radii of the grid if they were not provided, for a discrete N-body model
 static void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     unsigned int gridSizeR, double &rmin, double &rmax) 
 {
@@ -483,7 +484,7 @@ static inline void transformDerivsSphToCyl(const coord::PosCyl& pos,
 // G[ln(r),...] = Phi[ln(r),...] * sqrt(r^2 + R0^2);
 // on output, they are replaced with the value, gradient and hessian of Phi w.r.t. [ln(r),...];
 // grad or hess may be NULL, if they are ultimately not needed.
-// template parameter sphsym tells whether we need to handle non-radial components, or they are zero.
+// \tparam nonrad tells whether we need to handle non-radial components, or they are zero.
 template<bool nonrad>
 static inline void transformAmplitude(double r, double Rscale,
     double& pot, coord::GradSph *grad, coord::HessSph *hess)
@@ -494,7 +495,7 @@ static inline void transformAmplitude(double r, double Rscale,
     if(!grad)
         return;
     // unscale the amplitude of derivatives, i.e. transform from
-    // d [scaledPhi(scaledCoords) * amp] / d[scaledCoords] to d[scaledPhi] / d[scaledCoords]
+    // d [scaledPhi(scaledCoords) * amp] / d[scaledCoords]  to  d[scaledPhi] / d[scaledCoords]
     double damp = -r*r*amp;  // d amp[ln(r)] / d[ln(r)] / amp^2
     grad->dr = (grad->dr + pot * damp) * amp;
     if(nonrad) {
@@ -511,6 +512,28 @@ static inline void transformAmplitude(double r, double Rscale,
             hess->dthetadphi *= amp;
         }
     }
+}
+
+// find a suitable scaling radius R0 for transformation of potential amplitudes
+static double assignRscale(
+    const std::vector<double> &radii,
+    const std::vector< std::vector<double> > &Phi,
+    const std::vector< std::vector<double> > &dPhi)
+{
+    // determine the characteristic radius from the condition that Phi(0) = -Mtotal/rscale
+    double Rscale = radii.back() * Phi.back()[0] / Phi.front()[0];
+    if(!(Rscale>0))   // something weird happened, set to a reasonable default value
+        Rscale = 1.;
+    // if the l=0 harmonic component of the potential is well-behaved, that is everywhere negative
+    // and monotonically increasing with radius, then additionally ensure that the scaled potential
+    // does the same (to preserve monotonicity), at least near the center; otherwise don't care
+    for(unsigned int i=0; i<radii.size(); i++) {
+        double ratio = -Phi[i][0] / dPhi[i][0] * radii[i];
+        if(ratio >= 0 && Phi[i][0] / Phi[0][0] >= 0.5 && pow_2(Rscale) + pow_2(radii[i]) < ratio)
+            Rscale = sqrt(ratio - pow_2(radii[i]));
+    }
+    utils::msg(utils::VL_VERBOSE, "Multipole", "Rscale="+utils::toString(Rscale));
+    return Rscale;
 }
 
 }  // end internal namespace
@@ -1178,7 +1201,7 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
 }
 
 // ------- Multipole potential with 1d interpolating splines for each SH harmonic ------- //
-
+        
 MultipoleInterp1d::MultipoleInterp1d(
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &Phi,
@@ -1189,11 +1212,7 @@ MultipoleInterp1d::MultipoleInterp1d(
     assert(gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
         gridSizeR == Phi.size() && gridSizeR == dPhi.size() &&
         Phi[0].size() == ind.size() && ind.lmax >= 0 && ind.mmax <= ind.lmax);
-
-    // determine the characteristic radius from the condition that Phi(0) = -Mtotal/rscale
-    Rscale = radii.back() * Phi.back()[0] / Phi.front()[0];
-    if(!(Rscale>0))   // something weird happened, set to a reasonable default value
-        Rscale = 1.;
+    Rscale = assignRscale(radii, Phi, dPhi);
 
     // set up a logarithmic radial grid
     std::vector<double> gridR(gridSizeR);
@@ -1308,11 +1327,7 @@ MultipoleInterp2d::MultipoleInterp2d(
     assert(gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
         gridSizeR == Phi.size() && gridSizeR == dPhi.size() &&
         Phi[0].size() == ind.size() && ind.lmax >= 0 && ind.mmax <= ind.lmax);
-
-    // determine the characteristic radius from the condition that Phi(0) = -Mtotal/rscale
-    Rscale = radii.back() * Phi.back()[0] / Phi.front()[0];
-    if(!(Rscale>0))   // something weird happened, set to a reasonable default value
-        Rscale = 1.;
+    Rscale = assignRscale(radii, Phi, dPhi);
 
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):
     std::vector<double> gridR(gridSizeR);

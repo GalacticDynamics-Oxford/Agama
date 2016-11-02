@@ -332,7 +332,7 @@ static PtrPotential readPotentialSphHarmExp(
 {
     std::string buffer;
     std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer);
+    bool ok = std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
     unsigned int ncoefsRadial = utils::toInt(fields[0]);
     ok &= std::getline(strm, buffer).good();
@@ -409,7 +409,7 @@ static bool readAzimuthalHarmonics(std::istream& strm,
     bool ok=true;
     // total # of harmonics possible, not all of them need to be present in the file
     data.resize(mmax*2+1);
-    while(ok && std::getline(strm, buffer) && !strm.eof()) {
+    while(ok && std::getline(strm, buffer).good() && !strm.eof()) {
         if(buffer.size()==0 || buffer[0] == '\n' || buffer[0] == '\r')
             return ok;  // end block with an empty line
         fields = utils::splitString(buffer, "# \t");
@@ -452,7 +452,7 @@ static PtrPotential readPotentialCylSpline(std::istream& strm, const units::Exte
 {
     std::string buffer;
     std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer);
+    bool ok = std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
     unsigned int size_R = utils::toInt(fields[0]);
     ok &= std::getline(strm, buffer).good();
@@ -507,7 +507,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
     }
     // check header
     std::string buffer;
-    bool ok = std::getline(strm, buffer);
+    bool ok = std::getline(strm, buffer).good();
     if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
         std::vector<std::string> fields;
         fields = utils::splitString(buffer, "# \t");
@@ -526,7 +526,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
         if(fields[0] == CompositeCyl::myName()) {
             // each line is a name of a file with the given component
             std::vector<PtrPotential> components;
-            while(ok && std::getline(strm, buffer) && !strm.eof())
+            while(ok && std::getline(strm, buffer).good() && !strm.eof())
                 components.push_back(readPotential(buffer, converter));
             return PtrPotential(new CompositeCyl(components));
         }

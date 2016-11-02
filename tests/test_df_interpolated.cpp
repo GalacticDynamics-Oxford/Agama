@@ -106,15 +106,15 @@ int main()
         std::vector<double> densArrL(dfL.size()), densArrC(dfC.size());
         double densOrig, densIntL, densIntC;
         computeMoments(galaxymodel::GalaxyModelMulticomponent(pot, af, dfL),
-            point, 1e-3, 10000, &densArrL[0], NULL, NULL, NULL, NULL, NULL);
+            point, &densArrL[0], NULL, NULL, NULL, NULL, NULL, 1e-3, 10000);
         computeMoments(galaxymodel::GalaxyModelMulticomponent(pot, af, dfC),
-            point, 1e-3, 10000, &densArrC[0], NULL, NULL, NULL, NULL, NULL);
+            point, &densArrC[0], NULL, NULL, NULL, NULL, NULL, 1e-3, 10000);
         computeMoments(galaxymodel::GalaxyModel(pot, af, dfO),
-            point, 1e-3, 100000, &densOrig, NULL, NULL, NULL, NULL, NULL);
+            point, &densOrig,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
         computeMoments(galaxymodel::GalaxyModel(pot, af, dfL),
-            point, 1e-3, 100000, &densIntL, NULL, NULL, NULL, NULL, NULL);
+            point, &densIntL,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
         computeMoments(galaxymodel::GalaxyModel(pot, af, dfC),
-            point, 1e-3, 100000, &densIntC, NULL, NULL, NULL, NULL, NULL);
+            point, &densIntC,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
         double densSumL=0;
         for(unsigned int i=0; i<densArrL.size(); i++) {
             densSumL += densArrL[i];

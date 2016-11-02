@@ -1,8 +1,10 @@
 #include "galaxymodel.h"
 #include "math_core.h"
-#include "actions_torus.h"
 #include "math_sample.h"
 #include "math_specfunc.h"
+#include "math_spline.h"
+#include "math_linalg.h"
+#include "actions_torus.h"
 #include "smart.h"
 #include "utils.h"
 #include <cmath>
@@ -15,10 +17,10 @@ namespace{   // internal definitions
 //------- HELPER ROUTINES -------//
 
 /** convert from scaled velocity variables to the actual velocity.
-    \param[in]  vars are the scaled variables: |v|/vmag, cos(theta), phi,
+    \param[in]  vars are the scaled variables: |v|/velmag, cos(theta), phi,
     where the latter two quantities specify the orientation of velocity vector 
     in spherical coordinates centered at a given point, and
-    \param[in]  velmag is the magnutude of velocity.
+    \param[in]  velmag is the maximum magnutude of velocity (equal to the escape velocity).
     \param[out] jac (optional) if not NULL, output the jacobian of transformation.
     \return  three components of velocity in cylindrical coordinates
 */
@@ -79,14 +81,24 @@ static double unscaleZ(double zscaled, double *jac=NULL) {
 
 //------- HELPER CLASSES FOR MULTIDIMENSIONAL INTEGRATION OF DF -------//
 
-/** Base helper class for integrating the distribution function 
-    over 3d velocity or 6d position/velocity space.
-    The integration is carried over in scaled coordinates which range from 0 to 1;
-    the task for converting them to position/velocity point lies on the derived classes.
-    The actions corresponding to the given point are computed with the action finder object
-    from the GalaxyModel, and the distribution function value for these actions is provided
-    by the eponimous member object from the GalaxyModel.
-    The output may consist of one or more values, determined by the derived classes.
+/** Base helper class for integrating the distribution function over the position/velocity space.
+    Various tasks in this module boil down to computing the integrals or sampling the values of DF
+    over the (x,v) space, where the DF is expressed in terms of actions.
+    This involves the following steps:
+    1) scaled variables in N-dimensional unit cube are transformed to the actual (x,v);
+    2) x,v are transformed to actions (J);
+    3) the value of DF f(J) is computed;
+    4) one or more quantities that are products of f(J) times something
+    (e.g., velocity components) are returned to the integration or sampling routines.
+    These tasks differ in the first and the last steps, and also in the number of dimensions
+    that the integration/sampling is carried over. This diversity is handled by the class
+    hierarchy descending from DFIntegrandNdim, where the base class performs the steps 2 and 3,
+    and the derived classes implement virtual methods `unscaleVars()` and `outputValues()`,
+    which are responsible for the steps 1 and 4, respectively.
+    The derived classes also specify the dimensions of integration space (numVars)
+    and the number of simultaneously computed quantities (numValues).
+    The action finder for performing the step 2 and the DF used in the step 3 are provided
+    as members of the GalaxyModel structure.
 */
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
@@ -149,8 +161,6 @@ protected:
 
     const GalaxyModel& model;  ///< reference to the galaxy model to work with
 };
-
-
 
 
 /** helper class for computing the projected distribution function at a given point in x,y,vz space  */
@@ -345,15 +355,78 @@ private:
     const unsigned int numOutVal; ///< number of output values for each component of DF
 };
 
+
+/** Helper class for constructing histograms of velocity distribution */
+template <int N>
+class DFIntegrandVelDist: public DFIntegrandNdim {
+public:
+    DFIntegrandVelDist(const GalaxyModel& _model,
+        const coord::PosCyl& _point, bool _projected, 
+        const math::BsplineInterpolator1d<N>& _bsplVR,
+        const math::BsplineInterpolator1d<N>& _bsplVz,
+        const math::BsplineInterpolator1d<N>& _bsplVphi) :
+    DFIntegrandNdim(_model), point(_point),
+    projected(_projected), v_esc(escapeVel(point, model.potential)),
+    bsplVR(_bsplVR), bsplVz(_bsplVz), bsplVphi(_bsplVphi),
+    NR(bsplVR.numValues()), Nz(bsplVz.numValues()), Ntotal(1 + NR + Nz + bsplVphi.numValues())
+    {}
+    
+    virtual unsigned int numVars()   const { return projected ? 4 : 3; }
+    virtual unsigned int numValues() const { return Ntotal; }
+private:
+    const coord::PosCyl point;       ///< position
+    const bool projected;            ///< if true, only use R and phi and integrate over z
+    const double v_esc;              ///< escape velocity at this position (if not projected)
+    const math::BsplineInterpolator1d<N>& bsplVR, bsplVz, bsplVphi;
+    const unsigned int NR, Nz, Ntotal;
+
+    /// input variables define the z-coordinate and all three velocity components, suitably scaled
+    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
+        if(projected) {
+            coord::PosCyl pos(point.R, unscaleZ(vars[0], jac), point.phi);
+            const double velmag = escapeVel(pos, model.potential);
+            double jacVel;
+            const coord::VelCyl vel = unscaleVelocity(vars+1, velmag, &jacVel);
+            if(jac!=NULL)
+                *jac = velmag==0 ? 0 : *jac * jacVel;
+            return coord::PosVelCyl(pos, vel);
+        } else
+            return coord::PosVelCyl(point, unscaleVelocity(vars, v_esc, jac));
+    }
+
+    /// output the weighted integrals over basis functions;
+    /// we scan only half of the (v_R, v_z) plane, and add the same contributions to (-v_R, -v_z),
+    /// since the actions and hence the value of f(J) do not change with this inversion
+    virtual void outputValues(const coord::PosVelCyl& pv, const double dfval, double values[]) const {
+        std::fill(values, values+Ntotal, 0);
+        double valRp[N+1], valRm[N+1], valzp[N+1], valzm[N+1], valphi[N+1];
+        unsigned int 
+            iRp  = bsplVR.  nonzeroComponents( pv.vR,  valRp),
+            iRm  = bsplVR.  nonzeroComponents(-pv.vR,  valRm),
+            izp  = bsplVz.  nonzeroComponents( pv.vz,  valzp),
+            izm  = bsplVz.  nonzeroComponents(-pv.vz,  valzm),
+            iphi = bsplVphi.nonzeroComponents(pv.vphi, valphi);
+        values[0] = dfval;
+        for(int i=0; i<=N; i++) {
+            values[1 + i + iRp]           += dfval * valRp[i]*.5;
+            values[1 + i + iRm]           += dfval * valRm[i]*.5;
+            values[1 + i + izp  + NR]     += dfval * valzp[i]*.5;
+            values[1 + i + izm  + NR]     += dfval * valzm[i]*.5;
+            values[1 + i + iphi + NR + Nz] = dfval * valphi[i];
+        }
+    }
+};
+
+
 }  // unnamed namespace
 
 //------- DRIVER ROUTINES -------//
 
 template<typename GalaxyModelType>
-void computeMoments(const GalaxyModelType& model,
-    const coord::PosCyl& point, const double reqRelError, const int maxNumEval,
+void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
     double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
-    double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr)
+    double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr,
+    const double reqRelError, const int maxNumEval)
 {
     OperationMode mode = static_cast<OperationMode>(
         (velocityFirstMoment !=NULL ? OP_VEL1MOM : 0) |
@@ -364,9 +437,8 @@ void computeMoments(const GalaxyModelType& model,
     double xupper[3] = {1, 1, 1};
     // the values of integrals and their error estimates
     std::vector<double> result(fnc.numValues()), error(fnc.numValues());
-    int numEval; // actual number of evaluations
 
-    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, &result[0], &error[0], &numEval);
+    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, &result[0], &error[0]);
 
     // store the results
     unsigned int numCompDF = DFsize(model);
@@ -429,19 +501,66 @@ void computeMoments(const GalaxyModelType& model,
 }
 
 // template instantiations that must be compiled
-template void computeMoments(const GalaxyModel& model,
-    const coord::PosCyl& point, const double reqRelError, const int maxNumEval,
-    double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
-    double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr);
-template void computeMoments(const GalaxyModelMulticomponent& model,
-    const coord::PosCyl& point, const double reqRelError, const int maxNumEval,
-    double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
-    double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr);
+template void computeMoments(const GalaxyModel&, const coord::PosCyl&,
+    double*, coord::VelCyl*, coord::Vel2Cyl*, double*, coord::VelCyl*, coord::Vel2Cyl*,
+    const double, const int);
+template void computeMoments(const GalaxyModelMulticomponent&, const coord::PosCyl&,
+    double*, coord::VelCyl*, coord::Vel2Cyl*, double*, coord::VelCyl*, coord::Vel2Cyl*,
+    const double, const int);
 
+
+template <int N>
+double computeVelocityDistribution(const GalaxyModel& model,
+    const coord::PosCyl& point, bool projected,
+    const std::vector<double>& gridVR,
+    const std::vector<double>& gridVz,
+    const std::vector<double>& gridVphi,
+    std::vector<double>& amplVR,
+    std::vector<double>& amplVz,
+    std::vector<double>& amplVphi,
+    const double reqRelError, const int maxNumEval)
+{
+    math::BsplineInterpolator1d<N> bsplVR(gridVR), bsplVz(gridVz), bsplVphi(gridVphi);
+    const unsigned int NR = bsplVR.numValues(), Nz = bsplVz.numValues(), Nphi = bsplVphi.numValues();
+    DFIntegrandVelDist<N> fnc(model, point, projected, bsplVR, bsplVz, bsplVphi);
+
+    // the integration region in scaled velocities
+    double xlower[4] = {0, 0, 0, 0};
+    double xupper[4] = {1, 1, 1, 0.5};  // scan only half of {v_R,v_z} plane, since the VDF is symmetric
+    // the values of integrals and their error estimates
+    std::vector<double> result(fnc.numValues());
+
+    math::integrateNdim(fnc, projected? xlower : xlower+1, projected? xupper : xupper+1,
+        reqRelError, maxNumEval, &result.front());
+    
+    // store the results
+    amplVR   = math::CholeskyDecomp(bsplVR.computeOverlapMatrix(0)).solve(
+        std::vector<double>(result.begin()+1, result.begin()+1+NR));
+    amplVz   = math::CholeskyDecomp(bsplVz.computeOverlapMatrix(0)).solve(
+        std::vector<double>(result.begin()+1+NR, result.begin()+1+NR+Nz));
+    amplVphi = math::CholeskyDecomp(bsplVphi.computeOverlapMatrix(0)).solve(
+        std::vector<double>(result.begin()+1+NR+Nz, result.begin()+1+NR+Nz+Nphi));
+    double density = result[0];
+    math::blas_dmul(1/density, amplVR);
+    math::blas_dmul(1/density, amplVz);
+    math::blas_dmul(1/density, amplVphi);
+    return density*2;  // factor of two because we only integrated over half-space
+}
+
+// force compilation of several template instantiations
+template double computeVelocityDistribution<0>(const GalaxyModel&, const coord::PosCyl&, bool,
+    const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
+    std::vector<double>&, std::vector<double>&, std::vector<double>&, const double, const int);
+template double computeVelocityDistribution<1>(const GalaxyModel&, const coord::PosCyl&, bool,
+    const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
+    std::vector<double>&, std::vector<double>&, std::vector<double>&, const double, const int);
+template double computeVelocityDistribution<3>(const GalaxyModel&, const coord::PosCyl&, bool,
+    const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
+    std::vector<double>&, std::vector<double>&, std::vector<double>&, const double, const int);
 
 double computeProjectedDF(const GalaxyModel& model,
     const double R, const double vz, const double vz_error,
-    const double reqRelError, const int maxNumEval, double* error, int* numEval)
+    const double reqRelError, const int maxNumEval)
 {
     double xlower[4] = {0, 0, 0, 0};  // integration region in scaled variables
     double xupper[4] = {1, 1, 1, 1};
@@ -451,20 +570,20 @@ double computeProjectedDF(const GalaxyModel& model,
         xupper[0] = math::findRoot(fnc, 0.5, 1, 1e-8);  // to the region where v^2-vz^2>0
     }
     double result;
-    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, &result, error, numEval);
+    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, &result);
     return result;
 }
 
 
 void computeProjectedMoments(const GalaxyModel& model, const double R,
-    const double reqRelError, const int maxNumEval,
-    double& surfaceDensity, double& losvdisp, double* surfaceDensityErr, double* losvdispErr, int* numEval)
+    double& surfaceDensity, double& losvdisp, double* surfaceDensityErr, double* losvdispErr,
+    const double reqRelError, const int maxNumEval)
 {
     double xlower[4] = {0, 0, 0, 0};  // integration region in scaled variables
     double xupper[4] = {1, 1, 1, 1};
     DFIntegrandProjectedMoments fnc(model, R);
     double result[2], error[2];
-    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error, numEval);
+    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error);
     surfaceDensity = result[0];
     losvdisp = result[1] / result[0];
     if(surfaceDensityErr)

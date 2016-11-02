@@ -34,7 +34,7 @@ enum VerbosityLevel {
     \param[in] level is the verbosity level of the message;
     \param[in] origin is the name of calling function (should contain the value of FUNCNAME macro);
     \param[in] message is the text to be displayed.
-*/        
+*/
 typedef void MsgType(VerbosityLevel level, const char* origin, const std::string &message);
 
 /** global pointer to the logging routine;
@@ -77,6 +77,8 @@ std::string toString(double val, unsigned int width=6);
 std::string toString(float val, unsigned int width=6);
 std::string toString(int val);
 std::string toString(unsigned int val);
+std::string toString(long val);
+std::string toString(unsigned long val);
 /// convert a pointer to a string
 std::string toString(const void* val);
 /// convert any typed pointer to a string

@@ -50,6 +50,8 @@ namespace df {
 */
 class PhaseVolume: public math::IFunction {
 public:
+    /// Construct the interpolator for h(E) from an arbitrary function Phi(x),
+    /// which must be monotonic in radius (otherwise a std::runtime_error exception is thrown)
     explicit PhaseVolume(const math::IFunction& potential);
 
     /// return the phase volume h for the given energy, and optionally its derivative (density of states)
@@ -110,7 +112,9 @@ private:
     of density and potential profiles (which need not be related through the Poisson equation),
     using the Eddington inversion formula.
     \param[in]  density   is any one-dimensional function returning rho(r); may be constructed
-    from a spherically-symmetric `BaseDensity` object with a wrapper class `DensityWrapper`.
+    from a spherically-symmetric `BaseDensity` object using the wrapper class `DensityWrapper`.
+    \param[in]  potential  is any one-dimensional function representing the spherically-symmetric
+    potential (may be constructed using the `PotentialWrapper` class).
 */
 SphericalIsotropic makeEddingtonDF(const math::IFunction& density, const math::IFunction& potential);
 
@@ -141,7 +145,7 @@ public:
     DiffusionCoefs(const PhaseVolume& phasevol, const math::IFunction& df);
 
     /** compute the orbit-averaged drift and diffusion coefficients in energy.
-    The returned values should be multiplied by N^{-1} \ln\Lambda.
+    The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
     \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
     (otherwise the motion is unbound and orbit-averaging does not have sense);
     \param[out] DE  will contain the drift coefficient <Delta E>;
@@ -151,7 +155,7 @@ public:
     
     /** compute the local drift and diffusion coefficients in velocity,
     as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
-    the returned values should be multiplied by N^{-1} \ln\Lambda.
+    the returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
     \param[in]  Phi    is the potential at the given point;
     \param[in]  E      is the energy of the moving particle Phi + (1/2) v^2,
     should be >= Phi, and may be positive;

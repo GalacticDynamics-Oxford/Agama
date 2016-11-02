@@ -254,8 +254,7 @@ NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned 
     if(static_cast<int>(index) >= mat(*this).nonZeros())
         throw std::range_error("SpMatrix: element index out of range");
     row = mat(*this).innerIndexPtr()[index];
-    col = binSearch(static_cast<typename Type<SpMatrix<NumT> >::T::Index>(index),
-        mat(*this).outerIndexPtr(), cols()+1);
+    col = binSearch(static_cast<int>(index), mat(*this).outerIndexPtr(), cols()+1);
     return mat(*this).valuePtr()[index];
 }
 

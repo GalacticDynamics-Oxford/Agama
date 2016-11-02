@@ -75,7 +75,14 @@ public:
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0., double smoothing = 1.);
 
-    /** construct the object from stored coefficients */
+    /** construct the object from previously computed coefficients.
+        \param[in]  gridRadii  is the grid in radius (sorted in order of increase, first node > 0).
+        \param[in]  coefs  is the 2d array of sph.-harm. coefficients at each radius.
+        \param[in]  innerSlope  is the logarithmic slope of density profile at small radii
+        (below the first grid point), used for extrapolation; NAN means it will be automatically
+        estimated from the cubic spline for the l=0 component.
+        \param[in]  outerSlope  is the same for large radii (beyond the last grid point).
+    */
     DensitySphericalHarmonic(const std::vector<double> &gridRadii,
         const std::vector< std::vector<double> > &coefs, double innerSlope=NAN, double outerSlope=NAN);
 
@@ -181,7 +188,7 @@ public:
         \param[in]  smoothing  is the amount of smoothing applied during penalized spline fitting.
     */
     static PtrPotential create(
-        const particles::ParticleArray<coord::PosCyl> &points,
+        const particles::ParticleArray<coord::PosCyl> &particles,
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0., double smoothing = 1.);
 
@@ -250,6 +257,7 @@ void computeDensityCoefsSph(const BaseDensity& dens,
     const std::vector<double>& gridRadii,
     std::vector< std::vector<double> > &coefs);
 
+
 /** Compute the coefficients of spherical-harmonic density expansion
     from an N-body snapshot.
     \param[in] particles  is the array of particles.
@@ -260,14 +268,18 @@ void computeDensityCoefsSph(const BaseDensity& dens,
     \param[out] coefs  will contain the arrays of computed sph.-harm. coefficients
     that can be provided to the constructor of `DensitySphericalHarmonic` class;
     will be resized as needed.
+    \param[out] innerSlope  will contain the logarithmic slope of density profile at small radii.
+    \param[out] outerSlope  is the same for large radii; both parameters may be supplied to
+    the constructor of `DensitySphericalHarmonic` class.
 */
 void computeDensityCoefsSph(
-    const particles::ParticleArray<coord::PosCyl> &points,
+    const particles::ParticleArray<coord::PosCyl> &particles,
     const math::SphHarmIndices &ind,
     const std::vector<double> &gridRadii,
     std::vector< std::vector<double> > &coefs,
     double &innerSlope, double &outerSlope,
     double smoothing = 1.0);
+
 
 /** Compute spherical-harmonic potential expansion coefficients,
     by first creating a sph.-harm.representation of the density profile,
@@ -289,6 +301,7 @@ void computePotentialCoefsSph(const BaseDensity &dens,
     const std::vector<double> &gridRadii,
     std::vector< std::vector<double> > &Phi,
     std::vector< std::vector<double> > &dPhi);
+
 
 /** Same as above, but compute coefficients from the potential directly,
     without solving Poisson equation */

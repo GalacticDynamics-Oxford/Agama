@@ -10,7 +10,7 @@ namespace potential {
 
 /** Triaxial Ferrers (n=2) model.
     The density is given by \f$ \rho = \frac{105 M}{32\pi p q Rscale^3} (1-(r/Rscale)^2)^2 \f$,
-    where \f$  r = \sqrt{x^2 + (y/p)^2 + (z/q)^2} is the triaxial radius;
+    where \f$  r = \sqrt{x^2 + (y/p)^2 + (z/q)^2}  \f$ is the triaxial radius;
     the density is zero if r>Rscale.
     The potential is calculated using expressions from Pfenniger(1984) with elliptic integrals, 
     under assumption that q<p<1 strictly (will not work if any of two axes are equal).

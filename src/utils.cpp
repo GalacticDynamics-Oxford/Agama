@@ -66,7 +66,7 @@ static void defaultmsg(VerbosityLevel level, const char* origin, const std::stri
     else
         std::cerr << msg << std::flush;
 }
-    
+
 }  // namespace
 
 /// global pointer to the routine that displays or logs information messages
@@ -110,6 +110,18 @@ std::string toString(int val) {
 std::string toString(unsigned int val) {
     char buf[100];
     snprintf(buf, 100, "%u", val);
+    return std::string(buf);
+}
+
+std::string toString(long val) {
+    char buf[100];
+    snprintf(buf, 100, "%li", val);
+    return std::string(buf);
+}
+
+std::string toString(unsigned long val) {
+    char buf[100];
+    snprintf(buf, 100, "%lu", val);
     return std::string(buf);
 }
 

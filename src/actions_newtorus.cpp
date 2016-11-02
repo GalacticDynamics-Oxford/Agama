@@ -570,7 +570,7 @@ double Mapping::fitAngleMap(const double params[],
 
     // loop over grid of toy angles
     for(unsigned int indPoint=0; indPoint < numPoints; indPoint++) {
-        Actions dHby;  // derivative of Hamiltonian by toy actions
+        Actions dHby(0,0,0);  // derivative of Hamiltonian by toy actions
         Havg.add(computeHamiltonianAtPoint(params, indPoint,
             &dHby, &derivGenFnc.front()) );
         // fill the elements of each of three rhs vectors

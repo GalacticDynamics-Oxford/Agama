@@ -101,7 +101,7 @@ std::vector<double> createInterpolatedDFAmplitudes(
     const std::vector<double> &gridU, const std::vector<double> &gridV,
     const std::vector<double> &gridW)
 {
-    return math::createInterpolator3dArray<N>(DFscaled(df, scaling), gridU, gridV, gridW);
+    return math::createBsplineInterpolator3dArray<N>(DFscaled(df, scaling), gridU, gridV, gridW);
 }
 
 template<int N>
@@ -121,7 +121,7 @@ const std::vector<double> &gridV, const std::vector<double> &gridW)
         scaling.toActions(&points(i, 0), &jac);
         weights[i] = 1 / jac;
     }
-    return math::createInterpolator3dArrayFromSamples<N>(points, weights, gridU, gridV, gridW);
+    return math::createBsplineInterpolator3dArrayFromSamples<N>(points, weights, gridU, gridV, gridW);
 }
 
 // force the compilation of template instantiations

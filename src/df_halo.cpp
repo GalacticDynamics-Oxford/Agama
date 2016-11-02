@@ -36,8 +36,8 @@ double DoublePowerLaw::value(const actions::Actions &J) const {
     double gJ  = par.coefJrOut* J.Jr + par.coefJzOut* J.Jz +
         (3-par.coefJrOut-par.coefJzOut)* fabs(J.Jphi);
     double val = par.norm / pow_3(2*M_PI * par.J0) *
-        pow(hJ / par.J0, -par.slopeIn) *
-        pow(1 + pow(gJ / par.J0, par.steepness), (par.slopeIn - par.slopeOut) / par.steepness);
+        pow(1 + pow(par.J0 / hJ, par.steepness),  par.slopeIn  / par.steepness) *
+        pow(1 + pow(gJ / par.J0, par.steepness), -par.slopeOut / par.steepness);
     if(par.Jcutoff>0)    // exponential cutoff at large J
         val *= exp(-pow_2(gJ / par.Jcutoff));
     return val;

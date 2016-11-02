@@ -25,6 +25,7 @@ Modifications by Eugene Vasiliev, 2015-2016
 #include "potential_multipole.h"
 #include "math_core.h"
 #include "math_specfunc.h"
+#include "utils.h"
 #include <cmath>
 #include <stdexcept>
 #include <cassert>
@@ -40,9 +41,12 @@ static const int GALPOT_MMAX = 6;
 /// number of radial points in Multipole 
 static const int GALPOT_NRAD = 60;
 
-/// factors determining the radial extent of logarithmic grid in Multipole;
-/// they are multiplied by the min/max scale radii of model components
-static const double GALPOT_RMIN = 1e-4,  GALPOT_RMAX = 1e4;
+/// factors determining the radial extent of logarithmic grid in Multipole:
+/// they are multiplied by the min/max characteristic radii of model components,
+/// or radii of exponential cutoff
+static const double GALPOT_RMIN = 1e-4, GALPOT_RMAX = 1e4,
+    GALPOT_EXPRMIN = 1e-2, GALPOT_EXPRMAX = 10.,
+    GALPOT_SLOPETOLER = 1e-3, GALPOT_EPSROUNDOFF = 1e-12;
 
 //----- disk density and potential -----//
 
@@ -328,7 +332,7 @@ std::vector<PtrPotential> createGalaxyPotentialComponents(
     const std::vector<DiskParam>& diskParams, 
     const std::vector<SphrParam>& sphrParams)
 {
-    double lengthMin=INFINITY, lengthMax=0;  // keep track of length scales of all components
+    double rmin=INFINITY, rmax=0;            // min/max grid radii
     bool isSpherical=diskParams.size()==0;   // whether there are any non-spherical components
     bool isAxisymmetric=true;                // same for non-axisymmetric spheroidal components
 
@@ -349,30 +353,51 @@ std::vector<PtrPotential> createGalaxyPotentialComponents(
         negDisk.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
         componentsDens.push_back(PtrDensity(new DiskAnsatz(negDisk)));
         // keep track of characteristic lengths
-        lengthMin = fmin(lengthMin, diskParams[i].scaleRadius);
-        lengthMax = fmax(lengthMax, diskParams[i].scaleRadius);
-        if(diskParams[i].innerCutoffRadius>0)
-            lengthMin = fmin(lengthMin, diskParams[i].innerCutoffRadius);
+        double compRmin =    diskParams[i].innerCutoffRadius>0 ?
+            GALPOT_EXPRMIN * diskParams[i].innerCutoffRadius :
+            GALPOT_RMIN    * diskParams[i].scaleRadius;
+        double compRmax = GALPOT_RMAX * diskParams[i].scaleRadius;
+        rmin = fmin(rmin, compRmin);
+        rmax = fmax(rmax, compRmax);
     }
     for(unsigned int i=0; i<sphrParams.size(); i++) {
         if(sphrParams[i].densityNorm == 0)
             continue;
         componentsDens.push_back(PtrDensity(new SpheroidDensity(sphrParams[i])));
-        lengthMin = fmin(lengthMin, sphrParams[i].scaleRadius);
-        lengthMax = fmax(lengthMax, sphrParams[i].scaleRadius);
-        if(sphrParams[i].outerCutoffRadius) 
-            lengthMax = fmax(lengthMax, sphrParams[i].outerCutoffRadius);
         isSpherical    &= sphrParams[i].axisRatioZ == 1;
         isAxisymmetric &= sphrParams[i].axisRatioY == 1;
+        // characteristic radius: it's not quite the scale radius, because in the case gamma<<0
+        // the maximum of density is achieved at much larger radii. Here is a compromise choice.
+        double scaleRadius = pow( (1 + fmax(0, -sphrParams[i].gamma)) / (sphrParams[i].beta - 1),
+            1 / sphrParams[i].alpha) * sphrParams[i].scaleRadius;
+        // outer grid radius - if there is an exponential cutoff,
+        // place it at 10x the cutoff radius, where the density drops by exp(-100);
+        // otherwise put it at the radius where the logarithmic density slope
+        // s = (gamma * rscale^alpha + beta * r^alpha) / (rscale^alpha + r^alpha)
+        // approaches the asymptotic value (beta) to within the given tolerance
+        double radRatio = pow(fabs(sphrParams[i].beta - sphrParams[i].gamma) * GALPOT_SLOPETOLER,
+            1 / sphrParams[i].alpha);
+        double compRmax =    sphrParams[i].outerCutoffRadius ?
+            GALPOT_EXPRMAX * sphrParams[i].outerCutoffRadius :
+            fmin(GALPOT_RMAX * scaleRadius, sphrParams[i].scaleRadius / radRatio);
+        // inner grid radius - two requirements:
+        // a) the density slope should be within the given tolerance from its asymptotic value gamma,
+        // b) if the potential is very shallow near origin, we need to have enough digits of accuracy:
+        // [Phi(rmin)-Phi(0)]/|Phi(0)| ~ (r/rscale)^(2-gamma) >= EPSROUNDOFF
+        double roundoff = sphrParams[i].gamma<2 ? pow(GALPOT_EPSROUNDOFF, 1/(2-sphrParams[i].gamma)) : 0;
+        double compRmin = fmax(
+           fmax(GALPOT_RMIN, roundoff) * scaleRadius, sphrParams[i].scaleRadius * radRatio);
+        rmin = fmin(rmin, compRmin);
+        rmax = fmax(rmax, compRmax);
     }
+    utils::msg(utils::VL_DEBUG, "GalPot",
+        "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
     if(componentsDens.size()==0)
         throw std::invalid_argument("Empty parameters in GalPot");
     // create an composite density object to be passed to Multipole;
     const CompositeDensity dens(componentsDens);
 
     // create multipole potential from this combined density
-    double rmin = GALPOT_RMIN * lengthMin;
-    double rmax = GALPOT_RMAX * lengthMax;
     int lmax = isSpherical    ? 0 : GALPOT_LMAX;
     int mmax = isAxisymmetric ? 0 : GALPOT_MMAX;
     componentsPot.push_back(Multipole::create(dens, lmax, mmax, GALPOT_NRAD, rmin, rmax));
