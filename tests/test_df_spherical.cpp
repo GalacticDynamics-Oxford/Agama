@@ -11,7 +11,7 @@
 #include "potential_utils.h"
 #include "math_core.h"
 #include "math_specfunc.h"
-#include "df_spherical.h"
+#include "galaxymodel_spherical.h"
 #include "utils.h"
 #include <iostream>
 #include <iomanip>
@@ -100,9 +100,9 @@ public:
 
 /// analytic distribution function of the Plummer model
 class DFPlummer: public math::IFunctionNoDeriv {
-    const df::PhaseVolume& pv;
+    const potential::PhaseVolume& pv;
 public:
-    DFPlummer(const df::PhaseVolume& _pv) : pv(_pv) {}
+    DFPlummer(const potential::PhaseVolume& _pv) : pv(_pv) {}
     virtual double value(double h) const {
         return 3*8*M_SQRT2/7/pow_3(M_PI) * pow(-pv.E(h), 3.5);
     }
@@ -110,14 +110,18 @@ public:
 
 /// same for the Hernquist model
 class DFHernquist: public math::IFunctionNoDeriv {
-    const df::PhaseVolume& pv;
+    const potential::PhaseVolume& pv;
 public:
-    DFHernquist(const df::PhaseVolume& _pv) : pv(_pv) {}
+    DFHernquist(const potential::PhaseVolume& _pv) : pv(_pv) {}
     virtual double value(double h) const {
         double E = pv.E(h);
         double q = sqrt(-E), sq1pE = sqrt(1+E);
+        if(E>-1e-5)
+            return 8./5*M_SQRT2/pow_3(M_PI) * math::powInt(q, 5) * (1 - 10./7*E + 40./21*E*E);
+        if(E<-1+1e-5)
+            return 3./32*M_SQRT2/pow_2(M_PI) * (math::powInt(sq1pE, -5) - 256./(15*M_PI));
         return 1/M_SQRT2/pow_3(2*M_PI) / ( pow_2(1+E) * sq1pE ) *
-        (3*asin(q) + q * sq1pE * (1+2*E) * (8*E*E + 8*E - 3) );
+            (3*asin(q) + q * sq1pE * (1+2*E) * (8*E*E + 8*E - 3) );
     }
 };
 
@@ -146,16 +150,15 @@ void difCoefsPlummer(const double Phi, const double E, double &dvpar, double &dv
 }
 
 /// construct an interpolator for f(h) from the provided h(E) and f(E)
-df::SphericalIsotropic createInterpolatedDF(const df::PhaseVolume& phasevol, const math::IFunction& trueDF)
+math::LogLogSpline createInterpolatedDF(
+    const potential::PhaseVolume& phasevol, const math::IFunction& trueDF)
 {
-    const unsigned int gridSize = 100;
-    std::vector<double> gridh = math::createUniformGrid(gridSize, phasevol.logHmin(), phasevol.logHmax());
-    std::vector<double> gridf(gridSize);
-    for(unsigned int i=0; i<gridSize; i++) {
-        gridh[i] = exp(gridh[i]);
+    const unsigned int gridSize = phasevol.gridlogh().size();
+    std::vector<double> gridh(gridSize), gridf(gridSize);
+    std::transform(phasevol.gridlogh().begin(), phasevol.gridlogh().end(), gridh.begin(), exp);
+    for(unsigned int i=0; i<gridSize; i++)
         gridf[i] = trueDF(gridh[i]);
-    }
-    return df::SphericalIsotropic(gridh, gridf);
+    return math::LogLogSpline(gridh, gridf);
 }
 
 template<class RmaxFnc, class PhasevolFnc, class DistrFnc>
@@ -164,17 +167,19 @@ bool test(const potential::BasePotential& pot)
     bool ok=true;
 
     potential::Interpolator interp(pot);
-    df::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
+    potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
     const RmaxFnc trueRmax;
     const PhasevolFnc truePhasevol;
     const DistrFnc trueDF(phasevol);
-    df::SphericalIsotropic intDF = createInterpolatedDF(phasevol, trueDF);
-    df::DiffusionCoefs dc(phasevol, intDF);
+    math::LogLogSpline intDF = createInterpolatedDF(phasevol, trueDF);
+    galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
+    math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
+        potential::DensityWrapper(pot), potential::PotentialWrapper(pot));
 
     const unsigned int npoints = 100000;
-    std::vector<double> particle_h = sampleSphericalDF(dc, npoints);
-    std::vector<double> particle_m(npoints, dc.cumulMass()/npoints);
-    df::SphericalIsotropic fitDF = df::fitSphericalDF(particle_h, particle_m, 25);
+    std::vector<double> particle_h = galaxymodel::sampleSphericalDF(dc.model, npoints);
+    std::vector<double> particle_m(npoints, dc.model.cumulMass()/npoints);
+    math::LogLogSpline fitDF = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
 
     std::ofstream strm, strmd;
     if(output) {
@@ -188,14 +193,20 @@ bool test(const potential::BasePotential& pot)
     "dRmax(E)/dE,true dRmax/dE,interp\t"
     "Phi(Rcirc),true Phi,interp\t"
     "dPhi/dr,true dPhi/dr,interp\t"
-    "d2Phi/dr2,true d2Phi/dr2,interp\t"
+    "rho,true rho,interp rho,sphmod\t"
     "h(E),true h(E),interp g(E),true g(E),interp\t"
-    "f(E),true f(E),interp f(E),fit\n";
+    "f(E),true f(E),interp f(E),fit f(E),Eddington f(E),sphmodel\n";
     strmd << std::setprecision(15);
 
     double sumw=0, errRc=0, errRm=0, errPhi=0, errdPhi=0, errdens=0, errg=0, errh=0;
-    for(double lr=-16; lr<=23; lr+=.25) {
-        double r = pow(2., lr);
+    // grid in r from 2^-16 to 2^23 by 2^0.25
+    std::vector<double> gridr = math::createExpGrid(157, 1./65536, 8388608);
+    std::vector<double> gridPhi(gridr.size());
+    for(unsigned int i=0; i<gridr.size(); i++)
+        gridPhi[i] = pot.value(coord::PosCyl(gridr[i], 0, 0));
+    std::vector<double> gridRhoDF = galaxymodel::computeDensity(trueDF, phasevol, gridPhi);
+    for(unsigned int i=0; i<gridr.size(); i++) {
+        double r = gridr[i];
         double truePhi;
         coord::GradCyl grad;
         coord::HessCyl hess;
@@ -218,14 +229,17 @@ bool test(const potential::BasePotential& pot)
         dc.evalOrbitAvg(E, intDE, intDEE);
         double intPhi, intdPhi, intd2Phi;
         interp.evalDeriv(r, &intPhi, &intdPhi, &intd2Phi);
-        double truedens = hess.dR2 + 2*grad.dR/r;
-        double intdens  = intd2Phi + 2*intdPhi/r;
+        double truedens = (hess.dR2 + 2*grad.dR/r) / (4*M_PI);
+        double intdens  = (intd2Phi + 2*intdPhi/r) / (4*M_PI);
         double truef    = trueDF(trueh);
         double intf     = intDF(trueh);
         double fitf     = fitDF(trueh);
+        double eddf     = eddDF(trueh);
+        double sphf     = dc.model.value(trueh);
+        double sphdens  = gridRhoDF[i];
 
         // density-weighted error: integrate |x-x_true|^2 r^3 d log(r)
-        double weight= pow_3(r) * pot.density(coord::PosCyl(r,0,0));
+        double weight = pow_3(r) * truedens;
         sumw    += weight;
         errRc   += weight * pow_2((trueRc  - intRc)   / (trueRc  + intRc)   *2);
         errRm   += weight * pow_2((trueRm  - intRm)   / (trueRm  + intRm)   *2);
@@ -242,10 +256,10 @@ bool test(const potential::BasePotential& pot)
             truedRmdE << ' ' << intdRmdE << '\t' <<
             truePhi<< ' ' << intPhi << '\t'<< 
             grad.dR<< ' ' << intdPhi<< '\t'<<
-            truedens<<' ' << intdens<< '\t'<<
+            truedens<<' ' << intdens<< ' ' << sphdens << '\t'<<
             trueh  << ' ' << inth   << ' ' << trueg << ' ' << intg << '\t' <<
             intDEE << ' ' << intDE  << '\t'<<
-            truef  << ' ' << intf   << ' ' << fitf << '\n';
+            truef  << ' ' << intf   << ' ' << fitf << ' ' << eddf << ' ' << sphf << '\n';
 
         for(double vrel=0; vrel<1.25; vrel+=0.03125) {
             double E = (1-pow_2(vrel)) * truePhi;
@@ -270,10 +284,34 @@ bool test(const potential::BasePotential& pot)
     std::cout << pot.name() << ": weighted RMS error in Rcirc=" << errRc << ", Rmax=" << errRm <<
     ", Phi=" << errPhi << ", dPhi/dr=" << errdPhi << ", rho=" << errdens <<
     ", h=" << errh << ", g=" << errg << "\n";
-    ok &= errRc  < 1e-10 && errRm   < 1e-10 &&
-          errPhi < 1e-10 && errdPhi < 1e-08 && errdens < 1e-04 &&
+    ok &= errRc  < 1e-09 && errRm   < 1e-10 &&
+          errPhi < 1e-10 && errdPhi < 1e-08 && errdens < 1e-03 &&
           errh   < 1e-08 && errg    < 1e-08;
     return ok;
+}
+
+void exportTable(const char* filename, const potential::BasePotential& pot)
+{
+    try{
+        std::vector<double> h, f;
+        potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
+        potential::Interpolator interp(pot);
+        galaxymodel::makeEddingtonDF(potential::DensityWrapper(pot), potential::PotentialWrapper(pot), h, f);
+        std::ofstream strm(filename);
+        strm << "r\tM\tPhi\trho\tf\tg\th\n";
+        for(unsigned int i=0; i<h.size(); i++) {
+            double g, E= phasevol.E(h[i], &g);
+            double r   = interp.R_max(E);
+            double M   = pow_2(v_circ(pot, r)) * r;
+            double rho = pot.density(coord::PosCyl(r, 0, 0));
+            strm << utils::pp(r,14) + '\t' + utils::pp(M,14) + '\t' + 
+                utils::pp(E,14) + '\t' + utils::pp(rho,14) + '\t' +
+                utils::pp(f[i],14) + '\t' + utils::pp(g,14) + '\t' + utils::pp(h[i],14) + '\n';
+        }
+    }
+    catch(std::exception& e){
+        std::cout << filename << " => " << e.what() << '\n';
+    }
 }
 
 int main()
@@ -281,7 +319,14 @@ int main()
     bool ok=true;
     potential::Plummer potp(1., 1.);
     potential::Dehnen  poth(1., 1., 1., 1., 1.);
-
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        potential::Dehnen  pot0(1., 1., 0., 1., 1.);
+        potential::Dehnen  pot2(1., 1., 2., 1., 1.);
+        exportTable("test_Plummer.tab", potp);
+        exportTable("test_Dehnen0.tab", pot0);
+        exportTable("test_Dehnen1.tab", poth);
+        exportTable("test_Dehnen2.tab", pot2);
+    }
     ok &= test<RmaxPlummer,   PhasevolPlummer,   DFPlummer  >(potp);
     ok &= test<RmaxHernquist, PhasevolHernquist, DFHernquist>(poth);
     if(ok)

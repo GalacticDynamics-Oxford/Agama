@@ -559,11 +559,7 @@ public:
     double x_from_y(const double y) const {
         if(y!=y)
             return NAN;
-        if(y<0 || y>1) {  // FIXME: this should not happen, but it does....
-            utils::msg(utils::VL_MESSAGE, "x_from_y", "y="+utils::toString(y));
-            return NAN;
-        }
-        assert(y>=0 && y<=1);  // this should remain in place after the lines above are deleted
+        assert(y>=0 && y<=1);
         return inf_upper ?
             (  inf_lower ?
                 x_scaling*(1/(1-y)-1/y) :     // x in (-inf,inf)

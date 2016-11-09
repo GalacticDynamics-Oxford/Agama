@@ -76,6 +76,9 @@ public:
     /** return the interpolated value of radial action as a function of energy and angular momentum;
         also return the frequencies in Omegar and Omegaz if these arguments are not NULL */
     double Jr(double E, double L, double *Omegar=NULL, double *Omegaz=NULL) const;
+
+    /** return the energy corresponding to the given actions */
+    double E(const Actions& act) const;
 private:
     const potential::Interpolator2d interp;  ///< interpolator for potential and peri/apocenter radii
     const math::CubicSpline2d intJr;         ///< interpolator for the scaled value of radial action

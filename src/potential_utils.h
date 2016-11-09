@@ -116,7 +116,7 @@ public:
         \param[out] Phi0,coef  if not NULL, will contain the extrapolation coefficients;
     */
     double innerSlope(double* Phi0=NULL, double* coef=NULL) const;
-    
+
     /** return the slope of potential near r=0 (same as the standalone function `outerSlope`).
         \param[out] M,coef  if not NULL, will contain the extrapolation coefficients;
     */
@@ -125,9 +125,9 @@ public:
         if(coef) *coef = coefOut;
         return slopeOut;
     }
-    
+
 private:
-    double Phi0;                ///< value of potential at r=0 (possibly -inf)
+    double invPhi0;             ///< 1/(value of potential at r=0), or 0 if the potential is singular
     double slopeOut, Mtot, coefOut; ///< coefficients for power-law potential at large radii
     math::QuinticSpline LofE;   ///< spline-interpolated scaled function for L_circ(E)
     math::QuinticSpline RofL;   ///< spline-interpolated scaled R_circ(L)
@@ -177,6 +177,58 @@ public:
 
 private:
     math::QuinticSpline2d intR1, intR2; ///< 2d interpolators for scaled peri/apocenter radii
+};
+
+/** Computation of phase volume for a spherical potential.
+    Phase volume h(E) is defined as
+    \f$  h(E) = 16\pi^2/3 \int_0^{r_{max}(E)} r^2 v^3 dr = \int_{\Phi(0)}^E g(E') dE'  \f$;
+    its derivative g(E) is called the density of states and is given by
+    \f$  g(E) = 16\pi^2 \int_0^{r_{max}(E)} r^2 v dr = 4\pi^2 L_{circ}^2(E) T_{rad}(E)  \f$,
+    where  \f$  v = \sqrt{2(E-\Phi(r))}  \f$,  L_circ is the angular momentum of a circular orbit,
+    and  \f$  T_{rad}(E) = 2 \int_0^{r_{max}(E)} dr/v  \f$  is the radial period.
+    These quantities are computed for the given potential Phi(E), which is provided through an
+    `IFunction` interface (i.e., may be an instance of `potential::Interpolator`, or
+    `potential::PotentialWrapper`),
+    and stored as interpolating splines; the potential itself is not stored (only its value at r=0).
+    This class provides methods for computing h(E) and E(h), together with the derivative g(E),
+    and the inverse transformation E(h) and g(h).
+*/
+class PhaseVolume: public math::IFunction {
+public:
+    /// Construct the interpolator for h(E) from an arbitrary function Phi(r),
+    /// which must be monotonic in radius (otherwise a std::runtime_error exception is thrown)
+    explicit PhaseVolume(const math::IFunction& potential);
+
+    /** compute h and g from E.
+        \param[in]  E is the energy (may be arbitrary;
+        if E>=0, return infinity, if E<=Phi(0), return 0);
+        \param[out] h is the phase volume corresponding to the given energy;
+        \param[out] g is the density of states (dh/dE), if this pointer is NULL then it's not computed.
+    */
+    virtual void evalDeriv(const double E, double* h=NULL, double* g=NULL, double* =NULL) const;
+
+    /** compute E, g and dg/dh from h.
+        \param[in]  h  is the phase volume [0..infinity]
+        \param[out] g  is the density of states, g=1/(dE/dh), if NULL then it's not computed;
+        \param[out] dgdh is the derivative dg/dh, if NULL then it's not computed; 
+        \return  the energy E corresponding to the given phase volume h.
+    */
+    double E(const double h, double* g=NULL, double* dgdh=NULL) const;
+
+    /// compute deltaE = E(h1) - E(h2) in a way that does not suffer from cancellation;
+    /// h1 and h2 are specified through their logarithms
+    double deltaE(const double logh1, const double logh2, double* g1=NULL) const;
+
+    /// provides one derivative of h(E)
+    virtual unsigned int numDerivs() const { return 1; }
+
+    /// return the logarithmic grid used for interpolation;
+    /// g(h) has a power-law asymptotic behaviour outside the grid
+    const std::vector<double>& gridlogh() const { return EofH.xvalues(); }
+private:
+    double invPhi0;             ///< 1/Phi(0), where Phi(0) is the value of potential at r=0
+    math::QuinticSpline HofE;   ///< phase volume h(E), suitably scaled
+    math::QuinticSpline EofH;   ///< inverse of the above
 };
 
 }  // namespace potential

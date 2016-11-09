@@ -178,7 +178,7 @@ std::string KeyValueMap::dump() const
 {
     std::string str;
     for(unsigned int i=0; i<items.size(); i++)
-        str += items[i].first+'='+items[i].second+'\n';
+        str += (items[i].first.empty() ? "" : (items[i].first+'=')) + items[i].second + '\n';
     return str;
 }
 

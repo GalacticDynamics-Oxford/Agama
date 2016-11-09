@@ -6,7 +6,6 @@
 */
 #pragma once
 #include "df_base.h"
-#include "potential_utils.h"
 
 namespace df{
 

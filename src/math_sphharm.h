@@ -277,7 +277,6 @@ private:
 /** Routine for performing inverse spherical-harmonic transformation.
     Given the array of coefficients obtained by the forward transformation,
     it computes the value of function at the given position on unit sphere (theta,phi).
-    In doing so, it requires temporary storage that must be provided by the calling code.
     \param[in]  ind   - coefficient indexing scheme, defining lmax, mmax and skipped coefs;
     \param[in]  coefs - the array of coefficients;
     \param[in]  tau   - cos(theta) / (1 + sin(theta)), where theta is the polar angle;

@@ -25,9 +25,9 @@ SOURCES   = \
             df_factory.cpp \
             df_halo.cpp \
             df_interpolated.cpp \
-            df_spherical.cpp \
             galaxymodel.cpp \
             galaxymodel_selfconsistent.cpp \
+            galaxymodel_spherical.cpp \
             math_core.cpp \
             math_fit.cpp \
             math_linalg.cpp \
@@ -91,6 +91,7 @@ TESTSRCS  = test_math_core.cpp \
             test_df_spherical.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
+            example_fokker_planck.cpp \
             example_self_consistent_model.cpp \
 
 TESTFORTRAN = example_fortran.f
@@ -132,7 +133,7 @@ $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp Makefile.local
 	@mkdir -p $(OBJDIR)
 	$(CXX) -c $(CXXFLAGS) $(DEFINES) $(INCLUDES) -o "$@" "$<"
 
-$(OBJDIR)/%.o:  $(TORUSDIR)/%.cc
+$(OBJDIR)/%.o:  $(TORUSDIR)/%.cc Makefile.local
 	$(CXX) -c $(CXXFLAGS) $(TORUSFLAGS) $(INCLUDES) -o "$@" "$<"
 
 clean:

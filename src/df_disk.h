@@ -64,31 +64,29 @@ PseudoIsothermalParam() :  ///< set default values for all fields
     of them, but not explicitly on the potential.
 */
 class PseudoIsothermal: public BaseDistributionFunction{
-private:
     const PseudoIsothermalParam par;     ///< parameters of DF
     const potential::Interpolator freq;  ///< interface providing the epicyclic frequencies
+    static const int NT = 10; ///< number of points in quadrature rule for integration over age
+    double qx[NT], qw[NT];    ///< nodes and weights for quadrature rule
 public:
     /** Create an instance of pseudo-isothermal distribution function with given parameters
         \param[in] params  are the parameters of DF;
-        \param[in] freqs   is the instance of object that computes epicyclic frequencies:
+        \param[in] freq   is the instance of object that computes epicyclic frequencies:
         a copy of this object is kept in the DF, so that one may pass a temporary variable
         as the argument, like:
         ~~~~
-            df = new PseudoIsothermal(params, InterpEpicycleFreqs(potential));
+            df = new PseudoIsothermal(params, potential::Interpolator(potential));
         ~~~~
-        Since the potential itself is not used in the InterpEpicycleFreqs object,
+        Since the potential itself is not used in the Interpolator object,
         the DF is independent of the actual potential in which it is later used,
         which could be different from the one that was employed at construction.
         \throws std::invalid_argument exception if parameters are nonsense
     */
-    PseudoIsothermal(const PseudoIsothermalParam& params, const potential::Interpolator& freqs);
+    PseudoIsothermal(const PseudoIsothermalParam& params, const potential::Interpolator& freq);
 
     /** return value of DF for the given set of actions
         \param[in] J are the actions  */
     virtual double value(const actions::Actions &J) const;
-private:
-    static const int NT = 10; ///< number of points in quadrature rule for integration over age
-    double qx[NT], qw[NT];    ///< nodes and weights for quadrature rule
 };
 
 ///@}

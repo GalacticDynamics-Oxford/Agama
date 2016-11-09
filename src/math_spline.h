@@ -341,6 +341,33 @@ template<int N>
 std::vector<double> createBsplineInterpolator1dArray(const IFunction& F,
     const std::vector<double>& xnodes, int NpointsPerSegment=0);
 
+
+/** Cubic spline with logarithmic scaling of the value:
+    f(x) = exp( S(x) ), where S is represented as a cubic spline.
+*/
+class LogSpline: public math::IFunction {
+    CubicSpline S;
+public:
+    /**/
+    LogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        double derivLeft=NAN, double derivRight=NAN);
+    virtual void evalDeriv(const double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    virtual unsigned int numDerivs() const { return 2; }
+};
+
+/** Cubic spline with logarithmic scalings of both the value and the argument:
+    f(x) = exp( S( ln(x) ) ), where S is represented as a cubic spline.
+*/
+class LogLogSpline: public math::IFunction {
+    CubicSpline S;
+public:
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        double derivLeft=NAN, double derivRight=NAN);
+    virtual void evalDeriv(const double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    virtual unsigned int numDerivs() const { return 2; }
+};
+
+
 ///@}
 /// \name Two-dimensional interpolation
 ///@{

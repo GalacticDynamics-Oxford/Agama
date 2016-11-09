@@ -863,6 +863,57 @@ template class BsplineInterpolator1d<2>;
 template class BsplineInterpolator1d<3>;
 
 
+// ------ Auxiliary scaled splines ------ //
+
+LogSpline::LogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    double derivLeft, double derivRight)
+{
+    std::vector<double> logfvalues(fvalues.size());
+    std::transform(fvalues.begin(), fvalues.end(), logfvalues.begin(), log);
+    derivLeft  /= fvalues.front();
+    derivRight /= fvalues.back ();
+    S = CubicSpline(xvalues, logfvalues, derivLeft, derivRight);
+}
+
+void LogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
+{
+    double Sval, Sder;
+    S.evalDeriv(x, &Sval, deriv!=NULL || deriv2!=NULL ? &Sder : NULL, deriv2);
+    Sval = exp(Sval);
+    if(value)
+        *value = Sval;
+    if(deriv)
+        *deriv = Sder * Sval;
+    if(deriv2)
+        *deriv2 = (*deriv2 + pow_2(Sder)) * Sval;
+}
+
+LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    double derivLeft, double derivRight)
+{
+    std::vector<double> logxvalues(xvalues.size());
+    std::transform(xvalues.begin(), xvalues.end(), logxvalues.begin(), log);
+    std::vector<double> logfvalues(fvalues.size());
+    std::transform(fvalues.begin(), fvalues.end(), logfvalues.begin(), log);
+    derivLeft  *= xvalues.front() / fvalues.front();
+    derivRight *= xvalues.back () / fvalues.back ();
+    S = CubicSpline(logxvalues, logfvalues, derivLeft, derivRight);
+}
+
+void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
+{
+    double Sval, Sder;
+    S.evalDeriv(log(x), &Sval, deriv!=NULL || deriv2!=NULL ? &Sder : NULL, deriv2);
+    Sval = exp(Sval);
+    if(value)
+        *value = Sval;
+    if(deriv)
+        *deriv = Sder * Sval / x;
+    if(deriv2)
+        *deriv2 = (*deriv2 + Sder * (Sder-1)) * Sval / (x*x);
+}
+
+
 // ------ INTERPOLATION IN 2D ------ //
 
 BaseInterpolator2d::BaseInterpolator2d(

@@ -91,6 +91,8 @@ public:
         double val = 0;
         if(jac!=0) {
             double dfval = df.value(act);
+            if(!isFinite(dfval))
+                dfval = 0;  ///!!! TODO: check why this may happen?
             if(LogTerm && dfval>0)
                 dfval *= log(dfval);
             val = dfval * jac * TWO_PI_CUBE;   // integral over three angles

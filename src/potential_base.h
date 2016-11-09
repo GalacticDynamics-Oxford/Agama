@@ -28,8 +28,8 @@ namespace potential{
     coordinates to the most suitable system.
     Note that this class and its derivative BasePotential should represent constant objects,
     i.e. once created, they cannot be modified, and all their methods are const.
-    These objects also cannot be copied by value, thus if one needs to pass them around,
-    one should use either references to the base class (density or potential):
+    Typically the derived classes are passed as const references to the base class
+    (density or potential):
  
         const DerivedPotential pot1;     // statically typed object
         const BaseDensity& dens = pot1;  // polymorphic reference, here downgraded to the base class
@@ -89,21 +89,6 @@ protected:
 
     /** Evaluate density at the position specified in spherical coordinates */
     virtual double densitySph(const coord::PosSph &pos) const = 0;
-
-    /** Empty constructor is needed explicitly since we have disabled the default copy constructor */
-    BaseDensity() {};
-
-private:
-/** Copy constructor and assignment operators are not allowed, because their inadvertent
-    application (slicing) would lead to a complex derived class being assigned to 
-    a variable of base class, thus destroying its internal state.
-    Thus these polymorphic objects are simply non-copyable, period.
-    If one needs to pass a reference to an object that may possibly outlive the scope
-    of the object being passed, then one should use create this object dynamically 
-    and place it into a shared_ptr.
-*/
-    BaseDensity(const BaseDensity&);
-    BaseDensity& operator=(const BaseDensity&);
 };  // class BaseDensity
 
 ///@}
@@ -321,15 +306,29 @@ public:
     which computes a spherically-symmetric potential and its derivatives;
     should only be used to construct temporary objects passed as arguments to some routines.
 */
-class FunctionWrapper: public BasePotentialSphericallySymmetric{
+class FunctionToPotentialWrapper: public BasePotentialSphericallySymmetric{
     const math::IFunction &fnc;  ///< function representing the radial dependence of potential
-    virtual const char* name() const { return "FunctionWrapper"; }
+    virtual const char* name() const { return "FunctionToPotentialWrapper"; }
     virtual void evalDeriv(double r, double* val, double* deriv, double* deriv2) const {
         fnc.evalDeriv(r, val, deriv, deriv2); }
 public:
-    explicit FunctionWrapper(const math::IFunction &f) : fnc(f) {}
+    explicit FunctionToPotentialWrapper(const math::IFunction &f) : fnc(f) {}
 };
 
+/** A wrapper class providing a BaseDensity interface for an arbitrary function of radius
+    should only be used to construct temporary objects passed as arguments to some routines.
+*/
+class FunctionToDensityWrapper: public BaseDensity{
+    const math::IFunction &fnc;  ///< function representing the spherically-symmetric density profile
+    double densityCar(const coord::PosCar &pos) const { return fnc(toPosSph(pos).r); }
+    double densityCyl(const coord::PosCyl &pos) const { return fnc(toPosSph(pos).r); }
+    double densitySph(const coord::PosSph &pos) const { return fnc(pos.r); }
+    virtual coord::SymmetryType symmetry() const { return coord::ST_SPHERICAL; }
+    virtual const char* name() const { return "FunctionToDensityWrapper"; }
+public:
+    explicit FunctionToDensityWrapper(const math::IFunction &f) : fnc(f) {}
+};
+    
 /** A wrapper class providing a IFunction interface to a potential */
 class PotentialWrapper: public math::IFunction {
     const BasePotential& potential;  ///< potential that is evaluated along x-axis

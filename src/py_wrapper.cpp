@@ -38,6 +38,7 @@
 #include "actions_staeckel.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
+#include "df_pseudoisotropic.h"
 #include "galaxymodel.h"
 #include "galaxymodel_selfconsistent.h"
 #include "orbit.h"
@@ -585,13 +586,13 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
     const double result[], const int index, PyObject* resultObj) 
 {
     for(int d=0; d<3; d++)
-        pyArrayElem<double>(resultObj, index*3+d) = result[d];
+        pyArrayElem<double>(resultObj, index, d) = result[d];
 }
 template<> void formatOutputArr<OUTPUT_VALUE_SEXTET>(
     const double result[], const int index, PyObject* resultObj) 
 {
     for(int d=0; d<6; d++)
-        pyArrayElem<double>(resultObj, index*6+d) = result[d];
+        pyArrayElem<double>(resultObj, index, d) = result[d];
 }
 template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(
     const double result[], const int index, PyObject* resultObj)
@@ -605,7 +606,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
     for(int d=0; d<3; d++)
-        pyArrayElem<double>(arr2, index*3+d) = result[d+1];
+        pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
 template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
     const double result[], const int index, PyObject* resultObj)
@@ -613,7 +614,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
     for(int d=0; d<6; d++)
-        pyArrayElem<double>(arr2, index*3+d) = result[d+1];
+        pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
 template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
     const double result[], const int index, PyObject* resultObj)
@@ -621,8 +622,8 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
     for(int d=0; d<3; d++) {
-        pyArrayElem<double>(arr1, index*3+d) = result[d];
-        pyArrayElem<double>(arr2, index*3+d) = result[d+3];
+        pyArrayElem<double>(arr1, index, d) = result[d];
+        pyArrayElem<double>(arr2, index, d) = result[d+3];
     }
 }
 template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
@@ -631,9 +632,9 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
     for(int d=0; d<3; d++)
-        pyArrayElem<double>(arr1, index*3+d) = result[d];
+        pyArrayElem<double>(arr1, index, d) = result[d];
     for(int d=0; d<6; d++)
-        pyArrayElem<double>(arr2, index*3+d) = result[d+3];
+        pyArrayElem<double>(arr2, index, d) = result[d+3];
 }
 template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     const double result[], const int index, PyObject* resultObj)
@@ -642,9 +643,9 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 1);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 2);
     for(int d=0; d<3; d++)
-        pyArrayElem<double>(arr1, index*3+d) = result[d+1];
+        pyArrayElem<double>(arr1, index, d) = result[d+1];
     for(int d=0; d<6; d++)
-        pyArrayElem<double>(arr2, index*3+d) = result[d+4];
+        pyArrayElem<double>(arr2, index, d) = result[d+4];
 }
 
 /** A general function that computes something for one or many input points.
@@ -908,7 +909,7 @@ static PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* arg
         PyArrayObject* pos_arr  = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyArrayObject* mass_arr = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
         for(int i=0; i<numPoints; i++) {
-            unconvertPos(coord::toPosCar(points.point(i)), &pyArrayElem<double>(pos_arr, i*3));
+            unconvertPos(coord::toPosCar(points.point(i)), &pyArrayElem<double>(pos_arr, i, 0));
             pyArrayElem<double>(mass_arr, i) = points.mass(i) / conv->massUnit;
         }
         return Py_BuildValue("NN", pos_arr, mass_arr);
@@ -1721,17 +1722,21 @@ static const char* docstringDistributionFunction =
     "The constructor accepts several key=value arguments that describe the parameters "
     "of distribution function.\n"
     "Required parameter is type='...', specifying the type of DF: currently available types are "
-    "'DoublePowerLaw', (for the halo), 'PseudoIsothermal' (for the disk component), "
+    "'DoublePowerLaw' (for the halo), 'PseudoIsothermal' (for the disk component), "
+    "'PseudoIsotropic' (for the isotropic DF corresponding to a given density profile), "
     "'Interp1', 'Interp3' (for interpolated DFs).\n"
     "For some of them, one also needs to provide the potential to initialize the table of "
-    "epicyclic frequencies (pot=... argument).\n"
+    "epicyclic frequencies (pot=... argument), and for the PseudoIsotropic DF one needs to provide "
+    "an instance of density profile (dens=...) and the potential (if they are the same, then only "
+    "pot=... is needed).\n"
     "Other parameters are specific to each DF type.\n"
     "Alternatively, a composite DF may be created from an array of previously constructed DFs:\n"
     ">>> df = DistributionFunction(df1, df2, df3)\n\n"
     "The () operator computes the value of distribution function for the given triplet of actions.\n"
     "The totalMass() function computes the total mass in the entire phase space.\n\n"
-    "A user-defined Python function that takes three arguments(Jr, Jz, Jphi) may be provided "
-    "in all contexts where a DistributionFunction object is required.";
+    "A user-defined Python function that takes a single argument - Nx3 array "
+    "(with columns representing Jr, Jz, Jphi at N>=1 points) and returns an array of length N "
+    "may be provided in all contexts where a DistributionFunction object is required.";
 
 /// attempt to construct an interpolated distribution function from the parameters provided in dictionary
 template<int N>
@@ -1786,6 +1791,21 @@ static df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* n
         return DistributionFunction_initInterpolated<1>(namedArgs);
     else if(utils::stringsEqual(type, "Interp3"))
         return DistributionFunction_initInterpolated<3>(namedArgs);
+    else if(utils::stringsEqual(type, "PseudoIsotropic")) {
+        if(!pot)
+            throw std::invalid_argument("Must provide a potential in 'pot=...'");
+        PyObject *dens_obj = PyDict_GetItemString(namedArgs, "dens");
+        potential::PtrDensity dens;
+        if(dens_obj!=NULL) {
+            dens = getDensity(dens_obj);
+            if(!dens)
+                throw std::invalid_argument("Argument 'dens' must be a valid Density object");
+        } else
+            dens = pot;
+        return df::PtrDistributionFunction(new df::PseudoIsotropic(
+            galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens),
+            potential::PotentialWrapper(*pot)), *pot));
+    }
     return df::createDistributionFunction(params, pot.get(), *conv);  // any other DF type
 }
 
@@ -2115,7 +2135,7 @@ static PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* ar
         PyObject* posvel_arr = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
         for(int i=0; i<numPoints; i++) {
-            unconvertPosVel(coord::toPosVelCar(points.point(i)), &pyArrayElem<double>(posvel_arr, i*6));
+            unconvertPosVel(coord::toPosVelCar(points.point(i)), &pyArrayElem<double>(posvel_arr, i, 0));
             pyArrayElem<double>(mass_arr, i) = points.mass(i) / conv->massUnit;
         }
         return Py_BuildValue("NN", posvel_arr, mass_arr);
@@ -3349,7 +3369,7 @@ static PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         if(!result)
             return NULL;
         for(npy_intp index=0; index<size; index++)
-            unconvertPosVel(traj[index], &pyArrayElem<double>(result, index*6));
+            unconvertPosVel(traj[index], &pyArrayElem<double>(result, index, 0));
         return result;
     }
     catch(std::exception& e) {

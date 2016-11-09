@@ -28,7 +28,8 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
             "DoublePowerLaw DF: invalid weights in the linear combination of actions");
 }
         
-double DoublePowerLaw::value(const actions::Actions &J) const {
+double DoublePowerLaw::value(const actions::Actions &J) const
+{
     // linear combination of actions in the inner part of the model (for J<J0)
     double hJ  = par.coefJrIn * J.Jr + par.coefJzIn * J.Jz +
         (3-par.coefJrIn -par.coefJzIn) * fabs(J.Jphi);
@@ -42,6 +43,5 @@ double DoublePowerLaw::value(const actions::Actions &J) const {
         val *= exp(-pow_2(gJ / par.Jcutoff));
     return val;
 }
-
 
 }  // namespace df

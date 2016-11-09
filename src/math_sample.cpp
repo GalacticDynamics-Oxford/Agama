@@ -339,9 +339,11 @@ void Sampler::computeIntegral()
     const unsigned int numSamples = weightedFncValues.size();
     assert(sampleCoords.rows() == numSamples);
     Averager avg;
-    for(unsigned int i=0; i<numSamples; i++)
+    integValue = 0;
+    for(unsigned int i=0; i<numSamples; i++) {
         avg.add(weightedFncValues[i]);
-    integValue = avg.mean() * numSamples;
+        integValue += weightedFncValues[i];
+    }
     integError = sqrt(avg.disp() * numSamples);
     utils::msg(utils::VL_DEBUG, "sampleNdim",
         "Integral value="+utils::toString(integValue)+" +- "+utils::toString(integError)+
@@ -609,6 +611,9 @@ void Sampler::drawSamples(const unsigned int numOutputSamples, Matrix<double>& o
             outputIndex++;
         }
     }
+    if(outputIndex != numOutputSamples)    // TODO: remove if it never occurs ('assert' should remain)
+        utils::msg(utils::VL_MESSAGE, "sampleNdim()", "outputIndex="+utils::toString(outputIndex)+
+            ", numSamples="+utils::toString(numOutputSamples));
     assert(outputIndex == numOutputSamples);
 }
 

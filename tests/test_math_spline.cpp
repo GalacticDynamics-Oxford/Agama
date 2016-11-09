@@ -346,6 +346,42 @@ bool test_integral(const math::CubicSpline& f, double x1, double x2)
     // the large error in the last case is apparently due to roundoff errors
 }
 
+bool testLogScaledSplines()
+{
+    // function to approximate: f(x) = cos(x-1) + x, x=1..Pi+1
+    const int NNODES=8;
+    std::vector<double> xnodes = math::createUniformGrid(NNODES, 1, 1+M_PI);
+    std::vector<double> yvalues(NNODES);
+    for(int i=0; i<NNODES; i++)
+        yvalues[i] = cos(xnodes[i]-1) + xnodes[i];
+    double derLeft = 1., derRight = 1.;
+    math::CubicSpline  fSpl(xnodes, yvalues, derLeft, derRight);
+    math::LogSpline    fLog(xnodes, yvalues, derLeft, derRight);
+    math::LogLogSpline fDbl(xnodes, yvalues, derLeft, derRight);
+    double errValS = 0, errValL = 0, errValD = 0, errDerS = 0, errDerL = 0, errDerD = 0,
+        errDer2S = 0, errDer2L = 0, errDer2D = 0;
+    for(double x=1.; x<1.+M_PI; x+=0.01) {
+        double fval = cos(x-1) + x, fder = 1 - sin(x-1), fder2 = -cos(x-1);
+        double sval, sder, sder2, lval, lder, lder2, dval, dder, dder2;
+        fSpl.evalDeriv(x, &sval, &sder, &sder2);
+        fLog.evalDeriv(x, &lval, &lder, &lder2);
+        fDbl.evalDeriv(x, &dval, &dder, &dder2);
+        errValS = fmax(errValS, fabs(sval - fval));
+        errValL = fmax(errValL, fabs(lval - fval));
+        errValD = fmax(errValD, fabs(dval - fval));
+        errDerS = fmax(errDerS, fabs(sder - fder));
+        errDerL = fmax(errDerL, fabs(lder - fder));
+        errDerD = fmax(errDerD, fabs(dder - fder));
+        errDer2S= fmax(errDer2S,fabs(sder2- fder2));
+        errDer2L= fmax(errDer2L,fabs(lder2- fder2));
+        errDer2D= fmax(errDer2D,fabs(dder2- fder2));
+    }
+    return
+        errValS < 2e-4 && errValL < 4e-4 && errValD < 3e-4 &&
+        errDerS < 1e-3 && errDerL < 3e-3 && errDerD < 3e-3 &&
+        errDer2S< 2e-2 && errDer2L< 5e-2 && errDer2D< 4e-2;
+}
+
 bool test1dSpline()
 {
     // accuracy of approximation of an oscillating fnc //
@@ -564,6 +600,9 @@ bool test1dSpline()
     double intBspline = fBspline.integrate(X1, X2, amplBsplineEquivClamped);
     double intNumeric = math::integrateAdaptive(fClamped, X1, X2, 1e-14);
     ok &= fabs(intClamped-intNumeric) < 1e-13 && fabs(intClamped-intBspline) < 1e-13;
+
+    // test log-scaled splines
+    ok &= testLogScaledSplines();
 
     return ok;
 }

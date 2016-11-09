@@ -654,8 +654,8 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     }
 
     // prepare tables for (non-adaptive) integration over radius
-    std::vector<double> glx(ORDER_RAD_INT), glw(ORDER_RAD_INT);  // Gauss-Legendre nodes and weights
-    math::prepareIntegrationTableGL(0, 1, ORDER_RAD_INT, &glx.front(), &glw.front());
+    double glx[ORDER_RAD_INT], glw[ORDER_RAD_INT];  // Gauss-Legendre nodes and weights
+    math::prepareIntegrationTableGL(0, 1, ORDER_RAD_INT, glx, glw);
 
     // prepare SH transformation
     math::SphHarmTransformForward trans(ind);
@@ -666,9 +666,14 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     //   Qext[k][l,m] = \int_{r_k}^{r_{k+1}} \rho_{l,m}(r) (r/r_k)^{1-l} dr,  with r_{Nr} = \infty.
     // Here \rho_{l,m}(r) are the sph.-harm. coefs for density at each radius.
     std::string errorMsg;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
+
+    // in principle this may be OpenMP-parallelized,
+    // but if the density computation is expensive, then one should construct an intermediate
+    // DensitySphericalHarmonic interpolator and pass it to this routine.
+    // Otherwise it's quite cheap, as it only does 1d integrals in radius.
+//#ifdef _OPENMP
+//#pragma omp parallel for schedule(dynamic)
+//#endif
     for(int k=0; k<=gridSizeR; k++) {
         try{
             // local per-thread temporary arrays
@@ -1016,12 +1021,16 @@ static PtrPotential createMultipole(
 PtrPotential Multipole::create(
     const BaseDensity& src, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax)
-{ return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax); }
+{
+    return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax);
+}
 
 PtrPotential Multipole::create(
     const BasePotential& src, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax)
-{ return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax); }
+{
+    return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax);
+}
 
 PtrPotential Multipole::create(
     const particles::ParticleArray<coord::PosCyl> &particles,

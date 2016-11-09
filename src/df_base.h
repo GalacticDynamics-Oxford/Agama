@@ -36,11 +36,6 @@ public:
         \param[in] J - actions
     */
     virtual double value(const actions::Actions &J) const=0;
-
-private:
-    /// disable copy constructor and assignment operator
-    BaseDistributionFunction(const BaseDistributionFunction&);
-    BaseDistributionFunction& operator= (const BaseDistributionFunction&);
 };
 
 /** Base class for multi-component distribution functions */

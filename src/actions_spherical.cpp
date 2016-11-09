@@ -567,6 +567,18 @@ ActionAngles ActionFinderSpherical::actionAngles(
     return ActionAngles(acts, angs);
 }
 
+double ActionFinderSpherical::E(const Actions& acts) const
+{
+    double L = acts.Jz + fabs(acts.Jphi);  // total angular momentum
+    // radius of a circular orbit with this angular momentum
+    double rcirc = interp.pot.R_from_Lz(L);
+    // initial guess (more precisely, lower bound) for Hamiltonian
+    double Ecirc = interp.pot(rcirc) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
+    // find E such that Jr(E, L) equals the target value
+    HamiltonianFinderFncInt fnc(*this, acts.Jr, L, Ecirc, 0);
+    return math::findRoot(fnc, Ecirc, 0, ACCURACY_JR);
+}
+
 coord::PosVelSphMod ActionFinderSpherical::map(
     const ActionAngles& aa,
     Frequencies* freq,
@@ -576,14 +588,8 @@ coord::PosVelSphMod ActionFinderSpherical::map(
 {
     if(aa.Jr<0 || aa.Jz<0)
         throw std::invalid_argument("mapSpherical: input actions are negative");
+    double E = this->E(aa);
     double L = aa.Jz + fabs(aa.Jphi);  // total angular momentum
-    // radius of a circular orbit with this angular momentum
-    double rcirc = interp.pot.R_from_Lz(L);
-    // initial guess (more precisely, lower bound) for Hamiltonian
-    double Ecirc = interp.pot(rcirc) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
-    // find E such that Jr(E, L) equals the target value
-    HamiltonianFinderFncInt fnc(*this, aa.Jr, L, Ecirc, 0);
-    double E = math::findRoot(fnc, Ecirc, 0, ACCURACY_JR);
     // compute the frequencies
     double Omegar, Omegaz;
     Jr(E, L, &Omegar, &Omegaz);

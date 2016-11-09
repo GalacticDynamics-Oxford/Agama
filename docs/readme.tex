@@ -1026,6 +1026,22 @@ In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\st
 Of course, an efficient evaluation of diffusion coefficients again requires interpolation from a pre-computed table. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
 Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
 
+Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$ determined from $\rho(r,t)=\int f(h,t) d^3v$. Traditionally, the DF is expressed as a function of energy, but this has a disadvantage when it comes to solving the Poisson equation: as the potential changes, the DF should be kept fixed as a function of phase volume, not energy. Thus the formulation entirely in terms of $f(h)$ is preferrable, and it is straightforward to write down the FP equation in the flux-conservative form:
+\begin{align}
+\frac{\d f(h,t)}{\d (\Gamma t)} &= \frac{\d}{\d h} \left[ D_{hh} \frac{\d f(h,t)}{\d h} + D_h f(h,t) \right] , \label{eq:FokkerPlanck} \\
+D_{hh} &= g(h)\,\big[ h\, I_0(h) + K_h(h) \big], \qquad D_h = K_g(h).  \label{eq:FokkerPlanckCoefs}
+\end{align}
+To achieve high dynamical range, $h$ is further replaced by $\ln h$, with a trivial modification of the above expressions.
+
+The Fokker--Planck solver, dubbed \textsc{PhaseFlow}, has several ingredients:
+\begin{itemize}
+\item The distribution function $f(h,t)$ for the evolving population of stars, represented by its values on a grid in $\ln h$. Values of $f(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f$ as a function of $\ln h$.
+\item The potential $\Phi(r)$ corresponding to the density profile $\rho(r)$ of the evolving population, plus optionally an external component (e.g., a central point mass). The 1d Poisson equation is solved by the \ttt{Multipole} class (of course, a monopole is a particular case of a multipole).
+\item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,dE$ is obtained from the DF \textit{in the given potential}, i.e., to update the density entering the Poisson equation, we use the current values of $f(h)$ and the previous potential.
+\item The drift and diffusion coefficients $D_h, D_{hh}$ are computed using the \ttt{SphericalModel} class which combines the DF $f(h)$ with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
+\item The FP equation (\ref{eq:FokkerPlanck}) in the discretized form is solved with the Chang--Cooper scheme (e.g., \cite{ParkPetrosian1996}) which has excellent energy conservation properties. Typically several FP steps (which are cheap -- just a solution of a tridiagonal system) are taken between each update of the potential and the diffusion coefficients (the Poisson step).
+\end{itemize}
+
 \newpage
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{thebibliography}{99} \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
@@ -1105,6 +1121,9 @@ Merritt D., Tremblay B., 1994, AJ, 108, 514
 
 \bibitem{Meyers}
 Meyers S., 2005, \textsl{Effective C++}, Addison--Wesley
+
+\bibitem{ParkPetrosian1996}
+Park B., Petrosian V., 1996, ApJS, 103, 255
 
 \bibitem{Pfenniger1984}
 Pfenniger D., 1984, A\&A, 134, 373
