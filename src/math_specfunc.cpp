@@ -262,7 +262,12 @@ double dfactorial(const unsigned int n) {
 }
 
 double gamma(const double x) {
-    return gsl_sf_gamma(x);
+    try{
+        return gsl_sf_gamma(x);
+    }
+    catch(std::exception&) {
+        return NAN;
+    }
 }
 
 double lngamma(const double x) {

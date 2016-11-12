@@ -47,9 +47,9 @@ enum PotentialType {
 
     //  Generic potential expansions
     PT_BSE,          ///< basis-set expansion for infinite systems:  `BasisSetExp`
-    PT_SPLINE,       ///< spline spherical-harmonic expansion:  `SplineExp`
+    PT_SPLINE,       ///< [old] spline spherical-harmonic expansion:  `SplineExp`
     PT_CYLSPLINE,    ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
-    PT_MULTIPOLE,    ///< axisymmetric multipole expansion from GalPot:  `Multipole`
+    PT_MULTIPOLE,    ///< spherical-harmonic expansion:  `Multipole`
 
     //  Components of Walter Dehnen's GalPot
     PT_DISK,         ///< separable disk density model:  `DiskDensity`
@@ -326,7 +326,7 @@ static SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::
 //        ----------------------------------------------------------------------------------------
 ///@{
 
-/// attempt to load coefficients of BasisSetExp or SplineExp stored in a text file
+/// attempt to load coefficients of BasisSetExp, SplineExp or Multipole stored in a text file
 static PtrPotential readPotentialSphHarmExp(
     std::istream& strm, const units::ExternalUnits& converter, const PotentialType potentialType)
 {
@@ -334,53 +334,60 @@ static PtrPotential readPotentialSphHarmExp(
     std::vector<std::string> fields;
     bool ok = std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
-    unsigned int ncoefsRadial = utils::toInt(fields[0]);
+    int ncoefsRadial = utils::toInt(fields[0]);
     ok &= std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
-    unsigned int ncoefsAngular = utils::toInt(fields[0]);
+    int ncoefsAngular = utils::toInt(fields[0]);
+    unsigned int numTerms = pow_2(ncoefsAngular+1);
     ok &= std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
     double param = utils::toDouble(fields[0]);   // meaning of this parameter depends on potential type
     if( (potentialType == PT_BSE && param<0.5) || 
         ((potentialType == PT_SPLINE || potentialType == PT_MULTIPOLE) && ncoefsRadial<4) ) 
         ok = false;
-    std::vector< std::vector<double> > coefs, coefs1;
+    std::vector< std::vector<double> > coefs, coefsPhi(numTerms), coefsdPhi(numTerms);
     std::vector< double > radii;
     std::getline(strm, buffer);  // time, ignored
     std::getline(strm, buffer);  // comments, ignored
-    for(unsigned int n=0; ok && n<ncoefsRadial; n++) {
-        std::getline(strm, buffer);
+    for(int n=0; ok && n<ncoefsRadial; n++) {
+        ok &= std::getline(strm, buffer).good();
         fields = utils::splitString(buffer, "# \t");
         radii.push_back(utils::toDouble(fields[0]));
         // for BSE this field is basis function index, for spline the radii should be in increasing order
         if( (potentialType == PT_BSE && radii.back()!=n) || 
             (potentialType == PT_SPLINE && n>0 && radii.back()<=radii[n-1]) ) 
             ok = false;
-        coefs.push_back( std::vector<double>() );
-        for(int l=0; l<=static_cast<int>(ncoefsAngular); l++)
-            for(int m=-l; m<=l; m++) {
-                unsigned int fi=1+l*(l+1)+m;
-                coefs.back().push_back( fi<fields.size() ? utils::toDouble(fields[fi]) : 0);
-            }
+        if(potentialType != PT_MULTIPOLE) {
+            coefs.push_back( std::vector<double>() );
+            for(int l=0; l<=ncoefsAngular; l++)
+                for(int m=-l; m<=l; m++) {
+                    unsigned int fi=1+l*(l+1)+m;
+                    coefs.back().push_back( fi<fields.size() ? utils::toDouble(fields[fi]) : 0);
+                }
+        } else {  // for Multipole the indexing scheme is reversed
+            for(unsigned int ind=0; ind<numTerms; ind++)
+                coefsPhi[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
+        }
     }
     if(potentialType == PT_MULTIPOLE) {
         ok &= std::getline(strm, buffer).good();  // "dPhi/dR", ignored
         ok &= std::getline(strm, buffer).good();  // header, ignored
-        for(unsigned int n=0; ok && n<ncoefsRadial; n++) {
-            std::getline(strm, buffer);
+        for(int n=0; ok && n<ncoefsRadial; n++) {
+            ok &= std::getline(strm, buffer).good();
             fields = utils::splitString(buffer, "# \t");
-            coefs1.push_back( std::vector<double>() );
-            for(unsigned int l=1; ok && l<fields.size(); l++)
-                coefs1.back().push_back(utils::toDouble(fields[l]));
+            for(unsigned int ind=0; ind<numTerms; ind++)
+                coefsdPhi[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
         }
     }    
     if(!ok)
         throw std::runtime_error(std::string("Error loading potential ") +
             getPotentialNameByType(potentialType));
     math::blas_dmul(converter.lengthUnit, radii);
-    for(unsigned int i=0; i<coefs.size(); i++) {
+    for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(pow_2(converter.velocityUnit), coefs[i]);
-        math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, coefs1[i]);
+    for(unsigned int i=0; i<coefsPhi.size(); i++) {
+        math::blas_dmul(pow_2(converter.velocityUnit), coefsPhi[i]);
+        math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, coefsdPhi[i]);
     }        
     switch(potentialType)
     {
@@ -389,7 +396,7 @@ static PtrPotential readPotentialSphHarmExp(
     case PT_SPLINE:
         return PtrPotential(new SplineExp(radii, coefs)); 
     case PT_MULTIPOLE:
-        return PtrPotential(new Multipole(radii, coefs, coefs1)); 
+        return PtrPotential(new Multipole(radii, coefsPhi, coefsdPhi)); 
     default:
         throw std::invalid_argument(std::string("Unknown potential type to load: ") +
             getPotentialNameByType(potentialType));
@@ -429,7 +436,7 @@ static bool readAzimuthalHarmonics(std::istream& strm,
         gridz.clear();
         data[m+mmax]=math::Matrix<double>(size_R, size_z, 0);
         for(unsigned int iz=0; ok && iz<size_z; iz++) {
-            std::getline(strm, buffer);
+            ok &= std::getline(strm, buffer).good();
             fields = utils::splitString(buffer, "# \t");
             gridz.push_back(utils::toDouble(fields[0]));
             if(iz>0 && gridz.back()<=gridz[iz-1]) 
@@ -541,21 +548,27 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
 ///@{
 namespace {
 
+template<bool MULTIPOLE_INDEXING_ORDER>
 static void writeSphericalHarmonics(std::ostream& strm,
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &coefs)
 {
     assert(coefs.size()>0);
-    int lmax = static_cast<int>(sqrt(static_cast<double>(coefs[0].size()))-1);
+    int lmax = static_cast<int>(sqrt((MULTIPOLE_INDEXING_ORDER ? coefs.size() : coefs[0].size()) * 1.0)-1);
     for(int l=0; l<=lmax; l++)
         for(int m=-l; m<=l; m++)
             strm << "\tl="<<l<<",m="<<m;  // header line
-    strm << "\n" << std::setprecision(16);
+    strm << '\n' << std::setprecision(16);
     for(unsigned int n=0; n<radii.size(); n++) {
         strm << radii[n];
-        for(unsigned int i=0; i<coefs[n].size(); i++)
-            strm << "\t" << coefs[n][i];
-        strm << "\n";
+        if(MULTIPOLE_INDEXING_ORDER) {
+            for(unsigned int i=0; i<coefs.size(); i++)
+                strm << '\t' << (n<coefs[i].size() ? coefs[i][n] : 0.);
+        } else {
+            for(unsigned int i=0; i<coefs[n].size(); i++)
+                strm << '\t' << coefs[n][i];
+        }
+        strm << '\n';
     }
 }
 
@@ -599,7 +612,7 @@ static void writePotentialBSE(std::ostream& strm, const BasisSetExp& potBSE,
         (potBSE.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" << 
         potBSE.getAlpha() <<"\t#alpha\n0\t#time\n#index";
-    writeSphericalHarmonics(strm, indices, coefs);
+    writeSphericalHarmonics<false>(strm, indices, coefs);
 }
 
 static void writePotentialSpline(std::ostream& strm, const SplineExp& potSpline,
@@ -620,7 +633,7 @@ static void writePotentialSpline(std::ostream& strm, const SplineExp& potSpline,
         (potSpline.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" <<
         0 <<"\t#unused\n0\t#time\n#radius";
-    writeSphericalHarmonics(strm, radii, coefs);
+    writeSphericalHarmonics<false>(strm, radii, coefs);
 }
 
 static void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
@@ -629,21 +642,21 @@ static void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
     std::vector<double> radii;
     std::vector< std::vector<double> > Phi, dPhi;
     potMul.getCoefs(radii, Phi, dPhi);
-    assert(Phi.size() > 0 && Phi.size() == radii.size() && dPhi.size() == Phi.size());
+    assert(Phi.size() > 0 && Phi[0].size() == radii.size() && dPhi[0].size() == Phi[0].size());
     // convert units
     math::blas_dmul(1/converter.lengthUnit, radii);
     for(unsigned int i=0; i<Phi.size(); i++) {
         math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
         math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhi[i]);
     }
-    int lmax = static_cast<int>(sqrt(static_cast<double>(Phi[0].size()))-1);
+    int lmax = static_cast<int>(sqrt(Phi.size()*1.0)-1);
     strm << Multipole::myName() << "\t#header\n" << 
-        Phi.size() << "\t#n_radial\n" << 
+        Phi[0].size() << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" <<
         0 <<"\t#unused\nPhi\n#radius";
-    writeSphericalHarmonics(strm, radii, Phi);
+    writeSphericalHarmonics<true>(strm, radii, Phi);
     strm << "dPhi/dr\n#radius";
-    writeSphericalHarmonics(strm, radii, dPhi);
+    writeSphericalHarmonics<true>(strm, radii, dPhi);
 }
 
 static void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
@@ -684,7 +697,7 @@ static void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySpher
         math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
     strm << DensitySphericalHarmonic::myName() <<
     "\n#InnerSlope:\t" << innerSlope << "\tOuterSlope:\t" << outerSlope << "\n#radius";
-    writeSphericalHarmonics(strm, radii, coefs);
+    writeSphericalHarmonics<true>(strm, radii, coefs);
 }
 
 static void writeDensityCylGrid(std::ostream& strm, const DensityAzimuthalHarmonic& density,

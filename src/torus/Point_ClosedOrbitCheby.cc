@@ -139,7 +139,7 @@ void PoiClosedOrbit::RewriteTables(const int n, double *time, double *tbR,double
 ////////////////////////////////////////////////////////////////////////////////
 // chebderivs - returns dy/dth and dz/dth using Chebyshev fits to the orbit
 vec2 PoiClosedOrbit::chebderivs(const double psi, const vec2 yz) {
-  double t = thmax * sin(psi), t0 = yz[0]*yz[1], ptho,
+  double /*t = thmax * sin(psi),*/ t0 = yz[0]*yz[1], ptho,
     tvr,tdrdth,tpth,tiny=1.e-20,tmp,tmp2;
   vec2 dyzdt;
   tvr    = vr2.unfit1(psi);
@@ -242,10 +242,10 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
   // Could improve - starting radius should be guessed from Jz+Jphi
 
   double Rstart0 = Phi->RfromLc(Lz), Rstart = Rstart0, dr=0.1*Rstart, Rstop,
-    E = Phi->eff(Rstart,0.), dE, tiny=1.e-9, odiff,odiffJ,
-    delt=0.002*Rstart*Rstart/Lz, pot, tJl, *psi, *psisq, *tbth2, 
+    E = Phi->eff(Rstart,0.), dE, tiny=1.e-9, odiff=0,odiffJ=0,
+    delt=0.002*Rstart*Rstart/Lz, pot, tJl, *psi=0, *psisq=0, *tbth2=0, 
     Escale = Phi->eff(2.*Rstart,0.)-E; // positive number
-  PSPD  clo;
+  PSPD  clo(0);
   Cheby rr2;
   E += tiny*Escale;
   dE = 0.08*Escale;

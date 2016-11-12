@@ -1,6 +1,7 @@
 #include "galaxymodel_spherical.h"
 #include "math_core.h"
 #include "math_specfunc.h"
+#include "math_sample.h"
 #include "utils.h"
 #include "potential_multipole.h"  // used in Fokker-Planck
 #include "potential_composite.h"  // used in Fokker-Planck
@@ -24,31 +25,14 @@ static const double EPSROOT  = 1e-6;
 /// fixed order of Gauss-Legendre quadrature
 static const int GLORDER = 8;
 
-/// helper function to find a root of fnc(x)=val  (TODO: augment math::findRoot with this feature!)
-class RootFinder: public math::IFunction {
-    const math::IFunction& fnc;
-    double val;
-public:
-    RootFinder(const math::IFunction& _fnc, double _val) : fnc(_fnc), val(_val) {}
-    virtual void evalDeriv(const double x, double *v, double *d, double *dd) const {
-        fnc.evalDeriv(x, v, d, dd);
-        if(v)
-            *v -= val;
-    }
-    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
-};
-
-/// helper class for interpolating the density as a function of phase volume,
-/// used in the Eddington inversion routine,
-/// optionally with an asymptotic expansion for a constant-density core.
-/// TODO: separate the IFunction interface used in root-finder from the interpolator interface.
-class DensityInterp: public math::IFunctionNoDeriv {
+/// helper function to the slope of DF as a function of Phi
+class SlopeFinder: public math::IFunctionNoDeriv {
     const std::vector<double> &logh, &logrho;
-    const math::CubicSpline spl;
-    double logrho0, A, B, loghmin;
     int offset;
+public:
+    SlopeFinder(const std::vector<double>& _logh, const std::vector<double>& _logrho, int _offset) :
+        logh(_logh), logrho(_logrho), offset(_offset) {}
 
-    // function used in the root-finder
     virtual double value(const double B1) const {
         double ratio = (logrho[offset+0]-logrho[offset+1]) / (logrho[offset+1]-logrho[offset+2]);
         if(B1==0)
@@ -59,14 +43,26 @@ class DensityInterp: public math::IFunctionNoDeriv {
         double h0B = exp(B*logh[offset+0]), h1B = exp(B*logh[offset+1]), h2B = exp(B*logh[offset+2]);
         return (h0B - h1B) / (h1B - h2B) - ratio;
     }
+};
+
+/// helper class for interpolating the density as a function of phase volume,
+/// used in the Eddington inversion routine,
+/// optionally with an asymptotic expansion for a constant-density core.
+class DensityInterp: public math::IFunction {
+    const std::vector<double> &logh, &logrho;
+    const math::CubicSpline spl;
+    double logrho0, A, B, loghmin;
 
     // evaluate log(rho) and its derivatives w.r.t. log(h) using the asymptotic expansion
-    void asympt(const double logh, /*output*/ double& logrho, double& dlogrho, double& d2logrho) const
+    void asympt(const double logh, /*output*/ double* logrho, double* dlogrho, double* d2logrho) const
     {
         double AhB = A * exp(B * logh);
-        logrho     = logrho0 + log(1 + AhB);
-        dlogrho    = B / (1 + 1 / AhB);
-        d2logrho   = B / (1 + AhB) * dlogrho;
+        if(logrho)
+            *logrho   = logrho0 + log(1 + AhB);
+        if(dlogrho)
+            *dlogrho  = B / (1 + 1 / AhB);
+        if(d2logrho)
+            *d2logrho = pow_2(B / (1 + AhB)) * AhB;
     }
 
 public:
@@ -77,18 +73,16 @@ public:
     DensityInterp(const std::vector<double>& _logh, const std::vector<double>& _logrho) :
         logh(_logh), logrho(_logrho),
         spl(logh, logrho),
-        logrho0(-INFINITY), A(0), B(0), loghmin(-INFINITY), offset(0)
+        logrho0(-INFINITY), A(0), B(0), loghmin(-INFINITY)
     {
         if(logh.size()<4)
             return;
         // try determining the exponent B from the first three grid points
-        offset = 0;
-        double B1a = math::findRoot(*this, 0, 1, EPSROOT);
+        double B1a = math::findRoot(SlopeFinder(logh, logrho, 0), 0, 1, EPSROOT);
         if(!(B1a > 0.05 && B1a < 0.95))
             return;
         // now try the same using three points shifted by one
-        offset = 1;
-        double B1b = math::findRoot(*this, 0, 1, EPSROOT);
+        double B1b = math::findRoot(SlopeFinder(logh, logrho, 1), 0, 1, EPSROOT);
         if(!(B1b > 0.05 && B1b < 0.95))
             return;
         // consistency check - if the two values differ significantly, we're getting nonsense
@@ -109,7 +103,7 @@ public:
         for(unsigned int i=3; i<logh.size(); i++) {
             loghmin = logh[i];
             double corelogrho, coredlogrho, cored2logrho;  // values returned by the asymptotic expansion
-            asympt(logh[i], corelogrho, coredlogrho, cored2logrho);
+            asympt(logh[i], &corelogrho, &coredlogrho, &cored2logrho);
             if(!(fabs((corelogrho-logrho[i]) / (corelogrho-logrho0)) < 1e-4))
                 break;   // TODO: come up with a more rigorous method...
         }
@@ -118,13 +112,16 @@ public:
     /// returns the interpolated value for log(rho) as a function of log(h),
     /// together with its two derivatives.
     /// It automatically switches to the asymptotic expansion if necessary.
-    void interpolate(const double logh, /*output*/ double& logrho, double& dlogrho, double& d2logrho) const
+    virtual void evalDeriv(const double logh,
+        /*output*/ double* logrho, double* dlogrho, double* d2logrho) const
     {
         if(logh < loghmin)
             asympt(logh, logrho, dlogrho, d2logrho);
         else
-            spl.evalDeriv(logh, &logrho, &dlogrho, &d2logrho);
+            spl.evalDeriv(logh, logrho, dlogrho, d2logrho);
     }
+
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /// integrand for computing the product of f(E) and a weight function (E-Phi)^{P/2}
@@ -145,6 +142,39 @@ public:
         // that's why there are extra factors h and 1/g below.
         return df(h) * h / g * math::powInt(w, P);
     }
+};
+
+
+/** helper class for integrating or sampling the isotropic DF in a given spherical potential */
+class DFSphericalIntegrand: public math::IFunctionNdim {
+    const math::IFunction& pot;
+    const math::IFunction& df;
+    const potential::PhaseVolume pv;
+public:
+    DFSphericalIntegrand(const math::IFunction& _pot, const math::IFunction& _df) :
+        pot(_pot), df(_df), pv(pot) {}
+    
+    /// un-scale r and v and return the jacobian of this transformation
+    double unscalerv(double scaledr, double scaledv, double& r, double& v, double& Phi) const { 
+        r   = exp( 1/(1-scaledr) - 1/scaledr );
+        Phi = pot(r);
+        double vesc = sqrt(-2*Phi);
+        v   = scaledv * vesc;
+        return pow_2(4*M_PI) * pow_3(r*vesc) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr)) * pow_2(scaledv);
+    }
+    virtual void eval(const double vars[], double values[]) const
+    {
+        double r, v, Phi;
+        double jac = unscalerv(vars[0], vars[1], r, v, Phi);
+        values[0] = 0;
+        if(isFinite(jac) && jac>1e-100 && jac<1e100) {
+            double f = df(pv(Phi + 0.5 * v*v));
+            if(isFinite(f))
+                values[0] = f * jac;
+        }
+    }
+    virtual unsigned int numVars()   const { return 2; }
+    virtual unsigned int numValues() const { return 1; }
 };
 
 
@@ -218,7 +248,7 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
     // from Phi(r_max) to 0, assuming that Phi(r) ~ -1/r and h ~ r^(3/2) in the asymptotic regime.
     // First we find the slope d(logrho)/d(logh) at h_max
     double logrho, dlogrho, d2logrho;
-    densityInterp.interpolate(gridlogh.back(), logrho, dlogrho, d2logrho);
+    densityInterp.evalDeriv(gridlogh.back(), &logrho, &dlogrho, &d2logrho);
     double slope = -1.5*dlogrho;  // density at large radii is ~ r^(-slope)
     utils::msg(utils::VL_VERBOSE, "makeEddingtonDF",
         "Density is ~r^"+utils::toString(-slope)+" at large r");
@@ -250,7 +280,7 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
             double h = exp(logh), g, dgdh;
             double E = phasevol.E(h, &g, &dgdh);
             // compute log[rho](log[h]) and its derivatives
-            densityInterp.interpolate(logh, logrho, dlogrho, d2logrho);
+            densityInterp.evalDeriv(logh, &logrho, &dlogrho, &d2logrho);
             // GL weight -- contribution of this point to each integral on the current segment,
             // taking into account the transformation of variable y -> logh
             double weight = glweights[k] * 2*y * (gridlogh[i]-gridlogh[i-1]);
@@ -347,13 +377,30 @@ math::LogLogSpline fitSphericalDF(
 }
 
 
-std::vector<double> sampleSphericalDF(const SphericalModel& model, unsigned int npoints)
+particles::ParticleArraySph generatePosVelSamples(
+    const math::IFunction& pot, const math::IFunction& df, const unsigned int numPoints)
 {
-    std::vector<double> result(npoints);
-    double totalMass = model.cumulMass();
-    for(unsigned int i=0; i<npoints; i++)
-        result[i] = model.findh(totalMass * math::random());
-    return result;
+    DFSphericalIntegrand fnc(pot, df);
+    math::Matrix<double> result;  // sampled scaled coordinates/velocities
+    double totalMass, errorMass;  // total normalization of the DF and its estimated error
+    double xlower[6] = {0,0};     // boundaries of sampling region in scaled coordinates
+    double xupper[6] = {1,1};
+    math::sampleNdim(fnc, xlower, xupper, numPoints, result, NULL, &totalMass, &errorMass);
+    const double pointMass = totalMass / result.rows();
+    particles::ParticleArraySph points;
+    points.data.reserve(result.rows());
+    for(unsigned int i=0; i<result.rows(); i++) {
+        double r, v, Phi,
+            rtheta    = acos(math::random()*2-1),
+            rphi      = 2*M_PI * math::random(),
+            vcostheta = math::random()*2-1,
+            vsintheta = sqrt(1-pow_2(vcostheta)),
+            vphi      = 2*M_PI * math::random();
+        fnc.unscalerv(result(i, 0), result(i, 1), r, v, Phi);
+        points.add(coord::PosVelSph(r, rtheta, rphi,
+            v*vsintheta*cos(vphi), v*vsintheta*sin(vphi), v*vcostheta), pointMass);
+    }
+    return points;
 }
 
 
@@ -548,24 +595,6 @@ double SphericalModel::cumulEkin(const double logh) const
     return 1.5 * exp(intfh(logh));
 }
 
-double SphericalModel::findh(const double cm) const
-{
-    // solve the relation intfg(log(h)) = log(cm)  to find h for the given cm (cumulative mass)
-    if(cm==0)
-        return 0;
-    double logcm = log(cm), loghmin = intfg.xmin(), loghmax = intfg.xmax();
-    if(logcm >= totalMass)
-        return INFINITY;
-    double valmin, dermin;
-    intfg.evalDeriv(loghmin, &valmin, &dermin);
-    if(logcm <= valmin) {
-        // find the root (logh) using linear extrapolation:
-        // log(cm) = intfg(logh) = valmin + dermin * (logh - loghmin)
-        return exp((logcm - valmin) / dermin + loghmin);
-    }
-    return exp(findRoot(RootFinder(intfg, logcm), loghmin, loghmax, EPSROOT));
-}
-
 
 DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const math::IFunction& df) :
     model(phasevol, df)
@@ -579,48 +608,17 @@ DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const mat
     const double mindeltaY       = fmin(0.1, (logHmax-logHmin)/npointsY);
     std::vector<double> gridY    = math::createNonuniformGrid(npointsY, mindeltaY, logHmax-logHmin, true);
 
-
-    // 2. store the values of f, g, h at grid nodes
-    std::vector<double> gridF(npoints), gridG(npoints), gridH(npoints);
-    std::vector<double> gridFint(npoints), gridFGint(npoints), gridFHint(npoints);
-    for(unsigned int i=0; i<npoints; i++) {
-        gridH[i] = exp(gridLogH[i]);
-        gridF[i] = df(gridH[i]);
-        phasevol.E(gridH[i], &gridG[i]);
-    }
-
-    // 3a. determine the asymptotic behaviour of f(h):
-    // f(h) ~ h^outerFslope as h-->inf  or  h^innerFslope as h-->0
-    double innerFslope = log(gridF[1] / gridF[0]) / (gridLogH[1] - gridLogH[0]);
-    double outerFslope = log(gridF[npoints-1] / gridF[npoints-2]) /
-    (gridLogH[npoints-1] - gridLogH[npoints-2]);
-    if(!(innerFslope > -1))
-        throw std::runtime_error("SphericalModel: f(h) rises too rapidly as h-->0");
+    // 3. determine the asymptotic behaviour of f(h) and g(h):
+    // f(h) ~ h^outerFslope as h-->inf and  g(h) ~ h^(1-outerEslope)
+    double outerH = exp(gridLogH.back()), outerG, outerE = phasevol.E(outerH, &outerG);
+    double outerFslope = log(df(outerH) / df(exp(gridLogH[npoints-2]))) /
+        (gridLogH[npoints-1] - gridLogH[npoints-2]);
     if(!(outerFslope < -1))
-        throw std::runtime_error("SphericalModel: f(h) falls off too slowly as h-->infinity");
-
-    // 3b. determine the asymptotic behaviour of h(E), or rather, g(h) = dh/dE:
-    // -E ~ h^outerEslope  and  g(h) ~ h^(1-outerEslope)  as  h-->inf,
-    // and in the nearly Keplerian potential at large radii outerEslope should be ~ -2/3.
-    // -E ~ h^innerEslope + const  and  g(h) ~ h^(1-innerEslope)  as  h-->0:
-    // if innerEslope<0, Phi(r) --> -inf as r-->0, and we assume that |innerE| >> const;
-    // otherwise Phi(0) is finite, and we assume that  innerE-Phi(0) << |Phi(0)|.
-    // in general, if Phi ~ r^n + const at small r, then innerEslope = 2n / (6+3n);
-    // innerEslope ranges from -2/3 for a Kepler potential to ~0 for a logarithmic potential,
-    // to +1/3 for a harmonic (constant-density) core.
-    double Phi0   = phasevol.E(0);  // Phi(r=0), may be -inf
-    double innerE = phasevol.E(gridH.front());
-    double outerE = phasevol.E(gridH.back());
-    if(!(Phi0 < innerE && innerE < outerE && outerE < 0))
-        throw std::runtime_error("SphericalModel: weird behaviour of potential");
-    if(Phi0 != -INFINITY)   // determination of inner slope depends on whether the potential is finite
-        innerE -= Phi0;
-    double innerEslope = gridH.front() / gridG.front() / innerE;
-    double outerEslope = gridH.back()  / gridG.back()  / outerE;
-    double outerRatio  = outerFslope  / outerEslope;
-    if(!(outerRatio > 0 && innerEslope + innerFslope > -1))
-        throw std::runtime_error("SphericalModel: weird asymptotic behaviour of phase volume");
-
+        throw std::runtime_error("DiffusionCoefs: f(h) falls off too slowly as h-->infinity");
+    double outerEslope = outerH / outerG / outerE;
+    double outerRatio  = outerFslope / outerEslope;
+    if(!(outerRatio > 0))
+        throw std::runtime_error("DiffusionCoefs: weird asymptotic behaviour of phase volume");
 
     // 5. construct 2d interpolating splines for dv2par, dv2per as functions of Phi and E
 
@@ -672,7 +670,7 @@ DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const mat
                 double Fval1 = math::hypergeom2F1(-0.5, 1+outerRatio, 2+outerRatio, EoverPhi);
                 double Fval3 = math::hypergeom2F1(-1.5, 1+outerRatio, 2+outerRatio, EoverPhi);
                 double I0    = model.I0(gridLogH[i]);
-                double sqPhi = sqrt(-phasevol.E(gridH[i]));
+                double sqPhi = sqrt(-outerE);
                 if(isFinite(Fval1+Fval3)) {
                     J0acc = I0 * (1 - oneMinusJ0overI0);
                     J1acc = I0 * (outerJ1 - oneMinusJ0overI0 * Fval1) * sqPhi;
@@ -703,7 +701,7 @@ DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const mat
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("diffcoefs");
         for(unsigned int i=0; i<npoints; i++) {
-            double Phi = phasevol.E(gridH[i]);
+            double Phi = phasevol.E(exp(gridLogH[i]));
             for(unsigned int j=0; j<npointsY; j++) {
                 double E = phasevol.E(exp(gridLogH[i] + gridY[j]));
                 strm << utils::pp(gridLogH[i],10) +' '+ utils::pp(gridY[j],10) +'\t'+
@@ -800,7 +798,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
 {
     // construct the initial distribution function and ensure its non-negativity
     makeEddingtonDF(initDensity, totalPot, /*output*/ gridh, gridf);
-    for(unsigned int i=0; i<gridf.size();)
+    for(unsigned int i=0; i<gridf.size(); i++)
         if(gridf[i]<=0)
             throw std::runtime_error("FokkerPlanckSolver: negative f(h)");
     

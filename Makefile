@@ -70,9 +70,6 @@ TORUSSRC  = CHB.cc \
             Toy_Isochrone.cc \
             WD_Numerics.cc
 
-# disable several warnings - shouldn't be taken as an endorsement to ignore them, but as a sign of negligence for code maintenance
-TORUSFLAGS = -Wreorder -Wno-unused-variable
-
 # test and example programs
 TESTSRCS  = test_math_core.cpp \
             test_math_linalg.cpp \
@@ -134,7 +131,7 @@ $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp Makefile.local
 	$(CXX) -c $(CXXFLAGS) $(DEFINES) $(INCLUDES) -o "$@" "$<"
 
 $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc Makefile.local
-	$(CXX) -c $(CXXFLAGS) $(TORUSFLAGS) $(INCLUDES) -o "$@" "$<"
+	$(CXX) -c $(CXXFLAGS) $(INCLUDES) -o "$@" "$<"
 
 clean:
 	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME)

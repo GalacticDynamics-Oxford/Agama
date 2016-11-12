@@ -48,7 +48,7 @@ public:
         if(mode==MODE_OMEGAR) return 1/vr;
         if(mode==MODE_OMEGAZ) return L/(r*r*vr) - 1/(sqrt(pow_2(r/R1)-1)*r);
         // in the latter case, a singular term with analytic antiderivative is subtracted from the integrand
-        assert("Invalid mode in action integrand"==0);
+        assert(!"Invalid mode in action integrand");
         return 0;
     }
 };
@@ -66,7 +66,7 @@ public:
         double vr = sqrt(fmax(0, 1 - pow_2(v/x) - 2*t));
         if(mode==MODE_JR)     return vr;
         if(mode==MODE_OMEGAZ) return v/(x*x*vr) - 1/(sqrt(pow_2(x/R1)-1)*x);
-        assert("Invalid mode in power-law action integrand"==0);
+        assert(!"Invalid mode in power-law action integrand");
         return 0;
     }
 };
@@ -575,8 +575,8 @@ double ActionFinderSpherical::E(const Actions& acts) const
     // initial guess (more precisely, lower bound) for Hamiltonian
     double Ecirc = interp.pot(rcirc) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
     // find E such that Jr(E, L) equals the target value
-    HamiltonianFinderFncInt fnc(*this, acts.Jr, L, Ecirc, 0);
-    return math::findRoot(fnc, Ecirc, 0, ACCURACY_JR);
+    return math::findRoot(HamiltonianFinderFncInt(*this, acts.Jr, L, Ecirc, 0),
+        Ecirc, 0, ACCURACY_JR);
 }
 
 coord::PosVelSphMod ActionFinderSpherical::map(
@@ -614,7 +614,7 @@ coord::PosVelSphMod ActionFinderSpherical::map(
         double dR1dJz = (L / pow_2(R1) - Omegaz) / factR1;
         double dR2dJz = (L / pow_2(R2) - Omegaz) / factR2;
         // compute the derivs using finite-difference (silly approach, no error control)
-        double EPS= 1e-8;   // no proper scaling attempted!!
+        double EPS= 1e-8;   // no proper scaling attempted!! (TODO - do it properly or not at all)
         derivAct->dbyJr = derivPointFromActions(
             ActionAngles(Actions(aa.Jr + EPS, aa.Jz, aa.Jphi), aa), p0, EPS, *this, interp,
             E + EPS * Omegar, R1 + EPS * dR1dJr, R2 + EPS * dR2dJr);

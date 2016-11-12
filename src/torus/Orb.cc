@@ -142,8 +142,8 @@ void Record::stepRK_by(double& dt, const double f)
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 Record3D::Record3D(const PSPT& W, Potential* Phi, const double dE) : 
-  Pot(Phi), R(W(0)), z(W(1)), phi(W(2)), pR(W(3)), pz(W(4)), Jphi(R*W(5)), 
-  phid(W(5)/R), phidd(-2*phid*pR/R)
+  Pot(Phi), R(W(0)), z(W(1)), phi(W(2)), pR(W(3)), pz(W(4)), 
+  phid(W(5)/R), phidd(-2*phid*pR/R), Jphi(R*W(5))
 {
   E   = Pot->eff(R,z,aR,az) + 0.5 * (pR*pR + pz*pz);
   set_tolerance(dE);

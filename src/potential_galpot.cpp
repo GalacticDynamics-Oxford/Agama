@@ -411,7 +411,11 @@ PtrPotential createGalaxyPotential(
     const std::vector<DiskParam>& DiskParams,
     const std::vector<SphrParam>& SphrParams)
 {
-    return PtrPotential(new CompositeCyl(createGalaxyPotentialComponents(DiskParams, SphrParams)));
+    std::vector<PtrPotential> comps = createGalaxyPotentialComponents(DiskParams, SphrParams);
+    if(comps.size()==1)
+        return comps[0];
+    else
+        return PtrPotential(new CompositeCyl(comps));
 }
 
 } // namespace

@@ -25,6 +25,8 @@ Note: to use the Python extension, any external libraries to be statically linke
 3.  You need to create a file called Makefile.local, which is included by the Makefile
     and contains path names and compiler flags specific to your own computer.
     An example is given below (you will need to change the pathnames).
+    The reason for keeping it separate from the main Makefile is that the latter may be
+    updated from the repository while keeping the local settings unchanged.
 4.  In order to make the Python extension available for import, it should be either copied
     to its site-packages folder, or the path to it be added to PYTHONPATH environment variable,
     as shown in the example below.

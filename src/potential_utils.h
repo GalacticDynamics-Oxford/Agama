@@ -131,7 +131,7 @@ private:
     double slopeOut, Mtot, coefOut; ///< coefficients for power-law potential at large radii
     math::QuinticSpline LofE;   ///< spline-interpolated scaled function for L_circ(E)
     math::QuinticSpline RofL;   ///< spline-interpolated scaled R_circ(L)
-    math::QuinticSpline Phi;    ///< interpolated potential as a function of radius
+    math::QuinticSpline PhiofR; ///< interpolated potential as a function of radius
     math::QuinticSpline RofPhi; ///< inverse function (radius as a function of potential)
     math::CubicSpline   freqNu; ///< ratio of squared epicyclic frequencies nu to Omega
 };

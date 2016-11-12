@@ -3606,7 +3606,7 @@ static PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedA
     try{
         FncWrapper fnc(xlow.size(), callback);
         math::sampleNdim(fnc, &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
-        npy_intp dim[] = {numSamples, xlow.size()};
+        npy_intp dim[] = {numSamples, static_cast<npy_intp>(xlow.size())};
         PyObject* arr  = PyArray_SimpleNewFromData(2, dim, NPY_DOUBLE, const_cast<double*>(samples.data()));
         return Py_BuildValue("Nddi", arr, result, error, numEval);
     }

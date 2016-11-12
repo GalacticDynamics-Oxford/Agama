@@ -36,9 +36,12 @@ public:
         double R = exp(logR);
         poten.eval(coord::PosCyl(R,0,0), &Phi, &grad);
         if(val) {
-            if(R>=HUGE_NUMBER && !isFinite(Phi))
-                Phi=0;
-            *val = Phi-E;
+            if(R==0 && Phi==-INFINITY)
+                *val = +E;  // safely negative value
+            else if(R>=HUGE_NUMBER && !isFinite(Phi))
+                *val = -E;
+            else
+                *val = Phi-E;
         }
         if(deriv)
             *deriv = grad.dR * R;
@@ -46,7 +49,7 @@ public:
     virtual unsigned int numDerivs() const { return 1; }
 };
 
-/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
+/** helper class to find the root of  Phi(R) + 1/2 R dPhi/dR = E
     (i.e. the radius R of a circular orbit with the given energy E).
 */
 class RcircRootFinder: public math::IFunction {
@@ -61,7 +64,9 @@ public:
         double R = exp(logR);
         poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
         if(val) {
-            if(R>=HUGE_NUMBER && !isFinite(Phi))
+            if(R==0 && Phi==-INFINITY)
+                *val = +1+fabs(E);  // safely positive value
+            else if(R>=HUGE_NUMBER && !isFinite(Phi))
                 *val = -1-fabs(E);  // safely negative value
             else
                 *val = 2*(E-Phi) - (R>1./HUGE_NUMBER && R<HUGE_NUMBER ? R*grad.dR : 0);
@@ -76,32 +81,24 @@ public:
 
 /** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
     (i.e. the radius R of a circular orbit with the given angular momentum L_z).
-    For the reason of accuracy, we multiply the equation by  1/(R+1), 
-    which ensures that the value stays finite as R -> infinity or R -> 0.
 */
 class RfromLzRootFinder: public math::IFunction {
     const BasePotential& poten;
     const double Lz2;
 public:
     RfromLzRootFinder(const BasePotential& _poten, double _Lz) : poten(_poten), Lz2(_Lz*_Lz) {};
-    virtual void evalDeriv(const double R, double* val=0, double* deriv=0, double* deriv2=0) const {
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const {
         coord::GradCyl grad;
         coord::HessCyl hess;
-        // TODO: this is unsatisfactory, need to convert to log-scaling
-        static const double UNREASONABLY_LARGE_VALUE = 1e10;
-        if(R < UNREASONABLY_LARGE_VALUE) {
-            poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
-            if(val)
-                *val = ( Lz2 - (R>0 ? pow_3(R)*grad.dR : 0) ) / (R+1);
-            if(deriv)
-                *deriv = -(Lz2 + pow_2(R)*( (3+2*R)*grad.dR + R*(R+1)*hess.dR2) ) / pow_2(R+1);
-        } else {   // at large R, Phi(R) ~ -M/R, we may use this asymptotic approximation even at infinity
-            poten.eval(coord::PosCyl(UNREASONABLY_LARGE_VALUE,0,0), NULL, &grad);
-            if(val)
-                *val = Lz2/(R+1) - pow_2(UNREASONABLY_LARGE_VALUE) * grad.dR / (1+1/R);
-            if(deriv)
-                *deriv = NAN;
-        } 
+        double R = exp(logR);
+        poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
+        double F = pow_3(R)*grad.dR;  // Lz^2(R)
+        if(!isFinite(F))          // this may happen if R --> 0 or R --> infinity,
+            F = R<1 ? 0 : 2*Lz2;  // in these cases replace it with a finite number of a correct sign
+        if(val)
+            *val = F - Lz2;
+        if(deriv)
+            *deriv = pow_3(R) * (3*grad.dR + R*hess.dR2);
         if(deriv2)
             *deriv2 = NAN;
     }
@@ -228,13 +225,17 @@ public:
 };
 
 /** Construct a grid for interpolating a function with a cubic spline.
+    x is supposed to be a log-scaled coordinate, i.e., it does not attain very large values.
     The function is assumed to have linear asymptotic behaviour at x -> +- infinity,
     and the goal is to place the grid nodes such that the typical error in the interpolating
     spline is less than the provided tolerance eps.
     The error in the cubic spline approximation of a sufficiently smooth function
     is <= 5/384 h^4 |f""(x)|, where h is the grid spacing and f"" is the fourth derivative
     (which we have to estimate by finite differences, using the second derivatives provided
-    by the function).
+    by the function). Note, however, that if the input function is a spline interpolator itself,
+    its smoothness is not quite as high, and the accuracy of the secondary interpolation deteriorates
+    somewhat (but is still at an acceptable level, taking into account that the original function
+    itself is an approximation).
     We start from x=xinit and scan in both directions, adding grid nodes at intervals determined
     by the above relation, and stop when the second derivative is less than the threshold eps.
     Typically the nodes will be more sparsely spaced towards the end of the grid.
@@ -246,7 +247,8 @@ public:
 */
 static std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps, double xinit=0)
 {
-    std::vector<double> result(1, xinit);
+    // restrict the search to |x|<=xmax, assuming that x=log(something)
+    const double xmax = 25.;  // exp(xmax) ~ 0.7e11
     double eps4=pow(eps*384/5, 0.25);
     double d2f0, d2fm, d2fp;
     fnc.evalDeriv(xinit,      NULL, NULL, &d2f0);
@@ -256,6 +258,7 @@ static std::vector<double> createInterpolationGrid(const math::IFunction& fnc, d
     double dx = -eps4;
     double x  = xinit;
     d2fp = d2f0;
+    std::vector<double> result(1, xinit);
     int stage=0;
     while(stage<2) {
         x += dx;
@@ -267,7 +270,7 @@ static std::vector<double> createInterpolationGrid(const math::IFunction& fnc, d
         d3fp       = d3f;
         dx         = eps4 / pow(dif, 0.25) * (stage*2-1);
         result.push_back(x);
-        if(fabs(d2f) < eps || fabs(x)>25 || !isFinite(d2f+dx)) {
+        if(fabs(d2f) < eps || fabs(x)>xmax || !isFinite(d2f+dx)) {
             if(stage==0) {
                 std::reverse(result.begin(), result.end());
                 x   = 0;
@@ -292,7 +295,7 @@ double v_circ(const BasePotential& potential, double radius)
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular velocity is possible");
     if(radius==0)
-        return 0;  // this is not quite true for a singular potential at origin..
+        return isFinite(potential.value(coord::PosCyl(0, 0, 0))) ? 0 : INFINITY;
     coord::GradCyl deriv;
     potential.eval(coord::PosCyl(radius, 0, 0), NULL, &deriv);
     return sqrt(radius*deriv.dR);
@@ -311,12 +314,12 @@ double L_circ(const BasePotential& potential, double energy) {
 }
 
 double R_from_Lz(const BasePotential& potential, double Lz) {
-    if(Lz==0)
-        return 0;
     if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Potential is not axisymmetric, "
             "no meaningful definition of circular orbit is possible");
-    return math::findRoot(RfromLzRootFinder(potential, Lz), 0, INFINITY, ACCURACY_ROOT);
+    if(Lz==0)
+        return 0;
+    return exp(math::findRoot(RfromLzRootFinder(potential, Lz), -INFINITY, INFINITY, ACCURACY_ROOT));
 }
 
 double R_max(const BasePotential& potential, double energy) {
@@ -476,12 +479,12 @@ Interpolator::Interpolator(const BasePotential& potential)
             throw std::runtime_error("Interpolator: cannot determine circular velocity at r="+
                 utils::toString(R));
     }
-    
+
     // init various 1d splines
-    freqNu = math::CubicSpline(gridLogR, gridNu,   0, 0);  // set endpoint derivatives to zero
-    Phi  = math::QuinticSpline(gridLogR, gridPhi,  gridPhider);
-    LofE = math::QuinticSpline(gridE,    gridL,    gridLder);
-    RofL = math::QuinticSpline(gridL,    gridLogR, gridRder);
+    freqNu = math::CubicSpline  (gridLogR, gridNu,   0, 0);  // set endpoint derivatives to zero
+    LofE   = math::QuinticSpline(gridE,    gridL,    gridLder);
+    RofL   = math::QuinticSpline(gridL,    gridLogR, gridRder);
+    PhiofR = math::QuinticSpline(gridLogR, gridPhi,  gridPhider);
     // inverse relation between R and Phi - the derivative is reciprocal
     for(unsigned int i=0; i<gridsize; i++)
         gridPhider[i] = 1/gridPhider[i];
@@ -491,7 +494,7 @@ Interpolator::Interpolator(const BasePotential& potential)
 void Interpolator::evalDeriv(const double R, double* val, double* deriv, double* deriv2) const
 {
     double logR = log(R);
-    if(logR > Phi.xvalues().back()) {  // extrapolation at large r
+    if(logR > PhiofR.xvalues().back()) {  // extrapolation at large r
         double Rs = exp(logR * slopeOut);
         if(val)
             *val = -Mtot/R + coefOut * (slopeOut==-1 ? logR/R : Rs);
@@ -506,7 +509,7 @@ void Interpolator::evalDeriv(const double R, double* val, double* deriv, double*
         return;
     }
     double scaledPhi, dscaledPhidlogR, Phival, dPhidscaledPhi, dummy;
-    Phi.evalDeriv(logR, &scaledPhi, deriv2!=0||deriv!=0? &dscaledPhidlogR : NULL, deriv2);
+    PhiofR.evalDeriv(logR, &scaledPhi, deriv2!=0||deriv!=0? &dscaledPhidlogR : NULL, deriv2);
     unscaleE(scaledPhi, invPhi0, Phival, dPhidscaledPhi, dummy);
     if(val)
         *val    = Phival;
@@ -519,8 +522,8 @@ void Interpolator::evalDeriv(const double R, double* val, double* deriv, double*
 
 double Interpolator::innerSlope(double* Phi0, double* coef) const
 {
-    double val, der, logr = Phi.xvalues().front();
-    Phi.evalDeriv(logr, &val, &der);
+    double val, der, logr = PhiofR.xvalues().front();
+    PhiofR.evalDeriv(logr, &val, &der);
     double Phival, dummy1, dummy2;
     unscaleE(val, invPhi0, Phival, dummy1, dummy2);
     if(invPhi0!=0) {

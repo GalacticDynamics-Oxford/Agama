@@ -22,7 +22,7 @@ PoiNone::PoiNone()
   derivs_ok=false; 
 }
 ////////////////////////////////////////////////////////////////////////////////
-PoiNone::PoiNone(const PoiNone& P)
+PoiNone::PoiNone(const PoiNone& /*P*/)
 { 
  derivs_ok=false; 
 }

@@ -34,8 +34,8 @@ const double SAFETY_FACTOR = 8*DBL_EPSILON;
 // combine the array of coefficients at different radii into a single array
 // and then call the corresponding routine from math::.
 // This routine is templated on the number of arrays that it handles:
-// each one should have identical number of elements (SH coefs at different radii),
-// and each element of each array should have the same dimension (number of SH coefs).
+// each one should have identical number of elements (# of harmonic terms - (lmax+1)^2),
+// and each element of each array should have the same dimension (number of radial grid points).
 template<int N>
 static math::SphHarmIndices getIndicesFromCoefs(const std::vector< std::vector<double> >* C[N])
 {
@@ -43,20 +43,20 @@ static math::SphHarmIndices getIndicesFromCoefs(const std::vector< std::vector<d
     bool correct=true;
     for(int n=0; n<N; n++) {
         if(n==0) {
-            numRadii = C[n]->size();
-            if(numRadii>0)
-                numCoefs = C[n]->at(0).size();
+            numCoefs = C[n]->size();
+            if(numCoefs>0)
+                numRadii = C[n]->at(0).size();
         } else
-            correct &= C[n]->size() == numRadii;
+            correct &= C[n]->size() == numCoefs;
     }
     std::vector<double> D(numCoefs);
-    for(unsigned int k=0; correct && k<numRadii; k++) {
+    for(unsigned int c=0; correct && c<numCoefs; c++) {
         for(int n=0; n<N; n++) {
-            if(C[n]->at(k).size() == numCoefs)
+            if(C[n]->at(c).size() == numRadii)
                 // if any of the elements is non-zero,
                 // then the combined array will have non-zero c-th element too.
-                for(unsigned int c=0; c<numCoefs; c++)
-                    D[c] += fabs(C[n]->at(k)[c]);
+                for(unsigned int k=0; k<numRadii; k++)
+                    D[c] += fabs(C[n]->at(c)[k]);
             else
                 correct = false;
         }
@@ -78,14 +78,18 @@ static math::SphHarmIndices getIndicesFromCoefs(
     return getIndicesFromCoefs<2>(A);
 }
 
-// resize the array of coefficients down to the requested order
-static void restrictSphHarmCoefs(int lmax, int mmax, std::vector<double>& coefs)
+// resize the array of coefficients down to the requested order;
+// \param[in]  lmax  is the maximum order of angular expansion in cos(theta);
+// \param[in]  mmax  is the maximum order of expansion in phi (may be less than lmax);
+// \param[in,out]  coefs  is the 2d array of coefficients for each harmonic term (1st index)
+// at each radius (2nd index), which may be sequestered if necessary.
+static void restrictSphHarmCoefs(int lmax, int mmax, std::vector<std::vector<double> >& coefs)
 {
-    coefs.resize(pow_2(lmax+1), 0);
+    coefs.resize(pow_2(lmax+1), std::vector<double>(coefs[0].size(), 0));
     math::SphHarmIndices ind(lmax, mmax, coord::ST_NONE);
     for(unsigned int c=0; c<coefs.size(); c++)
         if(abs(ind.index_m(c))>mmax)
-            coefs[c] = 0;
+            coefs[c].assign(coefs[c].size(), 0.);
 }
 
 // ------- Spherical-harmonic expansion of density or potential ------- //
@@ -155,13 +159,14 @@ static void computeSphHarmCoefs(const BaseDensityOrPotential& src,
         throw std::runtime_error("Error in computeSphHarmCoefs: "+errorMsg);
     
     // 2nd step: transform these values to spherical-harmonic expansion coefficients at each radius
+    std::vector<double> shcoefs(ind.size());
     for(int q=0; q<NQuantities; q++) {
-        coefs[q]->resize(numPointsRadius);
+        coefs[q]->assign(ind.size(), std::vector<double>(numPointsRadius));
         for(unsigned int indR=0; indR<numPointsRadius; indR++) {
-            coefs[q]->at(indR).assign(ind.size(), 0);
-            trans.transform(&values[indR * numSamplesAngles + q * numSamplesTotal],
-                &coefs[q]->at(indR).front());
-            math::eliminateNearZeros(coefs[q]->at(indR));
+            trans.transform(&values[indR * numSamplesAngles + q * numSamplesTotal], &shcoefs.front());
+            math::eliminateNearZeros(shcoefs);
+            for(unsigned int c=0; c<ind.size(); c++)
+                coefs[q]->at(c)[indR] = shcoefs[c];
         }
     }
 }
@@ -169,8 +174,7 @@ static void computeSphHarmCoefs(const BaseDensityOrPotential& src,
 // transform an N-body snapshot to an array of spherical-harmonic coefficients:
 // input particles are sorted in radius, and for each k-th particle the array of
 // sph.-harm. functions Y_lm(theta_k, phi_k) times the particle mass is computed
-// and stored in the output array. The indexing of this array is reversed w.r.t.
-// the one used for potential or density coefs, namely:
+// and stored in the output array with the following indexing scheme:
 // C_lm(particle_k) = coefs[SphHarmIndices::index(l,m)][k].
 // This saves memory, since only the arrays for harmonic coefficients allowed
 // by the indexing scheme are allocated and returned.
@@ -317,21 +321,35 @@ static void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
 }
 
 /** construct asymptotic power-law potential for extrapolation to small or large radii
-    from the given spherical-harmonic coefs and their derivatives at two consecutive radii */
-static PtrPotential initAsympt(double r1, double r2, 
-    const std::vector<double>& Phi1, const std::vector<double>& Phi2,
-    const std::vector<double>& dPhi1, bool inner)
+    from the given spherical-harmonic coefs and their derivatives at two consecutive radii.
+    \param[in]  radii is the array of grid radii (only the first two or the last two elements
+    are used, depending on the parameter 'inner');
+    \param[in]  Phi  is the full array of potential coefficients (each element corresponds
+    to a particular harmonic term and lists the coefficients of this harmonic at all radii);
+    \param[in]  dPhi is the array of potential derivatives with the same indexing scheme;
+    \param[in]  inner is the flag specifying whether to use the first two or the last two
+    elements of these arrays.
+    \return  an instance of PowerLawMultipole providing the extrapolation.
+*/
+static PtrPotential initAsympt(const std::vector<double>& radii,
+    const std::vector<std::vector<double> >& Phi,
+    const std::vector<std::vector<double> >& dPhi, bool inner)
 {
-    unsigned int nc = Phi1.size();
-    // limit the number of terms to consider
+    unsigned int nc = Phi.size();  // the number of sph-harm terms in the input arrays
+    // limit the number of terms to consider for extrapolation
     const unsigned int lmax = 8;
     nc = std::min<unsigned int>(nc, pow_2(lmax+1));
     std::vector<double> S(nc), U(nc), W(nc);
+    // index1 is the endpoint element of each array (the first or the last element, depending on 'inner')
+    // index2 is the next-to-endpoint element
+    unsigned int index1 = inner? 0 : Phi[0].size()-1;
+    unsigned int index2 = inner? 1 : Phi[0].size()-2;
 
     // determine the coefficients for potential extrapolation at small and large radii
     for(unsigned int c=0; c<nc; c++) {
         int l = math::SphHarmIndices::index_l(c);
-        computeExtrapolationCoefs(Phi1[c], Phi2[c], dPhi1[c], r1, r2, inner ? l : -l-1,
+        computeExtrapolationCoefs(Phi[c][index1], Phi[c][index2], dPhi[c][index1],
+            radii[index1], radii[index2], inner ? l : -l-1,
             /*output*/ S[c], U[c], W[c]);
         // TODO: may need to constrain the slope of l>0 harmonics so that it doesn't exceed
         // that of the l=0 one; this is enforced in the constructor of PowerLawMultipole,
@@ -341,7 +359,7 @@ static PtrPotential initAsympt(double r1, double r2,
                 std::string("Power-law index of ")+(inner?"inner":"outer")+
                 " density profile: "+utils::toString(S[c]-2));
     }
-    return PtrPotential(new PowerLawMultipole(r1, inner, S, U, W));
+    return PtrPotential(new PowerLawMultipole(radii[index1], inner, S, U, W));
 }
 
 
@@ -515,21 +533,22 @@ static inline void transformAmplitude(double r, double Rscale,
 }
 
 // find a suitable scaling radius R0 for transformation of potential amplitudes
+// (TODO: not very robust, incorrect results for steep cusps?)
 static double assignRscale(
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &Phi,
     const std::vector< std::vector<double> > &dPhi)
 {
     // determine the characteristic radius from the condition that Phi(0) = -Mtotal/rscale
-    double Rscale = radii.back() * Phi.back()[0] / Phi.front()[0];
+    double Rscale = radii.back() * Phi[0].back() / Phi[0].front();
     if(!(Rscale>0))   // something weird happened, set to a reasonable default value
         Rscale = 1.;
     // if the l=0 harmonic component of the potential is well-behaved, that is everywhere negative
     // and monotonically increasing with radius, then additionally ensure that the scaled potential
     // does the same (to preserve monotonicity), at least near the center; otherwise don't care
     for(unsigned int i=0; i<radii.size(); i++) {
-        double ratio = -Phi[i][0] / dPhi[i][0] * radii[i];
-        if(ratio >= 0 && Phi[i][0] / Phi[0][0] >= 0.5 && pow_2(Rscale) + pow_2(radii[i]) < ratio)
+        double ratio = -Phi[0][i] / dPhi[0][i] * radii[i];
+        if(ratio >= 0 && Phi[0][i] / Phi[0][0] >= 0.5 && pow_2(Rscale) + pow_2(radii[i]) < ratio)
             Rscale = sqrt(ratio - pow_2(radii[i]));
     }
     utils::msg(utils::VL_VERBOSE, "Multipole", "Rscale="+utils::toString(Rscale));
@@ -567,12 +586,13 @@ void computeDensityCoefsSph(
         if(gridRadii[k] <= (k==0 ? 0 : gridRadii[k-1]))
             throw std::invalid_argument("computePotentialCoefs: "
                 "radii of grid points must be positive and sorted in increasing order");
-    coefs.resize(gridSizeR);
+
+    // allocate the output arrays
     std::vector<double> gridLogRadii(gridSizeR);
-    for(unsigned int k=0; k<gridSizeR; k++) {
-        gridLogRadii[k] = log(gridRadii[k]);
-        coefs[k].resize(ind.size());
-    }
+    std::transform(gridRadii.begin(), gridRadii.end(), gridLogRadii.begin(), log);
+    coefs.assign(ind.size(), std::vector<double>(gridSizeR, 0.));
+
+    // compute the sph-harm coefs at each particle's radius
     std::vector<std::vector<double> > harmonics(ind.size());
     std::vector<double> particleRadii;
     computeSphericalHarmonicsFromParticles(particles, ind, particleRadii, harmonics);
@@ -594,7 +614,7 @@ void computeDensityCoefsSph(
     innerSlope -= 3;  // we have computed the log of density of particles in log(r),
     outerSlope -= 3;  // which is equal to the true density multiplied by 4 pi r^3
     for(unsigned int k=0; k<gridSizeR; k++)
-        coefs[k][0] = exp(spl0(gridLogRadii[k])) / (4*M_PI*pow_3(gridRadii[k]));
+        coefs[0][k] = exp(spl0(gridLogRadii[k])) / (4*M_PI*pow_3(gridRadii[k]));
     utils::msg(utils::VL_DEBUG, "Multipole",
         "Power-law index of density profile: inner="+utils::toString(innerSlope)+
         ", outer="+utils::toString(outerSlope));
@@ -608,7 +628,7 @@ void computeDensityCoefsSph(
         if(!harmonics[c].empty()) {
             math::CubicSpline splc(gridLogRadii, fitter.fit(harmonics[c], edf));
             for(unsigned int k=0; k<gridSizeR; k++)
-                coefs[k][c] = splc(gridLogRadii[k]) * coefs[k][0];
+                coefs[c][k] = splc(gridLogRadii[k]) * coefs[0][k];
         }
     }
 }
@@ -646,24 +666,20 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     std::vector< std::vector<double> >& Qext = dPhi;
     std::vector< std::vector<double> >& Pint = Phi;
     std::vector< std::vector<double> >& Pext = dPhi;
-    Phi .resize(gridSizeR);
-    dPhi.resize(gridSizeR);
-    for(int k=0; k<gridSizeR; k++) {
-        Phi [k].assign(ind.size(), 0);
-        dPhi[k].assign(ind.size(), 0);
-    }
+    Phi .assign(ind.size(), std::vector<double>(gridSizeR, 0.));
+    dPhi.assign(ind.size(), std::vector<double>(gridSizeR, 0.));
 
-    // prepare tables for (non-adaptive) integration over radius
-    double glx[ORDER_RAD_INT], glw[ORDER_RAD_INT];  // Gauss-Legendre nodes and weights
-    math::prepareIntegrationTableGL(0, 1, ORDER_RAD_INT, glx, glw);
+    // prepare tables for (non-adaptive) Gauss-Legendre integration over radius
+    double glnodes[ORDER_RAD_INT], glweights[ORDER_RAD_INT];
+    math::prepareIntegrationTableGL(0, 1, ORDER_RAD_INT, glnodes, glweights);
 
     // prepare SH transformation
     math::SphHarmTransformForward trans(ind);
 
     // Loop over radial grid segments and compute integrals of rho_lm(r) times powers of radius,
     // for each interval of radii in the input grid (0 <= k < Nr):
-    //   Qint[k][l,m] = \int_{r_{k-1}}^{r_k} \rho_{l,m}(r) (r/r_k)^{l+2} dr,  with r_{-1} = 0;
-    //   Qext[k][l,m] = \int_{r_k}^{r_{k+1}} \rho_{l,m}(r) (r/r_k)^{1-l} dr,  with r_{Nr} = \infty.
+    //   Qint[l,m][k] = \int_{r_{k-1}}^{r_k} \rho_{l,m}(r) (r/r_k)^{l+2} dr,  with r_{-1} = 0;
+    //   Qext[l,m][k] = \int_{r_k}^{r_{k+1}} \rho_{l,m}(r) (r/r_k)^{1-l} dr,  with r_{Nr} = \infty.
     // Here \rho_{l,m}(r) are the sph.-harm. coefs for density at each radius.
     std::string errorMsg;
 
@@ -687,10 +703,10 @@ void computePotentialCoefsSph(const BaseDensity& dens,
             // loop over ORDER_RAD_INT nodes of GL quadrature for each radial grid segment
             for(unsigned int s=0; s<ORDER_RAD_INT; s++) {
                 double r = k<gridSizeR ?
-                    rkminus1 + glx[s] * deltaGridR :  // radius inside ordinary k-th segment
+                    rkminus1 + glnodes[s] * deltaGridR :  // radius inside ordinary k-th segment
                     // special treatment for the last segment which extends to infinity:
                     // the integration variable is t = r_{Nr-1} / r
-                    gridRadii.back() / glx[s];
+                    gridRadii.back() / glnodes[s];
 
                 // collect the values of density at all points of angular grid at the given radius
                 for(unsigned int i=0; i<densValues.size(); i++)
@@ -707,14 +723,14 @@ void computePotentialCoefsSph(const BaseDensity& dens,
                         unsigned int c = ind.index(l, m);
                         if(k<gridSizeR)
                             // accumulate Qint for all segments except the one extending to infinity
-                            Qint[k][c] += tmpCoefs[c] * glw[s] * deltaGridR *
+                            Qint[c][k] += tmpCoefs[c] * glweights[s] * deltaGridR *
                                 math::powInt(r / gridRadii[k], l+2);
                         if(k>0)
                             // accumulate Qext for all segments except the innermost one
                             // (which starts from zero), with a special treatment for last segment
                             // that extends to infinity and has a different integration variable
-                            Qext[k-1][c] += glw[s] * tmpCoefs[c] * deltaGridR *
-                                (k==gridSizeR ? 1 / pow_2(glx[s]) : 1) * // jacobian of 1/r transform
+                            Qext[c][k-1] += tmpCoefs[c] * glweights[s] * deltaGridR *
+                                (k==gridSizeR ? 1 / pow_2(glnodes[s]) : 1) * // jacobian of 1/r transform
                                 math::powInt(r / gridRadii[k-1], 1-l);
                     }
                 }
@@ -744,8 +760,8 @@ void computePotentialCoefsSph(const BaseDensity& dens,
             for(int k=0; k<gridSizeR; k++) {
                 if(k>0)
                     val *= math::powInt(gridRadii[k-1] / gridRadii[k], l+1);
-                val += gridRadii[k] * Qint[k][c];
-                Pint[k][c] = val;
+                val += gridRadii[k] * Qint[c][k];
+                Pint[c][k] = val;
             }
 
             // Compute Pext by summing from outside in, using the recurrent relation
@@ -754,26 +770,20 @@ void computePotentialCoefsSph(const BaseDensity& dens,
             for(int k=gridSizeR-1; k>=0; k--) {
                 if(k<gridSizeR-1)
                     val *= math::powInt(gridRadii[k] / gridRadii[k+1], l);
-                val += gridRadii[k] * Qext[k][c];
-                Pext[k][c] = val;
+                val += gridRadii[k] * Qext[c][k];
+                Pext[c][k] = val;
             }
 
             // Finally, put together the interior and exterior coefs to compute 
             // the potential and its radial derivative for each spherical-harmonic term
             double mul = -4*M_PI / (2*l+1);
             for(int k=0; k<gridSizeR; k++) {
-                double tmpPhi = mul * (Pint[k][c] + Pext[k][c]);
-                dPhi[k][c]    = mul * (-(l+1)*Pint[k][c] + l*Pext[k][c]) / gridRadii[k];
+                double tmpPhi = mul * (Pint[c][k] + Pext[c][k]);
+                dPhi[c][k]    = mul * (-(l+1)*Pint[c][k] + l*Pext[c][k]) / gridRadii[k];
                 // extra step needed because Phi/dPhi and Pint/Pext are aliased
-                Phi[k][c]     = tmpPhi;
+                Phi [c][k]    = tmpPhi;
             }
         }
-    }
-
-    // polishing: zero out coefs with small magnitude at each radius
-    for(int k=0; k<gridSizeR; k++) {
-        math::eliminateNearZeros(Phi[k]);
-        math::eliminateNearZeros(dPhi[k]);
     }
 }
 
@@ -797,9 +807,8 @@ PtrDensity DensitySphericalHarmonic::create(
     computeDensityCoefsSph(dens,
         math::SphHarmIndices(lmax_tmp, mmax_tmp, dens.symmetry()),
         gridRadii, coefs);
-    // now resize the coefficients back to the requested order
-    for(unsigned int k=0; k<gridSizeR; k++)
-        restrictSphHarmCoefs(lmax, mmax, coefs[k]);
+    // resize the coefficients back to the requested order
+    restrictSphHarmCoefs(lmax, mmax, coefs);
     return PtrDensity(new DensitySphericalHarmonic(gridRadii, coefs));
 }
 
@@ -833,18 +842,17 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &gr
     innerSlope(_innerSlope), outerSlope(_outerSlope), logScaling(true)
 {
     unsigned int gridSizeR = gridRadii.size();
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || gridSizeR != coefs.size())
-        throw std::invalid_argument("DensitySphericalHarmonic: input arrays are empty");
-    for(unsigned int n=0; n<gridSizeR; n++)
-        if(coefs[n].size() != ind.size())
+    if(coefs.size() != ind.size() || gridSizeR < MULTIPOLE_MIN_GRID_SIZE)
+        throw std::invalid_argument("DensitySphericalHarmonic: incorrect size of coefficients array");
+    for(unsigned int n=0; n<coefs.size(); n++)
+        if(coefs[n].size() != gridSizeR)
             throw std::invalid_argument("DensitySphericalHarmonic: incorrect size of coefficients array");
     if(ind.lmax>LMAX_SPHHARM)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
 
     spl.resize(ind.size());
     std::vector<double> gridLogR(gridSizeR), tmparr(gridSizeR);
-    for(unsigned int k=0; k<gridSizeR; k++)
-        gridLogR[k] = log(gridRadii[k]);
+    std::transform(gridRadii.begin(), gridRadii.end(), gridLogR.begin(), log);
 
     // set up 1d splines in radius for each non-trivial (l,m) coefficient
     for(unsigned int c=0; c<ind.size(); c++) {
@@ -856,25 +864,25 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &gr
             // for the l=0 coefficient (main spherically-symmetric component), we may use
             // logarithmic scaling of its amplitude, if it is everywhere positive
             for(unsigned int k=0; k<gridSizeR; k++)
-                logScaling &= coefs[k][0] > 0;
+                logScaling &= coefs[0][k] > 0;
             for(unsigned int k=0; k<gridSizeR; k++)
-                tmparr[k] = logScaling ? log(coefs[k][0]) : coefs[k][0];
+                tmparr[k] = logScaling ? log(coefs[0][k]) : coefs[0][k];
             // when using log-scaling, the endpoint derivatives of spline are simply
             // d[log(rho(log(r)))] / d[log(r)] = power-law indices of the inner/outer slope;
             // without log-scaling, the endpoint derivatives of spline are
             // d[rho(log(r))] / d[log(r)] = power-law indices multiplied by the values of rho.
             spl[0] = math::CubicSpline(gridLogR, tmparr,
-                innerSlope * (logScaling ? 1 : coefs.front()[0]),
-                outerSlope * (logScaling ? 1 : coefs.back()[0]));
+                innerSlope * (logScaling ? 1 : coefs[0].front()),
+                outerSlope * (logScaling ? 1 : coefs[0].back()));
             spl[0].evalDeriv(gridLogR.front(), NULL, &innerSlope);
             spl[0].evalDeriv(gridLogR.back(),  NULL, &outerSlope);
             if(!logScaling) {
-                if(coefs.front()[0] != 0)
-                    innerSlope /= coefs.front()[0];
+                if(coefs[0].front() != 0)
+                    innerSlope /= coefs[0].front();
                 else
                     innerSlope = 0;
-                if(coefs.back()[0] != 0)
-                    outerSlope /= coefs.back()[0];
+                if(coefs[0].back() != 0)
+                    outerSlope /= coefs[0].back();
                 else
                     outerSlope = 0;
             }
@@ -891,7 +899,7 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &gr
             if(!isFinite(innerSlope))
                 innerSlope = 0;
             if(!isFinite(outerSlope))
-                outerSlope = coefs.back()[0]==0 ? 0 : -4.;
+                outerSlope = coefs[0].back()==0 ? 0 : -4.;
             innerSlope = fmax(innerSlope, -2.8);
             outerSlope = fmin(outerSlope, -2.2);
         } else {
@@ -899,7 +907,7 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &gr
             // and are extrapolated as constants beyond the extent of the grid
             // (with zero endpoint derivatives)
             for(unsigned int k=0; k<gridSizeR; k++)
-                tmparr[k] = coefs[k][0]!=0 ? coefs[k][c] / coefs[k][0] : 0;
+                tmparr[k] = coefs[0][k]!=0 ? coefs[c][k] / coefs[0][k] : 0;
             spl[c] = math::CubicSpline(gridLogR, tmparr, 0, 0);
         }
     }
@@ -1008,11 +1016,9 @@ static PtrPotential createMultipole(
     computePotentialCoefsSph(src,
         math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()),
         gridRadii, Phi, dPhi);
-    // now resize the coefficients back to the requested order
-    for(unsigned int k=0; k<gridSizeR; k++) {
-        restrictSphHarmCoefs(lmax, mmax, Phi [k]);
-        restrictSphHarmCoefs(lmax, mmax, dPhi[k]);
-    }
+    // resize the coefficients back to the requested order
+    restrictSphHarmCoefs(lmax, mmax, Phi);
+    restrictSphHarmCoefs(lmax, mmax, dPhi);
     return PtrPotential(new Multipole(gridRadii, Phi, dPhi));
 }
 
@@ -1076,7 +1082,9 @@ Multipole::Multipole(
 {
     unsigned int gridSizeR = gridRadii.size();
     bool correct = gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
-        gridSizeR == Phi.size() && gridSizeR == dPhi.size();
+        Phi.size() == ind.size() && dPhi.size() == ind.size();
+    for(unsigned int c=0; correct && c<ind.size(); c++)
+        correct &= Phi[c].size() == gridSizeR && dPhi[c].size() == gridSizeR;
     for(unsigned int k=1; correct && k<gridSizeR; k++)
         correct &= gridRadii[k] > gridRadii[k-1];
     if(!correct)
@@ -1090,9 +1098,8 @@ Multipole::Multipole(
         PtrPotential(new MultipoleInterp2d(gridRadii, Phi, dPhi));
 
     // determine asymptotic behaviour at small and large radii
-    asymptInner = initAsympt(gridRadii[0], gridRadii[1], Phi[0], Phi[1], dPhi[0], true);
-    asymptOuter = initAsympt(gridRadii[gridSizeR-1], gridRadii[gridSizeR-2],
-        Phi[gridSizeR-1], Phi[gridSizeR-2], dPhi[gridSizeR-1], false);
+    asymptInner = initAsympt(gridRadii, Phi, dPhi, true);
+    asymptOuter = initAsympt(gridRadii, Phi, dPhi, false);
 }
 
 void Multipole::getCoefs(
@@ -1125,7 +1132,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
 double Multipole::enclosedMass(double radius) const
 {
     if(radius==0)
-        return 0;
+        return 0;  // TODO: this may not be correct for a potential of a point mass!
     // use the l=0 harmonic term of dPhi/dr to estimate the spherically-averaged enclosed mass
     const BasePotential& pot =
         radius <= gridRadii.front()* (1+SAFETY_FACTOR) ? *asymptInner :
@@ -1219,8 +1226,8 @@ MultipoleInterp1d::MultipoleInterp1d(
 {
     unsigned int gridSizeR = radii.size();
     assert(gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
-        gridSizeR == Phi.size() && gridSizeR == dPhi.size() &&
-        Phi[0].size() == ind.size() && ind.lmax >= 0 && ind.mmax <= ind.lmax);
+        ind.size() == Phi.size() && ind.size() == dPhi.size() &&
+        Phi[0].size() == gridSizeR && ind.lmax >= 0 && ind.mmax <= ind.lmax);
     Rscale = assignRscale(radii, Phi, dPhi);
 
     // set up a logarithmic radial grid
@@ -1236,9 +1243,9 @@ MultipoleInterp1d::MultipoleInterp1d(
             unsigned int c = ind.index(l, m);
             for(unsigned int k=0; k<gridSizeR; k++) {
                 double amp = sqrt(pow_2(Rscale) + pow_2(radii[k]));   // additional scaling multiplier
-                Phi_lm[k]  =  amp *  Phi[k][c];
+                Phi_lm[k]  =  amp *  Phi[c][k];
                 // transform d Phi / d r  to  d (Phi * amp(r)) / d ln(r)
-                dPhi_lm[k] = (amp * dPhi[k][c] + Phi[k][c] * radii[k] / amp) * radii[k];
+                dPhi_lm[k] = (amp * dPhi[c][k] + Phi[c][k] * radii[k] / amp) * radii[k];
             }
             spl[c] = math::QuinticSpline(gridR, Phi_lm, dPhi_lm);
         }
@@ -1334,8 +1341,8 @@ MultipoleInterp2d::MultipoleInterp2d(
 {
     unsigned int gridSizeR = radii.size();
     assert(gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
-        gridSizeR == Phi.size() && gridSizeR == dPhi.size() &&
-        Phi[0].size() == ind.size() && ind.lmax >= 0 && ind.mmax <= ind.lmax);
+        ind.size() == Phi.size() && ind.size() == dPhi.size() &&
+        Phi[0].size() == gridSizeR && ind.lmax >= 0 && ind.mmax <= ind.lmax);
     Rscale = assignRscale(radii, Phi, dPhi);
 
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):
@@ -1366,9 +1373,9 @@ MultipoleInterp2d::MultipoleInterp2d(
                 double val=0, dR=0, dT=0;
                 for(int l=lmin; l<=ind.lmax; l+=ind.step) {
                     unsigned int c = ind.index(l, m);
-                    val +=  Phi[k][c] *  Plm[l-absm];   // Phi_{l,m}(r)
-                    dR  += dPhi[k][c] *  Plm[l-absm];   // d Phi / d r
-                    dT  +=  Phi[k][c] * dPlm[l-absm];   // d Phi / d theta
+                    val +=  Phi[c][k] *  Plm[l-absm];   // Phi_{l,m}(r)
+                    dR  += dPhi[c][k] *  Plm[l-absm];   // d Phi / d r
+                    dT  +=  Phi[c][k] * dPlm[l-absm];   // d Phi / d theta
                 }
                 double amp = sqrt(pow_2(Rscale) + pow_2(radii[k]));   // additional scaling multiplier
                 Phi_val(k, j) = mul *  amp * val;

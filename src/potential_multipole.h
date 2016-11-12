@@ -77,7 +77,12 @@ public:
 
     /** construct the object from previously computed coefficients.
         \param[in]  gridRadii  is the grid in radius (sorted in order of increase, first node > 0).
-        \param[in]  coefs  is the 2d array of sph.-harm. coefficients at each radius.
+        \param[in]  coefs  is the 2d array of sph.-harm. coefficients:
+        the first dimension of the array is the number of spherical harmonics (lmax+1)^2,
+        and the second dimension is the number of radial grid points.
+        If all coefficients of the l=0 harmonic are positive, a logarithmic scaling
+        for this harmonic will be employed, and in any case the l!=0 terms are scaled relative to
+        the l=0 term, and the result is spline-interpolated.
         \param[in]  innerSlope  is the logarithmic slope of density profile at small radii
         (below the first grid point), used for extrapolation; NAN means it will be automatically
         estimated from the cubic spline for the l=0 component.
@@ -195,8 +200,8 @@ public:
     /** construct the potential from the set of spherical-harmonic coefficients.
         \param[in]  radii  is the grid in radius;
         \param[in]  Phi  is the matrix of harmonic coefficients for the potential;
-                    its first dimension is equal to the number of radial grid points,
-                    and the second gives the number of coefficients (lmax+1)^2;
+                    its first dimension is the number of coefficients (lmax+1)^2,
+                    and the second is the number of radial grid points;
         \param[in]  dPhi  is the matrix of radial derivatives of harmonic coefs
                     (same size as Phi, each element is  d Phi_{l,m}(r) / dr ).
     */
@@ -248,7 +253,7 @@ private:
     \param[in]  gridRadii - the array of radial points for the output coefficients;
                 must form an increasing sequence and start from r>0.
     \param[out] coefs - the array of sph.-harm. coefficients:
-                coefs[k][c] is the value of c-th coefficient (where c is a single index 
+                coefs[c][k] is the value of c-th coefficient (where c is a single index 
                 combining both l and m) at the radius r_k; will be resized as needed.
     \throws std::invalid_argument if gridRadii are not correct.
 */
@@ -290,7 +295,7 @@ void computeDensityCoefsSph(
     \param[in]  gridRadii - the array of radial points for the output coefficients;
                 must form an increasing sequence and start from r>0.
     \param[out] Phi  - the array of sph.-harm. coefficients for the potential:
-                Phi[k][c] is the value of c-th coefficient (where c is a single index 
+                Phi[c][k] is the value of c-th coefficient (where c is a single index 
                 combining both l and m) at the radius r_k; will be resized as needed.
     \param[out] dPhi - the array of radial derivatives of each sph.-harm. term:
                 dPhi_{l,m}(r) = d(Phi_{l,m})/dr; will be resized as needed.

@@ -39,7 +39,7 @@ public:
     void set_Lz    (const double Lz)    { Lzsq = Lz*Lz; }
 
     Potential      (const double Lz=0.) { set_Lz(Lz); }
-
+    virtual ~Potential() {}
     double Lzsquare() const             { return Lzsq; }
     /** \brief returns Phi given (R,z)                                  */
     virtual double operator()(				// returns Phi(R,z)

@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <fstream>
 #include <cmath>
+#include <algorithm>
 #include <stdexcept>
 
 /// whether to produce output files
@@ -177,8 +178,12 @@ bool test(const potential::BasePotential& pot)
         potential::DensityWrapper(pot), potential::PotentialWrapper(pot));
 
     const unsigned int npoints = 100000;
-    std::vector<double> particle_h = galaxymodel::sampleSphericalDF(dc.model, npoints);
-    std::vector<double> particle_m(npoints, dc.model.cumulMass()/npoints);
+    particles::ParticleArraySph particles = galaxymodel::generatePosVelSamples(interp, trueDF, npoints);
+    std::vector<double> particle_h(npoints), particle_m(npoints);
+    for(unsigned int i=0; i<npoints; i++) {
+        particle_h[i] = phasevol(totalEnergy(pot, particles[i].first));
+        particle_m[i] = particles[i].second;
+    }
     math::LogLogSpline fitDF = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
 
     std::ofstream strm, strmd;
@@ -263,10 +268,12 @@ bool test(const potential::BasePotential& pot)
 
         for(double vrel=0; vrel<1.25; vrel+=0.03125) {
             double E = (1-pow_2(vrel)) * truePhi;
-            double  intdvpar,  intdv2par,  intdv2per;
-            double truedvpar, truedv2par, truedv2per;
+            double intdvpar, intdv2par, intdv2per;
+            double truedvpar=0, truedv2par=0, truedv2per=0;
             dc.evalLocal(truePhi, E, intdvpar, intdv2par, intdv2per);
-            difCoefsPlummer(truePhi, E, truedvpar, truedv2par, truedv2per);
+            // note: no analytic expressions for the Hernquist model
+            if(pot.name() == potential::Plummer::myName())
+                difCoefsPlummer(truePhi, E, truedvpar, truedv2par, truedv2per);
             strmd << log(phasevol(truePhi)) << ' ' << log(phasevol(E)) << ' ' <<
                 truePhi << ' ' << E << '\t' <<
                 truedvpar << ' ' << truedv2par << ' ' << truedv2per << '\t' <<

@@ -153,18 +153,18 @@ struct EigenFncWrapper {
         return 0;
     }
 
-    int inputs() const { return F.numVars(); }
+    //int inputs() const { return F.numVars(); }
     int values() const { return F.numValues(); }
 
     // definitions for automatic numerical differentiation framework
     typedef double Scalar;
-	enum {
+        enum {
         InputsAtCompileTime = Eigen::Dynamic,
         ValuesAtCompileTime = Eigen::Dynamic
-	};
-	typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
-	typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
-	typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
+        };
+        typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
+        typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
+        typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
 };
 #endif
 

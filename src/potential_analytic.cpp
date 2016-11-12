@@ -41,7 +41,7 @@ void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
     double ln_over_r = r==INFINITY ? 0 :
-        r > scaleRadius*5e-5 ? log(1 + r/scaleRadius) / r :
+        r > scaleRadius*1e-4 ? log(1 + r/scaleRadius) / r :
         // accurate asymptotic expansion at r->0
         (1 - 0.5 * r/scaleRadius * (1 - 2./3 * r/scaleRadius)) / scaleRadius;
     if(potential)

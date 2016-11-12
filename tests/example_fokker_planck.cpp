@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
     potential::PtrDensity initModel = potential::createDensity(args);
     galaxymodel::FokkerPlanckSolver fp(potential::DensityWrapper(*initModel), extPot);
     
-    double timesim = 0, dt = 1e-6, prevtimeout = -INFINITY;
+    double timesim = 0, dt = (dtmin>0 ? dtmin : 1e-8), prevtimeout = -INFINITY;
     int nstep = 0, prevnstepout = -nstepout;
     while(timesim <= time && nstep < 1e6) {
         if(nstep % nsubstep == 0)
@@ -115,7 +115,7 @@ int main(int argc, char* argv[])
             "time: " + utils::pp(timesim, 9) + "\t"
             "Phi0: " + utils::pp(fp.Phi0, 9) + "\t"
             "Mass: " + utils::pp(fp.Mass, 9) + "\t"
-            "Etot: " + utils::pp(fp.Etot + mbh * fp.Phi0, 9) + "\t"
+            "Etot: " + utils::pp(fp.Etot + (mbh!=0 ? mbh * fp.Phi0 : 0), 9) + "\t"
             "Ekin: " + utils::pp(fp.Ekin, 9) + "\n";
         if( (timeout  > 0 && timesim >= prevtimeout  + timeout) || 
             (nstepout > 0 && nstep   >= prevnstepout + nstepout) )
@@ -126,8 +126,8 @@ int main(int argc, char* argv[])
             prevnstepout= nstep;
         }
         double relChange = fp.doStep(dt);
-        dt = fmin(dtmax, fmax(dtmin, dt * eps / relChange));
         timesim += dt;
+        dt = fmin(dtmax, fmax(dtmin, dt * eps / relChange));
         nstep++;
         if(nstep % nsubstep == 0) {
             fp.reinitPotential();

@@ -10,6 +10,8 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "math_optimization.h"
+
 namespace galaxymodel{
 
 namespace{   // internal definitions
@@ -232,7 +234,8 @@ protected:
     virtual unsigned int numVars()   const { return 4; }
     virtual unsigned int numValues() const { return 2; }
 
-    /// output array contains two elements - the value of DF and its second moment with line-of-sight velocity
+    /// output array contains two elements - the value of DF
+    /// and its second moment with line-of-sight velocity
     virtual void outputValues(const coord::PosVelCyl& pv, const double dfval, 
         double values[]) const {
         values[0] = dfval;
@@ -276,10 +279,14 @@ template<> unsigned int DFsize(const GalaxyModelMulticomponent& model) { return 
 template<typename GalaxyModelType>
 void DFvalue(const GalaxyModelType& model, const actions::Actions& acts, double val[]);
 
-template<> void DFvalue(const GalaxyModel& model, const actions::Actions& acts, double val[]) {
+template<> void DFvalue(const GalaxyModel& model,
+    const actions::Actions& acts, double val[])
+{
     *val = model.distrFunc.value(acts);
 }
-template<> void DFvalue(const GalaxyModelMulticomponent& model, const actions::Actions& acts, double val[]) {
+template<> void DFvalue(const GalaxyModelMulticomponent& model,
+    const actions::Actions& acts, double val[])
+{
     model.distrFunc.valuesOfAllComponents(acts, val);
 }
 
@@ -417,6 +424,64 @@ private:
     }
 };
 
+/** Solve the equation for amplitudes of B-spline expansion of the velocity distribution function.
+    The VDF is represented as  \f$  f(v) = \sum_i A_i B_i(v)  \f$,  where B_i(v) are the B-spline basis
+    functions and A_i are the amplitudes to be found by solving the following linear system:
+    \f$  \int f(v) B_j(v) dv = \sum_i A_i  [ \int B_i(v) B_j(v) dv ] = C_j  \f$,
+    where C_j is the RHS vector computed through the integration of f(v) weighted with each
+    basis function, and the overlap matrix in square brackets is provided by the B-spline object.
+    Even though the RHS by definition is non-negative, the solution vector is not guaranteed to be so
+    (unless the matrix is diagonal, which is the case only for N=0, i.e., a histogram representation);
+    that is, the interpolated f(v) may attain unphysical negative values.
+    We employ an additional measure that helps to reduce this effect:
+    if the order of B-spline interpolator is larger than zero (i.e., it's not a simple histogram), and
+    if the endpoints of the velocity interval are at the escape velocity (meaning that f(v) must be 0),
+    we enforce the amplitudes of the first and the last basis functions to be zero.
+    In this case, of course, the number of variables in the system is less than the number of equations,
+    so it is solved in the least-square sense using the singular-value decomposition, instead of
+    the standard Cholesky decomposition for a full-rank symmetric matrix.
+    \param[in]  bspl  is the B-spline basis in the 1d velocity space;
+    \param[in]  rhs   is the RHS of the linear system;
+    \param[in]  vesc  is the escape velocity: if the endpoints of the B-spline interval are at or beyond
+    the escape velocity, we force the corresponding amplitudes to be zero.
+    \return  the vector of amplitudes.
+*/
+template<int N>
+std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bspl,
+    const std::vector<double>& rhs, double vesc)
+{
+    math::Matrix<double> mat(bspl.computeOverlapMatrix(0));
+    int size = mat.rows();
+#if 0
+    // another possibility is to use a linear or quadratic optimization solver that enforce
+    // non-negativity constraints on the solution vector, at the same time minimizing the deviation
+    // from the exact solution. This is perhaps the cleanest approach, but it requires
+    // the optimization libraries to be included at the compile time, which we can't guarantee.
+    return math::quadraticOptimizationSolveApprox(mat, rhs,
+        std::vector<double>()          /*linear penalty for variables is absent*/,
+        math::DiagonalMatrix<double>() /*quadratic penalty for variables is absent*/,
+        std::vector<double>()          /*linear penalty for constraint violation is absent*/,
+        std::vector<double>(size, 1e9) /*quadratic penalty for constraint violation*/,
+        std::vector<double>(size, 0.)  /*lower bound on the solution vector*/ );
+#endif
+    int skipFirst = (N >= 1 && size>2 && math::fcmp(bspl.xmin(), -vesc, 1e-8) <= 0);
+    int skipLast  = (N >= 1 && size>2 && math::fcmp(bspl.xmax(),  vesc, 1e-8) >= 0);
+    if(skipFirst+skipLast==0)
+        return math::CholeskyDecomp(mat).solve(rhs);
+    // otherwise create another matrix with fewer columns (copy row-by-row from the original matrix)
+    math::Matrix<double> reducedMat(size, size-skipFirst-skipLast);
+    for(int i=0; i<size; i++)
+        std::copy(&mat(i, skipFirst), &mat(i, size-skipLast), &reducedMat(i, 0));
+    // use the SVD to solve the rank-deficient system
+    std::vector<double> sol = math::SVDecomp(reducedMat).solve(rhs);
+    // append the skipped amplitudes
+    if(skipFirst)
+        sol.insert(sol.begin(), 0);
+    if(skipLast)
+        sol.insert(sol.end(),   0);
+    return sol;
+}
+
 
 }  // unnamed namespace
 
@@ -520,26 +585,32 @@ double computeVelocityDistribution(const GalaxyModel& model,
     std::vector<double>& amplVphi,
     const double reqRelError, const int maxNumEval)
 {
+    double vesc = sqrt(-2 * model.potential.value(
+        projected ? coord::PosCyl(point.R, 0, point.phi) : point) );   // escape velocity
     math::BsplineInterpolator1d<N> bsplVR(gridVR), bsplVz(gridVz), bsplVphi(gridVphi);
     const unsigned int NR = bsplVR.numValues(), Nz = bsplVz.numValues(), Nphi = bsplVphi.numValues();
     DFIntegrandVelDist<N> fnc(model, point, projected, bsplVR, bsplVz, bsplVphi);
 
-    // the integration region in scaled velocities
+    // the integration region [scaled z, 3 components of scaled velocity]
     double xlower[4] = {0, 0, 0, 0};
     double xupper[4] = {1, 1, 1, 0.5};  // scan only half of {v_R,v_z} plane, since the VDF is symmetric
     // the values of integrals and their error estimates
     std::vector<double> result(fnc.numValues());
 
-    math::integrateNdim(fnc, projected? xlower : xlower+1, projected? xupper : xupper+1,
+    math::integrateNdim(fnc,
+        projected? xlower : xlower+1,   // the 0th dimension (z) only used in the case of projected VDF,
+        projected? xupper : xupper+1,   // otherwise only three components of scaled velocity
         reqRelError, maxNumEval, &result.front());
     
-    // store the results
-    amplVR   = math::CholeskyDecomp(bsplVR.computeOverlapMatrix(0)).solve(
-        std::vector<double>(result.begin()+1, result.begin()+1+NR));
-    amplVz   = math::CholeskyDecomp(bsplVz.computeOverlapMatrix(0)).solve(
-        std::vector<double>(result.begin()+1+NR, result.begin()+1+NR+Nz));
-    amplVphi = math::CholeskyDecomp(bsplVphi.computeOverlapMatrix(0)).solve(
-        std::vector<double>(result.begin()+1+NR+Nz, result.begin()+1+NR+Nz+Nphi));
+    // compute the amplitudes of un-normalized VDF
+    amplVR   = solveForAmplitudes<N>(bsplVR,
+        std::vector<double>(result.begin()+1, result.begin()+1+NR), vesc);
+    amplVz   = solveForAmplitudes<N>(bsplVz,
+        std::vector<double>(result.begin()+1+NR, result.begin()+1+NR+Nz), vesc);
+    amplVphi = solveForAmplitudes<N>(bsplVphi,
+        std::vector<double>(result.begin()+1+NR+Nz, result.begin()+1+NR+Nz+Nphi), vesc);
+
+    // normalize by the value of density
     double density = result[0];
     math::blas_dmul(1/density, amplVR);
     math::blas_dmul(1/density, amplVz);
@@ -636,7 +707,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
 {
     DFIntegrand6dim fnc(model);
     math::Matrix<double> result;      // sampled scaled coordinates/velocities
-    double totalMass, errorMass;      // total normalization of the distribution function and its estimated error
+    double totalMass, errorMass;      // total normalization of the DF and its estimated error
     double xlower[6] = {0,0,0,0,0,0}; // boundaries of sampling region in scaled coordinates
     double xupper[6] = {1,1,1,1,1,1};
     math::sampleNdim(fnc, xlower, xupper, numSamples, result, NULL, &totalMass, &errorMass);

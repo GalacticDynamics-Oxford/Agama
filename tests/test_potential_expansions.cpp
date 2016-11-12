@@ -95,6 +95,7 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
     const int nptbin=1000;
     for(double logR=-4; logR<4; logR+=dlogR) {
         double weightedDifP=0, weightedDifF=0, weightedDifD=0, weight=0;
+// OMP is disabled to make the computation deterministic
 //#ifdef _OPENMP
 //#pragma omp parallel for schedule(dynamic,64) reduction(+:weight,weightedDifP,weightedDifF,weightedDifD)
 //#endif
@@ -190,17 +191,17 @@ bool testDensSH()
     potential::DensitySphericalHarmonic dens2(radii2, coefs2);
     bool ok = true;
     // check that the two sets of coefs are identical at equal radii
-    for(unsigned int c=0; c<coefs2[0].size(); c++)
+    for(unsigned int c=0; c<coefs2.size(); c++)
         for(unsigned int k=0; k<radii1.size(); k++) {
-            if(c<coefs1[0].size() && fabs(coefs1[k][c] - coefs2[k*2][c]) > 1e-12) {
+            if(c<coefs1.size() && fabs(coefs1[c][k] - coefs2[c][k*2]) > 1e-12) {
                 std::cout << "r=" << radii1[k]      << ", C1["<<c<<"]=" <<
-                utils::toString(coefs1[k  ][c], 15) << ", C2["<<c<<"]=" <<
-                utils::toString(coefs2[k*2][c], 15) << "\033[1;31m **\033[0m\n";
+                utils::toString(coefs1[c][k  ], 15) << ", C2["<<c<<"]=" <<
+                utils::toString(coefs2[c][k*2], 15) << "\033[1;31m **\033[0m\n";
                 ok = false;
             }
-            if(c>=coefs1[0].size() && coefs2[k*2][c] != 0) {
+            if(c>=coefs1.size() && coefs2[c][k*2] != 0) {
                 std::cout << "r=" << radii1[k] << ", C1["<<c<<"] is 0, C2["<<c<<"]=" <<
-                utils::toString(coefs2[k*2][c], 15) << "\033[1;31m **\033[0m\n";
+                utils::toString(coefs2[c][k*2], 15) << "\033[1;31m **\033[0m\n";
                 ok = false;
             }
         }

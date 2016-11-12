@@ -34,12 +34,13 @@ bool testTotalMass(const galaxymodel::GalaxyModel& galmod, double massExact)
     int numEval;
     double mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval, &err, &numEval);
     if(err > mass*0.01) {
-        std::cout << "Mass=" << mass << " +- " << err << " in " << numEval << " DF evaluations\n";
+        std::cout << "Mass=" << mass << " +- " << utils::pp(err,7) <<
+        " in " << numEval << " DF evaluations\n";
         mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval*10, &err, &numEval);
     }
     bool ok = math::fcmp(mass, massExact, 0.05) == 0; // 5% relative error allowed because ar!=az
     std::cout <<
-        "Mass=" << mass << " +- " << err << " in " << numEval << " DF evaluations"
+        "Mass=" << mass << " +- " << utils::pp(err,7) << " in " << numEval << " DF evaluations"
         " (analytic value=" << massExact << (ok?"":errmsg) <<")\n";
     return ok;
 }
@@ -133,20 +134,13 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
         math::fcmp(sigmaphi, velocitySecondMoment.vphi2, 2e-5) == 0;
 
     std::cout << 
-        "density=" << density << " +- " << densityErr << (densvdfok?"":errmsg) <<
+        "density=" << density << " +- " << utils::pp(densityErr,7) << (densvdfok?"":errmsg) <<
         "  compared to analytic value " << densExact << (densok?"":errmsg) <<"\n"
-        //"velocity"
-        //"  vR=" << velocityFirstMoment.vR << " +- " << velocityFirstMomentErr.vR <<
-        //", vz=" << velocityFirstMoment.vz << " +- " << velocityFirstMomentErr.vz <<
-        //", vphi=" << velocityFirstMoment.vphi << " +- " << velocityFirstMomentErr.vphi << "\n"
-        "2nd moment of velocity"
-        "  vR2="    << velocitySecondMoment.vR2    << " +- " << velocitySecondMomentErr.vR2 <<
-        ", vz2="    << velocitySecondMoment.vz2    << " +- " << velocitySecondMomentErr.vz2 <<
-        ", vphi2="  << velocitySecondMoment.vphi2  << " +- " << velocitySecondMomentErr.vphi2 <<
+        "velocity dispersion"
+        "  vR2="    << velocitySecondMoment.vR2    << " +- " << utils::pp(velocitySecondMomentErr.vR2,  7) <<
+        ", vz2="    << velocitySecondMoment.vz2    << " +- " << utils::pp(velocitySecondMomentErr.vz2,  7) <<
+        ", vphi2="  << velocitySecondMoment.vphi2  << " +- " << utils::pp(velocitySecondMomentErr.vphi2,7) <<
         (sigmavdfok?"":errmsg) <<
-        //", vRvz="   << velocitySecondMoment.vRvz   << " +- " << velocitySecondMomentErr.vRvz <<
-        //", vRvphi=" << velocitySecondMoment.vRvphi << " +- " << velocitySecondMomentErr.vRvphi <<
-        //", vzvphi=" << velocitySecondMoment.vzvphi << " +- " << velocitySecondMomentErr.vzvphi <<
         "   compared to analytic value " << sigmaExact << (sigmaok?"":errmsg) <<"\n";
     return dfok && densok && sigmaok && densvdfok && sigmavdfok;
 }

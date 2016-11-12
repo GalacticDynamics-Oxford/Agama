@@ -103,6 +103,13 @@ void Dehnen::evalCar(const coord::PosCar &pos,
         }
         return;
     }
+    if(pos.x==0 && pos.y==0 && pos.z==0 && gamma>=2) {
+        if(potential)
+            *potential = -INFINITY;
+        if(deriv)
+            deriv->dx = deriv->dy = deriv->dz = INFINITY;
+        return;
+    }
     if(potential) {
         DehnenIntegrandPhi fnc(pos, gamma, axisRatioY, axisRatioZ, scalerad);
         *potential = math::integrate(fnc, 0, 1, EPSREL_POTENTIAL_INT) * mass/scalerad;

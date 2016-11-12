@@ -62,8 +62,8 @@ int dHdj_toy(const ToyMap &TM, const PSPD& jt, const PoiTra &PT, const Potential
     }
     TM.Derivatives(dqpdj, dqpdAp);
     PT.Derivatives(dxvdqp);
-    double H;
-    H = Heff(xv, dHdxv, Phi);
+    //double H;
+    /*H =*/ Heff(xv, dHdxv, Phi);
     for(int j=0; j<4; j++){
         for(int k=0; k<4; k++){
             dHdqp[j] += dHdxv[k] * dxvdqp[k][j];
@@ -104,12 +104,12 @@ int dSbySampling (            // return:     error flag (see below)
     const GenPar& Sn,         // Input:      parameters of generating function
     const PoiTra& PT,         // Input:      canonical map with parameters
     const ToyMap& TM,         // Input:      toy-potential map with parameters
-    const double  dO,         // Input:      delta Omega
+    const double  /*dO*/,         // Input:      delta Omega
     Frequencies   &Om,	      // In/Output:  Omega_r, Omega_l
     Errors   &chi,	          // Output:     chi_rms for fit of dSn/dJi
     AngPar& Ap,               // Output:     dSn/dJr & dSn/dJl
-    const int IperCell,	      // Input:	     max tol steps on average per cell
-    const int err)	          // Input:	     error output?
+    const int /*IperCell*/,	      // Input:	     max tol steps on average per cell
+    const int /*err*/)	          // Input:	     error output?
 //==============================================================================
 // meaning of return:  0       -> everything went ok
 //                    -1       -> N too small, e.g., due to:

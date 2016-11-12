@@ -357,7 +357,7 @@ int Torus::containsPoint(    // return:	    error flag (see below)
     Angles Ang = 0.;
     PSPD tmp = Map(Ang), QP =0., JT, Jt, Jtry;
     register PSPT   QP3D, Jt3D, JT3D;
-    double chi,chio,rmin,rmax, dTdt[2][2];;
+    double chio,rmin,rmax, dTdt[2][2];;
     DB22   A, Atry, dQdt, dQdtry;
     DB2    B, Btry, dt;
     rmin=tmp(0);
@@ -430,7 +430,7 @@ int Torus::containsPoint(    // return:	    error flag (see below)
     PSPD   QP;
     register PSPD   JT, Jt, Jtry;
     register PSPT   QP3D, Jt3D, JT3D;
-    register double lam=0.5, lam1, det, JT3_0, det1,
+    register double lam=0.5, lam1, det, /*JT3_0,*/ det1,
       rq   = Q(0)*Q(0) + Q(1)*Q(1),            
       rtin = (delr)? delr : sqrt(rq)*tiny;          // tolerance in position 
 
@@ -631,7 +631,7 @@ void Torus::CheckLevCof(PSPD QP_aim, Angles A_in) {
 void Torus::CheckLevCof(Position Q_aim, Angles A_in) {
   PSPD Jt = PSPD(J(0),J(1),A_in[0],A_in[1]), Jtry,QP,oQP;
   double small = 1.e-5;
-  double chi,chio,sc;
+  double chi,chio;
   DB22   A ;
   Matrix<double,2,2> dQdt;
   DB2    B;
@@ -666,7 +666,7 @@ DB2 Torus::DistancetoPSP(const PSPD &QP_aim, double &scale, Angles &Aclosest) co
   register PSPD   Jt, Jtry;
   register double sc;
   DB2 out=0.;
-  Angles Astart;
+  Angles Astart(0.);
   if(scale==0.) {
     //cerr << Rmin << ' ' << Rmax << ' ' << zmax << '\n';
     double tmpx2 = powf(0.5*(Rmax-Rmin),2) + powf(zmax,2), tmpv2;
@@ -770,7 +770,7 @@ Vector<double,4> Torus::DistancetoPSP(const PSPD &QP_aim,
   register PSPD   Jt, Jtry;
   register Vector<double,4> sc;
   Vector<double,4>  out=0.;
-  Angles Astart;
+  Angles Astart(0.);
   if(scales==0.) {
     //FindLimits();
     //cerr << Rmin << ' ' << Rmax << ' ' << zmax << '\n';
@@ -921,10 +921,10 @@ double Torus::DistancetoPoint(const Position &Q, double &thr, double &thz) const
 {
     const    int    maxit=100;
     const    double tiny=1.e-8;
-    register int    it=0, itb=0;
+    register int    it=0;
 	     DB22   A, Atry, dQdt, dQdtry;
 	     DB2    B, Btry, dt;
-	     double chi, chio, chih;
+	     double chi, chio;
     register double lam=0.5, lam1, det, r=hypot(Q(0),Q(1)), rtin=r*tiny;
 	     PSPD   QP;
     register PSPD   Jt, Jtry;
@@ -941,7 +941,7 @@ double Torus::DistancetoPoint(const Position &Q, double &thr, double &thz) const
     if(std::isnan(B(0))) return 0;
 
     while(chio>rtin && maxit>it++ && lam < 1.e20 ) {
-      if(it==30) chih = chio;
+      //if(it==30) chih = chio;
 	lam1  = 1.+lam;
 	det   = A(0,0)*A(1,1)*pow(lam1,2) - pow(A(0,1),2);
 	dt[0] = (B(0)*lam1*A(1,1)-B(1)*A(0,1)) / det;
@@ -949,7 +949,7 @@ double Torus::DistancetoPoint(const Position &Q, double &thr, double &thz) const
 	Jtry  = PSPD(J(0),J(1),Jt(2)+dt(0),Jt(3)+dt(1));
         LevCof(Jtry,Q,1.,1.,QP,chi,Btry,Atry,dQdtry);
 	if(chi<chio  && !std::isnan(Btry(0))) {
-	    itb  = it;
+	    //itb  = it;
 	    lam *= 0.125;
 	    chio = chi;
 	    Jt   = Jtry;

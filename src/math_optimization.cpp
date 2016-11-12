@@ -324,14 +324,14 @@ namespace{
 template<typename NumT>
 class AugmentedMatrix: public IMatrix<NumT> {
     const IMatrix<NumT>& M;       ///< the original matrix
-    const unsigned int Mcols, Mrows, Nadd;
 public:
-    AugmentedMatrix(const IMatrix<NumT>& src, unsigned int _Nadd):
-        M(src), Mcols(M.cols()), Mrows(M.rows()), Nadd(_Nadd) {};
-    virtual unsigned int size()    const { return numRows() * numCols(); }
-    virtual unsigned int numRows() const { return Mrows; }
-    virtual unsigned int numCols() const { return Mcols + 2*Nadd; }
+    AugmentedMatrix(const IMatrix<NumT>& src, unsigned int Nadd):
+        IMatrix<NumT>(src.rows(), src.cols()+2*Nadd), M(src) {};
+    using IMatrix<NumT>::rows;
+    using IMatrix<NumT>::cols;
+    virtual unsigned int size() const { return rows() * cols(); }
     virtual NumT at(const unsigned int row, const unsigned int col) const {
+        unsigned int Mcols=M.cols(), Nadd=(cols()-Mcols)/2;
         if(col < Mcols)
             return M.at(row, col);
         if(col == Mcols + row)
@@ -341,8 +341,8 @@ public:
         return 0;
     }
     virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const {
-        row = index / (Mcols + 2*Nadd);
-        col = index % (Mcols + 2*Nadd);
+        row = index / cols();
+        col = index % cols();
         return at(row, col);
     }
 };
@@ -355,10 +355,9 @@ class AugmentedQuadMatrix: public IMatrix<NumT> {
     const unsigned int Qsize, Qrows, Nadd;
 public:
     AugmentedQuadMatrix(const IMatrix<NumT>& src, const std::vector<NumT>& _pen):
+        IMatrix<NumT>(src.rows()+2*_pen.size(), src.cols()+2*_pen.size()),
         Q(src), pen(_pen), Qsize(Q.size()), Qrows(Q.rows()), Nadd(pen.size()) {};
     virtual unsigned int size()    const { return Qsize + 2*Nadd; }
-    virtual unsigned int numRows() const { return Qrows + 2*Nadd; }
-    virtual unsigned int numCols() const { return Qrows + 2*Nadd; }
     virtual NumT at(const unsigned int row, const unsigned int col) const {
         if(col < Qrows)
             return Q.at(row, col);
@@ -397,7 +396,7 @@ std::vector<double> linearOptimizationSolveApprox(
     std::vector<NumT> xminaug(xmin);
     if(!xmin.empty())
         xminaug.insert(xminaug.end(), 2*numConstraints, 0);
-    std::vector<NumT> xmaxaug(xmin);
+    std::vector<NumT> xmaxaug(xmax);
     if(!xmax.empty())
         xmaxaug.insert(xmaxaug.end(), 2*numConstraints, INFINITY);
     std::vector<double> result = linearOptimizationSolve(
@@ -433,7 +432,7 @@ std::vector<double> quadraticOptimizationSolveApprox(
     std::vector<NumT> xminaug(xmin);
     if(!xmin.empty())
         xminaug.insert(xminaug.end(), 2*numConstraints, 0);
-    std::vector<NumT> xmaxaug(xmin);
+    std::vector<NumT> xmaxaug(xmax);
     if(!xmax.empty())
         xmaxaug.insert(xmaxaug.end(), 2*numConstraints, INFINITY);
     bool Qempty = Q.size()==0;

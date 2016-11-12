@@ -383,7 +383,7 @@ void GenPar::edgetailor(const double a, const int Max)
 {
   register short i,n, n1,n2, n2min=N2[0]-2,n2max=N2[ntot-1]+2, newtot=ntot,
     maxtot=short(fmax(int(ntot),Max)),nedge=0;
-  register double Smax=0.;
+  //register double Smax=0.;
   // make a 2D map and compute |S|max
   char **map = new char* [nn1+2];
   bool  edge[ntot];
@@ -685,9 +685,9 @@ int GenPar::AddTerm      (const int nadd1, const int nadd2) {
 }
 
 void GenPar::Build_JR0    (const int type) {
-  register int newtot;
-  short *N1new, *N2new;
-  double *Snew;
+  register int newtot=0;
+  short *N1new=0, *N2new=0;
+  double *Snew=0;
   if(type==1){
     register int newn2=0;
     newtot=ntot+1;
@@ -1019,7 +1019,7 @@ void GenPar::put(ostream& to) const
 
 
 ////////////////////////////////////////////////////////////////////////////////
-void GenPar::put_terms(ostream& to) const
+void GenPar::put_terms(ostream& /*to*/) const
 {
 //    ::put(S,ntot,to);
 }
@@ -1051,7 +1051,7 @@ void GenPar::get(istream& from)
     //findNN();
 }
 ////////////////////////////////////////////////////////////////////////////////
-void GenPar::get_terms(istream& from)
+void GenPar::get_terms(istream& /*from*/)
 {
 //    ::get(S,ntot,from);
 }

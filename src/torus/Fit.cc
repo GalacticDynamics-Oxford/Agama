@@ -134,7 +134,7 @@ dH/dS_(n1,n2) = dH_eff/d(Q,P) * d(Q,P)/d(q,p) * d(q,p)/dj * dj/dS_(n1,n2)
 {
     register int    i1, i2, j, k, l, m;
     register PSPD   jt, QP;
-    double          dqpdj[4][2], dQPdqp[4][4], dHdQP[4], dHdqp[4];
+    double          dqpdj[4][2], dQPdqp[4][4], dHdQP[4], dHdqp[4]={0};
     Pdble           dHda, dHavda, dqpdalfa[4], dQPdbeta[4];
     register double H, Hsqav, temp,chims;
 
@@ -371,7 +371,7 @@ int SbyLevMar(               // return:        error flag (see below)
     int             iterations=0, mfit=0, F;
     double          chirms, dchisq, dchtry, temp, damp=1.,
                     H_av, *dA, *B, **AA, **AAtry;
-    register double H_av0, rHav, 
+    register double H_av0, //rHav, 
 		    Rc     = Phi->RfromLc(J(2)), 	// Rc = length scale
                     vc     = WDabs(J(2)) / Rc;		// vc = velocity scale
 		
@@ -428,7 +428,7 @@ int SbyLevMar(               // return:        error flag (see below)
       }
     }
     H_av0 = (exp_H)? exp_H : mean_H;  // first Average value of H
-    rHav  = mean_H/H_av0;             // ratio of average to initial average
+    //rHav  = mean_H/H_av0;             // ratio of average to initial average
     if(err) cerr<<"SbyLevMar: init:";
     if(F) {
       if(err)
@@ -484,7 +484,7 @@ int SbyLevMar(               // return:        error flag (see below)
         if(m!=mfit) cerr<<"wrong MFIT in SbyLevMar()\n";
 // 4. compute chi^2, A, b for trial parameters.
 	F = LevMarCof(fit,J,Phi,mfit,GF,TM,PT,H_av,chirms,dchtry,dA,AAtry);
-	rHav = H_av/H_av0;
+	//rHav = H_av/H_av0;
 // 5. accept or reject trial parameters
 	if(F) {
 	  if(F==-2) {
@@ -560,7 +560,7 @@ inline void z0AddEquation(int*g, double** M, double* T1, double* T3,
 {
   // Puts theta into the vectors T1,T3 and puts the #n -2sin(n.theta) values
   // into a column of the matrix M
-    register int i,j;
+    register int i;
     M[I]  = new double[Mdim];
     T1[I] = t1;
     T3[I] = t3;
@@ -574,11 +574,11 @@ inline void z0AddEquation(int*g, double** M, double* T1, double* T3,
     if(Tdim==(I+=1)) z0NewTdim(M,T1,T3,Tdim);
 }
 
-inline void z0RemoveEquation(int*g, double** M, double* T1, double* T3,
+inline void z0RemoveEquation(int*g, double** M, double* T1, double* /*T3*/,
 			   int& I, const int Nr, const double dT)
 {
     I--;
-    register int i,j;
+    register int i;
     delete[] M[I];
     i = int(T1[I]/dT);
     if(i>=0 && i<Nr) g[i] -= 1;
@@ -607,7 +607,7 @@ static int z0AddStrip(const PSPT& Jt3, Potential* Phi, const GenPar& Sn,
     register int    n;
    // register PSPD   jt=Jt>>GF, QP;
     register PSPT   jt3=Jt3>>GF, QP3;
-    register double dt,dt1,dt2,dt3,time=0.,t1=Jt3(3),t3=Jt3(5),t3new,Lperp,u,
+    register double dt,dt1,dt3,time=0.,t1=Jt3(3),t3=Jt3(5),//t3new,Lperp,u,
 		    dT=Pi/double(Nr);
     if(jt3(0)<0.) jt3[0]=tiny; 
     QP3 = jt3 >> TM >> PT;
@@ -670,7 +670,7 @@ int z0dSbyInteg(               // return:     error flag (see below)
     const GenPar& Sn,        // Input:      parameters of generating function
     const PoiTra& PT,        // Input:      canonical map with parameters
     const ToyMap& TM,        // Input:      toy-potential map with parameters
-    const double  dO,        // Input:      delta Omega
+    const double  /*dO*/,        // Input:      delta Omega
     Frequencies   &Om,	     // In/Output:  Omega_r, Omega_l
     Errors   &chi,	     // Output:     chi_rms for fit of dSn/dJi
     AngPar& Ap,              // Output:     dSn/dJr & dSn/dJl
@@ -686,12 +686,12 @@ int z0dSbyInteg(               // return:     error flag (see below)
 //		      -6       -> max{(dS/dJ)_n} > 1
 //==============================================================================
 {
-             char   constraint=(dO<Om(0) && dO<Om(1) && dO>0.);
+             //char   constraint=(dO<Om(0) && dO<Om(1) && dO>0.);
     const    int    Nm=12;
              int    *g, *Kl, I=0, K=0, integ=0, Tdim, xdim, Mdim,
 		    MAXHPOS=(Nr*Nr)/5, INTOL=Nr*Nr*IperCell; 
-             double  **M, *T1, *T3, A=0.;
-    register int    hpos=0, F, i, j, k, n, i1=0, i2=0;
+             double  **M, *T1, *T3;
+    register int    hpos=0, F, i, j, k, n, i1=0;
              double dtm = 1.;
     register double temp;
              PSPT   Jt3;
@@ -897,7 +897,7 @@ inline void AddEquation(int**g, double** M, double* T1, double* T2, double* T3,
     if(Tdim==(I+=1)) NewTdim(M,T1,T2,T3,Tdim);
 }
 
-inline void RemoveEquation(int**g, double** M, double* T1, double* T2, double* T3,
+inline void RemoveEquation(int**g, double** M, double* T1, double* T2, double* /*T3*/,
 			   int& I, const int Nr, const double dT)
 {
     I--;
@@ -932,7 +932,7 @@ static int AddStrip(const PSPT& Jt3, Potential* Phi, const GenPar& Sn,
     int    n;
     //PSPD   jt=Jt>>GF, QP;
     PSPT   jt3=Jt3>>GF, QP3;
-    double dt,dt1,dt2,dt3,time=0.,t1=Jt3(3),t2=Jt3(4),t3=Jt3(5),t3new,Lperp,u,
+    double dt,dt1,dt2,dt3,time=0.,t1=Jt3(3),t2=Jt3(4),t3=Jt3(5),//t3new,Lperp,u,
            dT=Pi/double(Nr);
     if(jt3(0)<0.) jt3[0]=tiny; if(jt3(1)<0.) jt3[1]=tiny;
     QP3 = jt3 >> TM >> PT;
@@ -1024,11 +1024,11 @@ int dSbyInteg(               // return:     error flag (see below)
     int F = z0dSbyInteg(J,Phi,Nr,Sn,PT,TM,dO,Om,chi,Ap,IperCell,err);
     return F;
   }
-             bool   constraint=false; //History 
+             //bool   constraint=false; //History 
     const    int    Nm=12;
              int    **g, *Kl, I=0, K=0, integ=0, Tdim, xdim, Mdim,
 		    MAXHPOS=(Nr*Nr)/5, INTOL=Nr*Nr*IperCell; 
-             double  **M, *T1, *T2, *T3, A=0.;
+             double  **M, *T1, *T2, *T3;
     register int    hpos=0, F, i, j, k, n, i1=0, i2=0;
              double dtm = 1.;
     register double temp;
@@ -1360,7 +1360,7 @@ int AllFit(	            // return:	error flag (see below)
   const    double BIG = 1.e10,         // tolerance on H if otherwise undefined
     off0 = 0.002,   	  	       // threshold for setting Sn=0
     l0  = 1./128., 	  	       // default start value of lambda
-    tl0 = 3.e-7,   	  	       // tolerance for dchisq of 0. fit
+    //tl0 = 3.e-7,   	  	       // tolerance for dchisq of 0. fit
     tl1 = 3.e-7,   	  	       // tolerance for dchisq of 1. & 2. fit
     tl8 = 3.e-5,          	       // tolarance for dchisq/(J*O) of --
     tla = 1.e-2;   	  	       // tolerance for chi_rms of angle fit
@@ -1645,10 +1645,10 @@ int LowJzFit(	            // return:	error flag (see below)
       return AllFit(J,Phi,tol,Max,800,OD,Nrs,PT,TM,SN,AP,
 		    Om,Hav,d,type,false,100,ipc,eH,Nth,err,useNewAngMap); // Let it run on
   }
-  int F;
+  //int F;
   double tolJz0 = tol*J(1)/J(0); // Alter tolerance for planar fit
   Actions Jz0=J; Jz0[1] = 0.;
-  F = AllFit(Jz0,Phi,tolJz0,Max,Ni,OD,Nrs,PT,TM,SN,AP,
+  /*F =*/ AllFit(Jz0,Phi,tolJz0,Max,Ni,OD,Nrs,PT,TM,SN,AP,
   	     Om,Hav,d,type,false,25,ipc,eH,Nth,err,useNewAngMap);// Orbit in plane, precise
   int nadd = 4 + SN.NumberofTerms()/10;
   SN.addn1eq0(nadd);  // add terms with n1=0
@@ -1689,7 +1689,7 @@ int PTFit(	            // return:	error flag (see below)
   const    double BIG = 1.e10,         // tolerance on H if otherwise undefined
     off0 = 0.002,   	  	       // threshold for setting Sn=0
     l0  = 1./128., 	  	       // default start value of lambda
-    tl0 = 3.e-7,   	  	       // tolerance for dchisq of 0. fit
+    //tl0 = 3.e-7,   	  	       // tolerance for dchisq of 0. fit
     tl1 = 3.e-7,   	  	       // tolerance for dchisq of 1. & 2. fit
     tl8 = 3.e-5,          	       // tolarance for dchisq/(J*O) of --
     tla = 1.e-2;   	  	       // tolerance for chi_rms of angle fit

@@ -55,16 +55,11 @@
 \tableofcontents
 \newpage
 
-%%%%%%%%%
+%%%%%%%%%%%%%%%%%%
 \section{Overview}
 
-%%%%%%%%%%%
-%\subsection{Scope}
 \Agama (Action-based Galaxy Modelling Architecture) is a software library intended for a broad range of tasks within the field of stellar dynamics. As the name suggests, it is centered around the use of action/angle formalism to describe the structure of stellar systems, but this is only one of its many facets. The library contains a powerful framework for dealing with arbitrary density/potential profiles and distribution functions (analytic, extracted from \Nbody models, or fitted to the data), a vast collection of general-purpose mathematical routines, and covers many aspects of galaxy dynamics up to the very high-level interface for constructing self-consistent galaxy models. It does not provide any methods for performing \Nbody simulations, but may assist in their analysis.
-%This document contains the complete user's guide and many technical details about various aspects of the code.
 
-%%%%%%%%%%%
-%\subsection{Overall structure}
 The core of the library is written in \Cpp and is organized into several modules, which are considered in turn in Section~\ref{sec:Structure}:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
 \item Low-level interfaces and generic routines, which are not particularly tied to stellar dynamics: various mathematical tasks, coordinate systems, unit conversion, input/output of particle collections and configuration data, and other utilities.
@@ -85,10 +80,11 @@ The main part of this document presents a comprehensive overview of various feat
 
 The code can be downloaded from \url{https://github.com/GalacticDynamics-Oxford/Agama}.
 
-%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Structure of the \Agama \Cpp library}  \label{sec:Structure}
 
-%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Low-level foundations}
 
 %%%%%%%%%%%%%%
@@ -210,7 +206,8 @@ Apart from several routines for string manipulation (e.g., converting between nu
 The class \ttt{KeyValueMap} is responsible for a list of values belonging to a single section; this list may be read from an INI file, or created by parsing a single string like \ppp{"param1=value1 param2=1.0"}, or from an array of command-line arguments. Various methods return the values converted to a particular type (number, string or boolean) or set/replace values.
 The class \ttt{ConfigFile} operates with a collection of sections, each represented by its own \ttt{KeyValueMap}; it can read and write INI files.
 
-%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Potentials}  \label{sec:Potential}
 
 \Agama provides a versatile collection of density and potential models, including two very general and efficient approximations that can represent almost any well-behaved profile of an isolated stellar system. All classes and routines in this section are located in the \ttt{potential::} namespace.
@@ -344,14 +341,16 @@ There are several frequently used functions that operate on any potential object
 \footnote{defined as $\displaystyle \kappa^2\equiv \frac{\d^2\Phi}{\d R^2} + \frac 3 R \frac{\d\Phi}{\d R},\;\; \nu^2\equiv \frac{\d^2\Phi}{\d z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\d R} = \left(\frac{L_\mathrm{circ}^2}{R}\right)^2,\;$ evaluated at $z=0$.};
 peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane of an axisymmetric potential), etc. They are implemented as standalone functions (generally using a root-finding routine to solve equations such as $\Phi(r)=E$ for $r$), and as two interpolator classes that pre-compute these values on a 1d or 2d grid in $E$ or $E,L$, and provide a faster (but still very accurate) alternative to the standalone functions. These interpolators are used, e.g., in the spherical action finder/mapper class (Section~\ref{sec:ActionsSpherical}).
 
-%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Orbit integration and analysis}  \label{sec:Orbits}
 
 Orbits of particles in the smooth time-independent potential are computed using the routine \ttt{orbit::integrate} in any of the three standard coordinate systems. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}. The trajectory is stored at regular intervals of time, which is unrelated to the internal timestep of ODE solver (that is, the  position/\-velocity at any time is obtained by interpolation provided by the solver -- so-called dense output feature). Currently we have one method available -- 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have rather similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
 
 Orbit analysis refers to the determination of orbit class (box, tube, resonant boxlet, etc.) and degree of chaoticity. This is performed using a Fourier transform of position as a function of time and detecting the most prominent ``spectral lines''; the ratio between their frequencies is an indicator of orbit type \cite{BinneySpergel1984, CarpinteroAguilar1998}, and their rate of change with time is a measure of chaos \cite{ValluriMerritt1998}. A finite-time estimate of Lyapunov exponent is another measure of stochasticity (see \cite{Carpintero2014, Skokos2010} for reviews of methods based on variational equations). These methods are implemented in \cite{Vasiliev2013}, but as the focus of \Agama in galaxy modelling is shifted from discrete orbits to smooth distribution functions, we have not yet included them in the library.
 
-%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Action/angle variables}  \label{sec:ActionAngle}
 
 As the name implies, \Agama deals with models of stellar system described in terms of action/angle variables. They are defined, e.g., in Section 3.5 of \cite{BinneyTremaine}.
@@ -379,7 +378,7 @@ In a more general case of an arbitrary spherical potential, the radial action is
 J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;dr,
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
-The standalone routines in \ttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$.
+The standalone routines in \ttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$, as well as the reverse mapping between $\bJ$ and $\{\bx,\bv\}$.
 
 %%%%%%%%%%%%%%
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
@@ -397,7 +396,8 @@ The computation of a single triplet of actions costs $\sim 50$ potential evaluat
 
 The transformation from $\{\bJ, \bt\}$ to $\{\bx,\bv\}$ in an arbitrary axisymmetric potential is performed using the Torus mapping approach \cite{BinneyMcMillan2016}. An instance of \ttt{ActionMapperTorus} class is constructed for any choice of $\bJ$ and allows to perform this mapping for multiple values of $\bt$; however, the cost of torus construction is rather high, and it may not always succeed (depending on the properties of potential and required accuracy). The code is adapted from the original \textsc{tm} package, with several modifications enabling the use of an arbitrary potential and a more efficient angle mapping approach; however, it does not quite comply to the coding standards adopted in \Agama (Section~\ref{sec:DeveloperGuide}) and in the future will be replaced by a fresh implementation. 
 
-%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Distribution functions}  \label{sec:DF}
 
 By Jeans' theorem, a steady-state distribution of stars or other species in a stationary potential may depend only on integrals of motion, taken here to be the actions $\bJ$. The \ttt{df::} namespace contains the classes and methods for working with such distribution functions (DFs) formulated in terms of actions. They are derived from the \ttt{BaseDistributionFunction} class, which provides a single method for computing the value $f(\bJ)$ at the given triplet of actions. All physically valid DFs must have a finite mass $M = (2\pi)^3 \iiint f(\bJ)\,d^3J$, by default computed by numerical integration (the pre-factor comes from a trivial integration over angles).
@@ -445,7 +445,8 @@ A general way of representing an arbitrary DF in a three-dimensional action spac
 %%%%%%%%%%%%%%
 \subsubsection{Spherical isotropic models}  \label{sec:DFspherical}
 
-There is an alternative framework for a special case of a spherically-symmetric potential and an isotropic DF in the velocity space. Such DFs depend only on energy, which is a certain function of $J_r$ and $L\equiv J_z+|J_\phi|$. To avoid the need to express this function explicitly, and to retain the convenience of action formalism, we instead use the phase volume $h$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
+There is an alternative framework for a special case of a spherically-symmetric potential and an isotropic DF in the velocity space. Such DFs depend only on energy $E$, which is a certain function of $J_r$ and $L\equiv J_z+|J_\phi|$ (provided, e.g., by the \ttt{ActionFinderSpherical} class).
+To avoid the need to express this function explicitly, and to retain the convenience of action formalism, we instead use the phase volume $h$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
 \begin{align*}
 h(E) &\equiv \iiint d^3x \iiint d^3v\, H\Big[E - \big(\Phi(|\bx|)+|\bv|^2/2\big)\Big] \;,\quad
 \mbox{where $H$ is the step function,} \\
@@ -458,9 +459,15 @@ The advantages of using $h$ instead of $E$ are that the total mass of the model 
 g(E) \equiv 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, \sqrt{2\big(E-\Phi(r)\big)}\;dr 
 = 4\pi^2\,L^2_\mathrm{circ}(E)\,T_\mathrm{rad}(E).
 \end{align*}
+
+Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, dh$ is finite. 
+One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{makeEddingtonDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalDF}.
 More information on these models is given in section~\ref{sec:DFsphericalDetails}.
 
-%%%%%%%%%%%
+These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{PseudoIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
+This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. In subsequent iterations, the potential is no longer spherical, but the density profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Galaxy modelling framework}  \label{sec:GalaxyModel}
 
 This module (namespace \ttt{galaxymodel::}) broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
@@ -483,7 +490,7 @@ The routine \ttt{computeProjectedMoments} calculates the surface density and the
 \Sigma(R) \equiv \int_{z=-\infty}^\infty dz\, \rho(R,z), \qquad
 \sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty dz\, \rho(R,z)\, v_z^2 .
 \end{align*}
-\textcolor{red}{[Currently there are no analogous routines for spherical isotropic DFs].}
+%\textcolor{red}{[Currently there are no analogous routines for spherical isotropic DFs].}
 
 %%%%%%%%%%%%%%
 \subsubsection{Velocity distribution functions}  \label{sec:VDF}
@@ -532,11 +539,11 @@ Presently this method is restricted to axisymmetric models, due to the lack of m
 
 This approach is implemented with the help of several classes derived from \ttt{BaseComponent}, the \ttt{SelfConsistentModel} structure which binds together the array of components, the potential, the action finder, and the parameters of potential expansions, and finally the routine \ttt{doIteration}, all defined in \ttt{galaxymodel_selfconsistent.h}. All these concepts are also available in the \Python wrapper (Section~\ref{sec:Python}), and a complete annotated example illustrating the entire workflow is presented both in the \Cpp and \Python variants.
 
-%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Data handling}
 \subsubsection{Selection functions}
 
-%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Interfaces with other languages and frameworks}  \label{sec:Interfaces}
 
 %%%%%%%%%%%
@@ -597,7 +604,8 @@ To build the plugin, one needs to have \Nemo installed (obviously) and the envir
 \texttt{\$ gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\
 where the last optional argument specifies the pattern speed $\Omega$ (frequency of rotation of the potential figure about $z$ axis). All units in the INI or coefs file here should follow the convention $G=1$.
 
-%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tests and example programs}  \label{sec:ExamplesTests}
 
 The \Agama library itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Some of them are described below \textcolor{red}{[not everything is ready yet]}.
@@ -608,9 +616,11 @@ The \Agama library itself is indeed just a ``library'', not a ``program'', but i
 The \Python equivalent of this program additionally determines the confidence intervals on these parameters by running a MCMC algorithm starting around the best-fit parameters.
 
 A more elaborate example in \Python determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
-This example is inspired by one of the Gaia Challenge assignments [ref].
+This example is inspired by one of the Gaia Challenge assignments \cite{Read2017}.
 
 \paragraph{example_self_consistent_model} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with a static density profile of the disk and a DF-based halo component, and performs a few iterations to find the potential generated by the halo. It then replaces the disk component with a DF-based one (the expressions for $f(\bJ)$ use epicyclic frequencies computed in the approximate potential delivered by the first stage), and performs a few more iterations, updating the density of both disk and halo components. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
+
+\paragraph{example_fokker_planck} is a \Cpp program for computing the evolution of a spherical isotropic stellar system driven by two-body relaxation, using the formalism presented in Section~\ref{sec:DFsphericalDetails}.
 
 \paragraph{example_galpy} is a \Python program showing the use of \Agama plugin for \Galpy to construct a potential, integrate orbits, and compare the accuracy of action finders between the two libraries. 
 
@@ -620,10 +630,10 @@ This example is inspired by one of the Gaia Challenge assignments [ref].
 %%%%%%%%%
 \appendix
 
-%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Technical details}
 
-%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Developer's guide}  \label{sec:DeveloperGuide}
 
 Any large piece of software needs to follow a number of generic programming rules, which are well-known standards in commercial software development, but unfortunately are insufficiently widespread in the scientific community. Here we outline the most important guidelines adopted in the development of \Agama. Some of them are \Cpp-specific \cite{Meyers,SutterAlexandrescu}, others are more general \cite{Martin,McConnell}.
@@ -703,7 +713,8 @@ For instance, in the \Python interface, a single call to the potential or action
 An important thing to keep in mind is that an exception that may occur in a parallel section should be handled in the same section, otherwise the program immediately aborts. Thus in such loops it is customary to provide a general handler that stores the error text, and then re-throws an exception when the loop is finished.
 Also, the \Python interface provides a way to supply a user-defined \Python callback function to some of the routines implemented in \Cpp, but the standard \Python interpreter has a global locking mechanism preventing its simultaneous usage from multiple threads. Therefore, when such callback functions are used with \Cpp routines, this temporarily disables \texttt{OpenMP} parallelization. (An alternative that is not yet implemented is to allow this callback function to handle a vectorized input instead of one point at a time).
 
-%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Mathematical methods}
 
 %%%%%%%%%%%%%%
@@ -831,6 +842,16 @@ Here the gradient and hessian of $G_0$ are taken at the overall best-fit amplitu
 
 Here $\ln\mathcal{L}_\mathrm{data}$ is the expression in brackets in (\ref{eq:MaxLikelihoodDensity}). The optimal value of $\lambda>0$ that maximizes the cross-validation score is found by a simple one-dimensional search. We first assign a reasonable initial guess for amplitudes (approximating the density as a Gaussian with the mean and dispersion computed from input samples). At each step, the multidimensional nonlinear root-finder routine is invoked to find best-fit amplitudes $\bA$ for the given $\lambda$, starting from the current initial guess. If it was successful and $\ln\mathcal{L}_\mathrm{CV}(\lambda)$ is higher than the current best estimate, the initial guess is replaced with the best-fit amplitudes: this not only speeds up the root-finder, but also improves the convergence. The range of $\lambda$ is progressively narrowed until the maximum has been located with sufficient accuracy, at which point we return the last successful array of $\bA$. 
 
+%%%%%%%%%%%%%%
+\begin{figure}
+\begin{center}
+\includegraphics[width=12cm]{SplineLogDensity.pdf}
+\end{center}
+\caption{Penalized spline estimate of density from sample points. Here $N_\mathrm{data}=1000$ were drawn from the original density profile (shown in dashed blue) described by a sum of two gaussians, with dispersions equal to 0.1 and 1. We reconstruct the logarithm of density using a linear ($N=1$) and cubic ($N=3$) B-splines with 50 nodes uniformly placed on the interval $[0..6]$, so that it is linearly extrapolated beyond the extent of this grid. The linear B-spline estimate (shown in red) is rather wiggly, because the grid spacing is intentionally made too fine for the given number of samples -- some elements do not contain any samples. The non-penalized cubic B-spline (not shown) is very close to the linear one, and also close to a standard Gaussian kernel density estimate with the same bandwidth as the grid spacing (also not shown). By contrast, the penalized cubic B-spline with the smoothing parameter determined automatically in order to maximize the cross-validation likelihood (shown in blue) is much closer to the true density.
+} \label{fig:SplineLogDensity}
+\end{figure}
+%%%%%%%%%%%%
+
 Figure~\ref{fig:SplineLogDensity} illustrates the application of linear (non-smoothed) and cubic spline with optimal smoothing to a test problem. In this case the grid spacing was deliberately too dense for the given number of samples, so that some grid segments do not contain any samples, but nevertheless the penalized density estimate comes out rather close to the true one.
 This regime is not very stable, though, and for normal operation the grid should be assigned in such a way that each segment contains at least a few samples -- this ensures that even the un-smoothed estimate is mathematically well defined.
 
@@ -846,15 +867,8 @@ Maximization of cross-validation score is considered to be ``optimal'' smoothing
 
 We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
 
-\begin{figure}
-\begin{center}
-\includegraphics[width=12cm]{SplineLogDensity.pdf}
-\end{center}
-\caption{Penalized spline estimate of density from sample points. Here $N_\mathrm{data}=1000$ were drawn from the original density profile (shown in dashed blue) described by a sum of two gaussians, with dispersions equal to 0.1 and 1. We reconstruct the logarithm of density using a linear ($N=1$) and cubic ($N=3$) B-splines with 50 nodes uniformly placed on the interval $[0..6]$, so that it is linearly extrapolated beyond the extent of this grid. The linear B-spline estimate (shown in red) is rather wiggly, because the grid spacing is intentionally made too fine for the given number of samples -- some elements do not contain any samples. The non-penalized cubic B-spline (not shown) is very close to the linear one, and also close to a standard Gaussian kernel density estimate with the same bandwidth as the grid spacing (also not shown). By contrast, the penalized cubic B-spline with the smoothing parameter determined automatically in order to maximize the cross-validation likelihood (shown in blue) is much closer to the true density.
-} \label{fig:SplineLogDensity}
-\end{figure}
 
-%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Potentials}  \label{sec:PotentialDetails}
 
 %%%%%%%%%%%
@@ -941,11 +955,7 @@ For an array of particles,
 
 The computation of \ttt{CylSpline} coefficients is much more expensive than that of \ttt{Multipole}, because at each of $\mathcal{O}(N_R\times N_z \times m_\mathrm{max})$ nodes we need to evaluate a 2d integral in (\ref{eq:PoissonCylindric}) or a sum over all particles in (\ref{eq:PoissonCylindricParticles}). On a typical workstation, this may take from from a few seconds to a few minutes, depending on the resolution and the number of CPU cores. Nevertheless, this is a one-time cost; once the coefficients are calculated, the evaluation of both \ttt{Multipole} and \ttt{CylSpline} potentials is very fast -- the cost depends very weakly on the number of grid nodes, and is proportional to the number of azimuthal-harmonic terms ($m_\mathrm{max}$, but not $l_\mathrm{max}$ in the case of Multipole).
 
-Figure~\ref{fig:PotentialAccuracy1} demonstrates that the accuracy of both approximations is fairly good (relative error in force $\lesssim 10^{-3}$) with default settings ($N_R=25, l_\mathrm{max}=m_\mathrm{max}=6$) and improves with resolution. For the case of initialization from an array of particles, discreteness noise is the main limiting factor.
-Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential expansions has its weak points: \ttt{Multipole} is not suitable for strongly flattened systems and \ttt{CylSpline} performs poorly in systems with density cusps; but for most density profiles at least one of them should deliver a good accuracy.
-
-\phantomsection\label{sec:DensityCylGrid} A separate class \ttt{DensityCylGrid} serves the same task as \ttt{DensitySphericalHarmonic}: provides an interpolated density model that is initialized from the values of source density at nodes of a 2d grid in $R,z$ plane (for an axisymmetric model) or 3d grid in $R,z,\phi$ (in general). The density is represented as a Fourier expansion in $\phi$, with each term being a 2d cubic spline in $\tilde R, \tilde z$ coordinates (scaled in the same way as in \ttt{CylSpline}). Interpolated density is zero outside the grid. This class serves as a counterpart to \ttt{DensitySphericalHarmonic} in the context of DF-based self-consistent models for disk-like components: the values of density at grid nodes are computed by (expensive) integration of DF over velocities, and density in the entire space, necessary for computing the potential, is given by the interpolator.
-
+%%%%%%%%%%%%%%
 \begin{figure}
 \includegraphics[width=16cm]{D0.pdf}
 \includegraphics[width=16cm]{D0nb.pdf}
@@ -959,8 +969,15 @@ Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential e
 \caption{Accuracy of potential approximations for different types of density profiles. As in the previous figure, we plot the relative errors in potential (red), force (green) and density (blue) for Multipole (left) and CylSpline (right) potential expansions. Top panels are for a triaxial $\gamma=1$ Dehnen model, and bottom -- for a Miyamoto--Nagai disk. In the former case, CylSpline cannot efficiently deal with cuspy density profiles, while Multipole is able to deliver accurate results even for a $\gamma=2$ cusp without any difficulty. On the other hand, in the latter case the strongly flattened density model is poorly represented by the spherical-harmonic expansion even with $l_\mathrm{max}=50$, whereas CylSpline performs well, especially with manually assigned grid boundaries.
 }  \label{fig:PotentialAccuracy2}
 \end{figure}
+%%%%%%%%%%%%
 
-%%%%%%%%%%%
+Figure~\ref{fig:PotentialAccuracy1} demonstrates that the accuracy of both approximations is fairly good (relative error in force $\lesssim 10^{-3}$) with default settings ($N_R=25, l_\mathrm{max}=m_\mathrm{max}=6$) and improves with resolution. For the case of initialization from an array of particles, discreteness noise is the main limiting factor.
+Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential expansions has its weak points: \ttt{Multipole} is not suitable for strongly flattened systems and \ttt{CylSpline} performs poorly in systems with density cusps; but for most density profiles at least one of them should deliver a good accuracy.
+
+\phantomsection\label{sec:DensityCylGrid} A separate class \ttt{DensityCylGrid} serves the same task as \ttt{DensitySphericalHarmonic}: provides an interpolated density model that is initialized from the values of source density at nodes of a 2d grid in $R,z$ plane (for an axisymmetric model) or 3d grid in $R,z,\phi$ (in general). The density is represented as a Fourier expansion in $\phi$, with each term being a 2d cubic spline in $\tilde R, \tilde z$ coordinates (scaled in the same way as in \ttt{CylSpline}). Interpolated density is zero outside the grid. This class serves as a counterpart to \ttt{DensitySphericalHarmonic} in the context of DF-based self-consistent models for disk-like components: the values of density at grid nodes are computed by (expensive) integration of DF over velocities, and density in the entire space, necessary for computing the potential, is given by the interpolator.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %\subsection{Action/angle transformation}  \label{sec:ActionDetails}
 
 \begin{figure}
@@ -973,7 +990,7 @@ The right panel shows the relative error in the sum of two actions as a function
 \end{figure}
 
 
-%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Distribution functions}  \label{sec:DFdetails}
 
 \subsubsection{Spherical isotropic DFs}  \label{sec:DFsphericalDetails}
@@ -993,8 +1010,7 @@ where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the a
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$. The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any well-behaved potential), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
 The interpolation in scaled coordinates typically attains a level of accuracy better than $10^{-9}$ over the range of $h$ covered by the spline, and $\sim 10^{-5}$ in the extrapolated regime (if the potential indeed has a power-law asymptotic behaviour).
 
-Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, dh$ is finite. The class \ttt{SphericalIsotropic} defines one such representation in terms of an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$).
-One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{makeEddingtonDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalDF}.
+Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{makeEddingtonDF} and \ttt{fitSphericalDF} in the \texttt{galaxymodel_spherical.h} module.
 
 The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
 In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
@@ -1012,7 +1028,7 @@ J_{n/2}(E,\Phi) &\equiv \int_{\Phi(r)}^E f(E') \left(\frac{E'-\Phi}{E-\Phi}\righ
 \end{subequations}
 
 Orbit-averaged energy drift and diffusion coefficients are given by
-\begin{subequations}
+\begin{subequations}  \label{eq:DriftDiffusionE}
 \begin{align}
 \langle \Delta E   \rangle_\mathrm{av} &= \phantom{2} \Gamma\; \left[I_0 - K_g/g \right], \\
 \langle \Delta E^2 \rangle_\mathrm{av} &= 2\Gamma\; \left[I_0\,h + K_h\right]/g, \\
@@ -1026,7 +1042,8 @@ In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\st
 Of course, an efficient evaluation of diffusion coefficients again requires interpolation from a pre-computed table. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
 Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
 
-Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$ determined from $\rho(r,t)=\int f(h,t) d^3v$. Traditionally, the DF is expressed as a function of energy, but this has a disadvantage when it comes to solving the Poisson equation: as the potential changes, the DF should be kept fixed as a function of phase volume, not energy. Thus the formulation entirely in terms of $f(h)$ is preferrable, and it is straightforward to write down the FP equation in the flux-conservative form:
+Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) d^3v$. This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
+Traditionally, the DF is expressed as a function of energy, but this has a disadvantage when it comes to solving the Poisson equation: as the potential changes, the DF should be kept fixed as a function of phase volume, not energy (e.g., \cite{Cohn1980}). Thus the formulation entirely in terms of $f(h)$ is preferrable, and does not introduce any additional complications. It is convenient to write down the FP equation in the flux-conservative form:
 \begin{align}
 \frac{\d f(h,t)}{\d (\Gamma t)} &= \frac{\d}{\d h} \left[ D_{hh} \frac{\d f(h,t)}{\d h} + D_h f(h,t) \right] , \label{eq:FokkerPlanck} \\
 D_{hh} &= g(h)\,\big[ h\, I_0(h) + K_h(h) \big], \qquad D_h = K_g(h).  \label{eq:FokkerPlanckCoefs}
@@ -1079,11 +1096,14 @@ Carpintero D., Maffione N., Darriba L., 2014, Astronomy \& computing, 5, 19.
 \bibitem{CohlTohline1999}
 Cohl H., Tohline J., 1999, ApJ, 527, 86
 
+\bibitem{Cohn1980}
+Cohn H., 1980, ApJ, 242, 765
+
 \bibitem{Dehnen1993}
-Dehnen W.  1993, MNRAS, 265, 250
+Dehnen W., 1993, MNRAS, 265, 250
 
 \bibitem{Dehnen2000}
-Dehnen W.  2000, ApJL, 536, L39
+Dehnen W., 2000, ApJL, 536, L39
 
 \bibitem{DehnenBinney1998}
 Dehnen W., Binney J., 1998, MNRAS, 294, 429
@@ -1136,6 +1156,9 @@ Portegies Zwart S., McMillan S., van Elteren E., Pelupessy I., de Vries N., 2013
 
 \bibitem{Posti2015}
 Posti L., Binney J., Nipoti C., Ciotti L., 2015, MNRAS, 447, 3060
+
+\bibitem{Read2017}
+Read J., et al., in prep. (Gaia Challenge)
 
 \bibitem{IAS15}
 Rein H., Spiegel D., 2015, MNRAS, 446, 1424
