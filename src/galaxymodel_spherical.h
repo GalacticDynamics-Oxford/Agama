@@ -156,7 +156,8 @@ public:
         potential of the evolving model; may be omitted.
     */
     FokkerPlanckSolver(const math::IFunction& initDensity,
-        const potential::PtrPotential& externalPotential = potential::PtrPotential());
+        const potential::PtrPotential& externalPotential = potential::PtrPotential(),
+        const std::vector<double>& gridh = std::vector<double>());
 
     /** Recompute the potential and the phase volume mapping (h <-> E) by integrating the DF over velocity,
         and solving the Poisson equation (adding the external potential if present).
@@ -188,27 +189,31 @@ public:
     from a spherically-symmetric `BaseDensity` object using the wrapper class `DensityWrapper`.
     \param[in]  potential  is any one-dimensional function representing the spherically-symmetric
     potential (may be constructed using the `PotentialWrapper` class).
-    \param[out]  gridh  is the array of phase volumes at which the DF is defined;
-    \param[out]  gridf  is the array of DF values at corresponding nodes of gridh,
-    however, keep in mind that these values are not guaranteed to be positive.
+    \param[in,out]  gridh  is the array of phase volumes at which the DF is defined;
+    if this array is empty on input, a plausible grid will be created automatically,
+    but in any case it may later be modified by this routine, to eliminate negative DF values.
+    \param[out]     gridf  is the array of DF values at corresponding nodes of gridh,
+    guaranteed to contain only positive values (thus a LogLogSpline may be constructed from it).
+    \throw  std::runtime_error if no valid DF can be constructed.
 */
 void makeEddingtonDF(const math::IFunction& density, const math::IFunction& potential,
     /*output*/ std::vector<double>& gridh, std::vector<double>& gridf);
 
 /** Construct a spherical isotropic distribution function using the Eddington formula.
     This is a convenience overloaded routine that first computes the values of f at a grid in h,
-    using the previous function with the same name, then eliminates negative points,
-    and creates an instance of LogLogSpline interpolator to represent log(f) as a function of log(h)
-    in terms of a cubic spline.
+    using the previous function with the same name, and then creates an instance of LogLogSpline
+    interpolator to represent log(f) as a function of log(h) in terms of a cubic spline.
     \param[in]  density    is any one-dimensional function returning rho(r);
     \param[in]  potential  is any one-dimensional function representing the potential;
     \return  an instance of math::LogLogSpline interpolator for the distribution function.
-    \throw   std::runtime_error if the DF is badly behaving at large or small h,
-    or some other exception in case of any other problem encountered.
-    Negative values of f are not an exception - they are simply eliminated,
-    with a warning message printed if utils::verbosityLevel >= utils::VL_WARNING.
 */
-math::LogLogSpline makeEddingtonDF(const math::IFunction& density, const math::IFunction& potential);
+inline math::LogLogSpline makeEddingtonDF(
+    const math::IFunction& density, const math::IFunction& potential)
+{
+    std::vector<double> gridh, gridf;
+    makeEddingtonDF(density, potential, gridh, gridf);
+    return math::LogLogSpline(gridh, gridf);
+}
 
 
 /** Construct a spherical isotropic distribution function f(h) from an array of particles.
@@ -222,6 +227,26 @@ math::LogLogSpline makeEddingtonDF(const math::IFunction& density, const math::I
 */
 math::LogLogSpline fitSphericalDF(
     const std::vector<double>& hvalues, const std::vector<double>& masses, unsigned int gridSize);
+
+
+/** Construct an interpolated spherical density profile from two arrays -- radii and
+    enclosed mass M(<r).
+    First a suitably scaled interpolator is constructed for M(r);
+    if it is found to have a finite limiting value at r --> infinity, the asymptotic power-law
+    behaviour of density at large radii will be correctly represented.
+    Then the density at each point of the radial grid is computed from the derivative of
+    this interpolator. The returned array may be used to construct a LogLogSpline interpolator
+    or a DensitySphericalHarmonic object (obviously, with only one harmonic).
+    \param[in]  gridr  is the grid in radius (must have positive values sorted in order of increase);
+    typically the radial grid should be exponentially spaced with r[i+1]/r[i] ~ 1.2 - 2.
+    \param[in]  gridm  is the array of enclosed mass at each radius (must be positive and monotonic);
+    \return  an array of density values at the given radii.
+    \throw   std::invalid_argument if the input arrays were incorrect
+    (incompatible sizes, non-monotinic or negative values), or
+    std::runtime_error if the interpolator failed to produce a positive-definite density.
+*/
+std::vector<double> densityFromCumulativeMass(
+    const std::vector<double>& gridr, const std::vector<double>& gridm);
 
 
 /** Generate N-body samples of the spherical isotropic distribution function in the given potential.

@@ -25,23 +25,29 @@ static const double EPSROOT  = 1e-6;
 /// fixed order of Gauss-Legendre quadrature
 static const int GLORDER = 8;
 
-/// helper function to the slope of DF as a function of Phi
-class SlopeFinder: public math::IFunctionNoDeriv {
-    const std::vector<double> &logh, &logrho;
-    int offset;
-public:
-    SlopeFinder(const std::vector<double>& _logh, const std::vector<double>& _logrho, int _offset) :
-        logh(_logh), logrho(_logrho), offset(_offset) {}
+/// lower limit on the value of density or DF to be considered seriously
+static const double MIN_VALUE = 1e-100;
 
-    virtual double value(const double B1) const {
-        double ratio = (logrho[offset+0]-logrho[offset+1]) / (logrho[offset+1]-logrho[offset+2]);
-        if(B1==0)
-            return (logh[offset+0] - logh[offset+1]) / (logh[offset+1] - logh[offset+2]) - ratio;
-        if(B1==1)
+/** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
+    if  f(x) ~ f0 * (1 + A * x^B)  as  x --> 0  or  x --> infinity,  then the slope B is given by
+    solving the equation  [x0^B - x1^B] / [x1^B - x2^B] = [f(x0) - f(x1)] / [f(x1) - f(x2)],
+    where x0, x1 and x2 are three consecutive points near the end of the interval.
+    The arrays of log(x) and corresponding f(x) are passed as parameters to this function,
+    and its value() method is used in the root-finding routine.
+*/
+class SlopeFinder: public math::IFunctionNoDeriv {
+    const double logx0, logx1, logx2, ratio;
+public:
+    SlopeFinder(double _logx0, double _logx1, double _logx2, double f0, double f1, double f2) :
+        logx0(_logx0), logx1(_logx1), logx2(_logx2), ratio( (f0-f1) / (f1-f2) ) {}
+
+    virtual double value(const double B) const {
+        if(B==0)
+            return (logx0 - logx1) / (logx1 - logx2) - ratio;
+        if(B==INFINITY || B==-INFINITY)  // in either case, assume that the ratio of (x0/x1)^B vanishes
             return -ratio;
-        double B = B1 / (1-B1);  // scaled exponent
-        double h0B = exp(B*logh[offset+0]), h1B = exp(B*logh[offset+1]), h2B = exp(B*logh[offset+2]);
-        return (h0B - h1B) / (h1B - h2B) - ratio;
+        double x0B = exp(B*logx0), x1B = exp(B*logx1), x2B = exp(B*logx2);
+        return (x0B - x1B) / (x1B - x2B) - ratio;
     }
 };
 
@@ -78,25 +84,25 @@ public:
         if(logh.size()<4)
             return;
         // try determining the exponent B from the first three grid points
-        double B1a = math::findRoot(SlopeFinder(logh, logrho, 0), 0, 1, EPSROOT);
-        if(!(B1a > 0.05 && B1a < 0.95))
+        double B0 = math::findRoot(
+            SlopeFinder(logh[0], logh[1], logh[2], logrho[0], logrho[1], logrho[2]),
+            0, INFINITY, EPSROOT);
+        if(!(B0 > 0.05 && B0 < 20))
             return;
         // now try the same using three points shifted by one
-        double B1b = math::findRoot(SlopeFinder(logh, logrho, 1), 0, 1, EPSROOT);
-        if(!(B1b > 0.05 && B1b < 0.95))
+        double B1 = math::findRoot(
+            SlopeFinder(logh[1], logh[2], logh[3], logrho[1], logrho[2], logrho[3]),
+            0, INFINITY, EPSROOT);
+        if(!(B1 > 0.05 && B1 < 20))
             return;
         // consistency check - if the two values differ significantly, we're getting nonsense
-        if(B1a < B1b*0.95 || B1b < B1a*0.95)
+        if(B0 < B1*0.95 || B1 < B0*0.95)
             return;
-        B = B1a / (1-B1a);
+        B = B0;
         A = (logrho[0] - logrho[1]) / (exp(B*logh[0]) - exp(B*logh[1]));
         logrho0 = logrho[0] - A * exp(B*logh[0]);
         if(!isFinite(logrho0))
             return;
-
-        utils::msg(utils::VL_VERBOSE, "makeEddingtonDF",
-            "Density core: rho="+utils::toString(exp(logrho0))+"*(1"+(A>0?"+":"")+
-            utils::toString(A)+"*h^"+utils::toString(B)+") at small h");
 
         // now need to determine the critical value of log(h)
         // below which we will use the asymptotic expansion
@@ -104,8 +110,12 @@ public:
             loghmin = logh[i];
             double corelogrho, coredlogrho, cored2logrho;  // values returned by the asymptotic expansion
             asympt(logh[i], &corelogrho, &coredlogrho, &cored2logrho);
-            if(!(fabs((corelogrho-logrho[i]) / (corelogrho-logrho0)) < 1e-4))
+            if(!(fabs((corelogrho-logrho[i]) / (corelogrho-logrho0)) < 1e-4)) {
+                utils::msg(utils::VL_VERBOSE, "makeEddingtonDF",
+                    "Density core: rho="+utils::toString(exp(logrho0))+"*(1"+(A>0?"+":"")+
+                    utils::toString(A)+"*h^"+utils::toString(B)+") at h<"+utils::toString(exp(loghmin)));
                 break;   // TODO: come up with a more rigorous method...
+            }
         }
     }
 
@@ -153,7 +163,7 @@ class DFSphericalIntegrand: public math::IFunctionNdim {
 public:
     DFSphericalIntegrand(const math::IFunction& _pot, const math::IFunction& _df) :
         pot(_pot), df(_df), pv(pot) {}
-    
+
     /// un-scale r and v and return the jacobian of this transformation
     double unscalerv(double scaledr, double scaledv, double& r, double& v, double& Phi) const { 
         r   = exp( 1/(1-scaledr) - 1/scaledr );
@@ -183,39 +193,40 @@ public:
 //---- Eddington inversion ----//
 
 void makeEddingtonDF(const math::IFunction& density, const math::IFunction& potential,
-    /*output*/ std::vector<double>& gridh, std::vector<double>& gridf)
+    /* input/output */ std::vector<double>& gridh, /* output */ std::vector<double>& gridf)
 {
     // 1. construct a phase-volume interpolator
     potential::PhaseVolume phasevol(potential);
 
-    // 2. sweep through a grid in radius and record h(r), rho(r)
-    std::vector<double> gridPhi, gridlogrho, gridlogh;  // log(density) as a function of log(h)
-    const double logRinit = 0; // initial value of log radius (rather arbitrary but doesn't matter)
-    double logR = logRinit,
-        loghmin = phasevol.gridlogh().front() - 4.,
-        loghmax = phasevol.gridlogh().back()  + 1.;
-    int   stage = 0;   // 0 means scan inward, 1 - outward, 2 - done
-    while(stage<2) {   // first scan inward in radius, then outward, then stop
-        double R    = exp(logR);
-        double Phi  = potential(R);
-        double rho  = density(R);
-        double logH = log(phasevol(Phi));
-        if(rho>0) {
-            gridlogh.  push_back(logH);
-            gridlogrho.push_back(log(rho));
-            gridPhi.   push_back(Phi);
-        }
-        if(stage == 0 && logH < loghmin) {
-            std::reverse(gridlogh.  begin(), gridlogh.  end());
-            std::reverse(gridlogrho.begin(), gridlogrho.end());
-            std::reverse(gridPhi.   begin(), gridPhi.   end());
-            stage = 1;
-            logR  = logRinit;
-        }
-        if(stage == 1 && logH > loghmax)
-            stage = 2;  // finish
-        logR += DELTALOG * (stage*2-1);
+    // 2. prepare grids
+    std::vector<double> gridlogh, gridPhi, gridlogrho;
+    if(gridh.empty()) {   // no input: use the grid in h from the PhaseVolume object
+        gridlogh = math::createUniformGrid(200, phasevol.gridlogh().front(), phasevol.gridlogh().back());
+    } else {              // input grid in h was provided
+        gridlogh.resize(gridh.size());
+        std::transform(gridh.begin(), gridh.end(), gridlogh.begin(), log);
     }
+
+    // 2b. store the values of h, Phi and rho at the nodes of a grid
+    potential::FunctionToPotentialWrapper potw(potential);
+    for(unsigned int i=0; i<gridlogh.size();) {
+        double Phi = phasevol.E(exp(gridlogh[i]));
+        double R   = R_max(potw, Phi);
+        double rho = density(R);
+        if(rho > MIN_VALUE) {
+            gridPhi.push_back(Phi);
+            gridlogrho.push_back(log(rho));
+            i++;
+        } else {
+            gridlogh.erase(gridlogh.begin()+i);
+        }
+    }
+    unsigned int gridsize = gridlogh.size();
+    if(gridsize < 3)
+        throw std::runtime_error("makeEddingtonDF: invalid grid size");
+    gridf.resize(gridsize);   // f(h_i) = int_{h[i]}^{infinity}    
+    gridh.resize(gridsize);
+    std::transform(gridlogh.begin(), gridlogh.end(), gridh.begin(), exp);
 
     // 3. construct a spline for log(rho) as a function of log(h),
     // optionally with an asymptotic expansion in the case of a constant-density core
@@ -239,10 +250,6 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
     // As a final remark, the integration variable on each segment is not \ln h', but rather
     // an auxiliary variable y, defined such that \ln h = \ln h[i-1] + (\ln h[i] - \ln h[i-1]) y^2.
     // This eliminates the singularity in the term  1 / \sqrt{\Phi(h')-\Phi(h)}  when h=h[i-1]. 
-    unsigned int gridsize = gridlogh.size();
-    gridf.resize(gridsize);  // f(h_i) = int_{h[i]}^{infinity}
-    gridh.resize(gridsize);
-    std::transform(gridlogh.begin(), gridlogh.end(), gridh.begin(), exp);
 
     // 4a. integrate from log(h_max) = logh[gridsize-1] to infinity, or equivalently, 
     // from Phi(r_max) to 0, assuming that Phi(r) ~ -1/r and h ~ r^(3/2) in the asymptotic regime.
@@ -297,26 +304,49 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
         }
     }
 
-    // results are returned in the two arrays, gridh and gridf
-}
-
-math::LogLogSpline makeEddingtonDF(const math::IFunction& density, const math::IFunction& potential)
-{
-    std::vector<double> gridh, gridf;
-    makeEddingtonDF(density, potential, gridh, gridf);
-    assert(gridh.size() == gridf.size());
+    // 5. check validity and remove negative values
     bool hasNegativeF = false;
     for(unsigned int i=0; i<gridf.size();) {
-        if(gridf[i]<=0) {
+        if(gridf[i] <= MIN_VALUE) {
+            hasNegativeF |= gridf[i]<0;
             gridf.erase(gridf.begin() + i);
             gridh.erase(gridh.begin() + i);
-            hasNegativeF = true;
         } else
             i++;
     }
     if(hasNegativeF)
         utils::msg(utils::VL_WARNING, "makeEddingtonDF", "Distribution function is negative");
-    return math::LogLogSpline(gridh, gridf);
+    if(gridf.size() < 2)
+        throw std::runtime_error("makeEddingtonDF: could not construct a valid non-negative DF");
+
+    // also check that the remaining positive values describe a DF that doesn't grow too fast as h-->0
+    // and decays fast enough as h-->infinity;  this still does not guarantee that it's reasonable,
+    // but at least allows to construct a valid interpolator
+    do {
+        math::LogLogSpline spl(gridh, gridf);
+        double derIn, derOut;
+        spl.evalDeriv(gridh.front(), NULL, &derIn);
+        spl.evalDeriv(gridh.back(),  NULL, &derOut);
+        double slopeIn  = gridh.front() / gridf.front() * derIn;
+        double slopeOut = gridh.back()  / gridf.back()  * derOut;
+        if(slopeIn > -1 && slopeOut < -1) {
+            utils::msg(utils::VL_VERBOSE, "makeEddingtonDF",
+                "f(h) ~ h^"+utils::toString(slopeIn)+
+                " at small h and ~ h^"+utils::toString(slopeOut)+" at large h");
+            // results are returned in the two arrays, gridh and gridf
+            return;
+        }
+        // otherwise remove the innermost and/or outermost point and repeat
+        if(slopeIn < -1) {
+            gridf.erase(gridf.begin());
+            gridh.erase(gridh.begin());
+        }
+        if(slopeOut > -1) {
+            gridf.erase(gridf.end()-1);
+            gridh.erase(gridh.end()-1);
+        }
+    } while(gridf.size() > 2);
+    throw std::runtime_error("makeEddingtonDF: could not construct a valid non-negative DF");
 }
 
 
@@ -404,6 +434,58 @@ particles::ParticleArraySph generatePosVelSamples(
 }
 
 
+std::vector<double> densityFromCumulativeMass(
+    const std::vector<double>& gridr, const std::vector<double>& gridm)
+{
+    unsigned int size = gridr.size();
+    if(size<3 || gridm.size()!=size)
+        throw std::invalid_argument("densityFromCumulativeMass: invalid array sizes");
+    // check monotonicity and convert to log-scaled radial grid
+    std::vector<double> gridlogr(size), gridlogm(size), gridrho(size);
+    for(unsigned int i=0; i<size; i++) {
+        if(!(gridr[i] > 0 && gridm[i] > 0))
+            throw std::invalid_argument("densityFromCumulativeMass: negative input values");
+        if(i>0 && (gridr[i] <= gridr[i-1] || gridm[i] <= gridm[i-1]))
+            throw std::invalid_argument("densityFromCumulativeMass: arrays are not monotonic");
+        gridlogr[i] = log(gridr[i]);
+    }
+    // determine if the cumulative mass approaches a finite limit at large radii,
+    // that is, M = Minf - A * r^B  with A>0, B<0
+    double B = math::findRoot(SlopeFinder(
+        gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
+        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -INFINITY, 0, EPSROOT);
+    double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
+    if(B<0) {
+        double A =  (gridm[size-1] - gridm[size-2]) / 
+            (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
+        if(A>0) {  // viable extrapolation
+            invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
+            utils::msg(utils::VL_VERBOSE, "densityFromCumulativeMass",
+                "Extrapolated total mass=" + utils::toString(1/invMinf) +
+                ", rho(r)~r^" + utils::toString(B-3) + " at large radii" );
+        }
+    }
+    // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),
+    // which has a linear asymptotic behaviour with slope -B as log(r) --> infinity;
+    // if Minf = infinity, this additional term has no effect
+    for(unsigned int i=0; i<size; i++)
+        gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
+    math::CubicSpline spl(gridlogr, gridlogm);
+    if(!spl.isMonotonic())
+        throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
+    // compute the density at each point of the input radial grid
+    for(unsigned int i=0; i<size; i++) {
+        double val, der;
+        spl.evalDeriv(gridlogr[i], &val, &der);
+        val = exp(val);
+        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val * invMinf));
+        if(gridrho[i] <= 0)   // shouldn't occur if the spline is (strictly) monotonic
+            throw std::runtime_error("densityFromCumulativeMass: interpolated density is non-positive");
+    }
+    return gridrho;
+}
+
+
 std::vector<double> computeDensity(const math::IFunction& df, const potential::PhaseVolume& pv,
     const std::vector<double> &gridPhi)
 {
@@ -440,17 +522,25 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in log[h(Phi)]
-    const std::vector<double>& gridLogH = phasevol.gridlogh();
-    const unsigned int npoints = gridLogH.size();
+    std::vector<double> gridLogH = phasevol.gridlogh();
 
-    // 2. store the values of f, g, h at grid nodes
-    std::vector<double> gridF(npoints), gridG(npoints), gridH(npoints);
-    std::vector<double> gridFint(npoints), gridFGint(npoints), gridFHint(npoints);
-    for(unsigned int i=0; i<npoints; i++) {   // TODO: add protection against f=0
-        gridH[i] = exp(gridLogH[i]);
-        gridF[i] = df(gridH[i]);
-        phasevol.E(gridH[i], &gridG[i]);
+    // 2. store the values of f, g, h at grid nodes (ensure to consider only positive values of f)
+    std::vector<double> gridF, gridG, gridH;
+    for(unsigned int i=0; i<gridLogH.size();) {
+        double h = exp(gridLogH[i]);
+        double f = df(h);
+        if(f > MIN_VALUE) {
+            gridF.push_back(f);
+            gridH.push_back(h);
+            gridG.push_back(0);
+            phasevol.E(h, &gridG.back());
+            i++;
+        } else {
+            gridLogH.erase(gridLogH.begin()+i);
+        }
     }
+    const unsigned int npoints = gridLogH.size();
+    std::vector<double> gridFint(npoints), gridFGint(npoints), gridFHint(npoints);
 
     // 3a. determine the asymptotic behaviour of f(h):
     // f(h) ~ h^outerFslope as h-->inf  or  h^innerFslope as h-->0
@@ -617,7 +707,7 @@ DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const mat
         throw std::runtime_error("DiffusionCoefs: f(h) falls off too slowly as h-->infinity");
     double outerEslope = outerH / outerG / outerE;
     double outerRatio  = outerFslope / outerEslope;
-    if(!(outerRatio > 0))
+    if(!(outerRatio > 0))   // TODO: this may happen if f(h_out)=0 which is a valid case (?)
         throw std::runtime_error("DiffusionCoefs: weird asymptotic behaviour of phase volume");
 
     // 5. construct 2d interpolating splines for dv2par, dv2per as functions of Phi and E
@@ -790,18 +880,32 @@ static potential::Interpolator computePotential(
 } // internal namespace
 
 FokkerPlanckSolver::FokkerPlanckSolver(
-    const math::IFunction& initDensity, const potential::PtrPotential& externalPotential
-    /*unsigned int numnodes, double loghmin, double loghmax*/) :
+    const math::IFunction& initDensity, const potential::PtrPotential& externalPotential,
+    const std::vector<double>& inputgridh) :
     extPot(externalPotential),
     totalPot(computePotential(initDensity, externalPotential, 0, 0, /*diagnostic output*/ Phi0)),
-    phasevol(totalPot)
+    phasevol(totalPot),
+    gridh(inputgridh)
 {
-    // construct the initial distribution function and ensure its non-negativity
+    // construct the initial distribution function
     makeEddingtonDF(initDensity, totalPot, /*output*/ gridh, gridf);
-    for(unsigned int i=0; i<gridf.size(); i++)
-        if(gridf[i]<=0)
-            throw std::runtime_error("FokkerPlanckSolver: negative f(h)");
-    
+    if(!inputgridh.empty()) {
+        // a grid in phase space was provided and we will try to respect it,
+        // even though the Eddington inversion routine may have eliminated some of its nodes:
+        // we re-interpolate the values of DF onto the original grid nodes,
+        // but retain only the nodes where DF is larger than the absolute minimum value
+        // (otherwise it will cause problems in constructing the log-spline interpolator later)
+        math::LogLogSpline spl(gridh, gridf);
+        gridh.clear();
+        gridf.clear();
+        for(unsigned int i=0; i<inputgridh.size(); i++) {
+            double dfval = spl(inputgridh[i]);
+            if(dfval > MIN_VALUE) {
+                gridh.push_back(inputgridh[i]);
+                gridf.push_back(dfval);
+            }
+        }
+    }
     // compute diffusion coefficients
     reinitDifCoefs();
 }

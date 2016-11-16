@@ -43,19 +43,25 @@ but only if its derivatives at grid nodes are known with sufficiently high accur
 (i.e. trying to obtain them by finite differences is useless).
 
 ###  3-dimensional case.
-In this case, the strategy is somewhat different: instead of a single object encapsulating
-all data needed for interpolation, we provide the interface based on tensor product of
-B-spline basis functions in each dimension, and their amplitudes are supplied by the user.
-In other words, the value of function is represented as a sum of interpolating basis functions
-with adjustable amplitudes, and each basis function is a separable function of three coordinates,
-i.e. a product of three one-dimensional functions. These 1d basis functions are piecewise
-polynomials of degree N with compact support spanning at most N+1 adjacent intervals between
-nodes on their respective axis. Thus the interpolation is local, i.e. is determined by
-the amplitudes of at most (N+1)^3 basis functions that are possibly non-zero at the given point;
-however, to find the amplitudes that yield the given values of function at all nodes of a 3d grid,
-one needs to solve a global linear system for all nodes, except the case of a linear (N=1)
-interpolator.
-
+For separable 3d grids there are linear and natural cubic spline interpolators,
+both constructed from the array of values at the nodes of 3d grid.
+ 
+###  B-splines.
+This is an alternative framework for interpolation.
+The value of the function is represented as a sum of basis function with adjustable amplitudes.
+These basis functions are piecewise polynomials of degree N with compact support,
+spanning at most N+1 adjacent intervals between grid nodes.
+In D dimensions, the basis is formed by tensor products of B-splines in each coordinate.
+Thus the interpolation is local, i.e. is determined by the amplitudes of at most (N+1)^D basis
+functions that are possibly non-zero at the given point;
+however, to find the amplitudes that yield the given values of function at all nodes of
+the D-dimensional grid, one needs to solve a global linear system for all nodes,
+except the case of a linear (N=1) interpolator.
+The B-spline framework is most useful when one needs to construct the interpolator from
+a large array of values not on a regular grid (penalized spline smoothing and density estimation).
+The amplitudes of B-splines of degree N=1 and 3 can be used to construct ordinary
+linear and cubic interpolators, which are evaluated more efficiently than B-splines.
+ 
 ###  Penalized spline smoothing.
 The approach based on B-spline basis functions can be used also for constructing
 a smooth approximation to the set of 'measurements'.
@@ -503,6 +509,75 @@ private:
 /// \name Three-dimensional interpolation
 ///@{
 
+/** Trilinear interpolator */
+class LinearInterpolator3d: public math::IFunctionNdim {
+public:
+    /** Construct the interpolator from the values at the nodes of a 3d grid.
+        \param[in]  xnodes  is the grid in x dimension with size nx>=2;
+        \param[in]  ynodes  is the grid in y dimension with size ny>=2;
+        \param[in]  ynodes  is the grid in z dimension with size nz>=2;
+        \param[in]  fvalues is the flattened array of function values:
+        fvalues[(i*ny + j) * nz + k] = f(xnodes[i], ynodes[j], znodes[k]).
+        \throw std::invalid_argument if the grid sizes are incorrect.
+    */
+    LinearInterpolator3d(const std::vector<double>& xnodes,
+        const std::vector<double>& ynodes, const std::vector<double>& znodes,
+        const std::vector<double>& fvalues);
+
+    /** Compute the value of the interpolator at the given point;
+        if it is outside the grid boundaries, return NAN.
+    */
+    double value(double x, double y, double z) const;
+    
+    // IFunctionNdim interface
+    virtual void eval(const double point[3], double *val) const
+    { *val = value(point[0], point[1], point[2]); }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
+
+private:
+    std::vector<double> xval, yval, zval;  ///< grid nodes in x, y and z directions
+    std::vector<double> fval;  ///< flattened 3d array of function values at 3d grid nodes
+};
+
+
+/** Three-dimensional cubic spline with natural boundary conditions */
+class CubicSpline3d: public math::IFunctionNdim {
+public:
+    /** Construct the spline interpolator from the values at the nodes of a 3d grid,
+        or from the amplitudes of a BsplineInterpolator3d of degree N=3.
+        \param[in]  xnodes  is the grid in x dimension with size nx>=2;
+        \param[in]  ynodes  is the grid in y dimension with size ny>=2;
+        \param[in]  ynodes  is the grid in z dimension with size nz>=2;
+        \param[in]  fvalues is a flattened array with two alternative meanings.
+        a) the array of function values taken at the nodes of the 3d grid:
+        fvalues[(i*ny + j) * nz + k] = f(xnodes[i], ynodes[j], znodes[k]);
+        b) the array of B-spline amplitudes - in this context, the dimensions of
+        the grid of amplitudes should be (nx+2) * (ny+2) * (nz+2).
+        \throw std::invalid_argument if the grid sizes are incorrect.
+    */
+    CubicSpline3d(const std::vector<double>& xnodes,
+        const std::vector<double>& ynodes, const std::vector<double>& znodes,
+        const std::vector<double>& fvalues);
+
+    /** Compute the value of the interpolator at the given point;
+        if it is outside the grid boundaries, return NAN.
+    */
+    double value(double x, double y, double z) const;
+
+    // IFunctionNdim interface
+    virtual void eval(const double point[3], double *val) const
+    { *val = value(point[0], point[1], point[2]); }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
+
+private:
+    std::vector<double> xval, yval, zval;  ///< grid nodes in x, y and z directions
+    /// values and various derivatives of the function at 3d grid nodes
+    std::vector<double> fval, fx, fy, fz, fxy, fxz, fyz, fxyz;
+};
+
+
 /** Three-dimensional B-spline interpolator class.
     The value of interpolant is given by a weighted sum of components:
     \f$  f(x,y,z) = \sum_n  A_n  B_n(x,y,z) ,  0 <= n < numComp  \f$,
@@ -530,6 +605,8 @@ private:
     The sum of all basis functions is always unity, and each function is non-negative.
     \tparam  N is the degree of 1d B-splines
     (N=1 - linear, N=3 - cubic, other cases are not implemented).
+    Note that the classes LinearInterpolator3d and CubicSpline3d perform the same task
+    more efficiently, and also store all required arrays to compute the interpolant.
 */
 template<int N>
 class BsplineInterpolator3d: public math::IFunctionNdim {
@@ -646,20 +723,19 @@ private:
     const unsigned int numComp;                  ///< total number of components
 };
 
-/// trilinear interpolator
-typedef BsplineInterpolator3d<1> LinearInterpolator3d;
-/// tricubic interpolator
-typedef BsplineInterpolator3d<3> CubicInterpolator3d;
 
 /** Fill the array of amplitudes for a 3d interpolator by collecting the values of the source
     function F at the nodes of 3d grid.
     For the case N=1, the values of source function at grid nodes are identical to the amplitudes,
     but for higher-degree interpolation this is not the case, and the amplitudes are obtained by
     solving a linear system with the size numComp*numComp, where numComp ~ (grid_size_in_1d+N-1)^3.
-    This could be prohibitively expensive if numComp > ~10^3, and hence this routine should be used
-    only for small grid sizes.
-    Keep in mind also that the amplitudes thus obtained may be negative even if the source function
-    is everywhere non-negative.
+    This requires O(numComp^2) operations and could be prohibitively expensive if numComp > ~10^4,
+    hence this routine should be used only for small grid sizes.
+    To construct a 3d cubic spline from the function values only, one should use the CubicSpline3d
+    class, which performs the initialization in O(numComp) operations, and also evaluates
+    the interpolant several times faster than the equivalent B-spline, so for all practical
+    purposes it should be preferred. One may supply the array of function values at the 3d grid,
+    collected using this routine with N=1, to either a LinearInterpolator3d or CubicSpline3d.
     \tparam     N  is the degree of interpolator (implemented for N=1 and N=3);
     \param[in]  F  is the source function of 3 variables, returning one value;
     \param[in]  xnodes, ynodes, znodes are the grids in each of three coordinates;
@@ -675,6 +751,7 @@ std::vector<double> createBsplineInterpolator3dArray(const IFunctionNdim& F,
     const std::vector<double>& ynodes,
     const std::vector<double>& znodes);
 
+
 /** Construct the array of amplitudes for a 3d interpolator representing a probability distribution
     function (PDF) from the provided array of points with weights, sampled from this PDF.
     \tparam     N  is the degree of interpolator (1 or 3);
@@ -684,6 +761,8 @@ std::vector<double> createBsplineInterpolator3dArray(const IFunctionNdim& F,
     \return  the array of amplitudes suitable to use with `BsplineInterpolator::interpolate()` routine;
     \throw  std::invalid_argument if the array sizes are incorrect, or std::runtime_error in case
     of other possible problems.
+
+    NOT AVAILABLE YET.
 */
 template<int N>
 std::vector<double> createBsplineInterpolator3dArrayFromSamples(

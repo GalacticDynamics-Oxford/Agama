@@ -72,12 +72,11 @@ void findPlanarOrbitExtent(const potential::BasePotential& potential, double E, 
     double& R1, double& R2);
 
 
-/** Interpolator class for faster evaluation potential and related quantities --
+/** Interpolator class for faster evaluation of potential and related quantities --
     radius and angular momentum of a circular orbit as functions of energy,
-    epicyclic frequencies as functions of radius.
+    epicyclic frequencies as functions of radius (all in the equatorial plane).
     It is applicable to any axisymmetric potential that tends to zero at infinity,
-    and may be regular or singular at origin; the dynamical quantities refer to orbits
-    in the equatorial plane.
+    is monotonic with radius, and may be regular or singular at origin.
 */
 class Interpolator: public math::IFunction {
 public:
@@ -86,8 +85,9 @@ public:
         when interpolation is needed. */
     explicit Interpolator(const BasePotential& potential);
 
-    /// compute the potential and its derivatives at the given cylindrical radius
-    virtual void evalDeriv(const double R, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    /// compute the potential and its derivatives at the given cylindrical radius in the z=0 plane
+    virtual void evalDeriv(const double R,
+        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
     /// provide up to 2 derivatives of potential
     virtual unsigned int numDerivs() const { return 2; }

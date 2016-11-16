@@ -391,9 +391,12 @@ BaseInterpolator1d::BaseInterpolator1d(const std::vector<double>& xv, const std:
     if(xv.size() < 2)
         throw std::invalid_argument("Error in 1d interpolator: number of nodes should be >=2");
     for(unsigned int i=1; i<xv.size(); i++)
-        if(xv[i] <= xv[i-1])
+        if(!(xv[i] > xv[i-1]))
             throw std::invalid_argument("Error in 1d interpolator: "
                 "x values must be monotonically increasing");
+    for(unsigned int i=0; i<fv.size(); i++)
+        if(!isFinite(fv[i]))
+            throw std::invalid_argument("Error in 1d interpolator: y values must be finite");
 }
 
 LinearInterpolator::LinearInterpolator(const std::vector<double>& xv, const std::vector<double>& yv) :
@@ -869,7 +872,11 @@ LogSpline::LogSpline(const std::vector<double>& xvalues, const std::vector<doubl
     double derivLeft, double derivRight)
 {
     std::vector<double> logfvalues(fvalues.size());
-    std::transform(fvalues.begin(), fvalues.end(), logfvalues.begin(), log);
+    for(unsigned int i=0; i<fvalues.size(); i++) {
+        if(!(fvalues[i]>0))
+            throw std::invalid_argument("LogSpline: input values must be positive");
+        logfvalues[i] = log(fvalues[i]);
+    }
     derivLeft  /= fvalues.front();
     derivRight /= fvalues.back ();
     S = CubicSpline(xvalues, logfvalues, derivLeft, derivRight);
@@ -891,10 +898,17 @@ void LogSpline::evalDeriv(const double x, double* value, double* deriv, double* 
 LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     double derivLeft, double derivRight)
 {
-    std::vector<double> logxvalues(xvalues.size());
-    std::transform(xvalues.begin(), xvalues.end(), logxvalues.begin(), log);
-    std::vector<double> logfvalues(fvalues.size());
-    std::transform(fvalues.begin(), fvalues.end(), logfvalues.begin(), log);
+    std::vector<double> logxvalues(xvalues.size()), logfvalues(fvalues.size());
+    for(unsigned int i=0; i<xvalues.size(); i++) {
+        if(!(xvalues[i]>0))
+            throw std::invalid_argument("LogSpline: input values must be positive");
+        logxvalues[i] = log(xvalues[i]);
+    }
+    for(unsigned int i=0; i<fvalues.size(); i++) {
+        if(!(fvalues[i]>0))
+            throw std::invalid_argument("LogSpline: input values must be positive");
+        logfvalues[i] = log(fvalues[i]);
+    }
     derivLeft  *= xvalues.front() / fvalues.front();
     derivRight *= xvalues.back () / fvalues.back ();
     S = CubicSpline(logxvalues, logfvalues, derivLeft, derivRight);
@@ -1223,6 +1237,233 @@ void QuinticSpline2d::evalDeriv(const double x, const double y,
 
 
 // ------- Interpolation in 3d ------- //
+
+LinearInterpolator3d::LinearInterpolator3d(const std::vector<double>& xnodes,
+    const std::vector<double>& ynodes, const std::vector<double>& znodes,
+    const std::vector<double>& fvalues) :
+    xval(xnodes), yval(ynodes), zval(znodes), fval(fvalues)
+{
+    const int nx = xval.size(), ny = yval.size(), nz = zval.size();
+    const unsigned int nval = nx*ny*nz;   // total number of nodes in the 3d grid
+    if(nx < 2 || ny < 2 || nz < 2 || fvalues.size() != nval)
+        throw std::invalid_argument("LinearInterpolator3d: invalid grid sizes");
+}
+
+double LinearInterpolator3d::value(double x, double y, double z) const
+{
+    const int
+    nx = xval.size(),
+    ny = yval.size(),
+    nz = zval.size(),
+    // indices of grid cell in x, y and z
+    xi = binSearch(x, &xval.front(), nx),
+    yi = binSearch(y, &yval.front(), ny),
+    zi = binSearch(z, &zval.front(), nz),
+    il = (xi * ny + yi) * nz + zi,
+    iu = il + ny * nz;
+    if(xi<0 || xi>=nx || yi<0 || yi>=ny || zi<0 || zi>=nz)
+        return NAN;
+    const double
+    // relative positions within the grid cell [0:1], in units of grid cell size
+    offx = (x - xval[xi]) / (xval[xi+1] - xval[xi]),
+    offy = (y - yval[yi]) / (yval[yi+1] - yval[yi]),
+    offz = (z - zval[zi]) / (zval[zi+1] - zval[zi]),
+    // values of function at 8 corners
+    flll = fval[il],          // xlow,ylow,zlow
+    fllu = fval[il + 1],      // xlow,ylow,zupp
+    flul = fval[il + nz],     // xlow,yupp,zlow
+    fluu = fval[il + nz + 1], // xlow,yupp,zupp
+    full = fval[iu],          // xupp,ylow,zlow
+    fulu = fval[iu + 1],      // xupp,ylow,zupp
+    fuul = fval[iu + nz],     // xupp,yupp,zlow
+    fuuu = fval[iu + nz + 1]; // xupp,yupp,zupp
+    return
+        ( (1-offy) * ( (1-offz) * flll + offz * fllu ) +
+             offy  * ( (1-offz) * flul + offz * fluu ) ) * (1-offx) +
+        ( (1-offy) * ( (1-offz) * full + offz * fulu ) +
+             offy  * ( (1-offz) * fuul + offz * fuuu ) ) * offx;
+}
+
+
+CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vector<double>& ynodes,
+    const std::vector<double>& znodes, const std::vector<double>& fvalues) :
+    xval(xnodes), yval(ynodes), zval(znodes)
+{
+    const int nx = xval.size(), ny = yval.size(), nz = zval.size();
+    const unsigned int nval = nx*ny*nz,   // total number of nodes in the 3d grid
+        nampl = (nx+2)*(ny+2)*(nz+2);     // or the number of amplitudes of B-splines
+    if(nx < 2 || ny < 2 || nz < 2 ||
+        !(fvalues.size() == nval || fvalues.size() == nampl) )
+        throw std::invalid_argument("CubicSpline3d: invalid grid sizes");
+    fval.resize(nval);
+    fx  .resize(nval);
+    fy  .resize(nval);
+    fz  .resize(nval);
+    fxy .resize(nval);
+    fxz .resize(nval);
+    fyz .resize(nval);
+    fxyz.resize(nval);
+
+    if(fvalues.size() == nampl) {
+        // assume that the input array contained amplitudes of a 3d cubic B-spline
+        const std::vector<double>* nodes[3] = {&xval, &yval, &zval};
+        Matrix<double> values[3], derivs[3];
+        std::vector<int> leftInd[3];
+        // collect the values and derivs of all basis functions at each grid node in each dimension
+        for(int d=0; d<3; d++) {
+            unsigned int Ngrid = nodes[d]->size();
+            values[d] = math::Matrix<double>(Ngrid, 4);
+            derivs[d] = math::Matrix<double>(Ngrid, 4);
+            leftInd[d].resize(Ngrid);
+            const double* arr = &(nodes[d]->front());
+            for(unsigned int n=0; n<Ngrid; n++) {
+                leftInd[d][n] = bsplineValues<3>(arr[n], arr, Ngrid, &values[d](n, 0));
+                bsplineDerivs<3,1>(arr[n], arr, Ngrid, &derivs[d](n, 0));
+            }
+        }
+        for(int xi=0; xi<nx; xi++)
+            for(int yi=0; yi<ny; yi++)
+                for(int zi=0; zi<nz; zi++) {
+                    int K = (xi * ny + yi) * nz + zi;
+                    for(int i=0; i<=3; i++)
+                        for(int j=0; j<=3; j++)
+                            for(int k=0; k<=3; k++) {
+                                double a = fvalues[ ((i+leftInd[0][xi]) * (ny+2) + j+leftInd[1][yi]) *
+                                    (nz+2) + k+leftInd[2][zi] ];
+                                fval[K] += a * values[0](xi,i) * values[1](yi,j) * values[2](zi,k);
+                                fx  [K] += a * derivs[0](xi,i) * values[1](yi,j) * values[2](zi,k);
+                                fy  [K] += a * values[0](xi,i) * derivs[1](yi,j) * values[2](zi,k);
+                                fz  [K] += a * values[0](xi,i) * values[1](yi,j) * derivs[2](zi,k);
+                                fxy [K] += a * derivs[0](xi,i) * derivs[1](yi,j) * values[2](zi,k);
+                                fxz [K] += a * derivs[0](xi,i) * values[1](yi,j) * derivs[2](zi,k);
+                                fyz [K] += a * values[0](xi,i) * derivs[1](yi,j) * derivs[2](zi,k);
+                                fxyz[K] += a * derivs[0](xi,i) * derivs[1](yi,j) * derivs[2](zi,k);
+                            }
+                }
+        return;
+    }
+
+    // otherwise the input array contains the values of function at 3d grid nodes
+    fval = fvalues;
+
+    std::vector<double> tmpx(nx), tmpy(ny), tmpz(nz), tmpxy(nx), tmpxz(nx), tmpyz, tmpxyz;
+    // step 1. construct splines from function values and store the first derivatives at grid nodes
+    // a. for each y_j,z_k construct cubic splines for f(x, y_j, z_k) in x and store df/fx
+    for(int j=0; j<ny; j++)
+        for(int k=0; k<nz; k++) {
+            for(int i=0; i<nx; i++)
+                tmpx[i] = fval[ (i*ny + j) * nz + k ];
+            CubicSpline splx(xval, tmpx);
+            for(int i=0; i<nx; i++)
+                splx.evalDeriv(xval[i], NULL, &fx[ (i*ny + j) * nz + k ]);
+        }
+    // b. for each x_i,z_k construct cubic splines for f(x_i, y, z_k) in y and store df/fy
+    for(int i=0; i<nx; i++)
+        for(int k=0; k<nz; k++) {
+            for(int j=0; j<ny; j++)
+                tmpy[j] = fval[ (i*ny + j) * nz + k ];
+            CubicSpline sply(yval, tmpy);
+            for(int j=0; j<ny; j++)
+                sply.evalDeriv(yval[j], NULL, &fy[ (i*ny + j) * nz + k ]);
+        }
+    // c. for each x_i,y_j construct cubic splines for f(x_i, y_j, z) in z and store df/fz
+    for(int i=0; i<nx; i++)
+        for(int j=0; j<ny; j++) {
+            tmpz.assign(fval.begin() + (i*ny + j) * nz, fval.begin() + (i*ny + j+1) * nz);
+            CubicSpline splz(zval, tmpz);
+            for(int k=0; k<nz; k++)
+                splz.evalDeriv(zval[k], NULL, &fz[ (i*ny + j) * nz + k ]);
+        }
+
+    // step 2. construct splines from first derivatives and store mixed second derivatives at grid nodes
+    // a,b:  compute d2f/dxdy, d2f/dxdz
+    for(int j=0; j<ny; j++)
+        for(int k=0; k<nz; k++) {
+            for(int i=0; i<nx; i++) {
+                tmpxy[i] = fy[ (i*ny + j) * nz + k ];
+                tmpxz[i] = fz[ (i*ny + j) * nz + k ];
+            }
+            CubicSpline splxy(xval, tmpxy);
+            CubicSpline splxz(xval, tmpxz);
+            for(int i=0; i<nx; i++) {
+                splxy.evalDeriv(xval[i], NULL, &fxy[ (i*ny + j) * nz + k ]);
+                splxz.evalDeriv(xval[i], NULL, &fxz[ (i*ny + j) * nz + k ]);
+            }
+        }
+    // 2c:  compute d2f/dydz  and  step 3: compute d3f/dxdydz
+    for(int i=0; i<nx; i++)
+        for(int j=0; j<ny; j++) {
+            tmpyz.assign (fy .begin() + (i*ny + j) * nz, fy .begin() + (i*ny + j+1) * nz);
+            tmpxyz.assign(fxy.begin() + (i*ny + j) * nz, fxy.begin() + (i*ny + j+1) * nz);
+            CubicSpline splyz (zval, tmpyz);
+            CubicSpline splxyz(zval, tmpxyz);
+            for(int k=0; k<nz; k++) {
+                splyz .evalDeriv(zval[k], NULL, &fyz [ (i*ny + j) * nz + k ]);
+                splxyz.evalDeriv(zval[k], NULL, &fxyz[ (i*ny + j) * nz + k ]);
+            }
+        }
+}
+
+double CubicSpline3d::value(double x, double y, double z) const
+{
+    const int
+    nx = xval.size(),
+    ny = yval.size(),
+    nz = zval.size(),
+    // indices of grid cell in x, y and z
+    xi = binSearch(x, &xval.front(), nx),
+    yi = binSearch(y, &yval.front(), ny),
+    zi = binSearch(z, &zval.front(), nz);
+    if(xi<0 || xi>=nx || yi<0 || yi>=ny || zi<0 || zi>=nz)
+        return NAN;
+    const int
+    // indices in flattened 3d arrays: 
+    illl = (xi * ny + yi) * nz + zi, // xlow,ylow,zlow
+    illu = illl + 1,                 // xlow,ylow,zupp
+    ilul = illl + nz,                // xlow,yupp,zlow
+    iluu = ilul + 1,                 // xlow,yupp,zupp
+    iull = illl + ny * nz,           // xupp,ylow,zlow
+    iulu = iull + 1,                 // xupp,ylow,zupp
+    iuul = iull + nz,                // xupp,yupp,zlow
+    iuuu = iuul + 1;                 // xupp,yupp,zupp
+    const double
+    // coordinates of corner points
+    xlow = xval[xi],
+    xupp = xval[xi+1],
+    ylow = yval[yi],
+    yupp = yval[yi+1],
+    zlow = zval[zi],
+    zupp = zval[zi+1],
+    // 1st stage: interpolate along x axis to obtain  f, f_y, f_z, f_yz  at four corners of the y-z cell
+    fl [16] = { fval[illl], fval[illu], fz  [illl], fz  [illu],
+                fval[ilul], fval[iluu], fz  [ilul], fz  [iluu],
+                fy  [illl], fy  [illu], fyz [illl], fyz [illu],
+                fy  [ilul], fy  [iluu], fyz [ilul], fyz [iluu] },
+    fu [16] = { fval[iull], fval[iulu], fz  [iull], fz  [iulu],
+                fval[iuul], fval[iuuu], fz  [iuul], fz  [iuuu],
+                fy  [iull], fy  [iulu], fyz [iull], fyz [iulu],
+                fy  [iuul], fy  [iuuu], fyz [iuul], fyz [iuuu] },
+    fxl[16] = { fx  [illl], fx  [illu], fxz [illl], fxz [illu],
+                fx  [ilul], fx  [iluu], fxz [ilul], fxz [iluu],
+                fxy [illl], fxy [illu], fxyz[illl], fxyz[illu],
+                fxy [ilul], fxy [iluu], fxyz[ilul], fxyz[iluu] },
+    fxu[16] = { fx  [iull], fx  [iulu], fxz [iull], fxz [iulu],
+                fx  [iuul], fx  [iuuu], fxz [iuul], fxz [iuuu],
+                fxy [iull], fxy [iulu], fxyz[iull], fxyz[iulu],
+                fxy [iuul], fxy [iuuu], fxyz[iuul], fxyz[iuuu] };
+    double F[16];
+    evalHermiteSplines<16>(xlow, xupp, x, fl, fu, fxl, fxu, /*output*/ F, NULL, NULL);
+    // 2nd stage: interpolate along y axis to obtain f(x,y,zlow), f(x,y,zupp), fz(x,y,zlow), fz(x,y,zupp)
+    double FF[4];
+    evalHermiteSplines<4> (ylow, yupp, y, F+0,  F+4,  F+8,  F+12, /*output*/ FF, NULL, NULL);
+    // 3rd stage: interpolate along z axis
+    double val;
+    evalHermiteSplines<1> (zlow, zupp, z, FF+0, FF+1, FF+2, FF+3, /*output*/ &val, NULL, NULL);
+    return val;
+}
+
+
+// ------ 3d B-spline interpolator ------ //
 
 template<int N>
 BsplineInterpolator3d<N>::BsplineInterpolator3d(

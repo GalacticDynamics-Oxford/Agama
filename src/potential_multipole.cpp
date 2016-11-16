@@ -28,7 +28,7 @@ const unsigned int MULTIPOLE_MIN_GRID_SIZE = 2;
 const unsigned int ORDER_RAD_INT = 15;
 
 /// safety factor to avoid roundoff errors near grid boundaries
-const double SAFETY_FACTOR = 8*DBL_EPSILON;
+const double SAFETY_FACTOR = 100*DBL_EPSILON;
 
 // Helper function to deduce symmetry from the list of non-zero coefficients;
 // combine the array of coefficients at different radii into a single array
@@ -296,8 +296,12 @@ static void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
     double r1, double r2, int v, double& s, double& U, double& W)
 {
     double lnr = log(r2/r1);
-    double A = lnr * (r1*dPhi1 - v*Phi1) / (Phi1 - Phi2 * exp(-v*lnr));
-    if(!isFinite(A) || A >= 0)
+    double num1 = r1*dPhi1, num2 = v*Phi1, den1 = Phi1, den2 = Phi2 * exp(-v*lnr);
+    double A = lnr * (num1 - num2) / (den1 - den2);
+    bool roundoff =   // check if the value of A is dominated by roundoff errors
+        fabs(num1-num2) < fmax(fabs(num1), fabs(num2)) * SAFETY_FACTOR ||
+        fabs(den1-den2) < fmax(fabs(den1), fabs(den2)) * SAFETY_FACTOR;
+    if(!isFinite(A) || A >= 0 || roundoff)
     {   // no solution - output only the main multipole component (with zero Laplacian)
         U = 0;
         s = 0;

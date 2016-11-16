@@ -162,6 +162,30 @@ math::LogLogSpline createInterpolatedDF(
     return math::LogLogSpline(gridh, gridf);
 }
 
+/// construct an interpolated density from a cumulative mass profile sampled at discrete values of radii
+/// (test the routine `densityFromCumulativeMass`)
+math::LogLogSpline createInterpolatedDensity(const potential::BasePotential& pot)
+{
+    std::vector<double> gridr = math::createUniformGrid(101, -1., +1.), gridm(gridr.size());
+    for(unsigned int i=0; i<gridr.size(); i++) {
+        // logarithmic grid in r from 1e-5 to 1e5 with a denser spacing around r=1
+        gridr[i] = pow(10., gridr[i] * (2 + 3*pow_2(gridr[i])));
+        coord::GradCyl grad;
+        pot.eval(coord::PosCyl(gridr[i], 0, 0), NULL, &grad);
+        gridm[i] = pow_2(gridr[i]) * grad.dR;
+    }
+    return math::LogLogSpline(gridr, galaxymodel::densityFromCumulativeMass(gridr, gridm));
+}
+
+/// check the accuracy and print a warning if it's not within the required tolerance
+std::string checkLess(double val, double max, bool &ok)
+{
+    if(!(val<max))
+        ok = false;
+    return utils::pp(val, 7) + (val<max ? "" : "\033[1;31m ** \033[0m");
+}
+
+
 template<class RmaxFnc, class PhasevolFnc, class DistrFnc>
 bool test(const potential::BasePotential& pot)
 {
@@ -172,11 +196,11 @@ bool test(const potential::BasePotential& pot)
     const RmaxFnc trueRmax;
     const PhasevolFnc truePhasevol;
     const DistrFnc trueDF(phasevol);
-    math::LogLogSpline intDF = createInterpolatedDF(phasevol, trueDF);
     galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
+    math::LogLogSpline intDF = createInterpolatedDF(phasevol, trueDF);
+    math::LogLogSpline intRho= createInterpolatedDensity(pot);
     math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
         potential::DensityWrapper(pot), potential::PotentialWrapper(pot));
-
     const unsigned int npoints = 100000;
     particles::ParticleArraySph particles = galaxymodel::generatePosVelSamples(interp, trueDF, npoints);
     std::vector<double> particle_h(npoints), particle_m(npoints);
@@ -188,24 +212,44 @@ bool test(const potential::BasePotential& pot)
 
     std::ofstream strm, strmd;
     if(output) {
-        strm. open(("test_pot_"+std::string(pot.name())).c_str());
-        strmd.open(("test_pot_"+std::string(pot.name())+"_dc").c_str());
+        std::string filename = std::string("test_pot_" )+pot.name();
+        // gnuplot script for plotting the results
+        strm.open((filename+".plt").c_str());
+        strm << "set term pdf enhanced size 15cm,10cm\nset output '"+filename+".pdf'\n"
+        "set logscale\nset xrange [1e-7:1e9]\nset yrange [1e-16:1e-4]\n"
+        "set format x '10^{%T}'\nset format y '10^{%T}'\nset multiplot layout 2,2\n"
+        "plot '"+filename+".dat' u 2:(abs(1-$3/$2)) w l title 'Rcirc(E),root', \\\n"
+        "  '' u 2:(abs(1-$4 /$2))  w l title 'Rcirc(E),interp', \\\n"
+        "  '' u 2:(abs(1-$6 /$5))  w l title 'Lcirc(E),root', \\\n"
+        "  '' u 2:(abs(1-$7 /$5))  w l title 'Lcirc(E),interp'\n"
+        "p '' u 2:(abs(1-$22/$21)) w l title 'h(E),interp', \\\n"
+        "  '' u 2:(abs(1-$24/$23)) w l title 'g(E),interp'\n"
+        "p '' u 2:(abs(1-$9 /$8))  w l title 'Rmax(E),root', \\\n"
+        "  '' u 2:(abs(1-$10/$8))  w l title 'Rmax(E),interp', \\\n"
+        "  '' u 2:(abs(1-$12/$11)) w l title 'dRmax/dE,interp'\n"
+        "p '' u 2:(abs(1-$14/$13)) w l title 'Phi(r),interp', \\\n"
+        "  '' u 2:(abs(1-$16/$15)) w l title 'dPhi/dr,interp', \\\n"
+        "  '' u 2:(abs(1-$18/$17)) w l title 'rho(r),interp', \\\n"
+        "  '' u 2:(abs(1-$19/$17)) w l title 'rho(r) from M(r)', \\\n"
+        "  '' u 2:(abs(1-$20/$17)) w l title 'rho(r) from DF'\n";
+        strm.close();
+        strm. open((filename+".dat").c_str());
+        strmd.open((filename+"_dc.dat").c_str());
     }
-    strm << std::setprecision(15) << "E\t"
+    strm << std::setprecision(16) << "E\t"
     "Rcirc(E),true Rcirc,root Rcirc,interp\t"
     "Lcirc(E),true Lcirc,root Lcirc,interp\t"
     "Rmax(E),true Rmax,root Rmax,interp\t"
     "dRmax(E)/dE,true dRmax/dE,interp\t"
     "Phi(Rcirc),true Phi,interp\t"
     "dPhi/dr,true dPhi/dr,interp\t"
-    "rho,true rho,interp rho,sphmod\t"
+    "rho,true rho,interp rho,fromCumulMass rho,fromDF\t"
     "h(E),true h(E),interp g(E),true g(E),interp\t"
     "f(E),true f(E),interp f(E),fit f(E),Eddington f(E),sphmodel\n";
     strmd << std::setprecision(15);
 
     double sumw=0, errRc=0, errRm=0, errPhi=0, errdPhi=0, errdens=0, errg=0, errh=0;
-    // grid in r from 2^-16 to 2^23 by 2^0.25
-    std::vector<double> gridr = math::createExpGrid(157, 1./65536, 8388608);
+    std::vector<double> gridr = math::createExpGrid(321, 1e-7, 1e9);
     std::vector<double> gridPhi(gridr.size());
     for(unsigned int i=0; i<gridr.size(); i++)
         gridPhi[i] = pot.value(coord::PosCyl(gridr[i], 0, 0));
@@ -241,19 +285,21 @@ bool test(const potential::BasePotential& pot)
         double fitf     = fitDF(trueh);
         double eddf     = eddDF(trueh);
         double sphf     = dc.model.value(trueh);
-        double sphdens  = gridRhoDF[i];
+        double cmdens   = intRho(gridr[i]);
+        double dfdens   = gridRhoDF[i];
 
         // density-weighted error: integrate |x-x_true|^2 r^3 d log(r)
         double weight = pow_3(r) * truedens;
-        sumw    += weight;
-        errRc   += weight * pow_2((trueRc  - intRc)   / (trueRc  + intRc)   *2);
-        errRm   += weight * pow_2((trueRm  - intRm)   / (trueRm  + intRm)   *2);
-        errPhi  += weight * pow_2((truePhi - intPhi)  / (truePhi + intPhi)  *2);
-        errdPhi += weight * pow_2((grad.dR - intdPhi) / (grad.dR + intdPhi) *2);
-        errdens += weight * pow_2((truedens- intdens) / (truedens+ intdens) *2);
-        errh    += weight * pow_2((trueh   - inth)    / (trueh   + inth)    *2);
-        errg    += weight * pow_2((trueg   - intg)    / (trueg   + intg)    *2);
-
+        if(weight>0) {
+            sumw    += weight;
+            errRc   += weight * pow_2((trueRc  - intRc)   / (trueRc  + intRc)   *2);
+            errRm   += weight * pow_2((trueRm  - intRm)   / (trueRm  + intRm)   *2);
+            errPhi  += weight * pow_2((truePhi - intPhi)  / (truePhi + intPhi)  *2);
+            errdPhi += weight * pow_2((grad.dR - intdPhi) / (grad.dR + intdPhi) *2);
+            errdens += weight * pow_2((truedens- intdens) / (truedens+ intdens) *2);
+            errh    += weight * pow_2((trueh   - inth)    / (trueh   + inth)    *2);
+            errg    += weight * pow_2((trueg   - intg)    / (trueg   + intg)    *2);
+        }
         strm << E << '\t' <<
             trueRc << ' ' << rootRc << ' ' << intRc << '\t' <<
             trueLc << ' ' << rootLc << ' ' << intLc << '\t' <<
@@ -261,8 +307,8 @@ bool test(const potential::BasePotential& pot)
             truedRmdE << ' ' << intdRmdE << '\t' <<
             truePhi<< ' ' << intPhi << '\t'<< 
             grad.dR<< ' ' << intdPhi<< '\t'<<
-            truedens<<' ' << intdens<< ' ' << sphdens << '\t'<<
-            trueh  << ' ' << inth   << ' ' << trueg << ' ' << intg << '\t' <<
+            truedens<<' ' << intdens<< ' ' << cmdens << ' ' << dfdens << '\t' <<
+            trueh  << ' ' << inth   << ' ' << trueg  << ' ' << intg   << '\t' <<
             intDEE << ' ' << intDE  << '\t'<<
             truef  << ' ' << intf   << ' ' << fitf << ' ' << eddf << ' ' << sphf << '\n';
 
@@ -288,12 +334,14 @@ bool test(const potential::BasePotential& pot)
     errdens = sqrt(errdens/sumw);
     errh    = sqrt(errh/sumw);
     errg    = sqrt(errg/sumw);
-    std::cout << pot.name() << ": weighted RMS error in Rcirc=" << errRc << ", Rmax=" << errRm <<
-    ", Phi=" << errPhi << ", dPhi/dr=" << errdPhi << ", rho=" << errdens <<
-    ", h=" << errh << ", g=" << errg << "\n";
-    ok &= errRc  < 1e-09 && errRm   < 1e-10 &&
-          errPhi < 1e-10 && errdPhi < 1e-08 && errdens < 1e-03 &&
-          errh   < 1e-08 && errg    < 1e-08;
+    std::cout << "\033[1;33m " << pot.name() << " \033[0m: weighted RMS error in"
+    "  Rcirc=" + checkLess(errRc,  1e-09, ok) +
+    ", Rmax="  + checkLess(errRm,  1e-10, ok) +
+    ", Phi="   + checkLess(errPhi, 1e-10, ok) +
+    ", dPhi/dr="+checkLess(errdPhi,1e-08, ok) +
+    ", rho="   + checkLess(errdens,1e-03, ok) +
+    ", h="     + checkLess(errh,   1e-08, ok) +
+    ", g="     + checkLess(errg,   1e-08, ok) + "\n";
     return ok;
 }
 

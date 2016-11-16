@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <algorithm>
 #include <cmath>
+#include <cfloat>
 #include <cassert>
 #include <stdexcept>
 
@@ -18,6 +19,9 @@ static const double ACCURACY_INTERP = 1e-6;
 
 /// a number that is considered nearly infinity in log-scaled root-finders
 static const double HUGE_NUMBER = 1e100;
+
+/// safety factor to avoid roundoff errors in estimating the inner/outer asymptotic slopes
+const double ROUNDOFF_THRESHOLD = 1e5 * DBL_EPSILON;
 
 /// fixed order of Gauss-Legendre integration for each segment of a log-grid
 static const int GLORDER = 8;
@@ -345,13 +349,10 @@ void epicycleFreqs(const BasePotential& potential, const double R,
 
 double innerSlope(const BasePotential& potential, double* Phi0, double* coef)
 {
-    // the choice of r must balance two opposite requirements:
-    // it should be close enough to origin so that we really probe the inner slope,
-    // but not too close so that Phi(r)-Phi(0) has enough significant digits;
-    // in the case of a constant-density core the latter quantity is proportional to r^2,
-    // so with r = double_epsilon^(1/3) ~ 1e-5 the values of Phi(r) and Phi(0) 
-    // may coincide in the first 10 digits, leaving 5 significant digits when subtracted.
-    double r = 1e-5;
+    // this routine shouldn't suffer from cancellation errors, provided that
+    // the potential and its derivatives are computed accurately,
+    // thus we may use a fixed tiny radius at which the slope is estimated.
+    double r = 1e-10;
     double val;
     coord::GradCyl grad;
     coord::HessCyl hess;
@@ -366,14 +367,27 @@ double innerSlope(const BasePotential& potential, double* Phi0, double* coef)
 
 double outerSlope(const BasePotential& potential, double* M, double* coef)
 {
-    // TODO here and in the previous routine:  make the choice of r scale-invariant;
-    // add checks for roundoff errors and possibly iterate with adjusted value of r
-    double r = 1e+5;
-    double val;
+    double r = 1e+10;  // start reasonably far...
+    double val, s;
     coord::GradCyl grad;
     coord::HessCyl hess;
-    potential.eval(coord::PosCyl(r,0,0), &val, &grad, &hess);
-    double  s = (2*grad.dR + r*hess.dR2) / (grad.dR + val/r);
+    bool roundoff = false;
+    int numiter = 0;
+    do {
+        if(roundoff)  // at each iteration, decrease the radius at which the estimates are made,
+            r /= 10;  // if the computation was dominated by roundoff error at the previous iteration
+        potential.eval(coord::PosCyl(r,0,0), &val, &grad, &hess);
+        double num1 = 2*grad.dR, num2 = -r*hess.dR2, den1 = grad.dR, den2 = -val/r;
+        s = (num1 - num2) / (den1 - den2);
+        roundoff =    // check if the value of s is dominated by roundoff errors
+            fabs(num1-num2) < fmax(fabs(num1), fabs(num2)) * ROUNDOFF_THRESHOLD ||
+            fabs(den1-den2) < fmax(fabs(den1), fabs(den2)) * ROUNDOFF_THRESHOLD;
+    } while(roundoff && ++numiter<10);
+    if(roundoff || s>0) {    // not successful - return the total mass only
+        if(coef) *coef=0;
+        if(M)    *M = -potential.value(coord::PosCyl(r,0,0)) * r;
+        return 0;
+    }
     if(coef)
         *coef = s==-1 ?  (val + r*grad.dR) * r  :  (val + r*grad.dR) * pow(r, -s) / (s+1);
     if(M)

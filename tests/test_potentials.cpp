@@ -41,8 +41,7 @@ bool testPotential(const potential::BasePotential& potential)
         ", M(r<10) is "<<potential.enclosedMass(10)<<
         ", M(r<1e9) is "<<potential.enclosedMass(1e9)<<"\n";
     if(!isZRotSymmetric(potential) ||
-        potential.name() == potential::Logarithmic::myName() ||
-        potential.name() == potential::Dehnen::myName())
+        potential.name() == potential::Logarithmic::myName() )
         // non-axisymmetric or infinite potentials are not amenable for further tests
         return ok;
     // test interpolated potential
@@ -69,7 +68,7 @@ bool testPotential(const potential::BasePotential& potential)
             "  '' u 2:(abs($17/$14-1)) w l title 'rho,interp'\n";
             strm.close();
             strm.open((filename+".dat").c_str());
-            strm << std::setprecision(15) << "E\t"
+            strm << std::setprecision(16) << "E\t"
             "R Rc_root(E) Rc_interp(E)\t"
             "Lc Lc_root(E) Lc_interp(E)\t"
             "Rc_root(Lc) Rc_interp(Lc)\t"
@@ -78,7 +77,7 @@ bool testPotential(const potential::BasePotential& potential)
         }
         double sumw = 0, errRcR = 0, errRcI = 0, errLcR = 0, errLcI = 0,
         errRLR = 0, errRLI = 0, errRmR = 0, errRmI = 0, errPhiI = 0, errdPhiI = 0;
-        for(double lr=-7; lr<=9; lr+=.125) {
+        for(double lr=-7; lr<=9; lr+=.0625) {
             double r = pow(10., lr);
             double Phi;
             coord::GradCyl grad;
@@ -137,7 +136,7 @@ bool testPotential(const potential::BasePotential& potential)
         // only an approximation and not infinitely smooth, thus its interpolated version
         // is not required to be exceedingly accurate
         double tol =
-            potential.name() == potential::Multipole::myName() ? 3e3 :
+            potential.name() == potential::Multipole::myName() ? 1e4 :
             potential.name() == potential::CylSpline::myName() ? 1e2 :
             potential.name() == potential::CompositeCyl::myName() ? 1e2 : 1.;
         std::cout << "Density-weighted RMS errors"
@@ -156,10 +155,10 @@ bool testPotential(const potential::BasePotential& potential)
         std::cout << "Cannot create interpolator: "<<e.what()<<"\n";
         ok = false;
     }
-#if 0
+#if 1
     try{
         potential::Interpolator2d interp(potential);
-        actions::ActionFinderSpherical af(potential);
+        /*actions::ActionFinderSpherical af(potential);
         std::ofstream strm;
         if(output)
             strm.open((std::string("testr_pot_")+potential.name()).c_str());
@@ -186,7 +185,7 @@ bool testPotential(const potential::BasePotential& potential)
                     act.Jr/Lc << ' ' << Jr/Lc << '\n'; 
             }
             strm<<'\n';
-        }
+        }*/
     }
     catch(std::exception& e) {
         std::cout << "Cannot create 2d interpolator: "<<e.what()<<"\n";
@@ -251,7 +250,7 @@ const char* test_galpot_params[] = {
 // an extreme case of a spheroid profile with a very steep cusp and slow fall-off
 "0\n"
 "1\n"
-"1e10 0.5 2.4 2.6 1 0\n"
+"1e10 0.5 2.5 2.5 1 0\n"
 };
 
 /*const int numtestpoints=3;
@@ -288,10 +287,8 @@ int main() {
     pots.push_back(potential::PtrPotential(new potential::NFW(10.,10.)));
     pots.push_back(potential::PtrPotential(new potential::MiyamotoNagai(5.,2.,0.2)));
     pots.push_back(potential::PtrPotential(new potential::Logarithmic(1.,0.01,.8,.5)));
-    pots.push_back(potential::PtrPotential(new potential::Logarithmic(1.,.7,.5)));
     pots.push_back(potential::PtrPotential(new potential::Ferrers(1.,0.9,.7,.5)));
-    pots.push_back(potential::PtrPotential(new potential::Dehnen(2.,1.,1.5,.7,.5)));
-    pots.push_back(potential::PtrPotential(new potential::Dehnen(2.,1.,1.5,1.,.5)));
+    pots.push_back(potential::PtrPotential(new potential::Dehnen(2.,1.,1.5,1.,1.)));
     pots.push_back(potential::CylSpline::create(potential::DiskDensity(
         potential::DiskParam(1., 2., -0.2, 0, 0)), 0, 20, 0.1, 500, 20, 0.01, 50));
     pots.push_back(make_galpot(test_galpot_params[0]));

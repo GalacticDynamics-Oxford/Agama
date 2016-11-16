@@ -16,8 +16,11 @@ static const double EPSREL_POTENTIAL_INT = 1e-6;
 // 2) replace the integration with a spherical-harmonic expansion up to l=2 at large radii
 //    (like in Ferrers potential, but will need to take into account that density is non-zero
 //    at all radii) - possible but would require extra work;
-// 3) use a multipole expansion implemented in SplineExp or Multipole potential instead -
-//    a preferred solution.
+// 3) use a Multipole potential expansion instead - a preferred solution.
+//    For this to work properly, one needs to supply the *density* profile, not the potential,
+//    so that the Multipole potential will solve the Poisson equation itself.
+//    This may be done by down-casting an instance of Dehnen class to BaseDensity,
+//    or by using a SpheroidDensity object instead.
     
 Dehnen::Dehnen(double _mass, double _scalerad, double _gamma, double _axisRatioY, double _axisRatioZ): 
     BasePotentialCar(), mass(_mass), scalerad(_scalerad),
@@ -42,7 +45,8 @@ class DehnenIntegrandPhi: public math::IFunctionNoDeriv {
     double X2, Y2, Z2, gamma, q2, p2;
 public:
     DehnenIntegrandPhi(const coord::PosCar& pt, double gam, double q, double p, double scalerad) :
-        X2(pow_2(pt.x/scalerad)), Y2(pow_2(pt.y/scalerad)), Z2(pow_2(pt.z/scalerad)), gamma(gam), q2(q*q), p2(p*p) {};
+        X2(pow_2(pt.x/scalerad)), Y2(pow_2(pt.y/scalerad)), Z2(pow_2(pt.z/scalerad)),
+    gamma(gam), q2(q*q), p2(p*p) {};
     virtual double value(double s) const {
         const double s2 = s*s;
         const double m = s * sqrt( X2 + Y2/(1-(1-q2)*s2) + Z2/(1-(1-p2)*s2) );
@@ -66,13 +70,17 @@ public:
         const double m = s * sqrt(X2 / (a2 + C1*s2) + Y2 / (a2 + C2*s2) + Z2 / (a2 + C3*s2) );
         double result = s2 * pow(m/(1+m), -gamma);
         switch(mode) {
-            case FORCE:  return result / pow_2(pow_2(1+m)) /
+            case FORCE:
+                return result / pow_2(pow_2(1+m)) /
                 sqrt( (a2 + C1*s2) * (a2 + C2*s2) * (a2 + C3*s2) );
-            case DERIV:  return result * s2 * (gamma + 4*m) / (pow_2(m * pow_2(1+m)) * (1+m) * 
+            case DERIV:
+                return result * s2 * (gamma + 4*m) / (pow_2(m * pow_2(1+m)) * (1+m) * 
                 sqrt( (a2 + C1*s2) * (a2 + C2*s2) * (a2 + C3*s2) ) );
-            case DERIV_MIXED:  return result * s2 * (gamma + 4*m) / (pow_2(m * pow_2(1+m)) * (1+m) * 
+            case DERIV_MIXED:
+                return result * s2 * (gamma + 4*m) / (pow_2(m * pow_2(1+m)) * (1+m) * 
                 sqrt( (a2 + C5*s2) * pow_3(a2 + C4*s2) ) );
-            default:  throw std::runtime_error("Incorrect integration mode in Dehnen potential");  // shouldn't happen
+            default:  // shouldn't happen
+                throw std::runtime_error("Incorrect integration mode in Dehnen potential");
         }
     }
 };
@@ -83,9 +91,13 @@ void Dehnen::evalCar(const coord::PosCar &pos,
 {
     if(axisRatioY==1 && axisRatioZ==1) {  // analytical expression for spherical potential
         double r = sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
-        if(potential!=NULL)
-            *potential = r==INFINITY ? 0 :
-                mass/scalerad * (gamma==2 ? log(r/(r+scalerad)) : (1-pow(r/(r+scalerad), 2-gamma))/(gamma-2) );
+        if(potential!=NULL) {
+            double x = scalerad / r;
+            *potential = mass/scalerad * (gamma==2 ? -log(1+x) :
+                x > 2e-3/(4-gamma) ? (1-pow(1+x, gamma-2))/(gamma-2) :
+                /* asymptotic expansion for r-->infinity, or equivalently x-->0 */
+                -x * (1 + x * (gamma-3)/2 * (1 + x * (gamma-4)/3 * (1 + x * (gamma-5)/4))) );
+        }
         double val = mass*pow(r, -gamma)*pow(r+scalerad, gamma-3);
         if(deriv!=NULL) {
             deriv->dx = r>0 ? val*pos.x : 0;
