@@ -153,7 +153,9 @@ public:
         the initial distribution function will be constructed using the Eddington inversion formula.
         \param[in]  externalPotential  (optional) is an additional spherically-symmetric potential
         (e.g., a central black hole), which will be summed with the self-consistently generated
-        potential of the evolving model; may be omitted.
+        potential of the evolving model; may be omitted;
+        \param[in]  gridh  (optional) is the grid in phase volume at which the DF is discretized;
+        if omitted, it will be constructed automatically by the Eddington inversion routine.
     */
     FokkerPlanckSolver(const math::IFunction& initDensity,
         const potential::PtrPotential& externalPotential = potential::PtrPotential(),

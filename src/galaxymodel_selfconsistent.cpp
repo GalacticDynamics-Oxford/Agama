@@ -137,13 +137,13 @@ void doIteration(SelfConsistentModel& model)
     }
 
     // now update the overall potential and reinit the action finder
-    std::cout << "Updating potential..."<<std::flush;
     updateTotalPotential(model);
-    std::cout << "done"<<std::endl;
 }
 
 void updateTotalPotential(SelfConsistentModel& model)
 {
+    std::cout << "Updating potential..."<<std::flush;
+
     // temporary array of density and potential objects from components
     std::vector<PtrDensity> compDensSph;
     std::vector<PtrDensity> compDensDisk;
@@ -201,7 +201,9 @@ void updateTotalPotential(SelfConsistentModel& model)
         model.totalPotential.reset(new potential::CompositeCyl(compPot));
 
     // update the action finder
+    std::cout << "done\nUpdating action finder..."<<std::flush;
     model.actionFinder.reset(new actions::ActionFinderAxisymFudge(model.totalPotential));
+    std::cout << "done"<<std::endl;
 }
 
 }  // namespace

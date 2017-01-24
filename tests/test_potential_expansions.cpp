@@ -5,6 +5,7 @@
 #include "potential_sphharm.h"
 #include "potential_factory.h"
 #include "potential_galpot.h"
+#include "galaxymodel.h"
 #include "particles_io.h"
 #include "debug_utils.h"
 #include "utils.h"
@@ -174,6 +175,7 @@ bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDen
     return totWeightedDif<eps;
 }
 
+// test the consistency of spherical-harmonic expansion
 bool testDensSH()
 {
     const potential::Dehnen dens(1., 1., 1.2, 0.8, 0.5);
@@ -265,6 +267,55 @@ bool checkSH(const math::SphHarmIndices& ind)
     return true;
 }
 
+// a simple density profile that is constant within a sphere of given radius,
+// which may be offset from the origin
+class DensityBlob: public potential::BaseDensity{
+public:
+    double r, x, y, z;
+    DensityBlob(double _r, double _x, double _y, double _z) : r(_r), x(_x), y(_y), z(_z) {}
+    virtual coord::SymmetryType symmetry() const {
+        return static_cast<coord::SymmetryType>(coord::ST_SPHERICAL*(x==0&&y==0&&z==0) |
+        coord::ST_XREFLECTION*(x==0) | coord::ST_YREFLECTION*(y==0) | coord::ST_ZREFLECTION*(z==0));
+    }
+    virtual const char* name() const { return "Blob"; };
+    virtual double densityCar(const coord::PosCar &pos) const {
+        return (pow_2(pos.x-x) + pow_2(pos.y-y) + pow_2(pos.z-z) < pow_2(r)) ? 3/(4*M_PI*pow_3(r)) : 0;
+    }
+    virtual double densityCyl(const coord::PosCyl &pos) const { return densityCar(toPosCar(pos)); }
+    virtual double densitySph(const coord::PosSph &pos) const { return densityCar(toPosCar(pos)); }
+};
+
+// test that the approximation of a "density blob" indeed closely resembles a sphere
+bool testBlob(const potential::BaseDensity& approx, const DensityBlob& blob)
+{
+    const int npt=100000;
+    particles::ParticleArray<coord::PosCar> points(galaxymodel::generateDensitySamples(approx, npt));
+    double avgr = 0, avgr2 = 0;
+    int npt_in_sphere = 0;
+    for(int i=0; i<npt; i++) {
+        double r = sqrt(
+            pow_2(points[i].first.x - blob.x) +
+            pow_2(points[i].first.y - blob.y) +
+            pow_2(points[i].first.z - blob.z));
+        if(r <= blob.r) {
+            avgr += r;
+            avgr2+= r*r;
+            npt_in_sphere++;
+        }
+    }
+    avgr /= npt_in_sphere;
+    avgr2/= npt_in_sphere;
+    bool ok = npt_in_sphere > npt * 0.85  &&
+        fabs(avgr  / (0.75 * blob.r) - 1) < 0.05  &&
+        fabs(avgr2 / (0.6 * pow_2(blob.r)) - 1) < 0.05;
+    std::cout << "Blob-test for " << approx.name() <<
+        " at (" << blob.x << ',' << blob.y << ',' << blob.z << "): " <<
+        (npt_in_sphere*100./npt) << "% of mass is inside the sphere, "
+        "<r>=" << avgr << ", <r^2>=" << avgr2 <<
+        (ok ? "\n" : "\033[1;31m **\033[0m\n");
+    return ok;
+}
+
 int main() {
 #if 0
     for(unsigned int m=0; m<=12; m++) {
@@ -335,9 +386,13 @@ int main() {
     PtrPotential test5_Galpot = createGalaxyPotential(                   // potential of d-exp disk,
         std::vector<potential::DiskParam>(1, test5_ExpdiskParam),        // computed using the GalPot approach
         std::vector<potential::SphrParam>());
-    const potential::Dehnen test6_Dehnen05Tri(1., 1., 0.5, 0.8, 0.5);     // triaxial weakly cuspy
+    const potential::Dehnen test6_Dehnen05Tri(1., 1., 0.5, 0.8, 0.5);    // triaxial weakly cuspy
     // N-body representation of the same profile
     particles::ParticleArray<coord::PosCar> test6_points = makeDehnen(100000, 0.5, 0.8, 0.5);
+    const DensityBlob test7x(1., 0.6, 0.0, 0.0);   // a constant-density sphere shifted along x-axis
+    const DensityBlob test7y(1., 0.0, 0.7, 0.0);   // same for y-axis
+    const DensityBlob test7z(1., 0.0, 0.0, 0.8);   // same for z-axis
+    const DensityBlob test7d(1., 0.3, 0.4, 0.5);   // shifted diagonally
 
     // 3b. test the approximating density profiles
     std::cout << "--- Testing accuracy of density profile interpolators: "
@@ -374,7 +429,7 @@ int main() {
     ok &= testAverageError(
         *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 100),
         test5_ExpdiskAxi, 0.05);
-
+    
     // 3c. test the approximating potential profiles
     std::cout << "--- Testing potential approximations: "
     "print density-averaged rms errors in potential, force and density ---\n";
@@ -435,7 +490,7 @@ int main() {
     std::cout << "--- Axisymmetric ExpDisk ---\n";
     PtrPotential test5c = potential::CylSpline::create(
         test5_ExpdiskAxi, 0, 20, 5e-2, 50., 20, 1e-2, 10.);
-    ok &= testAverageError(*test5c, *test5_Galpot, 0.05);
+    ok &= testAverageError(*test5c, *test5_Galpot, 0.06);
 
     // mildly triaxial, created from N-body samples
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";
@@ -452,6 +507,18 @@ int main() {
     ok &= testAverageError(*test6s, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6m, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.5);
+    
+    std::cout << "--- Testing the accuracy of representation of an off-centered constant-density sphere ---"
+        "\n--- Ideally all mass should be contained within the sphere radius, <r>=3/4, <r^2>=3/5 ---\n";
+    ok &= testBlob(*potential::Multipole::create(test7x, 8, 8, 40, 0.05, 2.0), test7x);
+    ok &= testBlob(*potential::Multipole::create(test7y, 8, 8, 40, 0.05, 2.0), test7y);
+    ok &= testBlob(*potential::Multipole::create(test7z, 8, 8, 40, 0.05, 2.0), test7z);
+    ok &= testBlob(*potential::Multipole::create(test7d, 8, 8, 40, 0.05, 2.0), test7d);
+    ok &= testBlob(*potential::CylSpline::create(test7x, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7x);
+    ok &= testBlob(*potential::CylSpline::create(test7y, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7y);
+    ok &= testBlob(*potential::CylSpline::create(test7z, 6, 10, 0.1, 1.0, 20, 0.1, 2.0), test7z);
+    ok &= testBlob(*potential::CylSpline::create(test7d, 6, 15, 0.1, 1.5, 15, 0.1, 1.5), test7d);
+    
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

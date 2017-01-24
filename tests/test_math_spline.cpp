@@ -1,6 +1,3 @@
-//#define COMPARE_WD_PSPLINE
-#define STRESS_TEST
-
 #include "math_spline.h"
 #include "math_core.h"
 #include "math_sphharm.h"
@@ -9,16 +6,13 @@
 #include "utils.h"
 #include <iostream>
 #include <fstream>
-#include <iomanip>
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
 #include <cassert>
-#ifdef COMPARE_WD_PSPLINE
-#include "torus/WD_Pspline.h"
-#endif
 
+#include "debug_utils.h"
 const bool OUTPUT = utils::verbosityLevel >= utils::VL_VERBOSE;
 
 bool testCond(bool condition, const char* errorMessage)
@@ -66,11 +60,30 @@ private:
     const math::IFunction& f;
 };
 
+//#define TESTFNC1D_SMOOTH
+
 // provides a function of 1 variable to interpolate
 class testfnc1d: public math::IFunction {
 public:
     void evalDeriv(const double x, double* val, double* der, double* der2, double* der3) const
     {
+#ifdef TESTFNC1D_SMOOTH
+        // a very special case of a function with 3 zero derivatives at x=0 and x=pi
+        double y = x / M_PI;
+        double q = M_PI*y*y*(3-2*y);
+        double s = sin(q);
+        double c = cos(q);
+        double t = 6*y*(1-y);
+        if(val)
+            *val = s*s;
+        if(der)
+            *der = 2*t*s*c;
+        if(der2)
+            *der2 = 2*t*t*(c*c-s*s) + 12/M_PI*(1-2*y)*s*c;
+        if(der3)
+            *der3 = -8*(t*t*t+3/M_PI/M_PI)*c*s + 216/M_PI*y*(1-y)*(1-2*y)*(c*c-s*s);
+#else
+        // a more general case of an oscillating function
         double sqx = sqrt(x);
         double y0 = sin(4*sqx);
         double y0p  = cos(4*sqx) * 2 / sqx;
@@ -82,6 +95,7 @@ public:
             *der2 = -(4*y0 + 0.5*y0p) / x;
         if(der3)
             *der3 = (6*y0 + (0.75-4*x)*y0p) / pow_2(x);
+#endif
     }
     virtual void evalDeriv(const double x, double* val=NULL, double* der=NULL, double* der2=NULL) const {
         evalDeriv(x, val, der, der2, NULL);
@@ -94,11 +108,19 @@ class testfnc2d: public math::IFunctionNdimDeriv {
 public:
     virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
     {
+        double val = exp(-pow_2(vars[0])-pow_2(vars[1]));
         if(values)
-            *values = sin(pow_2(vars[0])) * sin(vars[1]);
+            *values = val;
         if(derivs) {
-            derivs[0] = 2*vars[0] * cos(pow_2(vars[0])) * sin(vars[1]);
-            derivs[1] = sin(pow_2(vars[0])) * cos(vars[1]);
+            derivs[0] = -2*vars[0]*val;
+            derivs[1] = -2*vars[1]*val;
+            // output second and higher derivs as well
+            derivs[2] = (4*pow_2(vars[0])-2)*val; // f_xx
+            derivs[3] =  4* vars[0]*vars[1] *val; // f_xy
+            derivs[4] = (4*pow_2(vars[1])-2)*val; // f_yy
+            derivs[5] = 4*vars[1]*(1-2*pow_2(vars[0]))*val; // f_xxy
+            derivs[6] = 4*vars[0]*(1-2*pow_2(vars[1]))*val; // f_xyy
+            derivs[7] = 4*(1-pow_2(vars[0]))*(1-2*pow_2(vars[1]))*val; // f_xxyy
         }
     }
     virtual unsigned int numVars() const { return 2; }
@@ -119,37 +141,82 @@ public:
 //----------- test penalized smoothing spline fit to noisy data -------------//
 bool testPenalizedSplineFit()
 {
+    std::cout << "\033[1;33m1d penalized fitting\033[0m\n";
     bool ok=true;
     const int NNODES  = 20;
     const int NPOINTS = 10000;
     const double XMIN = 0.2;
     const double XMAX = 12.;
     const double DISP = 0.5;  // y-dispersion
+    // construct the grid of knots for the spline approximation
     std::vector<double> xnodes = math::createNonuniformGrid(NNODES, XMIN, XMAX, false);
+    // eliminate the last knot -- the spline will be linearly extrapolated
+    // beyond the new last knot
     xnodes.pop_back();
-    std::vector<double> xvalues(NPOINTS), yvalues1(NPOINTS), yvalues2(NPOINTS);
 
+    // arrays of x-points and corresponding function values
+    // (two sets of values with different noise levels)
+    std::vector<double> xvalues(NPOINTS), yvalues1(NPOINTS), yvalues2(NPOINTS);
     for(int i=0; i<NPOINTS; i++) {
         xvalues [i] = math::random()*XMAX;
         yvalues1[i] = sin(4*sqrt(xvalues[i])) + DISP*(math::random()-0.5);
         yvalues2[i] = cos(4*sqrt(xvalues[i])) + DISP*(math::random()-0.5)*4;
     }
+
+    // construct the spline approximation object, common for both sets of y-values
     math::SplineApprox appr(xnodes, xvalues);
-    double rms, edf;
+    double rms1, edf1, rms2, edf2, rmsw, edfw;
 
-    math::CubicSpline fit1(xnodes, appr.fitOptimal(yvalues1, &rms, &edf));
-    std::cout << "case A: RMS=" << rms<<", EDF="<<edf<<"\n";
-    ok &= rms<0.2 && edf>=2 && edf<NNODES+2;
+    math::CubicSpline fit1(xnodes, appr.fitOptimal(yvalues1, &rms1, &edf1));
+    std::cout << "case A: RMS=" << rms1 << ", EDF=" << edf1 << "\n";
+    ok &= rms1<0.2 && edf1>=2 && edf1<NNODES+2;
 
-    math::CubicSpline fit2(xnodes, appr.fitOversmooth(yvalues2, .5, &rms, &edf));
-    std::cout << "case B: RMS="<<rms<<", EDF="<<edf<<"\n";
-    ok &= rms<1.0 && edf>=2 && edf<NNODES+2;
+    math::CubicSpline fit2(xnodes, appr.fitOversmooth(yvalues2, .5, &rms2, &edf2));
+    std::cout << "case B: RMS=" << rms2 << ", EDF=" << edf2 << "\n";
+    ok &= rms2<1.0 && edf2>=2 && edf2<NNODES+2;
+
+    // test the weighted regression:
+    // split some of the input points into four identical ones,
+    // and assign them a four times smaller weight
+    std::vector<double> weights(NPOINTS, 1.0);
+    for(int i=0; i<NPOINTS; i++) {
+        weights[i] *= 1e5;  // test scale-invariance w.r.t. rescaling the weights
+        // split some points that lie above the original trend line (i.e. make a biased distribution)
+        if(yvalues1[i] >= sin(4*sqrt(xvalues[i])) && math::random() <= 0.5) {
+            weights[i] *= 0.25;
+            for(int k=1; k<4; k++) {  // add duplicate points
+                xvalues. push_back(xvalues [i]);
+                yvalues1.push_back(yvalues1[i]);
+                yvalues2.push_back(yvalues2[i]);
+                weights. push_back(weights [i]);
+            }
+        }
+    }
+    // create another spline approximation object for this expanded set of points
+    math::SplineApprox apprw(xnodes, xvalues, weights);
+    // fitting with the same EDF as the original dataset should recover the same result
+    apprw.fit(yvalues1, edf1, &rmsw);
+    std::cout << "case A': RMS=" << rmsw <<", EDF=" << edf1 << "\n";
+    ok &= math::fcmp(rmsw, rms1, 1e-10) == 0;
+    apprw.fit(yvalues2, edf2, &rmsw);
+    std::cout << "case B': RMS=" << rmsw <<", EDF=" << edf2 << "\n";
+    ok &= math::fcmp(rmsw, rms2, 1e-10) == 0;
+    // fitting with "optimal" or "oversmoothed" option will result in a somewhat less smoothed curve
+    // than the original one, because the number of data points has increased
+    math::CubicSpline fitw1(xnodes, apprw.fitOptimal(yvalues1, &rmsw, &edfw));
+    std::cout << "case A\": RMS=" << rmsw <<", EDF=" << edfw << "\n";
+    ok &= math::fcmp(rmsw, rms1, 1e-2) == 0 && math::fcmp(edfw, edf1, 1e-2) == 0;
+    math::CubicSpline fitw2(xnodes, apprw.fitOversmooth(yvalues2, .5, &rmsw, &edfw));
+    std::cout << "case B\": RMS=" << rmsw <<", EDF=" << edfw << "\n";
+    ok &= math::fcmp(rmsw, rms2, 1e-2) == 0 && math::fcmp(edfw, edf2, 1e-2) == 0;
 
     if(OUTPUT) {
         std::ofstream strm("test_math_spline_fit.dat");
-        for(size_t i=0; i<xvalues.size(); i++)
+        for(int i=0; i<NPOINTS; i++) {
             strm << xvalues[i] << "\t" << yvalues1[i] << "\t" << yvalues2[i] << "\t" <<
-                fit1(xvalues[i]) << "\t" << fit2(xvalues[i]) << "\n";
+                fit1(xvalues[i]) << "\t" << fitw1(xvalues[i]) << "\t" <<
+                fit2(xvalues[i]) << "\t" << fitw2(xvalues[i]) << "\n";
+        }
     }
     return ok;
 }
@@ -223,12 +290,13 @@ double kernelDensity(double x, const std::vector<double>& xvalues,
 
 bool testPenalizedSplineDensity()
 {
+    std::cout << "\033[1;33m1d density estimate\033[0m\n";
     bool ok=true;
 #if 1
-    const double MEAN1= 2.0, DISP1=0.1, MEAN2=3.0, DISP2=1.0;// parameters of density function
+    const double MEAN1= 2.0, DISP1=0.1, MEAN2=3.0, DISP2=1.0; // parameters of density function
     const double NORM = 1.;   // normalization (sum of weights of all samples)
-    const double XMIN = 0;//fmin(MEAN1-3*DISP1, MEAN2-3*DISP2);  // limits of the interval for
-    const double XMAX = 6;//fmax(MEAN1+3*DISP1, MEAN2+3*DISP2);  // constructing the estimators
+    const double XMIN = 0;    //fmin(MEAN1-3*DISP1, MEAN2-3*DISP2);  // limits of the interval for
+    const double XMAX = 6;    //fmax(MEAN1+3*DISP1, MEAN2+3*DISP2);  // constructing the estimators
     // whether to assume that the domain is infinite
     const math::FitOptions OPTIONS = math::FitOptions(math::FO_INFINITE_LEFT | math::FO_INFINITE_RIGHT);
     // density function from which the samples are drawn
@@ -240,7 +308,7 @@ bool testPenalizedSplineDensity()
     const math::FitOptions OPTIONS = math::FitOptions();
     Density2 dens(A, B, NORM);
 #endif
-    const int NPOINTS = 1000; // # of points to sample
+    const int NPOINTS = 1000;  // # of points to sample
     const int NNODES  = 49;    // nodes in the estimated density function
     const int NCHECK  = 321;   // points to measure the estimated density
     const double SMOOTHING=.5; // amount of smoothing applied to penalized spline estimate
@@ -389,59 +457,99 @@ bool testLogScaledSplines()
         errDer2S< 2e-2 && errDer2L< 5e-2 && errDer2D< 4e-2;
 }
 
+#ifdef  TESTFNC1D_SMOOTH
+const double XMIN1D = 0;
+const double XMAX1D = M_PI;
+#else
+const double XMIN1D = 0.4;
+const double XMAX1D = 6.2832;
+#endif
+
+// simple wrapper that binds together a 1d B-spline interpolator and the array of its amplitudes
+class BsplineWrapper: public math::IFunctionNoDeriv {
+    const math::BsplineInterpolator1d<3>& spl;
+    const std::vector<double>& ampl;
+public:
+    BsplineWrapper(const math::BsplineInterpolator1d<3>& _spl, const std::vector<double>& _ampl) :
+        spl(_spl), ampl(_ampl) {}
+    virtual double value(double x) const {
+        return spl.interpolate(x, ampl);
+    }
+};
+
+// performance test - repeat spline evaluation many times
+template<int numDeriv>
+std::string evalSpline(const math::IFunction& fnc)
+{
+    const int NUM_ITER = 100000, NPOINTS = 100;
+    double RATE = 1.0 * NUM_ITER * NPOINTS * CLOCKS_PER_SEC;
+    clock_t clk = std::clock();
+    for(int t=0; t<NUM_ITER; t++) {
+        for(int i=0; i<=NPOINTS; i++) {
+            double x = i * (XMAX1D-XMIN1D) / NPOINTS + XMIN1D, v, d, s;
+            fnc.evalDeriv(x, &v, numDeriv>=1 ? &d : NULL, numDeriv>=2 ? &s : NULL);
+        }
+    }
+    return utils::pp(RATE/(std::clock()-clk), 6);
+}
+
 bool test1dSpline()
 {
+    std::cout << "\033[1;33m1d interpolation\033[0m\n";
     const int NNODES  = 20;
-    const int NSUBINT = 16;
-    const double XMIN = 0.2;
-    const double XMAX = 12.0123456;
-    testfnc1d fnc;   // the original function that we are approximating
+    const int NSUBINT = 50;
     std::vector<double> yvalues(NNODES), yderivs(NNODES);
-    std::vector<double> xnodes = math::createNonuniformGrid(NNODES, XMIN, XMAX, false);
-    xnodes[1]=(xnodes[1]+xnodes[2])/2;  // slightly squeeze grid spacing to allow
-    xnodes[0]*=2;                       // a better interpolation of a strongly varying function
-    for(int i=0; i<NNODES; i++) {
+    std::vector<double> xnodes = math::createUniformGrid(NNODES, XMIN1D, XMAX1D);
+    //for(int i=0; i<NNODES; i++)   // this would create a denser grid towards the endpoints
+    //    xnodes[i] = XMIN1D + (XMAX1D-XMIN1D) * pow_2(i/(NNODES-1.))*(3-2*i/(NNODES-1.));
+    testfnc1d fnc;   // the original function that we are approximating
+    for(int i=0; i<NNODES; i++)
         fnc.evalDeriv(xnodes[i], &yvalues[i], &yderivs[i]);
-    }
 
     // a collection of approximating splines of various types:
+    // 1. linear interpolator
+    math::LinearInterpolator fLinear(xnodes, yvalues);
 
-    // 1. cubic spline with natural boundary conditions
+    // 2. cubic spline with natural boundary conditions
     math::CubicSpline   fNatural(xnodes, yvalues);
 
-    // 2. cubic, clamped -- specify derivs at the boundaries
+    // 3. cubic, clamped -- specify derivs at the boundaries
     math::CubicSpline   fClamped(xnodes, yvalues, yderivs.front(), yderivs.back());
 
-    // 3. hermite cubic spline -- specify derivs at all nodes
+    // 4. hermite cubic spline -- specify derivs at all nodes
     math::HermiteSpline fHermite(xnodes, yvalues, yderivs);
 
-    // 4. a hermite spline constructed from an ordinary cubic spline,
+    // 5. hermite spline constructed from an ordinary cubic spline,
     // by collecting the first derivatives at all grid nodes - should be equivalent
-    std::vector<double> yderivsClamped(NNODES);
+    std::vector<double> yderivsNatural(NNODES);
     for(int i=0; i<NNODES; i++)
-        fClamped.evalDeriv(xnodes[i], NULL, &yderivsClamped[i]);
-    math::HermiteSpline fHermiteEquivClamped(xnodes, yvalues, yderivsClamped);
+        fNatural.evalDeriv(xnodes[i], NULL, &yderivsNatural[i]);
+    math::HermiteSpline fHermiteEquivNatural(xnodes, yvalues, yderivsNatural);
 
-    // 5. quintic spline -- specify derivs at all nodes
+    // 6. quintic spline constructed using the derivatives computed by an ordinary cubic spline -
+    // doesn't give much improvement over the cubic spline, but provides a smoother interpolant
+    math::QuinticSpline fQuiCube(xnodes, yvalues, yderivsNatural);
+
+    // 7. quintic spline constructed using exact derivatives at all nodes
     math::QuinticSpline fQuintic(xnodes, yvalues, yderivs);
 
-    // 6-7: 1d cubic B-spline represented as a sum over basis functions;
+    // 8-9: 1d cubic B-spline represented as a sum over basis functions;
     // this class only stores the x-grid and presents a method for computing the interpolant
     // for any array of amplitudes passed as a parameter -- we will use two different ones:
     math::BsplineInterpolator1d<3> fBspline(xnodes);
 
-    // 6. compute the amplitudes from another cubic spline, which results in an equivalent
+    // 8. compute the amplitudes from another cubic spline, which results in an equivalent
     // representation in terms of B-splines
     std::vector<double> amplBsplineEquivClamped =
         math::createBsplineInterpolator1dArray<3>(fClamped, xnodes);
 
-    // 7. compute the amplitudes from the original function in a different way:
+    // 9. compute the amplitudes from the original function in a different way:
     // instead of using just from the function values and possibly the derivatives at the grid
     // nodes, as in all previous cases, it collects the function values at several points
     // inside each grid segment, thus achieving a somewhat better overall approximation
     std::vector<double> amplBsplineOrig = math::createBsplineInterpolator1dArray<3>(fnc, xnodes);
 
-    // 8. 1d clamped cubic spline equivalent to a B-spline (this demonstrates the equivalence
+    // 10. 1d clamped cubic spline equivalent to a B-spline (this demonstrates the equivalence
     // in both directions, as the amplitudes of this B-spline were computed from another cubic spline).
     // The array of amplitudes can be simply passed to the constructor of CubicSpline instead of
     // an array of function values -- the mode of operation is determined from the size of this array;
@@ -449,14 +557,16 @@ bool test1dSpline()
     // if it is longer by two elements, it refers to the B-spline amplitudes.
     math::CubicSpline fClampedEquivBspline(xnodes, amplBsplineEquivClamped);
 
+    // output file
     std::ofstream strm;
 
     // accumulators for computing rms errors in values, derivatives and second derivatives
     // of these approximations
-    double errClampedVal=0,  errHermiteVal=0,  errQuinticVal=0, errNaturalVal=0, errBsplineVal=0,
-           errClampedDer=0,  errHermiteDer=0,  errQuinticDer=0,
-           errClampedDer2=0, errHermiteDer2=0, errQuinticDer2=0,
-           errBsplineEquivClamped=0, errClampedEquivBspline=0, errHermiteEquivClamped=0;
+    double errLinearVal =0,  errNaturalVal=0,  errBsplineVal=0,
+           errClampedVal=0,  errHermiteVal=0,  errQuiCubeVal=0,  errQuinticVal=0,
+           errClampedDer=0,  errHermiteDer=0,  errQuiCubeDer=0,  errQuinticDer=0,
+           errClampedDer2=0, errHermiteDer2=0, errQuiCubeDer2=0, errQuinticDer2=0,
+           errBsplineEquivClamped=0, errClampedEquivBspline=0, errHermiteEquivNatural=0;
     bool oknat = true, okcla = true, okher = true, okqui = true, okhcl = true;
 
     // loop through the range of x covering the input grid,
@@ -471,46 +581,59 @@ bool test1dSpline()
         double origVal, origDer, origDer2, origDer3;
         fnc.evalDeriv(x, &origVal, &origDer, &origDer2, &origDer3);
 
-        // 1. natural cubic spline (only collect the value)
-        double fNaturalVal = fNatural(x);
+        // 1. linear interpolator
+        double fLinearVal = fLinear.value(x);
 
-        // 2. clamped cubic spline
+        // 2. natural cubic spline
+        double fNaturalVal, fNaturalDer, fNaturalDer2;
+        fNatural.evalDeriv(x, &fNaturalVal, &fNaturalDer, &fNaturalDer2);
+
+        // 3. clamped cubic spline
         double fClampedVal, fClampedDer, fClampedDer2;
         fClamped.evalDeriv(x, &fClampedVal, &fClampedDer, &fClampedDer2);
 
-        // 3. hermite spline constructed from the original function
+        // 4. hermite spline constructed from the original function
         double fHermiteVal, fHermiteDer, fHermiteDer2;
         fHermite.evalDeriv(x, &fHermiteVal, &fHermiteDer, &fHermiteDer2);
 
-        // 4. hermite spline equivalent to the clamped cubic spline
-        double fHermiteEquivClampedVal, fHermiteEquivClampedDer, fHermiteEquivClampedDer2;
-        fHermiteEquivClamped.evalDeriv(x, &fHermiteEquivClampedVal,
-            &fHermiteEquivClampedDer, &fHermiteEquivClampedDer2);
+        // 5. hermite spline equivalent to the natural cubic spline
+        double fHermiteEquivNaturalVal, fHermiteEquivNaturalDer, fHermiteEquivNaturalDer2;
+        fHermiteEquivNatural.evalDeriv(x, &fHermiteEquivNaturalVal,
+            &fHermiteEquivNaturalDer, &fHermiteEquivNaturalDer2);
 
-        // 5. quintic spline
-        double fQuinticVal, fQuinticDer, fQuinticDer2, fQuinticDer3=fQuintic.deriv3(x);
+        // 6. quintic spline from approximate derivatives
+        double fQuiCubeVal, fQuiCubeDer, fQuiCubeDer2;
+        fQuiCube.evalDeriv(x, &fQuiCubeVal,
+            &fQuiCubeDer, &fQuiCubeDer2);
+
+        // 7. quintic spline from exact derivatives
+        double fQuinticVal, fQuinticDer, fQuinticDer2;
         fQuintic.evalDeriv(x, &fQuinticVal, &fQuinticDer, &fQuinticDer2);
 
-        // 6. b-spline equivalent to the clamped cubic spline
+        // 8. b-spline equivalent to the clamped cubic spline
         double fBsplineEquivClampedVal = fBspline.interpolate(x, amplBsplineEquivClamped);
 
-        // 7. b-spline constructed from the original function
+        // 9. b-spline constructed from the original function
         double fBsplineVal = fBspline.interpolate(x, amplBsplineOrig);
 
-        // 8. clamped cubic spline equivalent to the b-spline
+        // 10. clamped cubic spline equivalent to the b-spline
         double fClampedEquivBsplineVal = fClampedEquivBspline(x);
 
         // accumulate errors of various approximations
+        errLinearVal  += pow_2(origVal - fLinearVal );
+        errBsplineVal += pow_2(origVal - fBsplineVal);
         errNaturalVal += pow_2(origVal - fNaturalVal);
         errClampedVal += pow_2(origVal - fClampedVal);
         errHermiteVal += pow_2(origVal - fHermiteVal);
-        errBsplineVal += pow_2(origVal - fBsplineVal);
+        errQuiCubeVal += pow_2(origVal - fQuiCubeVal);
         errQuinticVal += pow_2(origVal - fQuinticVal);
         errClampedDer += pow_2(origDer - fClampedDer);
         errHermiteDer += pow_2(origDer - fHermiteDer);
+        errQuiCubeDer += pow_2(origDer - fQuiCubeDer);
         errQuinticDer += pow_2(origDer - fQuinticDer);
         errClampedDer2+= pow_2(origDer2- fClampedDer2);
         errHermiteDer2+= pow_2(origDer2- fHermiteDer2);
+        errQuiCubeDer2+= pow_2(origDer2- fQuiCubeDer2);
         errQuinticDer2+= pow_2(origDer2- fQuinticDer2);
 
         // keep track of error in equivalent representations of the same interpolant
@@ -518,10 +641,10 @@ bool test1dSpline()
             fabs(fBsplineEquivClampedVal - fClampedVal));
         errClampedEquivBspline = fmax(errClampedEquivBspline,
             fabs(fBsplineEquivClampedVal - fClampedEquivBsplineVal));
-        errHermiteEquivClamped = fmax(errHermiteEquivClamped,
-            fabs(fHermiteEquivClampedVal - fClampedVal) +
-            fabs(fHermiteEquivClampedDer - fClampedDer) +
-            fabs(fHermiteEquivClampedDer2- fClampedDer2));
+        errHermiteEquivNatural = fmax(errHermiteEquivNatural,
+            fabs(fHermiteEquivNaturalVal - fNaturalVal) +
+            fabs(fHermiteEquivNaturalDer - fNaturalDer) +
+            fabs(fHermiteEquivNaturalDer2- fNaturalDer2));
 
         // if x coincides with a grid node, the values of interpolants should be
         // exact to machine precision by construction
@@ -531,37 +654,42 @@ bool test1dSpline()
             okcla &= fClampedVal == yvalues[k];
             okher &= fHermiteVal == yvalues[k] && fHermiteDer == yderivs[k];
             okqui &= fQuinticVal == yvalues[k] && fQuinticDer == yderivs[k];
-            okhcl &= fHermiteEquivClampedVal == fClampedVal;
+            okhcl &= fHermiteEquivNaturalVal == fNaturalVal;
         }
 
         // dump the values to a file if requested
         if(OUTPUT) {
             if(i==0) {
                 strm.open("test_math_spline1d.dat");
-                strm << "x\torig:f f' f'' f'''\tbspline:f\tnatural:f\t"
-                    "clamped:f f' f''\thermite:f f' f''\tquintic:f f' f'' f'''\n";
+                strm << "x\torig:f f' f''\tbspline:f\tnatural:f f' f''\t"
+                    "clamped:f f' f''\thermite:f f' f''\t"
+                    "quintic-from-cubic:f f' f''\tquintic:f f' f''\n";
             }
-            strm << utils::pp(x,   7) +'\t'+
-            utils::pp(origVal,     7) +' ' +
-            utils::pp(origDer,     7) +' ' +
-            utils::pp(origDer2,    7) +' ' +
-            utils::pp(origDer3,    7) +'\t'+
-            utils::pp(fNaturalVal, 7) +'\t'+
-            utils::pp(fBsplineVal, 7) +'\t'+
-            utils::pp(fClampedVal, 7) +' ' +
-            utils::pp(fClampedDer, 7) +' ' +
-            utils::pp(fClampedDer2,7) +'\t'+
-            utils::pp(fHermiteVal, 7) +' ' +
-            utils::pp(fHermiteDer, 7) +' ' +
-            utils::pp(fHermiteDer2,7) +'\t'+
-            utils::pp(fQuinticVal, 7) +' ' +
-            utils::pp(fQuinticDer, 7) +' ' +
-            utils::pp(fQuinticDer2,7) +'\t'+
-            utils::pp(fQuinticDer3,7) +'\n';
+            strm << utils::pp(x,   9) +'\t'+
+            utils::pp(origVal,    10) +' ' +
+            utils::pp(origDer,     9) +' ' +
+            utils::pp(origDer2,    9) +'\t'+
+            utils::pp(fBsplineVal,10) +'\t'+
+            utils::pp(fNaturalVal,10) +' ' +
+            utils::pp(fNaturalDer, 9) +' ' +
+            utils::pp(fNaturalDer2,9) +'\t'+
+            utils::pp(fClampedVal,10) +' ' +
+            utils::pp(fClampedDer, 9) +' ' +
+            utils::pp(fClampedDer2,9) +'\t'+
+            utils::pp(fHermiteVal,10) +' ' +
+            utils::pp(fHermiteDer, 9) +' ' +
+            utils::pp(fHermiteDer2,9) +'\t'+
+            utils::pp(fQuiCubeVal,10) +' ' +
+            utils::pp(fQuiCubeDer, 9) +' ' +
+            utils::pp(fQuiCubeDer2,9) +'\t'+
+            utils::pp(fQuinticVal,10) +' ' +
+            utils::pp(fQuinticDer, 9) +' ' +
+            utils::pp(fQuinticDer2,9) +'\n';
             if(i==NPOINTS)
                 strm.close();
         }
     }
+    errLinearVal   = sqrt(errLinearVal  / NPOINTS);
     errNaturalVal  = sqrt(errNaturalVal / NPOINTS);
     errBsplineVal  = sqrt(errBsplineVal / NPOINTS);
     errClampedVal  = sqrt(errClampedVal / NPOINTS);
@@ -573,15 +701,18 @@ bool test1dSpline()
     errClampedDer2 = sqrt(errClampedDer2/ NPOINTS);
     errHermiteDer2 = sqrt(errHermiteDer2/ NPOINTS);
     errQuinticDer2 = sqrt(errQuinticDer2/ NPOINTS);
+    errQuiCubeVal  = sqrt(errQuiCubeVal / NPOINTS);
 
-    std::cout << "RMS error in ordinary cubic spline: " << utils::pp(errNaturalVal, 8) <<
-        ", in clamped cubic spline: " << utils::pp(errClampedVal, 8) <<
-        ", in hermite cubic spline: " << utils::pp(errHermiteVal, 8) <<
-        ", in cubic B-spline: " << utils::pp(errBsplineVal, 8) <<
-        ", in quintic spline: " << utils::pp(errQuinticVal, 8) << 
-        ", max|cubic-hermite|=" << utils::pp(errHermiteEquivClamped, 8) << 
-        ", max|cubic-bspline|=" << utils::pp(errBsplineEquivClamped, 8) <<
-        " and " << utils::pp(errClampedEquivBspline, 8) << "\n";
+    std::cout << "RMS error in linear interpolator: " + utils::pp(errLinearVal, 8) +
+        ", in ordinary cubic spline: " + utils::pp(errNaturalVal, 8) +
+        ", in clamped cubic spline: "  + utils::pp(errClampedVal, 8) +
+        ", in hermite cubic spline: "  + utils::pp(errHermiteVal, 8) +
+        ", in cubic B-spline: "        + utils::pp(errBsplineVal, 8) +
+        ", in quintic-from-cubic spline: " + utils::pp(errQuiCubeVal, 8) +
+        ", in quintic spline: " + utils::pp(errQuinticVal, 8) +
+        ", max|cubic-hermite|=" + utils::pp(errHermiteEquivNatural, 8) +
+        ", max|cubic-bspline|=" + utils::pp(errBsplineEquivClamped, 8) +
+        " and " + utils::pp(errClampedEquivBspline, 8) + "\n";
 
     // test the integration functions //
     const double X1 = (xnodes[0]+xnodes[1])/2, X2 = xnodes[xnodes.size()-2]-0.1;
@@ -595,48 +726,83 @@ bool test1dSpline()
     // test log-scaled splines
     bool oklogspl = testLogScaledSplines();
 
-    return
+    bool ok =
     testCond(oknat, "natural cubic spline values at grid nodes are inexact") &&
     testCond(okcla, "clamped cubic spline values at grid nodes are inexact") &&
     testCond(oknat, "hermite cubic spline values or derivatives at grid nodes are inexact") &&
     testCond(oknat, "quintic spline values or derivatives at grid nodes are inexact") &&
     testCond(oknat, "hermite and clamped cubic spline values are not equal") &&
-    testCond(errHermiteEquivClamped < 1e-13, "hermite<>clamped") &&
-    testCond(errBsplineEquivClamped < 1e-15, "bspline<>clamped") &&
-    testCond(errClampedEquivBspline < 1e-15, "clamped<>bspline") &&
-    testCond(errNaturalVal < 5.0e-3, "error in natural cubic spline is too large") &&
-    testCond(errBsplineVal < 1.4e-4, "error in cubic b-spline is too large") &&
-    testCond(errClampedVal < 2.7e-4, "error in clamped cubic spline is too large") &&
-    testCond(errHermiteVal < 2.3e-4, "error in hermite cubic spline is too large") &&
-    testCond(errQuinticVal < 3.4e-5, "error in quintic spline is too large") &&
-    testCond(errClampedDer < 1.8e-3, "error in clamped cubic spline derivative is too large") &&
-    testCond(errHermiteDer < 1.3e-3, "error in hermite cubic spline derivative is too large") &&
-    testCond(errQuinticDer < 9.0e-4, "error in quintic spline derivative is too large") &&
-    testCond(errClampedDer2< 0.04, "error in clamped cubic spline 2nd derivative is too large")   &&
-    testCond(errHermiteDer2< 0.04, "error in hermite cubic spline 2nd derivative is too large")   &&
-    testCond(errQuinticDer2< 0.05, "error in quintic spline 2nd derivative is too large") &&
+    testCond(errHermiteEquivNatural < 1e-13, "hermite<>natural") &&
+    testCond(errBsplineEquivClamped < 1e-14, "bspline<>clamped") &&
+    testCond(errClampedEquivBspline < 1e-14, "clamped<>bspline") &&
+    testCond(errNaturalVal < 1.0e-3, "error in natural cubic spline is too large") &&
+    testCond(errBsplineVal < 1.0e-4, "error in cubic b-spline is too large") &&
+    testCond(errClampedVal < 4.0e-4, "error in clamped cubic spline is too large") &&
+    testCond(errHermiteVal < 3.1e-4, "error in hermite cubic spline is too large") &&
+    testCond(errQuinticVal < 1.2e-4, "error in quintic spline is too large") &&
+    testCond(errClampedDer < 4.5e-3, "error in clamped cubic spline derivative is too large") &&
+    testCond(errHermiteDer < 3.5e-3, "error in hermite cubic spline derivative is too large") &&
+    testCond(errQuinticDer < 1.4e-3, "error in quintic spline derivative is too large") &&
+    testCond(errClampedDer2< 0.085,  "error in clamped cubic spline 2nd derivative is too large")   &&
+    testCond(errHermiteDer2< 0.075,  "error in hermite cubic spline 2nd derivative is too large")   &&
+    testCond(errQuinticDer2< 0.035,  "error in quintic spline 2nd derivative is too large") &&
     testCond(okintcla, "integral of clamped spline is incorrect") &&
     testCond(okintnat, "integral of natural spline is incorrect") &&
     testCond(okintnum, "integral of B-spline is incorrect") &&
     testCond(oklogspl, "log-scaled splines failed");
+
+    //----------- test the performance of 1d spline calculation -------------//
+    std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fClamped) + ", 1st deriv: " +
+    evalSpline<1>(fClamped) + ", 2nd deriv: " + evalSpline<2>(fClamped) + " eval/s\n";
+    std::cout << "Hermite spline w/o deriv: " + evalSpline<0>(fHermite) + ", 1st deriv: " +
+    evalSpline<1>(fHermite) + ", 2nd deriv: " + evalSpline<2>(fHermite) + " eval/s\n";
+    std::cout << "Quintic spline w/o deriv: " + evalSpline<0>(fQuintic) + ", 1st deriv: " +
+    evalSpline<1>(fQuintic) + ", 2nd deriv: " + evalSpline<2>(fQuintic) + " eval/s\n";
+    std::cout << "B-spline of degree N=3:   " +
+    evalSpline<0>(BsplineWrapper(fBspline, amplBsplineOrig)) + " eval/s\n";
+    return ok;
 }
 
 //----------- test 2d cubic and quintic spline ------------//
+
+// performance test - repeat spline evaluation many times
+template<int numDeriv>
+std::string evalSpline2d(const math::BaseInterpolator2d& fnc)
+{
+    const int NUM_ITER = 500, NPOINTS = 100;
+    const double XMIN = -1.9, XMAX = 2.2, YMIN = -2.1, YMAX = 1.7;
+    double RATE = 1.0 * NUM_ITER * pow_2(NPOINTS+1) * CLOCKS_PER_SEC;
+    clock_t clk = std::clock();
+    for(int t=0; t<NUM_ITER; t++) {
+        for(int i=0; i<=NPOINTS; i++) {
+            double x = (XMAX-XMIN)*(i*1./NPOINTS)+XMIN;
+            for(int j=0; j<=NPOINTS; j++) {
+                double y = (YMAX-YMIN)*(j*1./NPOINTS)+YMIN;
+                double z, dx, dy, dxx, dxy, dyy;
+                fnc.evalDeriv(x, y, &z, numDeriv>=1 ? &dx : NULL, numDeriv>=1 ? &dy : NULL,
+                    numDeriv>=2 ? &dxx : NULL, numDeriv>=2 ? &dxy : NULL, numDeriv>=2 ? &dyy : NULL);
+            }
+        }
+    }
+    return utils::pp(RATE/(std::clock()-clk), 6);
+}
+
 bool test2dSpline()
 {
+    std::cout << "\033[1;33m2d interpolation\033[0m\n";
     bool ok=true;
-    const int NNODESX=7;
-    const int NNODESY=8;
-    const int NN=99;    // number of intermediate points for checking the values
-    const double XMAX = 1.81, YMAX = 2*M_PI;
-    std::vector<double> xval = math::createNonuniformGrid(NNODESX, XMAX*0.20, XMAX, true);
-    std::vector<double> yval = math::createNonuniformGrid(NNODESY, YMAX*0.15, YMAX, true);
+    const int NNODESX=8;
+    const int NNODESY=7;
+    const int NN=100;    // number of intermediate points for checking the values
+    const double XMIN = -1.9, XMAX = 2.2, YMIN = -2.1, YMAX = 1.7;
+    std::vector<double> xval = math::createUniformGrid(NNODESX, XMIN, XMAX);
+    std::vector<double> yval = math::createUniformGrid(NNODESY, YMIN, YMAX);
     math::Matrix<double> fval(NNODESX, NNODESY), fderx(NNODESX, NNODESY), fdery(NNODESX, NNODESY);
     testfnc2d fnc;
     for(int i=0; i<NNODESX; i++)
         for(int j=0; j<NNODESY; j++) {
             double xy[2] = {xval[i], yval[j]};
-            double der[2];
+            double der[8];
             fnc.evalDeriv(xy, &fval(i, j), der);
             fderx(i, j) = der[0];
             fdery(i, j) = der[1];
@@ -645,236 +811,93 @@ bool test2dSpline()
     math::LinearInterpolator2d lin2d(xval, yval, fval);
     // 2d cubic spline with natural boundary conditions at three edges
     // and a prescribed derivative at the fourth edge
-    math::CubicSpline2d spl2dc(xval, yval, fval, 0, NAN, NAN, NAN);
+    math::CubicSpline2d cub2d(xval, yval, fval);
     // 2d quintic spline with prescribed derivatives at all nodes
-    math::QuinticSpline2d spl2dq(xval, yval, fval, fderx, fdery);
-
-#ifdef COMPARE_WD_PSPLINE
-    double *WD_X[2], **WD_Y[3], **WD_Z[4];
-    WD_X[0] = new double[NNODESX];
-    WD_X[1] = new double[NNODESY];
-    int WD_K[2] = {NNODESX, NNODESY};
-    WD::Alloc2D(WD_Y[0],WD_K);
-    WD::Alloc2D(WD_Y[1],WD_K);
-    WD::Alloc2D(WD_Y[2],WD_K);
-    WD::Alloc2D(WD_Z[0],WD_K);
-    WD::Alloc2D(WD_Z[1],WD_K);
-    WD::Alloc2D(WD_Z[2],WD_K);
-    WD::Alloc2D(WD_Z[3],WD_K);
-    for(int i=0; i<NNODESX; i++)
-        WD_X[0][i] = xval[i];
-    for(int j=0; j<NNODESY; j++)
-        WD_X[1][j] = yval[j];
-    for(int i=0; i<NNODESX; i++)
-        for(int j=0; j<NNODESY; j++) {
-            WD_Y[0][i][j] = fval(i, j);
-            WD_Y[1][i][j] = fderx(i, j);
-            WD_Y[2][i][j] = fdery(i, j);
-        }
-    WD::Pspline2D(WD_X, WD_Y, WD_K, WD_Z);
-#endif
+    math::QuinticSpline2d qui2d(xval, yval, fval, fderx, fdery);
 
     // check the values (for both cubic and quintic splines) and derivatives (for quintic spline only)
     // at all nodes of 2d grid -- should exactly equal the input values (with machine precision)
-    for(int i=0; i<NNODESX; i++)
+    for(int i=0; i<NNODESX; i++) {
         for(int j=0; j<NNODESY; j++) {
             double xy[2] = {xval[i], yval[j]};
-            double f, fder[2], l, c, q, qder[2];
+            double f, fder[8], l, c, q, qder[8], cxy, qxy, qxx, qyy;
             fnc.evalDeriv(xy, &f, fder);
             l = lin2d .value(xy[0], xy[1]);
-            c = spl2dc.value(xy[0], xy[1]);
-            spl2dq.evalDeriv(xy[0], xy[1], &q, &qder[0], &qder[1]);
+            cub2d.evalDeriv(xy[0], xy[1], &c, NULL, NULL, NULL, &cxy);
+            qui2d.evalDeriv(xy[0], xy[1], &q, &qder[0], &qder[1], &qxx, &qxy, &qyy);
             if(l != f || c != f || q != f || fder[0] != qder[0] || fder[1] != qder[1])
                 ok = false;
         }
+    }
 
     std::ofstream strm;
-    if(OUTPUT)  // output for Gnuplot splot routine
+    if(OUTPUT) { // output for Gnuplot splot routine
         strm.open("test_math_spline2d.dat");
-    double maxerrl = 0, maxerrc = 0, maxerrq = 0, maxerrcder = 0, maxerrqder = 0;
+        strm << "x y\tfunc fx fy fxx fxy fyy\tcubic cx cy cxx cxy cyy\tquintic qx qy qxx qxy qyy\n";
+    }
+    double sumerrl = 0, sumerrc = 0, sumerrq = 0,
+        sumerrcder = 0, sumerrqder = 0, sumerrcder2 = 0, sumerrqder2 = 0;
     for(int i=0; i<=NN; i++) {
-        double x = XMAX*(i*1./NN);
+        double x = (XMAX-XMIN)*(i*1./NN)+XMIN;
         for(int j=0; j<=NN; j++) {
-            double y = YMAX*(j*1./NN);
-
-            double xy[2] = {x, y}, f, fder[2];
-            fnc.evalDeriv(xy, &f, fder);
+            double y = (YMAX-YMIN)*(j*1./NN)+YMIN;
+            double xy[2] = {x, y}, f, d[8];
+            fnc.evalDeriv(xy, &f, d);
             double l, c, cx, cy, cxx, cxy, cyy, q, qx, qy, qxx, qxy, qyy;
             l =  lin2d.value(x, y);
-            spl2dc.evalDeriv(x, y, &c, &cx, &cy, &cxx, &cxy, &cyy);
-            spl2dq.evalDeriv(x, y, &q, &qx, &qy, &qxx, &qxy, &qyy);
-            maxerrl = fmax(maxerrl, fabs(l-f));
-            maxerrc = fmax(maxerrc, fabs(c-f));
-            maxerrq = fmax(maxerrq, fabs(q-f));
-            maxerrcder = fmax(maxerrcder, fmax(fabs(cx-fder[0]), fabs(cy-fder[1])));
-            maxerrqder = fmax(maxerrqder, fmax(fabs(qx-fder[0]), fabs(qy-fder[1])));
-#ifdef COMPARE_WD_PSPLINE
-            const double EPS=1e-13;
-            double wder[2];
-            double wder2x[2], wder2y[2]; 
-            double* wder2[] = {wder2x, wder2y};
-            double wval = WD::Psplev2D(WD_X, WD_Y, WD_Z, WD_K, xy, wder, wder2);
-            ok &= fabs(q-wval   )  <EPS &&
-                fabs(qx -wder[0])  <EPS &&
-                fabs(qy -wder[1])  <EPS &&
-                fabs(qxx-wder2x[0])<EPS &&
-                fabs(qxy-wder2x[1])<EPS &&
-                fabs(qyy-wder2y[1])<EPS;
-#endif
+            cub2d.evalDeriv(x, y, &c, &cx, &cy, &cxx, &cxy, &cyy);
+            qui2d.evalDeriv(x, y, &q, &qx, &qy, &qxx, &qxy, &qyy);
+
+            sumerrl     += pow_2(l-f);
+            sumerrc     += pow_2(c-f);
+            sumerrq     += pow_2(q-f);
+            sumerrcder  += pow_2(cx-d[0]) + pow_2(cy-d[1]);
+            sumerrqder  += pow_2(qx-d[0]) + pow_2(qy-d[1]);
+            sumerrcder2 += pow_2(cxx-d[2]) + pow_2(cxy-d[3]) + pow_2(cyy-d[4]);
+            sumerrqder2 += pow_2(qxx-d[2]) + pow_2(qxy-d[3]) + pow_2(qyy-d[4]);
+
             if(OUTPUT)
-                strm << x << ' ' << y << '\t' << 
-                    f << ' ' << fder[0] << ' ' << fder[1] << '\t' << l << '\t' <<
-                    c << ' ' << cx << ' ' << cy << ' ' << cxx << ' ' << cxy << ' ' << cyy << '\t' <<
-                    q << ' ' << qx << ' ' << qy << ' ' << qxx << ' ' << qxy << ' ' << qyy << '\t' <<
-#ifdef COMPARE_WD_PSPLINE
-                    wval <<' '<< wder[0] <<' '<< wder[1] <<' '<< wder2x[0] <<' '<< wder2x[1] <<' '<< wder2y[1] <<
-#endif
-                    '\n';
+                strm << utils::pp(x, 7) + ' ' + utils::pp(y, 7) + '\t' +
+                utils::pp(f, 10) + ' ' + utils::pp(d[0],8)+ ' ' + utils::pp(d[1],8)+ ' ' +
+                utils::pp(d[2],7)+ ' ' + utils::pp(d[3],7)+ ' ' + utils::pp(d[4],7)+ '\t'+
+                utils::pp(c, 10) + ' ' + utils::pp(cx, 8) + ' ' + utils::pp(cy, 8) + ' ' +
+                utils::pp(cxx,7) + ' ' + utils::pp(cxy,7) + ' ' + utils::pp(cyy,7) + '\t'+
+                utils::pp(q, 10) + ' ' + utils::pp(qx, 8) + ' ' + utils::pp(qy, 8) + ' ' +
+                utils::pp(qxx,7) + ' ' + utils::pp(qxy,7) + ' ' + utils::pp(qyy,7) + '\n';
         }
         if(OUTPUT)
             strm << "\n";
     }
     if(OUTPUT)
         strm.close();
+    sumerrl     = sqrt(sumerrl)       / (NN+1);
+    sumerrc     = sqrt(sumerrc)       / (NN+1);
+    sumerrq     = sqrt(sumerrq)       / (NN+1);
+    sumerrcder  = sqrt(sumerrcder /2) / (NN+1);
+    sumerrqder  = sqrt(sumerrqder /2) / (NN+1);
+    sumerrcder2 = sqrt(sumerrcder2/3) / (NN+1);
+    sumerrqder2 = sqrt(sumerrqder2/3) / (NN+1);
+    std::cout << "RMS error in linear 2d interpolator: " + utils::pp(sumerrl, 8) +
+        "\ncubic   2d spline value:  " + utils::pp(sumerrc, 8) +
+        ", deriv: " + utils::pp(sumerrcder, 8) + ", 2nd deriv: " + utils::pp(sumerrcder2, 8) +
+        "\nquintic 2d spline value:  " + utils::pp(sumerrq, 8) +
+        ", deriv: " + utils::pp(sumerrqder, 8) + ", 2nd deriv: " + utils::pp(sumerrqder2, 8) +"\n";
+    ok &= sumerrc < 0.003 && sumerrcder < 0.012 && sumerrcder2 < 0.075 &&
+          sumerrq < 1.e-4 && sumerrqder < 7.e-4 && sumerrqder2 < 0.006;
 
-    std::cout << "Max error in linear 2d interpolator: " + utils::pp(maxerrl, 8) +
-        ", cubic 2d spline value: " + utils::pp(maxerrc, 8) +
-        ", deriv: " + utils::pp(maxerrcder, 8) +
-        ", quintic 2d spline value: " + utils::pp(maxerrq, 8) +
-        ", deriv: " + utils::pp(maxerrqder, 8) + "\n";
-    ok &= maxerrc < 0.006 && maxerrcder < 0.09 && maxerrq < 0.002 && maxerrqder < 0.03;
-
-#ifdef STRESS_TEST
     //----------- test the performance of 2d spline calculation -------------//
-    double z, dx, dy, dxx, dxy, dyy;
-    int NUM_ITER = 1000;
-    double RATE = 1.0 * NUM_ITER * pow_2(NN+1) * CLOCKS_PER_SEC;
-    clock_t clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                lin2d.evalDeriv(x, y, &z);
-            }
-        }
-    }
-    std::cout << "Linear interpolator:          " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dc.evalDeriv(x, y, &z);
-            }
-        }
-    }
-    std::cout << "Cubic spline with no deriv:   " + utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dc.evalDeriv(x, y, &z, &dx, &dy);
-            }
-        }
-    }
-    std::cout << ", 1st deriv: " + utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dc.evalDeriv(x, y, &z, &dx, &dy, &dxx, &dxy, &dyy);
-            }
-        }
-    }
-    std::cout << ", 2nd deriv: " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
-
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dq.evalDeriv(x, y, &z);
-            }
-        }
-    }
-    std::cout << "Quintic spline without deriv: " + utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dq.evalDeriv(x, y, &z, &dx, &dy);
-            }
-        }
-    }
-    std::cout << ", 1st deriv: " + utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                spl2dq.evalDeriv(x, y, &z, &dx, &dy, &dxx, &dxy, &dyy);
-            }
-        }
-    }
-    std::cout << ", 2nd deriv: " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
-#ifdef COMPARE_WD_PSPLINE
-    double wder[2];
-    double wder2x[2], wder2y[2]; 
-    double* wder2[] = {wder2x, wder2y};
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                double wx[2] = {x, y};
-                WD::Psplev2D(WD_X, WD_Y, WD_Z, WD_K, wx);
-            }
-        }
-    }
-    std::cout << "WD's Pspline with no deriv: " << utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                double wx[2] = {x, y};
-                WD::Psplev2D(WD_X, WD_Y, WD_Z, WD_K, wx, wder);
-            }
-        }
-    }
-    std::cout << ", 1st deriv: " << utils::pp(RATE/(std::clock()-clk), 6);
-    clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
-        for(int i=0; i<=NN; i++) {
-            double x = XMAX*(i*1./NN);
-            for(int j=0; j<=NN; j++) {
-                double y = YMAX*(j*1./NN);
-                double wx[2] = {x, y};
-                WD::Psplev2D(WD_X, WD_Y, WD_Z, WD_K, wx, wder, wder2);
-            }
-        }
-    }
-    std::cout << ", 2nd deriv: " << utils::pp(RATE/(std::clock()-clk), 6) << " eval/s\n";
-#endif
-#endif
+    std::cout <<"Linear interpolator:      " + evalSpline2d<0>(lin2d) + " eval/s\n";
+    std::cout <<"Cubic   spline w/o deriv: " + evalSpline2d<0>(cub2d) + ", 1st deriv: " +
+    evalSpline2d<1>(cub2d) + ", 2nd deriv: " + evalSpline2d<2>(cub2d) + " eval/s\n";
+    std::cout <<"Quintic spline w/o deriv: " + evalSpline2d<0>(qui2d) + ", 1st deriv: " +
+    evalSpline2d<1>(qui2d) + ", 2nd deriv: " + evalSpline2d<2>(qui2d) + " eval/s\n";
     return ok;
 }
 
 //----------- test 3d interpolation ------------//
 bool test3dSpline()
 {
+    std::cout << "\033[1;33m3d interpolation\033[0m\n";
     bool ok=true;
     testfnc3d fnc3d;
     const int NNODESX=10, NNODESY=8, NNODESZ=7;
@@ -956,9 +979,8 @@ bool test3dSpline()
         ", difference between cubic spline and B-spline: " << utils::pp(sumsqerr_s, 8) << "\n";
     ok &= sumsqerr_l<0.1 && sumsqerr_c<0.05 && sumsqerr_s<1e-15;
 
-#ifdef STRESS_TEST
     // test performance of various interpolators
-    int NUM_ITER = 100;
+    int NUM_ITER = 200;
     double RATE = 1.0 * NUM_ITER * pow_3(NNN+1) * CLOCKS_PER_SEC;
     clock_t clk = std::clock();
     for(int t=0; t<NUM_ITER; t++) {
@@ -1021,7 +1043,7 @@ bool test3dSpline()
         }
     }
     std::cout << "B-spline of degree N=3: " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
-#endif
+
     return ok;
 }
 

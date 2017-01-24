@@ -1,5 +1,4 @@
 #include "actions_spherical.h"
-#include "actions_interfocal_distance_finder.h"
 #include "potential_utils.h"
 #include "math_core.h"
 #include <stdexcept>
@@ -19,7 +18,7 @@ const unsigned int INTEGR_ORDER = 10;
 /** order of Gauss-Legendre quadrature for actions, frequencies and angles:
     use a higher order for more eccentric orbits, as indicated by the ratio
     of pericenter to apocenter radii (R1/R2) */
-static inline unsigned int integrOrder(double R1overR2) {
+inline unsigned int integrOrder(double R1overR2) {
     int order;  // base-2 logarithm of R1/R2
     frexp(R1overR2, &order);
     return INTEGR_ORDER + std::min<int>(-order, INTEGR_ORDER);
@@ -85,7 +84,7 @@ public:
     \return the value of integral.
 */
 template<Operation mode>
-inline static double integr(const math::IFunction& poten,
+inline double integr(const math::IFunction& poten,
     double E, double L, double R1, double R2, double R=-1)
 {
     if(R==-1) R=R2;             // default upper limit for integration
@@ -102,7 +101,7 @@ inline static double integr(const math::IFunction& poten,
     \param[in]  R1, R2 are peri/apocenter radii normalized to the radius of a circular orbit.
 */
 template<Operation mode>
-inline static double integrPowerLaw(double slope, double Lrel, double R1, double R2)
+inline double integrPowerLaw(double slope, double Lrel, double R1, double R2)
 {
     IntegrandPowerLaw<mode> integrand(slope, Lrel, R1);
     math::ScaledIntegrandEndpointSing transf(integrand, R1, R2);
@@ -203,7 +202,7 @@ public:
     \param[out] R1, R2  are the peri/apocenter radii;
     \return  the values of actions (or NAN in Jr if the energy is positive).
 */
-static Actions computeActions(const coord::PosVelCyl& point, const potential::BasePotential& pot,
+Actions computeActions(const coord::PosVelCyl& point, const potential::BasePotential& pot,
     double &E, double &L, double &R1, double &R2)
 {
     if(!isSpherical(pot))
@@ -234,7 +233,7 @@ static Actions computeActions(const coord::PosVelCyl& point, const potential::Ba
     \param[in]  Omegar, Omegaz are the corresponding frequencies (computed elsewhere);
     \returns    angle variables.
 */
-static Angles computeAngles(const coord::PosVelCyl& point,
+Angles computeAngles(const coord::PosVelCyl& point,
     const math::IFunction &potential, const double E, const double L,
     const double R1, const double R2, const double Omegar, const double Omegaz)
 {
@@ -271,7 +270,7 @@ static Angles computeAngles(const coord::PosVelCyl& point,
     \param[in]  Omegar, Omegaz are the corresponding frequencies (computed elsewhere);
     \returns    the point (position+velocity)
 */
-static coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
+coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
     const math::IFunction &potential, const double E, const double L,
     const double R1, const double R2, const double Omegar, const double Omegaz)
 {
@@ -312,7 +311,7 @@ static coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
     \param[in]  R1,R2  are the peri/apocenter radii, again slightly offset (all computed elsewhere);
     \return  the derivative of position/velocity point by the action that had this offset.
 */
-static coord::PosVelSphMod derivPointFromActions(
+coord::PosVelSphMod derivPointFromActions(
     const ActionAngles &aa, const coord::PosVelSphMod &p0, double EPS,
     const ActionFinderSpherical& af, const potential::Interpolator2d &interp,
     const double E, const double R1, const double R2)
@@ -333,7 +332,7 @@ static coord::PosVelSphMod derivPointFromActions(
 
 /// construct the interpolating spline for scaled radial action X = Jr / (Lcirc-L)
 /// as a function of E and L/Lcirc
-static math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2d& interp)
+math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2d& interp)
 {
     // for computing the asymptotic values at E=Phi(0), we assume a power-law behavior of potential:
     // Phi = Phi0 + coef * r^s
@@ -354,12 +353,14 @@ static math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2
     // value of Jr/(Lcirc-L) and its derivatives w.r.t. E and L/Lcirc
     math::Matrix<double> gridJr(sizeE, sizeL), gridJrdE(sizeE, sizeL), gridJrdL(sizeE, sizeL);
 
+    std::string errorMessage;  // store the error text in case of an exception in the openmp block
     // loop over values of energy strictly inside the interval [Phi0:0];
     // the boundary values will be treated separately
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
     for(int iE=1; iE<sizeE-1; iE++) {
+        try{
         double E = gridE[iE];
         double dLcdE, Lc = interp.pot.L_circ(E, &dLcdE);
         for(int iL=0; iL<sizeL-1; iL++) {
@@ -378,8 +379,14 @@ static math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2
         double kappa, nu, Omega;
         interp.pot.epicycleFreqs(interp.pot.R_circ(E), kappa, nu, Omega);
         gridJr(iE, sizeL-1) = Omega / kappa;
+        }
+        catch(std::exception& e) {
+            errorMessage = e.what();
+        }
     }
-    
+    if(!errorMessage.empty())
+        throw std::runtime_error("ActionFinderSpherical: "+errorMessage);
+
     // asymptotic expressions for E -> Phi(0) assuming a power-law potential near origin
     for(int iL=0; iL<sizeL-1; iL++) {
         double R1, R2;   // these are scaled values, normalized to Rcirc

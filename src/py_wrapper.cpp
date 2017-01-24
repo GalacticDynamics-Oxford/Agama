@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2016
+    \date   2014-2017
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -49,7 +49,7 @@
 #include "utils_config.h"
 
 /// classes and routines for the Python interface
-namespace{  // private namespace
+namespace pywrapper {  // internal namespace
 
 //  ---------------------------------------------------
 /// \name  Helper class to manage the OpenMP behaviour
@@ -90,7 +90,7 @@ public:
 ///@{
 
 /// return a string representation of a Python object
-static std::string toString(PyObject* obj)
+std::string toString(PyObject* obj)
 {
     if(obj==NULL)
         return "";
@@ -103,7 +103,7 @@ static std::string toString(PyObject* obj)
 }
 
 /// return an integer representation of a Python object, or a default value in case of error
-static int toInt(PyObject* obj, int defaultValue=-1)
+int toInt(PyObject* obj, int defaultValue=-1)
 {
     if(obj==NULL)
         return defaultValue;
@@ -124,7 +124,7 @@ static int toInt(PyObject* obj, int defaultValue=-1)
 }
 
 /// return a float representation of a Python object, or a default value in case of error
-static double toDouble(PyObject* obj, double defaultValue=NAN)
+double toDouble(PyObject* obj, double defaultValue=NAN)
 {
     if(obj==NULL)
         return defaultValue;
@@ -145,20 +145,20 @@ static double toDouble(PyObject* obj, double defaultValue=NAN)
 
 /// a convenience function for accessing an element of a PyArrayObject with the given data type
 template<typename DataType>
-static DataType& pyArrayElem(void* arr, npy_intp ind)
+inline DataType& pyArrayElem(void* arr, npy_intp ind)
 {
     return *static_cast<DataType*>(PyArray_GETPTR1(static_cast<PyArrayObject*>(arr), ind));
 }
 
 /// same as above, but for a 2d array
 template<typename DataType>
-static DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2)
+inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2)
 {
     return *static_cast<DataType*>(PyArray_GETPTR2(static_cast<PyArrayObject*>(arr), ind1, ind2));
 }
 
 /// convert a Python array of floats to std::vector, or return empty vector in case of error
-static std::vector<double> toFloatArray(PyObject* obj)
+std::vector<double> toFloatArray(PyObject* obj)
 {
     if(obj==NULL)
         return std::vector<double>();
@@ -175,7 +175,7 @@ static std::vector<double> toFloatArray(PyObject* obj)
 }
 
 /// convert a Python dictionary to its C++ analog
-static utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
+utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
 {
     PyObject *key, *value;
     Py_ssize_t pos = 0;
@@ -187,7 +187,7 @@ static utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
 
 /// check that the list of arguments provided to a Python function
 /// contains only named args and no positional args
-static bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
+inline bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
 {
     if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0) ||
         namedArgs==NULL || !PyDict_Check(namedArgs) || PyDict_Size(namedArgs)==0)
@@ -199,7 +199,7 @@ static bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
 }
 
 /// find an item in the Python dictionary using case-insensitive key comparison
-static PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey)
+PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey)
 {
     PyObject *key, *value;
     Py_ssize_t pos = 0;
@@ -238,7 +238,7 @@ static const char* docstringSetUnits =
     "    setUnits(mass=1e10, length=1, velocity=1)\n";
 
 /// define the unit conversion
-static PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"mass", "length", "velocity", "time", NULL};
     double mass = 0, length = 0, velocity = 0, time = 0;
@@ -293,7 +293,7 @@ static const char* docstringResetUnits =
     "Note that this is NOT equivalent to setUnits(mass=1, length=1, velocity=1).\n";
 
 /// reset the unit conversion
-static PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
+PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
 {
     conv.reset(new units::ExternalUnits());
     Py_INCREF(Py_None);
@@ -301,7 +301,7 @@ static PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
 }
 
 /// helper function for converting position to internal units
-static inline coord::PosCar convertPos(const double input[]) {
+inline coord::PosCar convertPos(const double input[]) {
     return coord::PosCar(
         input[0] * conv->lengthUnit,
         input[1] * conv->lengthUnit,
@@ -309,7 +309,7 @@ static inline coord::PosCar convertPos(const double input[]) {
 }
 
 /// helper function for converting position/velocity to internal units
-static inline coord::PosVelCar convertPosVel(const double input[]) {
+inline coord::PosVelCar convertPosVel(const double input[]) {
     return coord::PosVelCar(
         input[0] * conv->lengthUnit,
         input[1] * conv->lengthUnit,
@@ -320,7 +320,7 @@ static inline coord::PosVelCar convertPosVel(const double input[]) {
 }
 
 /// helper function for converting actions to internal units
-static inline actions::Actions convertActions(const double input[]) {
+inline actions::Actions convertActions(const double input[]) {
     return actions::Actions(
         input[0] * conv->lengthUnit * conv->velocityUnit,
         input[1] * conv->lengthUnit * conv->velocityUnit,
@@ -328,7 +328,7 @@ static inline actions::Actions convertActions(const double input[]) {
 }
 
 /// helper function to convert position from internal units back to user units
-static inline void unconvertPos(const coord::PosCar& point, double dest[])
+inline void unconvertPos(const coord::PosCar& point, double dest[])
 {
     dest[0] = point.x / conv->lengthUnit;
     dest[1] = point.y / conv->lengthUnit;
@@ -336,7 +336,7 @@ static inline void unconvertPos(const coord::PosCar& point, double dest[])
 }
 
 /// helper function to convert position/velocity from internal units back to user units
-static inline void unconvertPosVel(const coord::PosVelCar& point, double dest[])
+inline void unconvertPosVel(const coord::PosVelCar& point, double dest[])
 {
     dest[0] = point.x / conv->lengthUnit;
     dest[1] = point.y / conv->lengthUnit;
@@ -347,7 +347,7 @@ static inline void unconvertPosVel(const coord::PosVelCar& point, double dest[])
 }
 
 /// helper function to convert actions from internal units back to user units
-static inline void unconvertActions(const actions::Actions& act, double dest[])
+inline void unconvertActions(const actions::Actions& act, double dest[])
 {
     dest[0] = act.Jr   / (conv->lengthUnit * conv->velocityUnit);
     dest[1] = act.Jz   / (conv->lengthUnit * conv->velocityUnit);
@@ -389,7 +389,7 @@ enum OUTPUT_VALUE {
 
 /// size of input array for a single point
 template<int numArgs>
-static size_t inputLength();
+size_t inputLength();
 
 /// parse a list of numArgs floating-point arguments for a Python function, 
 /// and store them in inputArray[]; return 1 on success, 0 on failure 
@@ -398,7 +398,7 @@ int parseTuple(PyObject* args, double inputArray[]);
 
 /// check that the input array is of right dimensions, and return its length
 template<int numArgs>
-int parseArray(PyArrayObject* arr)
+inline int parseArray(PyArrayObject* arr)
 {
     if(PyArray_NDIM(arr) == 2 && PyArray_DIM(arr, 1) == numArgs)
         return PyArray_DIM(arr, 0);
@@ -416,7 +416,7 @@ const char* errStrInvalidInput();
 
 /// size of output array for a single point
 template<int numOutput>
-static size_t outputLength();
+size_t outputLength();
 
 /// construct an output tuple containing the given result data computed for a single input point
 template<int numOutput>
@@ -436,20 +436,19 @@ template<> inline size_t inputLength<INPUT_VALUE_SINGLE>()  {return 1;}
 template<> inline size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
 template<> inline size_t inputLength<INPUT_VALUE_SEXTET>()  {return 6;}
 
-template<> int parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double input[]) {
+template<> inline int parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double input[]) {
     input[0] = PyFloat_AsDouble(args);
     return PyErr_Occurred() ? 0 : 1;
 }
-template<> int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
+template<> inline int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
     return PyArg_ParseTuple(args, "ddd", &input[0], &input[1], &input[2]);
 }
-template<> int parseTuple<INPUT_VALUE_SEXTET>(PyObject* args, double input[]) {
+template<> inline int parseTuple<INPUT_VALUE_SEXTET>(PyObject* args, double input[]) {
     return PyArg_ParseTuple(args, "dddddd",
         &input[0], &input[1], &input[2], &input[3], &input[4], &input[5]);
 }
 
-template<>
-int parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
+template<> inline int parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
 {
     if(PyArray_NDIM(arr) == 1)
         return PyArray_DIM(arr, 0);
@@ -457,23 +456,23 @@ int parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
         return 0;
 }
 
-template<> const char* errStrInvalidArrayDim<INPUT_VALUE_SINGLE>() {
+template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_SINGLE>() {
     return "Input does not contain a valid one-dimensional array";
 }
-template<> const char* errStrInvalidArrayDim<INPUT_VALUE_TRIPLET>() {
+template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_TRIPLET>() {
     return "Input does not contain a valid Nx3 array";
 }
-template<> const char* errStrInvalidArrayDim<INPUT_VALUE_SEXTET>() {
+template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_SEXTET>() {
     return "Input does not contain a valid Nx6 array";
 }
 
-template<> const char* errStrInvalidInput<INPUT_VALUE_SINGLE>() {
+template<> inline const char* errStrInvalidInput<INPUT_VALUE_SINGLE>() {
     return "Input does not contain valid data (either a single number or a one-dimensional array)";
 }
-template<> const char* errStrInvalidInput<INPUT_VALUE_TRIPLET>() {
+template<> inline const char* errStrInvalidInput<INPUT_VALUE_TRIPLET>() {
     return "Input does not contain valid data (either 3 numbers for a single point or a Nx3 array)";
 }
-template<> const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
+template<> inline const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
     return "Input does not contain valid data (either 6 numbers for a single point or a Nx6 array)";
 }
 
@@ -489,85 +488,85 @@ template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {retur
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>() {return 10;}
 
-template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
     return Py_BuildValue("d", result[0]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_TRIPLET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET>(const double result[]) {
     return Py_BuildValue("ddd", result[0], result[1], result[2]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_SEXTET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SEXTET>(const double result[]) {
     return Py_BuildValue("dddddd",
         result[0], result[1], result[2], result[3], result[4], result[5]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE>(const double result[]) {
     return Py_BuildValue("(dd)", result[0], result[1]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(const double result[]) {
     return Py_BuildValue("d(ddd)", result[0], result[1], result[2], result[3]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SEXTET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SEXTET>(const double result[]) {
     return Py_BuildValue("d(dddddd)", result[0],
         result[1], result[2], result[3], result[4], result[5], result[6]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(const double result[]) {
     return Py_BuildValue("(ddd)(ddd)", result[0], result[1], result[2],
         result[3], result[4], result[5]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(const double result[]) {
     return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
         result[3], result[4], result[5], result[6], result[7], result[8]);
 }
-template<> PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(const double result[]) {
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(const double result[]) {
     return Py_BuildValue("d(ddd)(dddddd)", result[0], result[1], result[2], result[3],
         result[4], result[5], result[6], result[7], result[8], result[9]);
 }
 
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(int size) {
     npy_intp dims[] = {size};
     return PyArray_SimpleNew(1, dims, NPY_DOUBLE);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(int size) {
     npy_intp dims[] = {size, 3};
     return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SEXTET>(int size) {
     npy_intp dims[] = {size, 6};
     return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(int size) {
     npy_intp dims[] = {size};
     PyObject* arr1 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(int size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
     PyObject* arr1 = PyArray_SimpleNew(1, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(int size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 6};
     PyObject* arr1 = PyArray_SimpleNew(1, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(int size) {
     npy_intp dims[] = {size, 3};
     PyObject* arr1 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(int size) {
     npy_intp dims1[] = {size, 3};
     npy_intp dims2[] = {size, 6};
     PyObject* arr1 = PyArray_SimpleNew(2, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(int size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
     npy_intp dims3[] = {size, 6};
@@ -577,30 +576,30 @@ template<> PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     return Py_BuildValue("NNN", arr1, arr2, arr3);
 }
 
-template<> void formatOutputArr<OUTPUT_VALUE_SINGLE>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE>(
     const double result[], const int index, PyObject* resultObj) 
 {
     pyArrayElem<double>(resultObj, index) = result[0];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
     const double result[], const int index, PyObject* resultObj) 
 {
     for(int d=0; d<3; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_SEXTET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SEXTET>(
     const double result[], const int index, PyObject* resultObj) 
 {
     for(int d=0; d<6; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(
     const double result[], const int index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 1), index) = result[1];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
     const double result[], const int index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
@@ -608,7 +607,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
     for(int d=0; d<3; d++)
         pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
     const double result[], const int index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
@@ -616,7 +615,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
     for(int d=0; d<6; d++)
         pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
     const double result[], const int index, PyObject* resultObj)
 {
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
@@ -626,7 +625,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
         pyArrayElem<double>(arr2, index, d) = result[d+3];
     }
 }
-template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
     const double result[], const int index, PyObject* resultObj)
 {
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
@@ -636,7 +635,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
     for(int d=0; d<6; d++)
         pyArrayElem<double>(arr2, index, d) = result[d+3];
 }
-template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     const double result[], const int index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
@@ -667,7 +666,7 @@ template<> void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     shape determined by the output format, i.e., for the above example it would be ([N,3], [N,6]).
 */
 template<int numArgs, int numOutput>
-static PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
+PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
 {
     if(args==NULL) {
         PyErr_SetString(PyExc_ValueError, "No input data provided");
@@ -744,7 +743,7 @@ typedef struct {
 } DensityObject;
 /// \endcond
 
-static void Density_dealloc(DensityObject* self)
+void Density_dealloc(DensityObject* self)
 {
     if(self->dens)
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted "+std::string(self->dens->name())+
@@ -791,10 +790,10 @@ static const char* docstringDensity =
 /// extract a pointer to C++ Density class from a Python object,
 /// or return an empty pointer on error.
 /// Declared here, implemented after the PotentialObject definition becomes available.
-static potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
 
 /// attempt to construct a composite density from a tuple of Density objects
-static potential::PtrDensity Density_initFromTuple(PyObject* tuple)
+potential::PtrDensity Density_initFromTuple(PyObject* tuple)
 {
     std::vector<potential::PtrDensity> components;
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
@@ -808,7 +807,7 @@ static potential::PtrDensity Density_initFromTuple(PyObject* tuple)
 }
 
 /// attempt to construct a density from key=value parameters
-static potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
+potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 {
     utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
     // for convenience, may specify the type of density model in type="..." argument
@@ -821,7 +820,7 @@ static potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 }
 
 /// constructor of Density class
-static int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
+int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
         // check if we have only a tuple of density components as arguments
@@ -845,22 +844,22 @@ static int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs
     }
 }
 
-static void fncDensity_density(void* obj, const double input[], double *result) {
+void fncDensity_density(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     result[0] = ((DensityObject*)obj)->dens->density(point)
         / (conv->massUnit / pow_3(conv->lengthUnit));  // unit of density is M/L^3
 }
-static PyObject* Density_density(PyObject* self, PyObject* args) {
+PyObject* Density_density(PyObject* self, PyObject* args) {
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
         (self, args, fncDensity_density);
 }
 
-static PyObject* Density_name(PyObject* self)
+PyObject* Density_name(PyObject* self)
 {
     return Py_BuildValue("s", ((DensityObject*)self)->dens->name());
 }
 
-static PyObject* Density_totalMass(PyObject* self)
+PyObject* Density_totalMass(PyObject* self)
 {
     try{
         return Py_BuildValue("d", ((DensityObject*)self)->dens->totalMass() / conv->massUnit);
@@ -872,7 +871,7 @@ static PyObject* Density_totalMass(PyObject* self)
     }
 }
 
-static PyObject* Density_export(PyObject* self, PyObject* args)
+PyObject* Density_export(PyObject* self, PyObject* args)
 {
     const char* filename=NULL;
     if(!PyArg_ParseTuple(args, "s", &filename))
@@ -889,7 +888,7 @@ static PyObject* Density_export(PyObject* self, PyObject* args)
 }
 
 /// shared between Density and Potential classes
-static PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args)
+PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args)
 {
     int numPoints=0;
     if(!PyArg_ParseTuple(args, "i", &numPoints) || numPoints<=0)
@@ -921,7 +920,7 @@ static PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* arg
     }
 }
 
-static PyObject* Density_sample(PyObject* self, PyObject* args)
+PyObject* Density_sample(PyObject* self, PyObject* args)
 {
     return sampleDensity(*((DensityObject*)self)->dens, args);
 }
@@ -962,7 +961,7 @@ static PyTypeObject DensityType = {
 };
 
 /// create a Python Density object and initialize it with an existing instance of C++ density class
-static PyObject* createDensityObject(const potential::PtrDensity& dens)
+PyObject* createDensityObject(const potential::PtrDensity& dens)
 {
     DensityObject* dens_obj = PyObject_New(DensityObject, &DensityType);
     if(!dens_obj)
@@ -1056,7 +1055,7 @@ typedef struct {
 } PotentialObject;
 /// \endcond
 
-static void Potential_dealloc(PotentialObject* self)
+void Potential_dealloc(PotentialObject* self)
 {
     if(self->pot)
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted "+std::string(self->pot->name())+
@@ -1149,7 +1148,7 @@ static const char* docstringPotential =
     "(this is the default regime and is restored by `resetUnits`).\n";
 
 /// attempt to construct potential from an array of particles
-static potential::PtrPotential Potential_initFromParticles(
+potential::PtrPotential Potential_initFromParticles(
     const utils::KeyValueMap& params, PyObject* points)
 {
     if(params.contains("file"))
@@ -1196,7 +1195,7 @@ static potential::PtrPotential Potential_initFromParticles(
 }
 
 /// attempt to construct an elementary potential from the parameters provided in dictionary
-static potential::PtrPotential Potential_initFromDict(PyObject* args)
+potential::PtrPotential Potential_initFromDict(PyObject* args)
 {
     utils::KeyValueMap params = convertPyDictToKeyValueMap(args);
     // check if the list of arguments contains points
@@ -1231,7 +1230,7 @@ static potential::PtrPotential Potential_initFromDict(PyObject* args)
 
 /// attempt to construct a composite potential from a tuple of Potential objects
 /// or dictionaries with potential parameters
-static potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
+potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 {
     if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
     {   // assuming that we have one parameter which is the INI file name
@@ -1262,7 +1261,7 @@ static potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 }
 
 /// the generic constructor of Potential object
-static int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
+int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
         // check if we have only a tuple of potential components as arguments
@@ -1290,7 +1289,7 @@ static int Potential_init(PotentialObject* self, PyObject* args, PyObject* named
     }
 }
 
-static bool Potential_isCorrect(PyObject* self)
+bool Potential_isCorrect(PyObject* self)
 {
     if(self==NULL) {
         PyErr_SetString(PyExc_ValueError, "Should be called as method of Potential object");
@@ -1303,34 +1302,36 @@ static bool Potential_isCorrect(PyObject* self)
     return true;
 }
 
-// function that do actually compute something from the potential object,
+// functions that do actually compute something from the potential object,
 // applying appropriate unit conversions
 
-static void fncPotential_potential(void* obj, const double input[], double *result) {
+void fncPotential_potential(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     result[0] = ((PotentialObject*)obj)->pot->value(point)
         / pow_2(conv->velocityUnit);   // unit of potential is V^2
 }
-static PyObject* Potential_potential(PyObject* self, PyObject* args, PyObject* /*namedArgs*/) {
+
+PyObject* Potential_potential(PyObject* self, PyObject* args, PyObject* /*namedArgs*/) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
         (self, args, fncPotential_potential);
 }
 
-static void fncPotential_density(void* obj, const double input[], double *result) {
+void fncPotential_density(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     result[0] = ((PotentialObject*)obj)->pot->density(point)
         / (conv->massUnit / pow_3(conv->lengthUnit));  // unit of density is M/L^3
 }
-static PyObject* Potential_density(PyObject* self, PyObject* args) {
+
+PyObject* Potential_density(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
         (self, args, fncPotential_density);
 }
 
-static void fncPotential_force(void* obj, const double input[], double *result) {
+void fncPotential_force(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     coord::GradCar grad;
     ((PotentialObject*)obj)->pot->eval(point, NULL, &grad);
@@ -1340,14 +1341,15 @@ static void fncPotential_force(void* obj, const double input[], double *result) 
     result[1] = -grad.dy * convF;
     result[2] = -grad.dz * convF;
 }
-static PyObject* Potential_force(PyObject* self, PyObject* args) {
+
+PyObject* Potential_force(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET>
         (self, args, fncPotential_force);
 }
 
-static void fncPotential_forceDeriv(void* obj, const double input[], double *result) {
+void fncPotential_forceDeriv(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     coord::GradCar grad;
     coord::HessCar hess;
@@ -1366,21 +1368,22 @@ static void fncPotential_forceDeriv(void* obj, const double input[], double *res
     result[7] = -hess.dydz * convD;
     result[8] = -hess.dxdz * convD;
 }
-static PyObject* Potential_forceDeriv(PyObject* self, PyObject* args) {
+
+PyObject* Potential_forceDeriv(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET_AND_SEXTET>
         (self, args, fncPotential_forceDeriv);
 }
 
-static PyObject* Potential_name(PyObject* self)
+PyObject* Potential_name(PyObject* self)
 {
     if(!Potential_isCorrect(self))
         return NULL;
     return Py_BuildValue("s", ((PotentialObject*)self)->pot->name());
 }
 
-static PyObject* Potential_export(PyObject* self, PyObject* args)
+PyObject* Potential_export(PyObject* self, PyObject* args)
 {
     const char* filename=NULL;
     if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "s", &filename))
@@ -1396,7 +1399,7 @@ static PyObject* Potential_export(PyObject* self, PyObject* args)
     }
 }
 
-static PyObject* Potential_totalMass(PyObject* self)
+PyObject* Potential_totalMass(PyObject* self)
 {
     if(!Potential_isCorrect(self))
         return NULL;
@@ -1410,7 +1413,7 @@ static PyObject* Potential_totalMass(PyObject* self)
     }
 }
 
-static PyObject* Potential_sample(PyObject* self, PyObject* args)
+PyObject* Potential_sample(PyObject* self, PyObject* args)
 {
     if(!Potential_isCorrect(self))
         return NULL;
@@ -1468,7 +1471,7 @@ static PyTypeObject PotentialType = {
 };
 
 /// create a Python Potential object and initialize it with an existing instance of C++ potential class
-static PyObject* createPotentialObject(const potential::PtrPotential& pot)
+PyObject* createPotentialObject(const potential::PtrPotential& pot)
 {
     PotentialObject* pot_obj = PyObject_New(PotentialObject, &PotentialType);
     if(!pot_obj)
@@ -1483,7 +1486,7 @@ static PyObject* createPotentialObject(const potential::PtrPotential& pot)
 
 /// extract a pointer to C++ Potential class from a Python object,
 /// or return an empty pointer on error
-static potential::PtrPotential getPotential(PyObject* pot_obj)
+potential::PtrPotential getPotential(PyObject* pot_obj)
 {
     if(pot_obj == NULL || !PyObject_TypeCheck(pot_obj, &PotentialType) ||
         !((PotentialObject*)pot_obj)->pot)
@@ -1492,7 +1495,7 @@ static potential::PtrPotential getPotential(PyObject* pot_obj)
 }
 
 /// extract a pointer to C++ Density class from a Python object
-static potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
 {
     if(dens_obj == NULL)
         return potential::PtrDensity();
@@ -1525,7 +1528,7 @@ static potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType 
 ///@{
 
 /// create a spherical or non-spherical action finder
-static actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot)
+actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot)
 {
     assert(pot);
     actions::PtrActionFinder af = isSpherical(*pot) ?
@@ -1545,7 +1548,7 @@ typedef struct {
 } ActionFinderObject;
 /// \endcond
 
-static void ActionFinder_dealloc(ActionFinderObject* self)
+void ActionFinder_dealloc(ActionFinderObject* self)
 {
     utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an action finder at "+
         utils::toString(self->af.get()));
@@ -1555,11 +1558,13 @@ static void ActionFinder_dealloc(ActionFinderObject* self)
 
 static const char* docstringActionFinder =
     "ActionFinder object is created for a given potential, and its () operator "
-    "computes actions for a given position/velocity point, or array of points\n"
-    "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets\n"
-    "Returns: float or array of floats (for each point: Jr, Jz, Jphi)";
+    "computes actions for a given position/velocity point, or array of points.\n"
+    "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets, "
+    "and optionally an 'angles=True' argument if angles are also needed (extra computations).\n"
+    "Returns: float or array of floats (for each point: Jr, Jz, Jphi, "
+    "and also three corresponding angles if this was requested).";
 
-static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
+int ActionFinder_init(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
 {
     PyObject* pot_obj=NULL;
     if(!PyArg_ParseTuple(args, "O", &pot_obj)) {
@@ -1583,28 +1588,52 @@ static int ActionFinder_init(PyObject* self, PyObject* args, PyObject* /*namedAr
     }
 }
 
-static void fncActions(void* obj, const double input[], double *result) {
+template<bool Angles>
+void fncActions(void* obj, const double input[], double *result) {
     try{
         const coord::PosVelCyl point = coord::toPosVelCyl(convertPosVel(input));
-        actions::Actions acts = ((ActionFinderObject*)obj)->af->actions(point);
+        actions::ActionAngles actang = Angles ?
+            ((ActionFinderObject*)obj)->af->actionAngles(point) :
+            actions::ActionAngles(
+            ((ActionFinderObject*)obj)->af->actions(point), actions::Angles(0,0,0));
         // unit of action is V*L
         const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
-        result[0] = acts.Jr   * convA;
-        result[1] = acts.Jz   * convA;
-        result[2] = acts.Jphi * convA;
+        result[0] = actang.Jr   * convA;
+        result[1] = actang.Jz   * convA;
+        result[2] = actang.Jphi * convA;
+        if(Angles) {
+            result[3] = actang.thetar;
+            result[4] = actang.thetaz;
+            result[5] = actang.thetaphi;
+        }
     }
     catch(std::exception& ) {  // indicates an error, e.g., positive value of energy
         result[0] = result[1] = result[2] = NAN;
+        if(Angles)  result[3] = result[4] = result[5] = NAN;
     }
 }
-static PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
+
+PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!((ActionFinderObject*)self)->af) {
         PyErr_SetString(PyExc_ValueError, "ActionFinder object is not properly initialized");
         return NULL;
     }
-    return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
-        (self, args, fncActions);
+    static const char* keywords[] = {"point", "angles", NULL};
+    PyObject *points = NULL, *angles = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
+        &points, &angles))
+    {
+        PyErr_SetString(PyExc_ValueError,
+            "Must provide an array of points and optionally the 'angles=True/False' flag");
+        return NULL;
+    }
+    if(angles==NULL || !PyObject_IsTrue(angles))
+        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
+            (self, points, fncActions<false>);
+    else
+        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SEXTET>
+            (self, points, fncActions<true>);
 }
 
 static PyTypeObject ActionFinderType = {
@@ -1619,7 +1648,7 @@ static PyTypeObject ActionFinderType = {
 
 /// create a Python ActionFinder object and initialize it
 /// with an existing instance of C++ action finder class
-static PyObject* createActionFinderObject(actions::PtrActionFinder af)
+PyObject* createActionFinderObject(actions::PtrActionFinder af)
 {
     ActionFinderObject* af_obj = PyObject_New(ActionFinderObject, &ActionFinderType);
     if(!af_obj)
@@ -1640,22 +1669,34 @@ typedef struct {
 } ActionFinderParams;
 /// \endcond
 
-static void fncActionsStandalone(void* obj, const double input[], double *result) {
+template<bool Angles>
+void fncActionsStandalone(void* obj, const double input[], double *result) {
     try{
         const coord::PosVelCyl point = coord::toPosVelCyl(convertPosVel(input));
         const ActionFinderParams* params = static_cast<const ActionFinderParams*>(obj);
         double ifd = params->ifd * conv->lengthUnit;
-        actions::Actions acts = isSpherical(*params->pot) ?
+        actions::ActionAngles actang = Angles ?
+            (isSpherical(*params->pot) ?
+            actions::actionAnglesSpherical  (*params->pot, point) :
+            actions::actionAnglesAxisymFudge(*params->pot, point, ifd)) :
+            actions::ActionAngles(
+            (isSpherical(*params->pot) ?
             actions::actionsSpherical  (*params->pot, point) :
-            actions::actionsAxisymFudge(*params->pot, point, ifd);
+            actions::actionsAxisymFudge(*params->pot, point, ifd)), actions::Angles(0,0,0));
         // unit of action is V*L
         const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
-        result[0] = acts.Jr   * convA;
-        result[1] = acts.Jz   * convA;
-        result[2] = acts.Jphi * convA;
+        result[0] = actang.Jr   * convA;
+        result[1] = actang.Jz   * convA;
+        result[2] = actang.Jphi * convA;
+        if(Angles) {
+            result[3] = actang.thetar;
+            result[4] = actang.thetaz;
+            result[5] = actang.thetaphi;
+        }
     }
-    catch(std::exception& ) {  // indicates an error, e.g., positive value of energy
+    catch(std::exception& ) {
         result[0] = result[1] = result[2] = NAN;
+        if(Angles)  result[3] = result[4] = result[5] = NAN;
     }
 }
 
@@ -1665,15 +1706,18 @@ static const char* docstringActions =
     "    point - a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets;\n"
     "    pot - Potential object that defines the gravitational potential;\n"
     "    ifd (float) - interfocal distance for the prolate spheroidal coordinate system "
-    "(not necessary if the potential is spherical).\n"
-    "Returns: float or array of floats (for each point: Jr, Jz, Jphi)";
-static PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+    "(not necessary if the potential is spherical);\n"
+    "    angles (boolean, default False) - whether need to compute angles as well.\n"
+    "Returns: float or array of floats (for each point: Jr, Jz, Jphi, "
+    "and also three corresponding angles if this was requested).";
+
+PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"point", "pot", "ifd", NULL};
+    static const char* keywords[] = {"point", "pot", "ifd", "angles", NULL};
     double ifd = 0;
-    PyObject *points_obj = NULL, *pot_obj = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOd", const_cast<char**>(keywords),
-        &points_obj, &pot_obj, &ifd) || ifd<0)
+    PyObject *points_obj = NULL, *pot_obj = NULL, *angles = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
+        &points_obj, &pot_obj, &ifd, &angles) || ifd<0)
     {
         PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to actions()");
         return NULL;
@@ -1685,8 +1729,12 @@ static PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs
         PyErr_SetString(PyExc_TypeError, "Argument 'pot' must be a valid instance of Potential class");
         return NULL;
     }
-    return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
-        (&params, points_obj, fncActionsStandalone);
+    if(angles==NULL || !PyObject_IsTrue(angles))
+        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
+            (&params, points_obj, fncActionsStandalone<false>);
+    else
+        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SEXTET>
+            (&params, points_obj, fncActionsStandalone<true>);
 }
 
 
@@ -1704,7 +1752,7 @@ typedef struct {
 } DistributionFunctionObject;
 /// \endcond
 
-static void DistributionFunction_dealloc(DistributionFunctionObject* self)
+void DistributionFunction_dealloc(DistributionFunctionObject* self)
 {
     utils::msg(utils::VL_VERBOSE, "Agama", "Deleted a distribution function at "+
         utils::toString(self->df.get()));
@@ -1715,7 +1763,7 @@ static void DistributionFunction_dealloc(DistributionFunctionObject* self)
 // pointer to the DistributionFunctionType object (will be initialized below)
 static PyTypeObject* DistributionFunctionTypePtr;
 // forward declaration
-static df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
+df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
 
 static const char* docstringDistributionFunction =
     "DistributionFunction class represents an action-based distribution function.\n\n"
@@ -1740,7 +1788,7 @@ static const char* docstringDistributionFunction =
 
 /// attempt to construct an interpolated distribution function from the parameters provided in dictionary
 template<int N>
-static df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObject* namedArgs)
+df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObject* namedArgs)
 {
     PyObject *u_obj = getItemFromPyDict(namedArgs, "u");  // borrowed reference or NULL
     PyObject *v_obj = getItemFromPyDict(namedArgs, "v");
@@ -1773,7 +1821,7 @@ static df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObjec
 }
 
 /// attempt to construct an elementary distribution function from the parameters provided in dictionary
-static df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArgs)
+df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArgs)
 {
     PyObject *pot_obj = PyDict_GetItemString(namedArgs, "pot");  // borrowed reference or NULL
     potential::PtrPotential pot;
@@ -1810,7 +1858,7 @@ static df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* n
 }
 
 /// attempt to construct a composite distribution function from a tuple of DistributionFunction objects
-static df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
+df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
 {
     std::vector<df::PtrDistributionFunction> components;
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
@@ -1824,7 +1872,7 @@ static df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* 
 }
 
 /// the generic constructor of DistributionFunction object
-static int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, PyObject* namedArgs)
+int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
         // check if we have only a tuple of DF components as arguments
@@ -1855,7 +1903,7 @@ static int DistributionFunction_init(DistributionFunctionObject* self, PyObject*
     }
 }
 
-static void fncDistributionFunction(void* obj, const double input[], double *result)
+void fncDistributionFunction(void* obj, const double input[], double *result)
 {
     const actions::Actions acts = convertActions(input);
     // dimension of distribution function is M L^-3 V^-3
@@ -1868,7 +1916,7 @@ static void fncDistributionFunction(void* obj, const double input[], double *res
     }
 }
 
-static PyObject* DistributionFunction_value(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
+PyObject* DistributionFunction_value(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
 {
     if(((DistributionFunctionObject*)self)->df==NULL) {
         PyErr_SetString(PyExc_ValueError, "DistributionFunction object is not properly initialized");
@@ -1878,7 +1926,7 @@ static PyObject* DistributionFunction_value(PyObject* self, PyObject* args, PyOb
         (self, args, fncDistributionFunction);
 }
 
-static PyObject* DistributionFunction_totalMass(PyObject* self)
+PyObject* DistributionFunction_totalMass(PyObject* self)
 {
     if(((DistributionFunctionObject*)self)->df==NULL) {
         PyErr_SetString(PyExc_ValueError, "DistributionFunction object is not properly initialized");
@@ -1964,7 +2012,7 @@ public:
 
 /// extract a pointer to C++ DistributionFunction class from a Python object,
 /// or return an empty pointer on error
-static df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
+df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 {
     if(df_obj == NULL)
         return df::PtrDistributionFunction();
@@ -1982,7 +2030,7 @@ static df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 }
 
 /// create a Python DistributionFunction object from an existing instance of C++ DF class
-static PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
+PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
 {
     DistributionFunctionObject* df_obj =
         PyObject_New(DistributionFunctionObject, &DistributionFunctionType);
@@ -2012,7 +2060,7 @@ typedef struct {
 } GalaxyModelObject;
 /// \endcond
 
-static void GalaxyModel_dealloc(GalaxyModelObject* self)
+void GalaxyModel_dealloc(GalaxyModelObject* self)
 {
     Py_XDECREF(self->pot_obj);
     Py_XDECREF(self->df_obj);
@@ -2020,7 +2068,7 @@ static void GalaxyModel_dealloc(GalaxyModelObject* self)
     self->ob_type->tp_free((PyObject*)self);
 }
 
-static bool GalaxyModel_isCorrect(GalaxyModelObject* self)
+bool GalaxyModel_isCorrect(GalaxyModelObject* self)
 {
     if(self==NULL) {
         PyErr_SetString(PyExc_ValueError, "Should be called as method of GalaxyModel object");
@@ -2048,7 +2096,7 @@ static const char* docstringGalaxyModel =
     "  af (optional) - an ActionFinder object; "
     "if not provided then the action finder is created internally.\n";
 
-static int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
+int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"pot", "df", "af", NULL};
     PyObject *pot_obj = NULL, *df_obj = NULL, *af_obj = NULL;
@@ -2114,7 +2162,7 @@ static int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* n
 }
 
 /// generate samples in position/velocity space
-static PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
+PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
@@ -2164,7 +2212,7 @@ struct GalaxyModelParams{
 };
 /// \endcond
 
-static void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
+void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     GalaxyModelParams* params = static_cast<GalaxyModelParams*>(obj);
     double dens;
@@ -2205,7 +2253,7 @@ static void fncGalaxyModelMoments(void* obj, const double input[], double *resul
 }
 
 /// compute moments of DF at a given 3d point
-static PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
@@ -2274,7 +2322,7 @@ static PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, Py
     }
 }
 
-static void fncGalaxyModelProjectedMoments(void* obj, const double input[], double *result) {
+void fncGalaxyModelProjectedMoments(void* obj, const double input[], double *result) {
     GalaxyModelParams* params = static_cast<GalaxyModelParams*>(obj);
     try{
         double surfaceDensity, losvdisp;
@@ -2290,7 +2338,7 @@ static void fncGalaxyModelProjectedMoments(void* obj, const double input[], doub
 }
 
 /// compute projected moments of distribution function
-static PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
+PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
@@ -2314,7 +2362,7 @@ static PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject*
     }
 }
 
-static void fncGalaxyModelProjectedDF(void* obj, const double input[], double *result) {
+void fncGalaxyModelProjectedDF(void* obj, const double input[], double *result) {
     const double R = sqrt(pow_2(input[0]) + pow_2(input[1])) * conv->lengthUnit;
     const double vz = input[2] * conv->velocityUnit;
     // dimension of projected distribution function is M L^-2 V^-1
@@ -2330,7 +2378,7 @@ static void fncGalaxyModelProjectedDF(void* obj, const double input[], double *r
 }
 
 /// compute projected distribution function
-static PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
@@ -2359,7 +2407,7 @@ static PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args
     }
 }
 
-static bool computeVDFatPoint(const galaxymodel::GalaxyModel& model, const coord::PosCyl& point,
+bool computeVDFatPoint(const galaxymodel::GalaxyModel& model, const coord::PosCyl& point,
     const bool projected, const std::vector<double>& gridvR_ext,
     const std::vector<double>& gridvz_ext, const std::vector<double>& gridvphi_ext,
     /*storage for output interpolators */ PyObject*& splinevR, PyObject*& splinevz, PyObject*& splinevphi)
@@ -2426,7 +2474,7 @@ static bool computeVDFatPoint(const galaxymodel::GalaxyModel& model, const coord
 }
 
 /// compute velocity distribution functions at point(s)
-static PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
@@ -2634,7 +2682,7 @@ typedef struct {
 } ComponentObject;
 /// \endcond
 
-static void Component_dealloc(ComponentObject* self)
+void Component_dealloc(ComponentObject* self)
 {
     self->comp.reset();
     // self->name is either NULL or points to a constant string that does not require deallocation
@@ -2668,7 +2716,7 @@ static const char* docstringComponent =
     "    gridR, gridz (array-like) --  the nodes of 2d grid in cylindrical coordinates, "
     "first elements must be zeros (may be constructed using 'agama.createNonuniformGrid()').\n";
 
-static int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
+int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
@@ -2775,12 +2823,12 @@ static int Component_init(ComponentObject* self, PyObject* args, PyObject* named
     return -1;
 }
 
-static PyObject* Component_name(PyObject* self)
+PyObject* Component_name(PyObject* self)
 {
     return Py_BuildValue("s", ((ComponentObject*)self)->name);
 }
 
-static PyObject* Component_getPotential(ComponentObject* self)
+PyObject* Component_getPotential(ComponentObject* self)
 {
     potential::PtrPotential pot = self->comp->getPotential();
     if(pot)
@@ -2790,7 +2838,7 @@ static PyObject* Component_getPotential(ComponentObject* self)
     return Py_None;
 }
 
-static PyObject* Component_getDensity(ComponentObject* self)
+PyObject* Component_getDensity(ComponentObject* self)
 {
     potential::PtrDensity dens = self->comp->getDensity();
     if(dens)
@@ -2848,7 +2896,7 @@ typedef struct {
 } SelfConsistentModelObject;
 /// \endcond
 
-static void SelfConsistentModel_dealloc(SelfConsistentModelObject* self)
+void SelfConsistentModel_dealloc(SelfConsistentModelObject* self)
 {
     Py_XDECREF(self->components);
     Py_XDECREF(self->pot);
@@ -2873,7 +2921,7 @@ static const char* docstringSelfConsistentModel =
     "The potential and action finder member variables are initially empty, "
     "and are initialized after the first call to the 'iterate()' method.\n";
 
-static int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, PyObject* namedArgs)
+int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     Py_XDECREF(self->components);
     Py_XDECREF(self->pot);
@@ -2897,7 +2945,7 @@ static int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* a
     return 0;
 }
 
-static PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
+PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
 {
     galaxymodel::SelfConsistentModel model;
     // parse the Python list of components
@@ -3014,7 +3062,7 @@ typedef struct {
 } CubicSplineObject;
 /// \endcond
 
-static void CubicSpline_dealloc(PyObject* self)
+void CubicSpline_dealloc(PyObject* self)
 {
     // dirty hack: manually call the destructor for an object that was
     // constructed not in a normal way, but rather with a placement new operator
@@ -3025,7 +3073,7 @@ static void CubicSpline_dealloc(PyObject* self)
     self->ob_type->tp_free(self);
 }
 
-static int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
+int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     // "dirty hack" (see above) to construct a C++ object in an already allocated chunk of memory
     new (&(((CubicSplineObject*)self)->spl)) math::CubicSpline;
@@ -3061,7 +3109,7 @@ static int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
-static inline double splEval(const math::CubicSpline& spl, double x, int der)
+inline double splEval(const math::CubicSpline& spl, double x, int der)
 {
     double result;
     switch(der) {
@@ -3072,9 +3120,9 @@ static inline double splEval(const math::CubicSpline& spl, double x, int der)
     }
 }
 
-static PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    if(self==NULL || ((CubicSplineObject*)self)->spl.isEmpty()) {
+    if(self==NULL || ((CubicSplineObject*)self)->spl.empty()) {
         PyErr_SetString(PyExc_ValueError, "CubicSpline object is not properly initialized");
         return NULL;
     }
@@ -3101,6 +3149,8 @@ static PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* nam
     // if the input is a single value, just do it
     if(PyFloat_Check(ptx)) { // one value
         double x = PyFloat_AsDouble(ptx);
+        if(PyErr_Occurred())
+            return NULL;
         if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
             return Py_BuildValue("O", extrapolate_obj);
         else
@@ -3117,7 +3167,8 @@ static PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* nam
     // replace elements of the copy of input array with computed values
     npy_intp size = PyArray_SIZE(arr);
     for(int i=0; i<size; i++) {
-        double& x = pyArrayElem<double>(arr, i);  // reference to the array element to be replaced
+        // reference to the array element to be replaced
+        double& x = static_cast<double*>(PyArray_DATA(arr))[i];
         if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
             x = extrapolate_val;
         else
@@ -3186,43 +3237,53 @@ static const char* docstringSplineApprox =
     "    x -- x-coordinates of points (1d array), "
     "should preferrably be in the range covered by knots, ordering does not matter.\n"
     "    y -- y-coordinates of points, same length as x.\n"
+    "    w -- (1d array of the same length as x, optional) are weights of "
+    "each input point used in least-square fitting, assumed uniform if omitted.\n"
     "    smooth -- (float, default 0) is the parameter controlling the tradeoff "
     "between smoothness and approximation error; zero means no additional smoothing "
     "(beyond the one resulting from discreteness of the spacing of knots), "
     "and values around unity usually yield a reasonable smoothing of noise without "
-    "sacrificing too much of accuracy.\n"
+    "significantly increasing the rms error in the approximation.\n"
     "Returns: a CubicSpline object.\n";
 
-static PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"knots","x","y","smooth",NULL};
+    static const char* keywords[] = {"knots","x","y","w","smooth",NULL};
     PyObject* k_obj=NULL;
     PyObject* x_obj=NULL;
     PyObject* y_obj=NULL;
+    PyObject* w_obj=NULL;
     double smoothfactor=0;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OOO|d", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &y_obj, &smoothfactor)) {
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OOO|Od", const_cast<char **>(keywords),
+        &k_obj, &x_obj, &y_obj, &w_obj, &smoothfactor)) {
         PyErr_SetString(PyExc_ValueError, "splineApprox: "
             "must provide an array of grid nodes and two arrays of equal length "
-            "(input x and y points), and optionally a float (smooth factor)");
+            "(input x and y points), and optionally an array of weights "
+            "and a float (smooth factor)");
         return NULL;
     }
     std::vector<double>
         knots  (toFloatArray(k_obj)),
         xvalues(toFloatArray(x_obj)),
-        yvalues(toFloatArray(y_obj));
+        yvalues(toFloatArray(y_obj)),
+        weights(toFloatArray(w_obj));
     if(xvalues.empty() || yvalues.empty() || knots.empty()) {
         PyErr_SetString(PyExc_ValueError, "Input does not contain valid arrays");
         return NULL;
     }
-    if(knots.size() < 2|| xvalues.size() != yvalues.size()) {
+    if(knots.size() < 2 || xvalues.size() != yvalues.size()) {
         PyErr_SetString(PyExc_ValueError,
             "Arguments must be an array of grid nodes (at least 2) "
             "and two arrays of equal length (x and y)");
         return NULL;
     }
+    if(!weights.empty() && weights.size() != xvalues.size()) {
+        PyErr_SetString(PyExc_ValueError,
+            "Length of the array of weights must be the same as the number of x and y points");
+        return NULL;
+    }
     try{
-        math::SplineApprox spl(knots, xvalues);
+        math::SplineApprox spl(knots, xvalues, weights);
         std::vector<double> amplitudes;
         if(smoothfactor>0)
             amplitudes = spl.fitOversmooth(yvalues, smoothfactor);
@@ -3261,17 +3322,19 @@ static const char* docstringSplineLogDensity =
     "obviously be declining towards -infinity for the integral over rho(x) to be finite.\n"
     "    infRight (boolean, default False) is the same option for extrapolating "
     "the estimated density to x>knots[-1].\n"
+    "    smooth (float, default 0) -- optional extra smoothing.\n"
     "Returns: a CubicSpline object representing log(rho(x)).\n";
 
-static PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"knots","x","w","infLeft","infRight",NULL};
+    static const char* keywords[] = {"knots","x","w","infLeft","infRight","smooth",NULL};
     PyObject* k_obj=NULL;
     PyObject* x_obj=NULL;
     PyObject* w_obj=NULL;
     int infLeft=0, infRight=0;  // should rather be bool, but python doesn't handle it in arg list
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oii", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &w_obj, &infLeft, &infRight)) {
+    double smooth=0;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiid", const_cast<char **>(keywords),
+        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &smooth)) {
         PyErr_SetString(PyExc_ValueError, "splineLogDensity: "
             "must provide an array of grid nodes and two arrays of equal length "
             "(x coordinates of input points and their weights)");
@@ -3296,11 +3359,16 @@ static PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* 
             "plus optionally two boolean parameters (infLeft, infRight)");
         return NULL;
     }
+    if(!(smooth>=0)) {
+        PyErr_SetString(PyExc_ValueError, "smooth factor must be non-negative");
+        return NULL;
+    }
     try{
         std::vector<double> amplitudes = math::splineLogDensity<3>(knots, xvalues, weights,
             math::FitOptions(
             (infLeft ? math::FO_INFINITE_LEFT : 0) |
-            (infRight? math::FO_INFINITE_RIGHT: 0) ) );
+            (infRight? math::FO_INFINITE_RIGHT: 0) ),
+            smooth );
         return createCubicSpline(knots, amplitudes);
     }
     catch(std::exception& e) {
@@ -3330,7 +3398,7 @@ static const char* docstringOrbit =
     "in the trajectory, and each point consists of position and velocity in Cartesian coordinates.";
 
 /// orbit integration
-static PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"ic", "pot", "time", "step", "acc", NULL};
     double time = 0, step = 0, acc = 1e-10;
@@ -3400,7 +3468,7 @@ static const char* docstringNonuniformGrid =
     "Returns:   the array of grid nodes.";
 
 /// creation of a non-uniform grid, a complement to linspace and logspace routines
-static PyObject* nonuniformGrid(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* nonuniformGrid(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"nnodes", "xmin", "xmax", NULL};
     int nnodes=-1;
@@ -3452,7 +3520,7 @@ public:
 };
 
 /// parse the arguments of integrateNdim and sampleNdim functions
-static bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
+bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
     std::vector<double> &xlow, std::vector<double> &xupp)
 {
     if(!lower_obj) {   // this should always be provided - either # of dimensions, or lower boundary
@@ -3533,7 +3601,7 @@ static const char* docstringIntegrateNdim =
     ">>> # non-default values for tolerance and number of evaluations must be passed as named arguments\n";
 
 /// N-dimensional integration
-static PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"fnc", "lower", "upper", "toler", "maxeval", NULL};
     double eps=1e-4;
@@ -3586,7 +3654,7 @@ static const char* docstringSampleNdim =
     ">>> samples,integr,error,_ = sampleNdim(fnc, 10000, [0,-1,0], [10,1,3.14])\n";
 
 /// N-dimensional sampling
-static PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"fnc", "nsamples", "lower", "upper", NULL};
     int numSamples=-1, numEval=-1;
@@ -3643,7 +3711,9 @@ static PyMethodDef module_methods[] = {
 };
 
 } // end internal namespace
+using namespace pywrapper;
 
+// the module initialization function must be outside the internal namespace
 PyMODINIT_FUNC
 initagama(void)
 {

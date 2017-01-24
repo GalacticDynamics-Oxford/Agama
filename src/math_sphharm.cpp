@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
-#include <cstdlib>
+#include <alloca.h>
 
 namespace math{
 
@@ -15,7 +15,7 @@ namespace math{
     the value of Pmm in val, and optionally its first/second derivative w.r.t theta
     in der/der2 if they are not NULL.
 */
-static inline void legendrePmm(int m, double costheta, double sintheta, 
+inline void legendrePmm(int m, double costheta, double sintheta, 
     double& prefact, double* value, double* der, double* der2)
 {
     prefact = 0.5/M_SQRTPI;
@@ -280,7 +280,7 @@ void FourierTransformForward::transform(const double values[], double coefs[]) c
 }
     
 // index of Legendre function P_{lm}(theta_j) in the `legFnc` array
-static inline unsigned int indLeg(const SphHarmIndices& ind, int j, int l, int m)
+inline unsigned int indLeg(const SphHarmIndices& ind, int j, int l, int m)
 {
     int ntheta = ind.lmax/2+1;
     int nlegfn = (ind.lmax+1) * (ind.mmax+1);

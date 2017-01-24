@@ -47,15 +47,18 @@ template<>
 void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/,
     const math::OdeStateType& y, math::OdeStateType& dydt) const
 {
-    // TODO: handle the case R<0
-    const coord::PosVelCyl p(&y.front());
+    coord::PosVelCyl p(&y.front());
+    if(y[0]<0) {    // R<0
+        p.R = -p.R; // apply reflection
+        p.phi += M_PI;
+    }
     coord::GradCyl grad;
     potential.eval(p, NULL, &grad);
     double Rsafe = p.R!=0 ? p.R : 1e-100;  // avoid NAN in degenerate cases
     dydt[0] = p.vR;
     dydt[1] = p.vz;
     dydt[2] = p.vphi/Rsafe;
-    dydt[3] = -grad.dR + pow_2(p.vphi) / Rsafe;
+    dydt[3] = (y[0]<0 ? grad.dR : -grad.dR) + pow_2(p.vphi) / Rsafe;
     dydt[4] = -grad.dz;
     dydt[5] = -(grad.dphi + p.vR*p.vphi) / Rsafe;
 }
@@ -66,10 +69,14 @@ template<>
 void OrbitIntegrator<coord::Sph>::eval(const double /*t*/,
     const math::OdeStateType& y, math::OdeStateType& dydt) const
 {
-    // TODO: the integrator may well provide a point with r<0, which can't be handled properly
     const coord::PosVelSph p(&y.front());
     coord::GradSph grad;
-    potential.eval(p, NULL, &grad);
+    if(y[0]<0) {  // r<0: apply transformation to bring the coordinates into a valid range
+        potential.eval(coord::PosSph(-p.r, M_PI-p.theta, p.phi+M_PI), NULL, &grad);
+        grad.dr = -grad.dr;
+        grad.dtheta = -grad.dtheta;
+    } else
+        potential.eval(p, NULL, &grad);
     double rsafe = p.r!=0 ? p.r : 1e-100;
     double sintheta = sin(p.theta);
     if(sintheta == 0) sintheta = 1e-100;

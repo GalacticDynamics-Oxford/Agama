@@ -344,7 +344,7 @@ int SbyLevMar(               // return:        error flag (see below)
     double&         mean_H,  // Output:        mean H
     double&         delta_H, // Output:        rms deviation from mean
     int&            negact,  // Output:        # of occurence of neg. actions
-    const double    exp_H,   // Input:	       estimate of expected mean H
+    const double  /*exp_H*/, // Input:	       estimate of expected mean H
     const int       err)     // Input:	       error output
 /*==============================================================================
    meaning of return: positive -> =number of iterations
@@ -371,7 +371,7 @@ int SbyLevMar(               // return:        error flag (see below)
     int             iterations=0, mfit=0, F;
     double          chirms, dchisq, dchtry, temp, damp=1.,
                     H_av, *dA, *B, **AA, **AAtry;
-    register double H_av0, //rHav, 
+    register double //H_av0, rHav, 
 		    Rc     = Phi->RfromLc(J(2)), 	// Rc = length scale
                     vc     = WDabs(J(2)) / Rc;		// vc = velocity scale
 		
@@ -427,7 +427,7 @@ int SbyLevMar(               // return:        error flag (see below)
 	}
       }
     }
-    H_av0 = (exp_H)? exp_H : mean_H;  // first Average value of H
+    //H_av0 = (exp_H)? exp_H : mean_H;  // first Average value of H
     //rHav  = mean_H/H_av0;             // ratio of average to initial average
     if(err) cerr<<"SbyLevMar: init:";
     if(F) {
@@ -1540,8 +1540,8 @@ int AllFit(	            // return:	error flag (see below)
       n2=fmax(Nth, 6*(SN.NumberofN2()/4+1));
       tlH = dH*tl9/d(0);
       F=SbyLevMar(J,Phi,4+sf,n1,n2,Ni2,tlH,tlC,SN,PT,TM,l=l0,Hav,dH,ngA,eH,err>=2);
-        cerr<<" => M="<<pow_2(TM.parameters()[0])<<", b="<<pow_2(TM.parameters()[1])
-        <<", Lz="<<TM.parameters()[2]<<", r0="<<TM.parameters()[3]<<'\n';
+      if(err) {  cerr<<" => M="<<pow_2(TM.parameters()[0])<<", b="<<pow_2(TM.parameters()[1])
+          <<", Lz="<<TM.parameters()[2]<<", r0="<<TM.parameters()[3]<<'\n';} 
       if(F<0) { 
 	if(err) {cerr<<" dJ="<<d(0)<<" --> again tailor set of SN, max. "
 		     <<Ni2<<" iterations.\n";

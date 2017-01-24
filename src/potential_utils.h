@@ -222,9 +222,6 @@ public:
     /// provides one derivative of h(E)
     virtual unsigned int numDerivs() const { return 1; }
 
-    /// return the logarithmic grid used for interpolation;
-    /// g(h) has a power-law asymptotic behaviour outside the grid
-    const std::vector<double>& gridlogh() const { return EofH.xvalues(); }
 private:
     double invPhi0;             ///< 1/Phi(0), where Phi(0) is the value of potential at r=0
     math::QuinticSpline HofE;   ///< phase volume h(E), suitably scaled

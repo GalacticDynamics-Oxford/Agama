@@ -12,7 +12,7 @@ namespace utils {
 
 /* ------- logging routines ------- */
 // the following definitions ensure that function name will appear
-// with full class qualifier in logmsg calls
+// with full class qualifier in calls to "msg"
 #ifdef __GNUC__
 #define FUNCNAME __PRETTY_FUNCTION__
 #else
@@ -48,6 +48,9 @@ extern MsgType* msg;
     (if it exists, otherwise set to default VL_MESSAGE).
 */
 extern VerbosityLevel verbosityLevel;
+
+/** return a textual representation of the stack trace */
+std::string stacktrace();
 
 /*------------- string functions ------------*/
 

@@ -61,7 +61,7 @@ void IOSnapshotText::writeSnapshot(const ParticleArrayCar& points) const
 #ifdef HAVE_UNSIO
 namespace{  // internal
 
-static ParticleArrayCar readSnapshotUNSIO(const std::string& fileName, 
+ParticleArrayCar readSnapshotUNSIO(const std::string& fileName, 
     const units::ExternalUnits& conv) 
 { 
     uns::CunsIn input(fileName, "all", "all");
@@ -94,7 +94,7 @@ static ParticleArrayCar readSnapshotUNSIO(const std::string& fileName,
         throw std::runtime_error("IOSnapshotUNSIO: cannot read from file "+fileName);
 };
 
-static void writeSnapshotUNSIO(const std::string& fileName,
+void writeSnapshotUNSIO(const std::string& fileName,
     const units::ExternalUnits& conv, const ParticleArrayCar& points, const std::string& type)
 {
     uns::CunsOut output(fileName, type);

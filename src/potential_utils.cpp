@@ -145,7 +145,7 @@ public:
 };
 
 /// root polishing routine to improve the accuracy of peri/apocenter radii determination
-static inline double refineRoot(const math::IFunction& pot, double R, double E, double L)
+inline double refineRoot(const math::IFunction& pot, double R, double E, double L)
 {
     double val, der, der2;
     pot.evalDeriv(R, &val, &der, &der2);
@@ -168,7 +168,7 @@ static inline double refineRoot(const math::IFunction& pot, double R, double E, 
 /// extrapolated as its argument tends to +- infinity.
 
 /// return scaledE and dE/d(scaledE) as functions of E and invPhi0 = 1/Phi(0)
-static inline void scaleE(const double E, const double invPhi0,
+inline void scaleE(const double E, const double invPhi0,
     /*output*/ double& scaledE, double& dEdscaledE)
 {
     double expE = invPhi0 - 1/E;
@@ -177,7 +177,7 @@ static inline void scaleE(const double E, const double invPhi0,
 }
 
 /// return E and dE/d(scaledE) as functions of scaledE
-static inline void unscaleE(const double scaledE, const double invPhi0,
+inline void unscaleE(const double scaledE, const double invPhi0,
     /*output*/ double& E, double& dEdscaledE, double& d2EdscaledE2)
 {
     double expE = exp(scaledE);
@@ -189,7 +189,7 @@ static inline void unscaleE(const double scaledE, const double invPhi0,
 /// same as above, but for two separate values of E1 and E2;
 /// in addition, compute the difference between E1 and E2 in a way that is not prone
 /// to cancellation when both E1 and E2 are close to Phi0 and the latter is finite.
-static inline void unscaleDeltaE(const double scaledE1, const double scaledE2, const double invPhi0,
+inline void unscaleDeltaE(const double scaledE1, const double scaledE2, const double invPhi0,
     /*output*/ double& E1, double& E2, double& E1minusE2, double& dE1dscaledE1)
 {
     double exp1  = exp(scaledE1);
@@ -227,71 +227,9 @@ public:
     }
     virtual unsigned int numDerivs() const { return 2; }
 };
-
-/** Construct a grid for interpolating a function with a cubic spline.
-    x is supposed to be a log-scaled coordinate, i.e., it does not attain very large values.
-    The function is assumed to have linear asymptotic behaviour at x -> +- infinity,
-    and the goal is to place the grid nodes such that the typical error in the interpolating
-    spline is less than the provided tolerance eps.
-    The error in the cubic spline approximation of a sufficiently smooth function
-    is <= 5/384 h^4 |f""(x)|, where h is the grid spacing and f"" is the fourth derivative
-    (which we have to estimate by finite differences, using the second derivatives provided
-    by the function). Note, however, that if the input function is a spline interpolator itself,
-    its smoothness is not quite as high, and the accuracy of the secondary interpolation deteriorates
-    somewhat (but is still at an acceptable level, taking into account that the original function
-    itself is an approximation).
-    We start from x=xinit and scan in both directions, adding grid nodes at intervals determined
-    by the above relation, and stop when the second derivative is less than the threshold eps.
-    Typically the nodes will be more sparsely spaced towards the end of the grid.
-    The approach is intended for functions that take x=log(y), so that the range of x is rather moderate.
-    \param[in] fnc  is the function f(x), only its second derivative is examined;
-    \param[in] eps  is the tolerance parameter;
-    \param[in] xinit  is the initial search point (expand in both directions from there);
-    \return  the grid in x.
-*/
-static std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps, double xinit=0)
-{
-    // restrict the search to |x|<=xmax, assuming that x=log(something)
-    const double xmax = 25.;  // exp(xmax) ~ 0.7e11
-    double eps4=pow(eps*384/5, 0.25);
-    double d2f0, d2fm, d2fp;
-    fnc.evalDeriv(xinit,      NULL, NULL, &d2f0);
-    fnc.evalDeriv(xinit-eps4, NULL, NULL, &d2fm);
-    fnc.evalDeriv(xinit+eps4, NULL, NULL, &d2fp);
-    double d3f0 = (d2f0-d2fm) / eps4, d3fp = (d2fp-d2f0) / eps4;
-    double dx = -eps4;
-    double x  = xinit;
-    d2fp = d2f0;
-    std::vector<double> result(1, xinit);
-    int stage=0;
-    while(stage<2) {
-        x += dx;
-        double d2f;
-        fnc.evalDeriv(x, NULL, NULL, &d2f);
-        double d3f = (d2f-d2fp) / dx;
-        double dif = fabs((d3f-d3fp) / dx) + 0.1 * (fabs(d3fp) + fabs(d3f));  // estimate of 4th derivative
-        d2fp       = d2f;
-        d3fp       = d3f;
-        dx         = eps4 / pow(dif, 0.25) * (stage*2-1);
-        result.push_back(x);
-        if(fabs(d2f) < eps || fabs(x)>xmax || !isFinite(d2f+dx)) {
-            if(stage==0) {
-                std::reverse(result.begin(), result.end());
-                x   = 0;
-                dx  = eps4;
-                d2fp= d2f0;
-                d3fp= d3f0;
-            }
-            ++stage;
-        }
-    }
-    utils::msg(utils::VL_DEBUG, "createInterpolationGrid", "Grid in log(r): [" +
-        utils::toString(result.front()) + ":" + utils::toString(result.back()) + "], " +
-        utils::toString(result.size()) + " nodes");
-    return result;
-}
-
+    
 }  // internal namespace
+
 
 double v_circ(const BasePotential& potential, double radius)
 {
@@ -409,7 +347,8 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         slope==0 ?  coef * pow_2(Rcirc)  :  (E-Phi0) / (1/slope+0.5) * pow_2(Rcirc);
     if(!isFinite(Lcirc2))
         throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
-            utils::toString(E)+")");
+            utils::toString(E)+")\n" +
+            utils::stacktrace());
     double Lrel2  = L*L / Lcirc2;
     if(Lrel2>=1) {
         if(Lrel2<1+1e-8) {  // assuming a roundoff error and not an intentional foul
@@ -418,7 +357,8 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         } else
             throw std::invalid_argument("Error in findPlanarOrbitExtent: E="+
                 utils::toString(E,16)+" and L="+utils::toString(L,16)+
-                " have incompatible values (Lcirc="+utils::toString(sqrt(Lcirc2),16)+")");
+                " have incompatible values (Lcirc="+utils::toString(sqrt(Lcirc2),16)+")\n" +
+                utils::stacktrace());
     }
     if(asympt) {
         RPeriApoRootFinderPowerLaw fnc(slope, Lrel2);
@@ -452,7 +392,7 @@ Interpolator::Interpolator(const BasePotential& potential)
         throw std::runtime_error("Interpolator: potential cannot be computed at r=0");
     invPhi0 = 1./Phi0;
 
-    std::vector<double> gridLogR = createInterpolationGrid(
+    std::vector<double> gridLogR = math::createInterpolationGrid(
         ScalePhi(PotentialWrapper(potential)), ACCURACY_INTERP);
     unsigned int gridsize = gridLogR.size();
     std::vector<double>   // various arrays:
@@ -470,11 +410,11 @@ Interpolator::Interpolator(const BasePotential& potential)
         coord::GradCyl grad;
         coord::HessCyl hess;
         potential.eval(coord::PosCyl(R, 0, 0), &Phival, &grad, &hess);
-        double Ecirc = Phival + 0.5*R*grad.dR;
         // epicyclic frequencies
         double kappa = sqrt(hess.dR2 + 3*grad.dR/R);
         double Omega = sqrt(grad.dR/R);
-        double nu2Om = hess.dz2 / grad.dR * R;   // ratio of nu^2/Omega^2 - allowed to be negative
+        double nu2Om = hess.dz2 / grad.dR * R;  // ratio of nu^2/Omega^2 - allowed to be negative
+        double Ecirc = Phival + 0.5*R*grad.dR;
         double Lcirc = Omega * R*R;
         double scaledPhi, dPhidscaledPhi, scaledEcirc, dEcircdscaledEcirc;
         scaleE(Phival, invPhi0, scaledPhi,   dPhidscaledPhi);
@@ -489,9 +429,10 @@ Interpolator::Interpolator(const BasePotential& potential)
         gridRder  [i] = dRdL * Lcirc / R;  // extra factors are from conversion to log-derivatives
         gridLder  [i] = dLdE * dEcircdscaledEcirc / Lcirc;
         gridPhider[i] = grad.dR * R / dPhidscaledPhi;
-        if(!(grad.dR>=0 && Ecirc<0))  // guard against weird values of circular velocity, incl. NaN
-            throw std::runtime_error("Interpolator: cannot determine circular velocity at r="+
-                utils::toString(R));
+        if(!(grad.dR>=0 && (i==0 || gridPhi[i]>gridPhi[i-1]) && Phival<0 && Ecirc<0))
+            // guard against weird behaviour of potential
+            throw std::runtime_error("Interpolator: potential is not monotonically increasing "
+                "with radius at r="+utils::toString(R)+"\n" + utils::stacktrace());
     }
 
     // init various 1d splines
@@ -626,7 +567,8 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     if(!(Phi0<0))
         throw std::invalid_argument("PhaseVolume: invalid value of Phi(r=0)");
     invPhi0 = 1/Phi0;
-    std::vector<double> gridr = createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);  // grid in log(r)
+    // create grid in log(r)
+    std::vector<double> gridr = math::createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);
     std::transform(gridr.begin(), gridr.end(), gridr.begin(), exp);  // convert to grid in r
     unsigned int gridsize = gridr.size();
     std::vector<double> gridE(gridsize), gridH(gridsize), gridG(gridsize);

@@ -7,7 +7,7 @@ namespace potential{
 
 OblatePerfectEllipsoid::OblatePerfectEllipsoid
     (double _mass, double major_axis, double minor_axis) :
-    mass(_mass), coordSys(pow_2(major_axis)-pow_2(minor_axis)), minorAxis(minor_axis)
+    mass(_mass), coordSys(sqrt(pow_2(major_axis)-pow_2(minor_axis))), minorAxis(minor_axis)
 {
     if(minor_axis<=0 || minor_axis>=major_axis)
         throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
@@ -21,7 +21,7 @@ void OblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     double absnu = fabs(pos.nu);
     double signu = pos.nu>=0 ? 1 : -1;
     double lmn = pos.lambda-absnu;
-    if(absnu>coordSys.delta || pos.lambda<coordSys.delta)
+    if(absnu>coordSys.Delta2 || pos.lambda<coordSys.Delta2)
         throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "incorrect values of spheroidal coordinates");
     double Glambda, dGdlambda, d2Gdlambda2, Gnu, dGdnu, d2Gdnu2;

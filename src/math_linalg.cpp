@@ -76,6 +76,25 @@ double blas_ddot(const std::vector<double>& X, const std::vector<double>& Y)
     return result;
 }
 
+template<>
+double blas_dnrm2(const std::vector<double>& X)
+{
+    double result = 0;
+    for(unsigned int i=0; i<X.size(); i++)
+        result += pow_2(X[i]);
+    return result;
+}
+
+template<>
+double blas_dnrm2(const Matrix<double>& X)
+{
+    double result = 0;
+    for(unsigned int i=0; i<X.rows(); i++)
+        for(unsigned int j=0; j<X.cols(); j++)
+            result += pow_2(X(i,j));
+    return result;
+}
+
 std::vector<double> solveTridiag(
     const std::vector<double>& diag,
     const std::vector<double>& aboveDiag,

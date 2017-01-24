@@ -84,7 +84,7 @@ coord::PosCyl unscaleCoords(const double vars[], double* jac)
 }
 
 // return the scaled radius variable to be used as the integration limit
-static double scaledr_from_r(const double r) {
+inline double scaledr_from_r(const double r) {
     const double y = log(r);
     return  fabs(y)<1 ? // two cases depending on whether |y| is small or large
         1/(1 + sqrt(1+pow_2(y*0.5)) - y*0.5) :            // y is close to zero

@@ -16,6 +16,13 @@
 #include <fstream>
 #include <cmath>
 
+bool testCond(bool condition, const std::string& errorMsg)
+{
+    if(!condition)
+        std::cout << errorMsg+"\n";
+    return condition;
+}
+
 int main()
 {
     bool ok = true;
@@ -93,8 +100,10 @@ int main()
     std::cout << "M=" << pot.totalMass() << ", dfOrig M=" << massOrig <<
         ", dfInterLin M=" << massLin << ", sum over components=" << sumLin << 
         ", dfInterCub M=" << massCub << ", sum over components=" << sumCub << '\n';
-    ok &= math::fcmp(massOrig, massLin, 2e-2)==0 && math::fcmp(sumLin, massLin, 1e-3)==0 &&
-          math::fcmp(massOrig, massCub, 2e-2)==0 && math::fcmp(sumCub, massCub, 1e-3)==0;
+    ok &= testCond(math::fcmp(massOrig, massLin, 2e-2)==0, "MassOrig!=MassLinInt");
+    ok &= testCond(math::fcmp(sumLin,   massLin, 1e-3)==0, "SumComp!=MassLinInt");
+    ok &= testCond(math::fcmp(massOrig, massCub, 2e-2)==0, "MassOrig!=MassCubInt");
+    ok &= testCond(math::fcmp(sumCub,   massCub, 1e-3)==0, "SumComp!=MassCubInt");
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         strm.open ("test_df_interpolated.densval");
@@ -129,9 +138,10 @@ int main()
         strmC << '\n';
         strm << r << ' ' << pot.density(point) << '\t' << densOrig << '\t' <<
             densIntL << ' ' << densSumL << '\t' << densIntC << ' ' << densSumC << '\n';
-        ok &= math::fcmp(densOrig, densIntL, 2e-1)==0 && math::fcmp(densSumL, densIntL, 1e-2)==0 && 
-              math::fcmp(densOrig, densIntC, 5e-2)==0 && math::fcmp(densSumC, densIntC, 1e-2)==0;
-        if(!ok) std::cout << "failed at r="<<r<<"\n";
+        ok &= testCond(math::fcmp(densOrig, densIntL, 2e-1)==0, "RhoOrig!=LinInt at r="+utils::toString(r));
+        ok &= testCond(math::fcmp(densSumL, densIntL, 1e-2)==0, "SumComp!=LinInt at r="+utils::toString(r));
+        ok &= testCond(math::fcmp(densOrig, densIntC, 5e-2)==0, "RhoOrig!=CubInt at r="+utils::toString(r));
+        ok &= testCond(math::fcmp(densSumC, densIntC, 1e-2)==0, "SumComp!=CubInt at r="+utils::toString(r));
     }
 
     if(ok)

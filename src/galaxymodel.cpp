@@ -10,8 +10,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "math_optimization.h"
-
 namespace galaxymodel{
 
 namespace{   // internal definitions
@@ -19,20 +17,20 @@ namespace{   // internal definitions
 //------- HELPER ROUTINES -------//
 
 /** convert from scaled velocity variables to the actual velocity.
-    \param[in]  vars are the scaled variables: |v|/velmag, cos(theta), phi,
+    \param[in]  vars are the scaled variables: |v|/velmag, theta/Pi, phi/(2*Pi),
     where the latter two quantities specify the orientation of velocity vector 
     in spherical coordinates centered at a given point, and
     \param[in]  velmag is the maximum magnutude of velocity (equal to the escape velocity).
     \param[out] jac (optional) if not NULL, output the jacobian of transformation.
     \return  three components of velocity in cylindrical coordinates
 */
-static coord::VelCyl unscaleVelocity(const double vars[], const double velmag, double* jac=0)
+inline coord::VelCyl unscaleVelocity(const double vars[], const double velmag, double* jac=0)
 {
-    const double costheta = vars[1]*2 - 1;
-    const double sintheta = sqrt(1-pow_2(costheta));
+    const double costheta = cos(M_PI * vars[1]);
+    const double sintheta = sin(M_PI * vars[1]);
     const double vel = vars[0]*velmag;
     if(jac)
-        *jac = 4*M_PI * vel*vel * velmag;
+        *jac = 2*M_PI*M_PI * vel*vel * velmag * sintheta;
     return coord::VelCyl(
         vel * sintheta * cos(2*M_PI * vars[2]),
         vel * sintheta * sin(2*M_PI * vars[2]),
@@ -40,7 +38,7 @@ static coord::VelCyl unscaleVelocity(const double vars[], const double velmag, d
 }
 
 /** compute the escape velocity at a given position in the given ponential */
-static double escapeVel(const coord::PosCyl& pos, const potential::BasePotential& poten)
+inline double escapeVel(const coord::PosCyl& pos, const potential::BasePotential& poten)
 {
     if(pow_2(pos.R)+pow_2(pos.z) == INFINITY)
         return 0;
@@ -59,7 +57,7 @@ static double escapeVel(const coord::PosCyl& pos, const potential::BasePotential
     the density integration; the velocity magnitude is scaled with local escape velocity.
     If needed, also provide the jacobian of transformation.
 */
-static coord::PosVelCyl unscalePosVel(const double vars[], 
+inline coord::PosVelCyl unscalePosVel(const double vars[], 
     const potential::BasePotential& poten, double* jac=0)
 {
     // 1. determine the position from the first three scaled variables
@@ -75,7 +73,7 @@ static coord::PosVelCyl unscalePosVel(const double vars[],
 
 /** convert scaled z-coordinate into the actual z;
     if necessary, also provide the jacobian of transformation */
-static double unscaleZ(double zscaled, double *jac=NULL) {
+inline double unscaleZ(double zscaled, double *jac=NULL) {
     if(jac!=NULL)
         *jac = pow_2(1/(1-zscaled)) + pow_2(1/zscaled);
     return 1/(1-zscaled) - 1/zscaled;   // jacobian of coordinate transformation
@@ -323,7 +321,7 @@ public:
 
         // 3. compute the value(s) of distribution function
         DFvalue(model, acts, values);
-        
+
         // 4. output the value(s) of DF, multiplied by various combinations of velocity components:
         // {f, f*vR, f*vz, f*vphi, f*vR^2, f*vz^2, f*vphi^2, f*vR*vz, f*vR*vphi, f*vz*vphi },
         // depending on the mode of operation.
@@ -727,7 +725,6 @@ particles::ParticleArrayCyl generatePosVelSamples(
 particles::ParticleArray<coord::PosCyl> generateDensitySamples(
     const potential::BaseDensity& dens, const unsigned int numPoints)
 {
-    const bool axisym = isAxisymmetric(dens);
     potential::DensityIntegrandNdim fnc(dens, true);  // require the values of density to be non-negative
     math::Matrix<double> result;      // sampled scaled coordinates
     double totalMass, errorMass;      // total mass and its estimated error
@@ -740,7 +737,7 @@ particles::ParticleArray<coord::PosCyl> generateDensitySamples(
     for(unsigned int i=0; i<result.rows(); i++) {
         // if the system is axisymmetric, phi is not provided by the sampling routine
         double scaledvars[3] = {result(i,0), result(i,1), 
-            axisym ? math::random() : result(i,2)};
+            fnc.axisym ? math::random() : result(i,2)};
         // transform from scaled coordinates to the real ones, and store the point into the array
         points.add(fnc.unscaleVars(scaledvars), pointMass);
     }

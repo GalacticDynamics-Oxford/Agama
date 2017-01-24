@@ -20,7 +20,7 @@ PseudoIsothermal::PseudoIsothermal(
 }
 
 // part of DF that depends on radial and vertical action and velocity dispersions
-static inline double df_JrJz(double sigmarsq, double sigmazsq, double sigmaminsq,
+inline double df_JrJz(double sigmarsq, double sigmazsq, double sigmaminsq,
     double kappaJr, double nuJz)
 {
     sigmarsq = fmax(sigmarsq, sigmaminsq);

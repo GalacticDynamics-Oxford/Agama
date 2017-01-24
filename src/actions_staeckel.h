@@ -17,7 +17,7 @@ but virtually nothing of the original code remains.
 */
 #pragma once
 #include "actions_base.h"
-#include "actions_interfocal_distance_finder.h"
+#include "actions_focal_distance_finder.h"
 #include "potential_perfect_ellipsoid.h"
 #include "smart.h"
 
@@ -31,7 +31,7 @@ namespace actions {
     \param[in]  point     is the position/velocity point;
     \return     actions for the given point, or Jr=Jz=NAN if the energy is positive;
     \throw      std::invalid_argument exception if some error occurs.
-*/    
+*/
 Actions actionsAxisymStaeckel(
     const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
@@ -51,9 +51,9 @@ ActionAngles actionAnglesAxisymStaeckel(
 /** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method.
     \param[in]  potential is the arbitrary axisymmetric potential;
     \param[in]  point     is the position/velocity point;
-    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system:
+    \param[in]  focalDistance is the geometric parameter of best-fit coordinate system:
     the accuracy of the method depends on this parameter, which should be estimated by one of 
-    the methods from actions_interfocal_distance_finder.h;
+    the methods from actions_focal_distance_finder.h;
     \return     actions for the given point, or Jr=Jz=NAN if the energy is positive;
     \throw      std::invalid_argument exception if the potential is not axisymmetric 
     or some other error occurs.
@@ -61,13 +61,13 @@ ActionAngles actionAnglesAxisymStaeckel(
 Actions actionsAxisymFudge(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point,
-    double interfocalDistance);
+    double focalDistance);
 
 /** Find approximate actions and angles in a given axisymmetric potential, 
     using the Staeckel Fudge method.
     \param[in]  potential is the arbitrary axisymmetric potential;
     \param[in]  point     is the position/velocity point;
-    \param[in]  interfocalDistance is the geometric parameter of best-fit coordinate system;
+    \param[in]  focalDistance is the geometric parameter of best-fit coordinate system;
     \param[out] freq      if not NULL, store the frequencies of motion in this variable;
     \return     actions and angles for the given point, or Jr=Jz=NAN if the energy is positive;
     \throw      std::invalid_argument exception if the potential is not axisymmetric
@@ -76,23 +76,8 @@ Actions actionsAxisymFudge(
 ActionAngles actionAnglesAxisymFudge(
     const potential::BasePotential& potential, 
     const coord::PosVelCyl& point, 
-    double interfocalDistance, 
+    double focalDistance, 
     Frequencies* freq=NULL);
-
-#if 0 /* temporarily disabled */
-/** Compute the total energy and the third integral for an orbit in a Staeckel potential
-    from the given values of actions.
-    \param[in]  potential  is the arbitrary Staeckel potential, separable in spheroidal coordinates;
-    \param[in]  acts       are the actions;
-    \param[out] H          is the value of Hamiltonian (total energy);
-    \param[out] I3         is the value of the third integral corresponding to the given actions;
-    \throw      std::invalid_argument if Jr/Jz actions are negative, or some other error occurs.
-*/
-void computeIntegralsStaeckel(
-    const potential::OblatePerfectEllipsoid& potential,
-    const Actions& acts,
-    math::PtrFunction &rad, math::PtrFunction &ver);
-#endif
 
 ///@}
 /// \name  ------- Class interface to action/angle finders  -------
@@ -116,26 +101,32 @@ private:
 
 /** Action/angle finder for a generic axisymmetric potential, based on Staeckel Fudge approximation.
     It is more suitable for massive computation in a fixed potential than just using 
-    the standalone routines, because it estimates the interfocal distance using a pre-computed 
+    the standalone routines, because it estimates the focal distance using a pre-computed 
     interpolation grid, rather than doing it individually for each point. This results in 
-    a considerable speedup in action computation, for a negligible overhead during initialization.
+    a considerable speedup in action computation, for a minor overhead during initialization.
+    Additionally, it may set up an interpolation table for actions as functions
+    of three integrals of motion, which speeds up the evaluation by another order of magnitude,
+    for a moderate decrease in accuracy.
 */
 class ActionFinderAxisymFudge: public BaseActionFinder {
 public:
-    explicit ActionFinderAxisymFudge(const potential::PtrPotential& potential) :
-        pot(potential), finder(*potential) {};
+    ActionFinderAxisymFudge(const potential::PtrPotential& potential, bool interpolate = true);
 
-    virtual Actions actions(const coord::PosVelCyl& point) const {
-        return actionsAxisymFudge(*pot, point, 
-            finder.value(totalEnergy(*pot, point), point.R*point.vphi)); }
+    virtual Actions actions(const coord::PosVelCyl& point) const;
 
     virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const {
-        return actionAnglesAxisymFudge(*pot, point,
-            finder.value(totalEnergy(*pot, point), point.R*point.vphi), freq); }
+        return actionAnglesAxisymFudge(*pot, point, focalDistance(point), freq);
+    }
+
+    /** return the best-suitable focal distance for the given point, obtained by interpolation */
+    double focalDistance(const coord::PosVelCyl& point) const;
 
 private:
     const potential::PtrPotential pot;      ///< the potential in which actions are computed
-    const InterfocalDistanceFinder finder;  ///< fast estimator of interfocal distance
+    const potential::Interpolator interp;   ///< interpolator for Lcirc(E)
+    math::LinearInterpolator2d interpD;     ///< 2d interpolator for the focal distance Delta(E,Lz)
+    math::CubicSpline2d interpI;            ///< 2d interpolator for I3max(E,Lz)
+    math::CubicSpline3d intJr, intJz;       ///< 3d interpolators for Jr and Jz as functions of (E,Lz,I3)
 };
 
 ///@}

@@ -51,29 +51,45 @@ struct FncWrapper {
     explicit FncWrapper(const T& _F) : F(_F), numCalls(0) {}
 };
 
-static double functionWrapperNdim(const gsl_vector* x, void* param) {
+double functionWrapperNdim(const gsl_vector* x, void* param) {
     double val;
     FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
-    p->F.eval(x->data, &val);
-    return val;
+    try{
+        p->F.eval(x->data, &val);
+        return val;
+    }
+    catch(std::exception& e) {
+        p->error = e.what();
+        return NAN;
+    }
 }
 
-static void functionWrapperNdimDer(const gsl_vector* x, void* param, gsl_vector* df) {
+void functionWrapperNdimDer(const gsl_vector* x, void* param, gsl_vector* df) {
     FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
-    p->F.evalDeriv(x->data, NULL, df->data);
+    try{
+        p->F.evalDeriv(x->data, NULL, df->data);
+    }
+    catch(std::exception& e) {
+        p->error = e.what();
+    }
 }
 
-static void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_vector* df) {
+void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_vector* df) {
     FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
-    p->F.evalDeriv(x->data, f, df->data);
+    try{
+        p->F.evalDeriv(x->data, f, df->data);
+    }
+    catch(std::exception& e) {
+        p->error = e.what();
+    }
 }
 
 // ----- wrappers for multidimensional nonlinear fitting ----- //
 #ifndef HAVE_EIGEN
-static int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df) {
+inline int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df) {
     FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
     try{
         p->numCalls++;
@@ -98,11 +114,11 @@ static int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_v
     }
 }
     
-static int functionWrapperNdimMval(const gsl_vector* x, void* param, gsl_vector* f) {
+int functionWrapperNdimMval(const gsl_vector* x, void* param, gsl_vector* f) {
     return functionWrapperNdimMvalFncDer(x, param, f, NULL);
 }
 
-static int functionWrapperNdimMvalDer(const gsl_vector* x, void* param, gsl_matrix* df) {
+int functionWrapperNdimMvalDer(const gsl_vector* x, void* param, gsl_matrix* df) {
     return functionWrapperNdimMvalFncDer(x, param, NULL, df);
 }
 

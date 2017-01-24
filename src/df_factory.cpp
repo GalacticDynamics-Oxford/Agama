@@ -8,7 +8,7 @@
 
 namespace df {
 
-static DoublePowerLawParam parseDoublePowerLawParams(
+DoublePowerLawParam parseDoublePowerLawParams(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& conv)
 {
@@ -26,7 +26,7 @@ static DoublePowerLawParam parseDoublePowerLawParams(
     return par;
 }
 
-static PseudoIsothermalParam parsePseudoIsothermalParams(
+PseudoIsothermalParam parsePseudoIsothermalParams(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& conv)
 {
@@ -46,7 +46,7 @@ static PseudoIsothermalParam parsePseudoIsothermalParams(
     return par;
 }
 
-static void checkNonzero(const potential::BasePotential* potential, const std::string& type)
+inline void checkNonzero(const potential::BasePotential* potential, const std::string& type)
 {
     if(potential == NULL)
         throw std::invalid_argument("Need an instance of potential to initialize "+type+" DF");

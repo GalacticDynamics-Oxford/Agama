@@ -223,7 +223,8 @@ private:
     /// array of 2d splines (for each m-component in the expansion in azimuthal angle)
     std::vector<math::PtrInterpolator2d> spl;
     coord::SymmetryType sym;  ///< type of symmetry deduced from coefficients
-    double Rscale;            ///< radial scaling factor
+    double Rscale;            ///< radial scaling factor for coordinate transformation
+    bool logScaling;          ///< flag for optional log-transformation of the m=0 term
 
     /// asymptotic behaviour at large radii described by `PowerLawMultipole`
     PtrPotential asymptOuter;

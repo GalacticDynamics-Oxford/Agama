@@ -5,10 +5,10 @@
 
 namespace coord{
 
-ProlSph::ProlSph(double _delta): 
-    delta(_delta) 
+ProlSph::ProlSph(double Delta): 
+    Delta2(Delta*Delta)
 {
-    if(delta<=0)
+    if(Delta<=0)
         throw std::invalid_argument("Invalid parameters for Prolate Spheroidal coordinate system");
 };
 
@@ -62,10 +62,10 @@ template<> PosSph toPos(const PosCyl& pos) {
     return PosSph(sqrt(pow_2(pos.R) + pow_2(pos.z)), atan2(pos.R, pos.z), pos.phi);
 }
 template<> PosCyl toPos(const PosProlSph& p) {
-    if(fabs(p.nu)>p.coordsys.delta || p.lambda<p.coordsys.delta)
+    if(fabs(p.nu)>p.coordsys.Delta2 || p.lambda<p.coordsys.Delta2)
         throw std::invalid_argument("Incorrect ProlSph coordinates");
-    const double R = sqrt( (p.lambda-p.coordsys.delta) * (1 - fabs(p.nu) / p.coordsys.delta) );
-    const double z = sqrt( p.lambda * fabs(p.nu) / p.coordsys.delta) * (p.nu>=0 ? 1 : -1);
+    const double R = sqrt( (p.lambda-p.coordsys.Delta2) * (1 - fabs(p.nu) / p.coordsys.Delta2) );
+    const double z = sqrt( p.lambda * fabs(p.nu) / p.coordsys.Delta2) * (p.nu>=0 ? 1 : -1);
     return PosCyl(R, z, p.phi);
 }
 // declare an instantiation which will be defined later
@@ -259,12 +259,12 @@ PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2
 {
     const double absnu = fabs(p.nu);
     const double sign = p.nu>=0 ? 1 : -1;
-    const double lminusd = p.lambda-p.coordsys.delta;
-    const double nminusd = absnu-p.coordsys.delta;  // note: |nu|<=delta
+    const double lminusd = p.lambda-p.coordsys.Delta2;
+    const double nminusd = absnu-p.coordsys.Delta2;  // note: |nu|<=Delta^2
     if(nminusd>0 || lminusd<0)
         throw std::invalid_argument("Incorrect ProlSph coordinates");
-    const double R = sqrt( lminusd * (1 - absnu / p.coordsys.delta) );
-    const double z = sqrt( p.lambda * absnu /  p.coordsys.delta ) * (p.nu>=0 ? 1 : -1);
+    const double R = sqrt( lminusd * (1 - absnu / p.coordsys.Delta2) );
+    const double z = sqrt( p.lambda * absnu /  p.coordsys.Delta2 ) * (p.nu>=0 ? 1 : -1);
     if(deriv!=NULL) {
         deriv->dRdlambda = 0.5*R/lminusd;
         deriv->dRdnu     = 0.5*R/nminusd * sign;
@@ -286,32 +286,32 @@ template<>
 PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
     PosDerivT<Cyl, ProlSph>* deriv, PosDeriv2T<Cyl, ProlSph>* deriv2)
 {
-    // lambda and nu are roots "t" of equation  R^2/(t-delta) + z^2/t = 1
+    // lambda and nu are roots "t" of equation  R^2/(t-Delta^2) + z^2/t = 1
     double R2     = pow_2(from.R), z2 = pow_2(from.z);
     double signz  = from.z>=0 ? 1 : -1;   // nu will have the same sign as z
-    double sum    = R2+z2+cs.delta;
-    double dif    = R2+z2-cs.delta;
-    double sqD    = sqrt(pow_2(dif) + 4*R2*cs.delta);   // determinant is always non-negative
+    double sum    = R2+z2+cs.Delta2;
+    double dif    = R2+z2-cs.Delta2;
+    double sqD    = sqrt(pow_2(dif) + 4*R2*cs.Delta2);   // determinant is always non-negative
     if(z2==0) sqD = sum;
     if(R2==0) sqD = fabs(dif);
-    double lmd, dmn;      // lambda-delta, delta-|nu| - separately from lambda and nu, to avoid roundoffs
+    double lmd, dmn;  // lambda-Delta^2, Delta^2-|nu| - separately from lambda and nu, to avoid roundoffs
     if(dif >= 0) {
         lmd       = 0.5 * (sqD + dif);
-        dmn       = R2>0 ? cs.delta * R2 / lmd : 0;
+        dmn       = R2>0 ? cs.Delta2 * R2 / lmd : 0;
     } else {
         dmn       = 0.5 * (sqD - dif);
-        lmd       = cs.delta * R2 / dmn;
+        lmd       = cs.Delta2 * R2 / dmn;
     }
-    double lambda = cs.delta + lmd;
-    double absnu  = 2 * cs.delta / (sum + sqD) * z2;
-    if(absnu*2 > cs.delta)             // compare |nu| and delta-|nu|
-        absnu     = cs.delta - dmn;    // avoid roundoff errors when delta-|nu| is small
+    double lambda = cs.Delta2 + lmd;
+    double absnu  = 2 * cs.Delta2 / (sum + sqD) * z2;
+    if(absnu*2 > cs.Delta2)             // compare |nu| and Delta^2-|nu|
+        absnu     = cs.Delta2 - dmn;    // avoid roundoff errors when Delta^2-|nu| is small
     else
-        dmn       = cs.delta - absnu;  // same in the opposite case, when |nu| is small
+        dmn       = cs.Delta2 - absnu;  // same in the opposite case, when |nu| is small
     if(deriv!=NULL || deriv2!=NULL) {
         if(sqD==0)
             throw std::runtime_error("Error in coordinate conversion Cyl=>ProlSph: "
-                "the special case lambda = nu = delta is not implemented");
+                "the special case lambda = nu = Delta^2 is not implemented");
         if(deriv!=NULL) {  // accurate expressions valid for arbitrary large/small values (no cancellations)
             deriv->dlambdadR = from.R * 2*lambda / sqD;
             deriv->dlambdadz = from.z * 2*lmd    / sqD;
@@ -319,7 +319,7 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
             deriv->dnudz     = from.z * 2*dmn    / sqD * signz;
         }
         if(deriv2!=NULL) {  // here no attempts were made to avoid cancellation errors
-            double common = 8 * cs.delta * R2 * z2 / pow_3(sqD);
+            double common = 8 * cs.Delta2 * R2 * z2 / pow_3(sqD);
             deriv2->d2lambdadR2 = 1 + sum/sqD - common;
             deriv2->d2lambdadz2 = 1 + dif/sqD + common;
             deriv2->d2nudR2     =(1 - sum/sqD + common) * signz;
@@ -396,7 +396,8 @@ template PosCar toPosDeriv(const PosCyl&, PosDerivT<Cyl, Car>*, PosDeriv2T<Cyl, 
 template PosSph toPosDeriv(const PosCyl&, PosDerivT<Cyl, Sph>*, PosDeriv2T<Cyl, Sph>*);
 template PosCar toPosDeriv(const PosSph&, PosDerivT<Sph, Car>*, PosDeriv2T<Sph, Car>*);
 template PosCyl toPosDeriv(const PosSph&, PosDerivT<Sph, Cyl>*, PosDeriv2T<Sph, Cyl>*);
-template PosProlSph toPosDeriv(const PosCyl&, const ProlSph&, PosDerivT<Cyl, ProlSph>*, PosDeriv2T<Cyl, ProlSph>*);
+template PosProlSph toPosDeriv(const PosCyl&, const ProlSph&,
+    PosDerivT<Cyl, ProlSph>*, PosDeriv2T<Cyl, ProlSph>*);
 
 //--------  position+velocity conversion functions  ---------//
 

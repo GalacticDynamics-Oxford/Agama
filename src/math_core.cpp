@@ -1,7 +1,6 @@
 #include "math_core.h"
 #include "utils.h"
 #include <gsl/gsl_errno.h>
-#include <gsl/gsl_math.h>
 #include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_poly.h>
@@ -32,14 +31,25 @@
 
 namespace math{
 
-const int MAXITER = 64;  ///< upper limit on the number of iterations in root-finders, minimizers, etc.
+/// upper limit on the number of iterations in root-finders, minimizers, etc.
+static const int MAXITER = 64;
 
-const int MAXINTEGRPOINTS = 1000;  ///< size of workspace for adaptive integration
+/// size of workspace for adaptive integration
+static const int MAXINTEGRPOINTS = 1000;
 
 // ------ error handling ------ //
 
-static void exceptionally_awesome_gsl_error_handler(const char *reason, 
-    const char * /*file*/, int /*line*/, int gsl_errno)
+/// stores the exception text to be propagated through external C code that does not support exceptions
+std::string exceptionText;
+
+#define CALL_FUNCTION_OR_THROW(x) \
+    exceptionText.clear(); \
+    x; \
+    if(!exceptionText.empty()) throw std::runtime_error(exceptionText);
+
+/// callback function invoked by GSL in case of error; stores the error text in a global variable
+/// (not thread-safe! assumed that these events don't occur often)
+void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
         gsl_errno == GSL_ETOL ||
@@ -47,24 +57,32 @@ static void exceptionally_awesome_gsl_error_handler(const char *reason,
         gsl_errno == GSL_ESING ||
         gsl_errno == GSL_EDIVERGE )
         return;  // do nothing
-    if( gsl_errno == GSL_ERANGE ||
-        gsl_errno == GSL_EOVRFLW )
-        throw std::range_error(std::string("GSL range error: ")+reason);
-    if( gsl_errno == GSL_EDOM )
-        throw std::domain_error(std::string("GSL domain error: ")+reason);
-    if( gsl_errno == GSL_EINVAL )
-        throw std::invalid_argument(std::string("GSL invalid argument error: ")+reason);
-    throw std::runtime_error("GSL error "+utils::toString(gsl_errno)+": "+reason);
+    if(exceptionText.empty())
+        exceptionText = (
+        gsl_errno == GSL_ERANGE || gsl_errno == GSL_EOVRFLW ? "GSL range error" :
+        gsl_errno == GSL_EDOM ? "GSL domain error" :
+        gsl_errno == GSL_EINVAL ? "GSL invalid argument error" :
+        "GSL error " + utils::toString(gsl_errno) ) +
+        " in " + file + ", line " + utils::toString(line) + ": " + reason + "\n" + utils::stacktrace();
 }
 
 // a static variable that initializes our error handler
-bool error_handler_set = gsl_set_error_handler(&exceptionally_awesome_gsl_error_handler);
+static bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler);
 
 // ------ math primitives -------- //
 
-static double functionWrapper(double x, void* param)
+/// wrapper for a user-defined function to provide to GSL
+/// (any exception arising in the C++ code should not propagate back to the C code in GSL,
+/// and are instead stored in a global variable, which is unfortunately not thread-safe)
+double functionWrapper(double x, void* param)
 {
-    return static_cast<IFunction*>(param)->value(x);
+    try{
+        return static_cast<IFunction*>(param)->value(x);
+    }
+    catch(std::exception& e){
+        exceptionText = e.what();
+        return NAN;
+    }
 }
 
 int fcmp(double x, double y, double eps)
@@ -82,12 +100,24 @@ int fcmp(double x, double y, double eps)
 
 double powInt(double x, int n)
 {
-    return gsl_pow_int(x, n);
+    if(n<0) {
+        n = -n;
+        x = 1/x;
+    }
+    double result = 1;
+    do {
+        if(n%2) result *= x;
+        n >>= 1;
+        x *= x;
+    } while(n);
+    return result;
 }
 
 double wrapAngle(double x)
 {
-    return isFinite(x) ? gsl_sf_angle_restrict_pos(x) : x;
+    exceptionText.clear();
+    double result = gsl_sf_angle_restrict_pos(x);
+    return exceptionText.empty() ? result : NAN;
 }
 
 double unwrapAngle(double x, double xprev)
@@ -102,16 +132,16 @@ double unwrapAngle(double x, double xprev)
 }
 
 template<typename NumT>
-unsigned int binSearch(const NumT x, const NumT arr[], unsigned int size)
+int binSearch(const NumT x, const NumT arr[], unsigned int size)
 {
-    if(size<1 || x<arr[0])
+    if(size<1 || !(x>=arr[0]))
         return -1;
     if(x>arr[size-1] || size<2)
         return size;
     // first guess the likely location in the case that the input grid is equally-spaced
-    unsigned int index = static_cast<unsigned int>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
-    unsigned int indhi = size-1;
-    if(index==size-1)
+    int index = static_cast<int>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
+    int indhi = size-1;
+    if(index==static_cast<int>(size)-1)
         return size-2;     // special case -- we are exactly at the end of array, return the previous node
     if(x>=arr[index]) {
         if(x<arr[index+1])
@@ -122,7 +152,7 @@ unsigned int binSearch(const NumT x, const NumT arr[], unsigned int size)
         index = 0;
     }
     while(indhi > index + 1) {
-        unsigned int i = (indhi + index)/2;
+        int i = (indhi + index)/2;
         if(arr[i] > x)
             indhi = i;
         else
@@ -132,14 +162,46 @@ unsigned int binSearch(const NumT x, const NumT arr[], unsigned int size)
 }
 
 // template instantiations
-template unsigned int binSearch(const double x, const double arr[], unsigned int size);
-template unsigned int binSearch(const float x, const float arr[], unsigned int size);
-template unsigned int binSearch(const int x, const int arr[], unsigned int size);
-template unsigned int binSearch(const long x, const long arr[], unsigned int size);
-template unsigned int binSearch(const unsigned int x, const unsigned int arr[], unsigned int size);
-template unsigned int binSearch(const unsigned long x, const unsigned long arr[], unsigned int size);
+template int binSearch(const double x, const double arr[], unsigned int size);
+template int binSearch(const float x, const float arr[], unsigned int size);
+template int binSearch(const int x, const int arr[], unsigned int size);
+template int binSearch(const long x, const long arr[], unsigned int size);
+template int binSearch(const unsigned int x, const unsigned int arr[], unsigned int size);
+template int binSearch(const unsigned long x, const unsigned long arr[], unsigned int size);
+
+
+/* ------ algebraic transformations of functions ------- */
+
+void FncProduct::evalDeriv(const double x, double *val, double *der, double *der2) const
+{
+    double v1, v2, d1, d2, dd1, dd2;
+    bool needDer = der!=NULL || der2!=NULL, needDer2 = der2!=NULL;
+    f1.evalDeriv(x, &v1, needDer ? &d1 : 0, needDer2 ? &dd1 : 0);
+    f2.evalDeriv(x, &v2, needDer ? &d2 : 0, needDer2 ? &dd2 : 0);
+    if(val)
+        *val = v1 * v2;
+    if(der)
+        *der = v1 * d2 + v2 * d1;
+    if(der2)
+        *der2 = v1 * dd2 + 2 * d1 * d2 + v2 * dd1;
+}
+
+void LogLogScaledFnc::evalDeriv(const double logx,
+    /*output*/ double* logf, double* der, double* der2) const
+{
+    double x = exp(logx);
+    PointNeighborhood pt(fnc, x);
+    if(logf)
+        *logf = log(pt.f0);
+    if(der)
+        *der  = pt.fder * x / pt.f0;
+    if(der2)
+        *der2 = (pt.fder2 * x + (1 - pt.fder * x / pt.f0) * pt.fder) * x / pt.f0;
+}
+
 
 /* --------- random numbers -------- */
+namespace {
 class RandGenStorage{
 #ifdef HAVE_VALID_OPENMP
     // in the case of OpenMP, we have as many independent pseudo-random number generators
@@ -195,6 +257,7 @@ public:
 // since it may already be called from a parallel section and will not determine
 // the number of threads correctly.
 static RandGenStorage randgen;
+}  // namespace
 
 void randomize(unsigned int seed)
 {
@@ -228,6 +291,7 @@ double quasiRandomHalton(unsigned int ind, unsigned int base)
     }
     return val;
 }
+
 
 // ------- tools for analyzing the behaviour of a function around a particular point ------- //
 // this comes handy in root-finding and related applications, when one needs to ensure that 
@@ -315,23 +379,49 @@ double PointNeighborhood::dxBetweenRoots() const
     return sqrt(fder*fder - 2*f0*fder2) / fabs(fder2);  // NaN if discriminant<0 - no roots
 }
 
-double deriv2(double x0, double x1, double x2, double f0, double f1, double f2,
-    double df0, double df1, double df2)
+void hermiteDerivs(double x0, double x1, double x2, double f0, double f1, double f2,
+    double df0, double df1, double df2, double& der2, double& der3, double& der4, double& der5)
 {
-    // construct a divided difference table to evaluate 2nd derivative via Hermite interpolation
-    double dx10 = x1-x0, dx21 = x2-x1, dx20 = x2-x0;
-    double df10 = (f1   - f0  ) / dx10;
-    double df21 = (f2   - f1  ) / dx21;
-    double dd10 = (df10 - df0 ) / dx10;
-    double dd11 = (df1  - df10) / dx10;
-    double dd21 = (df21 - df1 ) / dx21;
-    double dd22 = (df2  - df21) / dx21;
-    return ( -2 * (pow_2(dx21)*(dd10-2*dd11) + pow_2(dx10)*(dd22-2*dd21)) +
-            4*dx10*dx21 * (dx10*dd21 + dx21*dd11) / dx20 ) / pow_2(dx20);
+    // construct a divided difference table to evaluate 2nd to 5th derivatives via Hermite interpolation:
+    const double
+    // differences between grid points in x
+    dx10   = x1-x0,
+    dx21   = x2-x1,
+    dx20   = x2-x0,
+    sx20   = dx21-dx10,
+    // 2nd column
+    f00    = df0,
+    f01    = (f1    - f0)    / dx10,
+    f11    = df1,
+    f12    = (f2    - f1)    / dx21,
+    f22    = df2,
+    // 3rd column
+    f001   = (f01   - f00)   / dx10,
+    f011   = (f11   - f01)   / dx10,
+    f112   = (f12   - f11)   / dx21,
+    f122   = (f22   - f12)   / dx21,
+    // 4th column
+    f0011  = (f011  - f001)  / dx10,
+    f0112  = (f112  - f011)  / dx20,
+    f1122  = (f122  - f112)  / dx21,
+    // 5th column
+    f00112 = (f0112 - f0011) / dx20,
+    f01122 = (f1122 - f0112) / dx20;
+    // 6th column - the tip of triangle, equal to (1/5!) * 5th derivative
+    der5   = (f01122- f00112)/ dx20 * 120;
+    // start unwinding back
+    der4   = (f01122+ f00112) * 12 - sx20 * der5 * 0.3;
+    der3   =  f0112 * 6 - sx20 * (der4 + der5 * (sx20 + dx10*dx21/sx20) * 0.2) * 0.25;
+    der2   =  f011  + f112 - f0112 * sx20 - dx10 * dx21 * (der4 + der5 * sx20 * 0.2) / 12;
+
+    // alternative expression:
+    //der2 = ( -2 * (pow_2(dx21)*(f001-2*f011) + pow_2(dx10)*(f122-2*f112)) +
+    //    4*dx10*dx21 * (dx10*f112 + dx21*f011) / dx20 ) / pow_2(dx20);
 }
 
-// ------ root finder routines ------//
 
+// ------ root finder routines ------//
+namespace {
 /// used in hybrid root-finder to predict the root location by Hermite interpolation:
 /// compute the value of f(x) given its values and derivatives at two points x1,x2
 /// (x1<=x<=x2 or x1>=x>=x2 is implied but not checked), if the function is expected to be
@@ -358,7 +448,7 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
 
 /// a hybrid between Brent's method and interpolation of root using function derivatives;
 /// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
-static double findRootHybrid(const IFunction& fnc, 
+double findRootHybrid(const IFunction& fnc, 
     const double x_lower, const double x_upper, const double reltoler)
 {
     double a = x_lower;
@@ -489,7 +579,7 @@ static double findRootHybrid(const IFunction& fnc,
         if(numIter >= MAXITER) {
             converged = true;  // not quite ready, but can't loop forever
             utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded: "
-                "x="+utils::toString(b,15)+" +- "+utils::toString(b-c)+
+                "x="+utils::toString(b,15)+" +- "+utils::toString(fabs(b-c))+
                 " on interval ["+utils::toString(x_lower,15)+":"+utils::toString(x_upper,15)+
                 "], req.toler.="+utils::toString(abstoler));
         }
@@ -594,6 +684,7 @@ public:
             *der2= NAN;  // not implemented
     }
 };
+}  // namespace
 
 // root-finder with optional scaling
 double findRoot(const IFunction& fnc, double xlower, double xupper, double reltoler)
@@ -614,8 +705,9 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
     }
 }
 
+namespace {
 // 1d minimizer with known initial point
-static double findMinKnown(const IFunction& fnc, 
+double findMinKnown(const IFunction& fnc, 
     double xlower, double xupper, double xinit,
     double flower, double fupper, double finit, double reltoler)
 {
@@ -627,12 +719,11 @@ static double findMinKnown(const IFunction& fnc,
     double abstoler = reltoler*fabs(xupper-xlower);
     gsl_min_fminimizer_set_with_values(minser, &F, xinit, finit, xlower, flower, xupper, fupper);
     int iter=0;
+    exceptionText.clear();
     do {
         iter++;
-        try {
-            gsl_min_fminimizer_iterate (minser);
-        }
-        catch(std::runtime_error&) {
+        gsl_min_fminimizer_iterate (minser);
+        if(!exceptionText.empty()) {
             xroot = NAN;
             break;
         }
@@ -645,7 +736,7 @@ static double findMinKnown(const IFunction& fnc,
     return xroot;
 }
 
-static inline double minGuess(double x1, double x2, double y1, double y2)
+inline double minGuess(double x1, double x2, double y1, double y2)
 {
     const double golden = 0.618034;
     if(y1<y2)
@@ -653,6 +744,7 @@ static inline double minGuess(double x1, double x2, double y1, double y2)
     else
         return x2 * golden + x1 * (1-golden);
 }
+}  // namespace
 
 // 1d minimizer without prior knowledge of minimum location
 double findMin(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
@@ -701,6 +793,7 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, ylower, yupper, yinit, reltoler));
 }
 
+
 // ------- integration routines ------- //
 
 double integrate(const IFunction& fnc, double x1, double x2, double reltoler, 
@@ -713,7 +806,8 @@ double integrate(const IFunction& fnc, double x1, double x2, double reltoler,
     F.params = const_cast<IFunction*>(&fnc);
     double result, dummy;
     size_t neval;
-    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, error!=NULL ? error : &dummy, &neval);
+    CALL_FUNCTION_OR_THROW(
+    gsl_integration_qng(&F, x1, x2, 0, reltoler, &result, error!=NULL ? error : &dummy, &neval))
     if(numEval!=NULL)
         *numEval = neval;
     return result;
@@ -730,7 +824,8 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
     double result, dummy;
     size_t neval;
     gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);
-    gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, error!=NULL ? error : &dummy, &neval);
+    CALL_FUNCTION_OR_THROW(
+    gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, error!=NULL ? error : &dummy, &neval))
     gsl_integration_cquad_workspace_free(ws);
     if(numEval!=NULL)
         *numEval = neval;
@@ -746,7 +841,8 @@ double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
     F.params = const_cast<IFunction*>(&fnc);
     // tables up to N=20 are hard-coded in the library, no overhead
     gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
-    double result = gsl_integration_glfixed(&F, x1, x2, t);
+    CALL_FUNCTION_OR_THROW(
+    double result = gsl_integration_glfixed(&F, x1, x2, t))
     gsl_integration_glfixed_table_free(t);
     return result;
 }
@@ -754,6 +850,8 @@ double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights)
 {
     gsl_integration_glfixed_table* gltable = gsl_integration_glfixed_table_alloc(N);
+    if(N%2==1)
+        gltable->x[0] = 0;  // exact value (GSL doesn't care about roundoff errors..)
     for(int i=0; i<N; i++)
         gsl_integration_glfixed_point(x1, x2, i, &(coords[i]), &(weights[i]), gltable);
     gsl_integration_glfixed_table_free(gltable);
@@ -763,16 +861,17 @@ void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, doub
 
 double ScaledIntegrandEndpointSing::x_from_y(const double y) const 
 {
-    if(y<0 || y>1)
-        throw std::invalid_argument("value out of range [0,1]");
+    if(!(y>=0 && y<=1))
+        throw std::invalid_argument("value "+utils::toString(y)+" out of range [0,1]");
     return x_low + (x_upp-x_low) * y*y*(3-2*y);
 }
 
 // invert the transformation relation between x and y by solving a cubic equation
 double ScaledIntegrandEndpointSing::y_from_x(const double x) const 
 {
-    if(x<x_low || x>x_upp)
-        throw std::invalid_argument("value out of range [x_low,x_upp]");
+    if(!(x>=x_low && x<=x_upp))
+        throw std::invalid_argument("value "+utils::toString(x)+" out of range ["+
+            utils::toString(x_low)+":"+utils::toString(x_upp)+"]");
     if(x==x_low) return 0;
     if(x==x_upp) return 1;
     double phi=acos(1-2*(x-x_low)/(x_upp-x_low))/3.0;
@@ -786,13 +885,15 @@ double ScaledIntegrandEndpointSing::value(const double y) const
     return dx==0 ? 0 : F(x)*dx;
 }
 
+
 // ------- multidimensional integration ------- //
+namespace {
 #ifdef HAVE_CUBA
 // wrapper for Cuba library
 struct CubaParams {
     const IFunctionNdim& F;      ///< the original function
-    const double xlower[];        ///< lower limits of integration
-    const double xupper[];        ///< upper limits of integration
+    const double xlower[];       ///< lower limits of integration
+    const double xupper[];       ///< upper limits of integration
     std::vector<double> xvalue;  ///< temporary storage for un-scaling input point 
                                  ///< from [0:1]^N to the original range
     std::string error;           ///< store error message in case of exception
@@ -800,7 +901,8 @@ struct CubaParams {
         F(_F), xlower(_xlower), xupper(_xupper) 
     { xvalue.resize(F.numVars()); };
 };
-static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
+
+int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
     const int *ncomp, double fval[], void *v_param)
 {
     CubaParams* param = static_cast<CubaParams*>(v_param);
@@ -809,22 +911,27 @@ static int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
         for(int n=0; n< *ndim; n++)
             param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
         param->F.eval(&param->xvalue.front(), fval);
-        double result=0;
-        for(int i=0; i< *ncomp; i++)
-            result+=fval[i];
-        if(!isFinite(result)) {
-            param->error = "integrateNdim: invalid function value encountered at";
-            for(int n=0; n< *ndim; n++)
-                param->error += " "+utils::toString(param->xvalue[n], 15);
-            return -1;
+        // check if the result is not finite (not performed unless in debug mode)
+        if(utils::verbosityLevel >= utils::VL_WARNING) {
+            double result=0;
+            for(int i=0; i< *ncomp; i++)
+                result+=fval[i];
+            if(!isFinite(result)) {
+                param->error = "integrateNdim: invalid function value encountered at";
+                for(int n=0; n< *ndim; n++)
+                    param->error += ' ' + utils::toString(param->xvalue[n], 15);
+                param->error += '\n' + utils::stacktrace();
+                return -1;
+            }
         }
         return 0;   // success
     }
     catch(std::exception& e) {
-        param->error = std::string("integrateNdim: ") + e.what();
+        param->error = std::string("integrateNdim: ") + e.what() + '\n' + utils::stacktrace();
         return -999;  // signal of error
     }
 }
+
 #else
 // wrapper for Cubature library
 struct CubatureParams {
@@ -834,7 +941,8 @@ struct CubatureParams {
     explicit CubatureParams(const IFunctionNdim& _F) :
         F(_F), numEval(0){};
 };
-static int integrandNdimWrapperCubature(unsigned int ndim, const double *x, void *v_param,
+
+int integrandNdimWrapperCubature(unsigned int ndim, const double *x, void *v_param,
     unsigned int fdim, double *fval)
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
@@ -842,23 +950,29 @@ static int integrandNdimWrapperCubature(unsigned int ndim, const double *x, void
     try {
         param->numEval++;
         param->F.eval(x, fval);
-        double result=0;
-        for(unsigned int i=0; i<fdim; i++)
-            result+=fval[i];
-        if(!isFinite(result)) {
-            param->error = "integrateNdim: invalid function value encountered at";
-            for(unsigned int n=0; n<ndim; n++)
-                param->error += " "+utils::toString(x[n], 15);
-            return -1;
+        // check if the result is not finite (not performed unless in debug mode)
+        if(utils::verbosityLevel >= utils::VL_WARNING) {
+            double result=0;
+            for(unsigned int i=0; i<fdim; i++)
+                result+=fval[i];
+            if(!isFinite(result)) {
+                param->error = "integrateNdim: invalid function value encountered at";
+                for(unsigned int n=0; n<ndim; n++)
+                    param->error += ' ' + utils::toString(x[n], 15);
+                param->error += '\n' + utils::stacktrace();
+                return -1;
+            }
         }
         return 0;   // success
     }
     catch(std::exception& e) {
-        param->error = std::string("integrateNdim: ") + e.what();
+        param->error = std::string("integrateNdim: ") + e.what() + '\n' + utils::stacktrace();
+;
         return -1;  // signal of error
     }
 }
 #endif
+}  // namespace
 
 void integrateNdim(const IFunctionNdim& F, const double xlower[], const double xupper[], 
     const double relToler, const unsigned int maxNumEval, 

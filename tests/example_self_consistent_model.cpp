@@ -30,6 +30,7 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <cstdlib>
 
 using potential::PtrDensity;
 using potential::PtrPotential;
@@ -201,7 +202,7 @@ void writeVelocityDistributions(const std::string& fileName, const galaxymodel::
 }
 
 /// report progress after an iteration
-void printoutInfo(const galaxymodel::SelfConsistentModel& model, const std::string& iterationStr)
+void printoutInfo(const galaxymodel::SelfConsistentModel& model, int iterationIndex)
 {
     const potential::BaseDensity& compHalo = *model.components[0]->getDensity();
     const potential::BaseDensity& compDisc = *model.components[1]->getDensity();
@@ -218,9 +219,26 @@ void printoutInfo(const galaxymodel::SelfConsistentModel& model, const std::stri
         "Potential at origin=-("<<
         (sqrt(-model.totalPotential->value(coord::PosCyl(0,0,0))) * intUnits.to_kms) << " km/s)^2"
         ", total mass=" << (model.totalPotential->totalMass() * intUnits.to_Msun) << " Msun\n";
-    writeDensity("dens_disc_iter"+iterationStr, compDisc, extUnits);
-    writeDensity("dens_halo_iter"+iterationStr, compHalo, extUnits);
-    writeRotationCurve("rotcurve_iter"+iterationStr, model.totalPotential);
+    writeDensity("dens_disc_iter"+utils::toString(iterationIndex), compDisc, extUnits);
+    writeDensity("dens_halo_iter"+utils::toString(iterationIndex), compHalo, extUnits);
+    writeRotationCurve("rotcurve_iter"+utils::toString(iterationIndex), model.totalPotential);
+}
+
+/// perform one iteration of the model
+void doIteration(galaxymodel::SelfConsistentModel& model, int iterationIndex)
+{
+    std::cout << "Starting iteration #" << iterationIndex << '\n';
+    bool error=false;
+    try {
+        doIteration(model);
+    }
+    catch(std::exception& ex) {
+        error=true;  // report the error and allow to save the results of the last iteration
+        std::cout << "==== Exception occurred: \n" << ex.what();
+    }
+    printoutInfo(model, iterationIndex);
+    if(error)
+        exit(1);  // abort in case of problems
 }
 
 int main()
@@ -303,11 +321,8 @@ int main()
 
     // do a few iterations to determine the self-consistent density profile of the halo
     int iteration=0;
-    for(int i=0; i<5; i++) {
-        std::cout << "Starting iteration #" << ++iteration << '\n';
-        doIteration(model);
-        printoutInfo(model, utils::toString(iteration));
-    }
+    for(; iteration<=5; iteration++)
+        doIteration(model, iteration);
 
     // now that we have a reasonable guess for the total potential,
     // we may initialize the DF of the stellar components
@@ -345,15 +360,12 @@ int main()
         dfStellar, PtrDensity(), gridRadialCyl, gridVerticalCyl));
 
     // do a few more iterations to obtain the self-consistent density profile for both discs
-    for(int i=0; i<5; i++) {
-        std::cout << "Starting iteration #" << ++iteration << '\n';
-        doIteration(model);
-        printoutInfo(model, utils::toString(iteration));
-    }
+    for(; iteration<=10; iteration++)
+        doIteration(model, iteration);
 
     // export model to an N-body snapshot
     std::cout << "Creating an N-body representation of the model\n";
-    std::string iterationStr(utils::toString(iteration));
+    std::string iterationStr=utils::toString(iteration);
 
     // first create a representation of density profiles without velocities
     // (just for demonstration), by drawing samples from the density distribution

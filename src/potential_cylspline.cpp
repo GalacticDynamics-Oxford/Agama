@@ -17,24 +17,24 @@ namespace potential {
 namespace{
 
 /// minimum number of grid nodes
-const unsigned int CYLSPLINE_MIN_GRID_SIZE = 2;
+static const unsigned int CYLSPLINE_MIN_GRID_SIZE = 2;
 
 /// minimum number of terms in Fourier expansion used to compute coefficients
 /// of a non-axisymmetric density or potential model (it may be larger than
 /// the requested number of output terms, to improve the accuracy of integration)
-const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
+static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
 
 /// maximum allowed order of azimuthal Fourier expansion
-const unsigned int MMAX_AZIMUTHAL_FOURIER = 64;
+static const unsigned int MMAX_AZIMUTHAL_FOURIER = 64;
 
 /// lower cutoff in radius for Legendre Q function
-const double MIN_R = 1e-10;
+static const double MIN_R = 1e-10;
 
 /// max number of function evaluations in multidimensional integration
-const unsigned int MAX_NUM_EVAL = 10000;
+static const unsigned int MAX_NUM_EVAL = 10000;
 
 /// relative accuracy of potential computation (integration tolerance parameter)
-const double EPSREL_POTENTIAL_INT = 1e-6;
+static const double EPSREL_POTENTIAL_INT = 1e-6;
 
 // ------- Fourier expansion of density or potential ------- //
 // The routine 'computeFourierCoefs' can work with both density and potential classes,
@@ -46,7 +46,7 @@ const double EPSREL_POTENTIAL_INT = 1e-6;
 // the type of input data and the number of quantities stored for each point.
 
 template<class BaseDensityOrPotential>
-static void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[]);
+void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[]);
 
 template<>
 inline void storeValue(const BaseDensity& src, const coord::PosCyl& pos, double values[]) {
@@ -62,7 +62,7 @@ inline void storeValue(const BasePotential& src, const coord::PosCyl& pos, doubl
 }
 
 template<class BaseDensityOrPotential, int NQuantities>
-static void computeFourierCoefs(const BaseDensityOrPotential &src,
+void computeFourierCoefs(const BaseDensityOrPotential &src,
     const unsigned int mmax,
     const std::vector<double> &gridR,
     const std::vector<double> &gridz,
@@ -139,7 +139,7 @@ inline double density_rho_m(const BaseDensity& dens, int m, double R, double z) 
 // This routine is used both in AzimuthalHarmonicIntegrand to compute the potential from
 // a continuous density distribution, and in ComputePotentialCoefsFromPoints to obtain
 // the potential from a discrete point mass collection.
-static void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, double z0,
+void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, double z0,
     double mass, bool useDerivs, double values[])
 {
     // the contribution to the potential is given by
@@ -151,7 +151,7 @@ static void computePotentialHarmonicAtPoint(int m, double R, double z, double R0
         if(u < 1+MIN_R)
             return;  // close to singularity
         double dQ;
-        double Q  = math::legendreQ(m-0.5, u, useDerivs ? &dQ : NULL);
+        double Q  = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
         values[0]+= -sq * mass * Q;
         if(useDerivs) {
             values[1]+= -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
@@ -219,7 +219,7 @@ private:
     const bool useDerivs;
 };
 
-static void computePotentialCoefsFromDensity(const BaseDensity &src,
+void computePotentialCoefsFromDensity(const BaseDensity &src,
     unsigned int mmax,
     const std::vector<double> &gridR,
     const std::vector<double> &gridz,
@@ -300,7 +300,7 @@ static void computePotentialCoefsFromDensity(const BaseDensity &src,
 }
 
 // transform an N-body snapshot to an array of Fourier harmonic coefficients
-static void computeAzimuthalHarmonicsFromParticles(
+void computeAzimuthalHarmonicsFromParticles(
     const particles::ParticleArray<coord::PosCyl>& particles,
     const std::vector<int>& indices,
     std::vector<std::vector<double> >& harmonics,
@@ -330,7 +330,7 @@ static void computeAzimuthalHarmonicsFromParticles(
     }
 }
 
-static void computePotentialCoefsFromParticles(
+void computePotentialCoefsFromParticles(
     const std::vector<int>& indices,
     const std::vector<std::vector<double> > &harmonics,
     const std::vector<std::pair<double, double> > &Rz,
@@ -593,7 +593,7 @@ double DensityAzimuthalHarmonic::rho_m(int m, double R, double z) const
 {
     int mmax = (spl.size()-1)/2;
     double lR = log(1+R/Rscale), lz = log(1+fabs(z)/Rscale)*math::sign(z);
-    if( math::abs(m)>mmax || spl[m+mmax].isEmpty() ||
+    if( math::abs(m)>mmax || spl[m+mmax].empty() ||
         lR<spl[mmax].xmin() || lz<spl[mmax].ymin() ||
         lR>spl[mmax].xmax() || lz>spl[mmax].ymax() )
         return 0;
@@ -614,7 +614,7 @@ double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
         math::trigMultiAngle(pos.phi, mmax, needSine, trig);
     }
     for(int m=-mmax; m<=mmax; m++)
-        if(!spl[m+mmax].isEmpty()) {
+        if(!spl[m+mmax].empty()) {
             double trig_m = m==0 ? 1 : m>0 ? trig[m-1] : trig[mmax-1-m];
             result += spl[m+mmax].value(lR, lz) * trig_m;
         }
@@ -626,7 +626,7 @@ void DensityAzimuthalHarmonic::getCoefs(
     std::vector< math::Matrix<double> > &coefs) const
 {
     unsigned int mmax = (spl.size()-1)/2;
-    assert(mmax>=0 && spl.size() == mmax*2+1 && !spl[mmax].isEmpty());
+    assert(mmax>=0 && spl.size() == mmax*2+1 && !spl[mmax].empty());
     coefs.resize(2*mmax+1);
     unsigned int sizeR = spl[mmax].xvalues().size();
     unsigned int sizez = spl[mmax].yvalues().size();
@@ -638,7 +638,7 @@ void DensityAzimuthalHarmonic::getCoefs(
     } else
         gridz = spl[mmax].yvalues();
     for(unsigned int mm=0; mm<=2*mmax; mm++)
-        if(!spl[mm].isEmpty()) {
+        if(!spl[mm].empty()) {
             coefs[mm]=math::Matrix<double>(sizeR, sizez);
             for(unsigned int iR=0; iR<sizeR; iR++)
                 for(unsigned int iz=0; iz<sizez; iz++)
@@ -665,7 +665,7 @@ namespace {  // internal routines
 // which is valid for empty space, but is not able to describe the residual density;
 // thus this asymptotic form describes the potential and forces rather well,
 // but returns zero density.
-static PtrPotential determineAsympt(
+PtrPotential determineAsympt(
     const std::vector<double> &gridR,
     const std::vector<double> &gridz,
     const std::vector< math::Matrix<double> > &Phi)
@@ -758,7 +758,7 @@ static PtrPotential determineAsympt(
 }
 
 // Automatically choose reasonable grid extent if it was not provided
-static void chooseGridRadii(const BaseDensity& src,
+void chooseGridRadii(const BaseDensity& src,
     unsigned int gridSizeR, double &Rmin, double &Rmax, 
     unsigned int gridSizez, double &zmin, double &zmax)
 {
@@ -782,13 +782,15 @@ static void chooseGridRadii(const BaseDensity& src,
              "], z=["+utils::toString(zmin)+":"+utils::toString(zmax)+"]");
 }
 
-static void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& points,
+void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& points,
     unsigned int gridSizeR, double &Rmin, double &Rmax, 
     unsigned int gridSizez, double &zmin, double &zmax)
 {
     if(Rmin!=0 && Rmax!=0 && zmin!=0 && zmax!=0)
         return;
     unsigned int Npoints = points.size();
+    if(Npoints==0)
+        throw std::invalid_argument("CylSpline: no particles provided as input");
     std::vector<double> radii(Npoints);
     for(unsigned int i=0; i<Npoints; i++)
         radii[i] = sqrt(pow_2(points.point(i).R) + pow_2(points.point(i).z));
@@ -901,6 +903,7 @@ CylSpline::CylSpline(
         (haveDerivs && (Phi.size() != dPhidR.size() || Phi.size() != dPhidz.size())) )
         throw std::invalid_argument("CylSpline: incorrect grid size");
     int mmax  = (Phi.size()-1)/2;
+    spl.resize(2*mmax+1);
     int mysym = coord::ST_AXISYMMETRIC;
     bool zsym = true;
     double Phi0;  // potential at R=0,z=0
@@ -923,7 +926,7 @@ CylSpline::CylSpline(
     if(Phi0 < 0 && Mtot > 0)     // assign Rscale so that it approximately equals -Mtotal/Phi(r=0),
         Rscale  = -Mtot / Phi0;  // i.e. would equal the scale radius of a Plummer potential
     else
-        Rscale  = 1.;  // rather arbitrary
+        Rscale  = gridR[sizeR/2];  // rather arbitrary
 
     // transform the grid to log-scaled coordinates
     for(unsigned int i=0; i<sizeR; i++) {
@@ -933,42 +936,70 @@ CylSpline::CylSpline(
         gridz[i] = log(1+fabs(gridz[i])/Rscale) * math::sign(gridz[i]);
     }
 
+    // check if we may use log-scaling of the m=0 term (i.e. if the potential is negative everywhere)
+    logScaling = true;
+    for(unsigned int i=0; i<Phi[mmax].size(); i++)
+        logScaling &= Phi[mmax].data()[i] < 0;
+
+    // temporary matrices of scaled potential and derivatives used to construct 2d splines
     math::Matrix<double> val(sizeR, sizez), derR(sizeR, sizez), derz(sizeR, sizez);
-    spl.resize(2*mmax+1);
-    for(int mm=0; mm<=2*mmax; mm++) {
+    math::Matrix<double> val0, derR0, derz0;   // copies of these matrices for the m=0 term
+
+    // loop over azimuthal harmonic indices (m)
+    for(int im=0; im<=2*mmax; im++) {
+        // we process the terms in the following order:
+        // first start with the m=0 term, which is contained in the arrays Phi[mmax], ...
+        // then go over all positive m up to mmax inclusive (the last one is in Phi[mmax*2]),
+        // and then to negative ones (contained in Phi[0]..Phi[mmax-1]).
+        // This is done to ensure that we first consider the m=0 term,
+        // whose amplitude is used to normalize the other terms.
+        int mm = (im+mmax) % (2*mmax+1);
         if(Phi[mm].rows() == 0 && Phi[mm].cols() == 0)
             continue;
         if((   Phi[mm].rows() != sizeR ||    Phi[mm].cols() != sizez_orig) || (haveDerivs && 
            (dPhidR[mm].rows() != sizeR || dPhidR[mm].cols() != sizez_orig  ||
             dPhidz[mm].rows() != sizeR || dPhidz[mm].cols() != sizez_orig)))
             throw std::invalid_argument("CylSpline: incorrect coefs array size");
-        double sum=0;
+        bool nontrivial = true;  // keep track if this term is identically zero or not
         for(unsigned int iR=0; iR<sizeR; iR++) {
             double R = gridR_orig[iR];
             for(unsigned int iz=0; iz<sizez_orig; iz++) {
-                double z = gridz_orig[iz];
+                double z = fabs(gridz_orig[iz]);
+                nontrivial |= Phi[mm](iR, iz) != 0;
                 unsigned int iz1 = zsym ? sizez_orig-1+iz : iz;  // index in the internal 2d grid
                 // values of potential and its derivatives are represented as scaled 2d functions:
-                // the amplitude is scaled by 'amp', while both coordinates are log-scaled.
-                // thus the values passed to the constructor of 2d spline must be properly modified,
-                // and the derivatives additionally transformed to the scaled coordinates.
-                double amp = sqrt(pow_2(Rscale)+pow_2(R)+pow_2(z));
-                val (iR, iz1) =  Phi[mm](iR,iz) * amp;
-                if(haveDerivs) {
-                    derR(iR, iz1) = (dPhidR[mm](iR,iz) * amp + Phi[mm](iR,iz) * R / amp) * (R+Rscale);
-                    derz(iR, iz1) = (dPhidz[mm](iR,iz) * amp + Phi[mm](iR,iz) * z / amp) * (fabs(z)+Rscale);
+                // the amplitude is optionally log-scaled for the m=0 term,
+                // and divided by the value of the m=0 term for the other terms,
+                // and the derivatives additionally transformed to the semi-log-scaled coordinates.
+                if(mm == mmax) {  // this corresponds to the m=0 term
+                    val(iR,iz1) = logScaling ? log(-Phi[mm](iR,iz)) : Phi[mm](iR,iz);
+                    if(haveDerivs) {
+                        derR(iR,iz1) = dPhidR[mm](iR,iz) * (R+Rscale) / (logScaling ? Phi[mm](iR,iz) : 1);
+                        derz(iR,iz1) = dPhidz[mm](iR,iz) * (z+Rscale) / (logScaling ? Phi[mm](iR,iz) : 1);
+                    }
+                } else {   // normalize by the m=0 term contained in the [mmax] array element
+                    double v0 = Phi[mmax](iR,iz), vm = Phi[mm](iR,iz) / v0;
+                    val(iR,iz1) = vm;
+                    if(haveDerivs) {
+                        derR(iR,iz1) = (dPhidR[mm](iR,iz) - vm * dPhidR[mmax](iR,iz)) * (R+Rscale) / v0;
+                        derz(iR,iz1) = (dPhidz[mm](iR,iz) - vm * dPhidz[mmax](iR,iz)) * (z+Rscale) / v0;
+                    }
                 }
                 if(zsym) {
-                    assert(z>=0);  // source data only covers upper half-space
+                    assert(gridz_orig[iz]>=0);           // source data only covers upper half-space
                     unsigned int iz2 = sizez_orig-1-iz;  // index of the reflected cell
                     val (iR, iz2) = val (iR, iz1);
                     derR(iR, iz2) = derR(iR, iz1);
                     derz(iR, iz2) =-derz(iR, iz1);
                 }
-                sum += fabs(Phi[mm](iR, iz));
             }
         }
-        if(sum>0) {
+        if(mm == mmax) {  // store the values and derivatives of the scaled m=0 term
+            val0  = val;
+            derR0 = derR;
+            derz0 = derz;
+        }
+        if(nontrivial) {  // only construct splines if they are not identically zero
             spl[mm] = haveDerivs ? 
                 math::PtrInterpolator2d(new math::QuinticSpline2d(gridR, gridz, val, derR, derz)) :
                 math::PtrInterpolator2d(new math::CubicSpline2d(gridR, gridz, val, 0, NAN, NAN, NAN));
@@ -997,27 +1028,72 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
         asymptOuter->eval(pos, val, der, der2);
         return;
     }
+    double dRscaleddR   = 1/(Rscale+pos.R);
+    double dzscaleddz   = 1/(Rscale+fabs(pos.z));
+    double d2RscaleddR2 = -pow_2(dRscaleddR);
+    double d2zscaleddz2 = -pow_2(dzscaleddz) * math::sign(pos.z);
 
     // only compute those quantities that will be needed in output
     bool needPhi  = true;
     bool needGrad = der !=NULL || der2!=NULL;
     bool needHess = der2!=NULL;
-    double trig_arr[2*MMAX_AZIMUTHAL_FOURIER];
-    if(!isZRotSymmetric(sym)) {
-        bool needSine = needGrad || !isYReflSymmetric(sym);
-        math::trigMultiAngle(pos.phi, mmax, needSine, trig_arr);
+
+    // value and derivatives (in scaled coords) of the m=0 term, which are later used
+    // to scale the other terms after we have performed the Fourier transform on all of them
+    double Phi0, dPhi0dR, dPhi0dz, d2Phi0dR2, d2Phi0dRdz, d2Phi0dz2;
+    spl[mmax]->evalDeriv(Rscaled, zscaled,
+        needPhi  ?   &Phi0     : NULL, 
+        needGrad ?  &dPhi0dR   : NULL,
+        needGrad ?  &dPhi0dz   : NULL,
+        needHess ? &d2Phi0dR2  : NULL,
+        needHess ? &d2Phi0dRdz : NULL,
+        needHess ? &d2Phi0dz2  : NULL);
+    if(logScaling) {
+        Phi0 = -exp(Phi0);
+        if(needHess) {
+            d2Phi0dR2  = Phi0 * (d2Phi0dR2  + pow_2(dPhi0dR));
+            d2Phi0dRdz = Phi0 * (d2Phi0dRdz + dPhi0dR * dPhi0dz);
+            d2Phi0dz2  = Phi0 * (d2Phi0dz2  + pow_2(dPhi0dz));
+        }
+        if(needGrad) {
+            dPhi0dR *= Phi0;
+            dPhi0dz *= Phi0;
+        }
+    }
+    
+    // if the potential is axisymmetric, skip the Fourier transform and amplitude scaling
+    if(mmax==0) {
+        if(val)
+            *val = Phi0;
+        if(der) {
+            der->dR   = dPhi0dR * dRscaleddR;
+            der->dz   = dPhi0dz * dzscaleddz;
+            der->dphi = 0;
+        }
+        if(der2) {
+            der2->dR2 = d2Phi0dR2 * pow_2(dRscaleddR) + dPhi0dR * d2RscaleddR2;
+            der2->dz2 = d2Phi0dz2 * pow_2(dzscaleddz) + dPhi0dz * d2zscaleddz2;
+            der2->dRdz= d2Phi0dRdz * dRscaleddR * dzscaleddz;
+            der2->dRdphi = der2->dzdphi = der2->dphi2 = 0;
+        }
+        return;
     }
 
     // total scaled potential, gradient and hessian in scaled coordinates
-    double Phi = 0;
+    double Phi = 1;   // this is the value of the m=0 term scaled by itself, i.e. unity
     coord::GradCyl grad;
     coord::HessCyl hess;
-    grad.dR  = grad.dz = grad.dphi = 0;
+    grad.dR  = grad.dz  = grad.dphi  = 0;
     hess.dR2 = hess.dz2 = hess.dphi2 = hess.dRdz = hess.dRdphi = hess.dzdphi = 0;
 
-    // loop over azimuthal harmonics and compute the temporary (scaled) values
+    double trig_arr[2*MMAX_AZIMUTHAL_FOURIER];
+    bool needSine = needGrad || !isYReflSymmetric(sym);
+    math::trigMultiAngle(pos.phi, mmax, needSine, trig_arr);
+
+    // loop over other (m!=0) azimuthal harmonics and compute the temporary (scaled) values
     for(int mm=0; mm<=2*mmax; mm++) {
-        if(!spl[mm])  // empty harmonic
+        int m = mm-mmax;
+        if(!spl[mm] || m==0)  // empty harmonic or the already computed m=0 one
             continue;
         // scaled value, gradient and hessian of m-th harmonic in scaled coordinates
         double Phi_m;
@@ -1030,9 +1106,8 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
             needHess ? &d2Phi_m.dR2  : NULL,
             needHess ? &d2Phi_m.dRdz : NULL,
             needHess ? &d2Phi_m.dz2  : NULL);
-        int m = mm-mmax;
-        double trig  = m==0 ? 1. : m>0 ? trig_arr[m-1] : trig_arr[mmax-1-m];  // cos or sin
-        double dtrig = m==0 ? 0. : m>0 ? -m*trig_arr[mmax+m-1] : -m*trig_arr[-m-1];
+        double trig  = m>0 ? trig_arr[m-1] : trig_arr[mmax-1-m];  // cos or sin
+        double dtrig = m>0 ? -m*trig_arr[mmax+m-1] : -m*trig_arr[-m-1];
         double d2trig = -m*m*trig;
         Phi += Phi_m * trig;
         if(needGrad) {
@@ -1051,44 +1126,23 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
     }
 
     // unscale both amplitude of all quantities and their coordinate derivatives
-    double r2 = pow_2(pos.R) + pow_2(pos.z);
-    double S  = 1 / sqrt(pow_2(Rscale)+r2);  // scaling of the amplitude
     if(val)
-        *val = S * Phi;
-    if(!needGrad)
-        return;
-    double dSdr_over_r = -S*S*S;    
-    double dRscaleddR = 1/(Rscale+pos.R);
-    double dzscaleddz = 1/(Rscale+fabs(pos.z));
+        *val = Phi0 * Phi;
     if(der) {
-        der->dR   = S * grad.dR * dRscaleddR + dSdr_over_r * Phi * pos.R;
-        der->dz   = S * grad.dz * dzscaleddz + dSdr_over_r * Phi * pos.z;
-        der->dphi = S * grad.dphi;
+        der->dR   = (Phi0 * grad.dR + dPhi0dR * Phi) * dRscaleddR;
+        der->dz   = (Phi0 * grad.dz + dPhi0dz * Phi) * dzscaleddz;
+        der->dphi =  Phi0 * grad.dphi;
     }
     if(der2) {
-        double d2RscaleddR2 = -pow_2(dRscaleddR);
-        double d2zscaleddz2 = -pow_2(dzscaleddz) * math::sign(pos.z);
-        double d2Sdr2 = (pow_2(Rscale) - 2 * r2) * dSdr_over_r * S * S;
-        r2 += 1e-100;  // prevent 0/0 indeterminacy if r2==0
-        der2->dR2 =
-            (d2Sdr2 * pow_2(pos.R) + dSdr_over_r * pow_2(pos.z)) / r2 * Phi + 
-            dSdr_over_r * 2 * pos.R * dRscaleddR * grad.dR +
-            S * (hess.dR2 * pow_2(dRscaleddR) + grad.dR * d2RscaleddR2);
-        der2->dz2 =
-            (d2Sdr2 * pow_2(pos.z) + dSdr_over_r * pow_2(pos.R)) / r2 * Phi + 
-            dSdr_over_r * 2 * pos.z * dzscaleddz * grad.dz +
-            S * (hess.dz2 * pow_2(dzscaleddz) + grad.dz * d2zscaleddz2);
-        der2->dRdz =
-            (d2Sdr2 - dSdr_over_r) * pos.R * pos.z / r2 * Phi +
-            dSdr_over_r * (pos.z * dRscaleddR * grad.dR + pos.R * dzscaleddz * grad.dz) +
-            S * hess.dRdz * dRscaleddR * dzscaleddz;
-        der2->dRdphi =
-            dSdr_over_r * pos.R * grad.dphi +
-            S * dRscaleddR * hess.dRdphi;
-        der2->dzdphi =
-            dSdr_over_r * pos.z * grad.dphi +
-            S * dzscaleddz * hess.dzdphi;
-        der2->dphi2 = S * hess.dphi2;
+        der2->dR2 = (Phi0 * hess.dR2 + 2 * dPhi0dR * grad.dR + d2Phi0dR2 * Phi) *
+            pow_2(dRscaleddR)  +  (Phi0 * grad.dR + dPhi0dR * Phi) * d2RscaleddR2;
+        der2->dz2 = (Phi0 * hess.dz2 + 2 * dPhi0dz * grad.dz + d2Phi0dz2 * Phi) *
+            pow_2(dzscaleddz)  +  (Phi0 * grad.dz + dPhi0dz * Phi) * d2zscaleddz2;
+        der2->dRdz = (Phi0 * hess.dRdz + dPhi0dR * grad.dz + + dPhi0dz * grad.dR + d2Phi0dRdz * Phi) *
+            dRscaleddR * dzscaleddz;
+        der2->dRdphi = (Phi0 * hess.dRdphi + dPhi0dR * grad.dphi) * dRscaleddR;
+        der2->dzdphi = (Phi0 * hess.dzdphi + dPhi0dz * grad.dphi) * dzscaleddz;
+        der2->dphi2  =  Phi0 * hess.dphi2;
     }
 }
 
@@ -1099,7 +1153,7 @@ void CylSpline::getCoefs(
     std::vector< math::Matrix<double> > &dPhidz) const
 {
     unsigned int mmax = (spl.size()-1)/2;
-    assert(mmax>=0 && spl.size() == mmax*2+1 && !spl[mmax]->isEmpty());
+    assert(mmax>=0 && spl.size() == mmax*2+1 && !spl[mmax]->empty());
     const std::vector<double>& scaledR = spl[mmax]->xvalues();
     const std::vector<double>& scaledz = spl[mmax]->yvalues();
     unsigned int sizeR = scaledR.size();
@@ -1127,21 +1181,33 @@ void CylSpline::getCoefs(
         Phi   [mm]=math::Matrix<double>(sizeR, sizez);
         dPhidR[mm]=math::Matrix<double>(sizeR, sizez);
         dPhidz[mm]=math::Matrix<double>(sizeR, sizez);
-        for(unsigned int iR=0; iR<sizeR; iR++)
-            for(unsigned int iz=0; iz<sizez; iz++) {
-                double Rscaled = scaledR[iR];     // coordinates in the internal scaled coords array
-                double zscaled = scaledz[iz+iz0];
-                // scaling of the amplitude
-                double S = 1 / sqrt(pow_2(Rscale) + pow_2(gridR[iR]) + pow_2(gridz[iz]));
-                double dSdr_over_r = -S*S*S;
-                // scaling of derivatives
-                double dRscaleddR  = 1 / (Rscale + gridR[iR]);
-                double dzscaleddz  = 1 / (Rscale + fabs(gridz[iz]));
-                double val, dR, dz;
-                spl[mm]->evalDeriv(Rscaled, zscaled, &val, &dR, &dz);
-                Phi   [mm](iR,iz) = S * val;
-                dPhidR[mm](iR,iz) = S * dR * dRscaleddR + dSdr_over_r * val * gridR[iR];
-                dPhidz[mm](iR,iz) = S * dz * dzscaleddz + dSdr_over_r * val * gridz[iz];
+    }
+    for(unsigned int iR=0; iR<sizeR; iR++)
+        for(unsigned int iz=0; iz<sizez; iz++) {
+            double Rscaled = scaledR[iR];     // coordinates in the internal scaled coords array
+            double zscaled = scaledz[iz+iz0];
+            double dRscaleddR = 1 / (Rscale + gridR[iR]);
+            double dzscaleddz = 1 / (Rscale + fabs(gridz[iz]));
+            // first retrieve the m=0 harmonic (and un-log-scale it if necessary);
+            // the derivatives are taken w.r.t. scaled R and z
+            double Phi0, dPhi0dR, dPhi0dz;
+            spl[mmax]->evalDeriv(Rscaled, zscaled, &Phi0, &dPhi0dR, &dPhi0dz);
+            if(logScaling) {
+                Phi0 = -exp(Phi0);
+                dPhi0dR *= Phi0;
+                dPhi0dz *= Phi0;
+            }
+            // then loop over all harmonics, scale the amplitude by that of the m=0 term,
+            // and convert the derivatives from scaled to real R and z
+            for(unsigned int mm=0; mm<=2*mmax; mm++) {
+                if(!spl[mm])
+                    continue;
+                double val=1, derR=0, derz=0;
+                if(mm!=mmax)  // [mmax] is the m=0 term, "scaled by itself", i.e. identically unity
+                    spl[mm]->evalDeriv(Rscaled, zscaled, &val, &derR, &derz);
+                Phi   [mm](iR,iz) =  Phi0 * val;
+                dPhidR[mm](iR,iz) = (Phi0 * derR + dPhi0dR * val) * dRscaleddR;
+                dPhidz[mm](iR,iz) = (Phi0 * derz + dPhi0dz * val) * dzscaleddz;
             }
     }
 }

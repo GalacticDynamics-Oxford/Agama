@@ -427,7 +427,7 @@ public:
     /// optionally compute the jacobian of transformation if jac!=NULL
     inline coord::PosCyl unscaleVars(const double vars[], double* jac=NULL) const {
         return unscaleCoords(vars, jac); }
-private:
+
     const BaseDensity& dens;  ///< the density model to be integrated over
     const bool axisym;        ///< flag determining if the density is axisymmetric
     const bool nonnegative;   ///< flag determining whether to return zero if density was negative

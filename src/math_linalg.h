@@ -305,6 +305,11 @@ enum CBLAS_SIDE {CblasLeft=141, CblasRight=142};
 /// dot product of two vectors
 double blas_ddot(const std::vector<double>& X, const std::vector<double>& Y);
 
+/// L2-norm of a vector or a matrix (sum of squares of all elements)
+/// \tparam Type may be std::vector<double> or Matrix<double>
+template<typename Type>
+double blas_dnrm2(const Type& X);
+
 /// sum of two vectors or two matrices:  Y := alpha * X + Y
 /// \tparam Type may be std::vector<double> or Matrix<double>
 template<typename Type>

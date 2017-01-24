@@ -147,13 +147,13 @@ struct SphMod{
 
 //  less trivial:
 /** prolate spheroidal coordinate system, defined by a single parameter 
-    delta>0 (squared interfocal distance).
+    Delta>0 (focal distance).
     The traditionally used two parameters alpha and gamma (e.g., de Zeeuw 1985) 
-    are not independent, so we define  delta = gamma - alpha.
+    are not independent, so we define  Delta^2 = gamma - alpha.
 */
 struct ProlSph{
-    const double delta;      ///< = gamma - alpha > 0
-    ProlSph(double _delta);  ///< delta is _squared_ interfocal distance
+    const double Delta2;     ///< Delta^2 = gamma - alpha > 0
+    ProlSph(double Delta);   ///< Delta is the focal distance
     static const char* name() { return "Prolate spheroidal"; }
 };
 
@@ -230,7 +230,7 @@ typedef struct PosT<ProlSph> PosProlSph;
     The original formulation in terms of u and v variables, such that the cylindrical coordinates
     are given by  R = D sinh(u) sin(v), z = D cosh(u) cos(v),
     is replaced by  rho = D sinh(u), tau = cos(v) / (1 + sin(v)).
-    Here D is the interfocal distance of the coordinate system, which may even be zero.
+    Here D is the focal distance of the coordinate system, which may even be zero.
     An auxiliary variable chi is set equal to D cosh(u) = sqrt(D^2 + rho^2);
     as all member variables are declared const, this assignment may not be accidentally changed.
 */
@@ -238,7 +238,7 @@ template<> struct PosT<ProlMod>{
     const double rho;  ///< lies in the range [0:infinity), equal to cylindrical radius when z=0
     const double tau;  ///< lies in the range [-1:1], analog of tau in SphMod coords
     const double phi;  ///< usual azimuthal angle
-    const double chi;  ///< equal to sqrt(rho^2 + D^2), where D is the interfocal distance of coord.sys.
+    const double chi;  ///< equal to sqrt(rho^2 + D^2), where D is the focal distance of coord.sys.
     PosT<ProlMod>(double _rho, double _tau, double _phi) : 
         rho(_rho), tau(_tau), phi(_phi), chi(_rho) {};
     PosT<ProlMod>(double _rho, double _tau, double _phi, double _chi) : 

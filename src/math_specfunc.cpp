@@ -17,13 +17,15 @@
 
 namespace math {
 
-double gegenbauer(const int n, double lambda, double x) {
-    return gsl_sf_gegenpoly_n(n, lambda, x);
-}
+// if any GSL function triggers an error, it will be stored in this variable (defined in math_core.cpp)
+extern std::string exceptionText;
 
-void gegenbauerArray(const int nmax, double lambda, double x, double* result_array) {
-    gsl_sf_gegenpoly_array(nmax, lambda, x, result_array);
-}
+// call a GSL function and return NAN in case of an error;
+// the error message is recorded in math::exceptionText and may be later examined by the caller
+#define CALL_FUNCTION_OR_NAN(x) \
+    exceptionText.clear(); \
+    double _result = x; \
+    return exceptionText.empty() ? _result : NAN;
 
 double erfinv(const double x)
 {
@@ -51,26 +53,23 @@ double erfinv(const double x)
 
 double hypergeom2F1(const double a, const double b, const double c, const double x)
 {
-    try{
-        if (-1.<=x and x<1.)
-            return gsl_sf_hyperg_2F1(a, b, c, x);
-        // extension for 2F1 into the range x<-1 which is not provided by GSL; code from Heiko Bauke
-        if (x<-1.) {
-            if (c-a<0)
-                return pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
-            if (c-b<0)
-                return pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, c, c, x/(x-1.));
-            // choose one of two equivalent formulas which is expected to be more accurate
-            if (a*(c-b)<(c-a)*b)
-                return pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
-            else
-                return pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, b, c, x/(x-1.));
-        }
-    }
-    catch(std::exception&) {  // GSL routines are not very robust and may fail for some arguments
-        return NAN;
-    }
-    return NAN;  // not defined for x>=1
+    exceptionText.clear();
+    double _result = NAN;
+    if(-1.<=x and x<1.)
+        _result = gsl_sf_hyperg_2F1(a, b, c, x);
+    // extension for 2F1 into the range x<-1 which is not provided by GSL; code from Heiko Bauke
+    else if(x<-1.) {
+        if(c-a<0)
+            _result =  pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
+        if(c-b<0)
+            _result =  pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, c, c, x/(x-1.));
+        // choose one of two equivalent formulas which is expected to be more accurate
+        if(a*(c-b) < (c-a)*b)
+            _result =  pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
+        else
+            _result =  pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, b, c, x/(x-1.));
+    }  // otherwise not defined (for x>=1)
+    return exceptionText.empty() ? _result : NAN;
 }
 
 // ------ approximations for specific instances of hypergeometric function ------ //
@@ -207,7 +206,7 @@ const double X_THRESHOLD0[MMAX_HYPERGEOM+1] = {
     0.72, 0.72, 0.80, 0.80, 0.83, 0.86, 0.85, 0.88, 0.88, 0.88, 0.885,0.90, 0.91
 };
 
-static double hypergeom_m(int m, double x, double* deriv)
+double hypergeom_m(int m, double x, double* deriv)
 {
     if(x < X_THRESHOLD1[m]) {  // use continued fraction approximation for x not too close to unity
         const double* A = x<X_THRESHOLD0[m] ? HYPERGEOM_0[m] : HYPERGEOM_I[m];
@@ -249,77 +248,80 @@ double legendreQ(const double n, const double x, double* deriv)
     return F;
 }
 
+double gegenbauer(const int n, double lambda, double x) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_gegenpoly_n(n, lambda, x) )
+}
+
+void gegenbauerArray(const int nmax, double lambda, double x, double* result_array) {
+    gsl_sf_gegenpoly_array(nmax, lambda, x, result_array);
+}
+
 double factorial(const unsigned int n) {
-    return gsl_sf_fact(n);
+     CALL_FUNCTION_OR_NAN( gsl_sf_fact(n) )
 }
 
 double lnfactorial(const unsigned int n) {
-    return gsl_sf_lnfact(n);
+    CALL_FUNCTION_OR_NAN( gsl_sf_lnfact(n) )
 }
 
 double dfactorial(const unsigned int n) {
-    return gsl_sf_doublefact(n);
+    CALL_FUNCTION_OR_NAN( gsl_sf_doublefact(n) )
 }
 
 double gamma(const double x) {
-    try{
-        return gsl_sf_gamma(x);
-    }
-    catch(std::exception&) {
-        return NAN;
-    }
+    CALL_FUNCTION_OR_NAN( gsl_sf_gamma(x) )
 }
 
 double lngamma(const double x) {
-    return gsl_sf_lngamma(x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_lngamma(x) )
 }
 
 double digamma(const double x) {
-    return gsl_sf_psi(x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_psi(x) )
 }
 
 double digamma(const int x) {
-    return gsl_sf_psi_int(x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_psi_int(x) )
 }
 
 double ellintK(const double k, bool accurate) {
-    return gsl_sf_ellint_Kcomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE);
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Kcomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
 }
 
 double ellintE(const double k, bool accurate) {
-    return gsl_sf_ellint_Ecomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE);
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Ecomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
 }
 
 double ellintF(const double phi, const double k, bool accurate) {
-    return gsl_sf_ellint_F(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE);
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_F(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
 }
 
 double ellintE(const double phi, const double k, bool accurate) {
-    return gsl_sf_ellint_E(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE);
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_E(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
 }
 
 double ellintP(const double phi, const double k, const double n, bool accurate) {
-    return gsl_sf_ellint_P(phi, k, n, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE);
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_P(phi, k, n, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
 }
 
 double besselJ(const int n, const double x) {
-    return gsl_sf_bessel_Jn(n, x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_bessel_Jn(n, x) )
 }
 
 double besselY(const int n, const double x) {
-    return gsl_sf_bessel_Yn(n, x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_bessel_Yn(n, x) )
 }
 
 double besselI(const int n, const double x) {
-    return gsl_sf_bessel_In(n, x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_bessel_In(n, x) )
 }
 
 double besselK(const int n, const double x) {
-    return gsl_sf_bessel_Kn(n, x);
+    CALL_FUNCTION_OR_NAN( gsl_sf_bessel_Kn(n, x) )
 }
 
 double lambertW(const double x, bool Wminus1branch) {
-    return Wminus1branch ? gsl_sf_lambert_Wm1(x) : gsl_sf_lambert_W0(x);
+    CALL_FUNCTION_OR_NAN( Wminus1branch ? gsl_sf_lambert_Wm1(x) : gsl_sf_lambert_W0(x) )
 }
 
 void solveKepler(double ecc, double phase, double &eta, double &sineta, double &coseta)

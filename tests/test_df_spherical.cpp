@@ -150,14 +150,12 @@ void difCoefsPlummer(const double Phi, const double E, double &dvpar, double &dv
     dv2per =  mult * (I0 * 2 + J1 * 3 - J3);
 }
 
-/// construct an interpolator for f(h) from the provided h(E) and f(E)
-math::LogLogSpline createInterpolatedDF(
-    const potential::PhaseVolume& phasevol, const math::IFunction& trueDF)
+/// construct an interpolator for f(h)
+math::LogLogSpline createInterpolatedDF(const math::IFunction& trueDF)
 {
-    const unsigned int gridSize = phasevol.gridlogh().size();
-    std::vector<double> gridh(gridSize), gridf(gridSize);
-    std::transform(phasevol.gridlogh().begin(), phasevol.gridlogh().end(), gridh.begin(), exp);
-    for(unsigned int i=0; i<gridSize; i++)
+    std::vector<double> gridh = math::createExpGrid(200, 1e-15, 1e15);
+    std::vector<double> gridf(gridh.size());
+    for(unsigned int i=0; i<gridh.size(); i++)
         gridf[i] = trueDF(gridh[i]);
     return math::LogLogSpline(gridh, gridf);
 }
@@ -197,7 +195,7 @@ bool test(const potential::BasePotential& pot)
     const PhasevolFnc truePhasevol;
     const DistrFnc trueDF(phasevol);
     galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
-    math::LogLogSpline intDF = createInterpolatedDF(phasevol, trueDF);
+    math::LogLogSpline intDF = createInterpolatedDF(trueDF);
     math::LogLogSpline intRho= createInterpolatedDensity(pot);
     math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
         potential::DensityWrapper(pot), potential::PotentialWrapper(pot));

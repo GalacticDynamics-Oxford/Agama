@@ -5,8 +5,9 @@
 
 namespace utils {
 
+namespace{
 /// case-insensitive comparison (7-bit charset)
-static bool comparestr(const std::string& one, const std::string& two)
+inline bool comparestr(const std::string& one, const std::string& two)
 {
     if(one.size()!=two.size()) return false;
     for(size_t i=0; i<one.size(); i++) {
@@ -17,6 +18,7 @@ static bool comparestr(const std::string& one, const std::string& two)
         if(o!=t) return false;
     }
     return true;
+}
 }
 
 // -------- KeyValueMap -------- //
@@ -56,8 +58,10 @@ void KeyValueMap::add(const char* line)
         if(indx!=std::string::npos && indx+1<buffer.size())
             buffer.erase(indx+1);
         items.push_back(std::pair<std::string, std::string>(key, buffer));
-    } else  // line without '=' or starting with a comment is not a key-value pair, but must be stored anyway
-        items.push_back(std::pair<std::string, std::string>("", buffer));  // store with empty key (non-retrievable via get methods)
+    } else
+        // line without '=' or starting with a comment is not a key-value pair:
+        // store with empty key (non-retrievable via get methods), but will be kept when writing
+        items.push_back(std::pair<std::string, std::string>("", buffer));
 }
 
 bool KeyValueMap::contains(const std::string& key) const

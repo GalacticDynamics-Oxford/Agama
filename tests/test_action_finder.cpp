@@ -36,7 +36,8 @@
 #include <ctime>
 
 const double toler = 1e-8;  // integration accuracy parameter
-const units::InternalUnits unit(units::galactic_Myr);//(0.2*units::Kpc, 100*units::Myr);
+const units::InternalUnits unit(units::galactic_Myr);
+const double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr;
 int numActionEval  = 0;
 
 bool isResonance(const std::vector<coord::PosVelCar>& traj)
@@ -51,61 +52,62 @@ bool isResonance(const std::vector<coord::PosVelCar>& traj)
     return avgz.mean() / sqrt(avgz.disp());
 }
 
-class BestIFDFinder: public math::IFunctionNoDeriv {
-public:
-    BestIFDFinder(const potential::BasePotential& p, const std::vector<coord::PosVelCar>& t,
-                  actions::Actions& a, actions::Actions& r) :
-        potential(p), traj(t), avg(a), rms(r) {};
-    virtual double value(double ifd) const {
-        actions::ActionStat acts;
-        for(size_t i=0; i<traj.size(); i++)
-            acts.add(actions::actionsAxisymFudge(potential, coord::toPosVelCyl(traj[i]), ifd));
-        numActionEval += traj.size();
-        acts.finish();
-        avg = acts.avg;
-        rms = acts.rms;
-        return acts.rms.Jr + acts.rms.Jz;
-    }
-private:
-    const potential::BasePotential& potential;
-    const std::vector<coord::PosVelCar>& traj;
-    actions::Actions& avg;
-    actions::Actions& rms;
-};
-
 bool test_actions(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions,
-    const double total_time, const double timestep, double ifd,
+    const double total_time, const double timestep,
+    const actions::ActionFinderAxisymFudge& actfinder,
     std::string& output)
 {
     std::vector<coord::PosVelCar> traj;
     orbit::integrate(potential, initial_conditions, total_time, timestep, traj, toler);
-    actions::Actions avg, rms;
-    if(ifd<=0)
-        ifd = actions::estimateInterfocalDistancePoints(potential, traj);
+    double ifd = fmax(
+        //actions::estimateFocalDistancePoints(potential, traj);
+        actfinder.focalDistance(toPosVelCyl(initial_conditions)),
+        initial_conditions.x*1e-4);
 
-    BestIFDFinder fnc(potential, traj, avg, rms);
-    // uncommenting the line below enables the search of best-fit interfocal distance,
-    // i.e. the one that minimizes the variation in actions over the entire orbit.
-    // It turns out that the value provided by InterfocalDistanceFinder is good enough,
-    // so that the difference in the quality of action recovery between the true 
-    // best-fit IFD and the one provided by InterfocalDistanceFinder is rather minor.
-#if 0
-    ifd = math::findMin(fnc, 0.1, 10, NAN, 0.001);
-#endif
-    fnc.value(ifd);
-    double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr; //unit.to_Kpc_kms;
-    double scatter = (rms.Jr+rms.Jz) / (avg.Jr+avg.Jz);
-    double scatterNorm = 0.33 * sqrt( (avg.Jr+avg.Jz) / (avg.Jr+avg.Jz+fabs(avg.Jphi)) );
+    std::ofstream strm;
+    actions::ActionStat actF, actI;
+    math::Averager avgI3;
+    const coord::ProlSph coordsys(pow_2(ifd));
+    for(size_t i=0; i<traj.size(); i++) {
+        const coord::PosVelCyl point = toPosVelCyl(traj[i]);
+        const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
+        const double
+        Phi  = potential.value(point),
+        Phi0 = potential.value(coord::PosCyl(sqrt(pprol.lambda-coordsys.Delta2), 0, point.phi)),
+        I3   = pprol.lambda * (Phi - Phi0) + 0.5 * (
+            pow_2(point.z * point.vphi) +
+            pow_2(point.R * point.vz - point.z * point.vR) +
+            pow_2(point.vz) * coordsys.Delta2 );
+        actions::Actions actsF = actions::actionsAxisymFudge(potential, toPosVelCyl(traj[i]), ifd);
+        actions::Actions actsI = actfinder.actions(toPosVelCyl(traj[i]));
+        strm << utils::pp(point.R, 8)+' '+utils::pp(point.z, 8)+' '+
+            utils::pp(pprol.lambda, 8)+' '+utils::pp(pprol.nu, 8)+' '+
+            utils::pp(I3, 8)+' '+
+            utils::pp(actsF.Jr, 8)+' '+utils::pp(actsI.Jr, 8)+' '+
+            utils::pp(actsF.Jz, 8)+' '+utils::pp(actsI.Jz, 8)+'\n';
+        avgI3.add(I3);
+        actF.add(actsF);
+        actI.add(actsI);
+    }
+    numActionEval += traj.size();
+    actF.finish();
+    actI.finish();
+    double scatter = (actF.rms.Jr+actF.rms.Jz) / (actF.avg.Jr+actF.avg.Jz);
+    double scatterNorm = 0.33 * sqrt( (actF.avg.Jr+actF.avg.Jz) /
+        (actF.avg.Jr+actF.avg.Jz+fabs(actF.avg.Jphi)) );
     bool tolerable = scatter < scatterNorm || isResonance(traj);
     double E = totalEnergy(potential, initial_conditions);
     output =
         utils::pp(E*pow_2(unit.to_Kpc/unit.to_Myr),7) +'\t'+
         utils::pp(L_circ(potential, E)*dim,7) +'\t'+
-        utils::pp(avg.Jphi*dim,7) +'\t'+
-        utils::pp(avg.Jr*dim,7) +'\t'+ utils::pp(rms.Jr*dim,7) +'\t'+
-        utils::pp(avg.Jz*dim,7) +'\t'+ utils::pp(rms.Jz*dim,7) +'\t'+
-        utils::pp(ifd*unit.to_Kpc,7) +'\t'+
+        utils::pp(actF.avg.Jphi*dim,7) +'\t'+
+        utils::pp(actF.avg.Jr*dim,7) +'\t'+ utils::pp(actF.rms.Jr*dim,7) +'\t'+
+        utils::pp(actF.avg.Jz*dim,7) +'\t'+ utils::pp(actF.rms.Jz*dim,7) +'\t'+
+        utils::pp(actI.avg.Jr*dim,7) +'\t'+ utils::pp(actI.rms.Jr*dim,7) +'\t'+
+        utils::pp(actI.avg.Jz*dim,7) +'\t'+ utils::pp(actI.rms.Jz*dim,7) +'\t'+
+        utils::pp(avgI3.mean(),7) +'\t'+ utils::pp(sqrt(avgI3.disp()),7) +'\t'+
+        //utils::pp(ifd*unit.to_Kpc,7) +'\t'+
         (tolerable?"":" **");
     return tolerable;
 }
@@ -133,13 +135,13 @@ const char* test_galpot_params =
 "9.49e+10    0.5  0  1.8  0.075   2.1\n"
 "1.85884e+07 1.0  1  3    14.2825 250.\n";
 
-int main(int argc, const char* argv[])
+int main()
 {
     bool allok = true;
     potential::PtrPotential pot = make_galpot(test_galpot_params);
     clock_t clockbegin = std::clock();
-    actions::InterfocalDistanceFinder ifdFinder(*pot);
-    std::cout << (std::clock()-clockbegin)*1.0/CLOCKS_PER_SEC << " seconds to init Delta-finder\n";
+    actions::ActionFinderAxisymFudge actfinder(pot);
+    std::cout << (std::clock()-clockbegin)*1.0/CLOCKS_PER_SEC << " seconds to init action interpolator\n";
 
     // prepare room for storing the output
     std::vector<double> Evalues;
@@ -165,7 +167,7 @@ int main(int argc, const char* argv[])
         for(int iLz=0; iLz<NLZ; iLz++) {   // explore the range of angular momentum for a fixed energy
             double Lz   = (iLz+0.5)/NLZ * Lc;
             double R;                      // radius of a shell orbit
-            actions::estimateInterfocalDistanceShellOrbit(*pot, E, Lz, &R);
+            actions::estimateFocalDistanceShellOrbit(*pot, E, Lz, &R);
             double vphi = Lz/R;
             double vmer = sqrt(2*(E-pot->value(coord::PosCyl(R,0,0)))-vphi*vphi);
             if(vmer!=vmer) {
@@ -176,17 +178,15 @@ int main(int argc, const char* argv[])
             for(int a=0; a<NDIR; a++) {   // explore the range of third integral by varying the direction
                 double ang=(a+0.01)/(NDIR-0.98) * M_PI/2;  // of velocity in the meridional plane
                 coord::PosVelCar ic(R, 0, 0, vmer*cos(ang), vphi, vmer*sin(ang));
-                // interfocal distance to be used in Fudge
-                double ifd = ifdFinder.value(totalEnergy(*pot, ic), coord::Lz(ic));
                 int index = a + NDIR * (iLz + NLZ * iE);
-                allok &= test_actions(*pot, ic, totalTime, timeStep, ifd, results[index]);
+                allok &= test_actions(*pot, ic, totalTime, timeStep, actfinder, results[index]);
             }
         }
     }
     std::cout << numActionEval * 1.0*CLOCKS_PER_SEC / (std::clock()-clockbegin) << " actions per second\n";
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream output("test_action_finder.dat");
-        output << "E\tLcirc\tJphi\tJr\tJr_err\tJz\tJz_err\tInterfocal_distance\n";
+        output << "E\tLcirc\tJphi\tJr\tJr_err\tJz\tJz_err\tiJr\tiJr_err\tiJz\tiJz_err\tI3\tI3_err\n";
         for(unsigned int l=0; l<results.size(); l++)
             output << results[l] << '\n';
     }

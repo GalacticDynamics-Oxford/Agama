@@ -63,7 +63,7 @@ double qromb(double(*func)(double), const double a,
 	     const double b, const double EPS) {
 
   const int JMAX=20, JMAXP = JMAX+1, K=5;
-  double ss,dss, s[JMAX], h[JMAXP], s_t[K], h_t[K];
+  double ss=0,dss, s[JMAX], h[JMAXP], s_t[K], h_t[K];
   
   h[0]=1.;
   for(int j=1; j<=JMAX;j++) {

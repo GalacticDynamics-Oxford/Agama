@@ -115,7 +115,7 @@ int main(int argc, const char* argv[]) {
     acts.Jz   = Jz   * unit.from_Kpc_kms;
     acts.Jphi = Jphi * unit.from_Kpc_kms;
     actions::ActionMapperTorus mapper(*pot, acts);
-    actions::ActionFinderAxisymFudge finder(pot);
+    actions::ActionFinderAxisymFudge finder(pot, false);
     allok &= test_actions(*pot, finder, mapper, acts);
     if(allok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";

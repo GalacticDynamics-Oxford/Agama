@@ -6,6 +6,12 @@
 #include <cstring>
 #include <stdexcept>
 
+// stack trace presumably only works with GCC
+#ifdef __GNUC__
+#include <cxxabi.h>
+#include <execinfo.h>
+#endif
+
 namespace utils {
 
 /* -------- error reporting routines ------- */
@@ -13,7 +19,7 @@ namespace utils {
 namespace{  // internal
 
 /// remove function signature from GCC __PRETTY_FUNCTION__
-static std::string undecorateFunction(std::string origin)
+inline std::string undecorateFunction(std::string origin)
 {
 #ifdef __GNUC__
     // parse the full function signature returned by __PRETTY_FUNCTION__
@@ -27,7 +33,49 @@ static std::string undecorateFunction(std::string origin)
     return origin;
 }
 
-static char verbosityText(VerbosityLevel level)
+/// check if a character is a part of a valid C++ identifier name
+inline bool isAlphanumeric(const char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+/// attempt to demangle any possible C++ identifier names that are encountered in the input string
+std::string demangleName(char* const input)
+{
+    std::string result;
+    char *ptr = input, *name = NULL;
+    while(1) {                       // scan the entire input line until '\0' is found.
+        if(isAlphanumeric(*ptr)) {   // current character is a part of an identifier name:
+            if(!name)                // if we are not already in the regime of recording a name,
+                name = ptr;          // turn this regime on and remember the start of the name.
+        } else {                     // otherwise the character is not part of a name:
+            if(name) {               // if we have been recording a name, finalize this name.
+                char oldsym = *ptr;  // remember the character at the current position
+                *ptr = '\0';         // temporarily construct a null-terminated string with the name
+                int status;          // try to demangle an identifier name
+                char* demangledName = abi::__cxa_demangle(name, NULL, NULL, &status);
+                if(status == 0) {    // success: append the demangled name to the results
+                    result.append(demangledName);
+                } else {             // demangling failed: append the name itself
+                    result.append(name);
+                }
+                free(demangledName); // free the temporary string returned by __cxa_demangle()
+                *ptr = oldsym;       // put the current character back into place
+            }
+            name = NULL;             // turn off the regime of recording a name
+            if(*ptr != '\0')         // append the current character (not part of any name) to results
+                result.append(1, *ptr);
+        }
+        if(*ptr == '\0')             // reached the end of the input string
+            break;
+        else
+            ++ptr;                   // pass on to the next character of the input string
+    }
+    return result;
+}
+
+/// a prefix character prepended to the output message
+inline char verbosityText(VerbosityLevel level)
 {
     switch(level) {
         case VL_MESSAGE: return '.';
@@ -43,7 +91,7 @@ static char verbosityText(VerbosityLevel level)
 static std::ofstream logfile;
     
 /// read the environment variables controlling the verbosity level and log file redirection
-static VerbosityLevel initVerbosityLevel()
+VerbosityLevel initVerbosityLevel()
 {
     const char* env = std::getenv("LOGFILE");
     if(env) {
@@ -56,7 +104,7 @@ static VerbosityLevel initVerbosityLevel()
 }
 
 /// default routine that dumps text messages to stderr
-static void defaultmsg(VerbosityLevel level, const char* origin, const std::string &message)
+void defaultmsg(VerbosityLevel level, const char* origin, const std::string &message)
 {
     if(level > verbosityLevel)
         return;
@@ -75,6 +123,26 @@ MsgType* msg = &defaultmsg;
 
 /// global variable controlling the verbosity of printout
 VerbosityLevel verbosityLevel = initVerbosityLevel();
+
+std::string stacktrace()
+{
+#ifdef __GNUC__
+    const int MAXFRAMES = 256;
+    void* tmp[MAXFRAMES];     // temporary storage for stack frames
+    int numframes = backtrace(tmp, MAXFRAMES);
+    // convert this information into strings with function signatures and offsets
+    char** lines = backtrace_symbols(tmp, numframes);  // this array should be freed later
+    // represent these strings in a more user-friendly way (demangle identifier names)
+    std::string result = "Stack trace ("+toString(numframes)+
+        " functions, starting from the most recent one):\n";
+    for(int i=1; i<numframes; i++)
+        result += demangleName(lines[i]) + '\n';
+    free(lines);
+    return result;
+#else
+    return "Stack trace not available\n";
+#endif
+}
 
 /* ----------- string/number conversion and parsing routines ----------------- */
 
