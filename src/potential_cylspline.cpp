@@ -228,7 +228,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
 {
     unsigned int sizeR = gridR.size(), sizez = gridz.size();
     if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE ||
-        mmax<0 || mmax > MMAX_AZIMUTHAL_FOURIER)
+        mmax > MMAX_AZIMUTHAL_FOURIER)
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     if(isZRotSymmetric(src))
         mmax = 0;
@@ -307,8 +307,8 @@ void computeAzimuthalHarmonicsFromParticles(
     std::vector<std::pair<double, double> > &Rz)
 {
     assert(harmonics.size()>0 && indices.size()>0);
-    unsigned int nbody = particles.size();
-    unsigned int nind  = indices.size();
+    size_t nbody = particles.size();
+    unsigned int nind = indices.size();
     int mmax = (harmonics.size()-1)/2;
     bool needSine = false;
     for(unsigned int i=0; i<nind; i++) {
@@ -317,7 +317,7 @@ void computeAzimuthalHarmonicsFromParticles(
     }
     Rz.resize(nbody);
     std::vector<double> tmpharm(2*mmax);
-    for(unsigned int b=0; b<nbody; b++) {
+    for(size_t b=0; b<nbody; b++) {
         const coord::PosCyl& pc = particles.point(b);
         Rz[b].first = pc.R;
         Rz[b].second= pc.z;
@@ -350,7 +350,7 @@ void computePotentialCoefsFromParticles(
             output[q]->at(indices[i]+mmax)=math::Matrix<double>(sizeR, sizez, 0);
         }
     }
-    int nbody = Rz.size();
+    ptrdiff_t nbody = Rz.size();
     int numPoints = sizeR * sizez;
     std::string errorMsg;
     // parallelize the loop over the nodes of 2d grid, not the inner loop over particles
@@ -361,7 +361,7 @@ void computePotentialCoefsFromParticles(
         unsigned int iR = ind % sizeR;
         unsigned int iz = ind / sizeR;
         try{
-            for(int b=0; b<nbody; b++) {
+            for(ptrdiff_t b=0; b<nbody; b++) {
                 for(unsigned int i=0; i<indices.size(); i++) {
                     int m = indices[i];
                     double values[3] = {0,0,0};
@@ -472,7 +472,7 @@ void computePotentialCoefsCyl(
 {
     if( gridR.size() < CYLSPLINE_MIN_GRID_SIZE ||
         gridz.size() < CYLSPLINE_MIN_GRID_SIZE ||
-        mmax<0 || mmax > MMAX_AZIMUTHAL_FOURIER ||
+        mmax > MMAX_AZIMUTHAL_FOURIER ||
         (isZReflSymmetric(sym) && gridz[0] != 0) )
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     std::vector<int> indices = math::getIndicesAzimuthal(mmax, sym);
@@ -494,7 +494,7 @@ void computePotentialCoefsCyl(
 {
     if( gridR.size() < CYLSPLINE_MIN_GRID_SIZE ||
         gridz.size() < CYLSPLINE_MIN_GRID_SIZE ||
-        mmax<0 || mmax > MMAX_AZIMUTHAL_FOURIER ||
+        mmax > MMAX_AZIMUTHAL_FOURIER ||
         (isZReflSymmetric(sym) && gridz[0] != 0) )
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     std::vector<int> indices = math::getIndicesAzimuthal(mmax, sym);
@@ -782,30 +782,36 @@ void chooseGridRadii(const BaseDensity& src,
              "], z=["+utils::toString(zmin)+":"+utils::toString(zmax)+"]");
 }
 
-void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& points,
+void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     unsigned int gridSizeR, double &Rmin, double &Rmax, 
     unsigned int gridSizez, double &zmin, double &zmax)
 {
     if(Rmin!=0 && Rmax!=0 && zmin!=0 && zmax!=0)
         return;
-    unsigned int Npoints = points.size();
-    if(Npoints==0)
+
+    std::vector<double> radii;
+    radii.reserve(particles.size());
+    for(size_t i=0; i<particles.size(); i++) {
+        double r = sqrt(pow_2(particles.point(i).R) + pow_2(particles.point(i).z));
+        if(particles.mass(i) != 0)  // only consider particles with non-zero mass
+            radii.push_back(r);
+    }
+    size_t nbody = radii.size();
+    if(nbody==0)
         throw std::invalid_argument("CylSpline: no particles provided as input");
-    std::vector<double> radii(Npoints);
-    for(unsigned int i=0; i<Npoints; i++)
-        radii[i] = sqrt(pow_2(points.point(i).R) + pow_2(points.point(i).z));
-    std::nth_element(radii.begin(), radii.begin() + Npoints/2, radii.end());
+    
+    std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
     double gridSize = sqrt(gridSizeR*gridSizez);  // average of the two sizes
-    double Rhalf = radii[Npoints/2];   // half-mass radius (if all particles have equal mass)
+    double Rhalf = radii[nbody/2];   // half-mass radius (if all particles have equal mass)
     double spacing = 1 + sqrt(10./gridSize);
-    int Nmin = static_cast<int>(log(Npoints+1)/log(2));  // # of points in the inner cell
+    int Nmin = static_cast<int>(log(nbody+1)/log(2));  // # of points in the inner cell
     if(Rmin==0) {
         std::nth_element(radii.begin(), radii.begin() + Nmin, radii.end());
         Rmin = std::max(radii[Nmin], Rhalf * pow(spacing, -0.5*gridSize));
     }
     if(Rmax==0) {
         std::nth_element(radii.begin(), radii.end() - Nmin, radii.end());
-        Rmax = std::min(radii[Npoints-Nmin], Rhalf * pow(spacing, 0.5*gridSize));
+        Rmax = std::min(radii[nbody-Nmin], Rhalf * pow(spacing, 0.5*gridSize));
     }
     if(zmax==0)
         zmax=Rmax;
@@ -1034,9 +1040,9 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
     double d2zscaleddz2 = -pow_2(dzscaleddz) * math::sign(pos.z);
 
     // only compute those quantities that will be needed in output
-    bool needPhi  = true;
-    bool needGrad = der !=NULL || der2!=NULL;
-    bool needHess = der2!=NULL;
+    const bool needPhi  = true;
+    const bool needGrad = der !=NULL || der2!=NULL;
+    const bool needHess = der2!=NULL;
 
     // value and derivatives (in scaled coords) of the m=0 term, which are later used
     // to scale the other terms after we have performed the Fourier transform on all of them

@@ -30,7 +30,7 @@ namespace math{
     \param[out] interror (optional) if not NULL, will store the error estimate of the integral;
  */
 void sampleNdim(const IFunctionNdim& F, const double xlower[], const double xupper[],
-    const unsigned int numSamples,
-    Matrix<double>& samples, int* numTrialPoints=NULL, double* integral=NULL, double* interror=NULL);
+    const size_t numSamples,
+    Matrix<double>& samples, size_t* numTrialPoints=NULL, double* integral=NULL, double* interror=NULL);
 
 }  // namespace

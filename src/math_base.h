@@ -4,44 +4,43 @@
     \date    2015
 */
 #pragma once
+#include <cstddef>   // defines NULL
+#include <limits>    // defines infinity and NaN
+
+// a few very basic routines declared in the global namespace
 
 /// convenience function for squaring a number, used in many places
-inline double pow_2(double x) { return x*x; }
-inline float pow_2(float x) { return x*x; }
-inline int pow_2(int x) { return x*x; }
-inline unsigned int pow_2(unsigned int x) { return x*x; }
+template<typename T> inline T pow_2(T x) { return x*x; }
+
 /// convenience function for raising a number to the 3rd power
-inline double pow_3(double x) { return x*x*x; }
+template<typename T> inline T pow_3(T x) { return x*x*x; }
 
 /// test if a number is neither infinity nor NaN
 inline bool isFinite(double x) { return x==x && 1/x!=0; }
 
 // some useful numbers (or even not-a-numbers)
-#ifndef NULL
-#define NULL 0
-#endif
 
 #ifndef INFINITY
-#define INFINITY 1e10000
+#define INFINITY std::numeric_limits<double>::infinity()
 #endif
 
 #ifndef NAN
-#define NAN (INFINITY/INFINITY)
+#define NAN      std::numeric_limits<double>::quiet_NaN()
 #endif
 
 #ifndef M_PI
-#define M_PI     3.14159265358979323846264338328
+#define M_PI     3.14159265358979
 #endif
 
 #ifndef M_SQRTPI
-#define M_SQRTPI 1.77245385090551602729816748334
+#define M_SQRTPI 1.77245385090552
 #endif
 
 #ifndef M_SQRT2
-#define M_SQRT2  1.41421356237309504880168872421
+#define M_SQRT2  1.41421356237310
 #endif
 
-#define TWO_PI_CUBE 248.050213442398561403810520537
+#define TWO_PI_CUBE 248.050213442399
 
 /** Functions and classes for basic and advanced math operations */
 namespace math{

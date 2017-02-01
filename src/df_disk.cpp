@@ -23,15 +23,15 @@ PseudoIsothermal::PseudoIsothermal(
 inline double df_JrJz(double sigmarsq, double sigmazsq, double sigmaminsq,
     double kappaJr, double nuJz)
 {
-    sigmarsq = fmax(sigmarsq, sigmaminsq);
-    sigmazsq = fmax(sigmazsq, sigmaminsq);
+    sigmarsq = std::max(sigmarsq, sigmaminsq);
+    sigmazsq = std::max(sigmazsq, sigmaminsq);
     return exp( -kappaJr / sigmarsq - nuJz / sigmazsq ) / (sigmarsq * sigmazsq);
 }
     
 double PseudoIsothermal::value(const actions::Actions &J) const
 {
     double kappa, nu, Omega;   // characteristic epicyclic freqs
-    freq.epicycleFreqs(freq.R_from_Lz(fmax(par.Jphimin, fabs(J.Jphi))), kappa, nu, Omega);
+    freq.epicycleFreqs(freq.R_from_Lz(std::max(par.Jphimin, fabs(J.Jphi))), kappa, nu, Omega);
     // obtain characteristic radius corresponding to the given z-component of angular momentum
     double Rcirc    = J.Jphi!=0 ? sqrt(fabs(J.Jphi) / Omega) : 0;
     // surface density follows an exponential profile in radius 

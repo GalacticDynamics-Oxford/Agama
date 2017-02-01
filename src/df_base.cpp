@@ -134,7 +134,7 @@ double totalEntropy(const BaseDistributionFunction& DF, const double reqRelError
     return result;
 }
 
-void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
+void sampleActions(const BaseDistributionFunction& DF, const size_t numSamples,
     std::vector<actions::Actions>& samples, double* totalMass, double* totalMassErr)
 {
     double xlower[3] = {0, 0, 0};  // boundaries of integration region in scaled coordinates
@@ -142,9 +142,9 @@ void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
     math::Matrix<double> result;   // the result array of actions
     ActionSpaceScalingTriangLog transf;
     DFIntegrandNdim<false> fnc(DF, transf);
-    math::sampleNdim(fnc, xlower, xupper, numSamples, result, 0, totalMass, totalMassErr);
+    math::sampleNdim(fnc, xlower, xupper, numSamples, result, 0/*NULL*/, totalMass, totalMassErr);
     samples.resize(result.rows());
-    for(unsigned int i=0; i<result.rows(); i++) {
+    for(size_t i=0; i<result.rows(); i++) {
         const double point[3] = {result(i,0), result(i,1), result(i,2)};
         samples[i] = transf.toActions(point);  // transform from scaled vars to actions
     }

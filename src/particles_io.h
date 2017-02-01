@@ -52,7 +52,7 @@ private:
     const units::ExternalUnits conv;
 };
 
-/// NEMO snapshot format.
+/// NEMO snapshot format:
 /// reading is supported only if compiled with UNSIO library; 
 /// writing is implemented by builtin routines.
 class IOSnapshotNemo: public BaseIOSnapshot {
@@ -85,16 +85,31 @@ private:
     const units::ExternalUnits conv;
 };
 
-/// smart pointer to snapshot interface
+/// smart pointer to the snapshot interface
 typedef unique_ptr<BaseIOSnapshot> PtrIOSnapshot;
 
-/// creates an instance of appropriate snapshot reader, according to the file format 
-/// determined by reading first few bytes, or throw a std::runtime_error if a file doesn't exist
+/** Create an instance of appropriate snapshot reader, automatically determining the file format 
+    from the first few bytes of the file.
+    \param[in]  fileName  is the file name;
+    \param[in]  unitConverter  is the optional instance of a unit converter:
+    if provided, the dimensional quantities (positions, velocities and masses) will be converted
+    to the internal units.
+    \throw  std::runtime_error if a file doesn't exist.
+*/
 PtrIOSnapshot createIOSnapshotRead (const std::string &fileName, 
     const units::ExternalUnits& unitConverter = units::ExternalUnits());
 
-/// creates an instance of snapshot writer for a given format name,
-/// or throw a std::runtime_error if the format name string is incorrect or file name is empty
+/** Create an instance of snapshot writer for a given format name.
+    \param[in]  fileName  is the file name;
+    \param[in]  fileFormat  is the string specifying the file format (actually determined only
+    by the first letter, case-insensitive: 't' - Text, 'n' - Nemo, 'g' - Gadget);
+    \param[in]  unitConverter  is the optional instance of a unit converter;
+    \param[in]  header  is the optional header string to be written to the file (only for Nemo);
+    \param[in]  time  is the timestamp of the snapshot (only for Nemo);
+    \param[in]  append  is the flag specifying whether to append to an existing file or
+    overwrite the file (only for Nemo format, other formats always overwrite).
+    \throw  std::runtime_error if the format name string is incorrect or file name is empty.
+*/
 PtrIOSnapshot createIOSnapshotWrite(const std::string &fileName, 
     const std::string &fileFormat="Text",
     const units::ExternalUnits& unitConverter = units::ExternalUnits(),
@@ -144,12 +159,5 @@ inline void writeSnapshot(const std::string& fileName,
             coord::VelCar(0,0,0)), particles[i].second));  // convert the position and assign zero velocity
     createIOSnapshotWrite(fileName, fileFormat, unitConverter)->writeSnapshot(tmpParticles);
 }
-
-/* ------ Correspondence between file format names and types ------- */
-#if 0
-/// list of all available IO snapshot formats, initialized at module start 
-/// according to the file format supported at compile time
-extern std::vector< std::string > formatsIOSnapshot;
-#endif
 
 }  // namespace

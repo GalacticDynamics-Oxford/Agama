@@ -394,6 +394,9 @@ Interpolator::Interpolator(const BasePotential& potential)
 
     std::vector<double> gridLogR = math::createInterpolationGrid(
         ScalePhi(PotentialWrapper(potential)), ACCURACY_INTERP);
+    while(!gridLogR.empty() && potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) == Phi0)
+        gridLogR.erase(gridLogR.begin());
+
     unsigned int gridsize = gridLogR.size();
     std::vector<double>   // various arrays:
     gridPhi(gridsize),    // scaled Phi(r)
@@ -570,12 +573,24 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     // create grid in log(r)
     std::vector<double> gridr = math::createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);
     std::transform(gridr.begin(), gridr.end(), gridr.begin(), exp);  // convert to grid in r
+    std::vector<double> gridE;
+    gridE.reserve(gridr.size());
+    // compute the potential at each node of the radial grid,
+    // throwing away nodes that are too close to origin such that the potential is equal to Phi(0)
+    // due to finite precision of floating-point arithmetic
+    for(unsigned int i=0; i<gridr.size();) {
+        double E = pot.value(gridr[i]);
+        if(E>Phi0) {
+            gridE.push_back(E);
+            i++;
+        } else {
+            gridr.erase(gridr.begin()+i);
+        }
+    }
     unsigned int gridsize = gridr.size();
-    std::vector<double> gridE(gridsize), gridH(gridsize), gridG(gridsize);
+    std::vector<double> gridH(gridsize), gridG(gridsize);
     double glnodes[GLORDER], glweights[GLORDER];
     math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
-    for(unsigned int i=0; i<gridsize; i++)
-        gridE[i] = pot.value(gridr[i]);
     for(unsigned int i=0; i<gridsize; i++) {
         double deltar = gridr[i] - (i>0 ? gridr[i-1] : 0);
         for(int k=0; k<GLORDER; k++) {

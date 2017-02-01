@@ -34,10 +34,10 @@ namespace math{
 void eliminateNearZeros(std::vector<double>& vec, double threshold)
 {
     double mag=0;
-    for(unsigned int t=0; t<vec.size(); t++)
+    for(size_t t=0; t<vec.size(); t++)
         mag = fmax(mag, fabs(vec[t]));
     mag *= threshold;
-    for(unsigned int t=0; t<vec.size(); t++)
+    for(size_t t=0; t<vec.size(); t++)
         if(fabs(vec[t]) <= mag)
             vec[t]=0;
 }
@@ -45,33 +45,33 @@ void eliminateNearZeros(std::vector<double>& vec, double threshold)
 void eliminateNearZeros(Matrix<double>& mat, double threshold)
 {
     double mag=0;
-    for(unsigned int i=0; i<mat.rows(); i++)
-        for(unsigned int j=0; j<mat.cols(); j++)
+    for(size_t i=0; i<mat.rows(); i++)
+        for(size_t j=0; j<mat.cols(); j++)
             mag = fmax(mag, fabs(mat(i,j)));
     mag *= threshold;
-    for(unsigned int i=0; i<mat.rows(); i++)
-        for(unsigned int j=0; j<mat.cols(); j++)
+    for(size_t i=0; i<mat.rows(); i++)
+        for(size_t j=0; j<mat.cols(); j++)
             if(fabs(mat(i,j)) <= mag)
                 mat(i,j)=0;
 }
 
 template<> void blas_daxpy(double alpha, const std::vector<double>& X, std::vector<double>& Y)
 {
-    unsigned int size = X.size();
+    size_t size = X.size();
     if(size!=Y.size())
         throw std::invalid_argument("blas_daxpy: invalid size of input arrays");
     if(alpha==0) return;
-    for(unsigned int i=0; i<size; i++)
+    for(size_t i=0; i<size; i++)
         Y[i] += alpha*X[i];
 }
 
 double blas_ddot(const std::vector<double>& X, const std::vector<double>& Y)
 {
-    unsigned int size = X.size();
+    size_t size = X.size();
     if(size!=Y.size())
         throw std::invalid_argument("blas_ddot: invalid size of input arrays");
     double result = 0;
-    for(unsigned int i=0; i<size; i++)
+    for(size_t i=0; i<size; i++)
         result += X[i]*Y[i];
     return result;
 }
@@ -80,7 +80,7 @@ template<>
 double blas_dnrm2(const std::vector<double>& X)
 {
     double result = 0;
-    for(unsigned int i=0; i<X.size(); i++)
+    for(size_t i=0; i<X.size(); i++)
         result += pow_2(X[i]);
     return result;
 }
@@ -89,8 +89,8 @@ template<>
 double blas_dnrm2(const Matrix<double>& X)
 {
     double result = 0;
-    for(unsigned int i=0; i<X.rows(); i++)
-        for(unsigned int j=0; j<X.cols(); j++)
+    for(size_t i=0; i<X.rows(); i++)
+        for(size_t j=0; j<X.cols(); j++)
             result += pow_2(X(i,j));
     return result;
 }
@@ -101,13 +101,13 @@ std::vector<double> solveTridiag(
     const std::vector<double>& belowDiag,
     const std::vector<double>& rhs)
 {
-    unsigned int size = diag.size();
+    size_t size = diag.size();
     if(size<1 || rhs.size() != size || aboveDiag.size()+1 != size || belowDiag.size()+1 != size)
         throw std::invalid_argument("solveTridiag: invalid size of input arrays");
     std::vector<double> x(size);  // solution
     std::vector<double> t(size);  // temporary array
     // forward pass
-    for(unsigned int i=0; i<size; i++) {
+    for(size_t i=0; i<size; i++) {
         double piv = diag[i] - (i>0 ? belowDiag[i-1] * t[i-1] : 0);
         if(piv == 0)
             throw std::domain_error("solveTridiag: zero pivot element on diagonal");
@@ -115,7 +115,7 @@ std::vector<double> solveTridiag(
         x[i] = (rhs[i] - (i>0 ? belowDiag[i-1] * x[i-1] : 0)) / piv;
     }
     // back-substitution
-    for(unsigned int i=size-1; i>0; i--)
+    for(size_t i=size-1; i>0; i--)
         x[i-1] -= t[i-1] * x[i];
     x.resize(diag.size());
     return x;
@@ -159,13 +159,13 @@ Matrix<NumT>::Matrix() :
 
 // constructor without data initialization
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols) :
     IMatrix<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols)) {}
 
 // constructor with an initial value
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols, const NumT value) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
     IMatrix<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols))
 {
@@ -186,12 +186,12 @@ Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
 
 // constructor from triplets
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols))
 {
     mat(*this).fill(0);
-    for(unsigned int k=0; k<values.size(); k++)
+    for(size_t k=0; k<values.size(); k++)
         mat(*this)(values[k].i, values[k].j) = static_cast<NumT>(values[k].v);
 }
 
@@ -203,7 +203,7 @@ Matrix<NumT>::~Matrix()
 
 /// access a matrix element
 template<typename NumT>
-const NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col) const
+const NumT& Matrix<NumT>::operator() (size_t row, size_t col) const
 {
 #ifdef DEBUG_RANGE_CHECK
     return mat(*this)(row, col);
@@ -213,7 +213,7 @@ const NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col) const
 }
 
 template<typename NumT>
-NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col)
+NumT& Matrix<NumT>::operator() (size_t row, size_t col)
 {
 #ifdef DEBUG_RANGE_CHECK
     return mat(*this)(row, col);
@@ -241,7 +241,7 @@ SpMatrix<NumT>::SpMatrix() :
 
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values) :
+SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols),
     impl(new typename Type<SpMatrix<NumT> >::T(nRows, nCols))
 {
@@ -262,13 +262,13 @@ SpMatrix<NumT>::~SpMatrix()
 
 // element access
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (unsigned int row, unsigned int col) const
+NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
 {
     return mat(*this).coeff(row, col);
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned int &col) const
+NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
     if(static_cast<int>(index) >= mat(*this).nonZeros())
         throw std::range_error("SpMatrix: element index out of range");
@@ -278,7 +278,7 @@ NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned 
 }
 
 template<typename NumT>
-unsigned int SpMatrix<NumT>::size() const
+size_t SpMatrix<NumT>::size() const
 {
     return mat(*this).nonZeros();
 }
@@ -288,7 +288,7 @@ std::vector<Triplet> SpMatrix<NumT>::values() const
 {
     std::vector<Triplet> result;
     result.reserve(mat(*this).nonZeros());
-    for(unsigned int j=0; j<cols(); ++j)
+    for(size_t j=0; j<cols(); ++j)
         for(typename Type<SpMatrix<NumT> >::T::InnerIterator i(mat(*this), j); i; ++i)
             result.push_back(Triplet(i.row(), i.col(), i.value()));
     return result;
@@ -361,10 +361,10 @@ template<typename MatrixType>
 void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
     double alpha, const MatrixType& A, const MatrixType& B, double beta, MatrixType& C)
 {
-    unsigned int NR1 = TransA==CblasNoTrans ? A.rows() : A.cols();
-    unsigned int NC1 = TransA==CblasNoTrans ? A.cols() : A.rows();
-    unsigned int NR2 = TransB==CblasNoTrans ? B.rows() : B.cols();
-    unsigned int NC2 = TransB==CblasNoTrans ? B.cols() : B.rows();
+    size_t NR1 = TransA==CblasNoTrans ? A.rows() : A.cols();
+    size_t NC1 = TransA==CblasNoTrans ? A.cols() : A.rows();
+    size_t NR2 = TransB==CblasNoTrans ? B.rows() : B.cols();
+    size_t NC2 = TransB==CblasNoTrans ? B.cols() : B.rows();
     if(NC1 != NR2 || NR1 != C.rows() || NC2 != C.cols())
         throw std::invalid_argument("blas_dgemm: incompatible matrix dimensions");
     if(TransA == CblasNoTrans) {
@@ -394,7 +394,7 @@ void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
         }
     }
     // matrix shape should not have changed
-    assert((unsigned int)mat(C).rows() == C.rows() && (unsigned int)mat(C).cols() == C.cols());
+    assert((size_t)mat(C).rows() == C.rows() && (size_t)mat(C).cols() == C.cols());
 }
 
 void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_DIAG Diag,
@@ -456,7 +456,7 @@ void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_
     } else
         throw std::invalid_argument("blas_dtrsm: invalid operation mode");
     // matrix shape should not have changed
-    assert((unsigned int)mat(B).rows() == B.rows() && (unsigned int)mat(B).cols() == B.cols());
+    assert((size_t)mat(B).rows() == B.rows() && (size_t)mat(B).cols() == B.cols());
 }
 
 
@@ -530,7 +530,7 @@ CholeskyDecomp::CholeskyDecomp(const CholeskyDecomp& src) :
 Matrix<double> CholeskyDecomp::L() const { 
     if(!impl)
         throw std::runtime_error("CholeskyDecomp not initialized");
-    unsigned int size = static_cast<const CholeskyDecompImpl*>(impl)->matrixLLT().rows();
+    size_t size = static_cast<const CholeskyDecompImpl*>(impl)->matrixLLT().rows();
     // inefficient: we first allocate an uninitialized matrix and then replace its content with L
     Matrix<double> L(size, size);
     mat(L) = static_cast<const CholeskyDecompImpl*>(impl)->matrixL();
@@ -594,7 +594,7 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const {
 
 // allocate memory if the size is positive, otherwise return NULL
 template<typename NumT>
-inline NumT* xnew(unsigned int size) {
+inline NumT* xnew(size_t size) {
     return size==0 ? NULL : new NumT[size]; }
     
 //------ dense matrix ------//
@@ -606,12 +606,12 @@ Matrix<NumT>::Matrix() :
 
 // constructor without data initialization
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols) :
     IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols)) {}
 
 // constructor with a given initial value
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols, const NumT value) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
     IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nCols*nRows, value);
@@ -634,9 +634,9 @@ Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + rows()*cols(), 0);
-    unsigned int numelem = src.size();
-    for(unsigned int k=0; k<numelem; k++) {
-        unsigned int i, j;
+    size_t numelem = src.size();
+    for(size_t k=0; k<numelem; k++) {
+        size_t i, j;
         NumT v = src.elem(k, i, j);
         static_cast<NumT*>(impl)[i*cols()+j] = v;
     }
@@ -644,13 +644,13 @@ Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
 
 // constructor from triplets
 template<typename NumT>
-Matrix<NumT>::Matrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values) :
+Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, 0);
-    unsigned int numelem = values.size();
-    for(unsigned int k=0; k<numelem; k++) {
-        unsigned int i = values[k].i, j = values[k].j;
+    size_t numelem = values.size();
+    for(size_t k=0; k<numelem; k++) {
+        size_t i = values[k].i, j = values[k].j;
         if(i<nRows && j<nCols)
             static_cast<NumT*>(impl)[i*nCols+j] += static_cast<NumT>(values[k].v);
         else {
@@ -668,7 +668,7 @@ Matrix<NumT>::~Matrix()
 
 /// access the matrix element for reading
 template<typename NumT>
-const NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col) const
+const NumT& Matrix<NumT>::operator() (size_t row, size_t col) const
 {
 #ifdef DEBUG_RANGE_CHECK
     if(row >= rows() || col >= cols())
@@ -679,7 +679,7 @@ const NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col) const
 
 /// access the matrix element for writing
 template<typename NumT>
-NumT& Matrix<NumT>::operator() (unsigned int row, unsigned int col)
+NumT& Matrix<NumT>::operator() (size_t row, size_t col)
 {
 #ifdef DEBUG_RANGE_CHECK
     if(row >= rows() || col >= cols())
@@ -707,14 +707,14 @@ SpMatrix<NumT>::SpMatrix() :
 
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values) :
+SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols), impl(NULL)
 {
     if(nRows*nCols==0)
         return;  // no allocation in case of zero matrix
-    unsigned int size = values.size();
+    size_t size = values.size();
     gsl_spmatrix* sp  = gsl_spmatrix_alloc_nzmax(nRows, nCols, size, GSL_SPMATRIX_TRIPLET);
-    for(unsigned int k=0; k<size; k++)
+    for(size_t k=0; k<size; k++)
         gsl_spmatrix_set(sp, values[k].i, values[k].j, values[k].v);
     impl = gsl_spmatrix_compcol(sp);
     gsl_spmatrix_free(sp);
@@ -741,7 +741,7 @@ SpMatrix<NumT>::~SpMatrix()
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (unsigned int row, unsigned int col) const
+NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
 {
     if(impl)
         return static_cast<NumT>(gsl_spmatrix_get(static_cast<const gsl_spmatrix*>(impl), row, col));
@@ -750,7 +750,7 @@ NumT SpMatrix<NumT>::operator() (unsigned int row, unsigned int col) const
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned int &col) const
+NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
     const gsl_spmatrix* sp = static_cast<const gsl_spmatrix*>(impl);
     if(impl == NULL || index >= sp->nz)
@@ -761,7 +761,7 @@ NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned 
 }
 
 template<typename NumT>
-unsigned int SpMatrix<NumT>::size() const
+size_t SpMatrix<NumT>::size() const
 {
     return impl==NULL ? 0 : static_cast<const gsl_spmatrix*>(impl)->nz; 
 }
@@ -774,8 +774,8 @@ std::vector<Triplet> SpMatrix<NumT>::values() const
         return result;
     const gsl_spmatrix* sp = static_cast<const gsl_spmatrix*>(impl);
     result.reserve(sp->nz);
-    unsigned int col = 0;
-    for(unsigned int k=0; k<sp->nz; k++) {
+    size_t col = 0;
+    for(size_t k=0; k<sp->nz; k++) {
         while(col<sp->size2 && sp->p[col+1]<=k)
             col++;
         result.push_back(Triplet(sp->i[k], col, sp->data[k]));
@@ -792,13 +792,13 @@ SpMatrix<NumT>::SpMatrix() :
     
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values) :
+SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, 0);
-    unsigned int numelem = values.size();
-    for(unsigned int k=0; k<numelem; k++) {
-        unsigned int i = values[k].i, j = values[k].j;
+    size_t numelem = values.size();
+    for(size_t k=0; k<numelem; k++) {
+        size_t i = values[k].i, j = values[k].j;
         if(i<nRows && j<nCols)
             static_cast<NumT*>(impl)[i*nCols+j] += static_cast<NumT>(values[k].v);
         else {
@@ -827,7 +827,7 @@ SpMatrix<NumT>::~SpMatrix()
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (unsigned int row, unsigned int col) const
+NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
 {
     if(row >= rows() || col >= cols())
         throw std::range_error("SpMatrix: index out of range");
@@ -835,7 +835,7 @@ NumT SpMatrix<NumT>::operator() (unsigned int row, unsigned int col) const
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned int &col) const
+NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
     row = index / cols();
     col = index % cols();
@@ -843,13 +843,13 @@ NumT SpMatrix<NumT>::elem(const unsigned int index, unsigned int &row, unsigned 
 }
 
 template<typename NumT>
-unsigned int SpMatrix<NumT>::size() const { return rows()*cols(); }
+size_t SpMatrix<NumT>::size() const { return rows()*cols(); }
 
 template<typename NumT>
 std::vector<Triplet> SpMatrix<NumT>::values() const
 {
     std::vector<Triplet> result;
-    for(unsigned int k=0; k<cols() * rows(); k++)
+    for(size_t k=0; k<cols() * rows(); k++)
         if(static_cast<const NumT*>(impl)[k] != 0)
             result.push_back(Triplet(k / cols(), k % cols(), static_cast<const NumT*>(impl)[k]));
     return result;
@@ -880,7 +880,7 @@ private:
 struct Mat {
     explicit Mat(Matrix<double>& mat) :
         m(gsl_matrix_view_array(mat.data(), mat.rows(), mat.cols())) {}
-    Mat(double* data, unsigned int rows, unsigned int cols) :
+    Mat(double* data, size_t rows, size_t cols) :
         m(gsl_matrix_view_array(data, rows, cols)) {}
     operator gsl_matrix* () { return &m.matrix; }
 private:
@@ -890,7 +890,7 @@ private:
 struct MatC {
     explicit MatC(const Matrix<double>& mat) :
         m(gsl_matrix_const_view_array(mat.data(), mat.rows(), mat.cols())) {}
-    MatC(const double* data, unsigned int rows, unsigned int cols) :
+    MatC(const double* data, size_t rows, size_t cols) :
         m(gsl_matrix_const_view_array(data, rows, cols)) {}
     operator const gsl_matrix* () const { return &m.matrix; }
 private:
@@ -903,10 +903,10 @@ template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>
     if(X.rows() != Y.rows() || X.cols() != Y.cols())
         throw std::invalid_argument("blas_daxpy: incompatible sizes of input arrays");
     if(alpha==0) return;
-    unsigned int size = X.rows() * X.cols();
+    size_t size = X.rows() * X.cols();
     const double* arrX = X.data();
     double* arrY = Y.data();
-    for(unsigned int k=0; k<size; k++)
+    for(size_t k=0; k<size; k++)
         arrY[k] += alpha*arrX[k];
 }
 
@@ -990,7 +990,7 @@ void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_
 struct LUDecompImpl {
     gsl_matrix* LU;
     gsl_permutation* perm;
-    LUDecompImpl(const double* data, unsigned int rows, unsigned int cols) {
+    LUDecompImpl(const double* data, size_t rows, size_t cols) {
         LU = gsl_matrix_alloc(rows, cols);
         perm = gsl_permutation_alloc(rows);
         if(!LU || !perm) {
@@ -1129,8 +1129,8 @@ SVDecomp::SVDecomp(const Matrix<double>& M) :
     } else
         gsl_linalg_SV_decomp(Mat(sv->U), Mat(sv->V), Vec(sv->S), Vec(temp));
     // chop off excessively small singular values which may destabilize solution of linear system
-    double minSV = sv->S[0] * 1e-15 * std::max<unsigned int>(sv->S.size(), 10);
-    for(unsigned int k=0; k<sv->S.size(); k++)
+    double minSV = sv->S[0] * 1e-15 * std::max<size_t>(sv->S.size(), 10);
+    for(size_t k=0; k<sv->S.size(); k++)
         if(sv->S[k] < minSV)
             sv->S[k] = 0;
 }
@@ -1165,8 +1165,6 @@ template struct SpMatrix<float>;
 template struct SpMatrix<double>;
 template struct Matrix<float>;
 template struct Matrix<double>;
-//template struct Matrix<int>;
-//template struct Matrix<unsigned int>;
 template void blas_daxpy(double alpha, const std::vector<double>& X, std::vector<double>& Y);
 template void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>& Y);
 template void blas_dgemv(CBLAS_TRANSPOSE, double, const Matrix<double>&,

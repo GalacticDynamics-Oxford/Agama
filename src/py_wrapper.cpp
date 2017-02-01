@@ -79,6 +79,9 @@ public:
             "(max # of threads is "+utils::toString(origMaxThreads)+")");
         omp_set_num_threads(origMaxThreads);
     }
+#else
+public:
+    OmpDisabler() {}
 #endif
 };
 
@@ -3657,7 +3660,7 @@ static const char* docstringSampleNdim =
 PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"fnc", "nsamples", "lower", "upper", NULL};
-    int numSamples=-1, numEval=-1;
+    int numSamples=-1;
     PyObject *callback=NULL, *lower_obj=NULL, *upper_obj=NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "Oi|OO", const_cast<char**>(keywords),
         &callback, &numSamples, &lower_obj, &upper_obj) ||
@@ -3673,6 +3676,7 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     math::Matrix<double> samples;
     try{
         FncWrapper fnc(xlow.size(), callback);
+        size_t numEval=0;
         math::sampleNdim(fnc, &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
         npy_intp dim[] = {numSamples, static_cast<npy_intp>(xlow.size())};
         PyObject* arr  = PyArray_SimpleNewFromData(2, dim, NPY_DOUBLE, const_cast<double*>(samples.data()));
@@ -3710,6 +3714,13 @@ static PyMethodDef module_methods[] = {
     { NULL }
 };
 
+
+// an annoying feature in Python C API is the use of different types to refer to the same object,
+// which triggers a warning about breaking strict aliasing rules, unless compiled
+// with -fno-strict-aliasing. To avoid this, we use a dirty typecast.
+void* forget_about_type(void* x) { return x; }
+#define Py_INCREFx(x) Py_INCREF(forget_about_type(x))
+
 } // end internal namespace
 using namespace pywrapper;
 
@@ -3723,44 +3734,44 @@ initagama(void)
 
     DensityType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DensityType) < 0) return;
-    Py_INCREF(&DensityType);
+    Py_INCREFx(&DensityType);
     PyModule_AddObject(mod, "Density", (PyObject*)&DensityType);
 
     PotentialType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&PotentialType) < 0) return;
-    Py_INCREF(&PotentialType);
+    Py_INCREFx(&PotentialType);
     PyModule_AddObject(mod, "Potential", (PyObject*)&PotentialType);
     PotentialTypePtr = &PotentialType;
 
     ActionFinderType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ActionFinderType) < 0) return;
-    Py_INCREF(&ActionFinderType);
+    Py_INCREFx(&ActionFinderType);
     PyModule_AddObject(mod, "ActionFinder", (PyObject*)&ActionFinderType);
 
     DistributionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DistributionFunctionType) < 0) return;
-    Py_INCREF(&DistributionFunctionType);
+    Py_INCREFx(&DistributionFunctionType);
     PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
     DistributionFunctionTypePtr = &DistributionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&GalaxyModelType) < 0) return;
-    Py_INCREF(&GalaxyModelType);
+    Py_INCREFx(&GalaxyModelType);
     PyModule_AddObject(mod, "GalaxyModel", (PyObject*)&GalaxyModelType);
 
     ComponentType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ComponentType) < 0) return;
-    Py_INCREF(&ComponentType);
+    Py_INCREFx(&ComponentType);
     PyModule_AddObject(mod, "Component", (PyObject*)&ComponentType);
 
     SelfConsistentModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&SelfConsistentModelType) < 0) return;
-    Py_INCREF(&SelfConsistentModelType);
+    Py_INCREFx(&SelfConsistentModelType);
     PyModule_AddObject(mod, "SelfConsistentModel", (PyObject*)&SelfConsistentModelType);
 
     CubicSplineType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&CubicSplineType) < 0) return;
-    Py_INCREF(&CubicSplineType);
+    Py_INCREFx(&CubicSplineType);
     PyModule_AddObject(mod, "CubicSpline", (PyObject*)&CubicSplineType);
 
     import_array();  // needed for NumPy to work properly

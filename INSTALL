@@ -55,7 +55,7 @@ LINK = $(CXX)
 # DEFINES  are only relevant  for the compilation of the AGAMA library, and determine the available features;
 # INCLUDES are also used only for the compilation of the AGAMA library, should match the DEFINES;
 # LIBS     list the external libraries for the compilation of the AGAMA shared library only.
-CXXFLAGS += -fPIC -fopenmp -Wall -Wno-overflow -O3 -march=native -I$(SRCDIR)
+CXXFLAGS += -fPIC -fopenmp -Wall -O3 -march=native -I$(SRCDIR)
 LFLAGS   += -fPIC -fopenmp
 
 # uncomment if you have a C++11-compatible compiler (it is not required but may be more efficient)

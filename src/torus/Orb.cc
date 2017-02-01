@@ -9,6 +9,7 @@
 *                                                                              *
 *******************************************************************************/
 
+#include <cmath>
 #include <iostream>
 #include <fstream>
 #include "Orb.h"

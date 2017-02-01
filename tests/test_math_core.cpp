@@ -97,9 +97,17 @@ public:
 };
 
 // test function for sampleNdim
+#if 1
+// a 3d function that is positive inside a toroidal region in space 
 static const double Rout = 3, Rin = 1;  // outer and inner radii of the torus
 class test8Ndim: public math::IFunctionNdim{
 public:
+    test8Ndim()
+    {
+        exact = 2*pow_2(M_PI*Rin)*Rout;    // volume of a torus
+        ymin[0]=-4; ymin[1]=-4; ymin[2]=-2;
+        ymax[0]=+4; ymax[1]=+4; ymax[2]=+2;
+    }
     // 3-dimensional torus rotated with orthogonal matrix A[][]
     virtual void eval(const double x[], double val[]) const{
         double x0 = x[0]*A00+x[1]*A01+x[2]*A02;
@@ -111,10 +119,34 @@ public:
 #endif
         ++numEval;
     }
-    virtual unsigned int numVars() const { return 3; }
+    virtual unsigned int numVars()   const { return 3; }
     virtual unsigned int numValues() const { return 1; }
+    double ymin[3], ymax[3];  // boundaries of the integration region
+    double exact;             // exact analytic value of the integral
 };
-
+#else
+// a 3d function with an integrable singularity at the corner, taken from from GSL
+class test8Ndim: public math::IFunctionNdim{
+public:
+    test8Ndim()
+    {
+        exact = 1.393203929685677;
+        ymin[0]=ymin[1]=ymin[2]=0;
+        ymax[0]=ymax[1]=ymax[2]=M_PI;
+    }
+    virtual void eval(const double x[], double val[]) const{
+        val[0] = 1./pow_3(M_PI) / (1 - cos(x[0]) * cos(x[1]) * cos(x[2]));
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+        ++numEval;
+    }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
+    double ymin[3], ymax[3];  // boundaries of the integration region
+    double exact;             // exact analytic value of the integral
+};
+#endif
 
 // test functions for estimating the accuracy of Gauss-Legendre integration
 class test_GL_powerlaw: public math::IFunctionNoDeriv{
@@ -371,22 +403,20 @@ int main()
 
     // N-dimensional integration
     numEval=0;
-    double ymin[] = {-4,-4,-2};
-    double ymax[] = {+4,+4,+2};
     test8Ndim fnc8;
-    exact = 2*pow_2(M_PI*Rin)*Rout;  // volume of a torus
-    integrateNdim(fnc8, ymin, ymax, toler, 1000000, &result, &error);
-    std::cout << "Volume of a 3d torus = "<<result<<" +- "<<error<<" (delta="<<(result-exact)<<"; neval="<<numEval<<")\n";
-    ok &= (fabs(result-exact)<error) || err();
+    integrateNdim(fnc8, fnc8.ymin, fnc8.ymax, toler, 1000000, &result, &error);
+    std::cout << "Volume of a 3d torus = "<<result<<" +- "<<error<<
+        " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
+    ok &= (fabs(result-fnc8.exact)<error) || err();
 
     numEval=0;
     math::Matrix<double> points;
-    sampleNdim(fnc8, ymin, ymax, 100000, points, NULL, &result, &error);
+    sampleNdim(fnc8, fnc8.ymin, fnc8.ymax, 100000, points, NULL, &result, &error);
     std::cout << "Monte Carlo Volume of a 3d torus = "<<result<<" +- "<<error<<
-        " (delta="<<(result-exact)<<"; neval="<<numEval<<")\n";
-    ok &= (fabs(result-exact)<error*2) || err();  // loose tolerance on MC error estimate
-    if(0) {
-        std::ofstream fout("torus.dat");
+        " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
+    ok &= (fabs(result-fnc8.exact)<error*2) || err();  // loose tolerance on MC error estimate
+    if(1) {
+        std::ofstream fout("sampleNdim.dat");
         for(unsigned int i=0; i<points.rows(); i++)
             fout << points(i,0) << "\t" << points(i,1) << "\t" << points(i,2) << "\n";
     }

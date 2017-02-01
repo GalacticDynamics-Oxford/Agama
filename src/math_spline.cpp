@@ -412,6 +412,36 @@ inline void evalQuinticSplines(
             d2f[k] =       Ppp * fd +               Qpp * f1d +       f2l[k] + Rpp * f2d;
     }
 }
+    
+HermiteSpline createHermiteSplineFromCubic(
+    const std::vector<double>& xval, const std::vector<double>& fval,
+    double derivLeft, double derivRight, bool avoidWiggles)
+{
+    size_t npoints = xval.size();
+    assert(fval.size() == npoints);
+    CubicSpline S(xval, fval, derivLeft, derivRight);
+    std::vector<double> fder(npoints);
+    for(size_t i=0; i<npoints; i++) {
+        S.evalDeriv(xval[i], NULL, &fder[i]);
+        if(avoidWiggles) {
+            // apply slope-limiting prescription of Hyman(1983)
+            if(i==0 || i==npoints-1) {  // boundary points
+                size_t k = i==0 ? i : npoints-2;
+                double sec = (fval[k+1] - fval[k]) / (xval[k+1] - xval[k]);
+                fder[i] = sec>=0 ?
+                    std::min( std::max(fder[i], 0.), 3*sec) :
+                    std::max( std::min(fder[i], 0.), 3*sec);
+            } else {  // interior points
+                double secL = (fval[i]   - fval[i-1]) / (xval[i]   - xval[i-1]);
+                double secR = (fval[i+1] - fval[i]  ) / (xval[i+1] - xval[i]  );
+                fder[i] = std::min( fabs(fder[i]), 3 * std::min( fabs(secL), fabs(secR) ) ) *
+                    (secL * secR >= 0 ? sign(secL) : sign(fder[i]));
+            }
+        }
+    }
+    return HermiteSpline(xval, fval, fder);
+}
+
 }  // internal namespace
 
 
@@ -420,13 +450,16 @@ BaseInterpolator1d::BaseInterpolator1d(const std::vector<double>& xv, const std:
 {
     if(xv.size() < 2)
         throw std::invalid_argument("Error in 1d interpolator: number of nodes should be >=2");
-    for(unsigned int i=1; i<xv.size(); i++)
-        if(!(xv[i] > xv[i-1])) {
+    for(unsigned int i=0; i<xv.size(); i++) {
+        if(!isFinite(xv[i]))
+            throw std::invalid_argument("Error in 1d interpolator: x coordinates must be finite "
+                "(x["+utils::toString(i)+"]="+utils::toString(xv[i])+")\n" + utils::stacktrace());
+        if(i>0 && xv[i] <= xv[i-1])
             throw std::invalid_argument("Error in 1d interpolator: "
                 "x values must be monotonically increasing "
                 "(x["+utils::toString(i) + "]="+utils::toString(xv[i]) + " is not greater than"
                 " x["+utils::toString(i-1)+"]="+utils::toString(xv[i-1])+")\n" + utils::stacktrace());
-        }
+    }
     for(unsigned int i=0; i<fv.size(); i++)
         if(!isFinite(fv[i]))
             throw std::invalid_argument("Error in 1d interpolator: function values must be finite "
@@ -902,7 +935,7 @@ template class BsplineInterpolator1d<3>;
 // ------ Auxiliary scaled splines ------ //
 
 LogSpline::LogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-    double derivLeft, double derivRight)
+    double derivLeft, double derivRight, bool avoidWiggles)
 {
     std::vector<double> logfvalues(fvalues.size());
     for(unsigned int i=0; i<fvalues.size(); i++) {
@@ -912,7 +945,7 @@ LogSpline::LogSpline(const std::vector<double>& xvalues, const std::vector<doubl
     }
     derivLeft  /= fvalues.front();
     derivRight /= fvalues.back ();
-    S = CubicSpline(xvalues, logfvalues, derivLeft, derivRight);
+    S = createHermiteSplineFromCubic(xvalues, logfvalues, derivLeft, derivRight, avoidWiggles);
 }
 
 void LogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
@@ -929,7 +962,7 @@ void LogSpline::evalDeriv(const double x, double* value, double* deriv, double* 
 }
 
 LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-    double derivLeft, double derivRight)
+    double derivLeft, double derivRight, bool avoidWiggles)
 {
     std::vector<double> logxvalues(xvalues.size()), logfvalues(fvalues.size());
     for(unsigned int i=0; i<xvalues.size(); i++) {
@@ -944,7 +977,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
     }
     derivLeft  *= xvalues.front() / fvalues.front();
     derivRight *= xvalues.back () / fvalues.back ();
-    S = CubicSpline(logxvalues, logfvalues, derivLeft, derivRight);
+    S = createHermiteSplineFromCubic(logxvalues, logfvalues, derivLeft, derivRight, avoidWiggles);
 }
 
 void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
@@ -1159,7 +1192,7 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
 {
     const unsigned int xsize = xgrid.size();
     const unsigned int ysize = ygrid.size();
-    std::vector<double> t, tx, ty, txx, txy, tyy;  // temporary arrays for 1d splines
+    std::vector<double> t, tx, ty, txx, tyy;  // temporary arrays for 1d splines
 
     // step 1. for each y_j, construct:
     // a) 1d quintic spline for f in x, and record d^2f/dx^2;
@@ -3028,6 +3061,8 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps, do
     double x  = xinit;
     d2fp = d2f0;
     std::vector<double> result(1, xinit);
+    // we first scan the range of x from xinit down,
+    // then reverse the direction of scan and restart from xinit up, then stop
     int stage=0;
     while(stage<2) {
         x += dx;
@@ -3035,19 +3070,22 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps, do
         double d2f = fx.fder2;
         double d3f = (d2f-d2fp) / dx;
         double dif = fabs((d3f-d3fp) / dx) + 0.1 * (fabs(d3fp) + fabs(d3f));  // estimate of 4th derivative
-        d2fp       = d2f;
-        d3fp       = d3f;
         dx         = eps4 / fmin(1, pow(dif, 0.25)) * (stage*2-1);
         result.push_back(x);
-        if(fabs(d2f) < eps || fabs(x)>xmax || !isFinite(d2f+dx)) {
+        // we have reached the asymptotic linear regime if the second derivative is close enough to zero
+        // (check both the current and the previous value to avoid triggering this condition prematurely)
+        if((fabs(d2f) < eps && fabs(d2fp) < eps) || fabs(x) > xmax || !isFinite(d2f+dx)) {
             if(stage==0) {
                 std::reverse(result.begin(), result.end());
-                x   = 0;
-                dx  = eps4;
-                d2fp= d2f0;
-                d3fp= d3f0;
+                x    = 0;
+                dx   = eps4;
+                d2fp = d2f0;
+                d3fp = d3f0;
             }
             ++stage;
+        } else {
+            d2fp = d2f;
+            d3fp = d3f;
         }
     }
     utils::msg(utils::VL_DEBUG, "createInterpolationGrid", "Grid: [" +

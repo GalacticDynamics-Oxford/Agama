@@ -34,8 +34,8 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     const std::vector<NumT>& rhs,  const std::vector<NumT>& L,
     const std::vector<NumT>& xmin, const std::vector<NumT>& xmax)
 {
-    unsigned int numVariables   = A.cols();
-    unsigned int numConstraints = A.rows();
+    size_t numVariables   = A.cols();
+    size_t numConstraints = A.rows();
     if( rhs.size()!=numConstraints ||
         (!L.empty()    && L.size()!=numVariables) ||
         (!xmin.empty() && xmin.size()!=numVariables) ||
@@ -57,9 +57,9 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     glp_set_obj_dir(problem, GLP_MIN);
     glp_add_rows(problem, numConstraints);
     glp_add_cols(problem, numVariables);
-    for(unsigned int c=0; c<numConstraints; c++)
+    for(size_t c=0; c<numConstraints; c++)
         glp_set_row_bnds(problem, c+1, GLP_FX, rhs[c], rhs[c]);
-    for(unsigned int v=0; v<numVariables; v++) {
+    for(size_t v=0; v<numVariables; v++) {
         double xminval = xmin.empty()? 0 : xmin[v];
         if(!xmax.empty() && isFinite(xmax[v]))
             glp_set_col_bnds(problem, v+1, GLP_DB, xminval, xmax[v]);
@@ -70,11 +70,11 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     }
     // fill the linear matrix using triplets (row, column, value)
     {   // open a block so that temp variables are destroyed after it is closed.
-        unsigned int numNonZero=0, numTotal=A.size();
+        size_t numNonZero=0, numTotal=A.size();
         // count non-zero values in matrix to reserve the right amount of space
         // in vectors containing sparse matrix coefs
-        for(unsigned int i=0; i<numTotal; i++) {
-            unsigned int c, v;
+        for(size_t i=0; i<numTotal; i++) {
+            size_t c, v;
             double val = A.elem(i, c, v);
             if(val!=0) numNonZero++;
         }
@@ -84,8 +84,8 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
         ic.reserve (numNonZero+1); ic.push_back(0);
         iv.reserve (numNonZero+1); iv.push_back(0);
         mat.reserve(numNonZero+1); mat.push_back(0);
-        for(unsigned int i=0; i<numTotal; i++) {
-            unsigned int c, v;
+        for(size_t i=0; i<numTotal; i++) {
+            size_t c, v;
             double val = A.elem(i, c, v);
             if(val!=0) {
                 ic.push_back(c+1);
@@ -103,7 +103,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
 
     // retrieve the solution
     std::vector<double> result(numVariables);
-    for(unsigned int v=0; v<numVariables; v++) {
+    for(size_t v=0; v<numVariables; v++) {
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
@@ -142,13 +142,13 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
 template<typename NumT>
 PyObject* initPyMatrix(const IMatrix<NumT>& M)
 {
-    unsigned int nrows = M.rows(), ncols = M.cols(), ntotal = M.size();
+    size_t nrows = M.rows(), ncols = M.cols(), ntotal = M.size();
     if(ntotal == nrows*ncols)
     {   // dense matrices are initialized item-by-item
         PyObject *pyMatrix = (PyObject*)Matrix_New(nrows, ncols, DOUBLE);
         if(!pyMatrix) return NULL;
-        for(unsigned int ir=0; ir<nrows; ir++)
-            for(unsigned int ic=0; ic<ncols; ic++)
+        for(size_t ir=0; ir<nrows; ir++)
+            for(size_t ic=0; ic<ncols; ic++)
                 MAT_BUFD(pyMatrix)[ic*nrows+ir] = M.at(ir, ic);  // column-major order used in CVXOPT
         return pyMatrix;
     } else {  // To initialize sparse matrices, additional 3 vectors are allocated
@@ -162,8 +162,8 @@ PyObject* initPyMatrix(const IMatrix<NumT>& M)
             Py_XDECREF(values);
             return NULL;
         }
-        for(unsigned int i=0; i<ntotal; i++) {
-            unsigned int ir, ic;
+        for(size_t i=0; i<ntotal; i++) {
+            size_t ir, ic;
             double val = M.elem(i, ir, ic);
             MAT_BUFI(rowind)[i]=ir;
             MAT_BUFI(colind)[i]=ic;
@@ -184,8 +184,8 @@ std::vector<double> quadraticOptimizationSolve(
     const std::vector<NumT>& L, const IMatrix<NumT>& Q,
     const std::vector<NumT>& xmin, const std::vector<NumT>& xmax)
 {
-    unsigned int numVariables   = A.cols();
-    unsigned int numConstraints = A.rows();
+    size_t numVariables   = A.cols();
+    size_t numConstraints = A.rows();
     bool doQP = Q.size()!=0;
     if( rhs.size()!=numConstraints ||
         (!L.empty()    && L.size()!=numVariables) ||
@@ -208,8 +208,8 @@ std::vector<double> quadraticOptimizationSolve(
     }
 
     // count inequality constraints: one (lower) or two (lower+upper) constraints per variable
-    unsigned int numConsIneq = numVariables;
-    for(unsigned int v=0; v<xmax.size(); v++)
+    size_t numConsIneq = numVariables;
+    for(size_t v=0; v<xmax.size(); v++)
         if(isFinite(xmax[v]))
            numConsIneq++;
 
@@ -258,7 +258,7 @@ std::vector<double> quadraticOptimizationSolve(
     SP_COL(consIneq)[numVariables] = numConsIneq;
 
     // init rhs
-    for(unsigned int c=0; c<numConstraints; c++)
+    for(size_t c=0; c<numConstraints; c++)
         MAT_BUFD(coefRhs)[c] = rhs[c];
 
     // pack matrices into an argument tuple
@@ -284,7 +284,7 @@ std::vector<double> quadraticOptimizationSolve(
     PyObject *sol = PyDict_GetItemString(solver, "x");
 
     std::vector<double> result(numVariables);
-    for(unsigned int v=0; feasible && v<numVariables; v++) {
+    for(size_t v=0; feasible && v<numVariables; v++) {
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
@@ -325,13 +325,13 @@ template<typename NumT>
 class AugmentedMatrix: public IMatrix<NumT> {
     const IMatrix<NumT>& M;       ///< the original matrix
 public:
-    AugmentedMatrix(const IMatrix<NumT>& src, unsigned int Nadd):
+    AugmentedMatrix(const IMatrix<NumT>& src, size_t Nadd):
         IMatrix<NumT>(src.rows(), src.cols()+2*Nadd), M(src) {};
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
-    virtual unsigned int size() const { return rows() * cols(); }
-    virtual NumT at(const unsigned int row, const unsigned int col) const {
-        unsigned int Mcols=M.cols(), Nadd=(cols()-Mcols)/2;
+    virtual size_t size() const { return rows() * cols(); }
+    virtual NumT at(const size_t row, const size_t col) const {
+        size_t Mcols=M.cols(), Nadd=(cols()-Mcols)/2;
         if(col < Mcols)
             return M.at(row, col);
         if(col == Mcols + row)
@@ -340,7 +340,7 @@ public:
             return -1;
         return 0;
     }
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const {
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
         row = index / cols();
         col = index % cols();
         return at(row, col);
@@ -352,20 +352,20 @@ template<typename NumT>
 class AugmentedQuadMatrix: public IMatrix<NumT> {
     const IMatrix<NumT>& Q;        ///< the original matrix
     const std::vector<NumT>& pen;  ///< additional elements along the main diagonal (repeated twice)
-    const unsigned int Qsize, Qrows, Nadd;
+    const size_t Qsize, Qrows, Nadd;
 public:
     AugmentedQuadMatrix(const IMatrix<NumT>& src, const std::vector<NumT>& _pen):
         IMatrix<NumT>(src.rows()+2*_pen.size(), src.cols()+2*_pen.size()),
         Q(src), pen(_pen), Qsize(Q.size()), Qrows(Q.rows()), Nadd(pen.size()) {};
-    virtual unsigned int size()    const { return Qsize + 2*Nadd; }
-    virtual NumT at(const unsigned int row, const unsigned int col) const {
+    virtual size_t size()    const { return Qsize + 2*Nadd; }
+    virtual NumT at(const size_t row, const size_t col) const {
         if(col < Qrows)
             return Q.at(row, col);
         if(col == row)
             return pen.at((col-Qrows) % Nadd);
         return 0;
     }
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const {
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
         if(index<Qsize)
             return Q.elem(index, row, col);
         row = col = index - Qsize + Qrows;
@@ -382,8 +382,8 @@ std::vector<double> linearOptimizationSolveApprox(
 {
     if(allZeros(consPenaltyLin))
         return linearOptimizationSolve(A, rhs, L, xmin, xmax);
-    unsigned int numVariables   = A.cols();
-    unsigned int numConstraints = A.rows();
+    size_t numVariables   = A.cols();
+    size_t numConstraints = A.rows();
     if( rhs.size()!=numConstraints || consPenaltyLin.size()!=numConstraints ||
         (!L.empty() && L.size()!=numVariables) )
         throw std::invalid_argument("linearOptimizationSolveApprox: invalid size of input arrays");
@@ -414,8 +414,8 @@ std::vector<double> quadraticOptimizationSolveApprox(
 {
     if(allZeros(consPenaltyLin) && allZeros(consPenaltyQuad))
         return quadraticOptimizationSolve(A, rhs, L, Q, xmin, xmax);
-    unsigned int numVariables   = A.cols();
-    unsigned int numConstraints = A.rows();
+    size_t numVariables   = A.cols();
+    size_t numConstraints = A.rows();
     if( rhs.size()!=numConstraints ||
         (!consPenaltyLin.empty()  && consPenaltyLin. size()!=numConstraints) ||
         (!consPenaltyQuad.empty() && consPenaltyQuad.size()!=numConstraints) ||

@@ -260,7 +260,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     std::vector<double> radii;
     radii.reserve(particles.size());
     double prmin=INFINITY, prmax=0;
-    for(unsigned int i=0; i<particles.size(); i++) {
+    for(size_t i=0; i<particles.size(); i++) {
         double r = sqrt(pow_2(particles.point(i).R) + pow_2(particles.point(i).z));
         if(particles.mass(i) != 0) {   // only consider particles with non-zero mass
             radii.push_back(r);
@@ -268,21 +268,21 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
             prmax = std::max(prmax, r);
         }
     }
-    unsigned int Npoints = radii.size();
-    if(Npoints==0)
+    size_t nbody = radii.size();
+    if(nbody==0)
         throw std::invalid_argument("Multipole: no particles provided as input");
-    std::nth_element(radii.begin(), radii.begin() + Npoints/2, radii.end());
-    double rhalf = radii[Npoints/2];   // half-mass radius (if all particles have equal mass)
+    std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
+    double rhalf = radii[nbody/2];   // half-mass radius (if all particles have equal mass)
     double spacing = 1 + sqrt(20./gridSizeR);  // ratio between two adjacent grid nodes
     // # of points inside the first or outside the last grid node
-    int Nmin = static_cast<int>(log(Npoints+1)/log(2));
+    int Nmin = static_cast<int>(log(nbody+1)/log(2));
     if(rmin==0) {
         std::nth_element(radii.begin(), radii.begin() + Nmin, radii.end());
         rmin = std::max(radii[Nmin], rhalf * pow(spacing, -0.5*gridSizeR));
     }
     if(rmax==0) {
         std::nth_element(radii.begin(), radii.end() - Nmin, radii.end());
-        rmax = std::min(radii[Npoints-Nmin], rhalf * pow(spacing, 0.5*gridSizeR));
+        rmax = std::min(radii[nbody-Nmin], rhalf * pow(spacing, 0.5*gridSizeR));
     }
     utils::msg(utils::VL_DEBUG, "Multipole",
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]"
@@ -551,7 +551,7 @@ void computeDensityCoefsSph(
 
     // normalize all l>0 harmonics by the value of l=0 term
     // (the latter contains simply the particle masses)
-    for(unsigned int i=0; i<particleRadii.size(); i++) {
+    for(size_t i=0; i<particleRadii.size(); i++) {
         particleRadii[i] = log(particleRadii[i]);
         for(unsigned int c=1; c<ind.size(); c++)
             if(!harmonics[c].empty() && harmonics[0][i]!=0)

@@ -14,6 +14,11 @@ docs/readme.dvi
 docs/readme.log
 docs/readme.out
 docs/readme.toc
+docs/readme_raga.aux
+docs/readme_raga.dvi
+docs/readme_raga.log
+docs/readme_raga.out
+docs/readme_raga.toc
 docs/bib.pl
 python/*
 pytests/*.pyc

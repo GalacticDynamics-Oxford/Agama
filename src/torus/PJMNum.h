@@ -172,7 +172,7 @@ void stored_qromb<C>::sort_table() {
   int oldend = ntab;
   //for(int i=0;i!=ntab;i++) cerr << table[i] << '\n';
   for(int i=0;i!=nmax-1;i++) { // ??
-    int n = nmax-i, step = pow(2.,i+1), point=pow(2.,i); // for output table
+    int /*n = nmax-i,*/ step = pow(2.,i+1), point=pow(2.,i); // for output table
     //cerr <<"point step "<< point << ' ' << step << '\n';
     int it=1;
     for(int j=1;j<nmax-i-1;j++) it <<= 1;

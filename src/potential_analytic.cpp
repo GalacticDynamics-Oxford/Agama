@@ -1,6 +1,5 @@
 #include "potential_analytic.h"
 #include <cmath>
-#include <cassert>
 
 namespace potential{
 
@@ -19,7 +18,8 @@ void Plummer::evalDeriv(double r,
 
 double Plummer::enclosedMass(double r) const
 {
-    // should give correct result in all limiting cases
+    if(scaleRadius==0)
+        return mass;
     return mass / pow_3(sqrt(pow_2(scaleRadius/r) + 1));
 }
 

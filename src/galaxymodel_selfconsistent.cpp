@@ -68,7 +68,7 @@ ComponentWithSpheroidalDF::ComponentWithSpheroidalDF(
 BaseComponentWithDF(ensureNotNull(df), initDensity, false, _relError, _maxNumEval),
 rmin(_rmin), rmax(_rmax), numCoefsRadial(_numCoefsRadial), numCoefsAngular(_numCoefsAngular)
 {
-    if(rmin<=0 || rmax<=rmin || numCoefsRadial<2 || numCoefsAngular<0)
+    if(rmin<=0 || rmax<=rmin || numCoefsRadial<2)
         throw std::invalid_argument("ComponentWithSpheroidalDF: Invalid grid parameters");
 }
 

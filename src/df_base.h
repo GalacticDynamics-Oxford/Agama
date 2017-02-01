@@ -123,7 +123,7 @@ double totalEntropy(const BaseDistributionFunction& DF,
     BaseDistributionFunction::totalMass(), but calculated with a different method).
     \param[out] totalMassErr (optional) if not NULL, will store the error estimate of the integral.
  */
-void sampleActions(const BaseDistributionFunction& DF, const int numSamples,
+void sampleActions(const BaseDistributionFunction& DF, const std::size_t numSamples,
     std::vector<actions::Actions>& samples, double* totalMass=NULL, double* totalMassErr=NULL);
 
 }  // namespace df

@@ -45,8 +45,11 @@ namespace galaxymodel{
     represented by the `potential::PhaseVolume` class.
     This class constructs interpolators for various dynamical quantities (I0, K_g, K_h)
     that enter the expressions for two-body relaxation coefficients.
+    This class also provides the interpolated value of f(h) through the IFunction interface
+    (it does not store the original function provided in the constructor, but computes f(h)
+    from one of its interpolators).
 */
-class SphericalModel: math::IFunctionNoDeriv{
+class SphericalModel: public math::IFunction{
 
     /// 1d interpolators for various weighted integrals of f(h), represented in log-log coordinates:
     math::QuinticSpline
@@ -57,10 +60,24 @@ class SphericalModel: math::IFunctionNoDeriv{
     double totalMass;    ///< total mass associated with the DF, same as cumulMass(INFINITY)
     double totalEnergy;  ///< total energy of the model: \f$ \int_0^\infty f(h) E(h) dh \f$.
 public:
-    SphericalModel(const potential::PhaseVolume& phasevol, const math::IFunction& df);
+    /** Construct the model for the given h(E) and f(h).
+        \param[in]  phasevol  is the instance of phase volume h(E); a copy of it is stored internally.
+        \param[in]  df  is the instance of distribution function f(h).
+        \param[in]  gridh  (optional) if provided, will use this grid in phase volume for interpolation
+        (this makes sense if f(h) is represented by a spline interpolator itself, to ensure
+        1:1 correspondence between grids); otherwise will construct a suitable grid automatically.
+        \throw  std::runtime_error  in case of various problems detected with the data
+        (e.g., incorrect asymptotic behaviour).
+    */
+    SphericalModel(const potential::PhaseVolume& phasevol, const math::IFunction& df,
+        const std::vector<double>& gridh = std::vector<double>());
 
-    /// return the value of DF f(h), obtained by differentiating one of the interpolating splines
-    virtual double value(const double h) const;
+    /// return the value of DF f(h), and optionally its first derivative,
+    /// obtained by differentiating one of the interpolating splines
+    virtual void evalDeriv(const double h, double* f=NULL, double* dfdh=NULL, double* =NULL) const;
+
+    /// may provide up to one derivative of f(h)
+    virtual unsigned int numDerivs() const { return 1; }
 
     /// return \f$ I_0 = \int_h^\infty f(h') / g(h') dh' \f$
     double I0(const double logh) const;
@@ -81,43 +98,52 @@ public:
 };
 
 
-/** Diffusion coefficients for two-body relaxation */
+/** Diffusion coefficients for two-body relaxation.
+    This class is a further extension of SphericalModel, containing the instance of the latter
+    as a member variable, and providing two-dimensional interpolators for local (position-dependent)
+    drift and diffusion coefficients in velocity.
+*/
 class DiffusionCoefs {
 public:
-    /** construct the internal interpolators for diffusion coefficients.
-    \param[in] phasevol  is the object providing the correspondence between E and h;
-    \param[in] df  is the distribution function expressed in terms of h.
-    \throw std::runtime_error in case of incorrect asymptotic behaviour of E(h) or f(h)
-    (e.g., the distribution function has infinite mass, or the potential is non-monotonic, etc.),
-    or any other inconsistency detected in the input data or constructed interpolators.
+    /** Construct the internal interpolators for diffusion coefficients.
+        \param[in]  phasevol  is the object providing the correspondence between E and h.
+        \param[in]  df  is the distribution function expressed in terms of h.
+        \param[in]  gridh  (optional) grid in phase volume for the interpolators
+        (if not provided, will construct a suitable one automatically).
+        \throw std::runtime_error in case of incorrect asymptotic behaviour of E(h) or f(h)
+        (e.g., the distribution function has infinite mass, or the potential is non-monotonic, etc.),
+        or any other inconsistency detected in the input data or constructed interpolators.
     */
-    DiffusionCoefs(const potential::PhaseVolume& phasevol, const math::IFunction& df);
+    DiffusionCoefs(const potential::PhaseVolume& phasevol, const math::IFunction& df,
+        const std::vector<double>& gridh = std::vector<double>());
 
-    /** compute the orbit-averaged drift and diffusion coefficients in energy.
-    The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
-    \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
-    (otherwise the motion is unbound and orbit-averaging does not have sense);
-    \param[out] DeltaE  will contain the drift coefficient <Delta E>;
-    \param[out] DeltaE2 will contain the diffusion coefficient <Delta E^2>.
+    /** Compute the orbit-averaged drift and diffusion coefficients in energy.
+        The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
+        \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
+        (otherwise the motion is unbound and orbit-averaging does not have sense);
+        \param[out] DeltaE  will contain the drift coefficient <Delta E>;
+        \param[out] DeltaE2 will contain the diffusion coefficient <Delta E^2>.
     */
     void evalOrbitAvg(double E, double &DeltaE, double &DeltaE2) const;
 
-    /** compute the local drift and diffusion coefficients in velocity,
-    as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
-    the returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
-    \param[in]  Phi    is the potential at the given point;
-    \param[in]  E      is the energy of the moving particle Phi + (1/2) v^2,
-    should be >= Phi, and may be positive;
-    \param[out] dvpar  will contain  <v Delta v_par>,
-    where Delta v_par is the drag coefficient in the direction parallel to the particle velocity;
-    \param[out] dv2par will contain  <Delta v^2_par>,
-    the diffusion coefficient in the parallel component of velocity;
-    \param[out] dv2per will contain  <Delta v^2_per>,
-    the diffusion coefficient in the perpendicular component of velocity;
-    \throw std::invalid_argument if E<Phi or Phi>=0.
+    /** Compute the local drift and diffusion coefficients in velocity,
+        as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
+        the returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
+        \param[in]  Phi    is the potential at the given point;
+        \param[in]  E      is the energy of the moving particle Phi + (1/2) v^2,
+        should be >= Phi, and may be positive;
+        \param[out] dvpar  will contain  <v Delta v_par>,
+        where Delta v_par is the drag coefficient in the direction parallel to the particle velocity;
+        \param[out] dv2par will contain  <Delta v^2_par>,
+        the diffusion coefficient in the parallel component of velocity;
+        \param[out] dv2per will contain  <Delta v^2_per>,
+        the diffusion coefficient in the perpendicular component of velocity;
+        \throw std::invalid_argument if E<Phi or Phi>=0.
     */
     void evalLocal(double Phi, double E, double &dvpar, double &dv2par, double &dv2per) const;
 
+    /// The instance of SphericalModel providing 1d interpolators for orbit-averaged diffusion coefs
+    /// and the mapping between energy and phase volume
     const SphericalModel model;
 private:
 
@@ -140,13 +166,14 @@ private:
 */
 class FokkerPlanckSolver {
 public:
-    potential::PtrPotential extPot;     ///< external potential (if present)
-    potential::Interpolator totalPot;   ///< total potential
-    potential::PhaseVolume  phasevol;   ///< mapping between energy and phase volume
-    std::vector<double> gridh;          ///< grid in h (phase volume), stays fixed throughout the evolution
-    std::vector<double> gridf;          ///< values of distribution function at grid nodes
-    std::vector<double> diag, above, below; ///< coefficients of the tridiagonal system solved at each step
-public:
+    /** Additional parameters of the solver (may be combined by the OR operator) */
+    enum Options {
+        FP_NO_SELF_GRAVITY = 1,  ///< the density of evolving system does not contribute to the potential
+                                 ///< (makes sense only if an external potential was provided)
+        FP_ZERO_DF_INNER   = 2,  ///< set the DF to zero (rather, a very small value) at h_min
+                                 ///< (the alternative is a zero-flux boundary condition)
+        FP_ZERO_DF_OUTER   = 4,  ///< same for h_max
+    };
     /** Construct the Fokker-Planck model with the given density profile,
         optionally embedded in an external potential.
         \param[in]  initDensity  is a function that provides the density profile;
@@ -156,10 +183,11 @@ public:
         potential of the evolving model; may be omitted;
         \param[in]  gridh  (optional) is the grid in phase volume at which the DF is discretized;
         if omitted, it will be constructed automatically by the Eddington inversion routine.
+        \param[in]  options  is a bit field combining several additional parameters (none by default).
     */
     FokkerPlanckSolver(const math::IFunction& initDensity,
         const potential::PtrPotential& externalPotential = potential::PtrPotential(),
-        const std::vector<double>& gridh = std::vector<double>());
+        const std::vector<double>& gridh = std::vector<double>(), Options options=Options());
 
     /** Recompute the potential and the phase volume mapping (h <-> E) by integrating the DF over velocity,
         and solving the Poisson equation (adding the external potential if present).
@@ -181,6 +209,14 @@ public:
     /// diagnostic quantities: total mass, stellar potential at origin, total energy and kinetic energy
     double Mass, Phi0, Etot, Ekin;
 
+private:
+    potential::PtrPotential extPot;     ///< external potential (if present)
+    potential::Interpolator totalPot;   ///< total potential
+    potential::PhaseVolume  phasevol;   ///< mapping between energy and phase volume
+    std::vector<double> gridh;          ///< grid in h (phase volume), stays fixed throughout the evolution
+    std::vector<double> gridf;          ///< values of distribution function at grid nodes
+    std::vector<double> diag, above, below; ///< coefficients of the tridiagonal system solved at each step
+    const Options options;
 };
 
 
@@ -275,5 +311,52 @@ particles::ParticleArraySph generatePosVelSamples(
 */
 std::vector<double> computeDensity(const math::IFunction& df, const potential::PhaseVolume& pv,
     const std::vector<double> &gridPhi);
+
+    
+/** Read a file with the cumulative mass profile and construct a density model from it.
+    The text file should be a whitespace- or comma-separated table with at least two columns
+    (the rest is ignored) -- radius and the enclosed mass within this radius,
+    both must be in increasing order. Lines not starting with a number are ignored.
+    If the first line is at r=0, the corresponding mass is attributed to the central black hole
+    and subtracted from all other records.
+    \param[in]  filename  is the input file name.
+    \param[in]  Mbh (optional)  is the variable containing the mass of the central black hole
+    (if provided, and the file contained a record at r=0, its mass is added to this variable).
+    \return  an interpolated density profile, represented by a DensitySphericalHarmonic class
+    (with only the l=0 harmonic).
+    \throw  std::runtime_error if the file does not exist, or the mass profile is not monotonic.
+*/
+potential::PtrDensity readMassProfile(const std::string& fileName, double* Mbh = NULL);
+
+/** Write a text file with a table of several variables as functions of radius or energy.
+    These variables are extracted from a spherical model described by a combination of
+    potential, phase volume and distribution function.
+    The following variables are printed:
+    - radius                 r
+    - enclosed mass          M(r)
+    - potential              Phi(r), serves as the energy E in arguments of other variables
+    - density                rho(r)
+    - distribution function  f(E), or rather f(h(E))
+    - density of states      g(E) = dh(E)/dE
+    - phase volume           h(E)
+    - energy-enclosed mass   M(E), i.e. mass of particles with energies less than E
+    - diffusion coefficient  <Delta E^2>
+    - drift coefficient      <Delta E>
+    
+    \param[in]  fileName  is the output file name.
+    \param[in]  model  is the SphericalModel instance that provides both f(E) and h(E).
+    \param[in]  pot  is the potential Phi(r) -
+    it is not contained in the spherical model, so should be provided separately.
+    \param[in]  dens  (optional)  the density rho(r);
+    if not provided, the density is computed from f(E) in the given potential.
+    \param[in]  gridh  (optional)  the grid in phase volume (h) for the output table;
+    if not provided, a suitable grid that encompasses the region of significant variation
+    of f(h) is constructed automatically.
+*/
+void writeSphericalModel(const std::string& fileName,
+    const SphericalModel& model,
+    const potential::BasePotential& pot,
+    const potential::BaseDensity* dens = NULL,
+    const std::vector<double>& gridh = std::vector<double>());
 
 }  // namespace

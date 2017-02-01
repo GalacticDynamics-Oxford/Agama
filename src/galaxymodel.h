@@ -179,7 +179,7 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
     sampled from the distribution function;
 */
 particles::ParticleArrayCyl generateActionSamples(
-    const GalaxyModel& model, const unsigned int numPoints,
+    const GalaxyModel& model, const size_t numPoints,
     std::vector<actions::Actions>* actions=NULL);
 
 
@@ -193,7 +193,7 @@ particles::ParticleArrayCyl generateActionSamples(
     sampled from the distribution function;
 */
 particles::ParticleArrayCyl generatePosVelSamples(
-    const GalaxyModel& model, const unsigned int numPoints);
+    const GalaxyModel& model, const size_t numPoints);
 
 
 /** Sample the density profile by discrete points.
@@ -202,6 +202,6 @@ particles::ParticleArrayCyl generatePosVelSamples(
     \returns    a new array with the sampled coordinates and masses
 */
 particles::ParticleArray<coord::PosCyl> generateDensitySamples(
-    const potential::BaseDensity& dens, const unsigned int numPoints);
+    const potential::BaseDensity& dens, const size_t numPoints);
 
 }  // namespace

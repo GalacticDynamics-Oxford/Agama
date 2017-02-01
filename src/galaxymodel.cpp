@@ -663,14 +663,14 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
 
 
 particles::ParticleArrayCyl generateActionSamples(
-    const GalaxyModel& model, const unsigned int nSamp, std::vector<actions::Actions>* actsOutput)
+    const GalaxyModel& model, const size_t nSamp, std::vector<actions::Actions>* actsOutput)
 {
     // first sample points from the action space:
     // we use nAct << nSamp  distinct values for actions, and construct tori for these actions;
     // then each torus is sampled with nAng = nSamp/nAct  distinct values of angles,
     // and the action/angles are converted to position/velocity points
-    unsigned int nAng = std::min<unsigned int>(nSamp/100+1, 16);   // number of sample angles per torus
-    unsigned int nAct = nSamp / nAng + 1;
+    size_t nAng = std::min<size_t>(nSamp/100+1, 16);   // number of sample angles per torus
+    size_t nAct = nSamp / nAng + 1;
     std::vector<actions::Actions> actions;
 
     // do the sampling in actions space
@@ -684,9 +684,9 @@ particles::ParticleArrayCyl generateActionSamples(
     particles::ParticleArrayCyl points;
     if(actsOutput!=NULL)
         actsOutput->clear();
-    for(unsigned int t=0; t<nAct && points.size()<nSamp; t++) {
+    for(size_t t=0; t<nAct && points.size()<nSamp; t++) {
         actions::ActionMapperTorus torus(model.potential, actions[t]);
-        for(unsigned int a=0; a<nAng; a++) {
+        for(size_t a=0; a<nAng; a++) {
             actions::Angles ang;
             ang.thetar   = 2*M_PI*math::random();
             ang.thetaz   = 2*M_PI*math::random();
@@ -701,7 +701,7 @@ particles::ParticleArrayCyl generateActionSamples(
 
 
 particles::ParticleArrayCyl generatePosVelSamples(
-    const GalaxyModel& model, const unsigned int numSamples)
+    const GalaxyModel& model, const size_t numSamples)
 {
     DFIntegrand6dim fnc(model);
     math::Matrix<double> result;      // sampled scaled coordinates/velocities
@@ -712,7 +712,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
     const double pointMass = totalMass / result.rows();
     particles::ParticleArrayCyl points;
     points.data.reserve(result.rows());
-    for(unsigned int i=0; i<result.rows(); i++) {
+    for(size_t i=0; i<result.rows(); i++) {
         double scaledvars[6] = {result(i,0), result(i,1), result(i,2),
             result(i,3), result(i,4), result(i,5)};
         // transform from scaled vars (array of 6 numbers) to real pos/vel
@@ -723,7 +723,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
 
 
 particles::ParticleArray<coord::PosCyl> generateDensitySamples(
-    const potential::BaseDensity& dens, const unsigned int numPoints)
+    const potential::BaseDensity& dens, const size_t numPoints)
 {
     potential::DensityIntegrandNdim fnc(dens, true);  // require the values of density to be non-negative
     math::Matrix<double> result;      // sampled scaled coordinates
@@ -734,7 +734,7 @@ particles::ParticleArray<coord::PosCyl> generateDensitySamples(
     const double pointMass = totalMass / result.rows();
     particles::ParticleArray<coord::PosCyl> points;
     points.data.reserve(result.rows());
-    for(unsigned int i=0; i<result.rows(); i++) {
+    for(size_t i=0; i<result.rows(); i++) {
         // if the system is axisymmetric, phi is not provided by the sampling routine
         double scaledvars[3] = {result(i,0), result(i,1), 
             fnc.axisym ? math::random() : result(i,2)};

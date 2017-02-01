@@ -1,4 +1,4 @@
-/** \file    test_selfconsistentmodel.cpp
+/** \file    example_self_consistent_model.cpp
     \author  Eugene Vasiliev
     \date    November 2015
 

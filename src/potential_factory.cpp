@@ -39,11 +39,6 @@ enum PotentialType {
     PT_UNKNOWN,      ///< unspecified
     PT_COMPOSITE,    ///< a superposition of multiple potential instances:  `CompositeCyl`
 
-    //  Density models without a corresponding potential
-//    PT_ELLIPSOIDAL,  ///< a generalization of spherical mass profile with arbitrary axis ratios:  CDensityEllipsoidal
-//    PT_MGE,          ///< Multi-Gaussian expansion:  CDensityMGE
-//    PT_SERSIC,       ///< Sersic density profile:  CDensitySersic
-
     //  Generic potential expansions
     PT_BSE,          ///< basis-set expansion for infinite systems:  `BasisSetExp`
     PT_SPLINE,       ///< [old] spline spherical-harmonic expansion:  `SplineExp`
@@ -69,7 +64,7 @@ enum PotentialType {
     PT_FERRERS,      ///< triaxial Ferrers model with finite extent:  `Ferrers`
     PT_PLUMMER,      ///< spherical Plummer model:  `Plummer`
     PT_ISOCHRONE,    ///< spherical isochrone model:  `Isochrone`
-    PT_PERFECTELLIPSOID,  ///< oblate axisymmetric Perfect Ellipsoid of Kuzmin/de Zeeuw :  `OblatePerfectEllipsoid`
+    PT_PERFECTELLIPSOID,  ///< axisymmetric model of Kuzmin/de Zeeuw :  `OblatePerfectEllipsoid`
 };
 
 /// structure that contains parameters for all possible potentials
@@ -95,7 +90,8 @@ struct ConfigPotential
     /// default constructor initializes the fields to some reasonable values
     ConfigPotential() :
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
-        mass(1.), scaleRadius(1.), scaleRadius2(1.), axisRatioY(1.), axisRatioZ(1.), gamma(1.), sersicIndex(4.),
+        mass(1.), scaleRadius(1.), scaleRadius2(1.),
+        axisRatioY(1.), axisRatioZ(1.), gamma(1.), sersicIndex(4.),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0), lmax(6), mmax(6), smoothing(1.)
     {};
 };
@@ -263,8 +259,10 @@ ConfigPotential parseParams(const utils::KeyValueMap& params, const units::Exter
     config.mass        = params.getDouble("Mass", config.mass) * conv.massUnit;
     config.axisRatioY  = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
     config.axisRatioZ  = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
-    config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius) * conv.lengthUnit;
-    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight",config.scaleRadius2) * conv.lengthUnit;
+    config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius)
+                       * conv.lengthUnit;
+    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight",config.scaleRadius2)
+                       * conv.lengthUnit;
     config.gamma       = params.getDouble   ("Gamma", config.gamma);
     config.sersicIndex = params.getDouble   ("SersicIndex", config.sersicIndex);
     config.gridSizeR   = params.getInt("gridSizeR", config.gridSizeR);
@@ -286,7 +284,8 @@ DiskParam parseDiskParams(const utils::KeyValueMap& params, const units::Externa
                                * conv.massUnit / pow_2(conv.lengthUnit);
     config.scaleRadius         = params.getDouble("scaleRadius", config.scaleRadius) * conv.lengthUnit;
     config.scaleHeight         = params.getDouble("scaleHeight", config.scaleHeight) * conv.lengthUnit;
-    config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius) * conv.lengthUnit;
+    config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius)
+                               * conv.lengthUnit;
     config.modulationAmplitude = params.getDouble("modulationAmplitude", config.modulationAmplitude);
     // alternative way: specifying the total model mass instead of surface density at R=0
     if(params.contains("mass") && !params.contains("surfaceDensity")) {
@@ -307,7 +306,8 @@ SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::Externa
     config.beta               = params.getDouble("beta",  config.beta);
     config.gamma              = params.getDouble("gamma", config.gamma);
     config.scaleRadius        = params.getDouble("scaleRadius", config.scaleRadius) * conv.lengthUnit;
-    config.outerCutoffRadius  = params.getDouble("outerCutoffRadius", config.outerCutoffRadius) * conv.lengthUnit;
+    config.outerCutoffRadius  = params.getDouble("outerCutoffRadius", config.outerCutoffRadius)
+                              * conv.lengthUnit;
     // alternative way: specifying the total model mass instead of volume density at r=scaleRadius
     if(params.contains("mass") && !params.contains("densityNorm")) {
         config.densityNorm = 1;
@@ -576,7 +576,7 @@ void writeAzimuthalHarmonics(std::ostream& strm,
     assert(mmax>=0);
     for(int mm=0; mm<static_cast<int>(data.size()); mm++) 
         if(data[mm].rows()*data[mm].cols()>0) {
-            strm << (-mmax+mm) << "\t#m\n#z\\R";
+            strm << (-mmax+mm) << "\t#m\n#z(row)\\R(col)";
             for(unsigned int iR=0; iR<gridR.size(); iR++)
                 strm << "\t" + utils::pp(gridR[iR], 15);
             strm << "\n";
@@ -669,8 +669,8 @@ void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
         math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
     }
     int mmax = Phi.size()/2;
-    strm << CylSpline::myName() << "\t#header\n" << gridR.size() << "\t#size_R\n" << mmax << "\t#m_max\n" <<
-        gridz.size() << "\t#size_z\n";
+    strm << CylSpline::myName() << "\t#header\n" << gridR.size() <<
+        "\t#size_R\n" << mmax << "\t#m_max\n" << gridz.size() << "\t#size_z\n";
     strm << "#Phi\n";
     writeAzimuthalHarmonics(strm, gridR, gridz, Phi);
     strm << "\n#dPhi/dR\n";
@@ -902,7 +902,8 @@ PtrDensity createAnalyticDensity(const ConfigPotential& params)
         else
             throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
     case PT_FERRERS:
-        return PtrDensity(new Ferrers(params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
+        return PtrDensity(new Ferrers(
+            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
     case PT_MIYAMOTONAGAI:
         return PtrDensity(new MiyamotoNagai(params.mass, params.scaleRadius, params.scaleRadius2));
     default:
@@ -921,7 +922,8 @@ PtrPotential createAnalyticPotential(const ConfigPotential& params)
     switch(params.potentialType)
     {
     case PT_LOG:  // NB: it's not really 'mass' here but 'sigma'
-        return PtrPotential(new Logarithmic(params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
+        return PtrPotential(new Logarithmic(
+            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
     case PT_HARMONIC:  // NB: it's not really 'mass' here but 'Omega'
         return PtrPotential(new Harmonic(params.mass, params.axisRatioY, params.axisRatioZ));
     case PT_MIYAMOTONAGAI:
@@ -930,7 +932,8 @@ PtrPotential createAnalyticPotential(const ConfigPotential& params)
         return PtrPotential(new Dehnen(
             params.mass, params.scaleRadius, params.gamma, params.axisRatioY, params.axisRatioZ));
     case PT_FERRERS:
-        return PtrPotential(new Ferrers(params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ)); 
+        return PtrPotential(new Ferrers(
+            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ)); 
     case PT_PLUMMER:
         if(params.axisRatioY==1 && params.axisRatioZ==1)
             return PtrPotential(new Plummer(params.mass, params.scaleRadius));

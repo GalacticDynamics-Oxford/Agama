@@ -7,6 +7,7 @@
 #include "coord.h"
 #include <vector>
 #include <utility>
+using std::size_t;
 
 /** Classes and functions for manipulating arrays of particles */
 namespace particles {
@@ -41,6 +42,7 @@ struct Converter {
 */
 template<typename ParticleT>
 struct ParticleArray {
+
     /// templated typedef of a single particle
     typedef std::pair<ParticleT, double> ElemType;
 
@@ -60,12 +62,12 @@ struct ParticleArray {
     template<typename OtherParticleT> ParticleArray(const ParticleArray<OtherParticleT> &src) {
         data.reserve(src.size());
         Converter<OtherParticleT, ParticleT> conv;  // this is the mighty thing
-        for(unsigned int i=0; i<src.size(); i++)
+        for(size_t i=0; i<src.size(); i++)
             data.push_back(ElemType(conv(src[i].first), src[i].second));
     }
 
     /// return the array size
-    inline unsigned int size() const {
+    inline size_t size() const {
         return data.size(); }
 
     /// convenience function to add an element
@@ -73,33 +75,33 @@ struct ParticleArray {
         data.push_back(ElemType(first, second)); }
 
     /// convenience shorthand for extracting array element
-    inline ElemType& at(unsigned int index) {
+    inline ElemType& at(size_t index) {
         return data.at(index); }
 
     /// convenience shorthand for extracting array element as a const reference
-    inline const ElemType& at(unsigned int index) const {
+    inline const ElemType& at(size_t index) const {
         return data.at(index); }
 
     /// convenience shorthand for extracting array element
-    inline ElemType& operator[](unsigned int index) {
+    inline ElemType& operator[](size_t index) {
         return data[index]; }
 
     /// convenience shorthand for extracting array element as a const reference
-    inline const ElemType& operator[](unsigned int index) const {
+    inline const ElemType& operator[](size_t index) const {
         return data[index]; }
 
     /// convenience function for extracting the particle (without mass) from the array
-    inline const ParticleT& point(unsigned int index) const {
+    inline const ParticleT& point(size_t index) const {
         return data[index].first; }
 
     /// convenience function for extracting the mass of a particle from the array
-    inline double mass(unsigned int index) const {
+    inline double mass(size_t index) const {
         return data[index].second; }
 
     /// return total mass of particles in the array
     inline double totalMass() const {
         double sum=0;
-        for(unsigned int i=0; i<data.size(); i++)
+        for(size_t i=0; i<data.size(); i++)
             sum += data[i].second;
         return sum;
     }

@@ -339,7 +339,7 @@ bool test(const potential::BasePotential& pot)
     ", dPhi/dr="+checkLess(errdPhi,1e-08, ok) +
     ", rho="   + checkLess(errdens,1e-03, ok) +
     ", h="     + checkLess(errh,   1e-08, ok) +
-    ", g="     + checkLess(errg,   1e-08, ok) + "\n";
+    ", g="     + checkLess(errg,   2e-08, ok) + "\n";
     return ok;
 }
 

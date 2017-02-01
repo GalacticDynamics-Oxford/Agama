@@ -348,11 +348,11 @@ std::vector<double> createBsplineInterpolator1dArray(const IFunction& F,
     f(x) = exp( S(x) ), where S is represented as a cubic spline.
 */
 class LogSpline: public math::IFunction {
-    CubicSpline S;
+    HermiteSpline S;
 public:
     /**/
     LogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN);
+        double derivLeft=NAN, double derivRight=NAN, bool avoidWiggles=false);
     virtual void evalDeriv(const double x,
         double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
     virtual unsigned int numDerivs() const { return 2; }
@@ -362,10 +362,10 @@ public:
     f(x) = exp( S( ln(x) ) ), where S is represented as a cubic spline.
 */
 class LogLogSpline: public math::IFunction {
-    CubicSpline S;
+    HermiteSpline S;
 public:
     LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN);
+        double derivLeft=NAN, double derivRight=NAN, bool avoidWiggles=false);
     virtual void evalDeriv(const double x,
         double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
     virtual unsigned int numDerivs() const { return 2; }

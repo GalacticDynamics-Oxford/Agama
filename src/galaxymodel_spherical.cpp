@@ -9,15 +9,11 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
-//debugging output
 #include <fstream>
 
 namespace galaxymodel{
 
 namespace{
-
-/// default grid spacing in log radius or log phase volume
-static const double DELTALOG = 0.125;
 
 /// required tolerance for the root-finder
 static const double EPSROOT  = 1e-6;
@@ -224,9 +220,24 @@ public:
         }
     }
 
-    virtual unsigned int numDerivs()   const { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
+/// integrand for computing the surface density (integrate over z = R * t / (1-t), with t=0..1)
+class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
+    const math::IFunction &density;
+    const double R;
+public:
+    SurfaceDensityIntegrand(const math::IFunction& _density, double _R) :
+        density(_density), R(_R) {}
+
+    virtual double value(const double t) const
+    {
+        double r = R * sqrt(pow_2(t/(1-t)) + 1);
+        return density(r) / pow_2(1-t);
+    }
+};
+    
 }  // internal namespace
 
 //---- Eddington inversion ----//
@@ -453,8 +464,8 @@ particles::ParticleArraySph generatePosVelSamples(
     DFSphericalIntegrand fnc(pot, df);
     math::Matrix<double> result;  // sampled scaled coordinates/velocities
     double totalMass, errorMass;  // total normalization of the DF and its estimated error
-    double xlower[6] = {0,0};     // boundaries of sampling region in scaled coordinates
-    double xupper[6] = {1,1};
+    double xlower[2] = {0,0};     // boundaries of sampling region in scaled coordinates
+    double xupper[2] = {1,1};
     math::sampleNdim(fnc, xlower, xupper, numPoints, result, NULL, &totalMass, &errorMass);
     const double pointMass = totalMass / result.rows();
     particles::ParticleArraySph points;
@@ -557,19 +568,24 @@ std::vector<double> computeDensity(const math::IFunction& df, const potential::P
 
 //---- Spherical model specified by a DF f(h) and phase volume h(E) ----//
 
-SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const math::IFunction& df) :
+SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const math::IFunction& df,
+    const std::vector<double>& gridh) :
     phasevol(_phasevol)
 {
     // 1. determine the range of h that covers the region of interest
-    // and construct the grid in log[h(Phi)]
-    std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
+    // and construct the grid in log[h(Phi)] if it wasn't provided
+    std::vector<double> gridLogH(gridh.size());
+    if(gridh.empty())
+        gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
+    else
+        std::transform(gridh.begin(), gridh.end(), gridLogH.begin(), log);
 
     // 2. store the values of f, g, h at grid nodes (ensure to consider only positive values of f)
     std::vector<double> gridF, gridG, gridH;
     for(unsigned int i=0; i<gridLogH.size();) {
         double h = exp(gridLogH[i]);
         double f = df(h);
-        if(f > MIN_VALUE) {
+        if(f >= MIN_VALUE) {
             gridF.push_back(f);
             gridH.push_back(h);
             gridG.push_back(0);
@@ -581,12 +597,23 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
     }
     const unsigned int npoints = gridLogH.size();
     std::vector<double> gridFint(npoints), gridFGint(npoints), gridFHint(npoints);
+    if(npoints < 3)
+        throw std::runtime_error("SphericalModel: f(h) is nowhere positive");  // most likely reason
 
     // 3a. determine the asymptotic behaviour of f(h):
     // f(h) ~ h^outerFslope as h-->inf  or  h^innerFslope as h-->0
-    double innerFslope = log(gridF[1] / gridF[0]) / (gridLogH[1] - gridLogH[0]);
-    double outerFslope = log(gridF[npoints-1] / gridF[npoints-2]) /
-        (gridLogH[npoints-1] - gridLogH[npoints-2]);
+    double innerFslope, outerFslope;
+    if(df.numDerivs() >= 1) {
+        double der;
+        df.evalDeriv(gridH[0], NULL, &der);
+        innerFslope = der / gridF[0] * gridH[0];
+        df.evalDeriv(gridH[npoints-1], NULL, &der);
+        outerFslope = der / gridF[npoints-1] * gridH[npoints-1];
+    } else {
+        innerFslope = log(gridF[1] / gridF[0]) / (gridLogH[1] - gridLogH[0]);
+        outerFslope = log(gridF[npoints-1] / gridF[npoints-2]) /
+            (gridLogH[npoints-1] - gridLogH[npoints-2]);
+    }
     if(!(innerFslope > -1))
         throw std::runtime_error("SphericalModel: f(h) rises too rapidly as h-->0\n"
             "f(h="+utils::toString(gridH[0])+")="+utils::toString(gridF[0]) + "; "
@@ -594,7 +621,7 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
             "innerFslope="+utils::toString(innerFslope));
     if(!(outerFslope < -1))
         throw std::runtime_error("SphericalModel: f(h) falls off too slowly as h-->infinity\n"
-             "f(h="+utils::toString(gridH[npoints-1])+")="+utils::toString(gridF[npoints-1])     + "; "
+             "f(h="+utils::toString(gridH[npoints-1])+")="+utils::toString(gridF[npoints-1]) + "; "
              "f(h="+utils::toString(gridH[npoints-2])+")="+utils::toString(gridF[npoints-2]) + " => "
              "outerFslope="+utils::toString(outerFslope));
     
@@ -705,19 +732,29 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
     intfh = math::QuinticSpline(gridLogH, gridFHint, gridFHder);
 }
 
-double SphericalModel::value(const double h) const
+void SphericalModel::evalDeriv(const double h, double* f, double* dfdh, double* /*ignored*/) const
 {
-    // intfg represents log-scaled  \int_0^h f(h) dh
-    double logh = log(h), val, der, g;
-    intfg.evalDeriv(logh, &val, &der);
-    double mass = exp(val);
+    // intfg (ln h) = ln ( int_0^h f(h') dh' )  => f(h) = d(intfg)/d(ln h) * exp(intfg) / h
+    double logh = log(h), val, der, der2, g, dgdh;
+    intfg.evalDeriv(logh, &val, &der, dfdh? &der2 : NULL);
+    val = exp(val);
     // at large h, intfg reaches a limit (totalMass), thus its derivative may be inaccurate
-    if(mass < totalMass * 0.9999 && der > 0)
-        return der * mass / h;   // still ok
-    // otherwise we compute it from a different spline which tends to zero at large h
-    intf.evalDeriv(logh, &val, &der);
-    phasevol.E(h, &g);
-    return -der * exp(val) / h * g;
+    if(val < totalMass * 0.999 && der > 0) {   // still ok
+        if(f)
+            *f = der * val / h;
+        if(dfdh)
+            *dfdh = (der2 + der * (der-1)) * val / (h*h);
+    } else {
+        // otherwise we compute it from a different spline which tends to zero at large h:
+        // intf (ln h) = ln ( int_h^infinity f(h') / g(h') dh' )
+        intf.evalDeriv(logh, &val, &der, dfdh? &der2 : NULL);
+        phasevol.E(h, &g, dfdh? &dgdh : NULL);
+        val = exp(val);
+        if(f)
+            *f = -der * g * val / h;
+        if(dfdh)
+            *dfdh = -((der2 + der * (der-1)) * g / h + der * dgdh) * val / h;
+    }
 }
 
 double SphericalModel::I0(const double logh) const
@@ -738,29 +775,40 @@ double SphericalModel::cumulEkin(const double logh) const
 }
 
 
-DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const math::IFunction& df) :
-    model(phasevol, df)
+DiffusionCoefs::DiffusionCoefs(const potential::PhaseVolume& phasevol, const math::IFunction& df,
+    const std::vector<double>& gridh) :
+    model(phasevol, df, gridh)
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in X = log[h(Phi)] and Y = log[h(E)/h(Phi)]
-    std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
-    const double logHmin         = gridLogH.front(),  logHmax = gridLogH.back();
-    const unsigned int npoints   = gridLogH.size();
-    const unsigned int npointsY  = 100;
-    const double mindeltaY       = fmin(0.1, (logHmax-logHmin)/npointsY);
-    std::vector<double> gridY    = math::createNonuniformGrid(npointsY, mindeltaY, logHmax-logHmin, true);
+    std::vector<double> gridLogH(gridh.size());
+    if(gridh.empty())
+        gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
+    else
+        std::transform(gridh.begin(), gridh.end(), gridLogH.begin(), log);
+    while(!gridLogH.empty() && df(exp(gridLogH.back())) < MIN_VALUE)  // ensure that f(hmax)>0
+        gridLogH.pop_back();
+    if(gridLogH.size() < 3)
+        throw std::runtime_error("DiffusionCoefs: f(h) is nowhere positive");
+    const double logHmin        = gridLogH.front(),  logHmax = gridLogH.back();
+    const unsigned int npoints  = gridLogH.size();
+    const unsigned int npointsY = 100;
+    const double mindeltaY      = fmin(0.1, (logHmax-logHmin)/npointsY);
+    std::vector<double> gridY   = math::createNonuniformGrid(npointsY, mindeltaY, logHmax-logHmin, true);
 
     // 3. determine the asymptotic behaviour of f(h) and g(h):
     // f(h) ~ h^outerFslope as h-->inf and  g(h) ~ h^(1-outerEslope)
-    double outerH      = exp(gridLogH.back()), outerG, outerE = phasevol.E(outerH, &outerG);
-    double prevouterH  = exp(gridLogH[npoints-2]);
-    double outerFslope = log(df(outerH) / df(prevouterH)) /
-        (gridLogH[npoints-1] - gridLogH[npoints-2]);
-    if(!(outerFslope < -1))
-        throw std::runtime_error("DiffusionCoefs: f(h) falls off too slowly as h-->infinity\n"
-            "f(h="+utils::toString(outerH)    +")="+utils::toString(df(outerH))     + "; "
-            "f(h="+utils::toString(prevouterH)+")="+utils::toString(df(prevouterH)) + " => "
-            "outerFslope="+utils::toString(outerFslope));
+    double outerH = exp(gridLogH.back()), outerG, outerE = phasevol.E(outerH, &outerG), outerFslope;
+    if(df.numDerivs() >= 1) {
+        double val, der;
+        df.evalDeriv(outerH, &val, &der);
+        outerFslope = der / val * outerH;
+    } else {
+        outerFslope = log(df(outerH) / df(exp(gridLogH[npoints-2]))) /
+            (gridLogH[npoints-1] - gridLogH[npoints-2]);
+    }    
+    if(!(outerFslope < -1))  // in this case SphericalModel would have already thrown the same exception
+        throw std::runtime_error("DiffusionCoefs: f(h) falls off too slowly as h-->infinity");
     double outerEslope = outerH / outerG / outerE;
     double outerRatio  = outerFslope / outerEslope;
     if(!(outerRatio > 0))  // TODO: this may happen if f(h_out)=0 which is a valid case (?)
@@ -914,6 +962,113 @@ void DiffusionCoefs::evalLocal(double Phi, double E, double &dvpar, double &dv2p
 }
 
 
+// ------ Input/output of text tables describing spherical models ------ //
+
+potential::PtrDensity readMassProfile(const std::string& filename, double* Mbh)
+{
+    std::ifstream strm(filename.c_str());
+    if(!strm)
+        throw std::runtime_error("Can't read input file " + filename);
+    std::vector<double> radius, mass;
+    const std::string validDigits = "0123456789.-+";
+    double m0 = 0;   // possible central mass to be subtracted from all other elements of input table
+    while(strm) {
+        std::string str;
+        std::getline(strm, str);
+        std::vector<std::string> elems = utils::splitString(str, " \t,;");
+        if(elems.size() < 2 || validDigits.find(elems[0][0]) == std::string::npos)
+            continue;
+        double r = utils::toDouble(elems[0]),  m = utils::toDouble(elems[1]);
+        if(r>0) {
+            radius.push_back(r);
+            mass.push_back(m-m0);
+        } else {      // a nonzero mass at r=0 representing a central black hole is allowed
+            m0 = m;   // in the input file, but this point will not be stored in the arrays
+        }
+    }
+    if(Mbh)   // central point mass stored in the file will be added to Mbh
+        *Mbh += m0;
+    return potential::PtrDensity(new potential::DensitySphericalHarmonic(radius,
+        std::vector<std::vector<double> >(1, densityFromCumulativeMass(radius, mass))));
+}
+
+void writeSphericalModel(
+    const std::string& fileName, const SphericalModel& model,
+    const potential::BasePotential& pot, const potential::BaseDensity* dens,
+    const std::vector<double>& gridh)
+{
+    if(!isSpherical(pot) || (dens!=NULL && !isSpherical(*dens)))
+        throw std::runtime_error("writeSphericalModel: the potential and density must be spherical");
+
+    // construct a suitable grid in h, if not provided
+    std::vector<double> gridH(gridh);
+    const math::IFunction& df = model;
+    if(gridh.empty()) {
+        // estimate the range of log(h) where the DF varies considerably
+        std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), 1e-6);
+        // create a grid in h (log-spaced) that covers a somewhat wider range than the estimate above
+        gridH = math::createExpGrid(100, exp(gridLogH.front()-1.), exp(gridLogH.back()+1.));
+    } else if(gridh.size()<2)
+        throw std::runtime_error("writeSphericalModel: gridh is too small");
+
+    // record various quantities on this grid
+    size_t npoints = gridH.size();
+    std::vector<double> gridR(npoints), gridPhi(npoints), gridG(npoints), gridRho(npoints);
+    for(size_t i=0; i<npoints; i++) {
+        gridPhi[i] = model.phasevol.E(gridH[i], &gridG[i]);
+        gridR[i]   = R_max(pot, gridPhi[i]);
+        if(dens)   // if input density was provided, use it
+            gridRho[i] = dens->density(coord::PosCyl(gridR[i], 0, 0));
+    }
+    if(!dens)   // if it wasn't provided, compute the density from DF
+        gridRho = computeDensity(model, model.phasevol, gridPhi);
+
+    // construct an interpolator for the density profile
+    math::LogLogSpline density(gridR, gridRho, NAN, NAN, true);
+
+    double mult = 16*M_PI*M_PI * model.cumulMass();  // common factor for diffusion coefs
+    // determine the central mass (check if it appears to be non-zero)
+    double coef, slope = potential::innerSlope(pot, NULL, &coef);
+    double Mbh = fabs(slope + 1.) < 1e-3 ? -coef : 0;
+
+    // output various quantities as functions of r (or h) to the file
+    std::ofstream strm(fileName.c_str());
+    strm << "#r      \tM(r)    \tE=Phi(r)\trho(r)  \tf(E)    \tg(E)=dh/dE\th(E)    \t"
+        "M(E)    \tSurfaceDensity\tDeltaE^2\tDeltaE  \tMassFlux\n"
+        // first line for r=0
+        "0       \t" + utils::pp(Mbh, 14) + '\t' +
+        utils::pp(pot.value(coord::PosCyl(0, 0, 0)), 14) + '\n';
+    for(unsigned int i=0; i<gridH.size(); i++) {
+        double r = gridR[i], f, dfdh, g = gridG[i], h = gridH[i], logh = log(h);
+        df.evalDeriv(h, &f, &dfdh);
+        coord::GradCyl grad;
+        pot.eval(coord::PosCyl(r, 0, 0), NULL, &grad);
+        double
+        MwithinR = grad.dR * pow_2(r),       // mass enclosed by the radius r
+        intfg    = model.cumulMass(logh),    // mass of particles within phase volume < h
+        intfh    = model.cumulEkin(logh) * (2./3),
+        intf     = model.I0(logh),
+        DeltaE   = mult *  (intf - intfg / g),
+        DeltaE2  = mult *  (intf * h + intfh) / g * 2.,
+        Flux     =-mult * ((intf * h + intfh) * g * dfdh + intfg * f),
+        Sigma    = math::integrateAdaptive(SurfaceDensityIntegrand(density, r), 0, 1, 1e-3) * 2*r;
+        
+        strm << utils::pp(r,          14) +  // [ 1] radius
+        '\t' +  utils::pp(MwithinR,   14) +  // [ 2] enclosed mass
+        '\t' +  utils::pp(gridPhi[i], 14) +  // [ 3] Phi(r)=E
+        '\t' +  utils::pp(gridRho[i], 14) +  // [ 4] rho(r)
+        '\t' +  utils::pp(f,          14) +  // [ 5] distribution function f(E)
+        '\t' +  utils::pp(g,          14) +  // [ 6] density of states = dh/dE
+        '\t' +  utils::pp(h,          14) +  // [ 7] phase volume
+        '\t' +  utils::pp(intfg,      14) +  // [ 8] mass of particles having energy below E
+        '\t' +  utils::pp(Sigma,      14) +  // [ 9] surface density
+        '\t' +  utils::pp(DeltaE2,    14) +  // [10] diffusion coefficient <Delta E^2>
+        '\t' +  utils::pp(DeltaE,     14) +  // [11] drift coefficient <Delta E>
+        '\t' +  utils::pp(Flux,       14) +  // [12] flux of particles through the phase volume
+        '\n';
+    }
+}
+
 // ------ Fokker-Planck solver ------ //
 
 namespace {
@@ -940,21 +1095,28 @@ potential::Interpolator computePotential(
 
 FokkerPlanckSolver::FokkerPlanckSolver(
     const math::IFunction& initDensity, const potential::PtrPotential& externalPotential,
-    const std::vector<double>& inputgridh) :
+    const std::vector<double>& inputgridh, Options _options) :
     extPot(externalPotential),
-    totalPot(computePotential(initDensity, externalPotential, 0, 0, /*diagnostic output*/ Phi0)),
+    totalPot((_options & FP_NO_SELF_GRAVITY) == FP_NO_SELF_GRAVITY && extPot ?
+        potential::Interpolator(*extPot) :
+        computePotential(initDensity, externalPotential, 0, 0, /*diagnostic output*/ Phi0)),
     phasevol(totalPot),
-    gridh(inputgridh)
+    gridh(inputgridh),
+    options(_options)
 {
+    if((options & FP_NO_SELF_GRAVITY) == FP_NO_SELF_GRAVITY && !extPot)
+        throw std::runtime_error(
+            "FokkerPlanckSolver: need an external potential if self-gravity is disabled");
+
     // construct the initial distribution function
-    makeEddingtonDF(initDensity, totalPot, /*output*/ gridh, gridf);
+    makeEddingtonDF(initDensity, totalPot, /*input/output*/ gridh, /*output*/ gridf);
     if(!inputgridh.empty()) {
         // a grid in phase space was provided and we will try to respect it,
         // even though the Eddington inversion routine may have eliminated some of its nodes:
         // we re-interpolate the values of DF onto the original grid nodes,
         // but retain only the nodes where DF is larger than the absolute minimum value
         // (otherwise it will cause problems in constructing the log-spline interpolator later)
-        math::LogLogSpline spl(gridh, gridf);
+        math::LogLogSpline spl(gridh, gridf, NAN, NAN, true);
         gridh.clear();
         gridf.clear();
         for(unsigned int i=0; i<inputgridh.size(); i++) {
@@ -965,14 +1127,24 @@ FokkerPlanckSolver::FokkerPlanckSolver(
             }
         }
     }
+
+    // tweak the distribution function at boundaries, if necessary
+    if((options & FP_ZERO_DF_INNER) == FP_ZERO_DF_INNER)
+        gridf.front() = MIN_VALUE*10;
+    if((options & FP_ZERO_DF_OUTER) == FP_ZERO_DF_OUTER)
+        gridf.back()  = MIN_VALUE*10;
+        
     // compute diffusion coefficients
     reinitDifCoefs();
 }
 
 void FokkerPlanckSolver::reinitPotential()
 {
+    if((options & FP_NO_SELF_GRAVITY) == FP_NO_SELF_GRAVITY)
+        return;  // nothing happens in this case (the external potential is fixed)
+
     // 1. construct the interpolated distribution function from the values of f on the grid
-    math::LogLogSpline df(gridh, gridf);
+    math::LogLogSpline df(gridh, gridf, NAN, NAN, true);
 
     // 2. compute the density profile by integrating the DF over velocity at each point of the radial grid
     unsigned int gridsize = gridh.size()/2;
@@ -993,7 +1165,7 @@ void FokkerPlanckSolver::reinitPotential()
         }
 
     // 3. construct the density interpolator from the values computed on the radial grid
-    math::LogLogSpline newDensity(gridr, gridrho);
+    math::LogLogSpline newDensity(gridr, gridrho, NAN, NAN, true);
 
     // 4. solve the Poisson equation, reinit the potential and the phase volume
     totalPot = computePotential(newDensity, extPot, gridr.front(), gridr.back(),
@@ -1004,10 +1176,10 @@ void FokkerPlanckSolver::reinitPotential()
 void FokkerPlanckSolver::reinitDifCoefs()
 {
     // 1. construct the interpolated distribution function from the values of f on the grid
-    math::LogLogSpline df(gridh, gridf);
+    math::LogLogSpline df(gridh, gridf, NAN, NAN, true);
 
     // 2. construct the spherical model for this DF in the current potential, used to compute dif.coefs
-    SphericalModel model(phasevol, df);
+    SphericalModel model(phasevol, df, gridh);
     double mult = 16*M_PI*M_PI * model.cumulMass();
     // 2a. store diagnostic quantities
     Mass = model.cumulMass();
@@ -1024,11 +1196,11 @@ void FokkerPlanckSolver::reinitDifCoefs()
         Wplus(gridsize+1),  // Wplus[i]  = W_{m-1/2}^{+},  i=1..M
         Wminus(gridsize+1); // Wminus[i] = W_{m-1/2}^{-},  i=1..M
     for(unsigned int i=0; i<gridsize; i++)
-        xnode[i] = log(gridh[i]);
+        xnode  [i] = log(gridh[i]);
     for(unsigned int i=1; i<gridsize; i++)
-        xcenter[i] = (xnode[i]+xnode[i-1])/2;
-    xcenter[0] = 2*xnode[0]-xcenter[1];
-    xcenter[gridsize] = 2*xnode[gridsize-1]-xcenter[gridsize-1];
+        xcenter[i] = (xnode[i] + xnode[i-1]) / 2;
+    xcenter[0]        = 2 * xnode[0] - xcenter[1];
+    xcenter[gridsize] = 2 * xnode[gridsize-1] - xcenter[gridsize-1];
     
     // 3. compute the drift and diffusion coefficients
     // 3a. intermediate quantities W_{+,-} and C
@@ -1063,6 +1235,12 @@ void FokkerPlanckSolver::reinitDifCoefs()
             above[i]   = -denom * Cdiv[i+1] * Wplus[i+1];
         diag[i] = denom * (Cdiv[i] * Wplus[i] + Cdiv[i+1] * Wminus[i+1]);
     }
+
+    // 3c. assign the appropriate the boundary conditions
+    if((options & FP_ZERO_DF_INNER) == FP_ZERO_DF_INNER)
+        diag[0] = above[0] = 0;
+    if((options & FP_ZERO_DF_OUTER) == FP_ZERO_DF_OUTER)
+        diag[gridsize-1] = below[gridsize-2] = 0;
 }
 
 double FokkerPlanckSolver::doStep(double dt)

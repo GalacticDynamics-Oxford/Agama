@@ -14,6 +14,12 @@
 
 namespace utils {
 
+bool fileExists(const std::string& fileName)
+{
+    std::ifstream infile(fileName.c_str());
+    return infile.good();
+}
+
 /* -------- error reporting routines ------- */
 
 namespace{  // internal

@@ -229,8 +229,8 @@ double DiskAnsatz::densityCyl(const coord::PosCyl &pos) const
 void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
-    double r    = sqrt(pow_2(pos.R) + pow_2(pos.z));
-    double h, H, Hp, f, fp, fpp;
+    double r = sqrt(pow_2(pos.R) + pow_2(pos.z));
+    double h=0, H=0, Hp=0, f=0, fp=0, fpp=0;
     bool deriv1 = deriv!=NULL || deriv2!=NULL;  // compute 1st derivative of f and H only if necessary
     verticalFnc->evalDeriv(pos.z, &H, deriv1? &Hp : NULL, deriv2? &h : NULL);
     radialFnc  ->evalDeriv(r,     &f, deriv1? &fp : NULL, deriv2? &fpp : NULL);

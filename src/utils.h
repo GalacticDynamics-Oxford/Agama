@@ -110,4 +110,9 @@ bool stringsEqual(const std::string& str1, const std::string& str2);
 /// overloaded routine that compares two strings in a case-insensitive way
 bool stringsEqual(const std::string& str1, const char* str2);
 
+/*------- convenience function -------*/
+
+/// check if a file with this name exists
+bool fileExists(const std::string& fileName);
+
 }  // namespace

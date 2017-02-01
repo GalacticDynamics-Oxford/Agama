@@ -67,7 +67,7 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
 }
 
 // a static variable that initializes our error handler
-static bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler);
+namespace { bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler); }
 
 // ------ math primitives -------- //
 
@@ -431,15 +431,17 @@ inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx
     double x2, double f2, double dfdx2)
 {
     // derivatives must exist and have the same sign
-    // (but shouldn't bee too large, otherwise we have an overflow -- apparently a bug in gsl_poly_solve)
-    if(!isFinite(dfdx1+dfdx2) || dfdx1*dfdx2<0 || fabs(dfdx1)>1e100 || fabs(dfdx2)>1e100)
+    if(!isFinite(dfdx1+dfdx2) || (dfdx1>=0 && dfdx2<0) || (dfdx2>=0 && dfdx1<0))
         return NAN;
     const double dx = x2-x1, sixdf = 6*(f2-f1);
     const double t = (x-x1)/dx;
-    // check if the interpolant is monotonic on t=[0:1]
+    // check if the interpolant is monotonic on t=[0:1] by solving a quadratic equation
+    double a = -sixdf+3*dx*(dfdx1+dfdx2), b = sixdf-2*dx*(2*dfdx1+dfdx2), c = dx*dfdx1;
+    if(!isFinite(a+b+c))
+        return NAN;
+    double norm = 1./std::max(fabs(a), std::max(fabs(b), fabs(c)));  // scale the coefs to avoid overflows
     double t1, t2;
-    int nroots = gsl_poly_solve_quadratic(-sixdf+3*dx*(dfdx1+dfdx2), 
-        sixdf-2*dx*(2*dfdx1+dfdx2), dx*dfdx1, &t1, &t2);
+    int nroots = gsl_poly_solve_quadratic(a*norm, b*norm, c*norm, &t1, &t2);
     if(nroots>0 && ((t1>=0 && t1<=1) || (t2>=0 && t2<=1)) )
         return NAN;   // will produce a non-monotonic result
     return pow_2(1-t) * ( (1+2*t)*f1 + t * dfdx1*dx )
@@ -504,8 +506,7 @@ double findRootHybrid(const IFunction& fnc,
             if(dd == dd) {  // Hermite interpolation is successful
                 d = dd;
             } else {        // proceed as usual in the Brent method
-                double p, q, r;
-                double s = fb / fa;
+                double p, q, r, s = fb / fa;
                 if (a == c) {     // secant method (linear interpolation)
                     p = 2 * m * s;
                     q = 1 - s;

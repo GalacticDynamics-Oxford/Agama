@@ -25,10 +25,7 @@
 */
 #pragma once
 #include <vector>
-
-#ifndef NULL
-#define NULL 0
-#endif
+#include <cstddef>  // defines NULL, size_t and ptrdiff_t
 
 namespace math{
 
@@ -37,9 +34,9 @@ namespace math{
 
 /// a triplet of numbers specifying an element in a sparse matrix
 struct Triplet {
-    unsigned int i; ///< row
-    unsigned int j; ///< column
-    double v;       ///< value
+    size_t i;  ///< row
+    size_t j;  ///< column
+    double v;  ///< value
     Triplet() : i(0), j(0), v(0) {}
     Triplet(const int _i, const int _j, const double _v) : i(_i), j(_j), v(_v) {}
     int row() const { return i; }
@@ -58,26 +55,26 @@ struct Triplet {
 */
 template<typename NumT>
 struct IMatrix {
-    IMatrix(unsigned int _nRows=0, unsigned int _nCols=0) :
+    IMatrix(size_t _nRows=0, size_t _nCols=0) :
         nRows(_nRows), nCols(_nCols) {}
 
     virtual ~IMatrix() {}
 
     /// overall size of the matrix (number of possibly nonzero elements)
-    virtual unsigned int size() const = 0;
+    virtual size_t size() const = 0;
 
     /// return an element from the matrix at the specified position
-    virtual NumT at(const unsigned int row, const unsigned int col) const = 0;
+    virtual NumT at(const size_t row, const size_t col) const = 0;
 
     /// return an element at the overall `index` from the matrix (0 <= index < size),
     /// together with its separate row and column indices; used to loop over all nonzero elements
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const = 0;
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const = 0;
 
     /// get the number of matrix rows
-    inline unsigned int rows() const { return nRows; }
-    
+    inline size_t rows() const { return nRows; }
+
     /// get the number of matrix columns
-    inline unsigned int cols() const { return nCols; }
+    inline size_t cols() const { return nCols; }
 
     friend void swap(IMatrix<NumT>& first, IMatrix<NumT>& second)
     {
@@ -86,8 +83,8 @@ struct IMatrix {
         swap(first.nCols, second.nCols);
     }
 private:
-    unsigned int nRows;     ///< number of rows (first index)
-    unsigned int nCols;     ///< number of columns (second index)
+    size_t nRows;     ///< number of rows (first index)
+    size_t nCols;     ///< number of columns (second index)
 };
 
 /// The interface for diagonal matrices
@@ -103,13 +100,13 @@ struct DiagonalMatrix: public IMatrix<NumT> {
     explicit DiagonalMatrix(const std::vector<NumT>& src) :
         IMatrix<NumT>(src.size(), src.size()), D(src) {}
 
-    virtual unsigned int size() const { return rows(); }
+    virtual size_t size() const { return rows(); }
 
-    virtual NumT at(const unsigned int row, const unsigned int col) const {
+    virtual NumT at(const size_t row, const size_t col) const {
         return col==row ? D.at(col) : 0;
     }
 
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const {
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
         row = col = index;
         return D.at(index);
     }
@@ -127,12 +124,12 @@ struct SpMatrix: public IMatrix<NumT> {
     SpMatrix();
 
     /// create a matrix of given size from a list of triplets (row,column,value);
-    SpMatrix(unsigned int nRows, unsigned int nCols,
+    SpMatrix(size_t nRows, size_t nCols,
         const std::vector<Triplet>& values = std::vector<Triplet>());
-    
+
     /// copy constructor from a sparse matrix
     SpMatrix(const SpMatrix<NumT>& src);
-    
+
 #if __cplusplus >= 201103L
     // move constructor in C++11
     SpMatrix(SpMatrix&& src) : SpMatrix() {
@@ -145,30 +142,30 @@ struct SpMatrix: public IMatrix<NumT> {
         swap(*this, src);
         return *this;
     }
-    
+
     /// needed for standard containers and assignment operator
     friend void swap(SpMatrix<NumT>& first, SpMatrix<NumT>& second) {
         using std::swap;
         swap(static_cast<IMatrix<NumT>&>(first), static_cast<IMatrix<NumT>&>(second));
         swap(first.impl, second.impl);
     }
-    
+
     virtual ~SpMatrix();
 
     /// read-only access to a matrix element
-    NumT operator() (unsigned int row, unsigned int col) const;
-    
+    NumT operator() (size_t row, size_t col) const;
+
     /// return all non-zero elements in a single array of triplets (row, column, value)
     std::vector<Triplet> values() const;
-    
+
     /// return the number of nonzero elements
-    virtual unsigned int size() const;
+    virtual size_t size() const;
 
     /// return the given nonzero element and store its row and column indices
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const;
-    
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const;
+
     /// return an element from the matrix at the specified position
-    virtual NumT at(unsigned int row, unsigned int col) const { return operator()(row, col); }
+    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
 
     void* impl;  ///< opaque implementation details
 };
@@ -178,25 +175,25 @@ template<typename NumT>
 struct Matrix: public IMatrix<NumT> {
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
-    
+
     /// default (empty) constructor
     Matrix();
 
     /// create a matrix of given size (values are not initialized!)
-    Matrix(unsigned int nRows, unsigned int nCols);
+    Matrix(size_t nRows, size_t nCols);
 
     /// create a matrix of given size, initialized to the given value
-    Matrix(unsigned int nRows, unsigned int nCols, const NumT value);
+    Matrix(size_t nRows, size_t nCols, const NumT value);
 
     /// copy constructor from a matrix of the same type
     Matrix(const Matrix<NumT>& src);
-    
+
     /// copy constructor from a sparse matrix
     explicit Matrix(const SpMatrix<NumT>& src);
-    
+
     /// create a matrix from a list of triplets (row,column,value)
-    Matrix(unsigned int nRows, unsigned int nCols, const std::vector<Triplet>& values);
-    
+    Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values);
+
     /// assignment from the same type of matrix
     Matrix& operator=(Matrix<NumT> src) {
         swap(*this, src);
@@ -209,43 +206,43 @@ struct Matrix: public IMatrix<NumT> {
         swap(*this, src);
     }
 #endif
-    
+
     /// needed for standard containers and assignment operator
     friend void swap(Matrix<NumT>& first, Matrix<NumT>& second) {
         using std::swap;
         swap(static_cast<IMatrix<NumT>&>(first), static_cast<IMatrix<NumT>&>(second));
         swap(first.impl, second.impl);
     }
-    
+
     virtual ~Matrix();
-    
+
     /// access the matrix element for reading
-    const NumT& operator() (unsigned int row, unsigned int col) const;
+    const NumT& operator() (size_t row, size_t col) const;
 
     /// access the matrix element for writing
-    NumT& operator() (unsigned int row, unsigned int col);
+    NumT& operator() (size_t row, size_t col);
 
     /// access the raw data storage (flattened 2d array in row-major order):
     /// indexing scheme is  `M(row, column) = M.data[ row * M.cols() + column ]`;
     /// bound checks are the responsibility of the calling code
     NumT* data();
-    
+
     /// access the raw data storage (const overload)
     const NumT* data() const;
 
     /// get the number of elements
-    virtual unsigned int size() const { return cols() * rows(); }
-    
+    virtual size_t size() const { return cols() * rows(); }
+
     /// return the given nonzero element and store its row and column indices
-    virtual NumT elem(const unsigned int index, unsigned int &row, unsigned int &col) const {
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
         row = index / cols();
         col = index % cols();
         return operator()(row, col);
     }
-    
+
     /// return an element from the matrix at the specified position
-    virtual NumT at(unsigned int row, unsigned int col) const { return operator()(row, col); }
-    
+    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
+
     void* impl;     ///< opaque implementation details
 };
 
@@ -257,7 +254,7 @@ struct Matrix: public IMatrix<NumT> {
 template<typename NumT>
 bool allZeros(const std::vector<NumT>& vec)
 {
-    for(unsigned int i=0; i<vec.size(); i++)
+    for(size_t i=0; i<vec.size(); i++)
         if(vec[i]!=0)
             return false;
     return true;
@@ -267,8 +264,8 @@ bool allZeros(const std::vector<NumT>& vec)
 template<typename NumT>
 bool allZeros(const Matrix<NumT>& mat)
 {
-    for(unsigned int i=0; i<mat.rows(); i++)
-        for(unsigned int j=0; j<mat.cols(); j++)
+    for(size_t i=0; i<mat.rows(); i++)
+        for(size_t j=0; j<mat.cols(); j++)
             if(mat(i,j) != 0)
                 return false;
     return true;
@@ -278,8 +275,8 @@ bool allZeros(const Matrix<NumT>& mat)
 template<typename NumT>
 bool allZeros(const IMatrix<NumT>& mat)
 {
-    for(unsigned int k=0; k<mat.size(); k++) {
-        unsigned int i,j;
+    for(size_t k=0; k<mat.size(); k++) {
+        size_t i,j;
         if(mat.elem(k, i, j) != 0)
             return false;
     }
@@ -367,7 +364,7 @@ public:
         swap(first.sparse, second.sparse);
     }
     ~LUDecomp();
-    
+
     /// Construct a decomposition for the given dense matrix M
     explicit LUDecomp(const Matrix<double>& M);
 
@@ -378,7 +375,7 @@ public:
     std::vector<double> solve(const std::vector<double>& rhs) const;
 };
 
-    
+
 /** Cholesky decomposition of a symmetric positive-definite matrix M
     into a product of L L^T, where L is a lower triangular matrix.
     Once constructed, it be used for solving a linear system `M x = rhs` multiple times with
@@ -398,7 +395,7 @@ public:
         swap(first.impl, second.impl);
     }
     ~CholeskyDecomp();
-    
+
     /// Construct a decomposition for the given dense matrix M
     /// (only the lower triangular part of M is used).
     /// \throw std::domain_error if M is not positive-definite

@@ -18,11 +18,6 @@ namespace{
 const unsigned int MAX_NCOEFS_ANGULAR = 101;
 const unsigned int MAX_NCOEFS_RADIAL  = 100;
 
-/// minimum number of terms in sph.-harm. expansion used to compute coefficients
-/// of a non-spherical density or potential model (it may be larger than
-/// the requested number of output terms, to improve the accuracy of integration)    
-const unsigned int LMIN_SPHHARM = 16;
-
 /// max number of function evaluations in multidimensional integration
 const unsigned int MAX_NUM_EVAL = 4096;
 

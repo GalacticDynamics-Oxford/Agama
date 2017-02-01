@@ -41,7 +41,7 @@ void IOSnapshotText::writeSnapshot(const ParticleArrayCar& points) const
     std::ofstream strm(fileName.c_str(), std::ios::out);
     if(!strm) 
         throw std::runtime_error("IOSnapshotText: cannot write to file "+fileName);
-    strm << "x\ty\tz\tvx\tvy\tvz\tm" << std::endl;
+    strm << "#x\ty\tz\tvx\tvy\tvz\tm" << std::endl;
     for(size_t indx=0; indx<points.size(); indx++)
     {
         const coord::PosVelCar& pt = points.point(indx);
@@ -98,25 +98,23 @@ void writeSnapshotUNSIO(const std::string& fileName,
     const units::ExternalUnits& conv, const ParticleArrayCar& points, const std::string& type)
 {
     uns::CunsOut output(fileName, type);
-    bool result = 1 || output.isValid();  // this flag is apparently not initialized properly
-    if(result) {
-        int nbody=static_cast<int>(points.size());
-        std::vector<float> pos(nbody*3), vel(nbody*3), mass(nbody);
-        for(int i=0; i<nbody; i++) {
-            const coord::PosVelCar& pt = points.point(i);
-            pos[i*3]  = static_cast<float>(pt.x  / conv.lengthUnit);
-            pos[i*3+1]= static_cast<float>(pt.y  / conv.lengthUnit);
-            pos[i*3+2]= static_cast<float>(pt.z  / conv.lengthUnit);
-            vel[i*3]  = static_cast<float>(pt.vx / conv.velocityUnit);
-            vel[i*3+1]= static_cast<float>(pt.vy / conv.velocityUnit);
-            vel[i*3+2]= static_cast<float>(pt.vz / conv.velocityUnit);
-            mass[i]   = static_cast<float>(points.mass(i) / conv.massUnit);
-        }
-        result &= output.snapshot->setData("halo", "pos", nbody, &(pos.front()), true)>0;
-        result &= output.snapshot->setData("halo", "vel", nbody, &(vel.front()), true)>0;
-        result &= output.snapshot->setData("halo", "mass",nbody, &(mass.front()),true)>0;
-        result &= output.snapshot->save()>0;
+    bool result = true;
+    int nbody=static_cast<int>(points.size());
+    std::vector<float> pos(nbody*3), vel(nbody*3), mass(nbody);
+    for(int i=0; i<nbody; i++) {
+        const coord::PosVelCar& pt = points.point(i);
+        pos[i*3]  = static_cast<float>(pt.x  / conv.lengthUnit);
+        pos[i*3+1]= static_cast<float>(pt.y  / conv.lengthUnit);
+        pos[i*3+2]= static_cast<float>(pt.z  / conv.lengthUnit);
+        vel[i*3]  = static_cast<float>(pt.vx / conv.velocityUnit);
+        vel[i*3+1]= static_cast<float>(pt.vy / conv.velocityUnit);
+        vel[i*3+2]= static_cast<float>(pt.vz / conv.velocityUnit);
+        mass[i]   = static_cast<float>(points.mass(i) / conv.massUnit);
     }
+    result &= output.snapshot->setData("halo", "pos", nbody, &(pos.front()), true)>0;
+    result &= output.snapshot->setData("halo", "vel", nbody, &(vel.front()), true)>0;
+    result &= output.snapshot->setData("halo", "mass",nbody, &(mass.front()),true)>0;
+    result &= output.snapshot->save()>0;
     if(!result) 
         throw std::runtime_error("IOSnapshotUNSIO: cannot write to file "+fileName);
 };
@@ -144,16 +142,16 @@ ParticleArrayCar IOSnapshotNemo::readSnapshot() const
 
 namespace {   // internal
 /// helper class that writes NEMO-compatible snapshot file
-class CNemoSnapshotWriter
+class NemoSnapshotWriter
 {
 public:
     /// create class instance and open file (append if necessary)
-    CNemoSnapshotWriter(const std::string &filename, bool append=false) {
-        snap.open(filename.c_str(), std::ios::binary | (append?std::ios_base::app : std::ios_base::trunc));
+    NemoSnapshotWriter(const std::string &filename, bool append=false) {
+        snap.open(filename.c_str(), std::ios::binary | (append? std::ios_base::app : std::ios_base::trunc));
         level=0;
     }
     /// close file
-    ~CNemoSnapshotWriter() { snap.close(); }
+    ~NemoSnapshotWriter() { snap.close(); }
     /// return a letter corresponding to the given type
     template<typename T> char typeLetter();
     /// store a named quantity
@@ -255,20 +253,20 @@ private:
     std::ofstream snap;  ///< data stream
     int level;           ///< index of current level (root level is 0)
 };
-template<> char CNemoSnapshotWriter::typeLetter<int>()   { return 'i'; };
-template<> char CNemoSnapshotWriter::typeLetter<float>() { return 'f'; };
-template<> char CNemoSnapshotWriter::typeLetter<double>(){ return 'd'; };
-template<> char CNemoSnapshotWriter::typeLetter<char>()  { return 'c'; };
+template<> char NemoSnapshotWriter::typeLetter<int>()   { return 'i'; };
+template<> char NemoSnapshotWriter::typeLetter<float>() { return 'f'; };
+template<> char NemoSnapshotWriter::typeLetter<double>(){ return 'd'; };
+template<> char NemoSnapshotWriter::typeLetter<char>()  { return 'c'; };
 }  // end internal namespace
 
 void IOSnapshotNemo::writeSnapshot(const ParticleArrayCar& points) const
 {
-    CNemoSnapshotWriter SnapshotWriter(fileName, append);
-    bool result = SnapshotWriter.ok();
+    NemoSnapshotWriter snapshotWriter(fileName, append);
+    bool result = snapshotWriter.ok();
     if(result) {
-        SnapshotWriter.writeHistory(header);
-        SnapshotWriter.writePhase<float>(points, time, conv); 
-        result = SnapshotWriter.ok();
+        snapshotWriter.writeHistory(header);
+        snapshotWriter.writePhase<float>(points, time, conv); 
+        result = snapshotWriter.ok();
     }
     if(!result) 
         throw std::runtime_error("IOSnapshotNEMO: cannot write to file "+fileName);
@@ -286,8 +284,8 @@ PtrIOSnapshot createIOSnapshotRead (const std::string &fileName,
     char buffer[8];
     strm.read(buffer, 8);
     strm.close();
-    if(buffer[0]==-110 &&  // NEMO signature: open block
-        (buffer[2]=='c' || buffer[2]=='i' || buffer[2]=='f' || buffer[2]=='d' || buffer[2]=='('))  // nemo block type
+    if(buffer[0]==-110 &&  // NEMO signature: open block of a particular type
+        (buffer[2]=='c' || buffer[2]=='i' || buffer[2]=='f' || buffer[2]=='d' || buffer[2]=='('))
     {
         return PtrIOSnapshot(new IOSnapshotNemo(fileName, unitConverter));
     } else
@@ -303,7 +301,7 @@ PtrIOSnapshot createIOSnapshotRead (const std::string &fileName,
     {   // anything else is a text file by default (might not work out anyway)
         return PtrIOSnapshot(new IOSnapshotText(fileName, unitConverter));
     }
-};
+}
 
 // creates an instance of snapshot writer for a given format name, 
 // or throw an exception if the format name string is incorrect
@@ -314,37 +312,17 @@ PtrIOSnapshot createIOSnapshotWrite(const std::string &fileName,
     if(fileFormat.empty() || fileName.empty())
         throw std::runtime_error("Snapshot file name or format is empty");
     if(tolower(fileFormat[0])=='t')
-        return PtrIOSnapshot(new IOSnapshotText(
-            time==0 ? fileName : (fileName + utils::toString(time)), unitConverter) );
+        return PtrIOSnapshot(new IOSnapshotText(fileName, unitConverter) );
     else 
     if(tolower(fileFormat[0])=='n')
         return PtrIOSnapshot(new IOSnapshotNemo(fileName, unitConverter, header, time, append));
 #ifdef HAVE_UNSIO
     else 
     if(tolower(fileFormat[0])=='g')
-        return PtrIOSnapshot(new IOSnapshotGadget(
-            time==0 ? fileName : (fileName + utils::toString(time)), unitConverter) );
+        return PtrIOSnapshot(new IOSnapshotGadget(fileName, unitConverter) );
 #endif
     else
         throw std::runtime_error("Snapshot file format not recognized");   // error - format name not found
-};
-
-#if 0
-/// create a list of all IO snapshot formats available at compile time
-std::vector< std::string > initFormatsIOSnapshot()
-{
-    std::vector< std::string > formats;
-    formats.push_back("Text");
-    formats.push_back("Nemo");
-#ifdef HAVE_UNSIO
-    formats.push_back("Gadget");
-#endif
-    return formats;
-};
-
-// list of all available IO snapshot formats, initialized at module start 
-// according to the file formats supported at compile time
-std::vector< std::string > formatsIOSnapshot = initFormatsIOSnapshot();
-#endif
+}
 
 };  // namespace

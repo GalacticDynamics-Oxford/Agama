@@ -50,6 +50,13 @@ SOURCES   = \
             potential_perfect_ellipsoid.cpp \
             potential_sphharm.cpp \
             potential_utils.cpp \
+            raga_base.cpp  \
+            raga_core.cpp   \
+            raga_binary.cpp  \
+            raga_losscone.cpp \
+            raga_potential.cpp \
+            raga_relaxation.cpp \
+            raga_trajectory.cpp  \
             utils.cpp \
             utils_config.cpp \
             fortran_wrapper.cpp \
@@ -87,8 +94,10 @@ TESTSRCS  = test_math_core.cpp \
             test_df_spherical.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
-            example_fokker_planck.cpp \
             example_self_consistent_model.cpp \
+            mkspherical.cpp \
+            phaseflow.cpp \
+            raga.cpp \
 
 TESTFORTRAN = example_fortran.f
 

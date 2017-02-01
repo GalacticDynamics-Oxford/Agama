@@ -209,7 +209,7 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
 }
 
 bool test_prol() {
-    const coord::ProlSph cs(1.6*1.6-1);
+    const coord::ProlSph cs(sqrt(1.6*1.6-1));
     double lambda=1.5600000000780003, nu=-1.5599999701470495;
     const coord::PosProlSph pp(lambda, nu, 0, cs);
     const coord::PosCyl pc=coord::toPosCyl(pp);
@@ -218,7 +218,7 @@ bool test_prol() {
 }
 
 bool test_prol2(const coord::PosCyl& src) {
-    const coord::ProlSph cs(1.6*1.6-1);
+    const coord::ProlSph cs(sqrt(1.6*1.6-1));
     coord::PosDerivT <coord::Cyl, coord::ProlSph> derivCtoP;
     coord::PosDeriv2T<coord::Cyl, coord::ProlSph> deriv2CtoP;
     const coord::PosProlSph pp = coord::toPosDeriv<coord::Cyl, coord::ProlSph>(src, cs, &derivCtoP, &deriv2CtoP);

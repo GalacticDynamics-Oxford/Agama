@@ -145,24 +145,24 @@ public:
     /// Create an internal unit system from two scaling parameters -- length and time scales
     InternalUnits(double length_unit_in_cm, double time_unit_in_s) :
       length_unit(length_unit_in_cm),
-      mass_unit(length_unit_in_cm*length_unit_in_cm*length_unit_in_cm/time_unit_in_s/time_unit_in_s/units::Grav),
+      mass_unit(length_unit_in_cm*length_unit_in_cm*length_unit_in_cm/time_unit_in_s/time_unit_in_s/Grav),
       time_unit(time_unit_in_s),
-      from_Msun(units::Msun/mass_unit),
-      from_pc  (units::pc  /length_unit),
-      from_Kpc (units::Kpc /length_unit),
-      from_Mpc (units::Mpc /length_unit),
-      from_ly  (units::ly  /length_unit),
-      from_yr  (units::yr  /time_unit),
-      from_Myr (units::Myr /time_unit),
-      from_Gyr (units::Gyr /time_unit),
-      from_mas_per_yr(units::mas_per_yr * time_unit),
-      from_kms (units::kms /(length_unit/time_unit)),
-      from_Kpc_kms (units::Kpc_kms/(length_unit*length_unit/time_unit)),
-      from_Msun_per_pc2 (units::Msun_per_pc2 /(mass_unit/length_unit/length_unit)),
-      from_Msun_per_pc3 (units::Msun_per_pc3 /(mass_unit/length_unit/length_unit/length_unit)),
-      from_Msun_per_Kpc2(units::Msun_per_Kpc2/(mass_unit/length_unit/length_unit)),
-      from_Msun_per_Kpc3(units::Msun_per_Kpc3/(mass_unit/length_unit/length_unit/length_unit)),
-      from_Gev_per_cm3  (units::Gev_per_cm3  /(mass_unit/length_unit/length_unit/length_unit)),
+      from_Msun(Msun/mass_unit),
+      from_pc  (pc  /length_unit),
+      from_Kpc (Kpc /length_unit),
+      from_Mpc (Mpc /length_unit),
+      from_ly  (ly  /length_unit),
+      from_yr  (yr  /time_unit),
+      from_Myr (Myr /time_unit),
+      from_Gyr (Gyr /time_unit),
+      from_mas_per_yr(mas_per_yr * time_unit),
+      from_kms (kms /(length_unit/time_unit)),
+      from_Kpc_kms (Kpc_kms/(length_unit*length_unit/time_unit)),
+      from_Msun_per_pc2 (Msun_per_pc2 /(mass_unit/length_unit/length_unit)),
+      from_Msun_per_pc3 (Msun_per_pc3 /(mass_unit/length_unit/length_unit/length_unit)),
+      from_Msun_per_Kpc2(Msun_per_Kpc2/(mass_unit/length_unit/length_unit)),
+      from_Msun_per_Kpc3(Msun_per_Kpc3/(mass_unit/length_unit/length_unit/length_unit)),
+      from_Gev_per_cm3  (Gev_per_cm3  /(mass_unit/length_unit/length_unit/length_unit)),
       to_Msun(1./from_Msun),
       to_pc  (1./from_pc),
       to_Kpc (1./from_Kpc),
@@ -204,7 +204,7 @@ static const InternalUnits weird_units(2.71828*units::pc, 42.*units::ly/units::k
     in kiloparsecs, km/s and solar masses, and convert the data into the internal unit system 
     specified by a global instance  of `units::InternalUnits` class (let's name it `modelUnit`), 
     one has to create an instance of the conversion class 
-    `units::ExternalUnits extUnit (modelUnit, 1.0*units::Kpc, 1.0*units.kms, 1.0*units.Msun);`.
+    `units::ExternalUnits extUnit (modelUnit, 1.0*units::Kpc, 1.0*units::kms, 1.0*units::Msun);`.
     This conversion class would need to be passed to routines for reading/writing N-body snapshots
     (in particles_io.h) and to routines for creating a potential instance from the parameters
     provided in the configuration file (in potential_factory.h)
@@ -222,9 +222,9 @@ struct ExternalUnits {
     /** construct a converter for the given internal unit system and specified external units,
         the latter expressed in CGS unit system using the constants defined in this header file */
     ExternalUnits(const InternalUnits& unit, double _lengthUnit, double _velocityUnit, double _massUnit) :
-        lengthUnit(unit.from_pc*_lengthUnit/pc), 
-        velocityUnit(unit.from_kms*_velocityUnit/kms), 
-        massUnit(unit.from_Msun*_massUnit/Msun),
-        timeUnit(lengthUnit/velocityUnit) {};
+        lengthUnit  (unit.from_pc   * _lengthUnit / pc), 
+        velocityUnit(unit.from_kms  * _velocityUnit / kms), 
+        massUnit    (unit.from_Msun * _massUnit / Msun),
+        timeUnit    (lengthUnit / velocityUnit) {};
 };
 }  // namespace units
