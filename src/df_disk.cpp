@@ -54,12 +54,14 @@ double PseudoIsothermal::value(const actions::Actions &J) const
         exp_JrJz = df_JrJz(sigmarsq, sigmazsq, pow_2(par.sigmamin), kappaJr, nuJz);
     else {  // integrate using the pre-initialized Gauss-Legendre table on the interval [0:1]
         double sumnorm = 0;
-        double t1 = 1 / (pow(par.sigmabirth, -1/par.beta) - 1);
+        double t1 = 1 / (std::pow(par.sigmabirth, -1/par.beta) - 1);
         for(int i=0; i<NT; i++) {
+            // t is the lookback time (stellar age) measured in units of galaxy time (ranges from 0 to 1)
+            double t = qx[i];
             // star formation rate exponentially increases with look-back time
-            double weight = exp(qx[i] / par.Tsfr) * qw[i];
+            double weight = exp(t / par.Tsfr) * qw[i];
             // velocity dispersion scales as  [ (t+t1) / (1+t1) ]^beta
-            double mult   = pow( (t1 + qx[i]) / (1 + qx[i]), par.beta);
+            double mult   = std::pow( (t + t1) / (1 + t1), par.beta);
             exp_JrJz += weight * df_JrJz(sigmarsq * mult, sigmazsq * mult,
                 pow_2(par.sigmamin), kappaJr, nuJz);
             sumnorm  += weight;

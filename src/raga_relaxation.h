@@ -72,8 +72,8 @@
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
 namespace galaxymodel {
-class DiffusionCoefs;
-typedef shared_ptr<DiffusionCoefs> PtrDiffusionCoefs;
+class SphericalModelLocal;
+typedef shared_ptr<SphericalModelLocal> PtrSphericalModelLocal;
 }
 
 namespace raga {
@@ -85,7 +85,7 @@ class RuntimeRelaxation: public BaseRuntimeFnc {
 public:
     RuntimeRelaxation(
         const potential::BasePotential& _potentialSph,
-        const galaxymodel::DiffusionCoefs& _relaxationModel,
+        const galaxymodel::SphericalModelLocal& _relaxationModel,
         double _relaxationRate,
         double _outputTimestep,
         const std::vector<double>::iterator& _outputFirst,
@@ -119,7 +119,7 @@ private:
         Moreover, this model contains the PhaseVolume object that transforms the energy to
         phase volume.
     */
-    const galaxymodel::DiffusionCoefs& relaxationModel;
+    const galaxymodel::SphericalModelLocal& relaxationModel;
 
     /** The amplitude of relaxation (the drift and diffusion coefs returned by the relaxation
         model are multiplied by this factor, which has a physical meaning of \ln\Lambda/N_\star,
@@ -157,6 +157,9 @@ struct ParamsRelaxation {
 
     /// interval between writing out a text file with the spherical model
     double outputInterval;
+    
+    /// optional header written in the output file
+    std::string header;
 };
 
 /** The driver class for simulating two-body relaxation */
@@ -211,7 +214,7 @@ private:
         which provides the diffusion coefficients for perturbing the particle velocity
         during orbit integration
     */
-    galaxymodel::PtrDiffusionCoefs ptrRelaxationModel;
+    galaxymodel::PtrSphericalModelLocal ptrRelaxationModel;
 
     /** place for storing the phase volume h(E) (essentially a function of energy)
         sampled from particle trajectories during the episode

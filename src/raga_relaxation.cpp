@@ -10,29 +10,6 @@
 
 namespace raga {
 
-/// construct a random unit vector perpendicular to the given vector;
-/// as a by-product, compute the magnitude of the original vector.
-inline void getRandomPerpendicularVector(const double vec[3], double& vmag, double vper[3])
-{
-    double phi = 2*M_PI * math::random();  // rotation angle about the given vector
-    double cosphi = cos(phi), sinphi = sin(phi);
-    if(vec[1] != 0 || vec[2] != 0) {
-        // a combination of two steps:
-        // (1) obtain one perpendicular vector as a cross product of v and e_x;
-        // (2) rotate it about the vector v by angle phi, using the Rodriguez formula.
-        vmag = sqrt(pow_2(vec[0]) + pow_2(vec[1]) + pow_2(vec[2]));
-        double norm = 1 / sqrt(pow_2(vec[1]) + pow_2(vec[2])) / vmag;
-        vper[0] = norm * (sinphi * (pow_2(vec[0]) - pow_2(vmag)) );
-        vper[1] = norm * (sinphi * vec[0] * vec[1] - cosphi * vmag * vec[2]);
-        vper[2] = norm * (sinphi * vec[0] * vec[2] + cosphi * vmag * vec[1]);
-    } else {  // degenerate case
-        vmag    = fabs(vec[0]);
-        vper[0] = 0;
-        vper[1] = cosphi;
-        vper[2] = sinphi;
-    }
-}
-
 StepResult RuntimeRelaxation::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double currentState[6])
 {
@@ -45,7 +22,7 @@ StepResult RuntimeRelaxation::processTimestep(
     {
         sol.getSol(tsamp, data);
         double E = totalEnergy(potentialSph, coord::PosVelCar(data));
-        *(outputIter++) = relaxationModel.model.phasevol(E);
+        *(outputIter++) = relaxationModel.phasevol(E);
     }
 
     // 2. simulate the two-body relaxation
@@ -90,9 +67,9 @@ StepResult RuntimeRelaxation::processTimestep(
 
     // 2e. add the perturbations to the velocity
     double uper[3];  // unit vector perpendicular to velocity
-    double vmag;     // magnitude of the current velocity vector
-    getRandomPerpendicularVector(/*input: 3 components of velocity*/ currentState+3,
-        /*output: its magnitude*/ vmag, /*output: a random unit vector*/ uper);
+    double vmag =    // magnitude of the current velocity vector
+        math::getRandomPerpendicularVector(/*input: 3 components of velocity*/ currentState+3,
+        /*output: a random unit vector*/ uper);
     for(int d=0; d<3; d++)
         currentState[d+3] +=
             // first term is the component of unit vector parallel to v: v[d]/|v|
@@ -104,6 +81,46 @@ StepResult RuntimeRelaxation::processTimestep(
 //----- RagaTaskRelaxation -----//
 
 namespace{  // internal
+
+/// modified log-log spline with a restriction on the inner slope:
+class CautiousLogLogSpline: public math::IFunction {
+    /// spline in log-log-scaled coordinates
+    math::LogLogSpline spl;
+    /// innermost grid point, corresponding function value and inner slope for extrapolation
+    double xmin, sval, slope;
+public:
+    CautiousLogLogSpline(const math::LogLogSpline& S, double minslope) :
+        spl(S), xmin(spl.xmin())
+    {
+        spl.evalDeriv(xmin, &sval, &slope);
+        slope *= xmin / sval;
+        if(!(slope >= minslope)) {
+            utils::msg(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of f(h) "
+                "from "+utils::toString(slope)+" to "+utils::toString(minslope)+" to keep Etotal finite");
+            slope = minslope;
+        }
+    }
+
+    virtual void evalDeriv(const double x,
+        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
+    {
+        // extrapolation at small x is a power-law with the given slope;
+        // if the correction in the constructor was not applied, this is the same as the original spline,
+        // otherwise this results in a shallower inner power-law profile
+        if(x<xmin) {
+            double ratio = pow(x/xmin, slope);
+            if(value)
+                *value = sval * ratio;
+            if(deriv)
+                *deriv = sval * ratio * slope / x;
+            if(deriv2)
+                *deriv2= sval * ratio * slope * (slope-1) / pow_2(x);
+        } else
+            spl.evalDeriv(x, value, deriv, deriv2);
+    }
+
+    virtual unsigned int numDerivs() const { return 2; }
+};
 
 // eliminate samples with zero mass or positive energy (i.e. non-existent h):
 void eliminateBadSamples(std::vector<double>& particle_h, std::vector<double>& particle_m)
@@ -142,6 +159,22 @@ potential::PtrPotential createSphericalPotential(
     std::vector<std::vector<double> > Phi, dPhi;
     pot.getCoefs(rad, Phi, dPhi);
 
+    // safety check: ensure that the potential is finite at origin
+    // (more specifically, extrapolated as Phi(0) + C r^s with s>=0.05) -
+    // this is needed for well-behaved diffusion coefs
+    const double MINSLOPE = 0.05;
+    double lnr1r0= log(rad[1]/rad[0]);
+    double ratio = (Phi[0][1] - Phi[0][0]) / (dPhi[0][0] * rad[0] * lnr1r0);
+    // ratio = [(r1/r0)^s - 1] / s / ln(r1/r0), and is  >= 1 + s/2 * ln(r1/r0)  if s>0
+    double slope = (ratio - 1) / lnr1r0 * 2;  // this approximately holds if s is near 0
+    if(slope < MINSLOPE) {
+        // modify the derivative at the innermost grid point to correct the slope
+        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of the potential "
+            "from "+utils::toString(slope)+" to "+utils::toString(MINSLOPE)+" to keep Phi(0) finite");
+        ratio = MINSLOPE * 0.5 * lnr1r0 + 1;
+        dPhi[0][0] = (Phi[0][1] - Phi[0][0]) / (ratio * rad[0] * lnr1r0);
+    }
+
     // retain only the l=0 terms and add the contribution from the central black hole
     Phi.resize(1);
     dPhi.resize(1);
@@ -155,7 +188,7 @@ potential::PtrPotential createSphericalPotential(
 }
 
 // prepare the relaxation model (diffusion coefficients) for the spherical potential
-galaxymodel::PtrDiffusionCoefs createRelaxationModel(
+galaxymodel::PtrSphericalModelLocal createRelaxationModel(
     const potential::BasePotential& sphPot,
     std::vector<double>& particle_h,
     std::vector<double>& particle_m,
@@ -167,11 +200,17 @@ galaxymodel::PtrDiffusionCoefs createRelaxationModel(
     // eliminate particles with zero mass or positive energy
     eliminateBadSamples(particle_h, particle_m);
 
-    // determine the distribution function from the particle samples
-    math::LogLogSpline df = galaxymodel::fitSphericalDF(particle_h, particle_m, numbins);
+    // the fitting procedure guarantees that f(h) grows slower than h^-1 as h -> 0,
+    // but to ensure that the total energy is finite, a stricter condition must be satisfied,
+    // which depends on the innermost slope of the potential
+    // (only relevant if the potential is singular, i.e. its innerSlope<0)
+    double minSlope = -1 - 1 / (1.5 + 3/innerSlope(potential::PotentialWrapper(sphPot))) + 0.05;
+
+    // determine the distribution function from the particle samples and represent it as a log-log spline
+    CautiousLogLogSpline df(galaxymodel::fitSphericalDF(particle_h, particle_m, numbins), minSlope);
 
     // compute diffusion coefficients
-    return galaxymodel::PtrDiffusionCoefs(new galaxymodel::DiffusionCoefs(phasevol, df));
+    return galaxymodel::PtrSphericalModelLocal(new galaxymodel::SphericalModelLocal(phasevol, df));
 }
 
 }  // internal ns
@@ -222,7 +261,8 @@ void RagaTaskRelaxation::startEpisode(double timeStart, double length)
     if(!params.outputFilename.empty() && prevOutputTime == -INFINITY) {
         prevOutputTime = timeStart;
         galaxymodel::writeSphericalModel(
-            params.outputFilename + utils::toString(timeStart), ptrRelaxationModel->model, *ptrPotSph);
+            params.outputFilename + utils::toString(timeStart), params.header,
+            *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
     }
     episodeStart  = timeStart;
     episodeLength = length;
@@ -251,7 +291,8 @@ void RagaTaskRelaxation::finishEpisode()
     if(!params.outputFilename.empty() && currentTime >= prevOutputTime + params.outputInterval) {
         prevOutputTime = currentTime;
         galaxymodel::writeSphericalModel(
-            params.outputFilename + utils::toString(currentTime), ptrRelaxationModel->model, *ptrPotSph);
+            params.outputFilename + utils::toString(currentTime), params.header,
+            *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
     }
 }
 

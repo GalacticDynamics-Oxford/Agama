@@ -103,6 +103,20 @@ public:
     virtual unsigned int numDerivs() const { return 3; }
 };
 
+// provides a function to interpolate via log-spline
+class testfnclog: public math::IFunction {
+public:
+    virtual void evalDeriv(const double x, double* val=NULL, double* der=NULL, double* der2=NULL) const {
+        if(val)
+            *val  = x<1? 0 : (x-1) * pow_2(x-10) / pow(x, 6);
+        if(der)
+            *der  = x<1? 0 : (30-3*x) * (x*x-18*x+20) / pow(x, 7);
+        if(der2)
+            *der2 = x<1? 0 : (12*x*x*x - 420*x*x + 3600*x - 4200) / pow(x, 8);
+    }
+    virtual unsigned int numDerivs() const { return 2; }
+};
+
 // provides a function of 2 variables to interpolate
 class testfnc2d: public math::IFunctionNdimDeriv {
 public:
@@ -228,7 +242,7 @@ class Density1: public math::IFunctionNoDeriv {
 public:
     double mean1, disp1, mean2, disp2;  // parameters of the density
     double norm;  // overall normalization
-    int d;        // multiply P(x) by ln(P(x)^d
+    int d;        // multiply P(x) by ln(P(x))^d
     Density1(double _mean1, double _disp1, double _mean2, double _disp2, double _norm) :
         mean1(_mean1), disp1(_disp1), mean2(_mean2), disp2(_disp2), norm(_norm), d(0) {}
     // evaluate the density at the given point
@@ -236,7 +250,7 @@ public:
         double P = norm * (
             0.5 * exp( -0.5 * pow_2((x-mean1)/disp1) ) / sqrt(2*M_PI) / disp1 +
             0.5 * exp( -0.5 * pow_2((x-mean2)/disp2) ) / sqrt(2*M_PI) / disp2 );
-        return d==0 ? P : P * math::powInt(log(P), d);
+        return d==0 ? P : P * math::pow(log(P), d);
     }
     // sample a point from this density
     double sample() const {
@@ -255,7 +269,7 @@ public:
     double a, b;  // parameters of the density (must be >=0)
     double norm;  // normalization factor
     double cap;   // upper bound on the value of density (needed for rejection sampling)
-    int d;        // multiply P(x) by ln(P(x)^d
+    int d;        // multiply P(x) by ln(P(x))^d
     Density2(double _a, double _b, double _norm) :
         a(_a), b(_b),
         norm(_norm * math::gamma(a+b+2) / math::gamma(a+1) / math::gamma(b+1)),
@@ -264,7 +278,7 @@ public:
     // evaluate the density at the given point
     virtual double value(double x) const {
         double P = x>=0 && x<=1 ? norm * pow(x, a) * pow(1-x, b) : 0;
-        return d==0 ? P : P * math::powInt(log(P), d);
+        return d==0 ? P : P * math::pow(log(P), d);
     }
     // sample a point from this density using the rejection algorithm
     double sample() const {
@@ -423,38 +437,43 @@ bool test_integral(const math::CubicSpline& f, double x1, double x2)
 
 bool testLogScaledSplines()
 {
-    // function to approximate: f(x) = cos(x-1) + x, x=1..Pi+1
-    const int NNODES=8;
-    std::vector<double> xnodes = math::createUniformGrid(NNODES, 1, 1+M_PI);
-    std::vector<double> yvalues(NNODES);
+    const int NNODES=41;
+    const double XMIN=1., XMAX=100.;
+    testfnclog fnc;
+    std::vector<double> xnodes = math::createExpGrid(NNODES, XMIN, XMAX);
+    xnodes[20] = 10.;  // exact value where the function goes to zero
+    std::vector<double> yvalues(NNODES), yderivs(NNODES);
     for(int i=0; i<NNODES; i++)
-        yvalues[i] = cos(xnodes[i]-1) + xnodes[i];
-    double derLeft = 1., derRight = 1.;
-    math::CubicSpline  fSpl(xnodes, yvalues, derLeft, derRight);
-    math::LogSpline    fLog(xnodes, yvalues, derLeft, derRight);
-    math::LogLogSpline fDbl(xnodes, yvalues, derLeft, derRight);
-    double errValS = 0, errValL = 0, errValD = 0, errDerS = 0, errDerL = 0, errDerD = 0,
-        errDer2S = 0, errDer2L = 0, errDer2D = 0;
-    for(double x=1.; x<1.+M_PI; x+=0.01) {
-        double fval = cos(x-1) + x, fder = 1 - sin(x-1), fder2 = -cos(x-1);
-        double sval, sder, sder2, lval, lder, lder2, dval, dder, dder2;
-        fSpl.evalDeriv(x, &sval, &sder, &sder2);
-        fLog.evalDeriv(x, &lval, &lder, &lder2);
-        fDbl.evalDeriv(x, &dval, &dder, &dder2);
-        errValS = fmax(errValS, fabs(sval - fval));
-        errValL = fmax(errValL, fabs(lval - fval));
-        errValD = fmax(errValD, fabs(dval - fval));
-        errDerS = fmax(errDerS, fabs(sder - fder));
-        errDerL = fmax(errDerL, fabs(lder - fder));
-        errDerD = fmax(errDerD, fabs(dder - fder));
-        errDer2S= fmax(errDer2S,fabs(sder2- fder2));
-        errDer2L= fmax(errDer2L,fabs(lder2- fder2));
-        errDer2D= fmax(errDer2D,fabs(dder2- fder2));
+        fnc.evalDeriv(xnodes[i], &yvalues[i], &yderivs[i]);
+    math::CubicSpline  fSpl(xnodes, yvalues, true);
+    math::LogLogSpline fLog(xnodes, yvalues);
+    math::LogLogSpline fDer(xnodes, yvalues, yderivs);
+    double errValS = 0, errValL = 0, errValD = 0, errDerS = 0, errDerL = 0, errDerD = 0;
+    std::ofstream strm;
+    if(OUTPUT)
+        strm.open("test_math_spline_log.dat");
+    xnodes = math::createExpGrid(1001, XMIN/2, XMAX*2);
+    xnodes[500] = 10.;
+    for(unsigned int i=0; i<xnodes.size(); i++) {
+        double fval, fder, fder2, sval, sder, sder2, lval, lder, lder2, dval, dder, dder2;
+        fnc. evalDeriv(xnodes[i], &fval, &fder, &fder2);
+        fSpl.evalDeriv(xnodes[i], &sval, &sder, &sder2);
+        fLog.evalDeriv(xnodes[i], &lval, &lder, &lder2);
+        fDer.evalDeriv(xnodes[i], &dval, &dder, &dder2);
+        double norm = xnodes[i] * fmax(xnodes[i]-1, 0.);
+        errValS += pow_2(sval - fval)*norm;
+        errValL += pow_2(lval - fval)*norm;
+        errValD += pow_2(dval - fval)*norm;
+        errDerS += pow_2(sder - fder)*norm;
+        errDerL += pow_2(lder - fder)*norm;
+        errDerD += pow_2(dder - fder)*norm;
+        if(OUTPUT) strm <<
+            xnodes[i] << "\t" << fval << " " << sval << " " << lval << " " << dval << "\t" <<
+            fder << " " << sder << " " << lder << " " << dder << "\n";
     }
     return
-        errValS < 2e-4 && errValL < 4e-4 && errValD < 3e-4 &&
-        errDerS < 1e-3 && errDerL < 3e-3 && errDerD < 3e-3 &&
-        errDer2S< 2e-2 && errDer2L< 5e-2 && errDer2D< 4e-2;
+        errValS < 0.2 && errValL < 0.2 && errValD < 0.02 &&
+        errDerS < 150 && errDerL < 150 && errDerD < 1.;
 }
 
 #ifdef  TESTFNC1D_SMOOTH
@@ -464,18 +483,6 @@ const double XMAX1D = M_PI;
 const double XMIN1D = 0.4;
 const double XMAX1D = 6.2832;
 #endif
-
-// simple wrapper that binds together a 1d B-spline interpolator and the array of its amplitudes
-class BsplineWrapper: public math::IFunctionNoDeriv {
-    const math::BsplineInterpolator1d<3>& spl;
-    const std::vector<double>& ampl;
-public:
-    BsplineWrapper(const math::BsplineInterpolator1d<3>& _spl, const std::vector<double>& _ampl) :
-        spl(_spl), ampl(_ampl) {}
-    virtual double value(double x) const {
-        return spl.interpolate(x, ampl);
-    }
-};
 
 // performance test - repeat spline evaluation many times
 template<int numDeriv>
@@ -517,39 +524,34 @@ bool test1dSpline()
     math::CubicSpline   fClamped(xnodes, yvalues, yderivs.front(), yderivs.back());
 
     // 4. hermite cubic spline -- specify derivs at all nodes
-    math::HermiteSpline fHermite(xnodes, yvalues, yderivs);
+    math::CubicSpline fHermite(xnodes, yvalues, yderivs);
 
-    // 5. hermite spline constructed from an ordinary cubic spline,
-    // by collecting the first derivatives at all grid nodes - should be equivalent
+    // 5. quintic spline constructed using the derivatives computed by an ordinary cubic spline -
+    // doesn't give much improvement over the cubic spline, but provides a smoother interpolant
     std::vector<double> yderivsNatural(NNODES);
     for(int i=0; i<NNODES; i++)
         fNatural.evalDeriv(xnodes[i], NULL, &yderivsNatural[i]);
-    math::HermiteSpline fHermiteEquivNatural(xnodes, yvalues, yderivsNatural);
-
-    // 6. quintic spline constructed using the derivatives computed by an ordinary cubic spline -
-    // doesn't give much improvement over the cubic spline, but provides a smoother interpolant
     math::QuinticSpline fQuiCube(xnodes, yvalues, yderivsNatural);
 
-    // 7. quintic spline constructed using exact derivatives at all nodes
+    // 6. quintic spline constructed using exact derivatives at all nodes
     math::QuinticSpline fQuintic(xnodes, yvalues, yderivs);
 
-    // 8-9: 1d cubic B-spline represented as a sum over basis functions;
+    // 7-8: 1d cubic B-spline represented as a sum over basis functions;
     // this class only stores the x-grid and presents a method for computing the interpolant
     // for any array of amplitudes passed as a parameter -- we will use two different ones:
-    math::BsplineInterpolator1d<3> fBspline(xnodes);
+    math::FiniteElement1d<3> fBspline(xnodes);  // contains math::BsplineInterpolator1d<3>
 
-    // 8. compute the amplitudes from another cubic spline, which results in an equivalent
+    // 7. compute the amplitudes from another cubic spline, which results in an equivalent
     // representation in terms of B-splines
-    std::vector<double> amplBsplineEquivClamped =
-        math::createBsplineInterpolator1dArray<3>(fClamped, xnodes);
+    std::vector<double> amplBsplineEquivClamped = fBspline.computeAmplitudes(fClamped);
 
-    // 9. compute the amplitudes from the original function in a different way:
+    // 8. compute the amplitudes from the original function in a different way:
     // instead of using just from the function values and possibly the derivatives at the grid
     // nodes, as in all previous cases, it collects the function values at several points
     // inside each grid segment, thus achieving a somewhat better overall approximation
-    std::vector<double> amplBsplineOrig = math::createBsplineInterpolator1dArray<3>(fnc, xnodes);
+    std::vector<double> amplBsplineOrig = fBspline.computeAmplitudes(fnc);
 
-    // 10. 1d clamped cubic spline equivalent to a B-spline (this demonstrates the equivalence
+    // 9. 1d clamped cubic spline equivalent to a B-spline (this demonstrates the equivalence
     // in both directions, as the amplitudes of this B-spline were computed from another cubic spline).
     // The array of amplitudes can be simply passed to the constructor of CubicSpline instead of
     // an array of function values -- the mode of operation is determined from the size of this array;
@@ -557,17 +559,24 @@ bool test1dSpline()
     // if it is longer by two elements, it refers to the B-spline amplitudes.
     math::CubicSpline fClampedEquivBspline(xnodes, amplBsplineEquivClamped);
 
+    // 10. 1d quadratic B-spline representing the derivative of the cubic B-spline
+    math::BsplineInterpolator1d<2> fBsplineDeriv(xnodes);
+    std::vector<double> amplBsplineDeriv = fBspline.interp.deriv(amplBsplineOrig);
+
+    // 11. reverse procedure: cubic B-spline which is the antiderivative of the quadratic B-spline
+    std::vector<double> amplBsplineAnti = fBsplineDeriv.antideriv(amplBsplineDeriv);
+
     // output file
     std::ofstream strm;
 
     // accumulators for computing rms errors in values, derivatives and second derivatives
     // of these approximations
-    double errLinearVal =0,  errNaturalVal=0,  errBsplineVal=0,
+    double errLinearVal =0,  errNaturalVal=0,  errBsplineVal=0,  errBsplineDer=0,
            errClampedVal=0,  errHermiteVal=0,  errQuiCubeVal=0,  errQuinticVal=0,
            errClampedDer=0,  errHermiteDer=0,  errQuiCubeDer=0,  errQuinticDer=0,
            errClampedDer2=0, errHermiteDer2=0, errQuiCubeDer2=0, errQuinticDer2=0,
-           errBsplineEquivClamped=0, errClampedEquivBspline=0, errHermiteEquivNatural=0;
-    bool oknat = true, okcla = true, okher = true, okqui = true, okhcl = true;
+           errBsplineEquivClamped=0, errClampedEquivBspline=0, errBsplineQuad=0;
+    bool oknat = true, okcla = true, okher = true, okqui = true;
 
     // loop through the range of x covering the input grid,
     // using points both at grid nodes and inside grid segments
@@ -596,28 +605,27 @@ bool test1dSpline()
         double fHermiteVal, fHermiteDer, fHermiteDer2;
         fHermite.evalDeriv(x, &fHermiteVal, &fHermiteDer, &fHermiteDer2);
 
-        // 5. hermite spline equivalent to the natural cubic spline
-        double fHermiteEquivNaturalVal, fHermiteEquivNaturalDer, fHermiteEquivNaturalDer2;
-        fHermiteEquivNatural.evalDeriv(x, &fHermiteEquivNaturalVal,
-            &fHermiteEquivNaturalDer, &fHermiteEquivNaturalDer2);
-
-        // 6. quintic spline from approximate derivatives
+        // 5. quintic spline from approximate derivatives
         double fQuiCubeVal, fQuiCubeDer, fQuiCubeDer2;
         fQuiCube.evalDeriv(x, &fQuiCubeVal,
             &fQuiCubeDer, &fQuiCubeDer2);
 
-        // 7. quintic spline from exact derivatives
+        // 6. quintic spline from exact derivatives
         double fQuinticVal, fQuinticDer, fQuinticDer2;
         fQuintic.evalDeriv(x, &fQuinticVal, &fQuinticDer, &fQuinticDer2);
 
-        // 8. b-spline equivalent to the clamped cubic spline
-        double fBsplineEquivClampedVal = fBspline.interpolate(x, amplBsplineEquivClamped);
+        // 7. b-spline equivalent to the clamped cubic spline
+        double fBsplineEquivClampedVal = fBspline.interp.interpolate(x, amplBsplineEquivClamped);
 
-        // 9. b-spline constructed from the original function
-        double fBsplineVal = fBspline.interpolate(x, amplBsplineOrig);
+        // 8. b-spline constructed from the original function: compute both the value and 1st derivative
+        double fBsplineVal = fBspline.interp.interpolate(x, amplBsplineOrig);
+        double fBsplineDer = fBspline.interp.interpolate(x, amplBsplineOrig, 1);
 
-        // 10. clamped cubic spline equivalent to the b-spline
+        // 9. clamped cubic spline equivalent to the b-spline
         double fClampedEquivBsplineVal = fClampedEquivBspline(x);
+
+        // 10. quadratic b-spline representing the derivative of the original cubic b-spline
+        double fBsplineQuad = fBsplineDeriv.interpolate(x, amplBsplineDeriv);
 
         // accumulate errors of various approximations
         errLinearVal  += pow_2(origVal - fLinearVal );
@@ -627,6 +635,7 @@ bool test1dSpline()
         errHermiteVal += pow_2(origVal - fHermiteVal);
         errQuiCubeVal += pow_2(origVal - fQuiCubeVal);
         errQuinticVal += pow_2(origVal - fQuinticVal);
+        errBsplineDer += pow_2(origDer - fBsplineDer);
         errClampedDer += pow_2(origDer - fClampedDer);
         errHermiteDer += pow_2(origDer - fHermiteDer);
         errQuiCubeDer += pow_2(origDer - fQuiCubeDer);
@@ -641,10 +650,7 @@ bool test1dSpline()
             fabs(fBsplineEquivClampedVal - fClampedVal));
         errClampedEquivBspline = fmax(errClampedEquivBspline,
             fabs(fBsplineEquivClampedVal - fClampedEquivBsplineVal));
-        errHermiteEquivNatural = fmax(errHermiteEquivNatural,
-            fabs(fHermiteEquivNaturalVal - fNaturalVal) +
-            fabs(fHermiteEquivNaturalDer - fNaturalDer) +
-            fabs(fHermiteEquivNaturalDer2- fNaturalDer2));
+        errBsplineQuad = fmax(errBsplineQuad, fabs(fBsplineQuad - fBsplineDer));
 
         // if x coincides with a grid node, the values of interpolants should be
         // exact to machine precision by construction
@@ -654,14 +660,15 @@ bool test1dSpline()
             okcla &= fClampedVal == yvalues[k];
             okher &= fHermiteVal == yvalues[k] && fHermiteDer == yderivs[k];
             okqui &= fQuinticVal == yvalues[k] && fQuinticDer == yderivs[k];
-            okhcl &= fHermiteEquivNaturalVal == fNaturalVal;
+            if(k==0 || k==NNODES-1)   // for a clamped spline, also check endpoint derivs
+                okcla &= fClampedDer == yderivs[k];
         }
 
         // dump the values to a file if requested
         if(OUTPUT) {
             if(i==0) {
                 strm.open("test_math_spline1d.dat");
-                strm << "x\torig:f f' f''\tbspline:f\tnatural:f f' f''\t"
+                strm << "x\torig:f f' f''\tbspline:f f'\tnatural:f f' f''\t"
                     "clamped:f f' f''\thermite:f f' f''\t"
                     "quintic-from-cubic:f f' f''\tquintic:f f' f''\n";
             }
@@ -669,7 +676,8 @@ bool test1dSpline()
             utils::pp(origVal,    10) +' ' +
             utils::pp(origDer,     9) +' ' +
             utils::pp(origDer2,    9) +'\t'+
-            utils::pp(fBsplineVal,10) +'\t'+
+            utils::pp(fBsplineVal,10) +' ' +
+            utils::pp(fBsplineDer, 9) +'\t'+
             utils::pp(fNaturalVal,10) +' ' +
             utils::pp(fNaturalDer, 9) +' ' +
             utils::pp(fNaturalDer2,9) +'\t'+
@@ -695,6 +703,7 @@ bool test1dSpline()
     errClampedVal  = sqrt(errClampedVal / NPOINTS);
     errHermiteVal  = sqrt(errHermiteVal / NPOINTS);
     errQuinticVal  = sqrt(errQuinticVal / NPOINTS);
+    errBsplineDer  = sqrt(errBsplineDer / NPOINTS);
     errClampedDer  = sqrt(errClampedDer / NPOINTS);
     errHermiteDer  = sqrt(errHermiteDer / NPOINTS);
     errQuinticDer  = sqrt(errQuinticDer / NPOINTS);
@@ -710,36 +719,51 @@ bool test1dSpline()
         ", in cubic B-spline: "        + utils::pp(errBsplineVal, 8) +
         ", in quintic-from-cubic spline: " + utils::pp(errQuiCubeVal, 8) +
         ", in quintic spline: " + utils::pp(errQuinticVal, 8) +
-        ", max|cubic-hermite|=" + utils::pp(errHermiteEquivNatural, 8) +
         ", max|cubic-bspline|=" + utils::pp(errBsplineEquivClamped, 8) +
         " and " + utils::pp(errClampedEquivBspline, 8) + "\n";
 
-    // test the integration functions //
+    // test the integration functions
     const double X1 = (xnodes[0]+xnodes[1])/2, X2 = xnodes[xnodes.size()-2]-0.1;
     bool okintcla = test_integral(fClamped, X1, X2);
     bool okintnat = test_integral(fNatural, -1.234567, xnodes.back()+1.);
     double intClamped = fClamped.integrate(X1, X2);
-    double intBspline = fBspline.integrate(X1, X2, amplBsplineEquivClamped);
+    double intBspline = fBspline.interp.integrate(X1, X2, amplBsplineEquivClamped);
     double intNumeric = math::integrateAdaptive(fClamped, X1, X2, 1e-14);
     bool okintnum = fabs(intClamped-intNumeric) < 1e-13 && fabs(intClamped-intBspline) < 1e-13;
-
+    // check that the amplitudes of the cubic B-spline that represents the antiderivative
+    // of the quadratic B-spline representing the derivative of the original spline
+    // are the same as the amplitudes of the original spline (up to a constant term - the 0th amplitude)
+    double errBsplineAnti = 0;
+    for(unsigned int i=0; i<amplBsplineAnti.size(); i++)
+        errBsplineAnti = fmax(errBsplineAnti,
+            fabs(amplBsplineAnti[i] - amplBsplineOrig[i] + amplBsplineOrig[0]));
+    
     // test log-scaled splines
     bool oklogspl = testLogScaledSplines();
+
+    // test monotonicity filter
+    std::vector<double> xx(5), yy(5);  // a semi-monotonic sequence of values with a sharp jump
+    xx[0] = 1.2;  xx[1] = 1.6;  xx[2] = 1.8;  xx[3] = 2.2;  xx[4] = 2.5;
+    yy[0] = 0.4;  yy[1] = 0.5;  yy[2] = 1.0;  yy[3] = 1.1;  yy[4] = 1.1;
+    math::CubicSpline splmon(xx, yy, true);
+    math::CubicSpline splnon(xx, yy, false);
+    bool okmon = splmon.isMonotonic() && !splnon.isMonotonic();
 
     bool ok =
     testCond(oknat, "natural cubic spline values at grid nodes are inexact") &&
     testCond(okcla, "clamped cubic spline values at grid nodes are inexact") &&
-    testCond(oknat, "hermite cubic spline values or derivatives at grid nodes are inexact") &&
-    testCond(oknat, "quintic spline values or derivatives at grid nodes are inexact") &&
-    testCond(oknat, "hermite and clamped cubic spline values are not equal") &&
-    testCond(errHermiteEquivNatural < 1e-13, "hermite<>natural") &&
+    testCond(okher, "hermite cubic spline values or derivatives at grid nodes are inexact") &&
+    testCond(okqui, "quintic spline values or derivatives at grid nodes are inexact") &&
     testCond(errBsplineEquivClamped < 1e-14, "bspline<>clamped") &&
     testCond(errClampedEquivBspline < 1e-14, "clamped<>bspline") &&
+    testCond(errBsplineQuad < 1e-14, "cubic bpline deriv<>quadratic bspline") &&
+    testCond(errBsplineAnti < 1e-14, "quadratic bpline antideriv<>cubic bspline") &&
     testCond(errNaturalVal < 1.0e-3, "error in natural cubic spline is too large") &&
     testCond(errBsplineVal < 1.0e-4, "error in cubic b-spline is too large") &&
     testCond(errClampedVal < 4.0e-4, "error in clamped cubic spline is too large") &&
     testCond(errHermiteVal < 3.1e-4, "error in hermite cubic spline is too large") &&
     testCond(errQuinticVal < 1.2e-4, "error in quintic spline is too large") &&
+    testCond(errBsplineDer < 3.7e-3, "error in cubic b-spline derivative is too large") &&
     testCond(errClampedDer < 4.5e-3, "error in clamped cubic spline derivative is too large") &&
     testCond(errHermiteDer < 3.5e-3, "error in hermite cubic spline derivative is too large") &&
     testCond(errQuinticDer < 1.4e-3, "error in quintic spline derivative is too large") &&
@@ -749,17 +773,16 @@ bool test1dSpline()
     testCond(okintcla, "integral of clamped spline is incorrect") &&
     testCond(okintnat, "integral of natural spline is incorrect") &&
     testCond(okintnum, "integral of B-spline is incorrect") &&
-    testCond(oklogspl, "log-scaled splines failed");
+    testCond(oklogspl, "log-scaled splines failed") &&
+    testCond(okmon, "monotonicity analysis failed");
 
     //----------- test the performance of 1d spline calculation -------------//
-    std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fClamped) + ", 1st deriv: " +
-    evalSpline<1>(fClamped) + ", 2nd deriv: " + evalSpline<2>(fClamped) + " eval/s\n";
-    std::cout << "Hermite spline w/o deriv: " + evalSpline<0>(fHermite) + ", 1st deriv: " +
-    evalSpline<1>(fHermite) + ", 2nd deriv: " + evalSpline<2>(fHermite) + " eval/s\n";
+    std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fNatural) + ", 1st deriv: " +
+    evalSpline<1>(fClamped) + ", 2nd deriv: " + evalSpline<2>(fNatural) + " eval/s\n";
     std::cout << "Quintic spline w/o deriv: " + evalSpline<0>(fQuintic) + ", 1st deriv: " +
     evalSpline<1>(fQuintic) + ", 2nd deriv: " + evalSpline<2>(fQuintic) + " eval/s\n";
     std::cout << "B-spline of degree N=3:   " +
-    evalSpline<0>(BsplineWrapper(fBspline, amplBsplineOrig)) + " eval/s\n";
+    evalSpline<0>(math::BsplineWrapper<3>(fBspline.interp, amplBsplineOrig)) + " eval/s\n";
     return ok;
 }
 

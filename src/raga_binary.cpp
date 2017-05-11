@@ -193,8 +193,8 @@ static BHParams evolveBH(const BHParams& oldbh, double H, double K, double speed
     do {
         // compute the hardening and eccentricity growth rate due to GW emission,
         // given the current values of semimajor axis and eccentricity
-        double mult = pow_3(bh.mass) * math::powInt(speedOfLight * bh.sma, -5) * bh.sma *
-            bh.q / pow_2(1+bh.q) * pow(1 - pow_2(bh.ecc), -3.5);   // common multiple
+        double mult = pow_3(bh.mass) * math::pow(speedOfLight * bh.sma, -5) * bh.sma *
+            bh.q / pow_2(1+bh.q) * std::pow(1 - pow_2(bh.ecc), -3.5);   // common multiple
         double Hgw  =  mult * (192 + pow_2(bh.ecc) * (584 + 74 * pow_2(bh.ecc))) / 15 / bh.sma;
         double Kgw  = -mult * (608 + pow_2(bh.ecc) * 242) / 15 * (1 - pow_2(bh.ecc)) * pow_2(bh.ecc);
         double tstep = 0.01 * fmin(

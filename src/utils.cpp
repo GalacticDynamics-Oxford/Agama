@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "math_core.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -39,6 +40,7 @@ inline std::string undecorateFunction(std::string origin)
     return origin;
 }
 
+#ifdef __GNUC__
 /// check if a character is a part of a valid C++ identifier name
 inline bool isAlphanumeric(const char c)
 {
@@ -79,6 +81,7 @@ std::string demangleName(char* const input)
     }
     return result;
 }
+#endif
 
 /// a prefix character prepended to the output message
 inline char verbosityText(VerbosityLevel level)
@@ -153,15 +156,58 @@ std::string stacktrace()
 /* ----------- string/number conversion and parsing routines ----------------- */
 
 int toInt(const char* val) {
-    return strtol(val, NULL, 10);
+    double result = toDouble(val);  // to allow input values such as "1e5"
+    if(!isFinite(result))
+        throw std::invalid_argument("Parse error: \"" + std::string(val) +
+            "\" does not contain a valid integer number");
+    if(result >= (double)std::numeric_limits<int>::max())
+        return std::numeric_limits<int>::max();
+    if(result <= (double)std::numeric_limits<int>::min())
+        return std::numeric_limits<int>::min();
+    return (int)trunc(result);
 }
 
 float toFloat(const char* val) {
-    return strtof(val, NULL);
+    if(*val == '\0')
+        return 0;
+    char* end;
+    float result = strtof(val, &end);
+    if(end == val)  // could not parse a single character
+        throw std::invalid_argument("Parse error: \"" + std::string(val) +
+            "\" does not contain a valid float number");
+    return result;
 }
 
 double toDouble(const char* val) {
-    return strtod(val, NULL);
+    if(*val == '\0')
+        return 0;
+    char* end;
+    double result = strtod(val, &end);
+    if(end == val)  // could not parse a single character
+        throw std::invalid_argument("Parse error: \"" + std::string(val) +
+            "\" does not contain a valid double number");
+    return result;
+}
+
+bool toBool(const char* val) {
+    while(1)   // scan the string until a valid character is encountered or an exception is thrown
+    switch(*val) {
+        case '\0':  // empty string counts as false
+        case '0':
+        case 'n':
+        case 'N':
+        case 'f':
+        case 'F': return false;
+        case '1':
+        case 'y':
+        case 'Y':
+        case 't':
+        case 'T': return true;
+        case ' ':
+        case '\t':  ++val;   // skip whitespace and continue from the next character
+        default:  throw std::invalid_argument("Parse error: \"" + std::string(val) +
+            "\" does not contain a valid boolean value");
+    }
 }
 
 std::string toString(double val, unsigned int width) {
@@ -204,16 +250,6 @@ std::string toString(const void* val) {
     char buf[100];
     snprintf(buf, 100, "%p", val);
     return std::string(buf);
-}
-
-bool toBool(const char* val) {
-    return
-        strncmp(val, "yes", 3)==0 ||
-        strncmp(val, "Yes", 3)==0 ||
-        strncmp(val, "true", 4)==0 ||
-        strncmp(val, "True", 4)==0 ||
-        strncmp(val, "t", 1)==0 ||
-        strncmp(val, "1", 1)==0;
 }
 
 //  Pretty-print - convert float (and integer) numbers to string of fixed width.
@@ -298,7 +334,9 @@ std::string pp(double num, unsigned int uwidth)
     // try to print the number in exponential format
     if(width >= len_exp+1) {
         // strip out exponent, so that the number is within [1:10)
-        num = fmax(num / pow(10., expon), 1.);  // it might be <1 due to roundoff error
+        num /= math::pow(10., expon);
+        if(num<1 || !isFinite(num))  // it might be <1 due to roundoff error
+            num = 1.;
         int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2-len_exp, 0), num);
         if(len >= 2 && buf[0] == '1' && buf[1] == '0') {
             // a number 9.x is rounded up to 10, so we should replace it with 1. and increase the exponent

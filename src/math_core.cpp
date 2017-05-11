@@ -3,12 +3,12 @@
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_min.h>
-#include <gsl/gsl_poly.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_rng.h>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
+#include <cmath>
 
 #ifdef HAVE_CUBA
 #include <cuba.h>
@@ -98,7 +98,7 @@ int fcmp(double x, double y, double eps)
     return gsl_fcmp(x, y, eps);
 }
 
-double powInt(double x, int n)
+double pow(double x, int n)
 {
     if(n<0) {
         n = -n;
@@ -111,6 +111,20 @@ double powInt(double x, int n)
         x *= x;
     } while(n);
     return result;
+}
+
+double pow(double x, double n)
+{
+    if(n == 0.0) return 1;
+    if(n == 1.0) return x;
+    if(n ==-1.0) return 1/x;
+    if(n == 2.0) return x*x;
+    if(n ==-2.0) return 1/(x*x);
+    if(n == 0.5) return sqrt(x);
+    if(n ==-0.5) return 1/sqrt(x);
+    if(n == 3.0) return x*x*x;
+    if(n ==-3.0) return 1/(x*x*x);
+    return std::pow(x, n);
 }
 
 double wrapAngle(double x)
@@ -132,27 +146,29 @@ double unwrapAngle(double x, double xprev)
 }
 
 template<typename NumT>
-int binSearch(const NumT x, const NumT arr[], unsigned int size)
+ptrdiff_t binSearch(const NumT x, const NumT arr[], size_t size)
 {
     if(size<1 || !(x>=arr[0]))
         return -1;
     if(x>arr[size-1] || size<2)
         return size;
     // first guess the likely location in the case that the input grid is equally-spaced
-    int index = static_cast<int>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
-    int indhi = size-1;
-    if(index==static_cast<int>(size)-1)
+    ptrdiff_t index = static_cast<ptrdiff_t>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
+    ptrdiff_t indhi = size-1;
+    if(index==static_cast<ptrdiff_t>(size)-1)
         return size-2;     // special case -- we are exactly at the end of array, return the previous node
     if(x>=arr[index]) {
         if(x<arr[index+1])
             return index;  // guess correct, exiting
         // otherwise the search is restricted to [ index .. indhi ]
     } else {
-        indhi = index;  // search restricted to [ 0 .. index ]
+        indhi = index;     // search restricted to [ 0 .. index ]
         index = 0;
     }
+    // this will always end up with one grid node in O(log(N)) steps,
+    // even if the grid nodes were not monotonic (we don't check this assertion to avoid wasting time)
     while(indhi > index + 1) {
-        int i = (indhi + index)/2;
+        ptrdiff_t i = (indhi + index)/2;
         if(arr[i] > x)
             indhi = i;
         else
@@ -162,42 +178,12 @@ int binSearch(const NumT x, const NumT arr[], unsigned int size)
 }
 
 // template instantiations
-template int binSearch(const double x, const double arr[], unsigned int size);
-template int binSearch(const float x, const float arr[], unsigned int size);
-template int binSearch(const int x, const int arr[], unsigned int size);
-template int binSearch(const long x, const long arr[], unsigned int size);
-template int binSearch(const unsigned int x, const unsigned int arr[], unsigned int size);
-template int binSearch(const unsigned long x, const unsigned long arr[], unsigned int size);
-
-
-/* ------ algebraic transformations of functions ------- */
-
-void FncProduct::evalDeriv(const double x, double *val, double *der, double *der2) const
-{
-    double v1, v2, d1, d2, dd1, dd2;
-    bool needDer = der!=NULL || der2!=NULL, needDer2 = der2!=NULL;
-    f1.evalDeriv(x, &v1, needDer ? &d1 : 0, needDer2 ? &dd1 : 0);
-    f2.evalDeriv(x, &v2, needDer ? &d2 : 0, needDer2 ? &dd2 : 0);
-    if(val)
-        *val = v1 * v2;
-    if(der)
-        *der = v1 * d2 + v2 * d1;
-    if(der2)
-        *der2 = v1 * dd2 + 2 * d1 * d2 + v2 * dd1;
-}
-
-void LogLogScaledFnc::evalDeriv(const double logx,
-    /*output*/ double* logf, double* der, double* der2) const
-{
-    double x = exp(logx);
-    PointNeighborhood pt(fnc, x);
-    if(logf)
-        *logf = log(pt.f0);
-    if(der)
-        *der  = pt.fder * x / pt.f0;
-    if(der2)
-        *der2 = (pt.fder2 * x + (1 - pt.fder * x / pt.f0) * pt.fder) * x / pt.f0;
-}
+template ptrdiff_t binSearch(const double x, const double arr[], size_t size);
+template ptrdiff_t binSearch(const float x,  const float arr[],  size_t size);
+template ptrdiff_t binSearch(const int x,    const int arr[],    size_t size);
+template ptrdiff_t binSearch(const long x,   const long arr[],   size_t size);
+template ptrdiff_t binSearch(const unsigned int x,  const unsigned int arr[],  size_t size);
+template ptrdiff_t binSearch(const unsigned long x, const unsigned long arr[], size_t size);
 
 
 /* --------- random numbers -------- */
@@ -275,10 +261,75 @@ void getNormalRandomNumbers(double& num1, double& num2)
 {
     double p1 = random();
     double p2 = random();
-    if(p1>0&&p1<=1)
+    if(p1>0 && p1<=1)
         p1 = sqrt(-2*log(p1));
-    num1 = p1*sin(2*M_PI*p2);
-    num2 = p1*cos(2*M_PI*p2);
+    num1 = p1 * sin(2*M_PI * p2);
+    num2 = p1 * cos(2*M_PI * p2);
+}
+
+void getRandomUnitVector(double vec[3])
+{
+    double costh = random()*2-1;
+    double sinth = sqrt(1-pow_2(costh));
+    double phi   = random()*2*M_PI;
+    vec[0] = sinth * cos(phi);
+    vec[1] = sinth * sin(phi);
+    vec[2] = costh;
+}
+
+double getRandomPerpendicularVector(const double vec[3], double vper[3])
+{
+    double phi = 2*M_PI * random();   // rotation angle about the given vector
+    double cosphi = cos(phi), sinphi = sin(phi);
+    if(vec[1] != 0 || vec[2] != 0) {  // input vector has a nontrivial projection in the y-z plane
+        // a combination of two steps:
+        // (1) obtain one perpendicular vector as a cross product of v and e_x;
+        // (2) rotate it about the vector v by angle phi, using the Rodriguez formula.
+        double vmag = sqrt(pow_2(vec[0]) + pow_2(vec[1]) + pow_2(vec[2]));
+        double norm = 1 / sqrt(pow_2(vec[1]) + pow_2(vec[2])) / vmag;
+        vper[0] = norm * (sinphi * (pow_2(vec[0]) - pow_2(vmag)) );
+        vper[1] = norm * (sinphi * vec[0] * vec[1] - cosphi * vmag * vec[2]);
+        vper[2] = norm * (sinphi * vec[0] * vec[2] + cosphi * vmag * vec[1]);
+        return vmag;
+    } else if(vec[0] != 0) {  // degenerate case - a vector directed in the x plane
+        vper[0] = 0;
+        vper[1] = cosphi;
+        vper[2] = sinphi;
+        return fabs(vec[0]);
+    } else {  // even more degenerate case of a null vector - create a random isotropic vector
+        double costh = random()*2-1;
+        double sinth = sqrt(1-pow_2(costh));
+        vper[0] = sinth * cosphi;
+        vper[1] = sinth * sinphi;
+        vper[2] = costh;
+        return 0;
+    }
+}
+
+void getRandomRotationMatrix(double mat[9])
+{
+    // the algorith of Arvo(1992)
+    double
+    th = 2*M_PI * random(),
+    phi= 2*M_PI * random(),
+    mu = 2 * random(),
+    nu = sqrt(mu),
+    vx = sin(phi) * nu,
+    vy = cos(phi) * nu,
+    vz = sqrt(2-mu),
+    st = sin(th),
+    ct = cos(th),
+    sx = vx*ct - vy*st,
+    sy = vx*st + vy*ct;
+    mat[0] = vx*sx-ct;
+    mat[1] = vx*sy-st;
+    mat[2] = vx*vz;
+    mat[3] = vy*sx+st;
+    mat[4] = vy*sy-ct;
+    mat[5] = vy*vz;
+    mat[6] = vz*sx;
+    mat[7] = vz*sy;
+    mat[8] = 1-mu;
 }
 
 double quasiRandomHalton(unsigned int ind, unsigned int base)
@@ -293,6 +344,41 @@ double quasiRandomHalton(unsigned int ind, unsigned int base)
 }
 
 
+/* ------ algebraic transformations of functions ------- */
+
+void FncProduct::evalDeriv(const double x, double *val, double *der, double *der2) const
+{
+    double v1, v2, d1, d2, dd1, dd2;
+    bool needDer = der!=NULL || der2!=NULL, needDer2 = der2!=NULL;
+    f1.evalDeriv(x, &v1, needDer ? &d1 : 0, needDer2 ? &dd1 : 0);
+    f2.evalDeriv(x, &v2, needDer ? &d2 : 0, needDer2 ? &dd2 : 0);
+    if(val)
+        *val = v1 * v2;
+    if(der)
+        *der = v1 * d2 + v2 * d1;
+    if(der2)
+        *der2 = v1 * dd2 + 2 * d1 * d2 + v2 * dd1;
+}
+
+void LogLogScaledFnc::evalDeriv(const double logx,
+    /*output*/ double* logf, double* der, double* der2) const
+{
+    double x = exp(logx), fval, fder;
+    fnc.evalDeriv(x, &fval, der || der2 ? &fder : NULL, der2);
+    double logder = fder * x / fval;  // logarithmic derivative d[ln(f)] / d[ln(x)]
+    if(logf)
+        *logf = log(fval);
+    if(der)
+        *der  = logder;
+    if(der2) {
+        fder *= logder-1;
+        // if fder is very close to zero, der2 = (logder-1) * fder / x  may be rounded to zero,
+        // in which case we won't be able to compute it correctly, so should return zero
+        *der2 = fder / x == 0 ? 0 : (*der2 * x - fder) * x / fval;
+    }
+}
+
+
 // ------- tools for analyzing the behaviour of a function around a particular point ------- //
 // this comes handy in root-finding and related applications, when one needs to ensure that 
 // the endpoints of an interval strictly bracked the root: 
@@ -302,7 +388,7 @@ double quasiRandomHalton(unsigned int ind, unsigned int base)
 PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0) : absx0(fabs(x0))
 {
     // small offset used in computing numerical derivatives, if the analytic ones are not available
-    double delta = fmax(fabs(x0) * GSL_ROOT3_DBL_EPSILON, 16*GSL_DBL_EPSILON);
+    double delta = fmax(fabs(x0) * ROOT3_DBL_EPSILON, 16*DBL_EPSILON);
     // we assume that the function can be computed at all points, but the derivatives not necessarily can
     double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
     f0 = fder = fder2=NAN;
@@ -338,7 +424,7 @@ double PointNeighborhood::dxToPosneg(double sgn) const
     // offset should be no larger than the scale of variation of the function,
     // but no smaller than the minimum resolvable distance between floating point numbers
     const double delta = fmin(fabs(fder/fder2)*0.5,
-        fmax(1000*GSL_DBL_EPSILON * absx0, fabs(f0)) / fabs(sder));  //TODO!! this is not satisfactory
+        fmax(1000*DBL_EPSILON * absx0, fabs(f0)) / fabs(sder));  //TODO!! this is not satisfactory
     if(s0>0)
         return 0;  // already there
     if(sder==0) {
@@ -427,27 +513,32 @@ namespace {
 /// (x1<=x<=x2 or x1>=x>=x2 is implied but not checked), if the function is expected to be
 /// monotonic on this interval (i.e. its derivative does not have roots on x1..x2),
 /// otherwise return NAN
-inline double interpHermiteMonotonic(double x, double x1, double f1, double dfdx1,
-    double x2, double f2, double dfdx2)
+inline double hermiteInterpMonotone(double x, double x1, double x2,
+    double f1, double f2, double dfdx1, double dfdx2)
 {
     // derivatives must exist and have the same sign
     if(!isFinite(dfdx1+dfdx2) || (dfdx1>=0 && dfdx2<0) || (dfdx2>=0 && dfdx1<0))
         return NAN;
-    const double dx = x2-x1, sixdf = 6*(f2-f1);
-    const double t = (x-x1)/dx;
-    // check if the interpolant is monotonic on t=[0:1] by solving a quadratic equation
-    double a = -sixdf+3*dx*(dfdx1+dfdx2), b = sixdf-2*dx*(2*dfdx1+dfdx2), c = dx*dfdx1;
-    if(!isFinite(a+b+c))
-        return NAN;
-    double norm = 1./std::max(fabs(a), std::max(fabs(b), fabs(c)));  // scale the coefs to avoid overflows
-    double t1, t2;
-    int nroots = gsl_poly_solve_quadratic(a*norm, b*norm, c*norm, &t1, &t2);
-    if(nroots>0 && ((t1>=0 && t1<=1) || (t2>=0 && t2<=1)) )
-        return NAN;   // will produce a non-monotonic result
-    return pow_2(1-t) * ( (1+2*t)*f1 + t * dfdx1*dx )
-         + pow_2(t) * ( (3-2*t)*f2 + (t-1)*dfdx2*dx );
+    const double dx = x2-x1,
+    // check if the interpolant is monotonic on t=[0:1] by solving a quadratic equation:
+    // derivative is  a * (t^2 + b/a * t + c/a),  with 0<=t<=1 on the given interval.
+    ai = 1 / (-6 * (f2-f1) / dx + 3 * (dfdx1 + dfdx2)),  ba = -1 + (dfdx2 - dfdx1) * ai,  ca = dfdx1 * ai,
+    D  = pow_2(ba) - 4 * ca;
+    if(!isFinite(ba+D))
+        return NAN;  // prudently resign in case of troubles
+    if(D >= 0) {     // need to check roots
+        double sqD= sqrt(D);
+        double t1 = 0.5 * (-ba-sqD);
+        double t2 = 0.5 * (-ba+sqD);
+        if( (t1>=0 && t1<=1) || (t2>=0 && t2<=1) )
+            return NAN;    // there is a root ( y'=0 ) somewhere on the given interval
+    }  // otherwise there are no roots
+    return hermiteInterp(x, x1, x2, f1, f2, dfdx1, dfdx2);
 }
 
+/// the interpolation is accepted if the result differs from one of the endpoints by more than DELTA
+static const double DELTA_HERMITE = 1e-12;
+    
 /// a hybrid between Brent's method and interpolation of root using function derivatives;
 /// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
 double findRootHybrid(const IFunction& fnc, 
@@ -490,8 +581,8 @@ double findRootHybrid(const IFunction& fnc,
     bool converged = false;
     double abstoler = fabs(x_lower-x_upper) * reltoler;
     do {
-        double tol = 0.5 * GSL_DBL_EPSILON * fabs (b);
-        double m = 0.5 * (c - b);
+        double tol = 0.5 * DBL_EPSILON * fabs (b);
+        double cminusb = c-b, m = 0.5 * cminusb;
         if (fb == 0 || fabs (m) <= tol) 
             return b;  // the ROOT
         if (fabs (e) < tol || fabs (fa) <= fabs (fb)) { 
@@ -501,11 +592,11 @@ double findRootHybrid(const IFunction& fnc,
             double dd = NAN;
             if(have_derivs && fderb*fderc>0)  // derivs exist and have the same sign
             {   // attempt to obtain the approximation by Hermite interpolation
-                dd = interpHermiteMonotonic(0, fb, 0, 1/fderb, fc, 2*m, 1/fderc);
+                dd = hermiteInterpMonotone(0, fb, fc, 0, cminusb, 1/fderb, 1/fderc);
             }
-            if(dd == dd) {  // Hermite interpolation is successful
-                d = dd;
-            } else {        // proceed as usual in the Brent method
+            if(isFinite(dd) && std::min(fabs(dd), fabs(cminusb-dd)) > fabs(cminusb) * DELTA_HERMITE) {
+                d = dd;           // Hermite interpolation is successful
+            } else {              // otherwise proceed as usual in the Brent method
                 double p, q, r, s = fb / fa;
                 if (a == c) {     // secant method (linear interpolation)
                     p = 2 * m * s;
@@ -893,8 +984,8 @@ namespace {
 // wrapper for Cuba library
 struct CubaParams {
     const IFunctionNdim& F;      ///< the original function
-    const double xlower[];       ///< lower limits of integration
-    const double xupper[];       ///< upper limits of integration
+    const double* xlower;        ///< lower limits of integration
+    const double* xupper;        ///< upper limits of integration
     std::vector<double> xvalue;  ///< temporary storage for un-scaling input point 
                                  ///< from [0:1]^N to the original range
     std::string error;           ///< store error message in case of exception

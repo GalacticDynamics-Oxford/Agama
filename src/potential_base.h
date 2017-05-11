@@ -308,10 +308,10 @@ public:
 */
 class FunctionToPotentialWrapper: public BasePotentialSphericallySymmetric{
     const math::IFunction &fnc;  ///< function representing the radial dependence of potential
-    virtual const char* name() const { return "FunctionToPotentialWrapper"; }
-    virtual void evalDeriv(double r, double* val, double* deriv, double* deriv2) const {
-        fnc.evalDeriv(r, val, deriv, deriv2); }
 public:
+    virtual const char* name() const { return "FunctionToPotentialWrapper"; }
+    virtual void evalDeriv(double r, double* val=NULL, double* deriv=NULL, double* deriv2=NULL) const {
+        fnc.evalDeriv(r, val, deriv, deriv2); }
     explicit FunctionToPotentialWrapper(const math::IFunction &f) : fnc(f) {}
 };
 
@@ -320,19 +320,22 @@ public:
 */
 class FunctionToDensityWrapper: public BaseDensity{
     const math::IFunction &fnc;  ///< function representing the spherically-symmetric density profile
-    double densityCar(const coord::PosCar &pos) const { return fnc(toPosSph(pos).r); }
-    double densityCyl(const coord::PosCyl &pos) const { return fnc(toPosSph(pos).r); }
-    double densitySph(const coord::PosSph &pos) const { return fnc(pos.r); }
+    virtual double densityCar(const coord::PosCar &pos) const { return fnc(toPosSph(pos).r); }
+    virtual double densityCyl(const coord::PosCyl &pos) const { return fnc(toPosSph(pos).r); }
+    virtual double densitySph(const coord::PosSph &pos) const { return fnc(pos.r); }
+public:
     virtual coord::SymmetryType symmetry() const { return coord::ST_SPHERICAL; }
     virtual const char* name() const { return "FunctionToDensityWrapper"; }
-public:
     explicit FunctionToDensityWrapper(const math::IFunction &f) : fnc(f) {}
 };
     
-/** A wrapper class providing a IFunction interface to a potential */
+/** A wrapper class providing a IFunction interface to a potential:
+    it evaluates the potential and its derivatives at the given point along x-axis
+*/
 class PotentialWrapper: public math::IFunction {
-    const BasePotential& potential;  ///< potential that is evaluated along x-axis
-    virtual void evalDeriv(const double R, double *val, double *der, double *der2) const {
+    const BasePotential& potential;
+public:
+    virtual void evalDeriv(const double R, double *val=NULL, double *der=NULL, double *der2=NULL) const {
         coord::GradCyl grad;
         coord::HessCyl hess;
         potential.eval(coord::PosCyl(R,0,0), val, der? &grad : 0, der2? &hess : 0);
@@ -342,17 +345,18 @@ class PotentialWrapper: public math::IFunction {
             *der2 = hess.dR2;
     }
     virtual unsigned int numDerivs() const { return 2; }
-public:
     explicit PotentialWrapper(const BasePotential &p) : potential(p) {};
 };
 
-/** A wrapper class providing a IFunction interface to a spherically-symmetric density */
+/** A wrapper class providing a IFunction interface to a spherically-symmetric density,
+    which is evaluated at a given point along x-axis
+*/
 class DensityWrapper: public math::IFunctionNoDeriv {
-    const BaseDensity& density;  ///< density that is evaluated along x-axis
+    const BaseDensity& density;
+public:
     virtual double value(const double r) const {
         return density.density(coord::PosCyl(r, 0, 0));
     }
-public:
     explicit DensityWrapper(const BaseDensity &d) : density(d) {};
 };
 

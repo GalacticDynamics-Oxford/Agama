@@ -123,11 +123,13 @@ namespace potential{
 class BaseDensity;
 class BasePotential;
 class OblatePerfectEllipsoid;
+class PhaseVolume;
 
 /// Shared pointers to density and potential classes
-typedef shared_ptr<const BaseDensity>    PtrDensity;
-typedef shared_ptr<const BasePotential>  PtrPotential;
+typedef shared_ptr<const BaseDensity>   PtrDensity;
+typedef shared_ptr<const BasePotential> PtrPotential;
 typedef shared_ptr<const OblatePerfectEllipsoid> PtrOblatePerfectEllipsoid;
+typedef shared_ptr<const PhaseVolume>   PtrPhaseVolume;
 
 }  // namespace potential
 

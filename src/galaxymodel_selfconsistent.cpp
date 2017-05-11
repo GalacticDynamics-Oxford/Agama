@@ -1,6 +1,7 @@
 #include "galaxymodel_selfconsistent.h"
 #include "galaxymodel.h"
 #include "actions_staeckel.h"
+#include "actions_spherical.h"
 #include "potential_composite.h"
 #include "potential_multipole.h"
 #include "potential_cylspline.h"
@@ -168,9 +169,8 @@ void updateTotalPotential(SelfConsistentModel& model)
     // if more than one density component is present, create a temporary composite density object;
     if(compDensSph.size()>1)
         totalDensitySph.reset(new potential::CompositeDensity(compDensSph));
-    else
+    else if(compDensSph.size()>0)
     // if only one component is present, simply copy it;
-    if(compDensSph.size()>0)
         totalDensitySph = compDensSph[0];
     // otherwise don't use multipole expansion at all
 
@@ -190,7 +190,7 @@ void updateTotalPotential(SelfConsistentModel& model)
     if(totalDensityDisk != NULL)
         compPot.push_back(potential::CylSpline::create(*totalDensityDisk, 0 /*mmax*/,
             model.sizeRadialCyl,   model.RminCyl, model.RmaxCyl,
-            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, false));
+            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, false /*don't use derivs*/));
 
     // now check if the total potential is elementary or composite
     if(compPot.size()==0)
@@ -202,7 +202,11 @@ void updateTotalPotential(SelfConsistentModel& model)
 
     // update the action finder
     std::cout << "done\nUpdating action finder..."<<std::flush;
-    model.actionFinder.reset(new actions::ActionFinderAxisymFudge(model.totalPotential));
+    if(isSpherical(*model.totalPotential))
+        model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
+    else
+        model.actionFinder.reset(
+            new actions::ActionFinderAxisymFudge(model.totalPotential, model.useActionInterpolation));
     std::cout << "done"<<std::endl;
 }
 

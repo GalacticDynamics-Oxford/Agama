@@ -39,7 +39,7 @@ public:
     const potential::BasePotential&  potential;  ///< gravitational potential
     const actions::BaseActionFinder& actFinder;  ///< action finder for the given potential
     const df::BaseMulticomponentDF&  distrFunc;  ///< distribution function expressed in terms of actions
-    
+
     /** Create an instance of the galaxy model from the three ingredients */
     GalaxyModelMulticomponent(
         const potential::BasePotential& pot,

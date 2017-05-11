@@ -2,12 +2,16 @@
 #include "math_core.h"
 #include "math_spline.h"
 #include <cmath>
-#include <stdexcept>
 
 namespace potential{
 
-/// relative accuracy of density computation
+/// relative accuracy of density computation by integration
 static const double EPSREL_DENSITY_INT = 1e-4;
+
+/// at large r, the density computed from potential derivatives is subject to severe cancellation errors;
+/// if the result is smaller than this fraction of the absolute value of each term, we return zero
+/// (otherwise its relative accuracy is too low and its derivative cannot be reliably estimated)
+static const double EPSREL_DENSITY_DER = DBL_EPSILON / ROOT3_DBL_EPSILON;
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
@@ -23,15 +27,15 @@ double BasePotential::densityCyl(const coord::PosCyl &pos) const
     coord::GradCyl deriv;
     coord::HessCyl deriv2;
     eval(pos, NULL, &deriv, &deriv2);
-    double derivR_over_R = deriv.dR/pos.R;
-    double deriv2phi_over_R2 = deriv2.dphi2/pow_2(pos.R);
+    double derivR_over_R = deriv.dR / pos.R;
+    double deriv2phi_over_R2 = deriv2.dphi2 / pow_2(pos.R);
     if(pos.R==0) {
         if(deriv.dR==0)  // otherwise should remain infinite
             derivR_over_R = deriv2.dR2;
         deriv2phi_over_R2 = 0;
     }
     double result = (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2);
-    if(fabs(result) < 1e-12 * (fabs(deriv2.dR2) + fabs(derivR_over_R) +
+    if(fabs(result) < EPSREL_DENSITY_DER * (fabs(deriv2.dR2) + fabs(derivR_over_R) +
         fabs(deriv2.dz2) + fabs(deriv2phi_over_R2)) )
         result = 0;  // dominated by roundoff errors
     return result / (4*M_PI);
@@ -43,19 +47,19 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
     coord::HessSph deriv2;
     eval(pos, NULL, &deriv, &deriv2);
     double sintheta=sin(pos.theta);
-    double derivr_over_r = deriv.dr/pos.r;
-    double derivtheta_cottheta = deriv.dtheta*cos(pos.theta)/sintheta;
+    double derivr_over_r = deriv.dr / pos.r;
+    double derivtheta_cottheta = deriv.dtheta * cos(pos.theta) / sintheta;
     if(sintheta==0)
         derivtheta_cottheta = deriv2.dtheta2;
     double angular_part = (deriv2.dtheta2 + derivtheta_cottheta + 
-        deriv2.dphi2/pow_2(sintheta))/pow_2(pos.r);
+        (sintheta!=0 ? deriv2.dphi2 / pow_2(sintheta) : 0) ) / pow_2(pos.r);
     if(pos.r==0) {
         if(deriv.dr==0)  // otherwise should remain infinite
             derivr_over_r = deriv2.dr2;
-        angular_part=0; ///!!! is this correct assumption?
+        angular_part=0;  ///!!! is this correct assumption?
     }
     double result = deriv2.dr2 + 2*derivr_over_r + angular_part;
-    if(fabs(result) < 1e-12 * (fabs(deriv2.dr2) + fabs(2*derivr_over_r) + fabs(angular_part)) )
+    if(fabs(result) < EPSREL_DENSITY_DER * (fabs(deriv2.dr2) + fabs(2*derivr_over_r) + fabs(angular_part)) )
         result = 0;  // dominated by roundoff errors
     return result / (4*M_PI);
 }
@@ -107,7 +111,7 @@ void DensityIntegrandNdim::eval(const double vars[], double values[]) const
 
 double BaseDensity::enclosedMass(const double r) const
 {
-    if(r<=0) return 0;   // this assumes no central point mass! overriden in Plummer density model
+    if(r==0) return 0;   // this assumes no central point mass! overriden in Plummer density model
     // default implementation is to integrate over density inside given radius;
     // may be replaced by cheaper and more approximate evaluation for derived classes
     DensityIntegrandNdim fnc(*this);
@@ -127,24 +131,22 @@ double BaseDensity::totalMass() const
     double rad=32;
     double mass1, mass2 = enclosedMass(rad), mass3 = enclosedMass(rad*2);
     double massEst=0, massEstPrev;
-    int numNeg=0, numIter=0;
-    const int maxNumNeg=4, maxNumIter=20;
+    int numIter=0;
+    const int maxNumIter=20;
     do{
         rad *= 2;
         mass1 = mass2;
         mass2 = mass3;
         mass3 = enclosedMass(rad*2);
-        if(mass2 == mass3) {
+        if(mass2 == mass3 || mass3 == 0) {
             return mass3;  // mass doesn't seem to grow with raduis anymore
         }
         massEstPrev = massEst>0 ? massEst : mass3;
-        massEst = (mass2*mass2-mass1*mass3)/(2*mass2-mass1-mass3);
-        if(!isFinite(massEst) || massEst<=0)
-            numNeg++;  // increase counter of 'bad' attempts (negative means that mass is growing at least logarithmically with radius)
+        massEst = (mass2 * mass2 - mass1 * mass3) / (2 * mass2 - mass1 - mass3);
         numIter++;
-    } while(numIter<maxNumIter && numNeg<maxNumNeg && mass2!=mass3 &&
-        (massEst<0 || fabs((massEstPrev-massEst)/massEst)>EPSREL_DENSITY_INT));
-    if(fabs((massEstPrev-massEst)/massEst)>EPSREL_DENSITY_INT)
+    } while(numIter<maxNumIter && (massEst<0 || fabs((massEstPrev-massEst)/massEst)>EPSREL_DENSITY_INT));
+    if(!isFinite(massEst) || massEst<=0)
+        // (negative means that mass is growing at least logarithmically with radius)
         massEst = INFINITY;   // total mass seems to be infinite
     return massEst;
 }

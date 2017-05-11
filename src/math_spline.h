@@ -15,15 +15,13 @@ natural boundary condition the second derivatives of f(x) at the left- and right
 are set to zero; in the case of clamped spline instead the value of first derivative at these
 boundaries must be provided.
 In both cases the function and its first two derivatives are continuous on the entire domain.
+It is also possible to apply a regularizing filter after the spline initialization, which
+may modify the computed derivatives in order to avoid non-monotonic behaviour of the interpolator.
+This makes the spline only continuous up to its first derivative, but reduces wiggles.
 - If in addition to the values of function at grid points, its first derivatives y'[i]
 are also given at all points, then a quintic spline is the right choice for interpolation.
 It provides piecewise 5-th degree polynomial interpolation with three continuous derivatives
 on the entire domain.
-- Alternatively, a cubic Hermite spline may be constructed from the same arrays x, y and y',
-which provides locally cubic interpolation on each segment, but the values of 2nd derivative
-are not continuous across segments. On the other hand, since the interpolation is local,
-it is easy to ensure monotonic behaviour of the function by adjusting the derivatives
-at the boundaries of segments where the monotonicity is violated (presently not implemented).
 
 ###  2-dimensional case.
 In this case, {x[i], y[j]}, i=0..Mx-1, j=0..My-1  are the pairs of coordinates of nodes
@@ -137,28 +135,84 @@ public:
 };
 
 
-/** Class that defines a cubic spline with natural or clamped boundary conditions */
+/** Piecewise-cubic spline interpolator with one or two continuous derivatives.
+    The spline is defined by the values and first derivatives at each grid point.
+    There are several possible ways of constructing a cubic spline:
+    - from the function values at the grid points: this results in a natural cubic spline,
+    constructed from the requirement that the second derivative is continuous at all interior points,
+    and zero at the endpoints.
+    - the same plus one or two endpoint derivatives results in a clamped cubic spline,
+    which has the same smoothness properties, but a prescribed first derivative at the endpoint
+    (hence the second derivative is generally not zero).
+    - from the amplitudes of a 3rd degree B-spline interpolator: there are Nnodes+2 independent
+    basis functions, and the resulting clamped cubic spline is exactly equivalent to the B-spline.
+    - from the user-provided values and first derivatives at each grid point:
+    this resulting curve has, in general, only one continuous derivative.
+    A quintic spline, constructed from the same amount of input data, typically results in 
+    a much better interpolation accuracy, and has three continuous derivatives.
+
+    In the first case, there is a further possibility of applying a monotonicity-preserving filter:
+    if the input function values are monotonic over a certain range of grid indices,
+    the spline would preserve this property, with the exception of a grid segment adjacent to
+    a local maximum or minimum, where the value of interpolant is also allowed to reach an extremum
+    inside the segment. This is achieved by modifying the first derivatives where necessary;
+    as a result, the spline loses the property of being twice continuously differentiable,
+    but generally behaves in a more regular way, avoiding spurious spikes.
+    This procedure also manifestly violates the linear nature of the interpolator,
+    hence it is not used by default.
+*/
 class CubicSpline: public BaseInterpolator1d, public IFunctionIntegral {
 public:
     CubicSpline() : BaseInterpolator1d() {};
 
-    /** There are two possible ways of initializing a cubic spline:
-        (1) from the values of the function at grid nodes, and optionally its endpoint derivatives;
-        (2) from the amplitudes of B-spline functions returned by fitting routines.
+    /** Construct a natural cubic spline from the function values at grid points,
+        or a clamped cubic spline from the amplitudes of a B-spline interpolator.
+        In both cases the interpolated curve is twice continuously differentiable.
         \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
-        \param[in]  fvalues  - in the first case, an array of function values
-        at grid nodes (same length as xvalues);
+        \param[in]  fvalues  - depending on the length of this array, in may mean two things:
+        in the first case, an array of function values at grid nodes (same length as xvalues);
         in the second case, an array of B-spline amplitudes, with length equal to xvalues.size()+2.
-        \param[in]  derivLeft  (optional)  - first derivative of the spline at the leftmost
-        grid node (only in the first case), default value NaN means a natural boundary condition
-        (zero second derivative).
+        \throws  std::invalid_argument or std::range_error if grid is too small or not monotonic,
+        or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
+    */
+    CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
+    
+    /** Construct a natural or clamped cubic spline from the function values at grid nodes,
+        and optionally its endpoint derivatives: if any of them is not specified (indicated by NAN)
+        this means a natural boundary condition, i.e., the second derivative is zero.
+        Regardless of the boundary conditions, the interpolated curve is twice continuously
+        differentiable.
+        \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
+        \param[in]  fvalues  - the array of function values at grid nodes, same length as xvalues.
+        \param[in]  derivLeft  - first derivative of the spline at the leftmost grid node;
+        a NaN value means a natural boundary condition (zero second derivative).
         \param[in]  derivRight - same for the rightmost grid node.
-        \throws  std::invalid_argument exception if grid is too small or not monotonic,
-        or the array sizes are incorrect.
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN);
+        double derivLeft, double derivRight);
 
+    /** Construct a natural cubic spline from the function values at grid nodes,
+        and then apply a regularization procedure to impose monotonicity constraints
+        and reduce wiggliness. This may require a modification of the internally assigned
+        first derivative, so the resulting spline is no longer twice continuously differentiable
+        (only once); however, in general this produces a better-behaving interpolator.
+        \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
+        \param[in]  fvalues  - the array of function values at grid nodes, same length as xvalues.
+        \param[in]  regularize - whether to apply the regularization procedure (if false,
+        this is equivalent to the first variant of the constructor without any extra arguments).
+    */
+    CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        bool regularize);
+    
+    /** Construct a piecewise-cubic Hermite interpolator from the provided values of function
+         values and first derivatives. The curve has only one continuous derivative.
+         \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
+         \param[in]  fvalues  - the array of function values at grid nodes, same length as xvalues.
+         \param[in]  fderivs  - the array of function derivatives at grid nodes, same length.
+    */
+    CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
+    
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed. */
     virtual void evalDeriv(const double x,
@@ -176,36 +230,11 @@ public:
     bool isMonotonic() const;
 
 private:
-    std::vector<double> fder2;  ///< second derivatives of function at grid nodes
+    std::vector<double> fder;  ///< first derivatives of interpolated function at grid nodes
 };
 
 
-/** Class that defines a piecewise cubic Hermite spline.
-    Input consists of values of y(x) and dy/dx on a grid of x-nodes;
-    result is a cubic function in each segment, with continuous first derivative at nodes
-    (however second or third derivative is not continuous, unlike the case of quintic spline).
-*/
-class HermiteSpline: public BaseInterpolator1d {
-public:
-    HermiteSpline() : BaseInterpolator1d() {};
-
-    /** Initialize the spline from the provided values of x, f(x) and f'(x)
-        (which should be arrays of equal length, and x values must be monotonically increasing).
-    */
-    HermiteSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        const std::vector<double>& yderivs);
-
-    /** compute the value of spline and optionally its derivatives at point x;
-        if the input location is outside the definition interval, a linear extrapolation is performed. */
-    virtual void evalDeriv(const double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
-
-private:
-    std::vector<double> fder;  ///< first derivatives of function at grid nodes
-};
-
-
-/** Class that defines a quintic spline.
+/** Quintic spline (piecewise-quintic polynomial with three continuous derivatives).
     On each grid segment, y(x) is a 5th order polynomial specified by 6 coefficients --
     values and the first two derivatives at two adjacent grid nodes.
     The 2nd derivatives are initialized from the provided values y(x) and derivatives dy/dx
@@ -228,7 +257,7 @@ public:
         double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
 private:
-    std::vector<double> fder;  ///< first derivatives of function at grid nodes
+    std::vector<double> fder;  ///< first  derivatives of function at grid nodes
     std::vector<double> fder2; ///< second derivatives of function at grid nodes
 };
 
@@ -263,10 +292,11 @@ public:
     */
     BsplineInterpolator1d(const std::vector<double>& xnodes);
 
-    /** Compute the values of all potentially non-zero interpolating basis functions
-        at the given point, needed to obtain the value of interpolant f(x) at this point.
-        \param[in]  x is the point (which may lie outside the grid);
-        \param[out] values  is the array of (N+1) values of interpolation B-splines;
+    /** Compute the values of all potentially non-zero interpolating basis functions or their
+        derivatives at the given point, needed to obtain the value of interpolant f(x) at this point.
+        \param[in]  x  is the point (which may lie outside the grid);
+        \param[in]  derivOrder  is the order of derivative D of basis functions (0 <= D <= N);
+        \param[out] values  is the array of (N+1) values of interpolation B-splines or their derivs.
         The sum of values of all B-splines is always 1, and values are non-negative.
         The special case when one of these weigths is 1 and the rest are 0 occurs at the corners of
         the interval, or, for a linear intepolator (N=1) also at all grid nodes,
@@ -276,7 +306,7 @@ public:
         dimension, all weights are zero.
         \return  the index of the first basis function for which the values are stored.
     */
-    unsigned int nonzeroComponents(const double x, double values[]) const;
+    unsigned int nonzeroComponents(const double x, const unsigned int derivOrder, double values[]) const;
 
     /** Compute the values of all numComp basis functions at the given point.
         \param[in]  x is the point (which may lie outside the grid);
@@ -287,15 +317,17 @@ public:
     */
     virtual void eval(const double* x, double values[]) const;
 
-    /** Compute the value of the interpolant `f` at the given point.
+    /** Compute the value of the interpolant `f` or its derivative at the given point.
         \param[in] x is the point (which may lie outside the grid);
         \param[in] amplitudes is the array of numComp amplitudes of each basis function;
-        \return    the weighted sum of all potentially non-zero basis functions at this point,
-        multiplied by their respective amplitudes, or 0 if the input location is outside
+        \param[in] derivOrder is the order of derivative (default is 0, i.e. the function itself);
+        \return    the weighted sum of all potentially non-zero basis functions or their derivatives
+        at this point, multiplied by their respective amplitudes, or 0 if the input location is outside
         the grid definition region.
-        \throw std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
     */
-    double interpolate(const double x, const std::vector<double> &amplitudes) const;
+    double interpolate(const double x, const std::vector<double> &amplitudes,
+        const unsigned int derivOrder = 0) const;
 
     /** Compute the integral of f(x) * x^n over the interval [x1..x2], where f(x) is given
         by the weighted sum of basis functions, with weights provided in the array of amplitudes.
@@ -303,26 +335,28 @@ public:
         \param[in]  x2  is the upper limit;
         \param[in]  amplitudes  is the array of numComp amplitudes of basis functions;
         \param[in]  n   is the power-law index for the optional multiplier x^n;
-        \return     the value of integral (computed exactly up to machine precision).
+        \return     the value of integral (exact up to machine precision).
+        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
     */
     double integrate(double x1, double x2, const std::vector<double> &amplitudes, int n=0) const;
 
-    /** Compute the symmetric matrix of overlap integrals:
-        \f$  M_{ij} = \int_{x_{min}}^{x_{max}} B^(D)_i(x) B^(D)_j(x) dx  \f$,
-        where \f$  B^(D)_i(x)  \f$ is the D-th derivative of i-th basis function.
-        This matrix (for D=0) may be used to compute the amplitudes of basis functions
-        that yield the best approximation \f$ \tilde f(x) \f$ to the function f(x):
-        let \f$  \tilde f(x) = \sum_{i=1}^{numComp} A_i B_i(x)  \f$,
-        and \f$  C_j = \int_{x_{min}}^{x_{max}} f(x) B_j(x) dx  \f$.
-        Then the amplitudes A_i are obtained from the linear equation system
-        \f$  M_{ij} A_i = C_j  \f$.
-        The overlap integrals of derivatives are used in the context of penalized
-        smoothing splines and provide the roughness penalty term.
-        \param[in]  derivOrder = D -- order of the derivatives (should be 0, 1, or 2).
-        \return  the square symmetric matrix M_ij with size numComp.
-        \throw   std::invalid_argument if the order of derivative is incorrect.
+    /** Construct a B-spline representation of the derivative of a B-spline interpolator.
+        \param[in]  amplitudes  is the array of amplitudes of a B-spline of degree N;
+        \return  an array of amplutides for a different B-spline of degree N-1 constructed
+        for the same x-nodes and representing the derivative of the original B-spline;
+        the size of this array is one less than the input array.
+        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
     */
-    Matrix<double> computeOverlapMatrix(const unsigned int derivOrder) const;
+    std::vector<double> deriv(const std::vector<double> &amplitudes) const;
+
+    /** Construct a B-spline representation of the antiderivative of a B-spline interpolator.
+        \param[in]  amplitudes  is the array of amplitudes of a B-spline of degree N;
+        \return  an array of amplutides for a different B-spline of degree N+1 constructed
+        for the same x-nodes and representing the antiderivative of the original B-spline;
+        the size of this array is one element larger than the input array, and the 0th element is zero.
+        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
+    */
+    std::vector<double> antideriv(const std::vector<double> &amplitudes) const;
 
     /** The dimensions of interpolator (1) */
     virtual unsigned int numVars()   const { return 1; }
@@ -334,41 +368,143 @@ public:
     double xmin() const { return xnodes.front(); }
     double xmax() const { return xnodes.back();  }
 
+    /** return the nodes of the grid used for interpolation */
+    const std::vector<double>& xvalues() const { return xnodes; }
+
 private:
-    std::vector<double> xnodes;  ///< grid nodes
-    const unsigned int numComp;  ///< number of basis functions
+    const std::vector<double> xnodes;  ///< grid nodes
+    const unsigned int numComp;        ///< number of basis functions
 };
 
+/// simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
 template<int N>
-std::vector<double> createBsplineInterpolator1dArray(const IFunction& F,
-    const std::vector<double>& xnodes, int NpointsPerSegment=0);
-
-
-/** Cubic spline with logarithmic scaling of the value:
-    f(x) = exp( S(x) ), where S is represented as a cubic spline.
-*/
-class LogSpline: public math::IFunction {
-    HermiteSpline S;
+class BsplineWrapper: public math::IFunction {
+    const math::BsplineInterpolator1d<N> bspl;
+    const std::vector<double> ampl;
 public:
-    /**/
-    LogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN, bool avoidWiggles=false);
-    virtual void evalDeriv(const double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    BsplineWrapper(const math::BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
+        bspl(_bspl), ampl(_ampl) {}
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
+    {
+        if(value)
+            *value = bspl.interpolate(x, ampl);
+        if(deriv)
+            *deriv = bspl.interpolate(x, ampl, 1);
+        if(deriv2)
+            *deriv2= bspl.interpolate(x, ampl, 2);
+    }
     virtual unsigned int numDerivs() const { return 2; }
 };
 
-/** Cubic spline with logarithmic scalings of both the value and the argument:
-    f(x) = exp( S( ln(x) ) ), where S is represented as a cubic spline.
+
+/** Finite-element analysis using one-dimensional B-splines of degree N.
+    This class provides methods for constructing discretized representation of any function
+    using the basis set of B-splines or their derivatives; this amounts to integrating
+    the original function multiplied by basis functions, which is performed on a pre-determined
+    auxiliary grid of points (a few per each segment of the B-spline grid).
+    The input function is evaluated at these points, and the values or derivatives of basis functions
+    are pre-computed on the same grid during the construction.
 */
-class LogLogSpline: public math::IFunction {
-    HermiteSpline S;
+template<int N>
+class FiniteElement1d {
 public:
+    /** Construct the B-spline interpolator and set up the arrays with basis function values */
+    FiniteElement1d(const std::vector<double>& xnodes);
+    
+    /** Compute the projection of a function f(x) onto the basis -- the vector of integrals
+        of input function weighted with each of the basis functions B_n or their derivatives:
+        \f$ v_n = \int f(x) B_n^{(D)}(x) dx \f$.
+        \param[in]  fncValues   is the array of pre-computed values of input function f(x)
+        at the grid of points returned by `integrPoints()`.
+        \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
+        \return  the vector v_n  of length `interp.numValues()` (number of basis functions).
+        \throw   std::range_error if the length of fncValues differs from integrNodes.
+    */
+    std::vector<double> computeProjVector(
+        const std::vector<double>& fncValues, unsigned int derivOrder=0) const;
+
+    /** Compute the matrix of products of basis functions or their derivatives 
+        weighted with input function f(x):
+        \f$  A_{mn} = \int f(x) B_m^{(p)}(x) B_n^{(q)}(x) dx  \f$.
+        \param[in]  fncValues    is the array of pre-computed values of input function f(x)
+        at the grid of points returned by `integrPoints()`;
+        it may be an empty array, meaning that f(x)=1 identically.
+        \param[in]  derivOrderP  is the order `p` of derivatives of the row-wise basis functions.
+        \param[in]  derivOrderQ  is the order `p` of derivatives of the column-wise basis functions.
+        \return  the band matrix A_{mn}: a square matrix with size `interp.numValues()` and
+        at most 2*N+1 nonzero values around the main diagonal in each row.
+        \throw  std::range_error if the length of fncValues differs from integrNodes.
+    */
+    BandMatrix<double> computeProjMatrix(
+        const std::vector<double>& fncValues = std::vector<double>(),
+        unsigned int derivOrderP=0, unsigned int derivOrderQ=0) const;
+
+    /** Compute the amplitudes of B-spline interpolator for the input function f(x).
+        This is a convenience function that performs the following steps:
+        1) collect the function values at the points of the integration grid;
+        2) find \f$ v_i = \int f(x) B_i(x) dx \$ using `computeProjVector()`;
+        3) find \f$ A_{ij} = \int B_i(x) B_j(x) dx \$ using `computeProjMatrix()`;
+        4) solve the linear system `A c = v`  to find the vector of amplitudes `c`.
+        One can then use `interp.interpolate(x, c)` to compute the approximation for f(x).
+        If one needs to construct interpolators for several different functions,
+        it would be more efficient to store and re-use the matrix A_ij, i.e.,
+        perform these steps manually. Similarly, in the case of weighted inner product,
+        when the integrals for v_i and A_ij have an extra weight factor w(x),
+        this modified sequence of steps could also be easily carried out manually.
+        \param[in]  F  is the input function.
+        \return  the vector of amplitudes `c` that can be used as the argument to B-spline
+        `interpolate()` method as described above.
+    */
+    std::vector<double> computeAmplitudes(const IFunction& F) const;
+
+    /// the B-spline interpolator constructed for the input grid
+    const BsplineInterpolator1d<N> interp;
+
+    /// coordinates of points used to integrate any function on the grid
+    const std::vector<double>& integrPoints() const { return integrNodes; }
+
+private:
+    /// we use the order of Gauss-Legendre quadrature equal to N+1, so that the integration of
+    /// polynomials up to degree 2N+1 (e.g., products of two basis functions) is exact
+    static const int GLORDER = N+1;
+    std::vector<double> integrNodes;
+    std::vector<double> integrWeights;
+    std::vector<double> bsplValues;
+};
+
+
+/** Cubic or quintic spline with logarithmic scalings of both the value and the argument:
+    f(x) = exp( S( ln(x) ) ), where S is represented as a spline.
+    Input x values must be strictly positive; however, input f values may contain zero or
+    negative elements - these points will be excluded from log-spline construction and
+    interpolated without log-scaling when evaluating the function.
+*/
+class LogLogSpline: public BaseInterpolator1d {
+public:
+    /// empty constructor
+    LogLogSpline() {}
+
+    /// construct a natural or clamped cubic spline from the function values
+    /// and optionally two endpoint derivatives
     LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN, bool avoidWiggles=false);
+        double derivLeft=NAN, double derivRight=NAN);
+
+    /// construct a quintic spline from function values and derivatives
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
+    
     virtual void evalDeriv(const double x,
         double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+
     virtual unsigned int numDerivs() const { return 2; }
+
+private:
+    std::vector<double> fder;     ///< first derivatives of the original function at grid nodes
+    std::vector<double> logxval;  ///< log-scaled coordinate
+    std::vector<double> logfval;  ///< log-scaled function values
+    std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
+    std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
+    
 };
 
 
@@ -1017,7 +1153,8 @@ std::vector<double> createAlmostUniformGrid(unsigned int nnodes,
 std::vector<double> mirrorGrid(const std::vector<double> &input);
 
 /** Construct a grid for interpolating a function with a cubic spline.
-    x is supposed to be a log-scaled coordinate, i.e., it does not attain very large values.
+    x is supposed to be a log-scaled coordinate, i.e., it does not attain very large values
+    (only the range [-100:100] is examined).
     The function is assumed to have linear asymptotic behaviour at x -> +- infinity,
     and the goal is to place the grid nodes such that the typical error in the interpolating
     spline is less than the provided tolerance eps.
@@ -1028,16 +1165,18 @@ std::vector<double> mirrorGrid(const std::vector<double> &input);
     its smoothness is not quite as high, and the accuracy of the secondary interpolation deteriorates
     somewhat (but is still at an acceptable level, taking into account that the original function
     itself is an approximation).
-    We start from x=xinit and scan in both directions, adding grid nodes at intervals determined
+    We start by picking an initial point from several trial points inside the range [-100:100],
+    based on the highest absolute value of the second derivative.
+    Then we scan the range of x in both directions, adding grid nodes at intervals determined
     by the above relation, and stop when the second derivative is less than the threshold eps.
     Typically the nodes will be more sparsely spaced towards the end of the grid.
-    The approach is intended for functions that take x=log(y), so that the range of x is rather moderate.
-    \param[in] fnc  is the function f(x), only its second derivative is examined;
-    \param[in] eps  is the tolerance parameter;
-    \param[in] xinit  is the initial search point (expand in both directions from there);
+    The approach is intended for functions that take x=log(y), so that the range of x is rather small.
+    \param[in] fnc  is the function f(x), only its second derivative is examined
+    (if the function does not provide it, a finite-difference approximation is constructed).
+    \param[in] eps  is the tolerance parameter.
     \return  the grid in x.
 */
-std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps, double xinit=0);
+std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps);
     
 ///@}
 }  // namespace

@@ -14,7 +14,7 @@ namespace math{
     A x = rhs,  satisfies constraints  xmin <= x <= xmax, and minimizes the cost function
     F(x) = L x, where L is the vector of 'penalties'.
     \param[in]  A  is the matrix of the linear system (N_c rows, N_v columns, N_v>=N_c),
-    accessed through the 'IMatrix' interface (e.g., as `IMatrixDense<double>(actualMatrix)`);
+    accessed through the 'IMatrix' interface (e.g., a dense or a sparse matrix`);
     \param[in]  rhs  is the RHS of the linear system (N_c elements, or the equality constraints);
     \param[in]  L  is the vector of penalties (N_v elements, or empty vector meaning that
     all of them are zero);
@@ -30,11 +30,11 @@ namespace math{
 */
 template<typename NumT>
 std::vector<double> linearOptimizationSolve(
-    const IMatrix<NumT>& A,
+    const     IMatrix<NumT>& A,
     const std::vector<NumT>& rhs,
-    const std::vector<NumT>& L=std::vector<NumT>(),
-    const std::vector<NumT>& xmin=std::vector<NumT>(),
-    const std::vector<NumT>& xmax=std::vector<NumT>());
+    const std::vector<NumT>& L = std::vector<NumT>(),
+    const std::vector<NumT>& xmin = std::vector<NumT>(),
+    const std::vector<NumT>& xmax = std::vector<NumT>());
 
 /** Solve a quadratic optimization problem, i.e., a system of linear equations with
     constraints on the solution vector `x` and a quadratic objective function `F(x)`.
@@ -47,7 +47,7 @@ std::vector<double> linearOptimizationSolve(
     \param[in]  L  is the vector of linear penalties (N_v elements);
     \param[in]  Q  is the matrix of quadratic penalties (square matrix N_v x N_v),
     most commonly it would be a diagonal matrix specified by an array of N_v elements,
-    as `IMatrixDiagonal<double>(vectorDiag)`. May also be an empty matrix, which means
+    as `BandMatrix<double>(vectorDiag)`. May also be an empty matrix, which means
     no quadratic term, so that the optimization problem is linear; however, the implementation
     of the solver may be different from that in `linearOptimizationSolve()`.
     \param[in]  xmin  is the vector of lower limits imposed on the solution
@@ -64,12 +64,12 @@ std::vector<double> linearOptimizationSolve(
 */
 template<typename NumT>
 std::vector<double> quadraticOptimizationSolve(
-    const IMatrix<NumT>& A,
+    const     IMatrix<NumT>& A,
     const std::vector<NumT>& rhs,
-    const std::vector<NumT>& L=std::vector<NumT>(),
-    const IMatrix<NumT>& Q=DiagonalMatrix<NumT>(),
-    const std::vector<NumT>& xmin=std::vector<NumT>(),
-    const std::vector<NumT>& xmax=std::vector<NumT>());
+    const std::vector<NumT>& L = std::vector<NumT>(),
+    const     IMatrix<NumT>& Q = BandMatrix<NumT>(),
+    const std::vector<NumT>& xmin = std::vector<NumT>(),
+    const std::vector<NumT>& xmax = std::vector<NumT>());
 
 /** A modification of linear optimization problem that always has a solution, even if
     it does not satisfy all constraints exactly.
@@ -95,12 +95,12 @@ std::vector<double> quadraticOptimizationSolve(
 */
 template<typename NumT>
 std::vector<double> linearOptimizationSolveApprox(
-    const IMatrix<NumT>& A,
+    const     IMatrix<NumT>& A,
     const std::vector<NumT>& rhs,
-    const std::vector<NumT>& L=std::vector<NumT>(),
-    const std::vector<NumT>& consPenaltyLin=std::vector<NumT>(),
-    const std::vector<NumT>& xmin=std::vector<NumT>(),
-    const std::vector<NumT>& xmax=std::vector<NumT>());
+    const std::vector<NumT>& L = std::vector<NumT>(),
+    const std::vector<NumT>& consPenaltyLin = std::vector<NumT>(),
+    const std::vector<NumT>& xmin = std::vector<NumT>(),
+    const std::vector<NumT>& xmax = std::vector<NumT>());
 
    /** A modification of quadratic optimization problem that always has a solution, even if
     it does not satisfy all constraints exactly. 
@@ -129,13 +129,13 @@ std::vector<double> linearOptimizationSolveApprox(
 */
 template<typename NumT>
 std::vector<double> quadraticOptimizationSolveApprox(
-    const IMatrix<NumT>& A,
+    const     IMatrix<NumT>& A,
     const std::vector<NumT>& rhs,
-    const std::vector<NumT>& L=std::vector<NumT>(),
-    const IMatrix<NumT>& Q=DiagonalMatrix<NumT>(),
-    const std::vector<NumT>& consPenaltyLin=std::vector<NumT>(),
-    const std::vector<NumT>& consPenaltyQuad=std::vector<NumT>(),
-    const std::vector<NumT>& xmin=std::vector<NumT>(),
-    const std::vector<NumT>& xmax=std::vector<NumT>());
+    const std::vector<NumT>& L = std::vector<NumT>(),
+    const     IMatrix<NumT>& Q = BandMatrix<NumT>(),
+    const std::vector<NumT>& consPenaltyLin  = std::vector<NumT>(),
+    const std::vector<NumT>& consPenaltyQuad = std::vector<NumT>(),
+    const std::vector<NumT>& xmin = std::vector<NumT>(),
+    const std::vector<NumT>& xmax = std::vector<NumT>());
 
 }  // namespace

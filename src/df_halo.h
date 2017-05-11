@@ -15,18 +15,19 @@ namespace df{
 /// Parameters that describe a double power law distribution function.
 struct DoublePowerLawParam{
 double
-    norm,     ///< normalization factor with the dimension of mass
-    J0,       ///< break action (defines the transition between inner and outer regions)
-    Jcutoff,  ///< cutoff action (sets exponential suppression at J>Jcutoff, 0 to disable)
-    slopeIn,  ///< power-law index for actions below the break action (Gamma)
-    slopeOut, ///< power-law index for actions above the break action (Beta)
-    steepness,///< steepness of the transition between two asymptotic regimes (eta)
-    coefJrIn, ///< contribution of radial   action to h(J), controlling anisotropy below J_0 (h_r)
-    coefJzIn, ///< contribution of vertical action to h(J), controlling anisotropy below J_0 (h_z)
-    coefJrOut,///< contribution of radial   action to g(J), controlling anisotropy above J_0 (g_r)
-    coefJzOut;///< contribution of vertical action to g(J), controlling anisotropy above J_0 (g_z)
+    norm,      ///< normalization factor with the dimension of mass
+    J0,        ///< break action (defines the transition between inner and outer regions)
+    Jcutoff,   ///< cutoff action (sets exponential suppression at J>Jcutoff, 0 to disable)
+    slopeIn,   ///< power-law index for actions below the break action (Gamma)
+    slopeOut,  ///< power-law index for actions above the break action (Beta)
+    steepness, ///< steepness of the transition between two asymptotic regimes (eta)
+    cutoffStrength, ///< steepness of exponential suppression at J>Jcutoff (zeta)
+    coefJrIn,  ///< contribution of radial   action to h(J), controlling anisotropy below J_0 (h_r)
+    coefJzIn,  ///< contribution of vertical action to h(J), controlling anisotropy below J_0 (h_z)
+    coefJrOut, ///< contribution of radial   action to g(J), controlling anisotropy above J_0 (g_r)
+    coefJzOut; ///< contribution of vertical action to g(J), controlling anisotropy above J_0 (g_z)
 DoublePowerLawParam() :  ///< set default values for all fields
-    norm(0), J0(0), Jcutoff(0), slopeIn(0), slopeOut(0), steepness(1),
+    norm(0), J0(0), Jcutoff(0), slopeIn(0), slopeOut(0), steepness(1), cutoffStrength(2),
     coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1) {}
 };
 
@@ -35,7 +36,7 @@ DoublePowerLawParam() :  ///< set default values for all fields
     \f$  f(J) = norm / (2\pi J_0)^3
          (1 + (J_0 /h(J))^\eta )^{\Gamma / \eta}
          (1 + (g(J)/ J_0)^\eta )^{-B / \eta }
-         \exp[ - (g(J) / J_{cutoff})^2 ] \f$,  where
+         \exp[ - (g(J) / J_{cutoff})^\zeta ] \f$,  where
     \f$  g(J) = g_r J_r + g_z J_z + g_\phi |J_\phi|  \f$,
     \f$  h(J) = h_r J_r + h_z J_z + h_\phi |J_\phi|  \f$.
     Gamma is the power-law slope of DF at small J (slopeIn), and Beta -- at large J (slopeOut),
@@ -43,6 +44,7 @@ DoublePowerLawParam() :  ///< set default values for all fields
     h_r, h_z and h_phi control the anisotropy of the DF at small J (their sum is always taken
     to be unity, so that there are two free parameters -- coefJrIn = h_r, coefJzIn = h_z),
     and g_r, g_z, g_phi do the same for large J (coefJrOut = g_r, coefJzOut = g_z).
+    Jcutoff is the threshold of an optional exponential suppression, and zeta measures its strength.
 */
 class DoublePowerLaw: public BaseDistributionFunction{
     const DoublePowerLawParam par;  ///< parameters of DF

@@ -36,7 +36,7 @@ public:
     /// check if a key exists in the list
     bool contains(const std::string& key) const;
 
-    /// return a string value from the map
+    /// return a string value from the map, or defaultValue if the key is not found in the list
     std::string getString(const std::string& key, const std::string& defaultValue="") const;
 
     /// return value from either of the two variants of key
@@ -59,6 +59,10 @@ public:
 
     /// return a boolean value from the map
     bool getBool(const std::string& key, bool defaultValue=false) const;
+
+    /// return an array of floating-point values parsed from a comma-separated string
+    std::vector<double> getDoubleVector(const std::string& key,
+        const std::vector<double>& defaultValues) const;
 
     /// set a string value
     void set(const std::string& key, const std::string& value);
@@ -84,8 +88,13 @@ public:
     /// parse a key=value pair and append it to the map (does not change `modified` flag)
     void add(const char* keyValue);
 
-    /// dump the entire map into a single string (with line breaks between items)
+    /// dump the entire map into a single multi-line string, retaining all entries
+    /// (including comments and empty lines) joined with line breaks
     std::string dump() const;
+
+    /// dump the entire map into a single line, omitting comments
+    /// and joining entries with a space character
+    std::string dumpSingleLine() const;
 
     /// return the list of all keys that contain any values
     std::vector<std::string> keys() const;
@@ -105,21 +114,26 @@ private:
 class ConfigFile {
 public:
     /// open an INI file with the given name and read its contents
-    /// \throw std::runtime_error if the file does not exist
-    ConfigFile(const std::string& fileName);
+    /// \throw std::runtime_error if the file does not exist and mustExist==true
+    ConfigFile(const std::string& fileName, bool mustExist=true);
 
     /// destroy the class and write unsaved data back to INI file, if it was modified
+    /// (that is, if a 'set()' method was called for any of the sections)
     ~ConfigFile();
 
     /// return a list of all sections in the INI file
     std::vector<std::string> listSections() const;
 
-    /// find section by name, if it does not exist then first create it
-    KeyValueMap& findSection(const std::string& sec);
+    /// find the section by its name.
+    /// \param[in]  secName  is the section name; if it did not exist, first create an empty section.
+    /// \return a non-const reference to a section: it may be used to modify the values in the ini file
+    KeyValueMap& findSection(const std::string& secName);
 
 private:
-    std::string fileName;   ///< name of INI file
-    std::vector< std::pair<std::string, KeyValueMap> > sections;   ///< list of all sections with their names
+    /// name of the INI file
+    std::string fileName;
+    /// list of all sections with their names
+    std::vector< std::pair<std::string, KeyValueMap> > sections;
 };
 
 } // namespace

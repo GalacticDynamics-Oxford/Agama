@@ -40,6 +40,9 @@ struct ParamsTrajectory {
 
     /// interval between output (should be an integer multiple of the episode length)
     double outputInterval;
+    
+    /// optional header written in the output file
+    std::string header;
 };
 
 /** The task that stores the output of the simulation as a series of N-body snapshots */

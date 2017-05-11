@@ -37,7 +37,7 @@ inline void legendrePmm(int m, double costheta, double sintheta,
         return;
     }
     double coef  = prefact * dfactorial(2*m-1) * (m%2 == 1 ? -1 : 1);
-    double sinm2 = powInt(sintheta, m-2);
+    double sinm2 = pow(sintheta, m-2);
     if(der)
         *der = m * coef * sinm2 * sintheta * costheta;
     if(der2)
@@ -133,7 +133,7 @@ void trigMultiAngle(const double phi, const unsigned int m, const bool needSine,
     for(unsigned int k=m+1; k<m*2; k++)
         outputArray[k] = 2 * cosphi * outputArray[k-1] - (k>m+1 ? outputArray[k-2] : 0);
 }
-    
+
 // ------ indexing scheme for spherical harmonics, encoding its symmetry properties ------ //
 
 SphHarmIndices::SphHarmIndices(int _lmax, int _mmax, coord::SymmetryType _sym) :
@@ -159,7 +159,7 @@ SphHarmIndices::SphHarmIndices(int _lmax, int _mmax, coord::SymmetryType _sym) :
         if(isReflSymmetric(sym) && m%2!=0)
             lminm = abs(m)+1; // in this case start from the next even l, because step in l is 2
         if( (isYReflSymmetric(sym)  && m<0) ||
-            (isXReflSymmetric(sym)  && ((m<0) ^ (m%2!=0)) ) || 
+            (isXReflSymmetric(sym)  && ((m<0) ^ (m%2!=0)) ) ||
             (isXYReflSymmetric(sym) && m%2!=0) )
             lminm = lmax+1;  // don't consider this m at all
         lmin_arr[m+mmax] = lminm;
@@ -215,7 +215,7 @@ std::vector<int> getIndicesAzimuthal(int mmax, coord::SymmetryType sym)
     if((sym & coord::ST_ZROTATION) == coord::ST_ZROTATION)
         return result;  // in this case all m!=0 indices are zero
     for(int m=1; m<=mmax; m++) {
-        // odd-m indices are excluded under the combination of z-reflection and mirror symmetry 
+        // odd-m indices are excluded under the combination of z-reflection and mirror symmetry
         if(isXYReflSymmetric(sym) && m%2 != 0)
             continue;
         bool addplusm = true, addminusm = true;
@@ -232,7 +232,7 @@ std::vector<int> getIndicesAzimuthal(int mmax, coord::SymmetryType sym)
         if(addminusm)
             result.push_back(-m);
         if(addplusm)
-            result.push_back(m);        
+            result.push_back(m);
     }
     return result;
 }
@@ -278,7 +278,7 @@ void FourierTransformForward::transform(const double values[], double coefs[]) c
         }
     }
 }
-    
+
 // index of Legendre function P_{lm}(theta_j) in the `legFnc` array
 inline unsigned int indLeg(const SphHarmIndices& ind, int j, int l, int m)
 {
@@ -296,7 +296,7 @@ SphHarmTransformForward::SphHarmTransformForward(const SphHarmIndices& _ind):
     int ngrid  = ind.lmax+1;    // # of nodes of GL grid on [-1:1]
     int ntheta = ind.lmax/2+1;  // # of theta values to compute Plm
     int nlegfn = (ind.lmax+1) * (ind.mmax+1);  // # of Legendre functions for each theta-node
-    
+
     legFnc.resize(ntheta * nlegfn);
     costhnodes.resize(ngrid);
     // obtain nodes and weights of Gauss-Legendre quadrature of degree lmax+1 on [-1:1] for cos(theta)
@@ -314,13 +314,18 @@ SphHarmTransformForward::SphHarmTransformForward(const SphHarmIndices& _ind):
             // multiply the values of all Legendre functions at theta[i]
             // by the weight of this node in GL quadrature and by additional prefactor
             for(int l=m; l<=ind.lmax; l++)
-                legFnc[indLeg(ind, j, l, m)] *= weights[j] * 0.5 / M_SQRTPI * (m>0 ? M_SQRT2 : 1);
+                legFnc[indLeg(ind, j, l, m)] *= weights[j] * (0.5/M_SQRTPI) * (m>0 ? M_SQRT2 : 1);
         }
     }
 }
 
 void SphHarmTransformForward::transform(const double values[], double coefs[]) const
 {
+    if(ind.size() == 1) {
+        // shortcut in the spherically-symmetric case
+        coefs[0] = values[0];
+        return;
+    }
     for(unsigned int c=0; c<ind.size(); c++)
         coefs[c] = 0;
     int mmin  = ind.mmin();
@@ -328,9 +333,10 @@ void SphHarmTransformForward::transform(const double values[], double coefs[]) c
     int ngrid = ind.lmax+1;      // # of nodes of GL grid for integration in theta on (0:pi)
     int nfour = ind.mmax-mmin+1; // # of Fourier harmonic terms - either mmax+1 or 2*mmax+1
     int nsamp = thetasize();     // # of samples taken in theta (is less than ngrid in case of z-symmetry)
-    // tmp storage: azimuthal Fourier coefficients F_jm for each value of theta_j and m.
+    // azimuthal Fourier coefficients F_jm for each value of theta_j and m.
     // indexing scheme: val_m[ j * nfour + m+ind.mmax ] = F_jm, 0<=j<nsamp, -mmax<=m<=mmax.
-    std::vector<double> val_m( thetasize() * nfour );
+    // allocate the temp.array on the stack, will be automatically freed on exit
+    double* val_m = static_cast<double*>(alloca(thetasize() * nfour * sizeof(double)));
 
     // first step: perform integration in phi for each value of theta, using Fourier transform
     for(unsigned int j=0; j<thetasize(); j++)
@@ -370,9 +376,9 @@ double sphHarmTransformInverse(const SphHarmIndices& ind, const double coefs[],
         if(lmin>ind.lmax)
             continue;  // empty m-harmonic
         int absm = abs(m);
-        double trig = m==0 ?       2*M_SQRTPI : // extra numerical factors from the definition of sph.harm.
-            m>0 ? tmptrig[m-1]   * 2*M_SQRTPI * M_SQRT2 :
-            tmptrig[ind.mmax-m-1]* 2*M_SQRTPI * M_SQRT2;
+        double trig = m==0 ?       (2*M_SQRTPI) : // extra numerical factors from the definition of sph.harm.
+            m>0 ? tmptrig[m-1]   * (2*M_SQRTPI * M_SQRT2) :
+            tmptrig[ind.mmax-m-1]* (2*M_SQRTPI * M_SQRT2);
         sphHarmArray(ind.lmax, absm, tau, tmpleg);
         for(int l=lmin; l<=ind.lmax; l+=ind.step) {
             double leg = tmpleg[l-absm];

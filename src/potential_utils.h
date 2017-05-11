@@ -9,21 +9,63 @@
 
 namespace potential{
 
-/** Compute circular velocity at a given (cylindrical) radius R in equatorial plane */
-double v_circ(const BasePotential& potential, double R);
+/** Compute the circular velocity at a given radius (v_circ^2 = r * dPhi/dr )
+    in a spherically-symmetric potential represented by a 1d function */
+double v_circ(const math::IFunction& potential, double r);
 
-/** Compute angular momentum of a circular orbit in equatorial plane for a given value of energy */
-double L_circ(const BasePotential& potential, double E);
+/** Compute the circular velocity at a given (cylindrical) radius R in equatorial plane
+    (convenience overload; the potential should be axisymmetric for this to make sense) */
+inline double v_circ(const BasePotential& potential, double R)
+{
+    return v_circ(PotentialWrapper(potential), R);
+}
 
-/** Compute cylindrical radius of a circular orbit in equatorial plane for a given value of energy */
-double R_circ(const BasePotential& potential, double E);
+/** Compute the radius of a circular orbit with the given energy
+    in a spherically-symmetric potential represented by a 1d function */
+double R_circ(const math::IFunction& potential, double E);
+
+/** Compute the cylindrical radius of a circular orbit in equatorial plane for a given value of energy
+    (convenience overload; the potential should be axisymmetric) */
+inline double R_circ(const BasePotential& potential, double E)
+{
+    return R_circ(PotentialWrapper(potential), E);
+}
+
+/** Compute the angular momentum of a circular orbit with the given energy
+    in a spherically-symmetric potential represented by a 1d function */
+inline double L_circ(const math::IFunction& potential, double E)
+{
+    double R = R_circ(potential, E);
+    return R * v_circ(potential, R);
+}
+
+/** Compute the angular momentum of a circular orbit in equatorial plane for a given value of energy
+    (convenience overload; the potential should be axisymmetric) */
+inline double L_circ(const potential::BasePotential& potential, double E)
+{
+    return L_circ(PotentialWrapper(potential), E);
+}
+
+/** Compute the radius of a circular orbit with the given angular momentum
+    in a spherical potential represented by a 1d function */
+double R_from_L(const math::IFunction& potential, double L);
 
 /** Compute cylindrical radius of an orbit in equatorial plane for a given value of
-    z-component of angular momentum */
-double R_from_Lz(const BasePotential& potential, double Lz);
+    z-component of angular momentum (convenience overload; the potential should be axisymmetric) */
+inline double R_from_Lz(const BasePotential& potential, double Lz)
+{
+    return R_from_L(PotentialWrapper(potential), Lz);
+}
 
-/** Compute radius in the equatorial plane corresponding to the given value of potential */
-double R_max(const BasePotential& potential, double Phi);
+/** Compute the radius corresponding to the given value of potential represented by a 1d function */
+double R_max(const math::IFunction& potential, double Phi);
+
+/** Compute the distance along x axis corresponding to the given value of potential
+    (convenience overload) */
+inline double R_max(const BasePotential& potential, double Phi)
+{
+    return R_max(PotentialWrapper(potential), Phi);
+}
 
 /** Compute epicycle frequencies for a circular orbit in the equatorial plane with radius R.
     \param[in]  potential is the instance of potential (must have axial symmetry)
@@ -40,22 +82,22 @@ void epicycleFreqs(const BasePotential& potential, const double R,
     Phi(r) = Phi0 + coef * r^s  if s!=0,  or  Phi0 + coef * ln(r) if s==0;
     the corresponding density behaves as rho ~ r^(s-2),
     and if s>0, the value of potential at r=0 is finite and equals Phi0.
-    \param[in]  potential  is the instance of potential (will be evaluated along x axis);
+    \param[in]  potential  is the instance of potential represented by a 1d function;
     \param[out] Phi0,coef  if not NULL, will contain the extrapolation coefficients;
     \returns the slope `s` of potential extrapolation law.
 */
-double innerSlope(const BasePotential& potential, double* Phi0=NULL, double* coef=NULL);
+double innerSlope(const math::IFunction& potential, double* Phi0=NULL, double* coef=NULL);
 
 /** Determine the behavior of potential at infinity.
     The potential is approximated as the Newtonian fall-off plus a power-law with slope s<0:
     Phi(r) = -M/r + coef * r^s  if s!=-1,  or  -M/r + coef * ln(r) / r  if s==-1;
     the corresponding density behaves as rho ~ r^(s-2),
     and if s<-1, the total mass is finite and equals M.
-    \param[in]  potential  is the instance of potential (will be evaluated along x axis);
+    \param[in]  potential  is the instance of potential represented by a 1d function;
     \param[out] M,coef  if not NULL, will contain the extrapolation coefficients;
     \returns the slope `s` of potential extrapolation law.
 */
-double outerSlope(const BasePotential& potential, double* M=NULL, double* coef=NULL);
+double outerSlope(const math::IFunction& potential, double* M=NULL, double* coef=NULL);
 
 /** Find the minimum and maximum radii of an orbit in the equatorial plane
     with given energy and angular momentum (which are the roots of equation
@@ -136,6 +178,7 @@ private:
     math::CubicSpline   freqNu; ///< ratio of squared epicyclic frequencies nu to Omega
 };
 
+
 /** Two-dimensional interpolator for peri/apocenter radii as functions of energy and angular momentum.
     This class is a further development of one-dimensional interpolator and works with
     axisymmetric potentials that have a finite value at r=0 and tend to zero at r=infinity.
@@ -178,6 +221,7 @@ public:
 private:
     math::QuinticSpline2d intR1, intR2; ///< 2d interpolators for scaled peri/apocenter radii
 };
+
 
 /** Computation of phase volume for a spherical potential.
     Phase volume h(E) is defined as

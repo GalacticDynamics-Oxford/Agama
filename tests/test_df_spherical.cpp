@@ -1,6 +1,6 @@
 /** \name   test_df_spherical.cpp
     \author Eugene Vasiliev
-    \date   Sep 2016
+    \date   2016-2017
 
     This program tests the accuracy of computation of phase volume 'h(E)',
     density of states 'g(E)', distribution function 'f(h)', and diffusion coefficients,
@@ -12,6 +12,7 @@
 #include "math_core.h"
 #include "math_specfunc.h"
 #include "galaxymodel_spherical.h"
+#include "galaxymodel_jeans.h"
 #include "utils.h"
 #include <iostream>
 #include <iomanip>
@@ -22,6 +23,21 @@
 
 /// whether to produce output files
 const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
+
+/// integrand for Rmax(Phi)
+class RmaxIntegrand: public math::IFunctionNoDeriv {
+    const potential::PhaseVolume& phasevol;
+    const double loghmax;
+public:
+    RmaxIntegrand(const potential::PhaseVolume& _phasevol, double _hmax) :
+        phasevol(_phasevol), loghmax(log(_hmax)) {}
+    virtual double value(const double h) const {
+        double PhiminusE = phasevol.deltaE(loghmax, log(h));
+        double dgdh;
+        phasevol.E(h, NULL, &dgdh);
+        return (3/TWO_PI_CUBE/M_SQRT2) * dgdh / sqrt(PhiminusE);
+    }
+};
 
 /// analytic expressions for rmax(E) in the Plummer and Hernquist models
 class RmaxPlummer: public math::IFunction {
@@ -118,9 +134,9 @@ public:
         double E = pv.E(h);
         double q = sqrt(-E), sq1pE = sqrt(1+E);
         if(E>-1e-5)
-            return 8./5*M_SQRT2/pow_3(M_PI) * math::powInt(q, 5) * (1 - 10./7*E + 40./21*E*E);
+            return 8./5*M_SQRT2/pow_3(M_PI) * math::pow(q, 5) * (1 - 10./7*E + 40./21*E*E);
         if(E<-1+1e-5)
-            return 3./32*M_SQRT2/pow_2(M_PI) * (math::powInt(sq1pE, -5) - 256./(15*M_PI));
+            return 3./32*M_SQRT2/pow_2(M_PI) * (math::pow(sq1pE, -5) - 256./(15*M_PI));
         return 1/M_SQRT2/pow_3(2*M_PI) / ( pow_2(1+E) * sq1pE ) *
             (3*asin(q) + q * sq1pE * (1+2*E) * (8*E*E + 8*E - 3) );
     }
@@ -189,24 +205,36 @@ bool test(const potential::BasePotential& pot)
 {
     bool ok=true;
 
-    potential::Interpolator interp(pot);
-    potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
+    const potential::Interpolator interp(pot);
+    const potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
     const RmaxFnc trueRmax;
     const PhasevolFnc truePhasevol;
     const DistrFnc trueDF(phasevol);
-    galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
-    math::LogLogSpline intDF = createInterpolatedDF(trueDF);
-    math::LogLogSpline intRho= createInterpolatedDensity(pot);
-    math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
+    const galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
+    const math::LogLogSpline intDF = createInterpolatedDF(trueDF);
+    const math::LogLogSpline intRho= createInterpolatedDensity(pot);
+    const math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
         potential::DensityWrapper(pot), potential::PotentialWrapper(pot));
+    const math::LogLogSpline velDisp = galaxymodel::createJeansSphModel(
+        potential::DensityWrapper(pot), potential::PotentialWrapper(pot), 0.);
+    // draw samples from the DF
     const unsigned int npoints = 100000;
-    particles::ParticleArraySph particles = galaxymodel::generatePosVelSamples(interp, trueDF, npoints);
+    const particles::ParticleArraySph particles =
+        galaxymodel::generatePosVelSamples(interp, trueDF, npoints);
+    // convert position/velocity samples back into h samples
     std::vector<double> particle_h(npoints), particle_m(npoints);
     for(unsigned int i=0; i<npoints; i++) {
         particle_h[i] = phasevol(totalEnergy(pot, particles[i].first));
         particle_m[i] = particles[i].second;
     }
-    math::LogLogSpline fitDF = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
+    const math::LogLogSpline fitDF1 = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
+    // now reassign particle velocities using a different sampling procedure
+    for(unsigned int i=0; i<npoints; i++) {
+        double Phi = pot.value(particles[i].first);
+        double v = dc.sampleVelocity(Phi);
+        particle_h[i] = phasevol(Phi + 0.5*v*v);
+    }
+    const math::LogLogSpline fitDF2 = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
 
     std::ofstream strm, strmd;
     if(output) {
@@ -220,16 +248,17 @@ bool test(const potential::BasePotential& pot)
         "  '' u 2:(abs(1-$4 /$2))  w l title 'Rcirc(E),interp', \\\n"
         "  '' u 2:(abs(1-$6 /$5))  w l title 'Lcirc(E),root', \\\n"
         "  '' u 2:(abs(1-$7 /$5))  w l title 'Lcirc(E),interp'\n"
-        "p '' u 2:(abs(1-$22/$21)) w l title 'h(E),interp', \\\n"
-        "  '' u 2:(abs(1-$24/$23)) w l title 'g(E),interp'\n"
+        "p '' u 2:(abs(1-$26/$25)) w l title 'h(E),interp', \\\n"
+        "  '' u 2:(abs(1-$28/$27)) w l title 'g(E),interp'\n"
         "p '' u 2:(abs(1-$9 /$8))  w l title 'Rmax(E),root', \\\n"
         "  '' u 2:(abs(1-$10/$8))  w l title 'Rmax(E),interp', \\\n"
-        "  '' u 2:(abs(1-$12/$11)) w l title 'dRmax/dE,interp'\n"
-        "p '' u 2:(abs(1-$14/$13)) w l title 'Phi(r),interp', \\\n"
-        "  '' u 2:(abs(1-$16/$15)) w l title 'dPhi/dr,interp', \\\n"
-        "  '' u 2:(abs(1-$18/$17)) w l title 'rho(r),interp', \\\n"
-        "  '' u 2:(abs(1-$19/$17)) w l title 'rho(r) from M(r)', \\\n"
-        "  '' u 2:(abs(1-$20/$17)) w l title 'rho(r) from DF'\n";
+        "  '' u 2:(abs(1-$13/$12)) w l title 'dRmax/dE,interp'\n"
+        "p '' u 2:(abs(1-$15/$14)) w l title 'Phi(r),interp', \\\n"
+        "  '' u 2:(abs(1-$17/$16)) w l title 'dPhi/dr,interp', \\\n"
+        "  '' u 2:(abs(1-$19/$18)) w l title 'rho(r),interp', \\\n"
+        "  '' u 2:(abs(1-$20/$18)) w l title 'rho(r) from M(r)', \\\n"
+        "  '' u 2:(abs(1-$21/$18)) w l title 'rho(r) from DF', \\\n"
+        "  '' u 2:(abs(1-$22/$18)) w l title 'rho(r) from dif.coef.'\n";
         strm.close();
         strm. open((filename+".dat").c_str());
         strmd.open((filename+"_dc.dat").c_str());
@@ -237,13 +266,14 @@ bool test(const potential::BasePotential& pot)
     strm << std::setprecision(16) << "E\t"
     "Rcirc(E),true Rcirc,root Rcirc,interp\t"
     "Lcirc(E),true Lcirc,root Lcirc,interp\t"
-    "Rmax(E),true Rmax,root Rmax,interp\t"
+    "Rmax(E),true Rmax,root Rmax,interp Rmax,AbelInverse\t"
     "dRmax(E)/dE,true dRmax/dE,interp\t"
     "Phi(Rcirc),true Phi,interp\t"
     "dPhi/dr,true dPhi/dr,interp\t"
-    "rho,true rho,interp rho,fromCumulMass rho,fromDF\t"
+    "rho,true rho,interp rho,fromCumulMass rho,fromDF rho,fromDifCoef\t"
+    "sigma,fromDifCoef sigma,fromJeans\t"
     "h(E),true h(E),interp g(E),true g(E),interp\t"
-    "f(E),true f(E),interp f(E),fit f(E),Eddington f(E),sphmodel\n";
+    "f(E),true f(E),interp f(E),Eddington f(E),sphmodel f(E),fit1 f(E),fit2\n";
     strmd << std::setprecision(15);
 
     double sumw=0, errRc=0, errRm=0, errPhi=0, errdPhi=0, errdens=0, errg=0, errh=0;
@@ -273,18 +303,24 @@ bool test(const potential::BasePotential& pot)
         truePhasevol.evalDeriv(E, &trueh, &trueg);
         double intg, inth, intDE, intDEE;  // interpolated h and g
         phasevol.evalDeriv(E, &inth, &intg);
-        dc.evalOrbitAvg(E, intDE, intDEE);
+        galaxymodel::difCoefEnergy(dc.model, E, intDE, intDEE);
         double intPhi, intdPhi, intd2Phi;
         interp.evalDeriv(r, &intPhi, &intdPhi, &intd2Phi);
         double truedens = (hess.dR2 + 2*grad.dR/r) / (4*M_PI);
         double intdens  = (intd2Phi + 2*intdPhi/r) / (4*M_PI);
         double truef    = trueDF(trueh);
         double intf     = intDF(trueh);
-        double fitf     = fitDF(trueh);
         double eddf     = eddDF(trueh);
         double sphf     = dc.model.value(trueh);
+        double fitf1    = fitDF1(trueh);
+        double fitf2    = fitDF2(trueh);
         double cmdens   = intRho(gridr[i]);
         double dfdens   = gridRhoDF[i];
+        double dcdens   = dc.density(truePhi);
+        double dcdisp   = dc.velDisp(truePhi);
+        double jeansdisp= velDisp(gridr[i]);
+        double invRm    = cbrt( math::integrate(  // Abel inversion
+            math::ScaledIntegrandEndpointSing(RmaxIntegrand(phasevol, inth), 0, inth), 0, 1, 1e-4) );
 
         // density-weighted error: integrate |x-x_true|^2 r^3 d log(r)
         double weight = pow_3(r) * truedens;
@@ -301,14 +337,15 @@ bool test(const potential::BasePotential& pot)
         strm << E << '\t' <<
             trueRc << ' ' << rootRc << ' ' << intRc << '\t' <<
             trueLc << ' ' << rootLc << ' ' << intLc << '\t' <<
-            trueRm << ' ' << rootRm << ' ' << intRm << '\t' <<
+            trueRm << ' ' << rootRm << ' ' << intRm << ' ' << invRm << '\t' <<
             truedRmdE << ' ' << intdRmdE << '\t' <<
             truePhi<< ' ' << intPhi << '\t'<< 
             grad.dR<< ' ' << intdPhi<< '\t'<<
-            truedens<<' ' << intdens<< ' ' << cmdens << ' ' << dfdens << '\t' <<
+            truedens<<' ' << intdens<< ' ' << cmdens << ' ' << dfdens << ' ' << dcdens << '\t' <<
+            dcdisp << ' ' << jeansdisp << '\t' <<
             trueh  << ' ' << inth   << ' ' << trueg  << ' ' << intg   << '\t' <<
             intDEE << ' ' << intDE  << '\t'<<
-            truef  << ' ' << intf   << ' ' << fitf << ' ' << eddf << ' ' << sphf << '\n';
+            truef  << ' ' << intf   << ' ' << eddf << ' ' << sphf << ' ' << fitf1 << ' ' << fitf2 << '\n';
 
         for(double vrel=0; vrel<1.25; vrel+=0.03125) {
             double E = (1-pow_2(vrel)) * truePhi;
@@ -333,7 +370,7 @@ bool test(const potential::BasePotential& pot)
     errh    = sqrt(errh/sumw);
     errg    = sqrt(errg/sumw);
     std::cout << "\033[1;33m " << pot.name() << " \033[0m: weighted RMS error in"
-    "  Rcirc=" + checkLess(errRc,  1e-09, ok) +
+    "  Rcirc=" + checkLess(errRc,  2e-09, ok) +
     ", Rmax="  + checkLess(errRm,  1e-10, ok) +
     ", Phi="   + checkLess(errPhi, 1e-10, ok) +
     ", dPhi/dr="+checkLess(errdPhi,1e-08, ok) +
@@ -348,19 +385,9 @@ void exportTable(const char* filename, const potential::BasePotential& pot)
     try{
         std::vector<double> h, f;
         potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
-        potential::Interpolator interp(pot);
         galaxymodel::makeEddingtonDF(potential::DensityWrapper(pot), potential::PotentialWrapper(pot), h, f);
-        std::ofstream strm(filename);
-        strm << "r\tM\tPhi\trho\tf\tg\th\n";
-        for(unsigned int i=0; i<h.size(); i++) {
-            double g, E= phasevol.E(h[i], &g);
-            double r   = interp.R_max(E);
-            double M   = pow_2(v_circ(pot, r)) * r;
-            double rho = pot.density(coord::PosCyl(r, 0, 0));
-            strm << utils::pp(r,14) + '\t' + utils::pp(M,14) + '\t' + 
-                utils::pp(E,14) + '\t' + utils::pp(rho,14) + '\t' +
-                utils::pp(f[i],14) + '\t' + utils::pp(g,14) + '\t' + utils::pp(h[i],14) + '\n';
-        }
+        galaxymodel::SphericalModel model(phasevol, math::LogLogSpline(h, f), h);
+        galaxymodel::writeSphericalModel(filename, "", model, (potential::PotentialWrapper(pot)), h);
     }
     catch(std::exception& e){
         std::cout << filename << " => " << e.what() << '\n';

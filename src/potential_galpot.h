@@ -160,7 +160,7 @@ private:
 /** Parameters describing a spheroidal component with a Zhao(1996) alpha-beta-gamma
     density profile and an optional exponential cutoff:
     \f$  \rho = \rho_0  (r/r_0)^{-\gamma} ( 1 + (r/r_0)^\alpha )^{(\gamma-\beta) / \alpha}
-    \exp[ -(r/r_{cut})^2], \f$,
+    \exp[ -(r/r_{cut})^\xi], \f$,
     where  \f$ r = \sqrt{ x^2 + y^2/p^2 + z^2/q^2 } \f$  is the ellipsoidal radius.
 */
 struct SphrParam{
@@ -172,12 +172,14 @@ struct SphrParam{
     double gamma;               ///< inner power slope gamma
     double scaleRadius;         ///< transition radius r_0
     double outerCutoffRadius;   ///< outer cut-off radius r_{cut}
+    double cutoffStrength;      ///< steepness of the exponential cutoff xi
     SphrParam(double _densityNorm=0, double _axisRatioY=1, double _axisRatioZ=1,
         double _alpha=1, double _beta=4, double _gamma=1,
-        double _scaleRadius=1, double _outerCutoffRadius=0) :
+        double _scaleRadius=1, double _outerCutoffRadius=0, double _cutoffStrength=2) :
         densityNorm(_densityNorm), axisRatioY(_axisRatioY), axisRatioZ(_axisRatioZ),
         alpha(_alpha), beta(_beta), gamma(_gamma),
-        scaleRadius(_scaleRadius), outerCutoffRadius(_outerCutoffRadius) {};
+        scaleRadius(_scaleRadius), outerCutoffRadius(_outerCutoffRadius), cutoffStrength(_cutoffStrength)
+    {};
     double mass() const;        ///< return the total mass of a density profile with these parameters
 };
 

@@ -90,7 +90,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     std::string errorMsg;
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
 #endif
     for(int n=0; n<numPoints; n++) {
         int iR = n % sizeR;  // index in radial grid
@@ -199,22 +199,20 @@ public:
                rho = jac * density_rho_m(dens, m, R,-z);
         computePotentialHarmonicAtPoint(m, R,-z, R0, z0, rho, useDerivs, values);
 
-#ifdef HAVE_CUBA
-        // workaround for CUBA n-dimensional quadrature routine: it seems to be unable 
+        // workaround for the n-dimensional quadrature routine: it seems to be unable 
         // to properly handle cases when one of components of the integrand is identically zero,
         // that's why we output 1 instead, and zero it out later
-        if(R0==0)
+        if(useDerivs && R0==0)
             values[1] = 1;
-        if(isZReflSymmetric(dens) && z0==0)
+        if(useDerivs && isZReflSymmetric(dens) && z0==0)
             values[2] = 1;
-#endif
     }
     virtual unsigned int numVars() const { return 2; }
     virtual unsigned int numValues() const { return useDerivs ? 3 : 1; }
 private:
     const BaseDensity& dens;
     const int m;
-    // the point at which the integral is computed, also defines the toroidal coordinate system
+    // the point at which the integral is computed
     const double R0, z0;
     const bool useDerivs;
 };
@@ -735,7 +733,7 @@ PtrPotential determineAsympt(
                 math::sphHarmArray(lmax_fit, absm, tau, &Plm.front());
                 for(int l=absm; l<=lmax_fit; l++)
                     matr(p, l-absm) =
-                        Plm[l-absm] * math::powInt(r/r0, -l-1) *
+                        Plm[l-absm] * math::pow(r/r0, -l-1) *
                         (m==0 ? 2*M_SQRTPI : 2*M_SQRTPI*M_SQRT2);
             }
             math::linearMultiFit(matr, rhs, NULL, sol);
@@ -769,9 +767,9 @@ void chooseGridRadii(const BaseDensity& src,
             throw std::invalid_argument("CylSpline: failed to automatically determine grid extent");
         double spacing = 1 + sqrt(10./sqrt(gridSizeR*gridSizez));  // ratio between consecutive grid nodes
         if(Rmax==0)
-            Rmax = rhalf * pow(spacing,  0.5*gridSizeR);
+            Rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);
        	if(Rmin==0)
-            Rmin = rhalf * pow(spacing, -0.5*gridSizeR);
+            Rmin = rhalf * std::pow(spacing, -0.5*gridSizeR);
     }
     if(zmax==0)
         zmax=Rmax;
@@ -807,11 +805,11 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     int Nmin = static_cast<int>(log(nbody+1)/log(2));  // # of points in the inner cell
     if(Rmin==0) {
         std::nth_element(radii.begin(), radii.begin() + Nmin, radii.end());
-        Rmin = std::max(radii[Nmin], Rhalf * pow(spacing, -0.5*gridSize));
+        Rmin = std::max(radii[Nmin], Rhalf * std::pow(spacing, -0.5*gridSize));
     }
     if(Rmax==0) {
         std::nth_element(radii.begin(), radii.end() - Nmin, radii.end());
-        Rmax = std::min(radii[nbody-Nmin], Rhalf * pow(spacing, 0.5*gridSize));
+        Rmax = std::min(radii[nbody-Nmin], Rhalf * std::pow(spacing, 0.5*gridSize));
     }
     if(zmax==0)
         zmax=Rmax;

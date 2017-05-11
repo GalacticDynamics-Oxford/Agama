@@ -233,9 +233,9 @@ public:
     BasisSetExpRadialMult(int _n, int _l, double _alpha) :
         n(_n), l(_l), alpha(_alpha), w((2*l+1)*alpha+0.5) {};
     virtual double value(double r) const {
-        const double r1alpha = pow(r, 1./alpha);
+        const double r1alpha = math::pow(r, 1./alpha);
         const double xi = (r1alpha-1)/(r1alpha+1);
-        return math::gegenbauer(n, w, xi) * math::powInt(r, l) * pow(1+r1alpha, -(2*l+1)*alpha) * 4*M_PI;
+        return math::gegenbauer(n, w, xi) * math::pow(r, l) * math::pow(1+r1alpha, -(2*l+1)*alpha) * 4*M_PI;
     }
 private:
     const int n, l;
@@ -406,7 +406,7 @@ class SplineExpRadialMult: public math::IFunctionNoDeriv {
 public:
     SplineExpRadialMult(int _n) : n(_n) {};
     virtual double value(double r) const {
-        return math::powInt(r, n);
+        return math::pow(r, n);
     }
 private:
     const int n;

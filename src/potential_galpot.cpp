@@ -258,19 +258,20 @@ void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
 
 //----- spheroid density -----//
 
-/** integrand for computing the total mass:  4pi r^2 rho(r), x=r/scaleRadius */
+/** integrand for computing the total mass:  4pi r^2 rho(r) */
 class SpheroidDensityIntegrand: public math::IFunctionNoDeriv {
 public:
     SpheroidDensityIntegrand(const SphrParam& _params): params(_params) {};
 private:
     const SphrParam params;
     virtual double value(double x) const {
-        if(x==0 || x==1) return 0;
-        double rrel = x/(1-x);
-        return 
-            pow_2(x/pow_2(1-x)) * pow(rrel, -params.gamma) *
-            pow(1 + pow(rrel, params.alpha), (params.gamma-params.beta)/params.alpha) *
-            exp(-pow_2(rrel * params.scaleRadius / params.outerCutoffRadius));
+        double rrel = exp( 1/(1-x) - 1/x );
+        double result = 
+            pow_3(rrel) * (1/pow_2(1-x) + 1/pow_2(x)) *
+            math::pow(rrel, -params.gamma) *
+            math::pow(1 + math::pow(rrel, params.alpha), (params.gamma-params.beta)/params.alpha) *
+            exp(-math::pow(rrel * params.scaleRadius / params.outerCutoffRadius, params.cutoffStrength));
+        return isFinite(result) ? result : 0;
     }
 };
 
@@ -282,7 +283,7 @@ double SphrParam::mass() const
         ( outerCutoffRadius==0 ?   // have an analytic expression
         math::gamma((beta-3)/alpha) * math::gamma((3-gamma)/alpha) /
         math::gamma((beta-gamma)/alpha) / alpha :
-        math::integrate(SpheroidDensityIntegrand(*this), 0, 1, 1e-6) );
+        math::integrateAdaptive(SpheroidDensityIntegrand(*this), 0, 1, 1e-6) );
 }
 
 SpheroidDensity::SpheroidDensity (const SphrParam &_params) :
@@ -309,21 +310,10 @@ double SpheroidDensity::densityCyl(const coord::PosCyl &pos) const
         pow_2(pos.R) * (1 + pow_2(sin(pos.phi)) * (1/pow_2(params.axisRatioY) - 1));
     double  r  = sqrt(R2 + pow_2(pos.z/params.axisRatioZ));
     double  r0 = r/params.scaleRadius;
-    double rho = params.densityNorm;
-    if(params.gamma==1.) rho /= r0;       else 
-    if(params.gamma==2.) rho /= r0*r0;    else
-    if(params.gamma==0.5)rho /= sqrt(r0); else
-    if(params.gamma!=0.) rho /= pow(r0, params.gamma);
-    if(params.alpha==2.)  r0 *= r0; else
-    if(params.alpha!=1.)  r0  = pow(r0, params.alpha);
-    r0 += 1;
-    const double bga = (params.beta-params.gamma) / params.alpha;
-    if(bga==1.) rho /= r0;       else
-    if(bga==2.) rho /= r0*r0;    else
-    if(bga==3.) rho /= r0*r0*r0; else
-    rho *= pow(r0, -bga);
+    double rho = params.densityNorm * math::pow(r0, -params.gamma) *
+        math::pow(1 + math::pow(r0, params.alpha), (params.gamma-params.beta) / params.alpha);
     if(params.outerCutoffRadius)
-        rho *= exp(-pow_2(r/params.outerCutoffRadius));
+        rho *= exp(-math::pow(r/params.outerCutoffRadius, params.cutoffStrength));
     return rho;
 }
 
@@ -368,14 +358,14 @@ std::vector<PtrPotential> createGalaxyPotentialComponents(
         isAxisymmetric &= sphrParams[i].axisRatioY == 1;
         // characteristic radius: it's not quite the scale radius, because in the case gamma<<0
         // the maximum of density is achieved at much larger radii. Here is a compromise choice.
-        double scaleRadius = pow( (1 + fmax(0, -sphrParams[i].gamma)) / (sphrParams[i].beta - 1),
+        double scaleRadius = std::pow( (1 + fmax(0, -sphrParams[i].gamma)) / (sphrParams[i].beta - 1),
             1 / sphrParams[i].alpha) * sphrParams[i].scaleRadius;
         // outer grid radius - if there is an exponential cutoff,
         // place it at 10x the cutoff radius, where the density drops by exp(-100);
         // otherwise put it at the radius where the logarithmic density slope
         // s = (gamma * rscale^alpha + beta * r^alpha) / (rscale^alpha + r^alpha)
         // approaches the asymptotic value (beta) to within the given tolerance
-        double radRatio = pow(fabs(sphrParams[i].beta - sphrParams[i].gamma) * GALPOT_SLOPETOLER,
+        double radRatio = std::pow(fabs(sphrParams[i].beta - sphrParams[i].gamma) * GALPOT_SLOPETOLER,
             1 / sphrParams[i].alpha);
         double compRmax =    sphrParams[i].outerCutoffRadius ?
             GALPOT_EXPRMAX * sphrParams[i].outerCutoffRadius :
@@ -384,7 +374,7 @@ std::vector<PtrPotential> createGalaxyPotentialComponents(
         // a) the density slope should be within the given tolerance from its asymptotic value gamma,
         // b) if the potential is very shallow near origin, we need to have enough digits of accuracy:
         // [Phi(rmin)-Phi(0)]/|Phi(0)| ~ (r/rscale)^(2-gamma) >= EPSROUNDOFF
-        double roundoff = sphrParams[i].gamma<2 ? pow(GALPOT_EPSROUNDOFF, 1/(2-sphrParams[i].gamma)) : 0;
+        double roundoff = sphrParams[i].gamma<2 ? std::pow(GALPOT_EPSROUNDOFF, 1/(2-sphrParams[i].gamma)) : 0;
         double compRmin = fmax(
            fmax(GALPOT_RMIN, roundoff) * scaleRadius, sphrParams[i].scaleRadius * radRatio);
         rmin = fmin(rmin, compRmin);

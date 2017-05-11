@@ -1,4 +1,5 @@
 #include "df_halo.h"
+#include "math_core.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -21,13 +22,15 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
         throw std::invalid_argument(
             "DoublePowerLaw DF: mass diverges at J->0 (inner slope must be < 3)");
     if(par.steepness<=0)
-        throw std::invalid_argument("DoublePowerLaw DF: invalid transition steepness parameter");
+        throw std::invalid_argument("DoublePowerLaw DF: transition steepness parameter must be positive");
+    if(par.cutoffStrength<=0)
+        throw std::invalid_argument("DoublePowerLaw DF: cutoff strength parameter must be positive");
     if( par.coefJrIn <=0 || par.coefJzIn <=0 || par.coefJrIn + par.coefJzIn>=3 || 
         par.coefJrOut<=0 || par.coefJzOut<=0 || par.coefJrOut+par.coefJzOut>=3 )
         throw std::invalid_argument(
             "DoublePowerLaw DF: invalid weights in the linear combination of actions");
 }
-        
+
 double DoublePowerLaw::value(const actions::Actions &J) const
 {
     // linear combination of actions in the inner part of the model (for J<J0)
@@ -37,10 +40,10 @@ double DoublePowerLaw::value(const actions::Actions &J) const
     double gJ  = par.coefJrOut* J.Jr + par.coefJzOut* J.Jz +
         (3-par.coefJrOut-par.coefJzOut)* fabs(J.Jphi);
     double val = par.norm / pow_3(2*M_PI * par.J0) *
-        pow(1 + pow(par.J0 / hJ, par.steepness),  par.slopeIn  / par.steepness) *
-        pow(1 + pow(gJ / par.J0, par.steepness), -par.slopeOut / par.steepness);
-    if(par.Jcutoff>0)    // exponential cutoff at large J
-        val *= exp(-pow_2(gJ / par.Jcutoff));
+        math::pow(1 + math::pow(par.J0 / hJ, par.steepness),  par.slopeIn  / par.steepness) *
+        math::pow(1 + math::pow(gJ / par.J0, par.steepness), -par.slopeOut / par.steepness);
+    if(par.Jcutoff>0)   // exponential cutoff at large J
+        val *= exp(-math::pow(gJ / par.Jcutoff, par.cutoffStrength));
     return val;
 }
 

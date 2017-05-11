@@ -1,4 +1,5 @@
 #include "actions_staeckel.h"
+#include "potential_perfect_ellipsoid.h"
 #include "math_core.h"
 #include "math_fit.h"
 #include "utils.h"
@@ -659,8 +660,10 @@ ActionAngles actionAnglesAxisymFudge(const potential::BasePotential& potential,
         focalDistance = fmax(point.R, 1.) * 1e-4;   // this is a temporary workaround!
     const coord::ProlSph coordsys(focalDistance);
     const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
-    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0)
+    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0) {
+        if(freq) freq->Omegar = freq->Omegaz = freq->Omegaphi = NAN;
         return ActionAngles(Actions(NAN, NAN, fnc.Lz), Angles(NAN, NAN, NAN));
+    }
     const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
     return computeActionAngles(fnc, lim, freq);
 }
@@ -855,6 +858,8 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
         if(!isFinite(Rsh))
             throw std::runtime_error("cannot find a shell orbit for "
                 "E="+utils::toString(E)+", Lz="+utils::toString(Lz));
+        if(Rsh == 0 && utils::verbosityLevel >= utils::VL_WARNING)  // this may be a legitimate situation?
+            utils::msg(utils::VL_WARNING, "ActionFinderAxisymFudge", "Rthin=0 for E="+utils::toString(E));
         grid2dR(iE, iL) = Rsh / Rc;
 
         double Phi0 = pot->value(coord::PosCyl(Rsh,0,0));

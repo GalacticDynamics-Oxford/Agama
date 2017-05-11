@@ -342,7 +342,7 @@ public:
                 values[ic + numCompDF * (im++)] = dfval * posvel.vR * posvel.vphi;
                 values[ic + numCompDF * (im++)] = dfval * posvel.vz * posvel.vphi;
             }
-        }        
+        }
     }
 
     /// dimension of the input array (3 scaled velocity components)
@@ -375,7 +375,7 @@ public:
     bsplVR(_bsplVR), bsplVz(_bsplVz), bsplVphi(_bsplVphi),
     NR(bsplVR.numValues()), Nz(bsplVz.numValues()), Ntotal(1 + NR + Nz + bsplVphi.numValues())
     {}
-    
+
     virtual unsigned int numVars()   const { return projected ? 4 : 3; }
     virtual unsigned int numValues() const { return Ntotal; }
 private:
@@ -406,11 +406,11 @@ private:
         std::fill(values, values+Ntotal, 0);
         double valRp[N+1], valRm[N+1], valzp[N+1], valzm[N+1], valphi[N+1];
         unsigned int 
-            iRp  = bsplVR.  nonzeroComponents( pv.vR,  valRp),
-            iRm  = bsplVR.  nonzeroComponents(-pv.vR,  valRm),
-            izp  = bsplVz.  nonzeroComponents( pv.vz,  valzp),
-            izm  = bsplVz.  nonzeroComponents(-pv.vz,  valzm),
-            iphi = bsplVphi.nonzeroComponents(pv.vphi, valphi);
+            iRp  = bsplVR.  nonzeroComponents( pv.vR,  0, valRp),
+            iRm  = bsplVR.  nonzeroComponents(-pv.vR,  0, valRm),
+            izp  = bsplVz.  nonzeroComponents( pv.vz,  0, valzp),
+            izm  = bsplVz.  nonzeroComponents(-pv.vz,  0, valzm),
+            iphi = bsplVphi.nonzeroComponents(pv.vphi, 0, valphi);
         values[0] = dfval;
         for(int i=0; i<=N; i++) {
             values[1 + i + iRp]           += dfval * valRp[i]*.5;
@@ -448,16 +448,16 @@ template<int N>
 std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bspl,
     const std::vector<double>& rhs, double vesc)
 {
-    math::Matrix<double> mat(bspl.computeOverlapMatrix(0));
-    int size = mat.rows();
+    math::BandMatrix<double> bandMat = math::FiniteElement1d<N>(bspl.xvalues()).computeProjMatrix();
+    int size = bandMat.rows();
 #if 0
     // another possibility is to use a linear or quadratic optimization solver that enforce
     // non-negativity constraints on the solution vector, at the same time minimizing the deviation
     // from the exact solution. This is perhaps the cleanest approach, but it requires
     // the optimization libraries to be included at the compile time, which we can't guarantee.
-    return math::quadraticOptimizationSolveApprox(mat, rhs,
+    return math::quadraticOptimizationSolveApprox(bandMat, rhs,
         std::vector<double>()          /*linear penalty for variables is absent*/,
-        math::DiagonalMatrix<double>() /*quadratic penalty for variables is absent*/,
+        math::BandMatrix<double>()     /*quadratic penalty for variables is absent*/,
         std::vector<double>()          /*linear penalty for constraint violation is absent*/,
         std::vector<double>(size, 1e9) /*quadratic penalty for constraint violation*/,
         std::vector<double>(size, 0.)  /*lower bound on the solution vector*/ );
@@ -465,11 +465,12 @@ std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bsp
     int skipFirst = (N >= 1 && size>2 && math::fcmp(bspl.xmin(), -vesc, 1e-8) <= 0);
     int skipLast  = (N >= 1 && size>2 && math::fcmp(bspl.xmax(),  vesc, 1e-8) >= 0);
     if(skipFirst+skipLast==0)
-        return math::CholeskyDecomp(mat).solve(rhs);
+        return math::solveBand(bandMat, rhs);
     // otherwise create another matrix with fewer columns (copy row-by-row from the original matrix)
-    math::Matrix<double> reducedMat(size, size-skipFirst-skipLast);
+    math::Matrix<double> fullMat(bandMat);
+    math::Matrix<double> reducedMat(size, size-skipFirst-skipLast, 0.);
     for(int i=0; i<size; i++)
-        std::copy(&mat(i, skipFirst), &mat(i, size-skipLast), &reducedMat(i, 0));
+        std::copy(&fullMat(i, skipFirst), &fullMat(i, size-skipLast), &reducedMat(i, 0));
     // use the SVD to solve the rank-deficient system
     std::vector<double> sol = math::SVDecomp(reducedMat).solve(rhs);
     // append the skipped amplitudes
@@ -599,7 +600,7 @@ double computeVelocityDistribution(const GalaxyModel& model,
         projected? xlower : xlower+1,   // the 0th dimension (z) only used in the case of projected VDF,
         projected? xupper : xupper+1,   // otherwise only three components of scaled velocity
         reqRelError, maxNumEval, &result.front());
-    
+
     // compute the amplitudes of un-normalized VDF
     amplVR   = solveForAmplitudes<N>(bsplVR,
         std::vector<double>(result.begin()+1, result.begin()+1+NR), vesc);

@@ -227,6 +227,8 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double xlower[], const double 
         binBoundaries[d][1] = xupper[d];
         volume   *= xupper[d]-xlower[d];
     }
+    if(!isFinite(volume))
+        throw std::runtime_error("sampleNdim: cannot sample from an infinite region");
 }
 
 double Sampler::samplePoint(double coords[]) const
@@ -384,6 +386,8 @@ void Sampler::readjustBins()
         for(unsigned int i=0; i<numSamples; i++) {
             cumSumValues[i] = (cumSum += projection[i].second);
         }
+        if(cumSum <= 0)
+            throw std::runtime_error("sampleNdim: function is identically zero inside the region");
 
         std::vector<double> newBinBoundaries(2);
         std::vector<unsigned int> newBinIndices(2);

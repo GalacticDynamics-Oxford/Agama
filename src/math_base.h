@@ -28,19 +28,25 @@ inline bool isFinite(double x) { return x==x && 1/x!=0; }
 #define NAN      std::numeric_limits<double>::quiet_NaN()
 #endif
 
+#ifndef DBL_EPSILON
+#define DBL_EPSILON        2.2204460492503131e-16
+#endif
+#define SQRT_DBL_EPSILON   1.4901161193847656e-08
+#define ROOT3_DBL_EPSILON  6.0554544523933429e-06
+
 #ifndef M_PI
-#define M_PI     3.14159265358979
+#define M_PI     3.14159265358979323846264338328
 #endif
 
 #ifndef M_SQRTPI
-#define M_SQRTPI 1.77245385090552
+#define M_SQRTPI 1.77245385090551602729816748334
 #endif
 
 #ifndef M_SQRT2
-#define M_SQRT2  1.41421356237310
+#define M_SQRT2  1.41421356237309504880168872421
 #endif
 
-#define TWO_PI_CUBE 248.050213442399
+#define TWO_PI_CUBE 248.050213442398561403810520537
 
 /** Functions and classes for basic and advanced math operations */
 namespace math{

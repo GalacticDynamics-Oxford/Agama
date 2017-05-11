@@ -256,21 +256,26 @@ ConfigPotential parseParams(const utils::KeyValueMap& params, const units::Exter
     config.densityType   = getDensityTypeByName  (params.getString("Density"));
     config.symmetryType  = getSymmetryTypeByName (params.getString("Symmetry"));
     config.file        = params.getString("File");
-    config.mass        = params.getDouble("Mass", config.mass) * conv.massUnit;
+    config.mass        = params.getDouble("Mass", config.mass)
+                       * conv.massUnit;
     config.axisRatioY  = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
     config.axisRatioZ  = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
     config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius)
                        * conv.lengthUnit;
     config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight",config.scaleRadius2)
                        * conv.lengthUnit;
-    config.gamma       = params.getDouble   ("Gamma", config.gamma);
-    config.sersicIndex = params.getDouble   ("SersicIndex", config.sersicIndex);
+    config.gamma       = params.getDouble("Gamma", config.gamma);
+    config.sersicIndex = params.getDouble("SersicIndex", config.sersicIndex);
     config.gridSizeR   = params.getInt("gridSizeR", config.gridSizeR);
     config.gridSizez   = params.getInt("gridSizeZ", config.gridSizez);
-    config.rmin        = params.getDouble("rmin", config.rmin) * conv.lengthUnit;
-    config.rmax        = params.getDouble("rmax", config.rmax) * conv.lengthUnit;
-    config.zmin        = params.getDouble("zmin", config.zmin) * conv.lengthUnit;
-    config.zmax        = params.getDouble("zmax", config.zmax) * conv.lengthUnit;
+    config.rmin        = params.getDouble("rmin", config.rmin)
+                       * conv.lengthUnit;
+    config.rmax        = params.getDouble("rmax", config.rmax)
+                       * conv.lengthUnit;
+    config.zmin        = params.getDouble("zmin", config.zmin)
+                       * conv.lengthUnit;
+    config.zmax        = params.getDouble("zmax", config.zmax)
+                       * conv.lengthUnit;
     config.lmax        = params.getInt("lmax", config.lmax);
     config.mmax        = params.contains("mmax") ? params.getInt("mmax", config.mmax) : config.lmax;
     config.smoothing   = params.getDouble("smoothing", config.smoothing);
@@ -282,8 +287,10 @@ DiskParam parseDiskParams(const utils::KeyValueMap& params, const units::Externa
     DiskParam config;
     config.surfaceDensity      = params.getDouble("surfaceDensity", config.surfaceDensity)
                                * conv.massUnit / pow_2(conv.lengthUnit);
-    config.scaleRadius         = params.getDouble("scaleRadius", config.scaleRadius) * conv.lengthUnit;
-    config.scaleHeight         = params.getDouble("scaleHeight", config.scaleHeight) * conv.lengthUnit;
+    config.scaleRadius         = params.getDouble("scaleRadius", config.scaleRadius)
+                               * conv.lengthUnit;
+    config.scaleHeight         = params.getDouble("scaleHeight", config.scaleHeight)
+                               * conv.lengthUnit;
     config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius)
                                * conv.lengthUnit;
     config.modulationAmplitude = params.getDouble("modulationAmplitude", config.modulationAmplitude);
@@ -305,9 +312,11 @@ SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::Externa
     config.alpha              = params.getDouble("alpha", config.alpha);
     config.beta               = params.getDouble("beta",  config.beta);
     config.gamma              = params.getDouble("gamma", config.gamma);
-    config.scaleRadius        = params.getDouble("scaleRadius", config.scaleRadius) * conv.lengthUnit;
+    config.scaleRadius        = params.getDouble("scaleRadius", config.scaleRadius)
+                              * conv.lengthUnit;
     config.outerCutoffRadius  = params.getDouble("outerCutoffRadius", config.outerCutoffRadius)
                               * conv.lengthUnit;
+    config.cutoffStrength     = params.getDouble("cutoffStrength", config.cutoffStrength);
     // alternative way: specifying the total model mass instead of volume density at r=scaleRadius
     if(params.contains("mass") && !params.contains("densityNorm")) {
         config.densityNorm = 1;
@@ -478,6 +487,7 @@ PtrPotential readPotentialCylSpline(std::istream& strm, const units::ExternalUni
     ok1 &= buffer.find("dPhi/dz") != std::string::npos;
     if(ok1)
         ok1 &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, dPhidz);
+    ok1 &= dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size();
     if(!ok1) {  // have to live without derivatives...
         dPhidR.clear();
         dPhidz.clear();
@@ -489,6 +499,7 @@ PtrPotential readPotentialCylSpline(std::istream& strm, const units::ExternalUni
     math::blas_dmul(converter.lengthUnit, gridz);
     for(unsigned int i=0; i<Phi.size(); i++) {
         math::blas_dmul(pow_2(converter.velocityUnit), Phi[i]);
+        if(!ok1) continue;  // no derivs
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, dPhidR[i]);
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, dPhidz[i]);
     }
@@ -1003,6 +1014,8 @@ PtrPotential createAnyPotential(const ConfigPotential& params,
     const units::ExternalUnits& converter)
 {
     if(!params.file.empty()) {
+        if(!utils::fileExists(params.file))
+            throw std::runtime_error("File "+params.file+" does not exist");
         // file may contain either coefficients of potential expansion,
         // in which case the potential type is inferred from the first line of the file,
         // or an N-body snapshot, in which case the potential type must be specified.
@@ -1052,7 +1065,7 @@ PtrDensity createDensity(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
-    std::string type = kvmap.getString("type");
+    std::string type = kvmap.getString(kvmap.contains("density") ? "density" : "type");
     if(utils::stringsEqual(type, DiskDensity::myName()))
         return PtrDensity(new DiskDensity(parseDiskParams(kvmap, converter)));
     if(utils::stringsEqual(type, SpheroidDensity::myName()))

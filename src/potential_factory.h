@@ -25,7 +25,7 @@ namespace utils { class KeyValueMap; }
 namespace potential {
 
 /** Create an instance of density according to the parameters contained in the key-value map.
-    \param[in] params is the list of parameters;
+    \param[in] params is the list of parameters ("density=..." is a required one);
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrDensity on success.
@@ -36,7 +36,7 @@ PtrDensity createDensity(
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of potential according to the parameters contained in the key-value map.
-    \param[in] params is the list of parameters;
+    \param[in] params is the list of parameters ("type=..." is a required one);
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter;
     \return    a new instance of PtrPotential on success.
@@ -49,7 +49,8 @@ PtrPotential createPotential(
 
 /** Create an instance of potential expansion for the user-provided density model,
     with parameters contained in the key-value map.
-    \param[in] params is the list of parameters;
+    \param[in] params is the list of parameters
+    ("type=..." should specify one of the potential expansions);
     \param[in] dens   is the density model which will serve as the source to the potential;
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
     in parameters (essentially the grid sizes) into internal units;
@@ -64,7 +65,7 @@ PtrPotential createPotential(
 /** Create an instance of potential expansion approximating the user-provided potential model,
     with parameters contained in the key-value map; this is useful if the original potential
     is expensive to compute.
-    \param[in] params is the list of parameters;
+    \param[in] params is the list of parameters ("type=..." specifies the type of expansion);
     \param[in] pot    is the potential model which will be approximated with the potential expansion;
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
     in parameters (essentially the grid sizes) into internal units;

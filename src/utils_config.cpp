@@ -19,6 +19,11 @@ inline bool comparestr(const std::string& one, const std::string& two)
     }
     return true;
 }
+/// these characters signify a comment string
+inline bool commentStart(const char c)
+{
+    return c=='#' || c==';' || c=='/';
+}
 }
 
 // -------- KeyValueMap -------- //
@@ -41,22 +46,26 @@ void KeyValueMap::add(const char* line)
 {
     std::string buffer(line);
     std::string::size_type indx = buffer.find_first_not_of(" \t\n\r");
-    if(indx!=std::string::npos)   // get rid of spaces at the beginning of line
+    if(indx!=std::string::npos)   // get rid of spaces at the beginning of the line
         buffer.erase(0, indx);
     indx = buffer.find('=');
-    if(indx!=std::string::npos && indx>0 && buffer[0]!='#' && buffer[0]!=';' && buffer[0]!='/')
+    if(indx!=std::string::npos && indx>0 && !commentStart(buffer[0]))
     {   // key-value pair and not a comment
-        std::string key = buffer.substr(0, indx);
+        std::string key = buffer.substr(0, indx);         // get everything before the '=' character
         buffer.erase(0, indx+1);
         indx = key.find_last_not_of(" \t\n\r");
-        if(indx!=std::string::npos && indx+1<key.size())
+        if(indx!=std::string::npos && indx+1<key.size())  // and remove trailing spaces (before '=')
             key.erase(indx+1);
-        indx = buffer.find_first_not_of(" \t\n\r");
-        if(indx!=std::string::npos && indx>0)
+        indx = buffer.find_first_not_of(" \t\n\r");       // remove leading spaces after '='
+        if(indx!=std::string::npos && indx>0)  
             buffer.erase(0, indx);
-        indx = buffer.find_last_not_of(" \t\n\r");
+        indx = buffer.find_last_not_of(" \t\n\r");        // and trailing spaces at the end of the line
         if(indx!=std::string::npos && indx+1<buffer.size())
             buffer.erase(indx+1);
+        // do not allow a key to appear twice (there is no way to store and retrieve
+        // two separate values, so they are banned outright)
+        if(contains(key))
+            throw std::runtime_error("KeyValueMap: duplicate value for parameter "+key);
         items.push_back(std::pair<std::string, std::string>(key, buffer));
     } else
         // line without '=' or starting with a comment is not a key-value pair:
@@ -91,8 +100,8 @@ std::string KeyValueMap::getStringAlt(const std::string& key1,
 
 double KeyValueMap::getDouble(const std::string& key, double defaultValue) const
 {
-    std::string result = getString(key, "DEFAULT");
-    if(result=="DEFAULT")
+    std::string result = getString(key);
+    if(result.empty())
         return defaultValue;
     else
         return toDouble(result);
@@ -110,8 +119,8 @@ double KeyValueMap::getDoubleAlt(const std::string& key1,
 
 int KeyValueMap::getInt(const std::string& key, int defaultValue) const
 {
-    std::string result = getString(key, "DEFAULT");
-    if(result=="DEFAULT")
+    std::string result = getString(key);
+    if(result.empty())
         return defaultValue;
     else
         return toInt(result);
@@ -130,6 +139,17 @@ double KeyValueMap::getIntAlt(const std::string& key1,
 bool KeyValueMap::getBool(const std::string& key, bool defaultValue) const
 {
     return toBool(getString(key, defaultValue?"True":"False"));
+}
+
+std::vector<double> KeyValueMap::getDoubleVector(const std::string& key,
+    const std::vector<double>& defaultValues) const
+{
+    std::string result = getString(key);
+    if(result.empty())
+        return defaultValues;
+    else
+        return toDoubleVector(splitString(result, ", "));
+    
 }
 
 void KeyValueMap::set(const std::string& key, const std::string& value)
@@ -182,7 +202,20 @@ std::string KeyValueMap::dump() const
 {
     std::string str;
     for(unsigned int i=0; i<items.size(); i++)
-        str += (items[i].first.empty() ? "" : (items[i].first+'=')) + items[i].second + '\n';
+        if(items[i].first.empty()) {  // an empty line or a comment
+            str += items[i].second + '\n';
+        } else {     // a normal key=value entry
+            str += items[i].first + '=' + items[i].second + '\n';
+        }
+    return str;
+}
+
+std::string KeyValueMap::dumpSingleLine() const
+{
+    std::string str;
+    for(unsigned int i=0; i<items.size(); i++)
+        if(!items[i].first.empty())
+            str += items[i].first + '=' + items[i].second + ' ';
     return str;
 }
 
@@ -197,21 +230,22 @@ std::vector<std::string> KeyValueMap::keys() const
 
 // -------- ConfigFile -------- //
 
-ConfigFile::ConfigFile(const std::string& _fileName) :
+ConfigFile::ConfigFile(const std::string& _fileName, bool mustExist) :
     fileName(_fileName)
 {
     std::ifstream strm(fileName.c_str());
-    if(!strm)
-        throw std::runtime_error("File does not exist: "+_fileName);
+    if(!strm) {
+        if(mustExist)
+            throw std::runtime_error("File does not exist: "+_fileName);
+        else
+            return;  // may be used to create a new ini file
+    }
     std::string buffer;
     int secIndex = -1;
     while(std::getline(strm, buffer)) {
-        // remove all comment lines
-        if(buffer.size()>0 && (buffer[0] == '#' || buffer[0] == ';'))
-            continue;
-        std::string::size_type indx = buffer.find('[');
+        std::string::size_type indx = buffer.find_first_not_of(" \t\n\r");  // skip spaces at the beginning
         std::string::size_type indx1= buffer.find(']');
-        if(indx!=std::string::npos && indx1!=std::string::npos && indx1>indx)
+        if(indx!=std::string::npos && buffer[indx] == '[' && indx1!=std::string::npos && indx1>indx)
         {   // section start - parse section name
             buffer = buffer.substr(indx+1, indx1-indx-1);
             indx = buffer.find_first_not_of(" \t\n\r");
@@ -232,8 +266,8 @@ ConfigFile::ConfigFile(const std::string& _fileName) :
                 secIndex = sections.size()-1;
             }
         } else {  // not a section
-            if(sections.empty()) { // no sections has been created yet
-                sections.push_back(std::pair<std::string, KeyValueMap>("", KeyValueMap()));  // add an empty section
+            if(sections.empty()) { // no sections has been created yet: add an empty section
+                sections.push_back(std::pair<std::string, KeyValueMap>("", KeyValueMap()));
                 secIndex = 0;
             }
             sections[secIndex].second.add(buffer.c_str());
@@ -247,14 +281,22 @@ ConfigFile::~ConfigFile()
     bool modified = false;
     for(unsigned int is=0; is<sections.size(); is++)
         modified |= sections[is].second.isModified();
-    if(modified && !fileName.empty() && sections.size()>0) { // need to save ini file
+    if(modified && !fileName.empty() && sections.size()>0) {  // need to save ini file
         std::ofstream strm(fileName.c_str());
-        if(!strm)   // sad but true, we can't do anything else but ignore the problem
+        if(!strm) {  // sad but true, we can't do anything else but ignore the problem
+            msg(VL_WARNING, "ConfigFile", "Cannot write file "+fileName);
             return;
+        }
         for(unsigned int is=0; is<sections.size(); is++) {
             std::string dump = sections[is].second.dump();
-            if(!dump.empty())
-                strm << ("["+sections[is].first+"]\n"+dump+"\n");
+            if(!dump.empty()) {
+                if(!sections[is].first.empty())   // write the section name in brackets (if present)
+                    strm << ("["+sections[is].first+"]\n");
+                strm << dump;
+                // add an empty line after a section if it did not contain one already
+                if(dump.size()>=2 && dump.substr(dump.size()-2) != "\n\n" && is<sections.size()-1)
+                    strm << '\n';
+            }
         }
     }
 }

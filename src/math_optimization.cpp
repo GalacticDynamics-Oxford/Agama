@@ -129,7 +129,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     const std::vector<NumT>& xmin, const std::vector<NumT>& xmax)
 {
 #ifdef HAVE_CVXOPT
-    return quadraticOptimizationSolve(A, rhs, L, IMatrixDiagonal<NumT>(std::vector<NumT>()), xmin, xmax);
+    return quadraticOptimizationSolve(A, rhs, L, BandMatrix<NumT>(std::vector<NumT>()), xmin, xmax);
 #else
     throw std::runtime_error("linearOptimizationSolve not implemented");
 #endif
@@ -439,12 +439,12 @@ std::vector<double> quadraticOptimizationSolveApprox(
     std::vector<double> result = quadraticOptimizationSolve(
         AugmentedMatrix<NumT>(A, numConstraints), rhs, Laug,
         Qempty && consPenaltyQuad.empty() ?   // in this case don't create any quadratic matrix
-            static_cast<const IMatrix<NumT>&>(DiagonalMatrix<NumT>()) :
+            static_cast<const IMatrix<NumT>&>(BandMatrix<NumT>()) :
             // if either the original quadratic matrix for numVariables was non-empty,
             // or the additional diagonal elements for numConstraints penalties were specified,
             // will create an augmented quadratic matrix, substituting the unspecified elements with zeros
             static_cast<const IMatrix<NumT>&>(AugmentedQuadMatrix<NumT>(Qempty ?
-                static_cast<const IMatrix<NumT>&>(DiagonalMatrix<NumT>(std::vector<NumT>(numVariables, 0))) :
+                static_cast<const IMatrix<NumT>&>(BandMatrix<NumT>(std::vector<NumT>(numVariables, 0))) :
                 Q, consPenaltyQuad.empty() ? std::vector<NumT>(numConstraints) : consPenaltyQuad)),
         xminaug, xmaxaug);
     result.resize(numVariables);  // chop off extra slack variables

@@ -1,5 +1,5 @@
 #include "math_linalg.h"
-#include "math_core.h"
+#include "math_core.h"  // for binSearch
 #include <cmath>
 #include <stdexcept>
 
@@ -95,32 +95,192 @@ double blas_dnrm2(const Matrix<double>& X)
     return result;
 }
 
-std::vector<double> solveTridiag(
-    const std::vector<double>& diag,
-    const std::vector<double>& aboveDiag,
-    const std::vector<double>& belowDiag,
-    const std::vector<double>& rhs)
+// --------- BAND MATRIX --------- //
+/*  we use the following storage scheme for band matrices: a flattened array of size N * (2*B+1),
+    where N is the number of rows and B is the bandwidth (B < N).
+    An example of a matrix with N=8 and B=2, and its compact representation:
+    |10  5  2  0  0  0  0  0 |     | -  - 10  5  2 |
+    | 4 10  5  2  0  0  0  0 |     | -  4 10  5  2 |
+    | 1  4 10  5  2  0  0  0 |     | 1  4 10  5  2 |
+    | 0  1  4 10  5  2  0  0 |     | 1  4 10  5  2 |
+    | 0  0  1  4 10  5  2  0 |     | 1  4 10  5  2 |
+    | 0  0  0  1  4 10  5  2 |     | 1  4 10  5  2 |
+    | 0  0  0  0  1  4 10  5 |     | 1  4 10  5  - |
+    | 0  0  0  0  0  1  4 10 |     | 1  4 10  -  - |
+    Here entries marked '-' are unused (refer to elements that would lie outside the original matrix).
+*/    
+template<typename NumT>
+BandMatrix<NumT>::BandMatrix(size_t size, size_t bandWidth, const NumT value) :
+    IMatrix<NumT>(size, size), band(bandWidth), data(size * (2*bandWidth+1), value)
 {
-    size_t size = diag.size();
-    if(size<1 || rhs.size() != size || aboveDiag.size()+1 != size || belowDiag.size()+1 != size)
-        throw std::invalid_argument("solveTridiag: invalid size of input arrays");
-    std::vector<double> x(size);  // solution
-    std::vector<double> t(size);  // temporary array
-    // forward pass
-    for(size_t i=0; i<size; i++) {
-        double piv = diag[i] - (i>0 ? belowDiag[i-1] * t[i-1] : 0);
-        if(piv == 0)
-            throw std::domain_error("solveTridiag: zero pivot element on diagonal");
-        t[i] = i<size-1 ? aboveDiag[i] / piv : 0;
-        x[i] = (rhs[i] - (i>0 ? belowDiag[i-1] * x[i-1] : 0)) / piv;
-    }
-    // back-substitution
-    for(size_t i=size-1; i>0; i--)
-        x[i-1] -= t[i-1] * x[i];
-    x.resize(diag.size());
-    return x;
+    if(bandWidth >= size)
+        throw std::invalid_argument("BandMatrix: bandwidth must be less than the matrix size");
 }
 
+template<typename NumT>
+const NumT& BandMatrix<NumT>::operator() (size_t row, size_t col) const
+{
+    if(std::max(row, col) >= rows() || col > row+band || row > col+band)
+        throw std::range_error("BandMatrix: index out of range");
+    return data[row * (2*band+1) + col+band-row];
+}
+
+template<typename NumT>
+NumT& BandMatrix<NumT>::operator() (size_t row, size_t col)
+{
+    if(std::max(row, col) >= rows() || col > row+band || row > col+band)
+        throw std::range_error("BandMatrix: index out of range");
+    return data[row * (2*band+1) + col+band-row];
+}
+
+template<typename NumT>
+size_t BandMatrix<NumT>::size() const
+{
+    return rows() * (2*band+1) - band*(band+1);
+}
+
+template<typename NumT>
+NumT BandMatrix<NumT>::elem(size_t index, size_t &row, size_t &col) const
+{
+    size_t
+        nRows = rows(),
+        width = 2*band+1,                           // width of one normal row
+        total = nRows * width - band * (band+1),    // total number of nonzero elements
+        nclip = pow_2(band) + band * (band+1) / 2;  // number of elements in clipped areas
+    if(index < nclip) {
+        // first few rows have clipped left edge
+        row = 0;
+        col = index;
+        while(col >= row+band+1) {
+            col -= row+band+1;
+            row++;
+        }
+    } else if(index+nclip < total) {
+        // the bulk of the matrix
+        row = (index-nclip) / width + band;
+        col = (index-nclip) % width + row-band;
+    } else if(index < total) {
+        // last few rows have clipped right edge
+        row = 0;
+        col = total-1-index;
+        while(col >= row+band+1) {
+            col -= row+band+1;
+            row++;
+        }
+        row = nRows-1-row;
+        col = nRows-1-col;
+    } else
+        throw std::range_error("BandMatrix: index out of range");
+    return data[row * width + col+band-row];
+}
+
+template<typename NumT>
+std::vector<Triplet> BandMatrix<NumT>::values() const
+{
+    const ptrdiff_t width = band * 2 + 1, nRows = rows();
+    std::vector<Triplet> result;
+    result.reserve(nRows * width);
+    for(ptrdiff_t r=0; r<nRows; r++) {
+        ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
+        ptrdiff_t cr = std::min<ptrdiff_t>(nRows-1, r+band);
+        for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
+            result.push_back(Triplet(r, c, data[m]));
+    }
+    return result;
+}
+
+template<>
+void blas_daxpy(double alpha, const BandMatrix<double>& X, BandMatrix<double>& Y)
+{
+    const size_t size = X.rows(), band = X.bandwidth(), numElem = size * (band*2+1);
+    if(Y.rows() != size || Y.bandwidth() != band)
+        throw std::invalid_argument("blas_daxpy: invalid size of input arrays");
+    if(alpha==0) return;
+    const double* x = &(X(0,0))-band;  // address of the first element in the flattened band matrix
+    double* y = &(Y(0,0))-band;
+    for(size_t i=0; i<numElem; i++)
+        y[i] += alpha * x[i];
+}
+
+template<>
+void blas_dgemv(CBLAS_TRANSPOSE Trans, double alpha, const BandMatrix<double>& mat,
+    const std::vector<double>& vec, double beta, std::vector<double>& result)
+{
+    const ptrdiff_t size = mat.rows(), band = mat.bandwidth(), width = band * 2 + 1;
+    if((ptrdiff_t)vec.size() != size || (ptrdiff_t)result.size() != size)
+        throw std::invalid_argument("blas_dgemv: invalid size of input arrays");
+    if(beta==0)
+        result.assign(size, 0.);
+    else
+        for(ptrdiff_t i=0; i<size; i++)
+            result[i] *= beta;
+    const double* data = &(mat(0,0))-band;  // address of the first element in the flattened band matrix
+    if(Trans == CblasTrans) {
+        for(ptrdiff_t r=0; r<size; r++) {
+            double   val = alpha * vec[r];
+            ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
+            ptrdiff_t cr = std::min<ptrdiff_t>(size-1, r+band);
+            for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
+                result[c] += val * data[m];
+        }
+    } else {
+        for(ptrdiff_t r=0; r<size; r++) {
+            ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
+            ptrdiff_t cr = std::min<ptrdiff_t>(size-1, r+band);
+            for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
+                result[r] += alpha * vec[c] * data[m];
+        }
+    }
+}
+    
+std::vector<double> solveBand(const BandMatrix<double>& mat, const std::vector<double>& rhs)
+{
+    const ptrdiff_t size = mat.rows(), band = mat.bandwidth(), width = band * 2 + 1;
+    if((ptrdiff_t)rhs.size() != size)
+        throw std::invalid_argument("solveBand: invalid size of input arrays");
+    std::vector<double> x(rhs);             // result vector, which originally contains the r.h.s.
+    std::vector<double> U(size*band);       // upper triangular part of the input matrix
+    std::vector<double> L(width);           // temporary storage (one row of the input matrix)
+    const double* data = &(mat(0,0))-band;  // hack into the internal representation of band matrix
+    if(band==1) {  // fast track for a tridiagonal matrix
+        for(ptrdiff_t i=0; i<size; i++) {   // forward pass
+            double ipiv = 1. / (data[i*3+1] - (i>0 ? data[i*3] * U[i-1] : 0));
+            U[i] = data[i*3+2] * ipiv;
+            x[i] = (rhs[i] - (i>0 ? data[i*3] * x[i-1] : 0)) * ipiv;
+        }
+        // back-substitution
+        for(ptrdiff_t i=size-2; i>=0; i--)
+            x[i] -= U[i] * x[i+1];
+        return x;
+    }
+    for(ptrdiff_t i=0; i<size; i++) {
+        // copy the [non-zero elements of] i-th row of input matrix into the temporary array L
+        std::copy(data + i*width, data + (i+1)*width, L.begin());
+        // Gaussian elimination (only the current, i-th row, is kept at a time)
+        for(ptrdiff_t c = 1; c < 2*band; c++) {
+            ptrdiff_t rmin = std::max<ptrdiff_t>(0, std::max(band-i, c-band));
+            ptrdiff_t rmax = std::min<ptrdiff_t>(band, c);
+            for(ptrdiff_t r=rmin; r<rmax; r++)
+                L[c] -= L[r] * U[(i-band+r) * band + c-r-1];
+        }
+        double ipiv = 1. / L[band];  // inverse of the diagonal element
+        // store the elements of U matrix for the current row
+        for(ptrdiff_t c = band+1; c <= 2*band; c++)
+            U[i * band + c-band-1] = L[c] * ipiv;
+        // forward pass for the solution vector (multiply x by L^-1)
+        for(ptrdiff_t c = std::max<ptrdiff_t>(0, band-i); c < band; c++)
+            x[i] -= L[c] * x[i-band+c];
+        x[i] *= ipiv;
+    }
+    // back-substitution (multiply x by U^-1)
+    for(ptrdiff_t i = size-2; i >= 0; i--) {
+        for(ptrdiff_t j = std::min<ptrdiff_t>(band-1, size-2-i); j >= 0; j--)
+            x[i] -= x[i+j+1] * U[i * band + j];
+    }
+    return x;
+}
+    
+    
 #ifdef HAVE_EIGEN
 // --------- EIGEN-BASED IMPLEMENTATIONS --------- //
 
@@ -183,6 +343,23 @@ template<typename NumT>
 Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()),
     impl(new typename Type<Matrix<NumT> >::T(mat(src))) {}
+
+// copy constructor from a band matrix
+template<typename NumT>
+Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
+    IMatrix<NumT>(src.rows(), src.cols()),
+    impl(new typename Type<Matrix<NumT> >::T(src.rows(), src.cols()))
+{
+    mat(*this).fill(0);
+    const ptrdiff_t band = src.bandwidth(), width = band * 2 + 1, nRows = rows();
+    const NumT* data = &(src(0,0))-band;
+    for(ptrdiff_t r=0; r<nRows; r++) {
+        ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
+        ptrdiff_t cr = std::min<ptrdiff_t>(nRows-1, r+band);
+        for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
+            mat(*this)(r, c) = data[m];
+    }
+}
 
 // constructor from triplets
 template<typename NumT>
@@ -248,6 +425,16 @@ SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>&
     mat(*this).setFromTriplets(values.begin(), values.end());
 }
 
+// copy constructor from band matrix
+template<typename NumT>
+    SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+    IMatrix<NumT>(src.rows(), src.cols()),
+    impl(new typename Type<SpMatrix<NumT> >::T(src.rows(), src.cols()))
+{
+    std::vector<Triplet> values = src.values();
+    mat(*this).setFromTriplets(values.begin(), values.end());
+}
+
 // copy constructor from sparse matrix
 template<typename NumT>
 SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& src) :
@@ -270,7 +457,7 @@ NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
 template<typename NumT>
 NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
-    if(static_cast<int>(index) >= mat(*this).nonZeros())
+    if(index >= static_cast<size_t>(mat(*this).nonZeros()))
         throw std::range_error("SpMatrix: element index out of range");
     row = mat(*this).innerIndexPtr()[index];
     col = binSearch(static_cast<int>(index), mat(*this).outerIndexPtr(), cols()+1);
@@ -309,6 +496,12 @@ inline Eigen::Map<const Eigen::VectorXd> toEigenVector(const std::vector<double>
 }
 
 template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>& Y)
+{
+    if(alpha!=0)
+        mat(Y) += alpha * mat(X);
+}
+
+template<> void blas_daxpy(double alpha, const SpMatrix<double>& X, SpMatrix<double>& Y)
 {
     if(alpha!=0)
         mat(Y) += alpha * mat(X);
@@ -545,9 +738,9 @@ std::vector<double> CholeskyDecomp::solve(const std::vector<double>& rhs) const 
 
 /// Singular-value decomposition for dense matrices
 #if EIGEN_VERSION_AT_LEAST(3,3,0)
-typedef Eigen::BDCSVD< Type< Matrix<double> >::T> SVDecompImpl;
+typedef Eigen::BDCSVD< Type< Matrix<double> >::T> SVDecompImpl;     // more efficient
 #else
-typedef Eigen::JacobiSVD< Type< Matrix<double> >::T> SVDecompImpl;
+typedef Eigen::JacobiSVD< Type< Matrix<double> >::T> SVDecompImpl;  // slower
 #endif
     
 SVDecomp::SVDecomp(const Matrix<double>& M) :
@@ -591,12 +784,12 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const {
 // --------- END OF EIGEN-BASED IMPLEMENTATIONS --------- //
 #else
 // --------- GSL-BASED IMPLEMENTATIONS --------- //
-
+namespace{
 // allocate memory if the size is positive, otherwise return NULL
 template<typename NumT>
 inline NumT* xnew(size_t size) {
     return size==0 ? NULL : new NumT[size]; }
-    
+}
 //------ dense matrix ------//
 
 // default constructor
@@ -639,6 +832,23 @@ Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
         size_t i, j;
         NumT v = src.elem(k, i, j);
         static_cast<NumT*>(impl)[i*cols()+j] = v;
+    }
+}
+
+// copy constructor from a band matrix
+template<typename NumT>
+Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
+    IMatrix<NumT>(src.rows(), src.cols()),
+    impl(xnew<NumT>(rows()*cols()))
+{
+    const ptrdiff_t band = src.bandwidth(), width = band * 2 + 1, nRows = rows();
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + pow_2(nRows), 0);
+    const NumT* data = &(src(0,0))-band;
+    for(ptrdiff_t r=0; r<nRows; r++) {
+        ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
+        ptrdiff_t cr = std::min<ptrdiff_t>(nRows-1, r+band);
+        for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
+            static_cast<NumT*>(impl)[r*nRows+c] = data[m];
     }
 }
 
@@ -733,6 +943,25 @@ SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& srcObj) :
     impl = dest;
 }
 
+// copy constructor from band matrix
+template<typename NumT>
+SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+    IMatrix<NumT>(src.rows(), src.cols()), impl(NULL)
+{
+    size_t nRows = src.rows();
+    if(nRows == 0)
+        return;
+    size_t size = src.size();
+    gsl_spmatrix* sp  = gsl_spmatrix_alloc_nzmax(nRows, nRows, size, GSL_SPMATRIX_TRIPLET);
+    for(size_t k=0; k<size; k++) {
+        size_t row, col;
+        double val = src.elem(k, row, col);
+        gsl_spmatrix_set(sp, row, col, val);
+    }
+    impl = gsl_spmatrix_compcol(sp);
+    gsl_spmatrix_free(sp);
+}
+
 template<typename NumT>
 SpMatrix<NumT>::~SpMatrix()
 {
@@ -756,7 +985,7 @@ NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
     if(impl == NULL || index >= sp->nz)
         throw std::range_error("SpMatrix: index out of range");
     row = sp->i[index];
-    col = binSearch(static_cast<size_t>(index), sp->p, sp->size2+1);
+    col = binSearch(index, sp->p, sp->size2+1);
     return static_cast<NumT>(sp->data[index]);
 }
 
@@ -818,6 +1047,21 @@ SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& src) :
         /*src  begin*/ static_cast<const NumT*>(src.impl),
         /*src  end  */ static_cast<const NumT*>(src.impl) + rows()*cols(),
         /*dest begin*/ static_cast<NumT*>(impl));
+}
+
+// copy constructor from band matrix
+template<typename NumT>
+SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+    IMatrix<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(src.rows()*src.cols()))
+{
+    size_t nRows = src.rows();
+    size_t size  = src.size();
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nRows, 0);
+    for(size_t k=0; k<size; k++) {
+        size_t row, col;
+        NumT val = src.elem(k, row, col);
+        static_cast<NumT*>(impl)[row*nRows+col] += static_cast<NumT>(val);
+    }
 }
 
 template<typename NumT>
@@ -908,6 +1152,34 @@ template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>
     double* arrY = Y.data();
     for(size_t k=0; k<size; k++)
         arrY[k] += alpha*arrX[k];
+}
+
+template<> void blas_daxpy(double alpha, const SpMatrix<double>& X, SpMatrix<double>& Y)
+{
+    if(X.rows() != Y.rows() || X.cols() != Y.cols())
+        throw std::invalid_argument("blas_daxpy: incompatible sizes of input arrays");
+    if(alpha==0) return;
+#ifdef HAVE_GSL_SPARSE
+    const gsl_spmatrix* spX = static_cast<const gsl_spmatrix*>(X.impl);
+    gsl_spmatrix* spY = static_cast<gsl_spmatrix*>(Y.impl), *tmpX = NULL;
+    if(alpha!=1) {  // allocate a temporary sparse matrix for X*alpha
+        tmpX = gsl_spmatrix_alloc_nzmax(spX->size1, spX->size2, spX->nz, GSL_SPMATRIX_CCS);
+        gsl_spmatrix_memcpy(tmpX, spX);
+        gsl_spmatrix_scale(tmpX, alpha);
+        spX = tmpX;
+    }
+    gsl_spmatrix* result = gsl_spmatrix_alloc_nzmax(spY->size1, spY->size2,
+        std::max(spX->nz, spY->nz), GSL_SPMATRIX_CCS);
+    gsl_spmatrix_add(result, spX, spY);
+    gsl_spmatrix_free(spY);
+    Y.impl = result;
+    if(alpha!=1)
+        gsl_spmatrix_free(tmpX);
+#else
+    size_t size = X.rows() * X.cols();
+    for(size_t k=0; k<size; k++)
+        static_cast<double*>(Y.impl)[k] += alpha * static_cast<const double*>(X.impl)[k];
+#endif
 }
 
 template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const Matrix<double>& A,
@@ -1161,15 +1433,21 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const
 #endif
 
 // template instantiations to be compiled (both for Eigen and GSL)
+template struct BandMatrix<float>;
+template struct BandMatrix<double>;
 template struct SpMatrix<float>;
 template struct SpMatrix<double>;
 template struct Matrix<float>;
 template struct Matrix<double>;
-template void blas_daxpy(double alpha, const std::vector<double>& X, std::vector<double>& Y);
-template void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>& Y);
+template void blas_daxpy(double, const std::vector<double>&, std::vector<double>&);
+template void blas_daxpy(double, const Matrix<double>&, Matrix<double>&);
+template void blas_daxpy(double, const SpMatrix<double>&, SpMatrix<double>&);
+template void blas_daxpy(double, const BandMatrix<double>&, BandMatrix<double>&);
 template void blas_dgemv(CBLAS_TRANSPOSE, double, const Matrix<double>&,
     const std::vector<double>&, double, std::vector<double>&);
 template void blas_dgemv(CBLAS_TRANSPOSE, double, const SpMatrix<double>&,
+    const std::vector<double>&, double, std::vector<double>&);
+template void blas_dgemv(CBLAS_TRANSPOSE, double, const BandMatrix<double>&,
     const std::vector<double>&, double, std::vector<double>&);
 template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
     double, const Matrix<double>&, const Matrix<double>&, double, Matrix<double>&);

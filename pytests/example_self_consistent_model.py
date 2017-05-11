@@ -53,11 +53,11 @@ def printoutInfo(model, iteration):
         "Halo total mass=%g Msun," % densHalo.totalMass(), \
         "rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \
         (densHalo.density(pt0)*1e-9, densHalo.density(pt1)*1e-9)
-    print "Potential at origin=-(%g km/s)^2," % (-model.pot.potential(0,0,0))**0.5, \
-        "total mass=%g Msun" % model.pot.totalMass()
+    print "Potential at origin=-(%g km/s)^2," % (-model.potential.potential(0,0,0))**0.5, \
+        "total mass=%g Msun" % model.potential.totalMass()
     densDisc.export("dens_disc_iter"+str(iteration));
     densHalo.export("dens_halo_iter"+str(iteration));
-    writeRotationCurve("rotcurve_iter"+str(iteration), model.pot)
+    writeRotationCurve("rotcurve_iter"+str(iteration), model.potential)
 
 if __name__ == "__main__":
     # read parameters from the INI file
@@ -93,14 +93,14 @@ if __name__ == "__main__":
     densityStellarDisc = agama.Density(densityThinDisc, densityThickDisc)  # composite
 
     # add components to SCM - at first, all of them are static density profiles
-    model.components.append(agama.Component(dens=densityDarkHalo,    disklike=False))
-    model.components.append(agama.Component(dens=densityStellarDisc, disklike=True))
-    model.components.append(agama.Component(dens=densityBulge,       disklike=False))
-    model.components.append(agama.Component(dens=densityGasDisc,     disklike=True))
+    model.components.append(agama.Component(density=densityDarkHalo,    disklike=False))
+    model.components.append(agama.Component(density=densityStellarDisc, disklike=True))
+    model.components.append(agama.Component(density=densityBulge,       disklike=False))
+    model.components.append(agama.Component(density=densityGasDisc,     disklike=True))
 
     # compute the initial potential
     model.iterate()
-    writeRotationCurve("rotcurve_init", model.pot)
+    writeRotationCurve("rotcurve_init", model.potential)
 
     print "**** STARTING ONE-COMPONENT MODELLING ****\nMasses are:  " \
         "Mbulge=%g Msun,"% densityBulge.totalMass(), \
@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
     # create the dark halo DF from the parameters in INI file;
     # here the initial potential is only used to create epicyclic frequency interpolation table
-    dfHalo = agama.DistributionFunction(pot=model.pot, **iniDFDarkHalo)
+    dfHalo = agama.DistributionFunction(potential=model.potential, **iniDFDarkHalo)
 
     # replace the halo SCM component with the DF-based one
     model.components[0] = agama.Component(df=dfHalo, disklike=False, **iniSCMHalo)
@@ -123,9 +123,9 @@ if __name__ == "__main__":
 
     # now that we have a reasonable guess for the total potential,
     # we may initialize the DF of the stellar components
-    dfThinDisc    = agama.DistributionFunction(pot=model.pot, **iniDFThinDisc)
-    dfThickDisc   = agama.DistributionFunction(pot=model.pot, **iniDFThickDisc)
-    dfStellarHalo = agama.DistributionFunction(pot=model.pot, **iniDFStellarHalo)
+    dfThinDisc    = agama.DistributionFunction(potential=model.potential, **iniDFThinDisc)
+    dfThickDisc   = agama.DistributionFunction(potential=model.potential, **iniDFThickDisc)
+    dfStellarHalo = agama.DistributionFunction(potential=model.potential, **iniDFStellarHalo)
     # composite DF of all stellar components except the bulge
     dfStellar = agama.DistributionFunction(dfThinDisc, dfThickDisc, dfStellarHalo)
 
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     # by drawing positions and velocities from the DF in the given (self-consistent) potential
     print "Sampling halo DF"
     writeNbodySnapshot("model_halo_iter10", \
-        agama.GalaxyModel(pot=model.pot, df=dfHalo, af=model.af).sample(100000))
+        agama.GalaxyModel(potential=model.potential, df=dfHalo, af=model.af).sample(100000))
     print "Sampling disc DF"
     writeNbodySnapshot("model_disc_iter10", \
-        agama.GalaxyModel(pot=model.pot, df=dfStellar, af=model.af).sample(100000))
+        agama.GalaxyModel(potential=model.potential, df=dfStellar, af=model.af).sample(100000))

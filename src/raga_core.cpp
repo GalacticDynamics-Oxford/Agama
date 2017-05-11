@@ -164,6 +164,9 @@ void RagaCore::doEpisode()
 
 void RagaCore::loadSettings(const utils::KeyValueMap& config)
 {
+    // a header line written in the output file contains all parameters from the ini file
+    paramsTrajectory.header = paramsRelaxation.header = "Raga " + config.dumpSingleLine();
+
     // parameters of the stellar potential and the central black hole(s)
     paramsPotential.symmetry  = potential::getSymmetryTypeByName(config.getString("Symmetry"));
     paramsPotential.gridSizeR = config.getInt("gridSizeR", 25);

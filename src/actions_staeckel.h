@@ -18,7 +18,6 @@ but virtually nothing of the original code remains.
 #pragma once
 #include "actions_base.h"
 #include "actions_focal_distance_finder.h"
-#include "potential_perfect_ellipsoid.h"
 #include "smart.h"
 
 namespace actions {

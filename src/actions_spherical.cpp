@@ -61,7 +61,7 @@ class IntegrandPowerLaw: public math::IFunctionNoDeriv {
 public:
     IntegrandPowerLaw(double slope, double Lrel, double _R1) : s(slope), v(Lrel), R1(_R1) {}
     virtual double value(const double x) const {
-        double t  = s!=0 ?  (pow(x, s) - 1) / s  :  log(x);
+        double t  = s!=0 ?  (std::pow(x, s) - 1) / s  :  log(x);
         double vr = sqrt(fmax(0, 1 - pow_2(v/x) - 2*t));
         if(mode==MODE_JR)     return vr;
         if(mode==MODE_OMEGAZ) return v/(x*x*vr) - 1/(sqrt(pow_2(x/R1)-1)*x);
@@ -507,8 +507,10 @@ ActionAngles actionAnglesSpherical(
 {
     double E, L, R1, R2;
     Actions acts = computeActions(point, pot, E, L, R1, R2);
-    if(!isFinite(acts.Jr))  // E>=0
+    if(!isFinite(acts.Jr)) { // E>=0
+        if(freqout) freqout->Omegar = freqout->Omegaz = freqout->Omegaphi = NAN;
         return ActionAngles(acts, Angles(NAN, NAN, NAN));
+    }
     Frequencies freq;
     freq.Omegar = M_PI / integr<MODE_OMEGAR>(potential::PotentialWrapper(pot), E, L, R1, R2);
     freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
@@ -530,6 +532,11 @@ double ActionFinderSpherical::Jr(double E, double L, double *Omegar, double *Ome
     bool needDeriv = Omegar!=NULL || Omegaz!=NULL;
     double val, derE, derZ, dLcdE;
     double Lc = interp.pot.L_circ(E, needDeriv? &dLcdE : NULL);
+    if(!isFinite(Lc)) {  // E>=0 or E<Phi(0)
+        if(Omegar) *Omegar = NAN;
+        if(Omegaz) *Omegaz = NAN;
+        return NAN;
+    }
     double Z  = Lc>0 ? fmin(fabs(L/Lc), 1) : 0;
     intJr.evalDeriv(E, Z, &val, needDeriv? &derE : NULL, needDeriv? &derZ : NULL);
     if(needDeriv) {

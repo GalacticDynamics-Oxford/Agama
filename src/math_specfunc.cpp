@@ -60,14 +60,14 @@ double hypergeom2F1(const double a, const double b, const double c, const double
     // extension for 2F1 into the range x<-1 which is not provided by GSL; code from Heiko Bauke
     else if(x<-1.) {
         if(c-a<0)
-            _result =  pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
+            _result = std::pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
         if(c-b<0)
-            _result =  pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, c, c, x/(x-1.));
+            _result = std::pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, c, c, x/(x-1.));
         // choose one of two equivalent formulas which is expected to be more accurate
         if(a*(c-b) < (c-a)*b)
-            _result =  pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
+            _result = std::pow(1.-x, -a) * gsl_sf_hyperg_2F1(a, c-b, c, x/(x-1.));
         else
-            _result =  pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, b, c, x/(x-1.));
+            _result = std::pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, b, c, x/(x-1.));
     }  // otherwise not defined (for x>=1)
     return exceptionText.empty() ? _result : NAN;
 }
@@ -235,10 +235,10 @@ double legendreQ(const double n, const double x, double* deriv)
     int m = static_cast<int>(n+0.5);
     double prefactor, F;
     if(m == n+0.5 && m >= 0 && m<= MMAX_HYPERGEOM) {
-        prefactor = Q_PREFACTOR[m] / sqrt(x) / powInt(x, m);
+        prefactor = Q_PREFACTOR[m] / sqrt(x) / pow(x, m);
         F = prefactor * hypergeom_m(m, 1/(x*x), deriv);
     } else {
-        prefactor = pow(2*x,-1-n) * M_SQRTPI * gamma(n+1) / gamma(n+1.5);
+        prefactor = std::pow(2*x,-1-n) * M_SQRTPI * gamma(n+1) / gamma(n+1.5);
         F = prefactor * hypergeom2F1(1+n/2, 0.5+n/2, 1.5+n, 1/(x*x));
         if(deriv)
             *deriv = (1+n/2) * (0.5+n/2) / (1.5+n) * hypergeom2F1(2+n/2, 1.5+n/2, 2.5+n, 1/(x*x));

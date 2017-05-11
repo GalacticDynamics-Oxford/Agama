@@ -17,7 +17,7 @@ print "DF mass=", mass, ' Density mass=', dens.totalMass()  # should be identica
 
 # define the self-consistent model consisting of a single component
 params = dict(rminSph=0.01, rmaxSph=100., sizeRadialSph=25, lmaxAngularSph=0)
-comp = agama.Component(df=df, dens=dens, disklike=False, **params)
+comp = agama.Component(df=df, density=dens, disklike=False, **params)
 scm = agama.SelfConsistentModel(**params)
 scm.components=[comp]
 
@@ -29,11 +29,11 @@ plt.plot(r, dens.density(xyz), label='Init density')
 # perform several iterations of self-consistent modelling procedure
 for i in range(5):
     scm.iterate()
-    print 'Iteration', i, ' Phi(0)=', scm.pot.potential(0,0,0), ' Mass=', scm.pot.totalMass()
-    plt.plot(r, scm.pot.density(xyz), label='Iteration #'+str(i))
+    print 'Iteration', i, ' Phi(0)=', scm.potential.potential(0,0,0), ' Mass=', scm.potential.totalMass()
+    plt.plot(r, scm.potential.density(xyz), label='Iteration #'+str(i))
 
 # save the final density/potential profile
-scm.pot.export("simple_scm.coef_mul")
+scm.potential.export("simple_scm.coef_mul")
 
 # show the results
 plt.legend(loc='lower left')

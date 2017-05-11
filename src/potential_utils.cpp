@@ -6,6 +6,7 @@
 #include <cfloat>
 #include <cassert>
 #include <stdexcept>
+#include <fstream>   // for writing debug info
 
 namespace potential{
 
@@ -21,24 +22,26 @@ static const double ACCURACY_INTERP = 1e-6;
 static const double HUGE_NUMBER = 1e100;
 
 /// safety factor to avoid roundoff errors in estimating the inner/outer asymptotic slopes
-const double ROUNDOFF_THRESHOLD = 1e5 * DBL_EPSILON;
+static const double ROUNDOFF_THRESHOLD = 1e5 * DBL_EPSILON;
 
-/// fixed order of Gauss-Legendre integration for each segment of a log-grid
-static const int GLORDER = 8;
+/// fixed order of Gauss-Legendre integration of PhaseVolume on each segment of a log-grid
+static const int GLORDER1 = 6;   // for shorter segments
+static const int GLORDER2 = 10;  // for larger segments
+/// the choice between short and long segments is determined by the ratio between consecutive nodes
+static const double GLRATIO = 2.0;
 
 // -------- routines for conversion between energy, radius and angular momentum --------- //
 
 /** helper class to find the root of  Phi(R) = E */
 class RmaxRootFinder: public math::IFunction {
-    const BasePotential& poten;
+    const math::IFunction& poten;
     const double E;
 public:
-    RmaxRootFinder(const BasePotential& _poten, double _E) : poten(_poten), E(_E) {};
-    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* =0) const {
-        double Phi;
-        coord::GradCyl grad;
-        double R = exp(logR);
-        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad);
+    RmaxRootFinder(const math::IFunction& _poten, double _E) : poten(_poten), E(_E) {}
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* =0) const
+    {
+        double Phi, dPhidR, R = exp(logR);
+        poten.evalDeriv(R, &Phi, &dPhidR);
         if(val) {
             if(R==0 && Phi==-INFINITY)
                 *val = +E;  // safely negative value
@@ -48,7 +51,7 @@ public:
                 *val = Phi-E;
         }
         if(deriv)
-            *deriv = grad.dR * R;
+            *deriv = dPhidR * R;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
@@ -57,52 +60,49 @@ public:
     (i.e. the radius R of a circular orbit with the given energy E).
 */
 class RcircRootFinder: public math::IFunction {
-    const BasePotential& poten;
+    const math::IFunction& poten;
     const double E;
 public:
-    RcircRootFinder(const BasePotential& _poten, double _E) : poten(_poten), E(_E) {};
-    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const {
-        double Phi;
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        double R = exp(logR);
-        poten.eval(coord::PosCyl(R,0,0), &Phi, &grad, &hess);
+    RcircRootFinder(const math::IFunction& _poten, double _E) : poten(_poten), E(_E) {}
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const
+    {
+        double Phi, dPhidR, d2PhidR2, R = exp(logR);
+        poten.evalDeriv(R, &Phi, &dPhidR, &d2PhidR2);
         if(val) {
             if(R==0 && Phi==-INFINITY)
                 *val = +1+fabs(E);  // safely positive value
             else if(R>=HUGE_NUMBER && !isFinite(Phi))
                 *val = -1-fabs(E);  // safely negative value
             else
-                *val = 2*(E-Phi) - (R>1./HUGE_NUMBER && R<HUGE_NUMBER ? R*grad.dR : 0);
+                *val = 2*(E-Phi) - (R>1./HUGE_NUMBER && R<HUGE_NUMBER ? R*dPhidR : 0);
         }
         if(deriv)
-            *deriv = (-3*grad.dR - R*hess.dR2) * R;
+            *deriv = (-3*dPhidR - R*d2PhidR2) * R;
         if(deriv2)
             *deriv2 = NAN;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
 
-/** helper class to find the root of  L_z^2 - R^3 d\Phi(R)/dR = 0
-    (i.e. the radius R of a circular orbit with the given angular momentum L_z).
+/** helper class to find the root of  L^2 - R^3 d\Phi(R)/dR = 0
+    (i.e. the radius R of a circular orbit with the given angular momentum L).
 */
-class RfromLzRootFinder: public math::IFunction {
-    const BasePotential& poten;
-    const double Lz2;
+class RfromLRootFinder: public math::IFunction {
+    const math::IFunction& poten;
+    const double L2;
 public:
-    RfromLzRootFinder(const BasePotential& _poten, double _Lz) : poten(_poten), Lz2(_Lz*_Lz) {};
-    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const {
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        double R = exp(logR);
-        poten.eval(coord::PosCyl(R,0,0), NULL, &grad, &hess);
-        double F = pow_3(R)*grad.dR;  // Lz^2(R)
-        if(!isFinite(F))          // this may happen if R --> 0 or R --> infinity,
-            F = R<1 ? 0 : 2*Lz2;  // in these cases replace it with a finite number of a correct sign
+    RfromLRootFinder(const math::IFunction& _poten, double _L) : poten(_poten), L2(_L*_L) {}
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const
+    {
+        double dPhidR, d2PhidR2, R = exp(logR);
+        poten.evalDeriv(R, NULL, &dPhidR, &d2PhidR2);
+        double F = pow_3(R)*dPhidR; // Lz^2(R)
+        if(!isFinite(F))            // this may happen if R --> 0 or R --> infinity,
+            F = R<1 ? 0 : 2*L2;     // in these cases replace it with a finite number of a correct sign
         if(val)
-            *val = F - Lz2;
+            *val = F - L2;
         if(deriv)
-            *deriv = pow_3(R) * (3*grad.dR + R*hess.dR2);
+            *deriv = pow_3(R) * (3*dPhidR + R*d2PhidR2);
         if(deriv2)
             *deriv2 = NAN;
     }
@@ -138,9 +138,9 @@ public:
     virtual unsigned int numDerivs() const { return 1; }
     virtual void evalDeriv(const double x, double* val=0, double* der=0, double* =0) const {
         if(val)
-            *val = s!=0 ?  (2+s)*x*x - 2*pow(x, 2+s) - v2*s  :  (x==0 ? 0 : x*x * (1 - 2*log(x)) - v2);
+            *val = s!=0 ?  (2+s)*x*x - 2*std::pow(x, 2+s) - v2*s  :  (x==0 ? 0 : x*x * (1 - 2*log(x)) - v2);
         if(der)
-            *der = s!=0 ?  (4+2*s) * (x - pow(x, 1+s))  :  -4*x*log(x);
+            *der = s!=0 ?  (4+2*s) * (x - std::pow(x, 1+s))  :  -4*x*log(x);
     }
 };
 
@@ -231,40 +231,26 @@ public:
 }  // internal namespace
 
 
-double v_circ(const BasePotential& potential, double radius)
+double v_circ(const math::IFunction& potential, double radius)
 {
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular velocity is possible");
     if(radius==0)
-        return isFinite(potential.value(coord::PosCyl(0, 0, 0))) ? 0 : INFINITY;
-    coord::GradCyl deriv;
-    potential.eval(coord::PosCyl(radius, 0, 0), NULL, &deriv);
-    return sqrt(radius*deriv.dR);
+        return isFinite(potential.value(0)) ? 0 : INFINITY;
+    double dPhidr;
+    potential.evalDeriv(radius, NULL, &dPhidr);
+    return sqrt(radius * dPhidr);
 }
 
-double R_circ(const BasePotential& potential, double energy) {
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
+double R_circ(const math::IFunction& potential, double energy) {
     return exp(math::findRoot(RcircRootFinder(potential, energy), -INFINITY, INFINITY, ACCURACY_ROOT));
 }
 
-double L_circ(const BasePotential& potential, double energy) {
-    double R = R_circ(potential, energy);
-    return R * v_circ(potential, R);
-}
-
-double R_from_Lz(const BasePotential& potential, double Lz) {
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
-    if(Lz==0)
+double R_from_L(const math::IFunction& potential, double L) {
+    if(L==0)
         return 0;
-    return exp(math::findRoot(RfromLzRootFinder(potential, Lz), -INFINITY, INFINITY, ACCURACY_ROOT));
+    return exp(math::findRoot(RfromLRootFinder(potential, L), -INFINITY, INFINITY, ACCURACY_ROOT));
 }
 
-double R_max(const BasePotential& potential, double energy) {
+double R_max(const math::IFunction& potential, double energy) {
     return exp(math::findRoot(RmaxRootFinder(potential, energy), -INFINITY, INFINITY, ACCURACY_ROOT));
 }
 
@@ -285,37 +271,33 @@ void epicycleFreqs(const BasePotential& potential, const double R,
     Omega = sqrt(gradR_over_R);
 }
 
-double innerSlope(const BasePotential& potential, double* Phi0, double* coef)
+double innerSlope(const math::IFunction& potential, double* Phi0, double* coef)
 {
     // this routine shouldn't suffer from cancellation errors, provided that
     // the potential and its derivatives are computed accurately,
     // thus we may use a fixed tiny radius at which the slope is estimated.
     double r = 1e-10;
-    double val;
-    coord::GradCyl grad;
-    coord::HessCyl hess;
-    potential.eval(coord::PosCyl(r,0,0), &val, &grad, &hess);
-    double  s = 1 + r * hess.dR2 / grad.dR;
+    double Phi, dPhidR, d2PhidR2;
+    potential.evalDeriv(r, &Phi, &dPhidR, &d2PhidR2);
+    double  s = 1 + r * d2PhidR2 / dPhidR;
     if(coef)
-        *coef = s==0 ?  grad.dR * r  :  grad.dR / s * pow(r, 1-s);
+        *coef = s==0 ?  dPhidR * r  :  dPhidR / s * std::pow(r, 1-s);
     if(Phi0)
-        *Phi0 = s==0 ?  val - r * grad.dR * log(r)  :  val - r * grad.dR / s;
+        *Phi0 = s==0 ?  Phi - r * dPhidR * log(r)  :  Phi - r * dPhidR / s;
     return s;
 }
 
-double outerSlope(const BasePotential& potential, double* M, double* coef)
+double outerSlope(const math::IFunction& potential, double* M, double* coef)
 {
     double r = 1e+10;  // start reasonably far...
-    double val, s;
-    coord::GradCyl grad;
-    coord::HessCyl hess;
+    double s, Phi, dPhidR, d2PhidR2;
     bool roundoff = false;
     int numiter = 0;
     do {
         if(roundoff)  // at each iteration, decrease the radius at which the estimates are made,
             r /= 10;  // if the computation was dominated by roundoff error at the previous iteration
-        potential.eval(coord::PosCyl(r,0,0), &val, &grad, &hess);
-        double num1 = 2*grad.dR, num2 = -r*hess.dR2, den1 = grad.dR, den2 = -val/r;
+        potential.evalDeriv(r, &Phi, &dPhidR, &d2PhidR2);
+        double num1 = 2*dPhidR, num2 = -r*d2PhidR2, den1 = dPhidR, den2 = -Phi/r;
         s = (num1 - num2) / (den1 - den2);
         roundoff =    // check if the value of s is dominated by roundoff errors
             fabs(num1-num2) < fmax(fabs(num1), fabs(num2)) * ROUNDOFF_THRESHOLD ||
@@ -323,13 +305,13 @@ double outerSlope(const BasePotential& potential, double* M, double* coef)
     } while(roundoff && ++numiter<10);
     if(roundoff || s>0) {    // not successful - return the total mass only
         if(coef) *coef=0;
-        if(M)    *M = -potential.value(coord::PosCyl(r,0,0)) * r;
+        if(M)    *M = -potential.value(r) * r;
         return 0;
     }
     if(coef)
-        *coef = s==-1 ?  (val + r*grad.dR) * r  :  (val + r*grad.dR) * pow(r, -s) / (s+1);
+        *coef = s==-1 ?  (Phi + r*dPhidR) * r  :  (Phi + r*dPhidR) * std::pow(r, -s) / (s+1);
     if(M)
-        *M    = s==-1 ?  (log(r) * (val + r*grad.dR) - val) * r  :  (r*grad.dR - s*val) * r / (s+1);
+        *M    = s==-1 ?  (log(r) * (Phi + r*dPhidR) - Phi) * r  :  (r*dPhidR - s*Phi) * r / (s+1);
     return s;
 }
 
@@ -338,11 +320,11 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
     if(!isAxisymmetric(potential))
         throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
     double Phi0, coef, slope;
-    slope = innerSlope(potential, &Phi0, &coef);
+    slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
     // accurate treatment close to the origin assuming a power-law asymptotic behavior of potential
     bool asympt   = (slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*1e-8);
     double Rcirc  = !asympt ?  R_circ(potential, E) :
-        slope==0 ?  exp((E-Phi0) / coef - 0.5)  :  pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
+        slope==0 ?  exp((E-Phi0) / coef - 0.5)  :  std::pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
     double Lcirc2 = !asympt ?  2 * (E - potential.value(coord::PosCyl(Rcirc,0,0))) * pow_2(Rcirc) :
         slope==0 ?  coef * pow_2(Rcirc)  :  (E-Phi0) / (1/slope+0.5) * pow_2(Rcirc);
     if(!isFinite(Lcirc2))
@@ -386,7 +368,7 @@ Interpolator::Interpolator(const BasePotential& potential)
     if(Phiinf==Phiinf && Phiinf!=0)
         throw std::runtime_error("Interpolator: can only work with potentials "
             "that tend to zero as r->infinity");   // otherwise assume Phiinf==0
-    slopeOut = potential::outerSlope(potential, &Mtot, &coefOut);
+    slopeOut = potential::outerSlope(PotentialWrapper(potential), &Mtot, &coefOut);
     double Phi0 = potential.value(coord::PosCyl(0,0,0));
     if(!(Phi0<0))  // well-behaved potential must not be NAN at 0, but is allowed to be -INFINITY
         throw std::runtime_error("Interpolator: potential cannot be computed at r=0");
@@ -394,7 +376,8 @@ Interpolator::Interpolator(const BasePotential& potential)
 
     std::vector<double> gridLogR = math::createInterpolationGrid(
         ScalePhi(PotentialWrapper(potential)), ACCURACY_INTERP);
-    while(!gridLogR.empty() && potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) == Phi0)
+    // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
+    while(!gridLogR.empty() && potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) < Phi0*(1-1e-14))
         gridLogR.erase(gridLogR.begin());
 
     unsigned int gridsize = gridLogR.size();
@@ -406,6 +389,12 @@ Interpolator::Interpolator(const BasePotential& potential)
     gridPhider(gridsize), // d(scaled Phi)/ d(log r)
     gridRder(gridsize),   // d(log Rcirc) / d(log Lcirc)
     gridLder(gridsize);   // d(log Lcirc) / d(scaled Ecirc)
+
+    std::ofstream strm;   // debugging
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        strm.open("potential_interp1d.dat");
+        strm << "#R      \tPhi(R)  \tdPhi/dR \td2Phi/dR2\td2Phi/dz2\tEcirc   \tLcirc\n";
+    }
 
     for(unsigned int i=0; i<gridsize; i++) {
         double R = exp(gridLogR[i]);
@@ -432,10 +421,21 @@ Interpolator::Interpolator(const BasePotential& potential)
         gridRder  [i] = dRdL * Lcirc / R;  // extra factors are from conversion to log-derivatives
         gridLder  [i] = dLdE * dEcircdscaledEcirc / Lcirc;
         gridPhider[i] = grad.dR * R / dPhidscaledPhi;
-        if(!(grad.dR>=0 && (i==0 || gridPhi[i]>gridPhi[i-1]) && Phival<0 && Ecirc<0))
-            // guard against weird behaviour of potential
+        // debugging printout
+        if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+            strm << utils::pp(R, 15) + '\t' +
+            utils::pp(Phival,    15) + '\t' +
+            utils::pp(grad.dR,   15) + '\t' +
+            utils::pp(hess.dR2,  15) + '\t' +
+            utils::pp(hess.dz2,  15) + '\t' +
+            utils::pp(Ecirc,     15) + '\t' +
+            utils::pp(Lcirc,     15) + '\n';
+        }
+        // guard against weird behaviour of potential
+        if(!(grad.dR>=0 && Phival<0 && Ecirc<0 &&
+            (i==0 || (gridPhi[i]>gridPhi[i-1] && gridE[i]>gridE[i-1]))))
             throw std::runtime_error("Interpolator: potential is not monotonically increasing "
-                "with radius at r="+utils::toString(R)+"\n" + utils::stacktrace());
+                "with radius at R=" + utils::toString(R) + '\n' + utils::stacktrace());
     }
 
     // init various 1d splines
@@ -570,17 +570,22 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     if(!(Phi0<0))
         throw std::invalid_argument("PhaseVolume: invalid value of Phi(r=0)");
     invPhi0 = 1/Phi0;
+
     // create grid in log(r)
     std::vector<double> gridr = math::createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);
     std::transform(gridr.begin(), gridr.end(), gridr.begin(), exp);  // convert to grid in r
     std::vector<double> gridE;
     gridE.reserve(gridr.size());
+
     // compute the potential at each node of the radial grid,
     // throwing away nodes that are too close to origin such that the potential is equal to Phi(0)
     // due to finite precision of floating-point arithmetic
     for(unsigned int i=0; i<gridr.size();) {
         double E = pot.value(gridr[i]);
-        if(E>Phi0) {
+        if(E > Phi0 * (1-1e-14)) {
+            if(i>0 && !(E>=gridE[i-1]))
+                throw std::invalid_argument(
+                    "PhaseVolume: potential is non-monotonic at r="+utils::toString(gridr[i]));
             gridE.push_back(E);
             i++;
         } else {
@@ -588,12 +593,24 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
         }
     }
     unsigned int gridsize = gridr.size();
+    if(gridsize == 0)
+        throw std::runtime_error("PhaseVolume: cannot construct a suitable grid in radius");
+    
     std::vector<double> gridH(gridsize), gridG(gridsize);
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    double glnodes1[GLORDER1], glweights1[GLORDER1], glnodes2[GLORDER2], glweights2[GLORDER2];
+    math::prepareIntegrationTableGL(0, 1, GLORDER1, glnodes1, glweights1);
+    math::prepareIntegrationTableGL(0, 1, GLORDER2, glnodes2, glweights2);
+
+    // loop through all grid segments, and in each segment add the contribution to integrals
+    // in all other segments leftmost of the current one (thus the complexity is Ngrid^2,
+    // but the number of potential evaluations is only Ngrid * GLORDER).
     for(unsigned int i=0; i<gridsize; i++) {
         double deltar = gridr[i] - (i>0 ? gridr[i-1] : 0);
-        for(int k=0; k<GLORDER; k++) {
+        // choose a higher-order quadrature rule for longer grid segments
+        int glorder = i>0 && gridr[i] < gridr[i-1]*GLRATIO ? GLORDER1 : GLORDER2;
+        const double *glnodes   = glorder == GLORDER1 ? glnodes1   : glnodes2;
+        const double *glweights = glorder == GLORDER1 ? glweights1 : glweights2;
+        for(int k=0; k<glorder; k++) {
             // node of Gauss-Legendre quadrature within the current segment (r[i-1] .. r[i]);
             // the integration variable y ranges from 0 to 1, and r(y) is defined below
             double y = glnodes[k];
@@ -605,17 +622,39 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
             // add a contribution to the integrals expressing g(E_j) and h(E_j) for all E_j > Phi(r[i])
             for(unsigned int j=i; j<gridsize; j++) {
                 double v  = sqrt(fmax(0, gridE[j] - E));
-                gridG[j] += weight * v;
+                gridG[j] += weight * v * 1.5;
                 gridH[j] += weight * pow_3(v);
             }
         }
     }
+
+    // debugging output: asymptotic slopes
+    if(utils::verbosityLevel >= utils::VL_DEBUG) {
+        double inner = gridH.front() / gridG.front() / (gridE.front() - (isFinite(Phi0) ? Phi0 : 0));
+        double outer = gridH.back()  / gridG.back()  / gridE.back();
+        utils::msg(utils::VL_DEBUG, "PhaseVolume", "Potential asymptotes: "
+            "Phi(r) ~ r^" + utils::toString( 6 * inner / (2 - 3 * inner), 8) + " at small r, "
+            "Phi(r) ~ r^" + utils::toString( 6 * outer / (2 - 3 * outer), 8) + " at large r.");
+    }
+    
+    std::ofstream strm;   // debugging
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        strm.open("potential_phasevolume.dat");
+        strm << "#r      \tE       \th       \tg=dh/dE\n";
+    }
+    
+    // convert h, g and E to scaled coordinates
     for(unsigned int i=0; i<gridsize; i++) {
         double E = gridE[i], H = gridH[i], G = gridG[i], scaledE, dEdscaledE;
         scaleE(E, invPhi0, scaledE, dEdscaledE);
         gridE[i] = scaledE;
         gridH[i] = log(H) + log(16*M_PI*M_PI/3*2*M_SQRT2);
-        gridG[i] = 1.5*G/H * dEdscaledE;
+        gridG[i] = G / H * dEdscaledE;
+        // debugging printout
+        if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+            strm << utils::pp(gridr[i], 15) + '\t' +
+                utils::pp(E, 15) + '\t' + utils::pp(H, 15) + '\t' + utils::pp(G, 15) + '\n';
+        }
     }
 
     HofE = math::QuinticSpline(gridE, gridH, gridG);
@@ -769,10 +808,10 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
         double Z = gridL[iL];
         RPeriApoRootFinderPowerLaw fnc(slope, Z*Z);
         double R1overRc = math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
-        double R2overRc = iL==0 ? pow(1+slope/2, 1/slope) : math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
+        double R2overRc = iL==0 ? std::pow(1+slope/2, 1/slope) : math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
         double dR1overRc_dZ = iL==0 ? sqrt(slope/(slope+2)) :
-            slope*Z / ((slope+2) * (1-pow(R1overRc, slope)) * R1overRc);
-        double dR2overRc_dZ = slope*Z / ((slope+2) * (1-pow(R2overRc, slope)) * R2overRc);
+            slope*Z / ((slope+2) * (1-std::pow(R1overRc, slope)) * R1overRc);
+        double dR2overRc_dZ = slope*Z / ((slope+2) * (1-std::pow(R2overRc, slope)) * R2overRc);
         gridR1  (0, iL) = pow_2(R1overRc-1);
         gridR2  (0, iL) = pow_2(R2overRc-1);
         gridR1dL(0, iL) =  2 * (R1overRc-1) * dR1overRc_dZ;
@@ -799,7 +838,7 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
     }
 
 #if 0  /// test code, to be removed
-    std::ofstream strm("file.dat");
+    std::ofstream strm("interp2d.dat");
     strm << std::setprecision(15);
     for(unsigned int iE=0; iE<sizeE; iE++) {
         for(unsigned int iL=0; iL<sizeL; iL++) {

@@ -44,16 +44,16 @@ private:
 
 // ----- wrappers for multidimensional minimization routines ----- //
 template <class T>
-struct FncWrapper {
+struct GslFncWrapper {
     const T& F;
     std::string error;
     int numCalls;
-    explicit FncWrapper(const T& _F) : F(_F), numCalls(0) {}
+    explicit GslFncWrapper(const T& _F) : F(_F), numCalls(0) {}
 };
 
 double functionWrapperNdim(const gsl_vector* x, void* param) {
     double val;
-    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    GslFncWrapper<IFunctionNdimDeriv>* p = static_cast<GslFncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
     try{
         p->F.eval(x->data, &val);
@@ -66,7 +66,7 @@ double functionWrapperNdim(const gsl_vector* x, void* param) {
 }
 
 void functionWrapperNdimDer(const gsl_vector* x, void* param, gsl_vector* df) {
-    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    GslFncWrapper<IFunctionNdimDeriv>* p = static_cast<GslFncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
     try{
         p->F.evalDeriv(x->data, NULL, df->data);
@@ -77,7 +77,7 @@ void functionWrapperNdimDer(const gsl_vector* x, void* param, gsl_vector* df) {
 }
 
 void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_vector* df) {
-    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    GslFncWrapper<IFunctionNdimDeriv>* p = static_cast<GslFncWrapper<IFunctionNdimDeriv>*>(param);
     p->numCalls++;
     try{
         p->F.evalDeriv(x->data, f, df->data);
@@ -90,7 +90,7 @@ void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_
 // ----- wrappers for multidimensional nonlinear fitting ----- //
 #ifndef HAVE_EIGEN
 inline int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df) {
-    FncWrapper<IFunctionNdimDeriv>* p = static_cast<FncWrapper<IFunctionNdimDeriv>*>(param);
+    GslFncWrapper<IFunctionNdimDeriv>* p = static_cast<GslFncWrapper<IFunctionNdimDeriv>*>(param);
     try{
         p->numCalls++;
         p->F.evalDeriv(x->data, f? f->data : NULL, df? df->data : NULL);
@@ -303,7 +303,7 @@ int nonlinearMultiFit(const IFunctionNdimDeriv& F, const double xinit[],
     if(solver.minimizeInit(data) == Eigen::LevenbergMarquardtSpace::ImproperInputParameters)
         params.error = "invalid input parameters";
 #else
-    FncWrapper<IFunctionNdimDeriv> params(F);
+    GslFncWrapper<IFunctionNdimDeriv> params(F);
     gsl_multifit_function_fdf fnc;
     fnc.params = &params;
     fnc.p = Nparam;
@@ -363,7 +363,7 @@ int findRootNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[],
     solver.diag.setConstant(Ndim, 1.);
     const double* values = solver.fvec.data();
 #else
-    FncWrapper<IFunctionNdimDeriv> fnc(F);
+    GslFncWrapper<IFunctionNdimDeriv> fnc(F);
     gsl_multiroot_function_fdf gfnc;
     gfnc.params = &fnc;
     gfnc.n = Ndim;
@@ -416,7 +416,7 @@ int findMinNdim(const IFunctionNdim& F, const double xinit[], const double xstep
     gsl_multimin_fminimizer* mizer = gsl_multimin_fminimizer_alloc(
         gsl_multimin_fminimizer_nmsimplex2, Ndim);
     gsl_multimin_function fnc;
-    FncWrapper<IFunctionNdim> params(F);
+    GslFncWrapper<IFunctionNdim> params(F);
     fnc.params = &params;
     fnc.n = Ndim;
     fnc.f = functionWrapperNdim;
@@ -463,7 +463,7 @@ int findMinNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[], const do
     gsl_multimin_fdfminimizer* mizer = gsl_multimin_fdfminimizer_alloc(
         gsl_multimin_fdfminimizer_vector_bfgs2, Ndim);
     gsl_multimin_function_fdf fnc;
-    FncWrapper<IFunctionNdimDeriv> params(F);
+    GslFncWrapper<IFunctionNdimDeriv> params(F);
     fnc.params = &params;
     fnc.n = Ndim;
     fnc.f = functionWrapperNdim;

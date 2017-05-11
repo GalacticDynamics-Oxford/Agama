@@ -6,14 +6,14 @@ namespace potential{
 void Plummer::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
-    double rsq = pow_2(r) + pow_2(scaleRadius);
-    double pot = -mass/sqrt(rsq);
+    double invrsq = 1. / (pow_2(r) + pow_2(scaleRadius));
+    double pot = -mass * sqrt(invrsq);
     if(potential)
         *potential = pot;
     if(deriv)
-        *deriv = -pot*r/rsq;
+        *deriv = -pot * r * invrsq;
     if(deriv2)
-        *deriv2 = pot*(2*pow_2(r)-pow_2(scaleRadius))/pow_2(rsq);
+        *deriv2 = pot * (2*pow_2(r * invrsq) - pow_2(scaleRadius * invrsq));
 }
 
 double Plummer::enclosedMass(double r) const
@@ -57,23 +57,30 @@ void NFW::evalDeriv(double r,
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
 {
-    double zb=sqrt(pow_2(pos.z)+pow_2(scaleRadiusB));
-    double azb2=pow_2(scaleRadiusA+zb);
-    double denom=1/sqrt(pow_2(pos.R) + azb2);
+    double zb    = sqrt(pow_2(pos.z) + pow_2(scaleRadiusB));
+    double azb2  = pow_2(scaleRadiusA + zb);
+    double den2  = 1. / (pow_2(pos.R) + azb2);
+    double denom = sqrt(den2);
+    double Rsc   = pos.R * denom;
+    double zsc   = pos.z * denom;
     if(potential)
-        *potential = -mass*denom;
+        *potential = -mass * denom;
     if(deriv) {
-        double denom3=mass*denom*denom*denom;
-        deriv->dR = pos.R * denom3;
-        deriv->dz = pos.z * denom3 * (1 + scaleRadiusA/zb);
-        deriv->dphi = 0;
+        deriv->dR  = mass * den2 * Rsc;
+        deriv->dz  = mass * den2 * zsc * (1 + scaleRadiusA/zb);
+        deriv->dphi= 0;
     }
     if(deriv2) {
-        double denom5=mass*pow_2(pow_2(denom))*denom;
-        deriv2->dR2 = denom5 * (azb2 - 2*pow_2(pos.R));
-        deriv2->dz2 = denom5 *( (pow_2(pos.R) - 2*azb2) * pow_2(pos.z/zb) +
-            pow_2(scaleRadiusB) * (scaleRadiusA/zb+1) * (pow_2(pos.R) + azb2) / pow_2(zb) );
-        deriv2->dRdz= denom5 * -3*pos.R*pos.z * (scaleRadiusA/zb + 1);
+        double mden3 = mass * denom * den2;
+        deriv2->dR2  = mden3 * (azb2*den2 - 2*pow_2(Rsc));
+        deriv2->dz2  = mden3 * ( (pow_2(Rsc) - 2*azb2*den2) * pow_2(pos.z/zb) +
+            pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(Rsc) + azb2*den2) / pow_2(zb) );
+        deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);        
+//        double denom5 = mass * pow_2(pow_2(denom)) * denom;
+  //      deriv2->dR2 = denom5 * (azb2 - 2*pow_2(pos.R));
+    //    deriv2->dz2 = denom5 * ( (pow_2(pos.R) - 2*azb2) * pow_2(pos.z/zb) +
+      //      pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(pos.R) + azb2) / pow_2(zb) );
+        //deriv2->dRdz = denom5 * -3 * pos.R * pos.z * (scaleRadiusA/zb + 1);
         deriv2->dRdphi = deriv2->dzdphi = deriv2->dphi2 = 0;
     }
 }

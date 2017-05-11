@@ -25,8 +25,11 @@ SOURCES   = \
             df_halo.cpp \
             df_interpolated.cpp \
             galaxymodel.cpp \
+            galaxymodel_fokkerplanck.cpp \
+            galaxymodel_jeans.cpp \
             galaxymodel_selfconsistent.cpp \
             galaxymodel_spherical.cpp \
+            galaxymodel_velocitysampler.cpp \
             math_core.cpp \
             math_fit.cpp \
             math_linalg.cpp \
@@ -82,6 +85,7 @@ TESTSRCS  = test_math_core.cpp \
             test_math_spline.cpp \
             test_coord.cpp \
             test_units.cpp \
+            test_utils.cpp \
             test_orbit_integr.cpp \
             test_potentials.cpp \
             test_potential_expansions.cpp \

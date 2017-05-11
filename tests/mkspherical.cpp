@@ -51,6 +51,9 @@ const char* usage =
     "or (b) the file name with the cumulative mass profile (text file should contain "
     "at least two columns: radius and enclosed mass).\n"
     "in=...        (c) file with the input N-body snapshot.\n"
+    "extractdf=(false) in case of input N-body snapshot, the distribution function may be "
+    "extracted from particle energies (if true) or constructed using the Eddington inversion formula "
+    "(default; same approach as for an input analytic density profile).\n"
     "potential=(none)  if provided, specifies the name of the potential model "
     "that may be different from the density profile - in this case the density corresponds to "
     "a tracer population which does not contribute to the total potential, "
@@ -92,6 +95,8 @@ math::LogLogSpline fitSphericalDF(const particles::ParticleArrayCar& bodies,
             nactive++;
         }
     }
+    utils::msg(utils::VL_VERBOSE, "fitSphericalDF",
+        utils::toString(nactive)+" out of "+utils::toString(nbody)+" particles used in DF");
     hvalues.resize(nactive);
     masses. resize(nactive);
     return galaxymodel::fitSphericalDF(hvalues, masses, gridsize);
@@ -100,10 +105,9 @@ math::LogLogSpline fitSphericalDF(const particles::ParticleArrayCar& bodies,
 // main program begins here
 int main(int argc, char* argv[])
 {
-    try{
     if(argc<=1)  // print help and exit
         printfail(usage);
-
+    
     // parse command-line parameters
     utils::KeyValueMap args(argc-1, argv+1);
     std::string inputdensity   = args.getString("density");
@@ -112,9 +116,12 @@ int main(int argc, char* argv[])
     std::string outputsnap     = args.getString("out");
     std::string outputformat   = args.getString("format", "Text");
     std::string outputtab      = args.getString("tab");
-    int nbody    = args.getInt("nbody");
-    int gridsize = args.getInt("gridsizer", 50);
-    double mbh   = args.getDouble("mbh", 0.);
+    int nbody     = args.getInt("nbody");
+    int gridsize  = args.getInt("gridsizer", 50);
+    double rmin   = args.getDouble("rmin", 0.);
+    double rmax   = args.getDouble("rmax", 0.);
+    double mbh    = args.getDouble("mbh",  0.);
+    bool extractdf= args.getBool("extractdf", false);
     if(!(inputsnap.empty() ^ inputdensity.empty()))
         printfail("Must provide either density=... or in=... as input");
     if((!outputsnap.empty() && nbody==0) || (outputsnap.empty() && nbody>0))
@@ -122,21 +129,23 @@ int main(int argc, char* argv[])
     if(outputsnap.empty() && outputtab.empty())
         printfail("Must provide output snapshot filename (out=...) and/or output table filename (tab=...)");
 
-    potential::PtrDensity dens;          // the density profile
+    math::LogLogSpline densInterp;       // interpolated density profile constructed from a table
+    potential::PtrDensity dens;          // the density profile (analytic or interpolated)
     potential::PtrPotential pot;         // the potential (may be different from the density)
     particles::ParticleArrayCar bodies;  // particles from the input N-body snapshot (if provided)
 
     // input is a name of a density profile or a file with the cumulative mass profile
     if(!inputdensity.empty()) {
         // the choice is made based on whether 'density=...' specifies an existing file name
-        if(utils::fileExists(inputdensity))
-            dens = galaxymodel::readMassProfile(inputdensity, &mbh);
-        else
+        if(utils::fileExists(inputdensity)) {
+            densInterp = galaxymodel::readMassProfile(inputdensity, &mbh);
+            dens.reset(new potential::FunctionToDensityWrapper(densInterp));
+        } else
             dens = potential::createDensity(args);
 
         // check if a separate potential was also provided
         if(inputpotential.empty()) {
-            pot = potential::Multipole::create(*dens, 0, 0, gridsize);
+            pot = potential::Multipole::create(*dens, 0, 0, gridsize, rmin, rmax);
         } else {
             // the createPotential() routine reads the potential name from the 'type=...' parameter
             args.set("type", inputpotential);
@@ -166,7 +175,7 @@ int main(int argc, char* argv[])
         }
 
         // create the potential, which is the same as the density in this case
-        pot  = potential::Multipole::create(bodies, coord::ST_SPHERICAL, 0, 0, gridsize);
+        pot  = potential::Multipole::create(bodies, coord::ST_SPHERICAL, 0, 0, gridsize, rmin, rmax);
         dens = pot;
     }
 
@@ -183,26 +192,26 @@ int main(int argc, char* argv[])
 
     // compute the distribution function either from the density (using the Eddington inversion formula),
     // or from the input N-body snapshot (using the same approach as for density estimation,
-    // but this time for the distribution in phase volume)
-    math::LogLogSpline df = inputsnap.empty() ?
+    // but this time for the distribution in phase volume; in this case the density
+    // reported in the output tab file will be computed from the DF, not from particle positions --
+    // it may lead to a different result if the snapshot was not in equilibrium, or the velocities were
+    // not in N-body units, or the real DF is not isotropic)
+    math::LogLogSpline df = inputsnap.empty() || !extractdf ?
         galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot)) :
         fitSphericalDF(bodies, *pot, phasevol, gridsize);
+
+    // combine all command-line arguments to form the output snapshot header
+    std::string header="mkspherical " + args.dumpSingleLine();
 
     // now ripe the fruit: create an output table and/or
     // generate an N-body representation of the spherical model
     if(!outputtab.empty()) {
-        galaxymodel::writeSphericalModel(outputtab,
-            galaxymodel::SphericalModel(phasevol, df), *pot, dens.get());
+        galaxymodel::writeSphericalModel(outputtab, header,
+            galaxymodel::SphericalModel(phasevol, df),
+            potential::PotentialWrapper(*pot));
     }
 
     if(!outputsnap.empty()) {
-        // combine all command-line arguments to form the output snapshot header
-        std::string header="mkspherical";
-        char** argv0 = argv+1;
-        for(char *arg = *argv0; (arg = *argv0); argv0 ++ ){
-            header += ' ' + std::string(arg);
-        }
-
         // generate the samples
         math::randomize();
         particles::ParticleArraySph bodies = galaxymodel::generatePosVelSamples(
@@ -214,10 +223,5 @@ int main(int argc, char* argv[])
         // write the snapshot
         particles::createIOSnapshotWrite(outputsnap, outputformat, units::ExternalUnits(), header)->
             writeSnapshot(bodies);
-    }
-
-    }
-    catch (std::exception& ex) {
-        printfail(ex.what());
     }
 }

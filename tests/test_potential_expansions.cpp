@@ -85,11 +85,13 @@ PtrPotential createFromFile(
 bool testAverageError(const potential::BasePotential& p1, const potential::BasePotential& p2, double eps)
 {
     double gamma = getInnerDensitySlope(p2);
-    std::string fileName = std::string("testerr_") + p1.name() + "_" + p2.name() + 
+    std::string fileName = std::string("test_potential_") + p1.name() + "_" + p2.name() + 
         "_gamma" + utils::toString(gamma);
     std::ofstream strm;
-    if(output)
+    if(output) {
+        writePotential(std::string("test_potential_") + p1.name() + "_gamma" + utils::toString(gamma), p1);
         strm.open(fileName.c_str());
+    }
     // total density-weighted rms errors in potential, force and density, and total weight
     double totWeightedDifP=0, totWeightedDifF=0, totWeightedDifD=0, totWeight=0;
     const double dlogR=0.1;
@@ -141,7 +143,7 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
 bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDensity& p2, double eps)
 {
     double gamma = getInnerDensitySlope(p2);
-    std::string fileName = std::string("testerr_") + p1.name() + "_" + p2.name() + 
+    std::string fileName = std::string("test_density_") + p1.name() + "_" + p2.name() + 
         "_gamma" + utils::toString(gamma);
     std::ofstream strm;
     if(output)
@@ -217,7 +219,7 @@ bool testDensSH()
                 double d2 = dens2.density(point);
                 if(fabs(d1-d2) / fabs(d1) > 1e-12) { // two SH expansions should give the same result
                     std::cout << point << "dens1=" << utils::toString(d1, 15) <<
-                    "dens2=" << utils::toString(d2, 15) << "\033[1;31m **\033[0m\n";
+                    " dens2=" << utils::toString(d2, 15) << "\033[1;31m **\033[0m\n";
                     ok = false;
                 }
             }
@@ -261,7 +263,7 @@ bool checkSH(const math::SphHarmIndices& ind)
     for(unsigned int i=0; i<d.size(); i++) {
         double tau = tr.costheta(i) / (sqrt(1-pow_2(tr.costheta(i))) + 1);
         b[i] = math::sphHarmTransformInverse(ind, &c.front(), tau, tr.phi(i));
-        if(fabs(d[i]-b[i]) > 1e-14)
+        if(fabs(d[i]-b[i]) > 1e-15)
             return false;
     }
     return true;
@@ -370,6 +372,8 @@ int main() {
     ok &= checkSH<2, 1>(math::SphHarmIndices(3, 1,
         static_cast<coord::SymmetryType>(coord::ST_REFLECTION | coord::ST_YREFLECTION)));
     ok &= checkSH<2, 2>(math::SphHarmIndices(5, 3, coord::ST_TRIAXIAL));
+    if(!ok)
+        std::cout << "Spherical-harmonic transform failed \033[1;31m**\033[0m\n";
 
     // 2. check the reversibility of SH expansion of density
     ok &= testDensSH();
@@ -429,7 +433,7 @@ int main() {
     ok &= testAverageError(
         *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 100),
         test5_ExpdiskAxi, 0.05);
-    
+
     // 3c. test the approximating potential profiles
     std::cout << "--- Testing potential approximations: "
     "print density-averaged rms errors in potential, force and density ---\n";
@@ -471,7 +475,7 @@ int main() {
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
-    ok &= testAverageError(*test2c_clone, *test2c, 1e-4);
+    ok &= testAverageError(*test2c, *test2c_clone, 1e-4);
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
@@ -483,7 +487,7 @@ int main() {
 //    ok &= testAverageError( test3b, test3_Dehnen15Tri, 0.5);
     ok &= testAverageError( test3s, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
-    ok &= testAverageError(*test3m_clone, *test3m, 1e-8);
+    ok &= testAverageError(*test3m, *test3m_clone, 1e-8);
 
     // strongly flattened exp.disk; the 'true' potential is not available,
     // so we compare two approximations: GalPot and CylSpline
@@ -507,7 +511,7 @@ int main() {
     ok &= testAverageError(*test6s, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6m, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.5);
-    
+
     std::cout << "--- Testing the accuracy of representation of an off-centered constant-density sphere ---"
         "\n--- Ideally all mass should be contained within the sphere radius, <r>=3/4, <r^2>=3/5 ---\n";
     ok &= testBlob(*potential::Multipole::create(test7x, 8, 8, 40, 0.05, 2.0), test7x);
@@ -518,7 +522,7 @@ int main() {
     ok &= testBlob(*potential::CylSpline::create(test7y, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7y);
     ok &= testBlob(*potential::CylSpline::create(test7z, 6, 10, 0.1, 1.0, 20, 0.1, 2.0), test7z);
     ok &= testBlob(*potential::CylSpline::create(test7d, 6, 15, 0.1, 1.5, 15, 0.1, 1.5), test7d);
-    
+
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

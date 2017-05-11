@@ -372,22 +372,21 @@ void test_sph_iso()
 {
     const double M = 2.7;      // mass and
     const double b = 0.6;      // scale radius of Isochrone potential
-    potential::Isochrone potential(M, b);
-    actions::ActionFinderSpherical af(potential);
+    potential::PtrPotential pot(new potential::Isochrone(M, b));
+    actions::ActionFinderSpherical af(*pot);
     std::ofstream strm ("test_actions_isochrone_spherical.dat");
     strm << std::setprecision(15);
     for(double lr=-13; lr<=24; lr+=.25) {
         double r = pow(2., lr);
-        double vc= v_circ(potential, r);
+        double vc= v_circ(*pot, r);
         double Lc= vc * r;
-        double E = 0.5*pow_2(vc) +  // have to cope with ambiguous overloaded member function...
-            dynamic_cast<const potential::BasePotential&>(potential).value(coord::PosCyl(r,0,0));
+        double E = 0.5*pow_2(vc) + pot->value(coord::PosCyl(r,0,0));
         for(double ll=0; ll<1; ll+=1./128) {
             double L = Lc * pow_2(sin(M_PI_2*ll));
             double Omegar, Omegaz, Jr= af.Jr(E, L, &Omegar, &Omegaz);
             actions::Frequencies fi, fs;
             coord::PosVelCyl point(r, 0, 0, sqrt(vc*vc-pow_2(L/r)), 0, L/r);
-            actions::Actions as = actions::actionAnglesSpherical(potential, point, &fs);
+            actions::Actions as = actions::actionAnglesSpherical(*pot, point, &fs);
             actions::Actions ai = actions::actionAnglesIsochrone(M, b, point, &fi);
             strm << E << ' ' << L/Lc << ' ' <<
                 ai.Jr/(Lc-L) << ' ' << as.Jr/(Lc-L) << ' ' << Jr/(Lc-L) << ' ' <<

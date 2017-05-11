@@ -23,6 +23,7 @@ DoublePowerLawParam parseDoublePowerLawParams(
     par.coefJzIn  = kvmap.getDouble("coefJzIn",  par.coefJzIn);
     par.coefJrOut = kvmap.getDouble("coefJrOut", par.coefJrOut);
     par.coefJzOut = kvmap.getDouble("coefJzOut", par.coefJzOut);
+    par.cutoffStrength = kvmap.getDouble("cutoffStrength", par.cutoffStrength);
     return par;
 }
 

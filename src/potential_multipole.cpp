@@ -25,7 +25,7 @@ static const int LMAX_SPHHARM = 64;
 static const unsigned int MULTIPOLE_MIN_GRID_SIZE = 2;
 
 /// order of Gauss-Legendre quadrature for computing the radial integrals in Multipole
-static const unsigned int ORDER_RAD_INT = 15;
+static const unsigned int ORDER_RAD_INT = 10;
 
 /// safety factor to avoid roundoff errors near grid boundaries
 static const double SAFETY_FACTOR = 100*DBL_EPSILON;
@@ -137,9 +137,9 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
     int numSamplesTotal  = numSamplesAngles * numPointsRadius;
     std::vector<double> values(numSamplesTotal * NQuantities);
     std::string errorMsg;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
+//#ifdef _OPENMP
+//#pragma omp parallel for schedule(static)
+//#endif
     for(int n=0; n<numSamplesTotal; n++) {
         try{
             int indR    = n / numSamplesAngles;  // index in radial grid
@@ -244,9 +244,9 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
         throw std::invalid_argument("Multipole: failed to automatically determine grid extent");
     double spacing = 1 + sqrt(20./gridSizeR);  // ratio between consecutive grid nodes
     if(rmax==0)
-        rmax = rhalf * pow(spacing,  0.5*gridSizeR);
+        rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);
     if(rmin==0)
-        rmin = rhalf * pow(spacing, -0.5*gridSizeR);
+        rmin = rhalf * std::pow(spacing, -0.5*gridSizeR);
     utils::msg(utils::VL_DEBUG, "Multipole",
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
 }
@@ -278,11 +278,11 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     int Nmin = static_cast<int>(log(nbody+1)/log(2));
     if(rmin==0) {
         std::nth_element(radii.begin(), radii.begin() + Nmin, radii.end());
-        rmin = std::max(radii[Nmin], rhalf * pow(spacing, -0.5*gridSizeR));
+        rmin = std::max(radii[Nmin], rhalf * std::pow(spacing, -0.5*gridSizeR));
     }
     if(rmax==0) {
         std::nth_element(radii.begin(), radii.end() - Nmin, radii.end());
-        rmax = std::min(radii[nbody-Nmin], rhalf * pow(spacing, 0.5*gridSizeR));
+        rmax = std::min(radii[nbody-Nmin], rhalf * std::pow(spacing, 0.5*gridSizeR));
     }
     utils::msg(utils::VL_DEBUG, "Multipole",
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]"
@@ -317,7 +317,7 @@ void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
     // find x(A) such that  x = A * (1 - exp(x)),  where  x = (s-v) * ln(r2/r1)
     s = A==-1 ? v : v + (A - math::lambertW(A * exp(A), /*choice of branch*/ A>-1)) / lnr;
     // safeguard against weird slope determination
-    if(v>=0 && (!isFinite(s) || s<=-1))
+    if(v>=0 && (!isFinite(s)/* || s<=-1*/))
         s = 2;  // results in a constant-density core for the inward extrapolation
     if(v<0  && (!isFinite(s) || s>=0))
         s = -2; // results in a r^-4 falloff for the outward extrapolation
@@ -365,7 +365,7 @@ PtrPotential initAsympt(const std::vector<double>& radii,
         // that of the l=0 one; this is enforced in the constructor of PowerLawMultipole,
         // but the slope should already have been adjusted before computing the coefs U and W.
         if(l==0)
-            utils::msg(utils::VL_VERBOSE, "Multipole",
+            utils::msg(utils::VL_DEBUG, "Multipole",
                 std::string("Power-law index of ")+(inner?"inner":"outer")+
                 " density profile: "+utils::toString(S[c]-2));
     }
@@ -641,13 +641,13 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     // Here \rho_{l,m}(r) are the sph.-harm. coefs for density at each radius.
     std::string errorMsg;
 
-    // the computation of potential by 1d integration in radius is OpenMP-parallelized,
+    // the computation of potential by 1d integration in radius may be OpenMP-parallelized,
     // but it's quite cheap by itself anyway;
     // if the density computation is expensive, then one should construct an intermediate
     // DensitySphericalHarmonic interpolator and pass it to this routine.
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
+//#ifdef _OPENMP
+//#pragma omp parallel for schedule(static)
+//#endif
     for(int k=0; k<=gridSizeR; k++) {
         try{
             // local per-thread temporary arrays
@@ -682,14 +682,14 @@ void computePotentialCoefsSph(const BaseDensity& dens,
                         if(k<gridSizeR)
                             // accumulate Qint for all segments except the one extending to infinity
                             Qint[c][k] += tmpCoefs[c] * glweights[s] * deltaGridR *
-                                math::powInt(r / gridRadii[k], l+2);
+                                math::pow(r / gridRadii[k], l+2);
                         if(k>0)
                             // accumulate Qext for all segments except the innermost one
                             // (which starts from zero), with a special treatment for last segment
                             // that extends to infinity and has a different integration variable
                             Qext[c][k-1] += tmpCoefs[c] * glweights[s] * deltaGridR *
                                 (k==gridSizeR ? 1 / pow_2(glnodes[s]) : 1) * // jacobian of 1/r transform
-                                math::powInt(r / gridRadii[k-1], 1-l);
+                                math::pow(r / gridRadii[k-1], 1-l);
                     }
                 }
             }
@@ -717,7 +717,7 @@ void computePotentialCoefsSph(const BaseDensity& dens,
             double val = 0;
             for(int k=0; k<gridSizeR; k++) {
                 if(k>0)
-                    val *= math::powInt(gridRadii[k-1] / gridRadii[k], l+1);
+                    val *= math::pow(gridRadii[k-1] / gridRadii[k], l+1);
                 val += gridRadii[k] * Qint[c][k];
                 Pint[c][k] = val;
             }
@@ -727,7 +727,7 @@ void computePotentialCoefsSph(const BaseDensity& dens,
             val = 0;
             for(int k=gridSizeR-1; k>=0; k--) {
                 if(k<gridSizeR-1)
-                    val *= math::powInt(gridRadii[k] / gridRadii[k+1], l);
+                    val *= math::pow(gridRadii[k] / gridRadii[k+1], l);
                 val += gridRadii[k] * Qext[c][k];
                 Pext[c][k] = val;
             }

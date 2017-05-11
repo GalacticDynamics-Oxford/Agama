@@ -35,8 +35,7 @@
     ~~~~
 */
 #include "potential_factory.h"
-#include "potential_analytic.h"
-#include "potential_multipole.h"
+#include "galaxymodel_fokkerplanck.h"
 #include "galaxymodel_spherical.h"
 #include "utils.h"
 #include "utils_config.h"
@@ -45,130 +44,248 @@
 #include <cmath>
 
 const char* usage =
-    "PhaseFlow Fokker-Planck solver v.01 build " __DATE__ "\n"
-    "Command-line arguments (optional are marked by a default value in brackets):\n"
-    "density=...      either (a) the name of a built-in density model "
+    "PhaseFlow Fokker-Planck solver v.02 build " __DATE__ "\n"
+    "Parameters of the simulation should be provided either as command-line arguments "
+    "(have the form param=value), or put into an INI file under the section [PhaseFlow] "
+    "(each parameter on a separate line, in the same form), and the name of this file "
+    "given as the only command-line argument.\n"
+    "Possible parameters (case-insensitive, optional are marked by a default value in brackets):\n"
+    "  ==== Initial conditions ====\n"
+    "  density=...      either (a) the name of a built-in density model "
     "(Plummer, Dehnen, SpheroidDensity, etc.), in which case additional parameters "
     "of the density profile may be provided, see below;\n"
     "or (b) the name of the input file with two columns: radius and enclosed mass within this radius, "
     "which specifies the initial density profile\n"
-    "mass=(1)         mass of the density profile (in case of a built-in model, option 'a')\n"
-    "scaleradius=(1)  scale radius of the density profile (option 'a')\n"
-    "gamma=(1)        inner power-law slope (for Dehnen and SpheroidDensity, option 'a')\n"
-    "beta=(4)         outer power-law slope (for SpheroidDensity only, option 'a'; "
+    "  mass=(1)         mass of the density profile (in case of a built-in model, option 'a')\n"
+    "  scaleRadius=(1)  scale radius of the density profile (option 'a')\n"
+    "  gamma=(1)        inner power-law slope (for Dehnen and SpheroidDensity, option 'a')\n"
+    "  beta=(4)         outer power-law slope (for SpheroidDensity only, option 'a'; "
     "it also has other parameters, see readme.pdf)\n"
-    "mbh=(0)          additional central mass (black hole) - may be used in both 'a' and 'b' cases\n"
-    "time=...         total evolution time (required)\n"
-    "eps=(0.001)      max relative change of DF in one timestep of the FP solver "
-    "(determines the timestep)\n"
-    "dtmin=(0)        minimum length of FP timestep\n"
-    "dtmax=(inf)      maximum length of FP timestep (both these limits may modify the timestep "
-    "that was computed using the criterion of max relative DF change)\n"
-    "nsubstep=(8)     # of FP timesteps between each recomputation of potential and diffusion coefs\n"
-    "updatepot=(true) whether to update the gravitational potential self-consistently "
+    "  Mbh=(0)          additional central mass (black hole) - may be used both in 'a' and 'b' cases\n"
+    "  initBH=(true)    determines whether the black hole was present in the system initially (true) "
+    "or is added adiabatically (false). In the former case the initial distribution function is "
+    "constructed in the combined potential of stars and the black hole. In the opposite case it is "
+    "initialized from the stellar model only, and then the potential is modified by adding the black "
+    "hole while keeping the DF unchanged\n"
+    "  ==== Multi-component models ====\n"
+    "  componentMass=(1)  the proportion of mass attributed to each species in a multi-component model. "
+    "In the case of a single component, this parameter is irrelevant; to set up a multi-component run, "
+    "provide a list of comma-separated numbers (e.g., \"0.95,0.04,0.01\"); they will be rescaled to sum "
+    "up to unity. Each species has initially the same DF scaled by its corresponding mass fraction\n"
+    "  Mstar=(1)  mass of a single star (required); the number of stars in the system is thus "
+    "equal to mass/Mstar, and it determines the relaxation rate. In the case of a multi-component "
+    "system, this should be a comma-separated list of stellar masses of each species\n"
+    "  coulombLog=(1)   Coulomb logarithm that also enters the expression for the relaxation rate\n"
+    "  ==== Poisson solver ====\n"
+    "  updatePotential=(true)  whether to update the gravitational potential self-consistently "
     "(if false, the potential will be fixed to its initial profile, but the diffusion coefficients "
     "are still recomputed after every 'nsubstep' FP steps)\n"
-    "selfgravity=(true) whether the density profile of the evolving system contributes to "
+    "  selfGravity=(true)  whether the density profile of the evolving system contributes to "
     "the total potential; if false, then an external potential must be provided "
-    "(currently only the black hole), and updatepot has no effect\n"
-    "zeroin=(false)   specifies the boundary condition at the innermost grid point: "
-    "true means f(h_min)=0 (absorbing boundary), false (default) means no flux through the boundary\n"
-    "zeroout=(false)  same for the outer boundary condition\n"
-    "hmin=(),hmax=()  the extent of the grid in phase volume h; the grid is logarithmically spaced "
+    "(currently only the black hole)\n"
+    "  ==== Fokker-Planck solver: grid and time integration ====\n"
+    "  timeTotal=...    total evolution time (required)\n"
+    "  eps=(0.01)       accuracy parameter for time integration: the timestep is eps times "
+    "the geometric mean of the two characteristic timescales - f / (df/dt) and the relaxation time\n"
+    "  dtmin=(0)        minimum length of FP timestep\n"
+    "  dtmax=(inf)      maximum length of FP timestep (both these limits may modify the timestep "
+    "that was computed using the eps parameter)\n"
+    "  hmin=(),hmax=()  the extent of the grid in phase volume h; the grid is logarithmically spaced "
     "between hmin and hmax, and by default encompasses a fairly large range of h "
     "(depending on the potential, but typically hmin~1e-10, hmax~1e10)\n"
-    "gridsize=(200)   number of grid points in h\n"
-    "fileout=()       name (common prefix) of output files, time is appended to the name; "
+    "  gridSizeDF=(200) number of grid points in h\n"
+    "  method=(0)       the choice of discretization method (0: Chang&Cooper, 1-3: finite element)\n"
+    "  ==== Central black hole (sink) ====\n"
+    "  captureRadius=(0)  in the case of a central black hole, specifies the capture radius "
+    "and turns on the absorbing boundary condition f(hmin)=0. In this case hmin is determined by "
+    "the energy at which the capture occurs from a circular orbit, i.e. there should be no stars "
+    "at lower energies. Setting captureRadius=0 implies a zero-flux boundary condition, "
+    "even in the presense of a central black hole. It stays fixed even if the black hole mass grows. "
+    "In the multi-component case, this should be a comma-separated list of capture radii for "
+    "each species, unless they are all identical (in which case only one number is sufficient)\n"
+    "  lossCone=(true)  in the case of a central black hole and a non-zero capture radius, "
+    "further turns on loss-cone draining, i.e., the decay of DF at all energies with a rate "
+    "that corresponds to the steady-state solution for the diffusion in the angular momentum "
+    "direction with an appropriate boundary condition (empty or full loss cone) determined from "
+    "the capture radius and the relaxation rate\n"
+    "  captureMassFraction=(1)  in the case of non-zero capture radius, the fraction of flux through "
+    "the capture boundary that is added to the black hole mass. "
+    "In a multi-component system, may provide a comma-separated list of values for each species\n"
+    "  ==== Star formation (source) ====\n"
+    "  sourceRate=(0)   source term: total mass injected per unit time. "
+    "In the multi-component case this may be a comma-separated list of values for each species\n"
+    "  sourceRadius=(0) radius where the source term (mass injection) is concentrated\n"
+    "  ==== Output ====\n"
+    "  fileOut=()    name (common prefix) of output files, time is appended to the name; "
     "if not provided, don't output anything\n"
-    "timeout=(0)      (maximum) time interval between storing the output profiles (0 means unlimited)\n"
-    "nstepout=(0)     maximum number of FP steps between outputs (0 means unlimited; "
-    "if neither of the two parameters is set, will not produce any output files)\n";
+    "  timeOut=(0)   (maximum) time interval between storing the output profiles (0 means unlimited)\n"
+    "  nstepOut=(0)  maximum number of FP steps between outputs (0 means unlimited; " 
+    "if neither of the two parameters is set, will not produce any output files)\n"
+    "  fileLog=(fileOut+\".log\")  name of the file with overall diagnostic information "
+    "printed every 'nsubstep' timesteps\n";
 
-/// write a text file with various quantities in a spherical model
-void exportTable(const std::string& filename, const double timesim,
+/// upper limit on the number of steps (arbitrary)
+const int MAXNSTEP = 1e8;
+
+/// write text file(s) with various quantities in a spherical model
+void exportTable(const std::string& filename, const std::string& header, const double timeSim,
     const galaxymodel::FokkerPlanckSolver& fp)
 {
-    std::cerr << "Writing output file at time " << timesim << '\n';
-    galaxymodel::writeSphericalModel(filename + utils::toString(timesim),
-        /*model*/     galaxymodel::SphericalModel(
-            /*h(E)*/  fp.getPhaseVolume(),
-            /*f(h)*/  math::LogLogSpline(fp.getGridH(), fp.getGridF(), NAN, NAN, true),
-            /*gridh*/ fp.getGridH()),
-        /*potential*/ potential::FunctionToPotentialWrapper(fp.getPotential()),
-        /*density*/   NULL,
-        /*gridh*/     fp.getGridH());
+    std::cerr << "Writing output file at time " << timeSim << '\n';
+    unsigned int numComp = fp.numComp();  // number of components
+    for(unsigned int comp=0; comp<numComp; comp++) {
+        std::string fullfilename = filename + utils::toString(timeSim);
+        if(numComp>1)
+            fullfilename += char(comp+97); /* suffix a,b,... */
+        galaxymodel::writeSphericalModel(fullfilename, header,
+        /*model*/      galaxymodel::SphericalModel(
+            /*h(E)*/  *fp.phaseVolume(),
+            /*f(h)*/  *fp.df(comp),
+            /*gridh*/  fp.gridh()),
+        /*potential*/ *fp.potential(),
+        /*gridh*/      fp.gridh());
+    }
 }
 
+/// print out diagnostic information
+void printInfo(std::ofstream& strmLog, const double timeSim, const galaxymodel::FokkerPlanckSolver& fp)
+{
+    std::cerr << "time: " << utils::pp(timeSim, 9) << '\r';
+    strmLog <<
+    utils::pp(timeSim,          11) + ' ' +
+    utils::pp(fp.Phi0(),        11) + ' ' +
+    utils::pp(fp.Mbh(),         11) + ' ' +
+    utils::pp(fp.Mass(),        11) + ' ' +
+    utils::pp(fp.sourceMass(),  11) + ' ' +
+    utils::pp(fp.drainMass(),   11) + ' ' +
+    utils::pp(fp.Etot(),        11) + ' ' +
+    utils::pp(fp.sourceEnergy(),11) + ' ' +
+    utils::pp(fp.drainEnergy(), 11) + ' ' +
+    utils::pp(fp.Ekin(),        11) + '\n';
+}
+    
 int main(int argc, char* argv[])
 {
     if(argc<=1) {  // print command-line options and exit
         std::cout << usage;
         return 0;
     }
-    utils::KeyValueMap args(argc-1, argv+1);
-    double mbh     = args.getDouble("Mbh", 0);
-    double time    = args.getDouble("time", 0);
-    double eps     = args.getDouble("eps", 1e-3);
-    double dtmin   = args.getDouble("dtmin", 0);
-    double dtmax   = args.getDouble("dtmax", INFINITY);
-    double hmin    = args.getDouble("hmin", 0);
-    double hmax    = args.getDouble("hmax", 0);
-    int gridsize   = args.getInt   ("gridsize", 200);
-    int nsubstep   = args.getInt   ("nsubstep", 8);
-    int nstepout   = args.getInt   ("nstepout", 0);
-    double timeout = args.getDouble("timeout", 0);
-    bool updatepot = args.getBool  ("updatepot", true);
-    std::string density = args.getString("density");
-    std::string fileout = args.getString("fileout");
-    if(fileout.empty())
-        timeout = nstepout = 0;
-    if(time<=0 || density.empty()) {
+
+    // parse command-line arguments:
+    // if only one argument was provided and it doesn't have a '=' symbol,
+    // it's assumed to be the name of an INI file with all parameters listed in the [PhaseFlow] section;
+    // otherwise collect all arguments as provided in the command line (should have the form key=value)
+    utils::KeyValueMap args = 
+        (argc==2 && std::string(argv[1]).find('=')==std::string::npos) ?
+        utils::ConfigFile(argv[1]).findSection("PhaseFlow") :
+        utils::KeyValueMap(argc-1, argv+1);
+    double eps          = args.getDouble   ("eps", 1e-2);
+    double dtmin        = args.getDouble   ("dtmin", 0);
+    double dtmax        = args.getDouble   ("dtmax", INFINITY);
+    bool initBH         = args.getBool     ("initBH", true);
+    double Mbh          = args.getDouble   ("Mbh", 0);
+    std::string density = args.getString   ("density");
+    std::string fileOut = args.getStringAlt("fileOut", "fileOutput");
+    std::string fileLog = args.getString   ("fileLog", fileOut.empty() ? "" : fileOut+".log");
+    double timeOut      = args.getDoubleAlt("timeOut", "outputInterval", 0);
+    int nstepOut        = args.getInt      ("nstepOut", 0);
+    double timeTotal    = args.getDoubleAlt("time", "timeTotal", 0);
+    galaxymodel::FokkerPlanckParams params;
+    params.method              = (galaxymodel::FokkerPlanckMethod)args.getDouble("method", params.method);
+    params.hmin                = args.getDouble("hmin", params.hmin);
+    params.hmax                = args.getDouble("hmax", params.hmax);
+    params.gridSize            = args.getIntAlt("gridsize", "gridSizeDF", params.gridSize);
+    params.componentMass       = args.getDoubleVector("componentMass", params.componentMass);
+    params.Mstar               = args.getDoubleVector("Mstar", params.Mstar);
+    params.coulombLog          = args.getDouble("coulombLog",  params.coulombLog);
+    params.selfGravity         = args.getBool("selfGravity", params.selfGravity);
+    params.updatePotential     = args.getBool("updatePotential", params.updatePotential);
+    params.lossConeDrain       = args.getBool("lossCone", params.lossConeDrain);
+    params.captureRadius       = args.getDoubleVector("captureRadius", params.captureRadius);
+    params.captureMassFraction = args.getDoubleVector("captureMassFraction", params.captureMassFraction);
+    params.sourceRate          = args.getDoubleVector("sourceRate", params.sourceRate);
+    params.sourceRadius        = args.getDouble("sourceRadius", params.sourceRadius);
+    if(fileOut.empty())
+        timeOut = nstepOut = 0;
+    if(timeTotal <= 0 || density.empty()) {
         std::cout << usage;
+        if(timeTotal <= 0)  std::cout << "Need to provide timeTotal=... parameter\n";
+        if(density.empty()) std::cout << "Need to provide density=... parameter\n";
         return 0;
     }
-    std::vector<double> gridh;
-    if(hmin>0 && hmax>hmin && gridsize>3)
-        gridh = math::createExpGrid(gridsize, hmin, hmax);         // user-defined grid extent
-    potential::PtrDensity initModel = utils::fileExists(density) ? // if this refers to an existing file,
-        galaxymodel::readMassProfile(density, &mbh) :              // read the cumulative mass profile,
-        potential::createDensity(args);                            // otherwise create a built-in model
-    potential::PtrPotential extPot(mbh>0 ? new potential::Plummer(mbh, 0) : NULL);
-    galaxymodel::FokkerPlanckSolver fp(
-        potential::DensityWrapper(*initModel),  // initial density profile used to construct the DF
-        extPot,   // optional external potential (in the form of a central black hole)
-        gridh,    // optional grid in phase volume (if none provided, will construct an automatic one)
-        static_cast<galaxymodel::FokkerPlanckSolver::Options>(   // additional options
-        (args.getBool("selfgravity", true) ? 0 : galaxymodel::FokkerPlanckSolver::FP_NO_SELF_GRAVITY) |
-        (args.getBool("zeroin",  false) ? galaxymodel::FokkerPlanckSolver::FP_ZERO_DF_INNER : 0) |
-        (args.getBool("zeroout", false) ? galaxymodel::FokkerPlanckSolver::FP_ZERO_DF_OUTER : 0) ) );
 
-    double timesim = 0, dt = (dtmin>0 ? dtmin : 1e-8), prevtimeout = -INFINITY;
-    int nstep = 0, prevnstepout = -nstepout;
-    while(timesim <= time && nstep < 1e6) {
-        if(nstep % nsubstep == 0)
-            std::cout <<
-            "time: " + utils::pp(timesim, 9) + "\t"
-            "Phi0: " + utils::pp(fp.Phi0, 9) + "\t"
-            "Mass: " + utils::pp(fp.Mass, 9) + "\t"
-            "Etot: " + utils::pp(fp.Etot + (mbh!=0 ? mbh * fp.Phi0 : 0), 9) + "\t"
-            "Ekin: " + utils::pp(fp.Ekin, 9) + "\n";
-        if( (timeout  > 0 && timesim >= prevtimeout  + timeout) ||
-            (nstepout > 0 && nstep   >= prevnstepout + nstepout) )
-        {
-            exportTable(fileout, timesim, fp);
-            prevtimeout  = timesim;
-            prevnstepout = nstep;
-        }
-        double relChange = fp.doStep(dt);
-        timesim += dt;
-        dt = fmin(dtmax, fmax(dtmin, dt * eps / relChange));
-        nstep++;
-        if(nstep % nsubstep == 0) {
-            if(updatepot)
-                fp.reinitPotential();
-            fp.reinitDifCoefs();
-        }
+    // combine all command-line arguments to form the header written into the output files
+    std::string header="phaseflow " + args.dumpSingleLine();
+
+    // construct the initial density model
+    potential::PtrDensity initDensityAnalytic;
+    math::LogLogSpline initDensityInterpolated;
+    if(utils::fileExists(density))
+        // if the density=... argument refers to an existing file, read the cumulative mass profile
+        initDensityInterpolated = galaxymodel::readMassProfile(density, &Mbh);
+    else 
+        // otherwise create a built-in model
+        initDensityAnalytic = potential::createDensity(args);
+
+    // if the central black hole is grown adiabatically, start from a zero initial BH mass
+    params.Mbh = initBH ? Mbh : 0;
+
+    // create the Fokker-Planck solver
+    galaxymodel::FokkerPlanckSolver fp(
+        params,                // all optional parameters of the solver
+        initDensityAnalytic ?  // initial density profile used to construct the DF
+        static_cast<const math::IFunction&>(potential::DensityWrapper(*initDensityAnalytic)) :
+        static_cast<const math::IFunction&>(initDensityInterpolated));
+
+    if(!initBH)  // set the initial BH mass and modify the potential adiabatically
+        fp.setMbh(Mbh);
+
+    // output log file
+    std::ofstream strmLog;
+    if(!fileLog.empty()) {
+        strmLog.open(fileLog.c_str());
+        strmLog << "#" + header + "\n#Time       Phi_star(0) Mbh         "
+        "Mtotal      Msource     Msink       Etotal      Esource     Esink       Ekin\n";
     }
-    if(timeout>0 || nstepout>0)  // final output
-        exportTable(fileout, timesim, fp);
+
+    // begin the simulation
+    double timeSim = 0, dt = dtmin>0 ? dtmin : 0.01 * eps * fp.relaxationTime(), prevTimeOut = -INFINITY;
+    int nstep = 0, prevNstepOut = -nstepOut;
+    while(timeSim < timeTotal && nstep < MAXNSTEP) {
+        // print out the diagnostic information
+        printInfo(strmLog, timeSim, fp);
+
+        // store output files once in a while
+        if( (timeOut  > 0 && timeSim >= prevTimeOut  + timeOut) ||
+            (nstepOut > 0 && nstep   >= prevNstepOut + nstepOut) )
+        {
+            exportTable(fileOut, header, timeSim, fp);
+            prevTimeOut  = timeSim;
+            prevNstepOut = nstep;
+        }
+
+        // adjust the length of the upcoming timestep
+        if(timeSim + dt >= timeTotal) {
+            dt = timeTotal - timeSim;
+            timeSim = timeTotal;
+        } else if(timeOut > 0 && timeSim + dt > prevTimeOut + timeOut)
+        {   // end the current timestep exactly at the next export time
+            dt = prevTimeOut + timeOut - timeSim;
+            timeSim = prevTimeOut + timeOut;
+        } else
+            timeSim += dt;
+
+        // perform one timestep of the Fokker-Planck solver
+        double relChange = fp.evolve(dt);
+
+        // adjust the length of the next timestep considering the characteristic evolution timescale
+        dt = fmin(dtmax, fmax(dtmin, eps * sqrt(fp.relaxationTime() * dt / relChange)));
+        nstep++;
+    }
+
+    // last output
+    if((timeOut>0 || nstepOut>0) && prevTimeOut < timeSim) {
+        printInfo(strmLog, timeSim, fp);
+        exportTable(fileOut, header, timeSim, fp);
+    }
 }

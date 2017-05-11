@@ -25,42 +25,12 @@ template<typename T>
 inline T abs(T x) { return x<0 ? -x : x; }
 
 /** return an integer power of a number */
-double powInt(double x, int n);
+double pow(double x, int n);
 
+/** return a number raised to the given power,
+    taking shortcuts for a few common values of n such as 0.5 or 2 */
+double pow(double x, double n);
 
-/** initialize the pseudo-random number generator with the given value,
-    or a completely arbitrary value (depending on system time) if seed==0.
-    In a multi-threaded case, each thread is initialized with a different seed.
-    At startup (without any call to randomize()), the random seed always has the same value.
-*/
-void randomize(unsigned int seed=0);
-
-/** return a pseudo-random number in the range [0,1).
-    In a multi-threaded environment, each thread has access to its own instance of 
-    pseudo-random number generator, which are initialized with different (but fixed) seeds.
-    Therefore, if several threads process the data in an orderly way (using a static schedule),
-    they will receive the same sequence of numbers on each run of the program,
-    unless randomize(0) is called and as long as the number of threads is fixed.
-*/
-double random();
-
-/** return two uncorrelated random numbers from the standard normal distribution */
-void getNormalRandomNumbers(double& num1, double& num2);
-
-/** return a quasirandom number from the Halton sequence.
-    \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
-    \param[in]  base   is the base of the sequence, must be a prime number;
-    if one needs an N-dimensional vector of ostensibly independent quasirandom numbers,
-    one may call this function N times with different prime numbers as bases.
-    \return  a number between 0 and 1.
-    \note that that the numbers get increasingly more correlated as the base increases,
-    thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
-*/
-double quasiRandomHalton(unsigned int index, unsigned int base);
-
-/** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
-static const unsigned int MAX_PRIMES = 10;  // not that there aren't more!
-static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 
 /** wraps the input argument into the range [0,2pi) */
 double wrapAngle(double x);
@@ -75,18 +45,18 @@ double unwrapAngle(double x, double xprev);
 
 /** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
     to locate the index of bin that contains a given value x.
-    \tparam  NumT is the numeric type of data in the array (double, float, int or unsigned int);
-    \param[in]  x is the position, which must lie in the interval x_0 <= x <= x_N;
-    \param[in]  arr is the array of bin boundaries sorted in ascending order (NOT CHECKED!)
-    \param[in]  size is the number of elements in the array (i.e., number of bins plus 1);
+    \tparam  NumT is the numeric type of data in the array (double, float, signed/unsigned int or long);
+    \param[in]  x is the position;
+    \param[in]  arr is the array of bin boundaries sorted in ascending order (assumed but NOT CHECKED!);
+    \param[in]  size is the number of elements in the array (i.e., number of bins N plus 1);
     since this header file does not #include <vector>, we shall pass the array in the traditional
     way, as a pointer to the first element plus the number of elements.
     \returns the index k of the bin such that x_k <= x < x_{k+1}, where the last strict inequality
     is replaced by <= for the last bin (x=x_N still returns N-1);
-    or -1 if x<x_0, or N if x>x_N.
+    if x is strictly outside the grid, return -1 if x<x_0, or N if x>x_N.
 */
 template<typename NumT>
-int binSearch(const NumT x, const NumT arr[], const unsigned int size);
+ptrdiff_t binSearch(const NumT x, const NumT arr[], const size_t size);
 
 /** linearly interpolate the value y(x) between y1 and y2, for x between x1 and x2 */
 inline double linearInterp(double x, double x1, double x2, double y1, double y2) {
@@ -126,28 +96,94 @@ private:
     unsigned int num;
 };
 
+
+/** A wrapper providing the IFunction interface for an ordinary function with one parameter,
+    e.g., exp(x) */
+class FncWrapper: public IFunctionNoDeriv {
+    double (*fnc)(double);  ///< function pointer to the actual function
+public:
+    FncWrapper(double (*f)(double)) : fnc(f) {}
+    virtual double value(const double x) const { return fnc(x); }
+};
+
 /** A product of two functions, to be used as a temporary object passed to
     integration or root-finding routines */
 class FncProduct: public IFunction {
-    const IFunction &f1, &f2; ///< references to two functions
+    const IFunction &f1, &f2;  ///< references to two functions
 public:
     FncProduct(const IFunction& fnc1, const IFunction& fnc2) :
         f1(fnc1), f2(fnc2) {}
     virtual unsigned int numDerivs() const {
         return f1.numDerivs() < f2.numDerivs() ? f1.numDerivs() : f2.numDerivs();
     }
-    virtual void evalDeriv(const double x, double *val, double *der, double *der2) const;
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
 };
 
-/** Doubly-log-scaled function: return log(f(exp(logx))) and its two derivatives w.r.t log(x) */
-class LogLogScaledFnc: public math::IFunction {
-    const math::IFunction& fnc;  ///< reference to the original function
+/** Doubly-log-scaled function: return log(f(exp(logx))) and up to two derivatives w.r.t log(x) */
+class LogLogScaledFnc: public IFunction {
+    const IFunction& fnc;  ///< reference to the original function
 public:
-    LogLogScaledFnc(const math::IFunction& _fnc) : fnc(_fnc) {}
-    virtual void evalDeriv(const double logx,
-        /*output*/ double* logf, double* der, double* der2) const;
-    virtual unsigned int numDerivs() const { return 2; }
+    LogLogScaledFnc(const IFunction& _fnc) : fnc(_fnc) {}
+    virtual void evalDeriv(const double logx, /*output*/ double* logf, double* der, double* der2) const;
+    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
 };
+
+///@}
+/// \name  ----- random numbers -----
+///@{
+
+/** initialize the pseudo-random number generator with the given value,
+    or a completely arbitrary value (depending on system time) if seed==0.
+    In a multi-threaded case, each thread is initialized with a different seed.
+    At startup (without any call to randomize()), the random seed always has the same value.
+*/
+void randomize(unsigned int seed=0);
+
+/** return a pseudo-random number in the range [0,1).
+    In a multi-threaded environment, each thread has access to its own instance of 
+    pseudo-random number generator, which are initialized with different (but fixed) seeds.
+    Therefore, if several threads process the data in an orderly way (using a static schedule),
+    they will receive the same sequence of numbers on each run of the program,
+    unless randomize(0) is called and as long as the number of threads is fixed.
+*/
+double random();
+
+/** return two uncorrelated random numbers from the standard normal distribution */
+void getNormalRandomNumbers(double& num1, double& num2);
+
+/** construct a random vector, uniformly distributed on the unit sphere in 3d
+    \param[out]  vec  is an array filled with 3 components of the unit vector.
+*/
+void getRandomUnitVector(double vec[3]);
+
+/** construct a random unit vector perpendicular to the given vector.
+    \param[in]   vec   is an array of 3 cartesian coordinates of the input vector;
+    \param[out]  vper  is an array filled with three components of the random vector
+    perpendicular to the input vector;
+    \return  the magnitude of the input vector as a by-product.
+*/
+double getRandomPerpendicularVector(const double vec[3], double vper[3]);
+
+/** construct a random 3d rotation matrix (uniformly distributed random rotation angle
+    about an axis specified by a random vector uniformly distributed on the unit sphere).
+    \param[out]  mat  is an array of 9 numbers representing a 3x3 rotation matrix.
+*/
+void getRandomRotationMatrix(double mat[9]);
+
+/** return a quasirandom number from the Halton sequence.
+    \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
+    \param[in]  base   is the base of the sequence, must be a prime number;
+    if one needs an N-dimensional vector of ostensibly independent quasirandom numbers,
+    one may call this function N times with different prime numbers as bases.
+    \return  a number between 0 and 1.
+    \note that that the numbers get increasingly more correlated as the base increases,
+    thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
+*/
+double quasiRandomHalton(unsigned int index, unsigned int base);
+
+/** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
+static const unsigned int MAX_PRIMES = 10;  // not that there aren't more!
+static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 
 ///@}
 /// \name  ----- root-finding and minimization routines -----

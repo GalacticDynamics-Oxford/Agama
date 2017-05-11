@@ -280,6 +280,9 @@ public:
     /// action finder associated with the total potential (empty at the beginning)
     actions::PtrActionFinder actionFinder;
 
+    /// whether to use the interpolated action finder (faster but less accurate)
+    bool useActionInterpolation;
+
     /** parameters of grid for computing the multipole expansion of the combined
         density profile of spheroidal components;
         in general, these parameters should encompass the range of analogous parameters 
@@ -297,6 +300,12 @@ public:
     double zminCyl, zmaxCyl;      ///< innermost and outermost grid nodes in vertical direction
     unsigned int sizeRadialCyl;   ///< number of grid nodes in cylindrical radius
     unsigned int sizeVerticalCyl; ///< number of grid nodes in vertical (z) direction
+
+    /// assign default values
+    SelfConsistentModel() :
+        useActionInterpolation(true),
+        rminSph(0), rmaxSph(0), sizeRadialSph(25), lmaxAngularSph(0),
+        RminCyl(0), RmaxCyl(0), zminCyl(0), zmaxCyl(0), sizeRadialCyl(20), sizeVerticalCyl(20) {}
 };
 
 /** recompute the total potential using the current density profiles for all components,

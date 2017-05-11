@@ -35,19 +35,19 @@ int main()
     paramDPL.coefJrOut = 1.2;
     paramDPL.coefJzOut = 0.9;
     paramDPL.norm = 78.19;
-    potential::Plummer pot(1., 1.);
-    const actions::ActionFinderSpherical af(pot);
+    potential::PtrPotential pot(new potential::Plummer(1., 1.));
+    const actions::ActionFinderSpherical af(*pot);
     const df::DoublePowerLaw dfO(paramDPL);    // original distribution function
     df::PtrActionSpaceScaling scaling(new df::ActionSpaceScalingTriangLog());
     unsigned int gridSize[3] = {40, 7, 5};
     std::vector<double> gridU(gridSize[0]),
     gridV(math::createUniformGrid(gridSize[1], 0, 1)),
     gridW(math::createUniformGrid(gridSize[2], 0, 1));
-    double totalMass = pot.totalMass();
+    double totalMass = pot->totalMass();
     for(unsigned int i=0; i<gridSize[0]; i++) {
-        double r = getRadiusByMass(pot, totalMass * (1 - cos(M_PI * i / gridSize[0])) / 2);
+        double r = getRadiusByMass(*pot, totalMass * (1 - cos(M_PI * i / gridSize[0])) / 2);
         //std::cout << r << ' ';
-        double J = r * v_circ(pot, r);  // r^2*Omega
+        double J = r * v_circ(*pot, r);  // r^2*Omega
         double v[3];
         scaling->toScaled(actions::Actions(0,0,J), v);
         gridU[i] = v[0];
@@ -97,7 +97,7 @@ int main()
     double massOrig = dfO.totalMass();
     double massLin  = dfL.totalMass();
     double massCub  = dfC.totalMass();
-    std::cout << "M=" << pot.totalMass() << ", dfOrig M=" << massOrig <<
+    std::cout << "M=" << totalMass << ", dfOrig M=" << massOrig <<
         ", dfInterLin M=" << massLin << ", sum over components=" << sumLin << 
         ", dfInterCub M=" << massCub << ", sum over components=" << sumCub << '\n';
     ok &= testCond(math::fcmp(massOrig, massLin, 2e-2)==0, "MassOrig!=MassLinInt");
@@ -114,15 +114,15 @@ int main()
         coord::PosCyl point(r, 0, 0);
         std::vector<double> densArrL(dfL.size()), densArrC(dfC.size());
         double densOrig, densIntL, densIntC;
-        computeMoments(galaxymodel::GalaxyModelMulticomponent(pot, af, dfL),
+        computeMoments(galaxymodel::GalaxyModelMulticomponent(*pot, af, dfL),
             point, &densArrL[0], NULL, NULL, NULL, NULL, NULL, 1e-3, 10000);
-        computeMoments(galaxymodel::GalaxyModelMulticomponent(pot, af, dfC),
+        computeMoments(galaxymodel::GalaxyModelMulticomponent(*pot, af, dfC),
             point, &densArrC[0], NULL, NULL, NULL, NULL, NULL, 1e-3, 10000);
-        computeMoments(galaxymodel::GalaxyModel(pot, af, dfO),
+        computeMoments(galaxymodel::GalaxyModel(*pot, af, dfO),
             point, &densOrig,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
-        computeMoments(galaxymodel::GalaxyModel(pot, af, dfL),
+        computeMoments(galaxymodel::GalaxyModel(*pot, af, dfL),
             point, &densIntL,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
-        computeMoments(galaxymodel::GalaxyModel(pot, af, dfC),
+        computeMoments(galaxymodel::GalaxyModel(*pot, af, dfC),
             point, &densIntC,    NULL, NULL, NULL, NULL, NULL, 1e-3, 100000);
         double densSumL=0;
         for(unsigned int i=0; i<densArrL.size(); i++) {
@@ -136,7 +136,7 @@ int main()
             strmC << densArrC[i] << '\n';
         }
         strmC << '\n';
-        strm << r << ' ' << pot.density(point) << '\t' << densOrig << '\t' <<
+        strm << r << ' ' << pot->density(point) << '\t' << densOrig << '\t' <<
             densIntL << ' ' << densSumL << '\t' << densIntC << ' ' << densSumC << '\n';
         ok &= testCond(math::fcmp(densOrig, densIntL, 2e-1)==0, "RhoOrig!=LinInt at r="+utils::toString(r));
         ok &= testCond(math::fcmp(densSumL, densIntL, 1e-2)==0, "SumComp!=LinInt at r="+utils::toString(r));

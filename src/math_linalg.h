@@ -1,6 +1,6 @@
 /** \file   math_linalg.h
     \brief  linear algebra routines
-    \date   2015-2016
+    \date   2015-2017
     \author Eugene Vasiliev
 
     This module defines the matrix class and the interface for linear algebra routines.
@@ -22,6 +22,8 @@
     implemented as dense matrices, which of course may render some operations entirely
     impractical (the use of GSL is not recommended anyway).
     Again the user interface is agnostic to the actual back-end.
+    A special subtype of a sparse matrix is a band matrix, which is represented by
+    a separate class and allows read/write access and fast solution of linear systems.
 */
 #pragma once
 #include <vector>
@@ -44,10 +46,11 @@ struct Triplet {
     double value() const { return v; }
 };
 
+
 /** An abstract read-only interface for a matrix.
-    Dense, sparse and diagonal matrices implement this interface and add more specific methods.
+    Dense, sparse and band matrices implement this interface and add more specific methods.
     It may also be implemented by a user-defined proxy class in the following context:
-    suppose we need to provide the elementwise access to the matrix for some routine,
+    suppose we need to provide the element-wise access to the matrix for some routine,
     but do not want to store the entire matrix in memory, or this matrix is composed of
     several concatenated matrices and we don't want to create a temporary copy of them.
     It can be used to loop over non-zero elements of the original matrix without
@@ -87,34 +90,73 @@ private:
     size_t nCols;     ///< number of columns (second index)
 };
 
-/// The interface for diagonal matrices
+
+/** Band-diagonal square matrices.
+    A band matrix with dimension NxN and bandwidth B has nonzero elements A(i,j) only when |i-j| <= B.
+    A diagonal matrix has bandwidth zero. An example of a penta-diagonal matrix (B=2) of size 8x8:
+    \code
+    |10  5  2  0  0  0  0  0 |
+    | 4 10  5  2  0  0  0  0 |
+    | 1  4 10  5  2  0  0  0 |
+    | 0  1  4 10  5  2  0  0 |
+    | 0  0  1  4 10  5  2  0 |
+    | 0  0  0  1  4 10  5  2 |
+    | 0  0  0  0  1  4 10  5 |
+    | 0  0  0  0  0  1  4 10 |
+    \endcode
+    These matrices are stored in a compact way and can be used to efficiently solve certain types
+    of linear systems (such as those arising in spline construction).
+*/
 template<typename NumT>
-struct DiagonalMatrix: public IMatrix<NumT> {
+struct BandMatrix: public IMatrix<NumT> {
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
 
     /// default empty constructor
-    DiagonalMatrix() {}
+    BandMatrix() : band(0) {}
 
-    /// construct the matrix from the vector of diagonal values
-    explicit DiagonalMatrix(const std::vector<NumT>& src) :
-        IMatrix<NumT>(src.size(), src.size()), D(src) {}
+    /// create a square matrix of given size and bandwidth, initialized to the given value.
+    /// \param[in]  size  is the size of matrix (number of rows and columns);
+    /// \param[in]  bandwidth  is the number of elements on each side of the diagonal;
+    /// \param[in]  value (optional)  is the initial value of all elements;
+    /// \throw  std::invalid_argument if bandwidth>=size.
+    BandMatrix(size_t size, size_t bandwidth, const NumT value=0);
+    
+    /// create a diagonal matrix from the vector of diagonal values
+    explicit BandMatrix(const std::vector<NumT>& src) :
+        IMatrix<NumT>(src.size(), src.size()), band(0), data(src) {}
 
-    virtual size_t size() const { return rows(); }
+    /// access the matrix element for reading
+    /// \throw std::range_error if the element is outside the band
+    const NumT& operator() (size_t row, size_t col) const;
+    
+    /// access the matrix element for writing
+    /// \throw std::range_error if the element is outside the band
+    NumT& operator() (size_t row, size_t col);
+    
+    /// return the number of nonzero elements
+    virtual size_t size() const;
 
-    virtual NumT at(const size_t row, const size_t col) const {
-        return col==row ? D.at(col) : 0;
-    }
+    /// return an element from the matrix at the specified position
+    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
 
-    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
-        row = col = index;
-        return D.at(index);
-    }
+    /// return the given nonzero element and store its row and column indices
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const;
+
+    /// return the bandwidth of the matrix (number of nonzero elements on each side
+    /// of the diagonal at each row; a diagonal matrix has bandwidth 0)
+    inline size_t bandwidth() const { return band; }
+
+    /// return all non-zero elements in a single array of triplets (row, column, value)
+    std::vector<Triplet> values() const;
+
 private:
-    const std::vector<NumT> D;  ///< the actual storage of diagonal elements
+    size_t band;             ///< bandwidth
+    std::vector<NumT> data;  ///< actual storage of matrix elements
 };
 
-/// class for read-only sparse matrices
+
+/// Read-only sparse matrices
 template<typename NumT>
 struct SpMatrix: public IMatrix<NumT> {
     using IMatrix<NumT>::rows;
@@ -129,6 +171,9 @@ struct SpMatrix: public IMatrix<NumT> {
 
     /// copy constructor from a sparse matrix
     SpMatrix(const SpMatrix<NumT>& src);
+
+    /// copy constructor from a band matrix
+    explicit SpMatrix(const BandMatrix<NumT>& src);
 
 #if __cplusplus >= 201103L
     // move constructor in C++11
@@ -170,7 +215,8 @@ struct SpMatrix: public IMatrix<NumT> {
     void* impl;  ///< opaque implementation details
 };
 
-/** a simple class for two-dimensional matrices with dense storage */
+
+/** Ordinary matrices with dense storage */
 template<typename NumT>
 struct Matrix: public IMatrix<NumT> {
     using IMatrix<NumT>::rows;
@@ -190,6 +236,9 @@ struct Matrix: public IMatrix<NumT> {
 
     /// copy constructor from a sparse matrix
     explicit Matrix(const SpMatrix<NumT>& src);
+
+    /// copy constructor from a band matrix
+    explicit Matrix(const BandMatrix<NumT>& src);
 
     /// create a matrix from a list of triplets (row,column,value)
     Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values);
@@ -308,17 +357,17 @@ template<typename Type>
 double blas_dnrm2(const Type& X);
 
 /// sum of two vectors or two matrices:  Y := alpha * X + Y
-/// \tparam Type may be std::vector<double> or Matrix<double>
+/// \tparam Type may be std::vector<double>, Matrix<double>, SpMatrix<double> or BandMatrix<double>
 template<typename Type>
 void blas_daxpy(double alpha, const Type& X, Type& Y);
 
 /// multiply vector or matrix by a number:  Y := alpha * Y
-/// \tparam Type may be std::vector<double> or Matrix<double>
+/// \tparam Type may be std::vector<double>, Matrix<double>, SpMatrix<double> or BandMatrix<double>
 template<typename Type>
 void blas_dmul(double alpha, Type& Y) { blas_daxpy(alpha-1, Y, Y); }
 
 /// matrix-vector multiplication:  Y := alpha * A * X + beta * Y
-/// \tparam MatrixType is either Matrix<double> or SpMatrix<double>
+/// \tparam MatrixType is Matrix<double>, SpMatrix<double> or BandMatrix<double>
 template<typename MatrixType>
 void blas_dgemv(CBLAS_TRANSPOSE TransA,
     double alpha, const MatrixType& A, const std::vector<double>& X, double beta,
@@ -455,10 +504,18 @@ public:
 };
 
 
-/** solve a tridiagonal linear system  A x = rhs,  where elements of A are stored in three vectors
-    `diag`, `aboveDiag` and `belowDiag` */
-std::vector<double> solveTridiag(const std::vector<double>& diag, const std::vector<double>& aboveDiag,
-    const std::vector<double>& belowDiag, const std::vector<double>& rhs);
+/** Solve a sparse linear system  A x = rhs, where A is a square band-diagonal matrix.
+    The matrix A must be strongly non-degenerate and diagonally dominant (which is usually the case,
+    e.g. when such matrix is constructed in the finite-difference context such as spline approximation);
+    in other words, we do not use pivoting in solving the linear system and always take the diagonal
+    element without checking (no error is reported if it turns out to be near-zero).
+    \param[in] bandMatrix  is the square NxN matrix of the linear system.
+    \param[in] rhs  is the right-hand side of the linear system, must have length N.
+    \return  the solution vector `x` of length N.
+    \throw  std::invalid_argument  if the matrix size is incorrect.
+*/
+std::vector<double> solveBand(const BandMatrix<double>& bandMatrix, const std::vector<double>& rhs);
+
 
 ///@}
 

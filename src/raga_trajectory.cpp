@@ -31,7 +31,7 @@ void RagaTaskTrajectory::outputParticles(double time)
             append = false;
         }
         particles::PtrIOSnapshot snap = particles::createIOSnapshotWrite(
-            filename, params.outputFormat, units::ExternalUnits(), "Raga" /*header*/, time, append);
+            filename, params.outputFormat, units::ExternalUnits(), params.header, time, append);
         snap->writeSnapshot(particles);
         prevOutputTime = time;
     }

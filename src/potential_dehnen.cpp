@@ -36,7 +36,7 @@ double Dehnen::densityCar(const coord::PosCar& pos) const
 {
     double m = sqrt(pow_2(pos.x) + pow_2(pos.y/axisRatioY) + pow_2(pos.z/axisRatioZ));
     return mass * scalerad * (3-gamma) / (4*M_PI*axisRatioY*axisRatioZ) *
-        pow(m, -gamma) * pow(scalerad+m, gamma-4);
+        math::pow(m, -gamma) * math::pow(scalerad+m, gamma-4);
 }
 
 /// \cond INTERNAL_DOCS
@@ -51,7 +51,7 @@ public:
         const double s2 = s*s;
         const double m = s * sqrt( X2 + Y2/(1-(1-q2)*s2) + Z2/(1-(1-p2)*s2) );
         const double numerator = (gamma==2)? (log((1+m)*s/m) - 1/(1+m) - log(s)) :
-            (1 - (3-gamma)*pow(m/(m+1), 2-gamma) + (2-gamma)*pow(m/(m+1), 3-gamma))/(2-gamma);
+            (1 - (3-gamma)*math::pow(m/(m+1), 2-gamma) + (2-gamma)*math::pow(m/(m+1), 3-gamma))/(2-gamma);
         return -numerator / sqrt( (1-(1-q2)*s2) * (1-(1-p2)*s2) );
     }
 };
@@ -68,7 +68,7 @@ public:
     double value(double s) const {
         const double s2=s*s;
         const double m = s * sqrt(X2 / (a2 + C1*s2) + Y2 / (a2 + C2*s2) + Z2 / (a2 + C3*s2) );
-        double result = s2 * pow(m/(1+m), -gamma);
+        double result = s2 * math::pow(m/(1+m), -gamma);
         switch(mode) {
             case FORCE:
                 return result / pow_2(pow_2(1+m)) /
@@ -93,12 +93,13 @@ void Dehnen::evalCar(const coord::PosCar &pos,
         double r = sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
         if(potential!=NULL) {
             double x = scalerad / r;
-            *potential = mass/scalerad * (gamma==2 ? -log(1+x) :
-                x > 2e-3/(4-gamma) ? (1-pow(1+x, gamma-2))/(gamma-2) :
-                /* asymptotic expansion for r-->infinity, or equivalently x-->0 */
-                -x * (1 + x * (gamma-3)/2 * (1 + x * (gamma-4)/3 * (1 + x * (gamma-5)/4))) );
+            if(x > 2e-3/(4-gamma))
+                *potential = mass/scalerad * (gamma==2 ? -log(1+x) : (1-math::pow(1+x, gamma-2)) / (gamma-2) );
+            else  // asymptotic expansion for r-->infinity, or equivalently x-->0
+                *potential = mass/scalerad *
+                    -x * (1 + x * (gamma-3)/2 * (1 + x * (gamma-4)/3 * (1 + x * (gamma-5)/4)));
         }
-        double val = mass*pow(r, -gamma)*pow(r+scalerad, gamma-3);
+        double val = mass * math::pow(r, -gamma) * math::pow(r+scalerad, gamma-3);
         if(deriv!=NULL) {
             deriv->dx = r>0 ? val*pos.x : 0;
             deriv->dy = r>0 ? val*pos.y : 0;
