@@ -127,6 +127,8 @@ void RagaCore::doEpisode()
     double episodeLength = paramsRaga.episodeLength;  // duration of this episode
     for(int task=0; task<numtasks; task++)
         tasks[task]->startEpisode(paramsRaga.timeCurr, episodeLength);
+    orbit::OrbitIntParams orbitIntParams;
+    orbitIntParams.accuracy = paramsRaga.integratorAccuracy;
 
     // loop over the particles
     int nbody = particles.size();
@@ -135,11 +137,13 @@ void RagaCore::doEpisode()
 #endif
     for(int index=0; index<nbody; index++) {
         if(particles.mass(index) != 0) {   // run only non-zero-mass particles
-            RuntimeFncArray tsfnc(numtasks);
+            orbit::RuntimeFncArray timestepFncs(numtasks);
             for(int task=0; task<numtasks; task++)
-                tsfnc[task] = tasks[task]->createRuntimeFnc(index);
-            particles[index].first = integrateOrbit(*ptrPot, bh,
-                particles.point(index), episodeLength, tsfnc, paramsRaga.integratorAccuracy);
+                timestepFncs[task] = tasks[task]->createRuntimeFnc(index);
+            particles[index].first = orbit::integrate(
+                particles.point(index), episodeLength,
+                RagaOrbitIntegrator(*ptrPot, bh),
+                timestepFncs, orbitIntParams);
         }
     }   // end parallel for
 

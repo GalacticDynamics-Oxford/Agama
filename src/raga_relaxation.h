@@ -81,7 +81,7 @@ namespace raga {
 /** The runtime function that applies velocity perturbations to particle orbits and
     collects samples of particle energies (or, rather, phase volumes) during the episode
 */
-class RuntimeRelaxation: public BaseRuntimeFnc {
+class RuntimeRelaxation: public orbit::BaseRuntimeFnc {
 public:
     RuntimeRelaxation(
         const potential::BasePotential& _potentialSph,
@@ -99,7 +99,7 @@ public:
         outputLast (_outputLast),
         outputIter (_outputFirst)
     {}
-    virtual StepResult processTimestep(
+    virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
 private:
     /** The spherically-symmetric approximation to the actual total potential,
@@ -170,7 +170,7 @@ public:
         const particles::ParticleArrayCar& particles,
         const potential::PtrPotential& ptrPot,
         const BHParams& bh);
-    virtual PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "Relaxation"; }

@@ -27,7 +27,6 @@
 #include <sstream>
 #include <cmath>
 
-const double integr_eps=1e-8;        // integration accuracy parameter
 const double eps=1e-7;               // accuracy of comparison
 const double epsint=2e-3;            // accuracy of action interpolator
 const double axis_a=1.6, axis_c=1.0; // axes of perfect ellipsoid
@@ -39,8 +38,8 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     const coord::PosVelT<coordSysT>& initial_conditions,
     const double total_time, const double timestep)
 {
-    std::vector<coord::PosVelT<coordSysT> > traj;
-    orbit::integrate(potential, initial_conditions, total_time, timestep, traj, integr_eps);
+    std::vector<coord::PosVelT<coordSysT> > traj = orbit::integrateTraj(
+        initial_conditions, total_time, timestep, potential);
     actions::ActionStat stats, statf, stati;
     actions::Angles angf;
     bool ex_afs=false, ex_aff=false, ex_afi=false;

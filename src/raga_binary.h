@@ -45,7 +45,7 @@ struct BinaryEncounterData {
 typedef std::vector<BinaryEncounterData> BinaryEncounterList;
 
 /** Runtime function responsible for tracking the encounters with the binary black hole */
-class RuntimeBinary: public BaseRuntimeFnc {
+class RuntimeBinary: public orbit::BaseRuntimeFnc {
     const potential::BasePotential& pot;  ///< stellar potential
     const BHParams& bh;                   ///< parameters of the binary BH
     BinaryEncounterList& encountersList;  ///< place for storing the information about encounters
@@ -60,7 +60,7 @@ public:
         encountersList(_encountersList)
     {}
 
-    virtual StepResult processTimestep(
+    virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
 };
 
@@ -85,7 +85,7 @@ public:
         const particles::ParticleArrayCar& particles,
         const potential::PtrPotential& ptrPot,
         BHParams& bh);
-    virtual PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "BinaryBH"; }

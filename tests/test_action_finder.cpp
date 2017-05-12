@@ -35,7 +35,6 @@
 #include <cmath>
 #include <ctime>
 
-const double toler = 1e-8;  // integration accuracy parameter
 const units::InternalUnits unit(units::galactic_Myr);
 const double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr;
 int numActionEval  = 0;
@@ -58,8 +57,8 @@ bool test_actions(const potential::BasePotential& potential,
     const actions::ActionFinderAxisymFudge& actfinder,
     std::string& output)
 {
-    std::vector<coord::PosVelCar> traj;
-    orbit::integrate(potential, initial_conditions, total_time, timestep, traj, toler);
+    std::vector<coord::PosVelCar> traj = orbit::integrateTraj(
+        initial_conditions, total_time, timestep, potential);
     double ifd = fmax(
         //actions::estimateFocalDistancePoints(potential, traj);
         actfinder.focalDistance(toPosVelCyl(initial_conditions)),

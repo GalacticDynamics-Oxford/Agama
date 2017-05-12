@@ -71,6 +71,13 @@ protected:
     double timePrev, timeCurr;
 };
 
+enum OdeSolverType {
+    OS_DOP853 = 1,  ///< the classic 8th order Runge-Kutta method
+  //OS_HERMITE,     ///< Hermite integration using second derivatives
+  //OS_IAS15,       ///< 15th order Gauss-Radau method
+    OS_DEFAULT = OS_DOP853  ///< the standard choice
+};
+
 /** 8th order Runge-Kutta integrator from Hairer,Norsett&Wanner */
 class OdeSolverDOP853: public BaseOdeSolver
 {

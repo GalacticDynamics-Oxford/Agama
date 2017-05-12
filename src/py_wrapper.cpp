@@ -231,7 +231,7 @@ static const units::InternalUnits unit(2.7183 * units::Kpc, 3.1416 * units::Myr)
 
 /// external units that are used in the calling code, set by the user,
 /// (or remaining at default values (no conversion) if not set explicitly
-static shared_ptr<const units::ExternalUnits> conv;
+static unique_ptr<const units::ExternalUnits> conv;
 
 /// description of setUnits function
 static const char* docstringSetUnits = 
@@ -3585,25 +3585,27 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 static const char* docstringOrbit =
     "Compute an orbit starting from the given initial conditions in the given potential\n"
     "Arguments:\n"
-    "    ic=float[6] : initial conditions - an array of 6 numbers "
+    "  ic=float[6] : initial conditions - an array of 6 numbers "
     "(3 positions and 3 velocities in Cartesian coordinates);\n"
-    "    pot=Potential object that defines the gravitational potential;\n"
-    "    time=float : total integration time;\n"
-    "    step=float : output timestep (does not affect the integration accuracy);\n"
-    "    acc=float, optional : relative accuracy parameter (default 1e-10).\n"
-    "Returns: an array of Nx6 numbers, where N=time/step is the number of output points "
+    "  pot=Potential object that defines the gravitational potential;\n"
+    "  time=float : total integration time;\n"
+    "  step=float : output timestep (does not affect the integration accuracy);\n"
+    "  Omega=float, optional : pattern speed of the rotating frame (default 0);\n"
+    "  acc=float, optional : relative accuracy parameter (default 1e-8).\n"
+    "Returns: an array of Nx6 numbers, where N=time/step+1 is the number of output points "
     "in the trajectory, and each point consists of position and velocity in Cartesian coordinates.";
 
 /// orbit integration
 PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"ic", "pot", "time", "step", "acc", NULL};
-    double time = 0, step = 0, acc = 1e-10;
+    static const char* keywords[] = {"ic", "pot", "time", "step", "Omega", "acc", NULL};
+    double time = 0, step = 0, Omega = 0;
+    orbit::OrbitIntParams params;
     PyObject *ic_obj = NULL, *pot_obj = NULL;
     if(!PyArg_ParseTupleAndKeywords(
-        args, namedArgs, "|OOddd", const_cast<char**>(keywords),
-        &ic_obj, &pot_obj, &time, &step, &acc) ||
-        time<=0 || step<=0 || acc<=0)
+        args, namedArgs, "|OOdddd", const_cast<char**>(keywords),
+        &ic_obj, &pot_obj, &time, &step, &Omega, &params.accuracy) ||
+        time<=0 || step<=0 || params.accuracy<=0)
     {
         PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to orbit()");
         return NULL;
@@ -3621,12 +3623,15 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
     // initialize
     const coord::PosVelCar ic_point(convertPosVel(&pyArrayElem<double>(ic_arr, 0)));
-    std::vector<coord::PosVelCar> traj;
     Py_DECREF(ic_arr);
     // integrate
     try{
-        orbit::integrate( *((PotentialObject*)pot_obj)->pot, ic_point,
-            time * conv->timeUnit, step * conv->timeUnit, traj, acc);
+        std::vector<coord::PosVelCar> traj;
+        orbit::integrate(ic_point, time * conv->timeUnit,
+            orbit::OrbitIntegratorRot(*((PotentialObject*)pot_obj)->pot, Omega / conv->timeUnit),
+            orbit::RuntimeFncArray(1, orbit::PtrRuntimeFnc(
+                new orbit::RuntimeTrajectory<coord::Car>(traj, step * conv->timeUnit))),
+            params);
         // build an appropriate output array
         const npy_intp size = traj.size();
         npy_intp dims[] = {size, 6};

@@ -20,11 +20,11 @@
 namespace raga {
 
 /** Does nothing */
-class RuntimeTrajectory: public BaseRuntimeFnc {
+class RuntimeTrajectory: public orbit::BaseRuntimeFnc {
 public:
-    virtual StepResult processTimestep(
+    virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver&, const double, const double, double[])
-        { return SR_CONTINUE; }
+        { return orbit::SR_CONTINUE; }
 };
 
 /** Global parameters of this task */
@@ -51,7 +51,7 @@ public:
     RagaTaskTrajectory(
         const ParamsTrajectory& params,
         const particles::ParticleArrayCar& particles);
-    virtual PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "SnapshotOutput"; }

@@ -39,9 +39,11 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     const double total_time=50;// integration time
     const double timestep=1./8;// sampling rate of trajectory
     std::cout << "\033[1;39m"<<title<<"\033[0m\n";
-    std::vector<coord::PosVelCyl > traj;
     potential::Isochrone pot(M, b);
-    orbit::integrate(pot, initial_conditions, total_time, timestep, traj, 1e-15);
+    orbit::OrbitIntParams params;
+    params.accuracy = 1e-15;
+    std::vector<coord::PosVelCyl > traj = orbit::integrateTraj(
+        initial_conditions, total_time, timestep, pot, params);
     actions::ActionFinderSpherical actGrid(pot);  // interpolation-based action finder/mapper
     actions::ActionStat statI, statS, statF, statG;
     actions::ActionAngles aaI, aaF, aaS, aaG;
@@ -137,7 +139,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
             math::fcmp(frG.Omegar, frSinv.Omegar, epss) == 0 &&
             math::fcmp(frG.Omegaz, frSinv.Omegaz, epss) == 0 &&
             math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epss) == 0;
-        
+
         // inverse transformation for Isochrone with derivs
         actions::DerivAct<coord::SphMod> ac;
         coord::PosVelSphMod pd[2];

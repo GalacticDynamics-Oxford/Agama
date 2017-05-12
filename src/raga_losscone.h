@@ -49,7 +49,7 @@ struct CaptureData {
 };
 
 /** Runtime function responsible for tracking the capture of particles by the central black hole(s) */
-class RuntimeLosscone: public BaseRuntimeFnc {
+class RuntimeLosscone: public orbit::BaseRuntimeFnc {
 
     /// parameters of the binary BH
     const BHParams& bh;
@@ -77,7 +77,7 @@ public:
         captureRadius(_captureRadius)
     { drdt[0] = drdt[1] = 0.; }
 
-    virtual StepResult processTimestep(
+    virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
 };
 
@@ -108,7 +108,7 @@ public:
         const ParamsLosscone& params,
         particles::ParticleArrayCar& particles,
         BHParams& bh);
-    virtual PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "LossCone"; }

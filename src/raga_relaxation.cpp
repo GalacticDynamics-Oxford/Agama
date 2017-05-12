@@ -10,7 +10,7 @@
 
 namespace raga {
 
-StepResult RuntimeRelaxation::processTimestep(
+orbit::StepResult RuntimeRelaxation::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double currentState[6])
 {
     // 1. collect samples of phase volume corresponding to particle energy
@@ -33,7 +33,7 @@ StepResult RuntimeRelaxation::processTimestep(
     coord::PosVelCar posvel(data);
     double vel = sqrt(pow_2(posvel.vx) + pow_2(posvel.vy) + pow_2(posvel.vz));
     if(vel==0)  // can't do anything meaningful for a non-moving particle
-        return SR_CONTINUE;
+        return orbit::SR_CONTINUE;
     double Phi = potentialSph.value(posvel);
     double E   = Phi + 0.5 * pow_2(vel);
 
@@ -45,7 +45,7 @@ StepResult RuntimeRelaxation::processTimestep(
             "Cannot compute diffusion coefficients at t="+utils::toString(tsamp)+
             ", r="+utils::toString(sqrt(pow_2(data[0])+pow_2(data[1])+pow_2(data[2])))+
             ", Phi="+utils::toString(Phi,10)+", E="+utils::toString(E,10));
-        return SR_CONTINUE;
+        return orbit::SR_CONTINUE;
     }
 
     // 2c. scale the diffusion coefs
@@ -75,7 +75,7 @@ StepResult RuntimeRelaxation::processTimestep(
             // first term is the component of unit vector parallel to v: v[d]/|v|
             (currentState[d+3] / vmag) * deltavpar +
             uper[d] * deltavper;
-    return SR_REINIT;
+    return orbit::SR_REINIT;
 }
 
 //----- RagaTaskRelaxation -----//
@@ -244,9 +244,9 @@ RagaTaskRelaxation::RagaTaskRelaxation(
         "Initialized with relaxation rate="+utils::toString(params.relaxationRate));
 }
 
-PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
+orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
 {
-    return PtrRuntimeFnc(new RuntimeRelaxation(
+    return orbit::PtrRuntimeFnc(new RuntimeRelaxation(
         *ptrPotSph,
         *ptrRelaxationModel,
         params.relaxationRate,

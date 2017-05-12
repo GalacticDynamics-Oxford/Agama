@@ -37,9 +37,9 @@ void RagaTaskTrajectory::outputParticles(double time)
     }
 }
 
-PtrRuntimeFnc RagaTaskTrajectory::createRuntimeFnc(unsigned int)
+orbit::PtrRuntimeFnc RagaTaskTrajectory::createRuntimeFnc(unsigned int)
 {
-    return PtrRuntimeFnc(new RuntimeTrajectory());
+    return orbit::PtrRuntimeFnc(new RuntimeTrajectory());
 }
 
 void RagaTaskTrajectory::startEpisode(double timeStart, double length)

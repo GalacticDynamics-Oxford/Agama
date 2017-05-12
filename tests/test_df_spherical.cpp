@@ -210,7 +210,7 @@ bool test(const potential::BasePotential& pot)
     const RmaxFnc trueRmax;
     const PhasevolFnc truePhasevol;
     const DistrFnc trueDF(phasevol);
-    const galaxymodel::DiffusionCoefs dc(phasevol, trueDF);
+    const galaxymodel::SphericalModelLocal model(phasevol, trueDF);
     const math::LogLogSpline intDF = createInterpolatedDF(trueDF);
     const math::LogLogSpline intRho= createInterpolatedDensity(pot);
     const math::LogLogSpline eddDF = galaxymodel::makeEddingtonDF(
@@ -231,7 +231,7 @@ bool test(const potential::BasePotential& pot)
     // now reassign particle velocities using a different sampling procedure
     for(unsigned int i=0; i<npoints; i++) {
         double Phi = pot.value(particles[i].first);
-        double v = dc.sampleVelocity(Phi);
+        double v = model.sampleVelocity(Phi);
         particle_h[i] = phasevol(Phi + 0.5*v*v);
     }
     const math::LogLogSpline fitDF2 = galaxymodel::fitSphericalDF(particle_h, particle_m, 25);
@@ -303,7 +303,7 @@ bool test(const potential::BasePotential& pot)
         truePhasevol.evalDeriv(E, &trueh, &trueg);
         double intg, inth, intDE, intDEE;  // interpolated h and g
         phasevol.evalDeriv(E, &inth, &intg);
-        galaxymodel::difCoefEnergy(dc.model, E, intDE, intDEE);
+        galaxymodel::difCoefEnergy(model, E, intDE, intDEE);
         double intPhi, intdPhi, intd2Phi;
         interp.evalDeriv(r, &intPhi, &intdPhi, &intd2Phi);
         double truedens = (hess.dR2 + 2*grad.dR/r) / (4*M_PI);
@@ -311,13 +311,13 @@ bool test(const potential::BasePotential& pot)
         double truef    = trueDF(trueh);
         double intf     = intDF(trueh);
         double eddf     = eddDF(trueh);
-        double sphf     = dc.model.value(trueh);
+        double sphf     = model.value(trueh);
         double fitf1    = fitDF1(trueh);
         double fitf2    = fitDF2(trueh);
         double cmdens   = intRho(gridr[i]);
         double dfdens   = gridRhoDF[i];
-        double dcdens   = dc.density(truePhi);
-        double dcdisp   = dc.velDisp(truePhi);
+        double dcdens   = model.density(truePhi);
+        double dcdisp   = model.velDisp(truePhi);
         double jeansdisp= velDisp(gridr[i]);
         double invRm    = cbrt( math::integrate(  // Abel inversion
             math::ScaledIntegrandEndpointSing(RmaxIntegrand(phasevol, inth), 0, inth), 0, 1, 1e-4) );
@@ -351,7 +351,7 @@ bool test(const potential::BasePotential& pot)
             double E = (1-pow_2(vrel)) * truePhi;
             double intdvpar, intdv2par, intdv2per;
             double truedvpar=0, truedv2par=0, truedv2per=0;
-            dc.evalLocal(truePhi, E, intdvpar, intdv2par, intdv2per);
+            model.evalLocal(truePhi, E, intdvpar, intdv2par, intdv2per);
             // note: no analytic expressions for the Hernquist model
             if(pot.name() == potential::Plummer::myName())
                 difCoefsPlummer(truePhi, E, truedvpar, truedv2par, truedv2per);

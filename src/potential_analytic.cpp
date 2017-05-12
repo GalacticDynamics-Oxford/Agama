@@ -76,11 +76,6 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
         deriv2->dz2  = mden3 * ( (pow_2(Rsc) - 2*azb2*den2) * pow_2(pos.z/zb) +
             pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(Rsc) + azb2*den2) / pow_2(zb) );
         deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);        
-//        double denom5 = mass * pow_2(pow_2(denom)) * denom;
-  //      deriv2->dR2 = denom5 * (azb2 - 2*pow_2(pos.R));
-    //    deriv2->dz2 = denom5 * ( (pow_2(pos.R) - 2*azb2) * pow_2(pos.z/zb) +
-      //      pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(pos.R) + azb2) / pow_2(zb) );
-        //deriv2->dRdz = denom5 * -3 * pos.R * pos.z * (scaleRadiusA/zb + 1);
         deriv2->dRdphi = deriv2->dzdphi = deriv2->dphi2 = 0;
     }
 }
@@ -88,21 +83,21 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
 void Logarithmic::evalCar(const coord::PosCar &pos,
     double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
 {
-    double m2 = coreRadius2 + pow_2(pos.x) + pow_2(pos.y)/q2 + pow_2(pos.z)/p2;
+    double m2 = coreRadius2 + pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2;
     if(potential)
         *potential = sigma2*log(m2)*0.5;
     if(deriv) {
         deriv->dx = pos.x*sigma2/m2;
-        deriv->dy = pos.y*sigma2/m2/q2;
-        deriv->dz = pos.z*sigma2/m2/p2;
+        deriv->dy = pos.y*sigma2/m2/p2;
+        deriv->dz = pos.z*sigma2/m2/q2;
     }
     if(deriv2) {
         deriv2->dx2 = sigma2*(1/m2    - 2*pow_2(pos.x/m2));
-        deriv2->dy2 = sigma2*(1/m2/q2 - 2*pow_2(pos.y/(m2*q2)));
-        deriv2->dz2 = sigma2*(1/m2/p2 - 2*pow_2(pos.z/(m2*p2)));
-        deriv2->dxdy=-sigma2*pos.x*pos.y * 2/(pow_2(m2)*q2);
-        deriv2->dydz=-sigma2*pos.y*pos.z * 2/(pow_2(m2)*q2*p2);
-        deriv2->dxdz=-sigma2*pos.z*pos.x * 2/(pow_2(m2)*p2);
+        deriv2->dy2 = sigma2*(1/m2/p2 - 2*pow_2(pos.y/(m2*p2)));
+        deriv2->dz2 = sigma2*(1/m2/q2 - 2*pow_2(pos.z/(m2*q2)));
+        deriv2->dxdy=-sigma2*pos.x*pos.y * 2/(pow_2(m2)*p2);
+        deriv2->dydz=-sigma2*pos.y*pos.z * 2/(pow_2(m2)*p2*q2);
+        deriv2->dxdz=-sigma2*pos.z*pos.x * 2/(pow_2(m2)*q2);
     }
 }
 
@@ -110,16 +105,16 @@ void Harmonic::evalCar(const coord::PosCar &pos,
     double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
 {
     if(potential)
-        *potential = 0.5*Omega2 * (pow_2(pos.x) + pow_2(pos.y)/q2 + pow_2(pos.z)/p2);
+        *potential = 0.5*Omega2 * (pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2);
     if(deriv) {
         deriv->dx = pos.x*Omega2;
-        deriv->dy = pos.y*Omega2/q2;
-        deriv->dz = pos.z*Omega2/p2;
+        deriv->dy = pos.y*Omega2/p2;
+        deriv->dz = pos.z*Omega2/q2;
     }
     if(deriv2) {
         deriv2->dx2 = Omega2;
-        deriv2->dy2 = Omega2/q2;
-        deriv2->dz2 = Omega2/p2;
+        deriv2->dy2 = Omega2/p2;
+        deriv2->dz2 = Omega2/q2;
         deriv2->dxdy=deriv2->dydz=deriv2->dxdz=0;
     }
 }

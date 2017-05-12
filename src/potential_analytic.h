@@ -80,12 +80,12 @@ private:
 };
 
 /** Triaxial logarithmic potential:
-    \f$  \Phi(r) = \sigma^2 \ln[ r_c^2 + x^2 + (y/q)^2 + (z/p)^2 ]  \f$. */
+    \f$  \Phi(r) = \sigma^2 \ln[ r_c^2 + x^2 + (y/p)^2 + (z/q)^2 ]  \f$. */
 class Logarithmic: public BasePotentialCar{
 public:
     Logarithmic(double sigma, double coreRadius=0, double axisRatioYtoX=1, double axisRatioZtoX=1) :
         sigma2(pow_2(sigma)), coreRadius2(pow_2(coreRadius)),
-        q2(pow_2(axisRatioYtoX)), p2(pow_2(axisRatioZtoX)) {}
+        p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
     virtual coord::SymmetryType symmetry() const { 
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); }
@@ -94,19 +94,19 @@ public:
 private:
     const double sigma2;       ///< squared asymptotic circular velocity (sigma)
     const double coreRadius2;  ///< squared core radius (r_c)
-    const double q2;           ///< squared y/x axis ratio (q)
-    const double p2;           ///< squared z/x axis ratio (p)
+    const double p2;           ///< squared y/x axis ratio (p)
+    const double q2;           ///< squared z/x axis ratio (q)
 
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
 };
 
 /** Triaxial harmonic potential:
- \f$  \Phi(r) = \Omega^2 [ x^2 + (y/q)^2 + (z/p)^2 ]/2  \f$. */
+ \f$  \Phi(r) = \Omega^2 [ x^2 + (y/p)^2 + (z/q)^2 ]/2  \f$. */
 class Harmonic: public BasePotentialCar{
 public:
     Harmonic(double Omega, double axisRatioYtoX=1, double axisRatioZtoX=1) :
-        Omega2(pow_2(Omega)), q2(pow_2(axisRatioYtoX)), p2(pow_2(axisRatioZtoX)) {}
+        Omega2(pow_2(Omega)), p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
     virtual coord::SymmetryType symmetry() const { 
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); }
@@ -114,8 +114,8 @@ public:
     virtual double totalMass() const { return INFINITY; }
 private:
     const double Omega2;       ///< squared oscillation frequency (Omega)
-    const double q2;           ///< squared y/x axis ratio (q)
-    const double p2;           ///< squared z/x axis ratio (p)
+    const double p2;           ///< squared y/x axis ratio (p)
+    const double q2;           ///< squared z/x axis ratio (q)
 
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;

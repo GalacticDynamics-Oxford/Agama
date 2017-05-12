@@ -36,13 +36,13 @@ public:
     }
 };
 
-StepResult RuntimeLosscone::processTimestep(
+orbit::StepResult RuntimeLosscone::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[])
 {
     // first check if this particle has already been captured
     // (actually then the orbit integration should have been terminated, so this check is redundant)
     if(output->tcapt >= 0)
-        return SR_TERMINATE;
+        return orbit::SR_TERMINATE;
 
     int numBH = bh.sma>0 ? 2 : 1;
     for(int b=0; b<numBH; b++) {
@@ -99,11 +99,11 @@ StepResult RuntimeLosscone::processTimestep(
             vars[i] = posvel[i];
 
         // inform the ODE integrator that this particle is no more...
-        return SR_TERMINATE;
+        return orbit::SR_TERMINATE;
     }
 
     // if the particle wasn't captured, continue as usual
-    return SR_CONTINUE;
+    return orbit::SR_CONTINUE;
 }
 
 
@@ -123,9 +123,9 @@ RagaTaskLosscone::RagaTaskLosscone(
         ", accreted mass fraction=" + utils::toString(params.captureMassFraction));
 }
 
-PtrRuntimeFnc RagaTaskLosscone::createRuntimeFnc(unsigned int particleIndex)
+orbit::PtrRuntimeFnc RagaTaskLosscone::createRuntimeFnc(unsigned int particleIndex)
 {
-    return PtrRuntimeFnc(new RuntimeLosscone(
+    return orbit::PtrRuntimeFnc(new RuntimeLosscone(
         bh, captures.begin() + particleIndex, params.captureRadius));
 }
 

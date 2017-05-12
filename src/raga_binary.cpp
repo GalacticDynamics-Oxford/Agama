@@ -65,7 +65,7 @@ static double computeLztorque(
     }
 }
 
-StepResult RuntimeBinary::processTimestep(
+orbit::StepResult RuntimeBinary::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double [])
 {
     // first determine whether the particle experiences an encounter during this timestep
@@ -76,7 +76,7 @@ StepResult RuntimeBinary::processTimestep(
     double r2end   = pow_2(ptend  [0]) + pow_2(ptend  [1]) + pow_2(ptend  [2]);
     double r2crit  = pow_2(bh.sma * BINARY_ENCOUNTER_RADIUS);
     if(r2begin >= r2crit && r2end >= r2crit)  // the entire timestep is outside the critical radius:
-        return SR_CONTINUE;                   // no further action required
+        return orbit::SR_CONTINUE;                   // no further action required
 
     // if during the timestep the particle spends some time inside the critical radius,
     // we need to determine exactly the time when it enters and exits the sphere with this radius
@@ -128,7 +128,7 @@ StepResult RuntimeBinary::processTimestep(
         encountersList.back().deltaLz += Lzend-Lzbegin-Lztorque;
     }
 
-    return SR_CONTINUE;
+    return orbit::SR_CONTINUE;
 }
 
 
@@ -149,9 +149,9 @@ RagaTaskBinary::RagaTaskBinary(
         ", eccentricity=" + utils::toString(bh.ecc));        
 }
 
-PtrRuntimeFnc RagaTaskBinary::createRuntimeFnc(unsigned int particleIndex)
+orbit::PtrRuntimeFnc RagaTaskBinary::createRuntimeFnc(unsigned int particleIndex)
 {
-    return PtrRuntimeFnc(new RuntimeBinary(*ptrPot, bh, encounters[particleIndex]));
+    return orbit::PtrRuntimeFnc(new RuntimeBinary(*ptrPot, bh, encounters[particleIndex]));
 }
 
 void RagaTaskBinary::startEpisode(double timeStart, double length)

@@ -41,7 +41,7 @@ typedef particles::ParticleArray<coord::PosCyl>::ArrayType ParticleArrayType;
 
 /** The runtime function that collects samples from each particle's trajectory during the episode
     and stores them in the external array in the pre-allocated block */
-class RuntimePotential: public BaseRuntimeFnc {
+class RuntimePotential: public orbit::BaseRuntimeFnc {
 public:
     RuntimePotential(
         double _outputTimestep,
@@ -53,7 +53,7 @@ public:
         outputLast (_outputLast),
         outputIter (_outputFirst)
     {}
-    virtual StepResult processTimestep(
+    virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
 private:
     /// interval between taking samples from the trajectory (counting from the beginning of the episode)
@@ -99,7 +99,7 @@ public:
         const ParamsPotential& params,
         const particles::ParticleArrayCar& particles,
         potential::PtrPotential& ptrPot);
-    virtual PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "PotentialUpdate"; }

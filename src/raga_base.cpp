@@ -1,13 +1,11 @@
 #include "raga_base.h"
 #include "potential_base.h"
+#include "math_ode.h"
 #include "math_specfunc.h"
 #include "utils.h"
 #include <cmath>
 
 namespace raga {
-
-// upper limit on the number of internal timesteps in the ODE solver for each orbit during an episode
-static const unsigned int ODE_MAX_NUM_STEPS = 1e8;
 
 void BHParams::keplerOrbit(double t, double bhX[], double bhY[], double bhVX[], double bhVY[]) const
 {
@@ -83,77 +81,17 @@ static inline void evalRagaPotential(
     }
 }
 
-
-/** Implements the IOdeSystem interface by providing the time derivative
-    of position/velocity vector, computed from the composite (stellar and black hole) potential */
-class RagaOdeSystem: public math::IOdeSystem {
-    const potential::BasePotential& pot;  ///< the time-independent stellar potential
-    const BHParams& bh;                   ///< the central black hole [binary] parameters
-public:
-    RagaOdeSystem(const potential::BasePotential& _pot, const BHParams& _bh) :
-        pot(_pot), bh(_bh) {}
-
-    /// compute the time derivative of the position/velocity vector at time t
-    virtual void eval(const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const
-    {
-        coord::GradCar grad;
-        evalRagaPotential(pot, bh, t, coord::PosCar(x[0], x[1], x[2]), NULL, &grad, NULL);
-        dxdt[0] = x[3];
-        dxdt[1] = x[4];
-        dxdt[2] = x[5];
-        dxdt[3] = -grad.dx;
-        dxdt[4] = -grad.dy;
-        dxdt[5] = -grad.dz;
-    }
-    
-    /** The size of the position/velocity vector */
-    virtual unsigned int size() const { return 6; }
-
-    virtual bool isStdHamiltonian() const { return true; }
-};
-
-coord::PosVelCar integrateOrbit(
-    const potential::BasePotential& pot,
-    const BHParams& bh,
-    const coord::PosVelCar& initialConditions,
-    const double totalTime,
-    const RuntimeFncArray& runtimeFncs,
-    const double accuracy)
+void RagaOrbitIntegrator::eval(
+    const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const
 {
-    RagaOdeSystem odeSystem(pot, bh);
-    math::OdeStateType vars(odeSystem.size());
-    initialConditions.unpack_to(&vars[0]);
-    math::OdeSolverDOP853 solver(odeSystem, accuracy);
-    solver.init(vars);
-    unsigned int numSteps = 0;
-    double timePrev = 0, timeCurr = 0;
-    while(timeCurr < totalTime)
-    {
-        if(solver.doStep() <= 0) {  // signal of error
-            utils::msg(utils::VL_WARNING, FUNCNAME,
-                "Timestep is zero at t="+utils::toString(timeCurr));
-            break;
-        }
-        timeCurr = solver.getTime();
-        solver.getSol(timeCurr, &vars[0]);
-        bool reinit = false, finish = false;
-        for(unsigned int i=0; i<runtimeFncs.size(); i++) {
-            switch(runtimeFncs[i]->processTimestep(solver, timePrev, timeCurr, &vars[0]))
-            {
-                case SR_TERMINATE: finish = true; break;
-                case SR_REINIT:    reinit = true; break;
-                default: ;
-            }
-        }
-        timePrev = timeCurr;
-        if(reinit)
-            solver.init(vars);
-        if(finish || ++numSteps > ODE_MAX_NUM_STEPS)
-            break;
-    }
-    timeCurr = fmin(solver.getTime(), totalTime);
-    solver.getSol(timeCurr, &vars[0]);
-    return coord::PosVelCar(&vars[0]);
+    coord::GradCar grad;
+    evalRagaPotential(pot, bh, t, coord::PosCar(x[0], x[1], x[2]), NULL, &grad, NULL);
+    dxdt[0] = x[3];
+    dxdt[1] = x[4];
+    dxdt[2] = x[5];
+    dxdt[3] = -grad.dx;
+    dxdt[4] = -grad.dy;
+    dxdt[5] = -grad.dz;
 }
 
 }  // namespace raga

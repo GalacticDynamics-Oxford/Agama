@@ -7,7 +7,7 @@
 
 namespace raga {
 
-StepResult RuntimePotential::processTimestep(
+orbit::StepResult RuntimePotential::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double[])
 {
     double t;
@@ -18,7 +18,7 @@ StepResult RuntimePotential::processTimestep(
         sol.getSol(t, data);
         (outputIter++)->first = toPosCyl(coord::PosCar(data[0], data[1], data[2]));
     }
-    return SR_CONTINUE;
+    return orbit::SR_CONTINUE;
 }
 
 
@@ -35,9 +35,9 @@ RagaTaskPotential::RagaTaskPotential(
     utils::msg(utils::VL_DEBUG, "RagaTaskPotential", "Potential update is enabled");
 }
 
-PtrRuntimeFnc RagaTaskPotential::createRuntimeFnc(unsigned int index)
+orbit::PtrRuntimeFnc RagaTaskPotential::createRuntimeFnc(unsigned int index)
 {
-    return PtrRuntimeFnc(new RuntimePotential(
+    return orbit::PtrRuntimeFnc(new RuntimePotential(
         episodeLength / params.numSamplesPerEpisode,
         particleTrajectories.data.begin() + params.numSamplesPerEpisode * index,
         particleTrajectories.data.begin() + params.numSamplesPerEpisode * (index+1) ));
