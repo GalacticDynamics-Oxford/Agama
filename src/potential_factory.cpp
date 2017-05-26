@@ -10,7 +10,6 @@
 #include "potential_sphharm.h"
 #include "particles_io.h"
 #include "math_core.h"
-#include "math_linalg.h"
 #include "utils.h"
 #include "utils_config.h"
 #include <cmath>
@@ -22,6 +21,15 @@
 namespace potential {
 
 namespace {  // internal definitions and routines
+
+/// order of the Multipole expansion for the GalPot potential
+static const int GALPOT_LMAX = 32;
+
+/// order of the azimuthal Fourier expansion in case of non-axisymmetric components
+static const int GALPOT_MMAX = 6;
+
+/// number of radial points in the Multipole potential automatically constructed for GalPot
+static const int GALPOT_NRAD = 50;
 
 /// \name Definitions of all known potential types and parameters
 //        -------------------------------------------------------
@@ -48,6 +56,7 @@ enum PotentialType {
     //  Components of Walter Dehnen's GalPot
     PT_DISK,         ///< separable disk density model:  `DiskDensity`
     PT_SPHEROID,     ///< two-power-law spheroid density model:  `SpheroidDensity`
+    PT_SERSIC,       ///< Sersic profile:  `SersicDensity`
 
     //  Density interpolators
     PT_DENS_SPHHARM, ///< DensitySphericalHarmonic
@@ -78,7 +87,6 @@ struct ConfigPotential
     double scaleRadius2;     ///< second scale radius of the model (if applicable)
     double axisRatioY, axisRatioZ;   ///< axis ratios of the model (if applicable)
     double gamma;            ///< central cusp slope (for the Dehnen model)
-    double sersicIndex;      ///< Sersic index (for the Sersic density profile)
     unsigned int gridSizeR;  ///< number of radial grid points in Multipole and CylSpline potentials
     unsigned int gridSizez;  ///< number of grid points in z-direction for CylSpline potential
     double rmin, rmax;       ///< inner- and outermost grid node radii for Multipole and CylSpline
@@ -91,8 +99,9 @@ struct ConfigPotential
     ConfigPotential() :
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
         mass(1.), scaleRadius(1.), scaleRadius2(1.),
-        axisRatioY(1.), axisRatioZ(1.), gamma(1.), sersicIndex(4.),
-        gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0), lmax(6), mmax(6), smoothing(1.)
+        axisRatioY(1.), axisRatioZ(1.), gamma(1.),
+        gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
+        lmax(6), mmax(6), smoothing(1.)
     {};
 };
 
@@ -134,11 +143,13 @@ void initPotentialNameMap()
     // list of density models available for BSE and Spline approximation
     DensityNames.clear();
     DensityNames[PT_COMPOSITE] = CompositeDensity::myName();
-    DensityNames[PT_PLUMMER] = Plummer::myName();
-    DensityNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
-    DensityNames[PT_DEHNEN]  = Dehnen::myName();
-    DensityNames[PT_FERRERS] = Ferrers::myName();
+    DensityNames[PT_PLUMMER]   = Plummer::myName();
+    DensityNames[PT_DEHNEN]    = Dehnen::myName();
+    DensityNames[PT_FERRERS]   = Ferrers::myName();
     DensityNames[PT_ISOCHRONE] = Isochrone::myName();
+    DensityNames[PT_SPHEROID]  = SpheroidDensity::myName();    
+    DensityNames[PT_SERSIC]    = SersicParam::myName();    
+    DensityNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
     DensityNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
     DensityNames[PT_DENS_CYLGRID] = DensityAzimuthalHarmonic::myName();
     DensityNames[PT_DENS_SPHHARM] = DensitySphericalHarmonic::myName();
@@ -262,10 +273,9 @@ ConfigPotential parseParams(const utils::KeyValueMap& params, const units::Exter
     config.axisRatioZ  = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
     config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius)
                        * conv.lengthUnit;
-    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight",config.scaleRadius2)
+    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight", config.scaleRadius2)
                        * conv.lengthUnit;
     config.gamma       = params.getDouble("Gamma", config.gamma);
-    config.sersicIndex = params.getDouble("SersicIndex", config.sersicIndex);
     config.gridSizeR   = params.getInt("gridSizeR", config.gridSizeR);
     config.gridSizez   = params.getInt("gridSizeZ", config.gridSizez);
     config.rmin        = params.getDouble("rmin", config.rmin)
@@ -289,38 +299,56 @@ DiskParam parseDiskParams(const utils::KeyValueMap& params, const units::Externa
                                * conv.massUnit / pow_2(conv.lengthUnit);
     config.scaleRadius         = params.getDouble("scaleRadius", config.scaleRadius)
                                * conv.lengthUnit;
-    config.scaleHeight         = params.getDouble("scaleHeight", config.scaleHeight)
+    config.scaleHeight         = params.getDoubleAlt("scaleRadius2","scaleHeight", config.scaleHeight)
                                * conv.lengthUnit;
     config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius)
                                * conv.lengthUnit;
     config.modulationAmplitude = params.getDouble("modulationAmplitude", config.modulationAmplitude);
     // alternative way: specifying the total model mass instead of surface density at R=0
     if(params.contains("mass") && !params.contains("surfaceDensity")) {
-        config.surfaceDensity = 1;
-        config.surfaceDensity = params.getDouble("mass") * conv.massUnit / config.mass();
+        config.surfaceDensity  = 1;
+        config.surfaceDensity  = params.getDouble("mass") * conv.massUnit / config.mass();
     }
     return config;
-};
+}
 
 SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
 {
     SphrParam config;
-    config.densityNorm        = params.getDouble("densityNorm", config.densityNorm)
-                              * conv.massUnit / pow_3(conv.lengthUnit);
-    config.axisRatioY         = params.getDouble("axisRatioY", config.axisRatioY);
-    config.axisRatioZ         = params.getDouble("axisRatioZ", config.axisRatioZ);
-    config.alpha              = params.getDouble("alpha", config.alpha);
-    config.beta               = params.getDouble("beta",  config.beta);
-    config.gamma              = params.getDouble("gamma", config.gamma);
-    config.scaleRadius        = params.getDouble("scaleRadius", config.scaleRadius)
-                              * conv.lengthUnit;
-    config.outerCutoffRadius  = params.getDouble("outerCutoffRadius", config.outerCutoffRadius)
-                              * conv.lengthUnit;
-    config.cutoffStrength     = params.getDouble("cutoffStrength", config.cutoffStrength);
+    config.densityNorm       = params.getDouble("densityNorm", config.densityNorm)
+                             * conv.massUnit / pow_3(conv.lengthUnit);
+    config.axisRatioY        = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
+    config.axisRatioZ        = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
+    config.alpha             = params.getDouble("alpha", config.alpha);
+    config.beta              = params.getDouble("beta",  config.beta);
+    config.gamma             = params.getDouble("gamma", config.gamma);
+    config.scaleRadius       = params.getDouble("scaleRadius", config.scaleRadius)
+                             * conv.lengthUnit;
+    config.outerCutoffRadius = params.getDouble("outerCutoffRadius", config.outerCutoffRadius)
+                             * conv.lengthUnit;
+    config.cutoffStrength    = params.getDouble("cutoffStrength", config.cutoffStrength);
     // alternative way: specifying the total model mass instead of volume density at r=scaleRadius
     if(params.contains("mass") && !params.contains("densityNorm")) {
         config.densityNorm = 1;
         config.densityNorm = params.getDouble("mass") * conv.massUnit / config.mass();
+    }
+    return config;
+}
+
+SersicParam parseSersicParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
+{
+    SersicParam config;
+    config.surfaceDensity = params.getDouble("surfaceDensity", config.surfaceDensity)
+                          * conv.massUnit / pow_2(conv.lengthUnit);
+    config.scaleRadius    = params.getDouble("scaleRadius", config.scaleRadius)
+                          * conv.lengthUnit;
+    config.sersicIndex    = params.getDouble("sersicIndex", config.sersicIndex);
+    config.axisRatioY     = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
+    config.axisRatioZ     = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
+    // alternative way: specifying the total model mass instead of central surface density
+    if(params.contains("mass") && !params.contains("surfaceDensity")) {
+        config.surfaceDensity = 1;
+        config.surfaceDensity = params.getDouble("mass") * conv.massUnit / config.mass();
     }
     return config;
 }
@@ -349,10 +377,10 @@ PtrPotential readPotentialSphHarmExp(
     if( (potentialType == PT_BSE && param<0.5) || 
         ((potentialType == PT_SPLINE || potentialType == PT_MULTIPOLE) && ncoefsRadial<4) ) 
         ok = false;
+    ok &= std::getline(strm, buffer) && buffer.find("Phi") != std::string::npos;
+    std::getline(strm, buffer);  // header, ignored
     std::vector< std::vector<double> > coefs, coefsPhi(numTerms), coefsdPhi(numTerms);
     std::vector< double > radii;
-    std::getline(strm, buffer);  // time, ignored
-    std::getline(strm, buffer);  // comments, ignored
     for(int n=0; ok && n<ncoefsRadial; n++) {
         ok &= std::getline(strm, buffer).good();
         fields = utils::splitString(buffer, "# \t");
@@ -374,7 +402,8 @@ PtrPotential readPotentialSphHarmExp(
         }
     }
     if(potentialType == PT_MULTIPOLE) {
-        ok &= std::getline(strm, buffer).good();  // "dPhi/dR", ignored
+        ok &= std::getline(strm, buffer).good();  // empty line
+        ok &= std::getline(strm, buffer).good() && buffer.find("dPhi/dr") != std::string::npos;
         ok &= std::getline(strm, buffer).good();  // header, ignored
         for(int n=0; ok && n<ncoefsRadial; n++) {
             ok &= std::getline(strm, buffer).good();
@@ -382,7 +411,7 @@ PtrPotential readPotentialSphHarmExp(
             for(unsigned int ind=0; ind<numTerms; ind++)
                 coefsdPhi[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
         }
-    }    
+    }
     if(!ok)
         throw std::runtime_error(std::string("Error loading potential ") +
             getPotentialNameByType(potentialType));
@@ -392,7 +421,7 @@ PtrPotential readPotentialSphHarmExp(
     for(unsigned int i=0; i<coefsPhi.size(); i++) {
         math::blas_dmul(pow_2(converter.velocityUnit), coefsPhi[i]);
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, coefsdPhi[i]);
-    }        
+    }
     switch(potentialType)
     {
     case PT_BSE: 
@@ -468,22 +497,21 @@ PtrPotential readPotentialCylSpline(std::istream& strm, const units::ExternalUni
     unsigned int size_R = utils::toInt(fields[0]);
     ok &= std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
-    int mmax = utils::toInt(fields[0]);
+    unsigned int size_z = utils::toInt(fields[0]);
     ok &= std::getline(strm, buffer).good();
     fields = utils::splitString(buffer, "# \t");
-    unsigned int size_z = utils::toInt(fields[0]);
+    int mmax = utils::toInt(fields[0]);
     ok &= size_R>0 && size_z>0 && mmax>=0;
     std::vector<double> gridR, gridz;
     std::vector< math::Matrix<double> > Phi, dPhidR, dPhidz;
-    ok &= std::getline(strm, buffer).good();
-    ok &= buffer.find("Phi") != std::string::npos;
+    ok &= std::getline(strm, buffer).good() && buffer.find("Phi") != std::string::npos;
     if(ok)
         ok &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, Phi);
-    bool ok1 = std::getline(strm, buffer).good();
+    bool ok1 = std::getline(strm, buffer).good();  // empty line
     ok1 &= buffer.find("dPhi/dR") != std::string::npos;
     if(ok1)
         ok1 &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, dPhidR);
-    ok1 &= std::getline(strm, buffer).good();
+    ok1 &= std::getline(strm, buffer).good();  // empty line
     ok1 &= buffer.find("dPhi/dz") != std::string::npos;
     if(ok1)
         ok1 &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, dPhidz);
@@ -506,17 +534,118 @@ PtrPotential readPotentialCylSpline(std::istream& strm, const units::ExternalUni
     return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
+PtrDensity readDensitySphericalHarmonic(std::istream& strm, const units::ExternalUnits& converter)
+{
+    std::string buffer;
+    std::vector<std::string> fields;
+    bool ok = std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    int ncoefsRadial = utils::toInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    int ncoefsAngular = utils::toInt(fields[0]);
+    unsigned int numTerms = pow_2(ncoefsAngular+1);
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    double innerSlope=NAN, outerSlope=NAN;
+    if(fields.size()>=2) {
+        innerSlope = utils::toDouble(fields[0]);
+        outerSlope = utils::toDouble(fields[1]);
+    } else ok=false;
+    std::vector< std::vector<double> > coefs(numTerms);
+    std::vector< double > radii;
+    ok &= std::getline(strm, buffer) && buffer.find("rho") != std::string::npos;
+    std::getline(strm, buffer);  // header, ignored
+    for(int n=0; ok && n<ncoefsRadial; n++) {
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        radii.push_back(utils::toDouble(fields[0]));
+        for(unsigned int ind=0; ind<numTerms; ind++)
+            coefs[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
+    }
+    if(!ok)
+        throw std::runtime_error(std::string("Error loading ") + DensitySphericalHarmonic::myName());
+    // convert units
+    math::blas_dmul(converter.lengthUnit, radii);
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), coefs[i]);
+    return PtrDensity(new DensitySphericalHarmonic(radii, coefs, innerSlope, outerSlope)); 
+}
+
+PtrDensity readDensityAzimuthalHarmonic(std::istream& strm, const units::ExternalUnits& converter)
+{
+    std::string buffer;
+    std::vector<std::string> fields;
+    bool ok = std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    unsigned int size_R = utils::toInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    unsigned int size_z = utils::toInt(fields[0]);
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    int mmax = utils::toInt(fields[0]);
+    ok &= size_R>0 && size_z>0 && mmax>=0;
+    std::vector<double> gridR, gridz;
+    std::vector< math::Matrix<double> > rho;
+    ok &= std::getline(strm, buffer).good();
+    ok &= buffer.find("rho") != std::string::npos;
+    if(ok)
+        ok &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, rho);
+    if(!ok)
+        throw std::runtime_error(std::string("Error loading ") + DensityAzimuthalHarmonic::myName());
+    // convert units
+    math::blas_dmul(converter.lengthUnit, gridR);
+    math::blas_dmul(converter.lengthUnit, gridz);
+    for(unsigned int i=0; i<rho.size(); i++)
+        math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), rho[i]);
+    return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, rho));
+}
+
 }  // end internal namespace
 
-// Main routine: load potential expansion coefficients from a text file
-PtrPotential readPotential(const std::string& fileName, const units::ExternalUnits& converter)
+// Main routines: load density or potential expansion coefficients from a text file
+PtrDensity readDensity(const std::string& fileName, const units::ExternalUnits& converter)
 {
     if(fileName.empty()) {
-        throw std::runtime_error("readPotentialCoefs: empty file name");
+        throw std::runtime_error("readDensity: empty file name");
     }
     std::ifstream strm(fileName.c_str(), std::ios::in);
     if(!strm) {
-        throw std::runtime_error("readPotentialCoefs: cannot read from file "+fileName);
+        throw std::runtime_error("readDensity: cannot read from file "+fileName);
+    }
+    // check header
+    std::string buffer;
+    bool ok = std::getline(strm, buffer).good();
+    if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
+        std::vector<std::string> fields;
+        fields = utils::splitString(buffer, "# \t");
+        if(fields[0] == DensitySphericalHarmonic::myName()) {
+            return readDensitySphericalHarmonic(strm, converter);
+        }
+        if(fields[0] == DensityAzimuthalHarmonic::myName()) {
+            return readDensityAzimuthalHarmonic(strm, converter);
+        }
+        if(fields[0] == CompositeDensity::myName()) {
+            // each line is a name of a file with the given component
+            std::vector<PtrDensity> components;
+            while(ok && std::getline(strm, buffer).good() && !strm.eof())
+                components.push_back(readDensity(buffer, converter));
+            return PtrDensity(new CompositeDensity(components));
+        }
+    }
+    throw std::runtime_error("readDensity: cannot find "
+        "valid density coefficients in file "+fileName);
+}
+
+PtrPotential readPotential(const std::string& fileName, const units::ExternalUnits& converter)
+{
+    if(fileName.empty()) {
+        throw std::runtime_error("readPotential: empty file name");
+    }
+    std::ifstream strm(fileName.c_str(), std::ios::in);
+    if(!strm) {
+        throw std::runtime_error("readPotential: cannot read from file "+fileName);
     }
     // check header
     std::string buffer;
@@ -544,7 +673,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
             return PtrPotential(new CompositeCyl(components));
         }
     }
-    throw std::runtime_error("readPotentialCoefs: cannot find "
+    throw std::runtime_error("readPotential: cannot find "
         "valid potential coefficients in file "+fileName);
 }
 
@@ -614,10 +743,10 @@ void writePotentialBSE(std::ostream& strm, const BasisSetExp& potBSE,
         math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
     }
     int lmax = potBSE.getNumCoefsAngular();
-    strm << BasisSetExp::myName() << "\t#header\n" << 
+    strm << BasisSetExp::myName() << "\n" << 
         (potBSE.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" << 
-        potBSE.getAlpha() <<"\t#alpha\n0\t#time\n#index";
+        potBSE.getAlpha() <<"\t#alpha\n#Phi\n#index";
     writeSphericalHarmonics<false>(strm, indices, coefs);
 }
 
@@ -635,10 +764,10 @@ void writePotentialSpline(std::ostream& strm, const SplineExp& potSpline,
         math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
     }
     int lmax = potSpline.getNumCoefsAngular();
-    strm << SplineExp::myName() << "\t#header\n" << 
+    strm << SplineExp::myName() << "\n" << 
         (potSpline.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" <<
-        0 <<"\t#unused\n0\t#time\n#radius";
+        0 <<"\t#unused\n#Phi\n#radius";
     writeSphericalHarmonics<false>(strm, radii, coefs);
 }
 
@@ -656,12 +785,12 @@ void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
         math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhi[i]);
     }
     int lmax = static_cast<int>(sqrt(Phi.size()*1.0)-1);
-    strm << Multipole::myName() << "\t#header\n" << 
-        Phi[0].size() << "\t#n_radial\n" << 
+    strm << Multipole::myName() << "\n" << 
+        radii.size() << "\t#n_radial\n" << 
         lmax << "\t#l_max\n" <<
-        0 <<"\t#unused\nPhi\n#radius";
+        0 <<"\t#unused\n#Phi\n#radius";
     writeSphericalHarmonics<true>(strm, radii, Phi);
-    strm << "dPhi/dr\n#radius";
+    strm << "\n#dPhi/dr\n#radius";
     writeSphericalHarmonics<true>(strm, radii, dPhi);
 }
 
@@ -680,8 +809,10 @@ void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
         math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
     }
     int mmax = Phi.size()/2;
-    strm << CylSpline::myName() << "\t#header\n" << gridR.size() <<
-        "\t#size_R\n" << mmax << "\t#m_max\n" << gridz.size() << "\t#size_z\n";
+    strm << CylSpline::myName() << "\n" <<
+        gridR.size() << "\t#size_R\n" <<
+        gridz.size() << "\t#size_z\n" <<
+        mmax << "\t#m_max\n";
     strm << "#Phi\n";
     writeAzimuthalHarmonics(strm, gridR, gridz, Phi);
     strm << "\n#dPhi/dR\n";
@@ -701,12 +832,15 @@ void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHar
     math::blas_dmul(1/converter.lengthUnit, radii);
     for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
-    strm << DensitySphericalHarmonic::myName() <<
-    "\n#InnerSlope:\t" << innerSlope << "\tOuterSlope:\t" << outerSlope << "\n#radius";
+    int lmax = static_cast<int>(sqrt(coefs.size()*1.0)-1);
+    strm << DensitySphericalHarmonic::myName() << "\n" <<
+        radii.size() << "\t#n_radial\n" << 
+        lmax << "\t#l_max\n" <<
+        innerSlope << "\t" << outerSlope <<"\t#inner/outer slopes\n#rho\n#radius";
     writeSphericalHarmonics<true>(strm, radii, coefs);
 }
 
-void writeDensityCylGrid(std::ostream& strm, const DensityAzimuthalHarmonic& density,
+void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHarmonic& density,
     const units::ExternalUnits& converter)
 {
     std::vector<double> gridR, gridz;
@@ -717,6 +851,12 @@ void writeDensityCylGrid(std::ostream& strm, const DensityAzimuthalHarmonic& den
     math::blas_dmul(1/converter.lengthUnit, gridz);
     for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
+    int mmax = coefs.size()/2;
+    strm << DensityAzimuthalHarmonic::myName() << "\n" <<
+        gridR.size() << "\t#size_R\n" <<
+        gridz.size() << "\t#size_z\n" <<
+        mmax << "\t#m_max\n";
+        strm << "#rho\n";
     writeAzimuthalHarmonics(strm, gridR, gridz, coefs);
 }
 
@@ -747,7 +887,7 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
         writePotentialCylSpline(strm, dynamic_cast<const CylSpline&>(dens), converter);
         break;
     case PT_DENS_CYLGRID:
-        writeDensityCylGrid(strm, dynamic_cast<const DensityAzimuthalHarmonic&>(dens), converter);
+        writeDensityAzimuthalHarmonic(strm, dynamic_cast<const DensityAzimuthalHarmonic&>(dens), converter);
         break;
     case PT_DENS_SPHHARM:
         writeDensitySphericalHarmonic(strm, dynamic_cast<const DensitySphericalHarmonic&>(dens), converter);
@@ -805,40 +945,43 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
     std::ifstream strm(filename.c_str());
     if(!strm) 
         throw std::runtime_error("Cannot open file "+std::string(filename));
-    std::vector<DiskParam> diskpars;
-    std::vector<SphrParam> sphrpars;
-    bool ok=true;
-    int num;
-    strm>>num;
-    swallowRestofLine(strm);
-    if(num<0 || num>10 || !strm) ok=false;
+    std::vector<utils::KeyValueMap> params;
+    std::string buffer;
+    std::vector<std::string> fields;
+    bool ok = std::getline(strm, buffer).good();
+    fields  = utils::splitString(buffer, "# \t");
+    int num = utils::toInt(fields[0]);
     for(int i=0; i<num && ok; i++) {
-        DiskParam dp;
-        strm >> dp.surfaceDensity >> dp.scaleRadius >> dp.scaleHeight >>
-            dp.innerCutoffRadius >> dp.modulationAmplitude;
-        swallowRestofLine(strm);
-        dp.surfaceDensity *= conv.massUnit/pow_2(conv.lengthUnit);
-        dp.scaleRadius *= conv.lengthUnit;
-        dp.scaleHeight *= conv.lengthUnit;
-        dp.innerCutoffRadius *= conv.lengthUnit;
-        if(strm) diskpars.push_back(dp);
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        if(fields.size() >= 5)
+            params.push_back(utils::KeyValueMap(
+                "type=DiskDensity"
+                " surfaceDensity=" +    fields[0]+
+                " scaleRadius=" +       fields[1]+
+                " scaleHeight=" +       fields[2]+
+                " innerCutoffRadius=" + fields[3]+
+                " modulationAmplitude="+fields[4]));
         else ok=false;
     }
-    strm>>num;
-    swallowRestofLine(strm);
-    ok=ok && strm;
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    num = utils::toInt(fields[0]);
     for(int i=0; i<num && ok; i++) {
-        SphrParam sp;
-        strm>>sp.densityNorm >> sp.axisRatioZ >> sp.gamma >> sp.beta >>
-            sp.scaleRadius >> sp.outerCutoffRadius;
-        swallowRestofLine(strm);
-        sp.densityNorm *= conv.massUnit/pow_3(conv.lengthUnit);
-        sp.scaleRadius *= conv.lengthUnit;
-        sp.outerCutoffRadius *= conv.lengthUnit;
-        if(strm) sphrpars.push_back(sp);
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        if(fields.size() >= 5)
+            params.push_back(utils::KeyValueMap(
+                "type=SpheroidDensity"
+                " densityNorm="      + fields[0]+
+                " axisRatioZ="       + fields[1]+
+                " gamma="            + fields[2]+
+                " beta="             + fields[3]+
+                " scaleRadius="      + fields[4]+
+                " outerCutoffRadius="+ fields[5]));
         else ok=false;
     }
-    return createGalaxyPotential(diskpars, sphrpars);
+    return createPotential(params, conv);
 }
 
 ///@}
@@ -1010,9 +1153,10 @@ inline bool isPotentialExpansion(PotentialType type)
     either an analytic one or a potential expansion constructed from a density model
     or loaded from a text file.
 */
-PtrPotential createAnyPotential(const ConfigPotential& params,
+PtrPotential createAnyPotential(const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
+    const ConfigPotential params = parseParams(kvmap, converter);
     if(!params.file.empty()) {
         if(!utils::fileExists(params.file))
             throw std::runtime_error("File "+params.file+" does not exist");
@@ -1025,7 +1169,8 @@ PtrPotential createAnyPotential(const ConfigPotential& params,
         catch(std::runtime_error&) {
             // otherwise the file is assumed to contain an N-body snapshot
             if(!isPotentialExpansion(params.potentialType))
-                throw std::runtime_error("Must specify the potential expansion type");
+                throw std::runtime_error(
+                    "Must specify the potential expansion type to load an N-body snapshot");
             const particles::ParticleArrayCar particles =
                 particles::readSnapshot(params.file, converter);
             if(particles.size()==0)
@@ -1053,7 +1198,7 @@ PtrPotential createAnyPotential(const ConfigPotential& params,
             return createPotentialExpansion(params, *createAnalyticPotential(potparams));
         }
         // otherwise use analytic density as the source
-        return createPotentialExpansion(params, *createAnalyticDensity(params));
+        return createPotentialExpansion(params, *createDensity(kvmap, converter));
     } else  // elementary potential, or an error
         return createAnalyticPotential(params);
 }
@@ -1065,11 +1210,16 @@ PtrDensity createDensity(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
+    std::string file = kvmap.getString("file");
+    if(!file.empty())
+        return readDensity(file, converter);
     std::string type = kvmap.getString(kvmap.contains("density") ? "density" : "type");
     if(utils::stringsEqual(type, DiskDensity::myName()))
         return PtrDensity(new DiskDensity(parseDiskParams(kvmap, converter)));
     if(utils::stringsEqual(type, SpheroidDensity::myName()))
         return PtrDensity(new SpheroidDensity(parseSphrParams(kvmap, converter)));
+    if(utils::stringsEqual(type, SersicParam::myName()))
+        return PtrDensity(new SpheroidDensity(parseSersicParams(kvmap, converter)));
     return createAnalyticDensity(parseParams(kvmap, converter));
 }
 
@@ -1080,34 +1230,59 @@ PtrPotential createPotential(
 {
     if(kvmap.size() == 0)
         throw std::runtime_error("Empty list of potential components");
-    std::vector<PtrPotential> components;
+    // all potential components
+    std::vector<PtrPotential> componentsPot;
+    // all density components that will contribute to the additional Multipole potential
+    std::vector<PtrDensity> componentsDens;
 
-    // first we isolate all components that are part of GalPot
-    std::vector<DiskParam> diskParams;
-    std::vector<SphrParam> sphrParams;
-    std::vector<ConfigPotential> params;
+    // assemble the set of density components for the multipole
+    // (all spheroids and residual part of disks),
+    // and the complementary set of potential components
+    // (the flattened part of disks, eventually to be joined by the multipole itself)
     for(unsigned int i=0; i<kvmap.size(); i++) {
         std::string type = kvmap[i].getString("type");
+        // isolate the density profiles that are part of GalPot scheme:
+        // DiskDensity will be represented by one potential component (DiskAnsatz)
+        // and two density components that will eventually be supplied to the Multipole potential;
+        // SpheroidDensity and SersicDensity profiles will also be added to the Multipole
         if(utils::stringsEqual(type, DiskDensity::myName())) {
-            diskParams.push_back(parseDiskParams(kvmap[i], converter));
+            DiskParam dpar = parseDiskParams(kvmap[i], converter);
+            if(dpar.surfaceDensity != 0) {
+                // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
+                componentsPot.push_back(PtrPotential(new DiskAnsatz(dpar)));
+                // ...and gets subtracted from the entire DiskDensity for the list of density components
+                componentsDens.push_back(PtrDensity(new DiskDensity(dpar)));
+                dpar.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
+                componentsDens.push_back(PtrDensity(new DiskAnsatz(dpar)));
+            }
         } else if(utils::stringsEqual(type, SpheroidDensity::myName())) {
-            sphrParams.push_back(parseSphrParams(kvmap[i], converter));
-        } else
-            params.push_back(parseParams(kvmap[i], converter));
-    }
-    // create an array of GalPot components if needed
-    if(diskParams.size()>0 || sphrParams.size()>0)
-        components = createGalaxyPotentialComponents(diskParams, sphrParams);
-    // add other components if they exist
-    for(unsigned int i=0; i<params.size(); i++) {
-        components.push_back(createAnyPotential(params[i], converter));
+            componentsDens.push_back(PtrDensity(
+                new SpheroidDensity(parseSphrParams(kvmap[i], converter))));
+        } else if(utils::stringsEqual(type, SersicParam::myName())) {
+            componentsDens.push_back(PtrDensity(
+                new SpheroidDensity(parseSersicParams(kvmap[i], converter))));
+        } else {
+            componentsPot.push_back(createAnyPotential(kvmap[i], converter));
+        }
     }
 
-    assert(components.size()>0);
-    if(components.size() == 1)
-        return components[0];
+    // create an additional Multipole potential if needed
+    if(!componentsDens.empty()) {
+        PtrDensity totalDens;
+        if(componentsDens.size() == 1)
+            totalDens = componentsDens[0];
+        else
+            totalDens.reset(new CompositeDensity(componentsDens));
+        componentsPot.push_back(Multipole::create(*totalDens,
+            isSpherical   (*totalDens) ? 0 : GALPOT_LMAX,
+            isAxisymmetric(*totalDens) ? 0 : GALPOT_MMAX, GALPOT_NRAD));
+    }
+
+    assert(componentsPot.size()>0);
+    if(componentsPot.size() == 1)
+        return componentsPot[0];
     else
-        return PtrPotential(new CompositeCyl(components));
+        return PtrPotential(new CompositeCyl(componentsPot));
 }
 
 // create a potential from one component (which may still turn into a composite potential

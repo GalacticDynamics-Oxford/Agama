@@ -31,6 +31,13 @@ inline double R_circ(const BasePotential& potential, double E)
     return R_circ(PotentialWrapper(potential), E);
 }
 
+/** Compute the characteristic orbital period as a function of energy */
+inline double T_circ(const potential::BasePotential& potential, double E)
+{
+    double R = R_circ(potential, E);
+    return R / v_circ(potential, R) * 2*M_PI;
+}
+
 /** Compute the angular momentum of a circular orbit with the given energy
     in a spherically-symmetric potential represented by a 1d function */
 inline double L_circ(const math::IFunction& potential, double E)

@@ -737,7 +737,7 @@ bool test1dSpline()
     for(unsigned int i=0; i<amplBsplineAnti.size(); i++)
         errBsplineAnti = fmax(errBsplineAnti,
             fabs(amplBsplineAnti[i] - amplBsplineOrig[i] + amplBsplineOrig[0]));
-    
+
     // test log-scaled splines
     bool oklogspl = testLogScaledSplines();
 

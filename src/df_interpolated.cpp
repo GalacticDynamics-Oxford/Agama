@@ -84,7 +84,7 @@ template<int N>
 double InterpolatedDF<N>::computePhaseVolume(const unsigned int indComp, const double reqRelError) const
 {
     if(indComp >= amplitudes.size())
-        throw std::range_error("InterpolatedDF: component index out of range");
+        throw std::out_of_range("InterpolatedDF: component index out of range");
     double xlower[3], xupper[3];
     interp.nonzeroDomain(indComp, xlower, xupper);
     double result, error;

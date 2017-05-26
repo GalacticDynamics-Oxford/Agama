@@ -726,7 +726,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
 particles::ParticleArray<coord::PosCyl> generateDensitySamples(
     const potential::BaseDensity& dens, const size_t numPoints)
 {
-    potential::DensityIntegrandNdim fnc(dens, true);  // require the values of density to be non-negative
+    potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);  
     math::Matrix<double> result;      // sampled scaled coordinates
     double totalMass, errorMass;      // total mass and its estimated error
     double xlower[3] = {0,0,0};       // boundaries of sampling region in scaled coordinates

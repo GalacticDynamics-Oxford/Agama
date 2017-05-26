@@ -39,6 +39,9 @@ double gamma(const double x);
 /** Logarithm of gamma function (doesn't overflow quite that easy) */
 double lngamma(const double n);
 
+/** Lower incomplete Gamma function: the ordinary Gamma(x) = gammainc(x, y=infinity) */
+double gammainc(const double x, const double y);
+
 /** Psi (digamma) function */
 double digamma(const double x);
 

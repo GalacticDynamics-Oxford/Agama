@@ -261,10 +261,10 @@ std::string pp(double num, unsigned int uwidth)
     int width = std::min<int>(uwidth, MAXWIDTH);
     if(width<1)
         return result;
-    unsigned int sign = num<0;
-    if(num==0) {  // no difference between +0 and -0
-        result = "0";
-        if(width>1) result+='.';
+    unsigned int sign = std::signbit(num);
+    if(num==0) {
+        result = width>1 && sign ? "-0" : "0";
+        if(width>1+sign) result+='.';
         result.resize(width, '0');
         return result;
     }

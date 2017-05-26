@@ -30,6 +30,11 @@
 namespace math{
 
 // ------ utility routines with common implementations for both EIGEN and GSL ------ //
+void matrixRangeCheck(bool condition)
+{
+    if(!condition)
+        throw std::out_of_range("matrix index out of range");
+}
 
 void eliminateNearZeros(std::vector<double>& vec, double threshold)
 {
@@ -57,19 +62,26 @@ void eliminateNearZeros(Matrix<double>& mat, double threshold)
 
 template<> void blas_daxpy(double alpha, const std::vector<double>& X, std::vector<double>& Y)
 {
-    size_t size = X.size();
+    const size_t size = X.size();
     if(size!=Y.size())
-        throw std::invalid_argument("blas_daxpy: invalid size of input arrays");
+        throw std::length_error("blas_daxpy: invalid size of input arrays");
     if(alpha==0) return;
     for(size_t i=0; i<size; i++)
         Y[i] += alpha*X[i];
 }
 
+template<> void blas_dmul(double alpha, std::vector<double>& Y)
+{
+    const size_t size = Y.size();
+    for(size_t i=0; i<size; i++)
+        Y[i] *= alpha;
+}
+
 double blas_ddot(const std::vector<double>& X, const std::vector<double>& Y)
 {
-    size_t size = X.size();
+    const size_t size = X.size();
     if(size!=Y.size())
-        throw std::invalid_argument("blas_ddot: invalid size of input arrays");
+        throw std::length_error("blas_ddot: invalid size of input arrays");
     double result = 0;
     for(size_t i=0; i<size; i++)
         result += X[i]*Y[i];
@@ -114,22 +126,30 @@ BandMatrix<NumT>::BandMatrix(size_t size, size_t bandWidth, const NumT value) :
     IMatrix<NumT>(size, size), band(bandWidth), data(size * (2*bandWidth+1), value)
 {
     if(bandWidth >= size)
-        throw std::invalid_argument("BandMatrix: bandwidth must be less than the matrix size");
+        throw std::length_error("BandMatrix: bandwidth must be less than the matrix size");
+}
+
+template<typename NumT>
+NumT BandMatrix<NumT>::at(size_t row, size_t col) const
+{
+    matrixRangeCheck(row < rows() && col < cols());
+    if(col > row+band || row > col+band)
+        return 0;  // no error if the element is out of bandwidth, just return zero
+    return data[row * (2*band+1) + col+band-row];
 }
 
 template<typename NumT>
 const NumT& BandMatrix<NumT>::operator() (size_t row, size_t col) const
 {
-    if(std::max(row, col) >= rows() || col > row+band || row > col+band)
-        throw std::range_error("BandMatrix: index out of range");
+    // if the element is outside bandwidth, cannot return zero because this is a reference, not a value
+    matrixRangeCheck(row < rows() && col < cols() && col <= row+band && row <= col+band);
     return data[row * (2*band+1) + col+band-row];
 }
 
 template<typename NumT>
 NumT& BandMatrix<NumT>::operator() (size_t row, size_t col)
 {
-    if(std::max(row, col) >= rows() || col > row+band || row > col+band)
-        throw std::range_error("BandMatrix: index out of range");
+    matrixRangeCheck(row < rows() && col < cols() && col <= row+band && row <= col+band);
     return data[row * (2*band+1) + col+band-row];
 }
 
@@ -142,7 +162,7 @@ size_t BandMatrix<NumT>::size() const
 template<typename NumT>
 NumT BandMatrix<NumT>::elem(size_t index, size_t &row, size_t &col) const
 {
-    size_t
+    const size_t
         nRows = rows(),
         width = 2*band+1,                           // width of one normal row
         total = nRows * width - band * (band+1),    // total number of nonzero elements
@@ -170,7 +190,7 @@ NumT BandMatrix<NumT>::elem(size_t index, size_t &row, size_t &col) const
         row = nRows-1-row;
         col = nRows-1-col;
     } else
-        throw std::range_error("BandMatrix: index out of range");
+        matrixRangeCheck(false /*index out of range*/);
     return data[row * width + col+band-row];
 }
 
@@ -194,12 +214,20 @@ void blas_daxpy(double alpha, const BandMatrix<double>& X, BandMatrix<double>& Y
 {
     const size_t size = X.rows(), band = X.bandwidth(), numElem = size * (band*2+1);
     if(Y.rows() != size || Y.bandwidth() != band)
-        throw std::invalid_argument("blas_daxpy: invalid size of input arrays");
+        throw std::length_error("blas_daxpy: invalid size of input arrays");
     if(alpha==0) return;
     const double* x = &(X(0,0))-band;  // address of the first element in the flattened band matrix
     double* y = &(Y(0,0))-band;
     for(size_t i=0; i<numElem; i++)
         y[i] += alpha * x[i];
+}
+    
+template<> void blas_dmul(double alpha, BandMatrix<double>& Y)
+{
+    const size_t size = Y.rows(), band = Y.bandwidth(), numElem = size * (band*2+1);
+    double* y = &(Y(0,0))-band;
+    for(size_t i=0; i<numElem; i++)
+        y[i] *= alpha;
 }
 
 template<>
@@ -208,7 +236,7 @@ void blas_dgemv(CBLAS_TRANSPOSE Trans, double alpha, const BandMatrix<double>& m
 {
     const ptrdiff_t size = mat.rows(), band = mat.bandwidth(), width = band * 2 + 1;
     if((ptrdiff_t)vec.size() != size || (ptrdiff_t)result.size() != size)
-        throw std::invalid_argument("blas_dgemv: invalid size of input arrays");
+        throw std::length_error("blas_dgemv: invalid size of input arrays");
     if(beta==0)
         result.assign(size, 0.);
     else
@@ -237,7 +265,7 @@ std::vector<double> solveBand(const BandMatrix<double>& mat, const std::vector<d
 {
     const ptrdiff_t size = mat.rows(), band = mat.bandwidth(), width = band * 2 + 1;
     if((ptrdiff_t)rhs.size() != size)
-        throw std::invalid_argument("solveBand: invalid size of input arrays");
+        throw std::length_error("solveBand: invalid size of input arrays");
     std::vector<double> x(rhs);             // result vector, which originally contains the r.h.s.
     std::vector<double> U(size*band);       // upper triangular part of the input matrix
     std::vector<double> L(width);           // temporary storage (one row of the input matrix)
@@ -293,7 +321,7 @@ struct Type< Matrix<NumT> > {
     typedef Eigen::Matrix<NumT, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> T;
 };
 template<typename NumT>
-struct Type< SpMatrix<NumT> > {
+struct Type< SparseMatrix<NumT> > {
     typedef Eigen::SparseMatrix<NumT, Eigen::ColMajor> T;
 };
     
@@ -314,19 +342,19 @@ inline const typename Type<M>::T& mat(const M& m) {
 // default constructor
 template<typename NumT>
 Matrix<NumT>::Matrix() :
-    IMatrix<NumT>(),
+    IMatrixDense<NumT>(),
     impl(new typename Type<Matrix<NumT> >::T()) {}
 
 // constructor without data initialization
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols) :
-    IMatrix<NumT>(nRows, nCols),
+    IMatrixDense<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols)) {}
 
 // constructor with an initial value
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
-    IMatrix<NumT>(nRows, nCols),
+    IMatrixDense<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols))
 {
     mat(*this).fill(value);
@@ -335,19 +363,19 @@ Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
 // copy constructor from a dense matrix
 template<typename NumT>
 Matrix<NumT>::Matrix(const Matrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()),
+    IMatrixDense<NumT>(src.rows(), src.cols()),
     impl(new typename Type<Matrix<NumT> >::T(mat(src))) {}
 
 // copy constructor from a sparse matrix
 template<typename NumT>
-Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()),
+Matrix<NumT>::Matrix(const SparseMatrix<NumT>& src) :
+    IMatrixDense<NumT>(src.rows(), src.cols()),
     impl(new typename Type<Matrix<NumT> >::T(mat(src))) {}
 
 // copy constructor from a band matrix
 template<typename NumT>
 Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()),
+    IMatrixDense<NumT>(src.rows(), src.cols()),
     impl(new typename Type<Matrix<NumT> >::T(src.rows(), src.cols()))
 {
     mat(*this).fill(0);
@@ -364,7 +392,7 @@ Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
 // constructor from triplets
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
-    IMatrix<NumT>(nRows, nCols),
+    IMatrixDense<NumT>(nRows, nCols),
     impl(new typename Type<Matrix<NumT> >::T(nRows, nCols))
 {
     mat(*this).fill(0);
@@ -383,20 +411,18 @@ template<typename NumT>
 const NumT& Matrix<NumT>::operator() (size_t row, size_t col) const
 {
 #ifdef DEBUG_RANGE_CHECK
-    return mat(*this)(row, col);
-#else
-    return mat(*this).data()[row * cols() + col];
+    matrixRangeCheck(row < rows() && col < cols());
 #endif
+    return mat(*this).data()[row * cols() + col];
 }
 
 template<typename NumT>
 NumT& Matrix<NumT>::operator() (size_t row, size_t col)
 {
 #ifdef DEBUG_RANGE_CHECK
-    return mat(*this)(row, col);
-#else
-    return mat(*this).data()[row * cols() + col];
+    matrixRangeCheck(row < rows() && col < cols());
 #endif
+    return mat(*this).data()[row * cols() + col];
 }
 
 /// access the raw data storage
@@ -413,23 +439,23 @@ const NumT* Matrix<NumT>::data() const {
 //------ sparse matrix -------//
 
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix() :
-    IMatrix<NumT>(), impl(new typename Type<SpMatrix<NumT> >::T()) {}
+SparseMatrix<NumT>::SparseMatrix() :
+    IMatrix<NumT>(), impl(new typename Type<SparseMatrix<NumT> >::T()) {}
 
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
+SparseMatrix<NumT>::SparseMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols),
-    impl(new typename Type<SpMatrix<NumT> >::T(nRows, nCols))
+    impl(new typename Type<SparseMatrix<NumT> >::T(nRows, nCols))
 {
     mat(*this).setFromTriplets(values.begin(), values.end());
 }
 
 // copy constructor from band matrix
 template<typename NumT>
-    SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+    SparseMatrix<NumT>::SparseMatrix(const BandMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()),
-    impl(new typename Type<SpMatrix<NumT> >::T(src.rows(), src.cols()))
+    impl(new typename Type<SparseMatrix<NumT> >::T(src.rows(), src.cols()))
 {
     std::vector<Triplet> values = src.values();
     mat(*this).setFromTriplets(values.begin(), values.end());
@@ -437,46 +463,45 @@ template<typename NumT>
 
 // copy constructor from sparse matrix
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& src) :
+SparseMatrix<NumT>::SparseMatrix(const SparseMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()),
-    impl(new typename Type<SpMatrix<NumT> >::T(mat(src))) {}
+    impl(new typename Type<SparseMatrix<NumT> >::T(mat(src))) {}
 
 template<typename NumT>
-SpMatrix<NumT>::~SpMatrix()
+SparseMatrix<NumT>::~SparseMatrix()
 {
     delete &(mat(*this));
 }
 
 // element access
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
+NumT SparseMatrix<NumT>::at(size_t row, size_t col) const
 {
     return mat(*this).coeff(row, col);
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
+NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
-    if(index >= static_cast<size_t>(mat(*this).nonZeros()))
-        throw std::range_error("SpMatrix: element index out of range");
+    matrixRangeCheck(index < static_cast<size_t>(mat(*this).nonZeros()));
     row = mat(*this).innerIndexPtr()[index];
     col = binSearch(static_cast<int>(index), mat(*this).outerIndexPtr(), cols()+1);
     return mat(*this).valuePtr()[index];
 }
 
 template<typename NumT>
-size_t SpMatrix<NumT>::size() const
+size_t SparseMatrix<NumT>::size() const
 {
     return mat(*this).nonZeros();
 }
 
 template<typename NumT>
-std::vector<Triplet> SpMatrix<NumT>::values() const
+std::vector<Triplet> SparseMatrix<NumT>::values() const
 {
     std::vector<Triplet> result;
     result.reserve(mat(*this).nonZeros());
     for(size_t j=0; j<cols(); ++j)
-        for(typename Type<SpMatrix<NumT> >::T::InnerIterator i(mat(*this), j); i; ++i)
+        for(typename Type<SparseMatrix<NumT> >::T::InnerIterator i(mat(*this), j); i; ++i)
             result.push_back(Triplet(i.row(), i.col(), i.value()));
     return result;
 }
@@ -501,10 +526,20 @@ template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>
         mat(Y) += alpha * mat(X);
 }
 
-template<> void blas_daxpy(double alpha, const SpMatrix<double>& X, SpMatrix<double>& Y)
+template<> void blas_dmul(double alpha, Matrix<double>& Y)
+{
+    mat(Y) *= alpha;
+}
+
+template<> void blas_daxpy(double alpha, const SparseMatrix<double>& X, SparseMatrix<double>& Y)
 {
     if(alpha!=0)
         mat(Y) += alpha * mat(X);
+}
+
+template<> void blas_dmul(double alpha, SparseMatrix<double>& Y)
+{
+    mat(Y) *= alpha;
 }
 
 template<typename MatrixType>
@@ -559,7 +594,7 @@ void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
     size_t NR2 = TransB==CblasNoTrans ? B.rows() : B.cols();
     size_t NC2 = TransB==CblasNoTrans ? B.cols() : B.rows();
     if(NC1 != NR2 || NR1 != C.rows() || NC2 != C.cols())
-        throw std::invalid_argument("blas_dgemm: incompatible matrix dimensions");
+        throw std::length_error("blas_dgemm: incompatible matrix dimensions");
     if(TransA == CblasNoTrans) {
         if(TransB == CblasNoTrans) {
             if(beta==0)
@@ -581,7 +616,7 @@ void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
         } else {
             if(beta==0)
                 mat(C) = alpha * mat(A).transpose() * mat(B).transpose();
-            else  // in this rare case, and if MatrixType==SpMatrix, we need to convert the storage order
+            else  // in this rare case, and if MatrixType==SparseMatrix, we need to convert the storage order
                 mat(C) = typename Type<MatrixType>::T(alpha * mat(A).transpose() * mat(B).transpose())
                     + beta * mat(C);
         }
@@ -659,19 +694,19 @@ void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_
 typedef Eigen::PartialPivLU< Type< Matrix<double> >::T> LUDecompImpl;
 
 /// LU decomposition for sparse matrices
-typedef Eigen::SparseLU< Type< SpMatrix<double> >::T> SpLUDecompImpl;
+typedef Eigen::SparseLU< Type< SparseMatrix<double> >::T> SparseLUDecompImpl;
 
 LUDecomp::LUDecomp(const Matrix<double>& M) :
     sparse(false), impl(new LUDecompImpl(mat(M))) {}
 
-LUDecomp::LUDecomp(const SpMatrix<double>& M) :
+LUDecomp::LUDecomp(const SparseMatrix<double>& M) :
     sparse(true), impl(NULL)
 {
-    SpLUDecompImpl* LU = new SpLUDecompImpl();
+    SparseLUDecompImpl* LU = new SparseLUDecompImpl();
     LU->compute(mat(M));
     if(LU->info() != Eigen::Success) {
         delete LU;
-        throw std::runtime_error("Sparse LUDecomp failed");
+        throw std::domain_error("Sparse LUDecomp failed");
     }
     impl = LU;
 }
@@ -688,7 +723,7 @@ LUDecomp::LUDecomp(const LUDecomp& src) :
 LUDecomp::~LUDecomp()
 {
     if(sparse)
-        delete static_cast<const SpLUDecompImpl*>(impl);
+        delete static_cast<const SparseLUDecompImpl*>(impl);
     else
         delete static_cast<const LUDecompImpl*>(impl);
 }
@@ -698,7 +733,7 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
     if(!impl)
         throw std::runtime_error("LUDecomp not initialized");
     if(sparse)
-        return toStdVector(static_cast<const SpLUDecompImpl*>(impl)->solve(toEigenVector(rhs)));
+        return toStdVector(static_cast<const SparseLUDecompImpl*>(impl)->solve(toEigenVector(rhs)));
     else
         return toStdVector(static_cast<const LUDecompImpl*>(impl)->solve(toEigenVector(rhs)));
 }
@@ -795,17 +830,17 @@ inline NumT* xnew(size_t size) {
 // default constructor
 template<typename NumT>
 Matrix<NumT>::Matrix() :
-    IMatrix<NumT>(), impl(NULL) {}
+    IMatrixDense<NumT>(), impl(NULL) {}
 
 // constructor without data initialization
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols) :
-    IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols)) {}
+    IMatrixDense<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols)) {}
 
 // constructor with a given initial value
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
-    IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
+    IMatrixDense<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nCols*nRows, value);
 }
@@ -813,7 +848,7 @@ Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const NumT value) :
 // copy constructor from a dense matrix
 template<typename NumT>
 Matrix<NumT>::Matrix(const Matrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
+    IMatrixDense<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
 {
     std::copy(
         /*src  begin*/ static_cast<const NumT*>(src.impl),
@@ -823,8 +858,8 @@ Matrix<NumT>::Matrix(const Matrix<NumT>& src) :
 
 // copy constructor from a sparse matrix
 template<typename NumT>
-Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
+Matrix<NumT>::Matrix(const SparseMatrix<NumT>& src) :
+    IMatrixDense<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + rows()*cols(), 0);
     size_t numelem = src.size();
@@ -838,7 +873,7 @@ Matrix<NumT>::Matrix(const SpMatrix<NumT>& src) :
 // copy constructor from a band matrix
 template<typename NumT>
 Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
-    IMatrix<NumT>(src.rows(), src.cols()),
+    IMatrixDense<NumT>(src.rows(), src.cols()),
     impl(xnew<NumT>(rows()*cols()))
 {
     const ptrdiff_t band = src.bandwidth(), width = band * 2 + 1, nRows = rows();
@@ -855,7 +890,7 @@ Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
 // constructor from triplets
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
-    IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
+    IMatrixDense<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, 0);
     size_t numelem = values.size();
@@ -865,7 +900,7 @@ Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& val
             static_cast<NumT*>(impl)[i*nCols+j] += static_cast<NumT>(values[k].v);
         else {
             delete[] static_cast<NumT*>(impl);
-            throw std::range_error("Matrix: triplet index out of range");
+            throw std::out_of_range("Matrix: triplet index out of range");
         }
     }
 }
@@ -881,8 +916,7 @@ template<typename NumT>
 const NumT& Matrix<NumT>::operator() (size_t row, size_t col) const
 {
 #ifdef DEBUG_RANGE_CHECK
-    if(row >= rows() || col >= cols())
-        throw std::range_error("Matrix: index out of range");
+    matrixRangeCheck(row < rows() && col < cols());
 #endif
     return static_cast<const NumT*>(impl)[row * cols() + col];
 }
@@ -892,8 +926,7 @@ template<typename NumT>
 NumT& Matrix<NumT>::operator() (size_t row, size_t col)
 {
 #ifdef DEBUG_RANGE_CHECK
-    if(row >= rows() || col >= cols())
-        throw std::range_error("Matrix: index out of range");
+    matrixRangeCheck(row < rows() && col < cols());
 #endif
     return static_cast<NumT*>(impl)[row * cols() + col];
 }
@@ -912,12 +945,12 @@ const NumT* Matrix<NumT>::data() const { return static_cast<const NumT*>(impl); 
 
 // empty constructor
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix() :
+SparseMatrix<NumT>::SparseMatrix() :
     IMatrix<NumT>(), impl(NULL) {}
 
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
+SparseMatrix<NumT>::SparseMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols), impl(NULL)
 {
     if(nRows*nCols==0)
@@ -932,7 +965,7 @@ SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>&
 
 // copy constructor from sparse matrix
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& srcObj) :
+SparseMatrix<NumT>::SparseMatrix(const SparseMatrix<NumT>& srcObj) :
     IMatrix<NumT>(srcObj.rows(), srcObj.cols()), impl(NULL)
 {
     if(rows()*cols() == 0)
@@ -945,7 +978,7 @@ SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& srcObj) :
 
 // copy constructor from band matrix
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+SparseMatrix<NumT>::SparseMatrix(const BandMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()), impl(NULL)
 {
     size_t nRows = src.rows();
@@ -963,40 +996,39 @@ SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
 }
 
 template<typename NumT>
-SpMatrix<NumT>::~SpMatrix()
+SparseMatrix<NumT>::~SparseMatrix()
 {
     if(impl)
         gsl_spmatrix_free(static_cast<gsl_spmatrix*>(impl));
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
+NumT SparseMatrix<NumT>::at(size_t row, size_t col) const
 {
     if(impl)
         return static_cast<NumT>(gsl_spmatrix_get(static_cast<const gsl_spmatrix*>(impl), row, col));
     else
-        throw std::range_error("SpMatrix: empty matrix");
+        throw std::length_error("SparseMatrix: empty matrix");
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
+NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
     const gsl_spmatrix* sp = static_cast<const gsl_spmatrix*>(impl);
-    if(impl == NULL || index >= sp->nz)
-        throw std::range_error("SpMatrix: index out of range");
+    matrixRangeCheck(impl != NULL && index < sp->nz);
     row = sp->i[index];
     col = binSearch(index, sp->p, sp->size2+1);
     return static_cast<NumT>(sp->data[index]);
 }
 
 template<typename NumT>
-size_t SpMatrix<NumT>::size() const
+size_t SparseMatrix<NumT>::size() const
 {
     return impl==NULL ? 0 : static_cast<const gsl_spmatrix*>(impl)->nz; 
 }
 
 template<typename NumT>
-std::vector<Triplet> SpMatrix<NumT>::values() const
+std::vector<Triplet> SparseMatrix<NumT>::values() const
 {
     std::vector<Triplet> result;
     if(impl == NULL)
@@ -1016,12 +1048,12 @@ std::vector<Triplet> SpMatrix<NumT>::values() const
 // no GSL support for sparse matrices - implement them as dense matrices
 
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix() :
+SparseMatrix<NumT>::SparseMatrix() :
     IMatrix<NumT>(), impl(NULL) {}
     
 // constructor from triplets
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
+SparseMatrix<NumT>::SparseMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrix<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
     std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, 0);
@@ -1032,14 +1064,14 @@ SpMatrix<NumT>::SpMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>&
             static_cast<NumT*>(impl)[i*nCols+j] += static_cast<NumT>(values[k].v);
         else {
             delete[] static_cast<NumT*>(impl);
-            throw std::range_error("SpMatrix: triplet index out of range");
+            throw std::out_of_range("SparseMatrix: triplet index out of range");
         }
     }
 }
 
 // copy constructor from sparse matrix
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& src) :
+SparseMatrix<NumT>::SparseMatrix(const SparseMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()),
     impl(xnew<NumT>(rows()*cols()))
 {
@@ -1051,7 +1083,7 @@ SpMatrix<NumT>::SpMatrix(const SpMatrix<NumT>& src) :
 
 // copy constructor from band matrix
 template<typename NumT>
-SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
+SparseMatrix<NumT>::SparseMatrix(const BandMatrix<NumT>& src) :
     IMatrix<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(src.rows()*src.cols()))
 {
     size_t nRows = src.rows();
@@ -1065,21 +1097,20 @@ SpMatrix<NumT>::SpMatrix(const BandMatrix<NumT>& src) :
 }
 
 template<typename NumT>
-SpMatrix<NumT>::~SpMatrix()
+SparseMatrix<NumT>::~SparseMatrix()
 {
     delete static_cast<NumT*>(impl);
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::operator() (size_t row, size_t col) const
+NumT SparseMatrix<NumT>::at(size_t row, size_t col) const
 {
-    if(row >= rows() || col >= cols())
-        throw std::range_error("SpMatrix: index out of range");
+    matrixRangeCheck(row < rows() && col < cols());
     return static_cast<const NumT*>(impl)[row * cols() + col];
 }
 
 template<typename NumT>
-NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
+NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 {
     row = index / cols();
     col = index % cols();
@@ -1087,10 +1118,10 @@ NumT SpMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) const
 }
 
 template<typename NumT>
-size_t SpMatrix<NumT>::size() const { return rows()*cols(); }
+size_t SparseMatrix<NumT>::size() const { return rows()*cols(); }
 
 template<typename NumT>
-std::vector<Triplet> SpMatrix<NumT>::values() const
+std::vector<Triplet> SparseMatrix<NumT>::values() const
 {
     std::vector<Triplet> result;
     for(size_t k=0; k<cols() * rows(); k++)
@@ -1145,19 +1176,27 @@ private:
 template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>& Y)
 {
     if(X.rows() != Y.rows() || X.cols() != Y.cols())
-        throw std::invalid_argument("blas_daxpy: incompatible sizes of input arrays");
+        throw std::length_error("blas_daxpy: incompatible sizes of input arrays");
     if(alpha==0) return;
-    size_t size = X.rows() * X.cols();
+    const size_t  size = X.size();
     const double* arrX = X.data();
     double* arrY = Y.data();
     for(size_t k=0; k<size; k++)
         arrY[k] += alpha*arrX[k];
 }
 
-template<> void blas_daxpy(double alpha, const SpMatrix<double>& X, SpMatrix<double>& Y)
+template<> void blas_dmul(double alpha, Matrix<double>& Y)
+{
+    const size_t size = Y.size();
+    double* y = Y.data();
+    for(size_t k=0; k<size; k++)
+        y[k] *= alpha;
+}
+
+template<> void blas_daxpy(double alpha, const SparseMatrix<double>& X, SparseMatrix<double>& Y)
 {
     if(X.rows() != Y.rows() || X.cols() != Y.cols())
-        throw std::invalid_argument("blas_daxpy: incompatible sizes of input arrays");
+        throw std::length_error("blas_daxpy: incompatible sizes of input arrays");
     if(alpha==0) return;
 #ifdef HAVE_GSL_SPARSE
     const gsl_spmatrix* spX = static_cast<const gsl_spmatrix*>(X.impl);
@@ -1176,9 +1215,20 @@ template<> void blas_daxpy(double alpha, const SpMatrix<double>& X, SpMatrix<dou
     if(alpha!=1)
         gsl_spmatrix_free(tmpX);
 #else
-    size_t size = X.rows() * X.cols();
+    const size_t size = X.rows() * X.cols();
     for(size_t k=0; k<size; k++)
         static_cast<double*>(Y.impl)[k] += alpha * static_cast<const double*>(X.impl)[k];
+#endif
+}
+
+template<> void blas_dmul(double alpha, SparseMatrix<double>& Y)
+{
+#ifdef HAVE_GSL_SPARSE
+    gsl_spmatrix_scale(static_cast<gsl_spmatrix*>(Y.impl), alpha);
+#else
+    const size_t size = Y.rows() * Y.cols();
+    for(size_t k=0; k<size; k++)
+        static_cast<double*>(Y.impl)[k] *= alpha;
 #endif
 }
 
@@ -1188,11 +1238,11 @@ template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const Matrix<do
     gsl_blas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, MatC(A), VecC(X), beta, Vec(Y));
 }
 
-template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const SpMatrix<double>& A,
+template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const SparseMatrix<double>& A,
     const std::vector<double>& X, double beta, std::vector<double>& Y)
 {
     if(A.impl == NULL)
-        throw std::invalid_argument("blas_dgemv: empty matrix");
+        throw std::length_error("blas_dgemv: empty matrix");
 #ifdef HAVE_GSL_SPARSE
     gsl_spblas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, static_cast<const gsl_spmatrix*>(A.impl),
         VecC(X), beta, Vec(Y));
@@ -1216,10 +1266,10 @@ template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
 }
 
 template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
-    double alpha, const SpMatrix<double>& A, const SpMatrix<double>& B, double beta, SpMatrix<double>& C)
+    double alpha, const SparseMatrix<double>& A, const SparseMatrix<double>& B, double beta, SparseMatrix<double>& C)
 {
     if(A.impl == NULL || B.impl == NULL || C.impl == NULL)
-        throw std::invalid_argument("blas_dgemv: empty matrix");
+        throw std::length_error("blas_dgemv: empty matrix");
 #ifdef HAVE_GSL_SPARSE
     if(beta!=0)
         throw std::runtime_error("blas_dgemm: beta!=0 not implemented");
@@ -1297,7 +1347,7 @@ LUDecomp::LUDecomp(const Matrix<double>& M) :
     sparse(false), impl(new LUDecompImpl(M.data(), M.rows(), M.cols())) {}
 
 // GSL does not offer LU decomposition of sparse matrices, so they are converted to dense ones
-LUDecomp::LUDecomp(const SpMatrix<double>& M) :
+LUDecomp::LUDecomp(const SparseMatrix<double>& M) :
     sparse(false),
 #ifdef HAVE_GSL_SPARSE
     impl(new LUDecompImpl(Matrix<double>(M).data(), M.rows(), M.cols()))
@@ -1316,7 +1366,7 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
     if(!impl)
         throw std::runtime_error("LUDecomp not initialized");
     if(rhs.size() != static_cast<const LUDecompImpl*>(impl)->LU->size1)
-        throw std::invalid_argument("LUDecomp: incorrect size of RHS vector");
+        throw std::length_error("LUDecomp: incorrect size of RHS vector");
     std::vector<double> result(rhs.size());
     gsl_linalg_LU_solve(static_cast<const LUDecompImpl*>(impl)->LU,
         static_cast<const LUDecompImpl*>(impl)->perm, VecC(rhs), Vec(result));
@@ -1375,7 +1425,7 @@ std::vector<double> CholeskyDecomp::solve(const std::vector<double>& rhs) const
     if(!impl)
         throw std::runtime_error("CholeskyDecomp not initialized");
     if(rhs.size() != static_cast<const gsl_matrix*>(impl)->size1)
-        throw std::invalid_argument("CholeskyDecomp: incorrect size of RHS vector");
+        throw std::length_error("CholeskyDecomp: incorrect size of RHS vector");
     std::vector<double> result(rhs.size());
     gsl_linalg_cholesky_solve(static_cast<const gsl_matrix*>(impl), VecC(rhs), Vec(result));
     return result;
@@ -1424,7 +1474,7 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const
         throw std::runtime_error("SVDecomp not initialized");
     const SVDecompImpl* sv = static_cast<const SVDecompImpl*>(impl);
     if(rhs.size() != sv->U.rows())
-        throw std::invalid_argument("SVDecomp: incorrect size of RHS vector");
+        throw std::length_error("SVDecomp: incorrect size of RHS vector");
     std::vector<double> result(sv->U.cols());
     gsl_linalg_SV_solve(MatC(sv->U), MatC(sv->V), VecC(sv->S), VecC(rhs), Vec(result));
     return result;
@@ -1435,23 +1485,23 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const
 // template instantiations to be compiled (both for Eigen and GSL)
 template struct BandMatrix<float>;
 template struct BandMatrix<double>;
-template struct SpMatrix<float>;
-template struct SpMatrix<double>;
+template struct SparseMatrix<float>;
+template struct SparseMatrix<double>;
 template struct Matrix<float>;
 template struct Matrix<double>;
 template void blas_daxpy(double, const std::vector<double>&, std::vector<double>&);
 template void blas_daxpy(double, const Matrix<double>&, Matrix<double>&);
-template void blas_daxpy(double, const SpMatrix<double>&, SpMatrix<double>&);
+template void blas_daxpy(double, const SparseMatrix<double>&, SparseMatrix<double>&);
 template void blas_daxpy(double, const BandMatrix<double>&, BandMatrix<double>&);
 template void blas_dgemv(CBLAS_TRANSPOSE, double, const Matrix<double>&,
     const std::vector<double>&, double, std::vector<double>&);
-template void blas_dgemv(CBLAS_TRANSPOSE, double, const SpMatrix<double>&,
+template void blas_dgemv(CBLAS_TRANSPOSE, double, const SparseMatrix<double>&,
     const std::vector<double>&, double, std::vector<double>&);
 template void blas_dgemv(CBLAS_TRANSPOSE, double, const BandMatrix<double>&,
     const std::vector<double>&, double, std::vector<double>&);
 template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
     double, const Matrix<double>&, const Matrix<double>&, double, Matrix<double>&);
 template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
-    double, const SpMatrix<double>&, const SpMatrix<double>&, double, SpMatrix<double>&);
+    double, const SparseMatrix<double>&, const SparseMatrix<double>&, double, SparseMatrix<double>&);
 
 }  // namespace

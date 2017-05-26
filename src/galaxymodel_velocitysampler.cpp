@@ -119,7 +119,7 @@ particles::ParticleArrayCar assignVelocity(
     };
 
     // depending on the provided arguments, use different methods for assigning the velocities
-    SamplingMethod method =
+    const SamplingMethod method =
         beta !=beta  ? SD_EDDINGTON :
         kappa!=kappa ? SD_JEANSSPH  : SD_JEANSAXI;
 
@@ -161,7 +161,8 @@ particles::ParticleArrayCar assignVelocity(
         JeansAxi model(dens, pot, beta);
         return assignVelocityJeansAxi(pointCoords, pot, model, kappa);
     }
-    assert(!"assignVelocity(): unknown method");
+    assert(!"assignVelocity: unknown method");
+    return particles::ParticleArrayCar();
 }
 
 }

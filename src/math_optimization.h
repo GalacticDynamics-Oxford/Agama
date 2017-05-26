@@ -41,7 +41,7 @@ std::vector<double> linearOptimizationSolve(
     The task is to find the vector `x` that solves the system of linear equations
     A x = rhs,  satisfies constraints  xmin <= x <= xmax, and minimizes the cost function
     F(x) = L x + x^T Q x,  where L is the vector of 'linear penalties' and Q is the matrix
-    of 'quadratic penalties', in the present implementation a diagonal matrix is assumed.
+    of 'quadratic penalties'.
     \param[in]  A  is the matrix of the linear system (N_c rows, N_v columns, N_v>=N_c);
     \param[in]  rhs  is the RHS of the linear system (N_c elements, or the equality constraints);
     \param[in]  L  is the vector of linear penalties (N_v elements);
@@ -102,7 +102,7 @@ std::vector<double> linearOptimizationSolveApprox(
     const std::vector<NumT>& xmin = std::vector<NumT>(),
     const std::vector<NumT>& xmax = std::vector<NumT>());
 
-   /** A modification of quadratic optimization problem that always has a solution, even if
+/** A modification of quadratic optimization problem that always has a solution, even if
     it does not satisfy all constraints exactly. 
     The original linear system  A x = rhs  that has N_v variables and N_c constraints in the rhs is
     augmented with extra 2 N_c slack variables in the same way as in `linearOptimizationSolveApprox()`.

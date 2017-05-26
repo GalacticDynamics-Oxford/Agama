@@ -27,6 +27,35 @@ const double EPSREL_POTENTIAL_INT = 1e-6;
 /// relative accuracy in auxiliary root-finding routines
 const double ACCURACY_ROOT = 1e-6;
 
+/// helper class for averaging of density over azimuthal angle
+class DensityAzimuthalAverageIntegrand: public math::IFunctionNoDeriv {
+public:
+    DensityAzimuthalAverageIntegrand(const BaseDensity& _dens, double _R, double _z, int _m) :
+        dens(_dens), R(_R), z(_z), m(_m) {};
+    virtual double value(double phi) const {
+        return dens.density(coord::PosCyl(R, z, phi)) *
+            (m==0 ? 1 : m>0 ? cos(m*phi) : sin(-m*phi));
+    }
+private:
+    const BaseDensity& dens;
+    double R, z, m;
+};
+
+/** Compute m-th azimuthal harmonic of density profile by averaging the density over angle phi
+    with weight factor cos(m phi) or sin(m phi), at the given point in (R,z) plane */
+double computeRho_m(const BaseDensity& dens, double R, double z, int m)
+{   // compute m-th azimuthal Fourier harmonic coefficient
+    // by averaging the input density over phi, if this is necessary at all
+    if(isAxisymmetric(dens))
+        return (m==0 ? dens.density(coord::PosCyl(R, z, 0)) : 0);
+    double phimax = (dens.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? M_PI_2 : 2*M_PI;
+    if(m==0)
+        return math::integrate(DensityAzimuthalAverageIntegrand(dens, R, z, m),
+            0, phimax, 1e-4) / phimax;
+    return math::integrateGL(DensityAzimuthalAverageIntegrand(dens, R, z, m),
+        0, phimax, std::max<int>(8, math::abs(m))) / phimax;
+}
+
 /** helper class for integrating the density weighted with spherical harmonics over 3d volume;
     angular part is shared between BasisSetExp and SplineExp, 
     which further define additional functions for radial multiplication factor. 

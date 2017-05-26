@@ -56,7 +56,7 @@ public:
         \param[in]  indComp  is the index of component, 0 <= indComp < size();
         \param[in]  reqRelError is the required accuracy (relative error);
         \return  the phase volume;
-        \throw   std::range_error if the index is out of range.
+        \throw   std::out_of_range if the index is out of range.
     */
     double computePhaseVolume(const unsigned int indComp, const double reqRelError=1e-3) const;
 

@@ -35,7 +35,7 @@ dt = time.time()
 c_actfinder = agama.ActionFinder(w_pot._pot)
 print 'Time to set up action finder: %s s' % (time.time()-dt)
 ### this needs to be done once for the given potential,
-### and initializes the interfocal distance estimator for all values of E and L
+### and initializes the focal distance estimator for all values of E and L
 
 ### conversion from prolate spheroidal to cylindrical coords
 def ProlSphToCyl(la, nu, ifd):
@@ -65,7 +65,7 @@ def compare(ic, inttime, numsteps):
     print 'Time to integrate orbit in galpy: %s s' % (time.time()-dt)
 
     dt = time.time()
-    c_orb_car = agama.orbit(ic=[ic[0],0,ic[1],ic[3],ic[5],ic[4]], pot=w_pot._pot, time=inttime, step=inttime/numsteps)
+    c_orb_car = agama.orbit(ic=[ic[0],0,ic[1],ic[3],ic[5],ic[4]], potential=w_pot._pot, time=inttime, step=inttime/numsteps)
     print 'Time to integrate orbit in Agama: %s s' % (time.time()-dt)
     times_c = numpy.linspace(0,inttime,len(c_orb_car[:,0]))
     ### make it compatible with galpy's convention (native output is in cartesian coordinates)
@@ -73,7 +73,7 @@ def compare(ic, inttime, numsteps):
     c_orb[:,0] = (c_orb_car[:,0]**2+c_orb_car[:,1]**2)**0.5
     c_orb[:,3] = c_orb_car[:,2]
 
-    ### in galpy, this is the only tool that can estimate interfocal distance,
+    ### in galpy, this is the only tool that can estimate focal distance,
     ### but it requires the orbit to be computed first
     delta = estimateDeltaStaeckel(g_orb[:,0], g_orb[:,3], pot=g_pot)
     print "interfocal distance Delta=",delta
@@ -110,12 +110,12 @@ def compare(ic, inttime, numsteps):
 
     ### use the Agama action routine for the same value of Delta as in galpy
     dt = time.time()
-    c_act = agama.actions(point=c_orb_car, pot=w_pot._pot, ifd=delta)   # explicitly specify interfocal distance
+    c_act = agama.actions(point=c_orb_car, potential=w_pot._pot, fd=delta)   # explicitly specify focal distance
     print 'Time to compute actions in Agama: %s s' % (time.time()-dt)
 
     ### use the Agama action finder (initialized at the beginning) that automatically determines the best value of Delta
     dt = time.time()
-    a_act = c_actfinder(c_orb_car)   # use the interfocal distance estimated by action finder
+    a_act = c_actfinder(c_orb_car)   # use the focal distance estimated by action finder
     print 'Time to compute actions in Agama: %s s' % (time.time()-dt)
 
     ### plot Jr vs Jz

@@ -400,10 +400,6 @@ double getRadiusByMass(const BaseDensity& dens, const double enclosedMass);
 /** Find the asymptotic power-law index of density profile at r->0 */
 double getInnerDensitySlope(const BaseDensity& dens);
 
-/** Compute m-th azimuthal harmonic of density profile by averaging the density over angle phi 
-    with weight factor cos(m phi) or sin(m phi), at the given point in (R,z) plane */
-double computeRho_m(const BaseDensity& dens, double R, double z, int m);
-
 
 /** Scaling transformation for 3-dimensional integration over volume:
     \param[in]  vars are three scaled variables that lie in the range [0:1];
@@ -436,6 +432,85 @@ public:
     const bool axisym;        ///< flag determining if the density is axisymmetric
     const bool nonnegative;   ///< flag determining whether to return zero if density was negative
 };
+
+/// list of quantities that may be spherically- or azimuthally-averaged
+enum AverageMode {
+    AV_RHO,  ///< density
+    AV_PHI,  ///< potential
+    AV_DR,   ///< potential derivative by cylindrical radius R
+    AV_DZ    ///< potential derivative by z
+};
+
+template<AverageMode mode, class T>
+double azimuthalAverageValue(const T& fnc, const coord::PosCyl& pos);
+template<> inline double azimuthalAverageValue<AV_RHO>(const BaseDensity& fnc, const coord::PosCyl& pos)
+{ return fnc.density(pos); }
+template<> inline double azimuthalAverageValue<AV_PHI>(const BasePotential& fnc, const coord::PosCyl& pos)
+{ return fnc.value(pos); }
+template<> inline double azimuthalAverageValue<AV_DR>(const BasePotential& fnc, const coord::PosCyl& pos) {
+    coord::GradCyl grad;
+    fnc.eval(pos, NULL, &grad);
+    return grad.dR;
+}
+template<> inline double azimuthalAverageValue<AV_DZ>(const BasePotential& fnc, const coord::PosCyl& pos) {
+    coord::GradCyl grad;
+    fnc.eval(pos, NULL, &grad);
+    return grad.dz;
+}
+
+/** compute a simple azimuthal average of a given quantity (quick and dirty, no error control)
+    \tparam mode  is the quantity (density, potential or its derivative)
+    \tparam T     is BaseDensity or BasePotential
+    \param[in]  fnc is the instance of density or potential
+    \param[in]  R,z is the point in the meridional plane where the average should be computed
+    \return  the averaged value
+*/
+template<AverageMode mode, class T>
+inline double azimuthalAverage(const T& fnc, double R, double z)
+{
+    if(isAxisymmetric(fnc))  // nothing to average
+        return azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, 0));
+    const int nphi = 8;  // number of equally-spaced points in phi
+    double result  = 0.;
+    for(int i=0; i<=nphi; i++) {
+        double phi = i*M_PI/(nphi+0.5);
+        double v = azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, phi));
+        result  += v;
+        if(i==0) continue;
+        if(!isYReflSymmetric(fnc))  // a different value for the lower half-plane
+            v    = azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, -phi));
+        result  += v;
+    }
+    return result / (2*nphi+1);
+}
+
+/** compute a simple spherical average of a given quantity (very primitive,
+    using a hard-coded fixed low order quadrature rule - intended for quick-and-dirty estimates)
+    \tparam mode  is the quantity (density, potential or its derivative)
+    \tparam T     is BaseDensity or BasePotential
+    \param[in]  fnc is the instance of density or potential
+    \param[in]  r is the spherical radius at which the average should be computed
+    \return  the averaged value
+*/
+template<AverageMode mode, class T>
+inline double sphericalAverage(const T& fnc, double r)
+{
+    if(isSpherical(fnc))  // nothing to average - just a single value
+        return azimuthalAverageValue<mode>(fnc, coord::PosCyl(r, 0, 0));
+    static double   // nodes and weights of Gauss-Legendre quadrature with 9 points in cos(theta)
+    costh [5] = {0, 0.3242534234, 0.6133714327, 0.8360311073, 0.9681602395},
+    sinth [5] = {1, 0.9459702519, 0.7897945844, 0.5486820460, 0.2503312819},
+    weight[5] = {0.08255983875, 0.1561735385, 0.1303053482, 0.09032408035, 0.04063719418};
+    double result = 0.;
+    for(int i=0; i<5; i++) {
+        double v = azimuthalAverage<mode>(fnc, r*sinth[i],  r*costh[i]) * weight[i];
+        result  += v;
+        if(i!=0 && !isZReflSymmetric(fnc))
+            v    = azimuthalAverage<mode>(fnc, r*sinth[i], -r*costh[i]) * weight[i];
+        result  += v;
+    }
+    return result;
+}
 
 ///@}
 }  // namespace potential

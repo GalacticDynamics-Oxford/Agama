@@ -172,7 +172,7 @@ public:
         \param[in]  fvalues  - depending on the length of this array, in may mean two things:
         in the first case, an array of function values at grid nodes (same length as xvalues);
         in the second case, an array of B-spline amplitudes, with length equal to xvalues.size()+2.
-        \throws  std::invalid_argument or std::range_error if grid is too small or not monotonic,
+        \throw  std::invalid_argument or std::length_error if grid is too small or not monotonic,
         or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
@@ -284,7 +284,10 @@ private:
 */
 template<int N>
 class BsplineInterpolator1d: public math::IFunctionNdim {
+    const std::vector<double> xnodes;  ///< grid nodes
+    const unsigned int numComp;        ///< number of basis functions
 public:
+
     /** Initialize a 1d interpolator from the provided arrays of grid nodes in x.
         There is no work done in the constructor apart from checking the validity of parameters.
         \param[in] xnodes are the grid nodes sorted in increasing order, must have at least 2 elements.
@@ -324,7 +327,7 @@ public:
         \return    the weighted sum of all potentially non-zero basis functions or their derivatives
         at this point, multiplied by their respective amplitudes, or 0 if the input location is outside
         the grid definition region.
-        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw  std::length_error if the length of `amplitudes` does not correspond to numComp.
     */
     double interpolate(const double x, const std::vector<double> &amplitudes,
         const unsigned int derivOrder = 0) const;
@@ -336,7 +339,7 @@ public:
         \param[in]  amplitudes  is the array of numComp amplitudes of basis functions;
         \param[in]  n   is the power-law index for the optional multiplier x^n;
         \return     the value of integral (exact up to machine precision).
-        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw  std::length_error if the length of `amplitudes` does not correspond to numComp.
     */
     double integrate(double x1, double x2, const std::vector<double> &amplitudes, int n=0) const;
 
@@ -345,7 +348,7 @@ public:
         \return  an array of amplutides for a different B-spline of degree N-1 constructed
         for the same x-nodes and representing the derivative of the original B-spline;
         the size of this array is one less than the input array.
-        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw  std::length_error if the length of `amplitudes` does not correspond to numComp.
     */
     std::vector<double> deriv(const std::vector<double> &amplitudes) const;
 
@@ -354,7 +357,7 @@ public:
         \return  an array of amplutides for a different B-spline of degree N+1 constructed
         for the same x-nodes and representing the antiderivative of the original B-spline;
         the size of this array is one element larger than the input array, and the 0th element is zero.
-        \throw  std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw  std::length_error if the length of `amplitudes` does not correspond to numComp.
     */
     std::vector<double> antideriv(const std::vector<double> &amplitudes) const;
 
@@ -370,10 +373,6 @@ public:
 
     /** return the nodes of the grid used for interpolation */
     const std::vector<double>& xvalues() const { return xnodes; }
-
-private:
-    const std::vector<double> xnodes;  ///< grid nodes
-    const unsigned int numComp;        ///< number of basis functions
 };
 
 /// simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
@@ -418,7 +417,7 @@ public:
         at the grid of points returned by `integrPoints()`.
         \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
         \return  the vector v_n  of length `interp.numValues()` (number of basis functions).
-        \throw   std::range_error if the length of fncValues differs from integrNodes.
+        \throw   std::length_error if the length of fncValues differs from integrNodes.
     */
     std::vector<double> computeProjVector(
         const std::vector<double>& fncValues, unsigned int derivOrder=0) const;
@@ -433,7 +432,7 @@ public:
         \param[in]  derivOrderQ  is the order `p` of derivatives of the column-wise basis functions.
         \return  the band matrix A_{mn}: a square matrix with size `interp.numValues()` and
         at most 2*N+1 nonzero values around the main diagonal in each row.
-        \throw  std::range_error if the length of fncValues differs from integrNodes.
+        \throw  std::length_error if the length of fncValues differs from integrNodes.
     */
     BandMatrix<double> computeProjMatrix(
         const std::vector<double>& fncValues = std::vector<double>(),
@@ -655,7 +654,7 @@ public:
         \param[in]  znodes  is the grid in z dimension with size nz>=2;
         \param[in]  fvalues is the flattened array of function values:
         fvalues[(i*ny + j) * nz + k] = f(xnodes[i], ynodes[j], znodes[k]).
-        \throw std::invalid_argument if the grid sizes are incorrect.
+        \throw std::length_error if the grid sizes are incorrect.
     */
     LinearInterpolator3d(
         const std::vector<double>& xnodes,
@@ -698,7 +697,7 @@ public:
         fvalues[(i*ny + j) * nz + k] = f(xnodes[i], ynodes[j], znodes[k]);
         b) the array of B-spline amplitudes - in this context, the dimensions of
         the grid of amplitudes should be (nx+2) * (ny+2) * (nz+2).
-        \throw std::invalid_argument if the grid sizes are incorrect.
+        \throw std::length_error if the grid sizes are incorrect.
     */
     CubicSpline3d(
         const std::vector<double>& xnodes,
@@ -799,7 +798,7 @@ public:
         \param[in]  indComp  is the index of component (0 <= indComp < numComp);
         \return  the value of a single interpolation basis function at this point,
         or zero if the point is outside the grid definition region;
-        \throw std::range_error if indComp is out of range.
+        \throw std::out_of_range if indComp is out of range.
     */
     double valueOfComponent(const double point[3], unsigned int indComp) const;
 
@@ -808,7 +807,7 @@ public:
         \param[in]  indComp is the index of component;
         \param[out] xlower  are the coordinates of the lower corner of the region;
         \param[out] xupper  same for the upper corner;
-        \throw std::range error if indComp >= numComp.
+        \throw std::out_of_range error if indComp >= numComp.
     */
     void nonzeroDomain(unsigned int indComp, double xlower[3], double xupper[3]) const;
 
@@ -828,7 +827,7 @@ public:
         \return    the weighted sum of all potentially non-zero basis functions at this point,
         multiplied by their respective amplitudes, or 0 if the input location is outside
         the grid definition region.
-        \throw std::range_error if the length of `amplitudes` does not correspond to numComp.
+        \throw std::length_error if the length of `amplitudes` does not correspond to numComp.
     */
     double interpolate(const double point[3], const std::vector<double> &amplitudes) const;
 
@@ -867,7 +866,7 @@ public:
     double zmax() const { return znodes.back();  }
 
     /** return the (sparse) matrix of roughness penalties */
-    SpMatrix<double> computeRoughnessPenaltyMatrix() const;
+    SparseMatrix<double> computeRoughnessPenaltyMatrix() const;
 
 private:
     std::vector<double> xnodes, ynodes, znodes;  ///< grid nodes in x, y and z directions
@@ -1089,7 +1088,7 @@ enum FitOptions {
     and ln(P(x)) is piecewise-linear, with the values at grid nodes equal to the amplitudes.
     For N=3, the amplitudes may be used to construct a clamped cubic spline for ln(P(x))
     by providing this array to the constructor of CubicSpline class.
-    \throws  std::invalid_argument exception if samples have negative weights or lie
+    \throw  std::invalid_argument exception if samples have negative weights or lie
     outside the allowed boundaries, or grid points are invalid.
 */
 template<int N>

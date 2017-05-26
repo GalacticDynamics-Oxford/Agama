@@ -878,7 +878,7 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
     while(!gridLogH.empty() && df(exp(gridLogH.back())) <= MIN_VALUE_ROUNDOFF)  // ensure that f(hmax)>0
         gridLogH.pop_back();
     if(gridLogH.size() < 3)
-        throw std::runtime_error("DiffusionCoefs: f(h) is nowhere positive");
+        throw std::runtime_error("SphericalModelLocal: f(h) is nowhere positive");
     const double logHmin        = gridLogH.front(),  logHmax = gridLogH.back();
     const unsigned int npoints  = gridLogH.size();
     const unsigned int npointsY = 100;
@@ -898,11 +898,11 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
             (gridLogH[npoints-1] - gridLogH[npoints-2]);
     }    
     if(!(outerFslope < -1))  // in this case SphericalModel would have already thrown the same exception
-        throw std::runtime_error("DiffusionCoefs: f(h) falls off too slowly as h-->infinity");
+        throw std::runtime_error("SphericalModelLocal: f(h) falls off too slowly as h-->infinity");
     double outerEslope = outerH / outerG / outerE;
     double outerRatio  = outerFslope / outerEslope;
     if(!(outerRatio > 0))
-        throw std::runtime_error("DiffusionCoefs: weird asymptotic behaviour of phase volume\n"
+        throw std::runtime_error("SphericalModelLocal: weird asymptotic behaviour of phase volume\n"
             "h(E="+utils::toString(outerE)+")="+utils::toString(outerH) +
             "; dh/dE="+utils::toString(outerG) + " => outerEslope="+utils::toString(outerEslope) +
             ", outerFslope="+utils::toString(outerFslope));
@@ -965,14 +965,14 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
                 } else {
                     // this procedure sometimes fails, since hypergeom2F1 is not very robust;
                     // in this case we simply keep the values computed by numerical integration
-                    utils::msg(utils::VL_WARNING, "DiffusionCoefs", "Can't compute asymptotic value");
+                    utils::msg(utils::VL_WARNING, "SphericalModelLocal", "Can't compute asymptotic value");
                 }
             }
             double dv = sqrt(phasevol.deltaE(logHcurr, gridLogH[i]));
             double J1overJ0 = J1acc / J0acc / dv;
             double J3overJ0 = J3acc / J0acc / pow_3(dv);
             if(J1overJ0<=0 || J3overJ0<=0 || !isFinite(J1overJ0+J3overJ0)) {
-                utils::msg(utils::VL_WARNING, "DiffusionCoefs", "Invalid value"
+                utils::msg(utils::VL_WARNING, "SphericalModelLocal", "Invalid value"
                     "  J0="+utils::toString(J0acc)+
                     ", J1="+utils::toString(J1acc)+
                     ", J3="+utils::toString(J3acc));
@@ -1010,7 +1010,7 @@ void SphericalModelLocal::evalLocal(
     double hPhi = phasevol(Phi);
     double hE   = phasevol(E);
     if(!(Phi<0 && hE >= hPhi))
-        throw std::invalid_argument("DiffusionCoefs: incompatible values of E and Phi");
+        throw std::invalid_argument("SphericalModelLocal: incompatible values of E and Phi");
 
     // compute the 1d interpolators for I0, J0
     double I0 = this->I0(hE);
@@ -1031,24 +1031,26 @@ void SphericalModelLocal::evalLocal(
     dv2par =  mult * (I0 + J3);
     dv2per =  mult * (I0 * 2 + J1 * 3 - J3);
     /*if(loghPhi<X)
-        utils::msg(utils::VL_WARNING, "DiffusionCoefs",
+        utils::msg(utils::VL_WARNING, "SphericalModelLocal",
         "Extrapolating to small h: log(h(Phi))="+utils::toString(loghPhi)+
         ", log(h(E))="+utils::toString(loghE)+
         ", I0="+utils::toString(I0)+", J0="+utils::toString(J0));*/
 }
 
+/// Helper class for finding the value of energy at which
+/// the cumulative distribution function equals the target value
 class VelocitySampleRootFinder: public math::IFunctionNoDeriv
 {
-    const SphericalModel& model;
-    const math::CubicSpline2d& intJ1;
-    const double loghPhi;
-    const double Phi;
-    const double I0plusJ0;
-    const double target;
+    const SphericalModel& model;      ///< the model providing h(E) and J0(h)
+    const math::CubicSpline2d& intJ1; ///< J1 as a function of h(E) and h(Phi)
+    const double Phi;                 ///< Phi, the potential at the given radius
+    const double loghPhi;             ///< log(h(Phi)) is cached to avoid its repeated evaluation
+    const double I0plusJ0;            ///< I0(h(Phi))
+    const double target;              ///< target value of the cumulative DF
 public:
     VelocitySampleRootFinder(const SphericalModel& _model, const math::CubicSpline2d& _intJ1,
-        const double _loghPhi, const double _Phi, const double _I0plusJ0, const double _target) :
-        model(_model), intJ1(_intJ1), loghPhi(_loghPhi), Phi(_Phi), I0plusJ0(_I0plusJ0), target(_target)
+        const double _Phi, const double _loghPhi, const double _I0plusJ0, const double _target) :
+        model(_model), intJ1(_intJ1), Phi(_Phi), loghPhi(_loghPhi), I0plusJ0(_I0plusJ0), target(_target)
     {}
     double value(const double loghEoverhPhi) const
     {
@@ -1064,15 +1066,16 @@ public:
 double SphericalModelLocal::sampleVelocity(double Phi) const
 {
     if(!(Phi<0))
-        throw std::invalid_argument("DiffusionCoefs: invalid value of Phi");
+        throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
     double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
     double I0plusJ0 = I0(hPhi);
     double maxJ1    = exp(intJ1.value(loghPhi, intJ1.ymax())) * I0plusJ0;
     double frac     = math::random();
     double target   = frac * maxJ1 * sqrt(-Phi);
+    // find the value of E at which the cumulative distribution function equals the target
     double loghEoverhPhi = math::findRoot(
-        VelocitySampleRootFinder(*this, intJ1, loghPhi, Phi, I0plusJ0, target),
+        VelocitySampleRootFinder(*this, intJ1, Phi, loghPhi, I0plusJ0, target),
         intJ1.ymin(), intJ1.ymax(), EPSROOT);
     assert(isFinite(loghEoverhPhi) && loghEoverhPhi>=0);
     double hE = exp(loghEoverhPhi + loghPhi);
@@ -1083,7 +1086,7 @@ double SphericalModelLocal::sampleVelocity(double Phi) const
 double SphericalModelLocal::density(double Phi) const
 {
     if(!(Phi<0))
-        throw std::invalid_argument("DiffusionCoefs: invalid value of Phi");
+        throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
     double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
     double J1overJ0 = exp(intJ1.value(loghPhi, intJ1.ymax()));
@@ -1094,7 +1097,7 @@ double SphericalModelLocal::density(double Phi) const
 double SphericalModelLocal::velDisp(double Phi) const
 {
     if(!(Phi<0))
-        throw std::invalid_argument("DiffusionCoefs: invalid value of Phi");
+        throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
     double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
     double J3overJ1 = exp(intJ3.value(loghPhi, intJ3.ymax()) - intJ1.value(loghPhi, intJ1.ymax()));

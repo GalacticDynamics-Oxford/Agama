@@ -170,6 +170,13 @@ double getRandomPerpendicularVector(const double vec[3], double vper[3]);
 */
 void getRandomRotationMatrix(double mat[9]);
 
+/** create a sequence of integers ranging from 0 to count-1 arranged in a random order.
+    \param[in]  count  is the number of elements in the permutation;
+    \param[out] output is the array to be filled by the permutation indices
+    (must be an existing array of sufficient length)
+*/
+void getRandomPermutation(int count, int output[]);
+
 /** return a quasirandom number from the Halton sequence.
     \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
     \param[in]  base   is the base of the sequence, must be a prime number;

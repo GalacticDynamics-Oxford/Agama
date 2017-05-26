@@ -34,6 +34,9 @@ namespace math{
 /// \name Matrix-related classes
 ///@{
 
+/// \throw std::out_of_range exception if the condition is not satisfied
+void matrixRangeCheck(bool condition);
+
 /// a triplet of numbers specifying an element in a sparse matrix
 struct Triplet {
     size_t i;  ///< row
@@ -91,6 +94,46 @@ private:
 };
 
 
+/** An abstract interface for a row-major dense-storage matrix.
+    Indexing scheme is  `M.at(row, column) = M.data()[ row * M.cols() + column ]`,
+    and the actual storage is provided by derived classes.
+*/
+template<typename NumT>
+struct IMatrixDense: public IMatrix<NumT> {
+    using IMatrix<NumT>::rows;
+    using IMatrix<NumT>::cols;
+
+    IMatrixDense(size_t nRows=0, size_t nCols=0) :
+        IMatrix<NumT>(nRows, nCols) {}
+
+    /// overall size of the matrix (= total number of elements, all of them are possibly nonzero)
+    virtual size_t size() const { return rows() * cols(); }
+
+    /// return an element from the matrix at the specified position (row and column index)
+    /// \throw std::out_of_range if row or col are larger than the respective matrix dimension
+    virtual NumT at(const size_t row, const size_t col) const {
+        matrixRangeCheck(row < rows() && col < cols());
+        return data()[row * cols() + col];
+    }
+
+    /// return the element with the given overall index and store its row and column indices
+    /// \throw std::out_of_range if the element index is larger than the total number of elements
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
+        row = index / cols();
+        col = index % cols();
+        matrixRangeCheck(row < rows());
+        return data()[index];
+    }
+
+    /// access the raw data storage
+    /// (data may be modified, but bound checks are responsibility of the calling code)
+    virtual NumT* data() = 0;
+
+    /// access the raw data storage (const overload)
+    virtual const NumT* data() const = 0;
+};
+
+
 /** Band-diagonal square matrices.
     A band matrix with dimension NxN and bandwidth B has nonzero elements A(i,j) only when |i-j| <= B.
     A diagonal matrix has bandwidth zero. An example of a penta-diagonal matrix (B=2) of size 8x8:
@@ -127,20 +170,22 @@ struct BandMatrix: public IMatrix<NumT> {
         IMatrix<NumT>(src.size(), src.size()), band(0), data(src) {}
 
     /// access the matrix element for reading
-    /// \throw std::range_error if the element is outside the band
+    /// \throw std::out_of_range if the element is outside the band
     const NumT& operator() (size_t row, size_t col) const;
     
     /// access the matrix element for writing
-    /// \throw std::range_error if the element is outside the band
+    /// \throw std::out_of_range if the element is outside the band
     NumT& operator() (size_t row, size_t col);
     
     /// return the number of nonzero elements
     virtual size_t size() const;
 
-    /// return an element from the matrix at the specified position
-    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
+    /// return an element from the matrix at the specified position (or zero if it is outside the band)
+    /// \throw std::out_of_range if the row or col index is larger than the matrix dimension
+    virtual NumT at(size_t row, size_t col) const;
 
     /// return the given nonzero element and store its row and column indices
+    /// \throw std::out_of_range if the index is larger than the total number of elements in the matrix
     virtual NumT elem(const size_t index, size_t &row, size_t &col) const;
 
     /// return the bandwidth of the matrix (number of nonzero elements on each side
@@ -158,47 +203,44 @@ private:
 
 /// Read-only sparse matrices
 template<typename NumT>
-struct SpMatrix: public IMatrix<NumT> {
+struct SparseMatrix: public IMatrix<NumT> {
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
 
     /// default (empty) constructor
-    SpMatrix();
+    SparseMatrix();
 
     /// create a matrix of given size from a list of triplets (row,column,value);
-    SpMatrix(size_t nRows, size_t nCols,
+    SparseMatrix(size_t nRows, size_t nCols,
         const std::vector<Triplet>& values = std::vector<Triplet>());
 
     /// copy constructor from a sparse matrix
-    SpMatrix(const SpMatrix<NumT>& src);
+    SparseMatrix(const SparseMatrix<NumT>& src);
 
     /// copy constructor from a band matrix
-    explicit SpMatrix(const BandMatrix<NumT>& src);
+    explicit SparseMatrix(const BandMatrix<NumT>& src);
 
 #if __cplusplus >= 201103L
     // move constructor in C++11
-    SpMatrix(SpMatrix&& src) : SpMatrix() {
+    SparseMatrix(SparseMatrix&& src) : SparseMatrix() {
         swap(*this, src);
     }
 #endif
 
     /// assignment from a sparse matrix
-    SpMatrix& operator=(SpMatrix<NumT> src) {
+    SparseMatrix& operator=(SparseMatrix<NumT> src) {
         swap(*this, src);
         return *this;
     }
 
     /// needed for standard containers and assignment operator
-    friend void swap(SpMatrix<NumT>& first, SpMatrix<NumT>& second) {
+    friend void swap(SparseMatrix<NumT>& first, SparseMatrix<NumT>& second) {
         using std::swap;
         swap(static_cast<IMatrix<NumT>&>(first), static_cast<IMatrix<NumT>&>(second));
         swap(first.impl, second.impl);
     }
 
-    virtual ~SpMatrix();
-
-    /// read-only access to a matrix element
-    NumT operator() (size_t row, size_t col) const;
+    virtual ~SparseMatrix();
 
     /// return all non-zero elements in a single array of triplets (row, column, value)
     std::vector<Triplet> values() const;
@@ -207,10 +249,12 @@ struct SpMatrix: public IMatrix<NumT> {
     virtual size_t size() const;
 
     /// return the given nonzero element and store its row and column indices
+    /// \throw std::out_of_range if index exceeds the total number of nonzero elements
     virtual NumT elem(const size_t index, size_t &row, size_t &col) const;
 
-    /// return an element from the matrix at the specified position
-    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
+    /// return an element from the matrix at the specified position, or zero if it is not stored
+    /// \throw std::out_of_range if row or col exceed the respective matrix dimension
+    virtual NumT at(size_t row, size_t col) const;
 
     void* impl;  ///< opaque implementation details
 };
@@ -218,7 +262,7 @@ struct SpMatrix: public IMatrix<NumT> {
 
 /** Ordinary matrices with dense storage */
 template<typename NumT>
-struct Matrix: public IMatrix<NumT> {
+struct Matrix: public IMatrixDense<NumT> {
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
 
@@ -235,7 +279,7 @@ struct Matrix: public IMatrix<NumT> {
     Matrix(const Matrix<NumT>& src);
 
     /// copy constructor from a sparse matrix
-    explicit Matrix(const SpMatrix<NumT>& src);
+    explicit Matrix(const SparseMatrix<NumT>& src);
 
     /// copy constructor from a band matrix
     explicit Matrix(const BandMatrix<NumT>& src);
@@ -266,33 +310,58 @@ struct Matrix: public IMatrix<NumT> {
     virtual ~Matrix();
 
     /// access the matrix element for reading
+    /// (range check is only performed if DEBUG_RANGE_CHECK macro is set)
     const NumT& operator() (size_t row, size_t col) const;
 
-    /// access the matrix element for writing
+    /// access the matrix element for writing (same remark about range check)
     NumT& operator() (size_t row, size_t col);
 
     /// access the raw data storage (flattened 2d array in row-major order):
     /// indexing scheme is  `M(row, column) = M.data[ row * M.cols() + column ]`;
     /// bound checks are the responsibility of the calling code
-    NumT* data();
+    virtual NumT* data();
 
     /// access the raw data storage (const overload)
-    const NumT* data() const;
-
-    /// get the number of elements
-    virtual size_t size() const { return cols() * rows(); }
-
-    /// return the given nonzero element and store its row and column indices
-    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
-        row = index / cols();
-        col = index % cols();
-        return operator()(row, col);
-    }
-
-    /// return an element from the matrix at the specified position
-    virtual NumT at(size_t row, size_t col) const { return operator()(row, col); }
+    virtual const NumT* data() const;
 
     void* impl;     ///< opaque implementation details
+};
+
+
+/** An adapter for representing an externally managed memory area as a dense row-major matrix */
+template<typename NumT>
+struct MatrixView: public IMatrixDense<NumT> {
+    using IMatrix<NumT>::rows;
+    using IMatrix<NumT>::cols;
+
+    /// construct the matrix view on the externally provided data storage with the given dimensions:
+    /// the pointer must remain valid for the lifetime of this object
+    MatrixView(size_t nRows, size_t nCols, NumT* _storage) :
+        IMatrixDense<NumT>(nRows, nCols), storage(_storage) {}
+
+    /// return the pointer to the external data storage
+    virtual NumT* data() { return storage; }
+
+    /// same but const-overload
+    virtual const NumT* data() const { return storage; }
+private:
+    NumT* storage;  ///< external data storage (neither created nor deallocated by this object)
+};
+
+/** Interface for a matrix transposition without creating a new matrix */
+template<typename NumT>
+class TransposedMatrix: public math::IMatrix<NumT> {
+    const math::IMatrix<NumT>& mat;       ///< the original matrix
+public:
+    TransposedMatrix(const math::IMatrix<NumT>& src):
+    math::IMatrix<NumT>(src.cols(), src.rows()), mat(src) {};
+    virtual size_t size() const { return mat.size(); }
+    virtual NumT at(const size_t row, const size_t col) const {
+        return mat.at(col, row);
+    }
+    virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
+        return mat.elem(index, col, row);
+    }
 };
 
 ///@}
@@ -357,17 +426,17 @@ template<typename Type>
 double blas_dnrm2(const Type& X);
 
 /// sum of two vectors or two matrices:  Y := alpha * X + Y
-/// \tparam Type may be std::vector<double>, Matrix<double>, SpMatrix<double> or BandMatrix<double>
+/// \tparam Type may be std::vector<double>, Matrix<double>, SparseMatrix<double> or BandMatrix<double>
 template<typename Type>
 void blas_daxpy(double alpha, const Type& X, Type& Y);
 
 /// multiply vector or matrix by a number:  Y := alpha * Y
-/// \tparam Type may be std::vector<double>, Matrix<double>, SpMatrix<double> or BandMatrix<double>
+/// \tparam Type may be std::vector<double>, Matrix<double>, SparseMatrix<double> or BandMatrix<double>
 template<typename Type>
-void blas_dmul(double alpha, Type& Y) { blas_daxpy(alpha-1, Y, Y); }
+void blas_dmul(double alpha, Type& Y);
 
 /// matrix-vector multiplication:  Y := alpha * A * X + beta * Y
-/// \tparam MatrixType is Matrix<double>, SpMatrix<double> or BandMatrix<double>
+/// \tparam MatrixType is Matrix<double>, SparseMatrix<double> or BandMatrix<double>
 template<typename MatrixType>
 void blas_dgemv(CBLAS_TRANSPOSE TransA,
     double alpha, const MatrixType& A, const std::vector<double>& X, double beta,
@@ -378,7 +447,7 @@ void blas_dtrmv(CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_DIAG Diag,
     const Matrix<double>& A, std::vector<double>& X);
 
 /// matrix product:  C := alpha * A * B + beta * C
-/// \tparam MatrixType is either Matrix<double> or SpMatrix<double>
+/// \tparam MatrixType is either Matrix<double> or SparseMatrix<double>
 template<typename MatrixType>
 void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
     double alpha, const MatrixType& A, const MatrixType& B, double beta, MatrixType& C);
@@ -418,7 +487,7 @@ public:
     explicit LUDecomp(const Matrix<double>& M);
 
     /// Construct a decomposition for the given sparse matrix M
-    explicit LUDecomp(const SpMatrix<double>& M);
+    explicit LUDecomp(const SparseMatrix<double>& M);
 
     /// Solve the matrix equation `M x = rhs` for x, using the LU decomposition of matrix M
     std::vector<double> solve(const std::vector<double>& rhs) const;

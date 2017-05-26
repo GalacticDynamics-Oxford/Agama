@@ -40,7 +40,7 @@ inline int bsplineValues(const double x, const double grid[], int size, double B
 {
     const int ind = binSearch(x, grid, size);
     if(ind<0 || ind>=size-1) {
-        std::fill(B, B+N+1, 0);
+        std::fill(B, B+N+1, 0.);
         return ind<0 ? 0 : size-2;
     }
 
@@ -201,13 +201,13 @@ Matrix<double> computeOverlapMatrix(const std::vector<double> &knots)
     and only Nvals of them are nonzero for each data point.
 */
 template<int Nvals>
-class SpMatrixSpecial {
+class SparseMatrixSpecial {
     unsigned int nRows;               ///< number of rows (large)
     unsigned int nCols;               ///< number of columns (small)
     std::vector<double> values;       ///< all entries stored in a single array Nrow * Nval
     std::vector<unsigned int> indcol; ///< indices of the first column in each row
 public:
-    SpMatrixSpecial(unsigned int Nrows, unsigned int Ncols) :
+    SparseMatrixSpecial(unsigned int Nrows, unsigned int Ncols) :
         nRows(Nrows), nCols(Ncols), values(Nrows * Nvals, 0), indcol(Nrows, 0) {}
 
     /// assign the entire row of the matrix (may be used in parallel loops)
@@ -284,7 +284,7 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
 {
     size_t numPoints = xval.size();
     if(fval.size() != numPoints)        
-        throw std::range_error("CubicSpline: input arrays are not equal in length");
+        throw std::length_error("CubicSpline: input arrays are not equal in length");
 
     // construct and solve the linear system for first derivatives
     std::vector<double> rhs(numPoints);
@@ -527,7 +527,7 @@ LinearInterpolator::LinearInterpolator(const std::vector<double>& xv, const std:
     BaseInterpolator1d(xv, yv)
 {
     if(fval.size() != xval.size())
-        throw std::range_error("LinearInterpolator: input arrays are not equal in length");
+        throw std::length_error("LinearInterpolator: input arrays are not equal in length");
 }
 
 void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
@@ -592,14 +592,14 @@ CubicSpline::CubicSpline(const std::vector<double>& _xval,
     BaseInterpolator1d(_xval, _fval), fder(_fder)
 {
     if(fval.size() != xval.size() || fder.size() != xval.size())
-        throw std::range_error("CubicSpline: input arrays are not equal in length");
+        throw std::length_error("CubicSpline: input arrays are not equal in length");
 }
 
 void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
 {
     int size = xval.size();
     if(size == 0)
-        throw std::range_error("Empty spline");
+        throw std::length_error("Empty spline");
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
         if(val)
@@ -628,7 +628,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
 bool CubicSpline::isMonotonic() const
 {
     if(fval.empty())
-        throw std::range_error("Empty spline");
+        throw std::length_error("Empty spline");
     bool ismonotonic=true;
     for(unsigned int index=0; ismonotonic && index < xval.size()-1; index++) {
         const double
@@ -667,7 +667,7 @@ double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) 
     if(x1>x2)
         return integrate(x2, x1, f);
     if(fval.empty())
-        throw std::range_error("Empty spline");
+        throw std::length_error("Empty spline");
     double result = 0;
     unsigned int size = xval.size();
     if(x1 <= xval[0]) {    // spline is linearly extrapolated at x<xval[0]
@@ -717,7 +717,7 @@ QuinticSpline::QuinticSpline(const std::vector<double>& xvalues,
 {
     unsigned int numPoints = xval.size();
     if(fval.size() != numPoints || fder.size() != numPoints)
-        throw std::range_error("QuinticSpline: input arrays are not equal in length");
+        throw std::length_error("QuinticSpline: input arrays are not equal in length");
     for(unsigned int i=0; i<numPoints; i++)
         if(!isFinite(fder[i]))
             throw std::invalid_argument("QuinticSpline: function derivatives must be finite "
@@ -729,7 +729,7 @@ void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double
 {
     int size = xval.size();
     if(size == 0)
-        throw std::range_error("Empty spline");
+        throw std::length_error("Empty spline");
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
         if(val)
@@ -763,7 +763,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
 {
     size_t numPoints = fvalues.size();
     if(numPoints != xvalues.size())
-        throw std::range_error("LogLogSpline: input arrays not equal");
+        throw std::length_error("LogLogSpline: input arrays not equal in length");
 
     // first initialize the derivatives for an un-scaled spline that will be used as a backup option
     fder = constructCubicSpline(xval, fval, derivLeft, derivRight);
@@ -824,7 +824,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
 {
     size_t numPoints = fvalues.size();
     if(numPoints != xvalues.size() || numPoints != fderivs.size())
-        throw std::range_error("LogLogSpline: input arrays not equal");
+        throw std::length_error("LogLogSpline: input arrays not equal in length");
     logxval.resize(numPoints);
     logfval. resize(numPoints);
     logfder. resize(numPoints, NAN);
@@ -893,7 +893,7 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
 {
     int size = xval.size();
     if(size == 0)
-        throw std::range_error("Empty spline");
+        throw std::length_error("Empty spline");
     int index = binSearch(x, &xval[0], size);
     double logx = log(x);
 
@@ -990,7 +990,7 @@ double BsplineInterpolator1d<N>::interpolate(
     const double x, const std::vector<double> &amplitudes, const unsigned int derivOrder) const
 {
     if(amplitudes.size() != numComp)
-        throw std::range_error("interpolate: invalid size of amplitudes array");
+        throw std::length_error("interpolate: invalid size of amplitudes array");
     if(derivOrder > N)
         return 0;
     if(derivOrder > 3)
@@ -1010,7 +1010,7 @@ double BsplineInterpolator1d<N>::interpolate(
 template<int N>
 void BsplineInterpolator1d<N>::eval(const double* x, double values[]) const
 {
-    std::fill(values, values+numComp, 0);
+    std::fill(values, values+numComp, 0.);
     double bspl[N+1];
     unsigned int leftInd = bsplineValues<N>(*x, &xnodes[0], xnodes.size(), bspl);
     for(int i=0; i<=N; i++)
@@ -1021,7 +1021,7 @@ template<int N>
 std::vector<double> BsplineInterpolator1d<N>::deriv(const std::vector<double> &amplitudes) const
 {    
     if(amplitudes.size() != numComp)
-        throw std::range_error("deriv: invalid size of amplitudes array");
+        throw std::length_error("deriv: invalid size of amplitudes array");
     std::vector<double> result(amplitudes);
     for(int i=0; i<(int)numComp-1; i++) {
         result[i] = N * (result[i+1] - result[i]) * denom(&xnodes[0], xnodes.size(), i-N+1, i+1);
@@ -1034,7 +1034,7 @@ template<int N>
 std::vector<double> BsplineInterpolator1d<N>::antideriv(const std::vector<double> &amplitudes) const
 {    
     if(amplitudes.size() != numComp)
-        throw std::range_error("antideriv: invalid size of amplitudes array");
+        throw std::length_error("antideriv: invalid size of amplitudes array");
     std::vector<double> result(numComp+1);
     for(int i=0; i<(int)numComp; i++) {
         result[i+1] = result[i] + amplitudes[i] / (N+1) / denom(&xnodes[0], xnodes.size(), i-N, i+1);
@@ -1047,7 +1047,7 @@ double BsplineInterpolator1d<N>::integrate(double x1, double x2,
     const std::vector<double> &amplitudes, int n) const
 {
     if(amplitudes.size() != numComp)
-        throw std::range_error("integrate: invalid size of amplitudes array");
+        throw std::length_error("integrate: invalid size of amplitudes array");
     double sign = 1.;
     if(x1>x2) {  // swap limits of integration
         double tmp=x2;
@@ -1133,7 +1133,7 @@ std::vector<double> FiniteElement1d<N>::computeProjVector(
 {
     const unsigned int gridSize = integrNodes.size(), numFunc = N+1, numBasisFnc = interp.numValues();
     if(fncValues.size() != gridSize)
-        throw std::range_error("computeProjVector: invalid size of input array");
+        throw std::length_error("computeProjVector: invalid size of input array");
     std::vector<double> result(numBasisFnc);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function times the weight of Gauss-Legendre quadrature at point p
@@ -1157,7 +1157,7 @@ BandMatrix<double> FiniteElement1d<N>::computeProjMatrix(
     numBasisFnc = interp.numValues();  // total number of basis functions (heigth of band matrix)
     bool empty  = fncValues.empty();   // whether the function f(x) is provided (otherwise take f=1)
     if(!empty && fncValues.size() != gridSize)
-        throw std::range_error("computeProjMatrix: invalid size of input array");
+        throw std::length_error("computeProjMatrix: invalid size of input array");
     BandMatrix<double> mat(numBasisFnc, N, 0.);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function (if provided) times the weight of Gauss-Legendre quadrature at point p
@@ -1212,10 +1212,10 @@ BaseInterpolator2d::BaseInterpolator2d(
         throw std::invalid_argument(
             "Error in 2d interpolator initialization: number of nodes should be >=2 in each direction");
     if(fvalues.rows() != xsize)
-        throw std::range_error(
+        throw std::length_error(
             "Error in 2d interpolator initialization: x and f array lengths differ");
     if(fvalues.cols() != ysize)
-        throw std::range_error(
+        throw std::length_error(
             "Error in 2d interpolator initialization: y and f array lengths differ");
 }
 
@@ -1225,7 +1225,7 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
      double *z, double *z_x, double *z_y, double *z_xx, double *z_xy, double *z_yy) const
 {
     if(fval.empty())
-        throw std::range_error("Empty 2d interpolator");
+        throw std::length_error("Empty 2d interpolator");
     // 2nd derivatives are always zero
     if(z_xx)
         *z_xx = 0;
@@ -1323,7 +1323,7 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
     double *z, double *z_x, double *z_y, double *z_xx, double *z_xy, double *z_yy) const
 {
     if(fval.empty())
-        throw std::range_error("Empty 2d spline");
+        throw std::length_error("Empty 2d spline");
     const int
         nx = xval.size(),
         ny = yval.size(),
@@ -1398,13 +1398,18 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
     const size_t xsize = xgrid.size();
     const size_t ysize = ygrid.size();
     if(dfdx.rows() != xsize || dfdy.rows() != xsize || dfdx.cols() != ysize || dfdy.cols() != ysize)
-        throw std::range_error("QuinticSpline2d: invalid size of derivatives matrix");
+        throw std::length_error("QuinticSpline2d: invalid size of derivatives matrix");
 
-    std::vector<double> t, tx, ty, txx, txy, tyy, txxy, txyy;  // temporary arrays for 1d splines
+    // temporary arrays for 1d splines
+    std::vector<double> t, tx, ty, txx, txy, tyy, txxy, txyy;
+    // additional safety measures: if the derivative df/dx is zero for all y and a particular column x[i],
+    // then the higher mixed derivatives d^2f/dxdy and d^3f/dx^2 dy must be zero for all y in this column;
+    // similarly for df/dy. The two arrays keep track of these conditions for each row/column.
+    std::vector<char> fxzero(xsize, true), fyzero(ysize, true);
 
     // step 1. for each y_j, construct:
     // a) 1d quintic spline for f in x, and record d^2f/dx^2;
-    // b) 1d cubic spline for df/dy in x, store d^2/dxdy and d^3f/dx^2 dy
+    // b) 1d cubic spline for df/dy in x, store d^2f/dxdy and d^3f/dx^2 dy
     //    (the latter only for the boundary columns, j=0 or j=ysize-1)
     t. resize(xsize);
     tx.resize(xsize);
@@ -1414,6 +1419,7 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
             t [i] = fval[i * ysize + j];
             tx[i] = fx  [i * ysize + j];
             ty[i] = fy  [i * ysize + j];
+            fyzero[j] &= ty[i]==0;
         }
         txx = constructQuinticSpline(xval, t, tx);
         txy = constructCubicSpline(xval, ty);
@@ -1445,6 +1451,7 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
             tx [j] = fx  [i * ysize + j];
             ty [j] = fy  [i * ysize + j];
             txx[j] = fxx [i * ysize + j];
+            fxzero[i] &= tx[j]==0;
         }
         tyy = constructQuinticSpline(yval, t, ty);
         txy = constructCubicSpline(yval, tx);
@@ -1463,21 +1470,24 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
             // while the second one is not accurate at the boundary nodes j=0, j=ysize-1;
             // thus on the grid edges we retain only the more accurate one,
             // while for the interior nodes or for the four corners we use an average of them
-            // (but if either one is exactly zero, then take zero as well)
+            // (but if df/dx=0 for all y or df/dy=0 for all x, then the mixed deriv should also be zero)
             if((i==0 || i==xsize-1) && j!=0 && j!=ysize-1) {
                 fxy [i * ysize + j] = f2;
                 fxyy[i * ysize + j] = f3;
             }
             if((j!=0 && j!=ysize-1) || ((i==0 || i==xsize-1) && (j==0 || j==ysize-1))) {
                 double f1 = fxy[i * ysize + j];
-                fxy[i * ysize + j] = (f1==0. || f2==0.) ? 0. : (f1 + f2) * 0.5;
+                fxy[i * ysize + j] = fxzero[i] || fyzero[j] ? 0. : (f1 + f2) * 0.5;
             }
             // 2c. assign d3f/dx2dy and d4f/dx2dy2 for all columns except the boundaries
             // (j=0 or j=ysize-1), where it is expected to be inaccurate
-            if(j!=0 && j!=ysize-1)
+            if(j!=0 && j!=ysize-1) {
                 evalCubicSplines<1>(yval[j], yval[jj], yval[jj+1],
                     &txx[jj], &txx[jj+1], &txxy[jj], &txxy[jj+1],
                     /*output*/NULL, &fxxy[i * ysize + j], &fxxyy[i * ysize + j]);
+                if(fyzero[j])   // if df/dy=0 for all x, then its further derivs by x must be zero too
+                    fxxy[i * ysize + j] = 0.;
+            }
         }
     }
 
@@ -1497,6 +1507,8 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
                 /*output*/NULL, &fxyy[i * ysize + j], &f4);
             // assign d4f/dx2dy2 or take the symmetric average with the one computed previously
             fxxyy[i * ysize + j] = j==0 || j==ysize-1 ? f4 : (fxxyy[i * ysize + j] + f4) * 0.5;
+            if(fxzero[i])
+                fxyy[i * ysize + j] = 0.;
         }
     }
 }
@@ -1506,7 +1518,7 @@ void QuinticSpline2d::evalDeriv(const double x, const double y,
     double* z_xx, double* z_xy, double* z_yy) const
 {
     if(fval.empty())
-        throw std::range_error("Empty 2d spline");
+        throw std::length_error("Empty 2d spline");
     const int
         nx = xval.size(),
         ny = yval.size(),
@@ -1577,7 +1589,7 @@ LinearInterpolator3d::LinearInterpolator3d(const std::vector<double>& xnodes,
     const int nx = xval.size(), ny = yval.size(), nz = zval.size();
     const unsigned int nval = nx*ny*nz;   // total number of nodes in the 3d grid
     if(nx < 2 || ny < 2 || nz < 2 || fvalues.size() != nval)
-        throw std::range_error("LinearInterpolator3d: invalid grid sizes");
+        throw std::length_error("LinearInterpolator3d: invalid grid sizes");
 }
 
 double LinearInterpolator3d::value(double x, double y, double z) const
@@ -1625,7 +1637,7 @@ CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vecto
         nampl = (nx+2)*(ny+2)*(nz+2);     // or the number of amplitudes of B-splines
     if(nx < 2 || ny < 2 || nz < 2 ||
         !(fvalues.size() == nval || fvalues.size() == nampl) )
-        throw std::range_error("CubicSpline3d: invalid grid sizes");
+        throw std::length_error("CubicSpline3d: invalid grid sizes");
     fval.resize(nval);
     fx  .resize(nval);
     fy  .resize(nval);
@@ -1835,7 +1847,7 @@ double BsplineInterpolator3d<N>::interpolate(
     const double point[3], const std::vector<double> &amplitudes) const
 {
     if(amplitudes.size() != numComp)
-        throw std::range_error("BsplineInterpolator3d: invalid size of amplitudes array");
+        throw std::length_error("BsplineInterpolator3d: invalid size of amplitudes array");
     double weights[(N+1)*(N+1)*(N+1)];
     unsigned int leftInd[3];
     nonzeroComponents(point, leftInd, weights);
@@ -1854,7 +1866,7 @@ void BsplineInterpolator3d<N>::eval(const double point[3], double values[]) cons
     unsigned int leftInd[3];
     double weights[(N+1)*(N+1)*(N+1)];
     nonzeroComponents(point, leftInd, weights);
-    std::fill(values, values+numComp, 0);
+    std::fill(values, values+numComp, 0.);
     for(int i=0; i<=N; i++)
         for(int j=0; j<=N; j++)
             for(int k=0; k<=N; k++)
@@ -1866,7 +1878,7 @@ template<int N>
 double BsplineInterpolator3d<N>::valueOfComponent(const double point[3], unsigned int indComp) const
 {
     if(indComp>=numComp)
-        throw std::range_error("BsplineInterpolator3d: component index out of range");
+        throw std::out_of_range("BsplineInterpolator3d: component index out of range");
     unsigned int leftInd[3], indices[3];
     double weights[(N+1)*(N+1)*(N+1)];
     nonzeroComponents(point, leftInd, weights);
@@ -1885,7 +1897,7 @@ void BsplineInterpolator3d<N>::nonzeroDomain(unsigned int indComp,
     double xlower[3], double xupper[3]) const
 {
     if(indComp>=numComp)
-        throw std::range_error("BsplineInterpolator3d: component index out of range");
+        throw std::out_of_range("BsplineInterpolator3d: component index out of range");
     unsigned int indices[3];
     decomposeIndComp(indComp, indices);
     for(int d=0; d<3; d++) {
@@ -1896,7 +1908,7 @@ void BsplineInterpolator3d<N>::nonzeroDomain(unsigned int indComp,
 }
 
 template<int N>
-SpMatrix<double> BsplineInterpolator3d<N>::computeRoughnessPenaltyMatrix() const
+SparseMatrix<double> BsplineInterpolator3d<N>::computeRoughnessPenaltyMatrix() const
 {
     std::vector<Triplet> values;      // elements of sparse matrix will be accumulated here
     Matrix<double>
@@ -1941,7 +1953,7 @@ SpMatrix<double> BsplineInterpolator3d<N>::computeRoughnessPenaltyMatrix() const
             }
         }
     }
-    return SpMatrix<double>(numComp, numComp, values);
+    return SparseMatrix<double>(numComp, numComp, values);
 }
 
 template<int N>
@@ -2020,7 +2032,7 @@ std::vector<double> createBsplineInterpolator3dArray(const IFunctionNdim& F,
     }
 
     // solve the linear system (could take *LONG* )
-    return LUDecomp(SpMatrix<double>(interp.numValues(), interp.numValues(), values)).solve(fncvalues);
+    return LUDecomp(SparseMatrix<double>(interp.numValues(), interp.numValues(), values)).solve(fncvalues);
 }
 
 template<int N>
@@ -2031,7 +2043,7 @@ std::vector<double> createBsplineInterpolator3dArrayFromSamples(
     const std::vector<double>& /*znodes*/)
 {
     if(points.rows() != pointWeights.size() || points.cols() != 3)
-        throw std::invalid_argument(
+        throw std::length_error(
             "createBsplineInterpolator3dArrayFromSamples: invalid size of input arrays");
     throw std::runtime_error("createBsplineInterpolator3dArrayFromSamples NOT IMPLEMENTED");
 }
@@ -2082,7 +2094,7 @@ private:
 
     /// sparse matrix  B  containing the values of each basis function at each data point:
     /// (size: numDataPoints rows, numBasisFnc columns, with only 4 nonzero values in each row)
-    SpMatrixSpecial<4> BMatrix;
+    SparseMatrixSpecial<4> BMatrix;
 
     /// an intermediate matrix  B^T W B  describes the system of normal equations (where W=diag(w)),
     /// and the lower triangular matrix L contains its Cholesky decomposition (size: numBasisFnc^2)
@@ -2169,7 +2181,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
         sumWeights = numDataPoints;
     } else {
         if(weights.size()!=numDataPoints)
-            throw std::invalid_argument("SplineApprox: xvalues and weights must have equal length");
+            throw std::length_error("SplineApprox: xvalues and weights must have equal length");
         sumWeights = 0;
         for(unsigned int i=0; i<numDataPoints; i++) {
             if(weights[i] < 0)
@@ -2233,7 +2245,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
 SplineApproxImpl::FitData SplineApproxImpl::initFit(const std::vector<double> &yvalues) const
 {
     if(yvalues.size() != numDataPoints)
-        throw std::invalid_argument("SplineApprox: input array sizes do not match");
+        throw std::length_error("SplineApprox: input array sizes do not match");
     FitData fitData;
     fitData.ynorm2 = 0;
     if(weights.empty())
@@ -2585,9 +2597,9 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     logSumWeights(0)
 {
     if(numData <= 0)
-        throw std::invalid_argument("splineLogDensity: no data");
+        throw std::length_error("splineLogDensity: no data");
     if(numData != weights.size())
-        throw std::invalid_argument("splineLogDensity: sizes of input arrays are not equal");
+        throw std::length_error("splineLogDensity: sizes of input arrays are not equal");
     if(numNodes<2)
         throw std::invalid_argument("splineLogDensity: grid size should be at least 2");
     for(unsigned int k=1; k<numNodes; k++)
@@ -2634,7 +2646,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     // prepare the log-likelihoods of each basis fnc and other useful arrays
     Vbasis.assign(numBasisFnc, 0.);
     Wbasis.assign(numBasisFnc, 0.);
-    SpMatrixSpecial<N+1> Bmatrix(numData, numAmpl);
+    SparseMatrixSpecial<N+1> Bmatrix(numData, numAmpl);
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -2850,10 +2862,10 @@ double SplineLogDensityFitter<N>::logG(
     double integral[3] = {0};
     // accumulator for d G_0 / d A_k
     if(deriv)
-        std::fill(deriv, deriv+numAmpl, 0);
+        std::fill(deriv, deriv+numAmpl, 0.);
     // accumulator for d^2 G_0 / d A_k d A_l
     if(deriv2)
-        std::fill(deriv2, deriv2+pow_2(numAmpl), 0);
+        std::fill(deriv2, deriv2+pow_2(numAmpl), 0.);
     // determine the constant offset needed to keep the magnitude in a reasonable range
     double offset = 0;
     for(unsigned int k=0; k<numAmpl; k++)

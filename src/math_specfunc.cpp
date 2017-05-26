@@ -276,6 +276,10 @@ double lngamma(const double x) {
     CALL_FUNCTION_OR_NAN( gsl_sf_lngamma(x) )
 }
 
+double gammainc(const double x, const double y) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_gamma_inc(x, y) )
+}
+
 double digamma(const double x) {
     CALL_FUNCTION_OR_NAN( gsl_sf_psi(x) )
 }

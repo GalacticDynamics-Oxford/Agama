@@ -44,47 +44,6 @@ public:
     }
 };
 
-enum AzimuthalAverageMode {
-    AZ_RHO,
-    AZ_PHI,
-    AZ_DR,
-    AZ_DZ
-};
-
-template<AzimuthalAverageMode mode, class T> double value(const T& fnc, const coord::PosCyl& pos);
-template<> double value<AZ_RHO>(const potential::BaseDensity& fnc, const coord::PosCyl& pos) {
-    return fnc.density(pos); }
-template<> double value<AZ_PHI>(const potential::BasePotential& fnc, const coord::PosCyl& pos) {
-    return fnc.value(pos); }
-template<> double value<AZ_DR>(const potential::BasePotential& fnc, const coord::PosCyl& pos) {
-    coord::GradCyl grad;
-    fnc.eval(pos, NULL, &grad);
-    return grad.dR;
-}
-template<> double value<AZ_DZ>(const potential::BasePotential& fnc, const coord::PosCyl& pos) {
-    coord::GradCyl grad;
-    fnc.eval(pos, NULL, &grad);
-    return grad.dz;
-}
-
-template<AzimuthalAverageMode mode, class T> double azimuthalAverage(const T& fnc, double R, double z)
-{
-    if(isAxisymmetric(fnc))
-        return value<mode>(fnc, coord::PosCyl(R, z, 0));
-    const int nphi = 8;
-    double result  = 0.;
-    for(int i=0; i<=nphi; i++) {
-        double phi = i*M_PI/(nphi+0.5);
-        double v = value<mode>(fnc, coord::PosCyl(R, z, phi));
-        result  += v;
-        if(i==0) continue;
-        if(!isYReflSymmetric(fnc))
-            v    = value<mode>(fnc, coord::PosCyl(R, z, -phi));
-        result  += v;
-    }
-    return result / (2*nphi+1);
-}
-
 }  // internal namespace
 
 math::LogLogSpline createJeansSphModel(
@@ -162,27 +121,27 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for(int iR=0; iR<gridSizeR; iR++) {
+    for(int iR=0; iR<gridRsize; iR++) {
         double R = gridR[iR];
         double result = 0.;
         // sum up integrals over the segments of the grid in z, starting from the outermost one
         // (from the last point to infinity)
-        for(int iz=gridSizez-1; iz>=0; iz--) {
+        for(int iz=gridzsize-1; iz>=0; iz--) {
             for(int k=0; k<GLORDER; k++) {
                 double z, w;  // z-coordinate of the k-th point in the quadrature rule and its weight
-                if(iz<gridSizez-1) {
+                if(iz<gridzsize-1) {
                     z = gridz[iz] + (gridz[iz+1]-gridz[iz]) * glnodes[k];
                     w = (gridz[iz+1]-gridz[iz]) * glweights[k];
                 } else {  // scaling transformation on the last segment: z = zmax/t, 0<t<1
-                    z = gridz[gridSizez-1] / glnodes[k];
-                    w = gridz[gridSizez-1] / pow_2(glnodes[k]) * glweights[k];
+                    z = gridz[gridzsize-1] / glnodes[k];
+                    w = gridz[gridzsize-1] / pow_2(glnodes[k]) * glweights[k];
                 }
-                double rho    = azimuthalAverage<AZ_RHO>(dens, R, z);
-                double dPhidz = azimuthalAverage<AZ_DZ> (pot,  R, z);
+                double rho    = potential::azimuthalAverage<potential::AV_RHO>(dens, R, z);
+                double dPhidz = potential::azimuthalAverage<potential::AV_DZ> (pot,  R, z);
                 result += rho * dPhidz * w;
             }
             rhosigmaz2(iR, iz) = result;
-            rhoval(iR, iz)     = azimuthalAverage<AZ_RHO>(dens, R, gridz[iz]);
+            rhoval(iR, iz)     = potential::azimuthalAverage<potential::AV_RHO>(dens, R, gridz[iz]);
         }
     }
 
@@ -214,7 +173,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     const math::BsplineInterpolator1d<3> fint(gridfemz);
 
 #ifdef _OPENMP
-//#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static)
 #endif
     for(int iR=0; iR<gridRsize; iR++) {
         double R = gridR[iR];
@@ -222,8 +181,8 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
         // collect values of two functions at integration points
         for(int kz=0; kz<femzsize; kz++) {
             double z      = femzpoints[kz];
-            double rho    = azimuthalAverage<AZ_RHO>(dens, R, z);
-            double dPhidz = azimuthalAverage<AZ_DZ> (pot,  R, z);
+            double rho    = potential::azimuthalAverage<potential::AV_RHO>(dens, R, z);
+            double dPhidz = potential::azimuthalAverage<potential::AV_DZ> (pot,  R, z);
             pointrho[kz]  = rho;
             pointrhs[kz]  = -rho * dPhidz * femzweights[kz];  // multiply by dz/dt
         }
@@ -283,8 +242,8 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
             int iR1 = std::max(0, iR-1), iR2 = std::min(iR+1, gridRsize-1);
             double derR   = (rhosigmaz2(iR2, iz) - rhosigmaz2(iR1, iz)) / (gridR[iR2] - gridR[iR1]);
             double rho    = rhoval(iR, iz);
-            double Phi    = azimuthalAverage<AZ_PHI>(pot,  R, z);
-            double dPhidR = azimuthalAverage<AZ_DR> (pot,  R, z);
+            double Phi    = potential::azimuthalAverage<potential::AV_PHI>(pot,  R, z);
+            double dPhidR = potential::azimuthalAverage<potential::AV_DR> (pot,  R, z);
             double vesc2  = -Phi;   // half the squared escape velocity - maximum allowed sigma^2
             vphi2(iR, iz) = fmin(vesc2, fmax(0.,
                 bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * dPhidR ));

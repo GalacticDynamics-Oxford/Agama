@@ -25,11 +25,11 @@ int main()
         double v = math::random();
         spdata.push_back(math::Triplet(i, j, v));
     }
-    math::SpMatrix<double> spmat(NR, NR, spdata);
+    math::SparseMatrix<double> spmat(NR, NR, spdata);
     math::Matrix<double> mat(spmat);
     {   // not used, just check that it compiles
-        math::SpMatrix<float> spmat(NR, NR, spdata);
-        math::SpMatrix<float> spmat1 = spmat;
+        math::SparseMatrix<float> spmat(NR, NR, spdata);
+        math::SparseMatrix<float> spmat1 = spmat;
         math::Matrix<float> mat(NR, NR, spdata);
         math::Matrix<float> mat1 = mat;
     }
@@ -79,15 +79,15 @@ int main()
         // convert to other matrix types
         std::vector<math::Triplet> values = bmat.values();
         math::Matrix<double> dmat(bmat);
-        math::SpMatrix<double> smat(bmat);
+        math::SparseMatrix<double> smat(bmat);
         if((int)values.size() != nelem)
             okband = false;
         for(int k=0; k<nelem; k++) {
             size_t i = values[k].i, j = values[k].j;
             double v = values[k].v;
-            double b = bmat(i, j);
-            double d = dmat(i, j);
-            double s = smat(i, j);
+            double b = bmat.at(i, j);
+            double d = dmat.at(i, j);
+            double s = smat.at(i, j);
             if(!(b==v && d==v && s==v))
                 okband = false;
         }
@@ -112,7 +112,7 @@ int main()
     }
 
     // test matrix multiplication: construct positive-definite matrix M M^T + diag(1)
-    math::SpMatrix<double> spdmat(NR, NR);
+    math::SparseMatrix<double> spdmat(NR, NR);
     clock_t tbegin=std::clock();
     math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, spmat, spmat, 0, spdmat);
     std::cout << "Sparse MM: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) << " s, " <<
@@ -210,7 +210,7 @@ int main()
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
         /// same using a generic sparse LU solver
-        math::SpMatrix<double> spmat(mat);
+        math::SparseMatrix<double> spmat(mat);
         tbegin=std::clock();
         for(int iter=0; iter<100; iter++) {
             sol = math::LUDecomp(spmat).solve(rhs);
@@ -248,7 +248,7 @@ int main()
         ok &= test(norm < 1e-15);
         /// same using generic sparse LU
         tbegin=std::clock();
-        math::SpMatrix<double> spmat(mat);
+        math::SparseMatrix<double> spmat(mat);
         for(int iter=0; iter<100; iter++) {
             sol = math::LUDecomp(spmat).solve(rhs);
         }

@@ -86,7 +86,7 @@ public:
     Logarithmic(double sigma, double coreRadius=0, double axisRatioYtoX=1, double axisRatioZtoX=1) :
         sigma2(pow_2(sigma)), coreRadius2(pow_2(coreRadius)),
         p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
-    virtual coord::SymmetryType symmetry() const { 
+    virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); }
     static const char* myName() { static const char* text = "Logarithmic"; return text; }
@@ -102,12 +102,12 @@ private:
 };
 
 /** Triaxial harmonic potential:
- \f$  \Phi(r) = \Omega^2 [ x^2 + (y/p)^2 + (z/q)^2 ]/2  \f$. */
+    \f$  \Phi(r) = \Omega^2 [ x^2 + (y/p)^2 + (z/q)^2 ]/2  \f$. */
 class Harmonic: public BasePotentialCar{
 public:
     Harmonic(double Omega, double axisRatioYtoX=1, double axisRatioZtoX=1) :
         Omega2(pow_2(Omega)), p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
-    virtual coord::SymmetryType symmetry() const { 
+    virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); }
     static const char* myName() { static const char* text = "Harmonic"; return text; }

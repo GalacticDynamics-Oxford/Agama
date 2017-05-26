@@ -387,9 +387,9 @@ int main() {
     const potential::MiyamotoNagai test4_MNAxi(1., 3.0, 0.5);            // axisymmetric Miyamoto-Nagai
     const potential::DiskParam test5_ExpdiskParam(1., 5., 0.5, 0, 0);    // double-exponential disk params
     const potential::DiskDensity test5_ExpdiskAxi(test5_ExpdiskParam);   // density profile of d-exp disk
-    PtrPotential test5_Galpot = createGalaxyPotential(                   // potential of d-exp disk,
-        std::vector<potential::DiskParam>(1, test5_ExpdiskParam),        // computed using the GalPot approach
-        std::vector<potential::SphrParam>());
+    // potential of d-exp disk, computed using the GalPot approach
+    PtrPotential test5_Galpot = potential::createPotential(utils::KeyValueMap(
+        "type=DiskDensity surfaceDensity=1 scaleRadius=5 scaleHeight=0.5"));
     const potential::Dehnen test6_Dehnen05Tri(1., 1., 0.5, 0.8, 0.5);    // triaxial weakly cuspy
     // N-body representation of the same profile
     particles::ParticleArray<coord::PosCar> test6_points = makeDehnen(100000, 0.5, 0.8, 0.5);
@@ -431,7 +431,7 @@ int main() {
     ok &= testAverageError(*test5_Galpot,
         test5_ExpdiskAxi, 0.05);
     ok &= testAverageError(
-        *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 100),
+        *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 50),
         test5_ExpdiskAxi, 0.05);
 
     // 3c. test the approximating potential profiles

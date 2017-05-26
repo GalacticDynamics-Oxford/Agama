@@ -25,10 +25,12 @@ SOURCES   = \
             df_halo.cpp \
             df_interpolated.cpp \
             galaxymodel.cpp \
+            galaxymodel_densitygrid.cpp \
             galaxymodel_fokkerplanck.cpp \
             galaxymodel_jeans.cpp \
             galaxymodel_selfconsistent.cpp \
             galaxymodel_spherical.cpp \
+            galaxymodel_target.cpp \
             galaxymodel_velocitysampler.cpp \
             math_core.cpp \
             math_fit.cpp \
@@ -96,6 +98,7 @@ TESTSRCS  = test_math_core.cpp \
             test_df_halo.cpp \
             test_df_interpolated.cpp \
             test_df_spherical.cpp \
+            test_density_grid.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
             example_self_consistent_model.cpp \
@@ -157,7 +160,7 @@ ifdef NEMO
 NEMOACC = $(NEMOOBJ)/acc/agama.so
 nemo:   $(LIBNAME)
 	$(CXX) $(CXXFLAGS) -I$(NEMOINC) src/nemo_wrapper.cpp \
-	-shared -o $(NEMOACC) $(OBJECTS) $(LFLAGS) $(LIBS) -lnemo
+	-shared -o $(NEMOACC) $(OBJECTS) $(TORUSOBJ) $(LFLAGS) $(LIBS) -lnemo
 endif
 
 .PHONY: clean test

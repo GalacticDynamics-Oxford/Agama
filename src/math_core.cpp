@@ -332,6 +332,16 @@ void getRandomRotationMatrix(double mat[9])
     mat[8] = 1-mu;
 }
 
+void getRandomPermutation(int count, int output[])
+{
+    // Fisher-Yates algo
+    for(int i=0; i<count; i++) {
+        int j = std::min(static_cast<int>(random() * (i+1)), i);
+        output[i] = output[j];
+        output[j] = i;
+    }
+}
+
 double quasiRandomHalton(unsigned int ind, unsigned int base)
 {
     double val = 0, fac = 1.;

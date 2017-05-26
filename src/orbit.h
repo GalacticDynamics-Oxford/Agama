@@ -55,7 +55,7 @@ enum StepResult {
 class BaseRuntimeFnc {
 public:
     virtual ~BaseRuntimeFnc() {}
-    
+
     /** Prototype of the runtime function.
         \param[in]  sol  is the instance of the ODE solver, which provides the method
         to compute the position/velocity at any time within the current timestep;

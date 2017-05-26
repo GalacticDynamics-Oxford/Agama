@@ -158,6 +158,19 @@ inline PtrPotential readGalaxyPotential(
     return readGalaxyPotential(filename, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
 }
 
+/** Create a density expansion from coefficients stored in a text file.
+    The file must contain coefficients for DensitySphericalHarmonic or DensityAzimuthalHarmonic;
+    the density type is determined automatically from the first line of the file.
+    \param[in] coefFileName specifies the file to read;
+    \param[in] converter is the unit converter for transforming the density coefficients;
+    from dimensional into internal units; can be a trivial converter;
+    \return    a new instance of PtrDensity on success;
+    \throws    std::invalid_argument or std::runtime_error or other density-specific exception
+    on failure (e.g., if the file does not exist, or does not contain valid coefficients).
+*/
+PtrDensity readDensity(const std::string& coefFileName,
+    const units::ExternalUnits& converter = units::ExternalUnits());
+
 /** Create a potential expansion from coefficients stored in a text file.
     The file must contain coefficients for BasisSetExp, SplineExp, CylSpline, or Multipole;
     the potential type is determined automatically from the first line of the file.
@@ -174,8 +187,9 @@ PtrPotential readPotential(const std::string& coefFileName,
 /** Write density or potential expansion coefficients to a text file.
     The potential must be one of the following expansion classes: 
     `BasisSetExp`, `SplineExp`, `CylSpline`, `Multipole`,
-    or the density may be `DensitySphericalHarmonic` or `DensityCylGrid`.
-    The coefficients stored in a file may be later loaded by `readPotential()` function.
+    or the density may be `DensitySphericalHarmonic` or `DensityAzimuthalHarmonic`.
+    The coefficients stored in a file may be later loaded by `readPotential()` or
+    `readDensity()` routines.
     If the potential or density is composite, each component is saved into a separate file
     with suffixes "_0", "_1", etc. attached to the name, and the list of these files is
     stored in the main file.
@@ -184,7 +198,7 @@ PtrPotential readPotential(const std::string& coefFileName,
     \param[in] converter is the unit converter for transforming the density or potential
     coefficients from internal into dimensional units; can be a trivial converter;
     \return    success or failure (the latter may also mean that export is 
-    not available for this type of potential).
+    not available for this type of potential/density).
 */
 bool writeDensity(const std::string& fileName, const BaseDensity& density,
     const units::ExternalUnits& converter = units::ExternalUnits());

@@ -28,6 +28,7 @@
 // starting with NPY_ARRAY_*** by NPY_***
 #include <numpy/arrayobject.h>
 #include <stdexcept>
+#include <signal.h>
 #ifdef _OPENMP
 #include "omp.h"
 #endif
@@ -43,10 +44,12 @@
 #include "df_interpolated.h"
 #include "df_pseudoisotropic.h"
 #include "galaxymodel.h"
-#include "galaxymodel_velocitysampler.h"
 #include "galaxymodel_selfconsistent.h"
+#include "galaxymodel_target.h"
+#include "galaxymodel_velocitysampler.h"
 #include "orbit.h"
 #include "math_core.h"
+#include "math_optimization.h"
 #include "math_sample.h"
 #include "math_spline.h"
 #include "utils.h"
@@ -89,6 +92,18 @@ public:
 #endif
 };
 
+///@}
+//  ----------------------------------------------------------------------------
+/// \name  Mechanism for capturing the Control-C signal in lengthy calculations
+//  ----------------------------------------------------------------------------
+///@{
+
+/// flag that is set to one if the keyboard interrupt has occurred
+volatile sig_atomic_t keyboardInterruptTriggered = 0;
+/// signal handler installed during lengthy computations that triggers the flag
+void customKeyboardInterruptHandler(int) { keyboardInterruptTriggered = 1; }
+/// previous signal handler restored after the computation is finished
+void (*defaultKeyboardInterruptHandler)(int) = NULL;
 
 ///@}
 //  ------------------------------------------------------------------
@@ -165,20 +180,52 @@ inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2)
 }
 
 /// convert a Python array of floats to std::vector, or return empty vector in case of error
-std::vector<double> toFloatArray(PyObject* obj)
+std::vector<double> toDoubleArray(PyObject* obj)
 {
-    if(obj==NULL)
+    if(!obj)
         return std::vector<double>();
-    PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, 0/*no special requirements*/);
     if(!arr || PyArray_NDIM((PyArrayObject*)arr) != 1) {
         Py_XDECREF(arr);
         return std::vector<double>();
     }
-    std::vector<double> vec(
-        &pyArrayElem<double>(arr, 0),
-        &pyArrayElem<double>(arr, PyArray_DIM((PyArrayObject*)arr, 0)) );
+    int size = PyArray_DIM((PyArrayObject*)arr, 0);
+    std::vector<double> vec(size);
+    for(int i=0; i<size; i++)
+        vec[i] = pyArrayElem<double>(arr, i);
     Py_DECREF(arr);
     return vec;
+}
+
+/// convert a C++ vector into a NumPy array
+PyObject* toPyArray(const std::vector<double>& vec)
+{
+    npy_intp size = vec.size();
+    PyObject* arr = PyArray_SimpleNew(1, &size, NPY_DOUBLE);
+    if(!arr)
+        return arr;
+    for(npy_intp i=0; i<size; i++)
+        pyArrayElem<double>(arr, i) = vec[i];
+    return arr;
+}
+
+/// convert a Python tuple or list into an array of borrowed PyObject* references
+std::vector<PyObject*> toPyObjectArray(PyObject* obj)
+{
+    std::vector<PyObject*> result;
+    if(!obj) return result;
+    if(PyTuple_Check(obj)) {
+        Py_ssize_t size = PyTuple_Size(obj);
+        for(Py_ssize_t i=0; i<size; i++)
+            result.push_back(PyTuple_GET_ITEM(obj, i));
+    } else
+    if(PyList_Check(obj)) {
+        Py_ssize_t size = PyList_Size(obj);
+        for(Py_ssize_t i=0; i<size; i++)
+            result.push_back(PyList_GET_ITEM(obj, i));
+    } else
+        result.push_back(obj);  // return an array consisting of a single object
+    return result;
 }
 
 /// convert a Python dictionary to its C++ analog
@@ -219,7 +266,11 @@ PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey)
 // forward declaration for a routine that constructs a Python cubic spline object
 PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
 
-
+/// NumPy data type corresponding to the storage container type of additive models
+static const int STORAGE_NUM_T = 
+    sizeof(galaxymodel::StorageNumT) == sizeof(float)  ? NPY_FLOAT  :
+    sizeof(galaxymodel::StorageNumT) == sizeof(double) ? NPY_DOUBLE : NPY_NOTYPE;
+    
 ///@}
 //  ------------------------------
 /// \name  Unit handling routines
@@ -251,11 +302,10 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     double mass = 0, length = 0, velocity = 0, time = 0;
     if(!onlyNamedArgs(args, namedArgs))
         return NULL;
-    if(!PyArg_ParseTupleAndKeywords(
-        args, namedArgs, "|dddd", const_cast<char**>(keywords),
-        &mass, &length, &velocity, &time) ||
-        mass<0 || length<0 || velocity<0 || time<0)
-    {
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|dddd", const_cast<char**>(keywords),
+        &mass, &length, &velocity, &time))
+        return NULL;
+    if(mass<0 || length<0 || velocity<0 || time<0) {
         PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to setUnits()");
         return NULL;
     }
@@ -268,28 +318,30 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_ValueError, "You must specify mass unit");
         return NULL;
     }
-    const units::ExternalUnits* newConv = NULL;
     if(length>0 && time>0)
-        newConv = new units::ExternalUnits(unit,
-            length*units::Kpc, length/time * units::Kpc/units::Myr, mass*units::Msun);
+        conv.reset(new units::ExternalUnits(unit,
+            length*units::Kpc, length/time * units::Kpc/units::Myr, mass*units::Msun));
     else if(length>0 && velocity>0)
-        newConv = new units::ExternalUnits(unit,
-            length*units::Kpc, velocity*units::kms, mass*units::Msun);
+        conv.reset(new units::ExternalUnits(unit,
+            length*units::Kpc, velocity*units::kms, mass*units::Msun));
     else if(time>0 && velocity>0)
-        newConv = new units::ExternalUnits(unit,
-            velocity*time * units::kms*units::Myr, velocity*units::kms, mass*units::Msun);
+        conv.reset(new units::ExternalUnits(unit,
+            velocity*time * units::kms*units::Myr, velocity*units::kms, mass*units::Msun));
     else {
         PyErr_SetString(PyExc_ValueError,
             "You must specify exactly two out of three units: length, time and velocity");
         return NULL;
     }
-    conv.reset(newConv);
-    utils::msg(utils::VL_VERBOSE, "Agama",
-        "length unit: "    +utils::toString(conv->lengthUnit)+", "
+    utils::msg(utils::VL_VERBOSE, "Agama",   // internal unit conversion factors not for public eye
+        "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
+        "time unit: "    +utils::toString(conv->timeUnit)+", "
         "mass unit: "    +utils::toString(conv->massUnit));
-    Py_INCREF(Py_None);
-    return Py_None;
+    return Py_BuildValue("s", 
+        ("Length unit: " +utils::toString(conv->lengthUnit   * unit.to_Kpc)+ " Kpc, "
+        "velocity unit: "+utils::toString(conv->velocityUnit * unit.to_kms)+ " km/s, "
+        "time unit: "    +utils::toString(conv->timeUnit     * unit.to_Myr)+ " Myr, "
+        "mass unit: "    +utils::toString(conv->massUnit     * unit.to_Msun)+" Msun").c_str());
 }
 
 /// description of resetUnits function
@@ -440,9 +492,9 @@ void formatOutputArr(const double result[], const int index, PyObject* resultObj
 
 // ---- template instantiations for input parameters ----
 
-template<> inline size_t inputLength<INPUT_VALUE_SINGLE>()  {return 1;}
+template<> inline size_t inputLength<INPUT_VALUE_SINGLE> () {return 1;}
 template<> inline size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
-template<> inline size_t inputLength<INPUT_VALUE_SEXTET>()  {return 6;}
+template<> inline size_t inputLength<INPUT_VALUE_SEXTET> () {return 6;}
 
 template<> inline int parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double input[]) {
     if(PyTuple_Check(args) && PyTuple_Size(args)==1)
@@ -719,13 +771,13 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
         }
         PyErr_Clear();  // clear error if the argument list is not a tuple of a proper type
         PyObject* obj=NULL;
-        if(PyArray_Check(args))
+        if(PyArray_Check(args) || PyList_Check(args))
             obj = args;
         else if(PyTuple_Check(args)) {
             if(PyTuple_Size(args)==1)
                 obj = PyTuple_GET_ITEM(args, 0);
             else if(numArgs == INPUT_VALUE_SINGLE)
-                obj = args;   // the entire list (tuple) of arguments is the input array
+                obj = args;   // the entire tuple of arguments is the input array
         }
         if(obj) {
             PyArrayObject *arr = (PyArrayObject*) PyArray_FROM_OTF(obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
@@ -734,7 +786,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
                 return NULL;
             }
             int numpt = 0;
-            if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == numArgs) 
+            if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == numArgs)
             {   // 1d array of length numArgs - a single point
                 fnc(params, &pyArrayElem<double>(arr, 0), output);
                 Py_DECREF(arr);
@@ -747,6 +799,8 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
                 Py_DECREF(arr);
                 return NULL;
             }
+            keyboardInterruptTriggered = 0;
+            defaultKeyboardInterruptHandler = signal(SIGINT, customKeyboardInterruptHandler);
             // allocate an appropriate output object
             PyObject* outputObj = allocOutputArr<numOutput>(numpt);
             // loop over input array
@@ -754,11 +808,17 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
 #pragma omp parallel for
 #endif
             for(int i=0; i<numpt; i++) {
+                if(keyboardInterruptTriggered) continue;
                 double local_output[outputLength<numOutput>()];  // separate variable in each thread
                 fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
                 formatOutputArr<numOutput>(local_output, i, outputObj);
             }
             Py_DECREF(arr);
+            signal(SIGINT, defaultKeyboardInterruptHandler);
+            if(keyboardInterruptTriggered) {
+                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+                return NULL;
+            }
             return outputObj;
         }
         PyErr_SetString(PyExc_ValueError, errStrInvalidInput<numArgs>());
@@ -766,6 +826,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, (std::string("Exception occurred: ")+e.what()).c_str());
+        signal(SIGINT, defaultKeyboardInterruptHandler);
         return NULL;
     }
 }
@@ -789,7 +850,7 @@ void Density_dealloc(DensityObject* self)
 {
     if(self->dens)
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted "+std::string(self->dens->name())+
-        " density at "+utils::toString(self->dens.get()));
+            " density at "+utils::toString(self->dens.get()));
     else
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty density");
     self->dens.reset();
@@ -801,19 +862,20 @@ void Density_dealloc(DensityObject* self)
     "  mass=...   total mass of the model, if applicable.\n" \
     "  scaleRadius=...   scale radius of the model (if applicable).\n" \
     "  scaleHeight=...   scale height of the model (currently applicable to " \
-    "Dehnen, MiyamotoNagai and DiskAnsatz).\n" \
-    "  axisRatio=...   axis ratio z/R for SpheroidDensity density profiles.\n" \
-    "  p=...   axis ratio y/x, i.e., intermediate to long axis (applicable to triaxial " \
-    "potential models such as Dehnen and Ferrers).\n" \
-    "  q=...   axis ratio z/x, i.e., short to long axis (if applicable, same as axisRatio).\n" \
-    "  gamma=...   central cusp slope (applicable for Dehnen and SpheroidDensity).\n" \
+    "Dehnen, MiyamotoNagai and DiskDensity).\n" \
+    "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
+    "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
+    "and to SpheroidDensity and SersicDensity models).\n" \
+    "  q=...   or  axisRatioZ=...   short to long axis (z/x).\n" \
+    "  gamma=...  central cusp slope (applicable for Dehnen and SpheroidDensity).\n" \
     "  beta=...   outer density slope (SpheroidDensity).\n" \
-    "  innerCutoffRadius=...   radius of inner hole (DiskAnsatz).\n" \
+    "  alpha=...  strength of transition from the inner to the outer slopes (SpheroidDensity).\n" \
+    "  sersicIndex=...   profile shape parameter 'n' (SersicDensity).\n" \
+    "  innerCutoffRadius=...   radius of inner hole (DiskDensity).\n" \
     "  outerCutoffRadius=...   radius of outer exponential cutoff (SpheroidDensity).\n" \
-    "  surfaceDensity=...   central surface density (or its value if no inner cutoff exists), " \
-    "for DiskAnsatz.\n" \
-    "  densityNorm=...   normalization of density profile for SpheroidDensity (the value " \
-    "at scaleRadius).\n"
+    "  cutoffStrength=...   strength of outer exponential cutoff  (SpheroidDensity).\n" \
+    "  surfaceDensity=...   central surface density (DiskDensity or SersicDensity).\n" \
+    "  densityNorm=...   normalization of density profile for SpheroidDensity.\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -822,13 +884,15 @@ static const char* docstringDensity =
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
     "    Denhen, Plummer, OblatePerfectEllipsoid, Ferrers, MiyamotoNagai, "
-    "NFW, DiskDensity, SpheroidDensity.\n"
+    "NFW, DiskDensity, SpheroidDensity, SersicDensity.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
     "Alternatively, one may construct a spherically-symmetric density model from a cumulative "
     "mass profile by providing a single argument\n"
     "  cumulmass=...  which should contain a table with two columns: radius and enclosed mass, "
     "both strictly positive and monotonically increasing.\n"
+    "One may also load density expansion coefficients that weree previously written to a text file "
+    "using the `export()` method, by providing the file name as an argument.\n"
     "Finally, one may create a composite density from several Density objects by providing them as "
     "unnamed arguments to the constructor:  densum = Density(den1, den2, den3)\n\n"
     "An instance of Potential class may be used in all contexts when a Density object is required;\n"
@@ -843,9 +907,18 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
 // (also a forward declaration, the function will be defined later)
 potential::PtrPotential getPotential(PyObject* pot_obj);
 
+// create a Python Density object and initialize it with an existing instance of C++ density class
+PyObject* createDensityObject(const potential::PtrDensity& dens);
+
+// create a Python Potential object and initialize it with an existing instance of C++ potential class
+PyObject* createPotentialObject(const potential::PtrPotential& pot);
+
 /// attempt to construct a composite density from a tuple of Density objects
 potential::PtrDensity Density_initFromTuple(PyObject* tuple)
 {
+    // if we have one string parameter, it could be the file name
+    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
+        return potential::readDensity(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
     std::vector<potential::PtrDensity> components;
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
         potential::PtrDensity comp = getDensity(PyTuple_GET_ITEM(tuple, i));
@@ -888,12 +961,12 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
     // for convenience, may specify the type of density model in type="..." argument
     if(params.contains("type") && !params.contains("density"))
         params.set("density", params.getString("type"));
-    if(!params.contains("density"))
+    if(!params.contains("density") && !params.contains("file"))
         throw std::invalid_argument("Should provide the name of density model "
-            "in type='...' or density='...' argument");
+            "in type='...' or density='...', or the file name to load in file='...' arguments");
     return potential::createDensity(params, *conv);
 }
-
+    
 /// constructor of Density class
 int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -927,11 +1000,6 @@ void fncDensity_density(void* obj, const double input[], double *result) {
 PyObject* Density_density(PyObject* self, PyObject* args) {
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
         (self, args, fncDensity_density);
-}
-
-PyObject* Density_name(PyObject* self)
-{
-    return Py_BuildValue("s", ((DensityObject*)self)->dens->name());
 }
 
 PyObject* Density_totalMass(PyObject* self)
@@ -972,8 +1040,8 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "i|Odd", const_cast<char**>(keywords),
         &numPoints, &pot_obj, &beta, &kappa))
     {
-        PyErr_SetString(PyExc_ValueError,
-            "sample() takes at least one integer argument (the number of particles)");
+        //PyErr_SetString(PyExc_ValueError,
+        //    "sample() takes at least one integer argument (the number of particles)");
         return NULL;
     }
     potential::PtrPotential pot = getPotential(pot_obj);  // if not NULL, will assign velocity as well
@@ -1017,6 +1085,60 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     return sampleDensity(*((DensityObject*)self)->dens, args, namedArgs);
 }
+
+PyObject* Density_name(PyObject* self)
+{
+    const char* name = ((DensityObject*)self)->dens->name();
+    if(name == potential::CompositeDensity::myName()) {
+        try{
+            const potential::CompositeDensity& dens =
+                dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens);
+            std::string tmp = std::string(name) + ": ";
+            for(unsigned int i=0; i<dens.size(); i++) {
+                if(i>0) tmp += ", ";
+                tmp += dens.component(i)->name();
+            }
+            return Py_BuildValue("s", tmp.c_str());
+        }
+        catch(std::exception& e) {
+            PyErr_SetString(PyExc_TypeError, e.what());
+            return NULL;
+        }
+    } else
+        return Py_BuildValue("s", name);
+}
+
+PyObject* Density_elem(PyObject* self, Py_ssize_t index)
+{
+    try{
+        const potential::CompositeDensity& dens =
+            dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens);
+        if(index<0 || index >= (Py_ssize_t)dens.size()) {
+            PyErr_SetString(PyExc_IndexError, "Density component index out of range");
+            return NULL;
+        }
+        return createDensityObject(dens.component(index));
+    }
+    catch(std::exception&) {
+        PyErr_SetString(PyExc_TypeError, "Density is not a composite");
+        return NULL;
+    }
+}
+
+Py_ssize_t Density_len(PyObject* self)
+{
+    try{
+        return dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens).size();
+    }
+    catch(std::exception&) {
+        PyErr_SetString(PyExc_TypeError, "Density is not a composite");
+        return -1;
+    }
+}
+
+static PySequenceMethods Density_sequence_methods = {
+    Density_len, 0, 0, Density_elem,
+};
 
 static PyMethodDef Density_methods[] = {
     { "name", (PyCFunction)Density_name, METH_NOARGS,
@@ -1193,6 +1315,7 @@ static const char* docstringPotential =
     "  - from a tuple of dictionary objects that contain the same list of possible "
     "key/value pairs for each component of a composite potential;\n"
     "  - from an INI file with these parameters for one or several components;\n"
+    "  - from a file with potential expansion coefficients or an N-body snapshot;\n"
     "  - from a tuple of existing Potential objects created previously "
     "(in this case a composite potential is created from these components).\n"
     "Note that all keywords and their values are not case-sensitive.\n\n"
@@ -1348,9 +1471,17 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
 /// or dictionaries with potential parameters
 potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 {
-    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
-    {   // assuming that we have one parameter which is the INI file name
-        return potential::createPotential(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
+    // if we have one string parameter, it could be the name of an INI file or a coefs file
+    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0))) {
+        std::string name(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)));
+        try{
+            // first attempt to treat it as a name of a coefficients file
+            return potential::readPotential(name, *conv);
+        }
+        catch(std::exception&) {
+            // if that failed, treat it as an INI file (this may also fail - then return an error)
+            return potential::createPotential(name, *conv);
+        }
     }
     bool onlyPot = true, onlyDict = true;
     // first check the types of tuple elements
@@ -1405,6 +1536,7 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
+// this check seems to be unnecessary, but let it remain for historical reasons
 bool Potential_isCorrect(PyObject* self)
 {
     if(self==NULL) {
@@ -1471,12 +1603,12 @@ void fncPotential_forceDeriv(void* obj, const double input[], double *result) {
     coord::HessCar hess;
     ((PotentialObject*)obj)->pot->eval(point, NULL, &grad, &hess);
     // unit of force per unit mass is V/T
-    const double convF = 1 / (conv->velocityUnit/conv->timeUnit);
-    // unit of force deriv per unit mass is V/T^2
-    const double convD = 1 / (conv->velocityUnit/pow_2(conv->timeUnit));
-    result[0] = -grad.dx * convF;
-    result[1] = -grad.dy * convF;
-    result[2] = -grad.dz * convF;
+    const double convF = 1 / (conv->velocityUnit / conv->timeUnit);
+    // unit of force deriv per unit mass is V/T/L
+    const double convD = 1 / (conv->velocityUnit / conv->timeUnit / conv->lengthUnit);
+    result[0] = -grad.dx   * convF;
+    result[1] = -grad.dy   * convF;
+    result[2] = -grad.dz   * convF;
     result[3] = -hess.dx2  * convD;
     result[4] = -hess.dy2  * convD;
     result[5] = -hess.dz2  * convD;
@@ -1523,6 +1655,48 @@ PyObject* Potential_Rcirc(PyObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
+void fncPotential_Tcirc_from_E(void* obj, const double input[], double *result) {
+    const double
+    E = input[0] * pow_2(conv->velocityUnit),
+    R = R_circ(*((PotentialObject*)obj)->pot, E),
+    T = R / v_circ(*((PotentialObject*)obj)->pot, R) * 2*M_PI;
+    result[0] = T / conv->timeUnit;
+}
+
+void fncPotential_Tcirc_from_xv(void* obj, const double input[], double *result) {
+    const coord::PosVelCar point = convertPosVel(input);
+    const double
+    E = totalEnergy(*((PotentialObject*)obj)->pot, point),
+    R = R_circ(*((PotentialObject*)obj)->pot, E),
+    T = R / v_circ(*((PotentialObject*)obj)->pot, R) * 2*M_PI;
+    result[0] = T / conv->timeUnit;
+}
+
+PyObject* Potential_Tcirc(PyObject* self, PyObject* args)
+{
+    PyObject* input = NULL;
+    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "O", &input))
+        return NULL;
+    // find out the shape of input array or anything that could be converted into an array
+    PyArrayObject* arr = NULL;
+    PyArray_Descr* dtype = NULL;
+    int ndim = 0;
+    npy_intp inputdims[NPY_MAXDIMS], *dims=inputdims;
+    if(PyArray_GetArrayParamsFromObject(input, NULL, 0, &dtype, &ndim, inputdims, &arr, NULL) < 0)
+        return NULL;
+    // if it was indeed an array, need to obtain its shape manually
+    if(arr) {
+        ndim = PyArray_NDIM(arr);
+        dims = PyArray_DIMS(arr);
+    }        
+    if((ndim == 1 && dims[0] == 6) || (ndim == 2 && dims[1] == 6))
+        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SINGLE>
+            (self, input, fncPotential_Tcirc_from_xv);
+    else
+        return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
+            (self, input, fncPotential_Tcirc_from_E);
+}
+
 void fncPotential_Rmax(void* obj, const double input[], double *result) {
     const double E = input[0] * pow_2(conv->velocityUnit);
     result[0] = R_max(*((PotentialObject*)obj)->pot, E) / conv->lengthUnit;
@@ -1533,13 +1707,6 @@ PyObject* Potential_Rmax(PyObject* self, PyObject* args) {
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
         (self, args, fncPotential_Rmax);
-}
-
-PyObject* Potential_name(PyObject* self)
-{
-    if(!Potential_isCorrect(self))
-        return NULL;
-    return Py_BuildValue("s", ((PotentialObject*)self)->pot->name());
 }
 
 PyObject* Potential_export(PyObject* self, PyObject* args)
@@ -1578,6 +1745,66 @@ PyObject* Potential_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         return NULL;
     return sampleDensity(*((PotentialObject*)self)->pot, args, namedArgs);
 }
+
+PyObject* Potential_name(PyObject* self)
+{
+    if(!Potential_isCorrect(self))
+        return NULL;
+    const char* name = ((PotentialObject*)self)->pot->name();
+    if(name == potential::CompositeCyl::myName()) {
+        try{
+            const potential::CompositeCyl& pot =
+                dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot);
+            std::string tmp = std::string(name) + ": ";
+            for(unsigned int i=0; i<pot.size(); i++) {
+                if(i>0) tmp += ", ";
+                tmp += pot.component(i)->name();
+            }
+            return Py_BuildValue("s", tmp.c_str());
+        }
+        catch(std::exception& e) {
+            PyErr_SetString(PyExc_TypeError, e.what());
+            return NULL;
+        }
+    } else
+        return Py_BuildValue("s", name);
+}
+
+PyObject* Potential_elem(PyObject* self, Py_ssize_t index)
+{
+    if(!Potential_isCorrect(self))
+        return NULL;
+    try{
+        const potential::CompositeCyl& pot =
+            dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot);
+        if(index<0 || index >= (Py_ssize_t)pot.size()) {
+            PyErr_SetString(PyExc_IndexError, "Potential component index out of range");
+            return NULL;
+        }
+        return createPotentialObject(pot.component(index));
+    }
+    catch(std::exception&) {
+        PyErr_SetString(PyExc_TypeError, "Potential is not a composite");
+        return NULL;
+    }
+}
+
+Py_ssize_t Potential_len(PyObject* self)
+{
+    if(!Potential_isCorrect(self))
+        return -1;
+    try{
+        return dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot).size();
+    }
+    catch(std::exception&) {
+        PyErr_SetString(PyExc_TypeError, "Potential is not a composite");
+        return -1;
+    }
+}
+
+static PySequenceMethods Potential_sequence_methods = {
+    Potential_len, 0, 0, Potential_elem,
+};
 
 static PyMethodDef Potential_methods[] = {
     { "name", (PyCFunction)Potential_name, METH_NOARGS,
@@ -1625,6 +1852,12 @@ static PyMethodDef Potential_methods[] = {
       "  E=... (same) - the values of energy; the arguments are mutually exclusive, "
       "and L is the default one if no name is provided\n"
       "Returns: a single number or an array of numbers - the radii of corresponding orbits\n" },
+    { "Tcirc", Potential_Tcirc, METH_VARARGS,
+      "Compute the period of a circular orbit for the given energy (a) or the (x,v) point (b)\n"
+      "Arguments:\n"
+      "  (a) a single value of energy or an array of N such values, or\n"
+      "  (b) a single point (6 numbers - position and velocity) or a Nx6 array of points\n"
+      "Returns: a single value or N values of orbital periods\n" },
     { "Rmax", Potential_Rmax, METH_VARARGS,
       "Find the maximum radius accessible to the given energy (i.e. the root of Phi(Rmax,0,0)=E)\n"
       "Arguments: a single number or an array of numbers - the values of energy\n"
@@ -1636,7 +1869,7 @@ static PyTypeObject PotentialType = {
     PyObject_HEAD_INIT(NULL)
     0, "agama.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Potential_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, &Potential_sequence_methods, 0, 0, 0, Potential_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringPotential,
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Potential_init
@@ -1912,7 +2145,7 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
         &points_obj, &pot_obj, &ifd, &angles) || ifd<0)
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to actions()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to actions()");
         return NULL;
     }
     ActionFinderParams params;
@@ -1990,10 +2223,10 @@ df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObject* name
     if(!u_obj || !v_obj || !w_obj || !ampl_obj)
         throw std::invalid_argument("Interpolated DF requires 4 array arguments: u, v, w, ampl");
     std::vector<double>
-        ampl (toFloatArray(ampl_obj)),
-        gridU(toFloatArray(u_obj)),
-        gridV(toFloatArray(v_obj)),
-        gridW(toFloatArray(w_obj));
+        ampl (toDoubleArray(ampl_obj)),
+        gridU(toDoubleArray(u_obj)),
+        gridV(toDoubleArray(v_obj)),
+        gridW(toDoubleArray(w_obj));
     if(gridU.empty() || gridV.empty() || gridW.empty() || ampl.empty())
     {
         throw std::invalid_argument("Input arguments do not contain valid arrays");
@@ -2454,7 +2687,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
         args, namedArgs, "O|OOO", const_cast<char**>(keywords),
         &points_obj, &dens_flag, &vel_flag, &vel2_flag))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to moments()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to moments()");
         return NULL;
     }
     try{
@@ -2533,7 +2766,7 @@ PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
     PyObject *points_obj = NULL;
     if(!PyArg_ParseTuple(args, "O", &points_obj))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedMoments()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedMoments()");
         return NULL;
     }
     try{
@@ -2573,7 +2806,7 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|d", const_cast<char**>(keywords),
         &points_obj, &vz_error))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedDF()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedDF()");
         return NULL;
     }
     try{
@@ -2667,7 +2900,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
         args, namedArgs, "O|OOO", const_cast<char**>(keywords),
         &points_obj, &gridvR_obj, &gridvz_obj, &gridvphi_obj))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to vdf()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to vdf()");
         return NULL;
     }
 
@@ -2692,9 +2925,9 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     }
 
     // retrieve the input grids, if they are provided
-    std::vector<double> gridvR_arr   = toFloatArray(gridvR_obj);   // empty array if gridvR_obj==NULL
-    std::vector<double> gridvz_arr   = gridvz_obj   ? toFloatArray(gridvz_obj)   : gridvR_arr;
-    std::vector<double> gridvphi_arr = gridvphi_obj ? toFloatArray(gridvphi_obj) : gridvR_arr;
+    std::vector<double> gridvR_arr   = toDoubleArray(gridvR_obj);   // empty array if gridvR_obj==NULL
+    std::vector<double> gridvz_arr   = gridvz_obj   ? toDoubleArray(gridvz_obj)   : gridvR_arr;
+    std::vector<double> gridvphi_arr = gridvphi_obj ? toDoubleArray(gridvphi_obj) : gridvR_arr;
 
     galaxymodel::GalaxyModel model(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
     bool allok = true;
@@ -2867,6 +3100,11 @@ typedef struct {
 
 void Component_dealloc(ComponentObject* self)
 {
+    if(self->comp)
+        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted " + std::string(self->name) + " at " +
+            utils::toString(self->comp.get()));
+    else
+        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty component");
     self->comp.reset();
     // self->name is either NULL or points to a constant string that does not require deallocation
     self->ob_type->tp_free(self);
@@ -2950,6 +3188,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             else       // both potential and density
                 self->comp.reset(new galaxymodel::ComponentStatic(dens, disklike, pot));
             self->name = "Static component";
+            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+                utils::toString(self->comp.get()));
             return 0;
         }
         catch(std::exception& e) {
@@ -2972,6 +3212,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithSpheroidalDF(
                 df, dens, rmin, rmax, numRad, numAng));
             self->name = "Spheroidal component";
+            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+                utils::toString(self->comp.get()));
             return 0;
         }
         catch(std::exception& e) {
@@ -2980,8 +3222,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             return -1;
         }
     } else {   // disk-like component
-        std::vector<double> gridR(toFloatArray(getItemFromPyDict(namedArgs, "gridR")));
-        std::vector<double> gridz(toFloatArray(getItemFromPyDict(namedArgs, "gridz")));
+        std::vector<double> gridR(toDoubleArray(getItemFromPyDict(namedArgs, "gridR")));
+        std::vector<double> gridz(toDoubleArray(getItemFromPyDict(namedArgs, "gridz")));
         math::blas_dmul(conv->lengthUnit, gridR);
         math::blas_dmul(conv->lengthUnit, gridz);
         if(gridR.empty() || gridz.empty()) {
@@ -2993,6 +3235,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithDisklikeDF(
                 df, dens, gridR, gridz));
             self->name = "Disklike component";
+            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+                utils::toString(self->comp.get()));
             return 0;
         }
         catch(std::exception& e) {
@@ -3232,6 +3476,171 @@ static PyTypeObject SelfConsistentModelType = {
 
 
 ///@}
+//  ----------------------------------------
+/// \name  Target class for additive models
+//  ----------------------------------------
+///@{
+
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Target class
+typedef struct {
+    PyObject_HEAD
+    galaxymodel::PtrTarget target;
+} TargetObject;
+/// \endcond
+
+void Target_dealloc(TargetObject* self)
+{
+    if(self->target)
+        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted " + std::string(self->target->name()) +
+            " target at " + utils::toString(self->target.get()));
+    else
+        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty target");
+    self->target.reset();
+    self->ob_type->tp_free(self);
+}
+
+static const char* docstringTarget =
+    "Target objects represent various targets that need to be satisfied by an additive model.\n";
+
+int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!onlyNamedArgs(args, namedArgs))
+        return -1;
+    // check if a potential object was provided
+    PyObject* pot_obj = getItemFromPyDict(namedArgs, "potential");
+    potential::PtrPotential pot = getPotential(pot_obj);
+    if(pot_obj!=NULL && !pot) {
+        PyErr_SetString(PyExc_TypeError,
+            "Argument 'potential' must be a valid instance of Potential class");
+        return -1;
+    }
+    // check if a density object was provided
+    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
+    potential::PtrDensity dens = getDensity(dens_obj);
+    if(dens_obj!=NULL && !dens) {
+        PyErr_SetString(PyExc_TypeError,
+            "Argument 'density' must be a valid Density instance");
+        return -1;
+    }
+
+    PyObject* type_obj = getItemFromPyDict(namedArgs, "type");
+    if(type_obj==NULL || !PyString_Check(type_obj)) {
+        PyErr_SetString(PyExc_ValueError, "Must provide a type='...' argument");
+        return -1;
+    }
+    std::string type_str(PyString_AsString(type_obj));
+    try{
+        // check if a DensityGrid is requested
+        galaxymodel::DensityGridParams densParams;
+        densParams.type = galaxymodel::DG_UNKNOWN;
+        if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
+            densParams.type = galaxymodel::DG_CLASSIC_TOPHAT;
+        if(utils::stringsEqual(type_str, "DensityClassicLinear"))
+            densParams.type = galaxymodel::DG_CLASSIC_LINEAR;
+        if(utils::stringsEqual(type_str, "DensitySphHarm"))
+            densParams.type = galaxymodel::DG_SPH_HARM;
+        if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
+            densParams.type = galaxymodel::DG_CYLINDRICAL_TOPHAT;
+        if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
+            densParams.type = galaxymodel::DG_CYLINDRICAL_LINEAR;
+        if(densParams.type != galaxymodel::DG_UNKNOWN) {
+            densParams.gridSizeR = toInt(getItemFromPyDict(namedArgs, "gridSizeR"), densParams.gridSizeR);
+            densParams.gridSizez = toInt(getItemFromPyDict(namedArgs, "gridSizez"), densParams.gridSizez);
+            densParams.lmax = toInt(getItemFromPyDict(namedArgs, "lmax"), densParams.lmax);
+            densParams.mmax = toInt(getItemFromPyDict(namedArgs, "mmax"), densParams.mmax);
+            densParams.stripsPerPane =
+                toInt(getItemFromPyDict(namedArgs, "stripsPerPane"), densParams.stripsPerPane);
+            densParams.innerShellMass =
+                toDouble(getItemFromPyDict(namedArgs, "innerShellMass"), densParams.innerShellMass);
+            densParams.outerShellMass =
+                toDouble(getItemFromPyDict(namedArgs, "outerShellMass"), densParams.outerShellMass);
+            densParams.axisRatioY =
+                toDouble(getItemFromPyDict(namedArgs, "axisRatioY"), densParams.axisRatioY);
+            densParams.axisRatioZ =
+                toDouble(getItemFromPyDict(namedArgs, "axisRatioZ"), densParams.axisRatioZ);
+            if(!dens) {
+                PyErr_SetString(PyExc_ValueError, "Must provide a density=... argument");
+                return -1;
+            }
+            self->target.reset(new galaxymodel::TargetDensity(*dens, densParams));
+            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
+                " at " + utils::toString(self->target.get()));
+            return 0;
+        }
+
+        // check if a KinemJeans is being requested
+        if(utils::stringsEqual(type_str, "KinemJeans")) {
+            double beta   = toDouble(getItemFromPyDict(namedArgs, "beta"), 0.);
+            int gridSizeR = toInt(getItemFromPyDict(namedArgs, "gridSizeR"), 0);
+            int degree    = toInt(getItemFromPyDict(namedArgs, "degree"), 0);
+            if(!dens || !pot) {
+                PyErr_SetString(PyExc_ValueError, "Must provide density=... and potential=... arguments");
+                return -1;
+            }
+            self->target.reset(new galaxymodel::TargetKinemJeans(*dens, *pot, beta, gridSizeR, degree));
+            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
+                " at " + utils::toString(self->target.get()));
+            return 0;
+        }
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError,
+            (std::string("Error in creating a Target object: ")+e.what()).c_str());
+        return -1;
+    }
+    // shouldn't reach here
+    PyErr_SetString(PyExc_ValueError, "Unknown type='...' argument");
+    return -1;
+}
+
+PyObject* Target_name(PyObject* self)
+{
+    return Py_BuildValue("s", ((TargetObject*)self)->target->name());
+}
+
+PyObject* Target_elem(PyObject* self, Py_ssize_t index)
+{
+    std::vector<double> constraints = ((TargetObject*)self)->target->constraints();
+    if(index<0 || index >= (Py_ssize_t)constraints.size()) {
+        PyErr_SetString(PyExc_IndexError, "element index out of range in Target");
+        return NULL;
+    }
+    return Py_BuildValue("sd", ((TargetObject*)self)->target->elemName(index).c_str(), constraints[index]);
+}
+
+Py_ssize_t Target_len(PyObject* self)
+{
+    return ((TargetObject*)self)->target->numConstraints();
+}
+
+PyObject* Target_values(PyObject* self)
+{
+    return toPyArray(((TargetObject*)self)->target->constraints());
+}
+
+static PySequenceMethods Target_sequence_methods = {
+    Target_len, 0, 0, Target_elem,
+};
+static PyMethodDef Target_methods[] = {
+    { "values", (PyCFunction)Target_values, METH_NOARGS,
+      "Return the 1d array of constraint values" },
+    { NULL }
+};
+
+static PyTypeObject TargetType = {
+    PyObject_HEAD_INIT(NULL)
+    0, "agama.Target",
+    sizeof(TargetObject), 0, (destructor)Target_dealloc,
+    0, 0, 0, 0, 0, 0, &Target_sequence_methods, 0, 0, 0, Target_name, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringTarget,
+    0, 0, 0, 0, 0, 0, Target_methods, 0, 0, 0, 0, 0, 0, 0,
+    (initproc)Target_init
+};
+
+
+///@}
 //  ----------------------------------------------
 /// \name  CubicSpline class and related routines
 //  ----------------------------------------------
@@ -3247,11 +3656,11 @@ typedef struct {
 
 void CubicSpline_dealloc(PyObject* self)
 {
-    // dirty hack: manually call the destructor for an object that was
-    // constructed not in a normal way, but rather with a placement new operator
     utils::msg(utils::VL_VERBOSE, "Agama", "Deleted a cubic spline of size "+
         utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
         utils::toString(&((CubicSplineObject*)self)->spl));
+    // dirty hack: manually call the destructor for an object that was
+    // constructed not in a normal way, but rather with a placement new operator
     ((CubicSplineObject*)self)->spl.~CubicSpline();
     self->ob_type->tp_free(self);
 }
@@ -3274,8 +3683,8 @@ int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
         return -1;
     }
     std::vector<double>
-        xvalues(toFloatArray(x_obj)),
-        yvalues(toFloatArray(y_obj));
+        xvalues(toDoubleArray(x_obj)),
+        yvalues(toDoubleArray(y_obj));
     if(xvalues.size() != yvalues.size() || xvalues.size() < 2) {
         PyErr_SetString(PyExc_ValueError, "CubicSpline: input does not contain valid arrays");
         return -1;
@@ -3325,7 +3734,7 @@ PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iO", const_cast<char **>(keywords),
         &ptx, &der, &extrapolate_obj))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments");
         return NULL;
     }
     if(der<0 || der>2) {
@@ -3452,7 +3861,8 @@ PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     PyObject* w_obj=NULL;
     double smoothfactor=0;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OOO|Od", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &y_obj, &w_obj, &smoothfactor)) {
+        &k_obj, &x_obj, &y_obj, &w_obj, &smoothfactor))
+    {
         PyErr_SetString(PyExc_ValueError, "splineApprox: "
             "must provide an array of grid nodes and two arrays of equal length "
             "(input x and y points), and optionally an array of weights "
@@ -3460,10 +3870,10 @@ PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     std::vector<double>
-        knots  (toFloatArray(k_obj)),
-        xvalues(toFloatArray(x_obj)),
-        yvalues(toFloatArray(y_obj)),
-        weights(toFloatArray(w_obj));
+        knots  (toDoubleArray(k_obj)),
+        xvalues(toDoubleArray(x_obj)),
+        yvalues(toDoubleArray(y_obj)),
+        weights(toDoubleArray(w_obj));
     if(xvalues.empty() || yvalues.empty() || knots.empty()) {
         PyErr_SetString(PyExc_ValueError, "Input does not contain valid arrays");
         return NULL;
@@ -3531,18 +3941,19 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
     int infLeft=0, infRight=0;  // should rather be bool, but python doesn't handle it in arg list
     double smooth=0;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiid", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &smooth)) {
+        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &smooth))
+    {
         PyErr_SetString(PyExc_ValueError, "splineLogDensity: "
             "must provide an array of grid nodes and two arrays of equal length "
             "(x coordinates of input points and their weights)");
         return NULL;
     }
     std::vector<double>
-        knots  (toFloatArray(k_obj)),
-        xvalues(toFloatArray(x_obj)),
+        knots  (toDoubleArray(k_obj)),
+        xvalues(toDoubleArray(x_obj)),
         weights;
     if(w_obj)
-        weights = toFloatArray(w_obj);
+        weights = toDoubleArray(w_obj);
     else
         weights.assign(xvalues.size(), 1./xvalues.size());
     if(xvalues.empty() || weights.empty() || knots.empty()) {
@@ -3583,70 +3994,638 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 
 /// description of orbit function
 static const char* docstringOrbit =
-    "Compute an orbit starting from the given initial conditions in the given potential\n"
-    "Arguments:\n"
-    "  ic=float[6] : initial conditions - an array of 6 numbers "
-    "(3 positions and 3 velocities in Cartesian coordinates);\n"
-    "  pot=Potential object that defines the gravitational potential;\n"
-    "  time=float : total integration time;\n"
-    "  step=float : output timestep (does not affect the integration accuracy);\n"
-    "  Omega=float, optional : pattern speed of the rotating frame (default 0);\n"
-    "  acc=float, optional : relative accuracy parameter (default 1e-8).\n"
-    "Returns: an array of Nx6 numbers, where N=time/step+1 is the number of output points "
-    "in the trajectory, and each point consists of position and velocity in Cartesian coordinates.";
+    "Compute a single orbit or a bunch of orbits in the given potential\n"
+    "Named arguments:\n"
+    "  ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in "
+    "Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.\n"
+    "  potential:  a Potential object or a compatible interface.\n"
+    "  Omega (optional):  pattern speed of the rotating frame (default 0).\n"
+    "  time:  integration time - for a single orbit, just one number; "
+    "for a bunch of orbits, an array of length N.\n"
+    "  targets (optional):  zero or more instances of Target class (a tuple/list if more than one); "
+    "each target collects its own data for each orbit.\n"
+    "  trajsize (optional):  if given, turns on the recording of trajectory for each orbit "
+    "(should be either a single integer or an array of integers with length N). "
+    "The trajectory of each orbit is stored at regular intervals of time (`dt=time/(trajsize-1)`, "
+    "so that the number of points is `trajsize`; both time and trajsize may differ between orbits.\n"
+    "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
+    "Returns:\n"
+    "  depending on the arguments, one or a tuple of several data containers (one for each target, "
+    "plus an extra one for trajectories). \n"
+    "  Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, "
+    "and C is the number of constraints in the target (varies between targets); "
+    "if there was a single orbit, then this would be a 1d array of length C. "
+    "These data storage arrays should be provided to the `optsolve()` routine. \n"
+    "  Trajectory output is represented as a Nx2 array (or, in case of a single orbit, a 1d array "
+    "of length 2), with elements being NumPy arrays themselves: "
+    "each row stands for one orbit, the first element in each row is a 1d array of length "
+    "`trajsize` containing the timestamps, and the second is a 2d array of size `trajsize`x6 "
+    "containing the position+velocity at corresponding timestamps.\n"
+    "Examples:\n"
+    "# compute a single orbit and output the trajectory in a 2d array of size 1001x6:\n"
+    ">>> times,points = orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
+    "# integrate a bunch of orbits with initial conditions taken from a Nx6 array `initcond`, "
+    "for a time equivalent to 50 periods for each orbit, collecting the data for two targets "
+    "`target1` and `target2` and also storing their trajectories in a Nx2 array of "
+    "time and position/velocity arrays:\n"
+    ">>> stor1, stor2, trajectories = orbit(potential=mypot, ic=initcond, time=50*mypot.Tcirc(initcond), "
+    "trajsize=500, targets=(target1, target2))";
 
-/// orbit integration
+/// run a single orbit or the entire orbit library for a Schwarzschild model
 PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"ic", "pot", "time", "step", "Omega", "acc", NULL};
-    double time = 0, step = 0, Omega = 0;
+    if(!onlyNamedArgs(args, namedArgs))
+        return NULL;
+
+    // parse input arguments
     orbit::OrbitIntParams params;
-    PyObject *ic_obj = NULL, *pot_obj = NULL;
-    if(!PyArg_ParseTupleAndKeywords(
-        args, namedArgs, "|OOdddd", const_cast<char**>(keywords),
-        &ic_obj, &pot_obj, &time, &step, &Omega, &params.accuracy) ||
-        time<=0 || step<=0 || params.accuracy<=0)
+    double Omega = 0.;
+    PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL, *targets_obj = NULL, *trajsize_obj = NULL;
+    static const char* keywords[] =
+        {"ic", "time", "potential", "targets", "trajsize", "Omega", "accuracy", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOdd", const_cast<char**>(keywords),
+        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj, &Omega, &params.accuracy))
     {
-        PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to orbit()");
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to orbit()");
         return NULL;
     }
-    if(!PyObject_TypeCheck(pot_obj, &PotentialType) ||
-        ((PotentialObject*)pot_obj)->pot==NULL ) {
-        PyErr_SetString(PyExc_TypeError, "Argument 'pot' must be a valid instance of Potential class");
+
+    // ensure that a potential object was provided
+    potential::PtrPotential pot = getPotential(pot_obj);
+    if(!pot) {
+        PyErr_SetString(PyExc_TypeError,
+            "Argument 'potential' must be a valid instance of Potential class");
         return NULL;
     }
-    PyArrayObject *ic_arr  = (PyArrayObject*) PyArray_FROM_OTF(ic_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    if(ic_arr == NULL || PyArray_NDIM(ic_arr) != 1 || PyArray_DIM(ic_arr, 0) != 6) {
+
+    // ensure that initial conditions were provided
+    PyArrayObject *ic_arr = ic_obj==NULL ? NULL :
+        (PyArrayObject*) PyArray_FROM_OTF(ic_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(ic_arr == NULL || !(
+        (PyArray_NDIM(ic_arr) == 1 && PyArray_DIM(ic_arr, 0) == 6) ||
+        (PyArray_NDIM(ic_arr) == 2 && PyArray_DIM(ic_arr, 1) == 6) ) )
+    {
         Py_XDECREF(ic_arr);
-        PyErr_SetString(PyExc_ValueError, "Argument 'ic' does not contain a valid array of length 6");
+        PyErr_SetString(PyExc_ValueError, "Argument 'ic' does not contain a valid array of length Nx6");
         return NULL;
     }
-    // initialize
-    const coord::PosVelCar ic_point(convertPosVel(&pyArrayElem<double>(ic_arr, 0)));
+    bool singleOrbit = PyArray_NDIM(ic_arr) == 1; // in this case all output arrays have one dimension less
+
+    // unit-convert initial conditions
+    int numOrbits = singleOrbit ? 1 : (int)PyArray_DIM(ic_arr, 0);
+    std::vector<coord::PosVelCar> initCond(numOrbits);
+    for(int i=0; i<numOrbits; i++)
+        initCond[i] = convertPosVel(PyArray_NDIM(ic_arr) == 1 ?
+            &pyArrayElem<double>(ic_arr, 0) : &pyArrayElem<double>(ic_arr, i, 0));
     Py_DECREF(ic_arr);
-    // integrate
-    try{
-        std::vector<coord::PosVelCar> traj;
-        orbit::integrate(ic_point, time * conv->timeUnit,
-            orbit::OrbitIntegratorRot(*((PotentialObject*)pot_obj)->pot, Omega / conv->timeUnit),
-            orbit::RuntimeFncArray(1, orbit::PtrRuntimeFnc(
-                new orbit::RuntimeTrajectory<coord::Car>(traj, step * conv->timeUnit))),
-            params);
-        // build an appropriate output array
-        const npy_intp size = traj.size();
-        npy_intp dims[] = {size, 6};
-        PyObject* result = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
-        if(!result)
+
+    // check that integration time(s) were provided
+    PyArrayObject *time_arr = time_obj==NULL ? NULL :
+        (PyArrayObject*) PyArray_FROM_OTF(time_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(time_arr == NULL || !( PyArray_NDIM(time_arr) == 0 ||
+        (PyArray_NDIM(time_arr) == 1 && (int)PyArray_DIM(time_arr, 0) == numOrbits) ) )
+    {
+        Py_XDECREF(time_arr);
+        PyErr_SetString(PyExc_ValueError,
+            "Argument 'time' must either be a scalar or have the same length "
+            "as the number of points in the initial conditions");
+        return NULL;
+    }
+
+    // unit-convert integration times
+    std::vector<double> integrTimes(numOrbits);
+    if(PyArray_NDIM(time_arr) == 0)
+        integrTimes.assign(numOrbits, PyFloat_AsDouble(time_obj));
+    else
+        for(int i=0; i<numOrbits; i++)
+            integrTimes[i] = pyArrayElem<double>(time_arr, i) * conv->timeUnit;
+    Py_DECREF(time_arr);
+    for(int orb=0; orb<numOrbits; orb++)
+        if(integrTimes[orb] <= 0) {
+            PyErr_SetString(PyExc_ValueError, "Argument 'time' must be positive");
             return NULL;
-        for(npy_intp index=0; index<size; index++)
-            unconvertPosVel(traj[index], &pyArrayElem<double>(result, index, 0));
+        }
+
+    // check that valid targets were provided
+    std::vector<PyObject*> targets_vec = toPyObjectArray(targets_obj);
+    std::vector<galaxymodel::PtrTarget> targets;
+    size_t numTargets = targets_vec.size();
+    for(size_t t=0; t<numTargets; t++) {
+        if(!PyObject_TypeCheck(targets_vec[t], &TargetType)) {
+            PyErr_SetString(PyExc_ValueError, "Argument 'targets' must contain "
+                "an instance of Target class or a tuple/list of such instances");
+            return NULL;
+        }
+        targets.push_back(((TargetObject*)targets_vec[t])->target);
+    }
+
+    // check if trajectory needs to be recorded
+    std::vector<int> trajSizes;
+    bool haveTraj = trajsize_obj!=NULL;  // in this case the output tuple contains one extra item
+    if(haveTraj) {
+        PyArrayObject *trajsize_arr =
+            (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_IN_ARRAY);
+        if(!trajsize_arr)
+            return NULL;
+        if(PyArray_NDIM(trajsize_arr) == 0) {
+            long val = PyInt_AsLong(trajsize_obj);
+            if(val > 0)
+                trajSizes.assign(numOrbits, val);
+        } else if(PyArray_NDIM(trajsize_arr) == 1 && (int)PyArray_DIM(trajsize_arr, 0) == numOrbits) {
+            trajSizes.resize(numOrbits);
+            for(int i=0; i<numOrbits; i++)
+                trajSizes[i] = pyArrayElem<int>(trajsize_arr, i);
+        }
+        Py_DECREF(trajsize_arr);
+        if((int)trajSizes.size() != numOrbits) {
+            PyErr_SetString(PyExc_ValueError,
+                "Argument 'trajsize', if provided, must either be an integer or an array of integers "
+                "with the same length as the number of points in the initial conditions");
+            return NULL;
+        }
+    }
+
+    // the output is a tuple with the following items:
+    // each target corresponds to a NumPy array where the collected information for all orbits is stored,
+    // plus optionally a list containing the trajectories of all orbits if they are requested
+    if(numTargets + haveTraj == 0) {
+        PyErr_SetString(PyExc_ValueError, "No output is requested");
+        return NULL;
+    }
+    PyObject* result = PyTuple_New(numTargets + haveTraj);
+    if(!result)
+        return NULL;
+
+    // allocate the arrays for storing the information for each target,
+    // and optionally for the output trajectory(ies) - the last item in the output tuple;
+    // the latter one is a Nx2 array of Python objects
+    bool fail = false;  // error flag (e.g., insufficient memory)
+    for(size_t t=0; !fail && t < numTargets + haveTraj; t++) {
+        npy_intp numCols = t==numTargets ? 2 : targets[t]->numConstraints();
+        int datatype     = t==numTargets ? NPY_OBJECT : STORAGE_NUM_T;
+        npy_intp size[2] = {numOrbits, numCols};
+        // if there is only a single orbit, the output array is 1-dimensional,
+        // otherwise 2-dimensional (numOrbits rows, numConstraints columns)
+        PyObject* storage_arr = singleOrbit ?
+            PyArray_SimpleNew(1, &size[1], datatype) :
+            PyArray_SimpleNew(2, size, datatype);
+        if(storage_arr)
+            PyTuple_SetItem(result, t, storage_arr);
+        else fail = true;
+    }
+
+    // set up signal handler to stop the integration on a keyboard interrupt
+    keyboardInterruptTriggered = 0;
+    defaultKeyboardInterruptHandler = signal(SIGINT, customKeyboardInterruptHandler);
+
+    // finally, run the orbit integration
+    if(!fail) {
+        const orbit::OrbitIntegratorRot orbitIntegrator(*pot, Omega / conv->timeUnit);
+        int numComplete = 0;
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+        for(int orb = 0; orb < numOrbits; orb++) {
+            if(fail || keyboardInterruptTriggered) continue;
+            try{
+                double integrTime = integrTimes.at(orb);
+                // slightly reduce the output interval for trajectory to ensure that
+                // the last point is stored (otherwise it may be left out due to roundoff)
+                double trajStep = haveTraj && trajSizes[orb]>0 ?
+                    integrTime / (trajSizes[orb]-1+1e-10) : INFINITY;
+                std::vector<coord::PosVelCar> traj;
+
+                // construct runtime functions for each target that store the collected data
+                // in the respective row of each target's matrix,
+                // plus optionally the trajectory recording function
+                orbit::RuntimeFncArray fncs(numTargets + haveTraj);
+                for(size_t t=0; t<numTargets; t++) {
+                    PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
+                    galaxymodel::StorageNumT* output = singleOrbit ?
+                        &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, 0) :
+                        &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, 0);
+                    fncs[t] = targets[t]->getOrbitRuntimeFnc(output);
+                }
+                if(haveTraj)
+                    fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(traj, trajStep));
+
+                // integrate the orbit
+                orbit::integrate(initCond.at(orb), integrTime, orbitIntegrator, fncs);
+
+                // if the trajectory was recorded, store it in the last item of the output tuple
+                if(haveTraj) {
+                    const npy_intp size = traj.size();
+                    npy_intp dims[] = {size, 6};
+                    PyObject* time_arr = PyArray_SimpleNew(1, dims, STORAGE_NUM_T);
+                    PyObject* traj_arr = PyArray_SimpleNew(2, dims, STORAGE_NUM_T);
+                    if(!time_arr || !traj_arr) {
+                        fail = true;
+                        continue;
+                    }
+
+                    // convert the units and numerical type
+                    for(npy_intp index=0; index<size; index++) {
+                        double point[6];
+                        unconvertPosVel(traj[index], point);
+                        for(int c=0; c<6; c++)
+                            pyArrayElem<galaxymodel::StorageNumT>(traj_arr, index, c) =
+                            static_cast<galaxymodel::StorageNumT>(point[c]);
+                        pyArrayElem<galaxymodel::StorageNumT>(time_arr, index) =
+                        static_cast<galaxymodel::StorageNumT>(trajStep * index / conv->timeUnit);
+                    }
+
+                    // store these arrays in the last element of the output tuple
+                    PyObject* elem = PyTuple_GET_ITEM(result, numTargets);
+                    if(singleOrbit) {
+                        pyArrayElem<PyObject*>(elem, 0) = time_arr;
+                        pyArrayElem<PyObject*>(elem, 1) = traj_arr;
+                    } else {
+                        pyArrayElem<PyObject*>(elem, orb, 0) = time_arr;
+                        pyArrayElem<PyObject*>(elem, orb, 1) = traj_arr;
+                    }
+                }
+
+                // status update
+                ++numComplete;
+                if(numOrbits != 1) {
+                    printf("%i orbits complete\r", numComplete);
+                    fflush(stdout);
+                }
+            }
+            catch(std::exception& e) {
+                PyErr_SetString(PyExc_ValueError, e.what());
+                fail = true;
+            }
+        }
+    }
+    if(numOrbits != 1)
+        printf("%i orbits complete\n", numOrbits);
+    signal(SIGINT, defaultKeyboardInterruptHandler);  // restore signal handler
+    if(keyboardInterruptTriggered) {
+        PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+        fail = true;
+    }
+    if(fail) {
+        Py_XDECREF(result);
+        return NULL;
+    }
+    // return a tuple of storage matrices (numpy-compatible) and/or a list of orbit trajectories,
+    // but if this tuple only contains one element, return simply this element
+    if(PyTuple_Size(result) == 1) {
+        PyObject* item = PyTuple_GET_ITEM(result, 0);
+        Py_INCREF(item);
+        Py_DECREF(result);
+        return item;
+    } else
         return result;
+}
+
+
+static const char* docstringSampleOrbitLibrary =
+    "Construct an N-body snapshot from the orbit library\n"
+    "Arguments:\n"
+    "  N:  the required number of particles in the output snapshot.\n"
+    "  traj:  an array of trajectories returned by the `orbit()` routine.\n"
+    "  amplitudes:  an array of orbit weights, returned by the `optsolve()` routine.\n"
+    "Returns: a tuple of two elements: the flag indicating success or failure, and the result.\n"
+    "  In case of success, the result is a tuple of two arrays: particle coordinates/velocities "
+    "(2d Nx6 array) and particle weights (1d array of length N).\n"
+    "  In case of failure, the result is a different tuple of two arrays: "
+    "list of orbit indices which did not have enough trajectory samples (length is anywhere from 1 to N), "
+    "and corresponding required numbers of samples for each orbit from this list.\n";
+
+/// convert the orbit library to an N-body model
+PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    long Nbody = 0;
+    PyObject *traj_obj = NULL, *ampl_obj = NULL;
+    static const char* keywords[] = {"N", "traj", "amplitudes", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "lOO", const_cast<char**>(keywords),
+        &Nbody, &traj_obj, &ampl_obj))
+    {
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to sampleOrbitLibrary()");
+        return NULL;
+    }
+    if(Nbody <= 0) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'N' must be a positive integer");
+        return NULL;
+    }
+
+    // check that amplitudes are correct and their sum is positive
+    std::vector<double> ampl(toDoubleArray(ampl_obj));
+    npy_intp numOrbits = ampl.size();
+    if(numOrbits <= 0) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'amplitudes' must be a non-empty array of floats");
+        return NULL;
+    }
+    double totalMass = 0.;
+    for(npy_intp orb=0; orb<numOrbits; orb++) {
+        if(ampl[orb]>=0)
+            totalMass += ampl[orb];
+        else
+            totalMass = -INFINITY;
+    }
+    if(!(totalMass > 0)) {
+        PyErr_SetString(PyExc_ValueError, "The sum of amplitudes must be positive");
+        return NULL;
+    }
+
+    // check that the trajectories are provided: it should be an array with PyObjects as elements
+    // (they must be arrays themselves, which will be checked later); the shape of this array should be
+    // either numOrbits or numOrbits x 2 (the latter variant is returned by the `orbit()` routine).
+    PyArrayObject* traj_arr = NULL;
+    PyArray_Descr* dtype = NULL;
+    int ndim = 0;
+    npy_intp inputdims[NPY_MAXDIMS];
+    if(PyArray_GetArrayParamsFromObject(traj_obj, NULL, 0, &dtype, &ndim, inputdims, &traj_arr, NULL) < 0 ||
+        traj_arr == NULL ||                        // the argument must be a genuine NumPy array,
+        PyArray_TYPE(traj_arr) != NPY_OBJECT ||    // with PyObjects as elements,
+        !( PyArray_NDIM(traj_arr) == 1 ||          // either 1d, or 2d and the second dimension is 2,
+        (PyArray_NDIM(traj_arr) == 2 && PyArray_DIM(traj_arr, 1) == 2) ) ||
+        PyArray_DIM(traj_arr, 0) != numOrbits )    // first dimension equal to the number of orbits
+    {
+        PyErr_SetString(PyExc_ValueError,
+            "'traj' must be an array of numpy arrays with the same length as 'amplitudes'");
+        return NULL;
+    }
+    // if this array has shape numOrbits x 2, as returned by the `orbit()` routine,
+    // then the first column contains timestamps (not used here), and the second column - trajectories
+    bool useSecondCol = PyArray_NDIM(traj_arr) == 2;
+
+    // allocate the output arrays of particles and masses
+    npy_intp dims[2] = {Nbody, 6};
+    PyObject* posvel_arr = PyArray_SimpleNew(2, dims, STORAGE_NUM_T);
+    PyObject* mass_arr   = PyArray_SimpleNew(1, dims, STORAGE_NUM_T);
+
+    // this array will store indices of orbits that failed to produce required number of samples
+    std::vector<std::pair<int, int> > badOrbits;
+    
+    // scan the array of orbits and sample appropriate number of points from each trajectory
+    double cumulMass   = 0.;  // total mass of output points sampled so far
+    long outPointIndex = 0;   // total number of output samples constructed so far
+    for(int orb=0; orb<numOrbits; orb++) {
+        cumulMass += ampl[orb];
+        long newPointIndex = static_cast<long int>(cumulMass / totalMass * Nbody);
+        // required number of points to sample from this orbit
+        int pointsToSample = newPointIndex - outPointIndex;
+
+        // obtain the trajectory of the current orbit and check its correctness
+        PyArrayObject* traj_elem = useSecondCol ?
+            pyArrayElem<PyArrayObject*>(traj_arr, orb, 1) :
+            pyArrayElem<PyArrayObject*>(traj_arr, orb);
+        if(!PyArray_Check(traj_elem) || PyArray_NDIM(traj_elem) != 2 || PyArray_DIM(traj_elem, 1) != 6) {
+            PyErr_SetString(PyExc_ValueError, "'traj' must contain arrays with shape Lx6");
+            Py_DECREF(posvel_arr);
+            Py_DECREF(mass_arr);
+            return NULL;
+        }
+        int pointsInTrajectory = PyArray_DIM(traj_elem, 0);
+
+        // check if this orbit has enough points to be sampled
+        if(pointsInTrajectory >= pointsToSample) {
+            // construct a random permutation of indices
+            std::vector<int> permutation(pointsInTrajectory);
+            math::getRandomPermutation(pointsInTrajectory, &permutation[0]);
+
+            // draw the given number of samples with random indices from the trajectory
+            for(int i=0; i<pointsToSample; i++) {
+                const galaxymodel::StorageNumT* from =
+                    &pyArrayElem<galaxymodel::StorageNumT>(traj_elem, permutation[i], 0);
+                std::copy(from, from+6,
+                    &pyArrayElem<galaxymodel::StorageNumT>(posvel_arr, outPointIndex+i, 0));
+                pyArrayElem<galaxymodel::StorageNumT>(mass_arr, outPointIndex+i) =
+                    static_cast<galaxymodel::StorageNumT>(totalMass / Nbody);
+            }
+        } else {
+            // insufficient samples: do not draw anything, add to the list of bad orbits
+            badOrbits.push_back(std::make_pair(orb, pointsToSample));
+        }
+        outPointIndex = newPointIndex;
+    }
+    assert(outPointIndex == Nbody);
+    if(badOrbits.empty()) {
+        return Py_BuildValue("O(NN)", Py_True, posvel_arr, mass_arr);
+    } else {
+        npy_intp size = badOrbits.size();
+        PyObject* indices_arr   = PyArray_SimpleNew(1, &size, NPY_INT);
+        PyObject* trajsizes_arr = PyArray_SimpleNew(1, &size, NPY_INT);
+        for(npy_intp i=0; i<size; i++) {
+            pyArrayElem<int>(indices_arr,   i) = badOrbits[i].first;
+            pyArrayElem<int>(trajsizes_arr, i) = badOrbits[i].second;
+        }
+        Py_DECREF(posvel_arr);
+        Py_DECREF(mass_arr);
+        return Py_BuildValue("O(NN)", Py_False, indices_arr, trajsizes_arr);
+    }
+}
+
+
+///@}
+//  ----------------------------
+/// \name  Optimization routine
+//  ----------------------------
+///@{
+
+/** helper routine for combining together the elements of a tuple of 1d arrays.
+    \param[in]  obj  is a single Python array or a tuple of arrays
+    \param[in]  nRow is the required size of each input array
+    \param[out] out  will be filled by the data from input arrays stacked together;
+    if the input is empty, out will remain empty
+    \return  true if the number and sizes of input arrays match the requirements in nRow,
+    or if the input is empty; false otherwise
+*/
+bool stackVectors(PyObject* obj, const std::vector<int> nRow, std::vector<double>& out)
+{
+    out.clear();
+    if(obj == NULL)
+        return true;
+    std::vector<PyObject*> arr = toPyObjectArray(obj);
+    if(arr.size() != nRow.size())
+        return false;
+    for(size_t i=0; i<arr.size(); i++) {
+        std::vector<double> tmp = toDoubleArray(arr[i]);
+        if((int)tmp.size() != nRow[i])
+            return false;
+        out.insert(out.end(), tmp.begin(), tmp.end());
+    }
+    return true;
+}
+
+/// interface class for accessing the values of a 2d Python array or a stack of such arrays
+class StackedMatrix: public math::IMatrix<double> {
+    const std::vector<PyObject*>& stack;
+    const std::vector<int>& nRow;
+    std::vector<int> dataTypes;
+public:
+    StackedMatrix(const std::vector<PyObject*>& _stack,
+        int nRowTotal, int nCol, const std::vector<int>& _nRow) :
+        math::IMatrix<double>(nRowTotal, nCol), stack(_stack), nRow(_nRow)
+    {
+        assert(stack.size() == nRow.size());
+        for(size_t s=0; s<stack.size(); s++)
+            dataTypes.push_back(PyArray_TYPE((PyArrayObject*)stack[s]));
+    }
+    
+    virtual size_t size() const { return rows() * cols(); }
+    
+    virtual double at(size_t row, size_t col) const
+    {
+        if(row >= rows() || col >= cols())
+            throw std::out_of_range("index out of range");
+        unsigned int indMatrix = 0;
+        while(indMatrix < stack.size() && (int)row >= nRow[indMatrix]) {
+            row -= nRow[indMatrix];
+            indMatrix++;
+        }
+        assert(indMatrix < stack.size());
+        if(dataTypes[indMatrix] == NPY_FLOAT)
+            return pyArrayElem<float>(stack[indMatrix], row, col);
+        else if(dataTypes[indMatrix] == NPY_DOUBLE)
+            return pyArrayElem<double>(stack[indMatrix], row, col);
+        else
+            throw std::runtime_error("unknown data type in matrix");
+    }
+    
+    virtual double elem(size_t index, size_t &row, size_t &col) const
+    {
+        row = index / cols();
+        col = index % cols();
+        return at(row, col);
+    }
+};
+
+static const char* docstringOptsolve =
+    "Solve a linear or quadratic optimization problem.\n"
+    "Find a vector x that solves a system of linear equations  A x = rhs,  "
+    "subject to elementwise inequalities  xmin <= x <= xmax, "
+    "while minimizing the cost function  F(x) = L^T x + x^T Q x + P(A x - rhs), where "
+    "L and Q are penalties for the solution vector, and P(y) is the penalty for violating "
+    "the RHS constraints, consisting of two parts: linear penalty rL^T |y| and quadratic penalty "
+    "|y|^T diag(rQ) |y|  (both rL and rQ are nonnegative vectors of the same length as rhs).\n"
+    "Arguments:\n"
+    "  matrix:  2d matrix A of size RxC, or a tuple of several matrices that would be vertically "
+    "stacked (they all must have the same number of columns C, and number of rows R1,R2,...). "
+    "Providing a list of matrices does not incur copying, unlike the numpy.vstack() function.\n"
+    "  rhs:     1d vector of length R, or a tuple of the same number of vectors as the number of "
+    "matrices, with sizes R1,R2,...\n"
+    "  xpenl:   1d vector of length C - linear penalties for the solution x "
+    "(optional - zero if not provided).\n"
+    "  xpenq:   1d vector of length C - diagonal of the matrix Q of quadratic "
+    "penalties for the solution x (optional).\n"
+    "  rpenl:   1d vector of length R, or a tuple of vectors R1,R2,... - "
+    "linear penalties for violating the RHS constraints (optional).\n"
+    "  rpenq:   same for the quadratic penalties (optional - if neither linear nor quadratic "
+    "penalties for RHS violation were provided, it means that RHS must be satisfied exactly).\n"
+    "  xmin:    1d vector of length C - minimum allowed values for the solution x (optional - "
+    "if not provided, it implies a vector of zeros, i.e. the solution must be nonnegative).\n"
+    "  xmax:    1d vector of length C - maximum allowed values for the solution x (optional - "
+    "if not provided, it implies no upper limit).\n"
+    "Returns:\n"
+    "  the vector x solving the above system; if it cannot be solved exactly and no penalties "
+    "for constraint violation were provided, then raise an exception.";
+///
+PyObject* optsolve(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] =
+        {"matrix", "rhs", "xpenl", "xpenq", "rpenl", "rpenq", "xmin", "xmax", NULL};
+    PyObject *matrix_obj = NULL, *rhs_obj = NULL, *xpenl_obj = NULL, *xpenq_obj = NULL,
+        *rpenl_obj = NULL, *rpenq_obj = NULL, *xmin_obj = NULL, *xmax_obj = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|OOOOOO", const_cast<char**>(keywords),
+        &matrix_obj, &rhs_obj, &xpenl_obj, &xpenq_obj, &rpenl_obj, &rpenq_obj, &xmin_obj, &xmax_obj))
+    {
+        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to optsolve()");
+        return NULL;
+    }
+
+    // check that the matrix or a tuple of matrices were provided
+    std::vector<PyObject*> matrixStack  = toPyObjectArray(matrix_obj);
+    int nCol = 0, nRowTotal = 0, nStack = matrixStack.size();
+    std::vector<int> nRow(nStack);
+    for(int s=0; s<nStack; s++) {
+        PyArrayObject* mat = (PyArrayObject*)matrixStack[s];
+        if(!PyArray_Check(mat) ||      // it must be an array in the first place,
+            PyArray_NDIM(mat) != 2 ||  // a 2d array, to be specific,
+            // for the first item we memorize the # of columns, and check that other items have the same
+            !((s == 0 && (nCol = PyArray_DIM(mat, 1)) > 0) || (s > 0 && PyArray_DIM(mat, 1) == nCol)) ||
+            !(PyArray_TYPE(mat) == NPY_FLOAT || PyArray_TYPE(mat) == NPY_DOUBLE) )  // check data type
+        {
+            PyErr_SetString(PyExc_ValueError, "Argument 'matrix' must be a 2d array "
+                "or a tuple of such arrays with the same number of columns");
+            return NULL;
+        }
+        nRow[s] = PyArray_DIM(mat, 0);
+        nRowTotal += nRow[s];
+    }
+
+    // check and stack other input vectors
+    std::vector<double> rhs, xpenl, xpenq, rpenl, rpenq, xmin, xmax, result;
+    if(!stackVectors(rhs_obj, nRow, rhs) || rhs.empty()) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'rhs' must be a 1d array "
+            "or a tuple of such arrays matching the number of rows in 'matrix'");
+        return NULL;
+    }
+    if(!stackVectors(rpenl_obj, nRow, rpenl)) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'rpenl', if provided, must be a 1d array "
+            "or a tuple of such arrays matching the number of rows in 'matrix'");
+        return NULL;
+    }
+    if(!stackVectors(rpenq_obj, nRow, rpenq)) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'rpenq', if provided, must be a 1d array "
+            "or a tuple of such arrays matching the number of rows in 'matrix'");
+        return NULL;
+    }
+    xpenl = toDoubleArray(xpenl_obj);
+    if(!xpenl.empty() && (int)xpenl.size() != nCol) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'xpenl', if provided, must be a 1d array "
+            "with length matching the number of columns in 'matrix'");
+        return NULL;
+    }
+    xpenq = toDoubleArray(xpenq_obj);
+    if(!xpenq.empty() && (int)xpenq.size() != nCol) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'xpenq', if provided, must be a 1d array "
+            "with length matching the number of columns in 'matrix'");
+        return NULL;
+    }
+    xmin = toDoubleArray(xmin_obj);
+    if(!xmin.empty() && (int)xmin.size() != nCol) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'xmin', if provided, must be a 1d array "
+            "with length matching the number of columns in 'matrix'");
+        return NULL;
+    }
+    xmax = toDoubleArray(xmax_obj);
+    if(!xmax.empty() && (int)xmax.size() != nCol) {
+        PyErr_SetString(PyExc_ValueError, "Argument 'xmax', if provided, must be a 1d array "
+            "with length matching the number of columns in 'matrix'");
+        return NULL;
+    }
+
+    // construct an interface layer for matrix stacking
+    StackedMatrix matrix(matrixStack, nRowTotal, nCol, nRow);
+
+    // call the appropriate solver
+    try {
+        if(rpenq.empty() && xpenq.empty()) {
+            if(rpenl.empty()) {
+                if(xpenq.empty())
+                    result = math::linearOptimizationSolve(
+                        matrix, rhs, xpenl, xmin, xmax);
+                else
+                    result = math::quadraticOptimizationSolve(
+                        matrix, rhs, xpenl, math::BandMatrix<double>(xpenq), xmin, xmax);
+            } else
+                result = math::linearOptimizationSolveApprox(
+                    matrix, rhs, xpenl, rpenl, xmin, xmax);
+        } else {
+            result = math::quadraticOptimizationSolveApprox(
+                matrix, rhs, xpenl, math::BandMatrix<double>(xpenq), rpenl, rpenq, xmin, xmax);
+        }
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
-            (std::string("Error in orbit computation: ")+e.what()).c_str());
+        PyErr_SetString(PyExc_ValueError, e.what());
         return NULL;
     }
+    return toPyArray(result);
 }
 
 
@@ -3676,19 +4655,13 @@ PyObject* nonuniformGrid(PyObject* /*self*/, PyObject* args, PyObject* namedArgs
     int nnodes=-1;
     double xmin=-1, xmax=-1;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "idd", const_cast<char**>(keywords),
-        &nnodes, &xmin, &xmax) || nnodes<2 || xmin<=0 || xmax<=xmin)
-    {
+        &nnodes, &xmin, &xmax))
+        return NULL;
+    if(nnodes<2 || xmin<=0 || xmax<=xmin) {
         PyErr_SetString(PyExc_ValueError, "Incorrect arguments for nonuniformGrid");
         return NULL;
     }
-    std::vector<double> grid = math::createNonuniformGrid(nnodes, xmin, xmax, true);
-    npy_intp size = grid.size();
-    PyObject* result = PyArray_SimpleNew(1, &size, NPY_DOUBLE);
-    if(!result)
-        return NULL;
-    for(npy_intp index=0; index<size; index++)
-        pyArrayElem<double>(result, index) = grid[index];
-    return result;
+    return toPyArray(math::createNonuniformGrid(nnodes, xmin, xmax, true));
 }
 
 /// wrapper for user-provided Python functions into the C++ compatible form
@@ -3904,6 +4877,10 @@ static PyMethodDef module_methods[] = {
       METH_VARARGS | METH_KEYWORDS, docstringSplineLogDensity },
     { "orbit",                  (PyCFunction)orbit,
       METH_VARARGS | METH_KEYWORDS, docstringOrbit },
+    { "sampleOrbitLibrary",     (PyCFunction)sampleOrbitLibrary,
+      METH_VARARGS | METH_KEYWORDS, docstringSampleOrbitLibrary },
+    { "optsolve",               (PyCFunction)optsolve,
+      METH_VARARGS | METH_KEYWORDS, docstringOptsolve },
     { "actions",                (PyCFunction)actions,
       METH_VARARGS | METH_KEYWORDS, docstringActions },
     { "integrateNdim",          (PyCFunction)integrateNdim,
@@ -3967,7 +4944,12 @@ initagama(void)
     if(PyType_Ready(&SelfConsistentModelType) < 0) return;
     Py_INCREFx(&SelfConsistentModelType);
     PyModule_AddObject(mod, "SelfConsistentModel", (PyObject*)&SelfConsistentModelType);
-
+    
+    TargetType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&TargetType) < 0) return;
+    Py_INCREFx(&TargetType);
+    PyModule_AddObject(mod, "Target", (PyObject*)&TargetType);
+    
     CubicSplineType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&CubicSplineType) < 0) return;
     Py_INCREFx(&CubicSplineType);

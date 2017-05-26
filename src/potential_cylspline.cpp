@@ -2,7 +2,6 @@
 #include "potential_multipole.h"
 #include "math_core.h"
 #include "math_fit.h"
-#include "math_spline.h"
 #include "math_specfunc.h"
 #include "math_sphharm.h"
 #include "utils.h"
@@ -10,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
+#include <alloca.h>
 
 namespace potential {
 
@@ -23,9 +23,6 @@ static const unsigned int CYLSPLINE_MIN_GRID_SIZE = 2;
 /// of a non-axisymmetric density or potential model (it may be larger than
 /// the requested number of output terms, to improve the accuracy of integration)
 static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
-
-/// maximum allowed order of azimuthal Fourier expansion
-static const unsigned int MMAX_AZIMUTHAL_FOURIER = 64;
 
 /// lower cutoff in radius for Legendre Q function
 static const double MIN_R = 1e-10;
@@ -46,19 +43,19 @@ static const double EPSREL_POTENTIAL_INT = 1e-6;
 // the type of input data and the number of quantities stored for each point.
 
 template<class BaseDensityOrPotential>
-void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[]);
+void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[], int numVal);
 
 template<>
-inline void storeValue(const BaseDensity& src, const coord::PosCyl& pos, double values[]) {
+inline void storeValue(const BaseDensity& src, const coord::PosCyl& pos, double values[], int) {
     *values = src.density(pos);
 }
 
 template<>
-inline void storeValue(const BasePotential& src, const coord::PosCyl& pos, double values[]) {
+inline void storeValue(const BasePotential& src, const coord::PosCyl& pos, double values[], int numVal) {
     coord::GradCyl grad;
     src.eval(pos, values, &grad);
-    values[(2*MMAX_AZIMUTHAL_FOURIER+1)]   = grad.dR;
-    values[(2*MMAX_AZIMUTHAL_FOURIER+1)*2] = grad.dz;
+    values[numVal]   = grad.dR;
+    values[numVal*2] = grad.dz;
 }
 
 template<class BaseDensityOrPotential, int NQuantities>
@@ -71,8 +68,6 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     unsigned int sizeR = gridR.size(), sizez = gridz.size();
     if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE)
         throw std::invalid_argument("computeFourierCoefs: incorrect grid size");
-    if(mmax > MMAX_AZIMUTHAL_FOURIER)
-        throw std::invalid_argument("computeFourierCoefs: mmax is too large");
     if(!isZReflSymmetric(src) && gridz[0]==0)
         throw std::invalid_argument("computeFourierCoefs: input density is not symmetric "
             "under z-reflection, the grid in z must cover both positive and negative z");
@@ -90,29 +85,34 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     std::string errorMsg;
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel
 #endif
-    for(int n=0; n<numPoints; n++) {
-        int iR = n % sizeR;  // index in radial grid
-        int iz = n / sizeR;  // index in vertical direction
-        double values [(2*MMAX_AZIMUTHAL_FOURIER+1) * NQuantities];
-        double coefs_m[(2*MMAX_AZIMUTHAL_FOURIER+1)];
-        try{
-            for(unsigned int i=0; i<trans.size(); i++)
-                storeValue<BaseDensityOrPotential>(src,
-                    coord::PosCyl(gridR[iR], gridz[iz], trans.phi(i)), values+i);
-            for(int q=0; q<NQuantities; q++) {
-                trans.transform(&values[q*(2*MMAX_AZIMUTHAL_FOURIER+1)], coefs_m);
-                for(unsigned int i=0; i<numHarmonicsComputed; i++) {
-                    int m = indices[i];
-                    coefs[q]->at(m+mmax)(iR, iz) =
-                        iR==0 && m!=0 ? 0 :   // at R=0, all non-axisymmetric harmonics must vanish
-                        coefs_m[useSine ? m+mmax : m] / (m==0 ? 2*M_PI : M_PI);
+    {
+        // thread-local variables
+        std::vector<double> values((2*mmax+1) * NQuantities), coefs_m(2*mmax+1);
+#ifdef _OPENMP
+#pragma omp for schedule(static)
+#endif
+        for(int n=0; n<numPoints; n++) {
+            int iR = n % sizeR;  // index in radial grid
+            int iz = n / sizeR;  // index in vertical direction
+            try{
+                for(unsigned int i=0; i<trans.size(); i++)
+                    storeValue<BaseDensityOrPotential>(src,
+                        coord::PosCyl(gridR[iR], gridz[iz], trans.phi(i)), &values[i], 2*mmax+1);
+                for(int q=0; q<NQuantities; q++) {
+                    trans.transform(&values[q*(2*mmax+1)], &coefs_m[0]);
+                    for(unsigned int i=0; i<numHarmonicsComputed; i++) {
+                        int m = indices[i];
+                        coefs[q]->at(m+mmax)(iR, iz) =
+                            iR==0 && m!=0 ? 0 :   // at R=0, all non-axisymmetric harmonics must vanish
+                            coefs_m[useSine ? m+mmax : m] / (m==0 ? 2*M_PI : M_PI);
+                    }
                 }
             }
-        }
-        catch(std::exception& e) {
-            errorMsg = e.what();
+            catch(std::exception& e) {
+                errorMsg = e.what();
+            }
         }
     }
     if(!errorMsg.empty())
@@ -196,7 +196,7 @@ public:
         double rho = jac * density_rho_m(dens, m, R, z);
         computePotentialHarmonicAtPoint(m, R, z, R0, z0, rho, useDerivs, values);
         if(!isZReflSymmetric(dens))
-               rho = jac * density_rho_m(dens, m, R,-z);
+            rho = jac * density_rho_m(dens, m, R,-z);
         computePotentialHarmonicAtPoint(m, R,-z, R0, z0, rho, useDerivs, values);
 
         // workaround for the n-dimensional quadrature routine: it seems to be unable 
@@ -225,8 +225,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
     std::vector< math::Matrix<double> >* output[])
 {
     unsigned int sizeR = gridR.size(), sizez = gridz.size();
-    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE ||
-        mmax > MMAX_AZIMUTHAL_FOURIER)
+    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE)
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     if(isZRotSymmetric(src))
         mmax = 0;
@@ -314,16 +313,16 @@ void computeAzimuthalHarmonicsFromParticles(
         harmonics[indices[i]+mmax].resize(nbody);
     }
     Rz.resize(nbody);
-    std::vector<double> tmpharm(2*mmax);
+    double* trig = static_cast<double*>(alloca(mmax*(1+needSine) * sizeof(double)));
     for(size_t b=0; b<nbody; b++) {
         const coord::PosCyl& pc = particles.point(b);
         Rz[b].first = pc.R;
         Rz[b].second= pc.z;
-        math::trigMultiAngle(pc.phi, mmax, needSine, &tmpharm.front());
+        math::trigMultiAngle(pc.phi, mmax, needSine, trig);
         for(unsigned int i=0; i<nind; i++) {
             int m = indices[i];
             harmonics[m+mmax][b] = particles.mass(b) *
-                (m==0 ? 1 : m>0 ? 2*tmpharm[m-1] : 2*tmpharm[mmax-m-1]);
+                (m==0 ? 1 : m>0 ? 2*trig[m-1] : 2*trig[mmax-m-1]);
         }
     }
 }
@@ -470,7 +469,6 @@ void computePotentialCoefsCyl(
 {
     if( gridR.size() < CYLSPLINE_MIN_GRID_SIZE ||
         gridz.size() < CYLSPLINE_MIN_GRID_SIZE ||
-        mmax > MMAX_AZIMUTHAL_FOURIER ||
         (isZReflSymmetric(sym) && gridz[0] != 0) )
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     std::vector<int> indices = math::getIndicesAzimuthal(mmax, sym);
@@ -492,7 +490,6 @@ void computePotentialCoefsCyl(
 {
     if( gridR.size() < CYLSPLINE_MIN_GRID_SIZE ||
         gridz.size() < CYLSPLINE_MIN_GRID_SIZE ||
-        mmax > MMAX_AZIMUTHAL_FOURIER ||
         (isZReflSymmetric(sym) && gridz[0] != 0) )
         throw std::invalid_argument("computePotentialCoefsCyl: invalid grid parameters");
     std::vector<int> indices = math::getIndicesAzimuthal(mmax, sym);
@@ -535,8 +532,7 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
     const std::vector< math::Matrix<double> > &coefs)
 {
     unsigned int sizeR = gridR_orig.size(), sizez_orig = gridz_orig.size(), sizez = sizez_orig;
-    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE || 
-        coefs.size()%2 == 0 || coefs.size() > 2*MMAX_AZIMUTHAL_FOURIER+1)
+    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE || coefs.size()%2 == 0)
         throw std::invalid_argument("DensityAzimuthalHarmonic: incorrect grid size");
     int mysym = coord::ST_AXISYMMETRIC;
     // grid in z may only cover half-space z>=0 if the density is z-reflection symmetric
@@ -606,11 +602,12 @@ double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
         lR>spl[mmax].xmax() || lz>spl[mmax].ymax() )
         return 0;
     double result = 0;
-    double trig[2*MMAX_AZIMUTHAL_FOURIER];
-    if(!isZRotSymmetric(sym)) {
-        bool needSine = !isYReflSymmetric(sym);
+
+    bool needSine = !isYReflSymmetric(sym);
+    // temporary stack-allocated array
+    double* trig = static_cast<double*>(alloca(mmax*(1+needSine) * sizeof(double)));
+    if(!isZRotSymmetric(sym))
         math::trigMultiAngle(pos.phi, mmax, needSine, trig);
-    }
     for(int m=-mmax; m<=mmax; m++)
         if(!spl[m+mmax].empty()) {
             double trig_m = m==0 ? 1 : m>0 ? trig[m-1] : trig[mmax-1-m];
@@ -902,8 +899,8 @@ CylSpline::CylSpline(
 {
     unsigned int sizeR = gridR_orig.size(), sizez = gridz_orig.size(), sizez_orig = sizez;
     bool haveDerivs = dPhidR.size() > 0 && dPhidz.size() > 0;
-    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE || gridR_orig[0]!=0 ||
-        Phi.size()%2 == 0 || Phi.size() > 2*MMAX_AZIMUTHAL_FOURIER+1 ||
+    if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE ||
+        gridR_orig[0]!=0 || Phi.size()%2 == 0 ||
         (haveDerivs && (Phi.size() != dPhidR.size() || Phi.size() != dPhidz.size())) )
         throw std::invalid_argument("CylSpline: incorrect grid size");
     int mmax  = (Phi.size()-1)/2;
@@ -1090,8 +1087,8 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
     grad.dR  = grad.dz  = grad.dphi  = 0;
     hess.dR2 = hess.dz2 = hess.dphi2 = hess.dRdz = hess.dRdphi = hess.dzdphi = 0;
 
-    double trig_arr[2*MMAX_AZIMUTHAL_FOURIER];
     bool needSine = needGrad || !isYReflSymmetric(sym);
+    double* trig_arr = static_cast<double*>(alloca(mmax*(1+needSine) * sizeof(double)));
     math::trigMultiAngle(pos.phi, mmax, needSine, trig_arr);
 
     // loop over other (m!=0) azimuthal harmonics and compute the temporary (scaled) values
