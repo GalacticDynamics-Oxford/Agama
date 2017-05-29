@@ -22,6 +22,42 @@ enum FokkerPlanckMethod {
     FP_FEM3 = 3          ///< finite-element method with cubic splines
 };
 
+/** Description of a single component in the Fokker-Planck model (initial density and other parameters) */
+struct FokkerPlanckComponent {
+
+    /** 1d function providing the initial density profile of this species;
+        the initial DF is obtained from this density via the Eddington inversion formula. */
+    math::PtrFunction initDensity;
+
+    /** Mass of a single star of this species; determines the relaxation rate. */
+    double Mstar;
+
+    /** Capture radius in the case of a central black hole.
+        If set to a positive value, this means two things.
+        First, the innermost boundary hmin is assigned to the phase volume corresponding to the energy
+        at which the radius of a circular orbit is twice the capture radius.
+        Second, it turns on the absorbing boundary condition at hmin: the DF value is fixed to a very
+        small number; the default alternative in case of captureRadius=0 is a zero-flux boundary. */
+    double captureRadius;
+
+    /** fraction of flux going into the loss cone that is added to the black hole mass (between 0 and 1). */
+    double captureMassFraction;
+
+    /** turns on additional source term: specifies the increase of mass per unit time. */
+    double sourceRate;
+
+    /** radius within which the injected mass is deposited. */
+    double sourceRadius;
+
+    /** set default values in the constructor */
+    FokkerPlanckComponent() :
+        Mstar(1.),
+        captureRadius(0.),
+        captureMassFraction(1.),
+        sourceRate(0.),
+        sourceRadius(0.)
+        {}
+};
 
 /** Parameters passed to the constructor of FokkerPlanckSolver. */
 struct FokkerPlanckParams {
@@ -50,40 +86,12 @@ struct FokkerPlanckParams {
     /** indicated whether the stellar potential is updated in the course of simulation (default yes) */
     bool updatePotential;
 
-    /** Mass fractions of all components.
-        If the length of the vector is 1, then a single-component system is created.
-        The DF of all the components has the same functional form, but the the normalization changes.
-        Note that only the ratios of the elements of the vector matter (not the overall normalization).
-        The overall normalizaton is set by the density profile. */
-    std::vector<double> componentMass;
-        
-    /** vector containing stellar masses of all stars in the system; determines the relaxation rate */
-    std::vector<double> Mstar;
-
-    /** Vector of capture radii for the central black hole.
-        If set to a positive value, this means two things.
-        First, the innermost boundary hmin is assigned to the phase volume corresponding to the energy
-        at which the radius of a circular orbit is twice the capture radius.
-        Second, it turns on the absorbing boundary condition at hmin: the DF value is fixed to a very
-        small number; the default alternative in case of captureRadius=0 is a zero-flux boundary. */
-    std::vector<double> captureRadius;
-
-    /** fraction of flux going into the loss code that is added to the black hole mass
-        (between 0 and 1), each species can have a different value. */
-    std::vector<double> captureMassFraction;
-
     /** applicable when captureRadius>0; turns on a sink term at all energies (not just at hmin),
         which mimics the effect of diffusion along the angular momentum axis and leads to a steady-state
         flux into the loss cone. The magnitude of this flux is determined from the diffusion coefficient
         in angular momentum, taking into accound the appropriate regime (empty or full loss cone);
         ultimately, everything is determined by captureRadius and relaxationRate. */
     bool lossConeDrain;
-
-    /** turns on additional source term: specifies the increase of mass in each species per unit time. */
-    std::vector<double> sourceRate;
-
-    /** radius within which the injected mass is deposited. */
-    double sourceRadius;
 
     /** set default values in the constructor */
     FokkerPlanckParams() :
@@ -94,13 +102,7 @@ struct FokkerPlanckParams {
         coulombLog(1.),
         selfGravity(true),
         updatePotential(true),
-        componentMass(1, 1.),
-        Mstar(1, 1.),
-        captureRadius(1, 0.),
-        captureMassFraction(1, 1.),
-        lossConeDrain(true),
-        sourceRate(1, 0.),
-        sourceRadius(0.)
+        lossConeDrain(true)
     {}
 };
 
@@ -135,11 +137,12 @@ public:
 
     /** Construct the Fokker-Planck model with the given density profile.
         \param[in]  params  specifies all parameters of the solver;
-        \param[in]  initDensity  is a function that provides the density profile,
-        the initial distribution function will be constructed using the Eddington inversion formula.
+        \param[in]  components  is the array of individual components (species) of the model
+        (initial density profiles that determine the DF, and other related parameters).
         \throw  std::runtime_error or some other exception if the parameters are incorrect.
     */
-    FokkerPlanckSolver(const FokkerPlanckParams& params, const math::IFunction& initDensity);
+    FokkerPlanckSolver(const FokkerPlanckParams& params,
+        const std::vector<FokkerPlanckComponent>& components);
 
     /// cleanup
     ~FokkerPlanckSolver();
@@ -186,10 +189,7 @@ public:
     double drainEnergy()  const; ///< change in total energy associated with the removed mass
 
 private:
-    /// parameters provided to the constructor which stay fixed throughout the simulation
-    const FokkerPlanckParams params;
-
-    /// all other internal data that evolves with time is stored in this opaque structure
+    /// opaque structure containing the initial parameters and all internal data that evolves with time
     FokkerPlanckData* data;
 
     /// opaque internal implementation of the discretization scheme

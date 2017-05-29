@@ -352,6 +352,14 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
         }
     }
 
+    // 4.5 write out the results
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("makeEddingtonDF.log");
+        strm << "#h      \tf(h) as computed\n";
+        for(unsigned int i=0; i<gridh.size(); i++)
+            strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';
+    }
+
     // 5. check validity and remove negative values
     bool hasNegativeF = false;
     for(unsigned int i=0; i<gridf.size();) {
@@ -381,6 +389,15 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
             utils::msg(utils::VL_DEBUG, "makeEddingtonDF",
                 "f(h) ~ h^"+utils::toString(slopeIn)+
                 " at small h and ~ h^"+utils::toString(slopeOut)+" at large h");
+
+            // write out the results once more
+            if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+                std::ofstream strm("makeEddingtonDF.log", std::ofstream::app);
+                strm << "\n#h      \tf(h) final; inner slope="<< slopeIn <<", outer="<< slopeOut <<"\n";
+                for(unsigned int i=0; i<gridh.size(); i++)
+                    strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';
+            }
+
             // results are returned in the two arrays, gridh and gridf
             return;
         }
@@ -455,7 +472,7 @@ math::LogLogSpline fitSphericalDF(
         "f(h) ~ h^" + utils::toString(derLeft)  + " at small h"
         " and ~ h^" + utils::toString(derRight) + " at large h");
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("fitsphericaldf");
+        std::ofstream strm("fitSphericalDF.log");
         strm << "#h      \tf(h)    \tinner slope: " << derLeft << ", outer slope: " << derRight << '\n';
         for(unsigned int i=0; i<gridh.size(); i++)
             strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';
@@ -812,6 +829,20 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
     // extrapolate them as constants beyond the last grid point
     gridFGder.back() = gridFHder.back() = gridFEder.back() = 0;
 
+    // debugging output
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("SphericalModel.log");
+        strm << "h             \tg             \tE             \tf(E)          \t"
+            "int_E^0 f dE  \tint_Phi0^E f g\tint_Phi0^E f h\tint_Phi0^E f g E\n";
+        for(unsigned int i=0; i<npoints; i++) {
+            strm <<
+            utils::pp(gridH[i],     14) + '\t' + utils::pp(gridG[i],     14) + '\t' +
+            utils::pp(gridE[i],     14) + '\t' + utils::pp(gridF[i],     14) + '\t' +
+            utils::pp(gridFint[i],  14) + '\t' + utils::pp(gridFGint[i], 14) + '\t' +
+            utils::pp(gridFHint[i], 14) + '\t' + utils::pp(gridFEint[i], 14) + '\n';
+        }
+    }
+
     // 5b. initialize splines for log-scaled integrals
     intf  = math::LogLogSpline(gridH, gridFint,  gridFder);
     intfg = math::LogLogSpline(gridH, gridFGint, gridFGder);
@@ -986,7 +1017,8 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
 
     // debugging output
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("diffcoefs");
+        std::ofstream strm("SphericalModelLocal.log");
+        strm << "ln[h(Phi)] ln[hE/hPhi]\tPhi            E             \tJ1         J3\n";
         for(unsigned int i=0; i<npoints; i++) {
             double Phi = phasevol.E(exp(gridLogH[i]));
             for(unsigned int j=0; j<npointsY; j++) {
@@ -1156,14 +1188,13 @@ double difCoefLosscone(const SphericalModel& model, const math::IFunction& pot, 
 
 // ------ Input/output of text tables describing spherical models ------ //
 
-math::LogLogSpline readMassProfile(const std::string& filename, double* Mbh)
+math::LogLogSpline readMassProfile(const std::string& filename)
 {
     std::ifstream strm(filename.c_str());
     if(!strm)
-        throw std::runtime_error("Can't read input file " + filename);
+        throw std::runtime_error("readMassProfile: can't read input file " + filename);
     std::vector<double> radius, mass;
     const std::string validDigits = "0123456789.-+";
-    double m0 = 0;   // possible central mass to be subtracted from all other elements of input table
     while(strm) {
         std::string str;
         std::getline(strm, str);
@@ -1171,15 +1202,15 @@ math::LogLogSpline readMassProfile(const std::string& filename, double* Mbh)
         if(elems.size() < 2 || validDigits.find(elems[0][0]) == std::string::npos)
             continue;
         double r = utils::toDouble(elems[0]),  m = utils::toDouble(elems[1]);
+        if(r<0)
+            throw std::runtime_error("readMassProfile: radii should be positive");
+        if(r==0 && m!=0)
+            throw std::runtime_error("readMassProfile: M(r=0) should be zero");
         if(r>0) {
             radius.push_back(r);
-            mass.push_back(m-m0);
-        } else {      // a nonzero mass at r=0 representing a central black hole is allowed
-            m0 = m;   // in the input file, but this point will not be stored in the arrays
+            mass.push_back(m);
         }
     }
-    if(Mbh)   // central point mass stored in the file will be added to Mbh
-        *Mbh += m0;
     return math::LogLogSpline(radius, densityFromCumulativeMass(radius, mass));
 }
 
@@ -1237,18 +1268,19 @@ void writeSphericalModel(const std::string& fileName, const std::string& header,
     // prepare for integrating the density in radius to obtain enclosed mass
     double glnodes[GLORDER], glweights[GLORDER];
     math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
-    double Mcumul = Mbh;
+    double Mcumul = 0;
 
-    // print the header
+    // print the header and the first line for r=0 (commented out)
     std::ofstream strm(fileName.c_str());
     if(!header.empty())
         strm << "#" << header << "\n";
     strm <<
         "#r      \tM(r)    \tE=Phi(r)\trho(r)  \tf(E)    \tM(E)    \th(E)    \tTrad(E) \trcirc(E) \t"
-        "Lcirc(E) \tVelDispersion\tVelDispProj\tSurfaceDensity\tDeltaE^2\tMassFlux\tEnergyFlux" <<
-        (Mbh>0 ? "\tD_RR/R(0)" : "") << "\n"
-        // first line for r=0
-        "0       \t" + utils::pp(Mbh, 14) + '\t' + utils::pp(Phi0, 14) + '\n';
+        "Lcirc(E) \tVelDispersion\tVelDispProj\tSurfaceDensity\tDeltaE^2\tMassFlux\tEnergyFlux";
+    if(Mbh>0)
+        strm << "\tD_RR/R(0)\n#0        Mbh = " << utils::pp(Mbh, 14) << "\t-INFINITY\n";
+    else
+        strm << "\n#0      \t0       \t" << utils::pp(Phi0, 14) << '\n';
 
     // output various quantities as functions of r (or E) to the file
     for(unsigned int i=0; i<gridH.size(); i++) {

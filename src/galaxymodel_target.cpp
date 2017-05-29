@@ -9,6 +9,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <alloca.h>
+#include <fstream>
 
 namespace galaxymodel{
 
@@ -177,15 +178,19 @@ TargetDensity::TargetDensity(const potential::BaseDensity& density, const Densit
         gridz = getCylRzByMass<1>(density, gridMass);
     } else {
         gridR.resize(gridSizeR);
-        for(unsigned int s=0; s<gridSizeR; s++) {
+        for(unsigned int s=0; s<gridSizeR; s++)
             gridR[s] = getRadiusByMass(density, gridMass[s]);
-            if(!isFinite(gridR[s]) || (s>0 && gridR[s] <= gridR[s-1]))
-                throw std::runtime_error("TargetDensity: cannot assign grid radii");
-        }
     }
+
     utils::msg(utils::VL_DEBUG, "TargetDensity", "Grid in radius: [" +
         utils::toString(gridR[0]) + ":" + utils::toString(gridR.back()) + (gridz.empty() ? "]" :
         "], in z: [" + utils::toString(gridz[0]) + ":" + utils::toString(gridz.back()) + "]") );
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("TargetDensity.log");
+        strm << "#Density type="<<params.type<<"\n";
+        for(unsigned int s=0; s<gridR.size(); s++) strm<<gridR[s]<<"\n";
+        for(unsigned int s=0; s<gridz.size(); s++) strm<<gridz[s]<<"\n";
+    }
 
     // then construct the appropriate density grid object
     switch(params.type) {

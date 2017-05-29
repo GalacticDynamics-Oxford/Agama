@@ -341,7 +341,11 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         ("Length unit: " +utils::toString(conv->lengthUnit   * unit.to_Kpc)+ " Kpc, "
         "velocity unit: "+utils::toString(conv->velocityUnit * unit.to_kms)+ " km/s, "
         "time unit: "    +utils::toString(conv->timeUnit     * unit.to_Myr)+ " Myr, "
-        "mass unit: "    +utils::toString(conv->massUnit     * unit.to_Msun)+" Msun").c_str());
+        "mass unit: "    +utils::toString(conv->massUnit     * unit.to_Msun)+" Msun, "
+        "gravitational constant: "+utils::toString(units::Grav *
+            (conv->massUnit * unit.to_Msun * units::Msun) /
+            pow_2(conv->velocityUnit * unit.to_kms * units::kms) /
+            (conv->lengthUnit * unit.to_Kpc * units::Kpc) ) ).c_str());
 }
 
 /// description of resetUnits function
@@ -1044,6 +1048,10 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
         //    "sample() takes at least one integer argument (the number of particles)");
         return NULL;
     }
+    if(numPoints<=0) {
+        PyErr_SetString(PyExc_TypeError, "number of sampling points 'n' must be positive");
+        return NULL;
+    }
     potential::PtrPotential pot = getPotential(pot_obj);  // if not NULL, will assign velocity as well
     if(pot_obj!=NULL && !pot) {
         PyErr_SetString(PyExc_TypeError,
@@ -1191,7 +1199,7 @@ static PyTypeObject DensityType = {
     PyObject_HEAD_INIT(NULL)
     0, "agama.Density",
     sizeof(DensityObject), 0, (destructor)Density_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Density_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, &Density_sequence_methods, 0, 0, 0, Density_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDensity,
     0, 0, 0, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Density_init
@@ -4285,7 +4293,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 static const char* docstringSampleOrbitLibrary =
     "Construct an N-body snapshot from the orbit library\n"
     "Arguments:\n"
-    "  N:  the required number of particles in the output snapshot.\n"
+    "  n:  the required number of particles in the output snapshot.\n"
     "  traj:  an array of trajectories returned by the `orbit()` routine.\n"
     "  amplitudes:  an array of orbit weights, returned by the `optsolve()` routine.\n"
     "Returns: a tuple of two elements: the flag indicating success or failure, and the result.\n"
@@ -4300,7 +4308,7 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
 {
     long Nbody = 0;
     PyObject *traj_obj = NULL, *ampl_obj = NULL;
-    static const char* keywords[] = {"N", "traj", "amplitudes", NULL};
+    static const char* keywords[] = {"n", "traj", "amplitudes", NULL};
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "lOO", const_cast<char**>(keywords),
         &Nbody, &traj_obj, &ampl_obj))
     {
@@ -4308,7 +4316,7 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
         return NULL;
     }
     if(Nbody <= 0) {
-        PyErr_SetString(PyExc_ValueError, "Argument 'N' must be a positive integer");
+        PyErr_SetString(PyExc_ValueError, "Argument 'n' must be a positive integer");
         return NULL;
     }
 

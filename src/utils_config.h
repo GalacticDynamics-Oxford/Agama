@@ -8,7 +8,8 @@
 
     [Section]
     key=value
-    ;key=old value -- commented out, lines starting with ; # / are ignored but preserved in the file upon saving
+    ;key=old value -- commented out,
+    //lines starting with ; # / are ignored but preserved in the file upon saving
 
 */
 

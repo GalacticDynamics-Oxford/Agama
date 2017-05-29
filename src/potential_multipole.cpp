@@ -241,7 +241,6 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
             "User-defined grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
         return;
     }
-
     const double
     LOGSTEP = log(1 + sqrt(20./gridSizeR)), // log-spacing between consecutive grid nodes (rule of thumb)
     LOGRMAX = 100.,                         // do not consider |log r| larger than this number
@@ -250,16 +249,26 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
     MINRHO  = 1e-100;
     double logr = 0., maxcurv = 0., rcenter = 1.;
     unsigned int skipped = 0;
+    std::vector<double> rad, rho;           // keep track of the points with reasonable density values
     // find the radius at which the density varies most considerably
     while(fabs(logr) < LOGRMAX) {
         double r = exp(logr), rho0 = sphericalAverage<AV_RHO>(src, r), curv = 0;
+        // only consider points with density values within reasonable bounds (e.g. excluding zero)
         if(between(fabs(rho0), MINRHO, MAXRHO)) {
+            // add this point to the overall array, either at the end or at the beginning
+            if(logr>0) {
+                rad.push_back(r);
+                rho.push_back(rho0);
+            } else {
+                rad.insert(rad.begin(), r);
+                rho.insert(rho.begin(), rho0);
+            }
             // estimate the second derivative d^2[log(rho)] / d[log(r)]^2
             double rhop = sphericalAverage<AV_RHO>(src, exp(logr+DELTA));
             double rhom = sphericalAverage<AV_RHO>(src, exp(logr-DELTA));
             double derp = (rhop-rho0) / DELTA, derm = (rho0-rhom) / DELTA, der2 = (derp-derm) / DELTA;
             // density- and volume-weighted logarithmic curvature of density profile
-            curv = fabs(der2 - pow_2(0.5 * (derp+derm)) / rho0) * pow_3(r);
+            curv = fabs(der2 - pow_2(0.5 * (derp+derm)) / rho0) * pow_2(r);
         }
         if(curv > maxcurv) {
             // the radius where the curvature is maximal is taken as the "center" of the profile
@@ -275,21 +284,48 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
         // sweep back and forth: logr = [0, +LOGSTEP, -LOGSTEP, +2*LOGSTEP, -2*LOGSTEP, +3*LOGSTEP, etc.]
         logr = -logr + (logr>0 ? 0. : LOGSTEP);
     }
-    if(rmin == 0) {
-        rmin = rcenter * exp(-0.5*gridSizeR * LOGSTEP);
-        // if the density value at the innermost radius is out of range, shift the radius up
-        while(rmin * exp(LOGSTEP) < rcenter &&
-            !between(fabs(sphericalAverage<AV_RHO>(src, rmin)), MINRHO, MAXRHO))
-            rmin *= exp(LOGSTEP);
+    if(rad.size()<2) {  // density was nowhere within reasonable bounds, most likely identically zero
+        rad.insert(rad.begin(), exp(-LOGSTEP));
+        rho.insert(rho.begin(), 0.0);
+        rad.push_back(exp(LOGSTEP));
+        rho.push_back(0.0);
     }
+    // by now we have an estimate of the "central" radius (where the density varies most rapidly),
+    // and by default we set the min/max grid radii to be equally spaced (in logarithm) from rcenter,
+    // but only considering the points where the density was within reasonable bounds (e.g. nonzero)
     if(rmax == 0) {
-        rmax = rcenter * exp(0.5*gridSizeR * LOGSTEP);
-        while(rmax * exp(-LOGSTEP) > rcenter &&
-            !between(fabs(sphericalAverage<AV_RHO>(src, rmax)), MINRHO, MAXRHO))
-            rmax *= exp(-LOGSTEP);
+        rmax = fmin(rad.back(), rcenter * exp(LOGSTEP * 0.5*gridSizeR));
+    }
+    if(rmin == 0) {
+        // default choice: take rmin as small as possible, given the maximum allowed grid spacing
+        rmin = fmax(rad[0], rmax * exp(-LOGSTEP * gridSizeR));
+        // this choice may be inefficient, because if the potential is reasonably flat near origin,
+        // then its derivatives would not be computed reliably at small radii.
+        // to determine the suitable inner radius, we demand that the potential at rmin is at least
+        // DELTAPHI times larger than the potential at origin.
+        const double DELTAPHI = pow_2(ROOT3_DBL_EPSILON);  // ~4e-11
+        // 1. estimate the potential at origin (very crudely, linearly interpolating rho on each segment):
+        // \Phi(0) = -4\pi \int_0^\infty \rho(r) r dr
+        double Phi0 = 0;
+        for(unsigned int i=1; i<rad.size(); i++) {
+            Phi0 += -4*M_PI / 6 * (rad[i]-rad[i-1]) *
+                (rho[i] * (2*rad[i] + rad[i-1]) + rho[i-1] * (rad[i] + 2*rad[i-1]));
+        }
+        // 2. estimate Phi(r) - Phi(0) at each radius, and shift rmin up if necessary
+        double enclMass = 0, deltaPhi = 0;
+        for(unsigned int i=1; i<rad.size() && rad[i] < rmax*0.999; i++) {
+            enclMass += 4*M_PI / 12 * (rad[i]-rad[i-1]) *
+                ((rho[i] + rho[i-1]) * pow_2(rad[i] + rad[i-1]) +
+                2 * rho[i] * pow_2(rad[i]) + 2 * rho[i-1] * pow_2(rad[i-1]));
+            deltaPhi += 4*M_PI / 6 * (rad[i]-rad[i-1]) *
+                (rho[i] * (2*rad[i] + rad[i-1]) + rho[i-1] * (rad[i] + 2*rad[i-1]));
+            double dPhi = enclMass / pow_2(rad[i]) + deltaPhi;  // Phi(r) - Phi(0)
+            if(fabs(dPhi) < fabs(Phi0) * DELTAPHI)
+                rmin = rad[i];
+        }
     }
     utils::msg(utils::VL_DEBUG, "Multipole",
-        "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
+        "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"] ");
 }
 
 /// auto-assign min/max radii of the grid if they were not provided, for a discrete N-body model

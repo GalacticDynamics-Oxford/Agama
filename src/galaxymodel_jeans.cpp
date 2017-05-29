@@ -90,6 +90,15 @@ math::LogLogSpline createJeansSphModel(
             integr.erase(integr.begin()+i);
         }
     }
+
+    // write out the results for debugging
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("JeansSph.log");
+        strm << "R\tsigma_r\n";
+        for(unsigned int i=0; i<gridr.size(); i++)
+            strm << utils::pp(gridr[i], 7) + '\t' + utils::pp(integr[i], 7) + '\n';
+    }
+
     return math::LogLogSpline(gridr, integr);
 }
 
@@ -251,17 +260,19 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
         }
     }
 
+    // write out the results for debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("jeansaxi.dat");
-        strm << "R\tz\tvz2\tvphi2\n";
+        std::ofstream strm("JeansAxi.log");
+        strm << "R\tz\tvz2\tvphi2\trho\trho*vz2\n";
         for(int iR=0; iR<gridRsize; iR++) {
             for(int iz=0; iz<gridzsize; iz++)
                 strm << utils::pp(gridR[iR], 7) + '\t' + utils::pp(gridz[iz], 7) + '\t' +
-                    utils::pp(vz2(iR,iz), 7) + '\t' + utils::pp(vphi2(iR,iz), 7) + '\t' +
+                    utils::pp(vz2(iR,iz),    7) + '\t' + utils::pp(vphi2(iR,iz), 7) + '\t' +
                     utils::pp(rhoval(iR,iz), 7) + '\t' + utils::pp(rhosigmaz2(iR,iz), 7) + '\n';
             strm << '\n';
         }
     }
+
     intvphi2 = math::LinearInterpolator2d(gridR, gridz, vphi2);
     intvz2   = math::LinearInterpolator2d(gridR, gridz, vz2);
 }

@@ -346,6 +346,8 @@ math::PtrFunction createSpheroidDensity(const SphrParam& params)
             "or a positive cutoff radius must be provided");
     if(params.gamma>=3)
         throw std::invalid_argument("Spheroid inner slope gamma must be less than 3");
+    if(params.gamma>params.beta)
+        throw std::invalid_argument("Spheroid inner slope gamma should not exceed the outer slope beta");
     if(params.outerCutoffRadius>0 && params.cutoffStrength<=0)
         throw std::invalid_argument("Spheroid cutoff strength must be positive");
     return math::PtrFunction(new SpheroidDensityFnc(params));

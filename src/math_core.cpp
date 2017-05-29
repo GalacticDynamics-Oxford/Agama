@@ -384,7 +384,10 @@ void LogLogScaledFnc::evalDeriv(const double logx,
         fder *= logder-1;
         // if fder is very close to zero, der2 = (logder-1) * fder / x  may be rounded to zero,
         // in which case we won't be able to compute it correctly, so should return zero
-        *der2 = fder / x == 0 ? 0 : (*der2 * x - fder) * x / fval;
+        if(fabs(fder) < DBL_MIN || fabs(*der2) < DBL_MIN)
+            *der2 = 0;
+        else
+            *der2 = (*der2 * x - fder) * x / fval;
     }
 }
 

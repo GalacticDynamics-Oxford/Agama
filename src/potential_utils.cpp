@@ -392,7 +392,7 @@ Interpolator::Interpolator(const BasePotential& potential)
 
     std::ofstream strm;   // debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        strm.open("potential_interp1d.dat");
+        strm.open("potentialInterpolator.log");
         strm << "#R      \tPhi(R)  \tdPhi/dR \td2Phi/dR2\td2Phi/dz2\tEcirc   \tLcirc\n";
     }
 
@@ -639,7 +639,7 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     
     std::ofstream strm;   // debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        strm.open("potential_phasevolume.dat");
+        strm.open("potentialPhaseVolume.log");
         strm << "#r      \tE       \th       \tg=dh/dE\n";
     }
     
@@ -838,7 +838,7 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
     }
 
 #if 0  /// test code, to be removed
-    std::ofstream strm("interp2d.dat");
+    std::ofstream strm("potentialInterpolator2d.log");
     strm << std::setprecision(15);
     for(unsigned int iE=0; iE<sizeE; iE++) {
         for(unsigned int iL=0; iL<sizeL; iL++) {

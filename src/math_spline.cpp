@@ -3253,7 +3253,7 @@ std::vector<double> createAlmostUniformGrid(unsigned int gridsize,
                         directionBackward=false;
                         numChangesDirection++;
                         if(numChangesDirection>10) {
-//                            my_message(FUNCNAME, "grid creation seems not to converge?");
+                            utils::msg(utils::VL_DEBUG, FUNCNAME, "grid creation seems not to converge?");
                             return grid;  // don't run forever but would not fulfill the minbin condition
                         }
                     } else {

@@ -328,28 +328,24 @@ void computeProjectedDensity(
     The text file should be a whitespace- or comma-separated table with at least two columns
     (the rest is ignored) -- radius and the enclosed mass within this radius,
     both must be in increasing order. Lines not starting with a number are ignored.
-    If the first line is at r=0, the corresponding mass is attributed to the central black hole
-    and subtracted from all other records.
+    The enclosed mass profile should not include the central black hole (if present),
+    because it could not be represented in terms of a density profile anyway.
     \param[in]  filename  is the input file name.
-    \param[in]  Mbh (optional)  is the variable containing the mass of the central black hole
-    (if provided, and the file contained a record at r=0, its mass is added to this variable).
     \return  an interpolated density profile, represented by a LogLogSpline class.
     \throw  std::runtime_error if the file does not exist, or the mass profile is not monotonic.
 */
-math::LogLogSpline readMassProfile(
-    const std::string& fileName,
-    double* Mbh = NULL);
+math::LogLogSpline readMassProfile(const std::string& fileName);
 
 /** Write a text file with a table of several variables as functions of radius or energy.
     These variables are extracted from a spherical model described by a combination of
     potential, phase volume and distribution function.
     The following variables are printed:
     - radius                 r
-    - enclosed mass          M(r)
+    - enclosed mass          M(r),   obtained by integrating the density profile corresponding to the DF
     - potential              Phi(r), serves as the energy E in arguments of other variables
     - density                rho(r), obtained by integrating the DF, not differentiating the potential
-    - distribution function  f(E), or rather f(h(E))
-    - energy-enclosed mass   M(E), i.e. mass of particles with energies less than E
+    - distribution function  f(E),   or rather f(h(E))
+    - energy-enclosed mass   M(E),   i.e. mass of particles with energies less than E
     - phase volume           h(E)
     - average radial period  T(E) = g(E) / (4 pi^2 Lcirc(E)),  where g(E) = dh(E)/dE
     - circular orbit radius  rcirc(E)
@@ -360,13 +356,13 @@ math::LogLogSpline readMassProfile(
     - diffusion coefficient  <Delta E^2>
     - drift coefficient      <Delta E>
     - phase-space mass flux  F(h)
-    - loss-cone dif.coef.    D_RR/R at R=0
+    - loss-cone dif.coef.    D_RR/R at R=0  (only if there is a central black hole)
 
     \param[in]  fileName  is the output file name.
     \param[in]  header  is the text written in the first line of the file
     \param[in]  model  is the SphericalModel instance that provides both f(E) and h(E).
-    \param[in]  pot  is the potential Phi(r) -
-    it is not contained in the spherical model, so should be provided separately.
+    \param[in]  pot  is the potential Phi(r) - it is not contained in the spherical model
+    (even though it may be derived from the phase volume), so should be provided separately.
     \param[in]  gridh  (optional)  the grid in phase volume (h) for the output table;
     if not provided, a suitable grid that encompasses the region of significant variation
     of f(h) is constructed automatically.

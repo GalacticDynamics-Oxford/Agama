@@ -948,7 +948,7 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
 
     // debugging output
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("action_interp");
+        std::ofstream strm("ActionFinderAxisymFudge.log");
         strm << "#E L/Lcirc I3rel\tIFD\tRthin/Rcirc\tJrrel\tJzrel\n";
         for(int iE=0; iE<sizeE; iE++) {
             for(int iL=0; iL<sizeL; iL++) {

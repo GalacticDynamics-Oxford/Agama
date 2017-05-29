@@ -66,81 +66,6 @@ inline std::vector<double> sumVectors(const std::vector< std::vector<double> > v
     return result;
 }
 
-/// helper routine to check if the input vector has the required size,
-/// or if it only had one element, fill the entire vector with this value
-void checkVectorLength(std::vector<double>& vec, unsigned int size, const std::string& name)
-{
-    if(vec.size() == 1)
-        vec.resize(size, vec[0]);   // set the same value for each component
-    else if(vec.size() != size)
-        throw std::runtime_error("FokkerPlanckSolver: "+name+".size() != number of components");
-}
-
-
-/// helper routine to check the validity of FokkerPlanckParams
-/// and assign default values to some of them if they were not provided
-FokkerPlanckParams checkParams(const FokkerPlanckParams& inputParams)
-{
-    FokkerPlanckParams params(inputParams);
-
-    if(params.gridSize == 0 )
-        params.gridSize = DEFAULT_GRID_SIZE;
-
-    unsigned int numComp = params.componentMass.size();
-    if(numComp == 0)
-        throw std::runtime_error("FokkerPlanckSolver: number of components should be >= 1");
-
-    // renormalize the component masses so that their sum is unity
-    double norm=0;
-    for(unsigned int c=0; c<numComp; c++){
-        if(params.componentMass[c] <= 0)
-            throw std::runtime_error("FokkerPlanckSolver: mass of each component should be positive.");
-        norm += params.componentMass[c];
-    }
-    for(unsigned int c=0; c<numComp; c++)
-        params.componentMass[c] /= norm;
-
-    // check the array sizes - in case of one element, extend it to the entire array
-    checkVectorLength(params.Mstar, numComp, "Mstar");
-    checkVectorLength(params.sourceRate, numComp, "sourceRate");
-    checkVectorLength(params.captureRadius, numComp, "captureRadius");
-    checkVectorLength(params.captureMassFraction, numComp, "captureMassFraction");
-
-    // if source rate is zero for all components, discard sourceRadius
-    if(maxElement(params.sourceRate) == 0.)
-        params.sourceRadius = 0.;
-
-    // whether we have an absorbing boundary condition at the innermost grid point
-    bool absorbingBoundaryCondition = maxElement(params.captureRadius) > 0.;
-    if(!absorbingBoundaryCondition)
-        params.lossConeDrain = false;   // if captureRadius is not set, there is no loss cone
-
-    // check the validity of parameters for each component
-    for(unsigned int c=0; c<numComp; c++){
-        if(params.captureMassFraction[c] < 0. || params.captureMassFraction[c] > 1.)
-            throw std::runtime_error("FokkerPlanckSolver: capture mass faction be between 0 and 1");
-        if(params.captureRadius[c] < 0.)
-            throw std::runtime_error("FokkerPlanckSolver: capture radius should be non-negative");
-        if(absorbingBoundaryCondition && params.captureRadius[c] == 0.)
-            throw std::runtime_error("FokkerPlanckSolver: "
-                "if one capture radius is non-zero then all of them should be positive");
-        if(params.Mstar[c] <= 0.)
-            throw std::runtime_error("FokkerPlanckSolver: stellar masses should be positive");
-        if(params.sourceRate[c] < 0.)
-            throw std::runtime_error("FokkerPlanckSolver: source rate should be non-negative");
-    }
-
-    // debugging output
-    utils::msg(utils::VL_DEBUG, "FokkerPlanckSolver",
-        "Component fractions: "     + utils::toString(params.componentMass) +
-        "; stellar masses: "        + utils::toString(params.Mstar) +
-        "; source rates: "          + utils::toString(params.sourceRate) +
-        "; capture radii: "         + utils::toString(params.captureRadius) +
-        "; capture mass fraction: " + utils::toString(params.captureMassFraction));
-
-    return params;
-}
-
 
 /// Scaling transformation for a function expressed in scaled coordinates and its derivative
 class ScaledFunction: public math::IFunction {
@@ -216,6 +141,19 @@ public:
             return -difLC / (alpha + log(Lcirc2 / Lcapt2));
         else  // at this energy, all orbits lie inside the loss cone, i.e. should be depopulated entirely
             return -INFINITY;
+    }
+};
+
+/// an extremely simple function that is a sum of several components
+class FncSum: public math::IFunctionNoDeriv {
+public:
+    std::vector<math::PtrFunction> comps;
+    explicit FncSum(unsigned int size): comps(size) {}
+    virtual double value(const double x) const {
+        double sum = 0;
+        for(unsigned int c=0; c<comps.size(); c++)
+            sum += comps[c]->value(x);
+        return sum;
     }
 };
 
@@ -588,10 +526,44 @@ public:
 };
 
 
-/// The aggregate structure containing all internal data of FokkerPlanckSolver that evolves with time
+/// The aggregate structure containing all internal data of FokkerPlanckSolver;
+/// some of them stay fixed throughout the simulation while other evolve
 struct FokkerPlanckData {
 
-    /// total potential of all components plus the black hole
+    /// number of species (fixed)
+    const unsigned int numComp;
+
+    /// Coulomb logarithm that enters the expressions for diffusion coefs (fixed)
+    const double coulombLog;
+    
+    /// whether the density of evolving system contributes to the potential (fixed)
+    const bool selfGravity;
+    
+    /// whether the stellar potential is updated in the course of simulation (fixed)
+    const bool updatePotential;
+    
+    /// whether to use absorbing (true) or zero-flux (false) boundary condition at hmin (fixed)
+    bool absorbingBoundaryCondition;
+    
+    /// if the boundary condition is absorbing, whether to use loss-cone draining at all energies (fixed)
+    bool lossConeDrain;
+
+    /// array of masses of a single star in each species (fixed)
+    std::vector<double> Mstar;
+
+    /// array of capture radii in each species (fixed)
+    std::vector<double> captureRadius;
+
+    /// fractions of mass of disrupted stars of each species that is added to the black hole mass (fixed)
+    std::vector<double> captureMassFraction;
+
+    /// rate of mass added per unit time in each species accounting for star formation (fixed)
+    std::vector<double> sourceRate;
+
+    /// radii where the added mass in each species is deposited (fixed)
+    std::vector<double> sourceRadius;
+
+    /// total potential of all components plus the black hole (evolves or stays fixed)
     potential::PtrPotential currPot;
 
     /// total potential at the previous timestep (used to extrapolate its evolution)
@@ -603,44 +575,42 @@ struct FokkerPlanckData {
     /// mass of the central black hole (may evolve with time)
     double Mbh;
 
-    /// total mass of all stellar components
+    /// total mass of all stellar components (evolves)
     double Mass;
 
-    /// stellar potential at r=0
+    /// stellar potential at r=0 (evolves)
     double Phi0;
 
-    /// total and kinetic energy of the entire system
+    /// total and kinetic energy of the entire system (evolves)
     double Etot, Ekin;
 
-    /// total mass added due to star formation and the associated change in total energy
+    /// total mass added due to star formation and the associated change in total energy (evolves)
     double sourceMass, sourceEnergy;
 
-    /// total change in mass (<0) and energy resulting from the stars being captured by the black hole
+    /// total change in mass (<0) and energy resulting from the stars
+    /// being captured by the black hole (evolves)
     double drainMass, drainEnergy;
 
     /// the rate of change of the total mass and total energy due to star formation (evolves)
     double sourceRateMass, sourceRateEnergy;
     
-    /// conductive energy flux through the innermost boundary (hmin), evolves
+    /// conductive energy flux through the innermost boundary hmin (evolves)
     double drainRateEnergy;
-    
-    /// whether to use absorbing (true) or zero-flux (false) boundary condition at hmin (fixed)
-    bool absorbingBoundaryCondition;
 
-    /// grid in h (phase volume), stays fixed throughout the evolution
+    /// grid in phase volume h, (fixed)
     std::vector<double> gridh;
     
     /// arrays of amplitides that define the distribution function (one vector for each component, evolve)
     std::vector< std::vector<double> > gridf;
 
-    /// auxiliary grid in phase volume where the advection/diffusion coefs are computed (stays fixed)
+    /// auxiliary grid in phase volume where the advection/diffusion coefs are computed (fixed)
     std::vector<double> gridAdvDifCoefs;
 
-    /// values of advection and diffusion coefficients collected at the nodes of an auxiliary grid
-    /// (recomputed in `reinitAdvDifCoefs()` before each FP step)
+    /// values of advection and diffusion coefficients collected at the nodes of an auxiliary grid,
+    /// recomputed in `reinitAdvDifCoefs()` before each FP step (evolve)
     std::vector<double> gridAdv, gridDif;
 
-    /// weight of each node in h in the total integral over the grid (stays fixed);
+    /// weight of each node in h in the total integral over the grid (fixed);
     /// the total mass of a DF component is a dot product of this vector and the array of amplitudes
     std::vector<double> gridMass;
 
@@ -650,53 +620,108 @@ struct FokkerPlanckData {
 
     /// array of projections of the function that defines the source (star formation rate);
     /// evolves because the mapping between radius and phase volume changes with time
-    std::vector<double> gridSourceRate;
+    std::vector< std::vector<double> > gridSourceRate;
     
     /// draining rate due to the angular-momentum flux into the loss cone of the central black hole
-    /// (projection matrix computed from the loss rate, one per DF component)
-    std::vector<math::BandMatrix<double> > drainMatrix;
+    /// (projection matrix computed from the loss rate, one per species, evolves)
+    std::vector< math::BandMatrix<double> > drainMatrix;
 
-    /// length of the previous timestep
+    /// previously computed matrices R entering the matrix FP equation (one per species, evolves)
+    std::vector< math::BandMatrix<double> > prevRelaxationMatrix;
+
+    /// length of the previous timestep (evolves)
     double prevdeltat;
 
-    /// previously computed matrices R entering the matrix FP equation (one per component)
-    std::vector<math::BandMatrix<double> > prevRelaxationMatrix;
-
-    /// number of times that the evolve() routine was called
+    /// number of times that the evolve() routine was called (evolves)
     int numSteps;
 
-    /// a constructor is needed to explicitly initialize member variables with no default constructors
-    FokkerPlanckData(double initMbh, const math::IFunction* initDensity) :
-        currPot(computePotential(initMbh, initDensity,
-            /*rmin-autodetect*/ 0., /*rmax*/ 0., /*diagnostic output*/ Phi0)),
-        phasevol(new potential::PhaseVolume(potential::PotentialWrapper(*currPot))),
-        Mbh(initMbh), Mass(0.), Etot(0.), Ekin(0.),
+    /// check the input parameters and initialize all member variables
+    FokkerPlanckData(const FokkerPlanckParams& params,
+        const std::vector<FokkerPlanckComponent>& components) :
+        numComp(components.size()),
+        coulombLog(params.coulombLog),
+        selfGravity(params.selfGravity),
+        updatePotential(params.updatePotential),
+        absorbingBoundaryCondition(false),
+        lossConeDrain(params.lossConeDrain),
+        Mstar(numComp, 0.),
+        captureRadius(numComp, 0.),
+        captureMassFraction(numComp, 0.),
+        sourceRate(numComp, 0.),
+        sourceRadius(numComp, 0.),
+        Mbh(params.Mbh),
+        Mass(0.), Etot(0.), Ekin(0.),
         sourceMass(0.), sourceEnergy(0.), drainMass(0.), drainEnergy(0.),
         sourceRateMass(0.), sourceRateEnergy(0.), drainRateEnergy(0.),
-        absorbingBoundaryCondition(false),
-        prevdeltat(0.), numSteps(0) {}
+        gridf(numComp),
+        gridSourceRate(numComp),
+        drainMatrix(numComp),
+        prevRelaxationMatrix(numComp),
+        prevdeltat(0.), numSteps(0)
+    {
+        if(numComp == 0)
+            throw std::runtime_error("FokkerPlanckSolver: empty component list");
+
+        // assemble the total density of all components
+        FncSum initDens(numComp);
+
+        // check the validity of parameters for each component
+        for(unsigned int c=0; c<numComp; c++){
+            if(!components[c].initDensity)
+                throw std::runtime_error("FokkerPlanckSolver: must provide initial density");
+            if(components[c].captureMassFraction < 0. || components[c].captureMassFraction > 1.)
+                throw std::runtime_error("FokkerPlanckSolver: capture mass faction be between 0 and 1");
+            if(components[c].captureRadius < 0.)
+                throw std::runtime_error("FokkerPlanckSolver: capture radius should be non-negative");
+            if(c==0)
+                absorbingBoundaryCondition = components[c].captureRadius > 0.;
+            else if(absorbingBoundaryCondition ^ (components[c].captureRadius > 0.))
+                throw std::runtime_error("FokkerPlanckSolver: "
+                    "if one capture radius is non-zero then all of them should be positive");
+            if(components[c].Mstar <= 0.)
+                throw std::runtime_error("FokkerPlanckSolver: stellar masses should be positive");
+            if(components[c].sourceRate < 0.)
+                throw std::runtime_error("FokkerPlanckSolver: source rate should be non-negative");
+            if(components[c].sourceRadius < 0. ||
+                (components[c].sourceRate > 0. && components[c].sourceRadius == 0.) )
+                throw std::runtime_error("FokkerPlanckSolver: source radius should be non-negative");
+            Mstar[c]               = components[c].Mstar;
+            captureRadius[c]       = components[c].captureRadius;
+            captureMassFraction[c] = components[c].captureMassFraction;
+            sourceRate[c]          = components[c].sourceRate;
+            sourceRadius[c]        = components[c].sourceRadius;
+            initDens.comps[c]      = components[c].initDensity;
+        }
+        if(!absorbingBoundaryCondition)
+            lossConeDrain = false;   // if captureRadius is not set, there is no loss cone
+
+        // initialize the potential and the phase volume
+        currPot = computePotential(Mbh, selfGravity? &initDens : NULL,
+            /*rmin-autodetect*/ 0., /*rmax*/ 0., /*diagnostic output*/ Phi0);
+        phasevol.reset(new potential::PhaseVolume(potential::PotentialWrapper(*currPot)));
+    }
 };
 
 
 // ------ the driver class for the Fokker-Planck solver ------ //
 
 FokkerPlanckSolver::FokkerPlanckSolver(
-    const FokkerPlanckParams& inputParams, const  math::IFunction& initDensity)
+    const FokkerPlanckParams& params,
+    const std::vector<FokkerPlanckComponent>& components)
 :
-    params(checkParams(inputParams)),
-    data(new FokkerPlanckData(params.Mbh, params.selfGravity ? &initDensity : NULL)),
+    data(new FokkerPlanckData(params, components)),
     impl(NULL)  // will be initialized later
 {
-    // input grid parameters
-    double hmin = params.hmin, hmax = params.hmax;
+    // set up the grid parameters
+    size_t gridSize = params.gridSize ?: DEFAULT_GRID_SIZE;
+    double hmin = params.hmin ?: INFINITY, hmax = params.hmax ?: 0.;
 
     // determine if we have a central black hole with a non-zero capture radius -
     // if yes, need to adjust the innermost boundary of phase volume.
-    data->absorbingBoundaryCondition = maxElement(params.captureRadius) > 0.;
     if(data->absorbingBoundaryCondition && data->Mbh>0.) {
         // compute the lowest possible energy corresponding to a circular orbit with
         // the angular momentum equal to the capture boundary, and its associated phase volume
-        double rcapt = minElement(params.captureRadius);
+        double rcapt = minElement(data->captureRadius);
         double rmin  = R_from_Lz(*data->currPot, sqrt(2 * data->Mbh * rcapt)), Phi;
         coord::GradCyl dPhi;
         data->currPot->eval(coord::PosCyl(rmin,0,0), &Phi, &dPhi);
@@ -704,23 +729,29 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     }
 
     // create the grid in phase volume (h) if its parameters were provided
-    std::vector<double> initgridh;
     if(hmin>0. && hmax>hmin)
-        initgridh = math::createExpGrid(params.gridSize, hmin, hmax);
+        data->gridh = math::createExpGrid(gridSize, hmin, hmax);
 
-    // construct the initial distribution function
-    std::vector<double> initf;
-    makeEddingtonDF(initDensity, potential::PotentialWrapper(*data->currPot),
-        /*input/output*/ initgridh, /*output*/ initf);
-    math::LogLogSpline df(initgridh, initf);  // interpolated f(h)
+    // construct the initial distribution function(s)
+    std::vector<math::PtrFunction> initDF(data->numComp);
+    for(unsigned int comp=0; comp<data->numComp; comp++) {
+        std::vector<double> gridh(data->gridh), initf;
+        makeEddingtonDF(*components[comp].initDensity, potential::PotentialWrapper(*data->currPot),
+            /*input/output*/ gridh, /*output*/ initf);
+        initDF[comp].reset(new math::LogLogSpline(gridh, initf));  // interpolated f(h)
 
-    // if no input grid was provided, take the grid returned by the Eddington routine,
-    // but instead of using it directly, create a new grid with the same extent, uniform in log-space
-    if(hmin==0.)
-        hmin = initgridh.front();
-    if(hmax==0.)
-        hmax = initgridh.back();
-    data->gridh = math::createExpGrid(params.gridSize, hmin, hmax);
+        // if no input grid was provided, take the min/max values of h from the grid returned
+        // by the Eddington routine (in case of several components, take the most extreme values)
+        if(data->gridh.empty()) {
+            hmin = std::min(hmin, gridh.front());
+            hmax = std::max(hmax, gridh.back());
+        }
+    }
+
+    // create a new grid, uniform in log(h)
+    utils::msg(utils::VL_DEBUG, "FokkerPlanckSolver", "Grid in h=[" + 
+        utils::toString(hmin) + ":" + utils::toString(hmax) + "], " + utils::toString(gridSize) + "nodes");
+    data->gridh = math::createExpGrid(gridSize, hmin, hmax);
 
     // construct the appropriate implementation of the solver
     switch(params.method) {
@@ -733,20 +764,15 @@ FokkerPlanckSolver::FokkerPlanckSolver(
 
     // initialize the implementation-dependent representation of DF for each component
     // from the DF constructed by the Eddington routine
-    initf = math::solveBand(impl->weightMatrix(), impl->projVector(df));
-    unsigned int numComp = params.componentMass.size();
-    data->gridf.resize(numComp, initf);
-    for(unsigned int i=0; i<initf.size(); i++) {
-        // distribute the initial DF between all components
-        for(unsigned int c=0; c<numComp; c++)
-            data->gridf[c][i] = (data->absorbingBoundaryCondition && i==0) ?
-                0. :   // if using an absorbing boundary at hmin, set f(hmin) to zero
-                std::max(0., initf[i] * params.componentMass[c]);
+    for(unsigned int comp=0; comp<data->numComp; comp++) {
+        data->gridf[comp] = math::solveBand(impl->weightMatrix(), impl->projVector(*initDF[comp]));
+        if(data->absorbingBoundaryCondition)
+            data->gridf[comp][0] = 0.;   // if using an absorbing boundary at hmin, set f(hmin) to zero
+        for(unsigned int i=0; i<data->gridf[comp].size(); i++)
+            data->gridf[comp][i] = std::max(0., data->gridf[comp][i]);
     }
 
     // allocate and assign various auxiliary arrays
-    data->prevRelaxationMatrix.resize(numComp);
-    data->drainMatrix.resize(numComp);
     data->gridAdvDifCoefs = impl->getGridForCoefs();
     data->gridMass   = impl->projVector(FncMass());
     data->gridEnergy = impl->projVector(FncEnergy(*data->phasevol));
@@ -777,11 +803,11 @@ double FokkerPlanckSolver::sourceMass()   const { return data->sourceMass; }
 double FokkerPlanckSolver::sourceEnergy() const { return data->sourceEnergy; }
 double FokkerPlanckSolver::drainMass()    const { return data->drainMass; }
 double FokkerPlanckSolver::drainEnergy()  const { return data->drainEnergy; }
-unsigned int FokkerPlanckSolver::numComp()const { return data->gridf.size(); }
+unsigned int FokkerPlanckSolver::numComp()const { return data->numComp; }
 std::vector<double> FokkerPlanckSolver::gridh() const { return data->gridh; }
 math::PtrFunction   FokkerPlanckSolver::df(unsigned int indexComp) const
 {
-    if(indexComp >= data->gridf.size())
+    if(indexComp >= data->numComp)
         throw std::runtime_error("FokkerPlanckSolver: component index out of range");
     return impl->getInterpolatedFunction(data->gridf[indexComp]);
 }
@@ -799,8 +825,8 @@ void FokkerPlanckSolver::setMbh(double Mbh)
 double FokkerPlanckSolver::relaxationTime() const
 {
     double maxf = 0;
-    for(unsigned int c=0; c<params.Mstar.size(); c++)
-        maxf = fmax(maxf, maxElement(data->gridf[c]) * params.Mstar[c]);
+    for(unsigned int c=0; c<data->numComp; c++)
+        maxf = fmax(maxf, maxElement(data->gridf[c]) * data->Mstar[c]);
     // the numerical factor corresponds to the standard definition of relaxation time
     // T = 0.34 sigma^3 / (rho m lnLambda)
     // if the DF is close to isothermal, in which case  f = rho / (sqrt(2pi) sigma)^3
@@ -811,7 +837,7 @@ double FokkerPlanckSolver::relaxationTime() const
 void FokkerPlanckSolver::reinitPotential(double deltat)
 {
     // recompute the density profile of the model only if it contributes to the total potential
-    if(params.selfGravity) {
+    if(data->selfGravity) {
 
         // construct the combined DF of all components
         math::PtrFunction df = impl->getInterpolatedFunction(sumVectors(data->gridf));
@@ -875,13 +901,13 @@ void FokkerPlanckSolver::reinitPotential(double deltat)
 void FokkerPlanckSolver::reinitAdvDifCoefs()
 {
     // constant multiplicative factor for advection/diffusion coefs
-    const double GAMMA = 16*M_PI*M_PI * params.coulombLog;
+    const double GAMMA = 16*M_PI*M_PI * data->coulombLog;
     // recompute the angular-momentum draining rate once in a while only,
     // because this is a rather expensive operation, and being slightly off in estimating
     // the angular momentum diffusion is not a big deal
     bool computeDrainMatrix = data->absorbingBoundaryCondition && data->numSteps%16 == 0;
     const unsigned int
-    numComp   = data->gridf.size(),      // number of DF components
+    numComp   = data->numComp,           // number of DF components
     gridSize  = data->gridh.size(),      // size of the grid in phase volume that defines the DF
     numPoints = data->gridAdvDifCoefs.size();   // size of the auxiliary grid for adv/dif coefs
     data->Mass = data->Etot = data->Ekin = 0.;  // overall diagnostic quantities
@@ -925,16 +951,16 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
             data->gridAdv[p] += GAMMA * Kg;
 
             // diffusion coefficient D_hh
-            data->gridDif[p] += GAMMA * params.Mstar[comp] * g * (Kh + h * I0);
+            data->gridDif[p] += GAMMA * data->Mstar[comp] * g * (Kh + h * I0);
         }
 
         // if needed, compute the angular-momentum diffusion coefficient on a different grid in h
-        if(computeDrainMatrix && params.lossConeDrain) {
+        if(computeDrainMatrix && data->lossConeDrain) {
             for(unsigned int i=0; i<gridSize; i++) {
                 gridLC[i]  += difCoefLosscone(model,
                     potential::PotentialWrapper(*data->currPot),
                     data->phasevol->E(data->gridh[i])) *
-                    (params.coulombLog * params.Mstar[comp] / model.cumulMass());
+                    (data->coulombLog * data->Mstar[comp] / model.cumulMass());
             }
         }
 
@@ -944,7 +970,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         fval0[comp] = df->value(h0);
         fint0[comp] = model.I0(h0);
         adv0 += GAMMA * model.cumulMass(h0);
-        dif0 += GAMMA * params.Mstar[comp] * (model.cumulEkin(h0) * (2./3) + h0 * fint0[comp]);
+        dif0 += GAMMA * data->Mstar[comp] * (model.cumulEkin(h0) * (2./3) + h0 * fint0[comp]);
     }
 
     // convert the sum of total energies of all stars into the total energy of the entire system
@@ -955,7 +981,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     // (advection flux will be computed later in the evolve() method)
     data->drainRateEnergy = 0.;
     for(unsigned int comp=0; comp<numComp; comp++) {
-        data->drainRateEnergy += -adv0 * params.Mstar[comp] * fint0[comp] + dif0 * fval0[comp];
+        data->drainRateEnergy += -adv0 * data->Mstar[comp] * fint0[comp] + dif0 * fval0[comp];
     }
 
     // initialize the loss-cone draining term in the matrix equation
@@ -966,7 +992,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         for(unsigned int comp=0; comp<numComp; comp++) {
             math::BandMatrix<double> mat = impl->projMatrix(
                 FncDrainRate(*data->currPot, *data->phasevol,
-                    2 * data->Mbh * params.captureRadius[comp], interpLC));
+                    2 * data->Mbh * data->captureRadius[comp], interpLC));
             // if the loss cone occupies the entire range of angular momenta at a given energy,
             // the draining rate is infinite, which is intended to make the DF instantly zero;
             // however, for this to work properly, we need to keep infinities on the diagonal,
@@ -986,18 +1012,22 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     }
 
     // initialize the source term in the matrix equation
-    if(params.sourceRadius>0.) {
+    data->sourceRateMass = data->sourceRateEnergy = 0.;
+    for(unsigned int comp=0; comp<numComp; comp++) {
+        if(data->sourceRate[comp] == 0)
+            continue;
         // translate the radius of the source term to phase volume
-        double src_h = data->phasevol->value(data->currPot->value(coord::PosCyl(params.sourceRadius,0,0)));
+        double src_h = data->phasevol->value(
+            data->currPot->value(coord::PosCyl(data->sourceRadius[comp], 0, 0)));
         // assign the source rate at grid nodes in h
-        data->gridSourceRate = impl->projVector(LogNormal(src_h, SOURCE_WIDTH));
+        data->gridSourceRate[comp] = impl->projVector(LogNormal(src_h, SOURCE_WIDTH));
+        // multiply by the actual rate
+        math::blas_dmul(data->sourceRate[comp], data->gridSourceRate[comp]);
         // according to the boundary conditions, source rate must be zero at endpoints
-        data->gridSourceRate.front() = data->gridSourceRate.back() = 0.;
-        // compute the total rate of mass and energy change associated with the source (diagnostic)
-        double totalRate = sumElements(params.sourceRate);                      // sum over all species...
-        data->sourceRateMass   = sumElements(data->gridSourceRate) * totalRate; // ..and all grid elements
-        data->sourceRateEnergy = totalRate * math::blas_ddot(
-            math::solveBand(impl->weightMatrix(), data->gridSourceRate), data->gridEnergy);
+        data->gridSourceRate[comp].front() = data->gridSourceRate[comp].back() = 0.;
+        data->sourceRateMass   += sumElements(data->gridSourceRate[comp]);
+        data->sourceRateEnergy += math::blas_ddot(data->gridEnergy,
+            math::solveBand(impl->weightMatrix(), data->gridSourceRate[comp]));
     }
 }
 
@@ -1009,10 +1039,10 @@ double FokkerPlanckSolver::evolve(double deltat)
 
     // evolve the DF of each component
     double maxdeltaf = 0.;
-    for(unsigned int comp = 0; comp < data->gridf.size(); comp++) {
+    for(unsigned int comp = 0; comp < data->numComp; comp++) {
         // prepare the advection and diffusion coefficients for the current component
         std::vector<double> compAdv = data->gridAdv, compDif = data->gridDif;
-        math::blas_dmul(params.Mstar[comp], compAdv);
+        math::blas_dmul(data->Mstar[comp], compAdv);
 
         // weight matrix M and relaxation matrix R
         const math::BandMatrix<double> weightMatrix = impl->weightMatrix();
@@ -1050,8 +1080,8 @@ double FokkerPlanckSolver::evolve(double deltat)
             math::blas_daxpy(-deltat, data->drainMatrix[comp], lhsMatrix);
 
         // source term in the rhs
-        if(params.sourceRadius>0.)
-            math::blas_daxpy(deltat * params.sourceRate[comp], data->gridSourceRate, rhs);
+        if(data->sourceRate[comp]>0.)
+            math::blas_daxpy(deltat, data->gridSourceRate[comp], rhs);
         
         // boundary conditions: zero-flux (Neumann) b/c does not need anything special,
         // while a constant-value (Dirichlet) b/c essentially eliminates the first/last row
@@ -1089,7 +1119,7 @@ double FokkerPlanckSolver::evolve(double deltat)
             }
             data->drainMass   += lostMass;
             data->drainEnergy += lostMass * data->phasevol->E(data->gridh[0]);
-            accretedMass      -= lostMass * params.captureMassFraction[comp];
+            accretedMass      -= lostMass * data->captureMassFraction[comp];
         }
 
         // keep track of mass and energy removed from the system through the loss cone
@@ -1108,7 +1138,7 @@ double FokkerPlanckSolver::evolve(double deltat)
             data->drainMass   += lostMass;
             data->drainEnergy += math::blas_ddot(newfLC, data->gridEnergy);
             // a fraction of this mass will be contributed to the black hole mass
-            accretedMass      -= lostMass * params.captureMassFraction[comp];
+            accretedMass      -= lostMass * data->captureMassFraction[comp];
         }
 
         // overwrite the array of DF values at grid nodes with the new ones
@@ -1128,7 +1158,7 @@ double FokkerPlanckSolver::evolve(double deltat)
     }
 
     // recompute the potential (if necessary) and the adv/dif coefs
-    if(params.updatePotential && data->numSteps%1==0) {
+    if(data->updatePotential && data->numSteps%1==0) {
         reinitPotential(deltat);
     }
     reinitAdvDifCoefs();

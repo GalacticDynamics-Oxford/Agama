@@ -330,7 +330,10 @@ SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::Externa
     // alternative way: specifying the total model mass instead of volume density at r=scaleRadius
     if(params.contains("mass") && !params.contains("densityNorm")) {
         config.densityNorm = 1;
-        config.densityNorm = params.getDouble("mass") * conv.massUnit / config.mass();
+        double mass = config.mass();
+        if(!isFinite(mass))
+            throw std::runtime_error("SpheroidDensity model has infinite mass");
+        config.densityNorm = params.getDouble("mass") * conv.massUnit / mass;
     }
     return config;
 }

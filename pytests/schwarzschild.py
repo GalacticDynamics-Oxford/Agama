@@ -48,7 +48,9 @@ def createModel(iniFileName):
             elif len(listdens) > 1:
                 value['density'] = agama.Density(*listdens)
             # else there are no user-defined density sections
+        print "Creating",name
         pot[name] = agama.Potential(**value)
+        pot[name].export("model_"+name)
     model = {'density': den}
     if len(pot) == 0:
         raise ValueError("No potential components defined")
@@ -79,16 +81,19 @@ def createModel(iniFileName):
         elif len(listdens) > 1:
             value['density'] = agama.Density(*listdens)
         else: raise ValueError("No density components in "+name)
+        print "Creating density target for",name
         targets.append(agama.Target(**value))
         if value.has_key('kinemshells'):
             options = { "type": 'KinemJeans', "gridSizeR": int(value['kinemshells']), \
                 "density": value['density'], "potential": model['potential'] }
             if value.has_key('kinemdegree'):  options['degree'] = int(value['kinemdegree'])
+            print "Creating kinematic target for",name
             targets.append(agama.Target(**options))
         if value.has_key('numorbits'):
             icoptions = { 'n': int(value['numorbits']), 'potential': model['potential'] }
             if value.has_key('icbeta'):   icoptions['beta' ] = float(value['icbeta'])
             if value.has_key('ickappa'):  icoptions['kappa'] = float(value['ickappa'])
+            print "Creating initial conditions for", icoptions['n'], "orbits in", name
             ic,weightprior = value['density'].sample(**icoptions)
         else: raise ValueError("No orbits defined in "+name)
         if value.has_key('inttime'):
@@ -121,32 +126,38 @@ def runComponent(comp, pot):
     rpenl  = list()
     matrix.append(result[0].T)
     rhs.   append(comp['targets'][0].values())
-    rpenl. append(numpy.ones(len(comp['targets'][0])))
+    mass   = rhs[0][-1]  # the last constraint is the total mass
+    avgrhs = mass/len(rhs[0])  # typical constraint magnitude
+    rpenl. append(numpy.ones_like(rhs[0]) / avgrhs)
     if len(comp['targets']) == 2 and comp.has_key('beta'):
         numrow = len(comp['targets'][1]) / 2
         matrix.append(result[1].T[0:numrow] * 2*(1-comp['beta']) - result[1].T[numrow:2*numrow])
         rhs.   append(numpy.zeros(numrow))
-        rpenl. append(numpy.ones(numrow) * 0.1)
-    weights = agama.optsolve(matrix=matrix, rhs=rhs, rpenl=rpenl, xpenq=numpy.ones(len(comp['ic']))*0.1 )
+        avgrhs = numpy.average(abs(comp['targets'][1].values()))
+        rpenl. append(numpy.ones(numrow) / avgrhs)
+    avgweight = mass / len(comp['ic'])
+    xpenq   = numpy.ones(len(comp['ic'])) / avgweight**2 / len(comp['ic']) * 0.1
+    weights = agama.optsolve(matrix=matrix, rhs=rhs, rpenl=rpenl, xpenq=xpenq )
 
     # check for any outstanding constraints
     for t in range(len(matrix)):
         delta = matrix[t].dot(weights) - rhs[t]
-        for c, v in enumerate(delta):
-            if abs(v)>1e-8:
-                print "Constraint",t," #",c,"not satisfied:", comp['targets'][t][c], v
+        norm  = 1e-8 * abs(comp['targets'][t].values())
+        for c, d in enumerate(delta):
+            if abs(d) > norm[c]:
+                print "Constraint",t," #",c,"not satisfied:", comp['targets'][t][c], d
 
     # create an N-body model if needed
     if comp.has_key('nbody'):
-        status,result = agama.sampleOrbitLibrary(comp['nbody'], traj, weights)
+        status,particles = agama.sampleOrbitLibrary(comp['nbody'], traj, weights)
         if not status:
-            indices,trajsizes = result
+            indices,trajsizes = particles
             print "reintegrating",len(indices),"orbits; max # of sampling points is", max(trajsizes)
             traj[indices] = agama.orbit(potential=pot, ic=comp['ic'][indices], \
                 time=comp['inttime'][indices], trajsize=trajsizes)
-            status,result = agama.sampleOrbitLibrary(comp['nbody'], traj, weights)
+            status,particles = agama.sampleOrbitLibrary(comp['nbody'], traj, weights)
             if not status: print "Failed to produce output N-body model"
-        comp['nbodymodel'] = result
+        comp['nbodymodel'] = particles
 
     # output
     comp['weights'] = weights
