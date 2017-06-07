@@ -1,6 +1,7 @@
 #include "galaxymodel_target.h"
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_jeans.h"
+#include "galaxymodel.h"
 #include "math_core.h"
 #include "potential_multipole.h"
 #include "potential_utils.h"
@@ -152,11 +153,28 @@ std::vector<double> getCylRzByMass(
     return result;
 }
 
+//---- moments of a multi-component DF ----//
+
+// wrapper function for computing a multi-component density by integrating each DF component over velocity
+class MulticomponentDensityFromDF: public math::IFunctionNdim {
+    const GalaxyModel& model;
+public:
+    explicit MulticomponentDensityFromDF(const GalaxyModel& _model) : model(_model) {}
+    virtual unsigned int numVars() const { return 3; }  // a triplet of cylindrical coordinates
+    virtual unsigned int numValues() const { return model.distrFunc.numValues(); }
+
+    /// input: position in cylindrical coordinates, output: integrals of all DF components
+    virtual void eval(const double vars[], double values[]) const {
+        computeMoments(model, coord::PosCyl(vars[0], vars[1], vars[2]), values, NULL, NULL);
+    }
+};
+
 }  // internal ns
 
 //----- Density discretization scheme -----//
 
-TargetDensity::TargetDensity(const potential::BaseDensity& density, const DensityGridParams& params)
+TargetDensity::TargetDensity(const potential::BaseDensity& density, const DensityGridParams& params) :
+    lmax(0), mmax(0)   // will be initialized later
 {
     if(!isTriaxial(density))
         throw std::runtime_error("TargetDensity: density must have at least triaxial symmetry");
@@ -197,13 +215,16 @@ TargetDensity::TargetDensity(const potential::BaseDensity& density, const Densit
         case DG_CLASSIC_TOPHAT:
             grid.reset(new DensityGridClassic<0>(
                 params.stripsPerPane, gridR, params.axisRatioY, params.axisRatioZ));
+            lmax = mmax = params.stripsPerPane * 4;
             break;
         case DG_CLASSIC_LINEAR:
             grid.reset(new DensityGridClassic<1>(
                 params.stripsPerPane, gridR, params.axisRatioY, params.axisRatioZ));
+            lmax = mmax = params.stripsPerPane * 4;
             break;
         case DG_SPH_HARM:
             grid.reset(new DensityGridSphHarm(params.lmax, params.mmax, gridR));
+            lmax = params.lmax;  mmax = params.mmax;
             break;
         case DG_CYLINDRICAL_TOPHAT:
             grid.reset(new DensityGridCylindrical<0>(params.mmax, gridR, gridz));
@@ -214,6 +235,8 @@ TargetDensity::TargetDensity(const potential::BaseDensity& density, const Densit
         default:
             throw std::invalid_argument("TargetDensity: unknown grid type");
     }
+    if(isAxisymmetric(density)) mmax = 0;
+    if(isSpherical   (density)) lmax = 0;
 
     // finally, compute the projection of the input density onto the grid
     constraintValues = grid->computeProjVector(density);
@@ -239,6 +262,43 @@ std::string TargetDensity::elemName(unsigned int index) const
         return "Total mass";
 }
 
+void TargetDensity::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
+{
+    // BaseDensityGrid provides a method for computing the projection of a density onto the grid
+    // by weighted integration of the density multiplied by each basis function.
+    // The density, in turn, is given by an integral of the DF over velocities.
+    // However, it would be too expensive to perform this integral at each point used in the projection;
+    // instead, we compute the density on a coarser grid, roughly coinciding with the grid used
+    // for density discretization, and then construct a suitable interpolator and provide it 
+    // as the input density for the projection.
+    // If the discretization scheme is based on a spherical grid (DensityGridClassic, DensityGridSphHarm),
+    // we use spherical-harmonic expansion with linearly interpolated coefficients in radius;
+    // otherwise for DensityGridCylindrical we use azimuthal Fourier expansion with linearly
+    // interpolated coefficients in meridional plane (R,z).
+
+    const MulticomponentDensityFromDF densWrapper(model);   // temporary density wrapper object
+
+    // array of density interpolators for each component of the DF
+    int numComp = model.distrFunc.numValues();
+    std::vector<potential::PtrDensity> densityComponents(numComp);
+    if(gridz.empty()) {
+        // compute the spherical-harmonic expansion for the density of each DF component
+        math::SphHarmIndices ind(lmax, mmax, coord::ST_TRIAXIAL);
+        std::vector< std::vector< std::vector<double> > > sphHarmCoefs;
+        potential::computeDensityCoefsSph(densWrapper, ind, gridR, /*output*/sphHarmCoefs);
+        for(int c=0; c<numComp; c++)
+            densityComponents[c].reset(new potential::DensitySphericalHarmonic(gridR, sphHarmCoefs[c]));
+    } else {
+        //       computeDensityComponentsCylindrical(df, mmax, gridR, gridz);
+    }
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int c=0; c<numComp; c++) {
+        std::vector<double> data = grid->computeProjVector(*densityComponents[c]);
+        std::copy(data.begin(), data.end(), output + c * data.size());
+    }
+}
 
 //----- Kinematic discretization scheme -----//
 
@@ -362,6 +422,12 @@ std::string TargetKinemJeans::elemName(unsigned int index) const
         return "sigmat[" + utils::toString(index-numBasisFnc) + "]";
     else
         return "sigmar[" + utils::toString(index) + "]";
+}
+
+void TargetKinemJeans::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
+{
+    /// TODO
+    std::fill(output, output + model.distrFunc.numValues() * numConstraints(), 0);
 }
 
 }  // namespace

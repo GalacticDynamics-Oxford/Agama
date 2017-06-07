@@ -28,7 +28,7 @@
 #pragma once
 #include "potential_base.h"
 #include "particles_base.h"
-#include "math_spline.h"
+#include "math_linalg.h"
 #include "smart.h"
 
 namespace potential {
@@ -69,7 +69,7 @@ public:
     double rho_m(int m, double R, double z) const;
 
 private:
-    std::vector<math::CubicSpline2d> spl;  ///< spline for rho_m(R,z)
+    std::vector<math::PtrInterpolator2d> spl;  ///< spline for rho_m(R,z)
     coord::SymmetryType sym;  ///< type of symmetry deduced from coefficients
     double Rscale;            ///< radial scaling factor
 

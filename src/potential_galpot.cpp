@@ -16,15 +16,14 @@ Version 0.7    23. September 2004
 Version 0.8    24. June      2005
 
 ----------------------------------------------------------------------
-Modifications by Eugene Vasiliev, 2015-2016
+Modifications by Eugene Vasiliev, 2015-2017
 (so extensive that almost nothing of the original code remains)
 
 */
 #include "potential_galpot.h"
-#include "potential_composite.h"
-#include "potential_multipole.h"
 #include "math_core.h"
 #include "math_specfunc.h"
+#include "math_spline.h"
 #include "utils.h"
 #include <cmath>
 #include <stdexcept>

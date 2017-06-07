@@ -45,7 +45,6 @@
 #pragma once
 #include "potential_base.h"
 #include "particles_base.h"
-#include "math_spline.h"
 #include "math_sphharm.h"
 #include "smart.h"
 
@@ -83,29 +82,26 @@ public:
         If all coefficients of the l=0 harmonic are positive, a logarithmic scaling
         for this harmonic will be employed, and in any case the l!=0 terms are scaled relative to
         the l=0 term, and the result is spline-interpolated.
-        \param[in]  innerSlope  is the logarithmic slope of density profile at small radii
-        (below the first grid point), used for extrapolation; NAN means it will be automatically
-        estimated from the cubic spline for the l=0 component.
-        \param[in]  outerSlope  is the same for large radii (beyond the last grid point).
     */
     DensitySphericalHarmonic(const std::vector<double> &gridRadii,
-        const std::vector< std::vector<double> > &coefs, double innerSlope=NAN, double outerSlope=NAN);
+        const std::vector< std::vector<double> > &coefs);
 
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
     virtual const char* name() const { return myName(); }
     static const char* myName() { static const char* text = "DensitySphericalHarmonic"; return text; }
 
-    /** return the radii of spline nodes and the array of density expansion coefficients,
-        together with power-law indices of extrapolation to small and large radii */
-    void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray,
-        double &innerSlope, double &outerSlope) const;
+    /** return the radii of spline nodes and the array of density expansion coefficients */
+    void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray) const;
 
 private:
+    /// radial grid
+    const std::vector<double> gridRadii;
+
     /// indexing scheme for sph.-harm. coefficients
     const math::SphHarmIndices ind;
 
     /// radial dependence of each sph.-harm. expansion term
-    std::vector<math::CubicSpline> spl;
+    std::vector<math::PtrFunction> spl;
 
     /// logarithmic density slope at small and large radii (rho ~ r^s)
     double innerSlope, outerSlope;
@@ -255,7 +251,7 @@ private:
     \param[out] coefs - the array of sph.-harm. coefficients:
                 coefs[c][k] is the value of c-th coefficient (where c is a single index 
                 combining both l and m) at the radius r_k; will be resized as needed.
-    \throws std::invalid_argument if gridRadii are not correct.
+    \throws std::invalid_argument if gridRadii are not correct or any error occurs in the computation.
 */
 void computeDensityCoefsSph(const BaseDensity& dens,
     const math::SphHarmIndices& ind,
@@ -273,17 +269,33 @@ void computeDensityCoefsSph(const BaseDensity& dens,
     \param[out] coefs  will contain the arrays of computed sph.-harm. coefficients
     that can be provided to the constructor of `DensitySphericalHarmonic` class;
     will be resized as needed.
-    \param[out] innerSlope  will contain the logarithmic slope of density profile at small radii.
-    \param[out] outerSlope  is the same for large radii; both parameters may be supplied to
-    the constructor of `DensitySphericalHarmonic` class.
 */
 void computeDensityCoefsSph(
     const particles::ParticleArray<coord::PosCyl> &particles,
     const math::SphHarmIndices &ind,
     const std::vector<double> &gridRadii,
     std::vector< std::vector<double> > &coefs,
-    double &innerSlope, double &outerSlope,
     double smoothing = 1.0);
+
+/** Compute spherical-harmonic expansion coefficients for a multi-component density.
+    It is similar to the eponymous routine for an ordinary density model, except that
+    it simultaneously collects the values of all components at each point in a 3d grid.
+    \param[in]  dens - the input multi-component density interface:
+    the function should take a triplet of cylindrical coordinates (R,z,phi) as input,
+    and provide the values of all numValues() density components as output.
+    \param[in]  ind  - indexing scheme for spherical-harmonic coefficients,
+    which determines the order of expansion and its symmetry properties.
+    \param[in]  gridRadii - the array of radial points for the output coefficients;
+    must form an increasing sequence and start from r>0.
+    \param[out] coefs - the array of sph.-harm. coefficients:
+    coefs[i][c][k] is the value of c-th coefficient (where c is a single index combining
+    both l and m) at the radius r_k for the i-th component; will be resized as needed.
+    \throws std::invalid_argument if gridRadii are not correct or any error occurs in the computation.
+*/
+void computeDensityCoefsSph(const math::IFunctionNdim& dens,
+    const math::SphHarmIndices& ind,
+    const std::vector<double>& gridRadii,
+    std::vector< std::vector< std::vector<double> > > &coefs);
 
 
 /** Compute spherical-harmonic potential expansion coefficients,

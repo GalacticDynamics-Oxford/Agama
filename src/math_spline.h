@@ -949,9 +949,10 @@ class SplineApproxImpl;
     is the approximated regression for input data,
     \f$ B_p(x) \f$ are its basis functions and \f$ A_p \f$ are amplitudes to be found.
 
-    Basis functions are b-splines of degree 3 with knots at X[k], k=0..numKnots-1;
-    the number of basis functions is numKnots+2. Equivalently, the regression
-    can be represented by a clamped cubic spline with numKnots control points;
+    Basis functions are modified b-splines of degree 3 with knots at X[k], k=0..numKnots-1
+    and natural boundary conditions (i.e., 2nd derivative is zero at endpoints);
+    the number of basis functions is numKnots. Equivalently, the regression
+    can be represented by a natural cubic spline with the same set of knots;
     b-splines are only used internally.
 
     LLS fitting is done by solving the following linear system:
@@ -985,13 +986,12 @@ public:
         that were passed to the constructor;
         \param[in]  edf  is the number of equivalent degrees of freedom - the parameter that
         controls the amount of smoothing.
-        It ranges from 2 for a linear regression (infinite smoothing) to numKnots+2 (no smoothing).
+        It ranges from 2 for a linear regression (infinite smoothing) to numKnots (no smoothing).
         Default value 0 is synonymous to no smoothing; other values outside this range are not allowed.
         \param[out] rmserror if not NULL, will contain the root-mean-square deviation of data points
         from the smoothing curve;
-        \returns the array of amplitudes of B-splines, which may be used as an argument for
-        the constructor of CubicSpline class that will provide the interpolated function;
-        the length of this array is numKnots+2.
+        \returns  the array of interpolated function values at grid knots (length: numKnots),
+        which may be used to initialize a natural CubicSpline.
     */
     std::vector<double> fit(const std::vector<double> &yvalues, const double edf=0, 
         double *rmserror=NULL) const;
@@ -1041,8 +1041,7 @@ enum FitOptions {
 
     The task of this routine is to estimate P(x) from the samples.
     It will represent ln(P(x)) as a sum of numBasisFnc basis functions (B-splines of degree N>=1)
-    defined by the grid nodes (numBasisFnc = numGridNodes+N-1), where the grid nodes are provided
-    by the user. In the case N=3 this is equivalent to a clamped cubic spline.
+    defined by the grid nodes, which are provided by the user.
     The amplitudes of these basis functions are computed using the penalized maximum-likelihood
     approach for the input samples.
     In case that the interval is finite or semi-infinite, the corresponding endpoint of input grid
@@ -1054,6 +1053,8 @@ enum FitOptions {
 
     \tparam  N is the degree of B-splines
     (implemented for 1 or 3, smoothing is possible only for N>1).
+    In the case N=1, basis functions are triangular-shaped blocks spanning two grid segments,
+    and in the case N=3, we use a modified set of B-splines with natural boundary conditions.
 
     \param[in]  grid     are the grid nodes defining the interpolated ln(P),
     should be in increasing order.
@@ -1083,11 +1084,9 @@ enum FitOptions {
     by an amount smoothing*logLrms.
     For instance, setting smoothing=1.0 will yield a model that is within 1 sigma from
     the best-fitting optimally smoothed model.
-    \return  the array of basis function amplitudes defining the log-density ln(P(x)).
-    For N=1, their number is equal to the number of grid points,
-    and ln(P(x)) is piecewise-linear, with the values at grid nodes equal to the amplitudes.
-    For N=3, the amplitudes may be used to construct a clamped cubic spline for ln(P(x))
-    by providing this array to the constructor of CubicSpline class.
+    \return  the array of log-density values ln(P(x)) at grid points (same length as grid).
+    For N=1, ln(P(x)) is piecewise-linear, and for N=3 it is a natural cubic spline defined by
+    the values at grid nodes.
     \throw  std::invalid_argument exception if samples have negative weights or lie
     outside the allowed boundaries, or grid points are invalid.
 */
@@ -1176,6 +1175,6 @@ std::vector<double> mirrorGrid(const std::vector<double> &input);
     \return  the grid in x.
 */
 std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps);
-    
+
 ///@}
 }  // namespace

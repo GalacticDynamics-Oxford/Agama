@@ -452,6 +452,22 @@ std::vector<double> quadraticOptimizationSolveApprox(
 }
 
 // explicit instantiations for NumT = float and double
+template std::vector<double> linearOptimizationSolve(const IMatrix<float>&,
+    const std::vector<float>&, const std::vector<float>&,
+    const std::vector<float>&, const std::vector<float>&);
+
+template std::vector<double> linearOptimizationSolve(const IMatrix<double>&,
+    const std::vector<double>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<double>&);
+
+template std::vector<double> quadraticOptimizationSolve(const IMatrix<float>&,
+    const std::vector<float>&, const std::vector<float>&, const IMatrix<float>&,
+    const std::vector<float>&, const std::vector<float>&);
+
+template std::vector<double> quadraticOptimizationSolve(const IMatrix<double>&,
+    const std::vector<double>&, const std::vector<double>&, const IMatrix<double>&,
+    const std::vector<double>&, const std::vector<double>&);
+
 template std::vector<double> linearOptimizationSolveApprox(const IMatrix<float>&,
     const std::vector<float>&, const std::vector<float>&, const std::vector<float>&,
     const std::vector<float>&, const std::vector<float>&);

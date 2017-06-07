@@ -1093,7 +1093,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     CubaParams param(F, xlower, xupper);
     std::vector<double> tempProb(numValues);  // unused
     int nregions, neval, fail;
-    const int NVEC = 1, FLAGS = 0, KEY = 0, minNumEval = 0;
+    const int NVEC = 1, FLAGS = 0, KEY = 7, minNumEval = 0;
     cubacores(0, 0);
     Cuhre(numVars, numValues, &integrandNdimWrapperCuba, &param, NVEC,
         relToler, absToler, FLAGS, minNumEval, maxNumEval, 

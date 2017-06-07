@@ -12,6 +12,8 @@ namespace math {
 // ------- Some machinery for B-splines ------- //
 namespace {
 
+typedef int (*BsplineFnc)(const double, const double[], int, double[]);
+
 /// linear interpolation on a grid with a special treatment for indices outside the grid
 inline double linInt(const double x, const double grid[], int size, int i1, int i2)
 {
@@ -133,65 +135,69 @@ inline int bsplineValuesExtrapolated(const double x, const double grid[], int si
     return ind;
 }
 
-/** Compute the matrix of overlap integrals for the array of 1d B-spline functions or their derivs.
-    Let N>=1 be the degree of B-splines, and D - the order of derivative in question.
-    There are numBasisFnc = numKnots+N-1 basis functions B_p(x) on the entire interval spanned by knots,
-    and each of them is nonzero on at most N+1 consecutive sub-intervals between knots.
-    Define the matrix M_{pq}, 0<=p<=q<numBasisFnc, to be the symmetric matrix of overlap integrals:
-    \f$  M_{pq} = \int dx B^(D)_p(x) B^(D)_q(x)  \f$, where the integrand is nonzero on at most q-p+N+1
-    consecutive sub-intervals, and B^(D) is the D'th derivative of the corresponding function.
+/** A modified B-spline basis of degree N=3 and boundary conditions of a natural cubic spline
+    (i.e., the second derivative is zero at endpoints).
+    The number of basis functions is exactly "size", i.e. less by two than the number of cubic B-splines:
+    instead of the first three functions we introduce two modified ones
+    \f$  \tilde B_0 = B_0 + dx_2 / (dx_1 + dx_2) B_1,  \tilde B_1 = B_2 + dx_1 / (dx_1 + dx_2) B_1,  \f$
+    where dx_1 = grid[1]-grid[0], dx_2 = grid[2]-grid[0],
+    and the other functions are untouched but shifted by one, except the last three which are modified
+    in the same way.
+    \param[in]  fnc  is a function that computes the values or derivatives of ordinary degree 3 B-splines;
+    other arguments are the same as for the above functions
 */
-template<int N, int D>
-Matrix<double> computeOverlapMatrix(const std::vector<double> &knots)
+inline int bsplineNaturalCubic(BsplineFnc fnc, const double x, const double grid[], int size, double B[])
 {
-    int numKnots = knots.size(), numBasisFnc = numKnots+N-1;
-    // B-spline of degree N is a polynomial of degree N, so its D'th derivative is a polynomial
-    // of degree N-D. To compute the integral of a product of two such functions over a sub-interval,
-    // it is sufficient to employ a Gauss-Legendre quadrature rule with the number of nodes = N-D+1.
-    const int Nnodes = std::max<int>(N-D+1, 0);
-    double glnodes[Nnodes], glweights[Nnodes];
-    prepareIntegrationTableGL(0, 1, Nnodes, glnodes, glweights);
-
-    // Collect the values of all possibly non-zero basis functions (or their D'th derivatives)
-    // at Nnodes points of each sub-interval between knots. There are at most N+1 such non-zero functions,
-    // so these values are stored in a 2d array [N+1] x [number of subintervals * number of GL nodes].
-    Matrix<double> values(N+1, (numKnots-1)*Nnodes);
-    for(int k=0; k<numKnots-1; k++) {
-        double der[N+1];
-        for(int n=0; n<Nnodes; n++) {
-            // evaluate the possibly non-zero functions and keep track of the index of the leftmost one
-            int ind = bsplineDerivs<N, D> ( knots[k] + (knots[k+1] - knots[k]) * glnodes[n],
-                &knots.front(), numKnots, der);
-            for(int b=0; b<=N; b++)
-                values(b, k*Nnodes+n) = der[b+k-ind];
-        }
+    int ind = fnc(x, grid, size, B);
+    assert(size>=2);
+    if(size==2) {
+        // general expressions for transforming four degree 3 B-spline functions (or their derivatives)
+        // on a single grid segment into two linear combinations of them
+        assert(ind==0);
+        B[0] = B[0] + 2./3 * B[1] + 1./3 * B[2];
+        B[1] = B[3] + 2./3 * B[2] + 1./3 * B[1];
+        B[2] = B[3] = 0.;
+        return ind;
     }
-
-    // evaluate overlap integrals and store them in the symmetric matrix M_pq, which is a banded matrix
-    // with nonzero values only within N+1 cells from the diagonal
-    Matrix<double> mat(numBasisFnc, numBasisFnc, 0);
-    for(int p=0; p<numBasisFnc; p++) {
-        int kmin = std::max<int>(p-N, 0);   // index of leftmost knot of the integration sub-intervals
-        int kmax = std::min<int>(p+1, numKnots-1);     // same for the rightmost
-        int qmax = std::min<int>(p+N+1, numBasisFnc);  // max index of the column of the banded matrix
-        for(int q=p; q<qmax; q++) {
-            double result = 0;
-            // loop over sub-intervals where the integrand might be nonzero
-            for(int k=kmin; k<kmax; k++) {
-                double dx = knots[k+1]-knots[k];
-                // loop over nodes of GL quadrature rule over the sub-interval
-                for(int n=0; n<Nnodes; n++) {
-                    double P = p>=k && p<=k+N ? values(p-k, k*Nnodes+n) : 0;
-                    double Q = q>=k && q<=k+N ? values(q-k, k*Nnodes+n) : 0;
-                    result  += P * Q * glweights[n] * dx;
-                }
-            }
-            mat(p, q) = result;
-            mat(q, p) = result;  // it is symmetric
-        }
+    if(ind == size-3) {
+        double dx1 = grid[size-2] - grid[size-1], dx2 = grid[size-3] - grid[size-1];
+        B[2] = dx1 / (dx1 + dx2) * B[3] + B[2];
+        B[3] = dx2 / (dx1 + dx2) * B[3];
     }
-    return mat;
+    if(ind == size-2) {
+        double dx1 = grid[size-2] - grid[size-1], dx2 = grid[size-3] - grid[size-1];
+        B[1] = dx1 / (dx1 + dx2) * B[2] + B[1];
+        B[2] = dx2 / (dx1 + dx2) * B[2] + B[3];
+        B[3] = 0;
+    }
+    if(ind == 0) {
+        double dx1 = grid[1] - grid[0], dx2 = grid[2] - grid[0];
+        B[0] = dx2 / (dx1 + dx2) * B[1] + B[0];
+        B[1] = dx1 / (dx1 + dx2) * B[1] + B[2];
+        B[2] = B[3];
+        B[3] = 0;
+    }
+    if(ind == 1) {
+        double dx1 = grid[1] - grid[0], dx2 = grid[2] - grid[0];
+        B[1] = dx1 / (dx1 + dx2) * B[0] + B[1];
+        B[0] = dx2 / (dx1 + dx2) * B[0];
+    }
+    return std::max(0, ind-1);
 }
+
+/// shorthand for the above function in the case of computing basis function values (with extrapolation)
+inline int bsplineNaturalCubicValues(const double x, const double grid[], int size, double B[])
+{
+    return bsplineNaturalCubic(bsplineValuesExtrapolated<3>, x, grid, size, B);
+}
+
+/// shorthand for the D-th derivative of natural cubic B-spline functions
+template<int D>
+inline int bsplineNaturalCubicDerivs(const double x, const double grid[], int size, double B[])
+{
+    return bsplineNaturalCubic(bsplineDerivs<3, D>, x, grid, size, B);
+}
+
 
 /** Sparse matrix with a special structure:
     Nrows >> Ncols, each i'th row contains exactly Nvals entries
@@ -202,18 +208,18 @@ Matrix<double> computeOverlapMatrix(const std::vector<double> &knots)
 */
 template<int Nvals>
 class SparseMatrixSpecial {
-    unsigned int nRows;               ///< number of rows (large)
-    unsigned int nCols;               ///< number of columns (small)
+public:
+    const unsigned int nRows;         ///< number of rows (large)
+    const unsigned int nCols;         ///< number of columns (small)
     std::vector<double> values;       ///< all entries stored in a single array Nrow * Nval
     std::vector<unsigned int> indcol; ///< indices of the first column in each row
-public:
     SparseMatrixSpecial(unsigned int Nrows, unsigned int Ncols) :
         nRows(Nrows), nCols(Ncols), values(Nrows * Nvals, 0), indcol(Nrows, 0) {}
 
     /// assign the entire row of the matrix (may be used in parallel loops)
     inline void assignRow(unsigned int row, unsigned int firstColumnIndex, const double vals[])
     {
-        assert(firstColumnIndex + Nvals <= nCols && row<nRows);
+        assert(row < nRows);
         indcol[row] = firstColumnIndex;
         for(int c=0; c<Nvals; c++)
             values[row * Nvals + c] = vals[c];
@@ -221,24 +227,25 @@ public:
 
     /** compute M^T diag(weights) M  -- the product of the matrix M with its transpose,
         with an optional diagonal weight matrix in between;
-        a banded symmetric square matrix of size Ncols*Ncols with bandwidth 2*Nvals-1.
+        a banded symmetric square matrix of size Ncols*Ncols with bandwidth Nvals-1.
         The weights may be an empty vector (meaning they are unity), or a vector of length Nrows. */
-    Matrix<double> multiplyByTransposed(
+    BandMatrix<double> multiplyByTransposed(
         const std::vector<double>& weights = std::vector<double>()) const
     {
         bool noWeights = weights.empty();
         assert(values.size() == nRows * Nvals && indcol.size() == nRows &&
             (noWeights || weights.size() == nRows));
-        Matrix<double> result(nCols, nCols, 0.);
+        BandMatrix<double> result(nCols, Nvals-1, 0.);
         for(unsigned int row=0; row<nRows; row++) {
-            unsigned int ind = indcol[row];
+            unsigned int ind = indcol[row], nvals = std::min<unsigned int>(Nvals, nCols-ind);
             double weight = noWeights ? 1. : weights[row];
-            for(int i=0; i<Nvals; i++)
-                for(int j=i; j<Nvals; j++)  // fill in only the upper triangle of the symmetric matrix
+            // fill only the upper triangle of the symmetric matrix
+            for(unsigned int i=0; i<nvals; i++)
+                for(unsigned int j=i; j<nvals; j++)
                     result(ind+i, ind+j) += weight * values[row*Nvals+i] * values[row*Nvals+j];
         }
-        for(unsigned int i=1; i<nCols; i++) // fill the remaining lower triangle
-            for(unsigned int j=0; j<i; j++)
+        for(unsigned int j=0; j<nCols-1; j++)  // fill the remaining lower triangle of the banded matrix
+            for(unsigned int i=j+1; i<std::min<unsigned int>(nCols, j+Nvals); i++)
                 result(i, j) = result(j, i);
         return result;
     }
@@ -255,14 +262,66 @@ public:
         assert(vec.size() == nRows && (noWeights || weights.size() == nRows));
         std::vector<double> result(nCols, 0.);
         for(unsigned int row=0; row<nRows; row++) {
-            unsigned int ind = indcol[row];
+            unsigned int ind = indcol[row], nvals = std::min<unsigned int>(Nvals, nCols-ind);
             double val = noWeights ? vec[row] : weights[row] * vec[row];
-            for(int i=0; i<Nvals; i++)
-                result[ind+i] += val * values[row*Nvals+i];
+            for(unsigned int i=0; i<nvals; i++)
+                result.at(ind+i) += val * values[row*Nvals+i];
         }
         return result;
     }
 };
+
+/** Compute the matrix of overlap integrals for the array of 1d B-spline functions or their derivs.
+    Let N>=1 be the degree of B-splines, and D - the order of derivative in question.
+    There are numBasisFnc = numKnots+N-1 basis functions B_p(x) on the entire interval spanned by knots,
+    and each of them is nonzero on at most N+1 consecutive sub-intervals between knots.
+    Define the matrix R_{pq}, 0<=p<=q<numBasisFnc, to be the symmetric matrix of overlap integrals:
+    \f$  R_{pq} = \int dx B^(D)_p(x) B^(D)_q(x)  \f$, where the integrand is nonzero on at most q-p+N+1
+    consecutive sub-intervals, and B^(D) is the D'th derivative of the corresponding function.
+*/
+template<int N>
+BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots,
+    const int numBasisFnc, const int GLORDER, BsplineFnc fnc)
+{
+    int numKnots = knots.size();
+    double glnodes[GLORDER], glweights[GLORDER];
+    prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const int gridSize = (numKnots-1) * GLORDER;   // total # of points on all grid segments
+    std::vector<double> weights(gridSize);
+
+    // Collect the values of all possibly non-zero basis functions (or their D'th derivatives)
+    // at GLORDER points of each segment between knots. There are at most N+1 such non-zero functions
+    // at each point, and their values (and the index of the first nontrivial one) are stored
+    // in the special-structure matrix M with gridSize rows, numBasisFnc columns, and N+1 nonzero
+    // elements in each row
+    SparseMatrixSpecial<N+1> basisFncValues(gridSize, numBasisFnc);
+    for(int p=0; p<gridSize; p++) {
+        int k      = p / GLORDER, n = p % GLORDER; // index of the segment of the input grid
+        double dx  = knots[k+1] - knots[k];        // width of this segment
+        double x   = knots[k] + dx * glnodes[n];   // point inside this segment
+        weights[p] = dx * glweights[n];            // its weight in the overall quadrature rule
+        // evaluate the possibly non-zero functions and keep track of the index of the leftmost one
+        double vals[N+1];
+        int ind = fnc(x, &knots[0], numKnots, vals);
+        basisFncValues.assignRow(p, ind, vals);    // store them in the special matrix
+    }
+
+    // now the integrals of products of two basis functions B_i, B_j over the entire grid
+    // are given by the elements of the square banded matrix M^T diag(weights) M
+    return basisFncValues.multiplyByTransposed(weights);
+}
+
+template<int N, int D>
+BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots)
+{
+    const int numBasisFnc = knots.size() + N-1;
+    // B-spline of degree N is a polynomial of degree N, so its D'th derivative is a polynomial
+    // of degree N-D. To compute the integral of a product of two such functions over each grid segment,
+    // it is sufficient to employ a Gauss-Legendre quadrature rule with the number of nodes = N-D+1.
+    const int GLORDER = std::max<int>(N-D+1, 0);
+    return computeOverlapMatrix<N>(knots, numBasisFnc, GLORDER, bsplineDerivs<N, D>);
+}
+
 
 /// definite integral of x^(m+n)
 class MonomialIntegral: public IFunctionIntegral {
@@ -1911,7 +1970,7 @@ template<int N>
 SparseMatrix<double> BsplineInterpolator3d<N>::computeRoughnessPenaltyMatrix() const
 {
     std::vector<Triplet> values;      // elements of sparse matrix will be accumulated here
-    Matrix<double>
+    BandMatrix<double>
     X0(computeOverlapMatrix<N,0>(xnodes)),  // matrices of products of 1d basis functions or derivs
     X1(computeOverlapMatrix<N,1>(xnodes)),
     X2(computeOverlapMatrix<N,2>(xnodes)),
@@ -2107,6 +2166,9 @@ private:
     /// part of the decomposition of the matrix M (size: numBasisFnc)
     std::vector<double> singValues;
 
+    /// matrix "A" that transforms the vector of amplitudes into the array of function values at knots
+    BandMatrix<double> AMatrix;
+
 public:
     /// Auxiliary data used in the fitting process, pre-initialized for each set of data points `y`
     /// (these data cannot be members of the class, since they are not constant)
@@ -2172,7 +2234,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
     knots(_knots),
     xvalues(_xvalues),
     weights(_weights),
-    BMatrix(numDataPoints, numKnots+2)
+    BMatrix(numDataPoints, numKnots)
 {
     if(numKnots <= 1 || numDataPoints < 4)
         throw std::invalid_argument("SplineApprox: incorrect size of the problem");
@@ -2203,16 +2265,18 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
     for(int i=0; i<(int)numDataPoints; i++) {
         // for each input point, at most 4 basis functions are non-zero, starting from index 'ind'
         double Bspl[4];
-        unsigned int ind = bsplineValuesExtrapolated<3>(xvalues[i], &knots.front(), numKnots, Bspl);
-        assert(ind<=numKnots-2);
+        int ind = bsplineNaturalCubicValues(xvalues[i], &knots[0], numKnots, Bspl);
+        assert(ind>=0 && ind<=(int)numKnots-2);
         BMatrix.assignRow(i, ind, Bspl);
     }
 
     // compute the symmetric matrix  C = B^T diag(w) B
-    Matrix<double> CMatrix = BMatrix.multiplyByTransposed(weights);
+    Matrix<double> CMatrix(BMatrix.multiplyByTransposed(weights));
 
     // compute the roughness matrix R (integrals over products of second derivatives of basis functions)
-    Matrix<double> RMatrix(computeOverlapMatrix<3,2>(knots));
+    //Matrix<double> RMatrix(computeOverlapMatrix<3,2>(knots));
+    Matrix<double> RMatrix(computeOverlapMatrix<3>(knots, /*numBasisFnc*/ numKnots, /*GLORDER*/ 2,
+        /*functions entering the overlap matrix*/ bsplineNaturalCubicDerivs<2> ));
 
     // to prevent a failure of Cholesky decomposition in the case if C is not positive definite,
     // we add a small multiple of R to C (following the recommendation in Ruppert,Wand&Carroll)
@@ -2231,14 +2295,26 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
     // (since Q is symmetric, U and V should be identical)
     SVDecomp SVD(RMatrix);
     singValues = SVD.S();       // vector of singular values of matrix Q:
-    singValues[numKnots] = 0;   // the smallest two singular values must be zero;
-    singValues[numKnots+1] = 0; // set it explicitly to avoid roundoff error
+    singValues[numKnots-2] = 0; // the smallest two singular values must be zero;
+    singValues[numKnots-1] = 0; // set it explicitly to avoid roundoff error
 
     // precompute M = L^{-T} U  which is used in computing amplitudes of basis functions.
     MMatrix = SVD.U();
     blas_dtrsm(CblasLeft, CblasLower, CblasTrans, CblasNonUnit, 1, LMatrix, MMatrix);
     // now M is finally in place, and the amplitudes for any lambda are given by
     // M (I + lambda * diag(singValues))^{-1} M^T  z
+
+    // initialize the auxiliary matrix A that converts amplitudes of B-spline representation
+    // of the fitted function into the values of interpolated function at grid knots;
+    // there are at most 3 nonzero basis functions at each node, arranged into a tridiagonal matrix
+    AMatrix = BandMatrix<double>(numKnots, 1, 0.);
+    for(unsigned int k=0; k<numKnots; k++) {
+        double Bspl[4];
+        int ind = bsplineNaturalCubicValues(knots[k], &knots[0], numKnots, Bspl);
+        for(unsigned int j=0; j<=3; j++)
+            if(Bspl[j]!=0)  // the entries outside the main and two adjacent diagonals must be zero
+                AMatrix(k, j+ind) = Bspl[j];
+    }
 }
 
 // initialize the temporary arrays used in the fitting process for the given vector of values 'y'
@@ -2255,7 +2331,7 @@ SplineApproxImpl::FitData SplineApproxImpl::initFit(const std::vector<double> &y
         for(unsigned int i=0; i<numDataPoints; i++)
             fitData.ynorm2 += weights[i] * pow_2(yvalues[i]);
     fitData.zRHS = BMatrix.multiplyByVector(yvalues, weights);   // precompute z = B^T diag(w) y
-    fitData.MTz.resize(numKnots+2);
+    fitData.MTz.resize(numKnots);
     blas_dgemv(CblasTrans, 1, MMatrix, fitData.zRHS, 0, fitData.MTz); // precompute M^T z
     return fitData;
 }
@@ -2266,13 +2342,13 @@ namespace{  // a few helper routines and classes
 inline double computeEDF(const std::vector<double>& singValues, double lambda)
 {
     if(!isFinite(lambda))  // infinite smoothing leads to a straight line (2 d.o.f)
-        return 2;
+        return 2.;
     else if(lambda==0)     // no smoothing means the number of d.o.f. equal to the number of basis fncs
         return singValues.size()*1.;
     else {
         double EDF = 0;
         for(unsigned int c=0; c<singValues.size(); c++)
-            EDF += 1 / (1 + lambda * singValues[c]);
+            EDF += 1. / (1. + lambda * singValues[c]);
         return EDF;
     }
 }
@@ -2280,14 +2356,14 @@ inline double computeEDF(const std::vector<double>& singValues, double lambda)
 // compute the (modified) Akaike information criterion
 inline double computeAIC(double RSS, double EDF, unsigned int numDataPoints)
 {
-    return log(RSS) + 2 * (EDF+1) / (numDataPoints-EDF-2);
+    return log(RSS) + 2. * (EDF+1) / (numDataPoints-EDF-2);
 }
 
 // the root-finders below work with a scaledLambda in the interval [0:1],
 // which is converted to the real lambda (smoothing parameter) in the range [0:infinity] by this routine
 inline double unscaleLambda(double scaledLambda)
 {
-    return exp( 1 / scaledLambda - 1 / (1-scaledLambda) );
+    return exp( 1. / scaledLambda - 1. / (1.-scaledLambda) );
 }
 
 // helper class to find the value of scaledLambda that corresponds to the given number of
@@ -2325,14 +2401,13 @@ public:
 // using the pre-computed matrix M^T z, where z = B^T W y is the rhs of the system of normal equations;
 // output the amplitudes of basis functions and other relevant quantities (RSS, EDF);
 void SplineApproxImpl::computeAmplitudes(const FitData &fitData, double lambda,
-    std::vector<double> &ampl, double &RSS, double &EDF) const
+    std::vector<double> &result, double &RSS, double &EDF) const
 {
-    std::vector<double> tempv(numKnots+2);
-    for(unsigned int p=0; p<numKnots+2; p++) {
+    std::vector<double> tempv(numKnots), ampl(numKnots);
+    for(unsigned int p=0; p<numKnots; p++) {
         double sv = singValues[p];
         tempv[p]  = fitData.MTz[p] / (1 + (sv>0 ? sv*lambda : 0));
     }
-    ampl.resize(numKnots+2);
     blas_dgemv(CblasNoTrans, 1, MMatrix, tempv, 0, ampl);
     // compute the residual sum of squares (note: may be prone to cancellation errors?)
     tempv = ampl;
@@ -2346,14 +2421,17 @@ void SplineApproxImpl::computeAmplitudes(const FitData &fitData, double lambda,
         ", EDF="+utils::toString(EDF,10)+
         ", AIC="+utils::toString(computeAIC(RSS, EDF, numDataPoints),10)+
         ", GCV="+utils::toString(RSS / pow_2(numDataPoints-EDF),10));*/
+    // convert amplitudes to the values of interpolated function at grid nodes
+    result.resize(numKnots);
+    blas_dgemv(CblasNoTrans, 1, AMatrix, ampl, 0, result);
 }
 
 void SplineApproxImpl::solveForAmplitudesWithEDF(const std::vector<double> &yvalues, double EDF,
     std::vector<double> &ampl, double &RSS) const
 {
     if(EDF==0)
-        EDF = numKnots+2;
-    else if(EDF<2 || EDF>numKnots+2)
+        EDF = numKnots;
+    else if(EDF<2 || EDF>numKnots)
         throw std::invalid_argument("SplineApprox: incorrect number of equivalent degrees of freedom");
     double lambda = unscaleLambda(findRoot(SplineEDFRootFinder(singValues, EDF), 0, 1, 1e-6));
     computeAmplitudes(initFit(yvalues), lambda, ampl, RSS, EDF);
@@ -2507,10 +2585,10 @@ public:
         const std::vector<double>& grid, FitOptions options,
         SplineLogFitParams& params);
 
-    /** Return the array of properly normalized amplitudes, such that the integral of
-        P(x) over the entire domain is equal to the sum of sample weights M.
+    /** Return the array of interpolated function values, properly normalized,
+        such that the integral of P(x) over the entire domain is equal to the sum of sample weights M.
     */
-    std::vector<double> getNormalizedAmplitudes(const std::vector<double>& ampl) const;
+    std::vector<double> getInterpolatedFunctionValues(const std::vector<double>& ampl) const;
 
     /** Compute the expected rms scatter in log-likelihood for a density function defined
         by the given amplitudes, for the given number of samples */
@@ -2568,8 +2646,8 @@ private:
     const unsigned int numAmpl;       ///< the number of amplitudes that may be varied (numBasisFnc-1)
     const unsigned int numData;       ///< number of sample points
     const FitOptions options;         ///< whether the definition interval extends to +-inf
-    static const int GL_ORDER = 8;    ///< order of GL quadrature for computing the normalization
-    double GLnodes[GL_ORDER], GLweights[GL_ORDER];  ///< nodes and weights of GL quadrature
+    static const int GLORDER = 8;     ///< order of GL quadrature for computing the normalization
+    double GLnodes[GLORDER], GLweights[GLORDER];  ///< nodes and weights of GL quadrature
     std::vector<double> Vbasis;       ///< basis likelihoods: V_k = \sum_i w_i B_k(x_i)
     std::vector<double> Wbasis;       ///< W_k = \sum_i w_i^2 B_k(x_i)
     Matrix<double> BTBmatrix;         ///< matrix C = B^T B, where B_{ik} = w_i B_k(x_i)
@@ -2588,7 +2666,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     SplineLogFitParams& _params) :
     grid(_grid),
     numNodes(grid.size()),
-    numBasisFnc(numNodes + N - 1),
+    numBasisFnc(numNodes),
     numAmpl(numBasisFnc - 1),
     numData(xvalues.size()),
     options(_options),
@@ -2605,14 +2683,22 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     for(unsigned int k=1; k<numNodes; k++)
         if(grid[k-1] >= grid[k])
             throw std::invalid_argument("splineLogDensity: grid nodes are not monotonic");
-    prepareIntegrationTableGL(0, 1, GL_ORDER, GLnodes, GLweights);
+    prepareIntegrationTableGL(0, 1, GLORDER, GLnodes, GLweights);
 
     // prepare the roughness penalty matrix
     // (integrals over products of certain derivatives of basis functions)
-    if((options & FO_PENALTY_3RD_DERIV) == FO_PENALTY_3RD_DERIV)
-        roughnessMatrix = computeOverlapMatrix<N,3>(grid);
-    else
-        roughnessMatrix = computeOverlapMatrix<N,2>(grid);
+    if(N==3) {
+        if((options & FO_PENALTY_3RD_DERIV) == FO_PENALTY_3RD_DERIV)
+            roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
+                grid, numBasisFnc, /*GLORDER*/ 1, /*3rd deriv*/ bsplineNaturalCubicDerivs<3>));
+        else
+            roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
+                grid, numBasisFnc, /*GLORDER*/ 2, /*2nd deriv*/ bsplineNaturalCubicDerivs<2>));
+    } else {
+        assert(N==1);
+        // no roughness penalty is possible for N=1
+        roughnessMatrix = math::Matrix<double>(numBasisFnc, numBasisFnc, 0.);
+    }
 
     // quick scan to analyze the weights
     double minWeight = INFINITY;
@@ -2625,7 +2711,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
         if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
             (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
-            weight <= 0)
+            weight == 0)
             continue;
         sumWeights += weight;
         avgx       += weight * xval;
@@ -2643,49 +2729,37 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     double dispx = fmax(avgx2 - pow_2(avgx), 0.01 * pow_2(xmax-xmin));
     avgx  = fmin(fmax(avgx, xmin), xmax);
 
+    // compute the values of all nontrivial basis functions for each point,
+    // multiplied by the point weight, and store them in this matrix
+    SparseMatrixSpecial<N+1> Bmatrix(numData, numAmpl);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int p=0; p<(int)numData; p++) {
+        double xval = xvalues[p], weight = weights[p] / sumWeights;
+        // if the interval is (semi-)finite, samples beyond its boundaries are ignored
+        if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
+            (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
+            weight == 0)
+            continue;
+        double Bspl[N+1];
+        int ind = N==1 ?
+            bsplineValuesExtrapolated<1>(xval, &grid[0], numNodes, Bspl) :
+            bsplineNaturalCubicValues   (xval, &grid[0], numNodes, Bspl);
+        for(int b=0; b<=N; b++)
+            Bspl[b] *= weight;
+        Bmatrix.assignRow(p, ind, Bspl);
+    }
+
     // prepare the log-likelihoods of each basis fnc and other useful arrays
     Vbasis.assign(numBasisFnc, 0.);
     Wbasis.assign(numBasisFnc, 0.);
-    SparseMatrixSpecial<N+1> Bmatrix(numData, numAmpl);
-
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {   // hand-made implementation of parallel reduction:
-        // the vectors and scalar variables below are thread-local,
-        // they are accumulated in a parallel loop, and afterwards combined together
-        // in a critical section which is executed by each thread sequentially.
-        // While it's possible to use OpenMP reduction clause for sums accumulated in a scalar variable,
-        // it's not applicable to vectors nor to the min expression.
-        std::vector<double> Vbasis_(numBasisFnc, 0.), Wbasis_(numBasisFnc, 0.);
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-        for(int p=0; p<(int)numData; p++) {
-            double xval = xvalues[p], weight = weights[p] / sumWeights;
-            // if the interval is (semi-)finite, samples beyond its boundaries are ignored
-            if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
-                (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
-                weight <= 0)
-                continue;
-            double Bspl[N+2] = {0};
-            int ind = bsplineValuesExtrapolated<N>(xval, &grid[0], numNodes, Bspl+1);
-            for(int b=0; b<=N; b++) {
-                Bspl[b+1] *= weight;
-                Vbasis_[ind+b] += Bspl[b+1];
-                Wbasis_[ind+b] += Bspl[b+1] * weight;
-            }
-            int off = ind+N >= (int)numAmpl ? 1 : 0;
-            Bmatrix.assignRow(p, ind-off, Bspl+1-off);
-        }
-#ifdef _OPENMP
-#pragma omp critical (SplineLogDensityReductionLoop)
-#endif
-        {
-            for(unsigned int i=0; i<numBasisFnc; i++) {
-                Vbasis[i] += Vbasis_[i];
-                Wbasis[i] += Wbasis_[i];
-            }
+    for(unsigned int p=0; p<numData; p++) {
+        unsigned int ind = Bmatrix.indcol[p];
+        for(int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++) {
+            double weight = weights[p] / sumWeights;
+            Vbasis.at(ind+b) += Bmatrix.values.at(p*(N+1)+b);
+            Wbasis.at(ind+b) += Bmatrix.values.at(p*(N+1)+b) * weight;
         }
     }
 
@@ -2704,15 +2778,17 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     }
     if(isSingular) {
         // add fake contributions to all basis functions that would have arisen from
-        // a uniformly distributed minWeight over each grid segment
+        // a uniformly distributed minWeight over each grid segment (not a very elegant solution, TODO!)
         minWeight *= 1. / (numNodes-1);
         for(unsigned int j=0; j<numNodes-1; j++) {
-            for(int s=0; s<GL_ORDER; s++) {
+            for(int s=0; s<GLORDER; s++) {
                 double x = grid[j] + GLnodes[s] * (grid[j+1]-grid[j]);
                 double Bspl[N+1];
-                int ind = bsplineValues<N>(x, &grid[0], numNodes, Bspl);
-                for(unsigned int b=0; b<=N; b++)
-                    Vbasis[b+ind] += minWeight * Bspl[b] * GLweights[s];
+                int ind = N==1 ?
+                    bsplineValuesExtrapolated<1>(x, &grid[0], numNodes, Bspl) :
+                    bsplineNaturalCubicValues   (x, &grid[0], numNodes, Bspl);
+                for(unsigned int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++)
+                    Vbasis.at(ind+b) += minWeight * Bspl[b] * GLweights[s];
             }
             sumWeights += minWeight;
         }
@@ -2722,13 +2798,12 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     Wbasis.resize(numAmpl);
 
     // construct the matrix C = B^T B that is used in cross-validation
-    BTBmatrix = Bmatrix.multiplyByTransposed();
+    BTBmatrix = math::Matrix<double>(Bmatrix.multiplyByTransposed());
 
     // assign the initial guess for amplitudes using a Gaussian density distribution
     params.ampl.assign(numBasisFnc, 0);
-    for(int k=0; k<(int)numBasisFnc; k++) {
-        double xnode = grid[ std::min<int>(numNodes-1, std::max(0, k-N/2)) ];
-        params.ampl[k] = -pow_2(xnode-avgx) / 2 / dispx;
+    for(unsigned int k=0; k<numBasisFnc; k++) {
+        params.ampl[k] = -pow_2(grid[k]-avgx) / 2 / dispx;
     }
     // make sure that we start with a density that is declining when extrapolated
     if((options & FO_INFINITE_LEFT) == FO_INFINITE_LEFT)
@@ -2745,15 +2820,29 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
 }
 
 template<int N>
-std::vector<double> SplineLogDensityFitter<N>::getNormalizedAmplitudes(
-    const std::vector<double>& ampl) const
+std::vector<double> SplineLogDensityFitter<N>::getInterpolatedFunctionValues(
+    const std::vector<double>& ampl /*unnormalized amplitudes*/) const
 {
     assert(ampl.size() == numAmpl);
     std::vector<double> result(numBasisFnc);
     double C = logSumWeights - logG(&ampl[0]);
     for(unsigned int n=0; n<numBasisFnc; n++)
         result[n] = (n<numAmpl ? ampl[n] : 0) + C;
-    return result;
+    if(N==1)
+        // for N=1 the amplitudes coincide with the values of interpolated function at grid nodes
+        return result;
+    else {
+        // for N=3 need to convert the amplitudes of B-spline representation into the interpolated values
+        std::vector<double> fncval(numBasisFnc);
+        for(unsigned int n=0; n<numBasisFnc; n++) {
+            double Bspl[4];
+            int ind = bsplineNaturalCubicValues(grid[n], &grid[0], numNodes, Bspl);
+            for(unsigned int j=0; j<=3; j++)
+                if(Bspl[j]!=0)
+                    fncval[n] += Bspl[j] * result.at(ind+j);
+        }
+        return fncval;
+    }
 }
 
 template<int N>
@@ -2875,12 +2964,14 @@ double SplineLogDensityFitter<N>::logG(
     for(unsigned int k=0; k<numNodes-1; k++) {
         double segwidth = grid[k+1] - grid[k];
         // ...and over sub-nodes of Gauss-Legendre quadrature rule within each grid segment
-        for(int s=0; s<GL_ORDER; s++) {
+        for(int s=0; s<GLORDER; s++) {
             double x = grid[k] + GLnodes[s] * segwidth;
             double Bspl[N+1];
             // obtain the values of all nontrivial basis function at this point,
             // and the index of the first of these functions.
-            int ind = bsplineValues<N>(x, &grid[0], numNodes, Bspl);
+            int ind = N==1 ?
+                bsplineValues<1>(x, &grid[0], numNodes, Bspl) :
+                bsplineNaturalCubicValues(x, &grid[0], numNodes, Bspl);
             // sum the contributions to Q(x) from each basis function,
             // weighted with the provided amplitudes;
             // here we substitute zero in place of the last (numBasisFnc-1)'th amplitude.
@@ -2919,8 +3010,14 @@ double SplineLogDensityFitter<N>::logG(
         if(!infinite[p])
             continue;
         double Bspl[N+1], Bder[N+1];
-        int ind = bsplineValues<N>(endpoint[p], &grid[0], numNodes, Bspl);
-        bsplineDerivs<N,1>(endpoint[p], &grid[0], numNodes, Bder);
+        int ind;
+        if(N==1) {
+            ind = bsplineValues<N>(endpoint[p], &grid[0], numNodes, Bspl);
+            bsplineDerivs<1,1>(endpoint[p], &grid[0], numNodes, Bder);
+        } else {
+            ind = bsplineNaturalCubicValues(endpoint[p], &grid[0], numNodes, Bspl);
+            bsplineNaturalCubicDerivs<1>(endpoint[p], &grid[0], numNodes, Bder);
+        }
         double Q = 0, Qder = 0;
         for(unsigned int b=0; b<=N && b+ind<numAmpl; b++) {
             Q    += Bspl[b] * ampl[b+ind];
@@ -3066,7 +3163,7 @@ std::vector<double> splineLogDensity(const std::vector<double> &grid,
             findRoot(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, 1e-4);
         }
     }
-    return fitter.getNormalizedAmplitudes(params.ampl);
+    return fitter.getInterpolatedFunctionValues(params.ampl);
 }
 
 // force the template instantiations to compile

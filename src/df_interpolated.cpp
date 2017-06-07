@@ -44,8 +44,11 @@ public:
 template<int N>
 InterpolatedDF<N>::InterpolatedDF(const PtrActionSpaceScaling& _scaling,
     const std::vector<double> &gridU, const std::vector<double> &gridV,
-    const std::vector<double> &gridW,  const std::vector<double> &_amplitudes) :
-    scaling(_scaling), interp(gridU, gridV, gridW), amplitudes(_amplitudes)
+    const std::vector<double> &gridW,  const std::vector<double> &_amplitudes)
+:
+    scaling(_scaling),
+    interp(gridU, gridV, gridW),
+    amplitudes(_amplitudes.empty() ? std::vector<double>(interp.numValues(), 1.) : _amplitudes)
 {
     if(amplitudes.size() != interp.numValues())
         throw std::invalid_argument("InterpolatedDF: invalid array size");
@@ -63,15 +66,7 @@ double InterpolatedDF<N>::value(const actions::Actions &J) const
 }
 
 template<int N>
-double InterpolatedDF<N>::valueOfComponent(const actions::Actions &J, unsigned int indComp) const
-{
-    double vars[3];
-    scaling->toScaled(J, vars);
-    return interp.valueOfComponent(vars, indComp) * amplitudes.at(indComp);
-}
-
-template<int N>
-void InterpolatedDF<N>::valuesOfAllComponents(const actions::Actions &J, double val[]) const
+void InterpolatedDF<N>::eval(const actions::Actions &J, double val[]) const
 {
     double vars[3];
     scaling->toScaled(J, vars);

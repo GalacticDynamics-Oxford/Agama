@@ -32,10 +32,12 @@ p_halo  = {"type":"SpheroidDensity", "densityNorm":1.072e10,
 w_pot   = galpy_agama.CPotential(p_bulge, p_disk, p_halo)  # same as above, two variants
 ### ...and then use _pot member variable to access the instance of raw Agama potential
 dt = time.time()
-c_actfinder = agama.ActionFinder(w_pot._pot)
+### initialization of the action finder needs to be done once for the given potential
+c_actfinder = agama.ActionFinder(w_pot._pot, interp=False)
 print 'Time to set up action finder: %s s' % (time.time()-dt)
-### this needs to be done once for the given potential,
-### and initializes the focal distance estimator for all values of E and L
+### we have a faster but less accurate "interpolated action finder", which takes a bit longer to initialize
+i_actfinder = agama.ActionFinder(w_pot._pot, interp=True)
+print 'Time to set up interpolated action finder: %s s' % (time.time()-dt)
 
 ### conversion from prolate spheroidal to cylindrical coords
 def ProlSphToCyl(la, nu, ifd):
@@ -63,11 +65,9 @@ def compare(ic, inttime, numsteps):
     g_orb_obj.integrate(times, g_pot)
     g_orb = g_orb_obj.getOrbit()
     print 'Time to integrate orbit in galpy: %s s' % (time.time()-dt)
-
     dt = time.time()
-    c_orb_car = agama.orbit(ic=[ic[0],0,ic[1],ic[3],ic[5],ic[4]], potential=w_pot._pot, time=inttime, step=inttime/numsteps)
+    times_c, c_orb_car = agama.orbit(ic=[ic[0],0,ic[1],ic[3],ic[5],ic[4]], potential=w_pot._pot, time=inttime, trajsize=numsteps)
     print 'Time to integrate orbit in Agama: %s s' % (time.time()-dt)
-    times_c = numpy.linspace(0,inttime,len(c_orb_car[:,0]))
     ### make it compatible with galpy's convention (native output is in cartesian coordinates)
     c_orb = c_orb_car*1.0
     c_orb[:,0] = (c_orb_car[:,0]**2+c_orb_car[:,1]**2)**0.5
@@ -111,21 +111,27 @@ def compare(ic, inttime, numsteps):
     ### use the Agama action routine for the same value of Delta as in galpy
     dt = time.time()
     c_act = agama.actions(point=c_orb_car, potential=w_pot._pot, fd=delta)   # explicitly specify focal distance
-    print 'Time to compute actions in Agama: %s s' % (time.time()-dt)
+    print 'Time to compute actions in Agama using Galpy-estimated focal distance: %s s' % (time.time()-dt)
 
     ### use the Agama action finder (initialized at the beginning) that automatically determines the best value of Delta
     dt = time.time()
     a_act = c_actfinder(c_orb_car)   # use the focal distance estimated by action finder
-    print 'Time to compute actions in Agama: %s s' % (time.time()-dt)
+    print 'Time to compute actions in Agama using pre-initialized focal distance: %s s' % (time.time()-dt)
+
+    ### use the interpolated Agama action finder (initialized at the beginning) - less accurate but faster
+    dt = time.time()
+    i_act = i_actfinder(c_orb_car)
+    print 'Time to compute actions in Agama with interpolated action finder: %s s' % (time.time()-dt)
 
     ### plot Jr vs Jz
     plt.axes([0.05, 0.05, 0.45, 0.45])
     plt.plot(g_act[0],g_act[2], label='galpy')
     plt.plot(c_act[:,0],c_act[:,1], label=r'Agama,$\Delta='+str(delta)+'$')
     plt.plot(a_act[:,0],a_act[:,1], label=r'Agama,$\Delta=$auto')
+    plt.plot(i_act[:,0],i_act[:,1], label=r'Agama,interpolated')
     plt.xlabel("$J_r$")
     plt.ylabel("$J_z$")
-    plt.legend()
+    plt.legend(loc='lower left')
 
     ### plot Jr(t) and Jz(t)
     plt.axes([0.55, 0.05, 0.45, 0.45])
@@ -135,11 +141,14 @@ def compare(ic, inttime, numsteps):
     plt.plot(times_c, c_act[:,1], c='g')
     plt.plot(times_c, a_act[:,0], label='Agama,$\Delta=$auto', c='r')
     plt.plot(times_c, a_act[:,1], c='r')
+    plt.plot(times_c, i_act[:,0], label='Agama,interpolated', c='c')
+    plt.plot(times_c, i_act[:,1], c='c')
     plt.text(0, c_act[0,0], '$J_r$', fontsize=16)
     plt.text(0, c_act[0,1], '$J_z$', fontsize=16)
     plt.xlabel("t")
     plt.ylabel("$J_r, J_z$")
     plt.legend(loc='center right')
+    plt.ylim(0.14,0.25)
     plt.xlim(0,50)
     plt.show()
 

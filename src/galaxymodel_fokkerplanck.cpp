@@ -204,6 +204,59 @@ potential::PtrPotential computePotential(
     return potential::PtrPotential(new potential::Multipole(rad, Phi, dPhi));
 }
 
+/// make sure that the interpolated function is well-behaved
+/// (i.e. has converging asymptotics and no negative values)
+template<int N>
+std::vector<double> regularizeAmplitudes(
+    const math::BsplineInterpolator1d<N>& interp, const std::vector<double>& amplitudes)
+{
+    std::vector<double> result(amplitudes);
+    unsigned int numAmpl = result.size();
+    // first eliminate negative values
+    for(unsigned int i=0; i<numAmpl; i++)
+        result[i] = fmax(0., result[i]);
+    // next check that the log-slopes at the inner/outermost points are physically valid
+    // (the inner asymptotic is shallower than h^-1 and the outer is correspondingly steeper).
+    // If that's not the case, modify the amplitudes of the first/last basis function.
+
+    // values and derivatives B_i, B'_i of basis functions at the leftmost node
+    // (actually for B-splines val[0] = 1, der[0] = -der[1], and the other terms should be zero)
+    double val[N+1], der[N+1];
+    double x = interp.xmin();
+    int ind  = // index of the leftmost basis function out of the N+1 computed ones (should be zero)
+    interp.nonzeroComponents(x, 0, val);
+    interp.nonzeroComponents(x, 1, der);
+    assert(ind == 0);
+    // the value f and derivative df/dx at x=xmin are given by
+    // f(xmin) = \sum_{k=0}^N f_k B_k(xmin), df/dx = \sum_{k=0}^M f_k B'_k,
+    // where f_k are the amplitudes of the basis functions.
+    // The log-slope w.r.t. unscaled variable h is df/dx dx/dh h/f, and it should be larger than...
+    const double SLOPEMIN = -0.99;
+    double C = DHDSCALEH(x) / UNSCALEH(x) * SLOPEMIN;
+    double L = C * val[0] - der[0], R = 0.;
+    for(int k=1; k<=N; k++)
+        R += result[k+ind] * (der[k] - C * val[k]);
+    // we need to satisfy the inequality  f_0 L <= R, where R is guaranteed to be nonnegative
+    if( result[0] * L > R )
+        result[0] = R / L;
+
+    // now the same exercise for the amplitude of the rightmost basis function
+    x = interp.xmax();
+    ind =
+    interp.nonzeroComponents(x, 0, val);
+    interp.nonzeroComponents(x, 1, der);
+    assert(ind+N+1 == numAmpl);
+    const double SLOPEMAX = -1.01;
+    C = DHDSCALEH(x) / UNSCALEH(x) * SLOPEMAX;
+    L = C * val[N] - der[N], R = 0.;
+    for(int k=0; k<N; k++)
+        R += result[k+ind] * (der[k] - C * val[k]);
+    if( result[numAmpl-1] * L < R )
+        result[numAmpl-1] = R / L;
+
+    return result;
+}
+
 } // internal namespace
 
 
@@ -346,8 +399,8 @@ public:
 
     virtual math::PtrFunction getInterpolatedFunction(const std::vector<double>& amplitudes) const
     {
-        return math::PtrFunction(new ScaledFunction(
-            math::PtrFunction(new math::BsplineWrapper<N>(fem.interp, amplitudes))));
+        return math::PtrFunction(new ScaledFunction(math::PtrFunction(
+            new math::BsplineWrapper<N>(fem.interp, regularizeAmplitudes(fem.interp, amplitudes)))));
     }
 
     virtual std::vector<double> getGridForCoefs() const { return auxGridCoords; }
@@ -387,14 +440,14 @@ public:
 template<> math::PtrFunction FokkerPlanckImplFEM<1>::getInterpolatedFunction(
     const std::vector<double>& amplitudes) const
 {
-    return math::PtrFunction(new ScaledFunction(
-        math::PtrFunction(new math::LinearInterpolator(fem.interp.xvalues(), amplitudes))));
+    return math::PtrFunction(new ScaledFunction(math::PtrFunction(new math::LinearInterpolator(
+        fem.interp.xvalues(), regularizeAmplitudes(fem.interp, amplitudes)))));
 }
 template<> math::PtrFunction FokkerPlanckImplFEM<3>::getInterpolatedFunction(
     const std::vector<double>& amplitudes) const
 {
-    return math::PtrFunction(new ScaledFunction(
-        math::PtrFunction(new math::CubicSpline(fem.interp.xvalues(), amplitudes))));
+    return math::PtrFunction(new ScaledFunction(math::PtrFunction(new math::CubicSpline(
+        fem.interp.xvalues(), regularizeAmplitudes(fem.interp, amplitudes)))));
 }
 
 
@@ -768,8 +821,6 @@ FokkerPlanckSolver::FokkerPlanckSolver(
         data->gridf[comp] = math::solveBand(impl->weightMatrix(), impl->projVector(*initDF[comp]));
         if(data->absorbingBoundaryCondition)
             data->gridf[comp][0] = 0.;   // if using an absorbing boundary at hmin, set f(hmin) to zero
-        for(unsigned int i=0; i<data->gridf[comp].size(); i++)
-            data->gridf[comp][i] = std::max(0., data->gridf[comp][i]);
     }
 
     // allocate and assign various auxiliary arrays
@@ -808,7 +859,7 @@ std::vector<double> FokkerPlanckSolver::gridh() const { return data->gridh; }
 math::PtrFunction   FokkerPlanckSolver::df(unsigned int indexComp) const
 {
     if(indexComp >= data->numComp)
-        throw std::runtime_error("FokkerPlanckSolver: component index out of range");
+        throw std::out_of_range("FokkerPlanckSolver: component index out of range");
     return impl->getInterpolatedFunction(data->gridf[indexComp]);
 }
 

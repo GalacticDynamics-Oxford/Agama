@@ -107,7 +107,7 @@ public:
         the total potential, or NULL if not applicable.
     */
     virtual potential::PtrPotential getPotential() const = 0;
-    
+
     /** in case the component has an associated density profile, it may be used
         in construction of either multipole (spherical-harmonic) potential expansion,
         or a 'CylSpline' expansion of potential in the meridional plane;
@@ -163,7 +163,7 @@ public:
         double _relError, unsigned int _maxNumEval) :
     BaseComponent(_isDensityDisklike), distrFunc(df), density(initDensity),
     relError(_relError), maxNumEval(_maxNumEval) {}
-    
+
     /** return the pointer to the internal density profile */
     virtual potential::PtrDensity   getDensity()   const { return density; }
 
@@ -173,14 +173,14 @@ public:
 protected:
     /// shared pointer to the action-based distribution function (remains unchanged)
     const df::PtrDistributionFunction distrFunc;
-    
+
     /// spherical-harmonic expansion of density profile of this component
     potential::PtrDensity density;
 
     /// Parameters controlling the accuracy of density computation:
     /// required relative error in density
     const double relError;
-    
+
     /// maximum number of DF evaluations during density computation at a single point
     const unsigned int maxNumEval;
 };
@@ -213,7 +213,7 @@ public:
         density expansion from these values.
     */
     virtual void update(const potential::BasePotential& pot, const actions::BaseActionFinder& af);
-    
+
 private:
     /// definition of grid for computing the density profile:
     const double rmin, rmax;             ///< range of radii for the logarithmic grid
@@ -290,7 +290,7 @@ public:
     double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
     unsigned int sizeRadialSph;   ///< number of grid points in radius
     unsigned int lmaxAngularSph;  ///< maximum order of angular-harmonic expansion (l_max)
-    
+
     /** parameters of grid for computing CylSpline expansion of the combined
         density profile of flattened (disk-like) components;
         the radial and vertical extent should be somewhat larger than the region where
@@ -319,5 +319,5 @@ void updateTotalPotential(SelfConsistentModel& model);
     by a call to the same `updateTotalPotential` before recomputing the densities.
 */
 void doIteration(SelfConsistentModel& model);
-    
+
 }  // namespace

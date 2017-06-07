@@ -55,6 +55,14 @@ LINK = $(CXX)
 # DEFINES  are only relevant  for the compilation of the AGAMA library, and determine the available features;
 # INCLUDES are also used only for the compilation of the AGAMA library, should match the DEFINES;
 # LIBS     list the external libraries for the compilation of the AGAMA shared library only.
+# A note about optimization-specific flags: -march=native is not supported on some machines,
+# and may be replaced by -march=core2 or whatever your processor name is.
+# Intel compiler tends to perform very aggressive floating-point optimizations, which may lead to
+# irreproducible run-to-run results because of subtle interplay between loop vectorization, OpenMP
+# parallelization, and memory alignment; to prevent this, add the flag "-qno-opt-dynamic-align" to CXXFLAGS.
+# Also do not use -O3 with Intel compiler and the Eigen library - it thwarts some of linear algebra routines.
+# These problems may be avoided altogether by using -fp-model:precise switch, but it prevents many more
+# useful optimizations.
 CXXFLAGS += -fPIC -fopenmp -Wall -O3 -march=native -I$(SRCDIR)
 LFLAGS   += -fPIC -fopenmp
 
@@ -66,12 +74,16 @@ INCLUDES += -I/path/to/gsl
 LIBS     += -L/path/to/gsl -lgsl -lgslcblas
 
 # uncomment and check the dirnames to build the Python plugin
+# (for Mac OS users with Anaconda python distribution: may need to put explicitly full path and filename
+# of the python dylib, otherwise it will link to the system-default python and you will get
+# "Fatal Python error: PyThreadState_Get: no current thread"  when importing the agama module)
 DEFINES  += -DHAVE_PYTHON
 INCLUDES += -I/usr/include/python -I/path/to/numpy/core/include
 LIBS     += -lpython
 
-# uncomment the three lines below and adjust the paths  to use Cuba library for multidimensional integration
-# (otherwise use Cubature library bundled with the code)
+# uncomment the three lines below and adjust the paths to use Cuba library for multidimensional integration
+# (otherwise use Cubature library bundled with the code).
+# Note that Cuba is apparently less accurate at least for CylSpline integrands, so is not recommended.
 #DEFINES  += -DHAVE_CUBA
 #INCLUDES += -I/path/to/cuba
 #LIBS     += -L/path/to/cuba -lcuba

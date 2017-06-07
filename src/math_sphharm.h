@@ -203,8 +203,15 @@ public:
         if useSine=true, 0 <= phi_i < 2 pi, otherwise 0 <= phi_i < pi */
     inline double phi(unsigned int i) const { return i*M_PI/(mmax+0.5); }
 
-    /** perform the transform on the collected function values and output coefs */
-    void transform(const double values[] /*in*/, double coefs[] /*out*/) const;
+    /** perform the transform on the collected function values.
+        \param[in]  values is the array of function values at a regular grid in phi,
+        arranged so that  values[i*stride] = f(phi(i)), 0 <= i < size()
+        \param[out] coefs must point to an existing array of length `size()`,
+        which will be filled with Fourier coefficients as described above
+        \param[in]  stride (optional) is the spacing between consecutive elements
+        in the input array (no stride in the output)
+    */
+    void transform(const double values[] /*in*/, double coefs[] /*out*/, int stride=1) const;
 private:
     const int mmax;               ///< order of expansion
     const bool useSine;           ///< whether to use sine terms (if no then only cosines)
@@ -250,12 +257,13 @@ public:
 
     /** perform the transformation of input array (values) into the array of coefficients.
         \param[in]  values is the array of function values at a rectangular grid in (theta,phi),
-        arranged so that  values[i] = f(theta(i), phi(i)), 0 <= i < size().
+        arranged so that  values[i*stride] = f(theta(i), phi(i)), 0 <= i < size()
         \param[out] coefs must point to an existing array of length `ind.size()`,
         which will be filled with spherical-harmonic expansion coefficients as follows:
-        coefs[ind.index(l,m)] = C_lm, 0 <= l <= lmax, -l <= m <= l.
+        coefs[ind.index(l,m)] = C_lm, 0 <= l <= lmax, -l <= m <= l
+        \param[in]  stride (optional) is the spacing between consecutive elements in the input array
     */
-    void transform(const double values[] /*in*/, double coefs[] /*out*/) const;
+    void transform(const double values[] /*in*/, double coefs[] /*out*/, int stride=1) const;
 
 private:
     /// coefficient indexing scheme (including lmax and mmax)

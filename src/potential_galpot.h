@@ -1,7 +1,7 @@
 /** \file    potential_galpot.h
     \brief   Walter Dehnen's GalaxyPotential code
-    \author  Walter Dehnen, Paul McMillan, Eugene Vasiliev
-    \date    1996-2015
+    \author  Eugene Vasiliev, Walter Dehnen, Paul McMillan
+    \date    1996-2017
 
 Copyright Walter Dehnen, 1996-2005 
 e-mail:   walter.dehnen@astro.le.ac.uk 
@@ -11,7 +11,7 @@ address:  Department of Physics and Astronomy, University of Leicester
 Put into the Torus code (with a minimum of fuss) by Paul McMillan, Oxford 2010
 email: p.mcmillan1@physics.ox.ac.uk
 
-Modifications by Eugene Vasiliev, 2015-2016
+Modifications by Eugene Vasiliev, 2015-2017 (a complete redesign of the approach)
 
 
 The method, explained in Dehnen & Binney (1998, MNRAS, 294, 429) and based 

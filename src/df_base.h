@@ -1,7 +1,7 @@
 /** \file    df_base.h
     \brief   Base class for action-based distribution functions
     \date    201?-2015
-    \authors Payel Das, Eugene Vasiliev
+    \authors Eugene Vasiliev, Payel Das
 */
 #pragma once
 #include "actions_base.h"
@@ -32,39 +32,16 @@ public:
     virtual double totalMass(const double reqRelError=1e-5, const int maxNumEval=1e6,
         double* error=NULL, int* numEval=NULL) const;
 
-    /** Value of distribution function for the given set of actions
-        \param[in] J - actions
-    */
+    /** Value of distribution function for the given set of actions J */
     virtual double value(const actions::Actions &J) const=0;
+
+    /** Number of components in the case of a multi-component DF */
+    virtual unsigned int numValues() const { return 1; }
+
+    /** Compute values of all components for the given actions */
+    virtual void eval(const actions::Actions &J, double values[]) const { *values = value(J); }
 };
 
-/** Base class for multi-component distribution functions */
-class BaseMulticomponentDF: public BaseDistributionFunction{
-public:
-    /// the number of components
-    virtual unsigned int size() const = 0;
-
-    /// value of the given DF component at the given actions
-    virtual double valueOfComponent(const actions::Actions &J, unsigned int index) const = 0;
-
-    /** values of all components at the given actions:
-        \param[in]  J are the actions;
-        \param[out] values will contain the values of all components,
-        must point to an existing array of sufficient length.
-    */
-    virtual void valuesOfAllComponents(const actions::Actions &J, double values[]) const {
-        for(unsigned int i=0; i<size(); i++)
-            values[i] = valueOfComponent(J, i);
-    }
-
-    /// total value of multi-component DF is the sum of all components
-    virtual double value(const actions::Actions &J) const {
-        double sum=0;
-        for(unsigned int i=0; i<size(); i++)
-            sum += valueOfComponent(J, i);
-        return sum;
-    }
-};
 
 /** Helper class for scaling transformations in the action space,
     mapping the entire possible range of actions into a unit cube */

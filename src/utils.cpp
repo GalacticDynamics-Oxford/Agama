@@ -98,7 +98,7 @@ inline char verbosityText(VerbosityLevel level)
 /// file to store the messages sent to msg() routine;
 /// if not open, they are printed to stderr
 static std::ofstream logfile;
-    
+
 /// read the environment variables controlling the verbosity level and log file redirection
 VerbosityLevel initVerbosityLevel()
 {
@@ -261,11 +261,11 @@ std::string pp(double num, unsigned int uwidth)
     int width = std::min<int>(uwidth, MAXWIDTH);
     if(width<1)
         return result;
-    unsigned int sign = std::signbit(num);
+    bool sign = std::signbit(num);
     if(num==0) {
-        result = width>1 && sign ? "-0" : "0";
-        if(width>1+sign) result+='.';
         result.resize(width, '0');
+        if(width>1 && sign) result[0] = '-';
+        if(width>1+sign) result[1+sign] = '.';
         return result;
     }
     if(num!=num || num==INFINITY || num==-INFINITY) {
@@ -330,7 +330,7 @@ std::string pp(double num, unsigned int uwidth)
         result += buf;
         return result;
     }
-    
+
     // try to print the number in exponential format
     if(width >= len_exp+1) {
         // strip out exponent, so that the number is within [1:10)
@@ -355,7 +355,7 @@ std::string pp(double num, unsigned int uwidth)
             return result;
         }
     }
-    
+
     // can't use any of these - display a jail symbol
     result.resize(sign+width, '#');
     return result;

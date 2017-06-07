@@ -698,12 +698,15 @@ inline std::vector<double> createGrid(int size)
 }
 
 /** compute the best-suitable focal distance at a 2d grid in E, L/Lcirc(E) */
-math::Matrix<double> createGridFocalDistance(
+void createGridFocalDistance(
     const potential::BasePotential& pot,
-    const std::vector<double>& gridE, const std::vector<double>& gridL)
+    const std::vector<double>& gridE, const std::vector<double>& gridL,
+    /*output: focal distance*/ math::Matrix<double>& grid2dD,
+    /*output: radius of shell orbit normalized to R_circ(E) */ math::Matrix<double>& grid2dR)
 {
     int sizeE = gridE.size(), sizeL = gridL.size(), sizeEL = (sizeE-1) * (sizeL-2);
-    math::Matrix<double> grid2dD(sizeE, sizeL);
+    grid2dD = math::Matrix<double>(sizeE, sizeL);
+    grid2dR = math::Matrix<double>(sizeE, sizeL);
     std::string errorMessage;  // store the error text in case of an exception in the openmp block
     // loop over the grid in E and L (combined index for better load balancing)
 #ifdef _OPENMP
@@ -711,43 +714,17 @@ math::Matrix<double> createGridFocalDistance(
 #endif
     for(int iEL = 0; iEL < sizeEL; iEL++) {
         try{
-        int iE    = iEL / (sizeL-2);
-        int iL    = iEL % (sizeL-2)+1;
-        double E  = gridE[iE];
-        double Lc = L_circ(pot, E);
-        double Lz = gridL[iL] * Lc;
-#if 1
-        // estimate the focal distance from fitting a line lambda=const to a shell orbit (with Jr=0)
-        double fd = estimateFocalDistanceShellOrbit(pot, E, Lz);
-        //if(fd > 0 && fd < Rthin * 1e-2)
-        //    fd = 0;   // probably dominated by inaccuracies
-#else
-        // estimate the focal distance from the mixed derivatives of potential
-        // averaged over the region accessible to the ensemble of orbits with the given E and Lz
-        double R1, R2;
-        potential::findPlanarOrbitExtent(pot, E, Lz, R1, R2);
-        const int NP=32;
-        std::vector<double> x, y, P;
-        for(int iR=0; iR<NP; iR++) {
-            double R = (iR + 0.5) / NP * (R2-R1) + R1;
-            for(int iz=0; iz<NP; iz++) {
-                double z = pow_2((iz + 0.5) / NP) * R2;
-                double Phi;
-                coord::GradCyl grad;
-                coord::HessCyl hess;
-                pot.eval(coord::PosCyl(R, z, 0), &Phi, &grad, &hess);
-                if(Phi + 0.5*pow_2(Lz/R) < E) {
-                    P.push_back(Phi);
-                    x.push_back(hess.dRdz);
-                    y.push_back(3*z * grad.dR - 3*R * grad.dz +
-                        R*z * (hess.dR2-hess.dz2) + (z*z - R*R) * hess.dRdz);
-                } else
-                    break;
-            }
-        }
-        double fd = sqrt( fmax( math::linearFitZero(x, y, NULL), 0) );
-#endif
-        grid2dD(iE, iL) = fd;
+            int iE    = iEL / (sizeL-2);
+            int iL    = iEL % (sizeL-2)+1;
+            double E  = gridE[iE];
+            double Rc = R_circ(pot, E);
+            double vc = v_circ(pot, Rc);
+            double Lc = Rc * vc;
+            double Lz = gridL[iL] * Lc;
+            // estimate the focal distance from fitting a line lambda=const to a shell orbit (with Jr=0)
+            double Rshell, FD = estimateFocalDistanceShellOrbit(pot, E, Lz, &Rshell);
+            grid2dD(iE, iL) = FD;
+            grid2dR(iE, iL) = Rshell / Rc;
         }
         catch(std::exception& ex) {
             errorMessage = ex.what();
@@ -757,52 +734,16 @@ math::Matrix<double> createGridFocalDistance(
     for(int iE=0; iE<sizeE-1; iE++) {
         grid2dD(iE, 0)       = grid2dD(iE, 1);
         grid2dD(iE, sizeL-1) = grid2dD(iE, sizeL-2);
+        grid2dR(iE, 0)       = grid2dR(iE, 1);
+        grid2dR(iE, sizeL-1) = 1.;  // Rshell = Rcirc for the planar circular orbit
     }
     // limiting case of E=0 - copy from the penultimate row
-    for(int iL=0; iL<sizeL; iL++)
+    for(int iL=0; iL<sizeL; iL++) {
         grid2dD(sizeE-1, iL) = grid2dD(sizeE-2, iL);
+        grid2dR(sizeE-1, iL) = 1.;  // Rshell = Rcirc for a Keplerian potential at large radii
+    }
     if(!errorMessage.empty())
         throw std::runtime_error(errorMessage);
-    return grid2dD;
-}
-
-// helper class to find the minimum of -I3
-class MaxI3finder: public math::IFunctionNoDeriv {
-    const potential::BasePotential& pot;
-    double E, Lz2, d2;
-public:
-    MaxI3finder(const potential::BasePotential& _pot, double _E, double _Lz, double _ifd) :
-        pot(_pot), E(_E), Lz2(_Lz*_Lz), d2(_ifd*_ifd) {}
-    virtual double value(const double R) const
-    {
-        double Phi = pot.value(coord::PosCyl(R, 0, 0));
-        return (R*R + d2) * (Phi - E + 0.5 * (R>0 ? Lz2 / pow_2(R) : 0));
-    }
-};
-
-// find the radius of a shell orbit, i.e. the one that maximizes I3:
-// I3 = (R^2 + Delta^2) (E - Phi(R) - Lz^2/(2R^2) ), where Delta is the focal distance (fd).
-// we do not use the shell orbits obtained during the construction of an interpolator for Delta(E,Lz),
-// because they are valid for the _real_ potential, but the _approximate_ radial action needs not
-// be zero when evaluated for such an orbit. Instead we explicitly locate the point on the R axis
-// that corresponds to the minimum of effective potential for the given value of Delta.
-double findRshell(const potential::BasePotential& pot, double E, double Lz, double fd)
-{
-    MaxI3finder fnc(pot, E, Lz, fd);
-    // unfortunately, the function to minimize may have more than one local minimum,
-    // therefore we first do a brute-force grid search to locate the global minimum, and then polish it
-    double R1, R2, Rshell=NAN;
-    potential::findPlanarOrbitExtent(pot, E, Lz, R1, R2);
-    double minval = INFINITY;
-    for(int k=1; k<100; k++) {
-        double R = pow_2(k/100.)*(3-2*k/100.) * (R2-R1) + R1;  // search between R1 and R2
-        double I = fnc(R);
-        if(I<minval) {
-            Rshell = R;
-            minval = I;
-        }
-    }
-    return math::findMin(fnc, R1, R2, Rshell, ACCURACY_RANGE);
 }
 
 }  // internal namespace
@@ -827,13 +768,30 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
     std::vector<double> gridI = createGrid(sizeI);        // grid in I3/I3max(E,L)
 
     // initialize the interpolator for the focal distance as a function of E and Lz/Lcirc
-    math::Matrix<double> grid2dD = createGridFocalDistance(*pot, gridE, gridL);
+    math::Matrix<double> grid2dD;  // focal distance
+    math::Matrix<double> grid2dR;  // Rshell / Rcirc(E)
+    createGridFocalDistance(*pot, gridE, gridL, /*output*/ grid2dD, grid2dR);
     interpD = math::LinearInterpolator2d(gridE, gridL, grid2dD);
-    if(!interpolate)
+
+    if(!interpolate) {
+        // nothing more to do, except perhaps writing the debug information
+        if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+            std::ofstream strm("ActionFinderAxisymFudge.log");
+            strm << "#Energy L/Lcirc\tFocalD\tRthn/Rc\n";
+            for(int iE=0; iE<sizeE; iE++) {
+                for(int iL=0; iL<sizeL; iL++)
+                    strm <<
+                    utils::pp(gridE[iE], 8) + ' ' +
+                    utils::pp(gridL[iL], 6) + '\t'+
+                    utils::pp(grid2dD(iE, iL), 7) + '\t'+
+                    utils::pp(grid2dR(iE, iL), 7) + '\n';
+                strm << '\n';
+            }
+        }
         return;
+    }
 
     // we're constructing an interpolation grid for Jr and Jz in (E,L,I3)
-    math::Matrix<double> grid2dR(sizeE, sizeL);           // Rshell(E, Lz/Lc)
     math::Matrix<double> grid2dI(sizeE, sizeL);           // I3max(E, Lz/Lc)
     std::vector<double> grid3dJr(sizeE * sizeL * sizeI);  // Jr(E, Lz/Lc, I3/I3max)
     std::vector<double> grid3dJz(sizeE * sizeL * sizeI);  // same for Jz
@@ -845,57 +803,51 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
 #endif
     for(int iEL=0; iEL<sizeEL; iEL++) {
         try{
-        int iE      = iEL / (sizeL-1);
-        int iL      = iEL % (sizeL-1);
-        double E    = gridE[iE];
-        double Rc   = R_circ(*pot, E);
-        double vc   = v_circ(*pot, Rc);
-        double Lc   = Rc * vc;
-        double Lz   = gridL[iL] * Lc;
-        // focal distance: presently can't work when fd=0 exactly
-        double fd   = fmax(grid2dD(iE, iL), Rc * 1e-4);
-        double Rsh  = findRshell(*pot, E, Lz, fd);  // radius of an orbit with Jr=0, i.e. I3=I3max
-        if(!isFinite(Rsh))
-            throw std::runtime_error("cannot find a shell orbit for "
-                "E="+utils::toString(E)+", Lz="+utils::toString(Lz));
-        if(Rsh == 0 && utils::verbosityLevel >= utils::VL_WARNING)  // this may be a legitimate situation?
-            utils::msg(utils::VL_WARNING, "ActionFinderAxisymFudge", "Rthin=0 for E="+utils::toString(E));
-        grid2dR(iE, iL) = Rsh / Rc;
+            int iE      = iEL / (sizeL-1);
+            int iL      = iEL % (sizeL-1);
+            double E    = gridE[iE];
+            double Rc   = R_circ(*pot, E);
+            double vc   = v_circ(*pot, Rc);
+            double Lc   = Rc * vc;
+            double Lz   = gridL[iL] * Lc;
+            // focal distance: presently can't work when fd=0 exactly
+            double fd   = fmax(grid2dD(iE, iL), Rc * 1e-4);
+            double Rsh  = grid2dR(iE, iL) * Rc;
+            double Phi0 = pot->value(coord::PosCyl(Rsh,0,0));
+            double vphi = Lz>0 ? Lz / Rsh : 0;
+            double vmer = sqrt(fmax( 2 * (E - Phi0) - pow_2(vphi), 0));
+            double lambda  = pow_2(Rsh) + pow_2(fd);
+            double flambda = -lambda * Phi0;
+            double I3max   = 0.5 * lambda * pow_2(vmer);
+            double I3norm  = (0.5 * vc*vc * (1-pow_2(gridL[iL])) * (Rc*Rc + fd*fd));
+            grid2dI(iE,iL) = I3max / I3norm;
+            const coord::ProlSph coordsys(fd);
 
-        double Phi0 = pot->value(coord::PosCyl(Rsh,0,0));
-        double vphi = Lz>0 ? Lz / Rsh : 0;
-        double vmer = sqrt(fmax( 2 * (E - Phi0) - pow_2(vphi), 0));
-        double lambda  = pow_2(Rsh) + pow_2(fd);
-        double flambda = -lambda * Phi0;
-        double I3max   = 0.5 * lambda * pow_2(vmer);
-        double I3norm  = (0.5 * vc*vc * (1-pow_2(gridL[iL])) * (Rc*Rc + fd*fd));
-        grid2dI(iE,iL) = I3max / I3norm;
-        const coord::ProlSph coordsys(fd);
+            // explore the range of I3
+            for(int iI=0; iI<sizeI; iI++) {
+                int index = (iE * sizeL + iL) * sizeI + iI;
+                const double I3 = I3max * gridI[iI];
 
-        for(int iI=0; iI<sizeI; iI++) {
-            int index = (iE * sizeL + iL) * sizeI + iI;
-            const double I3 = I3max * gridI[iI];
+                const coord::PosProlSph pprol(lambda, 0, 0, coordsys);
+                const AxisymFunctionFudge fnc(coord::PosVelProlSph(pprol, 0, 0, 0),
+                    E, Lz, I3, flambda, 0, *pot);
+                AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
+                if(iI==0)        // no vertical oscillation for a planar orbit
+                    lim.nu_max = lim.nu_min = 0;
+                if(iI==sizeI-1)  // no radial oscillation for a shell orbit
+                    lim.lambda_min = lim.lambda_max = fnc.point.lambda;
+                actions::Actions acts = computeActions(fnc, lim);
 
-            const coord::PosProlSph pprol(lambda, 0, 0, coordsys);
-            const AxisymFunctionFudge fnc(coord::PosVelProlSph(pprol, 0, 0, 0),
-                E, Lz, I3, flambda, 0, *pot);
-            AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-            if(iI==0)        // no vertical oscillation for a planar orbit
-                lim.nu_max = lim.nu_min = 0;
-            if(iI==sizeI-1)  // no radial oscillation for a shell orbit
-                lim.lambda_min = lim.lambda_max = fnc.point.lambda;
-            actions::Actions acts = computeActions(fnc, lim);
+                // sanity check
+                if(!isFinite(acts.Jr+acts.Jz))
+                    throw std::runtime_error("cannot compute actions for "
+                        "R="+utils::toString(Rsh)+", z=0, vR="+utils::toString(vmer * sqrt(1-gridI[iI]))+
+                        ", vz="+utils::toString(vmer * sqrt(gridI[iI]))+", vphi="+utils::toString(vphi));
 
-            // sanity check
-            if(!isFinite(acts.Jr+acts.Jz))
-                throw std::runtime_error("cannot compute actions for "
-                    "R="+utils::toString(Rsh)+", z=0, vR="+utils::toString(vmer * sqrt(1-gridI[iI]))+
-                    ", vz="+utils::toString(vmer * sqrt(gridI[iI]))+", vphi="+utils::toString(vphi));
-
-            // scaled values passed to the interpolator
-            grid3dJr[index] = acts.Jr / (Lc-Lz);
-            grid3dJz[index] = acts.Jz / (Lc-Lz);
-        }
+                // scaled values passed to the interpolator
+                grid3dJr[index] = acts.Jr / (Lc-Lz);
+                grid3dJz[index] = acts.Jz / (Lc-Lz);
+            }
         }
         catch(std::exception& ex) {
             errorMessage = ex.what();
@@ -949,7 +901,7 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
     // debugging output
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("ActionFinderAxisymFudge.log");
-        strm << "#E L/Lcirc I3rel\tIFD\tRthin/Rcirc\tJrrel\tJzrel\n";
+        strm << "#Energy L/Lcirc I3rel\tFocalD\tRthn/Rc\tI3max\tJrrel\tJzrel\n";
         for(int iE=0; iE<sizeE; iE++) {
             for(int iL=0; iL<sizeL; iL++) {
                 for(int iI=0; iI<sizeI; iI++) {

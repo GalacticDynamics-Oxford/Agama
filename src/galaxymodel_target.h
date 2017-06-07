@@ -17,7 +17,9 @@ namespace galaxymodel{
 /// numerical type for storing the matrix elements (choose float to save memory)
 typedef float StorageNumT;
 
-   /** A Target object represents any possible constraint in the model.
+class GalaxyModel;  // forward declaration
+
+/** A Target object represents any possible constraint in the model.
     These could come from the self-consistency requirements for the density/potential pair,
     or from various kinematic requirements, velocity profiles, etc.
     A target consists of an array of required values for the constraints,
@@ -47,9 +49,19 @@ public:
     /// array of penalties for constraint violation (size: numConstraints)
     virtual std::vector<double> penalties() const = 0;
 
+    /// construct a runtime function that collects the target-specific data during orbit integration
+    /// \param[out] output is a pointer to the storage that will be filled by the runtime function;
+    /// should point to an existing chunk of memory with size equal to numConstraints()
+    /// \return  a new instance of a target-specific runtime function
     virtual orbit::PtrRuntimeFnc getOrbitRuntimeFnc(StorageNumT* output) const = 0;
 
-//    virtual void computeDFProjection(const math::IFunctionNdim& df, StorageNumT* output) const {};
+    /// compute target-specific data (projection of a DF)
+    /// \param[in] model  is the interface for computing the value(s) of a distribution function,
+    /// possibly a multi-component DF
+    /// \param[out] output is a pointer to the array where the DF projection will be stored:
+    /// each DF component produces a contiguous array of numConstraints() output values;
+    /// should be an existing chunk of memory with size numConstraints() * df.numValues()
+    virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const = 0;
 };
 
 typedef shared_ptr<const BaseTarget> PtrTarget;
@@ -120,6 +132,7 @@ class TargetDensity: public BaseTarget {
     std::vector<double> constraintValues;
     std::vector<double> constraintPenalties;
     std::vector<double> gridR, gridz;
+    unsigned int lmax, mmax;
 public:
     TargetDensity(const potential::BaseDensity& density, const DensityGridParams& params);
 
@@ -134,6 +147,8 @@ public:
     virtual std::vector<double> penalties() const { return constraintPenalties; }
 
     virtual orbit::PtrRuntimeFnc getOrbitRuntimeFnc(StorageNumT* output) const;
+
+    virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
 };
 
 ///@}
@@ -163,6 +178,8 @@ public:
     virtual std::vector<double> penalties() const { return constraintPenalties; }
 
     virtual orbit::PtrRuntimeFnc getOrbitRuntimeFnc(StorageNumT* output) const;
+
+    virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
 };
 
 ///@}

@@ -33,22 +33,6 @@ public:
 };
 
 
-/** Data-only structure defining a galaxy model with a multicomponent distribution function */
-struct GalaxyModelMulticomponent{
-public:
-    const potential::BasePotential&  potential;  ///< gravitational potential
-    const actions::BaseActionFinder& actFinder;  ///< action finder for the given potential
-    const df::BaseMulticomponentDF&  distrFunc;  ///< distribution function expressed in terms of actions
-
-    /** Create an instance of the galaxy model from the three ingredients */
-    GalaxyModelMulticomponent(
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseMulticomponentDF& df) :
-    potential(pot), actFinder(af), distrFunc(df) {}
-};
-
-
 /** Compute density, first-order, and second-order moments of velocity in cylindrical coordinates;
     if some of them are not needed, pass NULL as the corresponding argument, and it will not be computed.
     \tparam     GalaxyModelType  is either GalaxyModel or GalaxyModelMulticomponent,
@@ -65,8 +49,7 @@ public:
     \param[in]  reqRelError is the required relative error in the integral;
     \param[in]  maxNumEval  is the maximum number of evaluations in integral;
 */
-template<typename GalaxyModelType>
-void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
+void computeMoments(const GalaxyModel& model, const coord::PosCyl& point,
     double* density,
     coord::VelCyl* velocityFirstMoment,
     coord::Vel2Cyl* velocitySecondMoment,

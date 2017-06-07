@@ -265,29 +265,6 @@ protected:
 };
 
 
-/** helper routine returning the number of components in the DF,
-    or 1 in the case of generic (non-multicomponent) DF */
-template<typename GalaxyModelType>
-unsigned int DFsize(const GalaxyModelType& model);
-
-template<> unsigned int DFsize(const GalaxyModel& ) { return 1; }
-template<> unsigned int DFsize(const GalaxyModelMulticomponent& model) { return model.distrFunc.size(); }
-
-/** helper routine computing the value or values of DF */
-template<typename GalaxyModelType>
-void DFvalue(const GalaxyModelType& model, const actions::Actions& acts, double val[]);
-
-template<> void DFvalue(const GalaxyModel& model,
-    const actions::Actions& acts, double val[])
-{
-    *val = model.distrFunc.value(acts);
-}
-template<> void DFvalue(const GalaxyModelMulticomponent& model,
-    const actions::Actions& acts, double val[])
-{
-    model.distrFunc.valuesOfAllComponents(acts, val);
-}
-
 /** specification of the velocity moments of DF to be computed at a single point in space
     (a combination of them is given by bitwise OR) */
 enum OperationMode {
@@ -296,11 +273,10 @@ enum OperationMode {
 };
 
 /** helper class for integrating the distribution function over velocity at a fixed position */
-template<typename GalaxyModelType>
 class DFIntegrandAtPoint: public math::IFunctionNdim {
 public:
-    DFIntegrandAtPoint(const GalaxyModelType& _model, const coord::PosCyl& _point, OperationMode _mode) :
-        model(_model), numCompDF(DFsize(model)),
+    DFIntegrandAtPoint(const GalaxyModel& _model, const coord::PosCyl& _point, OperationMode _mode) :
+        model(_model), numCompDF(model.distrFunc.numValues()),
         point(_point), v_esc(escapeVel(point, model.potential)), mode(_mode),
         numOutVal(1 + (mode&OP_VEL1MOM ? 3 : 0) + (mode&OP_VEL2MOM ? 6 : 0)) {}
 
@@ -320,7 +296,7 @@ public:
         actions::Actions acts = model.actFinder.actions(posvel);
 
         // 3. compute the value(s) of distribution function
-        DFvalue(model, acts, values);
+        model.distrFunc.eval(acts, values);
 
         // 4. output the value(s) of DF, multiplied by various combinations of velocity components:
         // {f, f*vR, f*vz, f*vphi, f*vR^2, f*vz^2, f*vphi^2, f*vR*vz, f*vR*vphi, f*vz*vphi },
@@ -352,7 +328,7 @@ public:
     virtual unsigned int numValues() const { return numCompDF * numOutVal; }
 
 private:
-    const GalaxyModelType& model; ///< reference to the galaxy model to work with
+    const GalaxyModel& model;     ///< reference to the galaxy model to work with
     const unsigned int numCompDF; ///< number of DF components (if model is multicomponent), or 1
     const coord::PosCyl point;    ///< fixed position
     const double v_esc;           ///< escape velocity at this position
@@ -486,8 +462,7 @@ std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bsp
 
 //------- DRIVER ROUTINES -------//
 
-template<typename GalaxyModelType>
-void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
+void computeMoments(const GalaxyModel& model, const coord::PosCyl& point,
     double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
     double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr,
     const double reqRelError, const int maxNumEval)
@@ -495,7 +470,7 @@ void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
     OperationMode mode = static_cast<OperationMode>(
         (velocityFirstMoment !=NULL ? OP_VEL1MOM : 0) |
         (velocitySecondMoment!=NULL ? OP_VEL2MOM : 0) );
-    DFIntegrandAtPoint<GalaxyModelType> fnc(model, point, mode);
+    DFIntegrandAtPoint fnc(model, point, mode);
     // the integration region in scaled velocities
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {1, 1, 1};
@@ -505,7 +480,7 @@ void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
     math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, &result[0], &error[0]);
 
     // store the results
-    unsigned int numCompDF = DFsize(model);
+    unsigned int numCompDF = model.distrFunc.numValues();
     for(unsigned int ic=0; ic<numCompDF; ic++) {
         if(density!=NULL) {
             density[ic] = result[ic];
@@ -563,14 +538,6 @@ void computeMoments(const GalaxyModelType& model, const coord::PosCyl& point,
         }
     }
 }
-
-// template instantiations that must be compiled
-template void computeMoments(const GalaxyModel&, const coord::PosCyl&,
-    double*, coord::VelCyl*, coord::Vel2Cyl*, double*, coord::VelCyl*, coord::Vel2Cyl*,
-    const double, const int);
-template void computeMoments(const GalaxyModelMulticomponent&, const coord::PosCyl&,
-    double*, coord::VelCyl*, coord::Vel2Cyl*, double*, coord::VelCyl*, coord::Vel2Cyl*,
-    const double, const int);
 
 
 template <int N>

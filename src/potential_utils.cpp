@@ -227,7 +227,7 @@ public:
     }
     virtual unsigned int numDerivs() const { return 2; }
 };
-    
+
 }  // internal namespace
 
 
@@ -322,26 +322,17 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
     double Phi0, coef, slope;
     slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
     // accurate treatment close to the origin assuming a power-law asymptotic behavior of potential
-    bool asympt   = (slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*1e-8);
+    bool asympt   = (slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*SQRT_DBL_EPSILON);
     double Rcirc  = !asympt ?  R_circ(potential, E) :
         slope==0 ?  exp((E-Phi0) / coef - 0.5)  :  std::pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
-    double Lcirc2 = !asympt ?  2 * (E - potential.value(coord::PosCyl(Rcirc,0,0))) * pow_2(Rcirc) :
+    coord::GradCyl grad;
+    potential.eval(coord::PosCyl(Rcirc,0,0), NULL, &grad);
+    double Lcirc2 = !asympt ?  pow_3(Rcirc) * grad.dR :
         slope==0 ?  coef * pow_2(Rcirc)  :  (E-Phi0) / (1/slope+0.5) * pow_2(Rcirc);
     if(!isFinite(Lcirc2))
         throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
-            utils::toString(E)+")\n" +
-            utils::stacktrace());
+            utils::toString(E,16) + ")\n" + utils::stacktrace());
     double Lrel2  = L*L / Lcirc2;
-    if(Lrel2>=1) {
-        if(Lrel2<1+1e-8) {  // assuming a roundoff error and not an intentional foul
-            R1 = R2 = Rcirc;
-            return;
-        } else
-            throw std::invalid_argument("Error in findPlanarOrbitExtent: E="+
-                utils::toString(E,16)+" and L="+utils::toString(L,16)+
-                " have incompatible values (Lcirc="+utils::toString(sqrt(Lcirc2),16)+")\n" +
-                utils::stacktrace());
-    }
     if(asympt) {
         RPeriApoRootFinderPowerLaw fnc(slope, Lrel2);
         R1 = Rcirc * math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
@@ -354,6 +345,15 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         // but in case of trouble, repeat with a safely larger value 
         if(!isFinite(R2))
             R2 = math::findRoot(fnc, Rcirc, (1+1e-8)*R_max(potential, E), ACCURACY_ROOT);
+    }
+    if(!isFinite(R1+R2)) {
+        // this may arise when the orbit is very nearly circular due to roundoff errors,
+        // or due to intentional foul.
+        // Assuming the former reason, do not crash but pretend to be on a circular orbit exactly.
+        R1 = R2 = Rcirc;
+        utils::msg(utils::VL_WARNING, FUNCNAME,
+            "E=" + utils::toString(E,16) + " and L=" + utils::toString(L,16) +
+            " have incompatible values (Lcirc=" + utils::toString(sqrt(Lcirc2),16) + ")");
     }
 }
 
@@ -403,11 +403,11 @@ Interpolator::Interpolator(const BasePotential& potential)
         coord::HessCyl hess;
         potential.eval(coord::PosCyl(R, 0, 0), &Phival, &grad, &hess);
         // epicyclic frequencies
-        double kappa = sqrt(hess.dR2 + 3*grad.dR/R);
-        double Omega = sqrt(grad.dR/R);
+        double kappa2= hess.dR2 + 3*grad.dR/R;  // kappa^2
+        double Omega = sqrt(grad.dR/R);         // Omega, always exists if potential is monotonic with R
         double nu2Om = hess.dz2 / grad.dR * R;  // ratio of nu^2/Omega^2 - allowed to be negative
-        double Ecirc = Phival + 0.5*R*grad.dR;
-        double Lcirc = Omega * R*R;
+        double Ecirc = Phival + 0.5*R*grad.dR;  // energy of a circular orbit at this radius
+        double Lcirc = Omega * R*R;             // angular momentum of a circular orbit
         double scaledPhi, dPhidscaledPhi, scaledEcirc, dEcircdscaledEcirc;
         scaleE(Phival, invPhi0, scaledPhi,   dPhidscaledPhi);
         scaleE(Ecirc,  invPhi0, scaledEcirc, dEcircdscaledEcirc);
@@ -416,7 +416,7 @@ Interpolator::Interpolator(const BasePotential& potential)
         gridL  [i] = log(Lcirc);   // log-scaled ang.mom. of a circular orbit
         gridNu [i] = nu2Om;        // ratio of nu^2/Omega^2 
         // also compute the scaled derivatives for the quintic splines
-        double dRdL = 2*Omega / (pow_2(kappa) * R);
+        double dRdL = 2*Omega / (kappa2 * R);
         double dLdE = 1/Omega;
         gridRder  [i] = dRdL * Lcirc / R;  // extra factors are from conversion to log-derivatives
         gridLder  [i] = dLdE * dEcircdscaledEcirc / Lcirc;
@@ -429,13 +429,20 @@ Interpolator::Interpolator(const BasePotential& potential)
             utils::pp(hess.dR2,  15) + '\t' +
             utils::pp(hess.dz2,  15) + '\t' +
             utils::pp(Ecirc,     15) + '\t' +
-            utils::pp(Lcirc,     15) + '\n';
+            utils::pp(Lcirc,     15) + '\n' << std::flush;
         }
         // guard against weird behaviour of potential
-        if(!(grad.dR>=0 && Phival<0 && Ecirc<0 &&
-            (i==0 || (gridPhi[i]>gridPhi[i-1] && gridE[i]>gridE[i-1]))))
-            throw std::runtime_error("Interpolator: potential is not monotonically increasing "
+        if(!(Phival<0 && grad.dR>=0 && (i==0 || gridPhi[i]>gridPhi[i-1])))
+            throw std::runtime_error(
+                "Interpolator: potential is not monotonically increasing with radius at R=" +
+                utils::toString(R) + '\n' + utils::stacktrace());
+        if(!(Ecirc<0 && Lcirc>=0 && (i==0 || (gridE[i]>gridE[i-1] && gridL[i]>gridL[i-1])) && dRdL>=0))
+            throw std::runtime_error(
+                "Interpolator: energy or angular momentum of a circular orbit are not monotonic "
                 "with radius at R=" + utils::toString(R) + '\n' + utils::stacktrace());
+        if(!(nu2Om>=0))  // not a critical error, but possibly a sign of problems
+            utils::msg(utils::VL_WARNING, "Interpolator",
+                "Vertical epicyclic frequency is negative at R=" + utils::toString(R));
     }
 
     // init various 1d splines
@@ -652,8 +659,8 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
         gridG[i] = G / H * dEdscaledE;
         // debugging printout
         if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-            strm << utils::pp(gridr[i], 15) + '\t' +
-                utils::pp(E, 15) + '\t' + utils::pp(H, 15) + '\t' + utils::pp(G, 15) + '\n';
+            strm << utils::pp(gridr[i], 15) + '\t' + utils::pp(E, 15) + '\t' +
+                utils::pp(H, 15) + '\t' + utils::pp(G, 15) + '\n' << std::flush;
         }
     }
 

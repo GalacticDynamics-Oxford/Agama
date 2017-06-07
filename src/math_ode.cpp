@@ -61,7 +61,7 @@ double OdeSolverDOP853::initTimeStep()
     for (unsigned int i = 0; i < stateCurr.size(); i++)
         ytemp[i] = stateCurr[i] + h * k1[i];
     odeSystem.eval(timeCurr+h, ytemp, k2);
-    
+
     /* estimate the second derivative of the solution */
     double der2 = 0.0;
     for (unsigned int i = 0; i < stateCurr.size(); i++) {
@@ -70,15 +70,14 @@ double OdeSolverDOP853::initTimeStep()
         if(sk!=0) der2 += sqre*sqre;
     }
     der2 = sqrt (der2) / h;
-    
+
     /* step size is computed such that h^8 * max(norm(der),norm(der2)) = 0.01 */
     double der12 = fmax(fabs(der2), sqrt(dnf));
     double h1 = der12 > 1e-15 ? pow (0.01/der12, 1./8) : fmax(1e-6, h*1e-3);
     h = fmin(100.0 * h, h1);
     return h;
-    
 }
-    
+
 void OdeSolverDOP853::init(const OdeStateType& state)
 {
     if(stateCurr.size() != state.size())
@@ -88,7 +87,7 @@ void OdeSolverDOP853::init(const OdeStateType& state)
     if(timeStep == 0)
         timeStep = initTimeStep();
 }
-    
+
 double OdeSolverDOP853::doStep()
 {
     // initialize some internal constants
@@ -219,50 +218,50 @@ double OdeSolverDOP853::doStep()
 
         /* the twelve Runge-Kutta stages */
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 a21 * k1[i];
         odeSystem.eval(timeCurr+c2*timeStep, ytemp, k2);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a31*k1[i] + a32*k2[i]);
         odeSystem.eval(timeCurr+c3*timeStep, ytemp, k3);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a41*k1[i] + a43*k3[i]);
         odeSystem.eval(timeCurr+c4*timeStep, ytemp, k4);
         for (unsigned int i = 0; i <n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a51*k1[i] + a53*k3[i] + a54*k4[i]);
         odeSystem.eval(timeCurr+c5*timeStep, ytemp, k5);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a61*k1[i] + a64*k4[i] + a65*k5[i]);
         odeSystem.eval(timeCurr+c6*timeStep, ytemp, k6);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a71*k1[i] + a74*k4[i] + a75*k5[i] + a76*k6[i]);
         odeSystem.eval(timeCurr+c7*timeStep, ytemp, k7);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a81*k1[i] + a84*k4[i] + a85*k5[i] + a86*k6[i] + a87*k7[i]);
         odeSystem.eval(timeCurr+c8*timeStep, ytemp, k8);
         for (unsigned int i = 0; i <n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
+            ytemp[i] = stateCurr[i] + timeStep *
                 (a91*k1[i] + a94*k4[i] + a95*k5[i] + a96*k6[i] + a97*k7[i] + a98*k8[i]);
         odeSystem.eval(timeCurr+c9*timeStep, ytemp, k9);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a101*k1[i] + a104*k4[i] + a105*k5[i] + a106*k6[i] + a107*k7[i] + 
+            ytemp[i] = stateCurr[i] + timeStep *
+                (a101*k1[i] + a104*k4[i] + a105*k5[i] + a106*k6[i] + a107*k7[i] +
                  a108*k8[i] + a109*k9[i]);
         odeSystem.eval(timeCurr+c10*timeStep, ytemp, k10);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a111*k1[i] + a114*k4[i] + a115*k5[i] + a116*k6[i] + a117*k7[i] + 
+            ytemp[i] = stateCurr[i] + timeStep *
+                (a111*k1[i] + a114*k4[i] + a115*k5[i] + a116*k6[i] + a117*k7[i] +
                  a118*k8[i] + a119*k9[i] + a1110*k10[i]);
         odeSystem.eval(timeCurr+c11*timeStep, ytemp, k2);
         for (unsigned int i = 0; i < n; i++)
-            ytemp[i] = stateCurr[i] + timeStep * 
-                (a121*k1[i] + a124*k4[i] + a125*k5[i] + a126*k6[i] + a127*k7[i] + 
+            ytemp[i] = stateCurr[i] + timeStep *
+                (a121*k1[i] + a124*k4[i] + a125*k5[i] + a126*k6[i] + a127*k7[i] +
                  a128*k8[i] + a129*k9[i] + a1210*k10[i] + a1211*k2[i]);
         odeSystem.eval(timeCurr+timeStep, ytemp, k3);
         for (unsigned int i = 0; i < n; i++) {
@@ -270,7 +269,7 @@ double OdeSolverDOP853::doStep()
                     b10*k10[i] + b11*k2[i] + b12*k3[i];
             k5[i] = stateCurr[i] + timeStep * k4[i];
         }
-     
+
         /* error estimation */
         double err = 0.0, err2 = 0.0;
         for (unsigned int i = 0; i < n; i++) {

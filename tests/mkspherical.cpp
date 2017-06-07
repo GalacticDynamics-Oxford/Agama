@@ -138,7 +138,7 @@ int main(int argc, char* argv[])
     if(!inputdensity.empty()) {
         // the choice is made based on whether 'density=...' specifies an existing file name
         if(utils::fileExists(inputdensity)) {
-            densInterp = galaxymodel::readMassProfile(inputdensity, &mbh);
+            densInterp = galaxymodel::readMassProfile(inputdensity);
             dens.reset(new potential::FunctionToDensityWrapper(densInterp));
         } else
             dens = potential::createDensity(args);

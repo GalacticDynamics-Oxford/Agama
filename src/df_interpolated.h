@@ -23,30 +23,30 @@ namespace df{
 */
 
 template<int N>
-class InterpolatedDF: public BaseMulticomponentDF{
+class InterpolatedDF: public BaseDistributionFunction{
 public:
     /** Create an instance of interpolated distribution function with the given parameters.
         \param[in] scaling  is the instance of class that performs scaling transformation
         in action space, mapping the entire range of actions into a unit cube;
         \param[in] gridU, gridV, gridW  are the nodes of 1d grids in each of the scaled coordinate;
-        \param[in] amplitudes  is the flattened array of amplitudes of basis functions;
+        \param[in] amplitudes  is the flattened array of amplitudes of basis functions:
+        if not provided, this implies a vector of the suitable length, filled with ones.
         \throws std::invalid_argument exception if parameters are nonsense.
     */
     InterpolatedDF(const PtrActionSpaceScaling& scaling,
-        const std::vector<double> &gridU, const std::vector<double> &gridV,
-        const std::vector<double> &gridW, const std::vector<double> &amplitudes);
+        const std::vector<double> &gridU,
+        const std::vector<double> &gridV,
+        const std::vector<double> &gridW,
+        const std::vector<double> &amplitudes = std::vector<double>());
 
     /// the value of interpolated DF at the given actions
     virtual double value(const actions::Actions &J) const;
 
     /// the number of components in the interpolation array
-    virtual unsigned int size() const { return amplitudes.size(); }
-
-    /// the value of a single component at the given actions
-    virtual double valueOfComponent(const actions::Actions &J, unsigned int indComp) const;
+    virtual unsigned int numValues() const { return amplitudes.size(); }
 
     /// values of all components at the given actions reported separately
-    virtual void valuesOfAllComponents(const actions::Actions &J, double values[]) const;
+    virtual void eval(const actions::Actions &J, double values[]) const;
 
     /** Compute the phase volume associated with the given component.
         The volume is given by the integral of interpolation kernel associated with this

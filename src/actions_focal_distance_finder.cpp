@@ -215,27 +215,33 @@ private:
 }  // namespace
 
 double estimateFocalDistanceShellOrbit(
-    const potential::BasePotential& poten, double E, double Lz, 
-    double* R)
+    const potential::BasePotential& poten, double E, double Lz, double* Rthin_out)
 {
-    double Rmin, Rmax;
+    double Rmin, Rmax, FD;
     findPlanarOrbitExtent(poten, E, Lz, Rmin, Rmax);
     double timeCross = INFINITY;
     std::vector<coord::PosCyl> traj;
-    FindClosedOrbitRZplane fnc(poten, E, Lz, Rmin, Rmax, &timeCross, &traj);
-    // locate the radius of thin orbit;
-    // as a by-product, store the orbit in 'traj'
-    double Rthin = math::findRoot(fnc, Rmin, Rmax, ACCURACY_RTHIN);
-    if(R!=NULL)
-        *R=Rthin;
-    if(!isFinite(Rthin) || traj.size()==0) {
+    // locate the radius of thin orbit;  as a by-product, store the orbit in 'traj'
+    double Rthin = math::findRoot(
+        FindClosedOrbitRZplane(poten, E, Lz, Rmin, Rmax, &timeCross, &traj), Rmin, Rmax, ACCURACY_RTHIN);
+    if(traj.size() >= 2)
+        // now find the best-fit value of delta for this orbit
+        FD = fitFocalDistanceShellOrbit(traj);
+    else {
+        // something went wrong; use a backup solution
+        if(!isFinite(Rthin))
+            Rthin = 0.5 * (Rmin+Rmax);
         utils::msg(utils::VL_WARNING, FUNCNAME,
-            "Could not find a thin orbit for E="+utils::toString(E)+", Lz="+utils::toString(Lz)+
-            " - returning "+utils::toString(Rmin));
-        return Rmin;  // anything
+            "Could not find a thin orbit for E="+utils::toString(E,16)+", Lz="+utils::toString(Lz,16)+
+            " - assuming Rthin="+utils::toString(Rthin,16));
+        // if we don't have a proper orbit, make a short vertical step out of the z=0 plane
+        // and estimate the focal distance from the mixed derivative at this single point
+        FD = estimateFocalDistancePoints(poten, std::vector<coord::PosCyl>(1,
+            coord::PosCyl(Rthin, /* z=very small number */ Rthin*ACCURACY_RTHIN, 0)));
     }
-    // now find the best-fit value of delta for this orbit
-    return fitFocalDistanceShellOrbit(traj);
+    if(Rthin_out != NULL)
+        *Rthin_out = Rthin;
+    return FD;
 }
 
 }  // namespace actions

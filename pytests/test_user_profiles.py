@@ -62,8 +62,8 @@ print "DF mass=%.8g  (orig value=%.8g)" % (mass_my, mass_orig)
 
 # GalaxyModel objects constructed from the C++ DF and from the Python function
 # (without the need of a proxy object; in fact, GalaxyModel.df is itself a proxy object)
-gm_orig = agama.GalaxyModel(df=df_orig, pot=pot_orig)
-gm_my   = agama.GalaxyModel(df=MyDF, pot=pot_appr)
+gm_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig)
+gm_my   = agama.GalaxyModel(df=MyDF, potential=pot_appr)
 # note that different potentials were used for gm_orig and gm_my, so the results may slightly disagree
 
 # DF moments (density and velocity dispersion) computed from the C++ DF object

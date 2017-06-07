@@ -98,10 +98,6 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
     const int nptbin=1000;
     for(double logR=-4; logR<4; logR+=dlogR) {
         double weightedDifP=0, weightedDifF=0, weightedDifD=0, weight=0;
-// OMP is disabled to make the computation deterministic
-//#ifdef _OPENMP
-//#pragma omp parallel for schedule(dynamic,64) reduction(+:weight,weightedDifP,weightedDifF,weightedDifD)
-//#endif
         for(int n=0; n<nptbin; n++) {
             coord::PosSph point( pow(10., logR+dlogR*n/nptbin),
                 acos(math::random()*2-1), math::random()*2*M_PI);
@@ -109,14 +105,13 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
             double v1, v2, d1, d2;
             p1.eval(coord::toPosCar(point), &v1, &g1);
             p2.eval(coord::toPosCar(point), &v2, &g2);
-            d1 = p1.density(point);
-            d2 = p2.density(point);
-            weightedDifP += pow_2((v1-v2) / v2) * pow_2(point.r) * fabs(d2);
+            d1 = fmax(0, p1.density(point));
+            d2 = fmax(0, p2.density(point));
+            weightedDifP += pow_2((v1-v2) / v2) * pow_2(point.r) * d2;
             weightedDifF += (pow_2(g1.dx-g2.dx)+pow_2(g1.dy-g2.dy)+pow_2(g1.dz-g2.dz)) /
-                (pow_2(g2.dx)+pow_2(g2.dy)+pow_2(g2.dz)) * pow_2(point.r) * fabs(d2);
-            weightedDifD += d1==0 && d2==0 ? 0 :
-                pow_2((d1-d2) / fmax(fabs(d1), fabs(d2))) * pow_2(point.r) * fabs(d2);
-            weight += pow_2(point.r) * fabs(d2);
+                (pow_2(g2.dx)+pow_2(g2.dy)+pow_2(g2.dz)) * pow_2(point.r) * d2;
+            weightedDifD += d1==0 && d2==0 ? 0 : pow_2((d1-d2) / fmax(d1, d2)) * pow_2(point.r) * d2;
+            weight += pow_2(point.r) * d2;
         }
         totWeightedDifP += weightedDifP;
         totWeightedDifF += weightedDifF;
@@ -153,18 +148,15 @@ bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDen
     const int nptbin=5000;
     for(double logR=-4; logR<4; logR+=dlogR) {
         double weightedDif=0, weight=0;
-//#ifdef _OPENMP
-//#pragma omp parallel for schedule(dynamic,256) reduction(+:weight,weightedDif)
-//#endif
         for(int n=0; n<nptbin; n++) {
             double r     = pow(10., logR+dlogR*n/nptbin);
             double costh = math::random()*2-1;
             coord::PosCyl point( r*sqrt(1-pow_2(costh)), r*costh, math::random()*2*M_PI);
-            double d1 = p1.density(point);
-            double d2 = p2.density(point);
+            double d1 = fmax(0, p1.density(point));
+            double d2 = fmax(0, p2.density(point));
             weightedDif += d1==0 && d2==0 ? 0 :
-                pow_2((d1-d2) / fmax(fabs(d1), fabs(d2))) * pow_2(r) * fabs(d2);
-            weight += pow_2(r) * fabs(d2);
+                pow_2((d1-d2) / fmax(d1, d2)) * pow_2(r) * d2;
+            weight += pow_2(r) * d2;
         }
         totWeightedDif += weightedDif;
         totWeight += weight;
@@ -433,7 +425,7 @@ int main() {
     ok &= testAverageError(
         *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 50),
         test5_ExpdiskAxi, 0.05);
-
+    
     // 3c. test the approximating potential profiles
     std::cout << "--- Testing potential approximations: "
     "print density-averaged rms errors in potential, force and density ---\n";
@@ -475,7 +467,7 @@ int main() {
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
-    ok &= testAverageError(*test2c, *test2c_clone, 1e-4);
+    ok &= testAverageError(*test2c, *test2c_clone, 3e-4);
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
@@ -494,7 +486,7 @@ int main() {
     std::cout << "--- Axisymmetric ExpDisk ---\n";
     PtrPotential test5c = potential::CylSpline::create(
         test5_ExpdiskAxi, 0, 20, 5e-2, 50., 20, 1e-2, 10.);
-    ok &= testAverageError(*test5c, *test5_Galpot, 0.06);
+    ok &= testAverageError(*test5c, *test5_Galpot, 0.05);
 
     // mildly triaxial, created from N-body samples
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";

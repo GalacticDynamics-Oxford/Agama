@@ -262,7 +262,7 @@ FourierTransformForward::FourierTransformForward(int _mmax, bool _useSine) :
     }
 }
 
-void FourierTransformForward::transform(const double values[], double coefs[]) const
+void FourierTransformForward::transform(const double values[], double coefs[], int stride) const
 {
     const int nfnc = useSine ? mmax*2+1 : mmax+1;  // number of trig functions for each phi-node
     for(int mm=0; mm<nfnc; mm++) {  // index in the output array
@@ -274,7 +274,7 @@ void FourierTransformForward::transform(const double values[], double coefs[]) c
             double fnc = trigFnc[indphi*nfnc + indfnc];
             if(m<0 && k>mmax)  // sin(2pi-phi) = -sin(phi)
                 fnc*=-1;
-            coefs[mm] += fnc * values[k];
+            coefs[mm] += fnc * values[k*stride];
         }
     }
 }
@@ -319,15 +319,16 @@ SphHarmTransformForward::SphHarmTransformForward(const SphHarmIndices& _ind):
     }
 }
 
-void SphHarmTransformForward::transform(const double values[], double coefs[]) const
+void SphHarmTransformForward::transform(const double values[], double coefs[], int stride) const
 {
     if(ind.size() == 1) {
         // shortcut in the spherically-symmetric case
         coefs[0] = values[0];
         return;
     }
-    for(unsigned int c=0; c<ind.size(); c++)
-        coefs[c] = 0;
+    if(stride<=0)
+        throw std::invalid_argument("stride must be positive");
+    std::fill(coefs, coefs+ind.size(), 0.);
     int mmin  = ind.mmin();
     assert(mmin == 0 || mmin == -ind.mmax);
     int ngrid = ind.lmax+1;      // # of nodes of GL grid for integration in theta on (0:pi)
@@ -340,7 +341,7 @@ void SphHarmTransformForward::transform(const double values[], double coefs[]) c
 
     // first step: perform integration in phi for each value of theta, using Fourier transform
     for(unsigned int j=0; j<thetasize(); j++)
-        fourier.transform( &values[j*fourier.size()], &val_m[j*nfour] );
+        fourier.transform( &values[j * fourier.size() * stride], &val_m[j * nfour], stride );
 
     // second step: perform integration in theta for each m
     for(int m=ind.mmin(); m<=ind.mmax; m++) {

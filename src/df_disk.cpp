@@ -72,5 +72,4 @@ double PseudoIsothermal::value(const actions::Actions &J) const
     return isFinite(result) ? result : 0;
 }
 
-
 }  // namespace df

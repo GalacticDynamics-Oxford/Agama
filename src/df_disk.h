@@ -88,6 +88,6 @@ public:
         \param[in] J are the actions  */
     virtual double value(const actions::Actions &J) const;
 };
-
+    
 ///@}
 }  // namespace df

@@ -190,7 +190,7 @@ void updateTotalPotential(SelfConsistentModel& model)
     if(totalDensityDisk != NULL)
         compPot.push_back(potential::CylSpline::create(*totalDensityDisk, 0 /*mmax*/,
             model.sizeRadialCyl,   model.RminCyl, model.RmaxCyl,
-            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, false /*don't use derivs*/));
+            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, true /*use derivs*/));
 
     // now check if the total potential is elementary or composite
     if(compPot.size()==0)

@@ -548,13 +548,7 @@ PtrDensity readDensitySphericalHarmonic(std::istream& strm, const units::Externa
     fields = utils::splitString(buffer, "# \t");
     int ncoefsAngular = utils::toInt(fields[0]);
     unsigned int numTerms = pow_2(ncoefsAngular+1);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    double innerSlope=NAN, outerSlope=NAN;
-    if(fields.size()>=2) {
-        innerSlope = utils::toDouble(fields[0]);
-        outerSlope = utils::toDouble(fields[1]);
-    } else ok=false;
+    std::getline(strm, buffer);  // unused
     std::vector< std::vector<double> > coefs(numTerms);
     std::vector< double > radii;
     ok &= std::getline(strm, buffer) && buffer.find("rho") != std::string::npos;
@@ -572,7 +566,7 @@ PtrDensity readDensitySphericalHarmonic(std::istream& strm, const units::Externa
     math::blas_dmul(converter.lengthUnit, radii);
     for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), coefs[i]);
-    return PtrDensity(new DensitySphericalHarmonic(radii, coefs, innerSlope, outerSlope)); 
+    return PtrDensity(new DensitySphericalHarmonic(radii, coefs)); 
 }
 
 PtrDensity readDensityAzimuthalHarmonic(std::istream& strm, const units::ExternalUnits& converter)
@@ -790,8 +784,7 @@ void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
     int lmax = static_cast<int>(sqrt(Phi.size()*1.0)-1);
     strm << Multipole::myName() << "\n" << 
         radii.size() << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n" <<
-        0 <<"\t#unused\n#Phi\n#radius";
+        lmax << "\t#l_max\n0\t#unused\n#Phi\n#radius";
     writeSphericalHarmonics<true>(strm, radii, Phi);
     strm << "\n#dPhi/dr\n#radius";
     writeSphericalHarmonics<true>(strm, radii, dPhi);
@@ -829,8 +822,7 @@ void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHar
 {
     std::vector<double> radii;
     std::vector<std::vector<double> > coefs;
-    double innerSlope, outerSlope;
-    density.getCoefs(radii, coefs, innerSlope, outerSlope);
+    density.getCoefs(radii, coefs);
     // convert units
     math::blas_dmul(1/converter.lengthUnit, radii);
     for(unsigned int i=0; i<coefs.size(); i++)
@@ -838,8 +830,7 @@ void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHar
     int lmax = static_cast<int>(sqrt(coefs.size()*1.0)-1);
     strm << DensitySphericalHarmonic::myName() << "\n" <<
         radii.size() << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n" <<
-        innerSlope << "\t" << outerSlope <<"\t#inner/outer slopes\n#rho\n#radius";
+        lmax << "\t#l_max\n0\t#unused\n#rho\n#radius";
     writeSphericalHarmonics<true>(strm, radii, coefs);
 }
 

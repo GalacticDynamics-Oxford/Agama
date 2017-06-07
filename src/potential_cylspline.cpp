@@ -4,6 +4,7 @@
 #include "math_fit.h"
 #include "math_specfunc.h"
 #include "math_sphharm.h"
+#include "math_spline.h"
 #include "utils.h"
 #include <cmath>
 #include <algorithm>
@@ -24,11 +25,15 @@ static const unsigned int CYLSPLINE_MIN_GRID_SIZE = 2;
 /// the requested number of output terms, to improve the accuracy of integration)
 static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
 
-/// lower cutoff in radius for Legendre Q function
-static const double MIN_R = 1e-10;
+/// order of multipole extrapolation outside the grid
+static const int LMAX_EXTRAPOLATION = 8;
 
 /// max number of function evaluations in multidimensional integration
 static const unsigned int MAX_NUM_EVAL = 10000;
+
+/// to avoid singularities in potential integration kernel, we add a small softening
+/// (intended to be much less than typical grid spacing) - perhaps need to make it grid-dependent
+const double EPS2_SOFTENING = 1e-12;
 
 /// relative accuracy of potential computation (integration tolerance parameter)
 static const double EPSREL_POTENTIAL_INT = 1e-6;
@@ -91,7 +96,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
         // thread-local variables
         std::vector<double> values((2*mmax+1) * NQuantities), coefs_m(2*mmax+1);
 #ifdef _OPENMP
-#pragma omp for schedule(static)
+#pragma omp for schedule(dynamic)
 #endif
         for(int n=0; n<numPoints; n++) {
             int iR = n % sizeR;  // index in radial grid
@@ -133,7 +138,7 @@ inline double density_rho_m(const BaseDensity& dens, int m, double R, double z) 
     return m==0 ? dens.density(coord::PosCyl(R, z, 0)) : 0;
 }
 
-// Routine that computes the contribution tothe  m-th harmonic potential at location (R0,z0)
+// Routine that computes the contribution to the m-th harmonic of potential at location (R0,z0)
 // from the point at (R,z) with given 'mass' (or, rather, mass times trig(m phi)
 // in the discrete case, or density times jacobian times trig(m phi) in the continuous case).
 // This routine is used both in AzimuthalHarmonicIntegrand to compute the potential from
@@ -145,23 +150,23 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
     // the contribution to the potential is given by
     // rho * \int_0^\infty dk J_m(k R) J_m(k R0) exp(-k|z-z0|)
     double t = R*R + R0*R0 + pow_2(z0-z);
-    if(R > MIN_R && R0 > MIN_R) {  // normal case
+    if(R > 0 && R0 > 0) {  // normal case
         double sq = 1 / (M_PI * sqrt(R*R0));
-        double u  = t / (2*R*R0);
-        if(u < 1+MIN_R)
-            return;  // close to singularity
-        double dQ;
-        double Q  = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
+        double u  = t / (2*R*R0);   // u >= 1
+        double dQ, Q = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
+        if(!isFinite(Q)) return;
         values[0]+= -sq * mass * Q;
         if(useDerivs) {
+            // only soften the derivative, because it diverges as 1/|u-1|,
+            // but the infinite contributions from z>z0 and z<z0 should nearly cancel anyway
+            // when one approaches the singularity
+            dQ = math::sign(dQ) / sqrt( 1/pow_2(dQ) + EPS2_SOFTENING);
             values[1]+= -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
             values[2]+= -sq * mass * dQ * (z0-z) / (R*R0);
         }
     } else      // degenerate case
-    if(m==0) {  // here only m=0 harmonic survives
-        if(t < 1e-15)
-            return;    // close to singularity
-        double s  = 1/sqrt(t);
+    if(m==0) {  // here only m=0 harmonic survives;
+        double s  = 1 / sqrt(t + EPS2_SOFTENING); // actually the integration never reaches R=0 anyway
         values[0]+= -mass * s;
         if(useDerivs)
             values[2]+=  mass * s * (z0-z) / t;
@@ -184,11 +189,11 @@ public:
         const double r = exp( 1/(1-s) - 1/s );
         if(r<1e-100 || r>1e100)
             return;  // scaled coords point at 0 or infinity
-        const double th= pos[1] * M_PI/2;
+        const double th= M_PI/2 * pow_2(pos[1]);
         const double R = r*cos(th);
         const double z = r*sin(th);
-        const double jac = pow_2(M_PI*r) * R * (1/pow_2(1-s) + 1/pow_2(s));
-        
+        const double jac = pow_2(M_PI*r) * R * (1/pow_2(1-s) + 1/pow_2(s)) * 2*pos[1];
+
         // get the values of density at (R,z) and (R,-z):
         // here the density evaluation may be a computational bottleneck,
         // so in the typical case of z-reflection symmetry we save on using
@@ -570,7 +575,7 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
                 sum += fabs(value);
             }
         if(sum>0) {
-            spl[mm] = math::CubicSpline2d(gridR, gridz, val);
+            spl[mm].reset(new math::CubicSpline2d(gridR, gridz, val));
             int m = mm-mmax;
             if(m!=0)  // no z-rotation symmetry because m!=0 coefs are non-zero
                 mysym &= ~coord::ST_ZROTATION;
@@ -587,19 +592,20 @@ double DensityAzimuthalHarmonic::rho_m(int m, double R, double z) const
 {
     int mmax = (spl.size()-1)/2;
     double lR = log(1+R/Rscale), lz = log(1+fabs(z)/Rscale)*math::sign(z);
-    if( math::abs(m)>mmax || spl[m+mmax].empty() ||
-        lR<spl[mmax].xmin() || lz<spl[mmax].ymin() ||
-        lR>spl[mmax].xmax() || lz>spl[mmax].ymax() )
+    if( math::abs(m)>mmax || !spl[m+mmax] ||
+        lR<spl[mmax]->xmin() || lz<spl[mmax]->ymin() ||
+        lR>spl[mmax]->xmax() || lz>spl[mmax]->ymax() )
         return 0;
-    return spl[m+mmax].value(lR, lz);
+    return spl[m+mmax]->value(lR, lz);
 }
 
 double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
 {
     int mmax = (spl.size()-1)/2;
     double lR = log(1+pos.R/Rscale), lz = log(1+fabs(pos.z)/Rscale)*math::sign(pos.z);
-    if( lR<spl[mmax].xmin() || lz<spl[mmax].ymin() ||
-        lR>spl[mmax].xmax() || lz>spl[mmax].ymax() )
+    assert(spl[mmax]);  // the spline for m=0 must exist
+    if( lR<spl[mmax]->xmin() || lz<spl[mmax]->ymin() ||
+        lR>spl[mmax]->xmax() || lz>spl[mmax]->ymax() )
         return 0;
     double result = 0;
 
@@ -609,9 +615,9 @@ double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
     if(!isZRotSymmetric(sym))
         math::trigMultiAngle(pos.phi, mmax, needSine, trig);
     for(int m=-mmax; m<=mmax; m++)
-        if(!spl[m+mmax].empty()) {
+        if(spl[m+mmax]) {
             double trig_m = m==0 ? 1 : m>0 ? trig[m-1] : trig[mmax-1-m];
-            result += spl[m+mmax].value(lR, lz) * trig_m;
+            result += spl[m+mmax]->value(lR, lz) * trig_m;
         }
     return result;
 }
@@ -621,23 +627,23 @@ void DensityAzimuthalHarmonic::getCoefs(
     std::vector< math::Matrix<double> > &coefs) const
 {
     unsigned int mmax = (spl.size()-1)/2;
-    assert(mmax>=0 && spl.size() == mmax*2+1 && !spl[mmax].empty());
+    assert(mmax>=0 && spl.size() == mmax*2+1 && spl[mmax]);
     coefs.resize(2*mmax+1);
-    unsigned int sizeR = spl[mmax].xvalues().size();
-    unsigned int sizez = spl[mmax].yvalues().size();
-    gridR = spl[mmax].xvalues();
+    unsigned int sizeR = spl[mmax]->xvalues().size();
+    unsigned int sizez = spl[mmax]->yvalues().size();
+    gridR = spl[mmax]->xvalues();
     if(isZReflSymmetric(sym)) {
         // output only coefs for half-space z>=0
         sizez = (sizez+1) / 2;
-        gridz.assign(spl[mmax].yvalues().begin() + sizez-1, spl[mmax].yvalues().end());
+        gridz.assign(spl[mmax]->yvalues().begin() + sizez-1, spl[mmax]->yvalues().end());
     } else
-        gridz = spl[mmax].yvalues();
+        gridz = spl[mmax]->yvalues();
     for(unsigned int mm=0; mm<=2*mmax; mm++)
-        if(!spl[mm].empty()) {
+        if(spl[mm]) {
             coefs[mm]=math::Matrix<double>(sizeR, sizez);
             for(unsigned int iR=0; iR<sizeR; iR++)
                 for(unsigned int iz=0; iz<sizez; iz++)
-                    coefs[mm](iR, iz) = spl[mm].value(gridR[iR], gridz[iz]);
+                    coefs[mm](iR, iz) = spl[mm]->value(gridR[iR], gridz[iz]);
             //math::eliminateNearZeros(coefs[mm]);
         }
     // unscale the grid coordinates
@@ -702,8 +708,8 @@ PtrPotential determineAsympt(
         }
     }
     unsigned int npoints = points.size();
-    int mmax = (Phi.size()-1)/2;  // # of angular(phi) harmonics in the original potential
-    int lmax_fit = 8;             // # of meridional harmonics to fit - don't set too large
+    int mmax = (Phi.size()-1)/2;        // # of angular(phi) harmonics in the original potential
+    int lmax_fit = LMAX_EXTRAPOLATION;  // # of meridional harmonics to fit - don't set too large
     int mmax_fit = std::min<int>(lmax_fit, mmax);
     unsigned int ncoefs = pow_2(lmax_fit+1);
     std::vector<double> Plm(lmax_fit+1);     // temp.storage for sph-harm functions
@@ -767,6 +773,9 @@ void chooseGridRadii(const BaseDensity& src,
             Rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);
        	if(Rmin==0)
             Rmin = rhalf * std::pow(spacing, -0.5*gridSizeR);
+        // TODO: introduce a more intelligent adaptive approach as in Multipole,
+        // reducing the outer radius if the density drops to zero or decreases too rapidly,
+        // and also allow for different radial/vertical scales?
     }
     if(zmax==0)
         zmax=Rmax;

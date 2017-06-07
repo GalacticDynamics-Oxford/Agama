@@ -809,7 +809,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
             PyObject* outputObj = allocOutputArr<numOutput>(numpt);
             // loop over input array
 #ifdef _OPENMP
-#pragma omp parallel for
+#pragma omp parallel for schedule(dynamic)
 #endif
             for(int i=0; i<numpt; i++) {
                 if(keyboardInterruptTriggered) continue;
@@ -3321,6 +3321,7 @@ typedef struct {
     PotentialObject* pot;
     ActionFinderObject* af;
     /// members of galaxymodel::SelfConsistentModel structure listed here
+    bool useActionInterpolation;  ///< whether to use the interpolated action finder
     double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
     unsigned int sizeRadialSph;   ///< number of grid points in radius
     unsigned int lmaxAngularSph;  ///< maximum order of angular-harmonic expansion (l_max)
@@ -3367,6 +3368,8 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     self->components  = PyList_New(0);
     self->pot         = NULL;
     self->af          = NULL;
+    PyObject* interp  = getItemFromPyDict(namedArgs, "useActionInterpolation");
+    self->useActionInterpolation = interp==NULL ? true : PyObject_IsTrue(interp);
     self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
     self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -2);
     self->sizeRadialSph  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
@@ -3401,6 +3404,7 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
         }
         model.components.push_back(((ComponentObject*)elem)->comp);
     }
+    model.useActionInterpolation = self->useActionInterpolation;
     model.rminSph = self->rminSph * conv->lengthUnit;
     model.rmaxSph = self->rmaxSph * conv->lengthUnit;
     model.sizeRadialSph = self->sizeRadialSph;
@@ -3441,6 +3445,9 @@ static PyMemberDef SelfConsistentModel_members[] = {
       const_cast<char*>("Total potential of the model (read-only)") },
     { const_cast<char*>("af"), T_OBJECT, offsetof(SelfConsistentModelObject, af), READONLY,
       const_cast<char*>("Action finder associated with the total potential (read-only)") },
+    { const_cast<char*>("useActionInterpolation"), T_BOOL,
+      offsetof(SelfConsistentModelObject, useActionInterpolation), 0,
+      const_cast<char*>("Whether to use interpolated action finder (faster but less accurate)") },
     { const_cast<char*>("rminSph"), T_DOUBLE, offsetof(SelfConsistentModelObject, rminSph), 0,
       const_cast<char*>("Spherical radius of innermost grid node for Multipole potential") },
     { const_cast<char*>("rmaxSph"), T_DOUBLE, offsetof(SelfConsistentModelObject, rmaxSph), 0,
@@ -4103,7 +4110,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // unit-convert integration times
     std::vector<double> integrTimes(numOrbits);
     if(PyArray_NDIM(time_arr) == 0)
-        integrTimes.assign(numOrbits, PyFloat_AsDouble(time_obj));
+        integrTimes.assign(numOrbits, PyFloat_AsDouble(time_obj) * conv->timeUnit);
     else
         for(int i=0; i<numOrbits; i++)
             integrTimes[i] = pyArrayElem<double>(time_arr, i) * conv->timeUnit;
