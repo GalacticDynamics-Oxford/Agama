@@ -1,6 +1,7 @@
 #include "galaxymodel_target.h"
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_jeans.h"
+#include "galaxymodel_losvd.h"
 #include "galaxymodel.h"
 #include "math_core.h"
 #include "potential_multipole.h"
@@ -16,15 +17,51 @@ namespace galaxymodel{
 
 namespace {  // internal
 
+/// number of points taken from the trajectory during each timestep of the ODE solver
+static const int NUM_SAMPLES_PER_STEP = 10;
+
+/// helper routines for the templated class RuntimeFncSchw,
+/// where FncType is the function that collects some data for each point sampled from trajectory.
+
+/// allocate a new instance of (temporary) data storage
+template<typename FncType>
+math::Matrix<double> makeDatacube(const FncType& fnc);
+
+/// convert the temporarily collected data to another array that is actually stored for each orbit
+template<typename FncType>
+math::Matrix<double> finalizeData(const FncType& fnc, const math::Matrix<double>& datacube);
+
+/// generic implementation of the two above defined helper routines
+template<>
+inline math::Matrix<double> makeDatacube(const math::IFunctionNdimAdd& fnc)
+{ return math::Matrix<double>(1, fnc.numValues(), 0.); }
+
+template<>
+inline math::Matrix<double> finalizeData(
+    const math::IFunctionNdimAdd&, const math::Matrix<double>& datacube)
+{ return datacube; }  // trivial copy
+
+/// specialized implementation for the case of LOSVD grid, in which
+/// the intermediate data collection array is different from the final storage array
+template<>
+inline math::Matrix<double> makeDatacube(const BaseLOSVDGrid& fnc)
+{ return fnc.newDatacube(); }
+
+template<>
+inline math::Matrix<double> finalizeData(
+    const BaseLOSVDGrid& fnc, const math::Matrix<double>& datacube)
+{ return fnc.getAmplitudes(datacube); }  // non-trivial finalization
+
+
 /// Orbit runtime function that collects the values of a given N-dimensional function
 /// for each point on the trajectory, weighted by the amount of time spent at this point
+/// \tparam  FncType  is a generic IFunctionNdimAdd or a specific descendant class such as LOSVDGrid
+template<typename FncType>
 class RuntimeFncSchw: public orbit::BaseRuntimeFnc {
-    /// number of points taken from the trajectory during each timestep of the ODE solver
-    static const int NUM_SAMPLES_PER_STEP = 10;
 
     /// the function that collects some data for a given point
     /// (takes the position/velocity in Cartesian coordinates as input)
-    const math::IFunctionNdim& grid;
+    const FncType& fnc;
 
     /// where the data for this orbit will be ultimately stored (points to an external array)
     StorageNumT* output;
@@ -34,24 +71,26 @@ class RuntimeFncSchw: public orbit::BaseRuntimeFnc {
         internally accumulated in double precision, and at the end of integration normalized
         by the integration time and written in the output array converted to StorageNumT
     */
-    std::vector<double> data;
+    math::Matrix<double> datacube;
 
     /// total integration time - will be used to normalize the collected data
     /// at the end of orbit integration
     double time;
 
 public:
-    RuntimeFncSchw(const math::IFunctionNdim& _grid, StorageNumT* _output) :
-        grid(_grid), output(_output), data(grid.numValues(), 0.), time(0.) {}
+    RuntimeFncSchw(const FncType& _fnc, StorageNumT* _output) :
+        fnc(_fnc), output(_output), datacube(makeDatacube(fnc)), time(0.) {}
 
-    /// normalize the collected data by the total integration time,
+    /// finalize data collection, normalize the array by the total integration time,
     /// and convert to the numerical type used in the output storage
     virtual ~RuntimeFncSchw()
     {
         if(time==0) return;
-        const unsigned int size = grid.numValues();
-        for(unsigned int i=0; i<size; i++)
-            output[i] = static_cast<StorageNumT>(data[i] / time);
+        math::Matrix<double> data = finalizeData(fnc, datacube);
+        const double *dataptr = data.data(), invtime = 1./time;
+        for(size_t i=0, size = data.size(); i<size; i++)
+            output[i] = static_cast<StorageNumT>(dataptr[i] * invtime);
+        
     }
 
     /// collect the data returned by the function for each point sub-sampled from the trajectory
@@ -62,16 +101,12 @@ public:
     {
         time += tend-tbegin;
         double substep = (tend-tbegin) / NUM_SAMPLES_PER_STEP;  // duration of each sub-step
-        const unsigned int size = grid.numValues();
-        // temporary array for storing the values of grid basis functions at each sub-step
-        double* values = static_cast<double*>(alloca(size * sizeof(double)));
+        double *dataptr = datacube.data();
         for(int s=0; s<NUM_SAMPLES_PER_STEP; s++) {
             double point[6];  // position and velocity in cartesian coordinates at the current sub-step
             double tsubstep = tbegin + substep * (s+0.5);  // equally-spaced samples in time
             solver.getSol(tsubstep, point);
-            grid.eval(point, values);
-            for(unsigned int i=0; i<size; i++)
-                data[i] += values[i] * substep;
+            fnc.addPoint(point, substep, dataptr);
         }
         return orbit::SR_CONTINUE;
     }
@@ -240,21 +275,19 @@ TargetDensity::TargetDensity(const potential::BaseDensity& density, const Densit
 
     // finally, compute the projection of the input density onto the grid
     constraintValues = grid->computeProjVector(density);
-    constraintPenalties.assign(constraintValues.size(), 1.);
     // add the last constraint specifying the total mass
-    constraintPenalties.push_back(1.);
     constraintValues.push_back(totalMass);
 }
 
 orbit::PtrRuntimeFnc TargetDensity::getOrbitRuntimeFnc(StorageNumT* output) const
 {
     output[constraintValues.size()-1] = 1.;  // contribution of the orbit to the total mass
-    return orbit::PtrRuntimeFnc(new RuntimeFncSchw(*grid, output));
+    return orbit::PtrRuntimeFnc(new RuntimeFncSchw<math::IFunctionNdimAdd>(*grid, output));
 }
 
 const char* TargetDensity::name() const { return grid->name(); }
 
-std::string TargetDensity::elemName(unsigned int index) const
+std::string TargetDensity::constraintName(size_t index) const
 {
     if(index+1 < constraintValues.size())
         return grid->elemName(index);
@@ -289,6 +322,7 @@ void TargetDensity::computeDFProjection(const GalaxyModel& model, StorageNumT* o
         for(int c=0; c<numComp; c++)
             densityComponents[c].reset(new potential::DensitySphericalHarmonic(gridR, sphHarmCoefs[c]));
     } else {
+        // TODO!!
         //       computeDensityComponentsCylindrical(df, mmax, gridR, gridz);
     }
 #ifdef _OPENMP
@@ -300,59 +334,43 @@ void TargetDensity::computeDFProjection(const GalaxyModel& model, StorageNumT* o
     }
 }
 
+void TargetDensity::getMatrix(const math::IMatrixDense<StorageNumT>& recordedDatacube,
+    math::IMatrixDense<StorageNumT>& result) const
+{
+    if( recordedDatacube.rows() != result.rows() ||
+        recordedDatacube.cols() != datacubeSize() ||
+        result.cols() != constraintsSize() )
+        throw std::length_error("TargetDensity: invalid array sizes");
+    utils::msg(utils::VL_MESSAGE, "TargetDensity",
+        "No need to invoke the `matrix()` method, just use the original datacube");
+    std::copy(recordedDatacube.data(), recordedDatacube.data() + recordedDatacube.size(), result.data());
+}
+
 //----- Kinematic discretization scheme -----//
 
 /// N-dimensional function that computes the amplitudes of B-spline representation of
 /// squared radial and tangential velocity dispersions
 template<int DEGREE>
-class KinemJeansGrid: public math::IFunctionNdim {
+class KinemJeansGrid: public math::IFunctionNdimAdd {
     const math::BsplineInterpolator1d<DEGREE> bspl;
 public:
-    explicit KinemJeansGrid(const math::BsplineInterpolator1d<DEGREE>& _bspl) : bspl(_bspl) {}
+    explicit KinemJeansGrid(const std::vector<double>& grid) : bspl(grid) {}
 
-    virtual void eval(const double point[6], double values[]) const
+    virtual void addPoint(const double point[6], double mult, double output[]) const
     {
         double r2  = pow_2(point[0]) + pow_2(point[1]) + pow_2(point[2]), r = sqrt(r2);
         double vr2 = pow_2(point[0] * point[3] + point[1] * point[4] + point[2] * point[5]) / r2;
         double vt2 = pow_2(point[3]) + pow_2(point[4]) + pow_2(point[5]) - vr2;
-        bspl.eval(&r, values);
-        unsigned int numBasisFnc = bspl.numValues();
-        for(unsigned int b=0; b<numBasisFnc; b++) {
-            values[b + numBasisFnc] = values[b] * vt2;
-            values[b] *= vr2;
-        }
+        bspl.addPoint(&r, mult * vr2, output);
+        bspl.addPoint(&r, mult * vt2, output + bspl.numValues());
     }
     virtual unsigned int numVars() const { return 6; }
     virtual unsigned int numValues() const { return bspl.numValues() * 2; }
 };
 
-/// auxiliary function for initializing the B-spline representation of the velocity dispersion
-template<int DEGREE>
-void setupKinemJeans(const std::vector<double>& gridr,
-    const math::IFunction& dens, const math::IFunction& sigmar,
-    /*output*/ std::vector<double>& constraintValues, shared_ptr<const math::IFunctionNdim>& grid)
-{
-    // compute the finite-element decomposition of the function  4pi rho(r) [r sigma_r(r)]^2
-    math::FiniteElement1d<DEGREE> fem(gridr);
-    grid.reset(new KinemJeansGrid<DEGREE>(fem.interp));
-    
-    std::vector<double> integrPoints = fem.integrPoints();
-    std::vector<double> fncval(integrPoints.size());
-    for(unsigned int i=0; i<integrPoints.size(); i++) {
-        double r  = integrPoints[i];
-        fncval[i] = dens(r) * 4*M_PI * pow_2(r * sigmar(r));
-    }
-    // amplitudes of FEM representation of the function rho * r^2 * sigma_r^2
-    constraintValues = fem.computeProjVector(fncval);
-    assert(constraintValues.size() == fem.interp.numValues());
-}
-
-TargetKinemJeans::TargetKinemJeans(
-    const potential::BaseDensity& dens,
-    const potential::BasePotential& pot,
-    double beta,
-    unsigned int gridSizeR,
-    unsigned int degree)
+TargetKinemJeans::TargetKinemJeans(const potential::BaseDensity& dens,
+    unsigned int degree, unsigned int gridSizeR, double beta) :
+    multbeta(static_cast<StorageNumT>(2*(1-beta)))
 {
     // first determine the grid radii that enclose the specified fractions of mass
     double totalMass = dens.totalMass();
@@ -366,68 +384,121 @@ TargetKinemJeans::TargetKinemJeans(
         if(!isFinite(gridr[s]) || gridr[s] <= gridr[s-1])
             throw std::runtime_error("TargetKinemJeans: cannot assign grid radii");
     }
-
-    // sphericalized versions of density and potential (temporary objects created if needed)
-    potential::PtrDensity sphDens;
-    potential::PtrPotential sphPot;
-    // wrapper functions for the original or the sphericalized density/potential
-    math::PtrFunction fncDens;
-    math::PtrFunction fncPot;
-    if(isSpherical(pot)) {
-        fncPot.reset(new potential::PotentialWrapper(pot));
-    } else {
-        sphPot = potential::Multipole::create(pot, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50);
-        fncPot.reset(new potential::PotentialWrapper(*sphPot));
-    }
-    if(isSpherical(dens)) {
-        fncDens.reset(new potential::DensityWrapper(dens));
-    } else {
-        sphDens = potential::DensitySphericalHarmonic::create(dens,
-            /*lmax*/0, /*mmax*/0, /*gridSizeR*/50, gridr[1]*0.1, gridr.back()*10.);
-        fncDens.reset(new potential::DensityWrapper(*sphDens));
-    }
-
-    // construct the spherical Jeans model and compute the velocity dispersion as a function of radius
-    math::LogLogSpline sigmar = createJeansSphModel(*fncDens, *fncPot, beta);
-
-    // the choice of actual B-spline representation is done at runtime by the `degree` argument,
-    // but it corresponds to different template specializations, therefore some setup tasks are
-    // delegated to a dedicated templated routine
+    // construct the appropriate finite-element grid
     switch(degree) {
-        case 0: setupKinemJeans<0>(gridr, *fncDens, sigmar, /*output*/ constraintValues, grid); break;
-        case 1: setupKinemJeans<1>(gridr, *fncDens, sigmar, /*output*/ constraintValues, grid); break;
-        case 2: setupKinemJeans<2>(gridr, *fncDens, sigmar, /*output*/ constraintValues, grid); break;
-        case 3: setupKinemJeans<3>(gridr, *fncDens, sigmar, /*output*/ constraintValues, grid); break;
+        case 0: grid.reset(new KinemJeansGrid<0>(gridr)); break;
+        case 1: grid.reset(new KinemJeansGrid<1>(gridr)); break;
+        case 2: grid.reset(new KinemJeansGrid<2>(gridr)); break;
+        case 3: grid.reset(new KinemJeansGrid<3>(gridr)); break;
         default: throw std::invalid_argument("TargetKinemJeans: degree of interpolation may not exceed 3");
     }
-
-    // amplitudes of FEM representation for rho * r^2 * sigma_t^2, where sigma_t^2 = 2 (1-beta) sigma_r^2
-    unsigned int numBasisFnc = constraintValues.size();
-    constraintValues.resize(2 * numBasisFnc);
-    for(unsigned int b=0; b<numBasisFnc; b++)
-        constraintValues[b + numBasisFnc] = constraintValues[b] * 2 * (1-beta);
-    // penalties
-    constraintPenalties.assign(2 * numBasisFnc, 1.);
+    numConstraints = grid->numValues() / 2;
 }
 
 orbit::PtrRuntimeFnc TargetKinemJeans::getOrbitRuntimeFnc(StorageNumT* output) const
 {
-    return orbit::PtrRuntimeFnc(new RuntimeFncSchw(*grid, output));
+    return orbit::PtrRuntimeFnc(new RuntimeFncSchw<math::IFunctionNdimAdd>(*grid, output));
 }
 
-std::string TargetKinemJeans::elemName(unsigned int index) const
+std::string TargetKinemJeans::constraintName(size_t index) const
 {
-    unsigned int numBasisFnc = constraintValues.size() / 2;
-    if(index >= numBasisFnc)
-        return "sigmat[" + utils::toString(index-numBasisFnc) + "]";
-    else
-        return "sigmar[" + utils::toString(index) + "]";
+    return "beta[" + utils::toString(index) + "]";
 }
 
-void TargetKinemJeans::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
+void TargetKinemJeans::getMatrix(const math::IMatrixDense<StorageNumT>& recordedDatacube,
+    math::IMatrixDense<StorageNumT>& result) const
 {
-    /// TODO
-    std::fill(output, output + model.distrFunc.numValues() * numConstraints(), 0);
+    if( recordedDatacube.rows() != result.rows() ||
+        recordedDatacube.cols() != datacubeSize() ||
+        result.cols() != constraintsSize() )
+        throw std::length_error("TargetKinemJeans: invalid array sizes");
+    // get raw pointers for direct access to the matrix entries
+    const StorageNumT* recordedDatacubePtr = recordedDatacube.data();
+    StorageNumT* resultPtr = result.data();
+    for(size_t i=0; i<result.rows(); i++)
+        for(size_t c=0; c<numConstraints; c++)
+            resultPtr[i * numConstraints + c] =
+                recordedDatacubePtr[ i * 2 * numConstraints + c] * multbeta -
+                recordedDatacubePtr[(i*2+1)* numConstraints + c];
+}
+
+//------//
+
+TargetKinemLOSVD::TargetKinemLOSVD(const LOSVDGridParams& params, unsigned int degree,
+    const std::vector<GaussHermiteExpansion>& ghexp) : GHexp(ghexp)
+{
+    switch(degree) {
+        case 0: grid.reset(new LOSVDGrid<0>(params)); break;
+        case 1: grid.reset(new LOSVDGrid<1>(params)); break;
+        case 2: grid.reset(new LOSVDGrid<2>(params)); break;
+        case 3: grid.reset(new LOSVDGrid<3>(params)); break;
+        default: throw std::invalid_argument(
+            "TargetKinemLOSVD: degree of interpolation may not exceed 3");
+    }
+    // obtain the grid dimensions
+    math::Matrix<double> ampl = grid->getAmplitudes(grid->newDatacube());
+    numApertures = ampl.rows();
+    numBasisFncV = ampl.cols();
+    assert(numApertures == params.apertures.size());
+    // check the correctness of provided constraints (array of Gauss-Hermite expansions)
+    if(ghexp.size() != numApertures)
+        throw std::invalid_argument("TargetKinemLOSVD: "
+            "number of provided Gauss-Hermite moments does not match the number of apertures");
+    // determine the (max) order of Gauss-Hermite expansion
+    numGHmoments = 0;
+    for(size_t a=0; a<numApertures; a++)
+        numGHmoments = std::max(numGHmoments, GHexp[a].coefs().size());
+    if(numGHmoments <= 2)
+        throw std::invalid_argument("TargetKinemLOSVD: "
+            "order of Gauss-Hermite expansion should be at least two");
+}
+
+orbit::PtrRuntimeFnc TargetKinemLOSVD::getOrbitRuntimeFnc(StorageNumT* output) const
+{
+    return orbit::PtrRuntimeFnc(new RuntimeFncSchw<BaseLOSVDGrid>(*grid, output));
+}
+
+std::string TargetKinemLOSVD::constraintName(size_t index) const
+{
+    return "aperture[" + utils::toString(index / numGHmoments) +
+        "], h" + utils::toString(index % numGHmoments);
+}
+
+double TargetKinemLOSVD::constraintValue(size_t index) const
+{
+    return GHexp.at(index / numGHmoments).coefs().at(index % numGHmoments);
+}
+
+void TargetKinemLOSVD::getMatrix(const math::IMatrixDense<StorageNumT>& recordedDatacube,
+    math::IMatrixDense<StorageNumT>& result) const
+{
+    if( recordedDatacube.rows() != result.rows() ||
+        recordedDatacube.cols() != datacubeSize() ||
+        result.cols() != constraintsSize() )
+        throw std::length_error("TargetKinemLOSVD: invalid array sizes");
+    // get raw pointers for direct access to the matrix entries
+    const StorageNumT* recordedDatacubePtr = recordedDatacube.data();
+    StorageNumT* resultPtr = result.data();
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int a=0; a<(int)numApertures; a++) {
+        // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
+        math::Matrix<double> ghmat = grid->getGaussHermiteMatrix(
+            numGHmoments-1, GHexp[a].gamma(), GHexp[a].center(), GHexp[a].sigma());
+        std::vector<double> srcrow(numBasisFncV), dstrow(numGHmoments);  // temp storage
+        // loop over all orbits
+        for(size_t r=0; r<result.rows(); r++) {
+            // convert the section of one row of the input array, corresponding to one aperture
+            // and one orbit, from StorageNumT to double
+            const StorageNumT* srcptr = recordedDatacubePtr + numBasisFncV * (r * numApertures + a);
+            std::copy(srcptr, srcptr + numBasisFncV, srcrow.begin());
+            // multiply the array of amplitudes by the conversion matrix
+            math::blas_dgemv(math::CblasNoTrans, 1., ghmat, srcrow, 0., dstrow);
+            // convert back to StorageNumT and write to a section of one row of the result array
+            std::copy(dstrow.begin(), dstrow.end(), resultPtr + (r * numApertures + a) * numGHmoments);
+        }
+    }
 }
 
 }  // namespace

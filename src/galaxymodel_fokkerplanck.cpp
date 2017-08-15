@@ -211,9 +211,9 @@ std::vector<double> regularizeAmplitudes(
     const math::BsplineInterpolator1d<N>& interp, const std::vector<double>& amplitudes)
 {
     std::vector<double> result(amplitudes);
-    unsigned int numAmpl = result.size();
+    int numAmpl = result.size();
     // first eliminate negative values
-    for(unsigned int i=0; i<numAmpl; i++)
+    for(int i=0; i<numAmpl; i++)
         result[i] = fmax(0., result[i]);
     // next check that the log-slopes at the inner/outermost points are physically valid
     // (the inner asymptotic is shallower than h^-1 and the outer is correspondingly steeper).
@@ -762,8 +762,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     const FokkerPlanckParams& params,
     const std::vector<FokkerPlanckComponent>& components)
 :
-    data(new FokkerPlanckData(params, components)),
-    impl(NULL)  // will be initialized later
+    data(new FokkerPlanckData(params, components))
 {
     // set up the grid parameters
     size_t gridSize = params.gridSize ?: DEFAULT_GRID_SIZE;
@@ -781,6 +780,14 @@ FokkerPlanckSolver::FokkerPlanckSolver(
         hmin = data->phasevol->value(Phi + 0.5 * rmin * dPhi.dR);
     }
 
+    // if necessary, set up the outer boundary expressed in terms of radius, not h
+    if(params.rmax){
+        coord::GradCyl dPhi;
+        double Phi;
+        data->currPot->eval(coord::PosCyl(params.rmax,0,0), &Phi, &dPhi);
+        hmax = data->phasevol->value(Phi);
+    }
+    
     // create the grid in phase volume (h) if its parameters were provided
     if(hmin>0. && hmax>hmin)
         data->gridh = math::createExpGrid(gridSize, hmin, hmax);
@@ -803,15 +810,15 @@ FokkerPlanckSolver::FokkerPlanckSolver(
 
     // create a new grid, uniform in log(h)
     utils::msg(utils::VL_DEBUG, "FokkerPlanckSolver", "Grid in h=[" + 
-        utils::toString(hmin) + ":" + utils::toString(hmax) + "], " + utils::toString(gridSize) + "nodes");
+        utils::toString(hmin) + ":" + utils::toString(hmax) + "], " + utils::toString(gridSize) + " nodes");
     data->gridh = math::createExpGrid(gridSize, hmin, hmax);
 
     // construct the appropriate implementation of the solver
     switch(params.method) {
-        case FP_CHANGCOOPER: impl = new FokkerPlanckImplChangCooper(data->gridh); break;
-        case FP_FEM1: impl = new FokkerPlanckImplFEM<1>(data->gridh); break;
-        case FP_FEM2: impl = new FokkerPlanckImplFEM<2>(data->gridh); break;
-        case FP_FEM3: impl = new FokkerPlanckImplFEM<3>(data->gridh); break;
+        case FP_CHANGCOOPER: impl.reset(new FokkerPlanckImplChangCooper(data->gridh)); break;
+        case FP_FEM1: impl.reset(new FokkerPlanckImplFEM<1>(data->gridh)); break;
+        case FP_FEM2: impl.reset(new FokkerPlanckImplFEM<2>(data->gridh)); break;
+        case FP_FEM3: impl.reset(new FokkerPlanckImplFEM<3>(data->gridh)); break;
         default: throw std::runtime_error("FokkerPlanckSolver: invalid choice of method");
     }
 
@@ -836,14 +843,10 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     reinitAdvDifCoefs();
 }
 
-FokkerPlanckSolver::~FokkerPlanckSolver()
+math::PtrFunction FokkerPlanckSolver::potential() const
 {
-    delete data;
-    delete impl;
+    return math::PtrFunction(new potential::PotentialWrapper(*data->currPot));
 }
-
-math::PtrFunction FokkerPlanckSolver::potential() const {
-    return math::PtrFunction(new potential::PotentialWrapper(*data->currPot)); }
 potential::PtrPhaseVolume FokkerPlanckSolver::phaseVolume() const { return data->phasevol; }
 double FokkerPlanckSolver::Mbh()  const { return data->Mbh; }
 double FokkerPlanckSolver::Mass() const { return data->Mass; }
@@ -1111,7 +1114,7 @@ double FokkerPlanckSolver::evolve(double deltat)
 
         std::vector<double> rhs(dim);    // the r.h.s. of the above equation
         math::blas_dgemv(math::CblasNoTrans, 1., weightMatrix, data->gridf[comp], 0., rhs);
-        
+
         // energy correction term
         if(useCorrection) {
             // estimate d relMatrix / d t = (relMatrix - prevRel) / prevdt,
@@ -1125,7 +1128,7 @@ double FokkerPlanckSolver::evolve(double deltat)
                 data->gridf[comp], 1., rhs);
         }
         data->prevRelaxationMatrix[comp] = relaxationMatrix;
-        
+
         // sink term in the lhs:  lhsMatrix -= deltat * drainMatrix
         if(data->absorbingBoundaryCondition)
             math::blas_daxpy(-deltat, data->drainMatrix[comp], lhsMatrix);
@@ -1133,7 +1136,7 @@ double FokkerPlanckSolver::evolve(double deltat)
         // source term in the rhs
         if(data->sourceRate[comp]>0.)
             math::blas_daxpy(deltat, data->gridSourceRate[comp], rhs);
-        
+
         // boundary conditions: zero-flux (Neumann) b/c does not need anything special,
         // while a constant-value (Dirichlet) b/c essentially eliminates the first/last row
         // of the matrix equation, or, rather, makes it trivial
@@ -1145,7 +1148,7 @@ double FokkerPlanckSolver::evolve(double deltat)
                 rhs[0] = data->gridf[comp][0];
             }
         }
-        
+
         // solve the matrix equation  L f_new = R f_old + dt S
         // newf := L^{-1} rhs
         std::vector<double> newf = math::solveBand(lhsMatrix, rhs);

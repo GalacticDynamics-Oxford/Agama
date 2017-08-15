@@ -137,17 +137,17 @@ public:
         SphericalModel(phasevol, df, gridh) { init(df, gridh); }
 
     /** Construct the interpolators for diffusion coefficients from a SphericalModel.
-        \param[in]  sphmodel  is an instance of SphericalModel,
+        \param[in]  model  is an instance of SphericalModel,
         which provides both the phase volume and the expression for f(h).
-        \parma[in]  gridh  (optional) grid in phase volume for the interpolators
+        \param[in]  gridh  (optional) grid in phase volume for the interpolators
         (if not provided, will construct a suitable one automatically).
         \throw std::runtime_error in case of inconsistencies in the input data.
     */
     SphericalModelLocal(
-        const SphericalModel& sphModel,
+        const SphericalModel& model,
         const std::vector<double>& gridh = std::vector<double>())
     :
-        SphericalModel(sphModel) { init(*this, gridh); }
+        SphericalModel(model) { init(*this, gridh); }
 
     /** Compute the local drift and diffusion coefficients in velocity,
         as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
@@ -178,6 +178,7 @@ public:
 
 /** Compute the orbit-averaged drift and diffusion coefficients in energy.
     The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
+    \param[in]  model  is the instance of SphericalModel that provides the necessary quantities
     \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
     (otherwise the motion is unbound and orbit-averaging does not have sense);
     \param[out] DeltaE  will contain the drift coefficient <Delta E>;
@@ -186,7 +187,7 @@ public:
 void difCoefEnergy(const SphericalModel& model, double E, double &DeltaE, double &DeltaE2);
 
 /** Compute the diffusion coefficient entering the expression for the loss-cone flux.
-    \param[in]  dc   is the spherical model providing the DF and the phase volume.
+    \param[in]  model   is the spherical model providing the DF and the phase volume.
     \param[in]  pot  represents the spherically-symmetric gravitational potential.
     \param[in]  E    is the energy for which the coefficient should be computed.
     \return  the limiting value D of the orbit-averaged diffusion coefficient in
@@ -330,7 +331,7 @@ void computeProjectedDensity(
     both must be in increasing order. Lines not starting with a number are ignored.
     The enclosed mass profile should not include the central black hole (if present),
     because it could not be represented in terms of a density profile anyway.
-    \param[in]  filename  is the input file name.
+    \param[in]  fileName  is the input file name.
     \return  an interpolated density profile, represented by a LogLogSpline class.
     \throw  std::runtime_error if the file does not exist, or the mass profile is not monotonic.
 */

@@ -145,13 +145,14 @@ double unwrapAngle(double x, double xprev)
     return x - 2*M_PI * nwraps;
 }
 
+
 template<typename NumT>
 ptrdiff_t binSearch(const NumT x, const NumT arr[], size_t size)
 {
     if(size<1 || !(x>=arr[0]))
         return -1;
     if(x>arr[size-1] || size<2)
-        return size;
+        return size-1;
     // first guess the likely location in the case that the input grid is equally-spaced
     ptrdiff_t index = static_cast<ptrdiff_t>( (x-arr[0]) / (arr[size-1]-arr[0]) * (size-1) );
     ptrdiff_t indhi = size-1;
@@ -308,7 +309,7 @@ double getRandomPerpendicularVector(const double vec[3], double vper[3])
 
 void getRandomRotationMatrix(double mat[9])
 {
-    // the algorith of Arvo(1992)
+    // the algorithm of Arvo(1992)
     double
     th = 2*M_PI * random(),
     phi= 2*M_PI * random(),
@@ -332,11 +333,11 @@ void getRandomRotationMatrix(double mat[9])
     mat[8] = 1-mu;
 }
 
-void getRandomPermutation(int count, int output[])
+void getRandomPermutation(size_t count, size_t output[])
 {
     // Fisher-Yates algo
-    for(int i=0; i<count; i++) {
-        int j = std::min(static_cast<int>(random() * (i+1)), i);
+    for(size_t i=0; i<count; i++) {
+        size_t j = std::min(static_cast<size_t>(random() * (i+1)), i);
         output[i] = output[j];
         output[j] = i;
     }
@@ -789,6 +790,16 @@ public:
             *der2= NAN;  // not implemented
     }
 };
+
+class ScaledIntegrand: public IFunctionNoDeriv {
+    const ScaledFunction S;
+public:
+    ScaledIntegrand(const IFunction& F, double xlower, double xupper) : S(F, xlower, xupper) {}
+    virtual double value(const double y) const {
+        return S.F.value(S.x_from_y(y)) * S.dxdy_from_y(y);
+    }
+};
+
 }  // namespace
 
 // root-finder with optional scaling
@@ -796,11 +807,8 @@ double findRoot(const IFunction& fnc, double xlower, double xupper, double relto
 {
     if(reltoler<=0)
         throw std::invalid_argument("findRoot: relative tolerance must be positive");
-    if(xlower>=xupper) {
-        double z=xlower;
-        xlower=xupper;
-        xupper=z;
-    }
+    if(xlower>=xupper)
+        std::swap(xlower, xupper);
     if(xlower==-INFINITY || xupper==INFINITY) {   // apply internal scaling procedure
         ScaledFunction F(fnc, xlower, xupper);
         double scroot = findRootHybrid(F, 0., 1., reltoler);
@@ -856,11 +864,8 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
 {
     if(reltoler<=0)
         throw std::invalid_argument("findMin: relative tolerance must be positive");
-    if(xlower>=xupper) {
-        double z=xlower;
-        xlower=xupper;
-        xupper=z;
-    }
+    if(xlower>=xupper)
+        std::swap(xlower, xupper);
     if(xinit==xinit && (xinit<xlower || xinit>xupper))
         throw std::invalid_argument("findMin: initial guess is outside the search interval");
     // transform the original range into [0:1], even if it was (semi-)infinite
@@ -925,7 +930,13 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
         return 0;
     gsl_function F;
     F.function = functionWrapper;
-    F.params = const_cast<IFunction*>(&fnc);
+    ScaledIntegrand S(fnc, x1, x2);
+    if(!isFinite(x1) || !isFinite(x2)) {
+        F.params = &S;
+        x1 = 0.;
+        x2 = 1.;
+    } else
+        F.params = const_cast<IFunction*>(&fnc);
     double result, dummy;
     size_t neval;
     gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);

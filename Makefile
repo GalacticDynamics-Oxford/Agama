@@ -28,12 +28,14 @@ SOURCES   = \
             galaxymodel_densitygrid.cpp \
             galaxymodel_fokkerplanck.cpp \
             galaxymodel_jeans.cpp \
+            galaxymodel_losvd.cpp \
             galaxymodel_selfconsistent.cpp \
             galaxymodel_spherical.cpp \
             galaxymodel_target.cpp \
             galaxymodel_velocitysampler.cpp \
             math_core.cpp \
             math_fit.cpp \
+            math_geometry.cpp \
             math_linalg.cpp \
             math_ode.cpp \
             math_optimization.cpp \
@@ -100,6 +102,7 @@ TESTSRCS  = test_math_core.cpp \
             test_density_grid.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
+            example_lyapunov.cpp \
             example_self_consistent_model.cpp \
             mkspherical.cpp \
             phaseflow.cpp \

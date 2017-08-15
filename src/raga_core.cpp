@@ -4,6 +4,7 @@
 #include "particles_io.h"
 #include "potential_multipole.h"
 #include "potential_factory.h"
+#include "math_core.h"
 #include <fstream>
 #include <stdexcept>
 #include <ctime>
@@ -130,12 +131,16 @@ void RagaCore::doEpisode()
     orbit::OrbitIntParams orbitIntParams;
     orbitIntParams.accuracy = paramsRaga.integratorAccuracy;
 
-    // loop over the particles
+    // loop over the particles in a deterministic random order (for better load balancing),
+    // so that the simulation is reproducible when run with the same number of threads
     int nbody = particles.size();
+    std::vector<size_t> permutation(nbody);
+    math::getRandomPermutation(nbody, &permutation.front());
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(static)
 #endif
-    for(int index=0; index<nbody; index++) {
+    for(int i=0; i<nbody; i++) {
+        size_t index = permutation[i];
         if(particles.mass(index) != 0) {   // run only non-zero-mass particles
             orbit::RuntimeFncArray timestepFncs(numtasks);
             for(int task=0; task<numtasks; task++)

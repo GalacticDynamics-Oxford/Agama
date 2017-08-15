@@ -14,7 +14,6 @@
 #include "math_optimization.h"
 #include "math_base.h"
 #include <stdexcept>
-#include <cassert>
 #include <cmath>
 
 namespace math{
@@ -70,20 +69,13 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     }
     // fill the linear matrix using triplets (row, column, value)
     {   // open a block so that temp variables are destroyed after it is closed.
-        size_t numNonZero=0, numTotal=A.size();
-        // count non-zero values in matrix to reserve the right amount of space
-        // in vectors containing sparse matrix coefs
-        for(size_t i=0; i<numTotal; i++) {
-            size_t c, v;
-            double val = A.elem(i, c, v);
-            if(val!=0) numNonZero++;
-        }
         std::vector<int> ic;
         std::vector<int> iv;
         std::vector<double> mat;
-        ic.reserve (numNonZero+1); ic.push_back(0);
-        iv.reserve (numNonZero+1); iv.push_back(0);
-        mat.reserve(numNonZero+1); mat.push_back(0);
+        size_t numTotal=A.size();
+        ic.reserve (numTotal+1); ic.push_back(0);  // 0th element is always ignored
+        iv.reserve (numTotal+1); iv.push_back(0);  // (GLPK uses indices starting from 1)
+        mat.reserve(numTotal+1); mat.push_back(0);
         for(size_t i=0; i<numTotal; i++) {
             size_t c, v;
             double val = A.elem(i, c, v);
@@ -93,8 +85,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
                 mat.push_back(val);
             }
         }
-        assert(ic.size()==numNonZero+1);
-        glp_load_matrix(problem, numNonZero, &ic.front(), &iv.front(), &mat.front());
+        glp_load_matrix(problem, ic.size()-1, &ic.front(), &iv.front(), &mat.front());
     }
 
     // solve the problem using the interior-point method
@@ -280,7 +271,7 @@ std::vector<double> quadraticOptimizationSolve(
     }
 
     PyObject *status = PyDict_GetItemString(solver, "status");
-    bool feasible = std::string(PyString_AsString(status)) == "optimal";
+    bool feasible = status != NULL && std::string(PyString_AsString(status)) == "optimal";
     PyObject *sol = PyDict_GetItemString(solver, "x");
 
     std::vector<double> result(numVariables);
@@ -319,25 +310,39 @@ std::vector<double> quadraticOptimizationSolve(
 #endif
 
 namespace{
-/// Matrix augmented with two extra blocks at the right end, containint a diagonal unit matrix
-/// and a diagonal negative unit matrix
+/** Matrix augmented with an extra block at the right end, containing pairs of (+1,-1) values
+
+    +--------Nvar columns---------2*Naug--+     |v|
+    |  exactly constrained part |         |     |a|   | |
+    |---------------------------|         |     |r|   |R|
+    |  approximately constr.pt. |1 -1     |  *  |s| = |H|
+    |                           |     1 -1|     |_|   |S|
+    +-------------------------------------+     |#|   | |
+           original matrix       extra cols     |#|
+
+    The extra 2*Naug columns added to the matrix correspond to "slack" variables:
+    they are penalized in the objective function, and if the original matrix equation had
+    a feasible solution, these variables (#) would be zero. But if the RHS (constraints)
+    cannot be satisfied exactly, then either the odd or even-indexed slack variable
+    corresponding to the given constrain will be >0, and will contribute to the cost function
+    (linear or quadratic, or both).
+*/
 template<typename NumT>
 class AugmentedMatrix: public IMatrix<NumT> {
     const IMatrix<NumT>& M;       ///< the original matrix
+    const std::vector<size_t>& indAug;
 public:
-    AugmentedMatrix(const IMatrix<NumT>& src, size_t Nadd):
-        IMatrix<NumT>(src.rows(), src.cols()+2*Nadd), M(src) {};
+    AugmentedMatrix(const IMatrix<NumT>& src, const std::vector<size_t>& _indAug):
+        IMatrix<NumT>(src.rows(), src.cols() + 2*_indAug.size()), M(src), indAug(_indAug) {};
     using IMatrix<NumT>::rows;
     using IMatrix<NumT>::cols;
     virtual size_t size() const { return rows() * cols(); }
-    virtual NumT at(const size_t row, const size_t col) const {
-        size_t Mcols=M.cols(), Nadd=(cols()-Mcols)/2;
-        if(col < Mcols)
+    virtual NumT at(size_t row, size_t col) const {
+        if(col < M.cols())
             return M.at(row, col);
-        if(col == Mcols + row)
-            return +1;
-        if(col == Mcols + Nadd + row)
-            return -1;
+        col -= M.cols();
+        if(row == indAug.at(col / 2))
+            return col%2 ? +1 : -1;
         return 0;
     }
     virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
@@ -351,25 +356,25 @@ public:
 template<typename NumT>
 class AugmentedQuadMatrix: public IMatrix<NumT> {
     const IMatrix<NumT>& Q;        ///< the original matrix
-    const std::vector<NumT>& pen;  ///< additional elements along the main diagonal (repeated twice)
+    const std::vector<NumT>& pen;  ///< additional elements along the main diagonal
     const size_t Qsize, Qrows, Nadd;
 public:
     AugmentedQuadMatrix(const IMatrix<NumT>& src, const std::vector<NumT>& _pen):
-        IMatrix<NumT>(src.rows()+2*_pen.size(), src.cols()+2*_pen.size()),
+        IMatrix<NumT>(src.rows()+_pen.size(), src.cols()+_pen.size()),
         Q(src), pen(_pen), Qsize(Q.size()), Qrows(Q.rows()), Nadd(pen.size()) {};
-    virtual size_t size()    const { return Qsize + 2*Nadd; }
+    virtual size_t size()    const { return Qsize + Nadd; }
     virtual NumT at(const size_t row, const size_t col) const {
         if(col < Qrows)
             return Q.at(row, col);
         if(col == row)
-            return pen.at((col-Qrows) % Nadd);
+            return pen.at(col-Qrows);
         return 0;
     }
     virtual NumT elem(const size_t index, size_t &row, size_t &col) const {
         if(index<Qsize)
             return Q.elem(index, row, col);
         row = col = index - Qsize + Qrows;
-        return pen.at((index-Qsize) % Nadd);
+        return pen.at(index-Qsize);
     }
 };
 }  // internal namespace
@@ -380,27 +385,37 @@ std::vector<double> linearOptimizationSolveApprox(
     const std::vector<NumT>& L, const std::vector<NumT>& consPenaltyLin,
     const std::vector<NumT>& xmin, const std::vector<NumT>& xmax)
 {
-    if(allZeros(consPenaltyLin))
-        return linearOptimizationSolve(A, rhs, L, xmin, xmax);
+    if(consPenaltyLin.empty())
+        throw std::invalid_argument(
+            "linearOptimizationSolveApprox: constraint penalties must be provided");
     size_t numVariables   = A.cols();
     size_t numConstraints = A.rows();
     if( rhs.size()!=numConstraints || consPenaltyLin.size()!=numConstraints ||
         (!L.empty() && L.size()!=numVariables) )
         throw std::invalid_argument("linearOptimizationSolveApprox: invalid size of input arrays");
-    /// augment the original vectors with extra 2*numConstraints elements for the slack variables
-    std::vector<NumT> Laug(numVariables + 2*numConstraints);
+    /// augment the original vectors with extra elements for slack variables
+    std::vector<NumT> Laug(numVariables);
     if(!L.empty())   // copy the array of penalty coefs for variables
         std::copy(L.begin(), L.end(), Laug.begin());
-    std::copy(consPenaltyLin.begin(), consPenaltyLin.end(), Laug.begin()+numVariables);
-    std::copy(consPenaltyLin.begin(), consPenaltyLin.end(), Laug.begin()+numVariables+numConstraints);
+    std::vector<size_t> indAug;
+    for(size_t c=0; c<numConstraints; c++) {
+        if(isFinite(consPenaltyLin[c])) {
+            if(consPenaltyLin[c]<0)
+                throw std::invalid_argument(
+                    "linearOptimizationSolveApprox: constraint penalties must be non-negative");
+            indAug.push_back(c);
+            Laug.push_back(consPenaltyLin[c]);
+            Laug.push_back(consPenaltyLin[c]);
+        }
+    }
     std::vector<NumT> xminaug(xmin);
     if(!xmin.empty())
-        xminaug.insert(xminaug.end(), 2*numConstraints, 0);
+        xminaug.insert(xminaug.end(), 2*indAug.size(), 0);
     std::vector<NumT> xmaxaug(xmax);
     if(!xmax.empty())
-        xmaxaug.insert(xmaxaug.end(), 2*numConstraints, INFINITY);
+        xmaxaug.insert(xmaxaug.end(), 2*indAug.size(), INFINITY);
     std::vector<double> result = linearOptimizationSolve(
-        AugmentedMatrix<NumT>(A, numConstraints), rhs, Laug, xminaug, xmaxaug);
+        AugmentedMatrix<NumT>(A, indAug), rhs, Laug, xminaug, xmaxaug);
     result.resize(numVariables);  // chop off extra slack variables
     return result;
 }
@@ -412,8 +427,9 @@ std::vector<double> quadraticOptimizationSolveApprox(
     const std::vector<NumT>& consPenaltyLin, const std::vector<NumT>& consPenaltyQuad,
     const std::vector<NumT>& xmin, const std::vector<NumT>& xmax)
 {
-    if(allZeros(consPenaltyLin) && allZeros(consPenaltyQuad))
-        return quadraticOptimizationSolve(A, rhs, L, Q, xmin, xmax);
+    if(consPenaltyLin.empty() && consPenaltyQuad.empty())
+        throw std::invalid_argument(
+            "quadraticOptimizationSolveApprox: constraint penalties must be provided");
     size_t numVariables   = A.cols();
     size_t numConstraints = A.rows();
     if( rhs.size()!=numConstraints ||
@@ -421,31 +437,43 @@ std::vector<double> quadraticOptimizationSolveApprox(
         (!consPenaltyQuad.empty() && consPenaltyQuad.size()!=numConstraints) ||
         (!L.empty() && L.size()!=numVariables) )
         throw std::invalid_argument("quadraticOptimizationSolveApprox: invalid size of input arrays");
-    // augment the original vectors with extra 2*numConstraints elements for the slack variables
-    std::vector<NumT> Laug(numVariables + 2*numConstraints);
+
+    // check which constraints are 'loose', i.e. penalty is not infinite,
+    // and add an extra pair of penalized variables for each loose constraint
+    std::vector<NumT> Laug(numVariables), Qaug;
+    std::vector<size_t> indAug;
     if(!L.empty())   // copy the array of penalty coefs for variables
         std::copy(L.begin(), L.end(), Laug.begin());
-    if(!consPenaltyLin.empty()) {
-        std::copy(consPenaltyLin.begin(), consPenaltyLin.end(), Laug.begin()+numVariables);
-        std::copy(consPenaltyLin.begin(), consPenaltyLin.end(), Laug.begin()+numVariables+numConstraints);
+    for(size_t c=0; c<numConstraints; c++) {
+        NumT penLin  = consPenaltyLin.empty()  ? 0 : consPenaltyLin [c];
+        NumT penQuad = consPenaltyQuad.empty() ? 0 : consPenaltyQuad[c];
+        if(penLin<0 || penQuad<0)
+            throw std::invalid_argument(
+                "quadraticOptimizationSolveApprox: constraint penalties must be provided");
+        if(isFinite(penLin + penQuad)) {
+            indAug.push_back(c);
+            Laug.push_back(penLin);
+            Laug.push_back(penLin);
+            Qaug.push_back(penQuad);
+            Qaug.push_back(penQuad);
+        }
     }
     std::vector<NumT> xminaug(xmin);
     if(!xmin.empty())
-        xminaug.insert(xminaug.end(), 2*numConstraints, 0);
+        xminaug.insert(xminaug.end(), 2*indAug.size(), 0);
     std::vector<NumT> xmaxaug(xmax);
     if(!xmax.empty())
-        xmaxaug.insert(xmaxaug.end(), 2*numConstraints, INFINITY);
-    bool Qempty = Q.size()==0;
+        xmaxaug.insert(xmaxaug.end(), 2*indAug.size(), INFINITY);
     std::vector<double> result = quadraticOptimizationSolve(
-        AugmentedMatrix<NumT>(A, numConstraints), rhs, Laug,
-        Qempty && consPenaltyQuad.empty() ?   // in this case don't create any quadratic matrix
+        AugmentedMatrix<NumT>(A, indAug), rhs, allZeros(Laug) ? std::vector<NumT>() : Laug,
+        Q.size()==0 && allZeros(Qaug) ?   // in this case don't create any quadratic matrix
             static_cast<const IMatrix<NumT>&>(BandMatrix<NumT>()) :
             // if either the original quadratic matrix for numVariables was non-empty,
             // or the additional diagonal elements for numConstraints penalties were specified,
             // will create an augmented quadratic matrix, substituting the unspecified elements with zeros
-            static_cast<const IMatrix<NumT>&>(AugmentedQuadMatrix<NumT>(Qempty ?
+            static_cast<const IMatrix<NumT>&>(AugmentedQuadMatrix<NumT>(Q.size()==0 ?
                 static_cast<const IMatrix<NumT>&>(BandMatrix<NumT>(std::vector<NumT>(numVariables, 0))) :
-                Q, consPenaltyQuad.empty() ? std::vector<NumT>(numConstraints) : consPenaltyQuad)),
+                Q, Qaug)),
         xminaug, xmaxaug);
     result.resize(numVariables);  // chop off extra slack variables
     return result;

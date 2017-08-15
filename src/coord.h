@@ -801,6 +801,8 @@ void evalAndConvertSph(const math::IFunction& F,
     HessT<outputCS>* deriv2=NULL);
 
 ///@}
+/// \section Miscellaneous routines
+///@{
 
 /// convenience functions to extract the value of angular momentum and its z-component
 template<typename coordT> double Ltotal(const PosVelT<coordT> &p);
@@ -811,5 +813,7 @@ template<typename coordT> double Lz(const PosVelT<coordT> &p);
 */
 template<typename coordT>
 double Ekin(const PosVelT<coordT> &p, coord::GradT<coordT> *dEbyPos=NULL, coord::VelT<coordT> *dEbyVel=NULL);
-    
+
+///@}
+
 }  // namespace coord

@@ -25,7 +25,7 @@ inline double v_circ(const BasePotential& potential, double R)
 double R_circ(const math::IFunction& potential, double E);
 
 /** Compute the cylindrical radius of a circular orbit in equatorial plane for a given value of energy
-    (convenience overload; the potential should be axisymmetric) */
+    (convenience overload; the potential should be axisymmetric - evaluated along x axis) */
 inline double R_circ(const BasePotential& potential, double E)
 {
     return R_circ(PotentialWrapper(potential), E);

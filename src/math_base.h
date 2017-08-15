@@ -149,6 +149,29 @@ public:
     virtual unsigned int numValues() const = 0;
 };
 
+/** Prototype of a function that has possibly M>>1 output values, of which only a small fraction
+    could be nonzero at any point; it provides the interface for optimized accumulation of
+    weighted points in the output array. */
+class IFunctionNdimAdd: public IFunctionNdim {
+public:
+    /// add a weighted point to the output array.
+    /// \param[in]  vars  is the input point;
+    /// \param[in]  mult  is the weight of input point;
+    /// \param[in,out]  output  points to the external array that accumulates the data;
+    /// all its elements that have a contribution from the input point are incremented by
+    /// the appropriate amount, multiplied by the input factor 'mult'.
+    virtual void addPoint(const double vars[], const double mult, double output[]) const = 0;
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        /// to compute all values at the given point, we fill the output array with zeros
+        /// and invoke the `addPoint()` method (not very efficient, just fulfills the interface)
+        for(unsigned int size=numValues(), i=0; i<size; i++)
+            values[i] = 0.;
+        addPoint(vars, 1., values);
+    }
+};
+
 /** Prototype of a function of N>=1 variables that computes a vector of M>=1 values,
     and derivatives of these values w.r.t.the input variables (aka jacobian). */
 class IFunctionNdimDeriv: public IFunctionNdim {

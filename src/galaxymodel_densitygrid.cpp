@@ -30,24 +30,21 @@ static const int LMIN_SPHHARM = 16;
 /// Helper class for 3-dimensional integration of a density multiplied by basis functions of the grid
 class DensityGridIntegrand: public math::IFunctionNdim {
     const potential::BaseDensity& dens;
-    const math::IFunctionNdim& grid;
+    const BaseDensityGrid& grid;
     const unsigned int nval;
 public:
-    DensityGridIntegrand(const potential::BaseDensity& _dens, const math::IFunctionNdim& _grid) :
+    DensityGridIntegrand(const potential::BaseDensity& _dens, const BaseDensityGrid& _grid) :
         dens(_dens), grid(_grid), nval(grid.numValues()) {}
 
     virtual void eval(const double vars[], double values[]) const {
+        std::fill(values, values + nval, 0.);
         double val;
         const coord::PosCyl pcyl = potential::unscaleCoords(vars, &val /*jacobian of coord scaling*/);
         if(val!=0) val *= dens.density(pcyl);
         if(val!=0) {
             coord::PosCar pcar(toPosCar(pcyl));
             double xyz[3] = {pcar.x, pcar.y, pcar.z};
-            grid.eval(xyz, values);
-            for(unsigned int i=0; i<nval; i++)
-                values[i] *= val;
-        } else {
-            std::fill(values, values + nval, 0.);
+            grid.addPoint(xyz, val, values);
         }
     }
     virtual unsigned int numVars()   const { return 3; }
@@ -149,17 +146,16 @@ DensityGridClassic<N>::DensityGridClassic(
     if(!ok || stripsPerPane<1 || shellRadii.size()<1 || axisYtoX<=0 || axisZtoX<=0)
         throw std::invalid_argument("DensityGridClassic: invalid grid parameters");
 }
-    
+
 template<int N>
-void DensityGridClassic<N>::eval(const double point[3], double values[]) const
+void DensityGridClassic<N>::addPoint(const double point[3], const double mult, double values[]) const
 {
-    std::fill(values, values + numValues(), 0.);
     const int numShells = shellRadii.size();
     double X = fabs(point[0] / axisX), Y = fabs(point[1]) / axisY, Z = fabs(point[2]) / axisZ;
     double r = sqrt(X*X + Y*Y + Z*Z);
     int indShell = math::binSearch(r, &shellRadii[0], numShells) + 1;
     assert(indShell>=0);
-    if(indShell >= numShells) {
+    if(indShell >= numShells || mult == 0) {
         return;  // outside the grid
     }
     int pane;
@@ -193,28 +189,30 @@ void DensityGridClassic<N>::eval(const double point[3], double values[]) const
     int indll, indul, indlu, induu;
     getCornerIndicesClassic<N>(pane, ind1, ind2, stripsPerPane, /*output*/indll, indul, indlu, induu);
     if(N == 0) {
-        values[indll + indShell * valuesPerShell] = 1.;
+        values[indll + indShell * valuesPerShell] += mult;
     } else if(N==1) {
         // convert ratio1,ratio2 and r into fractional coordinates within the current cell (between 0 and 1)
         ratio1 -= ind1;
         ratio2 -= ind2;
-        if(indShell == 0)
-            r /= shellRadii[0];
-        else
-            r = (r - shellRadii[indShell-1]) / (shellRadii[indShell] - shellRadii[indShell-1]);
-        double* valOff= &values[indShell * valuesPerShell + 1];  // offset in the output array
-        valOff[indll] = (1-ratio1) * (1-ratio2) * r;
-        valOff[indul] =    ratio1  * (1-ratio2) * r;
-        valOff[indlu] = (1-ratio1) *    ratio2  * r;
-        valOff[induu] =    ratio1  *    ratio2  * r;
-        if(indShell  == 0) {
-            values[0] = 1-r;  // a single node at origin
-        } else {
-            valOff -= valuesPerShell;  // another offset
-            valOff[indll] = (1-ratio1) * (1-ratio2) * (1-r);
-            valOff[indul] =    ratio1  * (1-ratio2) * (1-r);
-            valOff[indlu] = (1-ratio1) *    ratio2  * (1-r);
-            valOff[induu] =    ratio1  *    ratio2  * (1-r);
+        double val = indShell == 0 ?
+            mult *  r / shellRadii[0] :
+            mult * (r - shellRadii[indShell-1]) / (shellRadii[indShell] - shellRadii[indShell-1]);
+        // contribution to the basis functions at the upper end of the radial segment
+        double* valOff = &values[indShell * valuesPerShell + 1];  // offset in the output array
+        valOff[indll] += (1-ratio1) * (1-ratio2) * val;
+        valOff[indul] +=    ratio1  * (1-ratio2) * val;
+        valOff[indlu] += (1-ratio1) *    ratio2  * val;
+        valOff[induu] +=    ratio1  *    ratio2  * val;
+        // contributions to the lower end of the radial segment
+        if(indShell   == 0) {          // if this is the innermost segment, then there is only
+            values[0] += mult - val;   // a single basis function at origin
+        } else {                       // otherwise a full set of four functions
+            valOff -= valuesPerShell;  // another offset in the output array
+            val = mult - val;          // remaining contribution of the input point
+            valOff[indll] += (1-ratio1) * (1-ratio2) * val;
+            valOff[indul] +=    ratio1  * (1-ratio2) * val;
+            valOff[indlu] += (1-ratio1) *    ratio2  * val;
+            valOff[induu] +=    ratio1  *    ratio2  * val;
         }
     } else
         assert(!"DensityGridClassic: unimplemented N");
@@ -352,20 +350,19 @@ DensityGridSphHarm::DensityGridSphHarm(
         throw std::invalid_argument("DensityGridSphHarm: invalid grid parameters");
 }
 
-void DensityGridSphHarm::eval(const double point[3], double values[]) const
+void DensityGridSphHarm::addPoint(const double point[3], double mult, double values[]) const
 {
-    std::fill(values, values + numValues(), 0.);
     const coord::PosCyl pcyl = toPosCyl(coord::PosCar(point[0], point[1], point[2]));
     double r   = sqrt(pow_2(pcyl.R) + pow_2(pcyl.z));
     double tau = pcyl.z / (r + pcyl.R);
     if(r==0) {
-        values[0] = 1.;
+        values[0] += mult;
         return;
     }
     const int gridrsize = gridr.size();
     int indr = math::binSearch(r, &gridr[0], gridrsize) + 1;
     assert(indr>=0);
-    if(indr >= gridrsize)
+    if(indr >= gridrsize || mult == 0)
         return;  // outside the grid
     // convert r into a fractional offset within the shell [0..1]
     double offr = indr==0 ? r / gridr[0] : (r - gridr[indr-1]) / (gridr[indr] - gridr[indr-1]);
@@ -387,10 +384,10 @@ void DensityGridSphHarm::eval(const double point[3], double values[]) const
     for(int m=0, offset=indr+1; m<=mmax; m+=2) {
         math::sphHarmArray(lmax, m, tau, leg);
         for(int l=m; l<=lmax; l+=2, offset+=gridrsize) {
-            double Ylm = leg[l-m] * 2*M_SQRTPI * (m==0 ? 1. : M_SQRT2 * trig[m-1]);
-            values[offset] = Ylm * offr;
+            double val = mult * leg[l-m] * 2*M_SQRTPI * (m==0 ? 1. : M_SQRT2 * trig[m-1]);
+            values[offset] += val * offr;
             if(indr>0 || l==0)
-                values[offset-1] = Ylm * (1-offr);
+                values[offset-1] += val * (1-offr);
         }
     }
 }
@@ -485,15 +482,14 @@ DensityGridCylindrical<N>::DensityGridCylindrical(const int _mmax,
 }
 
 template<int N>
-void DensityGridCylindrical<N>::eval(const double point[3], double values[]) const
+void DensityGridCylindrical<N>::addPoint(const double point[3], double mult, double values[]) const
 {
-    std::fill(values, values + numValues(), 0.);
     const coord::PosCyl pcyl = toPosCyl(coord::PosCar(point[0], point[1], fabs(point[2])));
     const int gridRsize = gridR.size(), gridzsize = gridz.size();
     int indR = math::binSearch(pcyl.R, &gridR[0], gridRsize) + 1;
     int indz = math::binSearch(pcyl.z, &gridz[0], gridzsize) + 1;
     assert(indR>=0 && indz>=0);
-    if(indR >= gridRsize || indz >= gridzsize)
+    if(indR >= gridRsize || indz >= gridzsize || mult == 0)
         return;  // outside the grid
     // convert R,z into fractional coordinates within the 2d cell [0..1]
     double prevR = indR>0 ? gridR[indR-1] : 0.;
@@ -506,7 +502,7 @@ void DensityGridCylindrical<N>::eval(const double point[3], double values[]) con
     math::trigMultiAngle(pcyl.phi, mmax, false, trig);
 
     for(int m=0; m<=mmax; m+=2) {
-        double val = m==0 ? 1. : 2*trig[m-1];
+        double val = mult * (m==0 ? 1. : 2*trig[m-1]);
         int indll, indul, indlu, induu;
         getCornerIndicesCylindrical<N>(m, indR, indz, gridRsize, gridzsize,
             /*output*/ indll, indul, indlu, induu);

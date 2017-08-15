@@ -3,6 +3,7 @@
 #include <uns.h>
 #endif
 #include <fstream>
+#include <cassert>
 #include <stdexcept>
 #include "utils.h"
 
@@ -144,6 +145,8 @@ namespace {   // internal
 /// helper class that writes NEMO-compatible snapshot file
 class NemoSnapshotWriter
 {
+    std::ofstream snap;  ///< data stream
+    int level;           ///< index of current level (root level is 0)
 public:
     /// create class instance and open file (append if necessary)
     NemoSnapshotWriter(const std::string &filename, bool append=false) {
@@ -187,10 +190,7 @@ public:
     /// end a nested array
     void endLevel() {
         level--;
-        if (level<0)
-        {   // should raise error
-            throw std::runtime_error("Error writing NEMO snapshot: level<0 in endLevel()");
-        }
+        assert(level>=0);
         snap.put(-110);
         snap.put(9);
         snap.put(')');
@@ -217,8 +217,8 @@ public:
     void writePhase(const ParticleArrayCar& points, double time, const units::ExternalUnits& conv) 
     {
         int nbody   = static_cast<int>(points.size());
-        NumT* phase = new NumT[nbody * 6];
-        NumT* mass  = new NumT[nbody];
+        std::vector<NumT> phase(nbody * 6);
+        std::vector<NumT> mass(nbody);
         for(int i = 0 ; i < nbody ; i++) {
             phase[i*6  ] = static_cast<NumT>(points.point(i).x  / conv.lengthUnit);
             phase[i*6+1] = static_cast<NumT>(points.point(i).y  / conv.lengthUnit);
@@ -226,7 +226,7 @@ public:
             phase[i*6+3] = static_cast<NumT>(points.point(i).vx / conv.velocityUnit);
             phase[i*6+4] = static_cast<NumT>(points.point(i).vy / conv.velocityUnit);
             phase[i*6+5] = static_cast<NumT>(points.point(i).vz / conv.velocityUnit);
-            mass[i] = static_cast<NumT>(points.mass(i) / conv.massUnit);
+            mass[i]      = static_cast<NumT>(points.mass(i)     / conv.massUnit);
         }
         startLevel("SnapShot");
         startLevel("Parameters");
@@ -234,24 +234,15 @@ public:
         putVal("Time", time);
         endLevel();
         startLevel("Particles");
-        putVal("CoordSystem",static_cast<int>(0201402));
-        int tmp_dim[3];
-        tmp_dim[0] = nbody;
-        putArray("Mass",1,tmp_dim,mass);
-        tmp_dim[0] = nbody;
-        tmp_dim[1] = 2;
-        tmp_dim[2] = 3;
-        putArray("PhaseSpace",3,tmp_dim,phase);
+        putVal("CoordSystem", static_cast<int>(0201402));
+        int tmp_dim[3] = {nbody, 2, 3};
+        putArray("Mass", 1, tmp_dim, &mass[0]);
+        putArray("PhaseSpace", 3, tmp_dim, &phase[0]);
         endLevel();
         endLevel();
-        delete [] phase;
-        delete [] mass;
     }
     /// check if any i/o errors occured
     bool ok() const { return snap.good(); }
-private:
-    std::ofstream snap;  ///< data stream
-    int level;           ///< index of current level (root level is 0)
 };
 template<> char NemoSnapshotWriter::typeLetter<int>()   { return 'i'; };
 template<> char NemoSnapshotWriter::typeLetter<float>() { return 'f'; };

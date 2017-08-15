@@ -175,7 +175,7 @@ void getRandomRotationMatrix(double mat[9]);
     \param[out] output is the array to be filled by the permutation indices
     (must be an existing array of sufficient length)
 */
-void getRandomPermutation(int count, int output[]);
+void getRandomPermutation(size_t count, size_t output[]);
 
 /** return a quasirandom number from the Halton sequence.
     \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
@@ -223,7 +223,7 @@ double findRoot(const IFunction& F, double x1, double x2, double relToler);
     the interval enclosing the minimum, and returns one of the endpoints if the function 
     turns out to be monotonic on the entire interval.
     \param[in] relToler  determines the accuracy of minimum localization, relative to the range |x2-x1|.
- */
+*/
 double findMin(const IFunction& F, double x1, double x2, double xinit, double relToler);
 
 ///@}

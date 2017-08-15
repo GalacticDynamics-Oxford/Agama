@@ -80,7 +80,7 @@ private:
 };
 
 /** Triaxial logarithmic potential:
-    \f$  \Phi(r) = \sigma^2 \ln[ r_c^2 + x^2 + (y/p)^2 + (z/q)^2 ]  \f$. */
+    \f$  \Phi(r) = (1/2) \sigma^2 \ln[ r_c^2 + x^2 + (y/p)^2 + (z/q)^2 ]  \f$. */
 class Logarithmic: public BasePotentialCar{
 public:
     Logarithmic(double sigma, double coreRadius=0, double axisRatioYtoX=1, double axisRatioZtoX=1) :
@@ -102,7 +102,7 @@ private:
 };
 
 /** Triaxial harmonic potential:
-    \f$  \Phi(r) = \Omega^2 [ x^2 + (y/p)^2 + (z/q)^2 ]/2  \f$. */
+    \f$  \Phi(r) = (1/2) \Omega^2 [ x^2 + (y/p)^2 + (z/q)^2 ]  \f$. */
 class Harmonic: public BasePotentialCar{
 public:
     Harmonic(double Omega, double axisRatioYtoX=1, double axisRatioZtoX=1) :

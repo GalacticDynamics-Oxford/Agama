@@ -133,8 +133,7 @@ def runComponent(comp, pot):
         numrow = len(comp['targets'][1]) / 2
         matrix.append(result[1].T[0:numrow] * 2*(1-comp['beta']) - result[1].T[numrow:2*numrow])
         rhs.   append(numpy.zeros(numrow))
-        avgrhs = numpy.average(abs(comp['targets'][1].values()))
-        rpenl. append(numpy.ones(numrow) / avgrhs)
+        rpenl. append(numpy.ones(numrow) * 10.)
     avgweight = mass / len(comp['ic'])
     xpenq   = numpy.ones(len(comp['ic'])) / avgweight**2 / len(comp['ic']) * 0.1
     weights = agama.optsolve(matrix=matrix, rhs=rhs, rpenl=rpenl, xpenq=xpenq )
@@ -142,10 +141,12 @@ def runComponent(comp, pot):
     # check for any outstanding constraints
     for t in range(len(matrix)):
         delta = matrix[t].dot(weights) - rhs[t]
-        norm  = 1e-8 * abs(comp['targets'][t].values())
+        norm  = 1e-4 * abs(comp['targets'][t].values()) + 1e-8
         for c, d in enumerate(delta):
             if abs(d) > norm[c]:
                 print "Constraint",t," #",c,"not satisfied:", comp['targets'][t][c], d
+    print "Entropy:", -sum(weights * numpy.log(weights+1e-100)) / mass + numpy.log(avgweight), \
+        " # of useful orbits:", len(numpy.where(weights >= avgweight)[0]), "/", len(comp['ic'])
 
     # create an N-body model if needed
     if comp.has_key('nbody'):
@@ -186,7 +187,8 @@ if __name__ == '__main__':
         args = {'ic': result['ic'], 'inttime': result['inttime'], 'weights': result['weights']}
         if result.has_key('densitydata'):  args['densitydata'] = result['densitydata']
         if result.has_key('kinemdata'):    args['kinemdata']   = result['kinemdata']
-        numpy.savez_compressed("model_"+n+".data", **args)
+        try: numpy.savez_compressed("model_"+n+".data", **args)
+        except Exception as e: print(e)
         # write out the initial conditions and weights as a text file
         numpy.savetxt("model_"+n+".orb", \
             numpy.hstack((result['ic'], result['weights'].reshape(-1,1), \

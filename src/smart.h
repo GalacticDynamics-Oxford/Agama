@@ -111,6 +111,7 @@ class BaseInterpolator2d;
 /// pointer to a function class
 typedef shared_ptr<const IFunction> PtrFunction;
 typedef shared_ptr<const IFunctionNdim> PtrFunctionNdim;
+typedef shared_ptr<const IFunctionNdimAdd> PtrFunctionNdimAdd;
 
 /// pointer to a generic 2d interpolation class
 typedef shared_ptr<const BaseInterpolator2d> PtrInterpolator2d;

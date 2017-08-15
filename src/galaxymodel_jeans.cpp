@@ -283,8 +283,8 @@ coord::Vel2Cyl JeansAxi::velDisp(const coord::PosCyl& point) const
     if(R > intvphi2.xmax() || z > intvphi2.ymax()) {
         // assume that sigma(r) ~ 1/sqrt(r) at large distances
         mult = fmin(intvphi2.xmax() / R, intvphi2.ymax() / z);
-        R *= mult;
-        z *= mult;
+        R = fmin(intvphi2.xmax(), R * mult);
+        z = fmin(intvphi2.ymax(), z * mult);
     }
     coord::Vel2Cyl result;
     result.vphi2 = intvphi2.value(R, z) * mult;

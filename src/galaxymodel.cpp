@@ -120,10 +120,10 @@ public:
             }
 
             // 2. determine the actions
-            actions::Actions acts = model.actFinder.actions(posvel);
+            actions::Actions act = model.actFinder.actions(posvel);
 
             // 3. compute the value of distribution function times the jacobian
-            dfval = model.distrFunc.value(acts) * jac;
+            dfval = isFinite(act.Jr + act.Jz + act.Jphi) ? model.distrFunc.value(act) * jac : 0.;
 
             if(!isFinite(dfval))
                 throw std::runtime_error("DF is not finite");

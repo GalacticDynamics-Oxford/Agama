@@ -4,6 +4,7 @@
 #include "potential_multipole.h"
 #include "math_core.h"
 #include "smart.h"
+#include "utils.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>

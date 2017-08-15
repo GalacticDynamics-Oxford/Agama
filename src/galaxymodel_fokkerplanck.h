@@ -70,6 +70,9 @@ struct FokkerPlanckParams {
 
     /** lower and upper boundaries of the grid; 0 means autodetect. */
     double hmin, hmax;
+    
+    /** outer radius of grid (if provided, overrides the value of hmax) */
+    double rmax;
 
     /** the mass of the central black hole (if present, default 0). */
     double Mbh;
@@ -96,8 +99,9 @@ struct FokkerPlanckParams {
     /** set default values in the constructor */
     FokkerPlanckParams() :
         method(FP_CHANGCOOPER),
-        gridSize(0),        // use default grid size
-        hmin(0), hmax(0),   // autodetect
+        gridSize(0),         // use default grid size
+        hmin(0.), hmax(0.),  // autodetect
+        rmax(0.),
         Mbh(0.),
         coulombLog(1.),
         selfGravity(true),
@@ -143,9 +147,6 @@ public:
     */
     FokkerPlanckSolver(const FokkerPlanckParams& params,
         const std::vector<FokkerPlanckComponent>& components);
-
-    /// cleanup
-    ~FokkerPlanckSolver();
     
     /** evolve the DF using the Fokker-Planck equation for a time deltat,
         followed by recomputation of the potential (if required) and the relaxation coefficients;
@@ -190,10 +191,10 @@ public:
 
 private:
     /// opaque structure containing the initial parameters and all internal data that evolves with time
-    FokkerPlanckData* data;
+    shared_ptr<FokkerPlanckData> data;
 
     /// opaque internal implementation of the discretization scheme
-    const FokkerPlanckImpl* impl;
+    shared_ptr<const FokkerPlanckImpl> impl;
     
     /** Recompute the potential and the phase volume mapping (h <-> E)
         by first computing the density by integrating the DF over velocity,

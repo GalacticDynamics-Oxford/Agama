@@ -7,6 +7,9 @@
 #include <string>
 
 #ifdef HAVE_EIGEN
+// necessary to change the global setting for storage order, because the solver interface
+// does not allow for custom matrix types (i.e. with non-default order)
+#define EIGEN_DEFAULT_TO_ROW_MAJOR
 #include <Eigen/Dense>
 #include <unsupported/Eigen/NonLinearOptimization>
 #else
@@ -89,7 +92,9 @@ void functionWrapperNdimFncDer(const gsl_vector* x, void* param, double* f, gsl_
 
 // ----- wrappers for multidimensional nonlinear fitting ----- //
 #ifndef HAVE_EIGEN
-inline int functionWrapperNdimMvalFncDer(const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df) {
+inline int functionWrapperNdimMvalFncDer(
+    const gsl_vector* x, void* param, gsl_vector* f, gsl_matrix* df)
+{
     GslFncWrapper<IFunctionNdimDeriv>* p = static_cast<GslFncWrapper<IFunctionNdimDeriv>*>(param);
     try{
         p->numCalls++;
@@ -125,12 +130,18 @@ int functionWrapperNdimMvalDer(const gsl_vector* x, void* param, gsl_matrix* df)
 #else
 template <class T>
 struct EigenFncWrapper {
+    // definitions for automatic numerical differentiation framework
+    typedef double Scalar;
+    typedef Eigen::VectorXd InputType; //Eigen::Matrix<Scalar, Eigen::Dynamic, 1> InputType;
+    typedef Eigen::VectorXd ValueType; //Eigen::Matrix<Scalar, Eigen::Dynamic, 1> ValueType;
+    typedef Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> JacobianType;
+
     const T& F;
     mutable std::string error;
     mutable int numCalls;
     explicit EigenFncWrapper(const T& _F) : F(_F), numCalls(0) {}
 
-    int operator()(const Eigen::VectorXd &x, Eigen::VectorXd &f) const {
+    int operator()(const InputType &x, ValueType &f) const {
         try{
             numCalls++;
             F.eval(x.data(), f.data());
@@ -151,7 +162,7 @@ struct EigenFncWrapper {
         return 0;
     }
 
-    int df(const Eigen::VectorXd &x, Eigen::MatrixXd &df) const {
+    int df(const InputType &x, JacobianType &df) const {
         try{
             numCalls++;
             F.evalDeriv(x.data(), NULL, df.data());
@@ -169,18 +180,12 @@ struct EigenFncWrapper {
         return 0;
     }
 
-    //int inputs() const { return F.numVars(); }
+    int inputs() const { return F.numVars(); }
     int values() const { return F.numValues(); }
-
-    // definitions for automatic numerical differentiation framework
-    typedef double Scalar;
-        enum {
+    enum {
         InputsAtCompileTime = Eigen::Dynamic,
         ValuesAtCompileTime = Eigen::Dynamic
-        };
-        typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
-        typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
-        typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
+    };
 };
 #endif
 
@@ -298,8 +303,8 @@ int nonlinearMultiFit(const IFunctionNdimDeriv& F, const double xinit[],
     EigenFncWrapper<IFunctionNdimDeriv> params(F);
     Eigen::VectorXd data = Eigen::Map<const Eigen::VectorXd>(xinit, Nparam);
     //Eigen::NumericalDiff< EigenFncWrapper<IFunctionNdimDeriv> > fw(params);
-    //Eigen::LevenbergMarquardt< Eigen::NumericalDiff< EigenFncWrapper<IFunctionNdimDeriv> >, double > solver(fw);
-    Eigen::LevenbergMarquardt< EigenFncWrapper<IFunctionNdimDeriv> , double > solver(params);
+    //Eigen::LevenbergMarquardt< Eigen::NumericalDiff< EigenFncWrapper<IFunctionNdimDeriv> > > solver(fw);
+    Eigen::LevenbergMarquardt< EigenFncWrapper<IFunctionNdimDeriv> > solver(params);
     if(solver.minimizeInit(data) == Eigen::LevenbergMarquardtSpace::ImproperInputParameters)
         params.error = "invalid input parameters";
 #else

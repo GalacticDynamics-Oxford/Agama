@@ -12,7 +12,6 @@
 #include <ctime>
 #include <cassert>
 
-#include "debug_utils.h"
 const bool OUTPUT = utils::verbosityLevel >= utils::VL_VERBOSE;
 
 bool testCond(bool condition, const char* errorMessage)
@@ -150,6 +149,29 @@ public:
     }
     virtual unsigned int numVars() const { return 3; }
     virtual unsigned int numValues() const { return 1; }
+};
+
+// original function to interpolate and convolve
+#define testfncorig sin
+
+// smoothing kernel
+class Gaussian: public math::IFunctionNoDeriv {
+    double invwidth;
+public:
+    Gaussian(double width): invwidth(1/width) {}
+    virtual double value(const double x) const {
+        return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth));
+    }
+};
+
+// smoothing kernel multiplied by the original function
+class GaussianConv: public math::IFunctionNoDeriv {
+    double invwidth, y;
+public:
+    GaussianConv(double width, double _y): invwidth(1/width), y(_y) {}
+    virtual double value(const double x) const {
+        return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth)) * testfncorig(y-x);
+    }
 };
 
 //----------- test penalized smoothing spline fit to noisy data -------------//
@@ -326,7 +348,7 @@ bool testPenalizedSplineDensity()
     const int NNODES  = 49;    // nodes in the estimated density function
     const int NCHECK  = 321;   // points to measure the estimated density
     const double SMOOTHING=.5; // amount of smoothing applied to penalized spline estimate
-    const int NTRIALS = 120;   // number of different realizations of samples
+    const int NTRIALS = 150;   // number of different realizations of samples
     const double XCUT = 3.;    // unequal-mass sampling: for x>XCUT, retain only a subset of
     const int MASSMULT= 1;     // samples with proportionally higher weight each
     std::vector<double> xvalues, weights;  // array of sample points
@@ -432,7 +454,7 @@ bool test_integral(const math::CubicSpline& f, double x1, double x2)
     std::cout << "Integral of f(x)^2 on [" + utils::pp(x1,10) +':'+ utils::pp(x2,10) +
         "]: result=" + utils::pp(result_int,8) + ", error=" + utils::pp(error3,8) + '\n';
     return error1 < 1e-13 && error2 < 1e-13 && error3 < 3e-12;
-    // the large error in the last case is apparently due to roundoff errors
+    // the larger error in the last case is apparently due to roundoff errors
 }
 
 bool testLogScaledSplines()
@@ -474,6 +496,102 @@ bool testLogScaledSplines()
     return
         errValS < 0.2 && errValL < 0.2 && errValD < 0.02 &&
         errDerS < 150 && errDerL < 150 && errDerD < 1.;
+}
+
+template<int N>
+void getAmplFiniteElement(const math::FiniteElement1d<N>& fe, const double SIGMA,
+    /*output*/ std::vector<double>& ampl, std::vector<double>& convampl)
+{
+    const unsigned int gridSize = fe.integrPoints().size();
+    // collect the function values at the nodes of integration grid
+    std::vector<double> fncValues(gridSize);
+    for(unsigned int p=0; p<gridSize; p++)
+        fncValues[p] = testfncorig(fe.integrPoints()[p]);
+    // compute the projection integrals and solve the linear equation to find the amplitudes
+    std::vector<double> pv = fe.computeProjVector(fncValues);
+    math::BandMatrix<double> pm = fe.computeProjMatrix();
+    ampl = solveBand(pm, pv);
+    // compute the convolution
+    math::Matrix<double> cm = fe.computeConvMatrix(Gaussian(SIGMA));
+    std::vector<double> tmpv(ampl.size());
+    math::blas_dgemv(math::CblasNoTrans, 1., cm, ampl, 0., tmpv);
+    convampl = solveBand(pm, tmpv);
+}
+
+bool testFiniteElement()
+{
+    // the function to approximate is  sin(x);
+    // the convolution kernel is a Gaussian with width SIGMA
+    const int NNODES  = 15;
+    const int NTEST   = std::max<int>(5*(NNODES-1)+1, 101);
+    const double XMIN = 0.;
+    const double XMAX = 10.;
+    const double SIGMA= 0.8;
+    std::vector<double> xnodes = math::createUniformGrid(NNODES, XMIN, XMAX);
+    math::FiniteElement1d<0> fe0(xnodes);
+    math::FiniteElement1d<1> fe1(xnodes);
+    math::FiniteElement1d<2> fe2(xnodes);
+    math::FiniteElement1d<3> fe3(xnodes);
+    std::vector<double> am0, cam0, am1, cam1, am2, cam2, am3, cam3;
+    getAmplFiniteElement(fe0, SIGMA, am0, cam0);
+    getAmplFiniteElement(fe1, SIGMA, am1, cam1);
+    getAmplFiniteElement(fe2, SIGMA, am2, cam2);
+    getAmplFiniteElement(fe3, SIGMA, am3, cam3);
+    std::ofstream strm;
+    if(OUTPUT) {
+        strm.open("test_math_spline_femconv.dat");
+        strm << "x         orig_fnc  conv_fnc  fem0      femconv0  fem1      femconv1  "
+        "fem2      femconv2  fem3      femconv3\n";
+    }
+    double err0=0, erc0=0, err1=0, erc1=0, err2=0, erc2=0, err3=0, erc3=0;
+    for(int i=0; i<NTEST; i++) {
+        double x = XMIN + (XMAX-XMIN) / (NTEST-1) * i;
+        double origfnc = testfncorig(x);
+        double convfnc = math::integrateAdaptive(GaussianConv(SIGMA, x), x-XMAX, x-XMIN, 1e-6);
+        double fem0    = fe0.interp.interpolate(x, am0);
+        double femconv0= fe0.interp.interpolate(x, cam0);
+        double fem1    = fe1.interp.interpolate(x, am1);
+        double femconv1= fe1.interp.interpolate(x, cam1);
+        double fem2    = fe2.interp.interpolate(x, am2);
+        double femconv2= fe2.interp.interpolate(x, cam2);
+        double fem3    = fe3.interp.interpolate(x, am3);
+        double femconv3= fe3.interp.interpolate(x, cam3);
+        err0 += pow_2(fem0-origfnc);
+        err1 += pow_2(fem1-origfnc);
+        err2 += pow_2(fem2-origfnc);
+        err3 += pow_2(fem3-origfnc);
+        erc0 += pow_2(femconv0-convfnc);
+        erc1 += pow_2(femconv1-convfnc);
+        erc2 += pow_2(femconv2-convfnc);
+        erc3 += pow_2(femconv3-convfnc);
+        if(OUTPUT)
+            strm << utils::pp(x, 9) +' ' +
+            utils::pp(origfnc,   9) +' ' +
+            utils::pp(convfnc,   9) +' ' +
+            utils::pp(fem0,      9) +' ' +
+            utils::pp(femconv0,  9) +' ' +
+            utils::pp(fem1,      9) +' ' +
+            utils::pp(femconv1,  9) +' ' +
+            utils::pp(fem2,      9) +' ' +
+            utils::pp(femconv2,  9) +' ' +
+            utils::pp(fem3,      9) +' ' +
+            utils::pp(femconv3,  9) +'\n';
+    }
+    err0 = sqrt(err0 / NTEST);
+    erc0 = sqrt(erc0 / NTEST);
+    err1 = sqrt(err1 / NTEST);
+    erc1 = sqrt(erc1 / NTEST);
+    err2 = sqrt(err2 / NTEST);
+    erc2 = sqrt(erc2 / NTEST);
+    err3 = sqrt(err3 / NTEST);
+    erc3 = sqrt(erc3 / NTEST);
+    std::cout << "Finite-element approximation and convolution: RMS error "
+    "in FEM0=" + utils::pp(err0, 8) + ", conv0=" + utils::pp(erc0, 8) +
+    ",  FEM1=" + utils::pp(err1, 8) + ", conv1=" + utils::pp(erc1, 8) +
+    ",  FEM2=" + utils::pp(err2, 8) + ", conv2=" + utils::pp(erc2, 8) +
+    ",  FEM3=" + utils::pp(err3, 8) + ", conv3=" + utils::pp(erc3, 8) + "\n";
+    return err1 < 0.2   && erc1 < 0.2   && err1 < 0.02    && erc1 < 0.02
+        && err2 < 0.002 && erc2 < 0.002 && err3 < 0.00025 && erc3 < 0.00025;
 }
 
 #ifdef  TESTFNC1D_SMOOTH
@@ -749,6 +867,9 @@ bool test1dSpline()
     math::CubicSpline splnon(xx, yy, false);
     bool okmon = splmon.isMonotonic() && !splnon.isMonotonic();
 
+    // test finite-element approximation and convolution
+    bool okfem = testFiniteElement();
+
     bool ok =
     testCond(oknat, "natural cubic spline values at grid nodes are inexact") &&
     testCond(okcla, "clamped cubic spline values at grid nodes are inexact") &&
@@ -774,7 +895,8 @@ bool test1dSpline()
     testCond(okintnat, "integral of natural spline is incorrect") &&
     testCond(okintnum, "integral of B-spline is incorrect") &&
     testCond(oklogspl, "log-scaled splines failed") &&
-    testCond(okmon, "monotonicity analysis failed");
+    testCond(okmon, "monotonicity analysis failed") &&
+    testCond(okfem, "finite-element failed");
 
     //----------- test the performance of 1d spline calculation -------------//
     std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fNatural) + ", 1st deriv: " +

@@ -1,6 +1,7 @@
 #include "math_core.h"
 #include "math_fit.h"
 #include "math_sample.h"
+#include "utils.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -323,7 +324,7 @@ int main()
     std::cout << "with derivative: Root4="<<result<<" (delta="<<(result-exact)<<"; neval="<<numEval<<")\n";
     ok &= (fabs(result-exact)<1e-8*0.8) || err();
 
-    double x0 = exact*2;
+    double x0 = exact*1.5;
     double x1 = x0 + math::PointNeighborhood(test4(0), x0).dxToPositive();
     result = test4(0)(x1);
     std::cout << "positive value at x="<<x1<<", value="<<result<<"\n";
@@ -415,7 +416,7 @@ int main()
     std::cout << "Monte Carlo Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
     ok &= (fabs(result-fnc8.exact)<error*2) || err();  // loose tolerance on MC error estimate
-    if(1) {
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream fout("sampleNdim.dat");
         for(unsigned int i=0; i<points.rows(); i++)
             fout << points(i,0) << "\t" << points(i,1) << "\t" << points(i,2) << "\n";

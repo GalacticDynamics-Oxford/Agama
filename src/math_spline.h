@@ -283,7 +283,7 @@ private:
     N=0 (rectangular histogram), N=1 (linear interpolator), N=2, and N=3 (clamped cubic spline).
 */
 template<int N>
-class BsplineInterpolator1d: public math::IFunctionNdim {
+class BsplineInterpolator1d: public math::IFunctionNdimAdd {
     const std::vector<double> xnodes;  ///< grid nodes
     const unsigned int numComp;        ///< number of basis functions
 public:
@@ -319,6 +319,12 @@ public:
         If the input point is outside the grid, all values will contain zeros.
     */
     virtual void eval(const double* x, double values[]) const;
+
+    /** Add the values of non-zero B-splines at the given point, multiplied by the provided factor
+        `mult`, to the array of accumulated values (similar to `eval()` but without zeroing down
+        the remaining entries, only adding to the relevant ones).
+    */
+    virtual void addPoint(const double* x, double mult, double values[]) const;
 
     /** Compute the value of the interpolant `f` or its derivative at the given point.
         \param[in] x is the point (which may lie outside the grid);
@@ -408,19 +414,23 @@ template<int N>
 class FiniteElement1d {
 public:
     /** Construct the B-spline interpolator and set up the arrays with basis function values */
-    FiniteElement1d(const std::vector<double>& xnodes);
+    FiniteElement1d(const std::vector<double>& xnodes) : interp(xnodes) { setup(); }
+
+    /** Construct the object from an existing B-spline interpolator */
+    FiniteElement1d(const BsplineInterpolator1d<N>& _interp) : interp(_interp) { setup(); }
     
     /** Compute the projection of a function f(x) onto the basis -- the vector of integrals
         of input function weighted with each of the basis functions B_n or their derivatives:
         \f$ v_n = \int f(x) B_n^{(D)}(x) dx \f$.
         \param[in]  fncValues   is the array of pre-computed values of input function f(x)
-        at the grid of points returned by `integrPoints()`.
+        at the grid of points returned by `integrPoints()`;
+        it may be an empty array, which stands for f(x)=1.
         \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
         \return  the vector v_n  of length `interp.numValues()` (number of basis functions).
         \throw   std::length_error if the length of fncValues differs from integrNodes.
     */
     std::vector<double> computeProjVector(
-        const std::vector<double>& fncValues, unsigned int derivOrder=0) const;
+        const std::vector<double>& fncValues = std::vector<double>(), unsigned int derivOrder=0) const;
 
     /** Compute the matrix of products of basis functions or their derivatives 
         weighted with input function f(x):
@@ -429,13 +439,28 @@ public:
         at the grid of points returned by `integrPoints()`;
         it may be an empty array, meaning that f(x)=1 identically.
         \param[in]  derivOrderP  is the order `p` of derivatives of the row-wise basis functions.
-        \param[in]  derivOrderQ  is the order `p` of derivatives of the column-wise basis functions.
+        \param[in]  derivOrderQ  is the order `q` of derivatives of the column-wise basis functions.
         \return  the band matrix A_{mn}: a square matrix with size `interp.numValues()` and
         at most 2*N+1 nonzero values around the main diagonal in each row.
         \throw  std::length_error if the length of fncValues differs from integrNodes.
     */
     BandMatrix<double> computeProjMatrix(
         const std::vector<double>& fncValues = std::vector<double>(),
+        unsigned int derivOrderP=0, unsigned int derivOrderQ=0) const;
+
+    /** Compute the convolution matrix for the given kernel K:
+        \f$  K_{mn} = \int dx \int dy  B_m^{(p)}(x) B_n^{(q)}(y) K(x-y)  \f$.
+        If a function f(x) is represented by the vector of its basis-set amplitudes f_i,
+        then the convolution of f with the kernel K (the integral  \f$ g(y) = \int f(x) K(x-y) dx \f$)
+        may be approximated by the vector of amplitudes g_j:  g = A^{-1} K f,
+        where A is the band matrix returned by `computeProjMatrix()`,
+        and K is the convolution matrix returned by this routine.
+        \param[in]  kernel  is the convolution kernel;
+        \param[in]  derivOrderP  is the order `p` of derivatives of the row-wise basis functions.
+        \param[in]  derivOrderQ  is the order `q` of derivatives of the column-wise basis functions.
+        \return the square matrix K_{mn} with size `interp.numValues()`.
+    */
+    Matrix<double> computeConvMatrix(const IFunction& kernel,
         unsigned int derivOrderP=0, unsigned int derivOrderQ=0) const;
 
     /** Compute the amplitudes of B-spline interpolator for the input function f(x).
@@ -466,9 +491,11 @@ private:
     /// we use the order of Gauss-Legendre quadrature equal to N+1, so that the integration of
     /// polynomials up to degree 2N+1 (e.g., products of two basis functions) is exact
     static const int GLORDER = N+1;
-    std::vector<double> integrNodes;
-    std::vector<double> integrWeights;
-    std::vector<double> bsplValues;
+    std::vector<double> integrNodes;   ///< nodes of the integration grid
+    std::vector<double> integrWeights; ///< weights associated with the nodes of the integration grid
+    std::vector<double> bsplValues;    ///< pre-computed values and all derivatives of basis functions
+    /// common initialization tasks for both constructors
+    void setup();
 };
 
 
@@ -1010,7 +1037,7 @@ public:
 
     /** perform an 'oversmooth' fitting with adaptive choice of smoothing parameter.
         deltaAIC>=0 determines the difference in AIC (Akaike information criterion) between
-        the solution with no smoothing and the returned solution which is smoothed more than
+        the solution with optimal smoothing and the returned solution which is smoothed more than
         the optimal amount defined above.
         The other arguments have the same meaning as in `fitOptimal()`.
     */
@@ -1149,6 +1176,15 @@ std::vector<double> createAlmostUniformGrid(unsigned int nnodes,
     \throw      std::invalid_argument if the input does not start with zero or is not increasing.
 */
 std::vector<double> mirrorGrid(const std::vector<double> &input);
+
+/** create a possibly non-uniform grid, symmetric about origin.
+    \param[in]  nnodes  is the total number of grid nodes (hence the number of segments is nnodes-1);
+    \param[in]  xmin  is the width of the central grid segment;
+    \param[in]  xmax  is the outer edge of the grid (endpoints are at +-xmax);
+    if it is provided, the grid segments are gradually stretched as needed,
+    otherwise this implies uniform segments and hence xmax = 0.5 * (nnodes-1) * xmin.
+*/
+std::vector<double> createSymmetricGrid(unsigned int nnodes, double xmin, double xmax=NAN);
 
 /** Construct a grid for interpolating a function with a cubic spline.
     x is supposed to be a log-scaled coordinate, i.e., it does not attain very large values

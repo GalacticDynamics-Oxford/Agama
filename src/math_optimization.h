@@ -1,6 +1,6 @@
 /** \file   math_optimization.h
     \brief  linear and quadratic optimization solvers
-    \date   2009-2016
+    \date   2009-2017
     \author Eugene Vasiliev
 */
 #pragma once
@@ -40,7 +40,7 @@ std::vector<double> linearOptimizationSolve(
     constraints on the solution vector `x` and a quadratic objective function `F(x)`.
     The task is to find the vector `x` that solves the system of linear equations
     A x = rhs,  satisfies constraints  xmin <= x <= xmax, and minimizes the cost function
-    F(x) = L x + x^T Q x,  where L is the vector of 'linear penalties' and Q is the matrix
+    F(x) = L x + (1/2) x^T Q x,  where L is the vector of 'linear penalties' and Q is the matrix
     of 'quadratic penalties'.
     \param[in]  A  is the matrix of the linear system (N_c rows, N_v columns, N_v>=N_c);
     \param[in]  rhs  is the RHS of the linear system (N_c elements, or the equality constraints);
@@ -82,11 +82,13 @@ std::vector<double> quadraticOptimizationSolve(
     but if it was infeasible, then either p[c] or q[c] will be larger than zero for some rows.
     The penalties for constraint violation are specified by an additional argument `consPenaltyLin`,
     while other arguments have the same meaning and default values as for `linearOptimizationSolve()`.
+    Some constraint penalties may be infinity, meaning that these constraints must be satisfied exactly
+    (no extra variables are added for these constraints).
     \param[in]  A  is the matrix of the linear system (N_c x N_v);
     \param[in]  rhs  is its right-hand side (N_c);
     \param[in]  L  is the vector of linear penalties for N_v variables;
     \param[in]  consPenaltyLin  is the vector of linear penalties for violating each of N_c constraints
-    (in either positive or negative direction);
+    (in either positive or negative direction), must contain non-negative elements;
     \param[in]  xmin  is the vector of lower bounds on the solution (N_v or empty);
     \param[in]  xmax  is the vector of upper bounds (N_v);
     \tparam  NumT  is the numerical type of the input arrays (float or double).
@@ -107,20 +109,22 @@ std::vector<double> linearOptimizationSolveApprox(
     The original linear system  A x = rhs  that has N_v variables and N_c constraints in the rhs is
     augmented with extra 2 N_c slack variables in the same way as in `linearOptimizationSolveApprox()`.
     The penalties for these extra variables being different from zero can be both linear and quadratic,
-    governed by two additional vectors `consPenaltyLin` and `consPenaltyQuad` (either of them may be
-    an empty vector). In particular, when only quadratic penalties for constraint violation are used,
-    this is equivalent to the constrained least-square fitting problem.
+    governed by two additional vectors `consPenaltyLin` and `consPenaltyQuad` (either of them, but
+    not both, may be an empty vector). In particular, when only quadratic penalties for constraint
+    violation are used, this is equivalent to the constrained least-square fitting problem.
+    Some constraint penalties may be infinity, meaning that these constraints must be satisfied exactly
+    (no extra variables are added for these constraints).
     Other arguments have the same meaning and default values as for `quadraticOptimizationSolve()`.
     \param[in]  A  is the matrix of the linear system (N_c x N_v);
     \param[in]  rhs  is its right-hand side (N_c);
     \param[in]  L  is the vector of linear penalties for N_v variables;
     \param[in]  Q  is the matrix (probably a diagonal one, or even an empty one) of quadratic penalties
     for N_v variables;
-    \param[in]  consPenaltyLin  is the vector of linear penalties for violating each of N_c constraints
-    (may be empty, meaning no linear penalties);
-    \param[in]  consPenaltyQuad is the vector of quadratic penalties for constraint violation
-    (N_c elements, may be empty if no quadratic penalties - independently from the existence of
-    quadratic penalties for variables in the `Q` matrix);
+    \param[in]  consPenaltyLin  is the vector of (non-negative) linear penalties for violating each of
+    N_c constraints (may be empty, meaning no linear penalties);
+    \param[in]  consPenaltyQuad is the vector of (non-negative) quadratic penalties for constraint
+    violation (N_c elements, may be empty if no quadratic penalties - independently from the existence
+    of quadratic penalties for variables in the `Q` matrix);
     \param[in]  xmin  is the vector of lower bounds on the solution (N_v or empty);
     \param[in]  xmax  is the vector of upper bounds (N_v);
     \tparam  NumT  is the numerical type of the input arrays (float or double).

@@ -29,7 +29,7 @@ namespace potential {
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrDensity on success.
-    \throws    std::invalid_argument or std::runtime_error or other density-specific exception on failure
+    \throw     std::invalid_argument or std::runtime_error or other density-specific exception on failure
 */
 PtrDensity createDensity(
     const utils::KeyValueMap& params,
@@ -40,7 +40,7 @@ PtrDensity createDensity(
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter;
     \return    a new instance of PtrPotential on success.
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
 */
 PtrPotential createPotential(
@@ -55,7 +55,7 @@ PtrPotential createPotential(
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
     in parameters (essentially the grid sizes) into internal units;
     \return    a new instance of PtrPotential on success.
-    \throws    std::invalid_argument if the requested potential is not of an expansion type,
+    \throw     std::invalid_argument if the requested potential is not of an expansion type,
     or any potential-specific exception on failure (if some parameters are missing or invalid).
 */
 PtrPotential createPotential(
@@ -70,7 +70,7 @@ PtrPotential createPotential(
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
     in parameters (essentially the grid sizes) into internal units;
     \return    a new instance of PtrPotential on success.
-    \throws    std::invalid_argument if the requested potential is not of an expansion type,
+    \throw     std::invalid_argument if the requested potential is not of an expansion type,
     or any potential-specific exception on failure (if some parameters are missing or invalid).
 */    
 PtrPotential createPotential(
@@ -87,7 +87,7 @@ PtrPotential createPotential(
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrPotential on success.
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
 */
 PtrPotential createPotential(
@@ -101,7 +101,7 @@ PtrPotential createPotential(
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrPotential on success (if there are several components
     in the INI file, the returned potential is composite).
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
 */
 PtrPotential createPotential(
@@ -118,7 +118,7 @@ PtrPotential createPotential(
     N-body snapshot file, the conversion is applied at that stage, and if they come from 
     other routines in the library, they are already in internal units.
     \return    a new instance of PtrPotential on success.
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing).
 */
 PtrPotential createPotential(
@@ -135,8 +135,8 @@ PtrPotential createPotential(
     as the second argument, and creates a converter from standard GalPot to these internal units.
     \param[in]  filename  is the name of parameter file;
     \param[in]  converter provides the conversion from GalPot to internal units;
-    \returns    a new instance of PtrPotential;
-    \throws     a std::runtime_error exception if file is not readable or does not contain valid parameters.
+    \return     a new instance of PtrPotential;
+    \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
 PtrPotential readGalaxyPotential(
     const std::string& filename, const units::ExternalUnits& converter);
@@ -149,8 +149,8 @@ PtrPotential readGalaxyPotential(
     with this converter object as the second argument. 
     \param[in]  filename is the name of parameter file;
     \param[in]  unit     is the specification of internal unit system;
-    \returns    a new instance of PtrPotential;
-    \throws     a std::runtime_error exception if file is not readable or does not contain valid parameters.
+    \return     a new instance of PtrPotential;
+    \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
 inline PtrPotential readGalaxyPotential(
     const std::string& filename, const units::InternalUnits& unit) 
@@ -165,7 +165,7 @@ inline PtrPotential readGalaxyPotential(
     \param[in] converter is the unit converter for transforming the density coefficients;
     from dimensional into internal units; can be a trivial converter;
     \return    a new instance of PtrDensity on success;
-    \throws    std::invalid_argument or std::runtime_error or other density-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other density-specific exception
     on failure (e.g., if the file does not exist, or does not contain valid coefficients).
 */
 PtrDensity readDensity(const std::string& coefFileName,
@@ -178,7 +178,7 @@ PtrDensity readDensity(const std::string& coefFileName,
     \param[in] converter is the unit converter for transforming the potential coefficients;
     from dimensional into internal units; can be a trivial converter;
     \return    a new instance of PtrPotential on success;
-    \throws    std::invalid_argument or std::runtime_error or other potential-specific exception
+    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if the file does not exist, or does not contain valid coefficients).
 */
 PtrPotential readPotential(const std::string& coefFileName,

@@ -12,7 +12,7 @@
 namespace galaxymodel{
 
 /** Base class for all density discretization schemes */
-class BaseDensityGrid: public math::IFunctionNdim {
+class BaseDensityGrid: public math::IFunctionNdimAdd {
 public:
     virtual ~BaseDensityGrid() {}
 
@@ -74,7 +74,7 @@ class DensityGridClassic: public BaseDensityGrid {
     const double axisX, axisY, axisZ;     ///< flattening of the grid in each cartesian direction
 public:
     /** construct the grid with given parameters.
-        \param[in]  stripsPerPlane  is the number of strips in each direction in one pane
+        \param[in]  stripsPerPane  is the number of strips in each direction in one pane
         (so that the total number of grid cells is 3 * stripsPerPane^2), should be positive
         \param[in]  shellRadii  is the array of grid nodes in spheroidal radius, should be increasing
         and does not include origin.
@@ -94,9 +94,9 @@ public:
     /// total number of basis functions
     virtual unsigned int numValues() const { return valuesPerShell * shellRadii.size() + N; }
 
-    /// compute the values of all basis functions at the point specified by its cartesian coordinates;
-    /// at most 1 (for N=0) or 8 (for N=1) values are non-zero at any point.
-    virtual void eval(const double point[3], double values[]) const;
+    /// adds the values of all nonzero basis functions at the input point, weighted by mult,
+    /// to the output array; at most 1 (for N=0) or 8 (for N=1) values are non-zero at any point.
+    virtual void addPoint(const double point[3], const double mult, double values[]) const;
 
     /// an optimized routine for computing the projection of the density profile
     /// onto the basis functions (in the case N=0 these are the masses contained in each cell)
@@ -136,7 +136,7 @@ public:
     virtual unsigned int numValues() const { return angularCoefs * gridr.size() + 1; }
 
     /// compute the values of all basis functions at the point specified by its cartesian coordinates
-    virtual void eval(const double point[3], double values[]) const;
+    virtual void addPoint(const double point[3], const double mult, double values[]) const;
 
     /// an optimized routine for computing the projection of the density profile
     /// onto the basis functions
@@ -180,7 +180,7 @@ public:
     virtual unsigned int numValues() const { return totalNumValues; }
 
     /// compute the values of all basis functions at the point specified by its cartesian coordinates
-    virtual void eval(const double point[3], double values[]) const;
+    virtual void addPoint(const double point[3], const double mult, double values[]) const;
 
     /// compute the projections of the density profile onto the basis functions
     virtual std::vector<double> computeProjVector(const potential::BaseDensity& density) const;

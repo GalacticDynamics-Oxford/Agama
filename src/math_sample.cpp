@@ -1,6 +1,5 @@
 #include "math_sample.h"
 #include "math_core.h"
-#include "math_spline.h"
 #include "utils.h"
 #include <stdexcept>
 #include <cassert>
@@ -128,13 +127,13 @@ private:
 
     /// the N-dimensional function to work with                          [ f(x) ]
     const IFunctionNdim& fnc;
-    
+
     /// a shorthand for the number of dimensions
     const unsigned int Ndim;
-    
+
     /// the total N-dimensional volume to be surveyed                    [ V ]
     double volume;
-    
+
     /// the total number of cells in the entire volume                   [ Nc ]
     CellEnum numCells;
 
@@ -147,7 +146,7 @@ private:
     /// array of sampling points drawn from the distribution,
     /// each i-th row of the matrix contains N coordinates of the point  [ x_i[d] ]
     Matrix<double> sampleCoords;
-    
+
     /// array of weighted function values  f(x_i) w(x_i),  where initially
     /// w = Vc(x) * Nc / V, i.e., proportional to the volume of the N-dimensional cell 
     /// from which the point was sampled, and later w may be reduced if this cell gets refined
@@ -332,7 +331,7 @@ void Sampler::runPass(const unsigned int numSamples)
         double* coords = &(sampleCoords(i, 0)); // address of 0th element in i-th matrix row
         // randomly assign coords and record the weight of this point, proportional to
         // the volume of the cell from which the coordinates were sampled (fnc is not yet called)
-        weightedFncValues[i] = samplePoint(coords) / defaultSamplesPerCell; 
+        weightedFncValues[i] = samplePoint(coords) / defaultSamplesPerCell;
     }
     // next compute the values of function at these points
     evalFncLoop(0, numSamples);
@@ -346,11 +345,14 @@ void Sampler::computeIntegral()
     const unsigned int numSamples = weightedFncValues.size();
     assert(sampleCoords.rows() == numSamples);
     Averager avg;
-    integValue = 0;
+    // declare the accumulator variable as volatile to PREVENT auto-vectorization:
+    // the summation needs to be done exactly in the same order here and in drawSamples()
+    volatile double integ = 0;
     for(unsigned int i=0; i<numSamples; i++) {
         avg.add(weightedFncValues[i]);
-        integValue += weightedFncValues[i];
+        integ += weightedFncValues[i];
     }
+    integValue = integ;
     integError = sqrt(avg.disp() * numSamples);
     utils::msg(utils::VL_DEBUG, "sampleNdim",
         "Integral value="+utils::toString(integValue)+" +- "+utils::toString(integError)+
@@ -449,7 +451,7 @@ void Sampler::readjustBins()
         }
         assert(dimToMerge<Ndim);  // it cannot be left unassigned,
         // since we must still have at least one dimension with more than one bin
-        
+
         // merge pairs of adjacent bins in the given dimension
         unsigned int newNumBins = (binBoundaries[dimToMerge].size()-1) / 2;
         assert(newNumBins>=1);
@@ -462,7 +464,7 @@ void Sampler::readjustBins()
             binIntegrals[dimToMerge].erase(binIntegrals[dimToMerge].begin()+i+1);
             binBoundaries[dimToMerge].erase(binBoundaries[dimToMerge].begin()+i+1);
         }
-        
+
         numCells /= 2;
     }
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
@@ -606,22 +608,25 @@ void Sampler::drawSamples(const unsigned int numOutputSamples, Matrix<double>& o
     outputSamples=math::Matrix<double>(numOutputSamples, Ndim);
     const unsigned int npoints = weightedFncValues.size();
     assert(sampleCoords.rows() == npoints);   // number of internal samples already taken
-    double partialSum = 0;        // accumulates the sum of f(x_i) w(x_i) for i=0..{current value}
-    const double outputWeight =   // difference in accumulated sum between two output samples
-        integValue / (numOutputSamples+1e-6);
-    // the tiny addition above ensures that the last output sample coincides with the last internal sample
+    volatile double partialSum = 0;  // accumulates the sum of f(x_i) w(x_i) for i=0..{current value}
+    const double outputWeight =      // difference in accumulated sum between two output samples
+        integValue / numOutputSamples;
+    // construct a random permutation of internal samples to erase the original order
+    // (because possible refinement steps would introduce features in the output sample distribution)
+    std::vector<size_t> permutation(numOutputSamples);
+    getRandomPermutation(numOutputSamples, &permutation.front());
     unsigned int outputIndex = 0;
     for(unsigned int i=0; i<npoints && outputIndex<numOutputSamples; i++) {
         assert(weightedFncValues[i] <= outputWeight);  // has been guaranteed by ensureEnoughSamples()
         partialSum += weightedFncValues[i];
-        if(partialSum >= (outputIndex+1) * outputWeight) {
+        if(partialSum >= (outputIndex+0.5) * outputWeight) {
             for(unsigned int d=0; d<Ndim; d++)
-                outputSamples(outputIndex, d) = sampleCoords(i, d);
+                outputSamples(permutation[outputIndex], d) = sampleCoords(i, d);
             outputIndex++;
         }
     }
     if(outputIndex != numOutputSamples)    // TODO: remove if it never occurs ('assert' should remain)
-        utils::msg(utils::VL_MESSAGE, "sampleNdim()", "outputIndex="+utils::toString(outputIndex)+
+        utils::msg(utils::VL_MESSAGE, "sampleNdim", "outputIndex="+utils::toString(outputIndex)+
             ", numSamples="+utils::toString(numOutputSamples));
     assert(outputIndex == numOutputSamples);
 }

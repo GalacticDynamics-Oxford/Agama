@@ -92,6 +92,8 @@ const char* usage =
     "  hmin=(),hmax=()  [G] the extent of the grid in phase volume h; the grid is logarithmically spaced "
     "between hmin and hmax, and by default encompasses a fairly large range of h "
     "(depending on the potential, but typically hmin~1e-10, hmax~1e10)\n"
+    "  rmax=()          [G] alternative specification of the outer grid boundary in terms of radius, "
+    "not h (if provided, overrides the value of hmax)\n"
     "  gridSizeDF=(200) [G] number of grid points in h\n"
     "  method=(0)       [G] the choice of discretization method (0: Chang&Cooper, 1-3: finite element)\n"
     "  ==== Central black hole (sink) ====\n"
@@ -259,6 +261,7 @@ int main(int argc, char* argv[])
     params.method          = (galaxymodel::FokkerPlanckMethod)args.getInt("method", params.method);
     params.hmin            = args.getDouble("hmin", params.hmin);
     params.hmax            = args.getDouble("hmax", params.hmax);
+    params.rmax            = args.getDouble("rmax", params.rmax);
     params.gridSize        = args.getIntAlt("gridsize", "gridSizeDF", params.gridSize);
     params.coulombLog      = args.getDouble("coulombLog", params.coulombLog);
     params.selfGravity     = args.getBool  ("selfGravity", params.selfGravity);
@@ -288,7 +291,8 @@ int main(int argc, char* argv[])
         fp.setMbh(Mbh);
 
     // begin the simulation
-    double timeSim = 0, dt = dtmin>0 ? dtmin : 0.01 * eps * fp.relaxationTime(), prevTimeOut = -INFINITY;
+    double timeSim = 0, prevTimeOut = -INFINITY;
+    double dt = fmin(dtmax, fmax(dtmin, 0.01 * eps * fp.relaxationTime()));
     int nstep = 0, prevNstepOut = -nstepOut;
     while(timeSim < timeTotal && nstep < MAXNSTEP) {
         // print out the diagnostic information

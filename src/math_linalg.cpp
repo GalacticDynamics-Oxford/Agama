@@ -1114,7 +1114,8 @@ NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) cons
 {
     row = index / cols();
     col = index % cols();
-    return operator()(row, col);
+    matrixRangeCheck(row < rows());
+    return static_cast<const NumT*>(impl)[index];
 }
 
 template<typename NumT>

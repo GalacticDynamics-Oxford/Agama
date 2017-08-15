@@ -65,8 +65,8 @@ inline int bsplineValues(const double x, const double grid[], int size, double B
 /// subexpression in b-spline derivatives (inverse distance between grid nodes or 0 if they coincide)
 inline double denom(const double grid[], int size, int i1, int i2)
 {
-    double x1 = grid[i1<0 ? 0 : i1>=size ? size-1 : i1];
-    double x2 = grid[i2<0 ? 0 : i2>=size ? size-1 : i2];
+    double x1 = grid[std::max(0, std::min(size-1, i1))];
+    double x2 = grid[std::max(0, std::min(size-1, i2))];
     return x1==x2 ? 0 : 1 / (x2-x1);
 }
 
@@ -670,7 +670,7 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
             *deriv2= 0;
         return;
     }
-    if(index >= size) {
+    if(index >= size-1) {
         if(val)
             *val   = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
         if(deriv)
@@ -799,7 +799,7 @@ void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double
             *deriv2= 0;
         return;
     }
-    if(index >= size) {
+    if(index >= size-1) {
         if(val)
             *val   = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
         if(deriv)
@@ -956,7 +956,7 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
     int index = binSearch(x, &xval[0], size);
     double logx = log(x);
 
-    if(index < 0 || index >= size) {
+    if(index < 0 || index >= size-1) {
         index = (index<0 ? 0 : size-1);
         if(!isFinite(logfder[index]) || logfder[index]==0) {
             // either the endpoint was excluded from the log-spline construction,
@@ -1077,8 +1077,17 @@ void BsplineInterpolator1d<N>::eval(const double* x, double values[]) const
 }
 
 template<int N>
+void BsplineInterpolator1d<N>::addPoint(const double* x, double mult, double values[]) const
+{
+    double bspl[N+1];
+    unsigned int leftInd = bsplineValues<N>(*x, &xnodes[0], xnodes.size(), bspl);
+    for(int i=0; i<=N; i++)
+        values[i+leftInd] += mult * bspl[i];
+}
+
+template<int N>
 std::vector<double> BsplineInterpolator1d<N>::deriv(const std::vector<double> &amplitudes) const
-{    
+{
     if(amplitudes.size() != numComp)
         throw std::length_error("deriv: invalid size of amplitudes array");
     std::vector<double> result(amplitudes);
@@ -1158,9 +1167,9 @@ template class BsplineInterpolator1d<3>;
 // ------ Finite-element features of B-splines ------ //
 
 template<int N>
-FiniteElement1d<N>::FiniteElement1d(const std::vector<double>& xnodes) :
-    interp(xnodes)
+void FiniteElement1d<N>::setup()
 {
+    const std::vector<double>& xnodes = interp.xvalues();
     const unsigned int
     gridSize = (xnodes.size()-1) * GLORDER,  // total # of points on the integration grid
     numFunc  = N+1,   // # of nonzero basis functions on each segment
@@ -1191,12 +1200,13 @@ std::vector<double> FiniteElement1d<N>::computeProjVector(
     const std::vector<double>& fncValues, unsigned int derivOrder) const
 {
     const unsigned int gridSize = integrNodes.size(), numFunc = N+1, numBasisFnc = interp.numValues();
-    if(fncValues.size() != gridSize)
+    bool empty = fncValues.empty();   // whether the function f(x) is provided (otherwise take f=1)
+    if(!empty && fncValues.size() != gridSize)
         throw std::length_error("computeProjVector: invalid size of input array");
     std::vector<double> result(numBasisFnc);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function times the weight of Gauss-Legendre quadrature at point p
-        double fw = fncValues[p] * integrWeights[p];
+        double fw = empty ? integrWeights[p] : fncValues[p] * integrWeights[p];
         // index of the first out of numFunc basis functions pre-computed at the current point
         unsigned int index = p / GLORDER;
         assert(index + numFunc <= numBasisFnc);
@@ -1213,7 +1223,7 @@ BandMatrix<double> FiniteElement1d<N>::computeProjMatrix(
     const unsigned int
     gridSize    = integrNodes.size(),  // # of points in the integration grid
     numFunc     = N+1,                 // # of nontrivial basis functions at each point
-    numBasisFnc = interp.numValues();  // total number of basis functions (heigth of band matrix)
+    numBasisFnc = interp.numValues();  // total number of basis functions (height of band matrix)
     bool empty  = fncValues.empty();   // whether the function f(x) is provided (otherwise take f=1)
     if(!empty && fncValues.size() != gridSize)
         throw std::length_error("computeProjMatrix: invalid size of input array");
@@ -1233,6 +1243,39 @@ BandMatrix<double> FiniteElement1d<N>::computeProjMatrix(
                 double B_j = bsplValues[numFunc * (derivOrderQ * gridSize + p) + kj];
                 // accumulate the contribution of the point p to the integral of B_i B_j
                 mat(ki+index, kj+index) += B_i * B_j;
+            }
+        }
+    }
+    return mat;
+}
+
+template<int N>
+Matrix<double> FiniteElement1d<N>::computeConvMatrix(const IFunction& kernel,
+    unsigned int derivOrderP, unsigned int derivOrderQ) const
+{
+    const unsigned int
+    gridSize    = integrNodes.size(),  // # of points in the integration grid
+    numFunc     = N+1,                 // # of nontrivial basis functions at each point
+    numBasisFnc = interp.numValues();  // total number of basis functions (size of convolution matrix)
+    Matrix<double> mat(numBasisFnc, numBasisFnc, 0.);
+    for(unsigned int p=0; p<gridSize; p++) {
+        // index of the first out of numFunc basis functions pre-computed at the current point p
+        unsigned int ip = p / GLORDER;
+        for(unsigned int q=0; q<gridSize; q++) {
+            // same for the point q
+            unsigned int jq = q / GLORDER;
+            // value of the kernel function depends on the distance between points p and q
+            double kval = kernel(integrNodes[p] - integrNodes[q]) * integrWeights[p] * integrWeights[q];
+            // basis functions B_i with indices  ip <= i < ip+numFunc  are nonzero at the given point
+            for(unsigned int i=0; i<numFunc; i++) {
+                // value or derivative of the basis function at i-th row, pre-multiplied with fval
+                double B_i = bsplValues[numFunc * (derivOrderP * gridSize + p) + i] * kval;
+                for(unsigned int j=0; j<numFunc; j++) {
+                    // value or derivative of the basis function at j-th column
+                    double B_j = bsplValues[numFunc * (derivOrderQ * gridSize + q) + j];
+                    // accumulate the contribution of the points {p,q} to the integral of B_i B_j
+                    mat(i+ip, j+jq) += B_i * B_j;
+                }
             }
         }
     }
@@ -1663,7 +1706,7 @@ double LinearInterpolator3d::value(double x, double y, double z) const
     zi = binSearch(z, &zval.front(), nz),
     il = (xi * ny + yi) * nz + zi,
     iu = il + ny * nz;
-    if(xi<0 || xi>=nx || yi<0 || yi>=ny || zi<0 || zi>=nz)
+    if(xi<0 || xi>=nx-1 || yi<0 || yi>=ny-1 || zi<0 || zi>=nz-1)
         return NAN;
     const double
     // relative positions within the grid cell [0:1], in units of grid cell size
@@ -1816,7 +1859,7 @@ double CubicSpline3d::value(double x, double y, double z) const
     xi = binSearch(x, &xval.front(), nx),
     yi = binSearch(y, &yval.front(), ny),
     zi = binSearch(z, &zval.front(), nz);
-    if(xi<0 || xi>=nx || yi<0 || yi>=ny || zi<0 || zi>=nz)
+    if(xi<0 || xi>=nx-1 || yi<0 || yi>=ny-1 || zi<0 || zi>=nz-1)
         return NAN;
     const int
     // indices in flattened 3d arrays:
@@ -2440,36 +2483,35 @@ void SplineApproxImpl::solveForAmplitudesWithEDF(const std::vector<double> &yval
 void SplineApproxImpl::solveForAmplitudesWithAIC(const std::vector<double> &yvalues, double deltaAIC,
     std::vector<double> &ampl, double &RSS, double &EDF) const
 {
-    double lambda=0;
-    FitData fitData = initFit(yvalues);
     if(deltaAIC < 0)
         throw std::invalid_argument("SplineApprox: deltaAIC must be non-negative");
-    if(deltaAIC == 0) {  // find the value of lambda corresponding to the optimal fit
-        lambda = unscaleLambda(findMin(SplineAICRootFinder(*this, fitData, 0),
-            0, 1, NAN /*no initial guess*/, 1e-6));
-        if(lambda!=lambda)
-            lambda = 0;  // no smoothing in case of weird problems
-    } else {  // find an oversmoothed solution
-        // the reference value of AIC at lambda=0 (NOT the value that minimizes AIC, but very close to it)
-        computeAmplitudes(fitData, 0, ampl, RSS, EDF);
+    FitData fitData = initFit(yvalues);
+    // find the value of lambda corresponding to the optimal fit
+    double lambda = unscaleLambda(findMin(SplineAICRootFinder(*this, fitData, 0),
+        0, 1, NAN /*no initial guess*/, 1e-6));
+    if(!isFinite(lambda)) {
+        utils::msg(utils::VL_DEBUG, "SplineApprox", "Can't find optimal smoothing parameter lambda");
+        lambda = 0;  // no smoothing in case of weird problems
+    }
+    computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
+    if(deltaAIC > 0) {  // find an oversmoothed solution
+        // the reference value of AIC at the optimal lambda
         double AIC0 = computeAIC(RSS, EDF, numDataPoints);
         // find the value of lambda so that AIC is larger than the reference value by the required amount
         lambda = unscaleLambda(findRoot(SplineAICRootFinder(*this, fitData, AIC0 + deltaAIC),
             0, 1, 1e-6));
         if(!isFinite(lambda))   // root does not exist, i.e. AIC is everywhere lower than target value
             lambda = INFINITY;  // basically means fitting with a linear regression
+        // compute the amplitudes for the final value of lambda
+        computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
     }
-    // compute the amplitudes for the final value of lambda
-    computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
 }
 
 //----------- DRIVER CLASS FOR PENALIZED SPLINE APPROXIMATION ------------//
 
 SplineApprox::SplineApprox(const std::vector<double> &grid,
-    const std::vector<double> &xvalues, const std::vector<double> &weights)
-{
-    impl = new SplineApproxImpl(grid, xvalues, weights);
-}
+    const std::vector<double> &xvalues, const std::vector<double> &weights) :
+    impl(new SplineApproxImpl(grid, xvalues, weights)) {}
 
 SplineApprox::~SplineApprox()
 {
@@ -2787,7 +2829,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
                 int ind = N==1 ?
                     bsplineValuesExtrapolated<1>(x, &grid[0], numNodes, Bspl) :
                     bsplineNaturalCubicValues   (x, &grid[0], numNodes, Bspl);
-                for(unsigned int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++)
+                for(int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++)
                     Vbasis.at(ind+b) += minWeight * Bspl[b] * GLweights[s];
             }
             sumWeights += minWeight;
@@ -3177,7 +3219,7 @@ template std::vector<double> splineLogDensity<3>(
 std::vector<double> createUniformGrid(unsigned int nnodes, double xmin, double xmax)
 {
     if(nnodes<2 || xmax<=xmin)
-        throw std::invalid_argument("Invalid parameters for grid creation");
+        throw std::invalid_argument("createUniformGrid: invalid parameters");
     std::vector<double> grid(nnodes);
     for(unsigned int k=1; k<nnodes-1; k++)
         grid[k] = (xmin * (nnodes-1-k) + xmax * k) / (nnodes-1);
@@ -3189,7 +3231,7 @@ std::vector<double> createUniformGrid(unsigned int nnodes, double xmin, double x
 std::vector<double> createExpGrid(unsigned int nnodes, double xmin, double xmax)
 {
     if(nnodes<2 || xmin<=0 || xmax<=xmin)
-        throw std::invalid_argument("Invalid parameters for grid creation");
+        throw std::invalid_argument("createExpGrid: invalid parameters");
     double logmin = log(xmin), logmax = log(xmax);
     std::vector<double> grid(nnodes);
     grid.front() = xmin;
@@ -3217,7 +3259,7 @@ private:
 std::vector<double> createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool zeroelem)
 {   // create grid so that x_k = B*(exp(A*k)-1)
     if(nnodes<2 || xmin<=0 || xmax<=xmin)
-        throw std::invalid_argument("Invalid parameters for grid creation");
+        throw std::invalid_argument("createNonuniformGrid: invalid parameters");
     double A, B, dynrange=xmax/xmin;
     std::vector<double> grid(nnodes);
     int indexstart=zeroelem?1:0;
@@ -3252,6 +3294,39 @@ std::vector<double> createNonuniformGrid(unsigned int nnodes, double xmin, doubl
         grid[i+indexstart] = B*(exp(A*(i+1))-1);
     grid[nnodes-1+indexstart] = xmax;
     return grid;
+}
+
+std::vector<double> mirrorGrid(const std::vector<double> &input)
+{
+    unsigned int size = input.size();
+    if(size==0 || input[0]!=0)
+        throw std::invalid_argument("incorrect input in mirrorGrid");
+    std::vector<double> output(size*2-1);
+    output[size-1] = 0;
+    for(unsigned int i=1; i<size; i++) {
+        if(input[i] <= input[i-1])
+            throw std::invalid_argument("incorrect input in mirrorGrid");
+        output[size-1-i] = -input[i];
+        output[size-1+i] =  input[i];
+    }
+    return output;
+}
+
+std::vector<double> createSymmetricGrid(unsigned int nnodes, double xmin, double xmax)
+{
+    if(isFinite(xmax)) {
+        if(nnodes%2 == 1)
+            return mirrorGrid(createNonuniformGrid(nnodes / 2 + 1, xmin, xmax, true));
+        else {
+            std::vector<double> tmpgrid = createNonuniformGrid(nnodes, xmin * 0.5, xmax, true);
+            for(unsigned int i=0; i<nnodes/2; i++)
+                tmpgrid[nnodes-1-i] = tmpgrid[nnodes-1-2*i];
+            for(unsigned int i=0; i<nnodes/2; i++)
+                tmpgrid[i] = -tmpgrid[nnodes-1-i];
+            return tmpgrid;
+        }
+    } else
+        return createUniformGrid(nnodes, -xmin * 0.5 * (nnodes-1), xmin * 0.5 * (nnodes-1));
 }
 
 /// creation of a grid with minimum guaranteed number of input points per bin
@@ -3378,33 +3453,19 @@ std::vector<double> createAlmostUniformGrid(unsigned int gridsize,
     return grid;
 }
 
-std::vector<double> mirrorGrid(const std::vector<double> &input)
-{
-    unsigned int size = input.size();
-    if(size==0 || input[0]!=0)
-        throw std::invalid_argument("incorrect input in mirrorGrid");
-    std::vector<double> output(size*2-1);
-    output[size-1] = 0;
-    for(unsigned int i=1; i<size; i++) {
-        if(input[i] <= input[i-1])
-            throw std::invalid_argument("incorrect input in mirrorGrid");
-        output[size-1-i] = -input[i];
-        output[size-1+i] =  input[i];
-    }
-    return output;
-}
-
 std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
 {
     // restrict the search to |x|<=xmax, assuming that x=log(something)
     const double xmax = 100.;  // exp(xmax) ~ 2.7e43
     // initial trial points
     const int NUMTRIAL = 10;
-    const double XINIT[NUMTRIAL] = {-75., -50., -30., -15., -3., 3., 15., 30., 50., 75.};
+    static const double XINIT[NUMTRIAL] = {-75., -50., -30., -15., -3., 3., 15., 30., 50., 75.};
     double xinit=0., d2f0 = 0.;
     // pick up the initial point where the second derivative is the highest
     for(int k=0; k<NUMTRIAL; k++) {
         PointNeighborhood f0(fnc, XINIT[k]);
+        //utils::msg(utils::VL_VERBOSE, "createInterpolationGrid", "x=" + utils::toString(XINIT[k]) +
+        //    ", f=" + utils::toString(f0.f0,18) + ", f''=" + utils::toString(f0.fder2));
         if(isFinite(f0.fder2) && fabs(f0.fder2) > fabs(d2f0)) {
             xinit = XINIT[k];
             d2f0  = f0.fder2;
