@@ -196,16 +196,17 @@ public:
         \param[in]  initDensity -- the initial guess for the density profile of this component;
                     if hard to guess, one may start e.g. with a simple Plummer sphere with
                     correct total mass and a reasonable scale radius, but it doesn't matter much.
+        \param[in]  lmax -- order of spherical-harmonic expansion in theta.
+        \param[in]  mmax -- order of Fourier expansion in phi (0 for axisymmetric models).
+        \param[in]  gridSizeR -- number of grid points in this radial grid.
         \param[in]  rmin,rmax -- determine the extent of (logarithmic) radial grid
                     used to compute the density profile of this component.
-        \param[in]  numCoefsRadial -- number of grid points in this radial grid.
-        \param[in]  numCoefsAngular -- max order of spherical-harmonic expansion (l_max).
         \param[in]  relError -- relative accuracy of density computation.
         \param[in]  maxNumEval -- max # of DF evaluations per single density computation.
     */
     ComponentWithSpheroidalDF(const df::PtrDistributionFunction& df,
         const potential::PtrDensity& initDensity,
-        double rmin, double rmax, unsigned int numCoefsRadial, unsigned int numCoefsAngular,
+        unsigned int lmax, unsigned int mmax, unsigned int gridSizeR, double rmin, double rmax,
         double relError=1e-3, unsigned int maxNumEval=1e5);
 
     /** reinitialize the density profile by recomputing the values of density at a set of 
@@ -215,10 +216,10 @@ public:
     virtual void update(const potential::BasePotential& pot, const actions::BaseActionFinder& af);
 
 private:
-    /// definition of grid for computing the density profile:
-    const double rmin, rmax;             ///< range of radii for the logarithmic grid
-    const unsigned int numCoefsRadial;   ///< number of grid points in radius
-    const unsigned int numCoefsAngular;  ///< maximum order of angular-harmonic expansion (l_max)
+    /// definition of spatial grid for computing the density profile:
+    const unsigned int lmax, mmax; ///< order of angular-harmonic expansion
+    const unsigned int gridSizeR;  ///< number of points in the radial grid
+    const double rmin, rmax;       ///< min/max radii for the logarithmically spaced grid
 };
 
 
@@ -230,25 +231,32 @@ public:
         the density in the meridional plane.
         \param[in]  df -- shared pointer to the distribution function of this component.
         \param[in]  initDensity -- the initial guess for the density profile of this component.
-        \param[in]  gridR -- grid in cylindrical radius defining the R-coordinate of points
-                    at which density is computed. 0th element must be at R=0, and the grid
-                    should cover the range in which the density is presumed to be non-negligible.
-                    A suitable grid may be constructed by `math::createNonuniformGrid`.
-        \param[in]  gridz -- grid in vertical direction, with the same requirements as gridR.
-        \param[in]  relError -- relative accuracy in density computation;
+        \param[in]  mmax -- order of Fourier expansion in phi (0 for axisymmetric models).
+        \param[in]  gridSizeR -- size of grid in cylindrical radius,
+        which should cover the range where the density is presumed to be non-negligible.
+        \param[in]  Rmin, Rmax -- the first (positive) and the last radial grid point.
+        \param[in]  gridSizez -- size of the vertical grid.
+        \param[in]  zmin, zmax -- extent of the vertical grid.
+        \param[in]  relError -- relative accuracy in density computation.
         \param[in]  maxNumEval -- maximum # of DF evaluations for a single density value.
     */
     ComponentWithDisklikeDF(const df::PtrDistributionFunction& df,
         const potential::PtrDensity& initDensity,
-        const std::vector<double> gridR, const std::vector<double> gridz,
+        unsigned int mmax,
+        unsigned int gridSizeR, double Rmin, double Rmax, 
+        unsigned int gridSizez, double zmin, double zmax,
         double relError=1e-3, unsigned int maxNumEval=1e5);
 
-    /** recompute both the analytic disk potential and the spherical-harmonic expansion
-     of the residual density profile. */
+    /** reinitialize the density profile by recomputing the values of density at a set of 
+        grid points in the meridional plane, and then constructing a density interpolator.
+    */
     virtual void update(const potential::BasePotential& pot, const actions::BaseActionFinder& af);
 private:
-    /// coordinates of grid nodes for computing the density profile
-    std::vector<double> gridR, gridz;
+    const unsigned int mmax;       ///< order of Fourier expansion
+    const unsigned int gridSizeR;  ///< size of the grid in cylindrical radius
+    const double Rmin, Rmax;       ///< min/max grid nodes in radius
+    const unsigned int gridSizez;  ///< size of the vertical grid
+    const double zmin, zmax;       ///< min/max grid nodes in z
 };
 
 
@@ -286,26 +294,32 @@ public:
     /** parameters of grid for computing the multipole expansion of the combined
         density profile of spheroidal components;
         in general, these parameters should encompass the range of analogous parameters 
-        of all components that have a spherical-harmonic density representation. */
-    double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
+        of all components that have a spherical-harmonic density representation.
+    */
+    unsigned int lmaxAngularSph;  ///< order of angular-harmonic expansion in theta (l_max)
+    unsigned int mmaxAngularSph;  ///< order of Fourier expansion in phi (m_max)
     unsigned int sizeRadialSph;   ///< number of grid points in radius
-    unsigned int lmaxAngularSph;  ///< maximum order of angular-harmonic expansion (l_max)
+    double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
 
     /** parameters of grid for computing CylSpline expansion of the combined
         density profile of flattened (disk-like) components;
         the radial and vertical extent should be somewhat larger than the region where
         the overall density is non-negligible, and the resolution should match that
-        of the density profiles of components. */
-    double RminCyl, RmaxCyl;      ///< innermost (non-zero) and outermost grid nodes in cylindrical radius
-    double zminCyl, zmaxCyl;      ///< innermost and outermost grid nodes in vertical direction
+        of the density profiles of components.
+    */
+    unsigned int mmaxAngularCyl;  ///< order of Fourier expansion in phi (m_max)
     unsigned int sizeRadialCyl;   ///< number of grid nodes in cylindrical radius
+    double RminCyl, RmaxCyl;      ///< innermost (non-zero) and outermost grid nodes in cylindrical radius
     unsigned int sizeVerticalCyl; ///< number of grid nodes in vertical (z) direction
+    double zminCyl, zmaxCyl;      ///< innermost and outermost grid nodes in vertical direction
 
     /// assign default values
     SelfConsistentModel() :
         useActionInterpolation(true),
-        rminSph(0), rmaxSph(0), sizeRadialSph(25), lmaxAngularSph(0),
-        RminCyl(0), RmaxCyl(0), zminCyl(0), zmaxCyl(0), sizeRadialCyl(20), sizeVerticalCyl(20) {}
+        lmaxAngularSph(0), mmaxAngularSph(0), sizeRadialSph(25), rminSph(0), rmaxSph(0),
+        mmaxAngularCyl(0), sizeRadialCyl(20), RminCyl(0), RmaxCyl(0),
+        sizeVerticalCyl(20), zminCyl(0), zmaxCyl(0)
+    {}
 };
 
 /** recompute the total potential using the current density profiles for all components,

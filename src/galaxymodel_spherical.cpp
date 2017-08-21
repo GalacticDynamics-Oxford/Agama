@@ -1109,7 +1109,8 @@ double SphericalModelLocal::sampleVelocity(double Phi) const
     double loghEoverhPhi = math::findRoot(
         VelocitySampleRootFinder(*this, intJ1, Phi, loghPhi, I0plusJ0, target),
         intJ1.ymin(), intJ1.ymax(), EPSROOT);
-    assert(isFinite(loghEoverhPhi) && loghEoverhPhi>=0);
+    if(!(loghEoverhPhi>=0))
+       return 0.;  // might not be able to find the root in some perverse cases at very large radii
     double hE = exp(loghEoverhPhi + loghPhi);
     double E  = phasevol.E(hE);
     return sqrt(2. * (E - Phi));

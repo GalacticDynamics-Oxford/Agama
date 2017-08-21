@@ -1,6 +1,7 @@
 #include "actions_spherical.h"
 #include "potential_utils.h"
 #include "math_core.h"
+#include <string>
 #include <stdexcept>
 #include <cassert>
 #include <cmath>

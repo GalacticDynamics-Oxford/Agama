@@ -38,7 +38,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     const double b = 0.6;      // scale radius of Isochrone potential
     const double total_time=50;// integration time
     const double timestep=1./8;// sampling rate of trajectory
-    std::cout << "\033[1;39m"<<title<<"\033[0m\n";
+    std::cout << "\033[1;37m"<<title<<"\033[0m\n";
     potential::Isochrone pot(M, b);
     orbit::OrbitIntParams params;
     params.accuracy = 1e-15;

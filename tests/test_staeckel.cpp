@@ -136,7 +136,7 @@ bool test_three_cs(const potential::PtrOblatePerfectEllipsoid& potential,
     const double total_time=100.;
     const double timestep=1./8;
     bool ok=true;
-    std::cout << "\033[1;39m   ===== "<<title<<" =====\033[0m\n";
+    std::cout << "\033[1;37m   ===== "<<title<<" =====\033[0m\n";
     ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelCar(initcond), total_time, timestep);
     ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelCyl(initcond), total_time, timestep);
     ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelSph(initcond), total_time, timestep);

@@ -22,22 +22,17 @@
 */
 #ifdef HAVE_PYTHON
 #include <Python.h>
-#include <structmember.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 // note: for some versions of NumPy, it seems necessary to replace constants
 // starting with NPY_ARRAY_*** by NPY_***
 #include <numpy/arrayobject.h>
+#include <structmember.h>
 #include <stdexcept>
 #include <signal.h>
 #ifdef _OPENMP
 #include "omp.h"
 #endif
 // include almost everything!
-#include "units.h"
-#include "potential_factory.h"
-#include "potential_composite.h"
-#include "potential_multipole.h"
-#include "potential_utils.h"
 #include "actions_spherical.h"
 #include "actions_staeckel.h"
 #include "df_factory.h"
@@ -48,13 +43,21 @@
 #include "galaxymodel_selfconsistent.h"
 #include "galaxymodel_target.h"
 #include "galaxymodel_velocitysampler.h"
-#include "orbit.h"
 #include "math_core.h"
 #include "math_optimization.h"
 #include "math_sample.h"
 #include "math_spline.h"
+#include "particles_io.h"
+#include "potential_composite.h"
+#include "potential_factory.h"
+#include "potential_multipole.h"
+#include "potential_utils.h"
+#include "orbit.h"
+#include "units.h"
 #include "utils.h"
 #include "utils_config.h"
+// text string embedded into the python module as the __version__ attribute
+#define AGAMA_VERSION "Compiled on " __DATE__
 
 /// classes and routines for the Python interface
 namespace pywrapper {  // internal namespace
@@ -213,7 +216,7 @@ PyObject* toPyArray(const std::vector<double>& vec)
 /// convert a C++ matrix into a NumPy 2d array
 PyObject* toPyArray(const math::IMatrix<double>& mat)
 {
-    npy_intp size[] = {mat.rows(), mat.cols()};
+    npy_intp size[] = { static_cast<npy_intp>(mat.rows()), static_cast<npy_intp>(mat.cols()) };
     PyObject* arr = PyArray_SimpleNew(2, size, NPY_DOUBLE);
     if(!arr)
         return arr;
@@ -1058,8 +1061,6 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "i|Odd", const_cast<char**>(keywords),
         &numPoints, &pot_obj, &beta, &kappa))
     {
-        //PyErr_SetString(PyExc_ValueError,
-        //    "sample() takes at least one integer argument (the number of particles)");
         return NULL;
     }
     if(numPoints<=0) {
@@ -1141,9 +1142,13 @@ PyObject* Density_elem(PyObject* self, Py_ssize_t index)
         }
         return createDensityObject(dens.component(index));
     }
-    catch(std::exception&) {
-        PyErr_SetString(PyExc_TypeError, "Density is not a composite");
-        return NULL;
+    catch(std::bad_cast&) {  // not a composite density: return a single element
+        if(index!=0) {
+            PyErr_SetString(PyExc_IndexError, "Density has just a single component");
+            return NULL;
+        }
+        Py_INCREF(self);
+        return self;
     }
 }
 
@@ -1152,9 +1157,8 @@ Py_ssize_t Density_len(PyObject* self)
     try{
         return dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens).size();
     }
-    catch(std::exception&) {
-        PyErr_SetString(PyExc_TypeError, "Density is not a composite");
-        return -1;
+    catch(std::bad_cast&) {  // not a composite density
+        return 1;
     }
 }
 
@@ -1420,7 +1424,7 @@ potential::PtrPotential Potential_initFromParticles(
     PyObject *pointCoordObj, *pointMassObj;
     if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
         throw std::invalid_argument("'particles' must be a tuple with two arrays - "
-            "coordinates and mass, where the first one is a two-dimensional Nx3 array "
+            "coordinates and mass, where the first one is a two-dimensional Nx3 or Nx6 array "
             "and the second one is a one-dimensional array of length N");
     }
     PyArrayObject *pointCoordArr = (PyArrayObject*)
@@ -1435,13 +1439,14 @@ potential::PtrPotential Potential_initFromParticles(
     int numpt = 0;
     if(PyArray_NDIM(pointMassArr) == 1)
         numpt = PyArray_DIM(pointMassArr, 0);
-    if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 || 
-        PyArray_DIM(pointCoordArr, 0) != numpt || PyArray_DIM(pointCoordArr, 1) != 3)
+    if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 ||   // it must be a 2d array
+        PyArray_DIM(pointCoordArr, 0) != numpt ||          // with numpt rows
+        (PyArray_DIM(pointCoordArr, 1) != 3 && PyArray_DIM(pointCoordArr, 1) != 6))  // and 3 or 6 columns
     {
         Py_DECREF(pointCoordArr);
         Py_DECREF(pointMassArr);
         throw std::invalid_argument("'particles' does not contain valid arrays "
-            "(the first one must be 2d array of shape Nx3, "
+            "(the first one must be 2d array of shape Nx3 or Nx6, "
             "and the second one must be 1d array of length N)");
     }
     particles::ParticleArray<coord::PosCar> pointArray;
@@ -1802,9 +1807,13 @@ PyObject* Potential_elem(PyObject* self, Py_ssize_t index)
         }
         return createPotentialObject(pot.component(index));
     }
-    catch(std::exception&) {
-        PyErr_SetString(PyExc_TypeError, "Potential is not a composite");
-        return NULL;
+    catch(std::bad_cast&) {  // not a composite potential
+        if(index != 0) {
+            PyErr_SetString(PyExc_IndexError, "Potential has just a single component");
+            return NULL;
+        }
+        Py_INCREF(self);
+        return self;
     }
 }
 
@@ -1815,9 +1824,8 @@ Py_ssize_t Potential_len(PyObject* self)
     try{
         return dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot).size();
     }
-    catch(std::exception&) {
-        PyErr_SetString(PyExc_TypeError, "Potential is not a composite");
-        return -1;
+    catch(std::bad_cast&) {  // not a composite potential
+        return 1;
     }
 }
 
@@ -2207,8 +2215,12 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
 
 // pointer to the DistributionFunctionType object (will be initialized below)
 static PyTypeObject* DistributionFunctionTypePtr;
+
 // forward declaration
 df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
+
+// forward declaration
+PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df);
 
 static const char* docstringDistributionFunction =
     "DistributionFunction class represents an action-based distribution function.\n\n"
@@ -2392,6 +2404,45 @@ PyObject* DistributionFunction_totalMass(PyObject* self)
     }
 }
 
+PyObject* DistributionFunction_elem(PyObject* self, Py_ssize_t index)
+{
+    if(((DistributionFunctionObject*)self)->df==NULL) {
+        PyErr_SetString(PyExc_ValueError, "DistributionFunction object is not properly initialized");
+        return NULL;
+    }
+    try{
+        const df::CompositeDF& df =
+            dynamic_cast<const df::CompositeDF&>(*((DistributionFunctionObject*)self)->df);
+        if(index<0 || index >= (Py_ssize_t)df.size()) {
+            PyErr_SetString(PyExc_IndexError, "DistributionFunction component index out of range");
+            return NULL;
+        }
+        return createDistributionFunctionObject(df.component(index));
+    }
+    catch(std::bad_cast&) {  // DF is not composite - return a single element
+        if(index != 0) {
+            PyErr_SetString(PyExc_TypeError, "DistributionFunction has a single component");
+            return NULL;
+        }
+        Py_INCREF(self);
+        return self;
+    }
+}
+
+Py_ssize_t DistributionFunction_len(PyObject* self)
+{
+    try{
+        return dynamic_cast<const df::CompositeDF&>(*((DistributionFunctionObject*)self)->df).size();
+    }
+    catch(std::bad_cast&) {  // not a composite
+        return 1;
+    }
+}
+
+static PySequenceMethods DistributionFunction_sequence_methods = {
+    DistributionFunction_len, 0, 0, DistributionFunction_elem,
+};
+
 static PyMethodDef DistributionFunction_methods[] = {
     { "totalMass", (PyCFunction)DistributionFunction_totalMass, METH_NOARGS,
       "Return the total mass of the model (integral of the distribution function "
@@ -2405,7 +2456,7 @@ static PyTypeObject DistributionFunctionType = {
     PyObject_HEAD_INIT(NULL)
     0, "agama.DistributionFunction",
     sizeof(DistributionFunctionObject), 0, (destructor)DistributionFunction_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, DistributionFunction_value, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, &DistributionFunction_sequence_methods, 0, 0, DistributionFunction_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDistributionFunction, 
     0, 0, 0, 0, 0, 0, DistributionFunction_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)DistributionFunction_init
@@ -2873,8 +2924,7 @@ bool computeVDFatPoint(const galaxymodel::GalaxyModel& model, const coord::PosCy
         const int ORDER = 3;
         math::BsplineInterpolator1d<ORDER> intvR(gridvR), intvz(gridvz), intvphi(gridvphi);
         galaxymodel::computeVelocityDistribution<ORDER>(model, point, projected,
-            gridvR, gridvz, gridvphi, /*output*/ amplvR, amplvz, amplvphi,
-            /*accuracy*/ 1e-2, /*maxNumEval*/1e6);
+            gridvR, gridvz, gridvphi, /*output*/ amplvR, amplvz, amplvphi);
 
         // convert the units for the abscissae (velocity)
         for(unsigned int i=0; i<gridvR.  size(); i++)
@@ -2926,7 +2976,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     PyArrayObject *points_arr =
         (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
     npy_intp npoints = 0;  // # of points at which the VDFs should be computed
-    npy_intp ndim    = 0;  // dimensions of points: 2 for projected VDF at (R,phi), 3 for (R,phi,z)
+    npy_intp ndim    = 0;  // dimensions of points: 2 for projected VDF at (x,y), 3 for (x,y,z)
     if(points_arr) {
         if(PyArray_NDIM(points_arr) == 1) {
             ndim    = PyArray_DIM(points_arr, 0);
@@ -2979,7 +3029,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
                 pyArrayElem<double>(points_arr, ind, 1) * conv->lengthUnit,
                 ndim==3 ? pyArrayElem<double>(points_arr, ind, 2) * conv->lengthUnit : 0);
             if(allok) {  // if even a single point failed, don't continue
-                if(!computeVDFatPoint(model, toPosCyl(point), ndim==2,
+                if(!computeVDFatPoint(model, toPosCyl(point), /*projected*/ ndim==2,
                     gridvR_arr, gridvz_arr, gridvphi_arr,
                     pyArrayElem<PyObject*>(splvR,   ind),
                     pyArrayElem<PyObject*>(splvz,   ind),
@@ -3000,7 +3050,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
             pyArrayElem<double>(points_arr, 0) * conv->lengthUnit,
             pyArrayElem<double>(points_arr, 1) * conv->lengthUnit,
             ndim==3 ? pyArrayElem<double>(points_arr, 2) * conv->lengthUnit : 0);
-        allok &= computeVDFatPoint(model, toPosCyl(point), ndim==2,
+        allok &= computeVDFatPoint(model, toPosCyl(point), /*projected*/ ndim==2,
             gridvR_arr, gridvz_arr, gridvphi_arr,
             /*output*/ splvR, splvz, splvphi);
     }
@@ -3217,19 +3267,20 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             return -1;
         }
     } else if(disklike == 0) {   // spheroidal component
-        double rmin = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -1) * conv->lengthUnit;
-        double rmax = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -1) * conv->lengthUnit;
-        int numRad  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
-        int numAng  = toInt(getItemFromPyDict(namedArgs, "lmaxAngularSph"), -1);
-        if(rmin<=0 || rmax<=rmin || numRad<=0 || numAng<0) {
+        double rmin  = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -1) * conv->lengthUnit;
+        double rmax  = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -1) * conv->lengthUnit;
+        int gridSize = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
+        int lmax     = toInt(getItemFromPyDict(namedArgs, "lmaxAngularSph"), 0);
+        int mmax     = toInt(getItemFromPyDict(namedArgs, "mmaxAngularSph"), 0);
+        if(rmin<=0 || rmax<=rmin || gridSize<2 || lmax<0 || mmax<0 || mmax>lmax) {
             PyErr_SetString(PyExc_ValueError,
-                "For spheroidal components, should provide correct values for the following arguments: "
-                "rminSph, rmaxSph, sizeRadialSph, lmaxAngularSph");
+                "For spheroidal components, should provide valid values for the following arguments: "
+                "rminSph, rmaxSph, sizeRadialSph, lmaxAngularSph[=0], mmaxAngularSph[=0]");
             return -1;
         }
         try {
             self->comp.reset(new galaxymodel::ComponentWithSpheroidalDF(
-                df, dens, rmin, rmax, numRad, numAng));
+                df, dens, lmax, mmax, gridSize, rmin, rmax));
             self->name = "Spheroidal component";
             utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
@@ -3241,18 +3292,22 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             return -1;
         }
     } else {   // disk-like component
-        std::vector<double> gridR(toDoubleArray(getItemFromPyDict(namedArgs, "gridR")));
-        std::vector<double> gridz(toDoubleArray(getItemFromPyDict(namedArgs, "gridz")));
-        math::blas_dmul(conv->lengthUnit, gridR);
-        math::blas_dmul(conv->lengthUnit, gridz);
-        if(gridR.empty() || gridz.empty()) {
+        double Rmin  = toDouble(getItemFromPyDict(namedArgs, "RminCyl"), -1) * conv->lengthUnit;
+        double Rmax  = toDouble(getItemFromPyDict(namedArgs, "RmaxCyl"), -1) * conv->lengthUnit;
+        double zmin  = toDouble(getItemFromPyDict(namedArgs, "zminCyl"), -1) * conv->lengthUnit;
+        double zmax  = toDouble(getItemFromPyDict(namedArgs, "zmaxCyl"), -1) * conv->lengthUnit;
+        int gridSizeR= toInt(getItemFromPyDict(namedArgs, "sizeRadialCyl"), -1);
+        int gridSizez= toInt(getItemFromPyDict(namedArgs, "sizeVerticalCyl"), -1);
+        int mmax     = toInt(getItemFromPyDict(namedArgs, "mmaxAngularCyl"), 0);
+        if(Rmin<=0 || Rmax<=Rmin || gridSizeR<2 || zmin<=0 || zmax<=zmin || gridSizez<2 || mmax<0) {
             PyErr_SetString(PyExc_ValueError,
-                "For disklike components, should provide two array arguments: gridR, gridz");
+                "For disk-like components, should provide valid values for the following arguments: "
+                "RminCyl, RmaxCyl, sizeRadialCyl, zminCyl, zmaxCyl, sizeVerticalCyl, mmaxAngularCyl[=0]");
             return -1;
         }
         try {
             self->comp.reset(new galaxymodel::ComponentWithDisklikeDF(
-                df, dens, gridR, gridz));
+                df, dens, mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax));
             self->name = "Disklike component";
             utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
@@ -4134,7 +4189,9 @@ static const char* docstringSampleOrbitLibrary =
     "Returns: a tuple of two elements: the flag indicating success or failure, and the result.\n"
     "  In case of success, the result is a tuple of two arrays: particle coordinates/velocities "
     "(2d Nx6 array) and particle masses (1d array of length N).\n"
-    "  In case of failure, the result is a different tuple of two arrays: "
+    "  In case of failure (when some of the orbits, usually with high weights, had fewer points "
+    "recorded from their trajectories during orbit integration than is needed to represent them "
+    "in the N-body snapshot), the result is a different tuple of two arrays: "
     "list of orbit indices which did not have enough trajectory samples (length is anywhere from 1 to N), "
     "and corresponding required numbers of samples for each orbit from this list.\n";
 
@@ -4262,6 +4319,130 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
     }
 }
 
+///@}
+//  ----------------------------------
+/// \name  N-body snapshot read/write
+//  ----------------------------------
+///@{
+
+static const char* docstringReadSnapshot =
+    "Read an N-body snapshot from a file.\n"
+    "Arguments: file name.\n"
+    "File format is determined automatically among the supported ones: "
+    "text file with 7 columns (x,y,z,vx,vy,vz,m) is always supported, and NEMO or GADGET formats "
+    "can be read if Agama was compiled with UNSIO library."
+    "Returns:\n"
+    "  a tuple of two arrays:  a 2d Nx6 array of particle coordinates and velocities, "
+    "and a 1d array of N masses.";
+
+PyObject* readSnapshot(PyObject* /*self*/, PyObject* args)
+{
+    if(!PyTuple_Check(args) || PyTuple_Size(args) != 1 || !PyString_Check(PyTuple_GET_ITEM(args, 0))) {
+        PyErr_SetString(PyExc_ValueError, "Expected one string argument (file name)");
+        return NULL;
+    }
+    try{
+        std::string name(PyString_AsString(PyTuple_GET_ITEM(args, 0)));
+        // we do not perform any unit conversion on the particle coordinates/masses:
+        // they are read 'as is' from the file, and any such conversion will take place when
+        // feeding them to other routines, such as constructing the potential or integrating orbits
+        particles::ParticleArrayCar snap = particles::readSnapshot(name);
+        npy_intp size[] = { static_cast<npy_intp>(snap.size()), 6 };
+        PyObject* posvel_arr = PyArray_SimpleNew(2, size, NPY_DOUBLE);
+        PyObject* mass_arr   = PyArray_SimpleNew(1, size, NPY_DOUBLE);
+        if(!posvel_arr || !mass_arr) {
+            Py_XDECREF(posvel_arr);
+            Py_XDECREF(mass_arr);
+            return NULL;
+        }
+        for(size_t i=0; i<snap.size(); i++) {
+            snap.point(i).unpack_to(&pyArrayElem<double>(posvel_arr, i, 0));
+            pyArrayElem<double>(mass_arr, i) = snap.mass(i);
+        }
+        return Py_BuildValue("NN", posvel_arr, mass_arr);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, e.what());
+        return NULL;
+    }
+}
+
+static const char* docstringWriteSnapshot =
+    "Write an N-body snapshot to a file.\n"
+    "Arguments: \n"
+    "  filename  - a string with file name;\n"
+    "  particles  - a tuple of two arrays: a 2d Nx3 or Nx6 array of positions and "
+    "optionally velocities, and a 1d array of N masses; \n"
+    "  format  - (optional) file format, only the first letter (case-insensitive) matters: "
+    "'t' is text (default), 'n' is NEMO, 'g' is GADGET (available if Agama was compiled with "
+    "UNSIO library).\n"
+    "Returns: none.\n";
+
+PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    PyObject *particles_obj = NULL;
+    const char *filename = NULL, *format = NULL;
+    static const char* keywords[] = {"filename","particles","format",NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "sO|s", const_cast<char **>(keywords),
+        &filename, &particles_obj, &format))
+    {
+        return NULL;
+    }
+
+    // parse the input arrays
+    static const char* errorstr = "'particles' must be a tuple with two arrays - "
+        "coordinates[+velocities] and mass, where the first one is a two-dimensional "
+        "Nx3 or Nx6 array and the second one is a one-dimensional array of length N";
+    PyObject *pointCoordObj, *pointMassObj;
+    if(!PyArg_ParseTuple(particles_obj, "OO", &pointCoordObj, &pointMassObj)) {
+        PyErr_SetString(PyExc_ValueError, errorstr);
+        return NULL;
+    }
+    PyArrayObject *pointCoordArr = (PyArrayObject*)
+        PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *pointMassArr  = (PyArrayObject*)
+        PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    npy_intp nbody = 0;
+    if( pointCoordArr == NULL || pointMassArr == NULL ||  // input should contain valid arrays
+        PyArray_NDIM(pointMassArr) != 1 ||                // the second one should be 1d array
+        (nbody = PyArray_DIM(pointMassArr, 0)) <= 0 ||    // of length nbody > 0
+        PyArray_NDIM(pointCoordArr) != 2 ||               // the first one should be a 2d array
+        PyArray_DIM(pointCoordArr, 0) != nbody ||         // with nbody rows
+       (PyArray_DIM(pointCoordArr, 1) != 3 && PyArray_DIM(pointCoordArr, 1) != 6))  // and 3 or 6 columns
+    {
+        Py_XDECREF(pointCoordArr);
+        Py_XDECREF(pointMassArr);
+        PyErr_SetString(PyExc_ValueError, errorstr);
+        return NULL;
+    }
+    bool haveVel = PyArray_DIM(pointCoordArr, 1) == 6;  // whether we have velocity data
+    particles::ParticleArrayCar pointArray;
+    pointArray.data.reserve(nbody);
+    for(npy_intp i=0; i<nbody; i++) {
+        const double *xv = &pyArrayElem<double>(pointCoordArr, i, 0);
+        // we do not perform any unit conversion on the particle coordinates/masses:
+        // if they came from various sampling routines, they are already in physical units
+        pointArray.add(coord::PosVelCar(
+            xv[0], xv[1], xv[2], haveVel? xv[3] : 0., haveVel? xv[4] : 0., haveVel? xv[5] : 0.),
+            pyArrayElem<double>(pointMassArr, i));
+    }
+    Py_DECREF(pointCoordArr);
+    Py_DECREF(pointMassArr);
+
+    // write snapshot
+    try{
+        if(format)
+            particles::writeSnapshot(filename, pointArray, format);
+        else
+            particles::writeSnapshot(filename, pointArray);
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, e.what());
+        return NULL;
+    }
+}
 
 ///@}
 //  ----------------------------
@@ -5123,6 +5304,10 @@ static PyMethodDef module_methods[] = {
       METH_VARARGS | METH_KEYWORDS, docstringOrbit },
     { "sampleOrbitLibrary",     (PyCFunction)sampleOrbitLibrary,
       METH_VARARGS | METH_KEYWORDS, docstringSampleOrbitLibrary },
+    { "readSnapshot",           (PyCFunction)readSnapshot,
+      METH_VARARGS,                 docstringReadSnapshot },
+    { "writeSnapshot",          (PyCFunction)writeSnapshot,
+      METH_VARARGS | METH_KEYWORDS, docstringWriteSnapshot },
     { "optsolve",               (PyCFunction)optsolve,
       METH_VARARGS | METH_KEYWORDS, docstringOptsolve },
     { "actions",                (PyCFunction)actions,
@@ -5150,6 +5335,7 @@ initagama(void)
 {
     PyObject* mod = Py_InitModule("agama", module_methods);
     if(!mod) return;
+    PyModule_AddStringConstant(mod, "__version__", AGAMA_VERSION);
     conv.reset(new units::ExternalUnits());
 
     DensityType.tp_new = PyType_GenericNew;

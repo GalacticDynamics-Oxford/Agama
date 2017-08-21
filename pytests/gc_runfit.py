@@ -106,7 +106,12 @@ class ModelSearcher:
     def __init__(self, filename):
         self.filename  = filename
         self.model     = ModelParams(filename)
-        self.particles = numpy.loadtxt(filename)[:,0:6]
+        try:
+            self.particles = numpy.loadtxt(filename)[:,0:6]
+        except Exception as ex:
+            print ex, "\nYou need to run this script from a directory containing files "\
+                "from the Gaia Challenge spherical/triaxial mock data."
+            exit()
         if vel_error!=0:
             print "Assumed error of",vel_error,"km/s in velocity"
         if phase_space_info_mode <= 5:

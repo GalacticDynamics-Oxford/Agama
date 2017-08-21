@@ -509,7 +509,7 @@ void computePotentialCoefsCyl(
 
 PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax, 
-    unsigned int gridSizez, double zmin, double zmax)
+    unsigned int gridSizez, double zmin, double zmax, bool accurateIntegration)
 {
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
         gridSizez<CYLSPLINE_MIN_GRID_SIZE || zmin<=0 || zmax<=zmin)
@@ -522,7 +522,8 @@ PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
     // to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle:
     // the number of output harmonics remains the same, but the accuracy of approximation increases.
-    int mmaxFourier = isZRotSymmetric(src) ? 0 : std::max<int>(mmax, MMIN_AZIMUTHAL_FOURIER);
+    int mmaxFourier = isZRotSymmetric(src) ? 0 :
+        accurateIntegration ? std::max<int>(mmax, MMIN_AZIMUTHAL_FOURIER) : mmax;
     computeDensityCoefsCyl(src, mmaxFourier, gridR, gridz, coefs);
     if(mmaxFourier > (int)mmax) {
         // remove extra coefs: (mmaxFourier-mmax) from both heads and tails of arrays

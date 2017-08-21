@@ -87,7 +87,7 @@ std::string demangleName(char* const input)
 inline char verbosityText(VerbosityLevel level)
 {
     switch(level) {
-        case VL_MESSAGE: return '.';
+        case VL_MESSAGE: return ':';
         case VL_WARNING: return '!';
         case VL_DEBUG:   return '-';
         case VL_VERBOSE: return '=';

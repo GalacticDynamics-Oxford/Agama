@@ -209,6 +209,9 @@ private:
 /// limit the total number of cells so that each cell has, on average, at least that many sampling points
 static const unsigned int MIN_SAMPLES_PER_CELL = 5;
 
+/// minimum number of samples per bin in each dimension
+static const unsigned int MIN_SAMPLES_PER_BIN = MIN_SAMPLES_PER_CELL * 20;
+
 /// maximum number of bins in each dimension (MUST be a power of two)
 static const unsigned int MAX_BINS_PER_DIM = 16;
 
@@ -366,9 +369,6 @@ void Sampler::readjustBins()
     assert(numSamples>0);
 
     // draw bin boundaties in each dimension separately
-    const unsigned int MIN_SAMPLES_PER_BIN =
-        std::max<unsigned int>(MIN_SAMPLES_PER_CELL*2,
-        std::min<unsigned int>(100, numSamples/MAX_BINS_PER_DIM/10));
     numCells = 1;
     std::vector<std::pair<double,double> > projection(numSamples);
     std::vector<double> cumSumValues(numSamples);
@@ -399,22 +399,39 @@ void Sampler::readjustBins()
         newBinIndices[1] = numSamples-1;
         unsigned int nbins = 1;
         do{
+            bool valid = true;
+            // num number of points per child bin at this level of refinement
+            unsigned int minSamplesPerBin = MIN_SAMPLES_PER_BIN * MAX_BINS_PER_DIM / (2*nbins);
             // split each existing bin in two halves
-            for(unsigned int b=0; b<nbins; b++) {
+            for(unsigned int b=0; valid && b<nbins; b++) {
+                if(newBinIndices[b*2+1] - newBinIndices[b*2] < 2*minSamplesPerBin) {
+                    valid = false;   // this bin can't be split into two large enough halves
+                    break;
+                }
                 // locate the center of the bin (in terms of cumulative weight)
                 double cumSumCenter = (b+0.5) * cumSum / nbins;
                 unsigned int indLeft = binSearch(cumSumCenter, &cumSumValues.front(), numSamples);
+                // ensure that each of two child bins has enough points
+                if( indLeft < newBinIndices[b*2] + minSamplesPerBin) {
+                    indLeft = newBinIndices[b*2] + minSamplesPerBin;
+                    cumSumCenter = cumSumValues[indLeft];
+                } else
+                if( indLeft > newBinIndices[b*2+1] - minSamplesPerBin) {
+                    indLeft = newBinIndices[b*2+1] - minSamplesPerBin;
+                    cumSumCenter = cumSumValues[indLeft];
+                }
                 assert(indLeft<numSamples-1);
                 // determine the x-coordinate that splits the bin into two equal halves
                 double binHalf = linearInterp(cumSumCenter,
                     cumSumValues[indLeft], cumSumValues[indLeft+1],
                     projection[indLeft].first, projection[indLeft+1].first);
+                if(!isFinite(binHalf))  // could happen if cumSum[indLeft]==cumSum[indLeft+1]
+                    binHalf = projection[indLeft].first;
                 newBinIndices.insert(newBinIndices.begin() + b*2+1, indLeft);
                 newBinBoundaries.insert(newBinBoundaries.begin() + b*2+1, binHalf);
             }
             // check if bins are large enough
             nbins = newBinBoundaries.size()-1;  // now twice as large as before
-            bool valid = true;
             for(unsigned int b=0; b<nbins; b++)
                 valid &= newBinIndices[b+1] - newBinIndices[b] >= MIN_SAMPLES_PER_BIN;
             if(valid)  // commit results

@@ -19,7 +19,7 @@ double BasePotential::densityCar(const coord::PosCar &pos) const
 {
     coord::HessCar deriv2;
     eval(pos, NULL, (coord::GradCar*)NULL, &deriv2);
-    return (deriv2.dx2 + deriv2.dy2 + deriv2.dz2) / (4*M_PI);
+    return (deriv2.dx2 + deriv2.dy2 + deriv2.dz2) * (1. / (4*M_PI));
 }
 
 double BasePotential::densityCyl(const coord::PosCyl &pos) const
@@ -35,9 +35,9 @@ double BasePotential::densityCyl(const coord::PosCyl &pos) const
         deriv2phi_over_R2 = 0;
     }
     double result = (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2);
-    if(fabs(result) < EPSREL_DENSITY_DER * (fabs(deriv2.dR2) + fabs(derivR_over_R) +
-        fabs(deriv2.dz2) + fabs(deriv2phi_over_R2)) )
-        result = 0;  // dominated by roundoff errors
+    if(!(fabs(result) > EPSREL_DENSITY_DER * (fabs(deriv2.dR2) + fabs(derivR_over_R) +
+        fabs(deriv2.dz2) + fabs(deriv2phi_over_R2))))
+        return 0;  // dominated by roundoff errors
     return result / (4*M_PI);
 }
 
@@ -56,11 +56,12 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
     if(pos.r==0) {
         if(deriv.dr==0)  // otherwise should remain infinite
             derivr_over_r = deriv2.dr2;
-        angular_part=0;  ///!!! is this correct assumption?
+        angular_part=0;
     }
     double result = deriv2.dr2 + 2*derivr_over_r + angular_part;
-    if(fabs(result) < EPSREL_DENSITY_DER * (fabs(deriv2.dr2) + fabs(2*derivr_over_r) + fabs(angular_part)) )
-        result = 0;  // dominated by roundoff errors
+    if(!(fabs(result) > EPSREL_DENSITY_DER * 
+        (fabs(deriv2.dr2) + fabs(2*derivr_over_r) + fabs(angular_part))))
+        return 0;  // dominated by roundoff errors
     return result / (4*M_PI);
 }
 

@@ -10,7 +10,7 @@ The model is also stored in a numpy binary file, and the orbit library is also e
 as a text file (initial conditions, weights and integration times).
 See an example of input file in data/schwarzschild_axisym.ini
 """
-import agama, numpy, ConfigParser, sys, re
+import agama, numpy, ConfigParser, os, sys, re
 
 def createModel(iniFileName):
     """
@@ -171,6 +171,9 @@ if __name__ == '__main__':
     # read parameters from the INI file
     if len(sys.argv)<=1:
         print "Provide the ini file name as the command-line argument"
+        exit()
+    if not os.path.isfile(sys.argv[1]):
+        print "File", sys.argv[1], "does not exist!"
         exit()
     model = createModel(sys.argv[1])
     for n,c in model['components'].items():

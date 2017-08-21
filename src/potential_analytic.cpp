@@ -13,7 +13,7 @@ void Plummer::evalDeriv(double r,
     if(deriv)
         *deriv = -pot * r * invrsq;
     if(deriv2)
-        *deriv2 = pot * (2*pow_2(r * invrsq) - pow_2(scaleRadius * invrsq));
+        *deriv2 = pot * (2 * pow_2(r * invrsq) - pow_2(scaleRadius * invrsq));
 }
 
 double Plummer::enclosedMass(double r) const
@@ -34,24 +34,25 @@ void Isochrone::evalDeriv(double r,
     if(deriv)
         *deriv = -pot * r / (rb * brb);
     if(deriv2)
-        *deriv2 = pot * (2*pow_2(r) - pow_2(scaleRadius) * (1 + scaleRadius / rb)) / pow_2(rb * brb);
+        *deriv2 = pot * (2*pow_2(r / (rb * brb)) - pow_2(scaleRadius / (rb * brb)) * (1 + scaleRadius / rb));
 }
 
 void NFW::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
+    double rrel = r / scaleRadius;
     double ln_over_r = r==INFINITY ? 0 :
-        r > scaleRadius*1e-4 ? log(1 + r/scaleRadius) / r :
+        rrel > 1e-4 ? log(1 + rrel) / r :
         // accurate asymptotic expansion at r->0
-        (1 - 0.5 * r/scaleRadius * (1 - 2./3 * r/scaleRadius)) / scaleRadius;
+        (1 - 0.5 * rrel * (1 - 2./3 * rrel)) / scaleRadius;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)
-        *deriv = mass * (r==0 ? 0.5/pow_2(scaleRadius) :
-            (ln_over_r - 1/(r+scaleRadius))/r );
+        *deriv = mass * (r==0 ? 0.5 / pow_2(scaleRadius) :
+            (ln_over_r - 1/(r+scaleRadius)) / r );
     if(deriv2)
-        *deriv2 = -mass * (r==0 ? 2./(3*scaleRadius*pow_2(scaleRadius)) :
-            (2*ln_over_r - (2*scaleRadius+3*r)/pow_2(scaleRadius+r) )/pow_2(r) );
+        *deriv2 = -mass * (r==0 ? 2./3 / pow_3(scaleRadius) :
+            (2*ln_over_r - (2*scaleRadius + 3*r) / pow_2(scaleRadius+r) ) / pow_2(r) );
 }
 
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
@@ -85,19 +86,19 @@ void Logarithmic::evalCar(const coord::PosCar &pos,
 {
     double m2 = coreRadius2 + pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2;
     if(potential)
-        *potential = sigma2*log(m2)*0.5;
+        *potential = 0.5 * sigma2 * log(m2);
     if(deriv) {
-        deriv->dx = pos.x*sigma2/m2;
-        deriv->dy = pos.y*sigma2/m2/p2;
-        deriv->dz = pos.z*sigma2/m2/q2;
+        deriv->dx = pos.x * sigma2/m2;
+        deriv->dy = pos.y * sigma2/m2/p2;
+        deriv->dz = pos.z * sigma2/m2/q2;
     }
     if(deriv2) {
-        deriv2->dx2 = sigma2*(1/m2    - 2*pow_2(pos.x/m2));
-        deriv2->dy2 = sigma2*(1/m2/p2 - 2*pow_2(pos.y/(m2*p2)));
-        deriv2->dz2 = sigma2*(1/m2/q2 - 2*pow_2(pos.z/(m2*q2)));
-        deriv2->dxdy=-sigma2*pos.x*pos.y * 2/(pow_2(m2)*p2);
-        deriv2->dydz=-sigma2*pos.y*pos.z * 2/(pow_2(m2)*p2*q2);
-        deriv2->dxdz=-sigma2*pos.z*pos.x * 2/(pow_2(m2)*q2);
+        deriv2->dx2 = sigma2 * (1/m2    - 2 * pow_2(pos.x / m2));
+        deriv2->dy2 = sigma2 * (1/m2/p2 - 2 * pow_2(pos.y / (m2 * p2)));
+        deriv2->dz2 = sigma2 * (1/m2/q2 - 2 * pow_2(pos.z / (m2 * q2)));
+        deriv2->dxdy=-sigma2 * pos.x * pos.y * 2 / (pow_2(m2) * p2);
+        deriv2->dydz=-sigma2 * pos.y * pos.z * 2 / (pow_2(m2) * p2 * q2);
+        deriv2->dxdz=-sigma2 * pos.z * pos.x * 2 / (pow_2(m2) * q2);
     }
 }
 

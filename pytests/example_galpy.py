@@ -75,7 +75,7 @@ def compare(ic, inttime, numsteps):
 
     ### in galpy, this is the only tool that can estimate focal distance,
     ### but it requires the orbit to be computed first
-    delta = estimateDeltaStaeckel(g_orb[:,0], g_orb[:,3], pot=g_pot)
+    delta = estimateDeltaStaeckel(g_pot, g_orb[:,0], g_orb[:,3])
     print "interfocal distance Delta=",delta
 
     ### plot the orbit(s) in R,z plane, along with the prolate spheroidal coordinate grid

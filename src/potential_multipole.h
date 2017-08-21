@@ -54,11 +54,18 @@ namespace potential {
 /** Spherical-harmonic expansion of density with coefficients being spline functions of radius */
 class DensitySphericalHarmonic: public BaseDensity {
 public:
-    /** construct the object from the provided density model and grid parameters */
+    /** Construct the object from the provided density model and grid parameters.
+        Arguments have the same meaning as for Multipole::create(), but the grid radii must be
+        provided explicitly (not determined automatically);
+        additional argument 'accurateIntegration' allows to use a higher-than-requested
+        angular expansion order (related to the number of points in theta and phi where the density
+        is evaluated) to improve the integration accuracy in the spherical-harmonic transformation;
+        on the other hand, only the requested number of terms are retained in the interpolator.
+    */
     static PtrDensity create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin, double rmax);
+        unsigned int gridSizeR, double rmin, double rmax, bool accurateIntegration=true);
 
-    /** construct the density interpolator from an N-body snapshot.
+    /** Construct the density interpolator from an N-body snapshot.
         \param[in]  particles  is the array of particles.
         \param[in]  sym  is the assumed symmetry of the input snapshot,
         which defines the list of spherical harmonics to compute and to ignore
@@ -74,7 +81,7 @@ public:
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0., double smoothing = 1.);
 
-    /** construct the object from previously computed coefficients.
+    /** Construct the object from previously computed coefficients.
         \param[in]  gridRadii  is the grid in radius (sorted in order of increase, first node > 0).
         \param[in]  coefs  is the 2d array of sph.-harm. coefficients:
         the first dimension of the array is the number of spherical harmonics (lmax+1)^2,

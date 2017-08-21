@@ -67,7 +67,7 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
 }
 
 // a static variable that initializes our error handler
-namespace { bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler); }
+namespace { static bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler); }
 
 // ------ math primitives -------- //
 

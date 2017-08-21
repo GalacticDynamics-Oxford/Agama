@@ -24,6 +24,15 @@ void OblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
     if(absnu>coordSys.Delta2 || pos.lambda<coordSys.Delta2)
         throw std::invalid_argument("Error in OblatePerfectEllipsoid: "
             "incorrect values of spheroidal coordinates");
+    if(!(pos.lambda < 1e100 && absnu < 1e100)) {
+        if(val)
+            *val = 0;
+        if(deriv)
+            deriv->dlambda = deriv->dnu = deriv->dphi = 0;
+        if(deriv2)
+            deriv2->dlambda2 = deriv2->dnu2 = deriv2->dlambdadnu = 0;
+        return;
+    }
     double Glambda, dGdlambda, d2Gdlambda2, Gnu, dGdnu, d2Gdnu2;
     // values and derivatives of G(lambda) and G(|nu|)
     evalDeriv(pos.lambda, &Glambda, &dGdlambda, &d2Gdlambda2);

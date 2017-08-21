@@ -17,7 +17,12 @@
     up to the difference in implementation of Nelder-Mead minimization algorithm.
 
     Additionally, we use the MCMC implementation EMCEE to explore the confidence
-    intervals of model parameters around their best-fit values
+    intervals of model parameters around their best-fit values obtained at the first
+    stage (deterministic search).
+    Note that occasionally this first stage could get stuck in a local minimum,
+    but the MCMC algorithm then usually finds its way towards the global minimum.
+    In these cases one could see rather large fluctuations in the parameters
+    explored by the chain.
 '''
 import agama, numpy
 from scipy.optimize import minimize
@@ -117,7 +122,10 @@ def main():
         options=dict(maxiter=1000, maxfev=1000, disp=True))
 
     # explore the parameter space around the best-fit values using the MCMC chain
-    import emcee, matplotlib.pyplot as plt, triangle as corner
+    try:
+        import matplotlib.pyplot as plt, emcee, corner
+    except ImportError as ex:
+        print ex, "\nYou need to install 'emcee' and 'corner' packages"
     print 'Starting MCMC'
     ndim = len(initparams)
     nwalkers = 16    # number of parallel walkers in the chain
@@ -143,8 +151,9 @@ def main():
 
     # show the posterior distribution of parameters
     samples = sampler.chain[:, nburnin:, :].reshape((-1, ndim))
+    trueval = (1.56, 1.55, 5.29, 1.22, 1.56)  # believed to be best-fit values
     corner.corner(samples, \
-        labels=labels, quantiles=[0.16, 0.5, 0.84], truths=result.x)
+        labels=labels, quantiles=[0.16, 0.5, 0.84], truths=trueval)
     plt.show()
     print "Acceptance fraction: ", numpy.mean(sampler.acceptance_fraction)  # should be in the range 0.2-0.5
     print "Autocorrelation time: ", sampler.acor  # should be considerably shorter than the total number of steps

@@ -26,7 +26,7 @@ data1, data2, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, \
 # data2 is kinematic data: for each orbit (row) it contains
 # Ngrid values of rho sigma_r^2, then the same number of values of rho sigma_t^2;
 # we combine them into a single array of Ngrid values that enforce isotropy (sigma_t^2 - 2 sigma_r^2 = 0)
-Ngrid = len(target2)/2
+Ngrid = len(target2)
 datak = 2*data2[:,:Ngrid] - data2[:,Ngrid:]
 weights = agama.optsolve(matrix=(data1.T, datak.T), rhs=[target1.values(),numpy.zeros(Ngrid)], \
     rpenl=[numpy.ones_like(target1.values()), numpy.ones(Ngrid)], \

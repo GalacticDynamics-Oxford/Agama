@@ -42,13 +42,13 @@ private:
     const GalaxyModel model;  ///< aggregate of potential, action finder and DF
     double       relError;    ///< requested relative error of density computation
     unsigned int maxNumEval;  ///< max # of DF evaluations per one density calculation
-    
+
     virtual double densityCar(const coord::PosCar &pos) const {
         return densityCyl(toPosCyl(pos)); }
-    
+
     virtual double densitySph(const coord::PosSph &pos) const {
         return densityCyl(toPosCyl(pos)); }
-    
+
     /// compute the density as the integral of DF over velocity at a given position
     virtual double densityCyl(const coord::PosCyl &point) const {
         double result;
@@ -63,60 +63,42 @@ private:
 ComponentWithSpheroidalDF::ComponentWithSpheroidalDF(
     const df::PtrDistributionFunction& df,
     const potential::PtrDensity& initDensity,
-    double _rmin, double _rmax,
-    unsigned int _numCoefsRadial, unsigned int _numCoefsAngular,
-    double _relError, unsigned int _maxNumEval) :
-BaseComponentWithDF(ensureNotNull(df), initDensity, false, _relError, _maxNumEval),
-rmin(_rmin), rmax(_rmax), numCoefsRadial(_numCoefsRadial), numCoefsAngular(_numCoefsAngular)
-{
-    if(rmin<=0 || rmax<=rmin || numCoefsRadial<2)
-        throw std::invalid_argument("ComponentWithSpheroidalDF: Invalid grid parameters");
-}
+    unsigned int _lmax, unsigned int _mmax, unsigned int _gridSizeR, double _rmin, double _rmax,
+    double _relError, unsigned int _maxNumEval)
+:
+    BaseComponentWithDF(ensureNotNull(df), initDensity, false, _relError, _maxNumEval),
+    lmax(_lmax), mmax(_mmax), gridSizeR(_gridSizeR), rmin(_rmin), rmax(_rmax)
+{}
 
 void ComponentWithSpheroidalDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    // temporary density wrapper object
-    const DensityFromDF densityWrapper(
-        totalPotential, actionFinder, *distrFunc, relError, maxNumEval);
-
-    // recompute the spherical-harmonic expansion for the density
-    std::vector<double> gridRadii = math::createExpGrid(numCoefsRadial, rmin, rmax);
-    std::vector<std::vector<double> > coefs;
-    computeDensityCoefsSph(densityWrapper,
-        math::SphHarmIndices(numCoefsAngular, 0, densityWrapper.symmetry()),
-        gridRadii, coefs);
-    density.reset(new potential::DensitySphericalHarmonic(gridRadii, coefs));
+    density = potential::DensitySphericalHarmonic::create(
+        DensityFromDF(totalPotential, actionFinder, *distrFunc, relError, maxNumEval),
+        lmax, mmax, gridSizeR, rmin, rmax, false /*use exactly the requested order*/);
 }
 
 ComponentWithDisklikeDF::ComponentWithDisklikeDF(
     const df::PtrDistributionFunction& df,
     const potential::PtrDensity& initDensity,
-    const std::vector<double> _gridR, const std::vector<double> _gridz,
-    double _relError, unsigned int _maxNumEval) :
-BaseComponentWithDF(ensureNotNull(df), initDensity, true, _relError, _maxNumEval),
-gridR(_gridR), gridz(_gridz)
-{
-    if(gridR[0]!=0 || gridR.size()<2 || gridz[0]!=0 || gridz.size()<2)
-        throw std::invalid_argument("ComponentWithDisklikeDF: Invalid grid parameters");
-    gridR[0] = gridR[1]*1e-3;  ///!!! FIXME: apparently there is a problem for points exactly on z axis
-    // in principle should also check if the grid is monotonic,
-    // but this will be done by 2d interpolator anyway
-}
+    unsigned int _mmax,
+    unsigned int _gridSizeR, double _Rmin, double _Rmax, 
+    unsigned int _gridSizez, double _zmin, double _zmax,
+    double _relError, unsigned int _maxNumEval)
+:
+    BaseComponentWithDF(ensureNotNull(df), initDensity, true, _relError, _maxNumEval),
+    mmax(_mmax), gridSizeR(_gridSizeR), Rmin(_Rmin), Rmax(_Rmax),
+    gridSizez(_gridSizez), zmin(_zmin), zmax(_zmax)
+{}
 
 void ComponentWithDisklikeDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    // temporary density wrapper object
-    const DensityFromDF densityWrapper(
-        totalPotential, actionFinder, *distrFunc, relError, maxNumEval);
-
-    // reinit the interpolator for density in meridional plane
-    std::vector< math::Matrix<double> > coefs;
-    computeDensityCoefsCyl(densityWrapper, 0, gridR, gridz, coefs);
-    density.reset(new potential::DensityAzimuthalHarmonic(gridR, gridz, coefs));
+    density = potential::DensityAzimuthalHarmonic::create(
+        DensityFromDF(totalPotential, actionFinder, *distrFunc, relError, maxNumEval),
+        mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, false /*respect the expansion order*/);
 }
 
 
@@ -152,16 +134,16 @@ void updateTotalPotential(SelfConsistentModel& model)
 
     // first retrieve non-zero density and potential objects from all components
     for(unsigned int i=0; i<model.components.size(); i++) {
-        PtrDensity d = model.components[i]->getDensity();
-        if(d) {
+        PtrDensity den = model.components[i]->getDensity();
+        if(den) {
             if(model.components[i]->isDensityDisklike)
-                compDensDisk.push_back(d);
+                compDensDisk.push_back(den);
             else
-                compDensSph.push_back(d);
+                compDensSph.push_back(den);
         }
-        PtrPotential p = model.components[i]->getPotential();
-        if(p)
-            compPot.push_back(p);
+        PtrPotential pot = model.components[i]->getPotential();
+        if(pot)
+            compPot.push_back(pot);
     }
 
     // the total density to be used in multipole expansion for spheroidal components
@@ -178,7 +160,8 @@ void updateTotalPotential(SelfConsistentModel& model)
     // and add it as one of potential components (possibly the only one)
     if(totalDensitySph != NULL)
         compPot.push_back(potential::Multipole::create(*totalDensitySph,
-            model.lmaxAngularSph, 0 /*mmax*/, model.sizeRadialSph, model.rminSph, model.rmaxSph));
+            model.lmaxAngularSph, model.mmaxAngularSph,
+            model.sizeRadialSph, model.rminSph, model.rmaxSph));
 
     // now the same for the total density to be used in CylSpline for the flattened components
     PtrDensity totalDensityDisk;
@@ -188,7 +171,7 @@ void updateTotalPotential(SelfConsistentModel& model)
         totalDensityDisk = compDensDisk[0];
 
     if(totalDensityDisk != NULL)
-        compPot.push_back(potential::CylSpline::create(*totalDensityDisk, 0 /*mmax*/,
+        compPot.push_back(potential::CylSpline::create(*totalDensityDisk, model.mmaxAngularCyl,
             model.sizeRadialCyl,   model.RminCyl, model.RmaxCyl,
             model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, true /*use derivs*/));
 

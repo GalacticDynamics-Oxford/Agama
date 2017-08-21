@@ -1,6 +1,7 @@
 #include "math_base.h"
 #include "math_core.h"
 #include "math_specfunc.h"
+#include <string>
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
