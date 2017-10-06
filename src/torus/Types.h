@@ -90,46 +90,46 @@ PSPD     operator*  (const double, const PSPD&);
 // PSPD: member functions
 
 inline PSPD::PSPD(const double fill_value)
-    { for(register int i=0; i<4; i++) a[i] = fill_value; }
+    { for(int i=0; i<4; i++) a[i] = fill_value; }
 
 inline PSPD::PSPD(const PSPD& V)
-    { for(register int i=0; i<4; i++) a[i] = V.a[i]; }
+    { for(int i=0; i<4; i++) a[i] = V.a[i]; }
 
 inline PSPD::PSPD(const double x0, const double x1, const double x2,
 	  const double x3)
     { a[0]=x0; a[1]=x1; a[2]=x2; a[3]=x3; }
 
 inline PSPD& PSPD::operator= (const PSPD& V)
-    { for(register int i=0; i<4; i++) a[i] = V.a[i];
+    { for(int i=0; i<4; i++) a[i] = V.a[i];
       return *this; }
 
 inline PSPD& PSPD::operator= (const double fill_value)
-    { for(register int i=0; i<4; i++) a[i] = fill_value;
+    { for(int i=0; i<4; i++) a[i] = fill_value;
       return *this; }
 
 inline PSPD& PSPD::operator+= (const PSPD& V)
-    { for(register int i=0; i<4; i++) a[i] += V.a[i];
+    { for(int i=0; i<4; i++) a[i] += V.a[i];
       return *this; }
 
 inline PSPD& PSPD::operator-= (const PSPD& V)
-    { for(register int i=0; i<4; i++) a[i] -= V.a[i];
+    { for(int i=0; i<4; i++) a[i] -= V.a[i];
       return *this; }
 
 inline PSPD& PSPD::operator+= (const double m)
-    { for(register int i=0; i<4; i++) a[i] += m;
+    { for(int i=0; i<4; i++) a[i] += m;
       return *this; }
 
 inline PSPD& PSPD::operator-= (const double m)
-    { for(register int i=0; i<4; i++) a[i] -= m;
+    { for(int i=0; i<4; i++) a[i] -= m;
       return *this; }
 
 inline PSPD& PSPD::operator*= (const double m)
-    { for(register int i=0; i<4; i++) a[i] *= m;
+    { for(int i=0; i<4; i++) a[i] *= m;
       return *this; }
 
 inline PSPD& PSPD::operator/= (const double m)
     { if(m==double(0.)) div_by_zero_error();
-      for(register int i=0; i<4; i++) a[i] /= m;
+      for(int i=0; i<4; i++) a[i] /= m;
       return *this; }
 
 inline PSPD PSPD::operator- () const
@@ -145,11 +145,11 @@ inline double PSPD::operator* (const PSPD& V) const
     { return a[0]*V.a[0] + a[1]*V.a[1] + a[2]*V.a[2] + a[3]*V.a[3]; }
 
 inline int PSPD::operator== (const PSPD& V) const
-    { for(register int i=0; i<4; i++) if(a[i] != V.a[i]) return 0;
+    { for(int i=0; i<4; i++) if(a[i] != V.a[i]) return 0;
       return 1; }
 
 inline int PSPD::operator!= (const PSPD& V) const
-    { for(register int i=0; i<4; i++) if(a[i] != V.a[i]) return 1;
+    { for(int i=0; i<4; i++) if(a[i] != V.a[i]) return 1;
       return 0; }
 
 inline PSPD PSPD::operator+ (const double x) const
@@ -171,12 +171,12 @@ inline double PSPD::norm() const
 
 inline ostream& operator<< (ostream& s, const PSPD& V)
     { s << ' ';
-      for(register int i=0; i<4; i++) s << ' ' << V(i);
+      for(int i=0; i<4; i++) s << ' ' << V(i);
       s << ' ';
       return s; }
 
 inline istream& operator>> (istream& s, PSPD& V)
-    { for(register int i=0; i<4; i++) s >> V[i];
+    { for(int i=0; i<4; i++) s >> V[i];
       return s; }
 
 inline double norm      (const PSPD& V)
@@ -255,46 +255,46 @@ PSPT     operator*  (const double, const PSPT&);
 // PSPT: member functions
 
 inline PSPT::PSPT(const double fill_value)
-    { for(register int i=0; i<6; i++) a[i] = fill_value; }
+    { for(int i=0; i<6; i++) a[i] = fill_value; }
 
 inline PSPT::PSPT(const PSPT& V)
-    { for(register int i=0; i<6; i++) a[i] = V.a[i]; }
+    { for(int i=0; i<6; i++) a[i] = V.a[i]; }
 
 inline PSPT::PSPT(const double x0, const double x1, const double x2,
 	  const double x3, const double x4, const double x5)
     { a[0]=x0; a[1]=x1; a[2]=x2; a[3]=x3; a[4]=x4; a[5]=x5;}
 
 inline PSPT& PSPT::operator= (const PSPT& V)
-    { for(register int i=0; i<6; i++) a[i] = V.a[i];
+    { for(int i=0; i<6; i++) a[i] = V.a[i];
       return *this; }
 
 inline PSPT& PSPT::operator= (const double fill_value)
-    { for(register int i=0; i<6; i++) a[i] = fill_value;
+    { for(int i=0; i<6; i++) a[i] = fill_value;
       return *this; }
 
 inline PSPT& PSPT::operator+= (const PSPT& V)
-    { for(register int i=0; i<6; i++) a[i] += V.a[i];
+    { for(int i=0; i<6; i++) a[i] += V.a[i];
       return *this; }
 
 inline PSPT& PSPT::operator-= (const PSPT& V)
-    { for(register int i=0; i<6; i++) a[i] -= V.a[i];
+    { for(int i=0; i<6; i++) a[i] -= V.a[i];
       return *this; }
 
 inline PSPT& PSPT::operator+= (const double m)
-    { for(register int i=0; i<6; i++) a[i] += m;
+    { for(int i=0; i<6; i++) a[i] += m;
       return *this; }
 
 inline PSPT& PSPT::operator-= (const double m)
-    { for(register int i=0; i<6; i++) a[i] -= m;
+    { for(int i=0; i<6; i++) a[i] -= m;
       return *this; }
 
 inline PSPT& PSPT::operator*= (const double m)
-    { for(register int i=0; i<6; i++) a[i] *= m;
+    { for(int i=0; i<6; i++) a[i] *= m;
       return *this; }
 
 inline PSPT& PSPT::operator/= (const double m)
     { if(m==double(0.)) div_by_zero_error();
-      for(register int i=0; i<6; i++) a[i] /= m;
+      for(int i=0; i<6; i++) a[i] /= m;
       return *this; }
 
 inline PSPT PSPT::operator- () const
@@ -310,11 +310,11 @@ inline double PSPT::operator* (const PSPT& V) const
     { return a[0]*V.a[0] + a[1]*V.a[1] + a[2]*V.a[2] + a[3]*V.a[3]; }
 
 inline int PSPT::operator== (const PSPT& V) const
-    { for(register int i=0; i<6; i++) if(a[i] != V.a[i]) return 0;
+    { for(int i=0; i<6; i++) if(a[i] != V.a[i]) return 0;
       return 1; }
 
 inline int PSPT::operator!= (const PSPT& V) const
-    { for(register int i=0; i<6; i++) if(a[i] != V.a[i]) return 1;
+    { for(int i=0; i<6; i++) if(a[i] != V.a[i]) return 1;
       return 0; }
 
 inline PSPT PSPT::operator+ (const double x) const
@@ -349,12 +349,12 @@ inline void PSPT::Take_PSPD(const PSPD& tmp) {
 
 inline ostream& operator<< (ostream& s, const PSPT& V)
 { s << ' ';
-  for(register int i=0; i<6; i++) s << ' ' << V(i);
+  for(int i=0; i<6; i++) s << ' ' << V(i);
   s << ' ';
   return s; }
 
 inline istream& operator>> (istream& s, PSPT& V)
-{ for(register int i=0; i<6; i++) s >> V[i];
+{ for(int i=0; i<6; i++) s >> V[i];
   return s; }
 
 inline double norm      (const PSPT& V)

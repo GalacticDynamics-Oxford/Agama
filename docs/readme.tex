@@ -340,7 +340,7 @@ All dimensional values in the potential factory routines can optionally be speci
 \subsubsection{Utility functions}  \label{sec:PotentialUtility}
 
 There are several frequently used functions that operate on any potential object: conversion between energy $E$, angular momentum of a circular orbit $L_\mathrm{circ}$, and radius; epicyclic frequencies $\kappa,\nu,\Omega$ as functions of radius%
-\footnote{defined as $\displaystyle \kappa^2\equiv \frac{\d^2\Phi}{\d R^2} + \frac 3 R \frac{\d\Phi}{\d R},\;\; \nu^2\equiv \frac{\d^2\Phi}{\d z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\d R} = \left(\frac{L_\mathrm{circ}^2}{R}\right)^2,\;$ evaluated at $z=0$.};
+\footnote{defined as $\displaystyle \kappa^2\equiv \frac{\d^2\Phi}{\d R^2} + \frac 3 R \frac{\d\Phi}{\d R},\;\; \nu^2\equiv \frac{\d^2\Phi}{\d z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\d R} = \left(\frac{L_\mathrm{circ}}{R^2}\right)^2,\;$ evaluated at $z=0$.};
 peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane of an axisymmetric potential), etc. They are implemented as standalone functions (generally using a root-finding routine to solve equations such as $\Phi(r)=E$ for $r$), and as two interpolator classes that pre-compute these values on a 1d or 2d grid in $E$ or $E,L$, and provide a faster (but still very accurate) alternative to the standalone functions. These interpolators are used, e.g., in the spherical action finder/mapper class (Section~\ref{sec:ActionsSpherical}).
 
 
@@ -438,9 +438,9 @@ f_z  \equiv \frac{\nu}{2\pi\, \sigma_z^2 }\,\exp\left(-\frac{\nu\,J_z}{\sigma_z^
 f_\phi \equiv 1 + \tanh\left( \frac{J_\phi}{J_{\phi,0}} \right) , \\
 \Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \quad
 \sigma_r(R_c) \equiv \sigma_{r,0} \exp( -R_c / R_{\sigma,r} ) , \quad
-\sigma_z(R_c) \equiv \sigma_{z,0} \exp( -R_c / R_{\sigma,z} ) .
+\sigma_z(R_c) \equiv \sqrt{2}\,h_\mathrm{disk}\,\nu(R_c).
 \end{align*}
-Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\phi$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\phi)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$ and radial scale length $R_\mathrm{disk}$) match those of the DF. The parameter $J_{\phi,0}$ controls the streaming motion (if $J_\phi \ll J_{\phi,0}$, both clockwise and counter-clockwise orbits are equally populated, and in the opposite case only the orbits with positive $J_\phi$ are present).
+Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\phi$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\phi)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$, radial scale length $R_\mathrm{disk}$ and scale height $h_\mathrm{disk}$) match those of the DF. The parameter $J_{\phi,0}$ controls the streaming motion (if $J_\phi \ll J_{\phi,0}$, both clockwise and counter-clockwise orbits are equally populated, and in the opposite case only the orbits with positive $J_\phi$ are present).
 A still more general model can describe a composition of populations with different velocity dispersions (see \texttt{df_disk.h} for more details).
 
 %%%%%%%%%%%%%%

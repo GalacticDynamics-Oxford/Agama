@@ -4,28 +4,25 @@
 #include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_integration.h>
-#include <gsl/gsl_rng.h>
+#include <gsl/gsl_version.h>
+#include <stdint.h>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
 #include <cmath>
 
+#if (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
+#error "GSL version is too old"
+#endif
+
 #ifdef HAVE_CUBA
 #include <cuba.h>
+#include <alloca.h>
 #else
 #include "cubature.h"
 #endif
 
 #ifdef _OPENMP
-#if defined(__APPLE__) && __GNUC__==4 && __GNUC_MINOR__==2
-// this is apparently a bug in Apple compiler that forces us to disable correct OpenMP support in this context
-// (linker reports undefined symbols _gomp_thread_attr and _gomp_tls_key)
-#warning Use of random() is not thread-safe due to broken OpenMP implementation
-#else
-#define HAVE_VALID_OPENMP
-#endif
-#endif
-#ifdef HAVE_VALID_OPENMP
 #include <omp.h>
 #endif
 
@@ -189,52 +186,73 @@ template ptrdiff_t binSearch(const unsigned long x, const unsigned long arr[], s
 
 /* --------- random numbers -------- */
 namespace {
+/// The "xoroshiro128+" pseudo-random number generator, supposed to be very fast and good quality.
+/// Written in 2016 by David Blackman and Sebastiano Vigna
 class RandGenStorage{
-#ifdef HAVE_VALID_OPENMP
+    /// return the next random number from the sequence, and update the state
+    uint64_t next(uint64_t state[2]) {
+        const uint64_t s0 = state[0];
+        uint64_t s1 = state[1];
+        const uint64_t result = s0 + s1;  // take the random number from the current state
+        // update the state using a few bit-shifts and xor operators
+        s1 ^= s0;
+        state[0] = ((s0 << 55) | (s0 >> 9)) ^ s1 ^ (s1 << 14); // a, b
+        state[1] =  (s1 << 36) | (s1 >> 28); // c
+        return result;
+    }
+
+    /// Jump function for the generator. It is equivalent to 2^64 calls to next();
+    /// it can be used to generate 2^64 non-overlapping subsequences for parallel computations.
+    void jump(uint64_t state[2]) {
+        static const uint64_t JUMP[] = { 0xbeac0467eba5facb, 0xd86b048b86aa9922 };
+        uint64_t s0 = 0;
+        uint64_t s1 = 0;
+        for(int i = 0; i < 2; i++)
+            for(int b = 0; b < 64; b++) {
+                if (JUMP[i] & 1ull << b) {
+                    s0 ^= state[0];
+                    s1 ^= state[1];
+                }
+                next(state);
+            }
+        state[0] = s0;
+        state[1] = s1;
+    }
+
     // in the case of OpenMP, we have as many independent pseudo-random number generators
-    // as there are threads, and each thread uses its own instance, to avoid race condition
+    // as there are threads, and each thread uses its own state (seed), to avoid race condition
     // and maintain deterministic output
     int maxThreads;
-    std::vector<gsl_rng*> randgen;
+    std::vector<uint64_t> randgen;  /// two 64-bit integers per thread
 public:
-    RandGenStorage() {
-        maxThreads = std::max(1, omp_get_max_threads());
-        randgen.resize(maxThreads);
+    RandGenStorage() :
+#ifdef _OPENMP
+        maxThreads(std::max(1, omp_get_max_threads())),
+#else
+        maxThreads(1),
+#endif
+        randgen(maxThreads*2)
+    {
+        randomize(42);  // set some nontrivial initial seeds (anything except zero is fine)
+    }
+    /// set the initial seed values for all threads
+    void randomize(uint64_t seed) {
+        if(!seed)
+            seed = (uint64_t)time(NULL);
         for(int i=0; i<maxThreads; i++) {
-            randgen[i] = gsl_rng_alloc(gsl_rng_default);
-            gsl_rng_set(randgen[i], i);  // assign a different but deterministic seed to each thread
+            // take the initial seed (for 0th thread) or copy the seed value from the previous thread...
+            randgen[i*2]   = i>0 ? randgen[i*2-2] : seed;
+            randgen[i*2+1] = i>0 ? randgen[i*2-1] : 0;
+            // ...and fast-forward 2^64 elements in the sequence
+            jump(&randgen[i*2]);
         }
     }
-    ~RandGenStorage() {
-        for(int i=0; i<maxThreads; i++)
-            gsl_rng_free(randgen[i]);
-    }
-    void randomize(unsigned int seed) {
-        if(!seed)
-            seed = (unsigned int)time(NULL);
-        for(int i=0; i<maxThreads; i++)
-            gsl_rng_set(randgen[i], seed+i);
-    }
+    /// convert the 64-bit random integer to a double
     inline double random() {
         int i = std::min(omp_get_thread_num(), maxThreads-1);
-        return gsl_rng_uniform(randgen[i]);
+        uint64_t r = next(&randgen[i*2]);
+        return (1./18446744073709551616.) * r;  // r * 2^-64
     }
-#else
-    gsl_rng* randgen;
-public:
-    RandGenStorage() {
-        randgen = gsl_rng_alloc(gsl_rng_default);
-    }
-    ~RandGenStorage() {
-        gsl_rng_free(randgen);
-    }
-    void randomize(unsigned int seed) {
-        gsl_rng_set(randgen, seed ? seed : (unsigned int)time(NULL));
-    }
-    inline double random() {
-        return gsl_rng_uniform(randgen);
-    }
-#endif
 };
 
 // global instance of random number generator -- created at program startup and destroyed
@@ -374,7 +392,7 @@ void FncProduct::evalDeriv(const double x, double *val, double *der, double *der
 void LogLogScaledFnc::evalDeriv(const double logx,
     /*output*/ double* logf, double* der, double* der2) const
 {
-    double x = exp(logx), fval, fder;
+    double x = exp(logx), fval, fder=0;
     fnc.evalDeriv(x, &fval, der || der2 ? &fder : NULL, der2);
     double logder = fder * x / fval;  // logarithmic derivative d[ln(f)] / d[ln(x)]
     if(logf)
@@ -696,8 +714,6 @@ double findRootHybrid(const IFunction& fnc,
 /** scaling transformation of input function for the case that the interval is (semi-)infinite:
     it replaces the original argument  x  with  y in the range [0:1],  
     and implements the transformation of 1st derivative.
-    TODO: change the transformation to logarithmic in case of infinite intervals,
-    to promote a (nearly) scale-free behaviour.
 */
 class ScaledFunction: public IFunction {
 public:
@@ -1005,40 +1021,41 @@ double ScaledIntegrandEndpointSing::value(const double y) const
 // ------- multidimensional integration ------- //
 namespace {
 #ifdef HAVE_CUBA
-// wrapper for Cuba library
+// wrapper for the Cuba library
 struct CubaParams {
-    const IFunctionNdim& F;      ///< the original function
-    const double* xlower;        ///< lower limits of integration
-    const double* xupper;        ///< upper limits of integration
-    std::vector<double> xvalue;  ///< temporary storage for un-scaling input point 
-                                 ///< from [0:1]^N to the original range
-    std::string error;           ///< store error message in case of exception
+    const IFunctionNdim& F; ///< the original function
+    const double* xlower;   ///< lower limits of integration
+    const double* xupper;   ///< upper limits of integration
+    std::string error;      ///< store error message in case of exception
     CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper) :
-        F(_F), xlower(_xlower), xupper(_xupper) 
-    { xvalue.resize(F.numVars()); };
+        F(_F), xlower(_xlower), xupper(_xupper) {}
 };
 
 int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
-    const int *ncomp, double fval[], void *v_param)
+    const int *fdim, double fval[], void *v_param, const int *npoints)
 {
     CubaParams* param = static_cast<CubaParams*>(v_param);
-    assert(*ndim == (int)param->F.numVars() && *ncomp == (int)param->F.numValues());
+    assert(*ndim == (int)param->F.numVars() && *fdim == (int)param->F.numValues());
     try {
-        for(int n=0; n< *ndim; n++)
-            param->xvalue[n] = param->xlower[n] + (param->xupper[n]-param->xlower[n])*xscaled[n];
-        param->F.eval(&param->xvalue.front(), fval);
+        // un-scale the input point(s) from [0:1]^N to the original range:
+        // allocate a temporary array for un-scaled values on the stack (no need to free it)
+        double* xval = (double*) alloca( (*ndim) * (*npoints) * sizeof(double));
+        for(int i=0; i<*npoints; i++) {
+            for(int d=0, s=(*ndim)*i; d< *ndim; d++, s++)
+                xval[s] = param->xlower[d] * (1-xscaled[s]) + param->xupper[d] * xscaled[s];
+        }
+        param->F.evalmany(*npoints, xval, fval);
         // check if the result is not finite (not performed unless in debug mode)
         if(utils::verbosityLevel >= utils::VL_WARNING) {
-            double result=0;
-            for(int i=0; i< *ncomp; i++)
-                result+=fval[i];
-            if(!isFinite(result)) {
-                param->error = "integrateNdim: invalid function value encountered at";
-                for(int n=0; n< *ndim; n++)
-                    param->error += ' ' + utils::toString(param->xvalue[n], 15);
-                param->error += '\n' + utils::stacktrace();
-                return -1;
-            }
+            for(int i=0; i< *npoints; i++)
+                for(int f=0; f< *fdim; f++)
+                    if(!isFinite(fval[f + (*fdim)*i])) {
+                        param->error = "integrateNdim: invalid function value encountered at";
+                        for(int d=0; d< *ndim; d++)
+                            param->error += ' ' + utils::toString(xval[d + (*ndim)*i], 15);
+                        param->error += '\n' + utils::stacktrace();
+                        return -1;
+                    }
         }
         return 0;   // success
     }
@@ -1049,41 +1066,39 @@ int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
 }
 
 #else
-// wrapper for Cubature library
+// wrapper for the Cubature library
 struct CubatureParams {
     const IFunctionNdim& F; ///< the original function
     int numEval;            ///< count the number of function evaluations
     std::string error;      ///< store error message in case of exception
     explicit CubatureParams(const IFunctionNdim& _F) :
-        F(_F), numEval(0){};
+        F(_F), numEval(0) {}
 };
 
-int integrandNdimWrapperCubature(unsigned int ndim, const double *x, void *v_param,
-    unsigned int fdim, double *fval)
+int integrandNdimWrapperCubature(unsigned int ndim, unsigned int npoints, const double *xval,
+    void *v_param, unsigned int fdim, double *fval)
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
     assert(ndim == param->F.numVars() && fdim == param->F.numValues());
     try {
-        param->numEval++;
-        param->F.eval(x, fval);
-        // check if the result is not finite (not performed unless in debug mode)
+        param->F.evalmany(npoints, xval, fval);
+        param->numEval += npoints;
+        // check if the result is not finite (only performed in debug mode)
         if(utils::verbosityLevel >= utils::VL_WARNING) {
-            double result=0;
-            for(unsigned int i=0; i<fdim; i++)
-                result+=fval[i];
-            if(!isFinite(result)) {
-                param->error = "integrateNdim: invalid function value encountered at";
-                for(unsigned int n=0; n<ndim; n++)
-                    param->error += ' ' + utils::toString(x[n], 15);
-                param->error += '\n' + utils::stacktrace();
-                return -1;
-            }
+            for(unsigned int i=0; i<npoints; i++)
+                for(unsigned int f=0; f<fdim; f++)
+                    if(!isFinite(fval[f + i*fdim])) {
+                        param->error = "integrateNdim: invalid function value encountered at";
+                        for(unsigned int d=0; d<ndim; d++)
+                            param->error += ' ' + utils::toString(xval[d + i*ndim], 15);
+                        param->error += '\n' + utils::stacktrace();
+                        return -1;
+                    }
         }
         return 0;   // success
     }
     catch(std::exception& e) {
         param->error = std::string("integrateNdim: ") + e.what() + '\n' + utils::stacktrace();
-;
         return -1;  // signal of error
     }
 }
@@ -1096,7 +1111,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
 {
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
-    const double absToler = 0;  // maybe should be more flexible?
+    const double absToler = 0;  // the only possible way to stay invariant under scaling transformations
     // storage for errors in the case that user doesn't need them
     std::vector<double> tempError(numValues);
     double* error = outError!=NULL ? outError : &tempError.front();
@@ -1104,9 +1119,9 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     CubaParams param(F, xlower, xupper);
     std::vector<double> tempProb(numValues);  // unused
     int nregions, neval, fail;
-    const int NVEC = 1, FLAGS = 0, KEY = 7, minNumEval = 0;
-    cubacores(0, 0);
-    Cuhre(numVars, numValues, &integrandNdimWrapperCuba, &param, NVEC,
+    const int NVEC = 1000, FLAGS = 0, KEY = 7, minNumEval = 0;
+    cubacores(0, 0);  // disable parallelization at the CUBA level
+    Cuhre(numVars, numValues, (integrand_t)&integrandNdimWrapperCuba, &param, NVEC,
         relToler, absToler, FLAGS, minNumEval, maxNumEval, 
         KEY, NULL/*STATEFILE*/, NULL/*spin*/,
         &nregions, numEval!=NULL ? numEval : &neval, &fail, 
@@ -1121,13 +1136,13 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
         scaleFactor *= (xupper[n]-xlower[n]);
     for(unsigned int m=0; m<numValues; m++) {
         result[m] *= scaleFactor;
-        error[m] *= scaleFactor;
+        error [m] *= scaleFactor;
     }
     if(!param.error.empty())
         throw std::runtime_error(param.error);
 #else
     CubatureParams param(F);
-    hcubature(numValues, &integrandNdimWrapperCubature, &param,
+    hcubature_v(numValues, &integrandNdimWrapperCubature, &param,
         numVars, xlower, xupper, maxNumEval, absToler, relToler,
         ERROR_INDIVIDUAL, result, error);
     if(numEval!=NULL)

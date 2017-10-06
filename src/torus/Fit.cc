@@ -56,7 +56,7 @@ inline double Heff(const PSPD& QP, double dHdQP[4], Potential* Phi)
 
 static void Deletion(const int M, double**A, double**B, double*a, double*b)
 {
-    register int m;
+    int m;
     for(m=0; m<M; m++) {
 	delete[] A[m];
 	delete[] B[m];
@@ -132,11 +132,11 @@ dH/dS_(n1,n2) = dH_eff/d(Q,P) * d(Q,P)/d(q,p) * d(q,p)/dj * dj/dS_(n1,n2)
 
 ==============================================================================*/
 {
-    register int    i1, i2, j, k, l, m;
-    register PSPD   jt, QP;
+    int    i1, i2, j, k, l, m;
+    PSPD   jt, QP;
     double          dqpdj[4][2], dQPdqp[4][4], dHdQP[4], dHdqp[4]={0};
     Pdble           dHda, dHavda, dqpdalfa[4], dQPdbeta[4];
-    register double H, Hsqav, temp,chims;
+    double H, Hsqav, temp,chims;
 
     dHda   = new double[mfit];
     dHavda = new double[mfit];
@@ -303,9 +303,9 @@ on the meaning of the return value:
    -2  -> negative action(s) occured at least at one point in angle space
 ==============================================================================*/
 {
-    register int     i1, i2;
-    register PSPD    jt, QP;
-    register double  H, Hsqav, temp;
+    int     i1, i2;
+    PSPD    jt, QP;
+    double  H, Hsqav, temp;
     Hav    = 0.;
     Hsqav  = 0.;
 // bomb around the torus and sum up the H and H^2
@@ -366,12 +366,12 @@ int SbyLevMar(               // return:        error flag (see below)
 	return 0;
     }
 // normal case: fit some parameter(s)
-    register int    j,k,m;
+    int    j,k,m;
     char            fit[3];
     int             iterations=0, mfit=0, F;
     double          chirms, dchisq, dchtry, temp, damp=1.,
                     H_av, *dA, *B, **AA, **AAtry;
-    register double //H_av0, rHav, 
+    double //H_av0, rHav, 
 		    Rc     = Phi->RfromLc(J(2)), 	// Rc = length scale
                     vc     = WDabs(J(2)) / Rc;		// vc = velocity scale
 		
@@ -540,7 +540,7 @@ inline void z0NewTdim(double**& M, double*& T1, double*& T3, int& Tdim)
     double* T1new = new double[Tdim];
     double* T3new = new double[Tdim];
     double** Mnew = new double* [Tdim];
-    for(register int i=0; i<Nold; i++) {
+    for(int i=0; i<Nold; i++) {
 	T1new[i] = T1[i];
 	T3new[i] = T3[i];
 	Mnew[i]  = M[i];
@@ -560,7 +560,7 @@ inline void z0AddEquation(int*g, double** M, double* T1, double* T3,
 {
   // Puts theta into the vectors T1,T3 and puts the #n -2sin(n.theta) values
   // into a column of the matrix M
-    register int i;
+    int i;
     M[I]  = new double[Mdim];
     T1[I] = t1;
     T3[I] = t3;
@@ -578,7 +578,7 @@ inline void z0RemoveEquation(int*g, double** M, double* T1, double* /*T3*/,
 			   int& I, const int Nr, const double dT)
 {
     I--;
-    register int i;
+    int i;
     delete[] M[I];
     i = int(T1[I]/dT);
     if(i>=0 && i<Nr) g[i] -= 1;
@@ -604,10 +604,10 @@ static int z0AddStrip(const PSPT& Jt3, Potential* Phi, const GenPar& Sn,
     int             grid;
     double          dtime= pow(2.,-30);  // Tiny number, ensuring v. accurate RK
                                          // integration. Kinda arbitrary, no?
-    register int    n;
-   // register PSPD   jt=Jt>>GF, QP;
-    register PSPT   jt3=Jt3>>GF, QP3;
-    register double dt,dt1,dt3,time=0.,t1=Jt3(3),t3=Jt3(5),//t3new,Lperp,u,
+    int    n;
+   // PSPD   jt=Jt>>GF, QP;
+    PSPT   jt3=Jt3>>GF, QP3;
+    double dt,dt1,dt3,time=0.,t1=Jt3(3),t3=Jt3(5),//t3new,Lperp,u,
 		    dT=Pi/double(Nr);
     if(jt3(0)<0.) jt3[0]=tiny; 
     QP3 = jt3 >> TM >> PT;
@@ -691,9 +691,9 @@ int z0dSbyInteg(               // return:     error flag (see below)
              int    *g, *Kl, I=0, K=0, integ=0, Tdim, xdim, Mdim,
 		    MAXHPOS=(Nr*Nr)/5, INTOL=Nr*Nr*IperCell; 
              double  **M, *T1, *T3;
-    register int    hpos=0, F, i, j, k, n, i1=0;
+    int    hpos=0, F, i, j, k, n, i1=0;
              double dtm = 1.;
-    register double temp;
+    double temp;
              PSPT   Jt3;
              GenFnc GF(Sn);
 
@@ -859,7 +859,7 @@ inline void NewTdim(double**& M, double*& T1, double*& T2, double*& T3, int& Tdi
     double* T2new = new double[Tdim];
     double* T3new = new double[Tdim];
     double** Mnew = new double* [Tdim];
-    for(register int i=0; i<Nold; i++) {
+    for(int i=0; i<Nold; i++) {
 	T1new[i] = T1[i];
 	T2new[i] = T2[i];
 	T3new[i] = T3[i];
@@ -882,7 +882,7 @@ inline void AddEquation(int**g, double** M, double* T1, double* T2, double* T3,
 {
   // Puts theta into the vectors T1,T2,T3 and puts the #n -2sin(n.theta) values
   // into a column of the matrix M
-    register int i,j;
+    int i,j;
     M[I]  = new double[Mdim];
     T1[I] = t1;
     T2[I] = t2;
@@ -901,7 +901,7 @@ inline void RemoveEquation(int**g, double** M, double* T1, double* T2, double* /
 			   int& I, const int Nr, const double dT)
 {
     I--;
-    register int i,j;
+    int i,j;
     delete[] M[I];
     i = int(T1[I]/dT);
     j = int(T2[I]/dT);
@@ -1029,9 +1029,9 @@ int dSbyInteg(               // return:     error flag (see below)
              int    **g, *Kl, I=0, K=0, integ=0, Tdim, xdim, Mdim,
 		    MAXHPOS=(Nr*Nr)/5, INTOL=Nr*Nr*IperCell; 
              double  **M, *T1, *T2, *T3;
-    register int    hpos=0, F, i, j, k, n, i1=0, i2=0;
+    int    hpos=0, F, i, j, k, n, i1=0, i2=0;
              double dtm = 1.;
-    register double temp;
+    double temp;
              PSPT   Jt3;
              GenFnc GF(Sn);
 
@@ -1241,13 +1241,13 @@ int Omega(                   // return:    error flag, see below
 {
     const    double Etol=1.e-14;
     const    int    Intol=100000;
-    register int    N=1,integ=0;
-    register double det,t=0,th1=t1,th2=t2,x,
+    int    N=1,integ=0;
+    double det,t=0,th1=t1,th2=t2,x,
 		    St=0.,Stt=0.,S1=t1,S2=t2,S1t=0.,S2t=0.,
 		    Sx=0.,Sxx=0;
     double          dt=1.e-4;
     GenFnc          GF(Sn);
-    register PSPD   jt,QP;
+    PSPD   jt,QP;
     int toruserrno = 0;
     QP = PSPD(J(0),J(1),t1,t2) >> GF >> TM;
     if(toruserrno) return -2;
@@ -1299,7 +1299,7 @@ int Omega(                   // return:    error flag, see below
 ////////////////////////////////////////////////////////////////////////////////
 inline double NearResonant(const Frequencies &Om)
 {
-    register double res=1., O01=Om(0)/Om(1), O10=Om(1)/Om(0);
+    double res=1., O01=Om(0)/Om(1), O10=Om(1)/Om(0);
     res = fmin(res, WDabs(O01 - 1.) );
     res = fmin(res, WDabs(2. - O10) );
     res = fmin(res, WDabs(O01 - 2.) );
@@ -1364,12 +1364,12 @@ int AllFit(	            // return:	error flag (see below)
     tl1 = 3.e-7,   	  	       // tolerance for dchisq of 1. & 2. fit
     tl8 = 3.e-5,          	       // tolarance for dchisq/(J*O) of --
     tla = 1.e-2;   	  	       // tolerance for chi_rms of angle fit
-  register int    Ni1 = Ni/5,          // max. No of iteration in 1. fit
+  int    Ni1 = Ni/5,          // max. No of iteration in 1. fit
     Ni2 = (Nta)? (Ni-Ni1)/Nta : Ni-Ni1,// max. No of iteration in 2. fit
     n1 = fmax(Nth, 6*(SN.NumberofN1()/4+1)),
     n2 = fmax(Nth, 6*(SN.NumberofN2()/4+1)),
     nrs= Nrs, F, sf=(safe)? 2 : 0;
-  register double tl9=0.95*tol, fac=1., Jabs, tlH, tlC, rs;
+  double tl9=0.95*tol, fac=1., Jabs, tlH, tlC, rs;
   int    ngA;
   double  tailorparam = (J(0) > J(1) && J(1))? J(0)/J(1) : 
                        (J(1) > J(0) && J(0))? J(1)/J(0) : 1;
@@ -1693,12 +1693,12 @@ int PTFit(	            // return:	error flag (see below)
     tl1 = 3.e-7,   	  	       // tolerance for dchisq of 1. & 2. fit
     tl8 = 3.e-5,          	       // tolarance for dchisq/(J*O) of --
     tla = 1.e-2;   	  	       // tolerance for chi_rms of angle fit
-  register int    Ni1 = Ni/5,          // max. No of iteration in 1. fit
+  int    Ni1 = Ni/5,          // max. No of iteration in 1. fit
     Ni2 = (Nta)? (Ni-Ni1)/Nta : Ni-Ni1,// max. No of iteration in 2. fit
     n1 = fmax(Nth, 6*(SN.NumberofN1()/4+1)),
     n2 = fmax(Nth, 6*(SN.NumberofN2()/4+1)),
     nrs= Nrs, F;
-  register double tl9=0.95*tol, fac=1., Jabs, tlH, tlC, rs;
+  double tl9=0.95*tol, fac=1., Jabs, tlH, tlC, rs;
   int    ngA;
   double  tailorparam = (J(0) > J(1) && J(1))? J(0)/J(1) : 
                        (J(1) > J(0) && J(0))? J(1)/J(0) : 1;

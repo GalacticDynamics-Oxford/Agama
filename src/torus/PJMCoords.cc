@@ -8,7 +8,7 @@ namespace Torus{
 
 void OmniCoords::GCYfromGCA()
 {
-    register double s, c;
+    double s, c;
     rv[5][0] = hypot(rv[4](0), rv[4](1));
     rv[5][1] = rv[4](2);
     if(rv[5](0)) {
@@ -28,7 +28,7 @@ void OmniCoords::GCYfromGCA()
 
 void OmniCoords::GCAfromGCY()
 {
-    register double s=sin(rv[5](2)), c=cos(rv[5](2));
+    double s=sin(rv[5](2)), c=cos(rv[5](2));
     rv[4][0] = c*rv[5](0);
     rv[4][1] = s*rv[5](0);
     rv[4][2] = rv[5](1);
@@ -51,7 +51,7 @@ void OmniCoords::LSRfromGCA()
     rv[3][4] = vcsun-rv[4](4);
     rv[3][5] = rv[4](5);
     if(zsun) { // need to rotate a bit for GC to have rv[3][2]=0
-	register double t;
+	double t;
 	if(z!=zsun) {
 	    z = zsun;
 	    t = hypot(zsun,Rsun);
@@ -72,8 +72,8 @@ void OmniCoords::GCAfromLSR()
 {
     static double z=0.,s=0.,c=1.;
     if(zsun) { // need to rotate a bit for GC to have rv[3][2]=0
-        register vec6 in=rv[3];
-	register double t;
+        vec6 in=rv[3];
+	double t;
 	if(z!=zsun) {
 	    z = zsun;
 	    t = hypot(zsun,Rsun);
@@ -132,9 +132,9 @@ void OmniCoords::HCAfromLSR()
 
 void OmniCoords::HGPfromHCA()
 {
-    register double R=hypot(rv[2](0),rv[2](1));
+    double R=hypot(rv[2](0),rv[2](1));
     rv[1][0] = hypot(R,rv[2](2));
-    register double 
+    double 
     cl	   = (R==0.)?       1. : rv[2](0)/R,
     sl	   = (R==0.)?       0. : rv[2](1)/R,
     cb	   = (rv[1](0)==0.)?  1. : R/rv[1](0),
@@ -150,7 +150,7 @@ void OmniCoords::HGPfromHCA()
 
 void OmniCoords::HCAfromHGP()
 {
-    register double 
+    double 
     cl     = cos(rv[1](1)),
     sl     = sin(rv[1](1)),
     cb     = cos(rv[1](2)),
@@ -181,7 +181,7 @@ void OmniCoords::SetTrans()
 		 C[6]={0.009717173455,-4.136915141e-6,-1.052045688e-9,
 		       -2.06845757e-6,-1.052045688e-9,-2.028121072e-7};
     if(epoch == 1991.25) {
-        register int i,j;
+        int i,j;
 	for(i=0; i<3; i++) for(j=0; j<3; j++) {
 	    EtoP[i][j] = GalactoConstants::EtoPJ1991[i][j];
 	    if(EtoP[i][j]==0.) {
@@ -194,7 +194,7 @@ void OmniCoords::SetTrans()
         return;
     }
     if(epoch == 2000.) {
-        register int i,j;
+        int i,j;
 	for(i=0; i<3; i++) for(j=0; j<3; j++) {
 	    EtoP[i][j] = GalactoConstants::EtoPJ2000[i][j];
 	    if(EtoP[i][j]==0.) {
@@ -206,8 +206,8 @@ void OmniCoords::SetTrans()
 	  }
         return;
     }
-    register int    i,j,k;
-    register double
+    int    i,j,k;
+    double
     T  = 0.01*(epoch-2000.),
     t  =-T,
     zt = ( ( A[5]*t + (A[4]*T+A[3]) )*t + ((A[2]*T+A[1])*T+A[0]) )*t, // z_a
@@ -231,15 +231,15 @@ void OmniCoords::SetTrans()
 
 void OmniCoords::HEQfromHCA()
 {
-    register int i,j;
-    register vec6  h=0.;
+    int i,j;
+    vec6  h=0.;
     for(i=0; i<3; i++) for(j=0; j<3; j++) {
 	h[i]   += rv[2](j)   * EtoP(i,j);
 	h[i+3] += rv[2](j+3) * EtoP(i,j);
     }
-    register double R=hypot(h(0),h(1));
+    double R=hypot(h(0),h(1));
     rv[0][0] = hypot(R,h(2));
-    register double
+    double
     ca	   = (R==0.)?       1. : h(0)/R,
     sa	   = (R==0.)?       0. : h(1)/R,
     cd	   = (rv[0](0)==0.)?  1. : R/rv[0](0),
@@ -255,9 +255,9 @@ void OmniCoords::HEQfromHCA()
 
 void OmniCoords::HCAfromHEQ()
 {
-    register        int i,j;
-    register vec6     h;
-    register double
+           int i,j;
+    vec6     h;
+    double
     ca   = cos(rv[0](1)),
     sa   = sin(rv[0](1)),
     cd   = cos(rv[0](2)),

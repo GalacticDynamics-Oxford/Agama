@@ -925,15 +925,6 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
 //        ----------------------------------------------------------------------------
 ///@{
 
-namespace {
-inline void swallowRestofLine(std::ifstream& from) {
-    char c;
-    do {
-        from.get(c);
-    } while( from.good() && c !='\n');
-}
-}
-
 PtrPotential readGalaxyPotential(const std::string& filename, const units::ExternalUnits& conv) 
 {
     std::ifstream strm(filename.c_str());

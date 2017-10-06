@@ -22,9 +22,6 @@ static const double MIN_MASS_FRAC  = 1e-4;
 /// grid size for the axisymmetric Jeans eq
 static const int NPOINTS_GRID = 64;
 
-/// order of Gauss-Legendre integration
-static const int GLORDER = 6;
-
 /// whether to use finite-element method for integrating the Jeans equation in z
 #define USE_FEM
 
@@ -123,8 +120,8 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     math::Matrix<double> rhosigmaz2(gridRsize, gridzsize), rhoval(gridRsize, gridzsize);
 
 #ifndef USE_FEM
-
     // perform the integration in z direction at each point of the radial grid
+    const int GLORDER = 6;  // order of Gauss-Legendre integration
     double glnodes[GLORDER], glweights[GLORDER];
     math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
 #ifdef _OPENMP

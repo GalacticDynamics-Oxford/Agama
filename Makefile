@@ -31,7 +31,6 @@ SOURCES   = \
             galaxymodel_losvd.cpp \
             galaxymodel_selfconsistent.cpp \
             galaxymodel_spherical.cpp \
-            galaxymodel_target.cpp \
             galaxymodel_velocitysampler.cpp \
             math_core.cpp \
             math_fit.cpp \

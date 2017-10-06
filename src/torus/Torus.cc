@@ -147,10 +147,10 @@ void Torus::LevCof(const PSPD     &Jt,
 // computes chi, where
 //		chi^2 = a^2 * (R0 - R[th])^2 + b^2 * (z0 - z[th])^2
 // and its derivatives w.r.t. th
-    register int    i,j,k;
+    int    i,j,k;
              double dQPdqp[4][4], dqdt[2][2], dqpdj[4][2], djdt[2][2];
 	     DB22   dq;
-	     register double dR, dz, aq=a*a,bq=b*b;
+	     double dR, dz, aq=a*a,bq=b*b;
     QP = TM->ForwardWithDerivs(GF.ForwardWithDerivs(Jt,djdt),dqdt) >> (*PT);
     PT->Derivatives(dQPdqp);
     TM->Derivatives(dqpdj);
@@ -194,10 +194,10 @@ void Torus::LevCof(const PSPD         &Jt,
 //		chi^2 = a^2 * (R0 - R[th])^2 + b^2 * (z0 - z[th])^2
 //                      + vscale^2 * ( (vR0 - vR[th])^2 + (vz0 - vz[th])^2 )
 // and its derivatives w.r.t. th
-    register int    i,j,k;
+    int    i,j,k;
     double dQPdqp[4][4], dqdt[2][2], dpdt[2][2], dqpdj[4][2], djdt[2][2];
     Matrix<double,4,2>   dqp;
-    register double dR, dz, dvR, dvz, aq=a*a, bq=b*b, vscale2=vscale*vscale;
+    double dR, dz, dvR, dvz, aq=a*a, bq=b*b, vscale2=vscale*vscale;
 
 
     QP = TM->ForwardWithDerivs(GF.ForwardWithDerivs(Jt,djdt),dqdt,dpdt)>> (*PT);
@@ -252,11 +252,11 @@ void Torus::LevCof(const PSPD         &Jt,
 //		chi^2 = a^2 * (R0 - R[th])^2 + b^2 * (z0 - z[th])^2
 //                      + vscale^2 * ( (vR0 - vR[th])^2 + (vz0 - vz[th])^2 )
 // and its derivatives w.r.t. th
-    register int    i,j,k;
+    int    i,j,k;
     double dQPdqp[4][4], dqdt[2][2], dpdt[2][2], dqpdj[4][2], djdt[2][2];
     Matrix<double,4,2>   dqp;
-    register double dR, dz, dvR, dvz;//, aq=a*a, bq=b*b, vscale2=vscale*vscale;
-    register Vector<double,4> scq;
+    double dR, dz, dvR, dvz;//, aq=a*a, bq=b*b, vscale2=vscale*vscale;
+    Vector<double,4> scq;
     for(int i=0;i!=4;i++) scq[i] = sc[i]*sc[i];
 
     QP = TM->ForwardWithDerivs(GF.ForwardWithDerivs(Jt,djdt),dqdt,dpdt)>> (*PT);
@@ -310,7 +310,7 @@ inline bool velocities_are_dependent(		// return: v1, v2 dependent?
 	double&         stat)                   // output: discriminant 
 {
     if( sign(v1(0)) * sign(v1(1)) * sign(v2(0)) * sign(v2(1)) < 0) return false;
-    register double x   = hypot(fabs(v1(0))-fabs(v2(0)), 
+    double x   = hypot(fabs(v1(0))-fabs(v2(0)), 
 				fabs(v1(1))-fabs(v2(1))),
 		    y   = hypot(v1(0),v1(1)),
 		    eps = tolerance * sqrt(norm_det);
@@ -356,7 +356,7 @@ int Torus::containsPoint(    // return:	    error flag (see below)
     if(Q(1)!=0.) return 0;   
     Angles Ang = 0.;
     PSPD tmp = Map(Ang), QP =0., JT, Jt, Jtry;
-    register PSPT   QP3D, Jt3D, JT3D;
+    PSPT   QP3D, Jt3D, JT3D;
     double chio,rmin,rmax, dTdt[2][2];;
     DB22   A, Atry, dQdt, dQdtry;
     DB2    B, Btry, dt;
@@ -423,14 +423,14 @@ int Torus::containsPoint(    // return:	    error flag (see below)
 			     31/32.,33/32.,35/32.,37/32.,39/32.,41/32.,43/32.,
 			     45/32.,47/32.,49/32.,51/32.,53/32.,55/32.,57/32.,
 			     59/32.,61/32.,63/32.}; // for finding 2nd theta
-    register int    it=0, tried=0;
+    int    it=0, tried=0;
     DB22   A, Atry, dQdt, dQdtry;                   // for Lev-Mar
     DB2    B, Btry, dt;                             // for Lev-Mar
     double chi, chio, dTdt[2][2];                   // ditto
     PSPD   QP;
-    register PSPD   JT, Jt, Jtry;
-    register PSPT   QP3D, Jt3D, JT3D;
-    register double lam=0.5, lam1, det, /*JT3_0,*/ det1,
+    PSPD   JT, Jt, Jtry;
+    PSPT   QP3D, Jt3D, JT3D;
+    double lam=0.5, lam1, det, /*JT3_0,*/ det1,
       rq   = Q(0)*Q(0) + Q(1)*Q(1),            
       rtin = (delr)? delr : sqrt(rq)*tiny;          // tolerance in position 
 
@@ -656,15 +656,15 @@ DB2 Torus::DistancetoPSP(const PSPD &QP_aim, double &scale, Angles &Aclosest) co
 {
   const    int    maxit=100;
   const    double tiny=1.e-8;
-  register int    it=0;
+  int    it=0;
            DB22   A, Atry;
 	   Matrix<double,4,2> dQPdt, dQPdtry;
            DB2    B, Btry, dt;
            double chi, chio=1.e99;
-  register double lam=0.5, lam1, det, r=hypot(QP_aim(0),QP_aim(1)), rtin=r*tiny;
+  double lam=0.5, lam1, det, r=hypot(QP_aim(0),QP_aim(1)), rtin=r*tiny;
   PSPD   QP, QP_best;
-  register PSPD   Jt, Jtry;
-  register double sc;
+  PSPD   Jt, Jtry;
+  double sc;
   DB2 out=0.;
   Angles Astart(0.);
   if(scale==0.) {
@@ -760,15 +760,15 @@ Vector<double,4> Torus::DistancetoPSP(const PSPD &QP_aim,
 {
   const    int    maxit=100;
   const    double tiny=1.e-8;
-  register int    it=0;
+  int    it=0;
            DB22   A, Atry;
 	   Matrix<double,4,2> dQPdt, dQPdtry;
            DB2    B, Btry, dt;
            double chi, chio=1.e99;
-  register double lam=0.5, lam1, det, r=hypot(QP_aim(0),QP_aim(1)), rtin=r*tiny;
+  double lam=0.5, lam1, det, r=hypot(QP_aim(0),QP_aim(1)), rtin=r*tiny;
   PSPD   QP, QP_best;
-  register PSPD   Jt, Jtry;
-  register Vector<double,4> sc;
+  PSPD   Jt, Jtry;
+  Vector<double,4> sc;
   Vector<double,4>  out=0.;
   Angles Astart(0.);
   if(scales==0.) {
@@ -875,13 +875,13 @@ double Torus::DistancetoPoint(const Position &Q) const
 {
     const    int    maxit=100;
     const    double tiny=1.e-8;
-    register int    it=0;
+    int    it=0;
 	     DB22   A, Atry, dQdt, dQdtry;
 	     DB2    B, Btry, dt;
 	     double chi, chio;
-    register double lam=0.5, lam1, det, r=hypot(Q(0),Q(1)), rtin=r*tiny;
+    double lam=0.5, lam1, det, r=hypot(Q(0),Q(1)), rtin=r*tiny;
 	     PSPD   QP;
-    register PSPD   Jt, Jtry;
+    PSPD   Jt, Jtry;
 
   // Avoid bugs causing crashes/loops
   if(J(0)<0. || J(1) < 0.) {
@@ -921,13 +921,13 @@ double Torus::DistancetoPoint(const Position &Q, double &thr, double &thz) const
 {
     const    int    maxit=100;
     const    double tiny=1.e-8;
-    register int    it=0;
+    int    it=0;
 	     DB22   A, Atry, dQdt, dQdtry;
 	     DB2    B, Btry, dt;
 	     double chi, chio;
-    register double lam=0.5, lam1, det, r=hypot(Q(0),Q(1)), rtin=r*tiny;
+    double lam=0.5, lam1, det, r=hypot(Q(0),Q(1)), rtin=r*tiny;
 	     PSPD   QP;
-    register PSPD   Jt, Jtry;
+    PSPD   Jt, Jtry;
 
   // Avoid bugs causing crashes/loops
   if(J(0)<0. || J(1) < 0.) {
@@ -970,14 +970,14 @@ double Torus::DistancetoRadius(const double R) const
 {
     const    int      maxit=1000;
     const    double   tiny=1.e-4;
-    register int      it=0;
+    int      it=0;
 	     DB22     A, Atry, dQdt, dQdtry;
 	     DB2      B, Btry, dt;
 	     double   chi, chio;
-    register double   lam=0.5, lam1, rtin=R*tiny;
+    double   lam=0.5, lam1, rtin=R*tiny;
 	     PSPD     QP;
 	     Position Q=0.;
-    register PSPD     Jt, Jtry;
+    PSPD     Jt, Jtry;
              Angles Ang = 0.;
 	     double rmin,rmax;
 	     
@@ -1023,9 +1023,9 @@ double Torus::DistancetoRadius(const double R) const
 void Torus::SOSroot(const double t2, double& z, double& dz) const
 {
     double          dQPdqp[4][4], dqdt[2][2], dqpdj[4][2], djdt[2][2];
-    register PSPD   jt, QP;
-    register int    i,j;
-    register double dqdt2;
+    PSPD   jt, QP;
+    int    i,j;
+    double dqdt2;
     Jtroot[3] = t2;
     jt        = GF.ForwardWithDerivs(Jtroot, djdt);
     QP        = TM->ForwardWithDerivs(jt, dqdt) >> (*PT);
@@ -1064,9 +1064,9 @@ void Torus::SOS(ostream& to, const int Nthr) const
 void Torus::SOS_z_root(const double t2, double& RmRS, double& dR) const
 {
     double          dQPdqp[4][4], dqdt[2][2], dqpdj[4][2], djdt[2][2];
-    register PSPD   jt, QP;
-    register int    i,j;
-    register double dqdt2;
+    PSPD   jt, QP;
+    int    i,j;
+    double dqdt2;
     Jtroot[2] = t2;
     jt        = GF.ForwardWithDerivs(Jtroot, djdt);
     QP        = TM->ForwardWithDerivs(jt, dqdt) >> (*PT);

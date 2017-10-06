@@ -28,12 +28,12 @@ static const unsigned int GLORDER_ANG  = 4;
 static const int LMIN_SPHHARM = 16;
 
 /// Helper class for 3-dimensional integration of a density multiplied by basis functions of the grid
-class DensityGridIntegrand: public math::IFunctionNdim {
+class TargetDensityIntegrand: public math::IFunctionNdim {
     const potential::BaseDensity& dens;
-    const BaseDensityGrid& grid;
+    const BaseTargetDensity& grid;
     const unsigned int nval;
 public:
-    DensityGridIntegrand(const potential::BaseDensity& _dens, const BaseDensityGrid& _grid) :
+    TargetDensityIntegrand(const potential::BaseDensity& _dens, const BaseTargetDensity& _grid) :
         dens(_dens), grid(_grid), nval(grid.numValues()) {}
 
     virtual void eval(const double vars[], double values[]) const {
@@ -51,8 +51,8 @@ public:
     virtual unsigned int numValues() const { return nval; }
 };
 
-// decode the index of the cell for DensityGridClassic<0>,
-// or its four corners for DensityGridClassic<1>
+// decode the index of the cell for TargetDensityClassic<0>,
+// or its four corners for TargetDensityClassic<1>
 template<int N> void getCornerIndicesClassic(
     /*input*/  int pane, int ind1, int ind2, int stripsPerPane,
     /*output*/ int& indll, int& indul, int& indlu, int& induu);
@@ -83,7 +83,7 @@ template<> inline void getCornerIndicesClassic<1>(
 }
 
 // decode the index of the basis element with the given index of angular harmonic m
-// for DensityGridCylindrical<0>, or the indices of four basis elements for DensityGridCylindrical<1>
+// for TargetDensityCylindrical<0>, or the indices of four basis elements for TargetDensityCylindrical<1>
 template<int N> void getCornerIndicesCylindrical(
     /*input*/  int m, int indR, int indz, int gridRsize, int gridzsize,
     /*output*/ int& indll, int& indul, int& indlu, int& induu);
@@ -114,12 +114,13 @@ template<> inline void getCornerIndicesCylindrical<1>(
 } // internal ns
 
 
-std::vector<double> BaseDensityGrid::computeProjVector(const potential::BaseDensity& density) const
+std::vector<double> BaseTargetDensity::computeDensityProjection(
+    const potential::BaseDensity& density) const
 {
     double xlower[3] = {0,0,0};   // boundaries of integration region in scaled coordinates
     double xupper[3] = {1,1,1};
     std::vector<double> result(numValues());
-    math::integrateNdim(DensityGridIntegrand(density, *this),
+    math::integrateNdim(TargetDensityIntegrand(density, *this),
         xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL * numValues(), &result[0]);
     return result;
 }
@@ -128,14 +129,15 @@ std::vector<double> BaseDensityGrid::computeProjVector(const potential::BaseDens
 //----- Classic grid-based density representation -----//
 
 template<int N>
-DensityGridClassic<N>::DensityGridClassic(
+TargetDensityClassic<N>::TargetDensityClassic(
     const unsigned int _stripsPerPane,
-    const std::vector<double>& _shellRadii,
+    const std::vector<double>& _gridr,
     const double axisYtoX, const double axisZtoX)
 :
     stripsPerPane(_stripsPerPane),
     valuesPerShell(3 * stripsPerPane * (stripsPerPane + N) + N),
-    shellRadii(_shellRadii),
+    // if the input grid starts from zero, skip this first array element, otherwise take the whole array
+    shellRadii(_gridr.empty() || _gridr[0] > 0 ? _gridr.begin() : _gridr.begin()+1, _gridr.end()),
     axisX(1. / cbrt(axisYtoX*axisZtoX)),
     axisY(axisYtoX * axisX),
     axisZ(axisZtoX * axisX)   // the product axisX*axisY*axisZ is unity
@@ -144,11 +146,11 @@ DensityGridClassic<N>::DensityGridClassic(
     for(unsigned int i=1; i<shellRadii.size(); i++)
         ok &= shellRadii[i] > shellRadii[i-1];
     if(!ok || stripsPerPane<1 || shellRadii.size()<1 || axisYtoX<=0 || axisZtoX<=0)
-        throw std::invalid_argument("DensityGridClassic: invalid grid parameters");
+        throw std::invalid_argument("TargetDensityClassic: invalid grid parameters");
 }
 
 template<int N>
-void DensityGridClassic<N>::addPoint(const double point[3], const double mult, double values[]) const
+void TargetDensityClassic<N>::addPoint(const double point[3], const double mult, double values[]) const
 {
     const int numShells = shellRadii.size();
     double X = fabs(point[0] / axisX), Y = fabs(point[1]) / axisY, Z = fabs(point[2]) / axisZ;
@@ -176,7 +178,7 @@ void DensityGridClassic<N>::addPoint(const double point[3], const double mult, d
         coord1=X;
         coord2=Y;
     } else
-        throw std::runtime_error("DensityGridClassic: cannot determine the cell index");
+        throw std::runtime_error("TargetDensityClassic: cannot determine the cell index");
     // fractional index of the grid cell in both directions:
     // ratio1 between 0 and 1 - inside the first row, between 1 and 2 - inside the second row, etc.;
     // ratio2 between 0 and 1 - inside the first column, etc.
@@ -215,11 +217,11 @@ void DensityGridClassic<N>::addPoint(const double point[3], const double mult, d
             valOff[induu] +=    ratio1  *    ratio2  * val;
         }
     } else
-        assert(!"DensityGridClassic: unimplemented N");
+        assert(!"TargetDensityClassic: unimplemented N");
 }
 
 template<int N>
-std::vector<double> DensityGridClassic<N>::computeProjVector(
+std::vector<double> TargetDensityClassic<N>::computeDensityProjection(
     const potential::BaseDensity& density) const
 {
     double glnodesRad[GLORDER_RAD], glweightsRad[GLORDER_RAD];
@@ -276,7 +278,7 @@ std::vector<double> DensityGridClassic<N>::computeProjVector(
                             resOff[induu] += value * (1-offsetR) *    offset1  *    offset2;
                         }
                     } else
-                        assert(!"DensityGridClassic: unimplemented N");
+                        assert(!"TargetDensityClassic: unimplemented N");
                 }
             }
         }
@@ -285,10 +287,10 @@ std::vector<double> DensityGridClassic<N>::computeProjVector(
 }
 
 template<int N>
-std::string DensityGridClassic<N>::elemName(unsigned int index) const
+std::string TargetDensityClassic<N>::coefName(unsigned int index) const
 {
     if(index >= numValues())
-        throw std::out_of_range("DensityGridClassic: index out of range");
+        throw std::out_of_range("TargetDensityClassic: index out of range");
     double coord[3] = {1.}, radius;
     unsigned int pane;
     if(N==0) {
@@ -319,7 +321,7 @@ std::string DensityGridClassic<N>::elemName(unsigned int index) const
             }
         }
     } else
-        assert(!"DensityGridClassic: unimplemented N");
+        assert(!"TargetDensityClassic: unimplemented N");
     double denom = 1. / sqrt(pow_2(coord[0]) + pow_2(coord[1]) + pow_2(coord[2]));
     // pane=0:  coord = {x, y, z};  pane=1:  coord = {y, z, x};  pane=2:  coord = {z, x, y}
     return "x=" + utils::toString(radius * denom * coord[(3-pane)%3] * axisX) +
@@ -327,30 +329,31 @@ std::string DensityGridClassic<N>::elemName(unsigned int index) const
          ", z=" + utils::toString(radius * denom * coord[(5-pane)%3] * axisZ);
 }
     
-template<> const char* DensityGridClassic<0>::name() const { return "DensityClassicTopHat"; }
-template<> const char* DensityGridClassic<1>::name() const { return "DensityClassicLinear"; }
+template<> const char* TargetDensityClassic<0>::name() const { return "DensityClassicTopHat"; }
+template<> const char* TargetDensityClassic<1>::name() const { return "DensityClassicLinear"; }
 
-template class DensityGridClassic<0>;
-template class DensityGridClassic<1>;
+template class TargetDensityClassic<0>;
+template class TargetDensityClassic<1>;
 
 
 //----- Spherical-harmonic density representation -----//
 
-DensityGridSphHarm::DensityGridSphHarm(
+TargetDensitySphHarm::TargetDensitySphHarm(
     const int _lmax, const int _mmax, const std::vector<double>& _gridr)
 :
     lmax(_lmax), mmax(_mmax),
     angularCoefs( (lmax/2+1) * (mmax/2+1) - mmax/2 * (mmax/2+1) / 2 ),
-    gridr(_gridr)
+    // if the input grid starts from zero, skip this first array element, otherwise take the whole array
+    gridr(_gridr.empty() || _gridr[0] > 0 ? _gridr.begin() : _gridr.begin()+1, _gridr.end())
 {
     bool ok = lmax >= 0 && mmax >= 0 && mmax <= lmax && gridr.size() >= 1 && gridr[0] > 0;
     for(unsigned int i=1; i<gridr.size(); i++)
         ok &= gridr[i] > gridr[i-1];
     if(!ok)
-        throw std::invalid_argument("DensityGridSphHarm: invalid grid parameters");
+        throw std::invalid_argument("TargetDensitySphHarm: invalid grid parameters");
 }
 
-void DensityGridSphHarm::addPoint(const double point[3], double mult, double values[]) const
+void TargetDensitySphHarm::addPoint(const double point[3], double mult, double values[]) const
 {
     const coord::PosCyl pcyl = toPosCyl(coord::PosCar(point[0], point[1], point[2]));
     double r   = sqrt(pow_2(pcyl.R) + pow_2(pcyl.z));
@@ -392,7 +395,8 @@ void DensityGridSphHarm::addPoint(const double point[3], double mult, double val
     }
 }
 
-std::vector<double> DensityGridSphHarm::computeProjVector(const potential::BaseDensity& density) const
+std::vector<double> TargetDensitySphHarm::computeDensityProjection(
+    const potential::BaseDensity& density) const
 {
     // the integration in radius follows the Gauss-Legendre rule
     double glnodesRad[GLORDER_RAD], glweightsRad[GLORDER_RAD];
@@ -444,10 +448,10 @@ std::vector<double> DensityGridSphHarm::computeProjVector(const potential::BaseD
     return result;
 }
 
-std::string DensityGridSphHarm::elemName(unsigned int index) const
+std::string TargetDensitySphHarm::coefName(unsigned int index) const
 {
     if(index >= numValues())
-        throw std::out_of_range("DensityGridSphHarm: index out of range");
+        throw std::out_of_range("TargetDensitySphHarm: index out of range");
     if(index == 0)
         return "r=0, l=0, m=0";
     index--;
@@ -460,16 +464,19 @@ std::string DensityGridSphHarm::elemName(unsigned int index) const
     return "r=" + utils::toString(gridr[indr]) + ", l=" + utils::toString(l) + ", m=" + utils::toString(m);
 }
 
-const char* DensityGridSphHarm::name() const { return "DensitySphHarm"; }
+const char* TargetDensitySphHarm::name() const { return "DensitySphHarm"; }
 
 
 //----- Cylindrical grid + azimuthal Fourier density representation -----//
 
 template<int N>
-DensityGridCylindrical<N>::DensityGridCylindrical(const int _mmax,
+TargetDensityCylindrical<N>::TargetDensityCylindrical(const int _mmax,
     const std::vector<double>& _gridR, const std::vector<double>& _gridz)
 :
-    mmax(_mmax), gridR(_gridR), gridz(_gridz),
+    mmax(_mmax),
+    // if the input grids start from zero, skip this first array element, otherwise take the whole array
+    gridR(_gridR.empty() || _gridR[0] > 0 ? _gridR.begin() : _gridR.begin()+1, _gridR.end()),
+    gridz(_gridz.empty() || _gridz[0] > 0 ? _gridz.begin() : _gridz.begin()+1, _gridz.end()),
     totalNumValues( (gridz.size() + N) * (gridR.size() * (mmax/2+1) + N) )
 {
     bool ok = mmax >= 0 && gridR.size() >= 1 && gridz.size() >= 1 && gridR[0] > 0 && gridz[0] > 0;
@@ -478,11 +485,11 @@ DensityGridCylindrical<N>::DensityGridCylindrical(const int _mmax,
     for(unsigned int i=1; i<gridz.size(); i++)
         ok &= gridz[i] > gridz[i-1];
     if(!ok)
-        throw std::invalid_argument("DensityGridCylindrical: invalid grid parameters");
+        throw std::invalid_argument("TargetDensityCylindrical: invalid grid parameters");
 }
 
 template<int N>
-void DensityGridCylindrical<N>::addPoint(const double point[3], double mult, double values[]) const
+void TargetDensityCylindrical<N>::addPoint(const double point[3], double mult, double values[]) const
 {
     const coord::PosCyl pcyl = toPosCyl(coord::PosCar(point[0], point[1], fabs(point[2])));
     const int gridRsize = gridR.size(), gridzsize = gridz.size();
@@ -518,12 +525,12 @@ void DensityGridCylindrical<N>::addPoint(const double point[3], double mult, dou
                 values[indlu] += val * (1-offR) *    offz;
             }   // otherwise there is no such term in the basis set
         } else
-            assert(!"DensityGridCylindrical: unimplemented N");
+            assert(!"TargetDensityCylindrical: unimplemented N");
     }
 }
 
 template<int N>
-std::vector<double> DensityGridCylindrical<N>::computeProjVector(
+std::vector<double> TargetDensityCylindrical<N>::computeDensityProjection(
     const potential::BaseDensity& density) const
 {
     // the integration in R and z follows the Gauss-Legendre rule
@@ -535,7 +542,7 @@ std::vector<double> DensityGridCylindrical<N>::computeProjVector(
     unsigned int numSamplesAngles = trans.size();      // size of array of density values at each (R,z)
     std::vector<double> densValues(numSamplesAngles);  // temp.storage for density values
     std::vector<double> coefs(std::max<int>(trans.size(), mmax+1));  // temp.storage for transformed coefs
-    std::vector<double> result(totalNumValues);  // output array
+    std::vector<double> result(numValues());  // output array
     const int gridRsize = gridR.size(), gridzsize = gridz.size();
     for(unsigned int iR=0; iR < gridRsize * GLORDER_RAD; iR++) {
         int indR = iR / GLORDER_RAD, subR = iR % GLORDER_RAD;
@@ -576,7 +583,7 @@ std::vector<double> DensityGridCylindrical<N>::computeProjVector(
                         result.at(indlu) += val * (1-offR) *    offz;
                     }   // otherwise there is no such term in the basis set
                 } else
-                    assert(!"DensityGridCylindrical: unimplemented N");
+                    assert(!"TargetDensityCylindrical: unimplemented N");
             }
         }
     }
@@ -584,10 +591,10 @@ std::vector<double> DensityGridCylindrical<N>::computeProjVector(
 }
 
 template<int N>
-std::string DensityGridCylindrical<N>::elemName(unsigned int index) const
+std::string TargetDensityCylindrical<N>::coefName(unsigned int index) const
 {
     if(index >= numValues())
-        throw std::out_of_range("DensityGridCylindrical: index out of range");
+        throw std::out_of_range("TargetDensityCylindrical: index out of range");
     unsigned int gridRsize = gridR.size(), gridzsize = gridz.size();
     if(N==0) {
         unsigned int
@@ -610,14 +617,14 @@ std::string DensityGridCylindrical<N>::elemName(unsigned int index) const
              ", z=" + utils::toString(indz==0 ? 0. : gridz.at(indz-1)) +
              ", m=" + utils::toString(m);
     }
-    assert(!"DensityGridCylindrical: unimplemented N");
+    assert(!"TargetDensityCylindrical: unimplemented N");
     return "";
 }
 
-template<> const char* DensityGridCylindrical<0>::name() const { return "DensityCylindricalTopHat"; }
-template<> const char* DensityGridCylindrical<1>::name() const { return "DensityCylindricalLinear"; }
+template<> const char* TargetDensityCylindrical<0>::name() const { return "DensityCylindricalTopHat"; }
+template<> const char* TargetDensityCylindrical<1>::name() const { return "DensityCylindricalLinear"; }
 
-template class DensityGridCylindrical<0>;
-template class DensityGridCylindrical<1>;
+template class TargetDensityCylindrical<0>;
+template class TargetDensityCylindrical<1>;
 
 }  // namespace

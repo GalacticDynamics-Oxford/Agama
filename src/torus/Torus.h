@@ -894,7 +894,7 @@ inline PSPD Torus::StartPoint(const double th1, const double th2) const
 /* 			    const int Ncl, const int ipc, const int Nth,  */
 /* 			    const int err) */
 /* { */
-/*     register int F; */
+/*     int F; */
 /*     GenPar SN=GF.parameters(); */
 /*     AngPar AP=AM.parameters(); */
 /*     F = AllFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP, */
@@ -940,7 +940,7 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
 {
   J = Jin;
   AutoTorus(Phi,Jin);
-  register int F;
+  int F;
   GenPar SN=GF.parameters();
   AngPar AP=AM.parameters();
   F = AllFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP,
@@ -988,7 +988,7 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
 /* 				const int Mit, const int Nta, const int Nth,  */
 /* 				const int err) */
 /* { */
-/*     register int F; */
+/*     int F; */
 /*     GenPar SN=GF.parameters(); */
 /*     AngPar AP=AM.parameters(); */
 /*     F = AllFit(J,Phi,tol,Max,Mit,0,0,*PT,*TM,SN,AP,Om,E,dc,1,false,Nta,0,E,Nth,err); */
@@ -1019,7 +1019,7 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
 /* 			   const int Nth, const int err, const int Over,  */
 /* 			   const int Ncl, const int ipc ) */
 /* { */
-/*     register int F; */
+/*     int F; */
 /*     GenPar SN=GF.parameters(); */
 /*     AngPar AP=AM.parameters(); */
 /*     F = LowJzFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP, */
@@ -1039,7 +1039,7 @@ inline int Torus::AutoFit(Actions Jin, Potential *Phi, const double tol,
 /* 		      const int ipc, const int Nth, const int err) */
 /* { */
 /*   AutoPTTorus(Phi,J,3.); */
-/*   register int F; */
+/*   int F; */
 /*   GenPar SN=GF.parameters(); */
 /*   AngPar AP=AM.parameters(); */
 /*   F = PTFit(J,Phi,tol,Max,Mit,Over,Ncl,*PT,*TM,SN,AP, */

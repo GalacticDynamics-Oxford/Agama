@@ -22,7 +22,6 @@
 
 const double reqRelError = 1e-4;
 const int maxNumEval = 1e5;
-const unsigned int numBins = 20;
 const char* errmsg = "\033[1;31m **\033[0m";
 std::string histograms;
 

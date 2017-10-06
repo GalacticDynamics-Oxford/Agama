@@ -49,7 +49,7 @@ Record& Record::operator=(const Record& X)
 
 void Record::LeapFrog(const double dt)
 {
-    register double dth = 0.5 * dt;
+    double dth = 0.5 * dt;
     pR-= aR * dth;
     pz-= az * dth;
     R += pR * dt;
@@ -69,7 +69,7 @@ inline PSPD RKint(const PSPD Y, double& P, Potential* Ph)
 
 void Record::RungeKutta(const double dt)
 {
-    register PSPD   dY,Y0=PSPD(R,z,pR,pz),Y1=Y0;
+    PSPD   dY,Y0=PSPD(R,z,pR,pz),Y1=Y0;
     Y1+=(dY=dt*PSPD(pR,pz,-aR,-az))/6.;
     Y1+=(dY=dt*RKint(Y0+.5*dY,E,Pot))/3.;
     Y1+=(dY=dt*RKint(Y0+.5*dY,E,Pot))/3.;
@@ -80,8 +80,8 @@ void Record::RungeKutta(const double dt)
 
 void Record::step2_by(double& dt, const double f)
 {
-    register Record next = *this;
-    register double fac=(f<=1.)? 2.:f, FAC=pow(fac,3), dE;
+    Record next = *this;
+    double fac=(f<=1.)? 2.:f, FAC=pow(fac,3), dE;
     next.LeapFrog(dt);
     dE = fabs(next.E - this->E);
     while(dt<dtm && FAC*dE < tol) {
@@ -101,8 +101,8 @@ void Record::step2_by(double& dt, const double f)
 
 void Record::step4_by(double& dt, const double f)
 {
-    register Record next = *this;
-    register double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
+    Record next = *this;
+    double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
     next.FourSymp(dt);
     dE = fabs(next.E - this->E);
     while(dt<dtm && FAC*dE < tol) {
@@ -122,8 +122,8 @@ void Record::step4_by(double& dt, const double f)
 
 void Record::stepRK_by(double& dt, const double f)
 {
-    register Record next = *this;
-    register double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
+    Record next = *this;
+    double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
     next.RungeKutta(dt);
     dE = fabs(next.E - this->E);
     while(dt<dtm && FAC*dE < tol) {
@@ -185,7 +185,7 @@ inline PSPT RK3Dint(const PSPT Y, double& P, Potential* Ph)
 void Record3D::RungeKutta(const double dt)
 {
   phid = Jphi/(R*R);
-  register PSPT dY,Y0(R,z,phi,pR,pz,phid),Y1=Y0;
+  PSPT dY,Y0(R,z,phi,pR,pz,phid),Y1=Y0;
   Y1+=(dY=dt*PSPT(pR,pz,phid,-aR,-az,phidd))/6.;
   Y1+=(dY=dt*RK3Dint(Y0+.5*dY,E,Pot))/3.;
   Y1+=(dY=dt*RK3Dint(Y0+.5*dY,E,Pot))/3.;
@@ -197,8 +197,8 @@ void Record3D::RungeKutta(const double dt)
 
 void Record3D::stepRK_by(double& dt, const double f)
 {
-    register Record3D next = *this;
-    register double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
+    Record3D next = *this;
+    double fac=(f<=1.)? 1.4:f, FAC=pow(fac,5), dE;
     next.RungeKutta(dt);
     dE = fabs(next.E - this->E);
     while(dt<dtm && FAC*dE < tol) {
@@ -231,8 +231,8 @@ inline PSPD fintz(const PSPD& W, const double z, Potential* Phi)
 static double find_sos(const PSPD W, Potential* Phi, double& R, double& pR)
 // returns dt = (time at which z=0) - (time at which W)
 {
-    register PSPD   y=W, y1;
-    register double h=-W(1);
+    PSPD   y=W, y1;
+    double h=-W(1);
     y[1] = 0.;
     if(h!=0.) {
 	y1 = h * fintz(W, -h, Phi);
@@ -283,9 +283,9 @@ int orbit(                         // return:     error flag
         sosout.open(sosfile);
 	if(!sosout) { cerr<<" cannot open file " << sosfile << '\n'; exit(1); }
     }
-    register int    nz=0;
-    register PSPD   W=W0;
-    register double path, t=0, tdt, Sz=0., Siz=0.;
+    int    nz=0;
+    PSPD   W=W0;
+    double path, t=0, tdt, Sz=0., Siz=0.;
     double          dt=1.e-4, Rsos, pRsos;
     Record X(W,Phi);
     X.set_tolerance(tol);

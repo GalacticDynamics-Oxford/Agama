@@ -50,7 +50,7 @@ inline int Alloc1D(ALLOCTYPE* &A, const int N, const ALLOCTYPE X)
 {
     A = new ALLOCTYPE[N]; 
     if(!A) return 1;
-    register ALLOCTYPE *a, *Au=A+N;
+    ALLOCTYPE *a, *Au=A+N;
     for(a=A; a<Au; a++) *a = X;
     return 0;
 }
@@ -58,7 +58,7 @@ inline int Alloc1D(ALLOCTYPE* &A, const int N, const ALLOCTYPE X)
 template <class ALLOCTYPE>
 inline int Alloc2D(ALLOCTYPE** &A, const int N[2])
 {
-    register int i, iN1;
+    int i, iN1;
     A    = new ALLOCTYPE* [N[0]];        if(!A) return 1;
     A[0] = new ALLOCTYPE[N[0]*N[1]];     if(!A[0]) return 1;
     for(i=1, iN1=N[1]; i<N[0]; i++,iN1+=N[1])
@@ -69,7 +69,7 @@ inline int Alloc2D(ALLOCTYPE** &A, const int N[2])
 template <class ALLOCTYPE>
 inline int Alloc2D(ALLOCTYPE** &A, const int N[2], const ALLOCTYPE X)
 {
-    register int i,iN1,j;
+    int i,iN1,j;
     A    = new ALLOCTYPE* [N[0]];        if(!A) return 1;
     A[0] = new ALLOCTYPE[N[0]*N[1]];     if(!A[0]) return 1;
     for(i=iN1=0; i<N[0]; i++,iN1+=N[1]) {
@@ -82,7 +82,7 @@ inline int Alloc2D(ALLOCTYPE** &A, const int N[2], const ALLOCTYPE X)
 template <class ALLOCTYPE>
 inline int Alloc3D(ALLOCTYPE*** &A, const int N[3])
 {
-    register int i,j, iN1,iN12,jN2, N12=N[1]*N[2];
+    int i,j, iN1,iN12,jN2, N12=N[1]*N[2];
     A       = new ALLOCTYPE** [N[0]];       if(!A) return 1;
     A[0]    = new ALLOCTYPE* [N[0]*N[1]]; if(!A[0]) return 1;
     A[0][0] = new ALLOCTYPE    [N[0]*N12];  if(!A[0][0]) return 1;
@@ -98,7 +98,7 @@ inline int Alloc3D(ALLOCTYPE*** &A, const int N[3])
 template <class ALLOCTYPE>
 inline int Alloc3D(ALLOCTYPE*** &A, const int N[3], const ALLOCTYPE X)
 {
-    register int i,j,k, iN1,iN12,jN2, N12=N[1]*N[2];
+    int i,j,k, iN1,iN12,jN2, N12=N[1]*N[2];
     A       = new ALLOCTYPE** [N[0]];       if(!A) return 1;
     A[0]    = new ALLOCTYPE* [N[0]*N[1]]; if(!A[0]) return 1;
     A[0][0] = new ALLOCTYPE    [N[0]*N12];  if(!A[0][0]) return 1;
@@ -116,7 +116,7 @@ inline int Alloc3D(ALLOCTYPE*** &A, const int N[3], const ALLOCTYPE X)
 template <class ALLOCTYPE>
 inline int Alloc4D(ALLOCTYPE**** &A, const int N[4])
 {
-    register int i,j,k, iN1,iN12,iN123, jN2,jN23, kN3,
+    int i,j,k, iN1,iN12,iN123, jN2,jN23, kN3,
                  N12=N[1]*N[2],N123=N12*N[3],N23=N[2]*N[3];
     A          = new ALLOCTYPE*** [N[0]];      if(!A) return 1;
     A[0]       = new ALLOCTYPE** [N[0]*N[1]]; if(!A[0]) return 1;
@@ -139,7 +139,7 @@ inline int Alloc4D(ALLOCTYPE**** &A, const int N[4])
 template <class ALLOCTYPE>
 inline int Alloc4D(ALLOCTYPE**** &A, const int N[4], const ALLOCTYPE X)
 {
-    register int i,j,k,l, iN1,iN12,iN123, jN2,jN23, kN3,
+    int i,j,k,l, iN1,iN12,iN123, jN2,jN23, kN3,
                  N12=N[1]*N[2],N123=N12*N[3],N23=N[2]*N[3];
     A          = new ALLOCTYPE*** [N[0]];      if(!A) return 1;
     A[0]       = new ALLOCTYPE** [N[0]*N[1]]; if(!A[0]) return 1;
