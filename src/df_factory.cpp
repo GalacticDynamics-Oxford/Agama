@@ -34,13 +34,12 @@ PseudoIsothermalParam parsePseudoIsothermalParams(
     PseudoIsothermalParam par;
     par.Sigma0  = kvmap.getDouble("Sigma0")  * conv.massUnit / pow_2(conv.lengthUnit);
     par.Rdisk   = kvmap.getDouble("Rdisk")   * conv.lengthUnit;
+    par.Hdisk   = kvmap.getDouble("Hdisk")   * conv.lengthUnit;
     par.Jphimin = kvmap.getDouble("Jphimin") * conv.lengthUnit * conv.velocityUnit;
     par.Jphi0   = kvmap.getDouble("Jphi0")   * conv.lengthUnit * conv.velocityUnit;
     par.sigmar0 = kvmap.getDouble("sigmar0") * conv.velocityUnit;
-    par.sigmaz0 = kvmap.getDouble("sigmaz0") * conv.velocityUnit;
     par.sigmamin= kvmap.getDouble("sigmamin")* conv.velocityUnit;
     par.Rsigmar = kvmap.getDouble("Rsigmar", 2*par.Rdisk) * conv.lengthUnit;
-    par.Rsigmaz = kvmap.getDouble("Rsigmaz", 2*par.Rdisk) * conv.lengthUnit;
     par.beta    = kvmap.getDouble("beta", par.beta);
     par.Tsfr    = kvmap.getDouble("Tsfr", par.Tsfr);  // dimensionless! in units of Hubble time
     par.sigmabirth = kvmap.getDouble("sigmabirth", par.sigmabirth);  // dimensionless ratio

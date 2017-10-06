@@ -6,30 +6,24 @@
 */
 #pragma once
 #include "potential_base.h"
+#include "galaxymodel_target.h"
 #include <vector>
 #include <string>
 
 namespace galaxymodel{
 
 /** Base class for all density discretization schemes */
-class BaseDensityGrid: public math::IFunctionNdimAdd {
+class BaseTargetDensity: public BaseTarget {
 public:
-    virtual ~BaseDensityGrid() {}
-
-    /// arguments are three cartesian coordinates
+    
+    /// for density targets, only the three coordinates are used, not velocities
     virtual unsigned int numVars() const { return 3; }
-
-    /// name of the density object
-    virtual const char* name() const = 0;
-
-    /// textual representation of a given basis element
-    virtual std::string elemName(unsigned int index) const = 0;
 
     /// compute the projections of the input density onto all basis elements of the grid
     /// (by default uses a 3d numerical integration for all basis functions computed via `eval()`,
     /// but derived classes may provide optimized versions taking into account the structure
     /// of basis functions and their support)
-    virtual std::vector<double> computeProjVector(const potential::BaseDensity& density) const;
+    virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const;
 };
 
 
@@ -67,7 +61,7 @@ public:
     \tparam  N  is the degree of interpolating B-splines (0 or 1).
 */
 template<int N>
-class DensityGridClassic: public BaseDensityGrid {
+class TargetDensityClassic: public BaseTargetDensity {
     const unsigned int stripsPerPane;     ///< number of strips in each direction in one pane
     const unsigned int valuesPerShell;    ///< number of basis functions in each spheroidal shell
     const std::vector<double> shellRadii; ///< spheroidal radii of the shells
@@ -75,21 +69,21 @@ class DensityGridClassic: public BaseDensityGrid {
 public:
     /** construct the grid with given parameters.
         \param[in]  stripsPerPane  is the number of strips in each direction in one pane
-        (so that the total number of grid cells is 3 * stripsPerPane^2), should be positive
-        \param[in]  shellRadii  is the array of grid nodes in spheroidal radius, should be increasing
-        and does not include origin.
+        (so that the total number of grid cells is 3 * stripsPerPane^2), should be positive.
+        \param[in]  shellRadii  is the array of grid nodes in spheroidal radius, should be increasing;
+        if the first element is not at zero, then an additional node at zero is implied.
         \param[in]  axisYtoX, axisZtoX  are optional flattening parameters for the grid:
         the grid is geometrically scaled by these numbers in Y and Z directions,
         and at the same time all three directions are multiplied by a compensating factor
         (axisYtoX*axisZtoX)^{-1/3}  that brings the overall volume scaling to unity.
     */
-    DensityGridClassic(
+    TargetDensityClassic(
         const unsigned int stripsPerPane,
         const std::vector<double>& shellRadii,
         const double axisYtoX=1., const double axisZtoX=1.);
 
     virtual const char* name() const;
-    virtual std::string elemName(unsigned int index) const;
+    virtual std::string coefName(unsigned int index) const;
 
     /// total number of basis functions
     virtual unsigned int numValues() const { return valuesPerShell * shellRadii.size() + N; }
@@ -100,7 +94,7 @@ public:
 
     /// an optimized routine for computing the projection of the density profile
     /// onto the basis functions (in the case N=0 these are the masses contained in each cell)
-    virtual std::vector<double> computeProjVector(const potential::BaseDensity& density) const;
+    virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const;
 };
 
 
@@ -111,7 +105,7 @@ public:
     There are `valuesPerShell` angular basis functions for each node in the radial grid,
     plus a single function for r=0 (only the 0th harmonic is used).
 */
-class DensityGridSphHarm: public BaseDensityGrid {
+class TargetDensitySphHarm: public BaseTargetDensity {
     const int lmax, mmax;             ///< order of angular expansion in theta and phi
     const unsigned int angularCoefs;  ///< number of angular coefs at each radius
     const std::vector<double> gridr;  ///< grid in spherical radius
@@ -123,14 +117,14 @@ public:
         \param[in]  mmax  is the order of expansion in azimuthal angle (phi):
         mmax==0 means axisymmetry, and mmax may not exceed lmax; only terms with non-negative even m
         are used in the expansion, so the actual order is rounded down to the nearest even number.
-        \param[in]  gridr  is the radial grid used in the expansion, should be in increasing
-        order and does not include the origin.
+        \param[in]  gridr  is the radial grid used in the expansion, should be in increasing order;
+        if the first element is not at zero, then an additional node at zero is implied.
         \throw  std::invalid_argument  if the parameters are not valid.
     */
-    DensityGridSphHarm(const int lmax, const int mmax, const std::vector<double>& gridr);
+    TargetDensitySphHarm(const int lmax, const int mmax, const std::vector<double>& gridr);
 
     virtual const char* name() const;
-    virtual std::string elemName(unsigned int index) const;
+    virtual std::string coefName(unsigned int index) const;
 
     /// total number of basis functions
     virtual unsigned int numValues() const { return angularCoefs * gridr.size() + 1; }
@@ -140,7 +134,7 @@ public:
 
     /// an optimized routine for computing the projection of the density profile
     /// onto the basis functions
-    virtual std::vector<double> computeProjVector(const potential::BaseDensity& density) const;
+    virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const;
 };
 
 
@@ -154,7 +148,7 @@ public:
     \tparam  N  is the degree of interpolating B-splines (0 or 1).
 */
 template<int N>
-class DensityGridCylindrical: public BaseDensityGrid {
+class TargetDensityCylindrical: public BaseTargetDensity {
     const int mmax;                    ///< order of angular expansion in azimuth (phi)
     const std::vector<double> gridR;   ///< grid in the cylindrical radius
     const std::vector<double> gridz;   ///< grid in the z direction
@@ -164,17 +158,17 @@ public:
         \param[in]  mmax  is the order of azimuthal Fourier expansion
         (0 means axisymmetry, and only even terms are used so that mmax is effectively
         rounded down to the nearest even number).
-        \param[in]  gridR  is the grid in cylindrical radius (should be in increasing order
-        and start at a positive value; an extra node at R=0 is implied).
+        \param[in]  gridR  is the grid in cylindrical radius (should be in increasing order,
+        if the first element is >0, an extra node at R=0 is implied).
         \param[in]  gridz  is the grid in the vertical coordinate (covers only half-space,
-        should be in increasing order and start at a positive value; an extra node at z=0 is implied).
+        starts at zero or at a positive value, in the latter case an extra node at z=0 is implied).
         \throw  std::invalid_argument  if the parameters are not valid.
     */
-    DensityGridCylindrical(const int mmax,
+    TargetDensityCylindrical(const int mmax,
         const std::vector<double>& gridR, const std::vector<double>& gridz);
 
     virtual const char* name() const;
-    virtual std::string elemName(unsigned int index) const;
+    virtual std::string coefName(unsigned int index) const;
 
     /// total number of basis functions
     virtual unsigned int numValues() const { return totalNumValues; }
@@ -183,7 +177,7 @@ public:
     virtual void addPoint(const double point[3], const double mult, double values[]) const;
 
     /// compute the projections of the density profile onto the basis functions
-    virtual std::vector<double> computeProjVector(const potential::BaseDensity& density) const;
+    virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const;
 };
 
 }  // namespace

@@ -581,7 +581,8 @@ public:
 
 /// The aggregate structure containing all internal data of FokkerPlanckSolver;
 /// some of them stay fixed throughout the simulation while other evolve
-struct FokkerPlanckData {
+class FokkerPlanckData {
+public:
 
     /// number of species (fixed)
     const unsigned int numComp;

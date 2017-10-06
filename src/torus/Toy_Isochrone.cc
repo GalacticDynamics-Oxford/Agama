@@ -42,7 +42,7 @@ void ToyIsochrone::psisolve() const
         return;
     }
 #if 0
-    register double ps=psi;
+    double ps=psi;
     if(ps<Pi) ps = rtsafe(this,&ToyIsochrone::psifunc,ps,Pi,tol);
 	else  ps = rtsafe(this,&ToyIsochrone::psifunc,Pi,ps,tol);
     if(ps!=psi) {
@@ -82,7 +82,7 @@ double ToyIsochrone::catan(const double& aa) const
     else if(cpsi<0. && spsi>=0)             //   Pi/2 > psi > Pi
 	return Pih-atan2(1.+cpsi,spsi*aa);
     else if(cpsi<0.) {                      //     Pi > psi > 3Pi/2
-	register double temp=atan2(1.+cpsi,spsi*aa);
+	double temp=atan2(1.+cpsi,spsi*aa);
 	if(temp>0) return Pi3h-temp;
 	return Pih-temp;
     } else                                  //  3Pi/2 > psi > 2Pi
@@ -184,7 +184,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2]) const
 // are also returned; theta is latitude rather than polar angle.
 {
   derivs_ok = true;
-    register double e2,schi,cchi,csth;
+    double e2,schi,cchi,csth;
     static   double fac, dw;
 
 // Extract and scale the actions and angles.
@@ -247,7 +247,7 @@ PSPD ToyIsochrone::ForwardWithDerivs(const PSPD& JT, double dQdT[2][2],
 //angle vars are also returned; theta is latitude rather than polar angle.
 {
     derivs_ok = true;
-    register double e2,schi,cchi,csth,dchidtr,ir,icsth;
+    double e2,schi,cchi,csth,dchidtr,ir,icsth;
     static   double fac, dw;
 
 // Extract and scale the actions and angles.
@@ -321,7 +321,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2]) const
   if(!derivs_ok)
       throw std::runtime_error("Torus Error -2:  `ToyIsochrone::Derivatives()' called without For/Backward");
 
-    register double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
+    double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
 		    schi,cchi,sith,csth,fac,cGam;
     schi=sin(chi);
     cchi=cos(chi);
@@ -395,7 +395,7 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
     if(!derivs_ok)
       throw std::runtime_error("Torus Error -2:  `ToyIsochrone::Derivatives()' called without For/Backward");
 
-    register double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
+    double Hx,wrx,wtx,ax,axa,ex,exe,axe,exa,psix,ux,xGam,wx,chix,HxH,
 		    schi,cchi,sith,csth,fac,cGam,temp;
     schi=sin(chi);
     cchi=cos(chi);
@@ -491,8 +491,8 @@ void ToyIsochrone::Derivatives(double dQPdJ[4][2], Pdble dQPdA[4]) const
     dQPdA[2][3] = 0.;
     dQPdA[3][3] = 0.;
 // transfer to gamma, beta, and Lz
-    register double tgamma=2*gamma, tbeta=2*beta;
-    for(register short i=0; i<4; i++) {
+    double tgamma=2*gamma, tbeta=2*beta;
+    for(short i=0; i<4; i++) {
 	dQPdA[i][0] *= tgamma;
 	dQPdA[i][1] *= tbeta;
 	if(Lz < 0.) dQPdA[i][2] = -dQPdA[i][2];
@@ -504,7 +504,7 @@ PSPD ToyIsochrone::Forward(const PSPD& JT) const
 // and their conjugated momenta; theta is latitude rather than polar angle.
 {
     derivs_ok = true;
-    register double e2;
+    double e2;
     static   double fac;
 // Extract and scale the actions and angles.
     jr = fmax(0, double(JT(0)) / sMb);
@@ -561,7 +561,7 @@ PSPD ToyIsochrone::Backward(const PSPD& QP) const
 // theta is latitude rather than polar angle.
 {
     derivs_ok = true;
-    register double e2,csth;
+    double e2,csth;
     static   double fac;
 // extract and scale co-ordinates
     r   = (QP(0)-r0) / b;

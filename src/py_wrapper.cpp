@@ -9,39 +9,36 @@
     that Python is aware of (e.g., through the PYTHONPATH= environment variable).
 
     Currently this module provides access to potential classes, orbit integration
-    routine, action finders, distribution functions, N-dimensional integration
-    and sampling routines, and smoothing splines.
+    routine, action finders, distribution functions, self-consistent models,
+    N-dimensional integration and sampling routines, and smoothing splines.
     Unit conversion is also part of the calling convention: the quantities
     received from Python are assumed to be in some physical units and converted
     into internal units inside this module, and the output from the Agama library
     routines is converted back to physical units. The physical units are assigned
     by `setUnits` and `resetUnits` functions.
 
-    Type `help(agama)` in Python to get a list of exported routines and classes,
+    Type `dir(agama)` in Python to get a list of exported routines and classes,
     and `help(agama.whatever)` to get the usage syntax for each of them.
 */
 #ifdef HAVE_PYTHON
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-// note: for some versions of NumPy, it seems necessary to replace constants
-// starting with NPY_ARRAY_*** by NPY_***
 #include <numpy/arrayobject.h>
 #include <structmember.h>
 #include <stdexcept>
-#include <signal.h>
 #ifdef _OPENMP
 #include "omp.h"
 #endif
-// include almost everything!
+// include almost everything from Agama!
 #include "actions_spherical.h"
 #include "actions_staeckel.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
 #include "df_pseudoisotropic.h"
 #include "galaxymodel.h"
+#include "galaxymodel_densitygrid.h"
 #include "galaxymodel_losvd.h"
 #include "galaxymodel_selfconsistent.h"
-#include "galaxymodel_target.h"
 #include "galaxymodel_velocitysampler.h"
 #include "math_core.h"
 #include "math_optimization.h"
@@ -57,7 +54,17 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute
+// (should eventually come up with a proper version numbering strategy...)
 #define AGAMA_VERSION "Compiled on " __DATE__
+
+// older versions of numpy have different macro names
+// (will need to expand this list if other similar macros are used in the code)
+#ifndef NPY_ARRAY_IN_ARRAY
+#define NPY_ARRAY_IN_ARRAY   NPY_IN_ARRAY
+#define NPY_ARRAY_OUT_ARRAY  NPY_OUT_ARRAY
+#define NPY_ARRAY_FORCECAST  NPY_FORCECAST
+#define NPY_ARRAY_ENSURECOPY NPY_ENSURECOPY
+#endif
 
 /// classes and routines for the Python interface
 namespace pywrapper {  // internal namespace
@@ -95,19 +102,6 @@ public:
     OmpDisabler() {}
 #endif
 };
-
-///@}
-//  ----------------------------------------------------------------------------
-/// \name  Mechanism for capturing the Control-C signal in lengthy calculations
-//  ----------------------------------------------------------------------------
-///@{
-
-/// flag that is set to one if the keyboard interrupt has occurred
-volatile sig_atomic_t keyboardInterruptTriggered = 0;
-/// signal handler installed during lengthy computations that triggers the flag
-void customKeyboardInterruptHandler(int) { keyboardInterruptTriggered = 1; }
-/// previous signal handler restored after the computation is finished
-void (*defaultKeyboardInterruptHandler)(int) = NULL;
 
 ///@}
 //  ------------------------------------------------------------------
@@ -232,15 +226,19 @@ std::vector<PyObject*> toPyObjectArray(PyObject* obj)
     std::vector<PyObject*> result;
     if(!obj) return result;
     if(PyTuple_Check(obj)) {
-        Py_ssize_t size = PyTuple_Size(obj);
-        for(Py_ssize_t i=0; i<size; i++)
+        for(Py_ssize_t i=0, size=PyTuple_Size(obj); i<size; i++)
             result.push_back(PyTuple_GET_ITEM(obj, i));
     } else
     if(PyList_Check(obj)) {
-        Py_ssize_t size = PyList_Size(obj);
-        for(Py_ssize_t i=0; i<size; i++)
+        for(Py_ssize_t i=0, size=PyList_Size(obj); i<size; i++)
             result.push_back(PyList_GET_ITEM(obj, i));
     } else
+    if(PyArray_Check(obj) && PyArray_TYPE((PyArrayObject*)obj) == NPY_OBJECT &&
+        PyArray_NDIM((PyArrayObject*)obj) == 1) {
+        for(npy_intp i=0, size=PyArray_DIM((PyArrayObject*)obj, 0); i<size; i++)
+            result.push_back(pyArrayElem<PyObject*>(obj, i));
+    }
+    else
         result.push_back(obj);  // return an array consisting of a single object
     return result;
 }
@@ -263,7 +261,7 @@ inline bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
     if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0) ||
         namedArgs==NULL || !PyDict_Check(namedArgs) || PyDict_Size(namedArgs)==0)
     {
-        PyErr_SetString(PyExc_ValueError, "Should only provide named arguments");
+        PyErr_SetString(PyExc_TypeError, "Should only provide named arguments");
         return false;
     }
     return true;
@@ -432,6 +430,51 @@ inline void unconvertActions(const actions::Actions& act, double dest[])
     dest[0] = act.Jr   / (conv->lengthUnit * conv->velocityUnit);
     dest[1] = act.Jz   / (conv->lengthUnit * conv->velocityUnit);
     dest[2] = act.Jphi / (conv->lengthUnit * conv->velocityUnit);
+}
+
+/// convert a tuple of two arrays (particle coordinates and possibly velocities, and particle masses)
+/// into an equivalent C++ object with appropriate units
+template<typename ParticleT>
+particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
+{
+    // parse the input arrays
+    static const char* errorstr = "'particles' must be a tuple with two arrays - "
+        "coordinates[+velocities] and mass, where the first one is a two-dimensional "
+        "Nx3 or Nx6 array and the second one is a one-dimensional array of length N";
+    PyObject *coord_obj, *mass_obj;
+    if(!PyArg_ParseTuple(particles_obj, "OO", &coord_obj, &mass_obj))
+        throw std::invalid_argument(errorstr);
+    PyArrayObject *coord_arr = (PyArrayObject*)
+        PyArray_FROM_OTF(coord_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *mass_arr  = (PyArrayObject*)
+        PyArray_FROM_OTF(mass_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    npy_intp nbody = 0;
+    if( coord_arr == NULL || mass_arr == NULL ||      // input should contain valid arrays
+        PyArray_NDIM(mass_arr) != 1 ||                // the second one should be 1d array
+        (nbody = PyArray_DIM(mass_arr, 0)) <= 0 ||    // of length nbody > 0
+        PyArray_NDIM(coord_arr) != 2 ||               // the first one should be a 2d array
+        PyArray_DIM(coord_arr, 0) != nbody ||         // with nbody rows
+       (PyArray_DIM(coord_arr, 1) != 3 && PyArray_DIM(coord_arr, 1) != 6))  // and 3 or 6 columns
+    {
+        Py_XDECREF(coord_arr);
+        Py_XDECREF(mass_arr);
+        throw std::invalid_argument(errorstr);
+    }
+    bool haveVel = PyArray_DIM(coord_arr, 1) == 6;  // whether we have velocity data
+    particles::ParticleArray<ParticleT> result;
+    result.data.reserve(nbody);
+    for(npy_intp i=0; i<nbody; i++) {
+        const double *xv = &pyArrayElem<double>(coord_arr, i, 0);
+        result.add(coord::PosVelCar(
+            xv[0] * conv->lengthUnit, xv[1] * conv->lengthUnit, xv[2] * conv->lengthUnit,
+            haveVel? xv[3] * conv->velocityUnit : 0.,
+            haveVel? xv[4] * conv->velocityUnit : 0.,
+            haveVel? xv[5] * conv->velocityUnit : 0.),
+            pyArrayElem<double>(mass_arr, i) * conv->massUnit);
+    }
+    Py_DECREF(coord_arr);
+    Py_DECREF(mass_arr);
+    return result;
 }
 
 
@@ -820,8 +863,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
                 Py_DECREF(arr);
                 return NULL;
             }
-            keyboardInterruptTriggered = 0;
-            defaultKeyboardInterruptHandler = signal(SIGINT, customKeyboardInterruptHandler);
+            utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
             // allocate an appropriate output object
             PyObject* outputObj = allocOutputArr<numOutput>(numpt);
             // loop over input array
@@ -829,14 +871,13 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
 #pragma omp parallel for schedule(dynamic)
 #endif
             for(int i=0; i<numpt; i++) {
-                if(keyboardInterruptTriggered) continue;
+                if(cbrk.triggered()) continue;
                 double local_output[outputLength<numOutput>()];  // separate variable in each thread
                 fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
                 formatOutputArr<numOutput>(local_output, i, outputObj);
             }
             Py_DECREF(arr);
-            signal(SIGINT, defaultKeyboardInterruptHandler);
-            if(keyboardInterruptTriggered) {
+            if(cbrk.triggered()) {
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
                 return NULL;
             }
@@ -847,7 +888,6 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, (std::string("Exception occurred: ")+e.what()).c_str());
-        signal(SIGINT, defaultKeyboardInterruptHandler);
         return NULL;
     }
 }
@@ -1411,64 +1451,21 @@ static const char* docstringPotential =
     "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
     "(this is the default regime and is restored by `resetUnits`).\n";
 
-/// attempt to construct potential from an array of particles
-potential::PtrPotential Potential_initFromParticles(
-    const utils::KeyValueMap& params, PyObject* points)
-{
-    if(params.contains("file"))
-        throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");
-    if(params.contains("density"))
-        throw std::invalid_argument("Cannot provide both 'particles' and 'density' arguments");
-    if(!params.contains("type"))
-        throw std::invalid_argument("Must provide 'type=\"...\"' argument");
-    PyObject *pointCoordObj, *pointMassObj;
-    if(!PyArg_ParseTuple(points, "OO", &pointCoordObj, &pointMassObj)) {
-        throw std::invalid_argument("'particles' must be a tuple with two arrays - "
-            "coordinates and mass, where the first one is a two-dimensional Nx3 or Nx6 array "
-            "and the second one is a one-dimensional array of length N");
-    }
-    PyArrayObject *pointCoordArr = (PyArrayObject*)
-        PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    PyArrayObject *pointMassArr  = (PyArrayObject*)
-        PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    if(pointCoordArr == NULL || pointMassArr == NULL) {
-        Py_XDECREF(pointCoordArr);
-        Py_XDECREF(pointMassArr);
-        throw std::invalid_argument("'particles' does not contain valid arrays");
-    }
-    int numpt = 0;
-    if(PyArray_NDIM(pointMassArr) == 1)
-        numpt = PyArray_DIM(pointMassArr, 0);
-    if(numpt == 0 || PyArray_NDIM(pointCoordArr) != 2 ||   // it must be a 2d array
-        PyArray_DIM(pointCoordArr, 0) != numpt ||          // with numpt rows
-        (PyArray_DIM(pointCoordArr, 1) != 3 && PyArray_DIM(pointCoordArr, 1) != 6))  // and 3 or 6 columns
-    {
-        Py_DECREF(pointCoordArr);
-        Py_DECREF(pointMassArr);
-        throw std::invalid_argument("'particles' does not contain valid arrays "
-            "(the first one must be 2d array of shape Nx3 or Nx6, "
-            "and the second one must be 1d array of length N)");
-    }
-    particles::ParticleArray<coord::PosCar> pointArray;
-    pointArray.data.reserve(numpt);
-    for(int i=0; i<numpt; i++) {
-        pointArray.add(convertPos(&pyArrayElem<double>(pointCoordArr, i, 0)),
-            pyArrayElem<double>(pointMassArr, i) * conv->massUnit);
-    }
-    Py_DECREF(pointCoordArr);
-    Py_DECREF(pointMassArr);
-    return potential::createPotential(params, pointArray, *conv);
-}
-
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* args)
 {
     utils::KeyValueMap params = convertPyDictToKeyValueMap(args);
-    // check if the list of arguments contains points
-    PyObject* points = getItemFromPyDict(args, "particles");
-    if(points) {
+    // check if the list of arguments contains an array of particles
+    PyObject* particles_obj = getItemFromPyDict(args, "particles");
+    if(particles_obj) {
+        if(params.contains("file"))
+            throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");
+        if(params.contains("density"))
+            throw std::invalid_argument("Cannot provide both 'particles' and 'density' arguments");
+        if(!params.contains("type"))
+            throw std::invalid_argument("Must provide 'type=\"...\"' argument");
         params.unset("particles");
-        return Potential_initFromParticles(params, points);
+        return potential::createPotential(params, convertParticles<coord::PosCar>(particles_obj), *conv);
     }
     // check if the list of arguments contains a density object
     // or a string specifying the name of density model
@@ -1667,8 +1664,9 @@ PyObject* Potential_Rcirc(PyObject* self, PyObject* args, PyObject* namedArgs)
         return NULL;
     static const char* keywords[] = {"L", "E", NULL};
     PyObject *L_obj=NULL, *E_obj=NULL;
-    if(PyArg_ParseTupleAndKeywords(args, namedArgs, "|OO", const_cast<char**>(keywords), &L_obj, &E_obj)
-        && ((L_obj!=NULL) ^ (E_obj!=NULL) /*exactly one of them should be non-NULL*/) )
+    if( onlyNamedArgs(args, namedArgs) &&
+        PyArg_ParseTupleAndKeywords(args, namedArgs, "|OO", const_cast<char**>(keywords), &L_obj, &E_obj) &&
+        ((L_obj!=NULL) ^ (E_obj!=NULL) /*exactly one of them should be non-NULL*/) )
     {
         if(L_obj)
             return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
@@ -1696,29 +1694,25 @@ void fncPotential_Tcirc_from_xv(void* obj, const double input[], double *result)
     result[0] = T / conv->timeUnit;
 }
     
-PyObject* Potential_Tcirc(PyObject* self, PyObject* args)
+PyObject* Potential_Tcirc(PyObject* self, PyObject* arg)
 {
-    PyObject* input = NULL;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "O", &input))
+    PyArrayObject *arr = (PyArrayObject*) PyArray_FROM_OTF(arg, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    if(!Potential_isCorrect(self) || !arr)
         return NULL;
-    // find out the shape of input array or anything that could be converted into an array
-    PyArrayObject* arr = NULL;
-    PyArray_Descr* dtype = NULL;
-    int ndim = 0;
-    npy_intp inputdims[NPY_MAXDIMS], *dims=inputdims;
-    if(PyArray_GetArrayParamsFromObject(input, NULL, 0, &dtype, &ndim, inputdims, &arr, NULL) < 0)
-        return NULL;
-    // if it was indeed an array, need to obtain its shape manually
-    if(arr) {
-        ndim = PyArray_NDIM(arr);
-        dims = PyArray_DIMS(arr);
-    }        
-    if((ndim == 1 && dims[0] == 6) || (ndim == 2 && dims[1] == 6))
-        return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SINGLE>
-            (self, input, fncPotential_Tcirc_from_xv);
+    // find out the shape of input array
+    int ndim = PyArray_NDIM(arr);
+    PyObject* result = NULL;
+    if((ndim == 1 || ndim == 2) && PyArray_DIM(arr, ndim-1) == 6)
+        result = callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SINGLE>
+            (self, (PyObject*)arr, fncPotential_Tcirc_from_xv);
+    else if(ndim == 0 || ndim == 1)
+        result = callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
+            (self, (PyObject*)arr, fncPotential_Tcirc_from_E);
     else
-        return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-            (self, input, fncPotential_Tcirc_from_E);
+        PyErr_SetString(PyExc_ValueError,
+            "Input must be a Nx1 array of energy values or a Nx6 array of position/velocity values");
+    Py_DECREF(arr);
+    return result;
 }
 
 void fncPotential_Rmax(void* obj, const double input[], double *result) {
@@ -1726,11 +1720,11 @@ void fncPotential_Rmax(void* obj, const double input[], double *result) {
     result[0] = R_max(*((PotentialObject*)obj)->pot, E) / conv->lengthUnit;
 }
 
-PyObject* Potential_Rmax(PyObject* self, PyObject* args) {
+PyObject* Potential_Rmax(PyObject* self, PyObject* arg) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-        (self, args, fncPotential_Rmax);
+        (self, arg, fncPotential_Rmax);
 }
 
 PyObject* Potential_export(PyObject* self, PyObject* args)
@@ -1879,13 +1873,13 @@ static PyMethodDef Potential_methods[] = {
       "  E=... (same) - the values of energy; the arguments are mutually exclusive, "
       "and L is the default one if no name is provided\n"
       "Returns: a single number or an array of numbers - the radii of corresponding orbits\n" },
-    { "Tcirc", Potential_Tcirc, METH_VARARGS,
+    { "Tcirc", Potential_Tcirc, METH_O,
       "Compute the period of a circular orbit for the given energy (a) or the (x,v) point (b)\n"
       "Arguments:\n"
       "  (a) a single value of energy or an array of N such values, or\n"
       "  (b) a single point (6 numbers - position and velocity) or a Nx6 array of points\n"
       "Returns: a single value or N values of orbital periods\n" },
-    { "Rmax", Potential_Rmax, METH_VARARGS,
+    { "Rmax", Potential_Rmax, METH_O,
       "Find the maximum radius accessible to the given energy (i.e. the root of Phi(Rmax,0,0)=E)\n"
       "Arguments: a single number or an array of numbers - the values of energy\n"
       "Returns: corresponding values of radii\n" },
@@ -2716,7 +2710,7 @@ void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
         computeMoments(params->model, coord::toPosCyl(point),
             params->needDens ? &dens : NULL,
             params->needVel  ? &vel  : NULL,
-            params->needVel2 ? &vel2 : NULL/*, NULL, NULL, NULL,
+            params->needVel2 ? &vel2 : NULL, NULL, NULL, NULL/*,
             params->accuracy, params->maxNumEval*/);
     }
     catch(std::exception& e) {
@@ -2818,7 +2812,7 @@ void fncGalaxyModelProjectedMoments(void* obj, const double input[], double *res
     try{
         double surfaceDensity, losvdisp;
         computeProjectedMoments(params->model, input[0] * conv->lengthUnit,
-            surfaceDensity, losvdisp/*, NULL, NULL, params->accuracy, params->maxNumEval*/);
+            surfaceDensity, losvdisp, NULL, NULL/*, params->accuracy, params->maxNumEval*/);
         result[0] = surfaceDensity * pow_2(conv->lengthUnit) / conv->massUnit;
         result[1] = losvdisp / pow_2(conv->velocityUnit);
     }
@@ -3583,84 +3577,188 @@ void Target_dealloc(TargetObject* self)
 }
 
 static const char* docstringTarget =
-    "Target objects represent various targets that need to be satisfied by an additive model.\n";
+    "Target objects represent various targets that need to be satisfied by an additive model.\n"
+    "The type of target is specified by the  type='...' argument, and other available arguments "
+    "depend on it. "
+    "Below follows the list of possible target types and their parameters (all case-insensitive).\n\n"
+    "Density discretization models:\n"
+    "  DensityClassicTopHat\n"
+    "Classical approach for spheroidal Schwarzschild models: "
+    "radial shells divided into three panes, each pane - into several strips, "
+    "and the density inside each resulting cell is approximated as a constant.\n"
+    "  DensityClassicLinear\n"
+    "Same as classical, but the density is specified at the grid nodes and interpolated "
+    "tri-linearly within each cell.\n"
+    "Parameters for both of these models:\n"
+    "gridr - array of radial grid nodes;\n"
+    "stripsPerPane - number of strips in each of three panes in each shell "
+    "(hence the number of cells in each pane is stripsPerPane^2);\n"
+    "axisRatioY, axisRatioZ - (optional) coefficients for squeezing the grid in each dimension.\n"
+    "  DensitySphHarm\n"
+    "Radial grid is the same as in the classic approach, but the angular dependence "
+    "of the density is represented in terms of spherical-harmonic expansion, "
+    "and the radial dependence of each term is a linearly-interpolated function.\n"
+    "Parameters:\n"
+    "gridr - array of radial grid nodes;\n"
+    "lmax, mmax - order of angular expansion in theta and phi, respectively.\n"
+    "  DensityCylindricalTopHat\n"
+    "A grid in meridional plane (R,z) aligned with cylindrical coordinates, "
+    "with the azimuthal dependence of the density represented by a Fourier expansion; "
+    "the density is attributed to each cell (implicitly assumed to be constant within a cell).\n"
+    "  DensityCylindricalLinear\n"
+    "Same as the previous one, but each azimuthal Fourier term in the meridional plane (R,z) "
+    "is bi-linearly interpolated within each cell.\n"
+    "Parameters for both of these models:\n"
+    "gridr, gridz - arrays of grid nodes in cylindrical radius and vertical coordinate "
+    "(should cover only the positive quadrant);\n"
+    "mmax - order of azmuthal Fourier expansion.\n\n"
+    "Kinematic constraints:\n"
+    "  KinemShell\n"
+    "This target object records the density-weighted radial and tangential velocity dispersion "
+    "in spherical coordinates, represented as projections onto basis elements of a B-spline grid "
+    "in radius.\n"
+    "Parameters:\n"
+    "degree (integer from 0 to 3) - degree of B-splines;\n"
+    "gridr - array of radial grid nodes.\n"
+    "These recorded projections may be used to constrain the velocity anisotropy of the model: "
+    "after choosing the desired value of coefficient beta = 1 - sigma_t^2 / (2 sigma_r^2), "
+    "one demands that\n2 (1-beta) * rho * sigma_r^2 - rho * sigma_t^2 = 0\nfor all radial points.\n\n"
+    "  LOSVD\n"
+    "This target object is intended for recording line-of-sight velocity distributions "
+    "in a 2d image plane; the latter is denoted by coordinates x', y', with y' pointing up (north) "
+    "and x' - left (west), and the complementary z' axis points towards the observer "
+    "(hence a positive LOS velocity corresponds to negative v_{z'}).\n"
+    "The orientation of the image plane w.r.t. the model coordinate system is set by three angles "
+    "theta, phi and chi: the former two are the usual spherical angles specifying the direction "
+    "of the line of sight in the model c.s., and the last one determines the rotation of the image "
+    "plane about this axis. For instance, the projections along each of the principal axes "
+    "are given by the following triplets of angles: \n"
+    "(0, 0, pi/2) - view down the z axis, so that the image plane (x',y') coincides with the (x,y)"
+    "plane;\n(pi/2, 0, 0) - view down the x axis, image plane coincides with the (y,z) plane;\n"
+    "(pi/2, pi/2, -pi/2) - view down the y axis, image plane coincides with the (z,x) plane.\n"
+    "LOSVDs are one-dimensional functions that describe the distribution of matter moving with "
+    "the given velocity -v_{z'} in the given spatial region (aperture) in the (x',y') plane. "
+    "Apertures are specified by arbitrary simple polygons (without self-intersection, but not "
+    "necessarily convex); different apertures may overlap in the same area. Any collection of slits "
+    "at various angles, regular 2d IFU spaxels, or Voronoi bins can be represented in this way. "
+    "In each aperture, the LOSVD is represented in terms of a B-spline expansion: "
+    "the degree of B-splines and the grid nodes in the velocity axis that together determine "
+    "the shape of basis functions are the same for all apertures, and the amplitudes of each basis "
+    "function are the free parameters that describe each LOSVD. For instance, the commonly used "
+    "approach to represent a LOSVD as a histogram with regularly-spaced bins is equivalent to "
+    "a 0th degree B-spline over a uniform grid in v; however, this is certainly not the most "
+    "efficient usage scenario. Higher-degree B-spines (2 or 3) result in smoother LOSVDs and need "
+    "substantially fewer grid points to achieve the same velocity resolution; in addition, the grid "
+    "needs not be uniformly-spaced.\n"
+    "The amplitudes of B-spline expansion in each aperture for each orbit or N-body snapshot "
+    "are computed by first constructing a datacube - the projection of said orbit onto "
+    "an auxiliary grid in the 2+1-dimensional space (x',y' and v_LOS). The grid in velocity space "
+    "is the same as used in the B-spline representation, but the grid in the image plane is "
+    "somewhat arbitrary (separable in x',y', but not necessarily uniform); the only requirement "
+    "is for it to cover all apertures, and have a sufficient spatial resolution - typically "
+    "comparable to the PSF width if 2nd or 3rd-degree B-splines are used. "
+    "Then the datacube is convolved with spatial and velocity-space PSFs and re-binned into "
+    "the apertures (all done internally by the Target object); the final LOSVD has "
+    "numApertures * numBasisFnc elements, where the latter is len(gridv) + degree - 1.\n"
+    "Parameters for this target:\n"
+    "theta,phi,chi - angles specifying the orientation of the image plane w.r.t. model coordinates;\n"
+    "degree (integer from 0 to 3) - degree of B-splines;\n"
+    "gridv - array of grid nodes in velocity space (typically should be symmetric about origin);\n"
+    "gridx - nodes of the auxiliary (internal) grid in the x' coordinate of the image plane;\n"
+    "gridy (optional - default is the same as gridx) - nodes of the internal grid in y'; "
+    "the spatial region covered by this 2d grid should encompass all apertures, and the grid spacing "
+    "should be comparable to either the PSF width or the typical aperture size, but not necessarily "
+    "uniform (i.e., it may be constructed with the routines 'nonuniformGrid' or 'symmetricGrid');\n"
+    "psf - description of spatial point-spread function: it may be either a single number, "
+    "interpreted as the width of the Gaussian PSF, or an Kx2 array describing a composition of K "
+    "such Gaussians (the first column is the width of each Gaussian, and the second column is "
+    "the relative fraction of this component, which should sum up to unity);\n"
+    "velpsf - width of the velocity-space smoothing kernel (a single Gaussian);\n"
+    "apertures - array of polygons describing the boundaries of each aperture: "
+    "each element of this array is a 2d array with x',y' coordinates of the polygon vertices, "
+    "and of course the number of vertices may be different for each polygon (but greater than two).\n\n"
+    "The role of a Target object is to collect data during the construction of an orbit library: "
+    "several instances of them could be provided as a 'targets=[t1,t2,...]' argument of "
+    "the 'orbit()' routine, and each one will produce a matrix with Norbit rows and Ncoef columns, "
+    "where the number of coefficients for a target t1 is given by the 'len(t1)' function.\n"
+    "A Target instance can also be used to produce the right-hand side of the matrix equation "
+    "in a linear superposition model, by applying it to a Density object or an N-body snapshot:\n"
+    ">>> den=agama.Density(**params)   # create an instance of a density model with some parameters\n"
+    ">>> snapshot=den.sample(10000)    # draw 10000 sample points from this model\n"
+    ">>> rhs_d=t1(den)                 # apply the target 't1' to the analytic density model\n"
+    ">>> rhs_s=t1(snapshot)            # apply it to an array of particles\n"
+    "The result depends on the type of the target and the type of the argument (density or array "
+    "of particles). For density discretization targets, this produces the array of integrals of "
+    "the density profile multiplied by the basis functions over the entire volume, or, if the input "
+    "is an array of particles, the sum of particle masses multiplied by basis functions. "
+    "The length of the resulting array is equal to len(t1). "
+    "For a LOSVD target, applying it to a density object computes the integrals of surface mass "
+    "density over each aperture, convolved with the spatial PSF; equivalently, this is the overall "
+    "normalization of the LOSVD in each aperture, i.e. the integral of f(v) over all velocities. "
+    "This number may be used as the normalization factor gamma in computing Gauss-Hermite coefficients "
+    "from LOSVD, as shown below:\n";
 
 int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
-    // check if a density object was provided
-    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
-    potential::PtrDensity dens = getDensity(dens_obj);
-    if(dens_obj!=NULL && !dens) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'density' must be a valid Density instance");
-        return -1;
-    }
-
     PyObject* type_obj = getItemFromPyDict(namedArgs, "type");
     if(type_obj==NULL || !PyString_Check(type_obj)) {
-        PyErr_SetString(PyExc_ValueError, "Must provide a 'type=[str]' argument");
+        PyErr_SetString(PyExc_ValueError, "Must provide a type='...' argument");
         return -1;
     }
     std::string type_str(PyString_AsString(type_obj));
     try{
-        // check if a DensityGrid is requested
-        galaxymodel::DensityGridParams params;
-        params.type = galaxymodel::DG_UNKNOWN;
-        if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
-            params.type = galaxymodel::DG_CLASSIC_TOPHAT;
-        if(utils::stringsEqual(type_str, "DensityClassicLinear"))
-            params.type = galaxymodel::DG_CLASSIC_LINEAR;
-        if(utils::stringsEqual(type_str, "DensitySphHarm"))
-            params.type = galaxymodel::DG_SPH_HARM;
-        if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
-            params.type = galaxymodel::DG_CYLINDRICAL_TOPHAT;
-        if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
-            params.type = galaxymodel::DG_CYLINDRICAL_LINEAR;
-        if(params.type != galaxymodel::DG_UNKNOWN) {
-            params.gridSizeR = toInt(getItemFromPyDict(namedArgs, "gridSizeR"), params.gridSizeR);
-            params.gridSizez = toInt(getItemFromPyDict(namedArgs, "gridSizez"), params.gridSizez);
-            params.lmax = toInt(getItemFromPyDict(namedArgs, "lmax"), params.lmax);
-            params.mmax = toInt(getItemFromPyDict(namedArgs, "mmax"), params.mmax);
-            params.stripsPerPane =
-                toInt(getItemFromPyDict(namedArgs, "stripsPerPane"), params.stripsPerPane);
-            params.innerShellMass =
-                toDouble(getItemFromPyDict(namedArgs, "innerShellMass"), params.innerShellMass);
-            params.outerShellMass =
-                toDouble(getItemFromPyDict(namedArgs, "outerShellMass"), params.outerShellMass);
-            params.axisRatioY =
-                toDouble(getItemFromPyDict(namedArgs, "axisRatioY"), params.axisRatioY);
-            params.axisRatioZ =
-                toDouble(getItemFromPyDict(namedArgs, "axisRatioZ"), params.axisRatioZ);
-            if(!dens) {
-                PyErr_SetString(PyExc_ValueError, "Must provide a 'density=[obj]' argument");
-                return -1;
-            }
-            self->target.reset(new galaxymodel::TargetDensity(*dens, params));
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
-                " at " + utils::toString(self->target.get()));
-            return 0;
+        if(utils::stringsEqual(type_str.substr(0, 7), "Density")) {
+            // spatial grids
+            std::vector<double> gridr = toDoubleArray(getItemFromPyDict(namedArgs, "gridr"));
+            std::vector<double> gridz = toDoubleArray(getItemFromPyDict(namedArgs, "gridz"));
+            math::blas_dmul(conv->lengthUnit, gridr);
+            math::blas_dmul(conv->lengthUnit, gridz);
+            // orders of angular expansion or number of lines partitioning a spherical shell into cells
+            unsigned int
+                lmax = toInt(getItemFromPyDict(namedArgs, "lmax"), 0),
+                mmax = toInt(getItemFromPyDict(namedArgs, "mmax"), 0),
+                stripsPerPane = toInt(getItemFromPyDict(namedArgs, "stripsPerPane"), 2);
+            // flattening of the spheroidal grid
+            double
+                axisRatioY = toDouble(getItemFromPyDict(namedArgs, "axisRatioY"), 1.),
+                axisRatioZ = toDouble(getItemFromPyDict(namedArgs, "axisRatioZ"), 1.);
+            if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
+                self->target.reset(new galaxymodel::TargetDensityClassic<0>(
+                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
+            else if(utils::stringsEqual(type_str, "DensityClassicLinear"))
+                self->target.reset(new galaxymodel::TargetDensityClassic<1>(
+                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
+            else if(utils::stringsEqual(type_str, "DensitySphHarm"))
+                self->target.reset(new galaxymodel::TargetDensitySphHarm(lmax, mmax, gridr));
+            else if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
+                self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
+            else if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
+                self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
+            else 
+                throw std::invalid_argument("Unknown type='...' argument");
         }
 
-        // check if a KinemJeans is being requested
-        if(utils::stringsEqual(type_str, "KinemJeans")) {
-            double beta   = toDouble(getItemFromPyDict(namedArgs, "beta"), 0.);
-            int gridSizeR = toInt(getItemFromPyDict(namedArgs, "gridSizeR"), 0);
-            int degree    = toInt(getItemFromPyDict(namedArgs, "degree"), -1);
-            if(!dens) {
-                PyErr_SetString(PyExc_ValueError, "Must provide a 'density=[obj]' argument");
-                return -1;
+        // check if a KinemShell is being requested
+        if(utils::stringsEqual(type_str, "KinemShell")) {
+            int degree = toInt(getItemFromPyDict(namedArgs, "degree"), -1);
+            std::vector<double> gridr = toDoubleArray(getItemFromPyDict(namedArgs, "gridr"));
+            math::blas_dmul(conv->lengthUnit, gridr);
+            switch(degree) {
+                case 0: self->target.reset(new galaxymodel::TargetKinemShell<0>(gridr)); break;
+                case 1: self->target.reset(new galaxymodel::TargetKinemShell<1>(gridr)); break;
+                case 2: self->target.reset(new galaxymodel::TargetKinemShell<2>(gridr)); break;
+                case 3: self->target.reset(new galaxymodel::TargetKinemShell<3>(gridr)); break;
+                default:
+                    throw std::invalid_argument(
+                        "KinemShell: degree of interpolation should be between 0 and 3");
             }
-            self->target.reset(new galaxymodel::TargetKinemJeans(*dens, degree, gridSizeR, beta));
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
-                " at " + utils::toString(self->target.get()));
-            return 0;
         }
 
-        // check if a KinemLOSVD is being requested
-        if(utils::stringsEqual(type_str, "KinemLOSVD")) {
-            galaxymodel::LOSVDGridParams params;
+        // check if a LOSVD is being requested
+        if(utils::stringsEqual(type_str, "LOSVD")) {
+            galaxymodel::LOSVDParams params;
             // parameters describing the orientation of the model
             params.theta = toDouble(getItemFromPyDict(namedArgs, "theta"), params.theta);
             params.phi   = toDouble(getItemFromPyDict(namedArgs, "phi"  ), params.phi);
@@ -3669,116 +3767,152 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             params.gridx = toDoubleArray(getItemFromPyDict(namedArgs, "gridx"));
             params.gridy = toDoubleArray(getItemFromPyDict(namedArgs, "gridy"));
             params.gridv = toDoubleArray(getItemFromPyDict(namedArgs, "gridv"));
-            int gridSizeX= toInt(getItemFromPyDict(namedArgs, "gridsizex"), -1);
-            int gridSizeY= toInt(getItemFromPyDict(namedArgs, "gridsizey"), -1);
-            int gridSizeV= toInt(getItemFromPyDict(namedArgs, "gridsizev"), -1);
-            double gridRmax = toDouble(getItemFromPyDict(namedArgs, "gridrmax"), NAN) * conv->lengthUnit;
-            double gridVmax = toDouble(getItemFromPyDict(namedArgs, "gridvmax"), NAN) * conv->velocityUnit;
-            double spatialBin = toDouble(getItemFromPyDict(namedArgs, "spatialbin"), 0.) * conv->lengthUnit;
-            double velocityBin= toDouble(getItemFromPyDict(namedArgs, "velocitybin"),0.) * conv->velocityUnit;
-            if(params.gridx.empty()) {
-                if(gridSizeX <= 1 || spatialBin <= 0) {
-                    PyErr_SetString(PyExc_ValueError,
-                        "Must provide either 'gridx=[array]' or 'gridsizex=[int], spatialbin=[float]'");
-                    return -1;
-                } else
-                    params.gridx = math::createSymmetricGrid(gridSizeX+1, spatialBin, gridRmax);
-            } else
-                math::blas_dmul(conv->lengthUnit, params.gridx);
-            if(params.gridy.empty()) {
-                if(gridSizeY <= 1)
-                    params.gridy = params.gridx;
-                else
-                    params.gridy = math::createSymmetricGrid(gridSizeY+1, spatialBin, gridRmax);
-            } else
-                math::blas_dmul(conv->lengthUnit, params.gridy);
-            if(params.gridv.empty()) {
-                if(gridSizeV <= 1 || velocityBin <= 0) {
-                    PyErr_SetString(PyExc_ValueError,
-                        "Must provide either 'gridv=[array]' or 'gridsizev=[int], velocitybin=[float]'");
-                    return -1;
-                } else
-                    params.gridv = math::createSymmetricGrid(gridSizeV+1, velocityBin, gridVmax);
-            } else
-                math::blas_dmul(conv->velocityUnit, params.gridv);
+            if(params.gridy.empty())
+                params.gridy = params.gridx;
+            if(params.gridx.size()<2 || params.gridy.size()<2 || params.gridv.size()<2)
+                throw std::invalid_argument("gridx, [gridy, ] gridv must be arrays with >=2 elements"); 
+            math::blas_dmul(conv->lengthUnit, params.gridx);
+            math::blas_dmul(conv->lengthUnit, params.gridy);
+            math::blas_dmul(conv->velocityUnit, params.gridv);
             // parameters of the point-spread functions (spatial and velocity)
-            params.spatialPSF.assign(1, galaxymodel::GaussianPSF(
-                toDouble(getItemFromPyDict(namedArgs, "spatialPSF")) * conv->lengthUnit));
-            params.velocityPSF =
-                toDouble(getItemFromPyDict(namedArgs, "velocityPSF")) * conv->velocityUnit;
-            // degree of B-splines
-            int degree = toInt(getItemFromPyDict(namedArgs, "degree"), -1);
+            PyObject* psf_obj = getItemFromPyDict(namedArgs, "psf");
+            if(psf_obj) {
+                double psf = toDouble(psf_obj, NAN) * conv->lengthUnit;
+                if(isFinite(psf))
+                    params.spatialPSF.assign(1, galaxymodel::GaussianPSF(psf));
+                else {  // may be an array of several PSFs
+                    PyArrayObject* psf_arr = (PyArrayObject*)PyArray_FROM_OTF(psf_obj, NPY_DOUBLE, 0);
+                    if(psf_arr == NULL || PyArray_NDIM(psf_arr) != 2 || PyArray_DIM(psf_arr, 1) != 2) {
+                        Py_XDECREF(psf_arr);
+                        throw std::invalid_argument(
+                            "Argument 'psf' must be a single number (width of the Gaussian PSF), "
+                            "or a Kx2 array of PSF widths and fractional weights");
+                    }
+                    for(npy_intp k=0; k<PyArray_DIM(psf_arr, 0); k++)
+                        params.spatialPSF.push_back(galaxymodel::GaussianPSF(
+                            pyArrayElem<double>(psf_arr, k, 0) * conv->lengthUnit,
+                            pyArrayElem<double>(psf_arr, k, 1)));
+                }
+            }  // otherwise no PSF is assigned at all
+            params.velocityPSF = toDouble(getItemFromPyDict(namedArgs, "velpsf"), 0.) * conv->velocityUnit;
             // apertures in the image plane where LOSVDs are analyzed
             std::vector<PyObject*> apertures = toPyObjectArray(getItemFromPyDict(namedArgs, "apertures"));
-            if(apertures.empty()) {
-                PyErr_SetString(PyExc_ValueError,
-                    "Must provide a list of polygons in 'apertures=...' argument");
-                return -1;
-            }
+            if(apertures.empty())
+                throw std::invalid_argument("Must provide a list of polygons in 'apertures=...' argument");
             for(size_t a=0; a<apertures.size(); a++) {
-                PyArrayObject* ap_obj =
-                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-                if( ap_obj == NULL ||
-                    PyArray_NDIM(ap_obj) != 2 ||
-                    PyArray_DIM(ap_obj, 0) <= 2 ||
-                    PyArray_DIM(ap_obj, 1) != 2)
+                PyArrayObject* ap_arr =
+                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, 0);
+                if( ap_arr == NULL ||
+                    PyArray_NDIM(ap_arr) != 2 ||
+                    PyArray_DIM(ap_arr, 0) <= 2 ||
+                    PyArray_DIM(ap_arr, 1) != 2)
                 {
-                    Py_XDECREF(ap_obj);
-                    PyErr_SetString(PyExc_ValueError,
+                    Py_XDECREF(ap_arr);
+                    throw std::invalid_argument(
                         "Each element of the list or tuple provided in the 'apertures=...' argument "
                         "must be a Nx2 array defining a polygon on the sky plane, with N>=3 vertices");
-                    return -1;
                 }
-                size_t nv = PyArray_DIM(ap_obj, 0);
+                size_t nv = PyArray_DIM(ap_arr, 0);
                 params.apertures.push_back(math::Polygon(nv));
                 for(size_t v=0; v<nv; v++) {
-                    params.apertures.back()[v].x = pyArrayElem<double>(ap_obj, v, 0) * conv->lengthUnit;
-                    params.apertures.back()[v].y = pyArrayElem<double>(ap_obj, v, 1) * conv->lengthUnit;
+                    params.apertures.back()[v].x = pyArrayElem<double>(ap_arr, v, 0) * conv->lengthUnit;
+                    params.apertures.back()[v].y = pyArrayElem<double>(ap_arr, v, 1) * conv->lengthUnit;
                 }
-                Py_DECREF(ap_obj);
+                Py_DECREF(ap_arr);
             }
-            // Gauss-Hermite moments
-            std::vector<galaxymodel::GaussHermiteExpansion> ghmoments;
-            PyObject* gh_obj = getItemFromPyDict(namedArgs, "ghmoments");
-            if(gh_obj) {
-                PyArrayObject *gh_arr =
-                    (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-                if( gh_arr == NULL ||
-                    PyArray_NDIM(gh_arr) != 2 ||
-                    PyArray_DIM(gh_arr, 0) != (Py_ssize_t)apertures.size() ||
-                    PyArray_DIM(gh_arr, 1) <= 3)
-                {
-                    Py_XDECREF(gh_arr);
-                    PyErr_SetString(PyExc_ValueError,
-                        "Argument 'ghmoments' should be a 2d array with "
-                        "the number of rows equal to the number of apertures, "
-                        "and >=3 columns (gamma,meanv,sigma,[h0,h1,h2,h3,h4,...])");
-                    return -1;
-                }
-                size_t numGHmoments = PyArray_DIM(gh_arr, 1) - 3;
-                for(size_t a=0; a<apertures.size(); a++) {
-                    const double* ghm = &pyArrayElem<double>(gh_arr, a, 0);
-                    ghmoments.push_back(galaxymodel::GaussHermiteExpansion(
-                        /*moments*/ std::vector<double>(ghm + 3, ghm + 3 + numGHmoments),
-                        /*gamma*/ ghm[0] * conv->massUnit,
-                        /*meanv*/ ghm[1] * conv->velocityUnit,
-                        /*sigma*/ ghm[2] * conv->velocityUnit));
-                }
+            // degree of B-splines
+            int degree = toInt(getItemFromPyDict(namedArgs, "degree"), -1);
+            switch(degree) {
+                case 0: self->target.reset(new galaxymodel::TargetLOSVD<0>(params)); break;
+                case 1: self->target.reset(new galaxymodel::TargetLOSVD<1>(params)); break;
+                case 2: self->target.reset(new galaxymodel::TargetLOSVD<2>(params)); break;
+                case 3: self->target.reset(new galaxymodel::TargetLOSVD<3>(params)); break;
+                default:
+                    throw std::invalid_argument(
+                        "LOSVD: degree of interpolation should be between 0 and 3");
             }
-            self->target.reset(new galaxymodel::TargetKinemLOSVD(params, degree, ghmoments));
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
-                " at " + utils::toString(self->target.get()));
-            return 0;
         }
+        if(!self->target)  // none of the above variants worked
+            throw std::invalid_argument("Unknown type='...' argument");
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError,
             (std::string("Error in creating a Target object: ")+e.what()).c_str());
         return -1;
     }
-    // shouldn't reach here
-    PyErr_SetString(PyExc_ValueError, "Unknown type='...' argument");
-    return -1;
+    utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
+        " at " + utils::toString(self->target.get()));
+    return 0;
+}
+
+PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs*/)
+{
+    if(!PyTuple_Check(args) || PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "Expected exactly 1 argument");
+        return NULL;
+    }
+    PyObject* arg = PyTuple_GET_ITEM(args, 0);
+    particles::ParticleArrayCar particles;
+    try{
+        // check if we have a density object as input
+        potential::PtrDensity dens = getDensity(arg);
+        if(dens) {
+            std::vector<double> result = self->target->computeDensityProjection(*dens);
+            math::blas_dmul(1./conv->massUnit, result);
+            return toPyArray(result);
+        }
+        // otherwise this must be a particle object
+        particles = convertParticles<coord::PosVelCar>(arg);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, e.what());
+        return NULL;
+    }
+    npy_intp size = self->target->numCoefs();
+    PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
+    if(!result)
+        return NULL;
+    bool fail = false;
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+        try{
+            // define thread-local intermediate matrices
+            math::Matrix<double> datacube = self->target->newDatacube();
+            std::vector<galaxymodel::StorageNumT> tmpresult(size);
+            const double mult = 1./conv->massUnit;
+#ifdef _OPENMP
+#pragma omp for schedule(static)
+#endif
+            for(int i=0; i<(int)particles.size(); i++) {
+                double xv[6];
+                particles.point(i).unpack_to(xv);
+                self->target->addPoint(xv, particles.mass(i), datacube.data());
+            }
+            self->target->finalizeDatacube(datacube, &tmpresult[0]);
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+            {
+                for(npy_intp i=0; i<size; i++)
+                    pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
+            }
+        }
+        catch(std::exception& e) {
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+            PyErr_SetString(PyExc_ValueError, e.what());
+            fail = true;
+        }
+    }
+
+    if(fail) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    return result;
 }
 
 PyObject* Target_name(TargetObject* self)
@@ -3789,8 +3923,7 @@ PyObject* Target_name(TargetObject* self)
 PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
 {
     try{
-        return Py_BuildValue("sd", self->target->constraintName(index).c_str(),
-            self->target->constraintValue(index));
+        return Py_BuildValue("s", self->target->coefName(index).c_str());
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_IndexError, e.what());
@@ -3800,59 +3933,13 @@ PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
 
 Py_ssize_t Target_len(TargetObject* self)
 {
-    return self->target->constraintsSize();
-}
-
-PyObject* Target_values(TargetObject* self)
-{
-    npy_intp size = self->target->constraintsSize();
-    PyObject* arr = PyArray_SimpleNew(1, &size, NPY_DOUBLE);
-    if(!arr)
-        return NULL;
-    for(npy_intp i=0; i<size; i++)
-        pyArrayElem<double>(arr, i) = self->target->constraintValue(i);
-    return arr;
-}
-
-PyObject* Target_matrix(TargetObject* self, PyObject* args)
-{
-    PyArrayObject* src = NULL;
-    if(!PyArg_ParseTuple(args, "O", &src))
-        return NULL;
-    if(!PyArray_Check(src) || PyArray_NDIM(src) != 2 ||
-        PyArray_TYPE((PyArrayObject*)src) != STORAGE_NUM_T ||
-        PyArray_DIM(src, 1) != static_cast<npy_intp>(self->target->datacubeSize()))
-    {
-        PyErr_SetString(PyExc_ValueError, "Argument must be a 2d datacube stored during orbit integration");
-        return NULL;
-    }
-    npy_intp dims[] = { PyArray_DIM(src, 0), static_cast<npy_intp>(self->target->constraintsSize()) };
-    PyArrayObject* dst = (PyArrayObject*)PyArray_SimpleNew(2, dims, STORAGE_NUM_T);
-    if(!dst)
-        return NULL;
-    try{
-        const math::MatrixView<galaxymodel::StorageNumT> srcview(
-            PyArray_DIM(src, 0), PyArray_DIM(src, 1), &pyArrayElem<galaxymodel::StorageNumT>(src, 0, 0));
-        math::MatrixView<galaxymodel::StorageNumT> dstview(
-            PyArray_DIM(dst, 0), PyArray_DIM(dst, 1), &pyArrayElem<galaxymodel::StorageNumT>(dst, 0, 0));
-        self->target->getMatrix(srcview, dstview);
-        return (PyObject*) dst;
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, e.what());
-        Py_XDECREF(dst);
-        return NULL;
-    }
+    return self->target->numCoefs();
 }
 
 static PySequenceMethods Target_sequence_methods = {
     (lenfunc)Target_len, 0, 0, (ssizeargfunc)Target_elem,
 };
 static PyMethodDef Target_methods[] = {
-    { "values", (PyCFunction)Target_values, METH_NOARGS,
-      "Return the 1d array of constraint values" },
-    { "matrix", (PyCFunction)Target_matrix, METH_VARARGS,
-      "Convert the datacube recorded during orbit integration into the matrix used in 'optsolve'"},
     { NULL }
 };
 
@@ -3860,11 +3947,247 @@ static PyTypeObject TargetType = {
     PyObject_HEAD_INIT(NULL)
     0, "agama.Target",
     sizeof(TargetObject), 0, (destructor)Target_dealloc,
-    0, 0, 0, 0, 0, 0, &Target_sequence_methods, 0, 0, 0, (reprfunc)Target_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, &Target_sequence_methods, 0, 0,
+    (PyCFunctionWithKeywords)Target_value, (reprfunc)Target_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringTarget,
     0, 0, 0, 0, 0, 0, Target_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Target_init
 };
+
+///@}
+//  --------------------------------------------
+/// \name  Computation of Gauss-Hermite moments
+//  --------------------------------------------
+///@{
+
+/// description of orbit function
+static const char* docstringGhmoments =
+    "Compute the coefficients of Gauss-Hermite expansion for line-of-sight velocity "
+    "distribution functions represented by a B-spline, as used in the LOSVD Target model.\n"
+    "Named arguments:\n"
+    "  degree - degree of B-spline expansion (int, 0 to 3).\n"
+    "  gridv  - array of grid nodes in velocity that determine the B-spline; "
+    "should be the same as used in constructing the Target object.\n"
+    "  matrix - a 1d or 2d array with the amplitudes of B-spline expansion of LOSVD. "
+    "The number of columns in the matrix is numBasisFnc * numApertures: "
+    "the former is the number of amplitudes of B-spline representation of a single LOSVD, "
+    "equal to len(gridv)+degree-1; the latter is the number of separate regions in "
+    "the image plane, each with its own LOSVD. Note that numApertures is inferred from "
+    "the ratio between the number of columns and the number of basis functions "
+    "(itself known from gridv and degree). "
+    "If the matrix is two-dimensional, each row corresponds to a single component "
+    "of the model (e.g., an orbit) which has its LOSVD recorded in each aperture. "
+    "In the opposite case (one-dimensional array) these could be LOSVDs for the entire model "
+    "(e.g., constructed from an N-body snapshot or from observations) in each aperture. "
+    "Amplitudes of LOSVD representation for a single aperture are grouped together "
+    "(in other words, each component may be viewed as a 2d matrix with numApertures rows "
+    "and numBasisFnc columns, reshaped into a 1d array).\n"
+    "  ghorder - the order of Gauss-Hermite expansion, should be >=2.\n"
+    "  ghexp (optional) - if provided, should be a 2d array with numApertures rows and 3 columns, "
+    "each row containing the parameters of the Gaussian that serves as the base for expansion: "
+    "overall normalization (gamma), center (mean v) and width (sigma). \n"
+    "There are two different scenarios for using this routine. \n"
+    "The first is to construct both the velocity maps (v, sigma and gamma) by finding a best-fit "
+    "Gaussian for each of the input LOSVDs, and then use these parameters to compute higher-order "
+    "GH moments; in this case the input matrix is supposed to represent the LOSVDs in each "
+    "aperture for the entire model (i.e., has only one component), and the argument 'ghexp' "
+    "is not provided.\n"
+    "The second scenario is to convert the LOSVDs for a multi-component model (e.g., produced by "
+    "the Target LOSVD object during orbit integration) into GH moments, reducing the number of "
+    "parameters needed to represent each component's LOSVD. In this case all components "
+    "naturally should use the same base parameters of the Gaussian (separate for each aperture, "
+    "but identical between components), so that a linear superposition of input LOSVDs "
+    "corresponds to the same linear superposition of GH moments. Hence the argument 'ghexp' "
+    "should be provided.\n"
+    "  Returns: a 1d or 2d array (depending on the number of dimensions of the input matrix), "
+    "where each row contains the GH moments for each aperture, and the number of rows is equal "
+    "to the number of components (rows of the input matrix).\n"
+    "If 'ghexp' argument was not provided, the output will contain also the parameters of "
+    "the best-fit Gaussian serving as the base for the expansion, i.e. three numbers "
+    "(gamma, mean v and sigma), followed by GH moments h_0..h_M, where M is the order "
+    "of expansion - in total M+4 numbers for each aperture (grouped together), "
+    "of which the first three can be later used as the 'ghexp' argument for computing the moments "
+    "in a multi-component model.\n"
+    "In the opposite case when 'ghexp' is provided, the output for each aperture contains M+1 "
+    "moments h_0..h_M.\n";
+
+PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    if(!onlyNamedArgs(args, namedArgs))
+       return NULL;
+
+    int degree = -1, ghorder = -1;
+    PyObject *gridv_obj = NULL, *mat_obj = NULL, *gh_obj = NULL;
+    static const char* keywords[] = {"degree", "ghorder", "gridv", "matrix", "ghexp", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "iiOO|O", const_cast<char**>(keywords),
+        &degree, &ghorder, &gridv_obj, &mat_obj, &gh_obj))
+        return NULL;
+
+    // order of Gauss-Hermite expansion
+    if(ghorder<2) {
+        PyErr_SetString(PyExc_ValueError, "ghmoments: order of Gauss-Hermite expansion should be >=2");
+        return NULL;
+    }
+
+    // degree of B-splines
+    if(degree<0 || degree>3) {
+        PyErr_SetString(PyExc_ValueError, "ghmoments: degree of interpolation may not exceed 3");
+        return NULL;
+    }
+
+    // grid in velocity space
+    std::vector<double> gridv = toDoubleArray(gridv_obj);
+    if(gridv.size() < 2) {
+        PyErr_SetString(PyExc_ValueError, "ghmoments: gridv must be an array with >= 2 nodes");
+        return NULL;
+    }
+    math::blas_dmul(conv->velocityUnit, gridv);
+    int numBasisFnc = (npy_intp)gridv.size() + degree - 1;  // number of B-spline basis functions
+
+    // matrix of B-spline amplitudes of LOSVD in each aperture (columns)
+    // for each element of the model (e.g. an orbit) (rows)
+    PyArrayObject *mat_arr = mat_obj?
+        (PyArrayObject*) PyArray_FROM_OTF(mat_obj, STORAGE_NUM_T, NPY_ARRAY_FORCECAST) : NULL;
+    npy_intp numApertures = -1;
+    if(mat_arr && (PyArray_NDIM(mat_arr) == 1 || PyArray_NDIM(mat_arr) == 2))
+        numApertures = PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1) / numBasisFnc;
+    if(!mat_arr || numApertures * numBasisFnc != PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1)) {
+        Py_XDECREF(mat_arr);
+        PyErr_SetString(PyExc_ValueError, ("Argument 'matrix' should be a 1d array "
+            "of length numApertures * numBasisFnc (the latter is " + utils::toString(numBasisFnc) +
+            " for the provided gridv and degree), or a 2d array with this number of columns").c_str());
+        return NULL;
+    }
+    int ndim = PyArray_NDIM(mat_arr);
+    npy_intp numComponents = ndim==1 ? 1 : PyArray_DIM(mat_arr, 0);
+
+    // parameters of Gauss-Hermite expansion(s), if provided
+    PyArrayObject *gh_arr = gh_obj? (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, 0) : NULL;
+    if( gh_obj != NULL && (gh_arr == NULL || PyArray_NDIM(gh_arr) != 2 ||
+        PyArray_DIM(gh_arr, 0) != numApertures || PyArray_DIM(gh_arr, 1) != 3))
+    {
+        Py_XDECREF(gh_arr);
+        Py_DECREF(mat_arr);
+        PyErr_SetString(PyExc_ValueError,
+            "Argument 'ghexp', if provided, should be a 2d array with 3 columns: gamma,meanv,sigma, "
+            "and the number of rows equal to the number of apertures");
+        return NULL;
+    }
+
+    // prepare the output array of Gauss-Hermite moments (and possibly the parameters of GH expansion)
+    npy_intp size[2] = {numComponents, numApertures * (gh_arr ? ghorder+1 : ghorder+4)};
+    PyObject* output_arr = PyArray_SimpleNew(ndim, &size[2-ndim], STORAGE_NUM_T);
+    if(!output_arr) {
+        Py_XDECREF(gh_arr);
+        Py_DECREF(mat_arr);
+        return NULL;
+    }
+
+    volatile bool fail = false;
+    // the procedure is different depending on whether the parameters of GH expansion are provided or not
+    if(gh_arr) {
+        // compute the GH moments for known (provided) parameters of expansion (gamma, meanv and sigma)
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(int a=0; a<numApertures; a++) {
+            if(fail) continue;
+            try{
+                // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
+                math::Matrix<double> ghmat(galaxymodel::computeGaussHermiteMatrix(degree, gridv, ghorder,
+                    /*gamma*/ pyArrayElem<double>(gh_arr, a, 0) /* conv->massUnit*/,
+                    /*meanv*/ pyArrayElem<double>(gh_arr, a, 1) * conv->velocityUnit,
+                    /*sigma*/ pyArrayElem<double>(gh_arr, a, 2) * conv->velocityUnit));
+                std::vector<double> srcrow(numBasisFnc), dstrow(ghorder+1);  // temp storage
+                // loop over all rows of the input matrix (e.g. orbits)
+                for(npy_intp r=0; r<numComponents; r++) {
+                    // convert the section of one row of the input array, corresponding to
+                    // one aperture and one orbit, from StorageNumT to double
+                    for(int b=0; b<numBasisFnc; b++)
+                        srcrow[b] = ndim==1 ?
+                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
+                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
+                    // multiply the array of amplitudes by the conversion matrix
+                    math::blas_dgemv(math::CblasNoTrans, 1., ghmat, srcrow, 0., dstrow);
+                    // convert back to StorageNumT and write
+                    // to a section of one row of the result array
+                    for(int m=0; m<=ghorder; m++)
+                        (ndim==1 ?
+                        pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+1) + m) :
+                        pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+1) + m) ) =
+                            static_cast<galaxymodel::StorageNumT>(dstrow[m]);
+                }
+            }
+            catch(std::exception& e) {
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+                PyErr_SetString(PyExc_ValueError, e.what());
+                fail = true;
+            }
+        }
+    } else {
+        // construct best-fit GH expansion (find gamma,meanv,sigma) for each aperture and component,
+        // and then compute GH moments using these best-fit values
+        const int count = numApertures * numComponents;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic,1)
+#endif
+        for(int ar=0; ar < count; ar++) {
+            if(fail) continue;
+            try{
+                int r = ar / numApertures, a = ar % numApertures;  // row and aperture indices
+                std::vector<double> srcrow(numBasisFnc);
+                for(int b=0; b<numBasisFnc; b++)
+                    srcrow[b] = ndim == 1 ?
+                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
+                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
+                math::PtrFunction fnc;
+                switch(degree) {
+                    case 0: fnc.reset(new math::BsplineWrapper<0>(
+                        math::BsplineInterpolator1d<0>(gridv), srcrow));
+                        break;
+                    case 1: fnc.reset(new math::BsplineWrapper<1>(
+                        math::BsplineInterpolator1d<1>(gridv), srcrow));
+                        break;
+                    case 2: fnc.reset(new math::BsplineWrapper<2>(
+                        math::BsplineInterpolator1d<2>(gridv), srcrow));
+                        break;
+                    case 3: fnc.reset(new math::BsplineWrapper<3>(
+                        math::BsplineInterpolator1d<3>(gridv), srcrow));
+                        break;
+                    default:  // shouldn't occur, we've checked degree beforehand
+                        assert(false);
+                }
+                galaxymodel::GaussHermiteExpansion ghexp(*fnc, ghorder);
+                std::vector<double> dstrow(ghorder+4);
+                dstrow[0] = ghexp.gamma()  /* conv->massUnit*/;      // overall normalization
+                dstrow[1] = ghexp.center() / conv->velocityUnit;  // center of expansion
+                dstrow[2] = ghexp.sigma()  / conv->velocityUnit;  // width of expansion
+                std::copy(ghexp.coefs().begin(), ghexp.coefs().end(), dstrow.begin()+3);
+                for(int m=0; m<=ghorder+3; m++)
+                    (ndim==1 ?
+                    pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+4) + m) :
+                    pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+4) + m) ) =
+                        static_cast<galaxymodel::StorageNumT>(dstrow[m]);
+            }
+            catch(std::exception& e) {
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+                PyErr_SetString(PyExc_ValueError, e.what());
+                fail = true;
+            }
+        }
+    }
+    Py_XDECREF(gh_arr);
+    Py_DECREF(mat_arr);
+    if(fail) {
+        Py_DECREF(output_arr);
+        return NULL;
+    }
+    return output_arr;
+}
 
 
 ///@}
@@ -3896,7 +4219,7 @@ static const char* docstringOrbit =
     "  Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, "
     "and C is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
-    "These data storage arrays should be provided to the `optsolve()` routine. \n"
+    "These data storage arrays should be provided to the `solveOpt()` routine. \n"
     "  Trajectory output is represented as a Nx2 array (or, in case of a single orbit, a 1d array "
     "of length 2), with elements being NumPy arrays themselves: "
     "each row stands for one orbit, the first element in each row is a 1d array of length "
@@ -3926,9 +4249,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         {"ic", "time", "potential", "targets", "trajsize", "Omega", "accuracy", NULL};
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOdd", const_cast<char**>(keywords),
         &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj, &Omega, &params.accuracy))
-    {
         return NULL;
-    }
 
     // ensure that a potential object was provided
     potential::PtrPotential pot = getPotential(pot_obj);
@@ -3961,7 +4282,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
     // check that integration time(s) were provided
     PyArrayObject *time_arr = time_obj==NULL ? NULL :
-        (PyArrayObject*) PyArray_FROM_OTF(time_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+        (PyArrayObject*) PyArray_FROM_OTF(time_obj, NPY_DOUBLE, 0);
     if(time_arr == NULL || !( PyArray_NDIM(time_arr) == 0 ||
         (PyArray_NDIM(time_arr) == 1 && (int)PyArray_DIM(time_arr, 0) == numOrbits) ) )
     {
@@ -4004,7 +4325,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     bool haveTraj = trajsize_obj!=NULL;  // in this case the output tuple contains one extra item
     if(haveTraj) {
         PyArrayObject *trajsize_arr =
-            (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_IN_ARRAY);
+            (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_FORCECAST);
         if(!trajsize_arr)
             return NULL;
         if(PyArray_NDIM(trajsize_arr) == 0) {
@@ -4041,7 +4362,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // the latter one is a Nx2 array of Python objects
     volatile bool fail = false;  // error flag (e.g., insufficient memory)
     for(size_t t=0; !fail && t < numTargets + haveTraj; t++) {
-        npy_intp numCols = t==numTargets ? 2 : targets[t]->datacubeSize();
+        npy_intp numCols = t==numTargets ? 2 : targets[t]->numCoefs();
         int datatype     = t==numTargets ? NPY_OBJECT : STORAGE_NUM_T;
         npy_intp size[2] = {numOrbits, numCols};
         // if there is only a single orbit, the output array is 1-dimensional,
@@ -4055,8 +4376,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
 
     // set up signal handler to stop the integration on a keyboard interrupt
-    keyboardInterruptTriggered = 0;
-    defaultKeyboardInterruptHandler = signal(SIGINT, customKeyboardInterruptHandler);
+    utils::CtrlBreakHandler cbrk;
 
     // finally, run the orbit integration
     volatile int numComplete = 0;
@@ -4068,7 +4388,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
         for(int orb = 0; orb < numOrbits; orb++) {
-            if(fail || keyboardInterruptTriggered) continue;
+            if(fail || cbrk.triggered()) continue;
             try{
                 double integrTime = integrTimes.at(orb);
                 // slightly reduce the output interval for trajectory to ensure that
@@ -4086,7 +4406,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     galaxymodel::StorageNumT* output = singleOrbit ?
                         &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, 0) :
                         &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, 0);
-                    fncs[t] = targets[t]->getOrbitRuntimeFnc(output);
+                    fncs[t].reset(new galaxymodel::RuntimeFncTarget(*targets[t], output));
                 }
                 if(haveTraj)
                     fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(traj, trajStep));
@@ -4159,8 +4479,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(numOrbits != 1)
         printf("%i orbits complete (%.4g orbits/s)\n", numComplete,
             numComplete / difftime(time(NULL), tbegin));
-    signal(SIGINT, defaultKeyboardInterruptHandler);  // restore signal handler
-    if(keyboardInterruptTriggered) {
+    if(cbrk.triggered()) {
         PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
         fail = true;
     }
@@ -4185,7 +4504,7 @@ static const char* docstringSampleOrbitLibrary =
     "Arguments:\n"
     "  n:  the required number of particles in the output snapshot.\n"
     "  traj:  an array of trajectories returned by the `orbit()` routine.\n"
-    "  weights:  an array of orbit weights, returned by the `optsolve()` routine.\n"
+    "  weights:  an array of orbit weights, returned by the `solveOpt()` routine.\n"
     "Returns: a tuple of two elements: the flag indicating success or failure, and the result.\n"
     "  In case of success, the result is a tuple of two arrays: particle coordinates/velocities "
     "(2d Nx6 array) and particle masses (1d array of length N).\n"
@@ -4233,12 +4552,8 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
     // check that the trajectories are provided: it should be an array with PyObjects as elements
     // (they must be arrays themselves, which will be checked later); the shape of this array should be
     // either numOrbits or numOrbits x 2 (the latter variant is returned by the `orbit()` routine).
-    PyArrayObject* traj_arr = NULL;
-    PyArray_Descr* dtype = NULL;
-    int ndim = 0;
-    npy_intp inputdims[NPY_MAXDIMS];
-    if(PyArray_GetArrayParamsFromObject(traj_obj, NULL, 0, &dtype, &ndim, inputdims, &traj_arr, NULL) < 0 ||
-        traj_arr == NULL ||                        // the argument must be a genuine NumPy array,
+    PyArrayObject* traj_arr = PyArray_Check(traj_obj) ? (PyArrayObject*)traj_obj : NULL;
+    if( traj_arr == NULL ||                        // the argument must be a genuine NumPy array,
         PyArray_TYPE(traj_arr) != NPY_OBJECT ||    // with PyObjects as elements,
         !( PyArray_NDIM(traj_arr) == 1 ||          // either 1d, or 2d and the second dimension is 2,
         (PyArray_NDIM(traj_arr) == 2 && PyArray_DIM(traj_arr, 1) == 2) ) ||
@@ -4259,7 +4574,7 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
 
     // this array will store indices of orbits that failed to produce required number of samples
     std::vector<std::pair<int, int> > badOrbits;
-    
+
     // scan the array of orbits and sample appropriate number of points from each trajectory
     double cumulMass   = 0.;  // total mass of output points sampled so far
     long outPointIndex = 0;   // total number of output samples constructed so far
@@ -4335,14 +4650,14 @@ static const char* docstringReadSnapshot =
     "  a tuple of two arrays:  a 2d Nx6 array of particle coordinates and velocities, "
     "and a 1d array of N masses.";
 
-PyObject* readSnapshot(PyObject* /*self*/, PyObject* args)
+PyObject* readSnapshot(PyObject* /*self*/, PyObject* arg)
 {
-    if(!PyTuple_Check(args) || PyTuple_Size(args) != 1 || !PyString_Check(PyTuple_GET_ITEM(args, 0))) {
+    if(!PyString_Check(arg)) {
         PyErr_SetString(PyExc_ValueError, "Expected one string argument (file name)");
         return NULL;
     }
     try{
-        std::string name(PyString_AsString(PyTuple_GET_ITEM(args, 0)));
+        std::string name(PyString_AsString(arg));
         // we do not perform any unit conversion on the particle coordinates/masses:
         // they are read 'as is' from the file, and any such conversion will take place when
         // feeding them to other routines, such as constructing the potential or integrating orbits
@@ -4388,53 +4703,10 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     {
         return NULL;
     }
-
-    // parse the input arrays
-    static const char* errorstr = "'particles' must be a tuple with two arrays - "
-        "coordinates[+velocities] and mass, where the first one is a two-dimensional "
-        "Nx3 or Nx6 array and the second one is a one-dimensional array of length N";
-    PyObject *pointCoordObj, *pointMassObj;
-    if(!PyArg_ParseTuple(particles_obj, "OO", &pointCoordObj, &pointMassObj)) {
-        PyErr_SetString(PyExc_ValueError, errorstr);
-        return NULL;
-    }
-    PyArrayObject *pointCoordArr = (PyArrayObject*)
-        PyArray_FROM_OTF(pointCoordObj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    PyArrayObject *pointMassArr  = (PyArrayObject*)
-        PyArray_FROM_OTF(pointMassObj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    npy_intp nbody = 0;
-    if( pointCoordArr == NULL || pointMassArr == NULL ||  // input should contain valid arrays
-        PyArray_NDIM(pointMassArr) != 1 ||                // the second one should be 1d array
-        (nbody = PyArray_DIM(pointMassArr, 0)) <= 0 ||    // of length nbody > 0
-        PyArray_NDIM(pointCoordArr) != 2 ||               // the first one should be a 2d array
-        PyArray_DIM(pointCoordArr, 0) != nbody ||         // with nbody rows
-       (PyArray_DIM(pointCoordArr, 1) != 3 && PyArray_DIM(pointCoordArr, 1) != 6))  // and 3 or 6 columns
-    {
-        Py_XDECREF(pointCoordArr);
-        Py_XDECREF(pointMassArr);
-        PyErr_SetString(PyExc_ValueError, errorstr);
-        return NULL;
-    }
-    bool haveVel = PyArray_DIM(pointCoordArr, 1) == 6;  // whether we have velocity data
-    particles::ParticleArrayCar pointArray;
-    pointArray.data.reserve(nbody);
-    for(npy_intp i=0; i<nbody; i++) {
-        const double *xv = &pyArrayElem<double>(pointCoordArr, i, 0);
-        // we do not perform any unit conversion on the particle coordinates/masses:
-        // if they came from various sampling routines, they are already in physical units
-        pointArray.add(coord::PosVelCar(
-            xv[0], xv[1], xv[2], haveVel? xv[3] : 0., haveVel? xv[4] : 0., haveVel? xv[5] : 0.),
-            pyArrayElem<double>(pointMassArr, i));
-    }
-    Py_DECREF(pointCoordArr);
-    Py_DECREF(pointMassArr);
-
     // write snapshot
     try{
-        if(format)
-            particles::writeSnapshot(filename, pointArray, format);
-        else
-            particles::writeSnapshot(filename, pointArray);
+        particles::writeSnapshot(filename,
+            convertParticles<coord::PosVelCar>(particles_obj), format?: "text", *conv);
         Py_INCREF(Py_None);
         return Py_None;
     }
@@ -4489,9 +4761,9 @@ public:
         for(size_t s=0; s<stack.size(); s++)
             dataTypes.push_back(PyArray_TYPE((PyArrayObject*)stack[s]));
     }
-    
+
     virtual size_t size() const { return rows() * cols(); }
-    
+
     virtual double at(size_t row, size_t col) const
     {
         if(row >= rows() || col >= cols())
@@ -4509,7 +4781,7 @@ public:
         else
             throw std::runtime_error("unknown data type in matrix");
     }
-    
+
     virtual double elem(size_t index, size_t &row, size_t &col) const
     {
         row = index / cols();
@@ -4518,7 +4790,7 @@ public:
     }
 };
 
-static const char* docstringOptsolve =
+static const char* docstringSolveOpt =
     "Solve a linear or quadratic optimization problem.\n"
     "Find a vector x that solves a system of linear equations  A x = rhs,  "
     "subject to elementwise inequalities  xmin <= x <= xmax, "
@@ -4550,7 +4822,7 @@ static const char* docstringOptsolve =
     "  the vector x solving the above system; if it cannot be solved exactly and no penalties "
     "for constraint violation were provided, then raise an exception.";
 ///
-PyObject* optsolve(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] =
         {"matrix", "rhs", "xpenl", "xpenq", "rpenl", "rpenq", "xmin", "xmax", NULL};
@@ -4559,7 +4831,6 @@ PyObject* optsolve(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|OOOOOO", const_cast<char**>(keywords),
         &matrix_obj, &rhs_obj, &xpenl_obj, &xpenq_obj, &rpenl_obj, &rpenq_obj, &xmin_obj, &xmax_obj))
     {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to optsolve()");
         return NULL;
     }
 
@@ -4647,7 +4918,7 @@ PyObject* optsolve(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         }
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, (std::string("Error in optsolve(): ")+e.what()).c_str());
+        PyErr_SetString(PyExc_ValueError, (std::string("Error in solveOpt(): ")+e.what()).c_str());
         return NULL;
     }
     return toPyArray(result);
@@ -5096,8 +5367,10 @@ class FncWrapper: public math::IFunctionNdim {
     PyObject* fnc;
 public:
     FncWrapper(unsigned int _nvars, PyObject* _fnc): nvars(_nvars), fnc(_fnc) {}
-    virtual void eval(const double vars[], double values[]) const {
-        npy_intp dims[]  = {1, nvars};
+
+    /// vectorized evaluation of Python function for several points at once
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const {
+        npy_intp dims[]  = { (npy_intp)npoints, nvars};
         PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
         PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
         Py_DECREF(args);
@@ -5105,9 +5378,15 @@ public:
             PyErr_Print();
             throw std::runtime_error("Exception occurred inside integrand");
         }
-        if(PyArray_Check(result))
-            values[0] = pyArrayElem<double>(result, 0);  // TODO: ensure that it's a float array!
-        else if(PyNumber_Check(result))
+        if( PyArray_Check(result) &&
+            PyArray_TYPE((PyArrayObject*)result) == NPY_DOUBLE &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM((PyArrayObject*)result, 0) == (npy_intp)npoints)
+        {
+            for(size_t i=0; i<npoints; i++)
+                values[i] = pyArrayElem<double>(result, i);
+        } else if(PyNumber_Check(result) && npoints==1)
+            // in case of a single input point, may return a single number
             values[0] = PyFloat_AsDouble(result);
         else {
             Py_DECREF(result);
@@ -5115,6 +5394,10 @@ public:
         }
         Py_DECREF(result);
     }
+    /// same for one point (not used by integration/sampling routines, but required by the interface)
+    virtual void eval(const double vars[], double values[]) const {
+        evalmany(1, vars, values);
+    }    
     virtual unsigned int numVars()   const { return nvars; }
     virtual unsigned int numValues() const { return 1; }
 };
@@ -5146,7 +5429,7 @@ bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
     }
     // if the first parameter is not the number of dimensions, then it must be the lower boundary,
     // and the second one must be the upper boundary
-    PyArrayObject *lower_arr = (PyArrayObject*) PyArray_FROM_OTF(lower_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *lower_arr = (PyArrayObject*) PyArray_FROM_OTF(lower_obj, NPY_DOUBLE, 0);
     if(lower_arr == NULL || PyArray_NDIM(lower_arr) != 1) {
         Py_XDECREF(lower_arr);
         PyErr_SetString(PyExc_ValueError,
@@ -5158,7 +5441,7 @@ bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
         PyErr_SetString(PyExc_ValueError, "Must provide both 'lower' and 'upper' arguments if both are arrays");
         return false;
     }
-    PyArrayObject *upper_arr = (PyArrayObject*) PyArray_FROM_OTF(upper_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObject *upper_arr = (PyArrayObject*) PyArray_FROM_OTF(upper_obj, NPY_DOUBLE, 0);
     if(upper_arr == NULL || PyArray_NDIM(upper_arr) != 1 || PyArray_DIM(upper_arr, 0) != ndim) {
         Py_XDECREF(upper_arr);
         PyErr_Format(PyExc_ValueError,
@@ -5183,7 +5466,8 @@ static const char* docstringIntegrateNdim =
     "  fnc - a callable object that must accept a single argument "
     "(a 2d array MxN array of coordinates, where N is the dimension of the integration space, "
     "and M>=1 is the number of points where the integrand should be evaluated simultaneously -- "
-    "this improves performance), and return a 1d array of length M with function values;\n"
+    "this improves performance when using operations on numpy arrays), "
+    "and return a 1d array of length M with function values;\n"
     "  lower, upper - two arrays of the same length N (equal to the number of dimensions) "
     "that specify the lower and upper boundaries of integration hypercube; "
     "alternatively, a single value - the number of dimensions - may be passed instead of 'lower', "
@@ -5286,6 +5570,9 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 ///@}
 
+static const char* docstringModule =
+    "This is the Python interface for the AGAMA galaxy modelling library";
+
 /// list of standalone functions exported by the module
 static PyMethodDef module_methods[] = {
     { "setUnits",               (PyCFunction)setUnits,
@@ -5305,11 +5592,13 @@ static PyMethodDef module_methods[] = {
     { "sampleOrbitLibrary",     (PyCFunction)sampleOrbitLibrary,
       METH_VARARGS | METH_KEYWORDS, docstringSampleOrbitLibrary },
     { "readSnapshot",           (PyCFunction)readSnapshot,
-      METH_VARARGS,                 docstringReadSnapshot },
+      METH_O,                       docstringReadSnapshot },
     { "writeSnapshot",          (PyCFunction)writeSnapshot,
       METH_VARARGS | METH_KEYWORDS, docstringWriteSnapshot },
-    { "optsolve",               (PyCFunction)optsolve,
-      METH_VARARGS | METH_KEYWORDS, docstringOptsolve },
+    { "ghmoments",              (PyCFunction)ghmoments,
+      METH_VARARGS | METH_KEYWORDS, docstringGhmoments },
+    { "solveOpt",               (PyCFunction)solveOpt,
+      METH_VARARGS | METH_KEYWORDS, docstringSolveOpt },
     { "actions",                (PyCFunction)actions,
       METH_VARARGS | METH_KEYWORDS, docstringActions },
     { "integrateNdim",          (PyCFunction)integrateNdim,
@@ -5333,7 +5622,7 @@ using namespace pywrapper;
 PyMODINIT_FUNC
 initagama(void)
 {
-    PyObject* mod = Py_InitModule("agama", module_methods);
+    PyObject* mod = Py_InitModule3("agama", module_methods, docstringModule);
     if(!mod) return;
     PyModule_AddStringConstant(mod, "__version__", AGAMA_VERSION);
     conv.reset(new units::ExternalUnits());

@@ -29,7 +29,7 @@ static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
 static const int LMAX_EXTRAPOLATION = 8;
 
 /// max number of function evaluations in multidimensional integration
-static const unsigned int MAX_NUM_EVAL = 10000;
+static const unsigned int MAX_NUM_EVAL = 100000;
 
 /// to avoid singularities in potential integration kernel, we add a small softening
 /// (intended to be much less than typical grid spacing) - perhaps need to make it grid-dependent
@@ -88,7 +88,8 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
             coefs[q]->at(indices[i]+mmax)=math::Matrix<double>(sizeR, sizez);
     }
     std::string errorMsg;
-
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -99,6 +100,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
 #pragma omp for schedule(dynamic)
 #endif
         for(int n=0; n<numPoints; n++) {
+            if(cbrk.triggered()) continue;
             int iR = n % sizeR;  // index in radial grid
             int iz = n / sizeR;  // index in vertical direction
             try{
@@ -120,6 +122,8 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
             }
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computeFourierCoefs: "+errorMsg);
 }
@@ -267,10 +271,12 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
 
     int numPoints = sizeR * sizez;
     std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ind=0; ind<numPoints; ind++) {  // combined index variable
+        if(cbrk.triggered()) continue;
         unsigned int iR = ind % sizeR;
         unsigned int iz = ind / sizeR;
         try{
@@ -297,6 +303,8 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
             errorMsg = e.what();
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computePotentialCoefsCyl: "+errorMsg);
 }
@@ -355,11 +363,13 @@ void computePotentialCoefsFromParticles(
     ptrdiff_t nbody = Rz.size();
     int numPoints = sizeR * sizez;
     std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
     // parallelize the loop over the nodes of 2d grid, not the inner loop over particles
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ind=0; ind<numPoints; ind++) {
+        if(cbrk.triggered()) continue;
         unsigned int iR = ind % sizeR;
         unsigned int iz = ind / sizeR;
         try{
@@ -384,6 +394,8 @@ void computePotentialCoefsFromParticles(
             errorMsg = e.what();
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computePotentialCoefsFromParticles: "+errorMsg);
 }

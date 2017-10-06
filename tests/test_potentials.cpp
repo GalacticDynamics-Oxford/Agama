@@ -15,7 +15,6 @@
 #include <fstream>
 #include <cmath>
 
-const double eps=1e-6;  // accuracy of comparison
 const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 
 std::string checkLess(double val, double max, bool &ok)

@@ -137,10 +137,25 @@ public:
     /** evaluate the function.
         \param[in]  vars   is the N-dimensional point at which the function should be computed.
         \param[out] values is the M-dimensional array (possibly M=1) that will contain
-                    the vector of function values.
-                    Should point to an existing array of length at least M.
+        the vector of function values. Should point to an existing array of length at least M.
     */
     virtual void eval(const double vars[], double values[]) const = 0;
+
+    /** evaluate the function at several points in a single call.
+        The default implementation simply loops over input points and calls eval() on each of them,
+        but derived classes may provide an optimized version for P>1.
+        This method is called, for instance, by integrateNdim() and sampleNdim() routines.
+        \param[in]  npoints >= 1 is the number of input points (P).
+        \param[in]  vars  is the array of P N-dimensional points, where N=numVars():
+        d-th coordinate of p-th point is retrieved from vars[p * N + d], 0 <= d < N, 0 <= p < npoints.
+        \param[out] values is the array of P M-dimensional function values, where M=numValues():
+        v-th value at p-th point is stored in values[p * M + v], 0 <= v < M, 0 <= p < npoints.
+        Should point to an existing array of length (at least) M*P.
+    */
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const {
+        for(size_t p=0, N=numVars(), M=numValues(); p<npoints; p++)
+            eval(vars + p*N, values + p*M);
+    }
 
     /// return the dimensionality of the input point (N)
     virtual unsigned int numVars() const = 0;

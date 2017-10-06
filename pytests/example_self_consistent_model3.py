@@ -23,11 +23,11 @@ def writeRotationCurve(filename, potential):
     numpy.savetxt(filename, numpy.vstack((radii, vcirc)).T, fmt="%.6g", header="radius\tv_circ")
 
 def printoutInfo(model, iteration):
-    densHalo = model.components[0].getDensity()
+    densDisk = model.components[0].getDensity()
     densBulge= model.components[1].getDensity()
-    densDisk = model.components[2].getDensity()
+    densHalo = model.components[2].getDensity()
     pt0 = (2.0, 0, 0)
-    pt1 = (2.0, 0, 0.5)
+    pt1 = (2.0, 0, 0.25)
     print \
         "Disk  total mass=%g," % densDisk.totalMass(), \
         "rho(R=2,z=0)=%g, rho(R=2,z=0.5)=%g" % \
@@ -38,9 +38,9 @@ def printoutInfo(model, iteration):
         (densBulge.density(0.4, 0, 0))
     print \
         "Halo  total mass=%g," % densHalo.totalMass(), \
-        "rho(R=2,z=0)=%g, rho(R=2,z=0.5)=%g" % \
+        "rho(R=2,z=0)=%g, rho(R=2,z=0.25)=%g" % \
         (densHalo.density(pt0), densHalo.density(pt1))
-    print "Potential at origin=-(%g km/s)^2," % (-model.potential.potential(0,0,0))**0.5, \
+    print "Potential at origin=-(%g)^2," % (-model.potential.potential(0,0,0))**0.5, \
         "total mass=%g" % model.potential.totalMass()
     densDisk. export("dens_disk_iter" +str(iteration));
     densBulge.export("dens_bulge_iter"+str(iteration));
@@ -65,56 +65,41 @@ if __name__ == "__main__":
     # initialize the SelfConsistentModel object (only the potential expansion parameters)
     model = agama.SelfConsistentModel(**iniSCM)
 
-    # create initial ('guessed') density profiles of all components
+    # create initial density profiles of all components
+    densityDisk  = agama.Density(**iniPotenDisk)
     densityBulge = agama.Density(**iniPotenBulge)
     densityHalo  = agama.Density(**iniPotenHalo)
-    densityDisk  = agama.Density(**iniPotenDisk)
 
     # add components to SCM - at first, all of them are static density profiles
-    model.components.append(agama.Component(density=densityHalo,  disklike=False))
-    model.components.append(agama.Component(density=densityBulge, disklike=False))
     model.components.append(agama.Component(density=densityDisk,  disklike=True))
+    model.components.append(agama.Component(density=densityBulge, disklike=False))
+    model.components.append(agama.Component(density=densityHalo,  disklike=False))
 
     # compute the initial potential
     model.iterate()
     writeRotationCurve("rotcurve_init", model.potential)
 
+    # construct the DF of the disk component, using the initial (non-spherical) potential
+    dfDisk  = agama.DistributionFunction(potential=model.potential, **iniDFDisk)
     # initialize the DFs of spheroidal components using the Eddington inversion formula
     # for their respective density profiles in the spherically-symmetric initial guess for the potential
     pot_sph = agama.Potential(type='Multipole', density=model.potential, lmax=0, gridsizer=100, rmin=1e-3, rmax=1e3)
-    dfHalo  = agama.DistributionFunction(type='PseudoIsotropic', potential=pot_sph, density=densityHalo)
     dfBulge = agama.DistributionFunction(type='PseudoIsotropic', potential=pot_sph, density=densityBulge)
+    dfHalo  = agama.DistributionFunction(type='PseudoIsotropic', potential=pot_sph, density=densityHalo)
+
+    print "\033[1;33m**** STARTING ITERATIVE MODELLING ****\033[0m\nMasses (computed from DF): ", \
+        "Mdisk=%g,"  % dfDisk.totalMass(), \
+        "Mbulge=%g," % dfBulge.totalMass(), \
+        "Mhalo=%g"   % dfHalo.totalMass()
     printoutInfo(model, 0)
 
-    print "\033[1;33m**** STARTING ONE-COMPONENT MODELLING ****\033[0m\nMasses are:  " \
-        "Mhalo=%g,"  % densityHalo.totalMass(), \
-        "Mbulge=%g," % densityBulge.totalMass(), \
-        "Mdisk=%g"   % densityDisk.totalMass()
-
-    # replace the halo and bulge SCM components with the DF-based ones
-    model.components[0] = agama.Component(df=dfHalo,  disklike=False, **iniSCMHalo)
+    # replace the initially static SCM components with the DF-based ones
+    model.components[0] = agama.Component(df=dfDisk,  disklike=True,  **iniSCMDisk)
     model.components[1] = agama.Component(df=dfBulge, disklike=False, **iniSCMBulge)
-
-    # do one iteration to determine the self-consistent density profile of the halo and the bulge
-    print "\033[1;37mStarting iteration #1\033[0m"
-    model.iterate()
-    printoutInfo(model, 1)
-
-    # now that we have a reasonable guess for the total potential,
-    # we may initialize the DF of the stellar disk
-    dfDisk = agama.DistributionFunction(potential=model.potential, **iniDFDisk)
-
-    # we can compute the masses even though we don't know the density profile yet
-    print "\033[1;33m**** STARTING TWO-COMPONENT MODELLING ****\033[0m\nMasses are: ", \
-        "Mhalo=%g,"  % dfHalo.totalMass(), \
-        "Mbulge=%g," % dfBulge.totalMass(), \
-        "Mdisk=%g"   % dfDisk.totalMass()
-
-    # replace the static disk component them with a DF-based disk one
-    model.components[2] = agama.Component(df=dfDisk, disklike=True, **iniSCMDisk)
+    model.components[2] = agama.Component(df=dfHalo,  disklike=False, **iniSCMHalo)
 
     # do a few more iterations to obtain the self-consistent density profile for both disks
-    for iteration in range(2,5):
+    for iteration in range(6):
         print "\033[1;37mStarting iteration #%d\033[0m" % iteration
         model.iterate()
         printoutInfo(model, iteration)
@@ -137,21 +122,21 @@ if __name__ == "__main__":
 
     # first create a representation of density profiles without velocities
     # (just for demonstration), by drawing samples from the density distribution
+    print "Sampling disk density"
+    agama.writeSnapshot("dens_disk_final",  model.components[0].getDensity().sample(160000), format)
     print "Sampling bulge density"
     agama.writeSnapshot("dens_bulge_final", model.components[1].getDensity().sample(40000), format)
-    print "Sampling disk density"
-    agama.writeSnapshot("dens_disk_final",  model.components[2].getDensity().sample(160000), format)
     print "Sampling halo density"
-    agama.writeSnapshot("dens_halo_final",  model.components[0].getDensity().sample(800000), format)
+    agama.writeSnapshot("dens_halo_final",  model.components[2].getDensity().sample(800000), format)
 
     # now create genuinely self-consistent models of both components,
     # by drawing positions and velocities from the DF in the given (self-consistent) potential
-    print "Sampling bulge DF"
-    agama.writeSnapshot("model_bulge_final", \
-        agama.GalaxyModel(potential=model.potential, df=dfBulge, af=model.af).sample(40000), format)
     print "Sampling disk DF"
     agama.writeSnapshot("model_disk_final", \
         agama.GalaxyModel(potential=model.potential, df=dfDisk,  af=model.af).sample(160000), format)
+    print "Sampling bulge DF"
+    agama.writeSnapshot("model_bulge_final", \
+        agama.GalaxyModel(potential=model.potential, df=dfBulge, af=model.af).sample(40000), format)
     print "Sampling halo DF"
     agama.writeSnapshot("model_halo_final", \
         agama.GalaxyModel(potential=model.potential, df=dfHalo,  af=model.af).sample(800000), format)

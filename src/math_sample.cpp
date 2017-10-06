@@ -285,37 +285,40 @@ Sampler::CellEnum Sampler::cellIndex(const double coords[]) const
 
 void Sampler::evalFncLoop(unsigned int first, unsigned int count)
 {
+    // loop over assigned points and compute/store the values of function
     if(count==0) return;
     bool badValueOccured = false;
     std::string errorMsg;
-    // loop over assigned points and compute the values of function (possibly in parallel)
+    // compute the function values for a block of points at once;
+    // operations on different blocks may be OpenMP-parallelized
+    const unsigned int block = 1024;
+    int nblocks = (count-1) / block + 1;
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic,256)
-    for(int i=0; i<(int)count; i++) {
-        double val;
-        try{
-            fnc.eval(&(sampleCoords(i+first, 0)), &val);
-        }
-        // guard against possible exceptions, since they must not leave the OpenMP block
-        catch(std::exception& e) {
-            errorMsg = e.what();
-            val = NAN;
-        }
-        if(val<0 || !isFinite(val))
-            badValueOccured = true;
-        weightedFncValues[i+first] *= val;
-    }
-#else
-    for(unsigned int i=0; i<count; i++) {
-        double val;
-        fnc.eval(&(sampleCoords(i+first, 0)), &val);
-        if(val<0 || !isFinite(val)) {
-            badValueOccured = true;
-            i=count;
-        }
-        weightedFncValues[i+first] *= val;
-    }
+#pragma omp parallel
 #endif
+    {   // block containing thread-local variables
+        std::vector<double> fncValues(block);
+#ifdef _OPENMP
+#pragma omp for schedule(dynamic)
+#endif
+        for(int b=0; b<nblocks; b++) {
+            int npoints = std::min<int>(block, count - b*block);
+            try {
+                fnc.evalmany(npoints, &(sampleCoords(first + b*block, 0)), &fncValues[0]);
+            }
+            // guard against possible exceptions, since they must not leave the OpenMP parallel section
+            catch(std::exception& e) {
+                errorMsg = e.what();
+                badValueOccured = true;
+            }
+            for(int i=0; i<npoints; i++) {
+                double val = fncValues[i];
+                if(val<0 || !isFinite(val))
+                    badValueOccured = true;
+                weightedFncValues[first + b*block + i] *= val;
+            }
+        }
+    }
     numCallsFnc += count;
     if(badValueOccured)
         throw std::runtime_error("Error in sampleNdim: " + 

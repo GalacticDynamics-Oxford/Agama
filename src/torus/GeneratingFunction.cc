@@ -35,7 +35,7 @@ int GenPar::NumberofTermsUsed() const
 
 void GenPar::findNN()
 {
-    register short i, n2_min=0, n2_max=0, n1_max=0;
+    short i, n2_min=0, n2_max=0, n1_max=0;
     for(i=0; i<ntot; i++) {
 	if(N1[i] > n1_max) n1_max = N1[i];
 	if(N2[i] > n2_max) n2_max = N2[i];
@@ -48,8 +48,8 @@ void GenPar::findNN()
 void GenPar::sortSn() // sort in order of n (order by n2, then n1 if needed)
 {
   if(ntot>0) {
-    register short i, ascending=1;
-    register int   *M=new int[ntot];
+    short i, ascending=1;
+    int   *M=new int[ntot];
     for(i=0; i<ntot; i++) {
       M[i] = 1000 * N2[i] + N1[i];
       if(ascending && i>0 && M[i] < M[i-1]) ascending = 0;
@@ -127,7 +127,7 @@ GenPar::GenPar(const GenPar& G)
     N1   = new short[ntot];
     N2   = new short[ntot];
     S    = new double[ntot];
-    for(register short i=0; i<ntot; i++) {
+    for(short i=0; i<ntot; i++) {
 	N1[i] = G.N1[i];
 	N2[i] = G.N2[i];
 	S[i]  = G.S[i];
@@ -159,7 +159,7 @@ GenPar::~GenPar()
 //             (i<32)? -4: -6; 
 //    }
 
-//   for(register short i=0; i<ntot; i++) S[i] = 0.; 
+//   for(short i=0; i<ntot; i++) S[i] = 0.; 
 //   sortSn();   // Shouldn't be needed, but 
 //   findNN();   // better safe than sorry.
 // }
@@ -193,7 +193,7 @@ int GenPar::same_terms_as(const GenPar& G) const
     if(ntot != G.ntot) return 0;
     if(nn1  != G.nn1)  return 0;
     if(nn2  != G.nn2)  return 0;
-    for(register short i=0; i<ntot; i++)
+    for(short i=0; i<ntot; i++)
 	if(N1[i]!=G.N1[i] || N2[i]!=G.N2[i]) return 0;
     return 1;
 }
@@ -201,13 +201,13 @@ int GenPar::same_terms_as(const GenPar& G) const
 void GenPar::write(ostream& to) const
 {
     to << ntot;
-    for(register short i=0; i<ntot; i++)
+    for(short i=0; i<ntot; i++)
         to << "\n " << N1[i] << ' ' << N2[i] << "  " << S[i];
 }
 ////////////////////////////////////////////////////////////////////////////////
 void GenPar::write_log(ostream& to) const
 {
-    register int i, ils, n2act=1000, n1act=0,  n1max=0;
+    int i, ils, n2act=1000, n1act=0,  n1max=0;
     to << ntot;
     for(i=0; i<ntot; i++) {
 	if(N1[i]> n1max) n1max = N1[i];
@@ -247,7 +247,7 @@ void GenPar::read(istream& from)
         N2   = new short[ntot];
         S    = new double[ntot];
     } 
-    register short i;
+    short i;
     for(i=0; i<ntot; i++) {
 	from >> N1[i] >> N2[i] >> S[i];
 	if(N2[i]%2 != 0)
@@ -274,7 +274,7 @@ void GenPar::read(int *N1in, int *N2in, double *Snin, short newtot)
         N2   = new short[ntot];
         S    = new double[ntot];
     } 
-    register short i;
+    short i;
     for(i=0; i<ntot; i++) {
       N1[i] = N1in[i];
       N2[i] = N2in[i];
@@ -297,9 +297,9 @@ void GenPar::tailor(const double a, const double b, const int Max)
 // if |S_n1,n2| < a * max[|S_n1,n2|]  ==>  delete it.
 // if |S_n1,n2| > b * max[|S_n1,n2|]  ==>  create new around it.
 {
-    register short i,n, n1,n2, n2min=N2[0]-2,n2max=N2[ntot-1]+2, newtot=ntot,
+    short i,n, n1,n2, n2min=N2[0]-2,n2max=N2[ntot-1]+2, newtot=ntot,
 		   maxtot=short(fmax(int(ntot),Max));
-    register double Smax=0.;
+    double Smax=0.;
 // make a 2D map and compute |S|max
     char **map = new char* [nn1+2];
     for(n1=0; n1<nn1+2; n1++) {
@@ -381,9 +381,9 @@ void GenPar::edgetailor(const double a, const int Max)
 // if |S_n1,n2| < a * max[|S_n1,n2|]  ==>  delete it.
 // if |S_n1,n2| > b * max[|S_n1,n2|]  ==>  create new around it.
 {
-  register short i,n, n1,n2, n2min=N2[0]-2,n2max=N2[ntot-1]+2, newtot=ntot,
+  short i,n, n1,n2, n2min=N2[0]-2,n2max=N2[ntot-1]+2, newtot=ntot,
     maxtot=short(fmax(int(ntot),Max)),nedge=0;
-  //register double Smax=0.;
+  //double Smax=0.;
   // make a 2D map and compute |S|max
   char **map = new char* [nn1+2];
   bool  edge[ntot];
@@ -482,7 +482,7 @@ void GenPar::edgetailor(const double a, const int Max)
 //////////////////////////////////////////////////////////////////////////////
 double GenPar::maxS() const
 {
-    register double *Si, *Sn=S+ntot, Smax = fabs(S[0]);
+    double *Si, *Sn=S+ntot, Smax = fabs(S[0]);
     for(Si=S+1; Si<Sn; Si++)
 	if(fabs(*Si) > Smax) Smax = fabs(*Si);
     return Smax;
@@ -491,7 +491,7 @@ double GenPar::maxS() const
 void GenPar::cut(const double f)
 // sets all Sn=0 for which |Sn| < f * max(|Sn|)
 {
-    register double *Si, *Sn=S+ntot, Smax = fabs(S[0]);
+    double *Si, *Sn=S+ntot, Smax = fabs(S[0]);
     for(Si=S+1; Si<Sn; Si++)
 	if(fabs(*Si)  > Smax) Smax = fabs(*Si);
     Smax *= fabs(f);
@@ -504,7 +504,7 @@ int GenPar::Jz0()
 // sets all Sn=0 for which n_z != 0
 {
   bool no_orig=false;
-  register int newtot=0;
+  int newtot=0;
   for (int i=0; i!=ntot; i++) if(N2[i]==0) newtot++;
   if(!newtot) { newtot++; no_orig=true; }
   short *N1new = new short[newtot];
@@ -541,7 +541,7 @@ int GenPar::JR0()
 // sets all Sn=0 for which n_z != 0
 {
   bool no_orig=false;
-  register int newtot=0;
+  int newtot=0;
   for (int i=0; i!=ntot; i++) if(N1[i]==0) newtot++;
   if(!newtot) { newtot++; no_orig=true; }
   short *N1new = new short[newtot];
@@ -581,7 +581,7 @@ int GenPar::NoMix()
 // sets all Sn=0 for which (n_z != 0 && n_R !=0)
 {
   bool no_orig=false;
-  register int newtot=0;
+  int newtot=0;
   for (int i=0; i!=ntot; i++) if(N1[i]==0 || N2[i]==0) newtot++;
   if(!newtot) { newtot++; no_orig=true; }
   short *N1new = new short[newtot];
@@ -622,7 +622,7 @@ void GenPar::addn1eq0(const int nadd)
     cerr << "GenPar.addn1eq0: number of points to add must be more than 0!\n";
     return;
   }
-  register int newtot=ntot+nadd;
+  int newtot=ntot+nadd;
   for (int i=0; i!=ntot; i++) {
     if(N2[i]!=0) cerr << "GenPar.addn1eq0 called on non Jz=0 GenPar\n";
     if(N1[i]==0) cerr << "GenPar.addn1eq0 called on GenPar with n1=0 terms\n";
@@ -657,7 +657,7 @@ int GenPar::AddTerm      (const int nadd1, const int nadd2) {
   for (int i=0; i!=ntot; i++) {
     if(N1[i]==nadd1 && N2[i]==nadd2) return 0;
   }
-  register int newtot=ntot+1;
+  int newtot=ntot+1;
   short *N1new = new short[newtot];
   short *N2new = new short[newtot];
   double *Snew  = new double[newtot];
@@ -685,11 +685,11 @@ int GenPar::AddTerm      (const int nadd1, const int nadd2) {
 }
 
 void GenPar::Build_JR0    (const int type) {
-  register int newtot=0;
+  int newtot=0;
   short *N1new=0, *N2new=0;
   double *Snew=0;
   if(type==1){
-    register int newn2=0;
+    int newn2=0;
     newtot=ntot+1;
     JR0();
     N1new = new short[newtot];
@@ -707,7 +707,7 @@ void GenPar::Build_JR0    (const int type) {
     Snew [ntot] = 0.; 
   }
   if(type==2) {
-    register int  newn1=0;
+    int  newn1=0;
     newtot=ntot+1;
     NoMix();
     N1new = new short[newtot];
@@ -771,7 +771,7 @@ void GenPar::Build_JR0    (const int type) {
 GenPar& GenPar::operator=(const GenPar& G)
 {
     if(same_terms_as(G)) {
-	for(register short i=0; i<ntot; i++)
+	for(short i=0; i<ntot; i++)
 	    S[i] = G.S[i];
     } else {
 	if (ntot!=G.ntot) {
@@ -785,7 +785,7 @@ GenPar& GenPar::operator=(const GenPar& G)
             N2   = new short[ntot];
             S    = new double[ntot];
 	}
-	for(register short i=0; i<ntot; i++) {
+	for(short i=0; i<ntot; i++) {
 	    N1[i] = G.N1[i];
 	    N2[i] = G.N2[i];
 	    S[i]  = G.S[i];
@@ -801,13 +801,13 @@ GenPar& GenPar::operator+=(const GenPar& G)
     if(ntot<=0)   return *this=G; 
     if(G.ntot<=0) return *this;
     if(same_terms_as(G)) {
-	for(register short i=0; i<ntot; i++) S[i] += G.S[i];
+	for(short i=0; i<ntot; i++) S[i] += G.S[i];
 	return *this;
     }
     short* n1t = new short[ntot+G.ntot];
     short* n2t = new short[ntot+G.ntot];
     double* st  = new double[ntot+G.ntot];
-    register short i=0,j=0,n=0,mi,mj; 
+    short i=0,j=0,n=0,mi,mj; 
     while(i<ntot || j<G.ntot) {
 	if(j==G.ntot) {
 	    n1t[n] = N1[i];
@@ -873,13 +873,13 @@ GenPar& GenPar::operator-=(const GenPar& G)
     if(ntot==0)   return *this=-G;
     if(G.ntot==0) return *this;
     if(same_terms_as(G)) {
-	for(register short i=0; i<ntot; i++) S[i] -= G.S[i];
+	for(short i=0; i<ntot; i++) S[i] -= G.S[i];
 	return *this;
     }
     short* n1t = new short[ntot+G.ntot];
     short* n2t = new short[ntot+G.ntot];
     double* st  = new double[ntot+G.ntot];
-    register short i=0,j=0,n=0,mi,mj; 
+    short i=0,j=0,n=0,mi,mj; 
     while(i<ntot || j<G.ntot) {
 	if(j==G.ntot) {
 	    n1t[n] = N1[i];
@@ -942,27 +942,27 @@ GenPar& GenPar::operator-=(const GenPar& G)
 ////////////////////////////////////////////////////////////////////////////////
 GenPar& GenPar::operator=(const double x)
 {
-    for(register short i=0; i<ntot; i++) S[i] = x;
+    for(short i=0; i<ntot; i++) S[i] = x;
     return *this;
 }
 ////////////////////////////////////////////////////////////////////////////////
 GenPar& GenPar::operator*=(const double x)
 {
-    for(register short i=0; i<ntot; i++) S[i] *= x;
+    for(short i=0; i<ntot; i++) S[i] *= x;
     return *this;
 }
 ////////////////////////////////////////////////////////////////////////////////
 GenPar& GenPar::operator/=(const double x)
 {
     if(x==0.) throw std::runtime_error("Torus Error -4: GenPar: division by zero");
-    for(register short i=0; i<ntot; i++) S[i] *= x;
+    for(short i=0; i<ntot; i++) S[i] *= x;
     return *this;
 }
 ////////////////////////////////////////////////////////////////////////////////
 GenPar GenPar::operator-() const
 {
     GenPar F(*this);
-    for(register short i=0; i<ntot; i++) F.S[i] = -F.S[i];
+    for(short i=0; i<ntot; i++) F.S[i] = -F.S[i];
     return F;
 }
 ////////////////////////////////////////////////////////////////////////////////
@@ -991,7 +991,7 @@ int GenPar::operator==(const GenPar& G) const
     if(ntot != G.ntot) return 0;
     if(nn1  != G.nn1 ) return 0;
     if(nn2  != G.nn2 ) return 0;
-    for(register short i=0; i<ntot; i++)
+    for(short i=0; i<ntot; i++)
 	if(N1[i]!=G.N1[i] || N2[i]!=G.N2[i] || S[i]!=G.S[i]) return 0;
     return 1;
 }
@@ -1001,14 +1001,14 @@ int GenPar::operator!=(const GenPar& G) const
     if(ntot != G.ntot) return 1;
     if(nn1  != G.nn1 ) return 1;
     if(nn2  != G.nn2 ) return 1;
-    for(register short i=0; i<ntot; i++)
+    for(short i=0; i<ntot; i++)
 	if(N1[i]!=G.N1[i] || N2[i]!=G.N2[i] || S[i]!=G.S[i]) return 1;
     return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////
 void GenPar::put(ostream& to) const
 {
-    register short i;
+    short i;
     to<<ntot<<' ';
     for(i=0; i<ntot; i++) to<<' '<<N1[i];
     to<<'\n';
@@ -1040,7 +1040,7 @@ void GenPar::get(istream& from)
         N2   = new short[ntot];
         S    = new double[ntot];
     } 
-    register short i;
+    short i;
     for(i=0; i<ntot; i++) from >> N1[i];
     for(i=0; i<ntot; i++) {
 	from >> N2[i];
@@ -1062,7 +1062,7 @@ int GenPar::skip(istream& from) const
     from>>n;				// get number of terms
     if(n <= 0)
 	throw std::runtime_error("Torus Error -4: GenPar: number of terms <= 0");
-    register short i;
+    short i;
     for(i=0; i<n; i++) from>>n12;	// skip n_1
     for(i=0; i<n; i++) from>>n12;	// skip n_2
     skip_terms(from,n);			// skip S_n
@@ -1071,7 +1071,7 @@ int GenPar::skip(istream& from) const
 ////////////////////////////////////////////////////////////////////////////////
 void GenPar::skip_terms(istream& from, const int n) const
 {
-    register int n5=5*n;
+    int n5=5*n;
     ws(from);
     from.seekg(n5+n5/80,std::ios::cur);
 }
@@ -1085,9 +1085,9 @@ PSPD GenFnc::Forward(const PSPD& Jt) const
 // cos() and using recursiv computations of cos(n1*th1 + n2*th2) exploiting
 // the fact that the (n1,n2) are ordered;
 {
-    register PSPD  jt=Jt;
-    register short i;
-    register double sncos;
+    PSPD  jt=Jt;
+    short i;
+    double sncos;
     for(i=0; i<Sn.NumberofTerms(); i++) if(Sn(i)!=0.) {
 	sncos  = Sn(i) * cos(jt(2)*Sn.n1(i) + jt(3) * Sn.n2(i));
 	sncos += sncos;   // sncos = 2 * Sn * cos(n1*th1 + n2*th2)
@@ -1107,9 +1107,9 @@ PSPT GenFnc::Forward3D(const PSPT& Jt3) const
 ////////////////////////////////////////////////////////////////////////////////
 PSPD GenFnc::ForwardWithDerivs(const PSPD& Jt, double djdt[2][2]) const
 {
-    register PSPD   jt=Jt;
-    register short  i;
-    register double thn, sncos, snsin;
+    PSPD   jt=Jt;
+    short  i;
+    double thn, sncos, snsin;
     djdt[0][0]=0;
     djdt[1][0]=0;
     djdt[1][1]=0;
@@ -1134,7 +1134,7 @@ PSPD GenFnc::ForwardWithDerivs(const PSPD& Jt, double djdt[2][2]) const
 
 void GenFncFit::FreeTrig()
 {
-    register short i;
+    short i;
     for(i=0; i<Sn.NumberofTerms(); i++) {
 	delete[] cc1[i];
 	delete[] cc2[i];
@@ -1149,8 +1149,8 @@ void GenFncFit::FreeTrig()
 ////////////////////////////////////////////////////////////////////////////////
 void GenFncFit::SetTrig()
 {
-    register short    i,t;
-    register double thn;
+    short    i,t;
+    double thn;
     Pin1 = Pi/double(Nth1);
     Pin2 = Pi/double(Nth2);
     for(i=0; i<Sn.NumberofTerms(); i++) {
@@ -1169,8 +1169,8 @@ void GenFncFit::SetTrig()
 ////////////////////////////////////////////////////////////////////////////////
 void GenFncFit::AllocAndSetTrig()
 {
-    register short    i,t;
-    register double thn;
+    short    i,t;
+    double thn;
     Pin1 = Pi/double(Nth1);
     Pin2 = Pi/double(Nth2);
     cc1  = new double* [Sn.NumberofTerms()];
@@ -1224,9 +1224,9 @@ const
     const double acc = 1.e-10;
     if(t1<0 || t1>=Nth1 || t2<0 || t2>=Nth2)
 	throw std::runtime_error("Torus Error -4: GenFncFit: (t1,t2) out of range");
-    register PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
-    register double sncos;
-    for(register short i=0; i<Sn.NumberofTerms(); i++) if(Sn(i)!=0.) { 
+    PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
+    double sncos;
+    for(short i=0; i<Sn.NumberofTerms(); i++) if(Sn(i)!=0.) { 
                         // remember that Sn is the GenPar in the member GenFnc S
 	sncos  = Sn(i) * (cc1[i][t1]*cc2[i][t2] - ss1[i][t1]*ss2[i][t2]);
 	if(fabs(sncos) <= acc) sncos = 0.;
@@ -1244,9 +1244,9 @@ const
     const double acc = 1.e-10;
     if(t1<0 || t1>=Nth1 || t2<0 || t2>=Nth2)
 	throw std::runtime_error("Torus Error -4: GenFncFit: (t1,t2) out of range");
-    register PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
-    register double costn;
-    for(register short i=0; i<Sn.NumberofTerms(); i++) {
+    PSPD   jt=PSPD(J1, J2, t1*Pin1, t2*Pin2);
+    double costn;
+    for(short i=0; i<Sn.NumberofTerms(); i++) {
 	costn      = (cc1[i][t1]*cc2[i][t2] - ss1[i][t1]*ss2[i][t2]);
 	if(fabs(costn) <= acc) costn = 0.;
 	    else costn += costn;   // 2 * cos(n1*th1 + n2*th2)
@@ -1264,9 +1264,9 @@ const
 
 PSPD AngMap::Map(const PSPD& Jt) const
 {
-    register short    i;
-    register PSPD   JT=Jt;
-    register double sinth;
+    short    i;
+    PSPD   JT=Jt;
+    double sinth;
     for(i=0; i<A.NumberofTerms(); i++) {
         sinth  = sin(A.dS1.n1(i)*Jt(2) + A.dS1.n2(i)*Jt(3));
 	sinth += sinth;            // 2 * sin(n1*th1+n2*th2)
@@ -1278,9 +1278,9 @@ PSPD AngMap::Map(const PSPD& Jt) const
 ////////////////////////////////////////////////////////////////////////////////
 PSPD AngMap::BackwardWithDerivs(const PSPD& Jt, double dTdt[2][2]) const
 {
-    register short    i;
-    register PSPD   JT=Jt;
-    register double temp, costh, sinth;
+    short    i;
+    PSPD   JT=Jt;
+    double temp, costh, sinth;
     dTdt[0][0] = dTdt[1][1] = 1.;
     dTdt[0][1] = dTdt[1][0] = 0.;
     for(i=0; i<A.NumberofTerms(); i++) {
@@ -1300,9 +1300,9 @@ PSPD AngMap::BackwardWithDerivs(const PSPD& Jt, double dTdt[2][2]) const
 PSPD AngMap::NewtonStep(double& F, double& dF1, double& dF2, const PSPD Jt,
 			const PSPD& JT) const
 {
-    register short    i;
-    register PSPD   dJt=0.;
-    register double temp,thn,costh,sinth,f1,f2,f11=1.,f12=0.,f21=0.,f22=1.,det;
+    short    i;
+    PSPD   dJt=0.;
+    double temp,thn,costh,sinth,f1,f2,f11=1.,f12=0.,f21=0.,f22=1.,det;
     f1 = Jt(2)-JT(2);
     f2 = Jt(3)-JT(3);
     for(i=0; i<A.NumberofTerms(); i++) {
@@ -1338,10 +1338,10 @@ PSPD AngMap::NewtonStep(double& F, double& dF1, double& dF2, const PSPD Jt,
 PSPD AngMap::Forward(const PSPD& Input) const
 {
     const double    alpha=1.e-4,LIN=1.e-6;
-    register PSPD   JT=Input,Jt,Jtry,dJt,dJT;
-    register short  it=0,maxit=20;
+    PSPD   JT=Input,Jt,Jtry,dJt,dJT;
+    short  it=0,maxit=20;
     double          F0,Fn,dF1,dF2;
-    register double Fo,lam,laq,lom=1.,loq,lax,lin,slp,a,b,r1,r2,disc;
+    double Fo,lam,laq,lom=1.,loq,lax,lin,slp,a,b,r1,r2,disc;
     AlignAngles(JT);         //set angles to be between 0 and 2pi
     Jt = JT;
     int numIter=0;
@@ -1417,9 +1417,9 @@ PSPT AngMap::Backward3D (const PSPT& Jt) const
 ////////////////////////////////////////////////////////////////////////////////
 PSPT AngMap::Backward3DWithDerivs(const PSPT& Jt, double dTdt[2][2]) const
 {
-    register short    i;
-    register PSPT   JT=Jt;
-    register double temp, costh, sinth;
+    short    i;
+    PSPT   JT=Jt;
+    double temp, costh, sinth;
     dTdt[0][0] = dTdt[1][1] = 1.;
     dTdt[0][1] = dTdt[1][0] = 0.;
     for(i=0; i<A.NumberofTerms(); i++) {

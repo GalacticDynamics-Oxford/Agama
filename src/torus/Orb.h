@@ -59,7 +59,7 @@ inline double Record::QP(const int i) const
 inline void Record::FourSymp(const double dt)
     { const double s1= 1.35120719195965763404768780897,
                    s0=-1.70241438391931526809537561794;
-      register double s1dt=s1*dt;
+      double s1dt=s1*dt;
       LeapFrog(s1dt); LeapFrog(s0*dt); LeapFrog(s1dt); }
 
 
