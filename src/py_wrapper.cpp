@@ -35,7 +35,7 @@
 #include "df_factory.h"
 #include "df_interpolated.h"
 #include "df_pseudoisotropic.h"
-#include "galaxymodel.h"
+#include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_losvd.h"
 #include "galaxymodel_selfconsistent.h"
@@ -163,6 +163,16 @@ double toDouble(PyObject* obj, double defaultValue=NAN)
     return defaultValue;
 }
 
+/// return a boolean of a Python object (e.g. false if this is a string "False")
+double toBool(PyObject* obj, bool defaultValue=false)
+{
+    if(obj==NULL)
+        return defaultValue;
+    if(PyString_Check(obj))
+        return utils::toBool(PyString_AsString(obj));
+    return PyObject_IsTrue(obj);
+}
+
 /// a convenience function for accessing an element of a PyArrayObject with the given data type
 template<typename DataType>
 inline DataType& pyArrayElem(void* arr, npy_intp ind)
@@ -177,11 +187,20 @@ inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2)
     return *static_cast<DataType*>(PyArray_GETPTR2(static_cast<PyArrayObject*>(arr), ind1, ind2));
 }
 
-/// convert a Python array of floats to std::vector, or return empty vector in case of error
+/// convert a Python array of floats to std::vector, or return empty vector in case of error;
+/// if the argument is a string instead of a proper array (e.g. if it comes from an ini file),
+/// it will be parsed as if it were a python expression, like "numpy.linspace(0.,1.,21)"
 std::vector<double> toDoubleArray(PyObject* obj)
 {
     if(!obj)
         return std::vector<double>();
+    if(PyString_Check(obj)) {  // replace the string with the result of eval("...")
+        obj = PyRun_String(PyString_AsString(obj), Py_eval_input, PyEval_GetGlobals(), PyEval_GetLocals());
+        if(!obj) {  // exception occurred when parsing and executing the string
+            PyErr_Print();
+            return std::vector<double>();
+        }
+    }
     PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, 0/*no special requirements*/);
     if(!arr || PyArray_NDIM((PyArrayObject*)arr) != 1) {
         Py_XDECREF(arr);
@@ -1115,8 +1134,7 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
     }
     try{
         // do the sampling of the density profile
-        particles::ParticleArray<coord::PosCyl> points =
-            galaxymodel::generateDensitySamples(dens, numPoints);
+        particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(dens, numPoints);
 
         // assign the velocities if needed
         particles::ParticleArrayCar pointsvel;
@@ -2070,7 +2088,7 @@ PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* namedArgs
             "Must provide an array of points and optionally the 'angles=True/False' flag");
         return NULL;
     }
-    if(angles==NULL || !PyObject_IsTrue(angles))
+    if(!toBool(angles))
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
             (self, points, fncActions<false>);
     else
@@ -2166,7 +2184,6 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
         &points_obj, &pot_obj, &ifd, &angles) || ifd<0)
     {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to actions()");
         return NULL;
     }
     ActionFinderParams params;
@@ -2176,7 +2193,7 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid instance of Potential class");
         return NULL;
     }
-    if(angles==NULL || !PyObject_IsTrue(angles))
+    if(!toBool(angles))
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
             (&params, points_obj, fncActionsStandalone<false>);
     else
@@ -2664,7 +2681,7 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
     try{
         // do the sampling
         galaxymodel::GalaxyModel galmod(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
-        particles::ParticleArrayCyl points = galaxymodel::generatePosVelSamples(galmod, numPoints);
+        particles::ParticleArrayCyl points = galaxymodel::samplePosVel(galmod, numPoints);
 
         // convert output to NumPy array
         numPoints = points.size();
@@ -2756,9 +2773,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
     }
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
-            dens_flag==NULL || PyObject_IsTrue(dens_flag),
-            vel_flag !=NULL && PyObject_IsTrue(vel_flag),
-            vel2_flag==NULL || PyObject_IsTrue(vel2_flag) );
+            toBool(dens_flag, true), toBool(vel_flag, false), toBool(vel2_flag, true) );
         if(params.needDens) {
             if(params.needVel) {
                 if(params.needVel2)
@@ -3230,7 +3245,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
     }
     // check if a 'disklike' flag was provided
     PyObject* disklike_obj = getItemFromPyDict(namedArgs, "disklike");
-    int disklike = disklike_obj ? PyObject_IsTrue(disklike_obj) : -1;
+    int disklike = disklike_obj ? toBool(disklike_obj) : -1;
 
     // choose the variant of component: static or DF-based
     if((pot_obj!=NULL && df_obj!=NULL) || (pot_obj==NULL && df_obj==NULL && dens_obj==NULL)) {
@@ -3428,8 +3443,7 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     self->components  = PyList_New(0);
     self->pot         = NULL;
     self->af          = NULL;
-    PyObject* interp  = getItemFromPyDict(namedArgs, "useActionInterpolation");
-    self->useActionInterpolation = interp==NULL ? true : PyObject_IsTrue(interp);
+    self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), true);
     self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
     self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -2);
     self->sizeRadialSph  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);

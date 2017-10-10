@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <alloca.h>
 
-//#define USE_NEW_METHOD
+#define USE_NEW_METHOD
 
 namespace math{
 
@@ -667,8 +667,8 @@ public:
 
     /** Return the integral of F over the entire volume, and its error estimate */
     void integral(double& value, double& error) const {
-        value = integValue;
-        error = integError;
+        value = volume * integValue;
+        error = volume * integError;
     }
 
     /** Return the total number of function evaluations */
@@ -683,29 +683,25 @@ private:
 
     /// A single cell of the tree
     struct Cell {
+        /// index of the first sample point belonging to this cell,
+        /// or -1 if none exist or the cell is split (is not a leaf one)
+        PointEnum headPointIndex;
+
         /// index of the parent cell (or -1 for the root cell)
         CellEnum parentIndex;
-
-        /// the dimension along which the cell is split, or -1 if this is a leaf cell
-        int splitDim;
-
-        /// relative coordinate of the boundary between two child cells (if it is split, otherwise NAN)
-        double splitFrac;
 
         /// index of the first child cell (if it is split, otherwise -1);
         /// the second child cell has index childIndex+1
         CellEnum childIndex;
 
-        /// index of the first sample point belonging to this cell,
-        /// or -1 if none exist or the cell is split (is not a leaf one)
-        PointEnum headPointIndex;
+        /// the dimension along which the cell is split, or -1 if this is a leaf cell
+        int splitDim;
 
-        /// weight of any point in this cell
+        /// weight of any sample point in the cell
         double weight;
 
         Cell() :
-            parentIndex(-1), splitDim(-1), splitFrac(NAN),
-            childIndex(-1), headPointIndex(-1), weight(0.) {}
+            headPointIndex(-1), parentIndex(-1), childIndex(-1), splitDim(-1), weight(0) {}
     };
 
     /// the N-dimensional function to work with
@@ -739,11 +735,15 @@ private:
     /// array of function values at sampling points  (size: Npoints)
     std::vector<double> fncValues;
 
-    /// estimate of the integral of f(x) over H
+    /// estimate of the integral of f(x) over H, divided by the volume
     double integValue;
 
-    /// estimate of the error in the integral
+    /// estimate of the error in the integral, divided by the volume
     double integError;
+
+    /// offset (seed value) of the quasi-random number generator,
+    /// assigned randomly to avoid repetition when the same sampling routine is called twice
+    const size_t qrngOffset;
 
     /** list of cells that need to be populated with more points on this iteration:
         the first element of the pair is the index of the cell,
@@ -759,26 +759,21 @@ private:
         its children, keeping track of all associated indices/pointers.
         \param[in]  cellIndex  is the cell to split;
         \param[in]  splitDim   is the index of dimension along which to split;
-        \param[in]  splitFrac  is the fraction of volume in the lower of the two child cells
-        (i.e. the relative coordinate of the boundary within this cell)
         \param[in]  boundary   is the absolute coordinate along the selected dimension
         that will be the new boundary between the two child cells, used to split the list
         of points between the child cells.
     */
-    void splitCell(CellEnum cellIndex, int splitDim, double splitFrac, double boundary);
+    void splitCell(CellEnum cellIndex, int splitDim, double boundary);
 
-    /** choose the best dimension and boundary to split a given cell and perform the split;
-        the criterion is that the center-of-mass of the cell in the given dimension is most
-        offset from the geometric center.
+    /** choose the best dimension and boundary to split a given cell and perform the division;
+        the dimension along which the function varies most significantly will be split.
     */
     void decideHowToSplitCell(CellEnum cellIndex);
 
     /** append the given cell to the queue of cells that will be populated with new points;
-        the number of points to be added into this cell is determined by 'refineFactor'
-        (the ratio between the maximum sample weight in this cell and the weight of one output
-        sample, which needs be larger than 1 in order for new points to be added to this cell).
+        the number of points in this cell will be doubled.
     */
-    void addCellToQueue(CellEnum cellIndex, double refineFactor);
+    void addCellToQueue(CellEnum cellIndex);
 
     /** determine the cell boundaries by recursively traversing the tree upwards.
         \param[in]  cellIndex is the index of the cell;
@@ -786,9 +781,6 @@ private:
         which will be filled with the coordinates of this cell's boundaries.
     */
     void getCellBoundaries(CellEnum cellIndex, double xlower[], double xupper[]) const;
-
-    /** determine the volume of the given cell by following the tree upwards until the root cell */
-    double getCellVolume(CellEnum cellIndex) const;
 
     /** assign coordinates to the new points inside the given cell;
         \param[in]  cellIndex  is the cell that the new points will belong to;
@@ -798,6 +790,7 @@ private:
         to this cell; the list of points belonging to this cell will be expanded accordingly
         (i.e. the elements of the `nextPoint' array will be assigned; the array itself
         must have been expanded before calling this routine).
+        May be called in parallel for many cells.
     */
     void addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, PointEnum lastPointIndex);
 
@@ -823,13 +816,16 @@ private:
     double computeResult();
 };
 
-static const double oversamplingFactor = 1.25;
-
+/// minimum allowed number of points in any cell
 static const int minNumPointsInCell = 256;
 
-static const int maxNumPointsInCell = minNumPointsInCell * 8;
+/// number of bins in the 1-d histogram of function values (projection in each dimension) in each cell,
+/// used to estimate the entropy and ultimately decide the dimension to split a cell;
+/// should be ~ sqrt(minNumPointsInCell)
+static const int numBinsEntropy = 16;
 
-static const int maxNumIter = 16;
+/// limit the number of iterations in the recursive refinement loop
+static const int maxNumIter = 50;
 
 Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double _xupper[],
     size_t _numOutputSamples) :
@@ -838,36 +834,45 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     xlower(_xlower, _xlower+Ndim),
     xupper(_xupper, _xupper+Ndim),
     numOutputSamples(_numOutputSamples),
-    cells(1)  // create the root cell
+    cells(1),  // create the root cell
+    qrngOffset(random() * 1e6)  // starting value for the quasi-random number sequence
 {
+    if(Ndim > MAX_PRIMES)  // this is only a limitation of the quasi-random number generator
+        throw std::runtime_error("sampleNdim: more than "+utils::toString(MAX_PRIMES)+
+            " dimensions is not supported");
     volume = 1;
     for(int d=0; d<Ndim; d++)
         volume *= xupper[d] - xlower[d];
-    cells[0].weight = volume / numOutputSamples;
 }
 
 double Sampler::computeResult()
 {
     Averager avg;
+    // declare the accumulator variable as volatile to PREVENT auto-vectorization:
+    // the summation needs to be done exactly in the same order here and in drawSamples()
+    volatile double integ  = 0;
     double maxSampleWeight = 0;
     for(CellEnum cellIndex = 0; cellIndex < static_cast<CellEnum>(cells.size()); cellIndex++) {
-        PointEnum pointIndex = cells[cellIndex].headPointIndex;
-        while(pointIndex >= 0) {
+        for(PointEnum pointIndex = cells[cellIndex].headPointIndex;
+            pointIndex >= 0;
+            pointIndex = nextPoint[pointIndex])
+        {
             double sampleWeight = fncValues[pointIndex] * cells[cellIndex].weight;
             avg.add(sampleWeight);
+            integ += sampleWeight;
             maxSampleWeight = std::max(maxSampleWeight, sampleWeight);
-            pointIndex = nextPoint[pointIndex];
         }
     }
     const size_t numPoints = fncValues.size();
     assert(numPoints == avg.count());
-    integValue = avg.mean() * numPoints;
+    integValue = integ; //avg.mean() * numPoints;
     integError = sqrt(avg.disp() * numPoints);
     // maximum allowed value of f(x)*w(x) is the weight of one output sample
     // (integValue/numOutputSamples); if it is larger, we need to do another iteration
     double refineFactor = maxSampleWeight * numOutputSamples / integValue;
     utils::msg(utils::VL_VERBOSE, "sampleNdim",
-        "Integral value= " + utils::toString(integValue) + " +- " + utils::toString(integError) +
+        "Integral value= " + utils::toString(volume * integValue) +
+        " +- " + utils::toString(volume * integError) +
         " using " + utils::toString(numPoints) + " points"
         " with " + utils::toString(cells.size()) + " cells;"
         " refineFactor=" + utils::toString(refineFactor));
@@ -882,22 +887,29 @@ void Sampler::evalFncLoop(PointEnum firstPointIndex, PointEnum lastPointIndex)
     // loop over assigned points and compute the values of function (in parallel)
     bool badValueOccured = false;
     std::string errorMsg;
+    // compute the function values for a block of points at once;
+    // operations on different blocks may be OpenMP-parallelized
+    const unsigned int block = 1024;
+    int nblocks = (lastPointIndex - firstPointIndex - 1) / block + 1;
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic,256)
+#pragma omp parallel for schedule(dynamic)
 #endif
-    for(PointEnum pointIndex = firstPointIndex; pointIndex < lastPointIndex; pointIndex++) {
-        double val;
-        try{
-            fnc.eval(&pointCoords[pointIndex * Ndim], &val);
+    for(int b=0; b<nblocks; b++) {
+        PointEnum pointIndex = firstPointIndex + b*block;
+        PointEnum npoints = std::min<PointEnum>(block, lastPointIndex - pointIndex);
+        try {
+            fnc.evalmany(npoints, &pointCoords[pointIndex * Ndim], &fncValues[pointIndex]);
         }
-        // guard against possible exceptions, since they must not leave the OpenMP block
+        // guard against possible exceptions, since they must not leave the OpenMP parallel section
         catch(std::exception& e) {
             errorMsg = e.what();
-            val = NAN;
-        }
-        if(val<0 || !isFinite(val))
             badValueOccured = true;
-        fncValues[pointIndex] = val;
+        }
+        for(int i=0; i<npoints; i++) {
+            double val = fncValues[pointIndex + i];
+            if(val<0 || !isFinite(val))
+                badValueOccured = true;
+        }
     }
     if(badValueOccured)
         throw std::runtime_error("Error in sampleNdim: " + 
@@ -916,16 +928,15 @@ void Sampler::getCellBoundaries(CellEnum cellIndex, double cellXlower[], double 
     while(index>0) {
         CellEnum parentIndex = cells[index].parentIndex;
         int splitDim         = cells[parentIndex].splitDim;
-        double splitFrac     = cells[parentIndex].splitFrac;
         bool lower =  index == cells[parentIndex].childIndex;
         bool upper =  index == cells[parentIndex].childIndex + 1;
         assert(lower || upper);
         if(lower) {
-            cellXlower[splitDim] *= splitFrac;
-            cellXupper[splitDim] *= splitFrac;
+            cellXlower[splitDim] *= 0.5;
+            cellXupper[splitDim] *= 0.5;
         } else {
-            cellXlower[splitDim] = splitFrac + (1-splitFrac) * cellXlower[splitDim];
-            cellXupper[splitDim] = splitFrac + (1-splitFrac) * cellXupper[splitDim];
+            cellXlower[splitDim] = 0.5 * (1 + cellXlower[splitDim]);
+            cellXupper[splitDim] = 0.5 * (1 + cellXupper[splitDim]);
         }
         index = parentIndex;
     }
@@ -937,37 +948,20 @@ void Sampler::getCellBoundaries(CellEnum cellIndex, double cellXlower[], double 
     }
 }
 
-double Sampler::getCellVolume(CellEnum cellIndex) const
+void Sampler::addCellToQueue(CellEnum cellIndex)
 {
-    double vol = volume;
-    CellEnum index  = cellIndex;
-    // same procedure as in the above function, but only compute the volume, not boundaries
-    while(index>0) {
-        CellEnum parentIndex = cells[index].parentIndex;
-        double splitFrac     = cells[parentIndex].splitFrac;
-        bool lower =  index == cells[parentIndex].childIndex;
-        vol  *= lower ? splitFrac : 1-splitFrac;
-        index = parentIndex;
-    }
-    return vol;
-}
+    // get the number of samples in the cell (same number of new samples will be added)
+    PointEnum numPoints = static_cast<PointEnum>(round(1. / cells[cellIndex].weight));
+    for(CellEnum index = cellIndex; index>0; index = cells[index].parentIndex)
+        numPoints >>= 1;   // each division halves the cell volume and hence the number of points
 
-void Sampler::addCellToQueue(CellEnum cellIndex, double refineFactor)
-{
-    assert(refineFactor >= 1);
-    // expectation of the average number of points in this cell
-    // (not the actual number, but not too far either)
-    double numPointsInCell = getCellVolume(cellIndex) / cells[cellIndex].weight;
-    int numAdd = 
-        std::max(minNumPointsInCell,
-        std::min(maxNumPointsInCell,
-        static_cast<int>((refineFactor * oversamplingFactor - 1) * numPointsInCell)));
-    cells[cellIndex].weight /= 1. + numAdd / numPointsInCell;
+    // halve the weight of each sample point in this cell
+    cells[cellIndex].weight *= 0.5;
 
     // schedule this cell for adding more points in the next iteration;
     // the coordinates of these new points will be assigned later, once this queue is completed.
     PointEnum numPrev = cellsQueue.empty() ? 0 : cellsQueue.back().second;
-    cellsQueue.push_back(std::pair<CellEnum, PointEnum>(cellIndex, numAdd + numPrev));
+    cellsQueue.push_back(std::pair<CellEnum, PointEnum>(cellIndex, numPoints + numPrev));
 }
 
 void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, PointEnum lastPointIndex)
@@ -981,8 +975,8 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     for(PointEnum pointIndex = firstPointIndex; pointIndex < lastPointIndex; pointIndex++) {
         // assign coordinates of the new point
         for(int d=0; d<Ndim; d++) {
-            pointCoords[ pointIndex * Ndim + d ] =
-                cellXlower[d] + random() * (cellXupper[d] - cellXlower[d]);
+            pointCoords[ pointIndex * Ndim + d ] = cellXlower[d] +
+                (cellXupper[d] - cellXlower[d]) * quasiRandomHalton(pointIndex + qrngOffset, PRIMES[d]);
         }
         // update the linked list of points in the cell
         nextPoint[pointIndex] = nextPointInList;
@@ -991,7 +985,7 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     cells[cellIndex].headPointIndex = nextPointInList;  // store the new head of the list for this cell
 }
 
-void Sampler::splitCell(CellEnum cellIndex, int splitDim, const double splitFrac, const double boundary)
+void Sampler::splitCell(CellEnum cellIndex, int splitDim, const double boundary)
 {
     CellEnum childIndex = cells.size();  // the two new cells will be added at the end of the existing list
     cells.resize(childIndex + 2);
@@ -1000,7 +994,6 @@ void Sampler::splitCell(CellEnum cellIndex, int splitDim, const double splitFrac
     cells[childIndex  ].weight      = cells[cellIndex].weight;
     cells[childIndex+1].weight      = cells[cellIndex].weight;
     cells[cellIndex   ].splitDim    = splitDim;
-    cells[cellIndex   ].splitFrac   = splitFrac;
     cells[cellIndex   ].childIndex  = childIndex;
     PointEnum pointIndex = cells[cellIndex].headPointIndex;
     assert(pointIndex >= 0);  // it must have some points, otherwise why split?
@@ -1031,58 +1024,61 @@ void Sampler::splitCell(CellEnum cellIndex, int splitDim, const double splitFrac
 
 void Sampler::decideHowToSplitCell(CellEnum cellIndex)
 {
-    // allocate temporary array on stack, to store the cell boundaries and its center-of-mass
-    double *cellXlower = static_cast<double*>(alloca(3*Ndim * sizeof(double)));
+    // allocate temporary array on stack, to store the cell boundaries
+    // and the histogram of the projection of the function in each dimension
+    double *cellXlower = static_cast<double*>(alloca( (2+numBinsEntropy) * Ndim * sizeof(double)));
     double *cellXupper = cellXlower + Ndim;    // space within the array allocated above
-    double *cellXavg   = cellXlower + 2*Ndim;
+    double *histogram  = cellXlower + 2*Ndim;
+    std::fill(histogram, histogram + Ndim*numBinsEntropy, 0.);
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
 
-    double sum = 0;
-    size_t numPointsInCell = 0;
     PointEnum pointIndex   = cells[cellIndex].headPointIndex;
     assert(pointIndex >= 0);
     // loop over the list of points belonging to this cell
     while(pointIndex >= 0) {
         double fval = fncValues[pointIndex];
-        sum += fval;
-        for(int d=0; d<Ndim; d++) {
-            //assert(pointCoords[pointIndex * Ndim + d] >= cellXlower[d]
-            //    && pointCoords[pointIndex * Ndim + d] <  cellXupper[d]);
-            cellXavg[d] += fval * (pointCoords[pointIndex * Ndim + d] - cellXlower[d]);
+        for(int dim = 0; dim < Ndim; dim++) {
+            double relCoord = (pointCoords[pointIndex * Ndim + dim] - cellXlower[dim]) /
+                (cellXupper[dim]-cellXlower[dim]);
+            int bin = static_cast<int>(relCoord * numBinsEntropy);
+            histogram[dim * numBinsEntropy + bin] += fval;
         }
         pointIndex = nextPoint[pointIndex];
-        numPointsInCell++;
     }
-    int splitDim   = -1;
-    double maxskew = 0;
-    for(int d=0; d<Ndim; d++) {
-        cellXavg[d] /= sum * (cellXupper[d] - cellXlower[d]);
-        double skew  = std::max(cellXavg[d], 1-cellXavg[d]);
-        if(skew > maxskew) {
-            maxskew  = skew;
-            splitDim = d;
+
+    // Compute a crude estimate of the (un-normalized) entropy in each dimension d,
+    // summing -F_{i,d} log(F_{i,d}), where F_{i,d} is the sum of function values in i-th bin;
+    // the dimension in which the entropy is minimal (the function varies most significantly) will be split
+    int splitDim = -1;
+    double minEntropy = INFINITY;
+    for(int dim = 0; dim < Ndim; dim++) {
+        double entropy = 0.;
+        for(int bin = 0; bin < numBinsEntropy; bin++)
+            if(histogram[dim * numBinsEntropy + bin] > 0)
+                entropy -= histogram[dim * numBinsEntropy + bin]
+                    *  log(histogram[dim * numBinsEntropy + bin]);
+        if(entropy < minEntropy) {
+            minEntropy = entropy;
+            splitDim = dim;
         }
     }
     assert(splitDim>=0);
 
-    // split in the given direction, preferrably at the coordinate of the center-of-mass,
-    // but ensuring that neither of the two child cells are too small
-    // (no less than minfrac of the volume of this cell)
-    double minfrac = minNumPointsInCell*1.0/numPointsInCell;
-    double frac    = std::max(minfrac, std::min(1-minfrac, cellXavg[splitDim]));
-    double coord   = (1-frac) * cellXlower[splitDim] + frac * cellXupper[splitDim];
-    splitCell(cellIndex, splitDim, frac, coord);
+    // split in the given direction into two equal halves
+    double coord = 0.5 * (cellXlower[splitDim] + cellXupper[splitDim]);
+    splitCell(cellIndex, splitDim, coord);
 }
 
 void Sampler::processCell(CellEnum cellIndex)
 {
     double maxFncValueCell = 0;
     size_t numPointsInCell = 0;
-    PointEnum pointIndex   = cells[cellIndex].headPointIndex;
-    while(pointIndex >= 0) {
+    for(PointEnum pointIndex = cells[cellIndex].headPointIndex;
+        pointIndex >= 0;
+        pointIndex = nextPoint[pointIndex])
+    {
         numPointsInCell++;
         maxFncValueCell = std::max(maxFncValueCell, fncValues[pointIndex]);
-        pointIndex = nextPoint[pointIndex];
     }
     if(numPointsInCell==0)
         return;  // this is a non-leaf cell
@@ -1095,33 +1091,49 @@ void Sampler::processCell(CellEnum cellIndex)
     if(numPointsInCell > 2*minNumPointsInCell)
         decideHowToSplitCell(cellIndex);
     else
-        addCellToQueue(cellIndex, refineFactor);
+        addCellToQueue(cellIndex);
 }
 
 void Sampler::run()
 {
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+
     // first iteration: sample uniformly in a single root cell
-    pointCoords.resize(numOutputSamples * Ndim);
-    fncValues.resize(numOutputSamples);
-    nextPoint.resize(numOutputSamples);
-    addPointsToCell(0, 0, numOutputSamples);
-    evalFncLoop(0, numOutputSamples);
+    size_t numInitSamples = (1 + numOutputSamples / minNumPointsInCell) * minNumPointsInCell;
+    cells[0].weight = 1. / numInitSamples;
+    pointCoords.resize(numInitSamples * Ndim);
+    fncValues.resize(numInitSamples);
+    nextPoint.resize(numInitSamples);
+    addPointsToCell(0, 0, numInitSamples);
+    evalFncLoop(0, numInitSamples);
     double refineFactor = computeResult();
     if(refineFactor <= 1)
         return;
 
     int nIter = 1;
     do{
+        if(cbrk.triggered())
+            throw std::runtime_error("Keyboard interrupt");
+        // Loop over all cells and check if there are enough sample points in the cell;
+        // if not, either split the cell in two halves or schedule this cell for adding more points later.
+        // The newly added cells (after splitting) are appended to the end of the cell list,
+        // therefore the list is gradually growing, and this loop must be done sequentially.
         cellsQueue.clear();
         for(CellEnum cellIndex=0; cellIndex < static_cast<CellEnum>(cells.size()); cellIndex++)
             processCell(cellIndex);
         assert(!cellsQueue.empty());
+        // find out how many new samples do we need to add, and extend the relevant arrays
         size_t numPointsExisting = fncValues.size();
         size_t numPointsOverall  = numPointsExisting + cellsQueue.back().second;
         pointCoords.resize(numPointsOverall * Ndim);
         fncValues.resize(numPointsOverall);
         nextPoint.resize(numPointsOverall);
-        for(size_t queueIndex=0; queueIndex < cellsQueue.size(); queueIndex++)
+        // assign the coordinates of new samples (each cell is processed independently, may parallelize)
+        int numNewCells = cellsQueue.size();
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(int queueIndex=0; queueIndex < numNewCells; queueIndex++)
             addPointsToCell( cellsQueue[queueIndex].first,
                 numPointsExisting + (queueIndex==0 ? 0 : cellsQueue[queueIndex-1].second),
                 numPointsExisting + cellsQueue[queueIndex].second);
@@ -1129,7 +1141,9 @@ void Sampler::run()
             ": #cells=" + utils::toString(cells.size()) +
             ", #refined cells=" + utils::toString(cellsQueue.size()) +
             ", #new points=" + utils::toString(cellsQueue.back().second) );
+        // now compute the function values for the newly added samples (also in parallel)
         evalFncLoop(numPointsExisting, numPointsOverall);
+        // estimate the integral value and check if we have enough samples
         double refineFactor = computeResult();
         if(refineFactor <= 1)
             return;
@@ -1144,7 +1158,7 @@ void Sampler::drawSamples(Matrix<double>& outputSamples) const
     const size_t numPoints = fncValues.size();
     assert(pointCoords.size() == numPoints * Ndim);
     const double outputSampleWeight = integValue / numOutputSamples;
-    Averager avg;  // accumulates the sum of f(x_i) w(x_i) for i=0..{current value}
+    volatile double partialSum = 0;  // accumulates the sum of f(x_i) w(x_i) for i=0..{current value}
     size_t outputIndex = 0;
     outputSamples = math::Matrix<double>(numOutputSamples, Ndim);
     for(CellEnum cellIndex = 0; cellIndex < static_cast<CellEnum>(cells.size()); cellIndex++) {
@@ -1152,8 +1166,8 @@ void Sampler::drawSamples(Matrix<double>& outputSamples) const
         while(pointIndex >= 0) {
             double sampleWeight = fncValues[pointIndex] * cells[cellIndex].weight;
             assert(sampleWeight <= outputSampleWeight);  // has been guaranteed by run()
-            avg.add(sampleWeight);
-            if(avg.mean() * avg.count() >= (outputIndex+0.5) * outputSampleWeight) {
+            partialSum += sampleWeight;
+            if(partialSum >= (outputIndex+0.5) * outputSampleWeight) {
                 for(int d=0; d<Ndim; d++)
                     outputSamples(outputIndex, d) = pointCoords[pointIndex * Ndim + d];
                 outputIndex++;

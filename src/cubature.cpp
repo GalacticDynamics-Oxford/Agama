@@ -1135,7 +1135,8 @@ int hcubature_v(unsigned fdim, integrand_v f, void *fdata,
                 double *val, double *err)
 {
      return cubature(fdim, f, fdata, dim, xmin, xmax, 
-		     maxEval, reqAbsError, reqRelError, norm, val, err, 1);
+		     maxEval, reqAbsError, reqRelError, norm, val, err,
+             0 /*disable evaluating multiple regions at once, as this deteriorates accuracy*/);
 }
 
 /* vectorized wrapper around non-vectorized integrands */

@@ -186,7 +186,7 @@ void getRandomPermutation(size_t count, size_t output[]);
     \note that that the numbers get increasingly more correlated as the base increases,
     thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
 */
-double quasiRandomHalton(unsigned int index, unsigned int base);
+double quasiRandomHalton(size_t index, unsigned int base);
 
 /** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
 static const unsigned int MAX_PRIMES = 10;  // not that there aren't more!

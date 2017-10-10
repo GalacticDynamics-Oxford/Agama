@@ -1,5 +1,5 @@
-/** \file    galaxymodel.h
-    \brief   A complete galaxy model
+/** \file    galaxymodel_base.h
+    \brief   A complete galaxy model and associated routines (computation of moments, sampling)
     \date    2015
     \author  Eugene Vasiliev, Payel Das
 */
@@ -161,7 +161,7 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
     \returns    a new array of particles (position/velocity/mass)
     sampled from the distribution function;
 */
-particles::ParticleArrayCyl generateActionSamples(
+particles::ParticleArrayCyl sampleActions(
     const GalaxyModel& model, const size_t numPoints,
     std::vector<actions::Actions>* actions=NULL);
 
@@ -175,7 +175,7 @@ particles::ParticleArrayCyl generateActionSamples(
     \returns    a new array of particles (position/velocity/mass)
     sampled from the distribution function;
 */
-particles::ParticleArrayCyl generatePosVelSamples(
+particles::ParticleArrayCyl samplePosVel(
     const GalaxyModel& model, const size_t numPoints);
 
 
@@ -184,7 +184,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
     \param[in]  numPoints  is the required number of sampling points;
     \returns    a new array with the sampled coordinates and masses
 */
-particles::ParticleArray<coord::PosCyl> generateDensitySamples(
+particles::ParticleArray<coord::PosCyl> sampleDensity(
     const potential::BaseDensity& dens, const size_t numPoints);
 
 }  // namespace

@@ -53,6 +53,13 @@ extern VerbosityLevel verbosityLevel;
 /** return a textual representation of the stack trace */
 std::string stacktrace();
 
+/** Singleton class for monitoring the Control-Break signal */
+class CtrlBreakHandler {
+public:
+    CtrlBreakHandler();      ///< sets up a custom signal handler (throws an exception if already set)
+    ~CtrlBreakHandler();     ///< restores the previous signal handler
+    static bool triggered(); ///< returns true if the Ctrl-Break signal was received, false otherwise
+};
 
 /*------------- string functions ------------*/
 

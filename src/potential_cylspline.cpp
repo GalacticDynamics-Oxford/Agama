@@ -29,7 +29,7 @@ static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
 static const int LMAX_EXTRAPOLATION = 8;
 
 /// max number of function evaluations in multidimensional integration
-static const unsigned int MAX_NUM_EVAL = 100000;
+static const unsigned int MAX_NUM_EVAL = 10000;
 
 /// to avoid singularities in potential integration kernel, we add a small softening
 /// (intended to be much less than typical grid spacing) - perhaps need to make it grid-dependent
@@ -89,7 +89,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     }
     std::string errorMsg;
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
-    
+
 #ifdef _OPENMP
 #pragma omp parallel
 #endif

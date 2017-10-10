@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
-
+#include <signal.h>
 // stack trace presumably only works with GCC
 #ifdef __GNUC__
 #include <cxxabi.h>
@@ -152,6 +152,34 @@ std::string stacktrace()
     return "Stack trace not available\n";
 #endif
 }
+
+/* ----------- mechanism for capturing the Control-Break signal ----------------- */
+namespace {
+/// flag that is set to one if the keyboard interrupt has occurred
+volatile bool ctrlBreakTriggered;
+/// signal handler installed during lengthy computations that triggers the flag
+void customCtrlBreakHandler(int) { ctrlBreakTriggered = true; }
+/// previous signal handler restored after the computation is finished
+void (*defaultCtrlBreakHandler)(int) = NULL;
+}
+
+CtrlBreakHandler::CtrlBreakHandler()
+{
+    // only zero or one instance of this class should exist at any time
+    if(defaultCtrlBreakHandler != NULL)
+        throw std::runtime_error("Ctrl-Break handler already set");
+    ctrlBreakTriggered = false;
+    defaultCtrlBreakHandler = signal(SIGINT, customCtrlBreakHandler);
+}
+
+CtrlBreakHandler::~CtrlBreakHandler()
+{
+    // restore the default handler once the instance of the class is destroyed
+    signal(SIGINT, defaultCtrlBreakHandler);
+    defaultCtrlBreakHandler = NULL;
+}
+
+bool CtrlBreakHandler::triggered() { return ctrlBreakTriggered; }
 
 /* ----------- string/number conversion and parsing routines ----------------- */
 

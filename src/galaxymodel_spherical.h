@@ -285,7 +285,7 @@ std::vector<double> densityFromCumulativeMass(
     \returns    a new array of particles (position/velocity/mass)
     sampled from the distribution function;
 */
-particles::ParticleArraySph generatePosVelSamples(
+particles::ParticleArraySph samplePosVel(
     const math::IFunction& pot,
     const math::IFunction& df,
     const unsigned int numPoints);
@@ -299,7 +299,7 @@ particles::ParticleArraySph generatePosVelSamples(
     values of radius at once);
     \param[out]  gridVelDisp (optional) is the array to be filled with the values of velocity
     dispersion at the same radii as the returned density values; if NULL it is not computed.
-    \return  the density  \f$ \rho(\Phi) = \int_{\Phi}^0 dE  f(h(E))  4\pi \sqrt{ 2 [E - Phi] }  \f$
+    \return  the density  \f$ \rho(\Phi) = \int_{\Phi}^0 dE  f(h(E))  4\pi \sqrt{ 2 [E - \Phi] }  \f$
     at the nodes of the radial grid.
 */
 std::vector<double> computeDensity(
@@ -353,9 +353,9 @@ math::LogLogSpline readMassProfile(const std::string& fileName);
     - its angular momentum   Lcirc(E) = rcirc * sqrt(dPhi/dr (rcirc))
     - velocity dispersion    sigma(r) - characteristic 1d velocity at the radius r
     - line-of-sight vel.disp sigma_los(R), where R is the projected radius equal to r
-    - surface density        Sigma(R), or projected density ( = \int_R^infinity rho(R,z) dz
-    - diffusion coefficient  <Delta E^2>
-    - drift coefficient      <Delta E>
+    - surface density        Sigma(R), or projected density ( = \int_R^infinity rho(R,z) dz )
+    - diffusion coefficient  < Delta E^2 >
+    - drift coefficient      < Delta E >
     - phase-space mass flux  F(h)
     - loss-cone dif.coef.    D_RR/R at R=0  (only if there is a central black hole)
 

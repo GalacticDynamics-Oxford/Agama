@@ -1,4 +1,4 @@
-#include "galaxymodel.h"
+#include "galaxymodel_base.h"
 #include "math_core.h"
 #include "math_sample.h"
 #include "math_specfunc.h"
@@ -9,6 +9,7 @@
 #include "utils.h"
 #include <cmath>
 #include <stdexcept>
+#include <cassert>
 
 namespace galaxymodel{
 
@@ -17,39 +18,56 @@ namespace{   // internal definitions
 //------- HELPER ROUTINES -------//
 
 /** convert from scaled velocity variables to the actual velocity.
-    \param[in]  vars are the scaled variables: |v|/velmag, theta/Pi, phi/(2*Pi),
-    where the latter two quantities specify the orientation of velocity vector 
-    in spherical coordinates centered at a given point, and
-    \param[in]  velmag is the maximum magnutude of velocity (equal to the escape velocity).
+    \param[in]  vars are the scaled variables: chi, theta/Pi, phi/(2*Pi),
+    where the magnitude of the velocity is v = v_esc * chi * zeta / (1 - zeta - chi + 2 zeta chi),
+    and the latter two quantities specify the orientation of velocity vector 
+    in spherical coordinates centered at a given point.
+    \param[in]  vesc is the maximum magnutude of velocity (equal to the escape velocity).
+    \param[in]  zeta is the scaling factor for the velocity magnitude;
+    it is assigned to be the ratio of circular to escape velocity at the given radius,
+    because then chi=1/2 corresponds to v=v_circ; since the adaptive integration routine
+    will likely explore this value at the very beginning, this minimizes the chance of missing
+    an crucial part of the phase space in the case that the DF is very strongly peaked near
+    the circular velocity (as happens for a cold disk-like DF).
     \param[out] jac (optional) if not NULL, output the jacobian of transformation.
     \return  three components of velocity in cylindrical coordinates
 */
-inline coord::VelCyl unscaleVelocity(const double vars[], const double velmag, double* jac=0)
+inline coord::VelCyl unscaleVelocity(
+    const double vars[], const double vesc, const double zeta, double* jac=0)
 {
-    const double costheta = cos(M_PI * vars[1]);
-    const double sintheta = sin(M_PI * vars[1]);
-    const double vel = vars[0]*velmag;
+    const double
+        costheta = cos(M_PI * vars[1]),
+        sintheta = sin(M_PI * vars[1]),
+        inv = 1. / (1 - zeta + (2 * zeta - 1) * vars[0]),
+        vel = vars[0] * vesc * zeta * inv;
     if(jac)
-        *jac = 2*M_PI*M_PI * vel*vel * velmag * sintheta;
+        *jac = 2*M_PI*M_PI * zeta * (1-zeta) * vesc * pow_2(vel * inv) * sintheta;
     return coord::VelCyl(
         vel * sintheta * cos(2*M_PI * vars[2]),
         vel * sintheta * sin(2*M_PI * vars[2]),
         vel * costheta);
 }
 
-/** compute the escape velocity at a given position in the given ponential */
-inline double escapeVel(const coord::PosCyl& pos, const potential::BasePotential& poten)
+/** compute the escape velocity and the ratio of circular to escape velocity
+    at a given position in the given ponential */
+inline void getVesc(
+    const coord::PosCyl& pos, const potential::BasePotential& poten, double& vesc, double& zeta)
 {
-    if(pow_2(pos.R)+pow_2(pos.z) == INFINITY)
-        return 0;
-    const double Phi_inf = 0;   // assume that the potential is zero at infinity
-    const double vesc = sqrt(2. * (Phi_inf - poten.value(pos)));
+    if(pow_2(pos.R) + pow_2(pos.z) == INFINITY) {
+        vesc = 0.;
+        zeta = 0.5;
+        return;
+    }
+    double Phi;
+    coord::GradCyl grad;
+    poten.eval(pos, &Phi, &grad);
+    vesc = sqrt(-2. * Phi);
+    zeta = fmin(0.75, fmax(0.5, sqrt(grad.dR * pos.R) / vesc));
     if(!isFinite(vesc)) {
         throw std::invalid_argument("Error in computing moments: escape velocity is undetermined at "
             "R="+utils::toString(pos.R)+", z="+utils::toString(pos.z)+", phi="+utils::toString(pos.phi)+
-            " (Phi="+utils::toString(poten.value(pos))+")");
+            " (Phi="+utils::toString(Phi)+")");
     }
-    return vesc;
 }
 
 /** convert from scaled position/velocity coordinates to the real ones.
@@ -58,14 +76,15 @@ inline double escapeVel(const coord::PosCyl& pos, const potential::BasePotential
     If needed, also provide the jacobian of transformation.
 */
 inline coord::PosVelCyl unscalePosVel(const double vars[], 
-    const potential::BasePotential& poten, double* jac=0)
+    const potential::BasePotential& pot, double* jac=0)
 {
     // 1. determine the position from the first three scaled variables
     double jacPos=0;
     const coord::PosCyl pos = potential::unscaleCoords(vars, jac==NULL ? NULL : &jacPos);
     // 2. determine the velocity from the second three scaled vars
-    const double velmag = escapeVel(pos, poten);
-    const coord::VelCyl vel = unscaleVelocity(vars+3, velmag, jac);
+    double vesc, zeta;
+    getVesc(pos, pot, vesc, zeta);
+    const coord::VelCyl vel = unscaleVelocity(vars+3, vesc, zeta, jac);
     if(jac!=NULL)
         *jac *= jacPos;
     return coord::PosVelCyl(pos, vel);
@@ -219,11 +238,11 @@ public:
     /// input variables define the z-coordinate and all three velocity components, suitably scaled
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
         coord::PosCyl pos(R, unscaleZ(vars[0], jac), 0);
-        const double velmag = escapeVel(pos, model.potential);
-        double jacVel;
-        const coord::VelCyl vel = unscaleVelocity(vars+1, velmag, &jacVel);
+        double vesc, zeta, jacVel;
+        getVesc(pos, model.potential, vesc, zeta);
+        const coord::VelCyl vel = unscaleVelocity(vars+1, vesc, zeta, &jacVel);
         if(jac!=NULL)
-            *jac = velmag==0 ? 0 : *jac * jacVel;
+            *jac = vesc==0 ? 0 : *jac * jacVel;
         return coord::PosVelCyl(pos, vel);
     }
 
@@ -277,14 +296,17 @@ class DFIntegrandAtPoint: public math::IFunctionNdim {
 public:
     DFIntegrandAtPoint(const GalaxyModel& _model, const coord::PosCyl& _point, OperationMode _mode) :
         model(_model), numCompDF(model.distrFunc.numValues()),
-        point(_point), v_esc(escapeVel(point, model.potential)), mode(_mode),
-        numOutVal(1 + (mode&OP_VEL1MOM ? 3 : 0) + (mode&OP_VEL2MOM ? 6 : 0)) {}
+        point(_point), mode(_mode),
+        numOutVal(1 + (mode&OP_VEL1MOM ? 3 : 0) + (mode&OP_VEL2MOM ? 6 : 0))
+    {
+        getVesc(point, model.potential, vesc, zeta);
+    }
 
     virtual void eval(const double vars[], double values[]) const
     {
         // 1. get the position/velocity components in cylindrical coordinates
         double jac;    // jacobian of variable transformation
-        coord::PosVelCyl posvel(point, unscaleVelocity(vars, v_esc, &jac));
+        coord::PosVelCyl posvel(point, unscaleVelocity(vars, vesc, zeta, &jac));
 
         if(jac == 0) {  // we can't compute actions, but pretend that DF*jac is zero
             for(unsigned int i=0; i<numCompDF * numOutVal; i++)
@@ -331,7 +353,8 @@ private:
     const GalaxyModel& model;     ///< reference to the galaxy model to work with
     const unsigned int numCompDF; ///< number of DF components (if model is multicomponent), or 1
     const coord::PosCyl point;    ///< fixed position
-    const double v_esc;           ///< escape velocity at this position
+    double vesc;                  ///< escape velocity at this position
+    double zeta;                  ///< the ratio of circular to escape velocity
     const OperationMode mode;     ///< determines which moments of DF to compute
     const unsigned int numOutVal; ///< number of output values for each component of DF
 };
@@ -347,17 +370,20 @@ public:
         const math::BsplineInterpolator1d<N>& _bsplVz,
         const math::BsplineInterpolator1d<N>& _bsplVphi) :
     DFIntegrandNdim(_model), point(_point),
-    projected(_projected), v_esc(escapeVel(point, model.potential)),
+    projected(_projected),
     bsplVR(_bsplVR), bsplVz(_bsplVz), bsplVphi(_bsplVphi),
     NR(bsplVR.numValues()), Nz(bsplVz.numValues()), Ntotal(1 + NR + Nz + bsplVphi.numValues())
-    {}
+    {
+        if(!projected)
+            getVesc(point, model.potential, vesc, zeta);
+    }
 
     virtual unsigned int numVars()   const { return projected ? 4 : 3; }
     virtual unsigned int numValues() const { return Ntotal; }
 private:
     const coord::PosCyl point;       ///< position
     const bool projected;            ///< if true, only use R and phi and integrate over z
-    const double v_esc;              ///< escape velocity at this position (if not projected)
+    double vesc, zeta;               ///< escape velocity at this position (if not projected)
     const math::BsplineInterpolator1d<N>& bsplVR, bsplVz, bsplVphi;
     const unsigned int NR, Nz, Ntotal;
 
@@ -365,14 +391,14 @@ private:
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
         if(projected) {
             coord::PosCyl pos(point.R, unscaleZ(vars[0], jac), point.phi);
-            const double velmag = escapeVel(pos, model.potential);
-            double jacVel;
-            const coord::VelCyl vel = unscaleVelocity(vars+1, velmag, &jacVel);
+            double vesc, zeta, jacVel;
+            getVesc(pos, model.potential, vesc, zeta);
+            const coord::VelCyl vel = unscaleVelocity(vars+1, vesc, zeta, &jacVel);
             if(jac!=NULL)
-                *jac = velmag==0 ? 0 : *jac * jacVel;
+                *jac = vesc==0 ? 0 : *jac * jacVel;
             return coord::PosVelCyl(pos, vel);
         } else
-            return coord::PosVelCyl(point, unscaleVelocity(vars, v_esc, jac));
+            return coord::PosVelCyl(point, unscaleVelocity(vars, vesc, zeta, jac));
     }
 
     /// output the weighted integrals over basis functions;
@@ -630,7 +656,7 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
 }
 
 
-particles::ParticleArrayCyl generateActionSamples(
+particles::ParticleArrayCyl sampleActions(
     const GalaxyModel& model, const size_t nSamp, std::vector<actions::Actions>* actsOutput)
 {
     // first sample points from the action space:
@@ -639,13 +665,12 @@ particles::ParticleArrayCyl generateActionSamples(
     // and the action/angles are converted to position/velocity points
     size_t nAng = std::min<size_t>(nSamp/100+1, 16);   // number of sample angles per torus
     size_t nAct = nSamp / nAng + 1;
-    std::vector<actions::Actions> actions;
 
     // do the sampling in actions space
     double totalMass, totalMassErr;
-    df::sampleActions(model.distrFunc, nAct, actions, &totalMass, &totalMassErr);
-    nAct = actions.size();   // could be different from requested?
-    //double totalMass = distrFunc.totalMass();
+    std::vector<actions::Actions> actions = df::sampleActions(
+        model.distrFunc, nAct, &totalMass, &totalMassErr);
+    assert(nAct == actions.size());
     double pointMass = totalMass / (nAct*nAng);
 
     // next sample angles from each torus
@@ -668,7 +693,7 @@ particles::ParticleArrayCyl generateActionSamples(
 }
 
 
-particles::ParticleArrayCyl generatePosVelSamples(
+particles::ParticleArrayCyl samplePosVel(
     const GalaxyModel& model, const size_t numSamples)
 {
     DFIntegrand6dim fnc(model);
@@ -690,7 +715,7 @@ particles::ParticleArrayCyl generatePosVelSamples(
 }
 
 
-particles::ParticleArray<coord::PosCyl> generateDensitySamples(
+particles::ParticleArray<coord::PosCyl> sampleDensity(
     const potential::BaseDensity& dens, const size_t numPoints)
 {
     potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);  

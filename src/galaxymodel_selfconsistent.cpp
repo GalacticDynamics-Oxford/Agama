@@ -1,5 +1,5 @@
+#include "galaxymodel_base.h"
 #include "galaxymodel_selfconsistent.h"
-#include "galaxymodel.h"
 #include "actions_staeckel.h"
 #include "actions_spherical.h"
 #include "potential_composite.h"

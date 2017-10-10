@@ -94,13 +94,13 @@ double totalEntropy(const BaseDistributionFunction& DF,
     (point = triplet of actions).
     \param[in]  DF  is the distribution function;
     \param[in]  numSamples  is the required number of sampling points;
-    \param[out] samples is the array to be filled with the sampled actions.
     \param[out] totalMass (optional) if not NULL, will store the Monte Carlo estimate 
     of the integral of the distribution function (i.e., the same quantity as computed by 
     BaseDistributionFunction::totalMass(), but calculated with a different method).
     \param[out] totalMassErr (optional) if not NULL, will store the error estimate of the integral.
- */
-void sampleActions(const BaseDistributionFunction& DF, const std::size_t numSamples,
-    std::vector<actions::Actions>& samples, double* totalMass=NULL, double* totalMassErr=NULL);
+    \returns    the array of actions sampled from the DF.
+*/
+std::vector<actions::Actions> sampleActions(const BaseDistributionFunction& DF,
+    const std::size_t numSamples, double* totalMass=NULL, double* totalMassErr=NULL);
 
 }  // namespace df

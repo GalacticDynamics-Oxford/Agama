@@ -490,7 +490,7 @@ math::LogLogSpline fitSphericalDF(
 
 //---- create an N-body realization of a spherical model ----//
 
-particles::ParticleArraySph generatePosVelSamples(
+particles::ParticleArraySph samplePosVel(
     const math::IFunction& pot, const math::IFunction& df, const unsigned int numPoints)
 {
     DFSphericalIntegrand fnc(pot, df);

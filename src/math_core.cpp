@@ -361,11 +361,11 @@ void getRandomPermutation(size_t count, size_t output[])
     }
 }
 
-double quasiRandomHalton(unsigned int ind, unsigned int base)
+double quasiRandomHalton(size_t ind, unsigned int base)
 {
-    double val = 0, fac = 1.;
+    double val = 0, fac = 1., invbase = 1./base;
     while(ind > 0) {
-        fac /= base;
+        fac *= invbase;
         val += fac * (ind % base);
         ind /= base;
     }

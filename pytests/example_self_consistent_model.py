@@ -64,9 +64,9 @@ def writeVelocityDistributions(filename, model, df):
     # choose the range of velocity to build the distribution
     v_escape = (-2 * model.potential.potential(point))**0.5;
     v_circ   = (-model.potential.force(point)[0] * point[0])**0.5
-    v_max    = min(v_escape, 2*v_circ)
+    v_max    = min(0.8*v_escape, 2*v_circ)
     # create grids in velocity space for computing the spline representation of VDF
-    gridvR   = numpy.linspace(-v_max, v_max, 41)
+    gridvR   = numpy.linspace(-v_max, v_max, 75)
     gridvz   = gridvR   # for simplicity, use the same grid for all dimensions
     gridvphi = gridvR
     # compute the distributions (represented as cubic splines)
@@ -79,14 +79,18 @@ def writeVelocityDistributions(filename, model, df):
 
 # display some information after each iteration
 def printoutInfo(model, iteration):
-    densHalo = model.components[0].getDensity()
-    densDisk = model.components[2].getDensity()
+    densHalo  = model.components[0].getDensity()
+    densBulge = model.components[1].getDensity()
+    densDisk  = model.components[2].getDensity()
     pt0 = (solarRadius, 0, 0)
     pt1 = (solarRadius, 0, 1)
     print \
         "Disk total mass=%g Msun," % densDisk.totalMass(), \
         "rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \
         (densDisk.density(pt0)*1e-9, densDisk.density(pt1)*1e-9)  # per pc^3, not kpc^3
+    print \
+        "Bulge total mass=%g Msun," % densBulge.totalMass(), \
+        "rho(1 kpc)=%g Msun/pc^3" % (densBulge.density(1, 0, 0)*1e-9)
     print \
         "Halo total mass=%g Msun," % densHalo.totalMass(), \
         "rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \

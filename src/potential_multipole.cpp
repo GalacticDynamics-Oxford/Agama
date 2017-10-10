@@ -148,10 +148,12 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
     int numSamplesTotal  = numSamplesAngles * numPointsRadius;
     std::vector<double> values(numSamplesTotal * numValues);
     std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int n=0; n<numSamplesTotal; n++) {
+        if(cbrk.triggered()) continue;
         try{
             int indR    = n / numSamplesAngles;  // index in radial grid
             int indA    = n % numSamplesAngles;  // combined index in angular direction (theta,phi)
@@ -166,6 +168,8 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
             errorMsg = e.what();
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computeSphHarmCoefs: "+errorMsg);
 
@@ -205,6 +209,7 @@ void computeSphericalHarmonicsFromParticles(
             coefs[ind.index(l, m)].resize(nbody);
     bool needSine = ind.mmin()<0;
     std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -216,6 +221,7 @@ void computeSphericalHarmonicsFromParticles(
 #pragma omp for schedule(static)
 #endif
         for(int i=0; i<nbody; i++) {
+            if(cbrk.triggered()) continue;
             // compute Y_lm for each particle
             try{
                 const coord::PosCyl& pos = particles.point(i);
@@ -242,6 +248,8 @@ void computeSphericalHarmonicsFromParticles(
             }
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
     if(!errorMsg.empty())
         throw std::runtime_error("computeSphericalHarmonicsFromParticles: " + errorMsg);
 }
