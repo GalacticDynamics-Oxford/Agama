@@ -16,9 +16,9 @@
 
     An equivalent Python example is given in pytests/example_self_consistent_model.py
 */
+#include "galaxymodel_base.h"
 #include "galaxymodel_selfconsistent.h"
 #include "galaxymodel_velocitysampler.h"
-#include "galaxymodel.h"
 #include "df_factory.h"
 #include "potential_factory.h"
 #include "potential_composite.h"
@@ -371,25 +371,25 @@ int main()
     // first create a representation of density profiles without velocities
     // (just for demonstration), by drawing samples from the density distribution
     std::cout << "Writing N-body sampled density profile for the dark matter halo\n";
-    particles::writeSnapshot("dens_dm_final", galaxymodel::generateDensitySamples(
+    particles::writeSnapshot("dens_dm_final", galaxymodel::sampleDensity(
         *model.components[0]->getDensity(), 800000), format, exportUnits);
     std::cout << "Writing N-body sampled density profile for the stellar bulge, disk and halo\n";
     std::vector<PtrDensity> densityStars(2);
     densityStars[0] = model.components[1]->getDensity();  // stellar disks and halo
     densityStars[1] = model.components[2]->getDensity();  // bulge
-    particles::writeSnapshot("dens_stars_final", galaxymodel::generateDensitySamples(
+    particles::writeSnapshot("dens_stars_final", galaxymodel::sampleDensity(
         potential::CompositeDensity(densityStars), 200000), format, exportUnits);
 
     // now create genuinely self-consistent models of both components,
     // by drawing positions and velocities from the DF in the given (self-consistent) potential
     std::cout << "Writing a complete DF-based N-body model for the dark matter halo\n";
-    particles::writeSnapshot("model_dm_final", galaxymodel::generatePosVelSamples(
+    particles::writeSnapshot("model_dm_final", galaxymodel::samplePosVel(
         galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfHalo), 800000),
         format, exportUnits);
     std::cout << "Writing a complete DF-based N-body model for the stellar bulge, disk and halo\n";
     dfStellarArray.push_back(dfBulge);
     dfStellar.reset(new df::CompositeDF(dfStellarArray));  // all stellar components incl. bulge
-    particles::writeSnapshot("model_stars_final", galaxymodel::generatePosVelSamples(
+    particles::writeSnapshot("model_stars_final", galaxymodel::samplePosVel(
         galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfStellar), 200000),
         format, exportUnits);
     // we didn't use an action-based DF for the gas disk, leaving it as a static component;
@@ -397,7 +397,7 @@ int main()
     // from the axisymmetric Jeans equation with equal velocity dispersions in R,z,phi
     std::cout << "Writing an N-body model for the gas disk\n";
     particles::writeSnapshot("model_gas_final", galaxymodel::assignVelocity(
-        galaxymodel::generateDensitySamples(*model.components[3]->getDensity(), 24000),
+        galaxymodel::sampleDensity(*model.components[3]->getDensity(), 24000),
         /*parameters for the axisymmetric Jeans velocity sampler*/
         *model.components[3]->getDensity(), *model.totalPotential, /*beta*/ 0., /*kappa*/ 1.),
         format, exportUnits);

@@ -249,7 +249,11 @@ public:
     }
     /// convert the 64-bit random integer to a double
     inline double random() {
+#ifdef _OPENMP
         int i = std::min(omp_get_thread_num(), maxThreads-1);
+#else
+        int i = 0;
+#endif
         uint64_t r = next(&randgen[i*2]);
         return (1./18446744073709551616.) * r;  // r * 2^-64
     }

@@ -408,14 +408,15 @@ int main()
     integrateNdim(fnc8, fnc8.ymin, fnc8.ymax, toler, 1000000, &result, &error);
     std::cout << "Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (fabs(result-fnc8.exact)<error) || err();
+    ok &= (error < 2.0 && fabs(result-fnc8.exact) < error*2) || err();
 
+    // N-dimensional sampling
     numEval=0;
     math::Matrix<double> points;
     sampleNdim(fnc8, fnc8.ymin, fnc8.ymax, 100000, points, NULL, &result, &error);
     std::cout << "Monte Carlo Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (fabs(result-fnc8.exact)<error*2) || err();  // loose tolerance on MC error estimate
+    ok &= (error < 1.0 && fabs(result-fnc8.exact) < error*2) || err();
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream fout("sampleNdim.dat");
         for(unsigned int i=0; i<points.rows(); i++)

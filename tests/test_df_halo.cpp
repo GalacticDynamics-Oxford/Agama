@@ -13,7 +13,7 @@
 #include "potential_dehnen.h"
 #include "actions_staeckel.h"
 #include "df_halo.h"
-#include "galaxymodel.h"
+#include "galaxymodel_base.h"
 #include "particles_io.h"
 #include "math_specfunc.h"
 #include "math_spline.h"

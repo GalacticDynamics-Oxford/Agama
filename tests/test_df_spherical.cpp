@@ -220,7 +220,7 @@ bool test(const potential::BasePotential& pot)
     // draw samples from the DF
     const unsigned int npoints = 100000;
     const particles::ParticleArraySph particles =
-        galaxymodel::generatePosVelSamples(interp, trueDF, npoints);
+        galaxymodel::samplePosVel(interp, trueDF, npoints);
     // convert position/velocity samples back into h samples
     std::vector<double> particle_h(npoints), particle_m(npoints);
     for(unsigned int i=0; i<npoints; i++) {

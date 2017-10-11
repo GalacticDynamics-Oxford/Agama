@@ -101,8 +101,8 @@ int main()
         math::blas_dgemv(math::CblasTrans,  -3., dmat, vec, 4., td);
         math::blas_dgemv(math::CblasTrans,  -3., smat, vec, 4., ts);
         for(int k=0; k<size; k++) {
-            if( fabs(vb[k]-vd[k])>1e-15 || fabs(vb[k]-vs[k])>1e-15 ||
-                fabs(tb[k]-td[k])>1e-15 || fabs(tb[k]-ts[k])>1e-15 )
+            if( math::fcmp(vb[k], vd[k]) || math::fcmp(vb[k], vs[k]) ||
+                math::fcmp(tb[k], td[k]) || math::fcmp(tb[k], ts[k]) )
                 okband = false;
         }
         if(!okband) {

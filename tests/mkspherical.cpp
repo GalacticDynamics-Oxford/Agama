@@ -214,7 +214,7 @@ int main(int argc, char* argv[])
     if(!outputsnap.empty()) {
         // generate the samples
         math::randomize();
-        particles::ParticleArraySph bodies = galaxymodel::generatePosVelSamples(
+        particles::ParticleArraySph bodies = galaxymodel::samplePosVel(
             potential::PotentialWrapper(*pot), df, mbh? nbody-1 : nbody);
         if(mbh)  // add the central black hole as the 0th particle
             bodies.data.insert(bodies.data.begin(),
