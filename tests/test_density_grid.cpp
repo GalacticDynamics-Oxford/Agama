@@ -27,7 +27,7 @@ const double radii[NR] = {
     rmult * 0.7885680919310256,
     rmult * 1.0 };
 
-bool check(const galaxymodel::DensityGridClassic<1>& grid, double x, double y, double z,
+bool check(const galaxymodel::TargetDensityClassic<1>& grid, double x, double y, double z,
     int c1, int c2, int c3, int c4)
 {
     const int N=grid.numValues(), P=(N-1) / NR;
@@ -47,13 +47,13 @@ bool check(const galaxymodel::DensityGridClassic<1>& grid, double x, double y, d
     return fabs(sum-1.)<1e-14;
 }
 
-bool test(const galaxymodel::BaseDensityGrid& grid)
+bool test(const galaxymodel::BaseTargetDensity& grid)
 {
     const int N=grid.numValues();
     std::vector<double> v(N);
     bool ok=true;
     for(int i=0; i<N; i++) {
-        std::string str = grid.elemName(i);  // has the form "x=... y=... z=..."
+        std::string str = grid.coefName(i);  // has the form "x=... y=... z=..."
         // parse the coordinates, and also slightly reduce the numbers
         // to avoid falling out of the grid for the outermost shell
         double p[3] = {
@@ -76,8 +76,8 @@ int main()
 {
     potential::Ferrers dens(mass, radius, axisYtoX, axisZtoX);
     std::vector<double> rad(radii, radii + NR);
-    galaxymodel::DensityGridClassic<0> grid0(4, rad, axisYtoX, axisZtoX);
-    galaxymodel::DensityGridClassic<1> grid1(4, rad, axisYtoX, axisZtoX);
+    galaxymodel::TargetDensityClassic<0> grid0(4, rad, axisYtoX, axisZtoX);
+    galaxymodel::TargetDensityClassic<1> grid1(4, rad, axisYtoX, axisZtoX);
     bool ok = true;
     ok &= check(grid1, 0.51, 0.01, 0.50, 15, 16, 44, 49);
     ok &= check(grid1, 0.01, 0.51, 0.50, 23, 24, 28, 29);
@@ -89,10 +89,10 @@ int main()
     ok &= check(grid1, 0.10, 0.10, 0.11, 58, 59, 39, 60);
     ok &= test (grid0);
     ok &= test (grid1);
-    std::vector<double> masses = grid0.computeProjVector(dens);
+    std::vector<double> masses = grid0.computeDensityProjection(dens);
     double sum = std::accumulate(masses.begin(), masses.end(), 0.);
     ok &= fabs(sum - mass) < 1e-10;
-    masses = grid1.computeProjVector(dens);
+    masses = grid1.computeDensityProjection(dens);
     sum = std::accumulate(masses.begin(), masses.end(), 0.);
     ok &= fabs(sum - mass) < 1e-10;
     if(ok)

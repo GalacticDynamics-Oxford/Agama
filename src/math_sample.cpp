@@ -895,6 +895,8 @@ void Sampler::evalFncLoop(PointEnum firstPointIndex, PointEnum lastPointIndex)
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int b=0; b<nblocks; b++) {
+        if(badValueOccured)
+            continue;
         PointEnum pointIndex = firstPointIndex + b*block;
         PointEnum npoints = std::min<PointEnum>(block, lastPointIndex - pointIndex);
         try {
@@ -1161,6 +1163,10 @@ void Sampler::drawSamples(Matrix<double>& outputSamples) const
     volatile double partialSum = 0;  // accumulates the sum of f(x_i) w(x_i) for i=0..{current value}
     size_t outputIndex = 0;
     outputSamples = math::Matrix<double>(numOutputSamples, Ndim);
+    // construct a random permutation of internal samples to erase the original order
+    std::vector<size_t> permutation(numOutputSamples);
+    getRandomPermutation(numOutputSamples, &permutation.front());
+    // loop over internal samples and pick up some of them for output
     for(CellEnum cellIndex = 0; cellIndex < static_cast<CellEnum>(cells.size()); cellIndex++) {
         PointEnum pointIndex = cells[cellIndex].headPointIndex;
         while(pointIndex >= 0) {
@@ -1169,7 +1175,7 @@ void Sampler::drawSamples(Matrix<double>& outputSamples) const
             partialSum += sampleWeight;
             if(partialSum >= (outputIndex+0.5) * outputSampleWeight) {
                 for(int d=0; d<Ndim; d++)
-                    outputSamples(outputIndex, d) = pointCoords[pointIndex * Ndim + d];
+                    outputSamples(permutation[outputIndex], d) = pointCoords[pointIndex * Ndim + d];
                 outputIndex++;
             }
             pointIndex = nextPoint[pointIndex];

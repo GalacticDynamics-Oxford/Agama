@@ -57,9 +57,11 @@ enum SymmetryType{
     ST_ZROTATION    =16, ///< rotation about z axis
     ST_ROTATION     =32, ///< rotation about arbitrary axis
     // composite symmetries:
-    /// mirror symmetry in xy-plane - change of sign in x and y simultaneously,
-    /// equivalent to the combination of z-reflection and mirror symmetry about origin
-    ST_XYREFLECTION = ST_ZREFLECTION | ST_REFLECTION,
+    /// bisymmetric: a combination of z-reflection and a mirror symmetry about origin,
+    /// resulting in a mirror symmetry in xy-plane - change of sign in x and y simultaneously;
+    /// this is suitable, for instance, to describe a spiral pattern containing only even-m modes
+    /// (both cosine and sine terms) and symmetric w.r.t sign change in z coordinate.
+    ST_BISYMMETRIC  = ST_ZREFLECTION | ST_REFLECTION,
     /// triaxial - reflection about principal planes (change of sign of any coordinate):
     /// note that while the combination of reflection symmetries about all three principal planes
     /// implies the reflection symmetry about origin (mirroring), the converse is not true, 
@@ -97,12 +99,11 @@ inline bool isZRotSymmetric(const SymmetryType sym) {
 }
 
 /** test for symmetry under xy-reflection */
-inline bool isXYReflSymmetric(const SymmetryType sym) {
-    return (sym & ST_XYREFLECTION) == ST_XYREFLECTION;
+inline bool isBisymmetric(const SymmetryType sym) {
+    return (sym & ST_BISYMMETRIC) == ST_BISYMMETRIC;
 }
 
-/** test for triaxial symmetry
-    (reflection about any of the three principal planes) */
+/** test for triaxial symmetry (reflection about any of the three principal planes) */
 inline bool isTriaxial(const SymmetryType sym) {
     return (sym & ST_TRIAXIAL) == ST_TRIAXIAL;
 }

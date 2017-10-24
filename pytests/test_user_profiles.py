@@ -77,7 +77,37 @@ print "user-def DF at r=1: density=%.8g, sigma_r=%.8g, sigma_t=%.8g" % \
     ( dens_my, veldisp_my[0], veldisp_my[1] )
 # gm_my.df.totalMass()  will give the same result as mass_my
 
-if abs(pot0_orig-pot0_appr)<1e-6 and abs(mass_orig-mass_my)<1e-6 and abs(dens_orig-dens_my)<1e-6:
+# manually compute the moments of DF (more specifically, only the density),
+# by providing the user-defined function to the integrateNdim routine.
+# this mimics the way that DF moments are computed in the C++ library,
+# except for a different velocity transformation.
+# this approach may be used for extended DFs which need to be integrated over
+# additional arguments apart from actions
+def my_moments(potential, df, point):
+    # create an action finder to transform from position+velocity to actions
+    af = agama.ActionFinder(potential)
+    # function to be integrated over [scaled] velocity
+    def integrand(scaledv):
+        # input is a Nx3 array of velocity values in polar coordinates (|v|, theta, phi)
+        sintheta = numpy.sin(scaledv[:,1])
+        posvel   = numpy.column_stack(( \
+            numpy.tile(point, len(scaledv)).reshape(-1,3), \
+            scaledv[:,0] * sintheta * numpy.cos(scaledv[:,2]), \
+            scaledv[:,0] * sintheta * numpy.sin(scaledv[:,2]), \
+            scaledv[:,0] * numpy.cos(scaledv[:,1]) ))
+        jacobian = scaledv[:,0]**2 * sintheta   # jacobian of the above transformation
+        actions  = af(posvel)                   # compute actions at the given points
+        return df(actions) * jacobian           # and return the values of DF times the jacobian
+    # integration region: |v| from 0 to escape velocity, theta and phi are angles of spherical coords
+    v_esc = (-2*potential.potential(point))**0.5
+    result, error, neval = agama.integrateNdim(integrand, [0,0,0], [v_esc, numpy.pi, 2*numpy.pi], toler=1e-6)
+    return result
+
+dens_manual = my_moments(pot_appr, MyDF, (1,0,0))
+print "manually computed : density=%.8g" % dens_manual
+
+if abs(pot0_orig-pot0_appr)<1e-6  and  abs(mass_orig-mass_my)<1e-6  and \
+    abs(dens_orig-dens_my)<1e-6   and  abs(dens_my-dens_manual)<1e-6:
     print "\033[1;32mALL TESTS PASSED\033[0m"
 else:
     print "\033[1;31mSOME TESTS FAILED\033[0m"

@@ -113,46 +113,46 @@ struct ConfigPotential
 typedef std::map<PotentialType, const char*> MapNameType;
 
 /// lists all 'true' potentials, i.e. those providing a complete density-potential(-force) pair
-static MapNameType PotentialNames;
+static MapNameType potentialNames;
 
 /// lists all analytic density profiles 
 /// (including those that don't have corresponding potential, but excluding general-purpose expansions)
-static MapNameType DensityNames;
+static MapNameType densityNames;
 
 static bool mapinitialized = false;
 
 /// create a correspondence between names and enum identifiers for potential and density types
 void initPotentialNameMap()
 {
-    PotentialNames.clear();
-    PotentialNames[PT_COMPOSITE] = CompositeCyl::myName();
-    PotentialNames[PT_LOG]       = Logarithmic::myName();
-    PotentialNames[PT_HARMONIC]  = Harmonic::myName();
-    PotentialNames[PT_NFW]       = NFW::myName();
-    PotentialNames[PT_PLUMMER]   = Plummer::myName();
-    PotentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
-    PotentialNames[PT_DEHNEN]    = Dehnen::myName();
-    PotentialNames[PT_FERRERS]   = Ferrers::myName();
-    PotentialNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
-    PotentialNames[PT_BSE]       = BasisSetExp::myName();
-    PotentialNames[PT_SPLINE]    = SplineExp::myName();
-    PotentialNames[PT_CYLSPLINE] = CylSpline::myName();
-    PotentialNames[PT_MULTIPOLE] = Multipole::myName();
-    PotentialNames[PT_DISK]      = DiskDensity::myName();
+    potentialNames.clear();
+    potentialNames[PT_COMPOSITE] = CompositeCyl::myName();
+    potentialNames[PT_LOG]       = Logarithmic::myName();
+    potentialNames[PT_HARMONIC]  = Harmonic::myName();
+    potentialNames[PT_NFW]       = NFW::myName();
+    potentialNames[PT_PLUMMER]   = Plummer::myName();
+    potentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
+    potentialNames[PT_DEHNEN]    = Dehnen::myName();
+    potentialNames[PT_FERRERS]   = Ferrers::myName();
+    potentialNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
+    potentialNames[PT_BSE]       = BasisSetExp::myName();
+    potentialNames[PT_SPLINE]    = SplineExp::myName();
+    potentialNames[PT_CYLSPLINE] = CylSpline::myName();
+    potentialNames[PT_MULTIPOLE] = Multipole::myName();
+    potentialNames[PT_DISK]      = DiskDensity::myName();
 
     // list of density models available for BSE and Spline approximation
-    DensityNames.clear();
-    DensityNames[PT_COMPOSITE] = CompositeDensity::myName();
-    DensityNames[PT_PLUMMER]   = Plummer::myName();
-    DensityNames[PT_DEHNEN]    = Dehnen::myName();
-    DensityNames[PT_FERRERS]   = Ferrers::myName();
-    DensityNames[PT_ISOCHRONE] = Isochrone::myName();
-    DensityNames[PT_SPHEROID]  = SpheroidDensity::myName();    
-    DensityNames[PT_SERSIC]    = SersicParam::myName();    
-    DensityNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
-    DensityNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
-    DensityNames[PT_DENS_CYLGRID] = DensityAzimuthalHarmonic::myName();
-    DensityNames[PT_DENS_SPHHARM] = DensitySphericalHarmonic::myName();
+    densityNames.clear();
+    densityNames[PT_COMPOSITE] = CompositeDensity::myName();
+    densityNames[PT_PLUMMER]   = Plummer::myName();
+    densityNames[PT_DEHNEN]    = Dehnen::myName();
+    densityNames[PT_FERRERS]   = Ferrers::myName();
+    densityNames[PT_ISOCHRONE] = Isochrone::myName();
+    densityNames[PT_SPHEROID]  = SpheroidDensity::myName();    
+    densityNames[PT_SERSIC]    = SersicParam::myName();    
+    densityNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
+    densityNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
+    densityNames[PT_DENS_CYLGRID] = DensityAzimuthalHarmonic::myName();
+    densityNames[PT_DENS_SPHHARM] = DensitySphericalHarmonic::myName();
 
     mapinitialized=true;
 }
@@ -162,43 +162,43 @@ const char* getPotentialNameByType(PotentialType type)
 {
     if(!mapinitialized)
         initPotentialNameMap();
-    MapNameType::const_iterator iter=PotentialNames.find(type);
-    if(iter!=PotentialNames.end()) 
+    MapNameType::const_iterator iter=potentialNames.find(type);
+    if(iter!=potentialNames.end()) 
         return iter->second;
     return "";
 }
 
 /// return the type of the potential model by its name, or PT_UNKNOWN if unavailable
-PotentialType getPotentialTypeByName(const std::string& PotentialName)
+PotentialType getPotentialTypeByName(const std::string& potentialName)
 {
     if(!mapinitialized)
         initPotentialNameMap();
-    for(MapNameType::const_iterator iter=PotentialNames.begin(); 
-        iter!=PotentialNames.end(); 
+    for(MapNameType::const_iterator iter=potentialNames.begin(); 
+        iter!=potentialNames.end(); 
         ++iter)
-        if(utils::stringsEqual(PotentialName, iter->second)) 
+        if(utils::stringsEqual(potentialName, iter->second)) 
             return iter->first;
     return PT_UNKNOWN;
 }
 
 /// return the type of the density model by its name, or PT_UNKNOWN if unavailable
-PotentialType getDensityTypeByName(const std::string& DensityName)
+PotentialType getDensityTypeByName(const std::string& densityName)
 {
     if(!mapinitialized)
         initPotentialNameMap();
-    for(MapNameType::const_iterator iter=DensityNames.begin(); 
-        iter!=DensityNames.end(); 
+    for(MapNameType::const_iterator iter=densityNames.begin(); 
+        iter!=densityNames.end(); 
         ++iter)
-        if(utils::stringsEqual(DensityName, iter->second)) 
+        if(utils::stringsEqual(densityName, iter->second)) 
             return iter->first;
     return PT_UNKNOWN;
 }
 
 /// return file extension for writing the coefficients of potential of the given type,
 /// or empty string if the potential type is not one of the expansion types
-const char* getCoefFileExtension(PotentialType pottype)
+const char* getCoefFileExtension(PotentialType type)
 {
-    switch(pottype) {
+    switch(type) {
         case PT_BSE:        return ".coef_bse";
         case PT_SPLINE:     return ".coef_spl";
         case PT_CYLSPLINE:  return ".coef_cyl";
@@ -210,22 +210,25 @@ const char* getCoefFileExtension(PotentialType pottype)
 } // internal namespace
 
 // return the type of symmetry by its name, or ST_DEFAULT if unavailable
-coord::SymmetryType getSymmetryTypeByName(const std::string& SymmetryName)
+coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
 {
-    if(SymmetryName.empty()) 
+    if(symmetryName.empty()) 
         return coord::ST_DEFAULT;
     // compare only the first letter, case-insensitive
-    switch(tolower(SymmetryName[0])) {
+    switch(tolower(symmetryName[0])) {
         case 's': return coord::ST_SPHERICAL;
         case 'a': return coord::ST_AXISYMMETRIC;
         case 't': return coord::ST_TRIAXIAL;
+        case 'b': return coord::ST_BISYMMETRIC;
         case 'r': return coord::ST_REFLECTION;
         case 'n': return coord::ST_NONE;
     }
     // otherwise it could be an integer constant representing the numerical value of sym.type
-    int sym = utils::toInt(SymmetryName);
-    if(sym==0 && SymmetryName!="0")  // it wasn't a valid number either
+    int sym = utils::toInt(symmetryName);
+    if(sym==0 && symmetryName!="0") {  // it wasn't a valid number either
+        utils::msg(utils::VL_WARNING, "getSymmetryTypeByName", "Invalid symmetry type: " + symmetryName);
         sym = coord::ST_DEFAULT;
+    }
     return static_cast<coord::SymmetryType>(sym);
 }
 
@@ -235,6 +238,7 @@ std::string getSymmetryNameByType(coord::SymmetryType type)
     switch(type) {
         case coord::ST_NONE:         return "None";
         case coord::ST_REFLECTION:   return "Reflection";
+        case coord::ST_BISYMMETRIC:  return "Bisymmetric";
         case coord::ST_TRIAXIAL:     return "Triaxial";
         case coord::ST_AXISYMMETRIC: return "Axisymmetric";
         case coord::ST_SPHERICAL:    return "Spherical";

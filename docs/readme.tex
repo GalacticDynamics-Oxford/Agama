@@ -267,12 +267,55 @@ We note that application of these methods to represent the potential of a galaxy
 All density and potential classes may be constructed using a universal ``factory'' interface -- several routines \ttt{createDensity} and \ttt{createPotential} that return new instances of \ttt{PtrDensity} or \ttt{PtrPotential} according to the provided parameters.
 The parameters can be supplied in several ways. One is an INI file with one or several components of the potential described in separate sections \ppp{[Potential]}, \ppp{[Potential2]}, \ppp{[Potential disk]}, etc. (all section names should start with ``Potential''). Another possibility is to provide a \ttt{KeyValueMap} object (Section~\ref{sec:Utilities}) corresponding to a single section from an INI file (it may be read from the file, or constructed manually, e.g., from named arguments in the \Python interface, or from command-line parameters for console programs, or from a single string like \ppp{"key1=value1 key2=value2"}). These parameters may describe the potential completely (e.g., if this is one of the known analytical models), or define the parameters of Multipole or CylSpline potential expansions to be constructed from the user-provided density or potential object, or from an array of particles -- in the latter case these objects are also passed to the factory routine. Finally, the coefficients of a potential or density expansion may be stored into a text file and subsequently used to load and construct a new object, using \ttt{writePotential}/\ttt{readPotential} routines.
 
+\begin{table}
+\caption{Available density and potential models and their parameters}  \label{tab:PotentialParams}
+\begin{tabular}{l m{5cm} >{\raggedright\arraybackslash}m{6cm}}
+Name & Formula & Parameters \\
+\hline
+\multicolumn{3}{c}{Density-only models} \\[2mm]
+\ttt{DiskDensity} & $\rho = \Sigma_0\,\exp\big(-\frac{R}{R_\mathrm{disk}}-\frac{R_\mathrm{cut}}{R}\big)\times$
+$\left\{ \begin{array}{ll} \delta(z) & \mbox{if } h=0 \\[1mm]
+\frac{1}{2h} \exp\big(-\big|\frac{z}{h}\big|\big) & \mbox{if } h>0 \\[1mm]
+\frac{1}{4|h|}\, \mathrm{sech}^2\big(\big|\frac{z}{2h}\big|\big) & \mbox{if } h<0 \end{array} \right. $ &
+\ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($R_\mathrm{disk}$), \ppp{scaleHeight}~($h$), \ppp{innerCutoffRadius}~($R_\mathrm{cut}$)\\
+\ttt{SpheroidDensity} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
+\ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$),\hspace{1cm} \ppp{gamma}~($\gamma$), \ppp{beta}~($\beta$), \ppp{alpha}~($\alpha$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{SersicDensity} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$),~\ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\multicolumn{3}{c}{Density/potential models} \\[2mm]
+\ttt{Plummer} & $\Phi = -\frac{M}{\sqrt{a^2+r^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{Isochrone} & $\Phi = - \frac{M}{a + \sqrt{r^2 + a^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{NFW} & $\Phi = -\frac{M}{r} \ln\left(1 + \frac{r}{a}\right)$ & \ppp{mass}~($M$, {\footnotesize note that the total mass is infinite}), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2}~($b$) \\[2mm]
+\ttt{OblatePerfectEllipsoid}\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Logarithmic} & $\Phi = \frac{1}{2} \sigma^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{mass}~($\sigma$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{mass}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\multicolumn{3}{l}{\footnotesize $R=\sqrt{x^2+y^2}$ is the cylindrical radius and $\tilde r=\sqrt{x^2+(y/p)^2+(z/q)^2}$ is the ellipsoidal radius}
+\end{tabular}
+\end{table}
+
+\begin{table}
+\caption{Symmetry types and their implications}  \label{tab:Symmetry}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{l m{9.2cm} m{3.5cm}}
+Name & Invariant transformations & \mbox{Sph.-harm.~coefs} identically zero \\
+\hline
+\ttt{None} & --- & --- \\[2mm]
+\ttt{Reflection} & \mbox{$\{x,y,z\} \to \{-x,-y,-z\}$} \mbox{(twofold discrete symmetry)} & odd $l$ \\
+\ttt{Bisymmetric} & \mbox{same or $z \to -z$, also implies $\{x,y\} \to \{-x,-y\}$} \mbox{(fourfold discrete symmetry}, e.g., a two-arm spiral) & same + odd $m$ \\
+\ttt{Triaxial} & \mbox{same or $x \to -x$ or $y \to -y$} \mbox{(eightfold discrete symmetry, e.g., a bar)} & same + negative $m$ \\
+\ttt{Axisymmetric} & \mbox{same or rotation about $z$ axis by any angle} \mbox{(continuous symmetry in $\phi$)} & same + any $m \ne 0$ \\
+\ttt{Spherical} & \mbox{same or rotation about origin by any angle} \mbox{(continuous symmetry in both $\theta$ and $\phi$)} & same + any $l \ne 0$
+\end{tabular}
+\end{table}
+
 Here is the list of possible parameters of a single potential or density component for the factory routines (not all of them make sense for all models, but unknown or irrelevant parameters will simply be ignored); see Table~\ref{tab:PotentialParams} for complete information:
 \begin{itemize}
 \item \ppp{type} -- determines the type of potential used; should be the name of a class derived from \ttt{BasePotential} -- either an analytic potential or an expansion (Multipole or CylSpline). It is usually required, except if the potential is loaded from a coefficients file -- in that case the name of the potential appears in the first line of this text file, so is determined automatically.
 \item \ppp{density} -- if \ppp{type} is a potential expansion, this parameter determines the density model to be used; should be the name of a class derived from \ttt{BaseDensity} (or, by consequence, the name of an analytic potential), except that it cannot be a model with unbound potential (Logarithmic or Harmonic) or another potential expansion.\\
 There is one exception to the rule that \ppp{type} must encode a potential class: it may also contain the names of two density profiles originally used in \textsc{GalPot} -- \ttt{DiskDensity} or \ttt{SpheroidDensity}. All such components are collected first, and used to construct a \textit{single} instance of \ttt{Multipole} potential with default parameters, plus zero or more instances of \ttt{DiskAnsatz} potentials (according to the number of disk profiles). The source density for this Multipole potential contains all SpheroidDensity and DiskDensity components, plus \textit{negative} contributions of DiskAnsatz potentials (i.e., with inverted sign of their masses). Of course, one may use them also as regular \ppp{density} components (e.g., \ppp{type=CylSpline density=DiskDensity}, which yields comparable accuracy), but in that case each one would create a separate potential expansion, which is of course not efficient. In order to lift this limitation, one may construct all density components individually, manually combine them into a single composite model, and pass it to the constructor of a potential expansion (this approach is used for self-consistent multicomponent models, Section~\ref{sec:SCM}).
-\item \ppp{symmetry} -- defines the symmetry properties of the density model passed to the potential expansion. All built-in models report this property automatically; this parameter is useful if the input is given by an array of particles, or by a user-defined routine returning the density or potential in \Python and \Fortran interfaces. It could be either a text string with one of the standard choices (``spherical``, ``axisymmetric``, ``triaxial``, ``none`` -- only the first letter is used), or a number encoding a more complicated symmetry (see the definitions in \ttt{coords.h}).
+\item \ppp{symmetry} -- defines the symmetry properties of the density model passed to the potential expansion. All built-in models report this property automatically; this parameter is useful if the input is given by an array of particles, or by a user-defined routine returning the density or potential in \Python and \Fortran interfaces. It could be either a text string with one of the standard choices from Table~\ref{tab:Symmetry} (only the first letter is used), or a number encoding a more complicated symmetry (see the definitions in \ttt{coord.h}).
 \item \ppp{file} -- the name of a file with potential expansion coefficients, or with an \Nbody snapshot to be used for creating a potential expansion. In the former case the type of potential expansion is stored in the first line of the file, so the \ppp{type} parameter is not required.
 \end{itemize}
 Parameters defining an analytic density or potential model (if \ppp{type} is a potential expansion, they refer to the \ppp{density} argument, otherwise to \ppp{type}); default values are given in brackets:
@@ -303,34 +346,6 @@ Parameters defining the potential expansions (default values in brackets are all
 \item \ppp{mmax} [lmax] -- the order of azimuthal Fourier expansion in $\phi$ for both  \ttt{CylSpline} and \ttt{Multipole}; 0 means axisymmetry, and $m_\mathrm{max}$ should be $\le l_\mathrm{max}$. Of course, the actual order of expansion in all cases is also determined by the symmetry properties of the input density model -- if it reports to be axisymmetric, no $m\ne 0$ terms will be used anyway.
 \item \ppp{smoothing} [1] -- the amount of smoothing applied during construction of the \ttt{Multipole} potential from an array of particles.
 \end{itemize}
-
-\begin{table}
-\caption{Available density and potential models and their parameters}  \label{tab:PotentialParams}
-\begin{tabular}{l m{5cm} >{\raggedright\arraybackslash}m{6cm}}
-Name & Formula & Parameters \\
-\hline
-\multicolumn{3}{c}{Density-only models} \\[2mm]
-\ttt{DiskDensity} & $\rho = \Sigma_0\,\exp\big(-\frac{R}{R_\mathrm{disk}}-\frac{R_\mathrm{cut}}{R}\big)\times$
-$\left\{ \begin{array}{ll} \delta(z) & \mbox{if } h=0 \\[1mm]
-\frac{1}{2h} \exp\big(-\big|\frac{z}{h}\big|\big) & \mbox{if } h>0 \\[1mm]
-\frac{1}{4|h|}\, \mathrm{sech}^2\big(\big|\frac{z}{2h}\big|\big) & \mbox{if } h<0 \end{array} \right. $ &
-\ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($R_\mathrm{disk}$), \ppp{scaleHeight}~($h$), \ppp{innerCutoffRadius}~($R_\mathrm{cut}$)\\
-\ttt{SpheroidDensity} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
-\ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$),\hspace{1cm} \ppp{gamma}~($\gamma$), \ppp{beta}~($\beta$), \ppp{alpha}~($\alpha$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\ttt{SersicDensity} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$),~\ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\multicolumn{3}{c}{Density/potential models} \\[2mm]
-\ttt{Plummer} & $\Phi = -\frac{M}{\sqrt{a^2+r^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
-\ttt{Isochrone} & $\Phi = - \frac{M}{a + \sqrt{r^2 + a^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
-\ttt{NFW} & $\Phi = -\frac{M}{r} \ln\left(1 + \frac{r}{a}\right)$ & \ppp{mass}~($M$, {\footnotesize note that the total mass is infinite}), \ppp{scaleRadius}~($a$) \\[2mm]
-\ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2}~($b$) \\[2mm]
-\ttt{OblatePerfectEllipsoid}\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\ttt{Logarithmic} & $\Phi = \frac{1}{2} \sigma^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{mass}~($\sigma$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{mass}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
-\multicolumn{3}{l}{\footnotesize $R=\sqrt{x^2+y^2}$ is the cylindrical radius and $\tilde r=\sqrt{x^2+(y/p)^2+(z/q)^2}$ is the ellipsoidal radius}
-\end{tabular}
-\end{table}
 
 These keywords, with some modifications, are also used in potential construction routines in \Python and \Fortran interfaces and in the \Amuse and \Galpy plugins (Sections~\ref{sec:Python}, \ref{sec:Fortran}, \ref{sec:Amuse}, \ref{sec:Galpy}). For instance, \Python interface allows to provide a user-defined function specifying the density profile in the \ppp{density=} argument, or an array of particles in the \ppp{particles=} argument.
 

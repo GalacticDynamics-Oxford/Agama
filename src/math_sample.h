@@ -14,6 +14,9 @@ namespace math{
     still better is if F is bounded from above everywhere in the region.
     The output consists of M sampling points from the given region, such that the density
     of points in the neighborhood of any location X is proportional to the value of F(X).
+    It is far more efficient to draw many samples in a single call rather than repeatedly sample
+    the same function, because a significant amount of effort is spent on exploring the region
+    (determining the portions where the value of the function is highest).
 
     \param[in]  F  is the probability distribution, the dimensionality N of the problem
                 is given by F.numVars();

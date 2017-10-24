@@ -158,9 +158,9 @@ SphHarmIndices::SphHarmIndices(int _lmax, int _mmax, coord::SymmetryType _sym) :
         int lminm = abs(m);   // by default start from the very first coefficient
         if(isReflSymmetric(sym) && m%2!=0)
             lminm = abs(m)+1; // in this case start from the next even l, because step in l is 2
-        if( (isYReflSymmetric(sym)  && m<0) ||
-            (isXReflSymmetric(sym)  && ((m<0) ^ (m%2!=0)) ) ||
-            (isXYReflSymmetric(sym) && m%2!=0) )
+        if( (isYReflSymmetric(sym) && m<0) ||
+            (isXReflSymmetric(sym) && ((m<0) ^ (m%2!=0)) ) ||
+            (isBisymmetric(sym)    && m%2!=0) )
             lminm = lmax+1;  // don't consider this m at all
         lmin_arr[m+mmax] = lminm;
     }
@@ -216,7 +216,7 @@ std::vector<int> getIndicesAzimuthal(int mmax, coord::SymmetryType sym)
         return result;  // in this case all m!=0 indices are zero
     for(int m=1; m<=mmax; m++) {
         // odd-m indices are excluded under the combination of z-reflection and mirror symmetry
-        if(isXYReflSymmetric(sym) && m%2 != 0)
+        if(isBisymmetric(sym) && m%2 != 0)
             continue;
         bool addplusm = true, addminusm = true;
         // in case of y-reflection, only m>=0 indices are present

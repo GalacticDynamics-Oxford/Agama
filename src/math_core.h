@@ -189,7 +189,7 @@ void getRandomPermutation(size_t count, size_t output[]);
 double quasiRandomHalton(size_t index, unsigned int base);
 
 /** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
-static const unsigned int MAX_PRIMES = 10;  // not that there aren't more!
+static const int MAX_PRIMES = 10;  // not that there aren't more!
 static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 
 ///@}

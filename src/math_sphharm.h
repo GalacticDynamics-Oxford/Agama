@@ -78,17 +78,18 @@ void trigMultiAngle(const double phi, const unsigned int m, const bool needSine,
     +-----------------------------------------------------------+
     | invariance       |       coefficients that are zero       |
     | under transform  |     l is odd    |      l is even  |    |
-    |                  |m>0  m>0 m<0  m<0|m>0  m>0 m<0  m<0|m!=0|
+    |                  |m>=0 m>0 m<0  m<0|m>=0 m>0 m<0  m<0|m!=0|
     |                  |even odd even odd|even odd even odd|    |
     |------------------+----------------------------------------|
-    |x -> -x           | .    0   0    .    .   0   0    .    . | ST_XREFLECTION
-    |y -> -y           | .    .   0    0    .   .   0    0    . | ST_YREFLECTION
-    |z -> -z           | 0    .   0    .    .   0   .    0    . | ST_ZREFLECTION
-    |x,y,z -> -x,-y,-z | 0    0   0    0    .   .   .    .    . | ST_REFLECTION
+    |x => -x           | .    0   0    .    .   0   0    .    . | ST_XREFLECTION
+    |y => -y           | .    .   0    0    .   .   0    0    . | ST_YREFLECTION
+    |z => -z           | 0    .   0    .    .   0   .    0    . | ST_ZREFLECTION
+    |x,y,z => -x,-y,-z | 0    0   0    0    .   .   .    .    . | ST_REFLECTION
+    |x,y=>-x,-y | z=>-z| 0    0   0    0    .   0   .    0    . | ST_BISYMMETRIC
     |triaxial sym.     | 0    0   0    0    .   0   0    0    . | ST_TRIAXIAL
-    |z-axis rotation   | .    .   .    .    .   .   .    .    0 | ST_ZROTATION
+    |z-axis rotation   | .    0   0    0    .   0   0    0    0 | ST_ZROTATION
     |axisymmetric      | 0    0   0    0    .   0   0    0    0 | ST_AXISYMMETRIC
-    |spherical         |       only  l=0, m=0 remains nonzero   | ST_SPHERICAL
+    |spherical         |     only  l=0, m=0 remains nonzero     | ST_SPHERICAL
     +-----------------------------------------------------------+
     \endcode
     Another way of representing these symmetries is shown on the diagrams below:

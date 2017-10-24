@@ -165,18 +165,23 @@ void (*defaultCtrlBreakHandler)(int) = NULL;
 
 CtrlBreakHandler::CtrlBreakHandler()
 {
-    // only zero or one instance of this class should exist at any time
-    if(defaultCtrlBreakHandler != NULL)
-        throw std::runtime_error("Ctrl-Break handler already set");
-    ctrlBreakTriggered = false;
-    defaultCtrlBreakHandler = signal(SIGINT, customCtrlBreakHandler);
+    // this class could be instantiated multiple times in nested routines (with some limitations):
+    // the new system interrupt handler is set and the break flag is cleared only for the outermost one.
+    if(defaultCtrlBreakHandler == NULL) {
+        defaultCtrlBreakHandler = signal(SIGINT, customCtrlBreakHandler);
+        ctrlBreakTriggered = false;
+    }
 }
 
 CtrlBreakHandler::~CtrlBreakHandler()
 {
-    // restore the default handler once the instance of the class is destroyed
-    signal(SIGINT, defaultCtrlBreakHandler);
-    defaultCtrlBreakHandler = NULL;
+    // restore the default handler once the instance of the class is destroyed;
+    // if this class is instantiated several times in nested fragments of code,
+    // the default signal handler is restored by the innermost one, but the break flag is not reset.
+    if(defaultCtrlBreakHandler) {
+        signal(SIGINT, defaultCtrlBreakHandler);
+        defaultCtrlBreakHandler = NULL;
+    }
 }
 
 bool CtrlBreakHandler::triggered() { return ctrlBreakTriggered; }

@@ -1,7 +1,7 @@
 This is the AGAMA galaxy modelling framework. To get it working on your computer:
 
 1.  Download the repository.
-2a. Install the required libraries (presently only GSL).
+2a. Install the required libraries (presently only GSL >= 1.15).
 2b. Although not compulsory, you may want to download and install optional libraries:
     - Eigen library for highly optimized linear algebra routines - highly recommended,
     (in its absense the non-optimized substitutes from GSL will be used);
@@ -72,7 +72,7 @@ LINK = $(CXX)
 # Finally, -fPIC is necessary on 64-bit systems for compiling into a shared library
 # (dunno why it isn't on by default), and since the shared library agama.so includes all relevant
 # third-party libraries (GSL, UNSIO, etc.), they also must be compiled with this flag!
-CXXFLAGS += -fPIC -fopenmp -Wall -O3 -march=native -I$(SRCDIR)
+CXXFLAGS += -fPIC -fopenmp -Wall -O2 -march=native -I$(SRCDIR)
 LFLAGS   += -fPIC -fopenmp
 
 # uncomment if you have a C++11-compatible compiler (it is not required but may be more efficient)
@@ -112,6 +112,8 @@ LIBS     += -L/path/to/gsl/lib -lgsl -lgslcblas
 # If everything works well, you should be able to run
 # > python -c 'import agama; print(agama.__version__)'
 # or, better, run some of the example scripts in the pytests folder.
+# on MacOS the following line may need to be added; on some systems -lpython should read -lpython2.7
+#LIBS    += -L/System/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/
 DEFINES  += -DHAVE_PYTHON
 INCLUDES += -I/usr/include/python -I/path/to/numpy/core/include
 LIBS     += -lpython
