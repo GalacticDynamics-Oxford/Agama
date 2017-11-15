@@ -25,6 +25,7 @@
 \newcommand{\ttt}[1]{\textcolor{darkviolet}{\texttt{#1}}}
 \newcommand{\ppp}[1]{\textcolor{darkolive} {\texttt{#1}}}
 \renewcommand{\d}{\partial}
+\newcommand{\D}{\mathrm{d}}
 \newcommand{\bA}{\boldsymbol{A}}
 \newcommand{\bv}{\boldsymbol{v}}
 \newcommand{\bx}{\boldsymbol{x}}
@@ -121,7 +122,7 @@ If $M>N$, there are more equations than variables, and the solution is obtained 
 
 Multidimensional integration over an $N$-dimensional hypercube is performed by the \ttt{integrateNdim} routine, which serves as a unified interface to either \textsc{Cubature} or \textsc{Cuba} library; the former is actually included into the \Agama codebase. Both methods are fully adaptive and have similar performance (either one is better on certain classes of functions). The input function may provide $M\ge 1$ values, i.e., several functions may be integrated simultaneously over the same domain.
 
-\paragraph{Sampling} \label{sec:Sampling}  from a probability distribution (\ttt{sampleNdim}) serves the following task: given a $N$-dimensional function $f(\bx)\ge 0$ over a hypercube domain, construct an array of $M$ random sample points $\bx_k$ such that the density of samples in the neighborhood of any point is proportional to the value of $f$ at that point. Obviously, the function $f$ must have a finite integral over the entire domain, and in fact the integral may be estimated from these samples (however it is not as accurate as the deterministic cubature routines, which are allowed to attribute different weights to each sampled point). This routine uses a multidimensional variant of rejection algorithm with adaptive subdivision of the entire domain into smaller regions, and performing the rejection sampling in each region.
+\paragraph{Sampling} \label{sec:Sampling}  from a probability distribution (\ttt{sampleNdim}) serves the following task: given a $N$-dimensional function $f(\bx)\ge 0$ over a hypercube domain, construct an array of $M$ random sample points $\bx_k$ such that the density of samples in the neighborhood of any point is proportional to the value of $f$ at that point. Obviously, the function $f$ must have a finite integral over the entire domain, and in fact the integral may be estimated from these samples (however it is not as accurate as the deterministic cubature routines, which are allowed to attribute different weights to each sampled point). This routine uses a multidimensional variant of rejection algorithm with adaptive subdivision of the entire domain into smaller regions, and performing the rejection sampling in each region (a more detailed description is given in Section~\ref{sec:MathSamplingDetails}).
 
 \paragraph{Optimization methods}
 A broad range of tasks may be loosely named ``optimization problems'', i.e., finding a minimum of a certain function (objective) of one or many variables under certain constraints.
@@ -404,7 +405,7 @@ In a still more general axisymmetric case, the action/angle variables can be exa
 
 For the most interesting practical case of a non-St\"ackel axisymmetric potential, the actions can only be approximated under the assumption that the motion is integrable and is locally well described by a St\"ackel potential. This is the essence of the ``St\"ackel fudge'' approach \cite{Binney2012}. In a nutshell, it pretends that the potential \textit{is} of a St\"ackel form (without explicitly constructing it), computes the would-be integrals of motion in this presumed potential, and then performs essentially the same steps as the routines for the genuine St\"ackel potential. Actions computed in this way are approximate, in the sense that even for a regular (non-chaotic) motion, they are not exactly conserved along the orbit; the variation of $\bJ$ is smallest for nearly-circular orbits close to the equatorial plane, but typically remains $\lesssim 1-10\%$ even for rather eccentric orbits that stray far from the plane (note that the method does not provide any error estimate), see Figure~\ref{fig:StaeckelAccuracy}. However, if the actual orbit is chaotic or belongs to one of minor resonant families, the variation of estimated actions along the orbit is rather large because the method does not account for resonant motion.
 
-In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the interfocal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Crucially, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
+In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the interfocal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Importantly, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
 The \ttt{ActionFinderAxisymFudge} class pre-computes a table of best-fit values of $\Delta$ as a function of $E,L_z$ (this takes a couple of seconds) and uses interpolation to obtain a suitable value at any point, which is then fed into the routines that compute the actions.
 This is the main workhorse for many higher-level tasks in the \Agama library.
 
@@ -445,23 +446,24 @@ are linear combinations of actions that control the anisotropy of the model in t
 %%%%%%%%%%%%%%
 \subsubsection{Disky components}  \label{sec:DFdisk}
 
-Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks expressed in terms of actions is provided by the \ttt{PseudoIsothermal} class, with many tunable parameters contained in a \ttt{PseudoIsothermalParam} structure. The DF for a single population is given by \cite{BinneyMcMillan2011}:
+Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks \cite{Dehnen1999} expressed in terms of actions \cite{BinneyMcMillan2011} is provided by the \ttt{PseudoIsothermal} class, with tunable parameters contained in a \ttt{PseudoIsothermalParam} structure. The DF for a single population is given by
 \begin{align*}
-f(J) &= f_r(J_r, J_\phi)\; f_z(J_z, J_\phi)\; f_\phi(J_\phi) , \quad \mbox{ where} \\
-f_r  &\equiv \frac{\Omega\, \Sigma}{\pi\, \kappa\, \sigma_r^2}\, \exp\left(-\frac{\kappa\,J_r}{\sigma_r^2}\right) ,\quad
-f_z  \equiv \frac{\nu}{2\pi\, \sigma_z^2 }\,\exp\left(-\frac{\nu\,J_z}{\sigma_z^2}\right) , \quad
-f_\phi \equiv 1 + \tanh\left( \frac{J_\phi}{J_{\phi,0}} \right) , \\
+f(\bJ) &= \frac{\Omega\,\Sigma}{2\pi^2\,\kappa^2} \times
+\frac{\kappa}{\sigma_r^2} \exp\left(-\frac{\kappa\,J_r}{\sigma_r^2}\right) \times
+\frac{\nu}   {\sigma_z^2} \exp\left(-\frac{\nu\,   J_z}{\sigma_z^2}\right) \times
+\left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0 \\
+\exp\left( \frac{2\Omega\,J_\phi}{\sigma_r^2} \right) & \mbox{if }J_\phi<0 \end{array} \right. \\
 \Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \quad
 \sigma_r(R_c) \equiv \sigma_{r,0} \exp( -R_c / R_{\sigma,r} ) , \quad
 \sigma_z(R_c) \equiv \sqrt{2}\,h_\mathrm{disk}\,\nu(R_c).
 \end{align*}
-Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\phi$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\phi)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$, radial scale length $R_\mathrm{disk}$ and scale height $h_\mathrm{disk}$) match those of the DF. The parameter $J_{\phi,0}$ controls the streaming motion (if $J_\phi \ll J_{\phi,0}$, both clockwise and counter-clockwise orbits are equally populated, and in the opposite case only the orbits with positive $J_\phi$ are present).
+Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\mathrm{sum}\equiv |J_\phi| + J_r$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\mathrm{sum})$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$, radial scale length $R_\mathrm{disk}$ and scale height $h_\mathrm{disk}$) match those of the DF.
 A still more general model can describe a composition of populations with different velocity dispersions (see \texttt{df_disk.h} for more details).
 
 %%%%%%%%%%%%%%
-\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
-
-A general way of representing an arbitrary DF in a three-dimensional action space is through an  \hyperref[sec:SplineInterpolation]{interpolating spline} in suitably scaled coordinates. The formulation in terms of B-splines is also an example of a multi-component DF, where each basis function, formed as a tensor product of one-dimensional B-splines, is a separate component. These DFs are used as building blocks in self-consistent models (work in preparation).
+%\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
+%
+%A general way of representing an arbitrary DF in a three-dimensional action space is through an  \hyperref[sec:SplineInterpolation]{interpolating spline} in suitably scaled coordinates. The formulation in terms of B-splines is also an example of a multi-component DF, where each basis function, formed as a tensor product of one-dimensional B-splines, is a separate component. These DFs are used as building blocks in self-consistent models (work in preparation).
 
 %%%%%%%%%%%%%%
 \subsubsection{Spherical isotropic models}  \label{sec:DFspherical}
@@ -561,8 +563,8 @@ Presently this method is restricted to axisymmetric models, due to the lack of m
 This approach is implemented with the help of several classes derived from \ttt{BaseComponent}, the \ttt{SelfConsistentModel} structure which binds together the array of components, the potential, the action finder, and the parameters of potential expansions, and finally the routine \ttt{doIteration}, all defined in \ttt{galaxymodel_selfconsistent.h}. All these concepts are also available in the \Python wrapper (Section~\ref{sec:Python}), and a complete annotated example illustrating the entire workflow is presented both in the \Cpp and \Python variants.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{Data handling}
-\subsubsection{Selection functions}
+%\subsection{Data handling}
+%\subsubsection{Selection functions}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Interfaces with other languages and frameworks}  \label{sec:Interfaces}
@@ -572,7 +574,7 @@ This approach is implemented with the help of several classes derived from \ttt{
 
 The \Python interface provides a large subset of \Agama functionality expressed as Python classes and routines. Presently, this includes:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
-\item A few mathematical tasks such as multidimensional integration and sampling, and penalized spline fitting.
+\item A few mathematical tasks such as multidimensional integration and sampling, penalized spline fitting and density estimate, linear/quadratic optimization solvers.
 \item Unit handling.
 \item Potential and density classes.
 \item Orbit integration.
@@ -716,7 +718,15 @@ This rule also has exceptions -- several wrapper classes used as proxy object fo
 
 \paragraph{Numerical issues} -- efficiency and accuracy -- are taken very seriously throughout the code. Floating-point operations often require great care in re-arranging expressions in a way that avoids catastrophic cancellation errors. A classic example is the formula for the roots of a quadratic equation: $x_{1,2} = (-b \pm\sqrt{b^2-4ac})/(2a)$. In the case of $ac\ll b^2$, one of the two roots is a difference between two very close numbers, thus it may suffer from the loss of precision. Another mathematically equivalent expression is $2c/(-b \mp\sqrt{b^2-4ac})$, and a numerically robust approach is to use both expressions -- each one for the root that has two numbers of the same sign \textit{added}, not subtracted. Going one step further, if the coefficients $a,b,c$ are themselves obtained from other expressions, it may be necessary to reformulate them in such a way as to avoid subtraction under the radical, etc. These details are necessary to ensure robust behaviour in all special and limiting cases; a good example are coordinate conversion routines.
 
-Efficiency is also a prime goal: this includes a careful consideration of algorithmic complexity and minimization of computational effort. Some mathematically equivalent functions have rather different computational cost: for instance, generating two Gaussian random numbers with the Box--Muller algorithm is a few times faster than using the inverse error function; finding a given quantile (e.g., median) of an array can be done in $\mathcal{O}(N)$ operations without sorting the entire array (which costs $\mathcal{O}(N\,\log N)$ operations); and computing potential and three components of force simultaneously is faster than doing it separately. For numerical integration, a suitable coordinate transformation may dramatically improve the accuracy -- or reduce the number of function calls in the adaptive integration routine; often a fixed-order Gauss--Legendre integration is enough in a particular case, with the degree of quadrature selected by extensive numerical experiments.
+Efficiency is also a prime goal: this includes a careful consideration of algorithmic complexity and minimization of computational effort. Some mathematically equivalent functions have rather different computational cost: for instance, generating two Gaussian random numbers with the Box--Muller algorithm is a few times faster than using the inverse error function; finding a given quantile (e.g., median) of an array can be done in $\mathcal{O}(N)$ operations without sorting the entire array (which costs $\mathcal{O}(N\,\log N)$ operations); and computing potential and three components of force simultaneously is faster than doing it separately.
+
+For numerical integration, a suitable coordinate transformation may dramatically improve the accuracy -- or reduce the number of function calls in the adaptive integration routine; often a fixed-order Gauss--Legendre integration is enough in a particular case, with the degree of quadrature selected by extensive numerical experiments.
+Consider, for instance, two one-dimensional integrals $I_a \equiv \int_{-1}^1 \sqrt{1-x^2}\,\D x$,
+$I_b \equiv \int_{-1}^1 1/\sqrt{1-x^2}\,\D x$; their analytical values are respectively $\pi/2$ and $\pi$. Both integrands have integrable endpoint singularities (even though the first one tends to zero as $x\to \pm 1$, it is not analytic at these points), and a na\"ive $N$-point Gauss--Legendre quadrature rule has poor convergence: relative errors are 0.003 (0.0005) with $N=5$ (10) for $I_a$, and 0.1 (0.05) for $I_b$. However, if we apply transformation of the interval $[-1..1]$ onto itself, stretching it near the endpoints, the results are far better: for a substitution $x = (3-y^2)y/2$, the errors in 5- or 10-point rule are $\sim10^{-6}$ or $10^{-12}$ for both functions, while another similar substitution $x = \sin(y\,\pi/2)$ would even make the second integral exact. Such transformations, in exactly the same context, are used, e.g., in computing the actions and frequencies.
+
+Multidimensional integration methods employ adaptive refinement of the integration domain, and in principle should be able to cope with strongly varying or non-analytic functions, again at the expence of accuracy (for a fixed upper limit on the number of function evaluations). However, there is another reason for applying non-trivial hand-crafted scaling transformations: if the function in question is very strongly localized in some small region of the entire domain, the adaptive integration routine may simply miss some part of the domain where none of the initially considered points yielded non-negligible function values, and hence this part was not refined at all. Such situation may arise, e.g., when computing the density $\rho(\bx) = \int f(\bx,\bv)\,\D^3v$ from a DF of a cold disk, that is very narrowly peaked at $v_r=0, v_z=0, v_\phi=v_\mathrm{circ}(r)$; hence we employ a sophisticated transformation that stretches the region around $|v| = v_\mathrm{circ}$, facilitating the task of "hitting the right point".
+
+Dimensional quantities are usually converted to logarithms before applying any scaling transformations, to ensure a (nearly-)scale-invariance. Consider, e.g., $\int_0^\infty f(x)\,\D x$ with a na\"ive transformation of the interval onto $[0..1]$: $x = y/(1-y)$. If the function $f(x)$ peaks between $x=10^6$ and $10^7$ (not uncommon when dealing with astronomical scales), no reasonable adaptive quadrature rule would be able to detect this peak crammed into a tiny interval $1-10^{-6} < y < 1-10^{-7}$! If, on the other hand, we employ a two-stage transformation, $x = \exp(y)$, $y = 1/(1-z)-1/z$, then the peak lies between $0.93<z<0.94$, which is far more likely to be found and handled correctly. Same considerations apply to root-finding and minimization routines; in these cases the added benefit is increased precision. If a root in the na\"ively scaled variable is at $1-10^{-10}$, it has only 5 significant digits; if our relative tolerance in root-finder was $10^{-12}$, the un-scaled variable would carry a relative error of $10^{-2}$! By contrast, in the two-stage transformation the root will be around 0.96 and we only lose one or two digits of precision.
 
 A few words about \texttt{INFINITY} and \texttt{NAN} values. Infinities are valid floating-point numbers and are quite useful in some contexts where a really large number is required (for instance, as the endpoint of the root-finder interval); they propagate correctly through most expressions and some functions (e.g., \texttt{exp}, \texttt{log}, comparison operators). The infamous \texttt{NAN} is a different story: it usually%
 \footnote{In some functions, \texttt{NAN} it is used as a special, usually a default value of an input argument, indicating something like ``value is unknown''.}
@@ -736,7 +746,7 @@ Other typical operations, such as computation of potential or action for many po
 For instance, in the \Python interface, a single call to the potential or action finder may provide an array of points to work with, and the loop is internally parallelized in the \Cpp extension module. 
 
 An important thing to keep in mind is that an exception that may occur in a parallel section should be handled in the same section, otherwise the program immediately aborts. Thus in such loops it is customary to provide a general handler that stores the error text, and then re-throws an exception when the loop is finished.
-Also, the \Python interface provides a way to supply a user-defined \Python callback function to some of the routines implemented in \Cpp, but the standard \Python interpreter has a global locking mechanism preventing its simultaneous usage from multiple threads. Therefore, when such callback functions are used with \Cpp routines, this temporarily disables \texttt{OpenMP} parallelization. (An alternative that is not yet implemented is to allow this callback function to handle a vectorized input instead of one point at a time).
+Also, the \Python interface provides a way to supply a user-defined \Python callback function to some of the routines implemented in \Cpp, but the standard \Python interpreter has a global locking mechanism preventing its simultaneous usage from multiple threads. Therefore, when such callback functions are used with \Cpp routines, this temporarily disables \texttt{OpenMP} parallelization. However, these user-defined functions are invoked with a vector of input points that may be processed in a single call (e.g. using \texttt{numpy} array operations), instead of one point at a time.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -827,16 +837,16 @@ If, on the other hand, one can independently compute both $f(x_i)$ and $f'(x_i)$
 
 This tridiagonal system results in a quintic spline, which provides 5th degree piecewise-polynomial interpolation with three continuous derivatives. It is \textit{not} equivalent to a 5th degree B-spline -- the latter would have 4 continuous derivatives and is fully specified by $K+4$ coefficients, whereas a quintic spline is specified by $2K+2$ numbers (the values and first derivatives at all nodes, plus two endpoint conditions). The accuracy of approximation with a quintic spline is far better than anything achievable with a cubic interpolation -- but only in the case when one may compute the function derivatives independently and accurately enough (i.e., using a cubic spline to find the derivatives results in a quintic spline which is almost equivalent to a cubic one in terms of accuracy).
 
+A common problem with high-order interpolation arises when there are sharp discontinuities in the input data, which lead to overshooting and nasty oscillations in the interpolated curve. To cope with these cases, there is a possibility of applying a regularizing (monotonicity-preserving) filter for a natural cubic spline \cite{Hyman}. As usual, the first derivatives at each node are computed from the standard tridiagonal system under the requirement that the second derivative is continuous. Then the filter examines the behaviour of the cubic interpolation polynomial at each segment and determines whether it is monotonic or not. In the latter case, and if the input data values were monotonic, it adjusts the first derivative, so that the interpolated curve also becomes monotonic. This does not preclude it from having a local maximum or minimum on a segment adjacent to a local extremum of input data points, but sometimes may also soften the amplitude of this maximum. Figure~\ref{fig:SplineMonotonic} illustrates various aspects of the regularization filter. The downside of this filter is that it converts a twice continuously differentiable curve into a generic piecewise-cubic Hermite interpolator with only one continuous derivative, but it typically does so only in the cases when the more smooth curve is actually a worse approximation of the function. One should also keep in mind that this procedure breaks the linearity of spline construction (i.e. a sum of two filtered splines may not be equal to a filtered spline of a summed input points). Thus the regularization filter does not apply by default, but is useful in particular for log-scaled interpolators ($\ln f(\ln x)$ is represented as a cubic spline), where an occasional very small positive value of an input point results in a large jump in the log-scaled curve, which then overshoots and oscillates on nearby segments, aggravated by the inverse exponential scaling.
+
 %%%%%%%%%%%%%%
-\begin{figure}
+\begin{figure}[t]
 \begin{center}
 \includegraphics[width=15cm]{SplineMonotonic.pdf}
 \end{center}
 \caption{Monotonicity-preserving spline (dotted line) compared to the natural cubic spline (solid line). This demonstrates several aspects of regularization filter: it preserves a monotonic trend of input points, avoiding spurious bumps (left part of the plot), does nothing if the spline is smooth enough (center), and preserves the information about local minima/maxima but may soften them somewhat (right). } \label{fig:SplineMonotonic}
 \end{figure}
 %%%%%%%%%%%%
-
-A common problem with high-order interpolation arises when there are sharp discontinuities in the input data, which lead to overshooting and nasty oscillations in the interpolated curve. To cope with these cases, there is a possibility of applying a regularizing (monotonicity-preserving) filter for a natural cubic spline \cite{Hyman}. As usual, the first derivatives at each node are computed from the standard tridiagonal system under the requirement that the second derivative is continuous. Then the filter examines the behaviour of the cubic interpolation polynomial at each segment and determines whether it is monotonic or not. In the latter case, and if the input data values were monotonic, it adjusts the first derivative, so that the interpolated curve also becomes monotonic. This does not preclude it from having a local maximum or minimum on a segment adjacent to a local extremum of input data points, but sometimes may also soften the amplitude of this maximum. Figure~\ref{fig:SplineMonotonic} illustrates various aspects of the regularization filter. The downside of this filter is that it converts a twice continuously differentiable curve into a generic piecewise-cubic Hermite interpolator with only one continuous derivative, but it typically does so only in the cases when the more smooth curve is actually a worse approximation of the function. One should also keep in mind that this procedure breaks the linearity of spline construction (i.e. a sum of two filtered splines may not be equal to a filtered spline of a summed input points). Thus the regularization filter does not apply by default, but is useful in particular for log-scaled interpolators ($\ln f(\ln x)$ is represented as a cubic spline), where an occasional very small positive value of an input point results in a large jump in the log-scaled curve, which then overshoots and oscillates on nearby segments, aggravated by the inverse exponential scaling.
 
 Let's move to the multidimensional case, where the interpolation is provided on a separable grid with piecewise-polynomial functions of degree $N$ (per dimension) on each cell: $\sum_{p=0}^{N}\sum_{q=0}^N\dots C_{pq\dots} x_1^p\,x_2^q\dots$
 A straightforward way of performing a multidimensional interpolation is to employ a sequence of 1d interpolation operations for each dimension separately. The 1d interpolation function is defined by $N+1$ coefficients -- the values and certain derivatives of the polynomial at two adjacent nodes in the $d$-th coordinate. These coefficients are obtained from $(N-1)$-dimensional interpolation along other coordinates in each of these two nodes.
@@ -909,7 +919,17 @@ It varies from $N_\mathrm{basis}$ for $\lambda=0$ to 2 for $\lambda\to\infty$ (w
 \mathrm{AIC_C} \equiv \ln(\mathrm{RSS}) + \frac{2\,(\mathrm{EDF}+1)}{N_\mathrm{data}-\mathrm{EDF}-2}.
 \end{align}
 
-Often one may wish to apply a somewhat stronger smoothing than the one given by minimizing AIC, for instance, by allowing it to be larger than the minimum value by a specified amount $\Delta\mathrm{AIC}\sim \mathcal{O}(1)$. In both cases, the corresponding value of $\lambda$ is  obtained by standard one-dimensional minimization or root-finding routines.
+Often one may wish to apply a somewhat stronger smoothing than the one given by minimizing AIC, for instance, by allowing it to be larger than the minimum value by a specified amount $\Delta\mathrm{AIC}\sim \mathcal{O}(1)$. In both cases, the corresponding value of $\lambda$ is  obtained by standard one-dimensional minimization or root-finding routines. Figure~\ref{fig:SplineFit} illustrates the method.
+
+%%%%%%%%%%%%%%
+\begin{figure}[t]
+\begin{center}
+\includegraphics[width=12cm]{SplineFit.pdf}
+\end{center}
+\caption{Penalized spline fit to noisy data. $N_\mathrm{data}=1000$ points follow a sine curve with a random noise in $y$-coordinate. A non-penalized spline fit with 100 nodes (red dashed line) is overfitting the noise, whereas an optimally-smoothed spline with the same number of points (solid green line) recovers the original trend very well; of course, we could use a far smaller number of nodes ($\lesssim 10$) and still get a decent fit, but the optimal amount of smoothing prevents overfitting even if the node spacing is too dense. Finally, dotted magenta line illustrates the effect of oversmoothing.
+} \label{fig:SplineFit}
+\end{figure}
+%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%
 \subsubsection{Penalized spline density estimate}  \label{sec:MathSplineDensityDetails}
@@ -976,7 +996,7 @@ Here the gradient and hessian of $G_0$ are taken at the overall best-fit amplitu
 Here $\ln\mathcal{L}_\mathrm{data}$ is the expression in brackets in (\ref{eq:MaxLikelihoodDensity}). The optimal value of $\lambda>0$ that maximizes the cross-validation score is found by a simple one-dimensional search. We first assign a reasonable initial guess for amplitudes (approximating the density as a Gaussian with the mean and dispersion computed from input samples). At each step, the multidimensional nonlinear root-finder routine is invoked to find best-fit amplitudes $\bA$ for the given $\lambda$, starting from the current initial guess. If it was successful and $\ln\mathcal{L}_\mathrm{CV}(\lambda)$ is higher than the current best estimate, the initial guess is replaced with the best-fit amplitudes: this not only speeds up the root-finder, but also improves the convergence. The range of $\lambda$ is progressively narrowed until the maximum has been located with sufficient accuracy, at which point we return the last successful array of $\bA$. 
 
 %%%%%%%%%%%%%%
-\begin{figure}
+\begin{figure}[t]
 \begin{center}
 \includegraphics[width=12cm]{SplineLogDensity.pdf}
 \end{center}
@@ -1000,6 +1020,39 @@ Maximization of cross-validation score is considered to be ``optimal'' smoothing
 
 We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
 
+%%%%%%%%%%%%%%
+\subsubsection{Sampling}  \label{sec:MathSamplingDetails}
+
+The sampling routine performs the following task: given an $D$-dimensional function $f(\bx)\ge 0$ defined in a rectangular domain (without loss of generality may take it to be a unit hypercube $[0..1]^D$), generate an array of $N$ points $\bx_i$ such that their density in the vicinity of any point $\bx$ is proportional to $f(\bx)$. In other words, $f$ is interpreted as a probability distribution function and is sampled with equal-weight samples; in fact the integral $\int f(\bx)\, \D^D x = A$ needs not be unity, and is itself estimated by the routine.
+
+We employ an adaptive rejection sampling method.
+The entire domain $\mathcal{V}$ is partitioned hierarchically into smaller hyperrectangles (cells) $\mathcal{V}_c$, an envelope function $\bar f_c$ (constant in each cell) is constructed, and a rejection sampling is used to draw output points from each cell. This requires several (up to 10--20) iterations, during each one this partitioning is further refined in regions with where the function values are largest, and more trial points are drawn. The cells are organized into a tree structure, where each non-leaf cell is split into two equal-volume child cells along some dimension. Each leaf cell keeps the list of trial points $\bx_{c,k}\in\mathcal{V}_c$ that belong to this cell; when a cell is split in two halves, these points are distributed among the child cells.
+The procedure, illustrated in Figure~\ref{fig:Sampling}, can be summarized as follows:
+
+%%%%%%%%%%%%%%
+\begin{figure}
+\begin{center}
+\includegraphics[width=15cm]{Sampling.pdf}
+\end{center}
+\caption{Illustration of the adaptive rejection sampling algorithm in the domain $[-1..2]^2$, recursively partitioned into $\sim 100$ rectangular cells. Left panel shows $10^4$ points sampled from $f(x,y) = \exp[-R(x,y)]$, where $R(x,y) \equiv (1-x)^2-100(y-x^2)^2$ is the Rosenbrock function. In the right panel cells are colored according to the density of trial points (successive shades are $2\times$ denser).
+} \label{fig:Sampling}
+\end{figure}
+%%%%%%%%%%%%
+
+\begin{enumerate}  \setcounter{enumi}{-1}
+\item We start with only one cell $\mathcal{V}_1$ covering the entire domain, and sprinkle $M_1$ sampling points $\bx_k$ uniformly in this cell. At this stage, the estimate of the integral is just
+\begin{align}
+A = \frac{\mathrm{vol}(\mathcal{V}_1)}{M_1} \sum_{k=1}^{M_1} f(\bx_k).
+\end{align}
+\item \label{step:computeIntegral}
+At each iteration, we first loop over all leaf cells $\mathcal{V}_c$ in the tree (those that are not split into child cells), and consider all $M_c$ trial points $\bx_{c,k}$ belonging to $\mathcal{V}_c$. The integral $A$ is estimated as \begin{align}
+A = \sum_{c=1}^{N_\mathrm{cell}} \frac{\mathrm{vol}(\mathcal{V}_c)}{M_c} \sum_{k=1}^{M_c} f(\bx_{c,k}).
+\end{align}
+\item \label{step:refinement} We then perform another scan over all leaf cells and check whether they contain enough trial points for the rejection sampling procedure. A trial point $\bx_{c,k}$ can be selected as one of $N$ output samples with probability $f(\bx_{c,k}) / \bar f_c$, where $\bar f_c \equiv \frac{A}{N} \frac{M_c}{\mathrm{vol}(\mathcal{V}_c)}$ is the "envelope" function, constant across the cell; clearly we need $\bar f_c$ to be larger than the maximum value of $f(\bx\in\mathcal{V}_c)$. If this condition is not satisfied, the cell is scheduled for refinement.
+\item For each such cell that needs to be refined, we have two choices: either to add more trial points into the entire cell (thus increasing $M_c$ and hence pushing up the envelope function), or first split the cell in two halves and consider both of them in turn. There is a lower limit $M_\mathrm{min}$ on the number of trial points in a cell, and splitting is possible only if child cells would contain at least that many points. We examine all possible dimensions along which the cell could be split, and choose the one with the lowest entropy (i.e. the function varies more significantly along this dimension). The two new child cells inherit the parent cell's trial points, are added to the end of the list and will be scanned in turn during the same pass (at least one of them will need to be further refined). If the cell contains less than $2M_\mathrm{min}$ trial points and hence cannot be split, we double the number of trial points $M_c$ in it (add the same number of new points uniformly distributed in the cell), so that it could be split (if necessary) on the next iteration.
+\item If we have added new trial points into any cell, we repeat the procedure from step~\ref{step:computeIntegral}. 
+\item Otherwise the iterative refinement is complete, and we draw $N$ output points from the trial points, with the probability described in step~\ref{step:refinement}, and finish.
+\end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Potentials}  \label{sec:PotentialDetails}
@@ -1368,6 +1421,9 @@ Cohn H., 1980, ApJ, 242, 765
 
 \bibitem{Dehnen1993}
 Dehnen W., 1993, MNRAS, 265, 250
+
+\bibitem{Dehnen1999}
+Dehnen W., 1999, AJ, 118, 1201
 
 \bibitem{Dehnen2000}
 Dehnen W., 2000, ApJL, 536, L39

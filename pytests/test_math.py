@@ -7,7 +7,7 @@ import agama, numpy, matplotlib.pyplot as plt
 # where N is the dimension of the space and M is the number of points where
 # the function should be evaluated simultaneously (for performance reasons),
 # i.e., it should operate with columns of the input array x[:,0], x[:,1], etc.
-def fnc(x):
+def fnc(x):   # eggbox function
     return numpy.maximum(0, numpy.sin(11*numpy.pi*x[:,0]) * numpy.sin(15*numpy.pi*x[:,1]))
 
 valI,errI,_ = agama.integrateNdim(fnc, 2, maxeval=50000)

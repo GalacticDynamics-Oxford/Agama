@@ -46,6 +46,10 @@ inline bool isFinite(double x) { return x==x && 1/x!=0; }
 #define M_SQRT2  1.41421356237309504880168872421
 #endif
 
+#ifndef M_SQRT3
+#define M_SQRT3  1.73205080756887729352744634151
+#endif
+
 #define TWO_PI_CUBE 248.050213442398561403810520537
 
 /** Functions and classes for basic and advanced math operations */

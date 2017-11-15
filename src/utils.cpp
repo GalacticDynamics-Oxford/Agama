@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <cassert>
 #include <signal.h>
 // stack trace presumably only works with GCC
 #ifdef __GNUC__
@@ -159,29 +160,26 @@ namespace {
 volatile bool ctrlBreakTriggered;
 /// signal handler installed during lengthy computations that triggers the flag
 void customCtrlBreakHandler(int) { ctrlBreakTriggered = true; }
-/// previous signal handler restored after the computation is finished
-void (*defaultCtrlBreakHandler)(int) = NULL;
+/// a stack of previous signal handlers restored after the computation is finished
+std::vector<void(*)(int)> prevCtrlBreakHandler;
 }
 
 CtrlBreakHandler::CtrlBreakHandler()
 {
-    // this class could be instantiated multiple times in nested routines (with some limitations):
-    // the new system interrupt handler is set and the break flag is cleared only for the outermost one.
-    if(defaultCtrlBreakHandler == NULL) {
-        defaultCtrlBreakHandler = signal(SIGINT, customCtrlBreakHandler);
+    // this class could be instantiated multiple times in nested routines,
+    // but the break flag is cleared only for the outermost one.
+    if(prevCtrlBreakHandler.empty())
         ctrlBreakTriggered = false;
-    }
+    // store the previous signal handler on the stack, and set the new one
+    prevCtrlBreakHandler.push_back(signal(SIGINT, customCtrlBreakHandler));
 }
 
 CtrlBreakHandler::~CtrlBreakHandler()
 {
-    // restore the default handler once the instance of the class is destroyed;
-    // if this class is instantiated several times in nested fragments of code,
-    // the default signal handler is restored by the innermost one, but the break flag is not reset.
-    if(defaultCtrlBreakHandler) {
-        signal(SIGINT, defaultCtrlBreakHandler);
-        defaultCtrlBreakHandler = NULL;
-    }
+    // restore the previous handler once the instance of the class is destroyed
+    assert(!prevCtrlBreakHandler.empty());       // it must have been set in the constructor
+    signal(SIGINT, prevCtrlBreakHandler.back()); // restore the previous handler
+    prevCtrlBreakHandler.pop_back();             // and eliminate it from the stack
 }
 
 bool CtrlBreakHandler::triggered() { return ctrlBreakTriggered; }

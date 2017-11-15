@@ -1083,7 +1083,7 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
             dPhi0dz *= Phi0;
         }
     }
-    
+
     // if the potential is axisymmetric, skip the Fourier transform and amplitude scaling
     if(mmax==0) {
         if(val)

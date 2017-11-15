@@ -18,30 +18,34 @@ namespace{   // internal definitions
 //------- HELPER ROUTINES -------//
 
 /** convert from scaled velocity variables to the actual velocity.
-    \param[in]  vars are the scaled variables: chi, theta/Pi, phi/(2*Pi),
-    where the magnitude of the velocity is v = v_esc * chi * zeta / (1 - zeta - chi + 2 zeta chi),
-    and the latter two quantities specify the orientation of velocity vector 
+    \param[in]  vars are the scaled variables: chi, psi, phi/(2*Pi),
+    where the magnitude of the velocity is v = v_esc * g(chi, zeta), g is some scaling function,
+    and the two angles {theta(psi), phi} specify the orientation of velocity vector 
     in spherical coordinates centered at a given point.
     \param[in]  vesc is the maximum magnutude of velocity (equal to the escape velocity).
-    \param[in]  zeta is the scaling factor for the velocity magnitude;
-    it is assigned to be the ratio of circular to escape velocity at the given radius,
-    because then chi=1/2 corresponds to v=v_circ; since the adaptive integration routine
-    will likely explore this value at the very beginning, this minimizes the chance of missing
-    an crucial part of the phase space in the case that the DF is very strongly peaked near
-    the circular velocity (as happens for a cold disk-like DF).
+    \param[in]  zeta is the scaling factor for the velocity magnitude -
+    the ratio of circular to escape velocity at the given radius.
+    The non-trivial transformation is needed to accurately handle distribution functions of
+    cold disks at large radii, which are very strongly peaked near {v_R,v_z,v_phi} = {0,0,v_circ}.
+    To improve the robustness of integration, we make sure that a large proportion of unit cube
+    in scaled variables maps onto a relatively small region around this circular velocity:
+    the scaling function g(chi) is nearly horizontal for a large range of chi when its value
+    is close to zeta, and the angle theta = pi * psi^2, i.e. again a large range of psi maps
+    onto a small region of theta near zero, where the velocity is directed nearly azimuthally.
     \param[out] jac (optional) if not NULL, output the jacobian of transformation.
-    \return  three components of velocity in cylindrical coordinates
+    \return  three components of velocity in cylindrical coordinates.
 */
 inline coord::VelCyl unscaleVelocity(
     const double vars[], const double vesc, const double zeta, double* jac=0)
 {
     const double
-        costheta = cos(M_PI * vars[1]),
-        sintheta = sin(M_PI * vars[1]),
-        inv = 1. / (1 - zeta + (2 * zeta - 1) * vars[0]),
-        vel = vars[0] * vesc * zeta * inv;
+        costheta = cos(M_PI * pow_2(vars[1])),
+        sintheta = sin(M_PI * pow_2(vars[1])),
+        eta = sqrt(1/zeta-1) + 1,
+        chi = vars[0] * eta - 1,
+        vel = vesc * zeta * (1 + math::sign(chi) * pow_2(chi));
     if(jac)
-        *jac = 2*M_PI*M_PI * zeta * (1-zeta) * vesc * pow_2(vel * inv) * sintheta;
+        *jac = 8*M_PI*M_PI * vars[1] * zeta * fabs(chi) * eta * vesc * pow_2(vel) * sintheta;
     return coord::VelCyl(
         vel * sintheta * cos(2*M_PI * vars[2]),
         vel * sintheta * sin(2*M_PI * vars[2]),
@@ -62,7 +66,7 @@ inline void getVesc(
     coord::GradCyl grad;
     poten.eval(pos, &Phi, &grad);
     vesc = sqrt(-2. * Phi);
-    zeta = fmin(0.75, fmax(0.5, sqrt(grad.dR * pos.R) / vesc));
+    zeta = fmin(0.9, fmax(0.1, sqrt(grad.dR * pos.R) / vesc));
     if(!isFinite(vesc)) {
         throw std::invalid_argument("Error in computing moments: escape velocity is undetermined at "
             "R="+utils::toString(pos.R)+", z="+utils::toString(pos.z)+", phi="+utils::toString(pos.phi)+

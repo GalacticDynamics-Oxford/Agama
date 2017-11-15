@@ -1010,8 +1010,9 @@ double ScaledIntegrandEndpointSing::y_from_x(const double x) const
             utils::toString(x_low)+":"+utils::toString(x_upp)+"]");
     if(x==x_low) return 0;
     if(x==x_upp) return 1;
-    double phi=acos(1-2*(x-x_low)/(x_upp-x_low))/3.0;
-    return (1 - cos(phi) + M_SQRT3*sin(phi))/2.0;
+    if(x==0.5*(x_low+x_upp)) return 0.5;
+    double phi = (1./3) * acos(1 - 2 * (x-x_low) / (x_upp-x_low));
+    return 0.5 - 0.5 * cos(phi) + 0.5*M_SQRT3 * sin(phi);
 }
 
 double ScaledIntegrandEndpointSing::value(const double y) const 

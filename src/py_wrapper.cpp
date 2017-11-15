@@ -39,6 +39,7 @@
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_losvd.h"
 #include "galaxymodel_selfconsistent.h"
+#include "galaxymodel_spherical.h"
 #include "galaxymodel_velocitysampler.h"
 #include "math_core.h"
 #include "math_optimization.h"
@@ -2402,11 +2403,7 @@ PyObject* DistributionFunction_totalMass(PyObject* self)
         return NULL;
     }
     try{
-        double err;
-        double val = ((DistributionFunctionObject*)self)->df->totalMass(1e-5, 1e6, &err);
-        if(err>1e-5*val)
-            utils::msg(utils::VL_WARNING, "Agama", "can't reach tolerance in df->totalMass: "
-            "rel.err="+utils::toString(err/val));
+        double val = ((DistributionFunctionObject*)self)->df->totalMass();
         return Py_BuildValue("d", val / conv->massUnit);
     }
     catch(std::exception& e) {
@@ -2908,8 +2905,7 @@ bool computeVDFatPoint(const galaxymodel::GalaxyModel& model, const coord::PosCy
     try{
         // create a default grid in velocity space (if not provided by the user), in internal units
         double v_max = sqrt(-2*model.potential.value(point));
-        std::vector<double> defaultgrid =
-            math::mirrorGrid(math::createNonuniformGrid(51, v_max*0.01, v_max, true));
+        std::vector<double> defaultgrid = math::createUniformGrid(101, -v_max, v_max);
 
         // convert the user-provided grids to internal units, or use the default grid
         std::vector<double> gridvR(defaultgrid), gridvz(defaultgrid), gridvphi(defaultgrid);

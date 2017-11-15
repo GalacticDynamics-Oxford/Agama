@@ -341,7 +341,7 @@ public:
 std::vector<double> constructCubicSpline(const std::vector<double>& xval,
     const std::vector<double>& fval, double derivLeft=NAN, double derivRight=NAN)
 {
-    size_t numPoints = xval.size();
+    const size_t numPoints = xval.size();
     if(fval.size() != numPoints)        
         throw std::length_error("CubicSpline: input arrays are not equal in length");
 
@@ -369,7 +369,20 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
         mat(numPoints-1,numPoints-2) = 0; // below
         rhs[numPoints-1] = derivRight;
     }
-    return solveBand(mat, rhs);
+    std::vector<double> fder = solveBand(mat, rhs);
+    
+    // check if the input nodes and values are symmetric w.r.t. grid center -
+    // if yes, make the derivatives exactly antisymmetric too
+    bool symmetric = numPoints%2==1;
+    for(size_t i=0; symmetric && i<numPoints/2; i++)
+        symmetric &= xval[i] == -xval[numPoints-1-i] && fval[i] == fval[numPoints-1-i];
+    if(symmetric) {
+        for(size_t i=0; i<numPoints/2; i++)
+            fder[i] = -fder[numPoints-1-i];
+        fder[numPoints/2] = 0.;
+    }
+
+    return fder;
 }
 
 // compute the 2nd derivative at each grid node from the condition that the 3rd derivative
@@ -611,7 +624,7 @@ CubicSpline::CubicSpline(const std::vector<double>& xvalues, const std::vector<d
     if(fval.size() == numPoints+2) {
         // initialize from the amplitudes of B-splines defined at these nodes
         std::vector<double> ampl(fvalues);  // temporarily store the amplitudes of B-splines
-        fval.assign(numPoints, 0);
+        fval.assign(numPoints, 0.);
         fder.resize(numPoints);
         for(size_t i=0; i<numPoints; i++) {
             // compute values and first derivatives of B-splines at grid nodes

@@ -16,30 +16,30 @@ are needed to converge towards a self-consistent model.
 
 import agama, numpy, ConfigParser, os, sys
 
+# write out the rotation curve for the entire model (not split by components)
 def writeRotationCurve(filename, potential):
     potential.export(filename)
     radii = numpy.logspace(-2, 1.5, 71)
     vcirc = (-potential.force( numpy.vstack((radii, radii*0, radii*0)).T)[:,0] * radii)**0.5
     numpy.savetxt(filename, numpy.vstack((radii, vcirc)).T, fmt="%.6g", header="radius\tv_circ")
 
+# print some diagnostic information after each iteration
 def printoutInfo(model, iteration):
     densDisk = model.components[0].getDensity()
     densBulge= model.components[1].getDensity()
     densHalo = model.components[2].getDensity()
-    pt0 = (2.0, 0, 0)
-    pt1 = (2.0, 0, 0.25)
     print \
         "Disk  total mass=%g," % densDisk.totalMass(), \
-        "rho(R=2,z=0)=%g, rho(R=2,z=0.5)=%g" % \
-        (densDisk.density(pt0), densDisk.density(pt1))
+        "rho(R=2,z=0)=%g, rho(R=2,z=0.25)=%g" % \
+        (densDisk.density(2, 0, 0), densDisk.density(2, 0, 0.25))
     print \
         "Bulge total mass=%g," % densBulge.totalMass(), \
-        "rho(R=0.5,z=0)=%g" % \
+        "rho(R=0.4,z=0)=%g" % \
         (densBulge.density(0.4, 0, 0))
     print \
         "Halo  total mass=%g," % densHalo.totalMass(), \
-        "rho(R=2,z=0)=%g, rho(R=2,z=0.25)=%g" % \
-        (densHalo.density(pt0), densHalo.density(pt1))
+        "rho(R=2,z=0)=%g, rho(R=0,z=2)=%g" % \
+        (densHalo.density(2, 0, 0), densHalo.density(0, 0, 2))
     print "Potential at origin=-(%g)^2," % (-model.potential.potential(0,0,0))**0.5, \
         "total mass=%g" % model.potential.totalMass()
     densDisk. export("dens_disk_iter" +str(iteration));
@@ -51,7 +51,6 @@ if __name__ == "__main__":
     # read parameters from the INI file
     iniFileName = os.path.dirname(os.path.realpath(sys.argv[0])) + "/../data/SCM3.ini"
     ini = ConfigParser.RawConfigParser()
-    ini.optionxform=str  # do not convert key to lowercase
     ini.read(iniFileName)
     iniPotenHalo  = dict(ini.items("Potential halo"))
     iniPotenBulge = dict(ini.items("Potential bulge"))
@@ -105,16 +104,22 @@ if __name__ == "__main__":
         printoutInfo(model, iteration)
 
     print "\033[1;33mComputing disk density and velocity profiles\033[0m"
-    R   = numpy.linspace(0.2, 10, 50)
+    # take only the disk component
+    modelDisk = agama.GalaxyModel(potential=model.potential, df=dfDisk, af=model.af)
+    # radial grid for computing various quantities in the disk plane
+    Rdisk = float(iniPotenDisk["scaleradius"])
+    Hdisk = float(iniPotenDisk["scaleheight"])
+    R = agama.nonuniformGrid(48, 0.01*Rdisk, 10.0*Rdisk)
     xyz = numpy.column_stack((R, R*0, R*0))
-    Sigma,_   = agama.GalaxyModel(potential=model.potential, df=dfDisk, af=model.af).projectedMoments(R)
-    rho,sigma = agama.GalaxyModel(potential=model.potential, df=dfDisk, af=model.af).moments(xyz)
+    Sigma,_ = modelDisk.projectedMoments(R)
+    rho,vmean,sigma = modelDisk.moments(xyz, vel=True)
     force, deriv = model.potential.forceDeriv(xyz)
     kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/R)
     ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma
     numpy.savetxt("disk_plane",
-        numpy.vstack((R, Sigma, rho, sigma[:,0]**0.5, sigma[:,1]**0.5, ToomreQ)).T,
-        header="R Sigma rho(R,z=0) sigma_R sigma_z ToomreQ", fmt="%.6g")
+        numpy.vstack((R, Sigma, rho, sigma[:,0]**0.5, sigma[:,1]**0.5,
+        (sigma[:,2]-vmean[:,2]**2)**0.5, vmean[:,2], (-R*force[:,0])**0.5, ToomreQ)).T,
+        header="R Sigma rho(R,z=0) sigma_R sigma_z sigma_phi v_phi,mean v_circ ToomreQ", fmt="%.6g")
 
     # export model to an N-body snapshot
     print "\033[1;33mCreating an N-body representation of the model\033[0m"

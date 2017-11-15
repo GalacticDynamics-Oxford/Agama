@@ -20,7 +20,7 @@
 #include "debug_utils.h"
 #include "utils.h"
 
-const double reqRelError = 1e-4;
+const double reqRelError = 1e-5;
 const int maxNumEval = 1e5;
 const char* errmsg = "\033[1;31m **\033[0m";
 std::string histograms;
@@ -172,6 +172,7 @@ int main(){
     bool ok = true;
     ok &= testActionSpaceScaling(df::ActionSpaceScalingTriangLog());
     ok &= testActionSpaceScaling(df::ActionSpaceScalingRect(0.765432,0.234567));
+    if(!ok) std::cout << "Scaling transformation in action space failed\n";
 
     // test double-power-law distribution function in a spherical Hernquist potential
     // NB: parameters obtained by fitting (example_df_fit.cpp)

@@ -13,15 +13,15 @@ actions::Actions ActionSpaceScalingTriangLog::toActions(const double vars[], dou
     const double u = vars[0], v = vars[1], w = vars[2];
     if(u<0 || u>1 || v<0 || v>1 || w<0 || w>1)
         throw std::range_error("ActionSpaceScaling: input variables outside unit cube");
-    const double
-    Jsum = exp( 1/(1-u) - 1/u ),                         // Jr+Jz+|Jphi|
-    Jm   = v==0 || v==1 ? 0 : Jsum * (1 - fabs(2*v-1));  // Jr+Jz
+    const double vv = v*v * (3-2*v),            // cubic transformation to stretch the range near v=0,v=1
+    Js = exp( 1/(1-u) - 1/u ),                  // hypot(Jr+Jz, Jphi)
+    Jm = v==0 || v==1 ? 0 : Js * sin(M_PI*vv);  // Jr+Jz
     if(jac) {
-        *jac = (2 - fabs(4*v-2)) * pow_3(Jsum) * (1/pow_2(1-u) + 1/pow_2(u));
-        if(!(*jac > 1e-100 && *jac < 1e100))  // if near J=0 or infinity, set jacobian to zero
+        *jac = M_PI * 6*v*(1-v) * Jm * Js * Js * (1/pow_2(1-u) + 1/pow_2(u));
+        if(!(*jac > 1e-100 && *jac < 1e100))    // if near J=0 or infinity, set jacobian to zero
             *jac = 0;
     }
-    return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), v==0.5 ? 0 : Jsum * (2*v-1));
+    return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), v==0.5 ? 0 : Js * cos(M_PI*vv));
 }
 
 void ActionSpaceScalingTriangLog::toScaled(const actions::Actions &acts, double vars[3]) const
@@ -29,13 +29,15 @@ void ActionSpaceScalingTriangLog::toScaled(const actions::Actions &acts, double 
     if(!(acts.Jr>=0 && acts.Jz>=0 && acts.Jphi==acts.Jphi))
         throw std::range_error("ActionSpaceScaling: input actions out of range");
     double Jm = acts.Jr + acts.Jz;
-    double Js = Jm + fabs(acts.Jphi);
+    double Js = sqrt(pow_2(Jm) + pow_2(acts.Jphi));
     double lJ = 0.5*log(Js);
+    double xi = atan2(Jm, acts.Jphi) / M_PI;  // valid for all input arguments
+    double phi= (1./3) * acos(1 - 2 * xi);    // aux angle in the solution of a cubic eqn
     vars[0] = fabs(lJ) < 1 ?
         1 / (1 + sqrt(1 + pow_2(lJ)) - lJ) :
         0.5 * (sqrt(1 + pow_2(1/lJ)) * math::sign(lJ) + 1 - 1/lJ);
-    vars[1] = acts.Jphi==0 ? 0.5 : acts.Jphi==INFINITY ? 1 : acts.Jphi==-INFINITY ? 0 :
-        0.5 + 0.5 * acts.Jphi / Js;
+    vars[1] = xi==0 || xi==0.5 || xi==1. ? xi :   // for some input values return the exact result
+        0.5 * (1 - cos(phi) + M_SQRT3*sin(phi));  // otherwise the solution of a cubic eqn
     vars[2] = acts.Jr==0 ? 0 : acts.Jr==INFINITY ? 1 : acts.Jr / Jm;
 }
 
@@ -72,7 +74,6 @@ void ActionSpaceScalingRect::toScaled(const actions::Actions &acts, double vars[
     vars[2] = Jm==0 ? 0 : Jm==INFINITY ? 0 : acts.Jr / Jm;
 }
 
-
 /// helper class for computing the integral of distribution function f
 /// or f * ln(f)  if LogTerm==true, in scaled coords in action space.
 template <bool LogTerm>
@@ -100,7 +101,7 @@ public:
             // we're (almost) at zero or infinity in terms of magnitude of J
             // at infinity we expect that f(J) tends to zero,
             // while at J->0 the jacobian of transformation is exponentially small.
-        }            
+        }
         values[0] = val;
     }
 

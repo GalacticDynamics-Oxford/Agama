@@ -37,8 +37,12 @@ namespace raga {
 
 /** Information about an encounter of a particle with the binary supermassive black hole */
 struct BinaryEncounterData {
-    double deltaE, deltaLz;  // accumulated change in energy and angular momentum during encounter
-    BinaryEncounterData(double dE=0, double dLz=0) : deltaE(dE), deltaLz(dLz) {}
+    double Tbegin, Tlength; ///< start time of encounter and its duration
+    double Ebegin, Lbegin;  ///< energy and total angular momentum at the beginning of encounter
+    double deltaE, deltaLz; ///< accumulated change in energy and z-angular momentum during encounter
+    double costheta, phi;   ///< direction of velocity at the end of encounter (angles in spherical coord)
+    BinaryEncounterData(double Tb=0, double Eb=0, double Lb=0) :
+        Tbegin(Tb), Tlength(0), Ebegin(Eb), Lbegin(Lb), deltaE(0), deltaLz(0), costheta(NAN), phi(NAN) {}
 };
 
 /** List of encounters for each particle during an episode */

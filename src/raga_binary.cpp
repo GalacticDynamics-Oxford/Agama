@@ -5,6 +5,8 @@
 #include <cmath>
 #include <fstream>
 #include <cassert>
+#include <algorithm>
+#include <utility>
 
 namespace raga {
 
@@ -121,12 +123,17 @@ orbit::StepResult RuntimeBinary::processTimestep(
     // if the encounter started during the current timestep,
     // we add a new record to the list of encounters for this orbit,
     // otherwise we update the most recent encounter record
-    if(newEncounter)
-        encountersList.push_back(BinaryEncounterData(Eend-Ebegin, Lzend-Lzbegin-Lztorque));
-    else {
-        encountersList.back().deltaE  += Eend -Ebegin;
-        encountersList.back().deltaLz += Lzend-Lzbegin-Lztorque;
+    if(newEncounter) {
+        double Lbegin = sqrt(pow_2(ptbegin[1] * ptbegin[5] - ptbegin[2] * ptbegin[4]) +
+            pow_2(Lzbegin) + pow_2(ptbegin[2] * ptbegin[3] - ptbegin[0] * ptbegin[5]) );
+        encountersList.push_back(BinaryEncounterData(tbeginEnc, Ebegin, Lbegin));
     }
+    BinaryEncounterData& enc = encountersList.back();
+    enc.Tlength += tendEnc - tbeginEnc;
+    enc.deltaE  += Eend  - Ebegin;
+    enc.deltaLz += Lzend - Lzbegin - Lztorque;
+    enc.costheta = ptend[5] / sqrt(pow_2(ptend[3]) + pow_2(ptend[4]) + pow_2(ptend[5]));
+    enc.phi      = atan2(ptend[4], ptend[3]);
 
     return orbit::SR_CONTINUE;
 }
@@ -168,6 +175,9 @@ void RagaTaskBinary::startEpisode(double timeStart, double length)
             utils::pp(bh.ecc,    10) + '\t' +
             utils::pp(bh.mass,   10) + '\t' +
             utils::pp(bh.q,      10) + "\t0       \t0\n";
+        strm.close();
+        strm.open((params.outputFilename+"_enc").c_str());
+        strm << "timeStart    duration Ebegin   Lbegin   deltaE   deltaLz  costheta  phi mass     index\n";
     }
     firstEpisode = false;
 }
@@ -224,6 +234,8 @@ void RagaTaskBinary::finishEpisode()
         return;
     assert(particles.size() == encounters.size());
 
+    // assemble the list of all encounters sorted by start time
+    std::vector<std::pair<double, std::pair<size_t, size_t> > > allEncounters;
     // sum up the total energy and angular momentum gained by all particles in the simulation;
     // these changes must be reciprocally imposed on the binary BH
     unsigned int numEnc=0, numPart=0;
@@ -235,6 +247,8 @@ void RagaTaskBinary::finishEpisode()
         for(size_t ie=0; ie<encounters[ip].size(); ie++) {
             deltaE  += mass * encounters[ip][ie].deltaE;
             deltaLz += mass * encounters[ip][ie].deltaLz;
+            allEncounters.push_back(std::pair<double, std::pair<size_t, size_t> >(
+                encounters[ip][ie].Tbegin, std::pair<size_t, size_t>(ip, ie) ) );
         }
         numEnc += encounters[ip].size();
         numPart++;
@@ -273,6 +287,24 @@ void RagaTaskBinary::finishEpisode()
             utils::pp(bh.q,    10) + '\t' +
             utils::pp(H,       10) + '\t' +
             utils::pp(Hgw,     10) + '\n';
+        strm.close();
+        std::sort(allEncounters.begin(), allEncounters.end());
+        strm.open((params.outputFilename+"_enc").c_str(), std::ios_base::app);
+        for(size_t k=0; k<allEncounters.size(); k++) {
+            size_t ip = allEncounters[k].second.first, ie = allEncounters[k].second.second;
+            const BinaryEncounterData& enc = encounters[ip][ie];
+            strm <<
+            utils::pp(episodeStart + enc.Tbegin,  12) + ' ' +
+            utils::pp(enc.Tlength, 8) + ' ' +
+            utils::pp(enc.Ebegin,  8) + ' ' +
+            utils::pp(enc.Lbegin,  8) + ' ' +
+            utils::pp(enc.deltaE,  8) + ' ' +
+            utils::pp(enc.deltaLz, 8) + ' ' +
+            utils::pp(enc.costheta,6) + ' ' +
+            utils::pp(enc.phi,     6) + ' ' +
+            utils::pp(particles[ip].second, 8) /*mass*/ + ' ' +
+            utils::toString(ip) + '\n';
+        }
     }
 }
 

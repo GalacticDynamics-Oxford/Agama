@@ -13,21 +13,19 @@ namespace df{
 /// Parameters that describe a pseudo-isothermal distribution function.
 struct PseudoIsothermalParam{
 double
-    Sigma0,   ///< surface density normalization (value at R=0)
-    Rdisk,    ///< scale radius of the (exponential) disk surface density
-    Hdisk,    ///< scale height of the disk (determines the vertical velocity dispersion)
-    Jphimin,  ///< lower cutoff for evaluating epicyclic frequencies: take max(Jphi,Jphimin)
+    Sigma0,     ///< surface density normalization (value at R=0)
+    Rdisk,      ///< scale radius of the (exponential) disk surface density
+    Hdisk,      ///< scale height of the disk (determines the vertical velocity dispersion)
     // parameters describing the dependence of DF on the azimuthal, radial and vertical actions
-    Jphi0,    ///< scale angular momentum determining the suppression of retrograde orbits
-    sigmar0,  ///< normalization of radial velocity dispersion at R=0
-    sigmamin, ///< lower limit on the radial velocity dispersion: take max(sigmar,sigmamin)
-    Rsigmar,  ///< scale radius of radial velocity dispersion: sigmar=sigmar0*exp(-R/Rsigmar)
+    sigmar0,    ///< normalization of radial velocity dispersion at R=0
+    sigmamin,   ///< lower limit on the radial and vertical velocity dispersions
+    Rsigmar,    ///< scale radius of radial velocity dispersion: sigmar=sigmar0*exp(-R/Rsigmar)
     // parameters controlling the age-velocity dispersion relation (set beta=0 to disable)
-    beta,     ///< factor describing the growth of velocity dispersion with age
-    Tsfr,     ///< timescale for exponential decline of star formation rate in units of galaxy age
-    sigmabirth;///< ratio of velocity dispersion at birth to the one at maximum age
+    beta,       ///< factor describing the growth of velocity dispersion with age
+    Tsfr,       ///< timescale for exponential decline of star formation rate in units of galaxy age
+    sigmabirth; ///< ratio of velocity dispersion at birth to the one at maximum age
 PseudoIsothermalParam() :  ///< set default values for all fields
-    Sigma0(0), Rdisk(0), Hdisk(0), Jphimin(0), Jphi0(0), sigmar0(0), sigmamin(0),
+    Sigma0(0), Rdisk(0), Hdisk(0), sigmar0(0), sigmamin(0),
     Rsigmar(0), beta(0), Tsfr(INFINITY), sigmabirth(1) {}
 };
 
@@ -65,9 +63,6 @@ PseudoIsothermalParam() :  ///< set default values for all fields
 class PseudoIsothermal: public BaseDistributionFunction{
     const PseudoIsothermalParam par;     ///< parameters of DF
     const potential::Interpolator freq;  ///< interface providing the epicyclic frequencies
-    static const int NT = 10; ///< number of points in quadrature rule for integration over age
-    double qx[NT], qw[NT];    ///< nodes and weights for quadrature rule
-    double numin;
 public:
     /** Create an instance of pseudo-isothermal distribution function with given parameters
         \param[in] params  are the parameters of DF;
