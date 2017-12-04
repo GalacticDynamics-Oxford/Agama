@@ -1,8 +1,7 @@
 /** \file    df_halo.h
+    \brief   Distribution functions for the spheroidal component (halo)
     \author  Eugene Vasiliev
     \date    2015-2016
-    \brief   Distribution functions for the spheroidal component (halo)
-
 */
 #pragma once
 #include "df_base.h"

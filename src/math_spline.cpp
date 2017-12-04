@@ -571,28 +571,41 @@ inline void regularizeSpline(const std::vector<double>& xval,
     }
 }
 
+/// check that the input array is monotonic and has finite values;
+/// throw a customized error message otherwise
+inline void checkFiniteAndMonotonic(const std::vector<double>& arr,
+    const char* fncName, const char arrName)
+{
+    for(size_t i=0, size=arr.size(); i<size; i++) {
+        if(!isFinite(arr[i]))
+            throw std::invalid_argument(std::string(fncName) + ": " + arrName +
+                " coordinates must be finite (" + arrName +
+                "[" + utils::toString(i) + "]=" + utils::toString(arr[i]) + ")\n" +
+                utils::stacktrace());
+        if(i>0 && arr[i] <= arr[i-1])
+            throw std::invalid_argument(std::string(fncName) + ": " + arrName +
+                " coordinates must be monotonically increasing (" + arrName +
+                "[" + utils::toString(i)   + "]=" + utils::toString(arr[i]) +
+                " is not greater than " + arrName +
+                "[" + utils::toString(i-1) + "]=" + utils::toString(arr[i-1]) + ")\n" +
+                utils::stacktrace());
+    }
+}
+
 }  // internal namespace
 
 
 BaseInterpolator1d::BaseInterpolator1d(const std::vector<double>& xv, const std::vector<double>& fv) :
     xval(xv), fval(fv)
 {
-    if(xv.size() < 2)
-        throw std::invalid_argument("Error in 1d interpolator: number of nodes should be >=2");
-    for(unsigned int i=0; i<xv.size(); i++) {
-        if(!isFinite(xv[i]))
-            throw std::invalid_argument("Error in 1d interpolator: x coordinates must be finite "
-                "(x["+utils::toString(i)+"]="+utils::toString(xv[i])+")\n" + utils::stacktrace());
-        if(i>0 && xv[i] <= xv[i-1])
-            throw std::invalid_argument("Error in 1d interpolator: "
-                "x values must be monotonically increasing "
-                "(x["+utils::toString(i) + "]="+utils::toString(xv[i]) + " is not greater than"
-                " x["+utils::toString(i-1)+"]="+utils::toString(xv[i-1])+")\n" + utils::stacktrace());
-    }
-    for(unsigned int i=0; i<fv.size(); i++)
-        if(!isFinite(fv[i]))
-            throw std::invalid_argument("Error in 1d interpolator: function values must be finite "
-                "(f["+utils::toString(i)+"]="+utils::toString(fv[i])+")\n" + utils::stacktrace());
+    if(xval.size() < 2)
+        throw std::invalid_argument("BaseInterpolator1d: number of nodes should be >=2");
+    checkFiniteAndMonotonic(xval, "BaseInterpolator1d", 'x');
+    for(size_t i=0, size=fval.size(); i<size; i++)
+        if(!isFinite(fval[i]))
+            throw std::invalid_argument("BaseInterpolator1d: function values must be finite "
+                "(f[" + utils::toString(i) + "]=" + utils::toString(fval[i]) + ")\n" +
+                utils::stacktrace());
 }
 
 LinearInterpolator::LinearInterpolator(const std::vector<double>& xv, const std::vector<double>& yv) :
@@ -665,6 +678,12 @@ CubicSpline::CubicSpline(const std::vector<double>& _xval,
 {
     if(fval.size() != xval.size() || fder.size() != xval.size())
         throw std::length_error("CubicSpline: input arrays are not equal in length");
+    for(size_t i=0, size=fder.size(); i<size; i++)
+        if(!isFinite(fder[i]))
+            throw std::invalid_argument("CubicSpline: function derivatives must be finite "
+                "(fder[" + utils::toString(i) + "]=" + utils::toString(fder[i]) + ")\n" +
+                utils::stacktrace());
+    
 }
 
 void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
@@ -787,13 +806,14 @@ QuinticSpline::QuinticSpline(const std::vector<double>& xvalues,
     const std::vector<double>& fvalues, const std::vector<double>& fderivs):
     BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
 {
-    unsigned int numPoints = xval.size();
+    size_t numPoints = xval.size();
     if(fval.size() != numPoints || fder.size() != numPoints)
         throw std::length_error("QuinticSpline: input arrays are not equal in length");
-    for(unsigned int i=0; i<numPoints; i++)
+    for(size_t i=0; i<numPoints; i++)
         if(!isFinite(fder[i]))
             throw std::invalid_argument("QuinticSpline: function derivatives must be finite "
-                "(fder["+utils::toString(i)+"]="+utils::toString(fder[i])+")\n" + utils::stacktrace());
+                "(fder[" + utils::toString(i) + "]=" + utils::toString(fder[i]) + ")\n" +
+                utils::stacktrace());
     fder2 = constructQuinticSpline(xval, fval, fder);
 }
 
@@ -1325,13 +1345,20 @@ BaseInterpolator2d::BaseInterpolator2d(
     const size_t ysize = ygrid.size();
     if(xsize<2 || ysize<2)
         throw std::invalid_argument(
-            "Error in 2d interpolator initialization: number of nodes should be >=2 in each direction");
+            "BaseInterpolator2d: number of nodes should be >=2 in each direction");
     if(fvalues.rows() != xsize)
         throw std::length_error(
-            "Error in 2d interpolator initialization: x and f array lengths differ");
+            "BaseInterpolator2d: x and f array lengths differ");
     if(fvalues.cols() != ysize)
         throw std::length_error(
-            "Error in 2d interpolator initialization: y and f array lengths differ");
+            "BaseInterpolator2d: y and f array lengths differ");
+    checkFiniteAndMonotonic(xval, "BaseInterpolator2d", 'x');
+    checkFiniteAndMonotonic(yval, "BaseInterpolator2d", 'y');
+    for(size_t k=0; k<xsize*ysize; k++)
+        if(!isFinite(fval[k]))
+            throw std::invalid_argument("BaseInterpolator2d: function values must be finite "
+                "(f[" + utils::toString(k/ysize) + "," + utils::toString(k%ysize) + "]=" +
+                utils::toString(fval[k]) + ")\n" + utils::stacktrace());
 }
 
 // ------- Bilinear interpolation in 2d ------- //
@@ -1514,7 +1541,16 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
     const size_t ysize = ygrid.size();
     if(dfdx.rows() != xsize || dfdy.rows() != xsize || dfdx.cols() != ysize || dfdy.cols() != ysize)
         throw std::length_error("QuinticSpline2d: invalid size of derivatives matrix");
-
+    for(size_t k=0; k<xsize*ysize; k++) {
+        if(!isFinite(fx[k]))
+            throw std::invalid_argument("QuinticSpline2d: function derivatives must be finite "
+                "(dfdx[" + utils::toString(k/ysize) + "," + utils::toString(k%ysize) + "]=" +
+                utils::toString(fx[k]) + ")\n" + utils::stacktrace());
+        if(!isFinite(fy[k]))
+            throw std::invalid_argument("QuinticSpline2d: function derivatives must be finite "
+                "(dfdy[" + utils::toString(k/ysize) + "," + utils::toString(k%ysize) + "]=" +
+                utils::toString(fy[k]) + ")\n" + utils::stacktrace());
+    }
     // temporary arrays for 1d splines
     std::vector<double> t, tx, ty, txx, txy, tyy, txxy, txyy;
     // additional safety measures: if the derivative df/dx is zero for all y and a particular column x[i],
@@ -1702,9 +1738,16 @@ LinearInterpolator3d::LinearInterpolator3d(const std::vector<double>& xnodes,
     xval(xnodes), yval(ynodes), zval(znodes), fval(fvalues)
 {
     const int nx = xval.size(), ny = yval.size(), nz = zval.size();
-    const unsigned int nval = nx*ny*nz;   // total number of nodes in the 3d grid
+    const size_t nval = nx*ny*nz;   // total number of nodes in the 3d grid
     if(nx < 2 || ny < 2 || nz < 2 || fvalues.size() != nval)
         throw std::length_error("LinearInterpolator3d: invalid grid sizes");
+    checkFiniteAndMonotonic(xval, "LinearInterpolator3d", 'x');
+    checkFiniteAndMonotonic(yval, "LinearInterpolator3d", 'y');
+    checkFiniteAndMonotonic(zval, "LinearInterpolator3d", 'z');
+    for(size_t i=0; i<nval; i++)
+        if(!isFinite(fval[i]))
+            throw std::invalid_argument("LinearInterpolator3d: function values must be finite "
+                "(f[" + utils::toString(i) + "]=" + utils::toString(fval[i]) + ")");
 }
 
 double LinearInterpolator3d::value(double x, double y, double z) const
@@ -1747,12 +1790,18 @@ CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vecto
     const std::vector<double>& znodes, const std::vector<double>& fvalues) :
     xval(xnodes), yval(ynodes), zval(znodes)
 {
-    const int nx = xval.size(), ny = yval.size(), nz = zval.size();
-    const unsigned int nval = nx*ny*nz,   // total number of nodes in the 3d grid
+    const int nx = xval.size(), ny = yval.size(), nz = zval.size(), nf = fvalues.size();
+    const int nval = nx*ny*nz,   // total number of nodes in the 3d grid
         nampl = (nx+2)*(ny+2)*(nz+2);     // or the number of amplitudes of B-splines
-    if(nx < 2 || ny < 2 || nz < 2 ||
-        !(fvalues.size() == nval || fvalues.size() == nampl) )
+    if(nx < 2 || ny < 2 || nz < 2 || !(nf == nval || nf == nampl) )
         throw std::length_error("CubicSpline3d: invalid grid sizes");
+    checkFiniteAndMonotonic(xval, "CubicSpline3d", 'x');
+    checkFiniteAndMonotonic(yval, "CubicSpline3d", 'y');
+    checkFiniteAndMonotonic(zval, "CubicSpline3d", 'z');
+    for(int i=0; i<nf; i++)
+        if(!isFinite(fvalues[i]))
+            throw std::invalid_argument("CubicSpline3d: function values must be finite "
+                "(f[" + utils::toString(i) + "]=" + utils::toString(fvalues[i]) + ")");
     fval.resize(nval);
     fx  .resize(nval);
     fy  .resize(nval);
@@ -1762,7 +1811,7 @@ CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vecto
     fyz .resize(nval);
     fxyz.resize(nval);
 
-    if(fvalues.size() == nampl) {
+    if(nf == nampl) {
         // assume that the input array contained amplitudes of a 3d cubic B-spline
         const std::vector<double>* nodes[3] = {&xval, &yval, &zval};
         Matrix<double> values[3], derivs[3];
@@ -2197,7 +2246,7 @@ public:
     const unsigned int numKnots;
 
     /// number of x[i],y[i] pairs (original data)
-    const unsigned int numDataPoints;
+    const size_t numDataPoints;
 
     /// sum of weights of all point weights, or their total number if weights not provided
     double sumWeights;
@@ -2301,7 +2350,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
         if(weights.size()!=numDataPoints)
             throw std::length_error("SplineApprox: xvalues and weights must have equal length");
         sumWeights = 0;
-        for(unsigned int i=0; i<numDataPoints; i++) {
+        for(size_t i=0; i<numDataPoints; i++) {
             if(weights[i] < 0)
                 throw std::invalid_argument("SplineApprox: weights must be non-negative");
             sumWeights += weights[i];
@@ -2318,7 +2367,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for(int i=0; i<(int)numDataPoints; i++) {
+    for(ptrdiff_t i=0; i<(ptrdiff_t)numDataPoints; i++) {
         // for each input point, at most 4 basis functions are non-zero, starting from index 'ind'
         double Bspl[4];
         int ind = bsplineNaturalCubicValues(xvalues[i], &knots[0], numKnots, Bspl);
@@ -2367,7 +2416,7 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
     for(unsigned int k=0; k<numKnots; k++) {
         double Bspl[4];
         int ind = bsplineNaturalCubicValues(knots[k], &knots[0], numKnots, Bspl);
-        for(unsigned int j=0; j<=3; j++)
+        for(int j=0; j<=3; j++)
             if(Bspl[j]!=0)  // the entries outside the main and two adjacent diagonals must be zero
                 AMatrix(k, j+ind) = Bspl[j];
     }
@@ -2381,10 +2430,10 @@ SplineApproxImpl::FitData SplineApproxImpl::initFit(const std::vector<double> &y
     FitData fitData;
     fitData.ynorm2 = 0;
     if(weights.empty())
-        for(unsigned int i=0; i<numDataPoints; i++)
+        for(size_t i=0; i<numDataPoints; i++)
             fitData.ynorm2 += pow_2(yvalues[i]);
     else
-        for(unsigned int i=0; i<numDataPoints; i++)
+        for(size_t i=0; i<numDataPoints; i++)
             fitData.ynorm2 += weights[i] * pow_2(yvalues[i]);
     fitData.zRHS = BMatrix.multiplyByVector(yvalues, weights);   // precompute z = B^T diag(w) y
     fitData.MTz.resize(numKnots);
@@ -2699,7 +2748,7 @@ private:
     const unsigned int numNodes;      ///< shortcut for grid.size()
     const unsigned int numBasisFnc;   ///< shortcut for the number of B-splines (numNodes+N-1)
     const unsigned int numAmpl;       ///< the number of amplitudes that may be varied (numBasisFnc-1)
-    const unsigned int numData;       ///< number of sample points
+    const size_t numData;             ///< number of sample points
     const FitOptions options;         ///< whether the definition interval extends to +-inf
     static const int GLORDER = 8;     ///< order of GL quadrature for computing the normalization
     double GLnodes[GLORDER], GLweights[GLORDER];  ///< nodes and weights of GL quadrature
@@ -2759,7 +2808,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     double minWeight = INFINITY;
     double xmin = grid[0], xmax = grid[numNodes-1];
     double avgx = 0, avgx2 = 0;
-    for(unsigned int p=0; p<numData; p++) {
+    for(size_t p=0; p<numData; p++) {
         double xval = xvalues[p], weight = weights[p];
         if(weight < 0)
             throw std::invalid_argument("splineLogDensity: sample weights may not be negative");
@@ -2790,7 +2839,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for(int p=0; p<(int)numData; p++) {
+    for(ptrdiff_t p=0; p<(ptrdiff_t)numData; p++) {
         double xval = xvalues[p], weight = weights[p] / sumWeights;
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
         if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
@@ -2809,7 +2858,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     // prepare the log-likelihoods of each basis fnc and other useful arrays
     Vbasis.assign(numBasisFnc, 0.);
     Wbasis.assign(numBasisFnc, 0.);
-    for(unsigned int p=0; p<numData; p++) {
+    for(size_t p=0; p<numData; p++) {
         unsigned int ind = Bmatrix.indcol[p];
         for(int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++) {
             double weight = weights[p] / sumWeights;
@@ -3470,18 +3519,29 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
 {
     // restrict the search to |x|<=xmax, assuming that x=log(something)
     const double xmax = 100.;  // exp(xmax) ~ 2.7e43
-    // initial trial points
-    const int NUMTRIAL = 10;
-    static const double XINIT[NUMTRIAL] = {-75., -50., -30., -15., -3., 3., 15., 30., 50., 75.};
+    // initial trial points - coarsely scan the range [-xmax, xmax]
+    const int NUMTRIAL = 16;
+    static const double XINIT[NUMTRIAL] = {-75,-50,-32,-22,-15,-10,-6,-2, 2, 6, 10, 15, 22, 32, 50, 75};
     double xinit=0., d2f0 = 0.;
-    // pick up the initial point where the second derivative is the highest
+    // pick up the initial point where the second derivative is the highest,
+    // and remember the min/max range where it is above the threshold
+    double xlow=xmax, xupp=-xmax;
     for(int k=0; k<NUMTRIAL; k++) {
         PointNeighborhood f0(fnc, XINIT[k]);
         //utils::msg(utils::VL_VERBOSE, "createInterpolationGrid", "x=" + utils::toString(XINIT[k]) +
         //    ", f=" + utils::toString(f0.f0,18) + ", f''=" + utils::toString(f0.fder2));
-        if(isFinite(f0.fder2) && fabs(f0.fder2) > fabs(d2f0)) {
-            xinit = XINIT[k];
-            d2f0  = f0.fder2;
+        if(isFinite(f0.fder2)) {
+            if(fabs(f0.fder2) > eps) {
+                // keep track of points where the second derivative is high enough,
+                // so that the output grid should cover them
+                xlow = fmin(xlow, XINIT[k]);
+                xupp = fmax(xupp, XINIT[k]);
+            }
+            if(fabs(f0.fder2) > fabs(d2f0)) {
+                // also find the initial point where the derivative is highest
+                xinit = XINIT[k];
+                d2f0  = f0.fder2;
+            }
         }
     }
     // tolerance parameter translated into the initial stepsize
@@ -3507,8 +3567,11 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
         dx         = eps4 / fmin(sqrt(sqrt(dif)), 1.) * sgn;
         result.push_back(x);
         // we have reached the asymptotic linear regime if the second derivative is close enough to zero
-        // (check both the current and the previous value to avoid triggering this condition prematurely)
-        if((fabs(d2f) < eps && fabs(d2fp) < eps) || fabs(x) > xmax || !isFinite(d2f+dx)) {
+        // (check both the current and the previous value to avoid triggering this condition prematurely,
+        // and make sure that we considered all previously identified points where it was above threshold)
+        if((fabs(d2f) < eps && fabs(d2fp) < eps && ((stage==0 && x < xlow) || (stage==1 && x > xupp)))
+            || fabs(x) > xmax || !isFinite(d2f+dx))
+        {
             if(stage==0) {
                 std::reverse(result.begin(), result.end());
                 x    = xinit;

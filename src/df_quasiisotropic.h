@@ -1,4 +1,4 @@
-/** \file    df_pseudoisotropic.h
+/** \file    df_quasiisotropic.h
     \brief   DistributionFunction interface to spherical isotropic models
     \author  Eugene Vasiliev
     \date    2016
@@ -25,14 +25,14 @@ namespace df{
     potential, but then the resulting DF can be viewed as a function of actions only,
     and used in an arbitrary potential just as any other f(J); the intermediate mappings
     become part of its definition. Of course, it may no longer yield isotropic velocity
-    distributions -- hence the name "pseudo".
+    distributions -- hence the name "quasi".
 */
-class PseudoIsotropic: public BaseDistributionFunction{
+class QuasiIsotropic: public BaseDistributionFunction{
     const math::LogLogSpline df;              ///< one-dimensional function of spherical phase volume h
     const potential::PhaseVolume pv;          ///< correspondence between E and h
     const actions::ActionFinderSpherical af;  ///< correspondence between (Jr,L) and E
 public:
-    PseudoIsotropic(const math::LogLogSpline& _df, const potential::BasePotential& potential) :
+    QuasiIsotropic(const math::LogLogSpline& _df, const potential::BasePotential& potential) :
         df(_df), pv(potential::PotentialWrapper(potential)), af(potential) {}
 
     virtual double value(const actions::Actions &J) const

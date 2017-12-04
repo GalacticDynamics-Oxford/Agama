@@ -30,8 +30,6 @@
 #include <stdexcept>
 #include <iostream>
 
-#include "potential_factory.h"
-
 const unsigned int NPARAMS = 5;
 typedef std::vector<actions::Actions> ActionArray;
 

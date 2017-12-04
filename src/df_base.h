@@ -1,7 +1,7 @@
 /** \file    df_base.h
     \brief   Base class for action-based distribution functions
-    \date    201?-2015
     \authors Eugene Vasiliev, Payel Das
+    \date    2015-2017
 */
 #pragma once
 #include "actions_base.h"
@@ -86,7 +86,6 @@ public:
 */
 double totalEntropy(const BaseDistributionFunction& DF,
     const double reqRelError=1e-4, const int maxNumEval=1e6);
-
 
 /** Sample the distribution function in actions.
     In other words, draw N sampling points from the action space, so that the density of points 

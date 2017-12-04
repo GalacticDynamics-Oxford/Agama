@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
 {
     if(argc<=1)  // print help and exit
         printfail(usage);
-    
+
     // parse command-line parameters
     utils::KeyValueMap args(argc-1, argv+1);
     std::string inputdensity   = args.getString("density");

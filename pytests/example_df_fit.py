@@ -151,9 +151,7 @@ def main():
 
     # show the posterior distribution of parameters
     samples = sampler.chain[:, nburnin:, :].reshape((-1, ndim))
-    trueval = (1.56, 1.55, 5.29, 1.22, 1.56)  # believed to be best-fit values
-    corner.corner(samples, \
-        labels=labels, quantiles=[0.16, 0.5, 0.84], truths=trueval)
+    corner.corner(samples, labels=labels, quantiles=[0.16, 0.5, 0.84])
     plt.show()
     print "Acceptance fraction: ", numpy.mean(sampler.acceptance_fraction)  # should be in the range 0.2-0.5
     print "Autocorrelation time: ", sampler.acor  # should be considerably shorter than the total number of steps

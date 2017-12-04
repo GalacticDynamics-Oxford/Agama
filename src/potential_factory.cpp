@@ -130,9 +130,10 @@ void initPotentialNameMap()
     potentialNames[PT_HARMONIC]  = Harmonic::myName();
     potentialNames[PT_NFW]       = NFW::myName();
     potentialNames[PT_PLUMMER]   = Plummer::myName();
-    potentialNames[PT_MIYAMOTONAGAI] = MiyamotoNagai::myName();
     potentialNames[PT_DEHNEN]    = Dehnen::myName();
     potentialNames[PT_FERRERS]   = Ferrers::myName();
+    potentialNames[PT_ISOCHRONE] = Isochrone::myName();
+    potentialNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
     potentialNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
     potentialNames[PT_BSE]       = BasisSetExp::myName();
     potentialNames[PT_SPLINE]    = SplineExp::myName();
@@ -1236,14 +1237,12 @@ PtrPotential createPotential(
         // SpheroidDensity and SersicDensity profiles will also be added to the Multipole
         if(utils::stringsEqual(type, DiskDensity::myName())) {
             DiskParam dpar = parseDiskParams(kvmap[i], converter);
-            if(dpar.surfaceDensity != 0) {
-                // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
-                componentsPot.push_back(PtrPotential(new DiskAnsatz(dpar)));
-                // ...and gets subtracted from the entire DiskDensity for the list of density components
-                componentsDens.push_back(PtrDensity(new DiskDensity(dpar)));
-                dpar.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
-                componentsDens.push_back(PtrDensity(new DiskAnsatz(dpar)));
-            }
+            // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
+            componentsPot.push_back(PtrPotential(new DiskAnsatz(dpar)));
+            // ...and gets subtracted from the entire DiskDensity for the list of density components
+            componentsDens.push_back(PtrDensity(new DiskDensity(dpar)));
+            dpar.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
+            componentsDens.push_back(PtrDensity(new DiskAnsatz(dpar)));
         } else if(utils::stringsEqual(type, SpheroidDensity::myName())) {
             componentsDens.push_back(PtrDensity(
                 new SpheroidDensity(parseSphrParams(kvmap[i], converter))));

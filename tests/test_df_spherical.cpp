@@ -330,7 +330,7 @@ bool test(const potential::BasePotential& pot)
             errRm   += weight * pow_2((trueRm  - intRm)   / (trueRm  + intRm)   *2);
             errPhi  += weight * pow_2((truePhi - intPhi)  / (truePhi + intPhi)  *2);
             errdPhi += weight * pow_2((grad.dR - intdPhi) / (grad.dR + intdPhi) *2);
-            errdens += weight * pow_2((truedens- intdens) / (truedens+ intdens) *2);
+            errdens += weight * pow_2((truedens- intdens) / (truedens+ fabs(intdens)) *2);
             errh    += weight * pow_2((trueh   - inth)    / (trueh   + inth)    *2);
             errg    += weight * pow_2((trueg   - intg)    / (trueg   + intg)    *2);
         }
@@ -374,9 +374,9 @@ bool test(const potential::BasePotential& pot)
     ", Rmax="  + checkLess(errRm,  1e-10, ok) +
     ", Phi="   + checkLess(errPhi, 1e-10, ok) +
     ", dPhi/dr="+checkLess(errdPhi,1e-08, ok) +
-    ", rho="   + checkLess(errdens,1e-03, ok) +
+    ", rho="   + checkLess(errdens,3e-04, ok) +
     ", h="     + checkLess(errh,   1e-08, ok) +
-    ", g="     + checkLess(errg,   2e-08, ok) + "\n";
+    ", g="     + checkLess(errg,   1e-08, ok) + "\n";
     return ok;
 }
 

@@ -31,11 +31,11 @@ void computeTotalEnergyModel(
         Esum -= Ebin*2;
     }
     // add energies of all particles
-    int nbody = particles.size();
+    ptrdiff_t nbody = particles.size();
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(+:Etot,Esum)
 #endif
-    for(int ip=0; ip<nbody; ip++) {
+    for(ptrdiff_t ip=0; ip<nbody; ip++) {
         const coord::PosVelCar& point = particles.point(ip);
         double Epot = pot.value(point) + bh.potential(time, point);
         double Ekin = (pow_2(point.vx) + pow_2(point.vy) + pow_2(point.vz)) * 0.5;
@@ -133,13 +133,13 @@ void RagaCore::doEpisode()
 
     // loop over the particles in a deterministic random order (for better load balancing),
     // so that the simulation is reproducible when run with the same number of threads
-    int nbody = particles.size();
+    ptrdiff_t nbody = particles.size();
     std::vector<size_t> permutation(nbody);
     math::getRandomPermutation(nbody, &permutation.front());
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for(int i=0; i<nbody; i++) {
+    for(ptrdiff_t i=0; i<nbody; i++) {
         size_t index = permutation[i];
         if(particles.mass(index) != 0) {   // run only non-zero-mass particles
             orbit::RuntimeFncArray timestepFncs(numtasks);

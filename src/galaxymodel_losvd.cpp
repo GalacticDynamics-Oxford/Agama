@@ -535,7 +535,7 @@ std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::Ba
     int numPixels = (bsplx.xvalues().size()-1) * (bsply.xvalues().size()-1);
     // loop over pixels of the 2d B-spline grid in the image plane
 #ifdef _OPENMP
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
 #endif
     for(int p=0; p<numPixels; p++) {
         int ix = p % (bsplx.xvalues().size()-1), iy = p / (bsplx.xvalues().size()-1);

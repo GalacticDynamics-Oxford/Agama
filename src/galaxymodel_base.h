@@ -133,20 +133,22 @@ double computeProjectedDF(const GalaxyModel& model,
 
 
 /** Compute the projected moments of distribution function:
-    surface density and line-of-sight velocity dispersion at a given projected radius.
+    surface density, scale height, and line-of-sight velocity dispersion at a given projected radius.
     TODO: generalize to allow an arbitrary orientation of the projection.
     \param[in]  model  is the galaxy model;
     \param[in]  R is the cylindrical radius;
-    \param[out] surfaceDensity will contain the computed surface density;
-    \param[out] losvdisp will contain the line-of-sight velocity dispersion (dimension: v^2);
+    \param[out] surfaceDensity if not NULL will contain the computed surface density;
+    \param[out] rmsHeight if not NULL, will contain the rms height;
+    \param[out] rmsVel if not NULL, will contain the rms line-of-sight velocity;
     \param[out] surfaceDensityErr if not NULL, will contain the error estimate for density;
-    \param[out] losvdispErr if not NULL, will contain the error estimate for velocity dispersion;
+    \param[out] rmsHeightErr if not NULL, will contain the error estimate for rms height;
+    \param[out] rmsVelErr if not NULL, will contain the error estimate for rms velocity;
     \param[in]  reqRelError is the required relative error in the integral;
     \param[in]  maxNumEval  is the maximum number of evaluations in integral;
 */
 void computeProjectedMoments(const GalaxyModel& model, const double R,
-    double& surfaceDensity, double& losvdisp,
-    double* surfaceDensityErr=NULL, double* losvdispErr=NULL,
+    double* surfaceDensity, double* rmsHeight, double* rmsVel,
+    double* surfaceDensityErr=NULL, double* rmsHeightErr=NULL, double* rmsVelErr=NULL,
     const double reqRelError=1e-3, const int maxNumEval=1e5);
 
 

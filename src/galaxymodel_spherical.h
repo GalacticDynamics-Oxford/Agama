@@ -1,6 +1,6 @@
 /** \file    galaxymodel_spherical.h
-    \brief   Spherically-symmetric models
-    \date    2010-2016
+    \brief   Spherically-symmetric isotropic models
+    \date    2010-2017
     \author  Eugene Vasiliev
 
     This module deals with isotropic distribution funcions for spherical systems.

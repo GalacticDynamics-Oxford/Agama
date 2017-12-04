@@ -13,17 +13,17 @@ import numpy, matplotlib, matplotlib.pyplot as plt, time
 matplotlib.rcParams['legend.frameon']=False
 
 ###1. set up galpy potential
-g_bulge = PowerSphericalPotentialwCutoff(alpha=1.8, rc=1.9/8, amp=0.03)
-g_disk  = MiyamotoNagaiPotential(a=3./8, b=0.28/8, amp=0.755)
-g_halo  = NFWPotential(a=2., amp=4.85)
+g_bulge = PowerSphericalPotentialwCutoff(alpha=1.8, rc=1.9/8, amp=0.029995)
+g_disk  = MiyamotoNagaiPotential(a=3./8, b=0.28/8, amp=0.75748)
+g_halo  = NFWPotential(a=2., amp=4.8522)
 g_pot   = [g_bulge,g_disk,g_halo]   # same as MWPotential2014
 
 ###2. set up equivalent potential from the Agama library
 agama.setUnits( mass=1., length=8., velocity=345.67)
-p_bulge = {"type":"SpheroidDensity", "densityNorm":6.669e9,
+p_bulge = {"type":"SpheroidDensity", "densityNorm":6.66643e9,
     "gamma":1.8, "beta":1.8, "scaleRadius":1, "outerCutoffRadius":1.9/8};
-p_disk  = {"type":"MiyamotoNagai", "mass":1.678e11, "scaleradius":3./8, "scaleheight":0.28/8};
-p_halo  = {"type":"SpheroidDensity", "densityNorm":1.072e10,
+p_disk  = {"type":"MiyamotoNagai", "mass":1.68354e11, "scaleradius":3./8, "scaleheight":0.28/8};
+p_halo  = {"type":"SpheroidDensity", "densityNorm":1.07274e10,
     "gamma":1.0, "beta":3.0, "scaleRadius":2.};
 ### one can create the genuine instance of Agama potential as follows:
 #c_pot   = agama.Potential("../data/MWPotential2014.ini")   # read parameters from ini file

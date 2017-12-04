@@ -22,8 +22,11 @@ static const double ACCURACY_INTERP = 1e-6;
 static const double HUGE_NUMBER = 1e100;
 
 /// safety factor to avoid roundoff errors in estimating the inner/outer asymptotic slopes
-static const double ROUNDOFF_THRESHOLD = 1e5 * DBL_EPSILON;
+static const double ROUNDOFF_THRESHOLD = DBL_EPSILON / ROOT3_DBL_EPSILON;
 
+/// minimum relative difference between two adjacent values of potential (to reduce roundoff errors)
+static const double MIN_REL_DIFFERENCE = 1e-12;
+    
 /// fixed order of Gauss-Legendre integration of PhaseVolume on each segment of a log-grid
 static const int GLORDER1 = 6;   // for shorter segments
 static const int GLORDER2 = 10;  // for larger segments
@@ -73,8 +76,10 @@ public:
                 *val = +1+fabs(E);  // safely positive value
             else if(R>=HUGE_NUMBER && !isFinite(Phi))
                 *val = -1-fabs(E);  // safely negative value
-            else
-                *val = 2*(E-Phi) - (R>1./HUGE_NUMBER && R<HUGE_NUMBER ? R*dPhidR : 0);
+            else {
+                double v = R * dPhidR;
+                *val = 2*(E-Phi) - (isFinite(v) ? v : 0);
+            }
         }
         if(deriv)
             *deriv = (-3*dPhidR - R*d2PhidR2) * R;
@@ -218,8 +223,10 @@ public:
         if(der)
             *der = dPhi * r / (Phi * Phi * expE) + 2 * dPhi/Phi*r;
         if(der2) {
-            if(invPhi0!=0 && expE < -invPhi0*1e-10)  // in case of a finite potential at r=0,
-                *der2 = 0;  // we avoid approaching too close to 0 to avoid roundoff errors in Phi
+            if(invPhi0!=0 && expE < -invPhi0 * MIN_REL_DIFFERENCE)
+                // in case of a finite potential at r=0,
+                // we avoid approaching too close to 0 to avoid roundoff errors in Phi
+                *der2 = 0;
             else
                 *der2 = pow_2(r/Phi) / expE * (dPhi * (1/r - dPhi/Phi * (2 + 1/Phi/expE)) + d2Phi)
                 + 2 * r/Phi * (d2Phi*r + dPhi*(1-dPhi/Phi*r));
@@ -276,7 +283,7 @@ double innerSlope(const math::IFunction& potential, double* Phi0, double* coef)
     // this routine shouldn't suffer from cancellation errors, provided that
     // the potential and its derivatives are computed accurately,
     // thus we may use a fixed tiny radius at which the slope is estimated.
-    double r = 1e-10;
+    double r = 1e-10;  // TODO: try making it more scale-invariant?
     double Phi, dPhidR, d2PhidR2;
     potential.evalDeriv(r, &Phi, &dPhidR, &d2PhidR2);
     double  s = 1 + r * d2PhidR2 / dPhidR;
@@ -319,22 +326,17 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
 {
     if(!isAxisymmetric(potential))
         throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
-    double Phi0, coef, slope;
-    slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
+    double Phi0, coef, slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
     // accurate treatment close to the origin assuming a power-law asymptotic behavior of potential
-    bool asympt   = (slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*SQRT_DBL_EPSILON);
-    double Rcirc  = !asympt ?  R_circ(potential, E) :
+    bool asympt  = slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*SQRT_DBL_EPSILON;
+    double Rcirc = !asympt ?  R_circ(potential, E) :
         slope==0 ?  exp((E-Phi0) / coef - 0.5)  :  std::pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
-    coord::GradCyl grad;
-    potential.eval(coord::PosCyl(Rcirc,0,0), NULL, &grad);
-    double Lcirc2 = !asympt ?  pow_3(Rcirc) * grad.dR :
-        slope==0 ?  coef * pow_2(Rcirc)  :  (E-Phi0) / (1/slope+0.5) * pow_2(Rcirc);
-    if(!isFinite(Lcirc2))
+    if(!isFinite(Rcirc))
         throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
             utils::toString(E,16) + ")\n" + utils::stacktrace());
-    double Lrel2  = L*L / Lcirc2;
     if(asympt) {
-        RPeriApoRootFinderPowerLaw fnc(slope, Lrel2);
+        double vcirc = slope==0 ? sqrt(coef) : sqrt(coef*slope) * std::pow(Rcirc, 0.5*slope);
+        RPeriApoRootFinderPowerLaw fnc(slope, pow_2(L / (Rcirc * vcirc)));
         R1 = Rcirc * math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
         R2 = Rcirc * math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
     } else {
@@ -344,7 +346,7 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         // for a reasonable potential, 2*Rcirc is actually an upper limit,
         // but in case of trouble, repeat with a safely larger value 
         if(!isFinite(R2))
-            R2 = math::findRoot(fnc, Rcirc, (1+1e-8)*R_max(potential, E), ACCURACY_ROOT);
+            R2 = math::findRoot(fnc, Rcirc, (1+ACCURACY_ROOT)*R_max(potential, E), ACCURACY_ROOT);
     }
     if(!isFinite(R1+R2)) {
         // this may arise when the orbit is very nearly circular due to roundoff errors,
@@ -353,7 +355,7 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         R1 = R2 = Rcirc;
         utils::msg(utils::VL_WARNING, FUNCNAME,
             "E=" + utils::toString(E,16) + " and L=" + utils::toString(L,16) +
-            " have incompatible values (Lcirc=" + utils::toString(sqrt(Lcirc2),16) + ")");
+            " have incompatible values (Rcirc=" + utils::toString(Rcirc,16) + ")");
     }
 }
 
@@ -377,7 +379,8 @@ Interpolator::Interpolator(const BasePotential& potential)
     std::vector<double> gridLogR = math::createInterpolationGrid(
         ScalePhi(PotentialWrapper(potential)), ACCURACY_INTERP);
     // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
-    while(!gridLogR.empty() && potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) < Phi0*(1-1e-14))
+    while(!gridLogR.empty() &&
+        potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) < Phi0 * (1-MIN_REL_DIFFERENCE))
         gridLogR.erase(gridLogR.begin());
 
     unsigned int gridsize = gridLogR.size();
@@ -584,17 +587,19 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     std::vector<double> gridE;
     gridE.reserve(gridr.size());
 
-    // compute the potential at each node of the radial grid,
-    // throwing away nodes that are too close to origin such that the potential is equal to Phi(0)
-    // due to finite precision of floating-point arithmetic
+    // compute the potential at each node of the radial grid, throwing away nodes that are
+    // too closely spaced, such that the difference between adjacent potential values suffers from
+    // roundoff/cancellation errors due to finite precision of floating-point arithmetic
+    double prevPhi = Phi0;
     for(unsigned int i=0; i<gridr.size();) {
         double E = pot.value(gridr[i]);
-        if(E > Phi0 * (1-1e-14)) {
-            if(i>0 && !(E>=gridE[i-1]))
-                throw std::invalid_argument(
-                    "PhaseVolume: potential is non-monotonic at r="+utils::toString(gridr[i]));
+        if(i>0 && !(E>=gridE[i-1]))
+            throw std::invalid_argument(
+                "PhaseVolume: potential is non-monotonic at r="+utils::toString(gridr[i]));
+        if(E > prevPhi * (1-MIN_REL_DIFFERENCE)) {
             gridE.push_back(E);
             i++;
+            prevPhi = E;
         } else {
             gridr.erase(gridr.begin()+i);
         }
@@ -740,6 +745,9 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
     double Phi0, slope = pot.innerSlope(&Phi0);
     if(!isFinite(Phi0) || slope<=0)
         throw std::runtime_error("Interpolator2d: can only deal with potentials that are finite at r->0");
+    if(slope <= 0.05)
+        utils::msg(utils::VL_WARNING, "Interpolator2d",
+            "Potential is nearly singular at origin, numerical problems are likely to occur");
     const unsigned int sizeE = 50;
     const unsigned int sizeL = 40;
 

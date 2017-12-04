@@ -1,38 +1,27 @@
 #!/usr/bin/python
 """
 This example demonstrates the machinery for constructing multicomponent self-consistent models
-specified by distribution functions in terms of actions.
-We create a two-component galaxy with disk, bulge and halo components, using a two-stage approach:
-first, we take a static potential/density profile for the disk, and find a self-consistent
-density profile of the bulge and the halo components in the presence of the disk potential;
-second, we replace the static disk with a DF-based component and find the overall self-consistent
-model for all components. The rationale is that a reasonable guess for the total potential
-is already needed before constructing the DF for the disk component, since the latter relies
-upon plausible radially-varying epicyclic frequencies.
-Both stages require a few iterations to converge.
+specified by distribution functions (DFs) in terms of actions.
+We create a four-component galaxy with disk, bulge and halo components defined by their DFs,
+and a static density profile of gas disk.
+Then we perform several iterations of recomputing the density profiles of components from their DFs
+and recomputing the total potential.
 Finally, we create N-body representations of all mass components: dark matter halo,
 stars (bulge, thin and thick disks and stellar halo combined), and gas disk.
 A modification of this script that creates a self-consistent three-component model
-(bulge, disk and halo) is given in example_self_consistent_model3.py
+(disk, bulge and halo) is given in example_self_consistent_model3.py
 This example is the Python counterpart of tests/example_self_consistent_model.cpp
 """
 import agama, numpy, ConfigParser, sys, os
 
-# write out the rotation curve (separately for the disky and spheroidal components:
-# the first one contains stellar disk, halo and the gas disk, the second - stellar bulge and dark halo
-def writeRotationCurve(filename, potential):
-    potential.export(filename)
-    numComp = len(potential)    # number of components in the composite potential (2)
-    radii = numpy.logspace(-1.5, 2, 71)
+# write out the rotation curve (separately for each component, and the total one)
+def writeRotationCurve(filename, potentials):
+    radii = numpy.logspace(-2., 2., 81)
     xyz   = numpy.column_stack((radii, radii*0, radii*0))
-    vcirc = numpy.zeros((len(radii), numComp+2))
-    vcirc[:,0] = radii
-    # first 2 columns are circular velocities of individual components, the last one is the total
-    for c in range(numComp+1):
-        pot = potential[c] if c<numComp else potential
-        vcirc[:,c+1] = (-pot.force(xyz)[:,0] * radii)**0.5
-    numpy.savetxt(filename, vcirc, fmt="%.6g", delimiter="\t", \
-        header="radius[Kpc]\t" + "\t".join([str(pot) for pot in potential]) + "\tv_circ,total[km/s]")
+    vcomp = numpy.column_stack([(-potential.force(xyz)[:,0] * radii)**0.5 for potential in potentials])
+    vtot  = numpy.sum(vcomp**2, axis=1)**0.5
+    numpy.savetxt(filename, numpy.column_stack((radii, vtot, vcomp)), fmt="%.6g", delimiter="\t", \
+        header="radius[Kpc]\tv_circ,total[km/s]\tdisk\tbulge\thalo")
 
 # print surface density profiles to a file
 def writeSurfaceDensityProfile(filename, model, df):
@@ -61,11 +50,8 @@ def writeVerticalDensityProfile(filename, model, df):
 def writeVelocityDistributions(filename, model, df):
     point = (solarRadius, 0, 0.1)
     print "Writing velocity distributions at (R=%g, z=%g)" % (point[0], point[2])
-    # choose the range of velocity to build the distribution
-    v_escape = (-2 * model.potential.potential(point))**0.5;
-    v_circ   = (-model.potential.force(point)[0] * point[0])**0.5
-    v_max    = min(0.8*v_escape, 2*v_circ)
     # create grids in velocity space for computing the spline representation of VDF
+    v_max    = 360.0    # km/s
     gridvR   = numpy.linspace(-v_max, v_max, 75)
     gridvz   = gridvR   # for simplicity, use the same grid for all dimensions
     gridvphi = gridvR
@@ -79,9 +65,9 @@ def writeVelocityDistributions(filename, model, df):
 
 # display some information after each iteration
 def printoutInfo(model, iteration):
-    densHalo  = model.components[0].getDensity()
-    densBulge = model.components[1].getDensity()
-    densDisk  = model.components[2].getDensity()
+    densDisk = model.components[0].getDensity()
+    densBulge= model.components[1].getDensity()
+    densHalo = model.components[2].getDensity()
     pt0 = (solarRadius, 0, 0)
     pt1 = (solarRadius, 0, 1)
     print \
@@ -89,17 +75,19 @@ def printoutInfo(model, iteration):
         "rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \
         (densDisk.density(pt0)*1e-9, densDisk.density(pt1)*1e-9)  # per pc^3, not kpc^3
     print \
-        "Bulge total mass=%g Msun," % densBulge.totalMass(), \
-        "rho(1 kpc)=%g Msun/pc^3" % (densBulge.density(1, 0, 0)*1e-9)
-    print \
         "Halo total mass=%g Msun," % densHalo.totalMass(), \
         "rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \
         (densHalo.density(pt0)*1e-9, densHalo.density(pt1)*1e-9)
     print "Potential at origin=-(%g km/s)^2," % (-model.potential.potential(0,0,0))**0.5, \
         "total mass=%g Msun" % model.potential.totalMass()
-    densDisk.export("dens_disk_iter"+str(iteration));
-    densHalo.export("dens_halo_iter"+str(iteration));
-    writeRotationCurve("rotcurve_iter"+str(iteration), model.potential)
+    densDisk.export ("dens_disk_" +iteration);
+    densBulge.export("dens_bulge_"+iteration);
+    densHalo.export ("dens_halo_" +iteration);
+    model.potential.export("potential_"+iteration);
+    writeRotationCurve("rotcurve_"+iteration, (model.potential[1],  # disk potential (CylSpline)
+        agama.Potential(type='Multipole', lmax=6, density=densBulge),        # -"- bulge
+        agama.Potential(type='Multipole', lmax=6, density=densHalo) ) )      # -"- halo
+
 
 if __name__ == "__main__":
     # read parameters from the INI file
@@ -138,38 +126,26 @@ if __name__ == "__main__":
     densityStellarDisk = agama.Density(densityThinDisk, densityThickDisk)  # composite
 
     # add components to SCM - at first, all of them are static density profiles
-    model.components.append(agama.Component(density=densityDarkHalo,    disklike=False))
-    model.components.append(agama.Component(density=densityBulge,       disklike=False))
     model.components.append(agama.Component(density=densityStellarDisk, disklike=True))
+    model.components.append(agama.Component(density=densityBulge,       disklike=False))
+    model.components.append(agama.Component(density=densityDarkHalo,    disklike=False))
     model.components.append(agama.Component(density=densityGasDisk,     disklike=True))
 
     # compute the initial potential
     model.iterate()
-    writeRotationCurve("rotcurve_init", model.potential)
+    printoutInfo(model, "init")
 
-    print "\033[1;33m**** STARTING ONE-COMPONENT MODELLING ****\033[0m\nMasses are: " \
-        "Mbulge=%g Msun,"% densityBulge.totalMass(), \
-        "Mgas=%g Msun,"  % densityGasDisk.totalMass(), \
+    print "\033[1;33m**** STARTING MODELLING ****\033[0m\nInitial masses of density components: " \
         "Mdisk=%g Msun," % densityStellarDisk.totalMass(), \
-        "Mhalo=%g Msun"  % densityDarkHalo.totalMass()
+        "Mbulge=%g Msun,"% densityBulge.totalMass(), \
+        "Mhalo=%g Msun," % densityDarkHalo.totalMass(), \
+        "Mgas=%g Msun"  % densityGasDisk.totalMass()
 
     # create the dark halo DF
     dfHalo  = agama.DistributionFunction(potential=model.potential, **iniDFDarkHalo)
     # same for the bulge
     dfBulge = agama.DistributionFunction(potential=model.potential, **iniDFBulge)
-
-    # replace the halo and bulge SCM components with the DF-based ones
-    model.components[0] = agama.Component(df=dfHalo,  disklike=False, **iniSCMHalo)
-    model.components[1] = agama.Component(df=dfBulge, disklike=False, **iniSCMBulge)
-
-    # do a few iterations to determine the self-consistent density profile of the halo and the bulge
-    for iteration in range(1,5):
-        print "\033[1;37mStarting iteration #%d\033[0m" % iteration
-        model.iterate()
-        printoutInfo(model, iteration)
-
-    # now that we have a reasonable guess for the total potential,
-    # we may initialize the DF of the stellar components (thin/thick disks and stellar halo)
+    # same for the stellar components (thin/thick disks and stellar halo)
     dfThinDisk    = agama.DistributionFunction(potential=model.potential, **iniDFThinDisk)
     dfThickDisk   = agama.DistributionFunction(potential=model.potential, **iniDFThickDisk)
     dfStellarHalo = agama.DistributionFunction(potential=model.potential, **iniDFStellarHalo)
@@ -178,22 +154,24 @@ if __name__ == "__main__":
     # composite DF of all stellar components including the bulge
     dfStellarAll  = agama.DistributionFunction(dfThinDisk, dfThickDisk, dfStellarHalo, dfBulge)
 
+    # replace the disk, halo and bulge SCM components with the DF-based ones
+    model.components[0] = agama.Component(df=dfStellar, disklike=True, **iniSCMDisk)
+    model.components[1] = agama.Component(df=dfBulge, disklike=False, **iniSCMBulge)
+    model.components[2] = agama.Component(df=dfHalo,  disklike=False, **iniSCMHalo)
+
     # we can compute the masses even though we don't know the density profile yet
-    print "\033[1;33m**** STARTING TWO-COMPONENT MODELLING ****\033[0m\nMasses are:", \
+    print "Masses of DF components: " \
         "Mdisk=%g Msun" % dfStellar.totalMass(), \
         "(Mthin=%g, Mthick=%g, Mstel.halo=%g);" % \
         (dfThinDisk.totalMass(), dfThickDisk.totalMass(), dfStellarHalo.totalMass()), \
         "Mbulge=%g Msun;" % dfBulge.totalMass(), \
         "Mdarkhalo=%g Msun" % dfHalo.totalMass()
 
-    # replace the static disk + stellar halo component with a DF-based one
-    model.components[2] = agama.Component(df=dfStellar, disklike=True, **iniSCMDisk)
-
     # do a few more iterations to obtain the self-consistent density profile for the entire system
-    for iteration in range(5,11):
+    for iteration in range(1,6):
         print "\033[1;37mStarting iteration #%d\033[0m" % iteration
         model.iterate()
-        printoutInfo(model, iteration)
+        printoutInfo(model, "iter"+str(iteration))
 
     # output various profiles
     print "\033[1;33mComputing density profiles and velocity distribution\033[0m"
@@ -207,12 +185,12 @@ if __name__ == "__main__":
 
     # first create a representation of density profiles without velocities
     # (just for demonstration), by drawing samples from the density distribution
-    print "Writing N-body sampled density profile for the dark matter halo"
-    agama.writeSnapshot("dens_dm_final", model.components[0].getDensity().sample(800000), format)
     print "Writing N-body sampled density profile for the stellar bulge, disk and halo"
-    # recall that component[1] contains stellar disks and stellar halo, and component[2] - bulge
-    densStars = agama.Density(model.components[1].getDensity(), model.components[2].getDensity())
+    # recall that component[0] contains stellar disks and stellar halo, and component[1] - bulge
+    densStars = agama.Density(model.components[0].getDensity(), model.components[1].getDensity())
     agama.writeSnapshot("dens_stars_final", densStars.sample(200000), format)
+    print "Writing N-body sampled density profile for the dark matter halo"
+    agama.writeSnapshot("dens_dm_final", model.components[2].getDensity().sample(800000), format)
 
     # now create genuinely self-consistent models of all components,
     # by drawing positions and velocities from the DF in the given (self-consistent) potential

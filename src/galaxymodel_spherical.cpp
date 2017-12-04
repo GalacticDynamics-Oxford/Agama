@@ -32,6 +32,9 @@ static const double GLDELTA = M_LN2;
 /// in converting the values to/from log-scaled ones, 
 static const double MIN_VALUE_ROUNDOFF = 0.9999999999999e-100;
 
+/// minimum relative difference between two adjacent values of potential (to reduce roundoff errors)
+static const double MIN_REL_DIFFERENCE = 1e-12;
+
 /** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
     if  f(x) ~ f0 * (1 + A * x^B)  as  x --> 0  or  x --> infinity,  then the slope B is given by
     solving the equation  [x0^B - x1^B] / [x1^B - x2^B] = [f(x0) - f(x1)] / [f(x1) - f(x2)],
@@ -257,14 +260,22 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
     }
 
     // 2b. store the values of h, Phi and rho at the nodes of a grid
+    double prevPhi = potential(0);
     for(unsigned int i=0; i<gridlogh.size();) {
         double Phi = phasevol.E(exp(gridlogh[i]));
         double R   = potential::R_max(potential, Phi);
         double rho = density(R);
-        if(rho > MIN_VALUE_ROUNDOFF) {
+        // throw away grid nodes with invalid or negligible values of density,
+        // and also nodes too closely so that the difference between adjacent potential values
+        // is dominated by roundoff / cancellation errors
+        if( isFinite(R) && R > 0 &&
+            isFinite(rho) && rho > MIN_VALUE_ROUNDOFF &&
+            Phi > prevPhi * (1-MIN_REL_DIFFERENCE))
+        {
             gridPhi.push_back(Phi);
             gridlogrho.push_back(log(rho));
             i++;
+            prevPhi = Phi;
         } else {
             gridlogh.erase(gridlogh.begin()+i);
         }
@@ -345,7 +356,7 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
             // now add a contribution to the integral expressing f(h_j) for all h_j <= h[i-1]
             for(unsigned int j=0; j<i; j++) {
                 double denom2 = E - gridPhi[j];
-                if(denom2 < fabs(gridPhi[i]) * 1e-8)              // loss of precision is possible:
+                if(denom2 < fabs(gridPhi[i]) * SQRT_DBL_EPSILON)  // loss of precision is possible:
                     denom2 = phasevol.deltaE(logh, gridlogh[j]);  // use a more accurate expression
                 gridf[j] += mult * weight * factor / sqrt(denom2);
             }
@@ -1223,7 +1234,7 @@ void writeSphericalModel(const std::string& fileName, const std::string& header,
     const math::IFunction& df = model;
     if(gridh.empty()) {
         // estimate the range of log(h) where the DF varies considerably
-        std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), 1e-6);
+        std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
         gridH.resize(gridLogH.size());
         std::transform (gridLogH.begin(), gridLogH.end(), gridH.begin(), exp);
     } else if(gridh.size()<2)
@@ -1234,7 +1245,8 @@ void writeSphericalModel(const std::string& fileName, const std::string& header,
     std::vector<double> gridR, gridPhi, gridG;
     for(size_t i=0; i<gridH.size(); ) {
         double g, Phi = model.phasevol.E(gridH[i], &g);
-        if(Phi > Phi0 * (1-1e-14)) {  // avoid radii where the potential is too close to Phi(0)
+        // avoid closely spaced potential values whose difference is dominated by roundoff errors
+        if(Phi > (gridPhi.empty()? Phi0 : gridPhi.back()) * (1-MIN_VALUE_ROUNDOFF)) {
             gridPhi.push_back(Phi);
             gridG.  push_back(g);
             gridR.  push_back(potential::R_max(pot, Phi));

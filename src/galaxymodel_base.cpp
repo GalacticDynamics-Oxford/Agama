@@ -233,7 +233,7 @@ protected:
 
 
 /** helper class for computing the moments of distribution function
-    (surface density and line-of-sight velocity dispersion) at a given point in x,y plane  */
+    (surface density, scale height, line-of-sight velocity dispersion) at a given point in x,y plane  */
 class DFIntegrandProjectedMoments: public DFIntegrandNdim {
 public:
     DFIntegrandProjectedMoments(const GalaxyModel& _model, double _R) :
@@ -253,14 +253,14 @@ public:
 protected:
     double R;
     virtual unsigned int numVars()   const { return 4; }
-    virtual unsigned int numValues() const { return 2; }
+    virtual unsigned int numValues() const { return 3; }
 
-    /// output array contains two elements - the value of DF
-    /// and its second moment with line-of-sight velocity
+    /// output array contains three elements - the value of DF multiplied by 1, z^2 or vz^2
     virtual void outputValues(const coord::PosVelCyl& pv, const double dfval, 
         double values[]) const {
         values[0] = dfval;
-        values[1] = dfval * pow_2(pv.vz);
+        values[1] = dfval * pow_2(pv.z);
+        values[2] = dfval * pow_2(pv.vz);
     }
 };
 
@@ -643,20 +643,27 @@ double computeProjectedDF(const GalaxyModel& model,
 
 
 void computeProjectedMoments(const GalaxyModel& model, const double R,
-    double& surfaceDensity, double& losvdisp, double* surfaceDensityErr, double* losvdispErr,
+    double* surfaceDensity, double* rmsHeight, double* rmsVel,
+    double* surfaceDensityErr, double* rmsHeightErr, double* rmsVelErr,
     const double reqRelError, const int maxNumEval)
 {
     double xlower[4] = {0, 0, 0, 0};  // integration region in scaled variables
     double xupper[4] = {1, 1, 1, 1};
     DFIntegrandProjectedMoments fnc(model, R);
-    double result[2], error[2];
+    double result[3], error[3];
     math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error);
-    surfaceDensity = result[0];
-    losvdisp = result[1] / result[0];
+    if(surfaceDensity)
+        *surfaceDensity = result[0];
+    if(rmsHeight)
+        *rmsHeight = result[0]>0 ? sqrt(result[1] / result[0]) : 0;
+    if(rmsVel)
+        *rmsVel = result[0]>0 ? sqrt(result[2] / result[0]) : 0;
     if(surfaceDensityErr)
         *surfaceDensityErr = error[0];
-    if(losvdispErr)
-        *losvdispErr = sqrt(pow_2(error[0]/result[0]*result[1]) + pow_2(error[1]));
+    if(rmsHeightErr)
+        *rmsHeightErr = result[0]>0 ? sqrt(pow_2(error[0]/result[0]*result[1]) + pow_2(error[1])) : 0;
+    if(rmsVelErr)
+        *rmsVelErr = result[0]>0 ? sqrt(pow_2(error[0]/result[0]*result[2]) + pow_2(error[2])) : 0;
 }
 
 

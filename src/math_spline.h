@@ -1,7 +1,7 @@
 /** \file    math_spline.h
     \brief   spline interpolation and penalized spline approximation
     \author  Eugene Vasiliev
-    \date    2011-2016
+    \date    2011-2017
 
 This module implements various interpolation and smoothing algorithms in 1,2,3 dimensions.
 
@@ -262,6 +262,41 @@ private:
 };
 
 
+/** Cubic or quintic spline with logarithmic scalings of both the value and the argument:
+    f(x) = exp( S( ln(x) ) ), where S is represented as a spline.
+    Input x values must be strictly positive; however, input f values may contain zero or
+    negative elements - these points will be excluded from log-spline construction and
+    interpolated without log-scaling when evaluating the function.
+*/
+class LogLogSpline: public BaseInterpolator1d {
+public:
+    /// empty constructor
+    LogLogSpline() {}
+
+    /// construct a natural or clamped cubic spline from the function values
+    /// and optionally two endpoint derivatives
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        double derivLeft=NAN, double derivRight=NAN);
+
+    /// construct a quintic spline from function values and derivatives
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
+    
+    virtual void evalDeriv(const double x,
+        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+
+    virtual unsigned int numDerivs() const { return 2; }
+
+private:
+    std::vector<double> fder;     ///< first derivatives of the original function at grid nodes
+    std::vector<double> logxval;  ///< log-scaled coordinate
+    std::vector<double> logfval;  ///< log-scaled function values
+    std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
+    std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
+    
+};
+
+
 /** One-dimensional B-spline interpolator class.
     The value of interpolant is given by a weighted sum of components:
     \f$  f(x) = \sum_n  A_n  B_n(x) ,  0 <= n < numComp  \f$,
@@ -499,41 +534,6 @@ private:
 };
 
 
-/** Cubic or quintic spline with logarithmic scalings of both the value and the argument:
-    f(x) = exp( S( ln(x) ) ), where S is represented as a spline.
-    Input x values must be strictly positive; however, input f values may contain zero or
-    negative elements - these points will be excluded from log-spline construction and
-    interpolated without log-scaling when evaluating the function.
-*/
-class LogLogSpline: public BaseInterpolator1d {
-public:
-    /// empty constructor
-    LogLogSpline() {}
-
-    /// construct a natural or clamped cubic spline from the function values
-    /// and optionally two endpoint derivatives
-    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        double derivLeft=NAN, double derivRight=NAN);
-
-    /// construct a quintic spline from function values and derivatives
-    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
-        const std::vector<double>& fderivs);
-    
-    virtual void evalDeriv(const double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
-
-    virtual unsigned int numDerivs() const { return 2; }
-
-private:
-    std::vector<double> fder;     ///< first derivatives of the original function at grid nodes
-    std::vector<double> logxval;  ///< log-scaled coordinate
-    std::vector<double> logfval;  ///< log-scaled function values
-    std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
-    std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
-    
-};
-
-
 ///@}
 /// \name Two-dimensional interpolation
 ///@{
@@ -544,7 +544,7 @@ public:
     BaseInterpolator2d() {}
 
     /** Initialize a 2d interpolator from the provided values of x, y and f.
-        The latter is 2d array with the following indexing convention:  f[i][j] = f(x[i],y[j]).
+        The latter is 2d array with the following indexing convention:  f(i, j) = f(x[i],y[j]).
         Values of x and y arrays should monotonically increase.
     */
     BaseInterpolator2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
@@ -600,7 +600,7 @@ public:
     LinearInterpolator2d() : BaseInterpolator2d() {}
 
     /** Initialize a 2d interpolator from the provided values of x, y and f.
-        The latter is 2d array with the following indexing convention:  f[i][j] = f(x[i],y[j]).
+        The latter is 2d array with the following indexing convention:  f(i,j) = f(x[i],y[j]).
         Values of x and y arrays should monotonically increase.
     */
     LinearInterpolator2d(const std::vector<double>& xgrid, const std::vector<double>& ygrid,

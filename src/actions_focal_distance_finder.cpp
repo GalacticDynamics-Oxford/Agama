@@ -21,7 +21,7 @@ static const double ACCURACY_INTEGR = 1e-6;
 static const unsigned int MAX_NUM_STEPS_ODE = 100;
 
 
-// estimate IFD for a series of points in R-z plane
+// estimate focal distance for a series of points in R-z plane
 template<typename PointT>
 double estimateFocalDistancePoints(
     const potential::BasePotential& potential, const std::vector<PointT>& traj)

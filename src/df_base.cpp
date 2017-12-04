@@ -79,8 +79,10 @@ void ActionSpaceScalingRect::toScaled(const actions::Actions &acts, double vars[
 template <bool LogTerm>
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
-    DFIntegrandNdim(const BaseDistributionFunction& _df, const BaseActionSpaceScaling& _scaling) :
-        df(_df), scaling(_scaling) {};
+    const BaseDistributionFunction& df;        ///< the instance of DF
+    const ActionSpaceScalingTriangLog scaling; ///< scaling transformation
+
+    DFIntegrandNdim(const BaseDistributionFunction& _df) : df(_df) {};
 
     /// compute the value of DF, taking into accound the scaling transformation for actions:
     /// input array of length 3 contains the three actions, scaled as described above;
@@ -89,29 +91,25 @@ public:
     {
         double jac;  // will be initialized by the following call
         const actions::Actions act = scaling.toActions(vars, &jac);
-        double val = 0;
         if(jac!=0) {
-            double dfval = df.value(act);
-            if(!isFinite(dfval))
-                dfval = 0;  ///!!! TODO: check why this may happen?
-            if(LogTerm && dfval>0)
-                dfval *= log(dfval);
-            val = dfval * jac * TWO_PI_CUBE;   // integral over three angles
+            double val = df.value(act);
+            if(!isFinite(val))
+                val = 0;
+            if(LogTerm && val>0)
+                val *= log(val);
+            values[0] = val * jac * TWO_PI_CUBE;   // integral over three angles
         } else {
             // we're (almost) at zero or infinity in terms of magnitude of J
             // at infinity we expect that f(J) tends to zero,
             // while at J->0 the jacobian of transformation is exponentially small.
+            values[0] = 0;
         }
-        values[0] = val;
     }
 
     /// number of variables (3 actions)
     virtual unsigned int numVars()   const { return 3; }
     /// number of values to compute (1 value of DF)
     virtual unsigned int numValues() const { return 1; }
-private:
-    const BaseDistributionFunction& df;    ///< the instance of DF
-    const BaseActionSpaceScaling& scaling; ///< scaling transformation
 };
 
 double BaseDistributionFunction::totalMass(const double reqRelError, const int maxNumEval,
@@ -120,7 +118,7 @@ double BaseDistributionFunction::totalMass(const double reqRelError, const int m
     double xlower[3] = {0, 0, 0};  // boundaries of integration region in scaled coordinates
     double xupper[3] = {1, 1, 1};
     double result;  // store the value of integral
-    math::integrateNdim(DFIntegrandNdim<false>(*this, ActionSpaceScalingTriangLog()),
+    math::integrateNdim(DFIntegrandNdim<false>(*this),
         xlower, xupper, reqRelError, maxNumEval, &result, error, numEval);
     return result;
 }
@@ -130,7 +128,7 @@ double totalEntropy(const BaseDistributionFunction& DF, const double reqRelError
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {1, 1, 1};
     double result;
-    math::integrateNdim(DFIntegrandNdim<true>(DF, ActionSpaceScalingTriangLog()),
+    math::integrateNdim(DFIntegrandNdim<true>(DF),
         xlower, xupper, reqRelError, maxNumEval, &result);
     return result;
 }
@@ -141,13 +139,12 @@ std::vector<actions::Actions> sampleActions(const BaseDistributionFunction& DF, 
     double xlower[3] = {0, 0, 0};  // boundaries of integration region in scaled coordinates
     double xupper[3] = {1, 1, 1};
     math::Matrix<double> result;   // the result array of actions
-    ActionSpaceScalingTriangLog transf;
-    DFIntegrandNdim<false> fnc(DF, transf);
+    DFIntegrandNdim<false> fnc(DF);
     math::sampleNdim(fnc, xlower, xupper, numSamples, result, 0/*NULL*/, totalMass, totalMassErr);
     std::vector<actions::Actions> samples(result.rows());
     for(size_t i=0; i<result.rows(); i++) {
         const double point[3] = {result(i,0), result(i,1), result(i,2)};
-        samples[i] = transf.toActions(point);  // transform from scaled vars to actions
+        samples[i] = fnc.scaling.toActions(point);  // transform from scaled vars to actions
     }
     return samples;
 }

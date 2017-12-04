@@ -120,7 +120,7 @@ If $M>N$, there are more equations than variables, and the solution is obtained 
 
 \paragraph{Integration}  of one-dimensional functions can be performed in several ways. \ttt{integrateGL} uses fixed-order Gauss--Legendre quadrature without error estimate. \ttt{integrate} uses variable-order Gauss--Kronrod scheme with the order of quadrature doubled each time until it attains the required accuracy or reaches the maximum; it is a good balance between fixed-order and fully adaptive methods, and is very accurate for smooth analytic functions. \ttt{integrateAdaptive} handles more sophisticated integrands, possibly with singularities, using a fully adaptive recursive scheme to reach the required accuracy, but is also more expensive.
 
-Multidimensional integration over an $N$-dimensional hypercube is performed by the \ttt{integrateNdim} routine, which serves as a unified interface to either \textsc{Cubature} or \textsc{Cuba} library; the former is actually included into the \Agama codebase. Both methods are fully adaptive and have similar performance (either one is better on certain classes of functions). The input function may provide $M\ge 1$ values, i.e., several functions may be integrated simultaneously over the same domain.
+Multidimensional integration over an $N$-dimensional hypercube is performed by the \ttt{integrateNdim} routine, which serves as a unified interface to either \textsc{Cubature} or \textsc{Cuba} library \cite{Cuba}; the former is actually included into the \Agama codebase. Both methods are fully adaptive and have similar performance (either one is better on certain classes of functions). The input function may provide $M\ge 1$ values, i.e., several functions may be integrated simultaneously over the same domain.
 
 \paragraph{Sampling} \label{sec:Sampling}  from a probability distribution (\ttt{sampleNdim}) serves the following task: given a $N$-dimensional function $f(\bx)\ge 0$ over a hypercube domain, construct an array of $M$ random sample points $\bx_k$ such that the density of samples in the neighborhood of any point is proportional to the value of $f$ at that point. Obviously, the function $f$ must have a finite integral over the entire domain, and in fact the integral may be estimated from these samples (however it is not as accurate as the deterministic cubature routines, which are allowed to attribute different weights to each sampled point). This routine uses a multidimensional variant of rejection algorithm with adaptive subdivision of the entire domain into smaller regions, and performing the rejection sampling in each region (a more detailed description is given in Section~\ref{sec:MathSamplingDetails}).
 
@@ -150,8 +150,8 @@ An alternative formulation of the piecewise-polynomial interpolation methods is 
 \footnote{A cubic spline in 1d is defined by $N_x+2$ parameters: they may be taken to be the values of spline at $N_x$ grid nodes plus two endpoint derivatives, which is called a clamped spline. The more familiar case of a natural cubic spline instead has these two additional parameters defined implicitly, by requiring that the second derivative of the spline is zero at both ends.}.
 The interpolating function is defined as $f(\bx) = \sum_\alpha\,A_\alpha\,B_\alpha(\bx)$, where $\alpha$ is a combined index in all dimensions, $A_\alpha$ are the amplitudes and $B_\alpha$ are the basis functions (in more than one dimension, they are formed as tensor products of 1d B-splines, i.e., $B_{ij}(x,y) = B_i(x)\,B_j(y)$). Again, the evaluation of interpolant only requires $O(\log(N_x)+N)$ operations per dimension to locate the grid segment and compute all $N$ possibly nonzero basis functions. This formulation is more suitable for constructing approximating splines from a large number of scattered points (see next paragraph) or basis elements, and they subsequently may be converted to more efficient linear or cubic interpolators. This approach is currently implemented in 1 and 3 dimensions.
 
-Spline interpolation is heavily used throughout the entire \Agama library as an efficient and accurate method for approximating various quantities that are expensive to evaluate directly. By performing suitable additional scaling transformations on the argument and/or value of the interpolator, it is possible to achieve an exquisite accuracy (sometimes down to machine precision) with a moderate ($\mathcal O(10^2)$) number of nodes covering the region of interest; for one-dimensional splines a linear extrapolation beyond that region often remains quite accurate under a carefully chosen scaling (usually logarithmic). Quintic splines are employed when it is possible to compute analytically the derivatives (or partial derivatives in the 2d case) of the approximated function at grid nodes during the spline construction in addition to its values -- in this case the accuracy of approximation becomes $1-2$ orders of magnitude better than that of a cubic spline. (Of course, computing the derivatives by finite-differencing or from a cubic spline does not achieve the goal).
-Mathematical foundations of splines are described in more detail in the Appendix~\ref{sec:MathSplineDetails}.
+Spline interpolation is heavily used throughout the entire \Agama library as an efficient and accurate method for approximating various quantities that are expensive to evaluate directly. By performing suitable additional scaling transformations on the argument and/or value of the interpolator, it is possible to achieve exquisite accuracy (sometimes down to machine precision) with a moderate ($\mathcal O(10^2)$) number of nodes covering the region of interest; for one-dimensional splines a linear extrapolation beyond that region often remains quite accurate under a carefully chosen scaling (usually logarithmic). Quintic splines are employed when it is possible to compute analytically the derivatives (or partial derivatives in the 2d case) of the approximated function at grid nodes during the spline construction in addition to its values -- in this case the accuracy of approximation becomes $1-2$ orders of magnitude better than that of a cubic spline. (Of course, computing the derivatives by finite-differencing or from a cubic spline does not achieve the goal).
+Mathematical foundations of splines are described in more detail in the Appendix (sections \ref{sec:MathBSplineDetails} and \ref{sec:MathSplineDetails}).
 
 \paragraph{Penalized spline fitting}  \label{sec:SplineFitting}
 There are two kinds of tasks that involve the construction of a spline curve from an irregular set of points (as opposed to the values of the curve at grid nodes, as in the previous section).
@@ -161,7 +161,7 @@ minimize $\sum_i [y_i-f(x_i)]^2 + \lambda \int [f''(x)]^2\,dx$, where $\lambda$ 
 
 The second task is to determine a density function $P(x)$ from an array of samples $\{x_i\}$, possibly with individual weights $\{w_i\}$. It is also solved with the help of B-splines, this time for $\ln P(x)$, which is represented as a B-spline of degree $N$ defined by user-specified grid nodes $\{X_k\}$. The routine \ttt{splineLogDensity} constructs an approximation for $\ln P$ for the given grid nodes and samples, with adjustable smoothing parameter $\lambda$.
 
-Both tasks are presently implemented only for the 1d case, but in the future may be generalized to multidimensional data represented by tensor-product B-splines. More details on the mathematical formulation are given in the Appendix~\ref{sec:MathSplineApproxDetails}.
+Both tasks are presently implemented only for the 1d case, but in the future may be generalized to multidimensional data represented by tensor-product B-splines. More details on the mathematical formulation are given in the Appendix (sections \ref{sec:MathSplineApproxDetails} and \ref{sec:MathSplineDensityDetails}).
 
 %%%%%%%%%%%%%%
 \subsubsection{Units}  \label{sec:Units}
@@ -182,7 +182,7 @@ The \Python interface supports the unit conversion internally: the user may set 
 \subsubsection{Coordinates}  \label{sec:Coords}
 The \ttt{coords::} namespace contains classes and routines for representing various mathematical objects in several coordinate systems in three-dimensional space.
 
-There are several built-in coordinate systems: \ttt{Car}tesian, \ttt{Cyl}indrical, \ttt{Sph}erical, and \ttt{ProlSph} -- prolate spheroidal. Their names are used as tags in other templated classes and conversion routines; only the last one has an adjustable parameter (interfocal distance).
+There are several built-in coordinate systems: \ttt{Car}tesian, \ttt{Cyl}indrical, \ttt{Sph}erical, and \ttt{ProlSph} -- prolate spheroidal. Their names are used as tags in other templated classes and conversion routines; only the last one has an adjustable parameter (focal distance).
 
 Templated classes include position, velocity, a combination of the two, an abstract interface \ttt{IScalarFunction} for a scalar function evaluated in a particular coordinate system, gradient and hessian of a scalar function, and coefficients for coordinate transformations from one system to the other. Templated functions convert these objects from one coordinate system to the other: for instance, \ttt{toPosVelCyl} converts the position and velocity from any source coordinate system into cylindrical coordinates; these routines should be called explicitly, to make the code self-documenting. An even more powerful family of functions \ttt{evalAndConvert} take the position in one (output) coordinate system and a scalar function defined in the other (evaluation) system, calls the function with transformed coordinates, and perform the transformation of gradient and hessian back to the output system. The primary use of these routines is in the potential framework (Section~\ref{sec:Potential}) -- each potential defines a method for computing it in the optimal system, and uses the conversion routines to provide the remaining ones. Another use is for transformation of probability distributions, which involve Jacobian matrices of coordinate conversions.
 
@@ -396,7 +396,7 @@ In a more general case of an arbitrary spherical potential, the radial action is
 J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;dr,
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
-The standalone routines in \ttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$, as well as the reverse mapping between $\bJ$ and $\{\bx,\bv\}$.
+The standalone routines in \ttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$, as well as the reverse mapping between $\{\bJ,\bt\}$ and $\{\bx,\bv\}$.
 
 %%%%%%%%%%%%%%
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
@@ -405,7 +405,7 @@ In a still more general axisymmetric case, the action/angle variables can be exa
 
 For the most interesting practical case of a non-St\"ackel axisymmetric potential, the actions can only be approximated under the assumption that the motion is integrable and is locally well described by a St\"ackel potential. This is the essence of the ``St\"ackel fudge'' approach \cite{Binney2012}. In a nutshell, it pretends that the potential \textit{is} of a St\"ackel form (without explicitly constructing it), computes the would-be integrals of motion in this presumed potential, and then performs essentially the same steps as the routines for the genuine St\"ackel potential. Actions computed in this way are approximate, in the sense that even for a regular (non-chaotic) motion, they are not exactly conserved along the orbit; the variation of $\bJ$ is smallest for nearly-circular orbits close to the equatorial plane, but typically remains $\lesssim 1-10\%$ even for rather eccentric orbits that stray far from the plane (note that the method does not provide any error estimate), see Figure~\ref{fig:StaeckelAccuracy}. However, if the actual orbit is chaotic or belongs to one of minor resonant families, the variation of estimated actions along the orbit is rather large because the method does not account for resonant motion.
 
-In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the interfocal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Importantly, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
+In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the focal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Importantly, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
 The \ttt{ActionFinderAxisymFudge} class pre-computes a table of best-fit values of $\Delta$ as a function of $E,L_z$ (this takes a couple of seconds) and uses interpolation to obtain a suitable value at any point, which is then fed into the routines that compute the actions.
 This is the main workhorse for many higher-level tasks in the \Agama library.
 
@@ -446,19 +446,52 @@ are linear combinations of actions that control the anisotropy of the model in t
 %%%%%%%%%%%%%%
 \subsubsection{Disky components}  \label{sec:DFdisk}
 
-Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks \cite{Dehnen1999} expressed in terms of actions \cite{BinneyMcMillan2011} is provided by the \ttt{PseudoIsothermal} class, with tunable parameters contained in a \ttt{PseudoIsothermalParam} structure. The DF for a single population is given by
+There are two classes of disk DFs in \Agama: the first, \ttt{QuasiIsothermal}, expresses the DF in terms of auxiliary functions that are related to a particular potential, while the second, \ttt{Exponential}, is written in an entirely self-contained form. We describe them in turn.
+
+Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks \cite{Dehnen1999} expressed in terms of actions \cite{BinneyMcMillan2011} is provided by the \ttt{QuasiIsothermal} class, with tunable parameters contained in a \ttt{QuasiIsothermalParam} structure. The DF for a single population is given by
 \begin{align*}
-f(\bJ) &= \frac{\Omega\,\Sigma}{2\pi^2\,\kappa^2} \times
-\frac{\kappa}{\sigma_r^2} \exp\left(-\frac{\kappa\,J_r}{\sigma_r^2}\right) \times
-\frac{\nu}   {\sigma_z^2} \exp\left(-\frac{\nu\,   J_z}{\sigma_z^2}\right) \times
-\left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0 \\
-\exp\left( \frac{2\Omega\,J_\phi}{\sigma_r^2} \right) & \mbox{if }J_\phi<0 \end{array} \right. \\
-\Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \quad
-\sigma_r(R_c) \equiv \sigma_{r,0} \exp( -R_c / R_{\sigma,r} ) , \quad
-\sigma_z(R_c) \equiv \sqrt{2}\,h_\mathrm{disk}\,\nu(R_c).
+f(\bJ) &= \frac{\tilde\Sigma\,\Omega}{2\pi^2\,\kappa^2} \times
+\frac{\kappa}{\tilde\sigma_r^2} \exp\left(-\frac{\kappa\,J_r}{\tilde\sigma_r^2}\right) \times
+\frac{\nu}   {\tilde\sigma_z^2} \exp\left(-\frac{\nu\,   J_z}{\tilde\sigma_z^2}\right) \times
+\left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0, \\
+\exp\left( \frac{2\Omega\,J_\phi}{\tilde\sigma_r^2} \right) & \mbox{if }J_\phi<0, \end{array} \right. \\
+\tilde\Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \quad
+\tilde\sigma_r(R_c) \equiv \sigma_{r,0} \exp( -R_c / R_{\sigma,r} ) ,\\
+\tilde\sigma_z(R_c)&\equiv \sqrt{2}\,h_\mathrm{disk}\,\nu(R_c) \quad\;\;\mbox{or}\quad
+\tilde\sigma_z(R_c) \equiv \sigma_{z,0} \exp( -R_c / R_{\sigma,z} ) .
 \end{align*}
-Here $R_c(J_\phi)$ is the radius of a circular orbit with angular momentum $J_\mathrm{sum}\equiv |J_\phi| + J_r$, and other quantities -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\Sigma$ and velocity dispersions $\sigma_r,\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(J_\mathrm{sum})$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. The DF of this form approximately corresponds to a radially exponential and vertically isothermal density profile in a potential of an exponential disk, whose parameters (surface density $\Sigma_0$, radial scale length $R_\mathrm{disk}$ and scale height $h_\mathrm{disk}$) match those of the DF.
-A still more general model can describe a composition of populations with different velocity dispersions (see \texttt{df_disk.h} for more details).
+Here $R_c(\tilde J)$ is the radius of a circular orbit with angular momentum $\tilde J\equiv |J_\phi| + k_r J_r + k_z J_z$, with dimensionless coefficients $k_r,k_z\sim \mathcal{O}(1)$. The reason for using a linear combination of all three actions instead of just the $z$-component of angular momentum is that it corresponds better to the average radius of a given orbit: for instance, a star with $J_\phi\approx 0$ does not in reality stay close to origin if the other two actions are large. Other auxiliary functions -- epicyclic frequencies $\kappa,\nu,\Omega$, surface density $\tilde\Sigma$ and velocity dispersions $\tilde\sigma_r,\tilde\sigma_z$ -- are expressed as functions of $R_c$. However, as stressed above, both epicyclic frequencies and $R_c(\tilde J)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. If these two potentials are close enough, then this DF produces density profiles and velocity dispersions that approximately correspond to the exponential disks: the surface density $\Sigma(R)$ is close to exponentially declining with central value $\Sigma_0$ and radial scale length $R_\mathrm{disk}$, the vertical profile is roughly isothermal with scale height $h_\mathrm{disk}$, and the radial velocity dispersion is similar to $\tilde\sigma_r$, althogh the actual profiles are somewhat different from the tilded functions. For historical reasons, we also retain the option of having an exponentially falling vertical velocity dispersion, but note that this choice does not produce constant-scaleheight disks.
+
+The other class of disk-like DFs is represented by the \ttt{Exponential} class, with parameters listed in a \ttt{ExponentialParam} structure:
+\begin{align*}
+f(\bJ) &= \frac{M}{(2\pi)^3}\, \frac{J_d}{J_{\phi,0}^2}\, \exp\bigg(-\frac{J_d}{J_{\phi,0}}\bigg) \times
+\frac{J_v}{J_{r,0}^2} \exp\bigg(-\frac{J_v\,J_r}{J_{r,0}^2}\bigg) \times
+\frac{J_v}{J_{z,0}^2} \exp\bigg(-\frac{J_v\,J_z}{J_{z,0}^2}\bigg) \\
+&\times \left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0, \\
+\exp\left(\frac{J_v\,J_\phi}{J_{r,0}^2} \right) & \mbox{if }J_\phi<0, \end{array} \right. \qquad
+J_d \equiv \sqrt{\tilde J^2 + J_{d,0}^2}, \quad
+J_v \equiv \sqrt{\tilde J^2 + J_{v,0}^2}
+\end{align*}
+
+If the potential has a nearly flat rotation curve with circular velocity $v_c$, then $R_c(\tilde J) \approx \tilde J/v_c$, and the functional form of this DF is similar to the \ttt{QuasiIsothermal} one; hence, it produces reasonably-looking profiles in realistic potentials, but does not itself contain any reference to the potential, simplifying the construction of self-consistent models (Section~\ref{sec:SCM}). The dimensional parameter $J_{\phi,0}$ determines the radial scale length, $J_{z,0}$ sets the scale height and vertical velocity dispersion, and $J_{r,0}$ controls the radial velocity dispersion. Since in real galaxy potentials the rotation curve decreases towards small radii, this would produce too low density and too high velocity dispersions at small radii; to compensate for this, we have additional dimensional parameters $J_{d,0}$ and $J_{v,0}$ that allow to tweak the radial profiles of density and velocity dispersions, correspondingly.
+
+One can generalize either of these models to the continuous distribution of populations with different velocity dispersions. It is commonly assumed that the velocity dispersion of a coeval population of stars increases with time. Let $\tau\in[0..1]$ be the age of the star normalized to the galaxy age (youngest stars have $\tau=0$ and oldest -- $\tau=1$). Let $\sigma_0$, $\sigma_1$ be the radial or vertical velocity dispersion of youngest and oldest stars, correspondingly, and denote their ratio as $\xi\equiv \sigma_0/\sigma_1 \le 1$. The commonly adopted relation between age and velocity dispersion \cite{AumerBinney2009} is $\sigma(\tau) = \sigma_1 \big[\tau + (1-\tau)\xi^{1/\beta} \big]^\beta$, with $\beta\simeq 0.33$. Assume further that the star formation rate declines exponentially with characteristic timescale $\tau_\mathrm{SFR}$ (again normalized to the galaxy age), so that the number of stars increases with look-back time $\tau$ as $\exp(\tau/\tau_\mathrm{SFR})$. Then the value of the DF needs to be integrated over stars of all ages, weighted by the number of stars at each age and substituting $\tilde\sigma_r, \tilde\sigma_z$ by the age-scaled values:
+\begin{align*}
+\bar f(\bJ) = \frac{\int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})\,
+f\big[ \bJ \,|\, \sigma(\tau) \big] }{\int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})}
+\end{align*}
+The \ttt{QuasiIsothermal} DF is then computed as
+\begin{align*}
+\bar f(\bJ) &= \frac{\tilde\Sigma\,\Omega\,\nu}
+{2\pi^2\,\kappa\,\tilde\sigma_{r,1}^2\,\tilde\sigma_{z,1}^2}
+\frac{ \displaystyle \int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})\,
+\frac{1}{\lambda^4} \exp\left(-\frac{1}{\lambda^2}
+\left[ \frac{\kappa\,J_r}{\tilde\sigma_{r,1}^2} + \frac{\nu\,J_z}{\tilde\sigma_{z,1}^2} +
+\mathrm{max}\bigg\{0, -\frac{2\Omega\,J_\phi}{\tilde\sigma_{r,1}^2}\bigg\} \right]\right)}
+{ \int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR}) } ,\\
+\lambda &\equiv \sigma(\tau)/\sigma_1 = \big[\tau + (1-\tau)\xi^{1/\beta}\big]^\beta ,
+\end{align*}
+where the auxiliary functions $\tilde\sigma_r,\tilde\sigma_z$ now refer to the oldest stars. A similar modification applies to the \ttt{Exponential} DF, except that the age-dependent parameters are the scale actions $J_{r,0}, J_{z,0}$, not the velocity dispersions.
 
 %%%%%%%%%%%%%%
 %\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
@@ -487,7 +520,7 @@ Any non-negative function of one variable (the phase volume $h$) may serve as an
 One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{makeEddingtonDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalDF}.
 More information on these models is given in section~\ref{sec:DFsphericalDetails}.
 
-These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{PseudoIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
+These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{QuasiIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
 This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. In subsequent iterations, the potential is no longer spherical, but the density profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -513,7 +546,8 @@ The routine \ttt{computeProjectedMoments} calculates the surface density and the
 \Sigma(R) \equiv \int_{z=-\infty}^\infty dz\, \rho(R,z), \qquad
 \sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty dz\, \rho(R,z)\, v_z^2 .
 \end{align*}
-%\textcolor{red}{[Currently there are no analogous routines for spherical isotropic DFs].}
+
+There are analogous routines for spherical isotropic DFs of the form $f(h)$, defined in \ttt{galaxymodel_spherical.h}
 
 %%%%%%%%%%%%%%
 \subsubsection{Velocity distribution functions}  \label{sec:VDF}
@@ -532,12 +566,12 @@ The VDFs or projected VDFs are computed by the routine \ttt{computeVelocityDistr
 
 As the DF is a probability distribution function (PDF), it can be sampled with a large number of points to create an \Nbody model of the system. There are two possible ways of doing this:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
-\item Draw samples of actions from $f(\bJ)$, used as a three-dimensional PDF. Then create (possibly several) $\{\bx,\bv\}$ points for each value of actions with a random choice of angles, using the torus mapping approach (Section~\ref{sec:ActionsTorus}). This is performed by the routine \ttt{generateActionSamples}.
-\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\{\bx,\bv\})\big)$ with the help of an action finder. This is performed by the routine \ttt{generatePosVelSamples}.
+\item Draw samples of actions from $f(\bJ)$, used as a three-dimensional PDF. Then create (possibly several) $\{\bx,\bv\}$ points for each value of actions with a random choice of angles, using the torus mapping approach (Section~\ref{sec:ActionsTorus}). This is performed by the routine \ttt{sampleActions}.
+\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\{\bx,\bv\})\big)$ with the help of an action finder. This is performed by the routine \ttt{samplePosVel}.
 \end{itemize}
-Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred.
+Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred. It also has a separate, more efficient implementation for spherical isotropic DFs $f(h)$ in spherical potentials $\Phi(r)$.
 
-There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{generateDensitySamples} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
+There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{sampleDensity} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
 
 The inverse procedure for constructing a DF from a given \Nbody model is less well defined. In the case of a spherical isotropic system (Section~\ref{sec:DFspherical}), the one-dimensional function of phase volume $f(h)$ is estimated non-parametrically with the \hyperref[sec:SplineFitting]{penalized density fitting method} and represented as a spline in scaled coordinate (the routine \ttt{fitSphericalDF}). In principle this may be generalized for the case of a three-dimensional $f(\bJ)$, but this has not been implemented yet. The alternative is to fit a parametric DF to the array of actions, computed for the \Nbody particles in the given potential (of course, a suitable self-consistent \ttt{Multipole} or \ttt{CylSpline} potential itself may also be constructed from the same \Nbody model). This approach is demonstrated by one of the example programs (Section~\ref{sec:ExamplesTests}).
 
@@ -649,7 +683,7 @@ This example is inspired by one of the Gaia Challenge assignments \cite{Read2017
 
 \paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFspherical}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation.
 
-\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalDetails}.
+\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalDetails}.
 
 \paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}).
 
@@ -1034,7 +1068,7 @@ The procedure, illustrated in Figure~\ref{fig:Sampling}, can be summarized as fo
 \begin{center}
 \includegraphics[width=15cm]{Sampling.pdf}
 \end{center}
-\caption{Illustration of the adaptive rejection sampling algorithm in the domain $[-1..2]^2$, recursively partitioned into $\sim 100$ rectangular cells. Left panel shows $10^4$ points sampled from $f(x,y) = \exp[-R(x,y)]$, where $R(x,y) \equiv (1-x)^2-100(y-x^2)^2$ is the Rosenbrock function. In the right panel cells are colored according to the density of trial points (successive shades are $2\times$ denser).
+\caption{Illustration of the adaptive rejection sampling algorithm in the domain $[-1..2]^2$, recursively partitioned into $\sim 100$ rectangular cells. Left panel shows $10^4$ points sampled from $f(x,y) = \exp[-R(x,y)]$, where $R(x,y) \equiv (1-x)^2-100(y-x^2)^2$ is the Rosenbrock function. In the right panel cells are \href{https://www.google.com/search?q=mondrian&tbm=isch}{colored} according to the density of trial points (successive shades are $2\times$ denser).
 } \label{fig:Sampling}
 \end{figure}
 %%%%%%%%%%%%
@@ -1325,7 +1359,7 @@ In other words, phase volume is literally the volume of phase space enclosed by 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$. The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ \textcolor{red}{(which is true for any well-behaved potential)}, $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
 The interpolation in scaled coordinates typically attains a level of accuracy better than $10^{-9}$ over the range of $h$ covered by the spline, and $\sim 10^{-5}$ in the extrapolated regime (if the potential indeed has a power-law asymptotic behaviour).
 
-Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{makeEddingtonDF} and \ttt{fitSphericalDF} in the \texttt{galaxymodel_spherical.h} module.
+Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{makeEddingtonDF} and \ttt{fitSphericalDF} in the \ttt{galaxymodel_spherical.h} module.
 
 The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
 In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
@@ -1365,7 +1399,7 @@ D_{hh} &= g(h)\,\big[ h\, I_0(h) + K_h(h) \big], \qquad D_h = K_g(h).  \label{eq
 \end{align}
 To achieve high dynamical range, $h$ is further replaced by $\ln h$, with a trivial modification of the above expressions.
 
-The Fokker--Planck solver, dubbed \textsc{PhaseFlow}, has several ingredients:
+The Fokker--Planck solver, dubbed \textsc{PhaseFlow} \cite{Vasiliev2017}, has several ingredients:
 \begin{itemize}
 \item The distribution function $f(h,t)$ for the evolving population of stars, represented by its values on a grid in $\ln h$. Values of $f(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f$ as a function of $\ln h$.
 \item The potential $\Phi(r)$ corresponding to the density profile $\rho(r)$ of the evolving population, plus optionally an external component (e.g., a central point mass). The 1d Poisson equation is solved by the \ttt{Multipole} class (of course, a monopole is a particular case of a multipole).
@@ -1382,6 +1416,9 @@ The Fokker--Planck solver, dubbed \textsc{PhaseFlow}, has several ingredients:
 
 \bibitem{odeint}
 Ahnert K., Mulansky M., 2011, AIP Conf. Proc. 1389, 1586
+
+\bibitem{AumerBinney2009}
+Aumer M., Binney J., 2009, MNRAS, 397, 1286
 
 \bibitem{Bienayme2015}
 Bienaym\'e O., Robin A., Famaey B., 2015, A\&A, 581, 123
@@ -1436,6 +1473,9 @@ de Zeeuw T., 1985, MNRAS, 216, 273
 
 \bibitem{GreenSilverman}
 Green P., Silverman B., 1994, \textsl{Nonparametric regression and generalized linear models}, Chapman\&Hall, London
+
+\bibitem{Cuba}
+Hahn T., 2005, Comput. Phys. Commun., 168, 78
 
 \bibitem{DOP853}
 Hairer E., N{\o}rsett S., Wanner G., 1993, \textsl{Solving ordinary differential equations}, Springer-Verlag
@@ -1519,6 +1559,9 @@ Vasiliev E., 2013, MNRAS, 434, 3174
 
 \bibitem{Vasiliev2015}
 Vasiliev E., 2015, MNRAS, 446, 3150
+
+\bibitem{Vasiliev2017}
+Vasiliev E., 2017, ApJ, 848, 10
 
 \bibitem{VasilievAthanassoula2015}
 Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842

@@ -1,6 +1,6 @@
 /** \file   math_core.h
     \brief  essential math routines (e.g., root-finding, integration)
-    \date   2015
+    \date   2015-2017
     \author Eugene Vasiliev
 */
 #pragma once

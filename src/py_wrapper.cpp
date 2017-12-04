@@ -34,7 +34,7 @@
 #include "actions_staeckel.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
-#include "df_pseudoisotropic.h"
+#include "df_quasiisotropic.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_losvd.h"
@@ -527,6 +527,7 @@ enum OUTPUT_VALUE {
     OUTPUT_VALUE_SINGLE_AND_SEXTET   = 16, ///< a single number and a sextet
     OUTPUT_VALUE_TRIPLET_AND_TRIPLET = 33, ///< a triplet and another triplet -- two separate arrays
     OUTPUT_VALUE_TRIPLET_AND_SEXTET  = 36, ///< a triplet and a sextet
+    OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE    = 111, ///< three times a single number
     OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET   = 136, ///< all wonders at once
     OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET = 333, ///< another all-in-one
 };
@@ -536,13 +537,13 @@ template<int numArgs>
 size_t inputLength();
 
 /// parse a list of numArgs floating-point arguments for a Python function, 
-/// and store them in inputArray[]; return 1 on success, 0 on failure 
+/// and store them in values[]; return 1 on success, 0 on failure 
 template<int numArgs>
-int parseTuple(PyObject* args, double inputArray[]);
+bool parseTuple(PyObject* args, double values[]);
 
-/// check that the input array is of right dimensions, and return its length
+/// check that the array is of right dimensions, and return its length
 template<int numArgs>
-inline int parseArray(PyArrayObject* arr)
+inline npy_intp parseArray(PyArrayObject* arr)
 {
     if(PyArray_NDIM(arr) == 2 && PyArray_DIM(arr, 1) == numArgs)
         return PyArray_DIM(arr, 0);
@@ -568,11 +569,11 @@ PyObject* formatTuple(const double result[]);
 
 /// construct an output array, or several arrays, that will store the output for many input points
 template<int numOutput>
-PyObject* allocOutputArr(int size);
+PyObject* allocOutputArr(npy_intp size);
 
 /// store the 'result' data computed for a single input point in an output array 'resultObj' at 'index'
 template<int numOutput>
-void formatOutputArr(const double result[], const int index, PyObject* resultObj);
+void formatOutputArr(const double result[], const npy_intp index, PyObject* resultObj);
 
 // ---- template instantiations for input parameters ----
 
@@ -580,21 +581,22 @@ template<> inline size_t inputLength<INPUT_VALUE_SINGLE> () {return 1;}
 template<> inline size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
 template<> inline size_t inputLength<INPUT_VALUE_SEXTET> () {return 6;}
 
-template<> inline int parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double input[]) {
+template<> inline bool parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double values[]) {
     if(PyTuple_Check(args) && PyTuple_Size(args)==1)
-        args = PyTuple_GET_ITEM(args, 0);
-    input[0] = PyFloat_AsDouble(args);
+        args  = PyTuple_GET_ITEM(args, 0);
+    values[0] = PyFloat_AsDouble(args);
     return PyErr_Occurred() ? 0 : 1;
 }
-template<> inline int parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double input[]) {
-    return PyArg_ParseTuple(args, "ddd", &input[0], &input[1], &input[2]);
+template<> inline bool parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double values[]) {
+    return PyArg_ParseTuple(args, "ddd", &values[0], &values[1], &values[2]);
 }
-template<> inline int parseTuple<INPUT_VALUE_SEXTET>(PyObject* args, double input[]) {
+template<> inline bool parseTuple<INPUT_VALUE_SEXTET>(PyObject* args, double values[]) {
     return PyArg_ParseTuple(args, "dddddd",
-        &input[0], &input[1], &input[2], &input[3], &input[4], &input[5]);
+        &values[0], &values[1], &values[2], &values[3], &values[4], &values[5]);
 }
 
-template<> inline int parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
+// specialization of the template function for a single-value input
+template<> inline npy_intp parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
 {
     if(PyArray_NDIM(arr) == 1)
         return PyArray_DIM(arr, 0);
@@ -632,6 +634,7 @@ template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_TRIPLET>()  {retur
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SEXTET>()   {return 7;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {return 6;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
+template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>()    {return 3;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>()   {return 10;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>() {return 9;}
 
@@ -663,6 +666,11 @@ template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(const d
     return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
         result[3], result[4], result[5], result[6], result[7], result[8]);
 }
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>(
+    const double result[])
+{
+    return Py_BuildValue("(ddd)", result[0], result[1], result[2]);
+}
 template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     const double result[])
 {
@@ -676,52 +684,59 @@ template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRI
         result[3], result[4], result[5], result[6], result[7], result[8]);
 }
     
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(npy_intp size) {
     npy_intp dims[] = {size};
     return PyArray_SimpleNew(1, dims, NPY_DOUBLE);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(npy_intp size) {
     npy_intp dims[] = {size, 3};
     return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SEXTET>(npy_intp size) {
     npy_intp dims[] = {size, 6};
     return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(npy_intp size) {
     npy_intp dims[] = {size};
     PyObject* arr1 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(npy_intp size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
     PyObject* arr1 = PyArray_SimpleNew(1, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(npy_intp size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 6};
     PyObject* arr1 = PyArray_SimpleNew(1, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(npy_intp size) {
     npy_intp dims[] = {size, 3};
     PyObject* arr1 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(npy_intp size) {
     npy_intp dims1[] = {size, 3};
     npy_intp dims2[] = {size, 6};
     PyObject* arr1 = PyArray_SimpleNew(2, dims1, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims2, NPY_DOUBLE);
     return Py_BuildValue("NN", arr1, arr2);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>(npy_intp size) {
+    npy_intp dims[] = {size};
+    PyObject* arr1 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    PyObject* arr2 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    PyObject* arr3 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    return Py_BuildValue("NNN", arr1, arr2, arr3);
+}
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(npy_intp size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
     npy_intp dims3[] = {size, 6};
@@ -730,7 +745,7 @@ template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_S
     PyObject* arr3 = PyArray_SimpleNew(2, dims3, NPY_DOUBLE);
     return Py_BuildValue("NNN", arr1, arr2, arr3);
 }
-template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>(int size) {
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>(npy_intp size) {
     npy_intp dims[] = {size, 3};
     PyObject* arr1 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     PyObject* arr2 = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
@@ -739,30 +754,30 @@ template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_
 }
 
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE>(
-    const double result[], const int index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj) 
 {
     pyArrayElem<double>(resultObj, index) = result[0];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
-    const double result[], const int index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj) 
 {
     for(int d=0; d<3; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SEXTET>(
-    const double result[], const int index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj) 
 {
     for(int d=0; d<6; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 1), index) = result[1];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
@@ -770,7 +785,7 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET>(
         pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
@@ -778,7 +793,7 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SEXTET>(
         pyArrayElem<double>(arr2, index, d) = result[d+1];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
@@ -788,7 +803,7 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>(
     }
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
@@ -797,8 +812,15 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(
     for(int d=0; d<6; d++)
         pyArrayElem<double>(arr2, index, d) = result[d+3];
 }
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>(
+    const double result[], const npy_intp index, PyObject* resultObj)
+{
+    pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
+    pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 1), index) = result[1];
+    pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 2), index) = result[2];
+}
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 1);
@@ -809,7 +831,7 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTE
         pyArrayElem<double>(arr2, index, d) = result[d+4];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>(
-    const double result[], const int index, PyObject* resultObj)
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     PyObject* arr1 = PyTuple_GET_ITEM(resultObj, 0);
     PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 1);
@@ -869,7 +891,6 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
                 PyErr_SetString(PyExc_ValueError, "Input does not contain a valid array");
                 return NULL;
             }
-            int numpt = 0;
             if(PyArray_NDIM(arr) == 1 && PyArray_DIM(arr, 0) == numArgs)
             {   // 1d array of length numArgs - a single point
                 fnc(params, &pyArrayElem<double>(arr, 0), output);
@@ -877,7 +898,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
                 return formatTuple<numOutput>(output);
             }
             // check the shape of input array
-            numpt = parseArray<numArgs>(arr);
+            npy_intp numpt = parseArray<numArgs>(arr);
             if(numpt == 0) {
                 PyErr_SetString(PyExc_ValueError, errStrInvalidArrayDim<numArgs>());
                 Py_DECREF(arr);
@@ -890,7 +911,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-            for(int i=0; i<numpt; i++) {
+            for(npy_intp i=0; i<numpt; i++) {
                 if(cbrk.triggered()) continue;
                 double local_output[outputLength<numOutput>()];  // separate variable in each thread
                 fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
@@ -2240,11 +2261,11 @@ static const char* docstringDistributionFunction =
     "The constructor accepts several key=value arguments that describe the parameters "
     "of distribution function.\n"
     "Required parameter is type='...', specifying the type of DF: currently available types are "
-    "'DoublePowerLaw' (for the halo), 'PseudoIsothermal' (for the disk component), "
-    "'PseudoIsotropic' (for the isotropic DF corresponding to a given density profile), "
+    "'DoublePowerLaw' (for the halo), 'QuasiIsothermal' (for the disk component), "
+    "'QuasiIsotropic' (for the isotropic DF corresponding to a given density profile), "
     "'Interp1', 'Interp3' (for interpolated DFs).\n"
     "For some of them, one also needs to provide the potential to initialize the table of epicyclic "
-    "frequencies (potential=... argument), and for the PseudoIsotropic DF one needs to provide "
+    "frequencies (potential=... argument), and for the QuasiIsotropic DF one needs to provide "
     "an instance of density profile (density=...) and the potential (if they are the same, then only "
     "potential=... is needed).\n"
     "Other parameters are specific to each DF type.\n"
@@ -2309,7 +2330,7 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
         return DistributionFunction_initInterpolated<1>(namedArgs);
     else if(utils::stringsEqual(type, "Interp3"))
         return DistributionFunction_initInterpolated<3>(namedArgs);
-    else if(utils::stringsEqual(type, "PseudoIsotropic")) {
+    else if(utils::stringsEqual(type, "QuasiIsotropic")) {
         if(!pot)
             throw std::invalid_argument("Must provide a potential in 'potential=...'");
         PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
@@ -2320,7 +2341,7 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
                 throw std::invalid_argument("Argument 'density' must be a valid Density object");
         } else
             dens = pot;
-        return df::PtrDistributionFunction(new df::PseudoIsotropic(
+        return df::PtrDistributionFunction(new df::QuasiIsotropic(
             galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens),
             potential::PotentialWrapper(*pot)), *pot));
     }
@@ -2823,14 +2844,16 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
 void fncGalaxyModelProjectedMoments(void* obj, const double input[], double *result) {
     GalaxyModelParams* params = static_cast<GalaxyModelParams*>(obj);
     try{
-        double surfaceDensity, losvdisp;
+        double surfaceDensity, rmsHeight, rmsVel;
         computeProjectedMoments(params->model, input[0] * conv->lengthUnit,
-            surfaceDensity, losvdisp, NULL, NULL/*, params->accuracy, params->maxNumEval*/);
+            &surfaceDensity, &rmsHeight, &rmsVel, NULL, NULL, NULL/*,
+            params->accuracy, params->maxNumEval*/);
         result[0] = surfaceDensity * pow_2(conv->lengthUnit) / conv->massUnit;
-        result[1] = losvdisp / pow_2(conv->velocityUnit);
+        result[1] = rmsHeight / conv->lengthUnit;
+        result[2] = rmsVel / conv->velocityUnit;
     }
     catch(std::exception& ) {
-        result[0] = result[1] = NAN;
+        result[0] = result[1] = result[2] = NAN;
     }
 }
 
@@ -2847,7 +2870,7 @@ PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
     }
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
-        return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE_AND_SINGLE>
+        return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>
             (&params, points_obj, fncGalaxyModelProjectedMoments);
     }
     catch(std::exception& e) {
@@ -3020,7 +3043,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
             return NULL;
         }
         // initialize the arrays with NULL pointers
-        for(int ind=0; ind<npoints; ind++) {
+        for(npy_intp ind=0; ind<npoints; ind++) {
             pyArrayElem<PyObject*>(splvR,   ind) = NULL;
             pyArrayElem<PyObject*>(splvz,   ind) = NULL;
             pyArrayElem<PyObject*>(splvphi, ind) = NULL;
@@ -3029,7 +3052,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic,1)
 #endif
-        for(int ind=0; ind<npoints; ind++) {
+        for(npy_intp ind=0; ind<npoints; ind++) {
             const coord::PosCar point(
                 pyArrayElem<double>(points_arr, ind, 0) * conv->lengthUnit,
                 pyArrayElem<double>(points_arr, ind, 1) * conv->lengthUnit,
@@ -3045,7 +3068,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
         }
         // if something went wrong, release any successfully created objects
         if(!allok) {
-            for(int ind=npoints-1; ind>=0; ind--) {
+            for(npy_intp ind=npoints-1; ind>=0; ind--) {
                 Py_XDECREF(pyArrayElem<PyObject*>(splvR,   ind));
                 Py_XDECREF(pyArrayElem<PyObject*>(splvz,   ind));
                 Py_XDECREF(pyArrayElem<PyObject*>(splvphi, ind));
@@ -3105,8 +3128,8 @@ static PyMethodDef GalaxyModel_methods[] = {
       "Arguments:\n"
       "  A single value or an array of values of cylindrical radius at which to compute moments.\n"
       "Returns:\n"
-      "  A tuple of two floats or arrays: surface density and line-of-sight velocity dispersion "
-      "at each input radius.\n" },
+      "  A tuple of three floats or arrays: surface density, rms height (z), and rms line-of-sight "
+      "velocity (v_z) at each input radius.\n" },
     { "projectedDF", (PyCFunction)GalaxyModel_projectedDF, METH_VARARGS | METH_KEYWORDS,
       "Compute projected distribution function (integrated over z-coordinate and x- and y-velocities)\n"
       "Named arguments:\n"
@@ -4101,7 +4124,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-        for(int a=0; a<numApertures; a++) {
+        for(npy_intp a=0; a<numApertures; a++) {
             if(fail) continue;
             try{
                 // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
@@ -4140,11 +4163,11 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     } else {
         // construct best-fit GH expansion (find gamma,meanv,sigma) for each aperture and component,
         // and then compute GH moments using these best-fit values
-        const int count = numApertures * numComponents;
+        const npy_intp count = numApertures * numComponents;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic,1)
 #endif
-        for(int ar=0; ar < count; ar++) {
+        for(npy_intp ar=0; ar < count; ar++) {
             if(fail) continue;
             try{
                 int r = ar / numApertures, a = ar % numApertures;  // row and aperture indices
@@ -4284,9 +4307,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     bool singleOrbit = PyArray_NDIM(ic_arr) == 1; // in this case all output arrays have one dimension less
 
     // unit-convert initial conditions
-    int numOrbits = singleOrbit ? 1 : (int)PyArray_DIM(ic_arr, 0);
+    npy_intp numOrbits = singleOrbit ? 1 : PyArray_DIM(ic_arr, 0);
     std::vector<coord::PosVelCar> initCond(numOrbits);
-    for(int i=0; i<numOrbits; i++)
+    for(npy_intp i=0; i<numOrbits; i++)
         initCond[i] = convertPosVel(PyArray_NDIM(ic_arr) == 1 ?
             &pyArrayElem<double>(ic_arr, 0) : &pyArrayElem<double>(ic_arr, i, 0));
     Py_DECREF(ic_arr);
@@ -4309,10 +4332,10 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(PyArray_NDIM(time_arr) == 0)
         integrTimes.assign(numOrbits, PyFloat_AsDouble(time_obj) * conv->timeUnit);
     else
-        for(int i=0; i<numOrbits; i++)
+        for(npy_intp i=0; i<numOrbits; i++)
             integrTimes[i] = pyArrayElem<double>(time_arr, i) * conv->timeUnit;
     Py_DECREF(time_arr);
-    for(int orb=0; orb<numOrbits; orb++)
+    for(npy_intp orb=0; orb<numOrbits; orb++)
         if(integrTimes[orb] <= 0) {
             PyErr_SetString(PyExc_ValueError, "Argument 'time' must be positive");
             return NULL;
@@ -4345,11 +4368,11 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 trajSizes.assign(numOrbits, val);
         } else if(PyArray_NDIM(trajsize_arr) == 1 && (int)PyArray_DIM(trajsize_arr, 0) == numOrbits) {
             trajSizes.resize(numOrbits);
-            for(int i=0; i<numOrbits; i++)
+            for(npy_intp i=0; i<numOrbits; i++)
                 trajSizes[i] = pyArrayElem<int>(trajsize_arr, i);
         }
         Py_DECREF(trajsize_arr);
-        if((int)trajSizes.size() != numOrbits) {
+        if((npy_intp)trajSizes.size() != numOrbits) {
             PyErr_SetString(PyExc_ValueError,
                 "Argument 'trajsize', if provided, must either be an integer or an array of integers "
                 "with the same length as the number of points in the initial conditions");
@@ -4390,7 +4413,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     utils::CtrlBreakHandler cbrk;
 
     // finally, run the orbit integration
-    volatile int numComplete = 0;
+    volatile npy_intp numComplete = 0;
     volatile time_t tprint = time(NULL), tbegin = tprint;
     if(!fail) {
         const orbit::OrbitIntegratorRot orbitIntegrator(*pot, Omega / conv->timeUnit);
@@ -4398,7 +4421,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
-        for(int orb = 0; orb < numOrbits; orb++) {
+        for(npy_intp orb = 0; orb < numOrbits; orb++) {
             if(fail || cbrk.triggered()) continue;
             try{
                 double integrTime = integrTimes.at(orb);
@@ -4472,9 +4495,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 if(numOrbits != 1) {
                     time_t tnow = time(NULL);
                     if(difftime(tnow, tprint)>=1.) {
-                        printf("%i orbits complete\r", numComplete);
-                        fflush(stdout);
                         tprint = tnow;
+                        printf("%li orbits complete\r", (long int)numComplete);
+                        fflush(stdout);
                     }
                 }
             }
@@ -4488,8 +4511,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         }
     }
     if(numOrbits != 1)
-        printf("%i orbits complete (%.4g orbits/s)\n", numComplete,
-            numComplete / difftime(time(NULL), tbegin));
+        printf("%li orbits complete (%.4g orbits/s)\n", (long int)numComplete,
+            numComplete * 1. / difftime(time(NULL), tbegin));
     if(cbrk.triggered()) {
         PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
         fail = true;

@@ -1,6 +1,6 @@
 /** \file    df_factory.h
     \brief   Creation of DistributionFunction instances
-    \author  EV
+    \author  Eugene Vasiliev
     \date    2015
 */
 

@@ -2,6 +2,7 @@
 #include "math_core.h"
 #include <cmath>
 #include <stdexcept>
+#include <cassert>
 
 namespace potential {
 
@@ -16,7 +17,8 @@ static const double EPSREL_POTENTIAL_INT = 1e-6;
 // 2) replace the integration with a spherical-harmonic expansion up to l=2 at large radii
 //    (like in Ferrers potential, but will need to take into account that density is non-zero
 //    at all radii) - possible but would require extra work;
-// 3) use a Multipole potential expansion instead - a preferred solution.
+// 3) change variables in the integration - would be a clean solution but also requires extra work;
+// 4) use a Multipole potential expansion instead - a preferred solution.
 //    For this to work properly, one needs to supply the *density* profile, not the potential,
 //    so that the Multipole potential will solve the Poisson equation itself.
 //    This may be done by down-casting an instance of Dehnen class to BaseDensity,
@@ -27,9 +29,9 @@ Dehnen::Dehnen(double _mass, double _scalerad, double _gamma, double _axisRatioY
     gamma(_gamma), axisRatioY(_axisRatioY), axisRatioZ(_axisRatioZ)
 {
     if(scalerad<=0)
-        throw std::invalid_argument("Error in Dehnen potential: scale radius must be positive");
+        throw std::invalid_argument("Dehnen potential: scale radius must be positive");
     if(gamma<0 || gamma>2)
-        throw std::invalid_argument("Error in Dehnen potential: gamma must lie in the range [0:2]");
+        throw std::invalid_argument("Dehnen potential: gamma must lie in the range [0:2]");
 }
 
 double Dehnen::densityCar(const coord::PosCar& pos) const
@@ -80,7 +82,7 @@ public:
                 return result * s2 * (gamma + 4*m) / (pow_2(m * pow_2(1+m)) * (1+m) * 
                 sqrt( (a2 + C5*s2) * pow_3(a2 + C4*s2) ) );
             default:  // shouldn't happen
-                throw std::runtime_error("Incorrect integration mode in Dehnen potential");
+                assert(!"Incorrect integration mode in Dehnen potential");
         }
     }
 };
@@ -91,28 +93,32 @@ void Dehnen::evalCar(const coord::PosCar &pos,
 {
     if(axisRatioY==1 && axisRatioZ==1) {  // analytical expression for spherical potential
         double r = sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+        double s = scalerad / r;
         if(potential!=NULL) {
-            double x = scalerad / r;
-            if(x > 2e-3/(4-gamma))
-                *potential = mass/scalerad * (gamma==2 ? -log(1+x) : (1-math::pow(1+x, gamma-2)) / (gamma-2) );
-            else  // asymptotic expansion for r-->infinity, or equivalently x-->0
+            if(s > 2e-3/(4-gamma))
                 *potential = mass/scalerad *
-                    -x * (1 + x * (gamma-3)/2 * (1 + x * (gamma-4)/3 * (1 + x * (gamma-5)/4)));
+                    (gamma==2 ? -log(1+s) : (1 - math::pow(1+s, gamma-2)) / (gamma-2) );
+            else  // asymptotic expansion for r-->infinity, or equivalently s-->0
+                *potential = mass/scalerad *
+                    -s * (1 + s * (gamma-3)/2 * (1 + s * (gamma-4)/3 * (1 + s * (gamma-5)/4)));
         }
-        double val = mass * math::pow(r, -gamma) * math::pow(r+scalerad, gamma-3);
+        if(deriv==NULL && deriv2==NULL)
+            return;
+        double xr = pos.x/r, yr = pos.y/r, zr = pos.z/r;
+        double val = mass * math::pow(r, 1-gamma) * math::pow(r+scalerad, gamma-3);
         if(deriv!=NULL) {
-            deriv->dx = r>0 ? val*pos.x : 0;
-            deriv->dy = r>0 ? val*pos.y : 0;
-            deriv->dz = r>0 ? val*pos.z : 0;
+            deriv->dx = r>0 ? val*xr : 0;
+            deriv->dy = r>0 ? val*yr : 0;
+            deriv->dz = r>0 ? val*zr : 0;
         }
         if(deriv2!=NULL) {
-            double val2 = val*(scalerad*(1-gamma)-2*r)/(r*r*(r+scalerad));
-            deriv2->dx2  = val2*pos.x*pos.x + val*(1-pow_2(pos.x/r));
-            deriv2->dy2  = val2*pos.y*pos.y + val*(1-pow_2(pos.y/r));
-            deriv2->dz2  = val2*pos.z*pos.z + val*(1-pow_2(pos.z/r));
-            deriv2->dxdy = (val2-val/(r*r))*pos.x*pos.y;
-            deriv2->dydz = (val2-val/(r*r))*pos.y*pos.z;
-            deriv2->dxdz = (val2-val/(r*r))*pos.z*pos.x;
+            double val2  = -val * (gamma * s + 3) / (r+scalerad);
+            deriv2->dx2  = val2 * xr * xr + val/r;
+            deriv2->dy2  = val2 * yr * yr + val/r;
+            deriv2->dz2  = val2 * zr * zr + val/r;
+            deriv2->dxdy = val2 * xr * yr;
+            deriv2->dydz = val2 * yr * zr;
+            deriv2->dxdz = val2 * zr * xr;
         }
         return;
     }

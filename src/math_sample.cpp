@@ -35,10 +35,10 @@ public:
 
 private:
     /// signed integral type large enough to enumerate all cells in the tree
-    typedef ssize_t CellEnum;
+    typedef ptrdiff_t CellEnum;
 
     /// same for all points in the array of samples
-    typedef ssize_t PointEnum;
+    typedef ptrdiff_t PointEnum;
 
     /// A single cell of the tree
     struct Cell {
@@ -200,8 +200,13 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
         throw std::runtime_error("sampleNdim: more than "+utils::toString(MAX_PRIMES)+
             " dimensions is not supported");
     volume = 1;
-    for(int d=0; d<Ndim; d++)
-        volume *= xupper[d] - xlower[d];
+    for(int d=0; d<Ndim; d++) {
+        if(xupper[d] > xlower[d])
+            volume *= xupper[d] - xlower[d];
+        else
+            throw std::runtime_error(
+            "sampleNdim: upper boundary of sampling region must be larger than the lower boundary");
+    }
 }
 
 double Sampler::computeResult()
@@ -249,11 +254,11 @@ void Sampler::evalFncLoop(PointEnum firstPointIndex, PointEnum lastPointIndex)
     // compute the function values for a block of points at once;
     // operations on different blocks may be OpenMP-parallelized
     const unsigned int block = 1024;
-    int nblocks = (lastPointIndex - firstPointIndex - 1) / block + 1;
+    PointEnum nblocks = (lastPointIndex - firstPointIndex - 1) / block + 1;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-    for(int b=0; b<nblocks; b++) {
+    for(PointEnum b=0; b<nblocks; b++) {
         if(badValueOccured)
             continue;
         PointEnum pointIndex = firstPointIndex + b*block;
@@ -266,7 +271,7 @@ void Sampler::evalFncLoop(PointEnum firstPointIndex, PointEnum lastPointIndex)
             errorMsg = e.what();
             badValueOccured = true;
         }
-        for(int i=0; i<npoints; i++) {
+        for(PointEnum i=0; i<npoints; i++) {
             double val = fncValues[pointIndex + i];
             if(val<0 || !isFinite(val))
                 badValueOccured = true;
@@ -460,7 +465,7 @@ void Sampler::run()
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 
     // first iteration: sample uniformly in a single root cell
-    size_t numInitSamples = (1 + numOutputSamples / minNumPointsInCell) * minNumPointsInCell;
+    PointEnum numInitSamples = (1 + numOutputSamples / minNumPointsInCell) * minNumPointsInCell;
     cells[0].weight = 1. / numInitSamples;
     pointCoords.resize(numInitSamples * Ndim);
     fncValues.resize(numInitSamples);
@@ -484,17 +489,17 @@ void Sampler::run()
             processCell(cellIndex);
         assert(!cellsQueue.empty());
         // find out how many new samples do we need to add, and extend the relevant arrays
-        size_t numPointsExisting = fncValues.size();
-        size_t numPointsOverall  = numPointsExisting + cellsQueue.back().second;
+        PointEnum numPointsExisting = fncValues.size();
+        PointEnum numPointsOverall  = numPointsExisting + cellsQueue.back().second;
         pointCoords.resize(numPointsOverall * Ndim);
         fncValues.resize(numPointsOverall);
         nextPoint.resize(numPointsOverall);
         // assign the coordinates of new samples (each cell is processed independently, may parallelize)
-        int numNewCells = cellsQueue.size();
+        CellEnum numNewCells = cellsQueue.size();
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-        for(int queueIndex=0; queueIndex < numNewCells; queueIndex++)
+        for(CellEnum queueIndex=0; queueIndex < numNewCells; queueIndex++)
             addPointsToCell( cellsQueue[queueIndex].first,
                 numPointsExisting + (queueIndex==0 ? 0 : cellsQueue[queueIndex-1].second),
                 numPointsExisting + cellsQueue[queueIndex].second);

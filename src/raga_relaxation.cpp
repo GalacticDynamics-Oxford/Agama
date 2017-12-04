@@ -229,11 +229,11 @@ RagaTaskRelaxation::RagaTaskRelaxation(
 {
     ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
     potential::PhaseVolume phasevol((potential::PotentialWrapper(*ptrPotSph)));
-    int nbody = particles.size();
+    ptrdiff_t nbody = particles.size();
     std::vector<double> particle_m(nbody);
     particle_h.resize(nbody);
 #pragma omp parallel for schedule(static)
-    for(int i=0; i<nbody; i++) {
+    for(ptrdiff_t i=0; i<nbody; i++) {
         particle_h[i] = phasevol(totalEnergy(*ptrPotSph, particles.point(i)));
         particle_m[i] = particles.mass(i);
     }
@@ -273,9 +273,9 @@ void RagaTaskRelaxation::startEpisode(double timeStart, double length)
 void RagaTaskRelaxation::finishEpisode()
 {
     // assign mass to trajectory samples
-    unsigned int nbody = particles.size();
+    size_t nbody = particles.size();
     std::vector<double> particle_m(nbody * params.numSamplesPerEpisode);
-    for(unsigned int i=0; i<nbody; i++) {
+    for(size_t i=0; i<nbody; i++) {
         double mass = particles.mass(i) / params.numSamplesPerEpisode;
         for(unsigned int j=0; j<params.numSamplesPerEpisode; j++)
             particle_m[i * params.numSamplesPerEpisode + j] = mass;

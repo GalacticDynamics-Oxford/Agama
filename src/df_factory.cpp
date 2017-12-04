@@ -27,19 +27,43 @@ DoublePowerLawParam parseDoublePowerLawParams(
     return par;
 }
 
-PseudoIsothermalParam parsePseudoIsothermalParams(
+QuasiIsothermalParam parseQuasiIsothermalParams(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& conv)
 {
-    PseudoIsothermalParam par;
+    QuasiIsothermalParam par;
     par.Sigma0  = kvmap.getDouble("Sigma0")  * conv.massUnit / pow_2(conv.lengthUnit);
     par.Rdisk   = kvmap.getDouble("Rdisk")   * conv.lengthUnit;
     par.Hdisk   = kvmap.getDouble("Hdisk")   * conv.lengthUnit;
     par.sigmar0 = kvmap.getDouble("sigmar0") * conv.velocityUnit;
+    par.sigmaz0 = kvmap.getDouble("sigmaz0") * conv.velocityUnit;
     par.sigmamin= kvmap.getDouble("sigmamin")* conv.velocityUnit;
-    par.Rsigmar = kvmap.getDouble("Rsigmar", 2*par.Rdisk / conv.lengthUnit) * conv.lengthUnit;
+    par.Rsigmar = kvmap.getDouble("Rsigmar") * conv.lengthUnit;
+    par.Rsigmaz = kvmap.getDouble("Rsigmaz") * conv.lengthUnit;
+    par.coefJr  = kvmap.getDouble("coefJr", par.coefJr);
+    par.coefJz  = kvmap.getDouble("coefJz", par.coefJz);
+    par.Jmin    = kvmap.getDouble("Jmin") * conv.lengthUnit * conv.velocityUnit;
     par.beta    = kvmap.getDouble("beta", par.beta);
     par.Tsfr    = kvmap.getDouble("Tsfr", par.Tsfr);  // dimensionless! in units of Hubble time (galaxy age)
+    par.sigmabirth = kvmap.getDouble("sigmabirth", par.sigmabirth);  // dimensionless ratio
+    return par;
+}
+
+ExponentialParam parseExponentialParams(
+    const utils::KeyValueMap& kvmap,
+    const units::ExternalUnits& conv)
+{
+    ExponentialParam par;
+    par.mass   = kvmap.getDouble("mass")   * conv.massUnit;
+    par.Jr0    = kvmap.getDouble("Jr0")    * conv.lengthUnit * conv.velocityUnit;
+    par.Jz0    = kvmap.getDouble("Jz0")    * conv.lengthUnit * conv.velocityUnit;
+    par.Jphi0  = kvmap.getDouble("Jphi0")  * conv.lengthUnit * conv.velocityUnit;
+    par.addJden= kvmap.getDouble("addJden")* conv.lengthUnit * conv.velocityUnit;
+    par.addJvel= kvmap.getDouble("addJvel")* conv.lengthUnit * conv.velocityUnit;
+    par.coefJr = kvmap.getDouble("coefJr", par.coefJr);
+    par.coefJz = kvmap.getDouble("coefJz", par.coefJz);
+    par.beta   = kvmap.getDouble("beta", par.beta);
+    par.Tsfr   = kvmap.getDouble("Tsfr", par.Tsfr);  // dimensionless! in units of Hubble time (galaxy age)
     par.sigmabirth = kvmap.getDouble("sigmabirth", par.sigmabirth);  // dimensionless ratio
     return par;
 }
@@ -57,14 +81,15 @@ PtrDistributionFunction createDistributionFunction(
 {
     std::string type = kvmap.getString("type");
     if(utils::stringsEqual(type, "DoublePowerLaw")) {
-        DoublePowerLawParam params = parseDoublePowerLawParams(kvmap, converter);
-        return PtrDistributionFunction(new DoublePowerLaw(params));
+        return PtrDistributionFunction(new DoublePowerLaw(parseDoublePowerLawParams(kvmap, converter)));
     }
-    else if(utils::stringsEqual(type, "PseudoIsothermal")) {
+    if(utils::stringsEqual(type, "Exponential")) {
+        return PtrDistributionFunction(new Exponential(parseExponentialParams(kvmap, converter)));
+    }
+    else if(utils::stringsEqual(type, "QuasiIsothermal")) {
         checkNonzero(potential, type);
-        PseudoIsothermalParam params = parsePseudoIsothermalParams(kvmap, converter);
-        return PtrDistributionFunction(new PseudoIsothermal(
-            params, potential::Interpolator(*potential)));
+        return PtrDistributionFunction(new QuasiIsothermal(parseQuasiIsothermalParams(kvmap, converter),
+            potential::Interpolator(*potential)));
     }
     else
         throw std::invalid_argument("Unknown type of distribution function");

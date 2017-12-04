@@ -301,7 +301,7 @@ coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
     point.pphi = aa.Jphi;
     return point;
 }
-    
+
 /** Compute the derivatives of pos/vel w.r.t. actions by finite differencing.
     \param[in]  aa  are the actions and angles at a point slightly offset from the original one;
     \param[in]  p0  is the original point;
@@ -340,7 +340,7 @@ math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2d& inte
     double Phi0, slope = interp.pot.innerSlope(&Phi0);
     const int sizeE = 50;
     const int sizeL = 40;
-    
+
     // create grids in energy and L/Lcirc(E), same as in Interpolator2d
     std::vector<double> gridE(sizeE), gridL(sizeL);
     for(int i=0; i<sizeE; i++) {
@@ -405,7 +405,7 @@ math::CubicSpline2d makeActionInterpolator(const potential::Interpolator2d& inte
         gridJr  (sizeE-1, iL) = 1;
         gridJrdL(sizeE-1, iL) = 0;
     }
-    
+
     // derivs wrt E for circular orbits cannot be obtained directly (involve 3rd deriv of potential),
     // thus they are computed by finite-differences (2nd order for interior nodes, 1st order at boundaries)
     for(int iE=1; iE<sizeE-1; iE++) {
@@ -471,7 +471,7 @@ double computeHamiltonianSpherical(const potential::BasePotential& potential, co
     // find E such that Jr(E, L) equals the target value
     HamiltonianFinderFnc fnc(potential, acts.Jr, L, Ecirc, Einf);
     return math::findRoot(fnc, Ecirc, Einf, ACCURACY_JR);
-}    
+}
 
 coord::PosVelCyl mapSpherical(
     const potential::BasePotential &pot,

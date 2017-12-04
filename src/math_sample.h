@@ -1,6 +1,6 @@
 /** \file    math_sample.h
     \brief   sampling points from a probability distribution
-    \date    2013-2015
+    \date    2013-2017
     \author  Eugene Vasiliev
 */
 #pragma once
