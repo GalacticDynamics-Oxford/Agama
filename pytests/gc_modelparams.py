@@ -46,14 +46,14 @@ class ModelParams:
         n = re.match(r'data_([ch])_rh(\d+)_rs(\d+)_gs(\d+)', filename)
         if m:
             self.truePotential = agama.Potential(
-                type  = 'SpheroidDensity',
+                type  = 'Spheroid',
                 densityNorm = float(m.group(6))*1e6,
                 scaleRadius = 1.0,
                 gamma = 1.0 if m.group(5)=='cusp' else 0.0,
                 beta  = 3.0 )
             self.scaleRadius = float(m.group(3))*0.01
             self.tracerParams = dict(
-                type  = 'SpheroidDensity',
+                type  = 'Spheroid',
                 densityNorm = 1.0,
                 scaleRadius = self.scaleRadius,
                 gamma = float(m.group(1))*0.01,
@@ -63,14 +63,14 @@ class ModelParams:
             self.tracerDensity = agama.Density(**self.tracerParams)
         elif n:
             self.truePotential = agama.Potential(
-                type  = 'SpheroidDensity',
+                type  = 'Spheroid',
                 densityNorm = 3.021516e7 if n.group(1)=='c' else 2.387329e7,
                 scaleRadius = float(n.group(2)),
                 gamma = 0.0 if n.group(1)=='c' else 1.0,
                 beta  = 4.0 )
             self.scaleRadius = float(n.group(3))*0.01
             self.tracerParams = dict(
-                type  = 'SpheroidDensity',
+                type  = 'Spheroid',
                 densityNorm = 1.0,
                 scaleRadius = self.scaleRadius,
                 gamma = float(m.group(4))*0.1,
@@ -91,7 +91,7 @@ class ModelParams:
         r1r0  = self.scaleRadius / r0
         rho0  = rho1 * (1 + r1r0**alpha)**((beta-gamma)/alpha) * r1r0**gamma
         return agama.Potential(
-            type        = 'SpheroidDensity',
+            type        = 'Spheroid',
             densityNorm = rho0,
             scaleRadius = r0,
             gamma       = gamma,

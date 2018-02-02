@@ -81,8 +81,7 @@ static inline void evalRagaPotential(
     }
 }
 
-void RagaOrbitIntegrator::eval(
-    const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const
+void RagaOrbitIntegrator::eval(const double t, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
     evalRagaPotential(pot, bh, t, coord::PosCar(x[0], x[1], x[2]), NULL, &grad, NULL);

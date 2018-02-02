@@ -24,6 +24,10 @@ inline T sign(T x) { return x>0 ? 1 : x<0 ? -1 : 0; }
 template<typename T>
 inline T abs(T x) { return x<0 ? -x : x; }
 
+/** restrict the value x to the range [low..upp]; return low if x is NAN */
+template<typename T>
+inline T clamp(const T& x, const T& low, const T& upp) { return x>upp ? upp : x>low ? x : low; }
+
 /** return an integer power of a number */
 double pow(double x, int n);
 
@@ -41,6 +45,11 @@ double wrapAngle(double x);
     element, already processed by this function, as xprev. 
     Note that this usage scenario is not stable against error accumulation. */
 double unwrapAngle(double x, double xprev);
+
+/** optimized function for computing both sine and cosine at once;
+    it performs a modified argument range reduction so that the floating-point values that are
+    integer multiples of M_PI/2 correspond to exactly zero values of sine or cosine */
+void sincos(double x, double& s, double& c);
 
 
 /** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
@@ -94,38 +103,6 @@ public:
 private:
     double avg, ssq;
     unsigned int num;
-};
-
-
-/** A wrapper providing the IFunction interface for an ordinary function with one parameter,
-    e.g., exp(x) */
-class FncWrapper: public IFunctionNoDeriv {
-    double (*fnc)(double);  ///< function pointer to the actual function
-public:
-    FncWrapper(double (*f)(double)) : fnc(f) {}
-    virtual double value(const double x) const { return fnc(x); }
-};
-
-/** A product of two functions, to be used as a temporary object passed to
-    integration or root-finding routines */
-class FncProduct: public IFunction {
-    const IFunction &f1, &f2;  ///< references to two functions
-public:
-    FncProduct(const IFunction& fnc1, const IFunction& fnc2) :
-        f1(fnc1), f2(fnc2) {}
-    virtual unsigned int numDerivs() const {
-        return f1.numDerivs() < f2.numDerivs() ? f1.numDerivs() : f2.numDerivs();
-    }
-    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
-};
-
-/** Doubly-log-scaled function: return log(f(exp(logx))) and up to two derivatives w.r.t log(x) */
-class LogLogScaledFnc: public IFunction {
-    const IFunction& fnc;  ///< reference to the original function
-public:
-    LogLogScaledFnc(const IFunction& _fnc) : fnc(_fnc) {}
-    virtual void evalDeriv(const double logx, /*output*/ double* logf, double* der, double* der2) const;
-    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
 };
 
 ///@}
@@ -193,38 +170,225 @@ static const int MAX_PRIMES = 10;  // not that there aren't more!
 static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 
 ///@}
+/// \name  ----- algebraic transformations of functions -----
+///@{
+
+/// transform the interval  -inf <= u <= +inf  to  0 <= s <= 1:  u = 1 / (1-s) - 1 / s;
+/// this is useful for finding roots on the entire real axis, if the magnitude of the unscaled
+/// variable u is known to be moderate (e.g., it is a logarithm of some other quantity)
+struct ScalingInf {};
+
+/// transform a semi-infinite interval 
+/// 0 <= u <= +inf,  or  0 < u0 <= u <= +inf,  or  -inf <= u <= u0 < 0,  to  0 <= s <= 1:
+/// in the first case (u0=0),  u = exp( 1 / (1-s) - 1 / s ),
+/// otherwise (u0!=0)          u = u0 * exp( s / (1-s) );
+/// this is useful for finding roots on a semi-infinite interval which does not strictly enclose zero,
+/// and the characteristic scale of the function is unknown (log-scaling solves this problem)
+struct ScalingSemiInf {
+    double u0;
+    ScalingSemiInf(double _u0=0) : u0(_u0) {}
+};
+
+/// trivial linear rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1
+struct ScalingLin {
+    double uleft, uright;
+    ScalingLin(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+};
+
+/// cubic rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1:
+/// u = s^2 (3 - 2 s) (uright - uleft) + uleft;
+/// this transformation stretches the region around the boundaries (du/ds ~ 0 at both ends)
+/// and hence is suitable for removing integrable endpoint singularities:
+/// \f$  \int_{uleft}^{uright} f(u) du = \int_0^1 f(u[s]) [du/ds] ds  \f$
+struct ScalingCub {
+    double uleft, uright;
+    ScalingCub(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+};
+
+/// quintic rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1:
+/// u = s^3 (10 - 15 s + 6 s^2) (uright - uleft) + uleft;
+/// this transformation strongly stretches the region around the boundaries
+/// (both du/ds and d2u/ds2 ~ 0 at both ends)
+struct ScalingQui {
+    double uleft, uright;
+    ScalingQui(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+};
+
+/// return the scaled variable s for the given original variable u
+template<typename Scaling> double scale(const Scaling& scaling, double u);
+
+/// return the original variable u for the given scaled variable s which should be in the range [0:1],
+/// and optionally the derivative du/ds
+template<typename Scaling> double unscale(const Scaling& scaling, double s, double* duds=NULL);
+
+/** Helper class for scaling transformations.
+    A function f(u) is transformed into f(u[s]), where the scaled variable s in the interval [0:1]
+    is related to u by one of the scaling transformations defined above.
+    The function of the scaled argument optionally provides the first derivative df/ds = df/du du/ds.
+
+    This class may be used with root-finding and minimization routines on (semi-)infinte intervals,
+    especially when even the order of magnitude of the root is not known in advance:
+    ~~~~
+    MyFnc fnc;               // original function f(u)
+    ScalingSemiInf scaling;  // transform [0..inf] to [0..1], or any other scaling transformation
+    double root = findRoot(fnc, scaling, toler);
+    ~~~~
+    The templated overloaded routines findRoot and findMin internally create an instance of ScaledFnc for
+    the user-provided scaling transformation, find the root in a scaled variable, and unscale it back.
+
+    \tparam  Scaling  is one of the available scaling transformations (e.g., ScalingCub, ScalingInfLog).
+*/
+template<typename Scaling>
+class ScaledFnc: public IFunction {
+public:
+    const Scaling scaling;  ///< the instance of the scaling transformations specifying its parameters
+    const IFunction& fnc;   ///< the original function of the unscaled argument u
+    ScaledFnc(const Scaling& _scaling, const IFunction& _fnc) : scaling(_scaling), fnc(_fnc) {}
+
+    /// compute the original function f(u[s]) for the given value of scaled argument s
+    virtual void evalDeriv(const double s, double* val=0, double* der=0, double* der2=0) const {
+        double dfdu, duds;
+        double u = unscale(scaling, s, der? &duds : NULL);
+        fnc.evalDeriv(u, val, der? &dfdu : NULL);
+        if(der)
+            *der = dfdu * duds;
+        if(der2)
+            *der2= NAN;  // not available
+    }
+
+    virtual unsigned int numDerivs() const { return fnc.numDerivs()<1 ? 0 : 1; }
+};
+
+/** Helper class for integrand transformations.
+    A function defined on a finite interval [x_lower,x_upper], with possible integrable 
+    singularities at endpoints, can be integrated on the interval [x1,x2] 
+    (which may be narrower, i.e., x_low <= x1 <= x2 <= x_upp), by transforming the integration variable.
+    \f$  \int_{x1}^{x2} f(x) dx  =  \int_{s1}^{s2} f(x(s)) (dx/ds) ds  \f$,
+    where  0 <= s <= 1  is the scaled integration variable, endpoints are defined as x1=x(s1), x2=x(s2),
+    and x(s) is a `ScalingCub` transformation that stretches the regions around s=0, s=1.
+    Similarly, if the interval is (semi-)infinite, then one may use `ScalingInf` or `ScalingSemiInf`.
+
+    This class may be used with any integration routine as follows:
+    ~~~~
+    MyFnc fnc;                              // original function f(x)
+    ScalingCub scaling(x_lower, x_upper);   // or any other scaling transformation
+    integrate*** (ScaledIntegrand<ScalingCub>(scaling, fnc), scale(scaling, x1), scale(scaling, x2), ...)
+    ~~~~
+    Note that if x1==x_lower then one may simply put 0 as the lower integration limit,
+    and similarly 1 for the upper limit if x2==x_upper.
+
+    \tparam  Scaling  is one of the available scaling transformations (e.g., ScalingCub, ScalingInf).
+*/
+template<typename Scaling>
+class ScaledIntegrand: public IFunctionNoDeriv {
+public:
+    const Scaling scaling;  ///< the instance of the scaling transformations specifying its parameters
+    const IFunction& fnc;   ///< the original function of the unscaled argument u
+    ScaledIntegrand(const Scaling& _scaling, const IFunction& _fnc) : scaling(_scaling), fnc(_fnc) {}
+
+    /// compute the integrand: the product of the original function of unscaled argument
+    /// multiplied by the derivative of scaling transformation
+    virtual double value(const double s) const {
+        double duds, u = unscale(scaling, s, &duds);
+        return fnc.value(u) * duds;
+    }
+};
+
+/** A wrapper providing the IFunction interface for an ordinary function with one parameter,
+    e.g., exp(x) */
+class FncWrapper: public IFunctionNoDeriv {
+    double (*fnc)(double);  ///< function pointer to the actual function
+public:
+    FncWrapper(double (*f)(double)) : fnc(f) {}
+    virtual double value(const double x) const { return fnc(x); }
+};
+
+/** A product of two functions, to be used as a temporary object passed to
+    integration or root-finding routines */
+class FncProduct: public IFunction {
+    const IFunction &f1, &f2;  ///< references to two functions
+public:
+    FncProduct(const IFunction& fnc1, const IFunction& fnc2) :
+        f1(fnc1), f2(fnc2) {}
+    virtual unsigned int numDerivs() const {
+        return f1.numDerivs() < f2.numDerivs() ? f1.numDerivs() : f2.numDerivs();
+    }
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
+};
+
+/** Doubly-log-scaled function: return log(f(exp(logx))) and up to two derivatives w.r.t log(x) */
+class LogLogScaledFnc: public IFunction {
+    const IFunction& fnc;  ///< reference to the original function
+public:
+    LogLogScaledFnc(const IFunction& _fnc) : fnc(_fnc) {}
+    virtual void evalDeriv(const double logx, /*output*/ double* logf, double* der, double* der2) const;
+    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
+};
+
+///@}
 /// \name  ----- root-finding and minimization routines -----
 ///@{
 
-/** find a root of function on the interval [x1,x2].
-    function must be finite at the ends of interval and have opposite signs (or be zero),
-    otherwise NaN is returned.
-    Interval can be (semi-)infinite, in which case an appropriate transformation is applied
-    to the variable (but the function still should return finite value for an infinite argument).
+/** find a root of a function F(x) on the finite interval [x1,x2].
+    Function values at the endpoints of the interval must be finite and have opposite signs
+    (or be zero), otherwise NaN is returned.
     If the function interface provides derivatives, this may speed up the search.
     \param[in] F  is the input function;
-    \param[in] x1 is the lower end of the interval (may be -INFINITY);
-    \param[in] x2 is the upper end of the interval (may be +INFINITY);
+    \param[in] x1,x2 are two endpoints of the interval;
     \param[in] relToler  determines the accuracy of root localization, relative to the range |x2-x1|.
+    \return  the root of equation F(x)=0, or NAN if the endpoints do not bracket the root.
+    \throw   std::invalid_argument if the endpoints are not finite or relToler is not positive.
 */
 double findRoot(const IFunction& F, double x1, double x2, double relToler);
 
-/** Find a local minimum on the interval [x1,x2].
-    Interval can be (semi-)infinite, in which case an appropriate transformation is applied
-    to the variable (but the function still should return finite value for an infinite argument).
+/** find a root of a function F(x) with a given scaling transformation of the argument: x=x(s).
+    This convenience routine allows to use (semi-)infinite intervals of x, transformed to 0<=s<=1
+    (the calling code must choose a suitable transformation).
+    The original interval for x is defined by the endpoints of the scaled variable: x(s=0), x(s=1).
+    \tparam  Scaling  defines the type of the scaling transformation;
+    \param[in]  F  is the input function F(x);
+    \param[in]  scaling  is the instance of scaling transformation and defines its parameters,
+    and implicitly the interval of the un-scaled variable x.
+    \param[in]  relToler  determines the accuracy of root localization in the scaled variable s.
+    \return  the root x of the input function (un-scaled), or NAN if the endpoints do not bracket it.
+    \throw   std::invalid_argument if the endpoints are not finite or relToler is not positive.
+*/
+template<typename Scaling>
+inline double findRoot(const IFunction& F, const Scaling& scaling, double relToler)
+{
+    return unscale(scaling, findRoot(ScaledFnc<Scaling>(scaling, F), 0, 1, relToler));
+}
+    
+/** Find a local minimum of a function F(x) on the finite interval [x1,x2].
     \param[in] F  is the input function;
-    \param[in] x1 is the lower end of the interval (may be -INFINITY);
-    \param[in] x2 is the upper end of the interval (may be +INFINITY);
+    \param[in] x1,x2  are the endpoints of the interval;
     \param[in] xinit  is the optional initial guess point: 
-    if provided (not NaN), this speeds up the determination of minimum, 
-    but results in error if F(xinit) was not strictly lower than both F(x1) and F(x2). 
-    Alternatively, if the location of the minimum is not known in advance, 
-    xinit is set to NaN, and the function first performs a binary search to determine 
-    the interval enclosing the minimum, and returns one of the endpoints if the function 
-    turns out to be monotonic on the entire interval.
-    \param[in] relToler  determines the accuracy of minimum localization, relative to the range |x2-x1|.
+    if provided (not NaN), this may speed up the localization of the minimum,
+    otherwise it will be determined automatically.
+    \param[in] relToler  determines the accuracy of localization of the minimum,
+    relative to the range |x2-x1|.
+    \return  the point where F(x) attains a (local) minimum, or one of the endpoints of the interval;
+    if the function produces an infinite value, return NAN.
+    \throw  std::invalid_argument if the endpoints are not finite or relToler is not positive.
 */
 double findMin(const IFunction& F, double x1, double x2, double xinit, double relToler);
+
+/** find a local minimum of a function F(x) with a given scaling transformation of the argument: x=x(s).
+    This routine allows to use (semi-)infinite intervals of x, similarly to findRoot.
+    \tparam  Scaling  defines the type of the scaling transformation;
+    \param[in]  F  is the input function F(x);
+    \param[in]  scaling  is the instance of scaling transformation and defines its parameters,
+    and implicitly the interval of the un-scaled variable x.
+    \param[in]  relToler  determines the accuracy of localization in the scaled variable s.
+    \return  the point x (un-scaled) where the input function reaches a (local) minimum.
+    \throw   std::invalid_argument if the endpoints are not finite or relToler is not positive.
+*/
+template<typename Scaling>
+inline double findMin(const IFunction& F, const Scaling& scaling, double xinit, double relToler)
+{
+    return unscale(scaling,
+        findMin(ScaledFnc<Scaling>(scaling, F), 0, 1, scale(scaling, xinit), relToler));
+}
 
 ///@}
 /// \name ------ numerical derivatives -------
@@ -301,7 +465,9 @@ double integrate(const IFunction& F, double x1, double x2, double relToler,
     double* error=NULL, int* numEval=NULL);
 
 /** integrate a function on a finite interval, using a fully adaptive integration routine 
-    to reach the required tolerance; integrable singularities are handled properly. 
+    to reach the required tolerance; integrable singularities are handled properly.
+    If the integration interval is (semi-)infinite, one may apply an appropriate transformation of
+    the integration variable, provided by the templated class ScaledIntegrand<Scaling>.
     \param[in] F  is the input function;
     \param[in] x1 is the lower end of the interval;
     \param[in] x2 is the upper end of the interval;
@@ -337,42 +503,6 @@ double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
 */
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights);
 
-/** Helper class for integrand transformations.
-    A function defined on a finite interval [x_low,x_upp], with possible integrable 
-    singularities at endpoints, can be integrated on the interval [x1,x2] 
-    (which may be narrower, i.e., x_low <= x1 <= x2 <= x_upp),
-    by applying the following transformation.
-    The integral  \f$  \int_{x1}^{x2} f(x) dx  \f$  is transformed into 
-    \f$  \int_{y1}^{y2} f(x(y)) (dx/dy) dy  \f$,  where  0 <= y <= 1,
-    \f$  x(y) = x_{low} + (x_{upp}-x_{low}) y^2 (3-2y)  \f$, and x1=x(y1), x2=x(y2). 
-
-    This class may be used with any integration routine as follows:
-    ~~~~
-    ScaledIntegrandEndpointSing transf(fnc, x_low, x_upp);
-    integrate*** (transf, transf.y_from_x(x1), transf.y_from_x(x2), ...)
-    ~~~~
-    Note that if x1==x_low then one may simply put 0 as the lower integration limit,
-    and similarly 1 for the upper limit if x2==x_upp.
-*/
-class ScaledIntegrandEndpointSing: public IFunctionNoDeriv {
-public:
-    ScaledIntegrandEndpointSing(const IFunction& _F, double low, double upp) : 
-        F(_F), x_low(low), x_upp(upp) {};
-
-    /// return the value of input function at the unscaled coordinate x(y)
-    /// times the conversion factor dx/dy
-    virtual double value(const double y) const;
-
-    /// return the scaled variable y for the given original variable x
-    double y_from_x(const double x) const;
-
-    /// return the original variable x for the given scaled variable y in [0,1]
-    double x_from_y(const double y) const;
-
-private:
-    const IFunction& F;
-    double x_low, x_upp;
-};
 
 /** N-dimensional integration (aka cubature).
     It computes the integral of a vector-valued function (each component is treated independently).

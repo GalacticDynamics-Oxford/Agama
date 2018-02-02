@@ -29,13 +29,17 @@ double Ferrers::densityCar(const coord::PosCar& pos) const
 
 /// helper class to find lambda as the root of equation
 /// x^2/(lambda+a^2) + y^2/(lambda+b^2) + z^2/(lambda+c^2) = 1
-class FerrersLambdaRootFinder: public math::IFunctionNoDeriv {
+class FerrersLambdaRootFinder: public math::IFunction {
 public:
     FerrersLambdaRootFinder(double x, double y, double z, double a, double b, double c) :
         x2(x*x), y2(y*y), z2(z*z), a2(a*a), b2(b*b), c2(c*c) {};
-    virtual double value(double lambda) const {
-        return x2/(lambda+a2) + y2/(lambda+b2) + z2/(lambda+c2) - 1;
+    virtual void evalDeriv(double lambda, double* val, double* der, double*) const {
+        if(val)
+            *val = x2/(lambda+a2) + y2/(lambda+b2) + z2/(lambda+c2) - 1;
+        if(der)
+            *der = -x2/pow_2(lambda+a2) - y2/pow_2(lambda+b2) - z2/pow_2(lambda+c2);
     }
+    virtual unsigned int numDerivs() const { return 1; }
 private:
     double x2, y2, z2, a2, b2, c2;
 };
@@ -46,13 +50,16 @@ void Ferrers::evalCar(const coord::PosCar &pos,
     double X2 = pow_2(pos.x), Y2 = pow_2(pos.y), Z2 = pow_2(pos.z);
     double m2 = X2/(a*a) + Y2/(b*b) + Z2/(c*c);
     double r2 = X2+Y2+Z2;
-    if(r2>a*a*4*4) {   // use spherical-harmonic expansion up to l=2 beyond 4 scale radii, to speed up (and increase the accuracy)
-        double Moverr = rho0*32*M_PI*a*b*c/105/sqrt(r2);
+    if(r2 > pow_2(10*a)) {
+        // use spherical-harmonic expansion up to l=2 beyond 10 scale radii,
+        // to speed up (and increase the accuracy)
+        double Moverr = (32*M_PI/105) * rho0 * a*b*c / sqrt(r2);
         if(potential)
-            *potential = -Moverr * (1 + ( (2*c*c-a*a-b*b)/36 * (2*Z2-X2-Y2) + (b*b-a*a)/12 * (Y2-X2) )/(r2*r2) );
+            *potential = -Moverr *
+                (1 + ( 1./36 * (2*c*c-a*a-b*b) * (2*Z2-X2-Y2) + 1./12 * (b*b-a*a) * (Y2-X2) ) / (r2*r2) );
         double Moverr3 = Moverr/r2;
-        double C20 = (2*c*c-a*a-b*b)/36, C22 = (b*b-a*a)/12;
-        double add = 5*(C20 * (2*Z2-X2-Y2) + C22 * (Y2-X2) )/(r2*r2);
+        double C20 = 1./36 * (2*c*c-a*a-b*b), C22 = 1./12 * (b*b-a*a);
+        double add = 5 * (C20 * (2*Z2-X2-Y2) + C22 * (Y2-X2) ) / (r2*r2);
         if(grad) {
             grad->dx = pos.x * Moverr3 * (1+add+2*(C20+C22)/r2);
             grad->dy = pos.y * Moverr3 * (1+add+2*(C20-C22)/r2);
@@ -72,16 +79,16 @@ void Ferrers::evalCar(const coord::PosCar &pos,
     const double *W;   // coefs used in computation (either pre-computed or temp.)
     if(m2>1) {
         FerrersLambdaRootFinder fnc(pos.x, pos.y, pos.z, a, b, c);
-        double lambda = math::findRoot(fnc, 0, INFINITY, ACCURACY_ROOT);
+        double lambda = math::findRoot(fnc, math::ScalingSemiInf(), ACCURACY_ROOT);
         computeW(lambda, Wcurr);
         W = Wcurr;
     } else 
         W=W0;  // use pre-computed coefs inside the model
     if(potential) {
-        *potential = -rho0*M_PI/3*a*b*c* ( W[0] - 6*W[10]*X2*Y2*Z2
-            + X2*( X2*(3*W[7]-X2*W[17]) + 3*Y2*(2*W[4]-Y2*W[11]-X2*W[14]) - 3*W[1] )
-            + Y2*( Y2*(3*W[8]-Y2*W[18]) + 3*Z2*(2*W[5]-Z2*W[12]-Y2*W[15]) - 3*W[2] )
-            + Z2*( Z2*(3*W[9]-Z2*W[19]) + 3*X2*(2*W[6]-X2*W[13]-Z2*W[16]) - 3*W[3] ) );
+        *potential = -M_PI/3 * rho0 * a*b*c * ( W[0] - 6*W[10]*X2*Y2*Z2
+            + X2 * ( X2*(3*W[7]-X2*W[17]) + 3*Y2*(2*W[4]-Y2*W[11]-X2*W[14]) - 3*W[1] )
+            + Y2 * ( Y2*(3*W[8]-Y2*W[18]) + 3*Z2*(2*W[5]-Z2*W[12]-Y2*W[15]) - 3*W[2] )
+            + Z2 * ( Z2*(3*W[9]-Z2*W[19]) + 3*X2*(2*W[6]-X2*W[13]-Z2*W[16]) - 3*W[3] ) );
     }
     double mult = 2*M_PI*rho0*a*b*c;
     if(grad) {
@@ -140,8 +147,8 @@ void Ferrers::computeW(double lambda, double W[20]) const
     W[11]= (W[8] - W[4])/ab2;     // W_120
     W[12]= (W[9] - W[5])/bc2;     // W_012
     W[13]=-(W[7] - W[6])/ac2;     // W_201
-    W[14]= (W[4] - W[7])/ab2;     // W_210  !! inverse sign w.r.t. Pfenniger'1984 paper, but matches his fortran code
-    W[15]= (W[5] - W[8])/bc2;     // W_021  !! --"--
+    W[14]= (W[4] - W[7])/ab2;     // W_210  !! inverse sign w.r.t. Pfenniger'1984 paper,
+    W[15]= (W[5] - W[8])/bc2;     // W_021  !! but matches his fortran code
     W[16]=-(W[6] - W[9])/ac2;     // W_102  !! --"--
     W[17]= (2/denom/pow_2(a*a+lambda) - W[14] - W[13])/5;  // W_300
     W[18]= (2/denom/pow_2(b*b+lambda) - W[15] - W[11])/5;  // W_030

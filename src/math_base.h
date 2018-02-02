@@ -7,17 +7,6 @@
 #include <cstddef>   // defines NULL
 #include <limits>    // defines infinity and NaN
 
-// a few very basic routines declared in the global namespace
-
-/// convenience function for squaring a number, used in many places
-template<typename T> inline T pow_2(T x) { return x*x; }
-
-/// convenience function for raising a number to the 3rd power
-template<typename T> inline T pow_3(T x) { return x*x*x; }
-
-/// test if a number is neither infinity nor NaN
-inline bool isFinite(double x) { return x==x && 1/x!=0; }
-
 // some useful numbers (or even not-a-numbers)
 
 #ifndef INFINITY
@@ -51,6 +40,18 @@ inline bool isFinite(double x) { return x==x && 1/x!=0; }
 #endif
 
 #define TWO_PI_CUBE 248.050213442398561403810520537
+
+// a few very basic routines declared in the global namespace
+
+/// convenience function for squaring a number, used in many places
+template<typename T> inline T pow_2(T x) { return x*x; }
+
+/// convenience function for raising a number to the 3rd power
+template<typename T> inline T pow_3(T x) { return x*x*x; }
+
+/// test if a number is neither infinity nor NaN
+inline bool isFinite(double x) { return x>-INFINITY && x<INFINITY; }
+
 
 /** Functions and classes for basic and advanced math operations */
 namespace math{

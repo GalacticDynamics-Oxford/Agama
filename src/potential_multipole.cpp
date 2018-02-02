@@ -16,14 +16,19 @@ namespace{
 
 /// minimum number of terms in sph.-harm. expansion used to compute coefficients
 /// of a non-spherical density or potential model (it may be larger than
-/// the requested number of output terms, to improve the accuracy of integration)    
+/// the requested number of output terms, to improve the accuracy of integration)
 static const int LMIN_SPHHARM = 16;
+
+/// choice between using 1d splines in radius for each (l,m) or 2d splines in (r,theta) for each m
+/// is controlled by the order of expansion in theta:
+/// if lmax <= LMAX_1D_SPLINE, use 1d splines, otherwise 2d
+static const int LMAX_1D_SPLINE = 2;
 
 /// minimum number of grid nodes
 static const unsigned int MULTIPOLE_MIN_GRID_SIZE = 2;
 
 /// order of Gauss-Legendre quadrature for computing the radial integrals in Multipole
-static const unsigned int ORDER_RAD_INT = 10;
+static const unsigned int GLORDER_RAD = 10;
 
 /// safety factor to avoid roundoff errors near grid boundaries
 static const double SAFETY_FACTOR = 100*DBL_EPSILON;
@@ -188,9 +193,8 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
 }
 
 // transform an N-body snapshot to an array of spherical-harmonic coefficients:
-// input particles are sorted in radius, and for each k-th particle the array of
-// sph.-harm. functions Y_lm(theta_k, phi_k) times the particle mass is computed
-// and stored in the output array with the following indexing scheme:
+// for each k-th particle, the array of sph.-harm. functions Y_lm(theta_k, phi_k)
+// is stored in the output array with the following indexing scheme:
 // C_lm(particle_k) = coefs[SphHarmIndices::index(l,m)][k].
 // This saves memory, since only the arrays for harmonic coefficients allowed
 // by the indexing scheme are allocated and returned.
@@ -200,8 +204,8 @@ void computeSphericalHarmonicsFromParticles(
     std::vector<double> &particleRadii,
     std::vector< std::vector<double> > &coefs)
 {
-    // allocate space
-    int nbody = particles.size();
+    // allocate space for non-trivial harmonics only (depending on the symmetry)
+    ptrdiff_t nbody = particles.size();
     particleRadii.resize(nbody);
     coefs.resize(ind.size());
     for(int m=ind.mmin(); m<=ind.mmax; m++)
@@ -215,32 +219,29 @@ void computeSphericalHarmonicsFromParticles(
 #endif
     {
         // thread-local temporary arrays for Legendre and trigonometric functions
-        std::vector<double> tmp(ind.lmax+1+2*ind.mmax);
+        std::vector<double> tmp(ind.lmax+2+2*ind.mmax);
         double *leg = &tmp[0], *trig = leg + ind.lmax+1;
+        trig[0] = 1.;  // stores cos(0*phi), which is not computed by trigMultiAngle
 #ifdef _OPENMP
 #pragma omp for schedule(static)
 #endif
-        for(int i=0; i<nbody; i++) {
+        for(ptrdiff_t i=0; i<nbody; i++) {
             if(cbrk.triggered()) continue;
             // compute Y_lm for each particle
             try{
                 const coord::PosCyl& pos = particles.point(i);
                 double r   = sqrt(pow_2(pos.R) + pow_2(pos.z));
                 double tau = pos.z / (r + pos.R);
-                const double mass = particles.mass(i);
-                if(r==0 && mass!=0)
-                    errorMsg = "no massive particles at r=0 allowed";
                 particleRadii[i] = r;
-                math::trigMultiAngle(pos.phi, ind.mmax, needSine, trig);
+                math::trigMultiAngle(pos.phi, ind.mmax, needSine, trig+1 /* start from m=1 */);
                 for(int m=0; m<=ind.mmax; m++) {
+                    double mult = 2*M_SQRTPI * (m==0 ? 1 : M_SQRT2);
                     math::sphHarmArray(ind.lmax, m, tau, leg);
                     for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step)
-                        coefs[ind.index(l, m)][i] = mass * leg[l-m] * 2*M_SQRTPI *
-                            (m==0 ? 1 : M_SQRT2 * trig[m-1]);
+                        coefs[ind.index(l, m)][i] = mult * leg[l-m] * trig[m];
                     if(needSine && m>0)
                         for(int l=ind.lmin(-m); l<=ind.lmax; l+=ind.step)
-                            coefs[ind.index(l, -m)][i] = mass * leg[l-m] * 2*M_SQRTPI *
-                                M_SQRT2 * trig[ind.mmax+m-1];
+                            coefs[ind.index(l, -m)][i] = mult * leg[l-m] * trig[ind.mmax+m];
                 }
             }
             catch(std::exception& e) {
@@ -342,7 +343,7 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
                 2 * rho[i] * pow_2(rad[i]) + 2 * rho[i-1] * pow_2(rad[i-1]));
             deltaPhi += 4*M_PI / 6 * (rad[i]-rad[i-1]) *
                 (rho[i] * (2*rad[i] + rad[i-1]) + rho[i-1] * (rad[i] + 2*rad[i-1]));
-            double dPhi = enclMass / pow_2(rad[i]) + deltaPhi;  // Phi(r) - Phi(0)
+            double dPhi = enclMass / rad[i] + deltaPhi;  // Phi(r) - Phi(0)
             if(fabs(dPhi) < fabs(Phi0) * DELTAPHI)
                 rmin = rad[i];
         }
@@ -360,9 +361,11 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     std::vector<double> radii;
     radii.reserve(particles.size());
     double prmin=INFINITY, prmax=0;
-    for(size_t i=0; i<particles.size(); i++) {
+    for(size_t i=0, size=particles.size(); i<size; i++) {
         double r = sqrt(pow_2(particles.point(i).R) + pow_2(particles.point(i).z));
         if(particles.mass(i) != 0) {   // only consider particles with non-zero mass
+            if(r==0)
+                throw std::runtime_error("Multipole: no massive particles at r=0 allowed");
             radii.push_back(r);
             prmin = std::min(prmin, r);
             prmax = std::max(prmax, r);
@@ -370,7 +373,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     }
     size_t nbody = radii.size();
     if(nbody==0)
-        throw std::invalid_argument("Multipole: no particles provided as input");
+        throw std::runtime_error("Multipole: no particles provided as input");
     std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
     double rhalf = radii[nbody/2];   // half-mass radius (if all particles have equal mass)
     double spacing = 1 + sqrt(20./gridSizeR);  // ratio between two adjacent grid nodes
@@ -662,20 +665,20 @@ void computeDensityCoefsSph(
     std::vector<std::vector<double> > harmonics(ind.size());
     std::vector<double> particleRadii;
     computeSphericalHarmonicsFromParticles(particles, ind, particleRadii, harmonics);
+    size_t nbody = particleRadii.size();
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 
-    // normalize all l>0 harmonics by the value of l=0 term
-    // (the latter contains simply the particle masses),
-    // and convert the radii to log-radii
-    for(size_t i=0; i<particleRadii.size(); i++) {
+    // convert the radii to log-radii and store particle masses in the {l=0,m=0} harmonic
+    for(size_t i=0; i<nbody; i++) {
+        if((harmonics[0][i] = particles.mass(i)) == 0) continue;   // ignore particles with zero mass
+        if(particleRadii[i] == 0)
+            throw std::runtime_error("computeDensityCoefsSph: no massive particles at r=0 allowed");
         particleRadii[i] = log(particleRadii[i]);
-        for(unsigned int c=1; c<ind.size(); c++)
-            if(!harmonics[c].empty() && harmonics[0][i]!=0)
-                harmonics[c][i] /= harmonics[0][i];
     }
 
     // construct the l=0 harmonic using a penalized log-density estimate
     math::CubicSpline spl0(gridLogRadii, math::splineLogDensity<3>(
-        gridLogRadii, particleRadii, harmonics[0],
+        gridLogRadii, particleRadii, /*weights*/harmonics[0],
         math::FitOptions(math::FO_INFINITE_LEFT | math::FO_INFINITE_RIGHT | math::FO_PENALTY_3RD_DERIV)));
     for(unsigned int k=0; k<gridSizeR; k++)
         coefs[0][k] = exp(spl0(gridLogRadii[k])) / (4*M_PI*pow_3(gridRadii[k]));
@@ -692,21 +695,42 @@ void computeDensityCoefsSph(
     if(ind.size()==1)
         return;
 
+    // obtain the list of nontrivial l>0 harmonics
+    // (TODO: this should be made part of math::SphHarmIndices interface!)
+    std::vector<unsigned int> nonzeroCoefs;
+    for(unsigned int c=1; c<ind.size(); c++)
+        if(!harmonics[c].empty())
+            nonzeroCoefs.push_back(c);
+    int nonzeroCoefsSize = nonzeroCoefs.size();
+
     // construct the l>0 terms by fitting a penalized smoothing spline,
     // where the penalty is given for "wiggliness" of the curve.
     // The amount of smoothing is specified through the number of "equivalent degrees of freedom" (EDF),
     // which ranges between 2 (infinite penalty resulting in a straight-line fit)
-    // to gridSizeR+2 for the case of zero penalty.
+    // to gridSizeR for the case of zero penalty.
     // we set edf roughly half-way between the two extremes for the default value of smoothing=1
-    math::SplineApprox fitter(gridLogRadii, particleRadii, harmonics[0]);
-    double edf = 2 + gridSizeR / (smoothing+1);
-    for(unsigned int c=1; c<ind.size(); c++) {
-        if(!harmonics[c].empty()) {
-            math::CubicSpline splc(gridLogRadii, fitter.fit(harmonics[c], edf));
+    math::SplineApprox fitter(gridLogRadii, particleRadii, /*weights*/harmonics[0]);
+    double edf = 2 + (gridSizeR-2) / (smoothing+1);
+    std::string errorMsg;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int h=0; h<nonzeroCoefsSize; h++) {
+        if(cbrk.triggered()) continue;
+        try{
+            math::CubicSpline splc(gridLogRadii, fitter.fit(harmonics[nonzeroCoefs[h]], edf));
+            // multiply the coefs by the value of the l=0 term (which is the spherical density estimate)
             for(unsigned int k=0; k<gridSizeR; k++)
-                coefs[c][k] = splc(gridLogRadii[k]) * coefs[0][k];
+                coefs[nonzeroCoefs[h]][k] = splc(gridLogRadii[k]) * coefs[0][k];
+        }
+        catch(std::exception& e) {
+            errorMsg = e.what();
         }
     }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
+    if(!errorMsg.empty())
+        throw std::runtime_error("computeDensityCoefsSph: " + errorMsg);
 }
 
 // potential coefs from potential
@@ -744,10 +768,10 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     std::vector< std::vector<double> >& Pext = dPhi;
     Phi .assign(ind.size(), std::vector<double>(gridSizeR, 0.));
     dPhi.assign(ind.size(), std::vector<double>(gridSizeR, 0.));
-    
+
     // prepare tables for (non-adaptive) Gauss-Legendre integration over radius
-    double glnodes[ORDER_RAD_INT], glweights[ORDER_RAD_INT];
-    math::prepareIntegrationTableGL(0, 1, ORDER_RAD_INT, glnodes, glweights);
+    double glnodes[GLORDER_RAD], glweights[GLORDER_RAD];
+    math::prepareIntegrationTableGL(0, 1, GLORDER_RAD, glnodes, glweights);
 
     // prepare SH transformation
     math::SphHarmTransformForward trans(ind);
@@ -759,13 +783,12 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     // Here \rho_{l,m}(r) are the sph.-harm. coefs for density at each radius.
     std::string errorMsg;
 
-    // the computation of potential by 1d integration in radius may be OpenMP-parallelized,
-    // but it's quite cheap by itself anyway;
+    // the computation of potential by 1d integration in radius is typically quite cheap by itself;
     // if the density computation is expensive, then one should construct an intermediate
     // DensitySphericalHarmonic interpolator and pass it to this routine.
-//#ifdef _OPENMP
-//#pragma omp parallel for schedule(static)
-//#endif
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for(int k=0; k<=gridSizeR; k++) {
         try{
             // local per-thread temporary arrays
@@ -777,7 +800,7 @@ void computePotentialCoefsSph(const BaseDensity& dens,
                 gridRadii.back();          // last grid segment extends to infinity
 
             // loop over ORDER_RAD_INT nodes of GL quadrature for each radial grid segment
-            for(unsigned int s=0; s<ORDER_RAD_INT; s++) {
+            for(unsigned int s=0; s<GLORDER_RAD; s++) {
                 double r = k<gridSizeR ?
                     rkminus1 + glnodes[s] * deltaGridR :  // radius inside ordinary k-th segment
                     // special treatment for the last segment which extends to infinity:
@@ -1000,7 +1023,7 @@ double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos) const
     double* coefs = static_cast<double*>(alloca(ind.size() * sizeof(double)));
     double r = sqrt(pow_2(pos.R) + pow_2(pos.z) );
     double rmin = gridRadii.front(), rmax = gridRadii.back();
-    double logr = log(std::max(rmin, std::min(rmax, r)));  // the argument of spline functions
+    double logr = log(math::clamp(r, rmin, rmax));  // the argument of spline functions
     // first compute the l=0 coefficient, possibly log-unscaled
     coefs[0] = spl[0]->value(logr);
     if(logScaling)
@@ -1159,8 +1182,9 @@ Multipole::Multipole(
     if(!correct)
         throw std::invalid_argument("Multipole: invalid radial grid");
 
-    // construct the interpolating splines
-    impl = ind.lmax <= 2 ?   // choose between 1d or 2d splines, depending on the expected efficiency
+    // construct the interpolating splines:
+    // choose between 1d or 2d splines, depending on the expected efficiency
+    impl = ind.lmax <= LMAX_1D_SPLINE ?
         PtrPotential(new MultipoleInterp1d(gridRadii, Phi, dPhi)) :
         PtrPotential(new MultipoleInterp2d(gridRadii, Phi, dPhi));
 
@@ -1261,10 +1285,10 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
     if(lmax == 0) {  // fast track
         if(potential)
             *potential = Phi_lm[0];
-        double rsqinv = 1/rsq, Rr2 = pos.R * rsqinv, zr2 = pos.z * rsqinv;
+        double rsqinv = rsq>0 ? 1/rsq : 0, Rr2 = pos.R * rsqinv, zr2 = pos.z * rsqinv;
         if(grad) {
-            grad->dR = rsq>0 ? dPhi_lm[0] * Rr2 : S[0]>1 ? 0 : INFINITY;
-            grad->dz = rsq>0 ? dPhi_lm[0] * zr2 : S[0]>1 ? 0 : INFINITY; 
+            grad->dR = dPhi_lm[0] * Rr2;
+            grad->dz = dPhi_lm[0] * zr2;
             grad->dphi = 0;
         }
         if(hess) {
@@ -1285,7 +1309,7 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
 }
 
 // ------- Multipole potential with 1d interpolating splines for each SH harmonic ------- //
-        
+
 MultipoleInterp1d::MultipoleInterp1d(
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &Phi,
@@ -1392,18 +1416,16 @@ void MultipoleInterp1d::evalCyl(const coord::PosCyl &pos,
 
 // ------- Multipole potential with 2d interpolating splines for each azimuthal harmonic ------- //
 
-/** Set up non-uniform grid in cos(theta), with denser spacing close to z-axis.
+/** Set up a grid in tau = cos(theta) / (sin(theta)+1).
     We want (some of) the nodes of the grid to coincide with the nodes of Gauss-Legendre
     quadrature on the interval -1 <= cos(theta) <= 1, which ensures that the values
     of 2d spline at these angles exactly equals the input values, thereby making
     the forward and reverse Legendre transformation invertible to machine precision.
-    So we first compute these nodes for the given order of sph.-harm. expansion lmax,
-    and then take only the non-negative half of them for the spline in cos(theta),
-    plus one at theta=0.
-    To achieve better accuracy in approximating the Legendre polynomials by quintic
-    splines, we insert additional nodes in between the original ones.
+    So we compute these nodes for the given order of sph.-harm. expansion lmax,
+    augment them with two endpoints (+-1), and insert additional nodes between the original ones
+    to increase the accuracy of approximating the Legendre polynomials by quintic splines.
 */
-std::vector<double> createGridInTheta(unsigned int lmax)
+std::vector<double> createGridInTau(unsigned int lmax)
 {
     unsigned int numPointsGL = lmax+1;
     std::vector<double> tau(numPointsGL+2), dummy(numPointsGL);
@@ -1415,7 +1437,7 @@ std::vector<double> createGridInTheta(unsigned int lmax)
     tau.back() = 1;
     tau.front()= -1;
     // split each interval between two successive GL nodes (or the ends of original interval)
-    // into this many grid points (accuracy of Legendre function approximation is better than 1e-6)
+    // into 3 grid segments (accuracy of Legendre function approximation is better than 1e-6)
     unsigned int oversampleFactor = 3;
     // number of grid points for spline in 0 <= theta) <= pi
     unsigned int gridSizeT = (numPointsGL+1) * oversampleFactor + 1;
@@ -1445,17 +1467,21 @@ MultipoleInterp2d::MultipoleInterp2d(
     std::vector<double> gridR(gridSizeR);
     for(unsigned int k=0; k<gridSizeR; k++)
         gridR[k] = log(radii[k]);
-    std::vector<double> gridT = createGridInTheta(ind.lmax);
+    std::vector<double> gridT = createGridInTau(ind.lmax);
     unsigned int gridSizeT = gridT.size();
 
     // allocate temporary arrays for initialization of 2d splines
-    math::Matrix<double> Phi_val(gridSizeR, gridSizeT);
-    math::Matrix<double> Phi_dR (gridSizeR, gridSizeT);
-    math::Matrix<double> Phi_dT (gridSizeR, gridSizeT);
-    std::vector<double>  Phi0_val, Phi0_dR, Phi0_dT;   // copies of these matrices for the m=0 term
-    std::vector<double>  Plm(ind.lmax+1), dPlm(ind.lmax+1);
+    math::Matrix<double> Phi_val (gridSizeR, gridSizeT);
+    math::Matrix<double> Phi_dR  (gridSizeR, gridSizeT);
+    math::Matrix<double> Phi_dT  (gridSizeR, gridSizeT);
+    math::Matrix<double> Phi_dRdT(gridSizeR, gridSizeT);
+    // copies of these matrices for the m=0 term
+    std::vector<double>  Phi0_val, Phi0_dR, Phi0_dT, Phi0_dRdT;
     // convenience pointers to the raw matrix storage
-    double *Phim_val = Phi_val.data(), *Phim_dR = Phi_dR.data(), *Phim_dT = Phi_dT.data();
+    double *Phim_val = Phi_val.data(), *Phim_dR = Phi_dR.data(),
+        *Phim_dT = Phi_dT.data(), *Phim_dRdT = Phi_dRdT.data();
+    // temp.arrays for Legendre polynomials and their theta-derivatives
+    std::vector<double>  Plm(ind.lmax+1), dPlm(ind.lmax+1);
 
     // loop over azimuthal harmonic indices (m)
     spl.resize(2*ind.mmax+1);
@@ -1471,35 +1497,41 @@ MultipoleInterp2d::MultipoleInterp2d(
         for(unsigned int j=0; j<gridSizeT; j++) {
             math::sphHarmArray(ind.lmax, absm, gridT[j], &Plm.front(), &dPlm.front());
             for(unsigned int k=0; k<gridSizeR; k++) {
-                double val=0, dR=0, dT=0;
+                double val=0, dR=0, dT=0, dRdT=0;
                 for(int l=lmin; l<=ind.lmax; l+=ind.step) {
                     unsigned int c = ind.index(l, m);
                     val +=  Phi[c][k] *  Plm[l-absm];   // Phi_{l,m}(r)
                     dR  += dPhi[c][k] *  Plm[l-absm];   // d Phi / d r
                     dT  +=  Phi[c][k] * dPlm[l-absm];   // d Phi / d theta
+                    dRdT+= dPhi[c][k] * dPlm[l-absm];   // d2Phi / dr dtheta
                     if(m==0)
                         logScaling &= val<0;
                 }
-                Phi_val(k, j) = mul * val;
+                Phi_val (k, j) = mul * val;
                 // transform d Phi / d r      to  d Phi / d ln(r)
-                Phi_dR (k, j) = mul * dR * radii[k];
+                Phi_dR  (k, j) = mul * dR * radii[k];
                 // transform d Phi / d theta  to  d Phi / d tau
-                Phi_dT (k, j) = mul * dT * -2 / (pow_2(gridT[j]) + 1);
+                Phi_dT  (k, j) = mul * dT * -2 / (pow_2(gridT[j]) + 1);
+                // transform d2Phi / dr dtheta to d2Phi / d ln(r) d tau
+                Phi_dRdT(k, j) = mul * dRdT * radii[k] * -2 / (pow_2(gridT[j]) + 1);
             }
         }
+
         // further transform the amplitude and the derivatives:
         // for the m=0 term we use log-scaling if possible (i.e. if it is everywhere negative),
         // the other terms are normalized to the value of the m=0 term
         if(m==0) {
             // store the un-transformed m=0 term, which is later used to scale the other terms
-            Phi0_val.assign(Phim_val, Phim_val+Phi_val.size());  
-            Phi0_dR .assign(Phim_dR , Phim_dR +Phi_dR. size());
-            Phi0_dT .assign(Phim_dT , Phim_dT +Phi_dT. size());
+            Phi0_val .assign(Phim_val , Phim_val + Phi_val. size());  
+            Phi0_dR  .assign(Phim_dR  , Phim_dR  + Phi_dR.  size());
+            Phi0_dT  .assign(Phim_dT  , Phim_dT  + Phi_dT.  size());
+            Phi0_dRdT.assign(Phim_dRdT, Phim_dRdT+ Phi_dRdT.size());
             if(logScaling) {
                 for(unsigned int i=0; i<gridSizeT*gridSizeR; i++) {
-                    Phim_dR [i] /= Phi0_val[i];
-                    Phim_dT [i] /= Phi0_val[i];
-                    Phim_val[i] = log(-Phi0_val[i]);
+                    Phim_dR  [i] /= Phi0_val[i];
+                    Phim_dT  [i] /= Phi0_val[i];
+                    Phim_dRdT[i] = Phim_dRdT[i] / Phi0_val[i] - Phim_dR[i] * Phim_dT[i];
+                    Phim_val [i] = log(-Phi0_val[i]);
                 }
             }
         } else {
@@ -1507,13 +1539,16 @@ MultipoleInterp2d::MultipoleInterp2d(
                 if(Phi0_val[i] == 0)  // don't attempt to scale by a zero value
                     continue;         // (assume that the m!=0 terms are zero too)
                 double Phi_rel = Phim_val[i] / Phi0_val[i];
-                Phim_val[i] = Phi_rel;
-                Phim_dR [i] = (Phim_dR[i] - Phi_rel * Phi0_dR[i]) / Phi0_val[i];
-                Phim_dT [i] = (Phim_dT[i] - Phi_rel * Phi0_dT[i]) / Phi0_val[i];
+                Phim_val [i] = Phi_rel;
+                Phim_dR  [i] = (Phim_dR[i] - Phi_rel * Phi0_dR[i]) / Phi0_val[i];
+                Phim_dT  [i] = (Phim_dT[i] - Phi_rel * Phi0_dT[i]) / Phi0_val[i];
+                Phim_dRdT[i] = (Phim_dRdT[i] - Phi_rel * Phi0_dRdT[i] -
+                    Phim_dR[i] * Phi0_dT[i] - Phim_dT[i] * Phi0_dR[i]) / Phi0_val[i];
             }
         }
+
         // establish 2D quintic spline for Phi_m(ln(r), tau)
-        spl[m+ind.mmax] = math::QuinticSpline2d(gridR, gridT, Phi_val, Phi_dR, Phi_dT);
+        spl[m+ind.mmax] = math::QuinticSpline2d(gridR, gridT, Phi_val, Phi_dR, Phi_dT, Phi_dRdT);
     }
 }
 
@@ -1528,10 +1563,10 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
 
     // number of azimuthal harmonics to compute
     const int mmin = ind.mmin(), nm = ind.mmax - mmin + 1;
-    
+
     // only compute those quantities that will be needed in output
     const int numQuantities = hess!=NULL ? 6 : grad!=NULL ? 3 : 1;
-    
+
     // temporary array for storing coefficients: Phi, two first and three second derivs for each m
     // allocated on the stack and will be automatically freed upon leaving this routine
     double *C_m = static_cast<double*>(alloca(nm * numQuantities * sizeof(double)));
@@ -1541,7 +1576,7 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
         *dlnr2  = C_m+nm*3,
         *dlnrdtau=C_m+nm*4,
         *dtau2  = C_m+nm*5;
-    
+
     // value, first and second derivs of scaled potential in scaled coordinates,
     // where 'r' stands for ln(r) and 'theta' - for tau
     double trPot;
@@ -1576,7 +1611,7 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
             dtau[-mmin] *= val;
         }
     }
-    // then multiply other terms by the value of the m=0 term, which resides in the [mmin] element
+    // then multiply other terms by the value of the m=0 term, which resides in the [-mmin] element
     for(int mm=0; mm<nm; mm++) {
         int m = mm + mmin;
         if(m==0 || ind.lmin(m) > ind.lmax)
@@ -1591,9 +1626,9 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
             dlnr[mm] = dlnr[mm] * Phi[-mmin] + Phi[mm] * dlnr[-mmin];
             dtau[mm] = dtau[mm] * Phi[-mmin] + Phi[mm] * dtau[-mmin];
         }
-        Phi[mm] *= Phi[-mmin];  // Phi
+        Phi[mm] *= Phi[-mmin];
     }
-    
+
     // Fourier synthesis from azimuthal harmonics to actual quantities, still in scaled coords
     fourierTransformAzimuth(ind, pos.phi, C_m, &trPot,
         numQuantities>=3 ? &trGrad : NULL, numQuantities==6 ? &trHess : NULL);

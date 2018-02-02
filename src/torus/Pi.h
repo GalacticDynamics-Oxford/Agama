@@ -15,7 +15,7 @@ You'd be amazed how often this is useful.
 
 #ifndef _Pi_def_
 #define _Pi_def_ 1
-namespace Torus {
+namespace torus {
 
 const double Pi   = 3.14159265358979323846264338328;
 const double Pih  = 0.5  * Pi;

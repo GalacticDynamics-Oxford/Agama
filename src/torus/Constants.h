@@ -23,7 +23,7 @@ here in truth.
 
 #include "Units.h"
 
-namespace Torus{
+namespace torus{
 /**
 \brief Contains default parameters of the Galaxy (e.g. R_0, v_0) and for conversions between coordinate systems
 

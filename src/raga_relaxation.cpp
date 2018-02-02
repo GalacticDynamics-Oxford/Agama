@@ -20,7 +20,8 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
     while(tsamp = outputTimestep * (outputIter - outputFirst + 1),
         tsamp>tbegin && tsamp<=tend && outputIter != outputLast)
     {
-        sol.getSol(tsamp, data);
+        for(int d=0; d<6; d++)
+            data[d] = sol.getSol(tsamp, d);
         double E = totalEnergy(potentialSph, coord::PosVelCar(data));
         *(outputIter++) = relaxationModel.phasevol(E);
     }
@@ -29,7 +30,8 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
 
     // 2a. obtain the position, velocity and potential at the middle of the timestep
     tsamp = (tbegin+tend) * 0.5;
-    sol.getSol(tsamp, data);
+    for(int d=0; d<6; d++)
+        data[d] = sol.getSol(tsamp, d);
     coord::PosVelCar posvel(data);
     double vel = sqrt(pow_2(posvel.vx) + pow_2(posvel.vy) + pow_2(posvel.vz));
     if(vel==0)  // can't do anything meaningful for a non-moving particle

@@ -2,7 +2,7 @@
 #include <cmath>
 #include "Constants.h"
 #include "Pi.h"
-namespace Torus{
+namespace torus{
 ////////////////////////////////////////////////////////////////////////////////
 // GCA <--> GCY
 

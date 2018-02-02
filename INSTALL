@@ -1,7 +1,8 @@
 This is the AGAMA galaxy modelling framework. To get it working on your computer:
 
 1.  Download the repository.
-2a. Install the required libraries (presently only GSL >= 1.15).
+2a. Install the required libraries (presently only GSL >= 1.15, configure with CFLAGS=-fPIC):
+    ftp://ftp.gnu.org/gnu/gsl/gsl-latest.tar.gz
 2b. Although not compulsory, you may want to download and install optional libraries:
     - Eigen library for highly optimized linear algebra routines - highly recommended,
     (in its absense the non-optimized substitutes from GSL will be used);
@@ -70,8 +71,9 @@ LINK = $(CXX)
 # so one has to either disable it by removing the "-fopenmp" flag below (and of course sacrifice a lot
 # in performance), or install an alternative compiler such as gcc or icc.
 # Finally, -fPIC is necessary on 64-bit systems for compiling into a shared library
-# (dunno why it isn't on by default), and since the shared library agama.so includes all relevant
+# (dunno why it isn't on by default!), and since the shared library agama.so includes all relevant
 # third-party libraries (GSL, UNSIO, etc.), they also must be compiled with this flag!
+# E.g., in the case of GSL you would need to run its "./configure" script with an extra option " --with-pic"
 CXXFLAGS += -fPIC -fopenmp -Wall -O2 -march=native -I$(SRCDIR)
 LFLAGS   += -fPIC -fopenmp
 
@@ -82,8 +84,8 @@ CXXFLAGS += -std=c++11
 # it is recommended to link against the static library libgsl.a, so that it will be included into
 # the shared library agama.so - for this you may need to replace -L/path -lgsl with the full path
 # to the static library (e.g. /usr/local/lib/libgsl.a, and similarly for libcblas.a), because
-# by default the linker prefers shared libgsl.so over static libgsl.a
-# note that GSL must be compiled with -fPIC flag to be included into the shared library
+# by default the linker prefers shared libgsl.so over static libgsl.a;
+# note that GSL must be compiled with -fPIC flag
 INCLUDES += -I/path/to/gsl/include
 LIBS     += -L/path/to/gsl/lib -lgsl -lgslcblas
 
@@ -112,8 +114,9 @@ LIBS     += -L/path/to/gsl/lib -lgsl -lgslcblas
 # If everything works well, you should be able to run
 # > python -c 'import agama; print(agama.__version__)'
 # or, better, run some of the example scripts in the pytests folder.
-# on MacOS the following line may need to be added; on some systems -lpython should read -lpython2.7
-#LIBS    += -L/System/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/
+# on MacOS the following line may need to be added:
+# LIBS    += -L/System/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/
+# on some systems -lpython should be replaced by -lpython2.7 or -lpython2.6
 DEFINES  += -DHAVE_PYTHON
 INCLUDES += -I/usr/include/python -I/path/to/numpy/core/include
 LIBS     += -lpython

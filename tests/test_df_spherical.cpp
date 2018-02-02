@@ -320,7 +320,8 @@ bool test(const potential::BasePotential& pot)
         double dcdisp   = model.velDisp(truePhi);
         double jeansdisp= velDisp(gridr[i]);
         double invRm    = cbrt( math::integrate(  // Abel inversion
-            math::ScaledIntegrandEndpointSing(RmaxIntegrand(phasevol, inth), 0, inth), 0, 1, 1e-4) );
+            math::ScaledIntegrand<math::ScalingCub>(math::ScalingCub(0, inth),
+            RmaxIntegrand(phasevol, inth)), 0, 1, 1e-4) );
 
         // density-weighted error: integrate |x-x_true|^2 r^3 d log(r)
         double weight = pow_3(r) * truedens;

@@ -143,7 +143,7 @@ typedef shared_ptr<const BaseActionFinder> PtrActionFinder;
 }  // namespace actions
 
 
-namespace Torus {
+namespace torus {
 
 class Torus;
 typedef shared_ptr<Torus> PtrTorus;

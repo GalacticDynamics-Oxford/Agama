@@ -9,7 +9,7 @@
     - the function that provides the r.h.s. of the ODE (time derivatives of position and velocity 
     in a particular coordinate system) for the given potential, optionally with some figure rotation;
     - functions that perform useful data collection tasks on the orbit while it is being computed.
- 
+
     The first part is implemented by one of the available methods from math_ode.h,
     and the instance of an appropriate class derived from `math::BaseOdeSolver` is
     constructed internally for each orbit.
@@ -80,31 +80,31 @@ typedef std::vector<PtrRuntimeFnc> RuntimeFncArray;
 
 /** Runtime function that records the orbit trajectory at regular intervals of time
     (unrelated to the internal timestep of the orbit integrator).
-    \tparam  coordT  is the type of coordinate system used in orbit integration (Car, Cyl or Sph)
+    \tparam  CoordT  is the type of coordinate system used in orbit integration (Car, Cyl or Sph)
 */
-template<typename coordT>
+template<typename CoordT>
 class RuntimeTrajectory: public BaseRuntimeFnc {
-public:
-    /// trajectory sampled at regular intervals of time (0th point is the initial conditions),
-    /// stored in an external array referenced by this variable
-    std::vector<coord::PosVelT<coordT> >& trajectory;
-
     /// time interval between trajectory samples
     const double samplingInterval;
 
-    RuntimeTrajectory(std::vector<coord::PosVelT<coordT> >& _trajectory, double _samplingInterval) :
-        trajectory(_trajectory), samplingInterval(_samplingInterval) {}
+    /// trajectory sampled at regular intervals of time (0th point is the initial conditions),
+    /// stored in an external array referenced by this variable
+    std::vector<coord::PosVelT<CoordT> >& trajectory;
+
+public:
+    RuntimeTrajectory(double _samplingInterval, std::vector<coord::PosVelT<CoordT> >& _trajectory) :
+        samplingInterval(_samplingInterval), trajectory(_trajectory) {}
 
     virtual StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
 };
 
-    
+
 /** The function that provides the RHS of the differential equation, i.e., the derivatives of
     position and velocity in different coordinate systems.
-    \tparam  coordT  is the type of coordinate system (Car, Cyl or Sph).
+    \tparam  CoordT  is the type of coordinate system (Car, Cyl or Sph).
 */
-template<typename coordT>
+template<typename CoordT>
 class OrbitIntegrator: public math::IOdeSystem {
     /// gravitational potential in which the orbit is computed
     const potential::BasePotential& potential;
@@ -114,13 +114,10 @@ public:
         potential(_potential) {};
 
     /// apply the equations of motion
-    virtual void eval(const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const;
+    virtual void eval(const double t, const double x[], double dxdt[]) const;
 
     /// return the size of ODE system - three coordinates and three velocities
     virtual unsigned int size() const { return 6; }
-
-    /// dx/dt=v in the cartesian frame only
-    virtual bool isStdHamiltonian() const;
 };
 
 /** The function providing the RHS of the differential equation in the cartesian coordinate system
@@ -138,36 +135,36 @@ class OrbitIntegratorRot: public math::IOdeSystem {
     const double Omega;
 public:
     /// initialize the object for the given potential and pattern speed
-    OrbitIntegratorRot(const potential::BasePotential& _potential, double _Omega) :
+    OrbitIntegratorRot(const potential::BasePotential& _potential, double _Omega=0) :
         potential(_potential), Omega(_Omega) {};
-    
-    virtual void eval(const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const;
+
+    virtual void eval(const double t, const double x[], double dxdt[]) const;
 
     virtual unsigned int size() const { return 6; }
-    virtual bool isStdHamiltonian() const { return Omega==0; }
 };
 
 
 /** Assorted parameters of orbit integration */
 struct OrbitIntParams {
-    math::OdeSolverType solver;  ///< choice of the ODE integrator
+    //math::OdeSolverType solver;  ///< choice of the ODE integrator
     double accuracy;             ///< accuracy parameter for the ODE integrator
     size_t maxNumSteps;          ///< upper limit on the number of steps of the ODE integrator
 
     /// assign default values
-    OrbitIntParams() : solver(math::OS_DEFAULT), accuracy(1e-8), maxNumSteps(1e8) {}
+    OrbitIntParams(double _accuracy=1e-8, size_t _maxNumSteps=1e8) :
+        accuracy(_accuracy), maxNumSteps(_maxNumSteps) {}
 };
 
 /** Numerically compute an orbit in the specific coordinate system.
     This routine binds together the ODE solver (created internally),
     the orbit integrator (constructed for the specific potential and coordinate system),
     and optionally the runtime functions that collect information during orbit integration.
-    \tparam     coordT  is the type of coordinate system (Car, Cyl or Sph);
+    \tparam     CoordT  is the type of coordinate system (Car, Cyl or Sph);
     \param[in]  initialConditions  is the initial position/velocity pair in the given 
                 coordinate system (the same c.s. is used for orbit integration and for output);
     \param[in]  totalTime  is the maximum duration of orbit integration;
     \param[in]  orbitIntegrator  is the function that provides the r.h.s. of the differential equation;
-                normally this would be an instance of `OrbitIntegrator<coordT>`;
+                normally this would be an instance of `OrbitIntegrator<CoordT>`;
     \param[in]  runtimeFncs  is the list of runtime functions that are called after each
                 internal timestep of the ODE integrator (for instance, to store the trajectory);
     \param[in]  params  are the extra parameters for the integration (default values may be used).
@@ -178,9 +175,9 @@ struct OrbitIntParams {
                 or the number of steps exceeded the limit).
     \throw      any possible exceptions from the ODE solver or the runtime functions.
 */
-template<typename coordT>
-coord::PosVelT<coordT> integrate(
-    const coord::PosVelT<coordT>& initialConditions,
+template<typename CoordT>
+coord::PosVelT<CoordT> integrate(
+    const coord::PosVelT<CoordT>& initialConditions,
     const double totalTime,
     const math::IOdeSystem& orbitIntegrator,
     const RuntimeFncArray&  runtimeFncs = RuntimeFncArray(),
@@ -189,7 +186,7 @@ coord::PosVelT<coordT> integrate(
 
 /** A convenience function to compute the trajectory for the given initial conditions and potential
     in a specific coordinate system.
-    \tparam     coordT  is the coordinate system;
+    \tparam     CoordT  is the coordinate system;
     \param[in]  initialConditions  is the initial position and velocity in the given coordinate system;
     \param[in]  totalTime  is the maximum duration of orbit integration;
     \param[in]  samplingInterval  is the time interval between successive point recorded
@@ -199,21 +196,21 @@ coord::PosVelT<coordT> integrate(
     \return     the trajectory recorded at regular intervals, starting from the initial conditions.
     \throw      an exception if something goes wrong.
 */
-template<typename coordT>
-inline std::vector<coord::PosVelT<coordT> > integrateTraj(
-    const coord::PosVelT<coordT>& initialConditions,
+template<typename CoordT>
+inline std::vector<coord::PosVelT<CoordT> > integrateTraj(
+    const coord::PosVelT<CoordT>& initialConditions,
     const double totalTime,
     const double samplingInterval,
     const potential::BasePotential& potential,
     const OrbitIntParams& params = OrbitIntParams())
 {
-    std::vector<coord::PosVelT<coordT> > output;
-    output.reserve((totalTime+1e-10) / samplingInterval + 1);  // one extra point for the final state
+    std::vector<coord::PosVelT<CoordT> > output;
+    output.reserve(totalTime * (1+1e-15) / samplingInterval + 1);  // one extra point for the final state
     integrate(initialConditions, totalTime,
-        OrbitIntegrator<coordT>(potential),
-        RuntimeFncArray(1, PtrRuntimeFnc(new RuntimeTrajectory<coordT>(output, samplingInterval))),
+        OrbitIntegrator<CoordT>(potential),
+        RuntimeFncArray(1, PtrRuntimeFnc(new RuntimeTrajectory<CoordT>(samplingInterval, output))),
         params);
     return output;
 }
-    
+
 }  // namespace

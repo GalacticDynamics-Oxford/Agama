@@ -46,9 +46,10 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
     coord::GradSph deriv;
     coord::HessSph deriv2;
     eval(pos, NULL, &deriv, &deriv2);
-    double sintheta=sin(pos.theta);
+    double sintheta, costheta;
+    math::sincos(pos.theta, sintheta, costheta);
     double derivr_over_r = deriv.dr / pos.r;
-    double derivtheta_cottheta = deriv.dtheta * cos(pos.theta) / sintheta;
+    double derivtheta_cottheta = deriv.dtheta * costheta / sintheta;
     if(sintheta==0)
         derivtheta_cottheta = deriv2.dtheta2;
     double angular_part = (deriv2.dtheta2 + derivtheta_cottheta + 
@@ -79,21 +80,14 @@ double BasePotentialSphericallySymmetric::enclosedMass(const double radius) cons
 // scaling transformation for integration over volume
 coord::PosCyl unscaleCoords(const double vars[], double* jac)
 {
-    const double scaledr  = vars[0];
-    const double costheta = vars[1] * 2 - 1;
-    const double r = exp( 1/(1-scaledr) - 1/scaledr );
+    double
+    scaledr  = vars[0],
+    costheta = vars[1] * 2 - 1,
+    drds, r  = math::unscale(math::ScalingSemiInf(), scaledr, &drds);
     if(jac)
         *jac = (r<1e-100 || r>1e100) ? 0 :  // if near r=0 or infinity, set jacobian to zero
-            4*M_PI * pow_3(r) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr));
+            4*M_PI * pow_2(r) * drds;
     return coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
-}
-
-// return the scaled radius variable to be used as the integration limit
-inline double scaledr_from_r(const double r) {
-    const double y = log(r);
-    return  fabs(y)<1 ? // two cases depending on whether |y| is small or large
-        1/(1 + sqrt(1+pow_2(y*0.5)) - y*0.5) :            // y is close to zero
-        0.5 + sqrt(0.25+pow_2(1/y))*math::sign(y) - 1/y;  // y is large (or even +-infinity)
 }
 
 /// helper class for integrating density over volume
@@ -113,16 +107,15 @@ void DensityIntegrandNdim::eval(const double vars[], double values[]) const
 double BaseDensity::enclosedMass(const double r) const
 {
     if(r==0) return 0;   // this assumes no central point mass! overriden in Plummer density model
+    if(r==INFINITY) return totalMass();
     // default implementation is to integrate over density inside given radius;
     // may be replaced by cheaper and more approximate evaluation for derived classes
-    DensityIntegrandNdim fnc(*this);
     double xlower[3] = {0, 0, 0};
-    double xupper[3] = {scaledr_from_r(r), 1, 1};
+    double xupper[3] = {math::scale(math::ScalingSemiInf(), r), 1, 1};
     double result, error;
-    int numEval;
     const int maxNumEval = 10000;
-    math::integrateNdim(fnc, xlower, xupper, EPSREL_DENSITY_INT, maxNumEval,
-        &result, &error, &numEval);
+    math::integrateNdim(DensityIntegrandNdim(*this),
+        xlower, xupper, EPSREL_DENSITY_INT, maxNumEval, &result, &error);
     return result;
 }
 
@@ -155,17 +148,17 @@ double BaseDensity::totalMass() const
 class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
 public:
     RadiusByMassRootFinder(const BaseDensity& _dens, double _m) :
-        dens(_dens), m(_m), mtot(dens.totalMass()) {};
+        dens(_dens), m(_m) {}
     virtual double value(double r) const {
-        return (r==INFINITY ? mtot : dens.enclosedMass(r)) - m;
+        return dens.enclosedMass(r) - m;
     }
 private:
     const BaseDensity& dens;
-    const double m, mtot;
+    const double m;
 };
 
 double getRadiusByMass(const BaseDensity& dens, const double mass) {
-    return math::findRoot(RadiusByMassRootFinder(dens, mass), 0, INFINITY, EPSREL_DENSITY_INT);
+    return math::findRoot(RadiusByMassRootFinder(dens, mass), math::ScalingSemiInf(), EPSREL_DENSITY_INT);
 }
 
 double getInnerDensitySlope(const BaseDensity& dens) {

@@ -38,18 +38,15 @@ namespace{   // internal definitions
 inline coord::VelCyl unscaleVelocity(
     const double vars[], const double vesc, const double zeta, double* jac=0)
 {
-    const double
-        costheta = cos(M_PI * pow_2(vars[1])),
-        sintheta = sin(M_PI * pow_2(vars[1])),
-        eta = sqrt(1/zeta-1) + 1,
-        chi = vars[0] * eta - 1,
-        vel = vesc * zeta * (1 + math::sign(chi) * pow_2(chi));
+    double sintheta, costheta, sinphi, cosphi,
+    eta = sqrt(1/zeta-1) + 1,
+    chi = vars[0] * eta - 1,
+    vel = vesc * zeta * (1 + math::sign(chi) * pow_2(chi));
+    math::sincos(M_PI * pow_2(vars[1]), sintheta, costheta);
+    math::sincos(2*M_PI * vars[2], sinphi, cosphi);
     if(jac)
         *jac = 8*M_PI*M_PI * vars[1] * zeta * fabs(chi) * eta * vesc * pow_2(vel) * sintheta;
-    return coord::VelCyl(
-        vel * sintheta * cos(2*M_PI * vars[2]),
-        vel * sintheta * sin(2*M_PI * vars[2]),
-        vel * costheta);
+    return coord::VelCyl(vel * sintheta * cosphi, vel * sintheta * sinphi, vel * costheta);
 }
 
 /** compute the escape velocity and the ratio of circular to escape velocity
@@ -66,7 +63,7 @@ inline void getVesc(
     coord::GradCyl grad;
     poten.eval(pos, &Phi, &grad);
     vesc = sqrt(-2. * Phi);
-    zeta = fmin(0.9, fmax(0.1, sqrt(grad.dR * pos.R) / vesc));
+    zeta = math::clamp(sqrt(grad.dR * pos.R) / vesc, 0.1, 0.9);
     if(!isFinite(vesc)) {
         throw std::invalid_argument("Error in computing moments: escape velocity is undetermined at "
             "R="+utils::toString(pos.R)+", z="+utils::toString(pos.z)+", phi="+utils::toString(pos.phi)+
@@ -92,14 +89,6 @@ inline coord::PosVelCyl unscalePosVel(const double vars[],
     if(jac!=NULL)
         *jac *= jacPos;
     return coord::PosVelCyl(pos, vel);
-}
-
-/** convert scaled z-coordinate into the actual z;
-    if necessary, also provide the jacobian of transformation */
-inline double unscaleZ(double zscaled, double *jac=NULL) {
-    if(jac!=NULL)
-        *jac = pow_2(1/(1-zscaled)) + pow_2(1/zscaled);
-    return 1/(1-zscaled) - 1/zscaled;   // jacobian of coordinate transformation
 }
 
 //------- HELPER CLASSES FOR MULTIDIMENSIONAL INTEGRATION OF DF -------//
@@ -190,18 +179,18 @@ protected:
 class DFIntegrandProjected: public DFIntegrandNdim, public math::IFunctionNoDeriv {
 public:
     DFIntegrandProjected(const GalaxyModel& _model, double _R, double _vz, double _vz_error) :
-        DFIntegrandNdim(_model), R(_R), vz(_vz), vz_error(_vz_error) {}
+        DFIntegrandNdim(_model), R(_R), vz(_vz), vz_error(_vz_error), scaling() {}
 
     /// return v^2-vz^2 (used in setting the integration limits by root-finding)
     virtual double value(double zscaled) const {
         return -vz*vz + (zscaled==0 || zscaled==1 ? 0 : 
-            -2*model.potential.value(coord::PosCyl(R, unscaleZ(zscaled), 0)));
+            -2*model.potential.value(coord::PosCyl(R, math::unscale(scaling, zscaled), 0)));
     }
 
     /// input variables define the missing components of position and velocity
     /// to be integrated over, suitably scaled: z, vx, vy
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
-        double z   = unscaleZ(vars[0], jac);
+        double z   = math::unscale(scaling, vars[0], jac);
         double vz1 = vz;
         if(vz_error!=0)  // add velocity error sampled from Gaussian c.d.f.
             vz1 += M_SQRT2 * vz_error * math::erfinv(2*vars[3]-1);
@@ -212,15 +201,16 @@ public:
                 *jac = 0;
             return coord::PosVelCyl(R, 0, 0, 0, vz, 0);
         }
-        double v = sqrt(v2) * vars[1];
+        double v = sqrt(v2) * vars[1], sinphi, cosphi;
+        math::sincos(2*M_PI*vars[2], sinphi, cosphi);
         if(jac!=NULL)
             *jac *= 2*M_PI * v2 * vars[1];    // jacobian of velocity transformation
-        return coord::PosVelCyl(R, z, 0,
-            v * cos(2*M_PI*vars[2]), vz1, v * sin(2*M_PI*vars[2]));
+        return coord::PosVelCyl(R, z, 0, v * cosphi, vz1, v * sinphi);
     }
 
 protected:
     double R, vz, vz_error;
+    const math::ScalingInf scaling;
     virtual unsigned int numVars()   const { return vz_error==0 ? 3 : 4; }
     virtual unsigned int numValues() const { return 1; }
 
@@ -241,7 +231,7 @@ public:
 
     /// input variables define the z-coordinate and all three velocity components, suitably scaled
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
-        coord::PosCyl pos(R, unscaleZ(vars[0], jac), 0);
+        coord::PosCyl pos(R, math::unscale(math::ScalingInf(), vars[0], jac), 0);
         double vesc, zeta, jacVel;
         getVesc(pos, model.potential, vesc, zeta);
         const coord::VelCyl vel = unscaleVelocity(vars+1, vesc, zeta, &jacVel);
@@ -394,7 +384,7 @@ private:
     /// input variables define the z-coordinate and all three velocity components, suitably scaled
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
         if(projected) {
-            coord::PosCyl pos(point.R, unscaleZ(vars[0], jac), point.phi);
+            coord::PosCyl pos(point.R, math::unscale(math::ScalingInf(), vars[0], jac), point.phi);
             double vesc, zeta, jacVel;
             getVesc(pos, model.potential, vesc, zeta);
             const coord::VelCyl vel = unscaleVelocity(vars+1, vesc, zeta, &jacVel);

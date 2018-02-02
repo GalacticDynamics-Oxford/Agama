@@ -10,7 +10,7 @@
 #include "PJMNum.h"
 #include "Orb.h"
 
-namespace Torus{
+namespace torus{
 
 // Routine needed for external integration routines ----------------------------
 

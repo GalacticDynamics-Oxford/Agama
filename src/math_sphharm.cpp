@@ -123,13 +123,14 @@ void trigMultiAngle(const double phi, const unsigned int m, const bool needSine,
     // note that the recurrence relation below is not suitable for large m due to loss of accuracy,
     // but for our purposes this should suffice;
     // a more accurate expression is given in section 5.4 of Num.Rec.3rd ed.
-    double cosphi = cos(phi);
+    double sinphi, cosphi;
+    sincos(phi, sinphi, cosphi);
     outputArray[0] = cosphi;
     for(unsigned int k=1; k<m; k++)
         outputArray[k] = 2 * cosphi * outputArray[k-1] - (k>1 ? outputArray[k-2] : 1);
     if(!needSine)
         return;
-    outputArray[m] = sin(phi);
+    outputArray[m] = sinphi;
     for(unsigned int k=m+1; k<m*2; k++)
         outputArray[k] = 2 * cosphi * outputArray[k-1] - (k>m+1 ? outputArray[k-2] : 0);
 }

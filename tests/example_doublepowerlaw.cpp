@@ -81,9 +81,9 @@ df::DoublePowerLawParam dfparams(const double vars[])
     params.slopeOut  = choose(defaultParams.slopeOut,  vars[2]);
     params.steepness = choose(defaultParams.steepness, vars[3]);
     params.coefJrIn  = choose(defaultParams.coefJrIn,  vars[4]);
-    params.coefJzIn  = (3-vars[4])/2; // fix g_z=g_phi taking into account that g_r+g_z+g_phi=3
+    params.coefJzIn  = (3-params.coefJrIn)/2;  // fix g_z=g_phi taking into account that g_r+g_z+g_phi=3
     params.coefJrOut = choose(defaultParams.coefJrOut, vars[5]);
-    params.coefJzOut = (3-vars[5])/2; // same for h_z
+    params.coefJzOut = (3-params.coefJrOut)/2; // same for h_z
     params.norm      = 1.;
     return params;
 }

@@ -103,13 +103,15 @@ private:
     the standalone routines, because it estimates the focal distance using a pre-computed 
     interpolation grid, rather than doing it individually for each point. This results in 
     a considerable speedup in action computation, for a minor overhead during initialization.
-    Additionally, it may set up an interpolation table for actions as functions
-    of three integrals of motion, which speeds up the evaluation by another order of magnitude,
-    for a moderate decrease in accuracy.
+    Additionally, it may set up an interpolation table for actions as functions of three integrals
+    of motion (one of them being approximate), which speeds up the evaluation by another order of
+    magnitude, for a moderate decrease in accuracy. Interpolated actions have small but non-negligible
+    systematic bias, which depends on the potential as well as the phase-space location,
+    hence they cannot be used for comparing the likelihood of a DF in different potentials.
 */
 class ActionFinderAxisymFudge: public BaseActionFinder {
 public:
-    ActionFinderAxisymFudge(const potential::PtrPotential& potential, bool interpolate = true);
+    ActionFinderAxisymFudge(const potential::PtrPotential& potential, bool interpolate = false);
 
     virtual Actions actions(const coord::PosVelCyl& point) const;
 
@@ -124,7 +126,7 @@ private:
     const potential::PtrPotential pot;      ///< the potential in which actions are computed
     const potential::Interpolator interp;   ///< interpolator for Lcirc(E)
     math::LinearInterpolator2d interpD;     ///< 2d interpolator for the focal distance Delta(E,Lz)
-    math::CubicSpline2d interpI;            ///< 2d interpolator for I3max(E,Lz)
+    math::CubicSpline2d        interpR;     ///< 2d interpolator for Rshell(E,Lz) / Rcirc(E)
     math::CubicSpline3d intJr, intJz;       ///< 3d interpolators for Jr and Jz as functions of (E,Lz,I3)
 };
 

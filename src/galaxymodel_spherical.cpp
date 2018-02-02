@@ -90,15 +90,13 @@ public:
             return;
         // try determining the exponent B from the first three grid points
         double B0 = math::findRoot(
-            SlopeFinder(logh[0], logh[1], logh[2], logrho[0], logrho[1], logrho[2]),
-            0, INFINITY, EPSROOT);
-        if(!(B0 > 0.05 && B0 < 20))
+            SlopeFinder(logh[0], logh[1], logh[2], logrho[0], logrho[1], logrho[2]), 0.05, 20, EPSROOT);
+        if(!isFinite(B0))
             return;
         // now try the same using three points shifted by one
         double B1 = math::findRoot(
-            SlopeFinder(logh[1], logh[2], logh[3], logrho[1], logrho[2], logrho[3]),
-            0, INFINITY, EPSROOT);
-        if(!(B1 > 0.05 && B1 < 20))
+            SlopeFinder(logh[1], logh[2], logh[3], logrho[1], logrho[2], logrho[3]), 0.05, 20, EPSROOT);
+        if(!isFinite(B1))
             return;
         // consistency check - if the two values differ significantly, we're getting nonsense
         if(B0 < B1*0.95 || B1 < B0*0.95)
@@ -170,13 +168,15 @@ public:
         pot(_pot), df(_df), pv(pot) {}
 
     /// un-scale r and v and return the jacobian of this transformation
-    double unscalerv(double scaledr, double scaledv, double& r, double& v, double& Phi) const { 
-        r   = exp( 1/(1-scaledr) - 1/scaledr );
+    double unscalerv(double scaledr, double scaledv, double& r, double& v, double& Phi) const {
+        double drds;
+        r   = math::unscale(math::ScalingSemiInf(), scaledr, &drds);
         Phi = pot(r);
         double vesc = sqrt(-2*Phi);
         v   = scaledv * vesc;
-        return pow_2(4*M_PI) * pow_3(r*vesc) * (1/pow_2(1-scaledr) + 1/pow_2(scaledr)) * pow_2(scaledv);
+        return pow_2(4*M_PI) * pow_2(r * vesc * scaledv) * vesc * drds;
     }
+
     virtual void eval(const double vars[], double values[]) const
     {
         double r, v, Phi;
@@ -198,19 +198,21 @@ class LogRhoOfLogH: public math::IFunction {
     const math::LogLogScaledFnc loglogdensity;
     const potential::PhaseVolume& phasevol;
     const math::IFunction& pot;
+    const double PhiMin;   ///< minimum allowed value of potential at the innermost grid node
 public:
     LogRhoOfLogH(const math::IFunction& density,
         const potential::PhaseVolume& _phasevol, const math::IFunction& _pot) :
-        loglogdensity(density), phasevol(_phasevol), pot(_pot) {}
+        loglogdensity(density), phasevol(_phasevol), pot(_pot), PhiMin(pot(0) * (1-MIN_REL_DIFFERENCE))
+    {}
 
     virtual void evalDeriv(double logh, double* logrho, double* der, double* der2) const
     {
         double h = exp(logh), g, dgdh;
         double E = phasevol.E(h, &g, &dgdh);
         double r = potential::R_max(pot, E);
-        double dPhidr, d2Phidr2;
-        pot.evalDeriv(r, NULL, &dPhidr, &d2Phidr2);
-        if(r <= 0 || !isFinite(dPhidr + d2Phidr2)) {
+        double Phi, dPhidr, d2Phidr2;
+        pot.evalDeriv(r, &Phi, &dPhidr, &d2Phidr2);
+        if(r <= 0 || !isFinite(dPhidr + d2Phidr2) || Phi<PhiMin) {
             // this may happen if E is too close to Phi(0), in which case don't do anything
             if(logrho)
                 *logrho=NAN;
@@ -546,7 +548,7 @@ std::vector<double> densityFromCumulativeMass(
     // that is, M = Minf - A * r^B  with A>0, B<0
     double B = math::findRoot(SlopeFinder(
         gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
-        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -INFINITY, 0, EPSROOT);
+        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -100, 0, EPSROOT);
     double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
     if(B<0) {
         double A =  (gridm[size-1] - gridm[size-2]) / 
@@ -981,12 +983,13 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
             if(j==1) {
                 // integration over the first segment uses a more accurate quadrature rule
                 // to accounting for a possible endpoint singularity at Phi=E
-                J0acc = math::integrateGL(math::ScaledIntegrandEndpointSing(
-                    intJ0, logHprev, logHcurr), 0, 1, GLORDER);
-                J1acc = math::integrateGL(math::ScaledIntegrandEndpointSing(
-                    intJ1, logHprev, logHcurr), 0, 1, GLORDER);
-                J3acc = math::integrateGL(math::ScaledIntegrandEndpointSing(
-                    intJ3, logHprev, logHcurr), 0, 1, GLORDER);
+                math::ScalingCub scaling(logHprev, logHcurr);
+                J0acc = math::integrateGL(
+                    math::ScaledIntegrand<math::ScalingCub>(scaling, intJ0), 0, 1, GLORDER);
+                J1acc = math::integrateGL(
+                    math::ScaledIntegrand<math::ScalingCub>(scaling, intJ1), 0, 1, GLORDER);
+                J3acc = math::integrateGL(
+                    math::ScaledIntegrand<math::ScalingCub>(scaling, intJ3), 0, 1, GLORDER);
             } else {
                 J0acc += math::integrateGL(intJ0, logHprev, logHcurr, GLORDER);
                 J1acc += math::integrateGL(intJ1, logHprev, logHcurr, GLORDER);
@@ -1059,8 +1062,8 @@ void SphericalModelLocal::evalLocal(
     double I0 = this->I0(hE);
     double J0 = fmax(this->I0(hPhi) - I0, 0);
     // restrict the arguments of 2d interpolators to the range covered by their grids
-    double X  = fmin(fmax(log(hPhi),    intJ1.xmin()), intJ1.xmax());
-    double Y  = fmin(fmax(log(hE/hPhi), intJ1.ymin()), intJ1.ymax());
+    double X  = math::clamp(log(hPhi),    intJ1.xmin(), intJ1.xmax());
+    double Y  = math::clamp(log(hE/hPhi), intJ1.ymin(), intJ1.ymax());
     // compute the 2d interpolators for J1, J3
     double J1 = exp(intJ1.value(X, Y)) * J0;
     double J3 = exp(intJ3.value(X, Y)) * J0;
@@ -1111,7 +1114,7 @@ double SphericalModelLocal::sampleVelocity(double Phi) const
     if(!(Phi<0))
         throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
+    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double I0plusJ0 = I0(hPhi);
     double maxJ1    = exp(intJ1.value(loghPhi, intJ1.ymax())) * I0plusJ0;
     double frac     = math::random();
@@ -1132,7 +1135,7 @@ double SphericalModelLocal::density(double Phi) const
     if(!(Phi<0))
         throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
+    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double J1overJ0 = exp(intJ1.value(loghPhi, intJ1.ymax()));
     double I0plusJ0 = I0(hPhi);  // in fact I0(E)=0 because E=0
     return 4*M_PI*M_SQRT2 * sqrt(-Phi) * J1overJ0 * I0plusJ0;
@@ -1143,7 +1146,7 @@ double SphericalModelLocal::velDisp(double Phi) const
     if(!(Phi<0))
         throw std::invalid_argument("SphericalModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = fmin(fmax(log(hPhi), intJ1.xmin()), intJ1.xmax());
+    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double J3overJ1 = exp(intJ3.value(loghPhi, intJ3.ymax()) - intJ1.value(loghPhi, intJ1.ymax()));
     return sqrt(-2./3 * Phi * J3overJ1);
 }

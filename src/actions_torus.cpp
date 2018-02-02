@@ -9,7 +9,7 @@
 namespace actions{
 
 /// Auxiliary class for using any of BasePotential-derived potentials with Torus code
-class TorusPotentialWrapper: public Torus::Potential{
+class TorusPotentialWrapper: public torus::Potential{
 public:
     TorusPotentialWrapper(const potential::BasePotential& _poten) : poten(_poten) {};
     virtual ~TorusPotentialWrapper() {};
@@ -34,8 +34,8 @@ public:
             throw std::runtime_error("dLc/dR not implemented");
         return v_circ(poten, R) * R;
     }
-    virtual Torus::Frequencies KapNuOm(double R) const {
-        Torus::Frequencies freq;
+    virtual torus::Frequencies KapNuOm(double R) const {
+        torus::Frequencies freq;
         epicycleFreqs(poten, R, freq[0], freq[1], freq[2]);
         return freq;
     }
@@ -47,11 +47,11 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
 {
     if(!isAxisymmetric(poten))
         throw std::invalid_argument("ActionMapperTorus only works for axisymmetric potentials");
-    torus = Torus::PtrTorus(new Torus::Torus(true));
+    torus = torus::PtrTorus(new torus::Torus(true));
     // the actual potential is used only during torus fitting, but not required 
     // later in angle mapping - so we create a temporary object
     TorusPotentialWrapper potwrap(poten);
-    Torus::Actions act;
+    torus::Actions act;
     act[0] = acts.Jr;
     act[1] = acts.Jz;
     act[2] = acts.Jphi;
@@ -73,16 +73,16 @@ coord::PosVelCyl ActionMapperTorus::map(const ActionAngles& actAng, Frequencies*
             "values of actions are different from those provided to the constructor");
     // frequencies are constant for a given torus (depend only on actions, not on angles)
     if(freq!=NULL) {
-        Torus::Frequencies tfreq = torus->omega();
+        torus::Frequencies tfreq = torus->omega();
         freq->Omegar   = tfreq[0];
         freq->Omegaz   = tfreq[1];
         freq->Omegaphi = tfreq[2];
     }
-    Torus::Angles ang;
+    torus::Angles ang;
     ang[0] = actAng.thetar;
     ang[1] = actAng.thetaz;
     ang[2] = actAng.thetaphi;
-    Torus::PSPT xv = torus->Map3D(ang);
+    torus::PSPT xv = torus->Map3D(ang);
     return coord::PosVelCyl(xv[0], xv[1], xv[2], xv[3], xv[4], xv[5]);
 }
 

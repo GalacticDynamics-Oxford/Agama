@@ -11,8 +11,8 @@
 #include <vector>
 #include <cmath>
 
-#if (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
-#error "GSL version is too old"
+#if not defined(GSL_MAJOR_VERSION) || (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
+#error "GSL version is too old (need at least 1.15)"
 #endif
 
 #ifdef HAVE_CUBA
@@ -32,7 +32,7 @@ namespace math{
 static const int MAXITER = 64;
 
 /// size of workspace for adaptive integration
-static const int MAXINTEGRPOINTS = 1000;
+static const int MAX_INTEGR_POINTS = 1000;
 
 // ------ error handling ------ //
 
@@ -140,6 +140,40 @@ double unwrapAngle(double x, double xprev)
     else if(diff<-0.5) 
         modf(diff-0.5, &nwraps);
     return x - 2*M_PI * nwraps;
+}
+
+void sincos(double x, double& s, double& c)
+{
+    double y = x>=0 ? x : -x;   // fabs(x)
+    double z = x>=0 ? 1 : -1;   // sign(x)
+    int quad = int(4/M_PI * y); // floor(...), non-negative
+    quad = (quad+1) >> 1;       // 0 => 0, 1 => 1, 2 => 1, 3 => 2, 4 => 2, 5 => 3, etc.
+    y -= M_PI/2 * quad;         // bring the range to [-pi/4 .. pi/4];
+    // note that multiples of M_PI/2 are exactly mapped to zero (this is a deliberate tweak).
+    double y2 = y * y;
+    // use a Chebyshev approximation for sin and cos on this interval
+    double sy = y + y * (((((
+        +1.5896230157654657e-10 * y2
+        -2.5050747762857807e-8) * y2
+        +2.7557313621385725e-6) * y2
+        -1.9841269829589539e-4) * y2
+        +8.3333333333221186e-3) * y2
+        -0.1666666666666663073) * y2;
+    double cy = 1.0 + (((((
+        +2.064357075039214e-09  * y2
+        -2.755549453909573e-07) * y2
+        +2.480158051577225e-05) * y2
+        -0.0013888888877062660) * y2
+        +0.0416666666665909000) * y2
+        -0.5000000000000000000) * y2;
+    // assign the output values, depending on the quadrant (also change the sign of sin(x) if x<0)
+    switch(quad & 3) {
+        case 0: s = sy * z; c = cy; return;
+        case 1: s = cy * z; c =-sy; return;
+        case 2: s =-sy * z; c =-cy; return;
+        case 3: s =-cy * z; c = sy; return;
+        default: s=NAN; c=NAN; /*shouldn't occur*/
+    }
 }
 
 
@@ -282,28 +316,29 @@ double random()
 // generate 2 random numbers with normal distribution, using Box-Muller approach
 void getNormalRandomNumbers(double& num1, double& num2)
 {
-    double p1 = random();
-    double p2 = random();
-    if(p1>0 && p1<=1)
+    double p1 = random(), p2 = random(), u, v;
+    if(p1>0)
         p1 = sqrt(-2*log(p1));
-    num1 = p1 * sin(2*M_PI * p2);
-    num2 = p1 * cos(2*M_PI * p2);
+    sincos(2*M_PI * p2, u, v);
+    num1 = p1 * u;
+    num2 = p1 * v;
 }
 
 void getRandomUnitVector(double vec[3])
 {
     double costh = random()*2-1;
     double sinth = sqrt(1-pow_2(costh));
-    double phi   = random()*2*M_PI;
-    vec[0] = sinth * cos(phi);
-    vec[1] = sinth * sin(phi);
+    double sinphi, cosphi;
+    sincos(2*M_PI * random(), sinphi, cosphi);
+    vec[0] = sinth * cosphi;
+    vec[1] = sinth * sinphi;
     vec[2] = costh;
 }
 
 double getRandomPerpendicularVector(const double vec[3], double vper[3])
 {
-    double phi = 2*M_PI * random();   // rotation angle about the given vector
-    double cosphi = cos(phi), sinphi = sin(phi);
+    double sinphi, cosphi;
+    sincos(2*M_PI * random(), sinphi, cosphi);
     if(vec[1] != 0 || vec[2] != 0) {  // input vector has a nontrivial projection in the y-z plane
         // a combination of two steps:
         // (1) obtain one perpendicular vector as a cross product of v and e_x;
@@ -332,16 +367,17 @@ double getRandomPerpendicularVector(const double vec[3], double vper[3])
 void getRandomRotationMatrix(double mat[9])
 {
     // the algorithm of Arvo(1992)
+    double sinth, costh, sinphi, cosphi;
+    sincos(2*M_PI * random(), sinth,  costh );
+    sincos(2*M_PI * random(), sinphi, cosphi);
     double
-    th = 2*M_PI * random(),
-    phi= 2*M_PI * random(),
     mu = 2 * random(),
     nu = sqrt(mu),
-    vx = sin(phi) * nu,
-    vy = cos(phi) * nu,
+    vx = sinphi * nu,
+    vy = cosphi * nu,
     vz = sqrt(2-mu),
-    st = sin(th),
-    ct = cos(th),
+    st = sinth,
+    ct = costh,
     sx = vx*ct - vy*st,
     sy = vx*st + vy*ct;
     mat[0] = vx*sx-ct;
@@ -378,6 +414,112 @@ double quasiRandomHalton(size_t ind, unsigned int base)
 
 
 /* ------ algebraic transformations of functions ------- */
+
+// u in (-inf,inf) but not too large (e.g. a logarithm of something else)
+template<> double scale(const ScalingInf& /*scaling*/, double u) {
+    return  fabs(u) < 1 ? // two cases depending on whether |u| is small or large
+        1 / (1 + sqrt(1 + 0.25 * u*u) - 0.5 * u) :      // u is close to zero
+        0.5 + sqrt(0.25 + pow_2(1/u)) * sign(u) - 1/u;  // u is large or even infinite
+}
+
+template<> double unscale(const ScalingInf& /*scaling*/, double s, double* duds) {
+    if(duds)
+        *duds = 1 / pow_2(1-s) + 1 / pow_2(s);
+    return 1 / (1-s) - 1 / s;
+}
+
+// u in (-inf, u0] or [u0, +inf), when u0 is zero or the sign of u0 is the same as the sign of infinity
+template<> double scale(const ScalingSemiInf& scaling, double u) {
+    if(scaling.u0 == 0)  // transform u to log(u) and then use the scaling on a doubly-infinite interval
+        return scale(ScalingInf(), log(u));
+    double l = log(u / scaling.u0);  // expected to be >=0, but this must be ensured by the calling code
+    return l / (1+l);
+}
+
+template<> double unscale(const ScalingSemiInf& scaling, double s, double* duds) {
+    double u = scaling.u0 == 0 ?  exp( 1 / (1-s) - 1 / s )  :  scaling.u0 * exp( s / (1-s) );
+    if(duds)
+        *duds = u * (1 / pow_2(1-s) + (scaling.u0 == 0 ? 1 / pow_2(s) : 0));
+    return u;
+}
+
+// u in [uleft, uright], trivial linear transformation
+template<> double scale(const ScalingLin& scaling, double u) {
+    return (u - scaling.uleft) / (scaling.uright - scaling.uleft);
+}
+
+template<> double unscale(const ScalingLin& scaling, double s, double* duds) {
+    if(duds)
+        *duds = scaling.uright - scaling.uleft;
+    return scaling.uleft * (1-s) + scaling.uright * s;
+}
+
+// u in [uleft, uright], cubic transformation 
+template<> double scale(const ScalingCub& scaling, double u) {
+    if(u == scaling.uleft)  return 0;
+    if(u == scaling.uright) return 1;
+    double  half = 0.5 * (scaling.uleft + scaling.uright);
+    if(u == half) return 0.5;
+    // rescale the input value into the range [0..0.5],
+    // considering only the lower half of the symmetric transformation
+    double w = u < half ?
+        (u - scaling.uleft)  / (scaling.uright - scaling.uleft) :  // choose the more accurate expression
+        (scaling.uright - u) / (scaling.uright - scaling.uleft);   // depending on the lower/upper half
+    // initial guess, accurate to <0.1%
+    double s = 1/M_SQRT3 * sqrt(w) + w * (0.1184 + 0.1291*w);
+    // two iterations of the Newton method to reach almost machine accuracy (faster than analytic solution)
+    for(int i=0; i<2; i++)
+        s -= (1./6) * (s*s * (3-2*s) - w) / (s * (1-s));
+    // if the rescaled input value was in the upper half of the unit interval, do the same for the output
+    return u < half ? s : 1-s;
+}
+
+template<> double unscale(const ScalingCub& scaling, double s, double* duds) {
+    if(duds)
+        *duds = (scaling.uright - scaling.uleft) * 6 * s * (1-s);
+    return scaling.uleft * pow_2(1-s) * (1 + 2*s) + scaling.uright * pow_2(s) * (3 - 2*s);
+}
+
+namespace{
+/// fast approximation for cubic root of a number 0<x<1, accurate to better than 1%
+inline double fastcbrt(double x)
+{
+    int ex;
+    double m = frexp(x, &ex);  // get mantissa and the exponent (assumed to be <= 0)
+    switch(ex % 3) {           // linearly rescale the mantissa which lies in the range [0.5:1]
+        case -2: m = 0.374 + 0.260 * m; break;  // multiplied by 0.5^(-2/3)
+        case -1: m = 0.471 + 0.327 * m; break;  // multiplied by 0.5^(-1/3)
+        default: m = 0.593 + 0.413 * m; break;  // no further multiplication
+    }
+    return ldexp(m, ex / 3);   // m * 2 ^ (ex [integer_divide_by] 3) 
+}
+}
+
+// u in [uleft, uright], quintic transformation
+template<> double scale(const ScalingQui& scaling, double u) {
+    // rescale the input value into the range [0..1]
+    double v = (u - scaling.uleft) / (scaling.uright - scaling.uleft);
+    // consider only the lower half of the symmetric transformation
+    double w = v<=0.5 ? v : 1-v;
+    // initial guess, accurate to ~1%
+    double s = fastcbrt( w * (sqrt(w * (1.54 * w + 0.067)) - w + 0.1) );
+    // two iterations of the Halley method to reach machine accuracy
+    for(int i=0; i<2; i++) {
+        double s2 = s*s, s3 = s2*s;
+        s *= (s3 * (12*s3 - 33*s2 + 30*s - 10) + (3*s-2) * w) /
+             (s3 * (18*s3 - 54*s2 + 55*s - 20) + (2*s-1) * w);
+    }
+    // if the rescaled input value was in the upper half of the unit interval, do the same for the output
+    return v>0.5 ? 1-s : s;
+}
+
+template<> double unscale(const ScalingQui& scaling, double s, double* duds) {
+    if(duds)
+        *duds = (scaling.uright - scaling.uleft) * 30 * pow_2(s * (1-s));
+    return scaling.uleft * pow_3(1-s) * (1  + (6*s + 3 ) * s)
+        + scaling.uright * pow_3( s ) * (10 + (6*s - 15) * s);
+}
+
 
 void FncProduct::evalDeriv(const double x, double *val, double *der, double *der2) const
 {
@@ -542,8 +684,9 @@ void hermiteDerivs(double x0, double x1, double x2, double f0, double f1, double
 }
 
 
-// ------ root finder routines ------//
-namespace {
+// ------ root finder and minimization routines ------//
+
+namespace {  // internal
 /// used in hybrid root-finder to predict the root location by Hermite interpolation:
 /// compute the value of f(x) given its values and derivatives at two points x1,x2
 /// (x1<=x<=x2 or x1>=x>=x2 is implied but not checked), if the function is expected to be
@@ -574,35 +717,40 @@ inline double hermiteInterpMonotone(double x, double x1, double x2,
 
 /// the interpolation is accepted if the result differs from one of the endpoints by more than DELTA
 static const double DELTA_HERMITE = 1e-12;
-    
+}  // internal ns
+
 /// a hybrid between Brent's method and interpolation of root using function derivatives;
 /// it is based on the implementation from GSL, original authors: Reid Priedhorsky, Brian Gough
-double findRootHybrid(const IFunction& fnc, 
-    const double x_lower, const double x_upper, const double reltoler)
+double findRoot(const IFunction& fnc, 
+    const double xlower, const double xupper, const double reltoler)
 {
-    double a = x_lower;
-    double b = x_upper;
+    if(reltoler<=0)
+        throw std::invalid_argument("findRoot: relative tolerance must be positive");
+    if(!isFinite(xlower+xupper))
+        throw std::invalid_argument("findRoot: endpoints must be finite, "
+            "otherwise need to apply an appropriate scaling transformation manually");
+    double a = xlower;
+    double b = xupper;
     double fa, fb;
     double fdera = NAN, fderb = NAN;
     bool have_derivs = fnc.numDerivs()>=1;
     fnc.evalDeriv(a, &fa, have_derivs? &fdera : NULL);
     fnc.evalDeriv(b, &fb, have_derivs? &fderb : NULL);
 
-    if ((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0) || !isFinite(fa+fb))
+    if((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0) || !isFinite(fa+fb))
         return NAN;   // endpoints do not bracket root
     /*  b  is the current estimate of the root,
-        c  is the counter-point (i.e. f(b)*f(c)<0, and |f(b)|<|f(c)| ),
+        c  is the counter-point (i.e. f(b) * f(c) < 0, and |f(b)| < |f(c)| ),
         a  is the previous estimate of the root:  either
            (1) a==c, or 
-           (2) f(a) has the same sign as f(b), |f(a)|>|f(b)|,
-               and 'a, b, c' form a monotonic sequence.
+           (2) f(a) has the same sign as f(b), |f(a)|>|f(b)|, and a, b, c form a monotonic sequence.
     */
     double c = a;
     double fc = fa;
     double fderc = fdera;
     double d = b - c;   // always holds the (signed) length of current interval
     double e = b - c;   // this is used to estimate roundoff (?)
-    if (fabs (fc) < fabs (fb)) {  // swap b and c so that |f(b)| < |f(c)|
+    if (fabs(fc) < fabs(fb)) {  // swap b and c so that |f(b)| < |f(c)|
         a = b;
         b = c;
         c = a;
@@ -615,18 +763,18 @@ double findRootHybrid(const IFunction& fnc,
     }
     int numIter = 0;
     bool converged = false;
-    double abstoler = fabs(x_lower-x_upper) * reltoler;
+    double abstoler = fabs(xlower-xupper) * reltoler;
     do {
-        double tol = 0.5 * DBL_EPSILON * fabs (b);
+        double tol = 0.5 * DBL_EPSILON * fabs(b);
         double cminusb = c-b, m = 0.5 * cminusb;
-        if (fb == 0 || fabs (m) <= tol) 
+        if(fb == 0 || fabs(m) <= tol) 
             return b;  // the ROOT
-        if (fabs (e) < tol || fabs (fa) <= fabs (fb)) { 
-            d = m;            /* use bisection */
+        if(fabs(e) < tol || fabs(fa) <= fabs(fb)) {  // use bisection
+            d = m;
             e = m;
         } else {
             double dd = NAN;
-            if(have_derivs && fderb*fderc>0)  // derivs exist and have the same sign
+            if(have_derivs && fderb * fderc > 0)  // derivs exist and have the same sign
             {   // attempt to obtain the approximation by Hermite interpolation
                 dd = hermiteInterpMonotone(0, fb, fc, 0, cminusb, 1/fderb, 1/fderc);
             }
@@ -643,11 +791,11 @@ double findRootHybrid(const IFunction& fnc,
                     p = s * (2 * m * q * (q - r) - (b - a) * (r - 1));
                     q = (q - 1) * (r - 1) * (s - 1);
                 }
-                if (p > 0)
+                if(p > 0)
                     q = -q;
                 else
                     p = -p;
-                if (2 * p < GSL_MIN (3 * m * q - fabs (tol * q), fabs (e * q))) { 
+                if(2 * p < std::min(3 * m * q - fabs(tol * q), fabs(e * q))) { 
                     e = d;
                     d = p / q;
                 } else {
@@ -661,7 +809,7 @@ double findRootHybrid(const IFunction& fnc,
         a = b;
         fa = fb;
         fdera = fderb;
-        if (fabs (d) > tol)
+        if (fabs(d) > tol)
             b += d;
         else
             b += (m > 0 ? +tol : -tol);
@@ -671,14 +819,14 @@ double findRootHybrid(const IFunction& fnc,
             return NAN;
 
         /* Update the best estimate of the root and bounds on each iteration */
-        if ((fb < 0 && fc < 0) || (fb > 0 && fc > 0)) {   // the root is between 'a' and the new 'b'
+        if((fb < 0 && fc < 0) || (fb > 0 && fc > 0)) {   // the root is between 'a' and the new 'b'
             c = a;       // so the new counterpoint is moved to the old 'a'
             fc = fa;
             fderc = fdera;
             d = b - c;
             e = b - c;
         }
-        if (fabs (fc) < fabs (fb)) {   // ensure that 'b' is close to zero than 'c'
+        if(fabs(fc) < fabs(fb)) {   // ensure that 'b' is close to zero than 'c'
             a = b;
             b = c;
             c = a;
@@ -708,167 +856,15 @@ double findRootHybrid(const IFunction& fnc,
             converged = true;  // not quite ready, but can't loop forever
             utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded: "
                 "x="+utils::toString(b,15)+" +- "+utils::toString(fabs(b-c))+
-                " on interval ["+utils::toString(x_lower,15)+":"+utils::toString(x_upper,15)+
+                " on interval ["+utils::toString(xlower,15)+":"+utils::toString(xupper,15)+
                 "], req.toler.="+utils::toString(abstoler));
         }
     } while(!converged);
     return b;  // best approximation
 }
 
-/** scaling transformation of input function for the case that the interval is (semi-)infinite:
-    it replaces the original argument  x  with  y in the range [0:1],  
-    and implements the transformation of 1st derivative.
-*/
-class ScaledFunction: public IFunction {
-public:
-    const IFunction& F;
-    double x_edge, x_scaling;
-    bool inf_lower, inf_upper;
-    ScaledFunction(const IFunction& _F, double xlower, double xupper) : F(_F) {
-        assert(xlower < xupper);
-        inf_lower = xlower==-INFINITY;
-        inf_upper = xupper== INFINITY;
-        if(inf_upper) {
-            if(inf_lower) {
-                x_edge = 0;
-                x_scaling = 1;
-            } else {
-                x_edge = xlower;
-                x_scaling = fmax(xlower, 1.);  // quite an arbitrary choice
-            }
-        } else {
-            if(inf_lower) {
-                x_edge = xupper;
-                x_scaling = fmax(-xupper, 1.);
-            } else {
-                x_edge = xlower;
-                x_scaling = xupper;
-            }
-        }
-    };
-
-    virtual unsigned int numDerivs() const { return F.numDerivs()>1 ? 1 : F.numDerivs(); }
-
-    // return the scaled variable y for the given original variable x
-    double y_from_x(const double x) const {
-        if(inf_upper) {
-            if(inf_lower) {                   // x in (-inf,inf)
-                return  fabs(x/x_scaling)<1 ? // two cases depending on whether |x| is small or large
-                    1/(1 + sqrt(1+pow_2(x*0.5/x_scaling)) - x*0.5/x_scaling) :  // x is close to zero
-                    0.5 + sqrt(0.25+pow_2(x_scaling/x))*sign(x) - x_scaling/x;  // x is large
-            } else {                          // x in [x_edge, inf)
-                assert(x>=x_edge);
-                return 1 - 1/(1 + (x-x_edge)/x_scaling);
-            }
-        } else {
-            if(inf_lower) {                   // x in (-inf, x_edge]
-                assert(x<=x_edge);
-                return 1/(1 + (x_edge-x)/x_scaling);
-            } else {                          // x in [x_edge, x_scaling]
-                assert(x>=x_edge && x<=x_scaling);
-                return (x-x_edge) / (x_scaling-x_edge);
-            }
-        }
-    }
-
-    // return the original variable x for the given scaled variable y in [0,1]
-    double x_from_y(const double y) const {
-        if(y!=y)
-            return NAN;
-        assert(y>=0 && y<=1);
-        return inf_upper ?
-            (  inf_lower ?
-                x_scaling*(1/(1-y)-1/y) :     // x in (-inf,inf)
-                x_edge + y/(1-y)*x_scaling    // x in [x_edge, inf)
-            ) : ( inf_lower ?
-                x_edge - x_scaling*(1-y)/y :  // x in (-inf, x_edge]
-                x_edge*(1-y) + x_scaling*y    // x in [x_edge, x_scaling]
-            );
-    }
-
-    // return the derivative of the original variable over the scaled one
-    double dxdy_from_y(const double y) const {
-        return inf_upper ?
-            (  inf_lower ?
-                x_scaling*(1/pow_2(1-y)+1/(y*y)) : // (-inf,inf)
-                x_scaling/pow_2(1-y)               // [x_edge, inf)
-            ) : ( inf_lower ?
-                x_scaling/pow_2(y) :               // (-inf, x_edge]
-                x_scaling-x_edge                   // [x_edge, x_scaling]
-            );
-    }
-
-    // compute the original function for the given value of scaled argument
-    virtual void evalDeriv(const double y, double* val=0, double* der=0, double* der2=0) const {
-        double x = x_from_y(y), f, dfdx;
-        F.evalDeriv(x, val ? &f : NULL, der ? &dfdx : NULL);
-        if(val)
-            *val = f;
-        if(der)
-            *der = dfdx * dxdy_from_y(y);
-        if(der2)
-            *der2= NAN;  // not implemented
-    }
-};
-
-class ScaledIntegrand: public IFunctionNoDeriv {
-    const ScaledFunction S;
-public:
-    ScaledIntegrand(const IFunction& F, double xlower, double xupper) : S(F, xlower, xupper) {}
-    virtual double value(const double y) const {
-        return S.F.value(S.x_from_y(y)) * S.dxdy_from_y(y);
-    }
-};
-
-}  // namespace
-
-// root-finder with optional scaling
-double findRoot(const IFunction& fnc, double xlower, double xupper, double reltoler)
-{
-    if(reltoler<=0)
-        throw std::invalid_argument("findRoot: relative tolerance must be positive");
-    if(xlower>=xupper)
-        std::swap(xlower, xupper);
-    if(xlower==-INFINITY || xupper==INFINITY) {   // apply internal scaling procedure
-        ScaledFunction F(fnc, xlower, xupper);
-        double scroot = findRootHybrid(F, 0., 1., reltoler);
-        return F.x_from_y(scroot);
-    } else {  // no scaling - use the original function
-        return findRootHybrid(fnc, xlower, xupper, reltoler);
-    }
-}
-
-namespace {
-// 1d minimizer with known initial point
-double findMinKnown(const IFunction& fnc, 
-    double xlower, double xupper, double xinit,
-    double flower, double fupper, double finit, double reltoler)
-{
-    gsl_function F;
-    F.function = &functionWrapper;
-    F.params = const_cast<IFunction*>(&fnc);
-    gsl_min_fminimizer *minser = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
-    double xroot = NAN;
-    double abstoler = reltoler*fabs(xupper-xlower);
-    gsl_min_fminimizer_set_with_values(minser, &F, xinit, finit, xlower, flower, xupper, fupper);
-    int iter=0;
-    exceptionText.clear();
-    do {
-        iter++;
-        gsl_min_fminimizer_iterate (minser);
-        if(!exceptionText.empty()) {
-            xroot = NAN;
-            break;
-        }
-        xroot  = gsl_min_fminimizer_x_minimum (minser);
-        xlower = gsl_min_fminimizer_x_lower (minser);
-        xupper = gsl_min_fminimizer_x_upper (minser);
-    }
-    while (fabs(xlower-xupper) > abstoler && iter < MAXITER);
-    gsl_min_fminimizer_free(minser);
-    return xroot;
-}
-
+namespace{  // internal
+/// choose a point inside an interval based on the golden section rule
 inline double minGuess(double x1, double x2, double y1, double y2)
 {
     const double golden = 0.618034;
@@ -877,34 +873,32 @@ inline double minGuess(double x1, double x2, double y1, double y2)
     else
         return x2 * golden + x1 * (1-golden);
 }
-}  // namespace
+}  // internal ns
 
-// 1d minimizer without prior knowledge of minimum location
+/// invoke the minimization routine with a valid initial guess (if it was not provided,
+/// try to come up with a plausible one)
 double findMin(const IFunction& fnc, double xlower, double xupper, double xinit, double reltoler)
 {
     if(reltoler<=0)
         throw std::invalid_argument("findMin: relative tolerance must be positive");
-    if(xlower>=xupper)
+    if(xlower>xupper)
         std::swap(xlower, xupper);
-    if(xinit==xinit && (xinit<xlower || xinit>xupper))
-        throw std::invalid_argument("findMin: initial guess is outside the search interval");
-    // transform the original range into [0:1], even if it was (semi-)infinite
-    ScaledFunction F(fnc, xlower, xupper);
-    xlower = F.y_from_x(xlower);
-    xupper = F.y_from_x(xupper);
-    double ylower = F(xlower);
-    double yupper = F(xupper);
+    double ylower = fnc(xlower);
+    double yupper = fnc(xupper);
     if(xinit == xinit) {
-        xinit  = F.y_from_x(xinit);
-    } else {    // initial guess not provided - try to find it somewhere inside the interval
+        if(! (xinit >= xlower && xinit <= xupper) )
+            throw std::invalid_argument("findMin: initial guess is outside the search interval");
+    } else {    // initial guess not provided - choose a plausible point inside the interval
         xinit = minGuess(xlower, xupper, ylower, yupper);
     }
-    double yinit  = F(xinit);
+    double yinit  = fnc(xinit);
     if(!isFinite(ylower+yupper+yinit))
         return NAN;
     int iter = 0;
-    while( (yinit>=ylower || yinit>=yupper) && iter<MAXITER && fabs(xlower-xupper)>reltoler) {
-        // if the initial guess does not enclose minimum, provide a new guess inside a smaller range
+    double abstoler = reltoler * fabs(xupper-xlower);
+
+    // if the initial guess does not enclose minimum, provide a new guess inside a smaller range
+    while( (yinit>=ylower || yinit>=yupper) && iter < MAXITER && fabs(xlower-xupper) > abstoler) {
         if(ylower<yupper) {
             xupper = xinit;
             yupper = yinit;
@@ -913,14 +907,37 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
             ylower = yinit;
         }
         xinit = minGuess(xlower, xupper, ylower, yupper);
-        yinit = F(xinit);
+        yinit = fnc(xinit);
         if(!isFinite(yinit))
             return NAN;
         iter++;
     }
-    if(yinit>=ylower || yinit>=yupper)  // couldn't locate a minimum inside the interval,
-        return F.x_from_y(ylower<yupper ? xlower : xupper);  // so return one of endpoints
-    return F.x_from_y(findMinKnown(F, xlower, xupper, xinit, ylower, yupper, yinit, reltoler));
+    if(yinit>=ylower || yinit>=yupper)
+        // couldn't locate a minimum strictly inside the interval, so return one of the endpoints
+        return ylower<yupper ? xlower : xupper;
+
+    // use the GSL minimizer with a known initial point
+    gsl_function F;
+    F.function = &functionWrapper;
+    F.params = const_cast<IFunction*>(&fnc);
+    gsl_min_fminimizer *minser = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
+    double xroot = NAN;
+    gsl_min_fminimizer_set_with_values(minser, &F, xinit, yinit, xlower, ylower, xupper, yupper);
+    iter=0;
+    exceptionText.clear();
+    while(iter < MAXITER && fabs(xlower-xupper) > abstoler) {
+        iter++;
+        gsl_min_fminimizer_iterate(minser);
+        if(!exceptionText.empty()) {
+            xroot = NAN;
+            break;
+        }
+        xroot  = gsl_min_fminimizer_x_minimum(minser);
+        xlower = gsl_min_fminimizer_x_lower(minser);
+        xupper = gsl_min_fminimizer_x_upper(minser);
+    }
+    gsl_min_fminimizer_free(minser);
+    return xroot;
 }
 
 
@@ -950,16 +967,10 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
         return 0;
     gsl_function F;
     F.function = functionWrapper;
-    ScaledIntegrand S(fnc, x1, x2);
-    if(!isFinite(x1) || !isFinite(x2)) {
-        F.params = &S;
-        x1 = 0.;
-        x2 = 1.;
-    } else
-        F.params = const_cast<IFunction*>(&fnc);
+    F.params = const_cast<IFunction*>(&fnc);
     double result, dummy;
     size_t neval;
-    gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAXINTEGRPOINTS);
+    gsl_integration_cquad_workspace* ws=gsl_integration_cquad_workspace_alloc(MAX_INTEGR_POINTS);
     CALL_FUNCTION_OR_THROW(
     gsl_integration_cquad(&F, x1, x2, 0, reltoler, ws, &result, error!=NULL ? error : &dummy, &neval))
     gsl_integration_cquad_workspace_free(ws);
@@ -991,35 +1002,6 @@ void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, doub
     for(int i=0; i<N; i++)
         gsl_integration_glfixed_point(x1, x2, i, &(coords[i]), &(weights[i]), gltable);
     gsl_integration_glfixed_table_free(gltable);
-}
-
-// integration transformation classes
-
-double ScaledIntegrandEndpointSing::x_from_y(const double y) const 
-{
-    if(!(y>=0 && y<=1))
-        throw std::invalid_argument("value "+utils::toString(y)+" out of range [0,1]");
-    return x_low + (x_upp-x_low) * y*y*(3-2*y);
-}
-
-// invert the transformation relation between x and y by solving a cubic equation
-double ScaledIntegrandEndpointSing::y_from_x(const double x) const 
-{
-    if(!(x>=x_low && x<=x_upp))
-        throw std::invalid_argument("value "+utils::toString(x)+" out of range ["+
-            utils::toString(x_low)+":"+utils::toString(x_upp)+"]");
-    if(x==x_low) return 0;
-    if(x==x_upp) return 1;
-    if(x==0.5*(x_low+x_upp)) return 0.5;
-    double phi = (1./3) * acos(1 - 2 * (x-x_low) / (x_upp-x_low));
-    return 0.5 - 0.5 * cos(phi) + 0.5*M_SQRT3 * sin(phi);
-}
-
-double ScaledIntegrandEndpointSing::value(const double y) const 
-{
-    const double x = x_from_y(y);
-    const double dx = (x_upp-x_low) * 6*y*(1-y);
-    return dx==0 ? 0 : F(x)*dx;
 }
 
 

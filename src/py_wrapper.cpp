@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2017
+    \date   2014-2018
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -51,6 +51,7 @@
 #include "potential_multipole.h"
 #include "potential_utils.h"
 #include "orbit.h"
+#include "orbit_lyapunov.h"
 #include "units.h"
 #include "utils.h"
 #include "utils_config.h"
@@ -65,6 +66,14 @@
 #define NPY_ARRAY_OUT_ARRAY  NPY_OUT_ARRAY
 #define NPY_ARRAY_FORCECAST  NPY_FORCECAST
 #define NPY_ARRAY_ENSURECOPY NPY_ENSURECOPY
+#endif
+
+// compatibility with Python 3
+#if PY_MAJOR_VERSION >= 3
+#define PyString_Check PyUnicode_Check
+#define PyString_AsString PyUnicode_AsUTF8
+#define PyInt_Check PyLong_Check
+#define PyInt_AsLong PyLong_AsLong
 #endif
 
 /// classes and routines for the Python interface
@@ -117,6 +126,8 @@ std::string toString(PyObject* obj)
         return "";
     if(PyString_Check(obj))
         return std::string(PyString_AsString(obj));
+    if(PyNumber_Check(obj))
+        return utils::toString(PyFloat_AsDouble(obj), 18);  // keep full precision in the string
     PyObject* s = PyObject_Str(obj);
     std::string str = PyString_AsString(s);
     Py_DECREF(s);
@@ -956,7 +967,7 @@ void Density_dealloc(DensityObject* self)
     else
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty density");
     self->dens.reset();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 /// common fragment of docstring for Density and Potential classes
@@ -964,20 +975,20 @@ void Density_dealloc(DensityObject* self)
     "  mass=...   total mass of the model, if applicable.\n" \
     "  scaleRadius=...   scale radius of the model (if applicable).\n" \
     "  scaleHeight=...   scale height of the model (currently applicable to " \
-    "Dehnen, MiyamotoNagai and DiskDensity).\n" \
+    "Dehnen, MiyamotoNagai and Disk).\n" \
     "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
     "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
-    "and to SpheroidDensity and SersicDensity models).\n" \
+    "and to Spheroid and Sersic density models).\n" \
     "  q=...   or  axisRatioZ=...   short to long axis (z/x).\n" \
-    "  gamma=...  central cusp slope (applicable for Dehnen and SpheroidDensity).\n" \
-    "  beta=...   outer density slope (SpheroidDensity).\n" \
-    "  alpha=...  strength of transition from the inner to the outer slopes (SpheroidDensity).\n" \
-    "  sersicIndex=...   profile shape parameter 'n' (SersicDensity).\n" \
-    "  innerCutoffRadius=...   radius of inner hole (DiskDensity).\n" \
-    "  outerCutoffRadius=...   radius of outer exponential cutoff (SpheroidDensity).\n" \
-    "  cutoffStrength=...   strength of outer exponential cutoff  (SpheroidDensity).\n" \
-    "  surfaceDensity=...   central surface density (DiskDensity or SersicDensity).\n" \
-    "  densityNorm=...   normalization of density profile for SpheroidDensity.\n"
+    "  gamma=...  central cusp slope (applicable for Dehnen and Spheroid).\n" \
+    "  beta=...   outer density slope (Spheroid).\n" \
+    "  alpha=...  strength of transition from the inner to the outer slopes (Spheroid).\n" \
+    "  sersicIndex=...   profile shape parameter 'n' (Sersic or Disk).\n" \
+    "  innerCutoffRadius=...   radius of inner hole (Disk).\n" \
+    "  outerCutoffRadius=...   radius of outer exponential cutoff (Spheroid).\n" \
+    "  cutoffStrength=...   strength of outer exponential cutoff  (Spheroid).\n" \
+    "  surfaceDensity=...   central surface density (Disk or Sersic).\n" \
+    "  densityNorm=...   normalization of density profile (Spheroid).\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -985,8 +996,7 @@ static const char* docstringDensity =
     "that do not necessarily have a corresponding potential defined.\n"
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
-    "    Denhen, Plummer, OblatePerfectEllipsoid, Ferrers, MiyamotoNagai, "
-    "NFW, DiskDensity, SpheroidDensity, SersicDensity.\n"
+    "    Denhen, Plummer, OblatePerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
     "Alternatively, one may construct a spherically-symmetric density model from a cumulative "
@@ -1068,7 +1078,7 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
             "in type='...' or density='...', or the file name to load in file='...' arguments");
     return potential::createDensity(params, *conv);
 }
-    
+
 /// constructor of Density class
 int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -1294,8 +1304,8 @@ static PyMethodDef Density_methods[] = {
 };
 
 static PyTypeObject DensityType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.Density",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Density",
     sizeof(DensityObject), 0, (destructor)Density_dealloc,
     0, 0, 0, 0, 0, 0, &Density_sequence_methods, 0, 0, 0, Density_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDensity,
@@ -1406,7 +1416,7 @@ void Potential_dealloc(PotentialObject* self)
     else
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty potential");
     self->pot.reset();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 /// pointer to the Potential type object (will be initialized below to &PotentialType,
@@ -1414,7 +1424,7 @@ void Potential_dealloc(PotentialObject* self)
 static PyTypeObject* PotentialTypePtr;
 
 /// description of Potential class
-static const char* docstringPotential = 
+static const char* docstringPotential =
     "Potential is a class that represents a wide range of gravitational potentials.\n"
     "There are several ways of initializing the potential instance:\n"
     "  - from a list of key=value arguments that specify an elementary potential class;\n"
@@ -1428,7 +1438,7 @@ static const char* docstringPotential =
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
-    "OblatePerfectEllipsoid, DiskDensity, SpheroidDensity;\n"
+    "OblatePerfectEllipsoid, Disk, Spheroid, Sersic;\n"
     "    or one of the expansion types:  Multipole or CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
@@ -1477,8 +1487,8 @@ static const char* docstringPotential =
     ">>> pot_from_coef = Potential(file='stored_coefs')\n"
     ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses))\n"
     ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2)\n"
-    ">>> disk_par = dict(type='DiskDensity', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
-    ">>> halo_par = dict(type='SpheroidDensity', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
+    ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
+    ">>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
     "outerCutoffRadius=150, axisRatioZ=0.8)\n"
     ">>> pot_exp = Potential(type='Multipole', density=Density(**halo_par), "
     "gridSizeR=20, Rmin=1, Rmax=500, lmax=4)\n"
@@ -1928,8 +1938,8 @@ static PyMethodDef Potential_methods[] = {
 };
 
 static PyTypeObject PotentialType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.Potential",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
     0, 0, 0, 0, 0, 0, &Potential_sequence_methods, 0, 0, 0, Potential_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringPotential,
@@ -2020,13 +2030,13 @@ void ActionFinder_dealloc(ActionFinderObject* self)
     utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an action finder at "+
         utils::toString(self->af.get()));
     self->af.reset();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 static const char* docstringActionFinder =
     "ActionFinder object is created for a given potential (provided as the first argument "
     "to the constructor); if the potential is axisymmetric, there is a further option to use "
-    "interpolation tables for actions (optional second argument 'interp=...', True by default), "
+    "interpolation tables for actions (optional second argument 'interp=...', False by default), "
     "which speeds up computation of actions (but not actions and angles) at the expense of "
     "a somewhat lower accuracy.\n"
     "The () operator computes actions for a given position/velocity point, or array of points.\n"
@@ -2041,7 +2051,7 @@ int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"potential", "interp", NULL};
     PyObject* pot_obj=NULL;
-    int interpolate=1;
+    int interpolate=0;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|i", const_cast<char**>(keywords),
         &pot_obj, &interpolate))
     {
@@ -2120,8 +2130,8 @@ PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* namedArgs
 }
 
 static PyTypeObject ActionFinderType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.ActionFinder",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.ActionFinder",
     sizeof(ActionFinderObject), 0, (destructor)ActionFinder_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringActionFinder, 
@@ -2244,7 +2254,7 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
     utils::msg(utils::VL_VERBOSE, "Agama", "Deleted a distribution function at "+
         utils::toString(self->df.get()));
     self->df.reset();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 // pointer to the DistributionFunctionType object (will be initialized below)
@@ -2483,8 +2493,8 @@ static PyMethodDef DistributionFunction_methods[] = {
 };
 
 static PyTypeObject DistributionFunctionType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.DistributionFunction",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.DistributionFunction",
     sizeof(DistributionFunctionObject), 0, (destructor)DistributionFunction_dealloc,
     0, 0, 0, 0, 0, 0, &DistributionFunction_sequence_methods, 0, 0, DistributionFunction_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDistributionFunction, 
@@ -2591,7 +2601,7 @@ void GalaxyModel_dealloc(GalaxyModelObject* self)
     Py_XDECREF(self->pot_obj);
     Py_XDECREF(self->df_obj);
     Py_XDECREF(self->af_obj);
-    self->ob_type->tp_free((PyObject*)self);
+    Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 bool GalaxyModel_isCorrect(GalaxyModelObject* self)
@@ -3171,8 +3181,8 @@ static PyMethodDef GalaxyModel_methods[] = {
 };
 
 static PyTypeObject GalaxyModelType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.GalaxyModel",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.GalaxyModel",
     sizeof(GalaxyModelObject), 0, (destructor)GalaxyModel_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringGalaxyModel,
@@ -3205,7 +3215,7 @@ void Component_dealloc(ComponentObject* self)
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty component");
     self->comp.reset();
     // self->name is either NULL or points to a constant string that does not require deallocation
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 static const char* docstringComponent = 
@@ -3392,8 +3402,8 @@ static PyMethodDef Component_methods[] = {
 };
 
 static PyTypeObject ComponentType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.Component",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Component",
     sizeof(ComponentObject), 0, (destructor)Component_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Component_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringComponent,
@@ -3432,7 +3442,7 @@ void SelfConsistentModel_dealloc(SelfConsistentModelObject* self)
     Py_XDECREF(self->components);
     Py_XDECREF(self->pot);
     Py_XDECREF(self->af);
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 static const char* docstringSelfConsistentModel =
@@ -3463,7 +3473,7 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     self->components  = PyList_New(0);
     self->pot         = NULL;
     self->af          = NULL;
-    self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), true);
+    self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), false);
     self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
     self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -2);
     self->sizeRadialSph  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
@@ -3574,8 +3584,8 @@ static PyMethodDef SelfConsistentModel_methods[] = {
 };
 
 static PyTypeObject SelfConsistentModelType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.SelfConsistentModel",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.SelfConsistentModel",
     sizeof(SelfConsistentModelObject), 0, (destructor)SelfConsistentModel_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringSelfConsistentModel,
@@ -3607,7 +3617,7 @@ void Target_dealloc(TargetObject* self)
     else
         utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty target");
     self->target.reset();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 static const char* docstringTarget =
@@ -3978,8 +3988,8 @@ static PyMethodDef Target_methods[] = {
 };
 
 static PyTypeObject TargetType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.Target",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Target",
     sizeof(TargetObject), 0, (destructor)Target_dealloc,
     0, 0, 0, 0, 0, 0, &Target_sequence_methods, 0, 0,
     (PyCFunctionWithKeywords)Target_value, (reprfunc)Target_name, 0, 0, 0,
@@ -4237,7 +4247,7 @@ static const char* docstringOrbit =
     "  ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in "
     "Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.\n"
     "  potential:  a Potential object or a compatible interface.\n"
-    "  Omega (optional):  pattern speed of the rotating frame (default 0).\n"
+    "  Omega (optional, default 0):  pattern speed of the rotating frame.\n"
     "  time:  integration time - for a single orbit, just one number; "
     "for a bunch of orbits, an array of length N.\n"
     "  targets (optional):  zero or more instances of Target class (a tuple/list if more than one); "
@@ -4246,10 +4256,13 @@ static const char* docstringOrbit =
     "(should be either a single integer or an array of integers with length N). "
     "The trajectory of each orbit is stored at regular intervals of time (`dt=time/(trajsize-1)`, "
     "so that the number of points is `trajsize`; both time and trajsize may differ between orbits.\n"
+    "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
+    "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
-    "plus an extra one for trajectories). \n"
+    "plus an extra one for trajectories if trajsize>0, plus another one for Lyapunov exponents "
+    "if lyapunov=True). \n"
     "  Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, "
     "and C is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
@@ -4259,6 +4272,7 @@ static const char* docstringOrbit =
     "each row stands for one orbit, the first element in each row is a 1d array of length "
     "`trajsize` containing the timestamps, and the second is a 2d array of size `trajsize`x6 "
     "containing the position+velocity at corresponding timestamps.\n"
+    "  Lyapunov exponent is a single number for each orbit, or a 1d array for several orbits.\n"
     "Examples:\n"
     "# compute a single orbit and output the trajectory in a 2d array of size 1001x6:\n"
     ">>> times,points = orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
@@ -4278,11 +4292,12 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // parse input arguments
     orbit::OrbitIntParams params;
     double Omega = 0.;
+    int haveLyap = 0;
     PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL, *targets_obj = NULL, *trajsize_obj = NULL;
     static const char* keywords[] =
-        {"ic", "time", "potential", "targets", "trajsize", "Omega", "accuracy", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOdd", const_cast<char**>(keywords),
-        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj, &Omega, &params.accuracy))
+        {"ic", "time", "potential", "targets", "trajsize", "lyapunov", "Omega", "accuracy", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOidd", const_cast<char**>(keywords),
+        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj, &haveLyap, &Omega, &params.accuracy))
         return NULL;
 
     // ensure that a potential object was provided
@@ -4380,14 +4395,17 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         }
     }
 
+    // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
+    haveLyap = haveLyap ? 1 : 0;
+
     // the output is a tuple with the following items:
     // each target corresponds to a NumPy array where the collected information for all orbits is stored,
     // plus optionally a list containing the trajectories of all orbits if they are requested
-    if(numTargets + haveTraj == 0) {
+    if(numTargets + haveTraj + haveLyap == 0) {
         PyErr_SetString(PyExc_ValueError, "No output is requested");
         return NULL;
     }
-    PyObject* result = PyTuple_New(numTargets + haveTraj);
+    PyObject* result = PyTuple_New(numTargets + haveTraj + haveLyap);
     if(!result)
         return NULL;
 
@@ -4395,12 +4413,22 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // and optionally for the output trajectory(ies) - the last item in the output tuple;
     // the latter one is a Nx2 array of Python objects
     volatile bool fail = false;  // error flag (e.g., insufficient memory)
-    for(size_t t=0; !fail && t < numTargets + haveTraj; t++) {
-        npy_intp numCols = t==numTargets ? 2 : targets[t]->numCoefs();
-        int datatype     = t==numTargets ? NPY_OBJECT : STORAGE_NUM_T;
+    for(size_t t=0; !fail && t < numTargets + haveTraj + haveLyap; t++) {
+        npy_intp numCols;
+        int datatype;
+        if(t < numTargets) {                      // ordinary target objects
+            numCols  = targets[t]->numCoefs();
+            datatype = STORAGE_NUM_T;
+        } else if(haveTraj && t == numTargets) {  // trajectory storage
+            numCols  = 2;
+            datatype = NPY_OBJECT;
+        } else {                                  // Lyapunov exponent
+            numCols  = 1;
+            datatype = NPY_DOUBLE;
+        }
         npy_intp size[2] = {numOrbits, numCols};
         // if there is only a single orbit, the output array is 1-dimensional,
-        // otherwise 2-dimensional (numOrbits rows, numConstraints columns)
+        // otherwise 2-dimensional (numOrbits rows, numCols columns)
         PyObject* storage_arr = singleOrbit ?
             PyArray_SimpleNew(1, &size[1], datatype) :
             PyArray_SimpleNew(2, size, datatype);
@@ -4416,7 +4444,10 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     volatile npy_intp numComplete = 0;
     volatile time_t tprint = time(NULL), tbegin = tprint;
     if(!fail) {
-        const orbit::OrbitIntegratorRot orbitIntegrator(*pot, Omega / conv->timeUnit);
+        const math::IOdeSystem& orbitIntegrator =
+            haveLyap && Omega!=0 ?
+            (const math::IOdeSystem&) orbit::OrbitIntegratorVarEq(*pot, Omega / conv->timeUnit) :
+            (const math::IOdeSystem&) orbit::OrbitIntegratorRot  (*pot, Omega / conv->timeUnit);
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
@@ -4429,12 +4460,12 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // the last point is stored (otherwise it may be left out due to roundoff)
                 double trajStep = haveTraj && trajSizes[orb]>0 ?
                     integrTime / (trajSizes[orb]-1+1e-10) : INFINITY;
-                std::vector<coord::PosVelCar> traj;
+                std::vector<coord::PosVelCar> traj;  // stores the trajectory
 
                 // construct runtime functions for each target that store the collected data
                 // in the respective row of each target's matrix,
-                // plus optionally the trajectory recording function
-                orbit::RuntimeFncArray fncs(numTargets + haveTraj);
+                // plus optionally the trajectory and Lyapunov exponent recording functions
+                orbit::RuntimeFncArray fncs(numTargets + haveTraj + haveLyap);
                 for(size_t t=0; t<numTargets; t++) {
                     PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
                     galaxymodel::StorageNumT* output = singleOrbit ?
@@ -4443,12 +4474,25 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     fncs[t].reset(new galaxymodel::RuntimeFncTarget(*targets[t], output));
                 }
                 if(haveTraj)
-                    fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(traj, trajStep));
+                    fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
+                if(haveLyap) {
+                    double samplingInterval = 0.1 * T_circ(*pot, totalEnergy(*pot, initCond.at(orb)));
+                    PyObject* elem = PyTuple_GET_ITEM(result, numTargets + haveTraj);  // output array
+                    double& output = singleOrbit ?
+                        pyArrayElem<double>(elem, 0) :
+                        pyArrayElem<double>(elem, orb, 0);
+                    if(Omega == 0)  // UseInternalVarEqSolver
+                        fncs[numTargets + haveTraj].reset(
+                            new orbit::RuntimeLyapunov<true> (*pot, samplingInterval, output));
+                    else
+                        fncs[numTargets + haveTraj].reset(
+                            new orbit::RuntimeLyapunov<false>(*pot, samplingInterval, output));
+                }
 
                 // integrate the orbit
-                orbit::integrate(initCond.at(orb), integrTime, orbitIntegrator, fncs);
+                orbit::integrate(initCond.at(orb), integrTime, orbitIntegrator, fncs, params);
 
-                // if the trajectory was recorded, store it in the last item of the output tuple
+                // if the trajectory was recorded, store it in the corresponding item of the output tuple
                 if(haveTraj) {
                     const npy_intp size = traj.size();
                     npy_intp dims[] = {size, 6};
@@ -4476,7 +4520,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         static_cast<galaxymodel::StorageNumT>(trajStep * index / conv->timeUnit);
                     }
 
-                    // store these arrays in the last element of the output tuple
+                    // store these arrays in the corresponding element of the output tuple
                     PyObject* elem = PyTuple_GET_ITEM(result, numTargets);
                     if(singleOrbit) {
                         pyArrayElem<PyObject*>(elem, 0) = time_arr;
@@ -4981,7 +5025,7 @@ void CubicSpline_dealloc(PyObject* self)
     // dirty hack: manually call the destructor for an object that was
     // constructed not in a normal way, but rather with a placement new operator
     ((CubicSplineObject*)self)->spl.~CubicSpline();
-    self->ob_type->tp_free(self);
+    Py_TYPE(self)->tp_free(self);
 }
 
 int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
@@ -5066,7 +5110,7 @@ PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
     double xmin = spl.xmin(), xmax = spl.xmax();
 
     // if the input is a single value, just do it
-    if(PyFloat_Check(ptx)) { // one value
+    if(PyFloat_Check(ptx) || PyInt_Check(ptx) || PyLong_Check(ptx)) {
         double x = PyFloat_AsDouble(ptx);
         if(PyErr_Occurred())
             return NULL;
@@ -5124,8 +5168,8 @@ static const char* docstringCubicSpline =
     "the spline is linearly extrapolated outside its definition region.";
 
 static PyTypeObject CubicSplineType = {
-    PyObject_HEAD_INIT(NULL)
-    0, "agama.CubicSpline",
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.CubicSpline",
     sizeof(CubicSplineObject), 0, CubicSpline_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, CubicSpline_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringCubicSpline,
@@ -5652,63 +5696,91 @@ void* forget_about_type(void* x) { return x; }
 } // end internal namespace
 using namespace pywrapper;
 
-// the module initialization function must be outside the internal namespace
+// the module initialization function must be outside the internal namespace,
+// and is slightly different in Python 2 and Python 3
+
+#if PY_MAJOR_VERSION < 3
+// Python 2.6-2.7
+typedef struct PyModuleDef {
+    int m_base;
+    const char* m_name;
+    const char* m_doc;
+    Py_ssize_t m_size;
+    PyMethodDef *m_methods;
+} PyModuleDef;
+#define PyModuleDef_HEAD_INIT 0
+#define PyModule_Create(def) Py_InitModule3((def)->m_name, (def)->m_methods, (def)->m_doc)
+static PyObject* PyInit_agama(void);
+PyMODINIT_FUNC initagama(void) { PyInit_agama(); }
+static PyObject*
+#else
+// Python 3
 PyMODINIT_FUNC
-initagama(void)
+#endif
+PyInit_agama(void)
 {
-    PyObject* mod = Py_InitModule3("agama", module_methods, docstringModule);
-    if(!mod) return;
+    static PyModuleDef moduledef = {
+        PyModuleDef_HEAD_INIT, /* m_base */
+        "agama",               /* m_name */
+        docstringModule,       /* m_doc  */
+        -1,                    /* m_size */
+        module_methods,        /* m_methods */
+    };
+
+    PyObject* mod = PyModule_Create(&moduledef);
+    if(!mod) return NULL;
     PyModule_AddStringConstant(mod, "__version__", AGAMA_VERSION);
     conv.reset(new units::ExternalUnits());
 
     DensityType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&DensityType) < 0) return;
+    if(PyType_Ready(&DensityType) < 0) return NULL;
     Py_INCREFx(&DensityType);
     PyModule_AddObject(mod, "Density", (PyObject*)&DensityType);
 
     PotentialType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&PotentialType) < 0) return;
+    if(PyType_Ready(&PotentialType) < 0) return NULL;
     Py_INCREFx(&PotentialType);
     PyModule_AddObject(mod, "Potential", (PyObject*)&PotentialType);
     PotentialTypePtr = &PotentialType;
 
     ActionFinderType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&ActionFinderType) < 0) return;
+    if(PyType_Ready(&ActionFinderType) < 0) return NULL;
     Py_INCREFx(&ActionFinderType);
     PyModule_AddObject(mod, "ActionFinder", (PyObject*)&ActionFinderType);
 
     DistributionFunctionType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&DistributionFunctionType) < 0) return;
+    if(PyType_Ready(&DistributionFunctionType) < 0) return NULL;
     Py_INCREFx(&DistributionFunctionType);
     PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
     DistributionFunctionTypePtr = &DistributionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&GalaxyModelType) < 0) return;
+    if(PyType_Ready(&GalaxyModelType) < 0) return NULL;
     Py_INCREFx(&GalaxyModelType);
     PyModule_AddObject(mod, "GalaxyModel", (PyObject*)&GalaxyModelType);
 
     ComponentType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&ComponentType) < 0) return;
+    if(PyType_Ready(&ComponentType) < 0) return NULL;
     Py_INCREFx(&ComponentType);
     PyModule_AddObject(mod, "Component", (PyObject*)&ComponentType);
 
     SelfConsistentModelType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&SelfConsistentModelType) < 0) return;
+    if(PyType_Ready(&SelfConsistentModelType) < 0) return NULL;
     Py_INCREFx(&SelfConsistentModelType);
     PyModule_AddObject(mod, "SelfConsistentModel", (PyObject*)&SelfConsistentModelType);
-    
+
     TargetType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&TargetType) < 0) return;
+    if(PyType_Ready(&TargetType) < 0) return NULL;
     Py_INCREFx(&TargetType);
     PyModule_AddObject(mod, "Target", (PyObject*)&TargetType);
-    
+
     CubicSplineType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&CubicSplineType) < 0) return;
+    if(PyType_Ready(&CubicSplineType) < 0) return NULL;
     Py_INCREFx(&CubicSplineType);
     PyModule_AddObject(mod, "CubicSpline", (PyObject*)&CubicSplineType);
 
-    import_array();  // needed for NumPy to work properly
+    import_array1(mod);  // needed for NumPy to work properly
+    return mod;
 }
 // ifdef HAVE_PYTHON
 #endif

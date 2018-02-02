@@ -25,7 +25,7 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
         throw std::invalid_argument("DoublePowerLaw DF: transition steepness parameter must be positive");
     if(par.cutoffStrength<=0)
         throw std::invalid_argument("DoublePowerLaw DF: cutoff strength parameter must be positive");
-    if( par.coefJrIn <=0 || par.coefJzIn <=0 || par.coefJrIn + par.coefJzIn>=3 || 
+    if( par.coefJrIn <=0 || par.coefJzIn <=0 || par.coefJrIn +par.coefJzIn >=3 || 
         par.coefJrOut<=0 || par.coefJzOut<=0 || par.coefJrOut+par.coefJzOut>=3 )
         throw std::invalid_argument(
             "DoublePowerLaw DF: invalid weights in the linear combination of actions");

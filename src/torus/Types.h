@@ -18,7 +18,7 @@ Vectors used within Torus code (e.g. Actions)
 
 #include "WD_Vector.h"
 
-namespace Torus{
+namespace torus{
 using namespace WD;
 using std::ostream;
 using std::istream;

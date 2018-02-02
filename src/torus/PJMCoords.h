@@ -160,7 +160,7 @@ Eventually I decided that I should probably use some proper c++ for this
 #include "WD_Vector.h"
 #include "WD_Matrix.h"
 
-namespace Torus {
+namespace torus {
 using namespace WD;
 
 #ifndef _Galactic_Coordinates_def_

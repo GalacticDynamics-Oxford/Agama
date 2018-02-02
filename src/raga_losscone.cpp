@@ -26,13 +26,11 @@ public:
     virtual double value(const double time) const
     {
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
-        double posvel[6];
         bh.keplerOrbit(time, bhX, bhY, bhVX, bhVY);
-        sol.getSol(time, posvel);
         return
-            (posvel[0]-bhX[bhindex]) * (posvel[3]-bhVX[bhindex]) +
-            (posvel[1]-bhY[bhindex]) * (posvel[4]-bhVY[bhindex]) +
-             posvel[2] * posvel[5];
+            (sol.getSol(time, 0)-bhX[bhindex]) * (sol.getSol(time, 3)-bhVX[bhindex]) +
+            (sol.getSol(time, 1)-bhY[bhindex]) * (sol.getSol(time, 4)-bhVY[bhindex]) +
+             sol.getSol(time, 2) * sol.getSol(time, 5);
     }
 };
 
@@ -73,9 +71,10 @@ orbit::StepResult RuntimeLosscone::processTimestep(
 
         // compute the pericenter distance
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
-        double posvel[6];
         bh.keplerOrbit(tperi, bhX, bhY, bhVX, bhVY);
-        sol.getSol(tperi, posvel);
+        double posvel[6];
+        for(int d=0; d<6; d++)
+            posvel[d] = sol.getSol(tperi, d);
         double rperi = sqrt(pow_2(posvel[0]-bhX[b]) + pow_2(posvel[1]-bhY[b]) + pow_2(posvel[2]));
 
         // compare it with the capture radius

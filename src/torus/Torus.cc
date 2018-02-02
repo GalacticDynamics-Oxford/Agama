@@ -17,7 +17,7 @@
 #include "WD_Numerics.h"
 #include <cmath>
 
-namespace Torus{
+namespace torus{
 
 typedef Vector<double,2>   DB2;
 typedef Matrix<double,2,2> DB22;

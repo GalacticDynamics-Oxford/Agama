@@ -6,19 +6,17 @@
 #include <cassert>
 #include <stdexcept>
 #include <cmath>
-// debugging
-#include <fstream>
 
 namespace actions{
 
 /// number of sampling points for a shell orbit (equally spaced in time)
 static const unsigned int NUM_STEPS_TRAJ = 16;
 /// accuracy of root-finding for the radius of thin (shell) orbit
-static const double ACCURACY_RTHIN = 1e-6;
+static const double ACCURACY_RSHELL = 1e-6;
 /// accuracy of orbit integration for shell orbit
-static const double ACCURACY_INTEGR = 1e-6;
+static const double ACCURACY_INTEGR = 1e-8;
 /// upper limit on the number of timesteps in ODE solver (should be enough to track half of the orbit)
-static const unsigned int MAX_NUM_STEPS_ODE = 100;
+static const unsigned int MAX_NUM_STEPS_ODE = 200;
 
 
 // estimate focal distance for a series of points in R-z plane
@@ -61,8 +59,8 @@ template double estimateFocalDistancePoints(
 namespace{
 /** find the best-fit value of focal distance for a shell orbit.
     \param[in] traj  contains the trajectory of this orbit in R-z plane,
-    \return  the parameter of a prolate spheroidal coordinate system which minimizes
-    the variation of `lambda` coordinate for this orbit.
+    \return  the parameter `delta` of a prolate spheroidal coordinate system which minimizes
+    the variation of `lambda` coordinate for this orbit
     If the best-fit value is negative, it is replaced with zero.
 */
 double fitFocalDistanceShellOrbit(const std::vector<coord::PosCyl>& traj)
@@ -88,20 +86,31 @@ public:
     OrbitIntegratorMeridionalPlane(const potential::BasePotential& p, double Lz) :
         poten(p), Lz2(Lz*Lz) {};
 
-    /** apply the equations of motion in R,z plane without tracking the azimuthal motion */
-    virtual void eval(const double /*t*/, const math::OdeStateType& y, math::OdeStateType& dydt) const
+    /** apply the equations of motion in R,z plane without tracking the azimuthal motion.
+        Integration variables are: R, z, vR, vz, dR, dz, dvR, dvz
+        R here can have a negative sign (this happens for Lz=0, when the orbit flips to x<0
+        and crosses the z=0 plane at negative 'R', but we compute the potential derivatives at |R|,
+        and multiply by sign(R) when necessary.
+    */
+    virtual void eval(const double /*t*/, const double x[], double dxdt[]) const
     {
         coord::GradCyl grad;
-        double sign = y[0]>=0 ? 1 : -1;
-        poten.eval(coord::PosCyl(fabs(y[0]), y[1], 0), NULL, &grad);
-        dydt[0] = y[2];
-        dydt[1] = y[3];
-        dydt[2] = -grad.dR*sign + (Lz2>0 ? Lz2/pow_3(y[0]) : 0);
-        dydt[3] = -grad.dz;
+        coord::HessCyl hess;
+        double signR = x[0]>=0 ? 1 : -1;
+        coord::PosCyl pos(fabs(x[0]), x[1], 0);
+        poten.eval(pos, NULL, &grad, &hess);
+        double Lz2ovR4 = Lz2>0 ? Lz2/pow_2(pow_2(pos.R)) : 0;
+        dxdt[0] = x[2];
+        dxdt[1] = x[3];
+        dxdt[2] = -(grad.dR - Lz2ovR4 * pos.R) * signR;
+        dxdt[3] = - grad.dz;
+        dxdt[4] = x[6];
+        dxdt[5] = x[7];
+        dxdt[6] = -(hess.dR2 + 3*Lz2ovR4) * x[4] - hess.dRdz * signR * x[5];
+        dxdt[7] = - hess.dRdz * signR * x[4] - hess.dz2 * x[5];
     }
 
-    /** return the size of ODE system: R, z, vR, vz */
-    virtual unsigned int size() const { return 4;}
+    virtual unsigned int size() const { return 8; }  // two coordinates and two velocities
 private:
     const potential::BasePotential& poten;
     const double Lz2;
@@ -115,132 +124,168 @@ public:
     /** used in root-finder to locate the root z(t)=0 */
     virtual void evalDeriv(const double time, double* val, double* der, double*) const
     {
-        double vars[4];
-        solver.getSol(time, vars);
         if(val)
-            *val = vars[1];  // z
+            *val = solver.getSol(time, 1);  // z
         if(der)
-            *der = vars[3];  // vz
+            *der = solver.getSol(time, 3);  // vz
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
     const math::BaseOdeSolver& solver;
 };
 
-/** launch an orbit perpendicularly to x-y plane from radius R with vz>0,
+/** launch an orbit perpendicularly to x-y plane from radius R0 with vz>0,
     and record the radius at which it crosses this plane downward (vz<0).
+    \param[in]  poten  is the potential;
+    \param[in]  E  is the orbit energy;
+    \param[in]  Lz  is the z-component of angular momentum;
+    \param[in]  R0  is the radius of the starting point;
     \param[out] timeCross stores the time required to complete the half-oscillation in z;
     \param[out] traj stores the trajectory recorded at equal intervals of time;
-    \return  the crossing radius
+    \param[out] Rcross stores the radius of the crossing point;
+    \param[out] dRcrossdR0  stores the derivative dRcross/dR0, computed from the variational equation.
 */
-double findCrossingPointR(
-    const potential::BasePotential& poten, double E, double Lz, double R,
-    double* timeCross, std::vector<coord::PosCyl>* traj)
+void findCrossingPointR(
+    const potential::BasePotential& poten, double E, double Lz, double R0,
+    double& timeCross, std::vector<coord::PosCyl>& traj, double& Rcross, double& dRcrossdR0)
 {
-    double vz = sqrt(fmax( 2 * (E-poten.value(coord::PosCyl(R, 0, 0))) - (Lz>0 ? pow_2(Lz/R) : 0), R*R*1e-16));
+    double Phi;
+    coord::GradCyl grad;
+    poten.eval(coord::PosCyl(R0, 0, 0), &Phi, &grad);
+    // initial vertical velocity
+    double vz0 = sqrt(fmax( 2 * (E-Phi) - (Lz>0 ? pow_2(Lz/R0) : 0), 0));
+    // initial R-component of the deviation vector
+    double dR0 = 1.;
+    // initial vz-component (assigned from the requirement that E=const)
+    double dvz0= vz0>0 ? ((Lz>0 ? pow_2(Lz) / pow_3(R0) : 0) - grad.dR) / vz0 * dR0 : 0;
+    double vars[8] = {R0, 0, 0, vz0, dR0, 0, 0, dvz0};
     OrbitIntegratorMeridionalPlane odeSystem(poten, Lz);
-    math::OdeStateType vars(odeSystem.size());
-    vars[0] = R;
-    vars[1] = 0;
-    vars[2] = 0;
-    vars[3] = vz;
     math::OdeSolverDOP853 solver(odeSystem, ACCURACY_INTEGR);
     solver.init(vars);
     bool finished = false;
     unsigned int numStepsODE = 0;
-    double timePrev = 0;
     double timeCurr = 0;
     double timeTraj = 0;
-    const double timeStepTraj = timeCross!=NULL ? *timeCross*0.5/(NUM_STEPS_TRAJ-1) : INFINITY;
-    if(traj!=NULL)
-        traj->clear();
+    const double timeStepTraj = timeCross*0.5/(NUM_STEPS_TRAJ-1);
+    traj.clear();
     while(!finished) {
-        if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE)  // signal of error
-            finished = true;
-        else {
+        if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE) { // signal of error
+            utils::msg(utils::VL_WARNING, FUNCNAME,
+                "Failed to compute orbit for E="+utils::toString(E,16)+
+                ", Lz="+utils::toString(Lz,16)+", R="+utils::toString(R0,16));        
+            timeCross  = 0;
+            Rcross     = R0;   // this would terminate the root-finder, but we have no better option..
+            dRcrossdR0 = NAN;
+            return;
+        } else {
             numStepsODE++;
-            timePrev = timeCurr;
+            double timePrev = timeCurr;
             timeCurr = solver.getTime();
-            if(timeStepTraj!=INFINITY && traj!=NULL)
+            if(timeStepTraj!=INFINITY)
             {   // store trajectory
-                while(timeTraj <= timeCurr && traj->size() < NUM_STEPS_TRAJ) {
+                while(timeTraj <= timeCurr && traj.size() < NUM_STEPS_TRAJ) {
                     // store R and z at equal intervals of time
-                    double vtraj[4];
-                    solver.getSol(timeTraj, vtraj);
-                    traj->push_back(coord::PosCyl(fabs(vtraj[0]), vtraj[1], 0));
+                    double R = solver.getSol(timeTraj, 0);
+                    double z = solver.getSol(timeTraj, 1);
+                    traj.push_back(coord::PosCyl(fabs(R), z, 0));
                     timeTraj += timeStepTraj;
                 }
             }
-            double vcurr[4];
-            solver.getSol(timeCurr, vcurr);
-            if(vcurr[1] < 0) {  // z<0 - we're done
+            if(solver.getSol(timeCurr, 1) <= 0) {  // z<=0 - we're done
                 finished = true;
                 timeCurr = math::findRoot(FindCrossingPointZequal0(solver),
-                    timePrev, timeCurr, ACCURACY_RTHIN);
+                    timePrev, timeCurr, ACCURACY_RSHELL);
             }
         }
     }
-    if(timeCross!=NULL)
-        *timeCross = timeCurr;
-    double vroot[4];
-    solver.getSol(timeCurr, vroot);    
-    return fabs(vroot[0]);   // value of R at the moment of crossing x-y plane
+    timeCross = timeCurr;    // the moment of crossing of the equatorial plane
+    Rcross    = solver.getSol(timeCurr, 0);
+    double vR = solver.getSol(timeCurr, 2);
+    double vz = solver.getSol(timeCurr, 3);
+    double dR = solver.getSol(timeCurr, 4);  // component of the deviation vector dR at the crossing
+    double dz = solver.getSol(timeCurr, 5);  // -"- dz
+    dRcrossdR0= dR - dz * vR / vz;
+    if(Rcross < 0) {  // this happens for Lz=0, when the orbit crosses the x axis at negative x
+        Rcross     = -Rcross;
+        dRcrossdR0 = -dRcrossdR0;
+    }
 }
 
 /// function to be used in root-finder for locating the thin orbit in R-z plane
-class FindClosedOrbitRZplane: public math::IFunctionNoDeriv {
+class FindClosedOrbitRZplane: public math::IFunction {
 public:
     FindClosedOrbitRZplane(const potential::BasePotential& p, 
         double _E, double _Lz, double _Rmin, double _Rmax,
-        double* _timeCross, std::vector<coord::PosCyl>* _traj) :
+        double& _timeCross, std::vector<coord::PosCyl>& _traj)
+    :
         poten(p), E(_E), Lz(_Lz), Rmin(_Rmin), Rmax(_Rmax), 
-        timeCross(_timeCross), traj(_traj) {};
-    /// report the difference in R between starting point (R, z=0, vz>0) and return point (R1, z=0, vz<0)
-    virtual double value(const double R) const {
+        timeCross(_timeCross), traj(_traj)
+    {}
+    /// report the difference in R between starting point (R0, z=0, vz>0)
+    /// and return point (Rcross, z=0, vz<0)
+    virtual void evalDeriv(const double R0, double* val, double* der, double*) const {
         // first two calls in root-finder are for the boundary points, we already know the answer
-        if(R==Rmin)
-            return R-Rmax;
-        if(R==Rmax)
-            return R-Rmin;
-        double R1 = findCrossingPointR(poten, E, Lz, R, timeCross, traj);
-        return R-R1;
+        if(R0==Rmin || R0==Rmax) {
+            if(val) *val = R0==Rmin ? Rmax-Rmin : Rmin-Rmax;
+            if(der) *der = NAN;
+            return;
+        }
+        double Rcross, dRcrossdR=NAN;
+        findCrossingPointR(poten, E, Lz, R0, timeCross, traj, Rcross, dRcrossdR);
+        if(val)
+            *val = Rcross-R0;
+        if(der)
+            *der = dRcrossdR-1;
     }
+    virtual unsigned int numDerivs() const { return 1; }
 private:
     const potential::BasePotential& poten;
     const double E, Lz;               ///< parameters of motion in the R-z plane
     const double Rmin, Rmax;          ///< boundaries of interval in R (to skip the first two calls)
-    double* timeCross;                ///< keep track of time required to complete orbit
-    std::vector<coord::PosCyl>* traj; ///< store the trajectory
+    double& timeCross;                ///< keep track of time required to complete orbit
+    std::vector<coord::PosCyl>& traj; ///< store the trajectory
 };
 }  // namespace
 
 double estimateFocalDistanceShellOrbit(
-    const potential::BasePotential& poten, double E, double Lz, double* Rthin_out)
+    const potential::BasePotential& poten, double E, double Lz, double* Rshell_out)
 {
     double Rmin, Rmax, FD;
     findPlanarOrbitExtent(poten, E, Lz, Rmin, Rmax);
     double timeCross = INFINITY;
     std::vector<coord::PosCyl> traj;
-    // locate the radius of thin orbit;  as a by-product, store the orbit in 'traj'
-    double Rthin = math::findRoot(
-        FindClosedOrbitRZplane(poten, E, Lz, Rmin, Rmax, &timeCross, &traj), Rmin, Rmax, ACCURACY_RTHIN);
+    // locate the radius of a shell orbit;  as a by-product, store the orbit in 'traj'
+    double Rshell = math::findRoot(
+        FindClosedOrbitRZplane(poten, E, Lz, Rmin, Rmax, timeCross, traj), Rmin, Rmax, ACCURACY_RSHELL);
+#ifdef OLD_METHOD
     if(traj.size() >= 2)
         // now find the best-fit value of delta for this orbit
         FD = fitFocalDistanceShellOrbit(traj);
     else {
         // something went wrong; use a backup solution
-        if(!isFinite(Rthin))
-            Rthin = 0.5 * (Rmin+Rmax);
+        if(!isFinite(Rshell))
+            Rshell = 0.5 * (Rmin+Rmax);
         utils::msg(utils::VL_WARNING, FUNCNAME,
             "Could not find a thin orbit for E="+utils::toString(E,16)+", Lz="+utils::toString(Lz,16)+
-            " - assuming Rthin="+utils::toString(Rthin,16));
+            " - assuming Rthin="+utils::toString(Rshell,16));
         // if we don't have a proper orbit, make a short vertical step out of the z=0 plane
         // and estimate the focal distance from the mixed derivative at this single point
         FD = estimateFocalDistancePoints(poten, std::vector<coord::PosCyl>(1,
-            coord::PosCyl(Rthin, /* z=very small number */ Rthin*ACCURACY_RTHIN, 0)));
+            coord::PosCyl(Rshell, /* z=very small number */ Rshell*ACCURACY_RSHELL, 0)));
     }
-    if(Rthin_out != NULL)
-        *Rthin_out = Rthin;
+#else
+    double Phi;
+    coord::GradCyl grad;
+    poten.eval(coord::PosCyl(Rshell,0,0), &Phi, &grad);
+    double vphi = Lz!=0 ? Lz / Rshell : 0;
+    FD = Rshell * sqrt( fmax(0, (2 * (E-Phi) - Rshell * grad.dR) / ( Rshell * grad.dR - vphi*vphi) ) );
+    // check that the orbit is a reasonable one, i.e., has smaller R for large |z|
+    //for(size_t p=1; FD>0 && p<traj.size(); p++)
+    //    if(traj[p].R > Rshell*1.000001)
+    //        FD = 0.;  // safe default value for weird shell-like orbits (disabled for the moment)
+#endif
+    if(Rshell_out != NULL)
+        *Rshell_out = Rshell;
     return FD;
 }
 

@@ -147,6 +147,7 @@ class NemoSnapshotWriter
 {
     std::ofstream snap;  ///< data stream
     int level;           ///< index of current level (root level is 0)
+    static const int COORDSYS = 66306;  ///< magic code for the cartesian coordinate system
 public:
     /// create class instance and open file (append if necessary)
     NemoSnapshotWriter(const std::string &filename, bool append=false) {
@@ -174,10 +175,10 @@ public:
         snap.write(reinterpret_cast<const char*>(dim), ndim*sizeof(int));
         int buf=0;
         snap.write(reinterpret_cast<const char*>(&buf), sizeof(int));
-        buf=1;
+        size_t size=1;
         for(int i=0; i<ndim; i++)
-            buf*=dim[i];   // compute the array size
-        snap.write(reinterpret_cast<const char*>(data), sizeof(T)*buf);
+            size *= dim[i];   // compute the array size
+        snap.write(reinterpret_cast<const char*>(data), size*sizeof(T));
     };
     /// begin a new nested array
     void startLevel(const std::string &name) {
@@ -197,14 +198,14 @@ public:
         snap.put(0);
     }
     /// store an array of char
-    void putString(const std::string &name,const std::string &str) {
+    void putString(const std::string &name, const std::string &str) {
         int len=static_cast<int>(str.size());
         putArray(name, 1, &len, str.c_str());
     }
     /// store a string enclosed by zeros
     void putZString(const std::string &name) {
         snap.put(0);
-        snap.write(name.c_str(),static_cast<std::streamsize>(name.size()));
+        snap.write(name.c_str(), static_cast<std::streamsize>(name.size()));
         snap.put(0);
     }
     /// store history line in header
@@ -216,28 +217,39 @@ public:
     template<typename NumT> 
     void writePhase(const ParticleArrayCar& points, double time, const units::ExternalUnits& conv) 
     {
-        int nbody   = static_cast<int>(points.size());
-        std::vector<NumT> phase(nbody * 6);
+        size_t nbody = static_cast<int>(points.size());
+        // check if the velocity information is present
+        bool noVel = true;
+        for(size_t i=0; noVel && i<nbody; i++)
+            noVel &= pow_2(points.point(i).vx) + pow_2(points.point(i).vy) + pow_2(points.point(i).vz) == 0;
+        int nvar = noVel ? 3 : 6, inbody = nbody;
+        std::vector<NumT> phase(nbody * nvar);
         std::vector<NumT> mass(nbody);
-        for(int i = 0 ; i < nbody ; i++) {
-            phase[i*6  ] = static_cast<NumT>(points.point(i).x  / conv.lengthUnit);
-            phase[i*6+1] = static_cast<NumT>(points.point(i).y  / conv.lengthUnit);
-            phase[i*6+2] = static_cast<NumT>(points.point(i).z  / conv.lengthUnit);
-            phase[i*6+3] = static_cast<NumT>(points.point(i).vx / conv.velocityUnit);
-            phase[i*6+4] = static_cast<NumT>(points.point(i).vy / conv.velocityUnit);
-            phase[i*6+5] = static_cast<NumT>(points.point(i).vz / conv.velocityUnit);
-            mass[i]      = static_cast<NumT>(points.mass(i)     / conv.massUnit);
+        for(size_t i = 0 ; i < nbody ; i++) {
+            mass [i]        = static_cast<NumT>(points.mass(i)     / conv.massUnit);
+            phase[i*nvar  ] = static_cast<NumT>(points.point(i).x  / conv.lengthUnit);
+            phase[i*nvar+1] = static_cast<NumT>(points.point(i).y  / conv.lengthUnit);
+            phase[i*nvar+2] = static_cast<NumT>(points.point(i).z  / conv.lengthUnit);
+            if(noVel) continue;
+            phase[i*nvar+3] = static_cast<NumT>(points.point(i).vx / conv.velocityUnit);
+            phase[i*nvar+4] = static_cast<NumT>(points.point(i).vy / conv.velocityUnit);
+            phase[i*nvar+5] = static_cast<NumT>(points.point(i).vz / conv.velocityUnit);
         }
         startLevel("SnapShot");
         startLevel("Parameters");
-        putVal("Nobj", nbody);
+        putVal("Nobj", inbody);
         putVal("Time", time);
         endLevel();
         startLevel("Particles");
-        putVal("CoordSystem", static_cast<int>(0201402));
-        int tmp_dim[3] = {nbody, 2, 3};
-        putArray("Mass", 1, tmp_dim, &mass[0]);
-        putArray("PhaseSpace", 3, tmp_dim, &phase[0]);
+        putVal("CoordSystem", COORDSYS);
+        putArray("Mass", 1, &inbody, &mass[0]);
+        if(noVel) {
+            int tmp_dim[2] = {nbody, 3};
+            putArray("Position", 2, tmp_dim, &phase[0]);
+        } else {
+            int tmp_dim[3] = {nbody, 2, 3};
+            putArray("PhaseSpace", 3, tmp_dim, &phase[0]);
+        }
         endLevel();
         endLevel();
     }

@@ -6,11 +6,9 @@
 
 #pragma once
 #include "df_base.h"
-#include "units.h"
 #include "smart.h"
-
-// forward declaration
-namespace utils { class KeyValueMap; }
+#include "units.h"
+#include "utils_config.h"
 
 namespace df {
 

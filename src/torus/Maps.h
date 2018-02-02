@@ -55,7 +55,7 @@ Base classes for all the transformations needed to describe a Torus
 #include "math_core.h"
 #include <climits>
 
-namespace Torus{
+namespace torus{
 ////////////////////////////////////////////////////////////////////////////////
 /**
 \brief Base class for any transformation on the route from

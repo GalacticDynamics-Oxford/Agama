@@ -83,12 +83,10 @@ public:
         pot(_pot), bh(_bh) {}
     
     /// compute the time derivative of the position/velocity vector at time t
-    virtual void eval(const double t, const math::OdeStateType& x, math::OdeStateType& dxdt) const;
+    virtual void eval(const double t, const double x[], double dxdt[]) const;
     
     /** The size of the position/velocity vector */
     virtual unsigned int size() const { return 6; }
-    
-    virtual bool isStdHamiltonian() const { return true; }
 };
 
 

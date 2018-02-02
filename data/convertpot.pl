@@ -14,7 +14,7 @@ for($i=0; $i<$ND; $i++) {
     $_=<FI>;
     if(/([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)/i) {
         print FO "[Potential$ind]\n".
-        "type = DiskDensity\n".
+        "type = Disk\n".
         "surfaceDensity = $1\n".
         "scaleRadius = $2\n".
         "scaleHeight = $3\n".
@@ -30,7 +30,7 @@ for($i=0; $i<$NS; $i++) {
     $_=<FI>;
     if(/([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)\s+([\d\+\-\.e]+)/i) {
         print FO "[Potential$ind]\n".
-        "type = SpheroidDensity\n".
+        "type = Spheroid\n".
         "densityNorm = $1\n".
         "axisRatioZ = $2\n".
         "gamma = $3\n".

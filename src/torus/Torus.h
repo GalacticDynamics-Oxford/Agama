@@ -34,7 +34,7 @@
 #include "PJMCoords.h"
 #include "Fit.h"
 
-namespace Torus{
+namespace torus{
 /**
 \brief Class combining everything. Can fit a Torus with Actions J in a 
 given Potential. Then gives position and velocity given angles. Lots 

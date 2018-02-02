@@ -32,7 +32,7 @@ struct Converter {
     because of the limitations of C++ that don't allow to template a typedef without a class,
     and to enable seamless conversion between compatible particle types and coordinate systems.
     \tparam ParticleT  is the particle type:
-    it could be coord::PosT<coordT> or coord::PosVelT<coordT>, where `coordT`
+    it could be coord::PosT<CoordT> or coord::PosVelT<CoordT>, where `CoordT`
     is one of the three standard coordinate systems (coord::Car, coord::Cyl, coord::Sph).
     In other words, the particles in this array may have either  positions and masses,
     or positions, velocities and masses.

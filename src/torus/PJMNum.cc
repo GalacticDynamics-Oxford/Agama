@@ -5,7 +5,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
-namespace Torus {
+namespace torus {
 using std::cerr;
 
 // A lot like Press et al's version.

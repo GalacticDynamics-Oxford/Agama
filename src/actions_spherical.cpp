@@ -88,11 +88,12 @@ template<Operation mode>
 inline double integr(const math::IFunction& poten,
     double E, double L, double R1, double R2, double R=-1)
 {
-    if(R==-1) R=R2;             // default upper limit for integration
-    R = fmin(fmax(R, R1), R2);  // roundoff errors might cause R to be outside the allowed interval
+    if(R==-1) R=R2;              // default upper limit for integration
+    R = math::clamp(R, R1, R2);  // roundoff errors might cause R to be outside the allowed interval
     Integrand<mode> integrand(poten, E, L, R1);
-    math::ScaledIntegrandEndpointSing transf(integrand, R1, R2);
-    return math::integrateGL(transf, 0, transf.y_from_x(R), integrOrder(R1/R2))
+    math::ScalingCub scaling(R1, R2);
+    return integrateGL(math::ScaledIntegrand<math::ScalingCub>(scaling, integrand),
+        0, math::scale(scaling, R), integrOrder(R1/R2))
         + (mode==MODE_OMEGAZ ? acos(R1/R) : 0);
 }
 
@@ -105,20 +106,21 @@ template<Operation mode>
 inline double integrPowerLaw(double slope, double Lrel, double R1, double R2)
 {
     IntegrandPowerLaw<mode> integrand(slope, Lrel, R1);
-    math::ScaledIntegrandEndpointSing transf(integrand, R1, R2);
-    return math::integrateGL(transf, 0, 1, integrOrder(R1/R2)) + (mode==MODE_OMEGAZ ? acos(R1/R2) : 0);
+    return integrateGL(math::ScaledIntegrand<math::ScalingCub>(math::ScalingCub(R1, R2), integrand),
+        0, 1, integrOrder(R1/R2))
+        + (mode==MODE_OMEGAZ ? acos(R1/R2) : 0);
 }
 
 /// helper function to find the upper limit of integral for the radial phase,
 /// such that its value equals the target
 class RadiusFromPhaseFinder: public math::IFunction {
     const Integrand<MODE_OMEGAR> integrand;
-    const math::ScaledIntegrandEndpointSing transf;
+    const math::ScaledIntegrand<math::ScalingCub> transf;
     const double target;  // target value of the integral
 public:
     RadiusFromPhaseFinder(const math::IFunction &poten,
         double E, double L, double R1, double R2, double _target) :
-        integrand(poten, E, L, R1), transf(integrand, R1, R2), target(_target) {};
+        integrand(poten, E, L, R1), transf(math::ScalingCub(R1, R2), integrand), target(_target) {};
     virtual void evalDeriv(const double x, double *val, double *der, double*) const {
         if(val)
             *val = math::integrateGL(transf, 0, x, INTEGR_ORDER) - target;
@@ -133,7 +135,7 @@ public:
             // may not exactly correspond to the (inverse) frequency computed by another method
             rscaled = 1;
         }
-        return transf.x_from_y(rscaled);
+        return math::unscale(transf.scaling, rscaled);
     }
 };
 
@@ -285,8 +287,8 @@ coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
     // find other auxiliary angles
     double thz = math::sign(thr) * integr<MODE_OMEGAZ>(potential, E, L, R1, R2, r);
     double psi = aa.thetaz + thz - thr * Omegaz / Omegar;
-    double sinpsi   = sin(psi);
-    double cospsi   = cos(psi);
+    double sinpsi, cospsi;
+    math::sincos(psi, sinpsi, cospsi);
     double chi      = aa.Jz != 0 ? atan2(fabs(aa.Jphi) * sinpsi, L * cospsi) : psi;
     double sini     = sqrt(1 - pow_2(aa.Jphi / L)); // inclination angle of the orbital plane
     double costheta = sini * sinpsi;                // z/r

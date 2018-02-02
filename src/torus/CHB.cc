@@ -14,7 +14,7 @@
 #include "CHB.h"
 #include <cstdlib>
 
-namespace Torus{
+namespace torus{
 using std::cerr;
 
 void Cheby::getchebc() { // get the coefficients

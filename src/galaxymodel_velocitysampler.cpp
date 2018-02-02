@@ -28,10 +28,11 @@ particles::ParticleArrayCar assignVelocityEdd(
         do {
             v = sphModel.sampleVelocity(Phi);
         } while(Phi + 0.5*v*v > 0 && ++numAttempts<100);
-        double vec[3];
+        double vec[3], sinphi, cosphi;
         math::getRandomUnitVector(vec);
+        math::sincos(point.phi, sinphi, cosphi);
         result.add(coord::PosVelCar(
-            point.R * cos(point.phi), point.R * sin(point.phi), point.z,
+            point.R * cosphi, point.R * sinphi, point.z,
             v * vec[0], v * vec[1], v * vec[2]),
             pointCoords.mass(i));
     }
@@ -59,7 +60,9 @@ particles::ParticleArrayCar assignVelocityJeansSph(
             vr *= sigma_r;
             vt *= sigma_t;
         } while(Phi + 0.5 * (vr*vr + vt*vt) > 0 && ++numAttempts<100);
-        double xyz[3] = { point.R * cos(point.phi), point.R * sin(point.phi), point.z };
+        double sinphi, cosphi;
+        math::sincos(point.phi, sinphi, cosphi);
+        double xyz[3] = { point.R * cosphi, point.R * sinphi, point.z };
         double vper[3];
         math::getRandomPerpendicularVector(xyz, vper);
         if(r==0) r=1.;  // avoid indeterminacy

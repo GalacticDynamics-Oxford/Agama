@@ -13,6 +13,9 @@ namespace galaxymodel{
 
 namespace {  // internal
 
+/// relative accuracy in computing the moments of LOSVD (total normalization, mean value and dispersion)
+static const double EPSREL_MOMENTS = 1e-3;
+
 /// relative tolerance for computing the pixel masses multiplied by B-spline basis functions
 static const double EPSREL_PIXEL_MASS = 1e-4;
 
@@ -270,12 +273,19 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
     if(!isFinite(gamma + center + sigma)) {
         GaussianFitter fit(/*either "2" or "order"*/ 2, fnc);
         std::vector<double> params(order+1);
-        // start the fit from a (hopefully) reasonable estimate based on the moments of the input function
-        params[0] = math::integrateAdaptive(fnc, -INFINITY, INFINITY, 1e-3);      // normalization
-        params[1] = math::integrateAdaptive(MomentIntegrand(fnc, 1),              // mean value
-            -INFINITY, INFINITY, 1e-3) / params[0];
-        params[2] = sqrt(fmax(0, math::integrateAdaptive(MomentIntegrand(fnc, 2), // dispersion
-            -INFINITY, INFINITY, 1e-3) / params[0] - pow_2(params[1])));
+        // start the fit from a (hopefully) reasonable estimate based on the moments of the input function,
+        // computed on an infinite interval of velocity using the appropriate scaling transformation;
+        // ideally one should use a magnitude-agnostic doubly-infinite scaling, but it's not yet available.
+        math::ScalingInf scaling;
+        params[0] = integrateAdaptive(
+            math::ScaledIntegrand<math::ScalingInf>(scaling, fnc),                      // normalization
+            0, 1, EPSREL_MOMENTS);
+        params[1] = integrateAdaptive(
+            math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 1)),  // mean value
+            0, 1, EPSREL_MOMENTS) / params[0];
+        params[2] = sqrt(fmax(0, integrateAdaptive(
+            math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 2)),  // dispersion
+            0, 1, EPSREL_MOMENTS) / params[0] - pow_2(params[1])));
         math::nonlinearMultiFit(fit, /*init*/&params[0], 1e-6, 100, /*output*/&params[0]);
         Gamma  = params[0];
         Center = params[1];

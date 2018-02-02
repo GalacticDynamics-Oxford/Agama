@@ -14,7 +14,7 @@
 #ifndef _PJMNum_
 #define _PJMNum_ 1 
 
-namespace Torus {
+namespace torus {
 
 double trapzd(double(*func)(double), const double, const double, const int);
 double polint(double*, double*, const int, const double, double&, double&);

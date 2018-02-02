@@ -44,7 +44,7 @@
 #include "GeneratingFunction.h"
 #include "Potential.h"
 
-namespace Torus{
+namespace torus{
 /**
    \brief Fits parameters of canonical transformation and/or of toy map  
    and/or the coefficients S_n of the generating function. 

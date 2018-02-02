@@ -46,8 +46,7 @@
 #include "raga_potential.h"
 #include "raga_relaxation.h"
 #include "raga_trajectory.h"
-
-namespace utils { class KeyValueMap; }  // forward declaration
+#include "utils_config.h"
 
 namespace raga{
 

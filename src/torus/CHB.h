@@ -18,7 +18,7 @@ Outputs value and derivatives at given points.
 
 #include <iostream>
 
-namespace Torus{
+namespace torus{
 /**
 
 \brief Deals with Chebyshev polynomials. Needed for PoiClosedOrbit.

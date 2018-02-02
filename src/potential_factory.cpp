@@ -54,9 +54,9 @@ enum PotentialType {
     PT_MULTIPOLE,    ///< spherical-harmonic expansion:  `Multipole`
 
     //  Components of Walter Dehnen's GalPot
-    PT_DISK,         ///< separable disk density model:  `DiskDensity`
-    PT_SPHEROID,     ///< two-power-law spheroid density model:  `SpheroidDensity`
-    PT_SERSIC,       ///< Sersic profile:  `SersicDensity`
+    PT_DISK,         ///< separable disk density model:  `Disk`
+    PT_SPHEROID,     ///< two-power-law spheroid density model:  `Spheroid`
+    PT_SERSIC,       ///< Sersic profile:  `Sersic`
 
     //  Density interpolators
     PT_DENS_SPHHARM, ///< DensitySphericalHarmonic
@@ -124,6 +124,7 @@ static bool mapinitialized = false;
 /// create a correspondence between names and enum identifiers for potential and density types
 void initPotentialNameMap()
 {
+    // list of potential models
     potentialNames.clear();
     potentialNames[PT_COMPOSITE] = CompositeCyl::myName();
     potentialNames[PT_LOG]       = Logarithmic::myName();
@@ -141,32 +142,22 @@ void initPotentialNameMap()
     potentialNames[PT_MULTIPOLE] = Multipole::myName();
     potentialNames[PT_DISK]      = DiskDensity::myName();
 
-    // list of density models available for BSE and Spline approximation
+    // list of density models
     densityNames.clear();
     densityNames[PT_COMPOSITE] = CompositeDensity::myName();
     densityNames[PT_PLUMMER]   = Plummer::myName();
     densityNames[PT_DEHNEN]    = Dehnen::myName();
     densityNames[PT_FERRERS]   = Ferrers::myName();
     densityNames[PT_ISOCHRONE] = Isochrone::myName();
-    densityNames[PT_SPHEROID]  = SpheroidDensity::myName();    
+    densityNames[PT_SPHEROID]  = SphrParam::myName();    
     densityNames[PT_SERSIC]    = SersicParam::myName();    
+    densityNames[PT_DISK]      = DiskDensity::myName();    
     densityNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
     densityNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
     densityNames[PT_DENS_CYLGRID] = DensityAzimuthalHarmonic::myName();
     densityNames[PT_DENS_SPHHARM] = DensitySphericalHarmonic::myName();
 
     mapinitialized=true;
-}
-
-/// return the name of the potential of a given type, or empty string if unavailable
-const char* getPotentialNameByType(PotentialType type)
-{
-    if(!mapinitialized)
-        initPotentialNameMap();
-    MapNameType::const_iterator iter=potentialNames.find(type);
-    if(iter!=potentialNames.end()) 
-        return iter->second;
-    return "";
 }
 
 /// return the type of the potential model by its name, or PT_UNKNOWN if unavailable
@@ -292,7 +283,7 @@ ConfigPotential parseParams(const utils::KeyValueMap& params, const units::Exter
     config.zmax        = params.getDouble("zmax", config.zmax)
                        * conv.lengthUnit;
     config.lmax        = params.getInt("lmax", config.lmax);
-    config.mmax        = params.contains("mmax") ? params.getInt("mmax", config.mmax) : config.lmax;
+    config.mmax        = params.contains("mmax") ? params.getInt("mmax") : config.lmax;
     config.smoothing   = params.getDouble("smoothing", config.smoothing);
     return config;
 }
@@ -309,6 +300,7 @@ DiskParam parseDiskParams(const utils::KeyValueMap& params, const units::Externa
     config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius)
                                * conv.lengthUnit;
     config.modulationAmplitude = params.getDouble("modulationAmplitude", config.modulationAmplitude);
+    config.sersicIndex         = params.getDouble("sersicIndex", config.sersicIndex);
     // alternative way: specifying the total model mass instead of surface density at R=0
     if(params.contains("mass") && !params.contains("surfaceDensity")) {
         config.surfaceDensity  = 1;
@@ -337,7 +329,7 @@ SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::Externa
         config.densityNorm = 1;
         double mass = config.mass();
         if(!isFinite(mass))
-            throw std::runtime_error("SpheroidDensity model has infinite mass");
+            throw std::runtime_error("Spheroid model has infinite mass");
         config.densityNorm = params.getDouble("mass") * conv.massUnit / mass;
     }
     return config;
@@ -421,8 +413,7 @@ PtrPotential readPotentialSphHarmExp(
         }
     }
     if(!ok)
-        throw std::runtime_error(std::string("Error loading potential ") +
-            getPotentialNameByType(potentialType));
+        throw std::runtime_error("Error loading potential");
     math::blas_dmul(converter.lengthUnit, radii);
     for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(pow_2(converter.velocityUnit), coefs[i]);
@@ -439,8 +430,7 @@ PtrPotential readPotentialSphHarmExp(
     case PT_MULTIPOLE:
         return PtrPotential(new Multipole(radii, coefsPhi, coefsdPhi)); 
     default:
-        throw std::invalid_argument(std::string("Unknown potential type to load: ") +
-            getPotentialNameByType(potentialType));
+        throw std::invalid_argument("Unknown potential type to load");
     }
 }
 
@@ -636,8 +626,7 @@ PtrDensity readDensity(const std::string& fileName, const units::ExternalUnits& 
             return PtrDensity(new CompositeDensity(components));
         }
     }
-    throw std::runtime_error("readDensity: cannot find "
-        "valid density coefficients in file "+fileName);
+    throw std::runtime_error("readDensity: cannot find valid density coefficients in file "+fileName);
 }
 
 PtrPotential readPotential(const std::string& fileName, const units::ExternalUnits& converter)
@@ -675,8 +664,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
             return PtrPotential(new CompositeCyl(components));
         }
     }
-    throw std::runtime_error("readPotential: cannot find "
-        "valid potential coefficients in file "+fileName);
+    throw std::runtime_error("readPotential: cannot find valid potential coefficients in file "+fileName);
 }
 
 ///@}
@@ -946,7 +934,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
         fields = utils::splitString(buffer, "# \t");
         if(fields.size() >= 5)
             params.push_back(utils::KeyValueMap(
-                "type=DiskDensity"
+                std::string("type=") +  DiskDensity::myName() +
                 " surfaceDensity=" +    fields[0]+
                 " scaleRadius=" +       fields[1]+
                 " scaleHeight=" +       fields[2]+
@@ -962,7 +950,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
         fields = utils::splitString(buffer, "# \t");
         if(fields.size() >= 5)
             params.push_back(utils::KeyValueMap(
-                "type=SpheroidDensity"
+                std::string("type=") + SpheroidDensity::myName() +
                 " densityNorm="      + fields[0]+
                 " axisRatioZ="       + fields[1]+
                 " gamma="            + fields[2]+
@@ -1206,7 +1194,7 @@ PtrDensity createDensity(
     std::string type = kvmap.getString(kvmap.contains("density") ? "density" : "type");
     if(utils::stringsEqual(type, DiskDensity::myName()))
         return PtrDensity(new DiskDensity(parseDiskParams(kvmap, converter)));
-    if(utils::stringsEqual(type, SpheroidDensity::myName()))
+    if(utils::stringsEqual(type, SphrParam::myName()))
         return PtrDensity(new SpheroidDensity(parseSphrParams(kvmap, converter)));
     if(utils::stringsEqual(type, SersicParam::myName()))
         return PtrDensity(new SpheroidDensity(parseSersicParams(kvmap, converter)));
@@ -1232,9 +1220,9 @@ PtrPotential createPotential(
     for(unsigned int i=0; i<kvmap.size(); i++) {
         std::string type = kvmap[i].getString("type");
         // isolate the density profiles that are part of GalPot scheme:
-        // DiskDensity will be represented by one potential component (DiskAnsatz)
+        // Disk profile will be represented by one potential component (DiskAnsatz)
         // and two density components that will eventually be supplied to the Multipole potential;
-        // SpheroidDensity and SersicDensity profiles will also be added to the Multipole
+        // Spheroid and Sersic profiles will also be added to the Multipole
         if(utils::stringsEqual(type, DiskDensity::myName())) {
             DiskParam dpar = parseDiskParams(kvmap[i], converter);
             // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
@@ -1243,7 +1231,7 @@ PtrPotential createPotential(
             componentsDens.push_back(PtrDensity(new DiskDensity(dpar)));
             dpar.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
             componentsDens.push_back(PtrDensity(new DiskAnsatz(dpar)));
-        } else if(utils::stringsEqual(type, SpheroidDensity::myName())) {
+        } else if(utils::stringsEqual(type, SphrParam::myName())) {
             componentsDens.push_back(PtrDensity(
                 new SpheroidDensity(parseSphrParams(kvmap[i], converter))));
         } else if(utils::stringsEqual(type, SersicParam::myName())) {

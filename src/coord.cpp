@@ -1,4 +1,5 @@
 #include "coord.h"
+#include "math_core.h"
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
@@ -41,25 +42,31 @@ template double Lz(const PosVelSph& p);
 
 //--------  position conversion functions ---------//
 
-template<> PosCar toPos(const PosCyl& pos) {
-    return PosCar(pos.R*cos(pos.phi), pos.R*sin(pos.phi), pos.z);
+template<> PosCar toPos(const PosCyl& p) {
+    double sinphi, cosphi;
+    math::sincos(p.phi, sinphi, cosphi);
+    return PosCar(p.R*cosphi, p.R*sinphi, p.z);
 }
-template<> PosCar toPos(const PosSph& pos) {
-    const double R=pos.r*sin(pos.theta);
-    return PosCar(R*cos(pos.phi), R*sin(pos.phi), pos.r*cos(pos.theta)); 
+template<> PosCar toPos(const PosSph& p) {
+    double sintheta, costheta, sinphi, cosphi;
+    math::sincos(p.theta, sintheta, costheta);
+    math::sincos(p.phi, sinphi, cosphi);
+    return PosCar(p.r*sintheta*cosphi, p.r*sintheta*sinphi, p.r*costheta); 
 }
-template<> PosCyl toPos(const PosCar& pos) {
-    return PosCyl(sqrt(pow_2(pos.x) + pow_2(pos.y)), pos.z, atan2(pos.y, pos.x));
+template<> PosCyl toPos(const PosCar& p) {
+    return PosCyl(sqrt(pow_2(p.x) + pow_2(p.y)), p.z, atan2(p.y, p.x));
 }
-template<> PosCyl toPos(const PosSph& pos) {
-    return PosCyl(pos.r*sin(pos.theta), pos.r*cos(pos.theta), pos.phi);
+template<> PosCyl toPos(const PosSph& p) {
+    double sintheta, costheta;
+    math::sincos(p.theta, sintheta, costheta);
+    return PosCyl(p.r*sintheta, p.r*costheta, p.phi);
 }
-template<> PosSph toPos(const PosCar& pos) {
-    return PosSph(sqrt(pow_2(pos.x)+pow_2(pos.y)+pow_2(pos.z)), 
-        atan2(sqrt(pow_2(pos.x) + pow_2(pos.y)), pos.z), atan2(pos.y, pos.x));
+template<> PosSph toPos(const PosCar& p) {
+    return PosSph(sqrt(pow_2(p.x)+pow_2(p.y)+pow_2(p.z)), 
+        atan2(sqrt(pow_2(p.x) + pow_2(p.y)), p.z), atan2(p.y, p.x));
 }
-template<> PosSph toPos(const PosCyl& pos) {
-    return PosSph(sqrt(pow_2(pos.R) + pow_2(pos.z)), atan2(pos.R, pos.z), pos.phi);
+template<> PosSph toPos(const PosCyl& p) {
+    return PosSph(sqrt(pow_2(p.R) + pow_2(p.z)), atan2(p.R, p.z), p.phi);
 }
 template<> PosCyl toPos(const PosProlSph& p) {
     if(fabs(p.nu)>p.coordsys.Delta2 || p.lambda<p.coordsys.Delta2)
@@ -162,7 +169,8 @@ PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, S
 
 template<>
 PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2) {
-    const double cosphi=cos(p.phi), sinphi=sin(p.phi);
+    double sinphi, cosphi;
+    math::sincos(p.phi, sinphi, cosphi);
     const double x=p.R*cosphi, y=p.R*sinphi;
     if(deriv!=NULL) {
         deriv->dxdR=cosphi;
@@ -205,8 +213,9 @@ PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, S
 
 template<>
 PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, Car>* deriv2) {
-    const double sintheta=sin(p.theta), costheta=cos(p.theta);
-    const double sinphi=sin(p.phi), cosphi=cos(p.phi);
+    double sintheta, costheta, sinphi, cosphi;
+    math::sincos(p.theta, sintheta, costheta);
+    math::sincos(p.phi, sinphi, cosphi);
     const double R=p.r*sintheta, x=R*cosphi, y=R*sinphi, z=p.r*costheta;
     if(deriv!=NULL) {
         deriv->dxdr=sintheta*cosphi;
@@ -237,7 +246,8 @@ PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, C
 
 template<>
 PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, Cyl>* deriv2) {
-    const double costheta=cos(p.theta), sintheta=sin(p.theta);
+    double sintheta, costheta;
+    math::sincos(p.theta, sintheta, costheta);
     const double R=p.r*sintheta, z=p.r*costheta;
     if(deriv!=NULL) {
         deriv->dRdr=sintheta;
@@ -385,7 +395,7 @@ PosProlMod toPosDeriv(const PosCyl& p, const ProlMod& cs,
     if(deriv)
         derivCyl2ProlMod(rho, chi, sinv, cosv, *deriv);
     if(deriv2) {
-        throw std::runtime_error("Deriv2 Cyl=>ProlMod not implemented");
+        assert(!"Deriv2 Cyl=>ProlMod not implemented");
     }
     return PosProlMod(rho, cosv / (1 + sinv), p.phi, chi);
 }
@@ -402,15 +412,17 @@ template PosProlSph toPosDeriv(const PosCyl&, const ProlSph&,
 //--------  position+velocity conversion functions  ---------//
 
 template<> PosVelCar toPosVel(const PosVelCyl& p) {
-    const double cosphi=cos(p.phi), sinphi=sin(p.phi);
+    double sinphi, cosphi;
+    math::sincos(p.phi, sinphi, cosphi);
     const double vx=p.vR*cosphi-p.vphi*sinphi;
     const double vy=p.vR*sinphi+p.vphi*cosphi;
     return PosVelCar(p.R*cosphi, p.R*sinphi, p.z, vx, vy, p.vz);
 }
 
 template<> PosVelCar toPosVel(const PosVelSph& p) {
-    const double sintheta=sin(p.theta), costheta=cos(p.theta);
-    const double sinphi=sin(p.phi), cosphi=cos(p.phi);
+    double sintheta, costheta, sinphi, cosphi;
+    math::sincos(p.theta, sintheta, costheta);
+    math::sincos(p.phi, sinphi, cosphi);
     const double R=p.r*sintheta, vmer=p.vr*sintheta + p.vtheta*costheta;
     const double vx=vmer*cosphi - p.vphi*sinphi;
     const double vy=vmer*sinphi + p.vphi*cosphi;
@@ -429,7 +441,8 @@ template<> PosVelCyl toPosVel(const PosVelCar& p) {
 }
 
 template<> PosVelCyl toPosVel(const PosVelSph& p) {
-    const double costheta=cos(p.theta), sintheta=sin(p.theta);
+    double sintheta, costheta;
+    math::sincos(p.theta, sintheta, costheta);
     const double R=p.r*sintheta, z=p.r*costheta;
     const double vR=p.vr*sintheta+p.vtheta*costheta;
     const double vz=p.vr*costheta-p.vtheta*sintheta;

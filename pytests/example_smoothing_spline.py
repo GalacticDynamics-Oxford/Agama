@@ -15,8 +15,6 @@ with several choices of smoothing parameter.
 import agama,numpy
 from matplotlib.pyplot import *
 from scipy.stats import gaussian_kde
-def gaussian(x, x0, sigma):
-    return (2*numpy.pi)**-0.5 / sigma * numpy.exp( -0.5 * ( (x-x0) / sigma)**2 )
 
 ### example 1: density estimate
 def gaussian(x, x0, sigma):
@@ -38,7 +36,7 @@ kde1 = gaussian_kde(data, 0.1)
 grid = numpy.linspace(-3, 3, 20)  # x-grid nodes for the spline
 spl  = agama.splineLogDensity(grid, data, infLeft=True, infRight=True)
 # plot the results
-x = numpy.linspace(-4., 4., 200)  # interval for plotting
+x = numpy.linspace(-4., 4., 201)  # interval for plotting
 plot(x, myfnc(x), label='Original f(x)')
 step(bins[:-1], hist, where='post', color='lightgrey', label='Simple histogram')
 plot(x, kde0(x), color='g', label='Kernel density, auto bandwidth')[0].set_dashes([6,2])

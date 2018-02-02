@@ -36,7 +36,7 @@ isochrone potential, used as the toy mapping.
 
 #include "Maps.h"
 
-namespace Torus{
+namespace torus{
 typedef Vector<double,4> IsoPar; // Vector.h
 ////////////////////////////////////////////////////////////////////////////////
 

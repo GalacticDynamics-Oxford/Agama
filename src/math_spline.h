@@ -655,6 +655,16 @@ public:
     QuinticSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
         const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy);
 
+    /** Initialize a 2d quintic spline from the provided values of x, y, f(x,y), df/dx, df/dy, and
+        the mixed second derivative d2f/dxdy, which improves the accuracy of interpolation.
+        The latter four are 2d arrays (variables of Matrix type) with the following indexing
+        convention:  f(i,j) = f(x[i],y[j]), etc.
+        Values of x and y arrays should monotonically increase.
+    */
+    QuinticSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
+        const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy,
+        const Matrix<double>& d2fdxdy);
+    
     /** compute the value of spline and optionally its derivatives at point x,y */
     virtual void evalDeriv(const double x, const double y,
         double* value=NULL, double* deriv_x=NULL, double* deriv_y=NULL,

@@ -14,7 +14,7 @@
 #include <fstream>
 #include "Orb.h"
 
-namespace Torus{
+namespace torus{
 using std::ofstream;
 
 

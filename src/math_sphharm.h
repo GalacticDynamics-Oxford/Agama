@@ -6,6 +6,7 @@
 #pragma once
 #include "coord.h"
 #include <vector>
+#include <utility>
 
 namespace math {
 
@@ -40,7 +41,7 @@ void sphHarmArray(const unsigned int lmax, const unsigned int m, const double ta
 /** Compute the values of cosines and optionally sines of an arithmetic progression of angles:
     cos(phi), cos(2 phi), ..., cos(m phi), [ sin(phi), sin(2 phi), ..., sin(m phi) ].
     \param[in]  phi - the angle;
-    \param[in]  m   - the number of multiples of this angle to process, must be >=1 (not checked);
+    \param[in]  m   - the number of multiples of this angle to process, must be >=1;
     \param[in]  needSine - whether to compute sines as well (if false then only cosines are computed);
     \param[out] outputArray - pointer to an existing array of length m (if needSine==false)
     or 2m (if needSine==true) that will store the output values.
@@ -122,9 +123,8 @@ public:
     /** Create the spherical-harmonic indexing scheme for the given symmetry type
         and expansion order.
         \param[in] sym  - the type of symmetry that determines which coefficients to omit;
-        \param[in] lmax - (max) order of expansion in polar angle (theta), 
-                   the actual lmax may be set to zero if have spherical symmetry;
-        \param[in] mmax - (max) order of expansion in azimuth (phi), the actual may be set to zero.
+        \param[in] lmax - order of expansion in polar angle (theta);
+        \param[in] mmax - order of expansion in azimuthal angle (phi);
         \returns   the instance of indexing scheme to be passed to spherical harmonic transform.
     */
     SphHarmIndices(int lmax, int mmax, coord::SymmetryType sym);

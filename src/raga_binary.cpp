@@ -25,11 +25,8 @@ public:
         sol(_sol), r2crit(_r2crit)  {}
     
     /// return the difference between the radius at the given time and the critical radius (both squared)
-    virtual double value(const double time) const
-    {
-        double point[6];
-        sol.getSol(time, point);
-        return pow_2(point[0]) + pow_2(point[1]) + pow_2(point[2]) - r2crit;
+    virtual double value(const double time) const {
+        return pow_2(sol.getSol(time, 0)) + pow_2(sol.getSol(time, 1)) + pow_2(sol.getSol(time, 2)) - r2crit;
     }
 };
 
@@ -50,17 +47,16 @@ static double computeLztorque(
     if(isZRotSymmetric(potential))
         return 0;
     // integrate the torque over the interval [t1:t2] using 2-point Gauss rule
-    const double delta = 0.211324865; // (1-sqrt(1./3))/2
-    double point[6];
-    coord::GradCar grad;
-    sol.getSol(t1 * delta + t2 * (1-delta), point);
-    potential.eval(coord::PosCar(point[0], point[1], point[2]), NULL, &grad);
-    double torque = point[0] * grad.dy - point[1] * grad.dx;
-    sol.getSol(t2 * delta + t1 * (1-delta), point);
-    potential.eval(coord::PosCar(point[0], point[1], point[2]), NULL, &grad);
-    torque += point[0] * grad.dy - point[1] * grad.dx;
+    static const double delta = 0.211324865; // (1-sqrt(1./3))/2
+    double ta = t1 * delta + t2 * (1-delta), tb = t2 * delta + t1 * (1-delta);
+    coord::GradCar ga, gb;
+    coord::PosCar pa(sol.getSol(ta, 0), sol.getSol(ta, 1), sol.getSol(ta, 2));
+    coord::PosCar pb(sol.getSol(tb, 0), sol.getSol(tb, 1), sol.getSol(tb, 2));
+    potential.eval(pa, NULL, &ga);
+    potential.eval(pb, NULL, &gb);
+    double torque = 0.5 * (t2-t1) * (pa.x * ga.dy - pa.y * ga.dx  +  pb.x * gb.dy - pb.y * gb.dx);
     if(isFinite(torque))
-        return torque * 0.5 * (t2-t1);
+        return torque;
     else {
         utils::msg(utils::VL_WARNING, "RuntimeBinary", "Cannot compute torque due to stellar potential");
         return 0;
@@ -72,8 +68,10 @@ orbit::StepResult RuntimeBinary::processTimestep(
 {
     // first determine whether the particle experiences an encounter during this timestep
     double ptbegin[6], ptend[6];  // position/velocity at the beginning and the end of encounter
-    sol.getSol(tbegin, ptbegin);  // initially assigned to the beginning/end of timestep
-    sol.getSol(tend,   ptend);
+    for(int d=0; d<6; d++) {      // initially assigned to the beginning/end of timestep
+        ptbegin[d] = sol.getSol(tbegin, d);
+        ptend  [d] = sol.getSol(tend, d);
+    }
     double r2begin = pow_2(ptbegin[0]) + pow_2(ptbegin[1]) + pow_2(ptbegin[2]);
     double r2end   = pow_2(ptend  [0]) + pow_2(ptend  [1]) + pow_2(ptend  [2]);
     double r2crit  = pow_2(bh.sma * BINARY_ENCOUNTER_RADIUS);
@@ -92,10 +90,12 @@ orbit::StepResult RuntimeBinary::processTimestep(
         assert(tcross >= tbegin && tcross <= tend);
         if(r2begin >= r2crit) {
             tbeginEnc = tcross;
-            sol.getSol(tcross, ptbegin);
+            for(int d=0; d<6; d++)
+                ptbegin[d] = sol.getSol(tcross, d);
         } else {
             tendEnc = tcross;
-            sol.getSol(tcross, ptend);
+            for(int d=0; d<6; d++)
+                ptend[d] = sol.getSol(tcross, d);
         }
     }
     

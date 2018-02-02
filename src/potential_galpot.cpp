@@ -57,17 +57,18 @@ private:
     virtual unsigned int numDerivs() const { return 2; }
 };
 
-/** more convoluted radial density profile - exponential with possible inner hole and modulation */
+/** more complex radial density profile - exponential/Sersic with possible inner hole and modulation */
 class DiskDensityRadialRichExp: public math::IFunction {
 public:
     DiskDensityRadialRichExp(const DiskParam& params):
         surfaceDensity     (params.surfaceDensity),
         invScaleRadius  (1./params.scaleRadius),
         innerCutoffRadius  (params.innerCutoffRadius),
-        modulationAmplitude(params.modulationAmplitude)
+        modulationAmplitude(params.modulationAmplitude),
+        invSersicIndex  (1./params.sersicIndex)
     {};
 private:
-    const double surfaceDensity, invScaleRadius, innerCutoffRadius, modulationAmplitude;
+    const double surfaceDensity, invScaleRadius, innerCutoffRadius, modulationAmplitude, invSersicIndex;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
     virtual void evalDeriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
         if(innerCutoffRadius && R==0.) {
@@ -79,14 +80,18 @@ private:
         const double
             Rinv = 1 / R,
             Rrel = R * invScaleRadius,
+            Rrn  = math::pow(Rrel, invSersicIndex),
+            RrnR = R>0 ? Rrn * Rinv : invSersicIndex==1 ? 1. : invSersicIndex>1 ? 0. : INFINITY,
             Rcut = innerCutoffRadius ? innerCutoffRadius * Rinv : 0,
             cr   = modulationAmplitude ? modulationAmplitude * cos(Rrel) : 0,
             sr   = modulationAmplitude ? modulationAmplitude * sin(Rrel) : 0,
-            val  = surfaceDensity * exp(-Rcut - Rrel + cr),
-            fp   = Rcut * Rinv - (1+sr) * invScaleRadius;
+            val  = surfaceDensity * exp(-Rcut - Rrn + cr),
+            fp   = Rcut * Rinv - invSersicIndex * RrnR - sr * invScaleRadius;
         if(fpprime)
-            *fpprime = val ? (fp*fp - 2*Rcut*pow_2(Rinv)
-                - cr * pow_2(invScaleRadius)) * val : 0;  // if val==0, the bracket could be NaN
+            *fpprime = val ?
+                val * (fp*fp - 2*Rcut*pow_2(Rinv) - cr * pow_2(invScaleRadius) +
+                (invSersicIndex==1 ? 0 : RrnR * Rinv * invSersicIndex * (1-invSersicIndex)) ) :
+                0;  // if val==0, the bracket could be NaN
         if(fprime)
             *fprime  = val ? fp*val : 0;
         if(f) 
@@ -105,7 +110,7 @@ private:
         if(x==0 || x==1) return 0;
         double Rrel = x/(1-x);
         return x / pow_3(1-x) *
-            exp(-params.innerCutoffRadius/params.scaleRadius/Rrel - Rrel
+            exp(-params.innerCutoffRadius/params.scaleRadius/Rrel - math::pow(Rrel, 1/params.sersicIndex)
                 +params.modulationAmplitude*cos(Rrel));
     }
 };
@@ -120,7 +125,8 @@ private:
     virtual void evalDeriv(double z, double* H=NULL, double* Hprime=NULL, double* Hpprime=NULL) const {
         double      x        = fabs(z * invScaleHeight);
         double      h        = exp(-x);
-        if(H)       *H       = 0.5 / invScaleHeight * (h-1+x);
+        if(H)       *H       = 0.5 / invScaleHeight *  // use asymptotic expansion for small x
+            (x>1e-5 ? h-1+x : x*x * (0.5 - 1./6*x));   // to avoid roundoff errors
         if(Hprime)  *Hprime  = 0.5 * math::sign(z) * (1.-h);
         if(Hpprime) *Hpprime = 0.5 * h * invScaleHeight;
     }
@@ -138,7 +144,8 @@ private:
         double      x        = fabs(z * invScaleHeight);
         double      h        = exp(-x);
         double      sh1      = 1 + h,  invsh1 = 1./sh1;
-        if(H)       *H       = 1./invScaleHeight * (0.5*x + log(0.5*sh1));
+        if(H)       *H       = 1./invScaleHeight *
+            (x>1e-3 ? 0.5*x + log(0.5*sh1) : x*x * (1./8 - 1./192*x*x));
         if(Hprime)  *Hprime  = 0.5 * math::sign(z) * (1.-h) * invsh1;
         if(Hpprime) *Hpprime = h * invScaleHeight * pow_2(invsh1);
     }
@@ -167,7 +174,9 @@ math::PtrFunction createRadialDiskFnc(const DiskParam& params) {
         throw std::invalid_argument("Disk scale radius cannot be <=0");
     if(params.innerCutoffRadius<0)
         throw std::invalid_argument("Disk inner cutoff radius cannot be <0");
-    if(params.innerCutoffRadius==0 && params.modulationAmplitude==0)
+    if(params.sersicIndex<=0)
+        throw std::invalid_argument("Disk Sersic index must be positive");
+    if(params.innerCutoffRadius==0 && params.modulationAmplitude==0 && params.sersicIndex==1)
         return math::PtrFunction(new DiskDensityRadialExp(params));
     else
         return math::PtrFunction(new DiskDensityRadialRichExp(params));
@@ -187,8 +196,8 @@ double DiskParam::mass() const
 {
     if(modulationAmplitude==0) {  // have an analytic expression
         if(innerCutoffRadius==0)
-            return 2*M_PI * pow_2(scaleRadius) * surfaceDensity;
-        else {
+            return M_PI * pow_2(scaleRadius) * surfaceDensity * math::gamma(2*sersicIndex+1);
+        else if(sersicIndex==1) {
             double p = sqrt(innerCutoffRadius / scaleRadius);
             return 4*M_PI * pow_2(scaleRadius) * surfaceDensity *
                 p * (p * math::besselK(0, 2*p) + math::besselK(1, 2*p));
@@ -218,8 +227,8 @@ void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
 {
     double r = sqrt(pow_2(pos.R) + pow_2(pos.z));
     double h=0, H=0, Hp=0, f=0, fp=0, fpp=0;
-    bool deriv1 = deriv!=NULL || deriv2!=NULL;  // compute 1st derivative of f and H only if necessary
-    verticalFnc->evalDeriv(pos.z, &H, deriv1? &Hp : NULL, deriv2? &h : NULL);
+    bool deriv1 = deriv!=NULL || deriv2!=NULL;  // compute derivatives of f and H only if necessary
+    verticalFnc->evalDeriv(pos.z, &H, deriv1? &Hp : NULL, deriv2? &h   : NULL);
     radialFnc  ->evalDeriv(r,     &f, deriv1? &fp : NULL, deriv2? &fpp : NULL);
     f  *= 4*M_PI;
     fp *= 4*M_PI;

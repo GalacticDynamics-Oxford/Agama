@@ -152,7 +152,7 @@ void RagaCore::doEpisode()
         }
     }   // end parallel for
 
-    double wallClockDurationEpisode = std::max<double>(1., std::time(NULL) - wallClockStartEpisode);
+    double wallClockDurationEpisode = std::max(1., difftime(std::time(NULL), wallClockStartEpisode));
     utils::msg(utils::VL_MESSAGE, "RagaEpisode",
         utils::toString(nbody) + " particles, " +
         utils::toString(nbody / wallClockDurationEpisode) + " orbits/s");

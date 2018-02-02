@@ -20,7 +20,7 @@ as well as the true potential.
 #define _Pot_def_ 1
 
 #include "Types.h"
-namespace Torus{
+namespace torus{
 /**
    \brief Base class for user defined potentials (or those provided).
 

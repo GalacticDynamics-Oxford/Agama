@@ -1,10 +1,19 @@
 """
-This is a collection of various routines that complement the Python interface to the Agama library
+This is a collection of various routines that complement the Python interface to the Agama library.
+Since it also imports all classes and routines from the python wrapper to the C++ library
+into its namespace, one may write
+>>> import pygama as agama                        # import both C++ and Python modules simultaneously
+>>> par = agama.getDensityParams(1., 2., 3., 4.)  # use routines from this file...
+>>> den = agama.Density(**par)                    # and classes and routines defined in the C++ library
+
+If Galpy is available, this module adds a class AgamaPotential that inherits galpy.potential.Potential,
+and can be used as a regular galpy potential class, although for the orbit integration or action
+computation, the native Agama counterparts are preferred.
 """
 import numpy, bisect
 from agama import *
 
-### -------------------------------------------------------------------------------------------- ###
+### ------------------------------------------------------------------------------- ###
 ### routines for dealing with 2d IFU data, represented on a regular 2d grid of spaxels,
 ### several spaxels could be Voronoi-binned together into apertures.
 ### Agama uses arbitrary polygons that define the boundaries of each aperture,
@@ -49,7 +58,7 @@ def getBinnedApertures(xcoords, ycoords, bintags):
         # obtain the table of x- and y-indices of all elements with the same binTag
         ix, iy = (matrix==b).nonzero()
         if len(ix)==0:
-            print "Empty bin", b
+            print ("Empty bin", b)
             continue
         minx   = min(ix)-1
         maxx   = max(ix)+2
@@ -120,8 +129,9 @@ def readApertures(filename):
 
 
 
-### -------------------------------------------------------------------------------------------- ###
-### routines for coordinate transformation, projection and deprojection of a Multi-Gaussian expansion
+### ------------------------------------------------------------------ ###
+### routines for coordinate transformation, projection and deprojection
+### of ellipsoidally stratified profiles (e.g. a Multi-Gaussian expansion)
 
 def makeProjectionMatrix(theta, phi, chi):
     """
@@ -243,13 +253,17 @@ def getViewingAngles(Sxp, Syp, eta, Sx, Sy, Sz):
     chi   = eta - psi
     return (theta, phi, chi)
 
+
+### ---------------------------------------- ###
+### Specific tools for Multi-Gaussian expansions
+
 def getDensityParams(Mass, Sx, Sy, Sz):
     """
     return a dictionary containing parameters for creating agama.Density object
     corresponding to a single Gaussian component of an MGE
     """
     return dict( \
-        density = "SpheroidDensity",
+        density = "Spheroid",
         axisRatioY  = Sy/Sx,
         axisRatioZ  = Sz/Sx,
         scaleRadius = 1,
@@ -277,8 +291,21 @@ def makeDensityFromMGE(tab, distance, theta, phi, chi):
     masses = 2*numpy.pi * (conv * tab[:,1])**2 * tab[:,0] * tab[:,2]
     return Density(*[Density( **getDensityParams(mass, *axes)) for mass,axes in zip(masses, intrshape)])
 
+def surfaceDensityFromMGE(tab, xp, yp):
+    """
+    Evaluate the surface density specified by a MGE at a given set of points xp,yp in the image plane
+    Input:
+    tab - array with 3 columns, as read from a text file produced by MGE fitting routines
+    each row contains data for one Gaussian components, columns are:
+    central luminosity (Lsun/pc^2), width of the major axis (arcsec), flattening (q<=1).
+    xp, yp - two arrays of equal length, specifying the image plane coordinates of points
+    where the surface density should be computed
+    """
+    return numpy.sum([comp[0] * numpy.exp( -0.5 * (xp**2 + (yp/comp[2])**2) / comp[1]**2) \
+        for comp in tab], axis=0)
 
-### -------------------------------------------------------------------------------------------- ###
+
+### -------------------------------------------------------------------------- ###
 ### routines for representing a function specified in terms of its coefficients of
 ### B-spline or Gauss-Hermite expansions
 
@@ -360,8 +387,10 @@ def GaussHermite(gamma, center, sigma, coefs, xarr):
     else: result = 1.
     return result * norm
 
-### --------------------- ###
-### module initialization ###
+
+### ---------------------------------------------------------------------------- ###
+### module initialization - extend the functionality of some third-party modules ###
+
 try:
     # register two new colormaps for matplotlib: "sauron", "sauron_r" by Michele Cappellari & Eric Emsellem
     import matplotlib, matplotlib.pyplot
@@ -373,4 +402,132 @@ try:
         { 'red': zip(f,r,r), 'green': zip(f,g,g), 'blue': zip(f,b,b) } ))
     matplotlib.pyplot.register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron_r', \
         { 'red': zip(f,r[::-1],r[::-1]), 'green': zip(f,g[::-1],g[::-1]), 'blue': zip(f,b[::-1],b[::-1]) } ))
-except ImportError: pass
+    del f; del r; del g; del b;  # remove the temporary variables from the module namespace
+
+except ImportError: pass   # no matplotlib - no problem
+
+
+try:
+    # This wrapper class allows to use Agama potentials as regular galpy potentials
+    import galpy.potential
+    class AgamaPotential(galpy.potential.Potential):
+        """
+        Class that implements a Galpy interface to Agama potentials
+        """
+        def __init__(self,*args,**kwargs):
+            """
+            Initialize a potential from parameters provided in an INI file
+            or as named arguments to the constructor.
+            Arguments are the same as for regular agama.Potential (see below);
+            an extra keyword "normalize=..." has the same meaning as in Galpy:
+            if True, normalize such that vc(1.,0.)=1., or,
+            if given as a number, such that the force is this fraction of the force
+            necessary to make vc(1.,0.)=1.
+
+            """
+            galpy.potential.Potential.__init__(self,amp=1.)
+            normalize=False
+            for key, value in kwargs.items():
+                if key=="normalize":
+                    normalize=value
+                    del kwargs[key]
+            self._pot = Potential(*args,**kwargs)  # regular Agama potential
+            if normalize or \
+                    (isinstance(normalize,(int,float)) \
+                        and not isinstance(normalize,bool)):
+                self.normalize(normalize)
+            self.hasC= False
+            self.hasC_dxdv=False
+        __init__.__doc__ += Potential.__doc__
+
+        def _coord(self,R,z,phi):
+            """
+            convert input cylindrical coordinates to a Nx3 array in cartesian coords
+            """
+            if phi is None: phi=0.
+            return numpy.array((R*numpy.cos(phi), R*numpy.sin(phi), z)).T
+
+        def _evaluate(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the potential at cylindrical coordinates R,z,phi
+            """
+            return self._pot.potential(self._coord(R,z,phi))
+
+        def _Rforce(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the radial force for this potential: -dPhi/dR
+            """
+            coord=self._coord(R,z,phi)
+            force=numpy.array(self._pot.force(coord))
+            return (force.T[0]*coord.T[0] + force.T[1]*coord.T[1]) / R
+
+        def _zforce(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the vertical force for this potential: -dPhi/dz
+            """
+            return numpy.array(self._pot.force(self._coord(R,z,phi))).T[2]
+
+        def _phiforce(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the azimuthal force for this potential: -dPhi/dphi
+            """
+            coord=self._coord(R,z,phi)
+            force=numpy.array(self._pot.force(coord))
+            return force.T[1]*coord.T[0] - force.T[0]*coord.T[1]
+
+        def _dens(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the density for this potential
+            """
+            return self._pot.density(self._coord(R,z,phi))
+
+        def _2deriv(self,R,z,phi):
+            coord=self._coord(R,z,phi)
+            force,deriv=self._pot.forceDeriv(coord)
+            return coord.T, numpy.array(force).T, numpy.array(deriv).T
+
+        def _R2deriv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the second radial derivative for this potential: d2Phi / dR^2
+            """
+            coord,force,deriv=self._2deriv(R,z,phi)
+            return -(deriv[0]*coord[0]**2 + deriv[1]*coord[1]**2 +
+                   2*deriv[3]*coord[0]*coord[1]) / R**2
+
+        def _z2deriv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the second vertical derivative for this potential: d2Phi / dz^2
+            """
+            return -numpy.array(self._pot.forceDeriv(self._coord(R,z,phi))[1]).T[2]
+
+        def _phi2deriv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the second azimuthal derivative for this potential: d2Phi / dphi^2
+            """
+            coord,force,deriv=self._2deriv(R,z,phi)
+            return -(deriv[0]*coord[1]**2 + deriv[1]*coord[0]**2 -
+                   2*deriv[3]*coord[0]*coord[1] - force[0]*coord[0] - force[1]*coord[1])
+
+        def _Rzderiv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the mixed R,z derivative for this potential: d2Phi / dR dz
+            """
+            coord,force,deriv=self._2deriv(R,z,phi)
+            return -(deriv[5]*coord[0] + deriv[4]*coord[1]) / R
+
+        def _Rphideriv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the mixed R,phi derivative for this potential: d2Phi / dR dphi
+            """
+            coord,force,deriv=self._2deriv(R,z,phi)
+            return -((deriv[1]-deriv[0])*coord[1]*coord[0] + deriv[3]*(coord[0]**2-coord[1]**2)
+                - force[0]*coord[1] + force[1]*coord[0]) / R
+
+        def _zphideriv(self,R,z,phi=0.,t=0.):
+            """
+            evaluate the mixed z,phi derivative for this potential: d2Phi / dz dphi
+            """
+            coord,force,deriv=self._2deriv(R,z,phi)
+            return -(deriv[4]*coord[0] - deriv[5]*coord[1])
+
+except ImportError: pass   # no galpy - no problem

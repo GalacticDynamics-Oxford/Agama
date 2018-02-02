@@ -25,7 +25,7 @@ nearly closed orbits in R-z plane.
 #include "Types.h"
 #include "CHB.h"
 
-namespace Torus{
+namespace torus{
 ////////////////////////////////////////////////////////////////////////////////
 
 /**

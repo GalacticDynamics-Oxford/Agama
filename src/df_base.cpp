@@ -13,15 +13,16 @@ actions::Actions ActionSpaceScalingTriangLog::toActions(const double vars[], dou
     const double u = vars[0], v = vars[1], w = vars[2];
     if(u<0 || u>1 || v<0 || v>1 || w<0 || w>1)
         throw std::range_error("ActionSpaceScaling: input variables outside unit cube");
-    const double vv = v*v * (3-2*v),            // cubic transformation to stretch the range near v=0,v=1
-    Js = exp( 1/(1-u) - 1/u ),                  // hypot(Jr+Jz, Jphi)
-    Jm = v==0 || v==1 ? 0 : Js * sin(M_PI*vv);  // Jr+Jz
+    double vv = M_PI * v*v * (3-2*v),  // cubic transformation to stretch the range near v=0,v=1
+    sv,cv, Js = exp( 1/(1-u) - 1/u );  // hypot(Jr+Jz, Jphi)
+    math::sincos(vv, sv, cv);
+    double Jm = v==0 || v==1 ? 0 : Js * sv;   // Jr+Jz
     if(jac) {
         *jac = M_PI * 6*v*(1-v) * Jm * Js * Js * (1/pow_2(1-u) + 1/pow_2(u));
         if(!(*jac > 1e-100 && *jac < 1e100))    // if near J=0 or infinity, set jacobian to zero
             *jac = 0;
     }
-    return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), v==0.5 ? 0 : Js * cos(M_PI*vv));
+    return actions::Actions(w==0 ? 0 : Jm * w, w==1 ? 0 : Jm * (1-w), v==0.5 ? 0 : Js * cv);
 }
 
 void ActionSpaceScalingTriangLog::toScaled(const actions::Actions &acts, double vars[3]) const
@@ -82,7 +83,7 @@ public:
     const BaseDistributionFunction& df;        ///< the instance of DF
     const ActionSpaceScalingTriangLog scaling; ///< scaling transformation
 
-    DFIntegrandNdim(const BaseDistributionFunction& _df) : df(_df) {};
+    DFIntegrandNdim(const BaseDistributionFunction& _df) : df(_df), scaling() {};
 
     /// compute the value of DF, taking into accound the scaling transformation for actions:
     /// input array of length 3 contains the three actions, scaled as described above;

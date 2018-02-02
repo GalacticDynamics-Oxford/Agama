@@ -145,9 +145,10 @@ public:
         double substep = (tend-tbegin) / NUM_SAMPLES_PER_STEP;  // duration of each sub-step
         double *dataptr = datacube.data();
         for(int s=0; s<NUM_SAMPLES_PER_STEP; s++) {
-            double point[6];  // position and velocity in cartesian coordinates at the current sub-step
             double tsubstep = tbegin + substep * (s+0.5);  // equally-spaced samples in time
-            solver.getSol(tsubstep, point);
+            double point[6];  // position and velocity in cartesian coordinates at the current sub-step
+            for(int c=0; c<6; c++)
+                point[c] = solver.getSol(tsubstep, c);
             target.addPoint(point, substep, dataptr);
         }
         return orbit::SR_CONTINUE;

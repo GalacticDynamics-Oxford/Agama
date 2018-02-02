@@ -171,7 +171,7 @@ struct ProlMod{
 /// position in arbitrary coordinates:
 /// the data types are defined as templates with the template parameter
 /// being any of the coordinate system names defined above
-template<typename CoordSysT> struct PosT;
+template<typename CoordT> struct PosT;
 
 /// position in cartesian coordinates
 template<> struct PosT<Car>{
@@ -195,7 +195,7 @@ typedef struct PosT<Cyl> PosCyl;
 /// position in spherical coordinates
 template<> struct PosT<Sph>{
     double r;     ///< spherical radius
-    double theta; ///< polar angle [0:pi) - 0 means along z axis in positive direction,
+    double theta; ///< polar angle [0:pi] - 0 means along z axis in positive direction,
                   ///< pi is along z in negative direction, pi/2 is in x-y plane
     double phi;   ///< azimuthal angle in x-y plane [0:2pi)
     PosT<Sph>() {};
@@ -253,7 +253,7 @@ typedef struct PosT<ProlMod> PosProlMod;
 ///@{
 
 /// velocity in arbitrary coordinates
-template<typename CoordSysT> struct VelT;
+template<typename CoordT> struct VelT;
 
 /// velocity in cartesian coordinates
 template<> struct VelT<Car> {
@@ -295,7 +295,7 @@ typedef struct VelT<ProlMod> VelProlMod;
 ///@{
 
 /// second moment of velocity in arbitrary coordinates
-template<typename CoordSysT> struct Vel2T;
+template<typename CoordT> struct Vel2T;
 
 /// velocity in cartesian coordinates
 template<> struct Vel2T<Car> {
@@ -320,7 +320,7 @@ typedef struct Vel2T<Sph> Vel2Sph;
 ///@{
 
 /// combined position and velocity in arbitrary coordinates
-template<typename CoordSysT> struct PosVelT;
+template<typename CoordT> struct PosVelT;
 
 /// combined position and velocity in cartesian coordinates
 template<> struct PosVelT<Car>: public PosCar, public VelCar {
@@ -406,7 +406,7 @@ typedef struct PosVelT<ProlMod> PosVelProlMod;
 ///@{
 
 /// components of a gradient in a given coordinate system
-template<typename CoordSysT> struct GradT;
+template<typename CoordT> struct GradT;
 
 /// gradient of scalar function in cartesian coordinates
 template<> struct GradT<Car>{
@@ -443,7 +443,7 @@ typedef struct GradT<ProlMod> GradProlMod;
 ///@{
 
 /// components of a hessian of a scalar function (matrix of its second derivatives)
-template<typename CoordSysT> struct HessT;
+template<typename CoordT> struct HessT;
 
 /// Hessian of scalar function F in cartesian coordinates: d2F/dx^2, d2F/dxdy, etc
 template<> struct HessT<Car>{
@@ -480,17 +480,17 @@ typedef struct HessT<ProlMod> HessProlMod;
 ///@{
 
 /** Prototype of a scalar function which is computed in a particular coordinate system */
-template<typename CoordSysT>
+template<typename CoordT>
 class IScalarFunction {
 public:
     IScalarFunction() {};
     virtual ~IScalarFunction() {};
     /** Evaluate any combination of value, gradient and hessian of the function at a given point.
         Each of these quantities is computed and stored in the output pointer if it was not NULL. */
-    virtual void evalScalar(const PosT<CoordSysT>& x,
+    virtual void evalScalar(const PosT<CoordT>& x,
         double* value=NULL,
-        GradT<CoordSysT>* deriv=NULL,
-        HessT<CoordSysT>* deriv2=NULL) const=0;
+        GradT<CoordT>* deriv=NULL,
+        HessT<CoordT>* deriv2=NULL) const=0;
 };
 
 ///@}
@@ -806,14 +806,14 @@ void evalAndConvertSph(const math::IFunction& F,
 ///@{
 
 /// convenience functions to extract the value of angular momentum and its z-component
-template<typename coordT> double Ltotal(const PosVelT<coordT> &p);
-template<typename coordT> double Lz(const PosVelT<coordT> &p);
+template<typename CoordT> double Ltotal(const PosVelT<CoordT> &p);
+template<typename CoordT> double Lz(const PosVelT<CoordT> &p);
 
 /** evaluate the kinetic energy from position/momentum in the given coordinate system;
     optionally also output its derivative w.r.t each coordinate/momentum in the second argument
 */
-template<typename coordT>
-double Ekin(const PosVelT<coordT> &p, coord::GradT<coordT> *dEbyPos=NULL, coord::VelT<coordT> *dEbyVel=NULL);
+template<typename CoordT>
+double Ekin(const PosVelT<CoordT> &p, coord::GradT<CoordT> *dEbyPos=NULL, coord::VelT<CoordT> *dEbyVel=NULL);
 
 ///@}
 

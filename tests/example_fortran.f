@@ -32,7 +32,7 @@ C  Example 1:  constructing a potential from parameters provided in a single str
 C  the first parameter is always the placeholder for the pointer to C++ object,
 C  the second one is a string encoding all parameters.
       call agama_initfromparam(c_obj1,
-     &    'type=SpheroidDensity axisRatioZ=0.5 gamma=0.5 beta=5.0 '//
+     &    'type=Spheroid axisRatioZ=0.5 gamma=0.5 beta=5.0 '//
      &    'scaleRadius=2.5 densityNorm=1')
 
 C  Example 2:  constructing a potential approximation from the user-provided

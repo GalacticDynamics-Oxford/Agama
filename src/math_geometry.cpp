@@ -262,9 +262,10 @@ bool isPointInsidePolygon(double x, double y, const Polygon& polygon)
 
 void makeRotationMatrix(double theta, double phi, double chi, double mat[9])
 {
-    double sintheta = sin(theta), costheta = cos(theta),
-    sinphi = sin(phi), cosphi = cos(phi),
-    sinchi = sin(chi), coschi = cos(chi);
+    double sintheta, costheta, sinphi, cosphi, sinchi, coschi;
+    sincos(theta, sintheta, costheta);
+    sincos(phi, sinphi, cosphi);
+    sincos(chi, sinchi, coschi);
     mat[0] = -coschi * sinphi + sinchi * costheta * cosphi;
     mat[1] =  coschi * cosphi + sinchi * costheta * sinphi;
     mat[2] = -sinchi * sintheta;

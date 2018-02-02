@@ -43,6 +43,7 @@ SOURCES   = \
             math_sphharm.cpp \
             math_spline.cpp \
             orbit.cpp \
+            orbit_lyapunov.cpp \
             particles_io.cpp \
             potential_analytic.cpp \
             potential_base.cpp \
@@ -90,6 +91,7 @@ TESTSRCS  = test_math_core.cpp \
             test_units.cpp \
             test_utils.cpp \
             test_orbit_integr.cpp \
+            test_orbit_lyapunov.cpp \
             test_potentials.cpp \
             test_potential_expansions.cpp \
             test_isochrone.cpp \
@@ -101,7 +103,7 @@ TESTSRCS  = test_math_core.cpp \
             test_density_grid.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
-            example_lyapunov.cpp \
+            example_doublepowerlaw.cpp \
             example_self_consistent_model.cpp \
             mkspherical.cpp \
             phaseflow.cpp \

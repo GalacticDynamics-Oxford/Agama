@@ -13,7 +13,7 @@
 #include "WD_Numerics.h"
 #include <cmath>
 
-namespace Torus{
+namespace torus{
 
 inline double pow_2(double x) {return x*x;}
 inline double pow_3(double x) {return x*x*x;}

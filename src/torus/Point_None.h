@@ -21,7 +21,7 @@
 #define _NoTra_ 1
 
 #include "Maps.h"
-namespace Torus{
+namespace torus{
 ////////////////////////////////////////////////////////////////////////////////
 
 /** \brief Null point transform.

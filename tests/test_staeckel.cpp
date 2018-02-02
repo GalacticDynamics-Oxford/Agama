@@ -27,10 +27,13 @@
 #include <sstream>
 #include <cmath>
 
-const double eps=1e-7;               // accuracy of comparison
+const double eps=5e-8;               // accuracy of comparison
+const double epsi=5e-7;              // accuracy of comparison for interpolator
 const double epsint=2e-3;            // accuracy of action interpolator
 const double axis_a=1.6, axis_c=1.0; // axes of perfect ellipsoid
 const bool output=utils::verbosityLevel >= utils::VL_VERBOSE;  // whether to create text files with orbits
+const char* err=" \033[1;31m**\033[0m\n";
+const char* exc=" \033[1;33mCAUGHT EXCEPTION\033[0m\n";
 
 template<typename coordSysT>
 bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
@@ -42,7 +45,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
         initial_conditions, total_time, timestep, potential);
     actions::ActionStat stats, statf, stati;
     actions::Angles angf;
-    bool ex_afs=false, ex_aff=false, ex_afi=false;
+    bool exs=false, exf=false, exi=false;
     std::ofstream strm;
     if(output) {
         std::ostringstream s;
@@ -63,8 +66,8 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
             stats.add(a);
         }
         catch(std::exception &e) {
-            if(!ex_afs) std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
-            ex_afs=true;
+            if(!exs) std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
+            exs=true;
         }
         try {
             actions::ActionAngles a = actions::actionAnglesAxisymFudge(potential, p, ifd_p);
@@ -80,53 +83,58 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
                 const coord::PosVelProlSph pp = coord::toPosVel<coord::Cyl,coord::ProlSph>
                     (pc, potential.coordsys());
                 strm << i*timestep<<"   "<<
-                    pc.phi<<" "<<pc.vphi<<" "<<pp.lambda<<" "<<pp.nu<<" "<<pp.lambdadot<<" "<<pp.nudot<<"  "<<
+                    pc.phi<<" "<<pc.vphi<<" "<<pp.lambda<<" "<<pp.nu<<" "<<
+                    pp.lambdadot<<" "<<pp.nudot<<"  "<<
                     angf.thetar<<" "<<angf.thetaz<<" "<<angf.thetaphi<<"  "<<
-                "\n";
+                    utils::pp(a.Jr,12)<<" "<<utils::pp(a.Jz,12)<<"  ";
             }
         }
         catch(std::exception &e) {
-            if(!ex_aff) std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
-            ex_aff=true;
+            if(!exf) std::cout << "Exception in Fudge at i="<<i<<": "<<e.what()<<"\n";
+            exf=true;
         }
         try {
             actions::Actions a = actfinder.actions(p);
             stati.add(a);
+            if(output)
+                strm << utils::pp(a.Jr,12)<<" "<<utils::pp(a.Jz,12)<<"\n";
         }
         catch(std::exception &e) {
-            if(!ex_afi) std::cout << "Exception in Interpolator at i="<<i<<": "<<e.what()<<"\n";
-            ex_afi=true;
+            if(!exi) std::cout << "Exception in Interpolator at i="<<i<<": "<<e.what()<<"\n";
+            exi=true;
         }
     }
     stats.finish();
     statf.finish();
     stati.finish();
-    bool ok= stats.rms.Jr<eps && stats.rms.Jz<eps && stats.rms.Jphi<eps && !ex_afs
-          && statf.rms.Jr<eps && statf.rms.Jz<eps && statf.rms.Jphi<eps && !ex_aff
-          && stati.rms.Jr<eps && stati.rms.Jz<eps && stati.rms.Jphi<eps && !ex_afi
-          && fabs(stats.avg.Jr-statf.avg.Jr)<eps
-          && fabs(stats.avg.Jz-statf.avg.Jz)<eps
-          && fabs(stats.avg.Jphi-statf.avg.Jphi)<eps
-          && fabs(stats.avg.Jr-stati.avg.Jr)<epsint
-          && fabs(stats.avg.Jz-stati.avg.Jz)<epsint
-          && (stats.avg.Jz==0 || fabs(ifd_p - ifd_i)<1e-5);
-    std::cout << coordSysT::name() << ", Exact"
-    ":  Jr="  <<stats.avg.Jr  <<" +- "<<stats.rms.Jr<<
-    ",  Jz="  <<stats.avg.Jz  <<" +- "<<stats.rms.Jz<<
-    ",  Jphi="<<stats.avg.Jphi<<" +- "<<stats.rms.Jphi<<
-    (ex_afs ? ",  \033[1;33mCAUGHT EXCEPTION\033[0m\n":"\n");
-    std::cout << coordSysT::name() << ", Fudge"
-    ":  Jr="  <<statf.avg.Jr  <<" +- "<<statf.rms.Jr<<
-    ",  Jz="  <<statf.avg.Jz  <<" +- "<<statf.rms.Jz<<
-    ",  Jphi="<<statf.avg.Jphi<<" +- "<<statf.rms.Jphi<<
-    (ex_aff ? ",  \033[1;33mCAUGHT EXCEPTION\033[0m\n":"\n");
-    std::cout << coordSysT::name() << ", Inter"
-    ":  Jr="  <<stati.avg.Jr  <<" +- "<<stati.rms.Jr<<
-    ",  Jz="  <<stati.avg.Jz  <<" +- "<<stati.rms.Jz<<
-    ",  Jphi="<<stati.avg.Jphi<<" +- "<<stati.rms.Jphi<<
-    (ok?"":" \033[1;31m**\033[0m")<<
-    (ex_afi ? ",  \033[1;33mCAUGHT EXCEPTION\033[0m\n":"\n");
-    return ok;
+    bool oks  = stats.rms.Jr<eps && stats.rms.Jz<eps && stats.rms.Jphi<eps && !exs;
+    bool okf  = statf.rms.Jr<eps && statf.rms.Jz<eps && statf.rms.Jphi<eps && !exf
+        && fabs(stats.avg.Jr-statf.avg.Jr)<eps
+        && fabs(stats.avg.Jz-statf.avg.Jz)<eps
+        && fabs(stats.avg.Jphi-statf.avg.Jphi)<eps
+        &&     (stats.avg.Jz==0 || fabs(ifd_p - ifd_i)<1e-5);
+    bool oki  = stati.rms.Jr<epsi&& stati.rms.Jz<epsi&& stati.rms.Jphi<eps && !exi
+        && fabs(stats.avg.Jr-stati.avg.Jr)<epsint
+        && fabs(stats.avg.Jz-stati.avg.Jz)<epsint;
+    std::string csname(coordSysT::name());
+    csname += ',';
+    csname.resize(12, ' ');
+    std::cout << csname << " Exact"
+    ":  Jr="  << utils::pp(stats.avg.Jr,  9) <<" +- "<< utils::pp(stats.rms.Jr,  7) <<
+    ",  Jz="  << utils::pp(stats.avg.Jz,  9) <<" +- "<< utils::pp(stats.rms.Jz,  7) <<
+    ",  Jphi="<< utils::pp(stats.avg.Jphi,9) <<" +- "<< utils::pp(stats.rms.Jphi,7) <<
+    (exs ? exc : !oks ? err : "\n");
+    std::cout << csname << " Fudge"
+    ":  Jr="  << utils::pp(statf.avg.Jr,  9) <<" +- "<< utils::pp(statf.rms.Jr,  7) <<
+    ",  Jz="  << utils::pp(statf.avg.Jz,  9) <<" +- "<< utils::pp(statf.rms.Jz,  7) <<
+    ",  Jphi="<< utils::pp(statf.avg.Jphi,9) <<" +- "<< utils::pp(statf.rms.Jphi,7) <<
+    (exf ? exc : !okf ? err : "\n");
+    std::cout << csname << " Inter"
+    ":  Jr="  << utils::pp(stati.avg.Jr,  9) <<" +- "<< utils::pp(stati.rms.Jr,  7) <<
+    ",  Jz="  << utils::pp(stati.avg.Jz,  9) <<" +- "<< utils::pp(stati.rms.Jz,  7) <<
+    ",  Jphi="<< utils::pp(stati.avg.Jphi,9) <<" +- "<< utils::pp(stati.rms.Jphi,7) <<
+    (exi ? exc : !oki ? err : "\n");
+    return oks && okf && oki;
 }
 
 bool test_three_cs(const potential::PtrOblatePerfectEllipsoid& potential,

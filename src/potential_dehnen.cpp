@@ -122,19 +122,19 @@ void Dehnen::evalCar(const coord::PosCar &pos,
         }
         return;
     }
-    if(pos.x==0 && pos.y==0 && pos.z==0 && gamma>=2) {
-        if(potential)
-            *potential = -INFINITY;
-        if(deriv)
-            deriv->dx = deriv->dy = deriv->dz = INFINITY;
-        return;
-    }
     if(potential) {
         DehnenIntegrandPhi fnc(pos, gamma, axisRatioY, axisRatioZ, scalerad);
         *potential = math::integrate(fnc, 0, 1, EPSREL_POTENTIAL_INT) * mass/scalerad;
     }
     if(deriv==NULL && deriv2==NULL)
         return;
+    if(pos.x==0 && pos.y==0 && pos.z==0) {
+        if(deriv)
+            deriv->dx = deriv->dy = deriv->dz = 0;
+        if(deriv2)
+            deriv2->dx2 = deriv2->dy2 = deriv2->dz2 = deriv2->dxdy = deriv2->dxdz = deriv2->dydz = NAN;
+        return;
+    }
     double scalerad2 = pow_2(scalerad);
     DehnenIntegrandForce fnc(pos, gamma);
     fnc.a2 = scalerad2;

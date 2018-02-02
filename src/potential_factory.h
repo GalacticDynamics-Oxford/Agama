@@ -13,14 +13,12 @@
 */
 
 #pragma once
-#include "potential_base.h"
 #include "particles_base.h"
-#include "units.h"
+#include "potential_base.h"
 #include "smart.h"
+#include "units.h"
+#include "utils_config.h"
 #include <string>
-
-// forward declaration
-namespace utils { class KeyValueMap; }
 
 namespace potential {
 

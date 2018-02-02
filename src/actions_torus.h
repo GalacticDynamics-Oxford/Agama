@@ -24,7 +24,7 @@ public:
         a `std::invalid_argument` exception. */
     virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const;
 private:
-    Torus::PtrTorus torus;  ///< hidden implementation details
+    torus::PtrTorus torus;  ///< hidden implementation details
 };
 
 }  // namespace actions

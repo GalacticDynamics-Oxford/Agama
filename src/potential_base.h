@@ -133,8 +133,8 @@ public:
         return evalSph(pos, potential, deriv, deriv2); }
 
     /** Shorthand for evaluating the value of potential at a given point in any coordinate system */
-    template<typename coordSysT>
-    inline double value(const coord::PosT<coordSysT>& point) const {
+    template<typename CoordT>
+    inline double value(const coord::PosT<CoordT>& point) const {
         double val;
         eval(point, &val);
         return val;

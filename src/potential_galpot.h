@@ -22,7 +22,7 @@ Let the density profile of the disk be
 
 \f$  \rho_d(R,z) = f(R) h(z)  \f$,
 
-and let H(z) be the second integral of h(z) over z.
+and let H(z) be the second antiderivative of h(z), so that d^2 H / dz^2 = h.
 Then the potential of the disk can be written as a sum of 'main' and 'residual' parts:
 
 \f$  \Phi(R,z) = 4\pi f(r) H(z) + \Phi_{res}  \f$,
@@ -76,11 +76,12 @@ namespace potential{
     f(R) and H(z)  (the former essentially describes the surface density of the disk,
     and the latter is the second antiderivative of vertical density profile h(z) ).
     They are used by both DiskAnsatz potential and DiskDensity density classes.
-    In the present implementation they are the same as in GalPot:
+    In the present implementation they are almost the same as in GalPot,
+    generalized for an arbitrary Sersic index 'n' of the surface density profile:
 
     \f$  \rho = f(R) h(z)  \f$,
 
-    \f$  f(R) = \Sigma_0  \exp [ -R_0/R - R/R_d + \epsilon \cos(R/R_d) ]  \f$,
+    \f$  f(R) = \Sigma_0  \exp [ -(R/R_d)^{1/n} - R_0/R + \epsilon \cos(R/R_d) ]  \f$,
 
     \f$  h(z) = \delta(z)                 \f$  for  h=0, or 
     \f$  h(z) = 1/(2 h)  * exp(-|z/h|)    \f$  for  h>0, or
@@ -91,16 +92,26 @@ namespace potential{
 */
 struct DiskParam{
     double surfaceDensity;      ///< surface density normalisation Sigma_0
-    double scaleRadius;         ///< scale length R_d
+    double scaleRadius;         ///< scale length R_d (NOT the effective radius!)
     double scaleHeight;         ///< scale height h: 
     ///< For h<0 an isothermal (sech^2) profile is used, for h>0 an exponential one, 
     ///< and for h=0 the disk is infinitesimally thin
     double innerCutoffRadius;   ///< if nonzero, specifies the radius of a hole at the center R_0
     double modulationAmplitude; ///< a term eps*cos(R/R_d) is added to the radial exponent
-    DiskParam(double _surfaceDensity=0, double _scaleRadius=1, double _scaleHeight=1,
-        double _innerCutoffRadius=0, double _modulationAmplitude=0) :
+    double sersicIndex;         ///< Sersic index n (by default n=1, corresponding to an exponential disk)
+    /// set up default values for all parameters
+    DiskParam(
+        double _surfaceDensity=0,
+        double _scaleRadius=1,
+        double _scaleHeight=1,
+        double _innerCutoffRadius=0,
+        double _modulationAmplitude=0,
+        double _sersicIndex=1)
+    :
         surfaceDensity(_surfaceDensity), scaleRadius(_scaleRadius), scaleHeight(_scaleHeight),
-        innerCutoffRadius(_innerCutoffRadius), modulationAmplitude(_modulationAmplitude) {};
+        innerCutoffRadius(_innerCutoffRadius), modulationAmplitude(_modulationAmplitude),
+        sersicIndex(_sersicIndex)
+    {}
     double mass() const;        ///< return the total mass of a density profile with these parameters
 };
 
@@ -124,7 +135,7 @@ public:
 
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
     virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "DiskDensity"; return text; }
+    static const char* myName() { static const char* text = "Disk"; return text; }
 private:
     math::PtrFunction radialFnc;     ///< function describing radial dependence of surface density
     math::PtrFunction verticalFnc;   ///< function describing vertical density profile
@@ -135,7 +146,9 @@ private:
     {  return densityCyl(toPosCyl(pos)); }
 };
 
-/** Part of the disk potential provided analytically as  4 pi f(r) H(z) */
+/** Part of the disk potential provided analytically as  4 pi f(r) H(z).
+    This potential model is intended for the internal usage in the GalPot approach,
+    not as an independent potential; its total mass is zero. */
 class DiskAnsatz: public BasePotentialCyl {
 public:
     DiskAnsatz(const DiskParam& _params) : 
@@ -175,14 +188,26 @@ struct SphrParam{
     double scaleRadius;         ///< transition radius r_0
     double outerCutoffRadius;   ///< outer cut-off radius r_{cut}
     double cutoffStrength;      ///< steepness of the exponential cutoff xi
-    SphrParam(double _densityNorm=0, double _axisRatioY=1, double _axisRatioZ=1,
-        double _alpha=1, double _beta=4, double _gamma=1,
-        double _scaleRadius=1, double _outerCutoffRadius=0, double _cutoffStrength=2) :
+    /// set up default values for all parameters
+    SphrParam(
+        double _densityNorm=0,
+        double _axisRatioY=1,
+        double _axisRatioZ=1,
+        double _alpha=1,
+        double _beta=4,
+        double _gamma=1,
+        double _scaleRadius=1,
+        double _outerCutoffRadius=0,
+        double _cutoffStrength=2)
+    :
         densityNorm(_densityNorm), axisRatioY(_axisRatioY), axisRatioZ(_axisRatioZ),
         alpha(_alpha), beta(_beta), gamma(_gamma),
         scaleRadius(_scaleRadius), outerCutoffRadius(_outerCutoffRadius), cutoffStrength(_cutoffStrength)
-    {};
+    {}
     double mass() const;        ///< return the total mass of a density profile with these parameters
+    static const char* myName() ///< the name of the density model in potential_factory routines
+    { static const char* text = "Spheroid"; return text; }
+
 };
 
 /** Parameters describing a Sersic density profile.
@@ -205,15 +230,21 @@ struct SersicParam{
     double sersicIndex;    ///< shape parameter `n` (Sersic index), should be positive
     double axisRatioY;     ///< axis ratio p (Y/X)
     double axisRatioZ;     ///< axis ratio q (Z/X)
-    SersicParam(double _surfaceDensity=0, double _scaleRadius=1, double _sersicIndex=4,
-        double _axisRatioY=1, double _axisRatioZ=1) :
+    /// set up default values for all parameters
+    SersicParam(
+        double _surfaceDensity=0,
+        double _scaleRadius=1,
+        double _sersicIndex=4,
+        double _axisRatioY=1,
+        double _axisRatioZ=1)
+    :
         surfaceDensity(_surfaceDensity), scaleRadius(_scaleRadius), sersicIndex(_sersicIndex),
         axisRatioY(_axisRatioY), axisRatioZ(_axisRatioZ)
     {}
     double b() const;      ///< compute the numerical coefficient b as a function of n
     double mass() const;   ///< return the total mass of a density profile with these parameters
-    static const char* myName()  ///< the name of the density model in potential_factory routines
-    { static const char* text = "SersicDensity"; return text; }
+    static const char* myName() ///< the name of the density model in potential_factory routines
+    { static const char* text = "Sersic"; return text; }
 };
 
 /// helper routine to construct a one-dimensional function describing a double-power-law profile
@@ -245,7 +276,9 @@ public:
     virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "SpheroidDensity"; return text; }
+    /// the name reported by the density model is always 'Spheroid',
+    /// regardless of whether it was initialized from SersicParam or SphrParam
+    static const char* myName() { return SphrParam::myName(); }
 private:
     const double p2, q2;    ///< squared axis ratios p=y/x, q=z/x
     math::PtrFunction rho;  ///< one-dimensional density as a function of elliptical radius

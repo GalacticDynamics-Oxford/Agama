@@ -14,9 +14,8 @@ orbit::StepResult RuntimePotential::processTimestep(
     while(t = outputTimestep * (outputIter - outputFirst + 1),
         t>tbegin && t<=tend && outputIter != outputLast)
     {
-        double data[6];
-        sol.getSol(t, data);
-        (outputIter++)->first = toPosCyl(coord::PosCar(data[0], data[1], data[2]));
+        (outputIter++)->first = toPosCyl(
+            coord::PosCar(sol.getSol(t, 0), sol.getSol(t, 1), sol.getSol(t, 2)));
     }
     return orbit::SR_CONTINUE;
 }

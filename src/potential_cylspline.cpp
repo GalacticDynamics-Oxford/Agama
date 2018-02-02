@@ -193,9 +193,10 @@ public:
         const double r = exp( 1/(1-s) - 1/s );
         if(r<1e-100 || r>1e100)
             return;  // scaled coords point at 0 or infinity
-        const double th= M_PI/2 * pow_2(pos[1]);
-        const double R = r*cos(th);
-        const double z = r*sin(th);
+        double sintheta, costheta;
+        math::sincos(M_PI/2 * pow_2(pos[1]), sintheta, costheta);
+        const double R = r*costheta;
+        const double z = r*sintheta;
         const double jac = pow_2(M_PI*r) * R * (1/pow_2(1-s) + 1/pow_2(s)) * 2*pos[1];
 
         // get the values of density at (R,z) and (R,-z):
@@ -778,9 +779,17 @@ void chooseGridRadii(const BaseDensity& src,
 {
     // if the grid min/max radii is not provided, try to determine automatically
     if(Rmax==0 || Rmin==0) {
-        double rhalf = getRadiusByMass(src, 0.5 * src.totalMass());
+        double mass  = src.totalMass();
+        if(mass==0) {   // safe default values for an empty model
+            Rmin = zmin = 1.0;
+            Rmax = zmax = Rmin * (gridSizeR-1);
+            return;
+        }
+        double rhalf = getRadiusByMass(src, 0.5 * mass);
         if(!isFinite(rhalf))
-            throw std::invalid_argument("CylSpline: failed to automatically determine grid extent");
+            throw std::invalid_argument(
+                std::string("CylSpline: failed to automatically determine grid extent ") +
+                (isFinite(mass) ? "(total mass is infinite)" : "(cannot compute half-mass radius)"));
         double spacing = 1 + sqrt(10./sqrt(gridSizeR*gridSizez));  // ratio between consecutive grid nodes
         if(Rmax==0)
             Rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);
@@ -790,6 +799,7 @@ void chooseGridRadii(const BaseDensity& src,
         // reducing the outer radius if the density drops to zero or decreases too rapidly,
         // and also allow for different radial/vertical scales?
     }
+    // TODO: allow the z grid to be different from the R grid if warranted by the model
     if(zmax==0)
         zmax=Rmax;
     if(zmin==0)

@@ -248,17 +248,17 @@ double v_circ(const math::IFunction& potential, double radius)
 }
 
 double R_circ(const math::IFunction& potential, double energy) {
-    return exp(math::findRoot(RcircRootFinder(potential, energy), -INFINITY, INFINITY, ACCURACY_ROOT));
+    return exp(math::findRoot(RcircRootFinder(potential, energy), math::ScalingInf(), ACCURACY_ROOT));
 }
 
 double R_from_L(const math::IFunction& potential, double L) {
     if(L==0)
         return 0;
-    return exp(math::findRoot(RfromLRootFinder(potential, L), -INFINITY, INFINITY, ACCURACY_ROOT));
+    return exp(math::findRoot(RfromLRootFinder(potential, L), math::ScalingInf(), ACCURACY_ROOT));
 }
 
 double R_max(const math::IFunction& potential, double energy) {
-    return exp(math::findRoot(RmaxRootFinder(potential, energy), -INFINITY, INFINITY, ACCURACY_ROOT));
+    return exp(math::findRoot(RmaxRootFinder(potential, energy), math::ScalingInf(), ACCURACY_ROOT));
 }
 
 void epicycleFreqs(const BasePotential& potential, const double R,
@@ -751,22 +751,19 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
     const unsigned int sizeE = 50;
     const unsigned int sizeL = 40;
 
+    // transformation of interval [0:1] onto itself that places more grid points near the edges:
+    // a function with zero 1st and 2nd derivs at x=0 and x=1
+    math::ScalingQui scaling(0, 1);
+
     // create a grid in energy
     std::vector<double> gridE(sizeE);
-    for(unsigned int i=0; i<sizeE; i++) {
-        double x = 1.*i/(sizeE-1);
-        gridE[i] = (1 - pow_3(x) * (10+x*(-15+x*6))) * Phi0; // see below
-    }
+    for(unsigned int i=0; i<sizeE; i++)
+        gridE[i] = (1 - math::unscale(scaling, 1. * i / (sizeE-1))) * Phi0;
 
     // create a grid in L/Lcirc(E)
     std::vector<double> gridL(sizeL);
-    for(unsigned int i=0; i<sizeL; i++) {
-        double x = 1.*i/(sizeL-1);
-        // transformation of interval [0:1] onto itself that places more grid points near the edges:
-        // a function with zero 1st and 2nd derivs at x=0 and x=1
-        gridL[i] = pow_3(x) * (10+x*(-15+x*6));
-        //pow_2(x*x) * (35+x*(-84+x*(70-x*20))); // <-- that would give three zero derivs
-    }
+    for(unsigned int i=0; i<sizeL; i++)
+        gridL[i] = math::unscale(scaling, 1. * i / (sizeL-1));
 
     // fill 2d grids for scaled peri/apocenter radii R1, R2 and their derivatives in {E, L/Lcirc}:
     math::Matrix<double> gridR1  (sizeE, sizeL), gridR2  (sizeE, sizeL);

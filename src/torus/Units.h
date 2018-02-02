@@ -21,7 +21,7 @@ Gives various units in terms of code units (which are kpc,Myr,Msun)
 
 #include "Pi.h"
 #include <string>
-namespace Torus{
+namespace torus{
 using std::string;
 
 /**

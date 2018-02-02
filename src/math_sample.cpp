@@ -12,6 +12,9 @@ namespace math{
 
 namespace {  // internal namespace for Sampler class
 
+/// choose between pseudo-random (PRNG) and quasi-random (QRNG) number generators in the sampling routine
+#define USE_QRNG
+
 class Sampler {
 public:
     /** Construct an N-dimensional sampler object */
@@ -196,9 +199,11 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     cells(1),  // create the root cell
     qrngOffset(random() * 1e6)  // starting value for the quasi-random number sequence
 {
+#ifdef USE_QRNG
     if(Ndim > MAX_PRIMES)  // this is only a limitation of the quasi-random number generator
         throw std::runtime_error("sampleNdim: more than "+utils::toString(MAX_PRIMES)+
             " dimensions is not supported");
+#endif
     volume = 1;
     for(int d=0; d<Ndim; d++) {
         if(xupper[d] > xlower[d])
@@ -342,7 +347,12 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
         // assign coordinates of the new point
         for(int d=0; d<Ndim; d++) {
             pointCoords[ pointIndex * Ndim + d ] = cellXlower[d] +
-                (cellXupper[d] - cellXlower[d]) * quasiRandomHalton(pointIndex + qrngOffset, PRIMES[d]);
+                (cellXupper[d] - cellXlower[d]) *
+#ifdef USE_QRNG
+                quasiRandomHalton(pointIndex + qrngOffset, PRIMES[d]);
+#else
+                random();
+#endif
         }
         // update the linked list of points in the cell
         nextPoint[pointIndex] = nextPointInList;

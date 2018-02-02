@@ -1,28 +1,52 @@
 #include "orbit.h"
 #include "potential_base.h"
 #include "utils.h"
+#include "math_core.h"
 #include <stdexcept>
 #include <cmath>
 
 namespace orbit{
 
-template<typename coordT>
-StepResult RuntimeTrajectory<coordT>::processTimestep(
+namespace{
+// normalize the position-velocity returned by orbit integrator in case of r<0 or R<0
+template<typename CoordT>
+inline coord::PosVelT<CoordT> getPosVel(const double data[6]) { return coord::PosVelT<CoordT>(data); }
+
+template<>
+inline coord::PosVelCyl getPosVel(const double data[6]) {
+    if(data[0] >= 0)
+        return coord::PosVelCyl(data);
+    else
+        return coord::PosVelCyl(-data[0], data[1], data[2]+M_PI, -data[3], data[4], -data[5]);
+}
+
+template<>
+inline coord::PosVelSph getPosVel(const double data[6]) {
+    if(data[0] >= 0)
+        return coord::PosVelSph(data);
+    else
+        return coord::PosVelSph(-data[0], M_PI-data[1], data[2]+M_PI, -data[3], -data[4], -data[5]);
+}
+}
+
+template<typename CoordT>
+StepResult RuntimeTrajectory<CoordT>::processTimestep(
     const math::BaseOdeSolver& solver, const double /*tbegin*/, const double tend, double[])
 {
     // store trajectory at regular intervals of time
     while(samplingInterval * trajectory.size() <= tend) {
+        double tsamp = samplingInterval * trajectory.size();
         double data[6];
-        solver.getSol(samplingInterval * trajectory.size(), data);
-        trajectory.push_back(coord::PosVelT<coordT>(data));
+        for(int d=0; d<6; d++)
+            data[d] = solver.getSol(tsamp, d);
+        trajectory.push_back(getPosVel<CoordT>(data));
     }
     return SR_CONTINUE;
 }
 
 
 template<>
-void OrbitIntegrator<coord::Car>::eval(const double /*t*/,
-    const math::OdeStateType& x, math::OdeStateType& dxdt) const
+void OrbitIntegrator<coord::Car>::eval(const double /*t*/, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
     potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
@@ -35,11 +59,8 @@ void OrbitIntegrator<coord::Car>::eval(const double /*t*/,
     dxdt[4] = -grad.dy;
     dxdt[5] = -grad.dz;
 }
-template<>
-bool OrbitIntegrator<coord::Car>::isStdHamiltonian() const { return true; }
 
-void OrbitIntegratorRot::eval(const double /*t*/,
-    const math::OdeStateType& x, math::OdeStateType& dxdt) const
+void OrbitIntegratorRot::eval(const double /*t*/, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
     potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
@@ -54,102 +75,99 @@ void OrbitIntegratorRot::eval(const double /*t*/,
 }
 
 template<>
-void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/,
-    const math::OdeStateType& x, math::OdeStateType& dxdt) const
+void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/, const double x[], double dxdt[]) const
 {
-    coord::PosVelCyl p(&x.front());
+    coord::PosVelCyl p(x);
     if(x[0]<0) {    // R<0
         p.R = -p.R; // apply reflection
         p.phi += M_PI;
     }
     coord::GradCyl grad;
     potential.eval(p, NULL, &grad);
-    double Rsafe = p.R!=0 ? p.R : 1e-100;  // avoid NAN in degenerate cases
+    double Rinv = p.R!=0 ? 1/p.R : 0;  // avoid NAN in degenerate cases
     dxdt[0] = p.vR;
     dxdt[1] = p.vz;
-    dxdt[2] = p.vphi/Rsafe;
-    dxdt[3] = (x[0]<0 ? grad.dR : -grad.dR) + pow_2(p.vphi) / Rsafe;
+    dxdt[2] = p.vphi * Rinv;
+    dxdt[3] = (x[0]<0 ? grad.dR : -grad.dR) + pow_2(p.vphi) * Rinv;
     dxdt[4] = -grad.dz;
-    dxdt[5] = -(grad.dphi + p.vR*p.vphi) / Rsafe;
+    dxdt[5] = -(grad.dphi + p.vR*p.vphi) * Rinv;
 }
+
 template<>
-bool OrbitIntegrator<coord::Cyl>::isStdHamiltonian() const { return false; }
-        
-template<>
-void OrbitIntegrator<coord::Sph>::eval(const double /*t*/,
-    const math::OdeStateType& x, math::OdeStateType& dxdt) const
+void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], double dxdt[]) const
 {
-    const coord::PosVelSph p(&x.front());
+    int tmp;
+    double r = x[0];
+    double phi = x[2];
+    double theta = remquo(x[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
+    int signr = r<0 ? -1 : 1, signt = (theta<0) ^ (r<0) ? -1 : 1;
+    if(signt<0)
+        phi += M_PI;
+    if(theta<0) // happens also if pi < theta < 2pi, which is flipped to -pi..0
+        theta = r<0 ? M_PI+theta : -theta;
+    if(r<0)
+        r = -r;
+    const coord::PosVelSph p(r, theta, phi, x[3], x[4], x[5]);
     coord::GradSph grad;
-    if(x[0]<0) {  // r<0: apply transformation to bring the coordinates into a valid range
-        potential.eval(coord::PosSph(-p.r, M_PI-p.theta, p.phi+M_PI), NULL, &grad);
-        grad.dr = -grad.dr;
-        grad.dtheta = -grad.dtheta;
-    } else
-        potential.eval(p, NULL, &grad);
-    double rsafe = p.r!=0 ? p.r : 1e-100;
-    double sintheta = sin(p.theta);
-    if(sintheta == 0) sintheta = 1e-100;
-    double cottheta = cos(p.theta)/sintheta;
+    potential.eval(p, NULL, &grad);
+    double rinv = r!=0 ? 1/r : 0, sintheta, costheta;
+    math::sincos(theta, sintheta, costheta);
+    double sinthinv = sintheta!=0 ? 1./sintheta : 0;
+    double cottheta = costheta * sinthinv;
     dxdt[0] = p.vr;
-    dxdt[1] = p.vtheta/rsafe;
-    dxdt[2] = p.vphi/(rsafe*sintheta);
-    dxdt[3] = -grad.dr + (pow_2(p.vtheta) + pow_2(p.vphi)) / rsafe;
-    dxdt[4] = (-grad.dtheta + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) / rsafe;
-    dxdt[5] = (-grad.dphi/sintheta - (p.vr+p.vtheta*cottheta)*p.vphi) / rsafe;
+    dxdt[1] = p.vtheta * rinv;
+    dxdt[2] = p.vphi * rinv * sinthinv;
+    dxdt[3] = -grad.dr*signr + (pow_2(p.vtheta) + pow_2(p.vphi)) * rinv;
+    dxdt[4] = (-grad.dtheta*signt + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) * rinv;
+    dxdt[5] = (-grad.dphi * sinthinv - (p.vr+p.vtheta*cottheta) * p.vphi) * rinv;
 }
-template<>
-bool OrbitIntegrator<coord::Sph>::isStdHamiltonian() const { return false; }
 
 
-template<typename coordT>
-coord::PosVelT<coordT> integrate(
-    const coord::PosVelT<coordT>& initialConditions,
+template<typename CoordT>
+coord::PosVelT<CoordT> integrate(
+    const coord::PosVelT<CoordT>& initialConditions,
     const double totalTime,
     const math::IOdeSystem& orbitIntegrator,
     const RuntimeFncArray& runtimeFncs,
-    const OrbitIntParams& params)    
+    const OrbitIntParams& params)
 {
-    // create an internal instance of the solver, will be destroyed automatically
-    unique_ptr<math::BaseOdeSolver> solver;
-    switch(params.solver) {
-        case math::OS_DOP853:
-            solver.reset(new math::OdeSolverDOP853(orbitIntegrator, params.accuracy));
-            break;
-        default:
-            throw std::invalid_argument("orbit::integrate(): unknown ODE solver type");
-    }
-    math::OdeStateType vars(orbitIntegrator.size());
-    initialConditions.unpack_to(&vars[0]);
-    solver->init(vars);
-    unsigned int numSteps = 0;
-    double timePrev = 0., timeCurr = 0.;
+    math::OdeSolverDOP853 solver(orbitIntegrator, params.accuracy);
+    int NDIM = orbitIntegrator.size();
+    if(NDIM < 6)
+        throw std::runtime_error("orbit::integrate() needs at least 6 variables");
+    std::vector<double> state(NDIM);
+    double* vars = &state.front();
+    initialConditions.unpack_to(vars);  // first 6 variables are always position/velocity
+    solver.init(vars);
+    size_t numSteps = 0;
+    double timeCurr = 0;
     while(timeCurr < totalTime) {
-        if(solver->doStep() <= 0.) {  // signal of error
-            utils::msg(utils::VL_WARNING, FUNCNAME,
-                "timestep is zero at t="+utils::toString(timeCurr));
+        if(!(solver.doStep() > 0.)) {
+            // signal of error
+            utils::msg(utils::VL_WARNING, "orbit::integrate", "terminated at t="+utils::toString(timeCurr));
             break;
         }
-        timeCurr = fmin(solver->getTime(), totalTime);
-        solver->getSol(timeCurr, &vars[0]);
-        bool reinit = false, finish = false;
-        for(unsigned int i=0; i<runtimeFncs.size(); i++) {
-            switch(runtimeFncs[i]->processTimestep(*solver, timePrev, timeCurr, &vars[0]))
+        double timePrev = timeCurr;
+        timeCurr = std::min(solver.getTime(), totalTime);
+        for(int d=0; d<NDIM; d++)
+            vars[d] = solver.getSol(timeCurr, d);
+        bool reinit = false, finish = timeCurr >= totalTime;
+        for(size_t i=0; i<runtimeFncs.size(); i++) {
+            switch(runtimeFncs[i]->processTimestep(solver, timePrev, timeCurr, vars))
             {
                 case orbit::SR_TERMINATE: finish = true; break;
                 case orbit::SR_REINIT:    reinit = true; break;
-                default: ;
+                default: /*nothing*/;
             }
         }
-        timePrev = timeCurr;
         if(reinit)
-            solver->init(vars);
+            solver.init(vars);
         if(finish || ++numSteps > params.maxNumSteps)
             break;
     }
-    return coord::PosVelT<coordT>(&vars[0]);
+    return coord::PosVelT<CoordT>(vars);
 }
-    
+
 // explicit template instantiations to make sure all of them get compiled
 template class OrbitIntegrator<coord::Car>;
 template class OrbitIntegrator<coord::Cyl>;

@@ -48,7 +48,7 @@ double erfinv(const double x)
     }
     // improve by Halley iteration
     double f = erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
-    z -= f / (fp - f*fpp/2/fp);
+    z -= f*fp / (fp*fp - 0.5*f*fpp);
     return z;
 }
 
@@ -346,8 +346,7 @@ void solveKepler(double ecc, double phase, double &eta, double &sineta, double &
     double deltaeta = 0;
     int niter = 0;
     do {  // Halley's method
-        sineta    = sin(eta);
-        coseta    = cos(eta);
+        sincos(eta, sineta, coseta);
         double f  = eta - ecc * sineta - phase;
         double df = 1.  - ecc * coseta;
         deltaeta  = -f/df;

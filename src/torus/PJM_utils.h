@@ -21,7 +21,7 @@
 #include <string>
 #include <cmath>
 #include <cstdlib>
-namespace Torus {
+namespace torus {
 using std::cerr;
 using std::string;
 using std::ifstream;

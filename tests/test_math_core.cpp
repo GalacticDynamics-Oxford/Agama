@@ -270,36 +270,74 @@ bool err() {
     return false;
 }
 
+template<typename Scaling> bool testScaling(const Scaling& scaling)
+{
+    double maxerr = 0, maxder = 0;
+    for(int i=0; i<1000; i++) {
+        double s = math::random() * 0.7, duds;
+        double u = math::unscale(scaling, s, &duds);
+        double duds_fd = (math::unscale(scaling, s + SQRT_DBL_EPSILON) -
+            math::unscale(scaling, s - SQRT_DBL_EPSILON)) / (2 * SQRT_DBL_EPSILON);
+        double S = math::scale(scaling, u);
+        if(S!=0)  // skip values which are rounded to the boundary because of the loss of precision
+            maxerr = fmax(maxerr, fabs(S-s));
+        if(isFinite(duds_fd + duds))
+            maxder = fmax(maxder, fabs(duds_fd - duds) / fmax(fabs(duds), 1));
+    }
+    if(maxerr > 1e-15 || maxder > 1e-7)
+        return err();
+    return true;
+}
+
 int main()
 {
     std::cout << std::setprecision(10);
     bool ok=true;
 
+    // scaling transformations
+    std::cout << "Scaling: InfLeft";
+    ok &= testScaling(math::ScalingSemiInf(-12.34));
+    std::cout << " InfRight";
+    ok &= testScaling(math::ScalingSemiInf(0.123));
+    std::cout << " Inf0";
+    ok &= testScaling(math::ScalingSemiInf());
+    std::cout << " Inf";
+    ok &= testScaling(math::ScalingInf());
+    std::cout << " Lin";
+    ok &= testScaling(math::ScalingLin(-10.98, -2.345));
+    std::cout << " Cub";
+    ok &= testScaling(math::ScalingCub(0,1));
+    std::cout << " Qui";
+    ok &= testScaling(math::ScalingQui(0,1));
+    std::cout << "\n";
+
     // integration routines
     const double toler = 1e-6;
     double exact = (M_PI*2/3), error=0, result;
-    result = math::integrate(test1(), -1, 1./2, toler, &error, &numEval);
+    test1 t1;
+    result = math::integrate(t1, -1, 1./2, toler, &error, &numEval);
     std::cout << "Int1: naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
     ok &= (fabs(1-result/exact)<2e-3 && fabs(result-exact)<error) || err();
-    result = math::integrateAdaptive(test1(), -1, 1./2, toler, &error, &numEval);
+    result = math::integrateAdaptive(t1, -1, 1./2, toler, &error, &numEval);
     std::cout << "), adaptive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
     ok &= (fabs(1-result/exact)<toler && fabs(result-exact)<error) || err();
-    test1 t1;
-    math::ScaledIntegrandEndpointSing test1s(t1, -1, 1);
-    result = math::integrate(test1s, test1s.y_from_x(-1), test1s.y_from_x(1./2), toler, &error, &numEval);
+    math::ScaledIntegrand<math::ScalingCub> t1s(math::ScalingCub(-1, 1), t1);
+    result = math::integrate(t1s, math::scale(t1s.scaling, -1), math::scale(t1s.scaling, 0.5),
+        toler, &error, &numEval);
     std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval<<")\n";
-    ok &= (fabs(1-result/exact)<1e-8 && fabs(result-exact)<error) || err();
+    ok &= (fabs(1-result/exact)<1e-8 && fabs(result-exact)<fmax(error,1e-12)) || err();
 
     exact = 2.274454287;
-    result = math::integrate(test2(), -1, 2./3, toler, &error, &numEval);
+    test2 t2;
+    result = math::integrate(t2, -1, 2./3, toler, &error, &numEval);
     std::cout << "Int2: naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
     ok &= (fabs(1-result/exact)<2e-2 && fabs(result-exact)<error) || err();
-    result = math::integrateAdaptive(test2(), -1, 2./3, toler*15, &error, &numEval);
+    result = math::integrateAdaptive(t2, -1, 2./3, toler*15, &error, &numEval);
     std::cout << "), adaptive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<toler*15 && fabs(result-exact)<error) || err();
-    test2 t2;
-    math::ScaledIntegrandEndpointSing test2s(t2, -1, 1);
-    result = math::integrate(test2s, test2s.y_from_x(-1), test2s.y_from_x(2./3), toler, &error, &numEval);
+    ok &= (fabs(1-result/exact)<1e-5 && fabs(result-exact)<error) || err();
+    math::ScaledIntegrand<math::ScalingCub> t2s(math::ScalingCub(-1, 1), t2);
+    result = math::integrate(t2s, math::scale(t2s.scaling, -1), math::scale(t2s.scaling, 2./3),
+        toler, &error, &numEval);
     std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval<<")\n";
     ok &= (fabs(1-result/exact)<2e-4 && fabs(result-exact)<error) || err();
 
@@ -352,7 +390,7 @@ int main()
 
     exact=1.000109999998;
     numEval=0;
-    result = math::findRoot(test5(), x1, INFINITY, toler);
+    result = math::findRoot(test5(), math::ScalingSemiInf(x1), toler);
     std::cout << "Another root="<<result<<" (delta="<<(result-exact)<<"; neval="<<numEval<<")\n";
     ok &= (fabs(result-exact)<toler*exact) || err();
 
@@ -369,7 +407,8 @@ int main()
     double xresult[1];
     int numIter = findMinNdim(test4Ndim(), xinit, xstep, toler, 100, xresult);
     std::cout << "N-dimensional minimization (N=1) of the same function: minimum at x="<<xresult[0]<<
-        " is "<<test4(0)(xresult[0])<<" (delta="<<(xresult[0]-exact)<<"; neval="<<numEval<<", nIter="<<numIter<<")\n";
+        " is "<<test4(0)(xresult[0])<<" (delta="<<(xresult[0]-exact)<<
+        "; neval="<<numEval<<", nIter="<<numIter<<")\n";
     ok &= (fabs(result-exact)<toler) || err();
 
     numEval=0;

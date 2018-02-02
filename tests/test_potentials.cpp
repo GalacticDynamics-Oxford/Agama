@@ -249,7 +249,7 @@ const char* test_galpot_params[] = {
 // an extreme case of a spheroid profile with a very steep cusp and slow fall-off
 "0\n"
 "1\n"
-"1e10 0.5 2.5 2.5 1 0\n"
+"1e10 0.5 2.4 2.6 1 0\n"
 };
 
 /*const int numtestpoints=3;

@@ -381,7 +381,7 @@ int main() {
     const potential::DiskDensity test5_ExpdiskAxi(test5_ExpdiskParam);   // density profile of d-exp disk
     // potential of d-exp disk, computed using the GalPot approach
     PtrPotential test5_Galpot = potential::createPotential(utils::KeyValueMap(
-        "type=DiskDensity surfaceDensity=1 scaleRadius=5 scaleHeight=0.5"));
+        "type=Disk surfaceDensity=1 scaleRadius=5 scaleHeight=0.5"));
     const potential::Dehnen test6_Dehnen05Tri(1., 1., 0.5, 0.8, 0.5);    // triaxial weakly cuspy
     // N-body representation of the same profile
     particles::ParticleArray<coord::PosCar> test6_points = makeDehnen(100000, 0.5, 0.8, 0.5);
@@ -479,14 +479,14 @@ int main() {
 //    ok &= testAverageError( test3b, test3_Dehnen15Tri, 0.5);
     ok &= testAverageError( test3s, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
-    ok &= testAverageError(*test3m, *test3m_clone, 1e-8);
+    ok &= testAverageError(*test3m, *test3m_clone, 1e-9);
 
     // strongly flattened exp.disk; the 'true' potential is not available,
     // so we compare two approximations: GalPot and CylSpline
     std::cout << "--- Axisymmetric ExpDisk ---\n";
     PtrPotential test5c = potential::CylSpline::create(
         test5_ExpdiskAxi, 0, 20, 5e-2, 50., 20, 1e-2, 10.);
-    ok &= testAverageError(*test5c, *test5_Galpot, 0.051);
+    ok &= testAverageError(*test5c, *test5_Galpot, 0.05);
 
     // mildly triaxial, created from N-body samples
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";

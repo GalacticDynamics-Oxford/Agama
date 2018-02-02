@@ -942,15 +942,18 @@ bool test2dSpline()
     const double XMIN = -1.9, XMAX = 2.2, YMIN = -2.1, YMAX = 1.7;
     std::vector<double> xval = math::createUniformGrid(NNODESX, XMIN, XMAX);
     std::vector<double> yval = math::createUniformGrid(NNODESY, YMIN, YMAX);
-    math::Matrix<double> fval(NNODESX, NNODESY), fderx(NNODESX, NNODESY), fdery(NNODESX, NNODESY);
+    math::Matrix<double>
+        fval (NNODESX, NNODESY), fderx (NNODESX, NNODESY),
+        fdery(NNODESX, NNODESY), fderxy(NNODESX, NNODESY);
     testfnc2d fnc;
     for(int i=0; i<NNODESX; i++)
         for(int j=0; j<NNODESY; j++) {
             double xy[2] = {xval[i], yval[j]};
             double der[8];
             fnc.evalDeriv(xy, &fval(i, j), der);
-            fderx(i, j) = der[0];
-            fdery(i, j) = der[1];
+            fderx (i, j) = der[0];
+            fdery (i, j) = der[1];
+            fderxy(i, j) = der[3];
         }
     // 2d bilinear interpolator
     math::LinearInterpolator2d lin2d(xval, yval, fval);
@@ -959,6 +962,8 @@ bool test2dSpline()
     math::CubicSpline2d cub2d(xval, yval, fval);
     // 2d quintic spline with prescribed derivatives at all nodes
     math::QuinticSpline2d qui2d(xval, yval, fval, fderx, fdery);
+    // 2d quintic spline with prescribed 1st derivatives and mixed 2nd derivative at all nodes
+    math::QuinticSpline2d mix2d(xval, yval, fval, fderx, fdery, fderxy);
 
     // check the values (for both cubic and quintic splines) and derivatives (for quintic spline only)
     // at all nodes of 2d grid -- should exactly equal the input values (with machine precision)
@@ -974,32 +979,37 @@ bool test2dSpline()
                 ok = false;
         }
     }
+    if(!ok) std::cout << "Values or derivs at grid nodes are inconsistent\n";
 
     std::ofstream strm;
     if(OUTPUT) { // output for Gnuplot splot routine
         strm.open("test_math_spline2d.dat");
         strm << "x y\tfunc fx fy fxx fxy fyy\tcubic cx cy cxx cxy cyy\tquintic qx qy qxx qxy qyy\n";
     }
-    double sumerrl = 0, sumerrc = 0, sumerrq = 0,
-        sumerrcder = 0, sumerrqder = 0, sumerrcder2 = 0, sumerrqder2 = 0;
+    double sumerrl = 0, sumerrc = 0, sumerrq = 0, sumerrm = 0,
+        sumerrcder = 0, sumerrqder = 0, sumerrmder = 0, sumerrcder2 = 0, sumerrqder2 = 0, sumerrmder2 = 0;
     for(int i=0; i<=NN; i++) {
         double x = (XMAX-XMIN)*(i*1./NN)+XMIN;
         for(int j=0; j<=NN; j++) {
             double y = (YMAX-YMIN)*(j*1./NN)+YMIN;
             double xy[2] = {x, y}, f, d[8];
             fnc.evalDeriv(xy, &f, d);
-            double l, c, cx, cy, cxx, cxy, cyy, q, qx, qy, qxx, qxy, qyy;
+            double l, c, cx, cy, cxx, cxy, cyy, q, qx, qy, qxx, qxy, qyy, m, mx, my, mxx, mxy, myy;
             l =  lin2d.value(x, y);
             cub2d.evalDeriv(x, y, &c, &cx, &cy, &cxx, &cxy, &cyy);
             qui2d.evalDeriv(x, y, &q, &qx, &qy, &qxx, &qxy, &qyy);
+            mix2d.evalDeriv(x, y, &m, &mx, &my, &mxx, &mxy, &myy);
 
             sumerrl     += pow_2(l-f);
             sumerrc     += pow_2(c-f);
             sumerrq     += pow_2(q-f);
+            sumerrm     += pow_2(m-f);
             sumerrcder  += pow_2(cx-d[0]) + pow_2(cy-d[1]);
             sumerrqder  += pow_2(qx-d[0]) + pow_2(qy-d[1]);
+            sumerrmder  += pow_2(mx-d[0]) + pow_2(my-d[1]);
             sumerrcder2 += pow_2(cxx-d[2]) + pow_2(cxy-d[3]) + pow_2(cyy-d[4]);
             sumerrqder2 += pow_2(qxx-d[2]) + pow_2(qxy-d[3]) + pow_2(qyy-d[4]);
+            sumerrmder2 += pow_2(mxx-d[2]) + pow_2(mxy-d[3]) + pow_2(myy-d[4]);
 
             if(OUTPUT)
                 strm << utils::pp(x, 7) + ' ' + utils::pp(y, 7) + '\t' +
@@ -1008,7 +1018,9 @@ bool test2dSpline()
                 utils::pp(c, 10) + ' ' + utils::pp(cx, 8) + ' ' + utils::pp(cy, 8) + ' ' +
                 utils::pp(cxx,7) + ' ' + utils::pp(cxy,7) + ' ' + utils::pp(cyy,7) + '\t'+
                 utils::pp(q, 10) + ' ' + utils::pp(qx, 8) + ' ' + utils::pp(qy, 8) + ' ' +
-                utils::pp(qxx,7) + ' ' + utils::pp(qxy,7) + ' ' + utils::pp(qyy,7) + '\n';
+                utils::pp(qxx,7) + ' ' + utils::pp(qxy,7) + ' ' + utils::pp(qyy,7) + '\t'+
+                utils::pp(m, 10) + ' ' + utils::pp(mx, 8) + ' ' + utils::pp(my, 8) + ' ' +
+                utils::pp(mxx,7) + ' ' + utils::pp(mxy,7) + ' ' + utils::pp(myy,7) + '\n';
         }
         if(OUTPUT)
             strm << "\n";
@@ -1018,17 +1030,23 @@ bool test2dSpline()
     sumerrl     = sqrt(sumerrl)       / (NN+1);
     sumerrc     = sqrt(sumerrc)       / (NN+1);
     sumerrq     = sqrt(sumerrq)       / (NN+1);
+    sumerrm     = sqrt(sumerrm)       / (NN+1);
     sumerrcder  = sqrt(sumerrcder /2) / (NN+1);
     sumerrqder  = sqrt(sumerrqder /2) / (NN+1);
+    sumerrmder  = sqrt(sumerrmder /2) / (NN+1);
     sumerrcder2 = sqrt(sumerrcder2/3) / (NN+1);
     sumerrqder2 = sqrt(sumerrqder2/3) / (NN+1);
+    sumerrmder2 = sqrt(sumerrmder2/3) / (NN+1);
     std::cout << "RMS error in linear 2d interpolator: " + utils::pp(sumerrl, 8) +
         "\ncubic   2d spline value:  " + utils::pp(sumerrc, 8) +
         ", deriv: " + utils::pp(sumerrcder, 8) + ", 2nd deriv: " + utils::pp(sumerrcder2, 8) +
         "\nquintic 2d spline value:  " + utils::pp(sumerrq, 8) +
-        ", deriv: " + utils::pp(sumerrqder, 8) + ", 2nd deriv: " + utils::pp(sumerrqder2, 8) +"\n";
+        ", deriv: " + utils::pp(sumerrqder, 8) + ", 2nd deriv: " + utils::pp(sumerrqder2, 8) +
+        "\nq-mixed 2d spline value:  " + utils::pp(sumerrm, 8) +
+        ", deriv: " + utils::pp(sumerrmder, 8) + ", 2nd deriv: " + utils::pp(sumerrmder2, 8) +"\n";
     ok &= sumerrc < 0.003 && sumerrcder < 0.012 && sumerrcder2 < 0.075 &&
-          sumerrq < 1.e-4 && sumerrqder < 7.e-4 && sumerrqder2 < 0.006;
+          sumerrq < 1.e-4 && sumerrqder < 7.e-4 && sumerrqder2 < 0.006 &&
+          sumerrm < 6.e-5 && sumerrmder < 3.e-4 && sumerrmder2 < 0.003;
 
     //----------- test the performance of 2d spline calculation -------------//
     std::cout <<"Linear interpolator:      " + evalSpline2d<0>(lin2d) + " eval/s\n";
@@ -1084,6 +1102,8 @@ bool test3dSpline()
             }
         }
     }
+    if(!ok) std::cout << "Values or derivs at grid nodes are inconsistent\n";
+
     // test accuracy of approximation
     double sumsqerr_l=0, sumsqerr_c=0, sumsqerr_s=0;
     const int NNN=24;    // number of intermediate points for checking the values

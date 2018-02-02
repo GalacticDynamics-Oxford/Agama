@@ -21,7 +21,7 @@
 #include "WD_Numerics.h"
 #include <cmath>
 
-namespace Torus{
+namespace torus{
 
 ////////////////////////////////////////////////////////////////////////////////
 // typedefs and constants

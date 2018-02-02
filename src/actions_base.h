@@ -46,14 +46,14 @@ struct Frequencies {
 /** Derivatives of coordinate/momentum variables w.r.t actions:
     each of three member fields stores the derivative of 6 pos/vel elements by the given action,
     in an inverted notation:  e.g.,  d(v_phi)/d(J_z) = dbyJz.vphi */
-template <typename coordSysT> struct DerivAct {
-    coord::PosVelT<coordSysT> dbyJr, dbyJz, dbyJphi;
+template <typename CoordT> struct DerivAct {
+    coord::PosVelT<CoordT> dbyJr, dbyJz, dbyJphi;
 };
 
 /** Derivatives of coordinate/momentum variables w.r.t angles:
     each of three member fields stores the derivative of 6 pos/vel elements by the given angle */
-template <typename coordSysT> struct DerivAng {
-    coord::PosVelT<coordSysT> dbythetar, dbythetaz, dbythetaphi;
+template <typename CoordT> struct DerivAng {
+    coord::PosVelT<CoordT> dbythetar, dbythetaz, dbythetaphi;
 };
 
 
@@ -110,7 +110,7 @@ private:
 
 /** Base class for toy maps used in torus machinery, which provide conversion from action/angle
     to coordinate/momentum variables, and also provide the derivatives of this transformation */
-template <typename coordSysT>
+template <typename CoordT>
 class BaseToyMap{
 public:
     virtual ~BaseToyMap() {};
@@ -125,23 +125,23 @@ public:
                     if not NULL, must point to an array of length `numParams()`;
         \return     pos/vel coordinates.
     */
-    virtual coord::PosVelT<coordSysT> map(
+    virtual coord::PosVelT<CoordT> map(
         const ActionAngles& actAng,
         Frequencies* freq=NULL,
-        DerivAct<coordSysT>* derivAct=NULL,
-        DerivAng<coordSysT>* derivAng=NULL,
-        coord::PosVelT<coordSysT>* derivParam=NULL) const = 0;
+        DerivAct<CoordT>* derivAct=NULL,
+        DerivAng<CoordT>* derivAng=NULL,
+        coord::PosVelT<CoordT>* derivParam=NULL) const = 0;
 };
 
 /** Base class for point transformations that map canonically conjugate coordinate/momentum
     in some intrinsic coord system into position/velocity in cylindrical coordinates */
-template <typename coordSysT>
+template <typename CoordT>
 class BasePointTransform{
 public:
     virtual ~BasePointTransform() {};
     /** convert from coordinate/momentum in the intrinsic template coordinate system
         to position/velocity in cylindrical coordinates */
-    virtual coord::PosVelCyl map(const coord::PosVelT<coordSysT> &point) const = 0;
+    virtual coord::PosVelCyl map(const coord::PosVelT<CoordT> &point) const = 0;
 };
 
 }  // namespace action

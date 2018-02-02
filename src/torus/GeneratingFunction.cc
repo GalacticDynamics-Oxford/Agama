@@ -16,7 +16,7 @@
 #include "WD_Numerics.h"
 #include <cmath>
 
-namespace Torus{
+namespace torus{
 
 using std::setfill;
 using std::setw;

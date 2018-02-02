@@ -4,6 +4,9 @@
 
 #ifdef HAVE_CVXOPT
 #include <cvxopt.h>  // C interface to LP/QP solver written in Python
+#if PY_MAJOR_VERSION >= 3
+#define PyString_AsString PyUnicode_AsUTF8
+#endif
 #endif
 
 #ifdef HAVE_GLPK
@@ -12,7 +15,7 @@
 #endif
 
 #include "math_optimization.h"
-#include "math_base.h"
+#include "math_core.h"
 #include <stdexcept>
 #include <cmath>
 
@@ -98,7 +101,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
-        result[v] = fmax(vmin, fmin(vmax, glp_ipt_col_prim(problem, v+1)));
+        result[v] = clamp(glp_ipt_col_prim(problem, v+1), vmin, vmax);
     }
     glp_delete_prob(problem);
 
@@ -279,7 +282,7 @@ std::vector<double> quadraticOptimizationSolve(
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
-        result[v] = fmax(vmin, fmin(vmax, MAT_BUFD(sol)[v]));
+        result[v] = clamp(MAT_BUFD(sol)[v], vmin, vmax);
     }
 
     Py_DECREF(solver);
