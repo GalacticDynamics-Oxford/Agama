@@ -11,7 +11,7 @@ namespace{
 /// the choice below produces comparable and incommensurable values of components, and has a unit norm
 static const double DEV_VEC_INIT[6] =
 { sqrt(7./90), sqrt(11./90), sqrt(13./90), sqrt(17./90), sqrt(19./90), sqrt(23./90) };
-    
+
 /// compute the logarithm of the L2-norm of a 6d vector
 double logMagnitude(const double x[6])
 {
@@ -64,7 +64,7 @@ RuntimeLyapunov<UseInternalVarEqSolver>::RuntimeLyapunov(
 {
     logDeviationVector.clear();
 }
-    
+
 template<bool UseInternalVarEqSolver>
 void RuntimeLyapunov<UseInternalVarEqSolver>::eval(const double t, double mat[]) const
 {
@@ -104,7 +104,7 @@ StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
             return SR_REINIT;
         }
     }
-    
+
     if(UseInternalVarEqSolver) {
         // perform one step of the internal variational equation solver
         // to compute the evolution of the deviation vector during the current timestep.

@@ -97,7 +97,7 @@ void trigMultiAngle(const double phi, const unsigned int m, const bool needSine,
     \code
                 x-reflection                    z-reflection
     m=   -4 -3 -2 -1  0  1  2  3  4      -4 -3 -2 -1  0  1  2  3  4
-    l=0               .                               .  
+    l=0               .                               .
     l=1            .  .  0                         .  0  .
     l=2         0  .  .  0  .                   .  0  .  0  .
     l=3      .  0  .  .  0  .  0             .  0  .  0  .  0  .
@@ -252,7 +252,7 @@ public:
 
     /// return the cos(theta) coordinate (-1:1) of i-th element of input array, 0 <= i < size()
     inline double costheta(unsigned int i) const { return costhnodes[i / fourier.size()]; }
-    
+
     /// return the phi coordinate [0:2pi) of i-th element of input array, 0 <= i < size()
     inline double phi(unsigned int i) const { return fourier.phi(i % fourier.size()); }
 
@@ -277,7 +277,7 @@ private:
     std::vector<double> costhnodes;
 
     /// values of all associated Legendre functions of order <= lmax,mmax at nodes of theta-grid
-    std::vector<double> legFnc;  
+    std::vector<double> legFnc;
 
     /// number of sample points in theta, spanning either (0:pi/2] or (0:pi)
     unsigned int thetasize() const { return isZReflSymmetric(ind.symmetry()) ? ind.lmax/2+1 : ind.lmax+1; }

@@ -13,11 +13,10 @@
 #include "coord.h"
 #include "debug_utils.h"
 #include <iostream>
-#include <iomanip>
 #include <stdexcept>
 
 
-const double eps=1e-10;  // accuracy of comparison
+const double eps=1e-14;  // accuracy of comparison
 
 /// some test functions that compute values, gradients and hessians in various coord systems
 template<typename CoordT>
@@ -53,9 +52,11 @@ public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
     virtual void evalScalar(const coord::PosCyl& p, double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
-    {  // same potential expressed in different coordinates
-        double sinphi = sin(p.phi), cosphi = cos(p.phi), sin2=pow_2(sinphi), R2=pow_2(p.R), R3=p.R*R2;
-        if(value) 
+    {   // same potential expressed in different coordinates
+        double sinphi,cosphi;
+        math::sincos(p.phi, sinphi, cosphi);
+        double sin2=pow_2(sinphi), R2=pow_2(p.R), R3=p.R*R2;
+        if(value)
             *value = R2*(3+p.R*p.z*sinphi*(6-8*sin2))/6;
         if(deriv) {
             deriv->dR  = p.R*(1+p.R*p.z*sinphi*(3-4*sin2));
@@ -78,21 +79,25 @@ public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
     virtual void evalScalar(const coord::PosSph& p, double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
-    {  // some obscure combination of spherical harmonics
-        if(value) 
-            *value = pow(p.r,2.5)*sin(p.theta)*sin(p.phi+2) - pow_2(p.r)*pow_2(sin(p.theta))*cos(2*p.phi-3);
+    {   // some obscure combination of spherical harmonics
+        double st, ct, sa, ca, sb, cb, sr=sqrt(p.r), r2=p.r*p.r;
+        math::sincos(  p.theta, st, ct);
+        math::sincos(  p.phi+2, sa, ca);
+        math::sincos(2*p.phi-3, sb, cb);
+        if(value)
+            *value = r2*sr*st*sa - r2*st*st*cb;
         if(deriv) {
-            deriv->dr    = 2.5*pow(p.r,1.5)*sin(p.theta)*sin(p.phi+2) - 2*p.r*pow_2(sin(p.theta))*cos(2*p.phi-3);
-            deriv->dtheta= pow(p.r,2.5)*cos(p.theta)*sin(p.phi+2) - pow_2(p.r)*sin(2*p.theta)*cos(2*p.phi-3);
-            deriv->dphi  = pow(p.r,2.5)*sin(p.theta)*cos(p.phi+2) + pow_2(p.r)*pow_2(sin(p.theta))*2*sin(2*p.phi-3);;
+            deriv->dr    = 2.5*p.r*sr*st*sa - 2*p.r*st*st*cb;
+            deriv->dtheta=      r2*sr*ct*sa - 2*r2 *st*ct*cb;
+            deriv->dphi  =      r2*sr*st*ca + 2*r2 *st*st*sb;;
         }
         if(deriv2) {
-            deriv2->dr2       = 3.75*sqrt(p.r)*sin(p.theta)*sin(p.phi+2) - 2*pow_2(sin(p.theta))*cos(2*p.phi-3);
-            deriv2->dtheta2   = pow(p.r,2.5)*sin(-p.theta)*sin(p.phi+2) - pow_2(p.r)*2*cos(2*p.theta)*cos(2*p.phi-3);
-            deriv2->dphi2     = pow(p.r,2.5)*sin(-p.theta)*sin(p.phi+2) + pow_2(p.r)*pow_2(sin(p.theta))*4*cos(2*p.phi-3);
-            deriv2->drdtheta  = 2.5*pow(p.r,1.5)*cos(p.theta)*sin(p.phi+2) - 2*p.r*sin(2*p.theta)*cos(2*p.phi-3);
-            deriv2->drdphi    = 2.5*pow(p.r,1.5)*sin(p.theta)*cos(p.phi+2) + 4*p.r*pow_2(sin(p.theta))*sin(2*p.phi-3);
-            deriv2->dthetadphi= pow(p.r,2.5)*cos(p.theta)*cos(p.phi+2) + pow_2(p.r)*sin(2*p.theta)*2*sin(2*p.phi-3);
+            deriv2->dr2       =    3.75*sr*st*sa - 2*st*st*cb;
+            deriv2->dtheta2   =     -r2*sr*st*sa - 2*r2*(ct*ct-st*st)*cb;
+            deriv2->dphi2     =     -r2*sr*st*sa + 4*r2 *st*st*cb;
+            deriv2->drdtheta  = 2.5*p.r*sr*ct*sa - 4*p.r*st*ct*cb;
+            deriv2->drdphi    = 2.5*p.r*sr*st*ca + 4*p.r*st*st*sb;
+            deriv2->dthetadphi=      r2*sr*ct*ca + 4*r2 *st*ct*sb;
         }
     }
 };
@@ -110,36 +115,29 @@ template<> bool isSingular(const coord::PosSph& p) {
 template<typename srcCS, typename destCS>
 bool test_conv_posvel(const coord::PosVelT<srcCS>& srcpoint)
 {
-    const coord::PosVelT<destCS> destpoint=coord::toPosVel<srcCS,destCS>(srcpoint);
-    const coord::PosVelT<srcCS>  invpoint =coord::toPosVel<destCS,srcCS>(destpoint);
-    double src[6],dest[6],inv[6];
+    const coord::PosVelT<destCS> dstpoint=coord::toPosVel<srcCS,destCS>(srcpoint);
+    const coord::PosVelT<srcCS>  invpoint=coord::toPosVel<destCS,srcCS>(dstpoint);
+    double src[6],dst[6],inv[6];
     srcpoint.unpack_to(src);
-    destpoint.unpack_to(dest);
+    dstpoint.unpack_to(dst);
     invpoint.unpack_to(inv);
-    double Lzsrc=coord::Lz(srcpoint), Lzdest=coord::Lz(destpoint);
-    double Ltsrc=coord::Ltotal(srcpoint), Ltdest=coord::Ltotal(destpoint);
-    double V2src=pow_2(src[3])+pow_2(src[4])+pow_2(src[5]);
-    double V2dest=pow_2(dest[3])+pow_2(dest[4])+pow_2(dest[5]);
-    bool samepos=true;
-    for(int i=0; i<3; i++)
-        if(fabs(src[i]-inv[i])>eps) samepos=false;
-    bool samevel=true;
-    for(int i=3; i<6; i++)
-        if(fabs(src[i]-inv[i])>eps) samevel=false;
-    bool sameLz=(fabs(Lzsrc-Lzdest)<eps);
-    bool sameLt=(fabs(Ltsrc-Ltdest)<eps);
-    bool sameV2=(fabs(V2src-V2dest)<eps);
-    bool ok=samepos && samevel && sameLz && sameLt && sameV2;
-    std::cout << (ok?"OK  ":"FAILED  ");
+    double Lsrc =coord::Ltotal(srcpoint), Ldst=coord::Ltotal(dstpoint);
+    double vsrc =pow_2(src[3])+pow_2(src[4])+pow_2(src[5]);
+    double vdst =pow_2(dst[3])+pow_2(dst[4])+pow_2(dst[5]);
+    bool samepos=equalPos(srcpoint, invpoint, eps);
+    bool samevel=equalVel(srcpoint, invpoint, eps);
+    bool sameL  =math::fcmp(Lsrc, Ldst, eps)==0;
+    bool samev2 =math::fcmp(vsrc, vdst, eps)==0;
+    bool ok=samepos && samevel && sameL && samev2;
+    std::cout << (ok?"OK  ":"\033[1;31mFAILED\033[0m  ");
     if(!samepos) std::cout << "pos  ";
-    if(!samevel) std::cout << "vel  ";
-    if(!sameLz) std::cout << "L_z  ";
-    if(!sameLt) std::cout << "L_total  ";
-    if(!sameV2) std::cout << "v^2  ";
+    if(!samevel) std::cout << "vel  " << src[3] << " " << (inv[3]-src[3]) << ", " << src[4] << " " << (inv[4]-src[4]) << ", " << src[5] << " " << (inv[5]-src[5]);
+    if(!sameL)   std::cout << "L_total  ";
+    if(!samev2)  std::cout << "v^2  ";
     std::cout<<srcCS::name()<<" => "<<
         destCS::name()<<" => "<<srcCS::name();
     if(!ok)
-        std::cout << srcpoint << " => " << destpoint << " => " << invpoint;
+        std::cout << srcpoint << " => " << dstpoint << " => " << invpoint;
     std::cout << "\n";
     return ok;
 }
@@ -183,14 +181,19 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
         std::cout << "    2-step conversion: " << e.what() << "\n";
     }
 
+    // not all components of the hessian can be accurately converted in the following nearly-degenerate case
+    double epsh = eps;
+    if(srcCS::name() == coord::Sph::name() && ((const double*)(&srcpoint))[1]/*theta*/ >= 3.1415)
+        epsh = 1e-10;  // loosen the tolerance
+
     bool samepos  = coord::equalPos(srcpoint,invpoint, eps);
     bool samegrad = coord::equalGrad(srcgrad, invgrad, eps);
-    bool samehess = coord::equalHess(srchess, invhess, eps);
-    bool samevalue2step= (fabs(destvalue-srcvalue)<eps);
+    bool samehess = coord::equalHess(srchess, invhess, epsh);
+    bool samevalue2step= math::fcmp(destvalue, srcvalue, eps)==0;
     bool samegrad2step = coord::equalGrad(destgrad, destgrad2step, eps);
-    bool samehess2step = coord::equalHess(desthess, desthess2step, eps);
+    bool samehess2step = coord::equalHess(desthess, desthess2step, epsh);
     bool ok=samepos && samegrad && samehess && samevalue2step && samegrad2step && samehess2step;
-    std::cout << (ok?"OK  ": isSingular(srcpoint)?"EXPECTEDLY FAILED  ":"FAILED  ");
+    std::cout << (ok?"OK  ": isSingular(srcpoint)?"EXPECTEDLY FAILED  ":"\033[1;31mFAILED\033[0m  ");
     if(!samepos)
         std::cout << "pos  ";
     if(!samegrad)
@@ -261,7 +264,7 @@ bool test_prolmod() {
     coord::PosVelSphMod psm(1.765432,0.3456,3.76543,0.213456,-2.123456,0.76543);
     coord::PosVelCyl pcy = toPosVelCyl(psm);
     coord::PosVelSphMod psm1 = coord::toPosVel<coord::Cyl, coord::SphMod>(pcy);
-    return samepos && samegrad && samepv && equalPosVel(psm, psm1, 1e-12);
+    return samepos && samegrad && samepv && equalPosVel(psm, psm1, eps);
 }
 
 // compare derivatives of kinetic energy obtained analytically and using finite differences

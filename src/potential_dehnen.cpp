@@ -23,7 +23,7 @@ static const double EPSREL_POTENTIAL_INT = 1e-6;
 //    so that the Multipole potential will solve the Poisson equation itself.
 //    This may be done by down-casting an instance of Dehnen class to BaseDensity,
 //    or by using a SpheroidDensity object instead.
-    
+
 Dehnen::Dehnen(double _mass, double _scalerad, double _gamma, double _axisRatioY, double _axisRatioZ): 
     BasePotentialCar(), mass(_mass), scalerad(_scalerad),
     gamma(_gamma), axisRatioY(_axisRatioY), axisRatioZ(_axisRatioZ)

@@ -1,5 +1,5 @@
 /** \file    test_orbit_integr.cpp
-    \date    2015-2016
+    \date    2015-2018
     \author  Eugene Vasiliev
 
     Test orbit integration in various potentials and coordinate systems.
@@ -102,12 +102,14 @@ bool test_potential(const potential::BasePotential& potential,
                 utils::pp(pointRot[2], 9) << "   " <<
                 utils::pp(totalEnergy(potential, coord::PosVelT<CoordT>(pointRot)), 15) << "  ";
         }
-        if(output) 
+        if(output)
             std::cout << utils::pp(E, 15) << ' '<<
             utils::pp(totalEnergy(potential, coord::PosVelCar(xv)), 15) << ' '<<
             utils::pp(Lz, 15) << '\n';
     }
     bool completed = time>0.999999*total_time;
+    // if Lz==0 initially and the potential is axisymmetric, it must stay so for the entire orbit
+    bool Lzok = isAxisymmetric(potential) && Lz(initial_conditions)==0 ? avgL.mean()==0 : true;
     bool ok = avgE.disp()<eps*eps && (avgL.disp()<eps*eps || !isAxisymmetric(potential));
     if(completed)
         std::cout <<numSteps<<" steps,  ";
@@ -121,8 +123,9 @@ bool test_potential(const potential::BasePotential& potential,
     }
     std::cout << "E=" <<avgE.mean() <<" +- "<<sqrt(avgE.disp())<<
         ",  Lz="<<avgL.mean()<<" +- "<<sqrt(avgL.disp())<<
+        (Lzok ? "" : " \033[1;35m!!\033[0m") <<
         (ok? "" : " \033[1;31m**\033[0m") << "\n";
-    return ok;
+    return ok && Lzok;
 }
 
 potential::PtrPotential make_galpot(const char* params)

@@ -16,7 +16,6 @@ Classes and functions used for integrating orbits in gravitational potentials
 
 #include "Types.h"
 #include "Potential.h"
-#include "WD_Numerics.h"
 
 namespace torus{
 /** \brief Integrates orbits in effective potentials. */

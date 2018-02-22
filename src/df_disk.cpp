@@ -5,7 +5,7 @@
 namespace df{
 
 namespace{  // internal
-    
+
 /// compute the average of DF over stellar age:
 /// ( \int_0^1 dt B^2(t) \exp[ t/t_0 - A*B(t) ] ) / ( \int_0^1 dt \exp[ t/t_0 ] ),
 /// where B(t) = ( (t + t_1) / (1 + t_1) )^{-2\beta}
@@ -40,13 +40,15 @@ QuasiIsothermal::QuasiIsothermal(const QuasiIsothermalParam &params, const poten
     par(params), freq(freqs)
 {
     // sanity checks on parameters
-    if(par.Rdisk<=0)
+    if(!(par.Sigma0>0))
+        throw std::invalid_argument("QuasiIsothermal: surface density Sigma0 must be positive");
+    if(!(par.Rdisk>0))
         throw std::invalid_argument("QuasiIsothermal: disk scale radius Rdisk must be positive");
-    if(par.sigmar0<=0)
+    if(!(par.sigmar0>0))
         throw std::invalid_argument("QuasiIsothermal: velocity dispersion sigmar0 must be positive");
-    if(par.Rsigmar<=0)
+    if(!(par.Rsigmar>0))
         throw std::invalid_argument("QuasiIsothermal: velocity scale radius Rsigmar must be positive");
-    if(!( (par.sigmaz0==0 && par.Rsigmaz==0) ^ (par.Hdisk==0) ))
+    if(!( (par.Hdisk>0) ^ (par.sigmaz0>0 && par.Rsigmaz>0) ))
         throw std::invalid_argument("QuasiIsothermal: should have either "
             "Hdisk>0 to assign the vertical velocity dispersion from disk scaleheight, or "
             "Rsigmaz>0, sigmaz0>0 to make it exponential in radius");
@@ -84,7 +86,9 @@ double QuasiIsothermal::value(const actions::Actions &J) const
 Exponential::Exponential(const ExponentialParam& params) :
     par(params)
 {
-    if(par.Jr0<=0 || par.Jz0<=0 || par.Jphi0<=0)
+    if(!(par.norm>0))
+        throw std::invalid_argument("Exponential: overall normalization must be positive");
+    if(!(par.Jr0>0) || !(par.Jz0>0) || !(par.Jphi0>0))
         throw std::invalid_argument("Exponential: scale actions must be positive");
     if(par.sigmabirth<=0 || par.sigmabirth>1)
         throw std::invalid_argument("Exponential: invalid value for velocity dispersion at birth");
@@ -98,7 +102,7 @@ double Exponential::value(const actions::Actions &J) const
     double Jvel = sqrt(pow_2(Jsum) + pow_2(par.addJvel));
     // suppression factor for counterrotating orbits
     double negJphi = J.Jphi>0 ? 0. : J.Jphi;
-    return 1. / TWO_PI_CUBE * par.mass / pow_2(par.Jr0 * par.Jz0 * par.Jphi0) *
+    return 1. / TWO_PI_CUBE * par.norm / pow_2(par.Jr0 * par.Jz0 * par.Jphi0) *
         Jvel * Jvel * Jden * exp(-Jden / par.Jphi0) *
         averageOverAge(Jvel * ((J.Jr - negJphi) / pow_2(par.Jr0) + J.Jz / pow_2(par.Jz0)), par);
 }

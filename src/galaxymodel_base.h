@@ -41,7 +41,7 @@ public:
     \param[in]  model  is the galaxy model (potential + DF + action finder);
     \param[in]  point  is the position at which the quantities should be computed;
     \param[out] density  will contain the integral of DF over all velocities;
-    \param[out] velocityFirstMoment  will contain the mean streaming velocity;
+    \param[out] velocityFirstMoment  will contain the mean streaming velocity <v_phi>;
     \param[out] velocitySecondMoment will contain the tensor of mean squared velocity components;
     \param[out] densityErr  will contain the error estimate of density;
     \param[out] velocityFirstMomentErr  will contain the error estimate of 1st velocity moment;
@@ -51,10 +51,10 @@ public:
 */
 void computeMoments(const GalaxyModel& model, const coord::PosCyl& point,
     double* density,
-    coord::VelCyl* velocityFirstMoment,
+    double* velocityFirstMoment,
     coord::Vel2Cyl* velocitySecondMoment,
     double* densityErr=NULL,
-    coord::VelCyl* velocityFirstMomentErr=NULL,
+    double* velocityFirstMomentErr=NULL,
     coord::Vel2Cyl* velocitySecondMomentErr=NULL,
     const double reqRelError=1e-3, const int maxNumEval=1e5);
 

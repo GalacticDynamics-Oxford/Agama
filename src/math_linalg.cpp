@@ -120,7 +120,7 @@ double blas_dnrm2(const Matrix<double>& X)
     | 0  0  0  0  1  4 10  5 |     | 1  4 10  5  - |
     | 0  0  0  0  0  1  4 10 |     | 1  4 10  -  - |
     Here entries marked '-' are unused (refer to elements that would lie outside the original matrix).
-*/    
+*/
 template<typename NumT>
 BandMatrix<NumT>::BandMatrix(size_t size, size_t bandWidth, const NumT value) :
     IMatrix<NumT>(size, size), band(bandWidth), data(size * (2*bandWidth+1), value)
@@ -221,7 +221,7 @@ void blas_daxpy(double alpha, const BandMatrix<double>& X, BandMatrix<double>& Y
     for(size_t i=0; i<numElem; i++)
         y[i] += alpha * x[i];
 }
-    
+
 template<> void blas_dmul(double alpha, BandMatrix<double>& Y)
 {
     const size_t size = Y.rows(), band = Y.bandwidth(), numElem = size * (band*2+1);
@@ -260,7 +260,7 @@ void blas_dgemv(CBLAS_TRANSPOSE Trans, double alpha, const BandMatrix<double>& m
         }
     }
 }
-    
+
 std::vector<double> solveBand(const BandMatrix<double>& mat, const std::vector<double>& rhs)
 {
     const ptrdiff_t size = mat.rows(), band = mat.bandwidth(), width = band * 2 + 1;
@@ -307,8 +307,8 @@ std::vector<double> solveBand(const BandMatrix<double>& mat, const std::vector<d
     }
     return x;
 }
-    
-    
+
+
 #ifdef HAVE_EIGEN
 // --------- EIGEN-BASED IMPLEMENTATIONS --------- //
 
@@ -324,7 +324,7 @@ template<typename NumT>
 struct Type< SparseMatrix<NumT> > {
     typedef Eigen::SparseMatrix<NumT, Eigen::ColMajor> T;
 };
-    
+
 // shotrcut for type casting
 template<typename M>
 inline typename Type<M>::T& mat(M& m) {
@@ -334,7 +334,7 @@ template<typename M>
 inline const typename Type<M>::T& mat(const M& m) {
     return *static_cast<const typename Type<M>::T*>(m.impl);
 }
-    
+
 }
 
 //------ dense matrix -------//
@@ -688,7 +688,7 @@ void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_
 }
 
 
-// ------ linear algebra routines ------ //    
+// ------ linear algebra routines ------ //
 
 /// LU decomposition for dense matrices
 typedef Eigen::PartialPivLU< Type< Matrix<double> >::T> LUDecompImpl;
@@ -777,7 +777,7 @@ typedef Eigen::BDCSVD< Type< Matrix<double> >::T> SVDecompImpl;     // more effi
 #else
 typedef Eigen::JacobiSVD< Type< Matrix<double> >::T> SVDecompImpl;  // slower
 #endif
-    
+
 SVDecomp::SVDecomp(const Matrix<double>& M) :
     impl(new SVDecompImpl(mat(M), Eigen::ComputeThinU | Eigen::ComputeThinV)) {}
 
@@ -1050,7 +1050,7 @@ std::vector<Triplet> SparseMatrix<NumT>::values() const
 template<typename NumT>
 SparseMatrix<NumT>::SparseMatrix() :
     IMatrix<NumT>(), impl(NULL) {}
-    
+
 // constructor from triplets
 template<typename NumT>
 SparseMatrix<NumT>::SparseMatrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
@@ -1130,9 +1130,9 @@ std::vector<Triplet> SparseMatrix<NumT>::values() const
             result.push_back(Triplet(k / cols(), k % cols(), static_cast<const NumT*>(impl)[k]));
     return result;
 }
-    
+
 #endif
-    
+
 // ------ wrappers for BLAS routines ------ //
 
 namespace {
@@ -1373,7 +1373,7 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
         static_cast<const LUDecompImpl*>(impl)->perm, VecC(rhs), Vec(result));
     return result;
 }
-    
+
 /// Cholesky decomposition implementation for GSL
 CholeskyDecomp::CholeskyDecomp(const Matrix<double>& M) :
     impl(NULL)
@@ -1437,7 +1437,7 @@ struct SVDecompImpl {
     Matrix<double> U, V;
     std::vector<double> S;
 };
-    
+
 SVDecomp::SVDecomp(const Matrix<double>& M) :
     impl(new SVDecompImpl())
 {
@@ -1459,7 +1459,7 @@ SVDecomp::SVDecomp(const Matrix<double>& M) :
 }
 
 SVDecomp::~SVDecomp() { delete static_cast<SVDecompImpl*>(impl); }
-    
+
 SVDecomp::SVDecomp(const SVDecomp& src) :
     impl(new SVDecompImpl(*static_cast<const SVDecompImpl*>(src.impl))) {}
 

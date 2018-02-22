@@ -1,7 +1,6 @@
 #include "potential_utils.h"
 #include "math_core.h"
 #include "utils.h"
-#include <algorithm>
 #include <cmath>
 #include <cfloat>
 #include <cassert>
@@ -26,7 +25,7 @@ static const double ROUNDOFF_THRESHOLD = DBL_EPSILON / ROOT3_DBL_EPSILON;
 
 /// minimum relative difference between two adjacent values of potential (to reduce roundoff errors)
 static const double MIN_REL_DIFFERENCE = 1e-12;
-    
+
 /// fixed order of Gauss-Legendre integration of PhaseVolume on each segment of a log-grid
 static const int GLORDER1 = 6;   // for shorter segments
 static const int GLORDER2 = 10;  // for larger segments
@@ -372,7 +371,9 @@ Interpolator::Interpolator(const BasePotential& potential)
             "that tend to zero as r->infinity");   // otherwise assume Phiinf==0
     slopeOut = potential::outerSlope(PotentialWrapper(potential), &Mtot, &coefOut);
     double Phi0 = potential.value(coord::PosCyl(0,0,0));
-    if(!(Phi0<0))  // well-behaved potential must not be NAN at 0, but is allowed to be -INFINITY
+    if(Phi0 >= 0)
+        throw std::runtime_error("Interpolator: potential must be negative at r=0");
+    if(Phi0!=Phi0)  // well-behaved potential must not be NAN at 0, but is allowed to be -INFINITY
         throw std::runtime_error("Interpolator: potential cannot be computed at r=0");
     invPhi0 = 1./Phi0;
 
@@ -583,7 +584,8 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
 
     // create grid in log(r)
     std::vector<double> gridr = math::createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);
-    std::transform(gridr.begin(), gridr.end(), gridr.begin(), exp);  // convert to grid in r
+    for(size_t i=0; i<gridr.size(); i++)
+        gridr[i] = exp(gridr[i]);  // convert to grid in r
     std::vector<double> gridE;
     gridE.reserve(gridr.size());
 
@@ -591,7 +593,7 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     // too closely spaced, such that the difference between adjacent potential values suffers from
     // roundoff/cancellation errors due to finite precision of floating-point arithmetic
     double prevPhi = Phi0;
-    for(unsigned int i=0; i<gridr.size();) {
+    for(size_t i=0; i<gridr.size(); ) {
         double E = pot.value(gridr[i]);
         if(i>0 && !(E>=gridE[i-1]))
             throw std::invalid_argument(
@@ -604,19 +606,18 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
             gridr.erase(gridr.begin()+i);
         }
     }
-    unsigned int gridsize = gridr.size();
+    size_t gridsize = gridr.size();
     if(gridsize == 0)
         throw std::runtime_error("PhaseVolume: cannot construct a suitable grid in radius");
-    
+
     std::vector<double> gridH(gridsize), gridG(gridsize);
-    double glnodes1[GLORDER1], glweights1[GLORDER1], glnodes2[GLORDER2], glweights2[GLORDER2];
-    math::prepareIntegrationTableGL(0, 1, GLORDER1, glnodes1, glweights1);
-    math::prepareIntegrationTableGL(0, 1, GLORDER2, glnodes2, glweights2);
+    const double *glnodes1 = math::GLPOINTS[GLORDER1], *glweights1 = math::GLWEIGHTS[GLORDER1];
+    const double *glnodes2 = math::GLPOINTS[GLORDER2], *glweights2 = math::GLWEIGHTS[GLORDER2];
 
     // loop through all grid segments, and in each segment add the contribution to integrals
     // in all other segments leftmost of the current one (thus the complexity is Ngrid^2,
     // but the number of potential evaluations is only Ngrid * GLORDER).
-    for(unsigned int i=0; i<gridsize; i++) {
+    for(size_t i=0; i<gridsize; i++) {
         double deltar = gridr[i] - (i>0 ? gridr[i-1] : 0);
         // choose a higher-order quadrature rule for longer grid segments
         int glorder = i>0 && gridr[i] < gridr[i-1]*GLRATIO ? GLORDER1 : GLORDER2;
@@ -632,7 +633,7 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
             // the transformation of variable y -> r  and the common weight factor r^2
             double weight = glweights[k] * 2*(1-y) * deltar * pow_2(r);
             // add a contribution to the integrals expressing g(E_j) and h(E_j) for all E_j > Phi(r[i])
-            for(unsigned int j=i; j<gridsize; j++) {
+            for(size_t j=i; j<gridsize; j++) {
                 double v  = sqrt(fmax(0, gridE[j] - E));
                 gridG[j] += weight * v * 1.5;
                 gridH[j] += weight * pow_3(v);
@@ -648,15 +649,15 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
             "Phi(r) ~ r^" + utils::toString( 6 * inner / (2 - 3 * inner), 8) + " at small r, "
             "Phi(r) ~ r^" + utils::toString( 6 * outer / (2 - 3 * outer), 8) + " at large r.");
     }
-    
+
     std::ofstream strm;   // debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         strm.open("potentialPhaseVolume.log");
         strm << "#r      \tE       \th       \tg=dh/dE\n";
     }
-    
+
     // convert h, g and E to scaled coordinates
-    for(unsigned int i=0; i<gridsize; i++) {
+    for(size_t i=0; i<gridsize; i++) {
         double E = gridE[i], H = gridH[i], G = gridG[i], scaledE, dEdscaledE;
         scaleE(E, invPhi0, scaledE, dEdscaledE);
         gridE[i] = scaledE;
@@ -671,7 +672,7 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
 
     HofE = math::QuinticSpline(gridE, gridH, gridG);
     // inverse relation between E and H - the derivative is reciprocal
-    for(unsigned int i=0; i<gridG.size(); i++)
+    for(size_t i=0; i<gridG.size(); i++)
         gridG[i] = 1/gridG[i];
     EofH = math::QuinticSpline(gridH, gridE, gridG);
 }

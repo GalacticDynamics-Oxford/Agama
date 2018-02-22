@@ -85,13 +85,9 @@ orbit::StepResult RuntimeLosscone::processTimestep(
         output->tcapt   = tperi;
         double Mbh      = bh.mass * (numBH==1 ? 1 : (b==0 ? 1 : bh.q) / (1 + bh.q));
         output->E       = -Mbh / rperi +
-            0.5 * (pow_2(posvel[3]) + pow_2(posvel[4]) + pow_2(posvel[5]));
+            0.5 * (pow_2(posvel[3]-bhVX[b]) + pow_2(posvel[4]-bhVY[b]) + pow_2(posvel[5]));
         output->rperi   = rperi;
         output->indexBH = b;
-        /*output->L2 =
-            pow_2((posvel[1]-bhY[b]) * (posvel[5]        ) - (posvel[2]       ) * (posvel[4]-bhVY[b])) +
-            pow_2((posvel[2]       ) * (posvel[3]-bhVX[b]) - (posvel[0]-bhX[b]) * (posvel[5]        )) +
-            pow_2((posvel[0]-bhX[b]) * (posvel[4]-bhVY[b]) - (posvel[1]-bhY[b]) * (posvel[3]-bhVX[b]));*/
 
         // store the position/velocity at the moment of capture
         for(int i=0; i<6; i++)
@@ -158,7 +154,7 @@ void RagaTaskLosscone::finishEpisode()
             if(totalNumCaptured == 0) {
                 // this is the first time the file is opened (i.e. is created), so print out the header
                 strm.open(params.outputFilename.c_str());
-                strm << "Time    \tParticleMass\tPericenterRad\tEnergy  \tParticleIndex\tBHindex\n";
+                strm << "#Time   \tParticleMass\tPericenterRad\tEnergy  \tParticleIndex\tBHindex\n";
             } else  // append to the file
                 strm.open(params.outputFilename.c_str(), std::ios_base::app);
         }

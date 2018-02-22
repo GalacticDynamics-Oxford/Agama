@@ -45,7 +45,7 @@ namespace coord {
 
 /// \name   Primitive data types: symmetry in 3d space
 ///@{
-    
+
 /** defines the symmetry properties of a function in three-dimensional space */
 enum SymmetryType{ 
     ST_NONE         = 0, ///< no symmetry whatsoever
@@ -437,7 +437,7 @@ template<> struct GradT<ProlMod>{
     double drho, dtau, dphi;
 };
 typedef struct GradT<ProlMod> GradProlMod;
-    
+
 ///@}
 /// \name   Primitive data types: hessian of a scalar function in different coordinate systems
 ///@{
@@ -618,7 +618,7 @@ inline PosVelSph toPosVelSph(const PosVelT<srcCS>& from) { return toPosVel<srcCS
 /** templated conversion taking the parameters of coordinate system into account */
 template<typename srcCS, typename destCS>
 PosVelT<destCS> toPosVel(const PosVelT<srcCS>& from, const destCS& coordsys);
-    
+
 /** trivial conversions */
 template<> inline PosCar toPos<Car,Car>(const PosCar& p) { return p;}
 template<> inline PosCyl toPos<Cyl,Cyl>(const PosCyl& p) { return p;}

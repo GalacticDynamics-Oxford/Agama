@@ -70,7 +70,7 @@ public:
 
     /// set a string value
     void set(const std::string& key, const char* value);
-    
+
     /// set a floating-point value
     void set(const std::string& key, const double value, unsigned int width=6);
 

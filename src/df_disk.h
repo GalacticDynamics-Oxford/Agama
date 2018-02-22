@@ -40,9 +40,9 @@ double
     coefJr,   ///< weight of radial action in the linear combination of actions Jsum = Jphi + cr Jr + cz Jz
     coefJz,   ///< same for the vertical action
     Jmin;     ///< lower cutoff for evaluating epicyclic frequencies: tildeJ = sqrt(Jsum^2 + Jmin^2)
-QuasiIsothermalParam() :  ///< set default values for all fields
-    Sigma0(0), Rdisk(0), Hdisk(0), sigmar0(0), sigmaz0(0), sigmamin(0),
-    Rsigmar(0), Rsigmaz(0), coefJr(1.), coefJz(0.25), Jmin(0) {}
+QuasiIsothermalParam() :  ///< set default values for all fields (NAN means that it must be set manually)
+    Sigma0(NAN), Rdisk(NAN), Hdisk(NAN), sigmar0(NAN), sigmaz0(NAN), sigmamin(0),
+    Rsigmar(NAN), Rsigmaz(NAN), coefJr(1.), coefJz(0.25), Jmin(0) {}
 };
 
 /** Distribution function for quasi-isothermal disk, similar but somewhat different from the one
@@ -56,8 +56,8 @@ QuasiIsothermalParam() :  ///< set default values for all fields
     \f$  \Sigma(R_c)   = \Sigma_0 \exp( -R_c / R_{disk} )  \f$,
     \f$  \sigma_r(R_c) = \sigma_{r,0} \exp( -R_c / R_{sigma,r} )  \f$,
     and two options for the vertical velocity dispersion: either
-    \f$  \sigma_z(R_c) = \sqrt{2} H_{disk} \nu(R_c)  \f$  if Hdisk!=0, or
-    \f$  \sigma_z(R_c) = \sigma_{z,0} \exp( -R_c / R_{sigma,z} )  \f$  if sigmaz0!=0 and Rsigmaz!=0.
+    \f$  \sigma_z(R_c) = \sqrt{2} H_{disk} \nu(R_c)  \f$  if Hdisk>0, or
+    \f$  \sigma_z(R_c) = \sigma_{z,0} \exp( -R_c / R_{sigma,z} )  \f$  if sigmaz0>0 and Rsigmaz>0.
 
     In the case that  \f$  \beta \ne 0  \f$, the above expressions are modified to take account
     of velocity dispersion that varies with age, together with the assumed exponentially declining
@@ -108,7 +108,7 @@ public:
 /// Parameters that describe the exponential distribution function
 struct ExponentialParam: public AgeVelocityDispersionParam{
 double
-    mass,       ///< overall normalization factor with the dimension of mass (NOT the actual mass)
+    norm,       ///< overall normalization factor with the dimension of mass (NOT the actual mass)
     Jr0,        ///< scale action setting the radial velocity dispersion
     Jz0,        ///< scale action setting the disk thickness and the vertical velocity dispersion
     Jphi0,      ///< scale action setting the disk radius
@@ -117,7 +117,7 @@ double
     coefJr,     ///< weight of radial action in the sum of actions
     coefJz;     ///< same for the vertical action
 ExponentialParam() :  ///< set default values for all fields
-    mass(0), Jr0(0), Jz0(0), Jphi0(0), addJden(0), addJvel(0), coefJr(1.0), coefJz(0.25) {}
+    norm(NAN), Jr0(NAN), Jz0(NAN), Jphi0(NAN), addJden(0), addJvel(0), coefJr(1.0), coefJz(0.25) {}
 };
 
 /** Another type of disk distribution function, which resembles QuasiIsothermal and produces
@@ -144,7 +144,7 @@ ExponentialParam() :  ///< set default values for all fields
 class Exponential: public df::BaseDistributionFunction{
     const ExponentialParam par;     ///< parameters of the DF
 public:
-    Exponential(const ExponentialParam& params);    
+    Exponential(const ExponentialParam& params);
     virtual double value(const actions::Actions &J) const;
 };
 

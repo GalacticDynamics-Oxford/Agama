@@ -57,7 +57,7 @@ void KeyValueMap::add(const char* line)
         if(indx!=std::string::npos && indx+1<key.size())  // and remove trailing spaces (before '=')
             key.erase(indx+1);
         indx = buffer.find_first_not_of(" \t\n\r");       // remove leading spaces after '='
-        if(indx!=std::string::npos && indx>0)  
+        if(indx!=std::string::npos && indx>0)
             buffer.erase(0, indx);
         indx = buffer.find_last_not_of(" \t\n\r");        // and trailing spaces at the end of the line
         if(indx!=std::string::npos && indx+1<buffer.size())
@@ -88,7 +88,7 @@ std::string KeyValueMap::getString(const std::string& key, const std::string& de
             return items[ik].second;
     return defaultValue;
 }
-    
+
 std::string KeyValueMap::getStringAlt(const std::string& key1, 
     const std::string& key2, const std::string& defaultValue) const
 {
@@ -149,7 +149,7 @@ std::vector<double> KeyValueMap::getDoubleVector(const std::string& key,
         return defaultValues;
     else
         return toDoubleVector(splitString(result, ", "));
-    
+
 }
 
 void KeyValueMap::set(const std::string& key, const std::string& value)

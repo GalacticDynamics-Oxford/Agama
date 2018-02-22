@@ -301,7 +301,7 @@ std::string pp(double num, unsigned int uwidth)
     }
     if(num!=num || num==INFINITY || num==-INFINITY) {
         result = num==INFINITY ? "+INF" : num==-INFINITY ? "-INF" : "NAN";
-        result.resize(width, '#');
+        result.resize(width, ' ');
         return result;
     }
     // separate out sign, and reduce the available width

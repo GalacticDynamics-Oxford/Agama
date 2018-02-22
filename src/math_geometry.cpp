@@ -19,17 +19,16 @@ inline void integrateOverRectangle(const Rectangle& rect,
     // or 4 points if N<=3 (two-point Gaussian quadrature in each dimension)
     double area = (rect.upper.x - rect.lower.x) * (rect.upper.y - rect.lower.y) * (N<=1 ? 1. : 0.25);
     double weightxa[N+1], weightya[N+1], weightxb[N+1], weightyb[N+1];
+    const double X1 = 0.2113248654051871, X2 = 1-X1;  // nodes of 2-point Gaussian quadrature rule
     double xa = N<=1 ? 0.5 * (rect.lower.x + rect.upper.x) :
-        0.2113248654051871 *  rect.lower.x + 0.7886751345948129 * rect.upper.x;
+        X1 *  rect.lower.x + X2 * rect.upper.x;
     double ya = N<=1 ? 0.5 * (rect.lower.y + rect.upper.y) :
-        0.2113248654051871 *  rect.lower.y + 0.7886751345948129 * rect.upper.y;
+        X1 *  rect.lower.y + X2 * rect.upper.y;
     unsigned int indx = bsplx.nonzeroComponents(xa, 0, weightxa);
     unsigned int indy = bsply.nonzeroComponents(ya, 0, weightya);
     if(N>1) {
-        bsplx.nonzeroComponents(
-            0.2113248654051871 * rect.upper.x + 0.7886751345948129 * rect.lower.x, 0, weightxb);
-        bsply.nonzeroComponents(
-            0.2113248654051871 * rect.upper.y + 0.7886751345948129 * rect.lower.y, 0, weightyb);
+        bsplx.nonzeroComponents(X1 * rect.upper.x + X2 * rect.lower.x, 0, weightxb);
+        bsply.nonzeroComponents(X1 * rect.upper.y + X2 * rect.lower.y, 0, weightyb);
     }
     const size_t nx = bsplx.numValues();
     // use one or four points depending on the order of B-splines
@@ -97,7 +96,7 @@ void integrateOverPolygon(const Polygon& polygon,
         {
             integrateOverRectangle(Rectangle(polygon[1], polygon[3]), bsplx, bsply, output);
             return;
-        }        
+        }
     }
     // otherwise split a generic polygon into triangles
     for(size_t v=2; v<numVertices; v++)
@@ -159,7 +158,7 @@ Polygon clipPolygonByRectangle(const Polygon& polygon, const Rectangle& rect)
                     default: dest.push_back(Point2d(
                         rect.lower.x, 
                         linearInterp(rect.lower.x, src[prev].x, src[curr].x, src[prev].y, src[curr].y)));
-                }                
+                }
             }
             // also retain the current vertex if it was on the non-clipped side w.r.t. current direction
             if(currInside)
@@ -168,7 +167,7 @@ Polygon clipPolygonByRectangle(const Polygon& polygon, const Rectangle& rect)
         }
     }
     return result;
-}    
+}
 
 
 template<int N>

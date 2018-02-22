@@ -16,6 +16,7 @@ DoublePowerLawParam parseDoublePowerLawParams(
     par.norm      = kvmap.getDouble("norm")    * conv.massUnit;
     par.J0        = kvmap.getDouble("J0")      * conv.lengthUnit * conv.velocityUnit;
     par.Jcutoff   = kvmap.getDouble("Jcutoff") * conv.lengthUnit * conv.velocityUnit;
+    par.Jphi0     = kvmap.getDouble("Jphi0")   * conv.lengthUnit * conv.velocityUnit;
     par.slopeIn   = kvmap.getDouble("slopeIn",   par.slopeIn);
     par.slopeOut  = kvmap.getDouble("slopeOut",  par.slopeOut);
     par.steepness = kvmap.getDouble("steepness", par.steepness);
@@ -23,6 +24,7 @@ DoublePowerLawParam parseDoublePowerLawParams(
     par.coefJzIn  = kvmap.getDouble("coefJzIn",  par.coefJzIn);
     par.coefJrOut = kvmap.getDouble("coefJrOut", par.coefJrOut);
     par.coefJzOut = kvmap.getDouble("coefJzOut", par.coefJzOut);
+    par.rotFrac   = kvmap.getDouble("rotFrac",   par.rotFrac);
     par.cutoffStrength = kvmap.getDouble("cutoffStrength", par.cutoffStrength);
     return par;
 }
@@ -54,7 +56,7 @@ ExponentialParam parseExponentialParams(
     const units::ExternalUnits& conv)
 {
     ExponentialParam par;
-    par.mass   = kvmap.getDouble("mass")   * conv.massUnit;
+    par.norm   = kvmap.getDouble("norm")   * conv.massUnit;
     par.Jr0    = kvmap.getDouble("Jr0")    * conv.lengthUnit * conv.velocityUnit;
     par.Jz0    = kvmap.getDouble("Jz0")    * conv.lengthUnit * conv.velocityUnit;
     par.Jphi0  = kvmap.getDouble("Jphi0")  * conv.lengthUnit * conv.velocityUnit;

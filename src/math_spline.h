@@ -43,7 +43,7 @@ but only if its derivatives at grid nodes are known with sufficiently high accur
 ###  3-dimensional case.
 For separable 3d grids there are linear and natural cubic spline interpolators,
 both constructed from the array of values at the nodes of 3d grid.
- 
+
 ###  B-splines.
 This is an alternative framework for interpolation.
 The value of the function is represented as a sum of basis function with adjustable amplitudes.
@@ -59,7 +59,7 @@ The B-spline framework is most useful when one needs to construct the interpolat
 a large array of values not on a regular grid (penalized spline smoothing and density estimation).
 The amplitudes of B-splines of degree N=1 and 3 can be used to construct ordinary
 linear and cubic interpolators, which are evaluated more efficiently than B-splines.
- 
+
 ###  Penalized spline smoothing.
 The approach based on B-spline basis functions can be used also for constructing
 a smooth approximation to the set of 'measurements'.
@@ -176,7 +176,7 @@ public:
         or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
-    
+
     /** Construct a natural or clamped cubic spline from the function values at grid nodes,
         and optionally its endpoint derivatives: if any of them is not specified (indicated by NAN)
         this means a natural boundary condition, i.e., the second derivative is zero.
@@ -203,7 +203,7 @@ public:
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         bool regularize);
-    
+
     /** Construct a piecewise-cubic Hermite interpolator from the provided values of function
          values and first derivatives. The curve has only one continuous derivative.
          \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
@@ -212,7 +212,7 @@ public:
     */
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         const std::vector<double>& fderivs);
-    
+
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed. */
     virtual void evalDeriv(const double x,
@@ -281,7 +281,7 @@ public:
     /// construct a quintic spline from function values and derivatives
     LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         const std::vector<double>& fderivs);
-    
+
     virtual void evalDeriv(const double x,
         double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
@@ -293,7 +293,7 @@ private:
     std::vector<double> logfval;  ///< log-scaled function values
     std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
     std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
-    
+
 };
 
 
@@ -453,7 +453,7 @@ public:
 
     /** Construct the object from an existing B-spline interpolator */
     FiniteElement1d(const BsplineInterpolator1d<N>& _interp) : interp(_interp) { setup(); }
-    
+
     /** Compute the projection of a function f(x) onto the basis -- the vector of integrals
         of input function weighted with each of the basis functions B_n or their derivatives:
         \f$ v_n = \int f(x) B_n^{(D)}(x) dx \f$.
@@ -570,7 +570,7 @@ public:
     virtual void eval(const double vars[], double values[]) const {
         evalDeriv(vars[0], vars[1], values);
     }
-    virtual unsigned int numVars() const { return 2; }    
+    virtual unsigned int numVars() const { return 2; }
     virtual unsigned int numValues() const { return 1; }
 
     /** return the boundaries of definition region */
@@ -664,7 +664,7 @@ public:
     QuinticSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
         const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy,
         const Matrix<double>& d2fdxdy);
-    
+
     /** compute the value of spline and optionally its derivatives at point x,y */
     virtual void evalDeriv(const double x, const double y,
         double* value=NULL, double* deriv_x=NULL, double* deriv_y=NULL,
@@ -1124,8 +1124,8 @@ enum FitOptions {
     \return  the array of log-density values ln(P(x)) at grid points (same length as grid).
     For N=1, ln(P(x)) is piecewise-linear, and for N=3 it is a natural cubic spline defined by
     the values at grid nodes.
-    \throw  std::invalid_argument exception if samples have negative weights or lie
-    outside the allowed boundaries, or grid points are invalid.
+    \throw  std::invalid_argument exception if samples have negative weights,
+    or their total weight is not positive, or grid points are invalid.
 */
 template<int N>
 std::vector<double> splineLogDensity(const std::vector<double> &grid,

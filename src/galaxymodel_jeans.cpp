@@ -2,7 +2,6 @@
 #include "math_core.h"
 #include "utils.h"
 #include <cmath>
-#include <algorithm>
 #include <stdexcept>
 #include <fstream>
 
@@ -47,9 +46,10 @@ math::LogLogSpline createJeansSphModel(
     const math::IFunction &dens, const math::IFunction &pot, double beta)
 {
     JeansSphIntegrand fnc(pot, dens, beta);
-    // create an appropriate grid in log(r)
+    // create an appropriate grid in log(r) and convert it to grid in r
     std::vector<double> gridr = math::createInterpolationGrid(math::LogLogScaledFnc(fnc), EPSDER2);
-    std::transform(gridr.begin(), gridr.end(), gridr.begin(), exp);  // convert to grid in r
+    for(size_t i=0, size=gridr.size(); i<size; i++)
+        gridr[i] = exp(gridr[i]);
     // eliminate points from the tail where the density is zero or dominated by roundoff errors
     for(int i=gridr.size()-1; i>=0; i--) {
         math::PointNeighborhood pnDens(dens, gridr[i]);
@@ -122,8 +122,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
 #ifndef USE_FEM
     // perform the integration in z direction at each point of the radial grid
     const int GLORDER = 6;  // order of Gauss-Legendre integration
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif

@@ -1,7 +1,6 @@
 #include "math_core.h"
 #include "math_linalg.h"
 #include <iostream>
-#include <iomanip>
 #include <cmath>
 #include <ctime>
 
@@ -13,10 +12,10 @@ bool test(bool condition)
 
 int main()
 {
-    std::cout << std::setprecision(10);
     bool ok=true;
 
     const unsigned int NR=500, NV=5000;  // matrix size, # of nonzero values
+    const unsigned int MIN_CLOCKS = CLOCKS_PER_SEC/2;
     std::vector<math::Triplet> spdata;
     // init matrix content
     for(unsigned int k=0; k<NV; k++) {
@@ -114,50 +113,59 @@ int main()
     // test matrix multiplication: construct positive-definite matrix M M^T + diag(1)
     math::SparseMatrix<double> spdmat(NR, NR);
     clock_t tbegin=std::clock();
-    math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, spmat, spmat, 0, spdmat);
-    std::cout << "Sparse MM: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) << " s, " <<
+    int niter = 0;
+    for(; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
+        math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, spmat, spmat, 0, spdmat);
+    std::cout << "Sparse MM: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) << " s, " <<
     spdmat.size() << " elements\n";
     math::Matrix<double> dmat(NR, NR);
     for(unsigned int k=0; k<NR; k++)
         dmat(k, k) = 1.;
     tbegin=std::clock();
-    math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, mat, mat, 0, dmat);
-    std::cout << "Dense  MM: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) << " s\n";
+    for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
+        math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, mat, mat, 0, dmat);
+    std::cout << "Dense  MM: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) << " s\n";
 
     {   // sparse LU
         tbegin=std::clock();
-        sol = math::LUDecomp(spdmat).solve(rhs);
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
+            sol = math::LUDecomp(spdmat).solve(rhs);
+        std::cout << "Sparse LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
         math::blas_dgemv(math::CblasNoTrans, 1, spdmat, sol, 0, mul);
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
-        std::cout << "Sparse LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) <<
-            " s, rmserr=" << norm;
+        std::cout << " s, rmserr=" << norm;
         ok &= test(norm < 1e-10);
     }
 
     {   // dense LU
         tbegin=std::clock();
-        math::LUDecomp lu(dmat), lu1=lu;
-        sol = math::LUDecomp(lu1).solve(rhs);  // test copy constructor and assignment
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++) {
+            math::LUDecomp lu(dmat), lu1=lu;
+            sol = math::LUDecomp(lu1).solve(rhs);  // test copy constructor and assignment
+        }
+        std::cout << "Dense  LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
         math::blas_dgemv(math::CblasNoTrans, 1, dmat, sol, 0, mul);
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
-        std::cout << "Dense  LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) <<
-            " s, rmserr=" << norm;
+        std::cout << " s, rmserr=" << norm;
         ok &= test(norm < 1e-10);
     }
 
     {   // Cholesky
         clock_t tbegin=std::clock();
-        math::CholeskyDecomp ch(dmat), ch1=ch;
-        sol = math::CholeskyDecomp(ch1).solve(rhs);
+        math::Matrix<double> L;
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++) {
+            math::CholeskyDecomp ch(dmat), ch1=ch;
+            sol = math::CholeskyDecomp(ch1).solve(rhs);
+            L = ch.L();
+        }
+        std::cout << "Cholesky : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
         math::blas_dgemv(math::CblasNoTrans, 1, dmat, sol, 0, mul);
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
-        std::cout << "Cholesky : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) <<
-            " s, rmserr=" << norm << std::flush;
+        std::cout << " s, rmserr=" << norm << std::flush;
         // check that L L^T = original matrix
-        math::Matrix<double> L(ch.L());
         math::Matrix<double> M(NR, NR);
         math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, L, L, 0, M);
         math::blas_daxpy(-1, dmat, M);
@@ -168,17 +176,21 @@ int main()
 
     {   // SVD
         clock_t tbegin=std::clock();
-        math::SVDecomp sv(dmat), sv1=sv;
-        sol = math::SVDecomp(sv1).solve(rhs);
+        math::Matrix<double> U, V;
+        std::vector <double> vS;
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++) {
+            math::SVDecomp sv(dmat), sv1=sv;
+            sol = math::SVDecomp(sv1).solve(rhs);
+            U = sv.U();
+            V = sv.V();
+            vS= sv.S();
+        }
+        std::cout << "Sing.val.: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
         math::blas_dgemv(math::CblasNoTrans, 1, dmat, sol, 0, mul);
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
-        std::cout << "Sing.val.: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC) <<
-            " s, rmserr=" << norm << std::flush;
+        std::cout << " s, rmserr=" << norm << std::flush;
         // check that U S V^T = original matrix
-        math::Matrix<double> U(sv.U());
-        math::Matrix<double> V(sv.V());
-        std::vector<double> vS(sv.S());
         math::Matrix<double> S(NR, NR, 0);
         for(unsigned int k=0; k<NR; k++)  S(k, k) = vS[k];
         math::Matrix<double> tmp(NR, NR);
@@ -188,7 +200,7 @@ int main()
         double norm2 = sqrt(math::blas_dnrm2(S)) / NR;
         std::cout << ", |M - U S V^T| = " << norm2 << ", cond.number = " <<
             vS.front() / vS.back();
-        ok &= test(norm < 1e-10 && norm2 < 1e-12);
+        ok &= test(norm < 1e-9 && norm2 < 1e-9);  // quite a loose tolerance, indulging the Intel compiler
     }
 
     {   // tridiagonal systems
@@ -200,25 +212,23 @@ int main()
         }
         std::vector<double> sol;
         clock_t tbegin=std::clock();
-        for(int iter=0; iter<10000; iter++) {
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
             sol = math::solveBand(mat, rhs);
-        }
         std::vector<double> prod(rhs);
         math::blas_dgemv(math::CblasNoTrans, 1., mat, sol, -1., prod);
         double norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "Tridiag. : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/10000) <<
+        std::cout << "Tridiag. : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
         /// same using a generic sparse LU solver
         math::SparseMatrix<double> spmat(mat);
         tbegin=std::clock();
-        for(int iter=0; iter<100; iter++) {
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
             sol = math::LUDecomp(spmat).solve(rhs);
-        }
         math::blas_dgemv(math::CblasNoTrans, 1., spmat, sol, 0., prod);
         math::blas_daxpy(-1, rhs, prod);
         norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/100) <<
+        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
     }
@@ -236,26 +246,24 @@ int main()
         }
         std::vector<double> sol;
         clock_t tbegin=std::clock();
-        for(int iter=0; iter<10000; iter++) {
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
             sol = math::solveBand(mat, rhs);
-        }
         std::vector<double> prod(NR);
         math::blas_dgemv(math::CblasNoTrans, 1., mat, sol, 0., prod);
         math::blas_daxpy(-1, rhs, prod);
         double norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "Band-diag: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/10000) <<
+        std::cout << "Band-diag: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
         /// same using generic sparse LU
         tbegin=std::clock();
         math::SparseMatrix<double> spmat(mat);
-        for(int iter=0; iter<100; iter++) {
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++)
             sol = math::LUDecomp(spmat).solve(rhs);
-        }
         prod = rhs;
         math::blas_dgemv(math::CblasNoTrans, 1., spmat, sol, -1., prod);
         norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/100) <<
+        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
     }

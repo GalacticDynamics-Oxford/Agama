@@ -417,17 +417,23 @@ void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
         W = Phi1;
         return;
     }
-    // find x(A) such that  x = A * (1 - exp(x)),  where  x = (s-v) * ln(r2/r1)
-    s = A==-1 ? v : v + (A - math::lambertW(A * exp(A), /*choice of branch*/ A>-1)) / lnr;
-    // safeguard against weird slope determination
+    // find x(A) such that  x = A * (1 - exp(x)),  where  x = (s-v) * ln(r2/r1);
+    // if A is close to -1 (the value for a logarithmic potential), assume it to be exactly -1
+    // (otherwise the subsequent operations will incur large cancellation errors)
+    s = fabs(A+1)<SQRT_DBL_EPSILON ? v :
+        v + (A - math::lambertW(A * exp(A), /*choice of branch*/ A>-1)) / lnr;
+    // safeguard against weird slope determination:
+    // density may not grow faster than r^-3 at small r, or the potential would be steeper than r^-1
     if(v>=0 && (!isFinite(s)/* || s<=-1*/))
-        s = 2;  // results in a constant-density core for the inward extrapolation
+        s = 2;    // results in a constant-density core for the inward extrapolation
+    // similarly, density must drop faster than r^-2 at large r,
+    // or else the potential would grow indefinitely, even as slowly as log(r), which is not allowed
     if(v<0  && (!isFinite(s) || s>=0))
-        s = -2; // results in a r^-4 falloff for the outward extrapolation
-    if(s != v) {
+        s = -2;   // results in a r^-4 falloff for the outward density extrapolation
+    if(s != v) {  // non-degenerate case of a power-law extrapolation
         U = (r1*dPhi1 - v*Phi1) / (s-v);
         W = (r1*dPhi1 - s*Phi1) / (v-s);
-    } else {
+    } else {      // degenerate logarithmic case (but still permitted for inward extrapolation)
         U = r1*dPhi1 - v*Phi1;
         W = Phi1;
     }
@@ -547,15 +553,15 @@ void sphHarmTransformInverseDeriv(
     const double C_lm[], const double dC_lm[], const double d2C_lm[],
     double *val, coord::GradSph *grad, coord::HessSph *hess)
 {
-    const int numQuantities = hess!=NULL ? 6 : grad!=NULL ? 3 : 1;  // number of quantities in C_m
-    const int nm = ind.mmax - ind.mmin() + 1;  // number of azimuthal harmonics in C_m array
-    const double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
     // temporary storage for coefficients - allocated on the stack, automatically freed
+    const int numQuantities = hess!=NULL ? 6 : grad!=NULL ? 3 : 1;  // number of quantities in C_m
     int sizeC = 6 * (2*ind.mmax+1), sizeP = ind.lmax+1;
     double*   C_m  = static_cast<double*>(alloca((sizeC + 3*sizeP) * sizeof(double)));
     double*   P_lm = C_m + sizeC;
     double*  dP_lm = numQuantities>=3 ? P_lm + sizeP   : NULL;
     double* d2P_lm = numQuantities==6 ? P_lm + sizeP*2 : NULL;
+    const double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+    const int nm = ind.mmax - ind.mmin() + 1;  // number of azimuthal harmonics in C_m array
     for(int mm=0; mm<nm; mm++) {
         int m = mm + ind.mmin();
         int lmin = ind.lmin(m);
@@ -581,6 +587,73 @@ void sphHarmTransformInverseDeriv(
         }
     }
     fourierTransformAzimuth(ind, pos.phi, C_m, val, grad, hess);
+}
+
+/** optimized version of sphHarmTransformInverseDeriv for the case lmax=2, mmin=0, step=2,
+    processing only the {l=0,m=0}, {l=2,m=0} and optionally {l=2,m=2} terms (a common special case)
+*/
+void sphHarmTransformInverseDeriv2(
+    const math::SphHarmIndices& ind, const coord::PosCyl& pos,
+    const double C_lm[], const double dC_lm[], const double d2C_lm[],
+    double *val, coord::GradSph *grad, coord::HessSph *hess)
+{
+    static const int i00 = ind.index(0,0), i20 = ind.index(2,0), i22 = ind.index(2,2);
+    static const double C2 = sqrt(1.25), D2 = sqrt(3.75);
+    const double 
+    tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R),
+    ct  =      2 * tau  / (1 + tau*tau),  // cos(theta)
+    st  = (1 - tau*tau) / (1 + tau*tau),  // sin(theta)
+    cc  = ct * ct, cs = ct * st, ss = st * st,
+    Y20       = (3*C2 * cc - C2),
+    dY20      = -6*C2 * cs,
+    d2Y20     =-12*C2 * cc + 6*C2,
+    Phi0      =   Y20 *   C_lm[i20] +   C_lm[i00],
+    dPhi0dr   =   Y20 *  dC_lm[i20] +  dC_lm[i00],
+    dPhi0dt   =  dY20 *   C_lm[i20],
+    d2Phi0dr2 =   Y20 * d2C_lm[i20] + d2C_lm[i00],
+    d2Phi0drt =  dY20 *  dC_lm[i20],
+    d2Phi0dt2 = d2Y20 *   C_lm[i20];
+    if(val)
+        *val = Phi0;
+    if(grad) {
+        grad->dr      = dPhi0dr;
+        grad->dtheta  = dPhi0dt;
+        grad->dphi    = 0;
+    }
+    if(hess) {
+        hess->dr2     = d2Phi0dr2;
+        hess->drdtheta= d2Phi0drt;
+        hess->dtheta2 = d2Phi0dt2;
+        hess->drdphi  = hess->dthetadphi = hess->dphi2 = 0;
+    }
+    if(ind.mmax == 2) {
+        double sp, cp,
+        Y22       =    D2 * ss,
+        dY22      =  2*D2 * cs,
+        d2Y22     =  4*D2 * cc - 2*D2,
+        Phi2      =   Y22 *   C_lm[i22],
+        dPhi2dr   =   Y22 *  dC_lm[i22],
+        dPhi2dt   =  dY22 *   C_lm[i22],
+        d2Phi2dr2 =   Y22 * d2C_lm[i22],
+        d2Phi2drt =  dY22 *  dC_lm[i22],
+        d2Phi2dt2 = d2Y22 *   C_lm[i22];
+        math::sincos(2*pos.phi, sp, cp);
+        if(val)
+            *val += Phi2 * cp;
+        if(grad) {
+            grad->dr     += dPhi2dr *    cp;
+            grad->dtheta += dPhi2dt *    cp;
+            grad->dphi   +=  Phi2   * -2*sp;
+        }
+        if(hess) {
+            hess->dr2       += d2Phi2dr2 *    cp;
+            hess->drdtheta  += d2Phi2drt *    cp;
+            hess->dtheta2   += d2Phi2dt2 *    cp;
+            hess->drdphi    +=  dPhi2dr  * -2*sp;
+            hess->dthetadphi+=  dPhi2dt  * -2*sp;
+            hess->dphi2     +=   Phi2    * -4*cp;
+        }
+    }
 }
 
 // transform potential derivatives from {ln(r), theta} to {R, z}
@@ -658,7 +731,8 @@ void computeDensityCoefsSph(
 
     // allocate the output arrays
     std::vector<double> gridLogRadii(gridSizeR);
-    std::transform(gridRadii.begin(), gridRadii.end(), gridLogRadii.begin(), log);
+    for(size_t i=0; i<gridSizeR; i++)
+        gridLogRadii[i] = log(gridRadii[i]);
     coefs.assign(ind.size(), std::vector<double>(gridSizeR, 0.));
 
     // compute the sph-harm coefs at each particle's radius
@@ -769,9 +843,8 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     Phi .assign(ind.size(), std::vector<double>(gridSizeR, 0.));
     dPhi.assign(ind.size(), std::vector<double>(gridSizeR, 0.));
 
-    // prepare tables for (non-adaptive) Gauss-Legendre integration over radius
-    double glnodes[GLORDER_RAD], glweights[GLORDER_RAD];
-    math::prepareIntegrationTableGL(0, 1, GLORDER_RAD, glnodes, glweights);
+    // pre-computed tables for (non-adaptive) Gauss-Legendre integration over radius
+    const double *glnodes = math::GLPOINTS[GLORDER_RAD], *glweights = math::GLWEIGHTS[GLORDER_RAD];
 
     // prepare SH transformation
     math::SphHarmTransformForward trans(ind);
@@ -950,7 +1023,8 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
 
     spl.resize(ind.size());
     std::vector<double> gridLogR(gridSizeR), tmparr(gridSizeR);
-    std::transform(gridRadii.begin(), gridRadii.end(), gridLogR.begin(), log);
+    for(size_t i=0; i<gridSizeR; i++)
+        gridLogR[i] = log(gridRadii[i]);
 
     // set up 1d splines in radius for each non-trivial (l,m) coefficient
     for(unsigned int c=0; c<ind.size(); c++) {
@@ -1407,8 +1481,12 @@ void MultipoleInterp1d::evalCyl(const coord::PosCyl &pos,
                     dPhi_lm[c] = dPhi_lm[c] * Phi_lm[0] + Phi_lm[c] * dPhi_lm[0];
                 Phi_lm[c] *= Phi_lm[0];
             }
-        sphHarmTransformInverseDeriv(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
-            needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
+        if(ind.lmax==2 && ind.mmin()==0 && ind.step==2)   // an optimized special case
+            sphHarmTransformInverseDeriv2(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
+                needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
+        else
+            sphHarmTransformInverseDeriv(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
+                needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
     }
     if(needGrad)
         transformDerivsSphToCyl(pos, gradSph, hessSph, grad, hess);
@@ -1522,7 +1600,7 @@ MultipoleInterp2d::MultipoleInterp2d(
         // the other terms are normalized to the value of the m=0 term
         if(m==0) {
             // store the un-transformed m=0 term, which is later used to scale the other terms
-            Phi0_val .assign(Phim_val , Phim_val + Phi_val. size());  
+            Phi0_val .assign(Phim_val , Phim_val + Phi_val. size());
             Phi0_dR  .assign(Phim_dR  , Phim_dR  + Phi_dR.  size());
             Phi0_dT  .assign(Phim_dT  , Phim_dT  + Phi_dT.  size());
             Phi0_dRdT.assign(Phim_dRdT, Phim_dRdT+ Phi_dRdT.size());

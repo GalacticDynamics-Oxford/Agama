@@ -224,10 +224,8 @@ template<int N>
 std::vector<double> TargetDensityClassic<N>::computeDensityProjection(
     const potential::BaseDensity& density) const
 {
-    double glnodesRad[GLORDER_RAD], glweightsRad[GLORDER_RAD];
-    math::prepareIntegrationTableGL(0, 1, GLORDER_RAD, glnodesRad, glweightsRad);
-    double glnodesAng[GLORDER_ANG], glweightsAng[GLORDER_ANG];
-    math::prepareIntegrationTableGL(0, 1, GLORDER_ANG, glnodesAng, glweightsAng);
+    const double *glnodesRad = math::GLPOINTS[GLORDER_RAD], *glweightsRad = math::GLWEIGHTS[GLORDER_RAD];
+    const double *glnodesAng = math::GLPOINTS[GLORDER_ANG], *glweightsAng = math::GLWEIGHTS[GLORDER_ANG];
     // pre-compute nodes and weigths for all strips in the integration over angles
     std::vector<double> nodesAng(GLORDER_ANG * stripsPerPane), weightsAng(GLORDER_ANG * stripsPerPane);
     for(unsigned int iA=0; iA < GLORDER_ANG * stripsPerPane; iA++) {
@@ -328,7 +326,7 @@ std::string TargetDensityClassic<N>::coefName(unsigned int index) const
          ", y=" + utils::toString(radius * denom * coord[(4-pane)%3] * axisY) +
          ", z=" + utils::toString(radius * denom * coord[(5-pane)%3] * axisZ);
 }
-    
+
 template<> const char* TargetDensityClassic<0>::name() const { return "DensityClassicTopHat"; }
 template<> const char* TargetDensityClassic<1>::name() const { return "DensityClassicLinear"; }
 
@@ -399,8 +397,7 @@ std::vector<double> TargetDensitySphHarm::computeDensityProjection(
     const potential::BaseDensity& density) const
 {
     // the integration in radius follows the Gauss-Legendre rule
-    double glnodesRad[GLORDER_RAD], glweightsRad[GLORDER_RAD];
-    math::prepareIntegrationTableGL(0, 1, GLORDER_RAD, glnodesRad, glweightsRad);
+    const double *glnodesRad = math::GLPOINTS[GLORDER_RAD], *glweightsRad = math::GLWEIGHTS[GLORDER_RAD];
 
     // to improve accuracy of SH coefficient computation, we may increase the order of expansion
     // that determines the number of integration points in angles
@@ -534,8 +531,7 @@ std::vector<double> TargetDensityCylindrical<N>::computeDensityProjection(
     const potential::BaseDensity& density) const
 {
     // the integration in R and z follows the Gauss-Legendre rule
-    double glnodesRad[GLORDER_RAD], glweightsRad[GLORDER_RAD];
-    math::prepareIntegrationTableGL(0, 1, GLORDER_RAD, glnodesRad, glweightsRad);
+    const double *glnodesRad = math::GLPOINTS[GLORDER_RAD], *glweightsRad = math::GLWEIGHTS[GLORDER_RAD];
     // select a sufficiently high order of integration in angles
     int mmax_tmp = isZRotSymmetric(density) ? 0 : std::max(mmax, LMIN_SPHHARM);
     math::FourierTransformForward trans(mmax_tmp, false/*no odd terms*/);

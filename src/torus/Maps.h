@@ -130,8 +130,8 @@ inline void AlignAngles(PSPD& JT)
     JT[2] = 0.;        // in case of major failure
   if(std::isnan(JT(3)) || std::isinf(JT(3)) || fabs(JT(3))>INT_MAX)
     JT[3] = 0.;        // in case of major failure
-    JT[2] = math::wrapAngle(JT(2));
-    JT[3] = math::wrapAngle(JT(3));
+  JT[2] = math::wrapAngle(JT(2));
+  JT[3] = math::wrapAngle(JT(3));
 }
 inline void AlignAngles3D(PSPT& JT)
 {
@@ -141,9 +141,9 @@ inline void AlignAngles3D(PSPT& JT)
     JT[4] = 0.;        // in case of major failure
   if(std::isnan(JT(5)) || std::isinf(JT(5)) || fabs(JT(5))>INT_MAX)
     JT[5] = 0.;        // in case of major failure
-    JT[3] = math::wrapAngle(JT(3));
-    JT[4] = math::wrapAngle(JT(4));
-    JT[5] = math::wrapAngle(JT(5));
+  JT[3] = math::wrapAngle(JT(3));
+  JT[4] = math::wrapAngle(JT(4));
+  JT[5] = math::wrapAngle(JT(5));
 }
 
 } // namespace

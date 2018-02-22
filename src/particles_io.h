@@ -33,7 +33,7 @@ public:
         \throws  std::runtime_error in case of error (e.g., file doesn't exist).
     */
     virtual ParticleArrayCar readSnapshot() const=0;
-    /** write a snapshot to the file;  
+    /** write a snapshot to the file;
         \param[in] particles is an instance of ParticleArray class to be stored;
         \throws  std::runtime_error in case of error (e.g., file is not writable)
     */

@@ -111,7 +111,7 @@ void RagaCore::run()
 {
     if(!paramsRaga.fileLog.empty()) {
         std::ofstream strmLog(paramsRaga.fileLog.c_str());
-        strmLog << "Time    \tTaskName\tTotalEnergy\tSumEnergy\tPhi_star(0)\n" +
+        strmLog << "#Time   \tTaskName\tTotalEnergy\tSumEnergy\tPhi_star(0)\n" +
             printLog(*ptrPot, bh, particles, paramsRaga.timeCurr, "Initialization");
     }
     while(paramsRaga.timeCurr < paramsRaga.timeEnd)

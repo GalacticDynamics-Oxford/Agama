@@ -2,7 +2,7 @@
     \brief   density and potential approximations based on 2d spline in cylindrical coordinates
     \author  Eugene Vasiliev
     \date    2014-2016
- 
+
     The classes and routines in this file deal with a generic way of representing
     an arbitrary density or potential profile as a 1d expansion + 2d interpolation:
     the azimuthal dependence for a non-axisymmetric profile is represented by 

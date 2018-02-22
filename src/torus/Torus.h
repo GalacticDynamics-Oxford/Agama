@@ -461,11 +461,12 @@ inline Torus& Torus::operator= (const Torus& T)
 	    (T.TM)->parameters(),
 	    (T.GF).parameters(),
 	    (T.AM).parameters());
-  }  else
+  }  else {
     SetMaps((T.TM)->parameters(),
 	    (T.GF).parameters(),
 	    (T.AM).parameters()); // May cause trouble as PT/TM != 0 initially
-    return *this;
+  }
+  return *this;
 }
 
 

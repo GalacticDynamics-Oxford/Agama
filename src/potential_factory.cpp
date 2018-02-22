@@ -7,7 +7,6 @@
 #include "potential_galpot.h"
 #include "potential_multipole.h"
 #include "potential_perfect_ellipsoid.h"
-#include "potential_sphharm.h"
 #include "particles_io.h"
 #include "math_core.h"
 #include "utils.h"
@@ -45,48 +44,60 @@ static const int GALPOT_NRAD = 50;
 enum PotentialType {
 
     PT_UNKNOWN,      ///< unspecified
-    PT_COMPOSITE,    ///< a superposition of multiple potential instances:  `CompositeCyl`
 
-    //  Generic potential expansions
-    PT_BSE,          ///< basis-set expansion for infinite systems:  `BasisSetExp`
-    PT_SPLINE,       ///< [old] spline spherical-harmonic expansion:  `SplineExp`
-    PT_CYLSPLINE,    ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
+    // density interpolators
+    PT_DENS_SPHHARM, ///< `DensitySphericalHarmonic`
+    PT_DENS_CYLGRID, ///< `DensityAzimuthalHarmonic`
+
+    // generic potential expansions
     PT_MULTIPOLE,    ///< spherical-harmonic expansion:  `Multipole`
+    PT_CYLSPLINE,    ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
 
-    //  Components of Walter Dehnen's GalPot
+    // components of GalPot
     PT_DISK,         ///< separable disk density model:  `Disk`
     PT_SPHEROID,     ///< two-power-law spheroid density model:  `Spheroid`
     PT_SERSIC,       ///< Sersic profile:  `Sersic`
 
-    //  Density interpolators
-    PT_DENS_SPHHARM, ///< DensitySphericalHarmonic
-    PT_DENS_CYLGRID, ///< DensityCylGrid
-
-    //  Potentials with infinite extent that can't be used as source density for a potential expansion
+    // potentials with infinite extent that can't be used as source density for a potential expansion
     PT_LOG,          ///< triaxial logaritmic potential:  `Logarithmic`
     PT_HARMONIC,     ///< triaxial simple harmonic oscillator:  `Harmonic`
 
-    //  Analytic potential models that can also be used as source density for a potential expansion
+    // analytic potential models that can also be used as source density for a potential expansion
     PT_NFW,          ///< spherical Navarro-Frenk-White profile:  `NFW`
     PT_MIYAMOTONAGAI,///< axisymmetric Miyamoto-Nagai(1975) model:  `MiyamotoNagai`
     PT_DEHNEN,       ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
     PT_FERRERS,      ///< triaxial Ferrers model with finite extent:  `Ferrers`
     PT_PLUMMER,      ///< spherical Plummer model:  `Plummer`
     PT_ISOCHRONE,    ///< spherical isochrone model:  `Isochrone`
-    PT_PERFECTELLIPSOID,  ///< axisymmetric model of Kuzmin/de Zeeuw :  `OblatePerfectEllipsoid`
+    PT_PERFECTELLIPSOID,  ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
+
+    // composite density or potential
+    PT_COMPOSITE_DENSITY,    ///< `CompositeDensity`
+    PT_COMPOSITE_POTENTIAL,  ///< `CompositePotential`
 };
 
-/// structure that contains parameters for all possible potentials
-struct ConfigPotential
+/// structure that contains parameters for all possible density or potential models
+/// (not all of them make sense for any given model)
+struct AllParam
 {
     PotentialType potentialType;      ///< type of the potential
     PotentialType densityType;        ///< density model used for initializing a potential expansion
     coord::SymmetryType symmetryType; ///< degree of symmetry
-    double mass;             ///< total mass of the model (not applicable to all potential types)
-    double scaleRadius;      ///< scale radius of the model (if applicable)
-    double scaleRadius2;     ///< second scale radius of the model (if applicable)
-    double axisRatioY, axisRatioZ;   ///< axis ratios of the model (if applicable)
-    double gamma;            ///< central cusp slope (for the Dehnen model)
+    double mass;                      ///< total mass
+    double surfaceDensity;            ///< central surface density for Disk or Sersic models
+    double densityNorm;               ///< density normalization for double-power-law models
+    double scaleRadius;               ///< scale radius
+    double scaleHeight;               ///< scale height or second scale radius
+    double innerCutoffRadius;         ///< central hole for disk profiles
+    double outerCutoffRadius;         ///< truncation radius for double-power-law models
+    double v0;                        ///< limiting circular velocity for Logarithmic potential
+    double Omega;                     ///< frequency for Harmonic potential
+    double axisRatioY, axisRatioZ;    ///< axis ratios (y/x, z/x) in non-spherical cases
+    double alpha, beta, gamma;        ///< parameters of double-power-law models
+    double modulationAmplitude;       ///< disk surface density wiggliness
+    double cutoffStrength;            ///< steepness of the exponential cutoff for double-power-law
+    double sersicIndex;               ///< sersic index for Disk or Sersic models
+    // parameters of potential expansions
     unsigned int gridSizeR;  ///< number of radial grid points in Multipole and CylSpline potentials
     unsigned int gridSizez;  ///< number of grid points in z-direction for CylSpline potential
     double rmin, rmax;       ///< inner- and outermost grid node radii for Multipole and CylSpline
@@ -96,10 +107,14 @@ struct ConfigPotential
     double smoothing;        ///< amount of smoothing in Multipole initialized from an N-body snapshot
     std::string file;        ///< name of file with coordinates of points, or coefficients of expansion
     /// default constructor initializes the fields to some reasonable values
-    ConfigPotential() :
+    AllParam() :
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
-        mass(1.), scaleRadius(1.), scaleRadius2(1.),
-        axisRatioY(1.), axisRatioZ(1.), gamma(1.),
+        mass(1.), surfaceDensity(NAN), densityNorm(NAN),
+        scaleRadius(1.), scaleHeight(1.), innerCutoffRadius(0.), outerCutoffRadius(0.),
+        v0(1.), Omega(1.),
+        axisRatioY(1.), axisRatioZ(1.),
+        alpha(1.), beta(4.), gamma(1.),
+        modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
         lmax(6), mmax(6), smoothing(1.)
     {};
@@ -110,79 +125,28 @@ struct ConfigPotential
 //        -------------------------------------------------------------------------
 ///@{
 
-typedef std::map<PotentialType, const char*> MapNameType;
-
-/// lists all 'true' potentials, i.e. those providing a complete density-potential(-force) pair
-static MapNameType potentialNames;
-
-/// lists all analytic density profiles 
-/// (including those that don't have corresponding potential, but excluding general-purpose expansions)
-static MapNameType densityNames;
-
-static bool mapinitialized = false;
-
-/// create a correspondence between names and enum identifiers for potential and density types
-void initPotentialNameMap()
+/// return the type of the potential or density model by its name, or PT_UNKNOWN if unavailable
+PotentialType getPotentialTypeByName(const std::string& name)
 {
-    // list of potential models
-    potentialNames.clear();
-    potentialNames[PT_COMPOSITE] = CompositeCyl::myName();
-    potentialNames[PT_LOG]       = Logarithmic::myName();
-    potentialNames[PT_HARMONIC]  = Harmonic::myName();
-    potentialNames[PT_NFW]       = NFW::myName();
-    potentialNames[PT_PLUMMER]   = Plummer::myName();
-    potentialNames[PT_DEHNEN]    = Dehnen::myName();
-    potentialNames[PT_FERRERS]   = Ferrers::myName();
-    potentialNames[PT_ISOCHRONE] = Isochrone::myName();
-    potentialNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
-    potentialNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
-    potentialNames[PT_BSE]       = BasisSetExp::myName();
-    potentialNames[PT_SPLINE]    = SplineExp::myName();
-    potentialNames[PT_CYLSPLINE] = CylSpline::myName();
-    potentialNames[PT_MULTIPOLE] = Multipole::myName();
-    potentialNames[PT_DISK]      = DiskDensity::myName();
-
-    // list of density models
-    densityNames.clear();
-    densityNames[PT_COMPOSITE] = CompositeDensity::myName();
-    densityNames[PT_PLUMMER]   = Plummer::myName();
-    densityNames[PT_DEHNEN]    = Dehnen::myName();
-    densityNames[PT_FERRERS]   = Ferrers::myName();
-    densityNames[PT_ISOCHRONE] = Isochrone::myName();
-    densityNames[PT_SPHEROID]  = SphrParam::myName();    
-    densityNames[PT_SERSIC]    = SersicParam::myName();    
-    densityNames[PT_DISK]      = DiskDensity::myName();    
-    densityNames[PT_MIYAMOTONAGAI]    = MiyamotoNagai::myName();
-    densityNames[PT_PERFECTELLIPSOID] = OblatePerfectEllipsoid::myName();
-    densityNames[PT_DENS_CYLGRID] = DensityAzimuthalHarmonic::myName();
-    densityNames[PT_DENS_SPHHARM] = DensitySphericalHarmonic::myName();
-
-    mapinitialized=true;
-}
-
-/// return the type of the potential model by its name, or PT_UNKNOWN if unavailable
-PotentialType getPotentialTypeByName(const std::string& potentialName)
-{
-    if(!mapinitialized)
-        initPotentialNameMap();
-    for(MapNameType::const_iterator iter=potentialNames.begin(); 
-        iter!=potentialNames.end(); 
-        ++iter)
-        if(utils::stringsEqual(potentialName, iter->second)) 
-            return iter->first;
-    return PT_UNKNOWN;
-}
-
-/// return the type of the density model by its name, or PT_UNKNOWN if unavailable
-PotentialType getDensityTypeByName(const std::string& densityName)
-{
-    if(!mapinitialized)
-        initPotentialNameMap();
-    for(MapNameType::const_iterator iter=densityNames.begin(); 
-        iter!=densityNames.end(); 
-        ++iter)
-        if(utils::stringsEqual(densityName, iter->second)) 
-            return iter->first;
+    if(name.empty()) return PT_UNKNOWN;
+    if(utils::stringsEqual(name, Logarithmic  ::myName())) return PT_LOG;
+    if(utils::stringsEqual(name, Harmonic     ::myName())) return PT_HARMONIC;
+    if(utils::stringsEqual(name, NFW          ::myName())) return PT_NFW;
+    if(utils::stringsEqual(name, Plummer      ::myName())) return PT_PLUMMER;
+    if(utils::stringsEqual(name, Dehnen       ::myName())) return PT_DEHNEN;
+    if(utils::stringsEqual(name, Ferrers      ::myName())) return PT_FERRERS;
+    if(utils::stringsEqual(name, Isochrone    ::myName())) return PT_ISOCHRONE;
+    if(utils::stringsEqual(name, SpheroidParam::myName())) return PT_SPHEROID;
+    if(utils::stringsEqual(name, SersicParam  ::myName())) return PT_SERSIC;
+    if(utils::stringsEqual(name, DiskDensity  ::myName())) return PT_DISK;
+    if(utils::stringsEqual(name, Multipole    ::myName())) return PT_MULTIPOLE;
+    if(utils::stringsEqual(name, CylSpline    ::myName())) return PT_CYLSPLINE;
+    if(utils::stringsEqual(name, MiyamotoNagai::myName())) return PT_MIYAMOTONAGAI;
+    if(utils::stringsEqual(name, OblatePerfectEllipsoid  ::myName())) return PT_PERFECTELLIPSOID;
+    if(utils::stringsEqual(name, DensitySphericalHarmonic::myName())) return PT_DENS_SPHHARM;
+    if(utils::stringsEqual(name, DensityAzimuthalHarmonic::myName())) return PT_DENS_CYLGRID;
+    if(utils::stringsEqual(name, CompositeDensity::myName())) return PT_COMPOSITE_DENSITY;
+    if(utils::stringsEqual(name, CompositeCyl    ::myName())) return PT_COMPOSITE_POTENTIAL;
     return PT_UNKNOWN;
 }
 
@@ -191,11 +155,10 @@ PotentialType getDensityTypeByName(const std::string& densityName)
 const char* getCoefFileExtension(PotentialType type)
 {
     switch(type) {
-        case PT_BSE:        return ".coef_bse";
-        case PT_SPLINE:     return ".coef_spl";
         case PT_CYLSPLINE:  return ".coef_cyl";
         case PT_MULTIPOLE:  return ".coef_mul";
-        case PT_COMPOSITE:  return ".composite";
+        case PT_COMPOSITE_DENSITY:
+        case PT_COMPOSITE_POTENTIAL: return ".composite";
         default: return "";
     }
 }
@@ -249,108 +212,136 @@ namespace{
 //        ----------------------------------------------------------------------------
 ///@{
 
-/** Parse the potential parameters contained in a text array of "key=value" pairs.
-    \param[in] params  is the array of string pairs "key" and "value", for instance,
+/** Parse the potential or density parameters contained in a text array of "key=value" pairs.
+    \param[in] kvmap  is the array of string pairs "key" and "value", for instance,
     created from command-line arguments, or read from an INI file;
     \param[in] converter  is the instance of unit converter for translating the dimensional
     parameters (such as mass or scale radius) into internal units (may be a trivial converter);
-    \return    the structure containing all parameters of potential
+    \return    the structure containing all possible potential/density parameters
 */
-ConfigPotential parseParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
+AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits& conv)
 {
-    ConfigPotential config;
-    config.potentialType = getPotentialTypeByName(params.getString("Type"));
-    config.densityType   = getDensityTypeByName  (params.getString("Density"));
-    config.symmetryType  = getSymmetryTypeByName (params.getString("Symmetry"));
-    config.file        = params.getString("File");
-    config.mass        = params.getDouble("Mass", config.mass)
-                       * conv.massUnit;
-    config.axisRatioY  = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
-    config.axisRatioZ  = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
-    config.scaleRadius = params.getDoubleAlt("scaleRadius", "rscale", config.scaleRadius)
-                       * conv.lengthUnit;
-    config.scaleRadius2= params.getDoubleAlt("scaleRadius2","scaleHeight", config.scaleRadius2)
-                       * conv.lengthUnit;
-    config.gamma       = params.getDouble("Gamma", config.gamma);
-    config.gridSizeR   = params.getInt("gridSizeR", config.gridSizeR);
-    config.gridSizez   = params.getInt("gridSizeZ", config.gridSizez);
-    config.rmin        = params.getDouble("rmin", config.rmin)
-                       * conv.lengthUnit;
-    config.rmax        = params.getDouble("rmax", config.rmax)
-                       * conv.lengthUnit;
-    config.zmin        = params.getDouble("zmin", config.zmin)
-                       * conv.lengthUnit;
-    config.zmax        = params.getDouble("zmax", config.zmax)
-                       * conv.lengthUnit;
-    config.lmax        = params.getInt("lmax", config.lmax);
-    config.mmax        = params.contains("mmax") ? params.getInt("mmax") : config.lmax;
-    config.smoothing   = params.getDouble("smoothing", config.smoothing);
-    return config;
+    AllParam param;
+    param.potentialType       = getPotentialTypeByName(kvmap.getString("Type"));
+    param.densityType         = getPotentialTypeByName(kvmap.getString("Density"));
+    param.symmetryType        = getSymmetryTypeByName (kvmap.getString("Symmetry"));
+    param.file                = kvmap.getString("File");
+    param.mass                = kvmap.getDouble("Mass", param.mass)
+                              * conv.massUnit;
+    param.surfaceDensity      = kvmap.getDoubleAlt("surfaceDensity", "Sigma0", param.surfaceDensity)
+                              * conv.massUnit / pow_2(conv.lengthUnit);
+    param.densityNorm         = kvmap.getDoubleAlt("densityNorm", "rho0", param.densityNorm)
+                              * conv.massUnit / pow_3(conv.lengthUnit);
+    param.scaleRadius         = kvmap.getDoubleAlt("scaleRadius", "rscale", param.scaleRadius)
+                              * conv.lengthUnit;
+    param.scaleHeight         = kvmap.getDoubleAlt("scaleHeight", "scaleRadius2", param.scaleHeight)
+                              * conv.lengthUnit;
+    param.innerCutoffRadius   = kvmap.getDouble("innerCutoffRadius", param.innerCutoffRadius)
+                              * conv.lengthUnit;
+    param.outerCutoffRadius   = kvmap.getDouble("outerCutoffRadius", param.outerCutoffRadius)
+                              * conv.lengthUnit;
+    param.v0                  = kvmap.getDouble("v0", param.v0)
+                              * conv.velocityUnit;
+    param.Omega               = kvmap.getDouble("Omega", param.Omega)
+                              * conv.velocityUnit / conv.lengthUnit;
+    param.axisRatioY          = kvmap.getDoubleAlt("axisRatioY", "p", param.axisRatioY);
+    param.axisRatioZ          = kvmap.getDoubleAlt("axisRatioZ", "q", param.axisRatioZ);
+    param.alpha               = kvmap.getDouble("alpha", param.alpha);
+    param.beta                = kvmap.getDouble("beta",  param.beta);
+    param.gamma               = kvmap.getDouble("gamma", param.gamma);
+    param.modulationAmplitude = kvmap.getDouble("modulationAmplitude", param.modulationAmplitude);
+    param.cutoffStrength      = kvmap.getDoubleAlt("cutoffStrength", "xi", param.cutoffStrength);
+    param.sersicIndex         = kvmap.getDouble("sersicIndex", param.sersicIndex);
+    param.gridSizeR           = kvmap.getInt(   "gridSizeR", param.gridSizeR);
+    param.gridSizez           = kvmap.getInt(   "gridSizeZ", param.gridSizez);
+    param.rmin                = kvmap.getDouble("rmin", param.rmin)
+                              * conv.lengthUnit;
+    param.rmax                = kvmap.getDouble("rmax", param.rmax)
+                              * conv.lengthUnit;
+    param.zmin                = kvmap.getDouble("zmin", param.zmin)
+                              * conv.lengthUnit;
+    param.zmax                = kvmap.getDouble("zmax", param.zmax)
+                              * conv.lengthUnit;
+    param.lmax                = kvmap.getInt(   "lmax", param.lmax);
+    param.mmax                = kvmap.contains( "mmax") ? kvmap.getInt("mmax") : param.lmax;
+    param.smoothing           = kvmap.getDouble("smoothing", param.smoothing);
+
+    // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity, replace it with
+    // an equivalent Spheroid model, because the dedicated potential models can only be spherical
+    PotentialType type = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
+    if( (type == PT_PLUMMER || type == PT_NFW) && (param.axisRatioY != 1 || param.axisRatioZ !=1) ) {
+        param.alpha = type == PT_PLUMMER ? 2 : 1;
+        param.beta  = type == PT_PLUMMER ? 5 : 3;
+        param.gamma = type == PT_PLUMMER ? 0 : 1;
+        param.densityNorm = (type == PT_PLUMMER ? 0.75 : 0.25) / M_PI * param.mass /
+            (pow_3(param.scaleRadius) * param.axisRatioY * param.axisRatioZ);
+        if(param.densityType == type)
+            param.densityType = PT_SPHEROID;
+        else
+            param.potentialType = PT_SPHEROID;
+    }
+    return param;
 }
 
-DiskParam parseDiskParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
+/// pick up the parameters for DiskDensity or DiskAnsatz from the list of all parameters
+DiskParam parseDiskParam(const AllParam& param)
 {
-    DiskParam config;
-    config.surfaceDensity      = params.getDouble("surfaceDensity", config.surfaceDensity)
-                               * conv.massUnit / pow_2(conv.lengthUnit);
-    config.scaleRadius         = params.getDouble("scaleRadius", config.scaleRadius)
-                               * conv.lengthUnit;
-    config.scaleHeight         = params.getDoubleAlt("scaleRadius2","scaleHeight", config.scaleHeight)
-                               * conv.lengthUnit;
-    config.innerCutoffRadius   = params.getDouble("innerCutoffRadius", config.innerCutoffRadius)
-                               * conv.lengthUnit;
-    config.modulationAmplitude = params.getDouble("modulationAmplitude", config.modulationAmplitude);
-    config.sersicIndex         = params.getDouble("sersicIndex", config.sersicIndex);
-    // alternative way: specifying the total model mass instead of surface density at R=0
-    if(params.contains("mass") && !params.contains("surfaceDensity")) {
-        config.surfaceDensity  = 1;
-        config.surfaceDensity  = params.getDouble("mass") * conv.massUnit / config.mass();
+    DiskParam dparam;   // copy the relevant parameters into a dedicated structure
+    dparam.scaleRadius         = param.scaleRadius;
+    dparam.scaleHeight         = param.scaleHeight;
+    dparam.innerCutoffRadius   = param.innerCutoffRadius;
+    dparam.modulationAmplitude = param.modulationAmplitude;
+    if(isFinite(param.sersicIndex))
+        dparam.sersicIndex     = param.sersicIndex;  // otherwise keep the default value
+    if(isFinite(param.surfaceDensity))
+        dparam.surfaceDensity  = param.surfaceDensity;
+    else {  // alternative way: specifying the total model mass instead of surface density at R=0
+        dparam.surfaceDensity  = 1;
+        dparam.surfaceDensity  = param.mass / dparam.mass();
     }
-    return config;
+    return dparam;
 }
 
-SphrParam parseSphrParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
+/// pick up the parameters for Spheroid density
+SpheroidParam parseSpheroidParam(const AllParam& param)
 {
-    SphrParam config;
-    config.densityNorm       = params.getDouble("densityNorm", config.densityNorm)
-                             * conv.massUnit / pow_3(conv.lengthUnit);
-    config.axisRatioY        = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
-    config.axisRatioZ        = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
-    config.alpha             = params.getDouble("alpha", config.alpha);
-    config.beta              = params.getDouble("beta",  config.beta);
-    config.gamma             = params.getDouble("gamma", config.gamma);
-    config.scaleRadius       = params.getDouble("scaleRadius", config.scaleRadius)
-                             * conv.lengthUnit;
-    config.outerCutoffRadius = params.getDouble("outerCutoffRadius", config.outerCutoffRadius)
-                             * conv.lengthUnit;
-    config.cutoffStrength    = params.getDouble("cutoffStrength", config.cutoffStrength);
-    // alternative way: specifying the total model mass instead of volume density at r=scaleRadius
-    if(params.contains("mass") && !params.contains("densityNorm")) {
-        config.densityNorm = 1;
-        double mass = config.mass();
-        if(!isFinite(mass))
-            throw std::runtime_error("Spheroid model has infinite mass");
-        config.densityNorm = params.getDouble("mass") * conv.massUnit / mass;
+    SpheroidParam sparam;
+    sparam.axisRatioY        = param.axisRatioY;
+    sparam.axisRatioZ        = param.axisRatioZ;
+    sparam.alpha             = param.alpha;
+    sparam.beta              = param.beta;
+    sparam.gamma             = param.gamma;
+    sparam.scaleRadius       = param.scaleRadius;
+    sparam.outerCutoffRadius = param.outerCutoffRadius;
+    sparam.cutoffStrength    = param.cutoffStrength;
+    if(isFinite(param.densityNorm))
+        sparam.densityNorm   = param.densityNorm;
+    else {  // alternative specification of the total model mass instead of density normalization
+        sparam.densityNorm = 1;
+        double norm = sparam.mass();
+        if(!isFinite(norm))
+            throw std::runtime_error("Spheroid model has infinite mass (provide densityNorm instead)");
+        sparam.densityNorm = param.mass / norm;
     }
-    return config;
+    return sparam;
 }
 
-SersicParam parseSersicParams(const utils::KeyValueMap& params, const units::ExternalUnits& conv)
+/// pick up the parameters for Sersic density
+SersicParam parseSersicParam(const AllParam& param)
 {
-    SersicParam config;
-    config.surfaceDensity = params.getDouble("surfaceDensity", config.surfaceDensity)
-                          * conv.massUnit / pow_2(conv.lengthUnit);
-    config.scaleRadius    = params.getDouble("scaleRadius", config.scaleRadius)
-                          * conv.lengthUnit;
-    config.sersicIndex    = params.getDouble("sersicIndex", config.sersicIndex);
-    config.axisRatioY     = params.getDoubleAlt("axisRatioY", "p", config.axisRatioY);
-    config.axisRatioZ     = params.getDoubleAlt("axisRatioZ", "q", config.axisRatioZ);
-    // alternative way: specifying the total model mass instead of central surface density
-    if(params.contains("mass") && !params.contains("surfaceDensity")) {
-        config.surfaceDensity = 1;
-        config.surfaceDensity = params.getDouble("mass") * conv.massUnit / config.mass();
+    SersicParam sparam;
+    sparam.axisRatioY  = param.axisRatioY;
+    sparam.axisRatioZ  = param.axisRatioZ;
+    sparam.scaleRadius = param.scaleRadius;
+    if(isFinite(param.sersicIndex))
+        sparam.sersicIndex    = param.sersicIndex;  // otherwise keep the default value
+    if(isFinite(param.surfaceDensity))
+        sparam.surfaceDensity = param.surfaceDensity;
+    else {  // alternative way: specifying the total model mass instead of surface density at R=0
+        sparam.surfaceDensity = 1;
+        sparam.surfaceDensity = param.mass / sparam.mass();
     }
-    return config;
+    return sparam;
 }
 
 ///@}
@@ -358,9 +349,8 @@ SersicParam parseSersicParams(const utils::KeyValueMap& params, const units::Ext
 //        ----------------------------------------------------------------------------------------
 ///@{
 
-/// attempt to load coefficients of BasisSetExp, SplineExp or Multipole stored in a text file
-PtrPotential readPotentialSphHarmExp(
-    std::istream& strm, const units::ExternalUnits& converter, const PotentialType potentialType)
+/// attempt to load coefficients of Multipole stored in a text file
+PtrPotential readPotentialMultipole(std::istream& strm, const units::ExternalUnits& converter)
 {
     std::string buffer;
     std::vector<std::string> fields;
@@ -371,67 +361,37 @@ PtrPotential readPotentialSphHarmExp(
     fields = utils::splitString(buffer, "# \t");
     int ncoefsAngular = utils::toInt(fields[0]);
     unsigned int numTerms = pow_2(ncoefsAngular+1);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    double param = utils::toDouble(fields[0]);   // meaning of this parameter depends on potential type
-    if( (potentialType == PT_BSE && param<0.5) || 
-        ((potentialType == PT_SPLINE || potentialType == PT_MULTIPOLE) && ncoefsRadial<4) ) 
-        ok = false;
+    std::vector< std::vector<double> >
+        coefsPhi (numTerms, std::vector<double>(ncoefsRadial)),
+        coefsdPhi(numTerms, std::vector<double>(ncoefsRadial));
+    std::vector< double > radii(ncoefsRadial);
+    ok &= std::getline(strm, buffer).good();  // ignored
     ok &= std::getline(strm, buffer) && buffer.find("Phi") != std::string::npos;
     std::getline(strm, buffer);  // header, ignored
-    std::vector< std::vector<double> > coefs, coefsPhi(numTerms), coefsdPhi(numTerms);
-    std::vector< double > radii;
     for(int n=0; ok && n<ncoefsRadial; n++) {
         ok &= std::getline(strm, buffer).good();
         fields = utils::splitString(buffer, "# \t");
-        radii.push_back(utils::toDouble(fields[0]));
-        // for BSE this field is basis function index, for spline the radii should be in increasing order
-        if( (potentialType == PT_BSE && radii.back()!=n) || 
-            (potentialType == PT_SPLINE && n>0 && radii.back()<=radii[n-1]) ) 
-            ok = false;
-        if(potentialType != PT_MULTIPOLE) {
-            coefs.push_back( std::vector<double>() );
-            for(int l=0; l<=ncoefsAngular; l++)
-                for(int m=-l; m<=l; m++) {
-                    unsigned int fi=1+l*(l+1)+m;
-                    coefs.back().push_back( fi<fields.size() ? utils::toDouble(fields[fi]) : 0);
-                }
-        } else {  // for Multipole the indexing scheme is reversed
-            for(unsigned int ind=0; ind<numTerms; ind++)
-                coefsPhi[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
-        }
+        radii[n] = utils::toDouble(fields[0]);
+        for(unsigned int ind=1; ind < std::min<size_t>(fields.size(), 1+numTerms); ind++)
+            coefsPhi[ind-1][n] = utils::toDouble(fields[ind]);
     }
-    if(potentialType == PT_MULTIPOLE) {
-        ok &= std::getline(strm, buffer).good();  // empty line
-        ok &= std::getline(strm, buffer).good() && buffer.find("dPhi/dr") != std::string::npos;
-        ok &= std::getline(strm, buffer).good();  // header, ignored
-        for(int n=0; ok && n<ncoefsRadial; n++) {
-            ok &= std::getline(strm, buffer).good();
-            fields = utils::splitString(buffer, "# \t");
-            for(unsigned int ind=0; ind<numTerms; ind++)
-                coefsdPhi[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
-        }
+    ok &= std::getline(strm, buffer).good();  // empty line
+    ok &= std::getline(strm, buffer).good() && buffer.find("dPhi/dr") != std::string::npos;
+    ok &= std::getline(strm, buffer).good();  // header, ignored
+    for(int n=0; ok && n<ncoefsRadial; n++) {
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        for(unsigned int ind=1; ind < std::min<size_t>(fields.size(), 1+numTerms); ind++)
+            coefsdPhi[ind-1][n] = utils::toDouble(fields[ind]);
     }
     if(!ok)
         throw std::runtime_error("Error loading potential");
     math::blas_dmul(converter.lengthUnit, radii);
-    for(unsigned int i=0; i<coefs.size(); i++)
-        math::blas_dmul(pow_2(converter.velocityUnit), coefs[i]);
-    for(unsigned int i=0; i<coefsPhi.size(); i++) {
+    for(unsigned int i=0; i<numTerms; i++) {
         math::blas_dmul(pow_2(converter.velocityUnit), coefsPhi[i]);
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, coefsdPhi[i]);
     }
-    switch(potentialType)
-    {
-    case PT_BSE: 
-        return PtrPotential(new BasisSetExp(/*Alpha*/param, coefs)); 
-    case PT_SPLINE:
-        return PtrPotential(new SplineExp(radii, coefs)); 
-    case PT_MULTIPOLE:
-        return PtrPotential(new Multipole(radii, coefsPhi, coefsdPhi)); 
-    default:
-        throw std::invalid_argument("Unknown potential type to load");
-    }
+    return PtrPotential(new Multipole(radii, coefsPhi, coefsdPhi)); 
 }
 
 /// read an array of azimuthal harmonics from text stream:
@@ -447,38 +407,37 @@ bool readAzimuthalHarmonics(std::istream& strm,
     bool ok=true;
     // total # of harmonics possible, not all of them need to be present in the file
     data.resize(mmax*2+1);
+    gridR.resize(size_R);
     while(ok && std::getline(strm, buffer).good() && !strm.eof()) {
         if(buffer.size()==0 || buffer[0] == '\n' || buffer[0] == '\r')
             return ok;  // end block with an empty line
         fields = utils::splitString(buffer, "# \t");
         int m = utils::toInt(fields[0]);  // m (azimuthal harmonic index)
         if(m < -mmax || m > mmax)
-            ok=false;
-        std::getline(strm, buffer);  // radii
-        if(gridR.size()==0) {  // read values of R only once
-            fields = utils::splitString(buffer, "# \t");
-            for(unsigned int i=1; i<fields.size(); i++) {
-                gridR.push_back(utils::toDouble(fields[i]));
-                if(i>1 && gridR[i-1]<=gridR[i-2])
-                    ok=false;  // the values must be in increasing order
-            }
+            return false;
+        std::getline(strm, buffer);  // z-values
+        fields = utils::splitString(buffer, "# \t");
+        if(fields.size() != size_z+1)   // 0th element is comment
+            return false;
+        gridz.resize(size_z);
+        for(unsigned int iz=0; iz<size_z; iz++) {
+            gridz[iz] = utils::toDouble(fields[iz+1]);
+            if(iz>0 && gridz[iz]<=gridz[iz-1])
+                ok=false;  // the values of z must be in increasing order
         }
-        ok &= gridR.size() == size_R;
-        gridz.clear();
+        gridR.resize(size_R);
         data[m+mmax]=math::Matrix<double>(size_R, size_z, 0);
-        for(unsigned int iz=0; ok && iz<size_z; iz++) {
+        for(unsigned int iR=0; ok && iR<size_R; iR++) {
             ok &= std::getline(strm, buffer).good();
             fields = utils::splitString(buffer, "# \t");
-            gridz.push_back(utils::toDouble(fields[0]));
-            if(iz>0 && gridz.back()<=gridz[iz-1]) 
-                ok=false;  // the values of z should be in increasing order
-            for(unsigned int iR=0; iR<size_R; iR++) {
-                double val=0;
-                if(iR+1<fields.size())
-                    val = utils::toDouble(fields[iR+1]);
+            gridR[iR] = utils::toDouble(fields[0]);
+            if(iR>0 && gridR[iR]<=gridR[iR-1])
+                ok=false;  // the values of R should be in increasing order
+            for(unsigned int iz=0; ok && iz<size_z; iz++) {
+                if(iz+1<fields.size())
+                    data[m+mmax](iR, iz) = utils::toDouble(fields[iz+1]);
                 else
                     ok=false;
-                data[m+mmax](iR, iz) = val;
             }
         }
     }
@@ -644,14 +603,8 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
     if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
         std::vector<std::string> fields;
         fields = utils::splitString(buffer, "# \t");
-        if(fields[0] == BasisSetExp::myName()) {
-            return readPotentialSphHarmExp(strm, converter, PT_BSE);
-        }
-        if(fields[0] == SplineExp::myName()) {
-            return readPotentialSphHarmExp(strm, converter, PT_SPLINE);
-        }
         if(fields[0] == Multipole::myName()) {
-            return readPotentialSphHarmExp(strm, converter, PT_MULTIPOLE);
+            return readPotentialMultipole(strm, converter);
         }
         if(fields[0] == CylSpline::myName()) {
             return readPotentialCylSpline(strm, converter);
@@ -673,26 +626,20 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
 ///@{
 namespace {
 
-template<bool MULTIPOLE_INDEXING_ORDER>
 void writeSphericalHarmonics(std::ostream& strm,
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &coefs)
 {
     assert(coefs.size()>0);
-    int lmax = static_cast<int>(sqrt((MULTIPOLE_INDEXING_ORDER ? coefs.size() : coefs[0].size()) * 1.0)-1);
+    int lmax = static_cast<int>(sqrt(coefs.size() * 1.0)-1);
     for(int l=0; l<=lmax; l++)
         for(int m=-l; m<=l; m++)
             strm << "\tl="<<l<<",m="<<m;  // header line
     strm << '\n';
     for(unsigned int n=0; n<radii.size(); n++) {
         strm << utils::pp(radii[n], 15);
-        if(MULTIPOLE_INDEXING_ORDER) {
-            for(unsigned int i=0; i<coefs.size(); i++)
-                strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" : utils::pp(coefs[i][n], 15));
-        } else {
-            for(unsigned int i=0; i<coefs[n].size(); i++)
-                strm << '\t' + (coefs[n][i] == 0 ? "0" : utils::pp(coefs[n][i], 15));
-        }
+        for(unsigned int i=0; i<coefs.size(); i++)
+            strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" : utils::pp(coefs[i][n], 15));
         strm << '\n';
     }
 }
@@ -704,61 +651,19 @@ void writeAzimuthalHarmonics(std::ostream& strm,
 {
     int mmax = (static_cast<int>(data.size())-1)/2;
     assert(mmax>=0);
-    for(int mm=0; mm<static_cast<int>(data.size()); mm++) 
+    for(int mm=0; mm<static_cast<int>(data.size()); mm++)
         if(data[mm].rows()*data[mm].cols()>0) {
-            strm << (-mmax+mm) << "\t#m\n#z(row)\\R(col)";
-            for(unsigned int iR=0; iR<gridR.size(); iR++)
-                strm << "\t" + utils::pp(gridR[iR], 15);
+            strm << (-mmax+mm) << "\t#m\n#R(row)\\z(col)";
+            for(unsigned int iz=0; iz<gridz.size(); iz++)
+                strm << "\t" + utils::pp(gridz[iz], 15);
             strm << "\n";
-            for(unsigned int iz=0; iz<gridz.size(); iz++) {
-                strm << utils::pp(gridz[iz], 15);
-                for(unsigned int iR=0; iR<gridR.size(); iR++)
+            for(unsigned int iR=0; iR<gridR.size(); iR++) {
+                strm << utils::pp(gridR[iR], 15);
+                for(unsigned int iz=0; iz<gridz.size(); iz++)
                     strm << "\t"  + utils::pp(data[mm](iR, iz), 15);
                 strm << "\n";
             }
         }
-}
-    
-void writePotentialBSE(std::ostream& strm, const BasisSetExp& potBSE,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> indices;
-    std::vector< std::vector<double> > coefs;
-    indices.resize(potBSE.getNumCoefsRadial()+1);
-    for(size_t i=0; i<indices.size(); i++) indices[i]=i*1.0;
-    potBSE.getCoefs(coefs);
-    assert(coefs.size() == indices.size());
-    // convert units
-    for(unsigned int i=0; i<coefs.size(); i++) {
-        math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
-    }
-    int lmax = potBSE.getNumCoefsAngular();
-    strm << BasisSetExp::myName() << "\n" << 
-        (potBSE.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n" << 
-        potBSE.getAlpha() <<"\t#alpha\n#Phi\n#index";
-    writeSphericalHarmonics<false>(strm, indices, coefs);
-}
-
-void writePotentialSpline(std::ostream& strm, const SplineExp& potSpline,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> radii;
-    std::vector< std::vector<double> > coefs;
-    potSpline.getCoefs(radii, coefs);
-    assert(radii[0] == 0 && coefs.size() == radii.size());
-    coefs[0].resize(1);       // retain only l=0 term for r=0, the rest is supposed to be zero
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, radii);
-    for(unsigned int i=0; i<coefs.size(); i++) {
-        math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
-    }
-    int lmax = potSpline.getNumCoefsAngular();
-    strm << SplineExp::myName() << "\n" << 
-        (potSpline.getNumCoefsRadial()+1) << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n" <<
-        0 <<"\t#unused\n#Phi\n#radius";
-    writeSphericalHarmonics<false>(strm, radii, coefs);
 }
 
 void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
@@ -778,9 +683,9 @@ void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
     strm << Multipole::myName() << "\n" << 
         radii.size() << "\t#n_radial\n" << 
         lmax << "\t#l_max\n0\t#unused\n#Phi\n#radius";
-    writeSphericalHarmonics<true>(strm, radii, Phi);
+    writeSphericalHarmonics(strm, radii, Phi);
     strm << "\n#dPhi/dr\n#radius";
-    writeSphericalHarmonics<true>(strm, radii, dPhi);
+    writeSphericalHarmonics(strm, radii, dPhi);
 }
 
 void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
@@ -824,7 +729,7 @@ void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHar
     strm << DensitySphericalHarmonic::myName() << "\n" <<
         radii.size() << "\t#n_radial\n" << 
         lmax << "\t#l_max\n0\t#unused\n#rho\n#radius";
-    writeSphericalHarmonics<true>(strm, radii, coefs);
+    writeSphericalHarmonics(strm, radii, coefs);
 }
 
 void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHarmonic& density,
@@ -843,7 +748,7 @@ void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHar
         gridR.size() << "\t#size_R\n" <<
         gridz.size() << "\t#size_z\n" <<
         mmax << "\t#m_max\n";
-        strm << "#rho\n";
+    strm << "#rho\n";
     writeAzimuthalHarmonics(strm, gridR, gridz, coefs);
 }
 
@@ -858,15 +763,7 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
     if(!strm)
         return false;
     PotentialType type = getPotentialTypeByName(dens.name());
-    if(type == PT_UNKNOWN)
-        type = getDensityTypeByName(dens.name());
     switch(type) {
-    case PT_BSE:
-        writePotentialBSE(strm, dynamic_cast<const BasisSetExp&>(dens), converter);
-        break;
-    case PT_SPLINE:
-        writePotentialSpline(strm, dynamic_cast<const SplineExp&>(dens), converter);
-        break;
     case PT_MULTIPOLE:
         writePotentialMultipole(strm, dynamic_cast<const Multipole&>(dens), converter);
         break;
@@ -879,29 +776,22 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
     case PT_DENS_SPHHARM:
         writeDensitySphericalHarmonic(strm, dynamic_cast<const DensitySphericalHarmonic&>(dens), converter);
         break;
-    case PT_COMPOSITE: {  // could be either composite density or composite potential
+    case PT_COMPOSITE_DENSITY: {
         strm << dens.name() << "\n";
-        const CompositeDensity* compDens = NULL;
-        const CompositeCyl* compPot = NULL;
-        unsigned int numComp = 0;
-        if(dens.name() == CompositeDensity::myName()) {
-            compDens = dynamic_cast<const CompositeDensity*>(&dens);
-            numComp  = compDens->size();
-        }
-        if(dens.name() == CompositeCyl::myName()) {
-            compPot = dynamic_cast<const CompositeCyl*>(&dens);
-            numComp = compPot->size();
-        }
-        assert((compDens!=NULL) ^ (compPot!=NULL));
-        for(unsigned int i=0; i<numComp; i++) {
-            const BaseDensity* dens=NULL;
-            if(compDens)
-                dens = compDens->component(i).get();
-            else
-                dens = compPot->component(i).get();
-            assert(dens);
+        const CompositeDensity* comp = dynamic_cast<const CompositeDensity*>(&dens);
+        for(unsigned int i=0; i<comp->size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
-            if(writeDensity(fileNameComp, *dens, converter))
+            if(writeDensity(fileNameComp, *comp->component(i), converter))
+                strm << fileNameComp << '\n';
+        }
+        break;
+    }
+    case PT_COMPOSITE_POTENTIAL: {
+        strm << dens.name() << "\n";
+        const CompositeCyl* comp = dynamic_cast<const CompositeCyl*>(&dens);
+        for(unsigned int i=0; i<comp->size(); i++) {
+            std::string fileNameComp = fileName+'_'+utils::toString(i);
+            if(writeDensity(fileNameComp, *comp->component(i), converter))
                 strm << fileNameComp << '\n';
         }
         break;
@@ -923,7 +813,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
     std::ifstream strm(filename.c_str());
     if(!strm) 
         throw std::runtime_error("Cannot open file "+std::string(filename));
-    std::vector<utils::KeyValueMap> params;
+    std::vector<utils::KeyValueMap> kvmap;
     std::string buffer;
     std::vector<std::string> fields;
     bool ok = std::getline(strm, buffer).good();
@@ -933,7 +823,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
         ok &= std::getline(strm, buffer).good();
         fields = utils::splitString(buffer, "# \t");
         if(fields.size() >= 5)
-            params.push_back(utils::KeyValueMap(
+            kvmap.push_back(utils::KeyValueMap(
                 std::string("type=") +  DiskDensity::myName() +
                 " surfaceDensity=" +    fields[0]+
                 " scaleRadius=" +       fields[1]+
@@ -949,7 +839,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
         ok &= std::getline(strm, buffer).good();
         fields = utils::splitString(buffer, "# \t");
         if(fields.size() >= 5)
-            params.push_back(utils::KeyValueMap(
+            kvmap.push_back(utils::KeyValueMap(
                 std::string("type=") + SpheroidDensity::myName() +
                 " densityNorm="      + fields[0]+
                 " axisRatioZ="       + fields[1]+
@@ -959,7 +849,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
                 " outerCutoffRadius="+ fields[5]));
         else ok=false;
     }
-    return createPotential(params, conv);
+    return createPotential(kvmap, conv);
 }
 
 ///@}
@@ -970,121 +860,64 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
 namespace {
 
 /// create potential expansion of a given type from a set of point masses
-PtrPotential createPotentialFromParticles(const ConfigPotential& config,
+PtrPotential createPotentialFromParticles(const AllParam& param,
     const particles::ParticleArray<coord::PosCyl>& particles)
 {
-    switch(config.potentialType) {
-    case PT_SPLINE:
-        return PtrPotential(new SplineExp(
-            config.gridSizeR, config.lmax, 
-            particles, config.symmetryType, config.smoothing, 
-            config.rmin, config.rmax));
-    case PT_BSE:
-        return PtrPotential(new BasisSetExp(
-            /*config.alpha*/0., config.gridSizeR, config.lmax,
-            particles, config.symmetryType));
-    case PT_CYLSPLINE:
-        return CylSpline::create(particles, config.symmetryType, config.mmax,
-            config.gridSizeR, config.rmin, config.rmax,
-            config.gridSizez, config.zmin, config.zmax);
+    switch(param.potentialType) {
     case PT_MULTIPOLE:
-        return Multipole::create(particles, config.symmetryType, config.lmax, config.mmax,
-            config.gridSizeR, config.rmin, config.rmax,
-            config.smoothing);
+        return Multipole::create(particles, param.symmetryType, param.lmax, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax, param.smoothing);
+    case PT_CYLSPLINE:
+        return CylSpline::create(particles, param.symmetryType, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax,
+            param.gridSizez, param.zmin, param.zmax);
     default:
         throw std::invalid_argument("Unknown potential expansion type");
     }
 }
 
-/** Create a density model according to the parameters. 
-    This only deals with finite-mass models, including some of the Potential descendants.
-    This function is used within `createPotential()` to construct 
-    temporary density models for initializing a potential expansion.
-    \param[in] params  contains the parameters (density type, mass, shape, etc.)
-    \return    the instance of a class derived from BaseDensity
-    \throw     std::invalid_argument exception if the parameters don't make sense,
-    or any other exception that may occur in the constructor of a particular density model
-*/
-PtrDensity createAnalyticDensity(const ConfigPotential& params)
-{
-    switch(params.densityType) 
-    {
-    case PT_DEHNEN:
-        return PtrDensity(new Dehnen(
-            params.mass, params.scaleRadius, params.gamma, params.axisRatioY, params.axisRatioZ));
-    case PT_PLUMMER:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrDensity(new Plummer(params.mass, params.scaleRadius));
-        else
-            throw std::invalid_argument("Non-spherical Plummer is not supported");
-    case PT_ISOCHRONE:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrDensity(new Isochrone(params.mass, params.scaleRadius));
-        else
-            throw std::invalid_argument("Non-spherical Isochrone is not supported");
-    case PT_NFW:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrDensity(new NFW(params.mass, params.scaleRadius));
-        else
-            throw std::invalid_argument("Non-spherical Navarro-Frenk-White is not supported");
-    case PT_PERFECTELLIPSOID:
-        if(params.axisRatioY==1 && params.axisRatioZ<1)
-            return PtrDensity(new OblatePerfectEllipsoid(
-                params.mass, params.scaleRadius, params.scaleRadius*params.axisRatioZ));
-        else
-            throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
-    case PT_FERRERS:
-        return PtrDensity(new Ferrers(
-            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
-    case PT_MIYAMOTONAGAI:
-        return PtrDensity(new MiyamotoNagai(params.mass, params.scaleRadius, params.scaleRadius2));
-    default:
-        throw std::invalid_argument("Unknown density type");
-    }
-}
-
 /** Create an instance of analytic potential model according to the parameters passed. 
-    \param[in] params  specifies the potential parameters
+    \param[in] param  specifies the potential parameters
     \return    the instance of potential
     \throw     std::invalid_argument exception if the parameters don't make sense,
     or any other exception that may occur in the constructor of a particular potential model
 */
-PtrPotential createAnalyticPotential(const ConfigPotential& params)
+PtrPotential createAnalyticPotential(const AllParam& param)
 {
-    switch(params.potentialType)
+    switch(param.potentialType)
     {
-    case PT_LOG:  // NB: it's not really 'mass' here but 'sigma'
+    case PT_LOG:
         return PtrPotential(new Logarithmic(
-            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ));
-    case PT_HARMONIC:  // NB: it's not really 'mass' here but 'Omega'
-        return PtrPotential(new Harmonic(params.mass, params.axisRatioY, params.axisRatioZ));
+            param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ));
+    case PT_HARMONIC:
+        return PtrPotential(new Harmonic(param.Omega, param.axisRatioY, param.axisRatioZ));
     case PT_MIYAMOTONAGAI:
-        return PtrPotential(new MiyamotoNagai(params.mass, params.scaleRadius, params.scaleRadius2));
+        return PtrPotential(new MiyamotoNagai(param.mass, param.scaleRadius, param.scaleHeight));
     case PT_DEHNEN:
         return PtrPotential(new Dehnen(
-            params.mass, params.scaleRadius, params.gamma, params.axisRatioY, params.axisRatioZ));
+            param.mass, param.scaleRadius, param.gamma, param.axisRatioY, param.axisRatioZ));
     case PT_FERRERS:
         return PtrPotential(new Ferrers(
-            params.mass, params.scaleRadius, params.axisRatioY, params.axisRatioZ)); 
+            param.mass, param.scaleRadius, param.axisRatioY, param.axisRatioZ)); 
     case PT_PLUMMER:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrPotential(new Plummer(params.mass, params.scaleRadius));
+        if(param.axisRatioY==1 && param.axisRatioZ==1)
+            return PtrPotential(new Plummer(param.mass, param.scaleRadius));
         else
             throw std::invalid_argument("Non-spherical Plummer is not supported");
     case PT_ISOCHRONE:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrPotential(new Isochrone(params.mass, params.scaleRadius));
+        if(param.axisRatioY==1 && param.axisRatioZ==1)
+            return PtrPotential(new Isochrone(param.mass, param.scaleRadius));
         else
             throw std::invalid_argument("Non-spherical Isochrone is not supported");
     case PT_NFW:
-        if(params.axisRatioY==1 && params.axisRatioZ==1)
-            return PtrPotential(new NFW(params.mass, params.scaleRadius));
+        if(param.axisRatioY==1 && param.axisRatioZ==1)
+            return PtrPotential(new NFW(param.mass, param.scaleRadius));
         else
             throw std::invalid_argument("Non-spherical Navarro-Frenk-White is not supported");
     case PT_PERFECTELLIPSOID:
-        if(params.axisRatioY==1 && params.axisRatioZ<1)
+        if(param.axisRatioY==1 && param.axisRatioZ<1)
             return PtrPotential(new OblatePerfectEllipsoid(
-                params.mass, params.scaleRadius, params.scaleRadius*params.axisRatioZ)); 
+                param.mass, param.scaleRadius, param.scaleRadius*param.axisRatioZ)); 
         else
             throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
     default:
@@ -1092,93 +925,75 @@ PtrPotential createAnalyticPotential(const ConfigPotential& params)
     }
 }
 
-/** Create an instance of potential expansion class according to the parameters passed in params,
+/** Create an instance of analytic density model according to the parameters passed. 
+    \param[in] param  specifies the density parameters (type=... determines the type of model)
+    \return    the instance of density
+    \throw     std::invalid_argument exception if the parameters don't make sense,
+    or any other exception that may occur in the constructor of a particular density model
+*/
+PtrDensity createAnalyticDensity(const AllParam& param)
+{
+    switch(param.potentialType)
+    {
+    case PT_DISK:
+        return PtrDensity(new DiskDensity(parseDiskParam(param)));
+    case PT_SPHEROID:
+        return PtrDensity(new SpheroidDensity(parseSpheroidParam(param)));
+    case PT_SERSIC:
+        return PtrDensity(new SpheroidDensity(parseSersicParam(param)));
+    default:
+        return createAnalyticPotential(param);
+    }
+}
+
+/** Create an instance of potential expansion class according to the parameters passed in param,
     for the provided source density or potential
     (template parameter SourceType==BaseDensity or BasePotential) */
 template<typename SourceType>
-PtrPotential createPotentialExpansion(const ConfigPotential& params, const SourceType& source)
+PtrPotential createPotentialExpansion(const AllParam& param, const SourceType& source)
 {
-    switch(params.potentialType) {
-    case PT_BSE: {
-        return PtrPotential(new BasisSetExp(
-            /*params.alpha*/0., params.gridSizeR, params.lmax, source));
-    }
-    case PT_SPLINE: {
-        return PtrPotential(new SplineExp(
-            params.gridSizeR, params.lmax, source,
-            params.rmin, params.rmax));
-    }
-    case PT_CYLSPLINE: {
-        return CylSpline::create(source, params.mmax,
-            params.gridSizeR, params.rmin, params.rmax,
-            params.gridSizez, params.zmin, params.zmax);
-    }
-    case PT_MULTIPOLE: {
-        return Multipole::create(source, params.lmax, params.mmax,
-            params.gridSizeR, params.rmin, params.rmax);
-    }
+    switch(param.potentialType) {
+    case PT_MULTIPOLE:
+        return Multipole::create(source, param.lmax, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax);
+    case PT_CYLSPLINE:
+        return CylSpline::create(source, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax,
+            param.gridSizez, param.zmin, param.zmax);
     default: throw std::invalid_argument("Unknown potential expansion type");
     }
 }
 
-/// determines whether the potential is of an expansion type
-inline bool isPotentialExpansion(PotentialType type)
-{
-    return type == PT_SPLINE || type == PT_BSE || type == PT_CYLSPLINE || type == PT_MULTIPOLE;
-}
-
-/** Universal routine for creating any elementary (non-composite) potential,
-    either an analytic one or a potential expansion constructed from a density model
-    or loaded from a text file.
+/** Read potential coefficients from a text file, or create a potential expansion
+    from N-body snapshot contained in a file
 */
-PtrPotential createAnyPotential(const utils::KeyValueMap& kvmap,
-    const units::ExternalUnits& converter)
+PtrPotential readPotentialExpansion(const AllParam& param, const units::ExternalUnits& converter)
 {
-    const ConfigPotential params = parseParams(kvmap, converter);
-    if(!params.file.empty()) {
-        if(!utils::fileExists(params.file))
-            throw std::runtime_error("File "+params.file+" does not exist");
-        // file may contain either coefficients of potential expansion,
-        // in which case the potential type is inferred from the first line of the file,
-        // or an N-body snapshot, in which case the potential type must be specified.
-        try {
-            return readPotential(params.file, converter);
-        }   // if it contained valid coefs, all is fine
-        catch(std::runtime_error&) {
-            // otherwise the file is assumed to contain an N-body snapshot
-            if(!isPotentialExpansion(params.potentialType))
-                throw std::runtime_error(
-                    "Must specify the potential expansion type to load an N-body snapshot");
-            const particles::ParticleArrayCar particles =
-                particles::readSnapshot(params.file, converter);
-            if(particles.size()==0)
-                throw std::runtime_error("Error loading N-body snapshot from " + params.file);
-            PtrPotential poten = createPotentialFromParticles(params, particles);
-            // store coefficients in a text file, 
-            // later may load this file instead for faster initialization
-            writePotential( (params.file + 
-                getCoefFileExtension(params.potentialType)), *poten, converter);
-            return poten;
-        }
-    }
-    // if params did not contain a file name, they must specify the potential type
-    if(params.potentialType == PT_UNKNOWN)
-        throw std::runtime_error("Must specify the potential type");
-    if(isPotentialExpansion(params.potentialType)) {
-        // create a temporary density or potential model
-        // to serve as the source for potential expansion
-        if( params.densityType == PT_DEHNEN || 
-            params.densityType == PT_FERRERS ||
-            params.densityType == PT_MIYAMOTONAGAI )
-        {   // use an analytic potential as the source
-            ConfigPotential potparams(params);
-            potparams.potentialType  = params.densityType;
-            return createPotentialExpansion(params, *createAnalyticPotential(potparams));
-        }
-        // otherwise use analytic density as the source
-        return createPotentialExpansion(params, *createDensity(kvmap, converter));
-    } else  // elementary potential, or an error
-        return createAnalyticPotential(params);
+    if(!utils::fileExists(param.file))
+        throw std::runtime_error("File "+param.file+" does not exist");
+
+    // file may contain either coefficients of potential expansion,
+    // in which case the potential type is inferred from the first line of the file,
+    // or an N-body snapshot, in which case the potential type must be specified.
+    try {
+        return readPotential(param.file, converter);
+    }   // if it contained valid coefs, all is fine
+    catch(std::runtime_error&) {}  // ignore error if the file didn't contain valid coefs
+
+    // otherwise the file is assumed to contain an N-body snapshot
+    if(param.potentialType != PT_MULTIPOLE && param.potentialType != PT_CYLSPLINE)
+        throw std::runtime_error("Must specify the potential expansion type to load an N-body snapshot");
+
+    const particles::ParticleArrayCar particles = particles::readSnapshot(param.file, converter);
+    if(particles.size()==0)
+        throw std::runtime_error("Error loading N-body snapshot from " + param.file);
+
+    PtrPotential poten = createPotentialFromParticles(param, particles);
+
+    // store coefficients in a text file,
+    // later may load this file instead for faster initialization
+    writePotential(param.file + getCoefFileExtension(param.potentialType), *poten, converter);
+    return poten;
 }
 
 }  // end internal namespace
@@ -1188,57 +1003,78 @@ PtrDensity createDensity(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
-    std::string file = kvmap.getString("file");
-    if(!file.empty())
-        return readDensity(file, converter);
-    std::string type = kvmap.getString(kvmap.contains("density") ? "density" : "type");
-    if(utils::stringsEqual(type, DiskDensity::myName()))
-        return PtrDensity(new DiskDensity(parseDiskParams(kvmap, converter)));
-    if(utils::stringsEqual(type, SphrParam::myName()))
-        return PtrDensity(new SpheroidDensity(parseSphrParams(kvmap, converter)));
-    if(utils::stringsEqual(type, SersicParam::myName()))
-        return PtrDensity(new SpheroidDensity(parseSersicParams(kvmap, converter)));
-    return createAnalyticDensity(parseParams(kvmap, converter));
+    AllParam param = parseParam(kvmap, converter);
+    if(!param.file.empty())
+        return readDensity(param.file, converter);
+    // if 'type=...' is not provided but 'density=...' is given, use that value
+    if(!kvmap.contains("type") && kvmap.contains("density"))
+        param.potentialType = param.densityType;
+    return createAnalyticDensity(param);
 }
 
-// create a potential from several components
+// universal routine for creating a potential from several components
 PtrPotential createPotential(
     const std::vector<utils::KeyValueMap>& kvmap,
     const units::ExternalUnits& converter)
 {
     if(kvmap.size() == 0)
         throw std::runtime_error("Empty list of potential components");
+
     // all potential components
     std::vector<PtrPotential> componentsPot;
     // all density components that will contribute to the additional Multipole potential
     std::vector<PtrDensity> componentsDens;
 
-    // assemble the set of density components for the multipole
-    // (all spheroids and residual part of disks),
-    // and the complementary set of potential components
-    // (the flattened part of disks, eventually to be joined by the multipole itself)
-    for(unsigned int i=0; i<kvmap.size(); i++) {
-        std::string type = kvmap[i].getString("type");
-        // isolate the density profiles that are part of GalPot scheme:
-        // Disk profile will be represented by one potential component (DiskAnsatz)
-        // and two density components that will eventually be supplied to the Multipole potential;
-        // Spheroid and Sersic profiles will also be added to the Multipole
-        if(utils::stringsEqual(type, DiskDensity::myName())) {
-            DiskParam dpar = parseDiskParams(kvmap[i], converter);
+    // isolate the density profiles that are part of GalPot scheme:
+    // Disk profile will be represented by one potential component (DiskAnsatz)
+    // and two density components that will eventually be supplied to the Multipole potential;
+    // Spheroid and Sersic profiles will also be added to the Multipole;
+    // any other potential components are constructed directly
+    for(unsigned int i=0; i<kvmap.size(); i++)
+    {
+        const AllParam param = parseParam(kvmap[i], converter);
+        if(!param.file.empty())
+        {
+            componentsPot.push_back(readPotentialExpansion(param, converter));
+        }
+        else switch(param.potentialType) {
+        case PT_DISK: {
+            DiskParam dparam = parseDiskParam(param);
             // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
-            componentsPot.push_back(PtrPotential(new DiskAnsatz(dpar)));
+            componentsPot.push_back(PtrPotential(new DiskAnsatz(dparam)));
             // ...and gets subtracted from the entire DiskDensity for the list of density components
-            componentsDens.push_back(PtrDensity(new DiskDensity(dpar)));
-            dpar.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
-            componentsDens.push_back(PtrDensity(new DiskAnsatz(dpar)));
-        } else if(utils::stringsEqual(type, SphrParam::myName())) {
-            componentsDens.push_back(PtrDensity(
-                new SpheroidDensity(parseSphrParams(kvmap[i], converter))));
-        } else if(utils::stringsEqual(type, SersicParam::myName())) {
-            componentsDens.push_back(PtrDensity(
-                new SpheroidDensity(parseSersicParams(kvmap[i], converter))));
-        } else {
-            componentsPot.push_back(createAnyPotential(kvmap[i], converter));
+            componentsDens.push_back(PtrDensity(new DiskDensity(dparam)));
+            dparam.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
+            componentsDens.push_back(PtrDensity(new DiskAnsatz(dparam)));
+            break;
+        }
+        case PT_SPHEROID: {
+            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSpheroidParam(param))));
+            break;
+        }
+        case PT_SERSIC: {
+            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSersicParam(param))));
+            break;
+        }
+        case PT_MULTIPOLE:
+        case PT_CYLSPLINE: {
+            // create a temporary density or potential model to serve as the source for potential expansion
+            AllParam srcpar(param);
+            srcpar.potentialType = param.densityType;
+            if( param.densityType == PT_DEHNEN ||
+                param.densityType == PT_FERRERS ||
+                param.densityType == PT_MIYAMOTONAGAI )
+            {   // use an analytic potential as the source
+                componentsPot.push_back(createPotentialExpansion(param, *createAnalyticPotential(srcpar)));
+            }
+            else
+            {   // otherwise use analytic density as the source
+                componentsPot.push_back(createPotentialExpansion(param, *createAnalyticDensity(srcpar)));
+            }
+            break;
+        }
+        default:  // the remaining alternative is an elementary potential, or an error
+            componentsPot.push_back(createAnalyticPotential(param));
         }
     }
 
@@ -1261,34 +1097,19 @@ PtrPotential createPotential(
         return PtrPotential(new CompositeCyl(componentsPot));
 }
 
-// create a potential from one component (which may still turn into a composite potential
-// if it happened to be one of GalPot things)
+// create a potential from a single set of parameters
+// (which may still turn into a composite potential if it happened to be one of GalPot things)
 PtrPotential createPotential(
-    const utils::KeyValueMap& params,
+    const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
-    return createPotential(std::vector<utils::KeyValueMap>(1, params), converter);
-}
-
-// create a potential expansion from the user-provided source density
-PtrPotential createPotential(
-    const utils::KeyValueMap& params, const BaseDensity& dens,
-    const units::ExternalUnits& converter)
-{
-    return createPotentialExpansion(parseParams(params, converter), dens);
-}
-
-// create a potential expansion from the user-provided source potential
-PtrPotential createPotential(
-    const utils::KeyValueMap& params, const BasePotential& pot,
-    const units::ExternalUnits& converter)
-{
-    return createPotentialExpansion(parseParams(params, converter), pot);
+    return createPotential(std::vector<utils::KeyValueMap>(1, kvmap), converter);
 }
 
 // create a potential from INI file
 PtrPotential createPotential(
-    const std::string& iniFileName, const units::ExternalUnits& converter)
+    const std::string& iniFileName,
+    const units::ExternalUnits& converter)
 {
     utils::ConfigFile ini(iniFileName);
     std::vector<std::string> sectionNames = ini.listSections();
@@ -1301,11 +1122,31 @@ PtrPotential createPotential(
     return createPotential(components, converter);
 }
 
-// create potential from particles
-PtrPotential createPotential(const utils::KeyValueMap& params,
-    const particles::ParticleArray<coord::PosCyl>& particles, const units::ExternalUnits& converter)
+// create a potential expansion from the user-provided source density
+PtrPotential createPotential(
+    const utils::KeyValueMap& kvmap,
+    const BaseDensity& dens,
+    const units::ExternalUnits& converter)
 {
-    return createPotentialFromParticles(parseParams(params, converter), particles);
+    return createPotentialExpansion(parseParam(kvmap, converter), dens);
+}
+
+// create a potential expansion from the user-provided source potential
+PtrPotential createPotential(
+    const utils::KeyValueMap& kvmap,
+    const BasePotential& pot,
+    const units::ExternalUnits& converter)
+{
+    return createPotentialExpansion(parseParam(kvmap, converter), pot);
+}
+
+// create potential from particles
+PtrPotential createPotential(
+    const utils::KeyValueMap& kvmap,
+    const particles::ParticleArray<coord::PosCyl>& particles,
+    const units::ExternalUnits& converter)
+{
+    return createPotentialFromParticles(parseParam(kvmap, converter), particles);
 }
 
 ///@}

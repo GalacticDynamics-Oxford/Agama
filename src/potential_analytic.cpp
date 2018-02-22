@@ -76,7 +76,7 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
         deriv2->dR2  = mden3 * (azb2*den2 - 2*pow_2(Rsc));
         deriv2->dz2  = mden3 * ( (pow_2(Rsc) - 2*azb2*den2) * pow_2(pos.z/zb) +
             pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(Rsc) + azb2*den2) / pow_2(zb) );
-        deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);        
+        deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);
         deriv2->dRdphi = deriv2->dzdphi = deriv2->dphi2 = 0;
     }
 }

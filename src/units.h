@@ -5,7 +5,7 @@
 */
 
 #pragma once
- 
+
 /** Unit systems
 
     The approach for handling dimensional quantities in the library is based on 

@@ -27,7 +27,7 @@ template<> double Ltotal(const PosVelCyl& p) {
 template<> double Ltotal(const PosVelSph& p) {
     return sqrt(pow_2(p.vtheta) + pow_2(p.vphi)) * p.r;
 }
-template<> double Lz(const PosVelCar& p) { return p.x * p.vy - p.y * p.vx; }
+template<> double Lz(const PosVelCar& p) { volatile double a = p.x * p.vy, b = p.y * p.vx; return a-b; }
 template<> double Lz(const PosVelCyl& p) { return p.R * p.vphi; }
 template<> double Lz(const PosVelSph& p) { return p.r * sin(p.theta) * p.vphi; }
 // now the stupid part: spell out these names once again but without <>,
@@ -287,7 +287,7 @@ PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2
         deriv2->d2Rdlambdadnu = -0.25*R / (lminusd * nminusd * sign);
         deriv2->d2zdlambda2   = -0.25*z / pow_2(p.lambda);
         deriv2->d2zdnu2       = -0.25*z / pow_2(p.nu);
-        deriv2->d2zdlambdadnu = -0.25*z / (p.lambda * p.nu);        
+        deriv2->d2zdlambdadnu = -0.25*z / (p.lambda * p.nu);
     }
     return PosCyl(R, z, p.phi);
 }

@@ -112,7 +112,7 @@ particles::ParticleArrayCar assignVelocity(
     const potential::BaseDensity& dens,
     const potential::BasePotential& pot,
     const double beta, const double kappa)
-{    
+{
     /// fraction of mass enclosed by the innermost radial grid point or excluded by the outermost one
     static const double MIN_MASS_FRAC  = 1e-4;
     /// type of velocity sampling procedure

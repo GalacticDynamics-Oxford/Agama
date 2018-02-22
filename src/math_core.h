@@ -7,7 +7,7 @@
 #include "math_base.h"
 
 namespace math{
-    
+
 /// \name  ---- Miscellaneous utility functions -----
 ///@{
 
@@ -36,7 +36,10 @@ double pow(double x, int n);
 double pow(double x, double n);
 
 
-/** wraps the input argument into the range [0,2pi) */
+/** wraps the input argument into the range [0,2pi),
+    taking the remainder of the division of x by the floating-point constant 2*M_PI
+    (not the mathematical constant 2pi)
+*/
 double wrapAngle(double x);
 
 /** create a nearly monotonic sequence of angles by adding or subtracting 2Pi as many times 
@@ -358,7 +361,7 @@ inline double findRoot(const IFunction& F, const Scaling& scaling, double relTol
 {
     return unscale(scaling, findRoot(ScaledFnc<Scaling>(scaling, F), 0, 1, relToler));
 }
-    
+
 /** Find a local minimum of a function F(x) on the finite interval [x1,x2].
     \param[in] F  is the input function;
     \param[in] x1,x2  are the endpoints of the interval;
@@ -379,6 +382,7 @@ double findMin(const IFunction& F, double x1, double x2, double xinit, double re
     \param[in]  F  is the input function F(x);
     \param[in]  scaling  is the instance of scaling transformation and defines its parameters,
     and implicitly the interval of the un-scaled variable x.
+    \param[in]  xinit  is the optional initial guess point in unscaled coordinates (use NaN if not known);
     \param[in]  relToler  determines the accuracy of localization in the scaled variable s.
     \return  the point x (un-scaled) where the input function reaches a (local) minimum.
     \throw   std::invalid_argument if the endpoints are not finite or relToler is not positive.
@@ -478,15 +482,14 @@ double integrate(const IFunction& F, double x1, double x2, double relToler,
 double integrateAdaptive(const IFunction& F, double x1, double x2, double relToler, 
     double* error=NULL, int* numEval=NULL);
 
-/** integrate a function on a finite interval, using a fixed-order Gauss-Legendre rule
-    without error estimate. 
+/** integrate a function on a finite interval, using a built-in fixed-order Gauss-Legendre rule
+    without error estimate.
     \param[in] F  is the input function;
     \param[in] x1 is the lower end of the interval;
     \param[in] x2 is the upper end of the interval;
-    \param[in] N  is the number of points in Gauss-Legendre quadrature; 
-    values up to 20 use pre-computed tables, and higher ones compute them on-the-fly (less efficient).
+    \param[in] N  is the number of points in Gauss-Legendre quadrature, must be <= MAX_GL_ORDER
 */
-double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
+double integrateGL(const IFunction& F, double x1, double x2, int N);
 
 /** prepare a table for Gauss-Legendre integration of one or many functions on the same interval.
     The integral is approximated by a weighted sum of function values over the array of points:
@@ -502,6 +505,13 @@ double integrateGL(const IFunction& F, double x1, double x2, unsigned int N);
     \param[out] weights  will be filled with weights (array should be allocated beforehand).
 */
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights);
+
+/// number of built-in integration tables
+const int MAX_GL_ORDER = 20;
+
+/// list of all built-in integration rules:  points and weights
+extern const double * const GLPOINTS [MAX_GL_ORDER+1];
+extern const double * const GLWEIGHTS[MAX_GL_ORDER+1];
 
 
 /** N-dimensional integration (aka cubature).

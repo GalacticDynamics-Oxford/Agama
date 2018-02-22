@@ -24,10 +24,12 @@ double
     coefJrIn,  ///< contribution of radial   action to h(J), controlling anisotropy below J_0 (h_r)
     coefJzIn,  ///< contribution of vertical action to h(J), controlling anisotropy below J_0 (h_z)
     coefJrOut, ///< contribution of radial   action to g(J), controlling anisotropy above J_0 (g_r)
-    coefJzOut; ///< contribution of vertical action to g(J), controlling anisotropy above J_0 (g_z)
-DoublePowerLawParam() :  ///< set default values for all fields
-    norm(0), J0(0), Jcutoff(0), slopeIn(0), slopeOut(0), steepness(1), cutoffStrength(2),
-    coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1) {}
+    coefJzOut, ///< contribution of vertical action to g(J), controlling anisotropy above J_0 (g_z)
+    rotFrac,   ///< relative amplitude of the odd-Jphi component (-1 to 1, 0 means no rotation)
+    Jphi0;     ///< controls the steepness of rotation and the size of non-rotating core
+DoublePowerLawParam() :  ///< set default values for all fields (NAN means that it must be set manually)
+    norm(NAN), J0(NAN), Jcutoff(0), slopeIn(NAN), slopeOut(NAN), steepness(1), cutoffStrength(2),
+    coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1), rotFrac(0), Jphi0(0) {}
 };
 
 /** General double power-law model.

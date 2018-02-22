@@ -30,7 +30,7 @@ namespace potential{
     i.e. once created, they cannot be modified, and all their methods are const.
     Typically the derived classes are passed as const references to the base class
     (density or potential):
- 
+
         const DerivedPotential pot1;     // statically typed object
         const BaseDensity& dens = pot1;  // polymorphic reference, here downgraded to the base class
         double mass = dens.totalMass();  // call virtual method of the base class
@@ -328,7 +328,7 @@ public:
     virtual const char* name() const { return "FunctionToDensityWrapper"; }
     explicit FunctionToDensityWrapper(const math::IFunction &f) : fnc(f) {}
 };
-    
+
 /** A wrapper class providing a IFunction interface to a potential:
     it evaluates the potential and its derivatives at the given point along x-axis
 */

@@ -2,7 +2,7 @@
     \brief   Action-angle finders using Staeckel potential approximation
     \author  Eugene Vasiliev
     \date    2015
- 
+
 Computation of actions and angles for axisymmetric systems, using two related methods:
 1) exact expressions for Staeckel potentials  (e.g. for the Perfect Ellipsoid),
 2) "Staeckel Fudge" approximation applicable for any axisymmetric potential.

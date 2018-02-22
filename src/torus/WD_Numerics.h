@@ -17,7 +17,6 @@
 
 #include "WD_Vector.h"
 #include "WD_Matrix.h"
-//#include "WD_Math.h"
 #include "WD_Numerics.templates"
 
 namespace WD{

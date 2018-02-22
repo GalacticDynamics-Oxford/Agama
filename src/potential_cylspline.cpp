@@ -793,7 +793,7 @@ void chooseGridRadii(const BaseDensity& src,
         double spacing = 1 + sqrt(10./sqrt(gridSizeR*gridSizez));  // ratio between consecutive grid nodes
         if(Rmax==0)
             Rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);
-       	if(Rmin==0)
+        if(Rmin==0)
             Rmin = rhalf * std::pow(spacing, -0.5*gridSizeR);
         // TODO: introduce a more intelligent adaptive approach as in Multipole,
         // reducing the outer radius if the density drops to zero or decreases too rapidly,
@@ -826,7 +826,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     size_t nbody = radii.size();
     if(nbody==0)
         throw std::invalid_argument("CylSpline: no particles provided as input");
-    
+
     std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
     double gridSize = sqrt(gridSizeR*gridSizez);  // average of the two sizes
     double Rhalf = radii[nbody/2];   // half-mass radius (if all particles have equal mass)
@@ -993,7 +993,7 @@ CylSpline::CylSpline(
            (dPhidR[mm].rows() != sizeR || dPhidR[mm].cols() != sizez_orig  ||
             dPhidz[mm].rows() != sizeR || dPhidz[mm].cols() != sizez_orig)))
             throw std::invalid_argument("CylSpline: incorrect coefs array size");
-        bool nontrivial = true;  // keep track if this term is identically zero or not
+        bool nontrivial = false;  // keep track if this term is identically zero or not
         for(unsigned int iR=0; iR<sizeR; iR++) {
             double R = gridR_orig[iR];
             for(unsigned int iz=0; iz<sizez_orig; iz++) {
@@ -1032,7 +1032,7 @@ CylSpline::CylSpline(
             derR0 = derR;
             derz0 = derz;
         }
-        if(nontrivial) {  // only construct splines if they are not identically zero
+        if(nontrivial || mm==mmax) {  // only construct splines if they are not identically zero or m=0
             spl[mm] = haveDerivs ? 
                 math::PtrInterpolator2d(new math::QuinticSpline2d(gridR, gridz, val, derR, derz)) :
                 math::PtrInterpolator2d(new math::CubicSpline2d(gridR, gridz, val, 0, NAN, NAN, NAN));

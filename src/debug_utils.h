@@ -2,7 +2,7 @@
     \brief   Auxiliary routines for comparing and printing data types from coord.h and actions_base.h
     \author  Eugene Vasiliev
     \date    2015
-*/ 
+*/
 #pragma once
 #include "coord.h"
 #include "actions_base.h"
@@ -17,39 +17,29 @@ namespace coord {
 /// comparison functions for positions, gradients and hessians
 
 inline bool equalPos(const PosCar& p1, const PosCar& p2, const double eps) {
-    return fabs(p1.x-p2.x)<eps*(1+fabs(p1.x))
-        && fabs(p1.y-p2.y)<eps*(1+fabs(p1.y))
-        && fabs(p1.z-p2.z)<eps*(1+fabs(p1.z)); }
+    return pow_2(p1.x-p2.x) + pow_2(p1.y-p2.y) + pow_2(p1.z-p2.z) <=
+        pow_2(eps) * (pow_2(p1.x) + pow_2(p1.y) + pow_2(p1.z)); }
 inline bool equalPos(const PosCyl& p1, const PosCyl& p2, const double eps) {
-    return fabs(p1.R-p2.R)<eps*(1+fabs(p1.R))
-        && fabs(p1.z-p2.z)<eps*(1+fabs(p1.z))
-        && fabs(p1.phi-p2.phi)<eps*(1+fabs(p1.phi)); }
+    return pow_2(p1.R-p2.R) + pow_2(p1.z-p2.z) <= pow_2(eps) * (pow_2(p1.R) + pow_2(p1.z)) &&
+        fabs(p1.phi-p2.phi) <= M_PI*eps; }
 inline bool equalPos(const PosSph& p1, const PosSph& p2, const double eps) {
-    return fabs(p1.r-p2.r)<eps*(1+fabs(p1.r))
-        && fabs(p1.theta-p2.theta)<eps*(1+fabs(p1.theta))
-        && fabs(p1.phi-p2.phi)<eps*(1+fabs(p1.phi)); }
+    return fabs(p1.r-p2.r) <= eps * fabs(p1.r) &&
+        fabs(p1.theta-p2.theta) <= M_PI/2*eps && fabs(p1.phi-p2.phi) <= M_PI*eps; }
 
-inline bool equalPosVel(const PosVelCar& p1, const PosVelCar& p2, const double eps) {
-    return fabs(p1.x-p2.x)<eps*(1+fabs(p1.x))
-        && fabs(p1.y-p2.y)<eps*(1+fabs(p1.y))
-        && fabs(p1.z-p2.z)<eps*(1+fabs(p1.z))
-        && fabs(p2.vx-p2.vx)<eps*(1+fabs(p1.vx))
-        && fabs(p1.vy-p2.vy)<eps*(1+fabs(p1.vy))
-        && fabs(p1.vz-p2.vz)<eps*(1+fabs(p1.vz)); }
-inline bool equalPosVel(const PosVelCyl& p1, const PosVelCyl& p2, const double eps) {
-    return fabs(p1.R-p2.R)<eps*(1+fabs(p1.R))
-        && fabs(p1.z-p2.z)<eps*(1+fabs(p1.z))
-        && fabs(p1.phi-p2.phi)<eps*(1+fabs(p1.phi))
-        && fabs(p2.vR-p2.vR)<eps*(1+fabs(p1.vR))
-        && fabs(p1.vz-p2.vz)<eps*(1+fabs(p1.vz))
-        && fabs(p1.vphi-p2.vphi)<eps*(1+fabs(p1.vphi)); }
-inline bool equalPosVel(const PosVelSph& p1, const PosVelSph& p2, const double eps) {
-    return fabs(p1.r-p2.r)<eps*(1+fabs(p1.r))
-        && fabs(p1.theta-p2.theta)<eps*(1+fabs(p1.theta))
-        && fabs(p1.phi-p2.phi)<eps*(1+fabs(p1.phi))
-        && fabs(p2.vr-p2.vr)<eps*(1+fabs(p1.vr))
-        && fabs(p1.vtheta-p2.vtheta)<eps*(1+fabs(p1.vtheta))
-        && fabs(p1.vphi-p2.vphi)<eps*(1+fabs(p1.vphi)); }
+inline bool equalVel(const VelCar& p1, const VelCar& p2, const double eps) {
+    return pow_2(p2.vx-p2.vx) + pow_2(p1.vy-p2.vy) + pow_2(p1.vz-p2.vz) <= 
+        pow_2(eps) * (pow_2(p1.vx) + pow_2(p1.vy) + pow_2(p1.vz)); }
+inline bool equalVel(const VelCyl& p1, const VelCyl& p2, const double eps) {
+    return pow_2(p2.vR-p2.vR) + pow_2(p1.vz-p2.vz) + pow_2(p1.vphi-p2.vphi) <= 
+        pow_2(eps) * (pow_2(p1.vR) + pow_2(p1.vz) + pow_2(p1.vphi)); }
+inline bool equalVel(const VelSph& p1, const VelSph& p2, const double eps) {
+    return pow_2(p2.vr-p2.vr) + pow_2(p1.vtheta-p2.vtheta) + pow_2(p1.vphi-p2.vphi) <= 
+        pow_2(eps) * (pow_2(p1.vr) + pow_2(p1.vtheta) + pow_2(p1.vphi)); }
+
+template<typename CoordT>
+bool equalPosVel(const PosVelT<CoordT>& p1, const PosVelT<CoordT>& p2, const double eps) {
+    return equalPos(p1, p2, eps) && equalVel(p1, p2, eps); }
+
 inline bool equalPosVel(const PosVelSphMod& p1, const PosVelSphMod& p2, const double eps) {
     return fabs(p1.r-p2.r)<eps*(1+fabs(p1.r))
         && fabs(p1.tau-p2.tau)<eps*(1+fabs(p1.tau))
@@ -59,21 +49,21 @@ inline bool equalPosVel(const PosVelSphMod& p1, const PosVelSphMod& p2, const do
         && fabs(p1.pphi-p2.pphi)<eps*(1+fabs(p1.pphi)); }
 
 inline bool equalGrad(const GradCar& g1, const GradCar& g2, const double eps) {
-    return fabs(g1.dx-g2.dx)<eps && fabs(g1.dy-g2.dy)<eps && fabs(g1.dz-g2.dz)<eps; }
+    return math::fcmp(g1.dx,g2.dx,eps)==0 && math::fcmp(g1.dy,g2.dy,eps)==0 && math::fcmp(g1.dz,g2.dz,eps)==0; }
 inline bool equalGrad(const GradCyl& g1, const GradCyl& g2, const double eps) {
-    return fabs(g1.dR-g2.dR)<eps && fabs(g1.dphi-g2.dphi)<eps && fabs(g1.dz-g2.dz)<eps; }
+    return math::fcmp(g1.dR,g2.dR,eps)==0 && math::fcmp(g1.dphi,g2.dphi,eps)==0 && math::fcmp(g1.dz,g2.dz,eps)==0; }
 inline bool equalGrad(const GradSph& g1, const GradSph& g2, const double eps) {
-    return fabs(g1.dr-g2.dr)<eps && fabs(g1.dtheta-g2.dtheta)<eps && fabs(g1.dphi-g2.dphi)<eps; }
+    return math::fcmp(g1.dr,g2.dr,eps)==0 && math::fcmp(g1.dtheta,g2.dtheta,eps)==0 && math::fcmp(g1.dphi,g2.dphi,eps)==0; }
 
 inline bool equalHess(const HessCar& h1, const HessCar& h2, const double eps) {
-    return fabs(h1.dx2-h2.dx2)<eps && fabs(h1.dy2-h2.dy2)<eps && fabs(h1.dz2-h2.dz2)<eps &&
-        fabs(h1.dxdy-h2.dxdy)<eps && fabs(h1.dydz-h2.dydz)<eps && fabs(h1.dxdz-h2.dxdz)<eps; }
+    return math::fcmp(h1.dx2,h2.dx2,eps)==0 && math::fcmp(h1.dy2,h2.dy2,eps)==0 && math::fcmp(h1.dz2,h2.dz2,eps)==0 &&
+        math::fcmp(h1.dxdy,h2.dxdy,eps)==0 && math::fcmp(h1.dydz,h2.dydz,eps)==0 && math::fcmp(h1.dxdz,h2.dxdz,eps)==0; }
 inline bool equalHess(const HessCyl& h1, const HessCyl& h2, const double eps) {
-    return fabs(h1.dR2-h2.dR2)<eps && fabs(h1.dphi2-h2.dphi2)<eps && fabs(h1.dz2-h2.dz2)<eps &&
-        fabs(h1.dRdphi-h2.dRdphi)<eps && fabs(h1.dzdphi-h2.dzdphi)<eps && fabs(h1.dRdz-h2.dRdz)<eps; }
+    return math::fcmp(h1.dR2,h2.dR2,eps)==0 && math::fcmp(h1.dphi2,h2.dphi2,eps)==0 && math::fcmp(h1.dz2,h2.dz2,eps)==0 &&
+        math::fcmp(h1.dRdphi,h2.dRdphi,eps)==0 && math::fcmp(h1.dzdphi,h2.dzdphi,eps)==0 && math::fcmp(h1.dRdz,h2.dRdz,eps)==0; }
 inline bool equalHess(const HessSph& h1, const HessSph& h2, const double eps) {
-    return fabs(h1.dr2-h2.dr2)<eps && fabs(h1.dtheta2-h2.dtheta2)<eps && fabs(h1.dphi2-h2.dphi2)<eps &&
-        fabs(h1.drdtheta-h2.drdtheta)<eps && fabs(h1.drdphi-h2.drdphi)<eps && fabs(h1.dthetadphi-h2.dthetadphi)<eps; }
+    return math::fcmp(h1.dr2,h2.dr2,eps)==0 && math::fcmp(h1.dtheta2,h2.dtheta2,eps)==0 && math::fcmp(h1.dphi2,h2.dphi2,eps)==0 &&
+        math::fcmp(h1.drdtheta,h2.drdtheta,eps)==0 && math::fcmp(h1.drdphi,h2.drdphi,eps)==0 && math::fcmp(h1.dthetadphi,h2.dthetadphi,eps)==0; }
 }  // namespace
 
 /// printout functions - outside the namespace

@@ -5,13 +5,13 @@
     This test demonstrates that the action-based double-power-law distribution function
     corresponds rather well to the ergodic distribution function obtained by
     the Eddington inversion formula for the known spherically-symmetric isotropic model.
-    We create an instance of DF and compute several quantities (such as density and 
+    We create an instance of DF and compute several quantities (such as density and
     velocity dispersion), comparing them to the standard analytical expressions.
 */
 #include <iostream>
 #include <fstream>
 #include "potential_dehnen.h"
-#include "actions_staeckel.h"
+#include "actions_spherical.h"
 #include "df_halo.h"
 #include "galaxymodel_base.h"
 #include "particles_io.h"
@@ -73,8 +73,11 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
 {
     std::cout << "\033[1mAt point " << point << "\033[0m we have\n";
     // compare the action-based distribution function f(J) with the analytic one
-    const actions::Actions J = galmod.actFinder.actions(point);
+    actions::Actions J = galmod.actFinder.actions(point);
+    // we only compare the even part of f(J), taking the average of its values at J_phi and -J_phi
     double dfValue = galmod.distrFunc.value(J);
+    J.Jphi *= -1;
+    dfValue = 0.5 * (galmod.distrFunc.value(J) + dfValue);
     double energy = totalEnergy(galmod.potential, point);
     bool dfok = math::fcmp(dfValue, dfExact, 0.05) == 0;
     std::cout <<
@@ -83,10 +86,10 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
 
     // compute density and velocity moments
     double density, densityErr;
-    coord::VelCyl velocityFirstMoment, velocityFirstMomentErr;
+    double velocityFirstMoment, velocityFirstMomentErr;
     coord::Vel2Cyl velocitySecondMoment, velocitySecondMomentErr;
     computeMoments(galmod, point,
-        &density, &velocityFirstMoment, &velocitySecondMoment,
+        &density,    &velocityFirstMoment,    &velocitySecondMoment,
         &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr,
         reqRelError, maxNumEval);
     bool densok = math::fcmp(density, densExact, 0.05) == 0;
@@ -127,14 +130,15 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
     double sigmaphi= intVphi.integrate(-vmax, vmax, amplVphi, 2);
     // they should agree with the velocity moments computed above
     bool densvdfok = math::fcmp(densvdf, density, 2e-5) == 0;
-    bool sigmavdfok= 
+    bool sigmavdfok=
         math::fcmp(sigmaR,   velocitySecondMoment.vR2,   2e-5) == 0 &&
         math::fcmp(sigmaz,   velocitySecondMoment.vz2,   2e-5) == 0 &&
         math::fcmp(sigmaphi, velocitySecondMoment.vphi2, 2e-5) == 0;
 
-    std::cout << 
+    std::cout <<
         "density=" << density << " +- " << utils::pp(densityErr,7) << (densvdfok?"":errmsg) <<
         "  compared to analytic value " << densExact << (densok?"":errmsg) <<"\n"
+        "mean velocity  vphi=" << velocityFirstMoment << " +- " << utils::pp(velocityFirstMomentErr, 7) << "\n"
         "velocity dispersion"
         "  vR2="    << velocitySecondMoment.vR2    << " +- " << utils::pp(velocitySecondMomentErr.vR2,  7) <<
         ", vz2="    << velocitySecondMoment.vz2    << " +- " << utils::pp(velocitySecondMomentErr.vz2,  7) <<
@@ -186,23 +190,26 @@ int main(){
     paramDPL.coefJrOut = 1.0;
     paramDPL.coefJzOut = 1.0;
     paramDPL.norm      = 2.7;
-    potential::PtrPotential potH(new potential::Dehnen(1., 1., 1., 1., 1.));  // potential
-    const actions::ActionFinderAxisymFudge actH(potH);        // action finder
-    const df::DoublePowerLaw dfH(paramDPL);                   // distribution function
-    const galaxymodel::GalaxyModel galmodH(*potH, actH, dfH); // all together - the mighty triad
+    paramDPL.rotFrac   = 0.5;  // add some rotation (odd-Jphi component),
+    paramDPL.Jphi0     = 0.7;  // it shouldn't affect the even-order moments
+    const potential::Dehnen potH(1., 1., 1., 1., 1.);        // potential
+    const actions::ActionFinderSpherical actH(potH);         // action finder
+    const df::DoublePowerLaw dfH(paramDPL);                  // distribution function
+    const galaxymodel::GalaxyModel galmodH(potH, actH, dfH); // all together - the mighty triad
 
     ok &= testTotalMass(galmodH, 1.);
 
     for(int i=0; i<NUM_POINTS_H; i++) {
         const coord::PosVelCyl point(testPointsH[i]);
-        double dfExact    = dfHernquist(1, 1, totalEnergy(*potH, point));    // f(E) for the Hernquist model
-        double densExact  = potH->density(point);                            // analytical value of density
+        double dfExact    = dfHernquist(1, 1, totalEnergy(potH, point));     // f(E) for the Hernquist model
+        double densExact  = potH.density(point);                             // analytical value of density
         double sigmaExact = sigmaHernquist(1, 1, coord::toPosSph(point).r);  // analytical value of sigma^2
         ok &= testDFmoments(galmodH, point, dfExact, densExact, sigmaExact);
     }
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("test_df_halo.dat");
+        strm << "#v       \tf(v_R)    f(v_z)    f(v_phi)\n";
         strm << histograms;
     }
 

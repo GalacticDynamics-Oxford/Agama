@@ -118,7 +118,7 @@ inline int functionWrapperNdimMvalFncDer(
         return GSL_FAILURE;
     }
 }
-    
+
 int functionWrapperNdimMval(const gsl_vector* x, void* param, gsl_vector* f) {
     return functionWrapperNdimMvalFncDer(x, param, f, NULL);
 }

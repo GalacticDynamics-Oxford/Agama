@@ -7,13 +7,14 @@ Its main tasks include:
   - Conversion between position/velocity and action/angle coordinates;
   - Distribution functions;
   - Self-consistent multi-component galaxy models;
-  - Framework for dealing with observational data and selection functions;
   - Framework for finding best-fit parameters of a model from data;
   - Auxiliary utilities (e.g., various mathematical routines).
 
-The core of the library is written in C++, and there are Python and Fortran interfaces.
-It comes with a collection of examples and test programs both in C++ and Python.
+The core of the library is written in C++, and there are Python and Fortran interfaces;
+it may be used as a plugin for other stellar-dynamical software packages:
+galpy, amuse, nemo.
 
-A detailed documentation for the AGAMA library is presented in a separate file docs/readme.pdf,
-and more technical description may be extracted from source files with Doxygen.
+A detailed documentation for the AGAMA library is presented in a separate file doc/reference.pdf,
+and a more technical description may be extracted from source files with Doxygen.
 Instructions for compilation are in the file INSTALL.
+The package also contains collection of examples and test programs both in C++ and Python.

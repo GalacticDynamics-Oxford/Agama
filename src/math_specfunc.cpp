@@ -329,22 +329,20 @@ double lambertW(const double x, bool Wminus1branch) {
     CALL_FUNCTION_OR_NAN( Wminus1branch ? gsl_sf_lambert_Wm1(x) : gsl_sf_lambert_W0(x) )
 }
 
-void solveKepler(double ecc, double phase, double &eta, double &sineta, double &coseta)
+double solveKepler(double ecc, double phase)
 {
-    phase = math::wrapAngle(phase);
-    if(phase==0 || phase==M_PI) {
-        eta    = phase;
-        sineta = 0;
-        coseta = phase==0 ? 1 : -1;
-        return;
+    phase -= 2*M_PI * floor(1/(2*M_PI) * phase);
+    if(phase==0 || phase==M_PI)
+        return phase;
+    double eta, sineta, coseta, deltaeta = 0;
+    // initial approximation
+    if(ecc>0.95 && (phase<0.3 || phase>6.0)) {  // very eccentric orbits near periapsis
+        double phase1 = phase<=M_PI ? phase : phase - 2*M_PI;
+        eta = phase + pow_2(ecc) * (cbrt(6*phase1) - phase1);
+    } else {  // all other cases
+        sincos(phase, sineta, coseta);
+        eta = phase + ecc * sineta / sqrt(1 - ecc * (2*coseta - ecc));
     }
-    if(ecc>0.95 && (phase<0.3 || phase>6.0)) {
-        if(phase>M_PI) phase -= 2*M_PI;
-        eta = phase + pow_2(ecc) * (cbrt(6*phase) - phase);
-    } else
-        eta = phase + ecc * sin(phase) / sqrt(1 - ecc * (2*cos(phase) - ecc));
-    double deltaeta = 0;
-    int niter = 0;
     do {  // Halley's method
         sincos(eta, sineta, coseta);
         double f  = eta - ecc * sineta - phase;
@@ -353,8 +351,10 @@ void solveKepler(double ecc, double phase, double &eta, double &sineta, double &
         // refinement using second derivative (thanks to A.Gurkan)
         deltaeta  = -f / (df + 0.5 * deltaeta * ecc * sineta);
         eta      += deltaeta;
-        niter++;
-    } while(fabs(deltaeta) > 1e-15 && niter<42);
+    } while(fabs(deltaeta) > 1e-5);
+    // since the Halley method converges cubically, a correction < 1e-5 at the current iteration
+    // implies that it would be <~1e-15 at the next iteration, which is beyond the precision limit
+    return eta;
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 #include <cassert>
 
 const bool OUTPUT = utils::verbosityLevel >= utils::VL_VERBOSE;
+const unsigned int MIN_CLOCKS = CLOCKS_PER_SEC/2;  // 0.5 seconds per performance test
 
 bool testCond(bool condition, const char* errorMessage)
 {
@@ -348,7 +349,7 @@ bool testPenalizedSplineDensity()
     const int NNODES  = 49;    // nodes in the estimated density function
     const int NCHECK  = 321;   // points to measure the estimated density
     const double SMOOTHING=.5; // amount of smoothing applied to penalized spline estimate
-    const int NTRIALS = 121;   // number of different realizations of samples
+    const int NTRIALS = 279;   // number of different realizations of samples
     const double XCUT = 3.;    // unequal-mass sampling: for x>XCUT, retain only a subset of
     const int MASSMULT= 1;     // samples with proportionally higher weight each
     std::vector<double> xvalues, weights;  // array of sample points
@@ -606,16 +607,17 @@ const double XMAX1D = 6.2832;
 template<int numDeriv>
 std::string evalSpline(const math::IFunction& fnc)
 {
-    const int NUM_ITER = 100000, NPOINTS = 100;
-    double RATE = 1.0 * NUM_ITER * NPOINTS * CLOCKS_PER_SEC;
+    const int NPOINTS = 100;
     clock_t clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    int iter=0;
+    // run for a fixed wall-clock time (don't check it too often, though), but variable # of iterations
+    for(; iter%1000!=999 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NPOINTS; i++) {
             double x = i * (XMAX1D-XMIN1D) / NPOINTS + XMIN1D, v, d, s;
             fnc.evalDeriv(x, &v, numDeriv>=1 ? &d : NULL, numDeriv>=2 ? &s : NULL);
         }
     }
-    return utils::pp(RATE/(std::clock()-clk), 6);
+    return utils::pp(1.0 * iter * NPOINTS * CLOCKS_PER_SEC / (std::clock()-clk), 6);
 }
 
 bool test1dSpline()
@@ -914,11 +916,11 @@ bool test1dSpline()
 template<int numDeriv>
 std::string evalSpline2d(const math::BaseInterpolator2d& fnc)
 {
-    const int NUM_ITER = 500, NPOINTS = 100;
+    const int NPOINTS = 100;
     const double XMIN = -1.9, XMAX = 2.2, YMIN = -2.1, YMAX = 1.7;
-    double RATE = 1.0 * NUM_ITER * pow_2(NPOINTS+1) * CLOCKS_PER_SEC;
     clock_t clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    int iter=0;
+    for(; iter%100!=99 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NPOINTS; i++) {
             double x = (XMAX-XMIN)*(i*1./NPOINTS)+XMIN;
             for(int j=0; j<=NPOINTS; j++) {
@@ -929,7 +931,7 @@ std::string evalSpline2d(const math::BaseInterpolator2d& fnc)
             }
         }
     }
-    return utils::pp(RATE/(std::clock()-clk), 6);
+    return utils::pp(1.0 * iter * pow_2(NPOINTS+1) * CLOCKS_PER_SEC / (std::clock()-clk), 6);
 }
 
 bool test2dSpline()
@@ -1145,10 +1147,10 @@ bool test3dSpline()
     ok &= sumsqerr_l<0.1 && sumsqerr_c<0.05 && sumsqerr_s<1e-15;
 
     // test performance of various interpolators
-    int NUM_ITER = 200;
-    double RATE = 1.0 * NUM_ITER * pow_3(NNN+1) * CLOCKS_PER_SEC;
+    double RATE = 1.0 * pow_3(NNN+1) * CLOCKS_PER_SEC;
     clock_t clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    int iter=0;
+    for(; iter%10!=9 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NNN; i++) {
             point[0] = i*xval.back()/NNN;
             for(int j=0; j<=NNN; j++) {
@@ -1161,10 +1163,11 @@ bool test3dSpline()
             }
         }
     }
-    std::cout << "Linear interpolator:    " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
+    std::cout << "Linear interpolator:    " + utils::pp(RATE*iter/(std::clock()-clk), 6) + " eval/s\n";
 
     clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    iter=0;
+    for(; iter%10!=9 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NNN; i++) {
             point[0] = i*xval.back()/NNN;
             for(int j=0; j<=NNN; j++) {
@@ -1177,10 +1180,11 @@ bool test3dSpline()
             }
         }
     }
-    std::cout << "Cubic spline:           " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
+    std::cout << "Cubic spline:           " + utils::pp(RATE*iter/(std::clock()-clk), 6) + " eval/s\n";
 
     clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    iter=0;
+    for(; iter%10!=9 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NNN; i++) {
             point[0] = i*xval.back()/NNN;
             for(int j=0; j<=NNN; j++) {
@@ -1192,10 +1196,11 @@ bool test3dSpline()
             }
         }
     }
-    std::cout << "B-spline of degree N=1: " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
+    std::cout << "B-spline of degree N=1: " + utils::pp(RATE*iter/(std::clock()-clk), 6) + " eval/s\n";
 
     clk = std::clock();
-    for(int t=0; t<NUM_ITER; t++) {
+    iter=0;
+    for(; iter%10!=9 || std::clock()-clk < MIN_CLOCKS; iter++) {
         for(int i=0; i<=NNN; i++) {
             point[0] = i*xval.back()/NNN;
             for(int j=0; j<=NNN; j++) {
@@ -1207,7 +1212,7 @@ bool test3dSpline()
             }
         }
     }
-    std::cout << "B-spline of degree N=3: " + utils::pp(RATE/(std::clock()-clk), 6) + " eval/s\n";
+    std::cout << "B-spline of degree N=3: " + utils::pp(RATE*iter/(std::clock()-clk), 6) + " eval/s\n";
 
     return ok;
 }

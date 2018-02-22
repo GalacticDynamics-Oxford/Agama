@@ -15,7 +15,7 @@ namespace galaxymodel{
 /** Base class for all density discretization schemes */
 class BaseTargetDensity: public BaseTarget {
 public:
-    
+
     /// for density targets, only the three coordinates are used, not velocities
     virtual unsigned int numVars() const { return 3; }
 

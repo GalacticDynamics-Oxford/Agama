@@ -1,36 +1,40 @@
 #include "potential_analytic.h"
 #include "potential_composite.h"
 #include "potential_cylspline.h"
-#include "potential_dehnen.h"
 #include "potential_factory.h"
-#include "potential_ferrers.h"
-#include "potential_galpot.h"
-#include "potential_multipole.h"
 #include "potential_utils.h"
 #include "utils.h"
 #include "debug_utils.h"
-#include "math_core.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
 #include <cmath>
 
 const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
-
+const char* err = "\033[1;31m ** \033[0m";
 std::string checkLess(double val, double max, bool &ok)
 {
     if(!(val<max))
         ok = false;
-    return utils::pp(val, 7) + (val<max ? "" : "\033[1;31m ** \033[0m");
+    return utils::pp(val, 7) + (val<max ? "" : err);
 }
 
 bool testPotential(const potential::BasePotential& potential)
 {
     bool ok=true;
     std::cout << "\033[1;33m " << potential.name() << " \033[0m";
-    double val0 = potential.value(coord::PosCar(0,0,0));
+    double val0   = potential.value(coord::PosCar(0,0,0));
+    double valinf = potential.value(coord::PosCar(INFINITY,0,0));
     std::cout << " at origin is "<<val0;
-    ok &= val0==val0;
+    if(val0 != val0) {   // allowed to be -inf, but not NaN
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << ", at r=inf is "<<valinf;
+    if(valinf != valinf) {   // allowed to be infinite, but not NaN
+        ok = false;
+        std::cout << err;
+    }
     double mtot = potential.totalMass();
     double minf = potential.enclosedMass(INFINITY);
     std::cout << "; total mass is "<<mtot<<
@@ -39,8 +43,7 @@ bool testPotential(const potential::BasePotential& potential)
         ", M(r<1) is "<<potential.enclosedMass(1)<<
         ", M(r<10) is "<<potential.enclosedMass(10)<<
         ", M(r<1e9) is "<<potential.enclosedMass(1e9)<<"\n";
-    if(!isZRotSymmetric(potential) ||
-        potential.name() == potential::Logarithmic::myName() )
+    if(!isZRotSymmetric(potential) || potential.name() == potential::Logarithmic::myName())
         // non-axisymmetric or infinite potentials are not amenable for further tests
         return ok;
     // test interpolated potential
@@ -135,9 +138,9 @@ bool testPotential(const potential::BasePotential& potential)
         // only an approximation and not infinitely smooth, thus its interpolated version
         // is not required to be exceedingly accurate
         double tol =
-            potential.name() == potential::Multipole::myName() ? 1e4 :
-            potential.name() == potential::CylSpline::myName() ? 1e2 :
-            potential.name() == potential::CompositeCyl::myName() ? 1e2 : 1.;
+            //potential.name() == potential::Multipole::myName() ? 1e4 :
+            potential.name() == potential::CylSpline   ::myName() ? 5.0 :
+            potential.name() == potential::CompositeCyl::myName() ? 200 : 1.;
         std::cout << "Density-weighted RMS errors"
         ": Phi(r)="     + checkLess(errPhiI, 1e-10 * tol, ok) +
         ", dPhi/dr="    + checkLess(errdPhiI,1e-08 * tol, ok) +
@@ -147,49 +150,13 @@ bool testPotential(const potential::BasePotential& potential)
         ", Rc,int(E)="  + checkLess(errRcI,  1e-09 * tol, ok) +
         ", Rc,root(Lz)="+ checkLess(errRLR,  1e-12,       ok) +
         ", Rc,int(Lz)=" + checkLess(errRLI,  1e-09 * tol, ok) +
-        ", Rm,root(E)=" + checkLess(errRmR,  1e-12,       ok) +
+        ", Rm,root(E)=" + checkLess(errRmR,  2e-12,       ok) +
         ", Rm,int(E)="  + checkLess(errRmI,  1e-09 * tol, ok) + "\n";
     }
     catch(std::exception& e) {
         std::cout << "Cannot create interpolator: "<<e.what()<<"\n";
         ok = false;
     }
-#if 1
-    try{
-        potential::Interpolator2d interp(potential);
-        /*actions::ActionFinderSpherical af(potential);
-        std::ofstream strm;
-        if(output)
-            strm.open((std::string("testr_pot_")+potential.name()).c_str());
-        strm << std::setprecision(15);
-        for(double lr=-16.125; lr<=24.125; lr+=.25) {
-            double r  = pow(2., lr);
-            double Lc = v_circ(potential, r) * r;
-            double E  = potential.value(coord::PosCyl(r, 0, 0)) + 0.5 * pow_2(Lc/r);
-            for(double ll=0; ll<1; ll+=1./128) {
-                double L = Lc * sin(M_PI_2*ll);
-                double Rmin, Rmax, RminI, RmaxI;
-                try{
-                    findPlanarOrbitExtent(potential, E, L, Rmin, Rmax);
-                }
-                catch (std::runtime_error&) {
-                    Rmin=Rmax=NAN;
-                }
-                interp.findPlanarOrbitExtent(E, L, RminI, RmaxI);
-                double Jr=af.Jr(E, L);
-                actions::Actions act = actions::actionsSpherical(potential,
-                    coord::PosVelCyl(Rmax, 0, 0, 0, 0, L/Rmax));
-                strm << E << ' ' << pow_2(L/Lc) << ' ' <<
-                    Rmin/r << ' ' << RminI/r << ' ' << Rmax/r << ' ' << RmaxI/r << ' ' <<
-                    act.Jr/Lc << ' ' << Jr/Lc << '\n'; 
-            }
-            strm<<'\n';
-        }*/
-    }
-    catch(std::exception& e) {
-        std::cout << "Cannot create 2d interpolator: "<<e.what()<<"\n";
-    }
-#endif
     return ok;
 }
 
@@ -249,7 +216,7 @@ const char* test_galpot_params[] = {
 // an extreme case of a spheroid profile with a very steep cusp and slow fall-off
 "0\n"
 "1\n"
-"1e10 0.5 2.4 2.6 1 0\n"
+"1e10 0.5 2.5 2.5 1 0\n"
 };
 
 /*const int numtestpoints=3;
@@ -279,20 +246,24 @@ const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
     {1,3.14159, 2, 0.5, 0.3, 1e-4},   // point almost along z axis, vphi must be small, but vtheta is non-zero
     {0, 2,-1, 0.5, 0,   0  }};  // point at origin with nonzero velocity in R
 
+// save a few keystrokes
+inline void addPot(std::vector<potential::PtrPotential>& pots, const char* params) {
+    pots.push_back(potential::createPotential(utils::KeyValueMap(params))); }
+
 int main() {
     std::vector<potential::PtrPotential> pots;
-    pots.push_back(potential::PtrPotential(new potential::Plummer(10.,5.)));
-    pots.push_back(potential::PtrPotential(new potential::Isochrone(1.,1.)));
-    pots.push_back(potential::PtrPotential(new potential::NFW(10.,10.)));
-    pots.push_back(potential::PtrPotential(new potential::MiyamotoNagai(5.,2.,0.2)));
-    pots.push_back(potential::PtrPotential(new potential::Logarithmic(1.,0.01,.8,.5)));
-    pots.push_back(potential::PtrPotential(new potential::Ferrers(1.,0.9,.7,.5)));
-    pots.push_back(potential::PtrPotential(new potential::Dehnen(2.,1.,1.5,1.,1.)));
-    pots.push_back(potential::CylSpline::create(potential::DiskDensity(
-        potential::DiskParam(1., 2., -0.2, 0, 0)), 0, 20, 0.1, 500, 20, 0.01, 50));
+    addPot(pots, "type=Plummer, mass=10, scaleRadius=5");
+    addPot(pots, "type=Isochrone, mass=1, scaleRadius=");
+    addPot(pots, "type=NFW, mass=10, scaleRadius=10");
+    addPot(pots, "type=MiyamotoNagai, mass=5, scaleRadius=2, scaleHeight=0.2");
+    addPot(pots, "type=Logarithmic, mass=1, scaleRadius=0.01, p=0.8, q=0.5");
+    addPot(pots, "type=Ferrers, mass=1, scaleRadius=0.9, p=0.8, q=0.5");
+    addPot(pots, "type=Dehnen, mass=2, scaleRadius=1, gamma=1.5");
+    addPot(pots, "density=Disk, surfaceDensity=1, scaleRadius=2, scaleHeight=-0.2, "
+        "type=CylSpline, gridSizeR=20, rmin=0.1, rmax=500, gridSizeZ=20, zmin=0.01, zmax=50");
     pots.push_back(make_galpot(test_galpot_params[0]));
     pots.push_back(make_galpot(test_galpot_params[1]));
-    pots.push_back(make_galpot(test_galpot_params[2]));
+    //pots.push_back(make_galpot(test_galpot_params[2]));
     bool allok=true;
     std::cout << std::setprecision(10);
     for(unsigned int ip=0; ip<pots.size(); ip++) {

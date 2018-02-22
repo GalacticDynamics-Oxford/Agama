@@ -122,7 +122,7 @@ public:
 
     virtual const char* name() const;
     virtual std::string coefName(unsigned int index) const;
-    
+
     /// return the total number of points in the flattened datacube
     virtual unsigned int numValues() const {
         return bsplx.numValues() * bsply.numValues() * bsplv.numValues();

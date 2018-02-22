@@ -258,7 +258,8 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
             LogRhoOfLogH(density, phasevol, potential), EPSDER2);
     } else {              // input grid in h was provided
         gridlogh.resize(gridh.size());
-        std::transform(gridh.begin(), gridh.end(), gridlogh.begin(), log);
+        for(size_t i=0; i<gridh.size(); i++)
+            gridlogh[i] = log(gridh[i]);
     }
 
     // 2b. store the values of h, Phi and rho at the nodes of a grid
@@ -285,9 +286,10 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
     unsigned int gridsize = gridlogh.size();
     if(gridsize < 3)
         throw std::runtime_error("makeEddingtonDF: invalid grid size");
-    gridf.resize(gridsize);   // f(h_i) = int_{h[i]}^{infinity}    
+    gridf.resize(gridsize);   // f(h_i) = int_{h[i]}^{infinity}
     gridh.resize(gridsize);
-    std::transform(gridlogh.begin(), gridlogh.end(), gridh.begin(), exp);
+    for(size_t i=0; i<gridsize; i++)
+        gridh[i] = exp(gridlogh[i]);
 
     // 3. construct a spline for log(rho) as a function of log(h),
     // optionally with an asymptotic expansion in the case of a constant-density core
@@ -331,9 +333,8 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
         // do nothing (keep f=0) in case of arithmetic overflow (outer slope too steep)
     }
 
-    // 4b. prepare integration tables
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    // 4b. use pre-computed integration tables
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
 
     // 4c. integrate from logh[i-1] to logh[i] for all i=1..gridsize-1
     for(unsigned int i=gridsize-1; i>0; i--)
@@ -494,7 +495,7 @@ math::LogLogSpline fitSphericalDF(
     // the derivatives provided to LogLogSpline are df/dh = (f/h) d[log f] / d[log h]
     derLeft  = derLeft  * gridf.front() / gridh.front();
     derRight = derRight * gridf.back () / gridh.back ();
-    
+
     // 5. construct an interpolating spline that matches exactly our fitfnc (it's also a cubic spline
     // in the same scaled variables), including the correct slopes for extrapolation outside the grid
     return math::LogLogSpline(gridh, gridf, derLeft, derRight);
@@ -591,8 +592,7 @@ std::vector<double> computeDensity(const math::IFunction& df, const potential::P
     if(gridVelDisp)
         gridVelDisp->assign(gridsize, 0);
     // assuming that the grid in Phi is sufficiently dense, use a fixed-order quadrature on each segment
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
     for(unsigned int i=0; i<gridsize; i++) {
         double deltaPhi = (i<gridsize-1 ? gridPhi[i+1] : 0) - gridPhi[i];
         if(deltaPhi<=0)
@@ -633,8 +633,7 @@ void computeProjectedDensity(const math::IFunction& dens, const math::IFunction&
     gridProjDensity.assign(gridsize, 0);
     gridProjVelDisp.assign(gridsize, 0);
     // assuming that the grid in R is sufficiently dense, use a fixed-order quadrature on each segment
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
     for(unsigned int i=0; i<gridsize; i++) {
         bool last = i==gridsize-1;
         double deltar = last ? gridR[i] : gridR[i+1]-gridR[i];
@@ -673,11 +672,14 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in log[h(Phi)] if it wasn't provided
-    std::vector<double> gridLogH(gridh.size());
+    std::vector<double> gridLogH;
     if(gridh.empty())
         gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
-    else
-        std::transform(gridh.begin(), gridh.end(), gridLogH.begin(), log);
+    else {
+        gridLogH.resize(gridh.size());
+        for(size_t i=0; i<gridh.size(); i++)
+            gridLogH[i] = log(gridh[i]);
+    }
     const unsigned int npoints = gridLogH.size();
 
     // 2. store the values of f, g, h at grid nodes (ensure to consider only positive values of f)
@@ -760,9 +762,8 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
     // \int f(E) g(E) E dE = \int f(h) E h d(log h)          [total energy]
 
     // 4a. integrate over all interior segments
-    double glnodes1[GLORDER1], glweights1[GLORDER1], glnodes2[GLORDER2], glweights2[GLORDER2];
-    math::prepareIntegrationTableGL(0, 1, GLORDER1, glnodes1, glweights1);
-    math::prepareIntegrationTableGL(0, 1, GLORDER2, glnodes2, glweights2);
+    const double *glnodes1 = math::GLPOINTS[GLORDER1], *glweights1 = math::GLWEIGHTS[GLORDER1];
+    const double *glnodes2 = math::GLPOINTS[GLORDER2], *glweights2 = math::GLWEIGHTS[GLORDER2];
     for(unsigned int i=1; i<npoints; i++) {
         double dlogh = gridLogH[i]-gridLogH[i-1];
         // choose a higher-order quadrature rule for longer grid segments
@@ -806,7 +807,7 @@ SphericalModel::SphericalModel(const potential::PhaseVolume& _phasevol, const ma
     gridFEint[0] = gridF[0] * gridH[0] * (innerEslope >= 0 ?
         -Phi0   / (1 + innerFslope) :
         -innerE / (1 + innerFslope + innerEslope) );
-    
+
     for(unsigned int i=1; i<npoints; i++) {
         gridFGint[i] += gridFGint[i-1];
         gridFHint[i] += gridFHint[i-1];
@@ -914,11 +915,14 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in X = log[h(Phi)] and Y = log[h(E)/h(Phi)]
-    std::vector<double> gridLogH(gridh.size());
+    std::vector<double> gridLogH;
     if(gridh.empty())
         gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
-    else
-        std::transform(gridh.begin(), gridh.end(), gridLogH.begin(), log);
+    else {
+        gridLogH.resize(gridh.size());
+        for(size_t i=0; i<gridh.size(); i++)
+            gridLogH[i] = log(gridh[i]);
+    }
     while(!gridLogH.empty() && df(exp(gridLogH.back())) <= MIN_VALUE_ROUNDOFF)  // ensure that f(hmax)>0
         gridLogH.pop_back();
     if(gridLogH.size() < 3)
@@ -940,7 +944,7 @@ void SphericalModelLocal::init(const math::IFunction& df, const std::vector<doub
     } else {
         outerFslope = log(df(outerH) / df(exp(gridLogH[npoints-2]))) /
             (gridLogH[npoints-1] - gridLogH[npoints-2]);
-    }    
+    }
     if(!(outerFslope < -1))  // in this case SphericalModel would have already thrown the same exception
         throw std::runtime_error("SphericalModelLocal: f(h) falls off too slowly as h-->infinity");
     double outerEslope = outerH / outerG / outerE;
@@ -1183,8 +1187,7 @@ double difCoefLosscone(const SphericalModel& model, const math::IFunction& pot, 
     double result = 2./3 * dgdh * model.I0(h);
     // (b)  the remaining terms need to be integrated numerically;
     // we use a fixed-order GL quadrature for both nested integrals
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
     for(int ir=0; ir<GLORDER; ir++) {
         // the outermost integral in scaled radial variable:  r/rmax 
         double r = glnodes[ir] * rmax, Phi = pot(r);
@@ -1239,7 +1242,8 @@ void writeSphericalModel(const std::string& fileName, const std::string& header,
         // estimate the range of log(h) where the DF varies considerably
         std::vector<double> gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), EPSDER2);
         gridH.resize(gridLogH.size());
-        std::transform (gridLogH.begin(), gridLogH.end(), gridH.begin(), exp);
+        for(size_t i=0; i<gridLogH.size(); i++)
+            gridH[i] = exp(gridLogH[i]);
     } else if(gridh.size()<2)
         throw std::runtime_error("writeSphericalModel: gridh is too small");
 
@@ -1282,8 +1286,7 @@ void writeSphericalModel(const std::string& fileName, const std::string& header,
     double Mbh = fabs(slope + 1.) < 1e-3 ? -coef : 0;
 
     // prepare for integrating the density in radius to obtain enclosed mass
-    double glnodes[GLORDER], glweights[GLORDER];
-    math::prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
     double Mcumul = 0;
 
     // print the header and the first line for r=0 (commented out)

@@ -291,7 +291,7 @@ public:
     DFIntegrandAtPoint(const GalaxyModel& _model, const coord::PosCyl& _point, OperationMode _mode) :
         model(_model), numCompDF(model.distrFunc.numValues()),
         point(_point), mode(_mode),
-        numOutVal(1 + (mode&OP_VEL1MOM ? 3 : 0) + (mode&OP_VEL2MOM ? 6 : 0))
+        numOutVal(1 + (mode&OP_VEL1MOM ? 1 : 0) + (mode&OP_VEL2MOM ? 6 : 0))
     {
         getVesc(point, model.potential, vesc, zeta);
     }
@@ -322,9 +322,7 @@ public:
             values[ic]   = dfval;
             unsigned int im=1;      // index of the output moment, increases with each stored value
             if(mode & OP_VEL1MOM) {
-                values[ic + numCompDF * (im++)] = dfval * posvel.vR;
-                values[ic + numCompDF * (im++)] = dfval * posvel.vz;
-                values[ic + numCompDF * (im++)] = dfval * posvel.vphi;
+                values[ic + numCompDF * (im++)] = dfval * posvel.vphi;  // only <v_phi> may be nonzero
             }
             if(mode & OP_VEL2MOM) {
                 values[ic + numCompDF * (im++)] = dfval * posvel.vR * posvel.vR;
@@ -483,8 +481,8 @@ std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bsp
 //------- DRIVER ROUTINES -------//
 
 void computeMoments(const GalaxyModel& model, const coord::PosCyl& point,
-    double* density, coord::VelCyl* velocityFirstMoment, coord::Vel2Cyl* velocitySecondMoment,
-    double* densityErr, coord::VelCyl* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr,
+    double* density,    double* velocityFirstMoment,    coord::Vel2Cyl* velocitySecondMoment,
+    double* densityErr, double* velocityFirstMomentErr, coord::Vel2Cyl* velocitySecondMomentErr,
     const double reqRelError, const int maxNumEval)
 {
     OperationMode mode = static_cast<OperationMode>(
@@ -510,23 +508,13 @@ void computeMoments(const GalaxyModel& model, const coord::PosCyl& point,
         double densVal = result[ic], densRelErr2 = pow_2(error[ic]/result[ic]);
         unsigned int im=1;  // index of the computed moment in the results array
         if(velocityFirstMoment!=NULL) {
-            velocityFirstMoment[ic] = densVal==0 ? coord::VelCyl(0,0,0) : coord::VelCyl(
-                result[ic + (im+0)*numCompDF] / densVal,
-                result[ic + (im+1)*numCompDF] / densVal,
-                result[ic + (im+2)*numCompDF] / densVal);
+            velocityFirstMoment[ic] = densVal==0 ? 0 : result[ic + im*numCompDF] / densVal;
             if(velocityFirstMomentErr!=NULL) {
                 // relative errors in moments are summed in quadrature from errors in rho and rho*v
-                velocityFirstMomentErr[ic].vR =
-                    fabs(velocityFirstMoment[ic].vR) * sqrt(densRelErr2 +
-                    pow_2(error[ic + (im+0)*numCompDF] / result[ic + (im+0)*numCompDF]) );
-                velocityFirstMomentErr[ic].vz =
-                    fabs(velocityFirstMoment[ic].vz) * sqrt(densRelErr2 +
-                    pow_2(error[ic + (im+1)*numCompDF] / result[ic + (im+1)*numCompDF]) );
-                velocityFirstMomentErr[ic].vphi =
-                    fabs(velocityFirstMoment[ic].vphi) * sqrt(densRelErr2 +
-                    pow_2(error[ic + (im+2)*numCompDF] / result[ic + (im+2)*numCompDF]) );
+                velocityFirstMomentErr[ic] = fabs(velocityFirstMoment[ic]) *
+                    sqrt(densRelErr2 + pow_2(error[ic + im*numCompDF] / result[ic + im*numCompDF]) );
             }
-            im+=3;
+            im++;
         }
         if(velocitySecondMoment!=NULL) {
             velocitySecondMoment[ic].vR2    = densVal ? result[ic + (im+0)*numCompDF] / densVal : 0;
@@ -719,7 +707,7 @@ particles::ParticleArrayCyl samplePosVel(
 particles::ParticleArray<coord::PosCyl> sampleDensity(
     const potential::BaseDensity& dens, const size_t numPoints)
 {
-    potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);  
+    potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);
     math::Matrix<double> result;      // sampled scaled coordinates
     double totalMass, errorMass;      // total mass and its estimated error
     double xlower[3] = {0,0,0};       // boundaries of sampling region in scaled coordinates

@@ -289,7 +289,7 @@ double OdeSolverDOP853::doStep(double dt)
                     b10*k10[i] + b11*k11[i] + b12*k12[i];
             xt[i] = x[i] + timeStep * k13[i];
         }
-        
+
         // error estimation
         double err5 = 0.0, err3 = 0.0;
         for(int i=0; i<NDIM; i++) {
@@ -350,7 +350,7 @@ double OdeSolverDOP853::doStep(double dt)
     *rcont5 = rcont4 + NDIM,
     *rcont6 = rcont5 + NDIM,
     *rcont7 = rcont6 + NDIM,
-    *rcont8 = rcont7 + NDIM;            
+    *rcont8 = rcont7 + NDIM;
     for(int i=0; i<NDIM; i++) {
         rcont1[i] = x[i];
         double xd = xt[i] - x[i];   // x(t+dt) - x(t)

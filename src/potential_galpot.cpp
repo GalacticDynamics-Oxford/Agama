@@ -1,25 +1,23 @@
 /*
-Copyright Walter Dehnen, 1996-2004 
-e-mail:   walter.dehnen@astro.le.ac.uk 
-address:  Department of Physics and Astronomy, University of Leicester 
-          University Road, Leicester LE1 7RH, United Kingdom 
+This is a new implementation of GalPot written by Eugene Vasiliev, 2015-2017.
 
-------------------------------------------------------------------------
-Version 0.0    15. July      1997 
-Version 0.1    24. March     1998 
-Version 0.2    22. September 1998 
-Version 0.3    07. June      2001 
-Version 0.4    22. April     2002 
-Version 0.5    05. December  2002 
-Version 0.6    05. February  2003 
+The original GalPot code:
+Copyright Walter Dehnen, 1996-2004
+e-mail:   walter.dehnen@astro.le.ac.uk
+address:  Department of Physics and Astronomy, University of Leicester
+          University Road, Leicester LE1 7RH, United Kingdom
+
+Version 0.0    15. July      1997
+Version 0.1    24. March     1998
+Version 0.2    22. September 1998
+Version 0.3    07. June      2001
+Version 0.4    22. April     2002
+Version 0.5    05. December  2002
+Version 0.6    05. February  2003
 Version 0.7    23. September 2004
 Version 0.8    24. June      2005
-
-----------------------------------------------------------------------
-Modifications by Eugene Vasiliev, 2015-2017
-(so extensive that almost nothing of the original code remains)
-
 */
+
 #include "potential_galpot.h"
 #include "math_core.h"
 #include "math_specfunc.h"
@@ -71,7 +69,7 @@ private:
     const double surfaceDensity, invScaleRadius, innerCutoffRadius, modulationAmplitude, invSersicIndex;
     /**  evaluate  f(R) and optionally its two derivatives, if these arguments are not NULL  */
     virtual void evalDeriv(double R, double* f=NULL, double* fprime=NULL, double* fpprime=NULL) const {
-        if(innerCutoffRadius && R==0.) {
+        if((innerCutoffRadius && R==0.) || R==INFINITY) {
             if(f) *f=0;
             if(fprime)  *fprime=0;
             if(fpprime) *fpprime=0;
@@ -94,7 +92,7 @@ private:
                 0;  // if val==0, the bracket could be NaN
         if(fprime)
             *fprime  = val ? fp*val : 0;
-        if(f) 
+        if(f)
             *f = val;
     }
     virtual unsigned int numDerivs() const { return 2; }
@@ -259,9 +257,9 @@ namespace {  // internal
 /** integrand for computing the total mass:  4pi r^2 rho(r) */
 class SpheroidDensityIntegrand: public math::IFunctionNoDeriv {
 public:
-    SpheroidDensityIntegrand(const SphrParam& _params): params(_params) {};
+    SpheroidDensityIntegrand(const SpheroidParam& _params): params(_params) {};
 private:
-    const SphrParam params;
+    const SpheroidParam params;
     virtual double value(double x) const {
         double rrel = exp( 1/(1-x) - 1/x );
         double result = 
@@ -275,9 +273,9 @@ private:
 
 /** one-dimensional density profile described by a double-power-law model with an exponential cutoff */
 class SpheroidDensityFnc: public math::IFunctionNoDeriv{
-    const SphrParam params;
+    const SpheroidParam params;
 public:
-    SpheroidDensityFnc(const SphrParam _params): params(_params) {}
+    SpheroidDensityFnc(const SpheroidParam _params): params(_params) {}
     virtual double value(const double r) const
     {
         double  r0 = r/params.scaleRadius;
@@ -318,7 +316,7 @@ public:
 
 }  // internal ns
 
-double SphrParam::mass() const
+double SpheroidParam::mass() const
 {
     if(beta<=3 && outerCutoffRadius==0)
         return INFINITY;
@@ -339,7 +337,7 @@ double SersicParam::mass() const {
         sersicIndex * math::gamma(2*sersicIndex) * pow(b(), -2*sersicIndex);
 }
 
-math::PtrFunction createSpheroidDensity(const SphrParam& params)
+math::PtrFunction createSpheroidDensity(const SpheroidParam& params)
 {
     if(params.scaleRadius<=0)
         throw std::invalid_argument("Spheroid scale radius must be positive");
@@ -360,11 +358,11 @@ math::PtrFunction createSpheroidDensity(const SphrParam& params)
         throw std::invalid_argument("Spheroid cutoff strength must be positive");
     return math::PtrFunction(new SpheroidDensityFnc(params));
 }
-    
+
 math::PtrFunction createSersicDensity(const SersicParam& params)
 {
     double b = params.b(), n = params.sersicIndex;
-    if(!(n>0) || !isFinite(b))
+    if(!(n>=0.5) || !isFinite(b))
         throw std::invalid_argument("Sersic index n should be larger than 0.5");
     if(params.scaleRadius <= 0)
         throw std::invalid_argument("Sersic scale radius must be positive");

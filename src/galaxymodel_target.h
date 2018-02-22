@@ -87,7 +87,7 @@ public:
         should be an existing chunk of memory with size numCoefs() * df.numValues()
     */
     virtual void computeDFProjection(const GalaxyModel& /*model*/, StorageNumT* /*output*/) const {}
-    
+
     /// compute the projections of the density onto all basis elements of the grid
     virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const = 0;
 };

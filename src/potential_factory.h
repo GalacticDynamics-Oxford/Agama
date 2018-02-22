@@ -70,7 +70,7 @@ PtrPotential createPotential(
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument if the requested potential is not of an expansion type,
     or any potential-specific exception on failure (if some parameters are missing or invalid).
-*/    
+*/
 PtrPotential createPotential(
     const utils::KeyValueMap& params, const BasePotential& pot,
     const units::ExternalUnits& converter = units::ExternalUnits());

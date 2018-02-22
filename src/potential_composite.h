@@ -34,9 +34,9 @@ private:
 /** A trivial collection of several potential objects, evaluated in cylindrical coordinates */
 class CompositeCyl: public BasePotentialCyl{
 public:
-    /** construct from the provided array of components */ 
+    /** construct from the provided array of components */
     CompositeCyl(const std::vector<PtrPotential>& _components);
-    
+
     /** provides the 'least common denominator' for the symmetry degree */
     virtual coord::SymmetryType symmetry() const;
 

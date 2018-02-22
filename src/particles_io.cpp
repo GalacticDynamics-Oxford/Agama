@@ -244,10 +244,10 @@ public:
         putVal("CoordSystem", COORDSYS);
         putArray("Mass", 1, &inbody, &mass[0]);
         if(noVel) {
-            int tmp_dim[2] = {nbody, 3};
+            int tmp_dim[2] = {inbody, 3};
             putArray("Position", 2, tmp_dim, &phase[0]);
         } else {
-            int tmp_dim[3] = {nbody, 2, 3};
+            int tmp_dim[3] = {inbody, 2, 3};
             putArray("PhaseSpace", 3, tmp_dim, &phase[0]);
         }
         endLevel();

@@ -39,14 +39,14 @@ class IOde2System {
 public:
     IOde2System() {};
     virtual ~IOde2System() {};
-    
+
     /** Compute the matrix c in the r.h.s. of the differential equation: 
         \param[in]  t    is the integration variable (time),
         \param[out] mat  should point to an existing array of length N^2,
         which will be filled with the flattened (row-major) matrix c: mat[i*N+j] = c_{ij}
     */
     virtual void eval(double t, double mat[]) const = 0;
-    
+
     /** Return the size of ODE system (2N variables - vectors x and dx/dt) */
     virtual unsigned int size() const = 0;
 };
@@ -102,7 +102,7 @@ public:
         accRel(_accRel), accAbs(_accAbs),
         timePrev(0), nextTimeStep(0),
         state(NDIM * 10)  // storage for the current values and derivs of x and for 8 interpolation coefs
-    {}    
+    {}
     virtual void init(const double stateNew[]);
     virtual double doStep(double dt = 0);
     virtual double getSol(double t, unsigned int ind) const;

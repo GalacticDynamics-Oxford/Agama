@@ -1,18 +1,17 @@
+#include "galaxymodel_base.h"
+#include "math_sphharm.h"
+#include "math_spline.h"
+#include "particles_io.h"
 #include "potential_analytic.h"
 #include "potential_dehnen.h"
 #include "potential_cylspline.h"
-#include "potential_multipole.h"
-#include "potential_sphharm.h"
 #include "potential_factory.h"
 #include "potential_galpot.h"
-#include "galaxymodel_base.h"
-#include "particles_io.h"
-#include "debug_utils.h"
+#include "potential_multipole.h"
 #include "utils.h"
 #include "utils_config.h"
-#include "math_sphharm.h"
+#include "debug_utils.h"
 #include <iostream>
-#include <iomanip>
 #include <fstream>
 #include <cstdlib>
 #include <cstdio>
@@ -52,30 +51,15 @@ PtrPotential createFromFile(
 {
     const std::string fileName = "test_potential_expansions.txt";
     writeSnapshot(fileName, points, "Text");
-    PtrPotential newpot;
-
-    // illustrates two possible ways of creating a potential from points
-    if(potType == "BasisSetExp") {
-        particles::ParticleArrayCar pts = particles::readSnapshot(fileName);
-        newpot = PtrPotential(new potential::BasisSetExp(
-            1.0, /*alpha*/
-            20,  /*numCoefsRadial*/
-            6,   /*numCoefsAngular*/
-            pts, /*points*/
-            coord::ST_DEFAULT));  /*symmetry (default value)*/
-    } else {
-        // a rather lengthy way of setting parameters, used only for illustration:
-        // normally these would be read from an INI file or from command line;
-        // to create an instance of potential expansion of a known type,
-        // use directly its constructor as shown above
-        utils::KeyValueMap params;
-        params.set("file", fileName);
-        params.set("type", potType);
-        params.set("gridSizeR", 20);
-        params.set("gridSizeZ", 20);
-        params.set("lmax", 6);
-        newpot = potential::createPotential(params);
-    }
+    // a rather lengthy way of setting parameters, used only for illustration:
+    // normally these would be read from an INI file or from command line
+    utils::KeyValueMap params;
+    params.set("file", fileName);
+    params.set("type", potType);
+    params.set("gridSizeR", 20);
+    params.set("gridSizeZ", 20);
+    params.set("lmax", 6);
+    PtrPotential newpot = potential::createPotential(params);
     std::remove(fileName.c_str());
     std::remove((fileName+potential::getCoefFileExtension(potType)).c_str());
     return newpot;
@@ -189,7 +173,7 @@ bool testDensSH()
     // check that the two sets of coefs are identical at equal radii
     for(unsigned int c=0; c<coefs2.size(); c++)
         for(unsigned int k=0; k<radii1.size(); k++) {
-            if(c<coefs1.size() && fabs(coefs1[c][k] - coefs2[c][k*2]) > 1e-12) {
+            if(c<coefs1.size() && fabs(coefs1[c][k] - coefs2[c][k*2]) > 1e-13) {
                 std::cout << "r=" << radii1[k]      << ", C1["<<c<<"]=" <<
                 utils::toString(coefs1[c][k  ], 15) << ", C2["<<c<<"]=" <<
                 utils::toString(coefs2[c][k*2], 15) << "\033[1;31m **\033[0m\n";
@@ -311,29 +295,6 @@ bool testBlob(const potential::BaseDensity& approx, const DensityBlob& blob)
 }
 
 int main() {
-#if 0
-    for(unsigned int m=0; m<=12; m++) {
-    double dd=math::powInt(0.5,14);
-    double sum=0, sumd, max=0, maxd=0;
-    std::ofstream ff(("appr"+utils::toString(m)).c_str());
-    ff << std::setprecision(15);
-    for(double x=dd; x<1; x+=dd) {
-        double der1, der2, val2;
-        double val1 = math::legendreQ(m-0.5, 1/sqrt(x), &der1);
-        try{ val2 = math::legendreQ(m-0.500000000000001, 1/sqrt(x), &der2); }
-        catch(...) { val2=val1; der2=der1; }
-        if(fabs(der2)>1e8) { val2=val1; der2=der1; } // overflow
-        ff << x << ", "<<val1 << ", " << (val2-val1) << "; " << der1 << ", " << (der2-der1) << "\n";
-        sum += pow_2(val2-val1)/pow_2(val1);
-        sumd+= pow_2(der2-der1)/pow_2(der1);
-        max = fmax(max, fabs((val2-val1)/val1));
-        maxd= fmax(maxd,fabs((der2-der1)/der1));
-    }
-    ff.close();
-    std::cout << "m="<<m<<": rel.error in fnc="<<sqrt(sum*dd)<<" (max="<<max<<
-    "), in deriv="<<sqrt(sumd*dd)<<" (max="<<maxd<<")\n";
-    }
-#endif
     bool ok=true;
 
     // 1. check the correctness and reversibility of math::SphHarmTransform
@@ -437,15 +398,11 @@ int main() {
 
     // spherical, cored
     std::cout << "--- Spherical Dehnen gamma=0 ---\n";
-    const potential::BasisSetExp test1b(0., 30, 0, test1_Dehnen0Sph);
-    const potential::SplineExp test1s(20, 0, test1_Dehnen0Sph);
     PtrPotential test1c = potential::CylSpline::create(
         // this forces potential to be computed via integration of density over volume
         static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 20, 0., 0., 20, 0., 0.);
     PtrPotential test1m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 0, 20);
-    ok &= testAverageError( test1b, test1_Dehnen0Sph, 0.2);
-    ok &= testAverageError( test1s, test1_Dehnen0Sph, 0.02);
     ok &= testAverageError(*test1m, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1c, test1_Dehnen0Sph, 0.02);
 
@@ -453,8 +410,6 @@ int main() {
     std::cout << "--- Triaxial Dehnen gamma=0 ---\n";
     PtrPotential test2m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 8, 6, 20);
-//    const potential::BasisSetExp test2b(1., 20, 8, test2_Dehnen0Tri);
-    const potential::SplineExp test2s(20, 8, test2_Dehnen0Tri);
     clock_t clock = std::clock();
     PtrPotential test2c = potential::CylSpline::create(  // from density via integration
         static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 6, 20, 0., 0., 20, 0., 0.);
@@ -462,8 +417,6 @@ int main() {
     PtrPotential test2d = potential::CylSpline::create(  // directly from potential
         test2_Dehnen0Tri, 6, 20, 0., 0., 20, 0., 0.);
     PtrPotential test2c_clone = writeRead(*test2c);
-//    ok &= testAverageError( test2b, test2_Dehnen0Tri, 0.5);
-    ok &= testAverageError( test2s, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
@@ -471,13 +424,9 @@ int main() {
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
-//    const potential::BasisSetExp test3b(2., 20, 6, test3_Dehnen15Tri);
-    const potential::SplineExp test3s(20, 6, test3_Dehnen15Tri);
     PtrPotential test3m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test3_Dehnen15Tri), 6, 6, 20);
     PtrPotential test3m_clone = writeRead(*test3m);
-//    ok &= testAverageError( test3b, test3_Dehnen15Tri, 0.5);
-    ok &= testAverageError( test3s, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, *test3m_clone, 1e-9);
 
@@ -492,15 +441,7 @@ int main() {
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";
     PtrPotential test6c = potential::CylSpline::create(test6_points,
         coord::ST_TRIAXIAL, 6, 20, 0., 0., 20, 0., 0.);
-    PtrPotential test6b = createFromFile(test6_points, potential::BasisSetExp::myName());
-    // could also use createFromFile(test6_points, "SplineExp");  below
-    PtrPotential test6s(new potential::SplineExp(20, 6, test6_points, coord::ST_TRIAXIAL));
     PtrPotential test6m = potential::Multipole::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
-    //writeDensity("do", *potential::DensitySphericalHarmonic::create(test6_Dehnen1Tri, 6, 6, 100, 1e-3, 5e3));
-    //writeDensity("dm", *potential::DensitySphericalHarmonic::create(*test6m, 6, 6, 100, 1e-3, 5e3));
-    //writeDensity("ds", *potential::DensitySphericalHarmonic::create(*test6s, 6, 6, 100, 1e-3, 5e3));
-    ok &= testAverageError(*test6b, test6_Dehnen05Tri, 1.5);
-    ok &= testAverageError(*test6s, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6m, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.5);
 

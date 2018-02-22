@@ -10,7 +10,6 @@
 *******************************************************************************/
 
 #include "Toy_Isochrone.h"
-#include "WD_Numerics.h"
 #include <cmath>
 
 namespace torus{
@@ -683,7 +682,7 @@ PSPT ToyIsochrone::Forward3D(const PSPT& JT3) const
     QP3[2] = (QP3(5)>0.)? JT3(5)+wh-wt0r*JT3(3) : JT3(5)-wh+wt0r*JT3(3);
     if(std::isnan(QP3[2]) || std::isinf(QP3[2]) || fabs(QP3[2])>INT_MAX) 
       QP3[2] = 0.; // just in case  
-      QP3[2] = math::wrapAngle(QP3(2));
+    QP3[2] = math::wrapAngle(QP3(2));
     return QP3;
   }
 
@@ -696,7 +695,7 @@ PSPT ToyIsochrone::Forward3D(const PSPT& JT3) const
   QP3[2] -= (JT3(2)>0.)? JT3(4) : -JT3(4); // Note opposite sign to Backward
   if(std::isnan(QP3[2]) || std::isinf(QP3[2]) || fabs(QP3[2])>INT_MAX) 
     QP3[2] = 0.; // just in case  
-    QP3[2] = math::wrapAngle(QP3(2));
+  QP3[2] = math::wrapAngle(QP3(2));
 
   return QP3;
 }

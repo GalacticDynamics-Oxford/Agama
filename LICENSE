@@ -1,0 +1,21 @@
+The Agama library uses routines from GSL and is therefore available
+under the GNU GPL license.
+However, the original source code of Agama itself is not subject to GPL
+and is provided under the less restrictive BSD or MIT licenses.
+The library also includes fragments of the following third-party codes:
+Cubature by Steven G. Johnson, available under GPL3
+(alternatively it can be compiled using the Cuba library by T. Hahn,
+which is distributed under LGPL);
+a somewhat modified version of TorusMapper by P. McMillan, distributed
+under MIT license (we do not include the GalPot part of the original code);
+a heavily modified version of DOP853 by E. Hairer, which is available under
+the following free license: http://www.unige.ch/~hairer/prog/licence.txt
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the author be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+and to alter it and redistribute it freely. Acknowledgement of the
+original author is appreciated.
+

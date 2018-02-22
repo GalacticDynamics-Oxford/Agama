@@ -70,7 +70,7 @@ struct FokkerPlanckParams {
 
     /** lower and upper boundaries of the grid; 0 means autodetect. */
     double hmin, hmax;
-    
+
     /** outer radius of grid (if provided, overrides the value of hmax) */
     double rmax;
 
@@ -147,7 +147,7 @@ public:
     */
     FokkerPlanckSolver(const FokkerPlanckParams& params,
         const std::vector<FokkerPlanckComponent>& components);
-    
+
     /** evolve the DF using the Fokker-Planck equation for a time deltat,
         followed by recomputation of the potential (if required) and the relaxation coefficients;
         return the maximum relative change of f across the grid |log(f_new/f_old)|. */
@@ -170,7 +170,7 @@ public:
 
     /// return the estimate of the shortest relaxation time across the grid
     double relaxationTime() const;
-    
+
     /// return mass of the central black hole (BH) which contributes to the total potential; 
     /// it may change internally in the course of evolution due to accretion of stars
     double Mbh() const;
@@ -195,15 +195,15 @@ private:
 
     /// opaque internal implementation of the discretization scheme
     shared_ptr<const FokkerPlanckImpl> impl;
-    
+
     /** Recompute the potential and the phase volume mapping (h <-> E)
         by first computing the density by integrating the DF over velocity,
         and then solving the Poisson equation (adding the central black hole if present). */
     void reinitPotential(double deltat);
-    
+
     /** Update the advection and diffusion coefficients using the current DFs of all components */
     void reinitAdvDifCoefs();
-    
+
 };
 
 }  // namespace

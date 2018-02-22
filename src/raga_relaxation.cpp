@@ -84,23 +84,27 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
 
 namespace{  // internal
 
-/// modified log-log spline with a restriction on the inner slope:
+/// modified log-log spline with a restriction on the inner and outer slopes
 class CautiousLogLogSpline: public math::IFunction {
     /// spline in log-log-scaled coordinates
     math::LogLogSpline spl;
-    /// innermost grid point, corresponding function value and inner slope for extrapolation
-    double xmin, sval, slope;
+    /// inner- and outermost grid points, corresponding function values and slopes for extrapolation
+    double xin, xout, fin, fout, slopein, slopeout;
 public:
     CautiousLogLogSpline(const math::LogLogSpline& S, double minslope) :
-        spl(S), xmin(spl.xmin())
+        spl(S), xin(spl.xmin()), xout(spl.xmax())
     {
-        spl.evalDeriv(xmin, &sval, &slope);
-        slope *= xmin / sval;
-        if(!(slope >= minslope)) {
+        spl.evalDeriv(xin, &fin, &slopein);
+        slopein *= xin / fin;
+        if(!(slopein >= minslope)) {
             utils::msg(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of f(h) "
-                "from "+utils::toString(slope)+" to "+utils::toString(minslope)+" to keep Etotal finite");
-            slope = minslope;
+                "from "+utils::toString(slopein)+" to "+utils::toString(minslope)+
+                " to keep Etotal finite");
+            slopein = minslope;
         }
+        // outer slope must be steeper than -1 to keep the total mass finite
+        spl.evalDeriv(xout, &fout, &slopeout);
+        slopeout = fmin(slopeout * xout / fout, -1.05);
     }
 
     virtual void evalDeriv(const double x,
@@ -109,14 +113,22 @@ public:
         // extrapolation at small x is a power-law with the given slope;
         // if the correction in the constructor was not applied, this is the same as the original spline,
         // otherwise this results in a shallower inner power-law profile
-        if(x<xmin) {
-            double ratio = pow(x/xmin, slope);
+        if(x<xin) {
+            double ratio = pow(x/xin, slopein);
             if(value)
-                *value = sval * ratio;
+                *value = fin * ratio;
             if(deriv)
-                *deriv = sval * ratio * slope / x;
+                *deriv = fin * ratio * slopein / x;
             if(deriv2)
-                *deriv2= sval * ratio * slope * (slope-1) / pow_2(x);
+                *deriv2= fin * ratio * slopein * (slopein-1) / pow_2(x);
+        } else if(x>xout) {
+            double ratio = pow(x/xout, slopeout);
+            if(value)
+                *value = fout * ratio;
+            if(deriv)
+                *deriv = fout * ratio * slopeout / x;
+            if(deriv2)
+                *deriv2= fout * ratio * slopeout * (slopeout-1) / pow_2(x);
         } else
             spl.evalDeriv(x, value, deriv, deriv2);
     }

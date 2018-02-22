@@ -1,7 +1,7 @@
 #include "math_core.h"
+#include "math_glquadrature.h"
 #include "utils.h"
 #include <gsl/gsl_errno.h>
-#include <gsl/gsl_sf_trig.h>
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_version.h>
@@ -63,8 +63,8 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
         " in " + file + ", line " + utils::toString(line) + ": " + reason + "\n" + utils::stacktrace();
 }
 
-// a static variable that initializes our error handler
-namespace { static bool error_handler_set = gsl_set_error_handler(&GSLerrorHandler); }
+// a hacky way to initialie our error handler on module startup
+bool gsl_error_handler_set = gsl_set_error_handler(&GSLerrorHandler);
 
 // ------ math primitives -------- //
 
@@ -126,9 +126,13 @@ double pow(double x, double n)
 
 double wrapAngle(double x)
 {
-    exceptionText.clear();
-    double result = gsl_sf_angle_restrict_pos(x);
-    return exceptionText.empty() ? result : NAN;
+    // make no attempt to "accurately" subtract the exact value of 2pi
+    // (not representable as a finite-mantissa floating-point number).
+    // on the contrary, take the modulus w.r.t the floating-point approximation of 2pi,
+    // so that 2*M_PI, 4*M_PI, -2*M_PI, etc., produce exactly 0
+    x -= 2*M_PI * floor(1/(2*M_PI) * x);
+    return x>=0 && x<2*M_PI ? x : 0;
+    // x==2*M_PI may occur only if x<0 and |x| is very small, so it is rounded to zero
 }
 
 double unwrapAngle(double x, double xprev)
@@ -144,11 +148,11 @@ double unwrapAngle(double x, double xprev)
 
 void sincos(double x, double& s, double& c)
 {
-    double y = x>=0 ? x : -x;   // fabs(x)
-    double z = x>=0 ? 1 : -1;   // sign(x)
-    int quad = int(4/M_PI * y); // floor(...), non-negative
-    quad = (quad+1) >> 1;       // 0 => 0, 1 => 1, 2 => 1, 3 => 2, 4 => 2, 5 => 3, etc.
-    y -= M_PI/2 * quad;         // bring the range to [-pi/4 .. pi/4];
+    double y = x>=0 ? x : -x;     // fabs(x)
+    double z = x>=0 ? 1 : -1;     // sign(x)
+    long quad = long(4/M_PI * y); // floor(...), non-negative (!!no overflow check!!)
+    quad = (quad+1) >> 1;         // 0 => 0, 1 => 1, 2 => 1, 3 => 2, 4 => 2, 5 => 3, etc.
+    y -= M_PI/2 * quad;           // bring the range to [-pi/4 .. pi/4];
     // note that multiples of M_PI/2 are exactly mapped to zero (this is a deliberate tweak).
     double y2 = y * y;
     // use a Chebyshev approximation for sin and cos on this interval
@@ -979,19 +983,18 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
     return result;
 }
 
-double integrateGL(const IFunction& fnc, double x1, double x2, unsigned int N)
+double integrateGL(const IFunction& fnc, double x1, double x2, int N)
 {
     if(x1==x2)
         return 0;
-    gsl_function F;
-    F.function = functionWrapper;
-    F.params = const_cast<IFunction*>(&fnc);
-    // tables up to N=20 are hard-coded in the library, no overhead
-    gsl_integration_glfixed_table* t = gsl_integration_glfixed_table_alloc(N);
-    CALL_FUNCTION_OR_THROW(
-    double result = gsl_integration_glfixed(&F, x1, x2, t))
-    gsl_integration_glfixed_table_free(t);
-    return result;
+    if(N < 1 || N > MAX_GL_ORDER)
+        throw std::invalid_argument("integrateGL: order is too high (not implemented)");
+    // use pre-computed tables of points and weights
+    const double *points = GLPOINTS[N], *weights = GLWEIGHTS[N];
+    double result = 0;
+    for(int i=0; i<N; i++)
+        result += weights[i] * fnc(x2 * points[i] + x1 * (1-points[i]));
+    return result * (x2-x1);
 }
 
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights)

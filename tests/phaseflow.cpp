@@ -207,7 +207,7 @@ int main(int argc, char* argv[])
     // parameters for each species of a multi-component model:
     // if there is only one, they may be kept in the same INI section [PhaseFlow] as the global params,
     // or if there is no ini file, just provided among other command-line arguments;
-    // alternatively, the INI file should contain one or more sections with a 'density=...' line    
+    // alternatively, the INI file should contain one or more sections with a 'density=...' line
     std::vector<utils::KeyValueMap> compSections;
     // all parameters are combined into a single string forming the header written into the output files
     std::string header="phaseflow";

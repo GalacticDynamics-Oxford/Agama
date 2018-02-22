@@ -56,8 +56,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute
-// (should eventually come up with a proper version numbering strategy...)
-#define AGAMA_VERSION "Compiled on " __DATE__
+#define AGAMA_VERSION "1.0 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -316,7 +315,7 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
 static const int STORAGE_NUM_T = 
     sizeof(galaxymodel::StorageNumT) == sizeof(float)  ? NPY_FLOAT  :
     sizeof(galaxymodel::StorageNumT) == sizeof(double) ? NPY_DOUBLE : NPY_NOTYPE;
-    
+
 ///@}
 //  ------------------------------
 /// \name  Unit handling routines
@@ -378,7 +377,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             "You must specify exactly two out of three units: length, time and velocity");
         return NULL;
     }
-    utils::msg(utils::VL_VERBOSE, "Agama",   // internal unit conversion factors not for public eye
+    utils::msg(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
         "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
         "time unit: "    +utils::toString(conv->timeUnit)+", "
@@ -539,8 +538,9 @@ enum OUTPUT_VALUE {
     OUTPUT_VALUE_TRIPLET_AND_TRIPLET = 33, ///< a triplet and another triplet -- two separate arrays
     OUTPUT_VALUE_TRIPLET_AND_SEXTET  = 36, ///< a triplet and a sextet
     OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE    = 111, ///< three times a single number
-    OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET   = 136, ///< all wonders at once
-    OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET = 333, ///< another all-in-one
+    OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET    = 116, ///< 1+1+6
+    OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET   = 136, ///< 1+3+6
+    OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET = 333, ///< 3+3+3
 };
 
 /// size of input array for a single point
@@ -646,6 +646,7 @@ template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SEXTET>()   {retur
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET>() {return 6;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_SEXTET>()  {return 9;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>()    {return 3;}
+template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>()    {return 8;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>()   {return 10;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>() {return 9;}
 
@@ -677,24 +678,22 @@ template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_SEXTET>(const d
     return Py_BuildValue("(ddd)(dddddd)", result[0], result[1], result[2],
         result[3], result[4], result[5], result[6], result[7], result[8]);
 }
-template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>(
-    const double result[])
-{
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>(const double result[]) {
     return Py_BuildValue("(ddd)", result[0], result[1], result[2]);
 }
-template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
-    const double result[])
-{
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>(const double result[]) {
+    return Py_BuildValue("dd(dddddd)", result[0], result[1],
+        result[2], result[3], result[4], result[5], result[6], result[7]);
+}
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(const double result[]) {
     return Py_BuildValue("d(ddd)(dddddd)", result[0], result[1], result[2], result[3],
         result[4], result[5], result[6], result[7], result[8], result[9]);
 }
-template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>(
-    const double result[])
-{
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>(const double result[]) {
     return Py_BuildValue("(ddd)(ddd)(ddd)", result[0], result[1], result[2],
         result[3], result[4], result[5], result[6], result[7], result[8]);
 }
-    
+
 template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(npy_intp size) {
     npy_intp dims[] = {size};
     return PyArray_SimpleNew(1, dims, NPY_DOUBLE);
@@ -747,6 +746,15 @@ template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SI
     PyObject* arr3 = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     return Py_BuildValue("NNN", arr1, arr2, arr3);
 }
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>(npy_intp size) {
+    npy_intp dims1[] = {size};
+    npy_intp dims2[] = {size};
+    npy_intp dims3[] = {size, 6};
+    PyObject* arr1 = PyArray_SimpleNew(1, dims1, NPY_DOUBLE);
+    PyObject* arr2 = PyArray_SimpleNew(1, dims2, NPY_DOUBLE);
+    PyObject* arr3 = PyArray_SimpleNew(2, dims3, NPY_DOUBLE);
+    return Py_BuildValue("NNN", arr1, arr2, arr3);
+}    
 template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(npy_intp size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
@@ -829,6 +837,15 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 1), index) = result[1];
     pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 2), index) = result[2];
+}
+template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>(
+    const double result[], const npy_intp index, PyObject* resultObj)
+{
+    pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 0), index) = result[0];
+    pyArrayElem<double>(PyTuple_GET_ITEM(resultObj, 1), index) = result[1];
+    PyObject* arr2 = PyTuple_GET_ITEM(resultObj, 2);
+    for(int d=0; d<6; d++)
+        pyArrayElem<double>(arr2, index, d) = result[d+2];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(
     const double result[], const npy_intp index, PyObject* resultObj)
@@ -962,10 +979,10 @@ typedef struct {
 void Density_dealloc(DensityObject* self)
 {
     if(self->dens)
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted "+std::string(self->dens->name())+
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
     else
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty density");
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty density");
     self->dens.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -974,11 +991,11 @@ void Density_dealloc(DensityObject* self)
 #define DOCSTRING_DENSITY_PARAMS \
     "  mass=...   total mass of the model, if applicable.\n" \
     "  scaleRadius=...   scale radius of the model (if applicable).\n" \
-    "  scaleHeight=...   scale height of the model (currently applicable to " \
-    "Dehnen, MiyamotoNagai and Disk).\n" \
+    "  scaleHeight=...   scale height of the model (currently applicable to MiyamotoNagai and Disk).\n" \
     "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
     "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
-    "and to Spheroid and Sersic density models).\n" \
+    "and to Spheroid and Sersic density models; when used with Plummer and NFW profiles, " \
+    "they are converted into equivalent Spheroid models).\n" \
     "  q=...   or  axisRatioZ=...   short to long axis (z/x).\n" \
     "  gamma=...  central cusp slope (applicable for Dehnen and Spheroid).\n" \
     "  beta=...   outer density slope (Spheroid).\n" \
@@ -996,7 +1013,7 @@ static const char* docstringDensity =
     "that do not necessarily have a corresponding potential defined.\n"
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
-    "    Denhen, Plummer, OblatePerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic.\n"
+    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
     "Alternatively, one may construct a spherically-symmetric density model from a cumulative "
@@ -1024,23 +1041,6 @@ PyObject* createDensityObject(const potential::PtrDensity& dens);
 
 // create a Python Potential object and initialize it with an existing instance of C++ potential class
 PyObject* createPotentialObject(const potential::PtrPotential& pot);
-
-/// attempt to construct a composite density from a tuple of Density objects
-potential::PtrDensity Density_initFromTuple(PyObject* tuple)
-{
-    // if we have one string parameter, it could be the file name
-    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
-        return potential::readDensity(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
-    std::vector<potential::PtrDensity> components;
-    for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-        potential::PtrDensity comp = getDensity(PyTuple_GET_ITEM(tuple, i));
-        if(!comp)
-            throw std::invalid_argument("Tuple should contain only valid Density objects "
-                "or functions providing that interface");
-        components.push_back(comp);
-    }
-    return potential::PtrDensity(new potential::CompositeDensity(components));
-}
 
 /// attempt to construct a spherically-symmetric density from a cumulative mass profile
 potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
@@ -1070,13 +1070,31 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
     if(cumulmass)
         return Density_initFromCumulMass(cumulmass);
     utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
-    // for convenience, may specify the type of density model in type="..." argument
-    if(params.contains("type") && !params.contains("density"))
-        params.set("density", params.getString("type"));
-    if(!params.contains("density") && !params.contains("file"))
+    if(!params.contains("type") && !params.contains("density") && !params.contains("file"))
         throw std::invalid_argument("Should provide the name of density model "
             "in type='...' or density='...', or the file name to load in file='...' arguments");
     return potential::createDensity(params, *conv);
+}
+
+/// attempt to construct a composite density from a tuple of Density objects
+potential::PtrDensity Density_initFromTuple(PyObject* tuple)
+{
+    // if we have one string parameter, it could be the file name
+    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
+        return potential::readDensity(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
+    std::vector<potential::PtrDensity> components;
+    for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
+        PyObject* item = PyTuple_GET_ITEM(tuple, i);
+        potential::PtrDensity comp = PyDict_Check(item) ?
+            Density_initFromDict(item) :
+            getDensity(item);   // Density or Potential or a user-defined function
+        if(!comp)
+            throw std::invalid_argument("Tuple should contain only valid Density objects, "
+                "or functions providing that interface, or dictionaries with density parameters");
+        components.push_back(comp);
+    }
+    return components.size()==1 ? components[0] :
+        potential::PtrDensity(new potential::CompositeDensity(components));
 }
 
 /// constructor of Density class
@@ -1094,7 +1112,7 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
                 "Invalid parameters passed to the constructor, type help(Density) for details");
         }
         assert(self->dens);
-        utils::msg(utils::VL_VERBOSE, "Agama", "Created "+std::string(self->dens->name())+
+        utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
         return 0;
     }
@@ -1336,7 +1354,7 @@ PyObject* createDensityObject(const potential::PtrDensity& dens)
     new (&(dens_obj->dens)) potential::PtrDensity;
     // now we may safely assign a new value to the smart pointer
     dens_obj->dens = dens;
-    utils::msg(utils::VL_VERBOSE, "Agama", "Created a Python wrapper for "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
         std::string(dens->name())+" density at "+utils::toString(dens.get()));
     return (PyObject*)dens_obj;
 }
@@ -1353,12 +1371,12 @@ public:
     {
         Py_INCREF(fnc);
         fncname = toString(fnc);
-        utils::msg(utils::VL_VERBOSE, "Agama",
+        utils::msg(utils::VL_DEBUG, "Agama",
             "Created a C++ density wrapper for Python function "+fncname);
     }
     ~DensityWrapper()
     {
-        utils::msg(utils::VL_VERBOSE, "Agama",
+        utils::msg(utils::VL_DEBUG, "Agama",
             "Deleted a C++ density wrapper for Python function "+fncname);
         Py_DECREF(fnc);
     }
@@ -1411,10 +1429,10 @@ typedef struct {
 void Potential_dealloc(PotentialObject* self)
 {
     if(self->pot)
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted "+std::string(self->pot->name())+
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->pot->name())+
         " potential at "+utils::toString(self->pot.get()));
     else
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty potential");
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty potential");
     self->pot.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -1438,7 +1456,7 @@ static const char* docstringPotential =
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
-    "OblatePerfectEllipsoid, Disk, Spheroid, Sersic;\n"
+    "PerfectEllipsoid, Disk, Spheroid, Sersic;\n"
     "    or one of the expansion types:  Multipole or CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
@@ -1490,7 +1508,7 @@ static const char* docstringPotential =
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
     ">>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
     "outerCutoffRadius=150, axisRatioZ=0.8)\n"
-    ">>> pot_exp = Potential(type='Multipole', density=Density(**halo_par), "
+    ">>> pot_exp = Potential(type='Multipole', density=Density(halo_par), "
     "gridSizeR=20, Rmin=1, Rmax=500, lmax=4)\n"
     ">>> pot_galpot = Potential(disk_par, halo_par)\n\n"
     "The latter example illustrates the use of GalPot components (exponential disks and spheroids) "
@@ -1601,7 +1619,7 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
                 "Invalid parameters passed to the constructor, type help(Potential) for details");
         }
         assert(self->pot);
-        utils::msg(utils::VL_VERBOSE, "Agama", "Created "+std::string(self->pot->name())+
+        utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
         return 0;
     }
@@ -1744,7 +1762,7 @@ void fncPotential_Tcirc_from_xv(void* obj, const double input[], double *result)
     T = T_circ(*((PotentialObject*)obj)->pot, E);
     result[0] = T / conv->timeUnit;
 }
-    
+
 PyObject* Potential_Tcirc(PyObject* self, PyObject* arg)
 {
     PyArrayObject *arr = (PyArrayObject*) PyArray_FROM_OTF(arg, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
@@ -1956,7 +1974,7 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
     // same hack as in 'createDensityObject()'
     new (&(pot_obj->pot)) potential::PtrPotential;
     pot_obj->pot = pot;
-    utils::msg(utils::VL_VERBOSE, "Agama",
+    utils::msg(utils::VL_DEBUG, "Agama",
         "Created a Python wrapper for "+std::string(pot->name())+" potential");
     return (PyObject*)pot_obj;
 }
@@ -2010,7 +2028,7 @@ actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, 
     actions::PtrActionFinder af = isSpherical(*pot) ?
         actions::PtrActionFinder(new actions::ActionFinderSpherical(*pot)) :
         actions::PtrActionFinder(new actions::ActionFinderAxisymFudge(pot, interpolate));
-    utils::msg(utils::VL_VERBOSE, "Agama",
+    utils::msg(utils::VL_DEBUG, "Agama",
         "Created " +
         std::string(isSpherical(*pot) ? "Spherical" : interpolate ? "Interpolated Fudge" : "Fudge") +
         " action finder for " + pot->name() + " potential at " + utils::toString(af.get()));
@@ -2027,7 +2045,7 @@ typedef struct {
 
 void ActionFinder_dealloc(ActionFinderObject* self)
 {
-    utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an action finder at "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action finder at "+
         utils::toString(self->af.get()));
     self->af.reset();
     Py_TYPE(self)->tp_free(self);
@@ -2149,7 +2167,7 @@ PyObject* createActionFinderObject(actions::PtrActionFinder af)
     // same trickery as in 'createDensityObject()'
     new (&(af_obj->af)) actions::PtrActionFinder;
     af_obj->af = af;
-    utils::msg(utils::VL_VERBOSE, "Agama", "Created a Python wrapper for action finder at "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
         utils::toString(af.get()));
     return (PyObject*)af_obj;
 }
@@ -2208,7 +2226,7 @@ static const char* docstringActions =
     "Returns: if angles are not computed, a single Nx3 array of floats "
     "(for each point: Jr, Jz, Jphi); in the opposite case, a tuple of three Nx3 arrays: "
     "actions, angles, and frequencies (in the same order - r,z,phi).";
-    
+
 PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"point", "potential", "fd", "angles", NULL};
@@ -2251,7 +2269,7 @@ typedef struct {
 
 void DistributionFunction_dealloc(DistributionFunctionObject* self)
 {
-    utils::msg(utils::VL_VERBOSE, "Agama", "Deleted a distribution function at "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a distribution function at "+
         utils::toString(self->df.get()));
     self->df.reset();
     Py_TYPE(self)->tp_free(self);
@@ -2271,7 +2289,7 @@ static const char* docstringDistributionFunction =
     "The constructor accepts several key=value arguments that describe the parameters "
     "of distribution function.\n"
     "Required parameter is type='...', specifying the type of DF: currently available types are "
-    "'DoublePowerLaw' (for the halo), 'QuasiIsothermal' (for the disk component), "
+    "'DoublePowerLaw' (for the halo), 'QuasiIsothermal' or 'Exponential' (for the disk component), "
     "'QuasiIsotropic' (for the isotropic DF corresponding to a given density profile), "
     "'Interp1', 'Interp3' (for interpolated DFs).\n"
     "For some of them, one also needs to provide the potential to initialize the table of epicyclic "
@@ -2369,7 +2387,8 @@ df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
                 "or functions providing that interface");
         components.push_back(comp);
     }
-    return df::PtrDistributionFunction(new df::CompositeDF(components));
+    return components.size()==1 ? components[0] : 
+        df::PtrDistributionFunction(new df::CompositeDF(components));
 }
 
 /// the generic constructor of DistributionFunction object
@@ -2393,7 +2412,7 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
                 "or a tuple of existing DistributionFunction objects to create a composite DF");
         }
         assert(self->df);
-        utils::msg(utils::VL_VERBOSE, "Agama", "Created a distribution function at "+
+        utils::msg(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
             utils::toString(self->df.get()));
         return 0;
     }
@@ -2512,12 +2531,12 @@ public:
     DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
         Py_INCREF(fnc);
-        utils::msg(utils::VL_VERBOSE, "Agama",
+        utils::msg(utils::VL_DEBUG, "Agama",
             "Created a C++ df wrapper for Python function "+toString(fnc));
     }
     ~DistributionFunctionWrapper()
     {
-        utils::msg(utils::VL_VERBOSE, "Agama",
+        utils::msg(utils::VL_DEBUG, "Agama",
             "Deleted a C++ df wrapper for Python function "+toString(fnc));
         Py_DECREF(fnc);
     }
@@ -2575,7 +2594,7 @@ PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
     // same hack as in 'createDensityObject()'
     new (&(df_obj->df)) df::PtrDistributionFunction;
     df_obj->df = df;
-    utils::msg(utils::VL_VERBOSE, "Agama", "Created a Python wrapper for distribution function");
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for distribution function");
     return (PyObject*)df_obj;
 }
 
@@ -2672,6 +2691,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
     }
 
     // af_obj might be NULL (then create a new one); if not NULL then check its validity
+    // (however there is no way to ensure that the action finder corresponds to the potential!)
     if(af_obj!=NULL && (!PyObject_TypeCheck(af_obj, &ActionFinderType) ||
        ((ActionFinderObject*)af_obj)->af==NULL))
     {
@@ -2749,8 +2769,7 @@ struct GalaxyModelParams{
 void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     GalaxyModelParams* params = static_cast<GalaxyModelParams*>(obj);
-    double dens;
-    coord::VelCyl vel;
+    double dens, vel;
     coord::Vel2Cyl vel2;
     try{
         computeMoments(params->model, coord::toPosCyl(point),
@@ -2760,9 +2779,7 @@ void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
             params->accuracy, params->maxNumEval*/);
     }
     catch(std::exception& e) {
-        dens = NAN;
-        vel.vR = vel.vz = vel.vphi = NAN;
-        vel2.vR2 = vel2.vz2 = vel2.vphi2 = vel2.vRvz = vel2.vRvphi = vel2.vzvphi = NAN;
+        dens = vel = vel2.vR2 = vel2.vz2 = vel2.vphi2 = vel2.vRvz = vel2.vRvphi = vel2.vzvphi = NAN;
         utils::msg(utils::VL_WARNING, "GalaxyModel.moments", e.what());
     }
     unsigned int offset=0;
@@ -2771,10 +2788,8 @@ void fncGalaxyModelMoments(void* obj, const double input[], double *result) {
         offset += 1;
     }
     if(params->needVel) {
-        result[offset  ] = vel.vR   / conv->velocityUnit;
-        result[offset+1] = vel.vz   / conv->velocityUnit;
-        result[offset+2] = vel.vphi / conv->velocityUnit;
-        offset += 3;
+        result[offset] = vel / conv->velocityUnit;
+        offset += 1;
     }
     if(params->needVel2) {
         result[offset  ] = vel2.vR2    / pow_2(conv->velocityUnit);
@@ -2807,11 +2822,11 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
             if(params.needVel) {
                 if(params.needVel2)
                     return callAnyFunctionOnArray
-                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>
+                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>
                     (&params, points_obj, fncGalaxyModelMoments);
                 else
                     return callAnyFunctionOnArray
-                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_TRIPLET>
+                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SINGLE>
                     (&params, points_obj, fncGalaxyModelMoments);
             } else {
                 if(params.needVel2)
@@ -2827,11 +2842,11 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
             if(params.needVel) {
                 if(params.needVel2)
                     return callAnyFunctionOnArray
-                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET_AND_SEXTET>
+                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SEXTET>
                     (&params, points_obj, fncGalaxyModelMoments);
                 else
                     return callAnyFunctionOnArray
-                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET>
+                    <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
                     (&params, points_obj, fncGalaxyModelMoments);
             } else {
                 if(params.needVel2)
@@ -3131,8 +3146,9 @@ static PyMethodDef GalaxyModel_methods[] = {
       "  vel  (boolean, default False) -- same for streaming velocity (1st moment);\n"
       "  vel2 (boolean, default True)  -- same for 2nd moment of velocity.\n"
       "Returns:\n"
-      "  For each input point, return the requested moments (one value for density, "
-      "a triplet for velocity, and 6 components of the 2nd moment tensor)." },
+      "  For each input point, return the requested moments "
+      "(one value for density, one for mean v_phi, "
+      "and 6 components of the 2nd moment tensor: RR, zz, phiphi, Rz, Rphi, zphi)." },
     { "projectedMoments", (PyCFunction)GalaxyModel_projectedMoments, METH_VARARGS,
       "Compute projected moments of distribution function in the given potential.\n"
       "Arguments:\n"
@@ -3209,10 +3225,10 @@ typedef struct {
 void Component_dealloc(ComponentObject* self)
 {
     if(self->comp)
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted " + std::string(self->name) + " at " +
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->name) + " at " +
             utils::toString(self->comp.get()));
     else
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty component");
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty component");
     self->comp.reset();
     // self->name is either NULL or points to a constant string that does not require deallocation
     Py_TYPE(self)->tp_free(self);
@@ -3296,7 +3312,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             else       // both potential and density
                 self->comp.reset(new galaxymodel::ComponentStatic(dens, disklike, pot));
             self->name = "Static component";
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -3321,7 +3337,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithSpheroidalDF(
                 df, dens, lmax, mmax, gridSize, rmin, rmax));
             self->name = "Spheroidal component";
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -3348,7 +3364,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithDisklikeDF(
                 df, dens, mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax));
             self->name = "Disklike component";
-            utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->name) + " at "+
+            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -3612,10 +3628,10 @@ typedef struct {
 void Target_dealloc(TargetObject* self)
 {
     if(self->target)
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted " + std::string(self->target->name()) +
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
             " target at " + utils::toString(self->target.get()));
     else
-        utils::msg(utils::VL_VERBOSE, "Agama", "Deleted an empty target");
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty target");
     self->target.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -3727,7 +3743,7 @@ static const char* docstringTarget =
     "where the number of coefficients for a target t1 is given by the 'len(t1)' function.\n"
     "A Target instance can also be used to produce the right-hand side of the matrix equation "
     "in a linear superposition model, by applying it to a Density object or an N-body snapshot:\n"
-    ">>> den=agama.Density(**params)   # create an instance of a density model with some parameters\n"
+    ">>> den=agama.Density(params)     # create an instance of a density model with some parameters\n"
     ">>> snapshot=den.sample(10000)    # draw 10000 sample points from this model\n"
     ">>> rhs_d=t1(den)                 # apply the target 't1' to the analytic density model\n"
     ">>> rhs_s=t1(snapshot)            # apply it to an array of particles\n"
@@ -3884,7 +3900,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             (std::string("Error in creating a Target object: ")+e.what()).c_str());
         return -1;
     }
-    utils::msg(utils::VL_VERBOSE, "Agama", "Created a " + std::string(self->target->name()) +
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->target->name()) +
         " at " + utils::toString(self->target.get()));
     return 0;
 }
@@ -4444,10 +4460,10 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     volatile npy_intp numComplete = 0;
     volatile time_t tprint = time(NULL), tbegin = tprint;
     if(!fail) {
-        const math::IOdeSystem& orbitIntegrator =
+        unique_ptr<const math::IOdeSystem> orbitIntegrator(
             haveLyap && Omega!=0 ?
-            (const math::IOdeSystem&) orbit::OrbitIntegratorVarEq(*pot, Omega / conv->timeUnit) :
-            (const math::IOdeSystem&) orbit::OrbitIntegratorRot  (*pot, Omega / conv->timeUnit);
+            (const math::IOdeSystem*) new orbit::OrbitIntegratorVarEq(*pot, Omega / conv->timeUnit) :
+            (const math::IOdeSystem*) new orbit::OrbitIntegratorRot  (*pot, Omega / conv->timeUnit) );
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
@@ -4490,7 +4506,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
 
                 // integrate the orbit
-                orbit::integrate(initCond.at(orb), integrTime, orbitIntegrator, fncs, params);
+                orbit::integrate(initCond.at(orb), integrTime, *orbitIntegrator, fncs, params);
 
                 // if the trajectory was recorded, store it in the corresponding item of the output tuple
                 if(haveTraj) {
@@ -5019,7 +5035,7 @@ typedef struct {
 
 void CubicSpline_dealloc(PyObject* self)
 {
-    utils::msg(utils::VL_VERBOSE, "Agama", "Deleted a cubic spline of size "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size "+
         utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
         utils::toString(&((CubicSplineObject*)self)->spl));
     // dirty hack: manually call the destructor for an object that was
@@ -5061,7 +5077,7 @@ int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
         ((CubicSplineObject*)self)->spl = regularize ?
             math::CubicSpline(xvalues, yvalues, regularize) :
             math::CubicSpline(xvalues, yvalues, derivLeft, derivRight);
-        utils::msg(utils::VL_VERBOSE, "Agama", "Created a cubic spline of size "+
+        utils::msg(utils::VL_DEBUG, "Agama", "Created a cubic spline of size "+
             utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
             utils::toString(&((CubicSplineObject*)self)->spl));
         return 0;
@@ -5186,7 +5202,7 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
         return NULL;
     // same dirty hack to construct a C++ object in already allocated memory
     new (&(spl_obj->spl)) math::CubicSpline(x, y);
-    utils::msg(utils::VL_VERBOSE, "Agama", "Constructed a cubic spline of size "+
+    utils::msg(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
         utils::toString(spl_obj->spl.xvalues().size())+" at "+
         utils::toString(&(spl_obj->spl)));
     return (PyObject*)spl_obj;
@@ -5475,7 +5491,7 @@ public:
     /// same for one point (not used by integration/sampling routines, but required by the interface)
     virtual void eval(const double vars[], double values[]) const {
         evalmany(1, vars, values);
-    }    
+    }
     virtual unsigned int numVars()   const { return nvars; }
     virtual unsigned int numValues() const { return 1; }
 };

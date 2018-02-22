@@ -25,7 +25,7 @@ class DFIntegrandKLD: public math::IFunctionNdim {
     const df::ActionSpaceScalingTriangLog scaling;  ///< action-space scaling transformation
 public:
     DFIntegrandKLD(const df::BaseDistributionFunction& _f, const df::BaseDistributionFunction& _g) :
-        f(_f), g(_g) {}
+        f(_f), g(_g), scaling() {}
 
     virtual void eval(const double vars[], double values[]) const
     {

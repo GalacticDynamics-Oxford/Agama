@@ -284,8 +284,8 @@ BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots,
     const int numBasisFnc, const int GLORDER, BsplineFnc fnc)
 {
     int numKnots = knots.size();
-    double glnodes[GLORDER], glweights[GLORDER];
-    prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    assert(GLORDER < MAX_GL_ORDER);
+    const double *glnodes = GLPOINTS[GLORDER], *glweights = GLWEIGHTS[GLORDER];
     const int gridSize = (numKnots-1) * GLORDER;   // total # of points on all grid segments
     std::vector<double> weights(gridSize);
 
@@ -342,7 +342,7 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
     const std::vector<double>& fval, double derivLeft=NAN, double derivRight=NAN)
 {
     const size_t numPoints = xval.size();
-    if(fval.size() != numPoints)        
+    if(fval.size() != numPoints)
         throw std::length_error("CubicSpline: input arrays are not equal in length");
 
     // construct and solve the linear system for first derivatives
@@ -370,7 +370,7 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
         rhs[numPoints-1] = derivRight;
     }
     std::vector<double> fder = solveBand(mat, rhs);
-    
+
     // check if the input nodes and values are symmetric w.r.t. grid center -
     // if yes, make the derivatives exactly antisymmetric too
     bool symmetric = numPoints%2==1;
@@ -543,7 +543,7 @@ inline void evalQuinticSplines(
             d2f[k] =       Ppp * fd +               Qpp * f1d +       f2l[k] + Rpp * f2d;
     }
 }
-    
+
 //---- Auxiliary spline construction routines ----//
 
 /// apply the slope-limiting prescription of Hyman(1983) to the first derivatives of a previously
@@ -602,7 +602,7 @@ inline void checkFinite2d(const std::vector<double>& arr, const char* arrName, s
                 "[" + utils::toString(k/ysize) + "," + utils::toString(k%ysize) + "]=" +
                 utils::toString(arr[k]) + ")\n" + utils::stacktrace());
 }
-    
+
 }  // internal namespace
 
 
@@ -694,7 +694,7 @@ CubicSpline::CubicSpline(const std::vector<double>& _xval,
             throw std::invalid_argument("CubicSpline: function derivatives must be finite "
                 "(fder[" + utils::toString(i) + "]=" + utils::toString(fder[i]) + ")\n" +
                 utils::stacktrace());
-    
+
 }
 
 void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
@@ -875,8 +875,10 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
     logxval.resize(numPoints);
     logfval.resize(numPoints);
     logfder.resize(numPoints, NAN);  // by default points are marked as 'bad'
-    std::transform(xvalues.begin(), xvalues.end(), logxval.begin(), log);
-    std::transform(fvalues.begin(), fvalues.end(), logfval.begin(), log);
+    for(size_t i=0; i<numPoints; i++) {
+        logxval[i] = log(xvalues[i]);
+        logfval[i] = log(fvalues[i]);
+    }
 
     // construct spline(s) for the sections of x grid where the function values are strictly positive
     std::vector<double> tmpx, tmpf, tmpd;
@@ -928,13 +930,15 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
     size_t numPoints = fvalues.size();
     if(numPoints != xvalues.size() || numPoints != fderivs.size())
         throw std::length_error("LogLogSpline: input arrays not equal in length");
-    logxval.resize(numPoints);
+    logxval. resize(numPoints);
     logfval. resize(numPoints);
     logfder. resize(numPoints, NAN);
     logfder2.resize(numPoints);
-    std::transform(xvalues.begin(), xvalues.end(), logxval.begin(), log);
-    std::transform(fvalues.begin(), fvalues.end(), logfval.begin(), log);
-    
+    for(size_t i=0; i<numPoints; i++) {
+        logxval[i] = log(xvalues[i]);
+        logfval[i] = log(fvalues[i]);
+    }
+
     // construct spline(s) for the sections of x grid where the function values are strictly positive
     std::vector<double> tmpx, tmpf, tmpd, tmpd2;
     for(size_t i=0; i<=numPoints; i++) {
@@ -973,7 +977,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
 
                 // initialize (log-log) 2nd derivs using the spline construction routine
                 tmpd2 = constructQuinticSpline(tmpx, tmpf, tmpd);
-                
+
                 // assign the log-log 1st/2nd derivs for all points in the preceding section
                 for(size_t k=0; k<numSegPoints; k++) {
                     logfder [i+k-numSegPoints] = tmpd [k];
@@ -1144,7 +1148,7 @@ std::vector<double> BsplineInterpolator1d<N>::deriv(const std::vector<double> &a
 
 template<int N>
 std::vector<double> BsplineInterpolator1d<N>::antideriv(const std::vector<double> &amplitudes) const
-{    
+{
     if(amplitudes.size() != numComp)
         throw std::length_error("antideriv: invalid size of amplitudes array");
     std::vector<double> result(numComp+1);
@@ -1178,8 +1182,8 @@ double BsplineInterpolator1d<N>::integrate(double x1, double x2,
     // of B-spline times x^n on each grid segment, it is sufficient to employ a Gauss-Legendre
     // quadrature rule with the number of nodes = floor((N+n)/2)+1.
     const int NnodesGL = (N+n)/2+1;
-    std::vector<double> glnodes(NnodesGL), glweights(NnodesGL);
-    prepareIntegrationTableGL(0, 1, NnodesGL, &glnodes[0], &glweights[0]);
+    assert(NnodesGL < MAX_GL_ORDER);
+    const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
 
     // loop over segments
     double result = 0;
@@ -1219,8 +1223,7 @@ void FiniteElement1d<N>::setup()
     numFunc  = N+1,   // # of nonzero basis functions on each segment
     numDeriv = N+1;   // # of nontrivial derivatives including the function itself
     // prepare table for Gauss-Legendre integration with GLORDER points per each segment of the input grid
-    double glnodes[GLORDER], glweights[GLORDER];
-    prepareIntegrationTableGL(0, 1, GLORDER, glnodes, glweights);
+    const double *glnodes = GLPOINTS[GLORDER], *glweights = GLWEIGHTS[GLORDER];
     integrNodes.resize(gridSize);
     integrWeights.resize(gridSize);
     bsplValues.resize(numFunc * gridSize * numDeriv);
@@ -1515,7 +1518,7 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
         fval_ill = fval[ill] - f_offset,
         fval_iul = fval[iul] - f_offset,
         fval_ilu = fval[ilu] - f_offset,
-        fval_iuu = fval[iuu] - f_offset,    
+        fval_iuu = fval[iuu] - f_offset,
         // values and derivatives for the intermediate Hermite splines
         flow  [4] = { fval_ill , fval_iul , fx [ill], fx [iul] },
         fupp  [4] = { fval_ilu , fval_iuu , fx [ilu], fx [iuu] },
@@ -2850,7 +2853,6 @@ private:
     const ptrdiff_t numData;          ///< number of sample points
     const FitOptions options;         ///< whether the definition interval extends to +-inf
     static const int GLORDER = 8;     ///< order of GL quadrature for computing the normalization
-    double GLnodes[GLORDER], GLweights[GLORDER];  ///< nodes and weights of GL quadrature
     std::vector<double> Vbasis;       ///< basis likelihoods: V_k = \sum_i w_i B_k(x_i)
     std::vector<double> Wbasis;       ///< W_k = \sum_i w_i^2 B_k(x_i)
     Matrix<double> BTBmatrix;         ///< matrix C = B^T B, where B_{ik} = w_i B_k(x_i)
@@ -2886,7 +2888,6 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     for(unsigned int k=1; k<numNodes; k++)
         if(grid[k-1] >= grid[k])
             throw std::invalid_argument("splineLogDensity: grid nodes are not monotonic");
-    prepareIntegrationTableGL(0, 1, GLORDER, GLnodes, GLweights);
 
     // prepare the roughness penalty matrix
     // (integrals over products of certain derivatives of basis functions)
@@ -2985,13 +2986,13 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         minWeight *= 1. / (numNodes-1);
         for(unsigned int j=0; j<numNodes-1; j++) {
             for(int s=0; s<GLORDER; s++) {
-                double x = grid[j] + GLnodes[s] * (grid[j+1]-grid[j]);
+                double x = grid[j] + GLPOINTS[GLORDER][s] * (grid[j+1]-grid[j]);
                 double Bspl[N+1];
                 int ind = N==1 ?
                     bsplineValuesExtrapolated<1>(x, &grid[0], numNodes, Bspl) :
                     bsplineNaturalCubicValues   (x, &grid[0], numNodes, Bspl);
                 for(int b=0; b <= std::min<int>(N, numBasisFnc-ind-1); b++)
-                    Vbasis.at(ind+b) += minWeight * Bspl[b] * GLweights[s];
+                    Vbasis.at(ind+b) += minWeight * Bspl[b] * GLWEIGHTS[GLORDER][s];
             }
             sumWeights += minWeight;
         }
@@ -3168,7 +3169,7 @@ double SplineLogDensityFitter<N>::logG(
         double segwidth = grid[k+1] - grid[k];
         // ...and over sub-nodes of Gauss-Legendre quadrature rule within each grid segment
         for(int s=0; s<GLORDER; s++) {
-            double x = grid[k] + GLnodes[s] * segwidth;
+            double x = grid[k] + GLPOINTS[GLORDER][s] * segwidth;
             double Bspl[N+1];
             // obtain the values of all nontrivial basis function at this point,
             // and the index of the first of these functions.
@@ -3185,7 +3186,7 @@ double SplineLogDensityFitter<N>::logG(
             // the contribution of this point to the integral is weighted according to the GL quadrature;
             // the value of integrand is exp(Q) * Q^d,
             // but to avoid possible overflows, we instead compute  exp(Q-offset) Q^d.
-            double val = GLweights[s] * segwidth * exp(Q-offset);
+            double val = GLWEIGHTS[GLORDER][s] * segwidth * exp(Q-offset);
             for(int d=0; d<=2; d++)
                 integral[d] += val * pow(Q, d);
             // contribution of this point to the integral of derivatives is further multiplied

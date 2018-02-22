@@ -31,7 +31,7 @@ ActionAngles actionAnglesIsochrone(
     double rb   = sqrt(b*b +pow_2(point.r));
     double L    = Ltotal(point);
     double L1   = sqrt(L*L + 4*M*b);
-    double J0   = M / sqrt(2*M / (b+rb) - pow_2(point.vr) - pow_2(point.vtheta) - pow_2(point.vphi));    
+    double J0   = M / sqrt(2*M / (b+rb) - pow_2(point.vr) - pow_2(point.vtheta) - pow_2(point.vphi));
     double j0invsq = M*b / pow_2(J0);
     // J0 is related to total energy via  J0 = M / sqrt(-2*E)
     aa.Jphi     = Lz(pointCyl);
@@ -90,16 +90,16 @@ coord::PosVelSphMod ToyMapIsochrone::map(
     double fac2 = (1 + ecc + j0invsq) * J0 / L1;  // sqrt( (1+x2) / (1+x1) )
 
     // quantities below depend on angles
-    double eta, sineta, coseta;     // will be computed by the following routine:
-    math::solveKepler(ecc, aa.thetar, eta, sineta, coseta); // thetar = eta - ecc * sin(eta)
+    double eta = math::solveKepler(ecc, aa.thetar); // thetar = eta - ecc * sin(eta)
+    double sineta, coseta, sinpsi, cospsi;
+    math::sincos(eta, sineta, coseta);
     double ra = 1 - ecc * coseta;   // Kepler problem:  r / a = 1 - e cos(eta)
     double tanhalfeta = coseta==-1 ? INFINITY : sineta / (1 + coseta);
     double thetar   = aa.thetar - (eta>M_PI ? 2*M_PI : 0);
     double psi1     = atan(fac1 * tanhalfeta);
     double psi2     = atan(fac2 * tanhalfeta);
     double psi      = aa.thetaz - LL1 * thetar + psi1 + psi2 * L/L1;
-    double sinpsi   = sin(psi);
-    double cospsi   = cos(psi);
+    math::sincos(psi, sinpsi, cospsi);
     double chi      = aa.Jz != 0 ? atan2(absJphi * sinpsi, L * cospsi) : psi;
     double sini     = sqrt(1 - pow_2(aa.Jphi / L)); // inclination angle of the orbital plane
     double costheta = sini * sinpsi;                // z/r

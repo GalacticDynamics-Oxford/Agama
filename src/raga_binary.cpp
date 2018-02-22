@@ -12,9 +12,16 @@ namespace raga {
 
 //---------- Three-body encounters of particles with the central binary black hole ----------//
 
+namespace{  // internal
 /// a particle is considered to be in a three-body encounter if its distance from origin
 /// is less than the binary semimajor axis multiplied by this factor
 const double BINARY_ENCOUNTER_RADIUS = 5.0;
+
+/// root-finder relative tolerance for determining the start/end of encounter
+const double ACCURACY_ROOT = 1e-4;
+
+/// maximum allowed eccentricity of the binary
+const double MAX_ECC = 0.999;
 
 /** Helper class to find the exact moment of crossing the critical radius */
 class EncounterFinder: public math::IFunctionNoDeriv {
@@ -31,7 +38,7 @@ public:
 };
 
 /// helper function to find the total energy in the time-dependent potential
-static inline double totalEnergy(double time,
+inline double totalEnergy(double time,
     const potential::BasePotential& pot, const BHParams& bh, double posvel[6])
 {
     const coord::PosCar pos(posvel[0], posvel[1], posvel[2]);
@@ -41,7 +48,7 @@ static inline double totalEnergy(double time,
 
 /// compute the change in L_z due to the torque from the stellar potential for the orbit segment
 /// on the interval of time [t1:t2] provided by the ODE solver
-static double computeLztorque(
+double computeLztorque(
     const potential::BasePotential& potential, const math::BaseOdeSolver& sol, double t1, double t2)
 {
     if(isZRotSymmetric(potential))
@@ -62,6 +69,7 @@ static double computeLztorque(
         return 0;
     }
 }
+}  // internal ns
 
 orbit::StepResult RuntimeBinary::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double [])
@@ -76,7 +84,7 @@ orbit::StepResult RuntimeBinary::processTimestep(
     double r2end   = pow_2(ptend  [0]) + pow_2(ptend  [1]) + pow_2(ptend  [2]);
     double r2crit  = pow_2(bh.sma * BINARY_ENCOUNTER_RADIUS);
     if(r2begin >= r2crit && r2end >= r2crit)  // the entire timestep is outside the critical radius:
-        return orbit::SR_CONTINUE;                   // no further action required
+        return orbit::SR_CONTINUE;            // no further action required
 
     // if during the timestep the particle spends some time inside the critical radius,
     // we need to determine exactly the time when it enters and exits the sphere with this radius
@@ -86,7 +94,7 @@ orbit::StepResult RuntimeBinary::processTimestep(
     // if the particle has crossed the critical radius during the timestep,
     // we need to find the exact time this happened
     if((r2end < r2crit) ^ (r2begin < r2crit)) {
-        double tcross = math::findRoot(EncounterFinder(sol, r2crit), tbegin, tend, 1e-4);
+        double tcross = math::findRoot(EncounterFinder(sol, r2crit), tbegin, tend, ACCURACY_ROOT);
         assert(tcross >= tbegin && tcross <= tend);
         if(r2begin >= r2crit) {
             tbeginEnc = tcross;
@@ -168,7 +176,7 @@ void RagaTaskBinary::startEpisode(double timeStart, double length)
     encounters.assign(particles.size(), BinaryEncounterList());  // reserve room for storing the encounters
     if(!params.outputFilename.empty() && firstEpisode) {
         std::ofstream strm(params.outputFilename.c_str());
-        strm << "time    \tsemimajor_axis\teccentricity\tBH_mass \tq(mass_ratio)\t"
+        strm << "#Time   \tsemimajor_axis\teccentricity\tBH_mass \tq(mass_ratio)\t"
             "hardening_star\thardening_gw\n" +
             utils::pp(timeStart, 10) + '\t' +
             utils::pp(bh.sma,    10) + '\t' +
@@ -177,7 +185,7 @@ void RagaTaskBinary::startEpisode(double timeStart, double length)
             utils::pp(bh.q,      10) + "\t0       \t0\n";
         strm.close();
         strm.open((params.outputFilename+"_enc").c_str());
-        strm << "timeStart    duration Ebegin   Lbegin   deltaE   deltaLz  costheta  phi mass     index\n";
+        strm << "#timeStart   duration Ebegin   Lbegin   deltaE   deltaLz  costheta  phi index\n";
     }
     firstEpisode = false;
 }
@@ -220,7 +228,7 @@ static BHParams evolveBH(const BHParams& oldbh, double H, double K, double speed
              maxTime = timePassed;  // will exit the loop and record the exact coalescence time
          } else {
              bh.sma  = 1 / (1 / bh.sma + tstep * (H + Hgw));
-             bh.ecc  = fmin(0.999, sqrt(fmax(0, pow_2(bh.ecc) + tstep * (K + Kgw))));
+             bh.ecc  = fmin(MAX_ECC, sqrt(fmax(0, pow_2(bh.ecc) + tstep * (K + Kgw))));
              timePassed += tstep;
          }
     } while(timePassed < maxTime * (1-1e-10));
@@ -242,13 +250,19 @@ void RagaTaskBinary::finishEpisode()
     double deltaE=0, deltaLz=0;
     for(size_t ip=0; ip<particles.size(); ip++) {
         double mass = particles[ip].second;
-        if(mass == 0 || encounters[ip].empty())
+        if(encounters[ip].empty())
             continue;   // nothing happened to this particle
         for(size_t ie=0; ie<encounters[ip].size(); ie++) {
             deltaE  += mass * encounters[ip][ie].deltaE;
             deltaLz += mass * encounters[ip][ie].deltaLz;
             allEncounters.push_back(std::pair<double, std::pair<size_t, size_t> >(
                 encounters[ip][ie].Tbegin, std::pair<size_t, size_t>(ip, ie) ) );
+            // if this particle was captured by one of the black holes
+            // (implying that its mass is 0 at the end of episode),
+            // mark the last encounter in a special way
+            if(mass == 0 && ie == encounters[ip].size()-1)
+                encounters[ip][ie].deltaE = encounters[ip][ie].deltaLz =
+                encounters[ip][ie].costheta = encounters[ip][ie].phi = NAN;
         }
         numEnc += encounters[ip].size();
         numPart++;
@@ -302,7 +316,6 @@ void RagaTaskBinary::finishEpisode()
             utils::pp(enc.deltaLz, 8) + ' ' +
             utils::pp(enc.costheta,6) + ' ' +
             utils::pp(enc.phi,     6) + ' ' +
-            utils::pp(particles[ip].second, 8) /*mass*/ + ' ' +
             utils::toString(ip) + '\n';
         }
     }

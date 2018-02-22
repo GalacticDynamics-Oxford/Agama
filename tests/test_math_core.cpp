@@ -1,6 +1,7 @@
 #include "math_core.h"
 #include "math_fit.h"
 #include "math_sample.h"
+#include "math_specfunc.h"
 #include "utils.h"
 #include <iostream>
 #include <iomanip>
@@ -309,6 +310,32 @@ int main()
     ok &= testScaling(math::ScalingCub(0,1));
     std::cout << " Qui";
     ok &= testScaling(math::ScalingQui(0,1));
+    std::cout << "\n";
+
+    // special functions
+    double maxerrk=0, maxerrs=0, maxerrc=0;
+    for(double ecc=0.; ecc<0.999; ecc = 1-(1-ecc)*0.9) {
+        for(double phase=-0.05; phase<1e10; phase<6.4? phase+=0.01 : phase*=1.5) {
+            double eta = math::solveKepler(ecc, phase);
+            double sineta, coseta;
+            math::sincos(eta, sineta, coseta);
+            double phasek = eta - ecc * sineta;
+            double phasew = math::wrapAngle(phase);
+            if(fabs(phasek - phasew)>0.1)
+                std::cout << utils::toString(phase, 17) <<
+                     ", " << utils::toString(phasek,17) <<
+                     ", " << utils::toString(phasew,17) << "\n";
+            maxerrk = fmax(maxerrk, fabs(phasek - phasew));
+            maxerrs = fmax(maxerrs, fabs(sin(eta) - sineta));
+            maxerrc = fmax(maxerrc, fabs(cos(eta) - coseta));
+        }
+    }
+    std::cout << "Specfunc: E(sin)=" << utils::toString(maxerrs,4);
+    ok &= maxerrs < 5e-16 || err();
+    std::cout << ", E(cos)=" << utils::toString(maxerrc,4);
+    ok &= maxerrc < 5e-16 || err();
+    std::cout << ", E(kepler)=" << utils::toString(maxerrk,4);
+    ok &= maxerrk < 2e-15 || err();
     std::cout << "\n";
 
     // integration routines

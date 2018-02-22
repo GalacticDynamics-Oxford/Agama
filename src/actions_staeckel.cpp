@@ -83,7 +83,7 @@ public:
 
     /** auxiliary function that enters the definition of canonical momentum for 
         for the Staeckel potential: it is the numerator of eq.50 in de Zeeuw(1985);
-        the argument tau is replaced by tau+gamma >= 0. */    
+        the argument tau is replaced by tau+gamma >= 0. */
     virtual void evalDeriv(const double tauplusgamma, 
         double* value=0, double* deriv=0, double* deriv2=0) const;
     virtual unsigned int numDerivs() const { return 2; }
@@ -308,7 +308,7 @@ class AxisymScaledForRootfinder: public math::IFunction {
 public:
     const AxisymFunctionBase& fnc;
     explicit AxisymScaledForRootfinder(const AxisymFunctionBase& d) : fnc(d) {};
-    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }    
+    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
     virtual void evalDeriv(const double tau, 
         double* val=0, double* der=0, double* der2=0) const
     {
@@ -494,7 +494,7 @@ AxisymActionDerivatives computeActionDerivatives(
 
 /** Compute the derivatives of integrals of motion (E, Lz, I3) over actions (Jr, Jz, Jphi), inverting
     the matrix of action derivatives by integrals.  These quantities are independent of angles,
-    and in particular, the derivatives of energy w.r.t. the three actions are the frequencies. */    
+    and in particular, the derivatives of energy w.r.t. the three actions are the frequencies. */
 AxisymIntDerivatives computeIntDerivatives(
     const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
 {

@@ -7,7 +7,6 @@
 #include <cassert>
 #include <stdexcept>
 #include <algorithm>
-#include <numeric>
 
 namespace galaxymodel{
 
@@ -31,11 +30,11 @@ static const double SOURCE_WIDTH = 0.2;
 // a few auxiliary routines:
 
 /// construct a new vector with values converted by the given mathematical function
-template<class Fnc>
-inline std::vector<double> convert(const std::vector<double>& vec, Fnc fnc)
+inline std::vector<double> convert(const std::vector<double>& vec, double(*fnc)(double))
 {
     std::vector<double> newvec(vec.size());
-    std::transform(vec.begin(), vec.end(), newvec.begin(), fnc);
+    for(size_t i=0, size=vec.size(); i<size; i++)
+        newvec[i] = fnc(vec[i]);
     return newvec;
 }
 
@@ -54,7 +53,10 @@ inline double maxElement(const std::vector<double>& vec)
 /// compute the sum the elements of a vector
 inline double sumElements(const std::vector<double>& vec)
 {
-    return std::accumulate(vec.begin(), vec.end(), 0.);
+    double result = 0;
+    for(size_t i=0, size=vec.size(); i<size; i++)
+        result += vec[i];
+    return result;
 }
 
 /// compute element-wise sum of several vectors
@@ -589,16 +591,16 @@ public:
 
     /// Coulomb logarithm that enters the expressions for diffusion coefs (fixed)
     const double coulombLog;
-    
+
     /// whether the density of evolving system contributes to the potential (fixed)
     const bool selfGravity;
-    
+
     /// whether the stellar potential is updated in the course of simulation (fixed)
     const bool updatePotential;
-    
+
     /// whether to use absorbing (true) or zero-flux (false) boundary condition at hmin (fixed)
     bool absorbingBoundaryCondition;
-    
+
     /// if the boundary condition is absorbing, whether to use loss-cone draining at all energies (fixed)
     bool lossConeDrain;
 
@@ -647,13 +649,13 @@ public:
 
     /// the rate of change of the total mass and total energy due to star formation (evolves)
     double sourceRateMass, sourceRateEnergy;
-    
+
     /// conductive energy flux through the innermost boundary hmin (evolves)
     double drainRateEnergy;
 
     /// grid in phase volume h, (fixed)
     std::vector<double> gridh;
-    
+
     /// arrays of amplitides that define the distribution function (one vector for each component, evolve)
     std::vector< std::vector<double> > gridf;
 
@@ -675,7 +677,7 @@ public:
     /// array of projections of the function that defines the source (star formation rate);
     /// evolves because the mapping between radius and phase volume changes with time
     std::vector< std::vector<double> > gridSourceRate;
-    
+
     /// draining rate due to the angular-momentum flux into the loss cone of the central black hole
     /// (projection matrix computed from the loss rate, one per species, evolves)
     std::vector< math::BandMatrix<double> > drainMatrix;
@@ -768,6 +770,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     // set up the grid parameters
     size_t gridSize = params.gridSize ?: DEFAULT_GRID_SIZE;
     double hmin = params.hmin ?: INFINITY, hmax = params.hmax ?: 0.;
+    bool fixmin = params.hmin!=0, fixmax = params.hmax!=0;
 
     // determine if we have a central black hole with a non-zero capture radius -
     // if yes, need to adjust the innermost boundary of phase volume.
@@ -779,6 +782,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
         coord::GradCyl dPhi;
         data->currPot->eval(coord::PosCyl(rmin,0,0), &Phi, &dPhi);
         hmin = data->phasevol->value(Phi + 0.5 * rmin * dPhi.dR);
+        fixmin = true;
     }
 
     // if necessary, set up the outer boundary expressed in terms of radius, not h
@@ -787,8 +791,9 @@ FokkerPlanckSolver::FokkerPlanckSolver(
         double Phi;
         data->currPot->eval(coord::PosCyl(params.rmax,0,0), &Phi, &dPhi);
         hmax = data->phasevol->value(Phi);
+        fixmax = true;
     }
-    
+
     // create the grid in phase volume (h) if its parameters were provided
     if(hmin>0. && hmax>hmin)
         data->gridh = math::createExpGrid(gridSize, hmin, hmax);
@@ -803,10 +808,10 @@ FokkerPlanckSolver::FokkerPlanckSolver(
 
         // if no input grid was provided, take the min/max values of h from the grid returned
         // by the Eddington routine (in case of several components, take the most extreme values)
-        if(data->gridh.empty()) {
+        if(!fixmin)
             hmin = std::min(hmin, gridh.front());
+        if(!fixmax)
             hmax = std::max(hmax, gridh.back());
-        }
     }
 
     // create a new grid, uniform in log(h)
@@ -896,7 +901,7 @@ void FokkerPlanckSolver::reinitPotential(double deltat)
 
         // construct the combined DF of all components
         math::PtrFunction df = impl->getInterpolatedFunction(sumVectors(data->gridf));
-        
+
         // create an auxiliary grid in h and convert it to a grid in radius
         unsigned int gridRsize = std::min<unsigned int>(100, data->gridh.size()/2);
         std::vector<double> gridr = math::createExpGrid(gridRsize,
@@ -1220,7 +1225,7 @@ double FokkerPlanckSolver::evolve(double deltat)
 
     data->prevdeltat = deltat;
     data->numSteps++;
-    
+
     return maxdeltaf;
 }
 

@@ -164,7 +164,7 @@ struct BandMatrix: public IMatrix<NumT> {
     /// \param[in]  value (optional)  is the initial value of all elements;
     /// \throw  std::invalid_argument if bandwidth>=size.
     BandMatrix(size_t size, size_t bandwidth, const NumT value=0);
-    
+
     /// create a diagonal matrix from the vector of diagonal values
     explicit BandMatrix(const std::vector<NumT>& src) :
         IMatrix<NumT>(src.size(), src.size()), band(0), data(src) {}
@@ -172,11 +172,11 @@ struct BandMatrix: public IMatrix<NumT> {
     /// access the matrix element for reading
     /// \throw std::out_of_range if the element is outside the band
     const NumT& operator() (size_t row, size_t col) const;
-    
+
     /// access the matrix element for writing
     /// \throw std::out_of_range if the element is outside the band
     NumT& operator() (size_t row, size_t col);
-    
+
     /// return the number of nonzero elements
     virtual size_t size() const;
 
@@ -404,8 +404,8 @@ bool allZeros(const IMatrix<NumT>& mat)
 /** zero out array elements with magnitude smaller than the threshold
     times the maximum element of the array;
 */
-void eliminateNearZeros(std::vector<double>& vec, double threshold=1e-15);
-void eliminateNearZeros(Matrix<double>& mat, double threshold=1e-15);
+void eliminateNearZeros(std::vector<double>& vec, double threshold=2e-15);
+void eliminateNearZeros(     Matrix<double>& mat, double threshold=2e-15);
 
 ///@}
 /// \name  a subset of BLAS routines

@@ -1033,7 +1033,7 @@ int LUDecomposition(PPdbl a, const int n, Pint indx, int& d)
     d = 1;
     for(i=0; i<n; i++) {
         big = 0.;
-        for(j=0; j<n; j++) big = std::max(big, fabs(a[i][j]));
+        for(j=0; j<n; j++) big = fmax(big, fabs(a[i][j]));
         if(big==0.) return Numerics_message("LUDecomposition: singular matrix");
         vv[i] = 1./big;
     }
@@ -1190,7 +1190,7 @@ int LUDecomposition(PPflt a, const int n, Pint indx, int& d)
     d = 1;
     for(i=0; i<n; i++) {
         big = 0.;
-        for(j=0; j<n; j++) big = std::max(double(big), fabs(a[i][j]));
+        for(j=0; j<n; j++) big = fmax(double(big), fabs(a[i][j]));
         if(big==0.) return Numerics_message("LUDecomposition: singular matrix");
         vv[i] = 1./big;
     }

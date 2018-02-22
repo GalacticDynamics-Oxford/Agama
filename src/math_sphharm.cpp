@@ -18,7 +18,19 @@ namespace math{
 inline void legendrePmm(int m, double costheta, double sintheta, 
     double& prefact, double* value, double* der, double* der2)
 {
-    prefact = 0.5/M_SQRTPI;
+    const int MMAX = 16;   // # of pre-computed coefs in the tables below for the most common values of m
+    const double PREFACT[MMAX+1] = { 0.2820947917738782, 
+        0.3454941494713355,    0.1287580673410632,    0.02781492157551894,   0.004214597070904597, 
+        0.0004911451888263050, 4.647273819914057e-05, 3.700296470718545e-06, 2.542785532478802e-07,
+        1.536743406172476e-08, 8.287860012085477e-10, 4.035298721198747e-11, 1.790656309174350e-12,
+        7.299068453727266e-14, 2.751209457796109e-15, 9.643748535232993e-17, 3.159120301003413e-18 };
+    const double COEF[MMAX+1] =  { 0.2820947917738782,
+        -0.3454941494713355, 0.3862742020231896, -0.4172238236327841, 0.4425326924449826,
+        -0.4641322034408582, 0.4830841135800662, -0.5000395635705506, 0.5154289843972843,
+        -0.5295529414924496, 0.5426302919442215, -0.5548257538066191, 0.5662666637421912,
+        -0.5770536647012670, 0.5872677968601020, -0.5969753602424046, 0.6062313441538353 };
+
+    prefact = m<=MMAX ? PREFACT[m] : 0.5/M_SQRTPI * sqrt( (2*m+1) / factorial(2*m) );
     if(m == 0) {
         if(der)
             *der = 0;
@@ -27,7 +39,6 @@ inline void legendrePmm(int m, double costheta, double sintheta,
         *value   = prefact;
         return;
     }
-    prefact *= sqrt( (2*m+1) / factorial(2*m) );
     if(m == 1) {
         if(der)
             *der = -costheta * prefact;
@@ -36,8 +47,8 @@ inline void legendrePmm(int m, double costheta, double sintheta,
         *value   = -sintheta * prefact;
         return;
     }
-    double coef  = prefact * dfactorial(2*m-1) * (m%2 == 1 ? -1 : 1);
-    double sinm2 = pow(sintheta, m-2);
+    double coef  = m<=MMAX ? COEF[m] : prefact * dfactorial(2*m-1) * (m%2 == 1 ? -1 : 1);
+    double sinm2 = math::pow(sintheta, m-2);
     if(der)
         *der = m * coef * sinm2 * sintheta * costheta;
     if(der2)
@@ -58,7 +69,7 @@ void sphHarmArray(const unsigned int lmax, const unsigned int m, const double ta
             deriv2Array[0] = 0;
         return;
     }
-    const double ct = 2 * tau / (1 + tau*tau);        // cos(theta)
+    const double ct =      2 * tau  / (1 + tau*tau);  // cos(theta)
     const double st = (1 - tau*tau) / (1 + tau*tau);  // sin(theta)
     double prefact; // will be initialized by legendrePmm
     legendrePmm(m, ct, st, prefact, resultArray, derivArray, deriv2Array);

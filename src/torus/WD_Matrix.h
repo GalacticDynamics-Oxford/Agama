@@ -461,9 +461,8 @@ inline void GaussInvert(Matrix<T,N,N>& A)
     Vector<int,N>   ipiv=0,indxr,indxc;
     for(i=0; i<N; i++) {
         big = Zero;
-        for(j=0; j<N; j++)
-        if(ipiv(j)!=1)
-            for(k=0; k<N; k++) {
+        for(j=0; j<N; j++) {
+            if(ipiv(j)!=1) for(k=0; k<N; k++) {
                 if(ipiv(k)==0) {
                     if(WDabs(A(j,k)) >= big) {
                         big  = WDabs(A(j,k));
@@ -473,8 +472,8 @@ inline void GaussInvert(Matrix<T,N,N>& A)
                 } else if(ipiv(k)>1) A.error(" Matrix to invert is singular");
             }
             ++(ipiv[icol]);
-            if(irow != icol) {
-            for(l=0; l<N; l++) WDswap(A[irow][l], A[icol][l]);
+            if(irow != icol)
+                for(l=0; l<N; l++) WDswap(A[irow][l], A[icol][l]);
         }
         indxr[i] = irow;
         indxc[i] = icol;

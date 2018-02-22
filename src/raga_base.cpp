@@ -1,6 +1,7 @@
 #include "raga_base.h"
 #include "potential_base.h"
 #include "math_ode.h"
+#include "math_core.h"
 #include "math_specfunc.h"
 #include "utils.h"
 #include <cmath>
@@ -11,15 +12,16 @@ void BHParams::keplerOrbit(double t, double bhX[], double bhY[], double bhVX[], 
 {
     if(sma!=0) {
         double omegabh = sqrt(mass/pow_3(sma));
-        double eta, sinE, cosE;
-        math::solveKepler(ecc, omegabh * t + phase, eta, sinE, cosE);
+        double eta = math::solveKepler(ecc, omegabh * t + phase);
+        double sineta, coseta;
+        math::sincos(eta, sineta, coseta);
         double ell = sqrt(1 - ecc * ecc);
         double a   = -sma / (1 + q);
-        double dotE= omegabh / (1 - ecc * cosE);
-        bhX [1] = (cosE - ecc) * a;
-        bhY [1] =  sinE * a * ell;
-        bhVX[1] = -dotE * a * sinE;
-        bhVY[1] =  dotE * a * cosE * ell;
+        double doteta = omegabh / (1 - ecc * coseta);
+        bhX [1] = (coseta - ecc) * a;
+        bhY [1] =  sineta * a * ell;
+        bhVX[1] = -doteta * a * sineta;
+        bhVY[1] =  doteta * a * coseta * ell;
         bhX [0] = -q * bhX [1];
         bhY [0] = -q * bhY [1];
         bhVX[0] = -q * bhVX[1];

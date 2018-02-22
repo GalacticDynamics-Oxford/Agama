@@ -138,5 +138,5 @@ template std::vector<double> createInterpolatedDFAmplitudesFromActionSamples<3>(
     const std::vector<actions::Actions>&, const std::vector<double>&,
     const BaseActionSpaceScaling&, const std::vector<double>&,
     const std::vector<double>&, const std::vector<double>&);
-    
+
 }  // namespace df

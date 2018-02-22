@@ -18,11 +18,6 @@
 #include <cmath>
 #include <ctime>
 
-//#define TEST_OLD_TORUS
-#ifdef TEST_OLD_TORUS
-#include "torus/Toy_Isochrone.h"
-#endif
-
 // whether to do performance test
 //#define PERFTEST
 
@@ -63,13 +58,6 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     }
     double ifd = 1e-5;
     int numWarnings = 0;
-#ifdef TEST_OLD_TORUS
-    Torus::IsoPar toypar;
-    toypar[0] = sqrt(M);
-    toypar[1] = sqrt(b);
-    toypar[2] = Lz(initial_conditions);
-    Torus::ToyIsochrone toy(toypar);
-#endif
     for(size_t i=0; i<traj.size(); i++) {
         statE.add(totalEnergy(pot, traj[i]));
         traj[i].phi = math::wrapAngle(traj[i].phi);
@@ -105,27 +93,6 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         aoldI = anewI;
         aoldS = anewS;
         aoldF = anewF;
-#ifdef TEST_OLD_TORUS
-        coord::PosVelSph ps(toPosVelSph(traj[i]));
-        Torus::PSPT pvs;
-        pvs[0]=ps.r; pvs[1]=M_PI/2-ps.theta; pvs[2]=ps.phi;
-        pvs[3]=ps.vr; pvs[4]=-ps.vtheta*ps.r; pvs[5]=ps.vphi*traj[i].R;
-        Torus::PSPT aaT = toy.Backward3D(pvs); // (J_r,J_z,J_phi,theta_r,theta_z,theta_phi)
-        Torus::PSPT pvi = toy.Forward3D(aaT);
-        reversible_iso &= 
-            math::fcmp(pvs[0], pvi[0], eps) == 0 && math::fcmp(pvs[1], pvi[1], eps) == 0 &&
-            math::fcmp(pvs[2], pvi[2], eps) == 0 && math::fcmp(pvs[3]+1, pvi[3]+1, eps) == 0 &&
-            math::fcmp(pvs[4]+1, pvi[4]+1, eps) == 0 && math::fcmp(pvs[5]+1, pvi[5]+1, eps) == 0;
-        reversible_iso &=
-            math::fcmp(aaT[0]+1, aaI.Jr+1, eps) == 0 &&  // ok when Jr<<1
-            math::fcmp(aaT[1], aaI.Jz, eps) == 0 &&
-            math::fcmp(aaT[2], aaI.Jphi, eps) == 0 &&
-            (aaI.Jr<epsd || math::fcmp(aaT[3], aaI.thetar, eps) == 0) &&
-            (aaI.Jz==0 || math::fcmp(math::wrapAngle(aaT[4]+1), math::wrapAngle(aaI.thetaz+1), eps) == 0) &&
-            math::fcmp(aaT[5], aaI.thetaphi, eps) == 0;
-        if(!reversible_iso)
-            std::cout << aaT <<'\t' <<aaI << '\n';
-#endif
         // inverse transformation for spherical potential
         coord::PosVelCyl pinv = actions::mapSpherical(pot, aaS, &frSinv);
         reversible_sph &= equalPosVel(pinv, traj[i], epss) && 
@@ -271,9 +238,9 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     }
     double t_iso_map = (std::clock()-clock)*1.0/CLOCKS_PER_SEC;
 
-    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_iso_act, 4)<<
-    ",  act+ang="<<utils::pp(npoints*ncycles/t_iso_ang, 4)<<
-    ",  map="<<utils::pp(npoints*ncycles/t_iso_map, 4)<<std::endl;
+    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_iso_act, 5)<<
+    ",  act+ang="<<utils::pp(npoints*ncycles/t_iso_ang, 5)<<
+    ",  map="<<utils::pp(npoints*ncycles/t_iso_map, 5)<<std::endl;
 #endif
 
     std::cout << "Spherical"
@@ -301,9 +268,9 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     }
     double t_sph_map = (std::clock()-clock)*1.0/CLOCKS_PER_SEC;
 
-    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_sph_act, 4)<<
-    ",  act+ang="<<utils::pp(npoints*ncycles/t_sph_ang, 4)<<
-    ",  map="<<utils::pp(npoints*ncycles/t_sph_map, 4)<<std::endl;
+    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_sph_act, 5)<<
+    ",  act+ang="<<utils::pp(npoints*ncycles/t_sph_ang, 5)<<
+    ",  map="<<utils::pp(npoints*ncycles/t_sph_map, 5)<<std::endl;
 #endif
 
     std::cout << "Interpol."
@@ -332,9 +299,9 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     }
     double t_grid_map = (std::clock()-clock)*1.0/CLOCKS_PER_SEC;
 
-    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_grid_act, 4)<<
-    ",  act+ang="<<utils::pp(npoints*ncycles/t_grid_ang, 4)<<
-    ",  map="<<utils::pp(npoints*ncycles/t_grid_map, 4)<<std::endl;
+    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_grid_act, 5)<<
+    ",  act+ang="<<utils::pp(npoints*ncycles/t_grid_ang, 5)<<
+    ",  map="<<utils::pp(npoints*ncycles/t_grid_map, 5)<<std::endl;
 #endif
 
     std::cout << "Axi.Fudge"
@@ -354,8 +321,8 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         actions::actionAnglesAxisymFudge(pot, traj[i/ncycles], ifd);
     double t_fudge_ang = (std::clock()-clock)*1.0/CLOCKS_PER_SEC;
 
-    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_fudge_act, 4)<<
-    ",  act+ang="<<utils::pp(npoints*ncycles/t_fudge_ang, 4)<<std::endl;
+    std::cout << "eval/s:  actions="<<utils::pp(npoints*ncycles/t_fudge_act, 5)<<
+    ",  act+ang="<<utils::pp(npoints*ncycles/t_fudge_ang, 5)<<std::endl;
 #endif
 
     std::cout << 

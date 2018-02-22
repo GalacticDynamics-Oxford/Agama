@@ -18,8 +18,8 @@
 #include <fstream>
 #include "Fit.h"
 #include "Orb.h"
-#include "WD_Numerics.h"
 #include <cmath>
+#include "WD_Numerics.h"
 
 namespace torus{
 
@@ -934,13 +934,14 @@ static int AddStrip(const PSPT& Jt3, Potential* Phi, const GenPar& Sn,
     PSPT   jt3=Jt3>>GF, QP3;
     double dt,dt1,dt2,dt3,time=0.,t1=Jt3(3),t2=Jt3(4),t3=Jt3(5),//t3new,Lperp,u,
            dT=Pi/double(Nr);
-    if(jt3(0)<0.) jt3[0]=tiny; if(jt3(1)<0.) jt3[1]=tiny;
+    if(jt3(0)<0.) jt3[0]=tiny;
+    if(jt3(1)<0.) jt3[1]=tiny;
     QP3 = jt3 >> TM >> PT;
     //cerr << QP3 << " " << jt3 << "\n";
     //cerr << jt3 << "\n";
     if(toruserrno) {
 	if(err) cerr<<"error in map, toruserrno="<<toruserrno<<'\n';
-        return 1;
+            return 1;
     }
     
     AddEquation(g,M,T1,T2,T3,I,Tdim,Nr,Mdim,Sn,t1,t2,t3,dT,time,grid);
@@ -1433,8 +1434,8 @@ int AllFit(	            // return:	error flag (see below)
     }
   } else if(!Om(0) || !Om(1) || !Om(2))                 // if no estimates
     Om = Phi->KapNuOm(Phi->RfromLc(WDabs(J(2))));         // and doing angle fit
-    if(!isFinite(Om(0)+Om(1)+Om(2)))
-        cerr << "**BAD** ";
+  if(!isFinite(Om(0)+Om(1)+Om(2)))
+    cerr << "**BAD** ";
   if(err>=2) cerr << "Omega estimate: "<< Om(0)<<','<<Om(1)<<','<<Om(2) << "\n";
   fac  = 1. / ( hypot(Om(0),Om(1))*Jabs );
   d[0] = dH*fac;
@@ -1589,10 +1590,10 @@ int AllFit(	            // return:	error flag (see below)
 	  if(J(1) == 0.) SN.Jz0();
 	  while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	  if(!J(1)) nrs = OD*(SN.NumberofTerms());
-      if(useNewAngMap)
-          F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
-      else
-          F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+	  if(useNewAngMap)
+	    F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+	  else
+	    F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	  if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	  if(F) {
 	    return -4;
@@ -1943,10 +1944,10 @@ int PTFit(	            // return:	error flag (see below)
 	  if(J(1) == 0.) SN.Jz0();
 	  while( ((2*nrs-1)*nrs) <= OD*(2*nrs+SN.NumberofTerms())) nrs++;
 	  if(!J(1)) nrs = OD*(SN.NumberofTerms());
-        if(useNewAngMap)
-            F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
-        else
-	  F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+	  if(useNewAngMap)
+	    F = dSbySampling(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
+	  else
+	    F = dSbyInteg(J,Phi,nrs,SN,PT,TM,dO,Om,d,AP,ipc,err);
 	  if(F) {
 	    if(err) cerr<<" dSbyInteg() returned "<<F<<'\n';
 	    return -4;

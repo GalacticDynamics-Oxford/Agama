@@ -1,9 +1,32 @@
 This is the AGAMA galaxy modelling framework. To get it working on your computer:
 
-1.  Download the repository.
-2a. Install the required libraries (presently only GSL >= 1.15, configure with CFLAGS=-fPIC):
+Download and unpack https://github.com/GalacticDynamics-Oxford/Agama/archive/master.zip
+
+There are two alternative ways of building and installing the library:
+- automatic, using the provided script setup.py (preferred)
+- manual
+
+In the automatic mode, go to the root folder of the archive (containing setup.py) and run
+  python setup.py install --user
+(or python3 with the same arguments), and follow the instructions.
+One can also install with pip: in the same folder, you may run
+  pip install --user ./
+or even without unpacking, just run
+  pip install --user agama.zip
+or install from the PyPI repository:
+  pip install --user agama
+Note that pip hides most of the messages printed during installation, but the questions
+requiring user input should nevertheless appear on the screen.
+The setup.py script will determine the supported compilation options, download and compile
+missing third-party libraries, compile the Agama library itself and the Python interface for it,
+and install it to the user-specific site-packages folder in your current python distribution
+(most likely $HOME/.local/lib/pythonX.Y/site-packages/agama).
+
+In the manual mode, follow these steps:
+
+1a. Install the required libraries (presently only GSL >= 1.15, configure with CFLAGS=-fPIC):
     ftp://ftp.gnu.org/gnu/gsl/gsl-latest.tar.gz
-2b. Although not compulsory, you may want to download and install optional libraries:
+1b. Although not compulsory, you may want to download and install optional libraries:
     - Eigen library for highly optimized linear algebra routines - highly recommended,
     (in its absense the non-optimized substitutes from GSL will be used);
     its use slows down compilation quite dramatically, but this more than pays off at runtime.
@@ -22,137 +45,45 @@ This is the AGAMA galaxy modelling framework. To get it working on your computer
     - Cuba library for multidimensional integration (the alternative, and actually preferred,
     is Cubature library that is bundled with this distribution):
     http://www.feynarts.de/cuba/
-    - galpy - this distribution contains a module for galpy, that can be used instead of
-    its built-in potentials, orbit integration and action-finding routines.
-Note: to use the Python extension, any external libraries to be statically linked with it
+    Note: to use the Python extension, any external libraries to be statically linked with it
     need to be compiled with -fPIC flag.
-3.  You need to create a file called Makefile.local, which is included by the Makefile
+2.  You need to create a file called Makefile.local, which is included by the Makefile
     and contains path names and compiler flags specific to your own computer.
-    An example is given below (you will need to change the pathnames).
+    An example is given in Makefile.local.template (you will need to change the pathnames).
     The reason for keeping it separate from the main Makefile is that the latter may be
     updated from the repository while keeping the local settings unchanged.
-4.  In order to make the Python extension available for import, it should be either copied
-    to its site-packages folder, or the path to it be added to PYTHONPATH environment variable,
-    as shown in the example below.
+    This file is also created by setup.py, so you may re-use it later if you need to manually
+    recompile the library.
+3.  Run 'make' to compile everything:
+    first the shared library is built and placed into lib/agama.so,
+    then the tests and example programs are compiled and placed into exe folder.
+4.  Run 'make test' to run a series of tests (may need up to a few minutes).
+5.  In order to make the Python extension module available for import, it should be either copied
+    to its site-packages folder, or the path to it be added to PYTHONPATH environment variable.
+    as shown in the example below: assuming that the folder containing this file is called
+    /path/to/agama, the extension module is located in /path/to/agama/lib/agama.so
+    (this shared library may be directly imported by python):
+    export PYTHONPATH=$(PYTHONPATH):/path/to/agama/lib
+    Alternatively, the root folder itself may be used as the 'package directory': it contains
+    __init__.py which loads both the C++ shared library from lib/agama.so and some Python routines
+    from py/pygama.py, and places them into the same namespace for convenience.
+    Hence PYTHONPATH would be augmented with '/path/to'
+    since this is the folder containing a sub-folder named 'agama'.
     To make it permanently available, you may add this line to .bashrc or its analog.
-5.  Typing make compiles everything.
-    First the library itself is built and placed into lib/agama.so (shared library) and
-    lib/libagama.a (static library).
-    The former one may be used as the python extension module, if it is found in PYTHONPATH.
-    Then the test and example programs are compiled and placed into exe folder.
 
-Makefile.local (copy and paste everything below into your file and change where required)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If you have the NEMO stellar-dynamics toolbox installed, the make command will also copy agama.so
+to the folder $(NEMOOBJ)/acc/, making it available as an external potential for nemo programs
+(in particular, gyrfalcon).
 
+If you have the AMUSE framework installed, the make command will also build a separate AMUSE plugin
+and place it into the folder with other community codes (it also contains an example script).
 
-# machine-specific settings
-
-# compiler and linker
-CXX  = g++
-FC   = gfortran
-ARC  = ar
-LINK = $(CXX)
-
-# compilation flags:
-# CXXFLAGS apply to the complilation of both the AGAMA library and all programs that use it;
-# LFLAGS   determine the linker option for both the AGAMA library and any programs that use it;
-# DEFINES  are only relevant  for the compilation of the AGAMA library, and determine the available features;
-# INCLUDES are also used only for the compilation of the AGAMA library, should match the DEFINES;
-# LIBS     list the external libraries for the compilation of the AGAMA shared library only.
-# A note about optimization-specific flags: -march=native is not supported on some machines,
-# and may be replaced by -march=core2 or whatever your processor name is.
-# Intel compiler tends to perform very aggressive floating-point optimizations, which may lead to
-# irreproducible run-to-run results because of subtle interplay between loop vectorization, OpenMP
-# parallelization, and memory alignment; to prevent this, add the flag "-qno-opt-dynamic-align" to CXXFLAGS.
-# Also do not use -O3 with Intel compiler and the Eigen library - it thwarts some of linear algebra routines.
-# These problems may be avoided altogether by using -fp-model:precise switch, but it prevents many more
-# useful optimizations.
-# The clang compiler used by default on some (many?) Mac OS versions does not support OpenMP (duh!...),
-# so one has to either disable it by removing the "-fopenmp" flag below (and of course sacrifice a lot
-# in performance), or install an alternative compiler such as gcc or icc.
-# Finally, -fPIC is necessary on 64-bit systems for compiling into a shared library
-# (dunno why it isn't on by default!), and since the shared library agama.so includes all relevant
-# third-party libraries (GSL, UNSIO, etc.), they also must be compiled with this flag!
-# E.g., in the case of GSL you would need to run its "./configure" script with an extra option " --with-pic"
-CXXFLAGS += -fPIC -fopenmp -Wall -O2 -march=native -I$(SRCDIR)
-LFLAGS   += -fPIC -fopenmp
-
-# uncomment if you have a C++11-compatible compiler (it is not required but may be more efficient)
-CXXFLAGS += -std=c++11
-
-# GSL library is required; check the path names;
-# it is recommended to link against the static library libgsl.a, so that it will be included into
-# the shared library agama.so - for this you may need to replace -L/path -lgsl with the full path
-# to the static library (e.g. /usr/local/lib/libgsl.a, and similarly for libcblas.a), because
-# by default the linker prefers shared libgsl.so over static libgsl.a;
-# note that GSL must be compiled with -fPIC flag
-INCLUDES += -I/path/to/gsl/include
-LIBS     += -L/path/to/gsl/lib -lgsl -lgslcblas
-
-# uncomment and check the dirnames to build the Python plugin.
-# It gets a bit tricky when there is more than one version of Python installed in the system,
-# e.g. a Mac OS with a system-default /usr/bin/python, another one coming from MacPorts or Homebrew,
-# and yet another one from Anaconda. In this case one has to be careful in choosing the correct paths.
-# Usually the default python version can be found by typing "which python" in the terminal,
-# but getting the path to the python shared library is not so easy;
-# one may end up printing all existing versions by typing
-# > find / -name libpython* 2>/dev/null
-# and then choosing the correct one manually (i.e. if the Python executable is in /opt/local/bin,
-# the appropriate shared library would most likely be also in /opt/local/lib/..., etc.)
-# The full path to numpy is easier to find: just type
-# > python -c 'import numpy; print(numpy.__path__)'
-# and then append "/core/include" to the returned string.
-# Linking to an incorrect version of Python (i.e. not the one that is invoked when you type 'python'
-# in the terminal) may result in various errors when trying to "import agama" within Python, such as
-# "ImportError: numpy.core.multiarray failed to import",  or
-# "RuntimeError: module compiled against API version 9 but this version of numpy is 8",  or
-# "Fatal Python error: PyThreadState_Get: no current thread".
-# In order to make the Agama extension available to Python, you may need to add the path to lib/agama.so
-# to the PYTHONPATH environment variable (better to do put it into .bashrc or .cshrc):
-# > export PYTHONPATH=/path/to/agama/lib:$PYTHONPATH   (for bash)
-# > setenv PYTHONPATH /path/to/agama/lib:$PYTHONPATH   (for csh/tcsh)
-# If everything works well, you should be able to run
-# > python -c 'import agama; print(agama.__version__)'
-# or, better, run some of the example scripts in the pytests folder.
-# on MacOS the following line may need to be added:
-# LIBS    += -L/System/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/
-# on some systems -lpython should be replaced by -lpython2.7 or -lpython2.6
-DEFINES  += -DHAVE_PYTHON
-INCLUDES += -I/usr/include/python -I/path/to/numpy/core/include
-LIBS     += -lpython
-
-# uncomment the three lines below and adjust the paths to use Cuba library for multidimensional integration
-# (otherwise use Cubature library bundled with the code).
-# Note that Cuba is apparently less accurate at least for CylSpline integrands, so is not recommended.
-#DEFINES  += -DHAVE_CUBA
-#INCLUDES += -I/path/to/cuba
-#LIBS     += -L/path/to/cuba -lcuba
-
-# uncomment the lines below to use Eigen library for optimized linear algebra operations
-# (strongly recommended for certain tasks, e.g. Schwarzschild modelling; otherwise slower
-# internal and GSL analogues will be used); it's a header-only library and needs no linking
-#DEFINES  += -DHAVE_EIGEN
-#INCLUDES += -I/path/to/eigen
-
-# uncomment to use the GNU linear programming library (needed for linear optimization solver);
-# note that if you have CVXOPT, then GLPK is not needed
-#DEFINES  += -DHAVE_GLPK
-#INCLUDES += -I/path/to/glpk
-#LIBS     += -L/path/to/glpk -lglpk
-
-# uncomment to enable the quadratic optimization solver CVXOPT (written in Python);
-# this only has effect if HAVE_PYTHON is defined.
-# The easiest way to install CVXOPT is via 'pip install --user cvxopt', but this only gets you
-# the binary distribution (available from Python, but not immediately useful to the C++ library).
-# Therefore, you also need to download the source distribution, unpack it somewhere, and use this
-# path appended with "src/C" in the INCLUDES directive below (this folder should contain cvxopt.h),
-# or just copy the file cvxopt.h into agama/src.
-#DEFINES  += -DHAVE_CVXOPT
-#INCLUDES += -I/path/to/cvxopt/src/C
-
-# uncomment the lines below to use UNSIO library for input/output of N-body snapshots
-# in NEMO and GADGET formats (in its absense only the text format is available)
-# same considerations for static linking as for GSL
-#DEFINES  += -DHAVE_UNSIO
-#INCLUDES += -I/path/to/unsio
-#LIBS     += -L/path/to/unsio -lunsio -lnemo
+After compilation, you may wish to run some tests - either in the folder where the library has been
+compiled, or in the site-packages/agama folder where it was installed. This is done by running
+> python setup.py test
+or
+> make test
+and should take no more than a few minutes, displaying "OK" or "FAILED" for each test program.
+Of course one may run these tests individually (C++ programs compiled and placed into exe/ subfolder,
+or python scripts in the py/ subfolder), in which case they print out more information.
+They can also serve as the examples of usage, together with other (non-test) example programs.

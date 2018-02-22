@@ -117,7 +117,7 @@ class SphericalModelLocal: public SphericalModel {
 
     /// perform actual initialization of interpolators
     void init(const math::IFunction& df, const std::vector<double>& gridh);
-    
+
 public:
 
     /** Construct the internal interpolators for diffusion coefficients.

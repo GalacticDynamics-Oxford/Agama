@@ -57,6 +57,7 @@ template double estimateFocalDistancePoints(
 
 
 namespace{
+#ifdef OLD_METHOD
 /** find the best-fit value of focal distance for a shell orbit.
     \param[in] traj  contains the trajectory of this orbit in R-z plane,
     \return  the parameter `delta` of a prolate spheroidal coordinate system which minimizes
@@ -78,7 +79,7 @@ double fitFocalDistanceShellOrbit(const std::vector<coord::PosCyl>& traj)
     math::linearMultiFit(coefs, rhs, NULL, result);
     return sqrt( fmax( result[1] * (1 - 1/result[0]), 0) );
 }
-
+#endif
 
 /// function to use in ODE integrator
 class OrbitIntegratorMeridionalPlane: public math::IOdeSystem {
@@ -172,7 +173,7 @@ void findCrossingPointR(
         if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE) { // signal of error
             utils::msg(utils::VL_WARNING, FUNCNAME,
                 "Failed to compute orbit for E="+utils::toString(E,16)+
-                ", Lz="+utils::toString(Lz,16)+", R="+utils::toString(R0,16));        
+                ", Lz="+utils::toString(Lz,16)+", R="+utils::toString(R0,16));
             timeCross  = 0;
             Rcross     = R0;   // this would terminate the root-finder, but we have no better option..
             dRcrossdR0 = NAN;

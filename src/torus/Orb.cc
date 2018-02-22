@@ -13,6 +13,7 @@
 #include <iostream>
 #include <fstream>
 #include "Orb.h"
+#include "WD_Matrix.h"
 
 namespace torus{
 using std::ofstream;

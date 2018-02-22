@@ -20,9 +20,9 @@ const unsigned int INTEGR_ORDER = 10;
     use a higher order for more eccentric orbits, as indicated by the ratio
     of pericenter to apocenter radii (R1/R2) */
 inline unsigned int integrOrder(double R1overR2) {
-    int order;  // base-2 logarithm of R1/R2
-    frexp(R1overR2, &order);
-    return INTEGR_ORDER + std::min<int>(-order, INTEGR_ORDER);
+    int log2;  // base-2 logarithm of R1/R2
+    frexp(R1overR2, &log2);
+    return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - log2);
 }
 
 /// different regimes for calculation of various integrals involving radial velocity
@@ -190,7 +190,7 @@ public:
         if(val)
             *val = v - Jr;
         if(der)
-            *der = 1 / *der;  
+            *der = 1 / *der;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };

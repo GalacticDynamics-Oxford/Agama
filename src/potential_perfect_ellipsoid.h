@@ -25,9 +25,9 @@ public:
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
 
     const coord::ProlSph& coordsys() const { return coordSys; }
-    
+
     virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "OblatePerfectEllipsoid"; return text; }
+    static const char* myName() { static const char* text = "PerfectEllipsoid"; return text; }
     virtual double totalMass() const { return mass; }
 
     /** evaluates the function G(tau) and up to two its derivatives,

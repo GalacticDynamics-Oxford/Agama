@@ -20,7 +20,7 @@ disk-like components) constructed from the sum of density profiles of all releva
 The rationale is that the multipole expansion is obviously not efficient for strongly
 flattened density profiles, but on the other hand, CylSpline is less suitable for extended
 envelopes and/or density cusps; so a combination of them suits the needs of both worlds.
- 
+
 For instance, a single static disk-like object (without a DF) could be represented by
 two components: a DiskAnsatz potential and a composite density profile (sum of DiskDensity
 plus DiskAnsatz with negative sign of surface density density, i.e. the residual), which together
@@ -100,7 +100,7 @@ public:
     /** return the pointer to the internally used density profile for the given component;
         if it returns NULL, then this component does not provide any density to contribute
         to the Multipole or CylSpline potential expansions of the SelfConsistentModel.
-    */    
+    */
     virtual potential::PtrDensity   getDensity()   const = 0;
 
     /** return the pointer to the additional potential component to be used as part of
