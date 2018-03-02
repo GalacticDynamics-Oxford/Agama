@@ -273,7 +273,6 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
       } while(np==Nt || np < Nt/4);
       Rstop = tbR[np-2]-tbz[np-2]/(tbz[np-1]-tbz[np-2])*(tbR[np-1]-tbR[np-2]); 
       set_Rstart(Rstart,Rstop,odiff,dr,done,either_side,first);//pick new Rstart
-      norb++;
     } // end iteration in Rstart
     // clean up tables of values
     RewriteTables(np, time,tbR,tbz,tbr,tbvr,tbpth,tbir, tbth, imax);

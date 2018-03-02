@@ -31,6 +31,10 @@ In the end, the python setup script creates the file Makefile.local and runs mak
 shared library and example programs. If you only need this, you may run python setup.py build_ext
 """
 
+# the setuptools module is not used directly, but it does some weird stuff to distutils;
+# if it is loaded mid-way into the installation, things may get wrong, so we import it beforehand
+try: import setuptools
+except: pass
 import os, sys, subprocess, distutils, distutils.core, distutils.dir_util, distutils.file_util
 try:        from urllib.request import urlretrieve  # Python 3
 except ImportError: from urllib import urlretrieve  # Python 2
@@ -135,7 +139,14 @@ def createMakefile():
         if runCompiler(code=ARCH_CODE, flags=ARCH_FLAG):
             CXXFLAGS += [ARCH_FLAG]
 
-    # [2a]: find out the paths to Python.h and libpythonXX.{a,so} (this is rather tricky) and
+    # [2a]: check that NumPy is present (required by the python interface)
+    try:
+        import numpy
+        NUMPY_INC = '-I'+numpy.get_include()
+    except ImportError:
+        raise CompileError("NumPy is not present - python extension cannot be compiled")
+
+    # [2b]: find out the paths to Python.h and libpythonXX.{a,so} (this is rather tricky) and
     # all other relevant compilation/linking flags needed to build a shared library that uses Python
     PYTHON_INC = '-I'+sysconfig.get_python_inc()
 
@@ -149,29 +160,61 @@ def createMakefile():
     numAttempts = 0
     def tryPythonCode(PYTHON_LIB):
         # test code for a shared library
-        PYTEST_LIB_CODE = '#include <Python.h>\nvoid bla(){Py_Initialize();' +\
-            'PyRun_SimpleString("from distutils import sysconfig;print(sysconfig.PREFIX);");' +\
-            'Py_Finalize();}\n'
+        PYTEST_LIB_CODE = """
+#include "Python.h"
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include "numpy/arrayobject.h"
+void bla() {PyRun_SimpleString("from distutils import sysconfig;print(sysconfig.PREFIX);");}
+void run() {Py_Initialize();bla();Py_Finalize();}
+PyMODINIT_FUNC
+"""
+        if sys.version_info[0]==2:  # Python 2.6-2.7
+            PYTEST_LIB_CODE += """
+initpytest42(void) {
+    Py_InitModule3("pytest42", NULL, "doc");
+    import_array();
+    bla();
+}
+"""
+        else:  # Python 3.x
+            PYTEST_LIB_CODE += """
+PyInit_pytest42(void) {
+    static PyModuleDef moduledef = {PyModuleDef_HEAD_INIT, "pytest42", "doc", -1, NULL};
+    PyObject* mod = PyModule_Create(&moduledef);
+    import_array1(mod);
+    bla();
+    return mod;
+}
+"""
         # test code for a program that loads this shared library
-        PYTEST_EXE_CODE = 'extern void bla();int main(){bla();}\n'
-        PYTEST_LIB_NAME = './pytest.so'
-        PYTEST_EXE_NAME = './pytest.exe'
+        PYTEST_EXE_CODE = 'extern void run();int main(){run();}\n'
+        PYTEST_LIB_NAME = './pytest42.so'
+        PYTEST_EXE_NAME = './pytest42.exe'
         # try compiling the test shared library
         if not runCompiler(code=PYTEST_LIB_CODE, \
-            flags=' '.join([PYTHON_INC, '-shared', '-fPIC'] + PYTHON_LIB), \
+            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_LIB), \
             dest=PYTEST_LIB_NAME):
             return False  # the program couldn't be compiled at all (try the next variant)
         # if succeeded, compile the test program that uses this library
         if not runCompiler(code=PYTEST_EXE_CODE, flags=PYTEST_LIB_NAME, dest=PYTEST_EXE_NAME) \
             or not os.path.isfile(PYTEST_LIB_NAME) or not os.path.isfile(PYTEST_EXE_NAME):
             return False  # can't find compiled test program
-        result = runProgram(PYTEST_EXE_NAME).rstrip()
+        resultexe = runProgram(PYTEST_EXE_NAME).rstrip()
+        # also try loading this shared library as an extension module
+        proc = subprocess.Popen(sys.executable+" -c 'import pytest42'", \
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
+        resultpy = proc.communicate()[0].decode().rstrip()
+        # clean up
         os.remove(PYTEST_EXE_NAME)
         os.remove(PYTEST_LIB_NAME)
-        if result != sysconfig.PREFIX:  # return a warning, the user may still wish to continue
-            return "Test program doesn't seem to use the same version of Python, " +\
-                "or the library path is reported incorrectly: \n" +\
-                "Expected: "+sysconfig.PREFIX+"\nReceived: "+result+"\n" +\
+        # check if the results (reported library path prefix) are the same as we have in this script
+        if resultexe != sysconfig.PREFIX or resultpy != sysconfig.PREFIX:
+            # return a warning, the user may still wish to continue
+            return "Test program doesn't seem to use the same version of Python, "+\
+                "or the library path is reported incorrectly: \n"+\
+                "Expected: "+sysconfig.PREFIX+"\n"+\
+                "Received: "+resultexe+"\n"+\
+                "From py:  "+resultpy+"\n"+\
                 "Should we continue the build (things may go wrong at a later stage)? [Y/N] "
         return True   # this combination of options seems reasonable...
 
@@ -204,17 +247,8 @@ def createMakefile():
         raise CompileError("Could not compile test program which uses libpython" +
             sysconfig.get_config_var('VERSION'))
 
-    # [2b]: find the python library and other relevant linking flags
-    PYTHON_LIB = findPythonLib()
-
-    # [2c]: check that NumPy is present (required by the python interface)
-    try:
-        import numpy
-        NUMPY_INC = '-I'+numpy.get_include()
-    except ImportError:
-        raise CompileError("NumPy is not present - python extension cannot be compiled")
-
-    # [2d]: flags regarding the python interface
+    # [2c]: find the python library and other relevant linking flags
+    PYTHON_LIB     = findPythonLib()
     COMPILE_FLAGS += ['-DHAVE_PYTHON', PYTHON_INC, NUMPY_INC]
     LINK_FLAGS    += PYTHON_LIB
 
@@ -351,8 +385,8 @@ class MyBuildExt(CmdBuildExt):
                 createMakefile()
         # run custom build step (make)
         say('==== Compiling the C++ library ====\n')
-        self.execute(subprocess.call, ['make'])
-        if not os.path.isfile('agama.so'): raise CompileError("Compilation failed")
+        if subprocess.call('make') != 0 or not os.path.isfile('agama.so'):
+            raise CompileError("Compilation failed")
         if not os.path.isdir(self.build_lib): return  # this occurs when running setup.py build_ext
         # copy the shared library and executables to the folder where the package is being built
         distutils.file_util.copy_file('Makefile.local', os.path.join(self.build_lib, 'agama'))
@@ -390,6 +424,7 @@ distutils.core.setup(
         ['Makefile', 'Makefile.local.template', 'Doxyfile', 'INSTALL', 'LICENSE', 'README'] },
     ext_modules      = [distutils.extension.Extension('', [])],
     cmdclass         = {'build_ext': MyBuildExt, 'test': MyTest},
+    zip_safe         = False,
     classifiers      = [
     'Development Status :: 4 - Beta',
     'Intended Audience :: Science/Research',

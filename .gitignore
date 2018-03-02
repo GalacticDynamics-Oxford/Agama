@@ -5,6 +5,7 @@ doc/*.out
 doc/*.toc
 doc/bib.pl
 exe/*
+extras/*
 obj/*
 doxy/*
 temp/*

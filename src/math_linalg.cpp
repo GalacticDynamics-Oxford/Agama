@@ -520,24 +520,15 @@ inline Eigen::Map<const Eigen::VectorXd> toEigenVector(const std::vector<double>
     return Eigen::Map<const Eigen::VectorXd>(&v.front(), v.size());
 }
 
-template<> void blas_daxpy(double alpha, const Matrix<double>& X, Matrix<double>& Y)
+template<typename MatrixType>
+void blas_daxpy(double alpha, const MatrixType& X, MatrixType& Y)
 {
     if(alpha!=0)
         mat(Y) += alpha * mat(X);
 }
 
-template<> void blas_dmul(double alpha, Matrix<double>& Y)
-{
-    mat(Y) *= alpha;
-}
-
-template<> void blas_daxpy(double alpha, const SparseMatrix<double>& X, SparseMatrix<double>& Y)
-{
-    if(alpha!=0)
-        mat(Y) += alpha * mat(X);
-}
-
-template<> void blas_dmul(double alpha, SparseMatrix<double>& Y)
+template<typename MatrixType>
+void blas_dmul(double alpha, MatrixType& Y)
 {
     mat(Y) *= alpha;
 }
@@ -686,6 +677,20 @@ void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_
     // matrix shape should not have changed
     assert((size_t)mat(B).rows() == B.rows() && (size_t)mat(B).cols() == B.cols());
 }
+
+// explicit function instantiations for two matrix types
+template void blas_daxpy(double, const Matrix<double>&, Matrix<double>&);
+template void blas_daxpy(double, const SparseMatrix<double>&, SparseMatrix<double>&);
+template void blas_dmul(double, Matrix<double>&);
+template void blas_dmul(double, SparseMatrix<double>&);
+template void blas_dgemv(CBLAS_TRANSPOSE, double, const Matrix<double>&,
+    const std::vector<double>&, double, std::vector<double>&);
+template void blas_dgemv(CBLAS_TRANSPOSE, double, const SparseMatrix<double>&,
+    const std::vector<double>&, double, std::vector<double>&);
+template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
+    double, const Matrix<double>&, const Matrix<double>&, double, Matrix<double>&);
+template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
+    double, const SparseMatrix<double>&, const SparseMatrix<double>&, double, SparseMatrix<double>&);
 
 
 // ------ linear algebra routines ------ //
@@ -1490,19 +1495,5 @@ template struct SparseMatrix<float>;
 template struct SparseMatrix<double>;
 template struct Matrix<float>;
 template struct Matrix<double>;
-template void blas_daxpy(double, const std::vector<double>&, std::vector<double>&);
-template void blas_daxpy(double, const Matrix<double>&, Matrix<double>&);
-template void blas_daxpy(double, const SparseMatrix<double>&, SparseMatrix<double>&);
-template void blas_daxpy(double, const BandMatrix<double>&, BandMatrix<double>&);
-template void blas_dgemv(CBLAS_TRANSPOSE, double, const Matrix<double>&,
-    const std::vector<double>&, double, std::vector<double>&);
-template void blas_dgemv(CBLAS_TRANSPOSE, double, const SparseMatrix<double>&,
-    const std::vector<double>&, double, std::vector<double>&);
-template void blas_dgemv(CBLAS_TRANSPOSE, double, const BandMatrix<double>&,
-    const std::vector<double>&, double, std::vector<double>&);
-template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
-    double, const Matrix<double>&, const Matrix<double>&, double, Matrix<double>&);
-template void blas_dgemm(CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
-    double, const SparseMatrix<double>&, const SparseMatrix<double>&, double, SparseMatrix<double>&);
 
 }  // namespace
