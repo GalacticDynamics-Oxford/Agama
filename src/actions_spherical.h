@@ -80,8 +80,9 @@ public:
     /** return the energy corresponding to the given actions */
     double E(const Actions& act) const;
 private:
-    const potential::Interpolator2d interp;  ///< interpolator for potential and peri/apocenter radii
-    const math::CubicSpline2d intJr;         ///< interpolator for the scaled value of radial action
+    const double invPhi0;                 ///< 1/(value of potential at r=0)
+    const potential::Interpolator2d pot;  ///< interpolator for potential and peri/apocenter radii
+    const math::QuinticSpline2d intJr;    ///< interpolator for the scaled value of radial action
 };
 
 typedef ActionFinderSpherical ToyMapSpherical;

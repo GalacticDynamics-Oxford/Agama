@@ -547,8 +547,10 @@ public:
         The latter is 2d array with the following indexing convention:  f(i, j) = f(x[i],y[j]).
         Values of x and y arrays should monotonically increase.
     */
-    BaseInterpolator2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const Matrix<double>& fvalues);
+    BaseInterpolator2d(
+        const  std::vector<double>& xvalues,
+        const  std::vector<double>& yvalues,
+        const IMatrixDense<double>& fvalues);
 
     /** compute the value of the interpolating function and optionally its derivatives at point x,y;
         if the input location is outside the definition region, the result is NaN.
@@ -603,8 +605,11 @@ public:
         The latter is 2d array with the following indexing convention:  f(i,j) = f(x[i],y[j]).
         Values of x and y arrays should monotonically increase.
     */
-    LinearInterpolator2d(const std::vector<double>& xgrid, const std::vector<double>& ygrid,
-        const Matrix<double>& fvalues) : 
+    LinearInterpolator2d(
+        const  std::vector<double>& xgrid,
+        const  std::vector<double>& ygrid,
+        const IMatrixDense<double>& fvalues)
+    : 
         BaseInterpolator2d(xgrid, ygrid, fvalues) {}
 
     /** Compute the value and/or derivatives of the interpolator;
@@ -626,10 +631,19 @@ public:
         Derivatives at the boundaries of definition region may be provided as optional arguments
         (currently a single value per entire side of the rectangle is supported);
         if any of them is NaN this means a natural boundary condition.
+        Optionally, a monotonic regularizing filter may be applied to reduce wiggliness
+        (in this case the spline coefficients are no longer linear functions of input values,
+        and the provided boundary derivatives may not be respected)
     */
-    CubicSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const Matrix<double>& fvalues,
-        double deriv_xmin=NAN, double deriv_xmax=NAN, double deriv_ymin=NAN, double deriv_ymax=NAN);
+    CubicSpline2d(
+        const  std::vector<double>& xvalues,
+        const  std::vector<double>& yvalues,
+        const IMatrixDense<double>& fvalues,
+        bool regularize=false,
+        double deriv_xmin=NAN,
+        double deriv_xmax=NAN,
+        double deriv_ymin=NAN,
+        double deriv_ymax=NAN);
 
     /** compute the value of spline and optionally its derivatives at point x,y */
     virtual void evalDeriv(const double x, const double y,
@@ -652,8 +666,12 @@ public:
         convention:  f(i,j) = f(x[i],y[j]), etc.
         Values of x and y arrays should monotonically increase.
     */
-    QuinticSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy);
+    QuinticSpline2d(
+        const  std::vector<double>& xvalues,
+        const  std::vector<double>& yvalues,
+        const IMatrixDense<double>& fvalues,
+        const IMatrixDense<double>& dfdx,
+        const IMatrixDense<double>& dfdy);
 
     /** Initialize a 2d quintic spline from the provided values of x, y, f(x,y), df/dx, df/dy, and
         the mixed second derivative d2f/dxdy, which improves the accuracy of interpolation.
@@ -661,9 +679,13 @@ public:
         convention:  f(i,j) = f(x[i],y[j]), etc.
         Values of x and y arrays should monotonically increase.
     */
-    QuinticSpline2d(const std::vector<double>& xvalues, const std::vector<double>& yvalues,
-        const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy,
-        const Matrix<double>& d2fdxdy);
+    QuinticSpline2d(
+        const  std::vector<double>& xvalues,
+        const  std::vector<double>& yvalues,
+        const IMatrixDense<double>& fvalues,
+        const IMatrixDense<double>& dfdx,
+        const IMatrixDense<double>& dfdy,
+        const IMatrixDense<double>& d2fdxdy);
 
     /** compute the value of spline and optionally its derivatives at point x,y */
     virtual void evalDeriv(const double x, const double y,
@@ -734,13 +756,15 @@ public:
         fvalues[(i*ny + j) * nz + k] = f(xnodes[i], ynodes[j], znodes[k]);
         b) the array of B-spline amplitudes - in this context, the dimensions of
         the grid of amplitudes should be (nx+2) * (ny+2) * (nz+2).
+        \param[in]  regularize  if true, invokes a monotonic regularization filter.
         \throw std::length_error if the grid sizes are incorrect.
     */
     CubicSpline3d(
         const std::vector<double>& xnodes,
         const std::vector<double>& ynodes,
         const std::vector<double>& znodes,
-        const std::vector<double>& fvalues);
+        const std::vector<double>& fvalues,
+        bool regularize=false);
 
     /** Compute the value of the interpolator at the given point;
         if it is outside the grid boundaries, return NAN.

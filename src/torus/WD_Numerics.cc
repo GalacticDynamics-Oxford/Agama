@@ -551,7 +551,7 @@ void GaussLegendre(Pdbl x, Pdbl w, const int n)
     int j,i,m=(n+1)/2;
     double z1,z,pp,p3,p2,p1;
     for (i=0;i<m;i++) {
-        z=cos(M_PI*(i+0.75)/(n+0.5));
+        z=cos(3.141592653589793*(i+0.75)/(n+0.5));
         do {
             p1 = 1.0;
             p2 = 0.0;

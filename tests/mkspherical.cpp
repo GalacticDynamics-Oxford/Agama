@@ -48,16 +48,17 @@ const char* usage =
     "and/or an N-body snapshot representing random samples from the spherical model.\n\n"
     "Command-line arguments (case-insensitive, default values in brackets):\n"
     "density=...   either (a) the name of the density model, "
-    "or (b) the file name with the cumulative mass profile (text file should contain "
-    "at least two columns: radius and enclosed mass).\n"
+    "or (b) the file name with the cumulative mass profile (text file should contain at least "
+    "two columns: radius and enclosed mass; for instance, it may be produced by mkspherical itself).\n"
     "in=...        (c) file with the input N-body snapshot.\n"
     "extractdf=(false) in case of input N-body snapshot, the distribution function may be "
     "extracted from particle energies (if true) or constructed using the Eddington inversion formula "
     "(default; same approach as for an input analytic density profile).\n"
     "potential=(none)  if provided, specifies the name of the potential model "
     "that may be different from the density profile - in this case the density corresponds to "
-    "a tracer population which does not contribute to the total potential, "
-    "and must be given by a text file (option b).\n"
+    "a tracer population which does not contribute to the total potential, and must be given "
+    "by a text file (option b). Alternatively, the parameters of the potential (possibly composite) "
+    "may be provided in an INI file, and the file name be given in this argument.\n"
     "mbh=(0)       the mass of a central black hole (if nonzero, it is added to the overall potential; "
     "moreover, if any particle in the input N-body snapshot is at origin, "
     "its mass is added to the central black hole and excluded from the density model).\n"
@@ -146,6 +147,9 @@ int main(int argc, char* argv[])
         // check if a separate potential was also provided
         if(inputpotential.empty()) {
             pot = potential::Multipole::create(*dens, 0, 0, gridsize, rmin, rmax);
+        } else if(utils::fileExists(inputpotential)) {
+            // create a (possibly composite) potential from the parameters provided in an INI file
+            pot = potential::createPotential(inputpotential);
         } else {
             // the createPotential() routine reads the potential name from the 'type=...' parameter
             args.set("type", inputpotential);

@@ -23,9 +23,9 @@ The other two optional libraries (GLPK and UNSIO) are ignored if not found:
 GLPK is superseded by CVXOPT for all practical purposes, and the N-body snapshot manipulation
 in Python is more easily done with other libraries, e.g., Pynbody.
 
-In case of problems with automatic downloading of missing libraries, or if you want to provide
-them manually, create a subdirectory "extras/" and place header files in "extras/include" and
-libraries in "extras/lib".
+In case of problems with automatic downloading of missing libraries (which may occur when using
+a proxy server), or if you want to provide them manually, create a subdirectory "extras/"
+and place header files in "extras/include" and libraries in "extras/lib".
 
 In the end, the python setup script creates the file Makefile.local and runs make to build the C++
 shared library and example programs. If you only need this, you may run python setup.py build_ext
@@ -138,6 +138,11 @@ def createMakefile():
         ARCH_FLAG = '-march=core2'  # try a less ambitious option
         if runCompiler(code=ARCH_CODE, flags=ARCH_FLAG):
             CXXFLAGS += [ARCH_FLAG]
+
+    # [1e]: special treatment for Intel compiler to restore determinism in OpenMP-parallelized loops
+    INTEL_FLAG = '-qno-opt-dynamic-align'
+    if runCompiler(flags=INTEL_FLAG):
+        CXXFLAGS += [INTEL_FLAG]
 
     # [2a]: check that NumPy is present (required by the python interface)
     try:
@@ -347,6 +352,8 @@ PyInit_pytest42(void) {
             if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
                 os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
                 COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
+            else:
+                say("Failed to download CVXOPT header files, this feature will not be available\n")
     except: pass  # cvxopt wasn't available
 
     # [6]: test if GLPK is present (optional)
@@ -409,7 +416,7 @@ if '--help' in sys.argv: print(helpstr)
 
 distutils.core.setup(
     name             = 'agama',
-    version          = '1.0rc1',
+    version          = '1.0',
     description      = 'Action-based galaxy modelling architecture',
     author           = 'Eugene Vasiliev',
     author_email     = 'eugvas@lpi.ru',

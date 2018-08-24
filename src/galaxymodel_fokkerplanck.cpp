@@ -233,7 +233,7 @@ std::vector<double> regularizeAmplitudes(
     // f(xmin) = \sum_{k=0}^N f_k B_k(xmin), df/dx = \sum_{k=0}^M f_k B'_k,
     // where f_k are the amplitudes of the basis functions.
     // The log-slope w.r.t. unscaled variable h is df/dx dx/dh h/f, and it should be larger than...
-    const double SLOPEMIN = -0.99;
+    const double SLOPEMIN = -0.32;  // safe value even in the presence of a black hole
     double C = DHDSCALEH(x) / UNSCALEH(x) * SLOPEMIN;
     double L = C * val[0] - der[0], R = 0.;
     for(int k=1; k<=N; k++)

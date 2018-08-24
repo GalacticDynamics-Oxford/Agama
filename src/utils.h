@@ -53,10 +53,32 @@ extern VerbosityLevel verbosityLevel;
 /** return a textual representation of the stack trace */
 std::string stacktrace();
 
-/** Singleton class for monitoring the Control-Break signal */
+/** Helper class for monitoring the Control-Break signal.
+    In a computationally heavy section of code, one may set up a custom signal handler
+    and periodically check if it was triggered, terminating the computation early if requested.
+    The C++ routine could look like this:
+    ~~~~
+    void busyLoop() {
+        utils::CtrlBreakHandler cbrk;
+        for(int i=0; i<1000000000; i++) {
+            if(cbrk.triggered())
+                throw std::runtime_error("Keyboard interrupt");
+        }
+    }
+    ~~~~
+    The signal handler is restored automatically, whether the routine exits normally or via
+    an exception. The calling code then could check the exception and decide what to do.
+    In a pure C++ program, an uncaught exception would usually terminate it anyway,
+    as the Control-Break signal is intended to do.
+    In the Python interface, though, we translate the C++ exception into an equivalent Python
+    exception, which then will be dealt within the script (or simply ignored in an interactive
+    session).
+
+    It is safe to instantiate this class multiple times, in nested routines.
+*/
 class CtrlBreakHandler {
 public:
-    CtrlBreakHandler();      ///< sets up a custom signal handler (throws an exception if already set)
+    CtrlBreakHandler();      ///< sets up a custom signal handler
     ~CtrlBreakHandler();     ///< restores the previous signal handler
     static bool triggered(); ///< returns true if the Ctrl-Break signal was received, false otherwise
 };
@@ -126,6 +148,8 @@ std::string toString(int val);
 std::string toString(unsigned int val);
 std::string toString(long val);
 std::string toString(unsigned long val);
+std::string toString(long long val);
+std::string toString(unsigned long long val);
 
 /// convert a pointer to a string
 std::string toString(const void* val);

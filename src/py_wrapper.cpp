@@ -37,6 +37,7 @@
 #include "df_quasiisotropic.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
+#include "galaxymodel_jeans.h"
 #include "galaxymodel_losvd.h"
 #include "galaxymodel_selfconsistent.h"
 #include "galaxymodel_spherical.h"
@@ -49,7 +50,7 @@
 #include "potential_composite.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
-#include "potential_utils.h"
+//#include "potential_utils.h"
 #include "orbit.h"
 #include "orbit_lyapunov.h"
 #include "units.h"
@@ -523,6 +524,7 @@ typedef void (*anyFunction)
 /// anyFunction input type
 enum INPUT_VALUE {
     INPUT_VALUE_SINGLE = 1,  ///< a single number
+    INPUT_VALUE_PAIR   = 2,  ///< two numbers
     INPUT_VALUE_TRIPLET= 3,  ///< three numbers
     INPUT_VALUE_SEXTET = 6   ///< six numbers
 };
@@ -589,6 +591,7 @@ void formatOutputArr(const double result[], const npy_intp index, PyObject* resu
 // ---- template instantiations for input parameters ----
 
 template<> inline size_t inputLength<INPUT_VALUE_SINGLE> () {return 1;}
+template<> inline size_t inputLength<INPUT_VALUE_PAIR>   () {return 2;}
 template<> inline size_t inputLength<INPUT_VALUE_TRIPLET>() {return 3;}
 template<> inline size_t inputLength<INPUT_VALUE_SEXTET> () {return 6;}
 
@@ -597,6 +600,9 @@ template<> inline bool parseTuple<INPUT_VALUE_SINGLE>(PyObject* args, double val
         args  = PyTuple_GET_ITEM(args, 0);
     values[0] = PyFloat_AsDouble(args);
     return PyErr_Occurred() ? 0 : 1;
+}
+template<> inline bool parseTuple<INPUT_VALUE_PAIR  >(PyObject* args, double values[]) {
+    return PyArg_ParseTuple(args, "dd", &values[0], &values[1]);
 }
 template<> inline bool parseTuple<INPUT_VALUE_TRIPLET>(PyObject* args, double values[]) {
     return PyArg_ParseTuple(args, "ddd", &values[0], &values[1], &values[2]);
@@ -618,6 +624,9 @@ template<> inline npy_intp parseArray<INPUT_VALUE_SINGLE>(PyArrayObject* arr)
 template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_SINGLE>() {
     return "Input does not contain a valid one-dimensional array";
 }
+template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_PAIR>() {
+    return "Input does not contain a valid Nx2 array";
+}
 template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_TRIPLET>() {
     return "Input does not contain a valid Nx3 array";
 }
@@ -627,6 +636,9 @@ template<> inline const char* errStrInvalidArrayDim<INPUT_VALUE_SEXTET>() {
 
 template<> inline const char* errStrInvalidInput<INPUT_VALUE_SINGLE>() {
     return "Input does not contain valid data (either a single number or a one-dimensional array)";
+}
+template<> inline const char* errStrInvalidInput<INPUT_VALUE_PAIR>() {
+    return "Input does not contain valid data (either 2 numbers for a single point or a Nx2 array)";
 }
 template<> inline const char* errStrInvalidInput<INPUT_VALUE_TRIPLET>() {
     return "Input does not contain valid data (either 3 numbers for a single point or a Nx3 array)";
@@ -1005,7 +1017,9 @@ void Density_dealloc(DensityObject* self)
     "  outerCutoffRadius=...   radius of outer exponential cutoff (Spheroid).\n" \
     "  cutoffStrength=...   strength of outer exponential cutoff  (Spheroid).\n" \
     "  surfaceDensity=...   central surface density (Disk or Sersic).\n" \
-    "  densityNorm=...   normalization of density profile (Spheroid).\n"
+    "  densityNorm=...   normalization of density profile (Spheroid).\n" \
+    "  W0=...  dimensionless central potential in King models.\n" \
+    "  trunc=...  truncation strength in King models.\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -1013,7 +1027,7 @@ static const char* docstringDensity =
     "that do not necessarily have a corresponding potential defined.\n"
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
-    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic.\n"
+    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic, King.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
     "Alternatively, one may construct a spherically-symmetric density model from a cumulative "
@@ -1456,7 +1470,7 @@ static const char* docstringPotential =
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
-    "PerfectEllipsoid, Disk, Spheroid, Sersic;\n"
+    "PerfectEllipsoid, Disk, Spheroid, Sersic, King;\n"
     "    or one of the expansion types:  Multipole or CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
@@ -2055,7 +2069,7 @@ static const char* docstringActionFinder =
     "ActionFinder object is created for a given potential (provided as the first argument "
     "to the constructor); if the potential is axisymmetric, there is a further option to use "
     "interpolation tables for actions (optional second argument 'interp=...', False by default), "
-    "which speeds up computation of actions (but not actions and angles) at the expense of "
+    "which speeds up computation of actions (but not frequencies and angles) at the expense of "
     "a somewhat lower accuracy.\n"
     "The () operator computes actions for a given position/velocity point, or array of points.\n"
     "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets, "
@@ -3307,11 +3321,13 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
     }
     if(!df_obj) {   // static component with potential and optionally density
         try {
-            if(!dens)  // only potential
+            if(!dens) {  // only potential
                 self->comp.reset(new galaxymodel::ComponentStatic(pot));
-            else       // both potential and density
+                self->name = "Static potential component";
+            } else {     // both potential and density
                 self->comp.reset(new galaxymodel::ComponentStatic(dens, disklike, pot));
-            self->name = "Static component";
+                self->name = disklike ? "Static disklike component" : "Static spheroidal component";
+            }
             utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
@@ -3411,7 +3427,7 @@ static PyMethodDef Component_methods[] = {
     { "getDensity", (PyCFunction)Component_getDensity, METH_NOARGS,
       "Return a Density object representing the fixed density profile for a static component "
       "(or None if it has only a potential profile), "
-      "or the current density profile from the previous iteration of the self-consistent "
+      "or the density profile from the previous iteration of the self-consistent "
       "modelling procedure for a DF-based component.\n"
       "No arguments.\n" },
     { NULL }
@@ -5321,19 +5337,24 @@ static const char* docstringSplineLogDensity =
     "obviously be declining towards -infinity for the integral over rho(x) to be finite.\n"
     "    infRight (boolean, default False) is the same option for extrapolating "
     "the estimated density to x>knots[-1].\n"
+    "    der3 (boolean, default False) determines how the roughness penalty is computed: "
+    "using 2nd derivative (False) or 3rd derivative (True). This choice determines the class "
+    "of functions that have zero penalty and are the limiting cases for infinitely large smoothing: "
+    "the latter choice implies a pure Gaussian, and the former - an exponential function, which is, "
+    "however, only attainable on (semi-)finite intervals, when there is no extrapolation.\n"
     "    smooth (float, default 0) -- optional extra smoothing.\n"
     "Returns: a CubicSpline object representing log(rho(x)).\n";
 
 PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"knots","x","w","infLeft","infRight","smooth",NULL};
+    static const char* keywords[] = {"knots","x","w","infLeft","infRight","der3","smooth",NULL};
     PyObject* k_obj=NULL;
     PyObject* x_obj=NULL;
     PyObject* w_obj=NULL;
-    int infLeft=0, infRight=0;  // should rather be bool, but python doesn't handle it in arg list
+    int infLeft=0, infRight=0, der3=0;  // should rather be bool, but python doesn't handle it in arg list
     double smooth=0;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiid", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &smooth))
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiiid", const_cast<char **>(keywords),
+        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &der3, &smooth))
     {
         PyErr_SetString(PyExc_ValueError, "splineLogDensity: "
             "must provide an array of grid nodes and two arrays of equal length "
@@ -5367,7 +5388,8 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
         std::vector<double> amplitudes = math::splineLogDensity<3>(knots, xvalues, weights,
             math::FitOptions(
             (infLeft ? math::FO_INFINITE_LEFT : 0) |
-            (infRight? math::FO_INFINITE_RIGHT: 0) ),
+            (infRight? math::FO_INFINITE_RIGHT: 0) |
+            (der3    ? math::FO_PENALTY_3RD_DERIV: 0)),
             smooth );
         return createCubicSpline(knots, amplitudes);
     }
@@ -5387,7 +5409,7 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 /// description of grid creation function
 static const char* docstringNonuniformGrid =
     "Create a grid with unequally spaced nodes:\n"
-    "x[k] = (exp(Z k) - 1)/(exp(Z) - 1), i.e., coordinates of nodes increase "
+    "x[k] = (exp(Z k) - 1) / (exp(Z) - 1), i.e., coordinates of nodes increase "
     "nearly linearly at the beginning and then nearly exponentially towards the end; "
     "the value of Z is computed so the the 1st element is at xmin and last at xmax "
     "(0th element is always placed at 0).\n"
@@ -5663,6 +5685,8 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 ///@}
+
+
 
 static const char* docstringModule =
     "This is the Python interface for the AGAMA galaxy modelling library";

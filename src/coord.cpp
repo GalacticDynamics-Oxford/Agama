@@ -875,28 +875,24 @@ void evalAndConvertSph(const math::IFunction& F,
 }
 
 
-template<>
-double Ekin(const coord::PosVelProlMod &p, coord::GradProlMod *dEbyPos, coord::VelProlMod *dEbyVel)
+//------ 3x3 matrix representing a [passive] rotation specified by Euler angles ------//
+
+void makeRotationMatrix(double alpha, double beta, double gamma, double mat[9])
 {
-    double sinv   = (1 - pow_2(p.tau)) / (1 + pow_2(p.tau));
-    double cosv   = 2 * p.tau / (1 + pow_2(p.tau));
-    double invdet = 1 / (pow_2(p.rho * cosv) + pow_2(p.chi * sinv));
-    double invRsq = 1 /  pow_2(p.rho * sinv);
-    double Euv    = 0.5 * invdet * (pow_2(p.prho * p.chi) + pow_2(p.ptau / (1+sinv)) );
-    double Ephi   = sinv!=0 ? 0.5 * invRsq *  pow_2(p.pphi) : 0;
-    if(dEbyPos) {
-        double D2 = pow_2(p.chi) - pow_2(p.rho);
-        dEbyPos->drho = (pow_2(p.prho) - 2*Euv) * invdet * p.rho - 2*Ephi / p.rho;
-        dEbyPos->dtau = (pow_2(p.ptau / (1+sinv)) * p.tau * invdet
-                         + 2*cosv * (Euv * D2 * sinv * invdet + Ephi / sinv) ) * (1+sinv);
-        dEbyPos->dphi = 0;
-    }
-    if(dEbyVel) {
-        dEbyVel->prho= p.prho * invdet * pow_2(p.chi);
-        dEbyVel->ptau= p.ptau * invdet / pow_2(1+sinv);
-        dEbyVel->pphi= p.pphi * invRsq;
-    }
-    return Euv + Ephi;
+    double sa, ca, sb, cb, sc, cc;
+    math::sincos(alpha, sa, ca);
+    math::sincos(beta,  sb, cb);
+    math::sincos(gamma, sc, cc);
+    mat[0] =  ca * cc - sa * cb * sc;
+    mat[1] =  sa * cc + ca * cb * sc;
+    mat[2] =  sb * sc;
+    mat[3] = -ca * sc - sa * cb * cc;
+    mat[4] = -sa * sc + ca * cb * cc;
+    mat[5] =  sb * cc;
+    mat[6] =  sa * sb;
+    mat[7] = -ca * sb;
+    mat[8] =  cb;
 }
+
 
 }  // namespace coord

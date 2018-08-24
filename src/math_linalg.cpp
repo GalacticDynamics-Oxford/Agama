@@ -5,6 +5,11 @@
 
 #ifdef HAVE_EIGEN
 
+// calm down excessively optimizing Intel compiler, which otherwise screws the SVD module
+#if defined(__INTEL_COMPILER) and __INTEL_COMPILER >= 1800
+#pragma float_control (strict,on)
+#endif
+
 // don't use internal OpenMP parallelization at the level of internal Eigen routines (why?)
 #define EIGEN_DONT_PARALLELIZE
 #include <Eigen/LU>
@@ -26,6 +31,9 @@
 #endif
 
 #endif
+
+// uncomment the following line to activate range checks on matrix element access (slows down the code)
+//#define DEBUG_RANGE_CHECK
 
 namespace math{
 
@@ -523,7 +531,9 @@ inline Eigen::Map<const Eigen::VectorXd> toEigenVector(const std::vector<double>
 template<typename MatrixType>
 void blas_daxpy(double alpha, const MatrixType& X, MatrixType& Y)
 {
-    if(alpha!=0)
+    if(alpha==1)
+        mat(Y) += mat(X);
+    else if(alpha!=0)
         mat(Y) += alpha * mat(X);
 }
 
@@ -539,9 +549,11 @@ void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const MatrixType& A,
 {
     Eigen::VectorXd v;
     if(TransA==CblasNoTrans)
-        v = alpha * mat(A) * toEigenVector(X);
+        v = mat(A) * toEigenVector(X);
     else
-        v = alpha * mat(A).transpose() * toEigenVector(X);
+        v = mat(A).transpose() * toEigenVector(X);
+    if(alpha!=1)
+        v *= alpha;
     if(beta!=0)
         v += beta * toEigenVector(Y);
     Y.assign(v.data(), v.data()+v.size());

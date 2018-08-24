@@ -290,9 +290,12 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
             // estimate the second derivative d^2[log(rho)] / d[log(r)]^2
             double rhop = sphericalAverage<AV_RHO>(src, exp(logr+DELTA));
             double rhom = sphericalAverage<AV_RHO>(src, exp(logr-DELTA));
-            double derp = (rhop-rho0) / DELTA, derm = (rho0-rhom) / DELTA, der2 = (derp-derm) / DELTA;
+            double derp = log(rhop/rho0) / DELTA, derm = log(rho0/rhom) / DELTA;
+            double der2 = fabs(derp-derm) / DELTA;   // estimate of the logarithmic second derivative,
+            if(der2 < 10 * DELTA)  // computed to an accuracy ~eps^(1/3),
+                der2 = 0;          // hence we declare it zero if it's smaller than 10x the roundoff error
             // density- and volume-weighted logarithmic curvature of density profile
-            curv = fabs(der2 - pow_2(0.5 * (derp+derm)) / rho0) * pow_2(r);
+            curv = der2 * rho0 * pow_2(r);
         }
         if(curv > maxcurv) {
             // the radius where the curvature is maximal is taken as the "center" of the profile

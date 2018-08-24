@@ -29,9 +29,8 @@ double BasePotential::densityCyl(const coord::PosCyl &pos) const
     eval(pos, NULL, &deriv, &deriv2);
     double derivR_over_R = deriv.dR / pos.R;
     double deriv2phi_over_R2 = deriv2.dphi2 / pow_2(pos.R);
-    if(pos.R==0) {
-        if(deriv.dR==0)  // otherwise should remain infinite
-            derivR_over_R = deriv2.dR2;
+    if(pos.R <= fabs(pos.z) * SQRT_DBL_EPSILON) {  // close to or exactly on the z axis
+        derivR_over_R = deriv2.dR2;
         deriv2phi_over_R2 = 0;
     }
     double result = (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2);
@@ -55,8 +54,7 @@ double BasePotential::densitySph(const coord::PosSph &pos) const
     double angular_part = (deriv2.dtheta2 + derivtheta_cottheta + 
         (sintheta!=0 ? deriv2.dphi2 / pow_2(sintheta) : 0) ) / pow_2(pos.r);
     if(pos.r==0) {
-        if(deriv.dr==0)  // otherwise should remain infinite
-            derivr_over_r = deriv2.dr2;
+        derivr_over_r = deriv2.dr2;
         angular_part=0;
     }
     double result = deriv2.dr2 + 2*derivr_over_r + angular_part;
@@ -132,8 +130,8 @@ double BaseDensity::totalMass() const
         mass1 = mass2;
         mass2 = mass3;
         mass3 = enclosedMass(rad*2);
-        if(mass2 == mass3 || mass3 == 0) {
-            return mass3;  // mass doesn't seem to grow with raduis anymore
+        if(mass3 == 0 || math::fcmp(mass2, mass3, pow_2(EPSREL_DENSITY_INT)) == 0) {
+            return mass3;  // mass doesn't seem to grow with radius anymore
         }
         massEstPrev = massEst>0 ? massEst : mass3;
         massEst = (mass2 * mass2 - mass1 * mass3) / (2 * mass2 - mass1 - mass3);

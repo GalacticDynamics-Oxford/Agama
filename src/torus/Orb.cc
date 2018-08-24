@@ -12,6 +12,7 @@
 #include <cmath>
 #include <iostream>
 #include <fstream>
+#include "Pi.h"
 #include "Orb.h"
 #include "WD_Matrix.h"
 
@@ -217,8 +218,8 @@ void Record3D::stepRK_by(double& dt, const double f)
     //cerr << next.QP3D() << '\n';
     *this = next;
     phid = Jphi/(R*R);
-    while (phi< 0.) phi += 2*M_PI;
-    while (phi>2*M_PI) phi -= 2*M_PI;
+    while (phi< 0.)  phi += 2*Pi;
+    while (phi>2*Pi) phi -= 2*Pi;
 }
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -274,7 +275,7 @@ int orbit(                         // return:     error flag
     const char*  sosfile,          // input:      file name for output of SoS
     double&      Oz)               // output:     Omega_z 
 {
-    const double Pith = M_PI/3.;
+    const double Pith = Pi/3.;
     ofstream orbout, sosout;
     if(orbfile[0]) {
         orbout.open(orbfile);

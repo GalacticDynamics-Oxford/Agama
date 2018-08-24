@@ -8,8 +8,9 @@
 #include <stdexcept>
 #include <cassert>
 #include <signal.h>
-// stack trace presumably only works with GCC
-#ifdef __GNUC__
+// stack trace presumably only works with GCC under unix-compatible platforms
+#if(defined(__GNUC__) && !defined(__MINGW32__))
+#define HAVE_STACKTRACE
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif
@@ -41,7 +42,7 @@ inline std::string undecorateFunction(std::string origin)
     return origin;
 }
 
-#ifdef __GNUC__
+#ifdef HAVE_STACKTRACE
 /// check if a character is a part of a valid C++ identifier name
 inline bool isAlphanumeric(const char c)
 {
@@ -136,7 +137,7 @@ VerbosityLevel verbosityLevel = initVerbosityLevel();
 
 std::string stacktrace()
 {
-#ifdef __GNUC__
+#ifdef HAVE_STACKTRACE
     const int MAXFRAMES = 256;
     void* tmp[MAXFRAMES];     // temporary storage for stack frames
     int numframes = backtrace(tmp, MAXFRAMES);
@@ -274,6 +275,18 @@ std::string toString(long val) {
 std::string toString(unsigned long val) {
     char buf[100];
     snprintf(buf, 100, "%lu", val);
+    return std::string(buf);
+}
+
+std::string toString(long long val) {
+    char buf[100];
+    snprintf(buf, 100, "%lli", val);
+    return std::string(buf);
+}
+
+std::string toString(unsigned long long val) {
+    char buf[100];
+    snprintf(buf, 100, "%llu", val);
     return std::string(buf);
 }
 

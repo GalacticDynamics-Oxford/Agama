@@ -106,14 +106,16 @@ namespace math{
 
 class IFunction;
 class IFunctionNdim;
+class IFunctionNdimAdd;
 class BaseInterpolator2d;
 
-/// pointer to a function class
+/// shared pointer to a function class
 typedef shared_ptr<const IFunction> PtrFunction;
+/// shared pointer to a N-dimensional function
 typedef shared_ptr<const IFunctionNdim> PtrFunctionNdim;
+/// shared pointer to a N-dimensional accumulator function
 typedef shared_ptr<const IFunctionNdimAdd> PtrFunctionNdimAdd;
-
-/// pointer to a generic 2d interpolation class
+/// shared pointer to a generic 2d interpolation class
 typedef shared_ptr<const BaseInterpolator2d> PtrInterpolator2d;
 
 }  // namespace math
@@ -126,10 +128,13 @@ class BasePotential;
 class OblatePerfectEllipsoid;
 class PhaseVolume;
 
-/// Shared pointers to density and potential classes
+/// shared pointer to a density object
 typedef shared_ptr<const BaseDensity>   PtrDensity;
+/// shared pointer to a potential object
 typedef shared_ptr<const BasePotential> PtrPotential;
+/// shared pointer to an instance of OblatePerfectEllipsoid potential
 typedef shared_ptr<const OblatePerfectEllipsoid> PtrOblatePerfectEllipsoid;
+/// shared pointer to a PhaseVolume object
 typedef shared_ptr<const PhaseVolume>   PtrPhaseVolume;
 
 }  // namespace potential
@@ -138,6 +143,7 @@ typedef shared_ptr<const PhaseVolume>   PtrPhaseVolume;
 namespace actions{
 
 class BaseActionFinder;
+/// shared pointer to an action finder object
 typedef shared_ptr<const BaseActionFinder> PtrActionFinder;
 
 }  // namespace actions
@@ -146,6 +152,7 @@ typedef shared_ptr<const BaseActionFinder> PtrActionFinder;
 namespace torus {
 
 class Torus;
+/// shared pointer to a torus object
 typedef shared_ptr<Torus> PtrTorus;
 
 }  // namespace Torus
@@ -155,8 +162,9 @@ namespace df{
 
 class BaseDistributionFunction;
 class BaseActionSpaceScaling;
-
+/// shared pointer to a distribution function object
 typedef shared_ptr<const BaseDistributionFunction> PtrDistributionFunction;
+/// shared pointer to a scaling transformation of the action space
 typedef shared_ptr<const BaseActionSpaceScaling> PtrActionSpaceScaling;
 
 }  // namespace df

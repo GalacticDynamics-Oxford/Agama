@@ -60,23 +60,4 @@ bool computeBsplineIntegralsOverPolygon(const Polygon& polygon,
     const BsplineInterpolator1d<N>& bsplx, const BsplineInterpolator1d<N>& bsply, double output[]);
 
 
-/** construct a 3d rotation matrix from three angles:
-    \param[in]  theta, phi, chi are three rotation angles;
-    \param[out] mat  will contain 9 elements of a 3x3 orthogonal rotation matrix in row-major order:
-    \code
-    | x' |   | mat[0]  mat[1]  mat[2] |   | x |
-    | y' | = | mat[3]  mat[4]  mat[5] | * | y |
-    | z' |   | mat[6]  mat[7]  mat[8] |   | z |
-    \endcode
-*/
-void makeRotationMatrix(double theta, double phi, double chi, double mat[9]);
-
-/** transform a 3d vector in cartesian coordinates using the rotation matrix */
-inline void transformVector(const double mat[9], const double vec[3], double result[3])
-{
-    result[0] = mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2];
-    result[1] = mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2];
-    result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
-}
-
 }  // namespace

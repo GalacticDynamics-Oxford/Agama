@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <fstream>
 
+#include <iostream>
 namespace galaxymodel{
 
 namespace {
@@ -12,7 +13,7 @@ namespace {
 /// tolerance parameter for grid generation
 static const double EPSDER2 = 1e-6;
 
-/// accuracy parameter for integration
+/// accuracy parameter for integration in constructing the spherical Jeans model
 static const double EPSINT  = 1e-6;
 
 /// fraction of mass enclosed by the innermost grid cell or excluded by the outermost one
@@ -99,8 +100,9 @@ math::LogLogSpline createJeansSphModel(
     return math::LogLogSpline(gridr, integr);
 }
 
-JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePotential &pot, double beta) :
-    bcoef(1. / (1-beta))
+JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePotential &pot,
+    double beta, double _kappa) :
+    bcoef(1. / (1-beta)), kappa(_kappa)
 {
     if(!(beta < 1.))
         throw std::invalid_argument("JeansAxi: beta_m should be less than unity");
@@ -118,6 +120,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     const int gridRsize = gridz.size();
     math::Matrix<double> vphi2(gridRsize, gridzsize, 0.), vz2(gridRsize, gridzsize);
     math::Matrix<double> rhosigmaz2(gridRsize, gridzsize), rhoval(gridRsize, gridzsize);
+    std::vector<double> epicycleRatioVal(gridRsize);
 
 #ifndef USE_FEM
     // perform the integration in z direction at each point of the radial grid
@@ -250,10 +253,17 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
             double Phi    = potential::azimuthalAverage<potential::AV_PHI>(pot,  R, z);
             double dPhidR = potential::azimuthalAverage<potential::AV_DR> (pot,  R, z);
             double vesc2  = -Phi;   // half the squared escape velocity - maximum allowed sigma^2
-            vphi2(iR, iz) = math::clamp(vesc2, 0.,
-                bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * dPhidR );
-            vz2  (iR, iz) = math::clamp(vesc2, 0., rhosigmaz2(iR, iz) / rho);
+            vphi2(iR, iz) = math::clamp(
+                bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * dPhidR,  0., vesc2 );
+            vz2  (iR, iz) = math::clamp(rhosigmaz2(iR, iz) / rho,  0., vesc2);
         }
+    }
+
+    for(int iR=0; iR<gridRsize; iR++) {
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        pot.eval(coord::PosCyl(gridR[iR], 0, 0), NULL, &grad, &hess);
+        epicycleRatioVal[iR] = (iR==0 && grad.dR==0) ? 1 : 0.75 + 0.25 * gridR[iR] * hess.dR2 / grad.dR;
     }
 
     // write out the results for debugging
@@ -271,9 +281,10 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
 
     intvphi2 = math::LinearInterpolator2d(gridR, gridz, vphi2);
     intvz2   = math::LinearInterpolator2d(gridR, gridz, vz2);
+    epicycleRatio = math::CubicSpline(gridR, epicycleRatioVal);
 }
 
-coord::Vel2Cyl JeansAxi::velDisp(const coord::PosCyl& point) const
+void JeansAxi::moments(const coord::PosCyl& point, coord::VelCyl &vel, coord::Vel2Cyl &vel2) const
 {
     double R = point.R, z = fabs(point.z), mult = 1.;
     if(R > intvphi2.xmax() || z > intvphi2.ymax()) {
@@ -282,12 +293,12 @@ coord::Vel2Cyl JeansAxi::velDisp(const coord::PosCyl& point) const
         R = fmin(intvphi2.xmax(), R * mult);
         z = fmin(intvphi2.ymax(), z * mult);
     }
-    coord::Vel2Cyl result;
-    result.vphi2 = intvphi2.value(R, z) * mult;
-    result.vz2   = intvz2.  value(R, z) * mult;
-    result.vR2   = result.vz2 * bcoef;
-    result.vRvz  = result.vRvphi = result.vzvphi = 0.;
-    return result;
+    vel2.vphi2 = intvphi2.value(R, z) * mult;
+    vel2.vz2   = intvz2.  value(R, z) * mult;
+    vel2.vR2   = vel2.vz2 * bcoef;
+    vel2.vRvz  = vel2.vRvphi = vel2.vzvphi = 0.;
+    vel.vR     = vel.vz = 0;
+    vel.vphi   = kappa * sqrt(fmax(0, vel2.vphi2 - vel2.vR2 * epicycleRatio(R) /*sigma_phi^2*/));
 }
 
 }  // namespace

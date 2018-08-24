@@ -123,10 +123,11 @@ public:
     double focalDistance(const coord::PosVelCyl& point) const;
 
 private:
-    const potential::PtrPotential pot;      ///< the potential in which actions are computed
-    const potential::Interpolator interp;   ///< interpolator for Lcirc(E)
+    const double invPhi0;                   ///< 1 / Phi(r=0)
+    const potential::PtrPotential pot;      ///< the potential Phi in which actions are computed
+    const potential::Interpolator interp;   ///< 1d interpolator for Lcirc(E)
     math::LinearInterpolator2d interpD;     ///< 2d interpolator for the focal distance Delta(E,Lz)
-    math::CubicSpline2d        interpR;     ///< 2d interpolator for Rshell(E,Lz) / Rcirc(E)
+    math::CubicSpline2d interpR;            ///< 2d interpolator for Rshell(E,Lz) / Rcirc(E)
     math::CubicSpline3d intJr, intJz;       ///< 3d interpolators for Jr and Jz as functions of (E,Lz,I3)
 };
 

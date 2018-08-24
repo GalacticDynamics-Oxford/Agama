@@ -227,14 +227,16 @@ Any number of density components may be combined into a single \ttt{CompositeDen
 
 There are several commonly used models with known expressions for the potential and its derivatives. 
 
-Spherical models include the \ttt{Plummer}, \ttt{Isochrone} and \ttt{NFW} (Navarro--Frenk--White) potentials. Moreover there is a wrapper class that turns any user-provided function $\Phi(r)$ with two known derivatives into a form compatible with the potential interface.
+Spherical models include the \ttt{Plummer}, \ttt{Isochrone}, \ttt{NFW} (Navarro--Frenk--White) potentials, and a generalized \ttt{King} (lowered isothermal) model which is specified by its distribution function $f(E)$, as given by Equation~1 in \cite{GielesZocchi2015}.
+Moreover there is a wrapper class that turns any user-provided function $\Phi(r)$ with two known derivatives into a form compatible with the potential interface.
 
 Axisymmetric models include the \ttt{MiyamotoNagai} and \ttt{OblatePerfectEllipsoid} potentials (the latter belongs to a more general class of St\"ackel potentials \cite{deZeeuw1985}, but is the only one implemented at present).
 There is another type of axisymmetric models that have a dedicated potential class, namely a separable \ttt{Disk} profile with $\rho(R,z) = \Sigma(R)\, h(z)$. A direct evaluation of potential requires 2d numerical quadrature, or 1d in special cases such as the exponential radial profile, which is still too costly. Instead, we use the \textsc{GalPot} approach introduced in \cite{KuijkenDubinski1995, DehnenBinney1998}: the potential is split into two parts, \ttt{DiskAnsatz} that has an analytic expression for the potential of the strongly flattened component, and the residual part that is represented with the \ttt{Multipole} expansion.
 
 Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cite{Dehnen1993} and \ttt{Ferrers} potentials. The first two have infinite extent and are usable only in certain contexts (such as orbit integration), because most routines expect the potential to vanish at infinity.
 Dehnen models may have any symmetry from spherical to triaxial; in non-spherical cases, the potential and its derivatives are computed using a 1d numerical quadrature \cite{MerrittFridman1996}, so this is rather costly (and also inaccurate at large distances). A preferred way of using an axisymmetric or triaxial Dehnen model is through the \ttt{Multipole} expansion. Ferrers ($n=2$) models are strictly triaxial, and have analytic expressions for the potential and its derivatives \cite{Pfenniger1984}.
-There is also a \ttt{Spheroid} class that describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles \cite{Zhao1996} with an optional exponential cutoff. Dehnen, Plummer, Isochrone and NFW profiles are all special cases of this model; however, this class only provides the density profile and not the potential. \ttt{Sersic} represents another commonly used density model, which can also be triaxial.
+There is also a \ttt{Spheroid} class that describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles \cite{Zhao1996} with an optional exponential cutoff. Dehnen, Plummer, Isochrone and NFW profiles are all special cases of this model; however, this class only provides the density profile and not the potential. \ttt{Sersic} represents another commonly used density model, which can also be triaxial. 
+Generalized \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
 
 %%%%%%%%%%%%%%
 \subsubsection{Multipole expansion}  \label{sec:PotentialMultipole}
@@ -273,24 +275,40 @@ We note that application of these methods to represent the potential of a galaxy
 Name & Formula & Parameters \\
 \hline
 \multicolumn{3}{c}{Density-only models} \\[2mm]
+
 \ttt{Disk} & $\rho = \Sigma_0\,\exp\big(-\big[\frac{R}{R_\mathrm{d}}\big]^{\frac1n} - \frac{R_\mathrm{cut}}{R}\big)$
 $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 \frac{1}{2h} \exp\big(-\big|\frac{z}{h}\big|\big) & h>0 \\[1mm]
 \frac{1}{4|h|}\, \mathrm{sech}^2\big(\big|\frac{z}{2h}\big|\big) & h<0 \end{array} \right. $ &
 \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($R_\mathrm{d}$), \ppp{scaleHeight}~($h$), \ppp{innerCutoffRadius}~($R_\mathrm{cut}$), \ppp{sersicIndex}~($n$)\\
+
 \ttt{Spheroid} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
 \ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
+
 \ttt{Sersic} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
 \multicolumn{3}{c}{Density/potential models} \\[2mm]
+
 \ttt{Plummer} & $\Phi = -\frac{M}{\sqrt{a^2+r^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+
 \ttt{Isochrone} & $\Phi = - \frac{M}{a + \sqrt{r^2 + a^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
+
 \ttt{NFW} & $\Phi = -\frac{M}{r} \ln\left(1 + \frac{r}{a}\right)$ & \ppp{mass}~($M$ {\footnotesize is the mass enclosed in $\sim5.3a$, the total mass is $\infty$}), \ppp{scaleRadius}~($a$) \\[2mm]
+
 \ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2} or \ppp{scaleHeight}~($b$) \\[2mm]
+
 \ttt{PerfectEllipsoid}\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
 \ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{scaleRadius}~($a$) \\[2mm]
+
 \ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
+\ttt{King} & specified by $f(E)$, see text & \ppp{mass}, \ppp{scaleRadius}~($r_\mathrm{c}$), \ppp{W0}~($W_0$), \ppp{trunc}~($g$) \\[2mm]
+
 \ttt{Logarithmic} & $\Phi = \frac{1}{2} v_0^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{v0}~($v_0$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
 \ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{Omega}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
 \multicolumn{3}{l}{\footnotesize $R=\sqrt{x^2+y^2}$ is the cylindrical radius and $\tilde r=\sqrt{x^2+(y/p)^2+(z/q)^2}$ is the ellipsoidal radius}
 \end{tabular}
 \end{table}
@@ -335,9 +353,11 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{Spheroid}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
 \item \ppp{gamma} [1] -- power-law index of the inner density profile $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{Spheroid} models (should be $\gamma<3$).
 \item \ppp{cutoffStrength} [2] -- parameter controlling the steepness of the exponential cutoff in \ttt{Spheroid}.
-\item \ppp{sersicIndex} -- shape parameter of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk)
+\item \ppp{sersicIndex} -- shape parameter of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk).
 \item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
 \item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$.
+\item \ppp{W0} -- dimensionless potential depth of generalized King (lowered isothermal) models: $W_0 = [ \Phi(r_t) - \Phi(0) ] / \sigma^2$; larger values correspond to more extended envelopes (larger ratio between the outer truncation radius $r_t$ and the scale radius). In the above expression, the velocity dispersion $\sigma$ is not an independent parameter: the model in dimensionless units is specified by $W_0$ and the truncation strength parameter $g$; the potential, the truncation radius, and the total mass in dimensionless units are all determined by integrating a second-order ODE, and then the length and mass units are rescaled to match the given total mass $M$ and the scale radius (also called King radius or core radius).
+\item \ppp{trunc} [1] -- truncation strength parameter of lowered isothermal models (denoted by $g$ in \cite{GielesZocchi2015}); should be between 0 and 3.5 (0 corresponds to Woolley, 1 -- to King, 2 -- to Wilson models), larger values result in softer density fall-off near the truncation radius.
 \item \ppp{Omega} [1] -- the frequency of oscillation in the \ttt{Harmonic} potential.
 \item \ppp{v0} [1] -- the asymptotic circular velocity for the \ttt{Logarithmic} potential.
 \end{itemize}
@@ -444,9 +464,11 @@ Importantly, the DF formulated in terms of actions does not depend on the potent
 
 A suitable choice for DFs of elliptical galaxies, bulges or haloes is the \ttt{DoublePowerLaw} model, which is similar to the ones presented in \cite{Binney2014, Posti2015}, with a different notation:
 \begin{align*}
-f(\bJ) &= \frac{M}{(2\pi\, J_0)^3} \left(\frac{h(\bJ)}{J_0}\right)^{-\Gamma}
+f(\bJ) &= \frac{M}{(2\pi\, J_0)^3}
+%\left(\frac{h(\bJ)}{J_0}\right)^{-\Gamma}
+\left[1 + \left(\frac{J_0}{h(\boldsymbol{J})}\right)^\eta \right]^{\frac{\Gamma}{\eta}}
 \left[1 + \left(\frac{g(\bJ)}{J_0}\right)^\eta \right]^{\frac{\Gamma-\Beta}{\eta}}
-\exp\bigg[-\left(\frac{g(\bJ)}{J_\mathrm{cut}}\right)^\zeta\bigg]
+\!\!\!\!\exp\bigg[-\left(\frac{g(\bJ)}{J_\mathrm{cut}}\right)^\zeta\bigg]
 \bigg(1 + \varkappa\tanh \frac{J_\phi}{J_{\phi,0}} \bigg), \\
 g(\bJ) &\equiv g_r J_r + g_z J_z + (3-g_r-g_z) |J_\phi|, \quad
 h(\bJ)  \equiv h_r J_r + h_z J_z + (3-h_r-h_z) |J_\phi|
@@ -480,7 +502,7 @@ f(\bJ) &= \frac{\tilde\Sigma\,\Omega}{2\pi^2\,\kappa^2} \times
 \left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0, \\
 \exp\left( \frac{2\Omega\,J_\phi}{\tilde\sigma_r^2} \right) & \mbox{if }J_\phi<0, \end{array} \right. \\
 \tilde\Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \qquad\quad
-\tilde\sigma_r^2(R_c) \equiv \sigma_{r,0}^2 \exp( -3R_c / R_{\sigma,r} ) + \sigma_\mathrm{min}^2,\\
+\tilde\sigma_r^2(R_c) \equiv \sigma_{r,0}^2 \exp( -2R_c / R_{\sigma,r} ) + \sigma_\mathrm{min}^2,\\
 \tilde\sigma_z^2(R_c)&\equiv 2\,h_\mathrm{disk}^2\,\nu^2(R_c)  + \sigma_\mathrm{min}^2
 \quad\mbox{or}\quad
 \tilde\sigma_z^2(R_c) \equiv \sigma_{z,0}^2 \exp( -2R_c / R_{\sigma,z} )  + \sigma_\mathrm{min}^2.
@@ -512,6 +534,7 @@ J_v \equiv \sqrt{\tilde J^2 + J_{v,0}^2}
 \end{align*}
 Its parameters listed in the \ttt{ExponentialParam} structure are:
 \begin{itemize}
+\item \ppp{norm} is the overall scaling with the dimension of mass ($M$).
 \item \ppp{Jphi0} determines the scale length of the disk: $J_{\phi,0} \sim R_\mathrm{disk}v_\circ$.
 \item \ppp{Jz0} controls the scale height and vertical velocity dispersion: $J_{z,0} \sim h_\mathrm{disk}v_\circ \sim R\,\sigma_z(R)$.
 \item \ppp{Jr0} plays a similar role for the radial velocity dispersion and the extent of radial excursion $\Delta R$ of a typical orbit: $J_{r,0} \sim \Delta R\,v_\circ \sim R\,\sigma_r(R)$.
@@ -1162,7 +1185,7 @@ Often one may wish to apply a somewhat stronger smoothing than the one given by 
 Let $P(x)>0$ be a density function defined on the entire real axis, a semi-infinite interval $[x_\mathrm{min},+\infty)$ or $(-\infty,x_\mathrm{max}]$, or a finite interval $[x_\mathrm{min},x_\mathrm{max}]$.
 Let $\{x_i, w_i\}$ be an array of $N_\mathrm{data}$ samples drawn from this distribution, where $x_i$ are their coordinates, and $w_i\ge 0$ are weights. We follow the convention that $\int P(x)\,dx$ over its domain is equal to $M\equiv \sum_i w_i$ (not necessarily unity).
 
-We estimate $P(x)$ using a B-spline approximation to $\ln P$ constructed for a grid of $N_\mathrm{grid}$ nodes $\{X_k\}$. We implemented two variants of basis set: linear B-splines and modified cubic B-splines with natural boundary conditions; in both cases the number of basis function $N_\mathrm{basis}$ is equal to the number of grid nodes. The estimated log-density is thus
+We estimate $P(x)$ using a B-spline approximation to $\ln P$ constructed for a grid of $N_\mathrm{grid}$ nodes $\{X_k\}$ \cite{OSullivan1988}. We implemented two variants of basis set: linear B-splines and modified cubic B-splines with natural boundary conditions; in both cases the number of basis function $N_\mathrm{basis}$ is equal to the number of grid nodes. The estimated log-density is thus
 \begin{align}
 \ln P(x;\,\bA) = \sum_{k=1}^{N_\mathrm{basis}}  A_k\, B_k(x) - \ln G_0 + \ln M \equiv Q(x; \bA) - \ln G_0(\bA) + \ln M ,
 \end{align}
@@ -1184,7 +1207,7 @@ The total penalized likelihood of the model given the vector of amplitudes $\bA$
 \label{eq:MaxLikelihoodDensity}
 \end{align}
 where $\lambda \mathcal{R}$ is the roughness penalty term, and the matrix $R_{kl}\equiv \int B_k''(x)\,B_l''(x)\,dx$ is also pre-computed at the beginning of the procedure%
-\footnote{It may be advantageous to use third derivatives here \cite{Silverman1982}, in which case the solution in the limit of infinite smoothing ($\mathcal{R}\to 0$) corresponds to a Gaussian density profile.}.
+\footnote{It may be advantageous to use third derivatives here \cite{Silverman1982}, in which case the solution in the limit of infinite smoothing ($\mathcal{R}\to 0$) corresponds to a Gaussian density profile; however, for our choice of \textit{natural} cubic splines it is unattainable, since a quadratic function (logarithm of a Gaussian) has non-zero second derivatives at endpoints, and hence cannot be represented by a spline with natural boundary conditions.}.
 The smoothing parameter $\lambda$ controls the tradeoff between the likelihood of the data and the wiggliness of the estimated density; its choice is discussed below.
 
 Unlike the penalized spline regression problem, in which the amplitudes are obtained from a linear equation, the problem of penalized spline density estimation is nonlinear because of the normalization factor $G_0(\bA)$. The amplitudes $\bA$ that minimize $-\!\ln\mathcal{L}$ (\ref{eq:MaxLikelihoodDensity}) are found by solving the system of equations $\d \ln\mathcal{L}/\d A_k=0$ iteratively, using a multidimensional Newton method with explicit expressions for the gradient and hessian:
@@ -1639,6 +1662,9 @@ Dehnen W., Binney J., 1998, MNRAS, 294, 429
 \bibitem{deZeeuw1985}
 de Zeeuw T., 1985, MNRAS, 216, 273
 
+\bibitem{GielesZocchi2015}
+Gieles M., Zocchi A., 2015, MNRAS, 454, 576
+
 \bibitem{GreenSilverman}
 Green P., Silverman B., 1994, \textsl{Nonparametric regression and generalized linear models}, Chapman\&Hall, London
 
@@ -1651,18 +1677,18 @@ Hairer E., N{\o}rsett S., Wanner G., 1993, \textsl{Solving ordinary differential
 \bibitem{HernquistOstriker1992}
 Hernquist L., Ostriker J., 1992, ApJ, 386, 375
 
+\bibitem{Hyman}
+Hyman J., 1983, J.~Sci.~Stat.~Comput., 4, 645
+
+\bibitem{Jeffreson2017}
+Jeffreson S., Sanders J., Evans N., et al., 2017, MNRAS, 469, 4740
+
 \bibitem{KuijkenDubinski1995}
 Kuijken K., Dubinski J., 1995, MNRAS, 277, 1341
 
 \bibitem{Hermite}
 %Makino J., 1991, ApJ, 369, 200
 Makino J., Aarseth S., 1992, PASJ, 44, 141
-
-\bibitem{Hyman}
-Hyman J., 1983, J.~Sci.~Stat.~Comput., 4, 645
-
-\bibitem{Jeffreson2017}
-Jeffreson S., Sanders J., Evans N., et al., 2017, MNRAS, 469, 4740
 
 \bibitem{Martin}
 Martin R., 2008, \textsl{Clean code}, Prentice Hall
@@ -1678,6 +1704,9 @@ Merritt D., Tremblay B., 1994, AJ, 108, 514
 
 \bibitem{Meyers}
 Meyers S., 2005, \textsl{Effective C++}, Addison--Wesley
+
+\bibitem{OSullivan1988}
+O'Sullivan F., 1988, J.Sci.Stat.Comput., 9, 363
 
 \bibitem{ParkPetrosian1996}
 Park B., Petrosian V., 1996, ApJS, 103, 255

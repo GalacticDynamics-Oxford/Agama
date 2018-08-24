@@ -259,21 +259,4 @@ bool isPointInsidePolygon(double x, double y, const Polygon& polygon)
     return wind != 0;
 }
 
-void makeRotationMatrix(double theta, double phi, double chi, double mat[9])
-{
-    double sintheta, costheta, sinphi, cosphi, sinchi, coschi;
-    sincos(theta, sintheta, costheta);
-    sincos(phi, sinphi, cosphi);
-    sincos(chi, sinchi, coschi);
-    mat[0] = -coschi * sinphi + sinchi * costheta * cosphi;
-    mat[1] =  coschi * cosphi + sinchi * costheta * sinphi;
-    mat[2] = -sinchi * sintheta;
-    mat[3] = -sinchi * sinphi - coschi * costheta * cosphi;
-    mat[4] =  sinchi * cosphi - coschi * costheta * sinphi;
-    mat[5] =  coschi * sintheta;
-    mat[6] =  sintheta * cosphi;
-    mat[7] =  sintheta * sinphi;
-    mat[8] =  costheta;
-}
-
 } // namespace

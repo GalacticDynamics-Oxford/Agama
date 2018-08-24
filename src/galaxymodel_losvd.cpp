@@ -372,7 +372,7 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
 
     // construct the projection matrix for transforming the position/velocity in the
     // intrinsic 3d coordinate system into image plane coordinates and line-of-sight velocity
-    math::makeRotationMatrix(params.theta, params.phi, params.chi, transformMatrix);
+    coord::makeRotationMatrix(params.phi+M_PI/2, params.theta, -params.chi, transformMatrix);
 
     // construct the spatial rebinning matrix
     math::Matrix<double> apertureMatrix(numApertures, numBasisFnc, 0.);

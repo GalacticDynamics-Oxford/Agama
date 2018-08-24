@@ -1,4 +1,3 @@
-#include "potential_analytic.h"
 #include "potential_composite.h"
 #include "potential_cylspline.h"
 #include "potential_factory.h"
@@ -43,7 +42,7 @@ bool testPotential(const potential::BasePotential& potential)
         ", M(r<1) is "<<potential.enclosedMass(1)<<
         ", M(r<10) is "<<potential.enclosedMass(10)<<
         ", M(r<1e9) is "<<potential.enclosedMass(1e9)<<"\n";
-    if(!isZRotSymmetric(potential) || potential.name() == potential::Logarithmic::myName())
+    if(!isZRotSymmetric(potential) || valinf!=0)
         // non-axisymmetric or infinite potentials are not amenable for further tests
         return ok;
     // test interpolated potential
@@ -138,7 +137,6 @@ bool testPotential(const potential::BasePotential& potential)
         // only an approximation and not infinitely smooth, thus its interpolated version
         // is not required to be exceedingly accurate
         double tol =
-            //potential.name() == potential::Multipole::myName() ? 1e4 :
             potential.name() == potential::CylSpline   ::myName() ? 5.0 :
             potential.name() == potential::CompositeCyl::myName() ? 200 : 1.;
         std::cout << "Density-weighted RMS errors"

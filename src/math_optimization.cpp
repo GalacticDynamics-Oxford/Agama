@@ -124,9 +124,8 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
 {
 #ifdef HAVE_CVXOPT
     return quadraticOptimizationSolve(A, rhs, L, BandMatrix<NumT>(std::vector<NumT>()), xmin, xmax);
-#else
-    throw std::runtime_error("linearOptimizationSolve not implemented");
 #endif
+    /*else*/ throw std::runtime_error("linearOptimizationSolve not implemented");
 }
 #endif
 
@@ -289,7 +288,7 @@ std::vector<double> quadraticOptimizationSolve(
     Py_DECREF(args);
     Py_DECREF(problem);
     Py_DECREF(solvers);
-    //Py_Finalize();
+    //Py_Finalize();  // <-- uncommenting causes crash on repeated calls..
     if(feasible)
         return result;
     throw std::runtime_error("quadraticOptimizationSolve: problem is infeasible");
@@ -304,11 +303,8 @@ std::vector<double> quadraticOptimizationSolve(
 #ifdef HAVE_GLPK
     if(Q.size()==0)  // linear problems will be redirected to the appropriate solver
         return linearOptimizationSolve(A, rhs, L, xmin, xmax);
-    else
-        throw std::runtime_error("quadraticOptimizationSolve not implemented");
-#else
-    throw std::runtime_error("quadraticOptimizationSolve not implemented");
 #endif
+    /*else*/ throw std::runtime_error("quadraticOptimizationSolve not implemented");
 }
 #endif
 

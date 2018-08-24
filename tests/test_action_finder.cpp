@@ -36,8 +36,7 @@
 #include <ctime>
 
 const units::InternalUnits unit(units::galactic_Myr);
-const double dim = unit.to_Kpc*unit.to_Kpc/unit.to_Myr;
-int numActionEval  = 0;
+int numActionEval = 0;
 
 bool isResonance(const std::vector<coord::PosVelCar>& traj)
 {
@@ -59,15 +58,22 @@ bool test_actions(const potential::BasePotential& potential,
 {
     std::vector<coord::PosVelCar> traj = orbit::integrateTraj(
         initial_conditions, total_time, timestep, potential);
-    double ifd = fmax(
+    double fd = fmax(
         //actions::estimateFocalDistancePoints(potential, traj);
         actfinder.focalDistance(toPosVelCyl(initial_conditions)),
         initial_conditions.x*1e-4);
 
-    std::ofstream strm;
+    //std::ofstream strm;
+    double E = totalEnergy(potential, initial_conditions);
+    double Lc = L_circ(potential, E);
+    double Lz = coord::Lz(initial_conditions);
+    double vmer2 = pow_2(initial_conditions.vx) + pow_2(initial_conditions.vz);
+    double I3rel = pow_2(initial_conditions.vz) / vmer2;
+    double I3max = 0.5 * (pow_2(initial_conditions.x) + pow_2(fd)) * vmer2;
     actions::ActionStat actF, actI;
     math::Averager avgI3;
-    const coord::ProlSph coordsys(pow_2(ifd));
+    double difJr=0, difJz=0;
+    const coord::ProlSph coordsys(fd);
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl point = toPosVelCyl(traj[i]);
         const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
@@ -78,16 +84,21 @@ bool test_actions(const potential::BasePotential& potential,
             pow_2(point.z * point.vphi) +
             pow_2(point.R * point.vz - point.z * point.vR) +
             pow_2(point.vz) * coordsys.Delta2 );
-        actions::Actions actsF = actions::actionsAxisymFudge(potential, toPosVelCyl(traj[i]), ifd);
-        actions::Actions actsI = actfinder.actions(toPosVelCyl(traj[i]));
-        strm << utils::pp(point.R, 8)+' '+utils::pp(point.z, 8)+' '+
+        actions::Actions acF = actions::actionsAxisymFudge(potential, toPosVelCyl(traj[i]), fd);
+        actions::Actions acI = actfinder.actions(toPosVelCyl(traj[i]));
+        /*strm << utils::pp(point.R, 8)+' '+utils::pp(point.z, 8)+' '+
             utils::pp(pprol.lambda, 8)+' '+utils::pp(pprol.nu, 8)+' '+
             utils::pp(I3, 8)+' '+
-            utils::pp(actsF.Jr, 8)+' '+utils::pp(actsI.Jr, 8)+' '+
-            utils::pp(actsF.Jz, 8)+' '+utils::pp(actsI.Jz, 8)+'\n';
+            utils::pp(acF.Jr, 8)+' '+utils::pp(acI.Jr, 8)+' '+
+            utils::pp(acF.Jz, 8)+' '+utils::pp(acI.Jz, 8)+'\n';*/
         avgI3.add(I3);
-        actF.add(actsF);
-        actI.add(actsI);
+        actF.add(acF);
+        actI.add(acI);
+        // difference between interpolated and non-interpolated actions for the initial point
+        if(i==0) {
+            difJr = acI.Jr-acF.Jr;
+            difJz = acI.Jz-acF.Jz;
+        }
     }
     numActionEval += traj.size();
     actF.finish();
@@ -96,17 +107,16 @@ bool test_actions(const potential::BasePotential& potential,
     double scatterNorm = 0.33 * sqrt( (actF.avg.Jr+actF.avg.Jz) /
         (actF.avg.Jr+actF.avg.Jz+fabs(actF.avg.Jphi)) );
     bool tolerable = scatter < scatterNorm || isResonance(traj);
-    double E = totalEnergy(potential, initial_conditions);
     output =
-        utils::pp(E*pow_2(unit.to_Kpc/unit.to_Myr),7) +'\t'+
-        utils::pp(L_circ(potential, E)*dim,7) +'\t'+
-        utils::pp(actF.avg.Jphi*dim,7) +'\t'+
-        utils::pp(actF.avg.Jr*dim,7) +'\t'+ utils::pp(actF.rms.Jr*dim,7) +'\t'+
-        utils::pp(actF.avg.Jz*dim,7) +'\t'+ utils::pp(actF.rms.Jz*dim,7) +'\t'+
-        utils::pp(actI.avg.Jr*dim,7) +'\t'+ utils::pp(actI.rms.Jr*dim,7) +'\t'+
-        utils::pp(actI.avg.Jz*dim,7) +'\t'+ utils::pp(actI.rms.Jz*dim,7) +'\t'+
-        utils::pp(avgI3.mean(),7) +'\t'+ utils::pp(sqrt(avgI3.disp()),7) +'\t'+
-        //utils::pp(ifd*unit.to_Kpc,7) +'\t'+
+        utils::pp(E*pow_2(unit.to_Kpc/unit.to_Myr), 7) +'\t'+
+        utils::pp(Lz / Lc, 7) +'\t'+ utils::pp(I3rel, 7) +'\t'+
+        utils::pp(actF.avg.Jr / (Lc-Lz), 7) +'\t'+ utils::pp(actF.rms.Jr / (Lc-Lz), 7) +'\t'+
+        utils::pp(actF.avg.Jz / (Lc-Lz), 7) +'\t'+ utils::pp(actF.rms.Jz / (Lc-Lz), 7) +'\t'+
+        utils::pp(actI.avg.Jr / (Lc-Lz), 7) +'\t'+ utils::pp(actI.rms.Jr / (Lc-Lz), 7) +'\t'+
+        utils::pp(actI.avg.Jz / (Lc-Lz), 7) +'\t'+ utils::pp(actI.rms.Jz / (Lc-Lz), 7) +'\t'+
+        utils::pp(avgI3.mean() / I3max,  7) +'\t'+ utils::pp(sqrt(avgI3.disp()) / I3max, 7) +'\t'+
+        utils::pp(difJr / (Lc-Lz), 7) +'\t'+ utils::pp(difJz / (Lc-Lz), 7) +'\t'+
+        //utils::pp(fd*unit.to_Kpc,7) +'\t'+
         (tolerable?"":" **");
     return tolerable;
 }
@@ -139,13 +149,16 @@ int main()
     bool allok = true;
     potential::PtrPotential pot = make_galpot(test_galpot_params);
     clock_t clockbegin = std::clock();
-    actions::ActionFinderAxisymFudge actfinder(pot);
+    actions::ActionFinderAxisymFudge actfinder(pot, /*interpolate*/true);
     std::cout << (std::clock()-clockbegin)*1.0/CLOCKS_PER_SEC << " seconds to init action interpolator\n";
 
     // prepare room for storing the output
     std::vector<double> Evalues;
-    for(double E=pot->value(coord::PosCyl(0,0,0))*0.95, dE=-E*0.063; E<0; E+=dE)
-        Evalues.push_back(E);
+    for(int i=-8; i<=8; i++) {
+        double r = pow(10, i*0.25);
+        Evalues.push_back(pot->value(coord::PosCyl(r,0,0)) + 0.5*pow_2(v_circ(*pot, r)));
+    }
+
     const int NE   = Evalues.size();
     const int NLZ  = 16;
     const int NDIR = 8;
@@ -159,7 +172,7 @@ int main()
         double E = Evalues[iE];
         double Rc = R_circ(*pot, E);
         double k,n,o;
-        epicycleFreqs(*pot, Rc, k, n, o);  // an estimate for orbit frequencies
+        epicycleFreqs(*pot, Rc, k, n, o);  // an estimate for orbit frequencies is
         double totalTime = 2*M_PI/k * 50;  // needed to assign the integration time interval
         double timeStep  = totalTime / 500;
         double Lc = v_circ(*pot, Rc) * Rc;
@@ -182,10 +195,11 @@ int main()
             }
         }
     }
+    // this estimate does not take into account the time spent on orbit integration
     std::cout << numActionEval * 1.0*CLOCKS_PER_SEC / (std::clock()-clockbegin) << " actions per second\n";
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream output("test_action_finder.dat");
-        output << "E\tLcirc\tJphi\tJr\tJr_err\tJz\tJz_err\tiJr\tiJr_err\tiJz\tiJz_err\tI3\tI3_err\n";
+        output << "E\tLzrel\tI3rel\tJr\tJr_err\tJz\tJz_err\tiJr\tiJr_err\tiJz\tiJz_err\tI3\tI3_err\n";
         for(unsigned int l=0; l<results.size(); l++)
             output << results[l] << '\n';
     }

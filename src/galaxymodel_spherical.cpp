@@ -25,7 +25,7 @@ static const int GLORDER  = 8;    // default value for all segments, or, alterna
 static const int GLORDER1 = 6;    // for shorter segments
 static const int GLORDER2 = 10;   // for larger segments
 /// the choice between short and long segments is determined by the segment length in log(h)
-static const double GLDELTA = M_LN2;
+static const double GLDELTA = 0.7;  // ln(2)
 
 /// lower limit on the value of density or DF to be considered seriously
 /// (this weird-looking threshold takes into account possible roundoff errors
@@ -368,7 +368,7 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
 
     // 4.5 write out the results
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("makeEddingtonDF.log");
+        std::ofstream strm("MakeEddingtonDF.log");
         strm << "#h      \tf(h) as computed\n";
         for(unsigned int i=0; i<gridh.size(); i++)
             strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';
@@ -406,7 +406,7 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
 
             // write out the results once more
             if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-                std::ofstream strm("makeEddingtonDF.log", std::ofstream::app);
+                std::ofstream strm("MakeEddingtonDF.log", std::ofstream::app);
                 strm << "\n#h      \tf(h) final; inner slope="<< slopeIn <<", outer="<< slopeOut <<"\n";
                 for(unsigned int i=0; i<gridh.size(); i++)
                     strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';
@@ -486,7 +486,7 @@ math::LogLogSpline fitSphericalDF(
         "f(h) ~ h^" + utils::toString(derLeft)  + " at small h"
         " and ~ h^" + utils::toString(derRight) + " at large h");
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("fitSphericalDF.log");
+        std::ofstream strm("FitSphericalDF.log");
         strm << "#h      \tf(h)    \tinner slope: " << derLeft << ", outer slope: " << derRight << '\n';
         for(unsigned int i=0; i<gridh.size(); i++)
             strm << utils::pp(gridh[i], 12) << '\t' << utils::pp(gridf[i],12) << '\n';

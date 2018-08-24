@@ -9,9 +9,24 @@
 
 namespace math {
 
-// ------- Some machinery for B-splines ------- //
 namespace {
 
+// ------- accuracy parameters for spline fitting ------- //
+
+/// tolerance parameter for multidimensional root-finding of amplitudes in splineLogDensity
+static const double EPS_AMPL = 1e-8;
+
+/// relative tolerance for finding the appropriate value of
+/// smoothing parameter lambda in SplineApprox and splineLogDensity
+static const double EPS_LAMBDA = 1e-4;
+
+/// upper limit on the number of iterations in root-finder for lambda
+static const int MAX_NUM_ITER  = 100;
+
+
+// ------- Some machinery for B-splines ------- //
+
+// prototype of a function that computes values or derivatives of B-spline basis sets
 typedef int (*BsplineFnc)(const double, const double[], int, double[]);
 
 /// linear interpolation on a grid with a special treatment for indices outside the grid
@@ -445,12 +460,11 @@ inline void evalCubicSplines(
         t      =  (x-xl) / h,  // NOT (x-xl)*hi, because this doesn't always give an exact result if x==xh
         T      =  1-t,
 #if 0   // two alternative ways of computing - not clear which one is more efficient
-        tq     =  t*t,
-        Tq     =  T*T,
-        f_fl   =  Tq * (1+2*t),
-        f_fh   =  tq * (1+2*T),
-        f_dl   =  Tq * (x-xl),
-        f_dh   = -tq * (xh-x),
+        //f_fl =  TT * (1+2*t),
+        f_fh   = t*t * (1+2*T),
+        f_fl   =  1  - f_fh,
+        f_dl   = T*T * (x-xl),  //  T*T*t*h
+        f_dh   = t*t * (x-xh),  // -t*t*T*h
         df_dl  =  T  * (1-3*t),
         df_dh  =  t  * (1-3*T),
         df_dif =  6  * t*T * hi,
@@ -467,16 +481,15 @@ inline void evalCubicSplines(
             d2f[k] = dl[k] * d2f_dl  +  dh[k] * d2f_dh  +  dif * d2f_dif;
     }
 #else
-    tt = t*t,
     tT = t*T;
     for(unsigned int k=0; k<K; k++) {
-        const double Q = dl[k] + dh[k] - 2 * (fh[k] - fl[k]) * hi;
+        const double dif = fh[k] - fl[k], Q = 3 * (dl[k] + dh[k]) - 6 * hi * dif;
         if(f)
-            f[k]   = fl[k] * (1-tt)  +  fh[k] * tt  +  (dl[k] - t * Q) * tT * h;
+            f[k]   = fl[k] * T  +  fh[k] * t  +  (dif * (t-T)  +  (dl[k] * T - dh[k] * t) * h) * tT;
         if(df)
-            df[k]  = dl[k] * T       +  dh[k] * t   -  3*Q * tT;
+            df[k]  = dl[k] * T  +  dh[k] * t  -  Q * tT;
         if(d2f)
-            d2f[k] = (dh[k] - dl[k]  +  3*Q * (t-T)) * hi;
+            d2f[k] = (dh[k] - dl[k]  +  Q * (t-T)) * hi;
     }
 #endif
 }
@@ -548,13 +561,11 @@ inline void evalQuinticSplines(
 
 /// apply the slope-limiting prescription of Hyman(1983) to the first derivatives of a previously
 /// constructed natural cubic spline (modify the first derivatives if necessary)
-inline void regularizeSpline(const std::vector<double>& xval,
-    const std::vector<double>& fval, std::vector<double>& fder)
+inline void regularizeSpline(const std::vector<double>& xval, const double fval[], double fder[])
 {
     // slightly reduce the maximum slope to make the interpolator strictly monotonic when possible
     const double THREE = 3 - 3e-15;
     size_t numPoints = xval.size();
-    assert(fval.size() == numPoints && fder.size() == numPoints);
     for(size_t i=0; i<numPoints; i++) {
         if(i==0 || i==numPoints-1) {  // boundary points
             size_t k = i==0 ? i : numPoints-2;
@@ -679,7 +690,7 @@ CubicSpline::CubicSpline(const std::vector<double>& xvalues, const std::vector<d
 {
     fder = constructCubicSpline(xval, fval);
     if(regularize)
-        regularizeSpline(xval, fval, fder);
+        regularizeSpline(xval, &fval[0], &fder[0]);
 }
 
 // initialization from function values and derivatives at all grid nodes
@@ -870,7 +881,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
 
     // first initialize the derivatives for an un-scaled spline that will be used as a backup option
     fder = constructCubicSpline(xval, fval, derivLeft, derivRight);
-    regularizeSpline(xval, fval, fder);
+    regularizeSpline(xval, &fval[0], &fder[0]);
 
     logxval.resize(numPoints);
     logfval.resize(numPoints);
@@ -906,7 +917,7 @@ LogLogSpline::LogLogSpline(const std::vector<double>& xvalues, const std::vector
 
                 // limit the derivatives so that monotonic segments will be monotonically interpolated
                 // (breaking this rule hits particularly badly if the interpolated value will be exp'ed)
-                regularizeSpline(tmpx, tmpf, tmpd);
+                regularizeSpline(tmpx, &tmpf[0], &tmpd[0]);
 
                 // assign the log-log derivs for all points in the preceding section
                 for(size_t k=0; k<numSegPoints; k++)
@@ -1351,8 +1362,10 @@ template class FiniteElement1d<3>;
 // ------ INTERPOLATION IN 2D ------ //
 
 BaseInterpolator2d::BaseInterpolator2d(
-    const std::vector<double>& xgrid, const std::vector<double>& ygrid,
-    const Matrix<double>& fvalues) :
+    const std::vector<double>& xgrid,
+    const std::vector<double>& ygrid,
+    const IMatrixDense<double>& fvalues)
+:
     xval(xgrid), yval(ygrid), fval(fvalues.data(), fvalues.data() + fvalues.size())
 {
     const size_t xsize = xgrid.size();
@@ -1419,21 +1432,26 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
         dy = yval[yi+1] - yval[yi],
         // relative positions within the grid cell [0:1], in units of grid cell size
         t = (x - xval[xi]) / dx,
-        u = (y - yval[yi]) / dy;
+        u = (y - yval[yi]) / dy,
+        T = 1-t, U = 1-u;
     if(z)
-        *z = (1-t)*(1-u) * zlowlow + t*(1-u) * zupplow + (1-t)*u * zlowupp + t*u * zuppupp;
+        *z = T * (U * zlowlow + u * zlowupp) + t * (U * zupplow + u * zuppupp);
     if(z_x)
-        *z_x = (-(1-u) * zlowlow + (1-u) * zupplow - u * zlowupp + u * zuppupp) / dx;
+        *z_x = (U * (zupplow - zlowlow) + u * (zuppupp - zlowupp)) / dx;
     if(z_y)
-        *z_y = (-(1-t) * zlowlow - t * zupplow + (1-t) * zlowupp + t * zuppupp) / dy;
+        *z_y = (T * (zlowupp - zlowlow) + t * (zuppupp - zupplow)) / dy;
 }
 
 
 //------------ 2D CUBIC SPLINE -------------//
 
-CubicSpline2d::CubicSpline2d(const std::vector<double>& xgrid, const std::vector<double>& ygrid,
-    const Matrix<double>& fvalues,
-    double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax) :
+CubicSpline2d::CubicSpline2d(
+    const std::vector<double>& xgrid,
+    const std::vector<double>& ygrid,
+    const IMatrixDense<double>& fvalues,
+    bool regularize,
+    double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax)
+:
     BaseInterpolator2d(xgrid, ygrid, fvalues),
     fx (fvalues.size()),
     fy (fvalues.size()),
@@ -1441,23 +1459,27 @@ CubicSpline2d::CubicSpline2d(const std::vector<double>& xgrid, const std::vector
 {
     const size_t xsize = xgrid.size();
     const size_t ysize = ygrid.size();
-    std::vector<double> tmpvalues(ysize);
+    std::vector<double> tmpvalues(ysize), tmpderivs;
     // step 1. for each x_i, construct cubic splines for f(x_i, y) in y and assign df/dy at grid nodes
     for(size_t i=0; i<xsize; i++) {
         for(size_t j=0; j<ysize; j++)
             tmpvalues[j] = fval[i * ysize + j];
-        tmpvalues = constructCubicSpline(yval, tmpvalues, deriv_ymin, deriv_ymax);
+        tmpderivs = constructCubicSpline(yval, tmpvalues, deriv_ymin, deriv_ymax);
+        if(regularize)
+            regularizeSpline(yval, &tmpvalues[0], &tmpderivs[0]);
         for(size_t j=0; j<ysize; j++)
-            fy[i * ysize + j] = tmpvalues[j];
+            fy[i * ysize + j] = tmpderivs[j];
     }
     tmpvalues.resize(xsize);
     // step 2. for each y_j, construct cubic splines for f(x, y_j) in x and assign df/dx at grid nodes
     for(size_t j=0; j<ysize; j++) {
         for(size_t i=0; i<xsize; i++)
             tmpvalues[i] = fval[i * ysize + j];
-        tmpvalues = constructCubicSpline(xval, tmpvalues, deriv_xmin, deriv_xmax);
+        tmpderivs = constructCubicSpline(xval, tmpvalues, deriv_xmin, deriv_xmax);
+        if(regularize)
+            regularizeSpline(xval, &tmpvalues[0], &tmpderivs[0]);
         for(size_t i=0; i<xsize; i++)
-            fx[i * ysize + j] = tmpvalues[i];
+            fx[i * ysize + j] = tmpderivs[i];
         // step 3. assign the mixed derivative d2f/dxdy:
         // if derivs at the boundary are specified and constant, 2nd deriv must be zero
         if( (j==0 && isFinite(deriv_ymin)) || (j==ysize-1 && isFinite(deriv_ymax)) ) {
@@ -1467,11 +1489,18 @@ CubicSpline2d::CubicSpline2d(const std::vector<double>& xgrid, const std::vector
             // otherwise construct cubic splines for df/dy(x,y_j) in x and assign d2f/dydx
             for(size_t i=0; i<xsize; i++)
                 tmpvalues[i] = fy[i * ysize + j];
-            tmpvalues = constructCubicSpline(xval, tmpvalues,
+            tmpderivs = constructCubicSpline(xval, tmpvalues,
                 isFinite(deriv_xmin) ? 0. : NAN, isFinite(deriv_xmax) ? 0. : NAN);
+            if(regularize)
+                regularizeSpline(xval, &tmpvalues[0], &tmpderivs[0]);
             for(size_t i=0; i<xsize; i++)
-                fxy[i * ysize + j] = tmpvalues[i];
+                fxy[i * ysize + j] = tmpderivs[i];
         }
+    }
+    // step 4 (optional): apply the regularization filter to the mixed derivative along the other direction
+    if(regularize) {
+        for(size_t i=0; i<xsize; i++)
+            regularizeSpline(yval, &fx[i * ysize], &fxy[i * ysize]);
     }
 }
 
@@ -1549,8 +1578,13 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
 //------------ 2D QUINTIC SPLINE -------------//
 
 // construct the spline in the case when we only have first derivatives, but no mixed second derivative
-QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::vector<double>& ygrid,
-    const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy) :
+QuinticSpline2d::QuinticSpline2d(
+    const std::vector<double>& xgrid,
+    const std::vector<double>& ygrid,
+    const IMatrixDense<double>& fvalues,
+    const IMatrixDense<double>& dfdx,
+    const IMatrixDense<double>& dfdy)
+:
     BaseInterpolator2d(xgrid, ygrid, fvalues),
     fx   (dfdx.data(), dfdx.data() + dfdx.size()),
     fy   (dfdy.data(), dfdy.data() + dfdy.size()),
@@ -1682,9 +1716,14 @@ QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::ve
 }
 
 // construct the spline from first derivatives and mixed second derivative (simpler and more accurate)
-QuinticSpline2d::QuinticSpline2d(const std::vector<double>& xgrid, const std::vector<double>& ygrid,
-    const Matrix<double>& fvalues, const Matrix<double>& dfdx, const Matrix<double>& dfdy,
-    const Matrix<double>& d2fdxdy) :
+QuinticSpline2d::QuinticSpline2d(
+    const std::vector<double>& xgrid,
+    const std::vector<double>& ygrid,
+    const IMatrixDense<double>& fvalues,
+    const IMatrixDense<double>& dfdx,
+    const IMatrixDense<double>& dfdy,
+    const IMatrixDense<double>& d2fdxdy)
+:
     BaseInterpolator2d(xgrid, ygrid, fvalues),
     fx   (dfdx.data(), dfdx.data() + dfdx.size()),
     fy   (dfdy.data(), dfdy.data() + dfdy.size()),
@@ -1870,9 +1909,9 @@ double LinearInterpolator3d::value(double x, double y, double z) const
         return NAN;
     const double
     // relative positions within the grid cell [0:1], in units of grid cell size
-    offx = (x - xval[xi]) / (xval[xi+1] - xval[xi]),
-    offy = (y - yval[yi]) / (yval[yi+1] - yval[yi]),
-    offz = (z - zval[zi]) / (zval[zi+1] - zval[zi]),
+    offx = (x - xval[xi]) / (xval[xi+1] - xval[xi]), offX = 1-offx,
+    offy = (y - yval[yi]) / (yval[yi+1] - yval[yi]), offY = 1-offy,
+    offz = (z - zval[zi]) / (zval[zi+1] - zval[zi]), offZ = 1-offz,
     // values of function at 8 corners
     flll = fval[il],          // xlow,ylow,zlow
     fllu = fval[il + 1],      // xlow,ylow,zupp
@@ -1883,15 +1922,15 @@ double LinearInterpolator3d::value(double x, double y, double z) const
     fuul = fval[iu + nz],     // xupp,yupp,zlow
     fuuu = fval[iu + nz + 1]; // xupp,yupp,zupp
     return
-        ( (1-offy) * ( (1-offz) * flll + offz * fllu ) +
-             offy  * ( (1-offz) * flul + offz * fluu ) ) * (1-offx) +
-        ( (1-offy) * ( (1-offz) * full + offz * fulu ) +
-             offy  * ( (1-offz) * fuul + offz * fuuu ) ) * offx;
+        ( offY * ( offZ * flll + offz * fllu )
+        + offy * ( offZ * flul + offz * fluu ) ) * offX +
+        ( offY * ( offZ * full + offz * fulu )
+        + offy * ( offZ * fuul + offz * fuuu ) ) * offx;
 }
 
 
 CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vector<double>& ynodes,
-    const std::vector<double>& znodes, const std::vector<double>& fvalues) :
+    const std::vector<double>& znodes, const std::vector<double>& fvalues, bool regularize) :
     xval(xnodes), yval(ynodes), zval(znodes)
 {
     const int nx = xval.size(), ny = yval.size(), nz = zval.size(), nf = fvalues.size();
@@ -1916,6 +1955,9 @@ CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vecto
     fxyz.resize(nval);
 
     if(nf == nampl) {
+        if(regularize)
+            throw std::invalid_argument("CubicSpline3d: cannot apply monotonic regularization filter "
+                "if the input contains B-spline amplitudes");
         // assume that the input array contained amplitudes of a 3d cubic B-spline
         const std::vector<double>* nodes[3] = {&xval, &yval, &zval};
         Matrix<double> values[3], derivs[3];
@@ -1957,61 +1999,102 @@ CubicSpline3d::CubicSpline3d(const std::vector<double>& xnodes, const std::vecto
     // otherwise the input array contains the values of function at 3d grid nodes
     fval = fvalues;
 
-    std::vector<double> tmpx(nx), tmpy(ny), tmpz(nz), tmpxy(nx), tmpxz(nx), tmpyz, tmpxyz;
+    std::vector<double> tmpx(nx), tmpy(ny), tmpz(nz), tmpd;
     // step 1. construct splines from function values and store the first derivatives at grid nodes
-    // a. for each y_j,z_k construct cubic splines for f(x, y_j, z_k) in x and store df/fx
+    // a. for each y_j,z_k construct cubic spline for f(x, y_j, z_k) in x and store df/dx
     for(int j=0; j<ny; j++)
         for(int k=0; k<nz; k++) {
             for(int i=0; i<nx; i++)
                 tmpx[i] = fval[ (i*ny + j) * nz + k ];
-            tmpx = constructCubicSpline(xval, tmpx);
+            tmpd = constructCubicSpline(xval, tmpx);
+            if(regularize)
+                regularizeSpline(xval, &tmpx[0], &tmpd[0]);
             for(int i=0; i<nx; i++)
-                fx[ (i*ny + j) * nz + k ] = tmpx[i];
+                fx[ (i*ny + j) * nz + k ] = tmpd[i];
         }
-    // b. for each x_i,z_k construct cubic splines for f(x_i, y, z_k) in y and store df/fy
+    // b. for each x_i,z_k construct cubic spline for f(x_i, y, z_k) in y and store df/dy
     for(int i=0; i<nx; i++)
         for(int k=0; k<nz; k++) {
             for(int j=0; j<ny; j++)
                 tmpy[j] = fval[ (i*ny + j) * nz + k ];
-            tmpy = constructCubicSpline(yval, tmpy);
+            tmpd = constructCubicSpline(yval, tmpy);
+            if(regularize)
+                regularizeSpline(yval, &tmpy[0], &tmpd[0]);
             for(int j=0; j<ny; j++)
-                fy[ (i*ny + j) * nz + k ] = tmpy[j];
+                fy[ (i*ny + j) * nz + k ] = tmpd[j];
         }
-    // c. for each x_i,y_j construct cubic splines for f(x_i, y_j, z) in z and store df/fz
+    // c. for each x_i,y_j construct cubic spline for f(x_i, y_j, z) in z and store df/dz
     for(int i=0; i<nx; i++)
         for(int j=0; j<ny; j++) {
             tmpz.assign(fval.begin() + (i*ny + j) * nz, fval.begin() + (i*ny + j+1) * nz);
-            tmpz = constructCubicSpline(zval, tmpz);
+            tmpd = constructCubicSpline(zval, tmpz);
+            if(regularize)
+                regularizeSpline(zval, &tmpz[0], &tmpd[0]);
             for(int k=0; k<nz; k++)
-                fz[ (i*ny + j) * nz + k ] = tmpz[k];
+                fz[ (i*ny + j) * nz + k ] = tmpd[k];
         }
 
     // step 2. construct splines from first derivatives and store mixed second derivatives at grid nodes
-    // a,b:  compute d2f/dxdy, d2f/dxdz
     for(int j=0; j<ny; j++)
         for(int k=0; k<nz; k++) {
-            for(int i=0; i<nx; i++) {
-                tmpxy[i] = fy[ (i*ny + j) * nz + k ];
-                tmpxz[i] = fz[ (i*ny + j) * nz + k ];
-            }
-            tmpxy = constructCubicSpline(xval, tmpxy);
-            tmpxz = constructCubicSpline(xval, tmpxz);
-            for(int i=0; i<nx; i++) {
-                fxy[ (i*ny + j) * nz + k ] = tmpxy[i];
-                fxz[ (i*ny + j) * nz + k ] = tmpxz[i];
+            // ab. for each y_j,z_k construct cubic spline for fy(x, y_j, z_k) in x and compute d2f/dxdy
+            for(int i=0; i<nx; i++)
+                tmpx[i] = fy[ (i*ny + j) * nz + k ];
+            tmpd = constructCubicSpline(xval, tmpx);
+            if(regularize)
+                regularizeSpline(xval, &tmpx[0], &tmpd[0]);
+            for(int i=0; i<nx; i++)
+                fxy[ (i*ny + j) * nz + k ] = tmpd[i];
+            // ac. for each y_j,z_k construct cubic spline for fz(x, y_j, z_k) in x and compute d2f/dxdz
+            for(int i=0; i<nx; i++)
+                tmpx[i] = fz[ (i*ny + j) * nz + k ];
+            tmpd = constructCubicSpline(xval, tmpx);
+            if(regularize)
+                regularizeSpline(xval, &tmpx[0], &tmpd[0]);
+            for(int i=0; i<nx; i++)
+                fxz[ (i*ny + j) * nz + k ] = tmpd[i];
+        }
+    for(int i=0; i<nx; i++)
+        for(int k=0; k<nz; k++) {
+            // bc. for each x_i,z_k construct cubic spline for fz(x_i, y, z_k) in y and compute d2f/dydz
+            for(int j=0; j<ny; j++)
+                tmpy[j] = fz[ (i*ny + j) * nz + k ];
+            tmpd = constructCubicSpline(yval, tmpy);
+            if(regularize)
+                regularizeSpline(yval, &tmpy[0], &tmpd[0]);
+            for(int j=0; j<ny; j++)
+                fyz[ (i*ny + j) * nz + k ] = tmpd[j];
+            // ba. for each x_i,z_k regularize the derivative d2f/dxdy of spline for fx(x_i, y, z_k) in y
+            if(regularize) {
+                for(int j=0; j<ny; j++) {
+                    tmpy[j] = fx [ (i*ny + j) * nz + k ];
+                    tmpd[j] = fxy[ (i*ny + j) * nz + k ];
+                }
+                regularizeSpline(yval, &tmpy[0], &tmpd[0]);
+                for(int j=0; j<ny; j++)
+                    fxy[ (i*ny + j) * nz + k ] = tmpd[j];
             }
         }
-    // 2c:  compute d2f/dydz  and  step 3: compute d3f/dxdydz
+    if(regularize) {
+        // ca. for each x_i,y_j regularize the derivative d2f/dxdz of spline for fx(x_i, y_j, z) in z
+        // cb. for each x_i,y_j regularize the derivative d2f/dydz of spline for fy(x_i, y_j, z) in z
+        for(int i=0; i<nx; i++)
+            for(int j=0; j<ny; j++) {
+                regularizeSpline(zval, &fx[ (i*ny + j) * nz ], &fxz[ (i*ny + j) * nz ]);
+                regularizeSpline(zval, &fy[ (i*ny + j) * nz ], &fyz[ (i*ny + j) * nz ]);
+            }
+    }
+
+    // step 3: for each x_i,y_j construct spline for d2f/dxdy(x_i, y_j, z) in z and compute d3f/dxdydz
     for(int i=0; i<nx; i++)
         for(int j=0; j<ny; j++) {
-            tmpyz.assign (fy .begin() + (i*ny + j) * nz, fy .begin() + (i*ny + j+1) * nz);
-            tmpxyz.assign(fxy.begin() + (i*ny + j) * nz, fxy.begin() + (i*ny + j+1) * nz);
-            tmpyz  = constructCubicSpline(zval, tmpyz);
-            tmpxyz = constructCubicSpline(zval, tmpxyz);
-            for(int k=0; k<nz; k++) {
-                fyz [ (i*ny + j) * nz + k ] = tmpyz[k];
-                fxyz[ (i*ny + j) * nz + k ] = tmpxyz[k];
-            }
+            tmpz.assign(fxy.begin() + (i*ny + j) * nz, fxy.begin() + (i*ny + j+1) * nz);
+            tmpd = constructCubicSpline(zval, tmpz);
+            if(regularize)
+                // not sure if one also needs to apply the slope limiter along the other two dimensions
+                regularizeSpline(zval, &tmpz[0], &tmpd[0]);
+            for(int k=0; k<nz; k++)
+                fxyz[ (i*ny + j) * nz + k ] = tmpd[k];
         }
 }
 
@@ -2450,21 +2533,18 @@ SplineApproxImpl::SplineApproxImpl(const std::vector<double> &_knots,
     if(weights.empty()) {
         sumWeights = numDataPoints;
     } else {
-        if(weights.size()!=(size_t)numDataPoints)
+        if(weights.size() != (size_t)numDataPoints)
             throw std::length_error("SplineApprox: xvalues and weights must have equal length");
         sumWeights = 0;
         for(ptrdiff_t i=0; i<numDataPoints; i++) {
-            if(weights[i] < 0)
+            if(!(weights[i] >= 0))
                 throw std::invalid_argument("SplineApprox: weights must be non-negative");
             sumWeights += weights[i];
         }
         if(sumWeights == 0)
             throw std::invalid_argument("SplineApprox: sum of all weights must positive");
     }
-
-    for(unsigned int k=1; k<numKnots; k++)
-        if(!(knots[k] > knots[k-1]))
-            throw std::invalid_argument("SplineApprox: knots must be in ascending order");
+    checkFiniteAndMonotonic(knots, "splineApprox", 'x');
 
     // initialize b-spline matrix B
 #ifdef _OPENMP
@@ -2597,8 +2677,6 @@ public:
     }
 };
 
-/// relative tolerance for finding the appropriate value of smoothing parameter
-static const double EPS_LAMBDA = 1e-6;
 }  // internal namespace
 
 // obtain solution of linear system for the given smoothing parameter,
@@ -2718,8 +2796,7 @@ struct SplineLogFitParams {
     double lambda;            ///< smoothing parameter
     double targetLogL;        ///< target value of likelihood for the case with smoothing
     double best;              ///< highest cross-validation score or smallest offset from root
-    double gradNorm;          ///< normalization factor for determining the root-finder tolerance
-    SplineLogFitParams() : lambda(0), targetLogL(0), best(-INFINITY), gradNorm(0) {}
+    SplineLogFitParams() : lambda(0), targetLogL(0), best(-INFINITY) {}
 };
 
 /** The engine of log-spline density estimator relies on the maximization of log-likelihood
@@ -2885,19 +2962,26 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         throw std::length_error("splineLogDensity: sizes of input arrays are not equal");
     if(numNodes<2)
         throw std::invalid_argument("splineLogDensity: grid size should be at least 2");
-    for(unsigned int k=1; k<numNodes; k++)
-        if(grid[k-1] >= grid[k])
-            throw std::invalid_argument("splineLogDensity: grid nodes are not monotonic");
+    checkFiniteAndMonotonic(grid, "splineLogDensity", 'x');
+    double xmin = grid[0], xmax = grid[numNodes-1];
 
     // prepare the roughness penalty matrix
     // (integrals over products of certain derivatives of basis functions)
     if(N==3) {
-        if((options & FO_PENALTY_3RD_DERIV) == FO_PENALTY_3RD_DERIV)
+        bool der3 = (options & FO_PENALTY_3RD_DERIV) == FO_PENALTY_3RD_DERIV;
+        if(der3)
             roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
                 grid, numBasisFnc, /*GLORDER*/ 1, /*3rd deriv*/ bsplineNaturalCubicDerivs<3>));
         else
             roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
                 grid, numBasisFnc, /*GLORDER*/ 2, /*2nd deriv*/ bsplineNaturalCubicDerivs<2>));
+        // rescale the roughness matrix to make it invariant w.r.t. the extent of the grid:
+        // the characteristic magnitude value of B-spline K-th derivatives is (xmax-xmin)^-K,
+        // hence the integrals of  [B^(K)]^2  are proportional to  (xmax-xmin)^(1-2K);
+        // additional balancing factors make the characteristic value of smoothing parameter 'lambda'
+        // roughly independent of the number of data points and of the use of 2nd vs 3rd deriv
+        double norm = pow( xmax-xmin, der3 ? 5 : 3) / numData * (der3 ? 1 : 0.01);
+        blas_dmul(norm, roughnessMatrix);
     } else {
         assert(N==1);
         // no roughness penalty is possible for N=1
@@ -2906,16 +2990,15 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
 
     // quick scan to analyze the weights
     double minWeight = INFINITY;
-    double xmin = grid[0], xmax = grid[numNodes-1];
     double avgx = 0, avgx2 = 0;
     for(ptrdiff_t p=0; p<numData; p++) {
         double xval = xvalues[p], weight = weights[p];
-        if(weight < 0)
+        if(!(weight >= 0))
             throw std::invalid_argument("splineLogDensity: sample weights may not be negative");
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
         if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
             (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
-            weight == 0)
+            !isFinite(xval) || weight == 0)
             continue;
         sumWeights += weight;
         avgx       += weight * xval;
@@ -2944,7 +3027,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
         if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
             (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
-            weight == 0)
+            !isFinite(xval) || weight == 0)
             continue;
         double Bspl[N+1];
         int ind = N==1 ?
@@ -2978,7 +3061,6 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     bool isSingular = false;
     for(unsigned int k=0; k<numBasisFnc; k++) {
         isSingular |= Vbasis[k]==0;
-        params.gradNorm = fmax(params.gradNorm, fabs(Vbasis[k]));
     }
     if(isSingular) {
         // add fake contributions to all basis functions that would have arisen from
@@ -3007,8 +3089,9 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     // assign the initial guess for amplitudes using a Gaussian density distribution
     params.ampl.assign(numBasisFnc, 0);
     for(unsigned int k=0; k<numBasisFnc; k++) {
-        params.ampl[k] = -pow_2(grid[k]-avgx) / 2 / dispx;
+        params.ampl[k] = -0.5 * pow_2(grid[k]-avgx) / dispx;
     }
+
     // make sure that we start with a density that is declining when extrapolated
     if((options & FO_INFINITE_LEFT) == FO_INFINITE_LEFT)
         params.ampl[0] = fmin(params.ampl[0], params.ampl[1] - (grid[1]-grid[0]));
@@ -3294,11 +3377,10 @@ private:
         bool useCV = params.targetLogL==0;   // whether we are in the minimizer or root-finder mode
         params.lambda = exp( 1 / scaledLambda - 1 / (1-scaledLambda) );
         std::vector<double> result(params.ampl);
-        int numIter   = findRootNdimDeriv(fitter, &params.ampl[0],
-            1e-8*params.gradNorm, 100, &result[0]);
+        int numIter   = findRootNdimDeriv(fitter, &params.ampl[0], EPS_AMPL, MAX_NUM_ITER, &result[0]);
+        bool converged= numIter>0;  // check for convergence (numIter positive)
         double logL   = fitter.logL(result);
         double logLcv = fitter.logLcv(result);
-        bool converged= numIter>0;  // check for convergence (numIter positive)
         if(utils::verbosityLevel >= utils::VL_VERBOSE) {
             utils::msg(utils::VL_VERBOSE, "splineLogDensity",
                 "lambda="+utils::toString(params.lambda)+", #iter="+utils::toString(numIter)+
@@ -3306,8 +3388,8 @@ private:
                 (!converged ? " did not converge" : params.best < logLcv ? " improved" : ""));
         }
         if(useCV) {  // we are searching for the highest cross-validation score
-            if( params.best < logLcv && converged)
-            {   // update the best-fit params and the starting point for fitting
+            if( params.best < logLcv && converged) {
+                // update the best-fit params and the starting point for fitting
                 params.best = logLcv;
                 params.ampl = result;
             }
@@ -3337,7 +3419,7 @@ std::vector<double> splineLogDensity(const std::vector<double> &grid,
         options, params);
     if(N==1) { // find the best-fit amplitudes without any smoothing
         std::vector<double> result(params.ampl);
-        int numIter = findRootNdimDeriv(fitter, &params.ampl[0], 1e-8*params.gradNorm, 100, &result[0]);
+        int numIter = findRootNdimDeriv(fitter, &params.ampl[0], EPS_AMPL, MAX_NUM_ITER, &result[0]);
         if(numIter>0)  // check for convergence
             params.ampl = result;
         utils::msg(utils::VL_VERBOSE, "splineLogDensity",
@@ -3357,14 +3439,14 @@ std::vector<double> splineLogDensity(const std::vector<double> &grid,
         // then a fit with almost no smoothing, which starts with an already more reasonable
         // initial guess and thus has a better chance to converge.
         const SplineLogDensityLambdaFinder<N> finder(fitter, params);
-        findMin(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, NAN, 1e-4);
+        findMin(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, NAN, EPS_LAMBDA);
         if(smoothing>0) {
             // target value of log-likelihood is allowed to be worse than
             // the best value for the case of no smoothing by an amount
             // that is proportional to the expected rms variation of logL
             params.best = smoothing * fitter.logLrms(params.ampl);
             params.targetLogL = fitter.logL(params.ampl) - params.best;
-            findRoot(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, 1e-4);
+            findRoot(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, EPS_LAMBDA);
         }
     }
     return fitter.getInterpolatedFunctionValues(params.ampl);

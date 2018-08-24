@@ -41,26 +41,25 @@ double Dehnen::densityCar(const coord::PosCar& pos) const
         math::pow(m, -gamma) * math::pow(scalerad+m, gamma-4);
 }
 
-/// \cond INTERNAL_DOCS
+namespace{  // internal
 
 class DehnenIntegrandPhi: public math::IFunctionNoDeriv {
-    double X2, Y2, Z2, gamma, q2, p2;
+    const double X2, Y2, Z2, gamma, q2, p2;
 public:
     DehnenIntegrandPhi(const coord::PosCar& pt, double gam, double q, double p, double scalerad) :
         X2(pow_2(pt.x/scalerad)), Y2(pow_2(pt.y/scalerad)), Z2(pow_2(pt.z/scalerad)),
-    gamma(gam), q2(q*q), p2(p*p) {};
+        gamma(gam), q2(q*q), p2(p*p) {}
     virtual double value(double s) const {
         const double s2 = s*s;
         const double m = s * sqrt( X2 + Y2/(1-(1-q2)*s2) + Z2/(1-(1-p2)*s2) );
-        const double numerator = (gamma==2)? (log((1+m)*s/m) - 1/(1+m) - log(s)) :
-            (1 - (3-gamma)*math::pow(m/(m+1), 2-gamma) + (2-gamma)*math::pow(m/(m+1), 3-gamma))/(2-gamma);
+        const double numerator = (gamma==2)? (log((1+m)/m) - 1/(1+m)) :
+            (1 - math::pow(m/(m+1), 2-gamma) * (3-gamma+m) / (1+m)) / (2-gamma);
         return -numerator / sqrt( (1-(1-q2)*s2) * (1-(1-p2)*s2) );
     }
 };
 
 class DehnenIntegrandForce: public math::IFunctionNoDeriv {
-    double X2, Y2, Z2;
-    double gamma;
+    const double X2, Y2, Z2, gamma;
 public:
     double a2;  // squared scale radius in i-th coordinate
     double C1, C2, C3, C4, C5;  // coefficients in computation as in Merritt&Fridman 1996
@@ -86,7 +85,8 @@ public:
         }
     }
 };
-/// \endcond
+
+} // internal namespace
 
 void Dehnen::evalCar(const coord::PosCar &pos,
     double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const

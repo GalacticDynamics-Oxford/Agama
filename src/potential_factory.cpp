@@ -5,6 +5,7 @@
 #include "potential_dehnen.h"
 #include "potential_ferrers.h"
 #include "potential_galpot.h"
+#include "potential_king.h"
 #include "potential_multipole.h"
 #include "potential_perfect_ellipsoid.h"
 #include "particles_io.h"
@@ -70,6 +71,7 @@ enum PotentialType {
     PT_PLUMMER,      ///< spherical Plummer model:  `Plummer`
     PT_ISOCHRONE,    ///< spherical isochrone model:  `Isochrone`
     PT_PERFECTELLIPSOID,  ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
+    PT_KING,         ///< generalized King (lowered isothermal) model, represented by Multipole
 
     // composite density or potential
     PT_COMPOSITE_DENSITY,    ///< `CompositeDensity`
@@ -97,6 +99,8 @@ struct AllParam
     double modulationAmplitude;       ///< disk surface density wiggliness
     double cutoffStrength;            ///< steepness of the exponential cutoff for double-power-law
     double sersicIndex;               ///< sersic index for Disk or Sersic models
+    double W0;                        ///< dimensionless potential depth for King models
+    double trunc;                     ///< truncation strength for generalized King models
     // parameters of potential expansions
     unsigned int gridSizeR;  ///< number of radial grid points in Multipole and CylSpline potentials
     unsigned int gridSizez;  ///< number of grid points in z-direction for CylSpline potential
@@ -114,7 +118,7 @@ struct AllParam
         v0(1.), Omega(1.),
         axisRatioY(1.), axisRatioZ(1.),
         alpha(1.), beta(4.), gamma(1.),
-        modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN),
+        modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
         lmax(6), mmax(6), smoothing(1.)
     {};
@@ -142,6 +146,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, Multipole    ::myName())) return PT_MULTIPOLE;
     if(utils::stringsEqual(name, CylSpline    ::myName())) return PT_CYLSPLINE;
     if(utils::stringsEqual(name, MiyamotoNagai::myName())) return PT_MIYAMOTONAGAI;
+    if(utils::stringsEqual(name, "King"))                  return PT_KING;
     if(utils::stringsEqual(name, OblatePerfectEllipsoid  ::myName())) return PT_PERFECTELLIPSOID;
     if(utils::stringsEqual(name, DensitySphericalHarmonic::myName())) return PT_DENS_SPHHARM;
     if(utils::stringsEqual(name, DensityAzimuthalHarmonic::myName())) return PT_DENS_CYLGRID;
@@ -252,6 +257,8 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.modulationAmplitude = kvmap.getDouble("modulationAmplitude", param.modulationAmplitude);
     param.cutoffStrength      = kvmap.getDoubleAlt("cutoffStrength", "xi", param.cutoffStrength);
     param.sersicIndex         = kvmap.getDouble("sersicIndex", param.sersicIndex);
+    param.W0                  = kvmap.getDouble("W0", param.W0);
+    param.trunc               = kvmap.getDouble("trunc", param.trunc);
     param.gridSizeR           = kvmap.getInt(   "gridSizeR", param.gridSizeR);
     param.gridSizez           = kvmap.getInt(   "gridSizeZ", param.gridSizez);
     param.rmin                = kvmap.getDouble("rmin", param.rmin)
@@ -920,6 +927,8 @@ PtrPotential createAnalyticPotential(const AllParam& param)
                 param.mass, param.scaleRadius, param.scaleRadius*param.axisRatioZ)); 
         else
             throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
+    case PT_KING:
+        return createKingPotential(param.mass, param.scaleRadius, param.W0, param.trunc); 
     default:
         throw std::invalid_argument("Unknown potential type");
     }
@@ -941,6 +950,8 @@ PtrDensity createAnalyticDensity(const AllParam& param)
         return PtrDensity(new SpheroidDensity(parseSpheroidParam(param)));
     case PT_SERSIC:
         return PtrDensity(new SpheroidDensity(parseSersicParam(param)));
+    case PT_KING:
+        return createKingDensity(param.mass, param.scaleRadius, param.W0, param.trunc); 
     default:
         return createAnalyticPotential(param);
     }

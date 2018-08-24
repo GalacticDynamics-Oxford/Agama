@@ -79,24 +79,25 @@ particles::ParticleArrayCar assignVelocityJeansSph(
 particles::ParticleArrayCar assignVelocityJeansAxi(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
     const potential::BasePotential& pot,
-    const JeansAxi& jeansAxiModel, const double kappa)
+    const JeansAxi& jeansAxiModel)
 {
     size_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
     result.data.reserve(npoints);
     for(size_t i=0; i<npoints; i++) {
         const coord::PosCyl& point = pointCoords.point(i);
-        const coord::Vel2Cyl vel2  = jeansAxiModel.velDisp(point);
+        coord::VelCyl  vel;
+        coord::Vel2Cyl vel2;
+        jeansAxiModel.moments(point, vel, vel2);
         double sigma_z   = sqrt(vel2.vz2);
         double sigma_R   = sqrt(vel2.vR2);
-        double meanv_phi = fmin(sqrt(vel2.vphi2), kappa * sqrt(fmax(0., vel2.vphi2 - vel2.vR2)));
-        double sigma_phi = sqrt(fmax(0., vel2.vphi2 - pow_2(meanv_phi)));
+        double sigma_phi = sqrt(fmax(0., vel2.vphi2 - pow_2(vel.vphi)));
         double Phi = pot.value(point);
         double vR, vz, vphi, sphi, devnull;
         int numAttempts = 0;
         do {
             math::getNormalRandomNumbers(sphi, devnull);  // need only one number here
-            vphi = meanv_phi + sphi * sigma_phi;
+            vphi = vel.vphi + sphi * sigma_phi;
             math::getNormalRandomNumbers(vR, vz);
             vR *= sigma_R;
             vz *= sigma_z;
@@ -162,8 +163,8 @@ particles::ParticleArrayCar assignVelocity(
             return assignVelocityJeansSph(pointCoords, pot, model, beta);
         }
     } else if(method == SD_JEANSAXI) {
-        JeansAxi model(dens, pot, beta);
-        return assignVelocityJeansAxi(pointCoords, pot, model, kappa);
+        JeansAxi model(dens, pot, beta, kappa);
+        return assignVelocityJeansAxi(pointCoords, pot, model);
     }
     assert(!"assignVelocity: unknown method");
     return particles::ParticleArrayCar();

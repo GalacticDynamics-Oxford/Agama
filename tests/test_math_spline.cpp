@@ -22,6 +22,15 @@ bool testCond(bool condition, const char* errorMessage)
     return condition;
 }
 
+std::string testLess(double val, double limit, bool &condition)
+{
+    if(!(val<limit)) {
+        condition = false;
+        return "\033[1;31m"+utils::toString(val)+"\033[0m";
+    }
+    return utils::toString(val);
+}
+
 // provides the integral of sin(x)*x^n
 class testfncsin: public math::IFunctionIntegral {
     virtual double integrate(double x1, double x2, int n=0) const {
@@ -152,6 +161,24 @@ public:
     virtual unsigned int numValues() const { return 1; }
 };
 
+// a function with sharp gradients for testing monotone interpolation
+template<int N>
+class testfncNd: public math::IFunctionNdim, public math::IFunctionNoDeriv {
+    static const int POW = 6;
+public:
+    virtual void eval(const double vars[], double values[]) const {
+        double sum = 0;
+        for(int i=0; i<N; i++)
+            sum += pow(vars[i], POW);
+        values[0] = exp(-sum);
+    }
+    virtual double value(const double x) const {
+        return exp(-pow(x, POW));
+    }    
+    virtual unsigned int numVars()   const { return N; }
+    virtual unsigned int numValues() const { return 1; }
+};
+
 // original function to interpolate and convolve
 #define testfncorig sin
 
@@ -234,10 +261,10 @@ bool testPenalizedSplineFit()
     // fitting with the same EDF as the original dataset should recover the same result
     apprw.fit(yvalues1, edf1, &rmsw);
     std::cout << "case A': RMS=" << rmsw <<", EDF=" << edf1 << "\n";
-    ok &= math::fcmp(rmsw, rms1, 1e-10) == 0;
+    ok &= math::fcmp(rmsw, rms1, 1e-8) == 0;
     apprw.fit(yvalues2, edf2, &rmsw);
     std::cout << "case B': RMS=" << rmsw <<", EDF=" << edf2 << "\n";
-    ok &= math::fcmp(rmsw, rms2, 1e-10) == 0;
+    ok &= math::fcmp(rmsw, rms2, 1e-8) == 0;
     // fitting with "optimal" or "oversmoothed" option will result in a somewhat less smoothed curve
     // than the original one, because the number of data points has increased
     math::CubicSpline fitw1(xnodes, apprw.fitOptimal(yvalues1, &rmsw, &edfw));
@@ -959,8 +986,7 @@ bool test2dSpline()
         }
     // 2d bilinear interpolator
     math::LinearInterpolator2d lin2d(xval, yval, fval);
-    // 2d cubic spline with natural boundary conditions at three edges
-    // and a prescribed derivative at the fourth edge
+    // 2d cubic spline
     math::CubicSpline2d cub2d(xval, yval, fval);
     // 2d quintic spline with prescribed derivatives at all nodes
     math::QuinticSpline2d qui2d(xval, yval, fval, fderx, fdery);
@@ -1046,9 +1072,10 @@ bool test2dSpline()
         ", deriv: " + utils::pp(sumerrqder, 8) + ", 2nd deriv: " + utils::pp(sumerrqder2, 8) +
         "\nq-mixed 2d spline value:  " + utils::pp(sumerrm, 8) +
         ", deriv: " + utils::pp(sumerrmder, 8) + ", 2nd deriv: " + utils::pp(sumerrmder2, 8) +"\n";
-    ok &= sumerrc < 0.003 && sumerrcder < 0.012 && sumerrcder2 < 0.075 &&
-          sumerrq < 1.e-4 && sumerrqder < 7.e-4 && sumerrqder2 < 0.006 &&
-          sumerrm < 6.e-5 && sumerrmder < 3.e-4 && sumerrmder2 < 0.003;
+    ok &= sumerrl < 0.03 &&
+        sumerrc < 0.003 && sumerrcder < 0.012 && sumerrcder2 < 0.075 &&
+        sumerrq < 1.e-4 && sumerrqder < 7.e-4 && sumerrqder2 < 0.006 &&
+        sumerrm < 6.e-5 && sumerrmder < 3.e-4 && sumerrmder2 < 0.003;
 
     //----------- test the performance of 2d spline calculation -------------//
     std::cout <<"Linear interpolator:      " + evalSpline2d<0>(lin2d) + " eval/s\n";
@@ -1135,6 +1162,8 @@ bool test3dSpline()
             if(OUTPUT)
                 strm << "\n";
         }
+        if(OUTPUT)
+            strm << "\n";
     }
     if(OUTPUT)
         strm.close();
@@ -1144,7 +1173,7 @@ bool test3dSpline()
     std::cout << "RMS error in linear 3d interpolator: " << utils::pp(sumsqerr_l, 8) << 
         ", cubic 3d interpolator: " << utils::pp(sumsqerr_c, 8) <<
         ", difference between cubic spline and B-spline: " << utils::pp(sumsqerr_s, 8) << "\n";
-    ok &= sumsqerr_l<0.1 && sumsqerr_c<0.05 && sumsqerr_s<1e-15;
+    ok &= sumsqerr_l<0.04 && sumsqerr_c<0.01 && sumsqerr_s<1e-15;
 
     // test performance of various interpolators
     double RATE = 1.0 * pow_3(NNN+1) * CLOCKS_PER_SEC;
@@ -1217,6 +1246,143 @@ bool test3dSpline()
     return ok;
 }
 
+//----------- test 1d/2d/3d monotonic cubic splines ------------//
+bool testMonoSpline()
+{
+    std::cout << "\033[1;33mMonotonic interpolation\033[0m\n";
+    bool okpos1=true, okpos2=true, okpos3=true, okerr1=true, okerr2=true, okerr3=true;
+    testfncNd<1> f1;
+    testfncNd<2> f2;
+    testfncNd<3> f3;
+    const double XMIN=-1.8, XMAX=2.2, YMIN=-1.6, YMAX=2.4, ZMIN=-1.5, ZMAX=2.0;
+    const int Mmin=6, Mmax=10;  // number of points in interpolation grids
+    const int L=40;             // number of test points
+    math::Matrix<double> result1(L,     (Mmax-Mmin+1)*2+2);  // results for the 1d case
+    math::Matrix<double> result2(L*L,   (Mmax-Mmin+1)*2+3);  // -"- for the 2d case
+    math::Matrix<double> result3(L*L*L, (Mmax-Mmin+1)*2+4);  // -"- 3d
+    for(int M=Mmin; M<=Mmax; M++) {
+        // define the grids in 1,2 or 3 dimensions
+        std::vector<double>
+        xval=math::createUniformGrid(M, XMIN, XMAX),
+        yval=math::createUniformGrid(M, YMIN, YMAX),
+        zval=math::createUniformGrid(M, ZMIN, ZMAX),
+        fval1d(M),
+        fval2d(M*M),
+        fval3d(M*M*M);
+        math::MatrixView<double> fmat2d(M, M, &fval2d.front());
+        // fill the input arrays for interpolation with values at grid nodes
+        for(int i=0; i<M; i++) {
+            fval1d[i] = f1(xval[i]);
+            for(int j=0; j<M; j++) {
+                double xyz[3] = {xval[i], yval[j], 0};
+                f2.eval(xyz, &fval2d[ i * M + j ]);
+                for(int k=0; k<M; k++) {
+                    xyz[2] = zval[k];
+                    f3.eval(xyz, &fval3d[ (i * M + j) * M + k ]);
+                }
+            }
+        }
+        // construct regularized and non-regularized splines
+        math::CubicSpline c1(xval, fval1d, false/*no regularizing filter*/);
+        math::CubicSpline r1(xval, fval1d, true/*use regularizing filter*/);
+        math::CubicSpline2d c2(xval, yval, fmat2d, false);
+        math::CubicSpline2d r2(xval, yval, fmat2d, true);
+        math::CubicSpline3d c3(xval, yval, zval, fval3d, false);
+        math::CubicSpline3d r3(xval, yval, zval, fval3d, true);
+        // test the approximation accuracy by comparing original and interpolated values on a finer grid
+        double ec1=0, er1=0, ec2=0, er2=0, ec3=0, er3=0;
+        for(int i=0; i<L; i++) {
+            double xyz[3] = { (XMIN*(L-0.5-i) + XMAX*(0.5+i)) / L, 0, 0};
+            double f1o, f1c, f1r;
+            f1o = f1(xyz[0]);
+            f1c = c1(xyz[0]);
+            f1r = r1(xyz[0]);
+            ec1 += pow_2(f1c-f1o);
+            er1 += pow_2(f1r-f1o);
+            okpos1 &= f1r>=0;
+            result1(i, 0) = xyz[0];
+            result1(i, 1) = f1o;
+            result1(i, (M-Mmin)*2+2) = f1c;
+            result1(i, (M-Mmin)*2+3) = f1r;
+            for(int j=0; j<L; j++) {
+                xyz[1] = (YMIN*(L-0.5-j) + YMAX*(0.5+j)) / L;
+                double f2o, f2c, f2r;
+                f2.eval(xyz, &f2o);
+                c2.eval(xyz, &f2c);
+                r2.eval(xyz, &f2r);
+                ec2 += pow_2(f2c-f2o);
+                er2 += pow_2(f2r-f2o);
+                okpos2 &= f2r>=0;
+                result2(i*L+j, 0) = xyz[0];
+                result2(i*L+j, 1) = xyz[1];
+                result2(i*L+j, 2) = f2o;
+                result2(i*L+j, (M-Mmin)*2+3) = f2c;
+                result2(i*L+j, (M-Mmin)*2+4) = f2r;
+                for(int k=0; k<L; k++) {
+                    xyz[2] = (ZMIN*(L-0.5-k) + ZMAX*(0.5+k)) / L;
+                    double f3o, f3c, f3r;
+                    f3.eval(xyz, &f3o);
+                    c3.eval(xyz, &f3c);
+                    r3.eval(xyz, &f3r);
+                    ec3 += pow_2(f3c-f3o);
+                    er3 += pow_2(f3r-f3o);
+                    okpos3 &= f3r>=0;
+                    result3((i*L+j)*L+k, 0) = xyz[0];
+                    result3((i*L+j)*L+k, 1) = xyz[1];
+                    result3((i*L+j)*L+k, 2) = xyz[2];
+                    result3((i*L+j)*L+k, 3) = f3o;
+                    result3((i*L+j)*L+k, (M-Mmin)*2+4) = f3c;
+                    result3((i*L+j)*L+k, (M-Mmin)*2+5) = f3r;
+                }
+            }
+        }
+        double norm = 1./M / (1 + pow(0.1*M, 4));  // characteristic magnitude of the rms error
+        std::cout << "rms error for "   << M << " grid points:" <<
+        "  1d cubic: " << testLess(sqrt(ec1/L)  , norm*1.2, okerr1) <<
+        ", 1d reg: "   << testLess(sqrt(er1/L)  , norm*0.9, okerr1) <<
+        ", 2d cubic: " << testLess(sqrt(ec2)/L  , norm*1.1, okerr2) <<
+        ", 2d reg: "   << testLess(sqrt(er2)/L  , norm*0.8, okerr1) <<
+        ", 3d cubic: " << testLess(sqrt(ec3/L)/L, norm*0.8, okerr2) <<
+        ", 3d reg: "   << testLess(sqrt(er3/L)/L, norm*0.6, okerr3) << "\n";
+    }
+    if(OUTPUT) {
+        std::ofstream strm("test_math_spline1d_mono.dat");
+        for(int i=0; i<L; i++) {
+            for(int c=0, C=result1.cols(); c<C; c++)
+                strm << result1(i,c) << (c<C-1?'\t':'\n');
+        }
+        strm.close();
+        strm.open("test_math_spline2d_mono.dat");
+        for(int i=0; i<L; i++) {
+            for(int j=0; j<L; j++) {
+                for(int c=0, C=result2.cols(); c<C; c++)
+                    strm << result2(i*L+j,c) << (c<C-1?'\t':'\n');
+            }
+            strm << '\n';
+        }
+        strm.close();
+        strm.open("test_math_spline3d_mono.dat");
+        for(int i=0; i<L; i++) {
+            for(int j=0; j<L; j++) {
+                for(int k=0; k<L; k++) {
+                    for(int c=0, C=result3.cols(); c<C; c++)
+                        strm << result3((i*L+j)*L+k,c) << (c<C-1?'\t':'\n');
+                }
+                strm << '\n';
+            }
+            strm << '\n';
+        }
+    }
+    bool ok =
+    testCond(okpos1, "1d monotonic spline is negative") &&
+    testCond(okpos2, "2d monotonic spline is negative") &&
+    testCond(okpos3, "3d monotonic spline is negative") &&
+    testCond(okerr1, "1d spline interpolation error is too large") &&
+    testCond(okerr2, "2d spline interpolation error is too large") &&
+    testCond(okerr3, "3d spline interpolation error is too large");
+    return ok;
+}
+
 bool printFail(const char* msg)
 {
     std::cout << "\033[1;31m " << msg << " failed\033[0m\n";
@@ -1228,6 +1394,7 @@ int main()
     bool ok=true;
     ok &= testPenalizedSplineFit() || printFail("Penalized spline fit");
     ok &= testPenalizedSplineDensity() || printFail("Penalized spline density estimator");
+    ok &= testMonoSpline() || printFail("Monotonic spline interpolation");
     ok &= test1dSpline() || printFail("1d spline");
     ok &= test2dSpline() || printFail("2d spline");
     ok &= test3dSpline() || printFail("3d spline");

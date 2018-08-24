@@ -16,15 +16,16 @@ static const double ACCURACY_ROOT = 1e-10;
 
 /// required tolerance on the 2nd deriv to declare the asymptotic limit
 static const double ACCURACY_INTERP = 1e-6;
+static const double ACCURACY_INTERP2= 1e-4;
 
 /// a number that is considered nearly infinity in log-scaled root-finders
 static const double HUGE_NUMBER = 1e100;
 
 /// safety factor to avoid roundoff errors in estimating the inner/outer asymptotic slopes
-static const double ROUNDOFF_THRESHOLD = DBL_EPSILON / ROOT3_DBL_EPSILON;
+static const double ROUNDOFF_THRESHOLD = DBL_EPSILON / ROOT3_DBL_EPSILON;  // eps^(2/3) ~ 4e-11
 
 /// minimum relative difference between two adjacent values of potential (to reduce roundoff errors)
-static const double MIN_REL_DIFFERENCE = 1e-12;
+static const double MIN_REL_DIFFERENCE = ROUNDOFF_THRESHOLD;
 
 /// fixed order of Gauss-Legendre integration of PhaseVolume on each segment of a log-grid
 static const int GLORDER1 = 6;   // for shorter segments
@@ -126,7 +127,7 @@ public:
         coord::GradCyl grad;
         potential.eval(coord::PosCyl(R,0,0), &Phi, der? &grad : NULL);
         if(val)
-            *val = (E-Phi)*R*R - halfL2;
+            *val = (R>0 ? (E-Phi)*R*R : 0) - halfL2;
         if(der)
             *der = 2*R*(E-Phi) - R*R*grad.dR;
     }
@@ -209,26 +210,44 @@ inline void unscaleDeltaE(const double scaledE1, const double scaledE2, const do
     Its second derivative is identically zero if the potential is a power-law in radius (e.g., -M/r).
 */
 class ScalePhi: public math::IFunction {
-    const math::IFunction& pot;
+    const BasePotential& pot;
     const double invPhi0;
 public:
-    ScalePhi(const math::IFunction& _pot) : pot(_pot), invPhi0(1/pot(0)) {}
+    ScalePhi(const BasePotential& _pot) : pot(_pot), invPhi0(1/pot.value(coord::PosCyl(0,0,0))) {}
     virtual void evalDeriv(const double logr, double* val, double* der, double* der2) const {
-        double r=exp(logr), Phi, dPhi, d2Phi;
-        pot.evalDeriv(r, &Phi, &dPhi, &d2Phi);
-        double expE = invPhi0 - 1/Phi;
+        double r=exp(logr), Phi;
+        coord::GradCyl dPhi;
+        coord::HessCyl d2Phi;
+        pot.eval(coord::PosCyl(r,0,0), &Phi, &dPhi, &d2Phi);
+        double expE  = invPhi0 - 1/Phi;
+        double nu2Om = d2Phi.dz2 / dPhi.dR * r;  // ratio of nu^2/Omega^2
+        double dnu2Om=0, d2nu2Om=0;  // 1st and 2nd derivatives of the above ratio w.r.t. log(r)
+        if(der || der2) {
+            // compute these derivatives by finite differences
+            coord::GradCyl dPhiP, dPhiM;
+            coord::HessCyl d2PhiP,d2PhiM;
+            const double delta = 10*ROOT3_DBL_EPSILON;
+            double rP = exp(logr+delta), rM = exp(logr-delta);
+            pot.eval(coord::PosCyl(rP,0,0), NULL, &dPhiP, &d2PhiP);
+            pot.eval(coord::PosCyl(rM,0,0), NULL, &dPhiM, &d2PhiM);
+            double nu2OmP = d2PhiP.dz2 / dPhiP.dR * rP, nu2OmM = d2PhiM.dz2 / dPhiM.dR * rM;
+            dnu2Om = (nu2OmP - nu2OmM) / (2*delta);
+            d2nu2Om= (nu2OmP + nu2OmM - 2*nu2Om) / pow_2(delta);
+            if(fabs(d2nu2Om) < delta)
+                d2nu2Om = 0;
+        }
         if(val)
-            *val = log(expE) + 2 * log(-Phi);
+            *val = log(expE) + 2 * log(-Phi) + 0.5*nu2Om;
         if(der)
-            *der = dPhi * r / (Phi * Phi * expE) + 2 * dPhi/Phi*r;
+            *der = dPhi.dR * r / (Phi * Phi * expE) + 2 * dPhi.dR/Phi*r + 0.5*dnu2Om;
         if(der2) {
             if(invPhi0!=0 && expE < -invPhi0 * MIN_REL_DIFFERENCE)
                 // in case of a finite potential at r=0,
                 // we avoid approaching too close to 0 to avoid roundoff errors in Phi
                 *der2 = 0;
             else
-                *der2 = pow_2(r/Phi) / expE * (dPhi * (1/r - dPhi/Phi * (2 + 1/Phi/expE)) + d2Phi)
-                + 2 * r/Phi * (d2Phi*r + dPhi*(1-dPhi/Phi*r));
+                *der2 = pow_2(r/Phi) / expE * (dPhi.dR * (1/r - dPhi.dR/Phi * (2 + 1/Phi/expE)) + d2Phi.dR2)
+                + 2 * r/Phi * (d2Phi.dR2*r + dPhi.dR*(1-dPhi.dR/Phi*r)) + 0.5*d2nu2Om;
         }
     }
     virtual unsigned int numDerivs() const { return 2; }
@@ -236,6 +255,23 @@ public:
 
 }  // internal namespace
 
+
+std::vector<double> createInterpolationGrid(const BasePotential& potential, double accuracy)
+{
+    // create a grid in log-radius with spacing depending on the local variation of the potential
+    std::vector<double> grid = math::createInterpolationGrid(ScalePhi(potential), accuracy);
+
+    // convert to grid in radius
+    for(size_t i=0, size=grid.size(); i<size; i++)
+        grid[i] = exp(grid[i]);
+
+    // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
+    double Phi0 = potential.value(coord::PosCyl(0,0,0));
+    while(grid.size() > 2  &&  potential.value(coord::PosCyl(grid[0],0,0)) < Phi0 * (1-MIN_REL_DIFFERENCE))
+        grid.erase(grid.begin());
+
+    return grid;
+}
 
 double v_circ(const math::IFunction& potential, double radius)
 {
@@ -270,7 +306,7 @@ void epicycleFreqs(const BasePotential& potential, const double R,
     coord::HessCyl hess;
     potential.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
     double gradR_over_R = (R==0 && grad.dR==0) ? hess.dR2 : grad.dR/R;
-    //!!! no attempt to check if the expressions under sqrt are non-negative - 
+    // no attempt to check if the expressions under sqrt are non-negative - 
     // they could well be for a physically plausible potential of a flat disk with an inner hole
     kappa = sqrt(hess.dR2 + 3*gradR_over_R);
     nu    = sqrt(hess.dz2);
@@ -327,15 +363,25 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
     double Phi0, coef, slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
     // accurate treatment close to the origin assuming a power-law asymptotic behavior of potential
-    bool asympt  = slope>0 && E>=Phi0 && E-Phi0 < fabs(Phi0)*SQRT_DBL_EPSILON;
+    bool asympt  = slope>0  &&  E >= Phi0  &&  E < Phi0 * (1-MIN_REL_DIFFERENCE);
     double Rcirc = !asympt ?  R_circ(potential, E) :
         slope==0 ?  exp((E-Phi0) / coef - 0.5)  :  std::pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
     if(!isFinite(Rcirc))
         throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
             utils::toString(E,16) + ")\n" + utils::stacktrace());
+    if(Rcirc == 0) {  // energy exactly equals the potential at origin
+        R1 = R2 = 0;
+        return;
+    }
+    double vcirc = !asympt ? v_circ(potential, Rcirc) :
+        slope==0 ? sqrt(coef) : sqrt(coef*slope) * std::pow(Rcirc, 0.5*slope);
+    double Lcirc = Rcirc * vcirc;
     if(asympt) {
-        double vcirc = slope==0 ? sqrt(coef) : sqrt(coef*slope) * std::pow(Rcirc, 0.5*slope);
-        RPeriApoRootFinderPowerLaw fnc(slope, pow_2(L / (Rcirc * vcirc)));
+        if(L > Lcirc) {
+            R1 = R2 = Rcirc;
+            return;
+        }
+        RPeriApoRootFinderPowerLaw fnc(slope, pow_2(L / Lcirc));
         R1 = Rcirc * math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
         R2 = Rcirc * math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
     } else {
@@ -345,22 +391,24 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         // for a reasonable potential, 2*Rcirc is actually an upper limit,
         // but in case of trouble, repeat with a safely larger value 
         if(!isFinite(R2))
-            R2 = math::findRoot(fnc, Rcirc, (1+ACCURACY_ROOT)*R_max(potential, E), ACCURACY_ROOT);
+            R2 = math::findRoot(fnc, Rcirc, (1+ACCURACY_ROOT) * R_max(potential, E), ACCURACY_ROOT);
     }
     if(!isFinite(R1+R2)) {
-        // this may arise when the orbit is very nearly circular due to roundoff errors,
-        // or due to intentional foul.
+        // this may arise due to roundoff errors when the orbit is very nearly circular,
+        // or due to intentional foul (passing L > Lcirc(E) as the argument).
         // Assuming the former reason, do not crash but pretend to be on a circular orbit exactly.
         R1 = R2 = Rcirc;
-        utils::msg(utils::VL_WARNING, FUNCNAME,
-            "E=" + utils::toString(E,16) + " and L=" + utils::toString(L,16) +
-            " have incompatible values (Rcirc=" + utils::toString(Rcirc,16) + ")");
+        if(L > Lcirc * (1 + SQRT_DBL_EPSILON))
+            utils::msg(utils::VL_WARNING, FUNCNAME,
+                "E=" + utils::toString(E, 16) + " and L=" + utils::toString(L, 16) +
+                " have incompatible values (Lcirc=" + utils::toString(Lcirc, 16) + ")");
     }
 }
 
 // -------- Same tasks implemented as an interpolation interface -------- //
 
-Interpolator::Interpolator(const BasePotential& potential)
+Interpolator::Interpolator(const BasePotential& potential) :
+    invPhi0(1./potential.value(coord::PosCyl(0,0,0)))
 {
     if(!isZRotSymmetric(potential))
         throw std::invalid_argument("Interpolator: can only work with axisymmetric potentials");
@@ -370,22 +418,14 @@ Interpolator::Interpolator(const BasePotential& potential)
         throw std::runtime_error("Interpolator: can only work with potentials "
             "that tend to zero as r->infinity");   // otherwise assume Phiinf==0
     slopeOut = potential::outerSlope(PotentialWrapper(potential), &Mtot, &coefOut);
-    double Phi0 = potential.value(coord::PosCyl(0,0,0));
-    if(Phi0 >= 0)
+    // well-behaved potential must be -INFINITY <= Phi0 < 0
+    if(invPhi0 > 0 || !isFinite(invPhi0))
         throw std::runtime_error("Interpolator: potential must be negative at r=0");
-    if(Phi0!=Phi0)  // well-behaved potential must not be NAN at 0, but is allowed to be -INFINITY
-        throw std::runtime_error("Interpolator: potential cannot be computed at r=0");
-    invPhi0 = 1./Phi0;
 
-    std::vector<double> gridLogR = math::createInterpolationGrid(
-        ScalePhi(PotentialWrapper(potential)), ACCURACY_INTERP);
-    // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
-    while(!gridLogR.empty() &&
-        potential.value(coord::PosCyl(exp(gridLogR[0]), 0, 0)) < Phi0 * (1-MIN_REL_DIFFERENCE))
-        gridLogR.erase(gridLogR.begin());
-
-    unsigned int gridsize = gridLogR.size();
+    std::vector<double> gridR = createInterpolationGrid(potential, ACCURACY_INTERP);
+    unsigned int gridsize = gridR.size();
     std::vector<double>   // various arrays:
+    gridLogR(gridsize),   // ln(r)
     gridPhi(gridsize),    // scaled Phi(r)
     gridE(gridsize),      // scaled Ecirc(Rcirc) where Rcirc=r
     gridL(gridsize),      // log(Lcirc)
@@ -396,12 +436,13 @@ Interpolator::Interpolator(const BasePotential& potential)
 
     std::ofstream strm;   // debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        strm.open("potentialInterpolator.log");
+        strm.open("PotentialInterpolator.log");
         strm << "#R      \tPhi(R)  \tdPhi/dR \td2Phi/dR2\td2Phi/dz2\tEcirc   \tLcirc\n";
     }
 
     for(unsigned int i=0; i<gridsize; i++) {
-        double R = exp(gridLogR[i]);
+        double R = gridR[i];
+        gridLogR[i] = log(R);
         double Phival;
         coord::GradCyl grad;
         coord::HessCyl hess;
@@ -573,6 +614,166 @@ void Interpolator::epicycleFreqs(double R, double& kappa, double& nu, double& Om
 }
 
 
+// --------- 2d interpolation of peri/apocenter radii in equatorial plane --------- //
+
+Interpolator2d::Interpolator2d(const BasePotential& potential) :
+    Interpolator(potential),
+    invPhi0(1./potential.value(coord::PosCyl(0,0,0)))  // -infinity <= Phi(0) < 0
+{
+    std::vector<double> gridR = createInterpolationGrid(potential, ACCURACY_INTERP2);
+
+    // interpolation grid in scaled variables: X = scaledE = log(1/Phi(0)-1/E), Y = L / Lcirc(E)
+    const int sizeE = gridR.size();
+    const int sizeL = 40;
+    std::vector<double> gridX(sizeE), gridY(sizeL);
+
+    // create a non-uniform grid in Y = L/Lcirc(E), using a transformation of interval [0:1]
+    // onto itself that places more grid points near the edges:
+    // a function with zero 1st and 2nd derivs at Y=0 and Y=1
+    math::ScalingQui scaling(0, 1);
+    for(int i=0; i<sizeL; i++)
+        gridY[i] = math::unscale(scaling, 1. * i / (sizeL-1));
+
+    // 2d grids for scaled peri/apocenter radii W1, W2 and their derivatives in {X,Y}:
+    // W1 = (R1 / Rc - 1)^2, same for W2, where
+    // R1 and R2 are the peri/apocenter radii, and Rc is the radius of a circular orbit;
+    // W1 and W2 are exactly zero when L=Lcirc (equivalently Y=1), and vary linearly as Y -> 1
+    math::Matrix<double> gridW1  (sizeE, sizeL), gridW2  (sizeE, sizeL);
+    math::Matrix<double> gridW1dX(sizeE, sizeL), gridW1dY(sizeE, sizeL);
+    math::Matrix<double> gridW2dX(sizeE, sizeL), gridW2dY(sizeE, sizeL);
+
+    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int iE=0; iE<sizeE; iE++) {
+        try{
+            double Rc = gridR[iE];
+            double Phi;
+            coord::GradCyl grad;
+            coord::HessCyl hess;
+            potential.eval(coord::PosCyl(Rc, 0, 0), &Phi, &grad, &hess);
+            double E  = Phi + 0.5*Rc*grad.dR;   // energy of a circular orbit at this radius
+            double Lc = Rc * sqrt(Rc*grad.dR);  // angular momentum of a circular orbit
+            double dEdX;                        // dE / d scaledE
+            scaleE(E, invPhi0, /*output*/gridX[iE], dEdX);
+            double Om2kap2= grad.dR / (3*grad.dR + Rc*hess.dR2);  // ratio of epi.freqs (Omega / kappa)^2
+            double dRcdE  = 2/grad.dR * Om2kap2;
+            double dLcdE  = Rc*Rc/Lc;
+            for(int iL=0; iL<sizeL-1; iL++) {
+                double L = Lc * gridY[iL];
+                double R1, R2, Phi;
+                if(iL==0) {  // exact values for a radial orbit
+                    R1=0;
+                    R2=potential::R_max(potential, E);
+                } else
+                    potential::findPlanarOrbitExtent(potential, E, L, R1, R2);
+                gridW1(iE, iL) = pow_2(R1 / Rc - 1);
+                gridW2(iE, iL) = pow_2(R2 / Rc - 1);
+                // compute derivatives of Rperi/apo w.r.t. E and L/Lcirc
+                potential.eval(coord::PosCyl(R1,0,0), &Phi, &grad);
+                if(R1==0) grad.dR=0;   // it won't be used anyway, but prevents a possible NaN
+                double dW1dE = (1 / (E-Phi) - 2 * dLcdE / Lc) / (grad.dR / (E-Phi) - 2 / R1);
+                double dW1dY = -Lc * M_SQRT2 / (grad.dR * R1 / sqrt(E-Phi) - 2*sqrt(E-Phi));
+                potential.eval(coord::PosCyl(R2,0,0), &Phi, &grad);
+                double dW2dE = (1 - 2*(E-Phi) * dLcdE / Lc) / (grad.dR - 2*(E-Phi) / R2);
+                double dW2dY = -Lc * L / (grad.dR * pow_2(R2) - 2*(E-Phi) * R2);
+                gridW1dX(iE, iL) = 2*(R1-Rc) / pow_2(Rc) * (dW1dE - R1/Rc * dRcdE) * dEdX;
+                gridW1dY(iE, iL) = 2*(R1-Rc) / pow_2(Rc) *  dW1dY;
+                gridW2dX(iE, iL) = 2*(R2-Rc) / pow_2(Rc) * (dW2dE - R2/Rc * dRcdE) * dEdX;
+                gridW2dY(iE, iL) = 2*(R2-Rc) / pow_2(Rc) *  dW2dY;
+            }
+            // limiting values for a nearly circular orbit:
+            // R{1,2} = Rcirc * (1 +- Omega/kappa * ecc),
+            // where ecc = sqrt(1 - (L/Lcirc)^2) = sqrt(1-Y^2)
+            gridW1  (iE, sizeL-1) = gridW2  (iE, sizeL-1) = 0;
+            gridW1dX(iE, sizeL-1) = gridW2dX(iE, sizeL-1) = 0;
+            gridW1dY(iE, sizeL-1) = gridW2dY(iE, sizeL-1) = -2*Om2kap2;
+        }
+        catch(std::exception& e) {
+            errorMessage = e.what();
+        }
+    }
+    if(!errorMessage.empty())
+        throw std::runtime_error("Interpolator2d: "+errorMessage);
+
+    // asymptotic values at E -> Phi(0) or E -> 0, assuming a power-law potential with slope s:
+    // at small radii,  Phi = Phi(0) + A r^s  if s>0 (regular), or Phi = A r^s if -1<=s<=0 (singular);
+    // at large radii,  Phi = A r^s,  where s=-1 for a Keplerian regime (for a model with finite
+    // total mass), or -1<=s<0 if the model has a shallower decline in the density profile.
+    // in principle, this fragment is not needed: we could just as well extrapolate the values
+    // computed at the first/last grid points, but let it stay for the great justice
+    for(int inout=0; inout<2; inout++) {
+        double slope = fmax(inout==0 ? innerSlope() : outerSlope(), -1/*shouldn't be steeper than Kepler*/);
+        int iE = inout==0 ? 0 : sizeE-1;
+        for(int iL=0; iL<sizeL-1; iL++) {
+            double Y = gridY[iL];
+            RPeriApoRootFinderPowerLaw fnc(slope, Y*Y);
+            double R1overRc = math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
+            double R2overRc = iL==0 ?  // limiting value for rmax/rcirc
+                (fabs(slope) < SQRT_DBL_EPSILON ? exp(0.5) : std::pow(1+slope/2, 1/slope)) :
+                math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
+            double dR1overRc_dY = iL==0 ?
+                sqrt(fmax(0, slope) / (slope+2)) :
+                slope*Y / ((slope+2) * (1-std::pow(R1overRc, slope)) * R1overRc);
+            double dR2overRc_dY =
+                slope*Y / ((slope+2) * (1-std::pow(R2overRc, slope)) * R2overRc);
+            gridW1  (iE, iL) = pow_2(R1overRc-1);
+            gridW2  (iE, iL) = pow_2(R2overRc-1);
+            gridW1dY(iE, iL) =  2 * (R1overRc-1) * dR1overRc_dY;
+            gridW2dY(iE, iL) =  2 * (R2overRc-1) * dR2overRc_dY;
+            gridW1dX(iE, iL) = 0;
+            gridW2dX(iE, iL) = 0;
+        }
+        // limiting values for L=Lcirc
+        gridW1  (iE, sizeL-1) = gridW2  (iE, sizeL-1) = 0;
+        gridW1dX(iE, sizeL-1) = gridW2dX(iE, sizeL-1) = 0;
+        gridW1dY(iE, sizeL-1) = gridW2dY(iE, sizeL-1) = -2/(slope+2);
+    }
+
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
+        std::ofstream strm("PotentialInterpolator2d.log");
+        strm << "# X=scaledE    \tY=L/Lcirc      \t"
+            "W1=scaledRperi \tdW1/dX         \tdW1/dY         \t"
+            "W2=scaledRapo  \tdW2/dX         \tdW2/dY         \n";
+        for(int iE=0; iE<sizeE; iE++) {
+            for(int iL=0; iL<sizeL; iL++) {
+                strm <<
+                utils::pp(gridX[iE], 15) + "\t" +
+                utils::pp(gridY[iL], 15) + "\t" +
+                utils::pp(gridW1  (iE, iL), 15) + "\t" +
+                utils::pp(gridW1dX(iE, iL), 15) + "\t" +
+                utils::pp(gridW1dY(iE, iL), 15) + "\t" +
+                utils::pp(gridW2  (iE, iL), 15) + "\t" +
+                utils::pp(gridW2dX(iE, iL), 15) + "\t" +
+                utils::pp(gridW2dY(iE, iL), 15) + "\n";
+            }
+            strm << "\n";
+        }
+    }
+
+    // create 2d interpolators
+    intR1 = math::QuinticSpline2d(gridX, gridY, gridW1, gridW1dX, gridW1dY);
+    intR2 = math::QuinticSpline2d(gridX, gridY, gridW2, gridW2dX, gridW2dY);
+}
+
+void Interpolator2d::findPlanarOrbitExtent(double E, double L,
+    double &R1, double &R2) const
+{
+    double Lc   = L_circ(E);
+    double Rc   = R_from_Lz(Lc);
+    double Lrel = Lc>0 ? math::clamp(fabs(L/Lc), 0., 1.) : 0;
+    double scaledE, dEdscaledE;
+    scaleE(E, invPhi0, scaledE, dEdscaledE);
+    scaledE = math::clamp(scaledE, intR1.xmin(), intR1.xmax());
+    R1 = (1 - sqrt(intR1.value(scaledE, Lrel))) * Rc;
+    R2 = (1 + sqrt(intR2.value(scaledE, Lrel))) * Rc;
+    // one iteration of root polishing
+    R1 = fmin(refineRoot(*this, R1, E, L), Rc);
+    R2 = fmax(refineRoot(*this, R2, E, L), Rc);
+}
+
+
 //---- Correspondence between h and E ----//
 
 PhaseVolume::PhaseVolume(const math::IFunction& pot)
@@ -583,7 +784,8 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
     invPhi0 = 1/Phi0;
 
     // create grid in log(r)
-    std::vector<double> gridr = math::createInterpolationGrid(ScalePhi(pot), ACCURACY_INTERP);
+    std::vector<double> gridr = math::createInterpolationGrid(
+        ScalePhi(FunctionToPotentialWrapper(pot)), ACCURACY_INTERP);
     for(size_t i=0; i<gridr.size(); i++)
         gridr[i] = exp(gridr[i]);  // convert to grid in r
     std::vector<double> gridE;
@@ -652,7 +854,7 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
 
     std::ofstream strm;   // debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        strm.open("potentialPhaseVolume.log");
+        strm.open("PhaseVolume.log");
         strm << "#r      \tE       \th       \tg=dh/dE\n";
     }
 
@@ -665,8 +867,11 @@ PhaseVolume::PhaseVolume(const math::IFunction& pot)
         gridG[i] = G / H * dEdscaledE;
         // debugging printout
         if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-            strm << utils::pp(gridr[i], 15) + '\t' + utils::pp(E, 15) + '\t' +
-                utils::pp(H, 15) + '\t' + utils::pp(G, 15) + '\n' << std::flush;
+            strm <<
+                utils::pp(gridr[i], 15) + '\t' +
+                utils::pp(E, 15) + '\t' +
+                utils::pp(H, 15) + '\t' +
+                utils::pp(G, 15) + '\n' << std::flush;
         }
     }
 
@@ -733,162 +938,6 @@ double PhaseVolume::deltaE(const double logh1, const double logh2, double* g1) c
     if(g1)
         *g1 = exp(logh1) / *g1 / scaledE1deriv;
     return E1minusE2;
-}
-
-
-// --------- 2d interpolation of peri/apocenter radii in equatorial plane --------- //
-
-Interpolator2d::Interpolator2d(const BasePotential& potential) :
-    pot(potential)
-{
-    // for computing the asymptotic values at E=Phi(0), we assume a power-law behavior of potential:
-    // Phi = Phi0 + coef * r^s;  potential must be finite at r=0 for this implementation to work
-    double Phi0, slope = pot.innerSlope(&Phi0);
-    if(!isFinite(Phi0) || slope<=0)
-        throw std::runtime_error("Interpolator2d: can only deal with potentials that are finite at r->0");
-    if(slope <= 0.05)
-        utils::msg(utils::VL_WARNING, "Interpolator2d",
-            "Potential is nearly singular at origin, numerical problems are likely to occur");
-    const unsigned int sizeE = 50;
-    const unsigned int sizeL = 40;
-
-    // transformation of interval [0:1] onto itself that places more grid points near the edges:
-    // a function with zero 1st and 2nd derivs at x=0 and x=1
-    math::ScalingQui scaling(0, 1);
-
-    // create a grid in energy
-    std::vector<double> gridE(sizeE);
-    for(unsigned int i=0; i<sizeE; i++)
-        gridE[i] = (1 - math::unscale(scaling, 1. * i / (sizeE-1))) * Phi0;
-
-    // create a grid in L/Lcirc(E)
-    std::vector<double> gridL(sizeL);
-    for(unsigned int i=0; i<sizeL; i++)
-        gridL[i] = math::unscale(scaling, 1. * i / (sizeL-1));
-
-    // fill 2d grids for scaled peri/apocenter radii R1, R2 and their derivatives in {E, L/Lcirc}:
-    math::Matrix<double> gridR1  (sizeE, sizeL), gridR2  (sizeE, sizeL);
-    math::Matrix<double> gridR1dE(sizeE, sizeL), gridR1dL(sizeE, sizeL);
-    math::Matrix<double> gridR2dE(sizeE, sizeL), gridR2dL(sizeE, sizeL);
-
-    // loop over values of energy strictly inside the interval [Ein:0];
-    // the boundary values will be treated separately
-    for(unsigned int iE=1; iE<sizeE-1; iE++) {
-        double E = gridE[iE];
-        coord::GradCyl grad;
-        coord::HessCyl hess;
-        double Rc     = potential::R_circ(potential, E);  // radius of a circular orbit with this energy
-        potential.eval(coord::PosCyl(Rc,0,0), NULL, &grad, &hess);
-        double Lc     = Rc*sqrt(Rc*grad.dR);              // corresponding angular momentum
-        double Om2kap2= grad.dR / (3*grad.dR + Rc*hess.dR2);  // ratio of epi.freqs (Omega / kappa)^2
-        double dRcdE  = 2/grad.dR * Om2kap2;
-        double dLcdE  = Rc*Rc/Lc;
-        /** The actual quantities to interpolate are not peri/apocenter radii R1/R2 themselves,
-            but rather scaled variables xi1/xi2 that are exactly zero at L=Lc,
-            and vary linearly near the edges of the interval. */
-        for(unsigned int iL=0; iL<sizeL-1; iL++) {
-            double L = Lc * gridL[iL];
-            double R1, R2, Phi;
-            if(iL==0) {  // exact values for a radial orbit
-                R1=0;
-                R2=potential::R_max(potential, E);
-            } else
-                potential::findPlanarOrbitExtent(potential, E, L, R1, R2);
-            gridR1(iE, iL) = pow_2((R1-Rc)/Rc);
-            gridR2(iE, iL) = pow_2((R2-Rc)/Rc);
-            // compute derivatives of Rperi/apo w.r.t. E and L/Lcirc
-            potential.eval(coord::PosCyl(R1,0,0), &Phi, &grad);
-            if(R1==0) grad.dR=0;   // it won't be used anyway, but prevents a possible NaN
-            double dR1dE = (1 - 2*(E-Phi) * dLcdE / Lc) / (grad.dR - 2*(E-Phi) / R1);
-            double dR1dZ = -Lc * sqrt(2*(E-Phi)) / (grad.dR * R1 - 2*(E-Phi));
-            potential.eval(coord::PosCyl(R2,0,0), &Phi, &grad);
-            double dR2dE = (1 - 2*(E-Phi) * dLcdE / Lc) / (grad.dR - 2*(E-Phi) / R2);
-            double dR2dZ = -Lc * L / (grad.dR * pow_2(R2) - 2*(E-Phi) * R2);
-            gridR1dE(iE, iL) = 2*(R1-Rc) / pow_2(Rc) * (dR1dE - R1/Rc * dRcdE);
-            gridR1dL(iE, iL) = 2*(R1-Rc) / pow_2(Rc) *  dR1dZ;
-            gridR2dE(iE, iL) = 2*(R2-Rc) / pow_2(Rc) * (dR2dE - R2/Rc * dRcdE);
-            gridR2dL(iE, iL) = 2*(R2-Rc) / pow_2(Rc) *  dR2dZ;
-        }
-        // limiting values for a nearly circular orbit:
-        // R{1,2} = Rcirc * (1 +- Omega/kappa * ecc),  where ecc = sqrt(1 - (L/Lcirc)^2)
-        gridR1(iE, sizeL-1) = gridR2(iE, sizeL-1) = gridR1dE(iE, sizeL-1) = gridR2dE(iE, sizeL-1) = 0;
-        gridR1dL(iE, sizeL-1) = gridR2dL(iE, sizeL-1) = -2*Om2kap2;
-    }
-
-    // asymptotic values at E -> Phi0
-    double dE = gridE[1] - gridE[0];
-    for(unsigned int iL=0; iL<sizeL-1; iL++) {
-        double Z = gridL[iL];
-        RPeriApoRootFinderPowerLaw fnc(slope, Z*Z);
-        double R1overRc = math::findRoot(fnc, 0, 1, ACCURACY_ROOT);
-        double R2overRc = iL==0 ? std::pow(1+slope/2, 1/slope) : math::findRoot(fnc, 1, 2, ACCURACY_ROOT);
-        double dR1overRc_dZ = iL==0 ? sqrt(slope/(slope+2)) :
-            slope*Z / ((slope+2) * (1-std::pow(R1overRc, slope)) * R1overRc);
-        double dR2overRc_dZ = slope*Z / ((slope+2) * (1-std::pow(R2overRc, slope)) * R2overRc);
-        gridR1  (0, iL) = pow_2(R1overRc-1);
-        gridR2  (0, iL) = pow_2(R2overRc-1);
-        gridR1dL(0, iL) =  2 * (R1overRc-1) * dR1overRc_dZ;
-        gridR2dL(0, iL) =  2 * (R2overRc-1) * dR2overRc_dZ;
-        // we cannot directly compute derivatives w.r.t energy at gridE[0],
-        // so we use quadratic interpolation to obtain them
-        // from the values at gridE[0], gridE[1] and derivs w.r.t E at gridE[1]
-        gridR1dE(0, iL) = 2 * (gridR1(1, iL) - gridR1(0, iL)) / dE - gridR1dE(1, iL);
-        gridR2dE(0, iL) = 2 * (gridR2(1, iL) - gridR2(0, iL)) / dE - gridR2dE(1, iL);
-    }
-    // limiting values for L=Lcirc
-    gridR1  (0, sizeL-1) = gridR2  (0, sizeL-1) = gridR1dE(0, sizeL-1) = gridR2dE(0, sizeL-1) = 0;
-    gridR1dL(0, sizeL-1) = gridR2dL(0, sizeL-1) = -2/(slope+2);
-
-    // asymptotic values at E -> 0, assuming Keplerian regime
-    dE = gridE[sizeE-1] - gridE[sizeE-2];
-    for(unsigned int iL=0; iL<sizeL; iL++) {
-        gridR1  (sizeE-1, iL) = gridR2  (sizeE-1, iL) = 1 - pow_2(gridL[iL]);
-        gridR1dL(sizeE-1, iL) = gridR2dL(sizeE-1, iL) = -2*gridL[iL];
-        gridR1dE(sizeE-1, iL) = -gridR1dE(sizeE-2, iL) +
-            2 * (gridR1(sizeE-1, iL) - gridR1(sizeE-2, iL)) / dE;
-        gridR2dE(sizeE-1, iL) = -gridR2dE(sizeE-2, iL) +
-            2 * (gridR2(sizeE-1, iL) - gridR2(sizeE-2, iL)) / dE;
-    }
-
-#if 0  /// test code, to be removed
-    std::ofstream strm("potentialInterpolator2d.log");
-    strm << std::setprecision(15);
-    for(unsigned int iE=0; iE<sizeE; iE++) {
-        for(unsigned int iL=0; iL<sizeL; iL++) {
-            strm << gridE[iE] << "\t" << gridL[iL] << "\t" << 
-            gridR1  (iE, iL) << "\t" << gridR1dE(iE, iL) << "\t" << gridR1dL(iE, iL) << "\t" <<
-            (iE>0 ? (gridR1(iE, iL)-gridR1(iE-1, iL)) / (gridE[iE]-gridE[iE-1]) : NAN) << "\t" <<
-            (iL>0 ? (gridR1(iE, iL)-gridR1(iE, iL-1)) / (gridL[iL]-gridL[iL-1]) : NAN) << "\t" <<
-            gridR2  (iE, iL) << "\t" << gridR2dE(iE, iL) << "\t" << gridR2dL(iE, iL) << "\t" <<
-            (iE>0 ? (gridR2(iE, iL)-gridR2(iE-1, iL)) / (gridE[iE]-gridE[iE-1]) : NAN) << "\t" <<
-            (iL>0 ? (gridR2(iE, iL)-gridR2(iE, iL-1)) / (gridL[iL]-gridL[iL-1]) : NAN) << "\n";
-        }
-        strm<<"\n";
-    }
-    strm.close();
-#endif
-
-    // create 2d interpolators
-    intR1 = math::QuinticSpline2d(gridE, gridL, gridR1, gridR1dE, gridR1dL);
-    intR2 = math::QuinticSpline2d(gridE, gridL, gridR2, gridR2dE, gridR2dL);
-}
-
-void Interpolator2d::findScaledOrbitExtent(double E, double Lrel,
-    double &R1rel, double &R2rel) const
-{
-    R1rel = 1 - sqrt(intR1.value(E, Lrel));
-    R2rel = 1 + sqrt(intR2.value(E, Lrel));
-}
-
-void Interpolator2d::findPlanarOrbitExtent(double E, double L,
-    double &R1, double &R2) const
-{
-    double Lc   = pot.L_circ(E);
-    double Rc   = pot.R_from_Lz(Lc);
-    double Lrel = Lc>0 ? fmin(fabs(L/Lc), 1) : 0;
-    findScaledOrbitExtent(E, Lrel, R1, R2);
-    R1 = fmin(refineRoot(pot, R1*Rc, E, L), Rc);  // one iteration of root polishing
-    R2 = fmax(refineRoot(pot, R2*Rc, E, L), Rc);
 }
 
 }  // namespace potential

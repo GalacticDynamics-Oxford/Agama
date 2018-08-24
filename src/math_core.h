@@ -239,7 +239,7 @@ template<typename Scaling> double unscale(const Scaling& scaling, double s, doub
     The templated overloaded routines findRoot and findMin internally create an instance of ScaledFnc for
     the user-provided scaling transformation, find the root in a scaled variable, and unscale it back.
 
-    \tparam  Scaling  is one of the available scaling transformations (e.g., ScalingCub, ScalingInfLog).
+    \tparam  Scaling  is one of the available scaling transformations (e.g., ScalingCub, ScalingInf).
 */
 template<typename Scaling>
 class ScaledFnc: public IFunction {

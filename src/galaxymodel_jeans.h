@@ -55,16 +55,22 @@ public:
         \param[in]  beta_m  is the meridional anisotropy coefficient (beta_m==0 means isotropic model),
         it is related to the parameter `b` defined in Cappellari(2008) by  b = 1 / (1-beta_m),
         and should be less than one.
+        \param[in]  kappa  is the rotation parameter ranging from 0 (no streaming motion) to +-1
+        (models with maximum streaming motion, so that the azimuthal velocity dispersion is
+        sigma_phi = 1/2 kappa / Omega * sigma_R, as in the epicyclic approximation).
         \throw  an exception in case of invalid parameters or problems in constructing the model.
     */
     JeansAxi(const potential::BaseDensity &density, const potential::BasePotential &potential,
-        double beta_m);
+        double beta_m, double kappa);
 
-    /** Compute the second moments of velocity at the given point */
-    coord::Vel2Cyl velDisp(const coord::PosCyl& point) const;
+    /** Compute the moments of velocity at the given point */
+    void moments(const coord::PosCyl& point, coord::VelCyl &vel, coord::Vel2Cyl &vel2) const;
+
 private:
-    const double bcoef;   ///< meridional velocity anisotropy coefficient b = 1 / (1-beta_m)
+    const double bcoef;          ///< meridional velocity anisotropy coefficient b = 1 / (1-beta_m)
+    const double kappa;          ///< rotation parameter
     math::LinearInterpolator2d intvphi2, intvz2;  ///< pre-computed interpolators for v_phi^2, v_z^2
+    math::CubicSpline epicycleRatio;
 };
 
 }  // namespace

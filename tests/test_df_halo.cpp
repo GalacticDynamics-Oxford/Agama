@@ -51,19 +51,26 @@ bool testActionSpaceScaling(const df::BaseActionSpaceScaling& s)
     for(int i=0; i<1000; i++) {
         double v[3] = { rnd(i%10), rnd(i/10%10), rnd(i/100) };
         actions::Actions J = s.toActions(v);
-        if(J.Jr!=J.Jr || J.Jz!=J.Jz || J.Jphi!=J.Jphi)
+        if(J.Jr!=J.Jr || J.Jz!=J.Jz || J.Jphi!=J.Jphi) {
+            std::cout << "v=[" << v[0] << "," << v[1] << "," << v[2] << "]: " << J << "\n";
             return false;
+        }
         double w[3];
         s.toScaled(J, w);
-        if(!(w[0]>=0 && w[0]<=1 && w[1]>=0 && w[1]<=1 && w[2]>=0 && w[2]<=1))
+        if(!(w[0]>=0 && w[0]<=1 && w[1]>=0 && w[1]<=1 && w[2]>=0 && w[2]<=1)) {
+            std::cout << J << ": w=[" << w[0] << "," << w[1] << "," << w[2] << "\n";
             return false;
+        }
         actions::Actions J1 = s.toActions(w);
         if( J1.Jr!=J1.Jr || J1.Jz!=J1.Jz || J1.Jphi!=J1.Jphi ||
             (isFinite(J1.Jr+J1.Jz+fabs(J1.Jphi)) && (
-            math::fcmp(J.Jr, J1.Jr, 1e-10)!=0 ||
-            math::fcmp(J.Jz, J1.Jz, 1e-10)!=0 ||
-            math::fcmp(J.Jphi, J1.Jphi, 1e-10)!=0) ) )
+            math::fcmp(J.Jr, J1.Jr, 2e-10)!=0 ||
+            math::fcmp(J.Jz, J1.Jz, 2e-10)!=0 ||
+            math::fcmp(J.Jphi, J1.Jphi, 2e-10)!=0) ) )
+        {
+            std::cout << J << " != " << J1 << "\n";
             return false;
+        }
     }
     return true;
 }

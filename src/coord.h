@@ -805,16 +805,50 @@ void evalAndConvertSph(const math::IFunction& F,
 /// \section Miscellaneous routines
 ///@{
 
-/// convenience functions to extract the value of angular momentum and its z-component
+/// compute the total angular momentum for a point in the given coordinate system CoordT
 template<typename CoordT> double Ltotal(const PosVelT<CoordT> &p);
+
+/// compute the z-component of angular momentum for a point in the given coordinate system CoordT
 template<typename CoordT> double Lz(const PosVelT<CoordT> &p);
 
-/** evaluate the kinetic energy from position/momentum in the given coordinate system;
-    optionally also output its derivative w.r.t each coordinate/momentum in the second argument
-*/
-template<typename CoordT>
-double Ekin(const PosVelT<CoordT> &p, coord::GradT<CoordT> *dEbyPos=NULL, coord::VelT<CoordT> *dEbyVel=NULL);
-
 ///@}
+/// \section 3d rotations
+///@{
+
+/** construct a 3d rotation matrix specified by Euler angles.
+    Let (x,y,z) be the source reference frame, and (X,Y,Z) be the rotated target frame.
+    The first rotation by angle alpha about the z axis creates an intermediate reference frame
+    (x',y',z'), where the axis x' points along the line of nodes of the overall transformation.
+    The second rotation by angle beta about the x' axis tilts the (x',y') plane by angle beta,
+    creating a second intermediate reference frame (x'', y'', z'').
+    The third rotation by angle gamma about the z'' axis does not change the orientation of z'',
+    hence the final axis Z is the same as z'', and beta is the angle between Z and z.
+    The composition of three rotations is described by an orthogonal rotation matrix R,
+    such that a point with coordinates (x,y,z) in the original reference frame will have
+    coordinates (X,Y,Z) in the rotated frame, specified by
+    \code
+    | X |   | mat[0]  mat[1]  mat[2] |   | x |
+    | Y | = | mat[3]  mat[4]  mat[5] | * | y |
+    | Z |   | mat[6]  mat[7]  mat[8] |   | z |
+    \endcode
+    where mat is the flattened matrix R in a row-major order.
+    In other words, the point remains geometrically fixed, only the reference frame changes
+    and the coordinates of this point change accordingly (passive rotation).
+    The inverse rotation is produced by a triplet of angles (-gamma,-beta,-alpha),
+    and its rotation matrix is simply the transpose of the forward rotation matrix.
+    \param[in]  alpha, beta, gamma are three Euler rotation angles.
+    \param[out] mat  will contain 9 elements of a 3x3 rotation matrix in row-major order.
+*/
+void makeRotationMatrix(double alpha, double beta, double gamma, double mat[9]);
+
+/** transform a 3d vector in cartesian coordinates using the rotation matrix */
+inline void transformVector(const double mat[9], const double vec[3], double result[3])
+{
+    result[0] = mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2];
+    result[1] = mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2];
+    result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
+}
+
+///@}    
 
 }  // namespace coord

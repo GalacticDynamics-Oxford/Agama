@@ -8,6 +8,12 @@
 
 namespace actions{
 
+/** Compute actions in a spherical Isochrone potential specified by total mass and scale radius.
+    \param[in]  isochroneMass   is the total mass associated with the potential;
+    \param[in]  isochroneRadius is the scale radius of the potential;
+    \param[in]  point  is the position/velocity point;
+    \return     actions, with Jr=NAN if the energy is positive.
+*/
 Actions actionsIsochrone(
     const double isochroneMass, const double isochroneRadius,
     const coord::PosVelCyl& point);
@@ -18,7 +24,7 @@ Actions actionsIsochrone(
     \param[in]  isochroneRadius is the scale radius of the potential;
     \param[in]  point  is the position/velocity point;
     \param[out] freq   if not NULL, store the frequencies for these actions.
-    \return     actions and angles, or Jr=NAN if the energy is positive.
+    \return     actions and angles, with Jr=angles=NAN if the energy is positive.
 */
 ActionAngles actionAnglesIsochrone(
     const double isochroneMass, const double isochroneRadius,

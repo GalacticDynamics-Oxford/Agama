@@ -32,7 +32,7 @@ inline double R_circ(const BasePotential& potential, double E)
 }
 
 /** Compute the characteristic orbital period as a function of energy */
-inline double T_circ(const potential::BasePotential& potential, double E)
+inline double T_circ(const BasePotential& potential, double E)
 {
     double R = R_circ(potential, E);
     return R / v_circ(potential, R) * 2*M_PI;
@@ -48,7 +48,7 @@ inline double L_circ(const math::IFunction& potential, double E)
 
 /** Compute the angular momentum of a circular orbit in equatorial plane for a given value of energy
     (convenience overload; the potential should be axisymmetric) */
-inline double L_circ(const potential::BasePotential& potential, double E)
+inline double L_circ(const BasePotential& potential, double E)
 {
     return L_circ(PotentialWrapper(potential), E);
 }
@@ -117,14 +117,24 @@ double outerSlope(const math::IFunction& potential, double* M=NULL, double* coef
     \throw std::invalid_argument if the potential is not axisymmetric, or energy is outside
     the allowed range, or angular momentum is not compatible with energy.
 */
-void findPlanarOrbitExtent(const potential::BasePotential& potential, double E, double L,
+void findPlanarOrbitExtent(const BasePotential& potential, double E, double L,
     double& R1, double& R2);
+
+/** Create a grid in radius suitable for interpolation of various quantities depending on the potential.
+    The grid spacing is determined by the variation of the logarithmic derivative of the potential
+    (becomes more sparse when the potential approaches an asymptotic power-law regime).
+    \param[in]  potential  is the instance of potential;
+    \param[in]  accuracy   is the parameter determining the grid spacing
+    (it is proportional to accuracy^(1/4) and, of course, depends on potential derivatives);
+    \returns  the grid in radius, typically containing from few dozen to a couple of hundred nodes.
+*/
+std::vector<double> createInterpolationGrid(const BasePotential& potential, double accuracy);
 
 
 /** Interpolator class for faster evaluation of potential and related quantities --
     radius and angular momentum of a circular orbit as functions of energy,
     epicyclic frequencies as functions of radius (all in the equatorial plane).
-    It is applicable to any axisymmetric potential that tends to zero at infinity,
+    It is applicable to any spherical or axisymmetric potential that tends to zero at infinity,
     is monotonic with radius, and may be regular or singular at origin.
 */
 class Interpolator: public math::IFunction {
@@ -176,7 +186,7 @@ public:
     }
 
 private:
-    double invPhi0;             ///< 1/(value of potential at r=0), or 0 if the potential is singular
+    const double invPhi0;       ///< 1/(value of potential at r=0), or 0 if the potential is singular
     double slopeOut, Mtot, coefOut; ///< coefficients for power-law potential at large radii
     math::QuinticSpline LofE;   ///< spline-interpolated scaled function for L_circ(E)
     math::QuinticSpline RofL;   ///< spline-interpolated scaled R_circ(L)
@@ -187,13 +197,11 @@ private:
 
 
 /** Two-dimensional interpolator for peri/apocenter radii as functions of energy and angular momentum.
-    This class is a further development of one-dimensional interpolator and works with
-    axisymmetric potentials that have a finite value at r=0 and tend to zero at r=infinity.
-    The accuracy of peri/apocenter radii interpolation is at the level of 1e-10 or better
-    for almost all orbits; however, if the density profile is not decaying fast enough at infinity
-    (i.e. r^-3 or shallower), the accuracy is rapidly deteriorating for very loosely bound orbits.
+    This class is a further development of one-dimensional interpolator and works with spherical or
+    axisymmetric potentials that tend to zero at r=infinity, and may be regular or singular at origin.
+    The accuracy of peri/apocenter radii interpolation is typically at the level of 1e-9 or better.
 */
-class Interpolator2d {
+class Interpolator2d: public Interpolator {
 public:
     /** Create internal interpolation tables for the given potential,
         which itself is not used afterwards */
@@ -208,25 +216,9 @@ public:
     */
     void findPlanarOrbitExtent(double E, double L, double& R1, double& R2) const;
 
-    /** Compute scaled peri/apocenter radii (normalized to the radius of a circular orbit
-        with the given energy), as functions of energy and relative angular momentum.
-        This routine is similar to `findPlanarOrbitExtent` (actually, is a first step in that routine),
-        except that it returns scaled radii, is applicable even in the limit r=0 or r=infinity,
-        and does not perform a refinement step that improves the accuracy of the interpolation.
-        \param[in]  E is the energy, which must be in the range Phi(0) <= E <= 0;
-        \param[in]  Lrel is the relative angular momentum (scaled to the ang.mom.of a circular orbit),
-        must be in the range 0 <= Lrel <= 1.
-        \param[out] R1rel will contain the pericenter radius, normalized to the radius of a circular
-        orbit (lies in the range 0 <= R1rel <= 1), or NAN if E or Lrel are outside the allowed range;
-        \param[out] R2rel same for the apocenter radius (lies in the range 1 <= R2rel < infinity).
-    */
-    void findScaledOrbitExtent(double E, double Lrel, double &R1rel, double &R2rel) const;
-
-    /// 1d interpolator for potential and other quantities in the equatorial plane
-    const Interpolator pot;
-
 private:
-    math::QuinticSpline2d intR1, intR2; ///< 2d interpolators for scaled peri/apocenter radii
+    const double invPhi0;                      ///< 1/(value of potential at r=0)
+    math::QuinticSpline2d intR1, intR2;  ///< 2d interpolators for scaled peri/apocenter radii
 };
 
 

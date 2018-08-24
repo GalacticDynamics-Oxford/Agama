@@ -268,9 +268,9 @@ int main()
 
     std::cout << "\033[1;33m**** STARTING MODELLING ****\033[0m\nInitial masses of density components: "
         "Mdisk="  << (model.components[0]->getDensity()->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mbulge=" << (densityBulge->totalMass() * intUnits.to_Msun) << " Msun, "
+        "Mbulge=" << (densityBulge   ->totalMass() * intUnits.to_Msun) << " Msun, "
         "Mhalo="  << (densityDarkHalo->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mgas="   << (densityGasDisk->totalMass() * intUnits.to_Msun) << " Msun\n";
+        "Mgas="   << (densityGasDisk ->totalMass() * intUnits.to_Msun) << " Msun\n";
 
     // create the dark halo DF
     df::PtrDistributionFunction dfHalo = df::createDistributionFunction(
@@ -292,7 +292,7 @@ int main()
     // replace the static disk density component of SCM with a DF-based disk component
     model.components[0] = galaxymodel::PtrComponent(
         new galaxymodel::ComponentWithDisklikeDF(dfStellar, PtrDensity(),
-        iniSCMHalo.getInt("mmaxAngularCyl"),
+        iniSCMDisk.getInt("mmaxAngularCyl"),
         iniSCMDisk.getInt("sizeRadialCyl"),
         iniSCMDisk.getDouble("RminCyl") * extUnits.lengthUnit,
         iniSCMDisk.getDouble("RmaxCyl") * extUnits.lengthUnit,

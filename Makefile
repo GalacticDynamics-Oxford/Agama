@@ -37,7 +37,6 @@ SOURCES   = \
             math_spline.cpp \
             particles_io.cpp \
             py_wrapper.cpp \
-            actions_genfnc.cpp \
             actions_focal_distance_finder.cpp \
             actions_isochrone.cpp \
             actions_spherical.cpp \
@@ -68,6 +67,7 @@ SOURCES   = \
             potential_factory.cpp \
             potential_ferrers.cpp \
             potential_galpot.cpp \
+            potential_king.cpp \
             potential_multipole.cpp \
             potential_perfect_ellipsoid.cpp \
             potential_utils.cpp \
@@ -109,10 +109,11 @@ TESTSRCS  = test_math_core.cpp \
             test_orbit_lyapunov.cpp \
             test_potentials.cpp \
             test_potential_expansions.cpp \
-            test_isochrone.cpp \
-            test_staeckel.cpp \
+            test_actions_isochrone.cpp \
+            test_actions_spherical.cpp \
+            test_actions_staeckel.cpp \
+            test_actions_torus.cpp \
             test_action_finder.cpp \
-            test_torus.cpp \
             test_df_halo.cpp \
             test_df_spherical.cpp \
             test_density_grid.cpp \
@@ -157,7 +158,7 @@ $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc Makefile.local
 	$(CXX) -c $(CXXFLAGS) $(COMPILE_FLAGS) -o "$@" "$<"
 
 clean:
-	rm -f $(OBJDIR)/*.o $(EXEDIR)/*.exe $(LIBNAME)
+	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME)
 
 # run tests (both C++ and python)
 test:
@@ -201,5 +202,9 @@ else
 amuse:
 endif
 
+# auto-dependency tracker (works with GCC-compatible compilers?)
+DEPENDS = $(patsubst %.cpp,$(OBJDIR)/%.d,$(SOURCES))
+COMPILE_FLAGS += -MMD -MP
+-include $(DEPENDS)
 
 .PHONY: clean test lib doxy nemo amuse

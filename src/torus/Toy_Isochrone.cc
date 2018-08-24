@@ -51,9 +51,9 @@ void ToyIsochrone::psisolve() const
     }
 #else
     // modification of the original code from Eugene Vasiliev
-    bool signpsi=tr>M_PI;
-    psi=M_PI_2+(M_PI/8)/eps*(sqrt(M_PI*M_PI-8*M_PI*eps+16*eps*(eps+(signpsi?2*M_PI-tr:tr)))-M_PI);
-    if(signpsi) psi=2*M_PI-psi;
+    bool signpsi=tr>Pi;
+    psi=Pi/2+(Pi/8)/eps*(sqrt(Pi*Pi-8*Pi*eps+16*eps*(eps+(signpsi?2*Pi-tr:tr)))-Pi);
+    if(signpsi) psi=2*Pi-psi;
     double deltapsi=0;
     int niter=0;
     do {  // Newton's method for solving the Kepler equation (f=0)

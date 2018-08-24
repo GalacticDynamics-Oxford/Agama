@@ -63,7 +63,7 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
         " in " + file + ", line " + utils::toString(line) + ": " + reason + "\n" + utils::stacktrace();
 }
 
-// a hacky way to initialie our error handler on module startup
+// a hacky way to initialize our error handler on module startup
 bool gsl_error_handler_set = gsl_set_error_handler(&GSLerrorHandler);
 
 // ------ math primitives -------- //
@@ -214,12 +214,14 @@ ptrdiff_t binSearch(const NumT x, const NumT arr[], size_t size)
 }
 
 // template instantiations
-template ptrdiff_t binSearch(const double x, const double arr[], size_t size);
-template ptrdiff_t binSearch(const float x,  const float arr[],  size_t size);
-template ptrdiff_t binSearch(const int x,    const int arr[],    size_t size);
-template ptrdiff_t binSearch(const long x,   const long arr[],   size_t size);
-template ptrdiff_t binSearch(const unsigned int x,  const unsigned int arr[],  size_t size);
-template ptrdiff_t binSearch(const unsigned long x, const unsigned long arr[], size_t size);
+template ptrdiff_t binSearch(const double,    const double[],    size_t);
+template ptrdiff_t binSearch(const float,     const float[],     size_t);
+template ptrdiff_t binSearch(const int,       const int[],       size_t);
+template ptrdiff_t binSearch(const long,      const long[],      size_t);
+template ptrdiff_t binSearch(const long long, const long long[], size_t);
+template ptrdiff_t binSearch(const unsigned int,       const unsigned int[],       size_t);
+template ptrdiff_t binSearch(const unsigned long,      const unsigned long[],      size_t);
+template ptrdiff_t binSearch(const unsigned long long, const unsigned long long[], size_t);
 
 
 /* --------- random numbers -------- */
@@ -317,7 +319,7 @@ double random()
     return randgen.random();
 }
 
-// generate 2 random numbers with normal distribution, using Box-Muller approach
+// generate 2 random numbers with normal distribution, using the Box-Muller approach
 void getNormalRandomNumbers(double& num1, double& num2)
 {
     double p1 = random(), p2 = random(), u, v;
@@ -571,7 +573,7 @@ PointNeighborhood::PointNeighborhood(const IFunction& fnc, double x0) : absx0(fa
 {
     // small offset used in computing numerical derivatives, if the analytic ones are not available
     double delta = fmax(fabs(x0) * ROOT3_DBL_EPSILON, 16*DBL_EPSILON);
-    // we assume that the function can be computed at all points, but the derivatives not necessarily can
+    // we assume that the function can be computed at all points, but not necessarily with derivatives
     double fplusd = NAN, fderplusd = NAN, fminusd = NAN;
     f0 = fder = fder2=NAN;
     if(fnc.numDerivs()>=2) {

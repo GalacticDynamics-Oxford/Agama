@@ -15,6 +15,17 @@ namespace {  // internal namespace for Sampler class
 /// choose between pseudo-random (PRNG) and quasi-random (QRNG) number generators in the sampling routine
 #define USE_QRNG
 
+/// minimum allowed number of points in any cell
+static const int minNumPointsInCell = 256;
+
+/// number of bins in the 1-d histogram of function values (projection in each dimension) in each cell,
+/// used to estimate the entropy and ultimately decide the dimension to split a cell;
+/// should be ~ sqrt(minNumPointsInCell)
+static const int numBinsEntropy = 16;
+
+/// limit the number of iterations in the recursive refinement loop
+static const int maxNumIter = 50;
+
 class Sampler {
 public:
     /** Construct an N-dimensional sampler object */
@@ -178,17 +189,6 @@ private:
     double computeResult();
 };
 
-/// minimum allowed number of points in any cell
-static const int minNumPointsInCell = 256;
-
-/// number of bins in the 1-d histogram of function values (projection in each dimension) in each cell,
-/// used to estimate the entropy and ultimately decide the dimension to split a cell;
-/// should be ~ sqrt(minNumPointsInCell)
-static const int numBinsEntropy = 16;
-
-/// limit the number of iterations in the recursive refinement loop
-static const int maxNumIter = 50;
-
 Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double _xupper[],
     size_t _numOutputSamples) :
     fnc(_fnc),
@@ -322,9 +322,9 @@ void Sampler::getCellBoundaries(CellEnum cellIndex, double cellXlower[], double 
 void Sampler::addCellToQueue(CellEnum cellIndex)
 {
     // get the number of samples in the cell (same number of new samples will be added)
-    PointEnum numPoints = static_cast<PointEnum>(round(1. / cells[cellIndex].weight));
+    double numPoints = 1. / cells[cellIndex].weight;
     for(CellEnum index = cellIndex; index>0; index = cells[index].parentIndex)
-        numPoints >>= 1;   // each division halves the cell volume and hence the number of points
+        numPoints *= 0.5;   // each division halves the cell volume and hence the number of points
 
     // halve the weight of each sample point in this cell
     cells[cellIndex].weight *= 0.5;
@@ -332,7 +332,8 @@ void Sampler::addCellToQueue(CellEnum cellIndex)
     // schedule this cell for adding more points in the next iteration;
     // the coordinates of these new points will be assigned later, once this queue is completed.
     PointEnum numPrev = cellsQueue.empty() ? 0 : cellsQueue.back().second;
-    cellsQueue.push_back(std::pair<CellEnum, PointEnum>(cellIndex, numPoints + numPrev));
+    cellsQueue.push_back(std::pair<CellEnum, PointEnum>(cellIndex,
+        static_cast<PointEnum>(numPoints) + numPrev));
 }
 
 void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, PointEnum lastPointIndex)
