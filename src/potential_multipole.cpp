@@ -1081,7 +1081,7 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
             // (with zero endpoint derivatives)
             for(unsigned int k=0; k<gridSizeR; k++)
                 tmparr[k] = coefs[0][k]!=0 ? coefs[c][k] / coefs[0][k] : 0;
-            spl[c].reset(new math::CubicSpline(gridLogR, tmparr, 0, 0));
+            spl[c].reset(new math::CubicSpline(gridLogR, tmparr, /*regularize*/false, 0, 0));
         }
     }
 }

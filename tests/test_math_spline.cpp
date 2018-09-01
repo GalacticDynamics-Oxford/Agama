@@ -174,7 +174,7 @@ public:
     }
     virtual double value(const double x) const {
         return exp(-pow(x, POW));
-    }    
+    }
     virtual unsigned int numVars()   const { return N; }
     virtual unsigned int numValues() const { return 1; }
 };
@@ -668,7 +668,7 @@ bool test1dSpline()
     math::CubicSpline   fNatural(xnodes, yvalues);
 
     // 3. cubic, clamped -- specify derivs at the boundaries
-    math::CubicSpline   fClamped(xnodes, yvalues, yderivs.front(), yderivs.back());
+    math::CubicSpline   fClamped(xnodes, yvalues, /*regularize*/false, yderivs.front(), yderivs.back());
 
     // 4. hermite cubic spline -- specify derivs at all nodes
     math::CubicSpline fHermite(xnodes, yvalues, yderivs);

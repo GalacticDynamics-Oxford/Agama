@@ -5084,15 +5084,8 @@ int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_ValueError, "CubicSpline: input does not contain valid arrays");
         return -1;
     }
-    if(regularize && (derivLeft==derivLeft || derivRight==derivRight)) {
-        PyErr_SetString(PyExc_ValueError, "CubicSpline: cannot provide endpoint derivatives "
-            "and apply a regularization filter at the same time");
-        return -1;
-    }
     try {
-        ((CubicSplineObject*)self)->spl = regularize ?
-            math::CubicSpline(xvalues, yvalues, regularize) :
-            math::CubicSpline(xvalues, yvalues, derivLeft, derivRight);
+        ((CubicSplineObject*)self)->spl = math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight);
         utils::msg(utils::VL_DEBUG, "Agama", "Created a cubic spline of size "+
             utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
             utils::toString(&((CubicSplineObject*)self)->spl));
@@ -5190,8 +5183,7 @@ static const char* docstringCubicSpline =
     "same default behaviour.\n"
     "    reg (boolean, default False) -- apply a regularization filter to "
     "reduce overshooting in the case of sharp discontinuities in input data "
-    "and preserve monotonic trend of input points; "
-    "cannot be used when an endpoint derivative is provided manually.\n\n"
+    "and preserve monotonic trend of input points.\n\n"
     "Values of the spline and up to its second derivative are computed using the () "
     "operator with the first argument being a single x-point or an array of points, "
     "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
