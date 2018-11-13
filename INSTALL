@@ -45,8 +45,8 @@ In the manual mode, follow these steps:
     - Cuba library for multidimensional integration (the alternative, and actually preferred,
     is Cubature library that is bundled with this distribution):
     http://www.feynarts.de/cuba/
-    Note: to use the Python extension, any external libraries to be statically linked with it
-    need to be compiled with -fPIC flag.
+    Note: since Agama is compiled to a shared library, any external libraries to be statically linked
+    with it need to be compiled with -fPIC flag.
 2.  You need to create a file called Makefile.local, which is included by the Makefile
     and contains path names and compiler flags specific to your own computer.
     An example is given in Makefile.local.template (you will need to change the pathnames).

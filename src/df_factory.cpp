@@ -97,4 +97,4 @@ PtrDistributionFunction createDistributionFunction(
         throw std::invalid_argument("Unknown type of distribution function");
 }
 
-}; // namespace
+}  // namespace df

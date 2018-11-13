@@ -45,9 +45,8 @@ public:
     void    Derivatives       (double[4][4])               const;
 };
 
-inline void PoiNone::parameters (double *tmp) const
+inline void PoiNone::parameters (double *) const
 {
-  tmp = NULL;
   // Not applicable for this map. It has no parameters.
 }
 

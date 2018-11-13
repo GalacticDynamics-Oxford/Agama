@@ -2,18 +2,20 @@
 # machine-specific settings such as include paths and #defines are in Makefile.local
 include Makefile.local
 
-# some OS-dependent wizardry needed to ensure that the executables are linked
-# with properly embedded releative path to the shared library,
-# so that they could be moved to and run from any other folder
-#UNAME = $(shell uname -s)
+# some OS-dependent wizardry needed to ensure that the executables are linked to
+# the shared library using a relative path, so that it will be looked for in the same
+# folder as the executables (a symlink is created as exe/agama.so -> agama.so).
+# This allows the executables to be copied/moved to and run from any other folder
+# without the need to put agama.so into a system-wide folder such as /usr/local/lib,
+# or add it to LD_LIBRARY_PATH, provided that a copy of the shared library or a symlink
+# to it resides in the same folder as the executable program.
 ifeq ($(shell uname -s),Darwin)
-# on MacOS we need to modify the header of the shared library, which is then automatically used
-# to embed the correct relative path into each executable in the exe/ subfolder
-SO_FLAGS += -Wl,-install_name,@executable_path/../agama.so
+# on MacOS we need to modify the header of the shared library, which is then
+# automatically used to embed the correct relative path into each executable
+SO_FLAGS += -Wl,-install_name,@executable_path/agama.so
 else
-# on Linux we need to pass this flag to every compiled executable
-# (which are put into exe/ subfolder, hence the relative path to the shared library is ../agama.so)
-EXE_FLAGS += -Wl,-rpath,'$$ORIGIN/..'
+# on Linux we need to pass this flag to every compiled executable in the exe/ subfolder
+EXE_FLAGS += -Wl,-rpath,'$$ORIGIN'
 endif
 
 # set up folder names
@@ -143,8 +145,11 @@ lib:  $(LIBNAME)
 $(LIBNAME):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local
 	$(LINK) -shared -o $(LIBNAME) $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(SO_FLAGS)
 
+# for each executable file, first make sure that the exe/ folder exists,
+# and create a symlink named agama.so pointing to ../agama.so in that folder if needed
 $(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
 	@mkdir -p $(EXEDIR)
+	@[ -L $(EXEDIR)/$(LIBNAME) ] || ln -s ../$(LIBNAME) $(EXEDIR)/$(LIBNAME)
 	$(LINK) -o "$@" "$<" $(CXXFLAGS) $(LIBNAME) $(EXE_FLAGS)
 
 $(TESTEXEFORTRAN):  $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME)

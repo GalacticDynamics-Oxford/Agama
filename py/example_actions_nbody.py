@@ -2,8 +2,10 @@
 """
     This example demonstrates the use of action finder (Staeckel approximation)
     to compute actions for particles from an N-body simulation.
-    The N-body system consists of a disk and a halo (10^5 particles each),
+    The N-body system consists of a disk and a halo,
     the two components being stored in separate text files.
+    They are not provided in the distribution, but could be created by running
+    example_self_consistent_model.py
     The potential is computed from the snapshot itself, by creating a suitable
     potential expansion for each component: Multipole for the halo and CylSpline
     for the disk. This actually takes most of the time. We save the constructed
@@ -17,12 +19,18 @@
 import agama, numpy, time
 
 #1. set units (in Msun, Kpc, km/s)
-agama.setUnits(mass=1e10, length=1, velocity=1)
+agama.setUnits(mass=1, length=1, velocity=1)
 
 #2. get in N-body snapshots: columns 0 to 2 are position, 3 to 5 are velocity, 6 is mass
 tbegin = time.clock()
-diskParticles = numpy.loadtxt("../data/disk.dat")
-haloParticles = numpy.loadtxt("../data/halo.dat")
+try:
+    diskParticles = numpy.loadtxt("model_stars_final")
+    haloParticles = numpy.loadtxt("model_dm_final")
+except:
+    print("Input snapshot files are not available; " \
+        "you may create them by running example_self_consistent_model.py")
+    exit()
+
 print("%g s to load %d disk particles (total mass=%g Msun) " \
     "and %d halo particles (total mass=%g Msun)" % \
     ( time.clock()-tbegin, \
@@ -34,8 +42,8 @@ print("%g s to load %d disk particles (total mass=%g Msun) " \
 
 try:
     #3a. try to load potentials from previously stored text files instead of computing them
-    haloPot = agama.Potential(file="halo.coef_mul")
-    diskPot = agama.Potential(file="disk.coef_cyl")
+    diskPot = agama.Potential(file="model_stars_final.coef_cyl")
+    haloPot = agama.Potential(file="model_dm_final.coef_mul")
 
 except:
     # 3b: these files don't exist on the first run, so we have to create the potentials
@@ -46,15 +54,17 @@ except:
     print("%f s to init %s potential for the halo; value at origin=%f (km/s)^2" % \
         ((time.clock()-tbegin), haloPot.name(), haloPot.potential(0,0,0)))
     tbegin  = time.clock()
+    # manually specify the spatial grid for the disk potential,
+    # although one may rely on the automatic choice of these parameters (as we did for the halo)
     diskPot = agama.Potential( \
         type="CylSpline", particles=(diskParticles[:,0:3], diskParticles[:,6]), \
-        gridsizer=20, gridsizez=20, mmax=0, Rmin=0.2, Rmax=50, Zmin=0.02, Zmax=10)
+        gridsizer=20, gridsizez=20, mmax=0, Rmin=0.2, Rmax=100, Zmin=0.05, Zmax=50)
     print("%f s to init %s potential for the disk; value at origin=%f (km/s)^2" % \
         ((time.clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
 
     # save the potentials into text files; on the next call may load them instead of re-computing
-    diskPot.export("disk.coef_cyl")
-    haloPot.export("halo.coef_mul")
+    diskPot.export("model_stars_final.coef_cyl")
+    haloPot.export("model_dm_final.coef_mul")
 
 #3c. combine the two potentials into a single composite one
 totalPot  = agama.Potential(diskPot, haloPot)

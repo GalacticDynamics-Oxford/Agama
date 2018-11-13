@@ -1743,4 +1743,4 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
     }
 }
 
-}; // namespace
+}  // namespace potential

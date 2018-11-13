@@ -401,4 +401,4 @@ double sphHarmTransformInverse(const SphHarmIndices& ind, const double coefs[],
     return result;
 }
 
-};  // namespace math
+}  // namespace math

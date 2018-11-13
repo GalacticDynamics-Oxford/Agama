@@ -188,4 +188,4 @@ private:
     double state[NDIM*2], p[NDIM], q[NDIM], r[NDIM], s[NDIM];
 };
 
-};  // namespace
+}  // namespace

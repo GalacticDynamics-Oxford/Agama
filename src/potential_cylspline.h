@@ -129,12 +129,12 @@ public:
         \param[in]  useDerivs  specifies whether to compute potential derivatives from density.
     */
     static PtrPotential create(const BaseDensity& src, int mmax,
-        unsigned int gridSizeR, double Rmin, double Rmax, 
+        unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax, bool useDerivs=true);
 
     /** Same as above, but taking a potential model as an input. */
     static PtrPotential create(const BasePotential& src, int mmax,
-        unsigned int gridSizeR, double Rmin, double Rmax, 
+        unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax);
 
     /** Create the potential from an N-body snapshot.
@@ -160,7 +160,7 @@ public:
     static PtrPotential create(
         const particles::ParticleArray<coord::PosCyl>& particles,
         coord::SymmetryType sym, int mmax,
-        unsigned int gridSizeR, double Rmin, double Rmax, 
+        unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax, bool useDerivs=false);
 
     /** Construct the potential from previously computed coefficients.
@@ -191,7 +191,7 @@ public:
     */
     CylSpline(
         const std::vector<double> &gridR,
-        const std::vector<double> &gridz, 
+        const std::vector<double> &gridz,
         const std::vector< math::Matrix<double> > &Phi,
         const std::vector< math::Matrix<double> > &dPhidR = std::vector< math::Matrix<double> >(),
         const std::vector< math::Matrix<double> > &dPhidz = std::vector< math::Matrix<double> >() );
@@ -205,16 +205,18 @@ public:
         \param[out] gridz will be filled with the array of z-values of grid nodes:
         if the potential is symmetric w.r.t. z-reflection, then only the half-space with
         non-negative z is returned both in this array and in the coefficients.
-        \param[out] Phi will contain array of sequentially stored 2d arrays 
+        \param[out] Phi will contain array of sequentially stored 2d arrays
         (the size of the outer array equals the number of terms in azimuthal expansion (2*mmax+1),
         inner arrays contain gridR.size()*gridz.size() values).
         \param[out] dPhidR will contain the array of derivatives in the radial direction,
-        with the same shape as Phi.
-        \param[out] dPhidz will contain the array of derivatives in the vertical direction.
+        with the same shape as Phi, if they were provided at construction (i.e., when using
+        quintic interpolation internally), otherwise this will be an empty array.
+        \param[out] dPhidz will contain the array of derivatives in the vertical direction,
+        or an empty array if the derivatives were not provided at construction
     */
     void getCoefs(
         std::vector<double> &gridR,
-        std::vector<double> &gridz, 
+        std::vector<double> &gridz,
         std::vector< math::Matrix<double> > &Phi,
         std::vector< math::Matrix<double> > &dPhidR,
         std::vector< math::Matrix<double> > &dPhidz) const;
@@ -225,6 +227,7 @@ private:
     coord::SymmetryType sym;  ///< type of symmetry deduced from coefficients
     double Rscale;            ///< radial scaling factor for coordinate transformation
     bool logScaling;          ///< flag for optional log-transformation of the m=0 term
+    bool haveDerivs;          ///< whether the potential derivatives were provided at construction
 
     /// asymptotic behaviour at large radii described by `PowerLawMultipole`
     PtrPotential asymptOuter;

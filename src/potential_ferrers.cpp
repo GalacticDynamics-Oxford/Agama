@@ -19,7 +19,7 @@ Ferrers::Ferrers(double _mass, double _R, double _q, double _p):
     if(_q>=1 || _p>=_q || _q<=0 || _p<=0)
         throw std::invalid_argument("Ferrers potential: axis ratios must be strictly less than unity");
     computeW(0, W0);
-};
+}
 
 double Ferrers::densityCar(const coord::PosCar& pos) const
 {
@@ -161,4 +161,4 @@ void Ferrers::computeW(double lambda, double W[20]) const
     W[19]= (2/denom/pow_2(c*c+lambda) - W[16] - W[12])/5;  // W_003
 }
 
-}; // namespace
+}  // namespace potential

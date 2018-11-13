@@ -35,6 +35,6 @@ try:
     import matplotlib.pyplot as plt
     plt.ion()
     plt.plot(arr[:,0], arr[:,1], ',')
-    plt.show()
-    plt.pause(15)
+    plt.draw()
+    plt.pause(10)
 except: pass

@@ -51,4 +51,4 @@ PtrDistributionFunction createDistributionFunction(
     const potential::BasePotential* potential = NULL,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
-}; // namespace
+}  // namespace df

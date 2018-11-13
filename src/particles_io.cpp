@@ -35,7 +35,7 @@ ParticleArrayCar IOSnapshotText::readSnapshot() const
         }
     }
     return points;
-};
+}
 
 void IOSnapshotText::writeSnapshot(const ParticleArrayCar& points) const
 {
@@ -93,7 +93,7 @@ ParticleArrayCar readSnapshotUNSIO(const std::string& fileName,
         return points;
     } else
         throw std::runtime_error("IOSnapshotUNSIO: cannot read from file "+fileName);
-};
+}
 
 void writeSnapshotUNSIO(const std::string& fileName,
     const units::ExternalUnits& conv, const ParticleArrayCar& points, const std::string& type)
@@ -118,7 +118,7 @@ void writeSnapshotUNSIO(const std::string& fileName,
     result &= output.snapshot->save()>0;
     if(!result) 
         throw std::runtime_error("IOSnapshotUNSIO: cannot write to file "+fileName);
-};
+}
 }  // internal ns
 
 ParticleArrayCar IOSnapshotGadget::readSnapshot() const {
@@ -138,7 +138,7 @@ ParticleArrayCar IOSnapshotNemo::readSnapshot() const {
 ParticleArrayCar IOSnapshotNemo::readSnapshot() const
 {
     throw std::runtime_error("Error, compiled without support for reading NEMO snapshots");
-};
+}
 #endif
 
 namespace {   // internal
@@ -165,7 +165,7 @@ public:
         snap.put(typeLetter<T>());
         putZString(name);
         snap.write(reinterpret_cast<const char*>(&val), sizeof(T));
-    };
+    }
     /// write array of T; ndim - number of dimensions, dim - length of array for each dimension
     template<typename T> void putArray(const std::string &name, int ndim, const int dim[], const T* data) {
         snap.put(-110);
@@ -179,7 +179,7 @@ public:
         for(int i=0; i<ndim; i++)
             size *= dim[i];   // compute the array size
         snap.write(reinterpret_cast<const char*>(data), size*sizeof(T));
-    };
+    }
     /// begin a new nested array
     void startLevel(const std::string &name) {
         level++;
@@ -256,10 +256,10 @@ public:
     /// check if any i/o errors occured
     bool ok() const { return snap.good(); }
 };
-template<> char NemoSnapshotWriter::typeLetter<int>()   { return 'i'; };
-template<> char NemoSnapshotWriter::typeLetter<float>() { return 'f'; };
-template<> char NemoSnapshotWriter::typeLetter<double>(){ return 'd'; };
-template<> char NemoSnapshotWriter::typeLetter<char>()  { return 'c'; };
+template<> char NemoSnapshotWriter::typeLetter<int>()   { return 'i'; }
+template<> char NemoSnapshotWriter::typeLetter<float>() { return 'f'; }
+template<> char NemoSnapshotWriter::typeLetter<double>(){ return 'd'; }
+template<> char NemoSnapshotWriter::typeLetter<char>()  { return 'c'; }
 }  // end internal namespace
 
 void IOSnapshotNemo::writeSnapshot(const ParticleArrayCar& points) const
@@ -273,7 +273,7 @@ void IOSnapshotNemo::writeSnapshot(const ParticleArrayCar& points) const
     }
     if(!result) 
         throw std::runtime_error("IOSnapshotNEMO: cannot write to file "+fileName);
-};
+}
 
 
 // creates an instance of appropriate snapshot reader, according to the file format 
@@ -328,4 +328,4 @@ PtrIOSnapshot createIOSnapshotWrite(const std::string &fileName,
         throw std::runtime_error("Snapshot file format not recognized");   // error - format name not found
 }
 
-};  // namespace
+}  // namespace particles

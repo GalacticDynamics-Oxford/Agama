@@ -57,6 +57,11 @@ if os.path.isdir(EXTRAS_DIR+'/include'):   # if it was created in the previous i
 if os.path.isdir(EXTRAS_DIR+'/lib'):
     LDFLAGS += ' -L'+EXTRAS_DIR+'/lib'
 
+# retrieve a system configuration variable with the given key, or return an empty string (instead of None)
+def get_config_var(key):
+    result = sysconfig.get_config_var(key)
+    return result if result else ''
+
 # force printing to the terminal even if stdout was redirected
 def say(text):
     if sys.stdout.isatty():
@@ -104,7 +109,7 @@ def runProgram(prog):
 # find out which required and optional 3rd party libraries are present, and create Makefile.local
 def createMakefile():
 
-    say("==== Checking supported compiler options and available libraries ====\n")
+    say("\n    ==== Checking supported compiler options and available libraries ====\n\n")
     LINK_FLAGS = LDFLAGS.split()    # accumulate the linker flags that will be put to Makefile.local
     COMPILE_FLAGS = CFLAGS.split()  # same for the compilation of the shared library only
     # default compilation flags for both the shared library and all example programs that use it
@@ -141,7 +146,7 @@ def createMakefile():
 
     # [1e]: special treatment for Intel compiler to restore determinism in OpenMP-parallelized loops
     INTEL_FLAG = '-qno-opt-dynamic-align'
-    if runCompiler(flags=INTEL_FLAG):
+    if runCompiler(code='#ifndef __INTEL_COMPILER\n#error\n#endif\nint main(){}\n', flags=INTEL_FLAG):
         CXXFLAGS += [INTEL_FLAG]
 
     # [2a]: check that NumPy is present (required by the python interface)
@@ -157,8 +162,8 @@ def createMakefile():
 
     # various other system libraries that are needed at link time
     PYTHON_LIB_EXTRA = \
-        sysconfig.get_config_var('LIBS').split() + \
-        sysconfig.get_config_var('SYSLIBS').split() #+ ['-lz']
+        get_config_var('LIBS').split() + \
+        get_config_var('SYSLIBS').split() #+ ['-lz']
 
     # try compiling a test code with the provided link flags (in particular, the name of Python library):
     # check that a sample C++ program with embedded python compiles, links and runs properly
@@ -191,6 +196,7 @@ PyInit_pytest42(void) {
     return mod;
 }
 """
+        print("    **** Trying the following options for linking against Python library ****: ", PYTHON_LIB)
         # test code for a program that loads this shared library
         PYTEST_EXE_CODE = 'extern void run();int main(){run();}\n'
         PYTEST_LIB_NAME = './pytest42.so'
@@ -221,6 +227,7 @@ PyInit_pytest42(void) {
                 "Received: "+resultexe+"\n"+\
                 "From py:  "+resultpy+"\n"+\
                 "Should we continue the build (things may go wrong at a later stage)? [Y/N] "
+        print("    *** Successfully linked using these options ***")
         return True   # this combination of options seems reasonable...
 
     # explore various possible combinations of file name and path to the python library...
@@ -236,12 +243,21 @@ PyInit_pytest42(void) {
                     # other libraries depend on whether this is a static or a shared python library
                     PYTHON_LIB = [PYTHON_LIB_FILEPATH] + PYTHON_LIB_EXTRA
                     if PYTHON_LIB_FILE.endswith('.a') and not sysconfig.get_config_var('PYTHONFRAMEWORK'):
-                        PYTHON_LIB += sysconfig.get_config_var('LINKFORSHARED').split()
+                        PYTHON_LIB += get_config_var('LINKFORSHARED').split()
                     # the stack_size flag is problematic and needs to be removed
                     PYTHON_LIB = [x for x in PYTHON_LIB if not x.startswith('-Wl,-stack_size,')]
                     result = tryPythonCode(PYTHON_LIB)
                     if result is True:
                         return PYTHON_LIB   # successful compilation
+                    if not result and PYTHON_LIB_FILE.endswith('.so'):
+                        # sometimes the python installation is so wrecked that the linker can find and use
+                        # the shared library libpython***.so, but this library is not in LD_LIBRARY_PATH and
+                        # cannot be found when loading the python extension module outside python itself.
+                        # the (inelegant) fix is to hardcode the path to this libpython***.so as -rpath.
+                        PYTHON_LIB += ['-Wl,-rpath='+PYTHON_LIB_PATH]  # extend the linker options
+                        result = tryPythonCode(PYTHON_LIB)             # and try again
+                        if result is True:
+                            return PYTHON_LIB   # now success
                     if result:  # not True, but a warning string
                         # test compiled, but with a version mismatch warning, store it as a backup option
                         PLANB_LIB = PYTHON_LIB
@@ -328,8 +344,7 @@ PyInit_pytest42(void) {
         if ask("CVXOPT library (needed only for Schwarzschild modelling) is not found\n"
             "Should we try to install it now? [Y/N] "):
             try:
-                import pip
-                pip.main(['install','--user','cvxopt'])
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', 'cvxopt'])
             except Exception as e:
                 say("Failed to install CVXOPT: "+str(e)+"\n")
 
@@ -391,7 +406,7 @@ class MyBuildExt(CmdBuildExt):
             not ask('Makefile.local already exists, should we use it (Y) or generate a new one (N)? '):
                 createMakefile()
         # run custom build step (make)
-        say('==== Compiling the C++ library ====\n')
+        say('\n    ==== Compiling the C++ library ====\n\n')
         if subprocess.call('make') != 0 or not os.path.isfile('agama.so'):
             raise CompileError("Compilation failed")
         if not os.path.isdir(self.build_lib): return  # this occurs when running setup.py build_ext

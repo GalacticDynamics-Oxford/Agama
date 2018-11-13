@@ -6,15 +6,15 @@
 
 namespace coord{
 
-ProlSph::ProlSph(double Delta): 
+ProlSph::ProlSph(double Delta) : 
     Delta2(Delta*Delta)
 {
     if(Delta<=0)
         throw std::invalid_argument("Invalid parameters for Prolate Spheroidal coordinate system");
-};
+}
 
-PosT<ProlMod>::PosT(double _rho, double _tau, double _phi, const ProlMod& coordsys):
-    rho(_rho), tau(_tau), phi(_phi), chi(sqrt(pow_2(_rho) + pow_2(coordsys.D))) {};
+PosT<ProlMod>::PosT(double _rho, double _tau, double _phi, const ProlMod& coordsys) :
+    rho(_rho), tau(_tau), phi(_phi), chi(sqrt(pow_2(_rho) + pow_2(coordsys.D))) {}
 
 //--------  angular momentum functions --------//
 
@@ -105,7 +105,7 @@ PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, C
         deriv2->d2phidxdy=(pow_2(sinphi)-pow_2(cosphi))/R2;
     }
     return PosCyl(R, p.z, atan2(p.y, p.x));
-};
+}
 
 template<>
 PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, Sph>* deriv2) {
@@ -191,7 +191,7 @@ PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, S
         deriv2->d2thetadRdz=(pow_2(sintheta)-pow_2(costheta))*pow_2(rinv);
     }
     return PosSph(r, atan2(p.R, p.z), p.phi);
-};
+}
 
 template<>
 PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, Car>* deriv2) {
@@ -224,7 +224,7 @@ PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, C
         deriv2->d2ydphi2=-y;
     }
     return PosCar(x, y, z);
-};
+}
 
 template<>
 PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, Cyl>* deriv2) {

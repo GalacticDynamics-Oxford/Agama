@@ -229,4 +229,4 @@ coord::SymmetryType getSymmetryTypeByName(const std::string& name);
 */
 std::string getSymmetryNameByType(coord::SymmetryType type);
 
-}; // namespace
+}  // namespace potential

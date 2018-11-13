@@ -2633,7 +2633,7 @@ void SplineApprox::Impl::computeAmplitudes(const FitData &fitData, double lambda
     tempv = ampl;
     blas_dtrmv(CblasLower, CblasTrans, CblasNonUnit, LMatrix, tempv); // tempv = L^T w
     double wTz = blas_ddot(ampl, fitData.zRHS);
-    RSS = (fitData.ynorm2 - 2*wTz + blas_ddot(tempv, tempv));
+    RSS = fitData.ynorm2 - 2*wTz + blas_dnrm2(tempv);
     EDF = computeEDF(singValues, lambda);  // equivalent degrees of freedom
     /*utils::msg(utils::VL_VERBOSE, "SplineApprox",
         "lambda="+utils::toString(lambda,10)+
@@ -2669,7 +2669,7 @@ void SplineApprox::Impl::solveForAmplitudesWithAIC(const std::vector<double> &yv
     ScalingSemiInf scaling;  // log-scaling for lambda
     double lambda = findMin(SplineAICRootFinder(*this, fitData, 0),
         scaling, NAN /*no initial guess*/, EPS_LAMBDA);
-    if(!isFinite(lambda)) {
+    if(lambda!=lambda) {
         utils::msg(utils::VL_DEBUG, "SplineApprox", "Can't find optimal smoothing parameter lambda");
         lambda = 0;  // no smoothing in case of weird problems
     }

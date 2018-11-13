@@ -195,4 +195,4 @@ void Dehnen::evalCar(const coord::PosCar &pos,
     }
 }
 
-}; // namespace
+}  // namespace potential

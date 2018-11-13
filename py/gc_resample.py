@@ -66,7 +66,7 @@ class SphericalModel:
 
         # create a smoothing spline for log(M/(Mtotal-M)) as a function of log(R), 
         # using points from the interval indices[1]..indices[-2], and spline knots at Radii[indices]
-        self.spl_mass = agama.SplineApprox( \
+        self.spl_mass = agama.splineApprox( \
             numpy.log(Radii[indices[1:-1]]), \
             numpy.log(Radii[indices[1]:indices[-2]]), \
             numpy.log(cumulMass[indices[1]:indices[-2]] / (1 - cumulMass[indices[1]:indices[-2]])), \
@@ -95,7 +95,7 @@ class SphericalModel:
         # cumulative kinetic energy (up to a constant factor) $\int_0^R \Sigma(R') \sigma_{los}^2(R') 2\pi R' dR'$
         cumulEkin  = numpy.cumsum(particles_sorted[:,5]**2) / len(Radii)
         self.total_Ekin = cumulEkin[-1]
-        self.spl_Ekin = agama.SplineApprox( \
+        self.spl_Ekin = agama.splineApprox( \
             numpy.log(Radii[indices]), \
             numpy.log(Radii[indices[0]:indices[-1]]), \
             numpy.log(cumulEkin[indices[0]:indices[-1]] / \

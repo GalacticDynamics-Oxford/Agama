@@ -701,25 +701,30 @@ void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
     std::vector<double> gridR, gridz;
     std::vector<math::Matrix<double> > Phi, dPhidR, dPhidz;
     potential.getCoefs(gridR, gridz, Phi, dPhidR, dPhidz);
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, gridR);
-    math::blas_dmul(1/converter.lengthUnit, gridz);
-    for(unsigned int i=0; i<Phi.size(); i++) {
-        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
-        math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidR[i]);
-        math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
-    }
-    int mmax = Phi.size()/2;
     strm << CylSpline::myName() << "\n" <<
         gridR.size() << "\t#size_R\n" <<
         gridz.size() << "\t#size_z\n" <<
-        mmax << "\t#m_max\n";
+        Phi.size()/2 << "\t#m_max\n";
     strm << "#Phi\n";
+    // convert units
+    math::blas_dmul(1/converter.lengthUnit, gridR);
+    math::blas_dmul(1/converter.lengthUnit, gridz);
+    for(unsigned int i=0; i<Phi.size(); i++)
+        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
     writeAzimuthalHarmonics(strm, gridR, gridz, Phi);
-    strm << "\n#dPhi/dR\n";
-    writeAzimuthalHarmonics(strm, gridR, gridz, dPhidR);
-    strm << "\n#dPhi/dz\n";
-    writeAzimuthalHarmonics(strm, gridR, gridz, dPhidz);
+    // write arrays of derivatives if they were provided
+    // (only when the potential uses quintic interpolaiton internally)
+    if(dPhidR.size()>0 && dPhidz.size()>0) {
+        assert(dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size());
+        for(unsigned int i=0; i<dPhidR.size(); i++) {
+            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidR[i]);
+            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
+        }
+        strm << "\n#dPhi/dR\n";
+        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidR);
+        strm << "\n#dPhi/dz\n";
+        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidz);
+    }
 }
 
 void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHarmonic& density,
@@ -1161,4 +1166,4 @@ PtrPotential createPotential(
 }
 
 ///@}
-}; // namespace
+}  // namespace potential

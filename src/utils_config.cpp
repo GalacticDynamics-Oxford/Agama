@@ -319,4 +319,4 @@ KeyValueMap& ConfigFile::findSection(const std::string& sec)
     return sections.back().second;
 }
 
-}; // namespace
+}  // namespace utils

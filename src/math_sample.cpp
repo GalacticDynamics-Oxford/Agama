@@ -579,6 +579,6 @@ void sampleNdim(const IFunctionNdim& fnc, const double xlower[], const double xu
         if(interror!=NULL)
             *interror = err;
     }
-};
+}
 
 }  // namespace

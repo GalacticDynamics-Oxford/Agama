@@ -731,4 +731,4 @@ template class Ode2SolverGL4<1>;
 template class Ode2SolverGL4<2>;
 template class Ode2SolverGL4<3>;
 
-};  // namespace
+}  // namespace

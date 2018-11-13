@@ -34,7 +34,7 @@ coord::SymmetryType CompositeDensity::symmetry() const {
     for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
     return static_cast<coord::SymmetryType>(sym);
-};
+}
 
 
 CompositeCyl::CompositeCyl(const std::vector<PtrPotential>& _components) : 
@@ -77,6 +77,6 @@ coord::SymmetryType CompositeCyl::symmetry() const {
     for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
     return static_cast<coord::SymmetryType>(sym);
-};
+}
 
 } // namespace potential

@@ -4160,6 +4160,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
 
     volatile bool fail = false;
+    utils::CtrlBreakHandler cbrk;
     // the procedure is different depending on whether the parameters of GH expansion are provided or not
     if(gh_arr) {
         // compute the GH moments for known (provided) parameters of expansion (gamma, meanv and sigma)
@@ -4201,6 +4202,10 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 PyErr_SetString(PyExc_ValueError, e.what());
                 fail = true;
             }
+            if(cbrk.triggered()) {
+                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+                fail = true;
+            }                
         }
     } else {
         // construct best-fit GH expansion (find gamma,meanv,sigma) for each aperture and component,
@@ -4254,6 +4259,10 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 PyErr_SetString(PyExc_ValueError, e.what());
                 fail = true;
             }
+            if(cbrk.triggered()) {
+                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+                fail = true;
+            }                
         }
     }
     Py_XDECREF(gh_arr);

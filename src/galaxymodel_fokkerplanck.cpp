@@ -768,8 +768,8 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     data(new FokkerPlanckData(params, components))
 {
     // set up the grid parameters
-    size_t gridSize = params.gridSize ?: DEFAULT_GRID_SIZE;
-    double hmin = params.hmin ?: INFINITY, hmax = params.hmax ?: 0.;
+    size_t gridSize = params.gridSize ? params.gridSize : DEFAULT_GRID_SIZE;
+    double hmin = params.hmin ? params.hmin : INFINITY, hmax = params.hmax ? params.hmax : 0.;
     bool fixmin = params.hmin!=0, fixmax = params.hmax!=0;
 
     // determine if we have a central black hole with a non-zero capture radius -

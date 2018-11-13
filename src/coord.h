@@ -685,7 +685,7 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
         *deriv2 = toHess<evalCS, outputCS> (evalGrad, evalHess, coordDeriv, coordDeriv2);
-};
+}
 
 /** The same routine for conversion of gradient and hessian 
     in the case that the computation requires the parameters of coordinate system evalCS */
@@ -709,7 +709,7 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
         *deriv2 = toHess<evalCS, outputCS> (evalGrad, evalHess, coordDeriv, coordDeriv2);
-};
+}
 
 /// trivial instantiation of the above function for the case that conversion is not necessary
 template<typename CS> 
@@ -755,7 +755,7 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
         intermedHess = toHess<evalCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
         *deriv2 = toHess<intermedCS, outputCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
     }
-};
+}
 
 /** The same routine for the case that evalCS requires the parameters of coordinate system */
 template<typename evalCS, typename intermedCS, typename outputCS>
@@ -789,7 +789,7 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
         intermedHess = toHess<evalCS, intermedCS> (evalGrad, evalHess, coordDerivIE, coordDeriv2IE);
         *deriv2 = toHess<intermedCS, outputCS> (intermedGrad, intermedHess, coordDerivOI, coordDeriv2OI);
     }
-};
+}
 
 /** Specialized conversion routine for spherically-symmetric functions.
     Convert the derivatives of a simple function that only depends on the spherical radius 
