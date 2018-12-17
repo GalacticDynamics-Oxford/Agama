@@ -25,6 +25,8 @@ const unsigned int INTEGR_ORDER = 10;
     use a higher order for more eccentric orbits, as indicated by the ratio
     of pericenter to apocenter radii (R1/R2) */
 inline unsigned int integrOrder(double R1overR2) {
+    if(R1overR2==0)
+        return math::MAX_GL_ORDER;
     int log2;  // base-2 logarithm of R1/R2
     frexp(R1overR2, &log2);
     return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - log2);

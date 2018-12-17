@@ -257,7 +257,7 @@ public:
         bool noWeights = weights.empty();
         assert(values.size() == nRows * Nvals && indcol.size() == nRows &&
             (noWeights || weights.size() == nRows));
-        BandMatrix<double> result(nCols, Nvals-1, 0.);
+        BandMatrix<double> result(nCols, std::min<int>(Nvals-1, nCols-1), 0.);
         for(size_t row=0; row<nRows; row++) {
             unsigned int ind = indcol[row], nvals = std::min<unsigned int>(Nvals, nCols-ind);
             double weight = noWeights ? 1. : weights[row];
@@ -2898,6 +2898,12 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         throw std::length_error("splineLogDensity: no data");
     if(numData != (ptrdiff_t)weights.size())
         throw std::length_error("splineLogDensity: sizes of input arrays are not equal");
+    bool infLeft  = (options & FO_INFINITE_LEFT)  == FO_INFINITE_LEFT;
+    bool infRight = (options & FO_INFINITE_RIGHT) == FO_INFINITE_RIGHT;
+    if(infLeft && infRight && numNodes<3)
+        throw std::invalid_argument("splineLogDensity: grid size should be at least 3 "
+            "when extrapolating beyond both endpoints of the interval "
+            "(function must be declining at both endpoints, hence cannot be a straight line)");
     if(numNodes<2)
         throw std::invalid_argument("splineLogDensity: grid size should be at least 2");
     checkFiniteAndMonotonic(grid, "splineLogDensity", "x");
@@ -2934,8 +2940,8 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         if(!(weight >= 0))
             throw std::invalid_argument("splineLogDensity: sample weights may not be negative");
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
-        if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
-            (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
+        if( (xval < xmin && !infLeft)  ||
+            (xval > xmax && !infRight) ||
             !isFinite(xval) || weight == 0)
             continue;
         sumWeights += weight;
@@ -2963,8 +2969,8 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     for(ptrdiff_t p=0; p<numData; p++) {
         double xval = xvalues[p], weight = weights[p] / sumWeights;
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
-        if( (xval < xmin && (options & FO_INFINITE_LEFT)  != FO_INFINITE_LEFT)  ||
-            (xval > xmax && (options & FO_INFINITE_RIGHT) != FO_INFINITE_RIGHT) ||
+        if( (xval < xmin && !infLeft)  ||
+            (xval > xmax && !infRight) ||
             !isFinite(xval) || weight == 0)
             continue;
         double Bspl[N+1];
@@ -3031,9 +3037,9 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     }
 
     // make sure that we start with a density that is declining when extrapolated
-    if((options & FO_INFINITE_LEFT) == FO_INFINITE_LEFT)
+    if(infLeft)
         params.ampl[0] = fmin(params.ampl[0], params.ampl[1] - (grid[1]-grid[0]));
-    if((options & FO_INFINITE_RIGHT) == FO_INFINITE_RIGHT)
+    if(infRight)
         params.ampl[numBasisFnc-1] = fmin(params.ampl[numBasisFnc-1],
             params.ampl[numBasisFnc-2] - (grid[numNodes-1]-grid[numNodes-2]));
 

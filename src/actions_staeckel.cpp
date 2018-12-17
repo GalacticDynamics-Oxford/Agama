@@ -15,8 +15,20 @@ namespace actions{
 namespace {  // internal routines
 
 /** Accuracy of integrals for computing actions and angles
-    is determined by the number of points in fixed-order Gauss-Legendre scheme */
-static const unsigned int INTEGR_ORDER = 10;  // good enough
+    is determined by the number of points in fixed-order Gauss-Legendre scheme with an order
+    that depends on the orbit eccentricity, varying from the value below up to MAX_GL_ORDER */
+static const unsigned int INTEGR_ORDER = 10;
+
+/** order of Gauss-Legendre quadrature for actions, frequencies and angles:
+    use a higher order for more eccentric orbits, as indicated by the ratio
+    of pericenter to apocenter radii (R1/R2) */
+inline unsigned int integrOrder(double R1overR2) {
+    if(R1overR2==0)
+        return math::MAX_GL_ORDER;
+    int log2;  // base-2 logarithm of R1/R2
+    frexp(R1overR2, &log2);
+    return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - log2);
+}
 
 /** relative tolerance in determining the range of variables (nu,lambda) to integrate over */
 static const double ACCURACY_RANGE = 1e-6;
@@ -33,6 +45,7 @@ static const double ACCURACY_INTERP2 = 1e-4;
     (shared between Staeckel and Fudge action finders). */
 struct AxisymIntLimits {
     double lambda_min, lambda_max, nu_min, nu_max;
+    int integrOrder;   ///< order of GL quadrature that depends on the eccentricity
 };
 
 /** Derivatives of actions by integrals of motion */
@@ -456,6 +469,9 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
     if(!(lim.lambda_max-lim.lambda_min >= delta * MINIMUM_RANGE))
         lim.lambda_min = lim.lambda_max = fnc.point.lambda;
 
+    // choose the order of Gauss-Legendre integration depending on the approximate eccentricity
+    double RperiOverRapo = sqrt((lim.lambda_min-delta) / (lim.lambda_max-delta));
+    lim.integrOrder = integrOrder(RperiOverRapo);
     return lim;
 }
 
@@ -478,22 +494,22 @@ AxisymActionDerivatives computeActionDerivatives(
     integrand.c = AxisymIntegrand::czero;
     der.dJrdE = (lim.lambda_min==lim.lambda_max ? 
         integrand.limitingIntegralValue(lim.lambda_min) :
-        math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) ) / (4*M_PI);
-    der.dJzdE = math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
+        math::integrateGL(transf_l, 0, 1, lim.integrOrder) ) / (4*M_PI);
+    der.dJzdE = math::integrateGL(transf_n, 0, 1, lim.integrOrder) / (2*M_PI);
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
     der.dJrdI3 = - (lim.lambda_min==lim.lambda_max ? 
         integrand.limitingIntegralValue(lim.lambda_min) :
-        math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) ) / (4*M_PI);
-    der.dJzdI3 = -math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
+        math::integrateGL(transf_l, 0, 1, lim.integrOrder) ) / (4*M_PI);
+    der.dJzdI3 = -math::integrateGL(transf_n, 0, 1, lim.integrOrder) / (2*M_PI);
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
     der.dJrdLz = -fnc.Lz * (lim.lambda_min==lim.lambda_max ? 
         integrand.limitingIntegralValue(lim.lambda_min) :
-        math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) ) / (4*M_PI);
-    der.dJzdLz = -fnc.Lz * math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / (2*M_PI);
+        math::integrateGL(transf_l, 0, 1, lim.integrOrder) ) / (4*M_PI);
+    der.dJzdLz = -fnc.Lz * math::integrateGL(transf_n, 0, 1, lim.integrOrder) / (2*M_PI);
     return der;
 }
 
@@ -548,20 +564,20 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::czero;
     der.dSdE =
-        signldot * math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
-      + signndot * math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
+        signldot * math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
+      + signndot * math::integrateGL(transf_n, 0, yn, lim.integrOrder) / 4;
     // derivatives w.r.t. I3
     integrand.a = AxisymIntegrand::aminus1;
     integrand.c = AxisymIntegrand::cminus1;
     der.dSdI3 = 
-        signldot * -math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
-      + signndot * -math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
+        signldot * -math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
+      + signndot * -math::integrateGL(transf_n, 0, yn, lim.integrOrder) / 4;
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
     der.dSdLz = fnc.Lz==0 ? 0 : fnc.point.phi +
-        signldot * -fnc.Lz * math::integrateGL(transf_l, 0, yl, INTEGR_ORDER) / 4
-      + signndot * -fnc.Lz * math::integrateGL(transf_n, 0, yn, INTEGR_ORDER) / 4;
+        signldot * -fnc.Lz * math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
+      + signndot * -fnc.Lz * math::integrateGL(transf_n, 0, yn, lim.integrOrder) / 4;
     return der;
 }
 
@@ -577,9 +593,9 @@ Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim
     integrand.n = AxisymIntegrand::nplus1;  // momentum goes into the numerator
     integrand.a = AxisymIntegrand::azero;
     integrand.c = AxisymIntegrand::czero;
-    acts.Jr = math::integrateGL(transf_l, 0, 1, INTEGR_ORDER) / M_PI;
+    acts.Jr = math::integrateGL(transf_l, 0, 1, lim.integrOrder) / M_PI;
     // factor of 2 in Jz because we only integrate over half of the orbit (z>=0)
-    acts.Jz = math::integrateGL(transf_n, 0, 1, INTEGR_ORDER) / M_PI * 2;
+    acts.Jz = math::integrateGL(transf_n, 0, 1, lim.integrOrder) / M_PI * 2;
     acts.Jphi = fnc.Lz;
     return acts;
 }

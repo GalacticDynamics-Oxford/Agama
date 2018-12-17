@@ -181,7 +181,7 @@ extern "C" void inipotential(
     else
         mypot = potential::readPotential(filename);
     Omega = *npar>=1 ? pars[0] : 0;
-    printf("Agama plugin for NEMO: "
+    fprintf(stderr, "Agama plugin for NEMO: "
         "Created an instance of %s potential with pattern speed=%g\n", mypot->name(), Omega);
 }
 

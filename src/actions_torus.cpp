@@ -47,6 +47,8 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
 {
     if(!isAxisymmetric(poten))
         throw std::invalid_argument("ActionMapperTorus only works for axisymmetric potentials");
+    if(!(acts.Jr>=0 && acts.Jz>=0 && isFinite(acts.Jr+acts.Jz+acts.Jphi)))
+        throw std::invalid_argument("ActionMapperTorus: invalid actions");
     torus = torus::PtrTorus(new torus::Torus(true));
     // the actual potential is used only during torus fitting, but not required 
     // later in angle mapping - so we create a temporary object
@@ -56,7 +58,7 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
     act[1] = acts.Jz;
     act[2] = acts.Jphi;
     int result = torus->AutoFit(act, &potwrap, tol, 600, 150, 12, 3, 16, 200, 12,
-        (int)utils::verbosityLevel);
+        utils::verbosityLevel >= utils::VL_VERBOSE);
     if(result!=0) {
         utils::msg(utils::VL_WARNING, "Torus", "Not converged: "+utils::toString(result));
         //torus->show(std::cout);

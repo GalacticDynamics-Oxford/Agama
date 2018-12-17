@@ -32,6 +32,7 @@
 // include almost everything from Agama!
 #include "actions_spherical.h"
 #include "actions_staeckel.h"
+#include "actions_torus.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
 #include "df_quasiisotropic.h"
@@ -50,7 +51,6 @@
 #include "potential_composite.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
-//#include "potential_utils.h"
 #include "orbit.h"
 #include "orbit_lyapunov.h"
 #include "units.h"
@@ -2030,9 +2030,9 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
 
 
 ///@}
-//  --------------------------
-/// \name  ActionFinder class
-//  --------------------------
+//  ---------------------------------------------
+/// \name  ActionFinder and ActionMapper classes
+//  ---------------------------------------------
 ///@{
 
 /// create a spherical or non-spherical action finder
@@ -2267,6 +2267,142 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to ActionMapper class
+typedef struct {
+    PyObject_HEAD
+    const actions::BaseActionMapper* am;  // C++ object for action mapper
+    double Jr, Jz, Jphi;              // triplet of actions provided at the construction (in physical units)
+    double Omegar, Omegaz, Omegaphi;  // frequencies corresponding to these actions (in physical units)
+} ActionMapperObject;
+/// \endcond
+
+void ActionMapper_dealloc(ActionMapperObject* self)
+{
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am));
+    delete self->am;
+    Py_TYPE(self)->tp_free(self);
+}
+
+static const char* docstringActionMapper =
+    "ActionMapper performs an inverse operation to ActionFinder, namely, compute the position and velocity "
+    "from actions and angles. Currently it is using the Torus Machine, but both the implementation "
+    "and the interface may change in the future.\n"
+    "The object is created for a given axisymmetric potential and a triplet of actions (Jr,Jz,Jphi).\n"
+    "The () operator computes the positions and velocities for one or more triplets of angles "
+    "(theta_r,theta_z,theta_phi), returning a sextet of floats (x,y,z,vx,vy,vz) for a single point "
+    "or an Nx6 array of such sextets.\n"
+    "Member variables (read-only):\n"
+    "    Jr, Jz, Jphi: the actions provided at construction;\n"
+    "    Omegar, Omegaz, Omegaphi: the corresponding frequencies.\n"
+    "Example:\n"
+    "    am = agama.ActionMapper(pot, [1.0, 2.0, 3.0])   # create an action mapper\n"
+    "    xv = am([ [3.0,2.0,1.0], [4.0,5.0,6.0] ])       # construct two phase-space points\n"
+    "    af = agama.ActionFinder(pot)                    # create an inverse action finder\n"
+    "    J,theta,Omega = af(xv, angles=True)             # compute actions, angles and frequencies\n"
+    "    print(Omega, am.Omegar, am.Omegaz, am.Omegaphi) # should be approximately equal\n"
+    "    print(J, am.Jr, am.Jz, am.Jphi)                 # same here\n"
+    "    print(theta)                                    # and here (nearly equal to the provided values)\n";
+
+int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"potential", "actions", "tol", NULL};
+    PyObject* pot_obj=NULL;
+    double tol=NAN;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O(ddd)|d", const_cast<char**>(keywords),
+        &pot_obj, &self->Jr, &self->Jz, &self->Jphi, &tol))
+    {
+        //PyErr_SetString(PyExc_ValueError, "Incorrect parameters for ActionMapper constructor: "
+        //    "must provide an instance of Potential and a triplet of actions.");
+        return -1;
+    }
+    potential::PtrPotential pot = getPotential(pot_obj);
+    if(!pot) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be a valid instance of Potential class");
+        return -1;
+    }
+    try{
+        const actions::Actions J(
+            self->Jr   * conv->velocityUnit * conv->lengthUnit,
+            self->Jz   * conv->velocityUnit * conv->lengthUnit,
+            self->Jphi * conv->velocityUnit * conv->lengthUnit);
+        self->am = tol==tol ?
+            new actions::ActionMapperTorus(*pot, J, tol) :  // use the provided value of tol
+            new actions::ActionMapperTorus(*pot, J);        // use the default value
+        // store the frequencies converted to physical units
+        actions::Frequencies freq;
+        self->am->map(actions::ActionAngles(J, actions::Angles(0, 0, 0)), &freq);
+        self->Omegar   = freq.Omegar   * conv->lengthUnit / conv->velocityUnit;   // inverse frequency unit
+        self->Omegaz   = freq.Omegaz   * conv->lengthUnit / conv->velocityUnit;
+        self->Omegaphi = freq.Omegaphi * conv->lengthUnit / conv->velocityUnit;
+        utils::msg(utils::VL_DEBUG, "Agama", "Created an ActionMapperTorus at "+
+            utils::toString(self->am));
+        return 0;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_ValueError, 
+            (std::string("Error in ActionMapper initialization: ")+e.what()).c_str());
+        return -1;
+    }
+}
+
+void fncActionMapper(void* obj, const double input[], double *result)
+{
+    try{
+        coord::PosVelCyl point = ((ActionMapperObject*)obj)->am->map(
+            actions::ActionAngles(actions::Actions(
+            ((ActionMapperObject*)obj)->Jr   * conv->velocityUnit * conv->lengthUnit,
+            ((ActionMapperObject*)obj)->Jz   * conv->velocityUnit * conv->lengthUnit,
+            ((ActionMapperObject*)obj)->Jphi * conv->velocityUnit * conv->lengthUnit),
+            actions::Angles(input[0], input[1], input[2]) ));
+        unconvertPosVel(toPosVelCar(point), result);
+    }
+    catch(std::exception& ) {
+        result[0] = result[1] = result[2] = result[3] = result[4] = result[5] = NAN;
+    }
+}
+
+PyObject* ActionMapper_value(PyObject* self, PyObject* args, PyObject* /*namedArgs*/)
+{
+    if(((ActionMapperObject*)self)->am==NULL) {
+        PyErr_SetString(PyExc_ValueError, "ActionMapper object is not properly initialized");
+        return NULL;
+    }
+    OmpDisabler ompDisabler;  // Torus is not thread-safe
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SEXTET>(self, args, fncActionMapper);
+}
+
+static PyMemberDef ActionMapper_members[] = {
+    { const_cast<char*>("Jr"),       T_DOUBLE, offsetof(ActionMapperObject, Jr),       READONLY,
+        const_cast<char*>("radial frequency (read-only)") },
+    { const_cast<char*>("Jz"),       T_DOUBLE, offsetof(ActionMapperObject, Jz),       READONLY,
+        const_cast<char*>("vertical frequency (read-only)") },
+    { const_cast<char*>("Jphi"),     T_DOUBLE, offsetof(ActionMapperObject, Jphi),     READONLY,
+        const_cast<char*>("azimuthal frequency (read-only)") },
+    { const_cast<char*>("Omegar"),   T_DOUBLE, offsetof(ActionMapperObject, Omegar),   READONLY,
+        const_cast<char*>("radial frequency (read-only)") },
+    { const_cast<char*>("Omegaz"),   T_DOUBLE, offsetof(ActionMapperObject, Omegaz),   READONLY,
+        const_cast<char*>("vertical frequency (read-only)") },
+    { const_cast<char*>("Omegaphi"), T_DOUBLE, offsetof(ActionMapperObject, Omegaphi), READONLY,
+        const_cast<char*>("azimuthal frequency (read-only)") },
+    { NULL }
+};
+
+static PyMethodDef ActionMapper_methods[] = {
+    { NULL, NULL, 0, NULL }  // no named methods
+};
+
+static PyTypeObject ActionMapperType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.ActionMapper",
+    sizeof(ActionMapperObject), 0, (destructor)ActionMapper_dealloc,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, ActionMapper_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringActionMapper,
+    0, 0, 0, 0, 0, 0, ActionMapper_methods, ActionMapper_members, 0, 0, 0, 0, 0, 0,
+    (initproc)ActionMapper_init
+};
+
+
 ///@}
 //  ----------------------------------
 /// \name  DistributionFunction class
@@ -2288,9 +2424,6 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
     self->df.reset();
     Py_TYPE(self)->tp_free(self);
 }
-
-// pointer to the DistributionFunctionType object (will be initialized below)
-static PyTypeObject* DistributionFunctionTypePtr;
 
 // forward declaration
 df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
@@ -5788,12 +5921,16 @@ PyInit_agama(void)
     if(PyType_Ready(&ActionFinderType) < 0) return NULL;
     Py_INCREFx(&ActionFinderType);
     PyModule_AddObject(mod, "ActionFinder", (PyObject*)&ActionFinderType);
-
+    
+    ActionMapperType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&ActionMapperType) < 0) return NULL;
+    Py_INCREFx(&ActionMapperType);
+    PyModule_AddObject(mod, "ActionMapper", (PyObject*)&ActionMapperType);
+    
     DistributionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DistributionFunctionType) < 0) return NULL;
     Py_INCREFx(&DistributionFunctionType);
     PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
-    DistributionFunctionTypePtr = &DistributionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&GalaxyModelType) < 0) return NULL;

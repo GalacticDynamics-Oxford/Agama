@@ -342,7 +342,12 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     double *cellXlower = static_cast<double*>(alloca(2*Ndim * sizeof(double)));
     double *cellXupper = cellXlower+Ndim;
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
-
+#ifdef USE_QRNG
+    // assign point coordinates using quasi-random numbers, but randomize the indices of output points
+    PointEnum count = lastPointIndex-firstPointIndex;
+    size_t *perm = static_cast<size_t*>(alloca(count * sizeof(size_t)));
+    getRandomPermutation(count, perm);
+#endif
     PointEnum nextPointInList = cells[cellIndex].headPointIndex;  // or -1 if the cell was empty
     for(PointEnum pointIndex = firstPointIndex; pointIndex < lastPointIndex; pointIndex++) {
         // assign coordinates of the new point
@@ -350,7 +355,7 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
             pointCoords[ pointIndex * Ndim + d ] = cellXlower[d] +
                 (cellXupper[d] - cellXlower[d]) *
 #ifdef USE_QRNG
-                quasiRandomHalton(pointIndex + qrngOffset, PRIMES[d]);
+                quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex] + qrngOffset, PRIMES[d]);
 #else
                 random();
 #endif
