@@ -65,7 +65,7 @@ namespace{  // internal
 ParticleArrayCar readSnapshotUNSIO(const std::string& fileName, 
     const units::ExternalUnits& conv) 
 { 
-    uns::CunsIn input(fileName, "all", "all");
+    uns::CunsIn input(fileName.c_str(), "all", "all");
     if(input.isValid() && input.snapshot->nextFrame("xvm")) {
         utils::msg(utils::VL_DEBUG, FUNCNAME,
             "input snapshot file "+fileName+" of type "+input.snapshot->getInterfaceType());
@@ -98,7 +98,7 @@ ParticleArrayCar readSnapshotUNSIO(const std::string& fileName,
 void writeSnapshotUNSIO(const std::string& fileName,
     const units::ExternalUnits& conv, const ParticleArrayCar& points, const std::string& type)
 {
-    uns::CunsOut output(fileName, type);
+    uns::CunsOut output(fileName.c_str(), type.c_str());
     bool result = true;
     int nbody=static_cast<int>(points.size());
     std::vector<float> pos(nbody*3), vel(nbody*3), mass(nbody);

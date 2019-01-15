@@ -16,12 +16,12 @@ by setting CFLAGS=-I/path/to/my/library/include);
 LDFLAGS  likewise will set additional link flags (e.g., -L/path/to/my/library/lib -lmylib).
 
 The setup script will attempt to download and compile the required GSL library (if it wasn't found)
-and the optional Eigen and CVXOPT libraries; Eigen is header-only so it is only downloaded,
-and CVXOPT is a python library, so it will be installed by calling "pip install --user cvxopt"
+and the optional Eigen, CVXOPT and UNSIO libraries (if the user agrees).
+Eigen is header-only so it is only downloaded; UNSIO is downloaded and compiled;
+CVXOPT is a python library, so it will be installed by calling "pip install --user cvxopt"
 (you might wish to manually install it if your preferred options are different).
-The other two optional libraries (GLPK and UNSIO) are ignored if not found:
-GLPK is superseded by CVXOPT for all practical purposes, and the N-body snapshot manipulation
-in Python is more easily done with other libraries, e.g., Pynbody.
+The optional GLPK library is ignored if not found (it is superseded by CVXOPT for all practical
+purposes).
 
 In case of problems with automatic downloading of missing libraries (which may occur when using
 a proxy server), or if you want to provide them manually, create a subdirectory "extras/"
@@ -227,7 +227,7 @@ PyInit_pytest42(void) {
                 "Received: "+resultexe+"\n"+\
                 "From py:  "+resultpy+"\n"+\
                 "Should we continue the build (things may go wrong at a later stage)? [Y/N] "
-        print("    *** Successfully linked using these options ***")
+        print("    **** Successfully linked using these options ****")
         return True   # this combination of options seems reasonable...
 
     # explore various possible combinations of file name and path to the python library...
@@ -337,7 +337,7 @@ PyInit_pytest42(void) {
             except: pass  # didn't succeed with Eigen
             os.chdir(ROOT_DIR)
 
-    # [5a]: test if CVXOPT is present (optional)
+    # [5a]: test if CVXOPT is present (optional); install if needed
     try:
         import cvxopt  # import the python module
     except:  # import error or some other problem, might be corrected
@@ -371,21 +371,50 @@ PyInit_pytest42(void) {
                 say("Failed to download CVXOPT header files, this feature will not be available\n")
     except: pass  # cvxopt wasn't available
 
-    # [6]: test if GLPK is present (optional)
+    # [6]: test if GLPK is present (optional - ignored if not found)
     if runCompiler(code='#include <glpk.h>\nint main(){}\n', flags='-lglpk'):
         COMPILE_FLAGS += ['-DHAVE_GLPK']
         LINK_FLAGS    += ['-lglpk']
     else:
         say("GLPK library (optional) is not found\n")
 
-    # [7]: test if UNSIO is present (optional)
+    # [7]: test if UNSIO is present (optional), download and compile if needed
     if runCompiler(code='#include <uns.h>\nint main(){}\n', flags='-lunsio -lnemo'):
         COMPILE_FLAGS += ['-DHAVE_UNSIO']
         LINK_FLAGS    += ['-lunsio', '-lnemo']
     else:
-        say("UNSIO library (optional) is not found\n")
+        if ask("UNSIO library (optional; used for input/output of N-body snapshots) is not found\n"+
+            "Should we try to download and compile it now? [Y/N] "):
+            distutils.dir_util.mkpath(EXTRAS_DIR)
+            say('Downloading UNSIO\n')
+            filename = EXTRAS_DIR+'/unsio-master.zip'
+            dirname  = EXTRAS_DIR+'/unsio-master'
+            try:
+                urlretrieve('https://github.com/GalacticDynamics-Oxford/unsio/archive/master.zip', filename)
+                if os.path.isfile(filename):
+                    subprocess.call('(cd '+EXTRAS_DIR+'; unzip ../'+filename+') >/dev/null', shell=True)  # unpack
+                    os.remove(filename)  # remove the downloaded archive
+                    say("Compiling UNSIO\n")
+                    result = subprocess.call('(cd '+dirname+'; make) > '+EXTRAS_DIR+'/unsio-install.log', shell=True)
+                    if result == 0 and os.path.isfile(dirname+'/libnemo.a') and os.path.isfile(dirname+'/libunsio.a'):
+                        # successfully compiled: copy the header files to extras/include
+                        for hfile in ['componentrange.h', 'ctools.h', 'snapshotinterface.h', 'uns.h', 'userselection.h']:
+                            distutils.file_util.copy_file(dirname+'/unsio/'+hfile, EXTRAS_DIR+'/include')
+                        # copy the static libraries to extras/lib
+                        distutils.file_util.copy_file(dirname+'/libnemo.a',  EXTRAS_DIR+'/lib')
+                        distutils.file_util.copy_file(dirname+'/libunsio.a', EXTRAS_DIR+'/lib')
+                        # delete the compiled directory
+                        distutils.dir_util.remove_tree(dirname)
+                        if runCompiler(code='#include <uns.h>\nint main(){}\n', flags='-lunsio -lnemo'):
+                            COMPILE_FLAGS += ['-DHAVE_UNSIO']
+                            LINK_FLAGS    += ['-lunsio', '-lnemo']
+                        else:
+                            raise CompileError('Failed to link against the just compiled UNSIO library')
+                    else: raise CompileError("Failed compiling UNSIO (check "+EXTRAS_DIR+"/unsio-install.log)")
+            except Exception as e:  # didn't succeed with UNSIO
+                say(str(e)+'\n')
 
-    # [99]: put everything togeter and create Makefile.local
+    # [99]: put everything together and create Makefile.local
     with open('Makefile.local','w') as f: f.write(
         "# set the default compiler if no value is found in the environment variables or among command-line arguments\n" +
         "ifeq ($(origin CXX),default)\nCXX = g++\nendif\n" +
