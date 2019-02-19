@@ -135,7 +135,12 @@ public:
             actions::Actions act = model.actFinder.actions(posvel);
 
             // 3. compute the value of distribution function times the jacobian
-            dfval = isFinite(act.Jr + act.Jz + act.Jphi) ? model.distrFunc.value(act) * jac : 0.;
+            // FIXME: in some cases the Fudge action finder may fail and produce
+            // zero values of Jr,Jz instead of very large ones, which may lead to
+            // unrealistically high DF values. We therefore ignore these points
+            // entirely, but the real problem is with the action finder, not here.
+            dfval = isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0) ?
+                model.distrFunc.value(act) * jac : 0.;
 
             if(!isFinite(dfval))
                 throw std::runtime_error("DF is not finite");

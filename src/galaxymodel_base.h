@@ -35,9 +35,8 @@ public:
 
 /** Compute density, first-order, and second-order moments of velocity in cylindrical coordinates;
     if some of them are not needed, pass NULL as the corresponding argument, and it will not be computed.
-    \tparam     GalaxyModelType  is either GalaxyModel or GalaxyModelMulticomponent,
-    in the latter case all non-NULL output arguments must point to arrays of length equal to the
-    number of components of the DF, which will be filled with separate values for each DF component.
+    In case of a multicomponent DF, the output values are provided separately for each component,
+    so the corresponding non-NULL arguments must point to arrays of appropriate length.
     \param[in]  model  is the galaxy model (potential + DF + action finder);
     \param[in]  point  is the position at which the quantities should be computed;
     \param[out] density  will contain the integral of DF over all velocities;

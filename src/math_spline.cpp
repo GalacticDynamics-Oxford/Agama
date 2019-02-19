@@ -3689,7 +3689,7 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
         double d3f = (d2f-d2fp) / dx;
         double dif = fabs((d3f-d3fp) / dx) + 0.1 * (fabs(d3fp) + fabs(d3f));  // estimate of 4th derivative
         double sgn = (stage*2-1);  // -1 for inward scan, +1 for outward
-        double dxn = eps4 / fmin(sqrt(sqrt(dif)), 2.) * sgn;  // new estimate of dx
+        double dxn = eps4 / fmax(fmin(sqrt(sqrt(dif)), 2.0), 0.01) * sgn;     // new estimate of dx
         if(fabs(dxn / dx) <= 0.5) {
             dx = dxn;   // abandon this step and repeat with a smaller dx
             continue;   // from the same previous x value

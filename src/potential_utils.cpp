@@ -348,7 +348,7 @@ double outerSlope(const math::IFunction& potential, double* M, double* coef)
     if(roundoff || s>0) {    // not successful - return the total mass only
         if(coef) *coef=0;
         if(M)    *M = -potential.value(r) * r;
-        return 0;
+        return -1;
     }
     if(coef)
         *coef = s==-1 ?  (Phi + r*dPhidR) * r  :  (Phi + r*dPhidR) * std::pow(r, -s) / (s+1);
@@ -703,6 +703,7 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
     // total mass), or -1<=s<0 if the model has a shallower decline in the density profile.
     // in principle, this fragment is not needed: we could just as well extrapolate the values
     // computed at the first/last grid points, but let it stay for the great justice
+#if 0
     for(int inout=0; inout<2; inout++) {
         double slope = fmax(inout==0 ? innerSlope() : outerSlope(), -1/*shouldn't be steeper than Kepler*/);
         int iE = inout==0 ? 0 : sizeE-1;
@@ -730,6 +731,7 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
         gridW1dX(iE, sizeL-1) = gridW2dX(iE, sizeL-1) = 0;
         gridW1dY(iE, sizeL-1) = gridW2dY(iE, sizeL-1) = -2/(slope+2);
     }
+#endif
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
         std::ofstream strm("PotentialInterpolator2d.log");

@@ -2,6 +2,7 @@
 #include "math_ode.h"
 #include "math_core.h"
 #include "potential_multipole.h"
+#include "utils.h"
 #include <stdexcept>
 #include <cmath>
 
@@ -16,7 +17,7 @@ const double ACCURACY_INTEGR = 1e-8;
 const double ACCURACY_ROOT   = 1e-8;
 
 /// upper limit on the number of steps in the ODE integrator
-const int MAX_NUM_STEPS_ODE  = 100;
+const int MAX_NUM_STEPS_ODE  = 200;
 
 
 /// RHS of the differential equation for the (dimensionless) potential
@@ -25,18 +26,23 @@ class KingPotentialIntegrator: public math::IOdeSystem {
     const double trunc;  ///< truncation strength parameter (0 - Woolley, 1 - King, 2 - Wilson, etc.)
     const double gamma;  ///< value of Gamma function for trunc+3/2
     const double norm;   ///< normalization constant for the density
+    const double phicrit;///< smallest value below which we use analytic approximation for gammainc
 public:
     KingPotentialIntegrator(double _W0, double _trunc) :
         W0(_W0),
         trunc(_trunc),
         gamma(math::gamma(trunc+1.5)),
-        norm(exp(-W0) / (gamma - math::gammainc(trunc+1.5, W0)))
+        norm(exp(-W0) / (gamma - math::gammainc(trunc+1.5, W0))),
+        phicrit(1e-3 * pow_3(trunc+0.1))
     {}
 
     /// dimensionless density as a function of dimensionless potential
     double rho(double phi) const
     {
-        return phi<=0 ? 0 : exp(phi) * (gamma - math::gammainc(trunc+1.5, phi)) * norm;
+        return phi<=0 ? 0 :
+            phi>phicrit ? norm * exp(phi) * (gamma - math::gammainc(trunc+1.5, phi)):
+            // the above expression suffers from cancellation at small phi, replace with series expansion
+            norm * pow(phi, trunc+1.5) / (trunc+1.5) * (1 + phi / (trunc+2.5));
     }
 
     virtual void eval(const double r, const double y[], double dydr[]) const
@@ -51,21 +57,22 @@ public:
 
 
 /// helper function for locating the radius where phi(r)=0
-class FindRadiusWherePhiEquals0: public math::IFunction {
+class FindRadiusFromPhi: public math::IFunction {
 public:
-    FindRadiusWherePhiEquals0(const math::BaseOdeSolver& _solver) :
-        solver(_solver) {};
-    /** used in root-finder to locate the root phi(r)=0 */
+    FindRadiusFromPhi(const math::BaseOdeSolver& _solver, double _phi0) :
+        solver(_solver), phi0(_phi0) {};
+    /** used in root-finder to locate the root phi(r)=phi0 */
     virtual void evalDeriv(const double r, double* val, double* der, double*) const
     {
         if(val)
-            *val = solver.getSol(r, 0);  // phi
+            *val = solver.getSol(r, 0)-phi0;  // phi-phi0
         if(der)
             *der = solver.getSol(r, 1);  // dphi/dr
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
     const math::BaseOdeSolver& solver;
+    const double phi0;
 };
 
 // construct both density and potential profiles by integrating an ODE
@@ -87,38 +94,51 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
     math::OdeSolverDOP853 solver(odeSystem, ACCURACY_INTEGR);
     solver.init(vars);
     bool finished = false;
-    double rcurr = 0;
+    double rcurr = 0, phicurr = W0, phitrans = NAN;
     int numStepsODE = 0;
     while(!finished) {
         if(solver.doStep() <= 0 || ++numStepsODE >= MAX_NUM_STEPS_ODE) {
             finished = true;
         } else {
-            double rprev = rcurr;
+            double rprev = rcurr, phiprev = phicurr;
             rcurr = solver.getTime();
-            double phicurr = solver.getSol(rcurr, 0);
-            // check if we reached the outer boundary, if yes, determine its location precisely
-            if(phicurr <= 0) {
-                finished = true;
-                rcurr = math::findRoot(FindRadiusWherePhiEquals0(solver), rprev, rcurr, ACCURACY_ROOT);
-                phicurr = 0;
+            phicurr = solver.getSol(rcurr, 0);
+            // when we approach the outer boundary (phi=0), output a more densely spaced radial grid,
+            // to improve the accuracy of interpolation of density profile.
+            // Instead of placing one point at the end of each radial integration step,
+            // allocate points at a pre-defined "quadratic" grid in phi, which is denser around phi=0,
+            // and store the interpolated phi, dphi/dr and rho inside the current integration step.
+            if(phicurr < phiprev * 0.75 || phitrans > 0) {
+                if(phitrans != phitrans)
+                    phitrans = phiprev;  // switch to the predefined grid mode
+                const int ngrid=8;
+                for(int igrid=ngrid-1; igrid>=0; igrid--) {
+                    double phiinter = phitrans * pow_2(igrid*1./ngrid);  // quadratically spaced grid
+                    if(phiinter < phiprev && phiinter >= phicurr) {
+                        // the predefined grid is specified for phi, convert it to radius
+                        double rinter = math::findRoot(
+                            FindRadiusFromPhi(solver, phiinter), rprev, rcurr, ACCURACY_ROOT);
+                        radii. push_back(rinter);
+                        phi.   push_back(phiinter);
+                        dphidr.push_back(solver.getSol(rinter, 1));
+                        rho.   push_back(odeSystem.rho(phiinter));
+                        if(phiinter == 0)    // the last grid point is exactly at the truncation radius
+                            finished = true;
+                    }
+                }
+            } else {
+                // store the values of phi, dphi/dr and rho at the end of the current radial step
+                radii. push_back(rcurr);
+                phi.   push_back(phicurr);
+                dphidr.push_back(solver.getSol(rcurr, 1));
+                rho.   push_back(odeSystem.rho(phicurr));
             }
-            // if the step of the ODE integrator is too large, or we are at the outer boundary,
-            // insert an extra point in the middle to improve the accuracy of interpolation
-            if((rprev>0 && rprev<=rcurr*0.5) || phicurr==0) {
-                radii. push_back(sqrt(rprev*rcurr));
-                phi.   push_back(solver.getSol(radii.back(), 0));
-                dphidr.push_back(solver.getSol(radii.back(), 1));
-                rho.   push_back(odeSystem.rho(phi.back()));
-            }
-            // store the values of phi, dphi/dr and rho at the end of the current radial step
-            radii. push_back(rcurr);
-            phi.   push_back(phicurr);
-            dphidr.push_back(solver.getSol(rcurr, 1));
-            rho.   push_back(odeSystem.rho(phicurr));
         }
     }
-    if(radii.empty())
+    if(radii.empty() || phi.back()!=0)
         throw std::runtime_error("createKingModel: failed to construct model");
+    utils::msg(utils::VL_DEBUG, "createKingModel", "W0="+utils::toString(W0)+
+        ", g="+utils::toString(trunc)+" => c="+utils::toString(log10(radii.back())));
 
     // shift the potential by its value at r_trunc, which is mtotal/rtrunc
     double totalMass = -dphidr.back() * pow_2(radii.back());  // total mass in dimensionless units

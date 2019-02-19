@@ -34,8 +34,8 @@ except:
 print("%g s to load %d disk particles (total mass=%g Msun) " \
     "and %d halo particles (total mass=%g Msun)" % \
     ( time.clock()-tbegin, \
-    diskParticles.shape[0], numpy.sum(diskParticles[:,6] * 1e10), \
-    haloParticles.shape[0], numpy.sum(haloParticles[:,6] * 1e10) ) )
+    diskParticles.shape[0], numpy.sum(diskParticles[:,6]), \
+    haloParticles.shape[0], numpy.sum(haloParticles[:,6]) ) )
 
 
 #3. create an axisymmetric potential from these snapshots

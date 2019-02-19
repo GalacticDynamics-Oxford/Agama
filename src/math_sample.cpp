@@ -15,6 +15,9 @@ namespace {  // internal namespace for Sampler class
 /// choose between pseudo-random (PRNG) and quasi-random (QRNG) number generators in the sampling routine
 #define USE_QRNG
 
+/// maximum number of points initially sampled from the root cell
+static const int maxInitSamples = 1048576;
+
 /// minimum allowed number of points in any cell
 static const int minNumPointsInCell = 256;
 
@@ -343,10 +346,33 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     double *cellXupper = cellXlower+Ndim;
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
 #ifdef USE_QRNG
-    // assign point coordinates using quasi-random numbers, but randomize the indices of output points
+    // Assign point coordinates using quasi-random numbers, but randomize the sequence of these numbers.
+    // These quasi-random numbers, or low-discrepancy sequences, have a property that each element of
+    // the sequence is reasonably distant from any other element (very close pairs are less likely than
+    // for purely (pseudo-)random numbers). But the order of these QR numbers in their sequence is not so
+    // random, which may be problematic because of the way we select the output points in drawSamples().
+    // Namely, after the sampling procedure has produced enough number of samples, we construct
+    // the cumulative probability distribution, summing the probabilities of all points with indices
+    // smaller than the given one. Then we slice through this cumulative distribution at equal intervals,
+    // and pick up samples which are closest to the given slice, putting them into the output array.
+    // The problem may happen when the coordinates (and hence the value of the probability function that
+    // we are working with) are correlated with their indices in a regular way. This would be the case
+    // for the original quasi-random sequence, and hence we shuffle the order of QR numbers in the list
+    // of sampled points randomly.
+    // An additional technical detail is that we use either stack- or heap- allocated temporary array.
     PointEnum count = lastPointIndex-firstPointIndex;
-    size_t *perm = static_cast<size_t*>(alloca(count * sizeof(size_t)));
-    getRandomPermutation(count, perm);
+    std::vector<size_t> permBuffer;  // temporary storage, might not be needed (see below)
+    size_t *perm;   // will point to the actual array of permutation indices
+    if(count > 2*minNumPointsInCell) {
+        // the length of the permutation list is too large, allocate it on the heap (freed automatically)
+        // (this usually happens only for the initial coordinate assignment within the root cell)
+        permBuffer.resize(count);
+        perm = &permBuffer[0];
+    } else
+        // the permutation list is small enough to be allocated on the stack (no need to free explicitly)
+        // (should be the case for all subsequent calls to this routine)
+        perm = static_cast<size_t*>(alloca(count * sizeof(size_t)));
+    getRandomPermutation(count, perm);  // assign the actual permutation list, no matter where it's stored
 #endif
     PointEnum nextPointInList = cells[cellIndex].headPointIndex;  // or -1 if the cell was empty
     for(PointEnum pointIndex = firstPointIndex; pointIndex < lastPointIndex; pointIndex++) {
@@ -481,7 +507,8 @@ void Sampler::run()
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 
     // first iteration: sample uniformly in a single root cell
-    PointEnum numInitSamples = (1 + numOutputSamples / minNumPointsInCell) * minNumPointsInCell;
+    PointEnum numInitSamples = std::min<PointEnum>(maxInitSamples,
+        (1 + numOutputSamples / minNumPointsInCell) * minNumPointsInCell);
     cells[0].weight = 1. / numInitSamples;
     pointCoords.resize(numInitSamples * Ndim);
     fncValues.resize(numInitSamples);

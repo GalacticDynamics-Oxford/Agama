@@ -894,6 +894,17 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIP
     \param[in] args  is the arguments of the function call: it may be a sequence of numArg floats
     that represents a single input point, or a 1d array of the same length and same meaning,
     or a 2d array of dimensions N * numArgs, representing N input points.
+    \param[in] chunk  determines the OpenMP parallelization strategy:
+    if the number of points is less than |chunk|, no threads are created at all;
+    otherwise OpenMP-parallelize the loop, either with a static or dynamic scheduling.
+    If chunk<0, use static workload distribution, meaning that each thread gets an equal number of
+    points (numpt/numthreads) -- this is suitable when the cost of each point is approximately equal.
+    If chunk>0, use dynamic scheduling: each thread gets a batch of 'chunk' points at a time, and
+    when finished crunching the current batch, it retrieves the next one from the queue --
+    this is more effective when the computational cost may vary widely between points, and hence
+    some threads may finish their work earlier and start the next chunk immediately.
+    However, it involves a larger scheduling overhead, so the chunks shouldn't be too small
+    (depending on the cost of processing a single point).
     \returns  the result of applying 'fnc' to one or many input points, in the form determined
     both by the number of input points, and the output data format.
     The output for a single point may be a sequence of numbers (tuple or 1d array),
@@ -902,7 +913,7 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIP
     shape determined by the output format, i.e., for the above example it would be ([N,3], [N,6]).
 */
 template<int numArgs, int numOutput>
-PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
+PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc, int chunk)
 {
     if(args==NULL) {
         PyErr_SetString(PyExc_ValueError, "No input data provided");
@@ -947,16 +958,42 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc)
             utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
             // allocate an appropriate output object
             PyObject* outputObj = allocOutputArr<numOutput>(numpt);
-            // loop over input array
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
+            if(numpt <= abs(chunk))
+#else
+            if(true)
 #endif
-            for(npy_intp i=0; i<numpt; i++) {
-                if(cbrk.triggered()) continue;
-                double local_output[outputLength<numOutput>()];  // separate variable in each thread
-                fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
-                formatOutputArr<numOutput>(local_output, i, outputObj);
+            {
+                // no parallelization if the number of points is too small (e.g., just one)
+                double local_output[outputLength<numOutput>()];
+                for(npy_intp i=0; i<numpt; i++) {
+                    if(cbrk.triggered()) continue;
+                    fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
+                    formatOutputArr<numOutput>(local_output, i, outputObj);
+                }
             }
+#ifdef _OPENMP
+            else {
+                // parallel loop over input array
+                if(chunk < 0) {
+#pragma omp parallel for schedule(static)
+                    for(npy_intp i=0; i<numpt; i++) {
+                        if(cbrk.triggered()) continue;
+                        double local_output[outputLength<numOutput>()];  // separate variable in each thread
+                        fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
+                        formatOutputArr<numOutput>(local_output, i, outputObj);
+                    }
+                } else {
+#pragma omp parallel for schedule(dynamic, chunk)
+                    for(npy_intp i=0; i<numpt; i++) {
+                        if(cbrk.triggered()) continue;
+                        double local_output[outputLength<numOutput>()];  // separate variable in each thread
+                        fnc(params, &pyArrayElem<double>(arr, i, 0), local_output);
+                        formatOutputArr<numOutput>(local_output, i, outputObj);
+                    }
+                }
+            }
+#endif
             Py_DECREF(arr);
             if(cbrk.triggered()) {
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
@@ -1034,7 +1071,7 @@ static const char* docstringDensity =
     "mass profile by providing a single argument\n"
     "  cumulmass=...  which should contain a table with two columns: radius and enclosed mass, "
     "both strictly positive and monotonically increasing.\n"
-    "One may also load density expansion coefficients that weree previously written to a text file "
+    "One may also load density expansion coefficients that were previously written to a text file "
     "using the `export()` method, by providing the file name as an argument.\n"
     "Finally, one may create a composite density from several Density objects by providing them as "
     "unnamed arguments to the constructor:  densum = Density(den1, den2, den3)\n\n"
@@ -1143,7 +1180,7 @@ void fncDensity_density(void* obj, const double input[], double *result) {
 }
 PyObject* Density_density(PyObject* self, PyObject* args) {
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-        (self, args, fncDensity_density);
+        (self, args, fncDensity_density, /*chunk*/256);
 }
 
 PyObject* Density_totalMass(PyObject* self)
@@ -1670,7 +1707,7 @@ PyObject* Potential_potential(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-        (self, args, fncPotential_potential);
+        (self, args, fncPotential_potential, /*chunk*/256);
 }
 
 void fncPotential_density(void* obj, const double input[], double *result) {
@@ -1683,7 +1720,7 @@ PyObject* Potential_density(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-        (self, args, fncPotential_density);
+        (self, args, fncPotential_density, /*chunk*/256);
 }
 
 void fncPotential_force(void* obj, const double input[], double *result) {
@@ -1701,7 +1738,7 @@ PyObject* Potential_force(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET>
-        (self, args, fncPotential_force);
+        (self, args, fncPotential_force, /*chunk*/256);
 }
 
 void fncPotential_forceDeriv(void* obj, const double input[], double *result) {
@@ -1728,7 +1765,7 @@ PyObject* Potential_forceDeriv(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_TRIPLET_AND_SEXTET>
-        (self, args, fncPotential_forceDeriv);
+        (self, args, fncPotential_forceDeriv, /*chunk*/256);
 }
 
 void fncPotential_Rcirc_from_L(void* obj, const double input[], double *result) {
@@ -1753,10 +1790,10 @@ PyObject* Potential_Rcirc(PyObject* self, PyObject* args, PyObject* namedArgs)
     {
         if(L_obj)
             return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-                (self, L_obj, fncPotential_Rcirc_from_L);
+                (self, L_obj, fncPotential_Rcirc_from_L, /*chunk*/64);
         else
             return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-                (self, E_obj, fncPotential_Rcirc_from_E);
+                (self, E_obj, fncPotential_Rcirc_from_E, /*chunk*/64);
     } else {
         PyErr_SetString(PyExc_ValueError, "Rcirc() takes exactly one argument (either L or E)");
         return NULL;
@@ -1787,10 +1824,10 @@ PyObject* Potential_Tcirc(PyObject* self, PyObject* arg)
     PyObject* result = NULL;
     if((ndim == 1 || ndim == 2) && PyArray_DIM(arr, ndim-1) == 6)
         result = callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_SINGLE>
-            (self, (PyObject*)arr, fncPotential_Tcirc_from_xv);
+            (self, (PyObject*)arr, fncPotential_Tcirc_from_xv, /*chunk*/64);
     else if(ndim == 0 || ndim == 1)
         result = callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-            (self, (PyObject*)arr, fncPotential_Tcirc_from_E);
+            (self, (PyObject*)arr, fncPotential_Tcirc_from_E, /*chunk*/64);
     else
         PyErr_SetString(PyExc_ValueError,
             "Input must be a Nx1 array of energy values or a Nx6 array of position/velocity values");
@@ -1807,7 +1844,7 @@ PyObject* Potential_Rmax(PyObject* self, PyObject* arg) {
     if(!Potential_isCorrect(self))
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
-        (self, arg, fncPotential_Rmax);
+        (self, arg, fncPotential_Rmax, /*chunk*/64);
 }
 
 PyObject* Potential_export(PyObject* self, PyObject* args)
@@ -2155,10 +2192,10 @@ PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* namedArgs
     }
     if(!toBool(angles))
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
-            (self, points, fncActions<false>);
+            (self, points, fncActions<false>, /*chunk*/64);
     else
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>
-            (self, points, fncActions<true>);
+            (self, points, fncActions<true>, /*chunk*/64);
 }
 
 static PyTypeObject ActionFinderType = {
@@ -2260,10 +2297,10 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
     if(!toBool(angles))
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET>
-            (&params, points_obj, fncActionsStandalone<false>);
+            (&params, points_obj, fncActionsStandalone<false>, /*chunk*/64);
     else
         return callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPLET>
-            (&params, points_obj, fncActionsStandalone<true>);
+            (&params, points_obj, fncActionsStandalone<true>, /*chunk*/64);
 }
 
 
@@ -2369,7 +2406,8 @@ PyObject* ActionMapper_value(PyObject* self, PyObject* args, PyObject* /*namedAr
         return NULL;
     }
     OmpDisabler ompDisabler;  // Torus is not thread-safe
-    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SEXTET>(self, args, fncActionMapper);
+    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SEXTET>(
+        self, args, fncActionMapper, /*chunk*/1000000000/*very large value disables parallelization*/);
 }
 
 static PyMemberDef ActionMapper_members[] = {
@@ -2590,7 +2628,7 @@ PyObject* DistributionFunction_value(PyObject* self, PyObject* args, PyObject* /
         return NULL;
     }
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-        (self, args, fncDistributionFunction);
+        (self, args, fncDistributionFunction, /*chunk*/256);
 }
 
 PyObject* DistributionFunction_totalMass(PyObject* self)
@@ -2970,36 +3008,36 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
                 if(params.needVel2)
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SEXTET>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
                 else
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SINGLE>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
             } else {
                 if(params.needVel2)
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SEXTET>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
                 else
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
             }
         } else {
             if(params.needVel) {
                 if(params.needVel2)
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE_AND_SEXTET>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
                 else
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
             } else {
                 if(params.needVel2)
                     return callAnyFunctionOnArray
                     <INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SEXTET>
-                    (&params, points_obj, fncGalaxyModelMoments);
+                    (&params, points_obj, fncGalaxyModelMoments, /*chunk*/1);
                 else {
                     PyErr_SetString(PyExc_ValueError, "Nothing to compute!");
                     return NULL;
@@ -3043,7 +3081,7 @@ PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
         return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>
-            (&params, points_obj, fncGalaxyModelProjectedMoments);
+            (&params, points_obj, fncGalaxyModelProjectedMoments, /*chunk*/1);
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, (std::string("Error in projectedMoments(): ")+e.what()).c_str());
@@ -3083,7 +3121,7 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
         params.vz_error = vz_error * conv->velocityUnit;
         PyObject* result = callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-            (&params, points_obj, fncGalaxyModelProjectedDF);
+            (&params, points_obj, fncGalaxyModelProjectedDF, /*chunk*/1);
         return result;
     }
     catch(std::exception& e) {

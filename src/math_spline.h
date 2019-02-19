@@ -196,7 +196,7 @@ public:
     /** Construct a natural cubic spline from the function values at grid points,
         or a clamped cubic spline from the amplitudes of a B-spline interpolator.
         In both cases the interpolated curve is twice continuously differentiable,
-      unless an optional monotonic regularization filter is applied.
+        unless an optional monotonic regularization filter is applied.
         \param[in]  xvalues - the array of grid nodes, should be monotonically increasing.
         \param[in]  fvalues - depending on the length of this array, it may mean two things:
         in the first case, an array of function values at grid nodes (same length as xvalues);

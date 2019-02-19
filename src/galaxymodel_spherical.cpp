@@ -325,8 +325,9 @@ void makeEddingtonDF(const math::IFunction& density, const math::IFunction& pote
     double mult  = 0.5 / M_SQRT2 / M_PI / M_PI;
     // next we compute analytically the values of all integrals for f(h_j) on the segment h_max..infinity
     for(unsigned int j=0; j<gridsize; j++) {
-        double factor = j==gridsize-1 ?
-            (slope-1) * M_SQRTPI * math::gamma(slope-1) / math::gamma(slope-0.5) :
+        double factor = j==gridsize-1 ? M_SQRTPI * (slope < 10 ?
+                math::gamma(slope) / math::gamma(slope-0.5) : /*exact expr. overflows at large slope*/
+                sqrt(slope)*(1-3./8./slope*(1+7./48./slope))  /*approx. better than 1e-5*/ ) :
             math::hypergeom2F1(0.5, slope-1, slope, gridPhi.back() / gridPhi[j]);
         if(isFinite(factor))
             gridf[j] = mult * slope * exp(logrho) / -gridPhi.back() * factor / sqrt(-gridPhi[j]);
