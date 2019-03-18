@@ -881,22 +881,38 @@ void LogLogSpline::setupCubic(double derivLeft, double derivRight)
     // first initialize the derivatives for an un-scaled spline that will be used as a backup option
     fder = constructCubicSpline(xval, fval, derivLeft, derivRight);
     regularizeSpline(xval, &fval[0], &fder[0]);
+#if 0
+    // also make sure that grid segments where f=0 at one end and f>0 at the other end
+    // will be interpolated in a non-negative way:
+    // [DISABLED because it deteriorates the accuracy of interpolation in nearby segments]
+    for(size_t i=0; i<numPoints; i++) {
+        if(fval[i]==0 && (i==0 || fval[i-1]>0) && (i==numPoints-1 || fval[i+1]>0)) {
+            fder[i] = 0;
+            if(i>0)
+                fder[i-1] = fmax(fder[i-1], 2*fval[i-1] / (xval[i-1]-xval[i]));
+            if(i<numPoints-1)
+                fder[i+1] = fmin(fder[i+1], 2*fval[i+1] / (xval[i+1]-xval[i]));
+        }
+    }
+#endif
 
     logxval.resize(numPoints);
     logfval.resize(numPoints);
     logfder.resize(numPoints, NAN);  // by default points are marked as 'bad'
+    nonnegative = true;
     for(size_t i=0; i<numPoints; i++) {
         logxval[i] = log(xval[i]);
         logfval[i] = log(fval[i]);
+        nonnegative &= fval[i]>=0;
+        if(!isFinite(logxval[i]) || !isFinite(fval[i]))
+            throw std::invalid_argument("LogLogSpline: " + utils::toString(i) + "'th element is "
+                "f(" + utils::toString(xval[i]) + ")=" + utils::toString(fval[i]) + "\n" +
+                utils::stacktrace());
     }
 
     // construct spline(s) for the sections of x grid where the function values are strictly positive
     std::vector<double> tmpx, tmpf, tmpd;
     for(size_t i=0; i<=numPoints; i++) {
-        if(i<numPoints && (!isFinite(logxval[i]) || !isFinite(fval[i])))
-            throw std::invalid_argument("LogLogSpline: " + utils::toString(i) + "'th element is "
-                "f(" + utils::toString(xval[i]) + ")=" + utils::toString(fval[i]) + "\n" +
-                utils::stacktrace());
 
         if(i==numPoints || !isFinite(logfval[i])) {
             // not so bad point, just can't be represented with a log (or we reached the end):
@@ -941,9 +957,11 @@ void LogLogSpline::setupQuintic()
     logfval. resize(numPoints);
     logfder. resize(numPoints, NAN);
     logfder2.resize(numPoints);
+    nonnegative = true;
     for(size_t i=0; i<numPoints; i++) {
         logxval[i] = log(xval[i]);
         logfval[i] = log(fval[i]);
+        nonnegative &= fval[i]>=0;
     }
 
     // construct spline(s) for the sections of x grid where the function values are strictly positive
@@ -1059,9 +1077,22 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
         // because the function is non-positive at one or both endpoints.
         // instead will do a cubic interpolation for this grid segment in un-scaled coordinates,
         // using the first derivatives that were either provided as input or spline-constructed
+        double fvalue;
         evalCubicSplines<1>(x, xval[index], xval[index+1],
             &fval[index], &fval[index+1], &fder[index], &fder[index+1],
-            /*output*/ value, deriv, deriv2);
+            /*output*/ &fvalue, deriv, deriv2);
+        // make sure that we don't produce negative interpolated values if the input did not have them
+        if(nonnegative && fvalue<=0) {
+            if(value)
+                *value = 0;
+            if(deriv)
+                *deriv = 0;
+            if(deriv2)
+                *deriv2= 0;
+        } else {  // ordinary case
+            if(value)
+                *value = fvalue;
+        }
     }
 }
 

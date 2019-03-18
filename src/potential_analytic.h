@@ -25,6 +25,10 @@ private:
     /** Evaluate potential and up to two its derivatives by spherical radius. */
     virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
+
+    /** explicitly define the density function, instead of relying on the potential derivatives
+        (they suffer from cancellation errors already at r>1e5) */
+    virtual double densitySph(const coord::PosSph &pos) const;
 };
 
 /** Spherical Isochrone potential:

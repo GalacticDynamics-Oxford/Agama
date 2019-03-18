@@ -8,7 +8,7 @@
 #include <iostream>
 #include <cmath>
 #include "df_halo.h"
-#include "df_quasiisotropic.h"
+#include "df_spherical.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_spherical.h"
 #include "potential_factory.h"
@@ -126,7 +126,7 @@ int main(int argc, char* argv[])
     if(argc<=1) {
         std::cout << "Find parameters of a double-power-law action-based DF "
         "that best correspond to the given spherical isotropic model.\n"
-        "The spherical model is expressed as a QuasiIsotropic DF f(J) (constructed numerically), "
+        "The spherical model is expressed as a QuasiSpherical DF f(J) (constructed numerically), "
         "and approximated by a DoublePowerLaw DF g(J), by minimizing the Kullback-Leibler distance "
         "between f(J) and g(J).\n"
         "After the best-fit parameters are found, print the radial profiles of density, "
@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
     // input is a name of a density profile or a file with the cumulative mass profile;
     // the choice is made based on whether 'density=...' specifies an existing file name
     if(!inputdensity.empty() && utils::fileExists(inputdensity)) {
-        densInterp = galaxymodel::readMassProfile(inputdensity);
+        densInterp = potential::readMassProfile(inputdensity);
         dens.reset(new potential::FunctionToDensityWrapper(densInterp));
     } else
         dens = potential::createDensity(args);
@@ -183,23 +183,23 @@ int main(int argc, char* argv[])
     potential::PhaseVolume phasevol((potential::PotentialWrapper(*pot)));
 
     // compute the distribution function from the density (using the Eddington inversion formula)
-    math::LogLogSpline eddf =
-        galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot));
-    df::QuasiIsotropic df(eddf, *pot);
+    math::LogLogSpline eddf = df::createSphericalIsotropicDF(
+        potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot));
+    df::QuasiSphericalIsotropic dfsph(eddf, *pot);
 
     const double initparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0};
     const double stepsizes [NPARAMS] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1};
     const int maxNumIter = 1000;
     const double toler   = 1e-4;
     double bestparams[NPARAMS];
-    ModelSearchFnc fnc(df);
+    ModelSearchFnc fnc(dfsph);
     int numIter = math::findMinNdim(fnc, initparams, stepsizes, toler, maxNumIter, bestparams);
     std::cout << numIter << " iterations\n";
 
     // plot the profiles of the final model
     const actions::ActionFinderSpherical af(*pot);
     galaxymodel::GalaxyModel mod(*pot, af, df::DoublePowerLaw(dfparams(bestparams)));
-    galaxymodel::SphericalModelLocal spm(phasevol, eddf);
+    galaxymodel::SphericalIsotropicModelLocal spm(phasevol, eddf);
     std::vector<double> rad = math::createExpGrid(61, 1e-3, 1e3);
     std::vector<double> rho(rad), sigR(rad), sigT(rad);
     double Mtot = mod.distrFunc.totalMass();

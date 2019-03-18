@@ -156,8 +156,13 @@ private:
     double r0sq;                    ///< reference radius, squared
     bool inner;                     ///< whether this is an inward or outward extrapolation
     std::vector<double> S, U, W;    ///< sph.-harm.coefficients for extrapolation
+
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+    
+    /// re-implement the density computation to avoid cancellation errors at large radii,
+    /// by using only the U-terms which have non-zero Laplacian
+    virtual double densityCyl(const coord::PosCyl &pos) const;    
 };
 
 
@@ -174,8 +179,7 @@ public:
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
-        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect
-        (only works for models with finite mass).
+        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
     */
     static PtrPotential create(const BaseDensity& src, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0.);
@@ -242,6 +246,8 @@ private:
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+
+    virtual double densityCyl(const coord::PosCyl &pos) const;    
 };
 
 

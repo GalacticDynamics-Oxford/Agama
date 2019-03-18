@@ -44,7 +44,7 @@ double linearFitZero(const std::vector<double>& x, const std::vector<double>& y,
     \param[out] result  stores the solution (array of N coefficients in the regression);
     \param[out] rms  optionally stores the rms scatter (if not NULL).
 */
-void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
+void linearMultiFit(const IMatrixDense<double>& coefs, const std::vector<double>& rhs, 
     const std::vector<double>* w, std::vector<double>& result, double* rms=NULL);
 
 ///@}

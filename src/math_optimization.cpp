@@ -126,7 +126,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
     return quadraticOptimizationSolve(A, rhs, L, BandMatrix<NumT>(std::vector<NumT>()), xmin, xmax);
 #endif
     /*else*/ throw std::runtime_error("linearOptimizationSolve not implemented");
-    (void)A; (void)rhs; (void)L; (void)xmin; (void)xmax;
+    (void)A; (void)rhs; (void)L; (void)xmin; (void)xmax;  // silence warnings about unused params
 }
 #endif
 
@@ -306,7 +306,7 @@ std::vector<double> quadraticOptimizationSolve(
         return linearOptimizationSolve(A, rhs, L, xmin, xmax);
 #endif
     /*else*/ throw std::runtime_error("quadraticOptimizationSolve not implemented");
-    (void)A; (void)rhs; (void)L; (void)Q; (void)xmin; (void)xmax;
+    (void)A; (void)rhs; (void)L; (void)Q; (void)xmin; (void)xmax;  // silence warnings about unused params
 }
 #endif
 

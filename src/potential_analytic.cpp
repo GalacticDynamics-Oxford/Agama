@@ -16,6 +16,12 @@ void Plummer::evalDeriv(double r,
         *deriv2 = pot * (2 * pow_2(r * invrsq) - pow_2(scaleRadius * invrsq));
 }
 
+double Plummer::densitySph(const coord::PosSph &pos) const
+{
+    double invrsq = 1. / (pow_2(pos.r) + pow_2(scaleRadius));
+    return 0.75/M_PI * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
+}
+
 double Plummer::enclosedMass(double r) const
 {
     if(scaleRadius==0)
@@ -42,9 +48,9 @@ void NFW::evalDeriv(double r,
 {
     double rrel = r / scaleRadius;
     double ln_over_r = r==INFINITY ? 0 :
-        rrel > 1e-4 ? log(1 + rrel) / r :
+        rrel > 1e-3 ? log(1 + rrel) / r :
         // accurate asymptotic expansion at r->0
-        (1 - 0.5 * rrel * (1 - 2./3 * rrel)) / scaleRadius;
+        (1 - 0.5 * rrel * (1 - 2./3 * rrel * (1 - 3./4 * rrel))) / scaleRadius;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)

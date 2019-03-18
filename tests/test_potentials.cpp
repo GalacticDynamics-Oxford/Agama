@@ -1,5 +1,6 @@
 #include "potential_composite.h"
 #include "potential_cylspline.h"
+#include "potential_multipole.h"
 #include "potential_factory.h"
 #include "potential_utils.h"
 #include "utils.h"
@@ -47,10 +48,10 @@ bool testPotential(const potential::BasePotential& potential)
         return ok;
     // test interpolated potential
     try{
-        potential::Interpolator interp(potential);
         std::ofstream strm;
         if(output) {
             std::string filename = std::string("test_pot_" )+potential.name();
+            writePotential(filename+".pot", potential);
             // gnuplot script for plotting the results
             strm.open((filename+".plt").c_str());
             strm << "set term pdf enhanced size 15cm,10cm\nset output '"+filename+".pdf'\n"
@@ -76,6 +77,7 @@ bool testPotential(const potential::BasePotential& potential)
             "Rmax_root(Phi) Rmax_interp(Phi)\t"
             "Phi dPhi/dR rho Phi_interp dPhi/dr_interp rho_interp\n";
         }
+        potential::Interpolator interp(potential);
         double sumw = 0, errRcR = 0, errRcI = 0, errLcR = 0, errLcI = 0,
         errRLR = 0, errRLI = 0, errRmR = 0, errRmI = 0, errPhiI = 0, errdPhiI = 0;
         for(double lr=-7; lr<=9; lr+=.0625) {
@@ -138,6 +140,7 @@ bool testPotential(const potential::BasePotential& potential)
         // is not required to be exceedingly accurate
         double tol =
             potential.name() == potential::CylSpline   ::myName() ? 5.0 :
+            potential.name() == potential::Multipole   ::myName() ? 10. :
             potential.name() == potential::CompositeCyl::myName() ? 200 : 1.;
         std::cout << "Density-weighted RMS errors"
         ": Phi(r)="     + checkLess(errPhiI, 1e-10 * tol, ok) +
@@ -257,6 +260,8 @@ int main() {
     addPot(pots, "type=Logarithmic, mass=1, scaleRadius=0.01, p=0.8, q=0.5");
     addPot(pots, "type=Ferrers, mass=1, scaleRadius=0.9, p=0.8, q=0.5");
     addPot(pots, "type=Dehnen, mass=2, scaleRadius=1, gamma=1.5");
+    addPot(pots, "type=Multipole, density=Spheroid, densityNorm=1e5, scaleRadius=1.234e-5, "
+        "gamma=-2.0, beta=2.99, alpha=2.5, gridSizeR=64");
     addPot(pots, "density=Disk, surfaceDensity=1, scaleRadius=2, scaleHeight=-0.2, "
         "type=CylSpline, gridSizeR=20, rmin=0.1, rmax=500, gridSizeZ=20, zmin=0.01, zmax=50");
     pots.push_back(make_galpot(test_galpot_params[0]));

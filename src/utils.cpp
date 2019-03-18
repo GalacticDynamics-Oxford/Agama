@@ -236,7 +236,7 @@ bool toBool(const char* val) {
         case 't':
         case 'T': return true;
         case ' ':
-        case '\t':  ++val;   // skip whitespace and continue from the next character
+        case '\t':  ++val; break;  // skip whitespace and continue from the next character
         default:  throw std::invalid_argument("Parse error: \"" + std::string(val) +
             "\" does not contain a valid boolean value");
     }

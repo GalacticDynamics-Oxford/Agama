@@ -28,6 +28,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     const double epsd = 1e-7;  // accuracy of action conservation along the orbit for each method
     const double epst = 1e-9;  // accuracy of reverse transformation (pv=>aa=>pv) for isochrone
     const double epss = 1e-7;  // accuracy of reverse transformation for spherical a/a mapping
+    const double epsi = 1e-6;  // accuracy of reverse transformation for interpolated spherical mapping
     const double epsf = 1e-7;  // accuracy of frequency determination
     const double M = 2.7;      // mass and
     const double b = 0.6;      // scale radius of Isochrone potential
@@ -44,6 +45,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     actions::ActionAngles aaI, aaF, aaS, aaG;
     actions::Frequencies frI, frF, frS, frG, frIinv, frSinv;
     math::Averager statfrIr, statfrIz, statH, statE;
+    double errSinv=0, errGinv=0;
     actions::Angles aoldF(0,0,0), aoldI(0,0,0), aoldS(0,0,0);
     bool anglesMonotonic= true;   // angle determination is reasonable
     bool reversible_iso = true;   // forward-reverse transform for isochrone gives the original point
@@ -53,7 +55,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     bool deriv_grid_ok  = true;   // same for the derivs of grid-interpolated a/a mapper
     std::ofstream strm;
     if(output) {
-        strm.open("test_isochrone.dat");
+        strm.open(("test_actions_isochrone_"+std::string(title)+".dat").c_str());
         strm << std::setprecision(15);
     }
     double ifd = 1e-5;
@@ -99,13 +101,18 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
             math::fcmp(frS.Omegar, frSinv.Omegar, epss) == 0 &&
             math::fcmp(frS.Omegaz, frSinv.Omegaz, epss) == 0 &&
             math::fcmp(frS.Omegaphi, frSinv.Omegaphi, epss) == 0;
+        errSinv+=pow_2(pinv.R-traj[i].R)+pow_2(pinv.z-traj[i].z)+pow_2(pinv.phi-traj[i].phi)+
+        pow_2(pinv.vR-traj[i].vR)+pow_2(pinv.vz-traj[i].vz)+pow_2(pinv.vphi-traj[i].vphi);
+
         // inverse transformation for interpolated spherical action finder, with derivatives
         actions::DerivAct<coord::SphMod> der_sph;
         pinv = toPosVelCyl(actGrid.map(aaG, &frSinv, &der_sph));
-        reversible_grid &= equalPosVel(pinv, traj[i], epss) && 
-            math::fcmp(frG.Omegar, frSinv.Omegar, epss) == 0 &&
-            math::fcmp(frG.Omegaz, frSinv.Omegaz, epss) == 0 &&
-            math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epss) == 0;
+        reversible_grid &= equalPosVel(pinv, traj[i], epsi) && 
+            math::fcmp(frG.Omegar, frSinv.Omegar, epsi) == 0 &&
+            math::fcmp(frG.Omegaz, frSinv.Omegaz, epsi) == 0 &&
+            math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epsi) == 0;
+        errGinv+=pow_2(pinv.R-traj[i].R)+pow_2(pinv.z-traj[i].z)+pow_2(pinv.phi-traj[i].phi)+
+        pow_2(pinv.vR-traj[i].vR)+pow_2(pinv.vz-traj[i].vz)+pow_2(pinv.vphi-traj[i].vphi);
 
         // inverse transformation for Isochrone with derivs
         actions::DerivAct<coord::SphMod> ac;
@@ -247,6 +254,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statS.avg.Jr,  14)<<" +- "<<utils::pp(statS.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statS.avg.Jz,  14)<<" +- "<<utils::pp(statS.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statS.avg.Jphi, 6)<<" +- "<<utils::pp(statS.rms.Jphi, 7)<<
+    //",  rmserrInverse="<<utils::pp(sqrt(errSinv/traj.size()),7) <<
     (dispS_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_sph?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<std::endl;
 
@@ -277,6 +285,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statG.avg.Jr,  14)<<" +- "<<utils::pp(statG.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statG.avg.Jz,  14)<<" +- "<<utils::pp(statG.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statG.avg.Jphi, 6)<<" +- "<<utils::pp(statG.rms.Jphi, 7)<<
+    //",  rmserrInverse="<<utils::pp(sqrt(errGinv/traj.size()),7) <<
     (dispG_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_grid?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<
     (deriv_grid_ok?"":" \033[1;31mDERIVS INCONSISTENT\033[0m ")<<std::endl;
@@ -371,11 +380,11 @@ int main()
     //test_sph_iso();
     bool ok=true;
     ok &= test_isochrone(coord::PosVelCyl(1.0, 0.3, 1.1, 0.1, 0.4,  0.1), "ordinary case");
-    ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0, 2.2, 1.0, 0.0,  0.5), "Jz==0");
+    ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0, 2.2, 1.0, 0.0,  0.5), "Jz=0");
     ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0, 3.3, 0.0, 0.21, 0.9), "Jr small");
     ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0, 4.4, 0.6, 1.0, 1e-4), "Jphi small");
     ok &= test_isochrone(coord::PosVelCyl(1.0, 0.5, 5.5, 0.5, 0.7, -0.5), "Jphi negative");
-    ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0,M_PI, 0.0, 0.0, -0.5), "Jz==0, Jphi<0");
+    ok &= test_isochrone(coord::PosVelCyl(1.0, 0.0,M_PI, 0.0, 0.0, -0.5), "Jz=0, Jphi negative");
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

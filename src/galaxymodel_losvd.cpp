@@ -142,7 +142,7 @@ math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d
     // the product of B-spline of degree N and a Hermite polynomial of degree 'order' is a polynomial
     // of degree N+order multiplied by an exponential function; we don't try to integrate it exactly,
     // but use a Gauss-Legendre quadrature with Nnodes per each segment of the B-spline grid
-    const int NnodesGL = std::min<int>(math::MAX_GL_ORDER, std::max<int>((N+order+1)/2+1, 3));
+    const int NnodesGL = std::min<int>(math::MAX_GL_TABLE, std::max<int>((N+order+1)/2+1, 3));
     const double *glnodes = math::GLPOINTS[NnodesGL], *glweights = math::GLWEIGHTS[NnodesGL];
     std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
     double bspl[N+1];                     // temp.storage for B-splines

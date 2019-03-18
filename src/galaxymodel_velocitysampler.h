@@ -26,8 +26,8 @@
 
 namespace galaxymodel{
 
-class SphericalModelLocal;  // forward declaration
-class JeansAxi;             // another forward declaration
+class SphericalIsotropicModelLocal;  // forward declaration
+class JeansAxi;                      // another forward declaration
 
 /** Assign particle velocities using a spherical isotropic distribution function constructed
     by the Eddington inversion formula.
@@ -43,7 +43,7 @@ class JeansAxi;             // another forward declaration
 particles::ParticleArrayCar assignVelocityEdd(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
     const potential::BasePotential& pot,
-    const SphericalModelLocal& sphModel);
+    const SphericalIsotropicModelLocal& sphModel);
 
 /** Assign particle velocities using a spherical Jeans model.
     \param[in]  pointCoords  is the array of particle coordinates and masses

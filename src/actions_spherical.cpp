@@ -6,21 +6,27 @@
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
-#include <fstream>   // for writing debug info
+#include <fstream>
 
 namespace actions{
 
 namespace {
 
+/// use interpolation for computing E(Jr,L) - if not defined, use root-finding (slower)
+#define INTERPOLATE_ENERGY
+
 /// required tolerance on the value of Jr(E) in the root-finder
-const double ACCURACY_JR = 1e-6;
-    
+static const double ACCURACY_JR = 1e-6;
+
 /// accuracy parameter determining the radial spacing of the 2d interpolation grid for Jr
 static const double ACCURACY_INTERP2 = 1e-4;
 
+/// size of the interpolation grid in the dimension corresponding to relative angular momentum
+static const unsigned int GRID_SIZE_L = 25;
+
 /// minimum order of Gauss-Legendre quadrature for actions, frequencies and angles
-const unsigned int INTEGR_ORDER = 10;
-    
+static const unsigned int INTEGR_ORDER = 10;
+
 /** order of Gauss-Legendre quadrature for actions, frequencies and angles:
     use a higher order for more eccentric orbits, as indicated by the ratio
     of pericenter to apocenter radii (R1/R2) */
@@ -31,6 +37,60 @@ inline unsigned int integrOrder(double R1overR2) {
     frexp(R1overR2, &log2);
     return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - log2);
 }
+
+
+/// return scaledE and optionally dE/d(scaledE) as functions of E and invPhi0 = 1/Phi(0)
+inline double scaleE(const double E, const double invPhi0, /*output*/ double* dEdscaledE=NULL)
+{
+    double expX = invPhi0 - 1/E;
+    if(dEdscaledE)
+        *dEdscaledE = E * E * expX;
+    return log(expX);
+}
+
+/// return E and optionally dE/d(scaledE) as a function of scaledE and invPhi0
+inline double unscaleE(const double scaledE, const double invPhi0, /*output*/ double* dEdscaledE=NULL)
+{
+    double expX = exp(scaledE);
+    double E = 1 / (invPhi0 - expX);
+    if(dEdscaledE)
+        *dEdscaledE = E * E * expX;
+    return E;
+}
+
+/// compute the radial action from a 2d interpolation table as in ActionFinderSpherical
+double computeJr(double E, double scaledE, double dEdscaledE, double L, 
+    const potential::Interpolator& pot, const math::BaseInterpolator2d& intJr,
+    /*optional output*/double *Omegar, double *Omegaz)
+{
+    bool needDeriv = Omegar!=NULL || Omegaz!=NULL;
+    double dLcdE, Lc = pot.L_circ(E, needDeriv? &dLcdE : NULL);
+    if(!isFinite(Lc)) {  // E>=0 or E<Phi(0)
+        if(Omegar) *Omegar = NAN;
+        if(Omegaz) *Omegaz = NAN;
+        return NAN;
+    }
+
+    double X = math::clamp(scaledE, intJr.xmin(), intJr.xmax());
+    double Y = math::clamp(fabs(L/Lc), 0., 1.);
+
+    // obtain the value of scaled Jr as a function of scaled E and L, and unscale it
+    double val, derX, derY;
+    intJr.evalDeriv(X, Y, &val, needDeriv? &derX : NULL, needDeriv? &derY : NULL);
+    if(needDeriv) {
+        double dJrdL = derY * (1-Y) - val;
+        double dJrdE = derX * (1-Y) * Lc / dEdscaledE - (derY * (1-Y) * Y - val) * dLcdE;
+        if(Omegar)
+            *Omegar  = 1 / dJrdE;
+        if(Omegaz)
+            *Omegaz  = -dJrdL / dJrdE;
+    }
+
+    // the interpolated value might turn out to be slightly negative due to approximation inaccuracies,
+    // and is then replaced by zero
+    return fmax(0, val * Lc * (1-Y));
+}
+
 
 /// different regimes for calculation of various integrals involving radial velocity
 typedef enum { MODE_JR, MODE_OMEGAR, MODE_OMEGAZ } Operation;
@@ -49,7 +109,7 @@ public:
         // r cannot be zero because the integrand is never evaluated at endpoints of the interval
         double Phi = potential.value(r);
         double vr2 = 2*(E-Phi) - pow_2(L/r);
-        if(vr2<=0 || r==R1) return 0;
+        if(vr2<=0 || !isFinite(vr2) || r==R1) return 0;
         double vr  = sqrt(vr2);
         if(mode==MODE_JR)     return vr;
         if(mode==MODE_OMEGAR) return 1/vr;
@@ -130,55 +190,60 @@ public:
 /// helper class to find the energy corresponding to the given radial action
 class HamiltonianFinderFnc: public math::IFunctionNoDeriv {
     /// the instance of potential
-    const potential::BasePotential& potential;
-    /// the values of actions
+    const potential::BasePotential& pot;
+    /// (inverse) value of potential at origin, used for scaling transformations
+    const double invPhi0;
+    /// the values of actions (Jr is assumed to be positive)
     const double Jr, L;
-    /// boundaries of the energy interval (to use in the first two calls from the root-finder)
-    const double Emin, Emax;
 public:
-    HamiltonianFinderFnc(const potential::BasePotential& p,
-        double _Jr, double _L, double _Emin, double _Emax) :
-        potential(p), Jr(_Jr), L(_L), Emin(_Emin), Emax(_Emax) {};
-    /// report the difference between target Jr and the one computed at the given energy
-    virtual double value(const double E) const {
+    HamiltonianFinderFnc(const potential::BasePotential& _pot, double _Jr, double _L) :
+        pot(_pot), invPhi0(1. / pot.value(coord::PosCyl(0,0,0))), Jr(_Jr), L(_L)  {};
+
+    /// report the difference between target Jr and the one computed at the given (scaled) energy
+    virtual double value(const double scaledE) const {
         // first two calls in root-finder are for the boundary points, we already know the answer
-        if(E==Emin)
-            return -Jr;
-        if(E==Emax)
-            return Jr+1e-10;  // at r==infinity should return some positive value
-        double R1, R2;
-        findPlanarOrbitExtent(potential, E, L, R1, R2);
-        return integr<MODE_JR>(potential::PotentialWrapper(potential), E, L, R1, R2) / M_PI - Jr;
+        if(scaledE==-INFINITY)
+            return -Jr;   // left boundary of the interval is at a circular orbit, for which Jr=0
+        else if(scaledE==INFINITY)
+            return +Jr;   // right boundary is at infinity, return a safely positive value for E=0
+        double R1, R2, E=unscaleE(scaledE, invPhi0);
+        findPlanarOrbitExtent(pot, E, L, R1, R2);
+        return integr<MODE_JR>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI - Jr;
     }
 };
 
 /// same operation using the interpolated radial action finder
-class HamiltonianFinderFncInt: public math::IFunction {
-    /// the instance of interpolated action finder
-    const ActionFinderSpherical& af;
-    /// the values of actions
-    const double Jr, L;
-    /// boundaries of the energy interval (to use in the first two calls from the root-finder)
-    const double Emin, Emax;
+class HamiltonianFinderFncInterpolated: public math::IFunction {
+    /// the instance of potential and peri/apocenter interpolator
+    const potential::Interpolator2d& pot;
+    /// the values of actions (Jr is assumed to be positive), and the inverse potential at origin
+    const double Jr, L, invPhi0;
+    /// the instance of 2d action interpolator
+    const math::BaseInterpolator2d& intJr;
 public:
-    HamiltonianFinderFncInt(const ActionFinderSpherical& _af,
-        double _Jr, double _L, double _Emin, double _Emax) :
-        af(_af), Jr(_Jr), L(_L), Emin(_Emin), Emax(_Emax) {};
-    /// report the difference between target Jr and the one computed at the given energy
-    virtual void evalDeriv(const double E, double *val=0, double *der=0, double* =0) const {
+    HamiltonianFinderFncInterpolated(
+        const potential::Interpolator2d& _pot, double _Jr, double _L, const double _invPhi0,
+        const math::BaseInterpolator2d& _intJr) :
+        pot(_pot), Jr(_Jr), L(_L), invPhi0(_invPhi0), intJr(_intJr)  {};
+
+    /// report the difference between target Jr and the one computed at the given (scaled) energy
+    virtual void evalDeriv(const double scaledE, double *val=0, double *der=0, double* =0) const {
         // first two calls in root-finder are for the boundary points, we already know the answer
-        if(E==Emin || E==Emax) {
+        if(fabs(scaledE)==INFINITY) {
             if(val)
-                *val = E==Emin ? -Jr : Jr+1e-10;
+                *val = scaledE<0 ? -Jr : +Jr;
             if(der)
                 *der = NAN;
             return;
         }
-        double v = af.Jr(E, L, der);  // der now contains Omega_r = 1 / (dJr/dE)
+        // convert the values of E and L into the scaled variables used for interpolation
+        double dEdscaledE, E = unscaleE(scaledE, invPhi0, /*output*/ &dEdscaledE);
+        // compute the trial action for the given E and L, and Omega_r which is (dJr/dE)^-1
+        double trialJr = computeJr(E, scaledE, dEdscaledE, L, pot, intJr, /*output: Omega_r*/der, NULL);
         if(val)
-            *val = v - Jr;
+            *val = trialJr - Jr;
         if(der)
-            *der = 1 / *der;
+            *der = dEdscaledE / *der;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
@@ -320,27 +385,20 @@ coord::PosVelSphMod derivPointFromActions(
     p.pphi= (p.pphi- p0.pphi)/EPS;
     return p;
 }
-
-/// return scaledE and dE/d(scaledE) as functions of E and invPhi0 = 1/Phi(0)
-inline void scaleE(const double E, const double invPhi0,
-    /*output*/ double& scaledE, double& dEdscaledE)
-{
-    double expE = invPhi0 - 1/E;
-    scaledE     = log(expE);
-    dEdscaledE  = E * E * expE;
-}
-
+    
 /// construct the interpolating spline for scaled radial action W = Jr / (Lcirc-L)
 /// as a function of E and L/Lcirc
-math::QuinticSpline2d makeActionInterpolator(const potential::Interpolator2d& pot)
+math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& pot)
 {
-    double invPhi0 = 1. / pot.value(0);
+    const double invPhi0 = 1. / pot.value(0);
     std::vector<double> gridR = potential::createInterpolationGrid(
         potential::FunctionToPotentialWrapper(pot), ACCURACY_INTERP2);
+    // extend the grid a little bit at large radii
+    gridR.push_back( exp(2.5 * log(gridR[gridR.size()-1]) - 1.5 * log(gridR[gridR.size()-2])) );
 
     // interpolation grid in scaled variables: X = scaledE = log(1/Phi(0)-1/E), Y = L / Lcirc(E)
     const int sizeE = gridR.size();
-    const int sizeL = 40;
+    const int sizeL = GRID_SIZE_L;
     std::vector<double> gridX(sizeE), gridY(sizeL);
 
     // create a non-uniform grid in Y = L/Lcirc(E), using a transformation of interval [0:1]
@@ -348,7 +406,7 @@ math::QuinticSpline2d makeActionInterpolator(const potential::Interpolator2d& po
     // a function with zero 1st and 2nd derivs at x=0 and x=1
     math::ScalingQui scaling(0, 1);
     for(int i=0; i<sizeL; i++)
-        gridY[i] = math::unscale(scaling, 1. * i / (sizeL-1));
+        gridY[i] = math::unscale(scaling, i / (sizeL-1.));
 
     // value of W=Jr/(Lcirc-L) and its derivatives w.r.t. X=scaledE and Y=L/Lcirc
     math::Matrix<double> gridW(sizeE, sizeL), gridWdX(sizeE, sizeL), gridWdY(sizeE, sizeL);
@@ -366,8 +424,8 @@ math::QuinticSpline2d makeActionInterpolator(const potential::Interpolator2d& po
             double E  = Phi + 0.5 * Rc * dPhi;   // energy of a circular orbit at this radius
             double Lc = Rc  * sqrt( Rc * dPhi);  // angular momentum of a circular orbit
             double dEdX;                         // dE / d scaledE
-            scaleE(E, invPhi0, /*output*/gridX[iE], dEdX);
-            double dLcdE  = Rc*Rc/Lc;
+            gridX[iE] = scaleE(E, invPhi0, /*output*/ &dEdX);
+            double dLcdE = Rc*Rc/Lc;
             for(int iL=0; iL<sizeL-1; iL++) {
                 double L = Lc * gridY[iL];
                 double R1, R2;
@@ -406,8 +464,8 @@ math::QuinticSpline2d makeActionInterpolator(const potential::Interpolator2d& po
         for(int iE=0; iE<sizeE; iE++) {
             for(int iL=0; iL<sizeL; iL++) {
                 strm << 
-                utils::pp(gridX[iE], 15) + "\t" +
-                utils::pp(gridY[iL], 15) + "\t" +
+                utils::pp(gridX  [iE],     15) + "\t" +
+                utils::pp(gridY  [iL],     15) + "\t" +
                 utils::pp(gridW  (iE, iL), 15) + "\t" +
                 utils::pp(gridWdX(iE, iL), 15) + "\t" +
                 utils::pp(gridWdY(iE, iL), 15) + "\n";
@@ -416,8 +474,108 @@ math::QuinticSpline2d makeActionInterpolator(const potential::Interpolator2d& po
         }
     }
 
-    //return math::CubicSpline2d(gridX, gridY, gridW);
     return math::QuinticSpline2d(gridX, gridY, gridW, gridWdX, gridWdY);
+}
+
+/// construct the interpolating spline for scaled energy X as a function of log(Jr+L), L/(Jr+L)
+math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& pot,
+    const math::BaseInterpolator2d& intJr)
+{
+    const double Phi0 = pot.value(0), invPhi0 = 1. / Phi0;
+    std::vector<double> gridR = potential::createInterpolationGrid(
+        potential::FunctionToPotentialWrapper(pot), ACCURACY_INTERP2);
+    // extend the grid a little
+    gridR.push_back( exp(2.5 * log(gridR[gridR.size()-1]) - 1.5 * log(gridR[gridR.size()-2])) );
+
+    // interpolation grid for X = scaledE = log(1/Phi(0)-1/E) in scaled variables:
+    // P = log(L+Jr), Q = L/(L+Jr)
+    const int sizeP = gridR.size();
+    const int sizeQ = GRID_SIZE_L;
+    std::vector<double> gridP(sizeP), gridQ(sizeQ);
+
+    // create a non-uniform grid in Q = Jr/(L+Jr), using a transformation of interval [0:1]
+    // onto itself that places more grid points near the edges:
+    // a function with zero 1st and 2nd derivs at x=0 and x=1
+    math::ScalingQui scaling(0, 1);
+    for(int i=0; i<sizeQ; i++)
+        gridQ[i] = math::unscale(scaling, i / (sizeQ-1.));
+    
+    // value of X=scaledE and its derivatives w.r.t. P and Q
+    math::Matrix<double> gridX(sizeP, sizeQ), gridXdP(sizeP, sizeQ), gridXdQ(sizeP, sizeQ);
+    
+    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int iP=0; iP<sizeP; iP++) {
+        try{
+            double Rc = gridR[iP];
+            double Phi, dPhi, d2Phi;
+            pot.evalDeriv(Rc, &Phi, &dPhi, &d2Phi);
+            double Lc = Rc  * sqrt( Rc * dPhi);  // exp(P) = Jr+L
+            gridP[iP] = log(Lc);
+            for(int iQ=0; iQ<sizeQ; iQ++) {
+                double L = Lc * gridQ[iQ], Jr = Lc * (1-gridQ[iQ]);                
+                // radius of a circular orbit with angular momentum equal to L
+                double Rcirc = iQ<sizeQ-1 ? pot.R_from_Lz(L) : Rc;
+                // initial guess (more precisely, lower bound) for Hamiltonian
+                double Elow  = pot.value(Rcirc) + (L>0 ? 0.5 * pow_2(L/Rcirc) : 0);
+                double dEdX,X= scaleE(Elow, invPhi0, /*output*/ &dEdX);
+                double dEdJr = sqrt(d2Phi + 3*dPhi/Rc);  // kappa - epicyclic frequency (when Jr=0)
+                double dEdL  = sqrt(dPhi/Rc);            // Omega --"--
+                // if the radial action Jr is zero, Elow = Ecirc is the correct result,
+                // otherwise need to find E such that Jr(E, L) equals the target value
+                if(Jr>0) {
+                    HamiltonianFinderFncInterpolated fnc(pot, Jr, L, invPhi0, intJr);
+                    // find E such that Jr(E, L) equals the target value.
+                    // We use logarithmically-scaled variable X=scaledE, which technically may range
+                    // from -inf to +inf, but in practice is likely to be within a range of +-few tens.
+                    // Since this is still an unbound range, in the root-finder we employ another
+                    // scaling transformation X <-> z, with 0<z<1.
+                    math::ScalingInf scaling;
+                    double zroot = math::findRoot(
+                        math::ScaledFnc<math::ScalingInf>(scaling, fnc),
+                        /*lower limit is Elow, which translates to*/ math::scale(scaling, X),
+                        /*upper limit on scaledE is infinity, which corresponds to*/ 1, ACCURACY_JR);
+                    if(zroot==zroot) {
+                        // only if the root-finder was successful, otherwise leave Elow=Ecirc as for Jr=0
+                        X = math::unscale(scaling, zroot);
+                        double E = unscaleE(X, invPhi0, /*output*/ &dEdX);
+                        // once again compute the radial action _and_frequencies_ for the given energy
+                        // (return value is ignored because we assume that it is equal to Jr)
+                        computeJr(E, X, dEdX, L, pot, intJr, /*output*/&dEdJr, &dEdL);
+                    }
+                }
+                gridX  (iP, iQ) = X;
+                gridXdP(iP, iQ) = (dEdJr * Jr + dEdL * L) / dEdX;
+                gridXdQ(iP, iQ) = (Jr+L) * (dEdL - dEdJr) / dEdX;
+            }
+        }
+        catch(std::exception& e) {
+            errorMessage = e.what();
+        }
+    }
+    if(!errorMessage.empty())
+        throw std::runtime_error("ActionFinderSpherical: "+errorMessage);
+    
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
+        std::ofstream strm("ActionFinderSphericalEnergy.log");
+        strm << "# P=ln(Jr+L)   \tQ=L/(Jr+L)     \tX=scaledE      \tdX/dP          \tdX/dQ          \n";
+        for(int iP=0; iP<sizeP; iP++) {
+            for(int iQ=0; iQ<sizeQ; iQ++) {
+                strm << 
+                utils::pp(gridP  [iP],     15) + "\t" +
+                utils::pp(gridQ  [iQ],     15) + "\t" +
+                utils::pp(gridX  (iP, iQ), 15) + "\t" +
+                utils::pp(gridXdP(iP, iQ), 15) + "\t" +
+                utils::pp(gridXdQ(iP, iQ), 15) + "\n";
+            }
+            strm<<"\n";
+        }
+    }
+    
+    //return math::CubicSpline2d(gridP, gridQ, gridX);
+    return math::QuinticSpline2d(gridP, gridQ, gridX, gridXdP, gridXdQ);
 }
 
 }  //internal namespace
@@ -431,14 +589,22 @@ double computeHamiltonianSpherical(const potential::BasePotential& potential, co
     // radius of a circular orbit with this angular momentum
     double rcirc = R_from_Lz(potential, L);
     // initial guess (more precisely, lower bound) for Hamiltonian
-    double Ecirc = potential.value(coord::PosCyl(rcirc, 0, 0)) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
-    // upper bound for Hamiltonian
-    double Einf  = potential.value(coord::PosCyl(INFINITY, 0, 0));
-    if(!isFinite(Einf) && Einf != INFINITY)  // some potentials may return NAN for r=infinity
-        Einf = 0;  // assume the default value for potential at infinity
-    // find E such that Jr(E, L) equals the target value
-    HamiltonianFinderFnc fnc(potential, acts.Jr, L, Ecirc, Einf);
-    return math::findRoot(fnc, Ecirc, Einf, ACCURACY_JR);
+    double Elow = potential.value(coord::PosCyl(rcirc, 0, 0)) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
+    // if the radial action is zero, this is the result
+    if(acts.Jr==0)
+        return Elow;
+    // find E such that Jr(E, L) equals the target value.
+    // We use logarithmically-scaled variable scaledE, which technically ranges from -inf to +inf,
+    // but is likely to be within a range of +-few tens. On top of that, in the root-finder
+    // we employ another scaling transformation scaledE <-> z, with 0<z<1.
+    double invPhi0 = 1. / potential.value(coord::PosCyl(0,0,0));
+    math::ScalingInf scaling;
+    HamiltonianFinderFnc fnc(potential, acts.Jr, L);
+    double zroot   = math::findRoot(
+        math::ScaledFnc<math::ScalingInf>(scaling, fnc),
+        /*lower limit is Elow, which translates to*/ math::scale(scaling, scaleE(Elow, invPhi0)),
+        /*upper limit on scaledE is infinity, which corresponds to*/ 1, ACCURACY_JR);
+    return unscaleE(math::unscale(scaling, zroot), invPhi0);
 }
 
 coord::PosVelCyl mapSpherical(
@@ -496,37 +662,17 @@ ActionAngles actionAnglesSpherical(
 ActionFinderSpherical::ActionFinderSpherical(const potential::BasePotential& potential) :
     invPhi0(1. / potential.value(coord::PosCyl(0,0,0))),
     pot(potential),
-    intJr(makeActionInterpolator(pot))
+    intJr(createActionInterpolator(pot))
+#ifdef INTERPOLATE_ENERGY
+    ,intE(createEnergyInterpolator(pot, intJr))
+#endif
 {}
 
 double ActionFinderSpherical::Jr(double E, double L, double *Omegar, double *Omegaz) const
 {
-    bool needDeriv = Omegar!=NULL || Omegaz!=NULL;
-    double dLcdE, Lc = pot.L_circ(E, needDeriv? &dLcdE : NULL);
-    if(!isFinite(Lc)) {  // E>=0 or E<Phi(0)
-        if(Omegar) *Omegar = NAN;
-        if(Omegaz) *Omegaz = NAN;
-        return NAN;
-    }
-
     // convert the values of E and L into the scaled variables used for interpolation
-    double dEdX, X;
-    scaleE(E, invPhi0, X, dEdX);
-    X = math::clamp(X, intJr.xmin(), intJr.xmax());
-    double Y = math::clamp(fabs(L/Lc), 0., 1.);
-
-    // obtain the value of scaled Jr as a function of scaled E and L, and unscale it
-    double val, derX, derY;
-    intJr.evalDeriv(X, Y, &val, needDeriv? &derX : NULL, needDeriv? &derY : NULL);
-    if(needDeriv) {
-        double dJrdL = derY * (1-Y) - val;
-        double dJrdE = derX * (1-Y) * Lc / dEdX - (derY * (1-Y) * Y - val) * dLcdE;
-        if(Omegar)
-            *Omegar  = 1 / dJrdE;
-        if(Omegaz)
-            *Omegaz  = -dJrdL / dJrdE;
-    }
-    return val * Lc * (1-Y);
+    double dEdX, X = scaleE(E, invPhi0, /*output*/ &dEdX);
+    return computeJr(E, X, dEdX, L, pot, intJr, /*optional output*/ Omegar, Omegaz);
 }
 
 Actions ActionFinderSpherical::actions(const coord::PosVelCyl& point) const
@@ -562,14 +708,41 @@ ActionAngles ActionFinderSpherical::actionAngles(
 
 double ActionFinderSpherical::E(const Actions& acts) const
 {
+    if(acts.Jr<0 || acts.Jz<0)
+        throw std::invalid_argument("ActionFinderSpherical: input actions are negative");
     double L = acts.Jz + fabs(acts.Jphi);  // total angular momentum
+#ifdef INTERPOLATE_ENERGY
+    double scaledE, der,
+    Jtot = acts.Jr + L,
+    Lrel = L/Jtot,
+    logJ = log(Jtot),
+    logJeval = math::clamp(logJ, intE.xmin(), intE.xmax());  // make sure it's within the 2d grid
+    if(logJ != logJeval) {
+        // compute the value at the edge of the 2d interpolation grid, and then linearly extrapolate
+        intE.evalDeriv(logJeval, Lrel, &scaledE, &der);
+        scaledE += der * (logJ - logJeval);
+    } else
+        scaledE = intE.value(logJ, Lrel);
+    return unscaleE(scaledE, invPhi0);
+#else
     // radius of a circular orbit with this angular momentum
     double rcirc = pot.R_from_Lz(L);
     // initial guess (more precisely, lower bound) for Hamiltonian
-    double Ecirc = pot.value(rcirc) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
-    // find E such that Jr(E, L) equals the target value
-    return math::findRoot(HamiltonianFinderFncInt(*this, acts.Jr, L, Ecirc, 0),
-        Ecirc, 0, ACCURACY_JR);
+    double Elow  = pot.value(rcirc) + (L>0 ? 0.5 * pow_2(L/rcirc) : 0);
+    if(acts.Jr==0)
+        return Elow;
+    // find E such that Jr(E, L) equals the target value.
+    // We use logarithmically-scaled variable scaledE, which technically ranges from -inf to +inf,
+    // but is likely to be within a range of +-few tens. On top of that, in the root-finder
+    // we employ another scaling transformation scaledE <-> z, with 0<z<1.
+    math::ScalingInf scaling;
+    HamiltonianFinderFncInterpolated fnc(pot, acts.Jr, L, invPhi0, intJr);
+    double zroot   = math::findRoot(
+        math::ScaledFnc<math::ScalingInf>(scaling, fnc),
+        /*lower limit is Elow, which translates to*/ math::scale(scaling, scaleE(Elow, invPhi0)),
+        /*upper limit on scaledE is infinity, which corresponds to*/ 1, ACCURACY_JR);
+    return unscaleE(math::unscale(scaling, zroot), invPhi0);    
+#endif
 }
 
 coord::PosVelSphMod ActionFinderSpherical::map(
@@ -585,10 +758,13 @@ coord::PosVelSphMod ActionFinderSpherical::map(
     double L = aa.Jz + fabs(aa.Jphi);  // total angular momentum
     // compute the frequencies
     double Omegar, Omegaz;
-    Jr(E, L, &Omegar, &Omegaz);
+    double Jr = this->Jr(E, L, &Omegar, &Omegaz);
     double Omegaphi = Omegaz * math::sign(aa.Jphi);
     if(freq)  // output if requested
         *freq = Frequencies(Omegar, Omegaz, Omegaphi);
+#ifdef INTERPOLATE_ENERGY
+    E += Omegar * (aa.Jr-Jr);  // first-order correction for the interpolated E(Jr,L)
+#endif
     // find peri/apocenter radii
     double R1, R2;
     pot.findPlanarOrbitExtent(E, L, R1, R2);

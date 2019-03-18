@@ -5,7 +5,6 @@
 #include <stdexcept>
 #include <fstream>
 
-#include <iostream>
 namespace galaxymodel{
 
 namespace {

@@ -434,19 +434,28 @@ template<> double unscale(const ScalingInf& /*scaling*/, double s, double* duds)
     return 1 / (1-s) - 1 / s;
 }
 
-// u in (-inf, u0] or [u0, +inf), when u0 is zero or the sign of u0 is the same as the sign of infinity
+// u in (-inf, u0] or [u0, +inf), when u0 is +-zero or the sign of u0 is the same as the sign of infinity
 template<> double scale(const ScalingSemiInf& scaling, double u) {
     if(scaling.u0 == 0)  // transform u to log(u) and then use the scaling on a doubly-infinite interval
-        return scale(ScalingInf(), log(u));
+        return scale(ScalingInf(), std::signbit(scaling.u0) ? -log(-u) : log(u));
     double l = log(u / scaling.u0);  // expected to be >=0, but this must be ensured by the calling code
     return l / (1+l);
 }
 
 template<> double unscale(const ScalingSemiInf& scaling, double s, double* duds) {
-    double u = scaling.u0 == 0 ?  exp( 1 / (1-s) - 1 / s )  :  scaling.u0 * exp( s / (1-s) );
-    if(duds)
-        *duds = u * (1 / pow_2(1-s) + (scaling.u0 == 0 ? 1 / pow_2(s) : 0));
-    return u;
+    if(scaling.u0 == 0) {
+        double u = exp( 1 / (1-s) - 1 / s );
+        if(std::signbit(scaling.u0))
+            u = -1/u;
+        if(duds)
+            *duds = fabs(u) * (1 / pow_2(1-s) + 1 / pow_2(s));
+        return u;
+    } else {
+        double u = scaling.u0 * exp( s / (1-s) );
+        if(duds)
+            *duds = u / pow_2(1-s);
+        return u;
+    }
 }
 
 // u in [uleft, uright], trivial linear transformation
@@ -985,13 +994,16 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
     return result;
 }
 
+// this routine is intended to be fast, so only works with pre-computed integration tables
 double integrateGL(const IFunction& fnc, double x1, double x2, int N)
 {
     if(x1==x2)
         return 0;
     if(N < 1 || N > MAX_GL_ORDER)
         throw std::invalid_argument("integrateGL: order is too high (not implemented)");
-    // use pre-computed tables of points and weights
+    // use pre-computed tables of points and weights (they are not available for every N,
+    // so take the closest implemented one with at least the requested number of points)
+    while(GLPOINTS[N] == NULL) N++;
     const double *points = GLPOINTS[N], *weights = GLWEIGHTS[N];
     double result = 0;
     for(int i=0; i<N; i++)
@@ -999,14 +1011,53 @@ double integrateGL(const IFunction& fnc, double x1, double x2, int N)
     return result * (x2-x1);
 }
 
-void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights)
+// compute the node and weight of k-th node in the Gauss-Legendre quadrature rule with n points (0<=k<n)
+void getGLnodeAndWeight(int n, int k, /*output: node*/ double& x, /*output: weight*/ double& w)
 {
-    gsl_integration_glfixed_table* gltable = gsl_integration_glfixed_table_alloc(N);
-    if(N%2==1)
-        gltable->x[0] = 0;  // exact value (GSL doesn't care about roundoff errors..)
-    for(int i=0; i<N; i++)
-        gsl_integration_glfixed_point(x1, x2, i, &(coords[i]), &(weights[i]), gltable);
-    gsl_integration_glfixed_table_free(gltable);
+    // initial guess for the k-th root of Legendre polynomial P_n(x)
+    x = (n==k*2+1) ? 0 : (1 - 0.125 * (n-1) / (n*n*n)) * cos(M_PI * (k+0.75) / (n+0.5));
+    while(1) {
+        // compute Legendre polynomial P_n(x) and its two derivatives
+        double Pm2, Pm1 = x, P = 1.5 * x*x - 0.5;
+        for(int l=3; l<=n; l++) {
+            // recurrence relation assuming n>=2
+            Pm2 = Pm1;
+            Pm1 = P;
+            P   = x * Pm1 + (1-1./l) * (x * Pm1 - Pm2);
+        }
+        double
+        der = (Pm1 - x*P) * n / (1-x*x),           // first derivative of P_n(x)
+        der2= (2*x*der - n*(n+1)*P) / (1-x*x),     // second derivative
+        dx  = -P / (der - 0.5 * P * der2 / der);   // Halley root-finding method for x
+        x  += dx;
+        if(fabs(dx) <= 1e-10) {
+            // if dx is so small, the next iteration will make it less than DBL_EPSILON, so is unnecessary.
+            // apply a final correction for the first derivative, and compute the weight
+            w = 2 / ( (1-x*x) * pow_2(der + dx*der2) );
+            return;
+        }
+    }
+}
+
+void prepareIntegrationTableGL(double x1, double x2, int N, double* nodes, double* weights)
+{
+    if(N <= MAX_GL_ORDER && GLPOINTS[N] != NULL) {
+        // retrieve a pre-computed table
+        for(int i=0; i<=N/2; i++) {
+            nodes  [i]     = x1 + GLPOINTS [N][i] * (x2-x1);
+            nodes  [N-1-i] = x2 - GLPOINTS [N][i] * (x2-x1);
+            weights[i] = weights[N-1-i] = GLWEIGHTS[N][i] * (x2-x1);
+        }
+    } else {
+        // compute a table on-the-fly
+        double x, w;
+        for(int i=0; i<=N/2; i++) {
+            getGLnodeAndWeight(N, i, /*output*/ x, w);
+            nodes  [i]     = 0.5 * (x1 + x2 - x * (x2-x1) );
+            nodes  [N-1-i] = 0.5 * (x1 + x2 + x * (x2-x1) );
+            weights[i] = weights[N-1-i] = 0.5 * w * (x2-x1);
+        }
+    }
 }
 
 

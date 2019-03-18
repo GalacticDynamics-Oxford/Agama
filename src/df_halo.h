@@ -1,7 +1,7 @@
 /** \file    df_halo.h
     \brief   Distribution functions for the spheroidal component (halo)
-    \author  Eugene Vasiliev
-    \date    2015-2016
+    \author  Eugene Vasiliev, James Binney
+    \date    2015-2019
 */
 #pragma once
 #include "df_base.h"
@@ -26,10 +26,11 @@ double
     coefJrOut, ///< contribution of radial   action to g(J), controlling anisotropy above J_0 (g_r)
     coefJzOut, ///< contribution of vertical action to g(J), controlling anisotropy above J_0 (g_z)
     rotFrac,   ///< relative amplitude of the odd-Jphi component (-1 to 1, 0 means no rotation)
-    Jphi0;     ///< controls the steepness of rotation and the size of non-rotating core
+    Jphi0,     ///< controls the steepness of rotation and the size of non-rotating core
+    Jcore;     ///< central core size for a Cole&Binney-type modified double-power-law halo
 DoublePowerLawParam() :  ///< set default values for all fields (NAN means that it must be set manually)
     norm(NAN), J0(NAN), Jcutoff(0), slopeIn(NAN), slopeOut(NAN), steepness(1), cutoffStrength(2),
-    coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1), rotFrac(0), Jphi0(0) {}
+    coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1), rotFrac(0), Jphi0(0), Jcore(0) {}
 };
 
 /** General double power-law model.
@@ -37,18 +38,24 @@ DoublePowerLawParam() :  ///< set default values for all fields (NAN means that 
     \f$  f(J) = norm / (2\pi J_0)^3
          (1 + (J_0 /h(J))^\eta )^{\Gamma / \eta}
          (1 + (g(J)/ J_0)^\eta )^{-B / \eta }
-         \exp[ - (g(J) / J_{cutoff})^\zeta ] \f$,  where
+         \exp[ - (g(J) / J_{cutoff})^\zeta ]
+         ( [J_{core} / h(J)]^2 - \beta J_{core} / h(J) + 1)^{\Gamma/2}   \f$,  where
     \f$  g(J) = g_r J_r + g_z J_z + g_\phi |J_\phi|  \f$,
     \f$  h(J) = h_r J_r + h_z J_z + h_\phi |J_\phi|  \f$.
     Gamma is the power-law slope of DF at small J (slopeIn), and Beta -- at large J (slopeOut),
     the transition occurs around J=J0, and its steepness is adjusted by the parameter eta.
     h_r, h_z and h_phi control the anisotropy of the DF at small J (their sum is always taken
-    to be unity, so that there are two free parameters -- coefJrIn = h_r, coefJzIn = h_z),
+    to be equal to 3, so that there are two free parameters -- coefJrIn = h_r, coefJzIn = h_z),
     and g_r, g_z, g_phi do the same for large J (coefJrOut = g_r, coefJzOut = g_z).
     Jcutoff is the threshold of an optional exponential suppression, and zeta measures its strength.
+    Jcore is the size of the central core (if nonzero, f(J) tends to a constant limit as J --> 0
+    even when the power-law slope Gamma is positive), and the auxiliary coefficient beta
+    is assigned automatically from the requirement that the introduction of the core (almost)
+    doesn't change the overall normalization (eq.5 in Cole&Binney 2017).
 */
 class DoublePowerLaw: public BaseDistributionFunction{
     const DoublePowerLawParam par;  ///< parameters of DF
+    const double beta;              ///< auxiliary coefficient for the case of a central core
 public:
     /** Create an instance of double-power-law distribution function with given parameters
         \param[in] params  are the parameters of DF

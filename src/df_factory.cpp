@@ -1,8 +1,8 @@
 #include "df_factory.h"
 #include "df_disk.h"
 #include "df_halo.h"
+#include "df_spherical.h"
 #include "utils.h"
-#include "utils_config.h"
 #include <cassert>
 #include <stdexcept>
 
@@ -17,6 +17,7 @@ DoublePowerLawParam parseDoublePowerLawParams(
     par.J0        = kvmap.getDouble("J0")      * conv.lengthUnit * conv.velocityUnit;
     par.Jcutoff   = kvmap.getDouble("Jcutoff") * conv.lengthUnit * conv.velocityUnit;
     par.Jphi0     = kvmap.getDouble("Jphi0")   * conv.lengthUnit * conv.velocityUnit;
+    par.Jcore     = kvmap.getDouble("Jcore")   * conv.lengthUnit * conv.velocityUnit;
     par.slopeIn   = kvmap.getDouble("slopeIn",   par.slopeIn);
     par.slopeOut  = kvmap.getDouble("slopeOut",  par.slopeOut);
     par.steepness = kvmap.getDouble("steepness", par.steepness);
@@ -79,6 +80,7 @@ inline void checkNonzero(const potential::BasePotential* potential, const std::s
 PtrDistributionFunction createDistributionFunction(
     const utils::KeyValueMap& kvmap,
     const potential::BasePotential* potential,
+    const potential::BaseDensity* density,
     const units::ExternalUnits& converter)
 {
     std::string type = kvmap.getString("type");
@@ -92,6 +94,15 @@ PtrDistributionFunction createDistributionFunction(
         checkNonzero(potential, type);
         return PtrDistributionFunction(new QuasiIsothermal(parseQuasiIsothermalParams(kvmap, converter),
             potential::Interpolator(*potential)));
+    }
+    else if(utils::stringsEqual(type, "QuasiSpherical")) {
+        checkNonzero(potential, type);
+        if(density == NULL)
+            density = potential;
+        double beta0 = kvmap.getDoubleAlt("beta", "beta0", 0);
+        double r_a   = kvmap.getDoubleAlt("anisotropyRadius", "r_a", INFINITY) * converter.lengthUnit;
+        return PtrDistributionFunction(new QuasiSphericalCOM(
+            potential::DensityWrapper(*density), potential::PotentialWrapper(*potential), beta0, r_a));
     }
     else
         throw std::invalid_argument("Unknown type of distribution function");

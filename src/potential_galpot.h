@@ -174,7 +174,7 @@ private:
 };
 
 ///@}
-/// \name  Spheroical density profile
+/// \name  Spheroidal density profile
 ///@{
 
 /** Parameters describing a double-power-law spheroidal density profile.

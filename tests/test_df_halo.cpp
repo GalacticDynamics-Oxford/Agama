@@ -220,6 +220,19 @@ int main(){
         strm << histograms;
     }
 
+    // test the model with a central core: the introduction of a core shouldn't change
+    // the overall normalization, at least when the coefficients in the linear combination
+    // of actions are the same in the inner and outer part of the halo, and there is no exp-cutoff
+    paramDPL.coefJrOut = paramDPL.coefJrIn;
+    paramDPL.coefJzOut = paramDPL.coefJzIn;
+    paramDPL.norm = 2.28;
+    // first compute the total mass for a model without core
+    ok &= testTotalMass(galaxymodel::GalaxyModel(potH, actH, df::DoublePowerLaw(paramDPL)), 1.);
+    // then set up a sizable core, create another DF and repeat the mass computation
+    paramDPL.Jcore = 0.8;
+    ok &= testTotalMass(galaxymodel::GalaxyModel(potH, actH, df::DoublePowerLaw(paramDPL)), 1.);
+
+
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

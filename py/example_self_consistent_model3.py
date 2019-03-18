@@ -89,8 +89,8 @@ if __name__ == "__main__":
     dfDisk  = agama.DistributionFunction(potential=model.potential, **iniDFDisk)
     # initialize the DFs of spheroidal components using the Eddington inversion formula
     # for their respective density profiles in the initial potential
-    dfBulge = agama.DistributionFunction(type='QuasiIsotropic', potential=model.potential, density=densityBulge)
-    dfHalo  = agama.DistributionFunction(type='QuasiIsotropic', potential=model.potential, density=densityHalo)
+    dfBulge = agama.DistributionFunction(type='QuasiSpherical', potential=model.potential, density=densityBulge)
+    dfHalo  = agama.DistributionFunction(type='QuasiSpherical', potential=model.potential, density=densityHalo)
 
     print("\033[1;33m**** STARTING ITERATIVE MODELLING ****\033[0m\nMasses (computed from DF): " \
         "Mdisk=%g, Mbulge=%g, Mhalo=%g" % (dfDisk.totalMass(), dfBulge.totalMass(), dfHalo.totalMass()))

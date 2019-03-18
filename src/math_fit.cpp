@@ -38,7 +38,7 @@ private:
 };
 
 struct MatC {
-    explicit MatC(const Matrix<double>& mat) :
+    explicit MatC(const IMatrixDense<double>& mat) :
         m(gsl_matrix_const_view_array(mat.data(), mat.rows(), mat.cols())) {}
     operator const gsl_matrix* () const { return &m.matrix; }
 private:
@@ -258,7 +258,7 @@ void linearFit(const std::vector<double>& x, const std::vector<double>& y,
 }
 
 // ----- multi-parameter linear least-square fit ----- //
-void linearMultiFit(const Matrix<double>& coefs, const std::vector<double>& rhs, 
+void linearMultiFit(const IMatrixDense<double>& coefs, const std::vector<double>& rhs, 
     const std::vector<double>* w, std::vector<double>& result, double* rms)
 {
     if(static_cast<unsigned int>(coefs.rows()) != rhs.size())

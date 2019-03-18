@@ -41,6 +41,9 @@ private:
     \param[in] potential  is the instance of global potential, required by some of the DF classes
     at construction (it is not stored in the DF but only used to initialize internal interpolation tables);
     may pass an empty pointer if the DF does not need it.
+    \param[in] density    is the instance of density, used to initialize some types of DF;
+    if omitted, the argument `potential` is used for both the density and the potential 
+    (if relevant, otherwise both arguments are ignored).
     \param[in] converter  is the unit converter for transforming the dimensional quantities 
     in parameters into internal units; can be a trivial converter.
     \return    a new instance of shared pointer to BaseDistributionFunction on success.
@@ -49,6 +52,7 @@ private:
 PtrDistributionFunction createDistributionFunction(
     const utils::KeyValueMap& params,
     const potential::BasePotential* potential = NULL,
+    const potential::BaseDensity* density = NULL,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 }  // namespace df

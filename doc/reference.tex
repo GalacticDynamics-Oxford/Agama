@@ -228,7 +228,7 @@ Any number of density components may be combined into a single \ttt{CompositeDen
 There are several commonly used models with known expressions for the potential and its derivatives. 
 
 Spherical models include the \ttt{Plummer}, \ttt{Isochrone}, \ttt{NFW} (Navarro--Frenk--White) potentials, and a generalized \ttt{King} (lowered isothermal) model which is specified by its distribution function $f(E)$, as given by Equation~1 in \cite{GielesZocchi2015}.
-Moreover there is a wrapper class that turns any user-provided function $\Phi(r)$ with two known derivatives into a form compatible with the potential interface.
+Moreover there is a wrapper class that turns any user-provided function $\Phi(r)$ with two known derivatives into a form compatible with the potential interface. A point mass (Kepler) potential is obtained by constructing a \ttt{Plummer} potential with zero scale radius.
 
 Axisymmetric models include the \ttt{MiyamotoNagai} and \ttt{OblatePerfectEllipsoid} potentials (the latter belongs to a more general class of St\"ackel potentials \cite{deZeeuw1985}, but is the only one implemented at present).
 There is another type of axisymmetric models that have a dedicated potential class, namely a separable \ttt{Disk} profile with $\rho(R,z) = \Sigma(R)\, h(z)$. A direct evaluation of potential requires 2d numerical quadrature, or 1d in special cases such as the exponential radial profile, which is still too costly. Instead, we use the \textsc{GalPot} approach introduced in \cite{KuijkenDubinski1995, DehnenBinney1998}: the potential is split into two parts, \ttt{DiskAnsatz} that has an analytic expression for the potential of the strongly flattened component, and the residual part that is represented with the \ttt{Multipole} expansion.
@@ -394,7 +394,7 @@ There are various tasks that can be performed during orbit integration, using cl
 
 Orbit analysis refers to the determination of orbit class (box, tube, resonant boxlet, etc.) and degree of chaoticity. This is performed using a Fourier transform of position as a function of time and detecting the most prominent ``spectral lines''; the ratio between their frequencies is an indicator of orbit type \cite{BinneySpergel1984, CarpinteroAguilar1998}, and their rate of change with time is a measure of chaos \cite{ValluriMerritt1998}. These methods were implemented in \cite{Vasiliev2013}, but as the focus of \Agama in galaxy modelling is shifted from discrete orbits to smooth distribution functions, we have not yet included them in the library.
 
-A finite-time estimate of Lyapunov exponent $\lambda$ is another measure of stochasticity (see \cite{Carpintero2014, Skokos2010} for reviews of methods based on variational equations). It may be estimated by following the time evolution of a deviation vector, which depends on the second derivatives of potential evaluated along the orbit. For a regular orbit, its magnitude grows at most linearly with time, while for a chaotic orbit it eventually starts to grow exponentially. The class \ttt{orbit::RuntimeLyapunov} implements the method described in Section~4.3 and illustrated on Figure~4 of \cite{Vasiliev2013}: if no exponential growth has been detected, it returns $\lambda=0$, otherwise a median value of $\lambda$ on the interval of exponential growth, normalized to the characteristic orbital time (so that orbits at different energies can be more directly compared).
+A finite-time estimate of Lyapunov exponent $\lambda$ is another measure of stochasticity (see \cite{Carpintero2014, Skokos2010} for reviews of methods based on variational equations). It may be estimated by following the time evolution of a deviation vector, which depends on the second derivatives of potential evaluated along the orbit. For a regular orbit, its magnitude grows at most linearly with time, while for a chaotic orbit it eventually starts to grow exponentially. The class \ttt{orbit::RuntimeLyapunov} implements the method described in Section~4.3 and illustrated in Figure~4 of \cite{Vasiliev2013}: if no exponential growth has been detected, it returns $\lambda=0$, otherwise a median value of $\lambda$ on the interval of exponential growth, normalized to the characteristic orbital time (so that orbits at different energies can be more directly compared).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -425,7 +425,7 @@ In a more general case of an arbitrary spherical potential, the radial action is
 J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;dr,
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
-The standalone routines in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the \ttt{potential::Interpolator2d} helper class) and $J_r(E,L)$, as well as the reverse mapping between $\{\bJ,\bt\}$ and $\{\bx,\bv\}$.
+The standalone routines in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the helper class \ttt{potential::Interpolator2d}) and $J_r(E,L)$, the inverse mapping $E(J_r,L)$ also provided via an interpolation table, and the complete inverse mapping $\{\bJ,\bt\} \Rightarrow \{\bx,\bv\}$.
 
 %%%%%%%%%%%%%%
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
@@ -458,36 +458,6 @@ The same DF corresponds to different density profiles in different potentials (S
 There is also a ``DF factory'' routine \ttt{createDistributionFunction} for constructing various DF classes from a set of named parameters described by a \ttt{KeyValueMap} object (Section~\ref{sec:Utilities}); the choice of model is set by \ppp{type=...}, and model-specific parameters are described in the following sections.
 
 Importantly, the DF formulated in terms of actions does not depend on the potential. However, some models use the concept of epicyclic frequencies to compute the value of $f(\bJ)$. These frequencies are represented by a special proxy class \ttt{potential::Interpolator}, which is constructed from a given potential, but then serves as an independent entity (essentially an array of arbitrary functions of one variable), so that $f(\bJ)$ has the same value in any other potential. This is important in the context of iterative construction of self-consistent models (Section~\ref{sec:SCM}).
-
-%%%%%%%%%%%%%%
-\subsubsection{Spheroidal components}  \label{sec:DFspheroid}
-
-A suitable choice for DFs of elliptical galaxies, bulges or haloes is the \ttt{DoublePowerLaw} model, which is similar to the ones presented in \cite{Binney2014, Posti2015}, with a different notation:
-\begin{align*}
-f(\bJ) &= \frac{M}{(2\pi\, J_0)^3}
-%\left(\frac{h(\bJ)}{J_0}\right)^{-\Gamma}
-\left[1 + \left(\frac{J_0}{h(\boldsymbol{J})}\right)^\eta \right]^{\frac{\Gamma}{\eta}}
-\left[1 + \left(\frac{g(\bJ)}{J_0}\right)^\eta \right]^{\frac{\Gamma-\Beta}{\eta}}
-\!\!\!\!\exp\bigg[-\left(\frac{g(\bJ)}{J_\mathrm{cut}}\right)^\zeta\bigg]
-\bigg(1 + \varkappa\tanh \frac{J_\phi}{J_{\phi,0}} \bigg), \\
-g(\bJ) &\equiv g_r J_r + g_z J_z + (3-g_r-g_z) |J_\phi|, \quad
-h(\bJ)  \equiv h_r J_r + h_z J_z + (3-h_r-h_z) |J_\phi|
-\end{align*}
-The parameters of this model are listed in the structure \ttt{DoublePowerLawParams} and have the following meaning (default values in brackets):
-\begin{itemize}
-\item \ppp{norm} is the overall normalization $M$ with the dimension of mass; the actual total mass differs from $M$ by a numerical factor ranging from 1 to a few tens, which depends on other parameters of the model. 
-\item \ppp{J0} is the characteristic action $J_0$ corresponding to the break in the double-power-law profile; it sets the overall scale of the model.
-\item \ppp{slopeIn} is the power-law index $\Gamma$ in the inner part of the model, below the characteristic action; must be $<3$.
-\item \ppp{slopeOut} is the power-law index $\Beta$ in the outer part of the model; must be $>3$.
-\item \ppp{steepness} [1] is the parameter $\eta$ controlling the steepness of the transition between the two asymptotic regimes.
-\item \ppp{coefJrIn} [1], \ppp{coefJzIn} [1] are the coefficients $h_r, h_z$ in the linear combination of actions, controlling the flattening and anisotropy in the inner part of the model; the third coefficient is implied to be $3-h_r-h_z$, and all three must be non-negative.
-\item \ppp{coefJrOut} [1], \ppp{coefJzOut} [1] are the similar coefficients $g_r, g_z$ for the outer part of the model.
-\item \ppp{Jcutoff} [0] additionally suppresses the DF at large actions (beyond $J_\mathrm{cut}$), 0  means disable.
-\item \ppp{cutoffStrength} [2] sets the steepness $\zeta$ of this exponential cutoff at large $J$.
-\item \ppp{rotFrac} [0] controls the amount of streaming motion by setting the odd-$J_\phi$ part of DF to be $\varkappa$ times the even-$J_\phi$ part; $\varkappa=0$ disables rotation and $\varkappa=\pm 1$ correspond to models with maximum rotation.
-\item \ppp{Jphi0} [0] sets the extent $J_{\phi,0}$ the central core with suppressed rotation.
-\end{itemize}
-This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{Spheroid} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ in the self-consistent case. An example program \texttt{example_doublepowerlaw.cpp} helps to find the values of these parameters that best correspond to the given spherical isotropic model.
 
 %%%%%%%%%%%%%%
 \subsubsection{Disky components}  \label{sec:DFdisk}
@@ -561,15 +531,75 @@ The \ttt{QuasiIsothermal} DF is then computed as
 where the auxiliary functions $\tilde\sigma_r,\tilde\sigma_z$ now refer to the oldest stars. A similar modification applies to the \ttt{Exponential} DF, except that the age-dependent parameters are the scale actions $J_{r,0}, J_{z,0}$, not the velocity dispersions.
 
 %%%%%%%%%%%%%%
+\subsubsection{Spheroidal components}  \label{sec:DFspheroid}
+
+A suitable choice for DFs of elliptical galaxies, bulges or haloes is the \ttt{DoublePowerLaw} model, which is similar to the ones presented in \cite{Binney2014, Posti2015}, with a different notation:
+\begin{align*}
+f(\bJ) &= \frac{M}{(2\pi\, J_0)^3}
+%\left(\frac{h(\bJ)}{J_0}\right)^{-\Gamma}
+\left[1 + \left(\frac{J_0}{h(\bJ)}\right)^\eta \right]^{\Gamma / \eta} \;
+\left[1 + \left(\frac{g(\bJ)}{J_0}\right)^\eta \right]^{(\Gamma-\Beta) / \eta} \\
+&\times
+\left[1 - \beta\left(\frac{J_\mathrm{core}}{h(\bJ)}\right) + 
+\left(\frac{J_\mathrm{core}}{h(\bJ)}\right)^2 \right]^{-\Gamma/2}
+\exp\bigg[-\left(\frac{g(\bJ)}{J_\mathrm{cutoff}}\right)^\zeta\bigg] \;
+\bigg(1 + \varkappa\tanh \frac{J_\phi}{J_{\phi,0}} \bigg), \\
+g(\bJ) &\equiv g_r J_r + g_z J_z\, + (3-g_r-g_z)\, |J_\phi|, \\
+h(\bJ) &\equiv h_r J_r + h_z J_z   + (3-h_r-h_z)   |J_\phi|.
+\end{align*}
+The parameters of this model are listed in the structure \ttt{DoublePowerLawParams} and have the following meaning (default values in brackets):
+\begin{itemize}
+\item \ppp{norm} is the overall normalization $M$ with the dimension of mass; the actual total mass differs from $M$ by a numerical factor ranging from 1 to a few tens, which depends on other parameters of the model. 
+\item \ppp{J0} is the characteristic action $J_0$ corresponding to the break in the double-power-law profile; it sets the overall scale of the model.
+\item \ppp{slopeIn} is the power-law index $\Gamma$ in the inner part of the model, below the characteristic action; must be $<3$.
+\item \ppp{slopeOut} is the power-law index $\Beta$ in the outer part of the model; must be $>3$.
+\item \ppp{steepness} [1] is the parameter $\eta$ controlling the steepness of the transition between the two asymptotic regimes.
+\item \ppp{coefJrIn} [1], \ppp{coefJzIn} [1] are the coefficients $h_r, h_z$ in the linear combination of actions, controlling the flattening and anisotropy in the inner part of the model; the third coefficient is implied to be $3-h_r-h_z$, and all three must be non-negative.
+\item \ppp{coefJrOut} [1], \ppp{coefJzOut} [1] are the similar coefficients $g_r, g_z$ for the outer part of the model.
+\item \ppp{Jcore} [0] introduces an optional central core, forcing the DF to have a finite central value even when the inner slope $\Gamma$ is nonzero \cite{ColeBinney2017}; in this case, the auxiliary coefficient $\beta$ is assigned automatically from the condition that the total normalization of the DF remains the same (although this is only true when $J_\mathrm{core}\ll \mathrm{min}(J_0, J_\mathrm{cutoff})$ or when the coefficients $g_r=h_r, g_z=h_z$, otherwise it still changes somewhat).
+\item \ppp{Jcutoff} [0] additionally suppresses the DF at large actions (beyond $J_\mathrm{cut}$), 0  means disable.
+\item \ppp{cutoffStrength} [2] sets the steepness $\zeta$ of this exponential cutoff at large $J$.
+\item \ppp{rotFrac} [0] controls the amount of streaming motion by setting the odd-$J_\phi$ part of DF to be $\varkappa$ times the even-$J_\phi$ part; $\varkappa=0$ disables rotation and $\varkappa=\pm 1$ correspond to models with maximum rotation.
+\item \ppp{Jphi0} [0] sets the extent $J_{\phi,0}$ the central core with suppressed rotation.
+\end{itemize}
+This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{Spheroid} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ in the self-consistent case. An example program \texttt{example_doublepowerlaw.cpp} helps to find the values of these parameters that best correspond to the given spherical isotropic model.
+
+%%%%%%%%%%%%%%
 %\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
 %
 %A general way of representing an arbitrary DF in a three-dimensional action space is through an  \hyperref[sec:SplineInterpolation]{interpolating spline} in suitably scaled coordinates. The formulation in terms of B-splines is also an example of a multi-component DF, where each basis function, formed as a tensor product of one-dimensional B-splines, is a separate component. These DFs are used as building blocks in self-consistent models (work in preparation).
 
 %%%%%%%%%%%%%%
-\subsubsection{Spherical isotropic models}  \label{sec:DFspherical}
+\subsubsection{Spherical DFs constructed from a density profile}  \label{sec:DFspherical}
 
-There is an alternative framework for a special case of a spherically-symmetric potential and an isotropic DF in the velocity space. Such DFs depend only on energy $E$, which is a certain function of $J_r$ and $L\equiv J_z+|J_\phi|$ (provided, e.g., by the \ttt{ActionFinderSpherical} class).
-To avoid the need to express this function explicitly, and to retain the convenience of action formalism, we instead use the phase volume $h$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
+The previously described types of DFs were defined in terms of an analytic functions of actions, and the density profiles that they generate in a particular potential (Section~\ref{sec:Moments}) are not available in a closed form. The alternative approach is to start from a given density profile and a potential, and determine a DF that generates this density profile, using some sort of inversion formula. So far this approach has been mostly used in spherical systems, with the most well-known case being the Eddington inversion formula for a spherical isotropic DF. We implement a more general version of this formula \cite{Cuddeford1991}, which produces a DF with the following velocity anisotropy profile:
+\begin{align*}
+\beta(r) \equiv 1 - \frac{\sigma_t^2}{2\sigma_r^2} = \frac{\beta_0 + (r/r_a)^2}{1 + (r/r_a)^2}.
+\end{align*}
+$\beta_0$ is the limiting value of anisotropy in the center, and if $r_a<\infty$, the anisotropy coefficient tends to 1 at large $r$ (Osipkov--Merritt profile), otherwise stays equal to $\beta_0$ everywhere. The usual isotropic case is obtained by setting $\beta_0=0, r_a=\infty$.
+
+The DF, expressed in terms of energy $E$ and angular momentum $L$, has the following form:
+\begin{align*}
+f(E,L) = \hat f(Q) \; L^{-2\beta_0}, \quad Q\equiv E + L^2 / (2 r_a^2) .
+\end{align*}
+The function $\hat f(Q)$ is computed numerically for the given choice of parameters, density and potential, as explained in Section~\ref{sec:DFsphericalDetails}), and represented in an interpolated form on a suitable grid in $Q$.
+For some combinations of parameters, this produces a DF which is negative in some range of $Q$, in particular, when the central slopes of the density profile $\gamma \equiv -d\ln\rho/d\ln r$, the potential $\delta \equiv -d\ln(-\Phi)/d\ln r$, and the coefficient $\beta_0$ violate the so-called slope--anisotropy theorem \cite{AnEvans2006}: $\gamma \ge 2\beta + (1/2-\beta)\delta$. For the self-gravitating case, $\delta=0$ if the potential is finite at origin, or $\delta=\beta-2$ otherwise. If the computed DF is negative, it is replaced by zero.
+
+This type of DF has the following parameters:
+\begin{itemize}
+\item \ppp{beta0} [0]  is the central value of velocity anisotropy, must be in the range $-0.5 \le \beta_0 < 1$.
+\item \ppp{r_a} [$\infty$]  is the anisotropy radius, must be positive (in particular, infinity means a constant-anisotropy model).
+\end{itemize}
+In addition, one needs to provide one-dimensional functions representing the radial profile of the density and the potential (if they are taken from the same model, only the latter is needed). Any spherically-symmetric instances of \ttt{Density} and \ttt{Potential} classes can be used.
+
+The DF is traditionally expressed in terms of $E,L$, and in this form can only be used in the same potential $\Phi$ as it was constructed in. However, it can be put on equal grounds with other action-based DFs, which are manifestly independent of potential, using the following approach.
+An instance of \ttt{ActionFinderSpherical} class, constructed for the original potential $\Phi$, is attached to the instance of a \ttt{QuasiSpherical} DF. To compute the value of DF at the given triplet of actions $\bJ$, we map them to $E,L$ using this original spherical action finder, and then feed these values to the DF. Crucially, in this form the actions $\bJ(\bx,\bv \;|\;\tilde\Phi)$ may be computed in any other potential $\tilde\Phi$ (not necessarily spherical), not just the original $\Phi$. This corresponds to the DF being adiabatically transformed from the original potential to the new one, without changing its dependence on actions.
+This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula or its anisotropic generalization in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. The resulting DF is then viewed as a function of actions only. In subsequent iterations, the potential is no longer spherical, but the density and anisotropiy profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
+
+%%%%%%%%%%%%%%
+\subsubsection{Spherical isotropic models}  \label{sec:DFsphericalIsotropic}
+
+In a special case of spherical isotropic models, the DF has the form $f(E)$. There is an alternative formulation which makes it invariant with respect to the potential, retaining the convenience of action formalism without the need to compute actions explicitly. Namely, we use the phase volume $h$ instead of $E$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
 \begin{align*}
 h(E) &\equiv \iiint d^3x \iiint d^3v\, H\Big[E - \big(\Phi(|\bx|)+|\bv|^2/2\big)\Big] \;,\quad
 \mbox{where $H$ is the step function,} \\
@@ -584,11 +614,11 @@ g(E) \equiv 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, \sqrt{2\big(E-\Phi(r)\big)}
 \end{align*}
 
 Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, dh$ is finite. 
-One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{makeEddingtonDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalDF}.
-More information on these models is given in section~\ref{sec:DFsphericalDetails}.
+One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{createSphericalIsotropicDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalIsotropicDF}.
+More information on these models is given in section~\ref{sec:DFsphericalIsotropicDetails}.
 
-These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{QuasiIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
-This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. In subsequent iterations, the potential is no longer spherical, but the density profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
+These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{QuasiSphericalIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
+When the original DF is constructed using the Eddington inversion formula, it is easier to use the \ttt{QuasiSpherical} class from the previous section directly, avoiding the additional transformation $E\leftrightarrow h$.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Galaxy modelling framework}  \label{sec:GalaxyModel}
@@ -640,7 +670,7 @@ Both approaches should in principle deliver an equivalent discrete representatio
 
 There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{sampleDensity} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
 
-The inverse procedure for constructing a DF from a given \Nbody model is less well defined. In the case of a spherical isotropic system (Section~\ref{sec:DFspherical}), the one-dimensional function of phase volume $f(h)$ is estimated non-parametrically with the \hyperref[sec:SplineFitting]{penalized density fitting method} and represented as a spline in scaled coordinate (the routine \ttt{fitSphericalDF}). In principle this may be generalized for the case of a three-dimensional $f(\bJ)$, but this has not been implemented yet. The alternative is to fit a parametric DF to the array of actions, computed for the \Nbody particles in the given potential (of course, a suitable self-consistent \ttt{Multipole} or \ttt{CylSpline} potential itself may also be constructed from the same \Nbody model). This approach is demonstrated by one of the example programs (Section~\ref{sec:ExamplesTests}).
+The inverse procedure for constructing a DF from a given \Nbody model is less well defined. In the case of a spherical isotropic system (Section~\ref{sec:DFsphericalIsotropic}), the one-dimensional function of phase volume $f(h)$ is estimated non-parametrically with the \hyperref[sec:SplineFitting]{penalized density fitting method} and represented as a spline in scaled coordinate (the routine \ttt{fitSphericalDF}). In principle this may be generalized for the case of a three-dimensional $f(\bJ)$, but this has not been implemented yet. The alternative is to fit a parametric DF to the array of actions, computed for the \Nbody particles in the given potential (of course, a suitable self-consistent \ttt{Multipole} or \ttt{CylSpline} potential itself may also be constructed from the same \Nbody model). This approach is demonstrated by one of the example programs (Section~\ref{sec:ExamplesTests}).
 
 %%%%%%%%%%%%%%
 \subsubsection{Iterative self-consistent modelling}  \label{sec:SCM}
@@ -785,7 +815,7 @@ or from a list of existing \ttt{DistributionFunction} objects, creating a compos
 \texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}\\[2mm]
 Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).\\[2mm]
 The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\Sigma,\sigma$.\\[2mm]
-The \ppp{QuasiIsotropic} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the Eddington inversion formula to create $f(E)$ and then a spherical action finder to convert it to an action-based form.
+The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the generalized Eddington inversion formula to create $f(E,L)$ and then a spherical action finder to convert it to an action-based form.
 
 \paragraph{GalaxyModel} is the combination of a potential, an action finder, and a DF:\\
 \texttt{gm = agama.GalaxyModel(pot, df)}
@@ -895,9 +925,9 @@ This example is inspired by one of the Gaia Challenge assignments \cite{Read2017
 \paragraph{example_fortran} demonstrates how to create and use \Agama potentials in \Fortran, both for built-in density or potential models, or for user-defined \Fortran functions that provide the density or potential.
 
 \phantomsection\label{sec:mkspherical}%
-\paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFspherical}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation.
+\paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFsphericalIsotropic}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation.
 
-\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalDetails}.
+\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalIsotropicDetails}.
 
 \paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}).
 
@@ -1324,7 +1354,7 @@ The potential in the multipole expansion approach is represented as a sum of ind
 Here $\tilde P_l^m(x) \equiv \sqrt{\frac{2l+1}{4\pi}\frac{(l-|m|)!}{(l+|m|)!}} \;P_l^{|m|}(x)$ 
 are normalized associated Legendre polynomials, $l_\mathrm{max}$ is the order of expansion in meridional angle $\theta$, and $m_0(l) = \mathrm{min}(l, m_\mathrm{max})$, where $m_\mathrm{max} \le l_\mathrm{max}$ is the order of expansion in azimuthal angle $\phi$ (they do not need to coincide, e.g., if the model is considerably flattened but only weakly triaxial, then $m_\mathrm{max}=2$ may be sufficient, while $l_\mathrm{max}$ may be set to 8 or 10). The normalization is chosen so that for a spherically-symmetric potential, $\Phi_{0,0}(r)=\Phi(r)$, and that for each $l$, the sum of squared coefficients over all $m$ is invariant under rotations of coordinate system.
 
-In the \ttt{Multipole} class, individual terms are approximated as suitably scaled functions in log-scaled radius. The logarithmic transformation of radius is intended to attain high dynamic range with a moderate number (a few dozen) of grid points, while the transformation of amplitude of each term increases the accuracy of interpolation. The main $l=0$ term is log-scaled (i.e., the actual function to be interpolated is $\ln\big[-\Phi_{0,0}(\ln r)\big]$), whereas the other terms are normalized to the value of the $l=0$ term (i.e., the spline is constructed for $[\Phi_{l,m}/\Phi_{0,0}](\ln r)$). Each term is interpolated as a quintic spline, defined by the values and first derivatives at nodes of a radial grid; usually this grid would be linear in log-radius, with a constant ratio between consecutive radii $f\equiv r_{k+1}/r_k$.
+In the \ttt{Multipole} class, individual terms are approximated as suitably scaled functions in log-scaled radius. The logarithmic transformation of radius is intended to attain high dynamic range with a moderate number (a few dozen) of grid points, while the transformation of amplitude of each term increases the accuracy of interpolation. The main $l=0$ term is log-scaled when possible (i.e., if it is everywhere negative, then the actual function to be interpolated is $\ln\big[1/\Phi(0)-1/\Phi_{0,0}(\ln r)\big]$, where $\Phi(0)$ is the value of potential at origin, which may be finite or $-\infty$). The other terms are normalized to the value of the $l=0$ term (i.e., the spline is constructed for $[\Phi_{l,m}/\Phi_{0,0}](\ln r)$). Each term is interpolated as a quintic spline, defined by the values and first derivatives at nodes of a radial grid; usually this grid would be linear in log-radius, with a constant ratio between consecutive radii $f\equiv r_{k+1}/r_k$.
 
 If the minimum/maximum grid radii are not provided, they are assigned automatically using the following approach. First we locate the radius at which the logarithmic curvature of the spherically-symmetric part of the density profile ($d^2\ln(\rho_{0,0})/d(\ln r)^2$), weighted by the mass at the given radius ($\propto r^2\rho$), reaches the maximum. For most finite-mass models, this would be the near the half-mass radius, but even for models with infinite mass (such as NFW) this criterion still estimates the "radius of interest" quite well. This fiducial radius $r_\star$ is taken as the center of the logarithmic grid, a suitable grid spacing factor $f$ is assigned, and the grid is extended both ways from this radius: $r_\mathrm{max/min} = r_\star\: f^{\pm N_R/2}$. As $N_R$ gets larger, both the dynamical range $D\equiv r_\mathrm{max}/r_\mathrm{min}$ is increased, and the resolution gets better (nodes are spaced more densely); e.g., for $N_R=20$, these are $D\sim 10^6$ and $f\sim 2$. If the input density drops to zero beyond some radius, the upper extent of the grid is moved inward to this radius, Likewise, if the density is declining towards small $r$, the potential has a very flat core, so that the inner grid point is shifted up to a "safe" radius $r_\mathrm{min}$ at which the potential is sufficiently different from $\Phi(0)$ (at least in the last few digits), to prevent the loss of precision of floating-point numbers. This automatic algorithm gives reasonable results in vast majority of cases, but if necessary, the min/max radii may be provided by the user.
 
@@ -1529,7 +1559,35 @@ Nevertheless, the overall accuracy of the St\"ackel approximation is reasonably 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Distribution functions}  \label{sec:DFdetails}
 
-\subsubsection{Spherical isotropic DFs}  \label{sec:DFsphericalDetails}
+\subsubsection{Spherical anisotropic DFs}  \label{sec:DFsphericalDetails}
+
+This type of DF, represented by the class \ttt{df::QuasiSpherical} and its descendants, is constructed from a given combination of density and potential, under certain assumptions about the functional form of the DF. At the moment, only one specific subtype is implemented in the \ttt{df::QuasiSphericalCOM} class: the Cuddeford--Osipkov--Merritt model:
+\begin{align}  \label{eq:DFanisotropic}
+f(E,L) &= \hat f(Q) \; L^{-2\beta_0}, \qquad Q\equiv E + L^2 / (2 r_a^2) , \\[3mm]
+\hat f(Q) &= \left\{  \begin{array}{ll}
+\displaystyle \frac{2^{\beta_0}}{(2\pi)^{3/2}\, \Gamma(1-\beta_0)\; \Gamma(3/2-\beta)}\,
+\int_Q^0 \frac{d\hat\rho}{d\Phi} \frac{d\Phi}{(\Phi - Q)^{3/2-\beta_0}}, &
+1/2<\beta_0<1, \\[7mm]
+\displaystyle \frac{1}{2\pi^2}\, 
+\left. \frac{d\hat\rho}{d\Phi} \right|_{\Phi=Q}, &
+\beta_0=1/2, \\[7mm]
+\displaystyle \frac{2^{\beta_0}}{(2\pi)^{3/2}\, \Gamma(1-\beta_0)\; \Gamma(1/2-\beta)}\,
+\int_Q^0 \frac{d^2\hat\rho}{d\Phi^2} \frac{d\Phi}{(\Phi - Q)^{1/2-\beta_0}}, &
+-1/2<\beta_0<1/2, \\[7mm]
+\displaystyle \frac{1}{2\pi^2}\, 
+\left. \frac{d^2\hat\rho}{d\Phi^2} \right|_{\Phi=Q} , &
+\beta_0=-1/2,
+\end{array} \right. \nonumber \\[3mm]
+\hat\rho(\Phi) &\equiv \left. \rho(r) \,r^{2\beta_0}\, \big[1 + (r/r_a)^2\big]^{1-\beta_0} \right|_{r=r(\Phi)}.  \nonumber
+\end{align}
+
+Here $\hat\rho$ is the augmented density, expressed as a function of potential and then differentiated once or twice.
+We use a finite-difference estimate for the radial derivatives of the original density $\rho(r)$, but this becomes inaccurate at small $r$ when both $\rho$ and $\Phi$ tend to finite limiting values. To cope with this issue, we fit a Taylor series expansion for $\rho(\Phi)$ as $\Phi \to \Phi(r=0)$, and use it at small radii where it can be differentiated analytically (only if the series produce a reasonable approximation of the density). We limit the range of the anisotropy coefficient to $\beta_0 \ge -1/2$, since lower values would need a third or even higher derivative of density, becoming too challenging to compute accurately.
+The energy-dependent part of the DF $\hat f(Q)$ is represented by a log-scaled cubic spline in the scaled energy coordinate $\scE$ defined below. Negative values of $f(Q)$ are replaced by zeros.
+
+\subsubsection{Spherical isotropic DFs and the phase-volume formalism}  \label{sec:DFsphericalIsotropicDetails}
+
+In the isotropic case ($\beta_0=0$, $r_a=\infty$), the DF is a function of $E$ alone, but it can also be expressed in terms of an action-like variable $h$.
 
 The correspondence between energy $E$ and phase volume $h$ in the given potential is provided by the class \ttt{PhaseVolume}. Phase volume $h(E)$ and its derivative (density of states) $g(E)\equiv dh(E)/dE$ are defined as
 \begin{subequations}
@@ -1547,7 +1605,7 @@ In other words, phase volume is literally the volume of phase space enclosed by 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$). The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any finite-mass model in which the density drops faster than $r^{-3}$ at large radii), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
 The interpolation in scaled coordinates typically attains a level of accuracy better than $10^{-9}$ over the range of $h$ covered by the spline, and $\sim 10^{-5}$ in the extrapolated regime (if the potential indeed has a power-law asymptotic behaviour).
 
-Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{makeEddingtonDF} and \ttt{fitSphericalDF} defined in \texttt{galaxymodel_spherical.h}.
+Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{createSphericalIsotropicDF} and \ttt{fitSphericalIsotropicDF} defined in \texttt{df_spherical.h}.
 
 The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
 In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
@@ -1576,7 +1634,7 @@ K_h(E) &\equiv \int_{\Phi(0)}^E f(E')\,h(E')\,dE' = \int_0^{h(E)} \frac{f(h')\,h
 
 In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\star^{-1}\ln\Lambda)$, where the term in brackets is the amplitude of relaxation term for the given number of stars $N_\star$ representing the stellar system ($\Lambda \sim N$ is the Coulomb logarithm). We note that $K_g(E)$ is the mass of stars with energies less than $E$ (and thus $M_\mathrm{total} = K_g(0)$), and $K_h(E)$ is their kinetic energy (up to a factor 3/2).
 
-Of course, an efficient evaluation of diffusion coefficients again requires interpolation from a pre-computed table. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
+Of course, an efficient evaluation of diffusion coefficients again requires interpolation from pre-computed tables, which are provided by the class \ttt{SphericalIsotropicModelLocal}. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
 Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
 
 Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) d^3v$. This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
@@ -1592,7 +1650,7 @@ The Fokker--Planck solver, dubbed \textsc{PhaseFlow} \cite{Vasiliev2017}, has se
 \item The distribution function $f(h,t)$ for the evolving population of stars, represented by its values on a grid in $\ln h$. Values of $f(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f$ as a function of $\ln h$.
 \item The potential $\Phi(r)$ corresponding to the density profile $\rho(r)$ of the evolving population, plus optionally an external component (e.g., a central point mass). The 1d Poisson equation is solved by the \ttt{Multipole} class (of course, a monopole is a particular case of a multipole).
 \item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,dE$ is obtained from the DF \textit{in the given potential}. We recompute the density after the DF has been evolved in the Fokker--Planck step, using the potential extrapolated from its previous evolution to the current time. This extrapolation makes in unnecessary to iteratively improve the solution by substituting the self-consistent potential back to the r.h.s.\ of this equation.
-\item The drift and diffusion coefficients $D_h, D_{hh}$ are computed using the \ttt{SphericalModel} class which combines the DF $f(h)$ with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
+\item The drift and diffusion coefficients $D_h, D_{hh}$ are computed using a dedicated class \ttt{SphericalIsotropicModel} which combines the DF $f(h)$ with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
 \item The FP equation (\ref{eq:FokkerPlanck}) in the discretized form is solved with the Chang--Cooper scheme (e.g., \cite{ParkPetrosian1996}) or with a finite-element method, described in the appendix of \cite{Vasiliev2017}.
 \end{itemize}
 
@@ -1604,6 +1662,9 @@ The Fokker--Planck solver, dubbed \textsc{PhaseFlow} \cite{Vasiliev2017}, has se
 
 \bibitem{odeint}
 Ahnert K., Mulansky M., 2011, AIP Conf. Proc. 1389, 1586
+
+\bibitem{AnEvans2006}
+An J.H., Evans N.W., 2006, ApJ, 642, 752
 
 \bibitem{Astropy}
 The Astropy collaboration, 2013, A\&A, 558, A33
@@ -1646,6 +1707,12 @@ Cohl H., Tohline J., 1999, ApJ, 527, 86
 
 \bibitem{Cohn1980}
 Cohn H., 1980, ApJ, 242, 765
+
+\bibitem{ColeBinney2017}
+Cole D., Binney J., 2017, MNRAS, 465, 798
+
+\bibitem{Cuddeford1991}
+Cuddeford P., 1991, MNRAS, 253, 414
 
 \bibitem{Dehnen1993}
 Dehnen W., 1993, MNRAS, 265, 250

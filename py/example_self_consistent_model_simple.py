@@ -12,7 +12,7 @@ import agama, numpy, matplotlib.pyplot as plt
 
 # the distribution function defining the model
 truepot = agama.Potential(type='Plummer')
-df = agama.DistributionFunction(type='QuasiIsotropic', potential=truepot, density=truepot)
+df = agama.DistributionFunction(type='QuasiSpherical', potential=truepot, density=truepot)
 
 # initial guess for the density profile - deliberately a wrong one
 dens = agama.Density(type='Dehnen', mass=0.1, scaleRadius=0.5)

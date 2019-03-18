@@ -274,18 +274,18 @@ int main()
 
     // create the dark halo DF
     df::PtrDistributionFunction dfHalo = df::createDistributionFunction(
-        iniDFDarkHalo, model.totalPotential.get(), extUnits);
+        iniDFDarkHalo, model.totalPotential.get(), /*density not needed*/NULL, extUnits);
     // same for the bulge
     df::PtrDistributionFunction dfBulge = df::createDistributionFunction(
-        iniDFBulge, model.totalPotential.get(), extUnits);
+        iniDFBulge, model.totalPotential.get(), NULL, extUnits);
     // same for the stellar components (thin/thick disks and stellar halo)
     std::vector<df::PtrDistributionFunction> dfStellarArray;
     dfStellarArray.push_back(df::createDistributionFunction(
-        iniDFThinDisk, model.totalPotential.get(), extUnits));
+        iniDFThinDisk, model.totalPotential.get(), NULL, extUnits));
     dfStellarArray.push_back(df::createDistributionFunction(
-        iniDFThickDisk, model.totalPotential.get(), extUnits));
+        iniDFThickDisk, model.totalPotential.get(), NULL, extUnits));
     dfStellarArray.push_back(df::createDistributionFunction(
-        iniDFStellarHalo, model.totalPotential.get(), extUnits));
+        iniDFStellarHalo, model.totalPotential.get(), NULL, extUnits));
     // composite DF of all stellar components except the bulge
     df::PtrDistributionFunction dfStellar(new df::CompositeDF(dfStellarArray));
 

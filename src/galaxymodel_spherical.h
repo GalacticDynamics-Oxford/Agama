@@ -15,7 +15,7 @@
     with E=Phi(r_max).
     The derivative dh(E)/dE = g(E) is called the density of states.
     The distribution function formulated in terms of h has the advantage that
-    the mass per unit interval of h is given simply by  dM = f(h) dh, 
+    the mass per unit interval of h is given simply by  dM = f(h) dh,
     whereas in terms of E it is given by the familiar expression dM = f(E) g(E) dE.
     Moreover, an adiabatic modification of potential leaves f(h) unchanged,
     although the mapping h(E), of course, depends on the potential.
@@ -24,14 +24,17 @@
     the bi-directional correspondence between E and h for any potential.
     Any function of a single variable may serve as a distribution function f(h);
     the class `math::LogLogSpline` can be used for representing a log-scaled interpolated f.
-    The routines `makeEddingtonDF` and `fitSphericalDF` construct such interpolators
-    from a pair of density and potential models (using the Eddington inversion formula)
-    or from an array of particles with known masses and values of h (using penalized
-    spline log-density fit).
-    The classes `SphericalModel` and `DiffusionCoefs` construct interpolation tables
-    to provide coefficients of drift and diffusion describing the two-body
-    relaxation process (the former - for the 1d orbit-averaged Fokker-Planck equation,
-    the latter - for position-dependent relaxation coefficients as functions of r and v).
+    The routines `df::createSphericalIsotropicDF` and `df::fitSphericalIsotropicDF`,
+    defined in df_spherical.h, construct such interpolators from a pair of density and
+    potential models (using the Eddington inversion formula) or from an array of particles
+    with given masses and values of h (using penalized spline log-density fit).
+    The classes `SphericalIsotropicModel` and `SphericalIsotropicModelLocal`, defined in
+    this file, construct interpolation tables to provide coefficients of drift and diffusion
+    describing the two-body relaxation process (the former - for the 1d orbit-averaged
+    Fokker-Planck equation, the latter - for position-dependent relaxation coefficients
+    as functions of r and v).
+    These models are used in the galaxymodel_fokkerplanck module (the FP code PhaseFlow)
+    and in the raga_*** modules (the Monte Carlo stellar-dynamical code Raga).
 */
 #pragma once
 #include "particles_base.h"
@@ -50,7 +53,7 @@ namespace galaxymodel{
     (it does not store the original function provided in the constructor, but computes f(h)
     from one of its interpolators).
 */
-class SphericalModel: public math::IFunction{
+class SphericalIsotropicModel: public math::IFunction{
 
     /// 1d interpolators for various weighted integrals of f(h), represented in log-log coordinates:
     math::LogLogSpline
@@ -71,7 +74,7 @@ public:
         \throw  std::runtime_error  in case of various problems detected with the data
         (e.g., incorrect asymptotic behaviour).
     */
-    SphericalModel(
+    SphericalIsotropicModel(
         const potential::PhaseVolume& phasevol,
         const math::IFunction& df,
         const std::vector<double>& gridh = std::vector<double>());
@@ -104,13 +107,15 @@ public:
 
 
 /** An augmented spherical model providing various quantities as functions of position.
-    This class is a further extension of SphericalModel, containing the instance of the latter
-    as a member variable, and providing two-dimensional interpolators for local (position-dependent)
-    quantities (advection and diffusion coefficients in velocity, density, velocity dispersion, etc.)
+    This class is a further extension of SphericalIsotropicModel, providing two-dimensional
+    interpolators for local (position-dependent) quantities (advection and diffusion coefficients
+    in velocity, density, velocity dispersion, etc.)
     As a by-product, the same 2d interpolators can be used to compute the density and draw samples
     from the velocity distribution at any position specified by the potential.
+    Hence this class performs (some of) the same tasks for spherical isotropic DFs
+    as the more general routines in galaxymodel_base.h working with the GalaxyModel structure.
 */
-class SphericalModelLocal: public SphericalModel {
+class SphericalIsotropicModelLocal: public SphericalIsotropicModel {
 
     /// 2d interpolators for scaled integrals over distribution function
     math::CubicSpline2d intJ1, intJ3;
@@ -129,25 +134,25 @@ public:
         (e.g., the distribution function has infinite mass, or the potential is non-monotonic, etc.),
         or any other inconsistency detected in the input data or constructed interpolators.
     */
-    SphericalModelLocal(
+    SphericalIsotropicModelLocal(
         const potential::PhaseVolume& phasevol,
         const math::IFunction& df,
         const std::vector<double>& gridh = std::vector<double>()) 
     :
-        SphericalModel(phasevol, df, gridh) { init(df, gridh); }
+        SphericalIsotropicModel(phasevol, df, gridh) { init(df, gridh); }
 
-    /** Construct the interpolators for diffusion coefficients from a SphericalModel.
-        \param[in]  model  is an instance of SphericalModel,
+    /** Construct the interpolators for diffusion coefficients from a SphericalIsotropicModel.
+        \param[in]  model  is an instance of SphericalIsotropicModel,
         which provides both the phase volume and the expression for f(h).
         \param[in]  gridh  (optional) grid in phase volume for the interpolators
         (if not provided, will construct a suitable one automatically).
         \throw std::runtime_error in case of inconsistencies in the input data.
     */
-    SphericalModelLocal(
-        const SphericalModel& model,
+    SphericalIsotropicModelLocal(
+        const SphericalIsotropicModel& model,
         const std::vector<double>& gridh = std::vector<double>())
     :
-        SphericalModel(model) { init(*this, gridh); }
+        SphericalIsotropicModel(model) { init(*this, gridh); }
 
     /** Compute the local drift and diffusion coefficients in velocity,
         as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
@@ -178,13 +183,13 @@ public:
 
 /** Compute the orbit-averaged drift and diffusion coefficients in energy.
     The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
-    \param[in]  model  is the instance of SphericalModel that provides the necessary quantities
+    \param[in]  model  is the instance of SphericalIsotropicModel that provides the necessary quantities
     \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
     (otherwise the motion is unbound and orbit-averaging does not have sense);
     \param[out] DeltaE  will contain the drift coefficient <Delta E>;
     \param[out] DeltaE2 will contain the diffusion coefficient <Delta E^2>.
 */
-void difCoefEnergy(const SphericalModel& model, double E, double &DeltaE, double &DeltaE2);
+void difCoefEnergy(const SphericalIsotropicModel& model, double E, double &DeltaE, double &DeltaE2);
 
 /** Compute the diffusion coefficient entering the expression for the loss-cone flux.
     \param[in]  model   is the spherical model providing the DF and the phase volume.
@@ -199,81 +204,7 @@ void difCoefEnergy(const SphericalModel& model, double E, double &DeltaE, double
     \f$  D = 8\pi^2 g^{-1}(E)  \int_0^{r_{max}(E)}  dr  \langle \Delta v_\bot^2 \rangle  r^2 / v  \f$.
     The returned value should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
 */
-double difCoefLosscone(const SphericalModel& model, const math::IFunction& pot, double E);
-
-
-/** Construct a spherical isotropic distribution function of phase volume h for the given pair
-    of density and potential profiles (which need not be related through the Poisson equation),
-    using the Eddington inversion formula.
-    \param[in]  density   is any one-dimensional function returning rho(r); may be constructed
-    from a spherically-symmetric `BaseDensity` object using the wrapper class `DensityWrapper`.
-    \param[in]  potential  is any one-dimensional function representing the spherically-symmetric
-    potential (may be constructed using the `PotentialWrapper` class).
-    \param[in,out]  gridh  is the array of phase volumes at which the DF is defined;
-    if this array is empty on input, a plausible grid will be created automatically,
-    but in any case it may later be modified by this routine, to eliminate negative DF values.
-    \param[out]     gridf  is the array of DF values at corresponding nodes of gridh,
-    guaranteed to contain only positive values (thus a LogLogSpline may be constructed from it).
-    \throw  std::runtime_error if no valid DF can be constructed.
-*/
-void makeEddingtonDF(
-    const math::IFunction& density,
-    const math::IFunction& potential,
-    /*output*/ std::vector<double>& gridh,
-    /*output*/ std::vector<double>& gridf);
-
-/** Construct a spherical isotropic distribution function using the Eddington formula.
-    This is a convenience overloaded routine that first computes the values of f at a grid in h,
-    using the previous function with the same name, and then creates an instance of LogLogSpline
-    interpolator to represent log(f) as a function of log(h) in terms of a cubic spline.
-    \param[in]  density    is any one-dimensional function returning rho(r);
-    \param[in]  potential  is any one-dimensional function representing the potential;
-    \return  an instance of math::LogLogSpline interpolator for the distribution function.
-*/
-inline math::LogLogSpline makeEddingtonDF(
-    const math::IFunction& density,
-    const math::IFunction& potential)
-{
-    std::vector<double> gridh, gridf;
-    makeEddingtonDF(density, potential, gridh, gridf);
-    return math::LogLogSpline(gridh, gridf);
-}
-
-
-/** Construct a spherical isotropic distribution function f(h) from an array of particles.
-    \param[in]  hvalues  is the array of values of h (phase volume) for each particle;
-    \param[in]  masses   is the array of particle masses;
-    \param[in]  gridSize is the number of nodes in the interpolated function
-    (20-40 is a reasonable choice); the grid nodes are assigned automatically.
-    \return     an instance of SphericalIsotropic function f(h).
-    \throw  std::invalid_argument exception if the input data is bad (e.g., masses are negative,
-    or array sizes are not equal, etc.)
-*/
-math::LogLogSpline fitSphericalDF(
-    const std::vector<double>& hvalues,
-    const std::vector<double>& masses,
-    unsigned int gridSize);
-
-
-/** Construct an interpolated spherical density profile from two arrays -- radii and
-    enclosed mass M(<r).
-    First a suitably scaled interpolator is constructed for M(r);
-    if it is found to have a finite limiting value at r --> infinity, the asymptotic power-law
-    behaviour of density at large radii will be correctly represented.
-    Then the density at each point of the radial grid is computed from the derivative of
-    this interpolator. The returned array may be used to construct a LogLogSpline interpolator
-    or a DensitySphericalHarmonic object (obviously, with only one harmonic).
-    \param[in]  gridr  is the grid in radius (must have positive values sorted in order of increase);
-    typically the radial grid should be exponentially spaced with r[i+1]/r[i] ~ 1.2 - 2.
-    \param[in]  gridm  is the array of enclosed mass at each radius (must be positive and monotonic);
-    \return  an array of density values at the given radii.
-    \throw   std::invalid_argument if the input arrays were incorrect
-    (incompatible sizes, non-monotinic or negative values), or
-    std::runtime_error if the interpolator failed to produce a positive-definite density.
-*/
-std::vector<double> densityFromCumulativeMass(
-    const std::vector<double>& gridr,
-    const std::vector<double>& gridm);
+double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFunction& pot, double E);
 
 
 /** Generate N-body samples of the spherical isotropic distribution function in the given potential.
@@ -325,18 +256,6 @@ void computeProjectedDensity(
     std::vector<double>& gridProjVelDisp);
 
 
-/** Read a file with the cumulative mass profile and construct a density model from it.
-    The text file should be a whitespace- or comma-separated table with at least two columns
-    (the rest is ignored) -- radius and the enclosed mass within this radius,
-    both must be in increasing order. Lines not starting with a number are ignored.
-    The enclosed mass profile should not include the central black hole (if present),
-    because it could not be represented in terms of a density profile anyway.
-    \param[in]  fileName  is the input file name.
-    \return  an interpolated density profile, represented by a LogLogSpline class.
-    \throw  std::runtime_error if the file does not exist, or the mass profile is not monotonic.
-*/
-math::LogLogSpline readMassProfile(const std::string& fileName);
-
 /** Write a text file with a table of several variables as functions of radius or energy.
     These variables are extracted from a spherical model described by a combination of
     potential, phase volume and distribution function.
@@ -361,17 +280,17 @@ math::LogLogSpline readMassProfile(const std::string& fileName);
 
     \param[in]  fileName  is the output file name.
     \param[in]  header  is the text written in the first line of the file
-    \param[in]  model  is the SphericalModel instance that provides both f(E) and h(E).
+    \param[in]  model  is the SphericalIsotropicModel instance that provides both f(E) and h(E).
     \param[in]  pot  is the potential Phi(r) - it is not contained in the spherical model
     (even though it may be derived from the phase volume), so should be provided separately.
     \param[in]  gridh  (optional)  the grid in phase volume (h) for the output table;
     if not provided, a suitable grid that encompasses the region of significant variation
     of f(h) is constructed automatically.
 */
-void writeSphericalModel(
+void writeSphericalIsotropicModel(
     const std::string& fileName,
     const std::string& header,
-    const SphericalModel& model,
+    const SphericalIsotropicModel& model,
     const math::IFunction& pot,
     const std::vector<double>& gridh = std::vector<double>());
 

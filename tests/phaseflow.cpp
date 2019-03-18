@@ -136,8 +136,8 @@ void exportTable(const std::string& filename, const std::string& header, const d
         std::string fullfilename = filename + utils::toString(timeSim);
         if(numComp>1)
             fullfilename += char(comp+97); /* suffix a,b,... */
-        galaxymodel::writeSphericalModel(fullfilename, header,
-        /*model*/      galaxymodel::SphericalModel(
+        galaxymodel::writeSphericalIsotropicModel(fullfilename, header,
+        /*model*/      galaxymodel::SphericalIsotropicModel(
             /*h(E)*/  *fp.phaseVolume(),
             /*f(h)*/  *fp.df(comp),
             /*gridh*/  fp.gridh()),
@@ -175,7 +175,7 @@ galaxymodel::FokkerPlanckComponent initComponent(const utils::KeyValueMap& args)
         throw std::invalid_argument("Need to provide density=... parameter");
     if(utils::fileExists(density))
         // if the density=... argument refers to an existing file, read the cumulative mass profile
-        comp.initDensity.reset(new math::LogLogSpline(galaxymodel::readMassProfile(density)));
+        comp.initDensity.reset(new math::LogLogSpline(potential::readMassProfile(density)));
     else {
         // otherwise create a built-in model
         densities.push_back(potential::createDensity(args));

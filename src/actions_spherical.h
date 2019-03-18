@@ -82,7 +82,8 @@ public:
 private:
     const double invPhi0;                 ///< 1/(value of potential at r=0)
     const potential::Interpolator2d pot;  ///< interpolator for potential and peri/apocenter radii
-    const math::QuinticSpline2d intJr;    ///< interpolator for the scaled value of radial action
+    const math::QuinticSpline2d intJr;    ///< interpolator for Jr(E,L)
+    const math::QuinticSpline2d intE;     ///< interpolator for E(Jr,L)
 };
 
 typedef ActionFinderSpherical ToyMapSpherical;

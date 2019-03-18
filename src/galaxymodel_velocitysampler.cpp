@@ -2,6 +2,7 @@
 #include "galaxymodel_spherical.h"
 #include "galaxymodel_jeans.h"
 #include "potential_multipole.h"
+#include "df_spherical.h"
 #include "math_core.h"
 #include "smart.h"
 #include "utils.h"
@@ -15,7 +16,7 @@ namespace galaxymodel {
 particles::ParticleArrayCar assignVelocityEdd(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
     const potential::BasePotential& pot,
-    const SphericalModelLocal& sphModel)
+    const SphericalIsotropicModelLocal& sphModel)
 {
     size_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
@@ -155,8 +156,8 @@ particles::ParticleArrayCar assignVelocity(
         }
         if(method == SD_EDDINGTON) {
             const potential::PhaseVolume phasevol(*fncPot);
-            const math::LogLogSpline df = makeEddingtonDF(*fncDens, *fncPot);
-            const SphericalModelLocal model(phasevol, df);
+            const math::LogLogSpline df = df::createSphericalIsotropicDF(*fncDens, *fncPot);
+            const SphericalIsotropicModelLocal model(phasevol, df);
             return assignVelocityEdd(pointCoords, pot, model);
         } else if(method == SD_JEANSSPH) {
             math::LogLogSpline model = createJeansSphModel(*fncDens, *fncPot, beta);

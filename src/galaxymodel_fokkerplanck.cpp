@@ -1,5 +1,6 @@
 #include "galaxymodel_fokkerplanck.h"
 #include "galaxymodel_spherical.h"
+#include "df_spherical.h"
 #include "math_core.h"
 #include "potential_multipole.h"
 #include "utils.h"
@@ -802,7 +803,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     std::vector<math::PtrFunction> initDF(data->numComp);
     for(unsigned int comp=0; comp<data->numComp; comp++) {
         std::vector<double> gridh(data->gridh), initf;
-        makeEddingtonDF(*components[comp].initDensity, potential::PotentialWrapper(*data->currPot),
+        df::createSphericalIsotropicDF(*components[comp].initDensity, potential::PotentialWrapper(*data->currPot),
             /*input/output*/ gridh, /*output*/ initf);
         initDF[comp].reset(new math::LogLogSpline(gridh, initf));  // interpolated f(h)
 
@@ -988,7 +989,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
 
         // construct the spherical model for this DF in the current potential
         math::PtrFunction df = impl->getInterpolatedFunction(data->gridf[comp]);
-        SphericalModel model(*data->phasevol, *df, data->gridh);
+        SphericalIsotropicModel model(*data->phasevol, *df, data->gridh);
 
         // store diagnostic quantities
         data->Mass += model.cumulMass();

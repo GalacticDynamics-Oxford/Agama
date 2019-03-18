@@ -28,6 +28,7 @@ and at the same time a useful tool to study dynamical properties of a given N-bo
 #include "potential_composite.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
+#include "df_spherical.h"
 #include "galaxymodel_spherical.h"
 #include "particles_io.h"
 #include "math_core.h"
@@ -71,6 +72,7 @@ const char* usage =
     "nbody=...     number of particles in the output snapshot.\n"
     "format=(text) format of the output N-body snapshot "
     "(Text, Nemo, Gadget - only the first letter matters).\n"
+    "seed=(0)      random seed (0 means randomize).\n"
     "VERSION=3.0   " __DATE__ "\n";
 
 // print a message and exit
@@ -81,7 +83,7 @@ void printfail(const char* msg)
 }
 
 // construct the distribution function from an N-body snapshot
-math::LogLogSpline fitSphericalDF(const particles::ParticleArrayCar& bodies,
+math::LogLogSpline fitSphericalIsotropicDF(const particles::ParticleArrayCar& bodies,
     const potential::BasePotential& pot, const potential::PhaseVolume& phasevol, int gridsize)
 {
     size_t nbody = bodies.size(), nactive = 0;
@@ -96,11 +98,11 @@ math::LogLogSpline fitSphericalDF(const particles::ParticleArrayCar& bodies,
             nactive++;
         }
     }
-    utils::msg(utils::VL_VERBOSE, "fitSphericalDF",
+    utils::msg(utils::VL_VERBOSE, "fitSphericalIsotropicDF",
         utils::toString(nactive)+" out of "+utils::toString(nbody)+" particles used in DF");
     hvalues.resize(nactive);
     masses. resize(nactive);
-    return galaxymodel::fitSphericalDF(hvalues, masses, gridsize);
+    return df::fitSphericalIsotropicDF(hvalues, masses, gridsize);
 }
 
 // main program begins here
@@ -117,6 +119,7 @@ int main(int argc, char* argv[])
     std::string outputsnap     = args.getString("out");
     std::string outputformat   = args.getString("format", "Text");
     std::string outputtab      = args.getString("tab");
+    int seed      = args.getInt("seed");
     int nbody     = args.getInt("nbody");
     int gridsize  = args.getInt("gridsizer", 50);
     double rmin   = args.getDouble("rmin", 0.);
@@ -139,7 +142,7 @@ int main(int argc, char* argv[])
     if(!inputdensity.empty()) {
         // the choice is made based on whether 'density=...' specifies an existing file name
         if(utils::fileExists(inputdensity)) {
-            densInterp = galaxymodel::readMassProfile(inputdensity);
+            densInterp = potential::readMassProfile(inputdensity);
             dens.reset(new potential::FunctionToDensityWrapper(densInterp));
         } else
             dens = potential::createDensity(args);
@@ -201,8 +204,9 @@ int main(int argc, char* argv[])
     // it may lead to a different result if the snapshot was not in equilibrium, or the velocities were
     // not in N-body units, or the real DF is not isotropic)
     math::LogLogSpline df = inputsnap.empty() || !extractdf ?
-        galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot)) :
-        fitSphericalDF(bodies, *pot, phasevol, gridsize);
+        df::createSphericalIsotropicDF(
+            potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot)) :
+        fitSphericalIsotropicDF(bodies, *pot, phasevol, gridsize);
 
     // combine all command-line arguments to form the output snapshot header
     std::string header="mkspherical " + args.dumpSingleLine();
@@ -210,14 +214,14 @@ int main(int argc, char* argv[])
     // now ripe the fruit: create an output table and/or
     // generate an N-body representation of the spherical model
     if(!outputtab.empty()) {
-        galaxymodel::writeSphericalModel(outputtab, header,
-            galaxymodel::SphericalModel(phasevol, df),
+        galaxymodel::writeSphericalIsotropicModel(outputtab, header,
+            galaxymodel::SphericalIsotropicModel(phasevol, df),
             potential::PotentialWrapper(*pot));
     }
 
     if(!outputsnap.empty()) {
         // generate the samples
-        math::randomize();
+        math::randomize(seed);
         particles::ParticleArraySph bodies = galaxymodel::samplePosVel(
             potential::PotentialWrapper(*pot), df, mbh? nbody-1 : nbody);
         if(mbh)  // add the central black hole as the 0th particle

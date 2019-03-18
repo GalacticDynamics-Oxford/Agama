@@ -137,12 +137,15 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
     }
     if(radii.empty() || phi.back()!=0)
         throw std::runtime_error("createKingModel: failed to construct model");
-    utils::msg(utils::VL_DEBUG, "createKingModel", "W0="+utils::toString(W0)+
-        ", g="+utils::toString(trunc)+" => c="+utils::toString(log10(radii.back())));
 
     // shift the potential by its value at r_trunc, which is mtotal/rtrunc
     double totalMass = -dphidr.back() * pow_2(radii.back());  // total mass in dimensionless units
     double phiadd = totalMass / radii.back();
+
+    utils::msg(utils::VL_DEBUG, "createKingModel",
+           "W0=" + utils::toString(W0) + ", g=" + utils::toString(trunc) +
+           " => concentration c=log10(rtrunc/rscale)=" + utils::toString(log10(radii.back())) +
+           ", sigma=" + utils::toString(sqrt(phi[0] * mass / scaleRadius / totalMass / W0)) );
     // scale the model to the given total mass and scale radius, inverting the sign of potential
     for(size_t i=0; i<radii.size(); i++) {
         phi[i]     = -(phi[i] + phiadd) * mass / scaleRadius / totalMass;

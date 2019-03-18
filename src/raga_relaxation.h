@@ -72,8 +72,8 @@
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
 namespace galaxymodel {
-class SphericalModelLocal;
-typedef shared_ptr<SphericalModelLocal> PtrSphericalModelLocal;
+class SphericalIsotropicModelLocal;
+typedef shared_ptr<SphericalIsotropicModelLocal> PtrSphericalIsotropicModelLocal;
 }
 
 namespace raga {
@@ -85,7 +85,7 @@ class RuntimeRelaxation: public orbit::BaseRuntimeFnc {
 public:
     RuntimeRelaxation(
         const potential::BasePotential& _potentialSph,
-        const galaxymodel::SphericalModelLocal& _relaxationModel,
+        const galaxymodel::SphericalIsotropicModelLocal& _relaxationModel,
         double _relaxationRate,
         double _outputTimestep,
         const std::vector<double>::iterator& _outputFirst,
@@ -119,7 +119,7 @@ private:
         Moreover, this model contains the PhaseVolume object that transforms the energy to
         phase volume.
     */
-    const galaxymodel::SphericalModelLocal& relaxationModel;
+    const galaxymodel::SphericalIsotropicModelLocal& relaxationModel;
 
     /** The amplitude of relaxation (the drift and diffusion coefs returned by the relaxation
         model are multiplied by this factor, which has a physical meaning of \ln\Lambda/N_\star,
@@ -214,7 +214,7 @@ private:
         which provides the diffusion coefficients for perturbing the particle velocity
         during orbit integration
     */
-    galaxymodel::PtrSphericalModelLocal ptrRelaxationModel;
+    galaxymodel::PtrSphericalIsotropicModelLocal ptrRelaxationModel;
 
     /** place for storing the phase volume h(E) (essentially a function of energy)
         sampled from particle trajectories during the episode

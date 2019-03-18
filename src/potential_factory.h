@@ -15,6 +15,7 @@
 #pragma once
 #include "particles_base.h"
 #include "potential_base.h"
+#include "math_spline.h"
 #include "smart.h"
 #include "units.h"
 #include "utils_config.h"
@@ -124,6 +125,41 @@ PtrPotential createPotential(
     const particles::ParticleArray<coord::PosCyl>& particles,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
+
+/** Construct an interpolated spherical density profile from two arrays -- radii and
+    enclosed mass M(<r).
+    First a suitably scaled interpolator is constructed for M(r);
+    if it is found to have a finite limiting value at r --> infinity, the asymptotic power-law
+    behaviour of density at large radii will be correctly represented.
+    Then the density at each point of the radial grid is computed from the derivative of
+    this interpolator. The returned array may be used to construct a LogLogSpline interpolator
+    or a DensitySphericalHarmonic object (obviously, with only one harmonic).
+    \param[in]  gridr  is the grid in radius (must have positive values sorted in order of increase);
+    typically the radial grid should be exponentially spaced with r[i+1]/r[i] ~ 1.2 - 2.
+    \param[in]  gridm  is the array of enclosed mass at each radius (must be positive and monotonic);
+    \return  an array of density values at the given radii.
+    \throw   std::invalid_argument if the input arrays were incorrect
+    (incompatible sizes, non-monotinic or negative values), or
+    std::runtime_error if the interpolator failed to produce a positive-definite density.
+*/
+std::vector<double> densityFromCumulativeMass(
+    const std::vector<double>& gridr,
+    const std::vector<double>& gridm);
+
+
+/** Read a file with the cumulative mass profile and construct a density model from it.
+    The text file should be a whitespace- or comma-separated table with at least two columns
+    (the rest is ignored) -- radius and the enclosed mass within this radius,
+    both must be in increasing order. Lines not starting with a number are ignored.
+    The enclosed mass profile should not include the central black hole (if present),
+    because it could not be represented in terms of a density profile anyway.
+    \param[in]  fileName  is the input file name.
+    \return  an interpolated density profile, represented by a LogLogSpline class.
+    \throw  std::runtime_error if the file does not exist, or the mass profile is not monotonic.
+*/
+math::LogLogSpline readMassProfile(const std::string& fileName);
+
+
 /** Utility function providing a legacy interface compatible with the original GalPot (deprecated).
     It reads the parameters from a text file and converts them into the internal unit system,
     using the conversion factors in the provided `units::ExternalUnits` object,
@@ -156,6 +192,7 @@ inline PtrPotential readGalaxyPotential(
     return readGalaxyPotential(filename, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
 }
 
+
 /** Create a density expansion from coefficients stored in a text file.
     The file must contain coefficients for DensitySphericalHarmonic or DensityAzimuthalHarmonic;
     the density type is determined automatically from the first line of the file.
@@ -181,6 +218,7 @@ PtrDensity readDensity(const std::string& coefFileName,
 */
 PtrPotential readPotential(const std::string& coefFileName,
     const units::ExternalUnits& converter = units::ExternalUnits());
+
 
 /** Write density or potential expansion coefficients to a text file.
     The potential must be one of the following expansion classes: 

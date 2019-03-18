@@ -351,8 +351,11 @@ int main()
     math::ScaledIntegrand<math::ScalingCub> t1s(math::ScalingCub(-1, 1), t1);
     result = math::integrate(t1s, math::scale(t1s.scaling, -1), math::scale(t1s.scaling, 0.5),
         toler, &error, &numEval);
-    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval<<")\n";
-    ok &= (fabs(1-result/exact)<1e-8 && fabs(result-exact)<fmax(error,1e-12)) || err();
+    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
+    ok &= (fabs(1-result/exact)<1e-12 && fabs(result-exact)<fmax(error,1e-12)) || err();
+    result = math::integrateGL(t1s, math::scale(t1s.scaling, -1), math::scale(t1s.scaling, 0.5), 13);
+    std::cout<<"), scaled GL="<<result<<" (delta="<<(result-exact)<<", neval=13)\n";
+    ok &= (fabs(1-result/exact)<1e-12) || err();
 
     exact = 2.274454287;
     test2 t2;
@@ -365,8 +368,11 @@ int main()
     math::ScaledIntegrand<math::ScalingCub> t2s(math::ScalingCub(-1, 1), t2);
     result = math::integrate(t2s, math::scale(t2s.scaling, -1), math::scale(t2s.scaling, 2./3),
         toler, &error, &numEval);
-    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval<<")\n";
+    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
     ok &= (fabs(1-result/exact)<2e-4 && fabs(result-exact)<error) || err();
+    result = math::integrateGL(t2s, math::scale(t2s.scaling, -1), math::scale(t2s.scaling, 2./3), 20);
+    std::cout<<"), scaled GL="<<result<<" (delta="<<(result-exact)<<", neval=20)\n";
+    ok &= (fabs(1-result/exact)<1e-2) || err();
 
     // root-finding
     exact=0.3;

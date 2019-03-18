@@ -20,26 +20,40 @@
 #include <fstream>
 #include <cmath>
 
-const double epsR = 1e-6;  // required relative accuracy of Rperi,Rapo interpolation
-const double epsJ = 1e-3;  // same for Jr
+const double epsR = 1e-9;  // required relative accuracy of Rperi,Rapo interpolation
+const double epsJ = 1e-6;  // same for Jr(E,L)
+const double epsE = 1e-6;  // same for E(Jr,L)
 const char*  err  = "\033[1;31m ** \033[0m";
 
 bool testPotential(const potential::BasePotential& pot)
 {
     potential::Interpolator2d intp(pot);
     actions::ActionFinderSpherical af(pot);
-    std::ofstream strm;
-    if(utils::verbosityLevel >= utils::VL_VERBOSE)
+    std::ofstream strm, strE;
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         strm.open(("test_actions_spherical_"+std::string(pot.name())+".dat").c_str());
-    math::Averager errR, errJ;
-    for(double r=1e-8; r<1e8; r*=1.25) {
+        strm << "# Energy       \tL/Lcirc\tRperi/Rcir,root\tRperi/Rcirc,int\t"
+            "Rapo/Rcirc,root\tRapo/Rcirc,int \tJr/Lcirc,true  \tJr/Lcirc,interp\n";
+        strE.open(("test_actions_spherical_"+std::string(pot.name())+"_energy.dat").c_str());
+        strE << "# Lcirc\tL/Lcirc\tE(L,Jr)/Ecirc,r\tE(L,Jr)/Ecirc/i\n";
+    }
+    double Phi0 = pot.value(coord::PosCyl(0,0,0));
+    math::Averager errR, errJ, errE;
+    std::vector<double> gridLogR = math::createSymmetricGrid(201, 0.1, 15.);
+    double sumwr = 0;   // integral of density over radius, used to normalize density-weighted errors
+    for(size_t n=0; n<gridLogR.size(); n++) {
+        double r = pow(10., gridLogR[n]);
         double Phi;
         coord::GradCyl grad;
         pot.eval(coord::PosCyl(r,0,0), &Phi, &grad);
+        if(Phi<=Phi0*(1-1e-11))
+            continue;  // roundoff
         double E  = Phi + 0.5*r*grad.dR;  // energy of a circular orbit at this radius
         double Lc = r*sqrt(r*grad.dR);    // ang.mom. of a circular orbit at this radius/this energy
+        double wr = pot.density(coord::PosCyl(r,0,0)) * pow_3(r);  // density-weighted radial integration
+        sumwr += wr;
         for(int i=0; i<=100; i++) {
-            double w, L = math::unscale(math::ScalingQui(0,1), i*0.01, &w) * Lc;
+            double wl, L = math::unscale(math::ScalingQui(0,1), i*0.01, &wl) * Lc, Jr = Lc-L;
             // test the accuracy of interpolation of peri/apocenter radii
             double R1s, R2s, R1i, R2i;
             potential::findPlanarOrbitExtent(pot, E, L, R1s, R2s);
@@ -48,25 +62,36 @@ bool testPotential(const potential::BasePotential& pot)
             coord::PosVelCyl point(r, 0, 0, sqrt(fmax(0, r*grad.dR - pow_2(L/r))), 0, L/r);
             double as = actions::actionsSpherical(pot, point).Jr;
             double ai = af.Jr(E, L);
-            errR.add((R1s-R1i)/r * w);
-            errR.add((R2s-R2i)/r * w);
-            errJ.add((as-ai)/Lc  * w);
-            if(utils::verbosityLevel >= utils::VL_VERBOSE)
-                strm << utils::pp(E, 15) + '\t' + utils::pp( L/Lc, 15) + '\t' +
+            // test the accuracy of computing energy from actions
+            double Es=actions::computeHamiltonianSpherical(pot, actions::Actions(Jr, L, 0));
+            double Ei=af.E(actions::Actions(Jr, L, 0));
+            errR.add((R1s-R1i)/r * wl * wr);
+            errR.add((R2s-R2i)/r * wl * wr);
+            errJ.add((as-ai)/Lc  * wl * wr);
+            errE.add((Ei/Es-1)   * wl * wr);
+            if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+                strm << utils::pp(E, 15) + '\t' + utils::pp( L/Lc,  7) + '\t' +
                     utils::pp(R1s/r, 15) + '\t' + utils::pp(R1i/r, 15) + '\t' +
                     utils::pp(R2s/r, 15) + '\t' + utils::pp(R2i/r, 15) + '\t' +
                     utils::pp(as/Lc, 15) + '\t' + utils::pp(ai/Lc, 15) + '\n';
+                strE << utils::pp(Lc, 7) + '\t' + utils::pp(L/Lc,   7) + '\t' +
+                    utils::pp(Es/E,  15) + '\t' + utils::pp(Ei/E,  15) + '\n';
+            }
         }
-        if(utils::verbosityLevel >= utils::VL_VERBOSE)
+        if(utils::verbosityLevel >= utils::VL_VERBOSE) {
             strm << '\n';
+            strE << '\n';
+        }
     }
-    double rmsR = sqrt(pow_2(errR.mean()) + errR.disp());
-    double rmsJ = sqrt(pow_2(errJ.mean()) + errJ.disp());
-    bool okR = rmsR < epsR, okJ = rmsJ < epsJ;
+    double rmsR = sqrt(pow_2(errR.mean()) + errR.disp()) / sumwr;
+    double rmsJ = sqrt(pow_2(errJ.mean()) + errJ.disp()) / sumwr;
+    double rmsE = sqrt(pow_2(errE.mean()) + errE.disp()) / sumwr;
+    bool okR = rmsR < epsR, okJ = rmsJ < epsJ, okE = rmsE < epsE;
     std::cout << pot.name() <<
         ": relative rms error in Rperi,Rapo = " << rmsR << (okR ? "" : err) <<
-        ", in Jr = " << rmsJ << (okJ ? "" : err) << "\n";
-    return okR && okJ;
+        ", in Jr(E,L) = " << rmsJ << (okJ ? "" : err) <<
+        ", in E(Jr,L) = " << rmsE << (okE ? "" : err) << "\n";
+    return okR && okJ && okE;
 }
 
 inline void addPot(std::vector<potential::PtrPotential>& pots, const char* params) {
@@ -80,12 +105,17 @@ int main()
     addPot(pots, "type=Plummer mass=1e15 scaleradius=1000");
     addPot(pots, "type=Plummer mass=1e6 scaleradius=0");  // a point mass
     addPot(pots, "type=Spheroid gamma=2.3 beta=2.7 alpha=2 scaleRadius=100000 densitynorm=1");
-    potential::CompositeCyl potc(pots);
-    allok &= testPotential(potc);
+    allok &= testPotential(potential::CompositeCyl(pots));
+    // a very shallow potential at small radii
+    addPot(pots, "type=Spheroid gamma=-2.0 beta=4.0 alpha=2.0 densitynorm=0.3183098861837907 gridsizer=64");
+    allok &= testPotential(*pots.back());
     // just a typical case: a marginal central singularity
     addPot(pots, "type=Dehnen gamma=2");
     allok &= testPotential(*pots.back());
-    // a very mild case
+    // another typical nasty case: logarithmically-diverging total mass
+    addPot(pots, "type=NFW");
+    allok &= testPotential(*pots.back());
+    // a very mild case (cored density)
     addPot(pots, "type=Isochrone scaleradius=1e-3");
     allok &= testPotential(*pots.back());
     if(allok)

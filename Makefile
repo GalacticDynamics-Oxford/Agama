@@ -51,6 +51,7 @@ SOURCES   = \
             df_factory.cpp \
             df_halo.cpp \
             df_interpolated.cpp \
+            df_spherical.cpp \
             galaxymodel_base.cpp \
             galaxymodel_densitygrid.cpp \
             galaxymodel_fokkerplanck.cpp \

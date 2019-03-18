@@ -1,6 +1,7 @@
 #include "raga_relaxation.h"
 #include "potential_multipole.h"
 #include "galaxymodel_spherical.h"
+#include "df_spherical.h"
 #include "utils.h"
 #include "math_core.h"
 #include "potential_utils.h"
@@ -202,7 +203,7 @@ potential::PtrPotential createSphericalPotential(
 }
 
 // prepare the relaxation model (diffusion coefficients) for the spherical potential
-galaxymodel::PtrSphericalModelLocal createRelaxationModel(
+galaxymodel::PtrSphericalIsotropicModelLocal createRelaxationModel(
     const potential::BasePotential& sphPot,
     std::vector<double>& particle_h,
     std::vector<double>& particle_m,
@@ -221,10 +222,11 @@ galaxymodel::PtrSphericalModelLocal createRelaxationModel(
     double minSlope = -1 - 1 / (1.5 + 3/innerSlope(potential::PotentialWrapper(sphPot))) + 0.05;
 
     // determine the distribution function from the particle samples and represent it as a log-log spline
-    CautiousLogLogSpline df(galaxymodel::fitSphericalDF(particle_h, particle_m, numbins), minSlope);
+    CautiousLogLogSpline df(df::fitSphericalIsotropicDF(particle_h, particle_m, numbins), minSlope);
 
     // compute diffusion coefficients
-    return galaxymodel::PtrSphericalModelLocal(new galaxymodel::SphericalModelLocal(phasevol, df));
+    return  galaxymodel::PtrSphericalIsotropicModelLocal(
+        new galaxymodel::SphericalIsotropicModelLocal(phasevol, df));
 }
 
 }  // internal ns
@@ -274,7 +276,7 @@ void RagaTaskRelaxation::startEpisode(double timeStart, double length)
     // at the beginning of the first episode, write out the spherical model file
     if(!params.outputFilename.empty() && prevOutputTime == -INFINITY) {
         prevOutputTime = timeStart;
-        galaxymodel::writeSphericalModel(
+        galaxymodel::writeSphericalIsotropicModel(
             params.outputFilename + utils::toString(timeStart), params.header,
             *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
     }
@@ -304,7 +306,7 @@ void RagaTaskRelaxation::finishEpisode()
     double currentTime = episodeStart+episodeLength;
     if(!params.outputFilename.empty() && currentTime >= prevOutputTime + params.outputInterval) {
         prevOutputTime = currentTime;
-        galaxymodel::writeSphericalModel(
+        galaxymodel::writeSphericalIsotropicModel(
             params.outputFilename + utils::toString(currentTime), params.header,
             *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
     }

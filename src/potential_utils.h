@@ -95,17 +95,6 @@ void epicycleFreqs(const BasePotential& potential, const double R,
 */
 double innerSlope(const math::IFunction& potential, double* Phi0=NULL, double* coef=NULL);
 
-/** Determine the behavior of potential at infinity.
-    The potential is approximated as the Newtonian fall-off plus a power-law with slope s<0:
-    Phi(r) = -M/r + coef * r^s  if s!=-1,  or  -M/r + coef * ln(r) / r  if s==-1;
-    the corresponding density behaves as rho ~ r^(s-2),
-    and if s<-1, the total mass is finite and equals M.
-    \param[in]  potential  is the instance of potential represented by a 1d function;
-    \param[out] M,coef  if not NULL, will contain the extrapolation coefficients;
-    \returns the slope `s` of potential extrapolation law.
-*/
-double outerSlope(const math::IFunction& potential, double* M=NULL, double* coef=NULL);
-
 /** Find the minimum and maximum radii of an orbit in the equatorial plane
     with given energy and angular momentum (which are the roots of equation
     \f$  2 (E - \Phi(R,z=0)) - L^2/R^2 = 0  \f$ ).
@@ -176,18 +165,9 @@ public:
     */
     double innerSlope(double* Phi0=NULL, double* coef=NULL) const;
 
-    /** return the slope of potential near r=0 (same as the standalone function `outerSlope`).
-        \param[out] M,coef  if not NULL, will contain the extrapolation coefficients;
-    */
-    double outerSlope(double* M=NULL, double* coef=NULL) const {
-        if(M)    *M = Mtot;
-        if(coef) *coef = coefOut;
-        return slopeOut;
-    }
-
 private:
     const double invPhi0;       ///< 1/(value of potential at r=0), or 0 if the potential is singular
-    double slopeOut, Mtot, coefOut; ///< coefficients for power-law potential at large radii
+    double slopeOut, massOut, coefOut; ///< coefficients for power-law potential at large radii
     math::QuinticSpline LofE;   ///< spline-interpolated scaled function for L_circ(E)
     math::QuinticSpline RofL;   ///< spline-interpolated scaled R_circ(L)
     math::QuinticSpline PhiofR; ///< interpolated potential as a function of radius

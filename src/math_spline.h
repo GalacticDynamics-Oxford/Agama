@@ -343,6 +343,7 @@ private:
     std::vector<double> logfval;  ///< log-scaled function values
     std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
     std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
+    bool nonnegative;             ///< if the input was non-negative, the interpolated values will be >=0
     void setupCubic(double, double);
     void setupQuintic();
 };

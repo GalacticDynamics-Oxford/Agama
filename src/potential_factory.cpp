@@ -560,9 +560,114 @@ PtrDensity readDensityAzimuthalHarmonic(std::istream& strm, const units::Externa
     return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, rho));
 }
 
+/** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
+    if  f(x) ~ f0 + a * x^b  as  x --> 0  or  x --> infinity,  then the slope b is given by
+    solving the equation  [x1^b - x2^b] / [x2^b - x3^b] = [f(x1) - f(x2)] / [f(x2) - f(x3)],
+    where x1, x2 and x3 are three consecutive points near the end of the interval.
+    The arrays of x and corresponding f(x) are passed as parameters to this function,
+    and its value() method is used in the root-finding routine.
+*/
+class SlopeFinder: public math::IFunctionNoDeriv {
+    const double r12, r32, ratio;
+public:
+    SlopeFinder(double logx1, double logx2, double logx3, double f1, double f2, double f3) :
+    r12(logx1-logx2), r32(logx3-logx2), ratio( (f1-f2) / (f2-f3) ) {}
+
+    virtual double value(const double b) const {
+        if(b==0)
+            return -r12 / r32 - ratio;
+        return (exp(b * r12) - 1) / (1 - exp(b * r32)) - ratio;
+    }
+};
+
 }  // end internal namespace
 
-// Main routines: load density or potential expansion coefficients from a text file
+//---- public routines ----//
+
+//---- construct a density profile from a cumulative mass profile ----//
+
+std::vector<double> densityFromCumulativeMass(
+    const std::vector<double>& gridr, const std::vector<double>& gridm)
+{
+    unsigned int size = gridr.size();
+    if(size<3 || gridm.size()!=size)
+        throw std::invalid_argument("densityFromCumulativeMass: invalid array sizes");
+    // check monotonicity and convert to log-scaled radial grid
+    std::vector<double> gridlogr(size), gridlogm(size), gridrho(size);
+    for(unsigned int i=0; i<size; i++) {
+        if(!(gridr[i] > 0 && gridm[i] > 0))
+            throw std::invalid_argument("densityFromCumulativeMass: negative input values");
+        if(i>0 && (gridr[i] <= gridr[i-1] || gridm[i] <= gridm[i-1]))
+            throw std::invalid_argument("densityFromCumulativeMass: arrays are not monotonic");
+        gridlogr[i] = log(gridr[i]);
+    }
+    // determine if the cumulative mass approaches a finite limit at large radii,
+    // that is, M = Minf - A * r^B  with A>0, B<0
+    double B = math::findRoot(SlopeFinder(
+        gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
+        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -100, 0, /*tolerance*/1e-6);
+    double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
+    if(B<0) {
+        double A =  (gridm[size-1] - gridm[size-2]) / 
+            (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
+        if(A>0) {  // viable extrapolation
+            invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
+            utils::msg(utils::VL_DEBUG, "densityFromCumulativeMass",
+                "Extrapolated total mass=" + utils::toString(1/invMinf) +
+                ", rho(r)~r^" + utils::toString(B-3) + " at large radii" );
+        }
+    }
+    // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),
+    // which has a linear asymptotic behaviour with slope -B as log(r) --> infinity;
+    // if Minf = infinity, this additional term has no effect
+    for(unsigned int i=0; i<size; i++)
+        gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
+    math::CubicSpline spl(gridlogr, gridlogm, true /*enforce monotonicity*/);
+    if(!spl.isMonotonic())
+        throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
+    // compute the density at each point of the input radial grid
+    for(unsigned int i=0; i<size; i++) {
+        double val, der;
+        spl.evalDeriv(gridlogr[i], &val, &der);
+        val = exp(val);
+        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val * invMinf));
+        if(gridrho[i] <= 0)   // shouldn't occur if the spline is (strictly) monotonic
+            throw std::runtime_error("densityFromCumulativeMass: interpolated density is non-positive");
+    }
+    return gridrho;
+}
+
+//------ read a cumulative mass profile from a file ------//
+
+math::LogLogSpline readMassProfile(const std::string& filename)
+{
+    std::ifstream strm(filename.c_str());
+    if(!strm)
+        throw std::runtime_error("readMassProfile: can't read input file " + filename);
+    std::vector<double> radius, mass;
+    const std::string validDigits = "0123456789.-+";
+    while(strm) {
+        std::string str;
+        std::getline(strm, str);
+        std::vector<std::string> elems = utils::splitString(str, " \t,;");
+        if(elems.size() < 2 || validDigits.find(elems[0][0]) == std::string::npos)
+            continue;
+        double r = utils::toDouble(elems[0]),  m = utils::toDouble(elems[1]);
+        if(r<0)
+            throw std::runtime_error("readMassProfile: radii should be positive");
+        if(r==0 && m!=0)
+            throw std::runtime_error("readMassProfile: M(r=0) should be zero");
+        if(r>0) {
+            radius.push_back(r);
+            mass.push_back(m);
+        }
+    }
+    return math::LogLogSpline(radius, densityFromCumulativeMass(radius, mass));
+}
+
+
+//------ load density or potential expansion coefficients from a text file ------//
+
 PtrDensity readDensity(const std::string& fileName, const units::ExternalUnits& converter)
 {
     if(fileName.empty()) {
@@ -646,7 +751,8 @@ void writeSphericalHarmonics(std::ostream& strm,
     for(unsigned int n=0; n<radii.size(); n++) {
         strm << utils::pp(radii[n], 15);
         for(unsigned int i=0; i<coefs.size(); i++)
-            strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" : utils::pp(coefs[i][n], 15));
+            strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" :
+                utils::pp(coefs[i][n], i==0 ? /*higher precision for l=0 coef*/22 : 15));
         strm << '\n';
     }
 }

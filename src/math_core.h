@@ -182,20 +182,22 @@ static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
 struct ScalingInf {};
 
 /// transform a semi-infinite interval 
-/// 0 <= u <= +inf,  or  0 < u0 <= u <= +inf,  or  -inf <= u <= u0 < 0,  to  0 <= s <= 1:
-/// in the first case (u0=0),  u = exp( 1 / (1-s) - 1 / s ),
-/// otherwise (u0!=0)          u = u0 * exp( s / (1-s) );
+/// 0 <= u <= +inf,       or  -inf <= u <= -0,  or  
+/// 0 < u0 <= u <= +inf,  or  -inf <= u <= u0 < 0,  to  0 <= s <= 1:
+/// in the first  case (u0=+0.0),  u = exp( 1 / (1-s) - 1 / s ),
+/// in the second case (u0=-0.0),  u =-exp( 1 / s - 1 / (1-s) ),
+/// otherwise (u0!=0)              u = u0 * exp( s / (1-s) );
 /// this is useful for finding roots on a semi-infinite interval which does not strictly enclose zero,
 /// and the characteristic scale of the function is unknown (log-scaling solves this problem)
 struct ScalingSemiInf {
-    double u0;
-    ScalingSemiInf(double _u0=0) : u0(_u0) {}
+    double u0;  ///< may be +-0.0 or any non-zero number
+    ScalingSemiInf(double _u0=+0.0) : u0(_u0) {}
 };
 
 /// trivial linear rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1
 struct ScalingLin {
     double uleft, uright;
-    ScalingLin(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+    ScalingLin(double _uleft, double _uright) : uleft(_uleft), uright(_uright) {}
 };
 
 /// cubic rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1:
@@ -205,7 +207,7 @@ struct ScalingLin {
 /// \f$  \int_{uleft}^{uright} f(u) du = \int_0^1 f(u[s]) [du/ds] ds  \f$
 struct ScalingCub {
     double uleft, uright;
-    ScalingCub(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+    ScalingCub(double _uleft, double _uright) : uleft(_uleft), uright(_uright) {}
 };
 
 /// quintic rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1:
@@ -214,7 +216,7 @@ struct ScalingCub {
 /// (both du/ds and d2u/ds2 ~ 0 at both ends)
 struct ScalingQui {
     double uleft, uright;
-    ScalingQui(double _uleft=0, double _uright=0) : uleft(_uleft), uright(_uright) {}
+    ScalingQui(double _uleft, double _uright) : uleft(_uleft), uright(_uright) {}
 };
 
 /// return the scaled variable s for the given original variable u
@@ -506,8 +508,10 @@ double integrateGL(const IFunction& F, double x1, double x2, int N);
 */
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights);
 
-/// number of built-in integration tables
-const int MAX_GL_ORDER = 20;
+/// built-in GL integration tables are available for every N up to MAX_GL_TABLE
+const int MAX_GL_TABLE = 20;
+/// built-in GL integration tables are available for some (but not every) N up to MAX_GL_ORDER
+const int MAX_GL_ORDER = 33;
 
 /// list of all built-in integration rules:  points and weights
 extern const double * const GLPOINTS [MAX_GL_ORDER+1];

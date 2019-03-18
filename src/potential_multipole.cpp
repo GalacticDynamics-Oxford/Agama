@@ -1140,6 +1140,8 @@ private:
     std::vector<math::QuinticSpline> spl;
     /// whether to perform log-scaling on the l=0 component
     bool logScaling;
+    /// the inverse of the value of potential at origin (if using log-scaling), may be zero
+    double invPhi0;
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -1159,8 +1161,10 @@ private:
     math::SphHarmIndices ind;
     /// 2d interpolation splines in meridional plane for each azimuthal harmonic (m) component
     std::vector<math::QuinticSpline2d> spl;
-    /// whether to perform log-scaling on the l=0 component
+    /// whether to perform log-scaling on the m=0 component
     bool logScaling;
+    /// the inverse of the value of potential at origin (if using log-scaling), may be zero
+    double invPhi0;
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
@@ -1178,10 +1182,21 @@ PtrPotential createMultipole(
         throw std::invalid_argument("Multipole: invalid choice of expansion order");
     chooseGridRadii(src, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
+    if(isSpherical(src))
+        lmax = 0;
+    if(isZRotSymmetric(src))
+        mmax = 0;
     // to improve accuracy of SH coefficient computation, we may increase the order of expansion
     // that determines the number of integration points in angles
-    int lmax_tmp =     isSpherical(src) ? 0 : std::max<int>(lmax, LMIN_SPHHARM);
-    int mmax_tmp = isZRotSymmetric(src) ? 0 : std::max<int>(mmax, LMIN_SPHHARM);
+    int lmax_tmp=0, mmax_tmp=0;
+    if(isSpherical(src))
+        lmax = 0;   // don't waste effort on computing non-spherical harmonic terms
+    else
+        lmax_tmp = std::max<int>(lmax, LMIN_SPHHARM);
+    if(isZRotSymmetric(src))
+        mmax = 0;   // similarly for non-axisymmetric harmonic terms
+    else
+        mmax_tmp = std::max<int>(mmax, LMIN_SPHHARM);
     std::vector<std::vector<double> > Phi, dPhi;
     computePotentialCoefsSph(src,
         math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()),
@@ -1297,6 +1312,17 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
         impl->eval(pos, potential, deriv, deriv2);
 }
 
+double Multipole::densityCyl(const coord::PosCyl &pos) const
+{
+    double rsq = pow_2(pos.R) + pow_2(pos.z);
+    if(rsq < pow_2(gridRadii.front()) * (1+SAFETY_FACTOR))
+        return asymptInner->density(pos);
+    else if(rsq > pow_2(gridRadii.back()) * (1-SAFETY_FACTOR))
+        return asymptOuter->density(pos);  // gives a more accurate result than the default implementation
+    else
+        return impl->density(pos);
+}
+
 double Multipole::enclosedMass(double radius) const
 {
     if(radius==0)
@@ -1385,6 +1411,35 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
         transformDerivsSphToCyl(pos, gradSph, hessSph, grad, hess);
 }
 
+double PowerLawMultipole::densityCyl(const coord::PosCyl &pos) const
+{
+    double rsq   = pow_2(pos.R) + pow_2(pos.z);
+    double dlogr = log(rsq / r0sq) * 0.5;
+    // simplified treatment in strongly asymptotic regime - retain only l==0 term
+    int lmax = (inner && rsq < r0sq*1e-16) || (!inner && rsq > r0sq*1e16) ? 0 : ind.lmax;
+    unsigned int size = lmax==0 ? 1 : ind.size();
+    double* rho_lm = static_cast<double*>(alloca(size * sizeof(double)));
+
+    // compute all spherical-harmonic coefficients for the density expansion
+    for(int m=ind.mmin(); m<=ind.mmax; m++)
+        for(int l=ind.lmin(m); l<=lmax; l+=ind.step) {
+            unsigned int c = ind.index(l, m);
+            double s=S[c], u=U[c], v = inner ? l : -l-1;
+            double ursm2 = s!=2 ? u * exp( dlogr * (s-2) ) : u;  // u * (r/r0)^(s-2)
+            if(s!=v)
+                rho_lm[c] = ursm2 * (s*(s+1) - l*(l+1));
+            else
+                rho_lm[c] = ursm2 * (s*(s+1) * dlogr - s*(s-1) + 1);
+        }
+
+    if(lmax == 0) {  // fast track - just return the l=0 coef
+        return 0.25/M_PI / r0sq * rho_lm[0];
+    } else {  // perform inverse spherical-harmonic transform
+        double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+        return 0.25/M_PI / r0sq * math::sphHarmTransformInverse(ind, rho_lm, tau, pos.phi);
+    }
+}
+
 // ------- Multipole potential with 1d interpolating splines for each SH harmonic ------- //
 
 MultipoleInterp1d::MultipoleInterp1d(
@@ -1400,12 +1455,22 @@ MultipoleInterp1d::MultipoleInterp1d(
 
     // whether to perform logarithmic scaling for the amplitude of l=0 term
     logScaling = true;  // will be enabled if all values of Phi_00(r) are negative
+    // compute the extrapolation coefficients at small r;
+    // if s>0, the potential is finite at r=0 and equal to W
+    double s, U, W;
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*output*/s, U, W);
+    invPhi0 = s>0 ? 1./W : 0;
 
     // set up a logarithmic radial grid
     std::vector<double> gridR(gridSizeR);
     for(unsigned int k=0; k<gridSizeR; k++) {
         gridR[k] = log(radii[k]);
-        logScaling &= Phi[0][k]<0;
+        // if the potential is everywhere negative, use some form of log-scaling
+        logScaling &= Phi[0][k] < 0;
+        // if the potential is non-monotonic, don't attempt to accurately follow its power-law
+        // asymptotic behaviour at origin (setting 1/Phi(0)=0), but still use log-scaling if possible
+        if(Phi[0][k]*invPhi0 >= 1)
+            invPhi0 = 0;
     }
     std::vector<double> Phi_lm(gridSizeR), dPhi_lm(gridSizeR);  // temp.arrays
 
@@ -1416,8 +1481,9 @@ MultipoleInterp1d::MultipoleInterp1d(
             unsigned int c = ind.index(l, m);
             for(unsigned int k=0; k<gridSizeR; k++) {
                 if(c==0) {
-                    Phi_lm [k] =  logScaling ? log(-Phi[c][k]) : Phi[c][k];
-                    dPhi_lm[k] = (logScaling ? 1/Phi[c][k] : 1) * radii[k] * dPhi[c][k];
+                    Phi_lm [k] =  logScaling ? log(invPhi0 - 1 / Phi[c][k]) : Phi[c][k];
+                    dPhi_lm[k] = (logScaling ? 1 / (Phi[c][k] * (invPhi0 * Phi[c][k] - 1)) : 1) *
+                        radii[k] * dPhi[c][k];
                 } else if(Phi[0][k] != 0) {
                     Phi_lm [k] = Phi[c][k] / Phi[0][k];
                     dPhi_lm[k] = (dPhi[c][k] - Phi_lm[k] * dPhi[0][k]) * radii[k] / Phi[0][k];
@@ -1449,11 +1515,14 @@ void MultipoleInterp1d::evalCyl(const coord::PosCyl &pos,
         needGrad ? dPhi_lm  : NULL,
         needHess ? d2Phi_lm : NULL);
     if(logScaling) {
-        Phi_lm[0] = -exp(Phi_lm[0]);
-        if(needHess)
-            d2Phi_lm[0] = Phi_lm[0] * (d2Phi_lm[0] + pow_2(dPhi_lm[0]));
-        if(needGrad)
-            dPhi_lm[0] *= Phi_lm[0];
+        double expX = exp(Phi_lm[0]), Phi = 1 / (invPhi0 - expX);
+        Phi_lm[0] = Phi;
+        if(needGrad) {
+            double dPhidX = pow_2(Phi) * expX;
+            if(needHess)
+                d2Phi_lm[0] = dPhidX * (d2Phi_lm[0] + pow_2(dPhi_lm[0]) * Phi * (invPhi0 + expX));
+            dPhi_lm[0] *= dPhidX;
+        }
     }
     if(ind.lmax == 0) {   // fast track in the spherical case
         if(potential)
@@ -1544,6 +1613,12 @@ MultipoleInterp2d::MultipoleInterp2d(
         ind.size() == Phi.size() && ind.size() == dPhi.size() &&
         Phi[0].size() == gridSizeR && ind.lmax >= 0 && ind.mmax <= ind.lmax);
 
+    // compute the extrapolation coefficients at small r;
+    // if s>0, the potential is finite at r=0 and equal to W
+    double s, U, W;
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*output*/s, U, W);
+    invPhi0 = s>0 ? 1./W : 0;
+
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):
     std::vector<double> gridR(gridSizeR);
     for(unsigned int k=0; k<gridSizeR; k++)
@@ -1585,8 +1660,15 @@ MultipoleInterp2d::MultipoleInterp2d(
                     dR  += dPhi[c][k] *  Plm[l-absm];   // d Phi / d r
                     dT  +=  Phi[c][k] * dPlm[l-absm];   // d Phi / d theta
                     dRdT+= dPhi[c][k] * dPlm[l-absm];   // d2Phi / dr dtheta
-                    if(m==0)
-                        logScaling &= val<0;
+                }
+                if(m==0) {
+                    logScaling &= val<0;
+                    // a nonzero value of 1/Phi(0) is used to improve the accuracy of interpolation
+                    // for potentials with finite central value, but it works only if the potential
+                    // is everywhere larger than Phi(0); otherwise we set 1/Phi(0) to zero and
+                    // and still use log-scaling (if possible) to improve accuracy at large radii
+                    if(invPhi0 <= 1 / (mul * val))
+                        invPhi0 = 0;
                 }
                 Phi_val (k, j) = mul * val;
                 // transform d Phi / d r      to  d Phi / d ln(r)
@@ -1609,10 +1691,12 @@ MultipoleInterp2d::MultipoleInterp2d(
             Phi0_dRdT.assign(Phim_dRdT, Phim_dRdT+ Phi_dRdT.size());
             if(logScaling) {
                 for(unsigned int i=0; i<gridSizeT*gridSizeR; i++) {
-                    Phim_dR  [i] /= Phi0_val[i];
-                    Phim_dT  [i] /= Phi0_val[i];
-                    Phim_dRdT[i] = Phim_dRdT[i] / Phi0_val[i] - Phim_dR[i] * Phim_dT[i];
-                    Phim_val [i] = log(-Phi0_val[i]);
+                    double dScaledPhidPhi = 1 / (Phi0_val[i] * (invPhi0 * Phi0_val[i] - 1));
+                    Phim_dR  [i] *= dScaledPhidPhi;
+                    Phim_dT  [i] *= dScaledPhidPhi;
+                    Phim_dRdT[i]  = dScaledPhidPhi * Phim_dRdT[i] +
+                        (1 - 2 * invPhi0 * Phi0_val[i]) * Phim_dR[i] * Phim_dT[i];
+                    Phim_val [i]  = log(invPhi0 - 1 / Phi0_val[i]);
                 }
             }
         } else {
@@ -1680,18 +1764,21 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
     // transform the amplitude: first perform the inverse log-scaling for the m=0 term,
     // which resides in the array elements with index mm = 0 - mmin
     if(logScaling) {
-        double val = -exp(Phi[-mmin]);  // the value of potential
-        Phi[-mmin] = val;
-        if(numQuantities==6) {         // second derivatives w.r.t. (ln r)^2, tau * ln r, tau^2
-            dlnr2   [-mmin] = val * (dlnr2   [-mmin] + pow_2(dlnr[-mmin]));
-            dlnrdtau[-mmin] = val * (dlnrdtau[-mmin] + dlnr[-mmin] * dtau[-mmin]);
-            dtau2   [-mmin] = val * (dtau2   [-mmin] + pow_2(dtau[-mmin]));
-        }
+        double expX = exp(Phi[-mmin]), val = 1 / (invPhi0 - expX);
+        Phi[-mmin]  = val;
         if(numQuantities>=3) {
-            dlnr[-mmin] *= val;
-            dtau[-mmin] *= val;
+            double dPhidX = pow_2(val) * expX;
+            if(numQuantities==6) {
+                double d2PhidX2 = dPhidX * val * (invPhi0 + expX);
+                dlnr2   [-mmin] = dPhidX * dlnr2   [-mmin] + d2PhidX2 * dlnr[-mmin] * dlnr[-mmin];
+                dtau2   [-mmin] = dPhidX * dtau2   [-mmin] + d2PhidX2 * dtau[-mmin] * dtau[-mmin];
+                dlnrdtau[-mmin] = dPhidX * dlnrdtau[-mmin] + d2PhidX2 * dlnr[-mmin] * dtau[-mmin];
+            }
+            dlnr[-mmin] *= dPhidX;
+            dtau[-mmin] *= dPhidX;
         }
     }
+
     // then multiply other terms by the value of the m=0 term, which resides in the [-mmin] element
     for(int mm=0; mm<nm; mm++) {
         int m = mm + mmin;

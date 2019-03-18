@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2018
+    \date   2014-2019
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -35,7 +35,7 @@
 #include "actions_torus.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
-#include "df_quasiisotropic.h"
+#include "df_spherical.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
 #include "galaxymodel_jeans.h"
@@ -77,7 +77,7 @@
 #endif
 
 /// classes and routines for the Python interface
-namespace pywrapper {  // internal namespace
+namespace pygama {  // internal namespace
 
 //  ---------------------------------------------------
 /// \name  Helper class to manage the OpenMP behaviour
@@ -1109,7 +1109,7 @@ potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
         mass  [i] = pyArrayElem<double>(cumulMassArr, i, 1) * conv->massUnit;
     }
     Py_DECREF(cumulMassArr);
-    std::vector<double> dens = galaxymodel::densityFromCumulativeMass(radius, mass);
+    std::vector<double> dens = potential::densityFromCumulativeMass(radius, mass);
     return potential::PtrDensity(new potential::DensitySphericalHarmonic(
         radius, std::vector<std::vector<double> >(1, dens)));
 }
@@ -2473,14 +2473,18 @@ static const char* docstringDistributionFunction =
     "DistributionFunction class represents an action-based distribution function.\n\n"
     "The constructor accepts several key=value arguments that describe the parameters "
     "of distribution function.\n"
-    "Required parameter is type='...', specifying the type of DF: currently available types are "
-    "'DoublePowerLaw' (for the halo), 'QuasiIsothermal' or 'Exponential' (for the disk component), "
-    "'QuasiIsotropic' (for the isotropic DF corresponding to a given density profile), "
-    "'Interp1', 'Interp3' (for interpolated DFs).\n"
+    "Required parameter is type='...', specifying the type of DF. Currently available types are:\n"
+    "'DoublePowerLaw' (for the halo);\n"
+    "'QuasiIsothermal' and 'Exponential' (for the disk component);\n"
+    "'QuasiSpherical' (for the isotropic or anisotropic DF of the Cuddeford-Osipkov-Merritt type "
+    "corresponding to a given density profile - by default it is the isotropic DF produced by "
+    "the Eddington inversion formula);\n"
+    "'Interp1', 'Interp3' (for interpolated DFs - currently under construction).\n"
     "For some of them, one also needs to provide the potential to initialize the table of epicyclic "
-    "frequencies (potential=... argument), and for the QuasiIsotropic DF one needs to provide "
+    "frequencies (potential=... argument). For the QuasiSpherical DF one needs to provide "
     "an instance of density profile (density=...) and the potential (if they are the same, then only "
-    "potential=... is needed).\n"
+    "potential=... is needed), and optionally the central value of anisotropy coefficient 'beta0' "
+    "(by default 0) and the anisotropy radius 'r_a' (by default infinity).\n"
     "Other parameters are specific to each DF type.\n"
     "Alternatively, a composite DF may be created from an array of previously constructed DFs:\n"
     ">>> df = DistributionFunction(df1, df2, df3)\n\n"
@@ -2527,6 +2531,7 @@ df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObject* name
 /// attempt to construct an elementary distribution function from the parameters provided in dictionary
 df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArgs)
 {
+    // density and potential are needed for some types of DF, but are otherwise unnecessary
     PyObject *pot_obj = PyDict_GetItemString(namedArgs, "potential");  // borrowed reference or NULL
     potential::PtrPotential pot;
     if(pot_obj!=NULL) {
@@ -2535,30 +2540,26 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
             throw std::invalid_argument("Argument 'potential' must be a valid instance of Potential class");
         PyDict_DelItemString(namedArgs, "potential");
     }
+    PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
+    potential::PtrDensity dens;
+    if(dens_obj!=NULL) {
+        dens = getDensity(dens_obj);
+        if(!dens)
+            throw std::invalid_argument("Argument 'density' must be a valid Density object");
+    } else
+        dens = pot;
+
+    // obtain other parameters as key=value pairs
     utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
     if(!params.contains("type"))
         throw std::invalid_argument("Should provide the type='...' argument");
     std::string type = params.getString("type");
+
     if(utils::stringsEqual(type, "Interp1"))
         return DistributionFunction_initInterpolated<1>(namedArgs);
     else if(utils::stringsEqual(type, "Interp3"))
         return DistributionFunction_initInterpolated<3>(namedArgs);
-    else if(utils::stringsEqual(type, "QuasiIsotropic")) {
-        if(!pot)
-            throw std::invalid_argument("Must provide a potential in 'potential=...'");
-        PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
-        potential::PtrDensity dens;
-        if(dens_obj!=NULL) {
-            dens = getDensity(dens_obj);
-            if(!dens)
-                throw std::invalid_argument("Argument 'density' must be a valid Density object");
-        } else
-            dens = pot;
-        return df::PtrDistributionFunction(new df::QuasiIsotropic(
-            galaxymodel::makeEddingtonDF(potential::DensityWrapper(*dens),
-            potential::PotentialWrapper(*pot)), *pot));
-    }
-    return df::createDistributionFunction(params, pot.get(), *conv);  // any other DF type
+    return df::createDistributionFunction(params, pot.get(), dens.get(), *conv);  // any other DF type
 }
 
 /// attempt to construct a composite distribution function from a tuple of DistributionFunction objects
@@ -5906,7 +5907,7 @@ void* forget_about_type(void* x) { return x; }
 #define Py_INCREFx(x) Py_INCREF(forget_about_type(x))
 
 } // end internal namespace
-using namespace pywrapper;
+using namespace pygama;
 
 // the module initialization function must be outside the internal namespace,
 // and is slightly different in Python 2 and Python 3
