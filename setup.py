@@ -101,10 +101,6 @@ def runCompiler(code='int main(){}\n', flags='', dest='/dev/null'):
     os.remove('test.cpp')
     return result==0
 
-# run a program and read its stdout (can't use check_output because it's not available on Python 2.6)
-def runProgram(prog):
-    return subprocess.Popen(prog, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode()
-
 
 # find out which required and optional 3rd party libraries are present, and create Makefile.local
 def createMakefile():
@@ -156,19 +152,18 @@ def createMakefile():
     except ImportError:
         raise CompileError("NumPy is not present - python extension cannot be compiled")
 
-    # [2b]: find out the paths to Python.h and libpythonXX.{a,so} (this is rather tricky) and
-    # all other relevant compilation/linking flags needed to build a shared library that uses Python
+    # [2b]: find out the paths to Python.h and libpythonXX.{a,so,dylib,...} (this is rather tricky)
+    # and all other relevant compilation/linking flags needed to build a shared library that uses Python
     PYTHON_INC = '-I'+sysconfig.get_python_inc()
 
     # various other system libraries that are needed at link time
-    PYTHON_LIB_EXTRA = \
-        get_config_var('LIBS').split() + \
-        get_config_var('SYSLIBS').split() #+ ['-lz']
+    PYTHON_LIB_EXTRA = compressList(
+        get_config_var('LIBS').split() +
+        get_config_var('SYSLIBS').split())
 
     # try compiling a test code with the provided link flags (in particular, the name of Python library):
     # check that a sample C++ program with embedded python compiles, links and runs properly
-    numAttempts = 0
-    def tryPythonCode(PYTHON_LIB):
+    def tryPythonCode(PYTHON_LIB, POSTLINKCOMMAND=None):
         # test code for a shared library
         PYTEST_LIB_CODE = """
 #include "Python.h"
@@ -180,96 +175,118 @@ PyMODINIT_FUNC
 """
         if sys.version_info[0]==2:  # Python 2.6-2.7
             PYTEST_LIB_CODE += """
-initpytest42(void) {
-    Py_InitModule3("pytest42", NULL, "doc");
+initagamatest(void) {
+    Py_InitModule3("agamatest", NULL, "doc");
     import_array();
     bla();
 }
 """
         else:  # Python 3.x
             PYTEST_LIB_CODE += """
-PyInit_pytest42(void) {
-    static PyModuleDef moduledef = {PyModuleDef_HEAD_INIT, "pytest42", "doc", -1, NULL};
+PyInit_agamatest(void) {
+    static PyModuleDef moduledef = {PyModuleDef_HEAD_INIT, "agamatest", "doc", -1, NULL};
     PyObject* mod = PyModule_Create(&moduledef);
     import_array1(mod);
     bla();
     return mod;
 }
 """
-        print("    **** Trying the following options for linking against Python library ****: ", PYTHON_LIB)
         # test code for a program that loads this shared library
         PYTEST_EXE_CODE = 'extern void run();int main(){run();}\n'
-        PYTEST_LIB_NAME = './pytest42.so'
-        PYTEST_EXE_NAME = './pytest42.exe'
+        PYTEST_LIB_NAME = './agamatest.so'
+        PYTEST_EXE_NAME = './agamatest.exe'
         # try compiling the test shared library
-        if not runCompiler(code=PYTEST_LIB_CODE, \
-            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_LIB), \
+        if not runCompiler(code=PYTEST_LIB_CODE,
+            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_LIB),
             dest=PYTEST_LIB_NAME):
             return False  # the program couldn't be compiled at all (try the next variant)
+        # if necessary, execute an additional step after compiling/linking the test shared library
+        if POSTLINKCOMMAND:
+            # execute a command after linking to change the name of python dynamic library
+            # to the absolute file path to this library
+            POSTLINKCOMMAND += PYTEST_LIB_NAME
+            print(POSTLINKCOMMAND)
+            subprocess.call(POSTLINKCOMMAND, shell=True)
+            try: print(subprocess.Popen('otool -L '+PYTEST_LIB_NAME, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, shell=True).communicate()[0].decode())
+            except: pass
         # if succeeded, compile the test program that uses this library
         if not runCompiler(code=PYTEST_EXE_CODE, flags=PYTEST_LIB_NAME, dest=PYTEST_EXE_NAME) \
             or not os.path.isfile(PYTEST_LIB_NAME) or not os.path.isfile(PYTEST_EXE_NAME):
             return False  # can't find compiled test program
-        resultexe = runProgram(PYTEST_EXE_NAME).rstrip()
+        resultexe = subprocess.Popen(PYTEST_EXE_NAME,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
+        # the test program might not be able to find the python home, in which case manually provide it
+        if 'Could not find platform independent libraries <prefix>' in resultexe:
+            resultexe = subprocess.Popen(PYTEST_EXE_NAME,
+                env=dict(os.environ, PYTHONHOME=sysconfig.PREFIX),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
         # also try loading this shared library as an extension module
-        proc = subprocess.Popen(sys.executable+" -c 'import pytest42'", \
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
-        resultpy = proc.communicate()[0].decode().rstrip()
+        resultpy = subprocess.Popen(sys.executable+" -c 'import agamatest'", shell=True, \
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
         # clean up
         os.remove(PYTEST_EXE_NAME)
         os.remove(PYTEST_LIB_NAME)
         # check if the results (reported library path prefix) are the same as we have in this script
         if resultexe != sysconfig.PREFIX or resultpy != sysconfig.PREFIX:
-            # return a warning, the user may still wish to continue
-            return "Test program doesn't seem to use the same version of Python, "+\
+            print("Test program doesn't seem to use the same version of Python, "+\
                 "or the library path is reported incorrectly: \n"+\
                 "Expected: "+sysconfig.PREFIX+"\n"+\
                 "Received: "+resultexe+"\n"+\
-                "From py:  "+resultpy+"\n"+\
-                "Should we continue the build (things may go wrong at a later stage)? [Y/N] "
+                "From py:  "+resultpy)
+            return False
         print("    **** Successfully linked using these options ****")
         return True   # this combination of options seems reasonable...
 
     # explore various possible combinations of file name and path to the python library...
     def findPythonLib():
-        PLANB_LIB = None
         # try linking against the static python library libpython**.a, if this does not succeed,
-        # try the shared library libpython**.so**
+        # try the shared library libpython**.so** or libpython**.dylib
         LIBNAMES = ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']
-        for PYTHON_LIB_FILE in [sysconfig.get_config_var(x) for x in LIBNAMES]:
-            for PYTHON_LIB_PATH in [sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR']]:
-                PYTHON_LIB_FILEPATH = os.path.join(PYTHON_LIB_PATH, PYTHON_LIB_FILE)
+        for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in LIBNAMES]):
+            for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR']]):
+                # obtain full path to the python library
+                PYTHON_LIB_FILEPATH = os.path.join(PYTHON_LIB_PATH, PYTHON_LIB_FILENAME)
+                # check if the file exists at all at the given location
                 if os.path.isfile(PYTHON_LIB_FILEPATH):
                     # other libraries depend on whether this is a static or a shared python library
                     PYTHON_LIB = [PYTHON_LIB_FILEPATH] + PYTHON_LIB_EXTRA
-                    if PYTHON_LIB_FILE.endswith('.a') and not sysconfig.get_config_var('PYTHONFRAMEWORK'):
+                    if PYTHON_LIB_FILENAME.endswith('.a') and not sysconfig.get_config_var('PYTHONFRAMEWORK'):
                         PYTHON_LIB += get_config_var('LINKFORSHARED').split()
                     # the stack_size flag is problematic and needs to be removed
                     PYTHON_LIB = [x for x in PYTHON_LIB if not x.startswith('-Wl,-stack_size,')]
-                    result = tryPythonCode(PYTHON_LIB)
-                    if result is True:
-                        return PYTHON_LIB   # successful compilation
-                    if not result and PYTHON_LIB_FILE.endswith('.so'):
+                    print("    **** Trying the following options for linking against Python library ****: ", PYTHON_LIB)
+                    if tryPythonCode(PYTHON_LIB):
+                        return PYTHON_LIB, ""   # successful compilation
+                    elif not PYTHON_LIB_FILENAME.endswith('.a'):
                         # sometimes the python installation is so wrecked that the linker can find and use
                         # the shared library libpython***.so, but this library is not in LD_LIBRARY_PATH and
                         # cannot be found when loading the python extension module outside python itself.
                         # the (inelegant) fix is to hardcode the path to this libpython***.so as -rpath.
-                        PYTHON_LIB += ['-Wl,-rpath='+PYTHON_LIB_PATH]  # extend the linker options
-                        result = tryPythonCode(PYTHON_LIB)             # and try again
-                        if result is True:
-                            return PYTHON_LIB   # now success
-                    if result:  # not True, but a warning string
-                        # test compiled, but with a version mismatch warning, store it as a backup option
-                        PLANB_LIB = PYTHON_LIB
-                        PLANB_ASK = result
-        if not PLANB_LIB is None and ask(PLANB_ASK):  # the user wants to continue with the backup option
-            return PLANB_LIB
+                        # On Mac OS + Anaconda, a related problem appears when the dynamic python library
+                        # does not contain a full path to itself, and this should be fixed at post-link
+                        # stage, using install_name_tool
+                        print("Trying rpath")
+                        RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options
+                        if tryPythonCode(PYTHON_LIB + RPATH):    # and try again
+                            return PYTHON_LIB + RPATH, ""        # now success
+                        if sys.platform == 'darwin':
+                            print("Trying install_name_tool")
+                            # execute a command after linking to change the name of python dynamic library
+                            # to the absolute file path to this library
+                            POSTLINKCOMMAND = 'install_name_tool -change ' + \
+                                PYTHON_LIB_FILENAME + ' ' + PYTHON_LIB_FILEPATH + ' '
+                            if tryPythonCode(PYTHON_LIB, POSTLINKCOMMAND):
+                                return PYTHON_LIB, \
+                                    '# additional command to be executed after linking\n' + \
+                                    'POSTLINKCOMMAND = ' + POSTLINKCOMMAND + 'agama.so\n'
+
         # if none of the above combinations worked, give up...
         raise CompileError("Could not compile test program which uses libpython" +
             sysconfig.get_config_var('VERSION'))
 
     # [2c]: find the python library and other relevant linking flags
-    PYTHON_LIB     = findPythonLib()
+    PYTHON_LIB, POSTLINKCOMMAND = findPythonLib()
     COMPILE_FLAGS += ['-DHAVE_PYTHON', PYTHON_INC, NUMPY_INC]
     LINK_FLAGS    += PYTHON_LIB
 
@@ -328,9 +345,8 @@ PyInit_pytest42(void) {
                 if os.path.isfile(filename):
                     subprocess.call('unzip '+filename+' >/dev/null', shell=True)  # unpack the archive
                     if os.path.isdir(dirname):
-                        distutils.dir_util.copy_tree(dirname+'/Eigen', 'include/Eigen',verbose=False)
-                        distutils.dir_util.copy_tree(dirname+'/unsupported/Eigen',
-                            'include/unsupported/Eigen',verbose=False)  # copy the headers
+                        distutils.dir_util.copy_tree(dirname+'/Eigen', 'include/Eigen', verbose=False)  # copy the headers
+                        distutils.dir_util.copy_tree(dirname+'/unsupported/Eigen', 'include/unsupported/Eigen', verbose=False)
                         distutils.dir_util.remove_tree(dirname)  # and delete the rest
                         COMPILE_FLAGS += ['-DHAVE_EIGEN', '-I'+EXTRAS_DIR+'/include']
                     os.remove(filename)                      # remove the downloaded archive
@@ -351,8 +367,7 @@ PyInit_pytest42(void) {
     # [5b]: if the cvxopt module is available in Python, make sure that we also have C header files
     try:
         import cvxopt   # if this fails, skip cvxopt altogether
-        if runCompiler(code='#include <cvxopt.h>\nint main(){}\n',
-            flags=' '.join(['-c', PYTHON_INC, NUMPY_INC])):
+        if runCompiler(code='#include <cvxopt.h>\nint main(){}\n', flags=' '.join(['-c', PYTHON_INC, NUMPY_INC])):
             COMPILE_FLAGS += ['-DHAVE_CVXOPT']
         else:
             # download the C header file if it does not appear to be present in a default location
@@ -386,6 +401,8 @@ PyInit_pytest42(void) {
         if ask("UNSIO library (optional; used for input/output of N-body snapshots) is not found\n"+
             "Should we try to download and compile it now? [Y/N] "):
             distutils.dir_util.mkpath(EXTRAS_DIR)
+            distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
+            distutils.dir_util.mkpath(EXTRAS_DIR+'/lib')
             say('Downloading UNSIO\n')
             filename = EXTRAS_DIR+'/unsio-master.zip'
             dirname  = EXTRAS_DIR+'/unsio-master'
@@ -405,12 +422,15 @@ PyInit_pytest42(void) {
                         distutils.file_util.copy_file(dirname+'/libunsio.a', EXTRAS_DIR+'/lib')
                         # delete the compiled directory
                         distutils.dir_util.remove_tree(dirname)
-                        if runCompiler(code='#include <uns.h>\nint main(){}\n', flags='-lunsio -lnemo'):
-                            COMPILE_FLAGS += ['-DHAVE_UNSIO']
-                            LINK_FLAGS    += ['-lunsio', '-lnemo']
+                        UNSIO_COMPILE_FLAGS = ['-I'+EXTRAS_DIR+'/include']
+                        UNSIO_LINK_FLAGS = [EXTRAS_DIR+'/lib/libunsio.a', EXTRAS_DIR+'/lib/libnemo.a']
+                        if runCompiler(code='#include <uns.h>\nint main(){}\n', flags=' '.join(UNSIO_COMPILE_FLAGS+UNSIO_LINK_FLAGS)):
+                            COMPILE_FLAGS += ['-DHAVE_UNSIO'] + UNSIO_COMPILE_FLAGS
+                            LINK_FLAGS    += UNSIO_LINK_FLAGS
                         else:
                             raise CompileError('Failed to link against the just compiled UNSIO library')
-                    else: raise CompileError("Failed compiling UNSIO (check "+EXTRAS_DIR+"/unsio-install.log)")
+                    else: raise CompileError(
+                        "Failed compiling UNSIO (check "+EXTRAS_DIR+"/unsio-install.log)")
             except Exception as e:  # didn't succeed with UNSIO
                 say(str(e)+'\n')
 
@@ -424,7 +444,8 @@ PyInit_pytest42(void) {
         "# compilation flags for the shared library only (files in src/)\n" +
         "COMPILE_FLAGS += " + " ".join(compressList(COMPILE_FLAGS)) + "\n" +
         "# linking flags for the shared library only\n" +
-        "LINK_FLAGS    += " + " ".join(compressList(LINK_FLAGS)) + "\n")
+        "LINK_FLAGS    += " + " ".join(compressList(LINK_FLAGS)) + "\n" +
+        POSTLINKCOMMAND)
 
 
 # Custom build step that manually creates the makefile and then calls 'make' to create the shared library

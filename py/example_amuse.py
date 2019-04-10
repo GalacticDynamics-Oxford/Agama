@@ -55,7 +55,7 @@ if __name__ in ('__main__', '__plot__'):
 
     for i,t in enumerate(times):
         sys.evolve_model(t, timestep=timestep)
-        print("Evolved the system to time %f" % t)
+        print("Evolved the system to time %f Myr" % t.value_in(units.Myr))
 
         x=sys.particles.x.value_in(units.parsec)
         y=sys.particles.y.value_in(units.parsec)

@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 from amuse.community.agama.interface import Agama
 from amuse.units import *
 from amuse.test.amusetest import TestWithMPI

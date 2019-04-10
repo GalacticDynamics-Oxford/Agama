@@ -780,7 +780,7 @@ it becomes apparent that some rearrangement took place behind the stage. Indeed,
 \texttt{\mbox{}~~~~agama.Potential(bulge_par), agama.Potential(halo_par))}\\[2mm]
 An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\
 \texttt{p.potential(points)} evaluates the potential at one or several input points (which should be either a 1d list/array of length 3, or a 2d array of size $N\times3$);\\
-\texttt{p.force(points)} computes the force, i.e., \textit{minus} the derivative of potential, returning a $N\times3$ array;\\
+\texttt{p.force(points)} computes the acceleration (force per unit mass), i.e., \textit{minus} the derivative of potential, returning a $N\times3$ array;\\
 \texttt{p.forceDeriv(points)} computes the forces and force derivatives:\\
 \texttt{r = numpy.linspace(0,20)}\\
 \texttt{points = numpy.column_stack((r, r*0, r*0))}
@@ -810,7 +810,7 @@ for a non-spherical potential one needs to provide the focal distance $\Delta$ (
 
 \paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\
 \texttt{df = agama.DistributionFunction(type="...", [norm=..., other params])}\\
-where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiIsotropic}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
+where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
 or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\
 \texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}\\[2mm]
 Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).\\[2mm]
@@ -820,13 +820,14 @@ The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from 
 \paragraph{GalaxyModel} is the combination of a potential, an action finder, and a DF:\\
 \texttt{gm = agama.GalaxyModel(pot, df)}
 \textit{\color{Sepia}\ \ \# action finder is constructed automatically} \\[2mm]
-This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except if the DF is a user-defined Python function).\\[2mm]
+This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF is a user-defined Python function).\\[2mm]
 \texttt{dens, meanvel, vel2 = gm.moments(points, dens=True, vel=True, vel2=True)}\\
 computes the density, mean $v_\phi$, and six second moments of the velocity at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations.\\[2mm]
 \texttt{Sigma, rmsheight, sigmaz = gm.projectedMoments(r)}\\
 computes the projected quantites in the equatorial plane (surface density, r.m.s. height, and vertical velocity dispersion).\\[2mm]
 \texttt{fvr, fvz, fvphi = gm.vdf(points [, gridv])}\\
-constructs 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators; for instance, one may plot them by as follows:\\
+constructs 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators. The optional second argument specifies the grid in velocity space used to represent the spline; if not provided, the default is to cover the range $\pm v_\mathrm{escape}$ with 50 points. The grid needs not be too dense -- a 3rd degree interpolating spline provides a substantially higher level of detail than an equivalently spaced histogram.
+One may plot the velocity distribution as a smooth function on a denser grid:\\
 \texttt{v_esc = numpy.sqrt(-2 * pot.potential(point))\\
 gridv = numpy.linspace(-v_esc, v_esc, 200)\\
 plt.plot(gridv, fvr(gridv))} \\[2mm]
@@ -850,13 +851,23 @@ returns the density of this component; \\[2mm]
 \texttt{posvel, mass = agama.GalaxyModel(scm.potential, df).sample(10000)}
 
 \paragraph{orbit} integration is performed by the following routine:\\
-\texttt{result = agama.orbit(potential=pot, ic=posvel, time=100*pot.Tcirc(posvel), ...)}\\
-here \texttt{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration time for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential}, and dots indicate additional parameters (at least some must be provided to produce a result): \texttt{Omega} specifies the pattern speed of a rotating coordinate system, \texttt{trajsize} is the number of output points recorded from the trajectory for each orbit (may vary between orbits), \texttt{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos).
+\texttt{result = agama.orbit(potential=pot, ic=posvel, time=int_time, ...)}\\
+here \texttt{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \texttt{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \texttt{Omega} specifies the pattern speed of a rotating coordinate system, \texttt{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \texttt{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos).
+The \texttt{result} returned by this routine is either a tuple of length 2 (for a single orbit) or an $N\times2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
+For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\
+\texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\
+and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\
+\texttt{for trj in result[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}
 
 \paragraph{N-body snapshot handling} \label{sec:PythonSnapshot} is very rudimentary; the routines\\
-\texttt{agama.writeSnapshot(filename, particles[, format])} and\\ \texttt{agama.readSnapshot(filename)} can deal with text files (7 columns -- $x,y,z,vx,vy,vz,m$), and optionally \Nemo or \textsc{Gadget} snapshots if the library was compiled with their support. Here \texttt{particles} is a tuple of two arrays: $N\times6$ position/velocity points and $N$ masses; the same convention is used to pass around snapshots in the rest of the \Python extension (e.g., in potential and sampling routines). A more powerful framework for dealing with $N$-body snapshots is provided by the \textsc{Pynbody} library \cite{Pynbody}.
+\texttt{agama.writeSnapshot(filename, particles[, format])} and\\ \texttt{agama.readSnapshot(filename)} can deal with text files (7 columns -- $x,y,z,vx,vy,vz,m$), and optionally \Nemo or \textsc{Gadget} snapshots if the library was compiled with their support. Here \texttt{particles} is a tuple of two arrays: $N\times6$ position/velocity points and $N$ masses; the same convention is used to pass around snapshots in the rest of the \Python extension (e.g., in potential and sampling routines). A more powerful framework for dealing with $N$-body snapshots is provided, e.g., by the \textsc{Pynbody} library \cite{Pynbody}.
 
-\paragraph{Mathematical methods} provided by the \Python extension module include:
+\paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass, length and velocity), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\
+\texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\
+instructs the library to work with the commonly used Galactic units: $1\,M_\odot$, 1\,kpc, 1\,km/s, with the derived unit of time being 0.98~Gyr (this is \textit{not} the same as using no units at all, because $G=4.3\times10^{-6}$ in these units). Importantly, this setup needs to be performed at the beginning of work, otherwise the values returned by the previously constructed classes and methods (e.g., potentials) would be incorrectly scaled.
+At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information. In the future, the unit system may be integrated with the one from the \texttt{astropy} framework \cite{Astropy}.
+
+\paragraph{Mathematical methods} provided by the \Python extension module include:\\
 \texttt{integrateNdim} routine for multidimensional integration (an alternative interface to the \texttt{cubature} library which is included in the \Cpp code);\\
 \texttt{sampleNdim} routine for sampling from a user-defined multidimensional function;\\
 \texttt{splineApprox} and \texttt{splineLogDensity} for constructing a penalized cubic spline approximation or density estimate from discrete samples (Section~\ref{sec:SplineFitting}).
@@ -916,7 +927,7 @@ The \Python equivalent of this program additionally determines the confidence in
 A more elaborate example in \Python determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
 This example is inspired by one of the Gaia Challenge assignments \cite{Read2017}.
 
-\paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ttt{QuasiIsotropic} DF and approximate it with a \ttt{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
+\paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ttt{QuasiSpherical} DF and approximate it with a \ttt{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
 
 \paragraph{example_self_consistent_model} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ttt{QuasiIsothermal} DF for the disk; the \ttt{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
 

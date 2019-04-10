@@ -39,7 +39,7 @@ class AgamaInterface(CodeInterface, LiteratureReferencesMixIn, GravityFieldInter
     >>> import agama
     >>> help(agama.Potential)
 
-    .. [#] Vasiliev E., 2013, MNRAS, 434, 3174
+    .. [#] Vasiliev E., 2019, MNRAS, 482, 1525
     """
 
     include_headers = ['worker_code.h']
