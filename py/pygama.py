@@ -54,7 +54,7 @@ def getBinnedApertures(xcoords, ycoords, bintags):
         # obtain the table of x- and y-indices of all elements with the same binTag
         ix, iy = (matrix==b).nonzero()
         if len(ix)==0:
-            print ("Empty bin", b)
+            print ("Empty bin %i" % b)
             continue
         minx   = min(ix)-1
         maxx   = max(ix)+2
@@ -130,127 +130,152 @@ def readApertures(filename):
 ### routines for coordinate transformation, projection and deprojection
 ### of ellipsoidally stratified profiles (e.g. a Multi-Gaussian expansion)
 
-def makeProjectionMatrix(theta, phi, chi):
+def makeRotationMatrix(alpha, beta, gamma):
     """
-    Construct the matrix for transforming the intrinsic coordinates (x,y,z)
-    into projected ones (x',y',z') in the rotated coordinate system.
-    Projected coords are such that x', y' is the image plane,
-    and z' is directed towards the observer.
-    theta, phi  are the spherical polar coordinates of the line-of-sight (z' axis)
-    in the intrinsic coordinate system;
-    chi  is the angle of rotation of the intrinsic coordinate system about the line of sight
-    (if chi=0, the z axis is projected onto y' axis, and for chi>0 the z-axis projection
-    in the x'y' plane has a positition angle chi w.r.t. y' axis, measured counterclockwise).
+    Construct the matrix for transforming the coordinates (x,y,z) in the intrinsic system
+    into the coordinates (X,Y,Z) in the rotated coordinate system.
+    Usually the intrinsic coordinates are associated with the stellar system,
+    and the rotated ones -- with the observer; in this case X,Y are the coordinates in
+    the image plane: Y axis points up/north, X axis points left(!)/east, and Z axis
+    points along the line of sight away from the observer.
+    alpha, beta, gamma are the three Euler rotation angles:
+    alpha is the rotation in the equatorial plane of the stellar system,
+    beta is the inclination angle,
+    gamma is the rotation in the sky plane (if gamma=0, the z axis projects onto the Y axis).
     """
-    from math import sin,cos
-    from numpy import array
+    from math import sin,cos; from numpy import array
     return array([
-        [ -cos(chi) * sin(phi) + sin(chi) * cos(theta) * cos(phi),
-           cos(chi) * cos(phi) + sin(chi) * cos(theta) * sin(phi),
-          -sin(chi) * sin(theta) ],
-        [ -sin(chi) * sin(phi) - cos(chi) * cos(theta) * cos(phi),
-           sin(chi) * cos(phi) - cos(chi) * cos(theta) * sin(phi),
-           cos(chi) * sin(theta) ],
-        [  sin(theta) * cos(phi),
-           sin(theta) * sin(phi),
-           cos(theta) ] ])
+        [ cos(alpha) * cos(gamma) - sin(alpha) * cos(beta) * sin(gamma),
+          sin(alpha) * cos(gamma) + cos(alpha) * cos(beta) * sin(gamma),
+          sin(beta)  * sin(gamma) ],
+        [-cos(alpha) * sin(gamma) - sin(alpha) * cos(beta) * cos(gamma),
+         -sin(alpha) * sin(gamma) + cos(alpha) * cos(beta) * cos(gamma),
+          sin(beta)  * cos(gamma) ],
+        [ sin(alpha) * sin(beta),
+         -cos(alpha) * sin(beta),
+          cos(beta) ] ])
 
-def getProjectedEllipsoid(Sx, Sy, Sz, theta, phi, chi):
+def getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma):
     """
-    Project a triaxial ellipsoid with intrinsic axes Sx, Sy, Sz
-    onto the image plane defined by three viewing angles theta, phi, chi
-    return: Sxp, Syp  are the projected major and minor axes,
-    eta  is the position angle of projected major axis ccw from the y' axis in the image plane
+    Project a triaxial ellipsoid with intrinsic axes Sx, Sy, Sz onto the image plane XY,
+    whose orientation w.r.t. the intrinsic coordinate system is defined by three Euler angles
+    alpha, beta, gamma (Y axis points up and X axis points left!).
+    The projection is an ellipse in the image plane.
+    return: SXp, SYp  are the major and minor axes of the ellipse;
+    eta  is the position angle of the major axis of this ellipse in the image plane
+    (measured counter-clockwise from the Y axis towards the X axis)
     """
-    from math import sin,cos,atan2,sqrt
+    from math import sin,cos,atan2,sqrt,pi
+    if abs(sin(beta)) < 1e-12:  # shortcut for a face-on orientation, avoiding roundoff errors
+        return Sx, Sy, ((alpha - pi/2) * cos(beta) + gamma) % pi % pi
     # axis ratios
     p = Sy / Sx
     q = Sz / Sx
     # parameters defined in Binney(1985)
-    f = (p*q*sin(theta)*cos(phi))**2 + (q*sin(theta)*sin(phi))**2 + (p*cos(theta))**2
-    A = (p*cos(theta)*sin(phi))**2 + (q*sin(theta))**2 + (cos(theta)*cos(phi))**2
-    B = (p*p-1)*cos(theta)*sin(2*phi)
-    C = sin(phi)**2 + (p*cos(phi))**2
+    f = (p * q * sin(beta) * sin(alpha))**2 + (q * sin(beta) * cos(alpha))**2 + (p * cos(beta))**2
+    A = (p * cos(beta) * cos(alpha))**2 + (q * sin(beta))**2 + (cos(beta) * sin(alpha))**2
+    B = (p*p-1) * cos(beta) * 2 * sin(alpha) * cos(alpha)
+    C = cos(alpha)**2 + (p * sin(alpha))**2
     D = sqrt( (A-C)**2 + B**2 )
     # axes of the projected ellipsoid
-    Sxp = Sx * sqrt(2*f / (A+C-D))
-    Syp = Sx * sqrt(2*f / (A+C+D))
+    SXp = Sx * sqrt(2*f / (A+C-D))
+    SYp = Sx * sqrt(2*f / (A+C+D))
     # position angle of the projected major axis ccw from projected z axis
     psi = 0.5 * atan2(B, A-C)
-    # position angle of the projected major axis ccw from y' (fixed direction in the image plane)
-    eta = psi + chi
-    return (Sxp, Syp, eta)
+    # position angle of the projected major axis ccw from Y (north) direction in the image plane
+    eta = psi + gamma
+    return max(Sy, min(Sx, SXp)), max(Sz, min(Sy, SYp)), eta % pi % pi
 
-def getIntrinsicShape(Sxp, Syp, eta, theta, phi, chi):
+def getIntrinsicShape(SXp, SYp, eta, alpha, beta, gamma):
     """
-    Deproject the density distribution for an assumed orientation of the intrinsic coord.sys.:
-    Sxp and Syp are lengths of projected major and minor axes,
-    eta is the position angle of the major axis ccw from the y' axis on the image plane.
-    theta, psi, chi are the assumed angles of rotation of the coordinate frame.
-    return: three intrinsic axes (Sx,Sy,Sz) of the density profile,
+    Deproject the ellipse in the image plane into a triaxial ellipsoid,
+    for an assumed orientation of the intrinsic coord.sys. of that ellipsoid.
+    SXp and SYp are lengths of the major and minor axes of the ellipse,
+    eta is the position angle of the major axis of the ellipse, measured counter-clockwise
+    from the Y (vertical) axis on the image plane (towards the X axis, which points left).
+    alpha, beta, gamma are the assumed angles of rotation of the coordinate frame.
+    return: three intrinsic axes (Sx,Sy,Sz) of the triaxial ellipsoid,
     or throw an exception if the deprojection is impossible for these angles.
     The deprojection is not unique in the following special cases:
-    - if theta==0 or theta==pi (face-on view down the z axis) - cannot constrain q=Sz/Sx, assume Sz=Sy;
-    - if theta==pi/2 (edge-on view in the x-y plane) - cannot constrain p=Sy/Sx, assume Sy=Sx;
-    - if phi==0 or phi==pi/2 (view in the x-z or y-z planes) - same as above;
+    - if beta==0 or beta==pi (face-on view down the z axis) - cannot determine q=Sz/Sx, assume q=p;
+    - if psi==pi/2 (angle between projected z axis and major axis) - cannot determine p=Sy/Sx, assume p=1;
     """
     from math import pi,sin,cos,tan,sqrt
-    qp  = Syp / Sxp
-    psi = eta - chi
-    if theta==0 or theta==pi:   # face-on view
-        if abs(sin(psi+phi)) > 1e-15: raise ValueError('Face-on view must have  eta + phi - chi = 0')
-        return (Sxp, Syp, Syp)  # q=Sz/Sx is not constrained, assume it to be equal to p=Sy/Sx
-    if theta==pi/2 or phi==0 or phi==pi/2 or phi==pi:  # assume axisymmetric shape with p=1
-        if abs(cos(psi)) > 1e-15: raise ValueError('Axisymmetric view must have eta - chi = +-pi/2')
-        return (Sxp, Sxp, Sxp * sqrt(qp*qp - cos(theta)**2) / sin(theta))
-    num = (1-qp*qp) * (cos(psi) * cos(theta) * tan(phi) + sin(psi))
-    den = (num * cos(psi) - cos(theta) * tan(phi))
-    q   = sqrt(1 - num * (cos(psi) - sin(psi) * cos(theta) * tan(phi)) / sin(theta)**2 / den)
-    p   = sqrt(1 - (1-qp*qp) * sin(psi) * cos(psi) / cos(phi)**2 / den)
-    f   = (p*q * sin(theta) * cos(phi))**2 + (q * sin(theta) * sin(phi))**2 + (p * cos(theta))**2
-    Sx  = Sxp * sqrt(qp / sqrt(f))
+    Q = SYp / SXp
+    if Q>1:
+        raise ValueError('Projected axis ratio must be <=1')
+    psi = eta - gamma
+    if abs(sin(beta)) < 1e-12:  # face-on view (inclination is zero) - assume prolate axisymmetric shape
+        return (SXp, SYp, SYp)  # q=Sz/Sx is not constrained, assume it to be equal to p=Sy/Sx
+    if abs(cos(psi)) < 1e-12:   # no misalignment - assume oblate axisymmetric shape
+        return (SXp, SXp, SXp * sqrt(1 - (1-Q**2) / sin(beta)**2))
+    num = (1-Q*Q) * (cos(psi) * cos(beta) / tan(alpha) + sin(psi))
+    den = (num * cos(psi) - cos(beta) / tan(alpha))
+    q   = sqrt(1 - num * (cos(psi) - sin(psi) * cos(beta) / tan(alpha)) / sin(beta)**2 / den)
+    p   = sqrt(1 - (1-Q*Q) * sin(psi) * cos(psi) / sin(alpha)**2 / den)
+    f   = (p*q * sin(beta) * sin(alpha))**2 + (q * sin(beta) * cos(alpha))**2 + (p * cos(beta))**2
+    Sx  = SXp * sqrt(Q / sqrt(f))
     return (Sx, Sx*p, Sx*q)
 
-def getViewingAngles(Sxp, Syp, eta, Sx, Sy, Sz):
+def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
     """
-    Find viewing angles that would project the 3d ellipsoid with axes Sx >= Sy >= Sz
-    into the projected ellipsoid with axes Sxp >= Syp and misalignment angle psi
-    (the position angle of the projected major axis ccw from the projected z axis)
-    Sxp and Syp are the lengths of projected major and minor axes,
-    eta is the position angle of the major axis ccw from the y' axis on the image plane.
+    Find the viewing angles that would project a triaxial ellipsoid with axes Sx >= Sy >= Sz
+    into the ellipse in the image plane with axes SXp >= SYp and position angle of the major axis eta.
+    SXp and SYp are the lengths of the major and minor axes of the ellipse in the image plane,
+    eta is the position angle of the major axis of this ellipse, measured counter-clockwise
+    from the Y (vertical) axis on the image plane (towards the X axis, which points left).
     Sx, Sy, Sz are the assumed intrinsic axis lengths.
-    return: viewing angles theta, phi, chi,
+    return: a 4x3 array, where each row represents a triplet of viewing angles alpha, beta, gamma
+    (there are four possible deprojections in general, although some of them may be identical),
     or throw an exception if the deprojection is impossible for the given parameters.
     """
     from math import pi,asin,acos,atan,sqrt
-    p     = Sy  / Sx
-    q     = Sz  / Sx
-    qp    = Syp / Sxp
-    u     = Sxp / Sx
-    if 0>q or q>p or p>1 or 0>qp or qp>1:
-        raise ValueError('Axes must be sorted in order of increase')
+    p  = Sy  / Sx
+    q  = Sz  / Sx
+    u  = SXp / Sx
+    v  = SYp / Sx
+    if not (0<=q and q<=v and v<=p and p<=u and u<=1):
+        raise ValueError('Projected and assumed axis lengths are inconsistent (should be '+
+        "0 <= Sz=%.16g <= SYp=%.16g <= Sy=%.16g <= SXp=%.16g <= Sx=%.16g)" % (Sz, SYp, Sy, SXp, Sx))
     if p==q:
         if p==1:
-            if abs(u-1)>1e-15 or abs(qp-1)>1e-15:
+            if abs(u-1) + abs(v-1) > 1e-12:
                 raise ValueError('All axes must be equal in the spherical case')
-            return (0, 0, eta)
-        if abs(qp*u-q)>1e-15:
-            raise ValueError('Prolate axisymmetric system must have Syp = Sy')
-        theta = asin(sqrt( (1-u*u) / (1-q*q) ) )
-        # this case is not yet supported
+            beta = 0  # assume face-on orientation for a spherical system
+        else:
+            if abs(v-p) > 1e-12:
+                raise ValueError('Prolate axisymmetric system must have SYp = Sy')
+            beta = asin(sqrt( (1-u*u) / (1-q*q) ) )
+            # this case is not yet supported ?
     else:
-        theta = acos(sqrt( (u*u-q*q) * (qp*qp*u*u-q*q) / (1-q*q) / (p*p-q*q) ) )
-    if p==1:
-        if abs(u-1)>1e-15:
-            raise ValueError('Oblate axisymmetric system must have Sxp = Sx')
-        phi = 0   # angle phi does not matter in this case, return any reasonable value
-        psi = pi/2
+        beta  = acos(sqrt( (u*u-q*q) / (1-q*q) * (v*v-q*q) / (p*p-q*q) ) )
+    if 1-u < 1e-12:   # u=1 <=> SXp=Sx - assume an oblate axisymmetric system
+        alpha = 0
+    elif u-p < 1e-12 or p-v < 1e-12:
+        alpha = pi/2
     else:
-        phi = atan(sqrt( (u*u-p*p) * (p*p-qp*qp*u*u) / (1-u*u) / (p*p-q*q) * (1-q*q) / (1-qp*qp*u*u) ) )
-        psi =-atan(sqrt( (u*u-q*q) * (p*p-qp*qp*u*u) / (1-u*u) / (u*u-p*p) * (1-qp*qp*u*u) / (qp*qp*u*u-q*q) ) )
-    chi   = eta - psi
-    return (theta, phi, chi)
-
+        alpha = atan(sqrt( (1-v*v) * (1-u*u) / (p*p-v*v) / (u*u-p*p) * (p*p-q*q) / (1-q*q) ) )
+    if p-v < 1e-12:
+        psi   = 0
+    elif u-p < 1e-12 or v-q < 1e-12 or 1-u < 1e-12:
+        psi   = pi/2
+    else:
+        psi   = atan(sqrt( (1-v*v) / (1-u*u) * (p*p-v*v) / (v*v-q*q) * (u*u-q*q) / (u*u-p*p) ) )
+    # two possible choices of gamma, normalized at first to the range [0..2pi)
+    gamma1 = (eta+psi) % (2*pi) % (2*pi)
+    gamma2 = (eta-psi) % (2*pi) % (2*pi)
+    # normalize alpha and gamma to the range [0..pi); beta is in the range [0..pi] by construction
+    def norm(alpha, beta, gamma):
+        if gamma < pi:
+            return (    alpha %pi%pi, beta,    gamma   )
+        else:
+            return ((pi-alpha)%pi%pi, pi-beta, gamma-pi)
+    # return four possible combinations of viewing angles
+    return (
+        norm( alpha,    beta, gamma1),
+        norm(-alpha, pi-beta, gamma1),
+        norm(-alpha,    beta, gamma2),
+        norm( alpha, pi-beta, gamma2) )
 
 ### ---------------------------------------- ###
 ### Specific tools for Multi-Gaussian expansions

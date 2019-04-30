@@ -145,7 +145,6 @@ lib:  $(LIBNAME)
 
 $(LIBNAME):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local
 	$(LINK) -shared -o $(LIBNAME) $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(SO_FLAGS)
-	$(POSTLINKCOMMAND)
 
 # for each executable file, first make sure that the exe/ folder exists,
 # and create a symlink named agama.so pointing to ../agama.so in that folder if needed

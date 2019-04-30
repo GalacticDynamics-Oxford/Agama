@@ -172,7 +172,7 @@ std::vector<double> computeDensity(const math::IFunction& df, const potential::P
             for(unsigned int j=0; j<=i; j++) {
                 double dif = Phi - gridPhi[j];  // guaranteed to be positive (or zero due to roundoff)
                 assert(dif>=0);
-                double val = sqrt(dif) * weight;
+                double val = dif>0 ? sqrt(dif) * weight : 0;
                 result[j] += val;
                 if(gridVelDisp)
                     gridVelDisp->at(j) += val * dif;

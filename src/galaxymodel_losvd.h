@@ -72,9 +72,7 @@ struct GaussianPSF {
 
 /** Parameters for handling the line-of-sight velocity distributions */
 struct LOSVDParams {
-    double theta;            ///< viewing angles for transforming the intrinsic to projected coords
-    double phi;
-    double chi;
+    double alpha, beta, gamma;   ///< viewing angles for transforming the intrinsic to projected coords
     std::vector<double> gridx, gridy;     ///< internal grids in X',Y' (image plane coords)
     std::vector<double> gridv;            ///< grid in line-of-sight velocity
     std::vector<GaussianPSF> spatialPSF;  ///< array of spatial point-spread functions
@@ -83,7 +81,7 @@ struct LOSVDParams {
 
     /// set (unreasonable) default values
     LOSVDParams() :
-        theta(0.), phi(0.), chi(0.), velocityPSF(0.) {}
+        alpha(0.), beta(0.), gamma(0.), velocityPSF(0.) {}
 };
 
 

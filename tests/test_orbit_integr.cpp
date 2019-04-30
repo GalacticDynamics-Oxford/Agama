@@ -3,7 +3,6 @@
     \author  Eugene Vasiliev
 
     Test orbit integration in various potentials and coordinate systems.
-    Note: not all tests pass at the moment.
 */
 #include "orbit.h"
 #include "potential_analytic.h"

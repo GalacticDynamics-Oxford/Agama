@@ -35,12 +35,13 @@ void ActionSpaceScalingTriangLog::toScaled(const actions::Actions &acts, double 
     double Js = sqrt(pow_2(Jm) + pow_2(acts.Jphi));
     double lJ = 0.5*log(Js);
     double xi = atan2(Jm, acts.Jphi) / M_PI;  // valid for all input arguments
-    double phi= (1./3) * acos(1 - 2 * xi);    // aux angle in the solution of a cubic eqn
+    //double phi= (1./3) * acos(1 - 2 * xi);    // aux angle in the solution of a cubic eqn
     vars[0] = fabs(lJ) < 1 ?
         1 / (1 + sqrt(1 + pow_2(lJ)) - lJ) :
         0.5 * (sqrt(1 + pow_2(1/lJ)) * math::sign(lJ) + 1 - 1/lJ);
-    vars[1] = xi==0 || xi==0.5 || xi==1. ? xi :   // for some input values return the exact result
-        0.5 * (1 - cos(phi) + M_SQRT3*sin(phi));  // otherwise the solution of a cubic eqn
+    //vars[1] = xi==0 || xi==0.5 || xi==1. ? xi :   // for some input values return the exact result
+    //    0.5 * (1 - cos(phi) + M_SQRT3*sin(phi));  // otherwise the solution of a cubic eqn
+    vars[1] = scale(math::ScalingCub(0,1), xi);
     vars[2] = acts.Jr==0 ? 0 : acts.Jr==INFINITY ? 1 : acts.Jr / Jm;
 }
 

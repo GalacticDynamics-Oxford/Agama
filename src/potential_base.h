@@ -394,6 +394,19 @@ inline bool isSpherical(const BaseDensity& dens) {
     return isSpherical(dens.symmetry()); }
 
 
+/** Compute the surface density, i.e., the integral of rho(X,Y,Z) dZ, with Z being the distance along
+    the line of sight, and the orientation of the observer's coordinate system X,Y,Z relative to the
+    intrinsic coordinate system x,y,z of the density profile is specified by the Euler rotation angles.
+    \param[in] dens  is the density profile;
+    \param[in] X,Y are the coordinates in the observer's system
+    (still centered on the object but possibly rotated);
+    \param[in] alpha, beta, gamma are the Euler rotation angles defining the orientation of
+    the observer's coordinate system X,Y,Z; if all three are zero, then X,Y,Z coincide with x,y,z.
+    \return  the integral \f$ \Sigma(X,Y) = \int_{-\infty}^{+\infty} \rho(X,Y,Z) dZ  \f$.
+*/
+double surfaceDensity(const BaseDensity& dens, double X, double Y,
+    double alpha=0, double beta=0, double gamma=0);
+
 /** Find (spherical) radius corresponding to the given enclosed mass */
 double getRadiusByMass(const BaseDensity& dens, const double enclosedMass);
 

@@ -603,9 +603,9 @@ inline void checkFiniteAndMonotonic(const std::vector<double>& arr,
         if(i>0 && arr[i] <= arr[i-1])
             throw std::invalid_argument(std::string(fncName) + ": " + arrName +
                 " coordinates must be monotonically increasing (" + arrName +
-                "[" + utils::toString(i)   + "]=" + utils::toString(arr[i]) +
+                "[" + utils::toString(i)   + "]=" + utils::toString(arr[i],16) +
                 " is not greater than " + arrName +
-                "[" + utils::toString(i-1) + "]=" + utils::toString(arr[i-1]) + ")\n" +
+                "[" + utils::toString(i-1) + "]=" + utils::toString(arr[i-1],16) + ")\n" +
                 utils::stacktrace());
     }
 }

@@ -106,22 +106,36 @@ def runCompiler(code='int main(){}\n', flags='', dest='/dev/null'):
 def createMakefile():
 
     say("\n    ==== Checking supported compiler options and available libraries ====\n\n")
-    LINK_FLAGS = LDFLAGS.split()    # accumulate the linker flags that will be put to Makefile.local
-    COMPILE_FLAGS = CFLAGS.split()  # same for the compilation of the shared library only
+    LINK_FLAGS    = LDFLAGS.split()   # accumulate the linker flags that will be put to Makefile.local
+    COMPILE_FLAGS = CFLAGS. split()   # same for the compilation of the shared library only
     # default compilation flags for both the shared library and all example programs that use it
     CXXFLAGS = ['-fPIC', '-Wall', '-O2']
+    # additional compilation/linking flags for example programs
+    EXE_FLAGS = []
 
     # [1a]: check if a compiler exists at all
     if not runCompiler():
         raise CompileError("Could not locate a compiler (set CXX=... environment variable to override)")
 
-    # [1b]: test if OpenMP is supported (optional)
+    # [1b]: test if OpenMP is supported (optional but highly recommended)
     OMP_FLAG = '-fopenmp'
-    OMP_CODE = "#include <omp.h>\nint main(){\n#pragma omp parallel for\nfor(int i=0; i<16; i++);\n}\n"
-    if runCompiler(code=OMP_CODE, flags=OMP_FLAG+' -Werror -Wno-unknown-pragmas'):
+    OMP_FLAGS= OMP_FLAG+' -Werror -Wno-unknown-pragmas'
+    OMP_CODE = '#include <omp.h>\n#include <iostream>\nint main(){\nstd::cout << "Number of threads: ";\n'+\
+        '#pragma omp parallel\n{std::cout<<\'*\';}\nstd::cout << "\\n";\n}\n'
+    if runCompiler(code=OMP_CODE, flags=OMP_FLAGS):
         CXXFLAGS += [OMP_FLAG]
     else:
-        if not ask("Warning, OpenMP is not supported\n"+
+        # on MacOS the clang compiler pretends not to support OpenMP, but in fact it does so
+        # if we insist (libomp.so or libgomp.so must be present in the system for this to work)
+        if runCompiler(code=OMP_CODE, flags='-lgomp -Xpreprocessor '+OMP_FLAGS):
+            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
+            LINK_FLAGS += ['-lgomp']
+            EXE_FLAGS  += ['-lgomp']
+        elif runCompiler(code=OMP_CODE, flags='-lomp -Xpreprocessor '+OMP_FLAGS):
+            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
+            LINK_FLAGS += ['-lomp']
+            EXE_FLAGS  += ['-lomp']
+        elif not ask("Warning, OpenMP is not supported\n"+
             "If you're compiling on MacOS with clang, you'd better install another compiler such as GCC\n"+
             "Do you want to continue without OpenMP? [Y/N] "): exit(1)
 
@@ -163,13 +177,14 @@ def createMakefile():
 
     # try compiling a test code with the provided link flags (in particular, the name of Python library):
     # check that a sample C++ program with embedded python compiles, links and runs properly
-    def tryPythonCode(PYTHON_LIB, POSTLINKCOMMAND=None):
+    def tryPythonCode(PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS=[]):
+        print("    **** Trying the following options for linking against Python library ****")
         # test code for a shared library
         PYTEST_LIB_CODE = """
 #include "Python.h"
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include "numpy/arrayobject.h"
-void bla() {PyRun_SimpleString("from distutils import sysconfig;print(sysconfig.PREFIX);");}
+void bla() {PyRun_SimpleString("import sys;print(sys.prefix);");}
 void run() {Py_Initialize();bla();Py_Finalize();}
 PyMODINIT_FUNC
 """
@@ -197,43 +212,40 @@ PyInit_agamatest(void) {
         PYTEST_EXE_NAME = './agamatest.exe'
         # try compiling the test shared library
         if not runCompiler(code=PYTEST_LIB_CODE,
-            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_LIB),
+            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_SO_FLAGS),
             dest=PYTEST_LIB_NAME):
             return False  # the program couldn't be compiled at all (try the next variant)
-        # if necessary, execute an additional step after compiling/linking the test shared library
-        if POSTLINKCOMMAND:
-            # execute a command after linking to change the name of python dynamic library
-            # to the absolute file path to this library
-            POSTLINKCOMMAND += PYTEST_LIB_NAME
-            print(POSTLINKCOMMAND)
-            subprocess.call(POSTLINKCOMMAND, shell=True)
-            try: print(subprocess.Popen('otool -L '+PYTEST_LIB_NAME, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, shell=True).communicate()[0].decode())
-            except: pass
+
         # if succeeded, compile the test program that uses this library
-        if not runCompiler(code=PYTEST_EXE_CODE, flags=PYTEST_LIB_NAME, dest=PYTEST_EXE_NAME) \
-            or not os.path.isfile(PYTEST_LIB_NAME) or not os.path.isfile(PYTEST_EXE_NAME):
+        if not runCompiler(code=PYTEST_EXE_CODE,
+            flags=' '.join([PYTEST_LIB_NAME] + PYTHON_EXE_FLAGS),
+            dest=PYTEST_EXE_NAME) \
+            or not os.path.isfile(PYTEST_LIB_NAME) \
+            or not os.path.isfile(PYTEST_EXE_NAME):
             return False  # can't find compiled test program
         resultexe = subprocess.Popen(PYTEST_EXE_NAME,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
         # the test program might not be able to find the python home, in which case manually provide it
         if 'Could not find platform independent libraries <prefix>' in resultexe:
             resultexe = subprocess.Popen(PYTEST_EXE_NAME,
-                env=dict(os.environ, PYTHONHOME=sysconfig.PREFIX),
+                env=dict(os.environ, PYTHONHOME=sys.prefix),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
         # also try loading this shared library as an extension module
-        resultpy = subprocess.Popen(sys.executable+" -c 'import agamatest'", shell=True, \
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
+        procpy = subprocess.Popen(sys.executable+" -c 'import agamatest'", shell=True, \
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        resultpy = procpy.communicate()[0].decode().rstrip()
+        returnpy = procpy.returncode
         # clean up
         os.remove(PYTEST_EXE_NAME)
         os.remove(PYTEST_LIB_NAME)
         # check if the results (reported library path prefix) are the same as we have in this script
-        if resultexe != sysconfig.PREFIX or resultpy != sysconfig.PREFIX:
+        sysprefix = os.path.realpath(sys.prefix)
+        if os.path.realpath(resultexe) != sysprefix or os.path.realpath(resultpy) != sysprefix:
             print("Test program doesn't seem to use the same version of Python, "+\
                 "or the library path is reported incorrectly: \n"+\
-                "Expected: "+sysconfig.PREFIX+"\n"+\
+                "Expected: "+sysprefix+"\n"+\
                 "Received: "+resultexe+"\n"+\
-                "From py:  "+resultpy)
+                "From py:  "+resultpy+('' if returnpy==0 else ' (crashed with error '+str(returnpy)+')'))
             return False
         print("    **** Successfully linked using these options ****")
         return True   # this combination of options seems reasonable...
@@ -242,53 +254,46 @@ PyInit_agamatest(void) {
     def findPythonLib():
         # try linking against the static python library libpython**.a, if this does not succeed,
         # try the shared library libpython**.so** or libpython**.dylib
-        LIBNAMES = ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']
-        for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in LIBNAMES]):
+        for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']]):
             for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR']]):
                 # obtain full path to the python library
                 PYTHON_LIB_FILEPATH = os.path.join(PYTHON_LIB_PATH, PYTHON_LIB_FILENAME)
                 # check if the file exists at all at the given location
                 if os.path.isfile(PYTHON_LIB_FILEPATH):
+                    # flags for compiling the shared library which serves as a Python extension module
+                    PYTHON_SO_FLAGS = [PYTHON_LIB_FILEPATH] + PYTHON_LIB_EXTRA
                     # other libraries depend on whether this is a static or a shared python library
-                    PYTHON_LIB = [PYTHON_LIB_FILEPATH] + PYTHON_LIB_EXTRA
                     if PYTHON_LIB_FILENAME.endswith('.a') and not sysconfig.get_config_var('PYTHONFRAMEWORK'):
-                        PYTHON_LIB += get_config_var('LINKFORSHARED').split()
+                        PYTHON_SO_FLAGS += get_config_var('LINKFORSHARED').split()
                     # the stack_size flag is problematic and needs to be removed
-                    PYTHON_LIB = [x for x in PYTHON_LIB if not x.startswith('-Wl,-stack_size,')]
-                    print("    **** Trying the following options for linking against Python library ****: ", PYTHON_LIB)
-                    if tryPythonCode(PYTHON_LIB):
-                        return PYTHON_LIB, ""   # successful compilation
+                    PYTHON_SO_FLAGS = [x for x in PYTHON_SO_FLAGS if not x.startswith('-Wl,-stack_size,')]
+                    if tryPythonCode(PYTHON_SO_FLAGS):
+                        return PYTHON_SO_FLAGS, []   # successful compilation
                     elif not PYTHON_LIB_FILENAME.endswith('.a'):
                         # sometimes the python installation is so wrecked that the linker can find and use
                         # the shared library libpython***.so, but this library is not in LD_LIBRARY_PATH and
                         # cannot be found when loading the python extension module outside python itself.
                         # the (inelegant) fix is to hardcode the path to this libpython***.so as -rpath.
-                        # On Mac OS + Anaconda, a related problem appears when the dynamic python library
-                        # does not contain a full path to itself, and this should be fixed at post-link
-                        # stage, using install_name_tool
                         print("Trying rpath")
-                        RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options
-                        if tryPythonCode(PYTHON_LIB + RPATH):    # and try again
-                            return PYTHON_LIB + RPATH, ""        # now success
-                        if sys.platform == 'darwin':
-                            print("Trying install_name_tool")
-                            # execute a command after linking to change the name of python dynamic library
-                            # to the absolute file path to this library
-                            POSTLINKCOMMAND = 'install_name_tool -change ' + \
-                                PYTHON_LIB_FILENAME + ' ' + PYTHON_LIB_FILEPATH + ' '
-                            if tryPythonCode(PYTHON_LIB, POSTLINKCOMMAND):
-                                return PYTHON_LIB, \
-                                    '# additional command to be executed after linking\n' + \
-                                    'POSTLINKCOMMAND = ' + POSTLINKCOMMAND + 'agama.so\n'
+                        RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options and try again
+                        if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
+                            return PYTHON_SO_FLAGS + RPATH, []
+                        if "-undefined dynamic_lookup" in sysconfig.get_config_var('LDSHARED'):
+                            print("Trying the last resort solution")
+                            PYTHON_SO_FLAGS = ['-undefined dynamic_lookup'] + PYTHON_LIB_EXTRA
+                            PYTHON_EXE_FLAGS = RPATH + [PYTHON_LIB_FILEPATH]
+                            if tryPythonCode(PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS):
+                                return PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS
 
         # if none of the above combinations worked, give up...
         raise CompileError("Could not compile test program which uses libpython" +
             sysconfig.get_config_var('VERSION'))
 
     # [2c]: find the python library and other relevant linking flags
-    PYTHON_LIB, POSTLINKCOMMAND = findPythonLib()
+    PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS = findPythonLib()
     COMPILE_FLAGS += ['-DHAVE_PYTHON', PYTHON_INC, NUMPY_INC]
-    LINK_FLAGS    += PYTHON_LIB
+    LINK_FLAGS    += PYTHON_SO_FLAGS
+    EXE_FLAGS     += PYTHON_EXE_FLAGS
 
     # [3]: check that GSL is present, and find out its version (required)
     # try compiling a snippet of code into a shared library (tests if GSL has been compiled with -fPIC)
@@ -339,9 +344,9 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say('Downloading Eigen\n')
             filename = 'Eigen.zip'
-            dirname  = 'eigen-git-mirror-3.3.4'
+            dirname  = 'eigen-git-mirror-3.3.7'
             try:
-                urlretrieve('https://github.com/eigenteam/eigen-git-mirror/archive/3.3.4.zip', filename)
+                urlretrieve('https://github.com/eigenteam/eigen-git-mirror/archive/3.3.7.zip', filename)
                 if os.path.isfile(filename):
                     subprocess.call('unzip '+filename+' >/dev/null', shell=True)  # unpack the archive
                     if os.path.isdir(dirname):
@@ -367,7 +372,7 @@ PyInit_agamatest(void) {
     # [5b]: if the cvxopt module is available in Python, make sure that we also have C header files
     try:
         import cvxopt   # if this fails, skip cvxopt altogether
-        if runCompiler(code='#include <cvxopt.h>\nint main(){}\n', flags=' '.join(['-c', PYTHON_INC, NUMPY_INC])):
+        if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n', flags=' '.join(['-c', PYTHON_INC, NUMPY_INC])):
             COMPILE_FLAGS += ['-DHAVE_CVXOPT']
         else:
             # download the C header file if it does not appear to be present in a default location
@@ -445,7 +450,8 @@ PyInit_agamatest(void) {
         "COMPILE_FLAGS += " + " ".join(compressList(COMPILE_FLAGS)) + "\n" +
         "# linking flags for the shared library only\n" +
         "LINK_FLAGS    += " + " ".join(compressList(LINK_FLAGS)) + "\n" +
-        POSTLINKCOMMAND)
+        ("# linking flags for the example/test programs\n" +
+        "EXE_FLAGS     += " + " ".join(compressList(EXE_FLAGS)) + "\n" if EXE_FLAGS else "") )
 
 
 # Custom build step that manually creates the makefile and then calls 'make' to create the shared library

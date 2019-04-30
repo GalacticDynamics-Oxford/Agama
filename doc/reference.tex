@@ -30,6 +30,10 @@
 \newcommand{\bv}{\boldsymbol{v}}
 \newcommand{\bx}{\boldsymbol{x}}
 \newcommand{\by}{\boldsymbol{y}}
+\newcommand{\bz}{\boldsymbol{z}}
+\newcommand{\bX}{\boldsymbol{X}}
+\newcommand{\bY}{\boldsymbol{Y}}
+\newcommand{\bZ}{\boldsymbol{Z}}
 \newcommand{\bJ}{\boldsymbol{J}}
 \newcommand{\bt}{\boldsymbol{\theta}}
 \newcommand{\scE}{\mathscr E}
@@ -38,6 +42,7 @@
 \newcommand{\dvsqpar}{\langle \Delta v^2_\| \rangle}
 \newcommand{\dvsqper}{\langle \Delta v^2_\bot \rangle}
 \DeclareMathOperator{\trig}{trig}
+\renewcommand{\floatpagefraction}{0.8}
 \textwidth=16.5cm
 \textheight=21cm
 \oddsidemargin=0cm
@@ -898,7 +903,7 @@ There is an example program showing all these modes of operation.
 \subsection{\Galpy plugin}  \label{sec:Galpy}
 
 \Galpy \cite{Bovy2015} is a \Python-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action finders, distribution functions and more. 
-The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a thin compatibility layer on top of the standard \Agama \Python interface. This layer introduces a \Galpy-compatible potential object \ttt{agama.py.AgamaPotential} that can be constructed in the same way as the \ttt{agama.Potential} class in \Python, but provides the methods suitable for use in \Galpy. Orbit integration and action finders can only be used with \Agama potentials, but they produce results in the form compatible with \Galpy. 
+The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a thin compatibility layer on top of the standard \Agama \Python interface. This layer introduces a \Galpy-compatible potential object \ttt{galpypot.AgamaPotential} that can be constructed in the same way as the \ttt{agama.Potential} class in \Python, but provides the methods suitable for use in \Galpy. Orbit integration and action finders can only be used with \Agama potentials, but they produce results in the form compatible with \Galpy. 
 
 An example, comparing the native \Galpy action finder with that from \Agama, is provided in the file \texttt{py/galpypot.py}. Overall, the potential approximations and action finders in \Agama are more versatile, accurate and computationally efficient, while \Galpy provides a convenient plotting interface.
 
@@ -1344,6 +1349,77 @@ A = \sum_{c=1}^{N_\mathrm{cell}} \frac{\mathrm{vol}(\mathcal{V}_c)}{M_c} \sum_{k
 \end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Coordinates}  \label{sec:CoordinateDetails}
+
+%%%%%%%%%%%%%%
+\begin{figure}
+\begin{center}
+\includegraphics[width=6cm]{EulerAngles.pdf} \hspace{1cm}
+\includegraphics{EulerAnglesProjection.pdf}
+\end{center}
+\caption{\textit{Left panel:} specification of rotation of the cartesian coordinate system in terms of Euler angles $\alpha,\beta,\gamma$.\protect\\
+Let the original reference frame be specified by the right-handed triplet of basis vectors (axes) $\bx,\by,\bz$, and the rotated frame -- by basis vectors $\bX,\bY,\bZ$.
+The first rotation of the $xy$ plane (blue) by angle $\alpha$ about the $\bz$ axis creates an intermediate basis $\bx',\by',\bz'$, where the axis $\bx'$ points along the line of nodes of the overall transformation (denoted by the green arrow $N$).
+The second rotation by angle $\beta$ about the $\bx'$ axis (line of nodes) tilts the $x'y'$ plane by angle $\beta$, creating a second intermediate basis $\bx'',\by'',\bz''$; the angle between basis vectors $\bz''$ and $\bz$ is also $\beta$.
+The third rotation of the $x''y''$ plane (red) by angle $\gamma$ about the $\bz''$ axis does not change the direction of that axis, hence the final axis $\bZ$ is the same as $\bz''$. \protect\\
+\textit{Right panel:} the same two reference frames as in the left panel, viewed in the image plane $XY$. The $\bZ$ axis points perpendicular to the plane away from the observer; the $\bY$ axis points up / north, and the $\bX$ axis -- left / east. The equatorial plane $xy$ of the intrinsic coordinate system is shown by blue ellipse (dashed when it is behind the image plane). Its intersection with the image plane is the line of nodes, marked by the green arrow. The angle of clockwise rotation of the $\bX$ axis w.r.t.\ the line of nodes is $\gamma$ (the last of the three rotations). The position angle (PA) in the $XY$ plane is measured from the $\bY$ axis counter-clockwise (towards the $\bX$ axis), hence the PA of the projection of $\bz$ axis onto the image plane is also $\gamma$, and the PA of the line of nodes is $\gamma+\pi/2$.
+%\vspace{2cm}
+} \label{fig:EulerAngles}
+\end{figure}
+%%%%%%%%%%%%
+
+The coordinate transformation subsystem in \Agama consists of several concepts.
+First, we define several commonly used coordinate systems (or \textit{representations} in the terminology of \texttt{astropy}): Cartesian, Cylindrical, Spherical, and Prolate Spheroidal. The same point in 3d space can be represented in any of these coordinate systems (having a common center and orientation). There are routines for transforming coordinates, velocities, gradients and hessians of scalar functions between these representations.
+
+Second, we define rotations of coordinate basis.
+Consider a right-handed Cartesian reference frame defined by basis vectors (axes) $\bx,\by,\bz$, and a rotated frame with the same origin defined by basis vectors $\bX,\bY,\bZ$. The relative orientation of two frames can be specified by Euler angles (see Figure~\ref{fig:EulerAngles}).
+The same point has coordinates $x,y,z$ in the original frame and $X,Y,Z$ in the rotated frame.
+The transformation between these coordinates (passive rotation) is given by the following orthogonal rotation matrix $\mathsf R$, produced by the routine \texttt{makeRotationMatrix}:
+\begin{equation}
+\left( \begin{array}{c} X \\ \,Y \\ Z \end{array} \right) = \mathsf R 
+\left( \begin{array}{c} x \\   y \\ z \end{array} \right) , \qquad
+\mathsf R \equiv \left( \begin{array}{ccc}  \phantom{-}
+ c_\alpha c_\gamma - s_\alpha c_\beta s_\gamma\;\; & \phantom{-}
+ s_\alpha c_\gamma + c_\alpha c_\beta s_\gamma\;\; &
+ s_\beta  s_\gamma \\
+-c_\alpha s_\gamma - s_\alpha c_\beta c_\gamma\;\; &
+-s_\alpha s_\gamma + c_\alpha c_\beta c_\gamma\;\; &
+ s_\beta  c_\gamma \\
+ s_\alpha s_\beta &
+-c_\alpha s_\beta &
+ c_\beta 
+\end{array} \right) ,
+\end{equation}
+where we used $c_\circ, s_\circ$ as shortcuts for $\cos\circ, \sin\circ$.
+The inverse transformation is described by the same angles, but with negative signs and in reverse order: $-\gamma,-\beta,-\alpha$, and its rotation matrix is $\mathsf R^{-1} = \mathsf R^T$. 
+The rotation matrix is invariant under the simultaneous substitution $\beta \to -\beta, \alpha \to \alpha+\pi, \gamma \to \gamma+\pi$; hence it is convenient to restrict the range of $\beta$ to $[0,\pi]$ and the other two angles -- to $(-\pi,\pi]$. %Moreover, \textit{if} the object has triplanar symmetry (invariant under reflection about any of the principal planes, or equivalently under change of sign of any coordinate), then a simultaneous flipping of two axes (preserving the right-handedness of the coordinate system) changes nothing in its properties, hence the transformation corresponding to $\alpha+\pi$ is equivalent to $\alpha$, or $\gamma+\pi$ -- to $\gamma$, and all three angles can be limited to the range $[0,\pi]$.
+
+\begin{tabular}{c c c r r r}
+\raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$+$}
+&   $\alpha$ & $\beta$ & $\gamma$ \\
+&&& $\pi+\alpha$ & $-\beta$ & $\pi+\gamma$ \\
+\raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$-$} & \raisebox{-8pt}[0pt][0pt]{$-$}
+&   $\pi-\alpha$ & $\pi-\beta$ & $\pi+\gamma$ \\
+&&& $-\alpha$ & $\pi+\beta$ & $\gamma$ \\
+\raisebox{-8pt}[0pt][0pt]{$-$} & \raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$-$}
+&   $-\alpha$ & $\pi-\beta$ & $\pi+\gamma$ \\
+&&& $\pi-\alpha$ & $\pi+\beta$ & $\gamma$ \\
+\raisebox{-8pt}[0pt][0pt]{$-$} & \raisebox{-8pt}[0pt][0pt]{$-$} & \raisebox{-8pt}[0pt][0pt]{$+$}
+&   $\pi+\alpha$ & $\beta$ & $\gamma$ \\
+&&& $\alpha$ & $-\beta$ & $\pi+\gamma$
+\end{tabular}
+
+This kind of transformation is used to convert between the intrinsic coordinates of the stellar system (original frame $\bx\by\bz$) and the observed coordinates (rotated frame $\bX\bY\bZ$), where the $\bZ$ axis points along the line of sight away from the observer, the $\bY$ axis points upward / north in the image plane, and the $\bX$ axis -- leftward (!) / east in the image plane.
+Note that this creates a rather awkward situation that the $\bX$ axis is directed opposite to the usual rightward orientation in conventional two-dimensional plots: this results from the unfortunate fact that the observer sits ``inside'' the celestial sphere. This transformation is often referred to as projection onto the sky or image plane $XY$. As another example of wrecked but venerable astronomical convention, position angles (PA) in the $XY$ plane are measured from the $\bY$ (north) direction towards $\bX$ (east), i.e., counter-clockwise in this configuration; hence the PA of $\bX$ is $\pi/2$.
+In some studies, the orientation of the rotated frame is given by the spherical polar angles $\theta,\phi$ of the line of sight $\bZ$ in the intrinsic frame; in this convention, $\alpha=\phi+\pi/2$, $\beta=\theta$.
+
+If the shape of an object in the intrinsic reference frame is a triaxial ellipsoid with the major axis $a\bx$, intermediate axis $b\by$ and minor axis $c\bz$, then the projection along the major axis corresponds to $\{\alpha,\beta\} = \{\pm\pi/2, \pi/2\}$, along the intermediate axis -- to $\{0, \pi/2\}$ or $\pi,\pi/2$, and along the minor axis -- to $\beta=0$ and any $\alpha$. In a general case, $\beta$ is the inclination angle (0 is ``face-on'' orientation and $\pi/2$ is ``edge-on''), and $\gamma$ is the PA of the projection of the intrinsic minor axis $\bz$ onto the sky plane. 
+In the case of an axisymmetric system, the first rotation ($\alpha$) does not change anything in its properties, hence we may set $\alpha=0$. Then the intrinsic major axis $\bx$ coincides with the line of nodes, and its PA is $\gamma+\pi/2$.
+In a general case, the projection of a triaxial ellipsoid is also an ellipse in the image plane, but its major and minor axes $A,B$ and orientation (PA $\eta$) are related to the intrinsic shape $a,b,c$ and viewing angles $\alpha,\beta,\gamma$ in a rather complicated way. In particular, the major axis of the ellipse may not be aligned with any of the three projected principal axes. There are routines \texttt{getProjectedEllipse}, \texttt{getIntrinsicShape} and \texttt{getViewingAngles} for computing one of these triplets from the other two, but note that the deprojection (determination of either the intrinsic shape or the viewing angles) is not always possible. For an axisymmetric system, there are two possible choices of viewing angles, depending on which side of the system is nearer, and for a triaxial system, there are four possible combinations of viewing angles, illustrated in Figure~\ref{fig:TriaxialProjection}.
+
+In case that the distance to the stellar system is not overwhelmingly larger than its characteristic size (or equivalently, when it occupies a non-negligible area on the sky), one needs to employ more sophisticated transformations between the cartesian intrinsic coordinates within the stellar system and the spherical coordinates on the sky (no longer ``sky plane''). An extreme case is our Galaxy, where the observer is located well within the stellar system, and it occupies the entire sky. Also in this case, we may need to consider shifts, not only rotations of the coordinate systems. The projection transformations will be extended to these cases in the future.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Potentials}  \label{sec:PotentialDetails}
 
 %%%%%%%%%%%
@@ -1610,7 +1686,7 @@ g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, dr =
   4\pi^2\, \int_0^{L_\mathrm{circ}^2(E)} T_\mathrm{rad}(E,L)\,dL^2,
 \end{align}
 \end{subequations}
-where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) = 2 \int_{r_-}^{r_+} dr/v = \d J_r/\d E$  is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
+where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} dr/v_r \equiv 2 \int_{r_-}^{r_+} dr/\sqrt{v^2-L^2/r^2} = \d J_r/\d E$  is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
 In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.
 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$). The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any finite-mass model in which the density drops faster than $r^{-3}$ at large radii), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.

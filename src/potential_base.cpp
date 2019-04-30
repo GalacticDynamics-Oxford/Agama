@@ -1,6 +1,5 @@
 #include "potential_base.h"
 #include "math_core.h"
-#include "math_spline.h"
 #include <cmath>
 
 namespace potential{
@@ -143,17 +142,37 @@ double BaseDensity::totalMass() const
     return massEst;
 }
 
+namespace{  // internal
+
 class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
+    const BaseDensity& dens;
+    const double m;
 public:
     RadiusByMassRootFinder(const BaseDensity& _dens, double _m) :
         dens(_dens), m(_m) {}
     virtual double value(double r) const {
         return dens.enclosedMass(r) - m;
     }
-private:
-    const BaseDensity& dens;
-    const double m;
 };
+
+class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
+    const BaseDensity& dens;  ///< the density model
+    const double X, Y, R;     ///< coordinates in the image plane
+    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+public:
+    SurfaceDensityIntegrand(const BaseDensity& _dens, double _X, double _Y, const double* _rotmatrix) :
+        dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+    virtual double value(double s) const {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
+        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
+        double XYZ[3] = {X, Y, Z}, xyz[3];
+        coord::transformVector(rotmatrix, XYZ, xyz);
+        return dZds!=0 ? dens.density(coord::PosCar(xyz[0], xyz[1], xyz[2])) * dZds : 0;
+    }
+};
+
+}  // internal ns
 
 double getRadiusByMass(const BaseDensity& dens, const double mass) {
     return math::findRoot(RadiusByMassRootFinder(dens, mass), math::ScalingSemiInf(), EPSREL_DENSITY_INT);
@@ -188,6 +207,18 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     if(fabs(gamma1)<1e-3)
         gamma1=0;
     return gamma1;
+}
+
+double surfaceDensity(const BaseDensity& dens, double X, double Y, double alpha, double beta, double gamma)
+{
+    double mat[9], tmp;
+    coord::makeRotationMatrix(alpha, beta, gamma, mat);
+    // the matrix corresponds to the transformation from intrinsic to observed coords,
+    // but we need the opposite transformation, so we transpose it
+    tmp = mat[1]; mat[1] = mat[3]; mat[3] = tmp;
+    tmp = mat[2]; mat[2] = mat[6]; mat[6] = tmp;
+    tmp = mat[5]; mat[5] = mat[7]; mat[7] = tmp;
+    return math::integrateAdaptive(SurfaceDensityIntegrand(dens, X, Y, mat), 0, 1, EPSREL_DENSITY_INT);
 }
 
 }  // namespace potential

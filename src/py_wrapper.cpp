@@ -1080,7 +1080,7 @@ static const char* docstringDensity =
     "may also be used in these contexts (i.e., an object presenting a Density interface).";
 
 // extract a pointer to C++ Density class from a Python object, or return an empty pointer on error.
-// Declared here, implemented after the PotentialObject definition becomes available.
+// Declared here, implemented after the DensityObject definition becomes available.
 potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
 
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
@@ -1178,9 +1178,51 @@ void fncDensity_density(void* obj, const double input[], double *result) {
     result[0] = ((DensityObject*)obj)->dens->density(point)
         / (conv->massUnit / pow_3(conv->lengthUnit));  // unit of density is M/L^3
 }
+
 PyObject* Density_density(PyObject* self, PyObject* args) {
     return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
         (self, args, fncDensity_density, /*chunk*/256);
+}
+
+struct DensityParams {
+    const potential::BaseDensity& dens;
+    const double alpha, beta, gamma;
+    DensityParams(const potential::BaseDensity& _dens, double _alpha, double _beta, double _gamma) :
+        dens(_dens), alpha(_alpha), beta(_beta), gamma(_gamma) {}
+};
+
+void fncDensity_surfaceDensity(void* obj, const double input[], double *result) {
+    DensityParams* params = static_cast<DensityParams*>(obj);
+    result[0] = surfaceDensity(params->dens,
+        input[0] * conv->lengthUnit, input[1] * conv->lengthUnit,
+        params->alpha, params->beta, params->gamma)
+    / (conv->massUnit / pow_2(conv->lengthUnit));  // unit of surface density is M/L^2
+}
+
+PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* namedArgs)
+{
+    // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
+    // namedArgs may be empty or contain three rotation angles
+    static const char* keywords1[] = {"point", "alpha", "beta", "gamma", NULL};
+    static const char* keywords2[] = {"x","y", "alpha", "beta", "gamma", NULL};
+    PyObject *points_obj = NULL;
+    double X = 0, Y = 0, alpha = 0, beta = 0, gamma = 0;
+    if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)==2 &&
+        PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|ddd", const_cast<char**>(keywords2),
+        &X, &Y, &alpha, &beta, &gamma))
+    {   // shortcut and alternative syntax for just a single point x,y
+        return Py_BuildValue("d", 
+            surfaceDensity(*((DensityObject*)self)->dens,
+            X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma)
+            / (conv->massUnit / pow_2(conv->lengthUnit)) );
+    }
+    // default syntax is a single first argument for the array of points
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|ddd", const_cast<char**>(keywords1),
+        &points_obj, &alpha, &beta, &gamma))
+        return NULL;
+    DensityParams params(*((DensityObject*)self)->dens, alpha, beta, gamma);
+    return callAnyFunctionOnArray<INPUT_VALUE_PAIR, OUTPUT_VALUE_SINGLE>
+        (&params, points_obj, fncDensity_surfaceDensity, /*chunk*/16);
 }
 
 PyObject* Density_totalMass(PyObject* self)
@@ -1201,7 +1243,7 @@ PyObject* Density_export(PyObject* self, PyObject* args)
     if(!PyArg_ParseTuple(args, "s", &filename))
         return NULL;
     try{
-        writeDensity(filename, *((DensityObject*)self)->dens, *conv);
+        writeDensity(filename, *((DensityObject*)self)->dens, *conv);  // this can also export a potential
         Py_INCREF(Py_None);
         return Py_None;
     }
@@ -1211,8 +1253,7 @@ PyObject* Density_export(PyObject* self, PyObject* args)
     }
 }
 
-/// shared between Density and Potential classes
-PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyObject* namedArgs)
+PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"n", "potential", "beta", "kappa", NULL};
     int numPoints=0;
@@ -1220,13 +1261,12 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
     double beta=NAN, kappa=NAN;  // undefined by default, if no argument is provided
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "i|Odd", const_cast<char**>(keywords),
         &numPoints, &pot_obj, &beta, &kappa))
-    {
         return NULL;
-    }
     if(numPoints<=0) {
         PyErr_SetString(PyExc_TypeError, "number of sampling points 'n' must be positive");
         return NULL;
     }
+    potential::PtrDensity dens  = ((DensityObject*)self)->dens;
     potential::PtrPotential pot = getPotential(pot_obj);  // if not NULL, will assign velocity as well
     if(pot_obj!=NULL && !pot) {
         PyErr_SetString(PyExc_TypeError,
@@ -1235,12 +1275,12 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
     }
     try{
         // do the sampling of the density profile
-        particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(dens, numPoints);
+        particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(*dens, numPoints);
 
         // assign the velocities if needed
         particles::ParticleArrayCar pointsvel;
         if(pot)
-            pointsvel = galaxymodel::assignVelocity(points, dens, *pot, beta, kappa);
+            pointsvel = galaxymodel::assignVelocity(points, *dens, *pot, beta, kappa);
 
         // convert output to NumPy array
         numPoints = points.size();
@@ -1261,11 +1301,6 @@ PyObject* sampleDensity(const potential::BaseDensity& dens, PyObject* args, PyOb
             (std::string("Error in sample(): ")+e.what()).c_str());
         return NULL;
     }
-}
-
-PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
-{
-    return sampleDensity(*((DensityObject*)self)->dens, args, namedArgs);
 }
 
 PyObject* Density_name(PyObject* self)
@@ -1327,18 +1362,20 @@ static PySequenceMethods Density_sequence_methods = {
 
 static PyMethodDef Density_methods[] = {
     { "name", (PyCFunction)Density_name, METH_NOARGS,
-      "Return the name of the density model\n"
+      "Return the name of the density or potential model\n"
       "No arguments\n"
       "Returns: string" },
     { "density", Density_density, METH_VARARGS, 
       "Compute density at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array\n"
       "Returns: float or array of floats" },
+    { "surfaceDensity", (PyCFunction)Density_surfaceDensity, METH_VARARGS | METH_KEYWORDS,
+      "Compute surface density at a given point or array of points\n" },
     { "export", Density_export, METH_VARARGS,
-      "Export density expansion coefficients to a text file\n"
+      "Export density or potential expansion coefficients to a text file\n"
       "Arguments: filename (string)\n"
       "Returns: none" },
-    { "sample", (PyCFunction)Density_sample, METH_VARARGS | METH_KEYWORDS, 
+    { "sample", (PyCFunction)Density_sample, METH_VARARGS | METH_KEYWORDS,
       "Sample the density profile with N point masses (assign particle coordinates and masses), "
       "and optionally assign velocities using one of three possible methods: "
       "Eddington, spherical or axisymmetric Jeans equations.\n"
@@ -1471,6 +1508,7 @@ public:
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Potential class
+/// note: it can also be used in a context where a DensityObject is expected
 typedef struct {
     PyObject_HEAD
     potential::PtrPotential pot;
@@ -1710,19 +1748,6 @@ PyObject* Potential_potential(PyObject* self, PyObject* args) {
         (self, args, fncPotential_potential, /*chunk*/256);
 }
 
-void fncPotential_density(void* obj, const double input[], double *result) {
-    const coord::PosCar point = convertPos(input);
-    result[0] = ((PotentialObject*)obj)->pot->density(point)
-        / (conv->massUnit / pow_3(conv->lengthUnit));  // unit of density is M/L^3
-}
-
-PyObject* Potential_density(PyObject* self, PyObject* args) {
-    if(!Potential_isCorrect(self))
-        return NULL;
-    return callAnyFunctionOnArray<INPUT_VALUE_TRIPLET, OUTPUT_VALUE_SINGLE>
-        (self, args, fncPotential_density, /*chunk*/256);
-}
-
 void fncPotential_force(void* obj, const double input[], double *result) {
     const coord::PosCar point = convertPos(input);
     coord::GradCar grad;
@@ -1847,43 +1872,6 @@ PyObject* Potential_Rmax(PyObject* self, PyObject* arg) {
         (self, arg, fncPotential_Rmax, /*chunk*/64);
 }
 
-PyObject* Potential_export(PyObject* self, PyObject* args)
-{
-    const char* filename=NULL;
-    if(!Potential_isCorrect(self) || !PyArg_ParseTuple(args, "s", &filename))
-        return NULL;
-    try{
-        writePotential(filename, *((PotentialObject*)self)->pot, *conv);
-        Py_INCREF(Py_None);
-        return Py_None;
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, (std::string("Error writing file: ")+e.what()).c_str());
-        return NULL;
-    }
-}
-
-PyObject* Potential_totalMass(PyObject* self)
-{
-    if(!Potential_isCorrect(self))
-        return NULL;
-    try{
-        return Py_BuildValue("d", ((PotentialObject*)self)->pot->totalMass() / conv->massUnit);
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError,
-            (std::string("Error in Potential.totalMass(): ")+e.what()).c_str());
-        return NULL;
-    }
-}
-
-PyObject* Potential_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
-{
-    if(!Potential_isCorrect(self))
-        return NULL;
-    return sampleDensity(*((PotentialObject*)self)->pot, args, namedArgs);
-}
-
 PyObject* Potential_name(PyObject* self)
 {
     if(!Potential_isCorrect(self))
@@ -1956,10 +1944,6 @@ static PyMethodDef Potential_methods[] = {
       "Compute potential at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
       "Returns: float or array of floats" },
-    { "density", Potential_density, METH_VARARGS,
-      "Compute density at a given point or array of points\n"
-      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
-      "Returns: float or array of floats" },
     { "force", Potential_force, METH_VARARGS,
       "Compute force at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
@@ -1971,19 +1955,6 @@ static PyMethodDef Potential_methods[] = {
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
       "or if the input was an array of N points, then both items in the tuple are 2d arrays "
       "with sizes Nx3 and Nx6, respectively"},
-    { "sample", (PyCFunction)Potential_sample, METH_VARARGS | METH_KEYWORDS, 
-      "Sample the density profile with N point masses (see help(Density.sample) for description)\n"
-      "Arguments: the number of points\n"
-      "Returns: a tuple of two arrays: "
-      "2d Nx3 array of point cartesian coordinates and 1d array of N point masses" },
-    { "export", Potential_export, METH_VARARGS,
-      "Export potential expansion coefficients to a text file\n"
-      "Arguments: filename (string)\n"
-      "Returns: none" },
-    { "totalMass", (PyCFunction)Potential_totalMass, METH_NOARGS,
-      "Return the total mass of the density model\n"
-      "No arguments\n"
-      "Returns: float number" },
     { "Rcirc", (PyCFunction)Potential_Rcirc, METH_VARARGS | METH_KEYWORDS,
       "Find the radius of a circular orbit in the equatorial plane corresponding to "
       "either the given z-component of angular momentum L or energy E; "
@@ -2012,7 +1983,7 @@ static PyTypeObject PotentialType = {
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
     0, 0, 0, 0, 0, 0, &Potential_sequence_methods, 0, 0, 0, Potential_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringPotential,
-    0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, /*parent class*/ &DensityType, 0, 0, 0, 0,
     (initproc)Potential_init
 };
 
@@ -2045,14 +2016,10 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
     if(dens_obj == NULL)
         return potential::PtrDensity();
 
-    // check if this is a Python wrapper for a C++ Density object
+    // check if this is a Python wrapper class for a C++ Density object (DensityType)
+    // or a Python class PotentiaType, which is a subclass of DensityType
     if(PyObject_TypeCheck(dens_obj, &DensityType) && ((DensityObject*)dens_obj)->dens)
         return ((DensityObject*)dens_obj)->dens;
-
-    // check if this is a Python wrapper for a C++ Potential object,
-    // which also provides a 'density()' method
-    if(PyObject_TypeCheck(dens_obj, &PotentialType) && ((PotentialObject*)dens_obj)->pot)
-        return ((PotentialObject*)dens_obj)->pot;
 
     // otherwise this could be an arbitrary Python function
     if(PyCallable_Check(dens_obj))
@@ -2285,9 +2252,7 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     PyObject *points_obj = NULL, *pot_obj = NULL, *angles = NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
         &points_obj, &pot_obj, &ifd, &angles) || ifd<0)
-    {
         return NULL;
-    }
     ActionFinderParams params;
     params.pot = getPotential(pot_obj);
     params.ifd = ifd;
@@ -2997,10 +2962,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
     if(!PyArg_ParseTupleAndKeywords(
         args, namedArgs, "O|OOO", const_cast<char**>(keywords),
         &points_obj, &dens_flag, &vel_flag, &vel2_flag))
-    {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to moments()");
         return NULL;
-    }
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
             toBool(dens_flag, true), toBool(vel_flag, false), toBool(vel2_flag, true) );
@@ -3075,10 +3037,7 @@ PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args)
         return NULL;
     PyObject *points_obj = NULL;
     if(!PyArg_ParseTuple(args, "O", &points_obj))
-    {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedMoments()");
         return NULL;
-    }
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
         return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SINGLE>
@@ -3114,10 +3073,7 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
     double vz_error = 0;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|d", const_cast<char**>(keywords),
         &points_obj, &vz_error))
-    {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to projectedDF()");
         return NULL;
-    }
     try{
         GalaxyModelParams params(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
         params.vz_error = vz_error * conv->velocityUnit;
@@ -3207,10 +3163,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     if(!PyArg_ParseTupleAndKeywords(
         args, namedArgs, "O|OOO", const_cast<char**>(keywords),
         &points_obj, &gridvR_obj, &gridvz_obj, &gridvphi_obj))
-    {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to vdf()");
         return NULL;
-    }
 
     // retrieve the input point(s)
     PyArrayObject *points_arr =
@@ -3872,20 +3825,28 @@ static const char* docstringTarget =
     "after choosing the desired value of coefficient beta = 1 - sigma_t^2 / (2 sigma_r^2), "
     "one demands that\n2 (1-beta) * rho * sigma_r^2 - rho * sigma_t^2 = 0\nfor all radial points.\n\n"
     "  LOSVD\n"
-    "This target object is intended for recording line-of-sight velocity distributions "
-    "in a 2d image plane; the latter is denoted by coordinates x', y', with y' pointing up (north) "
-    "and x' - left (west), and the complementary z' axis points towards the observer "
-    "(hence a positive LOS velocity corresponds to negative v_{z'}).\n"
-    "The orientation of the image plane w.r.t. the model coordinate system is set by three angles "
-    "theta, phi and chi: the former two are the usual spherical angles specifying the direction "
-    "of the line of sight in the model c.s., and the last one determines the rotation of the image "
-    "plane about this axis. For instance, the projections along each of the principal axes "
-    "are given by the following triplets of angles: \n"
-    "(0, 0, pi/2) - view down the z axis, so that the image plane (x',y') coincides with the (x,y)"
-    "plane;\n(pi/2, 0, 0) - view down the x axis, image plane coincides with the (y,z) plane;\n"
-    "(pi/2, pi/2, -pi/2) - view down the y axis, image plane coincides with the (z,x) plane.\n"
+    "This target object is intended for recording line-of-sight velocity distributions in a 2d image "
+    "plane; the latter is denoted by coordinates X, Y, with Y pointing up/north and X - left/east, "
+    "and the complementary Z axis points along the line of sight away from the observer.\n"
+    "The orientation of the image plane w.r.t. the intrinsic coordinate system x,y,z of the galaxy "
+    "is described by three Euler angles alpha, beta and gamma. "
+    "The first two angles define the line of sight: alpha is the angle between the x axis and "
+    "the line of nodes (the intersection between the equatorial (xy) plane of the galaxy and "
+    "the image plane); "
+    "beta is the inclination angle (beta=0 is face-on, with these two planes coinciding, beta=pi/2 "
+    "is edge-on, and beta=pi is again face-on but with z axis pointing towards the observer, "
+    "opposite to Z). "
+    "The third angle gamma defines additional rotation of the image plane: it is the position angle "
+    "(PA) of the projection of z axis onto the image plane, measured counter-clockwise from the Y "
+    "(up/north) axis towards the X (left/east) axis. The PA of the line of nodes is gamma+pi/2. "
+    "For instance, the projections along each of the principal axes are given by the following "
+    "triplets of angles: \n"
+    "(0, 0, 0) - face-on orientation, so that the image plane (X,Y) coincides with the (x,y) plane, "
+    "and the Z axis (line of sight) coincides with the z axis.\n"
+    "(0, pi/2, 0) - view down the y axis, image plane (X,Y) coincides with the (x,z) plane;\n"
+    "(pi/2, pi/2, 0) - view down the y axis, image plane coincides with the (y,z) plane.\n"
     "LOSVDs are one-dimensional functions that describe the distribution of matter moving with "
-    "the given velocity -v_{z'} in the given spatial region (aperture) in the (x',y') plane. "
+    "the given velocity v_Z in the given spatial region (aperture) in the (X,Y) plane. "
     "Apertures are specified by arbitrary simple polygons (without self-intersection, but not "
     "necessarily convex); different apertures may overlap in the same area. Any collection of slits "
     "at various angles, regular 2d IFU spaxels, or Voronoi bins can be represented in this way. "
@@ -3900,20 +3861,20 @@ static const char* docstringTarget =
     "needs not be uniformly-spaced.\n"
     "The amplitudes of B-spline expansion in each aperture for each orbit or N-body snapshot "
     "are computed by first constructing a datacube - the projection of said orbit onto "
-    "an auxiliary grid in the 2+1-dimensional space (x',y' and v_LOS). The grid in velocity space "
+    "an auxiliary grid in the 2+1-dimensional space (X,Y and v_LOS). The grid in velocity space "
     "is the same as used in the B-spline representation, but the grid in the image plane is "
-    "somewhat arbitrary (separable in x',y', but not necessarily uniform); the only requirement "
+    "somewhat arbitrary (separable in X,Y, but not necessarily uniform); the only requirement "
     "is for it to cover all apertures, and have a sufficient spatial resolution - typically "
     "comparable to the PSF width if 2nd or 3rd-degree B-splines are used. "
     "Then the datacube is convolved with spatial and velocity-space PSFs and re-binned into "
     "the apertures (all done internally by the Target object); the final LOSVD has "
     "numApertures * numBasisFnc elements, where the latter is len(gridv) + degree - 1.\n"
     "Parameters for this target:\n"
-    "theta,phi,chi - angles specifying the orientation of the image plane w.r.t. model coordinates;\n"
+    "alpha,beta,gamma - angles specifying the orientation of the image plane w.r.t. model coordinates;\n"
     "degree (integer from 0 to 3) - degree of B-splines;\n"
     "gridv - array of grid nodes in velocity space (typically should be symmetric about origin);\n"
-    "gridx - nodes of the auxiliary (internal) grid in the x' coordinate of the image plane;\n"
-    "gridy (optional - default is the same as gridx) - nodes of the internal grid in y'; "
+    "gridx - nodes of the auxiliary (internal) grid in the X coordinate of the image plane;\n"
+    "gridy (optional - default is the same as gridx) - nodes of the internal grid in Y; "
     "the spatial region covered by this 2d grid should encompass all apertures, and the grid spacing "
     "should be comparable to either the PSF width or the typical aperture size, but not necessarily "
     "uniform (i.e., it may be constructed with the routines 'nonuniformGrid' or 'symmetricGrid');\n"
@@ -3923,7 +3884,7 @@ static const char* docstringTarget =
     "the relative fraction of this component, which should sum up to unity);\n"
     "velpsf - width of the velocity-space smoothing kernel (a single Gaussian);\n"
     "apertures - array of polygons describing the boundaries of each aperture: "
-    "each element of this array is a 2d array with x',y' coordinates of the polygon vertices, "
+    "each element of this array is a 2d array with X,Y coordinates of the polygon vertices, "
     "and of course the number of vertices may be different for each polygon (but greater than two).\n\n"
     "The role of a Target object is to collect data during the construction of an orbit library: "
     "several instances of them could be provided as a 'targets=[t1,t2,...]' argument of "
@@ -4008,9 +3969,9 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
         if(utils::stringsEqual(type_str, "LOSVD")) {
             galaxymodel::LOSVDParams params;
             // parameters describing the orientation of the model
-            params.theta = toDouble(getItemFromPyDict(namedArgs, "theta"), params.theta);
-            params.phi   = toDouble(getItemFromPyDict(namedArgs, "phi"  ), params.phi);
-            params.chi   = toDouble(getItemFromPyDict(namedArgs, "chi"  ), params.chi);
+            params.alpha = toDouble(getItemFromPyDict(namedArgs, "alpha"), params.alpha);
+            params.beta  = toDouble(getItemFromPyDict(namedArgs, "beta" ), params.beta);
+            params.gamma = toDouble(getItemFromPyDict(namedArgs, "gamma"), params.gamma);
             // parameters of the internal grids in image plane and line-of-sight velocity
             params.gridx = toDoubleArray(getItemFromPyDict(namedArgs, "gridx"));
             params.gridy = toDoubleArray(getItemFromPyDict(namedArgs, "gridy"));
@@ -4813,9 +4774,7 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
     static const char* keywords[] = {"n", "traj", "weights", NULL};
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "lOO", const_cast<char**>(keywords),
         &Nbody, &traj_obj, &weights_obj))
-    {
         return NULL;
-    }
     if(Nbody <= 0) {
         PyErr_SetString(PyExc_ValueError, "Argument 'n' must be a positive integer");
         return NULL;
@@ -4991,9 +4950,7 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     static const char* keywords[] = {"filename","particles","format",NULL};
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "sO|s", const_cast<char **>(keywords),
         &filename, &particles_obj, &format))
-    {
         return NULL;
-    }
     // write snapshot
     try{
         particles::writeSnapshot(filename,
@@ -5121,9 +5078,7 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         *rpenl_obj = NULL, *rpenq_obj = NULL, *xmin_obj = NULL, *xmax_obj = NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|OOOOOO", const_cast<char**>(keywords),
         &matrix_obj, &rhs_obj, &xpenl_obj, &xpenq_obj, &rpenl_obj, &rpenq_obj, &xmin_obj, &xmax_obj))
-    {
         return NULL;
-    }
 
     // check that the matrix or a tuple of matrices were provided
     std::vector<PyObject*> matrixStack  = toPyObjectArray(matrix_obj);
@@ -5302,10 +5257,7 @@ PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
     PyObject* extrapolate_obj=NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iO", const_cast<char **>(keywords),
         &ptx, &der, &extrapolate_obj))
-    {
-        //PyErr_SetString(PyExc_ValueError, "Invalid arguments");
         return NULL;
-    }
     if(der<0 || der>2) {
         PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 2nd");
         return NULL;
@@ -5784,7 +5736,6 @@ PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         &callback, &lower_obj, &upper_obj, &eps, &maxNumEval) ||
         !PyCallable_Check(callback) || eps<=0 || maxNumEval<=0)
     {
-        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for integrateNdim");
         return NULL;
     }
     std::vector<double> xlow, xupp;
@@ -5836,7 +5787,6 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         &callback, &numSamples, &lower_obj, &upper_obj) ||
         !PyCallable_Check(callback) || numSamples<=0)
     {
-        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for sampleNdim");
         return NULL;
     }
     std::vector<double> xlow, xupp;

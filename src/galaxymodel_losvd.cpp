@@ -221,41 +221,41 @@ template<int N>
 class ApertureMassIntegrand: public math::IFunctionNdim {
     const potential::BaseDensity& density;        ///< density model 
     const double* mat;                            ///< orthogonal matrix for coordinate transformation
-    const math::BsplineInterpolator1d<N>& bsplx;  ///< B-spline for the x' coordinate in the image plane
-    const math::BsplineInterpolator1d<N>& bsply;  ///< same for the y' coordinate
-    const double scaleRadius;   ///< scaling radius for mapping the infinite interval in z' into [0:1]
+    const math::BsplineInterpolator1d<N>& bsplx;  ///< B-spline for the X coordinate in the image plane
+    const math::BsplineInterpolator1d<N>& bsply;  ///< same for the Y coordinate
+    const double scaleRadius;   ///< scaling radius for mapping the infinite interval in Z into [0:1]
 public:
     ApertureMassIntegrand(const potential::BaseDensity& _density, const double* _transformMatrix,
         const math::BsplineInterpolator1d<N>& _bsplx, const math::BsplineInterpolator1d<N>& _bsply) :
     density(_density), mat(_transformMatrix), bsplx(_bsplx), bsply(_bsply), scaleRadius(fmax(
     fmax(fabs(bsplx.xmin()), fabs(bsplx.xmax())), fmax(fabs(bsply.xmin()), fabs(bsply.xmax())))) {}
 
-    /// input variables are rotation-transformed x', y' and z'
+    /// input variables are rotation-transformed X, Y and Z
     virtual unsigned int numVars() const { return 3; }
 
     /// output values are the 2d tensor-product B-spline basis functions, multiplied by density
     virtual unsigned int numValues() const { return pow_2(N+1); }
 
-    /// compute the density times all non-trivial B-spline basis functions at the given point x',y',z'
+    /// compute the density times all non-trivial B-spline basis functions at the given point X,Y,Z
     virtual void eval(const double vars[], double values[]) const {
-        const double xp = vars[0], yp = vars[1], w = vars[2],
-        // transform the scaled variable w in the range [0:1] into z'
-        zp  = scaleRadius * (1 / (1-w) - 1 / w),
+        const double X = vars[0], Y = vars[1], w = vars[2],
+        // transform the scaled variable w in the range [0:1] into Z
+        Z   = scaleRadius * (1 / (1-w) - 1 / w),
         jac = scaleRadius * (1 / pow_2(1-w) + 1 / pow_2(w));
-        // transform the rotated coords x',y',z' back into the reference (un-rotated) frame,
+        // transform the rotated coords X,Y,Z back into the reference (un-rotated) frame,
         // multiplying this vector by the transposed rotation matrix
         // (since the inverse of an orthogonal matrix is just its transpose),
-        // and compute the density at this point, multiplied by the jacobian of w -> z' mapping
+        // and compute the density at this point, multiplied by the jacobian of w -> Z mapping
         double val = jac * density.density(coord::PosCar(
-            mat[0] * xp + mat[3] * yp + mat[6] * zp,
-            mat[1] * xp + mat[4] * yp + mat[7] * zp,
-            mat[2] * xp + mat[5] * yp + mat[8] * zp));
+            mat[0] * X + mat[3] * Y + mat[6] * Z,
+            mat[1] * X + mat[4] * Y + mat[7] * Z,
+            mat[2] * X + mat[5] * Y + mat[8] * Z));
         if(!isFinite(val))
             val = 0.;   // prevent failure in the case of error in density computation (e.g., at origin)
         // obtain the values of B-spline basis functions
         double weightx[N+1], weighty[N+1];
-        bsplx.nonzeroComponents(xp, 0, weightx);
-        bsply.nonzeroComponents(yp, 0, weighty);
+        bsplx.nonzeroComponents(X, 0, weightx);
+        bsply.nonzeroComponents(Y, 0, weighty);
         // add the contribution of this point to the integrals
         for(int ky=0; ky<=N; ky++)
             for(int kx=0; kx<=N; kx++)
@@ -372,7 +372,7 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
 
     // construct the projection matrix for transforming the position/velocity in the
     // intrinsic 3d coordinate system into image plane coordinates and line-of-sight velocity
-    coord::makeRotationMatrix(params.phi+M_PI/2, params.theta, -params.chi, transformMatrix);
+    coord::makeRotationMatrix(params.alpha, params.beta, params.gamma, transformMatrix);
 
     // construct the spatial rebinning matrix
     math::Matrix<double> apertureMatrix(numApertures, numBasisFnc, 0.);
@@ -487,16 +487,15 @@ void TargetLOSVD<N>::addPoint(const double point[6], const double mult, double* 
     // we have four symmetric points to be added: (x,y,z), (x,y,-z), (-x,-y,z), (-x,-y,-z);
     // their projected coordinates are (xp1+xp2,yp1+yp2), (xp1-xp2,yp1-yp2), and similarly for v_los
     double
-    xp1 =  transformMatrix[0] * point[0] + transformMatrix[1] * point[1],
-    xp2 =  transformMatrix[2] * point[2],
-    yp1 =  transformMatrix[3] * point[0] + transformMatrix[4] * point[1],
-    yp2 =  transformMatrix[5] * point[2],
-    // z' axis points towards the observer, so we have a minus sign for v_los
-    vl1 = -transformMatrix[6] * point[3] - transformMatrix[7] * point[4],
-    vl2 = -transformMatrix[8] * point[5];
+    xp1 = transformMatrix[0] * point[0] + transformMatrix[1] * point[1],
+    xp2 = transformMatrix[2] * point[2],
+    yp1 = transformMatrix[3] * point[0] + transformMatrix[4] * point[1],
+    yp2 = transformMatrix[5] * point[2],
+    vl1 = transformMatrix[6] * point[3] + transformMatrix[7] * point[4],
+    vl2 = transformMatrix[8] * point[5];
 
     // in case of symmetric grids, mirror-symmetrization (x,y,z -> -x,-y,-z) is done afterwards,
-    // so we only add the point and its z-flipped counterpart (because they project to different x',y');
+    // so we only add the point and its z-flipped counterpart (because they project to different X,Y);
     // otherwise all four symmetric points separately
     if(symmetricGrids) {
         reallyAddPoint(bsplx, bsply, bsplv, xp1+xp2, yp1+yp2, vl1+vl2, 0.5*mult, datacube);  // x,y,z
@@ -548,8 +547,8 @@ std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::Ba
 #endif
     for(int p=0; p<numPixels; p++) {
         int ix = p % (bsplx.xvalues().size()-1), iy = p / (bsplx.xvalues().size()-1);
-        // integration in a 3d slab: x', y' are projected coords in the image plane
-        // (inside the current pixel), and w is the scaled z' coordinate (mapped onto the interval [0:1])
+        // integration in a 3d slab: X, Y are projected coords in the image plane
+        // (inside the current pixel), and w is the scaled Z coordinate (mapped onto the interval [0:1])
         double xywlow[3] = { bsplx.xvalues()[ix  ], bsply.xvalues()[iy  ], 0 };
         double xywupp[3] = { bsplx.xvalues()[ix+1], bsply.xvalues()[iy+1], 1 };
         double result[ (N+1) * (N+1) ];  // number of nonzero 2d basis elements in each pixel
