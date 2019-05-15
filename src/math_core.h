@@ -330,6 +330,36 @@ public:
     virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
 };
 
+
+// a couple of analytic functions providing the IFunction and IFunctionIntegral interfaces
+
+/** A simple monomial function  f(x) = x^m */
+class Monomial: public IFunction, public IFunctionIntegral {
+    const int m;
+public:
+    Monomial(int _m) : m(_m) {};
+
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
+    virtual unsigned int numDerivs() const { return 2; }
+    virtual double integrate(double x1, double x2, int n=0) const;
+};
+
+/** A normalized Gaussian function centered at origin with a width sigma:
+    \f$   f(x) = \exp( - [x / \sigma]^2 / 2 ) / (\sqrt{2\pi} \sigma)  \f$
+*/
+class Gaussian: public IFunction, public IFunctionIntegral {
+    const double sigma;
+public:
+    Gaussian(double _sigma) : sigma(_sigma) {}
+
+    /* Compute the value and up to two derivatives of the function */
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
+    virtual unsigned int numDerivs() const { return 2; }
+
+    /** Compute the value of integral of the function times x^n on the interval [x1..x2] */
+    virtual double integrate(double x1, double x2, int n=0) const;
+};
+
 ///@}
 /// \name  ----- root-finding and minimization routines -----
 ///@{

@@ -33,7 +33,7 @@ static const unsigned int MAX_NUM_EVAL = 10000;
 
 /// to avoid singularities in potential integration kernel, we add a small softening
 /// (intended to be much less than typical grid spacing) - perhaps need to make it grid-dependent
-const double EPS2_SOFTENING = 1e-12;
+static const double EPS2_SOFTENING = 1e-12;
 
 /// relative accuracy of potential computation (integration tolerance parameter)
 static const double EPSREL_POTENTIAL_INT = 1e-6;
@@ -157,8 +157,8 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
     if(R > 0 && R0 > 0) {  // normal case
         double sq = 1 / (M_PI * sqrt(R*R0));
         double u  = t / (2*R*R0);   // u >= 1
-        double dQ, Q = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
-        if(!isFinite(Q)) return;
+        double dQ = 0, Q = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
+        if(!isFinite(Q+dQ)) return;
         values[0]+= -sq * mass * Q;
         if(useDerivs) {
             // only soften the derivative, because it diverges as 1/|u-1|,
@@ -582,9 +582,9 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
     }
     Rscale = gridR_orig[sizeR/2];  // take some reasonable value for scale radius for coord transformation
     for(unsigned int iR=0; iR<sizeR; iR++)
-        gridR[iR] = log(1+gridR[iR]/Rscale);
+        gridR[iR] = asinh(gridR[iR]/Rscale);
     for(unsigned int iz=0; iz<sizez; iz++)
-        gridz[iz] = log(1+fabs(gridz[iz])/Rscale)*math::sign(gridz[iz]);
+        gridz[iz] = asinh(gridz[iz]/Rscale);
 
     math::Matrix<double> val(sizeR, sizez);
     int mmax = (coefs.size()-1)/2;
@@ -622,7 +622,7 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
 double DensityAzimuthalHarmonic::rho_m(int m, double R, double z) const
 {
     int mmax = (spl.size()-1)/2;
-    double lR = log(1+R/Rscale), lz = log(1+fabs(z)/Rscale)*math::sign(z);
+    double lR = asinh(R/Rscale), lz = asinh(z/Rscale);
     if( math::abs(m)>mmax || !spl[m+mmax] ||
         lR<spl[mmax]->xmin() || lz<spl[mmax]->ymin() ||
         lR>spl[mmax]->xmax() || lz>spl[mmax]->ymax() )
@@ -633,7 +633,7 @@ double DensityAzimuthalHarmonic::rho_m(int m, double R, double z) const
 double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
 {
     int mmax = (spl.size()-1)/2;
-    double lR = log(1+pos.R/Rscale), lz = log(1+fabs(pos.z)/Rscale)*math::sign(pos.z);
+    double lR = asinh(pos.R/Rscale), lz = asinh(pos.z/Rscale);
     assert(spl[mmax]);  // the spline for m=0 must exist
     if( lR<spl[mmax]->xmin() || lz<spl[mmax]->ymin() ||
         lR>spl[mmax]->xmax() || lz>spl[mmax]->ymax() )
@@ -679,9 +679,9 @@ void DensityAzimuthalHarmonic::getCoefs(
         }
     // unscale the grid coordinates
     for(unsigned int iR=0; iR<sizeR; iR++)
-        gridR[iR] = Rscale * (exp(gridR[iR]) - 1);
+        gridR[iR] = Rscale * sinh(gridR[iR]);
     for(unsigned int iz=0; iz<sizez; iz++)
-        gridz[iz] = Rscale * (exp(fabs(gridz[iz])) - 1) * math::sign(gridz[iz]);
+        gridz[iz] = Rscale * sinh(gridz[iz]);
 }
 
 // -------- public classes: CylSpline --------- //
@@ -784,6 +784,8 @@ PtrPotential determineAsympt(
             avg.add(Phi[mmax](indR[p], indz[p]) * sqrt(pow_2(points[p].R) + pow_2(points[p].z)) / r0);
         W.assign(ncoefs, 0);
         W[0] = avg.mean();
+        utils::msg(utils::VL_WARNING, "CylSpline",
+            "Failed to determine extrapolation coefficients, set W0=" + utils::toString(W[0]));
     }
     math::eliminateNearZeros(W);
     return PtrPotential(new PowerLawMultipole(r0, false /*not inner*/, zeros, zeros, W));
@@ -981,10 +983,10 @@ CylSpline::CylSpline(
 
     // transform the grid to log-scaled coordinates
     for(unsigned int i=0; i<sizeR; i++) {
-        gridR[i] = log(1+gridR[i]/Rscale);
+        gridR[i] = asinh(gridR[i]/Rscale);
     }
     for(unsigned int i=0; i<sizez; i++) {
-        gridz[i] = log(1+fabs(gridz[i])/Rscale) * math::sign(gridz[i]);
+        gridz[i] = asinh(gridz[i]/Rscale);
     }
 
     // check if we may use log-scaling of the m=0 term (i.e. if the potential is negative everywhere)
@@ -1015,25 +1017,26 @@ CylSpline::CylSpline(
         for(unsigned int iR=0; iR<sizeR; iR++) {
             double R = gridR_orig[iR];
             for(unsigned int iz=0; iz<sizez_orig; iz++) {
-                double z = fabs(gridz_orig[iz]);
+                double z = gridz_orig[iz];
                 nontrivial |= Phi[mm](iR, iz) != 0;
                 unsigned int iz1 = zsym ? sizez_orig-1+iz : iz;  // index in the internal 2d grid
                 // values of potential and its derivatives are represented as scaled 2d functions:
                 // the amplitude is optionally log-scaled for the m=0 term,
                 // and divided by the value of the m=0 term for the other terms,
-                // and the derivatives additionally transformed to the semi-log-scaled coordinates.
+                // and the derivatives additionally transformed to the asinh-scaled coordinates.
+                double dRdRscaled = sqrt(R*R + Rscale*Rscale), dzdzscaled = sqrt(z*z + Rscale*Rscale);
                 if(mm == mmax) {  // this corresponds to the m=0 term
                     val(iR,iz1) = logScaling ? log(-Phi[mm](iR,iz)) : Phi[mm](iR,iz);
                     if(haveDerivs) {
-                        derR(iR,iz1) = dPhidR[mm](iR,iz) * (R+Rscale) / (logScaling ? Phi[mm](iR,iz) : 1);
-                        derz(iR,iz1) = dPhidz[mm](iR,iz) * (z+Rscale) / (logScaling ? Phi[mm](iR,iz) : 1);
+                        derR(iR,iz1) = dPhidR[mm](iR,iz) * dRdRscaled / (logScaling ? Phi[mm](iR,iz) : 1);
+                        derz(iR,iz1) = dPhidz[mm](iR,iz) * dzdzscaled / (logScaling ? Phi[mm](iR,iz) : 1);
                     }
                 } else {   // normalize by the m=0 term contained in the [mmax] array element
                     double v0 = Phi[mmax](iR,iz), vm = Phi[mm](iR,iz) / v0;
                     val(iR,iz1) = vm;
                     if(haveDerivs) {
-                        derR(iR,iz1) = (dPhidR[mm](iR,iz) - vm * dPhidR[mmax](iR,iz)) * (R+Rscale) / v0;
-                        derz(iR,iz1) = (dPhidz[mm](iR,iz) - vm * dPhidz[mmax](iR,iz)) * (z+Rscale) / v0;
+                        derR(iR,iz1) = (dPhidR[mm](iR,iz) - vm * dPhidR[mmax](iR,iz)) * dRdRscaled / v0;
+                        derz(iR,iz1) = (dPhidz[mm](iR,iz) - vm * dPhidz[mmax](iR,iz)) * dzdzscaled / v0;
                     }
                 }
                 if(zsym) {
@@ -1072,18 +1075,18 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
     double* val, coord::GradCyl* der, coord::HessCyl* der2) const
 {
     int mmax = (spl.size()-1)/2;
-    double Rscaled = log(1+pos.R/Rscale);
-    double zscaled = log(1+fabs(pos.z)/Rscale) * math::sign(pos.z);
+    double Rscaled = asinh(pos.R/Rscale);
+    double zscaled = asinh(pos.z/Rscale);
     if( Rscaled<spl[mmax]->xmin() || zscaled<spl[mmax]->ymin() ||
         Rscaled>spl[mmax]->xmax() || zscaled>spl[mmax]->ymax() ) {
         // outside the grid definition region, use the asymptotic expansion
         asymptOuter->eval(pos, val, der, der2);
         return;
     }
-    double dRscaleddR   = 1/(Rscale+pos.R);
-    double dzscaleddz   = 1/(Rscale+fabs(pos.z));
-    double d2RscaleddR2 = -pow_2(dRscaleddR);
-    double d2zscaleddz2 = -pow_2(dzscaleddz) * math::sign(pos.z);
+    double dRscaleddR   = 1 / sqrt(pow_2(pos.R) + pow_2(Rscale));
+    double dzscaleddz   = 1 / sqrt(pow_2(pos.z) + pow_2(Rscale));
+    double d2RscaleddR2 = -pos.R * pow_3(dRscaleddR);
+    double d2zscaleddz2 = -pos.z * pow_3(dzscaleddz);
 
     // only compute those quantities that will be needed in output
     const bool needPhi  = true;
@@ -1219,10 +1222,10 @@ void CylSpline::getCoefs(
     // unscale the coordinates
     gridR.resize(sizeR);
     for(unsigned int iR=0; iR<sizeR; iR++)
-        gridR[iR] = Rscale * (exp(scaledR[iR]) - 1);
+        gridR[iR] = Rscale * sinh(scaledR[iR]);
     gridz.resize(sizez);
     for(unsigned int iz=0; iz<sizez; iz++)
-        gridz[iz] = Rscale * (exp(fabs(scaledz[iz+iz0])) - 1) * math::sign(scaledz[iz+iz0]);
+        gridz[iz] = Rscale * sinh(scaledz[iz+iz0]);
 
     // output derivs only if they were provided as input (i.e. when using quintic splines)
     Phi.assign(2*mmax+1, math::Matrix<double>());
@@ -1241,8 +1244,8 @@ void CylSpline::getCoefs(
         for(unsigned int iz=0; iz<sizez; iz++) {
             double Rscaled = scaledR[iR];     // coordinates in the internal scaled coords array
             double zscaled = scaledz[iz+iz0];
-            double dRscaleddR = 1 / (Rscale + gridR[iR]);
-            double dzscaleddz = 1 / (Rscale + fabs(gridz[iz]));
+            double dRscaleddR = 1 / sqrt(pow_2(gridR[iR]) + pow_2(Rscale));
+            double dzscaleddz = 1 / sqrt(pow_2(gridz[iz]) + pow_2(Rscale));
             // first retrieve the m=0 harmonic (and un-log-scale it if necessary);
             // the derivatives are taken w.r.t. scaled R and z
             double Phi0, dPhi0dR, dPhi0dz;

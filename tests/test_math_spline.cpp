@@ -180,25 +180,48 @@ public:
 };
 
 // original function to interpolate and convolve
-#define testfncorig sin
+//#define testfncorig sin
+double testfncorig(double x) { return tanh((2-fabs(x-4))/0.5)*0.5+0.5; }
 
-// smoothing kernel
-class Gaussian: public math::IFunctionNoDeriv {
-    double invwidth;
+/** A normalized asymmetric exponential convolution kernel centered at origin with a scale sigma:
+    \f$   f(x) = \exp( -x/sigma ) / \sigma  \f$  if x>=0,  otherwise 0
+*/
+class ExpKernel: public math::IFunction, public math::IFunctionIntegral {
+    const double sigma;
 public:
-    Gaussian(double width): invwidth(1/width) {}
-    virtual double value(const double x) const {
-        return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth));
+    ExpKernel(double _sigma) : sigma(_sigma) {}
+
+    /* Compute the value and up to two derivatives of the function */
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const
+    {
+        double v = x >= 0 ? exp(-x/sigma) / sigma : 0;
+        if(val)
+            *val = v;
+        if(der)
+            *der = -v/sigma;
+        if(der2)
+            *der2 = v/pow_2(sigma);
+    }
+    virtual unsigned int numDerivs() const { return 2; }
+
+    /** Compute the value of integral of the function times x^n on the interval [x1..x2] */
+    virtual double integrate(double x1, double x2, int n=0) const
+    {
+        double v1 = x1 >=0 ? math::gammainc(n+1, x1/sigma) : math::gamma(n+1);
+        double v2 = x2 >=0 ? math::gammainc(n+1, x2/sigma) : math::gamma(n+1);
+        return (v1-v2) * math::pow(sigma, n);
     }
 };
 
-// smoothing kernel multiplied by the original function
-class GaussianConv: public math::IFunctionNoDeriv {
-    double invwidth, y;
+// convolution kernel multiplied by the original function
+class Convolved: public math::IFunctionNoDeriv {
+    const double y;
+    const math::IFunction& conv;
 public:
-    GaussianConv(double width, double _y): invwidth(1/width), y(_y) {}
+    Convolved(double _y, const math::IFunction& _conv): y(_y), conv(_conv) {}
     virtual double value(const double x) const {
-        return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth)) * testfncorig(y-x);
+        //return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth)) * testfncorig(y-x);
+        return testfncorig(y-x) * conv(x);
     }
 };
 
@@ -526,64 +549,115 @@ bool testLogScaledSplines()
         errDerS < 150 && errDerL < 150 && errDerD < 1.;
 }
 
+bool testGaussianIntegral(double x1, double x2, double sigma, int n)
+{
+    math::Gaussian gauss(sigma);
+    // numerical integration
+    double intnum = math::integrate(math::FncProduct(math::Monomial(n), gauss), x1, x2, 1e-12);
+    // analytic integration provided by the IFunctionIntegral interface
+    double intan  = gauss.integrate(x1, x2, n);
+    return fabs(intnum-intan) <= fabs(intan) * 1e-12;
+}
+
 template<int N>
-void getAmplFiniteElement(const math::FiniteElement1d<N>& fe, const double SIGMA,
-    /*output*/ std::vector<double>& ampl, std::vector<double>& convampl)
+double getAmplFiniteElement(const math::FiniteElement1d<N>& fe, const math::IFunctionIntegral& kernel,
+    /*output*/ std::vector<double>& ampl, std::vector<double>& convampl, std::vector<double>& conv2ampl)
 {
     const unsigned int gridSize = fe.integrPoints().size();
-    // collect the function values at the nodes of integration grid
+    // 0. collect the function values at the nodes of integration grid
     std::vector<double> fncValues(gridSize);
     for(unsigned int p=0; p<gridSize; p++)
         fncValues[p] = testfncorig(fe.integrPoints()[p]);
-    // compute the projection integrals and solve the linear equation to find the amplitudes
+    // 1. compute the projection integrals, using the collected function values, and solve the linear
+    // equation to find the amplitudes of the B-spline approximation of the original function
     std::vector<double> pv = fe.computeProjVector(fncValues);
     math::BandMatrix<double> pm = fe.computeProjMatrix();
     ampl = solveBand(pm, pv);
-    // compute the convolution
-    math::Matrix<double> cm = fe.computeConvMatrix(Gaussian(SIGMA));
-    std::vector<double> tmpv(ampl.size());
-    math::blas_dgemv(math::CblasNoTrans, 1., cm, ampl, 0., tmpv);
-    convampl = solveBand(pm, tmpv);
+    // 2. compute the amplitudes of the B-spline expansion of the original function convolved
+    // with the give kernel, using directly the values of the original function collected at step 0
+    pv = fe.computeConvVector(fncValues, kernel);
+    convampl = solveBand(pm, pv);
+    // 3. compute the amplitudes of the B-spline expansion of the convolution of the _approximate_
+    // (interpolated) function and the same kernel: they are obtained by applying the B-spline
+    // convolution matrix to the amplitudes of interpolated function produced at step 1
+    math::Matrix<double> cm = fe.computeConvMatrix(kernel);
+    math::blas_dgemv(math::CblasNoTrans, 1., cm, ampl, 0., /*output*/pv);
+    conv2ampl = solveBand(pm, pv);
+    // 4. consistency check: the B-spline convolution matrix with a zero-width kernel should be
+    // identical to the Gram (projection) matrix "pm" found in step 1
+    cm = fe.computeConvMatrix(math::Gaussian(0.));
+    math::blas_daxpy(-1, math::Matrix<double>(pm), cm);
+    return sqrt(math::blas_dnrm2(cm) / cm.size());  // should be close to machine epsilon
 }
 
 bool testFiniteElement()
 {
-    // the function to approximate is  sin(x);
-    // the convolution kernel is a Gaussian with width SIGMA
-    const int NNODES  = 15;
-    const int NTEST   = std::max<int>(5*(NNODES-1)+1, 101);
+    // test the analytic integration provided by the IFunctionIntegral interface of math::Gaussian
+    if( !testGaussianIntegral( 1.0, 2.0, 0.5, 0) ||
+        !testGaussianIntegral( 0.2, 2.0, 0.6, 1) ||
+        !testGaussianIntegral(-3.0, 2.0, 0.7, 2) ||
+        !testGaussianIntegral(-1.0,-3.0, 0.8, 3) ||
+        !testGaussianIntegral( 1.0,-2.0, 0.9, 4) ||
+        !testGaussianIntegral(-1.0, 2.0, 0.3, 5) ||
+        !testGaussianIntegral( 0.0, 2.0, 0.2, 6) ||
+        !testGaussianIntegral(-1.0, 1.0, 0.3, 5) ||
+        !testGaussianIntegral(-1.0, 1.0, 0.2, 6) ||
+        !testGaussianIntegral( 0.0, 2.0, 0.5, 7) ||
+        !testGaussianIntegral(-2.0, 0.0, 0.5, 7) ||
+        !testGaussianIntegral(-2.0, 2.0, 0.5, 7) ||
+        !testGaussianIntegral( 0.0, 2.0, 0.5, 8) ||
+        !testGaussianIntegral(-2.0, 0.0, 0.5, 8) ||
+        !testGaussianIntegral(-2.0, 2.0, 0.5, 8) ||
+        !testGaussianIntegral( 2.0,-2.0, 0.5, 8) )
+    {
+        std::cout << "Analytic integration of a Gaussian times monomial function "
+            "\033[1;31m failed\033[0m\n";
+        return false;
+    }
+
+    // the function to approximate is  a somewhat smoothed top-hat function;
+    // the convolution kernel is a one-sided exponential profile with scale SIGMA
+    const int NNODES  = 21;
+    const int NTEST   = std::max<int>(10*(NNODES-1)+1, 101);
     const double XMIN = 0.;
     const double XMAX = 10.;
-    const double SIGMA= 0.8;
+    const double SIGMA= 0.5;
     std::vector<double> xnodes = math::createUniformGrid(NNODES, XMIN, XMAX);
+    ExpKernel kernel(SIGMA);
     math::FiniteElement1d<0> fe0(xnodes);
     math::FiniteElement1d<1> fe1(xnodes);
     math::FiniteElement1d<2> fe2(xnodes);
     math::FiniteElement1d<3> fe3(xnodes);
-    std::vector<double> am0, cam0, am1, cam1, am2, cam2, am3, cam3;
-    getAmplFiniteElement(fe0, SIGMA, am0, cam0);
-    getAmplFiniteElement(fe1, SIGMA, am1, cam1);
-    getAmplFiniteElement(fe2, SIGMA, am2, cam2);
-    getAmplFiniteElement(fe3, SIGMA, am3, cam3);
+    std::vector<double> am0, cam0, tam0, am1, cam1, tam1, am2, cam2, tam2, am3, cam3, tam3;
+    double
+    zam0 = getAmplFiniteElement(fe0, kernel, am0, cam0, tam0),
+    zam1 = getAmplFiniteElement(fe1, kernel, am1, cam1, tam1),
+    zam2 = getAmplFiniteElement(fe2, kernel, am2, cam2, tam2),
+    zam3 = getAmplFiniteElement(fe3, kernel, am3, cam3, tam3);
     std::ofstream strm;
     if(OUTPUT) {
         strm.open("test_math_spline_femconv.dat");
-        strm << "x         orig_fnc  conv_fnc  fem0      femconv0  fem1      femconv1  "
-        "fem2      femconv2  fem3      femconv3\n";
+        strm << "x         orig_fnc  conv_fnc  fem0      femconv0  fem2conv0 "
+        "fem1      femconv1  fem2conv1 fem2      femconv2  fem2conv2 fem3      femconv3  fem2conv3\n";
     }
-    double err0=0, erc0=0, err1=0, erc1=0, err2=0, erc2=0, err3=0, erc3=0;
+    double err0=0, erc0=0, ert0=0, err1=0, erc1=0, ert1=0, err2=0, erc2=0, ert2=0, err3=0, erc3=0, ert3=0;
     for(int i=0; i<NTEST; i++) {
-        double x = XMIN + (XMAX-XMIN) / (NTEST-1) * i;
-        double origfnc = testfncorig(x);
-        double convfnc = math::integrateAdaptive(GaussianConv(SIGMA, x), x-XMAX, x-XMIN, 1e-6);
-        double fem0    = fe0.interp.interpolate(x, am0);
-        double femconv0= fe0.interp.interpolate(x, cam0);
-        double fem1    = fe1.interp.interpolate(x, am1);
-        double femconv1= fe1.interp.interpolate(x, cam1);
-        double fem2    = fe2.interp.interpolate(x, am2);
-        double femconv2= fe2.interp.interpolate(x, cam2);
-        double fem3    = fe3.interp.interpolate(x, am3);
-        double femconv3= fe3.interp.interpolate(x, cam3);
+        double x = XMIN + (XMAX-XMIN) / (NTEST-1) * i,
+        origfnc  = testfncorig(x),
+        convfnc  = math::integrateAdaptive(Convolved(x, ExpKernel(SIGMA)), x-XMAX, x-XMIN, 1e-6),
+        fem0     = fe0.interp.interpolate(x, am0),
+        femconv0 = fe0.interp.interpolate(x, cam0),
+        fem2conv0= fe0.interp.interpolate(x, tam0),
+        fem1     = fe1.interp.interpolate(x, am1),
+        femconv1 = fe1.interp.interpolate(x, cam1),
+        fem2conv1= fe1.interp.interpolate(x, tam1),
+        fem2     = fe2.interp.interpolate(x, am2),
+        femconv2 = fe2.interp.interpolate(x, cam2),
+        fem2conv2= fe2.interp.interpolate(x, tam2),
+        fem3     = fe3.interp.interpolate(x, am3),
+        femconv3 = fe3.interp.interpolate(x, cam3),
+        fem2conv3= fe3.interp.interpolate(x, tam3);
+
         err0 += pow_2(fem0-origfnc);
         err1 += pow_2(fem1-origfnc);
         err2 += pow_2(fem2-origfnc);
@@ -592,34 +666,48 @@ bool testFiniteElement()
         erc1 += pow_2(femconv1-convfnc);
         erc2 += pow_2(femconv2-convfnc);
         erc3 += pow_2(femconv3-convfnc);
+        ert0 += pow_2(femconv0-fem2conv0);
+        ert1 += pow_2(femconv1-fem2conv1);
+        ert2 += pow_2(femconv2-fem2conv2);
+        ert3 += pow_2(femconv3-fem2conv3);
         if(OUTPUT)
             strm << utils::pp(x, 9) +' ' +
             utils::pp(origfnc,   9) +' ' +
             utils::pp(convfnc,   9) +' ' +
             utils::pp(fem0,      9) +' ' +
             utils::pp(femconv0,  9) +' ' +
+            utils::pp(fem2conv0, 9) +' ' +
             utils::pp(fem1,      9) +' ' +
             utils::pp(femconv1,  9) +' ' +
+            utils::pp(fem2conv1, 9) +' ' +
             utils::pp(fem2,      9) +' ' +
             utils::pp(femconv2,  9) +' ' +
+            utils::pp(fem2conv2, 9) +' ' +
             utils::pp(fem3,      9) +' ' +
-            utils::pp(femconv3,  9) +'\n';
+            utils::pp(femconv3,  9) +' ' +
+            utils::pp(fem2conv3, 9) +'\n';
     }
     err0 = sqrt(err0 / NTEST);
     erc0 = sqrt(erc0 / NTEST);
+    ert0 = sqrt(ert0 / NTEST);
     err1 = sqrt(err1 / NTEST);
     erc1 = sqrt(erc1 / NTEST);
+    ert1 = sqrt(ert1 / NTEST);
     err2 = sqrt(err2 / NTEST);
     erc2 = sqrt(erc2 / NTEST);
+    ert2 = sqrt(ert2 / NTEST);
     err3 = sqrt(err3 / NTEST);
     erc3 = sqrt(erc3 / NTEST);
+    ert3 = sqrt(ert3 / NTEST);
     std::cout << "Finite-element approximation and convolution: RMS error "
     "in FEM0=" + utils::pp(err0, 8) + ", conv0=" + utils::pp(erc0, 8) +
     ",  FEM1=" + utils::pp(err1, 8) + ", conv1=" + utils::pp(erc1, 8) +
     ",  FEM2=" + utils::pp(err2, 8) + ", conv2=" + utils::pp(erc2, 8) +
     ",  FEM3=" + utils::pp(err3, 8) + ", conv3=" + utils::pp(erc3, 8) + "\n";
-    return err1 < 0.2   && erc1 < 0.2   && err1 < 0.02    && erc1 < 0.02
-        && err2 < 0.002 && erc2 < 0.002 && err3 < 0.00025 && erc3 < 0.00025;
+    return err0 < 0.06  && erc0 < 0.05  && ert0 < 1e-15 && zam0 < 1e-15
+        && err1 < 0.01  && erc1 < 0.005 && ert1 < 2e-3  && zam1 < 1e-15
+        && err2 < 0.003 && erc2 < 0.002 && ert2 < 3e-4  && zam2 < 1e-15
+        && err3 < 0.005 && erc3 < 0.001 && ert3 < 9e-4  && zam3 < 1e-15;
 }
 
 #ifdef  TESTFNC1D_SMOOTH

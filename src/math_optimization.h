@@ -1,6 +1,6 @@
 /** \file   math_optimization.h
     \brief  linear and quadratic optimization solvers
-    \date   2009-2017
+    \date   2009-2019
     \author Eugene Vasiliev
 */
 #pragma once

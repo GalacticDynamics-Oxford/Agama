@@ -370,12 +370,12 @@ Parameters defining the potential expansions (default values in brackets are all
 \begin{itemize}
 \item \ppp{gridSizeR} [25] -- the number of grid nodes in spherical (\ttt{Multipole}) or cylindrical (\ttt{CylSpline}) radius; in the latter case this includes the 0th node at $R=0$. 
 \item \ppp{gridSizeZ} [25] -- same for the grid in $z$ direction in \ttt{CylSpline}, including the $z=0$ node.
-\item \ppp{rmin} [0] -- the radius of the innermost nonzero node in the radial grid (for both potential expansions).
+\item \ppp{rmin} [0] -- the radius of the innermost nonzero node in the radial grid (for both potential expansions); zero means automatic determination.
 \item \ppp{rmax} [0] -- same for the outermost node; zero values mean automatic determination.
-\item \ppp{zmin} [0], \ppp{zmax} [0] -- same for the vertical grid in \ttt{CylSpline}; zero values mean take them from the radial grid.
+\item \ppp{zmin} [0], \ppp{zmax} [0] -- same for the vertical grid in \ttt{CylSpline}; zero values mean take them from the radial grid. Note that the grid auto-setup mechanism is currently less optimal in \ttt{CylSpline} than in \ttt{Multipole}, so a sensibly chosen manual grid extent may be beneficial for accuracy.
 \item \ppp{lmax} [6] -- the order of \ttt{Multipole} expansion in $\cos\theta$; 0 means spherical symmetry. 
 \item \ppp{mmax} [lmax] -- the order of azimuthal Fourier expansion in $\phi$ for both  \ttt{CylSpline} and \ttt{Multipole}; 0 means axisymmetry, and $m_\mathrm{max}$ should be $\le l_\mathrm{max}$. Of course, the actual order of expansion in all cases is also determined by the symmetry properties of the input density model -- if it reports to be axisymmetric, no $m\ne 0$ terms will be used anyway.
-\item \ppp{smoothing} [1] -- the amount of smoothing applied during construction of the \ttt{Multipole} potential from an array of particles.
+\item \ppp{smoothing} [1] -- the amount of smoothing applied to the non-spherical harmonics during the construction of the \ttt{Multipole} potential from an array of particles.
 \end{itemize}
 
 These keywords, with some modifications, are also used in potential construction routines in \Python and \Fortran interfaces and in the \Amuse and \Galpy plugins (Sections~\ref{sec:Python}, \ref{sec:Fortran}, \ref{sec:Amuse}, \ref{sec:Galpy}). For instance, \Python interface allows to provide a user-defined function specifying the density profile in the \ppp{density=} argument, or an array of particles in the \ppp{particles=} argument.
@@ -1044,29 +1044,64 @@ Also, the \Python interface provides a way to supply a user-defined \Python call
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{Mathematical methods}
+\subsection[Mathematical methods]
+{Mathematical methods\protect\footnote{
+In this chapter, we use $\boldsymbol{boldface}$ for column-vectors and \textsf{Sans-serif} font for matrices, while keeping the ordinary $cursive$ script for writing element-wise expressions.}}
 
 %%%%%%%%%%%%%%
-\subsubsection{B-splines}  \label{sec:MathBSplineDetails}
+\subsubsection{Basis-set approximation of functions}  \label{sec:MathBasisSetDetails}
 
 We often need to represent approximately an arbitrary function of one variable, defined on a finite or infinite interval $[a,b]$.
 This is conventionally achieved by defining the inner product of two functions $f(x), g(x)$:
-\begin{align}
-\langle f, g \rangle \equiv \int_a^b f(x)\, g(x)\, W(x) dx \;,
+\begin{align}  \label{eq:InnerProduct}
+\langle f, g \rangle \equiv \int_a^b f(x)\, g(x)\, dx \,,
 \end{align}
-where $W(x)$ is the weight function, and introducing a complete set of basis functions $B_i(x)$, so that any sufficiently well-behaved function $f(x)$ can be approximated by a weighted sum with a finite number of terms $M$ to any desired accuracy:
-\begin{subequations}
-\begin{align}  \label{eq:BasisInterpolation}
-\tilde f^{(M)}(x) = \sum_{i=1}^M A_i\,B_i(x) \;.
+and introducing a complete set of basis functions $B_i(x)$, so that any sufficiently well-behaved function $f(x)$ can be approximated by a weighted sum with a finite number of terms $M$ to any desired accuracy:
+\begin{align}  \label{eq:BasisApproximation}
+\tilde f^{(M)}(x) = \sum_{j=1}^M A_j\,B_j(x) \,.
 \end{align}
-The coefficients of expansion $A_i$ satisfy the linear system of equations
+The coefficients of this expansion (amplitudes) $A_j$ are determined from the requirement that the inner product $\mathcal P_i$ of the original function $f$ and each of the basis elements $B_i$ is the same as the inner product of the approximated function $\tilde f^{(M)}$ and the same basis element (Galerkin projection):
+\begin{subequations}  \label{eq:BasisExpansionCoefs}
 \begin{align}
-C_j &\equiv \int_a^b \tilde f^{(M)}(x)\, B_j(x)\, W(x)\, dx = \sum_{i=1}^M A_i\, \mathsf{B}_{ij} \;,  \label{eq:BasisExpansionCoefs} \\
-\mathsf{B}_{ij} &\equiv \int B_i(x)\,B_j(x)\,W(x)\,dx \;.   \label{eq:BasisExpansionMatrix}
+\mathcal P_i \{f\} &\equiv \langle f, B_i \rangle = \\
+\mathcal P_i \{\tilde f^{(M)}\} &\equiv \langle \tilde f^{(M)}, B_i \rangle =
+\int_a^b \tilde f^{(M)}(x)\, B_i(x)\, dx = \sum_{j=1}^M G_{ij}\, A_j  \,,
 \end{align}
 \end{subequations}
+where $\mathsf G$ is the Gram matrix of inner products of basis functions:
+\begin{align}  \label{eq:BasisExpansionMatrix}
+G_{ij} &\equiv \langle B_i, B_j \rangle  =  \int_a^b B_i(x)\,B_j(x)\,dx \,.
+\end{align}
 
-Classical basis sets usually are orthonormal, i.e., $\mathsf{B}_{ij} = \delta_{ij}$, and addition of each subsequent term does not change existing expansion coefficients (e.g., Fourier series, orthogonal polynomials). Of course, it is possible to construct an orthogonal set by employing the Gram--Schmidt procedure for any sequence of independent basis functions. However, it is not always necessary, as long as we can solve efficiently the linear system (\ref{eq:BasisExpansionCoefs}) to find $A_i$ from $C_j$.
+Classical basis sets are usually orthonormal, i.e., $G_{ij} = \delta_{ij}$, and addition of each subsequent term does not change existing expansion coefficients (e.g., Fourier series, orthogonal polynomials). Of course, it is possible to construct an orthogonal set by employing the Gram--Schmidt procedure for any sequence of independent basis functions. However, it is not always necessary, as long as we can solve efficiently the linear system $\mathsf G\,\boldsymbol A = \boldsymbol{\mathcal P}$ (\ref{eq:BasisExpansionCoefs}) to find $A_j$ from $\mathcal P_i$ (this is the case for the B-spline basis set discussed in the Section~\ref{sec:MathBSplineDetails}).
+
+The computation of projection integrals $\langle f, B_i\rangle$ ideally should be performed with a method that gives an exact result if the function $f$ is itself a basis element (or, consequently, a weighted sum of these elements, such as $\tilde f$); equivalently, the Gram matrix (\ref{eq:BasisExpansionMatrix}) needs to be computed exactly. This implies the use of the trapezoidal rule with equidistant points for the Fourier basis, the Gauss--Legendre rule for a basis of Legendre polynomials (spherical harmonics), the Gauss--Hermite rule for the eponymous basis set  (Section~\ref{sec:MathGaussHermiteDetails}), or again the Gauss--Legendre rule \textit{separately on each grid segment} for a B-spline basis (Section~\ref{sec:MathBSplineDetails}).
+
+We now discuss several commonly encountered tasks and the techniques for solving them with the aid of basis sets.
+
+\paragraph{Estimation of the probability distribution function $f(x)$ from discrete samples} $\{x_n\}_{n=1}^{N}$ drawn from this function can be formulated in the framework of basis functions as follows. The discrete realization of the probability density is $\hat f(x) \equiv \frac{1}{N} \sum_{n=1}^{N} \delta(x-x_n)$, and we identify it with the smooth approximation $\tilde f$ expressed in terms of a weighted sum of basis functions (\ref{eq:BasisApproximation}). According to (\ref{eq:BasisExpansionCoefs}), the amplitudes $\boldsymbol A$ of this expansion satisfy the linear equation system
+\begin{align}
+\sum_{j=1}^M G_{ij}\, A_j = \mathcal{P}_i \{\hat f\} = \frac{1}{N} \sum_{n=1}^{N} B_i(x_n) \;.
+\end{align}
+This expression is trivially generalized to the case of unequal-weight samples.\\
+The drawback of this formulation is that the approximated density $\tilde f$ is not guaranteed to be non-negative, unlike the original function $f$. An alternative approach, discussed in Section~\ref{sec:MathSplineDensityDetails}, is to represent the \textit{logarithm} of $f$ as a basis-set approximation, ensuring the non-negativity property; however, it is a non-linear operation, unlike the simpler approach introduced above. Of course, there exist various other methods for estimating the density from discrete samples, for instance, using the kernel density estimation (KDE). However, the latter is fundamentally a smoothing operation, producing the estimate of the convolution of $f$ with the kernel, rather than of the original function $f$. [illustration?]
+
+\paragraph{Linear operators} acting on the function $f$ can be represented as linear transformations of the vector of amplitudes of $\tilde f$: $A_k' = T_{kj} A_j$. The matrix $\mathsf T$ may correspond to an exact representation of the transformed function $\tilde f'(x) \equiv T\{\tilde f\}(x)$, possibly in terms of a different basis set $B_k'$, or to its approximation constructed in the same way as for the original function $f$ (by Galerkin projection of the transformed function $\tilde f$ onto the basis).
+
+An example of the first kind is the differentiation or integration of $\tilde f$, represented by its expansion in terms of a similarly transformed set of basis functions. For instance, in the case of Fourier or Chebyshev series, the transformed basis functions can be exactly represented by the same or a related basis set (increasing the degree $M$ in the case of integration). For a $M$-th degree B-spline basis set described in the next section, the integrals or derivatives of basis functions are also B-splines of degree $M+1$ or $M-1$, correspondingly, defined by the same grid. This feature is used in the finite-element analysis to represent differential equations in a discretized form, and solve the equivalent linear algebra equations.
+
+An example of the second kind is a convolution operation $\tilde f \ast K \equiv \int_a^b \tilde f(y)\, K(x-y)\, dy$. If $\tilde f$ is represented by the vector of amplitudes $\boldsymbol A$, and the convolved function $\breve f \equiv \tilde f \ast K$ is represented by the vector of amplitudes $\boldsymbol{\breve A}$, the relation between these two vectors is found by applying the projection operator $\mathcal P_i$ to $\breve f$:
+\begin{align}
+\mathcal P_i \{ \breve f \} = \sum_j K_{ij} A_j, \qquad
+K_{ij} \equiv \int_a^b dx \int_a^b dy\; B_i(x)\, B_j(y)\, K(x-y) \,.
+\end{align}
+Hence, according to the general rule, $\boldsymbol{\breve A} = \mathsf G^{-1} \, \mathsf K\, \boldsymbol A$.
+
+\paragraph{Change of basis:} if one needs to express the function $\tilde f(x) = \sum_j A_j\, B_j(x)$ in terms of a different basis set as $\sum_m \mathcal A_m\, \mathcal B_m(x)$, the amplitudes of this expansion are given by $\boldsymbol{\mathcal A} = \mathcal G^{-1}\, \mathsf C\, \boldsymbol A$, where $C_{mj} \equiv \langle \mathcal B_m, B_j \rangle$, and $\mathcal G$ is the Gram matrix of the basis set $\mathcal B_m$. This is, in general, a lossy operation (one may call it a \textit{reinterpolation} onto the new basis), in a sense that constructing an approximation for a function $f$ directly in terms of the new basis is not equivalent to the approximation for $f$ in terms of the old basis and then a further approximation of this $\tilde f$ in terms of the new basis. Depending on the properties of both the function and the basis, the extra error may be negligible or not.
+
+
+%%%%%%%%%%%%%%
+\subsubsection{B-splines}  \label{sec:MathBSplineDetails}
 
 The B-spline set of basis function is defined by a grid of points (knots) on the interval $[a,b]$: $a=k_1<k_2<\dots<k_K=b$. Each basis function is a piecewise polynomial of degree $N\ge 0$ that is non-zero on at most $N+1$ consecutive segments of the grid (or fewer at the edges of the grid). Specifically, it is a polynomial inside each grid segment, and its $N-1$-th derivative is continuous at each knot (except the endpoints $a,b$, but including all interior knots). The total number of basis functions is $M=K+N-1$. These functions are defined through the following recursion (de Boor's algorithm):
 \begin{subequations}
@@ -1079,8 +1114,8 @@ B^{[N-1]}_{j+1}(x)\,\frac{k_{j+N+1}-x}{k_{j+N+1}-k_{j+1}} \;.
 
 B-splines have the following convenient properties:
 \begin{itemize}
-\item At any grid segment, at most $N+1$ basis functions are nonzero. This makes the computation of interpolant (\ref{eq:BasisInterpolation}) very efficient -- the grid segment enclosing the point $x$ is located in $\mathcal{O}(\log M)$ operations, and the computation of all $N$ possibly non-zero basis functions takes $\mathcal{O}(N^2)$ operations (with $N$ typically ranging from 0 to 3), instead of $\mathcal{O}(M)$ as for traditional basis sets.
-\item The basis is not orthogonal, but the matrix $\mathsf{B}_{ij}$ (\ref{eq:BasisExpansionMatrix}) is block-diagonal with bandwidth $N$, thus the coefficients of decomposition $A_i$ are obtained from $C_j$ in $\mathcal{O}(N^2M)$ operations. (The weight function $W(x)$ is unity).
+\item At any grid segment, at most $N+1$ basis functions are nonzero. This makes the computation of interpolant (\ref{eq:BasisApproximation}) very efficient -- the grid segment enclosing the point $x$ is located in $\mathcal{O}(\log M)$ operations, and the computation of all $N$ possibly non-zero basis functions takes $\mathcal{O}(N^2)$ operations (with $N$ typically ranging from 0 to 3), instead of $\mathcal{O}(M)$ as for traditional basis sets.
+\item The basis is not orthogonal, but the matrix $\mathsf G$ (\ref{eq:BasisExpansionMatrix}) is block-diagonal with bandwidth $N$, thus the coefficients of decomposition $A_j$ are obtained from $\mathcal P_i$ in $\mathcal{O}(N^2M)$ operations.
 \item Although the number and degree of basis functions must be fixed in advance before computing any decompositions, we may use the freedom to put the knots at the most suitable locations to improve the accuracy of approximation.
 \item The basis functions are non-negative, thus to ensure that $f(x) \ge 0$, it is sufficient to have $A_i\ge 0$. 
 \item The sum of all basis functions is always 1 at any $x$.
@@ -1088,7 +1123,8 @@ B-splines have the following convenient properties:
 
 The case $N=0$ corresponds to a histogram (piecewise-constant function), $N=1$ -- to a piecewise-linear interpolator, and $N=3$ -- to a cubic spline with clamped boundary conditions (it is defined by $K$ nodes but has $K+2$ independent components, unlike the more familiar natural cubic spline, in which the extra two degrees of freedom are used to make the second derivative zero at endpoints). It is possible to construct an equivalent representation of a natural cubic spline in terms of a modified $N=3$ B-spline basis set, in which the first three basis functions $B_0, B_1, B_2$ are replaced with two linear combinations that have zero second derivative: $\tilde B_1 \equiv B_0 + \frac{x_2-x_0}{x_1+x_2-2x_0}\,B_1$, $\tilde B_2 \equiv B_2 + \frac{x_1-x_0}{x_1+x_2-2x_0}\,B_1$, and similarly for the last three basis functions, see Figure~\ref{fig:SplineKernels} (left panel).
 
-B-splines are well suited for constructing the approximating function with a relatively small number of terms from a possibly large array of points (essentially replacing the integral in (\ref{eq:BasisExpansionCoefs}) by a discrete sum, see Sections~\ref{sec:MathSplineApproxDetails} and \ref{sec:MathSplineDensityDetails}). However, their construction from the array of function values at grid nodes (especially in more than one dimension, where the basis set is formed by tensor products of one-dimensional B-splines in each coordinate), as is typical for spline interpolation, is more complicated, and the evaluation of the interpolant is less efficient than in conventional splines. Thus we consider the alternatives in the next section.
+B-splines are well suited for constructing the approximating function with a relatively small number of terms from a possibly large array of points (essentially replacing the integral in (\ref{eq:BasisExpansionCoefs}) by a discrete sum, see Sections~\ref{sec:MathSplineApproxDetails} and \ref{sec:MathSplineDensityDetails}). %They are also used in the finite-element analysis (Section~\ref{sec:MathFiniteElementDetails}. 
+On the other hand, if one needs to construct an interpolating function passing through the given set of points (the standard interpolation problem), B-splines are less convenient, and the evaluation of the interpolant is also less efficient than for the ``classical'' textbook splines discussed in the next section.
 
 %%%%%%%%%%%%%%
 \begin{figure}
@@ -1158,9 +1194,7 @@ By a similar argument, if we are provided with four matrices $\mathsf{f}, \maths
 %%%%%%%%%%%%%%
 \subsubsection{Penalized spline regression}  \label{sec:MathSplineApproxDetails}
 
-Suppose we have $N_\mathrm{data}$ points%
-\footnote{In this and the next section we use $\boldsymbol{boldface}$ for column-vectors and \textsf{Sans-serif} font for matrices, while keeping the ordinary $cursive$ script for writing element-wise expressions.}%
-$\{\bx, \by\}$ with weights $\boldsymbol{w}$, and we need to find a smooth function $y=f(x)$ that approximates the data in the weighted least-square sense, but does not fluctuate too much -- in other words, minimize the functional
+Suppose we have $N_\mathrm{data}$ points $\{\bx, \by\}$ with weights $\boldsymbol{w}$, and we need to find a smooth function $y=f(x)$ that approximates the data in the weighted least-square sense, but does not fluctuate too much -- in other words, minimize the functional
 \begin{align}  \label{eq:ObjectiveSplineFit}
 \mathcal{Q} &\equiv \sum_{i=1}^{N_\mathrm{data}} w_i\;\left[y_i - f(x_i)\right]^2 + \lambda \int \left[f''(x)\right]^2 \,dx .
 \end{align}
@@ -1302,7 +1336,7 @@ Here $\ln\mathcal{L}_\mathrm{data}$ is the expression in brackets in (\ref{eq:Ma
 Figure~\ref{fig:SplineLogDensity} illustrates the application of linear (non-smoothed) and cubic spline with optimal smoothing to a test problem. In this case the grid spacing was deliberately too dense for the given number of samples, so that some grid segments do not contain any samples, but nevertheless the penalized density estimate comes out rather close to the true one.
 This regime is not very stable, though, and for normal operation the grid should be assigned in such a way that each segment contains at least a few samples -- this ensures that even the un-smoothed estimate is mathematically well defined.
 
-Maximization of cross-validation score is considered to be ``optimal'' smoothing; however, in some cases the inferred $\ln P(x)$ may still be too wiggly. An alternative approach is to estimate the expected scatter in $\ln\mathcal{L}_\mathrm{data}$ for a sample of finite size $N_\mathrm{data}$. In the case of uniform-weight samples and zero smoothing, the mean and dispersion in $\ln\mathcal{L}$ are
+Maximization of cross-validation score is considered to be the ``optimal'' smoothing; however, in some cases the inferred $\ln P(x)$ may still be too wiggly. An alternative approach is to estimate the expected scatter in $\ln\mathcal{L}_\mathrm{data}$ for a sample of finite size $N_\mathrm{data}$, and allow the likelihood score to be worse than the best-fit score by an amount comparable to this expected scatter. In the case of uniform-weight samples and zero smoothing, the mean and dispersion in $\ln\mathcal{L}$ are
 \begin{align}
 \big\langle\ln\mathcal{L}\big\rangle &=
   \int P(x)\,\ln P(x)\, dx = M\,\left[\frac{G_1}{G_0} + \ln M - \ln G_0\right] ,\\
@@ -1313,6 +1347,50 @@ Maximization of cross-validation score is considered to be ``optimal'' smoothing
 \end{align}
 
 We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
+
+%%%%%%%%%%%%%%
+\subsubsection{Gauss--Hermite series}  \label{sec:MathGaussHermiteDetails}
+
+Gauss--Hermite expansion is another type of basis set, useful for representing velocity distribution functions, which are typically not too dissimilar to a Gaussian profile. Unlike the B-spline basis set, which is specified by the number and location of grid nodes and the degree of polynomials, the Gauss--Hermite basis is specified by the parameters of the zero-order function (a Gaussian with the given amplitude $\Xi$, mean value $x_0$, and width $\sigma$) and the order of expansion $M$. The total number of basis functions is $M+1$, and they are defined as
+\begin{subequations}
+\begin{align}  \label{eq:GaussHermiteBasis}
+\mathcal B_m(x) \equiv \frac{\Xi}{\sqrt{2\pi}\;\sigma} \;
+\exp\left[ -\frac{1}{2} \left( \frac{x-x_0}{\sigma} \right)^2 \right] \;
+\mathcal H_m \left( \frac{x-x_0}{\sigma} \right) \,,
+\end{align}
+where $\mathcal{H}_m(y)$ are the (astrophysical) Hermite polynomials \cite{Gerhard1993, vdMarelFranx1993}, defined by a recurrence relation
+\begin{align}  \label{eq:HermitePoly}
+\mathcal H_0 = 1 ,\quad 
+\mathcal H_1(y) = \sqrt{2}\,y ,\quad
+\mathcal H_{m+1}(y) = 
+\Big[ \sqrt{2}\,y\, \mathcal H_m(y) - \sqrt{m}\, \mathcal H_{m-1}(y) \Big] \Big/ \sqrt{m+1} \,.
+\end{align}
+\end{subequations}
+They differ in normalization from the physicist's definition of Hermite polynomials $H(y)$: 
+$\mathcal H_m(y) = H_m(y) / \sqrt{2^m\,m!}$. The Gauss--Hermite basis functions are orthogonal on the real axis, with the Gram matrix being
+\begin{align}
+\mathcal G_{mn} \equiv \int_{-\infty}^{\infty} \mathcal B_m(x)\, \mathcal B_n(x)\, dx =
+\frac{\Xi^2}{2\sqrt{\pi}\,\sigma}\, \delta_{mn} \,.
+\end{align}
+
+According to the general definition given in Section~\ref{sec:MathBasisSetDetails}, any function $f(x)$ can be approximated as a sum of Gauss--Hermite basis functions multiplied by amplitudes $\boldsymbol{h}$ (also called Gauss--Hermite coefficients):
+\begin{align}
+\tilde f(x) = \sum_{m=0}^{M} h_m\, \mathcal B_m(x), \quad
+h_m = \frac{2\sqrt{\pi}\,\sigma}{\Xi^2} \int_{-\infty}^{\infty} f(x)\, \mathcal B_m(x)\, dx \,.
+\end{align}
+
+For the fixed parameters $\Xi, x_0, \sigma, M$, this expansion is defined in a unambiguous way. However, there is some redundancy (most obviously in the overall amplitude factor $\Xi$, which merely rescales the amplitudes $\boldsymbol h$). If one has freedom to adjust $\Xi$, $x_0$ and $\sigma$, it makes sense to define them in such a way that the first three coefficients are $h_0=1, h_1=h_2=0$. In this case, if one limits the order of expansion $M$ to 2, the approximated function $\tilde f(x)$ is in fact the best-fit Gaussian for the original function $f(x)$. Addition of higher-order coefficients $h_m (m\ge 3)$ allows one to represent the deviations from this Gaussian, but does not change the first three coefficients, thanks to the orthogonality of the basis set.
+
+On the other hand, if one needs to compare two functions represented by the Gauss--Hermite series, this can only be done if the parameters of the basis set $\Xi, x_0, \sigma$ are the same. For instance, when the observational constraints on the velocity distribution come in the form of Gauss--Hermite coefficients $h_m$ (with the given $\Xi, x_0, \sigma$ and with the default values of $h_0=1, h_1=h_2=0$), the same function in the model must be represented in the same basis, even though the coefficients $h_{0,1,2}$ do not have the default values.
+
+In practice, it may be convenient to represent the velocity distribution of the model in terms of a B-spline expansion with amplitudes $A_j$, and then convert it into the Gauss--Hermite coefficients $h_m$. This is, of course, a linear operation $\boldsymbol h = \mathcal G^{-1}\, \mathsf C \,\boldsymbol A$ (for the given parameters of the two basis sets), with the matrix $C_{mj} = \langle \mathcal B_m, B_j \rangle$.
+
+It is important to keep in mind that $\Xi, x_0, \sigma$ are \textit{not} identical to the overall normalization, mean and dispersion of the function $\tilde f$. These are given by an amplitude-weighted sum over the corresponding values for \text{all} basis functions; for instance, the overall normalization is
+\begin{align}
+\int_{-\infty}^{\infty} \tilde f(x)\, dx =
+\sum_{m=0}^M  h_m\, \int_{-\infty}^{\infty} B_m(x)\, dx =
+\Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{\sqrt{m!}}{m!!} \,.
+\end{align}
 
 %%%%%%%%%%%%%%
 \subsubsection{Sampling}  \label{sec:MathSamplingDetails}
@@ -1816,6 +1894,9 @@ Dehnen W., Binney J., 1998, MNRAS, 294, 429
 \bibitem{deZeeuw1985}
 de Zeeuw T., 1985, MNRAS, 216, 273
 
+\bibitem{Gerhard1993}
+Gerhard O., 1993, MNRAS, 265, 213
+
 \bibitem{GielesZocchi2015}
 Gieles M., Zocchi A., 2015, MNRAS, 454, 576
 
@@ -1910,6 +1991,9 @@ Teuben P., 1995, in Shaw R. A., Payne H. E., Hayes J. J. E., eds, ASP Conf. Ser.
 
 \bibitem{ValluriMerritt1998}
 Valluri M., Merritt D., 1998, ApJ, 506, 686
+
+\bibitem{vdMarelFranx1993}
+van der Marel R., Franx M., 1993, ApJ, 407, 525
 
 \bibitem{Vasiliev2013}
 Vasiliev E., 2013, MNRAS, 434, 3174

@@ -22,18 +22,6 @@ static const double EPSREL_PIXEL_MASS = 1e-4;
 /// max number of density evaluations per each pixel in the above integrals
 static const int MAX_NUM_EVAL_PIXEL_MASS = 1e4;
 
-/// IFunction interface for a gaussian function 
-class GaussianPSFfnc: public math::IFunctionNoDeriv {
-    GaussianPSF psf;
-public:
-    GaussianPSFfnc(const GaussianPSF& _psf) : psf(_psf) {}
-    virtual double value(const double x) const {
-        // this represents a 2d PSF, i.e. convolved in both coordinates,
-        // hence we use square root of the amplitude for each coordinate
-        return sqrt(psf.ampl) / (M_SQRT2 * M_SQRTPI * psf.width) * exp(-0.5 * pow_2(x / psf.width));
-    }
-};
-
 std::vector<GaussianPSF> checkPSF(const std::vector<GaussianPSF>& gaussianPSF)
 {
     // if there are no input PSFs provided, create a trivial one (zero-width and unit amplitude)
@@ -49,16 +37,19 @@ std::vector<GaussianPSF> checkPSF(const std::vector<GaussianPSF>& gaussianPSF)
 
 template<int N>
 math::Matrix<double> getConvolutionMatrix(
-    const math::BsplineInterpolator1d<N> &bspl, const GaussianPSF &kernel)
+    const math::BsplineInterpolator1d<N> &bspl, const GaussianPSF &psf)
 {
     size_t size = bspl.numValues();
     math::FiniteElement1d<N> fem(bspl.xvalues());
     // matrix P - integrals of products of basis functions
     math::BandMatrix<double> proj = fem.computeProjMatrix();
     // matrix C is the convolution matrix if the PSF width is positive, otherwise equal to P
-    math::Matrix<double> conv = kernel.width > 0 ?
-        fem.computeConvMatrix(GaussianPSFfnc(kernel)) :
-        math::Matrix<double>(proj);
+    math::Matrix<double> conv(psf.width == 0 ?
+        math::Matrix<double>(proj) :
+        fem.computeConvMatrix(math::Gaussian(psf.width)));
+    // multiply by the PSF amplitude: since it represents a 2d PSF, i.e. convolved in both coordinates,
+    // we use the square root of the amplitude for each coordinate
+    math::blas_dmul(sqrt(psf.ampl), conv);
     // product P^{-T} C^T
     math::Matrix<double> tmpd(size, size);
     // first compute D = P^{-T} C^T
@@ -82,7 +73,7 @@ math::Matrix<double> getConvolutionMatrix(
 
 /** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
     When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
-    quarature rule, but in our applications f(x) is only piecewise-polynomial, and there seems
+    quadrature rule, but in our applications f(x) is only piecewise-polynomial, and there seems
     to be no easy-to-use generalization of this quadrature rule for finite intervals.
     Therefore we use a very simple-minded but surprisingly efficient approach:
     integration nodes are 2N^2+1 equally spaced points
@@ -276,13 +267,13 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
         // computed on an infinite interval of velocity using the appropriate scaling transformation;
         // ideally one should use a magnitude-agnostic doubly-infinite scaling, but it's not yet available.
         math::ScalingInf scaling;
-        params[0] = integrateAdaptive(
+        params[0] = integrate(
             math::ScaledIntegrand<math::ScalingInf>(scaling, fnc),                      // normalization
             0, 1, EPSREL_MOMENTS);
-        params[1] = integrateAdaptive(
+        params[1] = integrate(
             math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 1)),  // mean value
             0, 1, EPSREL_MOMENTS) / params[0];
-        params[2] = sqrt(fmax(0, integrateAdaptive(
+        params[2] = sqrt(fmax(0, integrate(
             math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 2)),  // dispersion
             0, 1, EPSREL_MOMENTS) / params[0] - pow_2(params[1])));
         math::nonlinearMultiFit(fit, /*init*/&params[0], 1e-6, 100, /*output*/&params[0]);

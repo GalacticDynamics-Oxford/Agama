@@ -120,6 +120,7 @@ TESTSRCS  = test_math_core.cpp \
             test_df_halo.cpp \
             test_df_spherical.cpp \
             test_density_grid.cpp \
+            test_losvd.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
             example_doublepowerlaw.cpp \

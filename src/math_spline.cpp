@@ -344,17 +344,31 @@ BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots)
     return computeOverlapMatrix<N>(knots, numBasisFnc, GLORDER, bsplineDerivs<N, D>);
 }
 
-
-/// definite integral of x^(m+n)
-class MonomialIntegral: public IFunctionIntegral {
-    const int n;
-public:
-    MonomialIntegral(int _n) : n(_n) {};
-    virtual double integrate(double x1, double x2, int m=0) const {
-        return m+n+1==0 ? log(x2/x1) : (pow(x2, m+n+1) - pow(x1, m+n+1)) / (m+n+1);
+/** compute the coefficients c of a polynomial of degree N from its values at N+1 points:
+    P(x) = c_0 + c_1 x + c_2 x^2 + ... + c_N x^N;  P(x_i) = y_i, i=0..N
+*/
+template<int N>
+void vandermonde(/*input*/ const double x[], const double y[], /*output*/ double c[])
+{
+    double s[N+1];  // temporary storage
+    for(int i=0; i<=N; i++)
+        s[i] = c[i] = 0.0;
+    s[N]= -x[0];
+    for(int i=1; i<=N; i++) {
+        for(int j=N-i; j<N; j++)
+            s[j] -= x[i] * s[j+1];
+        s[N] -= x[i];
     }
-};
-
+    for(int j=0; j<=N; j++) {
+        double p = N+1, q = 1;
+        for(int k=N; k>0; k--)
+            p = k * s[k] + x[j] * p;
+        for(int k=N; k>=0; k--) {
+            c[k] += y[j] / p * q;
+            q = s[k] + x[j] * q;
+        }
+    }
+}
 
 //---- spline construction routines ----//
 
@@ -395,13 +409,14 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
 
     // check if the input nodes and values are symmetric w.r.t. grid center -
     // if yes, make the derivatives exactly antisymmetric too
-    bool symmetric = numPoints%2==1;
-    for(size_t i=0; symmetric && i<numPoints/2; i++)
+    bool symmetric = true;
+    for(size_t i=0; symmetric && i<(numPoints+1)/2; i++)
         symmetric &= xval[i] == -xval[numPoints-1-i] && fval[i] == fval[numPoints-1-i];
     if(symmetric) {
         for(size_t i=0; i<numPoints/2; i++)
             fder[i] = -fder[numPoints-1-i];
-        fder[numPoints/2] = 0.;
+        if(numPoints%2==1)
+            fder[numPoints/2] = 0.;
     }
 
     return fder;
@@ -651,7 +666,10 @@ inline void checkFinite2d(const std::vector<double>& arr, const size_t ysize,
 }  // internal namespace
 
 
-void BaseInterpolator1d::sanityCheck()
+BaseInterpolator1d::BaseInterpolator1d(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues)
+:
+    xval(xvalues), fval(fvalues)
 {
     if(xval.size() < 2)
         throw std::length_error("BaseInterpolator1d: number of nodes should be >=2");
@@ -659,7 +677,10 @@ void BaseInterpolator1d::sanityCheck()
     checkFinite1d(fval, "BaseInterpolator1d", "fvalues");
 }
 
-void LinearInterpolator::sanityCheck()
+LinearInterpolator::LinearInterpolator(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues)
+:
+    BaseInterpolator1d(xvalues, fvalues)
 {
     if(fval.size() != xval.size())
         throw std::length_error("LinearInterpolator: input arrays are not equal in length");
@@ -679,36 +700,44 @@ void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv,
 
 //-------------- CUBIC SPLINE --------------//
 
-// initialization from function values, optionally the two endpoint derivatives
-// (a clamped spline), and optionally apply the regularization filter
-void CubicSpline::setupCubic(bool regularize, double derivLeft, double derivRight)
+// construct a natural or clamped cubic spline
+CubicSpline::CubicSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    bool regularize, double derivLeft, double derivRight)
+:
+    BaseInterpolator1d(xvalues, fvalues)
 {
-    fder = constructCubicSpline(xval, fval, derivLeft, derivRight);
-    if(regularize)
-        regularizeSpline(xval, &fval[0], &fder[0]);
-}
-
-// initialization from amplitudes of B-spline interpolator
-void CubicSpline::setupBspline()
-{
-    size_t numPoints = xval.size();
-    std::vector<double> ampl(fval);  // temporarily store the amplitudes of B-splines
-    fval.assign(numPoints, 0.);
-    fder.resize(numPoints);
-    for(size_t i=0; i<numPoints; i++) {
-        // compute values and first derivatives of B-splines at grid nodes
-        double val[4], der[4];
-        int ind = bsplineValues<3>(xval[i], &xval[0], numPoints, val);
-        bsplineDerivs<3,1>(xval[i], &xval[0], numPoints, der);
-        for(int p=0; p<=3; p++) {
-            fval[i] += val[p] * ampl[p+ind];
-            fder[i] += der[p] * ampl[p+ind];
+    if(fval.size() == xval.size()+2) {
+        // construct a clamped spline from amplitudes of B-spline
+        size_t numPoints = xval.size();
+        std::vector<double> ampl(fval);  // temporarily store the amplitudes of B-splines
+        fval.assign(numPoints, 0.);
+        fder.resize(numPoints);
+        for(size_t i=0; i<numPoints; i++) {
+            // compute values and first derivatives of B-splines at grid nodes
+            double val[4], der[4];
+            int ind = bsplineValues<3>(xval[i], &xval[0], numPoints, val);
+            bsplineDerivs<3,1>(xval[i], &xval[0], numPoints, der);
+            for(int p=0; p<=3; p++) {
+                fval[i] += val[p] * ampl[p+ind];
+                fder[i] += der[p] * ampl[p+ind];
+            }
         }
+    } else {
+        // initialization from function values, optionally the two endpoint derivatives
+        // (a clamped spline), and optionally apply the regularization filter
+        fder = constructCubicSpline(xval, fval, derivLeft, derivRight);
+        if(regularize)
+            regularizeSpline(xval, &fval[0], &fder[0]);
     }
 }
 
-// initialization from function values and derivatives at all grid nodes
-void CubicSpline::setupHermite()
+// construct a Hermite spline from function values and derivatives at all grid nodes
+CubicSpline::CubicSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    const std::vector<double>& fderivs)
+:
+    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
 {
     if(fval.size() != xval.size() || fder.size() != xval.size())
         throw std::length_error("CubicSpline: input arrays are not equal in length");
@@ -777,7 +806,7 @@ bool CubicSpline::isMonotonic() const
 }
 
 double CubicSpline::integrate(double x1, double x2, int n) const {
-    return integrate(x1, x2, MonomialIntegral(n));
+    return integrate(x1, x2, Monomial(n));
 }
 
 double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) const
@@ -831,7 +860,11 @@ double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) 
 
 // ------ Quintic spline ------- //
 
-void QuinticSpline::setup()
+QuinticSpline::QuinticSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    const std::vector<double>& fderivs)
+:
+    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
 {
     size_t numPoints = xval.size();
     if(fval.size() != numPoints || fder.size() != numPoints)
@@ -872,7 +905,11 @@ void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double
 
 // ------ Doubly-log-scaled spline ------ //
 
-void LogLogSpline::setupCubic(double derivLeft, double derivRight)
+LogLogSpline::LogLogSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    double derivLeft, double derivRight)
+:
+    BaseInterpolator1d(xvalues, fvalues)
 {
     size_t numPoints = fval.size();
     if(numPoints != xval.size())
@@ -948,7 +985,11 @@ void LogLogSpline::setupCubic(double derivLeft, double derivRight)
     }
 }
 
-void LogLogSpline::setupQuintic()
+LogLogSpline::LogLogSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    const std::vector<double>& fderivs)
+:
+    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
 {
     size_t numPoints = fval.size();
     if(numPoints != xval.size() || numPoints != fder.size())
@@ -1100,7 +1141,8 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
 // ------ B-spline interpolator ------ //
 
 template<int N>
-void BsplineInterpolator1d<N>::sanityCheck()
+BsplineInterpolator1d<N>::BsplineInterpolator1d(const std::vector<double>& xvalues) :
+    numComp(xvalues.size()+N-1), xval(xvalues)
 {
     if(xval.size()<2)
         throw std::length_error("BsplineInterpolator1d: number of nodes is too small");
@@ -1284,13 +1326,12 @@ std::vector<double> FiniteElement1d<N>::computeProjVector(
     const std::vector<double>& fncValues, unsigned int derivOrder) const
 {
     const unsigned int gridSize = integrNodes.size(), numFunc = N+1, numBasisFnc = interp.numValues();
-    bool empty = fncValues.empty();   // whether the function f(x) is provided (otherwise take f=1)
-    if(!empty && fncValues.size() != gridSize)
+    if(fncValues.size() != gridSize)
         throw std::length_error("computeProjVector: invalid size of input array");
     std::vector<double> result(numBasisFnc);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function times the weight of Gauss-Legendre quadrature at point p
-        double fw = empty ? integrWeights[p] : fncValues[p] * integrWeights[p];
+        double fw = fncValues[p] * integrWeights[p];
         // index of the first out of numFunc basis functions pre-computed at the current point
         unsigned int index = p / GLORDER;
         assert(index + numFunc <= numBasisFnc);
@@ -1333,8 +1374,70 @@ BandMatrix<double> FiniteElement1d<N>::computeProjMatrix(
     return mat;
 }
 
+template<int N> template<bool SIGN>
+void FiniteElement1d<N>::addPointConv(const double x, double mult, const IFunctionIntegral& kernel,
+    unsigned int derivOrder, /*output*/ double values[]) const
+{
+    const unsigned int
+    gridSize    = integrNodes.size(),  // # of points in the integration grid
+    numFunc     = N+1;                 // # of nontrivial basis functions at each point
+    // compute the integrals  \int_{xmin}^{xmax}  dy  B_j(y)  K(x-y)  for all basis functions B_j
+    // over the entire B-spline grid;  this is performed separately on each grid segment,
+    // and only for the few B_j's which are non-zero at that segment.
+    // loop over the segments of the B-spline grid for B_j
+    for(unsigned int jq=0; jq<interp.xvalues().size()-1; jq++) {
+        // boundaries of the current integration segment \int_{ya}^{yb} dy
+        double ya = interp.xvalues()[jq], yb = interp.xvalues()[jq+1];
+        // basis functions B_j with indices  jq <= j < jq+numFunc  are nonzero on this segment,
+        // they are enumerated by jo = j-jq
+        for(unsigned int jo=0; jo<numFunc; jo++) {
+            // the integral \int_{ya}^{yb}  dy  B_j(y)  K(x-y)  is written as
+            // \int_{x-yb}^{x-ya}  dz  B_j(x-z)  K(z) ,  where z=x-y.
+            // The kernel function K(z) provides a method for computing integrals of the form
+            // \int_{za}^{zb}  K(z) z^n  dz  for any monomial z^n on an interval [za:zb].
+            // The B-spline function B_j(x-z), considered as a function of z for a fixed x,
+            // is a polynomial of degree N on the current grid segment, and we need to find its
+            // coefficients, knowing its values at N+1 (=GLORDER) points inside this segment.
+            double z[N+1], v[N+1];   // points (z) and values of B_j(z)
+            for(int k=0; k<=N; k++) {
+                unsigned int q = jq * GLORDER + k;
+                z[k] = SIGN ? x-integrNodes[q] : integrNodes[q]-x;   // z_k = x-y_k  or  y_k-x
+                v[k] = bsplValues[numFunc * (derivOrder * gridSize + q) + jo];  // B_j(z_k)
+            }
+            // obtain the coefficients of the polynomial, given its values at these N+1 points
+            double c[N+1];
+            vandermonde<N>(/*input*/ z, v, /*output*/ c);
+            // obtain the integrals of the kernel times each monomial term z^n over this segment
+            double integr = 0;
+            for(int n=0; n<=N; n++)
+                integr += kernel.integrate(SIGN ? x-yb : ya-x, SIGN ? x-ya : yb-x, n) * c[n];
+            // finally, add the contribution of this segment to the matrix element K_ij
+            values[jo+jq] += mult * integr;
+        }
+    }
+}
+
 template<int N>
-Matrix<double> FiniteElement1d<N>::computeConvMatrix(const IFunction& kernel,
+std::vector<double> FiniteElement1d<N>::computeConvVector(
+    const std::vector<double>& fncValues, const IFunctionIntegral& kernel, unsigned int derivOrder) const
+{
+    const unsigned int gridSize = integrNodes.size(), numBasisFnc = interp.numValues();
+    if(fncValues.size() != gridSize)
+        throw std::length_error("computeConvVector: invalid size of input array");
+    std::vector<double> result(numBasisFnc);
+    for(unsigned int p=0; p<gridSize; p++) {
+        // value of input function times the weight of Gauss-Legendre quadrature at point p
+        double fw = fncValues[p] * integrWeights[p];
+        // add the contribution of this point (x) to the convolution integrals of all
+        // basis functions B_j(y), multiplied by the kernel K(x-y), over the entire grid in y
+        addPointConv<false>(integrNodes[p], fw, kernel, derivOrder, &result.front());
+    }
+    return result;
+    
+}
+
+template<int N>
+Matrix<double> FiniteElement1d<N>::computeConvMatrix(const IFunctionIntegral& kernel,
     unsigned int derivOrderP, unsigned int derivOrderQ) const
 {
     const unsigned int
@@ -1342,25 +1445,23 @@ Matrix<double> FiniteElement1d<N>::computeConvMatrix(const IFunction& kernel,
     numFunc     = N+1,                 // # of nontrivial basis functions at each point
     numBasisFnc = interp.numValues();  // total number of basis functions (size of convolution matrix)
     Matrix<double> mat(numBasisFnc, numBasisFnc, 0.);
+    assert(GLORDER == N+1);
+    // outer loop over integration grid for B_i (GLORDER points per each segment of the B-spline grid):
+    // we integrate each B_i over the entire grid, but it is non-zero only on a few segments of the grid,
+    // so we first loop over the points of the integration grid, and then over the indices of
+    // the few non-zero basis functions at the given point
     for(unsigned int p=0; p<gridSize; p++) {
+        double x = integrNodes[p];
         // index of the first out of numFunc basis functions pre-computed at the current point p
         unsigned int ip = p / GLORDER;
-        for(unsigned int q=0; q<gridSize; q++) {
-            // same for the point q
-            unsigned int jq = q / GLORDER;
-            // value of the kernel function depends on the distance between points p and q
-            double kval = kernel(integrNodes[p] - integrNodes[q]) * integrWeights[p] * integrWeights[q];
-            // basis functions B_i with indices  ip <= i < ip+numFunc  are nonzero at the given point
-            for(unsigned int i=0; i<numFunc; i++) {
-                // value or derivative of the basis function at i-th row, pre-multiplied with fval
-                double B_i = bsplValues[numFunc * (derivOrderP * gridSize + p) + i] * kval;
-                for(unsigned int j=0; j<numFunc; j++) {
-                    // value or derivative of the basis function at j-th column
-                    double B_j = bsplValues[numFunc * (derivOrderQ * gridSize + q) + j];
-                    // accumulate the contribution of the points {p,q} to the integral of B_i B_j
-                    mat(i+ip, j+jq) += B_i * B_j;
-                }
-            }
+        // basis functions B_i with indices  ip <= i < ip+numFunc  are nonzero at the given point;
+        // they are enumerated by io = i-ip
+        for(unsigned int io=0; io<numFunc; io++) {
+            // value or derivative of the basis function at i-th row, pre-multiplied with GL weight
+            double wB_i = bsplValues[numFunc * (derivOrderP * gridSize + p) + io] * integrWeights[p];
+            // for the given basis function B_i at the point x, compute the integrals
+            // \int_{xmin}^{xmax}  dy  B_j(y)  K(x-y)  for all basis functions B_j over the entire grid
+            addPointConv<true>(x, wB_i, kernel, derivOrderQ, &mat(io+ip, 0));
         }
     }
     return mat;
@@ -1387,7 +1488,13 @@ template class FiniteElement1d<3>;
 
 // ------ INTERPOLATION IN 2D ------ //
 
-void BaseInterpolator2d::sanityCheck(const IMatrixDense<double>&fvalues) const
+BaseInterpolator2d::BaseInterpolator2d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const IMatrixDense<double>& fvalues)
+:
+    xval(xvalues), yval(yvalues),
+    fval(fvalues.data(), fvalues.data() + fvalues.size())  // copy, not move
 {
     const size_t xsize = xval.size();
     const size_t ysize = yval.size();
@@ -1457,8 +1564,15 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
 
 //------------ 2D CUBIC SPLINE -------------//
 
-void CubicSpline2d::setup(bool regularize,
-    double deriv_xmin, double deriv_xmax, double deriv_ymin, double deriv_ymax)
+CubicSpline2d::CubicSpline2d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const IMatrixDense<double>& fvalues,
+    bool regularize,
+    double deriv_xmin, double deriv_xmax,
+    double deriv_ymin, double deriv_ymax)
+:
+    BaseInterpolator2d(xvalues, yvalues, fvalues)
 {
     const size_t xsize = xval.size();
     const size_t ysize = yval.size();
@@ -1584,8 +1698,15 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
 
 //------------ 2D QUINTIC SPLINE -------------//
 
-void QuinticSpline2d::setup(const IMatrixDense<double>& dfdx, const IMatrixDense<double>& dfdy,
+QuinticSpline2d::QuinticSpline2d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const IMatrixDense<double>& fvalues,
+    const IMatrixDense<double>& dfdx,
+    const IMatrixDense<double>& dfdy,
     const IMatrixDense<double>& d2fdxdy)
+:
+    BaseInterpolator2d(xvalues, yvalues, fvalues)
 {
     const size_t xsize = xval.size();
     const size_t ysize = yval.size();
@@ -1868,7 +1989,13 @@ void QuinticSpline2d::evalDeriv(const double x, const double y,
 
 // ------- Interpolation in 3d ------- //
 
-void LinearInterpolator3d::sanityCheck() const
+LinearInterpolator3d::LinearInterpolator3d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const std::vector<double>& zvalues,
+    const std::vector<double>& fvalues)
+:
+    xval(xvalues), yval(yvalues), zval(zvalues), fval(fvalues)
 {
     const size_t nx = xval.size(), ny = yval.size(), nz = zval.size();
     const size_t nval = nx*ny*nz;   // total number of nodes in the 3d grid
@@ -1916,7 +2043,14 @@ double LinearInterpolator3d::value(double x, double y, double z) const
 }
 
 
-void CubicSpline3d::setup(bool regularize)
+CubicSpline3d::CubicSpline3d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const std::vector<double>& zvalues,
+    const std::vector<double>& fvalues,
+    bool regularize)
+:
+    xval(xvalues), yval(yvalues), zval(zvalues), fval(fvalues)
 {
     const int nx = xval.size(), ny = yval.size(), nz = zval.size(), nf = fval.size();
     const int nval = nx*ny*nz;                  // total number of nodes in the 3d grid
@@ -2140,7 +2274,17 @@ double CubicSpline3d::value(const double x, const double y, const double z) cons
 // ------ 3d B-spline interpolator ------ //
 
 template<int N>
-void BsplineInterpolator3d<N>::sanityCheck()
+BsplineInterpolator3d<N>::BsplineInterpolator3d(
+    const std::vector<double>& xvalues,
+    const std::vector<double>& yvalues,
+    const std::vector<double>& zvalues)
+:
+    xval(xvalues), yval(yvalues), zval(zvalues),
+    numComp(index3d(
+        /* index of last element in each coordinate */
+        xval.size()+N-2, yval.size()+N-2, zval.size()+N-2,
+        /* total number of elements in two most rapidly varying coordinates */
+        yval.size()+N-1, zval.size()+N-1) + 1)
 {
     if(xval.size()<2 || yval.size()<2 || zval.size()<2)
         throw std::invalid_argument("BsplineInterpolator3d: number of nodes is too small");

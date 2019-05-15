@@ -132,6 +132,8 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
 
 #ifdef HAVE_CVXOPT
 
+namespace {  // internal
+
 /// helper routine to create CVXOPT-compatible dense or sparse matrix
 template<typename NumT>
 PyObject* initPyMatrix(const IMatrix<NumT>& M)
@@ -172,6 +174,197 @@ PyObject* initPyMatrix(const IMatrix<NumT>& M)
     }
 }
 
+static bool solver_called = false;  ///< prevent calling the solver more than once
+static PyObject
+    /// functions from various modules (initialized once, when CVXOPT is loaded)
+    *fnc_solvers_lp   = NULL,
+    *fnc_solvers_qp   = NULL,
+    *fnc_blas_syrk    = NULL,
+    *fnc_blas_gemv    = NULL,
+    *fnc_lapack_potrf = NULL,
+    *fnc_lapack_potrs = NULL,
+    *fnc_kkt_getsolve = NULL,
+    *fnc_kkt_runsolve = NULL,
+    /// pointers to various matrices, re-allocated every time the optimization solver is called
+    *objectiveQuad    = NULL,
+    *coefMatrix       = NULL,
+    *objectiveLin     = NULL,
+    *consIneq         = NULL,
+    *consIneqRhs      = NULL,
+    *coefRhs          = NULL,
+    *matAscaled       = NULL,
+    *matK             = NULL,
+    *vecWdi           = NULL;
+
+/// helper routine for calling a python function and cleaning up memory
+static bool callPythonFunction(PyObject* fnc, PyObject* args)
+{
+    PyObject* result = PyObject_CallObject(fnc, args);
+    bool success = result != NULL;
+    Py_XDECREF(result);
+    Py_DECREF(args);
+    return success;
+}
+
+/// Custom KKT solver for a diagonal Hessian matrix and diagonal inequality constraints matrix, Part I.
+/// This function is called on every iteration, assembles and factorizes the scaled matrix of
+/// normal equations (or, more correctly, Karush-Kuhn-Tucker eqns), and returns the solve function.
+/// The intermediate results are stored in global variables defined above.
+/// The most expensive operation is the computation of matrix K = A S^{-1} A^T,
+/// where A is the (fixed) coefficients matrix (numConstraints rows, numVariables columns),
+/// and S is a diagonal matrix of numVariables scaling coefficients (different on each iteration).
+/// Unfortunately, there is no BLAS routine for this operation, but only for a simpler one (syrk):
+/// the matrix product K = B B^T, which requires O(numVariables * numConstraints^2).
+/// Hence we first compute the diagonal scaling matrix S, then assemble an auxiliary scaled matrix
+/// Ascaled = A S^{-1/2}, and then pass it to syrk. The resulting matrix K is then Cholesky factorized
+/// by the LAPACK routine potrf, and subsequently used in the KKT solver, Part II.
+/// This custom solver is applicable in the most common case, when the quadratic penalty matrix
+/// is diagonal (or absent), and there is exactly one inequality constraint per variable,
+/// and it greatly speeds up the computation, compared to the general case (implemented natively
+/// in CVXOPT) when the matrices H (objectiveQuad), G (consIneq), W (scaling) and S are non-diagonal.
+static PyObject* kkt_getsolve(PyObject* /*self*/, PyObject* args)
+{
+    PyObject* W = NULL;
+    if(!PyArg_ParseTuple(args, "O!", &PyDict_Type, &W))
+        return NULL;
+    int numConstraints = MAT_NROWS(coefMatrix), numVariables= MAT_NCOLS(coefMatrix);
+    vecWdi       = PyDict_GetItemString(W, "di");   // inverse diagonal elements of the scaling matrix W
+    PyObject* u1 = PyDict_GetItemString(W, "r");    // other elements of scaling matrix:
+    PyObject* u2 = PyDict_GetItemString(W, "v");    // these should not be provided
+    PyObject* u3 = PyDict_GetItemString(W, "beta");
+    PyObject* u4 = PyDict_GetItemString(W, "dnl");
+    if( !vecWdi || MAT_NROWS(vecWdi) != numVariables || MAT_NCOLS(vecWdi) != 1 ||
+        (u1 && MAT_NROWS(u1)>0) ||   // these arguments should not be provided
+        (u2 && MAT_NROWS(u2)>0) ||   // (or, rather, should have zero length)
+        (u3 && MAT_NROWS(u3)>0) ||
+        (u4 && MAT_NROWS(u4)>0) )
+    {
+        PyErr_SetString(PyExc_TypeError,
+            "Custom KKT solver can't deal with non-diagonal scaling transformations");
+        return NULL;
+    }
+
+    // in the following fragment of code we don't call any Python C API functions,
+    // so may temporarily release GIL and let Python do its own business for a while
+    Py_BEGIN_ALLOW_THREADS
+
+    // multiply the matrix of coefficients A by a diagonal matrix S^{-1/2}, storing the result in Ascaled
+    const double *A = MAT_BUFD(coefMatrix);
+    double *Ascaled = MAT_BUFD(matAscaled);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int v=0; v<numVariables; v++) {
+        double Gs = SP_VALD(consIneq)[v] * MAT_BUFD(vecWdi)[v];
+        double S  = pow_2(Gs) + (objectiveQuad ? SP_VALD(objectiveQuad)[v] : 0);
+        double Si = 1./sqrt(S);
+        for(int i=v*numConstraints, up=i+numConstraints; i<up; i++)
+            Ascaled[i] = A[i] * Si;
+    }
+
+    // now re-acquire GIL
+    Py_END_ALLOW_THREADS
+
+    // call the external function syrk from blas, computing the matrix K = Ascaled^T Ascaled
+    if(!callPythonFunction(fnc_blas_syrk, Py_BuildValue("(OO)", matAscaled, matK)))
+        return NULL;
+
+    // call the external function potrf from lapack, computing the Cholesky factorization of the matrix K
+    if(!callPythonFunction(fnc_lapack_potrf, Py_BuildValue("(O)", matK)))
+        return NULL;
+
+    // return the solve function
+    Py_INCREF(fnc_kkt_runsolve);
+    return fnc_kkt_runsolve;
+}
+
+/// Custom KKT solver for a diagonal Hessian matrix and diagonal inequality constraints matrix, Part II.
+/// This function is called twice per iteration, and uses the pre-computed matrices Ascaled, K,
+/// stored in the global variables, to solve the KKT equations, replacing the input vectors x,y,z
+/// (rhs of these eqns) by the solution vectors.
+static PyObject* kkt_runsolve(PyObject* /*self*/, PyObject* args)
+{
+    int numConstraints = MAT_NROWS(coefMatrix), numVariables= MAT_NCOLS(coefMatrix);
+    PyObject *vecX=NULL, *vecY=NULL, *vecZ=NULL;
+    if(!PyArg_ParseTuple(args, "OOO", &vecX, &vecY, &vecZ))
+        return NULL;
+    if( MAT_NROWS(vecX) != numVariables   || MAT_NCOLS(vecX) != 1 ||
+        MAT_NROWS(vecY) != numConstraints || MAT_NCOLS(vecY) != 1 ||
+        MAT_NROWS(vecZ) != numVariables   || MAT_NCOLS(vecZ) != 1 )
+    {
+        PyErr_SetString(PyExc_ValueError, "Custom KKT solver: invalid size of input arrays");
+        return NULL;
+    }
+    double *x = MAT_BUFD(vecX), *z = MAT_BUFD(vecZ);
+    std::vector<double> S(numVariables), T(numVariables);
+
+    for(int v=0; v<numVariables; v++) {
+        double di = MAT_BUFD(vecWdi)[v];
+        double Gs = SP_VALD(consIneq)[v] * di;
+        S[v]  = pow_2(Gs) + (objectiveQuad ? SP_VALD(objectiveQuad)[v] : 0);
+        z[v] *= di;
+        x[v]  = (Gs * z[v] + x[v]) / S[v];
+        T[v]  = x[v];
+    };
+
+    // call the external function gemv from blas
+    if(!callPythonFunction(fnc_blas_gemv,
+        Py_BuildValue("(OOOcdd)", coefMatrix, vecX, vecY, /*trans*/ 'N', /*alpha*/ 1.0, /*beta*/ -1.0)))
+        return NULL;
+
+    // call the external function potrs from lapack
+    if(!callPythonFunction(fnc_lapack_potrs, Py_BuildValue("(OO)", matK, vecY)))
+        return NULL;
+
+    // again call the external function gemv from blas
+    if(!callPythonFunction(fnc_blas_gemv,
+        Py_BuildValue("(OOOcdd)", coefMatrix, vecY, vecX, /*trans*/ 'T', /*alpha*/ 1.0, /*beta*/ 0.0)))
+        return NULL;
+
+    for(int v=0; v<numVariables; v++) {
+        x[v] = T[v] - x[v] / S[v];
+        double Gs =  SP_VALD(consIneq)[v] * MAT_BUFD(vecWdi)[v];
+        z[v] = Gs * x[v] - z[v];
+    }
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+/// descriptors of these functions for Python
+static PyMethodDef descr_kkt_getsolve = {"getsolve", kkt_getsolve, METH_VARARGS, ""};
+static PyMethodDef descr_kkt_runsolve = {"runsolve", kkt_runsolve, METH_VARARGS, ""};
+
+/// one-time initialization of CVXOPT python module
+static void initCVXOPT()
+{
+    if(fnc_solvers_lp)  // if this routine has been called previously, no need to re-initialize
+        return;
+    Py_Initialize();
+    if(import_cvxopt() < 0) {
+        throw std::runtime_error("quadraticOptimizationSolve: error importing CVXOPT python module");
+    }
+    PyObject *module_solvers = PyImport_ImportModule("cvxopt.solvers");
+    PyObject *module_blas    = PyImport_ImportModule("cvxopt.blas");
+    PyObject *module_lapack  = PyImport_ImportModule("cvxopt.lapack");
+    if(module_solvers && module_blas && module_lapack) {
+        fnc_solvers_lp   = PyObject_GetAttrString(module_solvers, "conelp");
+        fnc_solvers_qp   = PyObject_GetAttrString(module_solvers, "coneqp");
+        fnc_blas_syrk    = PyObject_GetAttrString(module_blas,    "syrk");
+        fnc_blas_gemv    = PyObject_GetAttrString(module_blas,    "gemv");
+        fnc_lapack_potrf = PyObject_GetAttrString(module_lapack,  "potrf");
+        fnc_lapack_potrs = PyObject_GetAttrString(module_lapack,  "potrs");
+        fnc_kkt_getsolve = PyCFunction_New(&descr_kkt_getsolve, NULL);  // register our custom KKT solver
+        fnc_kkt_runsolve = PyCFunction_New(&descr_kkt_runsolve, NULL);
+    }
+    if(!fnc_solvers_lp || !fnc_blas_syrk || !fnc_lapack_potrs || !fnc_kkt_runsolve) {
+        throw std::runtime_error("quadraticOptimizationSolve: error initializing CVXOPT python module");
+    }
+    // never release the pointers to Python objects allocated above... not a big deal though
+}
+
+}  // internal namespace
+
 template<typename NumT>
 std::vector<double> quadraticOptimizationSolve(
     const IMatrix<NumT>& A, const std::vector<NumT>& rhs,
@@ -188,18 +381,13 @@ std::vector<double> quadraticOptimizationSolve(
         (doQP && (Q.rows()!=numVariables || Q.cols()!=numVariables)) )
         throw std::invalid_argument("quadraticOptimizationSolve: invalid size of input arrays");
 
-    Py_Initialize();
-    PyObject *solvers = import_cvxopt() < 0 ? NULL : PyImport_ImportModule("cvxopt.solvers");
-    if(!solvers) {
-        //Py_Finalize();
-        throw std::runtime_error("quadraticOptimizationSolve: error importing CVXOPT python module");
-    }
-    PyObject *problem = PyObject_GetAttrString(solvers, doQP ? "qp" : "lp");
-    if(!problem) {
-        Py_DECREF(solvers);
-        //Py_Finalize();
-        throw std::runtime_error("quadraticOptimizationSolve: error initializing CVXOPT python module");
-    }
+    // import and set up python extension module
+    initCVXOPT();
+
+    // make sure this function is not called more than once at any given time
+    if(solver_called)
+        throw std::runtime_error("quadraticOptimizationSolve is non-reentrant");
+    solver_called = true;
 
     // count inequality constraints: one (lower) or two (lower+upper) constraints per variable
     size_t numConsIneq = numVariables;
@@ -207,28 +395,34 @@ std::vector<double> quadraticOptimizationSolve(
         if(isFinite(xmax[v]))
            numConsIneq++;
 
-    // create matrices
-    PyObject *objectiveQuad = doQP ? initPyMatrix(Q) : NULL;
-    PyObject *coefMatrix    = initPyMatrix(A);
-    PyObject *objectiveLin  = (PyObject*)(Matrix_New(numVariables, 1, DOUBLE));
-    PyObject *consIneq      = (PyObject*)(SpMatrix_New(numConsIneq, numVariables, numConsIneq, DOUBLE));
-    PyObject *consIneqRhs   = (PyObject*)(Matrix_New(numConsIneq, 1, DOUBLE));
-    PyObject *coefRhs       = (PyObject*)(Matrix_New(numConstraints, 1, DOUBLE));
-    PyObject *args = PyTuple_New(doQP ? 6 : 5);
+    // check if we can use custom (optimized) KKT solver: a few conditions must be satisfied
+    bool useCustomKKT =
+        numConsIneq == numVariables &&             // only one (lower) inequality constraint per variable
+        (!doQP || Q.size() == numVariables) &&     // quadratic matrix is diagonal or absent altogether
+        A.size() == numVariables * numConstraints; // coefficient matrix is dense
+
+    // create matrices (stored as global variables!!)
+    objectiveQuad = doQP ? initPyMatrix(Q) : NULL;
+    coefMatrix    = initPyMatrix(A);
+    objectiveLin  = (PyObject*)(Matrix_New(numVariables, 1, DOUBLE));
+    consIneq      = (PyObject*)(SpMatrix_New(numConsIneq, numVariables, numConsIneq, DOUBLE));
+    consIneqRhs   = (PyObject*)(Matrix_New(numConsIneq, 1, DOUBLE));
+    coefRhs       = (PyObject*)(Matrix_New(numConstraints, 1, DOUBLE));
+    matAscaled    = useCustomKKT ? (PyObject*)(Matrix_New(numConstraints, numVariables, DOUBLE)) : NULL;
+    matK          = useCustomKKT ? (PyObject*)(Matrix_New(numConstraints, numConstraints, DOUBLE)) : NULL;
     if( !objectiveLin  || (doQP && !objectiveQuad) || !consIneq || !consIneqRhs ||
-        !coefMatrix || !coefRhs || !args)
+        !coefMatrix || !coefRhs || (useCustomKKT && (!matAscaled || !matK ) ) )
     {
         PyErr_Print();
-        Py_DECREF(problem);
-        Py_DECREF(solvers);
-        Py_XDECREF(objectiveLin); 
-        Py_XDECREF(objectiveQuad); 
-        Py_XDECREF(consIneq); 
-        Py_XDECREF(consIneqRhs); 
-        Py_XDECREF(coefMatrix); 
-        Py_XDECREF(coefRhs); 
-        Py_XDECREF(args);
-        //Py_Finalize();
+        Py_XDECREF(objectiveLin);
+        Py_XDECREF(objectiveQuad);
+        Py_XDECREF(coefMatrix);
+        Py_XDECREF(consIneq);
+        Py_XDECREF(consIneqRhs);
+        Py_XDECREF(coefRhs);
+        Py_XDECREF(matAscaled);
+        Py_XDECREF(matK);
+        solver_called = false;
         throw std::runtime_error("quadraticOptimizationSolve: error allocating matrices");
     }
 
@@ -255,28 +449,30 @@ std::vector<double> quadraticOptimizationSolve(
     for(size_t c=0; c<numConstraints; c++)
         MAT_BUFD(coefRhs)[c] = rhs[c];
 
-    // pack matrices into an argument tuple
+    // construct the dictionary of named arguments
+    PyObject *posargs = PyTuple_New(0);  // positional arguments - not used but must be present
+    PyObject *args    = PyDict_New();    // named arguments
     if(doQP)
-        PyTuple_SetItem(args, 0, objectiveQuad);
-    PyTuple_SetItem(args, doQP?1:0, objectiveLin);
-    PyTuple_SetItem(args, doQP?2:1, consIneq);
-    PyTuple_SetItem(args, doQP?3:2, consIneqRhs);
-    PyTuple_SetItem(args, doQP?4:3, coefMatrix);
-    PyTuple_SetItem(args, doQP?5:4, coefRhs);
-    PyObject *solver = PyObject_CallObject(problem, args);
-    if(!solver) {
-        PyErr_Print();
-        Py_DECREF(args);
-        Py_DECREF(problem);
-        Py_DECREF(solvers);
-        //Py_Finalize();
-        throw std::runtime_error("quadraticOptimizationSolve: solver returned error");
+        PyDict_SetItemString(args, "P", objectiveQuad);
+    PyDict_SetItemString(args, doQP ? "q" : "c", objectiveLin);
+    PyDict_SetItemString(args, "G", consIneq);
+    PyDict_SetItemString(args, "h", consIneqRhs);
+    PyDict_SetItemString(args, "A", coefMatrix);
+    PyDict_SetItemString(args, "b", coefRhs);
+    if(useCustomKKT) {
+        PyDict_SetItemString(args, "kktsolver", fnc_kkt_getsolve);
+        printf("Using a custom optimized KKT solver\n");
     }
 
-    PyObject *status = PyDict_GetItemString(solver, "status");
-    bool feasible = status != NULL && std::string(PyString_AsString(status)) == "optimal";
-    PyObject *sol = PyDict_GetItemString(solver, "x");
+    // call the solver
+    PyObject *result_dict = PyObject_Call(doQP ? fnc_solvers_qp : fnc_solvers_lp, posargs, args);
 
+    // analyze the result
+    PyObject *status = result_dict ? PyDict_GetItemString(result_dict, "status") : NULL;
+    bool feasible = status != NULL && std::string(PyString_AsString(status)) == "optimal";
+    PyObject *sol = result_dict ? PyDict_GetItemString(result_dict, "x") : NULL;
+
+    // retrieve and store the solution
     std::vector<double> result(numVariables);
     for(size_t v=0; feasible && v<numVariables; v++) {
         double vmin = xmin.empty() ? 0 : xmin[v];
@@ -285,13 +481,26 @@ std::vector<double> quadraticOptimizationSolve(
         result[v] = clamp(MAT_BUFD(sol)[v], vmin, vmax);
     }
 
-    Py_DECREF(solver);
+    // cleanup
+    Py_XDECREF(result_dict);
+    Py_DECREF(posargs);
     Py_DECREF(args);
-    Py_DECREF(problem);
-    Py_DECREF(solvers);
-    //Py_Finalize();  // <-- uncommenting causes crash on repeated calls..
+    Py_DECREF(objectiveLin);
+    Py_XDECREF(objectiveQuad);
+    Py_DECREF(consIneq);
+    Py_DECREF(consIneqRhs);
+    Py_DECREF(coefMatrix);
+    Py_DECREF(coefRhs);
+    Py_XDECREF(matAscaled);
+    Py_XDECREF(matK);
+    solver_called = false;
+
     if(feasible)
         return result;
+    if(!result_dict) {
+        PyErr_Print();
+        throw std::runtime_error("quadraticOptimizationSolve: solver returned error");
+    }
     throw std::runtime_error("quadraticOptimizationSolve: problem is infeasible");
 }
 #else

@@ -5,6 +5,8 @@
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_version.h>
+#include <gsl/gsl_sf_erf.h>
+#include <gsl/gsl_sf_gamma.h>
 #include <stdint.h>
 #include <stdexcept>
 #include <cassert>
@@ -571,6 +573,67 @@ void LogLogScaledFnc::evalDeriv(const double logx,
     }
 }
 
+
+void Monomial::evalDeriv(const double x, double *val, double *der, double *der2) const
+{
+    if(val)
+        *val = pow(x, m);
+    if(der)
+        *der = m==0 ? 0 : m * pow(x, m-1);
+    if(der2)
+        *der2 = m==0 || m==1 ? 0 : m * (m-1) * pow(x, m-2);
+}
+
+double Monomial::integrate(double x1, double x2, int n) const
+{
+    return m+n+1==0 ? log(x2/x1) : (pow(x2, m+n+1) - pow(x1, m+n+1)) / (m+n+1);
+}
+
+void Gaussian::evalDeriv(const double x, double *val, double *der, double *der2) const
+{
+    double v = 1/M_SQRT2/M_SQRTPI / sigma * exp(-0.5 * pow_2(x / sigma));  // easy, yeah?
+    if(val)
+        *val = v;
+    if(der)
+        *der = -x / pow_2(sigma) * v;
+    if(der2)
+        *der2 = (pow_2(x / sigma) - 1) / pow_2(sigma) * v;
+}
+
+double Gaussian::integrate(double x1, double x2, int n) const
+{
+    if(n<0)
+        return NAN;  // undefined
+    if(sigma==0)
+        return (n==0 && x1<=0 && x2>=0) ? 1 : (n==0 && x1>=0 && x2<=0) ? -1 : 0;
+    if(x1+x2==0 && n%2==1)
+        return 0;  // avoid roundoff errors if the integral is symmetrically zero
+    // not easy at all...
+    double y1 = x1 / sigma, y2 = x2 / sigma;  // first, normalize the input
+    double e1 = exp(-0.5*y1*y1), e2 = exp(-0.5*y2*y2);
+    double f1 = gsl_sf_erf(y1/M_SQRT2) * (M_SQRTPI/M_SQRT2);  // note: erf from cmath is not accurate!
+    double f2 = gsl_sf_erf(y2/M_SQRT2) * (M_SQRTPI/M_SQRT2);
+    double val= NAN;
+    switch(n) {
+        case 0: val = f2 - f1;  break;
+        case 1: val = e1 - e2;  break;
+        case 2: val = y1 * e1 - y2 * e2  +  f2 - f1;  break;
+        case 3: val = (2 + y1 * y1) * e1  -  (2 + y2 * y2) * e2;  break;
+        case 4: val = y1 * (3 + y1 * y1) * e1  -  y2 * (3 + y2 * y2) * e2  +  3 * (f2 - f1);  break;
+        case 5: val = (8 + y1 * y1 * (4 + y1 * y1)) * e1  -  (8 + y2 * y2 * (4 + y2 * y2)) * e2;  break;
+        case 6: val = y1 * (15 + y1 * y1 * (5 + y1 * y1)) * e1
+                    - y2 * (15 + y2 * y2 * (5 + y2 * y2)) * e2  +  15 * (f2 - f1);  break;
+        default: {  // general case
+            exceptionText.clear();
+            double v0 = gsl_sf_gamma(0.5*(n+1));
+            double v1 = (v0 - gsl_sf_gamma_inc(0.5*(n+1), 0.5*y1*y1)) * (y1>0 || n%2==1 ? 1 : -1);
+            double v2 = (v0 - gsl_sf_gamma_inc(0.5*(n+1), 0.5*y2*y2)) * (y2>0 || n%2==1 ? 1 : -1);
+            if(exceptionText.empty())
+                val = pow(M_SQRT2, n-1) * (v2 - v1);
+        }
+    }
+    return val * pow(sigma, n) / (M_SQRTPI * M_SQRT2);
+}
 
 // ------- tools for analyzing the behaviour of a function around a particular point ------- //
 // this comes handy in root-finding and related applications, when one needs to ensure that 

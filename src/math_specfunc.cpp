@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
+#include <gsl/gsl_sf_erf.h>
 #include <gsl/gsl_sf_gegenbauer.h>
 #include <gsl/gsl_sf_hyperg.h>
 #include <gsl/gsl_sf_gamma.h>
@@ -46,8 +47,8 @@ double erfinv(const double x)
             (1 + (1.6370678 * y + 3.5438892) * y);
         if(x<0) z = -z;
     }
-    // improve by Halley iteration
-    double f = erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
+    // improve by Halley iteration (note: erf from <cmath> is not accurate enough!)
+    double f = gsl_sf_erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
     z -= f*fp / (fp*fp - 0.5*f*fpp);
     return z;
 }

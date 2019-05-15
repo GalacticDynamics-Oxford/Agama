@@ -85,25 +85,6 @@ In the 3d case, the amplitudes are directly used with a cubic (N=3) 3d B-spline 
 #include "math_base.h"
 #include "math_linalg.h"
 
-/*  If compiled in the C++11-compatible mode, the input arguments of type std::vector<double>
-    in constructors are passed by value and std::move'd to the member variables of the same type.
-    One may take advantage of this and pass std::move(my_array) as the input argument,
-    enabling my_array to be moved to the member variable without taking a deep copy of it.
-    Otherwise, a copy is made (same as in the non-C++11 mode).
-    In the non-C++11 mode, the same input arguments are of the type const std::vector<double>&,
-    i.e. are const-references to vectors, and are always deep-copied into the member variables.
-*/
-#if __cplusplus >= 201103L  // enable some C++11 features
-#include <utility>          // for std::move
-#define AGAMA_CXX11
-#define AGAMA_VECTOR  std::vector<double>
-#define AGAMA_MOVE(x) std::move(x)
-#else
-#define override            // means nothing if not in C++11 mode
-#define AGAMA_VECTOR  const std::vector<double>&
-#define AGAMA_MOVE(x) (x)   // also a trivial operation
-#endif
-
 namespace math{
 
 ///@{
@@ -118,12 +99,10 @@ public:
     /** Initialize a 1d interpolator from the values provided for x and f(x);
         x should be at least of length 2 and monotonically increasing.
     */
-    BaseInterpolator1d(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues) :
-        xval(AGAMA_MOVE(xvalues)), fval(AGAMA_MOVE(fvalues))
-        { sanityCheck(); }
+    BaseInterpolator1d(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
 
     /** return the number of derivatives that the interpolator provides */
-    unsigned int numDerivs() const override { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 
     /** return the lower end of definition interval */
     double xmin() const { return xval.size()? xval.front() : NAN; }
@@ -140,26 +119,20 @@ public:
 protected:
     std::vector<double> xval;  ///< grid nodes
     std::vector<double> fval;  ///< values of function at grid nodes
-private:
-    void sanityCheck();        ///< check the correctness of input arguments
 };
+
 
 /** Class that provides a simple piecewise-linear interpolation for an array of x,y values */
 class LinearInterpolator: public BaseInterpolator1d {
 public:
     LinearInterpolator() : BaseInterpolator1d() {};
 
-    LinearInterpolator(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues) :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues))
-        { sanityCheck(); }
+    LinearInterpolator(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
 
     /** compute the value of interpolator and optionally its derivatives at point x; if the input
         location is outside the definition interval, a linear extrapolation is performed.
     */
-    void evalDeriv(double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const override;
-private:
-    void sanityCheck();
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 };
 
 
@@ -214,16 +187,8 @@ public:
         \throw  std::invalid_argument or std::length_error if grid is too small or not monotonic,
         or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
     */
-    CubicSpline(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues,
-        bool regularize=false, double derivLeft=NAN, double derivRight=NAN)
-    :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues))
-    {
-        if(fval.size() == xval.size()+2)  // construct a clamped spline from amplitudes of B-spline
-            setupBspline();
-        else  // construct a natural or clamped cubic spline from function values
-            setupCubic(regularize, derivLeft, derivRight);
-    }
+    CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        bool regularize=false, double derivLeft=NAN, double derivRight=NAN);
 
     /** Construct a piecewise-cubic Hermite interpolator from the provided values of function
         values and first derivatives. The curve has only one continuous derivative.
@@ -233,18 +198,16 @@ public:
         \throw  std::invalid_argument or std::length_error if grid is too small or not monotonic,
         or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
     */
-    CubicSpline(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues, AGAMA_VECTOR fderivs) :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues)), fder(AGAMA_MOVE(fderivs))
-        { setupHermite(); }
+    CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
 
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
     */
-    void evalDeriv(double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const override;
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
     /** return the integral of spline function times x^n on the interval [x1..x2] */
-    double integrate(double x1, double x2, int n=0) const override;
+    virtual double integrate(double x1, double x2, int n=0) const;
 
     /** return the integral of spline function times another function f(x) on the interval [x1..x2];
         the other function is specified by the interface that provides the integral
@@ -256,12 +219,6 @@ public:
 
 private:
     std::vector<double> fder;  ///< first derivatives of interpolated function at grid nodes
-    /// construct a natural or clamped cubic spline, and optionally apply a regularization filter
-    void setupCubic(bool regularize, double derivLeft, double derivRight);
-    /// construct a clamped cubic spline from the provided amplitudes of 3rd degree B-splines
-    void setupBspline();
-    /// construct a Hermite spline using the provided function derivatives
-    void setupHermite();
 };
 
 
@@ -283,20 +240,17 @@ public:
         \throw  std::invalid_argument or std::length_error if grid is too small or not monotonic,
         or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
     */
-    QuinticSpline(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues, AGAMA_VECTOR fderivs) :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues)), fder(AGAMA_MOVE(fderivs))
-        { setup(); }
+    QuinticSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
 
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
     */
-    void evalDeriv(double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const override;
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
 private:
     std::vector<double> fder;  ///< first  derivatives of function at grid nodes
     std::vector<double> fder2; ///< second derivatives of function at grid nodes
-    void setup();
 };
 
 
@@ -319,23 +273,18 @@ public:
         node; default value NaN means natural boundary condition (zero second derivative).
         \param[in] derivRight - same for the rightmost node.
     */
-    LogLogSpline(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues,
-        double derivLeft=NAN, double derivRight=NAN)
-    :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues))
-        { setupCubic(derivLeft, derivRight); }
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        double derivLeft=NAN, double derivRight=NAN);
 
     /** Construct a quintic spline from function values and derivatives.
         \param[in]  xvalues  - the array of grid nodes, must be monotonic and strictly positive.
         \param[in]  fvalues  - function values at grid nodes, same length as xvalues.
         \param[in]  fderivs  - function derivatives at grid nodes, same length.
     */
-    LogLogSpline(AGAMA_VECTOR xvalues, AGAMA_VECTOR fvalues, AGAMA_VECTOR fderivs) :
-        BaseInterpolator1d(AGAMA_MOVE(xvalues), AGAMA_MOVE(fvalues)), fder(AGAMA_MOVE(fderivs))
-        { setupQuintic(); }
+    LogLogSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs);
 
-    void evalDeriv(double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const override;
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
 private:
     std::vector<double> fder;     ///< first derivatives of the original function at grid nodes
@@ -344,8 +293,6 @@ private:
     std::vector<double> logfder;  ///< first derivatives of log-log scaled function at grid nodes
     std::vector<double> logfder2; ///< second derivatives of log-log function at grid nodes
     bool nonnegative;             ///< if the input was non-negative, the interpolated values will be >=0
-    void setupCubic(double, double);
-    void setupQuintic();
 };
 
 
@@ -379,9 +326,7 @@ public:
         \param[in] xvalues are the grid nodes sorted in increasing order, must have at least 2 elements.
         \throw std::invalid_argument if the grid is invalid.
     */
-    explicit BsplineInterpolator1d(AGAMA_VECTOR xvalues) :
-        numComp(xvalues.size()+N-1), xval(AGAMA_MOVE(xvalues))
-        { sanityCheck(); }
+    explicit BsplineInterpolator1d(const std::vector<double>& xvalues);
 
     /** Compute the values of all potentially non-zero interpolating basis functions or their
         derivatives at the given point, needed to obtain the value of interpolant f(x) at this point.
@@ -406,13 +351,13 @@ public:
         (no range check performed!).
         If the input point is outside the grid, all values will contain zeros.
     */
-    void eval(const double* x, double values[]) const override;
+    virtual void eval(const double* x, double values[]) const;
 
     /** Add the values of non-zero B-splines at the given point, multiplied by the provided factor
         `mult`, to the array of accumulated values (similar to `eval()` but without zeroing down
         the remaining entries, only adding to the relevant ones).
     */
-    void addPoint(const double* x, double mult, double values[]) const override;
+    virtual void addPoint(const double* x, double mult, double values[]) const;
 
     /** Compute the value of the interpolant `f` or its derivative at the given point.
         \param[in] x is the point (which may lie outside the grid);
@@ -456,10 +401,10 @@ public:
     std::vector<double> antideriv(const std::vector<double> &amplitudes) const;
 
     /** The dimensions of interpolator (1) */
-    unsigned int numVars() const override { return 1; }
+    virtual unsigned int numVars() const { return 1; }
 
     /** The number of components (basis functions) */
-    unsigned int numValues() const override { return numComp; }
+    virtual unsigned int numValues() const { return numComp; }
 
     /** return the boundaries of grid definition region */
     double xmin() const { return xval.front(); }
@@ -471,25 +416,20 @@ public:
 private:
     const unsigned int numComp;      ///< number of basis functions
     const std::vector<double> xval;  ///< grid nodes
-    void sanityCheck();              ///< check the correctness of constructor arguments
 };
 
-/// simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
+
+/** simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
+    and presents an IFunction interface for the interpolator */
 template<int N>
 class BsplineWrapper: public IFunction {
     const BsplineInterpolator1d<N> bspl;
     const std::vector<double> ampl;
 public:
-    BsplineWrapper(const math::BsplineInterpolator1d<N>& _bspl, AGAMA_VECTOR _ampl) :
-        bspl(_bspl), ampl(AGAMA_MOVE(_ampl)) {}
+    BsplineWrapper(const math::BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
+        bspl(_bspl), ampl(_ampl) {}
 
-#ifdef AGAMA_CXX11
-    BsplineWrapper(math::BsplineInterpolator1d<N>&& _bspl, AGAMA_VECTOR _ampl) :
-        bspl(AGAMA_MOVE(_bspl)), ampl(AGAMA_MOVE(_ampl)) {}
-#endif
-
-    void evalDeriv(double x,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const override
+    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
     {
         if(value)
             *value = bspl.interpolate(x, ampl);
@@ -499,7 +439,7 @@ public:
             *deriv2= bspl.interpolate(x, ampl, 2);
     }
 
-    unsigned int numDerivs() const override { return 2; }
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 
@@ -518,8 +458,8 @@ public:
     /** Construct the B-spline interpolator from the provided grid (xvalues)
         and initialize the arrays containing the values and derivatives of basis functions
     */
-    explicit FiniteElement1d(AGAMA_VECTOR xvalues) :
-        interp(AGAMA_MOVE(xvalues))
+    explicit FiniteElement1d(const std::vector<double>& xvalues) :
+        interp(xvalues)
         { setup(); }
 
     /** Construct the object from an existing B-spline interpolator */
@@ -527,24 +467,17 @@ public:
         interp(_interp)
         { setup(); }
 
-#ifdef AGAMA_CXX11
-    explicit FiniteElement1d(BsplineInterpolator1d<N>&& _interp) :
-        interp(AGAMA_MOVE(_interp))
-        { setup(); }
-#endif
-
     /** Compute the projection of a function f(x) onto the basis -- the vector of integrals
         of input function weighted with each of the basis functions B_n or their derivatives:
         \f$ v_n = \int f(x) B_n^{(D)}(x) dx \f$.
         \param[in]  fncValues   is the array of pre-computed values of input function f(x)
-        at the grid of points returned by `integrPoints()`;
-        it may be an empty array, which stands for f(x)=1.
+        at the grid of points returned by `integrPoints()`.
         \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
         \return  the vector v_n  of length `interp.numValues()` (number of basis functions).
         \throw   std::length_error if the length of fncValues differs from integrNodes.
     */
     std::vector<double> computeProjVector(
-        const std::vector<double>& fncValues = std::vector<double>(),
+        const std::vector<double>& fncValues,
         unsigned int derivOrder=0) const;
 
     /** Compute the matrix of products of basis functions or their derivatives 
@@ -564,20 +497,56 @@ public:
         unsigned int derivOrderP=0,
         unsigned int derivOrderQ=0) const;
 
+    /** Add the values or derivatives of all B-splines at the given point, convolved with the given
+        kernel and multiplied by the provided factor `mult`, to the array of accumulated values
+        (similar to the method BsplineInterpolator1d::addPoint(), but with convolution and
+        generalized to use any derivative of the basis functions).
+        \param[in]  x  is the input point.
+        \param[in]  mult  is the overall multiplicative factor for the output values.
+        \param[in]  kernel  is the convolution kernel (e.g., math::Gaussian).
+        \param[in]  derivOrder  is the order of derivatives of the basis functions (0 means values).
+        \param[in,out]  values  is the output (accumulation) array of length interp.numValues(),
+        whose elements will be incremented by the computed convolution integrals of all basis functions.
+        \tparam SIGN  specifies the choice of the argument for the convolution kernel:
+        if SIGN==True, the output values are \int dy B_i(y) K(x-y), otherwise  \int dy B_i(y) K(y-x).
+    */
+    template<bool SIGN>
+    void addPointConv(const double x, double mult, const IFunctionIntegral& kernel,
+        unsigned int derivOrder, double values[]) const;
+
+    /** Compute the projection of a convolution of a function f(x) with the given kernel onto the basis:
+        \f$  c_n = \int dx [ \int dy f(x) K(x-y) B_n^{(D)}(y) dy ]  \f$.
+        Note that this method uses the values of input function collected at the pre-defined integration
+        points (their number is ~ numBasisFnc * (N+1) );
+        if the function is already represented by a B-spline interpolator, then the amplitudes of the
+        convolved function are obtained as a product of the convolution matrix returned by 
+        `computeConvMatrix()` and the vector of amplitudes of the B-spline interpolator.
+        \param[in]  fncValues   is the array of pre-computed values of input function f(x)
+        at the grid of points returned by `integrPoints()`.
+        \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
+        \return  the vector c_n  of length `interp.numValues()` (number of basis functions).
+        \throw   std::length_error if the length of fncValues differs from integrNodes.
+    */
+    std::vector<double> computeConvVector(
+        const std::vector<double>& fncValues,
+        const IFunctionIntegral& kernel,
+        unsigned int derivOrder=0) const;
+
     /** Compute the convolution matrix for the given kernel K:
         \f$  K_{mn} = \int dx \int dy  B_m^{(p)}(x) B_n^{(q)}(y) K(x-y)  \f$.
-        If a function f(x) is represented by the vector of its basis-set amplitudes f_i,
+        If an interpolated function f(x) is represented by the vector of its basis-set amplitudes f_i,
         then the convolution of f with the kernel K (the integral  \f$ g(y) = \int f(x) K(x-y) dx \f$)
         may be approximated by the vector of amplitudes g_j:  g = A^{-1} K f,
         where A is the band matrix returned by `computeProjMatrix()`,
         and K is the convolution matrix returned by this routine.
-        \param[in]  kernel  is the convolution kernel;
+        If the convolution kernel is (close to) a delta function, the matrix K is identical to A.
+        \param[in]  kernel  is the convolution kernel (e.g., math::Gaussian).
         \param[in]  derivOrderP  is the order `p` of derivatives of the row-wise basis functions.
         \param[in]  derivOrderQ  is the order `q` of derivatives of the column-wise basis functions.
         \return the square matrix K_{mn} with size `interp.numValues()`.
     */
     Matrix<double> computeConvMatrix(
-        const IFunction& kernel,
+        const IFunctionIntegral& kernel,
         unsigned int derivOrderP=0,
         unsigned int derivOrderQ=0) const;
 
@@ -635,13 +604,9 @@ public:
         or they contain infinity or NaN elements.
     */
     BaseInterpolator2d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
-        const IMatrixDense<double>& fvalues)
-    :
-        xval(AGAMA_MOVE(xvalues)), yval(AGAMA_MOVE(yvalues)),
-        fval(fvalues.data(), fvalues.data() + fvalues.size())  // copy, not move
-        { sanityCheck(fvalues); }
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
+        const IMatrixDense<double>& fvalues);
 
     /** compute the value of the interpolating function and optionally its derivatives at point x,y;
         if the input location is outside the definition region, the result is NaN.
@@ -660,11 +625,11 @@ public:
     }
 
     /** IFunctionNdim interface */
-    void eval(const double vars[], double values[]) const override {
+    virtual void eval(const double vars[], double values[]) const {
         evalDeriv(vars[0], vars[1], values);
     }
-    unsigned int numVars()   const override { return 2; }
-    unsigned int numValues() const override { return 1; }
+    virtual unsigned int numVars()   const { return 2; }
+    virtual unsigned int numValues() const { return 1; }
 
     /** return the boundaries of definition region */
     double xmin() const { return xval.size()? xval.front(): NAN; }
@@ -684,8 +649,6 @@ public:
 protected:
     std::vector<double> xval, yval;  ///< grid nodes in x and y directions
     std::vector<double> fval;        ///< flattened row-major 2d array of f values
-private:
-    void sanityCheck(const IMatrixDense<double>&) const;
 };
 
 
@@ -704,17 +667,17 @@ public:
         or they contain infinity or NaN elements.
     */
     LinearInterpolator2d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
         const IMatrixDense<double>& fvalues)
     :
-        BaseInterpolator2d(AGAMA_MOVE(xvalues), AGAMA_MOVE(yvalues), fvalues) {}
+        BaseInterpolator2d(xvalues, yvalues, fvalues) {}
 
     /** Compute the value and/or derivatives of the interpolator;
         note that for the linear interpolator the 2nd derivatives are always zero. */
-    void evalDeriv(double x, double y,
+    virtual void evalDeriv(double x, double y,
         double* value=NULL, double* deriv_x=NULL, double* deriv_y=NULL,
-        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const override;
+        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const;
 };
 
 
@@ -742,25 +705,21 @@ public:
         or they contain infinity or NaN elements.
     */
     CubicSpline2d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
         const IMatrixDense<double>& fvalues,
         bool regularize=false,
         double deriv_xmin=NAN, double deriv_xmax=NAN,
-        double deriv_ymin=NAN, double deriv_ymax=NAN)
-    :
-        BaseInterpolator2d(AGAMA_MOVE(xvalues), AGAMA_MOVE(yvalues), fvalues)
-        { setup(regularize, deriv_xmin, deriv_xmax, deriv_ymin, deriv_ymax); }
+        double deriv_ymin=NAN, double deriv_ymax=NAN);
 
     /** compute the value of spline and optionally its derivatives at point x,y */
-    void evalDeriv(double x, double y,
+    virtual void evalDeriv(double x, double y,
         double* value=NULL, double* deriv_x=NULL, double* deriv_y=NULL,
-        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const override;
+        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const;
 
 private:
     /// flattened 2d arrays of derivatives in x and y directions, and mixed 2nd derivatives
     std::vector<double> fx, fy, fxy;
-    void setup(bool, double, double, double, double);
 };
 
 
@@ -782,25 +741,21 @@ public:
         (optional; if provided, this generally improves the accuracy of interpolation).
     */
     QuinticSpline2d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
         const IMatrixDense<double>& fvalues,
         const IMatrixDense<double>& dfdx,
         const IMatrixDense<double>& dfdy,
-        const IMatrixDense<double>& d2fdxdy = Matrix<double>())
-    :
-        BaseInterpolator2d(AGAMA_MOVE(xvalues), AGAMA_MOVE(yvalues), fvalues)
-        { setup(dfdx, dfdy, d2fdxdy); }
+        const IMatrixDense<double>& d2fdxdy = Matrix<double>());
 
     /** compute the value of spline and optionally its derivatives at point x,y */
-    void evalDeriv(double x, double y,
+    virtual void evalDeriv(double x, double y,
         double* value=NULL, double* deriv_x=NULL, double* deriv_y=NULL,
-        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const override;
+        double* deriv_xx=NULL, double* deriv_xy=NULL, double* deriv_yy=NULL) const;
 
 private:
     /// flattened 2d arrays of various derivatives
     std::vector<double> fx, fy, fxx, fxy, fyy, fxxy, fxyy, fxxyy;
-    void setup(const IMatrixDense<double>&, const IMatrixDense<double>&, const IMatrixDense<double>&);
     void setupWoutMixedDeriv(size_t xsize, size_t ysize);
     void setupWithMixedDeriv(size_t xsize, size_t ysize);
 };
@@ -825,14 +780,10 @@ public:
         or std::invalid_argument if the grids are not monotonic, or contain invalid values.
     */
     LinearInterpolator3d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
-        AGAMA_VECTOR zvalues,
-        AGAMA_VECTOR fvalues)
-    :
-        xval(AGAMA_MOVE(xvalues)), yval(AGAMA_MOVE(yvalues)), zval(AGAMA_MOVE(zvalues)),
-        fval(AGAMA_MOVE(fvalues))
-        { sanityCheck(); }
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
+        const std::vector<double>& zvalues,
+        const std::vector<double>& fvalues);
 
     /** Compute the value of the interpolator at the given point;
         if it is outside the grid boundaries, return NAN.
@@ -843,16 +794,15 @@ public:
     bool empty() const { return fval.empty(); }
 
     // IFunctionNdim interface
-    void eval(const double point[3], double *val) const override {
+    virtual void eval(const double point[3], double *val) const {
         *val = value(point[0], point[1], point[2]); }
 
-    unsigned int numVars()   const override { return 3; }
-    unsigned int numValues() const override { return 1; }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
 
 private:
     std::vector<double> xval, yval, zval;  ///< grid nodes in x, y and z directions
-    std::vector<double> fval;  ///< flattened 3d array of function values at 3d grid nodes
-    void sanityCheck() const;
+    std::vector<double> fval;              ///< flattened 3d array of function values at 3d grid nodes
 };
 
 
@@ -878,15 +828,11 @@ public:
         the input arrays contains invalid values.
     */
     CubicSpline3d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
-        AGAMA_VECTOR zvalues,
-        AGAMA_VECTOR fvalues,
-        bool regularize=false)
-    :
-        xval(AGAMA_MOVE(xvalues)), yval(AGAMA_MOVE(yvalues)), zval(AGAMA_MOVE(zvalues)),
-        fval(AGAMA_MOVE(fvalues))
-        { setup(regularize); }
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
+        const std::vector<double>& zvalues,
+        const std::vector<double>& fvalues,
+        bool regularize=false);
 
     /** Compute the value of the interpolator at the given point;
         if it is outside the grid boundaries, return NAN.
@@ -897,17 +843,16 @@ public:
     bool empty() const { return fval.empty(); }
 
     // IFunctionNdim interface
-    void eval(const double point[3], double *val) const override {
+    virtual void eval(const double point[3], double *val) const {
         *val = value(point[0], point[1], point[2]); }
 
-    unsigned int numVars()   const override { return 3; }
-    unsigned int numValues() const override { return 1; }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
 
 private:
     std::vector<double> xval, yval, zval;  ///< grid nodes in x, y and z directions
     /// values and various derivatives of the function at 3d grid nodes
     std::vector<double> fval, fx, fy, fz, fxy, fxz, fyz, fxyz;
-    void setup(bool regularize);           ///< initialize the interpolator
 };
 
 
@@ -952,17 +897,9 @@ public:
         \throw std::invalid_argument if the 1d grids are invalid.
     */
     BsplineInterpolator3d(
-        AGAMA_VECTOR xvalues,
-        AGAMA_VECTOR yvalues,
-        AGAMA_VECTOR zvalues)
-    :
-        xval(AGAMA_MOVE(xvalues)), yval(AGAMA_MOVE(yvalues)), zval(AGAMA_MOVE(zvalues)),
-        numComp(index3d(
-            /* index of last element in each coordinate */
-            xval.size()+N-2, yval.size()+N-2, zval.size()+N-2,
-            /* total number of elements in two most rapidly varying coordinates */
-            yval.size()+N-1, zval.size()+N-1) + 1)
-        { sanityCheck(); }
+        const std::vector<double>& xvalues,
+        const std::vector<double>& yvalues,
+        const std::vector<double>& zvalues);
 
     /** Compute the values of all potentially non-zero interpolating basis functions
         at the given point, needed to obtain the value of interpolant f(x,y,z) at this point.
@@ -1013,7 +950,7 @@ public:
         (no range check performed!).
         If the input point is outside the grid, all values will contain zeros.
     */
-    void eval(const double point[3], double values[]) const override;
+    virtual void eval(const double point[3], double values[]) const;
 
     /** Compute the value of the interpolant `f` at the given point.
         \param[in] point is the array of three coordinates of the point;
@@ -1027,10 +964,10 @@ public:
     double interpolate(const double point[3], const std::vector<double> &amplitudes) const;
 
     /** The dimensions of interpolator (3) */
-    unsigned int numVars()   const override { return 3; }
+    virtual unsigned int numVars()   const { return 3; }
 
     /** The number of components (3d interpolation basis functions) */
-    unsigned int numValues() const override { return numComp; }
+    virtual unsigned int numValues() const { return numComp; }
 
     /** Return the index of element in the flattened 3d array of function values
         associated with the given triplet of indices in each of the 1d coordinate grids.
@@ -1074,7 +1011,6 @@ public:
 private:
     std::vector<double> xval, yval, zval;  ///< grid nodes in x, y and z directions
     const unsigned int numComp;            ///< total number of components
-    void sanityCheck();                    ///< check that the grid sizes are correct
 };
 
 
@@ -1402,12 +1338,3 @@ std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double e
 
 ///@}
 }  // namespace
-
-// cleanup the preprocessor directives
-#ifdef AGAMA_CXX11
-#undef AGAMA_CXX11
-#else
-#undef override
-#endif
-#undef AGAMA_VECTOR
-#undef AGAMA_MOVE
