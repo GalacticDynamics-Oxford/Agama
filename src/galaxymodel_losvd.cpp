@@ -35,6 +35,7 @@ std::vector<GaussianPSF> checkPSF(const std::vector<GaussianPSF>& gaussianPSF)
     return gaussianPSF;
 }
 
+
 template<int N>
 math::Matrix<double> getConvolutionMatrix(
     const math::BsplineInterpolator1d<N> &bspl, const GaussianPSF &psf)
@@ -69,6 +70,7 @@ math::Matrix<double> getConvolutionMatrix(
     return conv;
 }
 
+
 //--------- VELOCITY MOMENTS ----------//
 
 /** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
@@ -84,7 +86,8 @@ math::Matrix<double> getConvolutionMatrix(
 */
 static const int QUADORDER = 7;  // N=7, i.e. 99 integration nodes
 
-/// compute the array of Hermite polynomials up to degree nmax at the given point
+
+/// compute the array of Hermite polynomials up to and including degree nmax at the given point
 void hermiteArray(const int nmax, const double x, double* result)
 {
     // This is neither "probabilist's" nor "physicist's" definition of Hermite polynomials,
@@ -107,14 +110,15 @@ void hermiteArray(const int nmax, const double x, double* result)
     }
 }
 
+
 /// compute the coefficients of GH expansion for an arbitrary function f(x)
-inline std::vector<double> computeGaussHermiteMoments(
-    unsigned int order, const math::IFunction& fnc, double gamma, double center, double sigma)
+inline std::vector<double> computeGaussHermiteMoments(const math::IFunction& fnc,
+    unsigned int order, double gamma, double center, double sigma)
 {
     std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
     std::vector<double> result(order+1);
     for(int p=0; p<=pow_2(QUADORDER); p++) {
-        double y = p * (1./QUADORDER);    // equally-spaced points (only positive half of real axis)
+        double y = p * (1./QUADORDER);    // equally-spaced points (only nonnegative half of real axis)
         double mult = M_SQRT2 * sigma / gamma / QUADORDER * exp(-0.5*y*y);
         double fp = fnc(center + sigma * y);
         double fm = p==0 ? 0. : fnc(center - sigma * y);  // fnc value at symmetrically negative point
@@ -125,10 +129,16 @@ inline std::vector<double> computeGaussHermiteMoments(
     return result;
 }
 
-/// compute the coefs of GH expansion for an array of B-spline basis functions of degree N
+
+/** compute the coefs of GH expansion for an array of B-spline basis functions of degree N.
+    A function f(x) represented as a B-spline expansion with an array of amplitudes A_k
+    f(x) = \sum_{j=1}^J A_j B_j(x)   (where B_j(x) are N-th degree B-splines over some grid)
+    has the Gauss-Hermite coefficients given by h_m = C_{mj} A_j, where C_{mj} is the matrix
+    returned by this routine.
+*/
 template<int N>
 math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d<N>& interp, 
-    const unsigned int order, double gamma, double center, double sigma)
+    unsigned int order, double gamma, double center, double sigma)
 {
     // the product of B-spline of degree N and a Hermite polynomial of degree 'order' is a polynomial
     // of degree N+order multiplied by an exponential function; we don't try to integrate it exactly,
@@ -145,7 +155,7 @@ math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d
         for(int k=0; k<NnodesGL; k++) {
             // evaluate the possibly non-zero B-splines and keep track of the index of the leftmost one
             const double x = x1 + dx * glnodes[k];
-            unsigned int leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, bspl);
+            unsigned int leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, /*output*/ bspl);
             // evaluate the Hermite polynomials
             const double y = (x - center) / sigma;
             hermiteArray(order, y, &hpoly[0]);
@@ -162,11 +172,24 @@ math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d
     return result;
 }
 
-class GaussianFitter: public math::IFunctionNdimDeriv {
-    unsigned int order;
-    const math::IFunction& fnc;
+
+/** A helper class to be used in multidimensional minimization with the Levenberg-Marquardt method,
+    when constructing the best-fit Gauss-Hermite approximation of a given function f(x).
+    The GH expansion of the given order M has M+1 free parameters:
+    amplitude gamma, mean value and width of the base gaussian,
+    and M-2 GH coefficients h_3, h_4, ..., h_M, with the convention that h_0=1, h_1=h_2=0.
+    The fit minimizes the rms deviation between f(x) and the GH expansion specified by these parameters
+    over the set of Q points (Q = 2*QUADORDER^2+1 is fixed, and the points are equally spaced,
+    but their location of these points depends on the mean and sigma of the current set of parameters).
+    The evalDeriv() method returns the difference between f(x_k) and GH(x_k) for each of these points x_k,
+    and its partial derivatives w.r.t. all parameters of GH expansion, all used in the Levenberg-Marquardt
+    fitting routine.
+*/
+class GaussHermiteFitter: public math::IFunctionNdimDeriv {
+    unsigned int order;          ///< order of GH expansion
+    const math::IFunction& fnc;  ///< function to be approximated
 public:
-    GaussianFitter(unsigned int _order, const math::IFunction& _fnc) : order(_order), fnc(_fnc) {}
+    GaussHermiteFitter(unsigned int _order, const math::IFunction& _fnc) : order(_order), fnc(_fnc) {}
     virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
     {
         double gamma = vars[0], center = vars[1], sigma = vars[2], sqsigma = sqrt(sigma);
@@ -174,14 +197,13 @@ public:
         for(int p=0; p <= 2*pow_2(QUADORDER); p++) {
             double y = (1./QUADORDER) * (p - pow_2(QUADORDER));  // equally spaced points
             double x = center + sigma * y;
-            double f = fnc(x);
             hermiteArray(order, y, &hpoly[0]);
             double sum = 1.;
             for(unsigned int n=3; n<=order; n++)
                 sum += vars[n] * hpoly[n];
-            double mult = 1./M_SQRT2/M_SQRTPI/sqrt(QUADORDER) * exp(-0.5*y*y) * sum / sqsigma;
+            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * sum / sqsigma;
             if(values)
-                values[p] = (1/sqrt(QUADORDER)) * sqsigma * f - mult * gamma;
+                values[p] = sqsigma * fnc(x) - mult * gamma;
             if(derivs) {
                 derivs[p*(order+1)  ] = -mult;
                 derivs[p*(order+1)+1] = -mult * gamma / sigma * y;
@@ -191,20 +213,10 @@ public:
             }
         }
     }
-    virtual unsigned int numVars() const { return order+1; }
+    virtual unsigned int numVars()   const { return order+1; }
     virtual unsigned int numValues() const { return 2*pow_2(QUADORDER)+1; }
 };
 
-/// simple interface for computing first/second moments of a function of one variable
-class MomentIntegrand: public math::IFunctionNoDeriv {
-    const math::IFunction& fnc;
-    int n;
-public:
-    MomentIntegrand(const math::IFunction& _fnc, int _n) : fnc(_fnc), n(_n) {}
-    virtual double value(const double x) const {
-        return fnc(x) * math::pow(x, n);
-    }
-};
 
 /// helper class for computing the surface density in the image plane, multiplied by
 /// basis functions of a 2d tensor-product B-spline expansion.
@@ -261,27 +273,47 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
     Gamma(gamma), Center(center), Sigma(sigma)
 {
     if(!isFinite(gamma + center + sigma)) {
-        GaussianFitter fit(/*either "2" or "order"*/ 2, fnc);
         std::vector<double> params(order+1);
-        // start the fit from a (hopefully) reasonable estimate based on the moments of the input function,
-        // computed on an infinite interval of velocity using the appropriate scaling transformation;
-        // ideally one should use a magnitude-agnostic doubly-infinite scaling, but it's not yet available.
+        // estimate the 0th,1st,2nd moments of the input function, which are used as starting values
+        // in the fit (hence they don't need to be computed very accurately - here we use a scaling
+        // transformation of a infinite interval onto [0:1], which is intended to work with log-scaled
+        // input variable, but not necessarily with an input variable with a dimension of velocity,
+        // whose magnitude scale is unknown. Hopefully this is not a serious oversight).
         math::ScalingInf scaling;
-        params[0] = integrate(
-            math::ScaledIntegrand<math::ScalingInf>(scaling, fnc),                      // normalization
+        params[0] = integrate(                  // normalization
+            math::ScaledIntegrand<math::ScalingInf>(scaling, fnc),
             0, 1, EPSREL_MOMENTS);
-        params[1] = integrate(
-            math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 1)),  // mean value
+        params[1] = integrate(                  // mean value
+            math::ScaledIntegrand<math::ScalingInf>(scaling, math::FncProduct(fnc, math::Monomial(1))),
             0, 1, EPSREL_MOMENTS) / params[0];
-        params[2] = sqrt(fmax(0, integrate(
-            math::ScaledIntegrand<math::ScalingInf>(scaling, MomentIntegrand(fnc, 2)),  // dispersion
+        params[2] = sqrt(fmax(0, integrate(     // dispersion
+            math::ScaledIntegrand<math::ScalingInf>(scaling, math::FncProduct(fnc, math::Monomial(2))),
             0, 1, EPSREL_MOMENTS) / params[0] - pow_2(params[1])));
-        math::nonlinearMultiFit(fit, /*init*/&params[0], 1e-6, 100, /*output*/&params[0]);
+        // now that we have a reasonable initial values for the moments of the input function,
+        // perform a Levenberg-Marquardt optimization to find the best-fit parameters of the GH expansion.
+        // Note that there are two conceptually different ways of fitting these parameters:
+        // 1) determine only the overall amplitude gamma, mean and sigma of the best-fit Gaussian,
+        // fixing h_0=1, h_1=h_2=0 and not considering higher-order terms.
+        // 2) determine simultaneously the parameters gamma, center, sigma, h_3, ... h_M, while still
+        // fixing h_0=1, h_1=h_2=0.
+        // The latter approach, although seemingly natural, does not, in fact, fit a GH expansion:
+        // if one computes all GH coefficients for the best-fit values, it turns out that h_1,h_2 != 0,
+        // but they were ignored during the fit. Moreover, the best-fit values of center and sigma
+        // (and hence all GH moments) depend on the chosen order of expansion.
+        // By contrast, in the first case, the 0th basis function (the gaussian) is always the same,
+        // and increasing the order of expansion does not change the values of previous terms.
+        // This first choice also produces h_1=h_2=0, as is typically implied.
+        // Note, however, that this is not the best-fit approximation at the given order
+        // (neither is var.2 -- to obtain the absolute best fit, one would need to freely adjust
+        // h_1 and h_2 during the fit).
+        math::nonlinearMultiFit(
+            GaussHermiteFitter(/*either "2" for the 1st var or "order" for the 2nd var*/ 2, fnc),
+            /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
         Gamma  = params[0];
         Center = params[1];
         Sigma  = params[2];
     }
-    moments = computeGaussHermiteMoments(order, fnc, Gamma, Center, Sigma);
+    moments = computeGaussHermiteMoments(fnc, order, Gamma, Center, Sigma);
 }
 
 double GaussHermiteExpansion::value(const double x) const

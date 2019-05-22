@@ -1261,7 +1261,8 @@ double BsplineInterpolator1d<N>::integrate(double x1, double x2,
     // of B-spline times x^n on each grid segment, it is sufficient to employ a Gauss-Legendre
     // quadrature rule with the number of nodes = floor((N+n)/2)+1.
     const int NnodesGL = (N+n)/2+1;
-    assert(NnodesGL < MAX_GL_ORDER);
+    if(NnodesGL >= MAX_GL_TABLE)
+        throw std::runtime_error("BsplineInterpolator1d: integration order not implemented");
     const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
 
     // loop over segments
@@ -1290,6 +1291,7 @@ template class BsplineInterpolator1d<0>;
 template class BsplineInterpolator1d<1>;
 template class BsplineInterpolator1d<2>;
 template class BsplineInterpolator1d<3>;
+
 
 // ------ Finite-element features of B-splines ------ //
 

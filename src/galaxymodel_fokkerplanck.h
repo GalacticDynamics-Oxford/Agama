@@ -179,15 +179,32 @@ public:
     /// of the total potential while keeping the DF fixed)
     void setMbh(double Mbh);
 
-    /// diagnostic quantities updated in the course of evolution:
-    double Mass() const;         ///< total mass of all stellar components (not including the BH)
-    double Phi0() const;         ///< stellar potential at origin (not including the BH)
-    double Etot() const;         ///< total energy of the entire system including the BH
-    double Ekin() const;         ///< kinetic energy of all components (BH is at rest anyway)
-    double sourceMass()   const; ///< total mass added to all components due to star formation
-    double sourceEnergy() const; ///< energy associated with the added mass
-    double drainMass()    const; ///< total change of mass (negative) due to capture/disruption by the BH
-    double drainEnergy()  const; ///< change in total energy associated with the removed mass
+
+    //  diagnostic quantities updated in the course of evolution:
+
+    /// total mass of each stellar component (not including the BH)
+    double Mass(unsigned int indexComp) const;
+
+    /// stellar potential at origin (not including the BH)
+    double Phi0() const;
+
+    /// total energy of the entire system (including the BH, sum for all components)
+    double Etot() const;
+
+    /// kinetic energy (sum for all components)
+    double Ekin() const;
+
+    /// total mass added to each component due to star formation
+    double sourceMass(unsigned int indexComp) const;
+
+    /// energy associated with the added mass (sum for all components)
+    double sourceEnergy() const;
+
+    /// total change of mass of each stellar component due to capture/disruption by the BH (negative)
+    double drainMass(unsigned int indexComp) const;
+
+    /// change in total energy associated with the removed mass (sum for all components)
+    double drainEnergy() const;
 
 private:
     /// opaque structure containing the initial parameters and all internal data that evolves with time

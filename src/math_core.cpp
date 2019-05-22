@@ -623,6 +623,8 @@ double Gaussian::integrate(double x1, double x2, int n) const
         case 5: val = (8 + y1 * y1 * (4 + y1 * y1)) * e1  -  (8 + y2 * y2 * (4 + y2 * y2)) * e2;  break;
         case 6: val = y1 * (15 + y1 * y1 * (5 + y1 * y1)) * e1
                     - y2 * (15 + y2 * y2 * (5 + y2 * y2)) * e2  +  15 * (f2 - f1);  break;
+        case 7: val = (48 + y1 * y1 * (24 + y1 * y1 * (6 + y1 * y1))) * e1
+                    - (48 + y2 * y2 * (24 + y2 * y2 * (6 + y2 * y2))) * e2; break;
         default: {  // general case
             exceptionText.clear();
             double v0 = gsl_sf_gamma(0.5*(n+1));

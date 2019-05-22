@@ -632,8 +632,8 @@ public:
     /// mass of the central black hole (may evolve with time)
     double Mbh;
 
-    /// total mass of all stellar components (evolves)
-    double Mass;
+    /// total mass of each stellar component (evolves)
+    std::vector<double> Mass;
 
     /// stellar potential at r=0 (evolves)
     double Phi0;
@@ -641,15 +641,20 @@ public:
     /// total and kinetic energy of the entire system (evolves)
     double Etot, Ekin;
 
-    /// total mass added due to star formation and the associated change in total energy (evolves)
-    double sourceMass, sourceEnergy;
+    /// total mass added due to star formation in each component (evolves)
+    std::vector<double> sourceMass;
 
-    /// total change in mass (<0) and energy resulting from the stars
-    /// being captured by the black hole (evolves)
-    double drainMass, drainEnergy;
+    /// the total energy change associated with star formation (sum for all components, evolves)
+    double sourceEnergy;
 
-    /// the rate of change of the total mass and total energy due to star formation (evolves)
-    double sourceRateMass, sourceRateEnergy;
+    /// total change in mass (<0) resulting from the stars being captured by the black hole (evolves)
+    std::vector<double> drainMass;
+
+    /// associated change in energy (sum for all components, evolves)
+    double drainEnergy;
+
+    /// the rate of change of the total energy due to star formation (evolves)
+    double sourceRateEnergy;
 
     /// conductive energy flux through the innermost boundary hmin (evolves)
     double drainRateEnergy;
@@ -707,9 +712,9 @@ public:
         sourceRate(numComp, 0.),
         sourceRadius(numComp, 0.),
         Mbh(params.Mbh),
-        Mass(0.), Etot(0.), Ekin(0.),
-        sourceMass(0.), sourceEnergy(0.), drainMass(0.), drainEnergy(0.),
-        sourceRateMass(0.), sourceRateEnergy(0.), drainRateEnergy(0.),
+        Mass(numComp, 0.), Etot(0.), Ekin(0.),
+        sourceMass(numComp, 0.), sourceEnergy(0.), drainMass(numComp, 0.), drainEnergy(0.),
+        sourceRateEnergy(0.), drainRateEnergy(0.),
         gridf(numComp),
         gridSourceRate(numComp),
         drainMatrix(numComp),
@@ -803,7 +808,9 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     std::vector<math::PtrFunction> initDF(data->numComp);
     for(unsigned int comp=0; comp<data->numComp; comp++) {
         std::vector<double> gridh(data->gridh), initf;
-        df::createSphericalIsotropicDF(*components[comp].initDensity, potential::PotentialWrapper(*data->currPot),
+        df::createSphericalIsotropicDF(
+            *components[comp].initDensity,
+            potential::PotentialWrapper(*data->currPot),
             /*input/output*/ gridh, /*output*/ initf);
         initDF[comp].reset(new math::LogLogSpline(gridh, initf));  // interpolated f(h)
 
@@ -850,28 +857,22 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     reinitAdvDifCoefs();
 }
 
-math::PtrFunction FokkerPlanckSolver::potential() const
-{
-    return math::PtrFunction(new potential::PotentialWrapper(*data->currPot));
-}
+double FokkerPlanckSolver::Phi0()                        const { return data->Phi0; }
+double FokkerPlanckSolver::Etot()                        const { return data->Etot; }
+double FokkerPlanckSolver::Ekin()                        const { return data->Ekin; }
+double FokkerPlanckSolver::Mbh ()                        const { return data->Mbh; }
+double FokkerPlanckSolver::sourceEnergy()                const { return data->sourceEnergy; }
+double FokkerPlanckSolver::drainEnergy()                 const { return data->drainEnergy; }
+double FokkerPlanckSolver::Mass      (unsigned int comp) const { return data->Mass.at(comp); }
+double FokkerPlanckSolver::sourceMass(unsigned int comp) const { return data->sourceMass.at(comp); }
+double FokkerPlanckSolver::drainMass (unsigned int comp) const { return data->drainMass.at(comp); }
+unsigned int FokkerPlanckSolver::numComp()               const { return data->numComp; }
+std::vector<double> FokkerPlanckSolver::gridh()          const { return data->gridh; }
+math::PtrFunction   FokkerPlanckSolver::df(unsigned int comp) const {
+    return impl->getInterpolatedFunction(data->gridf.at(comp)); }
+math::PtrFunction FokkerPlanckSolver::potential() const {
+    return math::PtrFunction(new potential::PotentialWrapper(*data->currPot)); }
 potential::PtrPhaseVolume FokkerPlanckSolver::phaseVolume() const { return data->phasevol; }
-double FokkerPlanckSolver::Mbh()  const { return data->Mbh; }
-double FokkerPlanckSolver::Mass() const { return data->Mass; }
-double FokkerPlanckSolver::Phi0() const { return data->Phi0; }
-double FokkerPlanckSolver::Etot() const { return data->Etot; }
-double FokkerPlanckSolver::Ekin() const { return data->Ekin; }
-double FokkerPlanckSolver::sourceMass()   const { return data->sourceMass; }
-double FokkerPlanckSolver::sourceEnergy() const { return data->sourceEnergy; }
-double FokkerPlanckSolver::drainMass()    const { return data->drainMass; }
-double FokkerPlanckSolver::drainEnergy()  const { return data->drainEnergy; }
-unsigned int FokkerPlanckSolver::numComp()const { return data->numComp; }
-std::vector<double> FokkerPlanckSolver::gridh() const { return data->gridh; }
-math::PtrFunction   FokkerPlanckSolver::df(unsigned int indexComp) const
-{
-    if(indexComp >= data->numComp)
-        throw std::out_of_range("FokkerPlanckSolver: component index out of range");
-    return impl->getInterpolatedFunction(data->gridf[indexComp]);
-}
 
 void FokkerPlanckSolver::setMbh(double Mbh)
 {
@@ -971,7 +972,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     numComp   = data->numComp,           // number of DF components
     gridSize  = data->gridh.size(),      // size of the grid in phase volume that defines the DF
     numPoints = data->gridAdvDifCoefs.size();   // size of the auxiliary grid for adv/dif coefs
-    data->Mass = data->Etot = data->Ekin = 0.;  // overall diagnostic quantities
+    data->Etot = data->Ekin = 0.;        // overall diagnostic quantities
     // total advection and diffusion coefs (sum over all species) at the nodes of the auxiliary grid
     data->gridAdv.assign(numPoints, 0.);
     data->gridDif.assign(numPoints, 0.);
@@ -992,12 +993,12 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         SphericalIsotropicModel model(*data->phasevol, *df, data->gridh);
 
         // store diagnostic quantities
-        data->Mass += model.cumulMass();
-        data->Etot += model.cumulEtotal();
-        data->Ekin += model.cumulEkin();
+        data->Mass[comp] = model.cumulMass();
+        data->Etot      += model.cumulEtotal();
+        data->Ekin      += model.cumulEkin();
         // one could also compute them as
-        //data->Mass += math::blas_ddot(data->gridf[comp], data->gridMass);
-        //data->Etot += math::blas_ddot(data->gridf[comp], data->gridEnergy);
+        //data->Mass[comp] = math::blas_ddot(data->gridf[comp], data->gridMass);
+        //data->Etot      += math::blas_ddot(data->gridf[comp], data->gridEnergy);
 
         // compute the advection and diffusion coefficients for the given component
         // at the points of grid where these coefs are needed
@@ -1073,7 +1074,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     }
 
     // initialize the source term in the matrix equation
-    data->sourceRateMass = data->sourceRateEnergy = 0.;
+    data->sourceRateEnergy = 0.;
     for(unsigned int comp=0; comp<numComp; comp++) {
         if(data->sourceRate[comp] == 0)
             continue;
@@ -1086,7 +1087,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         math::blas_dmul(data->sourceRate[comp], data->gridSourceRate[comp]);
         // according to the boundary conditions, source rate must be zero at endpoints
         data->gridSourceRate[comp].front() = data->gridSourceRate[comp].back() = 0.;
-        data->sourceRateMass   += sumElements(data->gridSourceRate[comp]);
+        // keep track of the energy production rate due to the source term
         data->sourceRateEnergy += math::blas_ddot(data->gridEnergy,
             math::solveBand(impl->weightMatrix(), data->gridSourceRate[comp]));
     }
@@ -1141,8 +1142,11 @@ double FokkerPlanckSolver::evolve(double deltat)
             math::blas_daxpy(-deltat, data->drainMatrix[comp], lhsMatrix);
 
         // source term in the rhs
-        if(data->sourceRate[comp]>0.)
+        if(data->sourceRate[comp]>0.) {
             math::blas_daxpy(deltat, data->gridSourceRate[comp], rhs);
+            // record the amount of created mass for this component
+            data->sourceMass[comp] += deltat * sumElements(data->gridSourceRate[comp]);
+        }
 
         // boundary conditions: zero-flux (Neumann) b/c does not need anything special,
         // while a constant-value (Dirichlet) b/c essentially eliminates the first/last row
@@ -1178,9 +1182,9 @@ double FokkerPlanckSolver::evolve(double deltat)
                 lostMass += (newf[b] - data->gridf[comp][b]) * weightMatrix(0, b) - 
                     newf[b] * relaxationMatrix(0, b) * deltat;
             }
-            data->drainMass   += lostMass;
-            data->drainEnergy += lostMass * data->phasevol->E(data->gridh[0]);
-            accretedMass      -= lostMass * data->captureMassFraction[comp];
+            data->drainMass[comp] += lostMass;
+            data->drainEnergy     += lostMass * data->phasevol->E(data->gridh[0]);
+            accretedMass          -= lostMass * data->captureMassFraction[comp];
         }
 
         // keep track of mass and energy removed from the system through the loss cone
@@ -1195,19 +1199,18 @@ double FokkerPlanckSolver::evolve(double deltat)
             // compute deltaf:  f_{new,LC} -= f_old
             math::blas_daxpy(-1., data->gridf[comp], newfLC);
             // compute the change in total mass of this component
-            double lostMass    = math::blas_ddot(newfLC, data->gridMass);
-            data->drainMass   += lostMass;
-            data->drainEnergy += math::blas_ddot(newfLC, data->gridEnergy);
+            double lostMass        = math::blas_ddot(newfLC, data->gridMass);
+            data->drainMass[comp] += lostMass;
+            data->drainEnergy     += math::blas_ddot(newfLC, data->gridEnergy);
             // a fraction of this mass will be contributed to the black hole mass
-            accretedMass      -= lostMass * data->captureMassFraction[comp];
+            accretedMass          -= lostMass * data->captureMassFraction[comp];
         }
 
         // overwrite the array of DF values at grid nodes with the new ones
         data->gridf[comp] = newf;
     }
 
-    // keep track of the mass and energy added to the system through the source term
-    data->sourceMass   += deltat * data->sourceRateMass;
+    // keep track of the energy added to the system through the source term
     data->sourceEnergy += deltat * data->sourceRateEnergy;
     // same for the energy lost through the conduction across the inner boundary
     data->drainEnergy  += deltat * data->drainRateEnergy;
@@ -1219,9 +1222,9 @@ double FokkerPlanckSolver::evolve(double deltat)
     }
 
     // recompute the potential (if necessary) and the adv/dif coefs
-    if(data->updatePotential && data->numSteps%1==0) {
+    if(data->updatePotential)
         reinitPotential(deltat);
-    }
+
     reinitAdvDifCoefs();
 
     data->prevdeltat = deltat;

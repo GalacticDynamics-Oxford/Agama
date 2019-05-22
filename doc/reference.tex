@@ -170,6 +170,7 @@ The second task is to determine a density function $P(x)$ from an array of sampl
 
 Both tasks are presently implemented only for the 1d case, but in the future may be generalized to multidimensional data represented by tensor-product B-splines. More details on the mathematical formulation are given in the Appendix (sections \ref{sec:MathSplineApproxDetails} and \ref{sec:MathSplineDensityDetails}).
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Units}  \label{sec:Units}
 
@@ -185,6 +186,7 @@ When the external data follows the convention $G=1$ in whatever units, no conver
 
 The \Python interface supports the unit conversion internally: the user may set up a global instance of \ttt{ExternalUnits}, and all dimensional quantities passed to the library will be converted to internal library units and then back to physical units on output. Or, if no such conversion has been set up, all data is assumed to follow the convention $G=1$. In the future, we may adopt an alternative unit handling approach that would be seamlessly integrated with the units subsystem of the \textsc{Astropy} library \cite{Astropy}.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Coordinates}  \label{sec:Coords}
 The \ttt{coords::} namespace contains classes and routines for representing various mathematical objects in several coordinate systems in three-dimensional space.
@@ -192,6 +194,7 @@ The \ttt{coords::} namespace contains classes and routines for representing vari
 There are several built-in coordinate systems: \ttt{Car}tesian, \ttt{Cyl}indrical, \ttt{Sph}erical, and \ttt{ProlSph} -- prolate spheroidal. Their names are used as tags in other templated classes and conversion routines; only the last one has an adjustable parameter (focal distance).
 
 Templated classes include position, velocity, a combination of the two, an abstract interface \ttt{IScalarFunction} for a scalar function evaluated in a particular coordinate system, gradient and hessian of a scalar function, and coefficients for coordinate transformations from one system to the other. Templated functions convert these objects from one coordinate system to the other: for instance, \ttt{toPosVelCyl} converts the position and velocity from any source coordinate system into cylindrical coordinates; these routines should be called explicitly, to make the code self-documenting. An even more powerful family of functions \ttt{evalAndConvert} take the position in one (output) coordinate system and a scalar function defined in the other (evaluation) system, calls the function with transformed coordinates, and perform the transformation of gradient and hessian back to the output system. The primary use of these routines is in the potential framework (Section~\ref{sec:Potential}) -- each potential defines a method for computing it in the optimal system, and uses the conversion routines to provide the remaining ones. Another use is for transformation of probability distributions, which involve Jacobian matrices of coordinate conversions. In the future, we may add other coordinate systems (e.g., heliocentric) into the same framework.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Particles}  \label{sec:Particles}
@@ -203,6 +206,7 @@ Particle arrays in different coordinate systems can be implicitly converted to e
 Particle arrays are also used in constructing a potential expansion (\ttt{Multipole} or \ttt{CylSpline}) from an \Nbody snapshot, and created by routines from the \texttt{galaxymodel} module (Section~\ref{sec:GalaxyModel}), e.g., by sampling from a distribution function.
 
 The particle array type and input/output routines belong to the \ttt{particles::} name\-space.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Utilities}  \label{sec:Utilities}
@@ -227,6 +231,7 @@ For instance, a triaxial harmonic potential is easier to evaluate in Cartesian c
 
 Any number of density components may be combined into a single \ttt{CompositeDensity} class, and similarly for potential components.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Analytic potentials}  \label{sec:PotentialAnalytic}
 
@@ -242,6 +247,7 @@ Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cit
 Dehnen models may have any symmetry from spherical to triaxial; in non-spherical cases, the potential and its derivatives are computed using a 1d numerical quadrature \cite{MerrittFridman1996}, so this is rather costly (and also inaccurate at large distances). A preferred way of using an axisymmetric or triaxial Dehnen model is through the \ttt{Multipole} expansion. Ferrers ($n=2$) models are strictly triaxial, and have analytic expressions for the potential and its derivatives \cite{Pfenniger1984}.
 There is also a \ttt{Spheroid} class that describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles \cite{Zhao1996} with an optional exponential cutoff. Dehnen, Plummer, Isochrone and NFW profiles are all special cases of this model; however, this class only provides the density profile and not the potential. \ttt{Sersic} represents another commonly used density model, which can also be triaxial. 
 Generalized \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Multipole expansion}  \label{sec:PotentialMultipole}
@@ -260,6 +266,7 @@ This type of potential is rather inexpensive to initialize, very efficient to co
 
 As a side note, a related class of potential approximations is based on expanding the radial dependence of spherical-harmonic terms $\Phi_{l,m}(r)$ into a sum over functions from a suitable basis set \cite{HernquistOstriker1992,Zhao1996}. For several reasons, this approach is less efficient: the choice of the family of basis functions implies certain biases in the approximation, and the need to compute a full set of them (involving rather expensive algebraic operations) at each radius is contrasted with a much faster evaluation of a spline (essentially using only a few adjacent grid points). \cite{Vasiliev2013} demonstrated the superiority of a previous implementation of spline-interpolated spherical-harmonic expansion over the basis-set approach, and \ttt{Multipole} is improved even further. 
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Azimuthal harmonic expansion}  \label{sec:PotentialCylSpline}
 
@@ -270,6 +277,7 @@ This potential may also be constructed in the same four ways as \ttt{Multipole},
 
 To summarize, both potential approximations have wide, partially overlapping range of applicability, are equally efficient in evaluation (but not construction), and deliver good accuracy (see Figures~\ref{fig:PotentialAccuracy1},~\ref{fig:PotentialAccuracy2} in the Appendix, with more technical details given in Section~\ref{sec:PotentialDetails}).
 We note that application of these methods to represent the potential of a galaxy like the Milky Way is computationally more demanding than simple models based e.g.\ on a combination of Miyamoto--Nagai disks and spherically-symmetric two-power-law profiles, but only moderately (by a factor of 2--3), and allows much greater flexibility and realism (especially if non-axisymmetric features are required).
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Potential factory}  \label{sec:PotentialFactory}
@@ -382,6 +390,7 @@ These keywords, with some modifications, are also used in potential construction
 
 All dimensional values in the potential factory routines can optionally be specified in physical units and converted into internal units by providing an extra unit conversion parameter (Section~\ref{sec:Units}). For instance, masses and radii in the INI file may be given in solar masses and parsecs. This conversion also applies during write/read of density or potential coefficients to/from text files. Of course, if all data is given in the same units and follows the convention $G=1$, no conversion is needed.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Utility functions}  \label{sec:PotentialUtility}
 
@@ -416,11 +425,13 @@ The transformation from $\{\bx,\bv\}$ to $\{\bJ,\bt\}$ is provided by action fin
 The following sections describe the methods suitable for specific cases of spherical or axisymmetric potentials (see \cite{SandersBinney2016} for a review and comparison of various approaches).
 At present, \Agama does not contain any methods for action/angle computation in non\--axi\-sym\-met\-ric potentials, but they may be added in the future within the same general framework.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Isochrone mapping}  \label{sec:ActionsIsochrone}
 
 The spherical isochrone potential, specified by two parameters (mass $M$ and scale radius $b$) admits analytic expressions for the transformation between $\{\bx,\bv\}$ and $\{\bJ,\bt\}$ in both directions. These expression are given, e.g., in Eqs.~3.225--3.241 of \cite{BinneyTremaine}.
 The standalone routines providing these transformations, optionally with partial derivatives of $\{\bx,\bv\}$ w.r.t.\ $\bJ, M, b$, are located in \texttt{actions_isochrone.h}.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Spherical potentials}  \label{sec:ActionsSpherical}
@@ -431,6 +442,7 @@ J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - 
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
 The standalone routines in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the helper class \ttt{potential::Interpolator2d}) and $J_r(E,L)$, the inverse mapping $E(J_r,L)$ also provided via an interpolation table, and the complete inverse mapping $\{\bJ,\bt\} \Rightarrow \{\bx,\bv\}$.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
@@ -446,6 +458,7 @@ This is the main workhorse for many higher-level tasks in the \Agama library.
 A variation of this approach is to pre-compute the actions $J_r,J_z$ as functions of three integrals of motion (one of them being approximate) on a suitable grid, and then use a 3d interpolation to obtain the values of actions at any point. The construction of such interpolation table takes another couple of seconds, and the evaluation of actions through interpolation is $\sim 10\times$ faster than using the St\"ackel approximation directly. However, the accuracy of this approach is somewhat worse (not because of interpolation, but due to the approximate nature of the third integral); nevertheless, it is still sufficient in many contexts.
 
 More technical details are provided in Section~\ref{sec:ActionsStaeckelDetails}.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Torus mapping}  \label{sec:ActionsTorus}
@@ -463,6 +476,7 @@ The same DF corresponds to different density profiles in different potentials (S
 There is also a ``DF factory'' routine \ttt{createDistributionFunction} for constructing various DF classes from a set of named parameters described by a \ttt{KeyValueMap} object (Section~\ref{sec:Utilities}); the choice of model is set by \ppp{type=...}, and model-specific parameters are described in the following sections.
 
 Importantly, the DF formulated in terms of actions does not depend on the potential. However, some models use the concept of epicyclic frequencies to compute the value of $f(\bJ)$. These frequencies are represented by a special proxy class \ttt{potential::Interpolator}, which is constructed from a given potential, but then serves as an independent entity (essentially an array of arbitrary functions of one variable), so that $f(\bJ)$ has the same value in any other potential. This is important in the context of iterative construction of self-consistent models (Section~\ref{sec:SCM}).
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Disky components}  \label{sec:DFdisk}
@@ -535,6 +549,7 @@ The \ttt{QuasiIsothermal} DF is then computed as
 \end{align*}
 where the auxiliary functions $\tilde\sigma_r,\tilde\sigma_z$ now refer to the oldest stars. A similar modification applies to the \ttt{Exponential} DF, except that the age-dependent parameters are the scale actions $J_{r,0}, J_{z,0}$, not the velocity dispersions.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Spheroidal components}  \label{sec:DFspheroid}
 
@@ -569,10 +584,12 @@ The parameters of this model are listed in the structure \ttt{DoublePowerLawPara
 \end{itemize}
 This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{Spheroid} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ in the self-consistent case. An example program \texttt{example_doublepowerlaw.cpp} helps to find the values of these parameters that best correspond to the given spherical isotropic model.
 
+
 %%%%%%%%%%%%%%
 %\subsubsection{Nonparametric interpolated models}  \label{sec:DFinterpolated}
 %
 %A general way of representing an arbitrary DF in a three-dimensional action space is through an  \hyperref[sec:SplineInterpolation]{interpolating spline} in suitably scaled coordinates. The formulation in terms of B-splines is also an example of a multi-component DF, where each basis function, formed as a tensor product of one-dimensional B-splines, is a separate component. These DFs are used as building blocks in self-consistent models (work in preparation).
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Spherical DFs constructed from a density profile}  \label{sec:DFspherical}
@@ -601,6 +618,7 @@ The DF is traditionally expressed in terms of $E,L$, and in this form can only b
 An instance of \ttt{ActionFinderSpherical} class, constructed for the original potential $\Phi$, is attached to the instance of a \ttt{QuasiSpherical} DF. To compute the value of DF at the given triplet of actions $\bJ$, we map them to $E,L$ using this original spherical action finder, and then feed these values to the DF. Crucially, in this form the actions $\bJ(\bx,\bv \;|\;\tilde\Phi)$ may be computed in any other potential $\tilde\Phi$ (not necessarily spherical), not just the original $\Phi$. This corresponds to the DF being adiabatically transformed from the original potential to the new one, without changing its dependence on actions.
 This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula or its anisotropic generalization in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. The resulting DF is then viewed as a function of actions only. In subsequent iterations, the potential is no longer spherical, but the density and anisotropiy profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Spherical isotropic models}  \label{sec:DFsphericalIsotropic}
 
@@ -625,11 +643,13 @@ More information on these models is given in section~\ref{sec:DFsphericalIsotrop
 These one-dimensional DFs may also be put on equal grounds with other action-based DFs, using a proxy class \ttt{QuasiSphericalIsotropic}. It provides the mapping $\bJ \to E \to h$ via \ttt{ActionFinderSpherical} and \ttt{PhaseVolume} classes, both constructed in a given potential; the value $h$ is then used as the argument to an arbitrary function $f(h)$ provided by the user. Similarly to the case of disky DFs (Section~\ref{sec:DFdisk}), the potential is only needed to construct the intermediate mappings between actions and the arguments of the DF; the resulting object is then viewed as a function of actions only, and could be used in any other potential.
 When the original DF is constructed using the Eddington inversion formula, it is easier to use the \ttt{QuasiSpherical} class from the previous section directly, avoiding the additional transformation $E\leftrightarrow h$.
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Galaxy modelling framework}  \label{sec:GalaxyModel}
 
 This module (namespace \ttt{galaxymodel::}) broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
 As stressed previously, using $\bJ$ as the argument of $f$ has the advantage that the DF may be used with an arbitrary potenial without any modifications (because the possible range of actions does not depend on the potential, unlike, e.g., the possible range of energy).
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Moments of distribution functions}  \label{sec:Moments}
@@ -651,6 +671,7 @@ The routine \ttt{computeProjectedMoments} calculates the surface density and the
 
 There are analogous routines for spherical isotropic DFs of the form $f(h)$, defined in \texttt{galaxymodel_spherical.h} and used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Velocity distribution functions}  \label{sec:VDF}
 
@@ -662,6 +683,7 @@ Instead of just a few DF moments at a given point, one may consider one-dimensio
 Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$.
 VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
 The VDFs or projected VDFs are computed by the routine \ttt{computeVelocityDistribution<N>}.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Conversion to/from \Nbody models}  \label{sec:Nbody}
@@ -676,6 +698,7 @@ Both approaches should in principle deliver an equivalent discrete representatio
 There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{sampleDensity} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
 
 The inverse procedure for constructing a DF from a given \Nbody model is less well defined. In the case of a spherical isotropic system (Section~\ref{sec:DFsphericalIsotropic}), the one-dimensional function of phase volume $f(h)$ is estimated non-parametrically with the \hyperref[sec:SplineFitting]{penalized density fitting method} and represented as a spline in scaled coordinate (the routine \ttt{fitSphericalDF}). In principle this may be generalized for the case of a three-dimensional $f(\bJ)$, but this has not been implemented yet. The alternative is to fit a parametric DF to the array of actions, computed for the \Nbody particles in the given potential (of course, a suitable self-consistent \ttt{Multipole} or \ttt{CylSpline} potential itself may also be constructed from the same \Nbody model). This approach is demonstrated by one of the example programs (Section~\ref{sec:ExamplesTests}).
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Iterative self-consistent modelling}  \label{sec:SCM}
@@ -701,6 +724,7 @@ This approach is implemented with the help of several classes derived from \ttt{
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 %\subsection{Data handling}
 %\subsubsection{Selection functions}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Interfaces with other languages and frameworks}  \label{sec:Interfaces}
@@ -877,6 +901,7 @@ At the moment there is no way to explicitly attach the units to the dimensional 
 \texttt{sampleNdim} routine for sampling from a user-defined multidimensional function;\\
 \texttt{splineApprox} and \texttt{splineLogDensity} for constructing a penalized cubic spline approximation or density estimate from discrete samples (Section~\ref{sec:SplineFitting}).
 
+
 %%%%%%%%%%%
 \subsection{\Fortran interface}  \label{sec:Fortran}
 
@@ -892,12 +917,14 @@ One may create a potential in several ways:
 Once the potential is constructed, the routines that compute the potential, force and its derivatives (including density) at any point can be called from the \Fortran code. No unit conversion is performed (i.e., $G=1$ is implied).
 There is an example program showing all these modes of operation.
 
+
 %%%%%%%%%%%
 \subsection{\Amuse plugin}  \label{sec:Amuse}
 
 \Amuse \cite{PortegiesZwart2013} is a heterogeneous framework for performing and analyzing \Nbody simulations using a uniform approach to a variety of third-party codes. The core of the framework and the user scripts are written in \Python, while the community modules are written in various programming languages and interact with each other using a standartized interface.
 
 \Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. The plugin interface allows to construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin. This application is illustrated in the example script \texttt{py/example_amuse.py}.
+
 
 %%%%%%%%%%%
 \subsection{\Galpy plugin}  \label{sec:Galpy}
@@ -906,6 +933,7 @@ There is an example program showing all these modes of operation.
 The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a thin compatibility layer on top of the standard \Agama \Python interface. This layer introduces a \Galpy-compatible potential object \ttt{galpypot.AgamaPotential} that can be constructed in the same way as the \ttt{agama.Potential} class in \Python, but provides the methods suitable for use in \Galpy. Orbit integration and action finders can only be used with \Agama potentials, but they produce results in the form compatible with \Galpy. 
 
 An example, comparing the native \Galpy action finder with that from \Agama, is provided in the file \texttt{py/galpypot.py}. Overall, the potential approximations and action finders in \Agama are more versatile, accurate and computationally efficient, while \Galpy provides a convenient plotting interface.
+
 
 %%%%%%%%%%%
 \subsection{\Nemo plugin}  \label{sec:Nemo}
@@ -1139,6 +1167,7 @@ Dash-dotted lines show modified cubic B-spline basis functions that have natural
 \end{figure}
 %%%%%%%%%%%%
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Spline interpolation}  \label{sec:MathSplineDetails}
 
@@ -1190,6 +1219,7 @@ The same scheme works in three dimensions: now we need eight coefficients at eac
 
 We now consider a more complicated case of 2d quintic interpolation. Similarly to the cubic Hermite case, we may interpolate with a piecewise-quintic polynomial in each direction using the following 9 quantities stored at each node: $f, f'_x, f''_{xx}, f'_y, f''_{xy}, f'''_{xxy}, f''_{yy}, f'''_{xyy}, f''''_{xxyy}$, first performing 6 interpolations in $y$ to compute $f$, $f'_x$, $f''_{xx}$ at two nodes of the $x$-grid, and then the final interpolation in $x$, or vice versa.
 By a similar argument, if we are provided with four matrices $\mathsf{f}, \mathsf{f}'_x, \mathsf{f}'_y, \mathsf{f}''_{xy}$, we can construct 1d quintic splines in each direction and use them to initialize the remaining five derivatives at each node from the conditions of continuity of still higher derivatives; again this will not result in a conflicting assignment of the mixed fourth derivative $f''''_{xxyy}$. Unfortunately, in practice we often have only three matrices to work with -- the function and its two partial derivatives at each node, but no mixed second derivative. We were not able to come up with an equally elegant method in this case, although the following kludge seems to deliver satisfactory results. We first construct the 1d quintic splines for $f(x, y_j)$ and $f(x_i, y)$ at each node, and use them to compute the second derivatives ($f''_{xx}$ and $f''_{yy}$, correspondingly). To compute the mixed derivatives, we construct natural cubic splines in $y$ from the values of $f'_x$ and $f''_{xx}$, and similarly in $x$ from the values of $f'_y$ and $f''_{yy}$, and then differentiate them. The resulting values do not agree with each other, so we take either the average of the two estimates, or the one that is expected to be more accurate: for instance, if $i=1$, we would compute $f''_{xy,ij}$ by differentiating the spline for $f'_x(x_i,y)$ by $y$, because the alternative variant (differentiating the spline for $f'_y(x,y_j)$ by $x$) does not provide a good estimate at the endpoint of its $x$-grid. In this way, all remaining derivatives are assigned.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Penalized spline regression}  \label{sec:MathSplineApproxDetails}
@@ -1258,6 +1288,7 @@ Often one may wish to apply a somewhat stronger smoothing than the one given by 
 } \label{fig:SplineFit}
 \end{figure}
 %%%%%%%%%%%%
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Penalized spline density estimate}  \label{sec:MathSplineDensityDetails}
@@ -1348,10 +1379,11 @@ Maximization of cross-validation score is considered to be the ``optimal'' smoot
 
 We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
 
+
 %%%%%%%%%%%%%%
 \subsubsection{Gauss--Hermite series}  \label{sec:MathGaussHermiteDetails}
 
-Gauss--Hermite expansion is another type of basis set, useful for representing velocity distribution functions, which are typically not too dissimilar to a Gaussian profile. Unlike the B-spline basis set, which is specified by the number and location of grid nodes and the degree of polynomials, the Gauss--Hermite basis is specified by the parameters of the zero-order function (a Gaussian with the given amplitude $\Xi$, mean value $x_0$, and width $\sigma$) and the order of expansion $M$. The total number of basis functions is $M+1$, and they are defined as
+Gauss--Hermite (GH) expansion is another type of basis set, useful for representing velocity distribution functions, which are typically not too dissimilar to a Gaussian profile. Unlike the B-spline basis set, which is specified by the number and location of grid nodes and the degree of polynomials, the GH basis is specified by the parameters of the zero-order function (a Gaussian with the given amplitude $\Xi$, mean value $x_0$, and width $\sigma$) and the order of expansion $M$. The total number of basis functions is $M+1$, and they are defined as
 \begin{subequations}
 \begin{align}  \label{eq:GaussHermiteBasis}
 \mathcal B_m(x) \equiv \frac{\Xi}{\sqrt{2\pi}\;\sigma} \;
@@ -1367,30 +1399,75 @@ where $\mathcal{H}_m(y)$ are the (astrophysical) Hermite polynomials \cite{Gerha
 \end{align}
 \end{subequations}
 They differ in normalization from the physicist's definition of Hermite polynomials $H(y)$: 
-$\mathcal H_m(y) = H_m(y) / \sqrt{2^m\,m!}$. The Gauss--Hermite basis functions are orthogonal on the real axis, with the Gram matrix being
+$\mathcal H_m(y) = H_m(y) / \sqrt{2^m\,m!}$. The GH basis functions are orthogonal on the real axis, with the Gram matrix being
 \begin{align}
 \mathcal G_{mn} \equiv \int_{-\infty}^{\infty} \mathcal B_m(x)\, \mathcal B_n(x)\, dx =
 \frac{\Xi^2}{2\sqrt{\pi}\,\sigma}\, \delta_{mn} \,.
 \end{align}
 
-According to the general definition given in Section~\ref{sec:MathBasisSetDetails}, any function $f(x)$ can be approximated as a sum of Gauss--Hermite basis functions multiplied by amplitudes $\boldsymbol{h}$ (also called Gauss--Hermite coefficients):
-\begin{align}
+According to the general definition given in Section~\ref{sec:MathBasisSetDetails}, any function $f(x)$ can be approximated as a sum of GH basis functions multiplied by amplitudes $\boldsymbol{h}$ (also called GH coefficients):
+\begin{align}  \label{eq:GHcoefs}
 \tilde f(x) = \sum_{m=0}^{M} h_m\, \mathcal B_m(x), \quad
 h_m = \frac{2\sqrt{\pi}\,\sigma}{\Xi^2} \int_{-\infty}^{\infty} f(x)\, \mathcal B_m(x)\, dx \,.
 \end{align}
 
-For the fixed parameters $\Xi, x_0, \sigma, M$, this expansion is defined in a unambiguous way. However, there is some redundancy (most obviously in the overall amplitude factor $\Xi$, which merely rescales the amplitudes $\boldsymbol h$). If one has freedom to adjust $\Xi$, $x_0$ and $\sigma$, it makes sense to define them in such a way that the first three coefficients are $h_0=1, h_1=h_2=0$. In this case, if one limits the order of expansion $M$ to 2, the approximated function $\tilde f(x)$ is in fact the best-fit Gaussian for the original function $f(x)$. Addition of higher-order coefficients $h_m (m\ge 3)$ allows one to represent the deviations from this Gaussian, but does not change the first three coefficients, thanks to the orthogonality of the basis set.
+For the fixed parameters $\Xi, x_0, \sigma, M$, this expansion is defined in a unambiguous way. However, there is some redundancy (most obviously in the overall amplitude factor $\Xi$, which merely rescales the amplitudes $\boldsymbol h$). If one has freedom to adjust $\Xi$, $x_0$ and $\sigma$, it makes sense to define them in such a way that the first three coefficients are $h_0=1, h_1=h_2=0$, which is always possible (more on this later). In this case, if one limits the order of expansion $M$ to 2 (or, in fact, to 0), the approximated function $\tilde f(x)$ is actually the best-fit Gaussian for the original function $f(x)$. Addition of higher-order coefficients $h_m (m\ge 3)$ allows one to represent the deviations from this Gaussian, but does not change the first three coefficients, thanks to the orthogonality of the basis set.
 
-On the other hand, if one needs to compare two functions represented by the Gauss--Hermite series, this can only be done if the parameters of the basis set $\Xi, x_0, \sigma$ are the same. For instance, when the observational constraints on the velocity distribution come in the form of Gauss--Hermite coefficients $h_m$ (with the given $\Xi, x_0, \sigma$ and with the default values of $h_0=1, h_1=h_2=0$), the same function in the model must be represented in the same basis, even though the coefficients $h_{0,1,2}$ do not have the default values.
+On the other hand, if one needs to compare two functions represented by the GH series, this can only be done if the parameters of the basis set $\Xi, x_0, \sigma$ are the same. For instance, when the observational constraints on the velocity distribution come in the form of GH coefficients $h_m$ (with the given $\Xi, x_0, \sigma$ and with the default values of $h_0=1, h_1=h_2=0$), the same function in the model must be represented in the same basis, even though the coefficients $h_{0,1,2}$ do not have the default values.
 
-In practice, it may be convenient to represent the velocity distribution of the model in terms of a B-spline expansion with amplitudes $A_j$, and then convert it into the Gauss--Hermite coefficients $h_m$. This is, of course, a linear operation $\boldsymbol h = \mathcal G^{-1}\, \mathsf C \,\boldsymbol A$ (for the given parameters of the two basis sets), with the matrix $C_{mj} = \langle \mathcal B_m, B_j \rangle$.
+In practice, it may be convenient to represent the velocity distribution of the model in terms of a B-spline expansion with amplitudes $A_j$, and then convert it into the GH coefficients $h_m$. This is, of course, a linear operation $\boldsymbol h = \mathcal G^{-1}\, \mathsf C \,\boldsymbol A$ (for the given parameters of the two basis sets), with the matrix $C_{mj} = \langle \mathcal B_m, B_j \rangle$.
 
 It is important to keep in mind that $\Xi, x_0, \sigma$ are \textit{not} identical to the overall normalization, mean and dispersion of the function $\tilde f$. These are given by an amplitude-weighted sum over the corresponding values for \text{all} basis functions; for instance, the overall normalization is
-\begin{align}
+\begin{subequations}
+\begin{align}  \label{eq:GHnormalization}
 \int_{-\infty}^{\infty} \tilde f(x)\, dx =
-\sum_{m=0}^M  h_m\, \int_{-\infty}^{\infty} B_m(x)\, dx =
-\Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{\sqrt{m!}}{m!!} \,.
+\sum_{m=0}^M  h_m\, \int_{-\infty}^{\infty} \mathcal B_m(x)\, dx =
+\Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{\sqrt{m!}}{m!!} \,,
 \end{align}
+and the second moment times the above quantity is
+\begin{align}  \label{eq:GHdispersion}
+\int_{-\infty}^{\infty} \tilde f(x)\, x^2\, dx =
+\Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{(2m+1)\,\sqrt{m!}}{m!!} \,.
+\end{align}
+\end{subequations}
+
+As mentioned above, the GH expansion is defined by the amplitude $\Xi$, mean value $x_0$ and scale $\sigma$ of the zero-order function (a pure Gaussian). Given a sufficiently large number of terms $M$, it can approximate any reasonably smooth function $f(x)$ to a desired accuracy; however, the speed of convergence naturally depends on the choice of $x_0$ and $\sigma$. There are several possible approaches for setting these parameters.
+
+\begin{enumerate}
+\item van der Marel \& Franx \cite{vdMarelFranx1993} choose the parameters $x_0, \sigma$ so that the lowest-order term approximates the function as closely as possible (this implies that only $h_0$ is nonzero, and hence the GH expansion is a pure Gaussian -- note that the best-fit Gaussian is \textit{not} a Gaussian with the width equal to the dispersion of the function!), then construct a full GH expansion with these parameters, computing the coefficients $h_m$ according to (\ref{eq:GHcoefs}). Thanks to the orthogonality of basis functions, the addition of subsequent terms does not change the previous expansion coefficients, hence in this (and \textit{only in this}) case $h_1=h_2=0$.
+\item The same authors find it ``more convenient in practice'' to fit a truncated GH series $\mathscr L(x) \equiv \mathcal B_0(x) + \sum_{m=3}^M h_m\,\mathcal B_m(x)$ to the function $f(x)$ with $\Xi, x_0, \sigma, h_3 \dots h_M$ as free parameters adjusted during the fit to minimize the rms deviation between the function and its approximation, while still fixing $h_0=1, h_1=h_2=0$.
+In this case, all parameters in the fit depend on the order of expansion $M$; in other words, this is the best approximation \textit{at the given order}, not the approximation in which the lowest-order function is chosen to be the best-fit one. Naturally, this results in a better overall fit, but note that this is \textit{not} a true GH expansion: if we compute the coefficients $h_{0,1,2}$ for the original function $f(x)$ with the parameters $x_0,\sigma$ having the best-fit values as described above, they will not have the values $1,0,0$ as implied during the fit, while the values of the remaining coefficients will be the same. Consequently, the actual GH expansion $\tilde f(x)$ constructed with these parameters will be somewhat less accurate than the fitted function $\mathscr L(x)$, but typically still more accurate than the GH expansion constructed around the best-fit Gaussian (as in the first approach). 
+Since the fitted function $\mathscr L(x)$ has zero $h_1,h_2$, the best-fit values of $x_0,\sigma$ (and consequently all GH coefficients) will converge to the ones produced by the first method as $M \to \infty$, because only for this choice of $\sigma$ the first two GH moments vanish.
+\item Gerhard \cite{Gerhard1993} independently introduced the GH parametrization of velocity profiles. In his approach, the scale parameter $\sigma$ is not necessarily fixed to any particular value, hence $h_2$ (called $s_2$ in that paper) is not zero (his eq.~3.10). To avoid ambiguity, he suggests to use the true dispersion of the original function%
+\footnote{When fitting the noisy data, true dispersion is unknown a priori, so Gerhard suggests a two-step procedure: first perform a GH fit with the scale parameter $\sigma$ set to some reasonable value (e.g. the width of the main peak of the function), then compute the true dispersion from this GH series, and re-fit another GH expansion with the scale set to the true dispersion. The total dispersion determined from the GH fit is less sensitive to the poorly measured wings of the profile. van der Marel \& Franx caution that this procedure could underestimate of the dispersion if the truncated GH expansion has significant negative wings, and suggest to take $\mathrm{max}\big(\tilde f(x), 0\big)$ when computing the dispersion according to Equation~\ref{eq:GHdispersion}.}
+$f(x)$ as the scale parameter $\sigma$, but notices that sometimes a smaller value of $\sigma$ could be preferred, e.g., when the function has a sharp and narrow peak. In common with the previous choice, all coefficients $h_m$ are, in general, nonzero if $\sigma$ is not equal to the width of the best-fit Gaussian.
+\item However, if one dispenses with the constraint that $h_1=h_2=0$, then a \textit{still} better approximation (for a given order $M$) could be achieved by fitting an unrestricted GH series (\ref{eq:GHcoefs}), simultaneously optimizing $x_0,\sigma$ and all $h_{m\ge 0}$.
+\end{enumerate}
+
+%%%%%%%%%%%%%%
+\begin{figure}
+\begin{center}
+\includegraphics[width=16.5cm]{GHmoments.pdf}
+\end{center}
+\caption{Gauss--Hermite expansions with $M=4$ and different choices of $\sigma$. \protect\\
+Left panel: $f(x) = \frac{1}{\sqrt{2\pi}} \exp\big(-\frac{1}{2} x^2 \big) \;\big[1 + 0.15\, \mathcal H_4(x) + 0.2\, \mathcal H_6(x) \big]$ (same as in Appendix A of \cite{Joseph2001}) is actually a pure GH expansion with 6 terms, but we fit it with only 4 terms. \protect\\
+Right panel: $f(x) = \exp(-x^6)$ is a slightly smoothed top-hat function. \protect\\
+Solid gray line shows the original function, and other lines show various approximations (each one is plotted for either positive or negative $x$ only, to reduce congestion): \protect\\
+Purple dotted line: GH expansion with the scale $\sigma$ equal to that of the best-fit Gaussian (variant 1 in the list) has $h_2=0$ by construction, and recovers the true value of $h_4$ on the left panel, but is not the best fit by itself.
+Dashed green line: best-fit function $\mathscr L(x)$ which looks like a GH expansion with $h_2=0$ and adjustable $\sigma,h_4$ (variant 2 in the list). It is not the \textit{true} GH expansion of the function $f(x)$ with this scale $\sigma$, however: the latter is shown by dot-dashed cyan line, and has non-zero $h_2$.
+Long-dashed blue line: GH expansion with the scale $\sigma$ equal to the true dispersion of the original function (variant 3 in the list) also has non-zero $h_2$.
+Dash-double-dotted red line: the absolute best-fit GH expansion with $\sigma, h_2$ and $h_4$ all being free parameters, which has the smallest deviation from the original function (not shown on the left panel because it is very similar to the variant 1).
+} \label{fig:GHmoments}
+\end{figure}
+%%%%%%%%%%%%
+
+Among these approaches, the first one (taking $x_0$ and $\sigma$ to be the parameters of the best-fit Gaussian) is the only one that gives the same values for all $h_m$ coefficients regardless of the order of expansion $M$ (because its parameters are fixed and do not depend on $M$), and has $h_1=h_2=0$ by construction. This makes it attractive from the conceptual point of view, because it can be ``gracefully degraded'' (truncated at a lower order while still producing a reasonable fit). In other approaches, $x_0$, $\sigma$ and all other coefficients depend on the choice of $M$, and because of two additional free parameters ($h_1,h_2$), the approximation is generally more accurate for a fixed $M$ than in the first approach. Figure~\ref{fig:GHmoments} illustrates the effect of different choices of $\sigma$ on the approximation accuracy of the resulting GH series truncated at $M=4$. The two examples shown in that figure are rather extreme, and in practice the difference is much smaller (and as mentioned before, vanishes for sufficiently high $M$, regardless of the choice of $\sigma$).
+We stress again that if the original function $f(x)$ is significantly non-Gaussian, one cannot interpret $\sigma$ from the best-fit approximation as the ``width'' of the function, because the higher-order terms cannot be neglected. Moreover, there is no uniquely defined set of ``true'' GH parameters -- different choices of $\sigma$ will lead to different GH expansions, and it is not clear a priori which one will converge faster as the number of terms $M$ increases (for the function shown on the right panel of the above figure, the optimal $\sigma$ appears to be substantially smaller than either the width of the best-fit Gaussian or the true dispersion).
+
+The above discussion assumed that we know perfectly the ``true'' original function. In practice, the GH expansion is often used to parametrize the velocity distribution functions extracted from or fitted to the spectra, which are often both noisy and undersampled.
+\cite{CappellariEmsellem2004} find that the first approach in the above list (fitting the data by a Gaussian with free parameters $x_0$ and $\sigma$ first and then using it to construct a GH expansion) becomes biased towards a pure Gaussian when the data is undersampled, even in the limit of zero noise, while the second approach (fitting a function $\mathscr L(x)$ with $x_0,\sigma,h_{m\ge 3}$) produces large and correlated uncertainties when the signal-to-noise ratio (SNR) is low. They design a hybrid method (the pPXF code) which uses $\mathscr L(x)$ at high SNR, but degenerates into fitting a pure Gaussian at low SNR. As explained above, the values of $\sigma$ (and hence all GH coefficients) produced by the second approach will tend to those of the first approach as $M$ increases (in the limit of well-sampled and noiseless data).
+Alternatively, one may use an entirely different method for extracting the velocity distribution from the spectrum, and only then fit a GH expansion to the resulting function. \cite{Joseph2001} use a nonparametric maximum penalized likelihood method to determine $f(x)$ and then follow the first approach (determine $\sigma$ from the best-fit Gaussian) to construct a GH expansion $\tilde f(x)$.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{Sampling}  \label{sec:MathSamplingDetails}
@@ -1425,6 +1502,7 @@ A = \sum_{c=1}^{N_\mathrm{cell}} \frac{\mathrm{vol}(\mathcal{V}_c)}{M_c} \sum_{k
 \item If we have added new trial points into any cell, we repeat the procedure from step~\ref{step:computeIntegral}. 
 \item Otherwise the iterative refinement is complete, and we draw $N$ output points from the trial points, with the probability described in step~\ref{step:refinement}, and finish.
 \end{enumerate}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Coordinates}  \label{sec:CoordinateDetails}
@@ -1497,6 +1575,7 @@ In a general case, the projection of a triaxial ellipsoid is also an ellipse in 
 
 In case that the distance to the stellar system is not overwhelmingly larger than its characteristic size (or equivalently, when it occupies a non-negligible area on the sky), one needs to employ more sophisticated transformations between the cartesian intrinsic coordinates within the stellar system and the spherical coordinates on the sky (no longer ``sky plane''). An extreme case is our Galaxy, where the observer is located well within the stellar system, and it occupies the entire sky. Also in this case, we may need to consider shifts, not only rotations of the coordinate systems. The projection transformations will be extended to these cases in the future.
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Potentials}  \label{sec:PotentialDetails}
 
@@ -1544,6 +1623,7 @@ Similarly to the Multipole potential class, we extrapolate the profile to small 
 \end{align*}
 Then the $l=0$ coefficients (which contain just particle masses) are used to determine the spherically-symmetric part of the density profile. We use penalized spline log-density fit (Section~\ref{sec:MathSplineDensityDetails}) to estimate the logarithm of an auxiliary quantity $P(\ln r) \equiv dM(<r)/d\ln r$ from the array of point masses and log-radii; the actual density is $\rho_{0,0}(r) = P(\ln r) / (4\pi\,r^3)$. Finally, we create smoothing splines (Section~\ref{sec:MathSplineApproxDetails}) for all non-trivial $\rho_{l,m}(\ln r)$ terms.
 This temporary density model is used to construct the \ttt{Multipole} potential from an \Nbody model -- even though the Poisson equation (\ref{eq:SphHarmPoisson},\ref{eq:SphHarmDensity}) can be solved directly by summing over particles (the approach used in \cite{Vasiliev2013}), this results in a noisier and less accurate potential than the intermediate smoothed density can provide.
+
 
 %%%%%%%%%%%%%%
 \subsubsection{CylSpline expansion}  \label{sec:PotentialCylSplineDetails}
@@ -1601,6 +1681,7 @@ Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential e
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Action/angle transformation}  \label{sec:ActionsDetails}
+
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckelDetails}
 
 A prolate spheroidal coordinate system is characterized by a single parameter $\Delta$ -- the distance between the origin and any of the two focal points (located on the $z$ axis). The coordinate lines are ellipses and hyperbolae defined by the focal points. How exactly the coordinate values along these lines are chosen is a matter of preference: various studies use different definitions, and we suggest yet another one for the reasons to be explained shortly. 
@@ -1721,6 +1802,7 @@ However, since $I_3$ is only an approximate integral (which furthermore also dep
 
 Nevertheless, the overall accuracy of the St\"ackel approximation is reasonably good (for low-eccentricity orbits it is typically much better than shown in the above example). For disk orbits, the relative errors are typically better than 1\%, while for halo orbits they may reach 10\% -- this happens mostly at resonances, when the orbit is not at all well described by a box in any prolate spheroidal coordinate system. The error in the interpolated approximation is a factor of 1.5--3 worse, but still tolerable in many contexts (e.g., construction of equilibrium models), and it leads to a $\sim 10\times$ speedup in action computation, for a very moderate overhead in construction of interpolation tables. In terms of accuracy and speed, the interpolated St\"ackel approximation is thus similar to the use of un-adorned $I_3$ as the approximate third integral of motion, as advocated in \cite{Bienayme2015}; however, actions have clear conceptual advantages.
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Distribution functions}  \label{sec:DFdetails}
 
@@ -1750,6 +1832,8 @@ Here $\hat\rho$ is the augmented density, expressed as a function of potential a
 We use a finite-difference estimate for the radial derivatives of the original density $\rho(r)$, but this becomes inaccurate at small $r$ when both $\rho$ and $\Phi$ tend to finite limiting values. To cope with this issue, we fit a Taylor series expansion for $\rho(\Phi)$ as $\Phi \to \Phi(r=0)$, and use it at small radii where it can be differentiated analytically (only if the series produce a reasonable approximation of the density). We limit the range of the anisotropy coefficient to $\beta_0 \ge -1/2$, since lower values would need a third or even higher derivative of density, becoming too challenging to compute accurately.
 The energy-dependent part of the DF $\hat f(Q)$ is represented by a log-scaled cubic spline in the scaled energy coordinate $\scE$ defined below. Negative values of $f(Q)$ are replaced by zeros.
 
+
+%%%%%%%%%%%%%%
 \subsubsection{Spherical isotropic DFs and the phase-volume formalism}  \label{sec:DFsphericalIsotropicDetails}
 
 In the isotropic case ($\beta_0=0$, $r_a=\infty$), the DF is a function of $E$ alone, but it can also be expressed in terms of an action-like variable $h$.
@@ -1861,6 +1945,9 @@ Binney J., Tremaine S., 2008, \textsl{Galactic Dynamics}, Princeton Univ.\ press
 \bibitem{Bovy2015}
 Bovy J., 2015, ApJS, 216, 29
 
+\bibitem{CappellariEmsellem2004}
+Cappellari M., Emsellem E., 2004, PASP, 116, 138
+
 \bibitem{CarpinteroAguilar1998}
 Carpintero D., Aguilar L., 1998, MNRAS, 298, 1
 
@@ -1917,6 +2004,9 @@ Hyman J., 1983, J.~Sci.~Stat.~Comput., 4, 645
 
 \bibitem{Jeffreson2017}
 Jeffreson S., Sanders J., Evans N., et al., 2017, MNRAS, 469, 4740
+
+\bibitem{Joseph2001}
+Joseph C., Merritt D., Olling R., et al., 2001, ApJ, 550, 668
 
 \bibitem{KuijkenDubinski1995}
 Kuijken K., Dubinski J., 1995, MNRAS, 277, 1341

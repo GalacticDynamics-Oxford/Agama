@@ -153,14 +153,18 @@ void printInfo(std::ofstream& strmLog, const double timeSim, const galaxymodel::
     strmLog <<
     utils::pp(timeSim,          11) + ' ' +
     utils::pp(fp.Phi0(),        11) + ' ' +
-    utils::pp(fp.Mbh(),         11) + ' ' +
-    utils::pp(fp.Mass(),        11) + ' ' +
-    utils::pp(fp.sourceMass(),  11) + ' ' +
-    utils::pp(fp.drainMass(),   11) + ' ' +
     utils::pp(fp.Etot(),        11) + ' ' +
+    utils::pp(fp.Ekin(),        11) + ' ' +
     utils::pp(fp.sourceEnergy(),11) + ' ' +
     utils::pp(fp.drainEnergy(), 11) + ' ' +
-    utils::pp(fp.Ekin(),        11) + '\n';
+    utils::pp(fp.Mbh(),         11);
+    for(unsigned int c=0; c<fp.numComp(); c++)
+        strmLog << ' ' + utils::pp(fp.Mass(c),       11);
+    for(unsigned int c=0; c<fp.numComp(); c++)
+        strmLog << ' ' + utils::pp(fp.sourceMass(c), 11);
+    for(unsigned int c=0; c<fp.numComp(); c++)
+        strmLog << ' ' + utils::pp(fp.drainMass(c),  11);
+    strmLog << '\n';
 }
 
 /// initial density profiles of model components
@@ -277,8 +281,19 @@ int main(int argc, char* argv[])
     std::ofstream strmLog;
     if(!fileLog.empty()) {
         strmLog.open(fileLog.c_str());
-        strmLog << "#" + header + "\n#Time       Phi_star(0) Mbh         "
-        "Mtotal      Msource     Msink       Etotal      Esource     Esink       Ekin\n" << std::flush;
+        strmLog << "#" + header + "\n"
+        "#Time       Phi_star(0) Etotal      Ekin        Esource     Esink       Mbh         ";
+        if(components.size() == 1) {
+            strmLog << "Mass        Msource     Msink       ";
+        } else {
+            for(unsigned int c=0; c<components.size(); c++)
+                strmLog << "Mass" + utils::toString(c) + "       ";
+            for(unsigned int c=0; c<components.size(); c++)
+                strmLog << "Msource" + utils::toString(c) + "    ";
+            for(unsigned int c=0; c<components.size(); c++)
+                strmLog << "Msink" + utils::toString(c) + "      ";
+        }
+        strmLog << "\n" << std::flush;
     }
 
     // if the central black hole is grown adiabatically, start from a zero initial BH mass
