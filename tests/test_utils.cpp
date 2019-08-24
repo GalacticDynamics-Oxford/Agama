@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "utils_config.h"
 #include "math_core.h"
+#include "math_random.h"
 #include <iostream>
 #include <fstream>
 #include <iomanip>

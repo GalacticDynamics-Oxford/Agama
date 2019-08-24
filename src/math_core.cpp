@@ -7,11 +7,10 @@
 #include <gsl/gsl_version.h>
 #include <gsl/gsl_sf_erf.h>
 #include <gsl/gsl_sf_gamma.h>
-#include <stdint.h>
 #include <stdexcept>
 #include <cassert>
-#include <vector>
 #include <cmath>
+#include <alloca.h>
 
 #if not defined(GSL_MAJOR_VERSION) || (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
 #error "GSL version is too old (need at least 1.15)"
@@ -19,13 +18,8 @@
 
 #ifdef HAVE_CUBA
 #include <cuba.h>
-#include <alloca.h>
 #else
 #include "cubature.h"
-#endif
-
-#ifdef _OPENMP
-#include <omp.h>
 #endif
 
 namespace math{
@@ -224,201 +218,6 @@ template ptrdiff_t binSearch(const long long, const long long[], size_t);
 template ptrdiff_t binSearch(const unsigned int,       const unsigned int[],       size_t);
 template ptrdiff_t binSearch(const unsigned long,      const unsigned long[],      size_t);
 template ptrdiff_t binSearch(const unsigned long long, const unsigned long long[], size_t);
-
-
-/* --------- random numbers -------- */
-namespace {
-/// The "xoroshiro128+" pseudo-random number generator, supposed to be very fast and good quality.
-/// Written in 2016 by David Blackman and Sebastiano Vigna
-class RandGenStorage{
-    /// return the next random number from the sequence, and update the state
-    uint64_t next(uint64_t state[2]) {
-        const uint64_t s0 = state[0];
-        uint64_t s1 = state[1];
-        const uint64_t result = s0 + s1;  // take the random number from the current state
-        // update the state using a few bit-shifts and xor operators
-        s1 ^= s0;
-        state[0] = ((s0 << 55) | (s0 >> 9)) ^ s1 ^ (s1 << 14); // a, b
-        state[1] =  (s1 << 36) | (s1 >> 28); // c
-        return result;
-    }
-
-    /// Jump function for the generator. It is equivalent to 2^64 calls to next();
-    /// it can be used to generate 2^64 non-overlapping subsequences for parallel computations.
-    void jump(uint64_t state[2]) {
-        static const uint64_t JUMP[] = { 0xbeac0467eba5facb, 0xd86b048b86aa9922 };
-        uint64_t s0 = 0;
-        uint64_t s1 = 0;
-        for(int i = 0; i < 2; i++)
-            for(int b = 0; b < 64; b++) {
-                if (JUMP[i] & 1ull << b) {
-                    s0 ^= state[0];
-                    s1 ^= state[1];
-                }
-                next(state);
-            }
-        state[0] = s0;
-        state[1] = s1;
-    }
-
-    // in the case of OpenMP, we have as many independent pseudo-random number generators
-    // as there are threads, and each thread uses its own state (seed), to avoid race condition
-    // and maintain deterministic output
-    int maxThreads;
-    std::vector<uint64_t> randgen;  /// two 64-bit integers per thread
-public:
-    RandGenStorage() :
-#ifdef _OPENMP
-        maxThreads(std::max(1, omp_get_max_threads())),
-#else
-        maxThreads(1),
-#endif
-        randgen(maxThreads*2)
-    {
-        randomize(42);  // set some nontrivial initial seeds (anything except zero is fine)
-    }
-    /// set the initial seed values for all threads
-    void randomize(uint64_t seed) {
-        if(!seed)
-            seed = (uint64_t)time(NULL);
-        for(int i=0; i<maxThreads; i++) {
-            // take the initial seed (for 0th thread) or copy the seed value from the previous thread...
-            randgen[i*2]   = i>0 ? randgen[i*2-2] : seed;
-            randgen[i*2+1] = i>0 ? randgen[i*2-1] : 0;
-            // ...and fast-forward 2^64 elements in the sequence
-            jump(&randgen[i*2]);
-        }
-    }
-    /// convert the 64-bit random integer to a double
-    inline double random() {
-#ifdef _OPENMP
-        int i = std::min(omp_get_thread_num(), maxThreads-1);
-#else
-        int i = 0;
-#endif
-        uint64_t r = next(&randgen[i*2]);
-        return (1./18446744073709551616.) * r;  // r * 2^-64
-    }
-};
-
-// global instance of random number generator -- created at program startup and destroyed
-// at program exit. Note that the order of initialization of different modules is undefined,
-// thus no other static variable initializer may use the random() function.
-// Moving the initializer into the first call of random() is not a remedy either,
-// since it may already be called from a parallel section and will not determine
-// the number of threads correctly.
-static RandGenStorage randgen;
-}  // namespace
-
-void randomize(unsigned int seed)
-{
-    randgen.randomize(seed);
-}
-
-// generate a random number using the global generator
-double random()
-{
-    return randgen.random();
-}
-
-// generate 2 random numbers with normal distribution, using the Box-Muller approach
-void getNormalRandomNumbers(double& num1, double& num2)
-{
-    double p1 = random(), p2 = random(), u, v;
-    if(p1>0)
-        p1 = sqrt(-2*log(p1));
-    sincos(2*M_PI * p2, u, v);
-    num1 = p1 * u;
-    num2 = p1 * v;
-}
-
-void getRandomUnitVector(double vec[3])
-{
-    double costh = random()*2-1;
-    double sinth = sqrt(1-pow_2(costh));
-    double sinphi, cosphi;
-    sincos(2*M_PI * random(), sinphi, cosphi);
-    vec[0] = sinth * cosphi;
-    vec[1] = sinth * sinphi;
-    vec[2] = costh;
-}
-
-double getRandomPerpendicularVector(const double vec[3], double vper[3])
-{
-    double sinphi, cosphi;
-    sincos(2*M_PI * random(), sinphi, cosphi);
-    if(vec[1] != 0 || vec[2] != 0) {  // input vector has a nontrivial projection in the y-z plane
-        // a combination of two steps:
-        // (1) obtain one perpendicular vector as a cross product of v and e_x;
-        // (2) rotate it about the vector v by angle phi, using the Rodriguez formula.
-        double vmag = sqrt(pow_2(vec[0]) + pow_2(vec[1]) + pow_2(vec[2]));
-        double norm = 1 / sqrt(pow_2(vec[1]) + pow_2(vec[2])) / vmag;
-        vper[0] = norm * (sinphi * (pow_2(vec[0]) - pow_2(vmag)) );
-        vper[1] = norm * (sinphi * vec[0] * vec[1] - cosphi * vmag * vec[2]);
-        vper[2] = norm * (sinphi * vec[0] * vec[2] + cosphi * vmag * vec[1]);
-        return vmag;
-    } else if(vec[0] != 0) {  // degenerate case - a vector directed in the x plane
-        vper[0] = 0;
-        vper[1] = cosphi;
-        vper[2] = sinphi;
-        return fabs(vec[0]);
-    } else {  // even more degenerate case of a null vector - create a random isotropic vector
-        double costh = random()*2-1;
-        double sinth = sqrt(1-pow_2(costh));
-        vper[0] = sinth * cosphi;
-        vper[1] = sinth * sinphi;
-        vper[2] = costh;
-        return 0;
-    }
-}
-
-void getRandomRotationMatrix(double mat[9])
-{
-    // the algorithm of Arvo(1992)
-    double sinth, costh, sinphi, cosphi;
-    sincos(2*M_PI * random(), sinth,  costh );
-    sincos(2*M_PI * random(), sinphi, cosphi);
-    double
-    mu = 2 * random(),
-    nu = sqrt(mu),
-    vx = sinphi * nu,
-    vy = cosphi * nu,
-    vz = sqrt(2-mu),
-    st = sinth,
-    ct = costh,
-    sx = vx*ct - vy*st,
-    sy = vx*st + vy*ct;
-    mat[0] = vx*sx-ct;
-    mat[1] = vx*sy-st;
-    mat[2] = vx*vz;
-    mat[3] = vy*sx+st;
-    mat[4] = vy*sy-ct;
-    mat[5] = vy*vz;
-    mat[6] = vz*sx;
-    mat[7] = vz*sy;
-    mat[8] = 1-mu;
-}
-
-void getRandomPermutation(size_t count, size_t output[])
-{
-    // Fisher-Yates algo
-    for(size_t i=0; i<count; i++) {
-        size_t j = std::min(static_cast<size_t>(random() * (i+1)), i);
-        output[i] = output[j];
-        output[j] = i;
-    }
-}
-
-double quasiRandomHalton(size_t ind, unsigned int base)
-{
-    double val = 0, fac = 1., invbase = 1./base;
-    while(ind > 0) {
-        fac *= invbase;
-        val += fac * (ind % base);
-        ind /= base;
-    }
-    return val;
-}
 
 
 /* ------ algebraic transformations of functions ------- */
@@ -1220,12 +1019,13 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
     const double absToler = 0;  // the only possible way to stay invariant under scaling transformations
-    // storage for errors in the case that user doesn't need them
-    std::vector<double> tempError(numValues);
-    double* error = outError!=NULL ? outError : &tempError.front();
+    // storage for errors: in the case that user doesn't need them, allocate a temp.array on the stack,
+    // which will be automatically freed on exit (NOTE: this assumes that numValues is not too large!)
+    double* error = outError!=NULL ? outError : static_cast<double*>(alloca(numValues * sizeof(double)));
 #ifdef HAVE_CUBA
     CubaParams param(F, xlower, xupper);
-    std::vector<double> tempProb(numValues);  // unused
+    // allocate another temp.array, unused
+    double* tempProb = static_cast<double*>(alloca(numValues * sizeof(double)));
     int nregions, neval, fail;
     const int NVEC = 1000, FLAGS = 0, KEY = 7, minNumEval = 0;
     cubacores(0, 0);  // disable parallelization at the CUBA level
@@ -1233,7 +1033,7 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
         relToler, absToler, FLAGS, minNumEval, maxNumEval, 
         KEY, NULL/*STATEFILE*/, NULL/*spin*/,
         &nregions, numEval!=NULL ? numEval : &neval, &fail, 
-        result, error, &tempProb.front());
+        result, error, tempProb);
     if(fail==-1)
         throw std::runtime_error("integrateNdim: number of dimensions is too large");
     if(fail==-2)

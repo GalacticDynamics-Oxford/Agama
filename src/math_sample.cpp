@@ -1,5 +1,6 @@
 #include "math_sample.h"
-#include "math_core.h"
+#include "math_core.h"  // for Averager
+#include "math_random.h"
 #include "utils.h"
 #include <stdexcept>
 #include <cassert>
@@ -372,7 +373,8 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
         // the permutation list is small enough to be allocated on the stack (no need to free explicitly)
         // (should be the case for all subsequent calls to this routine)
         perm = static_cast<size_t*>(alloca(count * sizeof(size_t)));
-    getRandomPermutation(count, perm);  // assign the actual permutation list, no matter where it's stored
+    math::PRNGState state = lastPointIndex;     // initial seed for the PRNG
+    getRandomPermutation(count, perm, &state);  // assign the actual permutation list, no matter where it's stored
 #endif
     PointEnum nextPointInList = cells[cellIndex].headPointIndex;  // or -1 if the cell was empty
     for(PointEnum pointIndex = firstPointIndex; pointIndex < lastPointIndex; pointIndex++) {
@@ -383,7 +385,7 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
 #ifdef USE_QRNG
                 quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex] + qrngOffset, PRIMES[d]);
 #else
-                random();
+                random(&state);
 #endif
         }
         // update the linked list of points in the cell

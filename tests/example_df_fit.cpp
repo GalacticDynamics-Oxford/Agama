@@ -24,6 +24,7 @@
 #include "particles_base.h"
 #include "math_fit.h"
 #include "math_core.h"
+#include "math_random.h"
 #include "utils.h"
 #include <cmath>
 #include <cassert>

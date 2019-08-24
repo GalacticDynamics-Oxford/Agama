@@ -1325,9 +1325,11 @@ double Multipole::densityCyl(const coord::PosCyl &pos) const
 
 double Multipole::enclosedMass(double radius) const
 {
-    if(radius==0)
+    if(radius == 0)
         return 0;  // TODO: this may not be correct for a potential of a point mass!
     // use the l=0 harmonic term of dPhi/dr to estimate the spherically-averaged enclosed mass
+    if(radius == INFINITY)
+        radius = gridRadii.back() * 1e20;
     const BasePotential& pot =
         radius <= gridRadii.front()* (1+SAFETY_FACTOR) ? *asymptInner :
         radius >= gridRadii.back() * (1-SAFETY_FACTOR) ? *asymptOuter : *impl;
@@ -1388,7 +1390,9 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
     if(lmax == 0) {  // fast track
         if(potential)
             *potential = Phi_lm[0];
-        double rsqinv = rsq>0 ? 1/rsq : 0, Rr2 = pos.R * rsqinv, zr2 = pos.z * rsqinv;
+        double rsqinv = rsq>0 ? 1/rsq : 0,
+            Rr2 = rsq<INFINITY ? pos.R * rsqinv : 0,
+            zr2 = rsq<INFINITY ? pos.z * rsqinv : 0;
         if(grad) {
             grad->dR = dPhi_lm[0] * Rr2;
             grad->dz = dPhi_lm[0] * zr2;

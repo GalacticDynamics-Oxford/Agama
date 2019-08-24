@@ -6,7 +6,7 @@ namespace potential{
 void Plummer::evalDeriv(double r,
     double* potential, double* deriv, double* deriv2) const
 {
-    double invrsq = 1. / (pow_2(r) + pow_2(scaleRadius));
+    double invrsq = mass?  1. / (pow_2(r) + pow_2(scaleRadius)) : 0;  // if mass=0, output 0
     double pot = -mass * sqrt(invrsq);
     if(potential)
         *potential = pot;

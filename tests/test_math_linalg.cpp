@@ -1,4 +1,5 @@
 #include "math_core.h"
+#include "math_random.h"
 #include "math_linalg.h"
 #include <iostream>
 #include <cmath>

@@ -419,22 +419,8 @@ def GaussHermite(gamma, center, sigma, coefs, xarr):
     return result * norm
 
 
-### ---------------------------------------------------------------------------- ###
-### module initialization - extend the functionality of some third-party modules ###
-
-def init():
-    try:
-        # register two new colormaps for matplotlib: "sauron", "sauron_r" by Michele Cappellari & Eric Emsellem
-        import matplotlib
-        f=[0.0, 0.17, 0.336, 0.414, 0.463, 0.502, 0.541, 0.590, 0.668, 0.834, 1.0]
-        r=[0.01, 0.0, 0.4, 0.5, 0.3, 0.0, 0.7, 1.0, 1.0, 1.0, 0.9]
-        g=[0.01, 0.0, 0.85,1.0, 1.0, 0.9, 1.0, 1.0, 0.85,0.0, 0.9]
-        b=[0.01, 1.0, 1.0, 1.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]
-        matplotlib.pyplot.register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron', \
-            { 'red': zip(f,r,r), 'green': zip(f,g,g), 'blue': zip(f,b,b) } ))
-        matplotlib.pyplot.register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron_r', \
-            { 'red': zip(f,r[::-1],r[::-1]), 'green': zip(f,g[::-1],g[::-1]), 'blue': zip(f,b[::-1],b[::-1]) } ))
-    except: pass   # no matplotlib - no problem
-
-init()
-del init  # remove the init function from the module namespace
+### module initialization: add some custom colormaps to matplotlib ###
+try:
+    import agamacolormaps
+except:
+    pass

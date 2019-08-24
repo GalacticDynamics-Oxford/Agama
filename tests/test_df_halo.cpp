@@ -15,6 +15,7 @@
 #include "df_halo.h"
 #include "galaxymodel_base.h"
 #include "particles_io.h"
+#include "math_random.h"
 #include "math_specfunc.h"
 #include "math_spline.h"
 #include "debug_utils.h"

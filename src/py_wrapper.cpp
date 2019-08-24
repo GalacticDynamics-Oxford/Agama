@@ -45,6 +45,7 @@
 #include "galaxymodel_velocitysampler.h"
 #include "math_core.h"
 #include "math_optimization.h"
+#include "math_random.h"
 #include "math_sample.h"
 #include "math_spline.h"
 #include "particles_io.h"
@@ -766,7 +767,7 @@ template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_SINGLE_AND_SE
     PyObject* arr2 = PyArray_SimpleNew(1, dims2, NPY_DOUBLE);
     PyObject* arr3 = PyArray_SimpleNew(2, dims3, NPY_DOUBLE);
     return Py_BuildValue("NNN", arr1, arr2, arr3);
-}    
+}
 template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE_AND_TRIPLET_AND_SEXTET>(npy_intp size) {
     npy_intp dims1[] = {size};
     npy_intp dims2[] = {size, 3};
@@ -1140,7 +1141,7 @@ potential::PtrDensity Density_initFromTuple(PyObject* tuple)
             Density_initFromDict(item) :
             getDensity(item);   // Density or Potential or a user-defined function
         if(!comp)
-            throw std::invalid_argument("Tuple should contain only valid Density objects, "
+            throw std::invalid_argument("Unnamed arguments should contain only valid Density objects, "
                 "or functions providing that interface, or dictionaries with density parameters");
         components.push_back(comp);
     }
@@ -1585,13 +1586,14 @@ static const char* docstringPotential =
     "Most of these parameters have reasonable default values; the only necessary ones are "
     "`type`, and for a potential expansion, `density` or `file` or `particles`.\n"
     "If the coefficiens of a potential expansion are loaded from a file, then the `type` argument "
-    "is not required (it will be inferred from the first line of the file).\n"
+    "is not required (it will be inferred from the first line of the file), and the argument name "
+    "`file=` may be omitted (i.e., may provide only the filename as an unnamed string argument).\n"
     "Examples:\n\n"
     ">>> pot_halo = Potential(type='Dehnen', mass=1e12, gamma=1, scaleRadius=100, p=0.8, q=0.6)\n"
     ">>> pot_disk = Potential(type='MiyamotoNagai', mass=5e10, scaleRadius=5, scaleHeight=0.5)\n"
     ">>> pot_composite = Potential(pot_halo, pot_disk)\n"
     ">>> pot_from_ini  = Potential('my_potential.ini')\n"
-    ">>> pot_from_coef = Potential(file='stored_coefs')\n"
+    ">>> pot_from_coef = Potential('stored_coefs')\n"
     ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses))\n"
     ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2)\n"
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
@@ -1685,8 +1687,8 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
         }
         return potential::createPotential(paramsArr, *conv);
     } else
-        throw std::invalid_argument(
-            "The tuple should contain either Potential objects or dictionaries with potential parameters");
+        throw std::invalid_argument("Unnamed arguments should contain "
+            "either Potential objects or dictionaries with potential parameters");
 }
 
 /// the generic constructor of Potential object
@@ -2534,8 +2536,8 @@ df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
         df::PtrDistributionFunction comp = getDistributionFunction(PyTuple_GET_ITEM(tuple, i));
         if(!comp)
-            throw std::invalid_argument("Tuple should contain only valid DistributionFunction objects "
-                "or functions providing that interface");
+            throw std::invalid_argument("Unnamed arguments should contain "
+                "only valid DistributionFunction objects or functions providing that interface");
         components.push_back(comp);
     }
     return components.size()==1 ? components[0] : 
@@ -3885,7 +3887,13 @@ static const char* docstringTarget =
     "velpsf - width of the velocity-space smoothing kernel (a single Gaussian);\n"
     "apertures - array of polygons describing the boundaries of each aperture: "
     "each element of this array is a 2d array with X,Y coordinates of the polygon vertices, "
-    "and of course the number of vertices may be different for each polygon (but greater than two).\n\n"
+    "and of course the number of vertices may be different for each polygon (but greater than two).\n"
+    "symmetry - a letter encoding the symmetries of the potential and orbit shapes, "
+    "determines how the points sampled from the trajectory of each orbit will be treated before "
+    "projecting them onto the image plane: 't' (triaxial, default) means that only the fourfold "
+    "reflection symmetry  z <-> -z  and  x,y <-> -x,-y  will be enforced,  'a' (axisymmetric) means "
+    "that the point will be rotated about the z axis by a random angle, and 's' (spherical) means "
+    "that both spherical angles will be randomized.\n\n"
     "The role of a Target object is to collect data during the construction of an orbit library: "
     "several instances of them could be provided as a 'targets=[t1,t2,...]' argument of "
     "the 'orbit()' routine, and each one will produce a matrix with Norbit rows and Ncoef columns, "
@@ -3983,6 +3991,9 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             math::blas_dmul(conv->lengthUnit, params.gridx);
             math::blas_dmul(conv->lengthUnit, params.gridy);
             math::blas_dmul(conv->velocityUnit, params.gridv);
+            // explicitly specified symmetry (triaxial by default)
+            params.symmetry = potential::getSymmetryTypeByName(
+                toString(getItemFromPyDict(namedArgs, "symmetry")));
             // parameters of the point-spread functions (spatial and velocity)
             PyObject* psf_obj = getItemFromPyDict(namedArgs, "psf");
             if(psf_obj) {

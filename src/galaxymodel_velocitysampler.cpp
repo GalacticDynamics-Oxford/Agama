@@ -4,6 +4,7 @@
 #include "potential_multipole.h"
 #include "df_spherical.h"
 #include "math_core.h"
+#include "math_random.h"
 #include "smart.h"
 #include "utils.h"
 #include <cmath>
@@ -18,24 +19,28 @@ particles::ParticleArrayCar assignVelocityEdd(
     const potential::BasePotential& pot,
     const SphericalIsotropicModelLocal& sphModel)
 {
-    size_t npoints = pointCoords.size();
+    ptrdiff_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
-    result.data.reserve(npoints);
-    for(size_t i=0; i<npoints; i++) {
+    result.data.resize(npoints);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for(ptrdiff_t i=0; i<npoints; i++) {
         const coord::PosCyl& point = pointCoords.point(i);
+        math::PRNGState state = math::hash(/*position is the source of randomness*/ &point, 3, /*seed*/ i);
         double Phi = pot.value(point);
         double v;
         int numAttempts = 0;  // prevent a lockup in troubled cases
         do {
-            v = sphModel.sampleVelocity(Phi);
+            v = sphModel.sampleVelocity(Phi, &state);
         } while(Phi + 0.5*v*v > 0 && ++numAttempts<100);
         double vec[3], sinphi, cosphi;
-        math::getRandomUnitVector(vec);
+        math::getRandomUnitVector(vec, &state);
         math::sincos(point.phi, sinphi, cosphi);
-        result.add(coord::PosVelCar(
+        result[i].first = coord::PosVelCar(
             point.R * cosphi, point.R * sinphi, point.z,
-            v * vec[0], v * vec[1], v * vec[2]),
-            pointCoords.mass(i));
+            v * vec[0], v * vec[1], v * vec[2]);
+        result[i].second = pointCoords.mass(i);
     }
     return result;
 }
@@ -45,11 +50,15 @@ particles::ParticleArrayCar assignVelocityJeansSph(
     const potential::BasePotential& pot,
     const math::IFunction& jeansSphModel, const double beta)
 {
-    size_t npoints = pointCoords.size();
+    ptrdiff_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
-    result.data.reserve(npoints);
-    for(size_t i=0; i<npoints; i++) {
+    result.data.resize(npoints);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for(ptrdiff_t i=0; i<npoints; i++) {
         const coord::PosCyl& point = pointCoords.point(i);
+        math::PRNGState state = math::hash(/*position is the source of randomness*/ &point, 3, /*seed*/ i);
         double r = hypot(point.R, point.z);
         double sigma_r = jeansSphModel.value(r);
         double sigma_t = sigma_r * sqrt(2-2*beta);  // vel.disp. in two tangential directions combined
@@ -57,7 +66,7 @@ particles::ParticleArrayCar assignVelocityJeansSph(
         double vr, vt;
         int numAttempts = 0;
         do {
-            math::getNormalRandomNumbers(vr, vt);
+            math::getNormalRandomNumbers(vr, vt, &state);
             vr *= sigma_r;
             vt *= sigma_t;
         } while(Phi + 0.5 * (vr*vr + vt*vt) > 0 && ++numAttempts<100);
@@ -65,14 +74,14 @@ particles::ParticleArrayCar assignVelocityJeansSph(
         math::sincos(point.phi, sinphi, cosphi);
         double xyz[3] = { point.R * cosphi, point.R * sinphi, point.z };
         double vper[3];
-        math::getRandomPerpendicularVector(xyz, vper);
+        math::getRandomPerpendicularVector(xyz, vper, &state);
         if(r==0) r=1.;  // avoid indeterminacy
-        result.add(coord::PosVelCar(
+        result[i].first = coord::PosVelCar(
             xyz[0], xyz[1], xyz[2],
             vr * xyz[0] / r + vt * vper[0],
             vr * xyz[1] / r + vt * vper[1],
-            vr * xyz[2] / r + vt * vper[2]),
-            pointCoords.mass(i));
+            vr * xyz[2] / r + vt * vper[2]);
+        result[i].second = pointCoords.mass(i);
     }
     return result;
 }
@@ -82,11 +91,15 @@ particles::ParticleArrayCar assignVelocityJeansAxi(
     const potential::BasePotential& pot,
     const JeansAxi& jeansAxiModel)
 {
-    size_t npoints = pointCoords.size();
+    ptrdiff_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
-    result.data.reserve(npoints);
-    for(size_t i=0; i<npoints; i++) {
+    result.data.resize(npoints);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for(ptrdiff_t i=0; i<npoints; i++) {
         const coord::PosCyl& point = pointCoords.point(i);
+        math::PRNGState state = math::hash(/*position is the source of randomness*/ &point, 3, /*seed*/ i);
         coord::VelCyl  vel;
         coord::Vel2Cyl vel2;
         jeansAxiModel.moments(point, vel, vel2);
@@ -97,14 +110,14 @@ particles::ParticleArrayCar assignVelocityJeansAxi(
         double vR, vz, vphi, sphi, devnull;
         int numAttempts = 0;
         do {
-            math::getNormalRandomNumbers(sphi, devnull);  // need only one number here
+            math::getNormalRandomNumbers(sphi, /*ignored - need only one number here*/ devnull, &state);  
             vphi = vel.vphi + sphi * sigma_phi;
-            math::getNormalRandomNumbers(vR, vz);
+            math::getNormalRandomNumbers(vR, vz, &state);
             vR *= sigma_R;
             vz *= sigma_z;
         } while(Phi + 0.5 * (vR*vR + vz*vz + vphi*vphi) > 0 && ++numAttempts<100);
-        result.add(toPosVelCar(coord::PosVelCyl(point, coord::VelCyl(vR, vz, vphi))),
-            pointCoords.mass(i));
+        result[i].first = toPosVelCar(coord::PosVelCyl(point, coord::VelCyl(vR, vz, vphi)));
+        result[i].second= pointCoords.mass(i);
     }
     return result;
 }

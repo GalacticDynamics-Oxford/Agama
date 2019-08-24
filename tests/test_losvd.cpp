@@ -16,6 +16,7 @@
 */
 #include "galaxymodel_losvd.h"
 #include "math_core.h"
+#include "math_random.h"
 #include "utils.h"
 #include <iostream>
 #include <fstream>
@@ -170,7 +171,7 @@ int main()
         std::cout << "\n";
     }
 
-    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+    if(output) {
         std::ofstream strm("test_losvd.dat");
         strm << "#Points(x,y):\n";
         for(size_t p=0; p<numPoints; p++) {

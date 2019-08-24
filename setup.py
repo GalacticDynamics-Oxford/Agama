@@ -64,18 +64,22 @@ def get_config_var(key):
 
 # force printing to the terminal even if stdout was redirected
 def say(text):
-    if sys.stdout.isatty():
-        sys.stdout.write(text)
-        sys.stdout.flush()
-    else:   # output was redirected, but we still send the message to the terminal 
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    if not sys.stdout.isatty():   # output was redirected, but we still send the message to the terminal
         with open('/dev/tty','w') as out:
-            out.write(text);
+            out.write(text)
             out.flush()
 
 # asking a yes/no question and parse the answer (raise an exception in case of ambiguous answer)
 def ask(q):
     say(q)
-    result=sys.stdin.readline().rstrip()
+    if sys.stdin.isatty():
+        result=sys.stdin.readline().rstrip()
+    else:  # input was redirected, but we still read from the true terminal
+        with open('/dev/tty','r') as stdin:
+            result=stdin.readline().rstrip()
+        sys.stdout.write(result)  # and duplicate the entered text to stdout, for posterity
     return distutils.util.strtobool(result)
 
 # get the list of all files in the given directories (including those in nested directories)
@@ -354,8 +358,9 @@ PyInit_agamatest(void) {
                         distutils.dir_util.copy_tree(dirname+'/unsupported/Eigen', 'include/unsupported/Eigen', verbose=False)
                         distutils.dir_util.remove_tree(dirname)  # and delete the rest
                         COMPILE_FLAGS += ['-DHAVE_EIGEN', '-I'+EXTRAS_DIR+'/include']
-                    os.remove(filename)                      # remove the downloaded archive
-            except: pass  # didn't succeed with Eigen
+                    os.remove(filename)                          # remove the downloaded archive
+            except Exception as e:
+                say("Failed to install Eigen: "+str(e)+"\n")     # didn't succeed with Eigen
             os.chdir(ROOT_DIR)
 
     # [5a]: test if CVXOPT is present (optional); install if needed
@@ -442,7 +447,7 @@ PyInit_agamatest(void) {
     # [99]: put everything together and create Makefile.local
     with open('Makefile.local','w') as f: f.write(
         "# set the default compiler if no value is found in the environment variables or among command-line arguments\n" +
-        "ifeq ($(origin CXX),default)\nCXX = g++\nendif\n" +
+        "ifeq ($(origin CXX),default)\nCXX = " + CC + "\nendif\n" +
         "ifeq ($(origin FC), default)\nFC  = gfortran\nendif\nLINK = $(CXX)\n" +
         "# compilation/linking flags for both the shared library and any programs that use it\n" +
         "CXXFLAGS      += " + " ".join(compressList(CXXFLAGS)) + "\n" +

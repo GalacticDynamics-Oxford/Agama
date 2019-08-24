@@ -1,13 +1,16 @@
 #include "galaxymodel_losvd.h"
 #include "math_core.h"
-#include "math_specfunc.h"
 #include "math_fit.h"
+#include "math_random.h"
+#include "math_specfunc.h"
 #include "potential_base.h"
 #include "utils.h"
 #include <cmath>
 #include <stdexcept>
 #include <cassert>
+#include <cstring>
 #include <alloca.h>
+#include <stdint.h>
 
 namespace galaxymodel{
 
@@ -72,6 +75,51 @@ math::Matrix<double> getConvolutionMatrix(
 
 
 //--------- VELOCITY MOMENTS ----------//
+
+/// helper class for computing the integrals of f(x) times 1,x,x^2, using scaled integration variable
+class MomentsIntegrand: public math::IFunctionNdim {
+    const math::IFunction& fnc;
+public:
+    explicit MomentsIntegrand(const math::IFunction& _fnc) : fnc(_fnc) {}
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return 3; }
+    virtual void eval(const double vars[], double values[]) const {
+        double z=vars[0], x=0, j=0;
+        // input scaled variable z ranges from -1 to 1, and maps to x as follows:
+        if(z<0) {
+            x = -exp(1/(1+z) + 1/z);
+            j = -x * (1/pow_2(1+z) + 1/pow_2(z));  // dx/dz
+        } else if(z>0) {
+            x =  exp(1/(1-z) - 1/z);
+            j =  x * (1/pow_2(1-z) + 1/pow_2(z));
+        }
+        double f = fnc(x);
+        if(f==0 || j==INFINITY) {
+            values[0] = values[1] = values[2] = 0;
+        } else {
+            values[0] = f * j;
+            values[1] = f * j * x;
+            values[2] = f * j * x * x;
+        }
+    }
+};
+
+/// compute the 0th, 1st and 2nd moments of a probability distribution function:
+/// f0 =   \int_{-\infty}^{\infty} f(x) dx                          (overall normalization)
+/// f1 =  (\int_{-\infty}^{\infty} f(x) x dx) / f0                  (mean x)
+/// f2 = ((\int_{-\infty}^{\infty} f(x) x^2 dx) / f0 - f1^2)^{1/2}  (standard deviation of x)
+std::vector<double> computeClassicMoments(const math::IFunction& fnc)
+{
+    double result[3], error[3], zlower[1]={-1.0}, zupper[1]={+1.0};
+    math::integrateNdim(MomentsIntegrand(fnc),
+        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/1000, /*output*/result, error);
+    std::vector<double> moments(3);
+    moments[0] = result[0];
+    moments[1] = result[0] != 0 ? result[1] / result[0] : 0;
+    moments[2] = result[0] != 0 ? sqrt(fmax(0, result[2] / result[0] - pow_2(moments[1]))) : 0;
+    return moments;
+}
+
 
 /** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
     When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
@@ -272,23 +320,11 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
     unsigned int order, double gamma, double center, double sigma) :
     Gamma(gamma), Center(center), Sigma(sigma)
 {
+    if(order<2)
+        throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
     if(!isFinite(gamma + center + sigma)) {
-        std::vector<double> params(order+1);
-        // estimate the 0th,1st,2nd moments of the input function, which are used as starting values
-        // in the fit (hence they don't need to be computed very accurately - here we use a scaling
-        // transformation of a infinite interval onto [0:1], which is intended to work with log-scaled
-        // input variable, but not necessarily with an input variable with a dimension of velocity,
-        // whose magnitude scale is unknown. Hopefully this is not a serious oversight).
-        math::ScalingInf scaling;
-        params[0] = integrate(                  // normalization
-            math::ScaledIntegrand<math::ScalingInf>(scaling, fnc),
-            0, 1, EPSREL_MOMENTS);
-        params[1] = integrate(                  // mean value
-            math::ScaledIntegrand<math::ScalingInf>(scaling, math::FncProduct(fnc, math::Monomial(1))),
-            0, 1, EPSREL_MOMENTS) / params[0];
-        params[2] = sqrt(fmax(0, integrate(     // dispersion
-            math::ScaledIntegrand<math::ScalingInf>(scaling, math::FncProduct(fnc, math::Monomial(2))),
-            0, 1, EPSREL_MOMENTS) / params[0] - pow_2(params[1])));
+        // estimate the first 3 moments of the function, which are used as starting values in the fit
+        std::vector<double> params = computeClassicMoments(fnc);
         // now that we have a reasonable initial values for the moments of the input function,
         // perform a Levenberg-Marquardt optimization to find the best-fit parameters of the GH expansion.
         // Note that there are two conceptually different ways of fitting these parameters:
@@ -306,8 +342,9 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
         // Note, however, that this is not the best-fit approximation at the given order
         // (neither is var.2 -- to obtain the absolute best fit, one would need to freely adjust
         // h_1 and h_2 during the fit).
-        math::nonlinearMultiFit(
-            GaussHermiteFitter(/*either "2" for the 1st var or "order" for the 2nd var*/ 2, fnc),
+        const unsigned int fitorder = 2;  // either "2" for the 1st var or "order" for the 2nd var
+        params.resize(fitorder+1);
+        math::nonlinearMultiFit(GaussHermiteFitter(fitorder, fnc),
             /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
         Gamma  = params[0];
         Center = params[1];
@@ -373,7 +410,7 @@ template<int N>
 TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
     bsplx(params.gridx), bsply(params.gridy), bsplv(params.gridv),
     apertureConvolutionMatrix(params.apertures.size(), bsplx.numValues() * bsply.numValues(), 0.),
-    symmetricGrids(true)
+    symmetry(params.symmetry), symmetricGrids(true)
 {
     const size_t
         numApertures = params.apertures.size(),
@@ -478,20 +515,20 @@ namespace{
 template<int N>
 inline void reallyAddPoint(const math::BsplineInterpolator1d<N>& bsplx,
     const math::BsplineInterpolator1d<N>& bsply, const math::BsplineInterpolator1d<N>& bsplv,
-    const double xp, const double yp, const double vl, const double mult, double* datacube)
+    const double X, const double Y, const double V, const double mult, double* datacube)
 {
     // quick check if the point is inside the grids at all
-    if( xp < bsplx.xmin() || xp > bsplx.xmax() ||
-        yp < bsply.xmin() || yp > bsply.xmax() ||
-        vl < bsplv.xmin() || vl > bsplv.xmax() )
+    if( X < bsplx.xmin() || X > bsplx.xmax() ||
+        Y < bsply.xmin() || Y > bsply.xmax() ||
+        V < bsplv.xmin() || V > bsplv.xmax() )
         return;   // don't waste time computing B-splines
 
     // find the index of grid segment in each dimension that this points belongs to,
     // and evaluate all nontrivial basis functions at this point in each dimension
     double weightx[N+1], weighty[N+1], weightv[N+1];
-    int indx = bsplx.nonzeroComponents(xp, 0, weightx),
-        indy = bsply.nonzeroComponents(yp, 0, weighty),
-        indv = bsplv.nonzeroComponents(vl, 0, weightv);
+    int indx = bsplx.nonzeroComponents(X, 0, weightx),
+        indy = bsply.nonzeroComponents(Y, 0, weighty),
+        indv = bsplv.nonzeroComponents(V, 0, weightv);
 
     // add the contribution of this point to the datacube
     const int nx = bsplx.numValues(), nv = bsplv.numValues();
@@ -507,28 +544,48 @@ inline void reallyAddPoint(const math::BsplineInterpolator1d<N>& bsplx,
 template<int N>
 void TargetLOSVD<N>::addPoint(const double point[6], const double mult, double* datacube) const
 {
-    // we have four symmetric points to be added: (x,y,z), (x,y,-z), (-x,-y,z), (-x,-y,-z);
-    // their projected coordinates are (xp1+xp2,yp1+yp2), (xp1-xp2,yp1-yp2), and similarly for v_los
-    double
-    xp1 = transformMatrix[0] * point[0] + transformMatrix[1] * point[1],
-    xp2 = transformMatrix[2] * point[2],
-    yp1 = transformMatrix[3] * point[0] + transformMatrix[4] * point[1],
-    yp2 = transformMatrix[5] * point[2],
-    vl1 = transformMatrix[6] * point[3] + transformMatrix[7] * point[4],
-    vl2 = transformMatrix[8] * point[5];
-
-    // in case of symmetric grids, mirror-symmetrization (x,y,z -> -x,-y,-z) is done afterwards,
-    // so we only add the point and its z-flipped counterpart (because they project to different X,Y);
-    // otherwise all four symmetric points separately
-    if(symmetricGrids) {
-        reallyAddPoint(bsplx, bsply, bsplv, xp1+xp2, yp1+yp2, vl1+vl2, 0.5*mult, datacube);  // x,y,z
-        reallyAddPoint(bsplx, bsply, bsplv, xp1-xp2, yp1-yp2, vl1-vl2, 0.5*mult, datacube);  // x,y,-z
+    double pt[6];
+    // construct initial state for the PRNG, using the input point position/velocity
+    // as the source of "randomness"
+    math::PRNGState state = math::hash(point, 6);
+    if(isSpherical(symmetry)) {
+        // if spherically-symmetric, randomize the orientation of the point on the 2d sphere
+        double rotmat[9];
+        math::getRandomRotationMatrix(/*output*/ rotmat, /*input*/ &state);
+        coord::transformVector(rotmat, point+0, pt+0);  // position
+        coord::transformVector(rotmat, point+3, pt+3);  // velocity
+    } else if(isZRotSymmetric(symmetry)) {
+        // if symmetric w.r.t rotation in phi, rotate the point about z axis by a random angle
+        double ang = math::random(&state) * 2*M_PI, sa, ca;
+        math::sincos(ang, sa, ca);
+        pt[0] = point[0] * ca - point[1] * sa;
+        pt[1] = point[0] * sa + point[1] * ca;
+        pt[2] = point[2];
+        pt[3] = point[3] * ca - point[4] * sa;
+        pt[4] = point[3] * sa + point[4] * ca;
+        pt[5] = point[5];
     } else {
-        reallyAddPoint(bsplx, bsply, bsplv, xp1+xp2, yp1+yp2, vl1+vl2, 0.25*mult, datacube); // x,y,z
-        reallyAddPoint(bsplx, bsply, bsplv, xp1-xp2, yp1-yp2, vl1-vl2, 0.25*mult, datacube); // x,y,-z
-        reallyAddPoint(bsplx, bsply, bsplv,-xp1+xp2,-yp1+yp2,-vl1+vl2, 0.25*mult, datacube); // -x,-y,z
-        reallyAddPoint(bsplx, bsply, bsplv,-xp1-xp2,-yp1-yp2,-vl1-vl2, 0.25*mult, datacube); // -x,-y,-z
+        // copy the input point
+        for(int i=0; i<6; i++)
+            pt[i] = point[i];
+        // if XY-reflection symmetry is present (e.g. in a triaxial system even when rotating),
+        // flip the x,y coordinates and velocities with probability 1/2
+        if(isBisymmetric(symmetry) && math::random(&state) > 0.5) {
+            pt[0] = -pt[0];
+            pt[1] = -pt[1];
+            pt[3] = -pt[3];
+            pt[4] = -pt[4];
+        }
     }
+    double
+    X1 = transformMatrix[0] * pt[0] + transformMatrix[1] * pt[1], X2 = transformMatrix[2] * pt[2],
+    Y1 = transformMatrix[3] * pt[0] + transformMatrix[4] * pt[1], Y2 = transformMatrix[5] * pt[2],
+    V1 = transformMatrix[6] * pt[3] + transformMatrix[7] * pt[4], V2 = transformMatrix[8] * pt[5];
+    if(isZReflSymmetric(symmetry)) {
+        reallyAddPoint(bsplx, bsply, bsplv, X1+X2, Y1+Y2, V1+V2, 0.5*mult, datacube);  // x,y,z
+        reallyAddPoint(bsplx, bsply, bsplv, X1-X2, Y1-Y2, V1-V2, 0.5*mult, datacube);  // x,y,-z
+    } else
+        reallyAddPoint(bsplx, bsply, bsplv, X1+X2, Y1+Y2, V1+V2, mult, datacube);  // x,y,z only
 }
 
 template<int N>
@@ -536,7 +593,7 @@ void TargetLOSVD<N>::finalizeDatacube(math::Matrix<double> &datacube, StorageNum
 {
     // 0th stage: mirror-symmetrization (if the grids are reflection-symmetric, this can be done now
     // for the entire datacube, otherwise it was done for each added point individually)
-    if(symmetricGrids) {
+    if(symmetricGrids && isTriaxial(symmetry)) {
         double* data = datacube.data();
         // average the symmetric elements from the head and tail of the flattened array
         for(size_t i=0, size = datacube.size(); i<size/2; i++)

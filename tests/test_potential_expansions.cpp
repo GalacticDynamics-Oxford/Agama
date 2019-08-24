@@ -1,4 +1,5 @@
 #include "galaxymodel_base.h"
+#include "math_random.h"
 #include "math_sphharm.h"
 #include "math_spline.h"
 #include "particles_io.h"

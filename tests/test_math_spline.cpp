@@ -1,5 +1,6 @@
 #include "math_spline.h"
 #include "math_core.h"
+#include "math_random.h"
 #include "math_sphharm.h"
 #include "math_sample.h"
 #include "math_specfunc.h"

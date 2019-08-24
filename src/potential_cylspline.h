@@ -199,6 +199,7 @@ public:
     virtual const char* name() const { return myName(); }
     static const char* myName() { static const char* text = "CylSpline"; return text; }
     virtual coord::SymmetryType symmetry() const { return sym; };
+    virtual double enclosedMass(const double radius) const;
 
     /** retrieve coefficients of potential approximation.
         \param[out] gridR will be filled with the array of R-values of grid nodes;

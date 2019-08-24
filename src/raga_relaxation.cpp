@@ -4,6 +4,7 @@
 #include "df_spherical.h"
 #include "utils.h"
 #include "math_core.h"
+#include "math_random.h"
 #include "potential_utils.h"
 #include <cassert>
 #include <cmath>
@@ -63,16 +64,20 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
             "; dt="+utils::toString(timestep)+", dE="+utils::toString(dEdt * timestep) );
 
     // 2d. assign the random (gaussian) velocity perturbation
-    double rand1, rand2;
-    math::getNormalRandomNumbers(rand1, rand2);
+    // initialize the PRNG state vector, using the current position-velocity as the source of "randomness"
+    math::PRNGState state = math::hash(data, 6);  
+    double rand1, rand2;  // two normally distributed numbers
+    math::getNormalRandomNumbers(/*output*/ rand1, rand2, /*PRNGState*/ &state);
     double deltavpar = rand1 * sqrt(dv2par * timestep) + dvpar / vel * timestep;
     double deltavper = rand2 * sqrt(dv2per * timestep);
 
     // 2e. add the perturbations to the velocity
     double uper[3];  // unit vector perpendicular to velocity
     double vmag =    // magnitude of the current velocity vector
-        math::getRandomPerpendicularVector(/*input: 3 components of velocity*/ currentState+3,
-        /*output: a random unit vector*/ uper);
+        math::getRandomPerpendicularVector(
+        /*input:  3 components of velocity*/ currentState+3,
+        /*output: a random unit vector*/ uper,
+        /*input/output: PRNG seed*/ &state);
     for(int d=0; d<3; d++)
         currentState[d+3] +=
             // first term is the component of unit vector parallel to v: v[d]/|v|

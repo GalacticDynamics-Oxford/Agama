@@ -58,7 +58,8 @@ PtrPotential createPotential(
     or any potential-specific exception on failure (if some parameters are missing or invalid).
 */
 PtrPotential createPotential(
-    const utils::KeyValueMap& params, const BaseDensity& dens,
+    const utils::KeyValueMap& params,
+    const BaseDensity& dens,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of potential expansion approximating the user-provided potential model,
@@ -73,7 +74,8 @@ PtrPotential createPotential(
     or any potential-specific exception on failure (if some parameters are missing or invalid).
 */
 PtrPotential createPotential(
-    const utils::KeyValueMap& params, const BasePotential& pot,
+    const utils::KeyValueMap& params,
+    const BasePotential& pot,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of composite potential according to the parameters contained in the 
@@ -173,7 +175,8 @@ math::LogLogSpline readMassProfile(const std::string& fileName);
     \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
 PtrPotential readGalaxyPotential(
-    const std::string& filename, const units::ExternalUnits& converter);
+    const std::string& filename,
+    const units::ExternalUnits& converter);
 
 /** Utility function providing a legacy interface compatible with the original GalPot (deprecated).
     It reads the parameters from a text file and converts them into the internal unit system, 
@@ -187,7 +190,8 @@ PtrPotential readGalaxyPotential(
     \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
 */
 inline PtrPotential readGalaxyPotential(
-    const std::string& filename, const units::InternalUnits& unit) 
+    const std::string& filename,
+    const units::InternalUnits& unit) 
 {   // create a temporary converter; velocity unit is not used
     return readGalaxyPotential(filename, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
 }
@@ -203,7 +207,8 @@ inline PtrPotential readGalaxyPotential(
     \throw     std::invalid_argument or std::runtime_error or other density-specific exception
     on failure (e.g., if the file does not exist, or does not contain valid coefficients).
 */
-PtrDensity readDensity(const std::string& coefFileName,
+PtrDensity readDensity(
+    const std::string& coefFileName,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create a potential expansion from coefficients stored in a text file.
@@ -216,7 +221,8 @@ PtrDensity readDensity(const std::string& coefFileName,
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if the file does not exist, or does not contain valid coefficients).
 */
-PtrPotential readPotential(const std::string& coefFileName,
+PtrPotential readPotential(
+    const std::string& coefFileName,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 
@@ -236,11 +242,15 @@ PtrPotential readPotential(const std::string& coefFileName,
     \return    success or failure (the latter may also mean that export is 
     not available for this type of potential/density).
 */
-bool writeDensity(const std::string& fileName, const BaseDensity& density,
+bool writeDensity(
+    const std::string& fileName,
+    const BaseDensity& density,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /// alias to writeDensity
-inline bool writePotential(const std::string& fileName, const BasePotential& potential,
+inline bool writePotential(
+    const std::string& fileName,
+    const BasePotential& potential,
     const units::ExternalUnits& converter = units::ExternalUnits()) {
     return writeDensity(fileName, potential, converter); }
 

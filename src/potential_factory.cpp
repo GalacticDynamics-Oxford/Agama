@@ -1183,6 +1183,8 @@ PtrPotential createPotential(
             // create a temporary density or potential model to serve as the source for potential expansion
             AllParam srcpar(param);
             srcpar.potentialType = param.densityType;
+            if( param.densityType == PT_UNKNOWN )
+                throw std::invalid_argument("Multipole or CylSpline need either a density model or a file");
             if( param.densityType == PT_DEHNEN ||
                 param.densityType == PT_FERRERS ||
                 param.densityType == PT_MIYAMOTONAGAI )

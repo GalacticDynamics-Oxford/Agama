@@ -309,7 +309,7 @@ static PyObject* kkt_runsolve(PyObject* /*self*/, PyObject* args)
 
     // call the external function gemv from blas
     if(!callPythonFunction(fnc_blas_gemv,
-        Py_BuildValue("(OOOcdd)", coefMatrix, vecX, vecY, /*trans*/ 'N', /*alpha*/ 1.0, /*beta*/ -1.0)))
+        Py_BuildValue("(OOOsdd)", coefMatrix, vecX, vecY, /*trans*/ "N", /*alpha*/ 1.0, /*beta*/ -1.0)))
         return NULL;
 
     // call the external function potrs from lapack
@@ -318,7 +318,7 @@ static PyObject* kkt_runsolve(PyObject* /*self*/, PyObject* args)
 
     // again call the external function gemv from blas
     if(!callPythonFunction(fnc_blas_gemv,
-        Py_BuildValue("(OOOcdd)", coefMatrix, vecY, vecX, /*trans*/ 'T', /*alpha*/ 1.0, /*beta*/ 0.0)))
+        Py_BuildValue("(OOOsdd)", coefMatrix, vecY, vecX, /*trans*/ "T", /*alpha*/ 1.0, /*beta*/ 0.0)))
         return NULL;
 
     for(int v=0; v<numVariables; v++) {

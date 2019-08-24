@@ -33,6 +33,7 @@ SOURCES   = \
             math_linalg.cpp \
             math_ode.cpp \
             math_optimization.cpp \
+            math_random.cpp \
             math_sample.cpp \
             math_specfunc.cpp \
             math_sphharm.cpp \

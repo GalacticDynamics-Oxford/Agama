@@ -1272,4 +1272,28 @@ void CylSpline::getCoefs(
     }
 }
 
+double CylSpline::enclosedMass(double radius) const
+{
+    if(radius==0)
+        return 0;
+    int mmax = (spl.size()-1)/2;
+    double Rscaled = asinh(radius/Rscale);
+    if( Rscaled<spl[mmax]->xmin() || Rscaled>spl[mmax]->xmax() ) {
+        // outside the grid definition region, use the asymptotic expansion
+        if(radius == INFINITY)
+            radius = sinh(spl[mmax]->xmax()) * 1e20;
+        coord::GradCyl grad;
+        asymptOuter->eval(coord::PosCyl(radius, 0, 0), NULL, &grad);
+        return grad.dR * pow_2(radius);
+    }
+    // use the radial derivative of the m=0 harmonic to estimate the enclosed mass
+    double dRscaleddR = 1 / sqrt(pow_2(radius) + pow_2(Rscale)), Phi0, dPhi0dRscaled;
+    spl[mmax]->evalDeriv(Rscaled, 0, &Phi0, &dPhi0dRscaled);
+    if(logScaling) {
+        Phi0 = -exp(Phi0);
+        dPhi0dRscaled *= Phi0;
+    }
+    return dPhi0dRscaled * dRscaleddR * pow_2(radius);
+}
+
 }  // namespace potential

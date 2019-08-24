@@ -1,7 +1,7 @@
 #include "galaxymodel_spherical.h"
 #include "math_core.h"
-#include "math_specfunc.h"
 #include "math_sample.h"
+#include "math_specfunc.h"
 #include "utils.h"
 #include <cmath>
 #include <algorithm>
@@ -657,7 +657,7 @@ void SphericalIsotropicModelLocal::evalLocal(
         ", I0="+utils::toString(I0)+", J0="+utils::toString(J0));*/
 }
 
-double SphericalIsotropicModelLocal::sampleVelocity(double Phi) const
+double SphericalIsotropicModelLocal::sampleVelocity(double Phi, math::PRNGState* state) const
 {
     if(!(Phi<0))
         throw std::invalid_argument("SphericalIsotropicModelLocal: invalid value of Phi");
@@ -665,7 +665,7 @@ double SphericalIsotropicModelLocal::sampleVelocity(double Phi) const
     double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double I0plusJ0 = I0(hPhi);
     double maxJ1    = exp(intJ1.value(loghPhi, intJ1.ymax())) * I0plusJ0;
-    double frac     = math::random();
+    double frac     = math::random(state);
     double target   = frac * maxJ1 * sqrt(-Phi);
     // find the value of E at which the cumulative distribution function equals the target
     double loghEoverhPhi = math::findRoot(

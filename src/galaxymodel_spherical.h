@@ -39,6 +39,7 @@
 #pragma once
 #include "particles_base.h"
 #include "potential_utils.h"
+#include "math_random.h"
 #include <string>
 
 namespace galaxymodel{
@@ -176,8 +177,10 @@ public:
     /** compute the velocity dispersion (sigma, not sigma^2) as a function of potential */
     double velDisp(double Phi) const;
 
-    /** draw a sample from the velocity distribution at the radius corresponding to the given potential */
-    double sampleVelocity(double Phi) const;
+    /** draw a sample from the velocity distribution at the radius corresponding to the given potential;
+        \param[in]  Phi  is the potential which defines the position and the escape speed;
+        \param[in/out]  state  is the random-number generator state (NULL means system default) */
+    double sampleVelocity(double Phi, math::PRNGState* state=NULL) const;
 };
 
 
