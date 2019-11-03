@@ -284,6 +284,84 @@ protected:
 };
 
 
+class DFIntegrandProjection: public math::IFunctionNdim {
+    const GalaxyModel& model;
+    const math::IFunctionNdim& fnc;  ///< spatial selection function
+    const double* mat;               ///< orthogonal matrix for coordinate transformation
+public:
+    DFIntegrandProjection(const GalaxyModel& _model,
+        const math::IFunctionNdim& _fnc, const double* _transformMatrix) :
+    model(_model), fnc(_fnc), mat(_transformMatrix) {}
+
+    virtual unsigned int numVars()   const { return 6; }
+    virtual unsigned int numValues() const { return fnc.numValues(); }
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        try{
+            double X = vars[0], Y = vars[1], W = 2*vars[2]-1, Z, jac;  // W is scaled Z:
+            if(W<0) {
+                Z   = -exp(1/(1+W) + 1/W);
+                jac = -Z * (1/pow_2(1+W) + 1/pow_2(W)) * 2;  // dZ/dW
+            } else if(W>0) {
+                Z   =  exp(1/(1-W) - 1/W);
+                jac =  Z * (1/pow_2(1-W) + 1/pow_2(W)) * 2;
+            } else {
+                Z = jac = 0;
+            }
+
+            // transform the position from observed to intrinsic frame
+            const coord::PosCyl pos(coord::toPosCyl(coord::PosCar(
+                mat[0] * X + mat[3] * Y + mat[6] * Z,
+                mat[1] * X + mat[4] * Y + mat[7] * Z,
+                mat[2] * X + mat[5] * Y + mat[8] * Z) ) );
+
+            // construct the full position/velocity in intrinsic frame
+            double vesc, zeta, jacVel;
+            getVesc(pos, model.potential, vesc, zeta);
+            const coord::PosVelCyl posvel(pos, unscaleVelocity(vars+3, vesc, zeta, &jacVel));
+            jac = isFinite(jacVel) && jac!=0 ?  jac * jacVel  : 0;
+
+            // transform the velocity back to observed frame
+            coord::VelCar velrot(toPosVelCar(posvel));
+            const double posvelrot[6] = { X, Y, Z,
+                mat[0] * velrot.vx + mat[1] * velrot.vy + mat[2] * velrot.vz,
+                mat[3] * velrot.vx + mat[4] * velrot.vy + mat[5] * velrot.vz,
+                mat[6] * velrot.vx + mat[7] * velrot.vy + mat[8] * velrot.vz };
+
+            // query the spatial selection function
+            fnc.eval(posvelrot, values);
+            
+            // check if there are any nonzero values reported by fnc
+            // [skipped for the moment]
+            
+            
+            // 2. determine the actions
+            actions::Actions act = model.actFinder.actions(posvel);
+            
+            // 3. compute the value of distribution function times the jacobian
+            // FIXME: in some cases the Fudge action finder may fail and produce
+            // zero values of Jr,Jz instead of very large ones, which may lead to
+            // unrealistically high DF values. We therefore ignore these points
+            // entirely, but the real problem is with the action finder, not here.
+            double dfval = isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0) ?
+                model.distrFunc.value(act) * jac : 0.;
+            
+            if(!isFinite(dfval))
+                dfval = 0;
+
+            // 4. output the value(s) to the integration routine
+            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
+                values[i] *= dfval;
+        }
+        catch(std::exception& e) {
+            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
+                values[i] = 0;
+        }
+    }
+};
+
+
 /** specification of the velocity moments of DF to be computed at a single point in space
     (a combination of them is given by bitwise OR) */
 enum OperationMode {
@@ -648,6 +726,20 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
         *rmsHeightErr = result[0]>0 ? sqrt(pow_2(error[0]/result[0]*result[1]) + pow_2(error[1])) : 0;
     if(rmsVelErr)
         *rmsVelErr = result[0]>0 ? sqrt(pow_2(error[0]/result[0]*result[2]) + pow_2(error[2])) : 0;
+}
+
+
+void computeProjection(const GalaxyModel& model,
+    const math::IFunctionNdim& spatialSelection,
+    const double Xlim[2], const double Ylim[2],
+    const double transformMatrix[9],
+    double* result, double* error,
+    const double reqRelError, const int maxNumEval)
+{
+    const double xlower[6] = {Xlim[0], Ylim[0], 0, 0, 0, 0};
+    const double xupper[6] = {Xlim[1], Ylim[1], 1, 1, 1, 1};
+    DFIntegrandProjection fnc(model, spatialSelection, transformMatrix);
+    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error);
 }
 
 

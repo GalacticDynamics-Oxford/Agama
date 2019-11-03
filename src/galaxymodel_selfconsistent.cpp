@@ -21,43 +21,6 @@ const T& ensureNotNull(const T& x) {
     throw std::invalid_argument("NULL pointer in assignment");
 }
 
-namespace{
-
-/// Helper class for providing a BaseDensity interface to a density computed via integration over DF
-class DensityFromDF: public potential::BaseDensity{
-public:
-    DensityFromDF(
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df,
-        double _relError, unsigned int _maxNumEval) :
-    model(pot, af, df), relError(_relError), maxNumEval(_maxNumEval) {};
-
-    virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
-    virtual const char* name() const { return myName(); };
-    static const char* myName() { return "DensityFromDF"; };
-    virtual double enclosedMass(const double) const {  // should never be used -- too slow
-        throw std::runtime_error("DensityFromDF: enclosedMass not implemented"); }
-private:
-    const GalaxyModel model;  ///< aggregate of potential, action finder and DF
-    double       relError;    ///< requested relative error of density computation
-    unsigned int maxNumEval;  ///< max # of DF evaluations per one density calculation
-
-    virtual double densityCar(const coord::PosCar &pos) const {
-        return densityCyl(toPosCyl(pos)); }
-
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCyl(toPosCyl(pos)); }
-
-    /// compute the density as the integral of DF over velocity at a given position
-    virtual double densityCyl(const coord::PosCyl &point) const {
-        double result;
-        computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, relError, maxNumEval);
-        return result;
-    }
-};
-} // anonymous namespace
-
 //--------- Components with DF ---------//
 
 ComponentWithSpheroidalDF::ComponentWithSpheroidalDF(
@@ -75,7 +38,7 @@ void ComponentWithSpheroidalDF::update(
     const actions::BaseActionFinder& actionFinder)
 {
     density = potential::DensitySphericalHarmonic::create(
-        DensityFromDF(totalPotential, actionFinder, *distrFunc, relError, maxNumEval),
+        DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
         lmax, mmax, gridSizeR, rmin, rmax, false /*use exactly the requested order*/);
 }
 
@@ -97,7 +60,7 @@ void ComponentWithDisklikeDF::update(
     const actions::BaseActionFinder& actionFinder)
 {
     density = potential::DensityAzimuthalHarmonic::create(
-        DensityFromDF(totalPotential, actionFinder, *distrFunc, relError, maxNumEval),
+        DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
         mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, false /*respect the expansion order*/);
 }
 

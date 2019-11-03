@@ -26,7 +26,7 @@ two components: a DiskAnsatz potential and a composite density profile (sum of D
 plus DiskAnsatz with negative sign of surface density density, i.e. the residual), which together
 generate the required density distribution of a separable disk model - same as in GalPot.
 Alternatively, a disk specified by DF provides a density profile which will be used to
-construct a CylSpline expansion for the potential, while a halo-like component with DF 
+construct a CylSpline expansion for the potential, while a halo-like component with DF
 provides density in the form of spherical-harmonic expansion to be used in Multipole potential.
 
 The workflow of self-consistent modelling is the following:
@@ -57,12 +57,12 @@ may simply repeat the loop a few times and hope that it converged.
 Steps 1 and 6 are left at the discretion of the end-user.
 
 A technical note on the potential expansions, in particular the Multipole.
-Recall that a component specified by its DF provides its density profile 
+Recall that a component specified by its DF provides its density profile
 already in terms of a spherical-harmonic expansion. If this is the only density
-component, its density is directly used in the Multipole potential, while if 
+component, its density is directly used in the Multipole potential, while if
 there are several density constituents, another spherical-harmonic expansion of
 the combined density is created. This double work has in fact a negligible overhead,
-because most of the computational effort is spent on the first stage (computing 
+because most of the computational effort is spent on the first stage (computing
 the density profile by integration over DF, and taking its spherical-harmonic expansion).
 Moreover, a transformation between two spherical-harmonic expansions is exact
 if the order of the second one (used in the Multipole potential) is the same or greater

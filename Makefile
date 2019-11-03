@@ -27,8 +27,10 @@ TORUSDIR  = src/torus
 
 # sources of the main library
 SOURCES   = \
+            py_wrapper.cpp \
             math_core.cpp \
             math_fit.cpp \
+            math_gausshermite.cpp \
             math_geometry.cpp \
             math_linalg.cpp \
             math_ode.cpp \
@@ -39,7 +41,6 @@ SOURCES   = \
             math_sphharm.cpp \
             math_spline.cpp \
             particles_io.cpp \
-            py_wrapper.cpp \
             actions_focal_distance_finder.cpp \
             actions_isochrone.cpp \
             actions_spherical.cpp \

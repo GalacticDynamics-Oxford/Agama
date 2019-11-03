@@ -78,6 +78,13 @@ template<> void blas_daxpy(double alpha, const std::vector<double>& X, std::vect
         Y[i] += alpha*X[i];
 }
 
+template<> void blas_dmul(double alpha, std::vector<float>& Y)
+{
+    const size_t size = Y.size();
+    for(size_t i=0; i<size; i++)
+        Y[i] *= alpha;
+}
+
 template<> void blas_dmul(double alpha, std::vector<double>& Y)
 {
     const size_t size = Y.size();

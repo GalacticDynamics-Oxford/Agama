@@ -44,6 +44,7 @@
 #include "galaxymodel_spherical.h"
 #include "galaxymodel_velocitysampler.h"
 #include "math_core.h"
+#include "math_gausshermite.h"
 #include "math_optimization.h"
 #include "math_random.h"
 #include "math_sample.h"
@@ -227,7 +228,7 @@ std::vector<double> toDoubleArray(PyObject* obj)
     return vec;
 }
 
-/// convert a C++ vector into a NumPy array
+/// convert a C++ vector of double into a NumPy array
 PyObject* toPyArray(const std::vector<double>& vec)
 {
     npy_intp size = vec.size();
@@ -236,6 +237,18 @@ PyObject* toPyArray(const std::vector<double>& vec)
         return arr;
     for(npy_intp i=0; i<size; i++)
         pyArrayElem<double>(arr, i) = vec[i];
+    return arr;
+}
+
+/// convert a C++ vector of float into a NumPy array
+PyObject* toPyArray(const std::vector<float>& vec)
+{
+    npy_intp size = vec.size();
+    PyObject* arr = PyArray_SimpleNew(1, &size, NPY_FLOAT);
+    if(!arr)
+        return arr;
+    for(npy_intp i=0; i<size; i++)
+        pyArrayElem<float>(arr, i) = vec[i];
     return arr;
 }
 
@@ -4071,6 +4084,9 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
         PyErr_SetString(PyExc_TypeError, "Expected exactly 1 argument");
         return NULL;
     }
+    const char* errorstr = "Argument must be an instance of Density, GalaxyMode, or an array of "
+        "particles (a tuple with two elements - Nx6 position/velocity coordinates and N masses)";
+
     PyObject* arg = PyTuple_GET_ITEM(args, 0);
     particles::ParticleArrayCar particles;
     try{
@@ -4081,13 +4097,36 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
             math::blas_dmul(1./conv->massUnit, result);
             return toPyArray(result);
         }
+
+        // otherwise we may have a GalaxyModel object as input
+        if(PyObject_IsInstance(arg, (PyObject*) &GalaxyModelType)) {
+            std::vector<galaxymodel::StorageNumT> result(self->target->numCoefs());
+            self->target->computeDFProjection(galaxymodel::GalaxyModel(
+                *((GalaxyModelObject*)arg)->pot_obj->pot,
+                *((GalaxyModelObject*)arg)->af_obj->af,
+                *((GalaxyModelObject*)arg)->df_obj->df),
+                &result[0]);
+            math::blas_dmul(1./conv->massUnit, result);
+            return toPyArray(result);
+        }
+
         // otherwise this must be a particle object
+        if(!PyTuple_Check(arg) || PyTuple_Size(arg)!=2) {
+            PyErr_SetString(PyExc_ValueError, errorstr);
+            return NULL;
+        }
         particles = convertParticles<coord::PosVelCar>(arg);
+        if(particles.size() == 0) {
+            PyErr_SetString(PyExc_ValueError, errorstr);
+            return NULL;
+        }
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError, e.what());
         return NULL;
     }
+
+    // now work with the input particle array
     npy_intp size = self->target->numCoefs();
     PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
     if(!result)
@@ -4315,7 +4354,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             if(fail) continue;
             try{
                 // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
-                math::Matrix<double> ghmat(galaxymodel::computeGaussHermiteMatrix(degree, gridv, ghorder,
+                math::Matrix<double> ghmat(math::computeGaussHermiteMatrix(degree, gridv, ghorder,
                     /*gamma*/ pyArrayElem<double>(gh_arr, a, 0) /* conv->massUnit*/,
                     /*meanv*/ pyArrayElem<double>(gh_arr, a, 1) * conv->velocityUnit,
                     /*sigma*/ pyArrayElem<double>(gh_arr, a, 2) * conv->velocityUnit));
@@ -4384,7 +4423,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     default:  // shouldn't occur, we've checked degree beforehand
                         assert(false);
                 }
-                galaxymodel::GaussHermiteExpansion ghexp(*fnc, ghorder);
+                math::GaussHermiteExpansion ghexp(*fnc, ghorder);
                 std::vector<double> dstrow(ghorder+4);
                 dstrow[0] = ghexp.gamma()  /* conv->massUnit*/;      // overall normalization
                 dstrow[1] = ghexp.center() / conv->velocityUnit;  // center of expansion
@@ -4444,6 +4483,7 @@ static const char* docstringOrbit =
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
+    "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
     "plus an extra one for trajectories if trajsize>0, plus another one for Lyapunov exponents "
@@ -4480,9 +4520,11 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     int haveLyap = 0;
     PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL, *targets_obj = NULL, *trajsize_obj = NULL;
     static const char* keywords[] =
-        {"ic", "time", "potential", "targets", "trajsize", "lyapunov", "Omega", "accuracy", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOidd", const_cast<char**>(keywords),
-        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj, &haveLyap, &Omega, &params.accuracy))
+        {"ic", "time", "potential", "targets", "trajsize",
+         "lyapunov", "Omega", "accuracy", "maxNumSteps", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOiddi", const_cast<char**>(keywords),
+        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj,
+        &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps))
         return NULL;
 
     // ensure that a potential object was provided

@@ -151,6 +151,15 @@ void computeProjectedMoments(const GalaxyModel& model, const double R,
     const double reqRelError=1e-3, const int maxNumEval=1e5);
 
 
+/** this will be redesigned */
+void computeProjection(const GalaxyModel& model,
+    const math::IFunctionNdim& spatialSelection,
+    const double Xlim[2], const double Ylim[2],
+    const double transformMatrix[9],
+    double* result, double* error=NULL,
+    const double reqRelError=1e-3, const int maxNumEval=1e5);
+
+
 /** Generate N-body samples of the distribution function 
     by sampling in action/angle space:
     sample actions directly from DF and angles uniformly from [0:2pi]^3,
@@ -187,5 +196,35 @@ particles::ParticleArrayCyl samplePosVel(
 */
 particles::ParticleArray<coord::PosCyl> sampleDensity(
     const potential::BaseDensity& dens, const size_t numPoints);
+
+
+/// Helper class for providing a BaseDensity interface to a density computed via integration over DF
+class DensityFromDF: public potential::BaseDensity{
+public:
+    DensityFromDF(const GalaxyModel& _model, double _relError, unsigned int _maxNumEval) :
+        model(_model), relError(_relError), maxNumEval(_maxNumEval) {}
+
+    virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
+    virtual const char* name() const { return myName(); }
+    static const char* myName() { return "DensityFromDF"; }
+    virtual double enclosedMass(const double) const { return NAN; } /// should never be used -- too slow
+private:
+    const GalaxyModel model;  ///< aggregate of potential, action finder and DF
+    double       relError;    ///< requested relative error of density computation
+    unsigned int maxNumEval;  ///< max # of DF evaluations per one density calculation
+
+    virtual double densityCar(const coord::PosCar &pos) const {
+        return densityCyl(toPosCyl(pos)); }
+
+    virtual double densitySph(const coord::PosSph &pos) const {
+        return densityCyl(toPosCyl(pos)); }
+
+    /// compute the density as the integral of DF over velocity at a given position
+    virtual double densityCyl(const coord::PosCyl &point) const {
+        double result;
+        computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, relError, maxNumEval);
+        return result;
+    }
+};
 
 }  // namespace

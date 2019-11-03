@@ -29,6 +29,7 @@ def createModel(iniFileName):
     sec_den = dict()   # list of density components
     sec_pot = dict()   # same for potential
     sec_comp= dict()   # list of model components (each one may include several density objects)
+    Omega   = None
     for s in sec:
         if s.lower().startswith('density'):
             sec_den [s.lower()]  = dict(ini.items(s))
@@ -36,6 +37,10 @@ def createModel(iniFileName):
             sec_pot [s.lower()] = dict(ini.items(s))
         if s.lower().startswith('component'):
             sec_comp[s.lower()] = dict(ini.items(s))
+        if s.lower()=='global':   # pattern speed
+            for name, value in ini.items(s):
+                if name.lower() == 'omega':
+                    Omega = float(value)
 
     # construct all density and potential objects
     den = dict()
@@ -63,6 +68,15 @@ def createModel(iniFileName):
         model.potential = pot.values()[0]
     else:
         model.potential = agama.Potential(*pot.values())
+
+    # determine corotation radius in case of nonzero pattern speed
+    if Omega!=0:
+        try:
+            from scipy.optimize import brentq
+            print("Omega=%.3g => corotation radius: %.3g" % (Omega,
+                brentq(lambda r: model.potential.force(r,0,0)[0]/r+Omega**2, 1e-10, 1e10, rtol=1e-4)))
+        except Exception as e:
+            print("Omega=%.3g, corotation radius unknown: %s" % (Omega, str(e)))
 
     # construct all model components
     if len(sec_comp) == 0:
@@ -105,7 +119,7 @@ def createModel(iniFileName):
         else: raise ValueError("No integration time defined in "+name)
         comp = type('Component', (), \
             {"density": density, "ic": ic, "weightprior": weightprior, \
-             "inttime": inttime, "targets": targets} )
+             "inttime": inttime, "targets": targets, "Omega": Omega} )
         if 'trajsize' in value:  comp.trajsize = int(value['trajsize'])
         if 'beta'     in value:  comp.beta     = float(value['beta'])
         if 'nbody'    in value:
@@ -121,11 +135,13 @@ def runComponent(comp, pot):
     for a given component of the Schwarzschild model
     """
     if hasattr(comp, 'trajsize'):
-        result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime, \
-            targets=comp.targets, trajsize=comp.trajsize)
+        result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime,
+            Omega=comp.Omega, targets=comp.targets, trajsize=comp.trajsize)
         traj = result[-1]
     else:
-        result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime, targets=comp.targets)
+        result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime,
+            Omega=comp.Omega, targets=comp.targets)
+        traj = None
     if type(result) == numpy.array: result = (result,)
     # targets[0] is density, targets[1], if provided, is kinematics
     matrix = list()
@@ -182,7 +198,7 @@ def runComponent(comp, pot):
     comp.weights = weights
     comp.densitydata = result[0]
     if len(comp.targets) >= 2:  comp.kinemdata = result[1]
-    if hasattr(comp, 'trajsize'):  comp.traj = traj
+    if not traj is None:  comp.traj = traj
     #return comp
 
 if __name__ == '__main__':

@@ -1,29 +1,25 @@
 #include "galaxymodel_losvd.h"
+#include "galaxymodel_base.h"
 #include "math_core.h"
-#include "math_fit.h"
 #include "math_random.h"
-#include "math_specfunc.h"
 #include "potential_base.h"
 #include "utils.h"
 #include <cmath>
 #include <stdexcept>
 #include <cassert>
-#include <cstring>
-#include <alloca.h>
-#include <stdint.h>
 
 namespace galaxymodel{
 
 namespace {  // internal
-
-/// relative accuracy in computing the moments of LOSVD (total normalization, mean value and dispersion)
-static const double EPSREL_MOMENTS = 1e-3;
 
 /// relative tolerance for computing the pixel masses multiplied by B-spline basis functions
 static const double EPSREL_PIXEL_MASS = 1e-4;
 
 /// max number of density evaluations per each pixel in the above integrals
 static const int MAX_NUM_EVAL_PIXEL_MASS = 1e4;
+
+/// max number of DF evaluations for constructing the LOSVD
+static const int MAX_NUM_EVAL_LOSVD_DF = 1e6;
 
 std::vector<GaussianPSF> checkPSF(const std::vector<GaussianPSF>& gaussianPSF)
 {
@@ -34,7 +30,7 @@ std::vector<GaussianPSF> checkPSF(const std::vector<GaussianPSF>& gaussianPSF)
     for(size_t i=0; i<gaussianPSF.size(); i++)
         sumAmpl += gaussianPSF[i].ampl;
     if(fabs(sumAmpl-1.) > 1e-3)  // show a warning
-        utils::msg(utils::VL_MESSAGE, "LOSVDGrid", "Amplitudes of input PSFs do not sum up to unity");
+        utils::msg(utils::VL_MESSAGE, "TargetLOSVD", "Amplitudes of input PSFs do not sum up to unity");
     return gaussianPSF;
 }
 
@@ -74,198 +70,6 @@ math::Matrix<double> getConvolutionMatrix(
 }
 
 
-//--------- VELOCITY MOMENTS ----------//
-
-/// helper class for computing the integrals of f(x) times 1,x,x^2, using scaled integration variable
-class MomentsIntegrand: public math::IFunctionNdim {
-    const math::IFunction& fnc;
-public:
-    explicit MomentsIntegrand(const math::IFunction& _fnc) : fnc(_fnc) {}
-    virtual unsigned int numVars()   const { return 1; }
-    virtual unsigned int numValues() const { return 3; }
-    virtual void eval(const double vars[], double values[]) const {
-        double z=vars[0], x=0, j=0;
-        // input scaled variable z ranges from -1 to 1, and maps to x as follows:
-        if(z<0) {
-            x = -exp(1/(1+z) + 1/z);
-            j = -x * (1/pow_2(1+z) + 1/pow_2(z));  // dx/dz
-        } else if(z>0) {
-            x =  exp(1/(1-z) - 1/z);
-            j =  x * (1/pow_2(1-z) + 1/pow_2(z));
-        }
-        double f = fnc(x);
-        if(f==0 || j==INFINITY) {
-            values[0] = values[1] = values[2] = 0;
-        } else {
-            values[0] = f * j;
-            values[1] = f * j * x;
-            values[2] = f * j * x * x;
-        }
-    }
-};
-
-/// compute the 0th, 1st and 2nd moments of a probability distribution function:
-/// f0 =   \int_{-\infty}^{\infty} f(x) dx                          (overall normalization)
-/// f1 =  (\int_{-\infty}^{\infty} f(x) x dx) / f0                  (mean x)
-/// f2 = ((\int_{-\infty}^{\infty} f(x) x^2 dx) / f0 - f1^2)^{1/2}  (standard deviation of x)
-std::vector<double> computeClassicMoments(const math::IFunction& fnc)
-{
-    double result[3], error[3], zlower[1]={-1.0}, zupper[1]={+1.0};
-    math::integrateNdim(MomentsIntegrand(fnc),
-        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/1000, /*output*/result, error);
-    std::vector<double> moments(3);
-    moments[0] = result[0];
-    moments[1] = result[0] != 0 ? result[1] / result[0] : 0;
-    moments[2] = result[0] != 0 ? sqrt(fmax(0, result[2] / result[0] - pow_2(moments[1]))) : 0;
-    return moments;
-}
-
-
-/** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
-    When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
-    quadrature rule, but in our applications f(x) is only piecewise-polynomial, and there seems
-    to be no easy-to-use generalization of this quadrature rule for finite intervals.
-    Therefore we use a very simple-minded but surprisingly efficient approach:
-    integration nodes are 2N^2+1 equally spaced points
-    -N, ..., -1/N, 0, 1/N, 2/N, ..., N,
-    and the integral is approximated as
-    \f$   \int_{-\infty}^{\infty}  f(x) \exp(-x^2) dx  \approx
-    (1/N) \sum_{i=-N^2}^{N^2}  f(i/N) \exp(-(i/N)^2)   \f$.
-*/
-static const int QUADORDER = 7;  // N=7, i.e. 99 integration nodes
-
-
-/// compute the array of Hermite polynomials up to and including degree nmax at the given point
-void hermiteArray(const int nmax, const double x, double* result)
-{
-    // This is neither "probabilist's" nor "physicist's" definition of Hermite polynomials,
-    // but rather "astrophysicist's" (with a different normalization).
-    // dH_n/dx = \sqrt{2n} H_{n-1};
-    // \int_{-\infty}^\infty dx H_n(x) H_m(x) \exp(-x^2) / (2\pi) = \delta_{mn} / (2 \sqrt{\pi});
-    // \int_{-\infty}^\infty dx H_n(x) \exp(-x^2/2) / \sqrt{2\pi} = \sqrt{n!} / n!!  for even n.
-    if(nmax<1)
-        return;
-    result[0] = 1.;
-    if(nmax>=1)
-        result[1] = M_SQRT2 * x;
-    static const double sqroots[8] =
-        { 1., sqrt(2.), sqrt(3.), 2., sqrt(5.), sqrt(6.), sqrt(7.), sqrt(8.) };
-    double sqrtn = 1.;
-    for(int n=1; n<nmax; n++) {
-        double sqrtnplus1 = n<8 ? sqroots[n] : sqrt(n+1.);
-        result[n+1] = (M_SQRT2 * x * result[n] - sqrtn * result[n-1]) / sqrtnplus1;
-        sqrtn = sqrtnplus1;
-    }
-}
-
-
-/// compute the coefficients of GH expansion for an arbitrary function f(x)
-inline std::vector<double> computeGaussHermiteMoments(const math::IFunction& fnc,
-    unsigned int order, double gamma, double center, double sigma)
-{
-    std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
-    std::vector<double> result(order+1);
-    for(int p=0; p<=pow_2(QUADORDER); p++) {
-        double y = p * (1./QUADORDER);    // equally-spaced points (only nonnegative half of real axis)
-        double mult = M_SQRT2 * sigma / gamma / QUADORDER * exp(-0.5*y*y);
-        double fp = fnc(center + sigma * y);
-        double fm = p==0 ? 0. : fnc(center - sigma * y);  // fnc value at symmetrically negative point
-        hermiteArray(order, y, &hpoly[0]);
-        for(unsigned int i=0; i<=order; i++)
-            result[i] += mult * (fp + /*odd/even*/ (i%2 ? -1 : 1) * fm) * hpoly[i];
-    }
-    return result;
-}
-
-
-/** compute the coefs of GH expansion for an array of B-spline basis functions of degree N.
-    A function f(x) represented as a B-spline expansion with an array of amplitudes A_k
-    f(x) = \sum_{j=1}^J A_j B_j(x)   (where B_j(x) are N-th degree B-splines over some grid)
-    has the Gauss-Hermite coefficients given by h_m = C_{mj} A_j, where C_{mj} is the matrix
-    returned by this routine.
-*/
-template<int N>
-math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d<N>& interp, 
-    unsigned int order, double gamma, double center, double sigma)
-{
-    // the product of B-spline of degree N and a Hermite polynomial of degree 'order' is a polynomial
-    // of degree N+order multiplied by an exponential function; we don't try to integrate it exactly,
-    // but use a Gauss-Legendre quadrature with Nnodes per each segment of the B-spline grid
-    const int NnodesGL = std::min<int>(math::MAX_GL_TABLE, std::max<int>((N+order+1)/2+1, 3));
-    const double *glnodes = math::GLPOINTS[NnodesGL], *glweights = math::GLWEIGHTS[NnodesGL];
-    std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
-    double bspl[N+1];                     // temp.storage for B-splines
-    const int gridSize = interp.xvalues().size(), numBsplines = interp.numValues();
-    math::Matrix<double> result(order+1, numBsplines, 0.);
-    double* dresult = result.data();      // shortcut for raw matrix storage
-    for(int n=0; n<gridSize-1; n++) {
-        const double x1 = interp.xvalues()[n], x2 = interp.xvalues()[n+1], dx = x2-x1;
-        for(int k=0; k<NnodesGL; k++) {
-            // evaluate the possibly non-zero B-splines and keep track of the index of the leftmost one
-            const double x = x1 + dx * glnodes[k];
-            unsigned int leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, /*output*/ bspl);
-            // evaluate the Hermite polynomials
-            const double y = (x - center) / sigma;
-            hermiteArray(order, y, &hpoly[0]);
-            // overall multiplicative factor
-            const double mult = M_SQRT2 / gamma * dx * glweights[k] * exp(-0.5*y*y);
-            // add the contribution of this GL point to the integrals of H_m(x) * B_j(x),
-            // where the index j runs from leftInd to leftInd+N
-            for(unsigned int m=0; m<=order; m++)
-                for(int b=0; b<=N; b++)
-                    //result(m, b+leftInd) = ...
-                    dresult[ m * numBsplines + b + leftInd ] += mult * hpoly[m] * bspl[b];
-        }
-    }
-    return result;
-}
-
-
-/** A helper class to be used in multidimensional minimization with the Levenberg-Marquardt method,
-    when constructing the best-fit Gauss-Hermite approximation of a given function f(x).
-    The GH expansion of the given order M has M+1 free parameters:
-    amplitude gamma, mean value and width of the base gaussian,
-    and M-2 GH coefficients h_3, h_4, ..., h_M, with the convention that h_0=1, h_1=h_2=0.
-    The fit minimizes the rms deviation between f(x) and the GH expansion specified by these parameters
-    over the set of Q points (Q = 2*QUADORDER^2+1 is fixed, and the points are equally spaced,
-    but their location of these points depends on the mean and sigma of the current set of parameters).
-    The evalDeriv() method returns the difference between f(x_k) and GH(x_k) for each of these points x_k,
-    and its partial derivatives w.r.t. all parameters of GH expansion, all used in the Levenberg-Marquardt
-    fitting routine.
-*/
-class GaussHermiteFitter: public math::IFunctionNdimDeriv {
-    unsigned int order;          ///< order of GH expansion
-    const math::IFunction& fnc;  ///< function to be approximated
-public:
-    GaussHermiteFitter(unsigned int _order, const math::IFunction& _fnc) : order(_order), fnc(_fnc) {}
-    virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
-    {
-        double gamma = vars[0], center = vars[1], sigma = vars[2], sqsigma = sqrt(sigma);
-        std::vector<double> hpoly(order+1);
-        for(int p=0; p <= 2*pow_2(QUADORDER); p++) {
-            double y = (1./QUADORDER) * (p - pow_2(QUADORDER));  // equally spaced points
-            double x = center + sigma * y;
-            hermiteArray(order, y, &hpoly[0]);
-            double sum = 1.;
-            for(unsigned int n=3; n<=order; n++)
-                sum += vars[n] * hpoly[n];
-            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * sum / sqsigma;
-            if(values)
-                values[p] = sqsigma * fnc(x) - mult * gamma;
-            if(derivs) {
-                derivs[p*(order+1)  ] = -mult;
-                derivs[p*(order+1)+1] = -mult * gamma / sigma * y;
-                derivs[p*(order+1)+2] =  mult * gamma / sigma * (1-y*y);
-                for(unsigned int n=3; n<=order; n++)
-                    derivs[p*(order+1)+n] = -mult * gamma / sum * hpoly[n];
-            }
-        }
-    }
-    virtual unsigned int numVars()   const { return order+1; }
-    virtual unsigned int numValues() const { return 2*pow_2(QUADORDER)+1; }
-};
-
-
 /// helper class for computing the surface density in the image plane, multiplied by
 /// basis functions of a 2d tensor-product B-spline expansion.
 template<int N>
@@ -276,10 +80,21 @@ class ApertureMassIntegrand: public math::IFunctionNdim {
     const math::BsplineInterpolator1d<N>& bsply;  ///< same for the Y coordinate
     const double scaleRadius;   ///< scaling radius for mapping the infinite interval in Z into [0:1]
 public:
-    ApertureMassIntegrand(const potential::BaseDensity& _density, const double* _transformMatrix,
-        const math::BsplineInterpolator1d<N>& _bsplx, const math::BsplineInterpolator1d<N>& _bsply) :
-    density(_density), mat(_transformMatrix), bsplx(_bsplx), bsply(_bsply), scaleRadius(fmax(
-    fmax(fabs(bsplx.xmin()), fabs(bsplx.xmax())), fmax(fabs(bsply.xmin()), fabs(bsply.xmax())))) {}
+    ApertureMassIntegrand(
+        const potential::BaseDensity& _density,
+        const double* _transformMatrix,
+        const math::BsplineInterpolator1d<N>& _bsplx,
+        const math::BsplineInterpolator1d<N>& _bsply)
+    :
+        density(_density),
+        mat(_transformMatrix),
+        bsplx(_bsplx),
+        bsply(_bsply),
+        scaleRadius(fmax(
+            fmax(fabs(bsplx.xmin()), fabs(bsplx.xmax())),
+            fmax(fabs(bsply.xmin()), fabs(bsply.xmax()))
+        ))
+    {}
 
     /// input variables are rotation-transformed X, Y and Z
     virtual unsigned int numVars() const { return 3; }
@@ -288,7 +103,8 @@ public:
     virtual unsigned int numValues() const { return pow_2(N+1); }
 
     /// compute the density times all non-trivial B-spline basis functions at the given point X,Y,Z
-    virtual void eval(const double vars[], double values[]) const {
+    virtual void eval(const double vars[], double values[]) const
+    {
         const double X = vars[0], Y = vars[1], w = vars[2],
         // transform the scaled variable w in the range [0:1] into Z
         Z   = scaleRadius * (1 / (1-w) - 1 / w),
@@ -314,95 +130,44 @@ public:
     }
 };
 
+template<int N>
+class ApertureLOSVDIntegrand: public math::IFunctionNdim {
+    const math::BsplineInterpolator1d<N>& bsplx;  ///< B-spline for the X coordinate in the image plane
+    const math::BsplineInterpolator1d<N>& bsply;  ///< same for the Y coordinate
+    const math::BsplineInterpolator1d<N>& bsplv;  ///< same for the V_Z coordinate
+public:
+    ApertureLOSVDIntegrand(
+        const math::BsplineInterpolator1d<N>& _bsplx,
+        const math::BsplineInterpolator1d<N>& _bsply,
+        const math::BsplineInterpolator1d<N>& _bsplv) :
+    bsplx(_bsplx), bsply(_bsply), bsplv(_bsplv)  {}
+    
+    /// input variables are cartesian position and velocity in the observationally-aligned frame
+    virtual unsigned int numVars() const { return 6; }
+
+    virtual unsigned int numValues() const { return pow_2(N+1) * bsplv.numValues(); }
+
+    /// compute the density times all non-trivial B-spline basis functions at the given point X,Y,Z
+    virtual void eval(const double vars[], double values[]) const
+    {
+        // find the index of grid segment in each dimension that this points belongs to,
+        // and evaluate all nontrivial basis functions at this point in each dimension
+        double weightx[N+1], weighty[N+1], weightv[N+1];
+        /*      */ bsplx.nonzeroComponents(vars[0], 0, weightx);
+        /*      */ bsply.nonzeroComponents(vars[1], 0, weighty);
+        int indv = bsplv.nonzeroComponents(vars[5], 0, weightv);
+        int nv   = bsplv.numValues();
+        std::fill(values, values+numValues(), 0.);
+        // add the contribution of this point to the integrals
+        for(int ky=0; ky<=N; ky++)
+            for(int kx=0; kx<=N; kx++)
+                for(int kv=0; kv<=N; kv++)
+                    values[ (ky * (N+1) + kx) * nv + indv + kv ] =
+                        weightx[kx] * weighty[ky] * weightv[kv];
+    }
+};
+
 }  // internal ns
-
-GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
-    unsigned int order, double gamma, double center, double sigma) :
-    Gamma(gamma), Center(center), Sigma(sigma)
-{
-    if(order<2)
-        throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
-    if(!isFinite(gamma + center + sigma)) {
-        // estimate the first 3 moments of the function, which are used as starting values in the fit
-        std::vector<double> params = computeClassicMoments(fnc);
-        // now that we have a reasonable initial values for the moments of the input function,
-        // perform a Levenberg-Marquardt optimization to find the best-fit parameters of the GH expansion.
-        // Note that there are two conceptually different ways of fitting these parameters:
-        // 1) determine only the overall amplitude gamma, mean and sigma of the best-fit Gaussian,
-        // fixing h_0=1, h_1=h_2=0 and not considering higher-order terms.
-        // 2) determine simultaneously the parameters gamma, center, sigma, h_3, ... h_M, while still
-        // fixing h_0=1, h_1=h_2=0.
-        // The latter approach, although seemingly natural, does not, in fact, fit a GH expansion:
-        // if one computes all GH coefficients for the best-fit values, it turns out that h_1,h_2 != 0,
-        // but they were ignored during the fit. Moreover, the best-fit values of center and sigma
-        // (and hence all GH moments) depend on the chosen order of expansion.
-        // By contrast, in the first case, the 0th basis function (the gaussian) is always the same,
-        // and increasing the order of expansion does not change the values of previous terms.
-        // This first choice also produces h_1=h_2=0, as is typically implied.
-        // Note, however, that this is not the best-fit approximation at the given order
-        // (neither is var.2 -- to obtain the absolute best fit, one would need to freely adjust
-        // h_1 and h_2 during the fit).
-        const unsigned int fitorder = 2;  // either "2" for the 1st var or "order" for the 2nd var
-        params.resize(fitorder+1);
-        math::nonlinearMultiFit(GaussHermiteFitter(fitorder, fnc),
-            /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
-        Gamma  = params[0];
-        Center = params[1];
-        Sigma  = params[2];
-    }
-    moments = computeGaussHermiteMoments(fnc, order, Gamma, Center, Sigma);
-}
-
-double GaussHermiteExpansion::value(const double x) const
-{
-    unsigned int ncoefs = moments.size();
-    if(ncoefs==0) return 0.;
-    double xscaled= (x - Center) / Sigma;
-    double norm   = (1./M_SQRT2/M_SQRTPI) * Gamma / Sigma * exp(-0.5 * pow_2(xscaled));
-    double* hpoly = static_cast<double*>(alloca(ncoefs * sizeof(double)));
-    hermiteArray(ncoefs-1, xscaled, hpoly);
-    double result = 0.;
-    for(unsigned int i=0; i<ncoefs; i++)
-        result += moments[i] * hpoly[i];
-    return result * norm;
-}
-
-double GaussHermiteExpansion::normn(unsigned int n)
-{
-    if(n%2 == 1) return 0;  // odd GH function integrate to zero over the entire real axis
-    switch(n) {
-        case 0: return 1.;
-        case 2: return 1./M_SQRT2;
-        case 4: return 0.6123724356957945;  // sqrt(6)/4
-        case 6: return 0.5590169943749474;  // sqrt(5)/4
-        case 8: return 0.5229125165837972;  // sqrt(70)/16
-        default: return sqrt(math::factorial(n)) / math::dfactorial(n);
-    }
-}
-
-double GaussHermiteExpansion::norm() const {
-    double result = 0;
-    for(size_t n=0; n<moments.size(); n+=2)
-        result += moments[n] * normn(n);
-    return result * Gamma;
-}
-
-math::Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
-    unsigned int order, double gamma, double center, double sigma)
-{
-    switch(N) {
-        case 0: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<0>(grid), order, gamma, center, sigma);
-        case 1: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<1>(grid), order, gamma, center, sigma);
-        case 2: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<2>(grid), order, gamma, center, sigma);
-        case 3: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<3>(grid), order, gamma, center, sigma);
-        default:
-            throw std::runtime_error("computeGaussHermiteMatrix: wrong B-spline degree");
-    }
-}
 
 //----- TargetLOSVD -----//
 
@@ -418,7 +183,7 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
         numBasisFnc  = numBasisFncX * numBasisFncY,  numBasisFncX2 = pow_2(numBasisFncX);
 
     if(numApertures <= 0)
-        throw std::invalid_argument("LOSVDGrid: no apertures defined");
+        throw std::invalid_argument("TargetLOSVD: no apertures defined");
 
     // check if input grids are reflection-symmetric:
     // if yes, will symmetrize the datacube after it has been fully assembled (often somewhat faster),
@@ -446,7 +211,7 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
         outOfBounds |= apOutOfBounds;
     }
     if(outOfBounds)
-        utils::msg(utils::VL_MESSAGE, "LOSVDGrid", "Datacube does not cover all apertures");
+        utils::msg(utils::VL_MESSAGE, "TargetLOSVD", "Datacube does not cover all apertures");
 
     // ensure that there is at least one PSF, even with a zero width
     std::vector<GaussianPSF> spatialPSF = checkPSF(params.spatialPSF);
@@ -614,9 +379,50 @@ void TargetLOSVD<N>::finalizeDatacube(math::Matrix<double> &datacube, StorageNum
 }
 
 template<int N>
+void TargetLOSVD<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
+{
+    //throw std::runtime_error("TargetLOSVD: DF projection not implemented");
+
+    // 1st stage: compute the integrals of surface density, weighted by the B-spline basis functions,
+    // over each pixel of the regular 2d grid in the image plane (projections onto the B-spline basis)
+    ApertureLOSVDIntegrand<N> fnc(bsplx, bsply, bsplv);
+    math::Matrix<double> datacube = newDatacube();
+    double* cubedata = datacube.data();
+    int numPixels = (bsplx.xvalues().size()-1) * (bsply.xvalues().size()-1);
+    // loop over pixels of the 2d B-spline grid in the image plane
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int p=0; p<numPixels; p++) {
+        const int indx = p % (bsplx.xvalues().size()-1), indy = p / (bsplx.xvalues().size()-1),
+        nx = bsplx.numValues(), nv = bsplv.numValues();
+        // integration in a 2d rectangular pixel: X, Y are projected coords in the image plane
+        double Xlim[2] = { bsplx.xvalues()[indx], bsplx.xvalues()[indx+1] };
+        double Ylim[2] = { bsply.xvalues()[indy], bsply.xvalues()[indy+1] };
+        std::vector<double> result(fnc.numValues());
+        computeProjection(model, fnc, Xlim, Ylim, transformMatrix,
+            &result[0], NULL, EPSREL_PIXEL_MASS, MAX_NUM_EVAL_LOSVD_DF);
+        // add the computed integrals to the output array
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            for(int ky=0; ky<=N; ky++)
+                for(int kx=0; kx<=N; kx++)
+                    for(int iv=0; iv<nv; iv++)
+                        cubedata[ ((indy + ky) * nx + indx + kx) * nv + iv ] +=
+                            result[ (ky * (N+1) + kx) * nv + iv ];
+        }
+    }
+    
+    // 2nd stage: convert the collected datacube into the output array of LOSVDs in each aperture
+    finalizeDatacube(datacube, output);
+}
+
+template<int N>
 std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::BaseDensity& density) const
 {
-    // 1st step: compute the integrals of surface density, weighted by the B-spline basis functions,
+    // 1st stage: compute the integrals of surface density, weighted by the B-spline basis functions,
     // over each pixel of the regular 2d grid in the image plane (projections onto the B-spline basis)
     ApertureMassIntegrand<N> fnc(density, transformMatrix, bsplx, bsply);
     std::vector<double> pixelMasses(bsplx.numValues() * bsply.numValues());
@@ -652,7 +458,7 @@ std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::Ba
         }
     }
 
-    // 2nd step: convert these projections to the aperture masses (simultaneously convolving with PSF)
+    // 2nd stage: convert these projections to the aperture masses (simultaneously convolving with PSF)
     std::vector<double> result(apertureConvolutionMatrix.rows());
     math::blas_dgemv(math::CblasNoTrans, 1., apertureConvolutionMatrix, pixelMasses, 0., result);
     return result;
@@ -694,6 +500,12 @@ void TargetKinemShell<N>::addPoint(const double point[6], double mult, double ou
     double vt2 = pow_2(point[3]) + pow_2(point[4]) + pow_2(point[5]) - vr2;
     bspl.addPoint(&r, mult * vr2, output);
     bspl.addPoint(&r, mult * vt2, output + bspl.numValues());
+}
+
+template<int N>
+void TargetKinemShell<N>::computeDFProjection(const GalaxyModel&, StorageNumT*) const
+{
+    throw std::runtime_error("TargetKinemShell: DF projection not implemented");
 }
 
 template<int N>

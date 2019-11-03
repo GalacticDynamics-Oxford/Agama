@@ -1,4 +1,5 @@
 #include "galaxymodel_densitygrid.h"
+#include "galaxymodel_base.h"
 #include "math_core.h"
 #include "math_sphharm.h"
 #include "utils.h"
@@ -113,6 +114,15 @@ template<> inline void getCornerIndicesCylindrical<1>(
 
 } // internal ns
 
+
+void BaseTargetDensity::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
+{
+    std::vector<double> result =
+        //TODO: this routine should be OpenMP-parallelized in each of the descendant classes
+        computeDensityProjection(DensityFromDF(model, EPSREL_DENSITY_INT, MAX_NUM_EVAL));
+    for(size_t i=0; i<result.size(); i++)
+        output[i] = static_cast<StorageNumT>(result[i]);
+}
 
 std::vector<double> BaseTargetDensity::computeDensityProjection(
     const potential::BaseDensity& density) const

@@ -19,6 +19,9 @@ public:
     /// for density targets, only the three coordinates are used, not velocities
     virtual unsigned int numVars() const { return 3; }
 
+    /// compute the projection of a DF-based model onto the basis elements of the spatial grid
+    virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
+
     /// compute the projections of the input density onto all basis elements of the grid
     /// (by default uses a 3d numerical integration for all basis functions computed via `eval()`,
     /// but derived classes may provide optimized versions taking into account the structure
