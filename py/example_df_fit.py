@@ -155,6 +155,6 @@ def main():
     corner.corner(samples, labels=labels, quantiles=[0.16, 0.5, 0.84])
     plt.show()
     print("Acceptance fraction: %f" % numpy.mean(sampler.acceptance_fraction))  # should be in the range 0.2-0.5
-    print("Autocorrelation time: %f"% sampler.acor)  # should be considerably shorter than the total number of steps
+    #print("Autocorrelation time: %f"% sampler.acor)  # should be considerably shorter than the total number of steps
 
 main()

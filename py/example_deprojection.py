@@ -31,7 +31,7 @@ Alternatively, the intrinsic shape of the ellipsoid can be inferred from the
 observed ellipse and the assumed viewing angles, except when it is projected
 along one if its principal planes; it is shown in the bottom of the left panel.
 """
-import sys, numpy, pygama, traceback
+import sys, numpy, agama, traceback
 import matplotlib.pyplot as plt, matplotlib.patches, matplotlib.collections, matplotlib.backend_bases
 sin=numpy.sin
 cos=numpy.cos
@@ -93,8 +93,11 @@ def getEllipse(Sxp, Syp, eta):
     yp = Syp * numpy.hstack((sin(angles), 0, 1, 0))
     return numpy.column_stack((xp * sin(eta) + yp * cos(eta), xp * cos(eta) - yp * sin(eta)))
 
+def clip(x):
+    return numpy.maximum(0, (1-1/(1+x**5))**0.2)   # soft clipping into the interval [0..1]
+
 def traceEllipsoid(alpha, beta, gamma):
-    R = pygama.makeRotationMatrix(alpha, beta, gamma)
+    R = agama.makeRotationMatrix(alpha, beta, gamma)
     # ray tracing - find the (smallest) Z coordinate of ellipsoid for each point in the X,Y grid
     Q = numpy.einsum('ij,j,kj->ik', R, [Sx**-2, Sy**-2, Sz**-2], R)
     a =  Q[2,2]
@@ -108,16 +111,16 @@ def traceEllipsoid(alpha, beta, gamma):
     pnorm   /= (numpy.sum(pnorm**2, axis=1)**0.5)[:,None]
     angle    = numpy.maximum(0, -numpy.dot(pnorm, R[2]))
     intensity= ampScattered + ampDirection * angle + ampSpecular * angle**powSpecular
-    return numpy.column_stack((numpy.clip(pcolor * intensity[:,None], 0, 1),
+    return numpy.column_stack((clip(pcolor * intensity[:,None]),
         numpy.isfinite(Z))).reshape(len(gridc), len(gridc), 4)
 
 def drawproj():
-    Sxp, Syp, eta = pygama.getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma)
-    R = pygama.makeRotationMatrix(alpha, beta, gamma)
+    Sxp, Syp, eta = agama.getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma)
+    R = agama.makeRotationMatrix(alpha, beta, gamma)
     prjfaces = numpy.dot(fvert.reshape(-1,3), R.T).reshape(-1, 3, 3)
     angle    = numpy.maximum(0, -numpy.dot(fnorm, R[2]))
     intensity= ampScattered + ampDirection * angle + ampSpecular * angle**powSpecular
-    prjcolor = numpy.clip(fcolor * intensity[:,None], 0, 1)
+    prjcolor = clip(fcolor * intensity[:,None])
     meanz    = numpy.mean(prjfaces[:,:,2], axis=1)
     order    = numpy.argsort(-meanz)
     figfaces.set_paths([matplotlib.patches.Polygon(f[:,0:2], closed=True) for f in prjfaces[order]])
@@ -146,7 +149,7 @@ def drawproj():
         '\nPAprojx=%.2f, PAprojy=%.2f, PAprojz=%.2f' % (PAprojx*180/pi, PAprojy*180/pi, PAprojz*180/pi) +
         '\nmajor=%.3f, minor=%.3f, PAmajor=%.2f' % (Sxp, Syp, eta*180/pi))
     try:
-        getSx, getSy, getSz = pygama.getIntrinsicShape(Sxp, Syp, eta, alpha, beta, gamma)
+        getSx, getSy, getSz = agama.getIntrinsicShape(Sxp, Syp, eta, alpha, beta, gamma)
         figlabeld.set_text('deprojected A=%.9f, B=%.9f, C=%.9f' % (getSx, getSy, getSz))
         figlabeld.set_color('k' if abs(getSx-Sx)+abs(getSy-Sy)+abs(getSz-Sz) < 1e-8 else 'r')
     except Exception as e:
@@ -157,15 +160,15 @@ def drawproj():
     try:
         cax.cla()
         cax.set_axis_off()
-        getang = pygama.getViewingAngles(Sxp, Syp, eta, Sx, Sy, Sz)
+        getang = agama.getViewingAngles(Sxp, Syp, eta, Sx, Sy, Sz)
         images = []
         arrowf = []
         arrowb = []
         trueR  = R  # rotation matrix corresponding to the true orientation
         for i in range(4):
             getAlpha, getBeta, getGamma = getang[i]
-            getSxp, getSyp, geteta = pygama.getProjectedEllipse(Sx, Sy, Sz, getAlpha, getBeta, getGamma)
-            R = pygama.makeRotationMatrix(getAlpha, getBeta, getGamma)
+            getSxp, getSyp, geteta = agama.getProjectedEllipse(Sx, Sy, Sz, getAlpha, getBeta, getGamma)
+            R = agama.makeRotationMatrix(getAlpha, getBeta, getGamma)
             # check which orientation is equivalent to the true one, i.e. when the rotation matrix is
             # "almost" the same as the true one (up to a simultaneous change of sign in two axes),
             # the product of R and inverse of true R is a diagonal matrix with +-1 on diagonal and det=1.

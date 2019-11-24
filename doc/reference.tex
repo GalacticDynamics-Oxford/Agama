@@ -26,8 +26,8 @@
 \definecolor{darkblue}  {rgb}{0.0,0.0,0.8}
 \newcommand{\ttt}[1]{\textcolor{darkviolet}{\texttt{#1}}}
 \newcommand{\ppp}[1]{\textcolor{darkolive} {\texttt{#1}}}
-\renewcommand{\d}{\partial}
-\newcommand{\D}{\mathrm{d}}
+\renewcommand{\d}{\mathrm{d}}
+\newcommand{\D}{\partial}
 \newcommand{\bA}{\boldsymbol{A}}
 \newcommand{\bv}{\boldsymbol{v}}
 \newcommand{\bx}{\boldsymbol{x}}
@@ -44,13 +44,14 @@
 \newcommand{\dvsqpar}{\langle \Delta v^2_\| \rangle}
 \newcommand{\dvsqper}{\langle \Delta v^2_\bot \rangle}
 \DeclareMathOperator{\trig}{trig}
+\hyphenation{Schwarz-schild}
 \hypersetup{
     colorlinks,
     linkcolor={darkcyan},
     citecolor={darkblue},
     urlcolor ={darkblue}
 }
-\renewcommand{\floatpagefraction}{0.8}
+\renewcommand{\floatpagefraction}{0.6}
 \textwidth=16.5cm
 \textheight=21cm
 \oddsidemargin=0cm
@@ -58,13 +59,12 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{document}
-\title{\includegraphics[width=8cm]{agama.jpg}\protect\\[0.5cm]\Agama reference}
+\title{\vspace*{-10mm}
+\includegraphics[width=8cm]{agama.jpg}\protect\\[5mm]\Agama reference}
 \author{Eugene Vasiliev\\
 %\normalsize\textit{Lebedev Physical Institute, Moscow, Russia}\\
-\normalsize\textit{Oxford University \& Institute of Astronomy, Cambridge}\\
+\normalsize\textit{University of Oxford \& Institute of Astronomy, Cambridge}\\
 \normalsize\textrm{email: eugvas@lpi.ru} }
-
-%\date{Version 1.1$\beta$\\ May 1, 2015}
 
 \maketitle
 \tableofcontents
@@ -93,7 +93,7 @@ The library comes with an extensive collection of test, demonstration programs a
 
 The main part of this document presents a comprehensive overview of various features of the library and a user's guide. The appendix contains a developer's guide and most technical aspects and mathematical details. The science paper describing the code is \cite{Vasiliev2019}.
 
-The code can be downloaded from \url{https://github.com/GalacticDynamics-Oxford/Agama}.
+The code can be downloaded from \url{http://agama.software}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -109,7 +109,7 @@ All classes and routines in this section belong to the \ttt{math::} namespace.
 
 \paragraph{Fundamental objects}
 throughout the entire library are functions of one or many variables, vectors and matrices.
-Any class derived from the \ttt{IFunction} interface should provide a method for computing the value and up to two derivatives of a function of one variable $f(x)$; \ttt{IFunctionNdim} represents the interface for a vector of functions of many variables $\boldsymbol{f}(\bx)$, and \ttt{IFunctionNdimDeriv} additionally provides the Jacobian of this function (the matrix $\d f_i /\d x_k$). Many mathematical routines operate on instances of classes derived from one of these interfaces.
+Any class derived from the \ttt{IFunction} interface should provide a method for computing the value and up to two derivatives of a function of one variable $f(x)$; \ttt{IFunctionNdim} represents the interface for a vector of functions of many variables $\boldsymbol{f}(\bx)$, and \ttt{IFunctionNdimDeriv} additionally provides the Jacobian of this function (the matrix $\D f_i /\D x_k$). Many mathematical routines operate on instances of classes derived from one of these interfaces.
 
 For one-dimensional vectors we use \ttt{std::vector} when a dynamically-sized array is needed; some routines take input arguments of type \ttt{const double[]} or store the output in \ttt{double[]} variables which may be also statically-sized arrays (for instance, allocated on the stack, which is more efficient in tight loops).
 
@@ -144,7 +144,7 @@ A broad range of tasks may be loosely named ``optimization problems'', i.e., fin
 For a function of one variable, there is a straightforward minimization routine \ttt{findMin} that can operate on any finite or (semi-)infinite interval $[a..b]$, and finds $\min f(x)$ on this interval (including endpoints); if there are multiple minima, then one of them will be found (not necessarily the global one), depending on the initial guess. The starting point $x_0$ such that  $f(x_0)<f(a), f(x_0)<f(b)$ may be optionally be provided by the caller; in its absense the routine will try to come up with a guess itself. Only the function values are needed by the algorithm.
 
 For a function of $N$ variables $\bx$, there are several possibilities. If only the values of the function $f(\bx)$ are available, then the Nelder--Mead (simplex, or amoeba) algorithm provided by the routine \ttt{findMinNdim} may be used. 
-If the partial derivatives $\d f/\d\bx$ are available, they may be used in a more efficient quasi-Newton BFGS algorithm provided by the routine \ttt{findMinNdimDeriv}.
+If the partial derivatives $\D f/\D \bx$ are available, they may be used in a more efficient quasi-Newton BFGS algorithm provided by the routine \ttt{findMinNdimDeriv}.
 
 A special case of optimization problem is a non-linear least-square fit: given a function $g(\bx; \boldsymbol{d})$, where $x_i$ are $N$ parameters that are being optimized, and $d_k$ are $M$ data points, minimize the sum of squared differences between the values of $g$ at these points and target values $v_k$: $\min f(\bx) = \sum_{k=1}^M [g(\bx; d_k) - v_k]^2$. This task is solved by the Levenberg--Marquardt algorithm, which needs the Jacobian matrix of partial derivatives of $g$ w.r.t.\ its parameters $\boldsymbol x$ at each data point $d_k$. It is provided by the routine \ttt{nonlinearMultiFit}.
 Of course, if the function $g$ is linear w.r.t.\ its parameters, this reduces to a simpler linear algebra problem, solved by the routine \ttt{linearMultiFit}. And if there is only one or two parameters (i.e., a linear regression with or without a constant term), this is solved by the routines \ttt{linearFit} and \ttt{linearFitZero}.
@@ -173,7 +173,7 @@ Mathematical foundations of splines are described in more detail in the Appendix
 There are two kinds of tasks that involve the construction of a spline curve from an irregular set of points (as opposed to the values of the curve at grid nodes, as in the previous section).
 
 The first task is to create a smooth least-square approximation $f(x)$ to a set of points $\{x_i, y_i\}$: 
-minimize $\sum_i [y_i-f(x_i)]^2 + \lambda \int [f''(x)]^2\,dx$, where $\lambda$ is the smoothing parameter controlling the tradeoff between approximation error (the first term) and the curvature penalty (the second term). The solution is given by a cubic spline with grid nodes placed at all input points $\{x_i\}$ \cite{GreenSilverman}; however, it is not practical in the case of a large number of points. Instead, we approximate it with a cubic spline having a much smaller number of grid nodes $\{X_k\}$ specified by the user. The class \ttt{SplineApprox} is constructed for the given grid  $\{X_k\}$ and $x$-coordinates of input points; after preparing the ground, it may be used to find the amplitudes of B-splines for any $\{y_i\}$ and $\lambda$, and there is a method for automatically choosing the suitable amount of smoothing.
+minimize $\sum_i [y_i-f(x_i)]^2 + \lambda \int [f''(x)]^2\,\d x$, where $\lambda$ is the smoothing parameter controlling the tradeoff between approximation error (the first term) and the curvature penalty (the second term). The solution is given by a cubic spline with grid nodes placed at all input points $\{x_i\}$ \cite{GreenSilverman}; however, it is not practical in the case of a large number of points. Instead, we approximate it with a cubic spline having a much smaller number of grid nodes $\{X_k\}$ specified by the user. The class \ttt{SplineApprox} is constructed for the given grid  $\{X_k\}$ and $x$-coordinates of input points; after preparing the ground, it may be used to find the amplitudes of B-splines for any $\{y_i\}$ and $\lambda$, and there is a method for automatically choosing the suitable amount of smoothing.
 
 The second task is to determine a density function $P(x)$ from an array of samples $\{x_i\}$, possibly with individual weights $\{w_i\}$. It is also solved with the help of B-splines, this time for $\ln P(x)$, which is represented as a B-spline of degree $N$ defined by user-specified grid nodes $\{X_k\}$. The routine \ttt{splineLogDensity} constructs an approximation for $\ln P$ for the given grid nodes and samples, with adjustable smoothing parameter $\lambda$.
 
@@ -404,7 +404,7 @@ All dimensional values in the potential factory routines can optionally be speci
 \subsubsection{Utility functions}  \label{sec:PotentialUtility}
 
 \texttt{potential_utils.h} contains several frequently used functions that operate on any potential object: determination of the radius that encloses a given mass; conversion between energy $E$, angular momentum of a circular orbit $L_\mathrm{circ}$, and radius; epicyclic frequencies $\kappa,\nu,\Omega$ as functions of radius%
-\footnote{defined as $\displaystyle \kappa^2\equiv \frac{\d^2\Phi}{\d R^2} + \frac 3 R \frac{\d\Phi}{\d R},\;\; \nu^2\equiv \frac{\d^2\Phi}{\d z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\d R} = \left(\frac{L_\mathrm{circ}}{R^2}\right)^2,\;$ evaluated at $z=0$.};
+\footnote{defined as $\displaystyle \kappa^2\equiv \frac{\D ^2\Phi}{\D R^2} + \frac 3 R \frac{\d\Phi}{\D R},\;\; \nu^2\equiv \frac{\D ^2\Phi}{\D z^2},\;\; \Omega^2\equiv \frac 1 R \frac{\d\Phi}{\D R} = \left(\frac{L_\mathrm{circ}}{R^2}\right)^2,\;$ evaluated at $z=0$.};
 peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane of an axisymmetric potential), etc. They are implemented as standalone functions (generally using a root-finding routine to solve equations such as $\Phi(r)=E$ for $r$), and as two interpolator classes that pre-compute these values on a 1d or 2d grid in $E$ or $E,L$, and provide a faster (but still very accurate) alternative to the standalone functions. These interpolators are used, e.g., in the spherical action finder/mapper class (Section~\ref{sec:ActionsSpherical}).
 
 
@@ -425,10 +425,10 @@ A finite-time estimate of Lyapunov exponent $\lambda$ is another measure of stoc
 
 As the name implies, \Agama deals with models of stellar system described in terms of action/angle variables. They are defined, e.g., in Section 3.5 of \cite{BinneyTremaine}.
 
-In a spherical or axisymmetric potential, the most convenient choice for actions is the triplet $\{J_r, J_z, J_\phi\}$, where $J_r\ge 0$ (radial action) describes the motion in cylindrical radius, $J_z\ge 0$ (vertical action) describes the motion in $z$ direction, and $J_\phi \equiv R v_\phi$ (azimuthal action) is the conserved component $L_z$ of angular momentum (it may have any sign). In a spherical potential, the sum $J_z + |J_\phi|$ is the total angular momentum $L$.
+In a spherical or axisymmetric potential, the most convenient choice for actions is the triplet $\{J_r, J_z, J_\phi\}$, where $J_r\ge 0$ (radial action) describes the motion in cylindrical radius, $J_z\ge 0$ (vertical action) describes the motion in $z$ direction, and $J_\phi \equiv R v_\phi$ (azimuthal action) is the conserved component $L_z$ of angular momentum (it may have any sign). In a spherical potential, the sum $J_z + |J_\phi|$ is the total angular momentum $L$. Actions are only defined for a bound orbit -- if the energy is positive, they will be reported as \texttt{NAN} (except $L_z$ which can always be computed).
 %The corresponding angles are defined such that $\theta_r=0$ corresponds to the pericenter, $\theta_z=0$ -- to the passage through the $x-y$ plane with positive vertical velocity, and $\theta_\phi=0$ -- to [?]. 
 
-The \ttt{actions::} namespace introduces several concepts: \ttt{Actions} and \ttt{Angles} are the triplet of action and angle variables, \ttt{ActionAngles} is their combination, \ttt{Frequencies} is the triplet of frequencies $\boldsymbol{\Omega}\equiv \d H/\d\bJ$ (derivatives of Hamiltonian w.r.t.\ actions). 
+The \ttt{actions::} namespace introduces several concepts: \ttt{Actions} and \ttt{Angles} are the triplet of action and angle variables, \ttt{ActionAngles} is their combination, \ttt{Frequencies} is the triplet of frequencies $\boldsymbol{\Omega}\equiv \D H/\D \bJ$ (derivatives of Hamiltonian w.r.t.\ actions). 
 The transformation from $\{\bx,\bv\}$ to $\{\bJ,\bt\}$ is provided by action finders, and the inverse transformation -- by action mappers. There are several distinct methods discussed later in this section, and they may exist as standalone routines and/or instances of classes derived from the \ttt{BaseActionFinder} and \ttt{BaseActionMapper} classes. The action finder routines exist in two variants: computing only the actions (the most common usage), or in addition the angles and frequencies (more expensive).
 
 The following sections describe the methods suitable for specific cases of spherical or axisymmetric potentials (see \cite{SandersBinney2016} for a review and comparison of various approaches).
@@ -447,7 +447,7 @@ The standalone routines providing these transformations, optionally with partial
 
 In a more general case of an arbitrary spherical potential, the radial action is given by 
 \begin{align*}
-J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;dr,
+J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;\d r,
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
 The standalone routines in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the helper class \ttt{potential::Interpolator2d}) and $J_r(E,L)$, the inverse mapping $E(J_r,L)$ also provided via an interpolation table, and the complete inverse mapping $\{\bJ,\bt\} \Rightarrow \{\bx,\bv\}$.
@@ -478,7 +478,7 @@ The transformation from $\{\bJ, \bt\}$ to $\{\bx,\bv\}$ in an arbitrary axisymme
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Distribution functions}  \label{sec:DF}
 
-By Jeans' theorem, a steady-state distribution of stars or other species in a stationary potential may depend only on integrals of motion, taken here to be the actions $\bJ$. The \ttt{df::} namespace contains the classes and methods for working with such distribution functions (DFs) formulated in terms of actions. They are derived from the \ttt{BaseDistributionFunction} class, which provides a single method for computing the value $f(\bJ)$ at the given triplet of actions. All physically valid DFs must have a finite mass $M = (2\pi)^3 \iiint f(\bJ)\,d^3J$, computed by numerical integration (the pre-factor comes from a trivial integration over angles) and returned by the \ttt{totalMass()} method of the DF instance.
+By Jeans' theorem, a steady-state distribution of stars or other species in a stationary potential may depend only on integrals of motion, taken here to be the actions $\bJ$. The \ttt{df::} namespace contains the classes and methods for working with such distribution functions (DFs) formulated in terms of actions. They are derived from the \ttt{BaseDistributionFunction} class, which provides a single method for computing the value $f(\bJ)$ at the given triplet of actions. All physically valid DFs must have a finite mass $M = (2\pi)^3 \iiint f(\bJ)\,\d ^3J$, computed by numerical integration (the pre-factor comes from a trivial integration over angles) and returned by the \ttt{totalMass()} method of the DF instance.
 The same DF corresponds to different density profiles in different potentials (Section~\ref{sec:Moments}), but the total mass of the density profile is always the same.
 
 \Agama provides several DFs suitable for various components of a galaxy, described in the following sections. In addition there is a concept of a multi-component DF: since computing the actions -- arguments of the DF -- is a non-negligible cost, it is often advantageous to evaluate several DFs at the same set of actions at once.
@@ -542,18 +542,18 @@ Its parameters listed in the \ttt{ExponentialParam} structure are:
 
 One can generalize either of these models to the continuous distribution of populations with different velocity dispersions, by introducing three additional dimensionless parameters. It is commonly assumed that the velocity dispersion of a coeval population of stars increases with time. Let $\tau\in[0..1]$ be the age of the star normalized to the galaxy age (youngest stars have $\tau=0$ and oldest -- $\tau=1$). Let $\sigma_0$, $\sigma_1$ be the radial or vertical velocity dispersion of youngest and oldest stars, correspondingly, and denote their ratio as $\xi\equiv \sigma_0/\sigma_1 \le 1$ (\ppp{sigmabirth}). The commonly adopted relation between age and velocity dispersion \cite{AumerBinney2009} is $\sigma(\tau) = \sigma_1 \big[\tau + (1-\tau)\xi^{1/\beta} \big]^\beta$, with $\beta\simeq 0.33$ (\ppp{beta}). Assume further that the star formation rate declines exponentially with characteristic timescale $\tau_\mathrm{SFR}$ (\ppp{Tsfr}, again normalized to the galaxy age), so that the number of stars increases with look-back time $\tau$ as $\exp(\tau/\tau_\mathrm{SFR})$. Then the value of the DF needs to be integrated over stars of all ages, weighted by the number of stars at each age and substituting $\tilde\sigma_r, \tilde\sigma_z$ by the age-scaled values:
 \begin{align*}
-\bar f(\bJ) = \frac{\int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})\,
-f\big[ \bJ \,|\, \sigma(\tau) \big] }{\int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})}
+\bar f(\bJ) = \frac{\int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})\,
+f\big[ \bJ \,|\, \sigma(\tau) \big] }{\int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})}
 \end{align*}
 The \ttt{QuasiIsothermal} DF is then computed as
 \begin{align*}
 \bar f(\bJ) &= \frac{\tilde\Sigma\,\Omega\,\nu}
 {2\pi^2\,\kappa\,\tilde\sigma_{r,1}^2\,\tilde\sigma_{z,1}^2}
-\frac{ \displaystyle \int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR})\,
+\frac{ \displaystyle \int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})\,
 \frac{1}{\lambda^4} \exp\left(-\frac{1}{\lambda^2}
 \left[ \frac{\kappa\,J_r}{\tilde\sigma_{r,1}^2} + \frac{\nu\,J_z}{\tilde\sigma_{z,1}^2} +
 \mathrm{max}\bigg\{0, -\frac{2\Omega\,J_\phi}{\tilde\sigma_{r,1}^2}\bigg\} \right]\right)}
-{ \int_0^1 \D\tau\, \exp(\tau/\tau_\mathrm{SFR}) } ,\\
+{ \int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR}) } ,\\
 \lambda &\equiv \sigma(\tau)/\sigma_1 = \big[\tau + (1-\tau)\xi^{1/\beta}\big]^\beta ,
 \end{align*}
 where the auxiliary functions $\tilde\sigma_r,\tilde\sigma_z$ now refer to the oldest stars. A similar modification applies to the \ttt{Exponential} DF, except that the age-dependent parameters are the scale actions $J_{r,0}, J_{z,0}$, not the velocity dispersions.
@@ -633,19 +633,19 @@ This is especially convenient for iterative construction of multicomponent self-
 
 In a special case of spherical isotropic models, the DF has the form $f(E)$. There is an alternative formulation which makes it invariant with respect to the potential, retaining the convenience of action formalism without the need to compute actions explicitly. Namely, we use the phase volume $h$ instead of $E$ as the argument of the DF. It is defined as the volume of phase space enclosed by the given energy hypersurface:
 \begin{align*}
-h(E) &\equiv \iiint d^3x \iiint d^3v\, H\Big[E - \big(\Phi(|\bx|)+|\bv|^2/2\big)\Big] \;,\quad
+h(E) &\equiv \iiint \d ^3x \iiint \d ^3v\, H\Big[E - \big(\Phi(|\bx|)+|\bv|^2/2\big)\Big] \;,\quad
 \mbox{where $H$ is the step function,} \\
-&= \int_0^{r_\mathrm{max}(E)} 4\pi\,r^2\,dr \int_0^{v_\mathrm{max}(E,r)} 4\pi\, v^2\,dv =
-\frac{16\pi^2}{3} \int_0^{r_\mathrm{max}(E)} r^2\, \Big[2\big(E-\Phi(r)\big)\Big]^{3/2}\;dr.
+&= \int_0^{r_\mathrm{max}(E)} 4\pi\,r^2\,\d r \int_0^{v_\mathrm{max}(E,r)} 4\pi\, v^2\,\d v =
+\frac{16\pi^2}{3} \int_0^{r_\mathrm{max}(E)} r^2\, \Big[2\big(E-\Phi(r)\big)\Big]^{3/2}\;\d r.
 \end{align*}
 
-The advantages of using $h$ instead of $E$ are that the total mass of the model is simply $M=\int_0^\infty f(h)\,dh$, that the same DF may be used in different potentials, etc. The bi-directional correspondence between $E$ and $h$ is provided by a helper class \ttt{PhaseVolume}, constructed for a given potential. The derivative $dh(E)/dE \equiv g(E)$ is called the density of states (\cite{BinneyTremaine}, eq.~4.56), and is given by
+The advantages of using $h$ instead of $E$ are that the total mass of the model is simply $M=\int_0^\infty f(h)\,\d h$, that the same DF may be used in different potentials, etc. The bi-directional correspondence between $E$ and $h$ is provided by a helper class \ttt{PhaseVolume}, constructed for a given potential. The derivative $\d h(E)/\d E \equiv g(E)$ is called the density of states (\cite{BinneyTremaine}, eq.~4.56), and is given by
 \begin{align*}
-g(E) \equiv 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, \sqrt{2\big(E-\Phi(r)\big)}\;dr 
+g(E) \equiv 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, \sqrt{2\big(E-\Phi(r)\big)}\;\d r 
 = 4\pi^2\,L^2_\mathrm{circ}(E)\,T_\mathrm{rad}(E).
 \end{align*}
 
-Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, dh$ is finite. 
+Any non-negative function of one variable (the phase volume $h$) may serve as an isotropic distribution function in a spherically-symmetric potential, provided that it satisfies the condition that $\int_0^\infty f(h)\, \d h$ is finite. 
 One possible way of computing such a DF is through the Eddington inversion formula for any density profile in any given potential (not necessarily related), implemented in the routine \ttt{createSphericalIsotropicDF}. The other is to construct an approximating DF from an array of particles sampled from it, using the log-density estimation approach (Section~\ref{sec:MathSplineDensityDetails}), provided by the routine \ttt{fitSphericalIsotropicDF}.
 More information on these models is given in section~\ref{sec:DFsphericalIsotropicDetails}.
 
@@ -665,17 +665,17 @@ As stressed previously, using $\bJ$ as the argument of $f$ has the advantage tha
 
 The most basic task is the computation of DF moments (density, velocity dispersion, etc.), defined as
 \begin{align*}
-\rho(\bx) &\equiv \iiint d^3v\, f\big(\bJ(\bx,\bv)\big), \\
-\overline{\bv} &\equiv \rho^{-1} \iiint d^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \\
-\overline{v_i v_j} &\equiv \rho^{-1} \iiint d^3v \,v_i v_j\, f\big(\bJ(\bx,\bv)\big).
+\rho(\bx) &\equiv \iiint \d ^3v\, f\big(\bJ(\bx,\bv)\big), \\
+\overline{\bv} &\equiv \rho^{-1} \iiint \d ^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \\
+\overline{v_i v_j} &\equiv \rho^{-1} \iiint \d ^3v \,v_i v_j\, f\big(\bJ(\bx,\bv)\big).
 \end{align*}
 The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
 This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$); the tensor of second velocity moments is computed in cylindrical coordinates ($R,z,\phi$), and in axisymmetric systems may have at most 4 non-zero components ($\overline{\strut v_R^2}, \overline{\strut v_z^2}, \overline{\strut v_\phi^2}, \overline{\strut v_R v_z}$, the latter is related to the tilt of velocity ellipsoid in the meridional plane).
 
 The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ (currently for axisymmetric systems only) -- this involves an additional integration over $z$:
 \begin{align*}
-\Sigma(R) \equiv \int_{z=-\infty}^\infty dz\, \rho(R,z), \qquad
-\sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty dz\, \rho(R,z)\, v_z^2 .
+\Sigma(R) \equiv \int_{z=-\infty}^\infty \d z\, \rho(R,z), \qquad
+\sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty \d z\, \rho(R,z)\, v_z^2 .
 \end{align*}
 
 There are analogous routines for spherical isotropic DFs of the form $f(h)$, defined in \texttt{galaxymodel_spherical.h} and used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
@@ -686,8 +686,8 @@ There are analogous routines for spherical isotropic DFs of the form $f(h)$, def
 
 Instead of just a few DF moments at a given point, one may consider one-dimensional velocity distribution functions (VDFs):
 \begin{align*}
-\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint dv_2\,dv_3\, f\big(\bJ(\bx,\bv)\big) ,\\
-\mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int dx_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
+\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint \d v_2\,\d v_3\, f\big(\bJ(\bx,\bv)\big) ,\\
+\mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int \d x_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
 \end{align*}
 Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$.
 VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
@@ -712,23 +712,76 @@ The inverse procedure for constructing a DF from a given \Nbody model is less we
 %%%%%%%%%%%%%%
 \subsubsection{Iterative self-consistent modelling}  \label{sec:SCM}
 
-As explained above, the same DF gives rise to a different density profile in each potential. A natural question is whether there always exists a unique potential-density pair $\rho,\Phi$ such that $\rho(\bx)=\int d^3v\,f\big(\bJ(\bx,\bv\;|\Phi)\big)$ corresponds to $\Phi(\bx)$ via the Poisson equation, with the mapping $\{\bx,\bv\}\implies \bJ$ constructed for the same potential.
+As explained above, the same DF gives rise to a different density profile in each potential. A natural question is whether there always exists a unique potential-density pair $\rho,\Phi$ such that $\rho(\bx)=\int \d ^3v\,f\big(\bJ(\bx,\bv\;|\Phi)\big)$ corresponds to $\Phi(\bx)$ via the Poisson equation, with the mapping $\{\bx,\bv\}\implies \bJ$ constructed for the same potential.
 While we are not aware of a strict mathematical proof, in most practical cases the answer is positive, and such potential may be constructed by the iterative self-consistent modelling approach \cite{Binney2014,Piffl2015}. 
 In a more general formulation, one may have several DF components $f_c(\bJ), c=1..N_\mathrm{comp}$ and optionally several additional (external) density or potential components. The procedure consists of several steps, which use various pieces of machinery described previously:
 \begin{enumerate}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
 \item Create a plausible initial guess for the total potential $\Phi(\bx)$.
 \item Construct the action finder for this potential (Section~\ref{sec:ActionAngle}).
 \item Compute the density profiles $\rho_c(\bx)$ of all components with DFs (Section~\ref{sec:Moments}).
-\item Calculate the updated potential by solving the Poisson equation $\nabla^2\Phi = 4\pi\sum_c\rho_c$ for the combined density of all components (plus any external density or potential components, which are called static since they are not updated throughout the iterative procedure), using one or both general-purpose potential expansions (Sections~\ref{sec:PotentialMultipole},~\ref{sec:PotentialCylSpline}).
+\item Calculate the updated potential by solving the Poisson equation $\nabla^2\Phi = 4\pi\sum_c\rho_c$ for the combined density of all components (plus any external density or potential components such as a central supermassive black hole (SMBH), which are called static since they are not updated throughout the iterative procedure), using one or both general-purpose potential expansions (Sections~\ref{sec:PotentialMultipole},~\ref{sec:PotentialCylSpline}).
 \item If desired, add new components or replace a static component with a DF-based one.
 \item Repeat from step 2, until the potential changes negligibly between iterations. This typically requires $\mathcal{O}(10)$ steps.
 \end{enumerate}
 
-The only non-trivial aspect of this procedure is to choose whether the density of a given component is better described as spheroidal (not strongly flattened, possibly with a central cusp or an extended envelope) or disky (possibly strongly flattened, but with a finite-density core and a finite extent, or at least sharply declining at large radii). In the first case it will contribute to the potential represented by the \ttt{Multipole} expansion, and in the second -- by the \ttt{CylSpline} expansion. This applies to both DF-based and static density components; in addition there may be static components with already known potentials, which will be added directly to the total potential. Importantly, all disky components will be represented by a single \ttt{CylSpline} object, and similarly all spheroidal components by a single \ttt{Multipole} object.
+The only non-trivial aspect of this procedure is to choose whether the density of a given component is better described as spheroidal (not strongly flattened, possibly with a central cusp or an extended envelope) or disky (possibly strongly flattened, but with a finite-density core and a finite extent, or at least sharply declining at large radii). In the first case it will contribute to the potential represented by the \ttt{Multipole} expansion, and in the second -- by the \ttt{CylSpline} expansion. This applies to both DF-based and static density components; in addition there may be static components with already known potentials (e.g., a Plummer potential with a very small scale radius representing the central SMBH), which will be added directly to the total potential. Importantly, all disky components will be represented by a single \ttt{CylSpline} object, and similarly all spheroidal components by a single \ttt{Multipole} object.
 The density of each DF-based component is first computed on a suitable grid of $\mathcal{O}(10^2-10^3)$ points, and a corresponding density interpolator (\ttt{DensitySphericalHarmonic} -- Section~\ref{sec:PotentialMultipoleDetails}, or \ttt{DensityAzimuthalHarmonic} -- Section~\ref{sec:PotentialCylSplineDetails}) is created that will be used in solving the Poisson equation. 
 Presently this method is restricted to axisymmetric models, due to the lack of more general action finders.
 
 This approach is implemented with the help of several classes derived from \ttt{BaseComponent}, the \ttt{SelfConsistentModel} structure which binds together the array of components, the potential, the action finder, and the parameters of potential expansions, and finally the routine \ttt{doIteration}, all defined in \texttt{galaxymodel_selfconsistent.h}. All these concepts are also available in the \Python wrapper (Section~\ref{sec:Python}), and a complete annotated example illustrating the entire workflow is presented both in the \Cpp and \Python variants.
+
+
+%%%%%%%%%%%%%%
+\subsubsection{Schwarzschild orbit-superposition modelling}  \label{sec:Schwarzschild}
+
+Schwarzschild modelling approach \cite{Schwarzschild1979} is an alternative method for creating self-consistent models, in which the DF is determined numerically as a weighted superposition of individual building blocks. In the original approach, these blocks are numerically computed orbits (hence the alternative name ``orbit-superposition method''), which are essentially $\delta$-functions in the space of integrals of motion, but a more general definition might use finite-size building blocks, or bunches of individual orbits. In what follows, we use the original formulation.
+
+There are several ingredients in these models:
+\begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item The total gravitational potential $\Phi(\bx)$ used to integrate the orbits.
+\item One or more \ttt{Target} objects, which define various kinds of constraints: 3d density distribution, intrinsic (3d) or projected (line-of-sight) kinematics, etc. The required values of these constraints are denoted as $U_n^{(t)}$, with the index $t=1..N_\mathrm{tar}$ enumerating \ttt{Target}s, and $n=1..N_{\mathrm{cons},t}$ -- constraints of each target.
+\item The orbit library (collection of $N_\mathrm{orb}$ orbits and their weights $w_i$ in the model), and associated arrays $u_{i,n}^{(t)}$ of contributions of $i$-th orbit to $n$-th constraint of $t$-th target.
+\end{itemize}
+
+The modelling workflow is split into several steps:
+\begin{enumerate}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
+\item Initialize the potential $\Phi$ and $N_\mathrm{tar}$ \ttt{Target} objects.
+\item Create initial conditions (IC) for the orbit library.
+\item Integrate orbits while recording the arrays $u_{i,n}^{(t)}$.
+\item Determine the orbit weights that satisfy the constraints.
+\item (Optional) create an $N$-body representation of the model.
+\end{enumerate}
+
+The potential for Schwarzschild models needs to be specified in advance, in contrast to the DF-based iterative self-consistent models (Section~\ref{sec:SCM}). Often it will be computed from the deprojected surface density profile, e.g., parametrized by a Multi-Gaussian Expansion (MGE); there are several \Python routines for manipulating these parametrizations.
+
+Target objects provide an abstract interface for discretizing both the data and the model into an array of constraints. There are 3 types (5 variants) of 3d density discretization schemes, described in the Appendix~\ref{sec:SchwarzschildDetails}, one target (4 variants) for representing the spherically averaged 3d kinematic profiles, and one target (4 variants) for recording the line-of-sight velocity distributions (LOSVD). All these schemes use $B$-splines (Section~\ref{sec:MathBSplineDetails}) for defining the discretization elements, and variants of the same scheme differ by the order of the $B$-spline basis.
+A \ttt{Target} object does not contain any data itself, it only provides the methods for computing discretized representations of various other entities and storing them in external arrays.
+For instance, a density target acting on a \ttt{Density} model produces the array of masses associated with each discretization element (in the simplest case, the mass contained in each cell of the 3d density grid), while a LOSVD target acting on a \ttt{Density} model computes the integrals of the PSF-convolved surface density profile over each spatial region (aperture) on the sky plane. The same LOSVD target applied to a \ttt{GalaxyModel} object computes the PSF-convolved LOSVDs produced by the combination of the DF and the potential in each aperture. Any target applied to an $N$-body snapshot computes the relevant quantities $U_n^{(t)}$ from the array of particles, weighted by their masses. And finally, any target can be attached to the orbit integrator to construct the discretized representaion of the $i$-th orbit $u_{i,n}^{(t)}$ (this is conceptually similar to recording the orbit as a collection of points sampled from the trajectory, with weights proportional to the time intervals between adjacent points, and then applying the target to this $N$-body snapshot, although in practice it is implemented on-the-fly, without actually storing the trajectory). The LOSVD target is used to constrain the model by observed kinematics, but this involves an additional step to convert the internal $B$-spline representation of the datacube into observable quantities (for details, see Appendix~\ref{sec:SchwarzschildDetails}).
+
+The IC for the orbit library may be generated by one of the complementary approaches for constructing dynamical models. This is achieved by first sampling positions from the actual 3d density profile of the galaxy or one of its components, then assigning velocities drawn from a suitable DF or from a Jeans model. For spheroidal systems or galaxy components, the Eddington inversion or its anisotropic generalization (Section~\ref{sec:DFspherical}) provide a suitable DF, while for strongly flattened and rotating disk components (including bars), velocities may be drawn from a Gaussian distribution with the dispersions computed from the axisymmetric anisotropic Jeans equations. In either case, the resulting IC are not necessarily in equilibrium, but merely provide a convenient starting point for the orbit-based modelling. Moreover, one may stack together several sets of IC created with different parameters (e.g., to provide a denser sampling of orbits at high binding energies near the galactic center).
+
+The orbit weights $w_i\ge 0$ that satisfy the constraints are determined from the system of linear equations
+\begin{equation*}
+\sum\nolimits_{i=1}^{N_\mathrm{orb}} w_i\, u_{i,n}^{(t)} = U_n^{(t)},\quad
+t=1..N_\mathrm{tar}, \; n=1..N_{\mathrm{cons},t} .
+\end{equation*}
+In practice, the constraints may not be satisfied exactly, especially if they come from noisy observations. In this case, the best solution is obtained by minimizing the $L_2$-norm of the residual in the above equation system, weighted by the observational uncertainties $\epsilon_{U_n^{(t)}}$. Additionally, one may employ some sort of regularization to make the solution more well-behaved. In practice, this is achieved by adding a regularization term proportional to the sum of squared orbit weights to the objective function to be minimized, which encourages a more uniform distribution of orbit weights in the solution. The objective function is thus written as
+\begin{equation*}
+\mathcal Q \equiv \sum_{t=1}^{N_\mathrm{tar}}\, \sum_{n=1}^{N_{\mathrm{cons},t}} 
+\left(
+\frac{ \sum_{i=1}^{N_\mathrm{orb}} w_i\, u_{i,n}^{(t)} - U_n^{(t)} }{ \epsilon_{U_n^{(t)}} }
+\right)^2 +\,
+\lambda\,\sum_{i=1}^{N_\mathrm{orb}} \left(\frac{w_i}{w_{i,0}}\right)^2.
+\end{equation*}
+Here $\lambda$ is the regularization coefficient, $w_{i,0}$ are the priors on orbit weights (in the simplest case, uniform). If some constraints need to be satisfied exactly, the corresponding uncertainties should be set to zero; these constraints will not contribute to $\mathcal Q$. The minimization of the objective function, subject to the non-negativity constraints $w_i\ge 0$, is performed by the quadratic optimization solver CVXOPT.
+
+In the case of constructing models constrained by observed LOSVD kinematics, one may use the same orbit library multiple times to represent systems with different mass normalizations $\Upsilon$, rescaling the velocities by $\sqrt{\Upsilon}$ as described in the Appendix~\ref{sec:SchwarzschildDetails}).
+
+Finally, the orbit-superposition model can be converted into an $N$-body representation, e.g., to test its stability or provide initial conditions for a simulation. In order to do this, one needs to record the trajectories during orbit integration along with the other arrays $u_{i,n}^{(t)}$, and then select a certain number of points from each orbit's trajectory in proportion to its weight. In the case that the number of points recorded during orbit integration was insufficient to represent an orbit with a particularly high weight, this orbit needs to be re-integrated while storing the points more frequently. There is a \Python routine \ttt{sampleOrbitLibrary} that performs this task in a transparent way.
+
+All computationally heavy operations of this approach are implemented in the \Cpp library, but the top-level modelling workflow is more conveniently expressed in \Python. 
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 %\subsection{Data handling}
@@ -749,14 +802,13 @@ The \Python interface provides a large subset of \Agama functionality expressed 
 \item Orbit integration.
 \item Action finders (both classes and standalone routines).
 \item Distribution functions.
-\item Galaxy modelling framework: computation of DF moments, drawing samples from density profiles and DFs, iterative self-consistent modelling.
+\item Galaxy modelling framework: computation of DF moments, drawing samples from density profiles and DFs, iterative self-consistent and Schwarzschild orbit-superposition modelling.
 \end{itemize}
 
 The shared library \texttt{agama.so} can be used directly as a \Python extension module%
-\footnote{for the most common implementation of \Python interpreter, named \texttt{CPython} -- not to be confused with \texttt{Cython}, which is a distinct compiled language. The \Python interface layer in \Agama relies solely on the \Python C API, and does not use any third-party libraries such as \texttt{swig} or \texttt{boost::python}.}
-by writing \texttt{import agama} in the \texttt{.py} file. Both \Python 2.6+ and \Python 3.x are supported, but the library must be compiled separately for either version.
+\footnote{for the most common implementation of \Python interpreter, named \texttt{CPython} -- not to be confused with \texttt{Cython}, which is a distinct compiled language. The \Python interface layer in \Agama relies solely on the \Python C API, and does not use any third-party libraries such as \texttt{swig} or \texttt{boost::python}.}. Both \Python 2.6--2.7 and \Python 3.x are supported, but the library must be compiled separately for either version. In addition, there are a few auxiliary routines written in \Python (they reside in \texttt{py/pygama.py}). To simplify the usage, the package initialization (\texttt{__init__.py}) imports everything from both \texttt{agama.so} and \texttt{py/pygama.py} into a single namespace, which is what you get by writing \texttt{import agama} in your \texttt{.py} file.
 
-The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
+The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction}, \ttt{Target} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
 Additionally, density and DF object may also be represented by an arbitrary user-defined Python function -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation.Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
 \footnote{this restriction is due to the global interpreter lock mechanism in \texttt{CPython}, precluding its simultaneous access from multiple threads.}.
 
@@ -781,6 +833,7 @@ In this case the \ttt{Density} object is internally represented by a \ttt{Densit
 The \ttt{Density} class provides only a couple of methods: first of all, the computation of the density itself -- the argument is a single point or a $N\times3$ array of $N$ points (the \Python interface always deals with cartesian coordinates to avoid confusion):\\
 \texttt{print(d.density(1,0,0))}\\
 \texttt{print(d.density([[1,0,0],[2,3,4]]))}\\[2mm]
+\texttt{surfaceDensity} computes the integral of density along the line of sight in an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles (Section~\ref{sec:CoordinateDetails}).\\[2mm]
 Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model.
 Finally, the density profile may be sampled with particles, producing two arrays -- coordinates ($N\times3$) and masses ($N$): \\
 \texttt{pos, mass = d.sample(10000)}\\[2mm]
@@ -846,6 +899,11 @@ There is also a standalone routine \texttt{actions()}, which may be used without
 \texttt{agama.actions(points, potential [, fd=focal_distance] [, angles=True])}\\
 for a non-spherical potential one needs to provide the focal distance $\Delta$ (the \ttt{ActionFinder} class retrieves it from an internally constructed interpolation table).
 
+\paragraph{ActionMapper} class performs the inverse operation -- transform from actions/angles to position/velocity coordinates. Currently it uses the Torus machinery (Section~\ref{sec:ActionsTorus}), and needs to be constructed for a given potential \textit{and} the triplet of actions:\\
+\texttt{am = agama.ActionMapper(pot, (Jr, Jz, Jphi))}\\
+When applied to one or more triplets of angles, it returns the corresponding $\bx,\bv$:\\
+\texttt{xv = am([[theta_r1, theta_z1, theta_phi1], [theta_r2, theta_z2, theta_phi2]])}
+
 \paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\
 \texttt{df = agama.DistributionFunction(type="...", [norm=..., other params])}\\
 where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
@@ -870,13 +928,14 @@ One may plot the velocity distribution as a smooth function on a denser grid:\\
 gridv = numpy.linspace(-v_esc, v_esc, 200)\\
 plt.plot(gridv, fvr(gridv))} \\[2mm]
 \texttt{posvel, mass = gm.sample(N)}\\
-draws $N$ equal-mass samples from the DF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (its values are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.
+draws $N$ equal-mass samples from the DF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (its values are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.\\[2mm]
+One may also sample positions from a given density profile, and then assign velocities using either the spherical anisotropic DF (Section~\ref{sec:DFspherical}) or axisymmetric Jeans equations. This is currently achieved by the \texttt{sample} method of a \ttt{Density} object, which additionally takes an instance of the \ttt{Potential} and optionally the parameters of Jeans equations. Be cautioned that the API will be changed in the future, to harmonize the usage conventions with those used for action-based \ttt{GalaxyModel}s.
 
 \paragraph{SelfConsistentModel} is the driver class for performing iterative self-consistent modelling (Section~\ref{sec:SCM}). It is initialized with a list of arguments determining the parameters of the two potential expansions (\ttt{Multipole} and \ttt{CylSpline}) that are constructed in the process. To run the model, one needs to add one or more components; the list of components may be changed between iterations.\\
 \texttt{params = dict(rminSph=1e-3, rmaxSph=1e3, sizeRadialSph=40, lmaxAngularSph=0)}\\
 \texttt{scm = agama.SelfConsistentModel(**params)}
 
-\paragraph{Component} represents a single component of this model; it could either represent a static density or potential profile, or provide a DF which will contribute to the density used to compute either of the two potential expansions.\\[2mm]
+\paragraph{Component} class is a single component of this model; it could either represent a static density or potential profile, or provide a DF which will contribute to the density used to compute either of the two potential expansions.\\[2mm]
 \texttt{comp = agama.Component(df=df, density=initdens, disklike=False, **params)}\\
 creates the component with a spheroidal DF and an initial guess for the density profile;\\[2mm]
 \texttt{scm.components.append(comp)}\\
@@ -888,17 +947,36 @@ returns the density of this component; \\[2mm]
 \texttt{scm.potential}\\ is the instance of the total potential, which may be combined with the DF of each component into a \ttt{GalaxyModel} object, and used to compute other DF moments or construct an $N$-body model:\\
 \texttt{posvel, mass = agama.GalaxyModel(scm.potential, df).sample(10000)}
 
-\paragraph{orbit} integration is performed by the following routine:\\
+\paragraph{Target} class represents one of several possible targets in Schwarzschild models. It is initialized by providing \ppp{type="..."} and other parameters depending on the target type (see Section~\ref{sec:SchwarzschildDetails}). This object can be used in two contexts: either as an argument for the \texttt{orbit} routine, collecting the contribution of each orbit to each constraint in the target, or as a function applied to a \ttt{Density} or \ttt{GalaxyModel} object or an $N$-body snapshot, returning the array of constraints computed from this object.
+
+\paragraph{Orbit} integration is performed by the following routine:\\
 \texttt{result = agama.orbit(potential=pot, ic=posvel, time=int_time, ...)}\\
-here \texttt{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \texttt{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \texttt{Omega} specifies the pattern speed of a rotating coordinate system, \texttt{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \texttt{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos).
-The \texttt{result} returned by this routine is either a tuple of length 2 (for a single orbit) or an $N\times2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
+here \ppp{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \ppp{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \ppp{Omega} specifies the pattern speed of a rotating coordinate system, \ppp{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos), and \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling.
+The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing a nonzero \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
 For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\
 \texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\
 and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\
-\texttt{for trj in result[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}
+\texttt{for trj in result[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}\\
+Finally, when \texttt{lyapunov=True}, another array of length $N$ is returned, containing the estimates of Lyapunov exponents for each orbit.
+
+\paragraph{sampleOrbitLibrary} routine constructs an $N$-body snapshot from the orbit library of a Schwarzschild model, in which each orbit has a weight assigned by the \ttt{solveOpt} routine (see Section~\ref{sec:SchwarzschildDetails} for details):\\
+\texttt{
+matrix, traj = agama.orbit(potential=pot, ic=posvel, time=int_time, \\
+\mbox{}~~~~trajsize=1000, targets=[target])\\
+weights = agama.solveOpt(matrix, rhs)\\
+nbody = 1000000\\
+status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\
+The previously recorded trajectories returned by the \ttt{orbit} routine contain a certain number of points each, which may not be sufficient to sample orbits with particularly high weights. In this case, the function fails (returns \texttt{status=False}), and \texttt{result} contains the list of orbit indices which did not have enough points in previously recorded trajectories, and corresponding required numbers of samples for each orbit in this list. Then one should rerun the \ttt{orbit} routine with these parameters:\\
+\texttt{
+if not status:\\
+\mbox{}~~~~indices, trajsizes = result\\
+\mbox{}~~~~traj[indices] = agama.orbit(potential=pot, ic=posvel[indices], \\
+\mbox{}~~~~~~~~time=int_time[indices], trajsize=trajsizes)\\
+\mbox{}~~~~status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\
+In case of success (\texttt{status=True}), the \texttt{result} array contains a tuple of two arrays: \texttt{nbody}$\times6$ coordinates/velocities and \texttt{nbody} masses of particles in the $N$-body snapshot.
 
 \paragraph{N-body snapshot handling} \label{sec:PythonSnapshot} is very rudimentary; the routines\\
-\texttt{agama.writeSnapshot(filename, particles[, format])} and\\ \texttt{agama.readSnapshot(filename)} can deal with text files (7 columns -- $x,y,z,vx,vy,vz,m$), and optionally \Nemo or \textsc{Gadget} snapshots if the library was compiled with their support. Here \texttt{particles} is a tuple of two arrays: $N\times6$ position/velocity points and $N$ masses; the same convention is used to pass around snapshots in the rest of the \Python extension (e.g., in potential and sampling routines). A more powerful framework for dealing with $N$-body snapshots is provided, e.g., by the \textsc{Pynbody} library \cite{Pynbody}.
+\texttt{agama.writeSnapshot(filename, particles[, format])} and\\ \texttt{agama.readSnapshot(filename)} can deal with text files (7 columns -- $x,y,z,vx,vy,vz,m$), and optionally \Nemo or \textsc{Gadget} snapshots if the library was compiled with their support. Here \ppp{particles} is a tuple of two arrays: $N\times6$ position/velocity points and $N$ masses; the same convention is used to pass around snapshots in the rest of the \Python extension (e.g., in potential and sampling routines). A more powerful framework for dealing with $N$-body snapshots is provided, e.g., by the \textsc{Pynbody} library \cite{Pynbody}.
 
 \paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass, length and velocity), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\
 \texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\
@@ -908,7 +986,12 @@ At the moment there is no way to explicitly attach the units to the dimensional 
 \paragraph{Mathematical methods} provided by the \Python extension module include:\\
 \texttt{integrateNdim} routine for multidimensional integration (an alternative interface to the \texttt{cubature} library which is included in the \Cpp code);\\
 \texttt{sampleNdim} routine for sampling from a user-defined multidimensional function;\\
-\texttt{splineApprox} and \texttt{splineLogDensity} for constructing a penalized cubic spline approximation or density estimate from discrete samples (Section~\ref{sec:SplineFitting}).
+\texttt{splineApprox} and \texttt{splineLogDensity} routines for constructing a penalized cubic spline approximation or density estimate from discrete samples (Section~\ref{sec:SplineFitting});\\
+\texttt{nonuniformGrid} and \texttt{symmetricGrid} routines for constructing one- and two-sided semi-exponentially-spaced arrays;\\
+\texttt{bsplineInterp}, \texttt{bsplineMatrix}, \texttt{bsplineIntegrals} routines for dealing with B-splines;\\
+\texttt{ghInterp}, \texttt{ghMoments} routines for dealing with Gauss--Hermite moments (see Section~\ref{sec:SchwarzschildDetails} for \hyperref[sec:SchwarzschildExample]{examples of usage} on the last two groups).
+
+\paragraph{Colormaps} augment the rich collection of color schemes included in \texttt{matplotlib} with several custom-designed maps, which are better-balanced analogues of \texttt{jet}, \texttt{rainbow}, \texttt{gist_earth} and \texttt{inferno} maps (Figure~\ref{fig:colormaps}). They can be accessed from any \texttt{matplotlib} function under the names \ppp{breeze}, \ppp{mist}, \ppp{earth} and \ppp{hell}, respectively.
 
 
 %%%%%%%%%%%
@@ -938,10 +1021,10 @@ There is an example program showing all these modes of operation.
 %%%%%%%%%%%
 \subsection{\Galpy plugin}  \label{sec:Galpy}
 
-\Galpy \cite{Bovy2015} is a \Python-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action finders, distribution functions and more. 
-The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a thin compatibility layer on top of the standard \Agama \Python interface. This layer introduces a \Galpy-compatible potential object \ttt{galpypot.AgamaPotential} that can be constructed in the same way as the \ttt{agama.Potential} class in \Python, but provides the methods suitable for use in \Galpy. Orbit integration and action finders can only be used with \Agama potentials, but they produce results in the form compatible with \Galpy. 
+\Galpy \cite{Bovy2015} is a \Python-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action computation, distribution functions and more. 
+The potential solvers and action finders from \Agama may be seamlessly integrated into the \Galpy framework with the help of a compatibility class \ttt{agama.GalpyPotential}, which is a subclass of both \ttt{agama.Potential} and \ttt{galpy.potential.Potential}. It is constructed in the same way as a regular \Agama potential and provides a \Galpy-compatible interface for any potential type from \Agama (note however that it cannot be used to wrap a native \Galpy potential into \Agama-compatible form, but in most cases it is possible to find an analogue among native \Agama types, or simply provide a user-defined density function wrapping a \Galpy density object to a \ppp{Multipole} or \ppp{CylSpline} potential solver from \Agama). This class provides methods from both interfaces (fortunately, their names do not coincide), and can be used in all relevant contexts in both frameworks. Of course, overlapping functionality (e.g., orbit integration or action computation) is much more efficiently performed using \Agama routines, avoiding in particular the overhead of repeatedly passing the control flow between \Python and \Cpp.
 
-An example, comparing the native \Galpy action finder with that from \Agama, is provided in the file \texttt{py/galpypot.py}. Overall, the potential approximations and action finders in \Agama are more versatile, accurate and computationally efficient, while \Galpy provides a convenient plotting interface.
+An example, comparing the native \Galpy action finder with that from \Agama, is provided in the file \texttt{py/example_galpy.py}. Overall, the potential approximations and action finders in \Agama are more versatile, accurate and computationally efficient, while \Galpy provides a convenient plotting interface.
 
 
 %%%%%%%%%%%
@@ -959,30 +1042,57 @@ where the last optional argument specifies the pattern speed $\Omega$ (frequency
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tests and example programs}  \label{sec:ExamplesTests}
 
-The \Agama library itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Finally, there are several tools built on top of the library that perform some useful tasks themselves. Some of them are described below.
+The \Agama library itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} and \texttt{test_***.py} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Finally, there are several tools built on top of the library that perform some useful tasks themselves. Some of them are described below.
+
+\paragraph{example_galpy} is a \Python program showing the use of \Agama plugin for \Galpy to construct a potential, integrate orbits, and compare the accuracy of action finders between the two libraries. 
+
+\paragraph{example_amuse} illustrates the use of \Agama to provide an external potential in an $N$-body simulation performed within the \Amuse framework.
+
+\paragraph{example_fortran} demonstrates how to create and use \Agama potentials in \Fortran, both for built-in density or potential models, or for user-defined \Fortran functions that provide the density or potential.
+
+\paragraph{example_deprojection} is an interactive \Python plotting script illustrating the projection and deprojection of triaxial ellipsoidal bodies viewed at different orientations.
+
+\paragraph{example_smoothing_spline} is a \Python program showing the use of penalized smoothing splines for fitting a curve to noisy data (\ttt{splineApprox}) and for estimating 1d probability distributions from discrete samples (\ttt{splineLogDensity}).
 
 \paragraph{example_actions_nbody} shows how to determine the actions for particles from an \Nbody snapshot taken from a simulation of a disk+halo system. It first reads the snapshot and constructs two potential approximations -- \ttt{Multipole} for the halo component and \ttt{CylSpline} for the disk component -- from the particles themselves. Then it computes the actions for each particle and writes them to another file. This program exists both in \Cpp and \Python variants that perform the same task.
+
+\paragraph{example_torus} is a \Python script illustrating the use of the \ttt{ActionMapper} class to construct an orbit, comparing it to a numerically integrated trajectory.
 
 \paragraph{example_df_fit} shows how to find the parameters of a DF belonging to a particular family from a collection of points drawn from this DF in a known potential. It first computes the actions for these points, and then uses the multidimensional minimization routine \ttt{findMinNdim} to locate the parameters which maximize the likelihood of the DF given the data.
 The \Python equivalent of this program additionally determines the confidence intervals on these parameters by running a MCMC algorithm starting around the best-fit parameters.
 
-A more elaborate example in \Python determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
-This example is inspired by one of the Gaia Challenge assignments \cite{Read2017}.
+A more elaborate \Python program \texttt{gc_runfit} determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
+This program is designed to work with the mock data from the \href{http://astrowiki.ph.surrey.ac.uk/dokuwiki/doku.php?id=tests:sphtri:spherical}{Gaia Challenge} test suite \cite{Read2020}, but can be easily adapted to other situations.
 
 \paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ttt{QuasiSpherical} DF and approximate it with a \ttt{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
 
 \paragraph{example_self_consistent_model} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ttt{QuasiIsothermal} DF for the disk; the \ttt{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
 
-\paragraph{example_galpy} is a \Python program showing the use of \Agama plugin for \Galpy to construct a potential, integrate orbits, and compare the accuracy of action finders between the two libraries. 
+There are a couple of closely related \Python programs:\\
+\texttt{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
+\texttt{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.
 
-\paragraph{example_fortran} demonstrates how to create and use \Agama potentials in \Fortran, both for built-in density or potential models, or for user-defined \Fortran functions that provide the density or potential.
+\paragraph{example_schwarzschild_simple} is a \Python script illustrating the basic steps in Schwarzschild orbit-superposition  modelling. It creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot.
+
+\paragraph{schwarzschild} is a more general \Python program for constructing multicomponent Schwarzschild models and converting them into $N$-body models. It reads all model parameters from an \texttt{ini} file (an example of a three-component axisymmetric disk galaxy model is provided in \texttt{data/schwarzschild_axisym.ini}). This program can be used in the ``theoretical'' context, when the goal is to construct a single equilibrium model with given parameters, not to fit a model to some observational data -- that job is performed by the following program.
+
+\paragraph{example_forstand} is a \Python program illustrating various aspects of observationally-constrained Schwarzschild modelling. It creates mock datasets from $N$-body models, runs a grid of models, and displays results in an interactive plot. This program can serve as a template for user scripts adapted to particular observational datasets.
 
 \phantomsection\label{sec:mkspherical}%
 \paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFsphericalIsotropic}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation.
 
-\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalIsotropicDetails}.
+\paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalIsotropicDetails}. It reads all input parameters from an \texttt{ini} file; a couple of examples are given in \texttt{data/phaseflow_corecollapse.ini} and \texttt{data/phaseflow_bahcallwolfcusp.ini}
 
-\paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}).
+\paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}), and an example input file is provided in \texttt{data/raga.ini}.
+
+\begin{figure}
+\begin{center}
+\includegraphics{Colormaps.pdf}
+\end{center}
+\vspace*{-5mm}
+\caption{Custom colormaps in \Agama (right) compared to the ones from \textsc{Matplotlib}.
+}  \label{fig:colormaps}
+\end{figure}
 
 \newpage
 %%%%%%%%%
@@ -1052,12 +1162,12 @@ This rule also has exceptions -- several wrapper classes used as proxy object fo
 Efficiency is also a prime goal: this includes a careful consideration of algorithmic complexity and minimization of computational effort. Some mathematically equivalent functions have rather different computational cost: for instance, generating two Gaussian random numbers with the Box--Muller algorithm is a few times faster than using the inverse error function; finding a given quantile (e.g., median) of an array can be done in $\mathcal{O}(N)$ operations without sorting the entire array (which costs $\mathcal{O}(N\,\log N)$ operations); and computing potential and three components of force simultaneously is faster than doing it separately.
 
 For numerical integration, a suitable coordinate transformation may dramatically improve the accuracy -- or reduce the number of function calls in the adaptive integration routine; often a fixed-order Gauss--Legendre integration is enough in a particular case, with the degree of quadrature selected by extensive numerical experiments.
-Consider, for instance, two one-dimensional integrals $I_a \equiv \int_{-1}^1 \sqrt{1-x^2}\,\D x$,
-$I_b \equiv \int_{-1}^1 1/\sqrt{1-x^2}\,\D x$; their analytical values are respectively $\pi/2$ and $\pi$. Both integrands have integrable endpoint singularities (even though the first one tends to zero as $x\to \pm 1$, it is not analytic at these points), and a na\"ive $N$-point Gauss--Legendre quadrature rule has poor convergence: relative errors are 0.003 (0.0005) with $N=5$ (10) for $I_a$, and 0.1 (0.05) for $I_b$. However, if we apply transformation of the interval $[-1..1]$ onto itself, stretching it near the endpoints, the results are far better: for a substitution $x = (3-y^2)y/2$, the errors in 5- or 10-point rule are $\sim10^{-6}$ or $10^{-12}$ for both functions, while another similar substitution $x = \sin(y\,\pi/2)$ would even make the second integral exact. Such transformations, in exactly the same context, are used, e.g., in computing the actions and frequencies.
+Consider, for instance, two one-dimensional integrals $I_a \equiv \int_{-1}^1 \sqrt{1-x^2}\,\d x$,
+$I_b \equiv \int_{-1}^1 1/\sqrt{1-x^2}\,\d x$; their analytical values are respectively $\pi/2$ and $\pi$. Both integrands have integrable endpoint singularities (even though the first one tends to zero as $x\to \pm 1$, it is not analytic at these points), and a na\"ive $N$-point Gauss--Legendre quadrature rule has poor convergence: relative errors are 0.003 (0.0005) with $N=5$ (10) for $I_a$, and 0.1 (0.05) for $I_b$. However, if we apply transformation of the interval $[-1..1]$ onto itself, stretching it near the endpoints, the results are far better: for a substitution $x = (3-y^2)y/2$, the errors in 5- or 10-point rule are $\sim10^{-6}$ or $10^{-12}$ for both functions, while another similar substitution $x = \sin(y\,\pi/2)$ would even make the second integral exact. Such transformations, in exactly the same context, are used, e.g., in computing the actions and frequencies.
 
-Multidimensional integration methods employ adaptive refinement of the integration domain, and in principle should be able to cope with strongly varying or non-analytic functions, again at the expence of accuracy (for a fixed upper limit on the number of function evaluations). However, there is another reason for applying non-trivial hand-crafted scaling transformations: if the function in question is very strongly localized in some small region of the entire domain, the adaptive integration routine may simply miss some part of the domain where none of the initially considered points yielded non-negligible function values, and hence this part was not refined at all. Such situation may arise, e.g., when computing the density $\rho(\bx) = \int f(\bx,\bv)\,\D^3v$ from a DF of a cold disk, which is very narrowly peaked at $v_r=0, v_z=0, v_\phi=v_\mathrm{circ}(r)$; hence we employ a sophisticated transformation that stretches the region around $|v| = v_\mathrm{circ}$, facilitating the task of "hitting the right point".
+Multidimensional integration methods employ adaptive refinement of the integration domain, and in principle should be able to cope with strongly varying or non-analytic functions, again at the expence of accuracy (for a fixed upper limit on the number of function evaluations). However, there is another reason for applying non-trivial hand-crafted scaling transformations: if the function in question is very strongly localized in some small region of the entire domain, the adaptive integration routine may simply miss some part of the domain where none of the initially considered points yielded non-negligible function values, and hence this part was not refined at all. Such situation may arise, e.g., when computing the density $\rho(\bx) = \int f(\bx,\bv)\,\d ^3v$ from a DF of a cold disk, which is very narrowly peaked at $v_r=0, v_z=0, v_\phi=v_\mathrm{circ}(r)$; hence we employ a sophisticated transformation that stretches the region around $|v| = v_\mathrm{circ}$, facilitating the task of "hitting the right point".
 
-Dimensional quantities are usually converted to logarithms before applying any scaling transformations, to ensure a (nearly-)scale-invariance. Consider, e.g., $\int_0^\infty f(x)\,\D x$ with a na\"ive transformation of the interval onto $[0..1]$: $x = y/(1-y)$. If the function $f(x)$ peaks between $x=10^6$ and $10^7$ (not uncommon when dealing with astronomical scales), no reasonable adaptive quadrature rule would be able to detect this peak crammed into a tiny interval $1-10^{-6} < y < 1-10^{-7}$! If, on the other hand, we employ a two-stage transformation, $x = \exp(y)$, $y = 1/(1-z)-1/z$, then the peak lies between $0.93<z<0.94$, which is far more likely to be found and handled correctly. Same considerations apply to root-finding and minimization routines; in these cases the added benefit is increased precision. If a root in the na\"ively scaled variable is at $1-10^{-10}$, it has only 5 significant digits; if our relative tolerance in root-finder was $10^{-12}$, the un-scaled variable would carry a relative error of $10^{-2}$! By contrast, in the two-stage transformation the root will be around 0.96 and we only lose one or two digits of precision.
+Dimensional quantities are usually converted to logarithms before applying any scaling transformations, to ensure a (nearly-)scale-invariance. Consider, e.g., $\int_0^\infty f(x)\,\d x$ with a na\"ive transformation of the interval onto $[0..1]$: $x = y/(1-y)$. If the function $f(x)$ peaks between $x=10^6$ and $10^7$ (not uncommon when dealing with astronomical scales), no reasonable adaptive quadrature rule would be able to detect this peak crammed into a tiny interval $1-10^{-6} < y < 1-10^{-7}$! If, on the other hand, we employ a two-stage transformation, $x = \exp(y)$, $y = 1/(1-z)-1/z$, then the peak lies between $0.93<z<0.94$, which is far more likely to be found and handled correctly. Same considerations apply to root-finding and minimization routines; in these cases the added benefit is increased precision. If a root in the na\"ively scaled variable is at $1-10^{-10}$, it has only 5 significant digits; if our relative tolerance in root-finder was $10^{-12}$, the un-scaled variable would carry a relative error of $10^{-2}$! By contrast, in the two-stage transformation the root will be around 0.96 and we only lose one or two digits of precision.
 
 A few words about \texttt{INFINITY} and \texttt{NAN} values. Infinities are valid floating-point numbers and are quite useful in some contexts where a really large number is required (for instance, as the endpoint of the root-finder interval); they propagate correctly through most expressions and some functions (e.g., \texttt{exp}, \texttt{log}, comparison operators). The infamous \texttt{NAN} is a different story: it usually%
 \footnote{In some functions, \texttt{NAN} it is used as a special, usually a default value of an input argument, indicating something like ``value is unknown''.}
@@ -1091,7 +1201,7 @@ In this chapter, we use $\boldsymbol{boldface}$ for column-vectors and \textsf{S
 We often need to represent approximately an arbitrary function of one variable, defined on a finite or infinite interval $[a,b]$.
 This is conventionally achieved by defining the inner product of two functions $f(x), g(x)$:
 \begin{align}  \label{eq:InnerProduct}
-\langle f, g \rangle \equiv \int_a^b f(x)\, g(x)\, dx \,,
+\langle f, g \rangle \equiv \int_a^b f(x)\, g(x)\, \d x \,,
 \end{align}
 and introducing a complete set of basis functions $B_i(x)$, so that any sufficiently well-behaved function $f(x)$ can be approximated by a weighted sum with a finite number of terms $M$ to any desired accuracy:
 \begin{align}  \label{eq:BasisApproximation}
@@ -1102,12 +1212,12 @@ The coefficients of this expansion (amplitudes) $A_j$ are determined from the re
 \begin{align}
 \mathcal P_i \{f\} &\equiv \langle f, B_i \rangle = \\
 \mathcal P_i \{\tilde f^{(M)}\} &\equiv \langle \tilde f^{(M)}, B_i \rangle =
-\int_a^b \tilde f^{(M)}(x)\, B_i(x)\, dx = \sum_{j=1}^M G_{ij}\, A_j  \,,
+\int_a^b \tilde f^{(M)}(x)\, B_i(x)\, \d x = \sum_{j=1}^M G_{ij}\, A_j  \,,
 \end{align}
 \end{subequations}
 where $\mathsf G$ is the Gram matrix of inner products of basis functions:
 \begin{align}  \label{eq:BasisExpansionMatrix}
-G_{ij} &\equiv \langle B_i, B_j \rangle  =  \int_a^b B_i(x)\,B_j(x)\,dx \,.
+G_{ij} &\equiv \langle B_i, B_j \rangle  =  \int_a^b B_i(x)\,B_j(x)\,\d x \,.
 \end{align}
 
 Classical basis sets are usually orthonormal, i.e., $G_{ij} = \delta_{ij}$, and addition of each subsequent term does not change existing expansion coefficients (e.g., Fourier series, orthogonal polynomials). Of course, it is possible to construct an orthogonal set by employing the Gram--Schmidt procedure for any sequence of independent basis functions. However, it is not always necessary, as long as we can solve efficiently the linear system $\mathsf G\,\boldsymbol A = \boldsymbol{\mathcal P}$ (\ref{eq:BasisExpansionCoefs}) to find $A_j$ from $\mathcal P_i$ (this is the case for the B-spline basis set discussed in the Section~\ref{sec:MathBSplineDetails}).
@@ -1127,14 +1237,15 @@ The drawback of this formulation is that the approximated density $\tilde f$ is 
 
 An example of the first kind is the differentiation or integration of $\tilde f$, represented by its expansion in terms of a similarly transformed set of basis functions. For instance, in the case of Fourier or Chebyshev series, the transformed basis functions can be exactly represented by the same or a related basis set (increasing the degree $M$ in the case of integration). For a $M$-th degree B-spline basis set described in the next section, the integrals or derivatives of basis functions are also B-splines of degree $M+1$ or $M-1$, correspondingly, defined by the same grid. This feature is used in the finite-element analysis to represent differential equations in a discretized form, and solve the equivalent linear algebra equations.
 
-An example of the second kind is a convolution operation $\tilde f \ast K \equiv \int_a^b \tilde f(y)\, K(x-y)\, dy$. If $\tilde f$ is represented by the vector of amplitudes $\boldsymbol A$, and the convolved function $\breve f \equiv \tilde f \ast K$ is represented by the vector of amplitudes $\boldsymbol{\breve A}$, the relation between these two vectors is found by applying the projection operator $\mathcal P_i$ to $\breve f$:
+An example of the second kind is a convolution operation $\tilde f \ast K \equiv \int_a^b \tilde f(y)\, K(x-y)\, \d y$. If $\tilde f$ is represented by the vector of amplitudes $\boldsymbol A$, and the convolved function $\breve f \equiv \tilde f \ast K$ is represented by the vector of amplitudes $\boldsymbol{\breve A}$, the relation between these two vectors is found by applying the projection operator $\mathcal P_i$ to $\breve f$:
 \begin{align}
 \mathcal P_i \{ \breve f \} = \sum_j K_{ij} A_j, \qquad
-K_{ij} \equiv \int_a^b dx \int_a^b dy\; B_i(x)\, B_j(y)\, K(x-y) \,.
+K_{ij} \equiv \int_a^b \d x \int_a^b \d y\; B_i(x)\, B_j(y)\, K(x-y) \,.
 \end{align}
 Hence, according to the general rule, $\boldsymbol{\breve A} = \mathsf G^{-1} \, \mathsf K\, \boldsymbol A$.
 
-\paragraph{Change of basis:} if one needs to express the function $\tilde f(x) = \sum_j A_j\, B_j(x)$ in terms of a different basis set as $\sum_m \mathcal A_m\, \mathcal B_m(x)$, the amplitudes of this expansion are given by $\boldsymbol{\mathcal A} = \mathcal G^{-1}\, \mathsf C\, \boldsymbol A$, where $C_{mj} \equiv \langle \mathcal B_m, B_j \rangle$, and $\mathcal G$ is the Gram matrix of the basis set $\mathcal B_m$. This is, in general, a lossy operation (one may call it a \textit{reinterpolation} onto the new basis), in a sense that constructing an approximation for a function $f$ directly in terms of the new basis is not equivalent to the approximation for $f$ in terms of the old basis and then a further approximation of this $\tilde f$ in terms of the new basis. Depending on the properties of both the function and the basis, the extra error may be negligible or not.
+\paragraph{Change of basis:}  \label{sec:MathBasisSetChange}
+if one needs to express the function $\tilde f(x) = \sum_j A_j\, B_j(x)$ in terms of a different basis set as $\sum_m \mathcal A_m\, \mathcal B_m(x)$, the amplitudes of this expansion are given by $\boldsymbol{\mathcal A} = \mathcal G^{-1}\, \mathsf H\, \boldsymbol A$, where $H_{mj} \equiv \langle \mathcal B_m, B_j \rangle$, and $\mathcal G$ is the Gram matrix of the basis set $\mathcal B_m$. This is, in general, a lossy operation (one may call it a \textit{reinterpolation} onto the new basis), in a sense that constructing an approximation for a function $f$ directly in terms of the new basis is not equivalent to the approximation for $f$ in terms of the old basis and then a further approximation of this $\tilde f$ in terms of the new basis. Depending on the properties of both the function and the basis, the extra error may be negligible or not.
 
 
 %%%%%%%%%%%%%%
@@ -1235,7 +1346,7 @@ By a similar argument, if we are provided with four matrices $\mathsf{f}, \maths
 
 Suppose we have $N_\mathrm{data}$ points $\{\bx, \by\}$ with weights $\boldsymbol{w}$, and we need to find a smooth function $y=f(x)$ that approximates the data in the weighted least-square sense, but does not fluctuate too much -- in other words, minimize the functional
 \begin{align}  \label{eq:ObjectiveSplineFit}
-\mathcal{Q} &\equiv \sum_{i=1}^{N_\mathrm{data}} w_i\;\left[y_i - f(x_i)\right]^2 + \lambda \int \left[f''(x)\right]^2 \,dx .
+\mathcal{Q} &\equiv \sum_{i=1}^{N_\mathrm{data}} w_i\;\left[y_i - f(x_i)\right]^2 + \lambda \int \left[f''(x)\right]^2 \,\d x .
 \end{align}
 Here $\lambda\ge 0$ is the smoothing parameter that controls the tradeoff between approximation error and wiggliness of the function \cite{GreenSilverman}; its choice is discussed below.
 
@@ -1246,7 +1357,7 @@ f(x) &\equiv \sum_{k=1}^{N_\mathrm{basis}} A_k\,B_k(x).
 We use the basis set of modified cubic ($N=3$) B-splines with natural boundary conditions, so that the number of basis functions $N_\mathrm{basis}$ is equal to the number of grid knots. Note that the value of interpolated function $f(x)$ at a grid point $x_k$ is \textit{not} equal to the amplitude of the corresponding basis function $A_k$, but rather to a linear combination of three adjacent amplitudes $A_{k-1},A_k,A_{k+1}$, see Figure~\ref{fig:SplineKernels}, left panel; however, for convenience we represent the result in terms of the array of function values $f(x_k)$, which may be used to initialize a natural cubic spline in the usual way.
 
 Let the matrix $\mathsf{B}$ with $N_\mathrm{data}$ rows and $N_\mathrm{basis}$ columns contain the values of basis functions at data points: $B_{ik} = B_k(x_i)$. Due to the locality of B-splines, this matrix is sparse -- each row contains at most $N+1$ nonzero consecutive elements. The grid in $x$ does not need to encompass all data points -- the function $f(x)$ is linearly extrapolated outside the grid boundaries.
-Define the ``roughness matrix'' $\mathsf{R}$ containing the integrals of products of second derivatives of basis functions: $R_{kl} \equiv \int B_k''(x) \, B_l''(x)\, dx$. This matrix is also sparse (band-diagonal) and symmetric.
+Define the ``roughness matrix'' $\mathsf{R}$ containing the integrals of products of second derivatives of basis functions: $R_{kl} \equiv \int B_k''(x) \, B_l''(x)\, \d x$. This matrix is also sparse (band-diagonal) and symmetric.
 The functional $\mathcal{Q}$ to be minimized (\ref{eq:ObjectiveSplineFit}) may be rewritten as
 \begin{align}  \label{eq:ObjectiveSplineFit2}
 \mathcal{Q}\equiv (\by - \mathsf{B} \bA)^{T}\, \mathsf{W}\, (\by - \mathsf{B} \bA) +
@@ -1303,7 +1414,7 @@ Often one may wish to apply a somewhat stronger smoothing than the one given by 
 \subsubsection{Penalized spline density estimate}  \label{sec:MathSplineDensityDetails}
 
 Let $P(x)>0$ be a density function defined on the entire real axis, a semi-infinite interval $[x_\mathrm{min},+\infty)$ or $(-\infty,x_\mathrm{max}]$, or a finite interval $[x_\mathrm{min},x_\mathrm{max}]$.
-Let $\{x_i, w_i\}$ be an array of $N_\mathrm{data}$ samples drawn from this distribution, where $x_i$ are their coordinates, and $w_i\ge 0$ are weights. We follow the convention that $\int P(x)\,dx$ over its domain is equal to $M\equiv \sum_i w_i$ (not necessarily unity).
+Let $\{x_i, w_i\}$ be an array of $N_\mathrm{data}$ samples drawn from this distribution, where $x_i$ are their coordinates, and $w_i\ge 0$ are weights. We follow the convention that $\int P(x)\,\d x$ over its domain is equal to $M\equiv \sum_i w_i$ (not necessarily unity).
 
 We estimate $P(x)$ using a B-spline approximation to $\ln P$ constructed for a grid of $N_\mathrm{grid}$ nodes $\{X_k\}$ \cite{OSullivan1988}. We implemented two variants of basis set: linear B-splines and modified cubic B-splines with natural boundary conditions; in both cases the number of basis function $N_\mathrm{basis}$ is equal to the number of grid nodes. The estimated log-density is thus
 \begin{align}
@@ -1312,7 +1423,7 @@ We estimate $P(x)$ using a B-spline approximation to $\ln P$ constructed for a g
 where $A_k$ are the amplitudes -- free parameters that are adjusted during the fit,\\
 $B_k(x)$  are  basis functions,\\
 $Q(x; \bA) \equiv \sum_k  A_k\, B_k(x)$  is the weighted sum of basis function, \\
-and $G_0(\bA) \equiv \int \exp[Q(x; \bA)]\, dx$  is the normalization constant determined from the condition that $\int P(x)\,dx = M$.
+and $G_0(\bA) \equiv \int \exp[Q(x; \bA)]\, \d x$  is the normalization constant determined from the condition that $\int P(x)\,\d x = M$.
 There is a gauge freedom in the choice of amplitudes $A_k$: if we add a constant to $Q(x; \bA)$, it would not have any effect on $\ln\mathcal{L}$ because this shift will be counterbalanced by $G_0$. We eliminate this freedom by fixing the amplitude of the last basis function to zero ($A_{N_\mathrm{basis}}=0$), thus retaining $N_\mathrm{ampl}\equiv N_\mathrm{basis}-1$ free parameters.
 
 As in the case of penalized spline regression, we first compute the matrix $\mathsf{B}$ of weighted basis-function values at each input point: $B_{ik} \equiv w_i\,B_k(x_i)$. This matrix is large ($N_\mathrm{data}$ rows, $N_\mathrm{ampl}$ columns) but sparse, and is further transformed into two vectors of length $N_\mathrm{ampl}$ and a square matrix of the same size:
@@ -1321,24 +1432,24 @@ $\boldsymbol{V} \equiv \mathsf{B}^T\boldsymbol{1}_{N_\mathrm{data}}$ (i.e., $V_k
 The total penalized likelihood of the model given the vector of amplitudes $\bA$ is
 \begin{align}
 \ln\mathcal{L}\; &\equiv\; \ln\mathcal{L}_\mathrm{data} - \lambda \mathcal{R}(\bA) \;\equiv\;
-\sum_{i=1}^{N_\mathrm{data}}  w_i  \ln P(x_i;\,\bA) - \lambda \int \left[\ln P''(x_i)\right]^2 \,dx \nonumber \\
+\sum_{i=1}^{N_\mathrm{data}}  w_i  \ln P(x_i;\,\bA) - \lambda \int \left[\ln P''(x_i)\right]^2 \,\d x \nonumber \\
 &= \sum_{i=1}^{N_\mathrm{data}} w_i \left(\sum_{k=1}^{N_\mathrm{ampl}} A_k B_k(x_i) - \ln G_0(\bA) + \ln M \right) - \lambda \sum_{k=1}^{N_\mathrm{ampl}} \sum_{l=1}^{N_\mathrm{ampl}} A_k\,A_l\,R_{kl}  \nonumber\\
 &= \big[ \boldsymbol{V}^T\bA - M\, \ln G_0(\bA)  + M\, \ln M \big] - \lambda\,\bA^T\,\mathsf{R}\,\bA ,
 \label{eq:MaxLikelihoodDensity}
 \end{align}
-where $\lambda \mathcal{R}$ is the roughness penalty term, and the matrix $R_{kl}\equiv \int B_k''(x)\,B_l''(x)\,dx$ is also pre-computed at the beginning of the procedure%
+where $\lambda \mathcal{R}$ is the roughness penalty term, and the matrix $R_{kl}\equiv \int B_k''(x)\,B_l''(x)\,\d x$ is also pre-computed at the beginning of the procedure%
 \footnote{It may be advantageous to use third derivatives here \cite{Silverman1982}, in which case the solution in the limit of infinite smoothing ($\mathcal{R}\to 0$) corresponds to a Gaussian density profile; however, for our choice of \textit{natural} cubic splines it is unattainable, since a quadratic function (logarithm of a Gaussian) has non-zero second derivatives at endpoints, and hence cannot be represented by a spline with natural boundary conditions.}.
 The smoothing parameter $\lambda$ controls the tradeoff between the likelihood of the data and the wiggliness of the estimated density; its choice is discussed below.
 
-Unlike the penalized spline regression problem, in which the amplitudes are obtained from a linear equation, the problem of penalized spline density estimation is nonlinear because of the normalization factor $G_0(\bA)$. The amplitudes $\bA$ that minimize $-\!\ln\mathcal{L}$ (\ref{eq:MaxLikelihoodDensity}) are found by solving the system of equations $\d \ln\mathcal{L}/\d A_k=0$ iteratively, using a multidimensional Newton method with explicit expressions for the gradient and hessian:
+Unlike the penalized spline regression problem, in which the amplitudes are obtained from a linear equation, the problem of penalized spline density estimation is nonlinear because of the normalization factor $G_0(\bA)$. The amplitudes $\bA$ that minimize $-\!\ln\mathcal{L}$ (\ref{eq:MaxLikelihoodDensity}) are found by solving the system of equations $\D \ln\mathcal{L}/\D A_k=0$ iteratively, using a multidimensional Newton method with explicit expressions for the gradient and hessian:
 \begin{subequations}
 \begin{align}
--\frac{\d \ln\mathcal{L}}{\d A_k} &= -V_k + M \frac{\d \ln G_0}{\d A_k} + 2\lambda \sum_l R_{kl}\,A_l \;, \label{eq:lnLgrad} \\
--\frac{\d^2 \ln\mathcal{L}}{\d A_k\, \d A_l} &= M \frac{\d^2 \ln G_0}{\d A_k\, \d A_l} + 2\lambda R_{kl} \,\equiv H_{kl}\;, \\
-\mbox{where }G_0 &\equiv \int \exp[Q(x; \bA)]\,dx \;, \quad
+-\frac{\D \ln\mathcal{L}}{\D A_k} &= -V_k + M \frac{\D \ln G_0}{\D A_k} + 2\lambda \sum_l R_{kl}\,A_l \;, \label{eq:lnLgrad} \\
+-\frac{\d^2 \ln\mathcal{L}}{\D A_k\, \D A_l} &= M \frac{\D ^2 \ln G_0}{\D A_k\, \D A_l} + 2\lambda R_{kl} \,\equiv H_{kl}\;, \\
+\mbox{where }G_0 &\equiv \int \exp[Q(x; \bA)]\,\d x \;, \quad
 Q(x; \bA) \equiv \sum_k  A_k\, B_k(x) \;, \nonumber \\
-\frac{\d \ln G_0}{\d A_k} &= \frac{\int B_k(x)\,\exp[Q(x; \bA)]\,dx}{G_0} \;, \nonumber\\
-\frac{\d^2 \ln G_0}{\d A_k\, \d A_l} &= \frac{\int B_k(x)\,B_l(x)\,\exp[Q(x; \bA)]\,dx}{G_0} - \frac{\d \ln G_0}{\d A_k}\; \frac{\d \ln G_0}{\d A_l} \;. \nonumber
+\frac{\D \ln G_0}{\D A_k} &= \frac{\int B_k(x)\,\exp[Q(x; \bA)]\,\d x}{G_0} \;, \nonumber\\
+\frac{\D ^2 \ln G_0}{\D A_k\, \D A_l} &= \frac{\int B_k(x)\,B_l(x)\,\exp[Q(x; \bA)]\,\d x}{G_0} - \frac{\D \ln G_0}{\D A_k}\; \frac{\D \ln G_0}{\D A_l} \;. \nonumber
 \end{align}
 \end{subequations}
 
@@ -1350,8 +1461,8 @@ The choice of smoothing parameter $\lambda$ may be done by cross-validation: for
 
 Of course, it would be prohibitively expensive to compute the best-fit amplitudes $\bA^{(i)}$ separately for each omitted point; instead, we express them as small perturbations of $\bA$, by demanding that the l.h.s. of (\ref{eq:lnLgrad}) is zero for each $i$ at the corresponding $\bA^{(i)}$:
 \begin{align*}
-0 &= -V_k + w_i\,B_k(x_i) + M \frac{\d \ln G_0}{\d A_k} + M \frac{\d^2 \ln G_0}{\d A_k\,\d A_l}(A_l^{(i)}-A_l) + 2\lambda \sum_l R_{kl}\,A_l^{(i)} \;, \\
-\delta A^{(i)}_l &\equiv A^{(i)}_l - A_l = - \left[ M \frac{\d^2 \ln G_0}{\d A_k\,\d A_l} + 2\lambda R_{kl} \right]^{-1} w_i\,B_k(x_i) \;,\mbox{ or }\;
+0 &= -V_k + w_i\,B_k(x_i) + M \frac{\D \ln G_0}{\D A_k} + M \frac{\D ^2 \ln G_0}{\D A_k\,\D A_l}(A_l^{(i)}-A_l) + 2\lambda \sum_l R_{kl}\,A_l^{(i)} \;, \\
+\delta A^{(i)}_l &\equiv A^{(i)}_l - A_l = - \left[ M \frac{\D ^2 \ln G_0}{\D A_k\,\D A_l} + 2\lambda R_{kl} \right]^{-1} w_i\,B_k(x_i) \;,\mbox{ or }\;
 \delta \mathsf{A} = -\mathsf{H}^{-1} \mathsf{B}^T .
 \end{align*}
 
@@ -1379,11 +1490,11 @@ This regime is not very stable, though, and for normal operation the grid should
 Maximization of cross-validation score is considered to be the ``optimal'' smoothing; however, in some cases the inferred $\ln P(x)$ may still be too wiggly. An alternative approach is to estimate the expected scatter in $\ln\mathcal{L}_\mathrm{data}$ for a sample of finite size $N_\mathrm{data}$, and allow the likelihood score to be worse than the best-fit score by an amount comparable to this expected scatter. In the case of uniform-weight samples and zero smoothing, the mean and dispersion in $\ln\mathcal{L}$ are
 \begin{align}
 \big\langle\ln\mathcal{L}\big\rangle &=
-  \int P(x)\,\ln P(x)\, dx = M\,\left[\frac{G_1}{G_0} + \ln M - \ln G_0\right] ,\\
+  \int P(x)\,\ln P(x)\, \d x = M\,\left[\frac{G_1}{G_0} + \ln M - \ln G_0\right] ,\\
 \Big\langle\big(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle\big)^2\Big\rangle &=
-  N_\mathrm{data}^{-1} \left( M\!\int\! P(x)\,[\ln P(x)]^2\, dx - \big\langle\ln\mathcal{L}\big\rangle^2 \right) =
+  N_\mathrm{data}^{-1} \left( M\!\int\! P(x)\,[\ln P(x)]^2\, \d x - \big\langle\ln\mathcal{L}\big\rangle^2 \right) =
   M^2 N_\mathrm{data}^{-1} \left[\frac{G_2}{G_0} - \left(\frac{G_1}{G_0}\right)^{\!2}\right]\! , \nonumber\\
-\mbox{where }\; G_n &\equiv \int \big[Q(x)\big]^n\, \exp\big[Q(x)\big]\,dx\;.  \nonumber
+\mbox{where }\; G_n &\equiv \int \big[Q(x)\big]^n\, \exp\big[Q(x)\big]\,\d x\;.  \nonumber
 \end{align}
 
 We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{opt}$ and compute the expected r.m.s. scatter $\delta\ln\mathcal{L}\equiv \sqrt{\langle(\ln\mathcal{L}-\langle\ln\mathcal{L}\rangle)^2\rangle}$ from the above equation; then we search for $\lambda$ such that $\ln\mathcal{L}_\mathrm{data}(\lambda) = \ln\mathcal{L}_\mathrm{data}(\lambda_\mathrm{opt}) - \kappa\, \delta\ln\mathcal{L}$, where $\kappa\sim 1$ is a tunable parameter. The resulting density is less fluctuating, but the asymptotic behaviour near or beyond grid boundaries, where the number of samples is low, may be somewhat biased as a result of more aggressive smoothing.
@@ -1392,12 +1503,12 @@ We first determine the best-fit $\bA$ for the optimal value of $\lambda_\mathrm{
 %%%%%%%%%%%%%%
 \subsubsection{Gauss--Hermite series}  \label{sec:MathGaussHermiteDetails}
 
-Gauss--Hermite (GH) expansion is another type of basis set, useful for representing velocity distribution functions, which are typically not too dissimilar to a Gaussian profile. Unlike the B-spline basis set, which is specified by the number and location of grid nodes and the degree of polynomials, the GH basis is specified by the parameters of the zero-order function (a Gaussian with the given amplitude $\Xi$, mean value $x_0$, and width $\sigma$) and the order of expansion $M$. The total number of basis functions is $M+1$, and they are defined as
+Gauss--Hermite (GH) expansion is another type of basis set, useful for representing velocity distribution functions, which are typically not too dissimilar to a Gaussian profile. Unlike the B-spline basis set, which is specified by the number and location of grid nodes and the degree of polynomials, the GH basis is specified by the parameters of the zero-order function (a Gaussian with the given amplitude $\Xi$, mean value $\mu$, and width $\sigma$) and the order of expansion $M$. The total number of basis functions is $M+1$, and they are defined as
 \begin{subequations}
 \begin{align}  \label{eq:GaussHermiteBasis}
 \mathcal B_m(x) \equiv \frac{\Xi}{\sqrt{2\pi}\;\sigma} \;
-\exp\left[ -\frac{1}{2} \left( \frac{x-x_0}{\sigma} \right)^2 \right] \;
-\mathcal H_m \left( \frac{x-x_0}{\sigma} \right) \,,
+\exp\left[ -\frac{1}{2} \left( \frac{x-\mu}{\sigma} \right)^2 \right] \;
+\mathcal H_m \left( \frac{x-\mu}{\sigma} \right) \,,
 \end{align}
 where $\mathcal{H}_m(y)$ are the (astrophysical) Hermite polynomials \cite{Gerhard1993, vdMarelFranx1993}, defined by a recurrence relation
 \begin{align}  \label{eq:HermitePoly}
@@ -1410,47 +1521,47 @@ where $\mathcal{H}_m(y)$ are the (astrophysical) Hermite polynomials \cite{Gerha
 They differ in normalization from the physicist's definition of Hermite polynomials $H(y)$: 
 $\mathcal H_m(y) = H_m(y) / \sqrt{2^m\,m!}$. The GH basis functions are orthogonal on the real axis, with the Gram matrix being
 \begin{align}
-\mathcal G_{mn} \equiv \int_{-\infty}^{\infty} \mathcal B_m(x)\, \mathcal B_n(x)\, dx =
+\mathcal G_{mn} \equiv \int_{-\infty}^{\infty} \mathcal B_m(x)\, \mathcal B_n(x)\, \d x =
 \frac{\Xi^2}{2\sqrt{\pi}\,\sigma}\, \delta_{mn} \,.
 \end{align}
 
 According to the general definition given in Section~\ref{sec:MathBasisSetDetails}, any function $f(x)$ can be approximated as a sum of GH basis functions multiplied by amplitudes $\boldsymbol{h}$ (also called GH coefficients):
 \begin{align}  \label{eq:GHcoefs}
 \tilde f(x) = \sum_{m=0}^{M} h_m\, \mathcal B_m(x), \quad
-h_m = \frac{2\sqrt{\pi}\,\sigma}{\Xi^2} \int_{-\infty}^{\infty} f(x)\, \mathcal B_m(x)\, dx \,.
+h_m = \frac{2\sqrt{\pi}\,\sigma}{\Xi^2} \int_{-\infty}^{\infty} f(x)\, \mathcal B_m(x)\, \d x \,.
 \end{align}
 
-For the fixed parameters $\Xi, x_0, \sigma, M$, this expansion is defined in a unambiguous way. However, there is some redundancy (most obviously in the overall amplitude factor $\Xi$, which merely rescales the amplitudes $\boldsymbol h$). If one has freedom to adjust $\Xi$, $x_0$ and $\sigma$, it makes sense to define them in such a way that the first three coefficients are $h_0=1, h_1=h_2=0$, which is always possible (more on this later). In this case, if one limits the order of expansion $M$ to 2 (or, in fact, to 0), the approximated function $\tilde f(x)$ is actually the best-fit Gaussian for the original function $f(x)$. Addition of higher-order coefficients $h_m (m\ge 3)$ allows one to represent the deviations from this Gaussian, but does not change the first three coefficients, thanks to the orthogonality of the basis set.
+For the fixed parameters $\Xi, \mu, \sigma, M$, this expansion is defined in a unambiguous way. However, there is some redundancy (most obviously in the overall amplitude factor $\Xi$, which merely rescales the amplitudes $\boldsymbol h$). If one has freedom to adjust $\Xi$, $\mu$ and $\sigma$, it makes sense to define them in such a way that the first three coefficients are $h_0=1, h_1=h_2=0$, which is always possible (more on this later). In this case, if one limits the order of expansion $M$ to 2 (or, in fact, to 0), the approximated function $\tilde f(x)$ is actually the best-fit Gaussian for the original function $f(x)$. Addition of higher-order coefficients $h_m (m\ge 3)$ allows one to represent the deviations from this Gaussian, but does not change the first three coefficients, thanks to the orthogonality of the basis set.
 
-On the other hand, if one needs to compare two functions represented by the GH series, this can only be done if the parameters of the basis set $\Xi, x_0, \sigma$ are the same. For instance, when the observational constraints on the velocity distribution come in the form of GH coefficients $h_m$ (with the given $\Xi, x_0, \sigma$ and with the default values of $h_0=1, h_1=h_2=0$), the same function in the model must be represented in the same basis, even though the coefficients $h_{0,1,2}$ do not have the default values.
+On the other hand, if one needs to compare two functions represented by the GH series, this can only be done if the parameters of the basis set $\Xi, \mu, \sigma$ are the same. For instance, when the observational constraints on the velocity distribution come in the form of GH coefficients $h_m$ (with the given $\Xi, \mu, \sigma$ and with the default values of $h_0=1, h_1=h_2=0$), the same function in the model must be represented in the same basis, even though the coefficients $h_{0,1,2}$ do not have the default values.
 
 In practice, it may be convenient to represent the velocity distribution of the model in terms of a B-spline expansion with amplitudes $A_j$, and then convert it into the GH coefficients $h_m$. This is, of course, a linear operation $\boldsymbol h = \mathcal G^{-1}\, \mathsf C \,\boldsymbol A$ (for the given parameters of the two basis sets), with the matrix $C_{mj} = \langle \mathcal B_m, B_j \rangle$.
 
-It is important to keep in mind that $\Xi, x_0, \sigma$ are \textit{not} identical to the overall normalization, mean and dispersion of the function $\tilde f$. These are given by an amplitude-weighted sum over the corresponding values for \text{all} basis functions; for instance, the overall normalization is
+It is important to keep in mind that $\Xi, \mu, \sigma$ are \textit{not} identical to the overall normalization, mean and dispersion of the function $\tilde f$. These are given by an amplitude-weighted sum over the corresponding values for \text{all} basis functions; for instance, the overall normalization is
 \begin{subequations}
 \begin{align}  \label{eq:GHnormalization}
-\int_{-\infty}^{\infty} \tilde f(x)\, dx =
-\sum_{m=0}^M  h_m\, \int_{-\infty}^{\infty} \mathcal B_m(x)\, dx =
+\int_{-\infty}^{\infty} \tilde f(x)\, \d x =
+\sum_{m=0}^M  h_m\, \int_{-\infty}^{\infty} \mathcal B_m(x)\, \d x =
 \Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{\sqrt{m!}}{m!!} \,,
 \end{align}
 and the second moment times the above quantity is
 \begin{align}  \label{eq:GHdispersion}
-\int_{-\infty}^{\infty} \tilde f(x)\, x^2\, dx =
+\int_{-\infty}^{\infty} \tilde f(x)\, x^2\, \d x =
 \Xi\!\!\sum_{\mbox{$m$ even}}\!  h_m\, \frac{(2m+1)\,\sqrt{m!}}{m!!} \,.
 \end{align}
 \end{subequations}
 
-As mentioned above, the GH expansion is defined by the amplitude $\Xi$, mean value $x_0$ and scale $\sigma$ of the zero-order function (a pure Gaussian). Given a sufficiently large number of terms $M$, it can approximate any reasonably smooth function $f(x)$ to a desired accuracy; however, the speed of convergence naturally depends on the choice of $x_0$ and $\sigma$. There are several possible approaches for setting these parameters.
+As mentioned above, the GH expansion is defined by the amplitude $\Xi$, center $\mu$ and width $\sigma$ of the zero-order function (a pure Gaussian). Given a sufficiently large number of terms $M$, it can approximate any reasonably smooth function $f(x)$ to a desired accuracy; however, the speed of convergence naturally depends on the choice of $\mu$ and $\sigma$. There are several possible approaches for setting these parameters.
 
 \begin{enumerate}
-\item van der Marel \& Franx \cite{vdMarelFranx1993} choose the parameters $x_0, \sigma$ so that the lowest-order term approximates the function as closely as possible (this implies that only $h_0$ is nonzero, and hence the GH expansion is a pure Gaussian -- note that the best-fit Gaussian is \textit{not} a Gaussian with the width equal to the dispersion of the function!), then construct a full GH expansion with these parameters, computing the coefficients $h_m$ according to (\ref{eq:GHcoefs}). Thanks to the orthogonality of basis functions, the addition of subsequent terms does not change the previous expansion coefficients, hence in this (and \textit{only in this}) case $h_1=h_2=0$.
-\item The same authors find it ``more convenient in practice'' to fit a truncated GH series $\mathscr L(x) \equiv \mathcal B_0(x) + \sum_{m=3}^M h_m\,\mathcal B_m(x)$ to the function $f(x)$ with $\Xi, x_0, \sigma, h_3 \dots h_M$ as free parameters adjusted during the fit to minimize the rms deviation between the function and its approximation, while still fixing $h_0=1, h_1=h_2=0$.
-In this case, all parameters in the fit depend on the order of expansion $M$; in other words, this is the best approximation \textit{at the given order}, not the approximation in which the lowest-order function is chosen to be the best-fit one. Naturally, this results in a better overall fit, but note that this is \textit{not} a true GH expansion: if we compute the coefficients $h_{0,1,2}$ for the original function $f(x)$ with the parameters $x_0,\sigma$ having the best-fit values as described above, they will not have the values $1,0,0$ as implied during the fit, while the values of the remaining coefficients will be the same. Consequently, the actual GH expansion $\tilde f(x)$ constructed with these parameters will be somewhat less accurate than the fitted function $\mathscr L(x)$, but typically still more accurate than the GH expansion constructed around the best-fit Gaussian (as in the first approach). 
-Since the fitted function $\mathscr L(x)$ has zero $h_1,h_2$, the best-fit values of $x_0,\sigma$ (and consequently all GH coefficients) will converge to the ones produced by the first method as $M \to \infty$, because only for this choice of $\sigma$ the first two GH moments vanish.
+\item van der Marel \& Franx \cite{vdMarelFranx1993} choose the parameters $\mu, \sigma$ so that the lowest-order term approximates the function as closely as possible (this implies that only $h_0$ is nonzero, and hence the GH expansion is a pure Gaussian -- note that the best-fit Gaussian is \textit{not} a Gaussian with the width equal to the dispersion of the function!), then construct a full GH expansion with these parameters, computing the coefficients $h_m$ according to (\ref{eq:GHcoefs}). Thanks to the orthogonality of basis functions, the addition of subsequent terms does not change the previous expansion coefficients, hence in this (and \textit{only in this}) case $h_1=h_2=0$.
+\item The same authors find it ``more convenient in practice'' to fit a truncated GH series $\mathscr L(x) \equiv \mathcal B_0(x) + \sum_{m=3}^M h_m\,\mathcal B_m(x)$ to the function $f(x)$ with $\Xi, \mu, \sigma, h_3 \dots h_M$ as free parameters adjusted during the fit to minimize the rms deviation between the function and its approximation, while still fixing $h_0=1, h_1=h_2=0$.
+In this case, all parameters in the fit depend on the order of expansion $M$; in other words, this is the best approximation \textit{at the given order}, not the approximation in which the lowest-order function is chosen to be the best-fit one. Naturally, this results in a better overall fit, but note that this is \textit{not} a true GH expansion: if we compute the coefficients $h_{0,1,2}$ for the original function $f(x)$ with the parameters $\mu,\sigma$ having the best-fit values as described above, they will not have the values $1,0,0$ as implied during the fit, while the values of the remaining coefficients will be the same. Consequently, the actual GH expansion $\tilde f(x)$ constructed with these parameters will be somewhat less accurate than the fitted function $\mathscr L(x)$, but typically still more accurate than the GH expansion constructed around the best-fit Gaussian (as in the first approach). 
+Since the fitted function $\mathscr L(x)$ has zero $h_1,h_2$, the best-fit values of $\mu,\sigma$ (and consequently all GH coefficients) will converge to the ones produced by the first method as $M \to \infty$, because only for this choice of $\sigma$ the first two GH moments vanish.
 \item Gerhard \cite{Gerhard1993} independently introduced the GH parametrization of velocity profiles. In his approach, the scale parameter $\sigma$ is not necessarily fixed to any particular value, hence $h_2$ (called $s_2$ in that paper) is not zero (his eq.~3.10). To avoid ambiguity, he suggests to use the true dispersion of the original function%
 \footnote{When fitting the noisy data, true dispersion is unknown a priori, so Gerhard suggests a two-step procedure: first perform a GH fit with the scale parameter $\sigma$ set to some reasonable value (e.g. the width of the main peak of the function), then compute the true dispersion from this GH series, and re-fit another GH expansion with the scale set to the true dispersion. The total dispersion determined from the GH fit is less sensitive to the poorly measured wings of the profile. van der Marel \& Franx caution that this procedure could underestimate of the dispersion if the truncated GH expansion has significant negative wings, and suggest to take $\mathrm{max}\big(\tilde f(x), 0\big)$ when computing the dispersion according to Equation~\ref{eq:GHdispersion}.}
 $f(x)$ as the scale parameter $\sigma$, but notices that sometimes a smaller value of $\sigma$ could be preferred, e.g., when the function has a sharp and narrow peak. In common with the previous choice, all coefficients $h_m$ are, in general, nonzero if $\sigma$ is not equal to the width of the best-fit Gaussian.
-\item However, if one dispenses with the constraint that $h_1=h_2=0$, then a \textit{still} better approximation (for a given order $M$) could be achieved by fitting an unrestricted GH series (\ref{eq:GHcoefs}), simultaneously optimizing $x_0,\sigma$ and all $h_{m\ge 0}$.
+\item However, if one dispenses with the constraint that $h_1=h_2=0$, then a \textit{still} better approximation (for a given order $M$) could be achieved by fitting an unrestricted GH series (\ref{eq:GHcoefs}), simultaneously optimizing $\mu,\sigma$ and all $h_{m\ge 0}$.
 \end{enumerate}
 
 %%%%%%%%%%%%%%
@@ -1462,26 +1573,26 @@ $f(x)$ as the scale parameter $\sigma$, but notices that sometimes a smaller val
 Left panel: $f(x) = \frac{1}{\sqrt{2\pi}} \exp\big(-\frac{1}{2} x^2 \big) \;\big[1 + 0.15\, \mathcal H_4(x) + 0.2\, \mathcal H_6(x) \big]$ (same as in Appendix A of \cite{Joseph2001}) is actually a pure GH expansion with 6 terms, but we fit it with only 4 terms. \protect\\
 Right panel: $f(x) = \exp(-x^6)$ is a slightly smoothed top-hat function. \protect\\
 Solid gray line shows the original function, and other lines show various approximations (each one is plotted for either positive or negative $x$ only, to reduce congestion): \protect\\
-Purple dotted line: GH expansion with the scale $\sigma$ equal to that of the best-fit Gaussian (variant 1 in the list) has $h_2=0$ by construction, and recovers the true value of $h_4$ on the left panel, but is not the best fit by itself.
-Dashed green line: best-fit function $\mathscr L(x)$ which looks like a GH expansion with $h_2=0$ and adjustable $\sigma,h_4$ (variant 2 in the list). It is not the \textit{true} GH expansion of the function $f(x)$ with this scale $\sigma$, however: the latter is shown by dot-dashed cyan line, and has non-zero $h_2$.
-Long-dashed blue line: GH expansion with the scale $\sigma$ equal to the true dispersion of the original function (variant 3 in the list) also has non-zero $h_2$.
+Purple dotted line: GH expansion with the scale $\sigma$ equal to that of the best-fit Gaussian (variant 1 in the list) has $h_2=0$ by construction, and recovers the true value of $h_4$ on the left panel, but is not the best fit by itself.\protect\\
+Dashed green line: best-fit function $\mathscr L(x)$ which looks like a GH expansion with $h_2=0$ and adjustable $\sigma,h_4$ (variant 2 in the list). It is not the \textit{true} GH expansion of the function $f(x)$ with this scale $\sigma$, however: the latter is shown by dot-dashed cyan line, and has non-zero $h_2$.\protect\\
+Long-dashed blue line: GH expansion with the scale $\sigma$ equal to the true dispersion of the original function (variant 3 in the list) also has non-zero $h_2$.\protect\\
 Dash-double-dotted red line: the absolute best-fit GH expansion with $\sigma, h_2$ and $h_4$ all being free parameters, which has the smallest deviation from the original function (not shown on the left panel because it is very similar to the variant 1).
 } \label{fig:GHmoments}
 \end{figure}
 %%%%%%%%%%%%
 
-Among these approaches, the first one (taking $x_0$ and $\sigma$ to be the parameters of the best-fit Gaussian) is the only one that gives the same values for all $h_m$ coefficients regardless of the order of expansion $M$ (because its parameters are fixed and do not depend on $M$), and has $h_1=h_2=0$ by construction. This makes it attractive from the conceptual point of view, because it can be ``gracefully degraded'' (truncated at a lower order while still producing a reasonable fit). In other approaches, $x_0$, $\sigma$ and all other coefficients depend on the choice of $M$, and because of two additional free parameters ($h_1,h_2$), the approximation is generally more accurate for a fixed $M$ than in the first approach. Figure~\ref{fig:GHmoments} illustrates the effect of different choices of $\sigma$ on the approximation accuracy of the resulting GH series truncated at $M=4$. The two examples shown in that figure are rather extreme, and in practice the difference is much smaller (and as mentioned before, vanishes for sufficiently high $M$, regardless of the choice of $\sigma$).
+Among these approaches, the first one (taking $\mu$ and $\sigma$ to be the parameters of the best-fit Gaussian) is the only one that gives the same values for all $h_m$ coefficients regardless of the order of expansion $M$ (because its parameters are fixed and do not depend on $M$), and has $h_1=h_2=0$ by construction. This makes it attractive from the conceptual point of view, because it can be ``gracefully degraded'' (truncated at a lower order while still producing a reasonable fit). In other approaches, $\mu$, $\sigma$ and all other coefficients depend on the choice of $M$, and because of two additional free parameters ($h_1,h_2$), the approximation is generally more accurate for a fixed $M$ than in the first approach. Figure~\ref{fig:GHmoments} illustrates the effect of different choices of $\sigma$ on the approximation accuracy of the resulting GH series truncated at $M=4$. The two examples shown in that figure are rather extreme, and in practice the difference is much smaller (and as mentioned before, vanishes for sufficiently high $M$, regardless of the choice of $\sigma$).
 We stress again that if the original function $f(x)$ is significantly non-Gaussian, one cannot interpret $\sigma$ from the best-fit approximation as the ``width'' of the function, because the higher-order terms cannot be neglected. Moreover, there is no uniquely defined set of ``true'' GH parameters -- different choices of $\sigma$ will lead to different GH expansions, and it is not clear a priori which one will converge faster as the number of terms $M$ increases (for the function shown on the right panel of the above figure, the optimal $\sigma$ appears to be substantially smaller than either the width of the best-fit Gaussian or the true dispersion).
 
 The above discussion assumed that we know perfectly the ``true'' original function. In practice, the GH expansion is often used to parametrize the velocity distribution functions extracted from or fitted to the spectra, which are often both noisy and undersampled.
-\cite{CappellariEmsellem2004} find that the first approach in the above list (fitting the data by a Gaussian with free parameters $x_0$ and $\sigma$ first and then using it to construct a GH expansion) becomes biased towards a pure Gaussian when the data is undersampled, even in the limit of zero noise, while the second approach (fitting a function $\mathscr L(x)$ with $x_0,\sigma,h_{m\ge 3}$) produces large and correlated uncertainties when the signal-to-noise ratio (SNR) is low. They design a hybrid method (the pPXF code) which uses $\mathscr L(x)$ at high SNR, but degenerates into fitting a pure Gaussian at low SNR. As explained above, the values of $\sigma$ (and hence all GH coefficients) produced by the second approach will tend to those of the first approach as $M$ increases (in the limit of well-sampled and noiseless data).
+\cite{CappellariEmsellem2004} find that the first approach in the above list (fitting the data by a Gaussian with free parameters $\mu$ and $\sigma$ first and then using it to construct a GH expansion) becomes biased towards a pure Gaussian when the data is undersampled, even in the limit of zero noise, while the second approach (fitting a function $\mathscr L(x)$ with $\mu,\sigma,h_{m\ge 3}$) produces large and correlated uncertainties when the signal-to-noise ratio (SNR) is low. They design a hybrid method (the \textsc{pPXF} code) which uses $\mathscr L(x)$ at high SNR, but degenerates into fitting a pure Gaussian at low SNR. As explained above, the values of $\sigma$ (and hence all GH coefficients) produced by the second approach will tend to those of the first approach as $M$ increases (in the limit of well-sampled and noiseless data).
 Alternatively, one may use an entirely different method for extracting the velocity distribution from the spectrum, and only then fit a GH expansion to the resulting function. \cite{Joseph2001} use a nonparametric maximum penalized likelihood method to determine $f(x)$ and then follow the first approach (determine $\sigma$ from the best-fit Gaussian) to construct a GH expansion $\tilde f(x)$.
 
 
 %%%%%%%%%%%%%%
 \subsubsection{Sampling}  \label{sec:MathSamplingDetails}
 
-The sampling routine performs the following task: given an $D$-dimensional function $f(\bx)\ge 0$ defined in a rectangular domain (without loss of generality may take it to be a unit hypercube $[0..1]^D$), generate an array of $N$ points $\bx_i$ such that their density in the vicinity of any point $\bx$ is proportional to $f(\bx)$. In other words, $f$ is interpreted as a probability distribution function and is sampled with equal-weight samples; in fact the integral $\int f(\bx)\, \D^D x = A$ needs not be unity, and is itself estimated by the routine.
+The sampling routine performs the following task: given an $D$-dimensional function $f(\bx)\ge 0$ defined in a rectangular domain (without loss of generality may take it to be a unit hypercube $[0..1]^D$), generate an array of $N$ points $\bx_i$ such that their density in the vicinity of any point $\bx$ is proportional to $f(\bx)$. In other words, $f$ is interpreted as a probability distribution function and is sampled with equal-weight samples; in fact the integral $\int f(\bx)\, \d ^D x = A$ needs not be unity, and is itself estimated by the routine.
 
 We employ an adaptive rejection sampling method.
 The entire domain $\mathcal{V}$ is partitioned hierarchically into smaller hyperrectangles (cells) $\mathcal{V}_c$, an envelope function $\bar f_c$ (constant in each cell) is constructed, and a rejection sampling is used to draw output points from each cell. This requires several (up to 10--20) iterations, during each one this partitioning is further refined in regions with where the function values are largest, and more trial points are drawn. The cells are organized into a tree structure, where each non-leaf cell is split into two equal-volume child cells along some dimension. Each leaf cell keeps the list of trial points $\bx_{c,k}\in\mathcal{V}_c$ that belong to this cell; when a cell is split in two halves, these points are distributed among the child cells.
@@ -1497,7 +1608,7 @@ The procedure, illustrated in Figure~\ref{fig:Sampling}, can be summarized as fo
 \end{figure}
 %%%%%%%%%%%%
 
-\begin{enumerate}  \setcounter{enumi}{-1}
+\begin{enumerate}  \setcounter{enumi}{-1} \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
 \item We start with only one cell $\mathcal{V}_1$ covering the entire domain, and sprinkle $M_1$ sampling points $\bx_k$ uniformly in this cell. At this stage, the estimate of the integral is just
 \begin{align}
 A = \frac{\mathrm{vol}(\mathcal{V}_1)}{M_1} \sum_{k=1}^{M_1} f(\bx_k).
@@ -1557,9 +1668,12 @@ The transformation between these coordinates (passive rotation) is given by the 
 \end{equation}
 where we used $c_\circ, s_\circ$ as shortcuts for $\cos\circ, \sin\circ$.
 The inverse transformation is described by the same angles, but with negative signs and in reverse order: $-\gamma,-\beta,-\alpha$, and its rotation matrix is $\mathsf R^{-1} = \mathsf R^T$. 
-The rotation matrix is invariant under the simultaneous substitution $\beta \to -\beta, \alpha \to \alpha+\pi, \gamma \to \gamma+\pi$; hence it is convenient to restrict the range of $\beta$ to $[0,\pi]$ and the other two angles -- to $(-\pi,\pi]$. %Moreover, \textit{if} the object has triplanar symmetry (invariant under reflection about any of the principal planes, or equivalently under change of sign of any coordinate), then a simultaneous flipping of two axes (preserving the right-handedness of the coordinate system) changes nothing in its properties, hence the transformation corresponding to $\alpha+\pi$ is equivalent to $\alpha$, or $\gamma+\pi$ -- to $\gamma$, and all three angles can be limited to the range $[0,\pi]$.
-
+The rotation matrix is invariant under the simultaneous substitution $\beta \to -\beta, \alpha \to \alpha+\pi, \gamma \to \gamma+\pi$; hence it is convenient to restrict the range of $\beta$ to $[0,\pi]$ and the other two angles -- to $(-\pi,\pi]$.\\
+\makebox[-2mm]{}\begin{tabular}{m{9.5cm} r}
+In the case of a triplanar symmetry (invariance under reflection about any of the three principal planes, or equivalently under change of sign of any coordinate), one may simultaneously change the sign of any two coordinates while preserving the right-handedness of the coordinate system, and this will not change any physical property of the system. These simultaneous sign changes and associated transformations of Euler angles are listed in the table on the right.
+&
 \begin{tabular}{c c c r r r}
+x & y & z & & \makebox[0pt][r]{angles} \\
 \raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$+$} & \raisebox{-8pt}[0pt][0pt]{$+$}
 &   $\alpha$ & $\beta$ & $\gamma$ \\
 &&& $\pi+\alpha$ & $-\beta$ & $\pi+\gamma$ \\
@@ -1573,6 +1687,7 @@ The rotation matrix is invariant under the simultaneous substitution $\beta \to 
 &   $\pi+\alpha$ & $\beta$ & $\gamma$ \\
 &&& $\alpha$ & $-\beta$ & $\pi+\gamma$
 \end{tabular}
+\end{tabular}
 
 This kind of transformation is used to convert between the intrinsic coordinates of the stellar system (original frame $\bx\by\bz$) and the observed coordinates (rotated frame $\bX\bY\bZ$), where the $\bZ$ axis points along the line of sight away from the observer, the $\bY$ axis points upward / north in the image plane, and the $\bX$ axis -- leftward (!) / east in the image plane.
 Note that this creates a rather awkward situation that the $\bX$ axis is directed opposite to the usual rightward orientation in conventional two-dimensional plots: this results from the unfortunate fact that the observer sits ``inside'' the celestial sphere. This transformation is often referred to as projection onto the sky or image plane $XY$. As another example of wrecked but venerable astronomical convention, position angles (PA) in the $XY$ plane are measured from the $\bY$ (north) direction towards $\bX$ (east), i.e., counter-clockwise in this configuration; hence the PA of $\bX$ is $\pi/2$.
@@ -1580,7 +1695,7 @@ In some studies, the orientation of the rotated frame is given by the spherical 
 
 If the shape of an object in the intrinsic reference frame is a triaxial ellipsoid with the major axis $a\bx$, intermediate axis $b\by$ and minor axis $c\bz$, then the projection along the major axis corresponds to $\{\alpha,\beta\} = \{\pm\pi/2, \pi/2\}$, along the intermediate axis -- to $\{0, \pi/2\}$ or $\pi,\pi/2$, and along the minor axis -- to $\beta=0$ and any $\alpha$. In a general case, $\beta$ is the inclination angle (0 is ``face-on'' orientation and $\pi/2$ is ``edge-on''), and $\gamma$ is the PA of the projection of the intrinsic minor axis $\bz$ onto the sky plane. 
 In the case of an axisymmetric system, the first rotation ($\alpha$) does not change anything in its properties, hence we may set $\alpha=0$. Then the intrinsic major axis $\bx$ coincides with the line of nodes, and its PA is $\gamma+\pi/2$.
-In a general case, the projection of a triaxial ellipsoid is also an ellipse in the image plane, but its major and minor axes $A,B$ and orientation (PA $\eta$) are related to the intrinsic shape $a,b,c$ and viewing angles $\alpha,\beta,\gamma$ in a rather complicated way. In particular, the major axis of the ellipse may not be aligned with any of the three projected principal axes. There are routines \texttt{getProjectedEllipse}, \texttt{getIntrinsicShape} and \texttt{getViewingAngles} for computing one of these triplets from the other two, but note that the deprojection (determination of either the intrinsic shape or the viewing angles) is not always possible. For an axisymmetric system, there are two possible choices of viewing angles, depending on which side of the system is nearer, and for a triaxial system, there are four possible combinations of viewing angles, illustrated in Figure~\ref{fig:TriaxialProjection}.
+In a general case, the projection of a triaxial ellipsoid is also an ellipse in the image plane, but its major and minor axes $A,B$ and orientation (PA $\eta$) are related to the intrinsic shape $a,b,c$ and viewing angles $\alpha,\beta,\gamma$ in a rather complicated way. In particular, the major axis of the ellipse may not be aligned with any of the three projected principal axes. There are routines \texttt{getProjectedEllipse}, \texttt{getIntrinsicShape} and \texttt{getViewingAngles} for computing one of these triplets from the other two, but note that the deprojection (determination of either the intrinsic shape or the viewing angles) is not always possible. For an axisymmetric system, there are two possible choices of viewing angles, depending on which side of the system is nearer, and for a triaxial system, there are four possible combinations of viewing angles. %, illustrated in Figure~\ref{fig:TriaxialProjection}.
 
 In case that the distance to the stellar system is not overwhelmingly larger than its characteristic size (or equivalently, when it occupies a non-negligible area on the sky), one needs to employ more sophisticated transformations between the cartesian intrinsic coordinates within the stellar system and the spherical coordinates on the sky (no longer ``sky plane''). An extreme case is our Galaxy, where the observer is located well within the stellar system, and it occupies the entire sky. Also in this case, we may need to consider shifts, not only rotations of the coordinate systems. The projection transformations will be extended to these cases in the future.
 
@@ -1619,8 +1734,8 @@ Extrapolation to small and large radii (beyond the extent of the grid) is perfor
 
 A \ttt{Multipole} potential may be constructed either from an existing potential object (in which case it simply computes a spherical-harmonic transform of the original potential at radial grid nodes), or from a density profile (thereby solving the Poisson equation):
 \begin{align}
-\Phi_{l,m}(r) &= -\frac{4\pi}{2l+1} \left[ r^{-l-1} \int_0^r \rho_{l,m}(r')\,{r'}^{\,l+2}\,dr' + r^l\int_r^\infty \rho_{l,m}(r')\,{r'}^{\,1-l}\,dr' \right],  \label{eq:SphHarmPoisson} \\
-\rho_{l,m}(r) &\equiv \frac{1}{\sqrt{4\pi}} \int_{-1}^1 d\cos\theta\, \tilde P_l^m(\cos\theta) \int_0^{2\pi}d\phi\:\trig m\phi\:\rho(r,\theta,\phi) .  \label{eq:SphHarmDensity}
+\Phi_{l,m}(r) &= -\frac{4\pi}{2l+1} \left[ r^{-l-1} \int_0^r \rho_{l,m}(r')\,{r'}^{\,l+2}\,\d r' + r^l\int_r^\infty \rho_{l,m}(r')\,{r'}^{\,1-l}\,\d r' \right],  \label{eq:SphHarmPoisson} \\
+\rho_{l,m}(r) &\equiv \frac{1}{\sqrt{4\pi}} \int_{-1}^1 \d \cos\theta\, \tilde P_l^m(\cos\theta) \int_0^{2\pi}\d \phi\:\trig m\phi\:\rho(r,\theta,\phi) .  \label{eq:SphHarmDensity}
 \end{align}
 
 A separate class \ttt{DensitySphericalHarmonic} serves to approximate any density profile with its spherical-harmonic expansion, with coefficients being cubic splines in $\ln r$. 
@@ -1647,9 +1762,9 @@ The automatic procedure is somewhat less optimal than in case of Multipole, so i
 
 The main advantage of \ttt{CylSpline} is in its ability to efficiently represent even very flattened density profiles, which are not suitable for \ttt{Multipole} expansion. When \ttt{CylSpline} approximation is constructed from another potential, this boils down to taking the Fourier transform in $\phi$ of potential and forces of the original potential at the nodes of 2d grid in $R,z$ plane. When it is constructed from a density profile, this involves the solution of Poisson equation in cylindrical coordinates, which is performed in two steps. First, a Fourier transform of the source model is created (if it was neither axisymmetric nor a \ttt{DensityCylGrid} class, see \hyperref[sec:DensityCylGrid]{below}). Next, for each $m$-th harmonic $\rho_m$, the potential is computed at each node $R,z$ of the 2d grid using the following approach \cite{CohlTohline1999}:
 \begin{align}
-\Phi_m(R,z) &= -\int_{-\infty}^{+\infty} dz' \int_0^{\infty} dR' \,2\pi R'\,\rho_m(R',z')  
+\Phi_m(R,z) &= -\int_{-\infty}^{+\infty} \d z' \int_0^{\infty} \d R' \,2\pi R'\,\rho_m(R',z')  
   \,\Xi_m(R,z,R',z')\;,  \label{eq:PoissonCylindric} \\
-\Xi_m &\equiv \int_0^\infty dk\, J_m(kR)\, J_m(kR')\, \exp(-k|z-z'|) \;,\quad
+\Xi_m &\equiv \int_0^\infty \d k\, J_m(kR)\, J_m(kR')\, \exp(-k|z-z'|) \;,\quad
   \mbox{which evaluates to} \\
 \Xi_m&= \frac{1}{\pi\sqrt{RR'}}\, Q_{m-1/2}\left( \frac{R^2+R'^2+(z-z')^2}{2RR'} \right) \quad
   \mbox{if }R>0,R'>0,  \nonumber \\
@@ -1764,7 +1879,7 @@ The quantity introduced in \cite{BinneyTremaine} (eq.~3.248), and also used in \
 
 The actions $J_\tau$, where $\tau=\{\lambda,\nu\}$, are computed as
 \begin{align}  \label{eq:ActionsStaeckel}
-J_\tau = \frac{1}{\pi} \int_{\tau_\mathrm{min}}^{\tau_\mathrm{max}} p_\tau\,d\tau
+J_\tau = \frac{1}{\pi} \int_{\tau_\mathrm{min}}^{\tau_\mathrm{max}} p_\tau\,\d \tau
 \qquad\mbox{($\tau$ is either $\lambda$ or $\nu$)},
 \end{align}
 where the canonical momentum $p_\tau(\lambda,\nu;E,L_z,I_3)$ is expressed from (\ref{eq:I3}), and the limits of integration $\tau_\mathrm{min,max}$ are defined by the condition $p_\tau^2=0$. In the spherical limit, $J_\lambda = J_r$, $J_\nu = J_z = L-L_z$.
@@ -1785,11 +1900,11 @@ The accuracy of this approximation may be judged by computing numerically an orb
 \item If $\Phi(\lambda,\nu)$ is a St\"ackel potential, then from (\ref{eq:PotentialStaeckel}) it follows that 
 \begin{subequations}
 \begin{align}
-\frac{\d^2[(\lambda-\nu)\Phi(\lambda,\nu)]}{\d\lambda\,\d\nu} = 0\;,
+\frac{\D ^2 [ (\lambda-\nu) \Phi(\lambda,\nu)] }{\D \lambda\,\D \nu} = 0\;,
 \quad\mbox{or, in the cylindrical coordinates,} \\
-3 z\, \frac{\d\Phi}{\d R} - 3 R\, \frac{\d\Phi}{\d z} +
-R\,z\,\left(\frac{\d^2\Phi}{\d R^2} - \frac{\d^2\Phi}{\d z^2}\right) +
-(z^2 - R^2 - \Delta^2)\,\frac{\d^2\Phi}{\d R\,\d z} = 0 .
+3 z\, \frac{\D \Phi}{\D R} - 3 R\, \frac{\D \Phi}{\D z} +
+R\,z\,\left(\frac{\D ^2\Phi}{\D R^2} - \frac{\D ^2\Phi}{\D z^2}\right) +
+(z^2 - R^2 - \Delta^2)\,\frac{\D ^2\Phi}{\D R\,\D z} = 0 .
 \end{align}
 \end{subequations}
 Thus one may seek the value of $\Delta$ that minimizes the deviation of the above quantity from zero in the region occupied by the orbit.
@@ -1822,16 +1937,16 @@ This type of DF, represented by the class \ttt{df::QuasiSpherical} and its desce
 f(E,L) &= \hat f(Q) \; L^{-2\beta_0}, \qquad Q\equiv E + L^2 / (2 r_a^2) , \\[3mm]
 \hat f(Q) &= \left\{  \begin{array}{ll}
 \displaystyle \frac{2^{\beta_0}}{(2\pi)^{3/2}\, \Gamma(1-\beta_0)\; \Gamma(3/2-\beta)}\,
-\int_Q^0 \frac{d\hat\rho}{d\Phi} \frac{d\Phi}{(\Phi - Q)^{3/2-\beta_0}}, &
+\int_Q^0 \frac{\d \hat\rho}{\d \Phi} \frac{\d \Phi}{(\Phi - Q)^{3/2-\beta_0}}, &
 1/2<\beta_0<1, \\[7mm]
 \displaystyle \frac{1}{2\pi^2}\, 
-\left. \frac{d\hat\rho}{d\Phi} \right|_{\Phi=Q}, &
+\left. \frac{\d \hat\rho}{\d \Phi} \right|_{\Phi=Q}, &
 \beta_0=1/2, \\[7mm]
 \displaystyle \frac{2^{\beta_0}}{(2\pi)^{3/2}\, \Gamma(1-\beta_0)\; \Gamma(1/2-\beta)}\,
-\int_Q^0 \frac{d^2\hat\rho}{d\Phi^2} \frac{d\Phi}{(\Phi - Q)^{1/2-\beta_0}}, &
+\int_Q^0 \frac{\d ^2\hat\rho}{\d \Phi^2} \frac{\d \Phi}{(\Phi - Q)^{1/2-\beta_0}}, &
 -1/2<\beta_0<1/2, \\[7mm]
 \displaystyle \frac{1}{2\pi^2}\, 
-\left. \frac{d^2\hat\rho}{d\Phi^2} \right|_{\Phi=Q} , &
+\left. \frac{\d ^2\hat\rho}{\d \Phi^2} \right|_{\Phi=Q} , &
 \beta_0=-1/2,
 \end{array} \right. \nonumber \\[3mm]
 \hat\rho(\Phi) &\equiv \left. \rho(r) \,r^{2\beta_0}\, \big[1 + (r/r_a)^2\big]^{1-\beta_0} \right|_{r=r(\Phi)}.  \nonumber
@@ -1850,14 +1965,14 @@ In the isotropic case ($\beta_0=0$, $r_a=\infty$), the DF is a function of $E$ a
 The correspondence between energy $E$ and phase volume $h$ in the given potential is provided by the class \ttt{PhaseVolume}. Phase volume $h(E)$ and its derivative (density of states) $g(E)\equiv dh(E)/dE$ are defined as
 \begin{subequations}
 \begin{align}
-h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, dr =
-  4\pi^2\int_0^{L^2_\mathrm{circ}(E)} J_r(E,L)\,dL^2 =
-  \int_{\Phi(0)}^E g(E')\, dE' ,\\
-g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, dr =
-  4\pi^2\, \int_0^{L_\mathrm{circ}^2(E)} T_\mathrm{rad}(E,L)\,dL^2,
+h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, \d r =
+  4\pi^2\int_0^{L^2_\mathrm{circ}(E)} J_r(E,L)\,\d L^2 =
+  \int_{\Phi(0)}^E g(E')\, \d E' ,\\
+g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, \d r =
+  4\pi^2\, \int_0^{L_\mathrm{circ}^2(E)} T_\mathrm{rad}(E,L)\,\d L^2,
 \end{align}
 \end{subequations}
-where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} dr/v_r \equiv 2 \int_{r_-}^{r_+} dr/\sqrt{v^2-L^2/r^2} = \d J_r/\d E$  is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
+where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} \d r/v_r \equiv 2 \int_{r_-}^{r_+} \d r/\sqrt{v^2-L^2/r^2} = \D J_r/\D E$  is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
 In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.
 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$). The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any finite-mass model in which the density drops faster than $r^{-3}$ at large radii), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
@@ -1874,9 +1989,9 @@ The local (position-dependent) drift and diffusion coefficients in velocity are 
 v\dvpar &= \textstyle -2\Gamma\, J_{1/2} \;,\\
 \dvsqpar&= \textstyle \;\frac{2}{3}\Gamma\, \left(I_0 + J_{3/2}\right) , \\
 \dvsqper&= \textstyle \;\frac{2}{3}\Gamma\, \left(2 I_0 + 3 J_{1/2} - J_{3/2}\right) , \quad\mbox{where} \\
-I_0(E)     &\equiv \int_E^0 f(E')\, dE' = \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, dh', \\
-J_{n/2}(E,\Phi) &\equiv \int_{\Phi(r)}^E f(E') \left(\frac{E'-\Phi}{E-\Phi}\right)^{n/2} dE' = 
- \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \left(\frac{E'(h')-\Phi}{E-\Phi}\right)^{n/2} dh'.
+I_0(E)     &\equiv \int_E^0 f(E')\, \d E' = \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \d h', \\
+J_{n/2}(E,\Phi) &\equiv \int_{\Phi(r)}^E f(E') \left(\frac{E'-\Phi}{E-\Phi}\right)^{n/2} \d E' = 
+ \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \left(\frac{E'(h')-\Phi}{E-\Phi}\right)^{n/2} \d h'.
 \end{align}
 \end{subequations}
 
@@ -1885,8 +2000,8 @@ Orbit-averaged energy drift and diffusion coefficients are given by
 \begin{align}
 \langle \Delta E   \rangle_\mathrm{av} &= \phantom{2} \Gamma\; \left[I_0 - K_g/g \right], \\
 \langle \Delta E^2 \rangle_\mathrm{av} &= 2\Gamma\; \left[I_0\,h + K_h\right]/g, \\
-K_g(E) &\equiv \int_{\Phi(0)}^E f(E')\,g(E')\,dE' = \int_0^{h(E)} f(h')\,dh', \\
-K_h(E) &\equiv \int_{\Phi(0)}^E f(E')\,h(E')\,dE' = \int_0^{h(E)} \frac{f(h')\,h'}{g(h')}\,dh'.
+K_g(E) &\equiv \int_{\Phi(0)}^E f(E')\,g(E')\,\d E' = \int_0^{h(E)} f(h')\,\d h', \\
+K_h(E) &\equiv \int_{\Phi(0)}^E f(E')\,h(E')\,\d E' = \int_0^{h(E)} \frac{f(h')\,h'}{g(h')}\,\d h'.
 \end{align}
 \end{subequations}
 
@@ -1895,10 +2010,10 @@ In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\st
 Of course, an efficient evaluation of diffusion coefficients again requires interpolation from pre-computed tables, which are provided by the class \ttt{SphericalIsotropicModelLocal}. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
 Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
 
-Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) d^3v$. This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
+Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) \d ^3v$. This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
 Traditionally, the DF is expressed as a function of energy, but this has a disadvantage when it comes to solving the Poisson equation: as the potential changes, the DF should be kept fixed as a function of phase volume, not energy (e.g., \cite{Cohn1980}). Thus the formulation entirely in terms of $f(h)$ is preferrable, and does not introduce any additional complications. It is convenient to write down the FP equation in the flux-conservative form:
 \begin{align}
-\frac{\d f(h,t)}{\d (\Gamma t)} &= \frac{\d}{\d h} \left[ D_{hh} \frac{\d f(h,t)}{\d h} + D_h f(h,t) \right] , \label{eq:FokkerPlanck} \\
+\frac{\D f(h,t)}{\D (\Gamma t)} &= \frac{\D }{\D h} \left[ D_{hh} \frac{\D f(h,t)}{\D h} + D_h f(h,t) \right] , \label{eq:FokkerPlanck} \\
 D_{hh} &= g(h)\,\big[ h\, I_0(h) + K_h(h) \big], \qquad D_h = K_g(h).  \label{eq:FokkerPlanckCoefs}
 \end{align}
 To achieve high dynamical range, $h$ is further replaced by $\ln h$, with a trivial modification of the above expressions.
@@ -1907,10 +2022,175 @@ The Fokker--Planck solver, dubbed \textsc{PhaseFlow} \cite{Vasiliev2017}, has se
 \begin{itemize}
 \item The distribution function $f(h,t)$ for the evolving population of stars, represented by its values on a grid in $\ln h$. Values of $f(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f$ as a function of $\ln h$.
 \item The potential $\Phi(r)$ corresponding to the density profile $\rho(r)$ of the evolving population, plus optionally an external component (e.g., a central point mass). The 1d Poisson equation is solved by the \ttt{Multipole} class (of course, a monopole is a particular case of a multipole).
-\item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,dE$ is obtained from the DF \textit{in the given potential}. We recompute the density after the DF has been evolved in the Fokker--Planck step, using the potential extrapolated from its previous evolution to the current time. This extrapolation makes in unnecessary to iteratively improve the solution by substituting the self-consistent potential back to the r.h.s.\ of this equation.
+\item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,\d E$ is obtained from the DF \textit{in the given potential}. We recompute the density after the DF has been evolved in the Fokker--Planck step, using the potential extrapolated from its previous evolution to the current time. This extrapolation makes in unnecessary to iteratively improve the solution by substituting the self-consistent potential back to the r.h.s.\ of this equation.
 \item The drift and diffusion coefficients $D_h, D_{hh}$ are computed using a dedicated class \ttt{SphericalIsotropicModel} which combines the DF $f(h)$ with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
 \item The FP equation (\ref{eq:FokkerPlanck}) in the discretized form is solved with the Chang--Cooper scheme (e.g., \cite{ParkPetrosian1996}) or with a finite-element method, described in the appendix of \cite{Vasiliev2017}.
 \end{itemize}
+
+
+%%%%%%%%%%%%%%
+\subsection{Schwarzschild modelling}  \label{sec:SchwarzschildDetails}
+
+\begin{figure}
+\includegraphics[width=16cm]{DensityGrid.pdf}
+\caption{Discretization schemes for the 3d density profile in Schwarzschild models.\protect\\
+Left panel shows one radial shell in the ``classic'' grid scheme: one octant of a sphere is divided into three equal panes, and each pane -- into $K\times K$ cells, where $K$ is given by the parameter \ppp{stripsPerPane}. The volume discretization elements are 0th degree B-splines ($\sqcap$-shaped blocks) in the case of \ppp{type="DensityClassicTopHat"} (green indices at cell centers), or 1st degree B-splines ($\wedge$-shaped elements) in the case of \ppp{type="DensityClassicLinear"} (red indices at grid vertices). Indices further increase along the third dimension (radius), with radial shells that could be placed at arbitrary intervals (parameter \ppp{gridR}); for \ppp{DensityClassicLinear}, a single vertex at origin is added as the 0th element. In both cases, the grid may be further stretched along $Y$ and $Z$ axes by an amount controlled by \ppp{axisRatioY}, \ppp{axisRatioZ}; the radial grid then refers to the elliptical radius.\protect\\
+Right panels show the meridional section ($R,Z$) of the grid in the ``cylindrical'' scheme; the grid is rectangular but arbitrarily spaced in both directions (parameters \ppp{gridR, gridz}), and each even azimuthal harmonic term $m \le {}$\ppp{mmax} has a separate set of indices. Again, the volume discretization elements are 0th degree B-splines in the case of \ppp{type="DensityCylindricalTopHat"} (green indices at cell centers) and 1st degree B-splines in the case of \ppp{type="DensityCylindricalLinear"} (red indices at grid vertices, excluding the $Z$ axis for $m>0$, where the coefficients of the Fourier expansion of density are always zero).
+}  \label{fig:DensityGrid}
+\end{figure}
+
+The framework for constructing Schwarzschild orbit-superposition models is centered around the concept of \ttt{Target} -- an abstract interface for representing some features of the model in a discretized form. We denote the required values $U_n$ of these features as $N_\mathrm{cons}$ model constraints, and the contributions of $i$-th orbit as $u_{i,n}$. The goal of the modelling procedure is to reproduce the constraints by a weighted superposition of orbit contributions.
+There are two categories of targets: density and kinematic.
+
+\paragraph{Density targets} are used to produce a gravitationally self-consistent solution, in which the total density of the weighted superposition of orbits agrees with the Laplacian of the gravitational potential in which the orbits are integrated.
+There are three discretization schemes, which differ in the geometry of the spatial grid: classic, cylindrical, and spherical-harmonic. The first two have two variants each, differing in the degree of B-spline basis set (0 -- top-hat, 1 -- linear), and the latter is always 1st degree. 
+In the classic scheme, the volume is divided into spherical or concentric ellipsoidal shells, the surface of each shell -- into three panes, and each pane -- into $K\times K$ cells, as shown in Figure~\ref{fig:DensityGrid}, left panel. In \ppp{DensityClassicTopHat}, the volume of the model is divided into these 3d cells, and the mass of each cell (density integrated over the volume of the cell) serves as a single constraint. Equivalently, the volume discretization elements are non-overlapping quasi-rectangular blocks, and the basis functions have amplitude 1 in each cell and 0 elsewhere. In \ppp{DensityClassicLinear}, the basis functions are $\wedge$-shaped in all three directions (radial and two angular), with amplitude 1 reached at a single vertex of the grid and linearly tapering to zero at adjacent vertices. At any point, there are several (up to 8) overlapping basis functions, with their amplitudes summing up to unity. The density integrated with these weight functions still has the meaning of mass, but is associated with a grid vertex rather than grid segment, as shown in the above figure.
+
+In the cylindrical scheme, the density is first expanded into Fourier series in the azimuthal angle $\phi$, and then each $m$-th term ($m=0, 2, \dots, m_\mathrm{max}$) is represented with a 2d B-spline basis set on the orthogonal grid in $R,z$, as shown in Figure~\ref{fig:DensityGrid}, right panel. Similarly to the previous scheme, \ppp{DensityCylindricalTopHat} has basis functions that are non-overlapping and have amplitude 1 inside each cell of the 2d grid, while \ppp{DensityCylindricalLinear} has $\wedge$-shaped basis functions associated with grid vertices rather than segments. There is an additional factor $2\pi R$ in the integration of density times the basis function, so that the constraint values for the $m=0$ term have the meaning of the mass in each grid cell or vertex (hence $\sum_{n=1}^{N_\mathrm{cons}} U_n$ is the total mass within the entire grid, similarly to the classic scheme). The constraint values for higher Fourier terms ($m>0$) can have positive or negative sign, and should not be summed up to get the total mass. Since these higher-$m$ terms must be zero on the $z$ axis from regularity conditions, 1st-degree basis functions at the leftmost vertex in $R$ are excluded from the basis set.
+
+Finally, the \ppp{DensitySphHarm} scheme represents one radial coordinate with a B-spline basis set, and two angular coordinates with the spherical-harmonic basis set with order $l_\mathrm{max},m_\mathrm{max}$. Both this and the previous schemes are conceptually similar to the \ttt{Density\-SphericalHarmonic} (Section~\ref{sec:PotentialMultipoleDetails}) and \ttt{DensityCylGrid} (Section~\ref{sec:PotentialCylSplineDetails}) classes, which represent a 3d density profile as a corresponding interpolated function. The difference is that in those classes, the free parameters are the values of Fourier or multipole coefficients of density expansion at grid points, while in the target classes discussed in this section, the free parameters have the dimension of mass (density integrated over some volume).
+
+The choice of a particular discretization scheme should be tailored to the density profile that is being represented: in the case of a spheroidal profile, classic or spherical-harmonic schemes work best, while for a disky profile (possibly with a non-axisymmetric bar), cylindrical grid is preferred. In all cases, the radial (and vertical, in the cylindrical scheme) grids are defined by the user, typically with uniform or exponential spacing, and enclosing $\gtrsim 90-99\%$ of the total mass.
+
+\paragraph{Kinematic targets} come in two flavors. One is \ppp{KinemShell}, which represents the density-weighted radial and tangential velocity dispersions $\rho\sigma_{r,t}^2$ as functions of radius, projected onto the basis set of B-splines of \ppp{degree=0..3} defined by \ppp{gridr} in spherical radius. 
+It is useful to constrain the velocity anisotropy profile $\beta\equiv 1 - \frac12 \sigma_t^2/\sigma_r^2$: if $U_n^r$ and $U_n^t$ are two equal-length arrays of these projections, then the constraints to be satisfied are written as $0 = 2(1-\beta_n)\,U_n^r - U_n^t$, where $\beta_n$ is the value of $\beta$ associated with $n$-th radial basis element. This can be used in the context of ``theoretical'' Schwarzschild models, when the goal is to construct a dynamically self-consistent model with the given density profile and have some control on its kinematic structure by assuming some functional form of $\beta(r)$.
+
+More important in practice is the \ppp{LOSVD} target, which is used to constrain the kinematic structure of the model by observed line-of-sight velocity distributions in the image plane. There are several related ways of representing a LOSVD, and the relation between them is explained below.
+
+The orientation of the image plane in the intrinsic coordinate system associated with the galaxy model is specified by three Euler angles $\alpha,\beta,\gamma$, see Section~\ref{sec:CoordinateDetails} for the definition, and Figure~\ref{fig:EulerAngles} for an illustration. The intrinsic (model) coordinate system is denoted as $xyz$, and the observational coordinate system -- as $XYZ$, with $Y$ axis pointing up in the image plane, $X$ axis pointing left (note the opposite of the usual convention!), and $Z$ axis pointing perpendicular to the image plane (along the line of sight) away from the observer. This unusual sign convention for the $X$ axis is a consequence of the right-handedness of the coordinate frame. $\beta$ is the usual inclination angle; $\gamma$ is the angle between the line of nodes (intersection of $xy$ and $XY$ planes) and the $X$ axis, and $\alpha$ is the angle between the line of nodes and the $x$ (major) axis of the galaxy (it is relevant only for non-axisymmetric systems). If there are several observational datasets, each one needs a separate instance of a \ppp{LOSVD} target, with the parameters \ppp{gamma} possibly different between instances, and the other two angles \ppp{alpha}, \ppp{beta} being identical.
+
+The LOSVDs are recorded in several spatial regions (apertures), which are arbitrary polygonal regions $\Omega_a$ in the image plane. The \ppp{apertures} parameter should contain a list of $N_a\times2$ two-dimensional arrays specifying the $N_a$ coordinates $X,Y$ of $a$-th boundary polygon. Often these apertures come from binning up pixels in a regular two-dimensional grid in the image plane, e.g., using the Voronoi binning approach \cite{CappellariCopin2003} or some other scheme. There is a \Python routine \ttt{getBinnedApertures} that reconstructs the boundary polygons from an array describing the correspondence between bin indices and pixel coordinates. But any alternative way of defining apertures (e.g. circular fibers, sectors in polar coordinates, or spaxels of a long slit) is equally well possible to describe with arbitrary boundary polygons.
+
+The effect of finite spatial resolution in the image plane is encoded in the point-spread function (PSF) of the instrument. The parameter \ppp{psf} can be specified either as a single number (the width of a circular Gaussian), or as a 2d array of several Gaussian components (the first column is the width and the second is the relative fraction of this component, which should sum up to unity).
+
+The kinematic datacube is three-dimensional: two image-plane coordinates $X,Y$ and the line-of-sight velocity $V_Z$. Accordingly, it is first recorded on a rectangular 3d grid in these variables, and represented internally as a 3d tensor-product B-spline: 
+\begin{align}  \label{eq:LOSVDinternal}
+\mathfrak{f}^\mathrm{(int)}(X,Y,V_Z) = \sum_{i,j,k} A_{ijk}\;B^{(X)}_i(X)\;B^{(Y)}_j(Y)\;B^{(V)}_k(V_Z),
+\end{align}
+where $A_{ijk}$ are the amplitudes and $B^{(X)},B^{(Y)},B^{(V)}$ are basis functions in each of the three directions. Then the two spatial directions are convolved with the PSF and rebinned onto the array of apertures. The output functions to be represented are the integrals of the LOSVD, convolved with the spatial PSF, over the area of each aperture $\Omega_a$:
+\begin{subequations}  \label{eq:LOSVDoutput}
+\begin{align}
+\mathfrak{f}_a(V_Z) &= \sum_{k} A_{a,k}\;B^{(V)}_k(V_Z), \\
+A_{a,k} &= \sum_{i,j} \iint_{X,Y\in \Omega_a} 
+\d X\, \d Y  \iint \d X'\, \d Y' \label{eq:LOSVDoutputAmpl} \\
+&\times A_{ijk}\;B^{(X)}_i(X')\;B^{(Y)}_j(Y')\;\; PSF\big( \sqrt{ (X-X')^2 + (Y-Y')^2 } \big)  \nonumber.
+\end{align}
+\end{subequations}
+The amplitudes $A_{a,k}$ of B-spline expansion in the velocity dimension (indexed by $k=1..N_V$) for each aperture (indexed by $a$) are stored in the flattened one-dimensional output array: each consecutive $N_V$ numbers refer to one aperture. The conversion between the internal and the output representations is performed transparently to the user, using a single matrix multiplication, for which the matrix is pre-computed in advance and combines the spatial convolution and rebinning steps. The parameters provided by the user are: the grids in the image plane \ppp{gridx}, \ppp{gridy} and velocity \ppp{gridv}, and the degree of B-spline basis set ranging from 0 to 3 (although \ppp{degree=2} or \ppp{3} is strongly recommended for a much greater accuracy at the same grid size, as illustrated in the appendix of \cite{VasilievValluri2020}). The image-plane grid should cover all apertures, and preferrably have an extra margin of $2-3$ times the PSF width for a more accurate convolution, but needs not be aligned with any of the apertures: the integration over $\Omega_a$ is performed exactly no matter what is the overlap between grid segments and aperture polygons. The spatial size of the grid should be comparable with the PSF width or the aperture size, whichever is larger. For instance, in the typical case that an adaptive binning scheme is employed, the apertures may consist of a single spaxel of the detector in the central area, typically smaller than the PSF width, and contain many such spaxels in the outer parts of the image. Then one may define a non-uniform \ppp{gridx} with smaller segments $\simeq$PSF width in the central part, which gradually become comparable to sizes of outermost apertures towards the endpoints in $X$. The parameter \ppp{gridy} may be omitted if it is identical to \ppp{gridx}.
+
+One may also perform smoothing along the velocity axis by providing a nonzero \ppp{velpsf} parameter. Since the integrated-light LOSVDs  are usually produced by a spectral fitting code in a velocity-deconvolved form, this is not needed (although won't hurt if the smoothing width is set to a significantly smaller value than the velocity dispersion). However, if the LOSVD is computed from individual stellar velocities, this parameter may represent the typical observational error (unfortunately, it is not easy to account for variable error bars between individual measurements).
+
+Finally, another important parameter is \ppp{symmetry}, which determines how the model LOSVDs are symmetrized before producing the output array. Possible values are: \ppp{symmetry=} \ppp{'t'} for the triaxial geometry, in which a fourfold discrete symmetry $\{x,y\}\leftrightarrow \{-x,-y\}, z \leftrightarrow -z$ holds even in the case of figure rotation; \ppp{symmetry='a'} for axisymmetric systems, which is approximately enforced by randomizing the azimuthal angle $\phi$ for each recorded point; or \ppp{symmetry='s'} for spherical systems, when both angles are randomized. This is performed in the intrinsic coordinate system $xyz$ before projection: for instance, two out of four possible identical points in the triaxial case correspond to a reflection symmetry $\mathfrak{f}(X,Y,V_Z) = \mathfrak{f}(-X,-Y,-V_Z)$, but two other points project to coordinates unrelated to $X,Y$. This parameter should be in agreement with the symmetry of the potential, but needs to be provided separately, as the \ttt{Target} object has no knowledge of the potential.
+
+\paragraph{Surface density} is the integral of $\mathfrak{f}(X,Y,V_Z)$ along the velocity axis. When the \ttt{Target} is applied to a \ttt{Density} object, it produces an array of aperture masses -- integrals of PSF-convolved LOSVDs over the area of each aperture and over velocity:
+\begin{align}  \label{eq:ApertureMass}
+\mathfrak M_a \equiv \int \mathfrak{f}(V_Z)\; \d V_Z .
+\end{align}
+In terms of the B-spline representation of the LOSVD, it can be expressed as the dot product of the vector of amplitudes $A_{a,k}$ (\ref{eq:LOSVDoutputAmpl}) by the vector of integrals of basis functions
+\begin{align}  \label{eq:BsplineIntegrals}
+\mathcal I_k \equiv \int B_k^{(V)}(V_Z)\; \d V_Z .
+\end{align}
+
+\paragraph{Observational constraints} on the LOSVD do not come in the form of B-splines, therefore one needs to convert the coefficients $A_{a,k}$ (output by the \ttt{Target} object as  a 1d flattened array $U_n$ for the entire model, or a 2d array $u_{i,n}$ of coefficients for each $i$-th orbit) into a form suitable for comparison with observations.
+
+The observed LOSVDs are usually not normalized, i.e., they provide the distribution of stars in velocities, but not the total luminosity in the given aperture. This quantity needs to be computed from the model, by applying the LOSVD \ttt{Target} to the \ttt{Density} object.
+
+Typically, the mass-to-light ratio of stars $\Upsilon$ is a free parameter in the models. When changing the mass normalization of all galactic components (including dark matter, central black hole, etc.) by the same factor $\Upsilon$, one can reuse the same orbit library, but rescale the model velocities by a factor $\sqrt\Upsilon$ before comparing the model LOSVDs to the observed ones. The rescaled LOSVD is represented by a B-spline: 
+$\mathfrak{f}'_a(V_Z) = \sum_k A'_{a,k}\;B_k\big(\sqrt\Upsilon\,V_Z\big)$, where the new set of basis functions is defined by the velocity grid multiplied by $\sqrt\Upsilon$, and the new amplitudes are $A'_{a,k} = A_{a,k}/\sqrt\Upsilon$.
+
+The observed LOSVD in $a$-th aperture is usually represented by some sort of basis-set expansion 
+$\mathfrak{f}^\mathrm{(obs)}_a(V_Z) = \sum_l C_{a,l}\,F_{a,l}(V_Z)$, with a vector of coefficients $\boldsymbol C_a \equiv C_{a,l}$ and the set of basis functions $F_{a,l}(V_Z)$. This could be a B-spline basis, e.g., a velocity histogram (0th-degree B-spline), in which case the basis functions are the same for all apertures, or a Gauss--Hermite (GH) expansion (Section~\ref{sec:MathGaussHermiteDetails}), in which case the basis functions depend on three additional parameters in each aperture -- amplitude $\Xi_a$, center $\mu_a$ and width $\sigma_a$ of the Gaussian function, which is the zeroth term in the expansion. In either case, the model LOSVDs can be \textit{reinterpolated} onto the observational basis set(s), as explained in the \hyperref[sec:MathBasisSetChange]{last paragraph} of Section~\ref{sec:MathBasisSetDetails}. The transformation between the vector of (rescaled) B-spline amplitudes of the model LOSVD $\boldsymbol A'_a$ and the vector of expansion coefficients in the observational basis set $\boldsymbol C_a$ is described by a matrix multiplication: $\boldsymbol C_a = \mathcal G^{-1}\,\mathsf H\, \boldsymbol A'_a$, where $H_{lk} \equiv \langle F_{a,l}, B_k \rangle$ and $\mathcal G_{lm} \equiv \langle F_{a,l}, F_{a,m} \rangle$ are the matrices of inner products of corresponding basis functions.
+
+\paragraph{Example} \label{sec:SchwarzschildExample} of all these steps is provided below (a complete \Python script is given in \texttt{example_forstand.py}). The apertures are Voronoi-binned as described in the file \texttt{voronoi_bins.txt} containing $N_\mathrm{aper}$ rows and 3 columns: $X$ and $Y$ coordinates of bin centers, and bin index. The kinematic measurements are provided in two alternative forms: (1) LOSVD histograms in the file \texttt{losvd_histograms.txt}, containing $N_\mathrm{aper}$ rows and $2\,N_\mathrm{bins}$ columns, each pair of consecutive columns giving the amplitude of LOSVD in a given bin of velocity grid and its error estimate; (2) Gauss--Hermite moments in the file \texttt{losvd_ghmoments.txt}, containing $N_\mathrm{aper}$ rows and 12 columns -- values and error estimates of $\mu, \sigma, h_{3..6}$.\\[2mm]
+\texttt{vorbins~~~= numpy.loadtxt("voronoi_bins.txt")\\
+apertures~= agama.schwarzlib.getBinnedApertures(\\
+\mbox{}~~~~xcoords=vorbins[:,0], ycoords=vorbins[:,1], bintags=vorbins[:,2])\\
+histfile~~= numpy.loadtxt("losvd_histograms.txt")\\
+obs_gridv~= numpy.linspace(-v_max, v_max, 16)}
+\textit{\color{Sepia} \ \# observational vel.~grid, $N_\mathrm{bins}=15$}\\
+\texttt{obs_degree= 0}
+\textit{\color{Sepia} \ \# histograms are 0th-degree B-splines}\\
+\texttt{hist_val~~= histfile[:,0::2];~~hist_err = histfile[:,1::2]}
+\textit{\color{Sepia} \ \# odd/even columns}\\
+\texttt{ghmfile~~~= numpy.loadtxt("losvd_ghmoments.txt")\\
+ghm_val~~~= ghmfile[:,0::2];~~ghm_err = ghmfile[:,1::2]\\
+num_aper~~= len(apertures)} 
+{\color{Sepia}\textit{\ \# number of apertures}\texttt{ = len(histfile) = len(ghmfile)}}\\[2mm]
+Define the density and LOSVD \ttt{Target} objects (only the necessary parameters are provided):\\[2mm]
+\texttt{mod_gridx~= numpy.linspace(-r_max, r_max, 50)}
+\textit{\color{Sepia} \ \ \# grid should cover all apertures}\\
+\texttt{mod_gridv~= numpy.linspace(-v_max, v_max, 25)}
+\textit{\color{Sepia} \ \ \# and all velocities in the model}\\
+\texttt{mod_degree= 2}
+\textit{\color{Sepia} \ \ \# degree of B-splines for representing model LOSVDs (use 2 or 3)}\\
+\texttt{tar_los~~~= agama.Target(type="LOSVD", gridx=mod_gridx, gridv=mod_gridv,\\
+\mbox{}~~~~degree=mod_degree, apertures=apertures, symmetry="s", psf=psf)\\
+mod_gridr~= agama.nonuniformGrid(30, 0.01*r_max, 5.*r_max)\\
+tar_den~~~= agama.Target(type="DensitySphHarm", lmax=0, gridr=mod_gridr)
+}\\[2mm]
+Assume we have a model potential \texttt{pot}, which also doubles as the density profile of stars, and have constructed initial conditions for the orbit library in \texttt{ic} (2d array of shape \texttt{num_orbits}${}\times 6$). Integrate the orbits while collecting the matrices $u_{i,n}^{(t)}$ containing the contribution of $i$-th orbit to $n$-th discretization element of $t$-th target:\\[2mm]
+\texttt{mat_den, mat_los = agama.orbit(potential=pot, ic=ic, time=100.*pot.Tcirc(ic),\\
+\mbox{}~~~~targets=[tar_den, tar_los])}\\[2mm]
+Next we compute the required values of density and kinematic constraints. As explained above, the observational kinematic profiles are not normalized, so we compute the overall scaling factors $\mathfrak M_a$ (\ref{eq:ApertureMass}) from the model density profile. For GH moments, a couple of extra steps are needed. First, the normalization is translated into the amplitude of the base Gaussian, summing the contributions from all even GH moments (\ref{eq:GHnormalization}). Second, the uncertainties on the mean and width of the Gaussian are converted into (approximate) uncertainties on $h_1,h_2$, which can be incorporated into the linear equation system.
+Finally, we may need to constrain the PSF-convolved surface density profile (aperture masses) separately from the 3d density profile, at least when working with GH moments (alternatively, one may add a set of constraints that $h_0$ be close to unity). This is expressed by a separate matrix constructed by dot-multiplying the LOSVD matrix of B-spline amplitudes of each orbit by the vector of B-spline integrals $\mathcal I$ (\ref{eq:BsplineIntegrals}). When fitting to LOSVD histograms directly, they will be already normalized, so separate aperture mass constraints are not necessary.\\[2mm]
+\texttt{cons_den~~= tar_den(pot)}
+\textit{\color{Sepia} \ \ \# required values of 3d density constraints}\\
+\texttt{cons_sur~~= tar_los(pot)}
+\textit{\color{Sepia} \ \ \# aperture masses (surface density integrated over apertures)}\\[1mm]
+\textit{\color{Sepia}\# row-normalize the provided histograms and multiply by aperture masses}\\
+\texttt{obs_bsint~= agama.bsplineIntegrals(degree=obs_degree, grid=obs_gridv)}\\
+\texttt{num_obs_bs= len(obs_bsint)}
+\textit{\color{Sepia}\ \ \# number of bins in observed velocity histograms}\\
+\texttt{hist_norm~= hist_val.dot(obs_bsint)}
+\textit{\color{Sepia} \ \ \# $\int \mathfrak f_a^\mathrm{(obs)}(V_Z)\, \d V_Z$ from the provided histograms}\\
+\texttt{hist_val *= (cons_sur / hist_norm).reshape(num_aper, 1)}\\
+\texttt{hist_err *= (cons_sur / hist_norm).reshape(num_aper, 1)}\\[1mm]
+\textit{\color{Sepia}\# normalization of the GH series in each aperture with contributions from $h_4$, $h_6$}\\
+\texttt{ghm_norm~~= 1 + ghm_val[:,3] * (24**0.5 / 8) + ghm_val[:,5] * (720**0.5 / 48)}\\
+\textit{\color{Sepia}\# parameters of GH series (amplitude, center, width)}\\
+\texttt{gh_params~= numpy.array([ cons_sur/ghm_norm, ghm_val[:,0], ghm_val[:,1] ]).T}\\
+\texttt{ghm_err[:,0:2] /= 2**0.5 * ghm_val[:,1:2]}
+\textit{\color{Sepia}\ \ \# $\delta h_1 \approx \delta v / \sqrt{2}\sigma$, $\delta h_2 \approx \delta \sigma / \sqrt{2}\sigma$}\\
+\texttt{ghm_val[:,0:2] *= 0} \textit{\color{Sepia}\ \ \# set $h_1=h_2=0$}\\
+\texttt{num_obs_gh= ghm_val.shape[1]} 
+\textit{\color{Sepia}\ \ \# order of GH expansion (6 in our case)}\\[1mm]
+\textit{\color{Sepia}\# matrix of orbital contributions to aperture masses}\\
+\texttt{mod_bsint = agama.bsplineIntegrals(degree=mod_degree, grid=mod_gridv)}\\
+\texttt{num_mod_bs= len(mod_bsint)}
+\textit{\color{Sepia}\ \ \# number of velocity basis functions in each aperture $N_V$}\\
+\texttt{mat_sur~~~= mat_los.reshape(num_orbits, num_aper, num_mod_bs).dot(mod_bsint)}\\[2mm]
+Now construct a Schwarzschild model for a particular value of mass-to-light ratio $\Upsilon$, scaling the velocity grid of orbit LOSVDs by $\sqrt{\Upsilon}$ and their amplitudes by $1/\sqrt{\Upsilon}$ before converting them into the form compatible with the observational constraints.\\[2mm]
+\texttt{mod_gridv_scaled = mod_gridv * Upsilon**0.5}\\[2mm]
+If using LOSVD histograms, transform the matrix of B-spline amplitudes of orbit LOSVDs into the matrix of histogram values (amplitudes of 0th-degree B-spline) defined by the observational velocity grid. This is achieved by the following conversion matrix:\\[2mm]
+\texttt{
+conv~~~~~~= numpy.linalg.solve(\\
+\mbox{}~~~~agama.bsplineMatrix(obs_degree, obs_gridv),}
+{\color{Sepia}\textit{\ \ \# same as }\texttt{obs_bsint}}\\
+\texttt{
+\mbox{}~~~~agama.bsplineMatrix(obs_degree, obs_gridv, mod_degree, mod_gridv_scaled))\\
+mat_kin~~~= mat_los.reshape(num_orbits * num_aper, num_mod_bs). \textbackslash\\
+\mbox{}~~~~dot(conv.T). \textbackslash\\
+\mbox{}~~~~reshape(num_orbits, num_aper * num_obs_bs) * Upsilon**-0.5\\
+cons_kin~~= hist_val.reshape(num_aper * num_obs_bs)\\
+err_kin~~~= hist_err.reshape(num_aper * num_obs_bs)}\\[2mm]
+If using GH moments, the routine \ttt{ghMoments} transforms the matrix of B-spline amplitudes of orbit LOSVDs into the matrix of GH moments computed in the observed GH basis defined by parameter \texttt{ghbasis} (different in each aperture). This matrix has moments $h_0..h_6$ (in this example \texttt{num_obs_gh=6}), but we don't use $h_0$ because it is not available observationally (instead, we constrain the aperture mass), so we reshape the matrix and eliminate the 0th column:\\[2mm]
+\texttt{
+mat_kin~~~= agama.ghMoments(degree=mod_degree, gridv=mod_gridv_scaled, \\
+\mbox{}~~~~matrix=mat_los, ghorder=num_obs_gh, ghbasis=gh_params). \textbackslash\\
+\mbox{}~~~~reshape(num_orbits, num_aper,~ num_obs_gh+1)[:,:,1:].~~ \textbackslash\\
+\mbox{}~~~~reshape(num_orbits, num_aper * num_obs_gh) * Upsilon**-0.5\\
+cons_kin~~= ghm_val.reshape(num_aper * num_obs_gh)\\
+err_kin~~~= ghm_err.reshape(num_aper * num_obs_gh)}\\[2mm]
+Finally, solve the quadratic optimization problem to determine orbit weights. In this example, we require that the 3d density and 2d aperture mass constraints be satisfied exactly (set an infinite penalty for them), while the observational kinematic constraints should be satisfied as closely as possible, with the penalty proportional to the inverse squared observational error:\\[2mm]
+\texttt{weights = agama.solveOpt(\\
+\mbox{}~~~~matrix=[mat_den.T, mat_sur.T, mat_kin.T],}
+\textit{\color{Sepia} \ \ \# list of matrices}\\
+\texttt{\mbox{}~~~~rhs=[cons_den, cons_sur, cons_kin],~~~~~~\mbox{}}
+\textit{\color{Sepia} \ \ \# list of RHS vectors (constraints)}\\
+\texttt{\mbox{}~~~~rpenq=[cons_den*numpy.inf, cons_sur*numpy.inf, 2*err_kin**-2])}
+\textit{\color{Sepia}\# penalties}\\[3mm]
+Many of the above steps are generally applicable to all observationally-constrained Schwarzschild models. The relevant routines and classes reside in the submodule \texttt{agama.schwarzlib}, and the user- and model-specific tasks may be kept in a separate script adapted from \texttt{example_forstand.py}.
+
 
 \newpage
 \addcontentsline{toc}{section}{References}
@@ -1953,6 +2233,9 @@ Binney J., Tremaine S., 2008, \textsl{Galactic Dynamics}, Princeton Univ.\ press
 
 \bibitem{Bovy2015}
 Bovy J., 2015, ApJS, 216, 29
+
+\bibitem{CappellariCopin2003}
+Cappellari M., Copin Y., 2003, MNRAS, 342, 345
 
 \bibitem{CappellariEmsellem2004}
 Cappellari M., Emsellem E., 2004, PASP, 116, 138
@@ -2060,8 +2343,8 @@ Portegies Zwart S., McMillan S., van Elteren E., Pelupessy I., de Vries N., 2013
 \bibitem{Posti2015}
 Posti L., Binney J., Nipoti C., Ciotti L., 2015, MNRAS, 447, 3060
 
-\bibitem{Read2017}
-Read J., et al., in prep. (Gaia Challenge)
+\bibitem{Read2020}
+Read J., Mamon G., Vasiliev E., et al., in prep. (Gaia Challenge)
 
 \bibitem{IAS15}
 Rein H., Spiegel D., 2015, MNRAS, 446, 1424
@@ -2074,6 +2357,9 @@ Sanders J., 2012, MNRAS, 426, 128
 
 \bibitem{SandersBinney2016}
 Sanders J., Binney J., 2016, MNRAS, 457, 2107
+
+\bibitem{Schwarzschild1979}
+Schwarzschild M., 1979, ApJ, 232, 236
 
 \bibitem{Skokos2010}
 Skokos Ch., 2010, LNP, 790, 63
@@ -2108,6 +2394,9 @@ Vasiliev E., 2019, MNRAS, 482, 1525
 
 \bibitem{VasilievAthanassoula2015}
 Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
+
+\bibitem{VasilievValluri2020}
+Vasiliev E., Valluri M., 2020, ApJ, submitted
 
 \bibitem{Zhao1996}
 Zhao H.-S., 1996, MNRAS, 278, 488

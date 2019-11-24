@@ -1,137 +1,19 @@
-"""
+'''
 This is a collection of various routines that complement the Python interface to the Agama library.
 The __init__.py file in the root directory of Agama package imports both the C++ extension (agama.so)
 and this python module (py/pygama.py) and merges them into a single namespace; hence one may write
->>> import agama                                  # import both C++ and Python modules simultaneously
->>> par = agama.getDensityParams(1., 2., 3., 4.)  # use routines from this file...
->>> den = agama.Density(**par)                    # and classes and routines defined in the C++ library
-"""
-
-### ------------------------------------------------------------------------------- ###
-### routines for dealing with 2d IFU data, represented on a regular 2d grid of spaxels,
-### several spaxels could be Voronoi-binned together into apertures.
-### Agama uses arbitrary polygons that define the boundaries of each aperture,
-### whether it is just a square pixel or a more complicated region.
-
-def getRegularApertures(xcoords, ycoords):
-    """
-    Construct boundary polygons corresponding to a regular separable grid in x,y:
-    each aperture is a rectangular region spanning x[i]..x[i+1], y[j]..y[j+1].
-    Input:  grid nodes in x and y; the number of pixels is (len(xcoords)-1) * (len(ycoords)-1)
-    Output: list of pixel boundaries (each element is a 4x2 array of four corner points)
-    """
-    from numpy import repeat, tile
-    ii = range(len(xcoords)-1)
-    jj = range(len(ycoords)-1)
-    return [ ((xcoords[i],ycoords[j]), (xcoords[i+1],ycoords[j]), \
-        (xcoords[i+1],ycoords[j+1]), (xcoords[i],ycoords[j+1])) \
-        for i,j in zip(tile(ii, len(jj)), repeat(jj, len(ii))) ]
-
-def getBinnedApertures(xcoords, ycoords, bintags):
-    """
-    Convert the data for Voronoi binned pixels into the polygons
-    describing the boundary of each connected Voronoi region.
-    Input: three 1d arrays of equal length: coord x and y of the center of each pixel,
-    and bin index for each pixel.
-    Output contains a list of length Nbins, each element is the list of vertices
-    of the boundary polygon for each bin (a 2d array with 2 columns (x,y) and Nvert rows).
-    """
-    import numpy
-    binTags = numpy.unique(bintags)    # list of bin tags (indices)
-    xCoords = numpy.unique(numpy.round(xcoords*1e6)*1e-6)      # list of possible x coordinates
-    yCoords = numpy.unique(numpy.round(ycoords*1e6)*1e-6)      # same for y; rounded appropriately
-    xpixel  = xCoords[1]-xCoords[0]    # size of a single pixel (assuming they all are equal)
-    ypixel  = yCoords[1]-yCoords[0]    # same in y direction
-    xcount  = int(round((xCoords[-1]-xCoords[0]) / xpixel)+1)  # total number of pixels in x direction
-    ycount  = int(round((yCoords[-1]-yCoords[0]) / ypixel)+1)  # same for y
-    if xcount > 10000 or ycount > 10000:
-        raise ValueError("Can't determine pixel size: "+str(xpixel)+" * "+str(ypixel)+" doesn't seem right")
-    polygons= []        # list of initially empty polygons
-    matrix  = numpy.ones((xcount,ycount), dtype=numpy.int32) * -1  # 2d array of binTag for each pixel
-    for (p,x,y) in zip(bintags, xcoords, ycoords):  # assign bin tags to each pixel in the 2d array
-        matrix[int(round((x-xCoords[0]) / xpixel)), int(round((y-yCoords[0]) / ypixel)) ] = int(p)
-    for b in binTags:
-        # obtain the table of x- and y-indices of all elements with the same binTag
-        ix, iy = (matrix==b).nonzero()
-        if len(ix)==0:
-            print ("Empty bin %i" % b)
-            continue
-        minx   = min(ix)-1
-        maxx   = max(ix)+2
-        miny   = min(iy)-1
-        maxy   = max(iy)+2
-        pixels = numpy.zeros((maxx-minx, maxy-miny), dtype=numpy.int32)
-        for kx,ky in zip(ix,iy):
-            pixels[kx-minx, ky-miny] = 1
-        # start at the top left corner and move counterclockwise along the boundary
-        vertices = []
-        cx, cy = ix[0]-minx, iy[0]-miny
-        direc  = 'd'  # first go down
-        edges  = 0
-        while edges < 1000:
-            if direc == 'd':
-                cx += 1
-                if   pixels[cx,   cy-1]: direc = 'l'
-                elif pixels[cx,   cy  ]: direc = 'd'
-                elif pixels[cx-1, cy  ]: direc = 'r'
-                else: direc = '?'
-            elif direc == 'r':
-                cy += 1
-                if   pixels[cx,   cy  ]: direc = 'd'
-                elif pixels[cx-1, cy  ]: direc = 'r'
-                elif pixels[cx-1, cy-1]: direc = 'u'
-                else: direc = '?'
-            elif direc == 'u':
-                cx -= 1
-                if   pixels[cx-1, cy  ]: direc = 'r'
-                elif pixels[cx-1, cy-1]: direc = 'u'
-                elif pixels[cx  , cy-1]: direc = 'l'
-                else: direc = '?'
-            elif direc == 'l':
-                cy -= 1
-                if   pixels[cx-1, cy-1]: direc = 'u'
-                elif pixels[cx,   cy-1]: direc = 'l'
-                elif pixels[cx,   cy  ]: direc = 'd'
-                else: direc = '?'
-            if direc == '?':
-                raise ValueError("Can't construct boundary polygon for bin "+str(b))
-                break
-            else:
-                vertices.append( \
-                    ( xpixel * (cx+minx-0.5) + xCoords[0], ypixel * (cy+miny-0.5) + yCoords[0] ))
-            if cx+minx == ix[0] and cy+miny == iy[0]:
-                break   # reached the initial point
-            edges += 1
-        if edges>=1000:
-            raise ValueError("Lost in the way for bin "+str(b))
-        polygons.append( numpy.array(vertices) )
-    return polygons
-
-def writeApertures(filename, polygons):
-    """
-    Write the list of polygons serving as aperture boundaries to a text file
-    """
-    with open(filename, 'w') as dfile:
-        for i,polygon in enumerate(polygons):
-            for vertex in polygon:  dfile.write('%f %f\n' % (vertex[0], vertex[1]))
-            if i<len(polygons)-1:   dfile.write('\n')
-
-def readApertures(filename):
-    """
-    Read the list of polygons from a text file
-    """
-    from numpy import array
-    with open(filename) as dfile:
-        return [array([float(a) for a in b.split()]).reshape(-1,2) for b in dfile.read().split("\n\n")]
-
-
+>>> import agama                                     # import both C++ and Python modules simultaneously
+>>> pot = agama.GalpyPotential(type='Plummer')       # use classes and routines from this file...
+>>> af  = agama.ActionFinder(pot)                    # ...or those defined in the C++ library
+'''
+import numpy as _numpy, agama as _agama
 
 ### ------------------------------------------------------------------ ###
 ### routines for coordinate transformation, projection and deprojection
 ### of ellipsoidally stratified profiles (e.g. a Multi-Gaussian expansion)
 
 def makeRotationMatrix(alpha, beta, gamma):
-    """
+    '''
     Construct the matrix for transforming the coordinates (x,y,z) in the intrinsic system
     into the coordinates (X,Y,Z) in the rotated coordinate system.
     Usually the intrinsic coordinates are associated with the stellar system,
@@ -142,21 +24,23 @@ def makeRotationMatrix(alpha, beta, gamma):
     alpha is the rotation in the equatorial plane of the stellar system,
     beta is the inclination angle,
     gamma is the rotation in the sky plane (if gamma=0, the z axis projects onto the Y axis).
-    """
-    from math import sin,cos; from numpy import array
-    return array([
-        [ cos(alpha) * cos(gamma) - sin(alpha) * cos(beta) * sin(gamma),
-          sin(alpha) * cos(gamma) + cos(alpha) * cos(beta) * sin(gamma),
-          sin(beta)  * sin(gamma) ],
-        [-cos(alpha) * sin(gamma) - sin(alpha) * cos(beta) * cos(gamma),
-         -sin(alpha) * sin(gamma) + cos(alpha) * cos(beta) * cos(gamma),
-          sin(beta)  * cos(gamma) ],
-        [ sin(alpha) * sin(beta),
-         -cos(alpha) * sin(beta),
-          cos(beta) ] ])
+    '''
+    sinalpha, sinbeta, singamma = _numpy.sin([alpha, beta, gamma])
+    cosalpha, cosbeta, cosgamma = _numpy.cos([alpha, beta, gamma])
+    return _numpy.array([
+        [ cosalpha * cosgamma - sinalpha * cosbeta * singamma,
+          sinalpha * cosgamma + cosalpha * cosbeta * singamma,
+          sinbeta  * singamma ],
+        [-cosalpha * singamma - sinalpha * cosbeta * cosgamma,
+         -sinalpha * singamma + cosalpha * cosbeta * cosgamma,
+          sinbeta  * cosgamma ],
+        [ sinalpha * sinbeta,
+         -cosalpha * sinbeta,
+          cosbeta ] ])
+
 
 def getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma):
-    """
+    '''
     Project a triaxial ellipsoid with intrinsic axes Sx, Sy, Sz onto the image plane XY,
     whose orientation w.r.t. the intrinsic coordinate system is defined by three Euler angles
     alpha, beta, gamma (Y axis points up and X axis points left!).
@@ -164,8 +48,8 @@ def getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma):
     return: SXp, SYp  are the major and minor axes of the ellipse;
     eta  is the position angle of the major axis of this ellipse in the image plane
     (measured counter-clockwise from the Y axis towards the X axis)
-    """
-    from math import sin,cos,atan2,sqrt,pi
+    '''
+    pi=_numpy.pi; sin=_numpy.sin; cos=_numpy.cos
     if abs(sin(beta)) < 1e-12:  # shortcut for a face-on orientation, avoiding roundoff errors
         return Sx, Sy, ((alpha - pi/2) * cos(beta) + gamma) % pi % pi
     # axis ratios
@@ -176,18 +60,19 @@ def getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma):
     A = (p * cos(beta) * cos(alpha))**2 + (q * sin(beta))**2 + (cos(beta) * sin(alpha))**2
     B = (p*p-1) * cos(beta) * 2 * sin(alpha) * cos(alpha)
     C = cos(alpha)**2 + (p * sin(alpha))**2
-    D = sqrt( (A-C)**2 + B**2 )
+    D = ( (A-C)**2 + B**2 )**0.5
     # axes of the projected ellipsoid
-    SXp = Sx * sqrt(2*f / (A+C-D))
-    SYp = Sx * sqrt(2*f / (A+C+D))
+    SXp = Sx * (2*f / (A+C-D))**0.5
+    SYp = Sx * (2*f / (A+C+D))**0.5
     # position angle of the projected major axis ccw from projected z axis
-    psi = 0.5 * atan2(B, A-C)
+    psi = 0.5 * _numpy.arctan2(B, A-C)
     # position angle of the projected major axis ccw from Y (north) direction in the image plane
     eta = psi + gamma
     return max(Sy, min(Sx, SXp)), max(Sz, min(Sy, SYp)), eta % pi % pi
 
+
 def getIntrinsicShape(SXp, SYp, eta, alpha, beta, gamma):
-    """
+    '''
     Deproject the ellipse in the image plane into a triaxial ellipsoid,
     for an assumed orientation of the intrinsic coord.sys. of that ellipsoid.
     SXp and SYp are lengths of the major and minor axes of the ellipse,
@@ -198,9 +83,9 @@ def getIntrinsicShape(SXp, SYp, eta, alpha, beta, gamma):
     or throw an exception if the deprojection is impossible for these angles.
     The deprojection is not unique in the following special cases:
     - if beta==0 or beta==pi (face-on view down the z axis) - cannot determine q=Sz/Sx, assume q=p;
-    - if psi==pi/2 (angle between projected z axis and major axis) - cannot determine p=Sy/Sx, assume p=1;
-    """
-    from math import pi,sin,cos,tan,sqrt
+    - if eta-gamma==pi/2 (angle between projected z axis and major axis) - cannot determine p=Sy/Sx, assume p=1;
+    '''
+    sin=_numpy.sin; cos=_numpy.cos; tan=_numpy.tan
     Q = SYp / SXp
     if Q>1:
         raise ValueError('Projected axis ratio must be <=1')
@@ -208,17 +93,22 @@ def getIntrinsicShape(SXp, SYp, eta, alpha, beta, gamma):
     if abs(sin(beta)) < 1e-12:  # face-on view (inclination is zero) - assume prolate axisymmetric shape
         return (SXp, SYp, SYp)  # q=Sz/Sx is not constrained, assume it to be equal to p=Sy/Sx
     if abs(cos(psi)) < 1e-12:   # no misalignment - assume oblate axisymmetric shape
-        return (SXp, SXp, SXp * sqrt(1 - (1-Q**2) / sin(beta)**2))
+        if 1-Q**2 > sin(beta)**2:
+            raise ValueError('Deprojection is impossible for the given inclination')
+        return (SXp, SXp, SXp * (1 - (1-Q**2) / sin(beta)**2)**0.5)
     num = (1-Q*Q) * (cos(psi) * cos(beta) / tan(alpha) + sin(psi))
     den = (num * cos(psi) - cos(beta) / tan(alpha))
-    q   = sqrt(1 - num * (cos(psi) - sin(psi) * cos(beta) / tan(alpha)) / sin(beta)**2 / den)
-    p   = sqrt(1 - (1-Q*Q) * sin(psi) * cos(psi) / sin(alpha)**2 / den)
+    q   = (1 - num * (cos(psi) - sin(psi) * cos(beta) / tan(alpha)) / sin(beta)**2 / den)**0.5
+    p   = (1 - (1-Q*Q) * sin(psi) * cos(psi) / sin(alpha)**2 / den)**0.5
     f   = (p*q * sin(beta) * sin(alpha))**2 + (q * sin(beta) * cos(alpha))**2 + (p * cos(beta))**2
-    Sx  = SXp * sqrt(Q / sqrt(f))
+    Sx  = SXp * (Q / f**0.5)**0.5
+    if _numpy.isnan(q+p+Sx):
+        raise ValueError('Deprojection is impossible for the given orientation')
     return (Sx, Sx*p, Sx*q)
 
+
 def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
-    """
+    '''
     Find the viewing angles that would project a triaxial ellipsoid with axes Sx >= Sy >= Sz
     into the ellipse in the image plane with axes SXp >= SYp and position angle of the major axis eta.
     SXp and SYp are the lengths of the major and minor axes of the ellipse in the image plane,
@@ -228,15 +118,15 @@ def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
     return: a 4x3 array, where each row represents a triplet of viewing angles alpha, beta, gamma
     (there are four possible deprojections in general, although some of them may be identical),
     or throw an exception if the deprojection is impossible for the given parameters.
-    """
-    from math import pi,asin,acos,atan,sqrt
+    '''
+    pi = _numpy.pi
     p  = Sy  / Sx
     q  = Sz  / Sx
     u  = SXp / Sx
     v  = SYp / Sx
     if not (0<=q and q<=v and v<=p and p<=u and u<=1):
         raise ValueError('Projected and assumed axis lengths are inconsistent (should be '+
-        "0 <= Sz=%.16g <= SYp=%.16g <= Sy=%.16g <= SXp=%.16g <= Sx=%.16g)" % (Sz, SYp, Sy, SXp, Sx))
+        '0 <= Sz=%.16g <= SYp=%.16g <= Sy=%.16g <= SXp=%.16g <= Sx=%.16g)' % (Sz, SYp, Sy, SXp, Sx))
     if p==q:
         if p==1:
             if abs(u-1) + abs(v-1) > 1e-12:
@@ -245,22 +135,22 @@ def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
         else:
             if abs(v-p) > 1e-12:
                 raise ValueError('Prolate axisymmetric system must have SYp = Sy')
-            beta = asin(sqrt( (1-u*u) / (1-q*q) ) )
+            beta = _numpy.arcsin( ( (1-u*u) / (1-q*q) )**0.5 )
             # this case is not yet supported ?
     else:
-        beta  = acos(sqrt( (u*u-q*q) / (1-q*q) * (v*v-q*q) / (p*p-q*q) ) )
+        beta  = _numpy.arccos( ( (u*u-q*q) / (1-q*q) * (v*v-q*q) / (p*p-q*q) )**0.5 )
     if 1-u < 1e-12:   # u=1 <=> SXp=Sx - assume an oblate axisymmetric system
         alpha = 0
     elif u-p < 1e-12 or p-v < 1e-12:
         alpha = pi/2
     else:
-        alpha = atan(sqrt( (1-v*v) * (1-u*u) / (p*p-v*v) / (u*u-p*p) * (p*p-q*q) / (1-q*q) ) )
+        alpha = _numpy.arctan( ( (1-v*v) * (1-u*u) / (p*p-v*v) / (u*u-p*p) * (p*p-q*q) / (1-q*q) )**0.5 )
     if p-v < 1e-12:
         psi   = 0
     elif u-p < 1e-12 or v-q < 1e-12 or 1-u < 1e-12:
         psi   = pi/2
     else:
-        psi   = atan(sqrt( (1-v*v) / (1-u*u) * (p*p-v*v) / (v*v-q*q) * (u*u-q*q) / (u*u-p*p) ) )
+        psi   = _numpy.arctan( ( (1-v*v) / (1-u*u) * (p*p-v*v) / (v*v-q*q) * (u*u-q*q) / (u*u-p*p) )**0.5 )
     # two possible choices of gamma, normalized at first to the range [0..2pi)
     gamma1 = (eta+psi) % (2*pi) % (2*pi)
     gamma2 = (eta-psi) % (2*pi) % (2*pi)
@@ -277,72 +167,18 @@ def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
         norm(-alpha,    beta, gamma2),
         norm( alpha, pi-beta, gamma2) )
 
-### ---------------------------------------- ###
-### Specific tools for Multi-Gaussian expansions
-
-def getDensityParams(Mass, Sx, Sy, Sz):
-    """
-    return a dictionary containing parameters for creating agama.Density object
-    corresponding to a single Gaussian component of an MGE
-    """
-    from numpy import pi
-    return dict( \
-        density = "Spheroid",
-        axisRatioY  = Sy/Sx,
-        axisRatioZ  = Sz/Sx,
-        scaleRadius = 1,
-        gamma       = 0,
-        beta        = 0,
-        alpha       = 1,
-        outerCutoffRadius = 2**0.5 * Sx,
-        cutoffStrength = 2,
-        densityNorm    = Mass / ((2*pi)**1.5 * Sx * Sy * Sz) )
-
-def makeDensityFromMGE(tab, distance, theta, phi, chi):
-    """
-    Construct an agama.Density object corresponding to a MGE read from a text file
-    and deprojected assuming the given viewing angles theta, phi, chi.
-    Input:
-    tab - array with 3 columns, as read from a text file produced by MGE fitting routines;
-    each row contains data for one Gaussian components, columns are:
-    central luminosity (Lsun/pc^2), width of the major axis (arcsec), flattening (q<=1).
-    distance - assumed distance to the object in pc, needed to convert arcseconds to parsecs.
-    theta, phi, chi - three assumed viewing angles
-    """
-    from numpy import pi,array
-    from agama import Density
-    conv = distance * pi / 648000   # conversion factor from arcseconds to parsecs
-    intrshape = array([
-        getIntrinsicShape(conv * m[1], conv * m[1] * m[2], pi/2, theta, phi, chi) for m in tab])
-    masses = 2*pi * (conv * tab[:,1])**2 * tab[:,0] * tab[:,2]
-    return Density(*[Density( **getDensityParams(mass, *axes)) for mass,axes in zip(masses, intrshape)])
-
-def surfaceDensityFromMGE(tab, xp, yp):
-    """
-    Evaluate the surface density specified by a MGE at a given set of points xp,yp in the image plane
-    Input:
-    tab - array with 3 columns, as read from a text file produced by MGE fitting routines
-    each row contains data for one Gaussian components, columns are:
-    central luminosity (Lsun/pc^2), width of the major axis (arcsec), flattening (q<=1).
-    xp, yp - two arrays of equal length, specifying the image plane coordinates of points
-    where the surface density should be computed
-    """
-    from numpy import sum,exp
-    return sum([comp[0] * exp( -0.5 * (xp**2 + (yp/comp[2])**2) / comp[1]**2) for comp in tab], axis=0)
-
 
 ### -------------------------------------------------------------------------- ###
 ### routines for representing a function specified in terms of its coefficients of
 ### B-spline or Gauss-Hermite expansions
 
-def bsplines(N, grid, x):
-    """
-    Compute B-splines of degree N over the given grid, for the input point x
-    """
+def _bsplines(degree, grid, x):
+    '''
+    Compute B-splines of given degree over the given grid, for the input point x
+    '''
     from bisect import bisect
-    from numpy import zeros
     npoints = len(grid)
-    result = zeros(npoints+N-1)
+    result = _numpy.zeros(npoints+degree-1)
     if(x<grid[0] or x>grid[npoints-1]):
         return result
     def linInt(x, grid, i1, i2):
@@ -354,58 +190,102 @@ def bsplines(N, grid, x):
             return (x-x1) / (x2-x1)
     ind = bisect(grid, x)-1
     if(ind == npoints-1): ind-=1
-    B = [0.] * (N+1)
-    B[N] = 1.
-    for l in range(N):
+    B = [0.] * (degree+1)
+    B[degree] = 1.
+    for l in range(degree):
         Bip1=0
         for j in range(ind,ind-l-2,-1):
-            i  = j-ind+N
+            i  = j-ind+degree
             Bi = B[i] * linInt(x, grid, j, j+l+1) + Bip1 * linInt(x, grid, j+l+2, j+1)
             Bip1 = B[i]
             B[i] = Bi
-    for i in range(N+1):
+    for i in range(degree+1):
         result[i+ind]=B[i]
     return result
 
-def bsplInt(N, grid, ampl, x):
-    """
-    Compute interpolated values of B-spline expansion of degree N over the given grid and ampitudes,
-    for the input point or an array of points x
-    """
-    from numpy import array, dot
-    if x is float: return dot(bsplines(N, grid, x), ampl)
-    return array([ dot(bsplines(N, grid, xx), ampl) for xx in x])
 
-def bsplIntegrals(N, grid, power=0):
-    """
+def _bsplineGaussLegendre(grid):
+    '''
+    return nodes and weights of a Gauss-Legendre quadrature for integration of piecewise polynomials
+    (e.g. products of B-splines or monomials). Use a 4-point rule, sufficient for polynomials up to
+    degree 7 (e.g. a B-spline of degree 3 times x^4, or a product of two B-splines of degrees <=3)
+    '''
+    nodes = _numpy.hstack((
+        grid[1:] * 0.0694318442029737 + grid[:-1] * 0.9305681557970263,
+        grid[1:] * 0.3300094782075719 + grid[:-1] * 0.6699905217924281,
+        grid[1:] * 0.6699905217924281 + grid[:-1] * 0.3300094782075719,
+        grid[1:] * 0.9305681557970263 + grid[:-1] * 0.0694318442029737 ))
+    weights = ( (grid[1:] - grid[:-1]) *
+        _numpy.hstack((0.173927422568727, 0.326072577431273, 0.326072577431273, 0.173927422568727))[:,None]
+        ).reshape(-1)
+    return nodes, weights
+
+
+def bsplineInterp(degree, grid, ampl, x):
+    '''
+    Compute interpolated values of B-spline expansion of given degree over the given grid and ampitudes,
+    for the input point or an array of points x
+    '''
+    if isinstance(x, (int,float,_numpy.float)):
+        return            _numpy.dot(_bsplines(degree, grid, x), ampl)
+    return _numpy.array([ _numpy.dot(_bsplines(degree, grid, X), ampl) for X in x])
+
+
+def bsplineIntegrals(degree, grid, power=0):
+    '''
     Compute the vector of integrals of B-spline basis functions, optionally multiplied by x^power.
     To obtain the integral of a function represented by amplitudes of its a B-spline expansion,
-    multiply this vector by the array of amplitudes.
-    """
-    from numpy import zeros
-    # use a 3-point Gauss-Legendre quadrature on each grid segment, sufficient for polynomials up to
-    # degree 5 (e.g. a B-spline of degree 3 times x^2)
-    glnode = 0.11270166537926
-    grid1  = grid[1:]  * glnode + grid[:-1] * (1-glnode)
-    grid2  = grid[:-1] * glnode + grid[1:]  * (1-glnode)
-    grid3  = 0.5 * (grid[1:] + grid[:-1])
-    result = zeros(len(grid)+N-1)
-    for i in range(len(grid)-1):
-        result += (grid[i+1] - grid[i]) * (
-            0.277777777777778 * bsplines(N, grid, grid1[i]) * grid1[i]**power + \
-            0.277777777777778 * bsplines(N, grid, grid2[i]) * grid2[i]**power + \
-            0.444444444444444 * bsplines(N, grid, grid3[i]) * grid3[i]**power )
+    multiply this vector by the array of amplitudes and sum the result
+    '''
+    return _numpy.sum(_numpy.vstack([ _bsplines(degree, grid, x) * x**power * w
+        for x, w in zip(*_bsplineGaussLegendre(grid)) ]), axis=0)
+
+
+def bsplineMatrix(degree1, grid1, degree2=None, grid2=None):
+    '''
+    Compute the matrix of inner products of B-spline functions:
+    M_{ij} = \int_{xmin}^{xmax} B1_i(x) B2_j(x) dx,
+    where B1(x) and B2(x) are two (possibly identical) basis sets of B-splines of degree(s),
+    defined by the grid nodes (or two separate grids).
+    If degree2 and grid2 are not provided, this means that they are identical to degree1, grid1.
+    '''
+    # since B-splines are piecewise-polynomial function, the product of two B-splines
+    # is a polynomial of degree degree1+degree2, which can be integrated exactly using
+    # a Gauss-Legendre quadrature with (degree1+degree2)//2+1;
+    # as we expect both degree1,degree2 to be <= 3, just use a 4-point quadrature for all cases.
+    if (degree2 is None and not grid2 is None) or (not degree2 is None and grid2 is None):
+        raise ValueError('Must provide both degree2 and grid2, or neither')
+    if degree2 is None:
+        grid=grid1
+    else:
+        grid=_numpy.unique(_numpy.hstack((grid1, grid2)))   # sorted array of all nodes of both grids
+    # integration is carried over each segment of the combined grid separately;
+    # set up nodes and weights of a suitable quadrature rule for all segments
+    nodes, weights = _bsplineGaussLegendre(grid)
+    # number of basis functions in each set
+    M1 = len(grid1)+degree1-1
+    M2 = len(grid2)+degree2-1 if not degree2 is None else M1
+    # result matrix
+    result = _numpy.zeros((M1, M2))
+    # iterate over all points of the integration grid,
+    # compute the values of all B-spline basis functions in both sets for each point,
+    # and add the outer product of these two vectors, multiplied by GL weight, to the result.
+    # this is not optimized, because most of the basis functions will be zero at any point
+    # (in fact, only N+1 of them are nonzero), but is sufficient for our purposes
+    for i in range(len(nodes)):
+        B1 = _bsplines(degree1, grid1, nodes[i])
+        B2 = _bsplines(degree2, grid2, nodes[i]) if not degree2 is None else B1
+        result += weights[i] * _numpy.outer(B1, B2)
     return result
 
-def GaussHermite(gamma, center, sigma, coefs, xarr):
-    """
+
+def ghInterp(ampl, center, width, coefs, x):
+    '''
     Compute the function specified by a Gauss-Hermite expansion with the given
-    overall amplitude (gamma), central point (center), width (sigma),
-    and a list of N>=2 GH coefficients, at point(s) xarr
-    """
-    from numpy import pi, exp
-    xscaled = (xarr - center) / sigma
-    norm    = (0.5/pi)**0.5 * gamma / sigma * exp(-0.5 * xscaled**2)
+    amplitude, center and width, and a list of N>=2 GH coefficients, at point(s) xarr.
+    '''
+    xscaled = (x[:,None] - center) / width
+    norm    = (0.5/_numpy.pi)**0.5 * ampl / width * _numpy.exp(-0.5 * xscaled**2)
     if not coefs is None and len(coefs) >= 2:
         hpp = 1.0
         hp  = 2**0.5 * xscaled
@@ -416,11 +296,109 @@ def GaussHermite(gamma, center, sigma, coefs, xarr):
             hpp= hp
             hp = hn
     else: result = 1.
-    return result * norm
+    return _numpy.squeeze(result * norm)
 
 
-### module initialization: add some custom colormaps to matplotlib ###
-try:
-    import agamacolormaps
-except:
-    pass
+### ------------------- ###
+### interface for galpy ###
+
+class GalpyPotential(_agama.Potential):
+    '''
+    Class that implements a Galpy interface to Agama potentials.
+    It can be used as a regular galpy potential class, although for the orbit integration
+    or action computation, the native Agama counterparts are preferred.
+    '''
+    def __init__(self,*args,**kwargs):
+        '''
+        Initialize a potential from parameters provided in an INI file
+        or as named arguments to the constructor.
+        Arguments are the same as for regular agama.Potential (see below);
+        an extra keyword 'normalize=...' has the same meaning as in Galpy:
+        if True, normalize such that vc(1.,0.)=1., or,
+        if given as a number, such that the force is this fraction of the force
+        necessary to make vc(1.,0.)=1.
+        '''
+        # importing galpy takes a lot of time (when first called in a script), so we only perform this
+        # when the constructor of this class is called, and add the inheritance from galpy.potential.Potential at runtime.
+        from galpy.potential import Potential as GPotential
+        GalpyPotential.__bases__ = (GPotential, _agama.Potential)
+        GPotential.__init__(self, amp=1.)
+        normalize=False
+        for key, value in kwargs.items():
+            if key=='normalize':
+                normalize=value
+                del kwargs[key]
+        _agama.Potential.__init__(self, *args, **kwargs)   # construct a regular Agama potential
+        if normalize or (isinstance(normalize,(int,float)) and not isinstance(normalize,bool)):
+            self.normalize(normalize)
+        self.hasC= False
+        self.hasC_dxdv=False
+
+    __init__.__doc__ += '\n' + _agama.Potential.__doc__  # extend the docstring of the constructor
+
+    def _coord(self,R,z,phi):
+        '''convert input cylindrical coordinates to a Nx3 array in cartesian coords'''
+        if phi is None: phi=0.
+        return _numpy.array((R*_numpy.cos(phi), R*_numpy.sin(phi), z)).T
+
+    def _evaluate(self,R,z,phi=0.,t=0.):
+        '''evaluate the potential at cylindrical coordinates R,z,phi'''
+        return self.potential(self._coord(R,z,phi))
+
+    def _Rforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the radial force for this potential: -dPhi/dR'''
+        coord=self._coord(R,z,phi)
+        force=_numpy.array(self.force(coord))
+        return (force.T[0]*coord.T[0] + force.T[1]*coord.T[1]) / R
+
+    def _zforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the vertical force for this potential: -dPhi/dz'''
+        return _numpy.array(self.force(self._coord(R,z,phi))).T[2]
+
+    def _phiforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the azimuthal force for this potential: -dPhi/dphi'''
+        coord=self._coord(R,z,phi)
+        force=_numpy.array(self.force(coord))
+        return force.T[1]*coord.T[0] - force.T[0]*coord.T[1]
+
+    def _dens(self,R,z,phi=0.,t=0.):
+        '''evaluate the density for this potential'''
+        return self.density(self._coord(R,z,phi))
+
+    def _2deriv(self,R,z,phi):
+        '''evaluate the potential derivatives in cartesian coordinates'''
+        coord=self._coord(R,z,phi)
+        force,deriv=self.forceDeriv(coord)
+        return coord.T, _numpy.array(force).T, _numpy.array(deriv).T
+
+    def _R2deriv(self,R,z,phi=0.,t=0.):
+        '''evaluate the second radial derivative for this potential: d2Phi / dR^2'''
+        coord,force,deriv=self._2deriv(R,z,phi)
+        return -(deriv[0]*coord[0]**2 + deriv[1]*coord[1]**2 +
+               2*deriv[3]*coord[0]*coord[1]) / R**2
+
+    def _z2deriv(self,R,z,phi=0.,t=0.):
+        '''evaluate the second vertical derivative for this potential: d2Phi / dz^2'''
+        return -_numpy.array(self.forceDeriv(self._coord(R,z,phi))[1]).T[2]
+
+    def _phi2deriv(self,R,z,phi=0.,t=0.):
+        '''evaluate the second azimuthal derivative for this potential: d2Phi / dphi^2'''
+        coord,force,deriv=self._2deriv(R,z,phi)
+        return -(deriv[0]*coord[1]**2 + deriv[1]*coord[0]**2 -
+               2*deriv[3]*coord[0]*coord[1] - force[0]*coord[0] - force[1]*coord[1])
+
+    def _Rzderiv(self,R,z,phi=0.,t=0.):
+        '''evaluate the mixed R,z derivative for this potential: d2Phi / dR dz'''
+        coord,force,deriv=self._2deriv(R,z,phi)
+        return -(deriv[5]*coord[0] + deriv[4]*coord[1]) / R
+
+    def _Rphideriv(self,R,z,phi=0.,t=0.):
+        '''evaluate the mixed R,phi derivative for this potential: d2Phi / dR dphi'''
+        coord,force,deriv=self._2deriv(R,z,phi)
+        return -((deriv[1]-deriv[0])*coord[1]*coord[0] + deriv[3]*(coord[0]**2-coord[1]**2)
+            - force[0]*coord[1] + force[1]*coord[0]) / R
+
+    def _zphideriv(self,R,z,phi=0.,t=0.):
+        '''evaluate the mixed z,phi derivative for this potential: d2Phi / dz dphi'''
+        coord,force,deriv=self._2deriv(R,z,phi)
+        return -(deriv[4]*coord[0] - deriv[5]*coord[1])

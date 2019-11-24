@@ -83,7 +83,6 @@ from gc_modelparamsE import ModelParams
 nsteps_deterministic  = 500   # number of steps per pass in deterministic minimizer
 nsteps_mcmc           = 500   # number of MC steps per pass
 nwalkers_mcmc         = 24    # number of independent MC walkers
-nthreads_mcmc         = 1     # number of parallel threads in MCMC (note that each process is additionally openmp-parallelized internally)
 nsamples_plot         = 200   # number of randomly chosen samples from the MCMC chain to plot
 initial_disp_mcmc     = 0.01  # initial dispersion of parameters carried by walkers around their best-fit values
 phase_space_info_mode = 3     # mode=6: full phase-space information (3 positions and 3 velocities)
@@ -247,7 +246,7 @@ class ModelSearcher:
                 else: print('%i-th walker: logL=%g' % (i, prob[i,0]))
 
         nwalkers, nparams = self.values.shape
-        sampler = emcee.EnsembleSampler(nwalkers, nparams, monteCarloSearchFnc, args=(self,), threads=nthreads_mcmc)
+        sampler = emcee.EnsembleSampler(nwalkers, nparams, monteCarloSearchFnc, args=(self,))
         prevmaxloglike = None
         while True:  # run several passes until convergence
             print('Starting MCMC')
@@ -262,9 +261,10 @@ class ModelSearcher:
                 numpy.hstack((sampler.chain[:,-nsteps_mcmc:].reshape(-1,nparams),
                  sampler.lnprobability[:,-nsteps_mcmc:].reshape(-1,1))), fmt='%.8g')
 
-            print("Acceptance fraction: " % numpy.mean(sampler.acceptance_fraction))  # should be in the range 0.2-0.5
+            print("Acceptance fraction: %g" % numpy.mean(sampler.acceptance_fraction))  # should be in the range 0.2-0.5
             try:
-                print("Autocorrelation time: " % sampler.acor)  # should be considerably shorter than the total number of steps
+                print("Autocorrelation time: %g" % sampler.get_autocorr_time())
+                # should be considerably shorter than the total number of steps
             except: pass  # sometimes it can't be computed, then ignore
             maxloglike = numpy.max(sampler.lnprobability[:,-nsteps_mcmc:])
             avgloglike = numpy.mean(sampler.lnprobability[:,-nsteps_mcmc:])  # avg.log-likelihood during the pass

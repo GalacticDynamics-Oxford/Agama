@@ -12,15 +12,15 @@ namespace math{
 
 /** Representation of a velocity distribution function in terms of Gauss-Hermite expansion */
 class GaussHermiteExpansion: public math::IFunctionNoDeriv {
-    double Gamma;  ///< overall normalization (amplitude)
+    double Ampl;   ///< overall amplitude
     double Center; ///< position of the center of expansion
-    double Sigma;  ///< width of the gaussian
+    double Width;  ///< width of the gaussian
     std::vector<double> moments;  ///< values of Gauss-Hermite moments
 public:
     /// initialize the function from previously computed coefficients
     GaussHermiteExpansion(const std::vector<double>& coefs,
-        double gamma, double center, double sigma) :
-        Gamma(gamma), Center(center), Sigma(sigma), moments(coefs) {}
+        double ampl, double center, double width) :
+        Ampl(ampl), Center(center), Width(width), moments(coefs) {}
 
     /// find the best-fit coefficients for a given function.
     /// If the parameters gamma, center and sigma are not provided, they are estimated
@@ -35,9 +35,9 @@ public:
     /// return the array of Gauss-Hermite coefficients
     inline const std::vector<double>& coefs() const { return moments; }
 
-    inline double gamma()  const { return Gamma;  }  ///< return the overall normalization factor
+    inline double ampl()   const { return Ampl;   }  ///< return the overall amplitude
     inline double center() const { return Center; }  ///< return the center of expansion
-    inline double sigma()  const { return Sigma;  }  ///< return the width of the 0th term
+    inline double width()  const { return Width;  }  ///< return the width of the base gaussian
 
     /// return the normalization constant \f$ N_n = \int_{-\infty}^\infty exp(-x^2/2) H_n(x) dx \f$
     static double normn(unsigned int n);
@@ -51,14 +51,14 @@ public:
     \param[in]  N      is the degree of B-spline (0 to 3);
     \param[in]  grid   is the grid in velocity space defining the B-spline;
     \param[in]  order  is the order M of GH expansion (i.e. it has order+1 coefficients h_0..h_M);
-    \param[in]  gamma  is the overall normalization factor of the gaussian;
+    \param[in]  ampl   is the overall amplitude of the gaussian;
     \param[in]  center is the central point of the gaussian;
-    \param[in]  sigma  is the width of the gaussian;
+    \param[in]  width  is the width of the gaussian;
     \return  a matrix G with (order+1) rows and bsplv.numValues() columns.
     To obtain the GH moments, multiply this matrix by the vector of amplitudes for a single aperture.
 */
 math::Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
-    unsigned int order, double gamma, double center, double sigma);
+    unsigned int order, double ampl, double center, double width);
 
 
 }  // namespace

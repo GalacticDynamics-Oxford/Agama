@@ -624,7 +624,6 @@ std::string TargetDensityCylindrical<N>::coefName(unsigned int index) const
              ", m=" + utils::toString(m);
     }
     assert(!"TargetDensityCylindrical: unimplemented N");
-    return "";
 }
 
 template<> const char* TargetDensityCylindrical<0>::name() const { return "DensityCylindricalTopHat"; }

@@ -4,7 +4,6 @@
 #include "df_spherical.h"
 #include "utils.h"
 #include "math_core.h"
-#include "math_random.h"
 #include "potential_utils.h"
 #include <cassert>
 #include <cmath>
@@ -64,8 +63,6 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
             "; dt="+utils::toString(timestep)+", dE="+utils::toString(dEdt * timestep) );
 
     // 2d. assign the random (gaussian) velocity perturbation
-    // initialize the PRNG state vector, using the current position-velocity as the source of "randomness"
-    math::PRNGState state = math::hash(data, 6);  
     double rand1, rand2;  // two normally distributed numbers
     math::getNormalRandomNumbers(/*output*/ rand1, rand2, /*PRNGState*/ &state);
     double deltavpar = rand1 * sqrt(dv2par * timestep) + dvpar / vel * timestep;
@@ -253,7 +250,6 @@ RagaTaskRelaxation::RagaTaskRelaxation(
     ptrdiff_t nbody = particles.size();
     std::vector<double> particle_m(nbody);
     particle_h.resize(nbody);
-#pragma omp parallel for schedule(static)
     for(ptrdiff_t i=0; i<nbody; i++) {
         particle_h[i] = phasevol(totalEnergy(*ptrPotSph, particles.point(i)));
         particle_m[i] = particles.mass(i);
@@ -273,7 +269,9 @@ orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
         params.relaxationRate,
         episodeLength / params.numSamplesPerEpisode,   // interval of time between storing the output samples
         particle_h.begin() + params.numSamplesPerEpisode * index,  // first and last index of the output sample
-        particle_h.begin() + params.numSamplesPerEpisode * (index+1) ));
+        particle_h.begin() + params.numSamplesPerEpisode * (index+1),
+        math::hash((const void*)NULL, 0, index)  // seed for the orbit-local PRNG
+    ));
 }
 
 void RagaTaskRelaxation::startEpisode(double timeStart, double length)

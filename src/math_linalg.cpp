@@ -1041,7 +1041,11 @@ NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) cons
     const gsl_spmatrix* sp = static_cast<const gsl_spmatrix*>(impl);
     matrixRangeCheck(impl != NULL && index < sp->nz);
     row = sp->i[index];
+#if GSL_MAJOR_VERSION == 2 and GSL_MINOR_VERSION < 6
     col = binSearch(index, sp->p, sp->size2+1);
+#else
+    col = binSearch(static_cast<int>(index), sp->p, sp->size2+1);  // type of sp->p changed to int*
+#endif
     return static_cast<NumT>(sp->data[index]);
 }
 

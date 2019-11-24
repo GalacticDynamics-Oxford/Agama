@@ -23,22 +23,15 @@ public:
     virtual unsigned int numVars()   const { return 1; }
     virtual unsigned int numValues() const { return 3; }
     virtual void eval(const double vars[], double values[]) const {
-        double z=vars[0], x=0, j=0;
-        // input scaled variable z ranges from -1 to 1, and maps to x as follows:
-        if(z<0) {
-            x = -exp(1/(1+z) + 1/z);
-            j = -x * (1/pow_2(1+z) + 1/pow_2(z));  // dx/dz
-        } else if(z>0) {
-            x =  exp(1/(1-z) - 1/z);
-            j =  x * (1/pow_2(1-z) + 1/pow_2(z));
-        }
-        double f = fnc(x);
-        if(f==0 || j==INFINITY) {
+        // input scaled variable z ranges from 0 to 1, and maps to x as follows:
+        double z = vars[0], x = exp(1/(1-z) - 1/z), j = x * (1/pow_2(1-z) + 1/pow_2(z));
+        double fp = fnc(x), fm = fnc(-x);
+        if((fp==0 && fm==0) || j==INFINITY) {
             values[0] = values[1] = values[2] = 0;
         } else {
-            values[0] = f * j;
-            values[1] = f * j * x;
-            values[2] = f * j * x * x;
+            values[0] = (fp + fm) * j;
+            values[1] = (fp - fm) * j * x;
+            values[2] = (fp + fm) * j * x * x;
         }
     }
 };
@@ -49,9 +42,9 @@ public:
 /// f2 = ((\int_{-\infty}^{\infty} f(x) x^2 dx) / f0 - f1^2)^{1/2}  (standard deviation of x)
 std::vector<double> computeClassicMoments(const math::IFunction& fnc)
 {
-    double result[3], error[3], zlower[1]={-1.0}, zupper[1]={+1.0};
+    double result[3], zlower[1]={0.0}, zupper[1]={+1.0};
     math::integrateNdim(MomentsIntegrand(fnc),
-        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/1000, /*output*/result, error);
+        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/1000, /*output*/result);
     std::vector<double> moments(3);
     moments[0] = result[0];
     moments[1] = result[0] != 0 ? result[1] / result[0] : 0;
@@ -100,15 +93,15 @@ void hermiteArray(const int nmax, const double x, double* result)
 
 /// compute the coefficients of GH expansion for an arbitrary function f(x)
 inline std::vector<double> computeGaussHermiteMoments(const math::IFunction& fnc,
-    unsigned int order, double gamma, double center, double sigma)
+    unsigned int order, double ampl, double center, double width)
 {
     std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
     std::vector<double> result(order+1);
     for(int p=0; p<=pow_2(QUADORDER); p++) {
         double y = p * (1./QUADORDER);    // equally-spaced points (only nonnegative half of real axis)
-        double mult = M_SQRT2 * sigma / gamma / QUADORDER * exp(-0.5*y*y);
-        double fp = fnc(center + sigma * y);
-        double fm = p==0 ? 0. : fnc(center - sigma * y);  // fnc value at symmetrically negative point
+        double mult = M_SQRT2 * width / ampl / QUADORDER * exp(-0.5*y*y);
+        double fp = fnc(center + width * y);
+        double fm = p==0 ? 0. : fnc(center - width * y);  // fnc value at symmetrically negative point
         hermiteArray(order, y, &hpoly[0]);
         for(unsigned int i=0; i<=order; i++)
             result[i] += mult * (fp + /*odd/even*/ (i%2 ? -1 : 1) * fm) * hpoly[i];
@@ -125,7 +118,7 @@ inline std::vector<double> computeGaussHermiteMoments(const math::IFunction& fnc
 */
 template<int N>
 math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d<N>& interp, 
-    unsigned int order, double gamma, double center, double sigma)
+    unsigned int order, double ampl, double center, double width)
 {
     // the product of B-spline of degree N and a Hermite polynomial of degree 'order' is a polynomial
     // of degree N+order multiplied by an exponential function; we don't try to integrate it exactly,
@@ -144,10 +137,10 @@ math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d
             const double x = x1 + dx * glnodes[k];
             unsigned int leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, /*output*/ bspl);
             // evaluate the Hermite polynomials
-            const double y = (x - center) / sigma;
+            const double y = (x - center) / width;
             hermiteArray(order, y, &hpoly[0]);
             // overall multiplicative factor
-            const double mult = M_SQRT2 / gamma * dx * glweights[k] * exp(-0.5*y*y);
+            const double mult = M_SQRT2 / ampl * dx * glweights[k] * exp(-0.5*y*y);
             // add the contribution of this GL point to the integrals of H_m(x) * B_j(x),
             // where the index j runs from leftInd to leftInd+N
             for(unsigned int m=0; m<=order; m++)
@@ -163,11 +156,11 @@ math::Matrix<double> computeGaussHermiteMatrix(const math::BsplineInterpolator1d
 /** A helper class to be used in multidimensional minimization with the Levenberg-Marquardt method,
     when constructing the best-fit Gauss-Hermite approximation of a given function f(x).
     The GH expansion of the given order M has M+1 free parameters:
-    amplitude gamma, mean value and width of the base gaussian,
+    amplitude, center and width of the base gaussian,
     and M-2 GH coefficients h_3, h_4, ..., h_M, with the convention that h_0=1, h_1=h_2=0.
     The fit minimizes the rms deviation between f(x) and the GH expansion specified by these parameters
     over the set of Q points (Q = 2*QUADORDER^2+1 is fixed, and the points are equally spaced,
-    but their location of these points depends on the mean and sigma of the current set of parameters).
+    but their location of these points depends on the mean and width of the current set of parameters).
     The evalDeriv() method returns the difference between f(x_k) and GH(x_k) for each of these points x_k,
     and its partial derivatives w.r.t. all parameters of GH expansion, all used in the Levenberg-Marquardt
     fitting routine.
@@ -179,24 +172,24 @@ public:
     GaussHermiteFitter(unsigned int _order, const math::IFunction& _fnc) : order(_order), fnc(_fnc) {}
     virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
     {
-        double gamma = vars[0], center = vars[1], sigma = vars[2], sqsigma = sqrt(sigma);
+        double ampl = vars[0], center = vars[1], width = vars[2], sqwidth = sqrt(width);
         std::vector<double> hpoly(order+1);
         for(int p=0; p <= 2*pow_2(QUADORDER); p++) {
             double y = (1./QUADORDER) * (p - pow_2(QUADORDER));  // equally spaced points
-            double x = center + sigma * y;
+            double x = center + width * y;
             hermiteArray(order, y, &hpoly[0]);
             double sum = 1.;
             for(unsigned int n=3; n<=order; n++)
                 sum += vars[n] * hpoly[n];
-            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * sum / sqsigma;
+            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * sum / sqwidth;
             if(values)
-                values[p] = sqsigma * fnc(x) - mult * gamma;
+                values[p] = sqwidth * fnc(x) - mult * ampl;
             if(derivs) {
                 derivs[p*(order+1)  ] = -mult;
-                derivs[p*(order+1)+1] = -mult * gamma / sigma * y;
-                derivs[p*(order+1)+2] =  mult * gamma / sigma * (1-y*y);
+                derivs[p*(order+1)+1] = -mult * ampl / width * y;
+                derivs[p*(order+1)+2] =  mult * ampl / width * (1-y*y);
                 for(unsigned int n=3; n<=order; n++)
-                    derivs[p*(order+1)+n] = -mult * gamma / sum * hpoly[n];
+                    derivs[p*(order+1)+n] = -mult * ampl / sum * hpoly[n];
             }
         }
     }
@@ -207,20 +200,20 @@ public:
 }  // internal ns
 
 GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
-    unsigned int order, double gamma, double center, double sigma) :
-    Gamma(gamma), Center(center), Sigma(sigma)
+    unsigned int order, double ampl, double center, double width) :
+    Ampl(ampl), Center(center), Width(width)
 {
     if(order<2)
         throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
-    if(!isFinite(gamma + center + sigma)) {
+    if(!isFinite(ampl + center + width)) {
         // estimate the first 3 moments of the function, which are used as starting values in the fit
         std::vector<double> params = computeClassicMoments(fnc);
         // now that we have a reasonable initial values for the moments of the input function,
         // perform a Levenberg-Marquardt optimization to find the best-fit parameters of the GH expansion.
         // Note that there are two conceptually different ways of fitting these parameters:
-        // 1) determine only the overall amplitude gamma, mean and sigma of the best-fit Gaussian,
+        // 1) determine only the overall amplitude, center and width of the best-fit Gaussian,
         // fixing h_0=1, h_1=h_2=0 and not considering higher-order terms.
-        // 2) determine simultaneously the parameters gamma, center, sigma, h_3, ... h_M, while still
+        // 2) determine simultaneously the parameters ampl, center, width, h_3, ... h_M, while still
         // fixing h_0=1, h_1=h_2=0.
         // The latter approach, although seemingly natural, does not, in fact, fit a GH expansion:
         // if one computes all GH coefficients for the best-fit values, it turns out that h_1,h_2 != 0,
@@ -236,19 +229,19 @@ GaussHermiteExpansion::GaussHermiteExpansion(const math::IFunction& fnc,
         params.resize(fitorder+1);
         math::nonlinearMultiFit(GaussHermiteFitter(fitorder, fnc),
             /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
-        Gamma  = params[0];
+        Ampl   = params[0];
         Center = params[1];
-        Sigma  = params[2];
+        Width  = params[2];
     }
-    moments = computeGaussHermiteMoments(fnc, order, Gamma, Center, Sigma);
+    moments = computeGaussHermiteMoments(fnc, order, Ampl, Center, Width);
 }
 
 double GaussHermiteExpansion::value(const double x) const
 {
     unsigned int ncoefs = moments.size();
     if(ncoefs==0) return 0.;
-    double xscaled= (x - Center) / Sigma;
-    double norm   = (1./M_SQRT2/M_SQRTPI) * Gamma / Sigma * exp(-0.5 * pow_2(xscaled));
+    double xscaled= (x - Center) / Width;
+    double norm   = (1./M_SQRT2/M_SQRTPI) * Ampl / Width * exp(-0.5 * pow_2(xscaled));
     double* hpoly = static_cast<double*>(alloca(ncoefs * sizeof(double)));
     hermiteArray(ncoefs-1, xscaled, hpoly);
     double result = 0.;
@@ -274,21 +267,21 @@ double GaussHermiteExpansion::norm() const {
     double result = 0;
     for(size_t n=0; n<moments.size(); n+=2)
         result += moments[n] * normn(n);
-    return result * Gamma;
+    return result * Ampl;
 }
 
 math::Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
-    unsigned int order, double gamma, double center, double sigma)
+    unsigned int order, double ampl, double center, double width)
 {
     switch(N) {
         case 0: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<0>(grid), order, gamma, center, sigma);
+            math::BsplineInterpolator1d<0>(grid), order, ampl, center, width);
         case 1: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<1>(grid), order, gamma, center, sigma);
+            math::BsplineInterpolator1d<1>(grid), order, ampl, center, width);
         case 2: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<2>(grid), order, gamma, center, sigma);
+            math::BsplineInterpolator1d<2>(grid), order, ampl, center, width);
         case 3: return computeGaussHermiteMatrix(
-            math::BsplineInterpolator1d<3>(grid), order, gamma, center, sigma);
+            math::BsplineInterpolator1d<3>(grid), order, ampl, center, width);
         default:
             throw std::invalid_argument("computeGaussHermiteMatrix: wrong B-spline degree");
     }

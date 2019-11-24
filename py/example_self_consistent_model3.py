@@ -3,7 +3,7 @@
 Example of construction of a three-component disk-bulge-halo equilibrium model of a galaxy.
 The approach is explained in example_self_consistent_model.py;
 this example differs in that it has a somewhat simpler structure (only a single stellar disk
-component, no stellar halo or gas disk).
+component, no stellar halo or gas disk) and adds a central supermassive black hole.
 Another modification is that the halo and the bulge are represented by 'quasi-isotropic' DF:
 it is a spherical isotropic DF that is constructed using the Eddington inversion formula
 for the given density profile in the spherically-symmetric approximation of the total potential.
@@ -19,13 +19,13 @@ try:
 except ImportError:
     from configparser import RawConfigParser  # python 3
 
-# write out the rotation curve for the entire model and per component
-def writeRotationCurve(filename, potentials):
-    radii = numpy.logspace(-2, 1.5, 71)
+# write out the circular velocity curve for the entire model and per component
+def writeRotationCurve(filename, potentials, names):
+    radii = numpy.logspace(-3.0, 2.0, 101)
     xyz   = numpy.column_stack((radii, radii*0, radii*0))
-    vcomp = numpy.column_stack([(-potential.force(xyz)[:,0] * radii)**0.5 for potential in potentials])
-    vtot  = numpy.sum(vcomp**2, axis=1)**0.5
-    numpy.savetxt(filename, numpy.column_stack((radii, vtot, vcomp)), fmt="%.6g", header="radius\tv_circ")
+    vcomp2= numpy.column_stack([-potential.force(xyz)[:,0] * radii for potential in potentials])
+    vtot2 = numpy.sum(vcomp2, axis=1)
+    numpy.savetxt(filename, numpy.column_stack((radii, vtot2**0.5, vcomp2**0.5)), fmt="%.6g", header="radius\tVcTotal\t"+"\t".join(names))
 
 # print some diagnostic information after each iteration
 def printoutInfo(model, iteration):
@@ -41,15 +41,21 @@ def printoutInfo(model, iteration):
         (densBulge.totalMass(), densBulge.density(0.4, 0, 0)))
     print("Halo  total mass=%g, rho(R=2,z=0)=%g, rho(R=0,z=2)=%g" % \
         (densHalo.totalMass(), densHalo.density(pt0), densHalo.density(pt2)))
-    print("Potential at origin=-(%g)^2, total mass=%g" % \
-        ((-model.potential.potential(0,0,0))**0.5, model.potential.totalMass()))
-    densDisk. export("dens_disk_iter" +str(iteration))
-    densBulge.export("dens_bulge_iter"+str(iteration))
-    densHalo. export("dens_halo_iter" +str(iteration))
-    model.potential.export("potential_iter"+str(iteration))
-    writeRotationCurve("rotcurve_iter"+str(iteration), (model.potential[1], # potential of the disk
-        agama.Potential(type='Multipole', lmax=6, density=densBulge),       # -"- bulge
-        agama.Potential(type='Multipole', lmax=6, density=densHalo) ) )     # -"- halo
+    # report only the potential of stars+halo, excluding the potential of the central BH (0th component)
+    pot0 = model.potential.potential(0,0,0) - model.potential[0].potential(0,0,0)
+    print("Potential at origin=-(%g)^2, total mass=%g" % ((-pot0)**0.5, model.potential.totalMass()))
+    densDisk. export("dens_disk_" +iteration)
+    densBulge.export("dens_bulge_"+iteration)
+    densHalo. export("dens_halo_" +iteration)
+    model.potential.export("potential_"+iteration)
+    # separate the contributions of bulge and halo, which are normally combined
+    # into the Multipole potential of all spheroidal components
+    writeRotationCurve("rotcurve_"+iteration, (
+        model.potential[0], # potential of the BH
+        model.potential[2], # potential of the disk
+        agama.Potential(type='Multipole', lmax=6, density=densBulge),  # -"- bulge
+        agama.Potential(type='Multipole', lmax=6, density=densHalo) ), # -"- halo
+        ('BH', 'Disk', 'Bulge', 'Halo') )
 
 if __name__ == "__main__":
     # read parameters from the INI file
@@ -60,6 +66,7 @@ if __name__ == "__main__":
     iniPotenHalo  = dict(ini.items("Potential halo"))
     iniPotenBulge = dict(ini.items("Potential bulge"))
     iniPotenDisk  = dict(ini.items("Potential disk"))
+    iniPotenBH    = dict(ini.items("Potential BH"))
     iniDFDisk     = dict(ini.items("DF disk"))
     iniSCMHalo    = dict(ini.items("SelfConsistentModel halo"))
     iniSCMBulge   = dict(ini.items("SelfConsistentModel bulge"))
@@ -73,17 +80,17 @@ if __name__ == "__main__":
     densityDisk  = agama.Density(**iniPotenDisk)
     densityBulge = agama.Density(**iniPotenBulge)
     densityHalo  = agama.Density(**iniPotenHalo)
+    potentialBH  = agama.Potential(**iniPotenBH)
 
     # add components to SCM - at first, all of them are static density profiles
     model.components.append(agama.Component(density=densityDisk,  disklike=True))
     model.components.append(agama.Component(density=densityBulge, disklike=False))
     model.components.append(agama.Component(density=densityHalo,  disklike=False))
+    model.components.append(agama.Component(potential=potentialBH))
 
     # compute the initial potential
     model.iterate()
-    writeRotationCurve("rotcurve_init", (model.potential[1],
-        agama.Potential(type='Multipole', lmax=0, density=densityBulge),
-        agama.Potential(type='Multipole', lmax=0, density=densityHalo) ) )
+    printoutInfo(model,'init')
 
     # construct the DF of the disk component, using the initial (non-spherical) potential
     dfDisk  = agama.DistributionFunction(potential=model.potential, **iniDFDisk)
@@ -94,7 +101,6 @@ if __name__ == "__main__":
 
     print("\033[1;33m**** STARTING ITERATIVE MODELLING ****\033[0m\nMasses (computed from DF): " \
         "Mdisk=%g, Mbulge=%g, Mhalo=%g" % (dfDisk.totalMass(), dfBulge.totalMass(), dfHalo.totalMass()))
-    printoutInfo(model, 0)
 
     # replace the initially static SCM components with the DF-based ones
     model.components[0] = agama.Component(df=dfDisk,  disklike=True,  **iniSCMDisk)
@@ -105,7 +111,7 @@ if __name__ == "__main__":
     for iteration in range(1,5):
         print("\033[1;37mStarting iteration #%d\033[0m" % iteration)
         model.iterate()
-        printoutInfo(model, iteration)
+        printoutInfo(model, 'iter%d'%iteration)
 
     # export model to an N-body snapshot
     print("\033[1;33mCreating an N-body representation of the model\033[0m")
@@ -124,17 +130,18 @@ if __name__ == "__main__":
     # by drawing positions and velocities from the DF in the given (self-consistent) potential
     print("Sampling disk DF")
     agama.writeSnapshot("model_disk_final", \
-        agama.GalaxyModel(potential=model.potential, df=dfDisk,  af=model.af).sample(160000*5), format)
+        agama.GalaxyModel(potential=model.potential, df=dfDisk,  af=model.af).sample(1600000), format)
     print("Sampling bulge DF")
     agama.writeSnapshot("model_bulge_final", \
-        agama.GalaxyModel(potential=model.potential, df=dfBulge, af=model.af).sample(40000*5), format)
+        agama.GalaxyModel(potential=model.potential, df=dfBulge, af=model.af).sample(400000), format)
     print("Sampling halo DF")
+    # note: use a 10x larger particle mass for halo than for bulge/disk
     agama.writeSnapshot("model_halo_final", \
-        agama.GalaxyModel(potential=model.potential, df=dfHalo,  af=model.af).sample(800000*5), format)
+        agama.GalaxyModel(potential=model.potential, df=dfHalo,  af=model.af).sample(3000000), format)
 
     # the remaining part computes and plots various diagnostics
     print("\033[1;33mComputing disk density and velocity profiles\033[0m")
-    ax=plt.subplots(2,3)[1].reshape(-1)
+    ax=plt.subplots(2, 3, figsize=(16,10))[1].reshape(-1)
     # take only the disk component
     modelDisk = agama.GalaxyModel(potential=model.potential, df=dfDisk, af=model.af)
     # radial grid for computing various quantities in the disk plane
@@ -160,6 +167,7 @@ if __name__ == "__main__":
     ax[0].plot(R, rho   / (Sigma0 * numpy.exp(-R/Rdisk) * 0.25/Hdisk), 'g-', label=r'$\rho_{z=0}$')
     ax[0].plot(R, sigma[:,0]**0.5 / (sigmar0 * numpy.exp(-R/rsigmar)), 'b-', label=r'$\sigma_r$')
     ax[0].plot(R, rmsh / (1.8*Hdisk), 'm-', label=r'$h$')
+    ax[0].set_xscale("log")
     ax[0].set_xlabel("R")
     ax[0].set_ylim(0,2)
     ax[0].legend(loc='lower right', frameon=False)
@@ -185,7 +193,8 @@ if __name__ == "__main__":
     z = numpy.array([0, 2*Hdisk])
     xyz = numpy.column_stack((numpy.tile(R, len(z)), numpy.zeros(len(R)*len(z)), numpy.repeat(z, len(R))))
     # create grids in velocity space for computing the spline representation of VDF (optional)
-    v_max = 0.75 * (-2 * model.potential.potential(0,0,0))**0.5  # range: 0.75 v_escape
+    # range: 0.75 v_escape from the galactic center (excluding the central BH potential)
+    v_max = 0.75 * (-2 * (model.potential.potential(0,0,0)-model.potential[0].potential(0,0,0)))**0.5
     gridv = numpy.linspace(-v_max, v_max, 101)  # for simplicity, use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
     splvR, splvz, splvphi = modelDisk.vdf(xyz, gridv, gridv, gridv)

@@ -81,6 +81,19 @@
 /// classes and routines for the Python interface
 namespace pygama {  // internal namespace
 
+// some forward declarations:
+// pointers to several Python type descriptors, which will be initialized at module startup
+static PyTypeObject
+    *DensityTypePtr,
+    *PotentialTypePtr,
+    *ActionFinderTypePtr,
+    *DistributionFunctionTypePtr,
+    *TargetTypePtr;
+
+// forward declaration for a routine that constructs a Python cubic spline object
+PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
+
+
 //  ---------------------------------------------------
 /// \name  Helper class to manage the OpenMP behaviour
 //  ---------------------------------------------------
@@ -323,13 +336,10 @@ PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey)
     return NULL;
 }
 
-// forward declaration for a routine that constructs a Python cubic spline object
-PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
-
 /// NumPy data type corresponding to the storage container type of additive models
-static const int STORAGE_NUM_T = 
+static const int STORAGE_NUM_T =
     sizeof(galaxymodel::StorageNumT) == sizeof(float)  ? NPY_FLOAT  :
-    sizeof(galaxymodel::StorageNumT) == sizeof(double) ? NPY_DOUBLE : NPY_NOTYPE;
+    sizeof(galaxymodel::StorageNumT) == sizeof(double) ? NPY_DOUBLE : NPY_NOTYPE /*shouldn't occur*/;
 
 ///@}
 //  ------------------------------
@@ -345,7 +355,7 @@ static const units::InternalUnits unit(2.7183 * units::Kpc, 3.1416 * units::Myr)
 static unique_ptr<const units::ExternalUnits> conv;
 
 /// description of setUnits function
-static const char* docstringSetUnits = 
+static const char* docstringSetUnits =
     "Inform the library about the physical units that are used in Python code\n"
     "Arguments should be any three independent physical quantities that define "
     "'mass', 'length', 'velocity' or 'time' scales "
@@ -370,7 +380,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     if(length>0 && velocity>0 && time>0) {
-        PyErr_SetString(PyExc_ValueError, 
+        PyErr_SetString(PyExc_ValueError,
             "You may not assign length, velocity and time units simultaneously");
         return NULL;
     }
@@ -397,7 +407,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
         "time unit: "    +utils::toString(conv->timeUnit)+", "
         "mass unit: "    +utils::toString(conv->massUnit));
-    return Py_BuildValue("s", 
+    return Py_BuildValue("s",
         ("Length unit: " +utils::toString(conv->lengthUnit   * unit.to_Kpc)+ " Kpc, "
         "velocity unit: "+utils::toString(conv->velocityUnit * unit.to_kms)+ " km/s, "
         "time unit: "    +utils::toString(conv->timeUnit     * unit.to_Myr)+ " Myr, "
@@ -409,7 +419,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 /// description of resetUnits function
-static const char* docstringResetUnits = 
+static const char* docstringResetUnits =
     "Reset the unit conversion system to a trivial one "
     "(i.e., no conversion involved and all quantities are assumed to be in N-body units, "
     "with the gravitational constant equal to 1.\n"
@@ -532,7 +542,7 @@ particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
 
 /// any function that evaluates something for a given object and an `input` array of floats,
 /// and stores one or more values in the `result` array of floats
-typedef void (*anyFunction) 
+typedef void (*anyFunction)
     (void* obj, const double input[], double *result);
 
 /// anyFunction input type
@@ -563,8 +573,8 @@ enum OUTPUT_VALUE {
 template<int numArgs>
 size_t inputLength();
 
-/// parse a list of numArgs floating-point arguments for a Python function, 
-/// and store them in values[]; return 1 on success, 0 on failure 
+/// parse a list of numArgs floating-point arguments for a Python function,
+/// and store them in values[]; return 1 on success, 0 on failure
 template<int numArgs>
 bool parseTuple(PyObject* args, double values[]);
 
@@ -799,18 +809,18 @@ template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_
 }
 
 template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE>(
-    const double result[], const npy_intp index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(resultObj, index) = result[0];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
-    const double result[], const npy_intp index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     for(int d=0; d<3; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_SEXTET>(
-    const double result[], const npy_intp index, PyObject* resultObj) 
+    const double result[], const npy_intp index, PyObject* resultObj)
 {
     for(int d=0; d<6; d++)
         pyArrayElem<double>(resultObj, index, d) = result[d];
@@ -1031,25 +1041,6 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc, 
 //  ---------------------
 ///@{
 
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Density class
-typedef struct {
-    PyObject_HEAD
-    potential::PtrDensity dens;
-} DensityObject;
-/// \endcond
-
-void Density_dealloc(DensityObject* self)
-{
-    if(self->dens)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->dens->name())+
-            " density at "+utils::toString(self->dens.get()));
-    else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty density");
-    self->dens.reset();
-    Py_TYPE(self)->tp_free(self);
-}
-
 /// common fragment of docstring for Density and Potential classes
 #define DOCSTRING_DENSITY_PARAMS \
     "  mass=...   total mass of the model, if applicable.\n" \
@@ -1093,19 +1084,135 @@ static const char* docstringDensity =
     "moreover, an arbitrary Python object with a method 'density(x,y,z)' that returns a single value "
     "may also be used in these contexts (i.e., an object presenting a Density interface).";
 
-// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error.
-// Declared here, implemented after the DensityObject definition becomes available.
-potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Density class
+typedef struct {
+    PyObject_HEAD
+    potential::PtrDensity dens;
+} DensityObject;
+/// \endcond
+
+/// Helper class for providing a BaseDensity interface
+/// to a Python function that returns density at one or several point
+class DensityWrapper: public potential::BaseDensity{
+    OmpDisabler ompDisabler;
+    PyObject* fnc;
+    coord::SymmetryType sym;
+    std::string fncname;
+public:
+    DensityWrapper(PyObject* _fnc, coord::SymmetryType _sym): fnc(_fnc), sym(_sym)
+    {
+        Py_INCREF(fnc);
+        fncname = toString(fnc);
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Created a C++ density wrapper for Python function "+fncname);
+    }
+    ~DensityWrapper()
+    {
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ density wrapper for Python function "+fncname);
+        Py_DECREF(fnc);
+    }
+    virtual coord::SymmetryType symmetry() const { return sym; }
+    virtual const char* name() const { return fncname.c_str(); };
+    virtual double densityCyl(const coord::PosCyl &pos) const {
+        return densityCar(toPosCar(pos)); }
+    virtual double densitySph(const coord::PosSph &pos) const {
+        return densityCar(toPosCar(pos)); }
+    virtual double densityCar(const coord::PosCar &pos) const {
+        double xyz[3];
+        unconvertPos(pos, xyz);
+        npy_intp dims[]  = {1, 3};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        double value;
+        if(result == NULL) {
+            PyErr_Print();
+            throw std::runtime_error("Call to user-defined density function failed");
+        }
+        if(PyArray_Check(result))
+            value = pyArrayElem<double>(result, 0);
+        else if(PyNumber_Check(result))
+            value = PyFloat_AsDouble(result);
+        else {
+            Py_DECREF(result);
+            throw std::runtime_error("Invalid data type returned from user-defined density function");
+        }
+        Py_DECREF(result);
+        return value * conv->massUnit / pow_3(conv->lengthUnit);
+    }
+};
+
+/// destructor of the Density class
+void Density_dealloc(DensityObject* self)
+{
+    if(self->dens)
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->dens->name())+
+            " density at "+utils::toString(self->dens.get()));
+    else
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty density");
+    self->dens.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+/// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL)
+{
+    if(dens_obj == NULL)
+        return potential::PtrDensity();
+
+    // check if this is a Python wrapper class for a C++ Density object (DensityType)
+    // or a Python class PotentiaType, which is a subclass of DensityType
+    if(PyObject_TypeCheck(dens_obj, DensityTypePtr) && ((DensityObject*)dens_obj)->dens)
+        return ((DensityObject*)dens_obj)->dens;
+
+    // otherwise this could be an arbitrary Python function,
+    // but make sure it's not one of the other classes in this module which provide a call interface
+    if(PyCallable_Check(dens_obj) &&
+        !PyObject_TypeCheck(dens_obj, ActionFinderTypePtr) &&
+        !PyObject_TypeCheck(dens_obj, DistributionFunctionTypePtr) &&
+        !PyObject_TypeCheck(dens_obj, TargetTypePtr) )
+    {   // then create a C++ wrapper for this Python function
+        // (don't check if it accepts a single Nx3 array as the argument...)
+        return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
+    }
+
+    // none of the above succeeded -- return an empty pointer
+    return potential::PtrDensity();
+}
 
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
-// (also a forward declaration, the function will be defined later)
+// (forward declaration, the function will be defined later)
 potential::PtrPotential getPotential(PyObject* pot_obj);
 
-// create a Python Density object and initialize it with an existing instance of C++ density class
-PyObject* createDensityObject(const potential::PtrDensity& dens);
+/// create a Python Density object and initialize it with an existing instance of C++ density class
+PyObject* createDensityObject(const potential::PtrDensity& dens)
+{
+    DensityObject* dens_obj = PyObject_New(DensityObject, DensityTypePtr);
+    if(!dens_obj)
+        return NULL;
 
-// create a Python Potential object and initialize it with an existing instance of C++ potential class
-PyObject* createPotentialObject(const potential::PtrPotential& pot);
+    // this is a DIRTY HACK!!! we have allocated a new instance of Python class,
+    // but have not initialized its extra fields in any way, so they contain garbage.
+    // We can't simply assign a new value to its 'dens' member variable,
+    // because this is an object (smart pointer) with undefined state,
+    // and it would attempt to deallocate its managed pointer before being assigned
+    // a new value, which results in a crash.
+    // Therefore, we use the "placement new" syntax to construct an empty smart pointer in-place,
+    // in the already allocated chunk of memory (which is just the address of this member variable).
+    // Note that we don't have these problems in the standard workflow when a Python object
+    // is allocated from Python, because the tp_alloc routine used in its default or custom tp_new
+    // method fills the entire memory block of the corresponding struct with zeros,
+    // which results in a correct initialization of both POD types and smart pointers
+    // (perhaps accidentally, and would not be valid for more complex classes with virtual tables).
+    new (&(dens_obj->dens)) potential::PtrDensity;
+    // now we may safely assign a new value to the smart pointer
+    dens_obj->dens = dens;
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
+        std::string(dens->name())+" density at "+utils::toString(dens.get()));
+    return (PyObject*)dens_obj;
+}
 
 /// attempt to construct a spherically-symmetric density from a cumulative mass profile
 potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
@@ -1218,14 +1325,14 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
     // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
     // namedArgs may be empty or contain three rotation angles
     static const char* keywords1[] = {"point", "alpha", "beta", "gamma", NULL};
-    static const char* keywords2[] = {"x","y", "alpha", "beta", "gamma", NULL};
+    static const char* keywords2[] = {"X","Y", "alpha", "beta", "gamma", NULL};
     PyObject *points_obj = NULL;
     double X = 0, Y = 0, alpha = 0, beta = 0, gamma = 0;
     if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)==2 &&
         PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|ddd", const_cast<char**>(keywords2),
         &X, &Y, &alpha, &beta, &gamma))
     {   // shortcut and alternative syntax for just a single point x,y
-        return Py_BuildValue("d", 
+        return Py_BuildValue("d",
             surfaceDensity(*((DensityObject*)self)->dens,
             X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma)
             / (conv->massUnit / pow_2(conv->lengthUnit)) );
@@ -1311,7 +1418,7 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         return Py_BuildValue("NN", point_arr, mass_arr);
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
+        PyErr_SetString(PyExc_ValueError,
             (std::string("Error in sample(): ")+e.what()).c_str());
         return NULL;
     }
@@ -1379,12 +1486,19 @@ static PyMethodDef Density_methods[] = {
       "Return the name of the density or potential model\n"
       "No arguments\n"
       "Returns: string" },
-    { "density", Density_density, METH_VARARGS, 
+    { "density", Density_density, METH_VARARGS,
       "Compute density at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array\n"
       "Returns: float or array of floats" },
     { "surfaceDensity", (PyCFunction)Density_surfaceDensity, METH_VARARGS | METH_KEYWORDS,
-      "Compute surface density at a given point or array of points\n" },
+      "Compute surface density at a given point or array of points\n"
+      "Arguments: \n"
+      "  X,Y (two floats) or point (a Nx2 array of floats): coordinates in the image plane.\n"
+      "  alpha, beta, gamma (optional, default 0): three angles specifying the orientation "
+      "of the image plane in the intrinsic coordinate system of the model; "
+      "in particular, beta is the inclination angle.\n"
+      "Returns: float or array of floats - the density integrated along the line of sight Z "
+      "perpendicular to the image plane."},
     { "export", Density_export, METH_VARARGS,
       "Export density or potential expansion coefficients to a text file\n"
       "Arguments: filename (string)\n"
@@ -1433,116 +1547,12 @@ static PyTypeObject DensityType = {
     (initproc)Density_init
 };
 
-/// create a Python Density object and initialize it with an existing instance of C++ density class
-PyObject* createDensityObject(const potential::PtrDensity& dens)
-{
-    DensityObject* dens_obj = PyObject_New(DensityObject, &DensityType);
-    if(!dens_obj)
-        return NULL;
-
-    // this is a DIRTY HACK!!! we have allocated a new instance of Python class,
-    // but have not initialized its extra fields in any way, so they contain garbage.
-    // We can't simply assign a new value to its 'dens' member variable,
-    // because this is an object (smart pointer) with undefined state,
-    // and it would attempt to deallocate its managed pointer before being assigned
-    // a new value, which results in a crash.
-    // Therefore, we use the "placement new" syntax to construct an empty smart pointer in-place,
-    // in the already allocated chunk of memory (which is just the address of this member variable).
-    // Note that we don't have these problems in the standard workflow when a Python object 
-    // is allocated from Python, because the tp_alloc routine used in its default or custom tp_new
-    // method fills the entire memory block of the corresponding struct with zeros,
-    // which results in a correct initialization of both POD types and smart pointers
-    // (perhaps accidentally, and would not be valid for more complex classes with virtual tables).
-    new (&(dens_obj->dens)) potential::PtrDensity;
-    // now we may safely assign a new value to the smart pointer
-    dens_obj->dens = dens;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
-        std::string(dens->name())+" density at "+utils::toString(dens.get()));
-    return (PyObject*)dens_obj;
-}
-
-/// Helper class for providing a BaseDensity interface
-/// to a Python function that returns density at one or several point
-class DensityWrapper: public potential::BaseDensity{
-    OmpDisabler ompDisabler;
-    PyObject* fnc;
-    coord::SymmetryType sym;
-    std::string fncname;
-public:
-    DensityWrapper(PyObject* _fnc, coord::SymmetryType _sym): fnc(_fnc), sym(_sym)
-    {
-        Py_INCREF(fnc);
-        fncname = toString(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ density wrapper for Python function "+fncname);
-    }
-    ~DensityWrapper()
-    {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ density wrapper for Python function "+fncname);
-        Py_DECREF(fnc);
-    }
-    virtual coord::SymmetryType symmetry() const { return sym; }
-    virtual const char* name() const { return fncname.c_str(); };
-    virtual double densityCyl(const coord::PosCyl &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densityCar(const coord::PosCar &pos) const {
-        double xyz[3];
-        unconvertPos(pos, xyz);
-        npy_intp dims[]  = {1, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        double value;
-        if(result == NULL) {
-            PyErr_Print();
-            throw std::runtime_error("Call to user-defined density function failed");
-        }
-        if(PyArray_Check(result))
-            value = pyArrayElem<double>(result, 0);
-        else if(PyNumber_Check(result))
-            value = PyFloat_AsDouble(result);
-        else {
-            Py_DECREF(result);
-            throw std::runtime_error("Invalid data type returned from user-defined density function");
-        }
-        Py_DECREF(result);
-        return value * conv->massUnit / pow_3(conv->lengthUnit);
-    }
-};
-
 
 ///@}
 //  -----------------------
 /// \name  Potential class
 //  -----------------------
 ///@{
-
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Potential class
-/// note: it can also be used in a context where a DensityObject is expected
-typedef struct {
-    PyObject_HEAD
-    potential::PtrPotential pot;
-} PotentialObject;
-/// \endcond
-
-void Potential_dealloc(PotentialObject* self)
-{
-    if(self->pot)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->pot->name())+
-        " potential at "+utils::toString(self->pot.get()));
-    else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty potential");
-    self->pot.reset();
-    Py_TYPE(self)->tp_free(self);
-}
-
-/// pointer to the Potential type object (will be initialized below to &PotentialType,
-/// this is necessary because it is used in Potential_init which is defined before PotentialType)
-static PyTypeObject* PotentialTypePtr;
 
 /// description of Potential class
 static const char* docstringPotential =
@@ -1623,6 +1633,49 @@ static const char* docstringPotential =
     "a call to `setUnits` should precede the construction of potentials in this approach. "
     "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
     "(this is the default regime and is restored by `resetUnits`).\n";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Potential class, which is inherited from Density
+typedef struct {
+    PyObject_HEAD
+    potential::PtrPotential pot;
+} PotentialObject;
+/// \endcond
+
+/// destructor of the Potential class
+void Potential_dealloc(PotentialObject* self)
+{
+    if(self->pot)
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->pot->name())+
+        " potential at "+utils::toString(self->pot.get()));
+    else
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty potential");
+    self->pot.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+/// create a Python Potential object and initialize it with an existing instance of C++ potential class
+PyObject* createPotentialObject(const potential::PtrPotential& pot)
+{
+    PotentialObject* pot_obj = PyObject_New(PotentialObject, PotentialTypePtr);
+    if(!pot_obj)
+        return NULL;
+    // same hack as in 'createDensityObject()'
+    new (&(pot_obj->pot)) potential::PtrPotential;
+    pot_obj->pot = pot;
+    utils::msg(utils::VL_DEBUG, "Agama",
+        "Created a Python wrapper for "+std::string(pot->name())+" potential");
+    return (PyObject*)pot_obj;
+}
+
+/// extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
+potential::PtrPotential getPotential(PyObject* pot_obj)
+{
+    if(pot_obj == NULL || !PyObject_TypeCheck(pot_obj, PotentialTypePtr) ||
+        !((PotentialObject*)pot_obj)->pot)
+        return potential::PtrPotential();    // empty pointer
+    return ((PotentialObject*)pot_obj)->pot; // pointer to an existing instance of C++ Potential class
+}
 
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* args)
@@ -1709,7 +1762,7 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
         // check if we have only a tuple of potential components as arguments
-        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && 
+        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 &&
             (namedArgs==NULL || PyDict_Size(namedArgs)==0))
             self->pot = Potential_initFromTuple(args);
         else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
@@ -1997,92 +2050,17 @@ static PyTypeObject PotentialType = {
     "agama.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
     0, 0, 0, 0, 0, 0, &Potential_sequence_methods, 0, 0, 0, Potential_name, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringPotential,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE /*allow it to be subclassed*/, docstringPotential,
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, /*parent class*/ &DensityType, 0, 0, 0, 0,
     (initproc)Potential_init
 };
 
-/// create a Python Potential object and initialize it with an existing instance of C++ potential class
-PyObject* createPotentialObject(const potential::PtrPotential& pot)
-{
-    PotentialObject* pot_obj = PyObject_New(PotentialObject, &PotentialType);
-    if(!pot_obj)
-        return NULL;
-    // same hack as in 'createDensityObject()'
-    new (&(pot_obj->pot)) potential::PtrPotential;
-    pot_obj->pot = pot;
-    utils::msg(utils::VL_DEBUG, "Agama",
-        "Created a Python wrapper for "+std::string(pot->name())+" potential");
-    return (PyObject*)pot_obj;
-}
-
-/// extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
-potential::PtrPotential getPotential(PyObject* pot_obj)
-{
-    if(pot_obj == NULL || !PyObject_TypeCheck(pot_obj, &PotentialType) ||
-        !((PotentialObject*)pot_obj)->pot)
-        return potential::PtrPotential();    // empty pointer
-    return ((PotentialObject*)pot_obj)->pot; // pointer to an existing instance of C++ Potential class
-}
-
-/// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error
-potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
-{
-    if(dens_obj == NULL)
-        return potential::PtrDensity();
-
-    // check if this is a Python wrapper class for a C++ Density object (DensityType)
-    // or a Python class PotentiaType, which is a subclass of DensityType
-    if(PyObject_TypeCheck(dens_obj, &DensityType) && ((DensityObject*)dens_obj)->dens)
-        return ((DensityObject*)dens_obj)->dens;
-
-    // otherwise this could be an arbitrary Python function
-    if(PyCallable_Check(dens_obj))
-    {   // then create a C++ wrapper for this Python function
-        // (don't check if it accepts a single Nx3 array as the argument...)
-        return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
-    }
-
-    // none of the above succeeded -- return an empty pointer
-    return potential::PtrDensity();
-}
-
 
 ///@}
-//  ---------------------------------------------
-/// \name  ActionFinder and ActionMapper classes
-//  ---------------------------------------------
+//  --------------------------
+/// \name  ActionFinder class
+//  --------------------------
 ///@{
-
-/// create a spherical or non-spherical action finder
-actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, bool interpolate)
-{
-    assert(pot);
-    actions::PtrActionFinder af = isSpherical(*pot) ?
-        actions::PtrActionFinder(new actions::ActionFinderSpherical(*pot)) :
-        actions::PtrActionFinder(new actions::ActionFinderAxisymFudge(pot, interpolate));
-    utils::msg(utils::VL_DEBUG, "Agama",
-        "Created " +
-        std::string(isSpherical(*pot) ? "Spherical" : interpolate ? "Interpolated Fudge" : "Fudge") +
-        " action finder for " + pot->name() + " potential at " + utils::toString(af.get()));
-    return af;
-}
-
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to ActionFinder class
-typedef struct {
-    PyObject_HEAD
-    actions::PtrActionFinder af;  // C++ object for action finder
-} ActionFinderObject;
-/// \endcond
-
-void ActionFinder_dealloc(ActionFinderObject* self)
-{
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action finder at "+
-        utils::toString(self->af.get()));
-    self->af.reset();
-    Py_TYPE(self)->tp_free(self);
-}
 
 static const char* docstringActionFinder =
     "ActionFinder object is created for a given potential (provided as the first argument "
@@ -2098,6 +2076,53 @@ static const char* docstringActionFinder =
     "(for each point: Jr, Jz, Jphi); in the opposite case, a tuple of three Nx3 arrays: "
     "actions, angles, and frequencies (in the same order - r,z,phi).";
 
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to ActionFinder class
+typedef struct {
+    PyObject_HEAD
+    actions::PtrActionFinder af;  // C++ object for action finder
+} ActionFinderObject;
+/// \endcond
+
+/// destructor of ActionFinder class
+void ActionFinder_dealloc(ActionFinderObject* self)
+{
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action finder at "+
+        utils::toString(self->af.get()));
+    self->af.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+/// create a Python ActionFinder object and initialize it
+/// with an existing instance of C++ action finder class
+PyObject* createActionFinderObject(actions::PtrActionFinder af)
+{
+    ActionFinderObject* af_obj = PyObject_New(ActionFinderObject, ActionFinderTypePtr);
+    if(!af_obj)
+        return NULL;
+    // same trickery as in 'createDensityObject()'
+    new (&(af_obj->af)) actions::PtrActionFinder;
+    af_obj->af = af;
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
+        utils::toString(af.get()));
+    return (PyObject*)af_obj;
+}
+
+/// create a spherical or non-spherical action finder
+actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, bool interpolate)
+{
+    assert(pot);
+    actions::PtrActionFinder af = isSpherical(*pot) ?
+        actions::PtrActionFinder(new actions::ActionFinderSpherical(*pot)) :
+        actions::PtrActionFinder(new actions::ActionFinderAxisymFudge(pot, interpolate));
+    utils::msg(utils::VL_DEBUG, "Agama",
+        "Created " +
+        std::string(isSpherical(*pot) ? "Spherical" : interpolate ? "Interpolated Fudge" : "Fudge") +
+        " action finder for " + pot->name() + " potential at " + utils::toString(af.get()));
+    return af;
+}
+
+/// constructor of ActionFinder class
 int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"potential", "interp", NULL};
@@ -2120,7 +2145,7 @@ int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
         return 0;
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
+        PyErr_SetString(PyExc_ValueError,
             (std::string("Error in ActionFinder initialization: ")+e.what()).c_str());
         return -1;
     }
@@ -2185,31 +2210,17 @@ static PyTypeObject ActionFinderType = {
     "agama.ActionFinder",
     sizeof(ActionFinderObject), 0, (destructor)ActionFinder_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringActionFinder, 
+    Py_TPFLAGS_DEFAULT, docstringActionFinder,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ActionFinder_init
 };
 
-/// create a Python ActionFinder object and initialize it
-/// with an existing instance of C++ action finder class
-PyObject* createActionFinderObject(actions::PtrActionFinder af)
-{
-    ActionFinderObject* af_obj = PyObject_New(ActionFinderObject, &ActionFinderType);
-    if(!af_obj)
-        return NULL;
-    // same trickery as in 'createDensityObject()'
-    new (&(af_obj->af)) actions::PtrActionFinder;
-    af_obj->af = af;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
-        utils::toString(af.get()));
-    return (PyObject*)af_obj;
-}
 
 /// \cond INTERNAL_DOCS
 /// standalone action finder
 typedef struct {
     potential::PtrPotential pot;
-    double ifd;
+    double fd;   // focal distance
 } ActionFinderParams;
 /// \endcond
 
@@ -2218,16 +2229,16 @@ void fncActionsStandalone(void* obj, const double input[], double *result) {
     try{
         const coord::PosVelCyl point = coord::toPosVelCyl(convertPosVel(input));
         const ActionFinderParams* params = static_cast<const ActionFinderParams*>(obj);
-        double ifd = params->ifd * conv->lengthUnit;
+        double fd = params->fd * conv->lengthUnit;
         actions::Frequencies freq;
         actions::ActionAngles actang = Angles ?
             (isSpherical(*params->pot) ?
             actions::actionAnglesSpherical  (*params->pot, point, &freq) :
-            actions::actionAnglesAxisymFudge(*params->pot, point, ifd, &freq)) :
+            actions::actionAnglesAxisymFudge(*params->pot, point, fd, &freq)) :
             actions::ActionAngles(
             (isSpherical(*params->pot) ?
             actions::actionsSpherical  (*params->pot, point) :
-            actions::actionsAxisymFudge(*params->pot, point, ifd)), actions::Angles(0,0,0));
+            actions::actionsAxisymFudge(*params->pot, point, fd)), actions::Angles(0,0,0));
         const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);  // inverse action unit
         result[0] = actang.Jr   * convA;
         result[1] = actang.Jz   * convA;
@@ -2263,14 +2274,14 @@ static const char* docstringActions =
 PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"point", "potential", "fd", "angles", NULL};
-    double ifd = 0;
+    double fd = 0;
     PyObject *points_obj = NULL, *pot_obj = NULL, *angles = NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
-        &points_obj, &pot_obj, &ifd, &angles) || ifd<0)
+        &points_obj, &pot_obj, &fd, &angles) || fd<0)
         return NULL;
     ActionFinderParams params;
     params.pot = getPotential(pot_obj);
-    params.ifd = ifd;
+    params.fd  = fd;
     if(!params.pot) {
         PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid instance of Potential class");
         return NULL;
@@ -2284,22 +2295,11 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to ActionMapper class
-typedef struct {
-    PyObject_HEAD
-    const actions::BaseActionMapper* am;  // C++ object for action mapper
-    double Jr, Jz, Jphi;              // triplet of actions provided at the construction (in physical units)
-    double Omegar, Omegaz, Omegaphi;  // frequencies corresponding to these actions (in physical units)
-} ActionMapperObject;
-/// \endcond
-
-void ActionMapper_dealloc(ActionMapperObject* self)
-{
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am));
-    delete self->am;
-    Py_TYPE(self)->tp_free(self);
-}
+///@}
+//  --------------------------
+/// \name  ActionMapper class
+//  --------------------------
+///@{
 
 static const char* docstringActionMapper =
     "ActionMapper performs an inverse operation to ActionFinder, namely, compute the position and velocity "
@@ -2320,6 +2320,23 @@ static const char* docstringActionMapper =
     "    print(Omega, am.Omegar, am.Omegaz, am.Omegaphi) # should be approximately equal\n"
     "    print(J, am.Jr, am.Jz, am.Jphi)                 # same here\n"
     "    print(theta)                                    # and here (nearly equal to the provided values)\n";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to ActionMapper class
+typedef struct {
+    PyObject_HEAD
+    const actions::BaseActionMapper* am;  // C++ object for action mapper
+    double Jr, Jz, Jphi;              // triplet of actions provided at the construction (in physical units)
+    double Omegar, Omegaz, Omegaphi;  // frequencies corresponding to these actions (in physical units)
+} ActionMapperObject;
+/// \endcond
+
+void ActionMapper_dealloc(ActionMapperObject* self)
+{
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am));
+    delete self->am;
+    Py_TYPE(self)->tp_free(self);
+}
 
 int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -2357,7 +2374,7 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
         return 0;
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
+        PyErr_SetString(PyExc_ValueError,
             (std::string("Error in ActionMapper initialization: ")+e.what()).c_str());
         return -1;
     }
@@ -2427,28 +2444,6 @@ static PyTypeObject ActionMapperType = {
 //  ----------------------------------
 ///@{
 
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to DistributionFunction class
-typedef struct {
-    PyObject_HEAD
-    df::PtrDistributionFunction df;
-} DistributionFunctionObject;
-/// \endcond
-
-void DistributionFunction_dealloc(DistributionFunctionObject* self)
-{
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a distribution function at "+
-        utils::toString(self->df.get()));
-    self->df.reset();
-    Py_TYPE(self)->tp_free(self);
-}
-
-// forward declaration
-df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
-
-// forward declaration
-PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df);
-
 static const char* docstringDistributionFunction =
     "DistributionFunction class represents an action-based distribution function.\n\n"
     "The constructor accepts several key=value arguments that describe the parameters "
@@ -2473,6 +2468,103 @@ static const char* docstringDistributionFunction =
     "A user-defined Python function that takes a single argument - Nx3 array "
     "(with columns representing Jr, Jz, Jphi at N>=1 points) and returns an array of length N "
     "may be provided in all contexts where a DistributionFunction object is required.";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to DistributionFunction class
+typedef struct {
+    PyObject_HEAD
+    df::PtrDistributionFunction df;
+} DistributionFunctionObject;
+/// \endcond
+
+/// destructor of DistributionFunction class
+void DistributionFunction_dealloc(DistributionFunctionObject* self)
+{
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a distribution function at "+
+        utils::toString(self->df.get()));
+    self->df.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+/// Helper class for providing a BaseDistributionFunction interface
+/// to a Python function that returns the value of df at a point in action space
+class DistributionFunctionWrapper: public df::BaseDistributionFunction{
+    OmpDisabler ompDisabler;
+    PyObject* fnc;
+public:
+    DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
+    {
+        Py_INCREF(fnc);
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Created a C++ df wrapper for Python function "+toString(fnc));
+    }
+    ~DistributionFunctionWrapper()
+    {
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ df wrapper for Python function "+toString(fnc));
+        Py_DECREF(fnc);
+    }
+    virtual double value(const actions::Actions &J) const {
+        double act[3];
+        unconvertActions(J, act);
+        npy_intp dims[]  = {1, 3};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        double value;
+        if(result == NULL) {
+            PyErr_Print();
+            throw std::runtime_error("Call to user-defined distribution function failed");
+        }
+        if(PyArray_Check(result))
+            value = pyArrayElem<double>(result, 0);  // TODO: ensure that it's an array of doubles?
+        else if(PyNumber_Check(result))
+            value = PyFloat_AsDouble(result);
+        else {
+            Py_DECREF(result);
+            throw std::runtime_error("Invalid data type returned from user-defined distribution function");
+        }
+        Py_DECREF(result);
+        return value * conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
+    }
+};
+
+/// extract a pointer to C++ DistributionFunction class from a Python object,
+/// or return an empty pointer on error
+df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
+{
+    if(df_obj == NULL)
+        return df::PtrDistributionFunction();
+    // check if this is a Python wrapper for a genuine C++ DF object
+    if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr) && ((DistributionFunctionObject*)df_obj)->df)
+        return ((DistributionFunctionObject*)df_obj)->df;
+    // otherwise this could be an arbitrary callable Python object,
+    // but make sure it's not one of the other classes in this module which provide a call interface
+    if(PyCallable_Check(df_obj) &&
+        !PyObject_TypeCheck(df_obj, DensityTypePtr) &&
+        !PyObject_TypeCheck(df_obj, ActionFinderTypePtr) &&
+        !PyObject_TypeCheck(df_obj, TargetTypePtr) )
+    {   // then create a C++ wrapper for this Python function
+        // (don't check if it accepts a single Nx3 array as the argument...)
+        return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
+    }
+    // none succeeded - return an empty pointer
+    return df::PtrDistributionFunction();
+}
+
+/// create a Python DistributionFunction object from an existing instance of C++ DF class
+PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
+{
+    DistributionFunctionObject* df_obj =
+        PyObject_New(DistributionFunctionObject, DistributionFunctionTypePtr);
+    if(!df_obj)
+        return NULL;
+    // same hack as in 'createDensityObject()'
+    new (&(df_obj->df)) df::PtrDistributionFunction;
+    df_obj->df = df;
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for distribution function");
+    return (PyObject*)df_obj;
+}
 
 /// attempt to construct an interpolated distribution function from the parameters provided in dictionary
 template<int N>
@@ -2553,7 +2645,7 @@ df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
                 "only valid DistributionFunction objects or functions providing that interface");
         components.push_back(comp);
     }
-    return components.size()==1 ? components[0] : 
+    return components.size()==1 ? components[0] :
         df::PtrDistributionFunction(new df::CompositeDF(components));
 }
 
@@ -2562,7 +2654,7 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
 {
     try{
         // check if we have only a tuple of DF components as arguments
-        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 && 
+        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 &&
             (namedArgs==NULL || !PyDict_Check(namedArgs) || PyDict_Size(namedArgs)==0))
         {
             self->df = DistributionFunction_initFromTuple(args);
@@ -2682,87 +2774,11 @@ static PyTypeObject DistributionFunctionType = {
     "agama.DistributionFunction",
     sizeof(DistributionFunctionObject), 0, (destructor)DistributionFunction_dealloc,
     0, 0, 0, 0, 0, 0, &DistributionFunction_sequence_methods, 0, 0, DistributionFunction_value, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringDistributionFunction, 
+    Py_TPFLAGS_DEFAULT, docstringDistributionFunction,
     0, 0, 0, 0, 0, 0, DistributionFunction_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)DistributionFunction_init
 };
 
-
-/// Helper class for providing a BaseDistributionFunction interface
-/// to a Python function that returns the value of df at a point in action space
-class DistributionFunctionWrapper: public df::BaseDistributionFunction{
-    OmpDisabler ompDisabler;
-    PyObject* fnc;
-public:
-    DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
-    {
-        Py_INCREF(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ df wrapper for Python function "+toString(fnc));
-    }
-    ~DistributionFunctionWrapper()
-    {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ df wrapper for Python function "+toString(fnc));
-        Py_DECREF(fnc);
-    }
-    virtual double value(const actions::Actions &J) const {
-        double act[3];
-        unconvertActions(J, act);
-        npy_intp dims[]  = {1, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        double value;
-        if(result == NULL) {
-            PyErr_Print();
-            throw std::runtime_error("Call to user-defined distribution function failed");
-        }
-        if(PyArray_Check(result))
-            value = pyArrayElem<double>(result, 0);  // TODO: ensure that it's an array of doubles?
-        else if(PyNumber_Check(result))
-            value = PyFloat_AsDouble(result);
-        else {
-            Py_DECREF(result);
-            throw std::runtime_error("Invalid data type returned from user-defined distribution function");
-        }
-        Py_DECREF(result);
-        return value * conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
-    }
-};
-
-/// extract a pointer to C++ DistributionFunction class from a Python object,
-/// or return an empty pointer on error
-df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
-{
-    if(df_obj == NULL)
-        return df::PtrDistributionFunction();
-    // check if this is a Python wrapper for a genuine C++ DF object
-    if(PyObject_TypeCheck(df_obj, &DistributionFunctionType) && ((DistributionFunctionObject*)df_obj)->df)
-        return ((DistributionFunctionObject*)df_obj)->df;
-    // otherwise this could be an arbitrary callable Python object
-    if(PyCallable_Check(df_obj))
-    {   // then create a C++ wrapper for this Python function
-        // (don't check if it accepts a single Nx3 array as the argument...)
-        return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
-    }
-    // none succeeded - return an empty pointer
-    return df::PtrDistributionFunction();
-}
-
-/// create a Python DistributionFunction object from an existing instance of C++ DF class
-PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
-{
-    DistributionFunctionObject* df_obj =
-        PyObject_New(DistributionFunctionObject, &DistributionFunctionType);
-    if(!df_obj)
-        return NULL;
-    // same hack as in 'createDensityObject()'
-    new (&(df_obj->df)) df::PtrDistributionFunction;
-    df_obj->df = df;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for distribution function");
-    return (PyObject*)df_obj;
-}
 
 
 ///@}
@@ -2770,6 +2786,18 @@ PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
 /// \name  GalaxyModel class
 //  -------------------------
 ///@{
+
+static const char* docstringGalaxyModel =
+    "GalaxyModel is a class that takes together a Potential, "
+    "a DistributionFunction, and an ActionFinder objects, "
+    "and provides methods to compute moments and projections of the distribution function "
+    "at a given point in the ordinary phase space (coordinate/velocity), as well as "
+    "methods for drawing samples from the distribution function in the given potential.\n"
+    "The constructor takes the following arguments:\n"
+    "  potential - a Potential object;\n"
+    "  df  - a DistributionFunction object;\n"
+    "  af (optional) - an ActionFinder object; "
+    "if not provided then the action finder is created internally.\n";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to GalaxyModel class
@@ -2805,18 +2833,6 @@ bool GalaxyModel_isCorrect(GalaxyModelObject* self)
     return true;
 }
 
-static const char* docstringGalaxyModel =
-    "GalaxyModel is a class that takes together a Potential, "
-    "a DistributionFunction, and an ActionFinder objects, "
-    "and provides methods to compute moments and projections of the distribution function "
-    "at a given point in the ordinary phase space (coordinate/velocity), as well as "
-    "methods for drawing samples from the distribution function in the given potential.\n"
-    "The constructor takes the following arguments:\n"
-    "  potential - a Potential object;\n"
-    "  df  - a DistributionFunction object;\n"
-    "  af (optional) - an ActionFinder object; "
-    "if not provided then the action finder is created internally.\n";
-
 int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"potential", "df", "af", NULL};
@@ -2846,7 +2862,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
         return -1;
     }
     Py_XDECREF(self->df_obj);
-    if(PyObject_TypeCheck(df_obj, &DistributionFunctionType))
+    if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr))
     {   // it is a true Python DF object
         Py_INCREF(df_obj);
         self->df_obj = (DistributionFunctionObject*)df_obj;
@@ -2858,7 +2874,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
 
     // af_obj might be NULL (then create a new one); if not NULL then check its validity
     // (however there is no way to ensure that the action finder corresponds to the potential!)
-    if(af_obj!=NULL && (!PyObject_TypeCheck(af_obj, &ActionFinderType) ||
+    if(af_obj!=NULL && (!PyObject_TypeCheck(af_obj, ActionFinderTypePtr) ||
        ((ActionFinderObject*)af_obj)->af==NULL))
     {
         PyErr_SetString(PyExc_TypeError,
@@ -2869,7 +2885,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
     Py_XDECREF(self->af_obj);
     if(af_obj==NULL) {  // no action finder provided - create one internally
         PyObject *args = Py_BuildValue("(O)", pot_obj);
-        self->af_obj = (ActionFinderObject*)PyObject_CallObject((PyObject*)&ActionFinderType, args);
+        self->af_obj = (ActionFinderObject*)PyObject_CallObject((PyObject*)ActionFinderTypePtr, args);
         Py_DECREF(args);
         if(!self->af_obj)
             return -1;
@@ -2910,7 +2926,7 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
         return Py_BuildValue("NN", posvel_arr, mass_arr);
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, 
+        PyErr_SetString(PyExc_ValueError,
             (std::string("Error in sample(): ")+e.what()).c_str());
         return NULL;
     }
@@ -3367,28 +3383,7 @@ static PyTypeObject GalaxyModelType = {
 //  -----------------------------------------------
 ///@{
 
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Component class
-typedef struct {
-    PyObject_HEAD
-    galaxymodel::PtrComponent comp;
-    const char* name;
-} ComponentObject;
-/// \endcond
-
-void Component_dealloc(ComponentObject* self)
-{
-    if(self->comp)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->name) + " at " +
-            utils::toString(self->comp.get()));
-    else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty component");
-    self->comp.reset();
-    // self->name is either NULL or points to a constant string that does not require deallocation
-    Py_TYPE(self)->tp_free(self);
-}
-
-static const char* docstringComponent = 
+static const char* docstringComponent =
     "Represents a single component of a self-consistent model.\n"
     "It can be either a static component with a fixed density or potential profile, "
     "or a DF-based component whose density profile is recomputed iteratively "
@@ -3414,6 +3409,27 @@ static const char* docstringComponent =
     "  For disklike components:\n"
     "    gridR, gridz (array-like) --  the nodes of 2d grid in cylindrical coordinates, "
     "first elements must be zeros (may be constructed using 'agama.createNonuniformGrid()').\n";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Component class
+typedef struct {
+    PyObject_HEAD
+    galaxymodel::PtrComponent comp;
+    const char* name;
+} ComponentObject;
+/// \endcond
+
+void Component_dealloc(ComponentObject* self)
+{
+    if(self->comp)
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->name) + " at " +
+            utils::toString(self->comp.get()));
+    else
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty component");
+    self->comp.reset();
+    // self->name is either NULL or points to a constant string that does not require deallocation
+    Py_TYPE(self)->tp_free(self);
+}
 
 int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -3590,6 +3606,23 @@ static PyTypeObject ComponentType = {
 //  ---------------------------------
 ///@{
 
+static const char* docstringSelfConsistentModel =
+    "A class for performing self-consistent modelling procedure.\n"
+    "A full model consists of one or more instances of Component class "
+    "representing either static density or potential profiles, or distribution function-based "
+    "components with iteratively recomputed density profiles, plus the overall potential "
+    "and the associated action finder object.\n"
+    "The SelfConsistentModel object contains parameters for two kinds of potential "
+    "expansions used in the procedure -- Multipole potential for spheroidal components "
+    "and CylSpline potential for disk-like components, the list of Component objects, "
+    "and read-only references to the total potential and the action finder.\n"
+    "The constructor takes named arguments describing the potential expansion parameters -- "
+    "a full list is given by 'dir(SelfConsistentModel)', and they may be modified at any time.\n"
+    "The list of components is initially empty and should be filled by the user; "
+    "it may also be modified between iterations.\n"
+    "The potential and action finder member variables are initially empty, "
+    "and are initialized after the first call to the 'iterate()' method.\n";
+
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to SelfConsistentModel class
 typedef struct {
@@ -3616,23 +3649,6 @@ void SelfConsistentModel_dealloc(SelfConsistentModelObject* self)
     Py_XDECREF(self->af);
     Py_TYPE(self)->tp_free(self);
 }
-
-static const char* docstringSelfConsistentModel =
-    "A class for performing self-consistent modelling procedure.\n"
-    "A full model consists of one or more instances of Component class "
-    "representing either static density or potential profiles, or distribution function-based "
-    "components with iteratively recomputed density profiles, plus the overall potential "
-    "and the associated action finder object.\n"
-    "The SelfConsistentModel object contains parameters for two kinds of potential "
-    "expansions used in the procedure -- Multipole potential for spheroidal components "
-    "and CylSpline potential for disk-like components, the list of Component objects, "
-    "and read-only references to the total potential and the action finder.\n"
-    "The constructor takes named arguments describing the potential expansion parameters -- "
-    "a full list is given by 'dir(SelfConsistentModel)', and they may be modified at any time.\n"
-    "The list of components is initially empty and should be filled by the user; "
-    "it may also be modified between iterations.\n"
-    "The potential and action finder member variables are initially empty, "
-    "and are initialized after the first call to the 'iterate()' method.\n";
 
 int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -3695,22 +3711,23 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
         model.totalPotential = ((PotentialObject*)self->pot)->pot;
     if(self->af!=NULL && PyObject_TypeCheck(self->af, &ActionFinderType))
         model.actionFinder = ((ActionFinderObject*)self->af)->af;
+    PyObject* result = NULL;
     try {
         doIteration(model);
-        // update the total potential and action finder by copying the C++ smart pointers into
-        // Python objects; old Python objects are released (and destroyed if no one else uses them)
-        Py_XDECREF(self->pot);
-        Py_XDECREF(self->af);
-        self->pot = (PotentialObject*)createPotentialObject(model.totalPotential);
-        self->af  = (ActionFinderObject*)createActionFinderObject(model.actionFinder);
         Py_INCREF(Py_None);
-        return Py_None;
+        result = Py_None;
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_ValueError,
             (std::string("Error in SelfConsistentModel.iterate(): ")+e.what()).c_str());
-        return NULL;
     }
+    // update the total potential and action finder by copying the C++ smart pointers into
+    // Python objects; old Python objects are released (and destroyed if no one else uses them)
+    Py_XDECREF(self->pot);
+    Py_XDECREF(self->af);
+    self->pot = (PotentialObject*)createPotentialObject(model.totalPotential);
+    self->af  = (ActionFinderObject*)createActionFinderObject(model.actionFinder);
+    return result;  // None on success, NULL on error
 }
 
 static PyMemberDef SelfConsistentModel_members[] = {
@@ -3773,35 +3790,16 @@ static PyTypeObject SelfConsistentModelType = {
 ///@{
 
 
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Target class
-typedef struct {
-    PyObject_HEAD
-    galaxymodel::PtrTarget target;
-} TargetObject;
-/// \endcond
-
-void Target_dealloc(TargetObject* self)
-{
-    if(self->target)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
-            " target at " + utils::toString(self->target.get()));
-    else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty target");
-    self->target.reset();
-    Py_TYPE(self)->tp_free(self);
-}
-
 static const char* docstringTarget =
     "Target objects represent various targets that need to be satisfied by an additive model.\n"
     "The type of target is specified by the  type='...' argument, and other available arguments "
     "depend on it. "
     "Below follows the list of possible target types and their parameters (all case-insensitive).\n\n"
-    "Density discretization models:\n"
+    "Density discretization models:\n\n"
     "  DensityClassicTopHat\n"
     "Classical approach for spheroidal Schwarzschild models: "
     "radial shells divided into three panes, each pane - into several strips, "
-    "and the density inside each resulting cell is approximated as a constant.\n"
+    "and the density inside each resulting cell is approximated as a constant.\n\n"
     "  DensityClassicLinear\n"
     "Same as classical, but the density is specified at the grid nodes and interpolated "
     "tri-linearly within each cell.\n"
@@ -3809,18 +3807,18 @@ static const char* docstringTarget =
     "gridr - array of radial grid nodes;\n"
     "stripsPerPane - number of strips in each of three panes in each shell "
     "(hence the number of cells in each pane is stripsPerPane^2);\n"
-    "axisRatioY, axisRatioZ - (optional) coefficients for squeezing the grid in each dimension.\n"
+    "axisRatioY, axisRatioZ - (optional) coefficients for squeezing the grid in each dimension.\n\n"
     "  DensitySphHarm\n"
     "Radial grid is the same as in the classic approach, but the angular dependence "
     "of the density is represented in terms of spherical-harmonic expansion, "
     "and the radial dependence of each term is a linearly-interpolated function.\n"
     "Parameters:\n"
     "gridr - array of radial grid nodes;\n"
-    "lmax, mmax - order of angular expansion in theta and phi, respectively.\n"
+    "lmax, mmax - order of angular expansion in theta and phi, respectively.\n\n"
     "  DensityCylindricalTopHat\n"
     "A grid in meridional plane (R,z) aligned with cylindrical coordinates, "
     "with the azimuthal dependence of the density represented by a Fourier expansion; "
-    "the density is attributed to each cell (implicitly assumed to be constant within a cell).\n"
+    "the density is attributed to each cell (implicitly assumed to be constant within a cell).\n\n"
     "  DensityCylindricalLinear\n"
     "Same as the previous one, but each azimuthal Fourier term in the meridional plane (R,z) "
     "is bi-linearly interpolated within each cell.\n"
@@ -3828,7 +3826,7 @@ static const char* docstringTarget =
     "gridr, gridz - arrays of grid nodes in cylindrical radius and vertical coordinate "
     "(should cover only the positive quadrant);\n"
     "mmax - order of azmuthal Fourier expansion.\n\n"
-    "Kinematic constraints:\n"
+    "Kinematic constraints:\n\n"
     "  KinemShell\n"
     "This target object records the density-weighted radial and tangential velocity dispersion "
     "in spherical coordinates, represented as projections onto basis elements of a B-spline grid "
@@ -3924,9 +3922,32 @@ static const char* docstringTarget =
     "The length of the resulting array is equal to len(t1). "
     "For a LOSVD target, applying it to a density object computes the integrals of surface mass "
     "density over each aperture, convolved with the spatial PSF; equivalently, this is the overall "
-    "normalization of the LOSVD in each aperture, i.e. the integral of f(v) over all velocities. "
-    "This number may be used as the normalization factor gamma in computing Gauss-Hermite coefficients "
-    "from LOSVD, as shown below:\n";
+    "normalization of the LOSVD in each aperture, i.e. the integral of f(v) over all velocities. ";
+    //"This number may be used as the normalization factor in computing Gauss-Hermite coefficients "
+    //"from LOSVD, as shown below:\n";  // TODO expand
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Target class
+typedef struct {
+    PyObject_HEAD
+    galaxymodel::PtrTarget target;
+    // dimensional unit conversion factor for applying the Target to a Density object
+    double unitDensityProjection;
+    // same factor for a GalaxyModel object, an N-body snapshot, or during orbit integration
+    double unitDFProjection;
+} TargetObject;
+/// \endcond
+
+void Target_dealloc(TargetObject* self)
+{
+    if(self->target)
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
+            " target at " + utils::toString(self->target.get()));
+    else
+        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty target");
+    self->target.reset();
+    Py_TYPE(self)->tp_free(self);
+}
 
 int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
 {
@@ -3943,6 +3964,10 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             // spatial grids
             std::vector<double> gridr = toDoubleArray(getItemFromPyDict(namedArgs, "gridr"));
             std::vector<double> gridz = toDoubleArray(getItemFromPyDict(namedArgs, "gridz"));
+            if(gridr.size()<2)
+                throw std::invalid_argument("gridr must be an array with >=2 elements");
+            if(gridz.size()<2 && utils::stringsEqual(type_str.substr(0, 18), "DensityCylindrical"))
+                throw std::invalid_argument("gridz must be an array with >=2 elements");
             math::blas_dmul(conv->lengthUnit, gridr);
             math::blas_dmul(conv->lengthUnit, gridz);
             // orders of angular expansion or number of lines partitioning a spherical shell into cells
@@ -3966,14 +3991,18 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
             else if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
                 self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
-            else 
+            else
                 throw std::invalid_argument("Unknown type='...' argument");
+            self->unitDensityProjection = conv->massUnit;
+            self->unitDFProjection = conv->massUnit;
         }
 
         // check if a KinemShell is being requested
         if(utils::stringsEqual(type_str, "KinemShell")) {
             int degree = toInt(getItemFromPyDict(namedArgs, "degree"), -1);
             std::vector<double> gridr = toDoubleArray(getItemFromPyDict(namedArgs, "gridr"));
+            if(gridr.size()<2)
+                throw std::invalid_argument("gridr must be an array with >=2 elements");
             math::blas_dmul(conv->lengthUnit, gridr);
             switch(degree) {
                 case 0: self->target.reset(new galaxymodel::TargetKinemShell<0>(gridr)); break;
@@ -3984,6 +4013,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                     throw std::invalid_argument(
                         "KinemShell: degree of interpolation should be between 0 and 3");
             }
+            self->unitDensityProjection = NAN;
+            self->unitDFProjection = conv->massUnit * pow_2(conv->velocityUnit);
         }
 
         // check if a LOSVD is being requested
@@ -4000,7 +4031,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             if(params.gridy.empty())
                 params.gridy = params.gridx;
             if(params.gridx.size()<2 || params.gridy.size()<2 || params.gridv.size()<2)
-                throw std::invalid_argument("gridx, [gridy, ] gridv must be arrays with >=2 elements"); 
+                throw std::invalid_argument("gridx, [gridy, ] gridv must be arrays with >=2 elements");
             math::blas_dmul(conv->lengthUnit, params.gridx);
             math::blas_dmul(conv->lengthUnit, params.gridy);
             math::blas_dmul(conv->velocityUnit, params.gridv);
@@ -4064,6 +4095,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                     throw std::invalid_argument(
                         "LOSVD: degree of interpolation should be between 0 and 3");
             }
+            self->unitDensityProjection = conv->massUnit;
+            self->unitDFProjection = conv->massUnit / conv->velocityUnit;
         }
         if(!self->target)  // none of the above variants worked
             throw std::invalid_argument("Unknown type='...' argument");
@@ -4073,8 +4106,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             (std::string("Error in creating a Target object: ")+e.what()).c_str());
         return -1;
     }
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->target->name()) +
-        " at " + utils::toString(self->target.get()));
+    utils::msg(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
+        " target at " + utils::toString(self->target.get()));
     return 0;
 }
 
@@ -4084,7 +4117,7 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
         PyErr_SetString(PyExc_TypeError, "Expected exactly 1 argument");
         return NULL;
     }
-    const char* errorstr = "Argument must be an instance of Density, GalaxyMode, or an array of "
+    const char* errorstr = "Argument must be an instance of Density, GalaxyModel, or an array of "
         "particles (a tuple with two elements - Nx6 position/velocity coordinates and N masses)";
 
     PyObject* arg = PyTuple_GET_ITEM(args, 0);
@@ -4094,7 +4127,7 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
         potential::PtrDensity dens = getDensity(arg);
         if(dens) {
             std::vector<double> result = self->target->computeDensityProjection(*dens);
-            math::blas_dmul(1./conv->massUnit, result);
+            math::blas_dmul(1./self->unitDensityProjection, result);
             return toPyArray(result);
         }
 
@@ -4106,7 +4139,7 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
                 *((GalaxyModelObject*)arg)->af_obj->af,
                 *((GalaxyModelObject*)arg)->df_obj->df),
                 &result[0]);
-            math::blas_dmul(1./conv->massUnit, result);
+            math::blas_dmul(1./self->unitDFProjection, result);
             return toPyArray(result);
         }
 
@@ -4140,7 +4173,7 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* /*namedArgs
             // define thread-local intermediate matrices
             math::Matrix<double> datacube = self->target->newDatacube();
             std::vector<galaxymodel::StorageNumT> tmpresult(size);
-            const double mult = 1./conv->massUnit;
+            const double mult = 1./self->unitDFProjection;
 #ifdef _OPENMP
 #pragma omp for schedule(static)
 #endif
@@ -4213,6 +4246,7 @@ static PyTypeObject TargetType = {
     (initproc)Target_init
 };
 
+
 ///@}
 //  --------------------------------------------
 /// \name  Computation of Gauss-Hermite moments
@@ -4220,7 +4254,7 @@ static PyTypeObject TargetType = {
 ///@{
 
 /// description of orbit function
-static const char* docstringGhmoments =
+static const char* docstringGhMoments =
     "Compute the coefficients of Gauss-Hermite expansion for line-of-sight velocity "
     "distribution functions represented by a B-spline, as used in the LOSVD Target model.\n"
     "Named arguments:\n"
@@ -4231,9 +4265,8 @@ static const char* docstringGhmoments =
     "The number of columns in the matrix is numBasisFnc * numApertures: "
     "the former is the number of amplitudes of B-spline representation of a single LOSVD, "
     "equal to len(gridv)+degree-1; the latter is the number of separate regions in "
-    "the image plane, each with its own LOSVD. Note that numApertures is inferred from "
-    "the ratio between the number of columns and the number of basis functions "
-    "(itself known from gridv and degree). "
+    "the image plane, each with its own LOSVD. Note that numApertures is inferred as the number "
+    "of columns divided by the number of basis functions (itself known from gridv and degree). "
     "If the matrix is two-dimensional, each row corresponds to a single component "
     "of the model (e.g., an orbit) which has its LOSVD recorded in each aperture. "
     "In the opposite case (one-dimensional array) these could be LOSVDs for the entire model "
@@ -4242,65 +4275,64 @@ static const char* docstringGhmoments =
     "(in other words, each component may be viewed as a 2d matrix with numApertures rows "
     "and numBasisFnc columns, reshaped into a 1d array).\n"
     "  ghorder - the order of Gauss-Hermite expansion, should be >=2.\n"
-    "  ghexp (optional) - if provided, should be a 2d array with numApertures rows and 3 columns, "
-    "each row containing the parameters of the Gaussian that serves as the base for expansion: "
-    "overall normalization (gamma), center (mean v) and width (sigma). \n"
+    "  ghbasis (optional) - if provided, should be a 2d array with numApertures rows and 3 columns, "
+    "each row containing the parameters of the Gaussian that serves as the basis for expansion: "
+    "amplitude, center and width. \n"
     "There are two different scenarios for using this routine. \n"
-    "The first is to construct both the velocity maps (v, sigma and gamma) by finding a best-fit "
-    "Gaussian for each of the input LOSVDs, and then use these parameters to compute higher-order "
-    "GH moments; in this case the input matrix is supposed to represent the LOSVDs in each "
-    "aperture for the entire model (i.e., has only one component), and the argument 'ghexp' "
-    "is not provided.\n"
+    "The first is to construct both the expansion parameters (amplitude, center and width) "
+    "by finding a best-fit Gaussian for each of the input LOSVDs, and then use these parameters "
+    "to compute higher-order GH moments; in this case the input matrix is supposed to represent "
+    "the LOSVDs in each aperture for the entire model (i.e., has only one component), "
+    "and the argument 'ghbasis' is not provided.\n"
     "The second scenario is to convert the LOSVDs for a multi-component model (e.g., produced by "
     "the Target LOSVD object during orbit integration) into GH moments, reducing the number of "
     "parameters needed to represent each component's LOSVD. In this case all components "
     "naturally should use the same base parameters of the Gaussian (separate for each aperture, "
     "but identical between components), so that a linear superposition of input LOSVDs "
-    "corresponds to the same linear superposition of GH moments. Hence the argument 'ghexp' "
+    "corresponds to the same linear superposition of GH moments. Hence the argument 'ghbasis' "
     "should be provided.\n"
     "  Returns: a 1d or 2d array (depending on the number of dimensions of the input matrix), "
     "where each row contains the GH moments for each aperture, and the number of rows is equal "
     "to the number of components (rows of the input matrix).\n"
-    "If 'ghexp' argument was not provided, the output will contain also the parameters of "
-    "the best-fit Gaussian serving as the base for the expansion, i.e. three numbers "
-    "(gamma, mean v and sigma), followed by GH moments h_0..h_M, where M is the order "
+    "If 'ghbasis' argument was not provided, the output will contain also the parameters of "
+    "the best-fit Gaussian serving as the basis for the expansion, i.e. three numbers "
+    "(amplitude, center and width), followed by GH moments h_0..h_M, where M is the order "
     "of expansion - in total M+4 numbers for each aperture (grouped together), "
-    "of which the first three can be later used as the 'ghexp' argument for computing the moments "
-    "in a multi-component model.\n"
-    "In the opposite case when 'ghexp' is provided, the output for each aperture contains M+1 "
+    "of which the first three can be later used as the 'ghbasis' argument for computing the moments "
+    "in a multi-component model. In this case, h_0=1, h_1=h_2=0 with high accuracy.\n"
+    "In the opposite case when 'ghbasis' is provided, the output for each aperture contains M+1 "
     "moments h_0..h_M.\n";
 
-PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     if(!onlyNamedArgs(args, namedArgs))
        return NULL;
 
     int degree = -1, ghorder = -1;
     PyObject *gridv_obj = NULL, *mat_obj = NULL, *gh_obj = NULL;
-    static const char* keywords[] = {"degree", "ghorder", "gridv", "matrix", "ghexp", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "iiOO|O", const_cast<char**>(keywords),
-        &degree, &ghorder, &gridv_obj, &mat_obj, &gh_obj))
+    static const char* keywords[] = {"degree", "gridv", "matrix", "ghorder", "ghbasis", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "iOOi|O", const_cast<char**>(keywords),
+        &degree, &gridv_obj, &mat_obj, &ghorder, &gh_obj))
         return NULL;
 
     // order of Gauss-Hermite expansion
-    if(ghorder<2) {
-        PyErr_SetString(PyExc_ValueError, "ghmoments: order of Gauss-Hermite expansion should be >=2");
+    if(ghorder<0) {
+        PyErr_SetString(PyExc_ValueError, "ghMoments: order of Gauss-Hermite expansion should be >=0");
         return NULL;
     }
 
     // degree of B-splines
     if(degree<0 || degree>3) {
-        PyErr_SetString(PyExc_ValueError, "ghmoments: degree of interpolation may not exceed 3");
+        PyErr_SetString(PyExc_ValueError, "ghMoments: degree of interpolation may not exceed 3");
         return NULL;
     }
 
     // grid in velocity space
     std::vector<double> gridv = toDoubleArray(gridv_obj);
     if(gridv.size() < 2) {
-        PyErr_SetString(PyExc_ValueError, "ghmoments: gridv must be an array with >= 2 nodes");
+        PyErr_SetString(PyExc_ValueError, "ghMoments: gridv must be an array with >= 2 nodes");
         return NULL;
     }
-    math::blas_dmul(conv->velocityUnit, gridv);
     int numBasisFnc = (npy_intp)gridv.size() + degree - 1;  // number of B-spline basis functions
 
     // matrix of B-spline amplitudes of LOSVD in each aperture (columns)
@@ -4328,8 +4360,8 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         Py_XDECREF(gh_arr);
         Py_DECREF(mat_arr);
         PyErr_SetString(PyExc_ValueError,
-            "Argument 'ghexp', if provided, should be a 2d array with 3 columns: gamma,meanv,sigma, "
-            "and the number of rows equal to the number of apertures");
+            "Argument 'ghbasis', if provided, should be a 2d array with 3 columns: "
+            "amplitude,center,width, and the number of rows equal to the number of apertures");
         return NULL;
     }
 
@@ -4346,7 +4378,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     utils::CtrlBreakHandler cbrk;
     // the procedure is different depending on whether the parameters of GH expansion are provided or not
     if(gh_arr) {
-        // compute the GH moments for known (provided) parameters of expansion (gamma, meanv and sigma)
+        // compute the GH moments for known (provided) parameters of expansion (amplitude,center,width)
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -4355,9 +4387,9 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             try{
                 // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
                 math::Matrix<double> ghmat(math::computeGaussHermiteMatrix(degree, gridv, ghorder,
-                    /*gamma*/ pyArrayElem<double>(gh_arr, a, 0) /* conv->massUnit*/,
-                    /*meanv*/ pyArrayElem<double>(gh_arr, a, 1) * conv->velocityUnit,
-                    /*sigma*/ pyArrayElem<double>(gh_arr, a, 2) * conv->velocityUnit));
+                    /*ampl  */ pyArrayElem<double>(gh_arr, a, 0),
+                    /*center*/ pyArrayElem<double>(gh_arr, a, 1),
+                    /*width */ pyArrayElem<double>(gh_arr, a, 2)));
                 std::vector<double> srcrow(numBasisFnc), dstrow(ghorder+1);  // temp storage
                 // loop over all rows of the input matrix (e.g. orbits)
                 for(npy_intp r=0; r<numComponents; r++) {
@@ -4388,11 +4420,11 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             if(cbrk.triggered()) {
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
                 fail = true;
-            }                
+            }
         }
     } else {
-        // construct best-fit GH expansion (find gamma,meanv,sigma) for each aperture and component,
-        // and then compute GH moments using these best-fit values
+        // construct best-fit parameters of GH expansion (find amplitude,center,width)
+        // for each aperture and component, and then compute GH moments using these parameters
         const npy_intp count = numApertures * numComponents;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic,1)
@@ -4421,13 +4453,13 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         math::BsplineInterpolator1d<3>(gridv), srcrow));
                         break;
                     default:  // shouldn't occur, we've checked degree beforehand
-                        assert(false);
+                        assert(!"Invalid B-spline degree");
                 }
                 math::GaussHermiteExpansion ghexp(*fnc, ghorder);
                 std::vector<double> dstrow(ghorder+4);
-                dstrow[0] = ghexp.gamma()  /* conv->massUnit*/;      // overall normalization
-                dstrow[1] = ghexp.center() / conv->velocityUnit;  // center of expansion
-                dstrow[2] = ghexp.sigma()  / conv->velocityUnit;  // width of expansion
+                dstrow[0] = ghexp.ampl();    // overall amplitude
+                dstrow[1] = ghexp.center();  // center of the expansion
+                dstrow[2] = ghexp.width();   // width of the base gaussian
                 std::copy(ghexp.coefs().begin(), ghexp.coefs().end(), dstrow.begin()+3);
                 for(int m=0; m<=ghorder+3; m++)
                     (ndim==1 ?
@@ -4445,7 +4477,7 @@ PyObject* ghmoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             if(cbrk.triggered()) {
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
                 fail = true;
-            }                
+            }
         }
     }
     Py_XDECREF(gh_arr);
@@ -4586,6 +4618,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // check that valid targets were provided
     std::vector<PyObject*> targets_vec = toPyObjectArray(targets_obj);
     std::vector<galaxymodel::PtrTarget> targets;
+    std::vector<double> unitConversionFactors;
     size_t numTargets = targets_vec.size();
     for(size_t t=0; t<numTargets; t++) {
         if(!PyObject_TypeCheck(targets_vec[t], &TargetType)) {
@@ -4594,6 +4627,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             return NULL;
         }
         targets.push_back(((TargetObject*)targets_vec[t])->target);
+        unitConversionFactors.push_back(((TargetObject*)targets_vec[t])->unitDFProjection);
     }
 
     // check if trajectory needs to be recorded
@@ -4719,6 +4753,22 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // integrate the orbit
                 orbit::integrate(initCond.at(orb), integrTime, *orbitIntegrator, fncs, params);
 
+                // finish the runtime functions
+                fncs.clear();
+
+                // convert the units for matrices produced by targets
+                for(size_t t=0; t<numTargets; t++) {
+                    galaxymodel::StorageNumT mult = conv->massUnit / unitConversionFactors[t];
+                    PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
+                    npy_intp size = targets[t]->numCoefs();
+                    if(singleOrbit)
+                        for(npy_intp index=0; index<size; index++)
+                            pyArrayElem<galaxymodel::StorageNumT>(storage_arr, index) *= mult;
+                    else
+                        for(npy_intp index=0; index<size; index++)
+                            pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, index) *= mult;
+                }
+
                 // if the trajectory was recorded, store it in the corresponding item of the output tuple
                 if(haveTraj) {
                     const npy_intp size = traj.size();
@@ -4742,9 +4792,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         unconvertPosVel(traj[index], point);
                         for(int c=0; c<6; c++)
                             pyArrayElem<galaxymodel::StorageNumT>(traj_arr, index, c) =
-                            static_cast<galaxymodel::StorageNumT>(point[c]);
+                                static_cast<galaxymodel::StorageNumT>(point[c]);
                         pyArrayElem<galaxymodel::StorageNumT>(time_arr, index) =
-                        static_cast<galaxymodel::StorageNumT>(trajStep * index / conv->timeUnit);
+                            static_cast<galaxymodel::StorageNumT>(trajStep * index / conv->timeUnit);
                     }
 
                     // store these arrays in the corresponding element of the output tuple
@@ -4767,7 +4817,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     time_t tnow = time(NULL);
                     if(difftime(tnow, tprint)>=1.) {
                         tprint = tnow;
-                        printf("%li orbits complete\r", (long int)numComplete);
+                        printf("%li/%li orbits complete\r", (long int)numComplete, (long int)numOrbits);
                         fflush(stdout);
                     }
                 }
@@ -4792,6 +4842,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         Py_XDECREF(result);
         return NULL;
     }
+
     // return a tuple of storage matrices (numpy-compatible) and/or a list of orbit trajectories,
     // but if this tuple only contains one element, return simply this element
     if(PyTuple_Size(result) == 1) {
@@ -4804,8 +4855,14 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 
+///@}
+//  --------------------------------------
+/// \name  Orbit library sampling routine
+//  --------------------------------------
+///@{
+
 static const char* docstringSampleOrbitLibrary =
-    "Construct an N-body snapshot from the orbit library\n"
+    "Construct an N-body snapshot from an orbit library\n"
     "Arguments:\n"
     "  n:  the required number of particles in the output snapshot.\n"
     "  traj:  an array of trajectories returned by the `orbit()` routine.\n"
@@ -4816,8 +4873,8 @@ static const char* docstringSampleOrbitLibrary =
     "  In case of failure (when some of the orbits, usually with high weights, had fewer points "
     "recorded from their trajectories during orbit integration than is needed to represent them "
     "in the N-body snapshot), the result is a different tuple of two arrays: "
-    "list of orbit indices which did not have enough trajectory samples (length is anywhere from 1 to N), "
-    "and corresponding required numbers of samples for each orbit from this list.\n";
+    "list of orbit indices which did not have enough trajectory samples (length is anywhere "
+    "from 1 to N), and corresponding required numbers of samples for each orbit from this list.\n";
 
 /// convert the orbit library to an N-body model
 PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
@@ -4937,6 +4994,7 @@ PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* named
     }
 }
 
+
 ///@}
 //  ----------------------------------
 /// \name  N-body snapshot read/write
@@ -5023,6 +5081,38 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 //  ----------------------------
 ///@{
 
+static const char* docstringSolveOpt =
+    "Solve a linear or quadratic optimization problem.\n"
+    "Find a vector x that solves a system of linear equations  A x = rhs,  "
+    "subject to elementwise inequalities  xmin <= x <= xmax, "
+    "while minimizing the cost function  F(x) = L^T x + (1/2) x^T Q x + P(A x - rhs), where "
+    "L and Q are penalties for the solution vector, and P(y) is the penalty for violating "
+    "the RHS constraints, consisting of two parts: linear penalty rL^T |y| and quadratic penalty "
+    "|y|^T diag(rQ) |y|  (both rL and rQ are nonnegative vectors of the same length as rhs).\n"
+    "Arguments:\n"
+    "  matrix:  2d matrix A of size RxC, or a tuple of several matrices that would be vertically "
+    "stacked (they all must have the same number of columns C, and number of rows R1,R2,...). "
+    "Providing a list of matrices does not incur copying, unlike the numpy.vstack() function.\n"
+    "  rhs:     1d vector of length R, or a tuple of the same number of vectors as the number of "
+    "matrices, with sizes R1,R2,...\n"
+    "  xpenl:   1d vector of length C - linear penalties for the solution x "
+    "(optional - zero if not provided).\n"
+    "  xpenq:   1d vector of length C - diagonal of the matrix Q of quadratic "
+    "penalties for the solution x (optional).\n"
+    "  rpenl:   1d vector of length R, or a tuple of vectors R1,R2,... - "
+    "linear penalties for violating the RHS constraints (optional).\n"
+    "  rpenq:   same for the quadratic penalties (optional - if neither linear nor quadratic "
+    "penalties for RHS violation were provided, it means that RHS must be satisfied exactly. "
+    "If any of these penalties is set to infinity, it has the same effect, i.e. corresponding "
+    "constraint must be satisfied exactly).\n"
+    "  xmin:    1d vector of length C - minimum allowed values for the solution x (optional - "
+    "if not provided, it implies a vector of zeros, i.e. the solution must be nonnegative).\n"
+    "  xmax:    1d vector of length C - maximum allowed values for the solution x (optional - "
+    "if not provided, it implies no upper limit).\n"
+    "Returns:\n"
+    "  the vector x solving the above system; if it cannot be solved exactly and no penalties "
+    "for constraint violation were provided, then raise an exception.";
+
 /** helper routine for combining together the elements of a tuple of 1d arrays.
     \param[in]  obj  is a single Python array or a tuple of arrays
     \param[in]  nRow is the required size of each input array
@@ -5091,38 +5181,6 @@ public:
     }
 };
 
-static const char* docstringSolveOpt =
-    "Solve a linear or quadratic optimization problem.\n"
-    "Find a vector x that solves a system of linear equations  A x = rhs,  "
-    "subject to elementwise inequalities  xmin <= x <= xmax, "
-    "while minimizing the cost function  F(x) = L^T x + (1/2) x^T Q x + P(A x - rhs), where "
-    "L and Q are penalties for the solution vector, and P(y) is the penalty for violating "
-    "the RHS constraints, consisting of two parts: linear penalty rL^T |y| and quadratic penalty "
-    "|y|^T diag(rQ) |y|  (both rL and rQ are nonnegative vectors of the same length as rhs).\n"
-    "Arguments:\n"
-    "  matrix:  2d matrix A of size RxC, or a tuple of several matrices that would be vertically "
-    "stacked (they all must have the same number of columns C, and number of rows R1,R2,...). "
-    "Providing a list of matrices does not incur copying, unlike the numpy.vstack() function.\n"
-    "  rhs:     1d vector of length R, or a tuple of the same number of vectors as the number of "
-    "matrices, with sizes R1,R2,...\n"
-    "  xpenl:   1d vector of length C - linear penalties for the solution x "
-    "(optional - zero if not provided).\n"
-    "  xpenq:   1d vector of length C - diagonal of the matrix Q of quadratic "
-    "penalties for the solution x (optional).\n"
-    "  rpenl:   1d vector of length R, or a tuple of vectors R1,R2,... - "
-    "linear penalties for violating the RHS constraints (optional).\n"
-    "  rpenq:   same for the quadratic penalties (optional - if neither linear nor quadratic "
-    "penalties for RHS violation were provided, it means that RHS must be satisfied exactly. "
-    "If any of these penalties is set to infinity, it has the same effect, i.e. corresponding "
-    "constraint must be satisfied exactly).\n"
-    "  xmin:    1d vector of length C - minimum allowed values for the solution x (optional - "
-    "if not provided, it implies a vector of zeros, i.e. the solution must be nonnegative).\n"
-    "  xmax:    1d vector of length C - maximum allowed values for the solution x (optional - "
-    "if not provided, it implies no upper limit).\n"
-    "Returns:\n"
-    "  the vector x solving the above system; if it cannot be solved exactly and no penalties "
-    "for constraint violation were provided, then raise an exception.";
-///
 PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] =
@@ -5229,6 +5287,28 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 /// \name  CubicSpline class and related routines
 //  ----------------------------------------------
 ///@{
+
+static const char* docstringCubicSpline =
+    "Cubic spline with natural or clamped boundary conditions.\n"
+    "Arguments:\n"
+    "    x (array of floats) -- grid nodes in x (at least two), "
+    "must be sorted in increasing order.\n"
+    "    y (array of floats) -- values of spline at grid nodes, "
+    "same length as x.\n"
+    "    left (float, optional) -- derivative at the leftmost endpoint; "
+    "if not provided or is NAN, a natural boundary condition is used "
+    "(i.e., second derivative is zero).\n"
+    "    right (float, optional) -- derivative at the rightmost endpoint, "
+    "same default behaviour.\n"
+    "    reg (boolean, default False) -- apply a regularization filter to "
+    "reduce overshooting in the case of sharp discontinuities in input data "
+    "and preserve monotonic trend of input points.\n\n"
+    "Values of the spline and up to its second derivative are computed using the () "
+    "operator with the first argument being a single x-point or an array of points, "
+    "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
+    "and the optional third argument (ext=...) specifies the value returned for "
+    "points outside the definition region; if the latter is not provided, "
+    "the spline is linearly extrapolated outside its definition region.";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to CubicSpline class
@@ -5354,28 +5434,6 @@ PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
 static PyMethodDef CubicSpline_methods[] = {
     { NULL, NULL, 0, NULL }  // no named methods
 };
-
-static const char* docstringCubicSpline =
-    "Cubic spline with natural or clamped boundary conditions.\n"
-    "Arguments:\n"
-    "    x (array of floats) -- grid nodes in x (at least two), "
-    "must be sorted in increasing order.\n"
-    "    y (array of floats) -- values of spline at grid nodes, "
-    "same length as x.\n"
-    "    left (float, optional) -- derivative at the leftmost endpoint; "
-    "if not provided or is NAN, a natural boundary condition is used "
-    "(i.e., second derivative is zero).\n"
-    "    right (float, optional) -- derivative at the rightmost endpoint, "
-    "same default behaviour.\n"
-    "    reg (boolean, default False) -- apply a regularization filter to "
-    "reduce overshooting in the case of sharp discontinuities in input data "
-    "and preserve monotonic trend of input points.\n\n"
-    "Values of the spline and up to its second derivative are computed using the () "
-    "operator with the first argument being a single x-point or an array of points, "
-    "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
-    "and the optional third argument (ext=...) specifies the value returned for "
-    "points outside the definition region; if the latter is not provided, "
-    "the spline is linearly extrapolated outside its definition region.";
 
 static PyTypeObject CubicSplineType = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -5865,7 +5923,7 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 
 static const char* docstringModule =
-    "This is the Python interface for the AGAMA galaxy modelling library";
+    "The Python interface for the AGAMA galaxy modelling library";
 
 /// list of standalone functions exported by the module
 static PyMethodDef module_methods[] = {
@@ -5889,8 +5947,8 @@ static PyMethodDef module_methods[] = {
       METH_O,                       docstringReadSnapshot },
     { "writeSnapshot",          (PyCFunction)writeSnapshot,
       METH_VARARGS | METH_KEYWORDS, docstringWriteSnapshot },
-    { "ghmoments",              (PyCFunction)ghmoments,
-      METH_VARARGS | METH_KEYWORDS, docstringGhmoments },
+    { "ghMoments",              (PyCFunction)ghMoments,
+      METH_VARARGS | METH_KEYWORDS, docstringGhMoments },
     { "solveOpt",               (PyCFunction)solveOpt,
       METH_VARARGS | METH_KEYWORDS, docstringSolveOpt },
     { "actions",                (PyCFunction)actions,
@@ -5952,6 +6010,7 @@ PyInit_agama(void)
     if(PyType_Ready(&DensityType) < 0) return NULL;
     Py_INCREFx(&DensityType);
     PyModule_AddObject(mod, "Density", (PyObject*)&DensityType);
+    DensityTypePtr = &DensityType;
 
     PotentialType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&PotentialType) < 0) return NULL;
@@ -5963,16 +6022,18 @@ PyInit_agama(void)
     if(PyType_Ready(&ActionFinderType) < 0) return NULL;
     Py_INCREFx(&ActionFinderType);
     PyModule_AddObject(mod, "ActionFinder", (PyObject*)&ActionFinderType);
-    
+    ActionFinderTypePtr = &ActionFinderType;
+
     ActionMapperType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ActionMapperType) < 0) return NULL;
     Py_INCREFx(&ActionMapperType);
     PyModule_AddObject(mod, "ActionMapper", (PyObject*)&ActionMapperType);
-    
+
     DistributionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DistributionFunctionType) < 0) return NULL;
     Py_INCREFx(&DistributionFunctionType);
     PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
+    DistributionFunctionTypePtr = &DistributionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&GalaxyModelType) < 0) return NULL;
@@ -5993,6 +6054,7 @@ PyInit_agama(void)
     if(PyType_Ready(&TargetType) < 0) return NULL;
     Py_INCREFx(&TargetType);
     PyModule_AddObject(mod, "Target", (PyObject*)&TargetType);
+    TargetTypePtr = &TargetType;
 
     CubicSplineType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&CubicSplineType) < 0) return NULL;

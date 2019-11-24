@@ -41,8 +41,8 @@ class ModelParams:
         self.numDFParams  = 6  # DF params come last in the list
 
         # parse true values
-        m = re.match(r'gs(\d+)_bs(\d+)_rcrs([a-z\d]+)_rarc([a-z\d]+)_([a-z]+)_(\d+)mpc3', filename)
-        n = re.match(r'data_([ch])_rh(\d+)_rs(\d+)_gs(\d+)', filename)
+        m = re.search(r'gs(\d+)_bs(\d+)_rcrs([a-z\d]+)_rarc([a-z\d]+)_([a-z]+)_(\d+)mpc3', filename)
+        n = re.search(r'data_([ch])_rh(\d+)_rs(\d+)_gs(\d+)', filename)
         if m:
             self.trueParams = (
                 numpy.log10(float(m.group(6))*1e6),

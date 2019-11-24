@@ -63,7 +63,7 @@ void OblatePerfectEllipsoid::evalDeriv(double tau, double* G, double* deriv, dou
     double fac  = mass/minorAxis*(2./M_PI);
     double tauc = tau/c2;
     double arct = 1;  // value for the limiting case tau==0
-    if(tau > 1e-16) {
+    if(tauc > 1e-16) {
         double sqtc = sqrt(tauc);
         arct = atan(sqtc)/sqtc;
     }

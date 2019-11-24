@@ -110,7 +110,10 @@ public:
 };
 
 
-/// A simple class for recording radial and tangential velocity dispersions in spherical shells
+/** A simple class for recording radial and tangential velocity dispersions in spherical shells,
+    represented by 1d B-spline interpolators in radius.
+    \tparam N  is the degree of B-spline interpolators (0,1,2 or 3).
+*/
 template<int N>
 class TargetKinemShell: public BaseTarget {
     const math::BsplineInterpolator1d<N> bspl;  ///< B-spline for representing rho * sigma^2
@@ -122,7 +125,7 @@ public:
     virtual void addPoint(const double point[6], double mult, double output[]) const;
     virtual unsigned int numVars() const { return 6; }
     virtual unsigned int numValues() const { return bspl.numValues() * 2; }
-        /// compute the velocity dispersion profile from a DF-based model
+    /// compute the velocity dispersion profile from a DF-based model
     virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
     /// this does not make sense for this target - throws a std::runtime_error
     virtual std::vector<double> computeDensityProjection(const potential::BaseDensity&) const;

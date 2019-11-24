@@ -68,6 +68,7 @@
 #pragma once
 #include "raga_base.h"
 #include "particles_base.h"
+#include "math_random.h"
 #include <string>
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
@@ -89,7 +90,8 @@ public:
         double _relaxationRate,
         double _outputTimestep,
         const std::vector<double>::iterator& _outputFirst,
-        const std::vector<double>::iterator& _outputLast)
+        const std::vector<double>::iterator& _outputLast,
+        math::PRNGState _state)
     :
         potentialSph(_potentialSph),
         relaxationModel(_relaxationModel),
@@ -97,7 +99,8 @@ public:
         outputTimestep(_outputTimestep),
         outputFirst(_outputFirst),
         outputLast (_outputLast),
-        outputIter (_outputFirst)
+        outputIter (_outputFirst),
+        state(_state)
     {}
     virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
@@ -138,6 +141,9 @@ private:
 
     /** pointer to the current array element where the upcoming sample will be placed */
     std::vector<double>::iterator outputIter;
+    
+    /** current state vector of the orbit-local pseudo-random number generator */
+    math::PRNGState state;
 };
 
 /** Fixed global parameters of this task */

@@ -381,9 +381,7 @@ void TargetLOSVD<N>::finalizeDatacube(math::Matrix<double> &datacube, StorageNum
 template<int N>
 void TargetLOSVD<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
 {
-    //throw std::runtime_error("TargetLOSVD: DF projection not implemented");
-
-    // 1st stage: compute the integrals of surface density, weighted by the B-spline basis functions,
+    // 1st stage: compute the integrals of the DF, weighted by the B-spline basis functions,
     // over each pixel of the regular 2d grid in the image plane (projections onto the B-spline basis)
     ApertureLOSVDIntegrand<N> fnc(bsplx, bsply, bsplv);
     math::Matrix<double> datacube = newDatacube();
@@ -467,7 +465,7 @@ std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::Ba
 template<int N>
 std::string TargetLOSVD<N>::coefName(unsigned int index) const
 {
-    if(index >= numValues())
+    if(index >= numCoefs())
         throw std::out_of_range("TargetLOSVD: index out of range");
     return "Aperture[" + utils::toString(index / bsplv.numValues()) +
         "], velocity[" + utils::toString(index % bsplv.numValues()) + "]";
@@ -483,6 +481,7 @@ template class TargetLOSVD<0>;
 template class TargetLOSVD<1>;
 template class TargetLOSVD<2>;
 template class TargetLOSVD<3>;
+
 
 //----- TargetKinemShell -----//
 
@@ -503,15 +502,39 @@ void TargetKinemShell<N>::addPoint(const double point[6], double mult, double ou
 }
 
 template<int N>
-void TargetKinemShell<N>::computeDFProjection(const GalaxyModel&, StorageNumT*) const
+void TargetKinemShell<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
 {
-    throw std::runtime_error("TargetKinemShell: DF projection not implemented");
+    // compute the moments of the DF at this many GL points on each segment of the radial grid
+    static const int GLORDER = 4;
+    const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
+    math::Matrix<double> datacube = newDatacube();
+    const int size = (bspl.xvalues().size()-1) * GLORDER;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int n=0; n<size; n++) {
+        int i=n/GLORDER, k=n%GLORDER;  // decompose the combined index into the grid segment and offset
+        double r = bspl.xvalues()[i] * (1-glnodes[k]) + bspl.xvalues()[i+1] * glnodes[k];
+        double dens;
+        coord::Vel2Cyl vel2;
+        computeMoments(model, coord::PosCyl(r,0,0), &dens, NULL, &vel2);
+        double mult = dens * glweights[k] * 4*M_PI*r*r * (bspl.xvalues()[i+1] - bspl.xvalues()[i]);
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            bspl.addPoint(&r, mult * vel2.vR2, datacube.data());
+            bspl.addPoint(&r, mult * (vel2.vz2 + vel2.vphi2), datacube.data() + bspl.numValues());
+        }
+    }
+    finalizeDatacube(datacube, output);
 }
 
 template<int N>
 std::vector<double> TargetKinemShell<N>::computeDensityProjection(const potential::BaseDensity&) const
 {
-    throw std::runtime_error("TargetKinemShell: density projection not implemented");
+    // this operation does not make sense
+    throw std::runtime_error("TargetKinemShell cannot be applied to a density object");
 }
 
 template<> const char* TargetKinemShell<0>::name() const { return "KinemShell0"; }
