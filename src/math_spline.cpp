@@ -3091,10 +3091,10 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     if(N==3) {
         bool der3 = (options & FO_PENALTY_3RD_DERIV) == FO_PENALTY_3RD_DERIV;
         if(der3)
-            roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
+            roughnessMatrix = Matrix<double>(computeOverlapMatrix<3>(
                 grid, numBasisFnc, /*GLORDER*/ 1, /*3rd deriv*/ bsplineNaturalCubicDerivs<3>));
         else
-            roughnessMatrix = math::Matrix<double>(computeOverlapMatrix<3>(
+            roughnessMatrix = Matrix<double>(computeOverlapMatrix<3>(
                 grid, numBasisFnc, /*GLORDER*/ 2, /*2nd deriv*/ bsplineNaturalCubicDerivs<2>));
         // rescale the roughness matrix to make it invariant w.r.t. the extent of the grid:
         // the characteristic magnitude value of B-spline K-th derivatives is (xmax-xmin)^-K,
@@ -3106,7 +3106,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     } else {
         assert(N==1);
         // no roughness penalty is possible for N=1
-        roughnessMatrix = math::Matrix<double>(numBasisFnc, numBasisFnc, 0.);
+        roughnessMatrix = Matrix<double>(numBasisFnc, numBasisFnc, 0.);
     }
 
     // quick scan to analyze the weights
@@ -3205,7 +3205,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     Wbasis.resize(numAmpl);
 
     // construct the matrix C = B^T B that is used in cross-validation
-    BTBmatrix = math::Matrix<double>(Bmatrix.multiplyByTransposed());
+    BTBmatrix = Matrix<double>(Bmatrix.multiplyByTransposed());
 
     // assign the initial guess for amplitudes using a Gaussian density distribution
     params.ampl.assign(numBasisFnc, 0);
@@ -3610,14 +3610,13 @@ std::vector<double> createExpGrid(unsigned int nnodes, double xmin, double xmax)
 namespace{
 class GridSpacingFinder: public IFunctionNoDeriv {
 public:
-    GridSpacingFinder(double _dynrange, int _nnodes) : dynrange(_dynrange), nnodes(_nnodes) {};
+    GridSpacingFinder(double _ratio, int _nnodes) : ratio(_ratio), nnodes(_nnodes) {};
     virtual double value(const double A) const {
-        return (A==0) ? nnodes-dynrange :
-            (exp(A*nnodes)-1)/(exp(A)-1) - dynrange;
+        return fabs(A)<1e-8 ? /*Taylor expansion*/ nnodes-ratio + 0.5*A*nnodes*(nnodes-1) :
+            (exp(A*nnodes)-1)/(exp(A)-1) - ratio;
     }
 private:
-    double dynrange;
-    int nnodes;
+    double ratio, nnodes;
 };
 }
 
@@ -3625,35 +3624,21 @@ std::vector<double> createNonuniformGrid(unsigned int nnodes, double xmin, doubl
 {   // create grid so that x_k = B*(exp(A*k)-1)
     if(nnodes<2 || xmin<=0 || xmax<=xmin)
         throw std::invalid_argument("createNonuniformGrid: invalid parameters");
-    double A, B, dynrange=xmax/xmin;
+    double A, B, ratio=xmax/xmin;
     std::vector<double> grid(nnodes);
     int indexstart=zeroelem?1:0;
     if(zeroelem) {
         grid[0] = 0;
         nnodes--;
     }
-    if(fcmp(static_cast<double>(nnodes), dynrange, 1e-6)==0) { // no need for non-uniform grid
+    if(fcmp(static_cast<double>(nnodes), ratio, 1e-12)==0) { // no need for non-uniform grid
         for(unsigned int i=0; i<nnodes; i++)
             grid[i+indexstart] = xmin+(xmax-xmin)*i/(nnodes-1);
         return grid;
     }
-    // solve for A:  dynrange = (exp(A*nnodes)-1)/(exp(A)-1)
-    GridSpacingFinder F(dynrange, nnodes);
-    // first localize the root coarsely, to avoid overflows in root solver
-    double Amin=0, Amax=0;
-    double step=1;
-    while(step>10./nnodes)
-        step/=2;
-    if(dynrange>nnodes) {
-        while(Amax<10 && F(Amax)<=0)
-            Amax+=step;
-        Amin = Amax-step;
-    } else {
-        while(Amin>-10 && F(Amin)>=0)
-            Amin-=step;
-        Amax = Amin+step;
-    }
-    A = findRoot(F, Amin, Amax, 1e-4);
+    // solve for A:  ratio = (exp(A*nnodes)-1)/(exp(A)-1)
+    A = findRoot(GridSpacingFinder(ratio, nnodes),
+        /*Amin*/ log(1-1/ratio), /*Amax*/ log(ratio)/(nnodes-2), /*accuracy*/ 1e-6);
     B = xmin / (exp(A)-1);
     for(unsigned int i=0; i<nnodes; i++)
         grid[i+indexstart] = B*(exp(A*(i+1))-1);

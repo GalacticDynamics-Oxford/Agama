@@ -207,9 +207,9 @@ def getRegularApertures(xcoords, ycoords):
     '''
     ii = range(len(xcoords)-1)
     jj = range(len(ycoords)-1)
-    return [ ((xcoords[i],ycoords[j]), (xcoords[i+1],ycoords[j]), \
-        (xcoords[i+1],ycoords[j+1]), (xcoords[i],ycoords[j+1])) \
-        for i,j in zip(_numpy.tile(ii, len(jj)), _numpy.repeat(jj, len(ii))) ]
+    return _numpy.array([ ((xcoords[i],ycoords[j]), (xcoords[i+1],ycoords[j]),
+        (xcoords[i+1],ycoords[j+1]), (xcoords[i],ycoords[j+1]))
+        for i,j in zip(_numpy.tile(ii, len(jj)), _numpy.repeat(jj, len(ii))) ])
 
 
 def getBinnedApertures(xcoords, ycoords, bintags):
@@ -289,7 +289,7 @@ def getBinnedApertures(xcoords, ycoords, bintags):
         if edges>=1000:
             raise ValueError('Lost in the way for bin '+str(b))
         polygons.append( _numpy.array(vertices) )
-    return polygons
+    return _numpy.array(polygons)
 
 
 def writeApertures(filename, polygons):
@@ -307,7 +307,10 @@ def readApertures(filename):
     Read the list of polygons from a text file
     '''
     with open(filename) as dfile:
-        return [_numpy.array([float(a) for a in b.split()]).reshape(-1,2) for b in dfile.read().split('\n\n')]
+        return _numpy.array([
+            _numpy.array([float(a) for a in b.split()]).reshape(-1,2)
+            for b in dfile.read().split('\n\n')
+        ])
 
 
 def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pixelmult=1.0):

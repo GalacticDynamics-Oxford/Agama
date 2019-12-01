@@ -280,6 +280,7 @@ void computeProjectedDensity(
     - drift coefficient      < Delta E >
     - phase-space mass flux  F(h)
     - loss-cone dif.coef.    D_RR/R at R=0  (only if there is a central black hole)
+    - optional auxiliary quantity
 
     \param[in]  fileName  is the output file name.
     \param[in]  header  is the text written in the first line of the file
@@ -289,12 +290,15 @@ void computeProjectedDensity(
     \param[in]  gridh  (optional)  the grid in phase volume (h) for the output table;
     if not provided, a suitable grid that encompasses the region of significant variation
     of f(h) is constructed automatically.
+    \param[in]  aux  (optional)  auxiliary quantity to be stored in an additional column in
+    the output file, should match gridh in length.
 */
 void writeSphericalIsotropicModel(
     const std::string& fileName,
     const std::string& header,
     const SphericalIsotropicModel& model,
     const math::IFunction& pot,
-    const std::vector<double>& gridh = std::vector<double>());
+    const std::vector<double>& gridh = std::vector<double>(),
+    const std::vector<double>& aux   = std::vector<double>());
 
 }  // namespace

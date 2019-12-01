@@ -142,7 +142,8 @@ void exportTable(const std::string& filename, const std::string& header, const d
             /*f(h)*/  *fp.df(comp),
             /*gridh*/  fp.gridh()),
         /*potential*/ *fp.potential(),
-        /*gridh*/      fp.gridh());
+        /*gridh*/      fp.gridh(),
+        /*drain rate*/ fp.drainRate(comp));
     }
 }
 

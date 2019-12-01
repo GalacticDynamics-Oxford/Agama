@@ -423,10 +423,10 @@ private:
     and presents an IFunction interface for the interpolator */
 template<int N>
 class BsplineWrapper: public IFunction {
+public:
     const BsplineInterpolator1d<N> bspl;
     const std::vector<double> ampl;
-public:
-    BsplineWrapper(const math::BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
+    BsplineWrapper(const BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
         bspl(_bspl), ampl(_ampl) {}
 
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
@@ -807,7 +807,7 @@ private:
 
 
 /** Three-dimensional cubic spline with natural boundary conditions */
-class CubicSpline3d: public math::IFunctionNdim {
+class CubicSpline3d: public IFunctionNdim {
 public:
     CubicSpline3d() {}
 
@@ -887,7 +887,7 @@ private:
     more efficiently, and also store all required arrays to compute the interpolant.
 */
 template<int N>
-class BsplineInterpolator3d: public math::IFunctionNdim {
+class BsplineInterpolator3d: public IFunctionNdim {
 public:
     /** Initialize a 3d interpolator from the provided 1d arrays of grid nodes in x, y and z
         dimensions.
@@ -1334,7 +1334,7 @@ std::vector<double> createSymmetricGrid(unsigned int nnodes, double xmin, double
     \param[in] eps  is the tolerance parameter.
     \return  the grid in x.
 */
-std::vector<double> createInterpolationGrid(const math::IFunction& fnc, double eps);
+std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps);
 
 ///@}
 }  // namespace

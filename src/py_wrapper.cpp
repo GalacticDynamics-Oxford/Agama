@@ -4438,29 +4438,32 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     srcrow[b] = ndim == 1 ?
                         pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
                         pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
-                math::PtrFunction fnc;
+                unique_ptr<math::GaussHermiteExpansion> ghexp;
                 switch(degree) {
-                    case 0: fnc.reset(new math::BsplineWrapper<0>(
-                        math::BsplineInterpolator1d<0>(gridv), srcrow));
+                    case 0: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<0>(math::BsplineInterpolator1d<0>(gridv), srcrow),
+                        ghorder));
                         break;
-                    case 1: fnc.reset(new math::BsplineWrapper<1>(
-                        math::BsplineInterpolator1d<1>(gridv), srcrow));
+                    case 1: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<1>(math::BsplineInterpolator1d<1>(gridv), srcrow),
+                        ghorder));
                         break;
-                    case 2: fnc.reset(new math::BsplineWrapper<2>(
-                        math::BsplineInterpolator1d<2>(gridv), srcrow));
+                    case 2: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<2>(math::BsplineInterpolator1d<2>(gridv), srcrow),
+                        ghorder));
                         break;
-                    case 3: fnc.reset(new math::BsplineWrapper<3>(
-                        math::BsplineInterpolator1d<3>(gridv), srcrow));
+                    case 3: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<3>(math::BsplineInterpolator1d<3>(gridv), srcrow),
+                        ghorder));
                         break;
                     default:  // shouldn't occur, we've checked degree beforehand
                         assert(!"Invalid B-spline degree");
                 }
-                math::GaussHermiteExpansion ghexp(*fnc, ghorder);
                 std::vector<double> dstrow(ghorder+4);
-                dstrow[0] = ghexp.ampl();    // overall amplitude
-                dstrow[1] = ghexp.center();  // center of the expansion
-                dstrow[2] = ghexp.width();   // width of the base gaussian
-                std::copy(ghexp.coefs().begin(), ghexp.coefs().end(), dstrow.begin()+3);
+                dstrow[0] = ghexp->ampl();    // overall amplitude
+                dstrow[1] = ghexp->center();  // center of the expansion
+                dstrow[2] = ghexp->width();   // width of the base gaussian
+                std::copy(ghexp->coefs().begin(), ghexp->coefs().end(), dstrow.begin()+3);
                 for(int m=0; m<=ghorder+3; m++)
                     (ndim==1 ?
                     pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+4) + m) :
@@ -4852,146 +4855,6 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return item;
     } else
         return result;
-}
-
-
-///@}
-//  --------------------------------------
-/// \name  Orbit library sampling routine
-//  --------------------------------------
-///@{
-
-static const char* docstringSampleOrbitLibrary =
-    "Construct an N-body snapshot from an orbit library\n"
-    "Arguments:\n"
-    "  n:  the required number of particles in the output snapshot.\n"
-    "  traj:  an array of trajectories returned by the `orbit()` routine.\n"
-    "  weights:  an array of orbit weights, returned by the `solveOpt()` routine.\n"
-    "Returns: a tuple of two elements: the flag indicating success or failure, and the result.\n"
-    "  In case of success, the result is a tuple of two arrays: particle coordinates/velocities "
-    "(2d Nx6 array) and particle masses (1d array of length N).\n"
-    "  In case of failure (when some of the orbits, usually with high weights, had fewer points "
-    "recorded from their trajectories during orbit integration than is needed to represent them "
-    "in the N-body snapshot), the result is a different tuple of two arrays: "
-    "list of orbit indices which did not have enough trajectory samples (length is anywhere "
-    "from 1 to N), and corresponding required numbers of samples for each orbit from this list.\n";
-
-/// convert the orbit library to an N-body model
-PyObject* sampleOrbitLibrary(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    long Nbody = 0;
-    PyObject *traj_obj = NULL, *weights_obj = NULL;
-    static const char* keywords[] = {"n", "traj", "weights", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "lOO", const_cast<char**>(keywords),
-        &Nbody, &traj_obj, &weights_obj))
-        return NULL;
-    if(Nbody <= 0) {
-        PyErr_SetString(PyExc_ValueError, "Argument 'n' must be a positive integer");
-        return NULL;
-    }
-
-    // check that orbit weights are correct and their sum is positive
-    std::vector<double> weights(toDoubleArray(weights_obj));
-    npy_intp numOrbits = weights.size();
-    if(numOrbits <= 0) {
-        PyErr_SetString(PyExc_ValueError, "Argument 'weights' must be a non-empty array of floats");
-        return NULL;
-    }
-    double totalMass = 0.;
-    for(npy_intp orb=0; orb<numOrbits; orb++) {
-        if(weights[orb]>=0)
-            totalMass += weights[orb];
-        else
-            totalMass = -INFINITY;
-    }
-    if(!(totalMass > 0)) {
-        PyErr_SetString(PyExc_ValueError, "The sum of weights must be positive");
-        return NULL;
-    }
-
-    // check that the trajectories are provided: it should be an array with PyObjects as elements
-    // (they must be arrays themselves, which will be checked later); the shape of this array should be
-    // either numOrbits or numOrbits x 2 (the latter variant is returned by the `orbit()` routine).
-    PyArrayObject* traj_arr = PyArray_Check(traj_obj) ? (PyArrayObject*)traj_obj : NULL;
-    if( traj_arr == NULL ||                        // the argument must be a genuine NumPy array,
-        PyArray_TYPE(traj_arr) != NPY_OBJECT ||    // with PyObjects as elements,
-        !( PyArray_NDIM(traj_arr) == 1 ||          // either 1d, or 2d and the second dimension is 2,
-        (PyArray_NDIM(traj_arr) == 2 && PyArray_DIM(traj_arr, 1) == 2) ) ||
-        PyArray_DIM(traj_arr, 0) != numOrbits )    // first dimension equal to the number of orbits
-    {
-        PyErr_SetString(PyExc_ValueError,
-            "'traj' must be an array of numpy arrays with the same length as 'weights'");
-        return NULL;
-    }
-    // if this array has shape numOrbits x 2, as returned by the `orbit()` routine,
-    // then the first column contains timestamps (not used here), and the second column - trajectories
-    bool useSecondCol = PyArray_NDIM(traj_arr) == 2;
-
-    // allocate the output arrays of particles and masses
-    npy_intp dims[2] = {Nbody, 6};
-    PyObject* posvel_arr = PyArray_SimpleNew(2, dims, STORAGE_NUM_T);
-    PyObject* mass_arr   = PyArray_SimpleNew(1, dims, STORAGE_NUM_T);
-
-    // this array will store indices of orbits that failed to produce required number of samples
-    std::vector<std::pair<int, int> > badOrbits;
-
-    // scan the array of orbits and sample appropriate number of points from each trajectory
-    double cumulMass   = 0.;  // total mass of output points sampled so far
-    long outPointIndex = 0;   // total number of output samples constructed so far
-    for(int orb=0; orb<numOrbits; orb++) {
-        cumulMass += weights[orb];
-        long newPointIndex = static_cast<long int>(cumulMass / totalMass * Nbody);
-        // required number of points to sample from this orbit
-        int pointsToSample = newPointIndex - outPointIndex;
-
-        // obtain the trajectory of the current orbit and check its correctness
-        PyArrayObject* traj_elem = useSecondCol ?
-            pyArrayElem<PyArrayObject*>(traj_arr, orb, 1) :
-            pyArrayElem<PyArrayObject*>(traj_arr, orb);
-        if(!PyArray_Check(traj_elem) || PyArray_NDIM(traj_elem) != 2 || PyArray_DIM(traj_elem, 1) != 6) {
-            PyErr_SetString(PyExc_ValueError, "'traj' must contain arrays with shape Lx6");
-            Py_DECREF(posvel_arr);
-            Py_DECREF(mass_arr);
-            return NULL;
-        }
-        int pointsInTrajectory = PyArray_DIM(traj_elem, 0);
-
-        // check if this orbit has enough points to be sampled
-        if(pointsInTrajectory >= pointsToSample) {
-            // construct a random permutation of indices
-            std::vector<size_t> permutation(pointsInTrajectory);
-            math::getRandomPermutation(pointsInTrajectory, &permutation.front());
-
-            // draw the given number of samples with random indices from the trajectory
-            for(int i=0; i<pointsToSample; i++) {
-                const galaxymodel::StorageNumT* from =
-                    &pyArrayElem<galaxymodel::StorageNumT>(traj_elem, permutation[i], 0);
-                std::copy(from, from+6,
-                    &pyArrayElem<galaxymodel::StorageNumT>(posvel_arr, outPointIndex+i, 0));
-                pyArrayElem<galaxymodel::StorageNumT>(mass_arr, outPointIndex+i) =
-                    static_cast<galaxymodel::StorageNumT>(totalMass / Nbody);
-            }
-        } else {
-            // insufficient samples: do not draw anything, add to the list of bad orbits
-            badOrbits.push_back(std::make_pair(orb, pointsToSample));
-        }
-        outPointIndex = newPointIndex;
-    }
-    assert(outPointIndex == Nbody);
-    if(badOrbits.empty()) {
-        return Py_BuildValue("O(NN)", Py_True, posvel_arr, mass_arr);
-    } else {
-        npy_intp size = badOrbits.size();
-        PyObject* indices_arr   = PyArray_SimpleNew(1, &size, NPY_INT);
-        PyObject* trajsizes_arr = PyArray_SimpleNew(1, &size, NPY_INT);
-        for(npy_intp i=0; i<size; i++) {
-            pyArrayElem<int>(indices_arr,   i) = badOrbits[i].first;
-            pyArrayElem<int>(trajsizes_arr, i) = badOrbits[i].second;
-        }
-        Py_DECREF(posvel_arr);
-        Py_DECREF(mass_arr);
-        return Py_BuildValue("O(NN)", Py_False, indices_arr, trajsizes_arr);
-    }
 }
 
 
@@ -5642,75 +5505,6 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 //  -----------------------------
 ///@{
 
-/// description of grid creation function
-static const char* docstringNonuniformGrid =
-    "Create a grid with unequally spaced nodes:\n"
-    "x[k] = (exp(Z k) - 1) / (exp(Z) - 1), i.e., coordinates of nodes increase "
-    "nearly linearly at the beginning and then nearly exponentially towards the end; "
-    "the value of Z is computed so the the 1st element is at xmin and last at xmax "
-    "(0th element is always placed at 0).\n"
-    "Arguments: \n"
-    "  nnodes   the total number of grid points (>=2)\n"
-    "  xmin     the location of the innermost nonzero node (>0);\n"
-    "  xmax     the location of the last node (optional, if not provided, means uniform grid);\n"
-    "Returns:   the array of grid nodes.";
-
-/// creation of a non-uniform grid, a complement to linspace and logspace routines
-PyObject* nonuniformGrid(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    static const char* keywords[] = {"nnodes", "xmin", "xmax", NULL};
-    int nnodes=-1;
-    double xmin=-1, xmax=NAN;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "id|d", const_cast<char**>(keywords),
-        &nnodes, &xmin, &xmax))
-        return NULL;
-    if(!isFinite(xmax))
-        xmax = (nnodes-1)*xmin;
-    if(nnodes<2 || xmin<=0 || xmax<=xmin) {
-        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for nonuniformGrid");
-        return NULL;
-    }
-    try {
-        return toPyArray(math::createNonuniformGrid(nnodes, xmin, xmax, true));
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, e.what());
-        return NULL;
-    }
-}
-
-/// description of symmetric grid creation function
-static const char* docstringSymmetricGrid =
-    "Create a possibly non-uniform grid, similar to 'nonuniformGrid()', but symmetric about origin.\n"
-    "Arguments: \n"
-    "  nnodes  is the total number of grid points;\n"
-    "  xmin  is the width of the central grid segment;\n"
-    "  xmax  is the outer edge of the grid (endpoints are at +-xmax); "
-    "if it is provided, the grid segments are gradually stretched as needed, "
-    "otherwise this implies uniform segments and hence xmax = 0.5 * (nnodes-1) * xmin.\n"
-    "Returns: the array of grid nodes.";
-
-/// creation of a symmetric non-uniform grid
-PyObject* symmetricGrid(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    static const char* keywords[] = {"nnodes", "xmin", "xmax", NULL};
-    int nnodes=-1;
-    double xmin=-1, xmax=NAN;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "id|d", const_cast<char**>(keywords),
-        &nnodes, &xmin, &xmax))
-        return NULL;
-    if(nnodes<2 || xmin<=0 || xmax<=xmin) {
-        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for symmetricGrid");
-        return NULL;
-    }
-    try {
-        return toPyArray(math::createSymmetricGrid(nnodes, xmin, xmax));
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_ValueError, e.what());
-        return NULL;
-    }
-}
 
 /// wrapper for user-provided Python functions into the C++ compatible form
 class FncWrapper: public math::IFunctionNdim {
@@ -5931,18 +5725,12 @@ static PyMethodDef module_methods[] = {
       METH_VARARGS | METH_KEYWORDS, docstringSetUnits },
     { "resetUnits",                          resetUnits,
       METH_NOARGS,                  docstringResetUnits },
-    { "nonuniformGrid",         (PyCFunction)nonuniformGrid,
-      METH_VARARGS | METH_KEYWORDS, docstringNonuniformGrid },
-    { "symmetricGrid",          (PyCFunction)symmetricGrid,
-      METH_VARARGS | METH_KEYWORDS, docstringSymmetricGrid },
     { "splineApprox",           (PyCFunction)splineApprox,
       METH_VARARGS | METH_KEYWORDS, docstringSplineApprox },
     { "splineLogDensity",       (PyCFunction)splineLogDensity,
       METH_VARARGS | METH_KEYWORDS, docstringSplineLogDensity },
     { "orbit",                  (PyCFunction)orbit,
       METH_VARARGS | METH_KEYWORDS, docstringOrbit },
-    { "sampleOrbitLibrary",     (PyCFunction)sampleOrbitLibrary,
-      METH_VARARGS | METH_KEYWORDS, docstringSampleOrbitLibrary },
     { "readSnapshot",           (PyCFunction)readSnapshot,
       METH_O,                       docstringReadSnapshot },
     { "writeSnapshot",          (PyCFunction)writeSnapshot,

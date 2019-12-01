@@ -751,8 +751,12 @@ double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFuncti
 // ------ write a text file with various quantities describing a spherical isotropic model ------ //
 
 void writeSphericalIsotropicModel(const std::string& fileName, const std::string& header,
-    const SphericalIsotropicModel& model, const math::IFunction& pot, const std::vector<double>& gridh)
+    const SphericalIsotropicModel& model, const math::IFunction& pot,
+    const std::vector<double>& gridh, const std::vector<double>& aux)
 {
+    if(!aux.empty() && aux.size() != gridh.size())
+        throw std::runtime_error("writeSphericalIsotropicModel: "
+            "aux, if provided, should match gridh in length");
     // construct a suitable grid in h, if not provided
     std::vector<double> gridH(gridh);
     const math::IFunction& df = model;
@@ -812,13 +816,14 @@ void writeSphericalIsotropicModel(const std::string& fileName, const std::string
     std::ofstream strm(fileName.c_str());
     if(!header.empty())
         strm << "#" << header << "\n";
+    std::string auxh = aux.empty() ? "" : "\tAux";
     strm <<
         "#r      \tM(r)    \tE=Phi(r)\trho(r)  \tf(E)    \tM(E)    \th(E)    \tTrad(E) \trcirc(E) \t"
         "Lcirc(E) \tVelDispersion\tVelDispProj\tSurfaceDensity\tDeltaE^2\tMassFlux\tEnergyFlux";
     if(Mbh>0)
-        strm << "\tD_RR/R(0)\n#0        Mbh = " << utils::pp(Mbh, 14) << "\t-INFINITY\n";
+        strm << "\tD_RR/R(0)"+auxh+"\n#0        Mbh = " << utils::pp(Mbh, 14) << "\t-INFINITY\n";
     else
-        strm << "\n#0      \t0       \t" << utils::pp(Phi0, 14) << '\n';
+        strm << auxh+"\n#0      \t0       \t" << utils::pp(Phi0, 14) << '\n';
 
     // output various quantities as functions of r (or E) to the file
     for(unsigned int i=0; i<gridH.size(); i++) {
@@ -865,7 +870,9 @@ void writeSphericalIsotropicModel(const std::string& fileName, const std::string
         '\t' +  utils::pp(FluxM,    14) +  // [15] flux of particles through the phase volume
         '\t' +  utils::pp(FluxE,    14);   // [16] flux of energy through the phase volume
         if(Mbh>0)  strm <<                 //      in case of a central black hole:
-        '\t' +  utils::pp(DRRoverR, 14);   // [17] loss-cone diffusion coef 
+        '\t' +  utils::pp(DRRoverR, 14);   // [17] loss-cone diffusion coef
+        if(!aux.empty())  strm <<
+        '\t' +  utils::pp(aux[i],   14);   // [18] auxiliary quantity
         strm << '\n';
     }
 }

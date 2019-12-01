@@ -81,6 +81,7 @@ class ModelParams:
             r_a   = numpy.inf
         else:
             print("Can't determine true parameters!")
+            return
         self.truePotential = agama.Potential(
             type  = 'Spheroid',
             densityNorm = 10**self.trueParams[0],

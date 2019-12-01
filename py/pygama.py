@@ -2,13 +2,63 @@
 This is a collection of various routines that complement the Python interface to the Agama library.
 The __init__.py file in the root directory of Agama package imports both the C++ extension (agama.so)
 and this python module (py/pygama.py) and merges them into a single namespace; hence one may write
->>> import agama                                     # import both C++ and Python modules simultaneously
->>> pot = agama.GalpyPotential(type='Plummer')       # use classes and routines from this file...
->>> af  = agama.ActionFinder(pot)                    # ...or those defined in the C++ library
+>>> import agama                                # import both C++ and Python modules simultaneously
+>>> pot = agama.GalpyPotential(type='Plummer')  # use classes and routines from this file...
+>>> af  = agama.ActionFinder(pot)               # ...or those defined in the C++ library
 '''
 import numpy as _numpy, agama as _agama
 
-### ------------------------------------------------------------------ ###
+### --------------------------------------------------------
+### two routines for constructing non-uniformly spaced grids
+
+def nonuniformGrid(nnodes, xmin, xmax=None):
+    '''
+    Create a grid with unequally spaced nodes:
+    x[k] = (exp(Z k) - 1) / (exp(Z) - 1), i.e., coordinates of nodes increase
+    nearly linearly at the beginning and then nearly exponentially towards the end;
+    the value of Z is computed so the the 1st element is at xmin and last at xmax
+    (0th element is always placed at 0).
+    Arguments:
+      nnodes:   the total number of grid points (>=3);
+      xmin:     the location of the innermost nonzero node (>0);
+      xmax:     the location of the last node (optional, if not provided, means uniform grid).
+    Returns:    the array of grid nodes.
+    '''
+    if xmax is None or _numpy.isclose(xmax, (nnodes-1)*xmin):
+        return _numpy.linspace(0, xmin*(nnodes-1), nnodes)
+    if xmin<=0 or xmax<=xmin or nnodes<=2:
+        raise ValueError('invalid parameters for nonuniformGrid')
+    import scipy.optimize
+    ratio = 1.*xmax/xmin
+    def fnc(A):
+        if abs(A)<1e-8: return nnodes-ratio + 0.5*A*nnodes*(nnodes-1)  # Taylor expansion
+        else: return (_numpy.exp(A*(nnodes-1))-1) / (_numpy.exp(A)-1) - ratio
+    A = scipy.optimize.brentq(fnc, _numpy.log(1-1./ratio), _numpy.log(ratio)/(nnodes-2))
+    return xmin * (_numpy.exp(A * _numpy.linspace(0, nnodes-1, nnodes))-1) / (_numpy.exp(A)-1)
+
+
+def symmetricGrid(nnodes, xmin, xmax=None):
+    '''
+    Create a possibly non-uniform grid, similar to 'nonuniformGrid()', but symmetric about origin.
+    Arguments:
+      nnodes:  the total number of grid points (>=4);
+      xmin:    the width of the central grid segment;
+      xmax:    the outer edge of the grid (endpoints are at +-xmax);
+      if it is provided, the grid segments are gradually stretched as needed,
+      otherwise this implies uniform segments and hence xmax = 0.5 * (nnodes-1) * xmin.
+    Returns:   the array of grid nodes.
+    '''
+    if xmax is None:
+        return _numpy.linspace(-1, 1, nnodes) * 0.5*xmin*(nnodes-1)
+    if nnodes%2 == 1:
+        grid = createNonuniformGrid(nnodes//2+1, xmin, xmax)
+        return _numpy.hstack((-grid[:0:-1], grid))
+    else:
+        grid = createNonuniformGrid(nnodes, xmin*0.5, xmax)[1::2]
+        return _numpy.hstack((-grid[::-1], grid))
+
+
+### -------------------------------------------------------------------
 ### routines for coordinate transformation, projection and deprojection
 ### of ellipsoidally stratified profiles (e.g. a Multi-Gaussian expansion)
 
@@ -168,7 +218,7 @@ def getViewingAngles(SXp, SYp, eta, Sx, Sy, Sz):
         norm( alpha, pi-beta, gamma2) )
 
 
-### -------------------------------------------------------------------------- ###
+### ------------------------------------------------------------------------------
 ### routines for representing a function specified in terms of its coefficients of
 ### B-spline or Gauss-Hermite expansions
 
@@ -299,8 +349,66 @@ def ghInterp(ampl, center, width, coefs, x):
     return _numpy.squeeze(result * norm)
 
 
-### ------------------- ###
-### interface for galpy ###
+def sampleOrbitLibrary(nbody, orbits, weights):
+    '''
+    Construct an N-body snapshot from an orbit library
+    Arguments:
+      nbody:    the required number of particles in the output snapshot.
+      orbits:   an array of trajectories returned by the `orbit()` routine.
+      weights:  an array of orbit weights, returned by the `solveOpt()` routine.
+    Returns: a tuple of two elements: the flag indicating success or failure, and the result.
+    In case of success, the result is a tuple of two arrays: particle coordinates/velocities
+    (2d Nx6 array) and particle masses (1d array of length N).
+    In case of failure (when some of the orbits, usually with high weights, had fewer points
+    recorded from their trajectories during orbit integration than is needed to represent them
+    in the N-body snapshot), the result is a different tuple of two arrays:
+    list of orbit indices which did not have enough trajectory samples (length is anywhere
+    from 1 to N), and corresponding required numbers of samples for each orbit from this list.
+    '''
+    nbody = int(nbody)
+    if nbody <= 0:
+        raise ValueError("Argument 'nbody' must be a positive integer")
+
+    # check that orbit weights are correct and their sum is positive
+    numOrbits = len(weights)
+    if numOrbits <= 0:
+        raise ValueError("Argument 'weights' must be a non-empty array of floats")
+    cumulMass = _numpy.cumsum(weights)  # sum of orbit weights up to and including each orbit in the list
+    totalMass = cumulMass[-1]
+    if not (totalMass>0):
+        raise ValueError("The sum of weights must be positive")
+    if not (_numpy.min(weights) >= 0):
+        raise ValueError("Weights must be non-negative")
+
+    # check that the trajectories are provided: it should be an array with PyObjects as elements
+    # (they must be arrays themselves, which will be checked later); the shape of this array should be
+    # either numOrbits or numOrbits x 2 (the latter variant is returned by the `orbit()` routine).
+    if len(orbits.shape) == 2:
+        orbits = orbits[:,1]  # take only the trajectories (1st column), not timestamps (0th column)
+    if orbits.shape != (numOrbits,):
+        raise ValueError("'orbits' must be an array of numpy arrays with the same length as 'weights'")
+    orbitLengths = _numpy.array([len(o) for o in orbits])
+    # index of first output point for each orbit
+    outPointIndex = _numpy.hstack((0, cumulMass / totalMass * nbody )).astype(int)
+    # number of output points to sample from each orbit
+    pointsToSample = outPointIndex[1:] - outPointIndex[:-1]
+    # indices of orbits whose length of recorded trajectory is less than the required number of samples
+    badOrbitIndices = _numpy.where(pointsToSample > orbitLengths)[0]
+    # if this list is not empty, the procedure failed and we return the indices of orbits for reintegration
+    if len(badOrbitIndices) > 0:
+        return False, (badOrbitIndices, pointsToSample[badOrbitIndices])
+    # otherwise scan the array of orbits and sample appropriate number of points from each trajectory
+    posvel = _numpy.zeros((nbody, 6), dtype=orbits[0].dtype)
+    for orb in range(numOrbits):
+        # copy a random [non-repeating] selection of points from this orbit into the output array
+        posvel[outPointIndex[orb] : outPointIndex[orb+1]] = \
+            orbits[orb][_numpy.random.choice(orbitLengths[orb], pointsToSample[orb], replace=False)]
+    # return a success flag and a tuple of posvel, mass
+    return True, (posvel, _numpy.ones(nbody, dtype=orbits[0].dtype) * totalMass / nbody)
+
+
+### -------------------
+### interface for galpy
 
 class GalpyPotential(_agama.Potential):
     '''
@@ -319,10 +427,11 @@ class GalpyPotential(_agama.Potential):
         necessary to make vc(1.,0.)=1.
         '''
         # importing galpy takes a lot of time (when first called in a script), so we only perform this
-        # when the constructor of this class is called, and add the inheritance from galpy.potential.Potential at runtime.
-        from galpy.potential import Potential as GPotential
-        GalpyPotential.__bases__ = (GPotential, _agama.Potential)
-        GPotential.__init__(self, amp=1.)
+        # when the constructor of this class is called, and add the inheritance from
+        # galpy.potential.Potential at runtime.
+        from galpy.potential import Potential
+        GalpyPotential.__bases__ = (Potential, _agama.Potential)
+        Potential.__init__(self, amp=1.)
         normalize=False
         for key, value in kwargs.items():
             if key=='normalize':

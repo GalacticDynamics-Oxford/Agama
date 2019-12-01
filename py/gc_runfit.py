@@ -37,6 +37,8 @@ between two consecutive episodes; when they no longer change, we declare
 the procedure to be converged. Intermediate results are also stored in text
 files, so that the fit may be restarted after each episode. We also display
 the evolution of parameters along the chain, and the covariance plots.
+To redo the plots without running the MCMC again, add a second command-line
+argument "plot" (after the name of the data file).
 
 The files "gc_modelparamsE.py" and "gc_modelparamsJ.py" specify two possible
 families of models (only one of them should be selected to import).
@@ -312,10 +314,6 @@ class ModelSearcher:
         dmslope  = numpy.zeros((chain.shape[0], len(midradii)))
         trdens   = numpy.zeros((chain.shape[0], len(radii)))
         trbeta   = numpy.zeros((chain.shape[0], len(radii)))
-        true_dmdens    = self.model.truePotential.density(xyz)
-        true_dmslope   = numpy.log(true_dmdens[1:] / true_dmdens[:-1]) / numpy.log(radii[1:] / radii[:-1])
-        true_trdens    = self.model.tracerDensity.density(xyz)
-        true_trbeta    = self.model.tracerBeta(radii)
         print('Plotting profiles...')
         for i in range(len(chain)):
             pot, df    = self.model.createModel(chain[i])
@@ -329,7 +327,6 @@ class ModelSearcher:
         axes[0].fill_between(midradii, cntr[0], cntr[4], color='lightgray')  # 2 sigma
         axes[0].fill_between(midradii, cntr[1], cntr[3], color='gray')       # 1 sigma
         axes[0].plot(midradii, cntr[2], color='k')  # median
-        axes[0].plot(midradii, true_dmslope, color='r', lw=3, linestyle='--')
         axes[0].set_xscale('log')
         axes[0].set_xlim(rmin, rmax)
         axes[0].set_ylim(-5, 1)
@@ -341,11 +338,9 @@ class ModelSearcher:
         axes[1].fill_between(radii, cntr[0], cntr[4], color='lightgray')  # 2 sigma
         axes[1].fill_between(radii, cntr[1], cntr[3], color='gray')       # 1 sigma
         axes[1].plot(radii, cntr[2], color='k')  # median
-        axes[1].plot(radii, true_dmdens, color='r', lw=3, linestyle='--')
         axes[1].set_xscale('log')
         axes[1].set_yscale('log')
         axes[1].set_xlim(rmin, rmax)
-        axes[1].set_ylim(true_dmdens[-1]*0.5, true_dmdens[0]*5)
         axes[1].set_xlabel('$r$')
         axes[1].set_ylabel(r'$\rho_{DM}$')
 
@@ -354,7 +349,6 @@ class ModelSearcher:
         axes[2].fill_between(radii, cntr[0], cntr[4], color='lightgray')  # 2 sigma
         axes[2].fill_between(radii, cntr[1], cntr[3], color='gray')       # 1 sigma
         axes[2].plot(radii, cntr[2], color='k')  # median
-        axes[2].plot(radii, true_trbeta, color='r', lw=3, linestyle='--')
         axes[2].set_xscale('log')
         axes[2].set_xlim(rmin, rmax)
         axes[2].set_ylim(-1, 1)
@@ -366,11 +360,9 @@ class ModelSearcher:
         axes[3].fill_between(radii, cntr[0], cntr[4], color='lightgray')  # 2 sigma
         axes[3].fill_between(radii, cntr[1], cntr[3], color='gray')       # 1 sigma
         axes[3].plot(radii, cntr[2], color='k')  # median
-        axes[3].plot(radii, true_trdens, color='r', lw=3, linestyle='--')
         axes[3].set_xscale('log')
         axes[3].set_yscale('log')
         axes[3].set_xlim(rmin, rmax)
-        axes[3].set_ylim(true_trdens[-1]*0.5, true_trdens[0]*5)
         axes[3].set_xlabel('$r$')
         axes[3].set_ylabel(r'$\rho_\star$')
 
@@ -380,6 +372,19 @@ class ModelSearcher:
             plt.twinx(ax)
             plt.plot(numpy.hstack(zip(radii[:-1], radii[1:])), numpy.repeat(ptcount, 2), 'g-', alpha=0.5)
             plt.ylim(0, 2*max(ptcount))
+
+        try:
+            true_dmdens = self.model.truePotential.density(xyz)
+            true_dmslope= numpy.log(true_dmdens[1:] / true_dmdens[:-1]) / numpy.log(radii[1:] / radii[:-1])
+            true_trdens = self.model.tracerDensity.density(xyz)
+            true_trbeta = self.model.tracerBeta(radii)
+            axes[0].plot(midradii, true_dmslope, color='r', lw=3, linestyle='--')
+            axes[1].plot(   radii, true_dmdens,  color='r', lw=3, linestyle='--')
+            axes[2].plot(   radii, true_trbeta,  color='r', lw=3, linestyle='--')
+            axes[3].plot(   radii, true_trdens,  color='r', lw=3, linestyle='--')
+            axes[1].set_ylim(true_dmdens[-1]*0.5, true_dmdens[0]*5)
+            axes[3].set_ylim(true_trdens[-1]*0.5, true_trdens[0]*5)
+        except AttributeError: pass  # no true values known
 
         plt.tight_layout()
         plt.savefig(self.filename+"_profiles.png")
@@ -408,7 +413,11 @@ class ModelSearcher:
 
         latest_chain = chain[:,-nsteps_mcmc:].reshape(-1, chain.shape[2])
         try:
-            corner.corner(latest_chain, quantiles=[0.16, 0.5, 0.84], labels=labels, truths=self.model.trueParams)
+            trueParams = self.model.trueParams
+        except AttributeError:
+            trueParams = None
+        try:
+            corner.corner(latest_chain, quantiles=[0.16, 0.5, 0.84], labels=labels, truths=trueParams)
             # distribution of log-likelihoods - expected to follow the chi2 law with ndim degrees of freedom
             ax=plt.axes([0.64,0.64,0.32,0.32])
             bins=numpy.linspace(-4-ndim, 1, 101) + maxexpected
@@ -438,4 +447,9 @@ class ModelSearcher:
 
 numpy.set_printoptions(precision=5, linewidth=200, suppress=True)
 agama.setUnits(mass=1, length=1, velocity=1)
-ModelSearcher().run()
+m=ModelSearcher()
+if len(sys.argv)>2 and 'PLOT' in sys.argv[2].upper():
+    chain = numpy.loadtxt(m.filename+'.chain')
+    m.plotProfiles(chain[numpy.random.choice(len(chain), nsamples_plot, replace=False)])
+else:
+    m.run()

@@ -95,7 +95,7 @@ halotype  =       args.get('HALOTYPE', 'nfw')   # [OPT] halo type: 'LOG' or 'NFW
 vhalo     = float(args.get('VHALO', 190))       # [OPT] asymptotic (LOG) or peak (NFW) circular velocity of the halo [km/s]
 rhalo     = float(args.get('RHALO', 150))       # [OPT] core (LOG) or scale (NFW) radius of the halo [lenth_unit]
 Upsilon   = float(args.get('UPSILON', 1.0))     # [OPT] initial value of mass-to-light ratio in the search
-multstep  = float(args.get('MULTSTEP', 2**0.05))# [OPT] multiplicative step for increasing/decreasing Upsilon during grid search
+multstep  = float(args.get('MULTSTEP', 1.02))   # [OPT] multiplicative step for increasing/decreasing Upsilon during grid search
 numOrbits = int  (args.get('NUMORBITS', 20000)) # [OPT] number of orbit in the model (size of orbit library)
 intTime   = float(args.get('INTTIME', 100.0))   # [OPT] integration time in units of orbital period
 regul     = float(args.get('REGUL', 1. ))       # [OPT] regularization parameter (larger => more uniform orbit weight distribution in models)
@@ -314,6 +314,10 @@ datasets.append(agama.schwarzlib.DensityDataset(
 # read the Voronoi binning scheme and convert it to polygons (aperture boundaries)
 vorbin    = numpy.loadtxt(filenameVorBin1)
 apertures = agama.schwarzlib.getBinnedApertures(xcoords=vorbin[:,0], ycoords=vorbin[:,1], bintags=vorbin[:,2])
+# note that when using real observational data, the coordinate system in the image plane is usually
+# right-handed, with Y pointing up and X pointing right. This is different from the convention used
+# in Agama, where X points left. Therefore, one will need to invert the X axis of the observed dataset:
+# getBinnedApertures(xcoords=-vorbin[:,0], ...)
 
 # use either histograms or GH moments as input data
 if usehist:
@@ -410,6 +414,12 @@ if command == 'RUN':
     pot_fidu  = agama.Potential(pot_gal, pot_bhfidu)
 
     # prepare initial conditions - use the same total potential independent of the actual Mbh
+    # [OPT]: choose the sampling method: isotropic IC drawn from Eddington DF are created by
+    #   density.sample(numorbits, potential)
+    # while IC with preferential rotation (for disky models) are constructed from Jeans eqns by
+    #   density.sample(numorbits, potential, beta={0-0.5}, kappa={1 or -1, depending on sign of rotation})
+    # Here we add together two sets of IC - the majority of orbits sampled with Jeans eqns,
+    # plus a small fraction additionally sampled from the central region to improve coverage
     ic = numpy.vstack((
         densityStars.sample(int(numOrbits*0.85), potential=pot_fidu, beta=0.3, kappa=1)[0],
         #densityStars.sample(int(numOrbits*0.85), potential=pot_fidu)[0],
@@ -455,7 +465,10 @@ elif command == 'PLOT':
     ML  = tab[:,6]                        # Upsilon is appended as the first column after those provided in linePrefix
     chi2= numpy.sum(tab[:,8:-1], axis=1)  # chi2 values are stored separately for each dataset, but here we combine all of them except regularization penalty
     # launch interactive plot with [OPT] Mbh vs M/L as the two coordinate axes displayed in chi2 plane (may choose a different pair of parameters)
-    agama.schwarzlib.runPlot(datasets=datasets, aval=Mbh, bval=ML, chi2=chi2, filenames=filenames)
+    agama.schwarzlib.runPlot(datasets=datasets, aval=Mbh, bval=ML, chi2=chi2, filenames=filenames,
+        # [OPT] various adjustable parameters for the plots (ranges, names, etc.) - most have reasonable default values
+        alabel='Mbh', blabel='M/L', alim=(0, 4e8), blim=(0.9, 1.1), vlim=(-500,500),
+        v0lim=(-150,150), sigmalim=(40,160), v0err=15.0, sigmaerr=15.0)
 
 else:
     print('Nothing to do!')

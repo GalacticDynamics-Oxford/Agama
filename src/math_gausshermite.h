@@ -6,12 +6,12 @@
 */
 #pragma once
 #include "math_base.h"
-#include "math_linalg.h"
+#include "math_spline.h"
 
 namespace math{
 
 /** Representation of a velocity distribution function in terms of Gauss-Hermite expansion */
-class GaussHermiteExpansion: public math::IFunctionNoDeriv {
+class GaussHermiteExpansion: public IFunctionNoDeriv {
     double Ampl;   ///< overall amplitude
     double Center; ///< position of the center of expansion
     double Width;  ///< width of the gaussian
@@ -26,7 +26,12 @@ public:
     /// If the parameters gamma, center and sigma are not provided, they are estimated
     /// by finding the best-fit Gaussian without higher-order terms; in this case
     /// the first three GH moments should be (1,0,0) to within integration accuracy.
-    GaussHermiteExpansion(const math::IFunction& fnc,
+    GaussHermiteExpansion(const IFunction& fnc,
+        unsigned int order, double gamma=NAN, double center=NAN, double sigma=NAN);
+
+    /// same as the above constructor, but specialized to the case of a B-spline input function
+    template<int N>
+    GaussHermiteExpansion(const BsplineWrapper<N>& fnc,
         unsigned int order, double gamma=NAN, double center=NAN, double sigma=NAN);
 
     /// evaluate the expansion at the given point
@@ -54,10 +59,10 @@ public:
     \param[in]  ampl   is the overall amplitude of the gaussian;
     \param[in]  center is the central point of the gaussian;
     \param[in]  width  is the width of the gaussian;
-    \return  a matrix G with (order+1) rows and bsplv.numValues() columns.
+    \return  a matrix G with (order+1) rows and bspl.numValues() columns.
     To obtain the GH moments, multiply this matrix by the vector of amplitudes for a single aperture.
 */
-math::Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
+Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
     unsigned int order, double ampl, double center, double width);
 
 

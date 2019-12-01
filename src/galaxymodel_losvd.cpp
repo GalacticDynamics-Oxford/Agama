@@ -197,7 +197,10 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
 
     // construct the projection matrix for transforming the position/velocity in the
     // intrinsic 3d coordinate system into image plane coordinates and line-of-sight velocity
-    coord::makeRotationMatrix(params.alpha, params.beta, params.gamma, transformMatrix);
+    coord::makeRotationMatrix(
+        // for axisymmetric systems, alpha has no effect; setting it to 0 simplifies bisymmetrization
+        isAxisymmetric(symmetry) ? 0 : params.alpha,
+        params.beta, params.gamma, /*output*/ transformMatrix);
 
     // construct the spatial rebinning matrix
     math::Matrix<double> apertureMatrix(numApertures, numBasisFnc, 0.);
@@ -307,7 +310,7 @@ inline void reallyAddPoint(const math::BsplineInterpolator1d<N>& bsplx,
 }
 
 template<int N>
-void TargetLOSVD<N>::addPoint(const double point[6], const double mult, double* datacube) const
+void TargetLOSVD<N>::addPoint(const double point[6], double mult, double* datacube) const
 {
     double pt[6];
     // construct initial state for the PRNG, using the input point position/velocity
@@ -316,12 +319,12 @@ void TargetLOSVD<N>::addPoint(const double point[6], const double mult, double* 
     if(isSpherical(symmetry)) {
         // if spherically-symmetric, randomize the orientation of the point on the 2d sphere
         double rotmat[9];
-        math::getRandomRotationMatrix(/*output*/ rotmat, /*input*/ &state);
+        math::getRandomRotationMatrix(/*output*/ rotmat, /*input/output*/ &state);
         coord::transformVector(rotmat, point+0, pt+0);  // position
         coord::transformVector(rotmat, point+3, pt+3);  // velocity
-    } else if(isZRotSymmetric(symmetry)) {
+    } else if(isAxisymmetric(symmetry)) {
         // if symmetric w.r.t rotation in phi, rotate the point about z axis by a random angle
-        double ang = math::random(&state) * 2*M_PI, sa, ca;
+        double ang = math::random(/*input/output*/ &state) * 2*M_PI, sa, ca;
         math::sincos(ang, sa, ca);
         pt[0] = point[0] * ca - point[1] * sa;
         pt[1] = point[0] * sa + point[1] * ca;
@@ -333,32 +336,68 @@ void TargetLOSVD<N>::addPoint(const double point[6], const double mult, double* 
         // copy the input point
         for(int i=0; i<6; i++)
             pt[i] = point[i];
-        // if XY-reflection symmetry is present (e.g. in a triaxial system even when rotating),
-        // flip the x,y coordinates and velocities with probability 1/2
-        if(isBisymmetric(symmetry) && math::random(&state) > 0.5) {
-            pt[0] = -pt[0];
-            pt[1] = -pt[1];
-            pt[3] = -pt[3];
-            pt[4] = -pt[4];
+    }
+
+    // impose various additional symmetries by adding more than one point to the datacube
+    double
+    X0 = transformMatrix[0] * pt[0], X1 = transformMatrix[1] * pt[1], X2 = transformMatrix[2] * pt[2],
+    Y0 = transformMatrix[3] * pt[0], Y1 = transformMatrix[4] * pt[1], Y2 = transformMatrix[5] * pt[2],
+    V01= transformMatrix[6] * pt[3]   +   transformMatrix[7] * pt[4], V2 = transformMatrix[8] * pt[5];
+
+    // 0. when have mirror symmetry (x,y,z <-> -x,-y,-z), and the datacube grids are symmetric,
+    // no need to add the mirror point, because the symmetrization will be done afterwards
+    // (it also corresponds to X,Y,V <-> -X,-Y,-V, i.e. point-symmetry of the kinematic dataset)
+    bool addMirrorPoint = isReflSymmetric(symmetry) && !symmetricGrids;
+    if(addMirrorPoint) mult *= 0.5;
+
+    // 1. if z-reflection symmetry is present (e.g. in a triaxial system even when rotating),
+    // add a copy of input point at x,y,-z (it projects to different X,Y,V than the original point)
+    if(isBisymmetric(symmetry)) mult *= 0.5;
+
+    // 2. in an axisymmetric system, also ensure a symmetry w.r.t. change of inclination angle
+    // beta <-> pi-beta, or flipping the observed datacube about the line of nodes - together with
+    // the point-symmetry of step 0, this corresponds to fourfold (bi-symmetrization) of image plane.
+    // it's equivalent to flipping the signs of 1,4 and 8-th elements of transformMatrix, or X1,Y1,V2;
+    // there is no trivial relation between the original point x,y,z and this new point x',y',z'
+    if(isAxisymmetric(symmetry)) mult *= 0.5;
+
+    if(true) {
+        if(true) {
+            if(true)                      //  x,  y,  z
+                reallyAddPoint(bsplx, bsply, bsplv, X0+X1+X2, Y0+Y1+Y2, V01+V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  //  x', y', z'
+                reallyAddPoint(bsplx, bsply, bsplv, X0-X1+X2, Y0-Y1+Y2, V01-V2, mult, datacube);
+        }
+        if(isBisymmetric(symmetry)) {
+            if(true)                      //  x,  y, -z
+                reallyAddPoint(bsplx, bsply, bsplv, X0+X1-X2, Y0+Y1-Y2, V01-V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  //  x', y',-z'
+                reallyAddPoint(bsplx, bsply, bsplv, X0-X1-X2, Y0-Y1-Y2, V01+V2, mult, datacube);
         }
     }
-    double
-    X1 = transformMatrix[0] * pt[0] + transformMatrix[1] * pt[1], X2 = transformMatrix[2] * pt[2],
-    Y1 = transformMatrix[3] * pt[0] + transformMatrix[4] * pt[1], Y2 = transformMatrix[5] * pt[2],
-    V1 = transformMatrix[6] * pt[3] + transformMatrix[7] * pt[4], V2 = transformMatrix[8] * pt[5];
-    if(isZReflSymmetric(symmetry)) {
-        reallyAddPoint(bsplx, bsply, bsplv, X1+X2, Y1+Y2, V1+V2, 0.5*mult, datacube);  // x,y,z
-        reallyAddPoint(bsplx, bsply, bsplv, X1-X2, Y1-Y2, V1-V2, 0.5*mult, datacube);  // x,y,-z
-    } else
-        reallyAddPoint(bsplx, bsply, bsplv, X1+X2, Y1+Y2, V1+V2, mult, datacube);  // x,y,z only
+    if(addMirrorPoint) {  // only if grids are not symmetric but we do need to point-symmetrize
+        if(true) {
+            if(true)                      // -x, -y, -z
+                reallyAddPoint(bsplx, bsply, bsplv,-X0-X1-X2,-Y0-Y1-Y2,-V01-V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  // -x',-y',-z'
+                reallyAddPoint(bsplx, bsply, bsplv,-X0+X1-X2,-Y0+Y1-Y2,-V01+V2, mult, datacube);
+        }
+        if(isBisymmetric(symmetry)) {
+            if(true)                      // -x, -y,  z
+                reallyAddPoint(bsplx, bsply, bsplv,-X0-X1+X2,-Y0-Y1+Y2,-V01+V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  // -x',-y', z'
+                reallyAddPoint(bsplx, bsply, bsplv,-X0+X1+X2,-Y0+Y1+Y2,-V01-V2, mult, datacube);
+        }
+    }
 }
 
 template<int N>
 void TargetLOSVD<N>::finalizeDatacube(math::Matrix<double> &datacube, StorageNumT* output) const
 {
-    // 0th stage: mirror-symmetrization (if the grids are reflection-symmetric, this can be done now
-    // for the entire datacube, otherwise it was done for each added point individually)
-    if(symmetricGrids && isTriaxial(symmetry)) {
+    // 0th stage: mirror-symmetrization (if the model is invariant under x,y,z <-> -x,-y,-z,
+    // and grids are reflection-symmetric, this can be done now for the entire datacube,
+    // otherwise it was done for each added point individually)
+    if(isReflSymmetric(symmetry) && symmetricGrids) {
         double* data = datacube.data();
         // average the symmetric elements from the head and tail of the flattened array
         for(size_t i=0, size = datacube.size(); i<size/2; i++)
@@ -412,7 +451,7 @@ void TargetLOSVD<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* 
                             result[ (ky * (N+1) + kx) * nv + iv ];
         }
     }
-    
+
     // 2nd stage: convert the collected datacube into the output array of LOSVDs in each aperture
     finalizeDatacube(datacube, output);
 }

@@ -608,8 +608,11 @@ public:
     /// array of masses of a single star in each species (fixed)
     std::vector<double> Mstar;
 
-    /// array of capture radii in each species (fixed)
+    /// array of capture radii in each species (may evolve as the central black hole mass changes)
     std::vector<double> captureRadius;
+
+    /// power-law indices describing the evolution of capture radii with black hole mass
+    std::vector<double> captureRadiusScalingExp;
 
     /// fractions of mass of disrupted stars of each species that is added to the black hole mass (fixed)
     std::vector<double> captureMassFraction;
@@ -631,6 +634,9 @@ public:
 
     /// mass of the central black hole (may evolve with time)
     double Mbh;
+
+    /// mass of the black hole at the previous time when the capture radii were (re)computed (evolves)
+    double prevMbh;
 
     /// total mass of each stellar component (evolves)
     std::vector<double> Mass;
@@ -688,6 +694,9 @@ public:
     /// (projection matrix computed from the loss rate, one per species, evolves)
     std::vector< math::BandMatrix<double> > drainMatrix;
 
+    /// array of instantaneous relative drain rates for each component (evolves)
+    std::vector< std::vector<double> > drainRate;
+
     /// previously computed matrices R entering the matrix FP equation (one per species, evolves)
     std::vector< math::BandMatrix<double> > prevRelaxationMatrix;
 
@@ -708,16 +717,18 @@ public:
         lossConeDrain(params.lossConeDrain),
         Mstar(numComp, 0.),
         captureRadius(numComp, 0.),
+        captureRadiusScalingExp(numComp, 0.),
         captureMassFraction(numComp, 0.),
         sourceRate(numComp, 0.),
         sourceRadius(numComp, 0.),
-        Mbh(params.Mbh),
+        Mbh(params.Mbh), prevMbh(params.Mbh),
         Mass(numComp, 0.), Etot(0.), Ekin(0.),
         sourceMass(numComp, 0.), sourceEnergy(0.), drainMass(numComp, 0.), drainEnergy(0.),
         sourceRateEnergy(0.), drainRateEnergy(0.),
         gridf(numComp),
         gridSourceRate(numComp),
         drainMatrix(numComp),
+        drainRate(numComp),
         prevRelaxationMatrix(numComp),
         prevdeltat(0.), numSteps(0)
     {
@@ -735,6 +746,9 @@ public:
                 throw std::runtime_error("FokkerPlanckSolver: capture mass faction be between 0 and 1");
             if(components[c].captureRadius < 0.)
                 throw std::runtime_error("FokkerPlanckSolver: capture radius should be non-negative");
+            if(components[c].captureRadiusScalingExp < 0. || components[c].captureRadiusScalingExp > 1.)
+                throw std::runtime_error("FokkerPlanckSolver: "
+                    "capture radius scaling exponent should be between 0 and 1");
             if(c==0)
                 absorbingBoundaryCondition = components[c].captureRadius > 0.;
             else if(absorbingBoundaryCondition ^ (components[c].captureRadius > 0.))
@@ -747,12 +761,13 @@ public:
             if(components[c].sourceRadius < 0. ||
                 (components[c].sourceRate > 0. && components[c].sourceRadius == 0.) )
                 throw std::runtime_error("FokkerPlanckSolver: source radius should be non-negative");
-            Mstar[c]               = components[c].Mstar;
-            captureRadius[c]       = components[c].captureRadius;
-            captureMassFraction[c] = components[c].captureMassFraction;
-            sourceRate[c]          = components[c].sourceRate;
-            sourceRadius[c]        = components[c].sourceRadius;
-            initDens.comps[c]      = components[c].initDensity;
+            Mstar[c]                   = components[c].Mstar;
+            captureRadius[c]           = components[c].captureRadius;
+            captureRadiusScalingExp[c] = components[c].captureRadiusScalingExp;
+            captureMassFraction[c]     = components[c].captureMassFraction;
+            sourceRate[c]              = components[c].sourceRate;
+            sourceRadius[c]            = components[c].sourceRadius;
+            initDens.comps[c]          = components[c].initDensity;
         }
         if(!absorbingBoundaryCondition)
             lossConeDrain = false;   // if captureRadius is not set, there is no loss cone
@@ -868,6 +883,8 @@ double FokkerPlanckSolver::sourceMass(unsigned int comp) const { return data->so
 double FokkerPlanckSolver::drainMass (unsigned int comp) const { return data->drainMass.at(comp); }
 unsigned int FokkerPlanckSolver::numComp()               const { return data->numComp; }
 std::vector<double> FokkerPlanckSolver::gridh()          const { return data->gridh; }
+std::vector<double> FokkerPlanckSolver::drainRate(unsigned int comp) const {
+    return data->drainRate.at(comp); }
 math::PtrFunction   FokkerPlanckSolver::df(unsigned int comp) const {
     return impl->getInterpolatedFunction(data->gridf.at(comp)); }
 math::PtrFunction FokkerPlanckSolver::potential() const {
@@ -877,7 +894,7 @@ potential::PtrPhaseVolume FokkerPlanckSolver::phaseVolume() const { return data-
 void FokkerPlanckSolver::setMbh(double Mbh)
 {
     if(data->Mbh == Mbh) return;
-    data->Mbh = Mbh;
+    data->Mbh = data->prevMbh = Mbh;
     // adiabatically modify the stellar density in response to the changed central black hole mass,
     // while keeping the DF fixed
     for(int i=0; i<10; i++)
@@ -1052,11 +1069,22 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         math::LogLogSpline interpLC(data->gridh, gridLC);
         // compute the matrix elements for the draining rate, separately for each species
         for(unsigned int comp=0; comp<numComp; comp++) {
-            math::BandMatrix<double> mat = impl->projMatrix(
-                FncDrainRate(*data->currPot, *data->phasevol,
-                    2 * data->Mbh * data->captureRadius[comp], interpLC));
+            // update the capture radii as the black hole mass changes
+            data->captureRadius[comp] *=
+                std::pow(data->Mbh / data->prevMbh, data->captureRadiusScalingExp[comp]);
+            // the function describing instantaneous relative loss rate as a function of h
+            FncDrainRate drainFnc(
+                *data->currPot, *data->phasevol, 2 * data->Mbh * data->captureRadius[comp], interpLC);
+            // store the values of this function on a grid (this is needed for output purposes only)
+            data->drainRate[comp].resize(gridSize);
+            for(unsigned int i=0; i<gridSize; i++) {
+                double val = drainFnc(data->gridh[i]);
+                data->drainRate[comp][i] = val==-INFINITY ? 0 : val;
+            }
+            // compute the drain matrix - that's how this function is used in the computation itself
+            math::BandMatrix<double> mat = impl->projMatrix(drainFnc);
             // if the loss cone occupies the entire range of angular momenta at a given energy,
-            // the draining rate is infinite, which is intended to make the DF instantly zero;
+            // the draining rate is -INFINITY, which is intended to make the DF instantly zero;
             // however, for this to work properly, we need to keep infinities on the diagonal,
             // but set all off-diagonal matrix elements to zero to avoid NANs in the solution.
             for(unsigned int r=0; r<mat.rows(); r++) {
@@ -1071,6 +1099,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
             }
             data->drainMatrix[comp] = mat;
         }
+        data->prevMbh = data->Mbh;
     }
 
     // initialize the source term in the matrix equation

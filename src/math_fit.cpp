@@ -189,40 +189,6 @@ struct EigenFncWrapper {
 };
 #endif
 
-//!!!!DEBUGGING!!!!
-#if 0
-void printoutD(const math::IFunctionNdimDeriv &fnc, const double params[]){
-    std::vector<double> jac(fnc.numVars()*fnc.numValues());
-    fnc.evalDeriv(params, NULL, &jac[0]);
-    std::ofstream strm("jac_analytic");
-    for(unsigned int v=0; v<fnc.numValues(); v++) {
-        for(unsigned int p=0; p<fnc.numVars(); p++)
-            strm<<jac[v*fnc.numVars()+p]<<' ';
-        strm<<'\n';
-    }
-}
-
-void printoutN(const math::IFunctionNdim &fnc, const double params[]){
-    std::vector<double> jac(fnc.numVars()*fnc.numValues());
-    std::vector<double> var(params, params+fnc.numVars());
-    std::vector<double> val0(fnc.numValues());
-    fnc.eval(params, &val0[0]);
-    for(unsigned int p=0; p<fnc.numVars(); p++) {
-        std::vector<double> var(params, params+fnc.numVars());
-        std::vector<double> val(fnc.numValues());
-        var[p]+=1e-8;
-        fnc.eval(&var[0], &val[0]);
-        for(unsigned int v=0; v<fnc.numValues(); v++)
-            jac[v*fnc.numVars()+p] = (val[v]-val0[v])/1e-8;
-    }
-    std::ofstream strm("jac_finitedif");
-    for(unsigned int v=0; v<fnc.numValues(); v++) {
-        for(unsigned int p=0; p<fnc.numVars(); p++)
-            strm<<jac[v*fnc.numVars()+p]<<' ';
-        strm<<'\n';
-    }
-}
-#endif
 }  // internal namespace
 
 // ----- linear least-square fit ------- //

@@ -40,6 +40,12 @@ struct FokkerPlanckComponent {
         small number; the default alternative in case of captureRadius=0 is a zero-flux boundary. */
     double captureRadius;
 
+    /** Index of the power-law scaling of capture radius with black hole mass.
+        Zero means that the capture radius stays constant;
+        1/3 is for tidal disruptions of stars outside horizon;
+        1 is for objects (NS, BH) that are captured entirely as they cross the horizon. */
+    double captureRadiusScalingExp;
+
     /** fraction of flux going into the loss cone that is added to the black hole mass (between 0 and 1). */
     double captureMassFraction;
 
@@ -53,6 +59,7 @@ struct FokkerPlanckComponent {
     FokkerPlanckComponent() :
         Mstar(1.),
         captureRadius(0.),
+        captureRadiusScalingExp(0.),
         captureMassFraction(1.),
         sourceRate(0.),
         sourceRadius(0.)
@@ -205,6 +212,10 @@ public:
 
     /// change in total energy associated with the removed mass (sum for all components)
     double drainEnergy() const;
+
+    /// relative rate of change (dimension: inverse time) of the DF of the given species
+    /// due to capture/disruption by the BH (negative), same length as gridh
+    std::vector<double> drainRate(unsigned int indexComp) const;
 
 private:
     /// opaque structure containing the initial parameters and all internal data that evolves with time
