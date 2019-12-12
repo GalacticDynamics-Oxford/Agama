@@ -68,19 +68,19 @@ const char* usage =
     "it also has other parameters, see readme.pdf)\n"
     "  Mstar=(1)       mass of a single star; the number of stars in the system is thus "
     "equal to mass/Mstar, and it determines the relaxation rate\n"
-    "  Mbh=(0)         [G] additional central mass (black hole) - may be used both in 'a' and 'b' cases\n"
-    "  initBH=(true)   [G] determines whether the black hole was present in the system initially (true) "
+    "  Mbh=(0)         [G] additional central mass (black hole, BH) - "
+    "may be used both in 'a' and 'b' cases\n"
+    "  initBH=(true)   [G] determines whether the BH was present in the system initially (true) "
     "or is added adiabatically (false). In the former case the initial distribution function is "
-    "constructed in the combined potential of stars and the black hole. In the opposite case it is "
+    "constructed in the combined potential of stars and the BH. In the opposite case it is "
     "initialized from the stellar model only, and then the potential is adiabatically modified "
-    "by adding the black hole while keeping the DF unchanged\n"
+    "by adding the BH while keeping the DF unchanged\n"
     "  ==== Poisson solver ====\n"
     "  updatePotential=(true)  [G] whether to update the gravitational potential self-consistently "
     "(if false, the potential will be fixed to its initial profile, but the diffusion coefficients "
     "are still recomputed after every FP step)\n"
-    "  selfGravity=(true)  [G] whether the density profile of the evolving system contributes to "
-    "the total potential; if false, then an external potential must be provided "
-    "(currently only the black hole)\n"
+    "  selfGravity=(true)  [G] whether the density profile of the evolving system contributes to the "
+    "total potential; if false, then an external potential must be provided (currently only the BH)\n"
     "  ==== Fokker-Planck solver: grid and time integration ====\n"
     "  coulombLog=(1)   [G] Coulomb logarithm that enters the expression for the relaxation rate\n"
     "  timeTotal=...    [G] total evolution time (required)\n"
@@ -89,30 +89,34 @@ const char* usage =
     "  dtmin=(0)        [G] minimum length of FP timestep\n"
     "  dtmax=(inf)      [G] maximum length of FP timestep (both these limits may modify the timestep "
     "that was computed using the eps parameter)\n"
-    "  hmin=(),hmax=()  [G] the extent of the grid in phase volume h; the grid is logarithmically spaced "
-    "between hmin and hmax, and by default encompasses a fairly large range of h "
+    "  hmin=(),hmax=()  [G] the extent of the grid in phase volume h; the grid is logarithmically "
+    "spaced between hmin and hmax, and by default encompasses a fairly large range of h "
     "(depending on the potential, but typically hmin~1e-10, hmax~1e10)\n"
     "  rmax=()          [G] alternative specification of the outer grid boundary in terms of radius, "
     "not h (if provided, overrides the value of hmax)\n"
     "  gridSizeDF=(200) [G] number of grid points in h\n"
     "  method=(0)       [G] the choice of discretization method (0: Chang&Cooper, 1-3: finite element)\n"
     "  ==== Central black hole (sink) ====\n"
-    "  captureRadius=(0)  in the case of a central black hole, specifies the capture radius "
-    "and turns on the absorbing boundary condition f(hmin)=0. In this case hmin is determined by "
-    "the energy at which the capture occurs from a circular orbit, i.e. there should be no stars "
-    "at lower energies. Setting captureRadius=0 implies a zero-flux boundary condition, "
-    "even in the presense of a central black hole. It stays fixed even if the black hole mass grows. "
+    "  captureRadius=(0)  in the case of a central BH, specifies the capture radius and turns on "
+    "the absorbing boundary condition f(hmin)=0. In this case hmin is determined by the energy at "
+    "which the capture occurs from a circular orbit, i.e. there should be no stars at lower energies. "
+    "Setting captureRadius=0 implies a zero-flux boundary condition, even in the presense of the BH. "
+    "It may grow along with the BH mass, as described by the following parameter. "
     "In the multi-component case, these numbers should all be either zero or non-zero for all species\n"
+    "  captureRadiusScalingExp=(0)  is the power-law index of the dependence of capture radius "
+    "on the central BH mass (1/3 for tidally disrupted stars, 1 for directly captured compact objects)\n"
     "  captureMassFraction=(1)  in the case of non-zero capture radius, the fraction of flux through "
-    "the capture boundary that is added to the black hole mass\n"
-    "  lossCone=(true)  [G] in the case of a central black hole and a non-zero capture radius, "
+    "the capture boundary that is added to the BH mass\n"
+    "  lossCone=(true)  [G] in the case of a central BH and a non-zero capture radius, "
     "further turns on loss-cone draining, i.e., the decay of DF at all energies with a rate "
     "that corresponds to the steady-state solution for the diffusion in the angular momentum "
     "direction with an appropriate boundary condition (empty or full loss cone) determined from "
     "the capture radius and the relaxation rate\n"
+    "  speedOfLight=(0) [G] if set to nonzero, account for energy loss due to emission of "
+    "gravitational waves\n"
     "  ==== Star formation (source) ====\n"
     "  sourceRate=(0)   source term: total mass injected per unit time\n"
-    "  sourceRadius=(0) radius where the source term (mass injection) is concentrated\n"
+    "  sourceRadius=(0) radius within which the mass injection occurs\n"
     "  ==== Output ====\n"
     "  fileOut=()    [G] name (common prefix) of output files, time is appended to the name; "
     "if not provided, don't output anything\n"
@@ -143,7 +147,7 @@ void exportTable(const std::string& filename, const std::string& header, const d
             /*gridh*/  fp.gridh()),
         /*potential*/ *fp.potential(),
         /*gridh*/      fp.gridh(),
-        /*drain rate*/ fp.drainRate(comp));
+        /*drain time*/ fp.drainTime(comp));
     }
 }
 
@@ -189,11 +193,12 @@ galaxymodel::FokkerPlanckComponent initComponent(const utils::KeyValueMap& args)
         // this is why there is a global array of PtrDensity pointers
         comp.initDensity.reset(new potential::DensityWrapper(*densities.back()));
     }
-    comp.Mstar               = args.getDouble("Mstar", comp.Mstar);
-    comp.captureRadius       = args.getDouble("captureRadius", comp.captureRadius);
-    comp.captureMassFraction = args.getDouble("captureMassFraction", comp.captureMassFraction);
-    comp.sourceRate          = args.getDouble("sourceRate", comp.sourceRate);
-    comp.sourceRadius        = args.getDouble("sourceRadius", comp.sourceRadius);
+    comp.Mstar                  = args.getDouble("Mstar", comp.Mstar);
+    comp.captureRadius          = args.getDouble("captureRadius", comp.captureRadius);
+    comp.captureMassFraction    = args.getDouble("captureMassFraction", comp.captureMassFraction);
+    comp.captureRadiusScalingExp= args.getDouble("captureRadiusScalingExp", comp.captureRadiusScalingExp);
+    comp.sourceRate             = args.getDouble("sourceRate", comp.sourceRate);
+    comp.sourceRadius           = args.getDouble("sourceRadius", comp.sourceRadius);
     return comp;
 }
 
@@ -272,6 +277,7 @@ int main(int argc, char* argv[])
     params.selfGravity     = args.getBool  ("selfGravity", params.selfGravity);
     params.updatePotential = args.getBool  ("updatePotential", params.updatePotential);
     params.lossConeDrain   = args.getBool  ("lossCone", params.lossConeDrain);
+    params.speedOfLight    = args.getDouble("speedOfLight", params.speedOfLight);
 
     // init all model components
     std::vector<galaxymodel::FokkerPlanckComponent> components;

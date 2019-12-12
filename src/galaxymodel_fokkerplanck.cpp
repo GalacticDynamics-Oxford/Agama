@@ -139,9 +139,10 @@ public:
         Trad  = g / (4*M_PI*M_PI * Lcirc2),
         difLC = difCoefLC(h),
         q     = difLC * Trad * Lcirc2 / Lcapt2,
-        alpha = sqrt(q * sqrt(1 + q*q));
-        if(Lcapt2 < Lcirc2)
-            return -difLC / (alpha + log(Lcirc2 / Lcapt2));
+        alpha = sqrt(q * sqrt(1 + q*q)),
+        Rcapt = Lcapt2 / Lcirc2;
+        if(Rcapt < 1)
+            return -difLC / ((alpha - 1) * (1 - Rcapt) - log(Rcapt));
         else  // at this energy, all orbits lie inside the loss cone, i.e. should be depopulated entirely
             return -INFINITY;
     }
@@ -605,6 +606,9 @@ public:
     /// if the boundary condition is absorbing, whether to use loss-cone draining at all energies (fixed)
     bool lossConeDrain;
 
+    /// if set to nonzero, account for the energy loss due to GW emission (fixed)
+    const double speedOfLight;
+
     /// array of masses of a single star in each species (fixed)
     std::vector<double> Mstar;
 
@@ -694,8 +698,8 @@ public:
     /// (projection matrix computed from the loss rate, one per species, evolves)
     std::vector< math::BandMatrix<double> > drainMatrix;
 
-    /// array of instantaneous relative drain rates for each component (evolves)
-    std::vector< std::vector<double> > drainRate;
+    /// array of instantaneous drain times for each component (evolves)
+    std::vector< std::vector<double> > drainTime;
 
     /// previously computed matrices R entering the matrix FP equation (one per species, evolves)
     std::vector< math::BandMatrix<double> > prevRelaxationMatrix;
@@ -715,6 +719,7 @@ public:
         updatePotential(params.updatePotential),
         absorbingBoundaryCondition(false),
         lossConeDrain(params.lossConeDrain),
+        speedOfLight(params.speedOfLight),
         Mstar(numComp, 0.),
         captureRadius(numComp, 0.),
         captureRadiusScalingExp(numComp, 0.),
@@ -728,7 +733,7 @@ public:
         gridf(numComp),
         gridSourceRate(numComp),
         drainMatrix(numComp),
-        drainRate(numComp),
+        drainTime(numComp),
         prevRelaxationMatrix(numComp),
         prevdeltat(0.), numSteps(0)
     {
@@ -883,8 +888,8 @@ double FokkerPlanckSolver::sourceMass(unsigned int comp) const { return data->so
 double FokkerPlanckSolver::drainMass (unsigned int comp) const { return data->drainMass.at(comp); }
 unsigned int FokkerPlanckSolver::numComp()               const { return data->numComp; }
 std::vector<double> FokkerPlanckSolver::gridh()          const { return data->gridh; }
-std::vector<double> FokkerPlanckSolver::drainRate(unsigned int comp) const {
-    return data->drainRate.at(comp); }
+std::vector<double> FokkerPlanckSolver::drainTime(unsigned int comp) const {
+    return data->drainTime.at(comp); }
 math::PtrFunction   FokkerPlanckSolver::df(unsigned int comp) const {
     return impl->getInterpolatedFunction(data->gridf.at(comp)); }
 math::PtrFunction FokkerPlanckSolver::potential() const {
@@ -1000,6 +1005,10 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     // DF values and the integrals I0, at the innermost boundary, for all species
     std::vector<double> fval0(numComp), fint0(numComp);
 
+    // prefactor for GW energy loss (for a circular orbit)
+    double GWterm = data->Mbh>0 && data->speedOfLight>0 ?
+        307.2 / pow_2(data->Mbh) / pow(data->speedOfLight, 5) : 0;
+
     // collect and sum up the advection and diffusion coefficients from each component;
     // the diffusion coef is the same for all species, and the functional form of the advection coef
     // is also universal, but its magnitude will be later multiplied by the stellar mass of each species
@@ -1024,13 +1033,19 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
             double I0 = model.I0(h);
             double Kg = model.cumulMass(h);
             double Kh = model.cumulEkin(h) * (2./3);
-            data->phasevol->E(h, &g);
+            double E  = data->phasevol->E(h, &g);
 
             // advection coefficient D_h  without the pre-factor m_star
             data->gridAdv[p] += GAMMA * Kg;
 
             // diffusion coefficient D_hh
             data->gridDif[p] += GAMMA * data->Mstar[comp] * g * (Kh + h * I0);
+
+            // if the energy loss due to GW emission is considered, add the following term
+            // to the advection coefficient (the loss is also proportional to the mass of a star).
+            // this needs to be done only once, so we do it when considering the 0th component.
+            if(comp==0)
+                data->gridAdv[p] += GWterm * pow_2(E*E) * h;
         }
 
         // if needed, compute the angular-momentum diffusion coefficient on a different grid in h
@@ -1075,11 +1090,12 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
             // the function describing instantaneous relative loss rate as a function of h
             FncDrainRate drainFnc(
                 *data->currPot, *data->phasevol, 2 * data->Mbh * data->captureRadius[comp], interpLC);
-            // store the values of this function on a grid (this is needed for output purposes only)
-            data->drainRate[comp].resize(gridSize);
+            // store the drain time (for output purposes only)
+            data->drainTime[comp].resize(gridSize);
             for(unsigned int i=0; i<gridSize; i++) {
-                double val = drainFnc(data->gridh[i]);
-                data->drainRate[comp][i] = val==-INFINITY ? 0 : val;
+                // drain time = 1 / (1/Tdrain + 1/Tgw)
+                data->drainTime[comp][i] = 1 / ( -drainFnc(data->gridh[i]) +
+                    GWterm * 8./3 * pow_2(pow_2(data->phasevol->E(data->gridh[i]))) * data->Mstar[comp]);
             }
             // compute the drain matrix - that's how this function is used in the computation itself
             math::BandMatrix<double> mat = impl->projMatrix(drainFnc);

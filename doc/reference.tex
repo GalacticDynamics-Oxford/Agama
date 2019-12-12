@@ -12,7 +12,6 @@
 \newcommand{\Amuse}{\textsc{Amuse}\xspace}
 \newcommand{\Galpy}{\textsc{Galpy}\xspace}
 \newcommand{\Nemo} {\textsc{Nemo}\xspace}
-\newcommand{\Raga} {\textsc{Raga}\xspace}
 \newcommand{\Gsl}  {\textsc{Gsl}\xspace}
 \newcommand{\Eigen}{\textsc{Eigen}\xspace}
 \newcommand{\Nbody}{\textsl{N}-body\xspace}
@@ -73,7 +72,7 @@
 %%%%%%%%%%%%%%%%%%
 \section{Overview}
 
-\Agama (Action-based Galaxy Modelling Architecture) is a software library intended for a broad range of tasks within the field of stellar dynamics. As the name suggests, it is centered around the use of action/angle formalism to describe the structure of stellar systems, but this is only one of its many facets. The library contains a powerful framework for dealing with arbitrary density/potential profiles and distribution functions (analytic, extracted from \Nbody models, or fitted to the data), a vast collection of general-purpose mathematical routines, and covers many aspects of galaxy dynamics up to the very high-level interface for constructing self-consistent galaxy models. It provides tools for analyzing \Nbody simulations, and serves as a base for the Monte Carlo stellar-dynamical code \Raga.
+\Agama (Action-based Galaxy Modelling Architecture) is a software library intended for a broad range of tasks within the field of stellar dynamics. As the name suggests, it is centered around the use of action/angle formalism to describe the structure of stellar systems, but this is only one of its many facets. The library contains a powerful framework for dealing with arbitrary density/potential profiles and distribution functions (analytic, extracted from \Nbody models, or fitted to the data), a vast collection of general-purpose mathematical routines, and covers many aspects of galaxy dynamics up to the very high-level interface for constructing self-consistent galaxy models. It provides tools for analyzing \Nbody simulations, serves as a base for the Monte Carlo stellar-dynamical code \textsc{Raga} \cite{Vasiliev2015}, the Fokker--Planck code \textsc{PhaseFlow} \cite{Vasiliev2017}, and the Schwarzschild modelling code \textsc{Forstand} \cite{VasilievValluri2020} (in turn, derived from the earlier code \textsc{Smile} \cite{Vasiliev2013,VasilievAthanassoula2015}).
 
 The core of the library is written in \Cpp and is organized into several modules, which are considered in turn in Section~\ref{sec:Structure}:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
@@ -164,7 +163,7 @@ An alternative formulation of the piecewise-polynomial interpolation methods is 
 \footnote{A general cubic spline in 1d is defined by $N_x+2$ parameters: they may be taken to be the values of spline at $N_x$ grid nodes plus two endpoint derivatives, which is called a clamped spline. The more familiar case of a natural cubic spline instead has these two additional parameters defined implicitly, by requiring that the second derivative of the spline is zero at both ends.}.
 The interpolating function is defined as $f(\bx) = \sum_\alpha\,A_\alpha\,B_\alpha(\bx)$, where $\alpha$ is a combined index in all dimensions, $A_\alpha$ are the amplitudes and $B_\alpha$ are the basis functions (in more than one dimension, they are formed as tensor products of 1d B-splines, i.e., $B_{ij}(x,y) = B_i(x)\,B_j(y)$). Again, the evaluation of interpolant only requires $O(\log(N_x)+N^2)$ operations per dimension to locate the grid segment and compute all $N$ possibly nonzero basis functions using a $N$-step recursion relation. This formulation is more suitable for constructing approximating splines from a large number of scattered points (see next paragraph), and the resulting B-splines may be subsequently converted to more efficient linear or cubic interpolators. This approach is currently implemented in 1 and 3 dimensions.
 
-B-splines can also be used as basis functions in finite-element methods: any sufficiently smooth function can be approximated by a linear combination of B-splines on the given interval, and hence represented as a vector of expansion coefficients. Various mathematical operations on the original functions (sum, product, convolution) can then be translated into linear algebra operations on these vectors. The 1d finite-element approach is used in the Fokker--Planck code \Raga, which is included in the library, and in a few other auxiliary tasks (e.g., solution of Jeans equations).
+B-splines can also be used as basis functions in finite-element methods: any sufficiently smooth function can be approximated by a linear combination of B-splines on the given interval, and hence represented as a vector of expansion coefficients. Various mathematical operations on the original functions (sum, product, convolution) can then be translated into linear algebra operations on these vectors. The 1d finite-element approach is used in the Fokker--Planck code \textsc{PhaseFlow}, which is included in the library, and in a few other auxiliary tasks (e.g., solution of Jeans equations).
 
 Spline interpolation is heavily used throughout the entire \Agama library as an efficient and accurate method for approximating various quantities that are expensive to evaluate directly. By performing suitable additional scaling transformations on the argument and/or value of the interpolator, it is possible to achieve exquisite accuracy (sometimes down to machine precision) with a moderate ($\mathcal O(10^2)$) number of nodes covering the region of interest; for one-dimensional splines a linear extrapolation beyond that region often remains quite accurate under a carefully chosen scaling (usually logarithmic). Quintic splines are employed when it is possible to compute analytically the derivatives (or partial derivatives in the 2d case) of the approximated function at grid nodes during the spline construction in addition to its values -- in this case the accuracy of approximation becomes $1-2$ orders of magnitude better than that of a cubic spline. (Of course, computing the derivatives by finite-differencing or from a cubic spline does not achieve the goal).
 Mathematical foundations of splines are described in more detail in the Appendix (sections \ref{sec:MathBSplineDetails} and \ref{sec:MathSplineDetails}).
@@ -833,8 +832,8 @@ In this case the \ttt{Density} object is internally represented by a \ttt{Densit
 The \ttt{Density} class provides only a couple of methods: first of all, the computation of the density itself -- the argument is a single point or a $N\times3$ array of $N$ points (the \Python interface always deals with cartesian coordinates to avoid confusion):\\
 \texttt{print(d.density(1,0,0))}\\
 \texttt{print(d.density([[1,0,0],[2,3,4]]))}\\[2mm]
-\texttt{surfaceDensity} computes the integral of density along the line of sight in an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles (Section~\ref{sec:CoordinateDetails}).\\[2mm]
-Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model.
+\texttt{surfaceDensity} computes the integral of density along the line of sight in an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles (Section~\ref{sec:CoordinateDetails}).\\[1mm]
+Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model.\\[1mm]
 Finally, the density profile may be sampled with particles, producing two arrays -- coordinates ($N\times3$) and masses ($N$): \\
 \texttt{pos, mass = d.sample(10000)}\\[2mm]
 The density framework can be augmented with user-defined \Python functions that return the density at a given point (or, rather, an array of points). Such a function must be a free function (not a class method) or a lambda expression, accepting one argument, which should be treated as a $N\times3$ array of points (even when $N=1$). Such function would typically be called from the \Cpp code with more than one input point, to reduce overhead from switching between \Cpp and \Python. The following two equivalent examples define a spherical Plummer model:\\
@@ -869,9 +868,9 @@ If we examine the potential created in the last line,\\
 it becomes apparent that some rearrangement took place behind the stage. Indeed, in the case when the potential is constructed from several sets of parameters (but \textit{not} from several existing potential instances), the code attempts to optimize the efficiency by using the \hyperref[sec:PotentialGalpot]{\textsc{GalPot}} approach. In this example, the \ppp{Disk} density profile was split into two parts -- the \ttt{DiskAnsatz} potential class and the residual density profile; other spheroidal density components (\ppp{Sersic} and \ppp{NFW}) were combined with this residual profile, and used to initialize a single instance of \ttt{Multipole} potential. This is advantageous if one needs to evaluate the potential many times (e.g., in action computation), but makes it difficult to examine the contribution of each mass component separately. In order to do so, we may instead create another potential used only for visualization:\\
 \texttt{potvis~= agama.Potential(agama.Potential(disk_par), }\\
 \texttt{\mbox{}~~~~agama.Potential(bulge_par), agama.Potential(halo_par))}\\[2mm]
-An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\
-\texttt{p.potential(points)} evaluates the potential at one or several input points (which should be either a 1d list/array of length 3, or a 2d array of size $N\times3$);\\
-\texttt{p.force(points)} computes the acceleration (force per unit mass), i.e., \textit{minus} the derivative of potential, returning a $N\times3$ array;\\
+An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\[1mm]
+\texttt{p.potential(points)} evaluates the potential at one or several input points (which should be either a 1d list/array of length 3, or a 2d array of size $N\times3$);\\[1mm]
+\texttt{p.force(points)} computes the acceleration (force per unit mass), i.e., \textit{minus} the derivative of potential, returning a $N\times3$ array;\\[1mm]
 \texttt{p.forceDeriv(points)} computes the forces and force derivatives:\\
 \texttt{r = numpy.linspace(0,20)}\\
 \texttt{points = numpy.column_stack((r, r*0, r*0))}
@@ -881,12 +880,14 @@ An instance of \ttt{Potential} class provides the same methods as the \ttt{Densi
 \texttt{kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/r)}
 \textit{\color{Sepia} \ \ \# radial epicyclic frequency $\kappa$} \\
 \texttt{nu~~~~= numpy.sqrt(-deriv[:,2])}
-\textit{\color{Sepia} \ \ \# vertical epicyclic frequency $\nu$} \\[2mm]
+\textit{\color{Sepia} \ \ \# vertical epicyclic frequency $\nu$} \\[1mm]
 Plotting the rotation curve of the above constructed potential and all its components:\\
 \texttt{plt.plot(r, numpy.sqrt(-r*potvis.force(points)[:,0]))}\\
-\texttt{for pot in potvis: plt.plot(r, numpy.sqrt(-r*pot.force(points)[:,0]))}\\[2mm]
-\texttt{p.Rcirc(E=...)} or \texttt{p.Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum;
-\texttt{p.Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{p.Tcirc(points)}.
+\texttt{for pot in potvis: plt.plot(r, numpy.sqrt(-r*pot.force(points)[:,0]))}\\[1mm]
+\texttt{p.Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{p.Tcirc(points)}.\\[1mm]
+\texttt{p.Rcirc(E=...)} or \texttt{p.Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum;\\[1mm]
+\texttt{p.Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$;\\[1mm]
+\texttt{p.Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum in the equatorial plane of an axisymmetric potential; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input).
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
 \texttt{af = agama.ActionFinder(pot, [interp=True|False])}\\
@@ -1968,13 +1969,13 @@ The correspondence between energy $E$ and phase volume $h$ in the given potentia
 \begin{subequations}
 \begin{align}
 h(E) &= \frac{16\pi^2}3 \int_0^{r_\mathrm{max}(E)} r^2\, v^3(E,r)\, \d r =
-  4\pi^2\int_0^{L^2_\mathrm{circ}(E)} J_r(E,L)\,\d L^2 =
+  8\pi^3\int_0^{L^2_\mathrm{circ}(E)} J_r(E,L)\,\d L^2 =
   \int_{\Phi(0)}^E g(E')\, \d E' ,\\
 g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, \d r =
   4\pi^2\, \int_0^{L_\mathrm{circ}^2(E)} T_\mathrm{rad}(E,L)\,\d L^2,
 \end{align}
 \end{subequations}
-where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} \d r/v_r \equiv 2 \int_{r_-}^{r_+} \d r/\sqrt{v^2-L^2/r^2} = \D J_r/\D E$  is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
+where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} \d r/v_r \equiv 2 \int_{r_-}^{r_+} \d r/\sqrt{v^2-L^2/r^2} = 2\pi\,\D J_r/\D E$ is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
 In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.
 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$). The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any finite-mass model in which the density drops faster than $r^{-3}$ at large radii), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
@@ -1982,7 +1983,7 @@ The interpolation in scaled coordinates typically attains a level of accuracy be
 
 Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{createSphericalIsotropicDF} and \ttt{fitSphericalIsotropicDF} defined in \texttt{df_spherical.h}.
 
-The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
+The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \textsc{Raga} \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
 In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
 
 The local (position-dependent) drift and diffusion coefficients in velocity are given by
@@ -2398,7 +2399,7 @@ Vasiliev E., 2019, MNRAS, 482, 1525
 Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
 
 \bibitem{VasilievValluri2020}
-Vasiliev E., Valluri M., 2020, ApJ, submitted
+Vasiliev E., Valluri M., 2020, ApJ, in press; arXiv:1912.04288
 
 \bibitem{Zhao1996}
 Zhao H.-S., 1996, MNRAS, 278, 488

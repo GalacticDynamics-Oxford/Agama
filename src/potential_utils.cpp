@@ -351,9 +351,10 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         // assuming a power-law asymptotic behavior of potential at r->0
         double Rcirc = slope==0 ?  exp((E-Phi0) / coef - 0.5)  :
             std::pow((E-Phi0) / (coef * (1+0.5*slope)), 1/slope);
-        if(!isFinite(Rcirc))
-            throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
-                utils::toString(E,16) + ")\n" + utils::stacktrace());
+        if(!isFinite(Rcirc)) {
+            R1 = R2 = NAN;
+            return;
+        }
         if(Rcirc == 0) {  // energy exactly equals the potential at origin
             R1 = R2 = 0;
             return;
@@ -368,9 +369,10 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         }
     } else {  // normal scenario when we don't suffer from roundoff errors 
         double Rcirc = R_circ(potential, E);
-        if(!isFinite(Rcirc))
-            throw std::invalid_argument("Error in findPlanarOrbitExtent: cannot determine Rcirc(E="+
-                utils::toString(E,16) + ")\n" + utils::stacktrace());
+        if(!isFinite(Rcirc)) {
+            R1 = R2 = NAN;
+            return;
+        }
         if(Rcirc == 0) {  // energy exactly equals the potential at origin
             R1 = R2 = 0;
             return;
@@ -758,8 +760,6 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
             errorMessage = e.what();
         }
     }
-    if(!errorMessage.empty())
-        throw std::runtime_error("Interpolator2d: "+errorMessage);
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
         std::ofstream strm("PotentialInterpolator2d.log");
@@ -781,6 +781,9 @@ Interpolator2d::Interpolator2d(const BasePotential& potential) :
             strm << "\n";
         }
     }
+
+    if(!errorMessage.empty())
+        throw std::runtime_error("Interpolator2d: "+errorMessage);
 
     // create 2d interpolators
     intR1 = math::QuinticSpline2d(gridX, gridY, gridW1, gridW1dX, gridW1dY);

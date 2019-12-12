@@ -103,6 +103,9 @@ struct FokkerPlanckParams {
         ultimately, everything is determined by captureRadius and relaxationRate. */
     bool lossConeDrain;
 
+    /** speed of light in N-body units: if nonzero, account for the energy loss due to GW emission */
+    double speedOfLight;
+
     /** set default values in the constructor */
     FokkerPlanckParams() :
         method(FP_CHANGCOOPER),
@@ -113,7 +116,8 @@ struct FokkerPlanckParams {
         coulombLog(1.),
         selfGravity(true),
         updatePotential(true),
-        lossConeDrain(true)
+        lossConeDrain(true),
+        speedOfLight(0)
     {}
 };
 
@@ -213,9 +217,9 @@ public:
     /// change in total energy associated with the removed mass (sum for all components)
     double drainEnergy() const;
 
-    /// relative rate of change (dimension: inverse time) of the DF of the given species
-    /// due to capture/disruption by the BH (negative), same length as gridh
-    std::vector<double> drainRate(unsigned int indexComp) const;
+    /// draining time of the given species (inverse of the rate of change due to capture/disruption
+    /// by the BH and the gravitational-wave energy loss), same length as gridh
+    std::vector<double> drainTime(unsigned int indexComp) const;
 
 private:
     /// opaque structure containing the initial parameters and all internal data that evolves with time

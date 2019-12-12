@@ -449,8 +449,6 @@ math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& 
             errorMessage = e.what();
         }
     }
-    if(!errorMessage.empty())
-        throw std::runtime_error("ActionFinderSpherical: "+errorMessage);
 
     // derivative dW/dX at Y=1 is computed by constructing an auxiliary 1d spline for W(X)|Y=1
     // and differentiating it
@@ -473,6 +471,9 @@ math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& 
             strm<<"\n";
         }
     }
+
+    if(!errorMessage.empty())
+        throw std::runtime_error("ActionFinderSpherical: "+errorMessage);
 
     return math::QuinticSpline2d(gridX, gridY, gridW, gridWdX, gridWdY);
 }

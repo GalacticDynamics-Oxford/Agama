@@ -103,8 +103,9 @@ double innerSlope(const math::IFunction& potential, double* Phi0=NULL, double* c
     \param[in]  L is the angular momentum of the orbit;
     \param[out] R1 will contain the pericenter radius;
     \param[out] R2 will contain the apocenter radius;
-    \throw std::invalid_argument if the potential is not axisymmetric, or energy is outside
-    the allowed range, or angular momentum is not compatible with energy.
+    \throw std::invalid_argument if the potential is not axisymmetric;
+    \return NAN for both output parameters in case of other errors (e.g., if the energy is
+    outside the allowed range); if L is greater than Lcirc(E), return Rcirc(E) for both R1,R2.
 */
 void findPlanarOrbitExtent(const BasePotential& potential, double E, double L,
     double& R1, double& R2);

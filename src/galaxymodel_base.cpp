@@ -805,6 +805,8 @@ particles::ParticleArrayCyl samplePosVel(
 particles::ParticleArray<coord::PosCyl> sampleDensity(
     const potential::BaseDensity& dens, const size_t numPoints)
 {
+    if(!isFinite(dens.totalMass()))   // safety precautions
+        throw std::runtime_error("sampleDensity: model has infinite mass");
     potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);
     math::Matrix<double> result;      // sampled scaled coordinates
     double totalMass, errorMass;      // total mass and its estimated error

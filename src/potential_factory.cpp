@@ -273,15 +273,20 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.mmax                = kvmap.contains( "mmax") ? kvmap.getInt("mmax") : param.lmax;
     param.smoothing           = kvmap.getDouble("smoothing", param.smoothing);
 
-    // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity, replace it with
-    // an equivalent Spheroid model, because the dedicated potential models can only be spherical
+    // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity or a cutoff radius is provided,
+    // replace it with an equivalent Spheroid model, because the dedicated potential models
+    // can only be spherical and non-truncated
     PotentialType type = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
-    if( (type == PT_PLUMMER || type == PT_NFW) && (param.axisRatioY != 1 || param.axisRatioZ !=1) ) {
+    if( (type == PT_PLUMMER || type == PT_NFW) &&
+        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=0) ) {
         param.alpha = type == PT_PLUMMER ? 2 : 1;
         param.beta  = type == PT_PLUMMER ? 5 : 3;
         param.gamma = type == PT_PLUMMER ? 0 : 1;
-        param.densityNorm = (type == PT_PLUMMER ? 0.75 : 0.25) / M_PI * param.mass /
-            (pow_3(param.scaleRadius) * param.axisRatioY * param.axisRatioZ);
+        if(param.outerCutoffRadius==0) {
+            param.densityNorm = (type == PT_PLUMMER ? 0.75 : 0.25) / M_PI * param.mass /
+                (pow_3(param.scaleRadius) * param.axisRatioY * param.axisRatioZ);
+        } else
+            param.densityNorm = NAN;    // will determine automatically from the total mass
         if(param.densityType == type)
             param.densityType = PT_SPHEROID;
         else

@@ -555,7 +555,8 @@ enum INPUT_VALUE {
 
 /// anyFunction output type; numerical value is arbitrary
 enum OUTPUT_VALUE {
-    OUTPUT_VALUE_SINGLE              = 1,  ///< scalar value
+    OUTPUT_VALUE_SINGLE              = 1,  ///< a single value
+    OUTPUT_VALUE_PAIR                = 2,  ///< two numbers
     OUTPUT_VALUE_TRIPLET             = 3,  ///< a triplet of numbers
     OUTPUT_VALUE_SEXTET              = 6,  ///< a sextet of numbers
     OUTPUT_VALUE_SINGLE_AND_SINGLE   = 11, ///< a single number and another single number
@@ -674,6 +675,7 @@ template<> inline const char* errStrInvalidInput<INPUT_VALUE_SEXTET>() {
 // ---- template instantiations for output parameters ----
 
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE>()  {return 1;}
+template<> inline size_t outputLength<OUTPUT_VALUE_PAIR>()    {return 2;}
 template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET>() {return 3;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SEXTET>()  {return 6;}
 template<> inline size_t outputLength<OUTPUT_VALUE_SINGLE_AND_SINGLE>()   {return 2;}
@@ -688,6 +690,9 @@ template<> inline size_t outputLength<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRIPL
 
 template<> inline PyObject* formatTuple<OUTPUT_VALUE_SINGLE>(const double result[]) {
     return Py_BuildValue("d", result[0]);
+}
+template<> inline PyObject* formatTuple<OUTPUT_VALUE_PAIR>(const double result[]) {
+    return Py_BuildValue("dd", result[0], result[1]);
 }
 template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET>(const double result[]) {
     return Py_BuildValue("ddd", result[0], result[1], result[2]);
@@ -733,6 +738,10 @@ template<> inline PyObject* formatTuple<OUTPUT_VALUE_TRIPLET_AND_TRIPLET_AND_TRI
 template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_SINGLE>(npy_intp size) {
     npy_intp dims[] = {size};
     return PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+}
+template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_PAIR>(npy_intp size) {
+    npy_intp dims[] = {size, 2};
+    return PyArray_SimpleNew(2, dims, NPY_DOUBLE);
 }
 template<> inline PyObject* allocOutputArr<OUTPUT_VALUE_TRIPLET>(npy_intp size) {
     npy_intp dims[] = {size, 3};
@@ -812,6 +821,12 @@ template<> inline void formatOutputArr<OUTPUT_VALUE_SINGLE>(
     const double result[], const npy_intp index, PyObject* resultObj)
 {
     pyArrayElem<double>(resultObj, index) = result[0];
+}
+template<> inline void formatOutputArr<OUTPUT_VALUE_PAIR>(
+    const double result[], const npy_intp index, PyObject* resultObj)
+{
+    pyArrayElem<double>(resultObj, index, 0) = result[0];
+    pyArrayElem<double>(resultObj, index, 1) = result[1];
 }
 template<> inline void formatOutputArr<OUTPUT_VALUE_TRIPLET>(
     const double result[], const npy_intp index, PyObject* resultObj)
@@ -1895,15 +1910,15 @@ PyObject* Potential_Rcirc(PyObject* self, PyObject* args, PyObject* namedArgs)
 
 void fncPotential_Tcirc_from_E(void* obj, const double input[], double *result) {
     const double
-    E = input[0] * pow_2(conv->velocityUnit),
-    T = T_circ(*((PotentialObject*)obj)->pot, E);
+        E = input[0] * pow_2(conv->velocityUnit),
+        T = T_circ(*((PotentialObject*)obj)->pot, E);
     result[0] = T / conv->timeUnit;
 }
 
 void fncPotential_Tcirc_from_xv(void* obj, const double input[], double *result) {
     const double
-    E = totalEnergy(*((PotentialObject*)obj)->pot, convertPosVel(input)),
-    T = T_circ(*((PotentialObject*)obj)->pot, E);
+        E = totalEnergy(*((PotentialObject*)obj)->pot, convertPosVel(input)),
+        T = T_circ(*((PotentialObject*)obj)->pot, E);
     result[0] = T / conv->timeUnit;
 }
 
@@ -1938,6 +1953,67 @@ PyObject* Potential_Rmax(PyObject* self, PyObject* arg) {
         return NULL;
     return callAnyFunctionOnArray<INPUT_VALUE_SINGLE, OUTPUT_VALUE_SINGLE>
         (self, arg, fncPotential_Rmax, /*chunk*/64);
+}
+
+void fncPotential_Rperiapo_from_xv(void* obj, const double input[], double *result) {
+    coord::PosVelCar point = convertPosVel(input);
+    double R1, R2,
+        E = totalEnergy(*((PotentialObject*)obj)->pot, point),
+        L = Ltotal(point);
+    try{ findPlanarOrbitExtent(*((PotentialObject*)obj)->pot, E, L, /*output*/ R1, R2); }
+    catch(...) { R1=R2=NAN; };
+    result[0] = R1 / conv->lengthUnit;
+    result[1] = R2 / conv->lengthUnit;
+}
+
+void fncPotential_Rperiapo_from_EL(void* obj, const double input[], double *result) {
+    double R1, R2,
+        E = input[0] * pow_2(conv->velocityUnit),
+        L = input[1] * conv->velocityUnit * conv->lengthUnit;
+    try{ findPlanarOrbitExtent(*((PotentialObject*)obj)->pot, E, L, /*output*/ R1, R2); }
+    catch(...) { R1=R2=NAN; };
+    result[0] = R1 / conv->lengthUnit;
+    result[1] = R2 / conv->lengthUnit;
+}
+
+PyObject* Potential_Rperiapo(PyObject* self, PyObject* args)
+{
+    if(!Potential_isCorrect(self) || args==NULL || !PyTuple_Check(args))
+        return NULL;
+    if(!isAxisymmetric(*((PotentialObject*)self)->pot)) {
+        PyErr_SetString(PyExc_ValueError, "Potential must be axisymmetric");
+        return NULL;
+    }
+    const char* err = "Input must be a pair of values (E,L), "
+        "or an Nx2 array of E,L values, or a Nx6 array of position/velocity values";
+    // check if the input is just two numbers (E,L)
+    double EL[2]={NAN,NAN}, output[2];
+    if(PyArg_ParseTuple(args, "dd", &EL[0], &EL[1]))
+    {
+        fncPotential_Rperiapo_from_EL(self, EL, output);
+        return formatTuple<OUTPUT_VALUE_PAIR>(output);
+    }
+    // otherwise the input should be some kind of array
+    PyArrayObject *arr = NULL;
+    if(PyTuple_Size(args) != 1 || (arr = (PyArrayObject*)
+        PyArray_FROM_OTF(PyTuple_GET_ITEM(args, 0), NPY_DOUBLE, NPY_ARRAY_IN_ARRAY)) == NULL )
+    {
+        PyErr_SetString(PyExc_ValueError, err);
+        return NULL;
+    }
+    // find out the shape of input array
+    int ndim = PyArray_NDIM(arr);
+    PyObject* result = NULL;
+    if((ndim == 1 || ndim == 2) && PyArray_DIM(arr, ndim-1) == 6)
+        result = callAnyFunctionOnArray<INPUT_VALUE_SEXTET, OUTPUT_VALUE_PAIR>
+        (self, (PyObject*)arr, fncPotential_Rperiapo_from_xv, /*chunk*/64);
+    else if((ndim == 1 || ndim == 2) && PyArray_DIM(arr, ndim-1) == 2)
+        result = callAnyFunctionOnArray<INPUT_VALUE_PAIR, OUTPUT_VALUE_PAIR>
+        (self, (PyObject*)arr, fncPotential_Rperiapo_from_EL, /*chunk*/64);
+    else
+        PyErr_SetString(PyExc_ValueError, err);
+    Py_DECREF(arr);
+    return result;
 }
 
 PyObject* Potential_name(PyObject* self)
@@ -2042,6 +2118,18 @@ static PyMethodDef Potential_methods[] = {
       "Find the maximum radius accessible to the given energy (i.e. the root of Phi(Rmax,0,0)=E)\n"
       "Arguments: a single number or an array of numbers - the values of energy\n"
       "Returns: corresponding values of radii\n" },
+    { "Rperiapo", Potential_Rperiapo, METH_VARARGS,
+      "Compute the peri/apocenter radii of a planar orbit (in the x,y plane) with the given "
+      "energy E and angular momentum L_z (the potential is assumed to be axisymmetric).\n"
+      "If E is outside the valid range, both radii are NAN, and if L is incompatible with E "
+      "(exceeds the value of circular angular momentum), both radii are set to Rcirc(E).\n"
+      "Arguments:\n"
+      "  (a) two values (E,L) or a Nx2 array of such values, or\n"
+      "  (b) a single point (6 numbers - position and velocity) or a Nx6 array of points; "
+      "in the latter case the total L is used, not just L_z, which produces expected results for "
+      "spherically-symmetric potentials (the minimum/maximum spherical radius that an orbit can "
+      "attain), but only approximate values for out-of-plane orbits in non-spherical potentials.\n"
+      "Returns: a pair of values (Rperi,Rapo) or a Nx2 array of these values for each input point\n" },
     { NULL }
 };
 
