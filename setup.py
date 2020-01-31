@@ -67,20 +67,30 @@ def say(text):
     sys.stdout.write(text)
     sys.stdout.flush()
     if not sys.stdout.isatty():   # output was redirected, but we still send the message to the terminal
-        with open('/dev/tty','w') as out:
-            out.write(text)
-            out.flush()
+        try:
+            with open('/dev/tty','w') as out:
+                out.write(text)
+                out.flush()
+        except:
+            # /dev/tty may not exist or may not be writable!
+            pass
 
 # asking a yes/no question and parse the answer (raise an exception in case of ambiguous answer)
 def ask(q):
     say(q)
-    if sys.stdin.isatty():
-        result=sys.stdin.readline().rstrip()
-    else:  # input was redirected, but we still read from the true terminal
-        with open('/dev/tty','r') as stdin:
-            result=stdin.readline().rstrip()
+    try:
+        result=sys.stdin.readline()
+    except:
+        result = ''
+    if not result: # input was redirected, but we still read from the true terminal
+        try:
+            with open('/dev/tty','r') as stdin:
+                result=stdin.readline()
+        except:
+            # no one to ask: assume yes
+            return True
         sys.stdout.write(result)  # and duplicate the entered text to stdout, for posterity
-    return distutils.util.strtobool(result)
+    return distutils.util.strtobool(result.rstrip())
 
 # get the list of all files in the given directories (including those in nested directories)
 def allFiles(*paths):
