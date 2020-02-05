@@ -87,7 +87,6 @@ SOURCES   = \
             utils_config.cpp \
             fortran_wrapper.cpp \
             nemo_wrapper.cpp \
-            amuse_wrapper.cpp \
 
 # ancient Torus code
 TORUSSRC  = CHB.cc \
@@ -202,10 +201,10 @@ $(AMUSE_INTERFACE): py/amuse_interface.py
 	cp py/example_amuse.py   $(AMUSE_WORKER_DIR)
 	cp py/test_amuse.py      $(AMUSE_WORKER_DIR)
 
-$(AMUSE_WORKER): $(OBJECTS) $(TORUSOBJ) $(AMUSE_INTERFACE)
+$(AMUSE_WORKER): $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(AMUSE_INTERFACE)
 	$(AMUSE_DIR)/build.py --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
 	$(AMUSE_DIR)/build.py --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
-	$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)
+	$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)
 
 else
 amuse:

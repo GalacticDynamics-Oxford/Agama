@@ -16,7 +16,8 @@ by setting CFLAGS=-I/path/to/my/library/include);
 LDFLAGS  likewise will set additional link flags (e.g., -L/path/to/my/library/lib -lmylib).
 
 The setup script will attempt to download and compile the required GSL library (if it wasn't found)
-and the optional Eigen, CVXOPT and UNSIO libraries (if the user agrees).
+and the optional Eigen, CVXOPT and UNSIO libraries
+(asking the user for a confirmation, unless command-line arguments include --yes or --assume-yes).
 Eigen is header-only so it is only downloaded; UNSIO is downloaded and compiled;
 CVXOPT is a python library, so it will be installed by calling "pip install --user cvxopt"
 (you might wish to manually install it if your preferred options are different).
@@ -66,21 +67,37 @@ def get_config_var(key):
 def say(text):
     sys.stdout.write(text)
     sys.stdout.flush()
-    if not sys.stdout.isatty():   # output was redirected, but we still send the message to the terminal
-        with open('/dev/tty','w') as out:
-            out.write(text)
-            out.flush()
+    if not sys.stdout.isatty():
+        # output was redirected, but we still try to send the message to the terminal
+        try:
+            with open('/dev/tty','w') as out:
+                out.write(text)
+                out.flush()
+        except:
+            # /dev/tty may not exist or may not be writable!
+            pass
 
 # asking a yes/no question and parse the answer (raise an exception in case of ambiguous answer)
 def ask(q):
     say(q)
-    if sys.stdin.isatty():
-        result=sys.stdin.readline().rstrip()
-    else:  # input was redirected, but we still read from the true terminal
-        with open('/dev/tty','r') as stdin:
-            result=stdin.readline().rstrip()
-        sys.stdout.write(result)  # and duplicate the entered text to stdout, for posterity
-    return distutils.util.strtobool(result)
+    if forceYes:
+        result='y'
+        say('y\n')
+    else:
+        result=sys.stdin.readline()
+    if not sys.stdin.isatty() and not result:
+        # if the input was redirected and no answer was provided,
+        # try to read it directly from the true terminal, if it is available
+        try:
+            with open('/dev/tty','r') as stdin:
+                result=stdin.readline()
+            sys.stdout.write(result)  # and duplicate the entered text to stdout, for posterity
+        except:
+            result=''  # no reply => will produce an error
+    result = result.rstrip()
+    if not result:
+        raise ValueError('No valid response was provided')
+    return distutils.util.strtobool(result)   # this may still fail if the result is not boolean
 
 # get the list of all files in the given directories (including those in nested directories)
 def allFiles(*paths):
@@ -104,6 +121,25 @@ def runCompiler(code='int main(){}\n', flags='', dest='/dev/null'):
     result = subprocess.call(cmd, shell=True)
     os.remove('test.cpp')
     return result==0
+
+# check if a given snippet of code
+# a) compiles into a shared library,
+# b) can be linked against and run without missing anyting
+def runCompileShared(code, flags):
+    EXE_CODE = 'void run(); int main() { run(); return 42; }\n'
+    EXE_NAME = './agamatest.exe'
+    LIB_NAME = './agamatest.so'
+    try:
+        success = runCompiler(code=code, flags=flags+' -fPIC -shared', dest=LIB_NAME) \
+        and runCompiler(code=EXE_CODE, flags=LIB_NAME, dest=EXE_NAME) \
+        and subprocess.call(EXE_NAME) == 42
+    except: success = False
+    # cleanup
+    try:    os.remove(LIB_NAME)
+    except: pass
+    try:    os.remove(EXE_NAME)
+    except: pass
+    return success
 
 
 # find out which required and optional 3rd party libraries are present, and create Makefile.local
@@ -300,14 +336,16 @@ PyInit_agamatest(void) {
     EXE_FLAGS     += PYTHON_EXE_FLAGS
 
     # [3]: check that GSL is present, and find out its version (required)
-    # try compiling a snippet of code into a shared library (tests if GSL has been compiled with -fPIC)
-    GSL_CODE = """#include <gsl/gsl_version.h>
+    # try compiling a snippet of code into a shared library (tests if GSL has been compiled with -fPIC),
+    # then compiling a test program that loads this library (tests if the correct version of GSL is loaded at link time)
+    GSL_TEST_CODE = """#include <gsl/gsl_version.h>
     #if not defined(GSL_MAJOR_VERSION) || (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
     #error "GSL version is too old (need at least 1.15)"
     #endif
-    void dummy(){}
+    #include <gsl/gsl_integration.h>
+    void run() { gsl_integration_cquad_workspace_alloc(10); }
     """
-    if runCompiler(code=GSL_CODE, flags='-fPIC -lgsl -lgslcblas -shared'):
+    if runCompileShared(GSL_TEST_CODE, '-lgsl -lgslcblas'):
         # apparently the headers and libraries can be found in some standard location,
         LINK_FLAGS += ['-lgsl', '-lgslcblas']   # so we only list their names
     else:
@@ -317,9 +355,9 @@ PyInit_agamatest(void) {
         os.chdir(EXTRAS_DIR)
         say('Downloading GSL\n')
         filename = 'gsl.tar.gz'
-        dirname  = 'gsl-2.4'
+        dirname  = 'gsl-2.6'
         try:
-            urlretrieve('ftp://ftp.gnu.org/gnu/gsl/gsl-2.4.tar.gz', filename)
+            urlretrieve('ftp://ftp.gnu.org/gnu/gsl/gsl-2.6.tar.gz', filename)
             if os.path.isfile(filename):
                 subprocess.call(['tar', '-zxf', filename])    # unpack the archive
                 os.remove(filename)  # remove the downloaded archive
@@ -397,14 +435,14 @@ PyInit_agamatest(void) {
     except: pass  # cvxopt wasn't available
 
     # [6]: test if GLPK is present (optional - ignored if not found)
-    if runCompiler(code='#include <glpk.h>\nint main(){}\n', flags='-lglpk'):
+    if runCompileShared('#include <glpk.h>\nvoid run() { glp_create_prob(); }\n', '-lglpk'):
         COMPILE_FLAGS += ['-DHAVE_GLPK']
         LINK_FLAGS    += ['-lglpk']
     else:
         say("GLPK library (optional) is not found\n")
 
     # [7]: test if UNSIO is present (optional), download and compile if needed
-    if runCompiler(code='#include <uns.h>\nint main(){}\n', flags='-lunsio -lnemo'):
+    if runCompileShared('#include <uns.h>\nvoid run() { }\n', '-lunsio -lnemo'):
         COMPILE_FLAGS += ['-DHAVE_UNSIO']
         LINK_FLAGS    += ['-lunsio', '-lnemo']
     else:
@@ -488,7 +526,13 @@ class MyTest(Command):
         os.chdir('py')
         alltest()
 
-if '--help' in sys.argv: print(helpstr)
+if '-h' in sys.argv or '--help' in sys.argv: print(helpstr)
+forceYes = False
+for opt in ['-y','--yes','--assume-yes']:
+    if opt in sys.argv:
+        forceYes = True
+        sys.argv.remove(opt)
+if forceYes: say('Assuming yes answers to all interactive questions\n')
 
 distutils.core.setup(
     name             = 'agama',

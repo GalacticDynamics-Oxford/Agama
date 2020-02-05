@@ -396,11 +396,11 @@ bool testPenalizedSplineDensity()
     const math::FitOptions OPTIONS = math::FitOptions();
     Density2 dens(A, B, NORM);
 #endif
-    const int NPOINTS = 1000;  // # of points to sample
+    const int NPOINTS = 2000;  // # of points to sample
     const int NNODES  = 49;    // nodes in the estimated density function
     const int NCHECK  = 321;   // points to measure the estimated density
     const double SMOOTHING=.5; // amount of smoothing applied to penalized spline estimate
-    const int NTRIALS = 279;   // number of different realizations of samples
+    const int NTRIALS = 300;   // number of different realizations of samples
     const double XCUT = 3.;    // unequal-mass sampling: for x>XCUT, retain only a subset of
     const int MASSMULT= 1;     // samples with proportionally higher weight each
     std::vector<double> xvalues, weights;  // array of sample points

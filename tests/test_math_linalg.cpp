@@ -15,8 +15,8 @@ int main()
 {
     bool ok=true;
 
-    const unsigned int NR=500, NV=5000;  // matrix size, # of nonzero values
-    const unsigned int MIN_CLOCKS = CLOCKS_PER_SEC/2;
+    const unsigned int NR=600, NV=10000;  // matrix size, # of nonzero values
+    const unsigned int MIN_CLOCKS = CLOCKS_PER_SEC;
     std::vector<math::Triplet> spdata;
     // init matrix content
     for(unsigned int k=0; k<NV; k++) {
