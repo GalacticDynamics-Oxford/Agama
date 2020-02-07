@@ -23,10 +23,21 @@ public:
     virtual ~IOdeSystem() {};
 
     /** Compute the r.h.s. of the differential equation: 
-        \param[in]  t    is the integration variable (time),
-        \param[in]  x    is the vector of values of dependent variables, 
-        \param[out] dxdt should return the time derivatives of these variables */
+        \param[in]  t    is the integration variable (time);
+        \param[in]  x    is the vector of values of dependent variables;
+        \param[out] dxdt should return the time derivatives of these variables
+    */
     virtual void eval(const double t, const double x[], double dxdt[]) const = 0;
+
+    /** Adjust the integration accuracy parameter based on the current state of the system.
+        The purpose of this method is to increase the accuracy (use tighter tolerance)
+        when the kinetic or potential energy of the system is much larger than the total energy.
+        In case that no adjustment is necessary, return one.
+        \param[in]  t  is the integration variable (time);
+        \param[in]  x  is the solution vector;
+        \return  the additional multiplicative factor <=1 in error tolerance, or 1 if not applicable
+    */
+    virtual double getAccuracyFactor(const double /*t*/, const double /*x*/[]) const { return 1; }
 
     /** Return the size of ODE system (number of variables N) */
     virtual unsigned int size() const = 0;
@@ -115,8 +126,6 @@ private:
     double timePrev;             ///< value of time at the beginning of the completed timestep
     double nextTimeStep;         ///< length of next timestep (not the one just completed)
     std::vector<double> state;   ///< 10*NDIM values: x, dx/dt, and 8 interpolation coefs for dense output
-
-    double initTimeStep();       ///< determine the initial timestep
 };
 
 

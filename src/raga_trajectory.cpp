@@ -1,6 +1,8 @@
 #include "raga_trajectory.h"
 #include "particles_io.h"
 #include "utils.h"
+#include <fstream>
+#include <stdexcept>
 
 namespace raga {
 
@@ -8,7 +10,7 @@ namespace raga {
 
 RagaTaskTrajectory::RagaTaskTrajectory(
     const ParamsTrajectory& _params,
-    const particles::ParticleArrayCar& _particles)
+    const particles::ParticleArrayAux& _particles)
 :
     params(_params),
     particles(_particles),
@@ -20,19 +22,18 @@ RagaTaskTrajectory::RagaTaskTrajectory(
 
 void RagaTaskTrajectory::outputParticles(double time)
 {
-    if(!params.outputFilename.empty() && time >= prevOutputTime + params.outputInterval) {
+    if(!params.outputFilename.empty() && time >= prevOutputTime + params.outputInterval*0.999999) {
         std::string filename = params.outputFilename;
-        // on the first output, create the file, otherwise append to the existing file (only for nemo format)
+        // on the first output, create the file, otherwise append to the existing file (only for nemo)
         bool append = prevOutputTime != -INFINITY;
         // if outputFormat=='nemo', it is written into a single file,
         // otherwise each snapshot is written into a separate file
-        if(params.outputFormat.empty() || (params.outputFormat[0]!='N' && params.outputFormat[0]!='n')) {
+        if(params.outputFormat.empty() || tolower(params.outputFormat[0])!='n') {
             filename += utils::toString(time);
             append = false;
         }
-        particles::PtrIOSnapshot snap = particles::createIOSnapshotWrite(
-            filename, params.outputFormat, units::ExternalUnits(), params.header, time, append);
-        snap->writeSnapshot(particles);
+        particles::writeSnapshot(filename, particles,
+            params.outputFormat, units::ExternalUnits(), params.header, time, append);
         prevOutputTime = time;
     }
 }

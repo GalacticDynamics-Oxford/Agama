@@ -95,4 +95,11 @@ void RagaOrbitIntegrator::eval(const double t, const double x[], double dxdt[]) 
     dxdt[5] = -grad.dz;
 }
 
+double RagaOrbitIntegrator::getAccuracyFactor(const double t, const double x[]) const
+{
+    double Epot, Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
+    evalRagaPotential(pot, bh, t, coord::PosCar(x[0], x[1], x[2]), &Epot, NULL, NULL);
+    return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+}
+
 }  // namespace raga

@@ -1,0 +1,87 @@
+This file lists the most important updates in Agama (in reverse chronological order);
+breaking changes in API are listed at the end.
+
+January 2020:
+The Monte Carlo code Raga is extended to multiple species and provided as part of AMUSE interface.
+
+December 2019:
+Observationally-driven Schwarzschild modelling framework is published under the name Forstand;
+added examples and documentation.
+
+May 2019:
+Significant speedup in quadratic optimization (part of Schwarzschild modelling framework).
+
+March 2019:
+Added anisotropic spherical DFs constructed via the Cuddeford-Osipkov-Merritt inversion technique.
+
+May 2018:
+Added axisymmetric Jeans models.
+
+Winter 2018:
+General cleanup, script for automatic installation, publicly announced together with the code paper.
+
+Autumn 2017:
+Added and improved action-based DFs (QuasiSpherical, QuasiIsothermal, Exponential);
+improved the multidimensional sampling routine.
+
+Summer 2017:
+Augmented the Schwarzschild module with the observational kinematic constraints in the form of LOSVDs.
+
+May 2017:
+The core functionality of SMILE - construction of Schwarzschild orbit-superposition models
+for the given density and potential (without any observational constraints) - is ported into Agama.
+The top-level workflow is implemented in Python, while the computationally heavy parts -- in C++.
+
+April 2017:
+Further development of the PhaseFlow code: multiple components, more accurate finite-element solver.
+
+January 2017:
+Ported the stellar-dynamical Monte Carlo code Raga (which, in turn, was based on SMILE) into
+Agama framework.
+
+November 2016:
+Added a first version of the PhaseFlow Fokker-Planck code.
+
+October 2016:
+Added reference documentation.
+
+Summer 2016:
+Extended Python interface, added Fortran, NEMO and AMUSE interfaces.
+
+November 2015:
+Added the framework for iterative construction of self-consistent models specified by action-based DFs.
+
+September 2015:
+First public announcement at the Gaia Challenge workshop.
+By this time, the Agama library already has a Python interface and a number of tests/example programs.
+
+Summer 2015:
+Various parts of SMILE are ported into Agama: potentials, orbit integration routines, splines.
+
+June 2015:
+The Agama C++ library is born by reimplementing several earlier routines for action computation
+written by James Binney and Jason Sanders (now known as the TACT toolbox).
+
+Pre-2015:
+The predecessor of Agama was the SMILE code for orbit analysis and Schwarzschild modelling.
+It contained many of the aspects that later were incorporated into Agama:
+an extensive collection of potentials (including earlier implementations of Multipole and CylSpline),
+orbit integration and analysis routines (frequency analysis, Lyapunov exponents, frequency maps),
+construction of orbit-superposition models, a graphical interface based on Qt, Python and NEMO interfaces.
+Some of this functionality is not yet ported to Agama.
+
+-----------
+API Changes
+
+January 2020:
+[C++]  interface for dealing with spherical isotropic models and relaxation coefficients
+changed to accommodate the possibility of working with a spectrum of stellar masses.
+[C++]  orbit integration, in particular integrateTraj(), can optionally store the orbit
+at every timestep, not just at regular intervals of time as before. Accordingly,
+the type of returned array changed to also contain timestamps for each point.
+[C++]  interface for N-body snapshot input/output has been cleaned up.
+
+March 2019:
+[C++, Python]  QuasiIsotropic DF renamed to QuasiSpherical, because it can now represent
+anisotropic spherical systems.
+

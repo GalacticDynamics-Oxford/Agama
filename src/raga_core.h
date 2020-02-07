@@ -52,17 +52,24 @@ namespace raga{
 
 /// parameters of the entire simulation, not attributed to any Raga task
 struct ParamsRaga {
-    double integratorAccuracy;  ///< accuracy parameter for the orbit integrator
+    double accuracy;            ///< accuracy parameter for the orbit integrator
+    size_t maxNumSteps;         ///< max number of ODE steps for any orbit per one episode
     bool   updatePotential;     ///< flag specifying whether to update the stellar potential
     double timeCurr;            ///< current sumulation time
     double timeEnd;             ///< total (maximum) simulation time
     double episodeLength;       ///< duration of one episode
     std::string fileInput;      ///< input file name (initial conditions for the simulation)
     std::string fileLog;        ///< file name for logging the global parameters of the simulation
+    bool initPotentialExternal; ///< whether the initial potential is set externally or from particles
+    ParamsRaga() :              /// set default parameters
+        accuracy(1e-8), maxNumSteps(1e8), updatePotential(false),
+        timeCurr(0), timeEnd(0), episodeLength(0), initPotentialExternal(false)
+    {}
 };
 
 /// the driver class performing the actual simulation
 class RagaCore {
+public:
     ParamsRaga       paramsRaga;           ///< global parameters of the simulation
     ParamsPotential  paramsPotential;      ///< parameters of the stellar potential
     ParamsRelaxation paramsRelaxation;     ///< parameters of two-body perturbations
@@ -71,22 +78,20 @@ class RagaCore {
     ParamsBinary     paramsBinary;         ///< parameters of the binary BH evolution
     potential::PtrPotential ptrPot;        ///< stellar potential used in orbit integration
     BHParams bh;                           ///< parameters of the central black hole(s)
-    particles::ParticleArrayCar particles; ///< particles (masses and phase-space coordinates)
+    particles::ParticleArrayAux particles; ///< particles (masses, radii, and phase-space coordinates)
     std::vector<PtrRagaTask> tasks;        ///< array of runtime tasks
+    double Ekin, Epot;                     ///< kinetic and potential energy of the entire system
 
-    /** parse the configuration parameters stored in the key=value dictionary */
-    void loadSettings(const utils::KeyValueMap& config);
+    RagaCore() : Ekin(0), Epot(0) {}
+
+    /** initialize the code: parse the configuration parameters stored in the dictionary,
+        check their correctness, load the input snapshot (if provided) */
+    void init(const utils::KeyValueMap& config);
+
+    void initPotentialFromParticles();
 
     /** perform one complete episode */
-    void doEpisode();
-
-public:
-
-    /** initialize the simulation using the parameters provided in the dictionary */
-    explicit RagaCore(const utils::KeyValueMap& config);
-
-    /** run the simulation (perform one or several episodes) */
-    void run();
+    void doEpisode(double episodeLength);
 };
 
 }  // namespace

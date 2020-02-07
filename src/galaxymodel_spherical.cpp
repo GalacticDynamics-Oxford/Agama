@@ -92,23 +92,26 @@ public:
 /// Helper class for finding the value of energy at which
 /// the cumulative distribution function equals the target value
 class VelocitySampleRootFinder: public math::IFunctionNoDeriv {
-    const SphericalIsotropicModel& model; ///< the model providing h(E) and J0(h)
-    const math::CubicSpline2d& intJ1;     ///< J1 as a function of h(E) and h(Phi)
-    const double Phi;                     ///< Phi, the potential at the given radius
-    const double loghPhi;                 ///< log(h(Phi)) is cached to avoid its repeated evaluation
-    const double I0plusJ0;                ///< I0(h(Phi))
-    const double target;                  ///< target value of the cumulative DF
+    const potential::PhaseVolume& phasevol; ///< h(E)
+    const math::IFunction& I0;              ///< I0(h)
+    const math::BaseInterpolator2d& intJ1;  ///< J1 as a function of h(E) and h(Phi)
+    const double Phi;                       ///< Phi, the potential at the given radius
+    const double loghPhi;                   ///< log(h(Phi)) is cached to avoid its repeated evaluation
+    const double I0plusJ0;                  ///< I0(h(Phi))
+    const double target;                    ///< target value of the cumulative DF
 public:
-    VelocitySampleRootFinder(const SphericalIsotropicModel& _model, const math::CubicSpline2d& _intJ1,
+    VelocitySampleRootFinder(const potential::PhaseVolume& _phasevol,
+         const math::IFunction& _I0, const math::BaseInterpolator2d& _intJ1,
         const double _Phi, const double _loghPhi, const double _I0plusJ0, const double _target)
     :
-        model(_model), intJ1(_intJ1), Phi(_Phi), loghPhi(_loghPhi), I0plusJ0(_I0plusJ0), target(_target)
+        phasevol(_phasevol), I0(_I0), intJ1(_intJ1),
+        Phi(_Phi), loghPhi(_loghPhi), I0plusJ0(_I0plusJ0), target(_target)
     {}
     double value(const double loghEoverhPhi) const
     {
         double hE = exp(loghEoverhPhi + loghPhi);
-        double E  = model.phasevol.E(hE);
-        double J0 = I0plusJ0 - model.I0(hE);
+        double E  = phasevol.E(hE);
+        double J0 = I0plusJ0 - I0(hE);
         double J1 = exp(intJ1.value(loghPhi, loghEoverhPhi)) * J0;
         double val= J1 * sqrt(fmax(E-Phi, 0.));
         return val - target;
@@ -229,65 +232,75 @@ void computeProjectedDensity(const math::IFunction& dens, const math::IFunction&
 
 //---- Spherical model specified by a DF f(h) and phase volume h(E) ----//
 
-SphericalIsotropicModel::SphericalIsotropicModel(
-    const potential::PhaseVolume& _phasevol, const math::IFunction& df, const std::vector<double>& gridh)
+void getAsymptoticSlopes(const math::IFunction& f, const std::vector<double>& gridh,
+    /*output*/ double &innerfslope, double& outerfslope)
+{
+    const unsigned int npoints = gridh.size();
+    double innerf, outerf, der;
+    if(f.numDerivs() >= 1) {
+        f.evalDeriv(gridh[0], &innerf, &der);
+        innerfslope = der / innerf * gridh[0];
+        f.evalDeriv(gridh[npoints-1], &outerf, &der);
+        outerfslope = der / outerf * gridh[npoints-1];
+    } else {
+        innerf = f(gridh[0]);
+        outerf = f(gridh[npoints-1]);
+        innerfslope = log(f(gridh[1]) / innerf) / log(gridh[1] / gridh[0]);
+        outerfslope = log(outerf / f(gridh[npoints-2])) / log(gridh[npoints-1] / gridh[npoints-2]);
+    }
+
+    if(innerf <= MIN_VALUE_ROUNDOFF) {
+        innerfslope = 0.;
+    } else if(!(innerfslope > -1))
+        throw std::runtime_error("SphericalIsotropicModel: f(h) rises too rapidly as h-->0\n"
+            "f(h="+utils::toString(gridh[0])+")="+utils::toString(f(gridh[0])) + "; "
+            "f(h="+utils::toString(gridh[1])+")="+utils::toString(f(gridh[1])) + " => "
+            "f ~ h^"+utils::toString(innerfslope));
+    if(outerf <= MIN_VALUE_ROUNDOFF) {
+        outerfslope = -INFINITY;
+    } else if(!(outerfslope < -1))
+        throw std::runtime_error("SphericalIsotropicModel: f(h) falls off too slowly as h-->infinity\n"
+             "f(h="+utils::toString(gridh[npoints-1])+")="+utils::toString(f(gridh[npoints-1])) + "; "
+             "f(h="+utils::toString(gridh[npoints-2])+")="+utils::toString(f(gridh[npoints-2])) + " => "
+             "f ~ h^"+utils::toString(outerfslope));
+}
+
+SphericalIsotropicModel::SphericalIsotropicModel(const potential::PhaseVolume& _phasevol,
+    const math::IFunction& df, const math::IFunction& DF, const std::vector<double>& inputgridh)
 :
     phasevol(_phasevol)
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in log[h(Phi)] if it wasn't provided
-    std::vector<double> gridLogH;
-    if(gridh.empty())
-        gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), ACCURACY_INTERP);
-    else {
-        gridLogH.resize(gridh.size());
+    std::vector<double> gridh(inputgridh), gridLogh;
+    if(gridh.empty()) {
+        gridLogh = math::createInterpolationGrid(math::LogLogScaledFnc(df), ACCURACY_INTERP);
+        gridh.resize(gridLogh.size());
         for(size_t i=0; i<gridh.size(); i++)
-            gridLogH[i] = log(gridh[i]);
-    }
-    const unsigned int npoints = gridLogH.size();
-
-    // 2. store the values of f, g, h at grid nodes (ensure to consider only positive values of f)
-    std::vector<double> gridF(npoints), gridG(npoints), gridH(npoints), gridE(npoints);
-    for(unsigned int i=0; i<npoints; i++) {
-        double h = exp(gridLogH[i]);
-        double f = df(h);
-        if(!(f>=0))
-            throw std::runtime_error("SphericalIsotropicModel: "
-                "f("+utils::toString(h)+")="+utils::toString(f));
-        gridF[i] = f;
-        gridH[i] = h;
-        gridE[i] = phasevol.E(h, &gridG[i]);
-    }
-    std::vector<double> gridFint(npoints), gridFGint(npoints), gridFHint(npoints), gridFEint(npoints);
-
-    // 3a. determine the asymptotic behaviour of f(h):
-    // f(h) ~ h^outerFslope as h-->inf  or  h^innerFslope as h-->0
-    double innerFslope, outerFslope;
-    if(df.numDerivs() >= 1) {
-        double der;
-        df.evalDeriv(gridH[0], NULL, &der);
-        innerFslope = der / gridF[0] * gridH[0];
-        df.evalDeriv(gridH[npoints-1], NULL, &der);
-        outerFslope = der / gridF[npoints-1] * gridH[npoints-1];
+            gridh[i] = exp(gridLogh[i]);
     } else {
-        innerFslope = log(gridF[1] / gridF[0]) / (gridLogH[1] - gridLogH[0]);
-        outerFslope = log(gridF[npoints-1] / gridF[npoints-2]) /
-            (gridLogH[npoints-1] - gridLogH[npoints-2]);
+        gridLogh.resize(gridh.size());
+        for(size_t i=0; i<gridh.size(); i++)
+            gridLogh[i] = log(gridh[i]);
     }
-    if(gridF[0] <= MIN_VALUE_ROUNDOFF) {
-        gridF[0] = innerFslope = 0.;
-    } else if(!(innerFslope > -1))
-        throw std::runtime_error("SphericalIsotropicModel: f(h) rises too rapidly as h-->0\n"
-            "f(h="+utils::toString(gridH[0])+")="+utils::toString(gridF[0]) + "; "
-            "f(h="+utils::toString(gridH[1])+")="+utils::toString(gridF[1]) + " => "
-            "f ~ h^"+utils::toString(innerFslope));
-    if(gridF[npoints-1] <= MIN_VALUE_ROUNDOFF) {
-        gridF[npoints-1] = outerFslope = 0.;
-    } else if(!(outerFslope < -1))
-        throw std::runtime_error("SphericalIsotropicModel: f(h) falls off too slowly as h-->infinity\n"
-             "f(h="+utils::toString(gridH[npoints-1])+")="+utils::toString(gridF[npoints-1]) + "; "
-             "f(h="+utils::toString(gridH[npoints-2])+")="+utils::toString(gridF[npoints-2]) + " => "
-             "f ~ h^"+utils::toString(outerFslope));
+    const unsigned int npoints = gridh.size();
+
+    // 2. store the values of f, g, h at grid nodes (also check that f>=0)
+    std::vector<double> gridf(npoints), gridF(npoints), gridg(npoints), gridE(npoints);
+    for(unsigned int i=0; i<npoints; i++) {
+        gridf[i] = df(gridh[i]);
+        gridF[i] = DF(gridh[i]);
+        gridE[i] = phasevol.E(gridh[i], &gridg[i]);
+        if(!(gridf[i]>=0 && gridF[i]>=0))
+            throw std::runtime_error("SphericalIsotropicModel: "
+                "f("+utils::toString(gridh[i])+")="+utils::toString(gridf[i]));
+    }
+
+    // 3a. determine the asymptotic behaviour of f(h) and F(h):
+    // f(h) ~ h^outerfslope as h-->inf  or  h^innerfslope as h-->0
+    double innerfslope, outerfslope, innerFslope, outerFslope;
+    getAsymptoticSlopes(df, gridh, /*output*/ innerfslope, outerfslope);
+    getAsymptoticSlopes(DF, gridh, /*output*/ innerFslope, outerFslope);
 
     // 3b. determine the asymptotic behaviour of h(E), or rather, g(h) = dh/dE:
     // -E ~ h^outerEslope  and  g(h) ~ h^(1-outerEslope)  as  h-->inf,
@@ -308,265 +321,235 @@ SphericalIsotropicModel::SphericalIsotropicModel(
             "outerE="+utils::toString(outerE));
     if(Phi0 != -INFINITY)   // determination of inner slope depends on whether the potential is finite
         innerE -= Phi0;
-    double innerEslope = gridH.front() / gridG.front() / innerE;
-    double outerEslope = gridH.back()  / gridG.back()  / outerE;
-    double outerRatio  = outerFslope  / outerEslope;
+    double innerEslope = gridh.front() / gridg.front() / innerE;
+    double outerEslope = gridh.back()  / gridg.back()  / outerE;
     if(!(outerEslope < 0))   // should be <0 if the potential tends to zero at infinity
         throw std::runtime_error("SphericalIsotropicModel: weird behaviour of E(h) at infinity: "
             "E ~ h^" +utils::toString(outerEslope));
-    if(!(innerEslope + innerFslope > -1))
+    if(!(innerEslope + innerfslope > -1))
         throw std::runtime_error("SphericalIsotropicModel: weird behaviour of f(h) at origin: "
             "E ~ h^"+utils::toString(innerEslope)+", "
-            "f ~ h^"+utils::toString(innerFslope)+", "
+            "f ~ h^"+utils::toString(innerfslope)+", "
             "their product grows faster than h^-1 => total energy is infinite");
 
     // 4. compute integrals
-    // \int f(E) dE        = \int f(h) / g(h) h d(log h),    [?]
-    // \int f(E) g(E) dE   = \int f(h) h d(log h),           [mass]
-    // \int f(E) h(E) dE   = \int f(h) / g(h) h^2 d(log h),  [kinetic energy]
-    // \int f(E) g(E) E dE = \int f(h) E h d(log h)          [total energy]
+    // I_0 = \int F(E) dE        = \int F(h) / g(h) h d(log h),
+    // K_g = \int f(E) g(E) dE   = \int f(h) h d(log h),
+    // K_h = \int F(E) h(E) dE   = \int F(h) / g(h) h^2 d(log h),
+    // Ekin= \int f(E) h(E) dE   = \int f(h) / g(h) h^2 d(log h),
+    // Etot= \int f(E) g(E) E dE = \int f(h) E h d(log h)
+    std::vector<double> gridFint(npoints), gridfgint(npoints), gridFhint(npoints);
+    // analytic integrals from h=0 to h=gridh[0]
+    totalEkin   = gridf[0] * pow_2(gridh[0]) / gridg[0] / (1 + innerEslope + innerfslope) * 1.5;
+    totalEnergy = gridf[0] * gridh[0] * (innerEslope >= 0 ?
+        -Phi0   / (1 + innerfslope) :
+        -innerE / (1 + innerfslope + innerEslope) );
 
     // 4a. integrate over all interior segments
     const double *glnodes1 = math::GLPOINTS[GLORDER1], *glweights1 = math::GLWEIGHTS[GLORDER1];
     const double *glnodes2 = math::GLPOINTS[GLORDER2], *glweights2 = math::GLWEIGHTS[GLORDER2];
     for(unsigned int i=1; i<npoints; i++) {
-        double dlogh = gridLogH[i]-gridLogH[i-1];
+        double dlogh = gridLogh[i]-gridLogh[i-1];
         // choose a higher-order quadrature rule for longer grid segments
         int glorder  = dlogh < GLDELTA ? GLORDER1 : GLORDER2;
         const double *glnodes   = glorder == GLORDER1 ? glnodes1   : glnodes2;
         const double *glweights = glorder == GLORDER1 ? glweights1 : glweights2;
         for(int k=0; k<glorder; k++) {
             // node of Gauss-Legendre quadrature within the current segment (logh[i-1] .. logh[i]);
-            double logh = gridLogH[i-1] + dlogh * glnodes[k];
-            // GL weight -- contribution of this point to each integral on the current segment
-            double weight = glweights[k] * dlogh;
+            double logh = gridLogh[i-1] + dlogh * glnodes[k];
             // compute E, f, g, h at the current point h (GL node)
-            double h = exp(logh), g, E = phasevol.E(h, &g), f = df(h);
-            if(!(f>=0))
+            double h = exp(logh), g, E = phasevol.E(h, &g), f = df(h), F = DF(h);
+            if(!(f>=0 && F>=0))
                 throw std::runtime_error("SphericalIsotropicModel: "
-                    "f("+utils::toString(h)+")="+utils::toString(f));
-            // the original integrals are formulated in terms of  \int f(E) weight(E) dE,
-            // where weight = 1, g, h for the three integrals,
+                    "f("+utils::toString(h)+")="+utils::toString(f)+", "
+                    "F("+utils::toString(h)+")="+utils::toString(F));
+            // weight = contribution of this point to each integral on the current segment
+            // the original integrals are formulated in terms of  \int f(E) A(E) dE,
+            // where A = 1, g, h for the three integrals,
             // and we replace  dE  by  d(log h) * [ dh / d(log h) ] / [ dh / dE ],
-            // that's why there are extra factors h and 1/g below.
-            double integrand = f * h * weight;
-            gridFint[i-1] += integrand / g;
-            gridFGint[i]  += integrand;
-            gridFHint[i]  += integrand / g * h;
-            gridFEint[i]  -= integrand * E;
+            // that's why there are extra factors h and 1/g = 1 / (dh/dE) below.
+            double weight = glweights[k] * h * dlogh;
+            gridFint[i-1] += F * weight / g;
+            gridfgint[i]  += f * weight;
+            gridFhint[i]  += F * weight / g * h;
+            totalEkin     += f * weight / g * h * 1.5;
+            totalEnergy   += f * weight * E;
         }
     }
 
     // 4b. integral of f(h) dE = f(h) / g(h) dh -- compute from outside in,
-    // summing contributions from all intervals of h above its current value
+    // summing contributions from all intervals of h above its current value;
     // the outermost segment from h_max to infinity is integrated analytically
-    gridFint.back() = -gridF.back() * outerE / (1 + outerRatio);
+    gridFint.back() = -gridF.back() * outerE / (1 + outerFslope / outerEslope);
     for(int i=npoints-1; i>=1; i--) {
         gridFint[i-1] += gridFint[i];
     }
 
-    // 4c. integrands of f*g dE,  f*h dE  and  f*g*E dE;  note that g = dh/dE.
-    // compute from inside out, summing contributions from all previous intervals of h
-    // integrals over the first segment (0..gridH[0]) are computed analytically
-    gridFGint[0] = gridF[0] * gridH[0] / (1 + innerFslope);
-    gridFHint[0] = gridF[0] * pow_2(gridH[0]) / gridG[0] / (1 + innerEslope + innerFslope);
-    gridFEint[0] = gridF[0] * gridH[0] * (innerEslope >= 0 ?
-        -Phi0   / (1 + innerFslope) :
-        -innerE / (1 + innerFslope + innerEslope) );
-
+    // 4c. integrands of f*g dE  and  f*h dE -- compute from inside out,
+    // summing contributions from all previous intervals of h;
+    // integrals over the first segment (0..gridh[0]) are computed analytically
+    gridfgint[0] = gridf[0] * gridh[0] / (1 + innerfslope);
+    gridFhint[0] = gridF[0] * pow_2(gridh[0]) / gridg[0] / (1 + innerEslope + innerFslope);
     for(unsigned int i=1; i<npoints; i++) {
-        gridFGint[i] += gridFGint[i-1];
-        gridFHint[i] += gridFHint[i-1];
-        gridFEint[i] += gridFEint[i-1];
+        gridfgint[i] += gridfgint[i-1];
+        gridFhint[i] += gridFhint[i-1];
     }
+
     // add the contribution of integrals from the last grid point up to infinity (very small anyway)
-    gridFGint.back() -= gridF.back() * gridH.back() / (1 + outerFslope);
-    gridFHint.back() -= gridF.back() * pow_2(gridH.back()) / gridG.back() / (1 + outerEslope + outerFslope);
-    gridFEint.back() += gridF.back() * gridH.back() * outerE / (1 + outerEslope + outerFslope);
-    totalMass = gridFGint.back();
+    totalMass   = gridfgint.back() - gridf.back() * gridh.back() / (1 + outerfslope);
+    totalEkin  -= gridf.back() * pow_2(gridh.back()) / gridg.back() / (1 + outerEslope + outerfslope) * 1.5;
+    totalEnergy-= gridf.back() * gridh.back() * outerE / (1 + outerEslope + outerfslope);
     if(!(totalMass > 0))
         throw std::runtime_error("SphericalIsotropicModel: f(h) is nowhere positive");
 
-    // decide on the value of h separating two regimes of computing f(h) from interpolating splines:
-    // if h is not too large, use intfg, otherwise use intf
-    htransition = gridH[0];
-    for(unsigned int i=1; i<npoints-1 && gridFGint[i+1] < totalMass * 0.999; i++)
-        htransition = gridH[i];
-
     // 5. construct 1d interpolating splines for these integrals
     // 5a. prepare derivatives for quintic spline
-    std::vector<double> gridFder(npoints), gridFGder(npoints), gridFHder(npoints), gridFEder(npoints);
+    std::vector<double> gridFder(npoints), gridfgder(npoints), gridFhder(npoints);
     for(unsigned int i=0; i<npoints; i++) {
-        gridFder [i] = -gridF[i] / gridG[i];
-        gridFGder[i] =  gridF[i];
-        gridFHder[i] =  gridF[i] * gridH[i] / gridG[i];
-        gridFEder[i] = -gridF[i] * gridE[i];
-        if(!(gridFder[i]<=0 && gridFGder[i]>=0 && gridFHder[i]>=0 && gridFEder[i]>=0 && 
-            isFinite(gridFint[i] + gridFGint[i] + gridFHint[i] + gridFEint[i])))
+        gridFder [i] = -gridF[i] / gridg[i];
+        gridfgder[i] =  gridf[i];
+        gridFhder[i] =  gridF[i] * gridh[i] / gridg[i];
+        if(!(gridFder[i]<=0 && gridfgder[i]>=0 && gridFhder[i]>=0 &&
+            isFinite(gridFint[i] + gridfgint[i] + gridFhint[i])))
             throw std::runtime_error("SphericalIsotropicModel: cannot construct valid interpolators");
     }
-    // integrals of f*g, f*h and f*g*E have finite limit as h-->inf;
+    // integrals of f*g and F*h have finite limits as h-->inf;
     // extrapolate them as constants beyond the last grid point
-    gridFGder.back() = gridFHder.back() = gridFEder.back() = 0;
+    gridfgder.back() = gridFhder.back() = 0;
 
     // debugging output
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("SphericalIsotropicModel.log");
-        strm << "h             \tg             \tE             \tf(E)          \t"
-            "int_E^0 f dE  \tint_Phi0^E f g\tint_Phi0^E f h\tint_Phi0^E f g E\n";
+        strm << "h             \tg             \tE             \tf(E)          \tF(E)          \t"
+                "int_E^0 F dE  \tint_Phi0^E f g\tint_Phi0^E F h\n";
         for(unsigned int i=0; i<npoints; i++) {
             strm <<
-            utils::pp(gridH[i],     14) + '\t' + utils::pp(gridG[i],     14) + '\t' +
-            utils::pp(gridE[i],     14) + '\t' + utils::pp(gridF[i],     14) + '\t' +
-            utils::pp(gridFint[i],  14) + '\t' + utils::pp(gridFGint[i], 14) + '\t' +
-            utils::pp(gridFHint[i], 14) + '\t' + utils::pp(gridFEint[i], 14) + '\n';
+            utils::pp(gridh[i],     14) + '\t' +
+            utils::pp(gridg[i],     14) + '\t' +
+            utils::pp(gridE[i],     14) + '\t' +
+            utils::pp(gridf[i],     14) + '\t' +
+            utils::pp(gridF[i],     14) + '\t' +
+            utils::pp(gridFint[i],  14) + '\t' +
+            utils::pp(gridfgint[i], 14) + '\t' +
+            utils::pp(gridFhint[i], 14) + '\n';
         }
     }
 
     // 5b. initialize splines for log-scaled integrals
-    intf  = math::LogLogSpline(gridH, gridFint,  gridFder);
-    intfg = math::LogLogSpline(gridH, gridFGint, gridFGder);
-    intfh = math::LogLogSpline(gridH, gridFHint, gridFHder);
-    intfE = math::LogLogSpline(gridH, gridFEint, gridFEder);
-}
-
-void SphericalIsotropicModel::evalDeriv(const double h, double* f, double* dfdh, double* /*ignored*/) const
-{
-    double der, der2, g, dgdh;
-    // at large h, intfg reaches a limit (totalMass), thus its derivative may be inaccurate
-    if(h < htransition) {   // still ok
-        // f(h) = d[ int_0^h f(h') dh' ] / d h
-        intfg.evalDeriv(h, NULL, &der, dfdh? &der2 : NULL);
-        if(f)
-            *f = der;
-        if(dfdh)
-            *dfdh = der2;
-    } else {
-        // otherwise we compute it from a different spline which tends to zero at large h:
-        // f(h) = -g(h)  d[ int_h^\infty f(h') / g(h') dh' ] / d h
-        intf.evalDeriv(h, NULL, &der, dfdh? &der2 : NULL);
-        phasevol.E(h, &g, dfdh? &dgdh : NULL);
-        if(f)
-            *f = -der * g;
-        if(dfdh)
-            *dfdh = -der2 * g - der * dgdh;
-    }
-}
-
-double SphericalIsotropicModel::I0(const double h) const
-{
-    return intf(h);
-}
-
-double SphericalIsotropicModel::cumulMass(const double h) const
-{
-    if(h==INFINITY)
-        return totalMass;
-    return intfg(h);
-}
-
-double SphericalIsotropicModel::cumulEkin(const double h) const
-{
-    return 1.5 * intfh(h);
-}
-
-double SphericalIsotropicModel::cumulEtotal(const double h) const
-{
-    return -intfE(h);
+    I0 = math::LogLogSpline(gridh, gridFint,  gridFder);
+    Kg = math::LogLogSpline(gridh, gridfgint, gridfgder);
+    Kh = math::LogLogSpline(gridh, gridFhint, gridFhder);
 }
 
 //---- Extended spherical model with 2d interpolation for position-dependent quantities ----//
 
-void SphericalIsotropicModelLocal::init(const math::IFunction& df, const std::vector<double>& gridh)
+SphericalIsotropicModelLocal::SphericalIsotropicModelLocal(
+    const potential::PhaseVolume& phasevol,
+    const math::IFunction& df,
+    const math::IFunction& DF,
+    const std::vector<double>& inputgridh)
+:
+    SphericalIsotropicModel(phasevol, df, DF)
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in X = log[h(Phi)] and Y = log[h(E)/h(Phi)]
-    std::vector<double> gridLogH;
-    if(gridh.empty())
-        gridLogH = math::createInterpolationGrid(math::LogLogScaledFnc(df), ACCURACY_INTERP);
-    else {
-        gridLogH.resize(gridh.size());
+    std::vector<double> gridh(inputgridh), gridLogh;
+    if(gridh.empty()) {
+        gridLogh = math::createInterpolationGrid(math::LogLogScaledFnc(df), ACCURACY_INTERP);
+        gridh.resize(gridLogh.size());
         for(size_t i=0; i<gridh.size(); i++)
-            gridLogH[i] = log(gridh[i]);
+            gridh[i] = exp(gridLogh[i]);
+    } else {
+        gridLogh.resize(gridh.size());
+        for(size_t i=0; i<gridh.size(); i++)
+            gridLogh[i] = log(gridh[i]);
     }
-    while(!gridLogH.empty() && df(exp(gridLogH.back())) <= MIN_VALUE_ROUNDOFF)  // ensure that f(hmax)>0
-        gridLogH.pop_back();
-    if(gridLogH.size() < 3)
+
+    // ensure that the grid covers only the range of h with non-zero df
+    while(!gridh.empty() && df(gridh.front()) <= MIN_VALUE_ROUNDOFF) {
+        gridh.erase(gridh.begin());
+        gridLogh.erase(gridLogh.begin());
+    }
+    while(!gridh.empty() && df(gridh.back()) <= MIN_VALUE_ROUNDOFF) {
+        gridh.pop_back();
+        gridLogh.pop_back();
+    }
+
+    if(gridLogh.size() < 3)
         throw std::runtime_error("SphericalIsotropicModelLocal: f(h) is nowhere positive");
-    const double logHmin        = gridLogH.front(),  logHmax = gridLogH.back();
-    const unsigned int npoints  = gridLogH.size();
+    const double loghmin        = gridLogh.front(),  loghmax = gridLogh.back();
+    const unsigned int npoints  = gridLogh.size();
     const unsigned int npointsY = 100;
-    const double mindeltaY      = fmin(0.1, (logHmax-logHmin)/npointsY);
-    std::vector<double> gridY   = math::createNonuniformGrid(npointsY, mindeltaY, logHmax-logHmin, true);
+    const double mindeltaY      = fmin(0.1, (loghmax-loghmin)/npointsY);
+    std::vector<double> gridY   = math::createNonuniformGrid(npointsY, mindeltaY, loghmax-loghmin, true);
 
     // 3. determine the asymptotic behaviour of f(h) and g(h):
     // f(h) ~ h^outerFslope as h-->inf and  g(h) ~ h^(1-outerEslope)
-    double outerH = exp(gridLogH.back()), outerG;
-    double outerE = phasevol.E(outerH, &outerG), outerFslope;
-    if(df.numDerivs() >= 1) {
-        double val, der;
-        df.evalDeriv(outerH, &val, &der);
-        outerFslope = der / val * outerH;
-    } else {
-        outerFslope = log(df(outerH) / df(exp(gridLogH[npoints-2]))) /
-            (gridLogH[npoints-1] - gridLogH[npoints-2]);
-    }
-    if(!(outerFslope < -1))
-        // in this case SphericalIsotropicModel would have already thrown the same exception
-        throw std::runtime_error("SphericalIsotropicModelLocal: "
-            "f(h) falls off too slowly as h-->infinity");
-    double outerEslope = outerH / outerG / outerE;
+    double outerh = exp(gridLogh.back()), outerg;
+    double outerE = phasevol.E(outerh, &outerg);
+    double innerFslope, outerFslope;
+    getAsymptoticSlopes(DF, gridh, /*output*/ innerFslope, outerFslope);
+    double outerEslope = outerh / outerg / outerE;
     double outerRatio  = outerFslope / outerEslope;
     if(!(outerRatio > 0))
         throw std::runtime_error("SphericalIsotropicModelLocal: "
             "weird asymptotic behaviour of phase volume\n"
-            "h(E="+utils::toString(outerE)+")="+utils::toString(outerH) +
-            "; dh/dE="+utils::toString(outerG) + " => outerEslope="+utils::toString(outerEslope) +
+            "h(E="+utils::toString(outerE)+")="+utils::toString(outerh) +
+            "; dh/dE="+utils::toString(outerg) + " => outerEslope="+utils::toString(outerEslope) +
             ", outerFslope="+utils::toString(outerFslope));
 
     // 5. construct 2d interpolating splines for dv2par, dv2per as functions of Phi and E
 
     // 5a. asymptotic values for J1/J0 and J3/J0 as Phi --> 0 and (E/Phi) --> 0
     double outerJ1 = 0.5*M_SQRTPI * math::gamma(2 + outerRatio) / math::gamma(2.5 + outerRatio);
+    if(!isFinite(outerJ1))  outerJ1 = 0.5*M_SQRTPI / sqrt(1.75 + outerRatio);  // better than 1%
     double outerJ3 = outerJ1 * 1.5 / (2.5 + outerRatio);
 
     // 5b. compute the values of J1/J0 and J3/J0 at nodes of 2d grid in X=log(h(Phi)), Y=log(h(E)/h(Phi))
-    math::Matrix<double> gridJ1(npoints, npointsY), gridJ3(npoints, npointsY);
+    math::Matrix<double> gridj1(npoints, npointsY), gridJ1(npoints, npointsY), gridJ3(npoints, npointsY);
     for(unsigned int i=0; i<npoints; i++)
     {
         // The first coordinate of the grid is X = log(h(Phi)), the second is Y = log(h(E)) - X.
         // For each pair of values of X and Y, we compute the following integrals:
-        // J_n = \int_\Phi^E f(E') [(E'-\Phi) / (E-\Phi)]^{n/2}  dE';  n = 0, 1, 3.
+        // J_n = \int_\Phi^E  F(E')  [(E'-\Phi) / (E-\Phi)]^{n/2}  dE';  n = 0, 1, 3;
+        // and additionally j_1 - same as J_1 but replacing F by f.
         // Then the value of 2d interpolants are assigned as
-        // \log[ J3 / J0 ], \log[ (3*J1-J3) / J0 ] .
+        // \log[ J1 / J0 ], \log[ J3 / J0 ] .
         // In practice, we replace the integration over dE by integration over dy = d(log h),
         // and accumulate the values of modified integrals sequentially over each segment in Y.
         // Here the modified integrals are  J{n}acc = \int_X^Y f(y) (dE'/dy) (E'(y)-\Phi)^{n/2}  dy,
         // i.e., without the term [E(Y,X)-\Phi(X)]^{n/2} in the denominator,
         // which is invoked later when we assign the values to the 2d interpolants.
-        double J0acc = 0, J1acc = 0, J3acc = 0;  // accumulators
-        SphericalIsotropicDFIntegrand<0> intJ0(df, phasevol, gridLogH[i]);
-        SphericalIsotropicDFIntegrand<1> intJ1(df, phasevol, gridLogH[i]);
-        SphericalIsotropicDFIntegrand<3> intJ3(df, phasevol, gridLogH[i]);
-        gridJ1(i, 0) = log(2./3);  // analytic limiting values for Phi=E
+        double J0acc = 0, j1acc = 0, J1acc = 0, J3acc = 0;  // accumulators
+        SphericalIsotropicDFIntegrand<0> intJ0(DF, phasevol, gridLogh[i]);
+        SphericalIsotropicDFIntegrand<1> intj1(df, phasevol, gridLogh[i]);
+        SphericalIsotropicDFIntegrand<1> intJ1(DF, phasevol, gridLogh[i]);
+        SphericalIsotropicDFIntegrand<3> intJ3(DF, phasevol, gridLogh[i]);
+        // analytic limiting values for Phi=E
+        gridj1(i, 0) = log(2./3 * df(gridh[i]) / DF(gridh[i]));
+        gridJ1(i, 0) = log(2./3);
         gridJ3(i, 0) = log(2./5);
+        // loop over other grid points except the endpoint
         for(unsigned int j=1; j<npointsY; j++) {
-            double logHprev = gridLogH[i] + gridY[j-1];
-            double logHcurr = gridLogH[i] + gridY[j];
+            double loghprev = gridLogh[i] + gridY[j-1];
+            double loghcurr = gridLogh[i] + gridY[j];
             if(j==1) {
                 // integration over the first segment uses a more accurate quadrature rule
                 // to accounting for a possible endpoint singularity at Phi=E
-                math::ScalingCub scaling(logHprev, logHcurr);
+                math::ScalingCub scaling(loghprev, loghcurr);
                 J0acc = math::integrateGL(
                     math::ScaledIntegrand<math::ScalingCub>(scaling, intJ0), 0, 1, GLORDER);
+                j1acc = math::integrateGL(
+                    math::ScaledIntegrand<math::ScalingCub>(scaling, intj1), 0, 1, GLORDER);
                 J1acc = math::integrateGL(
                     math::ScaledIntegrand<math::ScalingCub>(scaling, intJ1), 0, 1, GLORDER);
                 J3acc = math::integrateGL(
                     math::ScaledIntegrand<math::ScalingCub>(scaling, intJ3), 0, 1, GLORDER);
             } else {
-                J0acc += math::integrateGL(intJ0, logHprev, logHcurr, GLORDER);
-                J1acc += math::integrateGL(intJ1, logHprev, logHcurr, GLORDER);
-                J3acc += math::integrateGL(intJ3, logHprev, logHcurr, GLORDER);
+                J0acc += math::integrateGL(intJ0, loghprev, loghcurr, GLORDER);
+                j1acc += math::integrateGL(intj1, loghprev, loghcurr, GLORDER);
+                J1acc += math::integrateGL(intJ1, loghprev, loghcurr, GLORDER);
+                J3acc += math::integrateGL(intJ3, loghprev, loghcurr, GLORDER);
             }
             if(i==npoints-1) {
                 // last row: analytic limiting values for Phi-->0 and any E/Phi
@@ -574,12 +557,13 @@ void SphericalIsotropicModelLocal::init(const math::IFunction& df, const std::ve
                 double oneMinusJ0overI0 = std::pow(EoverPhi, 1+outerRatio);  // < 1
                 double Fval1 = math::hypergeom2F1(-0.5, 1+outerRatio, 2+outerRatio, EoverPhi);
                 double Fval3 = math::hypergeom2F1(-1.5, 1+outerRatio, 2+outerRatio, EoverPhi);
-                double I0    = this->I0(exp(gridLogH[i]));
+                double I0    = this->I0(outerh);
                 double sqPhi = sqrt(-outerE);
                 if(isFinite(Fval1+Fval3)) {
                     J0acc = I0 * (1 - oneMinusJ0overI0);
                     J1acc = I0 * (outerJ1 - oneMinusJ0overI0 * Fval1) * sqPhi;
                     J3acc = I0 * (outerJ3 - oneMinusJ0overI0 * Fval3) * pow_3(sqPhi);
+                    j1acc = J1acc * df(outerh) / DF(outerh);  // this is not quite right, but ok
                 } else {
                     // this procedure sometimes fails, since hypergeom2F1 is not very robust;
                     // in this case we simply keep the values computed by numerical integration
@@ -587,17 +571,23 @@ void SphericalIsotropicModelLocal::init(const math::IFunction& df, const std::ve
                         "Can't compute asymptotic value");
                 }
             }
-            double dv = sqrt(phasevol.deltaE(logHcurr, gridLogH[i]));
+            double dv = sqrt(phasevol.deltaE(loghcurr, gridLogh[i]));
+            double j1overJ0 = j1acc / J0acc / dv;
             double J1overJ0 = J1acc / J0acc / dv;
             double J3overJ0 = J3acc / J0acc / pow_3(dv);
-            if(J1overJ0<=0 || J3overJ0<=0 || !isFinite(J1overJ0+J3overJ0)) {
+            if(j1overJ0<=0 || J1overJ0<=0 || J3overJ0<=0 || !isFinite(j1overJ0+J1overJ0+J3overJ0)) {
                 utils::msg(utils::VL_WARNING, "SphericalIsotropicModelLocal", "Invalid value"
                     "  J0="+utils::toString(J0acc)+
+                    ", j1="+utils::toString(j1acc)+
                     ", J1="+utils::toString(J1acc)+
                     ", J3="+utils::toString(J3acc));
-                J1overJ0 = 2./3;   // fail-safe values corresponding to E=Phi
-                J3overJ0 = 2./5;
+                // try to copy the values from the previous row,
+                // or just assign some fiducial values corresponding to E=Phi
+                j1overJ0 = i>0 ? exp(gridj1(i-1, j)) : 2./3;
+                J1overJ0 = i>0 ? exp(gridJ1(i-1, j)) : 2./3;
+                J3overJ0 = i>0 ? exp(gridJ3(i-1, j)) : 2./5;
             }
+            gridj1(i, j) = log(j1overJ0);
             gridJ1(i, j) = log(J1overJ0);
             gridJ3(i, j) = log(J3overJ0);
         }
@@ -606,26 +596,32 @@ void SphericalIsotropicModelLocal::init(const math::IFunction& df, const std::ve
     // debugging output
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("SphericalIsotropicModelLocal.log");
-        strm << "ln[h(Phi)] ln[hE/hPhi]\tPhi            E             \tJ1         J3\n";
+        strm << "ln[h(Phi)] ln[hE/hPhi]\tPhi            E             \tj1         J1         J3\n";
         for(unsigned int i=0; i<npoints; i++) {
-            double Phi = phasevol.E(exp(gridLogH[i]));
+            double Phi = phasevol.E(exp(gridLogh[i]));
             for(unsigned int j=0; j<npointsY; j++) {
-                double E = phasevol.E(exp(gridLogH[i] + gridY[j]));
-                strm << utils::pp(gridLogH[i],10) +' '+ utils::pp(gridY[j],10) +'\t'+
-                utils::pp(Phi,14) +' '+ utils::pp(E,14) +'\t'+
-                utils::pp(exp(gridJ1(i, j)),10) +' '+ utils::pp(exp(gridJ3(i, j)),10)+'\n';
+                double E = phasevol.E(exp(gridLogh[i] + gridY[j]));
+                strm <<
+                utils::pp(gridLogh[i],      10) + ' ' +
+                utils::pp(gridY[j],         10) + '\t'+
+                utils::pp(Phi,              14) + ' ' +
+                utils::pp(E,                14) + '\t'+
+                utils::pp(exp(gridj1(i, j)),10) + ' ' +
+                utils::pp(exp(gridJ1(i, j)),10) + ' ' +
+                utils::pp(exp(gridJ3(i, j)),10) + '\n';
             }
             strm << '\n';
         }
     }
 
     // 5c. construct the 2d splines
-    intJ1 = math::CubicSpline2d(gridLogH, gridY, gridJ1);
-    intJ3 = math::CubicSpline2d(gridLogH, gridY, gridJ3);
+    intj1 = math::CubicSpline2d(gridLogh, gridY, gridj1, /*regularize*/ true);
+    intJ1 = math::CubicSpline2d(gridLogh, gridY, gridJ1, /*regularize*/ true);
+    intJ3 = math::CubicSpline2d(gridLogh, gridY, gridJ3, /*regularize*/ true);
 }
 
 void SphericalIsotropicModelLocal::evalLocal(
-    double Phi, double E, double &dvpar, double &dv2par, double &dv2per) const
+    double Phi, double E, double m, double &dvpar, double &dv2par, double &dv2per) const
 {
     double hPhi = phasevol(Phi);
     double hE   = phasevol(E);
@@ -639,15 +635,17 @@ void SphericalIsotropicModelLocal::evalLocal(
     double X  = math::clamp(log(hPhi),    intJ1.xmin(), intJ1.xmax());
     double Y  = math::clamp(log(hE/hPhi), intJ1.ymin(), intJ1.ymax());
     // compute the 2d interpolators for J1, J3
+    double j1 = exp(intj1.value(X, Y)) * J0;
     double J1 = exp(intJ1.value(X, Y)) * J0;
     double J3 = exp(intJ3.value(X, Y)) * J0;
     if(E>=0) {  // in this case, the coefficients were computed for E=0, need to scale them to E>0
         double corr = 1 / sqrt(1 - E / Phi);  // correction factor <1
+        j1 *= corr;
         J1 *= corr;
         J3 *= pow_3(corr);
     }
-    double mult = 32*M_PI*M_PI/3 * cumulMass();
-    dvpar  = -mult *  J1 * 3;
+    double mult = 32*M_PI*M_PI/3;// * cumulMass();
+    dvpar  = -mult * (J1 + j1 * m) * 1.5;
     dv2par =  mult * (I0 + J3);
     dv2per =  mult * (I0 * 2 + J1 * 3 - J3);
     /*if(loghPhi<X)
@@ -669,7 +667,7 @@ double SphericalIsotropicModelLocal::sampleVelocity(double Phi, math::PRNGState*
     double target   = frac * maxJ1 * sqrt(-Phi);
     // find the value of E at which the cumulative distribution function equals the target
     double loghEoverhPhi = math::findRoot(
-        VelocitySampleRootFinder(*this, intJ1, Phi, loghPhi, I0plusJ0, target),
+        VelocitySampleRootFinder(phasevol, I0, intJ1, Phi, loghPhi, I0plusJ0, target),
         intJ1.ymin(), intJ1.ymax(), EPSROOT);
     if(!(loghEoverhPhi>=0))
        return 0.;  // might not be able to find the root in some perverse cases at very large radii
@@ -701,22 +699,20 @@ double SphericalIsotropicModelLocal::velDisp(double Phi) const
 
 //---- non-member functions for various diffusion coefficients ----//
 
-void difCoefEnergy(const SphericalIsotropicModel& model, double E, double &DeltaE, double &DeltaE2)
+void difCoefEnergy(const SphericalIsotropicModel& model, double E, double m,
+    /*output*/ double &DeltaE, double &DeltaE2)
 {
     double h, g;
     model.phasevol.evalDeriv(E, &h, &g);
-    double totalMass = model.cumulMass(),
-    IF   = model.I0(h),
-    IFG  = model.cumulMass(h),
-    IFH  = model.cumulEkin(h) * (2./3);
-    DeltaE  = 16*M_PI*M_PI * totalMass * (IF - IFG / g);
-    DeltaE2 = 32*M_PI*M_PI * totalMass * (IF * h + IFH) / g;
+    double I0 = model.I0(h), Kg = model.Kg(h), Kh = model.Kh(h);
+    DeltaE  = 16*M_PI*M_PI * (I0 - m * Kg / g);
+    DeltaE2 = 32*M_PI*M_PI * (I0 * h + Kh) / g;
 }
 
 double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFunction& pot, double E)
 {
     double h = model.phasevol(E), rmax = potential::R_max(pot, E), g, dgdh;
-    model.phasevol.E(h, &g, &dgdh);
+    model.phasevol.E(h, /*output*/ &g, &dgdh);
     // we are computing the orbit-averaged diffusion coefficient  < Delta v_per^2 >,
     // by integrating it over the radial range covered by the orbit.
     // D = [8 pi^2 / g(E)]  int_0^{rmax(E)}  dr  r^2 / v(E,r)  < Delta v_per^2 >,
@@ -738,71 +734,81 @@ double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFuncti
         double w = 8*M_PI*M_PI * rmax / g * pow_2(r) * glweights[ir];
         for(int iE=0; iE<GLORDER; iE++) {
             // the innermost integral in scaled energy variable:  (E'-Phi) / (E-Phi)
-            double Ep  = E * glnodes[iE] + Phi * (1-glnodes[iE]);
-            double fEp = model.value(model.phasevol(Ep));  // model.value is the value of DF
+            double Ep  = E * glnodes[iE] + Phi * (1-glnodes[iE]),  hp, gp, dI0dhp;
+            model.phasevol.evalDeriv(Ep, &hp, &gp);
+            model.I0.evalDeriv(hp, NULL, &dI0dhp);
+            // the value of the stellar mass-weighted DF is F(h') = -g(h') * dI0/dh'
+            double FEp = -dI0dhp * gp;
             double vp  = sqrt(2 * (Ep-Phi));
-            result += glweights[iE] * w * fEp * vp * (1 - 1./3 * glnodes[iE] /*(Ep-Phi) / (E-Phi)*/);
+            result += glweights[iE] * w * FEp * vp * (1 - 1./3 * glnodes[iE] /*(Ep-Phi) / (E-Phi)*/);
         }
     }
-    return result * 16*M_PI*M_PI * model.cumulMass();
+    return result * 16*M_PI*M_PI;
 }
 
 
 // ------ write a text file with various quantities describing a spherical isotropic model ------ //
 
-void writeSphericalIsotropicModel(const std::string& fileName, const std::string& header,
-    const SphericalIsotropicModel& model, const math::IFunction& pot,
-    const std::vector<double>& gridh, const std::vector<double>& aux)
+void writeSphericalIsotropicModel(
+    const std::string& fileName,
+    const std::string& header,
+    const math::IFunction& df,
+    const math::IFunction& pot,
+    const std::vector<double>& inputgridh,
+    const std::vector<double>& aux)
 {
-    if(!aux.empty() && aux.size() != gridh.size())
+    if(!aux.empty() && aux.size() != inputgridh.size())
         throw std::runtime_error("writeSphericalIsotropicModel: "
             "aux, if provided, should match gridh in length");
     // construct a suitable grid in h, if not provided
-    std::vector<double> gridH(gridh);
-    const math::IFunction& df = model;
+    std::vector<double> gridh(inputgridh);
     if(gridh.empty()) {
         // estimate the range of log(h) where the DF varies considerably
-        std::vector<double> gridLogH =
+        std::vector<double> gridLogh =
             math::createInterpolationGrid(math::LogLogScaledFnc(df), ACCURACY_INTERP);
-        gridH.resize(gridLogH.size());
-        for(size_t i=0; i<gridLogH.size(); i++)
-            gridH[i] = exp(gridLogH[i]);
-    } else if(gridh.size()<2)
+        gridh.resize(gridLogh.size());
+        for(size_t i=0; i<gridLogh.size(); i++)
+            gridh[i] = exp(gridLogh[i]);
+    } else if(inputgridh.size()<2)
         throw std::runtime_error("writeSphericalIsotropicModel: gridh is too small");
 
     // construct the corresponding grid in E and r
+    potential::PhaseVolume phasevol(pot);
     double Phi0 = pot(0);
-    std::vector<double> gridR, gridPhi, gridG;
-    for(size_t i=0; i<gridH.size(); ) {
-        double g, Phi = model.phasevol.E(gridH[i], &g);
+    std::vector<double> gridr, gridPhi, gridg;
+    for(size_t i=0; i<gridh.size(); ) {
+        double g, Phi = phasevol.E(gridh[i], &g);
         // avoid closely spaced potential values whose difference is dominated by roundoff errors
         if(Phi > (gridPhi.empty()? Phi0 : gridPhi.back()) * (1-MIN_VALUE_ROUNDOFF)) {
             gridPhi.push_back(Phi);
-            gridG.  push_back(g);
-            gridR.  push_back(potential::R_max(pot, Phi));
+            gridg.  push_back(g);
+            gridr.  push_back(potential::R_max(pot, Phi));
             i++;
         } else {
-            gridH.erase(gridH.begin()+i);
+            gridh.erase(gridh.begin()+i);
         }
     }
-    size_t npoints = gridH.size();
+    size_t npoints = gridh.size();
+
+    // construct a spherical model to compute the diffusion coefficients
+    SphericalIsotropicModel model(phasevol, df, df, gridh);
 
     // compute the density and 1d velocity dispersion by integrating over the DF
     std::vector<double> gridRho, gridVelDisp;
-    gridRho = computeDensity(model, model.phasevol, gridPhi, &gridVelDisp);
+    gridRho = computeDensity(df, phasevol, gridPhi, &gridVelDisp);
     for(size_t i=0; i<npoints; i++)  // safety measure to avoid problems in log-log-spline
         if(!isFinite(gridRho[i]+gridVelDisp[i]) || gridRho[i]<=MIN_VALUE_ROUNDOFF)
             gridRho[i] = gridVelDisp[i] = MIN_VALUE_ROUNDOFF;
 
     // construct interpolators for the density and velocity dispersion profiles
-    math::LogLogSpline density(gridR, gridRho);
-    math::LogLogSpline veldisp(gridR, gridVelDisp);
+    math::LogLogSpline density(gridr, gridRho);
+    math::LogLogSpline veldisp(gridr, gridVelDisp);
 
     // and use them to compute the projected density and velocity dispersion
     std::vector<double> gridProjDensity, gridProjVelDisp;
-    computeProjectedDensity(density, veldisp, gridR, gridProjDensity, gridProjVelDisp);
+    computeProjectedDensity(density, veldisp, gridr, gridProjDensity, gridProjVelDisp);
 
-    double mult = 16*M_PI*M_PI * model.cumulMass();  // common factor for diffusion coefs
+    double mult = 16*M_PI*M_PI * model.totalMass;  // common factor for diffusion coefs
 
     // determine the central mass (check if it appears to be non-zero)
     double coef, slope = potential::innerSlope(pot, NULL, &coef);
@@ -816,21 +822,23 @@ void writeSphericalIsotropicModel(const std::string& fileName, const std::string
     std::ofstream strm(fileName.c_str());
     if(!header.empty())
         strm << "#" << header << "\n";
-    std::string auxh = aux.empty() ? "" : "\tAux";
+    std::string auxh = aux.empty() ? "" : "\tAux           ";
     strm <<
-        "#r      \tM(r)    \tE=Phi(r)\trho(r)  \tf(E)    \tM(E)    \th(E)    \tTrad(E) \trcirc(E) \t"
-        "Lcirc(E) \tVelDispersion\tVelDispProj\tSurfaceDensity\tDeltaE^2\tMassFlux\tEnergyFlux";
+        "#r            \tM(r)          \tE=Phi(r)      \trho(r)        \t"
+        "f(E)          \tM(E)          \th(E)          \tTrad(E)       \t"
+        "rcirc(E)      \tLcirc(E)      \tVelDispersion \tVelDispProj   \t"
+        "SurfaceDensity\tDeltaE^2      \tMassFlux      \tEnergyFlux    ";
     if(Mbh>0)
-        strm << "\tD_RR/R(0)"+auxh+"\n#0        Mbh = " << utils::pp(Mbh, 14) << "\t-INFINITY\n";
+        strm << "\tD_RR/R(0)     "+auxh+"\n#0        Mbh = "+utils::pp(Mbh, 14)+"\t-INFINITY\n";
     else
-        strm << auxh+"\n#0      \t0       \t" << utils::pp(Phi0, 14) << '\n';
+        strm << auxh+"\n#0            \t0             \t"+utils::pp(Phi0, 14)+'\n';
 
     // output various quantities as functions of r (or E) to the file
-    for(unsigned int i=0; i<gridH.size(); i++) {
-        double r = gridR[i], f, dfdh, g = gridG[i], h = gridH[i];
+    for(unsigned int i=0; i<gridh.size(); i++) {
+        double r = gridr[i], f, dfdh, g = gridg[i], h = gridh[i];
         df.evalDeriv(h, &f, &dfdh);
         // integrate the density on the previous segment
-        double rprev = i==0 ? 0 : gridR[i-1];
+        double rprev = i==0 ? 0 : gridr[i-1];
         for(int k=0; k<GLORDER; k++) {
             double rk = rprev + glnodes[k] * (r-rprev);
             Mcumul += (4*M_PI) * (r-rprev) * glweights[k] * pow_2(rk) * density(rk);
@@ -838,27 +846,27 @@ void writeSphericalIsotropicModel(const std::string& fileName, const std::string
         double
         E        = gridPhi[i],
         rho      = gridRho[i],
-        intfg    = model.cumulMass(h),    // mass of particles within phase volume < h
-        intfh    = model.cumulEkin(h) * (2./3),
-        intf     = model.I0(h),
-        //DeltaE   = mult *  (intf - intfg / g),
-        DeltaE2  = mult *  (intf * h + intfh) / g * 2.,
-        FluxM    =-mult * ((intf * h + intfh) * g * dfdh + intfg * f),
-        FluxE    = E * FluxM - mult * ( -(intf * h + intfh) * f + intfg * intf),
+        Kg       = model.Kg(h),    // mass of particles within phase volume < h
+        Kh       = model.Kh(h),
+        I0       = model.I0(h),
+        //DeltaE   = mult *  (I0 - m * Kg / g),
+        DeltaE2  = mult *  (I0 * h + Kh) / g * 2.,
+        FluxM    =-mult * ((I0 * h + Kh) * g * dfdh + Kg * f),
+        FluxE    = E * FluxM - mult * ( -(I0 * h + Kh) * f + Kg * I0),
         rcirc    = potential::R_circ(pot, E),
         Lcirc    = rcirc * potential::v_circ(pot, rcirc),
         Tradial  = g / (4*M_PI*M_PI * pow_2(Lcirc)),
         veldisp  = gridVelDisp[i],
         veldproj = gridProjVelDisp[i],
         Sigma    = gridProjDensity[i],
-        DRRoverR = difCoefLosscone(model, pot, E);
+        DRRoverR = difCoefLosscone(model, pot, E) * model.totalMass;
 
         strm << utils::pp(r,        14) +  // [ 1] radius
         '\t' +  utils::pp(Mcumul,   14) +  // [ 2] enclosed mass
         '\t' +  utils::pp(E,        14) +  // [ 3] Phi(r)=E
         '\t' +  utils::pp(rho,      14) +  // [ 4] rho(r)
         '\t' +  utils::pp(f,        14) +  // [ 5] distribution function f(E)
-        '\t' +  utils::pp(intfg,    14) +  // [ 6] mass of particles having energy below E
+        '\t' +  utils::pp(Kg,       14) +  // [ 6] mass of particles having energy below E
         '\t' +  utils::pp(h,        14) +  // [ 7] phase volume
         '\t' +  utils::pp(Tradial,  14) +  // [ 8] average radial period at the energy E
         '\t' +  utils::pp(rcirc,    14) +  // [ 9] radius of a circular orbit with energy E
@@ -871,7 +879,7 @@ void writeSphericalIsotropicModel(const std::string& fileName, const std::string
         '\t' +  utils::pp(FluxE,    14);   // [16] flux of energy through the phase volume
         if(Mbh>0)  strm <<                 //      in case of a central black hole:
         '\t' +  utils::pp(DRRoverR, 14);   // [17] loss-cone diffusion coef
-        if(!aux.empty())  strm <<
+        if(!aux.empty())  strm <<          //      if provided:
         '\t' +  utils::pp(aux[i],   14);   // [18] auxiliary quantity
         strm << '\n';
     }

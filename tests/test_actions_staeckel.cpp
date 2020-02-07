@@ -35,13 +35,13 @@ const bool output=utils::verbosityLevel >= utils::VL_VERBOSE;  // whether to cre
 const char* err=" \033[1;31m**\033[0m\n";
 const char* exc=" \033[1;33mCAUGHT EXCEPTION\033[0m\n";
 
-template<typename coordSysT>
+template<typename CoordT>
 bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     const actions::ActionFinderAxisymFudge& actfinder,
-    const coord::PosVelT<coordSysT>& initial_conditions,
+    const coord::PosVelT<CoordT>& initial_conditions,
     const double total_time, const double timestep)
 {
-    std::vector<coord::PosVelT<coordSysT> > traj = orbit::integrateTraj(
+    std::vector<std::pair<coord::PosVelT<CoordT>, double> > traj = orbit::integrateTraj(
         initial_conditions, total_time, timestep, potential);
     actions::ActionStat stats, statf, stati;
     actions::Angles angf;
@@ -51,18 +51,22 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
         std::ostringstream s;
         double x[6];
         initial_conditions.unpack_to(x);
-        s<<coordSysT::name()<<"_"<<x[0]<<x[1]<<x[2]<<x[3]<<x[4]<<x[5];
+        s<<"ActionsStaeckel_"<<CoordT::name()<<'_'<<
+            x[0]<<'_'<<x[1]<<'_'<<x[2]<<'_'<<x[3]<<'_'<<x[4]<<'_'<<x[5];
         strm.open(s.str().c_str());
     }
     // two estimates of focal distance: from the trajectory
     // (sensible unless z==0 everywhere, in which case its value doesn't matter anyway)
     // and from the interpolator
-    double ifd_p = actions::estimateFocalDistancePoints(potential, traj);
-    double ifd_i = actfinder.focalDistance(toPosVelCyl(traj[0]));
+    std::vector<coord::PosT<CoordT> > trajpoints(traj.size());
+    for(size_t i=0; i<traj.size(); i++)
+        trajpoints[i] = traj[i].first;
+    double ifd_p = actions::estimateFocalDistancePoints(potential, trajpoints);
+    double ifd_i = actfinder.focalDistance(toPosVelCyl(initial_conditions));
     for(size_t i=0; i<traj.size(); i++) {
-        const coord::PosVelCyl p = coord::toPosVelCyl(traj[i]);
+        const coord::PosVelCyl pc = coord::toPosVelCyl(traj[i].first);
         try {
-            actions::ActionAngles a = actions::actionAnglesAxisymStaeckel(potential, p);
+            actions::ActionAngles a = actions::actionAnglesAxisymStaeckel(potential, pc);
             stats.add(a);
         }
         catch(std::exception &e) {
@@ -70,7 +74,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
             exs=true;
         }
         try {
-            actions::ActionAngles a = actions::actionAnglesAxisymFudge(potential, p, ifd_p);
+            actions::ActionAngles a = actions::actionAnglesAxisymFudge(potential, pc, ifd_p);
             statf.add(a);
             if(1 || i==0) angf=a;  // 1 to disable unwrapping
             else {
@@ -79,7 +83,6 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
                 angf.thetaphi = math::unwrapAngle(a.thetaphi, angf.thetaphi);
             }
             if(output) {
-                const coord::PosVelCyl pc = coord::toPosVelCyl(traj[i]);
                 const coord::PosVelProlSph pp = coord::toPosVel<coord::Cyl,coord::ProlSph>
                     (pc, potential.coordsys());
                 strm << i*timestep<<"   "<<
@@ -94,7 +97,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
             exf=true;
         }
         try {
-            actions::Actions a = actfinder.actions(p);
+            actions::Actions a = actfinder.actions(pc);
             stati.add(a);
             if(output)
                 strm << utils::pp(a.Jr,12)<<" "<<utils::pp(a.Jz,12)<<"\n";
@@ -116,7 +119,7 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     bool oki  = stati.rms.Jr<epsi&& stati.rms.Jz<epsi&& stati.rms.Jphi<eps && !exi
         && fabs(stats.avg.Jr-stati.avg.Jr)<epsint
         && fabs(stats.avg.Jz-stati.avg.Jz)<epsint;
-    std::string csname(coordSysT::name());
+    std::string csname(CoordT::name());
     csname += ',';
     csname.resize(12, ' ');
     std::cout << csname << " Exact"

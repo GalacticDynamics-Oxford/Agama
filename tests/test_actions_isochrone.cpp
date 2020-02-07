@@ -38,7 +38,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     potential::Isochrone pot(M, b);
     orbit::OrbitIntParams params;
     params.accuracy = 1e-15;
-    std::vector<coord::PosVelCyl > traj = orbit::integrateTraj(
+    std::vector< std::pair<coord::PosVelCyl, double> > traj = orbit::integrateTraj(
         initial_conditions, total_time, timestep, pot, params);
     actions::ActionFinderSpherical actGrid(pot);  // interpolation-based action finder/mapper
     actions::ActionStat statI, statS, statF, statG;
@@ -61,12 +61,13 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     double ifd = 1e-5;
     int numWarnings = 0;
     for(size_t i=0; i<traj.size(); i++) {
-        statE.add(totalEnergy(pot, traj[i]));
-        traj[i].phi = math::wrapAngle(traj[i].phi);
-        aaI = actions::actionAnglesIsochrone(M, b,  traj[i], &frI);
-        aaF = actions::actionAnglesAxisymFudge(pot, traj[i], ifd, &frF);
-        aaS = actions::actionAnglesSpherical(pot, traj[i], &frS);
-        aaG = actGrid. actionAngles(traj[i], &frG);
+        coord::PosVelCyl &point = traj[i].first;
+        statE.add(totalEnergy(pot, point));
+        point.phi = math::wrapAngle(point.phi);
+        aaI = actions::actionAnglesIsochrone(M, b,  point, &frI);
+        aaF = actions::actionAnglesAxisymFudge(pot, point, ifd, &frF);
+        aaS = actions::actionAnglesSpherical(pot, point, &frS);
+        aaG = actGrid. actionAngles(point, &frG);
         statH.add(actions::computeHamiltonianSpherical(pot, aaI));  // find H(J)
         statI.add(aaI);
         statF.add(aaF);
@@ -97,28 +98,28 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         aoldF = anewF;
         // inverse transformation for spherical potential
         coord::PosVelCyl pinv = actions::mapSpherical(pot, aaS, &frSinv);
-        reversible_sph &= equalPosVel(pinv, traj[i], epss) && 
+        reversible_sph &= equalPosVel(pinv, point, epss) && 
             math::fcmp(frS.Omegar, frSinv.Omegar, epss) == 0 &&
             math::fcmp(frS.Omegaz, frSinv.Omegaz, epss) == 0 &&
             math::fcmp(frS.Omegaphi, frSinv.Omegaphi, epss) == 0;
-        errSinv+=pow_2(pinv.R-traj[i].R)+pow_2(pinv.z-traj[i].z)+pow_2(pinv.phi-traj[i].phi)+
-        pow_2(pinv.vR-traj[i].vR)+pow_2(pinv.vz-traj[i].vz)+pow_2(pinv.vphi-traj[i].vphi);
+        errSinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
+        pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
 
         // inverse transformation for interpolated spherical action finder, with derivatives
         actions::DerivAct<coord::SphMod> der_sph;
         pinv = toPosVelCyl(actGrid.map(aaG, &frSinv, &der_sph));
-        reversible_grid &= equalPosVel(pinv, traj[i], epsi) && 
+        reversible_grid &= equalPosVel(pinv, point, epsi) &&
             math::fcmp(frG.Omegar, frSinv.Omegar, epsi) == 0 &&
             math::fcmp(frG.Omegaz, frSinv.Omegaz, epsi) == 0 &&
             math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epsi) == 0;
-        errGinv+=pow_2(pinv.R-traj[i].R)+pow_2(pinv.z-traj[i].z)+pow_2(pinv.phi-traj[i].phi)+
-        pow_2(pinv.vR-traj[i].vR)+pow_2(pinv.vz-traj[i].vz)+pow_2(pinv.vphi-traj[i].vphi);
+        errGinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
+        pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
 
         // inverse transformation for Isochrone with derivs
         actions::DerivAct<coord::SphMod> ac;
         coord::PosVelSphMod pd[2];
         coord::PosVelSphMod pp = actions::ToyMapIsochrone(M, b).map(aaI, &frIinv, &ac, NULL, pd);
-        reversible_iso &= equalPosVel(toPosVelCyl(pp), traj[i], epst) && 
+        reversible_iso &= equalPosVel(toPosVelCyl(pp), point, epst) && 
             math::fcmp(frI.Omegar, frIinv.Omegar, epst) == 0 &&
             math::fcmp(frI.Omegaz, frIinv.Omegaz, epst) == 0 &&
             math::fcmp(frI.Omegaphi, frIinv.Omegaphi, epst) == 0;
@@ -193,7 +194,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
             std::cout << "d/dJphi: " << pJp << ac.dbyJphi << '\n';
         }
         if(output) {
-            strm << i*timestep<<"   "<<traj[i].R<<" "<<traj[i].z<<" "<<traj[i].phi<<"  "<<
+            strm << i*timestep<<"   "<<point.R<<" "<<point.z<<" "<<point.phi<<"  "<<
                 toPosVelCyl(pp).R<<" "<<toPosVelCyl(pp).z<<" "<<pp.phi<<"   "<<
                 aaI.thetar<<" "<<aaI.thetaz<<" "<<aaI.thetaphi<<"  "<<
                 aaS.thetar<<" "<<aaS.thetaz<<" "<<aaS.thetaphi<<"  "<<

@@ -31,11 +31,11 @@ if __name__ in ('__main__', '__plot__'):
     # create a globular cluster model
     particles = new_king_model(N, W0, convert_nbody=converter)
     particles.radius = 0.0| units.parsec
-    cluster = Hermite(converter, parameters=[("epsilon_squared", (0.01 | units.parsec)**2)], channel_type='sockets')
+    cluster = Hermite(converter, parameters=[("epsilon_squared", (0.01 | units.parsec)**2)], redirection='null')
 
     # create the external potential of the Galaxy
     galaxy = Agama(converter, type="Dehnen", gamma=1.8, \
-        rscale=1000.| units.parsec, mass=1.6e10 | units.MSun, channel_type='sockets')
+        rscale=1000.| units.parsec, mass=1.6e10 | units.MSun)
 
     # shift the cluster to an orbit around Galactic center
     acc,_,_ = galaxy.get_gravity_at_point(0|units.kpc, Rinit, 0|units.kpc, 0|units.kpc)

@@ -12,6 +12,15 @@ using std::size_t;
 /** Classes and functions for manipulating arrays of particles */
 namespace particles {
 
+/// a "fat particle" type with auxiliary properties
+struct ParticleAux : public coord::PosVelCar {
+    double stellarMass;       ///< mass of the star (responsible for relaxation and mass segregation)
+    double stellarRadius;     ///< radius of the star (responsible for loss-cone physics)
+    ParticleAux(const coord::PosVelCar& pv, double m=0, double r=0) :
+    coord::PosVelCar(pv), stellarMass(m), stellarRadius(r) {}
+};
+
+
 /** Helper class for converting between particle types (from SrcT to DestT).
     This is a templated class with essentially no generic implementation;
     the actual conversion is performed by one of the partially specialized
@@ -26,6 +35,7 @@ template<typename SrcT, typename DestT>
 struct Converter {
     DestT operator()(const SrcT& src);
 };
+
 
 /** An array of particles with masses.
     It is implemented as a separate structure instead of just a vector of pairs,
@@ -63,7 +73,7 @@ struct ParticleArray {
         data.reserve(src.size());
         Converter<OtherParticleT, ParticleT> conv;  // this is the mighty thing
         for(size_t i=0; i<src.size(); i++)
-            data.push_back(ElemType(conv(src[i].first), src[i].second));
+            data.push_back(ElemType(conv(src.point(i)), src.mass(i)));
     }
 
     /// return the array size
@@ -73,14 +83,6 @@ struct ParticleArray {
     /// convenience function to add an element
     inline void add(const ParticleT &first, const double second) {
         data.push_back(ElemType(first, second)); }
-
-    /// convenience shorthand for extracting array element
-    inline ElemType& at(size_t index) {
-        return data.at(index); }
-
-    /// convenience shorthand for extracting array element as a const reference
-    inline const ElemType& at(size_t index) const {
-        return data.at(index); }
 
     /// convenience shorthand for extracting array element
     inline ElemType& operator[](size_t index) {
@@ -111,6 +113,8 @@ struct ParticleArray {
 typedef ParticleArray<coord::PosVelCar>  ParticleArrayCar;
 typedef ParticleArray<coord::PosVelCyl>  ParticleArrayCyl;
 typedef ParticleArray<coord::PosVelSph>  ParticleArraySph;
+typedef ParticleArray<ParticleAux> ParticleArrayAux;
+
 
 /// specializations of conversion operator for the case that both SrcT and DestT
 /// are pos/vel/mass particle types in possibly different coordinate systems
@@ -138,5 +142,22 @@ struct Converter<coord::PosT<SrcCoordT>, coord::PosT<DestCoordT> > {
         return coord::toPos<SrcCoordT, DestCoordT>(src);
     }
 };
+
+/// specializations of conversion operator from a fat particle to an ordinary position
+template<typename DestCoordT>
+struct Converter<ParticleAux, coord::PosT<DestCoordT> > {
+    coord::PosT<DestCoordT> operator()(const ParticleAux& src) {
+        return coord::toPos<coord::Car, DestCoordT>(src);
+    }
+};
+
+/// specializations of conversion operator from a fat particle to an ordinary position/velocity
+template<typename DestCoordT>
+struct Converter<ParticleAux, coord::PosVelT<DestCoordT> > {
+    coord::PosVelT<DestCoordT> operator()(const ParticleAux& src) {
+        return coord::toPosVel<coord::Car, DestCoordT>(src);
+    }
+};
+
 
 }  // namespace

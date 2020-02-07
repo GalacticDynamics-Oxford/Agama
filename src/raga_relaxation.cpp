@@ -1,10 +1,12 @@
 #include "raga_relaxation.h"
+#include "potential_analytic.h"
+#include "potential_composite.h"
 #include "potential_multipole.h"
 #include "galaxymodel_spherical.h"
 #include "df_spherical.h"
 #include "utils.h"
 #include "math_core.h"
-#include "potential_utils.h"
+#include "math_random.h"
 #include <cassert>
 #include <cmath>
 #include <fstream>
@@ -42,7 +44,7 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
 
     // 2b. compute the diffusion coefs at the middle of the timestep
     double dvpar, dv2par, dv2per;
-    relaxationModel.evalLocal(Phi, E, dvpar, dv2par, dv2per);
+    relaxationModel.evalLocal(Phi, E, mass, dvpar, dv2par, dv2per);
     if(!isFinite(dvpar+dv2par+dv2per) || dv2par<0 || dv2per<0) {
         utils::msg(utils::VL_WARNING, FUNCNAME,
             "Cannot compute diffusion coefficients at t="+utils::toString(tsamp)+
@@ -52,9 +54,9 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
     }
 
     // 2c. scale the diffusion coefs
-    dvpar  *= relaxationRate;
-    dv2par *= relaxationRate;
-    dv2per *= relaxationRate;
+    dvpar  *= coulombLog;
+    dv2par *= coulombLog;
+    dv2per *= coulombLog;
     double dEdt = dvpar + 0.5 * (dv2par + dv2per);
     if(dEdt * timestep < -0.5 * pow_2(vel))
         utils::msg(utils::VL_WARNING, FUNCNAME,
@@ -63,6 +65,9 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
             "; dt="+utils::toString(timestep)+", dE="+utils::toString(dEdt * timestep) );
 
     // 2d. assign the random (gaussian) velocity perturbation
+    // initialize the PRNG state vector, using the current position-velocity
+    // as the source of "randomness", with an unique seed for each orbit
+    math::PRNGState state = math::hash(data, 6, seed);
     double rand1, rand2;  // two normally distributed numbers
     math::getNormalRandomNumbers(/*output*/ rand1, rand2, /*PRNGState*/ &state);
     double deltavpar = rand1 * sqrt(dv2par * timestep) + dvpar / vel * timestep;
@@ -140,26 +145,32 @@ public:
 };
 
 // eliminate samples with zero mass or positive energy (i.e. non-existent h):
-void eliminateBadSamples(std::vector<double>& particle_h, std::vector<double>& particle_m)
+void eliminateBadSamples(std::vector<double>& particle_h,
+    std::vector<double>& particle_m, std::vector<double>& stellar_m)
 {
     // scan the array and squeeze it towards the head
     std::vector<double>::iterator src_h = particle_h.begin(); // where to take elements from
     std::vector<double>::iterator src_m = particle_m.begin(); // where to take elements from
+    std::vector<double>::iterator src_s = stellar_m.begin();  // where to take elements from
     std::vector<double>::iterator dest_h = src_h;  // where to store the elements (dest <= src always)
     std::vector<double>::iterator dest_m = src_m;
+    std::vector<double>::iterator dest_s = src_s;
     while(src_h != particle_h.end()) {
         if(isFinite(*src_h) && *src_h>0 && *src_m>0) {
             *(dest_h++) = *src_h;
             *(dest_m++) = *src_m;
+            *(dest_s++) = *src_s;
         }
         ++src_h;
         ++src_m;
+        ++src_s;
     }
-    assert(src_m == particle_m.end());  // two arrays must have the same size
+    assert(src_m == particle_m.end() && src_s == stellar_m.end());  // two arrays must have the same size
 
     // shrink the array to retain only valid samples
     particle_h.erase(dest_h, particle_h.end());
     particle_m.erase(dest_m, particle_m.end());
+    stellar_m .erase(dest_s, stellar_m.end());
     utils::msg(utils::VL_DEBUG, "RagaTaskRelaxation",
         "Retained "+utils::toString((unsigned int)particle_h.size())+" samples");
 }
@@ -169,17 +180,23 @@ potential::PtrPotential createSphericalPotential(
     const potential::BasePotential& potential, double Mbh)
 {
     // obtain the sph.-harm. coefficients of the stellar potential
-    // (here we assume that it is represented as a Multipole class!)
-    const potential::Multipole& pot =
-        dynamic_cast<const potential::Multipole&>(potential);
     std::vector<double> rad;
     std::vector<std::vector<double> > Phi, dPhi;
-    pot.getCoefs(rad, Phi, dPhi);
+    try{
+        // if the potential is an instance of Multipole class, take the coefs directly from it
+        dynamic_cast<const potential::Multipole&>(potential).getCoefs(rad, Phi, dPhi);
+    }
+    catch(std::bad_cast&) {
+        // otherwise construct a temporary instance of Multipole and take the coefs from it
+        dynamic_cast<const potential::Multipole&>(
+            *potential::Multipole::create(potential, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50)
+        ).getCoefs(rad, Phi, dPhi);
+    }
 
     // safety check: ensure that the potential is finite at origin
-    // (more specifically, extrapolated as Phi(0) + C r^s with s>=0.05) -
-    // this is needed for well-behaved diffusion coefs
-    const double MINSLOPE = 0.05;
+    // (more specifically, extrapolated as Phi(0) + C r^s with s>=0.25, i.e. rho(r) no steeper
+    // than the Bahcall-Wolf profile) - this is needed for well-behaved diffusion coefs
+    const double MINSLOPE = 1./4;
     double lnr1r0= log(rad[1]/rad[0]);
     double ratio = (Phi[0][1] - Phi[0][0]) / (dPhi[0][0] * rad[0] * lnr1r0);
     // ratio = [(r1/r0)^s - 1] / s / ln(r1/r0), and is  >= 1 + s/2 * ln(r1/r0)  if s>0
@@ -195,47 +212,62 @@ potential::PtrPotential createSphericalPotential(
     // retain only the l=0 terms and add the contribution from the central black hole
     Phi.resize(1);
     dPhi.resize(1);
-    for(unsigned int i=0; i<rad.size(); i++) {
-        Phi [0][i] -= Mbh / rad[i];
-        dPhi[0][i] += Mbh / pow_2(rad[i]);
+    potential::PtrPotential potSph(new potential::Multipole(rad, Phi, dPhi));
+    if(Mbh==0)
+        return potSph;
+    else {
+        // create a composite potential out of the stellar potential and the singular BH potential
+        std::vector<potential::PtrPotential> comp(2);
+        comp[0] = potSph;
+        comp[1] = potential::PtrPotential(new potential::Plummer(Mbh, 0));
+        return potential::PtrPotential(new potential::CompositeCyl(comp));
     }
-
-    // construct the spherical potential
-    return potential::PtrPotential(new potential::Multipole(rad, Phi, dPhi));
 }
 
 // prepare the relaxation model (diffusion coefficients) for the spherical potential
-galaxymodel::PtrSphericalIsotropicModelLocal createRelaxationModel(
+galaxymodel::PtrSphericalIsotropicModelLocal createAndWriteRelaxationModel(
     const potential::BasePotential& sphPot,
     std::vector<double>& particle_h,
     std::vector<double>& particle_m,
-    const unsigned int numbins)
+    std::vector<double>& stellar_m,
+    const unsigned int numbins,
+    const std::string& filename,
+    const std::string& header)
 {
     // establish the correspondence between phase volume <=> energy
     potential::PhaseVolume phasevol((potential::PotentialWrapper(sphPot)));
 
     // eliminate particles with zero mass or positive energy
-    eliminateBadSamples(particle_h, particle_m);
+    eliminateBadSamples(particle_h, particle_m, stellar_m);
 
     // the fitting procedure guarantees that f(h) grows slower than h^-1 as h -> 0,
-    // but to ensure that the total energy is finite, a stricter condition must be satisfied,
-    // which depends on the innermost slope of the potential
-    // (only relevant if the potential is singular, i.e. its innerSlope<0)
-    double minSlope = -1 - 1 / (1.5 + 3/innerSlope(potential::PotentialWrapper(sphPot))) + 0.05;
+    // but we impose a stricter restriction that  f(h)  does not diverge as h -> 0.
+    double minSlope = 0;
 
-    // determine the distribution function from the particle samples and represent it as a log-log spline
+    // determine the distribution function from the particle samples
+    // and represent it as a log-log spline.
+    // there are two distinct kinds of DFs: one is "unweighted" (df)
+    // (corresponds to the gravitating mass density in the phase space),
+    // the other (DF) is additionally weighted by stellar mass of each particle,
+    // and determines the relaxation rate
     CautiousLogLogSpline df(df::fitSphericalIsotropicDF(particle_h, particle_m, numbins), minSlope);
+    CautiousLogLogSpline DF(df::fitSphericalIsotropicDF(particle_h, stellar_m,  numbins), minSlope);
+
+    // write out the model to a text file, if needed
+    if(!filename.empty())
+        galaxymodel::writeSphericalIsotropicModel(
+             filename, header, df, potential::PotentialWrapper(sphPot));
 
     // compute diffusion coefficients
     return  galaxymodel::PtrSphericalIsotropicModelLocal(
-        new galaxymodel::SphericalIsotropicModelLocal(phasevol, df));
+        new galaxymodel::SphericalIsotropicModelLocal(phasevol, /*unweighted*/df, /*mass-weighted*/DF));
 }
 
 }  // internal ns
 
 RagaTaskRelaxation::RagaTaskRelaxation(
     const ParamsRelaxation& _params,
-    const particles::ParticleArrayCar& _particles,
+    const particles::ParticleArrayAux& _particles,
     const potential::PtrPotential& _ptrPot,
     const BHParams& _bh)
 :
@@ -245,20 +277,8 @@ RagaTaskRelaxation::RagaTaskRelaxation(
     bh(_bh),
     prevOutputTime(-INFINITY)
 {
-    ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
-    potential::PhaseVolume phasevol((potential::PotentialWrapper(*ptrPotSph)));
-    ptrdiff_t nbody = particles.size();
-    std::vector<double> particle_m(nbody);
-    particle_h.resize(nbody);
-    for(ptrdiff_t i=0; i<nbody; i++) {
-        particle_h[i] = phasevol(totalEnergy(*ptrPotSph, particles.point(i)));
-        particle_m[i] = particles.mass(i);
-    }
-    ptrRelaxationModel = createRelaxationModel(*ptrPotSph,
-        particle_h, particle_m, params.gridSizeDF);
-    
     utils::msg(utils::VL_DEBUG, "RagaTaskRelaxation",
-        "Initialized with relaxation rate="+utils::toString(params.relaxationRate));
+        "Initialized with ln Lambda="+utils::toString(params.coulombLog));
 }
 
 orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
@@ -266,22 +286,40 @@ orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
     return orbit::PtrRuntimeFnc(new RuntimeRelaxation(
         *ptrPotSph,
         *ptrRelaxationModel,
-        params.relaxationRate,
-        episodeLength / params.numSamplesPerEpisode,   // interval of time between storing the output samples
-        particle_h.begin() + params.numSamplesPerEpisode * index,  // first and last index of the output sample
+        params.coulombLog,
+        particles.point(index).stellarMass,
+        // interval of time between storing the output samples
+        episodeLength / params.numSamplesPerEpisode,
+        // first and last index of the output sample
+        particle_h.begin() + params.numSamplesPerEpisode * index,
         particle_h.begin() + params.numSamplesPerEpisode * (index+1),
-        math::hash((const void*)NULL, 0, index)  // seed for the orbit-local PRNG
+        index  // seed for the orbit-local PRNG
     ));
 }
 
 void RagaTaskRelaxation::startEpisode(double timeStart, double length)
 {
-    // at the beginning of the first episode, write out the spherical model file
-    if(!params.outputFilename.empty() && prevOutputTime == -INFINITY) {
+    // at the beginning of the first episode, create the spherical model and write it to a file
+    if(!ptrRelaxationModel) {
+        // create the sphericalized version of the true potential (including the central BH)
+        ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
+        // compute the values of phase volume h for each particle
+        potential::PhaseVolume phasevol((potential::PotentialWrapper(*ptrPotSph)));
+        ptrdiff_t nbody = particles.size();
+        std::vector<double> particle_m(nbody);
+        std::vector<double> stellar_m (nbody);
+        particle_h.resize(nbody);
+        for(ptrdiff_t i=0; i<nbody; i++) {
+            particle_h[i] = phasevol(totalEnergy(*ptrPotSph, particles.point(i)));
+            particle_m[i] = particles.mass(i);
+            stellar_m [i] = particles.mass(i) * particles.point(i).stellarMass;
+        }
+        // create the relaxation model and write it to a file (if needed)
+        ptrRelaxationModel = createAndWriteRelaxationModel(
+            *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
+            params.outputFilename.empty() ? "" : params.outputFilename + utils::toString(timeStart),
+            params.header);
         prevOutputTime = timeStart;
-        galaxymodel::writeSphericalIsotropicModel(
-            params.outputFilename + utils::toString(timeStart), params.header,
-            *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
     }
     episodeStart  = timeStart;
     episodeLength = length;
@@ -294,25 +332,29 @@ void RagaTaskRelaxation::finishEpisode()
     // assign mass to trajectory samples
     size_t nbody = particles.size();
     std::vector<double> particle_m(nbody * params.numSamplesPerEpisode);
+    std::vector<double> stellar_m (nbody * params.numSamplesPerEpisode);
     for(size_t i=0; i<nbody; i++) {
-        double mass = particles.mass(i) / params.numSamplesPerEpisode;
-        for(unsigned int j=0; j<params.numSamplesPerEpisode; j++)
+        double mass = particles.mass(i) / params.numSamplesPerEpisode,
+            mstar = particles.point(i).stellarMass;
+        for(unsigned int j=0; j<params.numSamplesPerEpisode; j++) {
             particle_m[i * params.numSamplesPerEpisode + j] = mass;
+            stellar_m [i * params.numSamplesPerEpisode + j] = mass * mstar;
+        }
     }
 
-    // create a new relaxation model for a sphericalized version of the current potential
+    // check if need to write out the relaxation model
+    double time = episodeStart+episodeLength;
+    std::string outputFilename;
+    if(!params.outputFilename.empty() && time >= prevOutputTime + params.outputInterval*0.999999) {
+        prevOutputTime = time;
+        outputFilename = params.outputFilename + utils::toString(time);
+    }
+
+    // create a new relaxation model for the sphericalized version of the current potential
     ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
-    ptrRelaxationModel = createRelaxationModel(*ptrPotSph,
-        particle_h, particle_m, params.gridSizeDF);
-
-    // check if we need to output the relaxation model to a file
-    double currentTime = episodeStart+episodeLength;
-    if(!params.outputFilename.empty() && currentTime >= prevOutputTime + params.outputInterval) {
-        prevOutputTime = currentTime;
-        galaxymodel::writeSphericalIsotropicModel(
-            params.outputFilename + utils::toString(currentTime), params.header,
-            *ptrRelaxationModel, potential::PotentialWrapper(*ptrPotSph));
-    }
+    ptrRelaxationModel = createAndWriteRelaxationModel(
+        *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
+        outputFilename, params.header);
 }
 
 }  // namespace raga

@@ -38,15 +38,16 @@
 const units::InternalUnits unit(units::galactic_Myr);
 int numActionEval = 0;
 
-bool isResonance(const std::vector<coord::PosVelCar>& traj)
+bool isResonance(const std::vector<std::pair<coord::PosVelCar, double> >& traj)
 {
     // determine if an orbit is a vertical 1:1 resonance, i.e. is not symmetric w.r.t z-reflection:
     // compare the average value of F(z) with its rms, where F(z) = z when R < average R, or -z otherwise
     math::Averager avgR, avgz;
     for(unsigned int i=0; i<traj.size(); i++)
-        avgR.add(sqrt(pow_2(traj[i].x)+pow_2(traj[i].y)));
+        avgR.add(sqrt(pow_2(traj[i].first.x)+pow_2(traj[i].first.y)));
     for(unsigned int i=0; i<traj.size(); i++)
-        avgz.add(traj[i].z * (pow_2(traj[i].x)+pow_2(traj[i].y) < pow_2(avgR.mean()) ? 1 : -1));
+        avgz.add(traj[i].first.z *
+            (pow_2(traj[i].first.x)+pow_2(traj[i].first.y) < pow_2(avgR.mean()) ? 1 : -1) );
     return avgz.mean() / sqrt(avgz.disp());
 }
 
@@ -56,8 +57,8 @@ bool test_actions(const potential::BasePotential& potential,
     const actions::ActionFinderAxisymFudge& actfinder,
     std::string& output)
 {
-    std::vector<coord::PosVelCar> traj = orbit::integrateTraj(
-        initial_conditions, total_time, timestep, potential);
+    std::vector<std::pair<coord::PosVelCar, double> > traj =
+        orbit::integrateTraj(initial_conditions, total_time, timestep, potential);
     double fd = fmax(
         //actions::estimateFocalDistancePoints(potential, traj);
         actfinder.focalDistance(toPosVelCyl(initial_conditions)),
@@ -75,7 +76,7 @@ bool test_actions(const potential::BasePotential& potential,
     double difJr=0, difJz=0;
     const coord::ProlSph coordsys(fd);
     for(size_t i=0; i<traj.size(); i++) {
-        const coord::PosVelCyl point = toPosVelCyl(traj[i]);
+        const coord::PosVelCyl point = toPosVelCyl(traj[i].first);
         const coord::PosVelProlSph pprol = coord::toPosVel<coord::Cyl, coord::ProlSph>(point, coordsys);
         const double
         Phi  = potential.value(point),
@@ -84,8 +85,8 @@ bool test_actions(const potential::BasePotential& potential,
             pow_2(point.z * point.vphi) +
             pow_2(point.R * point.vz - point.z * point.vR) +
             pow_2(point.vz) * coordsys.Delta2 );
-        actions::Actions acF = actions::actionsAxisymFudge(potential, toPosVelCyl(traj[i]), fd);
-        actions::Actions acI = actfinder.actions(toPosVelCyl(traj[i]));
+        actions::Actions acF = actions::actionsAxisymFudge(potential, point, fd);
+        actions::Actions acI = actfinder.actions(point);
         /*strm << utils::pp(point.R, 8)+' '+utils::pp(point.z, 8)+' '+
             utils::pp(pprol.lambda, 8)+' '+utils::pp(pprol.nu, 8)+' '+
             utils::pp(I3, 8)+' '+

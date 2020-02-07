@@ -177,9 +177,15 @@ doxy:
 	doxygen Doxyfile
 
 # if NEMO is present, the library may be used as a plugin providing external potentials within NEMO
-nemo:  $(LIBNAME)
 ifdef NEMOOBJ
-	-cp $(LIBNAME) $(NEMOOBJ)/acc/agama.so
+NEMO_PLUGIN = $(NEMOOBJ)/acc/agama.so
+
+nemo: $(NEMO_PLUGIN)
+
+$(NEMO_PLUGIN): $(LIBNAME)
+	-cp $(LIBNAME) $(NEMO_PLUGIN)
+else
+nemo:
 endif
 
 # if AMUSE is installed, compile the plugin and put it into the AMUSE community code folder
@@ -190,18 +196,19 @@ ifdef AMUSE_DIR
 AMUSE_WORKER_DIR = $(AMUSE_DIR)/src/amuse/community/agama
 AMUSE_WORKER     = $(AMUSE_WORKER_DIR)/agama_worker
 AMUSE_INTERFACE  = $(AMUSE_WORKER_DIR)/interface.py
+AMUSE_WORKER_INIT= $(AMUSE_WORKER_DIR)/__init__.py
 MPICXX   ?= mpicxx
 
-amuse: $(AMUSE_INTERFACE) $(AMUSE_WORKER)
+amuse: $(AMUSE_WORKER)
 
-$(AMUSE_INTERFACE): py/amuse_interface.py
+$(AMUSE_WORKER_INIT):
 	@mkdir -p $(AMUSE_WORKER_DIR)
 	echo>>$(AMUSE_WORKER_DIR)/__init__.py
+
+$(AMUSE_WORKER): py/amuse_interface.py $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(AMUSE_WORKER_INIT)
 	cp py/amuse_interface.py $(AMUSE_INTERFACE)
 	cp py/example_amuse.py   $(AMUSE_WORKER_DIR)
 	cp py/test_amuse.py      $(AMUSE_WORKER_DIR)
-
-$(AMUSE_WORKER): $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(AMUSE_INTERFACE)
 	$(AMUSE_DIR)/build.py --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
 	$(AMUSE_DIR)/build.py --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
 	$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)

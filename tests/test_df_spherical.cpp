@@ -328,7 +328,7 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         // only consider the classes and routines dealing with f(h) if the model is isotropic
         DFWrapper dfw(phasevol, trueDF);
         splDF.reset(new math::LogLogSpline(createInterpolatedDF(dfw)));
-        model.reset(new galaxymodel::SphericalIsotropicModelLocal(phasevol, dfw));
+        model.reset(new galaxymodel::SphericalIsotropicModelLocal(phasevol, dfw, dfw));
         gridRhoDF = galaxymodel::computeDensity(dfw, phasevol, gridPhi);   // rho(Phi) from DF
 
         // draw samples from the DF
@@ -465,13 +465,14 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         double splf=0, sphf=0, fitf1=0, fitf2=0, dfdens=0, sphdens=0, sphdisp=0, difE=0, difEE=0;
         if(isotropic) {
             splf   = splDF ->value(trueh);
-            sphf   = model ->value(trueh);
+            model->I0.evalDeriv(trueh, NULL, &sphf);  // DF in the spherical model is -g dI0/dh
+            sphf  *= -trueg;
             fitf1  = fitDF1->value(trueh);
             fitf2  = fitDF2->value(trueh);
             dfdens = gridRhoDF[i];
             sphdens= model->density(truePhi);
             sphdisp= model->velDisp(truePhi);
-            galaxymodel::difCoefEnergy(*model, E, difE, difEE);
+            galaxymodel::difCoefEnergy(*model, E, /*m*/ 1., /*output*/ difE, difEE);
         }
 
         // density-weighted error: integrate |1-x/x_true|^2  \rho(r) r^3  d\log(r)
@@ -545,7 +546,7 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
             double E = (1-pow_2(vrel)) * truePhi;
             double intdvpar, intdv2par, intdv2per;
             double truedvpar=0, truedv2par=0, truedv2per=0;
-            model->evalLocal(truePhi, E, intdvpar, intdv2par, intdv2per);
+            model->evalLocal(truePhi, E, 1., intdvpar, intdv2par, intdv2per);
             // note: no analytic expressions for the Hernquist model
             if(pot.name() == potential::Plummer::myName())
                 difCoefsPlummer(truePhi, E, truedvpar, truedv2par, truedv2per);

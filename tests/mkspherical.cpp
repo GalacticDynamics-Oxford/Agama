@@ -161,6 +161,8 @@ int main(int argc, char* argv[])
 
         if(!isSpherical(*dens) || !isSpherical(*pot))
             printfail("Density and potential models must be spherical");
+        if(!isFinite(dens->totalMass()))
+            printfail("Total mass must be finite");
     }
 
     // otherwise the input must be an N-body snapshot
@@ -214,9 +216,8 @@ int main(int argc, char* argv[])
     // now ripe the fruit: create an output table and/or
     // generate an N-body representation of the spherical model
     if(!outputtab.empty()) {
-        galaxymodel::writeSphericalIsotropicModel(outputtab, header,
-            galaxymodel::SphericalIsotropicModel(phasevol, df),
-            potential::PotentialWrapper(*pot));
+        galaxymodel::writeSphericalIsotropicModel(
+            outputtab, header, df, potential::PotentialWrapper(*pot));
     }
 
     if(!outputsnap.empty()) {
@@ -229,7 +230,6 @@ int main(int argc, char* argv[])
                 particles::ParticleArraySph::ElemType(coord::PosVelSph(0,0,0,0,0,0), mbh));
 
         // write the snapshot
-        particles::createIOSnapshotWrite(outputsnap, outputformat, units::ExternalUnits(), header)->
-            writeSnapshot(bodies);
+        writeSnapshot(outputsnap, bodies, outputformat, units::ExternalUnits(), header);
     }
 }

@@ -39,6 +39,8 @@
 */
 #pragma once
 #include "orbit.h"
+#include "particles_base.h"
+#include <string>
 
 /** The Monte Carlo stellar-dynamical code Raga */
 namespace raga {
@@ -52,6 +54,9 @@ struct BHParams {
     double sma;   ///< binary BH semimajor axis
     double ecc;   ///< binary BH eccentricity (0<=ecc<1)
     double phase; ///< binary BH orbital phase (0<=phase<2*pi)
+
+    /// set defaults
+    BHParams() : mass(0), q(0), sma(0), ecc(0), phase(0) {}
 
     /** Compute the position and velocity of the two components of the binary black hole
         at the time 't'.
@@ -84,7 +89,11 @@ public:
     
     /// compute the time derivative of the position/velocity vector at time t
     virtual void eval(const double t, const double x[], double dxdt[]) const;
-    
+
+    /// provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
+    /// to improve the total energy conservation
+    virtual double getAccuracyFactor(const double t, const double x[]) const;
+
     /** The size of the position/velocity vector */
     virtual unsigned int size() const { return 6; }
 };

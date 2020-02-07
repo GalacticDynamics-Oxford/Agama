@@ -12,6 +12,7 @@
 \newcommand{\Amuse}{\textsc{Amuse}\xspace}
 \newcommand{\Galpy}{\textsc{Galpy}\xspace}
 \newcommand{\Nemo} {\textsc{Nemo}\xspace}
+\newcommand{\Raga} {\textsc{Raga}\xspace}
 \newcommand{\Gsl}  {\textsc{Gsl}\xspace}
 \newcommand{\Eigen}{\textsc{Eigen}\xspace}
 \newcommand{\Nbody}{\textsl{N}-body\xspace}
@@ -251,10 +252,12 @@ Moreover there is a wrapper class that turns any user-provided function $\Phi(r)
 Axisymmetric models include the \ttt{MiyamotoNagai} and \ttt{OblatePerfectEllipsoid} potentials (the latter belongs to a more general class of St\"ackel potentials \cite{deZeeuw1985}, but is the only one implemented at present).
 There is another type of axisymmetric models that have a dedicated potential class, namely a separable \ttt{Disk} profile with $\rho(R,z) = \Sigma(R)\, h(z)$. A direct evaluation of potential requires 2d numerical quadrature, or 1d in special cases such as the exponential radial profile, which is still too costly. Instead, we use the \textsc{GalPot} approach introduced in \cite{KuijkenDubinski1995, DehnenBinney1998}: the potential is split into two parts, \ttt{DiskAnsatz} that has an analytic expression for the potential of the strongly flattened component, and the residual part that is represented with the \ttt{Multipole} expansion.
 
-Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cite{Dehnen1993} and \ttt{Ferrers} potentials. The first two have infinite extent and are usable only in certain contexts (such as orbit integration), because most routines expect the potential to vanish at infinity.
-Dehnen models may have any symmetry from spherical to triaxial; in non-spherical cases, the potential and its derivatives are computed using a 1d numerical quadrature \cite{MerrittFridman1996}, so this is rather costly (and also inaccurate at large distances). A preferred way of using an axisymmetric or triaxial Dehnen model is through the \ttt{Multipole} expansion. Ferrers ($n=2$) models are strictly triaxial, and have analytic expressions for the potential and its derivatives \cite{Pfenniger1984}.
-There is also a \ttt{Spheroid} class that describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles \cite{Zhao1996} with an optional exponential cutoff. Dehnen, Plummer, Isochrone and NFW profiles are all special cases of this model; however, this class only provides the density profile and not the potential. \ttt{Sersic} represents another commonly used density model, which can also be triaxial. 
-Generalized \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
+Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cite{Dehnen1993} and \ttt{Ferrers} potentials. The first two have infinite extent and are usable only in certain contexts (such as orbit integration), because most routines expect the potential to vanish at infinity. Ferrers ($n=2$) models are strictly triaxial, and have analytic expressions for the potential and its derivatives \cite{Pfenniger1984}. Dehnen models may have any symmetry from spherical to triaxial; in non-spherical cases, the potential and its derivatives are computed using a 1d numerical quadrature \cite{MerrittFridman1996}, so this is rather costly (and also inaccurate at large distances). A preferred way of using an axisymmetric or triaxial Dehnen model is through the \ttt{Multipole} expansion constructed from a \ttt{Spheroid} density profile. 
+This class describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles%
+\footnote{$\alpha$ here corresponds to $1/\alpha$ in the original paper: higher values of $\alpha$ produce sharper transitions between inner and outer asymptotic slopes.}
+\cite{Zhao1996} with an optional exponential cutoff. Many well-known models are special cases of this profile: Dehnen, Plummer, Isochrone, NFW, Gaussian, Einasto, Prugniel--Simien.
+This class only provides the density profile and not the potential, so it needs to be used in conjunction with the \ttt{Multipole} potential solver. Some models are defined in terms of the radial profile of the surface density, from which the 3d density may be reconstructed by deprojection. These include the two-power-law \ttt{Nuker} model and the exponential \ttt{Sersic} model; both provide only the density but not potential, and can also be flattened or triaxial. 
+Generalized spherical \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
 
 
 %%%%%%%%%%%%%%
@@ -295,7 +298,7 @@ We note that application of these methods to represent the potential of a galaxy
 \begin{tabular}{l m{5cm} >{\raggedright\arraybackslash}m{7cm}}
 Name & Formula & Parameters \\
 \hline
-\multicolumn{3}{c}{Density-only models} \\[2mm]
+\multicolumn{3}{c}{Density-only models} \\
 
 \ttt{Disk} & $\rho = \Sigma_0\,\exp\big(-\big[\frac{R}{R_\mathrm{d}}\big]^{\frac1n} - \frac{R_\mathrm{cut}}{R}\big)$
 $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
@@ -306,9 +309,11 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 \ttt{Spheroid} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
 \ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
 
+\ttt{Nuker} & \mbox{deprojection of $\Sigma={}$} \mbox{$\Sigma_0 \left(\frac{R}{a}\right)^{-\gamma} \Big[ \frac12 + \frac12\big(\frac{R}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
 \ttt{Sersic} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
-\multicolumn{3}{c}{Density/potential models} \\[2mm]
+\multicolumn{3}{c}{Density/potential models} \\
 
 \ttt{Plummer} & $\Phi = -\frac{M}{\sqrt{a^2+r^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$) \\[2mm]
 
@@ -357,7 +362,7 @@ Below follows the list of possible parameters of a single potential or density c
 \item \ppp{type} -- determines the type of potential used; should be the name of a class derived from \ttt{BasePotential} -- either an analytic potential listed in the first column of Table~\ref{tab:PotentialParams}, or an expansion (\ttt{Multipole} or \ttt{CylSpline}). It is usually required, except if the potential is loaded from a coefficients file -- in that case the name of the potential appears in the first line of this text file, so is determined automatically.
 \item  \ppp{density} -- if \ppp{type} is a potential expansion, this parameter determines the density model to be used; should be the name of a class derived from \ttt{BaseDensity} (or, by consequence, the name of an analytic potential), except that it cannot be a model with unbound potential (Logarithmic or Harmonic) or another potential expansion.\\
 \phantomsection\label{sec:PotentialGalpot}%
-There is one exception to the rule that \ppp{type} must encode a potential class: it may also contain the names of the density profiles originally used in \textsc{GalPot} -- \ttt{Disk}, \ttt{Spheroid} or \ttt{Sersic}. All such components are collected first, and used to construct a \textit{single} instance of \ttt{Multipole} potential with default parameters, plus zero or more instances of \ttt{DiskAnsatz} potentials (according to the number of disk profiles). The source density for this Multipole potential contains all Spheroid, S\'ersic and Disk components, plus \textit{negative} contributions of DiskAnsatz potentials (i.e., with inverted sign of their masses). Of course, one may use them also as regular \ppp{density} components (e.g., \ppp{type=CylSpline density=Disk}, which yields comparable accuracy), but in that case each one would create a separate potential expansion, which is of course not efficient. In order to lift this limitation, one may construct all density components individually, manually combine them into a single \ttt{CompositeDensity} model, and pass it to the constructor of a potential expansion (this approach is used for self-consistent multicomponent models, Section~\ref{sec:SCM}).
+There is one exception to the rule that \ppp{type} must encode a potential class: it may also contain the names of the density profiles originally used in \textsc{GalPot} -- \ttt{Disk}, \ttt{Spheroid}, \ttt{Nuker} or \ttt{Sersic}. All such components are collected first, and used to construct a \textit{single} instance of \ttt{Multipole} potential with default parameters, plus zero or more instances of \ttt{DiskAnsatz} potentials (according to the number of disk profiles). The source density for this Multipole potential contains all Spheroid, Nuker, S\'ersic and Disk components, plus \textit{negative} contributions of DiskAnsatz potentials (i.e., with inverted sign of their masses). Of course, one may use them also as regular \ppp{density} components (e.g., \ppp{type=CylSpline density=Disk}, which yields comparable accuracy), but in that case each one would create a separate potential expansion, which is of course not efficient. In order to lift this limitation, one may construct all density components individually, manually combine them into a single \ttt{CompositeDensity} model, and pass it to the constructor of a potential expansion (this approach is used for self-consistent multicomponent models, Section~\ref{sec:SCM}).
 \item \ppp{symmetry} -- defines the symmetry properties of the density model passed to the potential expansion. All built-in models report this property automatically; this parameter is useful if the input is given by an array of particles, or by a user-defined routine returning the density or potential in \Python and \Fortran interfaces. It could be either a text string with one of the standard choices from Table~\ref{tab:Symmetry} (only the first letter is used), or a number encoding a more complicated symmetry (see the definitions in \texttt{coord.h}).
 \item \ppp{file} -- the name of a file with potential expansion coefficients, or with an \Nbody snapshot to be used for creating a potential expansion. In the former case the type of potential expansion is stored in the first line of the file, so the \ppp{type} parameter is not required.
 \end{itemize}
@@ -366,16 +371,16 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{mass} [1] -- total mass of an analytic model.
 \item \ppp{scaleRadius} [1] -- the first (sometimes the only) parameter with the dimension of length that defines the profile.
 \item \ppp{scaleHeight} [1] or \ppp{scaleRadius2} -- the second such parameter (e.g., for Miyamoto--Nagai or exponential disk models).
-\item \ppp{outerCutoffRadius} [0] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} models (0 means no cutoff).
+\item \ppp{outerCutoffRadius} [$\infty$] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} models ($\infty$ means no cutoff).
 \item \ppp{innerCutoffRadius} [0] -- similar parameter for \ttt{Disk} that defines the radius of an inner hole.
-\item \ppp{surfaceDensity} [0] -- value of surface density at $R=0$ for the exponential \ttt{Disk} profile or for the \ttt{Sersic} profile.
+\item \ppp{surfaceDensity} [0] -- normalization of surface density (its value at $R=0$ for the exponential \ttt{Disk} or \ttt{Sersic} profiles, or at $R=$\ppp{scaleRadius} for the \ttt{Nuker} profile).
 \item \ppp{densityNorm} [0] -- value that defines the volume density at the scale radius for the \ttt{Spheroid} profile. Alternatively, instead of this or the previous parameter, one may provide the total mass of the corresponding model (these two parameters have a priority over mass), but this can't be done for infinite-mass models, so the density normalization remains the only option.
-\item \ppp{alpha} [1] -- parameter controlling the steepness of transition between two asymptotic power-law slopes for \ttt{Spheroid}.
-\item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{Spheroid}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
-\item \ppp{gamma} [1] -- power-law index of the inner density profile $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{Spheroid} models (should be $\gamma<3$).
+\item \ppp{alpha} [1] -- parameter controlling the steepness of transition between two asymptotic power-law slopes for \ttt{Spheroid} or \ttt{Nuker}.
+\item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{Spheroid} or \ttt{Nuker}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
+\item \ppp{gamma} [1] -- power-law index of the inner density profile: $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{Spheroid} ($\gamma<3$) models, or $\Sigma \propto R^{-\gamma}$ for \ttt{Nuker} model ($0\le \gamma < 2$).
 \item \ppp{cutoffStrength} [2] -- parameter controlling the steepness of the exponential cutoff in \ttt{Spheroid}.
 \item \ppp{sersicIndex} -- shape parameter of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk).
-\item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
+\item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Nuker}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
 \item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$.
 \item \ppp{W0} -- dimensionless potential depth of generalized King (lowered isothermal) models: $W_0 = [ \Phi(r_t) - \Phi(0) ] / \sigma^2$; larger values correspond to more extended envelopes (larger ratio between the outer truncation radius $r_t$ and the scale radius). In the above expression, the velocity dispersion $\sigma$ is not an independent parameter: the model in dimensionless units is specified by $W_0$ and the truncation strength parameter $g$; the potential, the truncation radius, and the total mass in dimensionless units are all determined by integrating a second-order ODE, and then the length and mass units are rescaled to match the given total mass $M$ and the scale radius (also called King radius or core radius).
 \item \ppp{trunc} [1] -- truncation strength parameter of lowered isothermal models (denoted by $g$ in \cite{GielesZocchi2015}); should be between 0 and 3.5 (0 corresponds to Woolley, 1 -- to King, 2 -- to Wilson models), larger values result in softer density fall-off near the truncation radius.
@@ -412,7 +417,7 @@ peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane
 
 Orbits of particles in the smooth time-independent potential are computed using the routine \ttt{orbit::integrate} in any of the three standard coordinate systems, plus optionally a rotating reference frame. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}; currently we provide only the 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have rather similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
 
-There are various tasks that can be performed during orbit integration, using classes derived from \ttt{orbit::BaseRuntimeFnc}. The simplest one (\ttt{orbit::RuntimeTrajectory}) is the recording of the trajectory at regular intervals of time, which are unrelated to the internal timestep of ODE solver (that is, the  position/\-velocity at any time is obtained by interpolation provided by the solver -- so-called dense output feature). More complicated tasks involve storage of some other kind of information, e.g., in the context of Schwarzschild modelling, or in some cases, even modifying the orbit itself (random perturbations mimicking the effect of two-body relaxation in the Monte Carlo code \textsc{Raga}).
+There are various tasks that can be performed during orbit integration, using classes derived from \ttt{orbit::BaseRuntimeFnc}. The simplest one (\ttt{orbit::RuntimeTrajectory}) is the recording of the trajectory either at every timestep of the ODE solver, or at regular intervals of time, which are unrelated to the internal solver timestep (that is, the  position and velocity at any time are obtained by interpolation provided by the solver -- so-called dense output feature). More complicated tasks involve storage of some other kind of information, e.g., in the context of Schwarzschild modelling, or in some cases, even modifying the orbit itself (random perturbations mimicking the effect of two-body relaxation in the Monte Carlo code \textsc{Raga}).
 
 Orbit analysis refers to the determination of orbit class (box, tube, resonant boxlet, etc.) and degree of chaoticity. This is performed using a Fourier transform of position as a function of time and detecting the most prominent ``spectral lines''; the ratio between their frequencies is an indicator of orbit type \cite{BinneySpergel1984, CarpinteroAguilar1998}, and their rate of change with time is a measure of chaos \cite{ValluriMerritt1998}. These methods were implemented in \cite{Vasiliev2013}, but as the focus of \Agama in galaxy modelling is shifted from discrete orbits to smooth distribution functions, we have not yet included them in the library.
 
@@ -952,8 +957,8 @@ returns the density of this component; \\[2mm]
 
 \paragraph{Orbit} integration is performed by the following routine:\\
 \texttt{result = agama.orbit(potential=pot, ic=posvel, time=int_time, ...)}\\
-here \ppp{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \ppp{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \ppp{Omega} specifies the pattern speed of a rotating coordinate system, \ppp{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos), and \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling.
-The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing a nonzero \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
+here \ppp{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \ppp{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \ppp{Omega} specifies the pattern speed of a rotating coordinate system, \ppp{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \ppp{dtype} is the storage data type for trajectories (32-bit or 64-bit float or complex), \ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos), and \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling. \\
+The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
 For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\
 \texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\
 and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\
@@ -1016,7 +1021,11 @@ There is an example program showing all these modes of operation.
 
 \Amuse \cite{PortegiesZwart2013} is a heterogeneous framework for performing and analyzing \Nbody simulations using a uniform approach to a variety of third-party codes. The core of the framework and the user scripts are written in \Python, while the community modules are written in various programming languages and interact with each other using a standartized interface.
 
-\Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. The plugin interface allows to construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin. This application is illustrated in the example script \texttt{py/example_amuse.py}.
+\Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. One may construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin. This application is illustrated in the example script \texttt{py/example_amuse.py}.
+
+Moreover, the stellar-dynamical simulation code \Raga (described in a separate document \texttt{readme_raga.pdf}) can be used from within \Amuse, as well as a standalone program (see \hyperref[sec:raga]{below}).
+
+The \Amuse plugin is built automatically if the environment variable \$AMUSE\_DIR is defined, and the interface is provided by the class \texttt{amuse.community.agama.interface.Agama}.
 
 
 %%%%%%%%%%%
@@ -1084,7 +1093,8 @@ There are a couple of closely related \Python programs:\\
 
 \paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalIsotropicDetails}. It reads all input parameters from an \texttt{ini} file; a couple of examples are given in \texttt{data/phaseflow_corecollapse.ini} and \texttt{data/phaseflow_bahcallwolfcusp.ini}
 
-\paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}), and an example input file is provided in \texttt{data/raga.ini}.
+\phantomsection\label{sec:raga}%
+\paragraph{raga} is a Monte Carlo stellar-dynamical code for simulating the evolution of non-spherical stellar systems \cite{Vasiliev2015}. It represents the system as a collection of particles that move in the smooth potential, represented as a \ttt{Multipole} expansion with coefficients being regularly recomputed from the particles themselves, and can include several additional dynamical processes: explicitly simulated two-body relaxation, loss-cone effects (capture of particles by a massive black hole), and interaction between a binary massive black hole and the stellar system. The code is described in a separate document (\texttt{readme_raga.pdf}), and an example input file is provided in \texttt{data/raga.ini}. The \Amuse interface to \Raga has extra features compared to the standalone program, namely the possibility of adding particles or changing the stellar masses and radii during the simulation.
 
 \begin{figure}
 \begin{center}
@@ -1737,7 +1747,7 @@ Extrapolation to small and large radii (beyond the extent of the grid) is perfor
 
 A \ttt{Multipole} potential may be constructed either from an existing potential object (in which case it simply computes a spherical-harmonic transform of the original potential at radial grid nodes), or from a density profile (thereby solving the Poisson equation):
 \begin{align}
-\Phi_{l,m}(r) &= -\frac{4\pi}{2l+1} \left[ r^{-l-1} \int_0^r \rho_{l,m}(r')\,{r'}^{\,l+2}\,\d r' + r^l\int_r^\infty \rho_{l,m}(r')\,{r'}^{\,1-l}\,\d r' \right],  \label{eq:SphHarmPoisson} \\
+\Phi_{l,m}(r) &= -\frac{4\pi\,G}{2l+1} \left[ r^{-l-1} \int_0^r \rho_{l,m}(r')\,{r'}^{\,l+2}\,\d r' + r^l\int_r^\infty \rho_{l,m}(r')\,{r'}^{\,1-l}\,\d r' \right],  \label{eq:SphHarmPoisson} \\
 \rho_{l,m}(r) &\equiv \frac{1}{\sqrt{4\pi}} \int_{-1}^1 \d \cos\theta\, \tilde P_l^m(\cos\theta) \int_0^{2\pi}\d \phi\:\trig m\phi\:\rho(r,\theta,\phi) .  \label{eq:SphHarmDensity}
 \end{align}
 
@@ -1765,7 +1775,7 @@ The automatic procedure is somewhat less optimal than in case of Multipole, so i
 
 The main advantage of \ttt{CylSpline} is in its ability to efficiently represent even very flattened density profiles, which are not suitable for \ttt{Multipole} expansion. When \ttt{CylSpline} approximation is constructed from another potential, this boils down to taking the Fourier transform in $\phi$ of potential and forces of the original potential at the nodes of 2d grid in $R,z$ plane. When it is constructed from a density profile, this involves the solution of Poisson equation in cylindrical coordinates, which is performed in two steps. First, a Fourier transform of the source model is created (if it was neither axisymmetric nor a \ttt{DensityCylGrid} class, see \hyperref[sec:DensityCylGrid]{below}). Next, for each $m$-th harmonic $\rho_m$, the potential is computed at each node $R,z$ of the 2d grid using the following approach \cite{CohlTohline1999}:
 \begin{align}
-\Phi_m(R,z) &= -\int_{-\infty}^{+\infty} \d z' \int_0^{\infty} \d R' \,2\pi R'\,\rho_m(R',z')  
+\Phi_m(R,z) &= -G \int_{-\infty}^{+\infty} \d z' \int_0^{\infty} \d R' \,2\pi R'\,\rho_m(R',z')  
   \,\Xi_m(R,z,R',z')\;,  \label{eq:PoissonCylindric} \\
 \Xi_m &\equiv \int_0^\infty \d k\, J_m(kR)\, J_m(kR')\, \exp(-k|z-z'|) \;,\quad
   \mbox{which evaluates to} \\
@@ -1778,7 +1788,7 @@ Here $Q$ is the Legendre function of the second kind, which is computed using a 
 %The two-dimensional integral in (\ref{eq:PoissonCylindric}) is calculated numerically with the \texttt{integrateNdim} routine (Section~\ref{sec:MathDetails}) to an accuracy of $10^{-6}$.
 For an array of particles, 
 \begin{align}  \label{eq:PoissonCylindricParticles}
-\Phi_m(R,z) = -\sum_k m_k\,\Xi_m(R,z,R_k,z_k)\,\trig m\phi_k .
+\Phi_m(R,z) = -G \sum_k m_k\,\Xi_m(R,z,R_k,z_k)\,\trig m\phi_k .
 \end{align}
 
 %%%%%%%%%%%%%%
@@ -1818,7 +1828,7 @@ The transformation between cylindrical and prolate spheroidal coordinates is giv
 \begin{subequations}
 \begin{align}
 R^2 &= (\lambda-\Delta^2)(\Delta^2-\nu)/\Delta^2,\quad z^2= \lambda\nu/\Delta^2, \\
-\lambda,\nu &= \textstyle\frac12 (R^2+z^2+\Delta^2) \pm \frac12\sqrt{(R^2+z^2-\Delta^2)^2+4R^2\Delta^2}
+\lambda,\nu &= \tfrac 1 2 (R^2+z^2+\Delta^2) \pm \frac12\sqrt{(R^2+z^2-\Delta^2)^2+4R^2\Delta^2}
 \quad\mbox{(+ for $\lambda$, -- for $\nu$)}, \\
 p_\lambda &= \frac{R\,v_R}{2(\lambda-\Delta^2)} + \frac{z\,v_z}{2\lambda}, \quad
 p_\nu      = \frac{R\,v_R}{2(\nu    -\Delta^2)} + \frac{z\,v_z}{2\nu},     \quad
@@ -1872,9 +1882,9 @@ Here we adopt the definition used by \cite{Sanders2012} (their eq.~3), given by
 %\frac{\dot\lambda^2 \,(\lambda-\nu)^2}{8(\lambda-\Delta^2)\lambda}.
 I_3 &= f_\tau(\tau) + \left( E - \frac{L_z^2}{2(\tau-\Delta^2)} - 2(\tau-\Delta^2)\,p_\tau^2 \right) \tau \qquad\mbox{($\tau$ is either $\lambda$ or $\nu$)}  \label{eq:I3} \\
 &= f_\tau(\tau) + \Phi(\lambda,\nu)\,\tau +
-\textstyle \frac12 \big( L^2 - L_z^2 + v_z^2\Delta^2 \big) \nonumber \\
+\tfrac 1 2 \big( L^2 - L_z^2 + v_z^2\Delta^2 \big) \nonumber \\
 &= [\Phi(\lambda,\nu) - \Phi(\lambda,0)]\,\lambda +
-\textstyle \frac12 \big( z^2 v_\phi^2 + (R v_z - z V_R)^2 + v_z^2\Delta^2 \big) . \label{eq:I3init}
+\tfrac 1 2 \big( z^2 v_\phi^2 + (R v_z - z V_R)^2 + v_z^2\Delta^2 \big) . \label{eq:I3init}
 \end{align}
 \end{subequations}
 A slightly different expression is used in \cite{Bienayme2015}: their eq.~1 introduces $I_s$ which equals $-I_3/\Delta^2$ (they denote the focal distance as $z_0$). 
@@ -1976,57 +1986,68 @@ g(E) &= 16\pi^2 \int_0^{r_\mathrm{max}(E)} r^2\, v(E,r)\, \d r =
 \end{align}
 \end{subequations}
 where  $v = \sqrt{2(E-\Phi(r))}$ is the velocity,  $L_\mathrm{circ}(E)$ is the angular momentum of a circular orbit with energy $E$,  and  $T_\mathrm{rad}(E,L) \equiv 2 \int_{r_-}^{r_+} \d r/v_r \equiv 2 \int_{r_-}^{r_+} \d r/\sqrt{v^2-L^2/r^2} = 2\pi\,\D J_r/\D E$ is the radial period (its dependence on $L$ at a fixed $E$ is usually weak).
-In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface.
+In other words, phase volume is literally the volume of phase space enclosed by the energy hypersurface. Equations 2 and 3 in \cite{Cohn1980}, or Equations 5.178 and 5.179 in \cite{Merritt2013}, define two similarly related quantities $p\equiv g/(4\pi^2)$, $q\equiv h/(4\pi^2)$, with $p=\d q/\d E$.
 
 The bi-directional correspondence between $E$ and $h$ is given by two 1d quintic splines (with derivative at each node given by $g$) in scaled coordinates. Namely, we use $\ln h$ as one coordinate, and the scaled energy $\scE \equiv \ln[1/\Phi(0) - 1/E]$ as the other one (both when the potential has a finite value $\Phi(0)$ at origin, or when it tends to $-\infty$). The purpose of this scaling is twofold. First, in the case of a finite $\Phi(0)$, any quantity that depends on $E$ directly is poorly resolved as $E\to \Phi(0)$ because of finite floating-point precision: e.g., if $\Phi(0)=-1$, and $E=-1+10^{-8}$ (corresponding to the radius as large as $10^{-4}$ in a constant-density core), we only have half of the mantissa available to represent the variation of $E$. By performing this scaling, we ``unfold'' the range of $\scE$ down to $-\infty$ with full precision. Second, this scaling converts a power-law asymptotic behaviour of $h(\Phi(r))$ at small and large radii into a linear dependence between $\ln h$ and $\scE$, suitable for extrapolation. Namely, as $E \to 0$ and $\Phi \propto -1/r$ (which is true for any finite-mass model in which the density drops faster than $r^{-3}$ at large radii), $h(E)\propto (-E)^{-3/2}$ and $g(E)\propto (-E)^{-5/2}$. At small radii, if the density behaves as $\rho \propto r^{-\gamma}$ and the corresponding potential -- as $\Phi \propto r^{2-\gamma}$, then $h(E) \propto [E-\Phi(0)]^{(12-3\gamma)/(4-2\gamma)}$ in the case $\gamma<2$ (when $\Phi(0)$ is finite), or $h(E) \propto (-E)^{(12-3\gamma)/(4-2\gamma)}$ if $2\le \gamma \le 3$ (including the case of the Kepler potential, $\gamma=3$); in both cases, $g(h) \propto h^{(8-\gamma)/(12-3\gamma)}$.
 The interpolation in scaled coordinates typically attains a level of accuracy better than $10^{-9}$ over the range of $h$ covered by the spline, and $\sim 10^{-5}$ in the extrapolated regime (if the potential indeed has a power-law asymptotic behaviour).
 
 Any non-negative function $f(h)$ may serve as a spherical isotropic DF. One possible representation is provided by the \ttt{math::LogLogSpline} class -- an interpolating spline in doubly-logarithmically scaled coordinates (i.e., $\ln f (\ln h)$ is a cubic spline and is extrapolated linearly to small and large $h$). Such DFs are constructed, e.g., by routines \ttt{createSphericalIsotropicDF} and \ttt{fitSphericalIsotropicDF} defined in \texttt{df_spherical.h}.
 
-The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \textsc{Raga} \cite{Vasiliev2015}. We assume that test stars are moving in the background of fields stars with distribution function $f(h)$, and both test and field stars have the same mass. There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of the test star at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
+The main application of these DFs is for simulating the effect of two-body relaxation, used in the Monte Carlo code \Raga \cite{Vasiliev2015} and in the Fokker--Planck code \textsc{PhaseFlow} \cite{Vasiliev2017}. In general, the entire stellar system may consist of one or more components described by DFs $f_c(h)$, with $m_c$ being the mass of individual stars in each component $c$. One needs to consider two kinds of the composite DF of the field stars: \textsl{plain} $f(h) \equiv \sum_{c} f_c(h)$ and \textsl{stellar mass-weighted} $\widehat f(h) \equiv \sum_{c} m_c\,f_c(h)$. Various derived quantities (integrals of the DF) will also be denoted by $\widehat{\cdot}$ if they use $\widehat f$. In \cite{Merritt2013} (Equation 5.173), $f$ and $\widehat f$ are denoted by $\nu$ and $\mu$, respectively.
+
+There are two possible descriptions of relaxation phenomena: either locally, as a perturbation to the velocity $v\equiv \sqrt{2(E-\Phi(r))}$ of a test star with mass $m$ at the given position $r$, or, in the orbit-averaged approach, as a perturbation to the star's energy $E$ averaged over its radial motion.
 In both cases, the rate of change of the given quantity per unit time is denoted by $\langle \dots \rangle$.
 
 The local (position-dependent) drift and diffusion coefficients in velocity are given by
 \begin{subequations}
 \begin{align}
-v\dvpar &= \textstyle -2\Gamma\, J_{1/2} \;,\\
-\dvsqpar&= \textstyle \;\frac{2}{3}\Gamma\, \left(I_0 + J_{3/2}\right) , \\
-\dvsqper&= \textstyle \;\frac{2}{3}\Gamma\, \left(2 I_0 + 3 J_{1/2} - J_{3/2}\right) , \quad\mbox{where} \\
+v\dvpar &= -\Gamma\, (m\,J_{1/2} + \widehat J_{1/2}) \;,\\
+\dvsqpar&= \;\tfrac{2}{3}\Gamma\, \left(\widehat I_0 + \widehat J_{3/2}\right) , \\
+\dvsqper&= \;\tfrac{2}{3}\Gamma\, \left(2 \widehat I_0 + 3 \widehat J_{1/2} - \widehat J_{3/2}\right) ,
+\quad\mbox{where} \\
 I_0(E)     &\equiv \int_E^0 f(E')\, \d E' = \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \d h', \\
 J_{n/2}(E,\Phi) &\equiv \int_{\Phi(r)}^E f(E') \left(\frac{E'-\Phi}{E-\Phi}\right)^{n/2} \d E' = 
- \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \left(\frac{E'(h')-\Phi}{E-\Phi}\right)^{n/2} \d h'.
+ \int_{h(E)}^\infty \frac{f(h')}{g(h')}\, \left(\frac{E'(h')-\Phi}{E-\Phi}\right)^{n/2} \d h', \\
+\makebox[20mm][l]{and similar definitions for $\widehat I_0, \widehat J_{n/2}$ using $\widehat f$ instead of $f$.} & \nonumber 
 \end{align}
 \end{subequations}
 
 Orbit-averaged energy drift and diffusion coefficients are given by
 \begin{subequations}  \label{eq:DriftDiffusionE}
 \begin{align}
-\langle \Delta E   \rangle_\mathrm{av} &= \phantom{2} \Gamma\; \left[I_0 - K_g/g \right], \\
-\langle \Delta E^2 \rangle_\mathrm{av} &= 2\Gamma\; \left[I_0\,h + K_h\right]/g, \\
+\langle \Delta E   \rangle_\mathrm{av} &= \phantom{2} \Gamma\; \left[\widehat I_0 - m\,K_g/g \right], \\
+\langle \Delta E^2 \rangle_\mathrm{av} &= 2\Gamma\; \left[\widehat I_0\,h + \widehat K_h\right] / \,g, \\
 K_g(E) &\equiv \int_{\Phi(0)}^E f(E')\,g(E')\,\d E' = \int_0^{h(E)} f(h')\,\d h', \\
 K_h(E) &\equiv \int_{\Phi(0)}^E f(E')\,h(E')\,\d E' = \int_0^{h(E)} \frac{f(h')\,h'}{g(h')}\,\d h'.
 \end{align}
 \end{subequations}
 
-In these expressions, $\Gamma  \equiv 16\pi^2 G^2 M_\mathrm{total} \times (N_\star^{-1}\ln\Lambda)$, where the term in brackets is the amplitude of relaxation term for the given number of stars $N_\star$ representing the stellar system ($\Lambda \sim N$ is the Coulomb logarithm). We note that $K_g(E)$ is the mass of stars with energies less than $E$ (and thus $M_\mathrm{total} = K_g(0)$), and $K_h(E)$ is their kinetic energy (up to a factor 3/2).
+In these expressions, $\Gamma \equiv 16\pi^2\, G^2\, \ln\Lambda$, where $\ln\Lambda \sim \ln N = \mathcal O(10)$ is the Coulomb logarithm. We note that $K_g(E)$ is the mass of stars with energies less than $E$ (and thus $M_\mathrm{total} = K_g(0)$), and $K_h(E)$ is ${}^{2\!}/_{\!3}$ times their kinetic energy.
 
 Of course, an efficient evaluation of diffusion coefficients again requires interpolation from pre-computed tables, which are provided by the class \ttt{SphericalIsotropicModelLocal}. From the above expressions it is clear that $I_0$, $K_g$ and $K_h$ can be very accurately approximated by quintic splines in $h$, log-scaled in both coordinates and linearly extrapolated (provided that $f(h)$ also has power-law asymptotic behaviour at large and small $h$). 
 Moreover, $J_0(E,\Phi) = I_0(\Phi)-I_0(E)$, and $J_{n/2}(E,\Phi)\lesssim J_0$ thanks to the weighting factor (the ratio of velocities of field and test stars to the power of $n$). Indeed, for $E\to\Phi$, $J_{n/2} \to 1/(n+1)$. We interpolate the ratio $J_{n/2}/J_0$ as a function of $\ln h(\Phi)$ and $\ln h(E)-\ln h(\Phi)$ on a 2d grid covering a very broad range of $h$; the accuracy of this cubic spline interpolation is $\sim 10^{-4}..10^{-6}$, and it is extrapolated as a constant outside the definition region (while this is a good asymptotic approximation for large $h$, there is no easy way of delivering a reasonably correct extrapolation to small $h(\Phi)$ -- fortunately, the volume of this region is negligible in practice).
 
-Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) \d ^3v$. This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
+Another method for studying the evolution of stellar distribution driven by the two-body relaxation is the Fokker--Planck (FP) equation for $f(h,t)$ coupled with the 1d Poisson equation for $\Phi(r,t)$. The latter provides the potential corresponding to the density profile which is obtained by integrating the DF over velocity: $\rho(r,t)=\int f(h,t) \d ^3v$. In a multicomponent system, the DFs of individual components $f_c$ evolve independently in a common potential, which is still determined by the total \textsl{plain} DF $f\equiv \sum_{c} f_c$.
+This system of two PDEs -- parabolic for the DF and elliptic for the potential -- is solved using interleaved steps: first the orbit-averaged drift and diffusion coefficients entering the FP equation are obtained from (\ref{eq:DriftDiffusionE}), then the DF is evolved for some interval of time in a fixed potential, then the density is recomputed and the potential is updated through the Poisson equation.
+
 Traditionally, the DF is expressed as a function of energy, but this has a disadvantage when it comes to solving the Poisson equation: as the potential changes, the DF should be kept fixed as a function of phase volume, not energy (e.g., \cite{Cohn1980}). Thus the formulation entirely in terms of $f(h)$ is preferrable, and does not introduce any additional complications. It is convenient to write down the FP equation in the flux-conservative form:
 \begin{align}
-\frac{\D f(h,t)}{\D (\Gamma t)} &= \frac{\D }{\D h} \left[ D_{hh} \frac{\D f(h,t)}{\D h} + D_h f(h,t) \right] , \label{eq:FokkerPlanck} \\
-D_{hh} &= g(h)\,\big[ h\, I_0(h) + K_h(h) \big], \qquad D_h = K_g(h).  \label{eq:FokkerPlanckCoefs}
+\frac{\D f_c(h,t)}{\D t} &= 
+\frac{\D }{\D h} \left[ A_c(h)\,f_c(h,t) + D(h) \frac{\D f_c(h,t)}{\D h} \right] ,
+\label{eq:FokkerPlanck} \\
+A_c(h) &= \Gamma\, m_c\, K_g(h), \qquad
+D(h)    = \Gamma\, g(h)\, \big[ h\, \widehat I_0(h) + \widehat K_h(h) \big].
+\label{eq:FokkerPlanckCoefs}
 \end{align}
+Note that the advection coefficient $A_c$ for $c$-th component is proportional to the mass of individual stars $m_c$ of this component and involves the \textsl{plain} total DF $f$, whereas the diffusion coefficient $D$ is the same for all components, and is given by integrals over the \textsl{stellar mass-weighted} total DF $\widehat f$.
 To achieve high dynamical range, $h$ is further replaced by $\ln h$, with a trivial modification of the above expressions.
 
 The Fokker--Planck solver, dubbed \textsc{PhaseFlow} \cite{Vasiliev2017}, has several ingredients:
 \begin{itemize}
-\item The distribution function $f(h,t)$ for the evolving population of stars, represented by its values on a grid in $\ln h$. Values of $f(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f$ as a function of $\ln h$.
+\item The distribution functions $f_c(h,t)$ for all evolving populations of stars, represented by their values on a grid in $\ln h$. Values of $f_c(h)$ for an arbitrary argument are obtained from a cubic spline interpolator for $\ln f_c$ as a function of $\ln h$.
 \item The potential $\Phi(r)$ corresponding to the density profile $\rho(r)$ of the evolving population, plus optionally an external component (e.g., a central point mass). The 1d Poisson equation is solved by the \ttt{Multipole} class (of course, a monopole is a particular case of a multipole).
-\item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,\d E$ is obtained from the DF \textit{in the given potential}. We recompute the density after the DF has been evolved in the Fokker--Planck step, using the potential extrapolated from its previous evolution to the current time. This extrapolation makes in unnecessary to iteratively improve the solution by substituting the self-consistent potential back to the r.h.s.\ of this equation.
-\item The drift and diffusion coefficients $D_h, D_{hh}$ are computed using a dedicated class \ttt{SphericalIsotropicModel} which combines the DF $f(h)$ with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
+\item The density $\rho(\Phi(r)) = \int_{\Phi}^0 f\big(h(E)\big)\,4\pi\sqrt{2(E-\Phi)}\,\d E$ is obtained from the \textsl{plain} total DF \textit{in the given potential}. We recompute the density after the DF has been evolved in the Fokker--Planck step, using the potential extrapolated from its previous evolution to the current time. This extrapolation makes in unnecessary to iteratively improve the solution by substituting the self-consistent potential back to the r.h.s.\ of this equation.
+\item The advection and diffusion coefficients $A, D$ are computed using a dedicated class \ttt{SphericalIsotropicModel} which combines the two kinds of the total DF -- $f(h)$ and $\widehat f(h)$ -- with a potential $\Phi(r)$ and a mapping $h\leftrightarrow E$ (\ttt{PhaseVolume}) constructed for the given $\Phi$.
 \item The FP equation (\ref{eq:FokkerPlanck}) in the discretized form is solved with the Chang--Cooper scheme (e.g., \cite{ParkPetrosian1996}) or with a finite-element method, described in the appendix of \cite{Vasiliev2017}.
 \end{itemize}
 
@@ -2316,6 +2337,9 @@ Martin R., 2008, \textsl{Clean code}, Prentice Hall
 \bibitem{McConnell}
 McConnell S., 2004, \textsl{Code complete}, Microsoft press
 
+\bibitem{Merritt2013}
+Merritt D., 2013, \textsl{Dynamics and evolution of galactic nuclei}, Princeton Univ.\ press
+
 \bibitem{MerrittFridman1996}
 Merritt D., Fridman T., 1996, ApJ, 460, 136
 
@@ -2399,7 +2423,7 @@ Vasiliev E., 2019, MNRAS, 482, 1525
 Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
 
 \bibitem{VasilievValluri2020}
-Vasiliev E., Valluri M., 2020, ApJ, in press; arXiv:1912.04288
+Vasiliev E., Valluri M., 2020, ApJ, 889, 39
 
 \bibitem{Zhao1996}
 Zhao H.-S., 1996, MNRAS, 278, 488

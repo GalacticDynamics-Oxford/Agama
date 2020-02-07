@@ -10,19 +10,21 @@ inline double pow_2(double x)  { return x*x; }
 
 /* ----------------- ODE integrators ------------- */
 
-/* --- DOP853 high-accuracy Runge-Kutta integrator --- */
-
-double OdeSolverDOP853::initTimeStep()
+double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], double accAbs, double accRel)
 {
+    const int NDIM = odeSystem.size();
+
     // min/max limits on the initial timestep
     static const double HMIN = 1e-12, HMAX = 1e12;
 
     // temporary storage allocated on the stack
-    double *xt = static_cast<double*>(alloca(NDIM*3 * sizeof(double))),
-    *x  = &state[0],  // x(t)     (initial point)
-    *k1 = x  + NDIM,  // dx/dt(t) at the initial point (already computed on entering this routine)
-    *k2 = xt + NDIM,  // local temporary storage
+    double *xt = static_cast<double*>(alloca(NDIM*4 * sizeof(double))),
+    *k1 = xt + NDIM,  // dx/dt(t) at the initial point
+    *k2 = k1 + NDIM,  // local temporary storage
     *k3 = k2 + NDIM;
+
+    // compute the derivatives at the initial point
+    odeSystem.eval(time, x, k1);
 
     // compute the L2-norm of x and dx/dt (use the sum of all components for the crude estimate)
     double normx0 = 0, normd0 = 0;
@@ -65,6 +67,8 @@ double OdeSolverDOP853::initTimeStep()
     return h;
 }
 
+/* --- DOP853 high-accuracy Runge-Kutta integrator --- */
+
 void OdeSolverDOP853::init(const double stateNew[])
 {
     // copy the vector x
@@ -73,7 +77,7 @@ void OdeSolverDOP853::init(const double stateNew[])
     // obtain the derivatives dx/dt
     odeSystem.eval(time, stateNew, /*where to store the derivs*/ &state[NDIM]);
     if(nextTimeStep == 0)
-        nextTimeStep = initTimeStep();
+        nextTimeStep = initTimeStep(odeSystem, time, stateNew, accAbs, accRel);
 }
 
 double OdeSolverDOP853::doStep(double dt)
@@ -292,8 +296,9 @@ double OdeSolverDOP853::doStep(double dt)
 
         // error estimation
         double err5 = 0.0, err3 = 0.0;
+        double accFac = odeSystem.getAccuracyFactor(time + timeStep, xt);
         for(int i=0; i<NDIM; i++) {
-            double sk = accAbs + accRel * fmax(fabs(x[i]), fabs(xt[i]));
+            double sk = (accAbs + accRel * fmax(fabs(x[i]), fabs(xt[i]))) * accFac;
             if(sk==0) continue;
             err3 += pow_2( (   k13[i] - bhh1*k1 [i] - bhh2*k9 [i] - bhh3*k12[i]) / sk);
             err5 += pow_2( (er1*k1[i] + er6 *k6 [i] + er7 *k7 [i] + er8 *k8 [i]  +
@@ -322,7 +327,7 @@ double OdeSolverDOP853::doStep(double dt)
                 nbad++;
                 if(nbad >= 2)
                     fac = 1/fdec;  // apply maximum reduction in timestep
-                if(nbad >= 5) {
+                if(nbad >= 4) {
                     // no improvement likely means that something is wrong with the error estimate
                     // (e.g. one of the variables is nearly zero so that the relative error is huge);
                     // just accept the current step and try to proceed further

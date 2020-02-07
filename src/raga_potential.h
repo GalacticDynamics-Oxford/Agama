@@ -31,8 +31,6 @@
 */
 #pragma once
 #include "raga_base.h"
-#include "particles_base.h"
-#include <string>
 
 namespace raga {
 
@@ -76,6 +74,9 @@ struct ParamsPotential {
     /// (0 means spherical symmetry, and generally only even values should be used)
     unsigned int lmax;
 
+    /// min/max grid radii (0 means autodetect)
+    double rmin, rmax;
+
     /// number of points in the radial grid for the potential;
     /// all these parameters describe the Multipole potential whether constructed
     /// at the beginning of the simulation or updated at the end of an episode
@@ -90,6 +91,13 @@ struct ParamsPotential {
 
     /// interval between outputting the potential (should be a multiple of the episode length)
     double outputInterval;
+
+    /// set defaults
+    ParamsPotential() :
+        symmetry(coord::ST_TRIAXIAL),
+        lmax(0), rmin(0), rmax(0), gridSizeR(25),
+        numSamplesPerEpisode(1), outputInterval(0)
+    {}
 };
 
 /** The driver class performing the task of potential update and output */
@@ -97,22 +105,19 @@ class RagaTaskPotential: public BaseRagaTask {
 public:
     RagaTaskPotential(
         const ParamsPotential& params,
-        const particles::ParticleArrayCar& particles,
+        const particles::ParticleArrayAux& particles,
         potential::PtrPotential& ptrPot);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "PotentialUpdate"; }
 private:
-    /** write out potential coefficients and update the last output time  */
-    void outputPotential(double time);
-
 
     /** fixed parameters of this task  */
     const ParamsPotential params;
 
     /** read-only reference to the list of particles (only their current masses are used)  */
-    const particles::ParticleArrayCar& particles;
+    const particles::ParticleArrayAux& particles;
 
     /** reference to the global shared pointer containing the stellar potential,
         the original shared pointer is owned by the RagaCore class;

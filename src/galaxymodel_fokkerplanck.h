@@ -113,7 +113,7 @@ struct FokkerPlanckParams {
         hmin(0.), hmax(0.),  // autodetect
         rmax(0.),
         Mbh(0.),
-        coulombLog(1.),
+        coulombLog(0.),
         selfGravity(true),
         updatePotential(true),
         lossConeDrain(true),

@@ -198,13 +198,14 @@ bool testOde()
 bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
 {
     potential::PtrPotential pot = potential::createPotential(utils::KeyValueMap(potParams));
-    
+
     coord::PosVelCar initCond(1., 1., 1., 0., 0., 0.);
     double orbitalPeriod = potential::T_circ(*pot, totalEnergy(*pot, initCond));  // characteristic time
     double timeTotal = 1000. * orbitalPeriod;       // integration time in orbital periods
     double samplingInterval = 0.1 * orbitalPeriod;  // store output with sufficient temporal resolution
-    std::vector<coord::PosVelCar> trajectory6;      // from standard 6-dimensional ODE integrator
-    std::vector<coord::PosVelCar> trajectory12;     // from 12-dimensional ODE integrator (orbit+var.eq.)
+    std::vector< std::pair<coord::PosVelCar, double> >
+        trajectory6,                                // from standard 6-dimensional ODE integrator
+        trajectory12;                               // from 12-dimensional ODE integrator (orbit+var.eq.)
     std::vector<double> logDeviationVector6i;       // from the internal var.eq.solver in the 6d case
     std::vector<double> logDeviationVector12i;      // same for the 12d case
     std::vector<double> logDeviationVector12o;      // from the var.eq. solved by the 12d orbit integrator
@@ -246,15 +247,20 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         std::ofstream strm(("test_orbit_lyapunov"+utils::toString(testIndex++)+".dat").c_str());
         strm << "#time\tx(6) y(6) z(6)\tx(12) y(12) z(12)\tlnw6i lnw12i lnw12o\n";
         for(size_t i=0; i<size; i++)
-            strm << (i*samplingInterval/orbitalPeriod) << '\t' <<
-            trajectory6 [i].x << ' ' << trajectory6 [i].y << ' ' << trajectory6 [i].z << '\t' <<
-            trajectory12[i].x << ' ' << trajectory12[i].y << ' ' << trajectory12[i].z << '\t' <<
-            logDeviationVector6i[i] << ' ' << logDeviationVector12i[i] << ' ' <<
-            logDeviationVector12o[i] << '\n';
+            strm << /*time*/ trajectory6[i].second << '\t' <<
+            trajectory6 [i].first.x << ' ' <<
+            trajectory6 [i].first.y << ' ' <<
+            trajectory6 [i].first.z << '\t'<<
+            trajectory12[i].first.x << ' ' <<
+            trajectory12[i].first.y << ' ' <<
+            trajectory12[i].first.z << '\t'<<
+            logDeviationVector6i[i] << ' ' <<
+            logDeviationVector12i[i]<< ' ' <<
+            logDeviationVector12o[i]<< '\n';
     }
     double Einit = totalEnergy(*pot, initCond) - Omega * Lz(initCond);   // Jacobi energy
-    double Eend6 = totalEnergy(*pot, trajectory6. back()) - Omega * Lz(trajectory6. back());
-    double Eend12= totalEnergy(*pot, trajectory12.back()) - Omega * Lz(trajectory12.back());
+    double Eend6 = totalEnergy(*pot, trajectory6. back().first) - Omega * Lz(trajectory6. back().first);
+    double Eend12= totalEnergy(*pot, trajectory12.back().first) - Omega * Lz(trajectory12.back().first);
     std::cout << "Potential: " << potParams <<
         ";  pattern speed: "   << Omega << 
         ";  orbital period: "  << orbitalPeriod <<

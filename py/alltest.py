@@ -7,14 +7,15 @@ def alltest():
     passed = 0
     failed = 0
     for prog in allprogs:
-        progname = prog[1] if isinstance(prog, tuple) else prog
-        sys.stdout.write(os.path.basename(progname)+"  ")
+        progname = os.path.basename(prog[1] if isinstance(prog, tuple) else prog)
+        sys.stdout.write(progname)
         sys.stdout.flush()
+        filler = ' ' * (32-len(progname))
         try:
             tstart = time.time()
             proc = subprocess.Popen(prog, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             result = proc.communicate()[0].decode()
-            elapsed = "%.1f s, " % (time.time()-tstart)
+            elapsed = filler + "%5.1f s, " % (time.time()-tstart)
             if "ALL TESTS PASSED" in result:
                 print(elapsed+"OK")
                 passed+=1
@@ -24,7 +25,7 @@ def alltest():
             else:
                 print(elapsed+"UNKNOWN")
         except Exception as e:
-            print("NOT STARTED: "+str(e))
+            print(filler + "NOT STARTED: "+str(e))
     print(str(passed)+" TESTS PASSED" + \
         ( ", "+str(failed)+" FAILED" if failed>0 else ", NONE FAILED") +
         ( ", "+str(len(allprogs)-passed-failed)+" UNKNOWN" if passed+failed!=len(allprogs) else "") )

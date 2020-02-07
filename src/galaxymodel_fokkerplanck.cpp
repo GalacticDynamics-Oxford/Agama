@@ -401,11 +401,7 @@ public:
         weightMat(fem.computeProjMatrix(auxGridWeights))
     {}
 
-    virtual math::PtrFunction getInterpolatedFunction(const std::vector<double>& amplitudes) const
-    {
-        return math::PtrFunction(new ScaledFunction(math::PtrFunction(
-            new math::BsplineWrapper<N>(fem.interp, regularizeAmplitudes(fem.interp, amplitudes)))));
-    }
+    virtual math::PtrFunction getInterpolatedFunction(const std::vector<double>& amplitudes) const;
 
     virtual std::vector<double> getGridForCoefs() const { return auxGridCoords; }
 
@@ -440,14 +436,14 @@ public:
     }
 };
 
-/// specialization of the interpolator for N=1 and N=3 using more efficient methods
+/// different implementations for N=1 (linear interpolator) and N=2,3 (cubic spline)
 template<> math::PtrFunction FokkerPlanckImplFEM<1>::getInterpolatedFunction(
     const std::vector<double>& amplitudes) const
 {
     return math::PtrFunction(new ScaledFunction(math::PtrFunction(new math::LinearInterpolator(
         fem.interp.xvalues(), regularizeAmplitudes(fem.interp, amplitudes)))));
 }
-template<> math::PtrFunction FokkerPlanckImplFEM<3>::getInterpolatedFunction(
+template<int N> math::PtrFunction FokkerPlanckImplFEM<N>::getInterpolatedFunction(
     const std::vector<double>& amplitudes) const
 {
     return math::PtrFunction(new ScaledFunction(math::PtrFunction(new math::CubicSpline(
@@ -984,8 +980,6 @@ void FokkerPlanckSolver::reinitPotential(double deltat)
 
 void FokkerPlanckSolver::reinitAdvDifCoefs()
 {
-    // constant multiplicative factor for advection/diffusion coefs
-    const double GAMMA = 16*M_PI*M_PI * data->coulombLog;
     // recompute the angular-momentum draining rate once in a while only,
     // because this is a rather expensive operation, and being slightly off in estimating
     // the angular momentum diffusion is not a big deal
@@ -994,94 +988,81 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
     numComp   = data->numComp,           // number of DF components
     gridSize  = data->gridh.size(),      // size of the grid in phase volume that defines the DF
     numPoints = data->gridAdvDifCoefs.size();   // size of the auxiliary grid for adv/dif coefs
-    data->Etot = data->Ekin = 0.;        // overall diagnostic quantities
+
     // total advection and diffusion coefs (sum over all species) at the nodes of the auxiliary grid
     data->gridAdv.assign(numPoints, 0.);
     data->gridDif.assign(numPoints, 0.);
-    // total angular-momentum diffusion coef
-    std::vector<double> gridLC(gridSize);
-    // total adv/dif coefs at the innermost boundary, used to compute the flux
-    double adv0=0, dif0=0;
-    // DF values and the integrals I0, at the innermost boundary, for all species
-    std::vector<double> fval0(numComp), fint0(numComp);
 
     // prefactor for GW energy loss (for a circular orbit)
     double GWterm = data->Mbh>0 && data->speedOfLight>0 ?
         307.2 / pow_2(data->Mbh) / pow(data->speedOfLight, 5) : 0;
 
-    // collect and sum up the advection and diffusion coefficients from each component;
-    // the diffusion coef is the same for all species, and the functional form of the advection coef
-    // is also universal, but its magnitude will be later multiplied by the stellar mass of each species
+    // assemble two kinds of the composite DF:
+    // f -- sum of DFs of all components
+    // F -- sum of DFs multiplied by stellar mass of each component;
+    // the former determines the advection, and the latter -- the diffusion coefficients.
+    std::vector<double> gridf(data->gridf[0].size()), gridF(gridf.size());
     for(unsigned int comp = 0; comp < numComp; comp++) {
-
-        // construct the spherical model for this DF in the current potential
-        math::PtrFunction df = impl->getInterpolatedFunction(data->gridf[comp]);
-        SphericalIsotropicModel model(*data->phasevol, *df, data->gridh);
-
-        // store diagnostic quantities
-        data->Mass[comp] = model.cumulMass();
-        data->Etot      += model.cumulEtotal();
-        data->Ekin      += model.cumulEkin();
-        // one could also compute them as
-        //data->Mass[comp] = math::blas_ddot(data->gridf[comp], data->gridMass);
-        //data->Etot      += math::blas_ddot(data->gridf[comp], data->gridEnergy);
-
-        // compute the advection and diffusion coefficients for the given component
-        // at the points of grid where these coefs are needed
-        for(unsigned int p=0; p<numPoints; p++) {
-            double h  = data->gridAdvDifCoefs[p], g;
-            double I0 = model.I0(h);
-            double Kg = model.cumulMass(h);
-            double Kh = model.cumulEkin(h) * (2./3);
-            double E  = data->phasevol->E(h, &g);
-
-            // advection coefficient D_h  without the pre-factor m_star
-            data->gridAdv[p] += GAMMA * Kg;
-
-            // diffusion coefficient D_hh
-            data->gridDif[p] += GAMMA * data->Mstar[comp] * g * (Kh + h * I0);
-
-            // if the energy loss due to GW emission is considered, add the following term
-            // to the advection coefficient (the loss is also proportional to the mass of a star).
-            // this needs to be done only once, so we do it when considering the 0th component.
-            if(comp==0)
-                data->gridAdv[p] += GWterm * pow_2(E*E) * h;
-        }
-
-        // if needed, compute the angular-momentum diffusion coefficient on a different grid in h
-        if(computeDrainMatrix && data->lossConeDrain) {
-            for(unsigned int i=0; i<gridSize; i++) {
-                gridLC[i]  += difCoefLosscone(model,
-                    potential::PotentialWrapper(*data->currPot),
-                    data->phasevol->E(data->gridh[i])) *
-                    (data->coulombLog * data->Mstar[comp] / model.cumulMass());
-            }
-        }
-
-        // store the value of f(h) and the integral I0(h) at the inner boundary
-        // and accumulate the advection/diffusion coefs at this point
-        double h0   = data->gridh[0];
-        fval0[comp] = df->value(h0);
-        fint0[comp] = model.I0(h0);
-        adv0 += GAMMA * model.cumulMass(h0);
-        dif0 += GAMMA * data->Mstar[comp] * (model.cumulEkin(h0) * (2./3) + h0 * fint0[comp]);
+        math::blas_daxpy(1., data->gridf[comp], gridf);
+        math::blas_daxpy(data->Mstar[comp], data->gridf[comp], gridF);
+        data->Mass[comp] = math::blas_ddot(data->gridf[comp], data->gridMass);
     }
+    math::PtrFunction f = impl->getInterpolatedFunction(gridf);
+    math::PtrFunction F = impl->getInterpolatedFunction(gridF);
+
+    // construct the integrals I0, Kg, Kh from the two composite DFs
+    const SphericalIsotropicModel model(*data->phasevol, *f, *F, data->gridh);
+
+    // store diagnostic quantities
+    data->Etot = model.totalEnergy;
+    data->Ekin = model.totalEkin;
+
+    // constant multiplicative factor for advection/diffusion coefs
+    const double GAMMA = 16*M_PI*M_PI * data->coulombLog;
+
+    // compute the advection and diffusion coefficients
+    // at the points of grid where these coefs are needed
+    // (not necessarily the same grid that defines f)
+    for(unsigned int p=0; p<numPoints; p++) {
+        double h  = data->gridAdvDifCoefs[p], g;
+        double I0 = model.I0(h);
+        double Kg = model.Kg(h);
+        double Kh = model.Kh(h);
+        double E  = data->phasevol->E(h, &g);
+
+        // advection coefficient D_h  without the pre-factor m_star
+        data->gridAdv[p] += GAMMA * Kg;
+
+        // diffusion coefficient D_hh
+        data->gridDif[p] += GAMMA * g * (Kh + h * I0);
+
+        // if the energy loss due to GW emission is considered, add the following term
+        // to the advection coefficient (the loss is also proportional to the mass of a star)
+        data->gridAdv[p] += GWterm * pow_2(E*E) * h;
+    }
+
+    // compute the energy conduction flux through the innermost boundary
+    // (mass advection flux and associated energy flow will be computed later in the evolve() method)
+    double h0 = data->gridh[0];
+    data->drainRateEnergy =
+        GAMMA * (-model.Kg(h0) * model.I0(h0) + (model.Kh(h0) + h0 * model.I0(h0)) * f->value(h0));
 
     // convert the sum of total energies of all stars into the total energy of the entire system
     data->Etot = 0.5 * (data->Etot + (data->Mbh!=0. ? data->Mbh * data->Phi0 : 0.) + data->Ekin);
 
-    // now that we have the advection and diffusion coefs summed up for all components,
-    // we may compute the energy conduction flux through the innermost boundary
-    // (advection flux will be computed later in the evolve() method)
-    data->drainRateEnergy = 0.;
-    for(unsigned int comp=0; comp<numComp; comp++) {
-        data->drainRateEnergy += -adv0 * data->Mstar[comp] * fint0[comp] + dif0 * fval0[comp];
-    }
+    // if needed, compute the angular-momentum diffusion coefficient on a different grid in h
+    // and initialize the loss-cone draining term in the matrix equation
+    if(computeDrainMatrix && data->lossConeDrain) {
+        // total angular-momentum diffusion coef
+        std::vector<double> gridLC(gridSize);
+        for(unsigned int i=0; i<gridSize; i++) {
+            gridLC[i] = data->coulombLog * galaxymodel::difCoefLosscone(
+                model, potential::PotentialWrapper(*data->currPot), data->phasevol->E(data->gridh[i]));
+        }
 
-    // initialize the loss-cone draining term in the matrix equation
-    if(computeDrainMatrix) {
         // construct interpolator for the angular-momentum diffusion coef
         math::LogLogSpline interpLC(data->gridh, gridLC);
+
         // compute the matrix elements for the draining rate, separately for each species
         for(unsigned int comp=0; comp<numComp; comp++) {
             // update the capture radii as the black hole mass changes
@@ -1093,9 +1074,8 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
             // store the drain time (for output purposes only)
             data->drainTime[comp].resize(gridSize);
             for(unsigned int i=0; i<gridSize; i++) {
-                // drain time = 1 / (1/Tdrain + 1/Tgw)
-                data->drainTime[comp][i] = 1 / ( -drainFnc(data->gridh[i]) +
-                    GWterm * 8./3 * pow_2(pow_2(data->phasevol->E(data->gridh[i]))) * data->Mstar[comp]);
+                data->drainTime[comp][i] = -1 / drainFnc(data->gridh[i]);
+                //GWterm * 8./3 * pow_2(pow_2(data->phasevol->E(data->gridh[i]))) * data->Mstar[comp]);
             }
             // compute the drain matrix - that's how this function is used in the computation itself
             math::BandMatrix<double> mat = impl->projMatrix(drainFnc);

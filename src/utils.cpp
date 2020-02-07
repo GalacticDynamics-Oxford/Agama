@@ -441,7 +441,7 @@ bool stringsEqual(const std::string& str1, const std::string& str2)
     if(len!=str2.size())
         return false;
     for(std::string::size_type i=0; i<len; i++)
-        if(tolower(str1[i]) != tolower(str2[i]))
+        if(tolower((unsigned char)str1[i]) != tolower((unsigned char)str2[i]))
             return false;
     return true;
 }
@@ -451,7 +451,7 @@ bool stringsEqual(const std::string& str1, const char* str2)
     if(str2==NULL)
         return false;
     for(std::string::size_type i=0; i<str1.size(); i++)
-        if(str2[i]==0 || tolower(str1[i]) != tolower(str2[i]))
+        if(str2[i]==0 || tolower((unsigned char)str1[i]) != tolower((unsigned char)str2[i]))
             return false;
     return str2[str1.size()]==0;  // ensure that the 2nd string length is the same as the 1st
 }

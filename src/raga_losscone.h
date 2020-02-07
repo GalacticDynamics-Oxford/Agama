@@ -24,14 +24,12 @@
 */
 #pragma once
 #include "raga_base.h"
-#include "particles_base.h"
-#include <string>
 
 namespace raga {
 
 /** Information about a particle captured by a supermassive black hole */
 struct CaptureData {
-    /// time (from the beginning of the episode) at which the particle was captured (-1 if it wasn't)
+    /// time (from the beginning of the episode) at which the particle was captured (NAN if it wasn't)
     double tcapt;
 
     /// energy of the particle w.r.t. this black hole (i.e. considering only its gravitational
@@ -41,11 +39,14 @@ struct CaptureData {
     /// distance to the black hole at the moment of capture
     double rperi;
 
+    /// capture radius for the given star and the given black hole
+    double rcapt;
+
     /// which of the two black holes in the binary has captured this particle
     /// (always 0 in the case of a single black hole)
     int indexBH;
 
-    CaptureData() : tcapt(-1), E(0), rperi(0), indexBH(0) {}
+    CaptureData() : tcapt(NAN), E(0), rperi(0), rcapt(0), indexBH(0) {}
 };
 
 /** Runtime function responsible for tracking the capture of particles by the central black hole(s) */
@@ -60,7 +61,7 @@ class RuntimeLosscone: public orbit::BaseRuntimeFnc {
     const std::vector<CaptureData>::iterator output;
 
     /// capture radii for the first and optionally the second black hole (array of two numbers)
-    const double* captureRadius;
+    double captureRadius[2];
 
     /// time derivative of the distance to the first and the second black hole:
     /// when its sign changes from - to +, then this timestep contains the pericenter passage
@@ -73,9 +74,12 @@ public:
         const double _captureRadius[])
     :
         bh(_bh),
-        output(_output),
-        captureRadius(_captureRadius)
-    { drdt[0] = drdt[1] = 0.; }
+        output(_output)
+    {
+        drdt[0] = drdt[1] = 0.;
+        captureRadius[0] = _captureRadius[0];
+        captureRadius[1] = _captureRadius[1];
+    }
 
     virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
@@ -86,11 +90,14 @@ struct ParamsLosscone {
     /// file name for storing the capture history (if empty then no output is stored)
     std::string outputFilename;
 
-    /// radii of capture/tidal disruption by both BHs
-    double captureRadius[2];
-
     /// fraction of the mass of captured stars to be added to the BH mass (between 0 and 1)
     double captureMassFraction;
+
+    /// speed of light in N-body units, used to compute the Schwarzschild radius of the BHs
+    double speedOfLight;
+
+    /// set defaults
+    ParamsLosscone() : captureMassFraction(1), speedOfLight(INFINITY) {}
 };
 
 /** The driver class implementing the capture of particles by the central supermassive black hole(s).
@@ -106,19 +113,19 @@ class RagaTaskLosscone: public BaseRagaTask {
 public:
     RagaTaskLosscone(
         const ParamsLosscone& params,
-        particles::ParticleArrayCar& particles,
+        particles::ParticleArrayAux& particles,
         BHParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
-    virtual const char* name() const { return "LossCone"; }
+    virtual const char* name() const { return "LossCone       "; }
 private:
     /// fixed parameters of this task
     const ParamsLosscone params;
 
     /// reference to the array of particles in the simulation;
     /// the masses of captured particles are set to zero at the end of the episode
-    particles::ParticleArrayCar& particles;
+    particles::ParticleArrayAux& particles;
 
     /// reference to the parameters of the black hole(s);
     /// the BH mass is increased when particles are captured

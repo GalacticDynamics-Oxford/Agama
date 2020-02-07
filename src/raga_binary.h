@@ -30,8 +30,6 @@
 */
 #pragma once
 #include "raga_base.h"
-#include "particles_base.h"
-#include <string>
 
 namespace raga {
 
@@ -75,6 +73,9 @@ struct ParamsBinary {
 
     /// speed of light in model units, used to compute the losses due to gravitational-wave emission
     double speedOfLight;
+
+    /// set defaults
+    ParamsBinary() : speedOfLight(INFINITY) {}
 };
 
 /** The driver class implementing the evolution of the binary supermassive black hole.
@@ -86,20 +87,20 @@ class RagaTaskBinary: public BaseRagaTask {
 public:
     RagaTaskBinary(
         const ParamsBinary& params,
-        const particles::ParticleArrayCar& particles,
+        const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
         BHParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
-    virtual const char* name() const { return "BinaryBH"; }
+    virtual const char* name() const { return "BinaryBH     "; }
 
 private:
     /// fixed parameters of this task
     const ParamsBinary params;
 
     /// read-only reference to the array of particles in the simulation (only the masses are used)
-    const particles::ParticleArrayCar& particles;
+    const particles::ParticleArrayAux& particles;
 
     /// read-only pointer to the stellar potential of the system (it is used to compute
     /// the changes in particle energy and momentum during an encounter)

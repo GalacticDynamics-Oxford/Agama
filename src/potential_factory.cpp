@@ -56,7 +56,8 @@ enum PotentialType {
 
     // components of GalPot
     PT_DISK,         ///< separable disk density model:  `Disk`
-    PT_SPHEROID,     ///< two-power-law spheroid density model:  `Spheroid`
+    PT_SPHEROID,     ///< double-power-law 3d density model:  `Spheroid`
+    PT_NUKER,        ///< double-power-law surface density profile: `Nuker`
     PT_SERSIC,       ///< Sersic profile:  `Sersic`
 
     // potentials with infinite extent that can't be used as source density for a potential expansion
@@ -86,7 +87,7 @@ struct AllParam
     PotentialType densityType;        ///< density model used for initializing a potential expansion
     coord::SymmetryType symmetryType; ///< degree of symmetry
     double mass;                      ///< total mass
-    double surfaceDensity;            ///< central surface density for Disk or Sersic models
+    double surfaceDensity;            ///< central surface density for Disk, Nuker or Sersic models
     double densityNorm;               ///< density normalization for double-power-law models
     double scaleRadius;               ///< scale radius
     double scaleHeight;               ///< scale height or second scale radius
@@ -114,7 +115,7 @@ struct AllParam
     AllParam() :
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
         mass(1.), surfaceDensity(NAN), densityNorm(NAN),
-        scaleRadius(1.), scaleHeight(1.), innerCutoffRadius(0.), outerCutoffRadius(0.),
+        scaleRadius(1.), scaleHeight(1.), innerCutoffRadius(0.), outerCutoffRadius(INFINITY),
         v0(1.), Omega(1.),
         axisRatioY(1.), axisRatioZ(1.),
         alpha(1.), beta(4.), gamma(1.),
@@ -141,6 +142,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, Ferrers      ::myName())) return PT_FERRERS;
     if(utils::stringsEqual(name, Isochrone    ::myName())) return PT_ISOCHRONE;
     if(utils::stringsEqual(name, SpheroidParam::myName())) return PT_SPHEROID;
+    if(utils::stringsEqual(name, NukerParam   ::myName())) return PT_NUKER;
     if(utils::stringsEqual(name, SersicParam  ::myName())) return PT_SERSIC;
     if(utils::stringsEqual(name, DiskDensity  ::myName())) return PT_DISK;
     if(utils::stringsEqual(name, Multipole    ::myName())) return PT_MULTIPOLE;
@@ -278,7 +280,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     // can only be spherical and non-truncated
     PotentialType type = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
     if( (type == PT_PLUMMER || type == PT_NFW) &&
-        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=0) ) {
+        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=INFINITY) ) {
         param.alpha = type == PT_PLUMMER ? 2 : 1;
         param.beta  = type == PT_PLUMMER ? 5 : 3;
         param.gamma = type == PT_PLUMMER ? 0 : 1;
@@ -334,6 +336,25 @@ SpheroidParam parseSpheroidParam(const AllParam& param)
         if(!isFinite(norm))
             throw std::runtime_error("Spheroid model has infinite mass (provide densityNorm instead)");
         sparam.densityNorm = param.mass / norm;
+    }
+    return sparam;
+}
+
+/// pick up the parameters for Nuker density
+NukerParam parseNukerParam(const AllParam& param)
+{
+    NukerParam sparam;
+    sparam.axisRatioY  = param.axisRatioY;
+    sparam.axisRatioZ  = param.axisRatioZ;
+    sparam.alpha       = param.alpha;
+    sparam.beta        = param.beta;
+    sparam.gamma       = param.gamma;
+    sparam.scaleRadius = param.scaleRadius;
+    if(isFinite(param.surfaceDensity))
+        sparam.surfaceDensity = param.surfaceDensity;
+    else {  // alternative: specify the total model mass instead of surface density normalization
+        sparam.surfaceDensity = 1;
+        sparam.surfaceDensity = param.mass / sparam.mass();
     }
     return sparam;
 }
@@ -728,9 +749,12 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
         }
         if(fields[0] == CompositeCyl::myName()) {
             // each line is a name of a file with the given component
+            std::string::size_type idx = fileName.find_last_of('/');
+            // extract the path from the filename, and append it to all dependent filenames
+            std::string prefix = idx != std::string::npos ? fileName.substr(0, idx+1) : "";
             std::vector<PtrPotential> components;
             while(ok && std::getline(strm, buffer).good() && !strm.eof())
-                components.push_back(readPotential(buffer, converter));
+                components.push_back(readPotential(prefix+buffer, converter));
             return PtrPotential(new CompositeCyl(components));
         }
     }
@@ -902,20 +926,24 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
     case PT_COMPOSITE_DENSITY: {
         strm << dens.name() << "\n";
         const CompositeDensity* comp = dynamic_cast<const CompositeDensity*>(&dens);
+        std::string::size_type idx = fileName.find_last_of('/');
         for(unsigned int i=0; i<comp->size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
+            std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
             if(writeDensity(fileNameComp, *comp->component(i), converter))
-                strm << fileNameComp << '\n';
+                strm << fileNameShort << '\n';
         }
         break;
     }
     case PT_COMPOSITE_POTENTIAL: {
         strm << dens.name() << "\n";
         const CompositeCyl* comp = dynamic_cast<const CompositeCyl*>(&dens);
+        std::string::size_type idx = fileName.find_last_of('/');
         for(unsigned int i=0; i<comp->size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
+            std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
             if(writeDensity(fileNameComp, *comp->component(i), converter))
-                strm << fileNameComp << '\n';
+                strm << fileNameShort << '\n';
         }
         break;
     }
@@ -969,7 +997,7 @@ PtrPotential readGalaxyPotential(const std::string& filename, const units::Exter
                 " gamma="            + fields[2]+
                 " beta="             + fields[3]+
                 " scaleRadius="      + fields[4]+
-                " outerCutoffRadius="+ fields[5]));
+                (utils::toDouble(fields[5])!=0 ? " outerCutoffRadius=" + fields[5] : "") ));
         else ok=false;
     }
     return createPotential(kvmap, conv);
@@ -1064,6 +1092,8 @@ PtrDensity createAnalyticDensity(const AllParam& param)
         return PtrDensity(new DiskDensity(parseDiskParam(param)));
     case PT_SPHEROID:
         return PtrDensity(new SpheroidDensity(parseSpheroidParam(param)));
+    case PT_NUKER:
+        return PtrDensity(new SpheroidDensity(parseNukerParam(param)));
     case PT_SERSIC:
         return PtrDensity(new SpheroidDensity(parseSersicParam(param)));
     case PT_KING:
@@ -1155,7 +1185,7 @@ PtrPotential createPotential(
     // isolate the density profiles that are part of GalPot scheme:
     // Disk profile will be represented by one potential component (DiskAnsatz)
     // and two density components that will eventually be supplied to the Multipole potential;
-    // Spheroid and Sersic profiles will also be added to the Multipole;
+    // Spheroid, Nuker and Sersic profiles will also be added to the Multipole;
     // any other potential components are constructed directly
     for(unsigned int i=0; i<kvmap.size(); i++)
     {
@@ -1177,6 +1207,10 @@ PtrPotential createPotential(
         }
         case PT_SPHEROID: {
             componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSpheroidParam(param))));
+            break;
+        }
+        case PT_NUKER: {
+            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseNukerParam(param))));
             break;
         }
         case PT_SERSIC: {

@@ -9,6 +9,7 @@
 \newcommand{\Nbody}{\textsl{N}-body\xspace}
 \newcommand{\Raga}{\textsc{Raga}\xspace}
 \newcommand{\Agama}{\textsc{Agama}\xspace}
+\newcommand{\Amuse}{\textsc{Amuse}\xspace}
 \newcommand{\Nemo}{\textsc{Nemo}\xspace}
 \renewcommand{\d}{\partial}
 \textwidth=16.5cm
@@ -22,10 +23,10 @@
 \includegraphics[width=5cm]{raga} \protect\\[1cm]
 \protect\Raga reference}
 \author{Eugene Vasiliev\\
-\normalsize\textit{Oxford University}\\
+\normalsize\textit{University of Oxford \& Institute of Astronomy, Cambridge}\\
 \normalsize\textrm{email: eugvas@lpi.ru} }
 
-\date{Version 2.0\\ February 1, 2017}
+\date{Version 3.0\\ February 1, 2020}
 
 \maketitle
 \tableofcontents
@@ -35,31 +36,29 @@
 is a Monte Carlo code for dynamical evolution of self-gravitating non-spherical stellar systems.
 The method is described in \cite{Vasiliev2015}; here comes a more technical and practical guide.
 
-This document describes the version 2 of the program, which is a nearly complete rewrite of the first version, although built on the same principles. It is now based on the \Agama library for galaxy modelling \cite{Vasiliev2017} and included in its distribution. The main features are:
+This document describes the version 3 of the program. The main features in this version are the interface to the \href{http://amusecode.org}{\Amuse} framework \cite{AMUSE} and the possibility to deal with multimass systems.
+Version 2 (2017) was a nearly complete rewrite of the first version (2014--2015), although built on the same principles. It is now based on the \Agama library for galaxy modelling \cite{Vasiliev2019} and included in its distribution. The main features are:
 \begin{itemize}
 \item Simulation of stellar systems with a much smaller number of particles $N$ than the number of stars in the actual system $N_\star$;
 \item Representation of an arbitrary non-spherical potential via a Multipole expansion, with coefficients computed from particle trajectories;
 \item Two-body relaxation modelled by local (position-dependent) velocity diffusion coefficients (as in Spitzer's Monte Carlo formulation); the magnitude of relaxation can be adjusted to the actual number of stars in the target system and is not related to the number of particles in the simulation;
 \item Particle trajectories are computed independently and in parallel, using a high-accuracy adaptive-timestep integrator; the potential expansion and diffusion coefficients are updated at rather long intervals (possibly comprising many dynamical times, but much shorter than the relaxation time);
-\item Can model the effect of a central massive black hole (capture of low angular momentum stars) and/or a massive black hole binary (scattering of stars and hardening of the binary).
+\item Can model the effect of a central supermassive black hole (SMBH) -- capture of low angular momentum stars, and/or a SMBH binary -- scattering of stars and hardening of the binary.
 \end{itemize}
 
-In the present version, \Raga comes as a standalone program which takes an input \Nbody snapshot and evolves it forward in time, optionally storing \Nbody snapshots and other parameters at regular intervals during the evolution. In the future we plan to integrate it into the \href{http://amusecode.org}{\textsl{AMUSE}} framework \cite{AMUSE}.
+In version 3, \Raga comes in two flavors: as a standalone simulation program and as a component of the \Amuse framework. In the former scenario, it can evolve an \Nbody system read from a file, optionally storing \Nbody snapshots and other parameters at regular intervals during the evolution. If used from within \Amuse, the user script has more freedom to interact with the code, changing particle properties (stellar mass and radius, the former determines the balance between dynamical friction and heating, and the latter controls the distance of a tidal disruption by the central supermassive black hole). In the latter case, the code may also be used as a general-purpose interface providing gravitational potential and forces to be used in the \texttt{bridge} approach.
 
-The main improvements compared to the first version are a more modular design and new, more efficient and robust implementations of potential and relaxation models.
+%The main improvements compared to the first version are a more modular design and new, more efficient and robust implementations of potential and relaxation models.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Obtaining and compiling the software}
 
-\Raga, as part of \Agama, is available for download at\\ \url{https://github.com/GalacticDynamics-Oxford/Agama}. The compilation instructions are in the main documentation for the library (\texttt{readme.pdf}).
-To compile, one needs the following additional libraries:
+\Raga, as part of \Agama, is available for download at\\ \url{https://github.com/GalacticDynamics-Oxford/Agama}. The recommended installation procedure is to run \texttt{python setup.py install [--user]} and follow the instructions: the script will attempt to determine automatically all relevant compilation options, but may ask user's permission to download required and optional third-party libraries. Alternatively, one may install the prerequisites manually, edit the file \texttt{Makefile.local} and run \texttt{make}. The following external libraries are used:
 \begin{itemize}
 \item \href{http://www.gnu.org/software/gsl/}{GSL} (C math library).
-%\item optional: \href{http://www.odeint.com/}{Odeint} library (now part of \textsl{boost}) -- to allow more variants of ODE integrators (various Runge-Kutta methods and Bulirsch-Stoer). Without it the built-in 8th order Runge-Kutta is happily used. To include the support for Odeint, uncomment HAVE\_ODEINT in the makefile.
 \item optional (but recommended): \href{http://eigen.tuxfamily.org/}{Eigen} library for numerical linear algebra.
-\item optional: \href{http://projets.lam.fr/projects/unsio/}{UNSIO} library -- to enable support for \textsc{Gadget} and \Nemo \Nbody snapshot formats; without it only the text format is available for input and \Nemo for output.% To use UNSIO, turn on the flag HAVE\_UNSIO in the makefile.
+\item optional: \href{http://projets.lam.fr/projects/unsio/}{UNSIO} library -- to enable support for \textsc{Gadget} and \Nemo \Nbody snapshot formats; without it only the text format is available for input/output and \Nemo for output.
 \end{itemize}
-Check and correct paths to various libraries and compilation flags in the \texttt{Makefile} file, then run \texttt{make exe/raga.exe}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Structure of the algorithm}  \label{sec:algorithm}
@@ -70,41 +69,49 @@ The smooth gravitational potential in which all particles move is represented by
 The potential is constructed at the beginning of the simulation and (optionally) updated after each episode using trajectories of particles recording during the episode. 
 During the orbit integration, one or more "tasks" can be attached to each particle, collecting data and/or changing the properties of the orbit. After all particles have been processed, each task is performing its own "finalization" step, possibly changing the global properties of the system, and the entire episode is repeated until the end of simulation time.
 
-The available tasks, and the conditions for them to be used, are described below, in the same order as they are invoked during the simulation (the ordering matters).
+The available tasks, and the conditions for them to be used, are described below, in the same order as they are invoked during the simulation (the order matters!).
 \begin{itemize}
-\item \textsl{Loss cone treatment}: invoked when there is a single or a binary black hole at origin with a non-zero capture radius. When the distance of closest approach of a particle to the black hole is less than this loss-cone radius, the particle is eliminated from the subsequent simulation and its mass (or some fraction of it) is added to the black hole mass at the end of episode. %The list of captured particles and their properties at the moment of capture are stored in a text file.
-\item \textsl{Binary black hole evolution}: applies when there is a binary black hole in the center. The orbit of the binary is assumed to be Keplerian, oriented in the $x-y$ plane along the $x$ axis. Time-dependent potential causes the particles that approach the vicinity of the binary to change energy and $z$-component of angular momentum. These changes are recorded, and at the end of the episode the sum of these changes, weighted by particle masses, is used to adjust the orbital parameters of the binary (semimajor axis and eccentricity), using the conservation laws. Optionally, these parameters may additionally change due to gravitational-wave emission.
-\item \textsl{Potential recomputation}: switched on by the corresponding flag in the INI file (on by default). Collect sampling points from each particle's orbit during the episode and use them to update the total potential at the end of the episode. In the simplest case, only the position at the end of episode is used, but more than one sampling point per particle is possible by setting the \texttt{numSamplesPerEpisode} parameter -- this reduces the discreteness noise in the potential. 
-\item \textsl{Relaxation}: turned on by a non-zero value of the \texttt{relaxationRate} parameter. The Spitzer's Monte Carlo approach for simulation two-body relaxation consists of adding perturbations to particle velocities during orbit integration, after each internal timestep of the ODE solver. These perturbations are computed from the local (position-dependent) drift and diffusion coefficients, which in turn depend on the distribution function of scatterers. The latter is identified with the entire population of particles in the simulation, but approximated by a spherically-symmetric isotropic distribution function $f(E)$. The amplitude of these coefficients is scaled to the number of stars in the target stellar system being modelled (not necessarily the number of particles in the simulation), see next section. At the same time, samples of particle energies are recorded at regular intervals during the episode and used to recompute the distribution function (in the same way as for the potential, possibly using more than one sample per particle).
-\item \textsl{Trajectory output}: if the output interval is assigned, store the particle positions, velocities and masses in an \Nbody snapshot file.
+\item \textsl{Loss cone treatment}: invoked when there is a single or a binary SMBH at origin with a non-zero capture or tidal disruption radius. The radius of tidal disruption is $r_\mathrm{t} \equiv (M_\bullet/m_\star)^{1/3}\,r_\star$, where $m_\star$ and $r_\star$ are the stellar mass and radius of each particle, and $M_\bullet$ is the mass of the central SMBH (or each of the two components of the binary SMBH). The radius of direct capture is $r_\mathrm{c} \equiv 8 G M_\bullet / c^2$, where $G$ is the gravitational constant (equal to unity in \Nbody units used by the code), and $c$ is the speed of light. The largest of these two radii is chosen as the loss-cone radius $r_\mathrm{LC}$ for each particle. To disable the loss cone, one should set stellar radii to zero and $c$ to infinity.
+When the distance of closest approach of a particle to the SMBH is less than $r_\mathrm{LC}$, the particle is eliminated from the subsequent simulation and its mass (or some fraction of it) is added to the SMBH at the end of episode. The list of captured particles and their properties at the moment of capture are stored in a text file.
+\item \textsl{Binary black hole evolution}: applies when there is a binary SMBH in the center. The orbit of the binary is assumed to be Keplerian, oriented in the $x-y$ plane along the $x$ axis. Time-dependent potential causes the particles that approach the vicinity of the binary to change energy and $z$-component of angular momentum. These changes are recorded, and at the end of the episode the sum of these changes, weighted by particle masses, is used to adjust the orbital parameters of the binary (semimajor axis and eccentricity), using the conservation laws. When a finite speed of light is specified, these orbital parameters additionally change due to gravitational-wave emission.
+\item \textsl{Potential recomputation}: switched on by the corresponding flag in the INI file (\textbf{off} by default). Collect sampling points from each particle's orbit during the episode and use them to update the total potential at the end of the episode. In the simplest case, only the position at the end of episode is used, but more than one sampling point per particle is possible by setting the \texttt{numSamplesPerEpisode} parameter -- this reduces the discreteness noise in the potential. 
+\item \textsl{Relaxation}: turned on by a non-zero value of the \texttt{coulombLog} parameter. The Spitzer's Monte Carlo approach for simulation two-body relaxation consists of adding perturbations to particle velocities during orbit integration, after each internal timestep of the ODE solver. These perturbations are computed from the local (position-dependent) drift and diffusion coefficients, which in turn depend on the distribution function (DF) of scatterers. The latter is identified with the entire population of particles in the simulation, but approximated by a spherically-symmetric isotropic DF $f(E)$. \\
+An important point is the distinction between the \textit{gravitational} mass of a particle, which determines its contribution to the total potential and the total DF, and the \textit{stellar} mass, which determines the relaxation rate and the balance between the energy loss due to dynamical friction and energy gain due to heating. For instance, a simulated $10^7\,M_\odot$ cluster may be represented by $10^5$ particles with gravitational masses $10^2\,M_\odot$ and stellar masses $0.5\,M_\odot$, each particle corresponding to $200$ equal-mass stars. The relaxation rate will still correspond to that of a $2\times10^7$-star system. Moreover, stellar masses of particles need not be equal, and heavier stars experience stronger dynamical friction and gradually sink to the center of the system. Initially, stellar and gravitational masses of each particles may be assigned arbitrarily and independently from each other, but if the stellar mass is updated in the course of evolution, the gravitational mass is adjusted by the same amount, to keep the ratio between them (i.e., the number of stars represented by each particle) constant. \\
+When this task is activated, samples of particle energies are recorded at regular intervals during the episode and used to recompute the DF and the diffusion coefficients (in the same way as for the potential, possibly using more than one sample per particle).
+\item \textsl{Trajectory output}: if the output interval is assigned, store the particle positions, velocities and masses in an \Nbody snapshot file. This is done at most once per episode, at its end.
 \end{itemize}
+
+Input and output snapshot files may be provided in any of the supported formats (text format by default, but also \Nemo and \textsc{Gadget} if available; however, the latter does not support all particle attributes).
+In text files, the first 6 columns contain position and velocity in Cartesian coordinates, the next column is the \textit{gravitational} mass, and two more optional columns are the \textit{stellar} mass (if not provided, assumed equal to the gravitational mass) and the stellar radius (if not provided, assumed zero; it is only needed for the loss-cone task). In \Nemo files, these additional attributes are stored in \texttt{Aux} (stellar mass) and \texttt{Eps} (stellar radius) fields.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{INI parameters}
 
-All parameters are set in the INI file, which should be passed as the one and only command-line argument. The file should contain a section named \texttt{[Raga]} with the following parameters (case-insensitive, default values are given in brackets).
+For the standalone program, all parameters are set in the INI file, which should be passed as the one and only command-line argument. The file should contain a section named \texttt{[Raga]} with the parameters described below (case-insensitive, default values are given in brackets), using \Nbody units ($G=1$). For the \Amuse interface, these parameters should be provided in the constructor of the \texttt{Agama} worker object; dimensional parameters should have the appropriate dimension.
 \begin{itemize}
-\item \texttt{fileInput}  -- the input \Nbody snapshot (required).
-It may be in any of the formats supported by UNSIO library (e.g., \Nemo or \textsc{Gadget}), or -- even without this library -- a simple text file with 7 columns: 3 positions, 3 velocities, and mass of each particle (not including the central massive black hole).
+\item \texttt{type}, \texttt{scaleRadius}, \texttt{mass} and other parameters describing a particular built-in gravitational potential can be used to explicitly specify the initial potential of the system. If \texttt{type} is not provided (default), the initial Multipole potential is computed from the initial snapshot. When potential update is disabled, this initial potential will remain fixed throughout the evolution (even though the DF will still be updated after each episode if relaxation rate is nonzero).\\
+In an \Amuse script, it is possible to create a given potential (whether analytic or computed from particles) and use it simply as an external potential in a \texttt{bridge} scheme, without invoking any dynamical evolution provided by the \Raga code.
+\item \texttt{particles}  -- the initial snapshot in the \Amuse script (optional: particles can also be loaded from a file or assigned at a later stage). If provided, it should be an instance of \texttt{amuse.datamodel.Particles}, optionally with an additional attribute \texttt{gravitating_mass} (the \texttt{mass} attribute in \Amuse corresponds to stellar mass).
+\item \texttt{fileInput}  -- the input \Nbody snapshot (required only for the standalone program).
+It may be in any of the formats supported by UNSIO library (e.g., \Nemo or \textsc{Gadget}), or -- even without this library -- a simple text file with at least 7 columns, as described in the previous section. The central SMBH should not be included in the snapshot, and given by the \texttt{Mbh} parameter instead.
 \item \texttt{fileLog}  (\texttt{fileInput.log}) -- the name of a text file where the diagnostic information will be written.
-\item \texttt{timeTotal}  -- the total simulation time (required).
+\item \texttt{timeTotal}  -- the total simulation time (required for the standalone program, optional for \Amuse, in which the user script prescribes the evolution time).
 \item \texttt{timeInit}  (\texttt{0}) -- initial time, i.e., an offset added to all internal timestamps (useful if continuing a previous simulation).
-\item \texttt{episodeLength}  -- duration of one episode; if none provided, this means that the entire simulation is performed in a single go. Typically it should be considerably shorter than the timescale on which the system evolves (either the relaxation time or the binary black hole hardening timescale), but may well be longer than the characteristic dynamical time.
-\item \texttt{Symmetry}  (\texttt{triaxial}) -- the type of potential symmetry that determines the choice of non-trivial coefficients in the Multipole expansion. Possible values: \texttt{spherical}, \texttt{axisymmetric}, \texttt{triaxial}, \texttt{reflection}, \texttt{none}, or a numerical code (see \texttt{coords.h}); only the first letter is important.
+\item \texttt{episodeLength}  -- duration of one episode; if none provided, this means that the entire simulation is performed in a single go. Typically it should be considerably shorter than the timescale on which the system evolves (the central two-body relaxation time, the binary black hole hardening timescale, or the stellar evolution timescale if run from within \Amuse), but may well be longer than the characteristic dynamical time. In an \Amuse script, one may manually advance the evolution by any length of time, so this parameter is not necessary.
+\item \texttt{symmetry}  (\texttt{triaxial}) -- the type of potential symmetry that determines the choice of non-trivial coefficients in the Multipole expansion. Possible values: \texttt{spherical}, \texttt{axisymmetric}, \texttt{triaxial}, \texttt{reflection}, \texttt{none}, or a numerical code (see \texttt{coords.h}); only the first letter is important.
 \item \texttt{lmax}  (\texttt{0}) -- the order of angular expansion (should be an even value, 0 implies spherical symmetry).
-\item \texttt{GridSizeR}  (\texttt{25}) -- size of the radial grid in potential expansion (rarely needs to be adjusted, grid nodes are assigned automatically).
+\item \texttt{GridSizeR}  (\texttt{25}) -- size of the radial grid in the Multipole potential (rarely needs to be adjusted)
+\item \texttt{rmin, rmax}  (\texttt{0}) -- min/max grid radii; if not provided (0), they are assigned automatically based on the particle distribution.
 \item \texttt{Mbh} (\texttt{0}) -- mass of a central black hole, or the combined mass of a binary black hole. Its center of mass is fixed at origin, and it adds a Newtonian contribution to the stellar potential. Warning: the input snapshot should not contain the black hole particle.
 \item \texttt{binary_sma}  (\texttt{0}) -- semimajor axis of a binary black hole (0 means no binary, while a positive value turns on the task of evolving the binary orbit parameters).
 \item \texttt{binary_q}  (\texttt{0}) -- mass ratio of a binary black hole (components have masses $M_\mathrm{bh}/(1+q)$ and $M_\texttt{bh}\,q/(1+q)$, 0 means no binary).
 \item \texttt{binary_ecc}  (\texttt{0}) -- eccentricity of a binary black hole; its orbit is assumed to lie in $x-y$ plane oriented along $x$ axis.
-\item \texttt{updatePotential}  (\texttt{true}) -- whether the stellar potential is recomputed after each episode.
-\item \texttt{relaxationRate}  (\texttt{0}) -- the amplitude of velocity perturbations that mimic the effect of two-body relaxation. Its numerical value corresponds to $N_\star^{-1}\ln\Lambda$ of the target stellar system. In other words, if one wants to simulate a nuclear star cluster with $N_\star=10^8$ stars and a massive black hole of $M_\bullet=10^6\,M_\odot$, then the value of Coulomb logarithm is usually determined by the number of stars within the influence radius of the black hole ($\ln\Lambda \simeq \ln M_\bullet/M_\odot \sim 15$), and one should set \texttt{relaxationRate=1.5e-7}. The crucial feature of the Monte Carlo algorithm is that the actual number of particles in the simulation $N$ may be far less than $N_\star$.
-One should keep in mind that even with the relaxation rate set to zero, the recomputation of potential from particles leads to unavoidable discreteness noise, which is however much lower than the level of numerical relaxation in conventional \Nbody simulations: both the long interval between updates (episode length) and using more than one sample per particle greadly suppress this noise.
+\item \texttt{updatePotential}  (\texttt{false}) -- whether the stellar potential is recomputed after each episode.
+\item \texttt{coulombLog}  (\texttt{0}) -- the value of Coulomb logarithm $\ln\Lambda$, which sets the amplitude of velocity perturbations that mimic the effect of two-body relaxation. As explained above, the relaxation rate is determined by \textit{stellar} masses assigned to particles, not their \textit{gravitational} masses (the latter determine the density profile of the system). A typical value of $\ln\Lambda\simeq \ln N_\star$ or $\ln M_\bullet/m_\star$ is 10--15, and setting it to zero turns off the two-body relaxation. One should keep in mind that even with the relaxation rate set to zero, the recomputation of potential from particles leads to unavoidable discreteness noise, which is, however, much lower than the level of numerical relaxation in conventional \Nbody simulations: both the long interval between updates (episode length) and the use of more than one sample per particle greatly suppress this noise.
 \item \texttt{numSamplesPerEpisode}  (\texttt{1}) -- number of sample points taken from the orbit of each particle during one episode and used in recomputation of the potential and the distribution function; a value $>1$ reduces the discreteness noise (a few dozen is a reasonable value).
 \item \texttt{gridSizeDF}  (\texttt{25}) -- size of the grid in energy space used for representing the distribution function.
-\item \texttt{captureRadius}, \texttt{captureRadius2}  (\texttt{0}) -- loss-cone radius (or two separate values in case of a binary black hole); particles passing within the given distance from the black hole are captured.
 \item \texttt{captureMassFraction}  (\texttt{1}) -- fraction of mass of captured particles that is added to the mass of the black hole.
-\item \texttt{speedOfLight}  (\texttt{0}) -- if nonzero and a binary black hole is present, determines the loss of energy and angular momentum due to gravitational-wave emission; this parameter specifies the speed of light in \Nbody velocity units.
+\item \texttt{speedOfLight}  (\texttt{$\infty$}) -- specifies the speed of light in \Nbody velocity units. It is responsible for the loss of energy and angular momentum of a binary SMBH due to gravitational-wave emission, and also determines the lower limit on the capture radius of a single SMBH (4 times the Schwarzschild radius).
 \item \texttt{outputInterval}  (\texttt{0}) -- interval between writing out \Nbody snapshots, potential expansion coefficients, and relaxation model (should be an integer multiple of episode length, 0 disables this).
 \item \texttt{fileOutput}  -- file for writing \Nbody snapshots (if the format is \Nemo, all snapshots are stored in a single file, otherwise each one goes into a separate file with the timestamp appended to the file name).
 \item \texttt{fileOutputFormat}  (\texttt{text}) -- output format for snapshots (text/\Nemo/\textsc{Gadget}, the latter is available only with the UNSIO library; only the first letter matters).
@@ -112,12 +119,15 @@ One should keep in mind that even with the relaxation rate set to zero, the reco
 \item \texttt{fileOutputRelaxation}  -- base filename for writing the table with parameters of the spherical model used to compute diffusion coefficients (timestamp appended to the name).
 \item \texttt{fileOutputLosscone}  -- file for storing the list and parameters of particles captured by the black hole(s).
 \item \texttt{fileOutputBinary}  -- file for storing the orbital parameters of the binary black hole (semimajor axis and eccentricity) after each episode.
+\item \texttt{accuracy}  ($10^{-8}$) -- accuracy parameter of the orbit integrator; roughly corresponds to the relative energy error per orbital period. The default value is good enough for most cases, but keep in mind that very tightly bound particles close to the SMBH may complete millions of orbits per episode!
+\item \texttt{maxNumSteps}  ($10^8$) -- upper limit on the number of time integration steps per episode for each orbit; there are typically a few dozen or more steps per orbital period.
+\item \texttt{number_of_workers} (\Amuse only) -- the number of OpenMP threads used by the simulation (\textit{not} the number of independent MPI processes, unlike some other codes). If not provided, \textit{\Raga will use all available cores on the machine!} For the standalone program, a similar effect is achieved by setting the environment variable \texttt{OMP_NUM_THREADS}.
 \end{itemize}
 
 %\newpage
 \begin{thebibliography}{1}
 \bibitem{Vasiliev2015} Vasiliev E., 2015, MNRAS, 446, 3150
-\bibitem{Vasiliev2017} Vasiliev E., in prep.
+\bibitem{Vasiliev2019} Vasiliev E., 2019, MNRAS, 482, 1525
 \bibitem{AMUSE} Portegies Zwart, S., McMillan, S., van Elteren, E., Pelupessy, I., de Vries, N.\ 2013, Comp.Phys.Comm., 184, 456
 \end{thebibliography}
 

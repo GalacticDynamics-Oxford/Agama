@@ -3,7 +3,7 @@
     \date    2010-2017
     \author  Eugene Vasiliev
 
-    This module deals with isotropic distribution funcions for spherical systems.
+    This module deals with isotropic distribution functions for spherical systems.
     They are traditionally expressed as functions of energy f(E), but it appears that
     another quantity -- the phase volume h -- is better suited as the argument of f.
     Phase volume h(E) is defined as the volume of the region {x,v} phase space where 
@@ -48,27 +48,36 @@ namespace galaxymodel{
     The DF is given by an arbitrary function (typically a LogLogSpline) of one argument
     (the phase volume h), and the potential is implicitly given by the mapping between Phi and h,
     represented by the `potential::PhaseVolume` class.
-    This class constructs interpolators for various dynamical quantities (I0, K_g, K_h)
+    This class constructs interpolators for various dynamical quantities (I_0, K_g, K_h)
     that enter the expressions for two-body relaxation coefficients.
-    This class also provides the interpolated value of f(h) through the IFunction interface
-    (it does not store the original function provided in the constructor, but computes f(h)
-    from one of its interpolators).
+    It is designed to work with multi-component models, in which the total DF is a sum of
+    one or more species with different DFs f_i and stellar masses m_i.
+    The diffusion coefficients are proportional to the sum of stellar mass-weighted DFs,
+    while the advection coefficients also (or exclusively) contain the sum of unweighted DFs.
+    Accordingly, this class makes a distinction between
+    the unweighted df, denoted by lowercase  f = sum_i f_i,
+    and the stellar mass-weighted DF, denoted by uppercase  F = sum_i m_i f_i.
+    In a single-component system, these are identical up to a constant factor m_i.
+    As a reminder, the normalization of the (unweighted) df is the total mass of the component.
 */
-class SphericalIsotropicModel: public math::IFunction{
+class SphericalIsotropicModel {
+public:
+    /// the object providing the correspondence between phase volume h and energy E
+    const potential::PhaseVolume phasevol;
 
     /// 1d interpolators for various weighted integrals of f(h), represented in log-log coordinates:
     math::LogLogSpline
-    intf,  ///< \f$ I_0 = \int_E^0 f(E') dE' = \int_{h(E)}^\infty f(h') / g(h') dh' \f$
-    intfg, ///< \f$ K_g = \int_{\Phi(0)}^E f(E') g(E') dE' = \int_0^{h(E)} f(h') dh' \f$
-    intfh, ///< \f$ K_h = \int_{\Phi(0)}^E f(E') h(E') dE' = \int_0^{h(E)} f(h') h' / g(h') dh' \f$
-    intfE; ///< \f$ K_E = \int_{\Phi(0)}^E f(E') g(E') E' dE' = \int_0^{h(E)} f(h') E(h') dh' \f$ 
+    I0, ///< \f$ I_0 = \int_E^0 F(E') dE'               = \int_{h(E)}^\infty F(h') / g(h') dh' \f$
+    Kg, ///< \f$ K_g = \int_{\Phi(0)}^E f(E') g(E') dE' = \int_0^{h(E)} f(h') dh' \f$
+    Kh; ///< \f$ K_h = \int_{\Phi(0)}^E F(E') h(E') dE' = \int_0^{h(E)} F(h') h' / g(h') dh' \f$
+    
+    /// total mass, total energy, and kinetic energy of the model
+    double totalMass, totalEnergy, totalEkin;
 
-    double totalMass;    ///< total mass associated with the DF, same as cumulMass(INFINITY)
-    double htransition;  ///< value of h separating two regimes of computing f(h) (using intf or intfg)
-public:
     /** Construct the model for the given h(E) and f(h).
         \param[in]  phasevol  is the instance of phase volume h(E); a copy of it is stored internally.
-        \param[in]  df  is the instance of distribution function f(h).
+        \param[in]  df  is the instance of unweighted distribution function f(h).
+        \param[in]  DF  is the instance of stellar mass-weighted distribution function F(h).
         \param[in]  gridh  (optional) if provided, will use this grid in phase volume for interpolation
         (this makes sense if f(h) is represented by a spline interpolator itself, to ensure
         1:1 correspondence between grids); otherwise will construct a suitable grid automatically.
@@ -78,32 +87,8 @@ public:
     SphericalIsotropicModel(
         const potential::PhaseVolume& phasevol,
         const math::IFunction& df,
+        const math::IFunction& DF,
         const std::vector<double>& gridh = std::vector<double>());
-
-    /// return the value of DF f(h), and optionally its first derivative,
-    /// obtained by differentiating one of the interpolating splines
-    virtual void evalDeriv(const double h, double* f=NULL, double* dfdh=NULL, double* =NULL) const;
-
-    /// may provide up to one derivative of f(h)
-    virtual unsigned int numDerivs() const { return 1; }
-
-    /// return \f$ I_0 = \int_h^\infty f(h') / g(h') dh' \f$
-    double I0(const double h) const;
-
-    /// cumulative mass as a function of h, i.e., \f$ M(h) = \int_0^h f(h') dh' \f$;
-    /// default value of argument (infinity) returns the total mass of the distribution function
-    double cumulMass(const double h=INFINITY) const;
-
-    /// cumulative kinetic energy as a function of h:
-    /// \f$ Ekin(h) = 3/2 \int_0^h f(h') h' / g(h') dh' \f$
-    double cumulEkin(const double h=INFINITY) const;
-
-    /// cumulative total energy of the model as a function of h:
-    /// \f$ Etot(h) = \int_0^h f(h') E(h') dh' \f$
-    double cumulEtotal(const double h=INFINITY) const;
-
-    /// the object providing the correspondence between phase volume h and energy E
-    const potential::PhaseVolume phasevol;
 };
 
 
@@ -119,16 +104,14 @@ public:
 class SphericalIsotropicModelLocal: public SphericalIsotropicModel {
 
     /// 2d interpolators for scaled integrals over distribution function
-    math::CubicSpline2d intJ1, intJ3;
-
-    /// perform actual initialization of interpolators
-    void init(const math::IFunction& df, const std::vector<double>& gridh);
+    math::CubicSpline2d intj1, intJ1, intJ3;
 
 public:
 
     /** Construct the internal interpolators for diffusion coefficients.
         \param[in]  phasevol  is the object providing the correspondence between E and h.
-        \param[in]  df  is the distribution function expressed in terms of h.
+        \param[in]  df  is the instance of distribution function f(h).
+        \param[in]  DF  is the instance of stellar mass-weighted distribution function F(h).
         \param[in]  gridh  (optional) grid in phase volume for the interpolators
         (if not provided, will construct a suitable one automatically).
         \throw std::runtime_error in case of incorrect asymptotic behaviour of E(h) or f(h)
@@ -138,29 +121,17 @@ public:
     SphericalIsotropicModelLocal(
         const potential::PhaseVolume& phasevol,
         const math::IFunction& df,
-        const std::vector<double>& gridh = std::vector<double>()) 
-    :
-        SphericalIsotropicModel(phasevol, df, gridh) { init(df, gridh); }
-
-    /** Construct the interpolators for diffusion coefficients from a SphericalIsotropicModel.
-        \param[in]  model  is an instance of SphericalIsotropicModel,
-        which provides both the phase volume and the expression for f(h).
-        \param[in]  gridh  (optional) grid in phase volume for the interpolators
-        (if not provided, will construct a suitable one automatically).
-        \throw std::runtime_error in case of inconsistencies in the input data.
-    */
-    SphericalIsotropicModelLocal(
-        const SphericalIsotropicModel& model,
-        const std::vector<double>& gridh = std::vector<double>())
-    :
-        SphericalIsotropicModel(model) { init(*this, gridh); }
+        const math::IFunction& DF,
+        const std::vector<double>& gridh = std::vector<double>());
 
     /** Compute the local drift and diffusion coefficients in velocity,
         as defined, e.g., by eq.7.88 or L.26 in Binney&Tremaine(2008);
-        the returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
+        the returned values should be multiplied by the Coulomb logarithm (ln Lambda).
         \param[in]  Phi    is the potential at the given point;
         \param[in]  E      is the energy of the moving particle Phi + (1/2) v^2,
         should be >= Phi, and may be positive;
+        \param[in]  m      is the stellar mass of the particle:
+        one term in the drag coefficient is proportional to m, while the other is independent of it.
         \param[out] dvpar  will contain  <v Delta v_par>,
         where Delta v_par is the drag coefficient in the direction parallel to the particle velocity;
         \param[out] dv2par will contain  <Delta v^2_par>,
@@ -169,7 +140,8 @@ public:
         the diffusion coefficient in the perpendicular component of velocity;
         \throw std::invalid_argument if E<Phi or Phi>=0.
     */
-    void evalLocal(double Phi, double E, double &dvpar, double &dv2par, double &dv2per) const;
+    void evalLocal(double Phi, double E, double m,
+        /*output*/ double &dvpar, double &dv2par, double &dv2per) const;
 
     /** compute the density as a function of potential */
     double density(double Phi) const;
@@ -185,19 +157,22 @@ public:
 
 
 /** Compute the orbit-averaged drift and diffusion coefficients in energy.
-    The returned values should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
-    \param[in]  model  is the instance of SphericalIsotropicModel that provides the necessary quantities
+    The returned values should be multiplied by the Coulomb logarithm ln Lambda.
+    \param[in]  model  is the instance of SphericalIsotropicModel providing I0,Kg,Kh.
     \param[in]  E   is the energy; should lie in the range from Phi(0) to 0
-    (otherwise the motion is unbound and orbit-averaging does not have sense);
-    \param[out] DeltaE  will contain the drift coefficient <Delta E>;
+    (otherwise the motion is unbound and orbit-averaging does not have sense).
+    \param[in]  m   is the mass of the test star.
+    \param[out] DeltaE  will contain the drift coefficient <Delta E>.
     \param[out] DeltaE2 will contain the diffusion coefficient <Delta E^2>.
 */
-void difCoefEnergy(const SphericalIsotropicModel& model, double E, double &DeltaE, double &DeltaE2);
+void difCoefEnergy(const SphericalIsotropicModel& model, double E, double m,
+    /*output*/ double &DeltaE, double &DeltaE2);
+
 
 /** Compute the diffusion coefficient entering the expression for the loss-cone flux.
-    \param[in]  model   is the spherical model providing the DF and the phase volume.
+    \param[in]  model  is the spherical model providing the phase volume and the function I0.
     \param[in]  pot  represents the spherically-symmetric gravitational potential.
-    \param[in]  E    is the energy for which the coefficient should be computed.
+    \param[in]  E  is the energy for which the coefficient should be computed.
     \return  the limiting value D of the orbit-averaged diffusion coefficient in
     scaled squared angular momentum for nearly-radial orbits. It is defined as
     \f$  D = (1/2) \lim_{R \to 0}  \langle \Delta R^2 \rangle  / R  \f$,  where
@@ -205,7 +180,7 @@ void difCoefEnergy(const SphericalIsotropicModel& model, double E, double &Delta
     the averaging is performed for a radial orbit with the given energy.
     The expression for D is [Merritt 2013, eq. 6.31]
     \f$  D = 8\pi^2 g^{-1}(E)  \int_0^{r_{max}(E)}  dr  \langle \Delta v_\bot^2 \rangle  r^2 / v  \f$.
-    The returned value should be multiplied by  \f$ N^{-1} \ln\Lambda \f$.
+    The returned value should be multiplied by  \f$ m_\star \ln\Lambda \f$.
 */
 double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFunction& pot, double E);
 
@@ -283,8 +258,8 @@ void computeProjectedDensity(
     - optional auxiliary quantity
 
     \param[in]  fileName  is the output file name.
-    \param[in]  header  is the text written in the first line of the file
-    \param[in]  model  is the SphericalIsotropicModel instance that provides both f(E) and h(E).
+    \param[in]  header  is the text written in the first line of the file.
+    \param[in]  df   is the distribution function f(h).
     \param[in]  pot  is the potential Phi(r) - it is not contained in the spherical model
     (even though it may be derived from the phase volume), so should be provided separately.
     \param[in]  gridh  (optional)  the grid in phase volume (h) for the output table;
@@ -296,7 +271,7 @@ void computeProjectedDensity(
 void writeSphericalIsotropicModel(
     const std::string& fileName,
     const std::string& header,
-    const SphericalIsotropicModel& model,
+    const math::IFunction& df,
     const math::IFunction& pot,
     const std::vector<double>& gridh = std::vector<double>(),
     const std::vector<double>& aux   = std::vector<double>());

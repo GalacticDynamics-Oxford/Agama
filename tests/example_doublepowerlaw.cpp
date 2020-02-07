@@ -199,7 +199,7 @@ int main(int argc, char* argv[])
     // plot the profiles of the final model
     const actions::ActionFinderSpherical af(*pot);
     galaxymodel::GalaxyModel mod(*pot, af, df::DoublePowerLaw(dfparams(bestparams)));
-    galaxymodel::SphericalIsotropicModelLocal spm(phasevol, eddf);
+    galaxymodel::SphericalIsotropicModelLocal spm(phasevol, eddf, eddf);
     std::vector<double> rad = math::createExpGrid(61, 1e-3, 1e3);
     std::vector<double> rho(rad), sigR(rad), sigT(rad);
     double Mtot = mod.distrFunc.totalMass();

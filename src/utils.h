@@ -160,13 +160,13 @@ inline std::string toString(const T* val)
     return toString(static_cast<const void*>(val));
 }
 
-/// convert a vector to a string with comma-separated values
+/// convert a vector to a string with values separated by the given character
 template<typename T>
-std::string toString(const std::vector<T>& vec)
+std::string toString(const std::vector<T>& vec, char separator=',')
 {
     std::string result;
     for(size_t i=0; i<vec.size(); i++) {
-        if(i>0) result += ',';
+        if(i>0) result += separator;
         result += toString(vec[i]);
     }
     return result;
@@ -176,6 +176,11 @@ std::string toString(const std::vector<T>& vec)
 /// Choose fixed-point or exponential format depending on which one is more accurate;
 /// if the number does not fit into the given width, return a string with # symbols.
 std::string pp(double num, unsigned int width);
+
+/// check if the character starts a comment
+inline bool isComment(const char c) { return c=='#' || c==';'; }
+
+
 /*------- convenience function -------*/
 
 /// check if a file with this name exists

@@ -5,27 +5,6 @@
 
 namespace utils {
 
-namespace{
-/// case-insensitive comparison (7-bit charset)
-inline bool comparestr(const std::string& one, const std::string& two)
-{
-    if(one.size()!=two.size()) return false;
-    for(size_t i=0; i<one.size(); i++) {
-        char o=one[i];
-        if(o>=65&&o<=90) o+=32;
-        char t=two[i];
-        if(t>=65&&t<=90) t+=32;
-        if(o!=t) return false;
-    }
-    return true;
-}
-/// these characters signify a comment string
-inline bool commentStart(const char c)
-{
-    return c=='#' || c==';' || c=='/';
-}
-}
-
 // -------- KeyValueMap -------- //
 
 KeyValueMap::KeyValueMap(const int numParams, const char* const* params) : modified(false)
@@ -49,7 +28,7 @@ void KeyValueMap::add(const char* line)
     if(indx!=std::string::npos)   // get rid of spaces at the beginning of the line
         buffer.erase(0, indx);
     indx = buffer.find('=');
-    if(indx!=std::string::npos && indx>0 && !commentStart(buffer[0]))
+    if(indx!=std::string::npos && indx>0 && !isComment(buffer[0]))
     {   // key-value pair and not a comment
         std::string key = buffer.substr(0, indx);         // get everything before the '=' character
         buffer.erase(0, indx+1);
@@ -76,7 +55,7 @@ void KeyValueMap::add(const char* line)
 bool KeyValueMap::contains(const std::string& key) const
 {
     for(unsigned int ik=0; ik<items.size(); ik++)
-        if(!items[ik].first.empty() && comparestr(items[ik].first, key))
+        if(!items[ik].first.empty() && stringsEqual(items[ik].first, key))
             return true;
     return false;
 }
@@ -84,7 +63,7 @@ bool KeyValueMap::contains(const std::string& key) const
 std::string KeyValueMap::getString(const std::string& key, const std::string& defaultValue) const
 {
     for(unsigned int ik=0; ik<items.size(); ik++)
-        if(!items[ik].first.empty() && comparestr(items[ik].first, key))
+        if(!items[ik].first.empty() && stringsEqual(items[ik].first, key))
             return items[ik].second;
     return defaultValue;
 }
@@ -156,7 +135,7 @@ void KeyValueMap::set(const std::string& key, const std::string& value)
 {
     modified = true;  // don't check if the new value is different from the old one
     for(unsigned int ik=0; ik<items.size(); ik++)
-        if(!items[ik].first.empty() && comparestr(items[ik].first, key)) {
+        if(!items[ik].first.empty() && stringsEqual(items[ik].first, key)) {
             items[ik].second = value;
             return;
         }
@@ -191,7 +170,7 @@ void KeyValueMap::set(const std::string& key, const bool value)
 bool KeyValueMap::unset(const std::string& key)
 {
     for(unsigned int ik=0; ik<items.size(); ik++)
-        if(!items[ik].first.empty() && comparestr(items[ik].first, key)) {
+        if(!items[ik].first.empty() && stringsEqual(items[ik].first, key)) {
             items.erase(items.begin()+ik);
             return true;
         }
@@ -259,7 +238,7 @@ ConfigFile::ConfigFile(const std::string& _fileName, bool mustExist) :
             // find if this section already existed in the list
             secIndex = -1;
             for(size_t i=0; i<sections.size(); i++)
-                if(comparestr(sections[i].first, buffer))
+                if(stringsEqual(sections[i].first, buffer))
                     secIndex = i;
             if(secIndex<0) { // section not found before, add it
                 sections.push_back(std::pair<std::string, KeyValueMap>(buffer, KeyValueMap()));
@@ -312,7 +291,7 @@ std::vector<std::string> ConfigFile::listSections() const
 KeyValueMap& ConfigFile::findSection(const std::string& sec)
 {
     for(unsigned int is=0; is<sections.size(); is++)
-        if(comparestr(sections[is].first, sec))
+        if(stringsEqual(sections[is].first, sec))
             return sections[is].second;
     // not found -- add new section
     sections.push_back(std::pair<std::string, KeyValueMap>(sec, KeyValueMap()));

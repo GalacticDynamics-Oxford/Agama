@@ -82,7 +82,7 @@ const char* usage =
     "  selfGravity=(true)  [G] whether the density profile of the evolving system contributes to the "
     "total potential; if false, then an external potential must be provided (currently only the BH)\n"
     "  ==== Fokker-Planck solver: grid and time integration ====\n"
-    "  coulombLog=(1)   [G] Coulomb logarithm that enters the expression for the relaxation rate\n"
+    "  coulombLog=...   [G] Coulomb logarithm that enters the expression for the relaxation rate\n"
     "  timeTotal=...    [G] total evolution time (required)\n"
     "  eps=(0.01)       [G] accuracy parameter for time integration: the timestep is eps times "
     "the geometric mean of the two characteristic timescales - f / (df/dt) and the relaxation time\n"
@@ -138,13 +138,12 @@ void exportTable(const std::string& filename, const std::string& header, const d
     unsigned int numComp = fp.numComp();  // number of components
     for(unsigned int comp=0; comp<numComp; comp++) {
         std::string fullfilename = filename + utils::toString(timeSim);
-        if(numComp>1)
+        if(numComp>1 && numComp<=26)
             fullfilename += char(comp+97); /* suffix a,b,... */
+        else if(numComp>26)
+            fullfilename += "_"+utils::toString(comp); /* numerical suffix */
         galaxymodel::writeSphericalIsotropicModel(fullfilename, header,
-        /*model*/      galaxymodel::SphericalIsotropicModel(
-            /*h(E)*/  *fp.phaseVolume(),
-            /*f(h)*/  *fp.df(comp),
-            /*gridh*/  fp.gridh()),
+        /*f(h)*/      *fp.df(comp),
         /*potential*/ *fp.potential(),
         /*gridh*/      fp.gridh(),
         /*drain time*/ fp.drainTime(comp));
@@ -274,6 +273,9 @@ int main(int argc, char* argv[])
     params.rmax            = args.getDouble("rmax", params.rmax);
     params.gridSize        = args.getIntAlt("gridsize", "gridSizeDF", params.gridSize);
     params.coulombLog      = args.getDouble("coulombLog", params.coulombLog);
+    if(params.coulombLog <= 0)
+        throw std::invalid_argument("Need to provide coulombLog=... parameter "
+            "controlling the relaxation rate (10 is a reasonable fiducial value)");
     params.selfGravity     = args.getBool  ("selfGravity", params.selfGravity);
     params.updatePotential = args.getBool  ("updatePotential", params.updatePotential);
     params.lossConeDrain   = args.getBool  ("lossCone", params.lossConeDrain);

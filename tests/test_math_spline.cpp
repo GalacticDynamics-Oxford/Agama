@@ -802,6 +802,9 @@ bool test1dSpline()
     // 11. reverse procedure: cubic B-spline which is the antiderivative of the quadratic B-spline
     std::vector<double> amplBsplineAnti = fBsplineDeriv.antideriv(amplBsplineDeriv);
 
+    // 12. cubic spline initialized from amplitudes of a 2nd degree B-spline created at step 10
+    math::CubicSpline fCubicDeriv(xnodes, amplBsplineDeriv);
+
     // output file
     std::ofstream strm;
 
@@ -811,7 +814,8 @@ bool test1dSpline()
            errClampedVal=0,  errHermiteVal=0,  errQuiCubeVal=0,  errQuinticVal=0,
            errClampedDer=0,  errHermiteDer=0,  errQuiCubeDer=0,  errQuinticDer=0,
            errClampedDer2=0, errHermiteDer2=0, errQuiCubeDer2=0, errQuinticDer2=0,
-           errBsplineEquivClamped=0, errClampedEquivBspline=0, errBsplineQuad=0;
+           errBsplineEquivClamped=0, errClampedEquivBspline=0,
+           errBsplineQuad=0, errCubicEquivBsplineQuad = 0;
     bool oknat = true, okcla = true, okher = true, okqui = true;
 
     // loop through the range of x covering the input grid,
@@ -863,6 +867,9 @@ bool test1dSpline()
         // 10. quadratic b-spline representing the derivative of the original cubic b-spline
         double fBsplineQuad = fBsplineDeriv.interpolate(x, amplBsplineDeriv);
 
+        // 11. ordinary cubic spline equivalent to the above 2nd degree B-spline
+        double fCubicEquivBsplineQuad = fCubicDeriv(x);
+
         // accumulate errors of various approximations
         errLinearVal  += pow_2(origVal - fLinearVal );
         errBsplineVal += pow_2(origVal - fBsplineVal);
@@ -887,6 +894,8 @@ bool test1dSpline()
         errClampedEquivBspline = fmax(errClampedEquivBspline,
             fabs(fBsplineEquivClampedVal - fClampedEquivBsplineVal));
         errBsplineQuad = fmax(errBsplineQuad, fabs(fBsplineQuad - fBsplineDer));
+        errCubicEquivBsplineQuad = fmax(errCubicEquivBsplineQuad,
+            fabs(fBsplineQuad - fCubicEquivBsplineQuad));
 
         // if x coincides with a grid node, the values of interpolants should be
         // exact to machine precision by construction
@@ -993,8 +1002,9 @@ bool test1dSpline()
     testCond(okcla, "clamped cubic spline values at grid nodes are inexact") &&
     testCond(okher, "hermite cubic spline values or derivatives at grid nodes are inexact") &&
     testCond(okqui, "quintic spline values or derivatives at grid nodes are inexact") &&
-    testCond(errBsplineEquivClamped < 1e-14, "bspline<>clamped") &&
-    testCond(errClampedEquivBspline < 1e-14, "clamped<>bspline") &&
+    testCond(errBsplineEquivClamped   < 1e-14, "bspline<>clamped") &&
+    testCond(errClampedEquivBspline   < 1e-14, "clamped<>bspline") &&
+    testCond(errCubicEquivBsplineQuad < 1e-14, "bspline2<>cubic") &&
     testCond(errBsplineQuad < 1e-14, "cubic bpline deriv<>quadratic bspline") &&
     testCond(errBsplineAnti < 1e-14, "quadratic bpline antideriv<>cubic bspline") &&
     testCond(errNaturalVal < 1.0e-3, "error in natural cubic spline is too large") &&

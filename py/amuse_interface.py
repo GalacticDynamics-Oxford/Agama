@@ -1,4 +1,4 @@
-"""
+'''
 This is the plugin for AMUSE N-body simulation framework.
 
 Agama is a module that provides methods for computing gravitational potential and forces corresponding
@@ -19,37 +19,37 @@ profile (e.g., density='Dehnen'), or the array of particles that are used to con
 profile from an N-body snapshot (e.g., particles=new_plummer_model(10000) ).
 The default parameters controlling the accuracy of potential approximation are suitable in most cases,
 but sometimes need to be adjusted (e.g., lmax=10 or symmetry='Axisymmetric').
-"""
+'''
 
-from amuse.community import *
-from amuse.community.interface.gd import *
+from amuse.community import CodeInterface, LiteratureReferencesMixIn, legacy_function, LegacyFunctionSpecification
+from amuse.community.interface.gd import InCodeComponentImplementation, GravitationalDynamicsInterface, GravityFieldInterface, GravityFieldCode, GravitationalDynamics
+from amuse.units import nbody_system, constants
 
-
-class AgamaInterface(CodeInterface, LiteratureReferencesMixIn, GravityFieldInterface):
-    """
+class AgamaInterface(CodeInterface, LiteratureReferencesMixIn, GravitationalDynamicsInterface, GravityFieldInterface):
+    '''
     Agama is a library for galaxy modelling; among other features, it provides methods
     for computing potential, density and accelerations for a wide range of models of stellar systems.
     The Agama class provides methods for computing potential and accelerations at given coordinates.
     It is initialized with a list of named parameters defining the potential:
-    >>> Agama([converter], type="Dehnen", [mass="10|mass"], [scaleradius="0.42|length"], ...)
+    >>> Agama([converter], type='Dehnen', [mass=10|mass], [scaleradius=0.42|length], ...)
     type is obligatory, and if it is one of the potential expansions (Multipole or CylSpline),
-    then also  density="..."  or  particles=...  is necessary to define the actual model.
+    then also  density='...'  or  particles=...  is necessary to define the actual model.
     See a complete list of arguments in doc/reference.pdf,
     or check the python interface for the Agama library itself:
     >>> import agama
     >>> help(agama.Potential)
 
     .. [#] Vasiliev E., 2019, MNRAS, 482, 1525
-    """
+    '''
 
     include_headers = ['worker_code.h']
 
     def __init__(self, **keyword_arguments):
-        CodeInterface.__init__(self, name_of_the_worker="agama_worker", **keyword_arguments),
+        CodeInterface.__init__(self, name_of_the_worker='agama_worker', **keyword_arguments),
         LiteratureReferencesMixIn.__init__(self)
 
     @legacy_function
-    def initialize_code():
+    def set_params():
         function = LegacyFunctionSpecification()
         function.addParameter('nparams', dtype='int32',  direction=function.LENGTH)
         function.addParameter('params',  dtype='string', direction=function.IN)
@@ -58,93 +58,133 @@ class AgamaInterface(CodeInterface, LiteratureReferencesMixIn, GravityFieldInter
         return function
 
     @legacy_function
-    def set_particles():
+    def set_time_step():
         function = LegacyFunctionSpecification()
-        function.addParameter('pointx',  dtype='float64',direction=function.IN)
-        function.addParameter('pointy',  dtype='float64',direction=function.IN)
-        function.addParameter('pointz',  dtype='float64',direction=function.IN)
-        function.addParameter('pointm',  dtype='float64',direction=function.IN)
-        function.addParameter('nparams', dtype='int32',  direction=function.LENGTH)
-        function.must_handle_array = True
+        function.addParameter('time_step', dtype='float64', direction=function.IN,
+            description = 'Set the episode length')
         function.result_type = 'int32'
         return function
 
     @legacy_function
-    def cleanup_code():
+    def set_num_threads():
         function = LegacyFunctionSpecification()
+        function.addParameter('num_threads', dtype='int32', direction=function.IN,
+            description = 'Number of OpenMP threads')
         function.result_type = 'int32'
         return function
 
-class Agama(InCodeComponentImplementation, GravityFieldCode):
+    @legacy_function
+    def get_gravitating_mass():
+        function = LegacyFunctionSpecification()
+        function.addParameter('index_of_the_particle', dtype='int32', direction=function.IN,
+            description = 'Index of the particle')
+        function.addParameter('gravitating_mass', dtype='float64', direction=function.OUT,
+            description = 'Get the contribution of this particle to the total potential')
+        function.can_handle_array = True
+        function.result_type = 'int32'
+        return function
 
-    def __init__(self, unit_converter = None, **options):
+    @legacy_function
+    def set_gravitating_mass():
+        function = LegacyFunctionSpecification()
+        function.addParameter('index_of_the_particle', dtype='int32', direction=function.IN,
+            description = 'Index of the particle')
+        function.addParameter('gravitating_mass', dtype='float64', direction=function.IN,
+            description = 'Set the contribution of this particle to the total potential')
+        function.can_handle_array = True
+        function.result_type = 'int32'
+        return function
+
+
+class Agama(GravitationalDynamics, GravityFieldCode):
+
+    def __init__(self, unit_converter = None, number_of_workers = None, **options):
+        GravitationalDynamics.__init__(self, AgamaInterface(**options), unit_converter, **options)
         self.unit_converter = unit_converter
-        InCodeComponentImplementation.__init__(self,  AgamaInterface(**options), **options)
+        if number_of_workers is not None:
+            self.overridden().set_num_threads(number_of_workers)
         dimensional_params = {
-            'mass'        : nbody_system.mass,
-            'scalerad'    : nbody_system.length,
-            'scalerad2'   : nbody_system.length,
-            'rmax'        : nbody_system.length,
-            'splinermin'  : nbody_system.length,
-            'splinermax'  : nbody_system.length,
-            'splinezmin'  : nbody_system.length,
-            'splinezmax'  : nbody_system.length,
-            'treecodeeps' : nbody_system.length
+            'mass'             : nbody_system.mass,
+            'rscale'           : nbody_system.length,
+            'scaleradius'      : nbody_system.length,
+            'scaleradius2'     : nbody_system.length,
+            'scaleheight'      : nbody_system.length,
+            'innercutoffradius': nbody_system.length,
+            'outercutoffradius': nbody_system.length,
+            'rmin'             : nbody_system.length,
+            'rmax'             : nbody_system.length,
+            'zmin'             : nbody_system.length,
+            'zmax'             : nbody_system.length,
+            'densitynorm'      : nbody_system.mass / nbody_system.length**3,
+            'rho0'             : nbody_system.mass / nbody_system.length**3,
+            'surfacedensity'   : nbody_system.mass / nbody_system.length**2,
+            'sigma0'           : nbody_system.mass / nbody_system.length**2,
+            'v0'               : nbody_system.speed,
+            'omega'            : nbody_system.time**-1,
+
+            'mbh'              : nbody_system.mass,
+            'binary_sma'       : nbody_system.length,
+            'timetotal'        : nbody_system.time,
+            'timeinit'         : nbody_system.time,
+            'episodelength'    : nbody_system.time,
+            'outputinterval'   : nbody_system.time,
+            'captureradius'    : nbody_system.length,
+            'captureradius1'   : nbody_system.length,
+            'captureradius2'   : nbody_system.length,
+            'speedoflight'     : nbody_system.speed,
         }
         params=[]
+        # check if speed of light was provided by user, if not then put the universally accepted value
+        speed_of_light_provided = False
+        black_hole_provided = False
         for k,v in options.items():
             param_name=str(k)
             if param_name.lower() in dimensional_params.keys():
                 if unit_converter is not None:
                     v=unit_converter.as_converter_from_si_to_nbody().from_source_to_target(v)
-                params.append(param_name+"="+str(v.value_in(dimensional_params[param_name.lower()])))
-            elif param_name=="particles":
-                if unit_converter is not None:
-                    self.overridden().set_particles(
-                        unit_converter.as_converter_from_si_to_nbody().from_source_to_target(v.x).value_in(nbody_system.length),
-                        unit_converter.as_converter_from_si_to_nbody().from_source_to_target(v.y).value_in(nbody_system.length),
-                        unit_converter.as_converter_from_si_to_nbody().from_source_to_target(v.z).value_in(nbody_system.length),
-                        unit_converter.as_converter_from_si_to_nbody().from_source_to_target(v.mass).value_in(nbody_system.mass) )
-                else:
-                    self.overridden().set_particles(
-                        v.x.value_in(nbody_system.length),
-                        v.y.value_in(nbody_system.length),
-                        v.z.value_in(nbody_system.length),
-                        v.mass.value_in(nbody_system.mass) )
+                params.append(param_name+'='+str(v.value_in(dimensional_params[param_name.lower()])))
+                if param_name.lower() == 'speedoflight': speed_of_light_provided = True
+                if param_name.lower() == 'mbh': black_hole_provided = True
+            elif param_name=='particles':
+                self.particles.add_particles(v)
+                #print('added %i particles'%len(v))
             else:
-                params.append(param_name+"="+str(v))
-        self.overridden().initialize_code(params)
+                params.append(param_name+'='+str(v))
+        if black_hole_provided and not speed_of_light_provided and unit_converter is not None:
+            params.append('speedOfLight='+str(unit_converter.to_nbody(constants.c).value_in(nbody_system.speed)))
+        #print('setting params')
+        self.overridden().set_params(params)
+        handler=self.get_handler('PARTICLES')
+        handler.add_setter('particles', 'set_gravitating_mass', names = ('gravitating_mass',))
+        handler.add_getter('particles', 'get_gravitating_mass', names = ('gravitating_mass',))
 
-    def define_converter(self, object):
+    def define_converter(self, handler):
         if not self.unit_converter is None:
-            object.set_converter(self.unit_converter.as_converter_from_si_to_nbody())
+            handler.set_converter(self.unit_converter.as_converter_from_si_to_nbody())
 
     def define_methods(self, handler):
-        handler.add_method(
-            'get_gravity_at_point',
-            (
-                nbody_system.length,
-                nbody_system.length,
-                nbody_system.length,
-                nbody_system.length,
-            ),
-            (
-                nbody_system.acceleration,
-                nbody_system.acceleration,
-                nbody_system.acceleration,
-                handler.ERROR_CODE
-            )
+        GravitationalDynamics.define_methods(self, handler)
+        handler.add_method( 'set_time_step',
+            ( nbody_system.time, ),
+            ( handler.ERROR_CODE,)
         )
-        handler.add_method(
-            'get_potential_at_point',
-            (
-                nbody_system.length,
-                nbody_system.length,
-                nbody_system.length,
-                nbody_system.length,
-            ),
-            (
-                nbody_system.potential,
-                handler.ERROR_CODE
-            )
+        handler.add_method( 'get_gravity_at_point',
+            ( nbody_system.length,) * 4,
+            ( nbody_system.acceleration,) * 3 + (handler.ERROR_CODE,)
         )
+        handler.add_method( 'get_potential_at_point',
+            ( nbody_system.length,) * 4,
+            ( nbody_system.potential, handler.ERROR_CODE )
+        )
+        handler.add_method( 'set_gravitating_mass',
+            ( handler.NO_UNIT, nbody_system.mass ),
+            ( handler.ERROR_CODE, )
+        )
+        handler.add_method( 'get_gravitating_mass',
+            ( handler.NO_UNIT, ),
+            ( nbody_system.mass, handler.ERROR_CODE )
+        )
+
+    def define_state(self, handler):
+        GravitationalDynamics.define_state(self, handler)
+        GravityFieldCode.define_state(self, handler)

@@ -707,18 +707,24 @@ CubicSpline::CubicSpline(
 :
     BaseInterpolator1d(xvalues, fvalues)
 {
-    if(fval.size() == xval.size()+2) {
-        // construct a clamped spline from amplitudes of B-spline
-        size_t numPoints = xval.size();
-        std::vector<double> ampl(fval);  // temporarily store the amplitudes of B-splines
+    size_t numPoints = xval.size();
+    int degree = fval.size() - numPoints + 1;
+    if(degree == 2 || degree == 3) {
+        // construct a clamped spline from amplitudes of 2nd or 3rd-degree B-spline
+        std::vector<double> ampl = fval;  // temporarily store the amplitudes of B-splines
         fval.assign(numPoints, 0.);
         fder.resize(numPoints);
         for(size_t i=0; i<numPoints; i++) {
             // compute values and first derivatives of B-splines at grid nodes
-            double val[4], der[4];
-            int ind = bsplineValues<3>(xval[i], &xval[0], numPoints, val);
-            bsplineDerivs<3,1>(xval[i], &xval[0], numPoints, der);
-            for(int p=0; p<=3; p++) {
+            int ind; double val[4], der[4];
+            if(degree==2) {
+                ind = bsplineValues<2>  (xval[i], &xval[0], numPoints, val);
+                /* */ bsplineDerivs<2,1>(xval[i], &xval[0], numPoints, der);
+            } else {
+                ind = bsplineValues<3>  (xval[i], &xval[0], numPoints, val);
+                /* */ bsplineDerivs<3,1>(xval[i], &xval[0], numPoints, der);
+            }
+            for(int p=0; p<=degree; p++) {
                 fval[i] += val[p] * ampl[p+ind];
                 fder[i] += der[p] * ampl[p+ind];
             }

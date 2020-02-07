@@ -13,7 +13,8 @@ template<typename CoordT>
 inline coord::PosVelT<CoordT> getPosVel(const double data[6]) { return coord::PosVelT<CoordT>(data); }
 
 template<>
-inline coord::PosVelCyl getPosVel(const double data[6]) {
+inline coord::PosVelCyl getPosVel(const double data[6])
+{
     if(data[0] >= 0)
         return coord::PosVelCyl(data);
     else
@@ -21,29 +22,79 @@ inline coord::PosVelCyl getPosVel(const double data[6]) {
 }
 
 template<>
-inline coord::PosVelSph getPosVel(const double data[6]) {
-    if(data[0] >= 0)
-        return coord::PosVelSph(data);
-    else
-        return coord::PosVelSph(-data[0], M_PI-data[1], data[2]+M_PI, -data[3], -data[4], -data[5]);
+inline coord::PosVelSph getPosVel(const double data[6])
+{
+    int tmp;
+    double r = data[0];
+    double phi = data[2];
+    double theta = remquo(data[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
+    int signr = r<0 ? -1 : 1, signt = theta<0 ? -1 : 1;
+    if(theta<0) {  // happens also if pi < theta < 2pi, which is flipped to -pi..0
+        theta = -theta;
+        phi += M_PI;
+    }
+    if(r<0) {
+        r = -r;
+        theta = M_PI-theta;
+        phi += M_PI;
+    }
+    phi = math::wrapAngle(phi);
+    return coord::PosVelSph(r, theta, phi, data[3] * signr, data[4] * signt, data[5] * signr * signt);
 }
 }
 
 template<typename CoordT>
 StepResult RuntimeTrajectory<CoordT>::processTimestep(
-    const math::BaseOdeSolver& solver, const double /*tbegin*/, const double tend, double[])
+    const math::BaseOdeSolver& solver, const double tbegin, const double tend, double vars[])
 {
-    // store trajectory at regular intervals of time
-    while(samplingInterval * trajectory.size() <= tend) {
-        double tsamp = samplingInterval * trajectory.size();
-        double data[6];
-        for(int d=0; d<6; d++)
-            data[d] = solver.getSol(tsamp, d);
-        trajectory.push_back(getPosVel<CoordT>(data));
+    if(samplingInterval > 0) {
+        // store trajectory at regular intervals of time
+        while(samplingInterval * trajectory.size() <= tend) {
+            double tsamp = samplingInterval * trajectory.size();
+            double data[6];
+            for(int d=0; d<6; d++)
+                data[d] = solver.getSol(tsamp, d);
+            trajectory.push_back(
+                std::pair<coord::PosVelT<CoordT>, double>(getPosVel<CoordT>(data), tsamp));
+        }
+    } else {
+        // store trajectory at every integration timestep
+        if(trajectory.empty()) {
+            // add the initial point
+            double data[6];
+            for(int d=0; d<6; d++)
+                data[d] = solver.getSol(tbegin, d);
+            trajectory.push_back(
+                std::pair<coord::PosVelT<CoordT>, double>(getPosVel<CoordT>(data), tbegin));
+        }
+        // add the current point (at the end of the timestep)
+        trajectory.push_back(
+            std::pair<coord::PosVelT<CoordT>, double>(getPosVel<CoordT>(vars), tend));
     }
     return SR_CONTINUE;
 }
 
+
+void OrbitIntegratorRot::eval(const double /*t*/, const double x[], double dxdt[]) const
+{
+    coord::GradCar grad;
+    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
+    // time derivative of position
+    dxdt[0] = x[3] + Omega * x[1];
+    dxdt[1] = x[4] - Omega * x[0];
+    dxdt[2] = x[5];
+    // time derivative of velocity
+    dxdt[3] = -grad.dx + Omega * x[4];
+    dxdt[4] = -grad.dy - Omega * x[3];
+    dxdt[5] = -grad.dz;
+}
+
+double OrbitIntegratorRot::getAccuracyFactor(const double /*t*/, const double x[]) const
+{
+    double Epot = potential.value(coord::PosCar(x[0], x[1], x[2]));
+    double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
+    return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+}
 
 template<>
 void OrbitIntegrator<coord::Car>::eval(const double /*t*/, const double x[], double dxdt[]) const
@@ -57,20 +108,6 @@ void OrbitIntegrator<coord::Car>::eval(const double /*t*/, const double x[], dou
     // time derivative of velocity
     dxdt[3] = -grad.dx;
     dxdt[4] = -grad.dy;
-    dxdt[5] = -grad.dz;
-}
-
-void OrbitIntegratorRot::eval(const double /*t*/, const double x[], double dxdt[]) const
-{
-    coord::GradCar grad;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
-    // time derivative of position
-    dxdt[0] = x[3] + Omega * x[1];
-    dxdt[1] = x[4] - Omega * x[0];
-    dxdt[2] = x[5];
-    // time derivative of velocity
-    dxdt[3] = -grad.dx + Omega * x[4];
-    dxdt[4] = -grad.dy - Omega * x[3];
     dxdt[5] = -grad.dz;
 }
 
@@ -100,13 +137,17 @@ void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], dou
     double r = x[0];
     double phi = x[2];
     double theta = remquo(x[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
-    int signr = r<0 ? -1 : 1, signt = (theta<0) ^ (r<0) ? -1 : 1;
-    if(signt<0)
+    int signr = r<0 ? -1 : 1, signt = theta<0 ? -1 : 1;
+    if(theta<0) {  // happens also if pi < theta < 2pi, which is flipped to -pi..0
+        theta = -theta;
         phi += M_PI;
-    if(theta<0) // happens also if pi < theta < 2pi, which is flipped to -pi..0
-        theta = r<0 ? M_PI+theta : -theta;
-    if(r<0)
+    }
+    if(r<0) {
         r = -r;
+        theta = M_PI-theta;
+        phi += M_PI;
+    }
+
     const coord::PosVelSph p(r, theta, phi, x[3], x[4], x[5]);
     coord::GradSph grad;
     potential.eval(p, NULL, &grad);
@@ -120,6 +161,14 @@ void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], dou
     dxdt[3] = -grad.dr*signr + (pow_2(p.vtheta) + pow_2(p.vphi)) * rinv;
     dxdt[4] = (-grad.dtheta*signt + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) * rinv;
     dxdt[5] = (-grad.dphi * sinthinv - (p.vr+p.vtheta*cottheta) * p.vphi) * rinv;
+}
+
+template<typename CoordT>
+double OrbitIntegrator<CoordT>::getAccuracyFactor(const double /*t*/, const double x[]) const
+{
+    double Epot = potential.value(coord::PosT<CoordT>(x[0], x[1], x[2]));
+    double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
+    return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
 }
 
 
@@ -162,7 +211,7 @@ coord::PosVelT<CoordT> integrate(
         }
         if(reinit)
             solver.init(vars);
-        if(finish || ++numSteps > params.maxNumSteps)
+        if(finish || ++numSteps >= params.maxNumSteps)
             break;
     }
     return coord::PosVelT<CoordT>(vars);

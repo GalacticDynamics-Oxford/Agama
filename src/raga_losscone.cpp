@@ -9,6 +9,7 @@
 namespace raga {
 
 //---------- Loss-cone handling ----------//
+namespace{
 
 /** Helper class for finding the pericenter passage:
     compute the time derivative of the (squared) distance to the black hole;
@@ -33,6 +34,8 @@ public:
              sol.getSol(time, 2) * sol.getSol(time, 5);
     }
 };
+
+} // anonymous namespace
 
 orbit::StepResult RuntimeLosscone::processTimestep(
     const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[])
@@ -87,6 +90,7 @@ orbit::StepResult RuntimeLosscone::processTimestep(
         output->E       = -Mbh / rperi +
             0.5 * (pow_2(posvel[3]-bhVX[b]) + pow_2(posvel[4]-bhVY[b]) + pow_2(posvel[5]));
         output->rperi   = rperi;
+        output->rcapt   = captureRadius[b];
         output->indexBH = b;
 
         // store the position/velocity at the moment of capture
@@ -104,7 +108,7 @@ orbit::StepResult RuntimeLosscone::processTimestep(
 
 RagaTaskLosscone::RagaTaskLosscone(
     const ParamsLosscone& _params,
-    particles::ParticleArrayCar& _particles,
+    particles::ParticleArrayAux& _particles,
     BHParams& _bh)
 :
     params(_params),
@@ -113,15 +117,25 @@ RagaTaskLosscone::RagaTaskLosscone(
     totalNumCaptured(0)
 {
     utils::msg(utils::VL_DEBUG, "RagaTaskLosscone",
-        "Capture radius=" + utils::toString(params.captureRadius[0]) +
-        (  bh.sma>0 ? "," + utils::toString(params.captureRadius[1]) : "") +
+        std::string(bh.sma==0 ? "One black hole" : "Two black holes") +
+        ", c=" + utils::toString(params.speedOfLight) +
         ", accreted mass fraction=" + utils::toString(params.captureMassFraction));
 }
 
 orbit::PtrRuntimeFnc RagaTaskLosscone::createRuntimeFnc(unsigned int particleIndex)
 {
+    double Mbh0 = bh.sma==0 ? bh.mass / (1 + bh.q) : bh.mass;
+    double Mbh1 = bh.sma==0 ? bh.mass / (1 + bh.q) * bh.q : 0;
+    double captureRadius[2] = {
+        fmax(8 * Mbh0 / pow_2(params.speedOfLight),
+            particles.point(particleIndex).stellarRadius *
+            pow(Mbh0 / particles.point(particleIndex).stellarMass, 1./3) ),
+        fmax(8 * Mbh1 / pow_2(params.speedOfLight),
+            particles.point(particleIndex).stellarRadius *
+            pow(Mbh1 / particles.point(particleIndex).stellarMass, 1./3) ) };
+
     return orbit::PtrRuntimeFnc(new RuntimeLosscone(
-        bh, captures.begin() + particleIndex, params.captureRadius));
+        bh, captures.begin() + particleIndex, captureRadius));
 }
 
 void RagaTaskLosscone::startEpisode(double timeStart, double length)
@@ -139,9 +153,9 @@ void RagaTaskLosscone::finishEpisode()
     std::vector< std::pair<double, size_t> > sortedCaptures;
     assert(particles.size() == captures.size());
     for(size_t ip=0; ip<particles.size(); ip++) {
-        double mass = particles[ip].second;
+        double mass = particles.mass(ip);
         double tcapt= captures [ip].tcapt;
-        if(mass == 0 || tcapt < 0)
+        if(mass == 0 || !(tcapt >= 0))
             continue;   // nothing happened to this particle
         assert(captures[ip].indexBH < numBH);
         capturedMass[captures[ip].indexBH] += mass;
@@ -154,7 +168,8 @@ void RagaTaskLosscone::finishEpisode()
             if(totalNumCaptured == 0) {
                 // this is the first time the file is opened (i.e. is created), so print out the header
                 strm.open(params.outputFilename.c_str());
-                strm << "#Time   \tParticleMass\tPericenterRad\tEnergy  \tParticleIndex\tBHindex\n";
+                strm << "#Time   \tParticleMass\tPericenterRad\tEnergy  \t"
+                "ParticleIndex\tBHindex\tCaptureRadius\tStellarRadius\tStellarMass\n";
             } else  // append to the file
                 strm.open(params.outputFilename.c_str(), std::ios_base::app);
         }
@@ -164,12 +179,15 @@ void RagaTaskLosscone::finishEpisode()
             if(strParticleIndex.size()<8)  // padding to at least one tab-length
                 strParticleIndex.insert(strParticleIndex.end(), 8-strParticleIndex.size(), ' ');
             strm <<
-                utils::pp(episodeStart + captures[ip].tcapt, 10) + '\t' +
-                utils::pp(particles[ip].second, 12) + '\t' +   // particle mass
-                utils::pp(captures [ip].rperi,  12) + '\t' +   // pericenter distance
-                utils::pp(captures [ip].E,      12) + '\t' +   // energy at the moment of capture
-                strParticleIndex                    + '\t' +   // index of the particle that was captured
-                utils::toString(captures[ip].indexBH) + '\n';  // index of the black hole that captured it
+                utils::pp(episodeStart + captures[ip].tcapt, 12) + '\t' +
+                utils::pp(particles.mass(ip),   12) + '\t' +  // particle mass
+                utils::pp(captures[ip].rperi,   12) + '\t' +  // pericenter distance
+                utils::pp(captures[ip].E,       12) + '\t' +  // energy at the moment of capture
+                strParticleIndex                    + '\t' +  // index of the particle that was captured
+                utils::toString(captures[ip].indexBH)+'\t' +  // index of the black hole that captured it
+                utils::pp(captures[ip].rcapt,   12) + '\t' +  // capture radius for this event
+                utils::pp(particles.point(ip).stellarRadius, 12) + '\t' +  // radius and
+                utils::pp(particles.point(ip).stellarMass,   12) + '\n';   // mass of the star
             // set the particle mass to zero to indicate that it no longer exists
             particles[ip].second = 0;
         }

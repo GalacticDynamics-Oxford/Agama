@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2019
+    \date   2014-2020
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -26,6 +26,7 @@
 #include <numpy/arrayobject.h>
 #include <structmember.h>
 #include <stdexcept>
+#include <complex>
 #ifdef _OPENMP
 #include "omp.h"
 #endif
@@ -35,18 +36,14 @@
 #include "actions_torus.h"
 #include "df_factory.h"
 #include "df_interpolated.h"
-#include "df_spherical.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
-#include "galaxymodel_jeans.h"
 #include "galaxymodel_losvd.h"
 #include "galaxymodel_selfconsistent.h"
-#include "galaxymodel_spherical.h"
 #include "galaxymodel_velocitysampler.h"
 #include "math_core.h"
 #include "math_gausshermite.h"
 #include "math_optimization.h"
-#include "math_random.h"
 #include "math_sample.h"
 #include "math_spline.h"
 #include "particles_io.h"
@@ -487,10 +484,8 @@ inline void unconvertActions(const actions::Actions& act, double dest[])
     dest[2] = act.Jphi / (conv->lengthUnit * conv->velocityUnit);
 }
 
-/// convert a tuple of two arrays (particle coordinates and possibly velocities, and particle masses)
-/// into an equivalent C++ object with appropriate units
-template<typename ParticleT>
-particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
+void convertParticlesStep1(PyObject* particles_obj,
+    /*output - create new arrays*/ PyArrayObject* &coord_arr, PyArrayObject* &mass_arr)
 {
     // parse the input arrays
     static const char* errorstr = "'particles' must be a tuple with two arrays - "
@@ -499,10 +494,8 @@ particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
     PyObject *coord_obj, *mass_obj;
     if(!PyArg_ParseTuple(particles_obj, "OO", &coord_obj, &mass_obj))
         throw std::invalid_argument(errorstr);
-    PyArrayObject *coord_arr = (PyArrayObject*)
-        PyArray_FROM_OTF(coord_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    PyArrayObject *mass_arr  = (PyArrayObject*)
-        PyArray_FROM_OTF(mass_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    coord_arr = (PyArrayObject*)PyArray_FROM_OTF(coord_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    mass_arr  = (PyArrayObject*)PyArray_FROM_OTF(mass_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
     npy_intp nbody = 0;
     if( coord_arr == NULL || mass_arr == NULL ||      // input should contain valid arrays
         PyArray_NDIM(mass_arr) != 1 ||                // the second one should be 1d array
@@ -515,7 +508,14 @@ particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
         Py_XDECREF(mass_arr);
         throw std::invalid_argument(errorstr);
     }
-    bool haveVel = PyArray_DIM(coord_arr, 1) == 6;  // whether we have velocity data
+}
+    
+template<typename ParticleT>
+particles::ParticleArray<ParticleT> convertParticlesStep2(
+    /*input arrays, which will be disposed*/ PyArrayObject* coord_arr, PyArrayObject* mass_arr)
+{
+    npy_intp nbody = PyArray_DIM(coord_arr, 0);
+    bool haveVel   = PyArray_DIM(coord_arr, 1) == 6;  // whether we have velocity data
     particles::ParticleArray<ParticleT> result;
     result.data.reserve(nbody);
     for(npy_intp i=0; i<nbody; i++) {
@@ -532,6 +532,15 @@ particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
     return result;
 }
 
+/// convert a tuple of two arrays (particle coordinates and possibly velocities, and particle masses)
+/// into an equivalent C++ object with appropriate units
+template<typename ParticleT>
+particles::ParticleArray<ParticleT> convertParticles(PyObject* particles_obj)
+{
+    PyArrayObject *coord_arr, *mass_arr;
+    convertParticlesStep1(particles_obj,   /*create arrays*/ coord_arr, mass_arr);
+    return convertParticlesStep2<ParticleT>(/*consume them*/ coord_arr, mass_arr);
+}
 
 ///@}
 //  --------------------------------------------------------------
@@ -1000,6 +1009,7 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc, 
 #ifdef _OPENMP
             if(numpt <= abs(chunk))
 #else
+            (void)chunk;  // remove warning about unused parameter
             if(true)
 #endif
             {
@@ -1063,17 +1073,18 @@ PyObject* callAnyFunctionOnArray(void* params, PyObject* args, anyFunction fnc, 
     "  scaleHeight=...   scale height of the model (currently applicable to MiyamotoNagai and Disk).\n" \
     "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
     "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
-    "and to Spheroid and Sersic density models; when used with Plummer and NFW profiles, " \
+    "and to Spheroid, Nuker or Sersic density models; when used with Plummer and NFW profiles, " \
     "they are converted into equivalent Spheroid models).\n" \
     "  q=...   or  axisRatioZ=...   short to long axis (z/x).\n" \
-    "  gamma=...  central cusp slope (applicable for Dehnen and Spheroid).\n" \
-    "  beta=...   outer density slope (Spheroid).\n" \
-    "  alpha=...  strength of transition from the inner to the outer slopes (Spheroid).\n" \
+    "  gamma=...  central cusp slope (applicable for Dehnen, Spheroid or Nuker).\n" \
+    "  beta=...   outer density slope (Spheroid or Nuker).\n" \
+    "  alpha=...  strength of transition from the inner to the outer slopes (Spheroid or Nuker).\n" \
     "  sersicIndex=...   profile shape parameter 'n' (Sersic or Disk).\n" \
     "  innerCutoffRadius=...   radius of inner hole (Disk).\n" \
     "  outerCutoffRadius=...   radius of outer exponential cutoff (Spheroid).\n" \
     "  cutoffStrength=...   strength of outer exponential cutoff  (Spheroid).\n" \
-    "  surfaceDensity=...   central surface density (Disk or Sersic).\n" \
+    "  surfaceDensity=...   surface density normalization " \
+    "(Disk or Sersic - in the center, Nuker - at scaleRadius).\n" \
     "  densityNorm=...   normalization of density profile (Spheroid).\n" \
     "  W0=...  dimensionless central potential in King models.\n" \
     "  trunc=...  truncation strength in King models.\n"
@@ -1084,7 +1095,7 @@ static const char* docstringDensity =
     "that do not necessarily have a corresponding potential defined.\n"
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
-    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Sersic, King.\n"
+    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, Disk, Spheroid, Nuker, Sersic, King.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
     "Alternatively, one may construct a spherically-symmetric density model from a cumulative "
@@ -1584,7 +1595,7 @@ static const char* docstringPotential =
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
-    "PerfectEllipsoid, Disk, Spheroid, Sersic, King;\n"
+    "PerfectEllipsoid, Disk, Spheroid, Nuker, Sersic, King;\n"
     "    or one of the expansion types:  Multipole or CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
@@ -4601,12 +4612,22 @@ static const char* docstringOrbit =
     "each target collects its own data for each orbit.\n"
     "  trajsize (optional):  if given, turns on the recording of trajectory for each orbit "
     "(should be either a single integer or an array of integers with length N). "
-    "The trajectory of each orbit is stored at regular intervals of time (`dt=time/(trajsize-1)`, "
+    "The trajectory of each orbit is stored either at every timestep of the integrator "
+    "(if trajsize=0) or at regular intervals of time (`dt=time/(trajsize-1)`, "
     "so that the number of points is `trajsize`; both time and trajsize may differ between orbits.\n"
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
+    "  dtype (optional, default 'f32'):  storage data type for trajectories. "
+    "The choice is between 32-bit and 64-bit float or complex: "
+    "'float' or 'double' means 6 64-bit floats (3 positions and 3 velocities); "
+    "'float32' (default) means 6 32-bit floats; "
+    "'complex' or 'complex128' or 'c16' means 3 128-bit complex values (pairs of 64-bit floats), "
+    "with velocity in the imaginary part; and 'complex64' or 'c8' means 3 64-bit complex values. "
+    "The time array is also 32-bit or 64-bit, in agreement with the trajectory. "
+    "The choice of dtype only affects trajectories; arrays returned by each target always "
+    "contain 32-bit floats.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
     "plus an extra one for trajectories if trajsize>0, plus another one for Lyapunov exponents "
@@ -4641,13 +4662,15 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     orbit::OrbitIntParams params;
     double Omega = 0.;
     int haveLyap = 0;
-    PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL, *targets_obj = NULL, *trajsize_obj = NULL;
+    int traj_dtype = NPY_FLOAT;
+    PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL,
+        *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL;
     static const char* keywords[] =
         {"ic", "time", "potential", "targets", "trajsize",
-         "lyapunov", "Omega", "accuracy", "maxNumSteps", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOiddi", const_cast<char**>(keywords),
+         "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOiddiO", const_cast<char**>(keywords),
         &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj,
-        &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps))
+        &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
         return NULL;
 
     // ensure that a potential object was provided
@@ -4731,7 +4754,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             return NULL;
         if(PyArray_NDIM(trajsize_arr) == 0) {
             long val = PyInt_AsLong(trajsize_obj);
-            if(val > 0)
+            if(val >= 0)
                 trajSizes.assign(numOrbits, val);
         } else if(PyArray_NDIM(trajsize_arr) == 1 && (int)PyArray_DIM(trajsize_arr, 0) == numOrbits) {
             trajSizes.resize(numOrbits);
@@ -4744,6 +4767,20 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 "Argument 'trajsize', if provided, must either be an integer or an array of integers "
                 "with the same length as the number of points in the initial conditions");
             return NULL;
+        }
+
+        // determine the output datatype
+        if(dtype_obj != NULL && dtype_obj != Py_None) {
+            PyArray_Descr* dtype = NULL;
+            traj_dtype = PyArray_DescrConverter2(dtype_obj, &dtype) ? dtype->type_num : NPY_NOTYPE;
+            Py_XDECREF(dtype);
+            if( traj_dtype !=  NPY_FLOAT && traj_dtype !=  NPY_DOUBLE &&
+                traj_dtype != NPY_CFLOAT && traj_dtype != NPY_CDOUBLE )
+            {
+                PyErr_SetString(PyExc_ValueError,
+                    "Argument 'dtype' should correspond to 32- or 64-bit float or complex");
+                return NULL;
+            }
         }
     }
 
@@ -4808,11 +4845,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             if(fail || cbrk.triggered()) continue;
             try{
                 double integrTime = integrTimes.at(orb);
-                // slightly reduce the output interval for trajectory to ensure that
-                // the last point is stored (otherwise it may be left out due to roundoff)
-                double trajStep = haveTraj && trajSizes[orb]>0 ?
-                    integrTime / (trajSizes[orb]-1+1e-10) : INFINITY;
-                std::vector<coord::PosVelCar> traj;  // stores the trajectory
+                std::vector< std::pair<coord::PosVelCar, double> > traj;  // stores the trajectory
 
                 // construct runtime functions for each target that store the collected data
                 // in the respective row of each target's matrix,
@@ -4825,8 +4858,14 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, 0);
                     fncs[t].reset(new galaxymodel::RuntimeFncTarget(*targets[t], output));
                 }
-                if(haveTraj)
+                if(haveTraj) {
+                    double trajStep = trajSizes[orb]>0 ?
+                        // slightly reduce the output interval for trajectory to ensure that
+                        // the last point is stored (otherwise it may be left out due to roundoff)
+                        integrTime / (trajSizes[orb]-1+1e-10) :
+                        0;  // if trajSize==0, this means store trajectory at every integration timestep
                     fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
+                }
                 if(haveLyap) {
                     double samplingInterval = 0.1 * T_circ(*pot, totalEnergy(*pot, initCond.at(orb)));
                     PyObject* elem = PyTuple_GET_ITEM(result, numTargets + haveTraj);  // output array
@@ -4863,14 +4902,15 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // if the trajectory was recorded, store it in the corresponding item of the output tuple
                 if(haveTraj) {
                     const npy_intp size = traj.size();
-                    npy_intp dims[] = {size, 6};
+                    npy_intp dims[] = {size, traj_dtype==NPY_CFLOAT || traj_dtype==NPY_CDOUBLE ? 3 : 6};
                     PyObject *time_arr, *traj_arr;
 #ifdef _OPENMP
 #pragma omp critical(PythonAPI)
 #endif
                     {   // avoid concurrent non-readonly access to Python C API
-                        time_arr = PyArray_SimpleNew(1, dims, STORAGE_NUM_T);
-                        traj_arr = PyArray_SimpleNew(2, dims, STORAGE_NUM_T);
+                        time_arr = PyArray_SimpleNew(1, dims,
+                            traj_dtype==NPY_FLOAT || traj_dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
+                        traj_arr = PyArray_SimpleNew(2, dims, traj_dtype);
                     }
                     if(!time_arr || !traj_arr) {
                         fail = true;
@@ -4880,12 +4920,36 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     // convert the units and numerical type
                     for(npy_intp index=0; index<size; index++) {
                         double point[6];
-                        unconvertPosVel(traj[index], point);
-                        for(int c=0; c<6; c++)
-                            pyArrayElem<galaxymodel::StorageNumT>(traj_arr, index, c) =
-                                static_cast<galaxymodel::StorageNumT>(point[c]);
-                        pyArrayElem<galaxymodel::StorageNumT>(time_arr, index) =
-                            static_cast<galaxymodel::StorageNumT>(trajStep * index / conv->timeUnit);
+                        unconvertPosVel(traj[index].first, point);
+                        // time array
+                        if(traj_dtype == NPY_DOUBLE || traj_dtype == NPY_CDOUBLE)
+                            pyArrayElem<double>(time_arr, index) = traj[index].second / conv->timeUnit;
+                        else
+                            pyArrayElem<float>(time_arr, index) =
+                                static_cast<float>(traj[index].second / conv->timeUnit);
+                        // trajectory array
+                        switch(traj_dtype) {
+                            case NPY_DOUBLE:
+                                for(int c=0; c<6; c++)
+                                    pyArrayElem<double>(traj_arr, index, c) = point[c];
+                                break;
+                            case NPY_FLOAT:
+                                for(int c=0; c<6; c++)
+                                    pyArrayElem<float>(traj_arr, index, c) = static_cast<float>(point[c]);
+                                break;
+                            case NPY_CDOUBLE:
+                                for(int c=0; c<3; c++)
+                                    pyArrayElem<std::complex<double> >(traj_arr, index, c) =
+                                        std::complex<double>(point[c+0], point[c+3]);
+                                break;
+                            case NPY_CFLOAT:
+                                for(int c=0; c<3; c++) {
+                                    pyArrayElem<std::complex<float> >(traj_arr, index, c) =
+                                        std::complex<float>(point[c+0], point[c+3]);
+                                }
+                                break;
+                            default: {}  // shouldn't happen, we checked dtype beforehand
+                        }
                     }
 
                     // store these arrays in the corresponding element of the output tuple
@@ -4973,7 +5037,7 @@ PyObject* readSnapshot(PyObject* /*self*/, PyObject* arg)
         // we do not perform any unit conversion on the particle coordinates/masses:
         // they are read 'as is' from the file, and any such conversion will take place when
         // feeding them to other routines, such as constructing the potential or integrating orbits
-        particles::ParticleArrayCar snap = particles::readSnapshot(name);
+        particles::ParticleArrayAux snap = particles::readSnapshot(name);
         npy_intp size[] = { static_cast<npy_intp>(snap.size()), 6 };
         PyObject* posvel_arr = PyArray_SimpleNew(2, size, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, size, NPY_DOUBLE);
@@ -5013,10 +5077,19 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "sO|s", const_cast<char **>(keywords),
         &filename, &particles_obj, &format))
         return NULL;
-    // write snapshot
     try{
-        particles::writeSnapshot(filename,
-            convertParticles<coord::PosVelCar>(particles_obj), format?: "text", *conv);
+        // determine whether we have only 3 coordinates, or additionally 3 velocities
+        PyArrayObject *coord_arr, *mass_arr;
+        convertParticlesStep1(particles_obj, /*create arrays*/ coord_arr, mass_arr);
+        if(PyArray_DIM(coord_arr, 1) == 6) {
+            particles::writeSnapshot(filename,
+                convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
+                format?: "text", *conv);
+        } else {
+            particles::writeSnapshot(filename,
+                convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
+                format?: "text", *conv);
+        }
         Py_INCREF(Py_None);
         return Py_None;
     }
@@ -5305,7 +5378,8 @@ int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
         return -1;
     }
     try {
-        ((CubicSplineObject*)self)->spl = math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight);
+        ((CubicSplineObject*)self)->spl = math::CubicSpline(
+            xvalues, yvalues, regularize, derivLeft, derivRight);
         utils::msg(utils::VL_DEBUG, "Agama", "Created a cubic spline of size "+
             utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
             utils::toString(&((CubicSplineObject*)self)->spl));

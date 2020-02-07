@@ -234,7 +234,7 @@ double quasiRandomHalton(size_t ind, unsigned int base)
 uint64_t hash(const void* data, int len /*length of data in 8-byte chunks*/, unsigned int seed)
 {
     const uint64_t m = 0xc6a4a7935bd1e995;  // magic number for scrambling
-    uint64_t h = (len * m) ^ seed;
+    uint64_t h = (len + m) ^ seed;
     for(int i=0; i<len; i++) {
         uint64_t k = static_cast<const uint64_t*>(data)[i];
         k *= m;

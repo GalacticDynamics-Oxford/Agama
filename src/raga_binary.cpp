@@ -149,7 +149,7 @@ orbit::StepResult RuntimeBinary::processTimestep(
 
 RagaTaskBinary::RagaTaskBinary(
     const ParamsBinary& _params,
-    const particles::ParticleArrayCar& _particles,
+    const particles::ParticleArrayAux& _particles,
     const potential::PtrPotential& _ptrPot,
     BHParams& _bh)
 :
@@ -249,7 +249,7 @@ void RagaTaskBinary::finishEpisode()
     unsigned int numEnc=0, numPart=0;
     double deltaE=0, deltaLz=0;
     for(size_t ip=0; ip<particles.size(); ip++) {
-        double mass = particles[ip].second;
+        double mass = particles.mass(ip);
         if(encounters[ip].empty())
             continue;   // nothing happened to this particle
         for(size_t ie=0; ie<encounters[ip].size(); ie++) {

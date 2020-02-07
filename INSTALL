@@ -9,6 +9,9 @@ There are two alternative ways of building and installing the library:
 In the automatic mode, go to the root folder of the archive (containing setup.py) and run
   python setup.py install --user
 (or python3 with the same arguments), and follow the instructions.
+The setup script may ask permission for downloading/installing additional third-party
+libraries (most importantly, GSL); if the installation needs to be fully automated,
+one may add '--yes' to the command-line arguments to skip the confirmation questions.
 One can also install with pip: in the same folder, you may run
   pip install --user ./
 or even without unpacking, just run
@@ -31,7 +34,7 @@ In the manual mode, follow these steps:
     (in its absense the non-optimized substitutes from GSL will be used);
     its use slows down compilation quite dramatically, but this more than pays off at runtime.
     http://eigen.tuxfamily.org/
-    - GLPK for solving linear optimization problems:
+    - GLPK for solving linear optimization problems (not needed if CVXOPT is available):
     http://www.gnu.org/software/glpk/
     - CVXOPT for solving linear and quadratic optimization problems (requires Python):
     http://cvxopt.org/
@@ -60,12 +63,12 @@ In the manual mode, follow these steps:
 4.  Run 'make test' to run a series of tests (may need up to a few minutes).
 5.  In order to make the Python extension module available for import, it should be either copied
     to its site-packages folder, or the path to it be added to PYTHONPATH environment variable.
-    as shown in the example below: assuming that the folder containing this file is called
-    /path/to/agama, the extension module is located in /path/to/agama/lib/agama.so
+    If the root folder of the distribution (the same one in which this file resides) is called
+    /path/to/agama, the extension module is located in /path/to/agama/agama.so
     (this shared library may be directly imported by python):
-    export PYTHONPATH=$(PYTHONPATH):/path/to/agama/lib
+    export PYTHONPATH=$(PYTHONPATH):/path/to/agama
     Alternatively, the root folder itself may be used as the 'package directory': it contains
-    __init__.py which loads both the C++ shared library from lib/agama.so and some Python routines
+    __init__.py which loads both the C++ shared library from ./agama.so and some Python routines
     from py/pygama.py, and places them into the same namespace for convenience.
     Hence PYTHONPATH would be augmented with '/path/to'
     since this is the folder containing a sub-folder named 'agama'.

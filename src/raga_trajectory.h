@@ -14,8 +14,6 @@
 */
 #pragma once
 #include "raga_base.h"
-#include "particles_base.h"
-#include <string>
 
 namespace raga {
 
@@ -43,6 +41,9 @@ struct ParamsTrajectory {
     
     /// optional header written in the output file
     std::string header;
+
+    /// set defaults
+    ParamsTrajectory() : outputFormat("text"), outputInterval(0) {}
 };
 
 /** The task that stores the output of the simulation as a series of N-body snapshots */
@@ -50,11 +51,11 @@ class RagaTaskTrajectory: public BaseRagaTask {
 public:
     RagaTaskTrajectory(
         const ParamsTrajectory& params,
-        const particles::ParticleArrayCar& particles);
+        const particles::ParticleArrayAux& particles);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
-    virtual const char* name() const { return "SnapshotOutput"; }
+    virtual const char* name() const { return "SnapshotOutput "; }
 private:
     /// perform the actual output and update the last output time
     void outputParticles(double time);
@@ -64,7 +65,7 @@ private:
 
     /// read-only reference to the list of particles in the simulation
     /// (they are written into the output file when the time comes)
-    const particles::ParticleArrayCar& particles;
+    const particles::ParticleArrayAux& particles;
 
     /// last time the output file was written
     double prevOutputTime;

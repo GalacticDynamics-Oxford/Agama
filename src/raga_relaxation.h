@@ -67,9 +67,6 @@
 */
 #pragma once
 #include "raga_base.h"
-#include "particles_base.h"
-#include "math_random.h"
-#include <string>
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
 namespace galaxymodel {
@@ -87,20 +84,22 @@ public:
     RuntimeRelaxation(
         const potential::BasePotential& _potentialSph,
         const galaxymodel::SphericalIsotropicModelLocal& _relaxationModel,
-        double _relaxationRate,
+        double _coulombLog,
+        double _mass,
         double _outputTimestep,
         const std::vector<double>::iterator& _outputFirst,
         const std::vector<double>::iterator& _outputLast,
-        math::PRNGState _state)
+        unsigned int _seed)
     :
         potentialSph(_potentialSph),
         relaxationModel(_relaxationModel),
-        relaxationRate(_relaxationRate),
+        coulombLog(_coulombLog),
+        mass(_mass),
         outputTimestep(_outputTimestep),
         outputFirst(_outputFirst),
         outputLast (_outputLast),
         outputIter (_outputFirst),
-        state(_state)
+        seed(_seed)
     {}
     virtual orbit::StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
@@ -124,12 +123,12 @@ private:
     */
     const galaxymodel::SphericalIsotropicModelLocal& relaxationModel;
 
-    /** The amplitude of relaxation (the drift and diffusion coefs returned by the relaxation
-        model are multiplied by this factor, which has a physical meaning of \ln\Lambda/N_\star,
-        where N_\star is the number of stars in the actual stellar system (not the number of
-        particles in the simulation), and \ln\Lambda ~ \ln N_\star is the Coulomb logarithm.
-    */
-    const double relaxationRate;
+    /** Coulomb logarithm \ln\Lambda ~ \ln N_\star */
+    const double coulombLog;
+
+    /** Stellar mass associated with this particle (the strength of dynamical friction is
+        proportional to this mass, while relaxation rate is independent of it) */
+    const double mass;
 
     /** Interval between storing the samples of phase volume taken from this orbit during
         the current episode (counting from the beginning of the episode) */
@@ -142,8 +141,8 @@ private:
     /** pointer to the current array element where the upcoming sample will be placed */
     std::vector<double>::iterator outputIter;
     
-    /** current state vector of the orbit-local pseudo-random number generator */
-    math::PRNGState state;
+    /** seed for the orbit-local pseudo-random number generator */
+    unsigned int seed;
 };
 
 /** Fixed global parameters of this task */
@@ -151,8 +150,8 @@ struct ParamsRelaxation {
     /// number of subsamples collected for each orbit during an episode
     unsigned int numSamplesPerEpisode;
 
-    /// relaxation rate (=log Lambda / N_stars, if set to 0 then this task is not activated)
-    double relaxationRate;
+    /// Coulomb logarithm (ln Lambda), if set to 0 then this task is not activated
+    double coulombLog;
 
     /// size of the grid in energy space for constructing the spherical model
     unsigned int gridSizeDF;
@@ -166,6 +165,11 @@ struct ParamsRelaxation {
     
     /// optional header written in the output file
     std::string header;
+
+    /// set defaults
+    ParamsRelaxation() :
+        numSamplesPerEpisode(1), coulombLog(0), gridSizeDF(25), outputInterval(0)
+    {}
 };
 
 /** The driver class for simulating two-body relaxation */
@@ -173,13 +177,13 @@ class RagaTaskRelaxation: public BaseRagaTask {
 public:
     RagaTaskRelaxation(
         const ParamsRelaxation& params,
-        const particles::ParticleArrayCar& particles,
+        const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
         const BHParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
-    virtual const char* name() const { return "Relaxation"; }
+    virtual const char* name() const { return "Relaxation     "; }
 
 private:
     /** fixed parameters of this task  */
@@ -187,7 +191,7 @@ private:
 
     /** read-only reference to the list of particles
         (only their current masses are used in constructing the DF)  */
-    const particles::ParticleArrayCar& particles;
+    const particles::ParticleArrayAux& particles;
 
     /** read-only pointer to the stellar potential of the system
         which is used to construct a sphericalized potential and its associated

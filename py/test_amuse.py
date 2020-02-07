@@ -4,6 +4,7 @@ from amuse.community.agama.interface import Agama
 from amuse.units import *
 from amuse.test.amusetest import TestWithMPI
 from amuse.ic.plummer import new_plummer_model
+from numpy.random import seed
 
 class AgamaInterfaceTests(TestWithMPI):
 
@@ -43,6 +44,7 @@ class AgamaInterfaceTests(TestWithMPI):
         instance.stop()
 
     def test2(self):
+        seed(1)
         particles=new_plummer_model(10000)
         instance = Agama(type="Multipole", particles=particles)
         result=instance.get_potential_at_point(

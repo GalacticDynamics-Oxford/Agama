@@ -31,6 +31,7 @@
 #include "math_ode.h"
 #include "smart.h"
 #include <vector>
+#include <utility>
 
 /** Orbit integration routines and classes */
 namespace orbit {
@@ -78,21 +79,23 @@ typedef shared_ptr<BaseRuntimeFnc> PtrRuntimeFnc;
 typedef std::vector<PtrRuntimeFnc> RuntimeFncArray;
 
 
-/** Runtime function that records the orbit trajectory at regular intervals of time
-    (unrelated to the internal timestep of the orbit integrator).
+/** Runtime function that records the orbit trajectory either at every integration timestep,
+    or at regular intervals of time (unrelated to the internal timestep of the orbit integrator).
     \tparam  CoordT  is the type of coordinate system used in orbit integration (Car, Cyl or Sph)
 */
 template<typename CoordT>
 class RuntimeTrajectory: public BaseRuntimeFnc {
-    /// time interval between trajectory samples
+    /// if positive, indicates the time interval between trajectory samples,
+    /// otherwise samples are stored every timestep
     const double samplingInterval;
 
-    /// trajectory sampled at regular intervals of time (0th point is the initial conditions),
-    /// stored in an external array referenced by this variable
-    std::vector<coord::PosVelT<CoordT> >& trajectory;
+    /// sampled trajectory (position/velocity and time), stored in an external array
+    /// referenced by this variable; 0th point is the initial conditions
+    std::vector< std::pair<coord::PosVelT<CoordT>, double> >& trajectory;
 
 public:
-    RuntimeTrajectory(double _samplingInterval, std::vector<coord::PosVelT<CoordT> >& _trajectory) :
+    RuntimeTrajectory(double _samplingInterval,
+        std::vector<std::pair<coord::PosVelT<CoordT>, double> >& _trajectory) :
         samplingInterval(_samplingInterval), trajectory(_trajectory) {}
 
     virtual StepResult processTimestep(
@@ -116,6 +119,10 @@ public:
     /// apply the equations of motion
     virtual void eval(const double t, const double x[], double dxdt[]) const;
 
+    /// provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
+    /// to improve the total energy conservation
+    virtual double getAccuracyFactor(const double t, const double x[]) const;
+
     /// return the size of ODE system - three coordinates and three velocities
     virtual unsigned int size() const { return 6; }
 };
@@ -138,8 +145,14 @@ public:
     OrbitIntegratorRot(const potential::BasePotential& _potential, double _Omega=0) :
         potential(_potential), Omega(_Omega) {};
 
+    /// apply the equations of motion
     virtual void eval(const double t, const double x[], double dxdt[]) const;
 
+    /// provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
+    /// to improve the total energy conservation
+    virtual double getAccuracyFactor(const double t, const double x[]) const;
+
+    /// return the size of ODE system - three coordinates and three velocities
     virtual unsigned int size() const { return 6; }
 };
 
@@ -190,22 +203,26 @@ coord::PosVelT<CoordT> integrate(
     \param[in]  initialConditions  is the initial position and velocity in the given coordinate system;
     \param[in]  totalTime  is the maximum duration of orbit integration;
     \param[in]  samplingInterval  is the time interval between successive point recorded
-                from the trajectory (has no relation to the internal timestep of the orbit integrator);
+                from the trajectory; if zero, then the trajectory is recorded at every timestep
+                of the orbit integrator, otherwise it is stored at these regular intervals;
     \param[in]  potential  is the gravitational potential in which the orbit is computed;
     \param[in]  params  are the extra parameters for the integration (default values may be used);
-    \return     the trajectory recorded at regular intervals, starting from the initial conditions.
+    \return     the recorded trajectory (0th point is the initial conditions) - 
+                an array of pairs of position/velocity points and associated moments of time.
     \throw      an exception if something goes wrong.
 */
 template<typename CoordT>
-inline std::vector<coord::PosVelT<CoordT> > integrateTraj(
+inline std::vector<std::pair<coord::PosVelT<CoordT>, double> > integrateTraj(
     const coord::PosVelT<CoordT>& initialConditions,
     const double totalTime,
     const double samplingInterval,
     const potential::BasePotential& potential,
     const OrbitIntParams& params = OrbitIntParams())
 {
-    std::vector<coord::PosVelT<CoordT> > output;
-    output.reserve(totalTime * (1+1e-15) / samplingInterval + 1);  // one extra point for the final state
+    std::vector<std::pair<coord::PosVelT<CoordT>, double> > output;
+    if(samplingInterval > 0)
+        // reserve space for the trajectory, including one extra point for the final state
+        output.reserve(totalTime * (1+1e-15) / samplingInterval + 1);
     integrate(initialConditions, totalTime,
         OrbitIntegrator<CoordT>(potential),
         RuntimeFncArray(1, PtrRuntimeFnc(new RuntimeTrajectory<CoordT>(samplingInterval, output))),

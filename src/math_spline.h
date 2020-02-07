@@ -167,14 +167,15 @@ public:
     CubicSpline() : BaseInterpolator1d() {};
 
     /** Construct a natural cubic spline from the function values at grid points,
-        or a clamped cubic spline from the amplitudes of a B-spline interpolator.
-        In both cases the interpolated curve is twice continuously differentiable,
-        unless an optional monotonic regularization filter is applied.
+        or a clamped cubic spline from the amplitudes of a 2nd- or 3rd-degree B-spline interpolator.
+        In both cases the interpolated curve is twice (or only once for a 2nd-degree B-spline)
+        continuously differentiable, unless an optional monotonic regularization filter is applied.
         \param[in]  xvalues - the array of grid nodes, should be monotonically increasing.
         \param[in]  fvalues - depending on the length of this array, it may mean two things:
         in the first case, an array of function values at grid nodes (same length as xvalues);
-        in the second case, an array of B-spline amplitudes, with length equal to xvalues.size()+2
-        (in this case the remaining arguments are ignored).
+        in the second case, an array of B-spline amplitudes, with length equal to 
+        xvalues.size()+1 (for a 2nd-degree B-spline) or xvalues.size()+2 (for a 3rd-degree B-spline);
+        in this case the remaining arguments are ignored.
         \param[in]  regularize (optional, default false) - whether to apply the regularization
         procedure to impose monotonicity constraints and reduce wiggliness.
         This may require a modification of the internally assigned first derivative, 

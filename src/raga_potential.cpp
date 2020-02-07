@@ -23,7 +23,7 @@ orbit::StepResult RuntimePotential::processTimestep(
 
 RagaTaskPotential::RagaTaskPotential(
     const ParamsPotential& _params,
-    const particles::ParticleArrayCar& _particles,
+    const particles::ParticleArrayAux& _particles,
     potential::PtrPotential& _ptrPot)
 :
     params(_params),
@@ -49,7 +49,11 @@ void RagaTaskPotential::startEpisode(double timeStart, double length)
     unsigned int nbody = particles.size();
     particleTrajectories.data.assign(nbody * params.numSamplesPerEpisode,
         particles::ParticleArray<coord::PosCyl>::ElemType(coord::PosCyl(NAN, NAN, NAN), NAN));
-    outputPotential(episodeStart);
+    // output the potential (if needed) at the start of the first episode
+    if(prevOutputTime == -INFINITY && !params.outputFilename.empty()) {
+        prevOutputTime = episodeStart;
+        writePotential(params.outputFilename + utils::toString(episodeStart), *ptrPot);
+    }
 }
 
 void RagaTaskPotential::finishEpisode()
@@ -78,15 +82,11 @@ void RagaTaskPotential::finishEpisode()
 
     // update the potential
     ptrPot = potential::Multipole::create(particleTrajectories,
-        params.symmetry, params.lmax, params.lmax, params.gridSizeR);
+        params.symmetry, params.lmax, params.lmax, params.gridSizeR, params.rmin, params.rmax);
 
-    // write out the new potential
-    outputPotential(episodeStart+episodeLength);
-}
-
-void RagaTaskPotential::outputPotential(double time)
-{
-    if(!params.outputFilename.empty() && time >= prevOutputTime + params.outputInterval) {
+    // write out the new potential (if needed)
+    double time = episodeStart+episodeLength;
+    if(!params.outputFilename.empty() && time >= prevOutputTime + params.outputInterval*0.999999) {
         prevOutputTime = time;
         writePotential(params.outputFilename + utils::toString(time), *ptrPot);
     }

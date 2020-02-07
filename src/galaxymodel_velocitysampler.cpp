@@ -37,10 +37,10 @@ particles::ParticleArrayCar assignVelocityEdd(
         double vec[3], sinphi, cosphi;
         math::getRandomUnitVector(vec, &state);
         math::sincos(point.phi, sinphi, cosphi);
-        result[i].first = coord::PosVelCar(
+        result[i] = particles::ParticleArrayCar::ElemType(coord::PosVelCar(
             point.R * cosphi, point.R * sinphi, point.z,
-            v * vec[0], v * vec[1], v * vec[2]);
-        result[i].second = pointCoords.mass(i);
+            v * vec[0], v * vec[1], v * vec[2]),
+            pointCoords.mass(i));
     }
     return result;
 }
@@ -76,12 +76,12 @@ particles::ParticleArrayCar assignVelocityJeansSph(
         double vper[3];
         math::getRandomPerpendicularVector(xyz, vper, &state);
         if(r==0) r=1.;  // avoid indeterminacy
-        result[i].first = coord::PosVelCar(
+        result[i] = particles::ParticleArrayCar::ElemType(coord::PosVelCar(
             xyz[0], xyz[1], xyz[2],
             vr * xyz[0] / r + vt * vper[0],
             vr * xyz[1] / r + vt * vper[1],
-            vr * xyz[2] / r + vt * vper[2]);
-        result[i].second = pointCoords.mass(i);
+            vr * xyz[2] / r + vt * vper[2]),
+            pointCoords.mass(i));
     }
     return result;
 }
@@ -116,8 +116,9 @@ particles::ParticleArrayCar assignVelocityJeansAxi(
             vR *= sigma_R;
             vz *= sigma_z;
         } while(Phi + 0.5 * (vR*vR + vz*vz + vphi*vphi) > 0 && ++numAttempts<100);
-        result[i].first = toPosVelCar(coord::PosVelCyl(point, coord::VelCyl(vR, vz, vphi)));
-        result[i].second= pointCoords.mass(i);
+        result[i] = particles::ParticleArrayCar::ElemType(
+            toPosVelCar(coord::PosVelCyl(point, coord::VelCyl(vR, vz, vphi))),
+            pointCoords.mass(i));
     }
     return result;
 }
@@ -170,7 +171,7 @@ particles::ParticleArrayCar assignVelocity(
         if(method == SD_EDDINGTON) {
             const potential::PhaseVolume phasevol(*fncPot);
             const math::LogLogSpline df = df::createSphericalIsotropicDF(*fncDens, *fncPot);
-            const SphericalIsotropicModelLocal model(phasevol, df);
+            const SphericalIsotropicModelLocal model(phasevol, df, df);
             return assignVelocityEdd(pointCoords, pot, model);
         } else if(method == SD_JEANSSPH) {
             math::LogLogSpline model = createJeansSphModel(*fncDens, *fncPot, beta);
