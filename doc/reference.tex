@@ -512,9 +512,9 @@ f(\bJ) &= \frac{\tilde\Sigma\,\Omega}{2\pi^2\,\kappa^2} \times
 
 To construct such a DF, one needs to provide an instance of potential, which is used to initalize the mappings between actions and the radius of a circular orbit $R_c$ as a function of $z$-component of angular momentum, and the epicyclic frequencies $\kappa, \nu, \Omega$ as functions of radius. Other parameters listed in the  \ttt{QuasiIsothermalParam} structure are:
 \begin{itemize}
+\item \ppp{Sigma0} is the overall normalization of the surface density profile $\Sigma_0$; alternatively, one may provide the total \ppp{mass}, from which the normalization will be computed automatically.
 \item \ppp{coefJr} [1], \ppp{coefJz} [0.25] are the dimensionless coefficients $k_r,k_z\sim \mathcal{O}(1)$ in the linear combination of the actions $\tilde J \equiv |J_\phi| + k_r J_r + k_z J_z$, which is used as the argument of $R_c$ instead of the angular momentum. The reason for this is that $\tilde J$ better corresponds to the average radius of a given orbit than $J_\phi$ alone: for instance, a star with $J_\phi\approx 0$ does not in reality stay close to origin if the other two actions are large.
 Actually, we use $R_c(\hat J)$, where $\hat J \equiv (\tilde J^2 + J_\mathrm{min}^2)^{1/2}$, and $J_\mathrm{min}$ is introduced to prevent a pathological behaviour of DF in the case of a cuspy potential, when epicyclic frequencies tend to infinity as $R_c \to 0$.
-\item \ppp{Sigma0} is the overall normalization of the surface density profile $\Sigma_0$.
 \item \ppp{Rdisk} sets the scale length of the disk $R_\mathrm{disk}$.
 \item \ppp{Hdisk} if provided, determines the scale height of the disk $h_\mathrm{disk}$ and the vertical velocity dispersion, which are related through the vertical epicyclic frequency $\nu$. 
 \item Alternatively, \ppp{sigmaz0} and \ppp{Rsigmaz} can be used instead of \ppp{Hdisk} to make the vertical velocity dispersion profile close to an exponential function of radius, with central value $\sigma_{z,0}$ and radial scale length $R_{\sigma,z}$; this choice has been used historically for quasi-isothermal DFs \cite{BinneyMcMillan2011,Bovy2015}, but it does not generally produce constant-scaleheight disk profiles.
@@ -522,7 +522,7 @@ Actually, we use $R_c(\hat J)$, where $\hat J \equiv (\tilde J^2 + J_\mathrm{min
 \item \ppp{sigmamin} [0] is the minimum value of velocity dispersion $\sigma_\mathrm{min}$, added in quadrature to both $\tilde\sigma_r$ and $\tilde\sigma_z$; it is introduced to avoid the pathological situation when the velocity dispersion drop so rapidly with radius that the value of DF at $J_r=J_z=0$ actually increases indefinitely at large $J_\phi$. A reasonable lower limit could be $(0.02\, .. \, 0.05)\sigma_0$.
 \item \ppp{Jmin} [0] is the lower limit $J_\mathrm{min}$ imposed on the argument of the circular radius function $R_c(\hat J)$.
 \end{itemize}
-As stressed above, both epicyclic frequencies and $R_c(\hat J)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. If these two potentials are close enough, then this DF produces density profiles and velocity dispersions that approximately correspond to the exponential disks: the surface density $\Sigma(R)$ is close to exponentially declining with central value $\Sigma_0$ and radial scale length $R_\mathrm{disk}$, the vertical profile is roughly isothermal with scale height $h_\mathrm{disk}$, and the radial velocity dispersion is similar to $\tilde\sigma_r$, althogh the actual profiles are somewhat different from the tilded functions.
+As stressed above, both epicyclic frequencies and $R_c(\hat J)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. If these two potentials are close enough, then this DF produces density profiles and velocity dispersions that approximately correspond to the exponential disks: the surface density $\Sigma(R)$ is close to exponentially declining with central value $\Sigma_0$ and radial scale length $R_\mathrm{disk}$, the vertical profile is roughly isothermal with scale height $h_\mathrm{disk}$, and the radial velocity dispersion is similar to $\tilde\sigma_r$, although the actual profiles are somewhat different from the tilded functions.
 
 If the potential has a nearly flat rotation curve with circular velocity $v_\circ$, then $R_c(\tilde J) \approx \tilde J/v_\circ$, and epicyclic frequencies are $\propto v_\circ^2 / \tilde J$. This motivates the introduction of another family of disk-like DFs, which has a similar functional form, but does not itself contain any reference to the potential, simplifying the construction of self-consistent models (Section~\ref{sec:SCM}). It is represented by the \ttt{Exponential} class:
 \begin{align*}
@@ -536,7 +536,7 @@ J_v \equiv \sqrt{\tilde J^2 + J_{v,0}^2}
 \end{align*}
 Its parameters listed in the \ttt{ExponentialParam} structure are:
 \begin{itemize}
-\item \ppp{norm} is the overall scaling with the dimension of mass ($M$).
+\item \ppp{norm} is the overall scaling with the dimension of mass ($M$); alternatively, one may provide the total \ppp{mass}, from which the normalization will be computed automatically.
 \item \ppp{Jphi0} determines the scale length of the disk: $J_{\phi,0} \sim R_\mathrm{disk}v_\circ$.
 \item \ppp{Jz0} controls the scale height and vertical velocity dispersion: $J_{z,0} \sim h_\mathrm{disk}v_\circ \sim R\,\sigma_z(R)$.
 \item \ppp{Jr0} plays a similar role for the radial velocity dispersion and the extent of radial excursion $\Delta R$ of a typical orbit: $J_{r,0} \sim \Delta R\,v_\circ \sim R\,\sigma_r(R)$.
@@ -582,7 +582,7 @@ h(\bJ) &\equiv h_r J_r + h_z J_z   + (3-h_r-h_z)   |J_\phi|.
 \end{align*}
 The parameters of this model are listed in the structure \ttt{DoublePowerLawParams} and have the following meaning (default values in brackets):
 \begin{itemize}
-\item \ppp{norm} is the overall normalization $M$ with the dimension of mass; the actual total mass differs from $M$ by a numerical factor ranging from 1 to a few tens, which depends on other parameters of the model. 
+\item \ppp{norm} is the overall normalization $M$ with the dimension of mass; the actual total mass differs from $M$ by a numerical factor ranging from 1 to a few tens, which depends on other parameters of the model. Alternatively, one may provide the total \ppp{mass}, from which the normalization will be computed automatically.
 \item \ppp{J0} is the characteristic action $J_0$ corresponding to the break in the double-power-law profile; it sets the overall scale of the model.
 \item \ppp{slopeIn} is the power-law index $\Gamma$ in the inner part of the model, below the characteristic action; must be $<3$.
 \item \ppp{slopeOut} is the power-law index $\Beta$ in the outer part of the model; must be $>3$.
@@ -911,7 +911,7 @@ When applied to one or more triplets of angles, it returns the corresponding $\b
 \texttt{xv = am([[theta_r1, theta_z1, theta_phi1], [theta_r2, theta_z2, theta_phi2]])}
 
 \paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\
-\texttt{df = agama.DistributionFunction(type="...", [norm=..., other params])}\\
+\texttt{df = agama.DistributionFunction(type="...", [mass=..., other params])}\\
 where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
 or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\
 \texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}\\[2mm]
@@ -987,7 +987,14 @@ In case of success (\texttt{status=True}), the \texttt{result} array contains a 
 \paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass, length and velocity), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\
 \texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\
 instructs the library to work with the commonly used Galactic units: $1\,M_\odot$, 1\,kpc, 1\,km/s, with the derived unit of time being 0.98~Gyr (this is \textit{not} the same as using no units at all, because $G=4.3\times10^{-6}$ in these units). Importantly, this setup needs to be performed at the beginning of work, otherwise the values returned by the previously constructed classes and methods (e.g., potentials) would be incorrectly scaled.
-At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information. In the future, the unit system may be integrated with the one from the \texttt{astropy} framework \cite{Astropy}.
+At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information. In the future, the unit system may be integrated with the one from the \textsc{Astropy} framework \cite{Astropy}.
+
+\paragraph{Coordinate transformation} routines provide a simple mechanism for converting between Cartesian and celestial coordinates, or between two celestial reference frames. These conversions are a subset of those provided by \textsc{Astropy}, but are faster especially for small-to-medium size inputs, because they operate directly on \texttt{numpy} arrays and work only with a specific choice of units, bypassing the overheads of the comprehensive unit conversion subsystem of the \textsc{Astropy} framework:\\
+\texttt{makeRotationMatrix} constructs a $3\times3$ orthogonal rotation matrix $\mathsf R$ parametrized by Euler angles (Section~\ref{sec:CoordinateDetails}); the coordinates in the rotated frame $\boldsymbol x'$ are related to the original coordinates $\boldsymbol x$ via $\boldsymbol x' = \mathsf R \boldsymbol x$;\\
+\texttt{makeCelestialRotationMatrix} constructs a rotation matrix serving the same purpose, but parametrized by a different triplet of angles;\\
+\texttt{transformCelestialCoords} converts the celestial coordinates (longitude/latitude), and optionally proper motions and their dispersion tensor between two celestial reference frames;\\
+\texttt{getCelestialCoords} and \texttt{getCartesianCoords} perform the bidirectional transformation between celestial coordinates, proper motions, line-of-sight distance and velocity to/from Cartesian coordinates/velocities centered on the observer;\\
+\texttt{getGalacticFromGalactocentric} and \texttt{getGalactocentricFromGalactic} perform a similar transformation, but with additional positional and velocity offsets of the observer from the origin of the Galactocentric Cartesian reference frame.
 
 \paragraph{Mathematical methods} provided by the \Python extension module include:\\
 \texttt{integrateNdim} routine for multidimensional integration (an alternative interface to the \texttt{cubature} library which is included in the \Cpp code);\\
@@ -1101,7 +1108,7 @@ There are a couple of closely related \Python programs:\\
 \includegraphics{Colormaps.pdf}
 \end{center}
 \vspace*{-5mm}
-\caption{Custom colormaps in \Agama (right) compared to the ones from \textsc{Matplotlib}.
+\caption{Custom colormaps in \Agama (left) compared to the ones from \textsc{Matplotlib}.
 }  \label{fig:colormaps}
 \end{figure}
 
@@ -1658,7 +1665,7 @@ The third rotation of the $x''y''$ plane (red) by angle $\gamma$ about the $\bz'
 %%%%%%%%%%%%
 
 The coordinate transformation subsystem in \Agama consists of several concepts.
-First, we define several commonly used coordinate systems (or \textit{representations} in the terminology of \texttt{astropy}): Cartesian, Cylindrical, Spherical, and Prolate Spheroidal. The same point in 3d space can be represented in any of these coordinate systems (having a common center and orientation). There are routines for transforming coordinates, velocities, gradients and hessians of scalar functions between these representations.
+First, we define several commonly used coordinate systems (or \textit{representations} in the terminology of \textsc{Astropy}): Cartesian, Cylindrical, Spherical, and Prolate Spheroidal. The same point in 3d space can be represented in any of these coordinate systems (having a common center and orientation). There are routines for transforming coordinates, velocities, gradients and hessians of scalar functions between these representations.
 
 Second, we define rotations of coordinate basis.
 Consider a right-handed Cartesian reference frame defined by basis vectors (axes) $\bx,\by,\bz$, and a rotated frame with the same origin defined by basis vectors $\bX,\bY,\bZ$. The relative orientation of two frames can be specified by Euler angles (see Figure~\ref{fig:EulerAngles}).

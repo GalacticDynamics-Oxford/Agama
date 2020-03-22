@@ -343,20 +343,20 @@ SpheroidParam parseSpheroidParam(const AllParam& param)
 /// pick up the parameters for Nuker density
 NukerParam parseNukerParam(const AllParam& param)
 {
-    NukerParam sparam;
-    sparam.axisRatioY  = param.axisRatioY;
-    sparam.axisRatioZ  = param.axisRatioZ;
-    sparam.alpha       = param.alpha;
-    sparam.beta        = param.beta;
-    sparam.gamma       = param.gamma;
-    sparam.scaleRadius = param.scaleRadius;
+    NukerParam nparam;
+    nparam.axisRatioY  = param.axisRatioY;
+    nparam.axisRatioZ  = param.axisRatioZ;
+    nparam.alpha       = param.alpha;
+    nparam.beta        = param.beta;
+    nparam.gamma       = param.gamma;
+    nparam.scaleRadius = param.scaleRadius;
     if(isFinite(param.surfaceDensity))
-        sparam.surfaceDensity = param.surfaceDensity;
+        nparam.surfaceDensity = param.surfaceDensity;
     else {  // alternative: specify the total model mass instead of surface density normalization
-        sparam.surfaceDensity = 1;
-        sparam.surfaceDensity = param.mass / sparam.mass();
+        nparam.surfaceDensity = 1;
+        nparam.surfaceDensity = param.mass / nparam.mass();
     }
-    return sparam;
+    return nparam;
 }
 
 /// pick up the parameters for Sersic density

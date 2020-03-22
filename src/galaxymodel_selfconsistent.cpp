@@ -67,11 +67,26 @@ void ComponentWithDisklikeDF::update(
 
 //------------ Driver routines for self-consistent modelling ------------//
 
+static void updateActionFinder(SelfConsistentModel& model)
+{
+    // update the action finder after the potential has been reinitialized
+    std::cout << "done\nUpdating action finder..."<<std::flush;
+    if(isSpherical(*model.totalPotential))
+        model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
+    else
+        model.actionFinder.reset(
+        new actions::ActionFinderAxisymFudge(model.totalPotential, model.useActionInterpolation));
+    std::cout << "done" << std::endl;
+}
+
 void doIteration(SelfConsistentModel& model)
 {
-    // need to initialize the potential before the first iteration
+    // need to initialize the potential and the action finder before the first iteration
     if(!model.totalPotential)
         updateTotalPotential(model);
+    else
+        if(!model.actionFinder)
+            updateActionFinder(model);
 
     for(unsigned int index=0; index<model.components.size(); index++) {
         // update the density of each component (this may be a no-op if the component is 'dead',
@@ -146,14 +161,8 @@ void updateTotalPotential(SelfConsistentModel& model)
     else
         model.totalPotential.reset(new potential::CompositeCyl(compPot));
 
-    // update the action finder
-    std::cout << "done\nUpdating action finder..."<<std::flush;
-    if(isSpherical(*model.totalPotential))
-        model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
-    else
-        model.actionFinder.reset(
-            new actions::ActionFinderAxisymFudge(model.totalPotential, model.useActionInterpolation));
-    std::cout << "done"<<std::endl;
+    // finally, create the action finder for the new potential
+    updateActionFinder(model);
 }
 
 }  // namespace

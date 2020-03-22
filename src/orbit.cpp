@@ -24,20 +24,27 @@ inline coord::PosVelCyl getPosVel(const double data[6])
 template<>
 inline coord::PosVelSph getPosVel(const double data[6])
 {
-    int tmp;
     double r = data[0];
     double phi = data[2];
-    double theta = remquo(data[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
-    int signr = r<0 ? -1 : 1, signt = theta<0 ? -1 : 1;
-    if(theta<0) {  // happens also if pi < theta < 2pi, which is flipped to -pi..0
+    int signr = 1, signt = 1;
+    double theta = fmod(data[1], 2*M_PI);
+    // normalize theta to the range 0..pi, and r to >=0
+    if(theta<-M_PI) {
+        theta += 2*M_PI;
+    } else if(theta<0) {
         theta = -theta;
-        phi += M_PI;
+        signt = -1;
+    } else if(theta>M_PI) {
+        theta = 2*M_PI-theta;
+        signt = -1;
     }
     if(r<0) {
         r = -r;
         theta = M_PI-theta;
-        phi += M_PI;
+        signr = -1;
     }
+    if((signr == -1) ^ (signt == -1))
+        phi += M_PI;
     phi = math::wrapAngle(phi);
     return coord::PosVelSph(r, theta, phi, data[3] * signr, data[4] * signt, data[5] * signr * signt);
 }
@@ -47,15 +54,26 @@ template<typename CoordT>
 StepResult RuntimeTrajectory<CoordT>::processTimestep(
     const math::BaseOdeSolver& solver, const double tbegin, const double tend, double vars[])
 {
-    if(samplingInterval > 0) {
+    if(samplingInterval == INFINITY) {
+        // store just one point from the trajectory, which always contains the current orbital state and time
+        if(trajectory.empty())
+            trajectory.resize(1);
+        trajectory[0].first  = getPosVel<CoordT>(vars);
+        trajectory[0].second = tend;
+    } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
-        while(samplingInterval * trajectory.size() <= tend) {
-            double tsamp = samplingInterval * trajectory.size();
-            double data[6];
-            for(int d=0; d<6; d++)
-                data[d] = solver.getSol(tsamp, d);
-            trajectory.push_back(
-                std::pair<coord::PosVelT<CoordT>, double>(getPosVel<CoordT>(data), tsamp));
+        size_t ibegin = static_cast<size_t>(tbegin / samplingInterval);
+        size_t iend   = static_cast<size_t>(tend   / samplingInterval + 1e-10);
+        trajectory.resize(iend + 1);
+        for(size_t iout=ibegin; iout<=iend; iout++) {
+            double tout = samplingInterval * iout;
+            if(tout >= tbegin && tout <= tend) {
+                double data[6];
+                for(int d=0; d<6; d++)
+                    data[d] = solver.getSol(tout, d);
+                trajectory[iout].first  = getPosVel<CoordT>(data);
+                trajectory[iout].second = tout;
+            }
         }
     } else {
         // store trajectory at every integration timestep
@@ -133,21 +151,27 @@ void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/, const double x[], dou
 template<>
 void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], double dxdt[]) const
 {
-    int tmp;
     double r = x[0];
     double phi = x[2];
-    double theta = remquo(x[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
-    int signr = r<0 ? -1 : 1, signt = theta<0 ? -1 : 1;
-    if(theta<0) {  // happens also if pi < theta < 2pi, which is flipped to -pi..0
+    int signr = 1, signt = 1;
+    double theta = fmod(x[1], 2*M_PI);
+    // normalize theta to the range 0..pi, and r to >=0
+    if(theta<-M_PI) {
+        theta += 2*M_PI;
+    } else if(theta<0) {
         theta = -theta;
-        phi += M_PI;
+        signt = -1;
+    } else if(theta>M_PI) {
+        theta = 2*M_PI-theta;
+        signt = -1;
     }
     if(r<0) {
         r = -r;
         theta = M_PI-theta;
-        phi += M_PI;
+        signr = -1;
     }
-
+    if((signr == -1) ^ (signt == -1))
+        phi += M_PI;
     const coord::PosVelSph p(r, theta, phi, x[3], x[4], x[5]);
     coord::GradSph grad;
     potential.eval(p, NULL, &grad);

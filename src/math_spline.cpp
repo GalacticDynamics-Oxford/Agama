@@ -1336,6 +1336,8 @@ std::vector<double> FiniteElement1d<N>::computeProjVector(
     const unsigned int gridSize = integrNodes.size(), numFunc = N+1, numBasisFnc = interp.numValues();
     if(fncValues.size() != gridSize)
         throw std::length_error("computeProjVector: invalid size of input array");
+    if(derivOrder>N)
+        throw std::invalid_argument("computeProjVector: invalid order of derivative");
     std::vector<double> result(numBasisFnc);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function times the weight of Gauss-Legendre quadrature at point p
@@ -1360,6 +1362,8 @@ BandMatrix<double> FiniteElement1d<N>::computeProjMatrix(
     bool empty  = fncValues.empty();   // whether the function f(x) is provided (otherwise take f=1)
     if(!empty && fncValues.size() != gridSize)
         throw std::length_error("computeProjMatrix: invalid size of input array");
+    if(derivOrderP>N || derivOrderQ>N)
+        throw std::invalid_argument("computeProjMatrix: invalid order of derivative");
     BandMatrix<double> mat(numBasisFnc, N, 0.);
     for(unsigned int p=0; p<gridSize; p++) {
         // value of input function (if provided) times the weight of Gauss-Legendre quadrature at point p

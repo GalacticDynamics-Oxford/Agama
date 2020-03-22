@@ -298,7 +298,7 @@ public:
         p2(pow_2(params.axisRatioY)), q2(pow_2(params.axisRatioZ)),
         rho(createSpheroidDensity(params)) {}
     
-    /// construct a model with the provided Spheroid density parameters (convenience overload)
+    /// construct a model with the provided Nuker density parameters (convenience overload)
     SpheroidDensity(const NukerParam& params) :
         p2(pow_2(params.axisRatioY)), q2(pow_2(params.axisRatioZ)),
         rho(createNukerDensity(params)) {}

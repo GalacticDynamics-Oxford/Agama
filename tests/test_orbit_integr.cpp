@@ -187,20 +187,27 @@ inline coord::PosVelCyl getPosVelCyl(const double data[6])
 
 inline coord::PosVelSph getPosVelSph(const double data[6])
 {
-    int tmp;
     double r = data[0];
     double phi = data[2];
-    double theta = remquo(data[1], 2*M_PI, &tmp);  // reduce the range of theta to -pi..pi
-    int signr = r<0 ? -1 : 1, signt = theta<0 ? -1 : 1;
-    if(theta<0) {  // happens also if pi < theta < 2pi, which is flipped to -pi..0
+    int signr = 1, signt = 1;
+    double theta = fmod(data[1], 2*M_PI);
+    // normalize theta to the range 0..pi, and r to >=0
+    if(theta<-M_PI) {
+        theta += 2*M_PI;
+    } else if(theta<0) {
         theta = -theta;
-        phi += M_PI;
+        signt = -1;
+    } else if(theta>M_PI) {
+        theta = 2*M_PI-theta;
+        signt = -1;
     }
     if(r<0) {
         r = -r;
         theta = M_PI-theta;
-        phi += M_PI;
+        signr = -1;
     }
+    if((signr == -1) ^ (signt == -1))
+        phi += M_PI;
     phi = math::wrapAngle(phi);
     return coord::PosVelSph(r, theta, phi, data[3] * signr, data[4] * signt, data[5] * signr * signt);
 }

@@ -127,7 +127,7 @@ ExponentialParam() :  ///< set default values for all fields
     \f$  Jsum   = |J_\phi| + k_r J_r + k_z J_z  \f$  is a linear combination of actions,
     \f$  F      = M / (2\pi)^3 Jden / J_{\phi,0}^2  \exp( - Jden / J_{\phi,0} )  \f$,
     \f$  f_r    = Jvel / J_{r,0}^2 \exp( - J_r Jvel / J_{r,0}^2 )    \f$,
-    \f$  f_r    = Jvel / J_{z,0}^2 \exp( - J_z Jvel / J_{z,0}^2 )    \f$,
+    \f$  f_z    = Jvel / J_{z,0}^2 \exp( - J_z Jvel / J_{z,0}^2 )    \f$,
     \f$  f_\phi = max[1,  \exp( [2/k_r] J_\phi Jvel / J_{r,0}^2 ) ]  \f$,
     \f$  Jden   = \sqrt{ Jsum^2 + addJden^2 }  \f$,
     \f$  Jvel   = \sqrt{ Jsum^2 + addJvel^2 }  \f$,

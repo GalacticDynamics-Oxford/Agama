@@ -1215,6 +1215,10 @@ potential::PtrPotential getPotential(PyObject* pot_obj);
 /// create a Python Density object and initialize it with an existing instance of C++ density class
 PyObject* createDensityObject(const potential::PtrDensity& dens)
 {
+    if(!dens) {  // empty density, likely by mistake
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
     DensityObject* dens_obj = PyObject_New(DensityObject, DensityTypePtr);
     if(!dens_obj)
         return NULL;
@@ -1683,6 +1687,10 @@ void Potential_dealloc(PotentialObject* self)
 /// create a Python Potential object and initialize it with an existing instance of C++ potential class
 PyObject* createPotentialObject(const potential::PtrPotential& pot)
 {
+    if(!pot) {  // empty potential, likely by mistake
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
     PotentialObject* pot_obj = PyObject_New(PotentialObject, PotentialTypePtr);
     if(!pot_obj)
         return NULL;
@@ -3806,8 +3814,15 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
     model.zmaxCyl = self->zmaxCyl * conv->lengthUnit;
     model.sizeRadialCyl = self->sizeRadialCyl;
     model.sizeVerticalCyl = self->sizeVerticalCyl;
-    if(self->pot!=NULL && PyObject_TypeCheck(self->pot, &PotentialType))
-        model.totalPotential = ((PotentialObject*)self->pot)->pot;
+    if(self->pot!=NULL) {
+        if(PyObject_TypeCheck(self->pot, &PotentialType))
+            model.totalPotential = ((PotentialObject*)self->pot)->pot;
+        else {
+            PyErr_SetString(PyExc_ValueError,
+                "SelfConsistentModel.potential must be an instance of Potential class");
+            return NULL;
+        }
+    }
     if(self->af!=NULL && PyObject_TypeCheck(self->af, &ActionFinderType))
         model.actionFinder = ((ActionFinderObject*)self->af)->af;
     PyObject* result = NULL;
@@ -3833,8 +3848,8 @@ static PyMemberDef SelfConsistentModel_members[] = {
     { const_cast<char*>("components"), T_OBJECT_EX, offsetof(SelfConsistentModelObject, components), 0,
       const_cast<char*>("List of Component objects (may be modified by the user, but should be "
       "non-empty and contain only instances of Component class upon a call to 'iterate()' method)") },
-    { const_cast<char*>("potential"), T_OBJECT, offsetof(SelfConsistentModelObject, pot), READONLY,
-      const_cast<char*>("Total potential of the model (read-only)") },
+    { const_cast<char*>("potential"), T_OBJECT, offsetof(SelfConsistentModelObject, pot), 0,
+      const_cast<char*>("Total potential of the model") },
     { const_cast<char*>("af"), T_OBJECT, offsetof(SelfConsistentModelObject, af), READONLY,
       const_cast<char*>("Action finder associated with the total potential (read-only)") },
     { const_cast<char*>("useActionInterpolation"), T_BOOL,
@@ -4614,7 +4629,9 @@ static const char* docstringOrbit =
     "(should be either a single integer or an array of integers with length N). "
     "The trajectory of each orbit is stored either at every timestep of the integrator "
     "(if trajsize=0) or at regular intervals of time (`dt=time/(trajsize-1)`, "
-    "so that the number of points is `trajsize`; both time and trajsize may differ between orbits.\n"
+    "so that the number of points is `trajsize`; the last stored point is always at the end of "
+    "integration period, and if trajsize>1, the first point is the initial conditions). "
+    "Both time and trajsize may differ between orbits.\n"
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
@@ -4860,9 +4877,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
                 if(haveTraj) {
                     double trajStep = trajSizes[orb]>0 ?
-                        // slightly reduce the output interval for trajectory to ensure that
-                        // the last point is stored (otherwise it may be left out due to roundoff)
-                        integrTime / (trajSizes[orb]-1+1e-10) :
+                        // output at regular intervals of time, unless trajSize=1
+                        // (in that case, outputInterval=INFINITY, and we store only the last point)
+                        integrTime / (trajSizes[orb]-1) :
                         0;  // if trajSize==0, this means store trajectory at every integration timestep
                     fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
                 }

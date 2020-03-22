@@ -89,15 +89,214 @@ def makeRotationMatrix(alpha, beta, gamma):
           cosbeta ] ])
 
 
+def makeCelestialRotationMatrix(lon, lat, psi):
+    '''
+    Construct the matrix for transforming celestial coordinates (longitude = RA, latitude = DEC)
+    into another coordinate system 'centered' on the given sky position (lon, lat)
+    and rotated CCW by angle psi.
+    The rotation matrix has the same meaning as the one produced by 'makeRotationMatrix',
+    only the choice of rotation angles is different. Angles must be in radians, not degrees!
+    '''
+    sina, sind, sinp = _numpy.sin([lon, lat, psi])
+    cosa, cosd, cosp = _numpy.cos([lon, lat, psi])
+    return _numpy.array([ [    cosa * cosd,         sina * cosd,                sind        ],
+        [-sina * cosp - cosa * sind * sinp,  cosa * cosp - sina * sind * sinp,  cosd * sinp ],
+        [ sina * sinp - cosa * sind * cosp, -cosa * sinp - sina * sind * cosp,  cosd * cosp ] ])
+
+
+# the matrix for transforming sky coordinates in the International Celestial Reference System
+# into Galactic coordinates, defined by the RA,DEC coordinates of the Galactic center
+# and the tilt angle of the Galactic equator at that location.
+fromICRStoGalactic = makeCelestialRotationMatrix(
+    266.4049882865447 *_numpy.pi/180,
+    -28.93617776179147*_numpy.pi/180,
+    58.59866213832327 *_numpy.pi/180)
+
+# the inverse transformation is defined by a transposed matrix
+fromGalactictoICRS = fromICRStoGalactic.T
+
+
+def transformCelestialCoords(rotationMatrix, lon, lat,
+    pmlon=None, pmlat=None, sigmalon=None, sigmalat=None, sigmacorr=None):
+    '''
+    Transform celestial coordinates and optionally proper motions from one coordinate system
+    (latitude, longitude - usually RA, DEC) into another one specified by a rotation matrix.
+    Arguments:
+      rotationMatrix - a matrix describing the transformation, which may be constructed by routines
+      'makeRotationMatrix', 'makeCelestialRotationMatrix', etc. - any orthogonal 3x3 matrix is fine.
+      The inverse transformation is given by a transposed matrix.
+      lon, lat - coordinates in the input celestial frame (e.g., RA, DEC);
+      either single numbers or arrays of equal length. Must be in radians!
+      pmlon, pmlat - optionally the components of proper motion in the input frame.
+      sigmalon, sigmalat, sigmacorr - optionally the components of proper motion dispersion tensor
+      in the input frame (standard deviations in both coordinates, and the correlation coefficient
+      between -1 and 1).
+    Returns:
+      coordinates in the rotated frame, and optionally the corresponding components of proper motion
+      and its dispersion tensor, if these were provided. Longitude is normalized to the range [-pi,pi)
+    '''
+    sina, cosa, sind, cosd = _numpy.sin(lon), _numpy.cos(lon), _numpy.sin(lat), _numpy.cos(lat)
+    x = cosa * cosd
+    y = sina * cosd
+    z = sind
+    M = rotationMatrix  # shorthand
+    sinB = M[2,0]*x + M[2,1]*y + M[2,2]*z
+    B =  _numpy.arcsin(sinB)
+    L = (_numpy.arctan2( M[1,0]*x + M[1,1]*y + M[1,2]*z, M[0,0]*x + M[0,1]*y + M[0,2]*z ) + _numpy.pi) % (2*_numpy.pi) - _numpy.pi
+    if pmlon is None:
+        return L, B
+    T = _numpy.arctan2( M[2,0]*y - M[2,1]*x, M[2,2] - sinB * sind )
+    sinT, cosT = _numpy.sin(T), _numpy.cos(T)
+    if sigmalon is None:
+        return L, B, cosT * pmlon + sinT * pmlat, -sinT * pmlon + cosT * pmlat
+    sigmaL = (sigmalon**2 * cosT**2 + sigmalat**2 * sinT**2 + 2*sigmacorr * sigmalon * sigmalat * cosT * sinT)**0.5
+    sigmaB = (sigmalon**2 * sinT**2 + sigmalat**2 * cosT**2 - 2*sigmacorr * sigmalon * sigmalat * cosT * sinT)**0.5
+    corrLB = ((sigmalat**2 - sigmalon**2) * sinT*cosT + sigmacorr * sigmalon * sigmalat * (cosT**2 - sinT**2)) / sigmaL / sigmaB
+    return L, B, cosT * pmlon + sinT * pmlat, -sinT * pmlon + cosT * pmlat, sigmaL, sigmaB, corrLB
+
+
+def getCelestialCoords(x, y, z, vx=None, vy=None, vz=None):
+    '''
+    Convert Cartesian coordinates and velocities into longitude, latitude, distance,
+    two components of proper motion, and line-of-sight velocity.
+    The celestial coordinates are oriented so that the X axis points towards (lon,lat) = (0,0),
+    the Y axis - towards (lon,lat) = (pi/2,0), and the Z axis - towards (lat=pi/2).
+    This is a standard spherical coordinate system, except that latitude = pi/2-theta is used
+    instead of the polar angle theta.
+    Arguments:
+      x, y, z -- Cartesian positions (in arbitrary units of length, e.g. kpc);
+      vx, vy, vz -- (optional) corresponding Cartesian velocities (in arbitrary velocity units, e.g. km/s);
+    Returns:
+      longitude, latitude (e.g. RA, DEC or l, b) in radians (not degrees!),
+      distance in the input units of length (e.g. kpc);
+      optionally (if velocities were provided):
+      components of proper motion  pmlon = d(lon)/dt * cos(lat), pmlat = d(lat)/dt
+      in the input units of velocity over distance (e.g. km/s/kpc),
+      and line-of-sight velocity  vlos = d(dist)/dt  in the input velocity units (e.g. km/s).
+    '''
+    R2   = x*x + y*y
+    dist = (R2 + z*z)**0.5
+    lon  = _numpy.arctan2(y, x)
+    lat  = _numpy.arcsin (z / dist)
+    if vx is None:
+        return lon, lat, dist
+    R    = R2**0.5
+    vlos = (vx * x + vy * y + vz * z) / dist
+    pmlon= (vy * x - vx * y) / R / dist
+    pmlat= (vz - z / dist * vlos) / R
+    return lon, lat, dist, pmlon, pmlat, vlos
+
+
+def getCartesianCoords(lon, lat, dist, pmlon=None, pmlat=None, vlos=None):
+    '''
+    Convert celestial coordinates and velocities into Cartesian ones.
+    Arguments:
+      lon, lat - spherical coordinates (e.g. RA, DEC) in radians! lat=0 is the equator;
+      dist - distance (in arbitrary length units);
+      pmlon, pmlat - (optional) components of proper motion
+      pmlon = d(lon)/dt * cos(lat), pmlat = d(lat)/dt
+      (velocity over distance in the same units as vlos/dist, e.g. km/s/kpc);
+      vlos - line-of-sight velocity d(dist)/dt (in arbitrary velocity units, e.g. km/s)
+    Returns:
+      x, y, z - Cartesian coordinates in the input length units;
+      vx, vy, vz - corresponding velocities (if pmlon,pmlat,vlos were provided) in input velocity units.
+    '''
+    sina, cosa, sind, cosd = _numpy.sin(lon), _numpy.cos(lon), _numpy.sin(lat), _numpy.cos(lat)
+    x = dist * cosd * cosa
+    y = dist * cosd * sina
+    z = dist * sind
+    if pmlon is None:
+        return x, y, z
+    vx = -dist * pmlon * sina - dist * pmlat * cosa * sind + vlos * cosa * cosd
+    vy =  dist * pmlon * cosa - dist * pmlat * sina * sind + vlos * sina * cosd
+    vz =  dist * pmlat * cosd + vlos * sind
+    return x, y, z, vx, vy, vz
+
+
+def getGalacticFromGalactocentric(x, y, z, vx=None, vy=None, vz=None,
+    galcen_distance=8.122, galcen_v_sun=(12.9, 245.6, 7.78), z_sun=0.0208):
+    '''
+    Convert position (and optionally velocity) in the Milky Way Galactocentric Cartesian coordinates
+    to Galactic celestial coordinates. This is similar to getCelestialCoords but additionally
+    accounts for solar velocity and position offsets, and only works with a specific choice of units.
+    Arguments:
+      x, y, z - Galactocentric coordinates (in kpc);
+      vx, vy, vz - (optional) velocity in the same coordinates (in km/s);
+      optional parameters of the reference frame:
+      galcen_distance - distance from the observer to the Galactic center (in kpc);
+      z_sun - offset from the XY plane (in kpc);
+      the observer is located at x=-sqrt(galcen_distance**2-z_sun**2), y=0, z=z_sun;
+      galcen_v_sun - three components of solar velocity (in km/s).
+    Returns:
+      l, b - Galactic longitude and latitude (in radians);
+      heliocentric distance (in kpc);
+      optionally (if velocities are provided):
+      pm_l, pm_b - proper motions in longitude and latitude (in units of km/s/kpc = 0.211 mas/yr);
+      vlos - line-of-sight velocity (in km/s).
+    '''
+    sintheta = z_sun/galcen_distance
+    costheta = (1-sintheta**2)**0.5
+    xp = x * costheta - z * sintheta + galcen_distance
+    yp = y
+    zp = x * sintheta + z * costheta
+    if vx is None:
+        return getCelestialCoords(xp, yp, zp)
+    else:
+        vxp = vx * costheta + vz * sintheta - galcen_v_sun[0]
+        vyp = vy - galcen_v_sun[1]
+        vzp = vz * costheta - vx * sintheta - galcen_v_sun[2]
+        vxp = (vx - galcen_v_sun[0]) * costheta - (vz - galcen_v_sun[2]) * sintheta
+        vyp = (vy - galcen_v_sun[1])
+        vzp = (vx - galcen_v_sun[0]) * sintheta + (vz - galcen_v_sun[2]) * costheta
+        return getCelestialCoords(xp, yp, zp, vxp, vyp, vzp)
+
+
+def getGalactocentricFromGalactic(lon, lat, dist, pmlon=None, pmlat=None, vlos=None,
+    galcen_distance=8.122, galcen_v_sun=(12.9, 245.6, 7.78), z_sun=0.0208):
+    '''
+    Convert Galactic celestial coordinates into Galactocentric Cartesian coordinates
+    (optionally with velocities), taking into account Solar position and velocity;
+    the inverse of getGalacticFromGalactocentric.
+    Arguments:
+      lon, lat - Galactic longitude (l) and latitude (b) (in radians);
+      dist - heliocentric distance (in kpc);
+      optionally:
+      pmlon, pmlat - components of proper motion (in km/s/kpc = 0.211 mas/yr);
+      vlos - heliocentric line-of-sight velocity (in km/s);
+      optional parameters of the reference frame (same as in the inverse routine).
+    Returns:
+      x, y, z - Galactocentric Cartesian coordinates (in kpc);
+      optionally (if pmlon,pmlat,vlos are provided):
+      vx, vy, vz - corresponding velocities (in km/s).
+    '''
+    result   = getCartesianCoords(lon, lat, dist, pmlon, pmlat, vlos)
+    sintheta = z_sun/galcen_distance
+    costheta = (1-sintheta**2)**0.5
+    x =  (result[0] - galcen_distance) * costheta + result[2] * sintheta
+    y =   result[1]
+    z = -(result[0] - galcen_distance) * sintheta + result[2] * costheta
+    if pmlon is None:
+        return x, y, z
+    else:
+        vx =  result[3] * costheta + result[5] * sintheta + galcen_v_sun[0]
+        vy =  result[4] + galcen_v_sun[1]
+        vz = -result[3] * sintheta + result[5] * costheta + galcen_v_sun[2]
+        return x, y, z, vx, vy, vz
+
+
 def getProjectedEllipse(Sx, Sy, Sz, alpha, beta, gamma):
     '''
     Project a triaxial ellipsoid with intrinsic axes Sx, Sy, Sz onto the image plane XY,
     whose orientation w.r.t. the intrinsic coordinate system is defined by three Euler angles
     alpha, beta, gamma (Y axis points up and X axis points left!).
     The projection is an ellipse in the image plane.
-    return: SXp, SYp  are the major and minor axes of the ellipse;
-    eta  is the position angle of the major axis of this ellipse in the image plane
-    (measured counter-clockwise from the Y axis towards the X axis)
+    Arguments:
+      Sx, Sy, Sz - intrinsic axes of the ellipsoid;
+      alpha, beta, gamma - Euler angles;
+    Returns:
+      SXp, SYp - major and minor axes of the projected ellipse;
+      eta - position angle of the major axis of this ellipse in the image plane
+      (measured counter-clockwise from the Y axis towards the X axis).
     '''
     pi=_numpy.pi; sin=_numpy.sin; cos=_numpy.cos
     if abs(sin(beta)) < 1e-12:  # shortcut for a face-on orientation, avoiding roundoff errors
@@ -125,12 +324,14 @@ def getIntrinsicShape(SXp, SYp, eta, alpha, beta, gamma):
     '''
     Deproject the ellipse in the image plane into a triaxial ellipsoid,
     for an assumed orientation of the intrinsic coord.sys. of that ellipsoid.
-    SXp and SYp are lengths of the major and minor axes of the ellipse,
-    eta is the position angle of the major axis of the ellipse, measured counter-clockwise
-    from the Y (vertical) axis on the image plane (towards the X axis, which points left).
-    alpha, beta, gamma are the assumed angles of rotation of the coordinate frame.
-    return: three intrinsic axes (Sx,Sy,Sz) of the triaxial ellipsoid,
-    or throw an exception if the deprojection is impossible for these angles.
+    Arguments:
+      SXp and SYp - lengths of the major and minor axes of the ellipse;
+      eta - position angle of the major axis of the ellipse, measured counter-clockwise
+      from the Y (vertical) axis on the image plane (towards the X axis, which points left);
+      alpha, beta, gamma - assumed angles of rotation of the coordinate frame.
+    Returns:
+      three intrinsic axes (Sx,Sy,Sz) of the triaxial ellipsoid.
+    Throws an exception if the deprojection is impossible for these angles.
     The deprojection is not unique in the following special cases:
     - if beta==0 or beta==pi (face-on view down the z axis) - cannot determine q=Sz/Sx, assume q=p;
     - if eta-gamma==pi/2 (angle between projected z axis and major axis) - cannot determine p=Sy/Sx, assume p=1;

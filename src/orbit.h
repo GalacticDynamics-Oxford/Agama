@@ -90,7 +90,11 @@ class RuntimeTrajectory: public BaseRuntimeFnc {
     const double samplingInterval;
 
     /// sampled trajectory (position/velocity and time), stored in an external array
-    /// referenced by this variable; 0th point is the initial conditions
+    /// referenced by this variable.
+    /// last element of this array always contains the last recorded point in trajectory;
+    /// if samplingInterval is zero, then the trajectory is stored at the end of every timestep,
+    /// otherwise at regular intervals of time, and if samplingInterval is infinity, then only
+    /// a single (last point) is recorded, otherwise 0th point contains the initial conditions.
     std::vector< std::pair<coord::PosVelT<CoordT>, double> >& trajectory;
 
 public:

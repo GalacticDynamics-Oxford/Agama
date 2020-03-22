@@ -906,7 +906,7 @@ double FokkerPlanckSolver::relaxationTime() const
 {
     double maxf = 0;
     for(unsigned int c=0; c<data->numComp; c++)
-        maxf = fmax(maxf, maxElement(data->gridf[c]) * data->Mstar[c]);
+        maxf += maxElement(data->gridf[c]) * data->Mstar[c];
     // the numerical factor corresponds to the standard definition of relaxation time
     // T = 0.34 sigma^3 / (rho m lnLambda)
     // if the DF is close to isothermal, in which case  f = rho / (sqrt(2pi) sigma)^3

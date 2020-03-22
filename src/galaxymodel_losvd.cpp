@@ -310,8 +310,9 @@ inline void reallyAddPoint(const math::BsplineInterpolator1d<N>& bsplx,
 }
 
 template<int N>
-void TargetLOSVD<N>::addPoint(const double point[6], double mult, double* datacube) const
+void TargetLOSVD<N>::addPoint(const double point[6], double _mult, double* datacube) const
 {
+    double mult=_mult;  // for some strange reason, Intel compiler complains about modifying _mult
     double pt[6];
     // construct initial state for the PRNG, using the input point position/velocity
     // as the source of "randomness"

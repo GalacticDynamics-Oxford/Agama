@@ -237,12 +237,13 @@ public:
 
     /// input variables define the z-coordinate and all three velocity components, suitably scaled
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const {
-        coord::PosCyl pos(R, math::unscale(math::ScalingInf(), vars[0], jac), 0);
+        // map the input vars[0] ranging from 0 to 1 into z ranging from 0 to infinity
+        coord::PosCyl pos(R, math::unscale(math::ScalingSemiInf(), vars[0], jac), 0);
         double vesc, zeta, jacVel;
         getVesc(pos, model.potential, vesc, zeta);
         const coord::VelCyl vel = unscaleVelocity(vars+1, vesc, zeta, &jacVel);
         if(jac!=NULL)
-            *jac = vesc==0 ? 0 : *jac * jacVel;
+            *jac = vesc==0 ? 0 : *jac * jacVel * 2 /*since we only consider z>0*/;
         return coord::PosVelCyl(pos, vel);
     }
 
@@ -331,14 +332,13 @@ public:
 
             // query the spatial selection function
             fnc.eval(posvelrot, values);
-            
+
             // check if there are any nonzero values reported by fnc
             // [skipped for the moment]
-            
-            
+
             // 2. determine the actions
             actions::Actions act = model.actFinder.actions(posvel);
-            
+
             // 3. compute the value of distribution function times the jacobian
             // FIXME: in some cases the Fudge action finder may fail and produce
             // zero values of Jr,Jz instead of very large ones, which may lead to
@@ -346,7 +346,7 @@ public:
             // entirely, but the real problem is with the action finder, not here.
             double dfval = isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0) ?
                 model.distrFunc.value(act) * jac : 0.;
-            
+
             if(!isFinite(dfval))
                 dfval = 0;
 
