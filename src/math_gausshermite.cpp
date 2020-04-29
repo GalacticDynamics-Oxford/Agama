@@ -72,11 +72,10 @@ void hermiteArray(const int nmax, const double x, double* result)
     // dH_n/dx = \sqrt{2n} H_{n-1};
     // \int_{-\infty}^\infty dx H_n(x) H_m(x) \exp(-x^2) / (2\pi) = \delta_{mn} / (2 \sqrt{\pi});
     // \int_{-\infty}^\infty dx H_n(x) \exp(-x^2/2) / \sqrt{2\pi} = \sqrt{n!} / n!!  for even n.
+    result[0] = 1.;
     if(nmax<1)
         return;
-    result[0] = 1.;
-    if(nmax>=1)
-        result[1] = M_SQRT2 * x;
+    result[1] = M_SQRT2 * x;
     static const double sqroots[8] =
         { 1., sqrt(2.), sqrt(3.), 2., sqrt(5.), sqrt(6.), sqrt(7.), sqrt(8.) };
     double sqrtn = 1.;

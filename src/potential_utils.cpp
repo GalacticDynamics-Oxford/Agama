@@ -112,11 +112,12 @@ public:
     {
         double dPhidR, d2PhidR2, R = exp(logR);
         poten.evalDeriv(R, NULL, &dPhidR, &d2PhidR2);
-        double F = pow_3(R)*dPhidR; // Lz^2(R)
-        if(!isFinite(F))            // this may happen if R --> 0 or R --> infinity,
-            F = R<1 ? 0 : 2*L2;     // in these cases replace it with a finite number of a correct sign
+        double F = pow_3(R) * dPhidR; // Lz^2(R)
         if(val)
-            *val = F - L2;
+            *val = isFinite(F) ? F - L2 :
+            // this may fail if R --> 0 or R --> infinity,
+            // in these cases replace it with a finite number of a correct sign
+            R < 1 ? -L2 : +L2;
         if(deriv)
             *deriv = pow_3(R) * (3*dPhidR + R*d2PhidR2);
         if(deriv2)
@@ -300,6 +301,8 @@ double R_circ(const math::IFunction& potential, double energy) {
 double R_from_L(const math::IFunction& potential, double L) {
     if(L==0)
         return 0;
+    if(fabs(L) == INFINITY)
+        return INFINITY;
     return exp(math::findRoot(RfromLRootFinder(potential, L), math::ScalingInf(), ACCURACY_ROOT));
 }
 
@@ -585,7 +588,7 @@ double Interpolator::R_max(const double E, double* deriv) const
         // extra correction step at large r because of non-trivial extrapolation of potential
         double Phi, dPhidR, d2PhidR2;
         evalDeriv(R, &Phi, &dPhidR, &d2PhidR2);
-        R -= math::clamp(   // cautionary measure to avoid too large corrections
+        R -= math::clip(   // cautionary measure to avoid too large corrections
             (Phi-E) / (dPhidR - 0.5 * (Phi-E) * d2PhidR2 / dPhidR),   // Halley correction
             -0.25*R, 0.25*R);
     }
@@ -613,7 +616,7 @@ double Interpolator::L_circ(const double E, double* deriv) const
         double Ecirc = Phi + 0.5 * Rcirc * dPhidR;
         double denom = 1 - 0.5 * (Ecirc-E) * (Rcirc * d2PhidR2 - dPhidR) /
             ((Rcirc * d2PhidR2 + 3 * dPhidR) * Rcirc * dPhidR);
-        Lcirc = math::clamp(   // cautionary measure to avoid too large corrections
+        Lcirc = math::clip(   // cautionary measure to avoid too large corrections
             sqrt(Rcirc * dPhidR) * (Rcirc - (Ecirc-E) / (dPhidR * denom)),   // Halley correction
             0.75*Lcirc, 1.25*Lcirc);
     }
@@ -631,7 +634,7 @@ double Interpolator::R_from_Lz(const double Lz, double* deriv) const
         // extra correction step at large radii
         double Phi, dPhidR, d2PhidR2;
         evalDeriv(Rcirc, &Phi, &dPhidR, &d2PhidR2);
-        Rcirc -= math::clamp(   // cautionary measure to avoid too large corrections
+        Rcirc -= math::clip(   // cautionary measure to avoid too large corrections
             (Rcirc * dPhidR - pow_2(Lz/Rcirc)) / (3 * dPhidR + Rcirc * d2PhidR2),   // Newton correction
             -0.25*Rcirc, 0.25*Rcirc);
         // even though this is Newton (1st order), not Halley (2nd order) correction,
@@ -658,7 +661,7 @@ double Interpolator::R_circ(const double E, double* deriv) const
         // extra correction step at large radii
         double Phi, dPhidR, d2PhidR2;
         evalDeriv(Rcirc, &Phi, &dPhidR, &d2PhidR2);
-        Rcirc -= math::clamp(   // cautionary measure to avoid too large corrections
+        Rcirc -= math::clip(   // cautionary measure to avoid too large corrections
             ( 2*(Phi-E) + Rcirc * dPhidR ) / (3 * dPhidR + Rcirc * d2PhidR2),   // Newton correction
             -0.25*Rcirc, 0.25*Rcirc);
         // this is only 1st order correction, and could be improved by another iteration,
@@ -795,10 +798,10 @@ void Interpolator2d::findPlanarOrbitExtent(double E, double L,
 {
     double Lc   = L_circ(E);
     double Rc   = R_from_Lz(Lc);
-    double Lrel = Lc>0 ? math::clamp(fabs(L/Lc), 0., 1.) : 0;
+    double Lrel = Lc>0 ? math::clip(fabs(L/Lc), 0., 1.) : 0;
     double scaledE, dEdscaledE;
     scaleE(E, invPhi0, scaledE, dEdscaledE);
-    scaledE = math::clamp(scaledE, intR1.xmin(), intR1.xmax());
+    scaledE = math::clip(scaledE, intR1.xmin(), intR1.xmax());
     R1 = (1 - sqrt(intR1.value(scaledE, Lrel))) * Rc;
     R2 = (1 + sqrt(intR2.value(scaledE, Lrel))) * Rc;
     // one iteration of root polishing

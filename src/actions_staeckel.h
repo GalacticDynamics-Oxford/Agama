@@ -26,21 +26,19 @@ namespace actions {
 ///@{
 
 /** Find exact actions in the Staeckel potential of oblate Perfect Ellipsoid.
-    \param[in]  potential is the input Staeckel potential;
-    \param[in]  point     is the position/velocity point;
-    \return     actions for the given point, or Jr=Jz=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if some error occurs.
+    \param[in]  potential is the input Staeckel potential.
+    \param[in]  point     is the position/velocity point.
+    \return     actions for the given point, or Jr=Jz=NAN if the energy is positive.
 */
 Actions actionsAxisymStaeckel(
     const potential::OblatePerfectEllipsoid& potential, 
     const coord::PosVelCyl& point);
 
 /** Find exact actions and angles in the Staeckel potential of oblate Perfect Ellipsoid.
-    \param[in]  potential is the input Staeckel potential;
-    \param[in]  point     is the position/velocity point;
-    \param[out] freq      if not NULL, store the frequencies of motion in this variable;
-    \return     actions and angles for the given point, or Jr=Jz=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if some error occurs.
+    \param[in]  potential is the input Staeckel potential.
+    \param[in]  point     is the position/velocity point.
+    \param[out] freq      if not NULL, store the frequencies of motion in this variable.
+    \return     actions and angles for the given point, or Jr=Jz=NAN if the energy is positive.
 */
 ActionAngles actionAnglesAxisymStaeckel(
     const potential::OblatePerfectEllipsoid& potential, 
@@ -48,14 +46,13 @@ ActionAngles actionAnglesAxisymStaeckel(
     Frequencies* freq=NULL);
 
 /** Find approximate actions in a given axisymmetric potential, using the Staeckel Fudge method.
-    \param[in]  potential is the arbitrary axisymmetric potential;
-    \param[in]  point     is the position/velocity point;
+    \param[in]  potential is the arbitrary axisymmetric potential.
+    \param[in]  point     is the position/velocity point.
     \param[in]  focalDistance is the geometric parameter of best-fit coordinate system:
     the accuracy of the method depends on this parameter, which should be estimated by one of 
-    the methods from actions_focal_distance_finder.h;
-    \return     actions for the given point, or Jr=Jz=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if the potential is not axisymmetric 
-    or some other error occurs.
+    the methods from actions_focal_distance_finder.h.
+    \return     actions for the given point, or Jr=Jz=NAN if the energy is positive.
+    \throw      std::invalid_argument exception if the potential is not axisymmetric.
 */
 Actions actionsAxisymFudge(
     const potential::BasePotential& potential, 
@@ -64,13 +61,12 @@ Actions actionsAxisymFudge(
 
 /** Find approximate actions and angles in a given axisymmetric potential, 
     using the Staeckel Fudge method.
-    \param[in]  potential is the arbitrary axisymmetric potential;
-    \param[in]  point     is the position/velocity point;
-    \param[in]  focalDistance is the geometric parameter of best-fit coordinate system;
-    \param[out] freq      if not NULL, store the frequencies of motion in this variable;
-    \return     actions and angles for the given point, or Jr=Jz=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if the potential is not axisymmetric
-    or some other error occurs.
+    \param[in]  potential is the arbitrary axisymmetric potential.
+    \param[in]  point     is the position/velocity point.
+    \param[in]  focalDistance is the geometric parameter of best-fit coordinate system.
+    \param[out] freq      if not NULL, store the frequencies of motion in this variable.
+    \return     actions and angles for the given point, or Jr=Jz=NAN if the energy is positive.
+    \throw      std::invalid_argument exception if the potential is not axisymmetric.
 */
 ActionAngles actionAnglesAxisymFudge(
     const potential::BasePotential& potential, 
@@ -111,6 +107,11 @@ private:
 */
 class ActionFinderAxisymFudge: public BaseActionFinder {
 public:
+    /** set up the action finder: an interpolator for the focal distance, and optionally
+        interpolators for actions (if interpolate==true).
+        \throw std::invalid_argument exception if the potential is not axisymmetric
+        or std::runtime_error in case of other problems in initialization.
+    */
     ActionFinderAxisymFudge(const potential::PtrPotential& potential, bool interpolate = false);
 
     virtual Actions actions(const coord::PosVelCyl& point) const;

@@ -146,7 +146,7 @@ inline int bsplineDerivs<0,3>(const double, const double[], int, double[]) {
 template<int N>
 inline int bsplineValuesExtrapolated(const double x, const double grid[], int size, double B[])
 {
-    double x0 = clamp(x, grid[0], grid[size-1]);
+    double x0 = clip(x, grid[0], grid[size-1]);
     int ind = bsplineValues<N>(x0, grid, size, B);
     if(x != x0) {   // extrapolate using the derivatives
         double D[N+1];
@@ -593,8 +593,8 @@ inline void regularizeSpline(const std::vector<double>& xval, const double fval[
             size_t k = i==0 ? i : numPoints-2;
             double sec = (fval[k+1] - fval[k]) / (xval[k+1] - xval[k]);
             fder[i] = sec>=0 ?
-                clamp(fder[i], 0., THREE * sec) :
-                clamp(fder[i], THREE * sec, 0.);
+                clip(fder[i], 0., THREE * sec) :
+                clip(fder[i], THREE * sec, 0.);
         } else {  // interior points
             double secL = (fval[i]   - fval[i-1]) / (xval[i]   - xval[i-1]);
             double secR = (fval[i+1] - fval[i]  ) / (xval[i+1] - xval[i]  );
@@ -3145,7 +3145,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     avgx /= sumWeights;
     avgx2/= sumWeights;
     double dispx = fmax(avgx2 - pow_2(avgx), 0.01 * pow_2(xmax-xmin));
-    avgx  = clamp(avgx, xmin, xmax);
+    avgx  = clip(avgx, xmin, xmax);
 
     // compute the values of all nontrivial basis functions for each point,
     // multiplied by the point weight, and store them in this matrix

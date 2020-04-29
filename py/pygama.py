@@ -51,10 +51,10 @@ def symmetricGrid(nnodes, xmin, xmax=None):
     if xmax is None:
         return _numpy.linspace(-1, 1, nnodes) * 0.5*xmin*(nnodes-1)
     if nnodes%2 == 1:
-        grid = createNonuniformGrid(nnodes//2+1, xmin, xmax)
+        grid = nonuniformGrid(nnodes//2+1, xmin, xmax)
         return _numpy.hstack((-grid[:0:-1], grid))
     else:
-        grid = createNonuniformGrid(nnodes, xmin*0.5, xmax)[1::2]
+        grid = nonuniformGrid(nnodes, xmin*0.5, xmax)[1::2]
         return _numpy.hstack((-grid[::-1], grid))
 
 

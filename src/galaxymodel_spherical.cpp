@@ -632,8 +632,8 @@ void SphericalIsotropicModelLocal::evalLocal(
     double I0 = this->I0(hE);
     double J0 = fmax(this->I0(hPhi) - I0, 0);
     // restrict the arguments of 2d interpolators to the range covered by their grids
-    double X  = math::clamp(log(hPhi),    intJ1.xmin(), intJ1.xmax());
-    double Y  = math::clamp(log(hE/hPhi), intJ1.ymin(), intJ1.ymax());
+    double X  = math::clip(log(hPhi),    intJ1.xmin(), intJ1.xmax());
+    double Y  = math::clip(log(hE/hPhi), intJ1.ymin(), intJ1.ymax());
     // compute the 2d interpolators for J1, J3
     double j1 = exp(intj1.value(X, Y)) * J0;
     double J1 = exp(intJ1.value(X, Y)) * J0;
@@ -660,7 +660,7 @@ double SphericalIsotropicModelLocal::sampleVelocity(double Phi, math::PRNGState*
     if(!(Phi<0))
         throw std::invalid_argument("SphericalIsotropicModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
+    double loghPhi  = math::clip(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double I0plusJ0 = I0(hPhi);
     double maxJ1    = exp(intJ1.value(loghPhi, intJ1.ymax())) * I0plusJ0;
     double frac     = math::random(state);
@@ -681,7 +681,7 @@ double SphericalIsotropicModelLocal::density(double Phi) const
     if(!(Phi<0))
         throw std::invalid_argument("SphericalIsotropicModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
+    double loghPhi  = math::clip(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double J1overJ0 = exp(intJ1.value(loghPhi, intJ1.ymax()));
     double I0plusJ0 = I0(hPhi);  // in fact I0(E)=0 because E=0
     return 4*M_PI*M_SQRT2 * sqrt(-Phi) * J1overJ0 * I0plusJ0;
@@ -692,7 +692,7 @@ double SphericalIsotropicModelLocal::velDisp(double Phi) const
     if(!(Phi<0))
         throw std::invalid_argument("SphericalIsotropicModelLocal: invalid value of Phi");
     double hPhi     = phasevol(Phi);
-    double loghPhi  = math::clamp(log(hPhi), intJ1.xmin(), intJ1.xmax());
+    double loghPhi  = math::clip(log(hPhi), intJ1.xmin(), intJ1.xmax());
     double J3overJ1 = exp(intJ3.value(loghPhi, intJ3.ymax()) - intJ1.value(loghPhi, intJ1.ymax()));
     return sqrt(-2./3 * Phi * J3overJ1);
 }

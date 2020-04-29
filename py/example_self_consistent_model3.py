@@ -155,7 +155,7 @@ if __name__ == "__main__":
     print("Computing surface density")
     Sigma,rmsh,rmsv   = modelDisk.projectedMoments(R)
     print("Computing 3d density and velocity dispersion")
-    rho,vel,sigma = modelDisk.moments(xyz,vel=True)
+    rho,vel,sigma = modelDisk.moments(xyz, dens=True, vel=True, vel2=True)
     force, deriv = model.potential.forceDeriv(xyz)
     kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/R)
     ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma
@@ -195,9 +195,9 @@ if __name__ == "__main__":
     # create grids in velocity space for computing the spline representation of VDF (optional)
     # range: 0.75 v_escape from the galactic center (excluding the central BH potential)
     v_max = 0.75 * (-2 * (model.potential.potential(0,0,0)-model.potential[0].potential(0,0,0)))**0.5
-    gridv = numpy.linspace(-v_max, v_max, 101)  # for simplicity, use the same grid for all dimensions
+    gridv = numpy.linspace(-v_max, v_max, 80)  # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvR, splvz, splvphi = modelDisk.vdf(xyz, gridv, gridv, gridv)
+    splvR, splvz, splvphi = modelDisk.vdf(xyz, gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 251)
     for i,p in enumerate(xyz):

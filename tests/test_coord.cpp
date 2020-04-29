@@ -211,7 +211,8 @@ bool test_conv_deriv(const coord::PosT<srcCS>& srcpoint)
     return ok||isSingular(srcpoint);
 }
 
-bool test_prol() {
+bool test_prol()
+{
     const coord::ProlSph cs(sqrt(1.6*1.6-1));
     double lambda=1.5600000000780003, nu=-1.5599999701470495;
     const coord::PosProlSph pp(lambda, nu, 0, cs);
@@ -220,7 +221,8 @@ bool test_prol() {
     return fabs(ppnew.lambda-lambda)<3e-16 && fabs(ppnew.nu-nu)<3e-16;
 }
 
-bool test_prol2(const coord::PosCyl& src) {
+bool test_prol2(const coord::PosCyl& src)
+{
     const coord::ProlSph cs(sqrt(1.6*1.6-1));
     coord::PosDerivT <coord::Cyl, coord::ProlSph> derivCtoP;
     coord::PosDeriv2T<coord::Cyl, coord::ProlSph> deriv2CtoP;
@@ -240,7 +242,8 @@ bool test_prol2(const coord::PosCyl& src) {
     return samepos && samegrad;
 }
 
-bool test_prolmod() {
+bool test_prolmod()
+{
     // gradient conversion
     const coord::ProlMod cs(1.23456);
     const double rho = cs.D-1e-1, tau = .5;
@@ -265,6 +268,36 @@ bool test_prolmod() {
     coord::PosVelCyl pcy = toPosVelCyl(psm);
     coord::PosVelSphMod psm1 = coord::toPosVel<coord::Cyl, coord::SphMod>(pcy);
     return samepos && samegrad && samepv && equalPosVel(psm, psm1, eps);
+}
+
+template<typename CS> bool isNotNan(const coord::PosT<CS>& p);
+template<> bool isNotNan(const coord::PosCar& p) { return p.x==p.x && p.y==p.y && p.z==p.z; }
+template<> bool isNotNan(const coord::PosCyl& p) { return p.R==p.R && p.phi==p.phi && p.z==p.z; }
+template<> bool isNotNan(const coord::PosSph& p) { return p.r==p.r && p.phi==p.phi && p.theta==p.theta; }
+
+template<typename srcCS, typename destCS>
+bool test_inf(double a, double b, double c)
+{
+    coord::PosT<srcCS> pos(a, b, c);
+    return isNotNan(coord::toPos<srcCS, destCS>(pos)) &&
+      isNotNan(coord::toPosDeriv<srcCS, destCS>(pos, NULL));
+}
+bool test_inf()
+{
+    return
+    test_inf<coord::Cyl, coord::Car>(INFINITY, 0, 0) &&
+    test_inf<coord::Cyl, coord::Car>(INFINITY, 1, 0) &&
+    test_inf<coord::Cyl, coord::Car>(INFINITY, 0, 1) &&
+    test_inf<coord::Sph, coord::Car>(INFINITY, 0, 0) &&
+    test_inf<coord::Sph, coord::Car>(INFINITY, 1, 0) &&
+    test_inf<coord::Sph, coord::Car>(INFINITY, 0, 1) &&
+    test_inf<coord::Sph, coord::Cyl>(INFINITY, 0, 0) &&
+    test_inf<coord::Sph, coord::Cyl>(INFINITY, 1, 0) &&
+    test_inf<coord::Sph, coord::Cyl>(INFINITY, 0, 1) &&
+    test_inf<coord::Car, coord::Cyl>(INFINITY, 0, 0) &&
+    test_inf<coord::Car, coord::Cyl>(INFINITY, 1, 0) &&
+    test_inf<coord::Car, coord::Sph>(INFINITY, 0, 0) &&
+    test_inf<coord::Car, coord::Sph>(0, 0, INFINITY);
 }
 
 /// define test suite in terms of points for various coord systems
@@ -296,6 +329,8 @@ int main() {
     if(!passed) std::cout << "ProlSph => Cyl => ProlSph failed for z<0\n";
     passed &= test_prolmod();
     if(!passed) std::cout << "ProlMod <=> Cyl failed\n";
+    passed &= test_inf();
+    if(!passed) std::cout << "Coordinate conversion at infinity failed\n";
 
     std::cout << " ======= Testing conversion of position/velocity points =======\n";
     for(int n=0; n<numtestpoints; n++) {

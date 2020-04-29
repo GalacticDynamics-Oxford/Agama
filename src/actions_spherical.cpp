@@ -71,8 +71,8 @@ double computeJr(double E, double scaledE, double dEdscaledE, double L,
         return NAN;
     }
 
-    double X = math::clamp(scaledE, intJr.xmin(), intJr.xmax());
-    double Y = math::clamp(fabs(L/Lc), 0., 1.);
+    double X = math::clip(scaledE, intJr.xmin(), intJr.xmax());
+    double Y = math::clip(fabs(L/Lc), 0., 1.);
 
     // obtain the value of scaled Jr as a function of scaled E and L, and unscale it
     double val, derX, derY;
@@ -138,7 +138,7 @@ inline double integr(const math::IFunction& poten,
     double E, double L, double R1, double R2, double R=NAN)
 {
     if(R!=R) R=R2;               // default upper limit for integration
-    R = math::clamp(R, R1, R2);  // roundoff errors might cause R to be outside the allowed interval
+    R = math::clip(R, R1, R2);  // roundoff errors might cause R to be outside the allowed interval
     Integrand<mode> integrand(poten, E, L, R1);
     math::ScalingCub scaling(R1, R2);
     double add = 0;  // part of the integral that is computed analytically
@@ -717,7 +717,7 @@ double ActionFinderSpherical::E(const Actions& acts) const
     Jtot = acts.Jr + L,
     Lrel = L/Jtot,
     logJ = log(Jtot),
-    logJeval = math::clamp(logJ, intE.xmin(), intE.xmax());  // make sure it's within the 2d grid
+    logJeval = math::clip(logJ, intE.xmin(), intE.xmax());  // make sure it's within the 2d grid
     if(logJ != logJeval) {
         // compute the value at the edge of the 2d interpolation grid, and then linearly extrapolate
         intE.evalDeriv(logJeval, Lrel, &scaledE, &der);

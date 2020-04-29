@@ -26,7 +26,7 @@ inline T abs(T x) { return x<0 ? -x : x; }
 
 /** restrict the value x to the range [low..upp]; return low if x is NAN */
 template<typename T>
-inline T clamp(const T& x, const T& low, const T& upp) { return x>upp ? upp : x>low ? x : low; }
+inline T clip(const T& x, const T& low, const T& upp) { return x>upp ? upp : x>low ? x : low; }
 
 /** return an integer power of a number */
 double pow(double x, int n);

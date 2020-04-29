@@ -171,7 +171,7 @@ class ModelSearcher:
                 if self.particles.shape[0] > 2000:  # create an action finder object for a faster evaluation
                     actions = agama.ActionFinder(pot)(self.particles)
                 else:
-                    actions = agama.actions(self.particles, pot)
+                    actions = agama.actions(pot, self.particles)
                 df_val  = df(actions)       # values of DF for these actions
             else:  # have full phase space info for resampled input particles (missing components are filled in)
                 af      = agama.ActionFinder(pot)

@@ -3,11 +3,12 @@
 #include "potential_composite.h"
 #include "potential_cylspline.h"
 #include "potential_dehnen.h"
+#include "potential_disk.h"
 #include "potential_ferrers.h"
-#include "potential_galpot.h"
 #include "potential_king.h"
 #include "potential_multipole.h"
 #include "potential_perfect_ellipsoid.h"
+#include "potential_spheroid.h"
 #include "particles_io.h"
 #include "math_core.h"
 #include "utils.h"
@@ -718,7 +719,7 @@ PtrDensity readDensity(const std::string& fileName, const units::ExternalUnits& 
         if(fields[0] == CompositeDensity::myName()) {
             // each line is a name of a file with the given component
             std::vector<PtrDensity> components;
-            while(ok && std::getline(strm, buffer).good() && !strm.eof())
+            while(std::getline(strm, buffer).good() && !strm.eof())
                 components.push_back(readDensity(buffer, converter));
             return PtrDensity(new CompositeDensity(components));
         }
@@ -753,7 +754,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
             // extract the path from the filename, and append it to all dependent filenames
             std::string prefix = idx != std::string::npos ? fileName.substr(0, idx+1) : "";
             std::vector<PtrPotential> components;
-            while(ok && std::getline(strm, buffer).good() && !strm.eof())
+            while(std::getline(strm, buffer).good() && !strm.eof())
                 components.push_back(readPotential(prefix+buffer, converter));
             return PtrPotential(new CompositeCyl(components));
         }
@@ -925,24 +926,24 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
         break;
     case PT_COMPOSITE_DENSITY: {
         strm << dens.name() << "\n";
-        const CompositeDensity* comp = dynamic_cast<const CompositeDensity*>(&dens);
+        const CompositeDensity& comp = dynamic_cast<const CompositeDensity&>(dens);
         std::string::size_type idx = fileName.find_last_of('/');
-        for(unsigned int i=0; i<comp->size(); i++) {
+        for(unsigned int i=0; i<comp.size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
             std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
-            if(writeDensity(fileNameComp, *comp->component(i), converter))
+            if(writeDensity(fileNameComp, *comp.component(i), converter))
                 strm << fileNameShort << '\n';
         }
         break;
     }
     case PT_COMPOSITE_POTENTIAL: {
         strm << dens.name() << "\n";
-        const CompositeCyl* comp = dynamic_cast<const CompositeCyl*>(&dens);
+        const CompositeCyl& comp = dynamic_cast<const CompositeCyl&>(dens);
         std::string::size_type idx = fileName.find_last_of('/');
-        for(unsigned int i=0; i<comp->size(); i++) {
+        for(unsigned int i=0; i<comp.size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
             std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
-            if(writeDensity(fileNameComp, *comp->component(i), converter))
+            if(writeDensity(fileNameComp, *comp.component(i), converter))
                 strm << fileNameShort << '\n';
         }
         break;

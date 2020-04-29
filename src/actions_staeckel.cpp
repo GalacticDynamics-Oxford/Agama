@@ -966,8 +966,8 @@ Actions ActionFinderAxisymFudge::actions(const coord::PosVelCyl& point) const
     // xi = scaledE (restricted to a suitable range) and chi = s( Lz/Lcirc(E) ),
     // where s is the cubic scaling transformation
     math::ScalingCub scaling(0, 1);
-    double xi    = math::clamp(scaleE(E, invPhi0), interpD.xmin(), interpD.xmax());
-    double Lzrel = math::clamp(fabs(Lz) / Lcirc, 0., 1.);
+    double xi    = math::clip(scaleE(E, invPhi0), interpD.xmin(), interpD.xmax());
+    double Lzrel = math::clip(fabs(Lz) / Lcirc, 0., 1.);
     double chi   = math::scale(scaling, Lzrel);
     double fd    = fmax(0, interpD.value(xi, chi));   // focal distance
 
@@ -1002,7 +1002,7 @@ Actions ActionFinderAxisymFudge::actions(const coord::PosVelCyl& point) const
 
     // step 3. obtain the interpolated values of (suitably scaled) Jr and Jz
     // as functions of three scaled variables:  E, chi, psi = s( I3/I3max )
-    double psi   = math::scale(scaling, math::clamp(I3 / I3max, 0., 1.));
+    double psi   = math::scale(scaling, math::clip(I3 / I3max, 0., 1.));
     double Jrrel = fmax(0, intJr.value(xi, chi, psi));
     double Jzrel = fmax(0, intJz.value(xi, chi, psi));
     return Actions(Lcirc * (1-Lzrel) * Jrrel, Lcirc * (1-Lzrel) * Jzrel, Lz);
@@ -1013,8 +1013,8 @@ double ActionFinderAxisymFudge::focalDistance(const coord::PosVelCyl& point) con
     double E     = totalEnergy(*pot, point);
     double Lz    = coord::Lz(point);
     double Lc    = interp.L_circ(E);
-    double Lzrel = math::clamp(fabs(Lz) / Lc, 0., 1.);
-    double xi    = math::clamp(scaleE(E, invPhi0), interpD.xmin(), interpD.xmax());
+    double Lzrel = math::clip(fabs(Lz) / Lc, 0., 1.);
+    double xi    = math::clip(scaleE(E, invPhi0), interpD.xmin(), interpD.xmax());
     double chi   = math::scale(math::ScalingCub(0, 1), Lzrel);
     return fmax(0, interpD.value(xi, chi));
 }

@@ -253,9 +253,9 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
             double Phi    = potential::azimuthalAverage<potential::AV_PHI>(pot,  R, z);
             double dPhidR = potential::azimuthalAverage<potential::AV_DR> (pot,  R, z);
             double vesc2  = -Phi;   // half the squared escape velocity - maximum allowed sigma^2
-            vphi2(iR, iz) = math::clamp(
+            vphi2(iR, iz) = math::clip(
                 bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * dPhidR,  0., vesc2 );
-            vz2  (iR, iz) = math::clamp(rhosigmaz2(iR, iz) / rho,  0., vesc2);
+            vz2  (iR, iz) = math::clip(rhosigmaz2(iR, iz) / rho,  0., vesc2);
         }
     }
 

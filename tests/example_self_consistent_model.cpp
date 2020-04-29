@@ -77,26 +77,28 @@ void writeSurfaceDensityProfile(const std::string& filename, const galaxymodel::
     for(double r=1./8; r<=30; r<1 ? r*=2 : r<16 ? r+=0.5 : r+=2)
         radii.push_back(r * intUnits.from_Kpc);
     int nr = radii.size();
-    std::vector<double> surfDens(nr), rmsHeight(nr), rmsVel(nr);
+    int nc = model.distrFunc.numValues();  // number of DF components
+    std::vector<double> surfDens(nr*nc), rmsHeight(nr*nc), rmsVel(nr*nc);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ir=0; ir<nr; ir++) {
-        computeProjectedMoments(model, radii[ir], &surfDens[ir], &rmsHeight[ir], &rmsVel[ir]);
+        computeProjectedMoments(model, radii[ir], &surfDens[ir*nc], &rmsHeight[ir*nc], &rmsVel[ir*nc],
+            NULL, NULL, NULL, /*separate*/ true);
     }
 
     std::ofstream strm(filename.c_str());
     strm << "# Radius[Kpc]\tsurfaceDensity[Msun/pc^2]\n";
-    for(int ir=0; ir<nr; ir++)
-        strm << radii[ir] * intUnits.to_Kpc << '\t' <<
-            surfDens[ir]  * intUnits.to_Msun_per_pc2 << '\n';
+    for(int ir=0; ir<nr; ir++) {
+        strm << radii[ir] * intUnits.to_Kpc;
+        for(int ic=0; ic<nc; ic++)
+            strm << '\t' << surfDens[ir*nc+ic] * intUnits.to_Msun_per_pc2;
+        strm << '\n';
+    }
 }
 
 /// print vertical density profile for several sub-components of the stellar DF
-void writeVerticalDensityProfile(const std::string& filename,
-    const potential::BasePotential& pot,
-    const actions::BaseActionFinder& af,
-    const std::vector<df::PtrDistributionFunction>& DFcomponents)
+void writeVerticalDensityProfile(const std::string& filename, const galaxymodel::GalaxyModel& model)
 {
     std::cout << "Writing vertical density profile\n";
     std::vector<double> heights;
@@ -105,24 +107,22 @@ void writeVerticalDensityProfile(const std::string& filename,
         heights.push_back(h * intUnits.from_Kpc);
     double R = solarRadius * intUnits.from_Kpc;
     int nh = heights.size();
-    int nc = DFcomponents.size();
-    int n = nh*nc;
-    std::vector<double> dens(n);
+    int nc = model.distrFunc.numValues();
+    std::vector<double> dens(nh*nc);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-    for(int i=0; i<n; i++) {
-        int ih = i/nc, ic = i%nc;
-        computeMoments(galaxymodel::GalaxyModel(pot, af, *DFcomponents[ic]),
-            coord::PosCyl(R,heights[ih],0), &dens[ih*nc+ic], NULL, NULL);
+    for(int ih=0; ih<nh; ih++) {
+        computeMoments(model, coord::PosCyl(R,heights[ih],0), &dens[ih*nc], NULL, NULL,
+            NULL, NULL, NULL, /*separate*/ true);
     }
 
     std::ofstream strm(filename.c_str());
     strm << "# z[Kpc]\tThinDisk\tThickDisk\tStellarHalo[Msun/pc^3]\n";
     for(int ih=0; ih<nh; ih++) {
-        strm << (heights[ih] * intUnits.to_Kpc);
+        strm << heights[ih] * intUnits.to_Kpc;
         for(int ic=0; ic<nc; ic++)
-            strm << '\t' << (dens[ih*nc+ic] * intUnits.to_Msun_per_pc3);
+            strm << '\t' << dens[ih*nc+ic] * intUnits.to_Msun_per_pc3;
         strm << '\n';
     }
 }
@@ -139,11 +139,12 @@ void writeVelocityDistributions(const std::string& filename, const galaxymodel::
     std::vector<double> gridvz   = gridvR;  // for simplicity use the same grid for all three dimensions
     std::vector<double> gridvphi = gridvR;
     std::vector<double> amplvR, amplvz, amplvphi;
+    double density;
     // compute the distributions
     const int ORDER = 3;
     math::BsplineInterpolator1d<ORDER> intvR(gridvR), intvz(gridvz), intvphi(gridvphi);
     galaxymodel::computeVelocityDistribution<ORDER>(model, point, false /*not projected*/,
-        gridvR, gridvz, gridvphi, /*output*/ amplvR, amplvz, amplvphi);
+        gridvR, gridvz, gridvphi, /*output*/ &density, &amplvR, &amplvz, &amplvphi);
 
     std::ofstream strm(filename.c_str());
     strm << "# V\tf(V_R)\tf(V_z)\tf(V_phi) [1/(km/s)]\n";
@@ -332,14 +333,12 @@ int main()
     for(int iteration=1; iteration<=5; iteration++)
         doIteration(model, iteration);
 
-    // output various profiles
+    // output various profiles (only for stellar components)
     std::cout << "\033[1;33mComputing density profiles and velocity distribution\033[0m\n";
-    writeSurfaceDensityProfile("model_stars_final.surfdens",
-        galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfStellar));
-    writeVerticalDensityProfile("model_stars_final.vertical",
-        *model.totalPotential, *model.actionFinder, dfStellarArray);
-    writeVelocityDistributions("model_stars_final.veldist",
-        galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfStellar));
+    galaxymodel::GalaxyModel modelStars(*model.totalPotential, *model.actionFinder, *dfStellar);
+    writeSurfaceDensityProfile ("model_stars_final.surfdens", modelStars);
+    writeVerticalDensityProfile("model_stars_final.vertical", modelStars);
+    writeVelocityDistributions ("model_stars_final.veldist",  modelStars);
 
     // export model to an N-body snapshot
     std::cout << "\033[1;33mCreating an N-body representation of the model\033[0m\n";

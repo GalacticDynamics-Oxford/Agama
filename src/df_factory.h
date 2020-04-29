@@ -19,7 +19,7 @@ public:
         components(comps) {};
 
     /// the number of components in this composite DF
-    unsigned int size() const { return components.size(); }
+    virtual unsigned int numValues() const { return components.size(); }
 
     /// pointer to the given component
     PtrDistributionFunction component(unsigned int index) const { return components.at(index); }
@@ -30,6 +30,12 @@ public:
         for(unsigned int i=0; i<components.size(); i++)
             sum += components[i]->value(J);
         return sum;
+    }
+
+    /// Compute values of all components for the given actions and output them separately
+    virtual void eval(const actions::Actions &J, double values[]) const {
+        for(unsigned int i=0; i<components.size(); i++)
+            values[i] = components[i]->value(J);
     }
 
 private:

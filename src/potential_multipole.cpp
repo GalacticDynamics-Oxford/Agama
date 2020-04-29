@@ -1128,7 +1128,7 @@ double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos) const
     double* coefs = static_cast<double*>(alloca(ind.size() * sizeof(double)));
     double r = sqrt(pow_2(pos.R) + pow_2(pos.z) );
     double rmin = gridRadii.front(), rmax = gridRadii.back();
-    double logr = log(math::clamp(r, rmin, rmax));  // the argument of spline functions
+    double logr = log(math::clip(r, rmin, rmax));  // the argument of spline functions
     // first compute the l=0 coefficient, possibly log-unscaled
     coefs[0] = spl[0]->value(logr);
     if(logScaling)

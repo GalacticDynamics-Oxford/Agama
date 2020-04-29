@@ -98,7 +98,6 @@ PtrDistributionFunction createDistributionFunction(
     }
     else if(utils::stringsEqual(type, "Exponential")) {
         ExponentialParam par = parseExponentialParam(kvmap, converter);
-        utils::msg(utils::VL_MESSAGE, "parse", "norm="+utils::toString(par.norm)+",mass="+utils::toString(mass));
         if(mass>0) {
             par.norm = 1.0;
             par.norm = mass / Exponential(par).totalMass();

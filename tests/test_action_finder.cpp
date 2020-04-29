@@ -48,7 +48,7 @@ bool isResonance(const std::vector<std::pair<coord::PosVelCar, double> >& traj)
     for(unsigned int i=0; i<traj.size(); i++)
         avgz.add(traj[i].first.z *
             (pow_2(traj[i].first.x)+pow_2(traj[i].first.y) < pow_2(avgR.mean()) ? 1 : -1) );
-    return avgz.mean() / sqrt(avgz.disp());
+    return fabs(avgz.mean() / sqrt(avgz.disp())) > 0.5;
 }
 
 bool test_actions(const potential::BasePotential& potential,

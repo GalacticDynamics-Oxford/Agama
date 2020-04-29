@@ -52,7 +52,6 @@ SOURCES   = \
             df_disk.cpp \
             df_factory.cpp \
             df_halo.cpp \
-            df_interpolated.cpp \
             df_spherical.cpp \
             galaxymodel_base.cpp \
             galaxymodel_densitygrid.cpp \
@@ -69,12 +68,13 @@ SOURCES   = \
             potential_composite.cpp \
             potential_cylspline.cpp \
             potential_dehnen.cpp \
+            potential_disk.cpp \
             potential_factory.cpp \
             potential_ferrers.cpp \
-            potential_galpot.cpp \
             potential_king.cpp \
             potential_multipole.cpp \
             potential_perfect_ellipsoid.cpp \
+            potential_spheroid.cpp \
             potential_utils.cpp \
             raga_base.cpp  \
             raga_core.cpp   \

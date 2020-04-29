@@ -279,7 +279,7 @@ double estimateFocalDistanceShellOrbit(
     coord::GradCyl grad;
     poten.eval(coord::PosCyl(Rshell,0,0), &Phi, &grad);
     double vphi = Lz!=0 ? Lz / Rshell : 0;
-    FD = Rshell * sqrt( math::clamp((2 * (E-Phi) - Rshell * grad.dR) / ( Rshell * grad.dR - vphi*vphi), 0., 1e6) );
+    FD = Rshell * sqrt( math::clip((2 * (E-Phi) - Rshell * grad.dR) / ( Rshell * grad.dR - vphi*vphi), 0., 1e6) );
     // check that the orbit is a reasonable one, i.e., has smaller R for large |z|
     //for(size_t p=1; FD>0 && p<traj.size(); p++)
     //    if(traj[p].R > Rshell*1.000001)

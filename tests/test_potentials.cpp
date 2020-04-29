@@ -19,22 +19,64 @@ std::string checkLess(double val, double max, bool &ok)
     return utils::pp(val, 7) + (val<max ? "" : err);
 }
 
+
 bool testPotential(const potential::BasePotential& potential)
 {
     bool ok=true;
     std::cout << "\033[1;33m " << potential.name() << " \033[0m";
-    double val0   = potential.value(coord::PosCar(0,0,0));
-    double valinf = potential.value(coord::PosCar(INFINITY,0,0));
-    std::cout << " at origin is "<<val0;
-    if(val0 != val0) {   // allowed to be -inf, but not NaN
+    // check that the potential is defined (not NAN) at zero and infinity
+    double
+    val0car = potential.value(coord::PosCar(0,0,0)),
+    val8car = potential.value(coord::PosCar(INFINITY,0,0)),
+    val0cyl = potential.value(coord::PosCyl(0,0,0)),
+    val8cyl = potential.value(coord::PosCyl(INFINITY,0,0)),
+    val0sph = potential.value(coord::PosSph(0,0,0)),
+    val8sph = potential.value(coord::PosSph(INFINITY,0,0));
+    std::cout << " at origin is " << val0car << '/' << val0cyl << '/' << val0sph;
+    if(!(val0car == val0cyl && val0car == val0sph)) {   // allowed to be -inf, but not NaN
         ok = false;
         std::cout << err;
     }
-    std::cout << ", at r=inf is "<<valinf;
-    if(valinf != valinf) {   // allowed to be infinite, but not NaN
+    std::cout << ", at r=inf is " << val8car << '/' << val8cyl << '/' << val8sph;
+    if(!(val8car == val8cyl && val8car == val8sph)) {   // allowed to be infinite, but not NaN
         ok = false;
         std::cout << err;
     }
+
+    double Rmax0  = R_max (potential, val0car), Rmax8  = R_max (potential, val8car),
+           Rcirc0 = R_circ(potential, val0car), Rcirc8 = R_circ(potential, val8car),
+           Rlz0   = R_from_Lz(potential, 0),    Rlz8   = R_from_Lz(potential, INFINITY);
+    std::cout << "; Rmax(E=" << val0car << ")=" << Rmax0;
+    if(Rmax0 != 0) {
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << "; Rmax(E=" << val8car << ")=" << Rmax8;
+    if(Rmax8 != INFINITY && val8car == 0) {
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << "; Rcirc(E=" << val0car << ")=" << Rcirc0;
+    if(Rcirc0 != 0) {
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << "; Rcirc(E=" << val8car << ")=" << Rcirc8;
+    if(Rcirc8 != INFINITY && val8car == 0) {
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << "; Rcirc(L=0)=" << Rlz0;
+    if(Rlz0 != 0) {
+        ok = false;
+        std::cout << err;
+    }
+    std::cout << "; Rcirc(L=inf)=" << Rlz8;
+    if(Rlz8 != INFINITY) {
+        ok = false;
+        std::cout << err;
+    }
+
     double mtot = potential.totalMass();
     double minf = potential.enclosedMass(INFINITY);
     std::cout << "; total mass is "<<mtot<<
@@ -43,7 +85,7 @@ bool testPotential(const potential::BasePotential& potential)
         ", M(r<1) is "<<potential.enclosedMass(1)<<
         ", M(r<10) is "<<potential.enclosedMass(10)<<
         ", M(r<1e9) is "<<potential.enclosedMass(1e9)<<"\n";
-    if(!isZRotSymmetric(potential) || valinf!=0)
+    if(!isZRotSymmetric(potential) || val8car!=0)
         // non-axisymmetric or infinite potentials are not amenable for further tests
         return ok;
     // test interpolated potential

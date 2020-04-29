@@ -101,7 +101,7 @@ std::vector<double> linearOptimizationSolve(const IMatrix<NumT>& A,
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
-        result[v] = clamp(glp_ipt_col_prim(problem, v+1), vmin, vmax);
+        result[v] = clip(glp_ipt_col_prim(problem, v+1), vmin, vmax);
     }
     glp_delete_prob(problem);
 
@@ -478,7 +478,7 @@ std::vector<double> quadraticOptimizationSolve(
         double vmin = xmin.empty() ? 0 : xmin[v];
         double vmax = xmax.empty() ? INFINITY : xmax[v];
         // correct possible roundoff errors that may lead to the value being outside the limits
-        result[v] = clamp(MAT_BUFD(sol)[v], vmin, vmax);
+        result[v] = clip(MAT_BUFD(sol)[v], vmin, vmax);
     }
 
     // cleanup

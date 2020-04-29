@@ -99,7 +99,7 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
     computeMoments(galmod, point,
         &density,    &velocityFirstMoment,    &velocitySecondMoment,
         &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr,
-        reqRelError, maxNumEval);
+        false, reqRelError, maxNumEval);
     bool densok = math::fcmp(density, densExact, 0.05) == 0;
     bool sigmaok =
         math::fcmp(velocitySecondMoment.vR2,   sigmaExact, 0.05) == 0 &&
@@ -112,13 +112,14 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
     std::vector<double> gridVz   = math::createUniformGrid(41, -vmax, vmax);
     std::vector<double> gridVphi = math::createUniformGrid(41, -vmax, vmax);
     std::vector<double> amplVR, amplVz, amplVphi/*, projVR, projVz, projVphi*/;
+    double densvdf;
     const int ORDER = 3;
     math::BsplineInterpolator1d<ORDER> intVR(gridVR), intVz(gridVz), intVphi(gridVphi);
-    double densvdf = galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, false,
-        gridVR, gridVz, gridVphi, amplVR, amplVz, amplVphi);
+    galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, false,
+        gridVR, gridVz, gridVphi, &densvdf, &amplVR, &amplVz, &amplVphi);
     // skip the projected ones for the moment -- they are more expensive
     //galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, true,
-    //    gridVR, gridVz, gridVphi, projVR, projVz, projVphi, /*accuracy*/1e-2, /*maxNumEval*/1e6);
+    //    gridVR, gridVz, gridVphi, projVR, projVz, projVphi, false, /*accuracy*/1e-2, /*maxNumEval*/1e6);
     // output the profiles
     for(int i=-100; i<=100; i++) {
         double v = i*vmax/100;

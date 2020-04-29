@@ -31,18 +31,21 @@ template<> double Lz(const PosVelCar& p) { volatile double a = p.x * p.vy, b = p
 template<> double Lz(const PosVelCyl& p) { return p.R * p.vphi; }
 template<> double Lz(const PosVelSph& p) { return p.r * sin(p.theta) * p.vphi; }
 
+// multiply two numbers, replacing {anything including INFINITY} * 0 with 0
+inline double mul(double x, double y) { return y==0 ? 0 : x*y; }
+
 //--------  position conversion functions ---------//
 
 template<> PosCar toPos(const PosCyl& p) {
     double sinphi, cosphi;
     math::sincos(p.phi, sinphi, cosphi);
-    return PosCar(p.R*cosphi, p.R*sinphi, p.z);
+    return PosCar(mul(p.R, cosphi), mul(p.R, sinphi), p.z);
 }
 template<> PosCar toPos(const PosSph& p) {
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
-    return PosCar(p.r*sintheta*cosphi, p.r*sintheta*sinphi, p.r*costheta); 
+    return PosCar(mul(p.r, sintheta*cosphi), mul(p.r, sintheta*sinphi), mul(p.r, costheta));
 }
 template<> PosCyl toPos(const PosCar& p) {
     return PosCyl(sqrt(pow_2(p.x) + pow_2(p.y)), p.z, atan2(p.y, p.x));
@@ -50,7 +53,7 @@ template<> PosCyl toPos(const PosCar& p) {
 template<> PosCyl toPos(const PosSph& p) {
     double sintheta, costheta;
     math::sincos(p.theta, sintheta, costheta);
-    return PosCyl(p.r*sintheta, p.r*costheta, p.phi);
+    return PosCyl(mul(p.r, sintheta), mul(p.r, costheta), p.phi);
 }
 template<> PosSph toPos(const PosCar& p) {
     return PosSph(sqrt(pow_2(p.x)+pow_2(p.y)+pow_2(p.z)), 
@@ -153,7 +156,7 @@ template<>
 PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2) {
     double sinphi, cosphi;
     math::sincos(p.phi, sinphi, cosphi);
-    const double x=p.R*cosphi, y=p.R*sinphi;
+    const double x=mul(p.R, cosphi), y=mul(p.R, sinphi);
     if(deriv!=NULL) {
         deriv->dxdR=cosphi;
         deriv->dydR=sinphi;
@@ -198,7 +201,7 @@ PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, C
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
-    const double R=p.r*sintheta, x=R*cosphi, y=R*sinphi, z=p.r*costheta;
+    const double R=mul(p.r, sintheta), x=mul(R, cosphi), y=mul(R, sinphi), z=mul(p.r, costheta);
     if(deriv!=NULL) {
         deriv->dxdr=sintheta*cosphi;
         deriv->dydr=sintheta*sinphi;
@@ -230,7 +233,7 @@ template<>
 PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, Cyl>* deriv2) {
     double sintheta, costheta;
     math::sincos(p.theta, sintheta, costheta);
-    const double R=p.r*sintheta, z=p.r*costheta;
+    const double R=mul(p.r, sintheta), z=mul(p.r, costheta);
     if(deriv!=NULL) {
         deriv->dRdr=sintheta;
         deriv->dRdtheta=z;

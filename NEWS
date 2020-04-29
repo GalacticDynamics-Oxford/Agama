@@ -1,6 +1,14 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+April 2020:
+Optimized computation of DF moments for the case of a composite DF, when output is requested for
+each DF component separately.
+
+March 2020:
+Added Python routines for celestial coordinate transformations, which perform some of the tasks
+provided by the astropy.coordinates framework (the routines in Agama are less general but faster).
+
 January 2020:
 The Monte Carlo code Raga is extended to multiple species and provided as part of AMUSE interface.
 
@@ -72,6 +80,10 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+April 2020:
+[C++, Python]  interface for computing DF moments has been modified to provide an option
+for treating all components of a composite DF separately.
 
 January 2020:
 [C++]  interface for dealing with spherical isotropic models and relaxation coefficients

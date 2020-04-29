@@ -1,6 +1,6 @@
 /** \file    example_doublepowerlaw.cpp
     \author  Eugene Vasiliev
-    \date    2017
+    \date    2017-2020
 
     This example program helps to find the parameters of a DoublePowerLaw DF that best correspond
     to the given spherical isotropic model in the given spherical potential.
@@ -19,6 +19,14 @@
 #include "utils_config.h"
 
 
+/// max number of free parameters
+const unsigned int NPARAMS = 8;
+
+/// parameters that are provided (fixed) by the user
+df::DoublePowerLawParam defaultParams;
+
+inline double choose(double x, double y) { return x==x?x:y; }
+
 /// helper class for computing the Kullback-Leibler distance betweeen DFs f and g
 class DFIntegrandKLD: public math::IFunctionNdim {
     const df::BaseDistributionFunction &f, &g;      ///< two DF instances
@@ -31,7 +39,7 @@ public:
     {
         double jac;  // will be initialized by the following call
         const actions::Actions act = scaling.toActions(vars, &jac);
-        if(jac!=0) {
+        if(jac!=0 && isFinite(jac)) {
             jac *= TWO_PI_CUBE;   // integral over three angles
             double valf = f.value(act), valg = g.value(act);
             if(!isFinite(valf))
@@ -40,7 +48,7 @@ public:
                 valg = 0;
             values[0] = valf * jac;
             values[1] = valg * jac;
-            values[2] = valf>0 ? valf * jac * log(valf / valg) : 0;
+            values[2] = valf * jac * math::clip(log(valf / valg), -100., 100.);
         } else {
             // we're (almost) at zero or infinity in terms of magnitude of J
             // at infinity we expect that f(J) tends to zero,
@@ -55,7 +63,8 @@ public:
     virtual unsigned int numValues() const { return 3; }
 };
 
-double kullbackLeiblerDistance(const df::BaseDistributionFunction& f, const df::BaseDistributionFunction& g)
+double kullbackLeiblerDistance(
+    const df::BaseDistributionFunction& f, const df::BaseDistributionFunction& g)
 {
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {1, 1, 1};
@@ -64,13 +73,6 @@ double kullbackLeiblerDistance(const df::BaseDistributionFunction& f, const df::
         xlower, xupper, /*reqRelError*/ 1e-4, /*maxNumEval*/ 1e6, result);
     return result[2] / result[0] + log(result[1] / result[0]);
 }
-
-/// max number of free parameters
-const unsigned int NPARAMS = 6;
-
-df::DoublePowerLawParam defaultParams;
-
-inline double choose(double x, double y) { return x==x?x:y; }
 
 /// convert from parameter space to DF params
 df::DoublePowerLawParam dfparams(const double vars[])
@@ -84,6 +86,8 @@ df::DoublePowerLawParam dfparams(const double vars[])
     params.coefJzIn  = (3-params.coefJrIn)/2;  // fix g_z=g_phi taking into account that g_r+g_z+g_phi=3
     params.coefJrOut = choose(defaultParams.coefJrOut, vars[5]);
     params.coefJzOut = (3-params.coefJrOut)/2; // same for h_z
+    params.Jcutoff   = choose(defaultParams.Jcutoff,   exp(vars[6]));
+    params.cutoffStrength = choose(defaultParams.cutoffStrength, vars[7]);
     params.norm      = 1.;
     return params;
 }
@@ -92,23 +96,35 @@ df::DoublePowerLawParam dfparams(const double vars[])
 class ModelSearchFnc: public math::IFunctionNdim{
     const df::BaseDistributionFunction& f;
 public:
-    ModelSearchFnc(const df::BaseDistributionFunction& _f) : f(_f) {};
+    ModelSearchFnc(const df::BaseDistributionFunction& _f) : f(_f)
+    {
+        std::cout << "J0        slopeIn   slopeOut  steepness coefJrIn  "
+            "coefJrOut Jcutoff cutoffStrength :  KLD\n";
+    }
+
     virtual void eval(const double vars[], double values[]) const
     {
         df::DoublePowerLawParam params = dfparams(vars);
         std::cout <<
-            "J0="         << utils::pp(params.J0,       7) <<
-            " slopeIn="   << utils::pp(params.slopeIn,  7) <<
-            " slopeOut="  << utils::pp(params.slopeOut, 7) <<
-            " steepness=" << utils::pp(params.steepness,7) <<
-            " coefJrIn="  << utils::pp(params.coefJrIn, 7) <<
-            " coefJrOut=" << utils::pp(params.coefJrOut,7) << ": ";
+            utils::pp(params.J0,       8) << "  " <<
+            utils::pp(params.slopeIn,  8) << "  " <<
+            utils::pp(params.slopeOut, 8) << "  " <<
+            utils::pp(params.steepness,8) << "  " <<
+            utils::pp(params.coefJrIn, 8) << "  " <<
+            utils::pp(params.coefJrOut,8) << "  " <<
+            utils::pp(params.Jcutoff,  8) << "  " <<
+            utils::pp(params.cutoffStrength, 8) << " : ";
         try{
-            if(params.slopeIn<0) params.slopeIn=0;
-            double kld = params.slopeOut>12 || params.slopeOut<=3 ||
-                params.coefJrIn<0.1 || params.coefJrIn>2.9 ? INFINITY :
+            double kld =
+                params.slopeIn  <0   || params.slopeIn >=3   ||
+                params.slopeOut<=3   || params.slopeOut>12   ||
+                params.steepness<0.2 || params.steepness>5   ||
+                params.coefJrIn <0.1 || params.coefJrIn >2.8 ||
+                params.coefJzOut<0.1 || params.coefJrOut>2.8 ||
+                params.cutoffStrength<0.2 || params.cutoffStrength>5 ?
+                INFINITY :
                 kullbackLeiblerDistance(f, df::DoublePowerLaw(params));
-            std::cout << "KLD="       << utils::pp(kld, 8) << std::endl;
+            std::cout << utils::pp(kld, 8) << std::endl;
             values[0] = kld;
         }
         catch(std::exception&e) {
@@ -137,9 +153,9 @@ int main(int argc, char* argv[])
         "  potential=... - if provided, describes the potential that may be different from "
         "the density profile; in this case the density model must be given by a file with "
         "cumulative mass profile M(r), and other command-line parameters refer to the potential.\n"
-        "  slopeIn, slopeOut, steepness, coefJrIn, coefJrOut - if provided, fix the corresponding "
-        "parameters of the double-power-law DF to the given value; otherwise the best-fit value "
-        "will be found during the optimization procedure\n";
+        "  slopeIn, slopeOut, steepness, coefJrIn, coefJrOut, Jcutoff, cutoffStrength - "
+        "if provided, fix the corresponding parameters of the double-power-law DF to the given "
+        "value; otherwise the best-fit value will be found during the optimization procedure\n";
         return 0;
     }
 
@@ -152,10 +168,12 @@ int main(int argc, char* argv[])
     defaultParams.steepness    = args.getDouble("steepness", NAN);
     defaultParams.coefJrIn     = args.getDouble("coefJrIn",  NAN);
     defaultParams.coefJrOut    = args.getDouble("coefJrOut", NAN);
+    defaultParams.Jcutoff      = args.getDouble("Jcutoff",   NAN);
+    defaultParams.cutoffStrength=args.getDouble("cutoffStrength", NAN);
 
-    math::LogLogSpline densInterp;       // interpolated density profile constructed from a table
-    potential::PtrDensity dens;          // the density profile (analytic or interpolated)
-    potential::PtrPotential pot;         // the potential (may be different from the density)
+    math::LogLogSpline densInterp;  // interpolated density profile constructed from a table
+    potential::PtrDensity dens;     // the density profile (analytic or interpolated)
+    potential::PtrPotential pot;    // the potential (may be different from the density)
 
     // input is a name of a density profile or a file with the cumulative mass profile;
     // the choice is made based on whether 'density=...' specifies an existing file name
@@ -187,30 +205,41 @@ int main(int argc, char* argv[])
         potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot));
     df::QuasiSphericalIsotropic dfsph(eddf, *pot);
 
-    const double initparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0};
-    const double stepsizes [NPARAMS] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1};
-    const int maxNumIter = 1000;
+    double bestparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0, 100.0, 2.0};
+    double stepsizes [NPARAMS] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1,  10.0, 0.1};
+    const int maxNumIter = 500, maxNumLoop = 5;
     const double toler   = 1e-4;
-    double bestparams[NPARAMS];
     ModelSearchFnc fnc(dfsph);
-    int numIter = math::findMinNdim(fnc, initparams, stepsizes, toler, maxNumIter, bestparams);
-    std::cout << numIter << " iterations\n";
+    double bestScore = INFINITY, currScore;
+    // run the Nelder-Mead search a few times, because it can get stuck in a local minimum
+    for(int loop=0; loop<maxNumLoop; loop++) {
+        int numIter = math::findMinNdim(fnc, bestparams, stepsizes, toler, maxNumIter, bestparams);
+        std::cout << numIter << " iterations\n";
+        fnc.eval(bestparams, &currScore);
+        if(currScore >= 0.9*bestScore)  // doesn't improve - hopefully found the global minimum
+            break;
+        bestScore = fmin(currScore, bestScore);
+    }
 
     // plot the profiles of the final model
     const actions::ActionFinderSpherical af(*pot);
-    galaxymodel::GalaxyModel mod(*pot, af, df::DoublePowerLaw(dfparams(bestparams)));
+    df::DoublePowerLawParam bestParams = dfparams(bestparams);
+    df::DoublePowerLaw df(bestParams);
+    galaxymodel::GalaxyModel mod(*pot, af, df);
     galaxymodel::SphericalIsotropicModelLocal spm(phasevol, eddf, eddf);
     std::vector<double> rad = math::createExpGrid(61, 1e-3, 1e3);
     std::vector<double> rho(rad), sigR(rad), sigT(rad);
-    double Mtot = mod.distrFunc.totalMass();
+    double totalMass = dens->totalMass(), dfMass = df.totalMass();
     int s=rad.size();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for(int i=0; i<s; i++) {
         coord::Vel2Cyl vel2;
         computeMoments(mod, coord::PosCyl(rad[i],0,0), &rho[i], NULL, &vel2, NULL, NULL, NULL);
         sigR[i] = sqrt(vel2.vR2);
         sigT[i] = sqrt(vel2.vz2);
-        rho[i] /= Mtot;
+        rho[i] *= totalMass / dfMass;
     }
     potential::PtrPotential pot_appr = potential::Multipole::create(
         potential::DensitySphericalHarmonic(rad, std::vector< std::vector<double> >(1, rho)),
@@ -228,4 +257,17 @@ int main(int argc, char* argv[])
             utils::pp(sigR[i], 9) << ' ' <<
             utils::pp(sigT[i], 9) << '\n';
     }
+    std::cout << "Best-fit parameters of DoublePowerLaw DF "
+    "(Kullback-Leibler distance=" << bestScore << "):\n"
+    "norm          = " << utils::pp(totalMass / dfMass,       7) << "\n"
+    "J0            = " << utils::pp(bestParams.J0,            7) << "\n"
+    "slopeIn       = " << utils::pp(bestParams.slopeIn,       7) << "\n"
+    "slopeOut      = " << utils::pp(bestParams.slopeOut,      7) << "\n"
+    "steepness     = " << utils::pp(bestParams.steepness,     7) << "\n"
+    "coefJrIn      = " << utils::pp(bestParams.coefJrIn,      7) << "\n"
+    "coefJzIn      = " << utils::pp(bestParams.coefJzIn,      7) << "\n"
+    "coefJrOut     = " << utils::pp(bestParams.coefJrOut,     7) << "\n"
+    "coefJzOut     = " << utils::pp(bestParams.coefJzOut,     7) << "\n"
+    "Jcutoff       = " << utils::pp(bestParams.Jcutoff,       7) << "\n"
+    "cutoffStrength= " << utils::pp(bestParams.cutoffStrength,7) << "\n";
 }

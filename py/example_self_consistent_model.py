@@ -28,40 +28,31 @@ def writeRotationCurve(filename, potentials):
         header="radius[Kpc]\tv_circ,total[km/s]\tdisk\tbulge\thalo")
 
 # print surface density profiles to a file
-def writeSurfaceDensityProfile(filename, model, df):
+def writeSurfaceDensityProfile(filename, model):
     print("Writing surface density profile")
     radii = numpy.hstack(([1./8, 1./4], numpy.linspace(0.5, 16, 32), numpy.linspace(18, 30, 7)))
-    Sigma = agama.GalaxyModel(potential=model.potential, df=df, af=model.af). \
-        projectedMoments(radii)[0] * 1e-6  # convert from Msun/Kpc^2 to Msun/pc^2
+    Sigma = model.projectedMoments(radii, separate=True)[0] * 1e-6  # convert from Msun/Kpc^2 to Msun/pc^2
     numpy.savetxt(filename, numpy.column_stack((radii, Sigma)), fmt="%.6g", delimiter="\t", \
         header="Radius[Kpc]\tsurfaceDensity[Msun/pc^2]")
 
 # print vertical density profile for several sub-components of the stellar DF
-def writeVerticalDensityProfile(filename, model, df):
+def writeVerticalDensityProfile(filename, model):
     print("Writing vertical density profile")
-    numComp = len(df)   # number of DF components
     height = numpy.hstack((numpy.linspace(0, 1.5, 13), numpy.linspace(2, 8, 13)))
     xyz   = numpy.column_stack((height*0 + solarRadius, height*0, height))
-    dens  = numpy.zeros((len(height), numComp+1))
-    dens[:,0] = height
-    for c in range(numComp):
-        dens[:,c+1] = agama.GalaxyModel(potential=model.potential, df=df[c], af=model.af). \
-            moments(xyz, dens=True, vel=False, vel2=False) * 1e-9  # convert from Msun/Kpc^3 to Msun/pc^3
-    numpy.savetxt(filename, dens, fmt="%.6g", delimiter="\t", \
+    dens  = model.moments(xyz, dens=True, vel=False, vel2=False, separate=True) * 1e-9  # convert from Msun/Kpc^3 to Msun/pc^3
+    numpy.savetxt(filename, numpy.column_stack((height, dens)), fmt="%.6g", delimiter="\t", \
         header="z[Kpc]\tThinDisk\tThickDisk\tStellarHalo[Msun/pc^3]")
 
 # print velocity distributions at the given point to a file
-def writeVelocityDistributions(filename, model, df):
+def writeVelocityDistributions(filename, model):
     point = (solarRadius, 0, 0.1)
     print("Writing velocity distributions at (R=%g, z=%g)" % (point[0], point[2]))
     # create grids in velocity space for computing the spline representation of VDF
-    v_max    = 360.0    # km/s
-    gridvR   = numpy.linspace(-v_max, v_max, 75)
-    gridvz   = gridvR   # for simplicity, use the same grid for all dimensions
-    gridvphi = gridvR
+    v_max = 360.0    # km/s
+    gridv = numpy.linspace(-v_max, v_max, 75) # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvR, splvz, splvphi = agama.GalaxyModel(potential=model.potential, df=df, af=model.af). \
-        vdf(point, gridvR, gridvz, gridvphi)  # the last three arguments are optional
+    splvR, splvz, splvphi = model.vdf(point, gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 201)
     numpy.savetxt(filename, numpy.column_stack((gridv, splvR(gridv), splvz(gridv), splvphi(gridv))),
@@ -170,11 +161,12 @@ if __name__ == "__main__":
         model.iterate()
         printoutInfo(model, "iter"+str(iteration))
 
-    # output various profiles
+    # output various profiles (only for stellar components)
     print("\033[1;33mComputing density profiles and velocity distribution\033[0m")
-    writeSurfaceDensityProfile ("model_stars_final.surfdens", model, dfStellar)
-    writeVerticalDensityProfile("model_stars_final.vertical", model, dfStellar)
-    writeVelocityDistributions ("model_stars_final.veldist",  model, dfStellar)
+    modelStars = agama.GalaxyModel(model.potential, dfStellar, model.af)
+    writeSurfaceDensityProfile ("model_stars_final.surfdens", modelStars)
+    writeVerticalDensityProfile("model_stars_final.vertical", modelStars)
+    writeVelocityDistributions ("model_stars_final.veldist",  modelStars)
 
     # export model to an N-body snapshot
     print("\033[1;33mCreating an N-body representation of the model\033[0m")
@@ -182,12 +174,12 @@ if __name__ == "__main__":
 
     # first create a representation of density profiles without velocities
     # (just for demonstration), by drawing samples from the density distribution
+    print("Writing N-body sampled density profile for the dark matter halo")
+    agama.writeSnapshot("dens_dm_final", model.components[2].getDensity().sample(800000), format)
     print("Writing N-body sampled density profile for the stellar bulge, disk and halo")
     # recall that component[0] contains stellar disks and stellar halo, and component[1] - bulge
     densStars = agama.Density(model.components[0].getDensity(), model.components[1].getDensity())
     agama.writeSnapshot("dens_stars_final", densStars.sample(200000), format)
-    print("Writing N-body sampled density profile for the dark matter halo")
-    agama.writeSnapshot("dens_dm_final", model.components[2].getDensity().sample(800000), format)
 
     # now create genuinely self-consistent models of all components,
     # by drawing positions and velocities from the DF in the given (self-consistent) potential

@@ -368,7 +368,8 @@ There is one exception to the rule that \ppp{type} must encode a potential class
 \end{itemize}
 Parameters defining an analytic density or potential model (if \ppp{type} is a potential expansion, they refer to the \ppp{density} argument, otherwise to \ppp{type}); default values are given in brackets:
 \begin{itemize}
-\item \ppp{mass} [1] -- total mass of an analytic model.
+\item \ppp{mass} [1] -- total mass of an analytic model%
+\footnote{Except the \ttt{NFW} profile, in which the total mass is formally infinite, and the parameter $M$ refers to the mass within $\sim 5.3a$, where $a$ is the scale radius. It is related to the so-called virial mass $M_\mathrm{vir}$ and so-called concentration $c$ by $M_\mathrm{vir}=M\,[\ln(1+c)-c/(c+1)]$. Note that one may provide extra parameters \ppp{outerCutoffRadius} and \ppp{cutoffStrength}, in which case the \ppp{type} is implicitly changed to \ttt{Spheroid}, and the total mass will be indeed given by $M$. An NFW profile sharply cut at the virial radius is equivalent to setting \ppp{outerCutoffRadius} to the virial radius ($a\,c$) and \ppp{cutoffStrength} to a very large value (however, this may lead to numerical artifacts).}.
 \item \ppp{scaleRadius} [1] -- the first (sometimes the only) parameter with the dimension of length that defines the profile.
 \item \ppp{scaleHeight} [1] or \ppp{scaleRadius2} -- the second such parameter (e.g., for Miyamoto--Nagai or exponential disk models).
 \item \ppp{outerCutoffRadius} [$\infty$] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} models ($\infty$ means no cutoff).
@@ -660,7 +661,7 @@ When the original DF is constructed using the Eddington inversion formula, it is
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Galaxy modelling framework}  \label{sec:GalaxyModel}
 
-This module (namespace \ttt{galaxymodel::}) broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
+This module, residing in the namespace \ttt{galaxymodel::}, broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
 As stressed previously, using $\bJ$ as the argument of $f$ has the advantage that the DF may be used with an arbitrary potenial without any modifications (because the possible range of actions does not depend on the potential, unlike, e.g., the possible range of energy).
 
 
@@ -676,11 +677,17 @@ The most basic task is the computation of DF moments (density, velocity dispersi
 The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
 This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$); the tensor of second velocity moments is computed in cylindrical coordinates ($R,z,\phi$), and in axisymmetric systems may have at most 4 non-zero components ($\overline{\strut v_R^2}, \overline{\strut v_z^2}, \overline{\strut v_\phi^2}, \overline{\strut v_R v_z}$, the latter is related to the tilt of velocity ellipsoid in the meridional plane).
 
-The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ (currently for axisymmetric systems only) -- this involves an additional integration over $z$:
+The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ -- this involves an additional integration over $z$:
 \begin{align*}
 \Sigma(R) \equiv \int_{z=-\infty}^\infty \d z\, \rho(R,z), \qquad
 \sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty \d z\, \rho(R,z)\, v_z^2 .
 \end{align*}
+
+The routine \ttt{computeProjectedDF} calculates the value of the ``projected DF'', marginalized over two velocity components and one coordinate:
+\begin{align*}
+f_\mathrm{proj}(x,y;v_z) \equiv \int_{z=-\infty}^\infty \d z\, \iint \d v_x\, \d v_y\, f\big(\bJ(\bx,\bv)\big) .
+\end{align*}
+Currently both of these routines compute the projection along the $z$ axis only; in a future version, this will be generalized to allow for arbitrary orientation.
 
 There are analogous routines for spherical isotropic DFs of the form $f(h)$, defined in \texttt{galaxymodel_spherical.h} and used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
 
@@ -693,9 +700,12 @@ Instead of just a few DF moments at a given point, one may consider one-dimensio
 \mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint \d v_2\,\d v_3\, f\big(\bJ(\bx,\bv)\big) ,\\
 \mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int \d x_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
 \end{align*}
-Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$.
-VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
+Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$. The projected VDF is identical to the projected DF up to normalization: $\mathfrak{f}_\mathrm{proj}(x,y;v_z) = f_\mathrm{proj}(x,y;v_z) / \Sigma(x,y)$; however, computing the entire VDF at once is more efficient than repeatedly calling \ttt{computeProjectedDF}.
+
+VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 50-100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
 The VDFs or projected VDFs are computed by the routine \ttt{computeVelocityDistribution<N>}.
+
+When the DF consists of several components, and one needs the moments of each DF component separately, it is more efficient to compute them in a single operation, since the most expensive task -- conversion from $\bx,\bv$ to $\bJ$ -- is shared between all components. All four routines described above have an additional argument \ppp{separate}, which provides this option if set to \texttt{true}.
 
 
 %%%%%%%%%%%%%%
@@ -914,27 +924,42 @@ When applied to one or more triplets of angles, it returns the corresponding $\b
 \texttt{df = agama.DistributionFunction(type="...", [mass=..., other params])}\\
 where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
 or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\
-\texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}\\[2mm]
-Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).\\[2mm]
-The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\Sigma,\sigma$.\\[2mm]
+\texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}
+\\[2mm]
+Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).
+\\[2mm]
+The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\Sigma,\sigma$.
+\\[2mm]
 The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the generalized Eddington inversion formula to create $f(E,L)$ and then a spherical action finder to convert it to an action-based form.
 
 \paragraph{GalaxyModel} is the combination of a potential, an action finder, and a DF:\\
 \texttt{gm = agama.GalaxyModel(pot, df)}
 \textit{\color{Sepia}\ \ \# action finder is constructed automatically} \\[2mm]
-This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF is a user-defined Python function).\\[2mm]
+This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF is a user-defined Python function).
+\\[2mm]
 \texttt{dens, meanvel, vel2 = gm.moments(points, dens=True, vel=True, vel2=True)}\\
-computes the density, mean $v_\phi$, and six second moments of the velocity at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations.\\[2mm]
-\texttt{Sigma, rmsheight, sigmaz = gm.projectedMoments(r)}\\
-computes the projected quantites in the equatorial plane (surface density, r.m.s. height, and vertical velocity dispersion).\\[2mm]
+computes the density $\rho$, mean $v_\phi$, and six second moments of the velocity $\overline{v^2_{ij}}$ at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations.
+\\[2mm]
+\texttt{Sigma, rmsheight, sigmaz = gm.projectedMoments(R)}\\
+computes the projected quantites in the equatorial plane (surface density $\Sigma(R)$, r.m.s. height, and vertical velocity dispersion).
+\\[2mm]
+\texttt{fproj = gm.projectedDF([x,y,v_z])}\\
+computes the projected DF (integrated over $v_x,v_y$ and $z$).\\[2mm]
 \texttt{fvr, fvz, fvphi = gm.vdf(points [, gridv])}\\
-constructs 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators. The optional second argument specifies the grid in velocity space used to represent the spline; if not provided, the default is to cover the range $\pm v_\mathrm{escape}$ with 50 points. The grid needs not be too dense -- a 3rd degree interpolating spline provides a substantially higher level of detail than an equivalently spaced histogram.
+\texttt{fvr, fvz, fvphi, dens = gm.vdf(points, dens=True [, gridv=...])}\\
+constructs normalized 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators. One may compute either the full VDFs at the given 3d point(s), or the projected VDFs additionally integrated over the $z$ axis; the choice depends on the shape of the \texttt{points} array (3 or 2 columns, respectively). If the optional argument \texttt{dens=True} is provided, the output additionally contains the 3d density $\rho$ or the surface density $\Sigma$.
+The optional argument \texttt{gridv} specifies the grid in velocity space used to represent the spline (if given as an array) or the size of this grid (if given as an integer). If not provided, the default is to cover the range $\pm v_\mathrm{escape}$ with 50 points. The grid needs not be too dense -- a 3rd degree interpolating spline provides a substantially higher level of detail than an equivalently spaced histogram.
 One may plot the velocity distribution as a smooth function on a denser grid:\\
 \texttt{v_esc = numpy.sqrt(-2 * pot.potential(point))\\
 gridv = numpy.linspace(-v_esc, v_esc, 200)\\
-plt.plot(gridv, fvr(gridv))} \\[2mm]
+plt.plot(gridv, fvr(gridv))} \\[1mm]
+The VDF $\mathfrak{f}_\mathrm{proj}(x,y,v_z)$ is identical (up to numerical and interpolation errors) to the projected DF $f_\mathrm{proj}(x,y,v_z)$ divided by $\Sigma(x,y)$, but is more efficient when one needs to evaluate it for multiple values of $v_z$.
+\\[2mm]
+All four of the above methods additionally accept an optional argument \texttt{separate=True}, which produces separate output for each component of a composite DF -- this is more efficient than computing them individually. In this case, output arrays have one extra dimension with length equal to the number of DF components (even when it is 1).
+\\[2mm]
 \texttt{posvel, mass = gm.sample(N)}\\
-draws $N$ equal-mass samples from the DF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (its values are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.\\[2mm]
+draws $N$ equal-mass samples from the DF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (its values are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.
+\\[2mm]
 One may also sample positions from a given density profile, and then assign velocities using either the spherical anisotropic DF (Section~\ref{sec:DFspherical}) or axisymmetric Jeans equations. This is currently achieved by the \texttt{sample} method of a \ttt{Density} object, which additionally takes an instance of the \ttt{Potential} and optionally the parameters of Jeans equations. Be cautioned that the API will be changed in the future, to harmonize the usage conventions with those used for action-based \ttt{GalaxyModel}s.
 
 \paragraph{SelfConsistentModel} is the driver class for performing iterative self-consistent modelling (Section~\ref{sec:SCM}). It is initialized with a list of arguments determining the parameters of the two potential expansions (\ttt{Multipole} and \ttt{CylSpline}) that are constructed in the process. To run the model, one needs to add one or more components; the list of components may be changed between iterations.\\

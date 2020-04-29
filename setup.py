@@ -166,8 +166,17 @@ def createMakefile():
         CXXFLAGS += [OMP_FLAG]
     else:
         # on MacOS the clang compiler pretends not to support OpenMP, but in fact it does so
-        # if we insist (libomp.so or libgomp.so must be present in the system for this to work)
-        if runCompiler(code=OMP_CODE, flags='-lgomp -Xpreprocessor '+OMP_FLAGS):
+        # if we insist (libomp.so/dylib or libgomp.so must be present in the system for this to work);
+        # in some Anaconda installations, though, linking to the system-default libomp.dylib
+        # leads to conflicts with libiomp5.dylib, so we first try to link to the latter explicitly.
+        CONDA_EXE = os.environ.get('CONDA_EXE')
+        if CONDA_EXE is not None and os.path.isfile(CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')) \
+            and runCompiler(code=OMP_CODE, flags=CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib') +
+            ' -Xpreprocessor ' + OMP_FLAGS):
+            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
+            LINK_FLAGS += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
+            EXE_FLAGS  += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
+        elif runCompiler(code=OMP_CODE, flags='-lgomp -Xpreprocessor '+OMP_FLAGS):
             CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
             LINK_FLAGS += ['-lgomp']
             EXE_FLAGS  += ['-lgomp']
