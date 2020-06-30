@@ -1057,7 +1057,7 @@ There is an example program showing all these modes of operation.
 
 Moreover, the stellar-dynamical simulation code \Raga (described in a separate document \texttt{readme_raga.pdf}) can be used from within \Amuse, as well as a standalone program (see \hyperref[sec:raga]{below}).
 
-The \Amuse plugin is built automatically if the environment variable \$AMUSE\_DIR is defined, and the interface is provided by the class \texttt{amuse.community.agama.interface.Agama}.
+The \Amuse plugin is built automatically if the environment variable \texttt{\$AMUSE_DIR} is defined, and the interface is provided by the class \texttt{amuse.community.agama.interface.Agama}.
 
 
 %%%%%%%%%%%
@@ -1074,11 +1074,53 @@ An example, comparing the native \Galpy action finder with that from \Agama, is 
 
 \Nemo \cite{Teuben1995} is a collection of programs for performing and analyzing \Nbody simulations, which use common data exchange format and UNIX-style pipeline approach to chain together several processing steps. The centerpiece of this framework is the \Nbody simulation code \textsc{gyrfalcON} \cite{Dehnen2000}. It computes the gravitational force between particles using the fast multipole method, and can optionally include an external potential.
 
-The \Nemo plugin allows to use any \Agama potential as an external potential in \textsc{gyrfalcON} and other \Nemo programs (in a similar context as the \Amuse plugin). The potential may be specified either as a file with coefficients (for potential expansions), or more generally, as an INI file with parameters of possibly several components defined in groups \ppp{[Potential1]}, \ppp{[Potential whatever]}, \dots
+The \Nemo plugin allows to use any \Agama potential as an external potential in \textsc{gyrfalcON} and other \Nemo programs (in a similar context as the \Amuse plugin). Actually, it is even more general, with the possibility of representing a time-dependent potential, using a rotating reference frame, shifting the origin of the potential, and adding a spatially uniform acceleration (the latter two features can also be time-dependent). 
+In the simplest case, a \ttt{Multipole} or a \ttt{CylSpline} potential is specified as a single file with expansion coefficients, using the command-line argument \texttt{accfile=\dots}. Alternatively, if the potential contains several components or is not an expansion, one needs to create an INI file with potential parameters defined in sections \ppp{[Potential1]}, \ppp{[Potential whatever]}, \dots (any name starting with \ppp{Potential} is interpreted as a separate component, and as always, parameter names and values are case-insensitive), and pass it as a command-line argument \texttt{accfile=\dots.ini}. The INI file may contain additional sections in more complicated cases:
+{\setlength{\leftmargini}{6mm} \vspace{-2.5mm}
+\begin{itemize} \setlength{\itemsep}{0pt} \setlength{\parskip}{0pt}
+\item A section named \ppp{[Center]} defines the offset of the potential from the origin of the coordinate system used by the $N$-body simulation. It can be a fixed offset given by three parameters \ppp{x}, \ppp{y}, \ppp{z}, or a time-dependent offset specified by an auxiliary text file with $\ge 2$ lines and 4 columns: time, x, y, z. The name of this file should be given as a parameter \ppp{file=}\dots\ in this section of the INI file. The actual time-dependent offset will be interpolated by a cubic spline and linearly extrapolated beyond the range of times given in the file.
+\item A section named \ppp{[Acceleration]} defines a spatially uniform acceleration field, which is supposed to be time-dependent and must be given in another auxiliary text file with the same 4-column structure, and the file name provided as a single parameter \ppp{file=}\dots\ in this section.
+\item Finally, the potential itself may depend on time. In this case, it must be given by a sequence of potential expansion coefficients stored in separate files and an index file with a list of these files (two columns -- time and filename). The name of this index file should be provided as a parameter \ppp{file=}\dots\ in the section \ppp{[Time-dependent]} of the INI file. Alternatively, if there are no other sections in the INI file, it is not required, and the name of the index file itself should be provided as a command-line argument \texttt{accfile=\dots}
+\end{itemize} }\vspace{-2.5mm}
 
-To build the plugin, one needs to have \Nemo installed (obviously) and the environment variable \$NEMO defined; then \texttt{make nemo} will compile the plugin and place it in \texttt{\$NEMO/obj/acc} folder, where it can be found by \Nemo programs. For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\\
-\texttt{\$ gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\
-where the last optional argument specifies the pattern speed $\Omega$ (frequency of rotation of the potential figure about $z$ axis). All units in the INI or coefs file here should follow the convention $G=1$.
+Yet another possibility is to specify a pattern speed $\Omega$ for the potential (frequency of rotation of the potential figure about $z$ axis). In common with other \Nemo potentials, it is provided as a separate command-line argument \texttt{accpars=\dots} instead of the INI file.
+
+The shared library \texttt{agama.so} itself provides the \Nemo interface without any extra compilation options (it does not depend on any \Nemo header files). If the environment variable \texttt{\$NEMOOBJ} is defined during the compilation, the shared library will be automatically copied into the folder \texttt{\$NEMOOBJ/acc/}, where it could be found by \Nemo programs.\\
+For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\\
+\texttt{gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\
+where the last optional argument specifies a pattern speed $\Omega=1.0$. All units in the INI or coefs file here should follow the convention $G=1$.
+
+As an example, consider the evolution of an $N$-body model of a Plummer sphere of mass $m=0.1$ and radius $a=0.1$ (satellite), which moves on a nearly-circular orbit inside a larger Plummer sphere of mass $M=1$ and radius $A=1$ (host galaxy), represented by a smooth external potential. First create the satellite:\\
+\texttt{mkplum out=sat.nemo nbody=10000 r_s=0.1 mass=0.1}\\
+Put it on an orbit with radius $R=1$ and initial velocity approximately equal to the circular velocity of the external potential at this radius $V=0.6$:\\
+\texttt{snapshift sat.nemo sat_shift.nemo rshift=-1,0,0 vshift=0,-0.6,0}\\
+Create an INI file (\texttt{pot.ini}) with the external potential:\\
+\texttt{[Potential]\\type=Plummer\\mass=1\\scaleRadius=1}\\
+Now run a simulation for a few orbital periods:\\
+\texttt{gyrfalcON sat_shift.nemo sat_out1.nemo eps=0.02 kmax=5 step=0.25 tstop=50 \textbackslash \\
+\makebox[7mm]{} accname=agama accfile=pot.ini}\\
+The satellite nicely orbits around the origin, leaving a small tidal tail.
+
+We can model the same situation in the reference frame that is centered not on the host galaxy, but rather on the satellite [approximately]. Namely, the potential of the host galaxy now will be moving on a circular orbit around origin of the coordinate system associated with the simulation, in which the satellite was initially at rest and centered at origin. We need to create two additional files describing the time-dependent offset of the external potential's center and the acceleration associated with the non-inertial reference frame:\\
+\texttt{import numpy\\t = numpy.linspace(0,50,201)}\textit{\color{Sepia} \ \ \ \# grid in time}\\
+\texttt{w = 0.6}\textit{\color{Sepia} \ \ \ \# rotation frequency $\omega=V/R$}\\
+\texttt{x,y,z = numpy.cos(w*t), numpy.sin(w*t), t*0}\textit{\color{Sepia} \ \ \ \# orbit coordinates}\\
+\texttt{numpy.savetxt("center.txt", numpy.column_stack((t, x, y, z)))\\
+ax,ay,az = -w**2*x, -w**2*y, 0*z}\textit{\color{Sepia} \ \ \ \# components of centrifugal acceleration}\\
+\texttt{numpy.savetxt("accel.txt", numpy.column_stack((t, ax, ay, az)))}\\
+And add the following lines to \texttt{pot.ini}:\\
+\texttt{[Acceleration]\\file=accel.txt}\\
+\texttt{[Center]\\file=center.txt}\\
+Now run another simulation (with the un-shifted initial conditions for the satellite):\\
+\texttt{gyrfalcON sat.nemo sat_out2.nemo eps=0.02 kmax=5 step=0.25 tstop=50 \textbackslash \\
+\makebox[7mm]{} accname=agama accfile=pot.ini}\\
+The outcome should be similar, but expressed in a different reference frame. We can convert it back to the host-centered frame by running the following chain of operations:\\
+\texttt{snapprint sat_out2.nemo t,x,y,z | \textbackslash \\
+awk \char13 \{print \$2-cos(0.6*\$1),\$3-sin(0.6*\$1),\$4;\}\char13\ | \textbackslash \\
+tabtos - sat_out3.nemo nbody=10000 block1=x,y,z}
+
+In general, the non-inertial acceleration needs not correspond to the second derivative of the offset of the potential center -- one could imagine running the simulation in an inertial frame (hence zero acceleration), but forcing the external potential to dance around in some unpredictable way\dots And recall that one may add more than one external potential, each with its own trajectory!\\
+\texttt{gyrfalcON ic.nemo out.nemo accname=agama,agama accfile=\char13 pot1.ini;pot2.ini\char13}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1121,7 +1163,7 @@ There are a couple of closely related \Python programs:\\
 \paragraph{example_forstand} is a \Python program illustrating various aspects of observationally-constrained Schwarzschild modelling. It creates mock datasets from $N$-body models, runs a grid of models, and displays results in an interactive plot. This program can serve as a template for user scripts adapted to particular observational datasets.
 
 \phantomsection\label{sec:mkspherical}%
-\paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFsphericalIsotropic}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation.
+\paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFsphericalIsotropic}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation. Note that in the case that a given density and potential cannot be reproduced by a non-negative isotropic DF (e.g., a constant-density core in the Kepler potential), no error is emitted, and instead the DF is replaced with zeros whenever the computed value is negative.
 
 \paragraph{phaseflow} is a \Cpp program for computing the dynamical evolution of a spherical isotropic stellar system driven by two-body relaxation \cite{Vasiliev2017}. It solves a coupled system of Fokker--Planck and Poisson equations for the joint evolution of $\Phi(r), \rho(r)$ and $f(h)$ discretized on a grid, using the formalism presented in Section~\ref{sec:DFsphericalIsotropicDetails}. It reads all input parameters from an \texttt{ini} file; a couple of examples are given in \texttt{data/phaseflow_corecollapse.ini} and \texttt{data/phaseflow_bahcallwolfcusp.ini}
 
@@ -1437,12 +1479,12 @@ In case of non-zero smoothing, the effective number of free parameters is lower 
 \mathrm{EDF} \equiv \mathrm{tr}[\mathsf{I} + \lambda\,\mathrm{diag}(\boldsymbol{S})]^{-1} =
 \sum_{k=1}^{N_\mathrm{basis}} \frac{1}{1+\lambda S_k} \;.
 \end{align}
-It varies from $N_\mathrm{basis}$ for $\lambda=0$ to 2 for $\lambda\to\infty$ (which corresponds to a two-parameter linear least-square fit). The amount of smoothing thus may be specified by EDF, which has a more direct interpretation than $\lambda$. The optimal choice of smoothing parameter is given by minimization of the (corrected) Akaike information criterion:
+It varies from $N_\mathrm{basis}$ for $\lambda=0$ to 2 for $\lambda\to\infty$ (which corresponds to a two-parameter linear least-square fit). The amount of smoothing thus may be specified by EDF, which has a more direct interpretation than $\lambda$. The optimal choice of smoothing parameter is determined by minimization of the generalized cross-validation score:
 \begin{align}
-\mathrm{AIC_C} \equiv \ln(\mathrm{RSS}) + \frac{2\,(\mathrm{EDF}+1)}{N_\mathrm{data}-\mathrm{EDF}-2}.
+\mathrm{GCV} \equiv \frac{N_\mathrm{data}\;\mathrm{RSS}}{(N_\mathrm{data}-\mathrm{EDF})^2}.
 \end{align}
 
-Often one may wish to apply a somewhat stronger smoothing than the one given by minimizing AIC, for instance, by allowing it to be larger than the minimum value by a specified amount $\Delta\mathrm{AIC}\sim \mathcal{O}(1)$. In both cases, the corresponding value of $\lambda$ is  obtained by standard one-dimensional minimization or root-finding routines. Figure~\ref{fig:SplineFit} illustrates the method.
+Often one may wish to apply a somewhat stronger smoothing than the one given by minimizing GCV, for instance, by allowing ln(GCV) to be larger than the minimum value by a specified amount $\Delta\mathrm{\ln(GCV)}\sim \mathcal{O}(1)$. In both cases, the corresponding value of $\lambda$ is  obtained by standard one-dimensional minimization or root-finding routines. Figure~\ref{fig:SplineFit} illustrates the method.
 
 %%%%%%%%%%%%%%
 \begin{figure}[t]

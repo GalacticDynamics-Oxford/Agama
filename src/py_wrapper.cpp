@@ -1715,12 +1715,12 @@ public:
         if(!DERIV) return;
         // unit of force deriv per unit mass is V/T/L
         const double convD = 1 / (conv->velocityUnit / conv->timeUnit / conv->lengthUnit);
-        outputBuffers[1][ip*3 + 0] = -hess.dx2  * convD;
-        outputBuffers[1][ip*3 + 1] = -hess.dy2  * convD;
-        outputBuffers[1][ip*3 + 2] = -hess.dz2  * convD;
-        outputBuffers[1][ip*3 + 3] = -hess.dxdy * convD;
-        outputBuffers[1][ip*3 + 4] = -hess.dydz * convD;
-        outputBuffers[1][ip*3 + 5] = -hess.dxdz * convD;
+        outputBuffers[1][ip*6 + 0] = -hess.dx2  * convD;
+        outputBuffers[1][ip*6 + 1] = -hess.dy2  * convD;
+        outputBuffers[1][ip*6 + 2] = -hess.dz2  * convD;
+        outputBuffers[1][ip*6 + 3] = -hess.dxdy * convD;
+        outputBuffers[1][ip*6 + 4] = -hess.dydz * convD;
+        outputBuffers[1][ip*6 + 5] = -hess.dxdz * convD;
     }
 };
 
@@ -1985,11 +1985,12 @@ static PyMethodDef Potential_methods[] = {
       "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
       "Returns: float or array of floats" },
     { "force", Potential_force, METH_VARARGS,
-      "Compute force at a given point or array of points\n"
+      "Compute force per unit mass (i.e. acceleration, -dPhi/dx) "
+      "at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
       "Returns: float[3] - x,y,z components of force, or array of such triplets" },
     { "forceDeriv", Potential_forceDeriv, METH_VARARGS,
-      "Compute force and its derivatives at a given point or array of points\n"
+      "Compute force per unit mass and its derivatives at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
       "Returns: (float[3],float[6]) - x,y,z components of force, "
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "

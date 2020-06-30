@@ -1139,10 +1139,10 @@ public:
         double *rmserror=NULL) const;
 
     /** perform fitting with adaptive choice of smoothing parameter that minimizes
-        the value of AIC (Akaike information criterion), defined as 
-          log(rmserror^2 * numDataPoints) + 2 * (EDF+1) / (numDataPoints-EDF-2) .
+        the generalized cross-validation score (GCV), defined as
+          GCV = (rmserror^2 * numDataPoints) / (numDataPoints-EDF)^2 .
         The input and output arguments are similar to `fit()`, with the difference that
-        the smoothing parameter (number of equivalent degrees of freedom) is not provided as input,
+        the number of equivalent degrees of freedom is not provided as input,
         but may be reported as output argument `edf` if the latter is not NULL.
     */
     std::vector<double> fitOptimal(
@@ -1154,14 +1154,14 @@ public:
     }
 
     /** perform an 'oversmooth' fitting with adaptive choice of smoothing parameter.
-        deltaAIC>=0 determines the difference in AIC (Akaike information criterion) between
-        the solution with optimal smoothing and the returned solution which is smoothed more than
+        smoothing>=0 determines the difference in ln(GCV) between the solution with
+        optimal smoothing (lowest GCV) and the returned solution which is smoothed more than
         the optimal amount defined above.
         The other arguments have the same meaning as in `fitOptimal()`.
     */
     std::vector<double> fitOversmooth(
         const std::vector<double> &yvalues,
-        const double deltaAIC,
+        const double smoothing,
         double *rmserror=NULL,
         double* edf=NULL) const;
 

@@ -19,6 +19,28 @@
     `accname=agama accfile=my_potential_coefs [accpars=Omega]`
     The choice is determined by the file extesion (.ini vs any other).
 
+    There are a number of features that make it possible to use
+    a time-dependent potential. They are specified as additional sections
+    in the .ini file.
+    First, the potential itself may be shifted from origin by a constant
+    or a time-dependent offset vector. This is specified by the section
+    [center], with either three numbers x=..., y=..., z=... for a constant
+    offset, or a text file given by file=... with four columns: time,
+    x, y, z  for a time-dependent offset vector.
+    Second, one may add a spatially uniform time-dependent acceleration 
+    field given in a text file, specified by file=... parameter in
+    a section [acceleration]. (Again the file should have 4 columns).
+    Finally, the potential itself needs not be the same at all times.
+    To initialize a time-dependent potential, add a section [time-dependent]
+    to the ini file, with a single parameter file=...;
+    this index file should have two columns - time and the name of a file 
+    with potential coefficients at the given time.
+    Alternatively, one may provide the name of the index file as the
+    argument accfile=... in the command line, bypassing the creation of
+    a separate ini file.
+    Forces from a time-dependent potential are linearly interpolated in time,
+    while the offsets and accelerations are cubically interpolated.
+
     This file exports a few routines that make possible to load
     the shared library agama.so without any further modifications;
     NEMO framework is not needed for compilation (if it's not present,
@@ -47,12 +69,16 @@ typedef void(*acc_pter)(
     int indicator,      /* input:  indicator                       */
     char numtype);      /* input:  type: 'f' or 'd'                */
 
-/// pointer to the actual potential (a single instance)
-static potential::PtrPotential mypot;
+/// array of time stamps for a time-dependent potential
+static std::vector<double> times;
+/// array of potentials corresponding to each moment of time (possibly just one)
+static std::vector<potential::PtrPotential> mypot;
 /// pattern speed
 static double Omega = 0;
 /// time-dependent offsets of the potential center from origin
 static math::CubicSpline centerx, centery, centerz;
+/// time-dependent uniform accelerations
+static math::CubicSpline accelx, accely, accelz;
 
 /// add or assign a number
 template<typename NumT, int Add> void op(NumT x, NumT& y);
@@ -65,19 +91,41 @@ template<> inline void op<double,1>(double x, double&y) { y+= x; }
 template<typename NumT, int NDIM, int AddPot, int AddAcc>
 inline void getAcc(double time, int nbody, const int* active, const void* _pos, void* _pot, void* _acc)
 {
-    if(!mypot)
+    if(times.empty() || mypot.empty())
         throw std::runtime_error("Agama plugin for NEMO: potential is not initialized");
     const NumT* pos = static_cast<const NumT*>(_pos);
     NumT* pot = static_cast<NumT*>(_pot);
     NumT* acc = static_cast<NumT*>(_acc);
+    // coordinate offset and rotation
     double cosphi=1, sinphi=0,   // rotation angle of the potential reference frame at the current time
         offx=0, offy=0, offz=0,  // offset of the potential center
-        accx=0, accy=0, accz=0;  // accelerations due to the motion of the potential center
-    math::sincos(Omega*time, cosphi, sinphi);
+        accx=0, accy=0, accz=0;  // external uniform acceleration field
+    math::sincos(Omega*time, sinphi, cosphi);
     if(!centerx.empty()) {
-        centerx.evalDeriv(time, &offx, NULL, &accx);
-        centery.evalDeriv(time, &offy, NULL, &accy);
-        centerz.evalDeriv(time, &offz, NULL, &accz);
+        offx = centerx(time);
+        offy = centery(time);
+        offz = centerz(time);
+    }
+    if(!accelx.empty()) {
+        accx = accelx(time);
+        accy = accely(time);
+        accz = accelz(time);
+    }
+    // determine which potential(s) to use in the time-dependent case,
+    // linearly interpolating between the two timestamps enclosing the current time
+    int index = 0;      // index of the leftmost (smaller of the two) timestamp
+    double weight = 1.; // weigth of the potential associated with the leftmost timestamp
+    if(times.size()>=2) {
+        index = math::binSearch(time, &times.front(), times.size());
+        if(index<0) {
+            index = 0;
+            weight = 1;
+        } else if(index>=(int)times.size()-1) {
+            index = times.size()-1;
+            weight = 1;
+        } else {
+            weight = (times[index+1] - time) / (times[index+1] - times[index]);
+        }
     }
     for(int i=0; i<nbody; i++) {
         if(active && (active[i] & 1) != 1)
@@ -86,9 +134,17 @@ inline void getAcc(double time, int nbody, const int* active, const void* _pos, 
             (pos[i*NDIM + 0] - offx) * cosphi + (pos[i*NDIM + 1] - offy) * sinphi,
             (pos[i*NDIM + 1] - offy) * cosphi - (pos[i*NDIM + 0] - offx) * sinphi,
             (NDIM==3 ? pos[i*NDIM + 2] : 0) - offz);
-        coord::GradCar grad;
-        double Phi;
-        mypot->eval(point, &Phi, &grad);
+        coord::GradCar grad, grad1;
+        double Phi, Phi1;
+        mypot[index]->eval(point, &Phi, &grad);
+        // if needed, interpolate between two potentials
+        if(weight<1) {
+            mypot[index+1]->eval(point, &Phi1, &grad1);
+            Phi = Phi * weight + Phi1 * (1-weight);
+            grad.dx = grad.dx * weight + grad1.dx * (1-weight);
+            grad.dy = grad.dy * weight + grad1.dy * (1-weight);
+            grad.dz = grad.dz * weight + grad1.dz * (1-weight);
+        }
         // potential and acceleration are either added or assigned, depending on the flags
         op<NumT,AddPot>( static_cast<NumT>(Phi), pot[i]);
         op<NumT,AddAcc>(-static_cast<NumT>(grad.dx * cosphi - grad.dy * sinphi - accx), acc[i*NDIM + 0]);
@@ -142,7 +198,8 @@ static void myacc(
     } else   throw std::runtime_error("Invalid NumT");
 }
 
-static void readOrbit(const std::string& filename)
+static void readTimeDep(const std::string& filename,
+    /*output*/ math::CubicSpline& splx, math::CubicSpline& sply, math::CubicSpline& splz)
 {
     std::ifstream strm(filename.c_str(), std::ios::in);
     if(!strm)
@@ -170,14 +227,53 @@ static void readOrbit(const std::string& filename)
     }
     if(velx.size() == posx.size()) {
         // create Hermite splines from values and derivatives at each moment of time
-        centerx = math::CubicSpline(time, posx, velx);
-        centery = math::CubicSpline(time, posy, vely);
-        centerz = math::CubicSpline(time, posz, velz);
+        splx = math::CubicSpline(time, posx, velx);
+        sply = math::CubicSpline(time, posy, vely);
+        splz = math::CubicSpline(time, posz, velz);
     } else {
-        // create natural cubic splines from just the values
-        centerx = math::CubicSpline(time, posx);
-        centery = math::CubicSpline(time, posy);
-        centerz = math::CubicSpline(time, posz);
+        // create natural cubic splines from just the values (and regularize)
+        splx = math::CubicSpline(time, posx, true);
+        sply = math::CubicSpline(time, posy, true);
+        splz = math::CubicSpline(time, posz, true);
+    }
+}
+
+static void readPotentials(const std::string& filename)
+{
+    std::ifstream strm(filename.c_str(), std::ios::in);
+    if(!strm)
+        throw std::runtime_error("Agama plugin for NEMO: cannot read from file "+filename);
+    std::string buffer;
+    std::vector<std::string> fields;
+    // attempt to parse the file as if it contained time stamps and names of corresponding potential files
+    try{
+        while(std::getline(strm, buffer) && !strm.eof()) {
+            if(!buffer.empty() && utils::isComment(buffer[0]))  // commented line
+                continue;
+            fields = utils::splitString(buffer, "#;, \t");
+            size_t numFields = fields.size();
+            if(numFields < 2 ||
+               !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
+                continue;
+            if(!utils::fileExists(fields[1])) {
+                fprintf(stderr, "file %s missing\n", fields[1].c_str());
+                continue;
+            }
+            times.push_back(utils::toDouble(fields[0]));
+            mypot.push_back(potential::readPotential(fields[1]));
+            if(times.size()>=2 && !(times[times.size()-1] > times[times.size()-2]))
+                throw std::runtime_error("Times are not monotonic");
+        }
+    }
+    catch(std::exception&) {
+        times.clear();
+        mypot.clear();
+    }
+    strm.close();
+    // if this didn't work, assume that the file contains a single potential expansion
+    if(times.empty()) {
+        times.assign(1, 0.);
+        mypot.assign(1, potential::readPotential(filename));
     }
 }
 
@@ -226,15 +322,45 @@ extern "C" void inipotential(
             "Should provide the name of INI or potential coefficients file in accfile=...");
     const std::string filename(file);
     if(filename.size()>4 && filename.substr(filename.size()-4)==".ini") {
-        mypot = potential::createPotential(filename);
-        std::string centerfile = utils::ConfigFile(filename).findSection("center").getString("file");
-        if(!centerfile.empty())
-            readOrbit(centerfile);
-    } else
-        mypot = potential::readPotential(filename);
-    Omega = *npar>=1 ? pars[0] : 0;
-    fprintf(stderr, "Agama plugin for NEMO: "
-        "Created an instance of %s potential with pattern speed=%g\n", mypot->name(), Omega);
+        // parse the ini file and find out if it has any auxiliary sections apart from [Potential***]
+        utils::ConfigFile cfg(filename);
+        // [center]: provides the offset of the potential expansion from origin
+        const utils::KeyValueMap& sec_center = cfg.findSection("center");
+        if(sec_center.contains("file")) {
+            // time-dependent offset
+            readTimeDep(sec_center.getString("file"), /*output*/ centerx, centery, centerz);
+        } else {
+            // no file but perhaps values of x,y,z are provided (if not, just use zeros)
+            std::vector<double> times(2); times[1] = 1;
+            centerx = math::CubicSpline(times, std::vector<double>(2, sec_center.getDouble("x", 0)));
+            centery = math::CubicSpline(times, std::vector<double>(2, sec_center.getDouble("y", 0)));
+            centerz = math::CubicSpline(times, std::vector<double>(2, sec_center.getDouble("z", 0)));
+        }
+        // [acceleration]: provides an additional time-dependent uniform acceleration field
+        std::string accelfile = cfg.findSection("acceleration").getString("file");
+        if(!accelfile.empty())
+            readTimeDep(accelfile, /*output*/ accelx, accely, accelz);
+        // [time-dependent]: provides a list of files with time-dependent potentials
+        std::string timedepfile = cfg.findSection("time-dependent").getString("file");
+        if(!timedepfile.empty())
+            readPotentials(timedepfile);
+        else {
+            // non-time-dependent case, just a single potential: use all [Potential***] sections in the ini file
+            times.assign(1, 0.);
+            mypot.assign(1, potential::createPotential(filename));
+        }
+    } else {
+        readPotentials(filename);
+    }
+    // optional additional parameter: pattern speed
+    if(*npar>=1) {
+        Omega = pars[0];
+        fprintf(stderr, "Agama plugin for NEMO: "
+        "Created an instance of %s potential with pattern speed=%g\n", mypot[0]->name(), Omega);
+    } else {
+        Omega = 0;
+        fprintf(stderr, "Agama plugin for NEMO: Created an instance of %s potential\n", mypot[0]->name());
+    }
 }
 
 /// install the potential (newer interface)

@@ -2613,14 +2613,15 @@ public:
         std::vector<double>& ampl, double& RSS) const;
 
     /** find the amplitudes of basis functions that provide the best fit to the data points `y`
-        with the Akaike information criterion (AIC) being offset by deltaAIC from its minimum value
-        (the latter corresponding to the case of optimal smoothing).
+        with the logarithm of the generalized cross-validation score (GCV) being larger
+        than its minimum value (corresponding to the case of optimal smoothing) by deltaSmoothing.
         \param[in]  yvalues  are the data values;
-        \param[in]  deltaAIC is the offset of AIC (0 means the optimally smoothed spline);
+        \param[in]  deltaSmoothing is the offset of ln(GCV) from its minimum
+        (0 means the optimally smoothed spline);
         \param[out] ampl  will contain the computed amplitudes of basis functions;
         \param[out] RSS,EDF  same as in the previous function;
     */
-    void solveForAmplitudesWithAIC(const std::vector<double>& yvalues, double deltaAIC,
+    void solveForAmplitudesWithGCV(const std::vector<double>& yvalues, double deltaSmoothing,
         std::vector<double>& ampl, double& RSS, double& EDF) const;
 
     /** Obtain the best-fit solution for the given value of smoothing parameter lambda
@@ -2757,7 +2758,7 @@ inline double computeEDF(const std::vector<double>& singValues, double lambda)
     if(!isFinite(lambda))  // infinite smoothing leads to a straight line (2 d.o.f)
         return 2.;
     else if(lambda==0)     // no smoothing means the number of d.o.f. equal to the number of basis fncs
-        return singValues.size()*1.;
+        return singValues.size();
     else {
         double EDF = 0;
         for(unsigned int c=0; c<singValues.size(); c++)
@@ -2766,10 +2767,25 @@ inline double computeEDF(const std::vector<double>& singValues, double lambda)
     }
 }
 
-// compute the (modified) Akaike information criterion
-inline double computeAIC(double RSS, double EDF, unsigned int numDataPoints)
+// compute the generalized cross-validation score
+inline double computeGCV(double RSS, double EDF, unsigned int numDataPoints)
 {
-    return log(RSS) + 2. * (EDF+1) / (numDataPoints-EDF-2);
+    //AIC: return log(RSS) + 2. * (EDF+1) / (numDataPoints-EDF-2);
+    /*if(lambda==0 && EDF==numDataPoints) {
+        // this is a correct procedure for computing GCV for the case when the x-values of points
+        // coincide with the spline nodes and lambda=0, i.e. a spline with no smoothing is just
+        // interpolating between points. In this case both RSS and EDF are zero, hence the general
+        // expression below would fail. But we take a simpler approach of returning a huge value.
+        for(unsigned int p=0; p<numKnots; p++)
+            tempv[p] = fitData.MTz[p] * singValues[p];
+        blas_dgemv(CblasNoTrans, 1, MMatrix, tempv, 0, ampl);
+        std::vector<double> dy = BMatrix.multiplyByVector(ampl);
+        double numer = blas_dnrm2(dy);
+        double denom = 0;
+        for(unsigned int p=0; p<singValues.size(); p++) denom+=singValues[p];
+        GCV = numer / pow_2(denom) * numDataPoints;
+    }*/
+    return EDF<numDataPoints ? numDataPoints * RSS / pow_2(numDataPoints-EDF) : 1e100;
 }
 
 // helper class to find the value of lambda that corresponds to the given number of
@@ -2785,20 +2801,20 @@ public:
     }
 };
 
-// helper class to find the value of lambda that corresponds to the given value of AIC
-class SplineAICRootFinder: public IFunctionNoDeriv {
+// helper class to find the value of lambda that corresponds to the given value of smoothing
+class SplineGCVRootFinder: public IFunctionNoDeriv {
     const SplineApprox::Impl& impl;              ///< the fitting interface
     const SplineApprox::Impl::FitData& fitData;  ///< data for the fitting procedure
-    const double targetAIC;                      ///< target value of AIC for root-finder
+    const double targetGCV;                      ///< target value of GCV for root-finder
 public:
-    SplineAICRootFinder(const SplineApprox::Impl& _impl,
-        const SplineApprox::Impl::FitData& _fitData, double _targetAIC) :
-        impl(_impl), fitData(_fitData), targetAIC(_targetAIC) {};
+    SplineGCVRootFinder(const SplineApprox::Impl& _impl,
+        const SplineApprox::Impl::FitData& _fitData, double _targetGCV) :
+        impl(_impl), fitData(_fitData), targetGCV(_targetGCV) {};
     virtual double value(double lambda) const {
         std::vector<double> ampl;
         double RSS, EDF;
         impl.computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
-        return computeAIC(RSS, EDF, impl.numDataPoints) - targetAIC;
+        return computeGCV(RSS, EDF, impl.numDataPoints) - targetGCV;
     }
 };
 
@@ -2820,14 +2836,14 @@ void SplineApprox::Impl::computeAmplitudes(const FitData &fitData, double lambda
     tempv = ampl;
     blas_dtrmv(CblasLower, CblasTrans, CblasNonUnit, LMatrix, tempv); // tempv = L^T w
     double wTz = blas_ddot(ampl, fitData.zRHS);
-    RSS = fitData.ynorm2 - 2*wTz + blas_dnrm2(tempv);
+    RSS = fmax(0, fitData.ynorm2 - 2*wTz + blas_dnrm2(tempv)); // should be nonnegative by definition
     EDF = computeEDF(singValues, lambda);  // equivalent degrees of freedom
-    /*utils::msg(utils::VL_VERBOSE, "SplineApprox",
+    /*
+    utils::msg(utils::VL_VERBOSE, "SplineApprox",
         "lambda="+utils::toString(lambda,10)+
         ", RSS="+utils::toString(RSS,10)+
         ", EDF="+utils::toString(EDF,10)+
-        ", AIC="+utils::toString(computeAIC(RSS, EDF, numDataPoints),10)+
-        ", GCV="+utils::toString(RSS / pow_2(numDataPoints-EDF),10));*/
+        ", GCV="+utils::toString(computeGCV(RSS, EDF, numDataPoints),10));*/
     // convert amplitudes to the values of interpolated function at grid nodes
     result.resize(numKnots);
     blas_dgemv(CblasNoTrans, 1, AMatrix, ampl, 0, result);
@@ -2846,28 +2862,31 @@ void SplineApprox::Impl::solveForAmplitudesWithEDF(const std::vector<double> &yv
     computeAmplitudes(initFit(yvalues), lambda, ampl, RSS, EDF);
 }
 
-void SplineApprox::Impl::solveForAmplitudesWithAIC(const std::vector<double> &yvalues, double deltaAIC,
+void SplineApprox::Impl::solveForAmplitudesWithGCV(const std::vector<double> &yvalues, double smoothing,
     std::vector<double> &ampl, double &RSS, double &EDF) const
 {
-    if(deltaAIC < 0)
-        throw std::invalid_argument("SplineApprox: deltaAIC must be non-negative");
+    if(smoothing < 0)
+        throw std::invalid_argument("SplineApprox: smoothing must be non-negative");
     FitData fitData = initFit(yvalues);
+    ScalingSemiInf scaling;
     // find the value of lambda corresponding to the optimal fit
-    ScalingSemiInf scaling;  // log-scaling for lambda
-    double lambda = findMin(SplineAICRootFinder(*this, fitData, 0),
-        scaling, NAN /*no initial guess*/, EPS_LAMBDA);
+    double lambda = findMin(SplineGCVRootFinder(*this, fitData, 0),
+        /*log-scaling for lambda*/ scaling, /*no initial guess*/ NAN, /*accuracy*/ EPS_LAMBDA);
     if(lambda!=lambda) {
         utils::msg(utils::VL_DEBUG, "SplineApprox", "Can't find optimal smoothing parameter lambda");
         lambda = 0;  // no smoothing in case of weird problems
     }
     computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
-    if(deltaAIC > 0) {  // find an oversmoothed solution
-        // the reference value of AIC at the optimal lambda
-        double AIC0 = computeAIC(RSS, EDF, numDataPoints);
-        // find the value of lambda so that AIC is larger than the reference value by the required amount
-
-        lambda = findRoot(SplineAICRootFinder(*this, fitData, AIC0 + deltaAIC), scaling, EPS_LAMBDA);
-        if(!isFinite(lambda))   // root does not exist, i.e. AIC is everywhere lower than target value
+    if(smoothing > 0) {  // find an oversmoothed solution
+        // the reference value of GCV at the optimal lambda
+        double GCV0 = computeGCV(RSS, EDF, numDataPoints);
+        // find the value of lambda so that GCV is larger than the reference value by the required amount
+        lambda = unscale(scaling,
+            findRoot(ScaledFnc<ScalingSemiInf>(scaling,
+            SplineGCVRootFinder(*this, fitData, GCV0 * exp(smoothing))),
+            /*lower bound is the optimal lambda*/ scale(scaling, lambda),
+            /*upper bound is lambda=infinity*/ 1, /*accuracy*/ EPS_LAMBDA));
+        if(!isFinite(lambda))   // root does not exist, i.e. GCV is everywhere lower than target value
             lambda = INFINITY;  // basically means fitting with a linear regression
         // compute the amplitudes for the final value of lambda
         computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
@@ -2898,12 +2917,12 @@ std::vector<double> SplineApprox::fit(
 }
 
 std::vector<double> SplineApprox::fitOversmooth(
-    const std::vector<double> &yvalues, const double deltaAIC,
+    const std::vector<double> &yvalues, const double smoothing,
     double *rms, double* edf) const
 {
     std::vector<double> ampl;
     double RSS, EDF;
-    impl->solveForAmplitudesWithAIC(yvalues, deltaAIC, ampl, RSS, EDF);
+    impl->solveForAmplitudesWithGCV(yvalues, smoothing, ampl, RSS, EDF);
     if(rms)
         *rms = sqrt(RSS / impl->sumWeights);
     if(edf)
