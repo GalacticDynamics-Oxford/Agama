@@ -379,7 +379,8 @@ bool writeParticlesUNSIO(
     return
     file.setData("halo","pos", nbody, &(pos.front()), true) > 0  &&
     file.setData("halo","vel", nbody, &(vel.front()), true) > 0  &&
-    file.setData("halo","mass",nbody, &(mass.front()),true) > 0;
+    file.setData("halo","mass",nbody, &(mass.front()),true) > 0  &&
+    file.save() > 0;
 }
 
 // specialization of the above function for the case when only coordinates are available
@@ -398,7 +399,8 @@ template<> inline bool writeParticlesUNSIO<coord::PosCar>(
     }
     return
     file.setData("halo","pos", nbody, &(pos.front()), true) > 0  &&
-    file.setData("halo","mass",nbody, &(mass.front()),true) > 0;
+    file.setData("halo","mass",nbody, &(mass.front()),true) > 0  &&
+    file.save() > 0;
 }
 
 template<typename ParticleT>
@@ -415,7 +417,6 @@ void writeSnapshotUNSIO(
     if(isFinite(time))
         result &= output.snapshot->setData("time", static_cast<float>(time));
     result &= writeParticlesUNSIO<ParticleT>(*output.snapshot, points, conv);
-    result &= output.snapshot->save() > 0;
     if(!result) 
         throw std::runtime_error("writeSnapshotUNSIO: cannot write to file "+fileName);
 }
