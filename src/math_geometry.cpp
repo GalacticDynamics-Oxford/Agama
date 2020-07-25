@@ -186,10 +186,10 @@ bool computeBsplineIntegralsOverPolygon(const Polygon& polygon,
     bool outOfBounds = false;
     for(size_t i=0; i<numVertices; i++) {
         const Point2d& v = polygon[i], w = i<numVertices-1 ? polygon[i+1] : polygon[0];
-        xmin = std::min(xmin, v.x);
-        xmax = std::max(xmax, v.x);
-        ymin = std::min(ymin, v.y);
-        ymax = std::max(ymax, v.y);
+        xmin = fmin(xmin, v.x);
+        xmax = fmax(xmax, v.x);
+        ymin = fmin(ymin, v.y);
+        ymax = fmax(ymax, v.y);
         polygonArea += 0.5 * (v.x + w.x) * (w.y - v.y);
     }
 

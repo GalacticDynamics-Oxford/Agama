@@ -657,7 +657,7 @@ double findRoot(const IFunction& fnc,
             {   // attempt to obtain the approximation by Hermite interpolation
                 dd = hermiteInterpMonotone(0, fb, fc, 0, cminusb, 1/fderb, 1/fderc);
             }
-            if(isFinite(dd) && std::min(fabs(dd), fabs(cminusb-dd)) > fabs(cminusb) * DELTA_HERMITE) {
+            if(isFinite(dd) && fmin(fabs(dd), fabs(cminusb-dd)) > fabs(cminusb) * DELTA_HERMITE) {
                 d = dd;           // Hermite interpolation is successful
             } else {              // otherwise proceed as usual in the Brent method
                 double p, q, r, s = fb / fa;
@@ -674,7 +674,7 @@ double findRoot(const IFunction& fnc,
                     q = -q;
                 else
                     p = -p;
-                if(2 * p < std::min(3 * m * q - fabs(tol * q), fabs(e * q))) { 
+                if(2 * p < fmin(3 * m * q - fabs(tol * q), fabs(e * q))) {
                     e = d;
                     d = p / q;
                 } else {

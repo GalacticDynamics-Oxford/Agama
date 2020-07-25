@@ -28,7 +28,7 @@ private:
 
     /** explicitly define the density function, instead of relying on the potential derivatives
         (they suffer from cancellation errors already at r>1e5) */
-    virtual double densitySph(const coord::PosSph &pos) const;
+    virtual double densitySph(const coord::PosSph &pos, double time) const;
 };
 
 /** Spherical Isochrone potential:
@@ -80,7 +80,7 @@ private:
     const double scaleRadiusB; ///< second scale radius (B),  determines the vertical extent
 
     virtual void evalCyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const;
 };
 
 /** Triaxial logarithmic potential:
@@ -102,7 +102,7 @@ private:
     const double q2;           ///< squared z/x axis ratio (q)
 
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
 };
 
 /** Triaxial harmonic potential:
@@ -122,7 +122,54 @@ private:
     const double q2;           ///< squared z/x axis ratio (q)
 
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
+};
+
+
+//------ Potential of a binary black hole ------//
+
+/** Parameters describing the central single or binary supermassive black hole (BH) */
+struct KeplerBinaryParams {
+    double mass;  ///< mass of the central black hole or total mass of the binary
+    double q;     ///< binary BH mass ratio (0<=q<=1)
+    double sma;   ///< binary BH semimajor axis
+    double ecc;   ///< binary BH eccentricity (0<=ecc<1)
+    double phase; ///< binary BH orbital phase (0<=phase<2*pi)
+
+    /// set defaults
+    KeplerBinaryParams(double _mass=0, double _q=0, double _sma=0, double _ecc=0, double _phase=0) :
+        mass(_mass), q(_q), sma(_sma), ecc(_ecc), phase(_phase) {}
+
+    /** Compute the position and velocity of the two components of the binary black hole
+        at the time 't'.
+        if this is a single black hole, it stays at origin with zero velocity,
+        and in case of a binary, its center of mass is fixed at origin.
+        Output arrays of length 2 each will contain the x- and y-coordinates and
+        corresponding velocities of both components of the binary at time 't';
+        its orbit is assumed to lie in the x-y plane and directed along the x axis.
+    */
+    void keplerOrbit(double t, double bhX[], double bhY[], double bhVX[], double bhVY[]) const;
+
+    /** Compute the time-dependent potential of the two black holes at the given point */
+    double potential(const coord::PosCar& point, double time) const;
+};
+
+/** Time-dependent potential of a binary BH on a Kepler orbit in the x-y plane, centered at origin */
+class KeplerBinary: public BasePotentialCar {
+public:
+    KeplerBinary(const KeplerBinaryParams& _params) : params(_params) {}
+    virtual const char* name() const { return myName(); }
+    static const char* myName() { static const char* text = "KeplerBinary"; return text; }
+    virtual coord::SymmetryType symmetry() const
+    { return (params.sma==0 || params.q==0 ? coord::ST_SPHERICAL : coord::ST_NONE); }
+    virtual double totalMass() const { return params.mass; }
+    virtual double enclosedMass(const double radius) const
+    { return radius>=params.sma ? params.mass : 0; }
+private:
+    const KeplerBinaryParams params;   ///< parameters of the binary
+    virtual void evalCar(const coord::PosCar &pos,
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
+    virtual double densityCar(const coord::PosCar &, double) const { return 0; }
 };
 
 }

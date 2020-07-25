@@ -95,7 +95,7 @@ int main() {
     std::vector<potential::PtrPotential> components(2);
     components[0] = haloPot;
     components[1] = diskPot;
-    potential::PtrPotential totalPot(new potential::CompositeCyl(components));
+    potential::PtrPotential totalPot(new potential::Composite(components));
 
     // #4. Compute actions
     tbegin=std::clock();

@@ -4,6 +4,7 @@
 #include "math_fit.h"
 #include "utils.h"
 #include <stdexcept>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 

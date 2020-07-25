@@ -57,7 +57,7 @@ double hypergeom2F1(const double a, const double b, const double c, const double
 {
     exceptionText.clear();
     double _result = NAN;
-    if(-1.<=x and x<1.)
+    if(-1.<=x && x<1.)
         _result = gsl_sf_hyperg_2F1(a, b, c, x);
     // extension for 2F1 into the range x<-1 which is not provided by GSL; code from Heiko Bauke
     else if(x<-1.) {

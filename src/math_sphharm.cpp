@@ -212,7 +212,8 @@ SphHarmIndices getIndicesFromCoefs(const std::vector<double> &C)
                 sym &= ~coord::ST_XREFLECTION;
             if(m!=0) {
                 sym &= ~coord::ST_ZROTATION;
-                mmax = std::max<int>(abs(m), mmax);
+                if(abs(m)>mmax)
+                    mmax = abs(m);
             }
             if(l>0)
                 sym &= ~coord::ST_ROTATION;

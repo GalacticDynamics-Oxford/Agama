@@ -76,7 +76,6 @@ SOURCES   = \
             potential_perfect_ellipsoid.cpp \
             potential_spheroid.cpp \
             potential_utils.cpp \
-            raga_base.cpp  \
             raga_core.cpp   \
             raga_binary.cpp  \
             raga_losscone.cpp \

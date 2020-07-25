@@ -8,6 +8,10 @@
 namespace orbit{
 
 namespace{
+
+/// roundoff tolerance in the trajectory sampling routine
+const double ROUNDOFF = 1e-15;
+
 // normalize the position-velocity returned by orbit integrator in case of r<0 or R<0
 template<typename CoordT>
 inline coord::PosVelT<CoordT> getPosVel(const double data[6]) { return coord::PosVelT<CoordT>(data); }
@@ -54,6 +58,8 @@ template<typename CoordT>
 StepResult RuntimeTrajectory<CoordT>::processTimestep(
     const math::BaseOdeSolver& solver, const double tbegin, const double tend, double vars[])
 {
+    if(t0!=t0)
+        t0 = tbegin;   // record the first ever moment of time
     if(samplingInterval == INFINITY) {
         // store just one point from the trajectory, which always contains the current orbital state and time
         if(trajectory.empty())
@@ -62,12 +68,13 @@ StepResult RuntimeTrajectory<CoordT>::processTimestep(
         trajectory[0].second = tend;
     } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
-        size_t ibegin = static_cast<size_t>(tbegin / samplingInterval);
-        size_t iend   = static_cast<size_t>(tend   / samplingInterval + 1e-10);
+        ptrdiff_t ibegin = static_cast<ptrdiff_t>((tbegin-t0) / samplingInterval);
+        ptrdiff_t iend   = static_cast<ptrdiff_t>((tend-t0)   / samplingInterval + ROUNDOFF);
+        double dtroundoff = ROUNDOFF * fmax(fabs(tend), fabs(tbegin));
         trajectory.resize(iend + 1);
-        for(size_t iout=ibegin; iout<=iend; iout++) {
-            double tout = samplingInterval * iout;
-            if(tout >= tbegin && tout <= tend) {
+        for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
+            double tout = samplingInterval * iout + t0;
+            if(tout >= tbegin-dtroundoff && tout <= tend+dtroundoff) {
                 double data[6];
                 for(int d=0; d<6; d++)
                     data[d] = solver.getSol(tout, d);
@@ -93,10 +100,10 @@ StepResult RuntimeTrajectory<CoordT>::processTimestep(
 }
 
 
-void OrbitIntegratorRot::eval(const double /*t*/, const double x[], double dxdt[]) const
+void OrbitIntegratorRot::eval(const double time, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
+    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, NULL, time);
     // time derivative of position
     dxdt[0] = x[3] + Omega * x[1];
     dxdt[1] = x[4] - Omega * x[0];
@@ -107,18 +114,18 @@ void OrbitIntegratorRot::eval(const double /*t*/, const double x[], double dxdt[
     dxdt[5] = -grad.dz;
 }
 
-double OrbitIntegratorRot::getAccuracyFactor(const double /*t*/, const double x[]) const
+double OrbitIntegratorRot::getAccuracyFactor(const double time, const double x[]) const
 {
-    double Epot = potential.value(coord::PosCar(x[0], x[1], x[2]));
+    double Epot = potential.value(coord::PosCar(x[0], x[1], x[2]), time);
     double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
     return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
 }
 
 template<>
-void OrbitIntegrator<coord::Car>::eval(const double /*t*/, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Car>::eval(const double time, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad);
+    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, NULL, time);
     // time derivative of position
     dxdt[0] = x[3];
     dxdt[1] = x[4];
@@ -130,7 +137,7 @@ void OrbitIntegrator<coord::Car>::eval(const double /*t*/, const double x[], dou
 }
 
 template<>
-void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Cyl>::eval(const double time, const double x[], double dxdt[]) const
 {
     coord::PosVelCyl p(x);
     if(x[0]<0) {    // R<0
@@ -138,7 +145,7 @@ void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/, const double x[], dou
         p.phi += M_PI;
     }
     coord::GradCyl grad;
-    potential.eval(p, NULL, &grad);
+    potential.eval(p, NULL, &grad, NULL, time);
     double Rinv = p.R!=0 ? 1/p.R : 0;  // avoid NAN in degenerate cases
     dxdt[0] = p.vR;
     dxdt[1] = p.vz;
@@ -149,7 +156,7 @@ void OrbitIntegrator<coord::Cyl>::eval(const double /*t*/, const double x[], dou
 }
 
 template<>
-void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Sph>::eval(const double time, const double x[], double dxdt[]) const
 {
     double r = x[0];
     double phi = x[2];
@@ -174,7 +181,7 @@ void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], dou
         phi += M_PI;
     const coord::PosVelSph p(r, theta, phi, x[3], x[4], x[5]);
     coord::GradSph grad;
-    potential.eval(p, NULL, &grad);
+    potential.eval(p, NULL, &grad, NULL, time);
     double rinv = r!=0 ? 1/r : 0, sintheta, costheta;
     math::sincos(theta, sintheta, costheta);
     double sinthinv = sintheta!=0 ? 1./sintheta : 0;
@@ -188,9 +195,9 @@ void OrbitIntegrator<coord::Sph>::eval(const double /*t*/, const double x[], dou
 }
 
 template<typename CoordT>
-double OrbitIntegrator<CoordT>::getAccuracyFactor(const double /*t*/, const double x[]) const
+double OrbitIntegrator<CoordT>::getAccuracyFactor(const double time, const double x[]) const
 {
-    double Epot = potential.value(coord::PosT<CoordT>(x[0], x[1], x[2]));
+    double Epot = potential.value(coord::PosT<CoordT>(x[0], x[1], x[2]), time);
     double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
     return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
 }
@@ -202,7 +209,8 @@ coord::PosVelT<CoordT> integrate(
     const double totalTime,
     const math::IOdeSystem& orbitIntegrator,
     const RuntimeFncArray& runtimeFncs,
-    const OrbitIntParams& params)
+    const OrbitIntParams& params,
+    const double startTime)
 {
     math::OdeSolverDOP853 solver(orbitIntegrator, params.accuracy);
     int NDIM = orbitIntegrator.size();
@@ -211,22 +219,23 @@ coord::PosVelT<CoordT> integrate(
     std::vector<double> state(NDIM);
     double* vars = &state.front();
     initialConditions.unpack_to(vars);  // first 6 variables are always position/velocity
-    solver.init(vars);
+    solver.init(vars, startTime);
     size_t numSteps = 0;
-    double timeCurr = 0;
-    while(timeCurr < totalTime) {
+    double currentTime = startTime, endTime = totalTime + startTime;
+    while(currentTime < endTime) {
         if(!(solver.doStep() > 0.)) {
             // signal of error
-            utils::msg(utils::VL_WARNING, "orbit::integrate", "terminated at t="+utils::toString(timeCurr));
+            utils::msg(utils::VL_WARNING,
+                "orbit::integrate", "terminated at t="+utils::toString(currentTime));
             break;
         }
-        double timePrev = timeCurr;
-        timeCurr = std::min(solver.getTime(), totalTime);
+        double prevTime = currentTime;
+        currentTime = fmin(solver.getTime(), endTime);
         for(int d=0; d<NDIM; d++)
-            vars[d] = solver.getSol(timeCurr, d);
-        bool reinit = false, finish = timeCurr >= totalTime;
+            vars[d] = solver.getSol(currentTime, d);
+        bool reinit = false, finish = currentTime >= endTime;
         for(size_t i=0; i<runtimeFncs.size(); i++) {
-            switch(runtimeFncs[i]->processTimestep(solver, timePrev, timeCurr, vars))
+            switch(runtimeFncs[i]->processTimestep(solver, prevTime, currentTime, vars))
             {
                 case orbit::SR_TERMINATE: finish = true; break;
                 case orbit::SR_REINIT:    reinit = true; break;
@@ -249,10 +258,10 @@ template class RuntimeTrajectory<coord::Car>;
 template class RuntimeTrajectory<coord::Cyl>;
 template class RuntimeTrajectory<coord::Sph>;
 template coord::PosVelCar integrate(const coord::PosVelCar&,
-    const double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&);
+    double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&, double);
 template coord::PosVelCyl integrate(const coord::PosVelCyl&,
-    const double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&);
+    double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&, double);
 template coord::PosVelSph integrate(const coord::PosVelSph&,
-    const double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&);
+    double, const math::IOdeSystem&, const RuntimeFncArray&, const OrbitIntParams&, double);
 
 }  // namespace orbit

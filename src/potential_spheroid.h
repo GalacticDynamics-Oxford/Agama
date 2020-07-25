@@ -152,9 +152,9 @@ public:
 private:
     const double p2, q2;    ///< squared axis ratios p=y/x, q=z/x
     math::PtrFunction rho;  ///< one-dimensional density as a function of elliptical radius
-    virtual double densityCar(const coord::PosCar &pos) const;
-    virtual double densityCyl(const coord::PosCyl &pos) const;
-    virtual double densitySph(const coord::PosSph &pos) const;
+    virtual double densityCar(const coord::PosCar &pos, double time) const;
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const;
+    virtual double densitySph(const coord::PosSph &pos, double time) const;
 };
 
 ///@}

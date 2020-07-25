@@ -1121,7 +1121,7 @@ void DensitySphericalHarmonic::getCoefs(
     computeDensityCoefsSph(*this, ind, radii, coefs);
 }
 
-double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos) const
+double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     assert(spl[0]);  // 0th harmonic should always be present
     // temporary array allocated on the stack
@@ -1172,7 +1172,7 @@ private:
     double invPhi0;
 
     virtual void evalCyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
 };
 
 class MultipoleInterp2d: public BasePotentialCyl {
@@ -1195,7 +1195,7 @@ private:
     double invPhi0;
 
     virtual void evalCyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
 };
 
 template<class BaseDensityOrPotential>
@@ -1329,7 +1329,7 @@ void Multipole::getCoefs(
 }
 
 void Multipole::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
+    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const
 {
     double rsq = pow_2(pos.R) + pow_2(pos.z);
     if(rsq < pow_2(gridRadii.front()) * (1+SAFETY_FACTOR))
@@ -1340,7 +1340,7 @@ void Multipole::evalCyl(const coord::PosCyl &pos,
         impl->eval(pos, potential, deriv, deriv2);
 }
 
-double Multipole::densityCyl(const coord::PosCyl &pos) const
+double Multipole::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     double rsq = pow_2(pos.R) + pow_2(pos.z);
     if(rsq < pow_2(gridRadii.front()) * (1+SAFETY_FACTOR))
@@ -1387,7 +1387,7 @@ PowerLawMultipole::PowerLawMultipole(double _r0, bool _inner,
 }
 
 void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* grad, coord::HessCyl* hess) const
+    double* potential, coord::GradCyl* grad, coord::HessCyl* hess, double /*time*/) const
 {
     bool needGrad = grad!=NULL || hess!=NULL;
     bool needHess = hess!=NULL;
@@ -1445,7 +1445,7 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
         transformDerivsSphToCyl(pos, gradSph, hessSph, grad, hess);
 }
 
-double PowerLawMultipole::densityCyl(const coord::PosCyl &pos) const
+double PowerLawMultipole::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     double rsq   = pow_2(pos.R) + pow_2(pos.z);
     double dlogr = log(rsq / r0sq) * 0.5;
@@ -1529,7 +1529,7 @@ MultipoleInterp1d::MultipoleInterp1d(
 }
 
 void MultipoleInterp1d::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* grad, coord::HessCyl* hess) const
+    double* potential, coord::GradCyl* grad, coord::HessCyl* hess, double /*time*/) const
 {
     bool needGrad = grad!=NULL || hess!=NULL;
     bool needHess = hess!=NULL;
@@ -1752,7 +1752,7 @@ MultipoleInterp2d::MultipoleInterp2d(
 }
 
 void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* grad, coord::HessCyl* hess) const
+    double* potential, coord::GradCyl* grad, coord::HessCyl* hess, double /*time*/) const
 {
     const double
         r         = sqrt(pow_2(pos.R) + pow_2(pos.z)),

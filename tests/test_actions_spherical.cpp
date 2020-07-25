@@ -105,7 +105,7 @@ int main()
     addPot(pots, "type=Plummer mass=1e15 scaleradius=1000");
     addPot(pots, "type=Plummer mass=1e6 scaleradius=0");  // a point mass
     addPot(pots, "type=Spheroid gamma=2.3 beta=2.7 alpha=2 scaleRadius=100000 densitynorm=1");
-    allok &= testPotential(potential::CompositeCyl(pots));
+    allok &= testPotential(potential::Composite(pots));
     // a very shallow potential at small radii
     addPot(pots, "type=Spheroid gamma=-2.0 beta=4.0 alpha=2.0 densitynorm=0.3183098861837907 gridsizer=64");
     allok &= testPotential(*pots.back());

@@ -257,11 +257,12 @@ public:
         coord::ST_XREFLECTION*(x==0) | coord::ST_YREFLECTION*(y==0) | coord::ST_ZREFLECTION*(z==0));
     }
     virtual const char* name() const { return "Blob"; };
-    virtual double densityCar(const coord::PosCar &pos) const {
-        return (pow_2(pos.x-x) + pow_2(pos.y-y) + pow_2(pos.z-z) < pow_2(r)) ? 3/(4*M_PI*pow_3(r)) : 0;
-    }
-    virtual double densityCyl(const coord::PosCyl &pos) const { return densityCar(toPosCar(pos)); }
-    virtual double densitySph(const coord::PosSph &pos) const { return densityCar(toPosCar(pos)); }
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
+    { return (pow_2(pos.x-x) + pow_2(pos.y-y) + pow_2(pos.z-z) < pow_2(r)) ? 3/(4*M_PI*pow_3(r)) : 0; }
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const
+    { return densityCar(toPosCar(pos), 0); }
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const
+    { return densityCar(toPosCar(pos), 0); }
 };
 
 // test that the approximation of a "density blob" indeed closely resembles a sphere

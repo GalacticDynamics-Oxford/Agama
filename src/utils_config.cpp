@@ -105,7 +105,7 @@ int KeyValueMap::getInt(const std::string& key, int defaultValue) const
         return toInt(result);
 }
 
-double KeyValueMap::getIntAlt(const std::string& key1, 
+int KeyValueMap::getIntAlt(const std::string& key1,
     const std::string& key2, int defaultValue) const
 {
     std::string result = getString(key1);
@@ -118,6 +118,16 @@ double KeyValueMap::getIntAlt(const std::string& key1,
 bool KeyValueMap::getBool(const std::string& key, bool defaultValue) const
 {
     return toBool(getString(key, defaultValue?"True":"False"));
+}
+
+bool KeyValueMap::getBoolAlt(const std::string& key1,
+    const std::string& key2, bool defaultValue) const
+{
+    std::string result = getString(key1);
+    if(result.empty())
+        return toBool(getString(key2, defaultValue?"True":"False"));
+    else
+        return toBool(result);
 }
 
 std::vector<double> KeyValueMap::getDoubleVector(const std::string& key,

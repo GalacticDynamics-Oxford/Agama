@@ -2,6 +2,7 @@
 #include "math_core.h"  // for binSearch
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 
 #ifdef HAVE_EIGEN
 

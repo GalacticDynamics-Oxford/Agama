@@ -23,11 +23,11 @@ double logMagnitude(const double x[6])
 }  // internal ns
 
 
-void OrbitIntegratorVarEq::eval(const double /*t*/, const double x[], double dxdt[]) const
+void OrbitIntegratorVarEq::eval(const double t, const double x[], double dxdt[]) const
 {
     coord::GradCar grad;
     coord::HessCar hess;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, &hess);
+    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, &hess, t);
     // time derivative of position
     dxdt[0] = x[3] + Omega * x[1];
     dxdt[1] = x[4] - Omega * x[0];
@@ -72,7 +72,7 @@ void RuntimeLyapunov<UseInternalVarEqSolver>::eval(const double t, double mat[])
         "RuntimeLyapunov::eval must be called internally from processTimestep");
     coord::PosCar pos(orbitSolver->getSol(t, 0), orbitSolver->getSol(t, 1), orbitSolver->getSol(t, 2));
     coord::HessCar hess;
-    potential.eval(pos, NULL, NULL, &hess);
+    potential.eval(pos, NULL, NULL, &hess, t);
     mat[0] = -hess.dx2;
     mat[1] = -hess.dxdy;
     mat[2] = -hess.dxdz;
@@ -94,7 +94,7 @@ StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
         if(!isFinite(orbitalPeriod))  // e.g. the orbit is unbound,
             orbitalPeriod = 0;        // so no meaningful Lyapunov exponent can be computed anyway
         if(UseInternalVarEqSolver) {
-            varEqSolver.init(DEV_VEC_INIT);
+            varEqSolver.init(DEV_VEC_INIT, tbegin);
             return SR_CONTINUE;
         } else {
             // initialize the deviation vector that is stored in the ODE variables of

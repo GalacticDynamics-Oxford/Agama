@@ -298,18 +298,19 @@ std::string toString(const void* val) {
 
 //  Pretty-print - convert float (and integer) numbers to string of fixed width.
 //  Employ sophisticated techniques to fit the number into a string of exactly the given length.
-std::string pp(double num, unsigned int uwidth)
+std::string pp(double num, unsigned int width)
 {
-    const int MAXWIDTH = 31;  // rather arbitrary restriction, but doubles never are that long
     std::string result;
-    int width = std::min<int>(uwidth, MAXWIDTH);
+    const unsigned int MAXWIDTH = 31;  // rather arbitrary restriction, but doubles never are that long
+    if(width>MAXWIDTH)
+        width = MAXWIDTH;
     if(width<1)
         return result;
     bool sign = std::signbit(num);
     if(num==0) {
         result.resize(width, '0');
         if(width>1 && sign) result[0] = '-';
-        if(width>1+sign) result[1+sign] = '.';
+        if(width>sign?2:1) result[1+sign] = '.';
         return result;
     }
     if(num!=num || num==INFINITY || num==-INFINITY) {
@@ -337,14 +338,14 @@ std::string pp(double num, unsigned int uwidth)
     // 3) "#" if none of the above fits into the available space
 
     // try to print the number x>=1 in fixed-point format
-    if(expon >= 0 && expon <= width-1) {
+    if(expon >= 0 && expon <= (int)width-1) {
         int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2-expon, 0), num);
-        if(len == width+1 && buf[width] == '.') {
+        if(len == (int)width+1 && buf[width] == '.') {
             // exceeds the required width, but the final decimal point may be removed
             buf[width] = '\0';
             len--;
         }
-        if(len == width) {
+        if(len == (int)width) {
             result += buf;
             return result;
         }
@@ -367,7 +368,7 @@ std::string pp(double num, unsigned int uwidth)
     // in the exponential format, or in the special case of a number 0.5<=x<1 rounded up to 1.
     if(expon < 0 && (dig_lt1 >= dig_exp || (num>=0.5 && width<=2))) {
         int len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-2, 0), num);
-        if(len > width) {
+        if(len > (int)width) {
             buf[width] = '\0';
             len--;
         }
@@ -376,7 +377,7 @@ std::string pp(double num, unsigned int uwidth)
     }
 
     // try to print the number in exponential format
-    if(width >= len_exp+1) {
+    if((int)width >= len_exp+1) {
         // strip out exponent, so that the number is within [1:10)
         num /= math::pow(10., expon);
         if(num<1 || !isFinite(num))  // it might be <1 due to roundoff error
@@ -391,8 +392,8 @@ std::string pp(double num, unsigned int uwidth)
         }
         char buf_exp[8] = {'e'};
         len_exp = snprintf(buf_exp+1, 6, "%-i", expon)+1;
-        if(len_exp < width) {
-            if(len > width-len_exp)
+        if(len_exp < (int)width) {
+            if(len > (int)width-len_exp)
                 buf[width-len_exp] = '\0';
             result += buf;
             result += buf_exp;

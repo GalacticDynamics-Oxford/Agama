@@ -11,6 +11,7 @@
 */
 
 #pragma once
+#include "math_base.h"
 #include <vector>
 
 namespace math{
@@ -71,8 +72,9 @@ public:
 
     virtual ~BaseOdeSolver() {};
 
-    /** (re-)initialize the internal state from the given ODE system state */
-    virtual void init(const double stateNew[]) = 0;
+    /** (re-)initialize the internal state from the given ODE system state and optionally
+        set current time to a new value (unless timeNew=NAN, in which case it remains unchanged */
+    virtual void init(const double stateNew[], double timeNew=NAN) = 0;
 
     /** advance the solution by one timestep.
         \param[in]  dt is the length of the timestep;
@@ -111,10 +113,10 @@ public:
     OdeSolverDOP853(const IOdeSystem& _odeSystem, double _accRel=1e-8, double _accAbs=0) :
         BaseOdeSolver(_odeSystem), NDIM(odeSystem.size()),
         accRel(_accRel), accAbs(_accAbs),
-        timePrev(0), nextTimeStep(0),
+        timePrev(time), nextTimeStep(0),
         state(NDIM * 10)  // storage for the current values and derivs of x and for 8 interpolation coefs
     {}
-    virtual void init(const double stateNew[]);
+    virtual void init(const double stateNew[], double timeNew=NAN);
     virtual double doStep(double dt = 0);
     virtual double getSol(double t, unsigned int ind) const;
     /// return the estimate for the length of the next timestep
@@ -140,8 +142,9 @@ public:
 
     virtual ~BaseOde2Solver() {};
 
-    /** (re-)initialize the internal state from the given ODE system state */
-    virtual void init(const double stateNew[]) = 0;
+    /** (re-)initialize the internal state from the given ODE system state and optionally
+        set current time to a new value (unless timeNew=NAN, in which case it remains unchanged */
+    virtual void init(const double stateNew[], double timeNew=NAN) = 0;
 
     /** advance the solution by one timestep of length dt */
     virtual void doStep(double dt) = 0;
@@ -175,7 +178,7 @@ template<int NDIM>
 class Ode2SolverGL3: public BaseOde2Solver {
 public:
     Ode2SolverGL3(const IOde2System& _odeSystem);
-    virtual void init(const double stateNew[]);
+    virtual void init(const double stateNew[], double timeNew=NAN);
     virtual void doStep(double dt);
     virtual double getSol(double t, unsigned int ind) const;
 
@@ -189,7 +192,7 @@ template<int NDIM>
 class Ode2SolverGL4: public BaseOde2Solver {
 public:
     Ode2SolverGL4(const IOde2System& _odeSystem);
-    virtual void init(const double stateNew[]);
+    virtual void init(const double stateNew[], double timeNew=NAN);
     virtual void doStep(double dt);
     virtual double getSol(double t, unsigned int ind) const;
 

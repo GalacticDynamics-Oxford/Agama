@@ -202,14 +202,14 @@ double DiskParam::mass() const
         math::integrate(DiskDensityRadialRichExpIntegrand(*this), 0, 1, 1e-6);
 }
 
-double DiskDensity::densityCyl(const coord::PosCyl &pos) const
+double DiskDensity::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     double h;
     verticalFnc->evalDeriv(pos.z, NULL, NULL, &h);
     return radialFnc->value(pos.R) * h;
 }
 
-double DiskAnsatz::densityCyl(const coord::PosCyl &pos) const
+double DiskAnsatz::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     double h, H, Hp, f, fp, fpp, r=sqrt(pow_2(pos.R) + pow_2(pos.z));
     verticalFnc->evalDeriv(pos.z, &H, &Hp, &h);
@@ -218,7 +218,7 @@ double DiskAnsatz::densityCyl(const coord::PosCyl &pos) const
 }
 
 void DiskAnsatz::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
+    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const
 {
     double r = sqrt(pow_2(pos.R) + pow_2(pos.z));
     double h=0, H=0, Hp=0, f=0, fp=0, fpp=0;

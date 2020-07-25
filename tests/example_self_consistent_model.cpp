@@ -181,7 +181,7 @@ void printoutInfo(const galaxymodel::SelfConsistentModel& model, const std::stri
     writeDensity("dens_halo_"+iteration, compHalo, extUnits);
     writePotential("potential_"+iteration, *model.totalPotential, extUnits);
     std::vector<PtrPotential> potentials(3);
-    potentials[0] = dynamic_cast<const potential::CompositeCyl&>(*model.totalPotential).component(1);
+    potentials[0] = dynamic_cast<const potential::Composite&>(*model.totalPotential).component(1);
     potentials[1] = potential::Multipole::create(compBulge, /*lmax*/6, /*mmax*/0, /*gridsize*/25);
     potentials[2] = potential::Multipole::create(compHalo,  /*lmax*/6, /*mmax*/0, /*gridsize*/25);
     writeRotationCurve("rotcurve_"+iteration, potentials);

@@ -24,6 +24,9 @@
 */
 #pragma once
 #include "raga_base.h"
+#include "particles_base.h"
+#include "potential_analytic.h"
+#include <string>
 
 namespace raga {
 
@@ -53,7 +56,7 @@ struct CaptureData {
 class RuntimeLosscone: public orbit::BaseRuntimeFnc {
 
     /// parameters of the binary BH
-    const BHParams& bh;
+    const potential::KeplerBinaryParams& bh;
 
     /// place for storing the information for the captured particle:
     /// this points to an element of a vector in the parent task, which by default indicates
@@ -69,7 +72,7 @@ class RuntimeLosscone: public orbit::BaseRuntimeFnc {
 
 public:
     RuntimeLosscone(
-        const BHParams& _bh,
+        const potential::KeplerBinaryParams& _bh,
         const std::vector<CaptureData>::iterator& _output,
         const double _captureRadius[])
     :
@@ -114,7 +117,7 @@ public:
     RagaTaskLosscone(
         const ParamsLosscone& params,
         particles::ParticleArrayAux& particles,
-        BHParams& bh);
+        potential::KeplerBinaryParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
@@ -127,9 +130,9 @@ private:
     /// the masses of captured particles are set to zero at the end of the episode
     particles::ParticleArrayAux& particles;
 
-    /// reference to the parameters of the black hole(s);
+    /// non-const reference to the parameters of the black hole(s);
     /// the BH mass is increased when particles are captured
-    BHParams& bh;
+    potential::KeplerBinaryParams& bh;
 
     /// beginning and end of the current episode
     double episodeStart, episodeEnd;

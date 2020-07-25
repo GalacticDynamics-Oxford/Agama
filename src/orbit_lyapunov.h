@@ -100,7 +100,7 @@ public:
     /** construct the runtime function:
         \param[in]  potential  is the instance of potential (same as used in the orbit integration);
         \param[in]  samplingInterval  determines the frequency of recording the magnitude
-        of the deviation vector (should be ~ 0.1 times the orbital period)
+        of the deviation vector (should be ~ 0.1 times the orbital period);
         \param[in,out] outputLyapunovExponent  is the reference to an external variable that will
         store the estimated largest Lyapunov exponent when the orbit integration is finished and
         this object is destroyed;
@@ -153,7 +153,7 @@ public:
         potential(_potential), Omega(_Omega) {}
 
     /// compute the time derivative of the position/velocity vector and the deviation vector at time t
-    virtual void eval(const double /*t*/, const double x[], double dxdt[]) const;
+    virtual void eval(const double t, const double x[], double dxdt[]) const;
 
     /** The size of the position/velocity vector plus the deviation vector */
     virtual unsigned int size() const { return 12; }

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
+#include <algorithm>
 #include <fstream>
 #include <map>
 
@@ -61,9 +62,12 @@ enum PotentialType {
     PT_NUKER,        ///< double-power-law surface density profile: `Nuker`
     PT_SERSIC,       ///< Sersic profile:  `Sersic`
 
-    // potentials with infinite extent that can't be used as source density for a potential expansion
+    // analytic potentials that can't be used as source density for a potential expansion
     PT_LOG,          ///< triaxial logaritmic potential:  `Logarithmic`
     PT_HARMONIC,     ///< triaxial simple harmonic oscillator:  `Harmonic`
+    PT_KEPLERBINARY, ///< two point masses on a Kepler orbit: `KeplerBinary`
+    PT_UNIFORMACCELERATION,  ///< a spatially uniform but time-dependent acceleration: `UniformAcceleration`
+    PT_EVOLVING,     ///< a time-dependent series of potentials: `Evolving`
 
     // analytic potential models that can also be used as source density for a potential expansion
     PT_NFW,          ///< spherical Navarro-Frenk-White profile:  `NFW`
@@ -103,6 +107,10 @@ struct AllParam
     double sersicIndex;               ///< sersic index for Disk or Sersic models
     double W0;                        ///< dimensionless potential depth for King models
     double trunc;                     ///< truncation strength for generalized King models
+    double binary_q;                  ///< parameters for the KeplerBinary potential: mass ratio q
+    double binary_sma;                ///< binary semimajor axis (orbit size)
+    double binary_ecc;                ///< binary eccentricity
+    double binary_phase;              ///< orbital phase of the binary
     // parameters of potential expansions
     unsigned int gridSizeR;  ///< number of radial grid points in Multipole and CylSpline potentials
     unsigned int gridSizez;  ///< number of grid points in z-direction for CylSpline potential
@@ -111,7 +119,9 @@ struct AllParam
     unsigned int lmax;       ///< number of angular terms in spherical-harmonic expansion
     unsigned int mmax;       ///< number of angular terms in azimuthal-harmonic expansion
     double smoothing;        ///< amount of smoothing in Multipole initialized from an N-body snapshot
+    bool interpLinear;       ///< for an evolving potential, whether to use linear interpolation in time
     std::string file;        ///< name of file with coordinates of points, or coefficients of expansion
+    std::string center;      ///< coordinates of the center offset or the name of a file with these offsets
     /// default constructor initializes the fields to some reasonable values
     AllParam() :
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
@@ -121,9 +131,15 @@ struct AllParam
         axisRatioY(1.), axisRatioZ(1.),
         alpha(1.), beta(4.), gamma(1.),
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
+        binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.)
+        lmax(6), mmax(6), smoothing(1.), interpLinear(false)
     {};
+    /// convert to KeplerBinaryParams
+    operator KeplerBinaryParams() const
+    {
+        return KeplerBinaryParams(mass, binary_q, binary_sma, binary_ecc, binary_phase);
+    }
 };
 
 ///@}
@@ -137,6 +153,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(name.empty()) return PT_UNKNOWN;
     if(utils::stringsEqual(name, Logarithmic  ::myName())) return PT_LOG;
     if(utils::stringsEqual(name, Harmonic     ::myName())) return PT_HARMONIC;
+    if(utils::stringsEqual(name, KeplerBinary ::myName())) return PT_KEPLERBINARY;
     if(utils::stringsEqual(name, NFW          ::myName())) return PT_NFW;
     if(utils::stringsEqual(name, Plummer      ::myName())) return PT_PLUMMER;
     if(utils::stringsEqual(name, Dehnen       ::myName())) return PT_DEHNEN;
@@ -150,11 +167,13 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, CylSpline    ::myName())) return PT_CYLSPLINE;
     if(utils::stringsEqual(name, MiyamotoNagai::myName())) return PT_MIYAMOTONAGAI;
     if(utils::stringsEqual(name, "King"))                  return PT_KING;
+    if(utils::stringsEqual(name, UniformAcceleration     ::myName())) return PT_UNIFORMACCELERATION;
     if(utils::stringsEqual(name, OblatePerfectEllipsoid  ::myName())) return PT_PERFECTELLIPSOID;
     if(utils::stringsEqual(name, DensitySphericalHarmonic::myName())) return PT_DENS_SPHHARM;
     if(utils::stringsEqual(name, DensityAzimuthalHarmonic::myName())) return PT_DENS_CYLGRID;
     if(utils::stringsEqual(name, CompositeDensity::myName())) return PT_COMPOSITE_DENSITY;
-    if(utils::stringsEqual(name, CompositeCyl    ::myName())) return PT_COMPOSITE_POTENTIAL;
+    if(utils::stringsEqual(name, Composite       ::myName())) return PT_COMPOSITE_POTENTIAL;
+    if(utils::stringsEqual(name, Evolving        ::myName())) return PT_EVOLVING;
     return PT_UNKNOWN;
 }
 
@@ -234,6 +253,8 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.densityType         = getPotentialTypeByName(kvmap.getString("Density"));
     param.symmetryType        = getSymmetryTypeByName (kvmap.getString("Symmetry"));
     param.file                = kvmap.getString("File");
+    param.center              = kvmap.getString("center");
+    param.interpLinear        = kvmap.getBoolAlt("interpLinear", "linearInterp", param.interpLinear);
     param.mass                = kvmap.getDouble("Mass", param.mass)
                               * conv.massUnit;
     param.surfaceDensity      = kvmap.getDoubleAlt("surfaceDensity", "Sigma0", param.surfaceDensity)
@@ -262,6 +283,11 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.sersicIndex         = kvmap.getDouble("sersicIndex", param.sersicIndex);
     param.W0                  = kvmap.getDouble("W0", param.W0);
     param.trunc               = kvmap.getDouble("trunc", param.trunc);
+    param.binary_q            = kvmap.getDouble("binary_q",     param.binary_q);
+    param.binary_sma          = kvmap.getDouble("binary_sma",   param.binary_sma)
+                              * conv.lengthUnit;
+    param.binary_ecc          = kvmap.getDouble("binary_ecc",   param.binary_ecc);
+    param.binary_phase        = kvmap.getDouble("binary_phase", param.binary_phase);
     param.gridSizeR           = kvmap.getInt(   "gridSizeR", param.gridSizeR);
     param.gridSizez           = kvmap.getInt(   "gridSizeZ", param.gridSizez);
     param.rmin                = kvmap.getDouble("rmin", param.rmin)
@@ -281,7 +307,8 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     // can only be spherical and non-truncated
     PotentialType type = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
     if( (type == PT_PLUMMER || type == PT_NFW) &&
-        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=INFINITY) ) {
+        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=INFINITY) )
+    {
         param.alpha = type == PT_PLUMMER ? 2 : 1;
         param.beta  = type == PT_PLUMMER ? 5 : 3;
         param.gamma = type == PT_PLUMMER ? 0 : 1;
@@ -587,6 +614,76 @@ PtrDensity readDensityAzimuthalHarmonic(std::istream& strm, const units::Externa
     return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, rho));
 }
 
+//------ read a file with 3 components of some time-dependent vector quantity ------//
+
+static void readTimeDependentVector(
+    const std::string& filename, /*units:*/ double timeUnit, double valueUnit,
+    /*output*/ math::CubicSpline& splx, math::CubicSpline& sply, math::CubicSpline& splz)
+{
+    std::ifstream strm(filename.c_str(), std::ios::in);
+    if(!strm)
+        throw std::runtime_error("readTimeDependentVector: cannot read from file "+filename);
+    std::string buffer;
+    std::vector<std::string> fields;
+    std::vector<double> time, posx, posy, posz, velx, vely, velz;
+    while(std::getline(strm, buffer) && !strm.eof()) {
+        if(!buffer.empty() && utils::isComment(buffer[0]))  // commented line
+            continue;
+        fields = utils::splitString(buffer, "#;, \t");
+        size_t numFields = fields.size();
+        if(numFields < 4 ||
+           !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
+            continue;
+        time.push_back(utils::toDouble(fields[0]) * timeUnit);
+        posx.push_back(utils::toDouble(fields[1]) * valueUnit);
+        posy.push_back(utils::toDouble(fields[2]) * valueUnit);
+        posz.push_back(utils::toDouble(fields[3]) * valueUnit);
+        if(numFields >= 7) {
+            velx.push_back(utils::toDouble(fields[4]) * valueUnit / timeUnit);
+            vely.push_back(utils::toDouble(fields[5]) * valueUnit / timeUnit);
+            velz.push_back(utils::toDouble(fields[6]) * valueUnit / timeUnit);
+        }
+    }
+    if(velx.size() == posx.size()) {
+        // create Hermite splines from values and derivatives at each moment of time
+        splx = math::CubicSpline(time, posx, velx);
+        sply = math::CubicSpline(time, posy, vely);
+        splz = math::CubicSpline(time, posz, velz);
+    } else {
+        // create natural cubic splines from just the values (and regularize)
+        splx = math::CubicSpline(time, posx, true);
+        sply = math::CubicSpline(time, posy, true);
+        splz = math::CubicSpline(time, posz, true);
+    }
+}
+
+//------ read an index file containing a time-dependent list of potentials ------//
+
+static PtrPotential readEvolvingPotential(
+    const std::string& filename, bool interpLinear, const units::ExternalUnits& converter)
+{
+    std::ifstream strm(filename.c_str(), std::ios::in);
+    if(!strm)
+        throw std::runtime_error("readEvolvingPotential: cannot read from file "+filename);
+    std::string buffer;
+    std::vector<std::string> fields;
+    std::vector<double> times;
+    std::vector<PtrPotential> potentials;
+    // attempt to parse the file as if it contained time stamps and names of corresponding potential files
+    while(std::getline(strm, buffer) && !strm.eof()) {
+        if(!buffer.empty() && utils::isComment(buffer[0]))  // commented line
+            continue;
+        fields = utils::splitString(buffer, "#;, \t");
+        size_t numFields = fields.size();
+        if(numFields < 2 ||
+           !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
+            continue;
+        times.push_back(utils::toDouble(fields[0]) * converter.timeUnit);
+        potentials.push_back(potential::readPotential(fields[1], converter));
+    }
+    return PtrPotential(new Evolving(times, potentials, interpLinear));
+}
+
 /** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
     if  f(x) ~ f0 + a * x^b  as  x --> 0  or  x --> infinity,  then the slope b is given by
     solving the equation  [x1^b - x2^b] / [x2^b - x3^b] = [f(x1) - f(x2)] / [f(x2) - f(x3)],
@@ -748,7 +845,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
         if(fields[0] == CylSpline::myName()) {
             return readPotentialCylSpline(strm, converter);
         }
-        if(fields[0] == CompositeCyl::myName()) {
+        if(fields[0] == Composite::myName()) {
             // each line is a name of a file with the given component
             std::string::size_type idx = fileName.find_last_of('/');
             // extract the path from the filename, and append it to all dependent filenames
@@ -756,7 +853,7 @@ PtrPotential readPotential(const std::string& fileName, const units::ExternalUni
             std::vector<PtrPotential> components;
             while(std::getline(strm, buffer).good() && !strm.eof())
                 components.push_back(readPotential(prefix+buffer, converter));
-            return PtrPotential(new CompositeCyl(components));
+            return PtrPotential(new Composite(components));
         }
     }
     throw std::runtime_error("readPotential: cannot find valid potential coefficients in file "+fileName);
@@ -938,7 +1035,7 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
     }
     case PT_COMPOSITE_POTENTIAL: {
         strm << dens.name() << "\n";
-        const CompositeCyl& comp = dynamic_cast<const CompositeCyl&>(dens);
+        const Composite& comp = dynamic_cast<const Composite&>(dens);
         std::string::size_type idx = fileName.find_last_of('/');
         for(unsigned int i=0; i<comp.size(); i++) {
             std::string fileNameComp = fileName+'_'+utils::toString(i);
@@ -1036,13 +1133,14 @@ PtrPotential createPotentialFromParticles(const AllParam& param,
 */
 PtrPotential createAnalyticPotential(const AllParam& param)
 {
-    switch(param.potentialType)
-    {
+    switch(param.potentialType) {
     case PT_LOG:
         return PtrPotential(new Logarithmic(
             param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ));
     case PT_HARMONIC:
         return PtrPotential(new Harmonic(param.Omega, param.axisRatioY, param.axisRatioZ));
+    case PT_KEPLERBINARY:
+        return PtrPotential(new KeplerBinary(param));
     case PT_MIYAMOTONAGAI:
         return PtrPotential(new MiyamotoNagai(param.mass, param.scaleRadius, param.scaleHeight));
     case PT_DEHNEN:
@@ -1087,8 +1185,7 @@ PtrPotential createAnalyticPotential(const AllParam& param)
 */
 PtrDensity createAnalyticDensity(const AllParam& param)
 {
-    switch(param.potentialType)
-    {
+    switch(param.potentialType) {
     case PT_DISK:
         return PtrDensity(new DiskDensity(parseDiskParam(param)));
     case PT_SPHEROID:
@@ -1154,6 +1251,60 @@ PtrPotential readPotentialExpansion(const AllParam& param, const units::External
     return poten;
 }
 
+/** create and instance of UniformAcceleration potential from the time-dependent values in a file */
+PtrPotential readUniformAcceleration(const std::string& filename, const units::ExternalUnits& converter)
+{
+    //if(param.file.empty())
+    //    throw std::invalid_argument("Need to provide a file name for UniformAcceleration");
+    math::CubicSpline splx, sply, splz;
+    readTimeDependentVector(filename,
+        /*units*/ converter.timeUnit, converter.velocityUnit / converter.timeUnit /*acceleration*/,
+        /*output*/ splx, sply, splz);
+    return PtrPotential(new UniformAcceleration(splx, sply, splz));
+}
+
+/** create an instance of Shifted (potential) or ShiftedDensity from the given object
+    (Ptr = PtrDensity or PtrPotential) and a string containing the offset values or a file name */
+template<typename Shifted, typename Ptr>
+Ptr createOffset(const std::string& center, const units::ExternalUnits& converter, const Ptr& obj)
+{
+    // string could contain either three components of the fixed offset vector,
+    // or the name of a file with time-dependent trajectory
+    if(utils::fileExists(center)) {
+        math::CubicSpline splx, sply, splz;
+        readTimeDependentVector(center,
+            /*units*/ converter.timeUnit, converter.lengthUnit,
+            /*output*/ splx, sply, splz);
+        return Ptr(new Shifted(obj, splx, sply, splz));
+    } else {
+        std::vector<std::string> values = utils::splitString(center, ",; ");
+        double x = NAN, y = NAN, z = NAN;
+        if(values.size() == 3) {
+            x = utils::toDouble(values[0]) * converter.lengthUnit;
+            y = utils::toDouble(values[1]) * converter.lengthUnit;
+            z = utils::toDouble(values[2]) * converter.lengthUnit;
+        }
+        if(!isFinite(x+y+z))
+            throw std::runtime_error(
+                "\"center\" must be either a filename or a triplet of numbers");
+        if(x==0 && y==0 && z==0)
+            return obj;   // don't create entities without necessity
+        else
+            return Ptr(new Shifted(obj, x, y, z));
+    }
+}
+
+// a collection of would-be potential components with a common center (see createPotential)
+struct Bunch {
+    std::string center;
+    // all potential components (DiskAnsatz or any other potential class)
+    std::vector<PtrPotential> componentsPot;
+    // all density components that will contribute to a single additional Multipole potential
+    std::vector<PtrDensity> componentsDens;
+    // constructor
+    Bunch(const std::string& _center=""): center(_center) {}
+};
+
 }  // end internal namespace
 
 // create elementary density
@@ -1167,7 +1318,11 @@ PtrDensity createDensity(
     // if 'type=...' is not provided but 'density=...' is given, use that value
     if(!kvmap.contains("type") && kvmap.contains("density"))
         param.potentialType = param.densityType;
-    return createAnalyticDensity(param);
+    PtrDensity result = createAnalyticDensity(param);
+    std::string center = kvmap.getString("center");
+    if(!center.empty())
+        result = createOffset<ShiftedDensity>(center, converter, result);
+    return result;
 }
 
 // universal routine for creating a potential from several components
@@ -1178,46 +1333,78 @@ PtrPotential createPotential(
     if(kvmap.size() == 0)
         throw std::runtime_error("Empty list of potential components");
 
-    // all potential components
-    std::vector<PtrPotential> componentsPot;
-    // all density components that will contribute to the additional Multipole potential
-    std::vector<PtrDensity> componentsDens;
+    // the procedure would have been straightforward (iterate over the elements of the input array
+    // of parameters and create an instance of potential for each parameter group),
+    // if not for two complicating factors:
+    // 1) Elements of the GalPot scheme (disk and spheroid density profiles) are considered
+    // together and create Ndisk+1 potential components:
+    // each Disk group is represented by one potential component (DiskAnsatz) and two density
+    // components ("residuals") that are added to the list of components of a CompositeDensity;
+    // all Spheroid, Nuker and Sersic density profiles are also added to this CompositeDensity;
+    // and in the end a single Multipole potential is constructed from this density collection.
+    // 2) Any parameter group may have a non-trivial offset from origin, and the corresponding
+    // potential will be wrapped into a Shifted potential modifier.
+    // As a consequence of the two circumstances, the elements of GalPot scheme sharing a common
+    // center offset are grouped into a single bunch of DiskAnsatz+Multipole combinations, but
+    // there may be more than one such bunch if the center offsets vary between parameter groups.
 
-    // isolate the density profiles that are part of GalPot scheme:
-    // Disk profile will be represented by one potential component (DiskAnsatz)
-    // and two density components that will eventually be supplied to the Multipole potential;
-    // Spheroid, Nuker and Sersic profiles will also be added to the Multipole;
-    // any other potential components are constructed directly
-    for(unsigned int i=0; i<kvmap.size(); i++)
-    {
+    std::vector<Bunch> bunches;   // list of bunches sharing a common center
+
+    // first loop over all parameter groups
+    for(unsigned int i=0; i<kvmap.size(); i++) {
         const AllParam param = parseParam(kvmap[i], converter);
-        if(!param.file.empty())
-        {
-            componentsPot.push_back(readPotentialExpansion(param, converter));
+
+        // find the "bunch" with the same center, or create a new one
+        unsigned int indexBunch = 0;
+        while(indexBunch < bunches.size() && param.center != bunches[indexBunch].center)
+            indexBunch++;
+        if(indexBunch == bunches.size())  // add another bunch
+            bunches.push_back(Bunch(param.center));
+        Bunch& bunch = bunches[indexBunch];
+
+        // Several alternatives are possible, depending on the "type=..." and "file=..." params:
+
+        // 1. if a file name is provided, it contains either the potential expansion coefficients
+        // or specifies a spatially-uniform time-dependent acceleration, or an evolving potential
+        if(!param.file.empty()) {
+            if(param.potentialType == PT_UNIFORMACCELERATION) {
+                bunch.componentsPot.push_back(
+                    readUniformAcceleration(param.file, converter));
+            } else if(param.potentialType == PT_EVOLVING) {
+                bunch.componentsPot.push_back(
+                    readEvolvingPotential(param.file, param.interpLinear, converter));
+            } else {
+                bunch.componentsPot.push_back(
+                    readPotentialExpansion(param, converter));
+            }
         }
+        // 2. if the parameters describe a GalPot component, add it to the list of density and
+        // possibly potential components
         else switch(param.potentialType) {
         case PT_DISK: {
             DiskParam dparam = parseDiskParam(param);
             // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
-            componentsPot.push_back(PtrPotential(new DiskAnsatz(dparam)));
+            bunch.componentsPot.push_back(PtrPotential(new DiskAnsatz(dparam)));
             // ...and gets subtracted from the entire DiskDensity for the list of density components
-            componentsDens.push_back(PtrDensity(new DiskDensity(dparam)));
+            bunch.componentsDens.push_back(PtrDensity(new DiskDensity(dparam)));
             dparam.surfaceDensity *= -1;  // subtract the density of DiskAnsatz
-            componentsDens.push_back(PtrDensity(new DiskAnsatz(dparam)));
+            bunch.componentsDens.push_back(PtrDensity(new DiskAnsatz(dparam)));
             break;
         }
         case PT_SPHEROID: {
-            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSpheroidParam(param))));
+            bunch.componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSpheroidParam(param))));
             break;
         }
         case PT_NUKER: {
-            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseNukerParam(param))));
+            bunch.componentsDens.push_back(PtrDensity(new SpheroidDensity(parseNukerParam(param))));
             break;
         }
         case PT_SERSIC: {
-            componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSersicParam(param))));
+            bunch.componentsDens.push_back(PtrDensity(new SpheroidDensity(parseSersicParam(param))));
             break;
         }
+        // 3. if the potential type is one of the expansions and a source density/potential
+        // is provided, construct the expansion from a temporary analytic den/pot object
         case PT_MULTIPOLE:
         case PT_CYLSPLINE: {
             // create a temporary density or potential model to serve as the source for potential expansion
@@ -1229,36 +1416,53 @@ PtrPotential createPotential(
                 param.densityType == PT_FERRERS ||
                 param.densityType == PT_MIYAMOTONAGAI )
             {   // use an analytic potential as the source
-                componentsPot.push_back(createPotentialExpansion(param, *createAnalyticPotential(srcpar)));
+                bunch.componentsPot.push_back(
+                    createPotentialExpansion(param, *createAnalyticPotential(srcpar)));
             }
             else
             {   // otherwise use analytic density as the source
-                componentsPot.push_back(createPotentialExpansion(param, *createAnalyticDensity(srcpar)));
+                bunch.componentsPot.push_back(
+                    createPotentialExpansion(param, *createAnalyticDensity(srcpar)));
             }
             break;
         }
-        default:  // the remaining alternative is an elementary potential, or an error
-            componentsPot.push_back(createAnalyticPotential(param));
+        // 4. the remaining alternative is an elementary potential, or an error
+        default:
+            bunch.componentsPot.push_back(createAnalyticPotential(param));
         }
     }
 
-    // create an additional Multipole potential if needed
-    if(!componentsDens.empty()) {
-        PtrDensity totalDens;
-        if(componentsDens.size() == 1)
-            totalDens = componentsDens[0];
-        else
-            totalDens.reset(new CompositeDensity(componentsDens));
-        componentsPot.push_back(Multipole::create(*totalDens,
-            isSpherical   (*totalDens) ? 0 : GALPOT_LMAX,
-            isAxisymmetric(*totalDens) ? 0 : GALPOT_MMAX, GALPOT_NRAD));
+    // now loop over the list of bunches and finalize their construction
+    // (convert each bunch into a composite potential, possibly wrapped into a Shifted modifier)
+    std::vector<PtrPotential> bunchPotentials;
+    for(std::vector<Bunch>::iterator bunch = bunches.begin(); bunch != bunches.end(); ++bunch) {
+        // if the list of density components is not empty, create an additional Multipole potential
+        if(!bunch->componentsDens.empty()) {
+            PtrDensity totalDens;
+            if(bunch->componentsDens.size() == 1)
+                totalDens = bunch->componentsDens[0];
+            else
+                totalDens.reset(new CompositeDensity(bunch->componentsDens));
+            bunch->componentsPot.push_back(Multipole::create(*totalDens,
+                isSpherical   (*totalDens) ? 0 : GALPOT_LMAX,
+                isAxisymmetric(*totalDens) ? 0 : GALPOT_MMAX, GALPOT_NRAD));
+        }
+        // each bunch either has just one potential component, or produces a composite potential
+        PtrPotential bunchPotential = bunch->componentsPot.size()==1 ?
+            bunch->componentsPot[0] :
+            PtrPotential(new Composite(bunch->componentsPot));
+        // finally, if there is a nontrivial center offset, wrap the bunch into a Shifted potential
+        if(!bunch->center.empty())
+            bunchPotential = createOffset<Shifted>(bunch->center, converter, bunchPotential);
+        bunchPotentials.push_back(bunchPotential);
     }
 
-    assert(componentsPot.size()>0);
-    if(componentsPot.size() == 1)
-        return componentsPot[0];
+    // finally, return either the potential of a single bunch,
+    // or create yet another Composite potential from all bunches
+    if(bunchPotentials.size() == 1)
+        return bunchPotentials[0];
     else
-        return PtrPotential(new CompositeCyl(componentsPot));
+        return PtrPotential(new Composite(bunchPotentials));
 }
 
 // create a potential from a single set of parameters
@@ -1292,7 +1496,11 @@ PtrPotential createPotential(
     const BaseDensity& dens,
     const units::ExternalUnits& converter)
 {
-    return createPotentialExpansion(parseParam(kvmap, converter), dens);
+    PtrPotential result = createPotentialExpansion(parseParam(kvmap, converter), dens);
+    std::string center = kvmap.getString("center");
+    if(!center.empty())
+        result = createOffset<Shifted>(center, converter, result);
+    return result;
 }
 
 // create a potential expansion from the user-provided source potential
@@ -1301,7 +1509,11 @@ PtrPotential createPotential(
     const BasePotential& pot,
     const units::ExternalUnits& converter)
 {
-    return createPotentialExpansion(parseParam(kvmap, converter), pot);
+    PtrPotential result = createPotentialExpansion(parseParam(kvmap, converter), pot);
+    std::string center = kvmap.getString("center");
+    if(!center.empty())
+        result = createOffset<Shifted>(center, converter, result);
+    return result;
 }
 
 // create potential from particles
@@ -1310,7 +1522,11 @@ PtrPotential createPotential(
     const particles::ParticleArray<coord::PosCyl>& particles,
     const units::ExternalUnits& converter)
 {
-    return createPotentialFromParticles(parseParam(kvmap, converter), particles);
+    PtrPotential result = createPotentialFromParticles(parseParam(kvmap, converter), particles);
+    std::string center = kvmap.getString("center");
+    if(!center.empty())
+        result = createOffset<Shifted>(center, converter, result);
+    return result;
 }
 
 ///@}

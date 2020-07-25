@@ -26,7 +26,8 @@ template<> class MyScalarFunction<coord::Car>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void evalScalar(const coord::PosCar& p, double* value=0, coord::GradCar* deriv=0, coord::HessCar* deriv2=0) const
+    virtual void evalScalar(const coord::PosCar& p,
+        double* value=NULL, coord::GradCar* deriv=NULL, coord::HessCar* deriv2=NULL, double /*time*/=0) const
     {  // this is loosely based on Henon-Heiles potential, shifted from origin..
         double x=p.x-0.5, y=p.y+1.5, z=p.z+0.25;
         if(value) 
@@ -51,7 +52,8 @@ template<> class MyScalarFunction<coord::Cyl>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void evalScalar(const coord::PosCyl& p, double* value=0, coord::GradCyl* deriv=0, coord::HessCyl* deriv2=0) const
+    virtual void evalScalar(const coord::PosCyl& p,
+        double* value=NULL, coord::GradCyl* deriv=NULL, coord::HessCyl* deriv2=NULL, double /*time*/=0) const
     {   // same potential expressed in different coordinates
         double sinphi,cosphi;
         math::sincos(p.phi, sinphi, cosphi);
@@ -78,7 +80,8 @@ template<> class MyScalarFunction<coord::Sph>: public coord::IScalarFunction<coo
 public:
     MyScalarFunction() {};
     virtual ~MyScalarFunction() {};
-    virtual void evalScalar(const coord::PosSph& p, double* value=0, coord::GradSph* deriv=0, coord::HessSph* deriv2=0) const
+    virtual void evalScalar(const coord::PosSph& p,
+        double* value=NULL, coord::GradSph* deriv=NULL, coord::HessSph* deriv2=NULL, double /*time*/=0) const
     {   // some obscure combination of spherical harmonics
         double st, ct, sa, ca, sb, cb, sr=sqrt(p.r), r2=p.r*p.r;
         math::sincos(  p.theta, st, ct);

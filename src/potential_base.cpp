@@ -14,18 +14,18 @@ static const double EPSREL_DENSITY_DER = DBL_EPSILON / ROOT3_DBL_EPSILON;
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
-double BasePotential::densityCar(const coord::PosCar &pos) const
+double BasePotential::densityCar(const coord::PosCar &pos, double time) const
 {
     coord::HessCar deriv2;
-    eval(pos, NULL, (coord::GradCar*)NULL, &deriv2);
+    eval(pos, NULL, (coord::GradCar*)NULL, &deriv2, time);
     return (deriv2.dx2 + deriv2.dy2 + deriv2.dz2) * (1. / (4*M_PI));
 }
 
-double BasePotential::densityCyl(const coord::PosCyl &pos) const
+double BasePotential::densityCyl(const coord::PosCyl &pos, double time) const
 {
     coord::GradCyl deriv;
     coord::HessCyl deriv2;
-    eval(pos, NULL, &deriv, &deriv2);
+    eval(pos, NULL, &deriv, &deriv2, time);
     double derivR_over_R = deriv.dR / pos.R;
     double deriv2phi_over_R2 = deriv2.dphi2 / pow_2(pos.R);
     if(pos.R <= fabs(pos.z) * SQRT_DBL_EPSILON) {  // close to or exactly on the z axis
@@ -39,11 +39,11 @@ double BasePotential::densityCyl(const coord::PosCyl &pos) const
     return result / (4*M_PI);
 }
 
-double BasePotential::densitySph(const coord::PosSph &pos) const
+double BasePotential::densitySph(const coord::PosSph &pos, double time) const
 {
     coord::GradSph deriv;
     coord::HessSph deriv2;
-    eval(pos, NULL, &deriv, &deriv2);
+    eval(pos, NULL, &deriv, &deriv2, time);
     double sintheta, costheta;
     math::sincos(pos.theta, sintheta, costheta);
     double derivr_over_r = deriv.dr / pos.r;

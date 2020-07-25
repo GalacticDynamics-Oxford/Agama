@@ -3,6 +3,7 @@
 #include "utils_config.h"
 #include "potential_multipole.h"
 #include "potential_factory.h"
+#include "potential_composite.h"
 #include "math_core.h"
 #include "particles_io.h"
 #include <fstream>
@@ -14,7 +15,7 @@ namespace raga {
 
 void computeTotalEnergyModel(
     const potential::BasePotential& pot,
-    const BHParams& bh,
+    const potential::KeplerBinaryParams& bh,
     const particles::ParticleArrayAux& particles,
     double time, double& resultEtot, double& resultEsum)
 {
@@ -38,7 +39,7 @@ void computeTotalEnergyModel(
 #endif
     for(ptrdiff_t ip=0; ip<nbody; ip++) {
         const coord::PosVelCar& point = particles.point(ip);
-        double Epot = pot.value(point) + bh.potential(time, point);
+        double Epot = pot.value(point, time) + bh.potential(point, time);
         double Ekin = (pow_2(point.vx) + pow_2(point.vy) + pow_2(point.vz)) * 0.5;
         Etot += particles.mass(ip) * (Ekin+Epot*0.5);
         Esum += particles.mass(ip) * (Ekin+Epot);
@@ -49,7 +50,7 @@ void computeTotalEnergyModel(
 
 std::string printLog(
     const potential::BasePotential& pot,
-    const BHParams& bh,
+    const potential::KeplerBinaryParams& bh,
     const particles::ParticleArrayAux& particles,
     const double time,
     const std::string& taskName,
@@ -106,7 +107,8 @@ void RagaCore::doEpisode(double episodeLength)
     std::vector< std::pair<double, ptrdiff_t> > particleOrder(nbody);
     for(ptrdiff_t ip=0; ip<nbody; ip++) {
         const coord::PosVelCar& point = particles.point(ip);
-        double E = ptrPot->value(point) + bh.potential(paramsRaga.timeCurr, point) +
+        double E = ptrPot->value(point, paramsRaga.timeCurr) +
+            bh.potential(point, paramsRaga.timeCurr) +
             (pow_2(point.vx) + pow_2(point.vy) + pow_2(point.vz)) * 0.5;
         particleOrder[ip].first = E;
         particleOrder[ip].second = ip;
@@ -118,6 +120,14 @@ void RagaCore::doEpisode(double episodeLength)
     orbit::OrbitIntParams orbitIntParams;
     orbitIntParams.accuracy = paramsRaga.accuracy;
     orbitIntParams.maxNumSteps = paramsRaga.maxNumSteps;
+
+    // if needed, construct a composite potential (stars + BH)
+    std::vector<potential::PtrPotential> potComponents(bh.mass!=0 ? 2 : 1);
+    potComponents[0] = ptrPot;  // stellar potential
+    if(bh.mass!=0) potComponents[1].reset(new potential::KeplerBinary(bh));  // BH potential
+    potential::PtrPotential ptrTotalPot = bh.mass!=0 ?
+        potential::PtrPotential(new potential::Composite(potComponents)) :
+        ptrPot;
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic,1)
@@ -131,9 +141,9 @@ void RagaCore::doEpisode(double episodeLength)
             particles[index].first = particles::ParticleAux(
                 /* replace the initial position/velocity with that at the end of the episode */
                 orbit::integrate(
-                particles.point(index), episodeLength,
-                RagaOrbitIntegrator(*ptrPot, bh),
-                timestepFncs, orbitIntParams),
+                    particles.point(index), episodeLength,
+                    orbit::OrbitIntegrator<coord::Car>(*ptrTotalPot),
+                    timestepFncs, orbitIntParams),
                 /* keep the original extended particle attributes */
                 particles.point(index).stellarMass,
                 particles.point(index).stellarRadius);

@@ -67,6 +67,7 @@
 \normalsize\textrm{email: eugvas@lpi.ru} }
 
 \maketitle
+\vspace*{-10mm}
 \tableofcontents
 \newpage
 
@@ -238,7 +239,7 @@ All potential models are derived from the \ttt{BasePotential} class, which itsel
 Furthermore there are several derived abstract classes serving as bases for potentials that are easier to evaluate in a particular coordinate system (Section~\ref{sec:Coords}): the function \ttt{eval()} for this system remains to be implemented in descendant classes, and the other two functions use coordinate and derivative transformations to convert the computed value to the target coordinate system.
 For instance, a triaxial harmonic potential is easier to evaluate in Cartesian coordinates, while the St\"ackel potential is naturally expressed in a prolate spheroidal coordinate system.
 
-Any number of density components may be combined into a single \ttt{CompositeDensity} class, and similarly for potential components.
+Any number of density components may be combined into a single \ttt{CompositeDensity} class, and similarly several potential components may be combined into a \ttt{Composite} potential.
 
 
 %%%%%%%%%%%%%%
@@ -258,6 +259,7 @@ This class describes general triaxial two-power-law ($\alpha\beta\gamma$) densit
 \cite{Zhao1996} with an optional exponential cutoff. Many well-known models are special cases of this profile: Dehnen, Plummer, Isochrone, NFW, Gaussian, Einasto, Prugniel--Simien.
 This class only provides the density profile and not the potential, so it needs to be used in conjunction with the \ttt{Multipole} potential solver. Some models are defined in terms of the radial profile of the surface density, from which the 3d density may be reconstructed by deprojection. These include the two-power-law \ttt{Nuker} model and the exponential \ttt{Sersic} model; both provide only the density but not potential, and can also be flattened or triaxial. 
 Generalized spherical \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
+A time-dependent potential of two point masses orbiting each other is represented by the \ttt{KeplerBinary} class, and a spatially uniform but time-dependent acceleration field is provided by the \ttt{UniformAcceleration} class.
 
 
 %%%%%%%%%%%%%%
@@ -329,11 +331,16 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 
 \ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
-\ttt{King} & specified by $f(E)$, see text & \ppp{mass}, \ppp{scaleRadius}~($r_\mathrm{c}$), \ppp{W0}~($W_0$), \ppp{trunc}~($g$) \\[2mm]
+\ttt{King} & specified by $f(E)$, see text & 
+%\ppp{mass}, \ppp{scaleRadius}, \ppp{W0}~($W_0$), \ppp{trunc}
+\ppp{mass}, \ppp{scaleRadius}~($r_\mathrm{c}$), \ppp{W0}, \ppp{trunc}~($g$)
+\\[1mm]
 
 \ttt{Logarithmic} & $\Phi = \frac{1}{2} v_0^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{v0}~($v_0$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
 \ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{Omega}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+
+\ttt{KeplerBinary} & two moving point masses & \ppp{mass}, \ppp{binary_sma}, etc. (see text) \\[2mm]
 
 \multicolumn{3}{l}{\footnotesize $R=\sqrt{x^2+y^2}$ is the cylindrical radius and $\tilde r=\sqrt{x^2+(y/p)^2+(z/q)^2}$ is the ellipsoidal radius}
 \end{tabular}
@@ -364,7 +371,8 @@ Below follows the list of possible parameters of a single potential or density c
 \phantomsection\label{sec:PotentialGalpot}%
 There is one exception to the rule that \ppp{type} must encode a potential class: it may also contain the names of the density profiles originally used in \textsc{GalPot} -- \ttt{Disk}, \ttt{Spheroid}, \ttt{Nuker} or \ttt{Sersic}. All such components are collected first, and used to construct a \textit{single} instance of \ttt{Multipole} potential with default parameters, plus zero or more instances of \ttt{DiskAnsatz} potentials (according to the number of disk profiles). The source density for this Multipole potential contains all Spheroid, Nuker, S\'ersic and Disk components, plus \textit{negative} contributions of DiskAnsatz potentials (i.e., with inverted sign of their masses). Of course, one may use them also as regular \ppp{density} components (e.g., \ppp{type=CylSpline density=Disk}, which yields comparable accuracy), but in that case each one would create a separate potential expansion, which is of course not efficient. In order to lift this limitation, one may construct all density components individually, manually combine them into a single \ttt{CompositeDensity} model, and pass it to the constructor of a potential expansion (this approach is used for self-consistent multicomponent models, Section~\ref{sec:SCM}).
 \item \ppp{symmetry} -- defines the symmetry properties of the density model passed to the potential expansion. All built-in models report this property automatically; this parameter is useful if the input is given by an array of particles, or by a user-defined routine returning the density or potential in \Python and \Fortran interfaces. It could be either a text string with one of the standard choices from Table~\ref{tab:Symmetry} (only the first letter is used), or a number encoding a more complicated symmetry (see the definitions in \texttt{coord.h}).
-\item \ppp{file} -- the name of a file with potential expansion coefficients, or with an \Nbody snapshot to be used for creating a potential expansion. In the former case the type of potential expansion is stored in the first line of the file, so the \ppp{type} parameter is not required.
+\item \ppp{file} -- the name of a file with \ttt{Multipole} or \ttt{CylSpline} potential expansion coefficients, or with an \Nbody snapshot to be used for creating such a potential expansion. In the former case the type of potential expansion is stored in the first line of the file, so the \ppp{type} parameter is not required. Alternatively, for the \ttt{UniformAcceleration} potential type, this file contains the time-dependent acceleration field, and should have 4 columns -- time (monotonically increasing) and three acceleration components, which will be interpolated in time as regularized cubic splines (see Figure~\ref{fig:SplineMonotonic}) and linearly extrapolated beyond the endpoints. Finally, for the \ttt{Evolving} potential type, this file represents the time-dependent potential as explained in Section~\ref{sec:PotentialComposition}.
+\item \ppp{center} -- the offset of the potential or density from the origin (default 0): can be either a comma-separated triplet of numbers specifying the $x,y,z$ coordinates of the potential center, or a name of the file with time-dependent trajectory of the potential center. Such a file should have 4 columns -- time (monotonically increasing) and three coordinates; the offset will be interpolated in time as a regularized cubic spline and linearly extrapolated beyond the endpoints. To extrapolate as a constant, make the next-to-last point identical to the last point. Note that an off-centered potential or density automatically degrades \ppp{symmetry} to \ttt{None}.
 \end{itemize}
 Parameters defining an analytic density or potential model (if \ppp{type} is a potential expansion, they refer to the \ppp{density} argument, otherwise to \ppp{type}); default values are given in brackets:
 \begin{itemize}
@@ -383,10 +391,14 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{sersicIndex} -- shape parameter of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk).
 \item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Nuker}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
 \item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$.
-\item \ppp{W0} -- dimensionless potential depth of generalized King (lowered isothermal) models: $W_0 = [ \Phi(r_t) - \Phi(0) ] / \sigma^2$; larger values correspond to more extended envelopes (larger ratio between the outer truncation radius $r_t$ and the scale radius). In the above expression, the velocity dispersion $\sigma$ is not an independent parameter: the model in dimensionless units is specified by $W_0$ and the truncation strength parameter $g$; the potential, the truncation radius, and the total mass in dimensionless units are all determined by integrating a second-order ODE, and then the length and mass units are rescaled to match the given total mass $M$ and the scale radius (also called King radius or core radius).
+\item \ppp{W0} -- dimensionless potential depth of generalized \ttt{King} (lowered isothermal) models: $W_0 = [ \Phi(r_t) - \Phi(0) ] / \sigma^2$; larger values correspond to more extended envelopes (larger ratio between the outer truncation radius $r_t$ and the scale radius). In the above expression, the velocity dispersion $\sigma$ is not an independent parameter: the model in dimensionless units is specified by $W_0$ and the truncation strength parameter $g$; the potential, the truncation radius, and the total mass in dimensionless units are all determined by integrating a second-order ODE, and then the length and mass units are rescaled to match the given total mass $M$ and the scale radius (also called King radius or core radius).
 \item \ppp{trunc} [1] -- truncation strength parameter of lowered isothermal models (denoted by $g$ in \cite{GielesZocchi2015}); should be between 0 and 3.5 (0 corresponds to Woolley, 1 -- to King, 2 -- to Wilson models), larger values result in softer density fall-off near the truncation radius.
-\item \ppp{Omega} [1] -- the frequency of oscillation in the \ttt{Harmonic} potential.
-\item \ppp{v0} [1] -- the asymptotic circular velocity for the \ttt{Logarithmic} potential.
+\item \ppp{Omega} [1] -- frequency of oscillation in the \ttt{Harmonic} potential.
+\item \ppp{v0} [1] -- asymptotic circular velocity for the \ttt{Logarithmic} potential.
+\item \ppp{binary_sma} [0] -- semimajor axis $a$ for the \ttt{KeplerBinary} potential. This model represents a time-dependent potential of two point masses orbiting each other in the $x-y$ plane, with the center of mass specified by the \ppp{center} parameter. $a=0$ means a single point mass (the same effect is produced by a \ttt{Plummer} model with \ppp{scaleRadius}=0).
+\item \ppp{binary_q} [0] -- mass ratio $q$ of the \ttt{KeplerBinary} potential (0 means a single massive object, otherwise the masses of the two components are $m_1=m/(1+q),\; m_2=qm_0$).
+\item \ppp{binary_ecc} [0] -- orbital eccentricity $e$ of the \ttt{KeplerBinary} potential ($0\le e \le 1$).
+\item \ppp{binary_phase} [0] -- orbital phase $\phi_0$ of the \ttt{KeplerBinary} at time $t=0$. The positions of two point masses at time $t$ are given by $x_1 = a\,\frac{q}{1+q}\, (\cos\eta-e),\; y_1 = a\,\frac{q}{1+q}\,\sqrt{1-e^2}\,\sin\eta$ for the first one and $x_2=-x_1/q,\; y_2=-y_1/q$ for the second one, where the eccentric anomaly $\eta(t)$ is the solution of Kepler's equation: $\eta - e\,\sin\eta = \Omega t + \phi_0$, and $\Omega \equiv \sqrt{m/a^3}$ is the orbital frequency.
 \end{itemize}
 Parameters defining the potential expansions (default values in brackets are all sensible and only occasionally need to be changed):
 \begin{itemize}
@@ -406,6 +418,17 @@ All dimensional values in the potential factory routines can optionally be speci
 
 
 %%%%%%%%%%%%%%
+\subsubsection{Time-dependent and composite potentials}  \label{sec:PotentialComposition}
+
+All potential and density classes provide functions for evaluating them at an arbitrary moment of time (0 by default), although almost all built-in models are time-independent (except \ttt{KeplerBinary} and \ttt{UniformAcceleration}). However, there are two ways in which even a static potential can be made time-dependent:
+\begin{itemize}
+\item By shifting the potential center in space by a time-dependent offset vector specified in a text file provided as the \ppp{center} parameter. Such a file should have four columns -- time and three components of the offset vector, which will be interpolated as regularized cubic splines. 
+In the case of a nontrivial offset, the actual potential or density object is wrapped into an instance of a ``modifier'' class \ttt{Shifted} or \ttt{ShiftedDensity}. The \ttt{createPotential} routine that constructs a [possibly composite] potential from an INI file or a list of \ttt{KeyValueMap} objects will group the components sharing the same center into separate ``bunches'' of elementary or composite potentials.
+\item By constructing an \ttt{Evolving} potential from a file containing two columns -- timestamps and names of corresponding INI files with potential parameters. The actual potential at the given time $t$ is either taken from the nearest timestamp, or linearly interpolated between the two potentials associated with timestamps $t_1 \le t \le t_2$, if the parameter \ppp{interpLinear} is set to \texttt{true} (note that this is twice more expensive than taking the nearest one). Of course, the individual INI files may specify composite or time-dependent potentials of arbitrary complexity, and the ``master'' \ttt{Evolving} potential may itself have a time-dependent center offset.
+\end{itemize}
+The time-dependent potentials are fully supported by the orbit integration routine, but not by the rest of the library (i.e., all utility functions, sampling from the density profile, construction of action finders, etc., evaluate the potentials at the default time 0).
+
+%%%%%%%%%%%%%%
 \subsubsection{Utility functions}  \label{sec:PotentialUtility}
 
 \texttt{potential_utils.h} contains several frequently used functions that operate on any potential object: determination of the radius that encloses a given mass; conversion between energy $E$, angular momentum of a circular orbit $L_\mathrm{circ}$, and radius; epicyclic frequencies $\kappa,\nu,\Omega$ as functions of radius%
@@ -416,7 +439,7 @@ peri- and apocenter radii of a planar orbit with given $E,L$ (in the $z=0$ plane
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Orbit integration and analysis}  \label{sec:Orbits}
 
-Orbits of particles in the smooth time-independent potential are computed using the routine \ttt{orbit::integrate} in any of the three standard coordinate systems, plus optionally a rotating reference frame. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}; currently we provide only the 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have rather similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
+Orbits of particles in a [possibly time-dependent] potential are computed using the routine \ttt{orbit::integrate} in any of the three standard coordinate systems, plus optionally a rotating reference frame. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}; currently we provide only the 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have rather similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
 
 There are various tasks that can be performed during orbit integration, using classes derived from \ttt{orbit::BaseRuntimeFnc}. The simplest one (\ttt{orbit::RuntimeTrajectory}) is the recording of the trajectory either at every timestep of the ODE solver, or at regular intervals of time, which are unrelated to the internal solver timestep (that is, the  position and velocity at any time are obtained by interpolation provided by the solver -- so-called dense output feature). More complicated tasks involve storage of some other kind of information, e.g., in the context of Schwarzschild modelling, or in some cases, even modifying the orbit itself (random perturbations mimicking the effect of two-body relaxation in the Monte Carlo code \textsc{Raga}).
 
@@ -820,10 +843,10 @@ The \Python interface provides a large subset of \Agama functionality expressed 
 \end{itemize}
 
 The shared library \texttt{agama.so} can be used directly as a \Python extension module%
-\footnote{for the most common implementation of \Python interpreter, named \texttt{CPython} -- not to be confused with \texttt{Cython}, which is a distinct compiled language. The \Python interface layer in \Agama relies solely on the \Python C API, and does not use any third-party libraries such as \texttt{swig} or \texttt{boost::python}.}. Both \Python 2.6--2.7 and \Python 3.x are supported, but the library must be compiled separately for either version. In addition, there are a few auxiliary routines written in \Python (they reside in \texttt{py/pygama.py}). To simplify the usage, the package initialization (\texttt{__init__.py}) imports everything from both \texttt{agama.so} and \texttt{py/pygama.py} into a single namespace, which is what you get by writing \texttt{import agama} in your \texttt{.py} file.
+\footnote{for the most common implementation of \Python interpreter, named \texttt{CPython} -- not to be confused with \texttt{Cython}, which is a distinct compiled language. The \Python interface layer in \Agama relies solely on the \Python C API, and does not use any third-party libraries such as \texttt{swig} or \texttt{boost::python}.}. Both \Python 2.6--2.7 and \Python 3.x are supported, but the library must be compiled separately for either version. In addition, there are a few auxiliary routines written in \Python (they reside in \texttt{py/pygama.py}). To simplify the usage, the package initialization (\texttt{__init__.py}) imports everything from both \texttt{agama.so} and \texttt{py/pygama.py} into a single namespace, which is what you get by writing \texttt{import agama} in your \Python script.
 
 The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction}, \ttt{Target} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
-Additionally, density and DF object may also be represented by an arbitrary user-defined Python function -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation.Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
+Additionally, density and DF objects may also be represented by an arbitrary user-defined Python function -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation.Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
 \footnote{this restriction is due to the global interpreter lock mechanism in \texttt{CPython}, precluding its simultaneous access from multiple threads.}.
 
 Below follows a brief overview of the classes and routines provided by the \Python interface.
@@ -833,7 +856,7 @@ As usual, writing \texttt{help(agama.Whatever)} brings up a complete description
 \texttt{d = agama.Density(type="...", mass=..., scaleRadius=..., otherParameters=...)}\\
 using the parameters listed in Section~\ref{sec:PotentialFactory}; argument names are case-insensitive, as are the names of density models. 
 Alternatively, to combine several density objects \texttt{d1}, \texttt{d2}, etc., one may list them as the unnamed arguments of the constructor (these could be proper Density objects, dictionaries with density parameters, or user-defined functions providing the Density interface, see below):\\
-\texttt{comp = agama.Density(d1, dict(type='Plummer', mass=42), d2)}\\[2mm]
+\texttt{comp = agama.Density(d1, dict(type="Plummer", mass=42), d2)}\\[2mm]
 Elements of such composite density objects can be accessed by index or iterated over:\\
 \texttt{for i in range(len(comp)): print(comp[i])}\\
 \texttt{for d in comp: print d}\\[2mm]
@@ -846,7 +869,8 @@ In this case the \ttt{Density} object is internally represented by a \ttt{Densit
 \texttt{d = agama.Density("hernquist_model.txt")}\\[2mm]
 The \ttt{Density} class provides only a couple of methods: first of all, the computation of the density itself -- the argument is a single point or a $N\times3$ array of $N$ points (the \Python interface always deals with cartesian coordinates to avoid confusion):\\
 \texttt{print(d.density(1,0,0))}\\
-\texttt{print(d.density([[1,0,0],[2,3,4]]))}\\[2mm]
+\texttt{print(d.density([[1,0,0],[2,3,4]]))}\\
+To compute a time-dependent density at an arbitrary moment of time, provide an extra \texttt{t=...} argument to the \texttt{density} method (note that all other methods still evaluate it only at time 0).\\[2mm]
 \texttt{surfaceDensity} computes the integral of density along the line of sight in an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles (Section~\ref{sec:CoordinateDetails}).\\[1mm]
 Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model.\\[1mm]
 Finally, the density profile may be sampled with particles, producing two arrays -- coordinates ($N\times3$) and masses ($N$): \\
@@ -879,14 +903,14 @@ Another way of creating a composite potential is to provide a list of \texttt{di
 \texttt{halo_par = dict(type="NFW", mass=70, scaleRadius=20, axisRatioZ=0.8)}\\
 \texttt{potgal~~~= agama.Potential(disk_par, bulge_par, halo_par)}\\[2mm]
 If we examine the potential created in the last line,\\
-\texttt{print(pot_gal)}  \textit{\color{Sepia} \ \ \# CompositePotential: DiskAnsatz, Multipole}\\
+\texttt{print(potgal)}  \textit{\color{Sepia} \ \ \# CompositePotential: DiskAnsatz, Multipole}\\
 it becomes apparent that some rearrangement took place behind the stage. Indeed, in the case when the potential is constructed from several sets of parameters (but \textit{not} from several existing potential instances), the code attempts to optimize the efficiency by using the \hyperref[sec:PotentialGalpot]{\textsc{GalPot}} approach. In this example, the \ppp{Disk} density profile was split into two parts -- the \ttt{DiskAnsatz} potential class and the residual density profile; other spheroidal density components (\ppp{Sersic} and \ppp{NFW}) were combined with this residual profile, and used to initialize a single instance of \ttt{Multipole} potential. This is advantageous if one needs to evaluate the potential many times (e.g., in action computation), but makes it difficult to examine the contribution of each mass component separately. In order to do so, we may instead create another potential used only for visualization:\\
 \texttt{potvis~= agama.Potential(agama.Potential(disk_par), }\\
 \texttt{\mbox{}~~~~agama.Potential(bulge_par), agama.Potential(halo_par))}\\[2mm]
-An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\[1mm]
-\texttt{p.potential(points)} evaluates the potential at one or several input points (which should be either a 1d list/array of length 3, or a 2d array of size $N\times3$);\\[1mm]
-\texttt{p.force(points)} computes the acceleration (force per unit mass), i.e., \textit{minus} the derivative of potential, returning a $N\times3$ array;\\[1mm]
-\texttt{p.forceDeriv(points)} computes the forces and force derivatives:\\
+An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\[2mm]
+\texttt{potential(points [, t=t0])} evaluates the potential at one or several input points (which should be either 3 numbers, or a 1d list/array of length 3, or a 2d array of size $N\times3$) at time \texttt{t0} (0 by default).\\[2mm]
+\texttt{force(points [, t=t0])} computes the acceleration (force per unit mass) at time \texttt{t0}, i.e., \textit{minus} the derivative of potential, returning 3 numbers or an $N\times3$ array.\\[2mm]
+\texttt{forceDeriv(points [, t=t0])} computes the forces and force derivatives at time \texttt{t0}:\\[1mm]
 \texttt{r = numpy.linspace(0,20)}\\
 \texttt{points = numpy.column_stack((r, r*0, r*0))}
 \textit{\color{Sepia} \ \ \# a $N\times3$ array}\\
@@ -898,32 +922,32 @@ An instance of \ttt{Potential} class provides the same methods as the \ttt{Densi
 \textit{\color{Sepia} \ \ \# vertical epicyclic frequency $\nu$} \\[1mm]
 Plotting the rotation curve of the above constructed potential and all its components:\\
 \texttt{plt.plot(r, numpy.sqrt(-r*potvis.force(points)[:,0]))}\\
-\texttt{for pot in potvis: plt.plot(r, numpy.sqrt(-r*pot.force(points)[:,0]))}\\[1mm]
-\texttt{p.Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{p.Tcirc(points)}.\\[1mm]
-\texttt{p.Rcirc(E=...)} or \texttt{p.Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum;\\[1mm]
-\texttt{p.Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$;\\[1mm]
-\texttt{p.Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum in the equatorial plane of an axisymmetric potential; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input).
+\texttt{for pot in potvis: plt.plot(r, numpy.sqrt(-r*pot.force(points)[:,0]))}\\[2mm]
+\texttt{Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{Tcirc(points)}.\\[2mm]
+\texttt{Rcirc(E=...)} or \texttt{Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum.\\[2mm]
+\texttt{Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$.\\[2mm]
+\texttt{Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum in the equatorial plane of an axisymmetric potential; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input).
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
 \texttt{af = agama.ActionFinder(pot, [interp=True|False])}\\
 where the optional second argument chooses between the interpolated (faster, less accurate) and non-interpolated version of St\"ackel fudge. If the potential is spherical, the underlying \Cpp implementation will use the \ttt{ActionFinderSpherical} class, otherwise the \ttt{ActionFinderAxisymFudge} class (interpolated or not).\\
-This class has only one method \texttt{__call__()}, computing actions, and optionally angles and frequencies, for the given 6d position/velocity point or an $N\times6$ array of points:\\
+This class has only one method \texttt{__call__()}, computing actions, and optionally angles and frequencies, for the given 6d position/velocity point or an $N\times6$ array of points:\\[1mm]
 \texttt{act = af(points)}
 \textit{\color{Sepia}\ \ \# 0th column is $J_r$, 1st -- $J_z$, 2nd -- $J_\phi$} \\
 \texttt{act, ang, freq = af(points, angles=True)}\\[2mm]
-There is also a standalone routine \texttt{actions()}, which may be used without constructing an instance of action finder:\\
-\texttt{agama.actions(points, potential [, fd=focal_distance] [, angles=True])}\\
+There is also a standalone routine \texttt{actions()}, which may be used without constructing an instance of action finder:\\[1mm]
+\texttt{agama.actions(points, potential [, fd=focal_distance] [, angles=True])}\\[1mm]
 for a non-spherical potential one needs to provide the focal distance $\Delta$ (the \ttt{ActionFinder} class retrieves it from an internally constructed interpolation table).
 
-\paragraph{ActionMapper} class performs the inverse operation -- transform from actions/angles to position/velocity coordinates. Currently it uses the Torus machinery (Section~\ref{sec:ActionsTorus}), and needs to be constructed for a given potential \textit{and} the triplet of actions:\\
-\texttt{am = agama.ActionMapper(pot, (Jr, Jz, Jphi))}\\
-When applied to one or more triplets of angles, it returns the corresponding $\bx,\bv$:\\
+\paragraph{ActionMapper} class performs the inverse operation -- transform from actions/angles to position/velocity coordinates. Currently it uses the Torus machinery (Section~\ref{sec:ActionsTorus}), and needs to be constructed for a given potential \textit{and} the triplet of actions:\\[1mm]
+\texttt{am = agama.ActionMapper(pot, (Jr, Jz, Jphi))}\\[2mm]
+When applied to one or more triplets of angles, it returns the corresponding $\bx,\bv$:\\[1mm]
 \texttt{xv = am([[theta_r1, theta_z1, theta_phi1], [theta_r2, theta_z2, theta_phi2]])}
 
-\paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\
-\texttt{df = agama.DistributionFunction(type="...", [mass=..., other params])}\\
-where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}), \\
-or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\
+\paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\[1mm]
+\texttt{df = agama.DistributionFunction(type="...", [mass=..., other params])}\\[1mm]
+where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIsothermal}, \ppp{Exponential}, \ppp{QuasiSpherical}, and the other parameters are specific to each type of DF (Section~\ref{sec:DF}),
+or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\[1mm]
 \texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}
 \\[2mm]
 Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).
@@ -949,7 +973,7 @@ computes the projected DF (integrated over $v_x,v_y$ and $z$).\\[2mm]
 \texttt{fvr, fvz, fvphi, dens = gm.vdf(points, dens=True [, gridv=...])}\\
 constructs normalized 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators. One may compute either the full VDFs at the given 3d point(s), or the projected VDFs additionally integrated over the $z$ axis; the choice depends on the shape of the \texttt{points} array (3 or 2 columns, respectively). If the optional argument \texttt{dens=True} is provided, the output additionally contains the 3d density $\rho$ or the surface density $\Sigma$.
 The optional argument \texttt{gridv} specifies the grid in velocity space used to represent the spline (if given as an array) or the size of this grid (if given as an integer). If not provided, the default is to cover the range $\pm v_\mathrm{escape}$ with 50 points. The grid needs not be too dense -- a 3rd degree interpolating spline provides a substantially higher level of detail than an equivalently spaced histogram.
-One may plot the velocity distribution as a smooth function on a denser grid:\\
+One may plot the velocity distribution as a smooth function on a denser grid:\\[1mm]
 \texttt{v_esc = numpy.sqrt(-2 * pot.potential(point))\\
 gridv = numpy.linspace(-v_esc, v_esc, 200)\\
 plt.plot(gridv, fvr(gridv))} \\[1mm]
@@ -982,35 +1006,42 @@ returns the density of this component; \\[2mm]
 
 \paragraph{Orbit} integration is performed by the following routine:\\
 \texttt{result = agama.orbit(potential=pot, ic=posvel, time=int_time, ...)}\\
-here \ppp{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), integration \ppp{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result): \ppp{Omega} specifies the pattern speed of a rotating coordinate system, \ppp{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits), \ppp{dtype} is the storage data type for trajectories (32-bit or 64-bit float or complex), \ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos), and \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling. \\
+here \ppp{posvel} contains initial conditions for one or several orbits (a $N\times6$ array), total integration \ppp{time} for each orbit may be different, but typically is a multiple of the dynamical time returned by the \texttt{Tcirc} method of \ttt{Potential} (e.g., \texttt{100*pot.Tcirc(posvel)}), and dots indicate additional parameters (at least some must be provided to produce a result):\\
+\ppp{Omega} specifies the pattern speed of a rotating coordinate system.\\
+\ppp{trajsize} is the number of output points $M_k$ recorded from the trajectory for each orbit $k$ (may be a single number or vary between orbits). A zero value means that the orbit will be recorded after every ODE integration timestep, which may be useful in some contexts, but usually one is better served with an orbit sampled at regular intervals of time equal to \texttt{time}/(\texttt{trajsize}$-$1). If \texttt{trajsize}=1, only the final point is stored, otherwise both the initial and the final point are stored in the first and the last array elements.\\
+\ppp{timestart} is the initial moment of time (default 0), and similarly to the total \texttt{time}, may be either a single value or an array of separate values for each orbit. The final time of each orbit is \texttt{time}+\texttt{timestart}.\\
+\ppp{accuracy} (default $10^{-8}$) is the relative accuracy of the ODE integrator.\\
+\ppp{dtype} is the storage data type for trajectories (32-bit or 64-bit float or complex). Note that although the orbit integration always uses 64-bit floats (\Cpp \texttt{double}s) internally, by default the trajectory is stored in 32-bit floats to save memory, with the loss of precision usually being acceptable.\\
+\ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos).\\
+\ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling. \\[2mm]
 The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
-For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\
-\texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\
-and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\
-\texttt{for trj in result[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}\\
+For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\[1mm]
+\texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\[1mm]
+and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\[1mm]
+\texttt{for trj in result[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}\\[1mm]
 Finally, when \texttt{lyapunov=True}, another array of length $N$ is returned, containing the estimates of Lyapunov exponents for each orbit.
 
-\paragraph{sampleOrbitLibrary} routine constructs an $N$-body snapshot from the orbit library of a Schwarzschild model, in which each orbit has a weight assigned by the \ttt{solveOpt} routine (see Section~\ref{sec:SchwarzschildDetails} for details):\\
+\paragraph{sampleOrbitLibrary} routine constructs an $N$-body snapshot from the orbit library of a Schwarzschild model, in which each orbit has a weight assigned by the \ttt{solveOpt} routine (see Section~\ref{sec:SchwarzschildDetails} for details):\\[1mm]
 \texttt{
 matrix, traj = agama.orbit(potential=pot, ic=posvel, time=int_time, \\
 \mbox{}~~~~trajsize=1000, targets=[target])\\
 weights = agama.solveOpt(matrix, rhs)\\
 nbody = 1000000\\
-status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\
-The previously recorded trajectories returned by the \ttt{orbit} routine contain a certain number of points each, which may not be sufficient to sample orbits with particularly high weights. In this case, the function fails (returns \texttt{status=False}), and \texttt{result} contains the list of orbit indices which did not have enough points in previously recorded trajectories, and corresponding required numbers of samples for each orbit in this list. Then one should rerun the \ttt{orbit} routine with these parameters:\\
+status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\[2mm]
+The previously recorded trajectories returned by the \ttt{orbit} routine contain a certain number of points each, which may not be sufficient to sample orbits with particularly high weights. In this case, the function fails (returns \texttt{status=False}), and \texttt{result} contains the list of orbit indices which did not have enough points in previously recorded trajectories, and corresponding required numbers of samples for each orbit in this list. Then one should rerun the \ttt{orbit} routine with these parameters:\\[1mm]
 \texttt{
 if not status:\\
 \mbox{}~~~~indices, trajsizes = result\\
 \mbox{}~~~~traj[indices] = agama.orbit(potential=pot, ic=posvel[indices], \\
 \mbox{}~~~~~~~~time=int_time[indices], trajsize=trajsizes)\\
-\mbox{}~~~~status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\
+\mbox{}~~~~status, result = agama.sampleOrbitLibrary(nbody, traj, weights)}\\[2mm]
 In case of success (\texttt{status=True}), the \texttt{result} array contains a tuple of two arrays: \texttt{nbody}$\times6$ coordinates/velocities and \texttt{nbody} masses of particles in the $N$-body snapshot.
 
 \paragraph{N-body snapshot handling} \label{sec:PythonSnapshot} is very rudimentary; the routines\\
 \texttt{agama.writeSnapshot(filename, particles[, format])} and\\ \texttt{agama.readSnapshot(filename)} can deal with text files (7 columns -- $x,y,z,vx,vy,vz,m$), and optionally \Nemo or \textsc{Gadget} snapshots if the library was compiled with their support. Here \ppp{particles} is a tuple of two arrays: $N\times6$ position/velocity points and $N$ masses; the same convention is used to pass around snapshots in the rest of the \Python extension (e.g., in potential and sampling routines). A more powerful framework for dealing with $N$-body snapshots is provided, e.g., by the \textsc{Pynbody} library \cite{Pynbody}.
 
-\paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass, length and velocity), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\
-\texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\
+\paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass, length and velocity), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\[1mm]
+\texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\[1mm]
 instructs the library to work with the commonly used Galactic units: $1\,M_\odot$, 1\,kpc, 1\,km/s, with the derived unit of time being 0.98~Gyr (this is \textit{not} the same as using no units at all, because $G=4.3\times10^{-6}$ in these units). Importantly, this setup needs to be performed at the beginning of work, otherwise the values returned by the previously constructed classes and methods (e.g., potentials) would be incorrectly scaled.
 At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information. In the future, the unit system may be integrated with the one from the \textsc{Astropy} framework \cite{Astropy}.
 
@@ -1075,64 +1106,60 @@ An example, comparing the native \Galpy action finder with that from \Agama, is 
 \Nemo \cite{Teuben1995} is a collection of programs for performing and analyzing \Nbody simulations, which use common data exchange format and UNIX-style pipeline approach to chain together several processing steps. The centerpiece of this framework is the \Nbody simulation code \textsc{gyrfalcON} \cite{Dehnen2000}. It computes the gravitational force between particles using the fast multipole method, and can optionally include an external potential.
 
 The \Nemo plugin allows to use any \Agama potential as an external potential in \textsc{gyrfalcON} and other \Nemo programs (in a similar context as the \Amuse plugin). Actually, it is even more general, with the possibility of representing a time-dependent potential, using a rotating reference frame, shifting the origin of the potential, and adding a spatially uniform acceleration (the latter two features can also be time-dependent). 
-In the simplest case, a \ttt{Multipole} or a \ttt{CylSpline} potential is specified as a single file with expansion coefficients, using the command-line argument \texttt{accfile=\dots}. Alternatively, if the potential contains several components or is not an expansion, one needs to create an INI file with potential parameters defined in sections \ppp{[Potential1]}, \ppp{[Potential whatever]}, \dots (any name starting with \ppp{Potential} is interpreted as a separate component, and as always, parameter names and values are case-insensitive), and pass it as a command-line argument \texttt{accfile=\dots.ini}. The INI file may contain additional sections in more complicated cases:
-{\setlength{\leftmargini}{6mm} \vspace{-2.5mm}
-\begin{itemize} \setlength{\itemsep}{0pt} \setlength{\parskip}{0pt}
-\item A section named \ppp{[Center]} defines the offset of the potential from the origin of the coordinate system used by the $N$-body simulation. It can be a fixed offset given by three parameters \ppp{x}, \ppp{y}, \ppp{z}, or a time-dependent offset specified by an auxiliary text file with $\ge 2$ lines and 4 columns: time, x, y, z. The name of this file should be given as a parameter \ppp{file=}\dots\ in this section of the INI file. The actual time-dependent offset will be interpolated by a cubic spline and linearly extrapolated beyond the range of times given in the file.
-\item A section named \ppp{[Acceleration]} defines a spatially uniform acceleration field, which is supposed to be time-dependent and must be given in another auxiliary text file with the same 4-column structure, and the file name provided as a single parameter \ppp{file=}\dots\ in this section.
-\item Finally, the potential itself may depend on time. In this case, it must be given by a sequence of potential expansion coefficients stored in separate files and an index file with a list of these files (two columns -- time and filename). The name of this index file should be provided as a parameter \ppp{file=}\dots\ in the section \ppp{[Time-dependent]} of the INI file. Alternatively, if there are no other sections in the INI file, it is not required, and the name of the index file itself should be provided as a command-line argument \texttt{accfile=\dots}
-\end{itemize} }\vspace{-2.5mm}
-
-Yet another possibility is to specify a pattern speed $\Omega$ for the potential (frequency of rotation of the potential figure about $z$ axis). In common with other \Nemo potentials, it is provided as a separate command-line argument \texttt{accpars=\dots} instead of the INI file.
+In the simplest case, a \ttt{Multipole} or a \ttt{CylSpline} potential is specified as a single file with expansion coefficients, using the command-line argument \texttt{accfile=\dots} Alternatively, if the potential contains several components or is not an expansion, one needs to create an INI file with potential parameters defined in sections \ppp{[Potential1]}, \ppp{[Potential whatever]}, \dots (any name starting with \ppp{Potential} is interpreted as a separate component, and as always, parameter names and values are case-insensitive), and pass it as a command-line argument \texttt{accfile=\dots.ini}. Individual potential components may have [possibly time-dependent] offsets from origin, or represent time-dependent potentials (such as \ttt{Evolving} or \ttt{UniformAcceleration}). An additional \Nemo-specific feature is a possibility of providing a pattern speed $\Omega$ for the potential (frequency of rotation of the potential figure about $z$ axis) as a separate command-line argument \texttt{accpars=\dots}
 
 The shared library \texttt{agama.so} itself provides the \Nemo interface without any extra compilation options (it does not depend on any \Nemo header files). If the environment variable \texttt{\$NEMOOBJ} is defined during the compilation, the shared library will be automatically copied into the folder \texttt{\$NEMOOBJ/acc/}, where it could be found by \Nemo programs.\\
-For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\\
-\texttt{gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\
+For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\\[2mm]
+\texttt{gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\[2mm]
 where the last optional argument specifies a pattern speed $\Omega=1.0$. All units in the INI or coefs file here should follow the convention $G=1$.
 
-As an example, consider the evolution of an $N$-body model of a Plummer sphere of mass $m=0.1$ and radius $a=0.1$ (satellite), which moves on a nearly-circular orbit inside a larger Plummer sphere of mass $M=1$ and radius $A=1$ (host galaxy), represented by a smooth external potential. First create the satellite:\\
-\texttt{mkplum out=sat.nemo nbody=10000 r_s=0.1 mass=0.1}\\
-Put it on an orbit with radius $R=1$ and initial velocity approximately equal to the circular velocity of the external potential at this radius $V=0.6$:\\
-\texttt{snapshift sat.nemo sat_shift.nemo rshift=-1,0,0 vshift=0,-0.6,0}\\
-Create an INI file (\texttt{pot.ini}) with the external potential:\\
-\texttt{[Potential]\\type=Plummer\\mass=1\\scaleRadius=1}\\
-Now run a simulation for a few orbital periods:\\
+As an example, consider the evolution of an $N$-body model of a Plummer sphere of mass $m=0.1$ and radius $a=0.1$ (satellite), which moves on a nearly-circular orbit inside a larger Plummer sphere of mass $M=1$ and radius $A=1$ (host galaxy), represented by a smooth external potential. First create the satellite:\\[2mm]
+\texttt{mkplum out=sat.nemo nbody=10000 r_s=0.1 mass=0.1}\\[2mm]
+Put it on an orbit with radius $R=1$ and initial velocity approximately equal to the circular velocity of the external potential at this radius $V=0.6$:\\[2mm]
+\texttt{snapshift sat.nemo sat_shift.nemo rshift=-1,0,0 vshift=0,-0.6,0}\\[2mm]
+Create an INI file (\texttt{pot.ini}) with the external potential:\\[2mm]
+\texttt{[Potential]\\type=Plummer\\mass=1\\scaleRadius=1}\\[2mm]
+Now run a simulation for a few orbital periods:\\[2mm]
 \texttt{gyrfalcON sat_shift.nemo sat_out1.nemo eps=0.02 kmax=5 step=0.25 tstop=50 \textbackslash \\
-\makebox[7mm]{} accname=agama accfile=pot.ini}\\
+\makebox[7mm]{} accname=agama accfile=pot.ini}\\[2mm]
 The satellite nicely orbits around the origin, leaving a small tidal tail.
 
-We can model the same situation in the reference frame that is centered not on the host galaxy, but rather on the satellite [approximately]. Namely, the potential of the host galaxy now will be moving on a circular orbit around origin of the coordinate system associated with the simulation, in which the satellite was initially at rest and centered at origin. We need to create two additional files describing the time-dependent offset of the external potential's center and the acceleration associated with the non-inertial reference frame:\\
+We can model the same situation in the reference frame that is centered not on the host galaxy, but rather on the satellite [approximately]. Namely, the potential of the host galaxy now will be moving on a circular orbit around origin of the coordinate system associated with the simulation, in which the satellite was initially at rest and centered at origin. We need to create two additional files describing the time-dependent offset of the external potential's center and the acceleration associated with the non-inertial reference frame:\\[2mm]
 \texttt{import numpy\\t = numpy.linspace(0,50,201)}\textit{\color{Sepia} \ \ \ \# grid in time}\\
 \texttt{w = 0.6}\textit{\color{Sepia} \ \ \ \# rotation frequency $\omega=V/R$}\\
 \texttt{x,y,z = numpy.cos(w*t), numpy.sin(w*t), t*0}\textit{\color{Sepia} \ \ \ \# orbit coordinates}\\
 \texttt{numpy.savetxt("center.txt", numpy.column_stack((t, x, y, z)))\\
 ax,ay,az = -w**2*x, -w**2*y, 0*z}\textit{\color{Sepia} \ \ \ \# components of centrifugal acceleration}\\
-\texttt{numpy.savetxt("accel.txt", numpy.column_stack((t, ax, ay, az)))}\\
-And add the following lines to \texttt{pot.ini}:\\
-\texttt{[Acceleration]\\file=accel.txt}\\
-\texttt{[Center]\\file=center.txt}\\
-Now run another simulation (with the un-shifted initial conditions for the satellite):\\
+\texttt{numpy.savetxt("accel.txt", numpy.column_stack((t, ax, ay, az)))}\\[2mm]
+And add the following lines to \texttt{pot.ini}:\\[2mm]
+\texttt{center=center.txt}\\
+\texttt{[Potential 1]\\
+type=UniformAcceleration\\
+file=accel.txt}\\[2mm]
+Now run another simulation (with the un-shifted initial conditions for the satellite):\\[2mm]
 \texttt{gyrfalcON sat.nemo sat_out2.nemo eps=0.02 kmax=5 step=0.25 tstop=50 \textbackslash \\
-\makebox[7mm]{} accname=agama accfile=pot.ini}\\
-The outcome should be similar, but expressed in a different reference frame. We can convert it back to the host-centered frame by running the following chain of operations:\\
+\makebox[7mm]{} accname=agama accfile=pot.ini}\\[2mm]
+The outcome should be similar, but expressed in a different reference frame. We can convert it back to the host-centered frame by running the following chain of operations:\\[2mm]
 \texttt{snapprint sat_out2.nemo t,x,y,z | \textbackslash \\
 awk \char13 \{print \$2-cos(0.6*\$1),\$3-sin(0.6*\$1),\$4;\}\char13\ | \textbackslash \\
 tabtos - sat_out3.nemo nbody=10000 block1=x,y,z}
+\vspace{2mm}
 
-In general, the non-inertial acceleration needs not correspond to the second derivative of the offset of the potential center -- one could imagine running the simulation in an inertial frame (hence zero acceleration), but forcing the external potential to dance around in some unpredictable way\dots And recall that one may add more than one external potential, each with its own trajectory!\\
-\texttt{gyrfalcON ic.nemo out.nemo accname=agama,agama accfile=\char13 pot1.ini;pot2.ini\char13}
+In general, the non-inertial acceleration needs not correspond to the second derivative of the offset of the potential center -- one could imagine running the simulation in an inertial frame (hence zero acceleration), but forcing the external potential to dance around in some unpredictable way. Finally, the INI file may contain multiple sections, each one could have its own fixed or time-dependent offset (center), or represent an \ttt{Evolving} sequence of potentials\dots The possibilities are boundless!
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tests and example programs}  \label{sec:ExamplesTests}
 
-The \Agama library itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} and \texttt{test_***.py} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Finally, there are several tools built on top of the library that perform some useful tasks themselves. Some of them are described below.
+The \Agama framework itself is indeed just a ``library'', not a ``program'', but it comes with a number of example programs and internal tests. The latter ones are intended to ensure the consistency of results as the development goes on, so that new or improved features do not break any existing code. All \texttt{test_***.cpp} and \texttt{test_***.py} programs are intended to run reasonably quickly and display either a \textcolor{Green}{PASS} or \textcolor{Red}{FAIL} message; they also illustrate some aspects of the code, or check the accuracy of various approximations on realistic data. Example programs, on the other hand, are more targeted towards the library users and demonstrate how to perform various tasks. Finally, there are several tools built on top of the library that perform some useful tasks themselves. Some of them are described below.
 
 \paragraph{example_galpy} is a \Python program showing the use of \Agama plugin for \Galpy to construct a potential, integrate orbits, and compare the accuracy of action finders between the two libraries. 
 
 \paragraph{example_amuse} illustrates the use of \Agama to provide an external potential in an $N$-body simulation performed within the \Amuse framework.
 
 \paragraph{example_fortran} demonstrates how to create and use \Agama potentials in \Fortran, both for built-in density or potential models, or for user-defined \Fortran functions that provide the density or potential.
+
+\paragraph{example_time_dependent_potential} is a \Python script illustrating various ways of constructing time-dependent potentials and integrating test-particle orbits.
 
 \paragraph{example_deprojection} is an interactive \Python plotting script illustrating the projection and deprojection of triaxial ellipsoidal bodies viewed at different orientations.
 
@@ -1153,10 +1180,10 @@ This program is designed to work with the mock data from the \href{http://astrow
 \paragraph{example_self_consistent_model} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ttt{QuasiIsothermal} DF for the disk; the \ttt{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
 
 There are a couple of closely related \Python programs:\\
-\texttt{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
-\texttt{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.
+\textbf{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
+\textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.
 
-\paragraph{example_schwarzschild_simple} is a \Python script illustrating the basic steps in Schwarzschild orbit-superposition  modelling. It creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot.
+\paragraph{example_schwarzschild_triaxial} and \;\;\textbf{example_schwarzschild_flattened_rotating}\;\;\\ are two \Python scripts illustrating the basic steps in Schwarzschild orbit-superposition  modelling. The first one creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot. The second one creates a flattened rotating S\'ersic model with a central black hole, again converts it into an $N$-body snapshot, and plots various diagnostic information.
 
 \paragraph{schwarzschild} is a more general \Python program for constructing multicomponent Schwarzschild models and converting them into $N$-body models. It reads all model parameters from an \texttt{ini} file (an example of a three-component axisymmetric disk galaxy model is provided in \texttt{data/schwarzschild_axisym.ini}). This program can be used in the ``theoretical'' context, when the goal is to construct a single equilibrium model with given parameters, not to fit a model to some observational data -- that job is performed by the following program.
 

@@ -16,11 +16,12 @@ namespace{
     when it passes through zero, we are at the peri/apocenter
 */
 class PericenterFinder: public math::IFunctionNoDeriv {
-    const BHParams& bh;
+    const potential::KeplerBinaryParams& bh;
     const math::BaseOdeSolver& sol;
     const int bhindex;
 public:
-    PericenterFinder(const BHParams& _bh, const math::BaseOdeSolver& _sol, const int _bhindex) :
+    PericenterFinder(const potential::KeplerBinaryParams& _bh,
+        const math::BaseOdeSolver& _sol, const int _bhindex) :
         bh(_bh), sol(_sol), bhindex(_bhindex)  {}
 
     /// return the time derivative of the squared distance to the given black hole
@@ -109,7 +110,7 @@ orbit::StepResult RuntimeLosscone::processTimestep(
 RagaTaskLosscone::RagaTaskLosscone(
     const ParamsLosscone& _params,
     particles::ParticleArrayAux& _particles,
-    BHParams& _bh)
+    potential::KeplerBinaryParams& _bh)
 :
     params(_params),
     particles(_particles),

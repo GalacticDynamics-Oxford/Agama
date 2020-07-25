@@ -117,19 +117,19 @@ public:
         try{
             double kld =
                 params.slopeIn  <0   || params.slopeIn >=3   ||
-                params.slopeOut<=3   || params.slopeOut>12   ||
+                /*params.slopeOut<=3   ||*/ params.slopeOut>12   ||
                 params.steepness<0.2 || params.steepness>5   ||
                 params.coefJrIn <0.1 || params.coefJrIn >2.8 ||
                 params.coefJzOut<0.1 || params.coefJrOut>2.8 ||
                 params.cutoffStrength<0.2 || params.cutoffStrength>5 ?
-                INFINITY :
+                /*INFINITY*/ 1e100 :
                 kullbackLeiblerDistance(f, df::DoublePowerLaw(params));
             std::cout << utils::pp(kld, 8) << std::endl;
             values[0] = kld;
         }
         catch(std::exception&e) {
             std::cout << e.what() << std::endl;
-            values[0] = INFINITY;
+            values[0] = /*INFINITY*/ 1e100;
         }
     }
     virtual unsigned int numVars() const { return NPARAMS; }
@@ -152,7 +152,8 @@ int main(int argc, char* argv[])
         "  scaleRadius=..., gamma=..., etc. - parameters of the density model;\n"
         "  potential=... - if provided, describes the potential that may be different from "
         "the density profile; in this case the density model must be given by a file with "
-        "cumulative mass profile M(r), and other command-line parameters refer to the potential.\n"
+        "cumulative mass profile M(r) or a DensitySphericalHarmonic model, "
+        "and other command-line parameters refer to the potential.\n"
         "  slopeIn, slopeOut, steepness, coefJrIn, coefJrOut, Jcutoff, cutoffStrength - "
         "if provided, fix the corresponding parameters of the double-power-law DF to the given "
         "value; otherwise the best-fit value will be found during the optimization procedure\n";
@@ -175,17 +176,27 @@ int main(int argc, char* argv[])
     potential::PtrDensity dens;     // the density profile (analytic or interpolated)
     potential::PtrPotential pot;    // the potential (may be different from the density)
 
-    // input is a name of a density profile or a file with the cumulative mass profile;
+    // input is a name of a density profile or a file with a cumulative mass profile or a density profile;
     // the choice is made based on whether 'density=...' specifies an existing file name
     if(!inputdensity.empty() && utils::fileExists(inputdensity)) {
-        densInterp = potential::readMassProfile(inputdensity);
-        dens.reset(new potential::FunctionToDensityWrapper(densInterp));
+        try {
+            // try to read the input file as if it contained a cumulative mass profile
+            densInterp = potential::readMassProfile(inputdensity);
+            dens.reset(new potential::FunctionToDensityWrapper(densInterp));
+        }
+        catch(std::exception&) {
+            // try to read the input file as if it contained a DensitySphericalHarmonic model
+            dens = potential::readDensity(inputdensity);
+        }
     } else
         dens = potential::createDensity(args);
 
     // check if a separate potential was also provided
     if(inputpotential.empty()) {
         pot = potential::Multipole::create(*dens, 0, 0, /*gridsize*/ 40);
+    } else if(utils::fileExists(inputpotential)) {
+        // create a (possibly composite) potential from the parameters provided in an INI file
+        pot = potential::createPotential(inputpotential);
     } else {
         // the createPotential() routine reads the potential name from the 'type=...' parameter
         args.set("type", inputpotential);
@@ -205,8 +216,8 @@ int main(int argc, char* argv[])
         potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot));
     df::QuasiSphericalIsotropic dfsph(eddf, *pot);
 
-    double bestparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0, 100.0, 2.0};
-    double stepsizes [NPARAMS] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1,  10.0, 0.1};
+    double bestparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0, 20.0, 2.0};
+    double stepsizes [NPARAMS] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 10.0, 0.1};
     const int maxNumIter = 500, maxNumLoop = 5;
     const double toler   = 1e-4;
     ModelSearchFnc fnc(dfsph);

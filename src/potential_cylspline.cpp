@@ -630,7 +630,7 @@ double DensityAzimuthalHarmonic::rho_m(int m, double R, double z) const
     return spl[m+mmax]->value(lR, lz);
 }
 
-double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos) const
+double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     int mmax = (spl.size()-1)/2;
     double lR = asinh(pos.R/Rscale), lz = asinh(pos.z/Rscale);
@@ -1072,7 +1072,7 @@ CylSpline::CylSpline(
 }
 
 void CylSpline::evalCyl(const coord::PosCyl &pos,
-    double* val, coord::GradCyl* der, coord::HessCyl* der2) const
+    double* val, coord::GradCyl* der, coord::HessCyl* der2, double /*time*/) const
 {
     int mmax = (spl.size()-1)/2;
     double Rscaled = asinh(pos.R/Rscale);

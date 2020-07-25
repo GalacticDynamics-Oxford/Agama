@@ -254,14 +254,14 @@ private:
     double       relError;    ///< requested relative error of density computation
     unsigned int maxNumEval;  ///< max # of DF evaluations per one density calculation
 
-    virtual double densityCar(const coord::PosCar &pos) const {
-        return densityCyl(toPosCyl(pos)); }
+    virtual double densityCar(const coord::PosCar &pos, double time) const {
+        return densityCyl(toPosCyl(pos), time); }
 
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCyl(toPosCyl(pos)); }
+    virtual double densitySph(const coord::PosSph &pos, double time) const {
+        return densityCyl(toPosCyl(pos), time); }
 
     /// compute the density as the integral of DF over velocity at a given position
-    virtual double densityCyl(const coord::PosCyl &point) const {
+    virtual double densityCyl(const coord::PosCyl &point, double /*time*/) const {
         double result;
         computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, false, relError, maxNumEval);
         return result;

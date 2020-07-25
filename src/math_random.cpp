@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <ctime>
+#include <algorithm>
 
 #ifdef _OPENMP
 #include <omp.h>

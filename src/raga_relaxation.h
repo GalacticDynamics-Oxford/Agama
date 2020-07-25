@@ -1,7 +1,7 @@
 /** \file    raga_relaxation.h
     \brief   Simulate the effect of two-body relaxation (part of the Raga code)
     \author  Eugene Vasiliev
-    \date    2013-2017
+    \date    2013-2020
 
     This module simulates the effect of two-body (collisional) relaxation,
     i.e., is the main component of the Monte Carlo approach to stellar dynamics.
@@ -67,6 +67,9 @@
 */
 #pragma once
 #include "raga_base.h"
+#include "particles_base.h"
+#include "potential_analytic.h"
+#include <string>
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
 namespace galaxymodel {
@@ -179,7 +182,7 @@ public:
         const ParamsRelaxation& params,
         const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
-        const BHParams& bh);
+        const potential::KeplerBinaryParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
@@ -206,7 +209,7 @@ private:
         (if this is a binary black hole, it is represented by a single point mass
         at origin in the sphericalized potential)
     */
-    const BHParams& bh;
+    const potential::KeplerBinaryParams& bh;
 
     /** last time when the spherical model was written into a text file  */
     double prevOutputTime;

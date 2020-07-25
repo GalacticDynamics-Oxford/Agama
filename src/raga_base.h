@@ -39,67 +39,9 @@
 */
 #pragma once
 #include "orbit.h"
-#include "particles_base.h"
-#include <string>
 
 /** The Monte Carlo stellar-dynamical code Raga */
 namespace raga {
-
-//------ RAGA binary black hole parameters ------//
-
-/** Parameters describing the central single or binary supermassive black hole (BH) */
-struct BHParams {
-    double mass;  ///< mass of the central black hole or total mass of the binary
-    double q;     ///< binary BH mass ratio (0<=q<=1)
-    double sma;   ///< binary BH semimajor axis
-    double ecc;   ///< binary BH eccentricity (0<=ecc<1)
-    double phase; ///< binary BH orbital phase (0<=phase<2*pi)
-
-    /// set defaults
-    BHParams() : mass(0), q(0), sma(0), ecc(0), phase(0) {}
-
-    /** Compute the position and velocity of the two components of the binary black hole
-        at the time 't'.
-        if this is a single black hole, it stays at origin with zero velocity,
-        and in case of a binary, its center of mass is fixed at origin.
-        Output arrays of length 2 each will contain the x- and y-coordinates and
-        corresponding velocities of both components of the binary at time 't';
-        its orbit is assumed to lie in the x-y plane and directed along the x axis.
-    */
-    void keplerOrbit(double t, double bhX[], double bhY[], double bhVX[], double bhVY[]) const;
-
-    /** Compute the time-dependent potential of the two black holes at the given point */
-    double potential(double time, const coord::PosCar& point) const;
-};
-
-
-//------ RAGA orbit integration ------//
-
-/** The function supplied to the `orbit::integrate()` routine, providing the time derivative
-    of position/velocity vector. It is computed from the composite potential of
-    the stellar distribution (time-independent for the duration of the episode)
-    plus possibly the central black hole(s), which may be time-dependent in case of a binary.
-*/
-class RagaOrbitIntegrator: public math::IOdeSystem {
-    const potential::BasePotential& pot;  ///< the time-independent stellar potential
-    const BHParams& bh;                   ///< the central black hole [binary] parameters
-public:
-    RagaOrbitIntegrator(const potential::BasePotential& _pot, const BHParams& _bh) :
-        pot(_pot), bh(_bh) {}
-    
-    /// compute the time derivative of the position/velocity vector at time t
-    virtual void eval(const double t, const double x[], double dxdt[]) const;
-
-    /// provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
-    /// to improve the total energy conservation
-    virtual double getAccuracyFactor(const double t, const double x[]) const;
-
-    /** The size of the position/velocity vector */
-    virtual unsigned int size() const { return 6; }
-};
-
-
-//------ RAGA tasks ------//
 
 /** Prototype of a RAGA task that handles a specific aspect of the evolution.
     Instances of derived classess are created at the beginning of the simulation

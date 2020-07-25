@@ -181,9 +181,9 @@ bool testPotential(const potential::BasePotential& potential)
         // only an approximation and not infinitely smooth, thus its interpolated version
         // is not required to be exceedingly accurate
         double tol =
-            potential.name() == potential::CylSpline   ::myName() ? 5.0 :
-            potential.name() == potential::Multipole   ::myName() ? 10. :
-            potential.name() == potential::CompositeCyl::myName() ? 200 : 1.;
+            potential.name() == potential::CylSpline::myName() ? 5.0 :
+            potential.name() == potential::Multipole::myName() ? 10. :
+            potential.name() == potential::Composite::myName() ? 200 : 1.;
         std::cout << "Density-weighted RMS errors"
         ": Phi(r)="     + checkLess(errPhiI, 1e-10 * tol, ok) +
         ", dPhi/dr="    + checkLess(errdPhiI,1e-08 * tol, ok) +

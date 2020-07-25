@@ -5,9 +5,6 @@
 
 namespace math{
 
-inline bool isFinite(double x) { return x>-INFINITY && x<INFINITY; }
-inline double pow_2(double x)  { return x*x; }
-
 /* ----------------- ODE integrators ------------- */
 
 double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], double accAbs, double accRel)
@@ -69,11 +66,13 @@ double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], 
 
 /* --- DOP853 high-accuracy Runge-Kutta integrator --- */
 
-void OdeSolverDOP853::init(const double stateNew[])
+void OdeSolverDOP853::init(const double stateNew[], double timeNew)
 {
     // copy the vector x
     for(int d=0; d<NDIM; d++)
         state[d] = stateNew[d];
+    if(timeNew==timeNew)
+        time = timeNew;
     // obtain the derivatives dx/dt
     odeSystem.eval(time, stateNew, /*where to store the derivs*/ &state[NDIM]);
     if(nextTimeStep == 0)
@@ -407,13 +406,15 @@ Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem) :
 }
 
 template<int NDIM>
-void Ode2SolverGL3<NDIM>::init(const double stateNew[])
+void Ode2SolverGL3<NDIM>::init(const double stateNew[], double timeNew)
 {
     for(int d=0; d<NDIM; d++) {
         state[d] = stateNew[d];
         state[d+NDIM] = stateNew[d+NDIM];
         p[d] = q[d] = r[d] = 0;
     }
+    if(timeNew==timeNew)
+        time = timeNew;
 }
 
 template<int NDIM>
@@ -563,13 +564,16 @@ Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem) :
 }
 
 template<int NDIM>
-void Ode2SolverGL4<NDIM>::init(const double stateNew[])
+void Ode2SolverGL4<NDIM>::init(const double stateNew[], double timeNew)
 {
     for(int d=0; d<NDIM; d++) {
         state[d] = stateNew[d];
         state[d+NDIM] = stateNew[d+NDIM];
         p[d] = q[d] = r[d] = s[d] = 0;
     }
+    if(timeNew==timeNew)
+        time = timeNew;
+
 }
 
 template<int NDIM>

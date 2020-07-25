@@ -97,10 +97,12 @@ class RuntimeTrajectory: public BaseRuntimeFnc {
     /// a single (last point) is recorded, otherwise 0th point contains the initial conditions.
     std::vector< std::pair<coord::PosVelT<CoordT>, double> >& trajectory;
 
+    double t0;  ///< initial time (recorded at the beginning of the first timestep)
+
 public:
     RuntimeTrajectory(double _samplingInterval,
         std::vector<std::pair<coord::PosVelT<CoordT>, double> >& _trajectory) :
-        samplingInterval(_samplingInterval), trajectory(_trajectory) {}
+        samplingInterval(_samplingInterval), trajectory(_trajectory), t0(NAN) {}
 
     virtual StepResult processTimestep(
         const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
@@ -184,10 +186,11 @@ struct OrbitIntParams {
                 normally this would be an instance of `OrbitIntegrator<CoordT>`;
     \param[in]  runtimeFncs  is the list of runtime functions that are called after each
                 internal timestep of the ODE integrator (for instance, to store the trajectory);
-    \param[in]  params  are the extra parameters for the integration (default values may be used).
+    \param[in]  params  are the extra parameters for the integration (default values may be used);
+    \param[in]  startTime  is the initial time of the integration (default 0).
     \return     the end state of the orbit integration at the time when it is terminated
-                (either totalTime or earlier -- the latter may occur if any of the runtime functions
-                requested the integration to be terminated by returning SR_TERMINATE,
+                (either startTime+totalTime or earlier -- the latter may occur if any of the runtime
+                functions requested the integration to be terminated by returning SR_TERMINATE,
                 or if the ODE solver returned an error (e.g. a zero or too small timestep),
                 or the number of steps exceeded the limit).
     \throw      any possible exceptions from the ODE solver or the runtime functions.
@@ -198,7 +201,8 @@ coord::PosVelT<CoordT> integrate(
     const double totalTime,
     const math::IOdeSystem& orbitIntegrator,
     const RuntimeFncArray&  runtimeFncs = RuntimeFncArray(),
-    const OrbitIntParams&   params = OrbitIntParams());
+    const OrbitIntParams&   params = OrbitIntParams(),
+    const double startTime = 0);
 
 
 /** A convenience function to compute the trajectory for the given initial conditions and potential
@@ -211,7 +215,8 @@ coord::PosVelT<CoordT> integrate(
                 of the orbit integrator, otherwise it is stored at these regular intervals;
     \param[in]  potential  is the gravitational potential in which the orbit is computed;
     \param[in]  params  are the extra parameters for the integration (default values may be used);
-    \return     the recorded trajectory (0th point is the initial conditions) - 
+    \param[in]  startTime  is the initial time of the integration (default 0).
+    \return     the recorded trajectory (0th point is the initial conditions) -
                 an array of pairs of position/velocity points and associated moments of time.
     \throw      an exception if something goes wrong.
 */
@@ -221,7 +226,8 @@ inline std::vector<std::pair<coord::PosVelT<CoordT>, double> > integrateTraj(
     const double totalTime,
     const double samplingInterval,
     const potential::BasePotential& potential,
-    const OrbitIntParams& params = OrbitIntParams())
+    const OrbitIntParams& params = OrbitIntParams(),
+    const double startTime = 0)
 {
     std::vector<std::pair<coord::PosVelT<CoordT>, double> > output;
     if(samplingInterval > 0)
@@ -230,7 +236,7 @@ inline std::vector<std::pair<coord::PosVelT<CoordT>, double> > integrateTraj(
     integrate(initialConditions, totalTime,
         OrbitIntegrator<CoordT>(potential),
         RuntimeFncArray(1, PtrRuntimeFnc(new RuntimeTrajectory<CoordT>(samplingInterval, output))),
-        params);
+        params, startTime);
     return output;
 }
 

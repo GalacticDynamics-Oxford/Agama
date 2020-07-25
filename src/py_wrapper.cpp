@@ -138,9 +138,26 @@ std::string toString(PyObject* obj)
         return "";
     if(PyString_Check(obj))
         return std::string(PyString_AsString(obj));
-    if(PyNumber_Check(obj))
-        return utils::toString(PyFloat_AsDouble(obj), 18);  // keep full precision in the string
+    if(PyNumber_Check(obj)) {
+        double value = PyFloat_AsDouble(obj);
+        if(!PyErr_Occurred())
+            return utils::toString(value, 18);  // keep full precision in the string
+        PyErr_Clear();   // otherwise something went wrong in conversion, carry on..
+    }
+    if(PySequence_Check(obj)) {
+        Py_ssize_t size = PySequence_Size(obj);
+        std::string str;
+        for(Py_ssize_t i=0; i<size; i++) {
+            if(i>0) str += ",";
+            PyObject* elem = PySequence_GetItem(obj, i);
+            str += toString(elem);
+            Py_XDECREF(elem);
+        }
+        return str;
+    }
     PyObject* s = PyObject_Str(obj);
+    if(!s)
+        return "";
     std::string str = PyString_AsString(s);
     Py_DECREF(s);
     return str;
@@ -341,6 +358,26 @@ inline bool noNamedArgs(PyObject* namedArgs)
         return false;
     }
     return true;
+}
+
+/// parse a single optional named argument and store its floating-point value in "value",
+/// or raise an exception if the arguments are incorrect
+inline bool getOptionalNamedArg(PyObject* namedArgs, const char* name, double &value)
+{
+    if(namedArgs && PyDict_Check(namedArgs)) {
+        if(PyDict_Size(namedArgs)==1) {
+            PyObject* arg = PyDict_GetItemString(namedArgs, name);
+            if(arg) {
+                value = toDouble(arg, /*default*/ NAN);
+                if(value == value)
+                    return true;
+            }
+        }
+        PyErr_SetString(PyExc_ValueError, ("Only one optional keyword argument "+
+            std::string(name)+"=(number) is allowed").c_str());
+        return false;
+    } else   // otherwise no named arguments -- keep the existing value and have no problem
+        return true;
 }
 
 /// find an item in the Python dictionary using case-insensitive key comparison
@@ -891,7 +928,9 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "(Disk or Sersic - in the center, Nuker - at scaleRadius).\n" \
     "  densityNorm=...   normalization of density profile (Spheroid).\n" \
     "  W0=...  dimensionless central potential in King models.\n" \
-    "  trunc=...  truncation strength in King models.\n"
+    "  trunc=...  truncation strength in King models.\n" \
+    "  center=...  offset of the potential from origin - can be either " \
+    "a triplet of numbers, or a file name with time-dependent offsets.\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -946,11 +985,11 @@ public:
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual const char* name() const { return fncname.c_str(); };
-    virtual double densityCyl(const coord::PosCyl &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densityCar(const coord::PosCar &pos) const {
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const {
+        return densityCar(toPosCar(pos), 0); }
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const {
+        return densityCar(toPosCar(pos), 9); }
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const {
         double xyz[3];
         unconvertPos(pos, xyz);
         npy_intp dims[]  = {1, 3};
@@ -1016,6 +1055,10 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
 // (forward declaration, the function will be defined later)
 potential::PtrPotential getPotential(PyObject* pot_obj);
+
+// create a Python Potential object and initialize it with an existing instance of C++ potential class
+// (forward declaration, the function will come later)
+PyObject* createPotentialObject(const potential::PtrPotential& pot);
 
 /// create a Python Density object and initialize it with an existing instance of C++ density class
 PyObject* createDensityObject(const potential::PtrDensity& dens)
@@ -1132,24 +1175,28 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 /// compute the density at one or more points
 class FncDensityDensity: public BatchFunction {
     const potential::BaseDensity& dens;
+    const double time;
     double* outputBuffer;
 public:
-    FncDensityDensity(PyObject* input, const potential::BaseDensity& _dens) :
-        BatchFunction(/*input length*/ 3, input), dens(_dens)
+    FncDensityDensity(PyObject* input, const potential::BaseDensity& _dens, double _time) :
+        BatchFunction(/*input length*/ 3, input), dens(_dens), time(_time * conv->timeUnit)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3]))) /
+            dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])), time) /
             (conv->massUnit / pow_3(conv->lengthUnit));
     }
 };
 
-PyObject* Density_density(PyObject* self, PyObject* args)
+PyObject* Density_density(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    return FncDensityDensity(args, *((DensityObject*)self)->dens).run(/*chunk*/256);
+    double time = 0;
+    if(!getOptionalNamedArg(namedArgs, "t", time))
+        return NULL;
+    return FncDensityDensity(args, *((DensityObject*)self)->dens, time).run(/*chunk*/256);
 }
 
 /// compute the surface density for an array of points
@@ -1282,57 +1329,127 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 
 PyObject* Density_name(PyObject* self)
 {
-    const char* name = ((DensityObject*)self)->dens->name();
-    if(name == potential::CompositeDensity::myName()) {
-        try{
-            const potential::CompositeDensity& dens =
-                dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens);
-            std::string tmp = std::string(name) + ": ";
-            for(unsigned int i=0; i<dens.size(); i++) {
-                if(i>0) tmp += ", ";
-                tmp += dens.component(i)->name();
-            }
-            return Py_BuildValue("s", tmp.c_str());
+    potential::PtrDensity dens = ((DensityObject*)self)->dens;
+    std::string name(dens->name());
+
+    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
+    // if the object was not an instance of this (or derived) class, this returns NULL
+
+    // check if this is a ShiftedDensity
+    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
+    if(sd) {
+        dens = sd->dens;
+        name = "Shifted " + name;
+    }
+
+    // check if this is a Shifted potential
+    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
+    if(sp) {
+        dens = sp->pot;
+        name = "Shifted " + name;
+    }
+
+    // now check if this is a CompositeDensity
+    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
+    if(cd) {
+        name += ": ";
+        for(unsigned int i=0; i<cd->size(); i++) {
+            if(i>0) name += ", ";
+            potential::PtrDensity comp = cd->component(i);
+            // this can again be a ShiftedDensity, in which case we add further details
+            if(dynamic_cast<const potential::ShiftedDensity*>(comp.get())) name += "Shifted ";
+            name += comp->name();
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_TypeError, e.what());
-            return NULL;
+    }
+
+    // now check if this is a Composite potential
+    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
+    if(cp) {
+        name += ": ";
+        for(unsigned int i=0; i<cp->size(); i++) {
+            if(i>0) name += ", ";
+            potential::PtrPotential comp = cp->component(i);
+            // this can again be a Shifted potential, in which case we add further details
+            if(dynamic_cast<const potential::Shifted*>(comp.get())) name += "Shifted ";
+            name += comp->name();
         }
-    } else
-        return Py_BuildValue("s", name);
+    }
+
+    return Py_BuildValue("s", name.c_str());
 }
 
 PyObject* Density_elem(PyObject* self, Py_ssize_t index)
 {
-    try{
-        const potential::CompositeDensity& dens =
-            dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens);
-        if(index<0 || index >= (Py_ssize_t)dens.size()) {
+    potential::PtrDensity dens = ((DensityObject*)self)->dens;
+    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
+    // if the object was not an instance of this (or derived) class, this returns NULL
+    
+    // check if this is a ShiftedDensity
+    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
+    if(sd)
+        dens = sd->dens;
+    
+    // check if this is a Shifted potential
+    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
+    if(sp)
+        dens = sp->pot;
+
+    // check if this is a CompositeDensity
+    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
+    if(cd) {
+        if(index<0 || index >= (Py_ssize_t)cd->size()) {
             PyErr_SetString(PyExc_IndexError, "Density component index out of range");
             return NULL;
         }
-        return createDensityObject(dens.component(index));
+        return createDensityObject(cd->component(index));
     }
-    catch(std::bad_cast&) {  // not a composite density: return a single element
-        if(index!=0) {
-            PyErr_SetString(PyExc_IndexError, "Density has just a single component");
+
+    // check if this is a Composite potential
+    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
+    if(cp) {
+        if(index<0 || index >= (Py_ssize_t)cp->size()) {
+            PyErr_SetString(PyExc_IndexError, "Potential component index out of range");
             return NULL;
         }
-        Py_INCREF(self);
-        return self;
+        return createPotentialObject(cp->component(index));
     }
+
+    // otherwise it's not a composite entity
+    PyErr_SetString(PyExc_IndexError, "Not a composite object");
+    return NULL;
 }
 
 Py_ssize_t Density_len(PyObject* self)
 {
-    try{
-        return dynamic_cast<const potential::CompositeDensity&>(*((DensityObject*)self)->dens).size();
-    }
-    catch(std::bad_cast&) {  // not a composite density
-        return 1;
-    }
+    potential::PtrDensity dens = ((DensityObject*)self)->dens;
+    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
+    // if the object was not an instance of this (or derived) class, this returns NULL
+
+    // check if this is a ShiftedDensity
+    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
+    if(sd)
+        dens = sd->dens;
+    
+    // check if this is a Shifted potential
+    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
+    if(sp)
+        dens = sp->pot;
+
+    // now check if this is a CompositeDensity
+    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
+    if(cd)
+        return cd->size();
+    
+    // now check if this is a Composite potential
+    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
+    if(cp)
+        return cp->size();
+
+    // otherwise it's not a composite thing (but we can't throw an exception, so just return -1)
+    return -1;
 }
 
+// indexing scheme is shared by both Density and Potential python classes
 static PySequenceMethods Density_sequence_methods = {
     Density_len, 0, 0, Density_elem,
 };
@@ -1342,9 +1459,9 @@ static PyMethodDef Density_methods[] = {
       "Return the name of the density or potential model\n"
       "No arguments\n"
       "Returns: string" },
-    { "density", Density_density, METH_VARARGS,
+    { "density", (PyCFunction)Density_density, METH_VARARGS | METH_KEYWORDS,
       "Compute density at a given point or array of points\n"
-      "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array\n"
+      "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array; optionally t=... (time)\n"
       "Returns: float or array of floats" },
     { "surfaceDensity", (PyCFunction)Density_surfaceDensity, METH_VARARGS | METH_KEYWORDS,
       "Compute surface density at a given point or array of points\n"
@@ -1494,6 +1611,9 @@ static const char* docstringPotential =
 /// Python type corresponding to Potential class, which is inherited from Density
 typedef struct {
     PyObject_HEAD
+    // note that the memory layout of both Density and Potential python classes are the same,
+    // but the sole member variable (a smart pointer) has different (but compatible) base types,
+    // allowing it to be used in class methods shared by both classes
     potential::PtrPotential pot;
 } PotentialObject;
 /// \endcond
@@ -1605,7 +1725,7 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
         for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
             components.push_back(((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot);
         }
-        return potential::PtrPotential(new potential::CompositeCyl(components));
+        return potential::PtrPotential(new potential::Composite(components));
     } else if(onlyDict) {
         std::vector<utils::KeyValueMap> paramsArr;
         for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
@@ -1666,36 +1786,41 @@ bool Potential_isCorrect(PyObject* self)
 /// compute the potential at one or more points
 class FncPotentialPotential: public BatchFunction {
     const potential::BasePotential& pot;
+    const double time;
     double* outputBuffer;
 public:
-    FncPotentialPotential(PyObject* input, const potential::BasePotential& _pot) :
-        BatchFunction(/*input length*/ 3, input), pot(_pot)
+    FncPotentialPotential(PyObject* input, const potential::BasePotential& _pot, double _time) :
+        BatchFunction(/*input length*/ 3, input), pot(_pot), time(_time * conv->timeUnit)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            pot.value(coord::PosCar(convertPos(&inputBuffer[indexPoint*3]))) /
+            pot.value(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])), time) /
             pow_2(conv->velocityUnit);
     }
 };
 
-PyObject* Potential_potential(PyObject* self, PyObject* args)
+PyObject* Potential_potential(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!Potential_isCorrect(self))
         return NULL;
-    return FncPotentialPotential(args, *((PotentialObject*)self)->pot).run(/*chunk*/256);
+    double time = 0;
+    if(!getOptionalNamedArg(namedArgs, "t", time))
+        return NULL;
+    return FncPotentialPotential(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
 }
 
 /// compute the force and optionally its derivatives
 template<bool DERIV>
 class FncPotentialForce: public BatchFunction {
     const potential::BasePotential& pot;
+    const double time;
     double* outputBuffers[2];
 public:
-    FncPotentialForce(PyObject* input, const potential::BasePotential& _pot) :
-        BatchFunction(/*input length*/ 3, input), pot(_pot)
+    FncPotentialForce(PyObject* input, const potential::BasePotential& _pot, double _time) :
+        BatchFunction(/*input length*/ 3, input), pot(_pot), time(_time * conv->timeUnit)
     {
         outputObject = DERIV ?
             allocateOutput<3, 6>(numPoints, outputBuffers) :
@@ -1706,7 +1831,7 @@ public:
         const coord::PosCar point = convertPos(&inputBuffer[ip*3]);
         coord::GradCar grad;
         coord::HessCar hess;
-        pot.eval(point, NULL, &grad, DERIV ? &hess : NULL);
+        pot.eval(point, NULL, &grad, DERIV ? &hess : NULL, time);
         // unit of force per unit mass is V/T
         const double convF = 1 / (conv->velocityUnit / conv->timeUnit);
         outputBuffers[0][ip*3 + 0] = -grad.dx   * convF;
@@ -1724,16 +1849,22 @@ public:
     }
 };
 
-PyObject* Potential_force(PyObject* self, PyObject* args) {
+PyObject* Potential_force(PyObject* self, PyObject* args, PyObject* namedArgs) {
     if(!Potential_isCorrect(self))
         return NULL;
-    return FncPotentialForce<false>(args, *((PotentialObject*)self)->pot).run(/*chunk*/256);
+    double time = 0;
+    if(!getOptionalNamedArg(namedArgs, "t", time))
+        return NULL;
+    return FncPotentialForce<false>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
 }
 
-PyObject* Potential_forceDeriv(PyObject* self, PyObject* args) {
+PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedArgs) {
     if(!Potential_isCorrect(self))
         return NULL;
-    return FncPotentialForce<true>(args, *((PotentialObject*)self)->pot).run(/*chunk*/256);
+    double time = 0;
+    if(!getOptionalNamedArg(namedArgs, "t", time))
+        return NULL;
+    return FncPotentialForce<true>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
 }
 
 /// compute the radius of a circular orbit as a function of energy or Lz
@@ -1911,87 +2042,19 @@ PyObject* Potential_Rperiapo(PyObject* self, PyObject* args)
     return result;
 }
 
-/// other routines of Potential class
-PyObject* Potential_name(PyObject* self)
-{
-    if(!Potential_isCorrect(self))
-        return NULL;
-    const char* name = ((PotentialObject*)self)->pot->name();
-    if(name == potential::CompositeCyl::myName()) {
-        try{
-            const potential::CompositeCyl& pot =
-                dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot);
-            std::string tmp = std::string(name) + ": ";
-            for(unsigned int i=0; i<pot.size(); i++) {
-                if(i>0) tmp += ", ";
-                tmp += pot.component(i)->name();
-            }
-            return Py_BuildValue("s", tmp.c_str());
-        }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_TypeError, e.what());
-            return NULL;
-        }
-    } else
-        return Py_BuildValue("s", name);
-}
-
-PyObject* Potential_elem(PyObject* self, Py_ssize_t index)
-{
-    if(!Potential_isCorrect(self))
-        return NULL;
-    try{
-        const potential::CompositeCyl& pot =
-            dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot);
-        if(index<0 || index >= (Py_ssize_t)pot.size()) {
-            PyErr_SetString(PyExc_IndexError, "Potential component index out of range");
-            return NULL;
-        }
-        return createPotentialObject(pot.component(index));
-    }
-    catch(std::bad_cast&) {  // not a composite potential
-        if(index != 0) {
-            PyErr_SetString(PyExc_IndexError, "Potential has just a single component");
-            return NULL;
-        }
-        Py_INCREF(self);
-        return self;
-    }
-}
-
-Py_ssize_t Potential_len(PyObject* self)
-{
-    if(!Potential_isCorrect(self))
-        return -1;
-    try{
-        return dynamic_cast<const potential::CompositeCyl&>(*((PotentialObject*)self)->pot).size();
-    }
-    catch(std::bad_cast&) {  // not a composite potential
-        return 1;
-    }
-}
-
-static PySequenceMethods Potential_sequence_methods = {
-    Potential_len, 0, 0, Potential_elem,
-};
-
 static PyMethodDef Potential_methods[] = {
-    { "name", (PyCFunction)Potential_name, METH_NOARGS,
-      "Return the name of the potential\n"
-      "No arguments\n"
-      "Returns: string" },
-    { "potential", Potential_potential, METH_VARARGS,
+    { "potential", (PyCFunction)Potential_potential, METH_VARARGS | METH_KEYWORDS,
       "Compute potential at a given point or array of points\n"
-      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets; optionally t=... (time)\n"
       "Returns: float or array of floats" },
-    { "force", Potential_force, METH_VARARGS,
+    { "force", (PyCFunction)Potential_force, METH_VARARGS | METH_KEYWORDS,
       "Compute force per unit mass (i.e. acceleration, -dPhi/dx) "
       "at a given point or array of points\n"
-      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets; optionally t=... (time)\n"
       "Returns: float[3] - x,y,z components of force, or array of such triplets" },
-    { "forceDeriv", Potential_forceDeriv, METH_VARARGS,
+    { "forceDeriv", (PyCFunction)Potential_forceDeriv, METH_VARARGS | METH_KEYWORDS,
       "Compute force per unit mass and its derivatives at a given point or array of points\n"
-      "Arguments: a triplet of floats (x,y,z) or array of such triplets\n"
+      "Arguments: a triplet of floats (x,y,z) or array of such triplets; optionally t=... (time)\n"
       "Returns: (float[3],float[6]) - x,y,z components of force, "
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
       "or if the input was an array of N points, then both items in the tuple are 2d arrays "
@@ -2034,7 +2097,7 @@ static PyTypeObject PotentialType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
-    0, 0, 0, 0, 0, 0, &Potential_sequence_methods, 0, 0, 0, Potential_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, /*sic!*/ &Density_sequence_methods, 0, 0, 0, /*sic!*/ Density_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE /*allow it to be subclassed*/, docstringPotential,
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, /*parent class*/ &DensityType, 0, 0, 0, 0,
     (initproc)Potential_init
@@ -4363,7 +4426,7 @@ static PyTypeObject TargetType = {
 //  --------------------------------------------
 ///@{
 
-/// description of orbit function
+/// description of ghMoments function
 static const char* docstringGhMoments =
     "Compute the coefficients of Gauss-Hermite expansion for line-of-sight velocity "
     "distribution functions represented by a B-spline, as used in the LOSVD Target model.\n"
@@ -4611,14 +4674,18 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 /// description of orbit function
 static const char* docstringOrbit =
-    "Compute a single orbit or a bunch of orbits in the given potential\n"
+    "Compute a single orbit or a bunch of orbits in the given potential.\n"
     "Named arguments:\n"
     "  ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in "
     "Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.\n"
     "  potential:  a Potential object or a compatible interface.\n"
     "  Omega (optional, default 0):  pattern speed of the rotating frame.\n"
-    "  time:  integration time - for a single orbit, just one number; "
-    "for a bunch of orbits, an array of length N.\n"
+    "  time:  total integration time - may be a single number (if computing a single orbit "
+    "or if it is identical for all orbits), or an array of length N (for a bunch of orbits).\n"
+    "  timestart (optional, default 0):  initial time for the integration (only matters if "
+    "the potential is time-dependent). The final time is thus timestart+time. "
+    "May be a single number (for one orbit or if it is identical for all orbits), "
+    "or an array of length N (for a bunch of orbits).\n"
     "  targets (optional):  zero or more instances of Target class (a tuple/list if more than one); "
     "each target collects its own data for each orbit.\n"
     "  trajsize (optional):  if given, turns on the recording of trajectory for each orbit "
@@ -4630,7 +4697,7 @@ static const char* docstringOrbit =
     "Both time and trajsize may differ between orbits.\n"
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
-    "  accuracy (optional, default 1e-8):  relative accuracy of ODE integrator.\n"
+    "  accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.\n"
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
     "  dtype (optional, default 'f32'):  storage data type for trajectories. "
     "The choice is between 32-bit and 64-bit float or complex: "
@@ -4676,13 +4743,13 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     double Omega = 0.;
     int haveLyap = 0;
     int traj_dtype = NPY_FLOAT;
-    PyObject *ic_obj = NULL, *time_obj = NULL, *pot_obj = NULL,
+    PyObject *ic_obj = NULL, *time_obj = NULL, *timestart_obj = NULL, *pot_obj = NULL,
         *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL;
     static const char* keywords[] =
-        {"ic", "time", "potential", "targets", "trajsize",
+        {"ic", "time", "timestart", "potential", "targets", "trajsize",
          "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOiddiO", const_cast<char**>(keywords),
-        &ic_obj, &time_obj, &pot_obj, &targets_obj, &trajsize_obj,
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiddiO", const_cast<char**>(keywords),
+        &ic_obj, &time_obj, &timestart_obj, &pot_obj, &targets_obj, &trajsize_obj,
         &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
         return NULL;
 
@@ -4727,18 +4794,37 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             "as the number of points in the initial conditions");
         return NULL;
     }
+    PyArrayObject *timestart_arr = timestart_obj==NULL ? NULL :
+        (PyArrayObject*) PyArray_FROM_OTF(timestart_obj, NPY_DOUBLE, 0);
+    if(timestart_arr != NULL && !( PyArray_NDIM(timestart_arr) == 0 ||
+         (PyArray_NDIM(timestart_arr) == 1 && (int)PyArray_DIM(timestart_arr, 0) == numOrbits) ) )
+    {
+        Py_DECREF(timestart_arr);
+        PyErr_SetString(PyExc_ValueError,
+            "Argument 'timestart' must either be a scalar or have the same length "
+            "as the number of points in the initial conditions");
+        return NULL;
+    }
 
     // unit-convert integration times
-    std::vector<double> integrTimes(numOrbits);
+    std::vector<double> timestart(numOrbits), timetotal(numOrbits);
     if(PyArray_NDIM(time_arr) == 0)
-        integrTimes.assign(numOrbits, PyFloat_AsDouble(time_obj) * conv->timeUnit);
+        timetotal.assign(numOrbits, PyFloat_AsDouble(time_obj) * conv->timeUnit);
     else
         for(npy_intp i=0; i<numOrbits; i++)
-            integrTimes[i] = pyArrayElem<double>(time_arr, i) * conv->timeUnit;
+            timetotal[i] = pyArrayElem<double>(time_arr, i) * conv->timeUnit;
+    if(timestart_arr == NULL)
+        timestart.assign(numOrbits, 0);
+    else if(PyArray_NDIM(timestart_arr) == 0)
+        timestart.assign(numOrbits, PyFloat_AsDouble(timestart_obj) * conv->timeUnit);
+    else
+        for(npy_intp i=0; i<numOrbits; i++)
+            timestart[i] = pyArrayElem<double>(timestart_arr, i) * conv->timeUnit;
     Py_DECREF(time_arr);
+    Py_XDECREF(timestart_arr);
     for(npy_intp orb=0; orb<numOrbits; orb++)
-        if(integrTimes[orb] <= 0) {
-            PyErr_SetString(PyExc_ValueError, "Argument 'time' must be positive");
+        if(timetotal[orb] < 0) {
+            PyErr_SetString(PyExc_ValueError, "Argument 'time' may not be negative");
             return NULL;
         }
 
@@ -4857,7 +4943,6 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         for(npy_intp orb = 0; orb < numOrbits; orb++) {
             if(fail || cbrk.triggered()) continue;
             try{
-                double integrTime = integrTimes.at(orb);
                 std::vector< std::pair<coord::PosVelCar, double> > traj;  // stores the trajectory
 
                 // construct runtime functions for each target that store the collected data
@@ -4875,7 +4960,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     double trajStep = trajSizes[orb]>0 ?
                         // output at regular intervals of time, unless trajSize=1
                         // (in that case, outputInterval=INFINITY, and we store only the last point)
-                        integrTime / (trajSizes[orb]-1) :
+                        timetotal[orb] / (trajSizes[orb]-1) :
                         0;  // if trajSize==0, this means store trajectory at every integration timestep
                     fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
                 }
@@ -4894,7 +4979,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
 
                 // integrate the orbit
-                orbit::integrate(initCond.at(orb), integrTime, *orbitIntegrator, fncs, params);
+                orbit::integrate(initCond.at(orb), timetotal[orb], *orbitIntegrator,
+                    fncs, params, timestart[orb]);
 
                 // finish the runtime functions
                 fncs.clear();

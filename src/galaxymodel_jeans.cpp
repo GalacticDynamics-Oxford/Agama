@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 #include <fstream>
 
 namespace galaxymodel{

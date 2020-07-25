@@ -1,4 +1,6 @@
 #include "potential_analytic.h"
+#include "math_core.h"
+#include "math_specfunc.h"
 #include <cmath>
 
 namespace potential{
@@ -16,7 +18,7 @@ void Plummer::evalDeriv(double r,
         *deriv2 = pot * (2 * pow_2(r * invrsq) - pow_2(scaleRadius * invrsq));
 }
 
-double Plummer::densitySph(const coord::PosSph &pos) const
+double Plummer::densitySph(const coord::PosSph &pos, double /*time*/) const
 {
     double invrsq = 1. / (pow_2(pos.r) + pow_2(scaleRadius));
     return 0.75/M_PI * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
@@ -62,7 +64,7 @@ void NFW::evalDeriv(double r,
 }
 
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
-    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const
+    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const
 {
     double zb    = sqrt(pow_2(pos.z) + pow_2(scaleRadiusB));
     double azb2  = pow_2(scaleRadiusA + zb);
@@ -88,7 +90,7 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
 }
 
 void Logarithmic::evalCar(const coord::PosCar &pos,
-    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
 {
     double m2 = coreRadius2 + pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2;
     if(potential)
@@ -109,7 +111,7 @@ void Logarithmic::evalCar(const coord::PosCar &pos,
 }
 
 void Harmonic::evalCar(const coord::PosCar &pos,
-    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
 {
     if(potential)
         *potential = 0.5*Omega2 * (pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2);
@@ -123,6 +125,80 @@ void Harmonic::evalCar(const coord::PosCar &pos,
         deriv2->dy2 = Omega2/p2;
         deriv2->dz2 = Omega2/q2;
         deriv2->dxdy=deriv2->dydz=deriv2->dxdz=0;
+    }
+}
+
+
+void KeplerBinaryParams::keplerOrbit(double t, double bhX[], double bhY[], double bhVX[], double bhVY[]) const
+{
+    if(sma!=0) {
+        double omegabh = sqrt(mass/pow_3(sma));
+        double eta = math::solveKepler(ecc, omegabh * t + phase);
+        double sineta, coseta;
+        math::sincos(eta, sineta, coseta);
+        double ell = sqrt(1 - ecc * ecc);
+        double a   = -sma / (1 + q);
+        double doteta = omegabh / (1 - ecc * coseta);
+        bhX [1] = (coseta - ecc) * a;
+        bhY [1] =  sineta * a * ell;
+        bhVX[1] = -doteta * a * sineta;
+        bhVY[1] =  doteta * a * coseta * ell;
+        bhX [0] = -q * bhX [1];
+        bhY [0] = -q * bhY [1];
+        bhVX[0] = -q * bhVX[1];
+        bhVY[0] = -q * bhVY[1];
+    } else {
+        bhX[0] = bhY[0] = bhVX[0] = bhVY[0] = bhX[1] = bhY[1] = bhVX[1] = bhVY[1] = 0;
+    }
+}
+
+double KeplerBinaryParams::potential(const coord::PosCar& point, double time) const
+{
+    double bhX[2], bhY[2], bhVX[2], bhVY[2], result = 0;
+    keplerOrbit(time, bhX, bhY, bhVX, bhVY);
+    int numbh = (sma != 0 && q != 0) ? 2 : 1;
+    double Mbh[2] = {
+        numbh==1 ? mass : mass / (1 + q),
+        mass * q / (1 + q) };
+    for(int b=0; b<numbh; b++) {
+        double x = point.x - bhX[b], y = point.y - bhY[b], z = point.z;
+        double invr2 = 1 / (pow_2(x) + pow_2(y) + pow_2(z));
+        result -= Mbh[b] * sqrt(invr2);
+    }
+    return result;
+}
+
+void KeplerBinary::evalCar(const coord::PosCar &pos,
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const
+{
+    double bhX[2], bhY[2], bhVX[2], bhVY[2];
+    params.keplerOrbit(time, bhX, bhY, bhVX, bhVY);
+    int numbh = (params.sma != 0 && params.q != 0) ? 2 : 1;
+    if(potential) *potential=0;
+    if(deriv)  deriv->dx=deriv->dy=deriv->dz=0;
+    if(deriv2) deriv2->dx2=deriv2->dy2=deriv2->dz2=deriv2->dxdy=deriv2->dxdz=deriv2->dydz=0;
+    double Mbh[2] = {
+        numbh==1 ? params.mass : params.mass / (1 + params.q),
+        params.mass * params.q / (1 + params.q) };
+    for(int b=0; b<numbh; b++) {
+        double x = pos.x - bhX[b], y = pos.y - bhY[b], z = pos.z;
+        double invr2 = 1 / (pow_2(x) + pow_2(y) + pow_2(z));
+        double minvr = Mbh[b] * sqrt(invr2);
+        if(potential)
+            *potential -= minvr;
+        if(deriv) {
+            deriv->dx += x * minvr * invr2;
+            deriv->dy += y * minvr * invr2;
+            deriv->dz += z * minvr * invr2;
+        }
+        if(deriv2) {
+            deriv2->dx2  += minvr * invr2 * (3 * pow_2(x) * invr2 - 1);
+            deriv2->dy2  += minvr * invr2 * (3 * pow_2(y) * invr2 - 1);
+            deriv2->dz2  += minvr * invr2 * (3 * pow_2(z) * invr2 - 1);
+            deriv2->dxdy += minvr * pow_2(invr2) * 3 * x * y;
+            deriv2->dydz += minvr * pow_2(invr2) * 3 * y * z;
+            deriv2->dxdz += minvr * pow_2(invr2) * 3 * x * z;
+        }
     }
 }
 

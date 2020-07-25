@@ -490,7 +490,8 @@ public:
     virtual void evalScalar(const PosT<CoordT>& x,
         double* value=NULL,
         GradT<CoordT>* deriv=NULL,
-        HessT<CoordT>* deriv2=NULL) const=0;
+        HessT<CoordT>* deriv2=NULL,
+        double time=0) const=0;
 };
 
 ///@}
@@ -575,6 +576,104 @@ template<> struct PosDeriv2T<ProlMod, Cyl>{
 template<> struct PosDeriv2T<Cyl, ProlMod>{
     double d2rhodR2, d2rhodRdz, d2rhodz2, d2taudR2, d2taudRdz, d2taudz2;
 };
+
+///@}
+/// \name   Convenience arithmetic routines for gradients/hessians in various coordinate systems
+///@{
+
+/// clear the content of a gradient
+template<typename CoordT>
+void clear(GradT<CoordT>& grad);
+
+/// clear the content of a hessian
+template<typename CoordT>
+void clear(HessT<CoordT>& hess);
+
+/// linear combination of two gradients:  A := a*A + b*B
+template<typename CoordT>
+void combine(GradT<CoordT>& A, const GradT<CoordT>& B, double a=1, double b=1);
+
+/// linear combination of two hessians:  A := a*A + b*B
+template<typename CoordT>
+void combine(HessT<CoordT>& A, const HessT<CoordT>& B, double a=1, double b=1);
+
+template<>
+inline void clear(GradCar& grad) { grad.dx = grad.dy = grad.dz = 0; }
+
+template<>
+inline void clear(GradCyl& grad) { grad.dR = grad.dz = grad.dphi = 0; }
+
+template<>
+inline void clear(GradSph& grad) { grad.dr = grad.dtheta = grad.dphi = 0; }
+
+template<>
+inline void clear(HessCar& hess)
+{ hess.dx2 = hess.dy2 = hess.dz2 = hess.dxdy = hess.dxdz = hess.dydz = 0; }
+
+template<>
+inline void clear(HessCyl& hess)
+{ hess.dR2 = hess.dz2 = hess.dphi2 = hess.dRdz = hess.dRdphi = hess.dzdphi = 0; }
+
+template<>
+inline void clear(HessSph& hess)
+{ hess.dr2 = hess.dtheta2 = hess.dphi2 = hess.drdtheta = hess.drdphi = hess.dthetadphi = 0; }
+
+template<>
+inline void combine(GradCar& A, const GradCar& B, double a, double b)
+{
+    A.dx = a * A.dx + b * B.dx;
+    A.dy = a * A.dy + b * B.dy;
+    A.dz = a * A.dz + b * B.dz;
+}
+
+template<>
+inline void combine(HessCar& A, const HessCar& B, double a, double b)
+{
+    A.dx2  = a * A.dx2  + b * B.dx2;
+    A.dy2  = a * A.dy2  + b * B.dy2;
+    A.dz2  = a * A.dz2  + b * B.dz2;
+    A.dxdy = a * A.dxdy + b * B.dxdy;
+    A.dxdz = a * A.dxdz + b * B.dxdz;
+    A.dydz = a * A.dydz + b * B.dydz;
+}
+
+template<>
+inline void combine(GradCyl& A, const GradCyl& B, double a, double b)
+{
+    A.dR   = a * A.dR   + b * B.dR;
+    A.dz   = a * A.dz   + b * B.dz;
+    A.dphi = a * A.dphi + b * B.dphi;
+}
+
+template<>
+inline void combine(HessCyl& A, const HessCyl& B, double a, double b)
+{
+    A.dR2    = a * A.dR2    + b * B.dR2;
+    A.dz2    = a * A.dz2    + b * B.dz2;
+    A.dphi2  = a * A.dphi2  + b * B.dphi2;
+    A.dRdz   = a * A.dRdz   + b * B.dRdz;
+    A.dRdphi = a * A.dRdphi + b * B.dRdphi;
+    A.dzdphi = a * A.dzdphi + b * B.dzdphi;
+}
+
+template<>
+inline void combine(GradSph& A, const GradSph& B, double a, double b)
+{
+    A.dr     = a * A.dr     + b * B.dr;
+    A.dtheta = a * A.dtheta + b * B.dtheta;
+    A.dphi   = a * A.dphi   + b * B.dphi;
+}
+
+template<>
+inline void combine(HessSph& A, const HessSph& B, double a, double b)
+{
+    A.dr2        = a * A.dr2        + b * B.dr2;
+    A.dtheta2    = a * A.dtheta2    + b * B.dtheta2;
+    A.dphi2      = a * A.dphi2      + b * B.dphi2;
+    A.drdtheta   = a * A.drdtheta   + b * B.drdtheta;
+    A.drdphi     = a * A.drdphi     + b * B.drdphi;
+    A.dthetadphi = a * A.dthetadphi + b * B.dthetadphi;
+}
 
 ///@}
 /// \name   Routines for conversion between position/velocity in different coordinate systems
@@ -668,7 +767,8 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos,
     double* value=NULL,
     GradT<outputCS>* deriv=NULL,
-    HessT<outputCS>* deriv2=NULL)
+    HessT<outputCS>* deriv2=NULL,
+    double time=0)
 {
     bool needDeriv = deriv!=NULL || deriv2!=NULL;
     bool needDeriv2= deriv2!=NULL;
@@ -677,10 +777,10 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
     PosDerivT <outputCS, evalCS> coordDeriv;
     PosDeriv2T<outputCS, evalCS> coordDeriv2;
     const PosT<evalCS> evalPos = needDeriv ? 
-        toPosDeriv<outputCS, evalCS>(pos, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
+        toPosDeriv<outputCS, evalCS>(pos, &coordDeriv, needDeriv2 ? &coordDeriv2 : NULL) :
         toPos<outputCS, evalCS>(pos);
     // compute the function in transformed coordinates
-    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : NULL, needDeriv2 ? &evalHess : NULL, time);
     if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
@@ -691,8 +791,12 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
     in the case that the computation requires the parameters of coordinate system evalCS */
 template<typename evalCS, typename outputCS>
 void evalAndConvert(const IScalarFunction<evalCS>& F,
-    const PosT<outputCS>& pos, const evalCS& coordsys,
-    double* value=NULL, GradT<outputCS>* deriv=NULL, HessT<outputCS>* deriv2=NULL)
+    const PosT<outputCS>& pos,
+    const evalCS& coordsys,
+    double* value=NULL,
+    GradT<outputCS>* deriv=NULL,
+    HessT<outputCS>* deriv2=NULL,
+    double time=0)
 {
     bool needDeriv = deriv!=NULL || deriv2!=NULL;
     bool needDeriv2= deriv2!=NULL;
@@ -701,10 +805,10 @@ void evalAndConvert(const IScalarFunction<evalCS>& F,
     PosDerivT <outputCS, evalCS> coordDeriv;
     PosDeriv2T<outputCS, evalCS> coordDeriv2;
     const PosT<evalCS> evalPos = needDeriv ? 
-        toPosDeriv<outputCS, evalCS>(pos, coordsys, &coordDeriv, needDeriv2 ? &coordDeriv2 : 0) :
+        toPosDeriv<outputCS, evalCS>(pos, coordsys, &coordDeriv, needDeriv2 ? &coordDeriv2 : NULL) :
         toPos<outputCS, evalCS>(pos, coordsys);
     // compute the function in transformed coordinates
-    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : NULL, needDeriv2 ? &evalHess : NULL, time);
     if(deriv)  // ... and convert gradient/hessian back to output coords if necessary.
         *deriv  = toGrad<evalCS, outputCS> (evalGrad, coordDeriv);
     if(deriv2)
@@ -727,7 +831,8 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     const PosT<outputCS>& pos,
     double* value=NULL,
     GradT<outputCS>* deriv=NULL,
-    HessT<outputCS>* deriv2=NULL)
+    HessT<outputCS>* deriv2=NULL,
+    double time=0)
 {
     bool needDeriv = deriv!=NULL || deriv2!=NULL;
     bool needDeriv2= deriv2!=NULL;
@@ -740,13 +845,13 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     PosDerivT <intermedCS, evalCS> coordDerivIE;
     PosDeriv2T<intermedCS, evalCS> coordDeriv2IE;
     const PosT<intermedCS> intermedPos = needDeriv ? 
-        toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0) :
+        toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : NULL) :
         toPos<outputCS, intermedCS>(pos);
     const PosT<evalCS> evalPos = needDeriv ? 
-        toPosDeriv<intermedCS, evalCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
+        toPosDeriv<intermedCS, evalCS>(intermedPos, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : NULL) :
         toPos<intermedCS, evalCS>(intermedPos);
     // compute the function in transformed coordinates
-    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : NULL, needDeriv2 ? &evalHess : NULL, time);
     if(needDeriv)  // may be needed for either grad or hess (or both)
         intermedGrad = toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
     if(deriv)
@@ -760,8 +865,12 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
 /** The same routine for the case that evalCS requires the parameters of coordinate system */
 template<typename evalCS, typename intermedCS, typename outputCS>
 void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
-    const PosT<outputCS>& pos, const evalCS& coordsys,
-    double* value=NULL, GradT<outputCS>* deriv=NULL, HessT<outputCS>* deriv2=NULL)
+    const PosT<outputCS>& pos,
+    const evalCS& coordsys,
+    double* value=NULL,
+    GradT<outputCS>* deriv=NULL,
+    HessT<outputCS>* deriv2=NULL,
+    double time=0)
 {
     bool needDeriv = deriv!=NULL || deriv2!=NULL;
     bool needDeriv2= deriv2!=NULL;
@@ -774,13 +883,14 @@ void evalAndConvertTwoStep(const IScalarFunction<evalCS>& F,
     PosDerivT <intermedCS, evalCS> coordDerivIE;
     PosDeriv2T<intermedCS, evalCS> coordDeriv2IE;
     const PosT<intermedCS> intermedPos = needDeriv ? 
-        toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : 0) :
+        toPosDeriv<outputCS, intermedCS>(pos, &coordDerivOI, needDeriv2 ? &coordDeriv2OI : NULL) :
         toPos<outputCS, intermedCS>(pos);
     const PosT<evalCS> evalPos = needDeriv ? 
-        toPosDeriv<intermedCS, evalCS>(intermedPos, coordsys, &coordDerivIE, needDeriv2 ? &coordDeriv2IE : 0) :
+        toPosDeriv<intermedCS, evalCS>(intermedPos, coordsys,
+            &coordDerivIE, needDeriv2 ? &coordDeriv2IE : NULL) :
         toPos<intermedCS, evalCS>(intermedPos, coordsys);
     // compute the function in transformed coordinates
-    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : 0, needDeriv2 ? &evalHess : 0);
+    F.evalScalar(evalPos, value, needDeriv ? &evalGrad : NULL, needDeriv2 ? &evalHess : NULL, time);
     if(needDeriv)  // may be needed for either grad or hess (or both)
         intermedGrad = toGrad<evalCS, intermedCS> (evalGrad, coordDerivIE);
     if(deriv)

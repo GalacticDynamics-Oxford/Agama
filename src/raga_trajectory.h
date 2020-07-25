@@ -14,6 +14,8 @@
 */
 #pragma once
 #include "raga_base.h"
+#include "particles_base.h"
+#include <string>
 
 namespace raga {
 

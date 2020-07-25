@@ -39,10 +39,10 @@ public:
 
 /// helper function to find the total energy in the time-dependent potential
 inline double totalEnergy(double time,
-    const potential::BasePotential& pot, const BHParams& bh, double posvel[6])
+    const potential::BasePotential& pot, const potential::KeplerBinaryParams& bh, double posvel[6])
 {
     const coord::PosCar pos(posvel[0], posvel[1], posvel[2]);
-    return pot.value(pos) + bh.potential(time, pos) +
+    return pot.value(pos, time) + bh.potential(pos, time) +
         0.5 * (pow_2(posvel[3]) + pow_2(posvel[4]) + pow_2(posvel[5]));
 }
 
@@ -151,7 +151,7 @@ RagaTaskBinary::RagaTaskBinary(
     const ParamsBinary& _params,
     const particles::ParticleArrayAux& _particles,
     const potential::PtrPotential& _ptrPot,
-    BHParams& _bh)
+    potential::KeplerBinaryParams& _bh)
 :
     params(_params),
     particles(_particles),
@@ -177,12 +177,13 @@ void RagaTaskBinary::startEpisode(double timeStart, double length)
     if(!params.outputFilename.empty() && firstEpisode) {
         std::ofstream strm(params.outputFilename.c_str());
         strm << "#Time   \tsemimajor_axis\teccentricity\tBH_mass \tq(mass_ratio)\t"
-            "hardening_star\thardening_gw\n" +
+            "hardening_star\thardening_gw\tBH_orbitphase\n" +
             utils::pp(timeStart, 10) + '\t' +
             utils::pp(bh.sma,    10) + '\t' +
             utils::pp(bh.ecc,    10) + '\t' +
             utils::pp(bh.mass,   10) + '\t' +
-            utils::pp(bh.q,      10) + "\t0       \t0\n";
+            utils::pp(bh.q,      10) + "\t0       \t0       \t"+
+            utils::pp(bh.phase,  10) + "\n";
         strm.close();
         strm.open((params.outputFilename+"_enc").c_str());
         strm << "#timeStart   duration Ebegin   Lbegin   deltaE   deltaLz  costheta  phi index\n";
@@ -202,9 +203,10 @@ void RagaTaskBinary::startEpisode(double timeStart, double length)
     the coalescence time on output.
     \return  the new set of binary orbit parameters.
 */
-static BHParams evolveBH(const BHParams& oldbh, double H, double K, double speedOfLight, double& maxTime)
+static potential::KeplerBinaryParams evolveBH(const potential::KeplerBinaryParams& oldbh,
+    double H, double K, double speedOfLight, double& maxTime)
 {
-    BHParams bh = oldbh;
+    potential::KeplerBinaryParams bh = oldbh;
     bh.phase = math::wrapAngle(bh.phase + sqrt(bh.mass/pow_3(bh.sma)) * maxTime);
     double timePassed = 0;
     // evolve semimajor axis (sma) and eccentricity (ecc), in several sub-steps if necessary
@@ -300,7 +302,8 @@ void RagaTaskBinary::finishEpisode()
             utils::pp(bh.mass, 10) + '\t' +
             utils::pp(bh.q,    10) + '\t' +
             utils::pp(H,       10) + '\t' +
-            utils::pp(Hgw,     10) + '\n';
+            utils::pp(Hgw,     10) + '\t' +
+            utils::pp(bh.phase,10) + "\n";
         strm.close();
         std::sort(allEncounters.begin(), allEncounters.end());
         strm.open((params.outputFilename+"_enc").c_str(), std::ios_base::app);

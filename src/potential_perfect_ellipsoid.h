@@ -43,25 +43,27 @@ private:
 
     /** implementations of the standard triad of coordinate transformations */
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const {
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const {
+        // no direct conversion exists, use two-step
         coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Car>
-            (*this, pos, coordSys, potential, deriv, deriv2);  // no direct conversion exists, use two-step
+            (*this, pos, coordSys, potential, deriv, deriv2, time);
     }
     virtual void evalCyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const {
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const {
         coord::evalAndConvert<coord::ProlSph, coord::Cyl>
-            (*this, pos, coordSys, potential, deriv, deriv2);
+            (*this, pos, coordSys, potential, deriv, deriv2, time);
     }
     virtual void evalSph(const coord::PosSph &pos,
-        double* potential, coord::GradSph* deriv, coord::HessSph* deriv2) const {
+        double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const {
         coord::evalAndConvertTwoStep<coord::ProlSph, coord::Cyl, coord::Sph>
-            (*this, pos, coordSys, potential, deriv, deriv2);  // use two-step conversion
+            (*this, pos, coordSys, potential, deriv, deriv2, time);  // use two-step conversion
     }
 
     /** the function that does the actual computation in prolate spheroidal coordinates 
         (implements the coord::IScalarFunction<ProlSph> interface) */
     virtual void evalScalar(const coord::PosProlSph& pos,
-        double* value=NULL, coord::GradProlSph* deriv=NULL, coord::HessProlSph* deriv2=NULL) const;
+        double* value=NULL, coord::GradProlSph* deriv=NULL, coord::HessProlSph* deriv2=NULL,
+        double time=0) const;
 
     virtual unsigned int numDerivs() const { return 2; }
 };

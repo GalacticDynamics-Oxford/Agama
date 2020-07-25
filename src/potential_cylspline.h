@@ -73,14 +73,14 @@ private:
     coord::SymmetryType sym;  ///< type of symmetry deduced from coefficients
     double Rscale;            ///< radial scaling factor
 
-    virtual double densityCar(const coord::PosCar &pos) const {
-        return densityCyl(toPosCyl(pos)); }
+    virtual double densityCar(const coord::PosCar &pos, double time) const {
+        return densityCyl(toPosCyl(pos), time); }
 
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCyl(toPosCyl(pos)); }
+    virtual double densitySph(const coord::PosSph &pos, double time) const {
+        return densityCyl(toPosCyl(pos), time); }
 
     /** Return density interpolated on the 2d grid, or zero if the point lies outside the grid */
-    virtual double densityCyl(const coord::PosCyl &pos) const;
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const;
 };
 
 /** Generic potential approximation based on Fourier expansion in azimuthal angle (phi)
@@ -235,7 +235,7 @@ private:
 
     /// compute potential and its derivatives
     virtual void evalCyl(const coord::PosCyl &pos,
-        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2) const;
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
 };
 
 

@@ -159,7 +159,7 @@ void updateTotalPotential(SelfConsistentModel& model)
     if(compPot.size()==1)
         model.totalPotential = compPot[0];
     else
-        model.totalPotential.reset(new potential::CompositeCyl(compPot));
+        model.totalPotential.reset(new potential::Composite(compPot));
 
     // finally, create the action finder for the new potential
     updateActionFinder(model);

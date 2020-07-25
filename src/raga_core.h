@@ -77,7 +77,7 @@ public:
     ParamsLosscone   paramsLosscone;       ///< parameters of loss-cone treatment
     ParamsBinary     paramsBinary;         ///< parameters of the binary BH evolution
     potential::PtrPotential ptrPot;        ///< stellar potential used in orbit integration
-    BHParams bh;                           ///< parameters of the central black hole(s)
+    potential::KeplerBinaryParams bh;      ///< parameters of the central black hole(s)
     particles::ParticleArrayAux particles; ///< particles (masses, radii, and phase-space coordinates)
     std::vector<PtrRagaTask> tasks;        ///< array of runtime tasks
     double Ekin, Epot;                     ///< kinetic and potential energy of the entire system

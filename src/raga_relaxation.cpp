@@ -220,7 +220,7 @@ potential::PtrPotential createSphericalPotential(
         std::vector<potential::PtrPotential> comp(2);
         comp[0] = potSph;
         comp[1] = potential::PtrPotential(new potential::Plummer(Mbh, 0));
-        return potential::PtrPotential(new potential::CompositeCyl(comp));
+        return potential::PtrPotential(new potential::Composite(comp));
     }
 }
 
@@ -269,7 +269,7 @@ RagaTaskRelaxation::RagaTaskRelaxation(
     const ParamsRelaxation& _params,
     const particles::ParticleArrayAux& _particles,
     const potential::PtrPotential& _ptrPot,
-    const BHParams& _bh)
+    const potential::KeplerBinaryParams& _bh)
 :
     params(_params),
     particles(_particles),

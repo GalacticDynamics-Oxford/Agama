@@ -29,8 +29,8 @@ private:
     double W0[20];              ///< pre-computed coefficients for lambda=0
 
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
-    virtual double densityCar(const coord::PosCar &pos) const;
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
+    virtual double densityCar(const coord::PosCar &pos, double time) const;
 
     /** compute the array of 20 coefficients W_{ijk} listed in Pfenniger(1984),
         in order of appearance in that paper;

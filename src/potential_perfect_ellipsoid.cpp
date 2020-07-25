@@ -15,7 +15,7 @@ OblatePerfectEllipsoid::OblatePerfectEllipsoid
 }
 
 void OblatePerfectEllipsoid::evalScalar(const coord::PosProlSph& pos,
-    double* val, coord::GradProlSph* deriv, coord::HessProlSph* deriv2) const
+    double* val, coord::GradProlSph* deriv, coord::HessProlSph* deriv2, double /*time*/) const
 {
     assert(&(pos.coordsys)==&coordSys);  // make sure we're not bullshited
     double absnu = fabs(pos.nu);

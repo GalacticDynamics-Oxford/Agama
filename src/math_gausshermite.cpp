@@ -4,6 +4,7 @@
 #include "math_specfunc.h"
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 #include <alloca.h>
 
 namespace math{

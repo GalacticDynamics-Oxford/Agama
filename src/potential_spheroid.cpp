@@ -198,24 +198,24 @@ math::PtrFunction createSersicDensity(const SersicParam& params)
     return math::PtrFunction(new math::LogLogSpline(gridr, gridrho));
 }
 
-double SpheroidDensity::densityCar(const coord::PosCar &pos) const
+double SpheroidDensity::densityCar(const coord::PosCar &pos, double /*time*/) const
 {
     return rho->value(sqrt(pow_2(pos.x) + pow_2(pos.y) / p2 + pow_2(pos.z) / q2));
 }
 
-double SpheroidDensity::densityCyl(const coord::PosCyl &pos) const
+double SpheroidDensity::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
     double R2 = p2 == 1 ? pow_2(pos.R) :
         pow_2(pos.R) * (1 + pow_2(sin(pos.phi)) * (1 / p2 - 1));
     return rho->value(sqrt(R2 + pow_2(pos.z) / q2));
 }
 
-double SpheroidDensity::densitySph(const coord::PosSph &pos) const
+double SpheroidDensity::densitySph(const coord::PosSph &pos, double /*time*/) const
 {
     if(p2==1 && q2==1)  // spherically-symmetric profile
         return rho->value(pos.r);
     else
-        return densityCar(toPosCar(pos));
+        return densityCar(toPosCar(pos), /*time*/0);
 }
 
 } // namespace

@@ -89,7 +89,7 @@ be used inside the constructor, but not any longer.
 // one may substitute it with the boost implementations.
 // Unfortunately a side effect is a pollution of root namespace...
 
-#if __cplusplus >= 201103L
+#if (__cplusplus >= 201103L) || (defined(_MSC_VER) && (_MSC_VER >= 1600))
 // have a C++11 compatible compiler
 #include <memory>
 using std::shared_ptr;

@@ -30,6 +30,9 @@
 */
 #pragma once
 #include "raga_base.h"
+#include "particles_base.h"
+#include "potential_analytic.h"
+#include <string>
 
 namespace raga {
 
@@ -48,13 +51,13 @@ typedef std::vector<BinaryEncounterData> BinaryEncounterList;
 
 /** Runtime function responsible for tracking the encounters with the binary black hole */
 class RuntimeBinary: public orbit::BaseRuntimeFnc {
-    const potential::BasePotential& pot;  ///< stellar potential
-    const BHParams& bh;                   ///< parameters of the binary BH
-    BinaryEncounterList& encountersList;  ///< place for storing the information about encounters
+    const potential::BasePotential& pot;     ///< stellar potential
+    const potential::KeplerBinaryParams& bh; ///< parameters of the binary BH
+    BinaryEncounterList& encountersList;     ///< place for storing the information about encounters
 public:
     RuntimeBinary(
         const potential::BasePotential& _pot,
-        const BHParams& _bh,
+        const potential::KeplerBinaryParams& _bh,
         BinaryEncounterList& _encountersList)
     :
         pot(_pot),
@@ -89,7 +92,7 @@ public:
         const ParamsBinary& params,
         const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
-        BHParams& bh);
+        potential::KeplerBinaryParams& bh);
     virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
@@ -106,9 +109,9 @@ private:
     /// the changes in particle energy and momentum during an encounter)
     const potential::PtrPotential& ptrPot;
 
-    /// reference to the parameters of the binary BH;
+    /// non-const reference to the parameters of the binary BH;
     /// its orbital parameters are updated at the end of the episode
-    BHParams& bh;
+    potential::KeplerBinaryParams& bh;
 
     /// beginning and duration of the current episode
     double episodeStart, episodeLength;

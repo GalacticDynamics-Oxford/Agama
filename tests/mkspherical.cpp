@@ -138,12 +138,19 @@ int main(int argc, char* argv[])
     potential::PtrPotential pot;         // the potential (may be different from the density)
     particles::ParticleArrayCar bodies;  // particles from the input N-body snapshot (if provided)
 
-    // input is a name of a density profile or a file with the cumulative mass profile
+    // input is a name of a density profile or a file with the cumulative mass or density profile
     if(!inputdensity.empty()) {
         // the choice is made based on whether 'density=...' specifies an existing file name
         if(utils::fileExists(inputdensity)) {
-            densInterp = potential::readMassProfile(inputdensity);
-            dens.reset(new potential::FunctionToDensityWrapper(densInterp));
+            try {
+                // try to read the input file as if it contained a cumulative mass profile
+                densInterp = potential::readMassProfile(inputdensity);
+                dens.reset(new potential::FunctionToDensityWrapper(densInterp));
+            }
+            catch(std::exception&) {
+                // try to read the input file as if it contained a DensitySphericalHarmonic model
+                dens = potential::readDensity(inputdensity);
+            }
         } else
             dens = potential::createDensity(args);
 
@@ -193,7 +200,7 @@ int main(int argc, char* argv[])
         std::vector<potential::PtrPotential> components(2);
         components[0] = potential::PtrPotential(new potential::Plummer(mbh, 0));
         components[1] = pot;
-        pot = potential::PtrPotential(new potential::CompositeCyl(components));
+        pot = potential::PtrPotential(new potential::Composite(components));
     }
 
     // construct the mapping between energy and phase volume

@@ -58,11 +58,11 @@ private:
     coord::SymmetryType sym;
     virtual const char* name() const { return "DensityWrapper"; };
     virtual coord::SymmetryType symmetry() const { return sym; }
-    virtual double densityCyl(const coord::PosCyl &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densitySph(const coord::PosSph &pos) const {
-        return densityCar(toPosCar(pos)); }
-    virtual double densityCar(const coord::PosCar &pos) const {
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const {
+        return densityCar(toPosCar(pos), 0); }
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const {
+        return densityCar(toPosCar(pos), 0); }
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const {
         double x[3] = {pos.x, pos.y, pos.z};
         return dens(x);  // call the FORTRAN routine
     }
@@ -84,7 +84,7 @@ private:
     virtual const char* name() const { return "PotentialWrapper"; };
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar*) const
+        double* potential, coord::GradCar* deriv, coord::HessCar*, double /*time*/) const
     {
         double x[3] = {pos.x, pos.y, pos.z};
         double f[3];

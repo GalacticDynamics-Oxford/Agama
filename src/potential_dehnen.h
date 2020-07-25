@@ -26,8 +26,8 @@ private:
     const double axisRatioZ; ///< axis ratio z/x of equidensity surfaces
 
     virtual void evalCar(const coord::PosCar &pos,
-        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2) const;
-    virtual double densityCar(const coord::PosCar &pos) const;
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
+    virtual double densityCar(const coord::PosCar &pos, double time) const;
 };
 
 }  // namespace

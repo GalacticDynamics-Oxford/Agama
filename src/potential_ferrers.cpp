@@ -21,7 +21,7 @@ Ferrers::Ferrers(double _mass, double _R, double _q, double _p):
     computeW(0, W0);
 }
 
-double Ferrers::densityCar(const coord::PosCar& pos) const
+double Ferrers::densityCar(const coord::PosCar& pos, double /*time*/) const
 {
     double m2 = pow_2(pos.x/a) + pow_2(pos.y/b) + pow_2(pos.z/c);
     return m2>1 ? 0 : rho0*pow_2(1-m2);
@@ -45,7 +45,7 @@ private:
 };
 
 void Ferrers::evalCar(const coord::PosCar &pos,
-    double* potential, coord::GradCar* grad, coord::HessCar* hess) const
+    double* potential, coord::GradCar* grad, coord::HessCar* hess, double /*time*/) const
 {
     double X2 = pow_2(pos.x), Y2 = pow_2(pos.y), Z2 = pow_2(pos.z);
     double m2 = X2/(a*a) + Y2/(b*b) + Z2/(c*c);

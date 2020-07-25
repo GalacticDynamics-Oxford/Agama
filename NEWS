@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+July 2020:
+Added an extra time argument for the density and potential interfaces, and modified the orbit
+integration routine to use a time-dependent potential.
+
 April 2020:
 Optimized computation of DF moments for the case of a composite DF, when output is requested for
 each DF component separately.
