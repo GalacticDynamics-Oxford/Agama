@@ -1,7 +1,7 @@
 /** \file    potential_factory.h
     \brief   Creation and input/output of Potential instances
     \author  Eugene Vasiliev
-    \date    2010-2015
+    \date    2010-2020
 
     This file provides several utility function to manage instances of BaseDensity and BasePotential: 
     creating a density or potential model from parameters provided in ConfigPotential, 
@@ -24,23 +24,25 @@
 namespace potential {
 
 /** Create an instance of density according to the parameters contained in the key-value map.
-    \param[in] params is the list of parameters ("density=..." is a required one);
+    \param[in] params is the list of parameters (should contain either "file=", or
+    "density=...", or "type=...");
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrDensity on success.
-    \throw     std::invalid_argument or std::runtime_error or other density-specific exception on failure
+    \throw     std::invalid_argument or std::runtime_error or other density-specific
+    exception on failure
 */
 PtrDensity createDensity(
     const utils::KeyValueMap& params,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of potential according to the parameters contained in the key-value map.
-    \param[in] params is the list of parameters ("type=..." is a required one);
+    \param[in] params is the list of parameters (should contain either "file=..." or "type=...");
     \param[in] converter is the unit converter for transforming the dimensional quantities 
     in parameters (such as mass and radii) into internal units; can be a trivial converter;
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
+    on failure (e.g., if some of the parameters are invalid or missing, or refer to non-existent files)
 */
 PtrPotential createPotential(
     const utils::KeyValueMap& params,
@@ -89,24 +91,10 @@ PtrPotential createPotential(
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
+    on failure (e.g., if some of the parameters are invalid or missing, or refer to non-existent files)
 */
 PtrPotential createPotential(
     const std::vector<utils::KeyValueMap>& params,
-    const units::ExternalUnits& converter = units::ExternalUnits());
-
-/** Create an instance of potential according to the parameters contained in an INI file.
-    \param[in] iniFileName is the name of an INI file that contains one or more sections 
-    with potential parameters, named as [Potential], [Potential1], ...
-    \param[in] converter is the unit converter for transforming the dimensional quantities 
-    in parameters (such as mass and radii) into internal units; can be a trivial converter.
-    \return    a new instance of PtrPotential on success (if there are several components
-    in the INI file, the returned potential is composite).
-    \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if some of the parameters are invalid or missing, or refer to a non-existent file).
-*/
-PtrPotential createPotential(
-    const std::string& iniFileName,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of potential expansion from the provided array of particles.
@@ -172,7 +160,8 @@ math::LogLogSpline readMassProfile(const std::string& fileName);
     \param[in]  filename  is the name of parameter file;
     \param[in]  converter provides the conversion from GalPot to internal units;
     \return     a new instance of PtrPotential;
-    \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
+    \throw      a std::runtime_error exception if file is not readable
+    or does not contain valid parameters.
 */
 PtrPotential readGalaxyPotential(
     const std::string& filename,
@@ -187,19 +176,23 @@ PtrPotential readGalaxyPotential(
     \param[in]  filename is the name of parameter file;
     \param[in]  unit     is the specification of internal unit system;
     \return     a new instance of PtrPotential;
-    \throw      a std::runtime_error exception if file is not readable or does not contain valid parameters.
+    \throw      a std::runtime_error exception if file is not readable
+    or does not contain valid parameters.
 */
 inline PtrPotential readGalaxyPotential(
     const std::string& filename,
     const units::InternalUnits& unit) 
 {   // create a temporary converter; velocity unit is not used
-    return readGalaxyPotential(filename, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
+    return readGalaxyPotential(filename,
+        units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
 }
 
 
-/** Create a density expansion from coefficients stored in a text file.
-    The file must contain coefficients for DensitySphericalHarmonic or DensityAzimuthalHarmonic;
-    the density type is determined automatically from the first line of the file.
+/** Create an elementary or a composite density from parameters provided in the INI file.
+    The file must have one or more sections with names starting from Density,
+    and each section should contain the parameters for an analytic density profile or
+    coefficients of DensitySphericalHarmonic or DensityAzimuthalHarmonic models 
+    previously stored by writeDensity().
     \param[in] coefFileName specifies the file to read;
     \param[in] converter is the unit converter for transforming the density coefficients;
     from dimensional into internal units; can be a trivial converter;
@@ -211,15 +204,18 @@ PtrDensity readDensity(
     const std::string& coefFileName,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
-/** Create a potential expansion from coefficients stored in a text file.
-    The file must contain coefficients for BasisSetExp, SplineExp, CylSpline, or Multipole;
-    the potential type is determined automatically from the first line of the file.
-    \param[in] coefFileName specifies the file to read;
-    \param[in] converter is the unit converter for transforming the potential coefficients;
-    from dimensional into internal units; can be a trivial converter;
-    \return    a new instance of PtrPotential on success;
+/** Create an elementary or composite potential according to the parameters contained in an INI file.
+    \param[in] iniFileName is the name of an INI file that contains one or more sections
+    with potential parameters, named as [Potential], [Potential1], ...
+    These sections may contain references to other files with potential parameters (file=...),
+    or parameters of analytic potential models, or coefficients of Multipole or CylSpline
+    potential expansions previously stored by writePotential().
+    \param[in] converter is the unit converter for transforming the dimensional quantities
+    in parameters (such as mass and radii) into internal units; can be a trivial converter.
+    \return    a new instance of PtrPotential on success (if there are several components
+    in the INI file, the returned potential is composite).
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
-    on failure (e.g., if the file does not exist, or does not contain valid coefficients).
+    on failure (e.g., if some of the parameters are invalid or missing, or refer to non-existent files)
 */
 PtrPotential readPotential(
     const std::string& coefFileName,
@@ -254,15 +250,6 @@ inline bool writePotential(
     const units::ExternalUnits& converter = units::ExternalUnits()) {
     return writeDensity(fileName, potential, converter); }
 
-
-/// return file extension for writing the coefficients of a given potential type,
-/// or empty string if it is neither one of the expansion types nor a composite potential
-const char* getCoefFileExtension(const std::string& potName);
-
-/// return file extension for writing the coefficients of a given potential object,
-/// or empty string if the potential type is not one of the expansion types
-inline const char* getCoefFileExtension(const BasePotential& p) {
-    return getCoefFileExtension(p.name()); }
 
 /** return the symmetry type encoded in the string.
     Spherical, Axisymmetric, Triaxial and None are recognized by the first letter,

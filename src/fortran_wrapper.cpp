@@ -122,7 +122,7 @@ std::vector<potential::PtrPotential> potentials;
 ///     call agama_initfromfile(C_OBJ, "file.ini")  ! now C_OBJ contains a valid instance of potential
 extern "C" void agama_initfromfile_(void* c_obj, char* inifilename, long /*len(c_obj)=8*/, long len)
 {
-    potentials.push_back(potential::createPotential(stdstr(inifilename, len)));
+    potentials.push_back(potential::readPotential(stdstr(inifilename, len)));
     const potential::BasePotential* ptr = potentials.back().get();
     memcpy(c_obj, &ptr, sizeof(void*));
 }

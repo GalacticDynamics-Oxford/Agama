@@ -187,16 +187,16 @@ bool KeyValueMap::unset(const std::string& key)
     return false;
 }
 
-std::string KeyValueMap::dump() const
+std::vector<std::string> KeyValueMap::dumpLines() const
 {
-    std::string str;
+    std::vector<std::string> lines;
     for(unsigned int i=0; i<items.size(); i++)
         if(items[i].first.empty()) {  // an empty line or a comment
-            str += items[i].second + '\n';
+            lines.push_back(items[i].second);
         } else {     // a normal key=value entry
-            str += items[i].first + '=' + items[i].second + '\n';
+            lines.push_back(items[i].first + '=' + items[i].second);
         }
-    return str;
+    return lines;
 }
 
 std::string KeyValueMap::dumpSingleLine() const
@@ -277,13 +277,14 @@ ConfigFile::~ConfigFile()
             return;
         }
         for(unsigned int is=0; is<sections.size(); is++) {
-            std::string dump = sections[is].second.dump();
-            if(!dump.empty()) {
+            std::vector<std::string> lines = sections[is].second.dumpLines();
+            if(!lines.empty()) {
                 if(!sections[is].first.empty())   // write the section name in brackets (if present)
                     strm << ("["+sections[is].first+"]\n");
-                strm << dump;
+                for(size_t i=0; i<lines.size(); i++)
+                    strm << lines[i] << '\n';
                 // add an empty line after a section if it did not contain one already
-                if(dump.size()>=2 && dump.substr(dump.size()-2) != "\n\n" && is<sections.size()-1)
+                if(!lines.back().empty() && is<sections.size()-1)
                     strm << '\n';
             }
         }

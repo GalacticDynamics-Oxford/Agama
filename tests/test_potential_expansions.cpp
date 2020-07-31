@@ -62,7 +62,7 @@ PtrPotential createFromFile(
     params.set("lmax", 6);
     PtrPotential newpot = potential::createPotential(params);
     std::remove(fileName.c_str());
-    std::remove((fileName+potential::getCoefFileExtension(potType)).c_str());
+    std::remove((fileName+".pot").c_str());
     return newpot;
 }
 

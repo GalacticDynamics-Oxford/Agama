@@ -3,7 +3,8 @@ breaking changes in API are listed at the end.
 
 July 2020:
 Added an extra time argument for the density and potential interfaces, and modified the orbit
-integration routine to use a time-dependent potential.
+integration routine to use a time-dependent potential. Also modified storage format for
+potential expansion coefficients.
 
 April 2020:
 Optimized computation of DF moments for the case of a composite DF, when output is requested for
@@ -84,6 +85,12 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+July 2020:
+[C++] modified the format for storing potential expansion coefficients to unify it with
+the INI files containing all other potential parameters. Hence the routines
+createPotential("filename.ini") and readPotential("file.coefs") have both been superseded
+with readPotential("filename.ini"). No changes in the Python interface.
 
 April 2020:
 [C++, Python]  interface for computing DF moments has been modified to provide an option

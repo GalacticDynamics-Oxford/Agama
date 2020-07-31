@@ -101,7 +101,7 @@ int main(int argc, const char* argv[]) {
     utils::KeyValueMap params(argc, argv);
     if(argc==2 && std::string(argv[1]).find('=')==std::string::npos)
     {   // probably passed the ini file name
-        pot = potential::createPotential(argv[1], units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
+        pot = potential::readPotential(argv[1], units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));
     } else if(argc>1 && std::string(argv[1]).find('=')!=std::string::npos)
     {   // probably passed several key=value parameters
         pot = potential::createPotential(params, units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun));

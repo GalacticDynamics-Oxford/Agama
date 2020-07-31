@@ -32,7 +32,7 @@ public:
 
     /// initialize map from a single string in which all parameters are listed together,
     /// separated by any of white characters listed in the second argument
-    KeyValueMap(const std::string& params, const std::string& whitespace=", \t");
+    explicit KeyValueMap(const std::string& params, const std::string& whitespace=", \t");
 
     /// check if a key exists in the list
     bool contains(const std::string& key) const;
@@ -93,9 +93,9 @@ public:
     /// parse a key=value pair and append it to the map (does not change `modified` flag)
     void add(const char* keyValue);
 
-    /// dump the entire map into a single multi-line string, retaining all entries
-    /// (including comments and empty lines) joined with line breaks
-    std::string dump() const;
+    /// dump the entire map into an array of strings, retaining all entries
+    /// (including comments and empty lines)
+    std::vector<std::string> dumpLines() const;
 
     /// dump the entire map into a single line, omitting comments
     /// and joining entries with a space character

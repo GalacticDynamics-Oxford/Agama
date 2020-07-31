@@ -257,18 +257,22 @@ public:
         bool noWeights = weights.empty();
         assert(values.size() == nRows * Nvals && indcol.size() == nRows &&
             (noWeights || weights.size() == nRows));
-        BandMatrix<double> result(nCols, std::min<int>(Nvals-1, nCols-1), 0.);
+        // temporary storage for diagonal and above-diagonal band-matrix elements
+        std::vector<double> tmpresult(nCols*Nvals);
         for(size_t row=0; row<nRows; row++) {
             unsigned int ind = indcol[row], nvals = std::min<unsigned int>(Nvals, nCols-ind);
             double weight = noWeights ? 1. : weights[row];
-            // fill only the upper triangle of the symmetric matrix
+            // fill only the upper triangle (incl.diagonal) of the symmetric matrix
             for(unsigned int i=0; i<nvals; i++)
                 for(unsigned int j=i; j<nvals; j++)
-                    result(ind+i, ind+j) += weight * values[row*Nvals+i] * values[row*Nvals+j];
+                    tmpresult[(ind+i)*Nvals+j-i] += weight * values[row*Nvals+i] * values[row*Nvals+j];
         }
-        for(unsigned int j=0; j<nCols-1; j++)  // fill the remaining lower triangle of the banded matrix
-            for(unsigned int i=j+1; i<std::min<unsigned int>(nCols, j+Nvals); i++)
-                result(i, j) = result(j, i);
+        BandMatrix<double> result(nCols, std::min<int>(Nvals-1, nCols-1), 0.);
+        for(unsigned int j=0; j<nCols; j++)  // assign all elements of the band matrix
+            for(unsigned int i=j; i<std::min<unsigned int>(nCols, j+Nvals); i++) {
+                result(j, i) = tmpresult[j*(Nvals-1)+i];
+                result(i, j) = tmpresult[j*(Nvals-1)+i];
+            }
         return result;
     }
 

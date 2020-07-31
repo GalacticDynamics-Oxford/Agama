@@ -42,8 +42,8 @@ print("%g s to load %d disk particles (total mass=%g Msun) " \
 
 try:
     #3a. try to load potentials from previously stored text files instead of computing them
-    diskPot = agama.Potential(file="model_stars_final.coef_cyl")
-    haloPot = agama.Potential(file="model_dm_final.coef_mul")
+    diskPot = agama.Potential("model_stars_final.pot")
+    haloPot = agama.Potential("model_dm_final.pot")
 
 except:
     # 3b: these files don't exist on the first run, so we have to create the potentials
@@ -63,8 +63,8 @@ except:
         ((time.clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
 
     # save the potentials into text files; on the next call may load them instead of re-computing
-    diskPot.export("model_stars_final.coef_cyl")
-    haloPot.export("model_dm_final.coef_mul")
+    diskPot.export("model_stars_final.pot")
+    haloPot.export("model_dm_final.pot")
 
 #3c. combine the two potentials into a single composite one
 totalPot  = agama.Potential(diskPot, haloPot)

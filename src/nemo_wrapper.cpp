@@ -6,18 +6,16 @@
     The shared library agama.so can be used as a plugin in the NEMO
     stellar-dynamical toolbox, providing external potential that can
     be used, in particular, in the N-body code gyrfalcON.
-    The potential must be specified either as an INI file with all
+    The potential must be specified as an INI file with all
     parameters (possibly for a multi-component potential),
-    or as a file with potential expansion coefficients.
-    In both cases, the only free parameter is the pattern speed
+    possibly including potential expansion coefficients.
+    The only additional parameter is the pattern speed
     (Omega, optional, default is 0).
     The usage is as follows: in gyrfalcON, for instance, one adds
     `accname=agama accfile=params.ini [accpars=Omega]`
     to the command line arguments, and provides all necessary parameters.
     in the params.ini text file (see the reference documentation for
-    explanation of the options); alternatively one may use
-    `accname=agama accfile=my_potential_coefs [accpars=Omega]`
-    The choice is determined by the file extension (.ini vs any other).
+    explanation of the options).
     The ini file may contain multiple components and/or time-dependent
     features (such as center offset, acceleration, or an evolving sequence
     of potentials), which are fully supported by the NEMO interface.
@@ -176,11 +174,7 @@ extern "C" void inipotential(
     if(file==NULL || file[0]==0)
         throw std::runtime_error("Agama plugin for NEMO: "
             "Should provide the name of INI or potential coefficients file in accfile=...");
-    const std::string filename(file);
-    if(filename.size()>4 && filename.substr(filename.size()-4)==".ini")
-        mypot = potential::createPotential(filename);
-    else
-        mypot = potential::readPotential(filename);
+    mypot = potential::readPotential(file);
     Omega = *npar>=1 ? pars[0] : 0;
     fprintf(stderr, "Agama plugin for NEMO: Created an instance of %s potential", mypot->name());
     if(Omega != 0)

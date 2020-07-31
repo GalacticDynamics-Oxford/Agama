@@ -391,6 +391,17 @@ PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey)
     return NULL;
 }
 
+/// find and delete an item from Python dictionary using case-insensitive key comparison
+bool delItemFromPyDict(PyObject* dict, const char* itemkey)
+{
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(dict, &pos, &key, &value))
+        if(utils::stringsEqual(toString(key), itemkey))
+            return PyDict_DelItem(dict, key) == 0;
+    return false;
+}
+
 /// NumPy data type corresponding to the storage container type of additive models
 static const int STORAGE_NUM_T =
     sizeof(galaxymodel::StorageNumT) == sizeof(float)  ? NPY_FLOAT  :
@@ -937,7 +948,8 @@ static const char* docstringDensity =
     "Density is a class representing a variety of density profiles "
     "that do not necessarily have a corresponding potential defined.\n"
     "An instance of Density class is constructed using the following keyword arguments:\n"
-    "  type='...' or density='...'   the name of density profile (required), can be one of the following:\n"
+    "  type='...' or density='...'   the name of density profile (required), "
+    "can be one of the following:\n"
     "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, "
     "Disk, Spheroid, Nuker, Sersic, King.\n"
     DOCSTRING_DENSITY_PARAMS
@@ -947,7 +959,9 @@ static const char* docstringDensity =
     "  cumulmass=...  which should contain a table with two columns: radius and enclosed mass, "
     "both strictly positive and monotonically increasing.\n"
     "One may also load density expansion coefficients that were previously written to a text file "
-    "using the `export()` method, by providing the file name as an argument.\n"
+    "using the `export()` method, by providing the file name as an argument. "
+    "Such a file may contain any number of density components, each one in a separate "
+    "INI sections whose name starts with Density, e.g., [Density], [Density1], ...\n"
     "Finally, one may create a composite density from several Density objects by providing them as "
     "unnamed arguments to the constructor:  densum = Density(den1, den2, den3)\n\n"
     "An instance of Potential class may be used in all contexts when a Density object is required;\n"
@@ -1349,7 +1363,7 @@ PyObject* Density_name(PyObject* self)
         name = "Shifted " + name;
     }
 
-    // now check if this is a CompositeDensity
+    // check if this is a CompositeDensity
     const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
     if(cd) {
         name += ": ";
@@ -1362,7 +1376,7 @@ PyObject* Density_name(PyObject* self)
         }
     }
 
-    // now check if this is a Composite potential
+    // check if this is a Composite potential
     const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
     if(cp) {
         name += ": ";
@@ -1435,12 +1449,12 @@ Py_ssize_t Density_len(PyObject* self)
     if(sp)
         dens = sp->pot;
 
-    // now check if this is a CompositeDensity
+    // check if this is a CompositeDensity
     const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
     if(cd)
         return cd->size();
     
-    // now check if this is a Composite potential
+    // check if this is a Composite potential
     const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
     if(cp)
         return cp->size();
@@ -1534,15 +1548,15 @@ static const char* docstringPotential =
     "  - from a list of key=value arguments that specify an elementary potential class;\n"
     "  - from a tuple of dictionary objects that contain the same list of possible "
     "key/value pairs for each component of a composite potential;\n"
-    "  - from an INI file with these parameters for one or several components;\n"
-    "  - from a file with potential expansion coefficients or an N-body snapshot;\n"
+    "  - from an INI file with these parameters for one or several components "
+    "and/or with potential expansion coefficients previously stored by the export() method;\n"
     "  - from a tuple of existing Potential objects created previously "
     "(in this case a composite potential is created from these components).\n"
     "Note that all keywords and their values are not case-sensitive.\n\n"
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
-    "PerfectEllipsoid, Disk, Spheroid, Nuker, Sersic, King;\n"
+    "PerfectEllipsoid, Disk, Spheroid, Nuker, Sersic, King, KeplerBinary, UniformAcceleration;\n"
     "    or one of the expansion types:  Multipole or CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
@@ -1556,9 +1570,9 @@ static const char* docstringPotential =
     "either an instance of Density or Potential class, or a user-defined function "
     "'my_density(xyz)' returning the value of density computed simultaneously at N points, "
     "where xyz is a Nx3 array of points in cartesian coordinates (even if N=1, it's a 2d array).\n"
-    "  file='...'   the name of a file with potential coefficients for a potential "
-    "expansion (an alternative to density='...'), or with an N-body snapshot that "
-    "will be used to compute the coefficients.\n"
+    "  file='...'   the name of another INI file with potential parameters and/or "
+    "coefficients of a Multipole/CylSpline potential expansion, or an N-body snapshot file "
+    "that will be used to compute the coefficients of such expansion.\n"
     "  particles=(coords, mass)   array of point masses to be used in construction "
     "of a potential expansion (an alternative to density='...' or file='...' options): "
     "should be a tuple with two arrays - coordinates and mass, where the first one is "
@@ -1581,15 +1595,15 @@ static const char* docstringPotential =
     "  smoothing=...   amount of smoothing in Multipole initialized from an N-body snapshot.\n\n"
     "Most of these parameters have reasonable default values; the only necessary ones are "
     "`type`, and for a potential expansion, `density` or `file` or `particles`.\n"
-    "If the coefficiens of a potential expansion are loaded from a file, then the `type` argument "
-    "is not required (it will be inferred from the first line of the file), and the argument name "
+    "If the parameters of the potential (including the coefficients of a potential expansion) are"
+    "loaded from a file, then the `type` argument should not be provided, and the argument name "
     "`file=` may be omitted (i.e., may provide only the filename as an unnamed string argument).\n"
     "Examples:\n\n"
     ">>> pot_halo = Potential(type='Dehnen', mass=1e12, gamma=1, scaleRadius=100, p=0.8, q=0.6)\n"
     ">>> pot_disk = Potential(type='MiyamotoNagai', mass=5e10, scaleRadius=5, scaleHeight=0.5)\n"
     ">>> pot_composite = Potential(pot_halo, pot_disk)\n"
     ">>> pot_from_ini  = Potential('my_potential.ini')\n"
-    ">>> pot_from_coef = Potential('stored_coefs')\n"
+    ">>> pot_from_snapshot = Potential(type='Multipole', file='snapshot.dat')\n"
     ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses))\n"
     ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2)\n"
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
@@ -1660,9 +1674,13 @@ potential::PtrPotential getPotential(PyObject* pot_obj)
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* args)
 {
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(args);
     // check if the list of arguments contains an array of particles
     PyObject* particles_obj = getItemFromPyDict(args, "particles");
+    if(particles_obj) {
+        Py_INCREF(particles_obj);               // keep the object but remove it from the dictionary,
+        delItemFromPyDict(args, "particles");   // to avoid parsing it as a string
+    }
+    utils::KeyValueMap params = convertPyDictToKeyValueMap(args);
     if(particles_obj) {
         if(params.contains("file"))
             throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");
@@ -1670,7 +1688,6 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
             throw std::invalid_argument("Cannot provide both 'particles' and 'density' arguments");
         if(!params.contains("type"))
             throw std::invalid_argument("Must provide 'type=\"...\"' argument");
-        params.unset("particles");
         return potential::createPotential(params, convertParticles<coord::PosCar>(particles_obj), *conv);
     }
     // check if the list of arguments contains a density object
@@ -1702,17 +1719,8 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
 potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 {
     // if we have one string parameter, it could be the name of an INI file or a coefs file
-    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0))) {
-        std::string name(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)));
-        try{
-            // first attempt to treat it as a name of a coefficients file
-            return potential::readPotential(name, *conv);
-        }
-        catch(std::exception&) {
-            // if that failed, treat it as an INI file (this may also fail - then return an error)
-            return potential::createPotential(name, *conv);
-        }
-    }
+    if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
+        return potential::readPotential(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
     bool onlyPot = true, onlyDict = true;
     // first check the types of tuple elements
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {

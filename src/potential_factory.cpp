@@ -46,7 +46,8 @@ static const int GALPOT_NRAD = 50;
 */
 enum PotentialType {
 
-    PT_UNKNOWN,      ///< unspecified
+    PT_UNKNOWN,      ///< unspecified/not provided
+    PT_INVALID,      ///< provided but does not correspond to a known class
 
     // density interpolators
     PT_DENS_SPHHARM, ///< `DensitySphericalHarmonic`
@@ -119,7 +120,6 @@ struct AllParam
     unsigned int lmax;       ///< number of angular terms in spherical-harmonic expansion
     unsigned int mmax;       ///< number of angular terms in azimuthal-harmonic expansion
     double smoothing;        ///< amount of smoothing in Multipole initialized from an N-body snapshot
-    bool interpLinear;       ///< for an evolving potential, whether to use linear interpolation in time
     std::string file;        ///< name of file with coordinates of points, or coefficients of expansion
     std::string center;      ///< coordinates of the center offset or the name of a file with these offsets
     /// default constructor initializes the fields to some reasonable values
@@ -133,7 +133,7 @@ struct AllParam
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.), interpLinear(false)
+        lmax(6), mmax(6), smoothing(1.)
     {};
     /// convert to KeplerBinaryParams
     operator KeplerBinaryParams() const
@@ -147,7 +147,8 @@ struct AllParam
 //        -------------------------------------------------------------------------
 ///@{
 
-/// return the type of the potential or density model by its name, or PT_UNKNOWN if unavailable
+/// return the type of the potential or density model by its name,
+/// PT_UNKNOWN if the name is not provided, or PT_INVALID if it is provided incorrectly
 PotentialType getPotentialTypeByName(const std::string& name)
 {
     if(name.empty()) return PT_UNKNOWN;
@@ -174,21 +175,9 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, CompositeDensity::myName())) return PT_COMPOSITE_DENSITY;
     if(utils::stringsEqual(name, Composite       ::myName())) return PT_COMPOSITE_POTENTIAL;
     if(utils::stringsEqual(name, Evolving        ::myName())) return PT_EVOLVING;
-    return PT_UNKNOWN;
+    return PT_INVALID;
 }
 
-/// return file extension for writing the coefficients of potential of the given type,
-/// or empty string if the potential type is not one of the expansion types
-const char* getCoefFileExtension(PotentialType type)
-{
-    switch(type) {
-        case PT_CYLSPLINE:  return ".coef_cyl";
-        case PT_MULTIPOLE:  return ".coef_mul";
-        case PT_COMPOSITE_DENSITY:
-        case PT_COMPOSITE_POTENTIAL: return ".composite";
-        default: return "";
-    }
-}
 } // internal namespace
 
 // return the type of symmetry by its name, or ST_DEFAULT if unavailable
@@ -228,10 +217,6 @@ std::string getSymmetryNameByType(coord::SymmetryType type)
     }
 }
 
-/// return file extension for writing the coefficients of expansion of the given potential
-const char* getCoefFileExtension(const std::string& potName) {
-    return getCoefFileExtension(getPotentialTypeByName(potName)); }
-
 namespace{
 
 ///@}
@@ -254,7 +239,6 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.symmetryType        = getSymmetryTypeByName (kvmap.getString("Symmetry"));
     param.file                = kvmap.getString("File");
     param.center              = kvmap.getString("center");
-    param.interpLinear        = kvmap.getBoolAlt("interpLinear", "linearInterp", param.interpLinear);
     param.mass                = kvmap.getDouble("Mass", param.mass)
                               * conv.massUnit;
     param.surfaceDensity      = kvmap.getDoubleAlt("surfaceDensity", "Sigma0", param.surfaceDensity)
@@ -406,216 +390,396 @@ SersicParam parseSersicParam(const AllParam& param)
 }
 
 ///@}
-/// \name Factory routines for constructing various Potential classes from data stored in a stream
-//        ----------------------------------------------------------------------------------------
+/// \name Factory routines for constructing various Density & Potential classes from arrays of strings
+//        --------------------------------------------------------------------------------------------
 ///@{
 
-/// attempt to load coefficients of Multipole stored in a text file
-PtrPotential readPotentialMultipole(std::istream& strm, const units::ExternalUnits& converter)
+/// parse the array of spherical-harmonic coefficients
+/// for the Multipole potential or the DensitySphericalHarmonic
+bool parseSphericalHarmonics(std::vector<std::string>& lines, const AllParam& params,
+    /*output*/ std::vector<double>& gridr, std::vector< std::vector<double> > &coefs)
 {
-    std::string buffer;
+    if(lines.size() < params.gridSizeR+1)
+        return false;
+    unsigned int numTerms = pow_2(params.lmax+1);
+    coefs.assign(numTerms, std::vector<double>(params.gridSizeR));
+    gridr.resize(params.gridSizeR);
     std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int ncoefsRadial = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int ncoefsAngular = utils::toInt(fields[0]);
-    unsigned int numTerms = pow_2(ncoefsAngular+1);
-    std::vector< std::vector<double> >
-        coefsPhi (numTerms, std::vector<double>(ncoefsRadial)),
-        coefsdPhi(numTerms, std::vector<double>(ncoefsRadial));
-    std::vector< double > radii(ncoefsRadial);
-    ok &= std::getline(strm, buffer).good();  // ignored
-    ok &= std::getline(strm, buffer) && buffer.find("Phi") != std::string::npos;
-    std::getline(strm, buffer);  // header, ignored
-    for(int n=0; ok && n<ncoefsRadial; n++) {
-        ok &= std::getline(strm, buffer).good();
-        fields = utils::splitString(buffer, "# \t");
-        radii[n] = utils::toDouble(fields[0]);
-        for(unsigned int ind=1; ind < std::min<size_t>(fields.size(), 1+numTerms); ind++)
-            coefsPhi[ind-1][n] = utils::toDouble(fields[ind]);
+    for(unsigned int n=0; n<params.gridSizeR; n++) {
+        fields = utils::splitString(lines[n+1], " \t");
+        if(fields.size() != numTerms+1)
+            return false;
+        gridr[n] = utils::toDouble(fields[0]);
+        for(unsigned int ind=0; ind<numTerms; ind++)
+            coefs[ind][n] = utils::toDouble(fields[ind+1]);
     }
-    ok &= std::getline(strm, buffer).good();  // empty line
-    ok &= std::getline(strm, buffer).good() && buffer.find("dPhi/dr") != std::string::npos;
-    ok &= std::getline(strm, buffer).good();  // header, ignored
-    for(int n=0; ok && n<ncoefsRadial; n++) {
-        ok &= std::getline(strm, buffer).good();
-        fields = utils::splitString(buffer, "# \t");
-        for(unsigned int ind=1; ind < std::min<size_t>(fields.size(), 1+numTerms); ind++)
-            coefsdPhi[ind-1][n] = utils::toDouble(fields[ind]);
+    // remove the parsed lines from the array
+    lines.erase(lines.begin(), lines.begin()+params.gridSizeR+1);
+    return true;
+}
+
+/// parse azimuthal harmonics from the array of lines:
+/// one or more blocks corresponding to each m, where the block is a 2d matrix of values,
+/// together with the coordinates in the 1st line and 1st column
+bool parseAzimuthalHarmonics(std::vector<std::string>& lines, const AllParam& params,
+    /*output*/ std::vector<double>& gridR, std::vector<double>& gridz,
+    std::vector< math::Matrix<double> > &coefs)
+{
+    // total # of harmonics possible, not all of them need to be present in the file
+    coefs.resize(params.mmax*2+1);
+    gridR.resize(params.gridSizeR);
+    std::vector<std::string> fields;
+    // parse the array of lines until it is exhausted or an empty line is encountered
+    while(! (lines.empty() || lines[0].empty()) ) {
+        if(lines.size() < params.gridSizeR+2)
+            return false;   // not enough remaining lines
+        // 0th line is the index m
+        fields = utils::splitString(lines[0], " \t");
+        int m = utils::toInt(fields[0]);  // m (azimuthal harmonic index)
+        if(fields.size() != 2 || fields[1] != "#m" || m < -(int)params.mmax || m > (int)params.mmax)
+            return false;
+        // 1st line is the z-grid
+        fields = utils::splitString(lines[1], " \t");  // z-values
+        if(fields.size() != params.gridSizez+1 || fields[0][0] != '#')
+            return false;   // 0th element is comment, remaining are z-values
+        gridz.resize(params.gridSizez);
+        for(unsigned int iz=0; iz<params.gridSizez; iz++) {
+            gridz[iz] = utils::toDouble(fields[iz+1]);
+            if(iz>0 && gridz[iz]<=gridz[iz-1])
+                return false;  // the values of z must be in increasing order
+        }
+        coefs[m + params.mmax] = math::Matrix<double>(params.gridSizeR, params.gridSizez, 0);
+        // remaining lines are coefs
+        for(unsigned int iR=0; iR<params.gridSizeR; iR++) {
+            fields = utils::splitString(lines[iR+2], " \t");
+            if(fields.size() != params.gridSizez+1)
+                return false;  // 0th element is R-value, remaining are coefficients
+            gridR[iR] = utils::toDouble(fields[0]);
+            if(iR>0 && gridR[iR]<=gridR[iR-1])
+                return false;  // the values of R should be in increasing order
+            for(unsigned int iz=0; iz<params.gridSizez; iz++)
+                coefs[m + params.mmax](iR, iz) = utils::toDouble(fields[iz+1]);
+        }
+        // remove the parsed lines from the array and proceed to the next block for a different m
+        lines.erase(lines.begin(), lines.begin()+params.gridSizeR+2);
     }
-    if(!ok)
-        throw std::runtime_error("Error loading potential");
-    math::blas_dmul(converter.lengthUnit, radii);
-    for(unsigned int i=0; i<numTerms; i++) {
+    return true;
+}
+
+/// parse the array of coefficients and create a Multipole potential
+PtrPotential createMultipoleFromCoefs(std::vector<std::string>& lines,
+    const AllParam& params, const units::ExternalUnits& converter)
+{
+    std::vector< std::vector<double> > coefsPhi, coefsdPhi;
+    std::vector< double > gridr;
+    bool ok = lines.size() >= 2*params.gridSizeR+5 &&
+        lines[0] == "#Phi" && lines[params.gridSizeR+3] == "#dPhi/dr" &&
+        lines[1].size()>1 && lines[1][0] == '#' &&
+        lines[params.gridSizeR+4].size()>1 && lines[params.gridSizeR+4][0] == '#';
+    if(ok) {
+        lines.erase(lines.begin());
+        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefsPhi);
+        lines.erase(lines.begin(), lines.begin()+2);
+        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefsdPhi);
+    }
+    if(!ok || coefsPhi.size() != coefsdPhi.size())
+        throw std::runtime_error("Error loading Multipole potential");
+    math::blas_dmul(converter.lengthUnit, gridr);
+    for(unsigned int i=0; i<coefsPhi.size(); i++) {
         math::blas_dmul(pow_2(converter.velocityUnit), coefsPhi[i]);
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, coefsdPhi[i]);
     }
-    return PtrPotential(new Multipole(radii, coefsPhi, coefsdPhi)); 
+    return PtrPotential(new Multipole(gridr, coefsPhi, coefsdPhi));
 }
 
-/// read an array of azimuthal harmonics from text stream:
-/// one or more blocks corresponding to each m, where the block is a 2d matrix of values,
-/// together with the coordinates in the 1st line and 1st column
-bool readAzimuthalHarmonics(std::istream& strm,
-    int mmax, unsigned int size_R, unsigned int size_z,
-    std::vector<double>& gridR, std::vector<double>& gridz,
-    std::vector< math::Matrix<double> > &data)
+/// parse the array of coefficients and create a CylSpline potential
+PtrPotential createCylSplineFromCoefs(std::vector<std::string>& lines,
+    const AllParam& params, const units::ExternalUnits& converter)
 {
-    std::string buffer;
-    std::vector<std::string> fields;
-    bool ok=true;
-    // total # of harmonics possible, not all of them need to be present in the file
-    data.resize(mmax*2+1);
-    gridR.resize(size_R);
-    while(ok && std::getline(strm, buffer).good() && !strm.eof()) {
-        if(buffer.size()==0 || buffer[0] == '\n' || buffer[0] == '\r')
-            return ok;  // end block with an empty line
-        fields = utils::splitString(buffer, "# \t");
-        int m = utils::toInt(fields[0]);  // m (azimuthal harmonic index)
-        if(m < -mmax || m > mmax)
-            return false;
-        std::getline(strm, buffer);  // z-values
-        fields = utils::splitString(buffer, "# \t");
-        if(fields.size() != size_z+1)   // 0th element is comment
-            return false;
-        gridz.resize(size_z);
-        for(unsigned int iz=0; iz<size_z; iz++) {
-            gridz[iz] = utils::toDouble(fields[iz+1]);
-            if(iz>0 && gridz[iz]<=gridz[iz-1])
-                ok=false;  // the values of z must be in increasing order
-        }
-        gridR.resize(size_R);
-        data[m+mmax]=math::Matrix<double>(size_R, size_z, 0);
-        for(unsigned int iR=0; ok && iR<size_R; iR++) {
-            ok &= std::getline(strm, buffer).good();
-            fields = utils::splitString(buffer, "# \t");
-            gridR[iR] = utils::toDouble(fields[0]);
-            if(iR>0 && gridR[iR]<=gridR[iR-1])
-                ok=false;  // the values of R should be in increasing order
-            for(unsigned int iz=0; ok && iz<size_z; iz++) {
-                if(iz+1<fields.size())
-                    data[m+mmax](iR, iz) = utils::toDouble(fields[iz+1]);
-                else
-                    ok=false;
-            }
-        }
-    }
-    return ok;
-}
-
-/// attempt to load coefficients of CylSpline stored in a text file
-PtrPotential readPotentialCylSpline(std::istream& strm, const units::ExternalUnits& converter)
-{
-    std::string buffer;
-    std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    unsigned int size_R = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    unsigned int size_z = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int mmax = utils::toInt(fields[0]);
-    ok &= size_R>0 && size_z>0 && mmax>=0;
     std::vector<double> gridR, gridz;
     std::vector< math::Matrix<double> > Phi, dPhidR, dPhidz;
-    ok &= std::getline(strm, buffer).good() && buffer.find("Phi") != std::string::npos;
-    if(ok)
-        ok &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, Phi);
-    bool ok1 = std::getline(strm, buffer).good();  // empty line
-    ok1 &= buffer.find("dPhi/dR") != std::string::npos;
-    if(ok1)
-        ok1 &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, dPhidR);
-    ok1 &= std::getline(strm, buffer).good();  // empty line
-    ok1 &= buffer.find("dPhi/dz") != std::string::npos;
-    if(ok1)
-        ok1 &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, dPhidz);
-    ok1 &= dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size();
-    if(!ok1) {  // have to live without derivatives...
+    bool okpot = lines.size()>1 && lines[0] == "#Phi";
+    if(okpot) {
+        lines.erase(lines.begin());
+        okpot &= parseAzimuthalHarmonics(lines, params, /*output*/ gridR, gridz, Phi);
+    }
+    bool okder = okpot && lines.size()>2 && lines[0].empty() && lines[1] == "#dPhi/dR";
+    if(okder) {
+        lines.erase(lines.begin(), lines.begin()+2);
+        okder &= parseAzimuthalHarmonics(lines, params, /*output*/ gridR, gridz, dPhidR);
+    }
+    okder = okder && lines.size()>2 && lines[0].empty() && lines[1] == "#dPhi/dz";
+    if(okder) {
+        lines.erase(lines.begin(), lines.begin()+2);
+        okder &= parseAzimuthalHarmonics(lines, params, /*output*/ gridR, gridz, dPhidz);
+    }
+    okder &= dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size();
+    if(!okder) {  // have to live without derivatives...
         dPhidR.clear();
         dPhidz.clear();
     }
-    if(!ok)
-        throw std::runtime_error(std::string("Error loading potential ") + CylSpline::myName());
+    if(!okpot)
+        throw std::runtime_error("Error loading CylSpline potential");
     // convert units
     math::blas_dmul(converter.lengthUnit, gridR);
     math::blas_dmul(converter.lengthUnit, gridz);
     for(unsigned int i=0; i<Phi.size(); i++) {
         math::blas_dmul(pow_2(converter.velocityUnit), Phi[i]);
-        if(!ok1) continue;  // no derivs
+        if(!okder) continue;  // no derivs
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, dPhidR[i]);
         math::blas_dmul(pow_2(converter.velocityUnit)/converter.lengthUnit, dPhidz[i]);
     }
     return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
-PtrDensity readDensitySphericalHarmonic(std::istream& strm, const units::ExternalUnits& converter)
+/// parse the array of coefficients and create a SphericalHarmonic density
+PtrDensity createDensitySphericalHarmonicFromCoefs(std::vector<std::string>& lines,
+    const AllParam& params, const units::ExternalUnits& converter)
 {
-    std::string buffer;
-    std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int ncoefsRadial = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int ncoefsAngular = utils::toInt(fields[0]);
-    unsigned int numTerms = pow_2(ncoefsAngular+1);
-    std::getline(strm, buffer);  // unused
-    std::vector< std::vector<double> > coefs(numTerms);
-    std::vector< double > radii;
-    ok &= std::getline(strm, buffer) && buffer.find("rho") != std::string::npos;
-    std::getline(strm, buffer);  // header, ignored
-    for(int n=0; ok && n<ncoefsRadial; n++) {
-        ok &= std::getline(strm, buffer).good();
-        fields = utils::splitString(buffer, "# \t");
-        radii.push_back(utils::toDouble(fields[0]));
-        for(unsigned int ind=0; ind<numTerms; ind++)
-            coefs[ind].push_back( ind+1<fields.size() ? utils::toDouble(fields[ind+1]) : 0);
+    std::vector< std::vector<double> > coefs;
+    std::vector< double > gridr;
+    bool ok = lines.size() >= params.gridSizeR+2 &&
+        lines[0] == "#rho" && lines[1].size()>1 && lines[1][0] == '#';
+    if(ok) {
+        lines.erase(lines.begin());
+        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefs);
     }
     if(!ok)
         throw std::runtime_error(std::string("Error loading ") + DensitySphericalHarmonic::myName());
     // convert units
-    math::blas_dmul(converter.lengthUnit, radii);
+    math::blas_dmul(converter.lengthUnit, gridr);
     for(unsigned int i=0; i<coefs.size(); i++)
         math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), coefs[i]);
-    return PtrDensity(new DensitySphericalHarmonic(radii, coefs)); 
+    return PtrDensity(new DensitySphericalHarmonic(gridr, coefs));
 }
 
-PtrDensity readDensityAzimuthalHarmonic(std::istream& strm, const units::ExternalUnits& converter)
+/// parse the array of coefficients and create an AzimuthalHarmonic density
+PtrDensity createDensityAzimuthalHarmonicFromCoefs(std::vector<std::string>& lines,
+    const AllParam& params, const units::ExternalUnits& converter)
 {
-    std::string buffer;
-    std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    unsigned int size_R = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    unsigned int size_z = utils::toInt(fields[0]);
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    int mmax = utils::toInt(fields[0]);
-    ok &= size_R>0 && size_z>0 && mmax>=0;
-    std::vector<double> gridR, gridz;
-    std::vector< math::Matrix<double> > rho;
-    ok &= std::getline(strm, buffer).good();
-    ok &= buffer.find("rho") != std::string::npos;
-    if(ok)
-        ok &= readAzimuthalHarmonics(strm, mmax, size_R, size_z, gridR, gridz, rho);
+    std::vector< math::Matrix<double> > coefs;
+    std::vector< double > gridR, gridz;
+    bool ok = lines.size() >= params.gridSizeR+3 && lines[0] == "#rho";
+    if(ok) {
+        lines.erase(lines.begin());
+        ok &= parseAzimuthalHarmonics(lines, params, /*output*/ gridR, gridz, coefs);
+    }
     if(!ok)
         throw std::runtime_error(std::string("Error loading ") + DensityAzimuthalHarmonic::myName());
     // convert units
     math::blas_dmul(converter.lengthUnit, gridR);
     math::blas_dmul(converter.lengthUnit, gridz);
-    for(unsigned int i=0; i<rho.size(); i++)
-        math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), rho[i]);
-    return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, rho));
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(converter.massUnit/pow_3(converter.lengthUnit), coefs[i]);
+    return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, coefs));
 }
 
-//------ read a file with 3 components of some time-dependent vector quantity ------//
+///@}
+/// \name Routines for storing various Density and Potential classes into a stream
+//        ------------------------------------------------------------------------
+///@{
 
+/// write a block of spherical-harmonic coefs for the Multipole potential or DensitySphericalHarmonic
+void writeSphericalHarmonics(std::ostream& strm,
+    const std::vector<double> &radii,
+    const std::vector< std::vector<double> > &coefs)
+{
+    assert(coefs.size()>0);
+    int lmax = static_cast<int>(sqrt(coefs.size() * 1.0)-1);
+    strm << "#radius";
+    for(int l=0; l<=lmax; l++)
+        for(int m=-l; m<=l; m++)
+            strm << "\tl="<<l<<",m="<<m;  // header line
+    strm << '\n';
+    for(unsigned int n=0; n<radii.size(); n++) {
+        strm << utils::pp(radii[n], 15);
+        for(unsigned int i=0; i<coefs.size(); i++)
+            strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" :
+                utils::pp(coefs[i][n], i==0 ? /*higher precision for l=0 coef*/22 : 15));
+        strm << '\n';
+    }
+}
+
+/// write a block of azimuthal-harmonic coefs for the CylSpline potential or DensityAzimuthalHarmonic
+void writeAzimuthalHarmonics(std::ostream& strm,
+    const std::vector<double>& gridR,
+    const std::vector<double>& gridz,
+    const std::vector< math::Matrix<double> >& data)
+{
+    int mmax = (static_cast<int>(data.size())-1)/2;
+    assert(mmax>=0);
+    for(int mm=0; mm<static_cast<int>(data.size()); mm++)
+        if(data[mm].rows()*data[mm].cols()>0) {
+            strm << (-mmax+mm) << "\t#m\n#R(row)\\z(col)";
+            for(unsigned int iz=0; iz<gridz.size(); iz++)
+                strm << "\t" + utils::pp(gridz[iz], 15);
+            strm << "\n";
+            for(unsigned int iR=0; iR<gridR.size(); iR++) {
+                strm << utils::pp(gridR[iR], 15);
+                for(unsigned int iz=0; iz<gridz.size(); iz++)
+                    strm << "\t"  + utils::pp(data[mm](iR, iz), 15);
+                strm << "\n";
+            }
+        }
+}
+
+void writePotentialMultipole(std::ostream& strm, const Multipole& pot,
+    const units::ExternalUnits& converter)
+{
+    std::vector<double> gridr;
+    std::vector< std::vector<double> > Phi, dPhi;
+    pot.getCoefs(gridr, Phi, dPhi);
+    assert(Phi.size() > 0 && Phi[0].size() == gridr.size() && dPhi[0].size() == Phi[0].size());
+    // convert units
+    math::blas_dmul(1/converter.lengthUnit, gridr);
+    for(unsigned int i=0; i<Phi.size(); i++) {
+        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
+        math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhi[i]);
+    }
+    strm << "gridSizeR=" << gridr.size() << "\n";
+    strm << "lmax=" << static_cast<int>(sqrt(Phi.size()*1.0)-1) << "\n";
+    strm << "symmetry=" << getSymmetryNameByType(pot.symmetry()) << "\n";
+    strm << "Coefficients\n#Phi\n";
+    writeSphericalHarmonics(strm, gridr, Phi);
+    strm << "\n#dPhi/dr\n";
+    writeSphericalHarmonics(strm, gridr, dPhi);
+}
+
+void writePotentialCylSpline(std::ostream& strm, const CylSpline& pot,
+    const units::ExternalUnits& converter)
+{
+    std::vector<double> gridR, gridz;
+    std::vector<math::Matrix<double> > Phi, dPhidR, dPhidz;
+    pot.getCoefs(gridR, gridz, Phi, dPhidR, dPhidz);
+    strm << "gridSizeR=" << gridR.size() << "\n";
+    strm << "gridSizez=" << gridz.size() << "\n";
+    strm << "mmax=" << (Phi.size()/2) << "\n";
+    strm << "symmetry=" << getSymmetryNameByType(pot.symmetry()) << "\n";
+    strm << "Coefficients\n#Phi\n";
+    // convert units
+    math::blas_dmul(1/converter.lengthUnit, gridR);
+    math::blas_dmul(1/converter.lengthUnit, gridz);
+    for(unsigned int i=0; i<Phi.size(); i++)
+        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
+    writeAzimuthalHarmonics(strm, gridR, gridz, Phi);
+    // write arrays of derivatives if they were provided
+    // (only when the potential uses quintic interpolaiton internally)
+    if(dPhidR.size()>0 && dPhidz.size()>0) {
+        assert(dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size());
+        for(unsigned int i=0; i<dPhidR.size(); i++) {
+            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidR[i]);
+            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
+        }
+        strm << "\n#dPhi/dR\n";
+        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidR);
+        strm << "\n#dPhi/dz\n";
+        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidz);
+    }
+}
+
+void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHarmonic& density,
+    const units::ExternalUnits& converter)
+{
+    std::vector<double> gridr;
+    std::vector<std::vector<double> > coefs;
+    density.getCoefs(gridr, coefs);
+    // convert units
+    math::blas_dmul(1/converter.lengthUnit, gridr);
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
+    strm << "gridSizeR=" << gridr.size() << "\n";
+    strm << "lmax=" << static_cast<int>(sqrt(coefs.size()*1.0)-1) << "\n";
+    strm << "Coefficients\n#rho\n";
+    writeSphericalHarmonics(strm, gridr, coefs);
+}
+
+void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHarmonic& density,
+    const units::ExternalUnits& converter)
+{
+    std::vector<double> gridR, gridz;
+    std::vector<math::Matrix<double> > coefs;
+    density.getCoefs(gridR, gridz, coefs);
+    // convert units
+    math::blas_dmul(1/converter.lengthUnit, gridR);
+    math::blas_dmul(1/converter.lengthUnit, gridz);
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
+    strm << "gridSizeR=" << gridR.size() << "\n";
+    strm << "gridSizez=" << gridz.size() << "\n";
+    strm << "mmax=" << (coefs.size()/2) << "\n";
+    strm << "Coefficients\n#rho\n";
+    writeAzimuthalHarmonics(strm, gridR, gridz, coefs);
+}
+
+/// write data (expansion coefs or components) for a single or composite density or potential to a stream
+void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity& dens,
+    const units::ExternalUnits& converter, int& counter)
+{
+    // check if this is a CompositeDensity
+    const CompositeDensity* cd = dynamic_cast<const CompositeDensity*>(&dens);
+    if(cd) {
+        for(unsigned int i=0; i<cd->size(); i++) {
+            writeAnyDensityOrPotential(strm, *cd->component(i), converter, counter);
+            if(i+1<cd->size())
+                strm << '\n';
+        }
+        return;
+    }
+
+    // check if this is a Composite potential
+    const Composite* cp = dynamic_cast<const Composite*>(&dens);
+    if(cp) {
+        for(unsigned int i=0; i<cp->size(); i++) {
+            writeAnyDensityOrPotential(strm, *cp->component(i), converter, counter);
+            if(i+1<cp->size())
+                strm << '\n';
+        }
+        return;
+    }
+
+    // otherwise this is an elementary potential or density, so write a section header
+    const BasePotential* pot = dynamic_cast<const BasePotential*>(&dens);
+    if(pot)
+        strm << "[Potential";
+    else
+        strm << "[Density";
+    if(counter>0)
+        strm << counter;
+    strm << "]\n";
+    strm << "type=" << dens.name() << '\n';
+    counter++;
+
+    const Multipole* mu = dynamic_cast<const Multipole*>(&dens);
+    if(mu) {
+        writePotentialMultipole(strm, *mu, converter);
+        return;
+    }
+    const CylSpline* cy = dynamic_cast<const CylSpline*>(&dens);
+    if(cy) {
+        writePotentialCylSpline(strm, *cy, converter);
+        return;
+    }
+    const DensitySphericalHarmonic* sh = dynamic_cast<const DensitySphericalHarmonic*>(&dens);
+    if(sh) {
+        writeDensitySphericalHarmonic(strm, *sh, converter);
+        return;
+    }
+    const DensityAzimuthalHarmonic* ah = dynamic_cast<const DensityAzimuthalHarmonic*>(&dens);
+    if(ah) {
+        writeDensityAzimuthalHarmonic(strm, *ah, converter);
+        return;
+    }
+
+    // otherwise don't know how to store this potential
+    strm << "Other parameters are not stored\n";
+}
+
+///@}
+/// \name Routines for auxiliary density/potential classes
+//        ------------------------------------------------
+///@{
+
+/// read a file with 3 components of some time-dependent vector quantity
 static void readTimeDependentVector(
     const std::string& filename, /*units:*/ double timeUnit, double valueUnit,
     /*output*/ math::CubicSpline& splx, math::CubicSpline& sply, math::CubicSpline& splz)
@@ -657,33 +821,6 @@ static void readTimeDependentVector(
     }
 }
 
-//------ read an index file containing a time-dependent list of potentials ------//
-
-static PtrPotential readEvolvingPotential(
-    const std::string& filename, bool interpLinear, const units::ExternalUnits& converter)
-{
-    std::ifstream strm(filename.c_str(), std::ios::in);
-    if(!strm)
-        throw std::runtime_error("readEvolvingPotential: cannot read from file "+filename);
-    std::string buffer;
-    std::vector<std::string> fields;
-    std::vector<double> times;
-    std::vector<PtrPotential> potentials;
-    // attempt to parse the file as if it contained time stamps and names of corresponding potential files
-    while(std::getline(strm, buffer) && !strm.eof()) {
-        if(!buffer.empty() && utils::isComment(buffer[0]))  // commented line
-            continue;
-        fields = utils::splitString(buffer, "#;, \t");
-        size_t numFields = fields.size();
-        if(numFields < 2 ||
-           !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
-            continue;
-        times.push_back(utils::toDouble(fields[0]) * converter.timeUnit);
-        potentials.push_back(potential::readPotential(fields[1], converter));
-    }
-    return PtrPotential(new Evolving(times, potentials, interpLinear));
-}
-
 /** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
     if  f(x) ~ f0 + a * x^b  as  x --> 0  or  x --> infinity,  then the slope b is given by
     solving the equation  [x1^b - x2^b] / [x2^b - x3^b] = [f(x1) - f(x2)] / [f(x2) - f(x3)],
@@ -704,412 +841,13 @@ public:
     }
 };
 
-}  // end internal namespace
-
-//---- public routines ----//
-
-//---- construct a density profile from a cumulative mass profile ----//
-
-std::vector<double> densityFromCumulativeMass(
-    const std::vector<double>& gridr, const std::vector<double>& gridm)
-{
-    unsigned int size = gridr.size();
-    if(size<3 || gridm.size()!=size)
-        throw std::invalid_argument("densityFromCumulativeMass: invalid array sizes");
-    // check monotonicity and convert to log-scaled radial grid
-    std::vector<double> gridlogr(size), gridlogm(size), gridrho(size);
-    for(unsigned int i=0; i<size; i++) {
-        if(!(gridr[i] > 0 && gridm[i] > 0))
-            throw std::invalid_argument("densityFromCumulativeMass: negative input values");
-        if(i>0 && (gridr[i] <= gridr[i-1] || gridm[i] <= gridm[i-1]))
-            throw std::invalid_argument("densityFromCumulativeMass: arrays are not monotonic");
-        gridlogr[i] = log(gridr[i]);
-    }
-    // determine if the cumulative mass approaches a finite limit at large radii,
-    // that is, M = Minf - A * r^B  with A>0, B<0
-    double B = math::findRoot(SlopeFinder(
-        gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
-        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -100, 0, /*tolerance*/1e-6);
-    double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
-    if(B<0) {
-        double A =  (gridm[size-1] - gridm[size-2]) / 
-            (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
-        if(A>0) {  // viable extrapolation
-            invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
-            utils::msg(utils::VL_DEBUG, "densityFromCumulativeMass",
-                "Extrapolated total mass=" + utils::toString(1/invMinf) +
-                ", rho(r)~r^" + utils::toString(B-3) + " at large radii" );
-        }
-    }
-    // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),
-    // which has a linear asymptotic behaviour with slope -B as log(r) --> infinity;
-    // if Minf = infinity, this additional term has no effect
-    for(unsigned int i=0; i<size; i++)
-        gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
-    math::CubicSpline spl(gridlogr, gridlogm, true /*enforce monotonicity*/);
-    if(!spl.isMonotonic())
-        throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
-    // compute the density at each point of the input radial grid
-    for(unsigned int i=0; i<size; i++) {
-        double val, der;
-        spl.evalDeriv(gridlogr[i], &val, &der);
-        val = exp(val);
-        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val * invMinf));
-        if(gridrho[i] <= 0)   // shouldn't occur if the spline is (strictly) monotonic
-            throw std::runtime_error("densityFromCumulativeMass: interpolated density is non-positive");
-    }
-    return gridrho;
-}
-
-//------ read a cumulative mass profile from a file ------//
-
-math::LogLogSpline readMassProfile(const std::string& filename)
-{
-    std::ifstream strm(filename.c_str());
-    if(!strm)
-        throw std::runtime_error("readMassProfile: can't read input file " + filename);
-    std::vector<double> radius, mass;
-    const std::string validDigits = "0123456789.-+";
-    while(strm) {
-        std::string str;
-        std::getline(strm, str);
-        std::vector<std::string> elems = utils::splitString(str, " \t,;");
-        if(elems.size() < 2 || validDigits.find(elems[0][0]) == std::string::npos)
-            continue;
-        double r = utils::toDouble(elems[0]),  m = utils::toDouble(elems[1]);
-        if(r<0)
-            throw std::runtime_error("readMassProfile: radii should be positive");
-        if(r==0 && m!=0)
-            throw std::runtime_error("readMassProfile: M(r=0) should be zero");
-        if(r>0) {
-            radius.push_back(r);
-            mass.push_back(m);
-        }
-    }
-    return math::LogLogSpline(radius, densityFromCumulativeMass(radius, mass));
-}
-
-
-//------ load density or potential expansion coefficients from a text file ------//
-
-PtrDensity readDensity(const std::string& fileName, const units::ExternalUnits& converter)
-{
-    if(fileName.empty()) {
-        throw std::runtime_error("readDensity: empty file name");
-    }
-    std::ifstream strm(fileName.c_str(), std::ios::in);
-    if(!strm) {
-        throw std::runtime_error("readDensity: cannot read from file "+fileName);
-    }
-    // check header
-    std::string buffer;
-    bool ok = std::getline(strm, buffer).good();
-    if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
-        std::vector<std::string> fields;
-        fields = utils::splitString(buffer, "# \t");
-        if(fields[0] == DensitySphericalHarmonic::myName()) {
-            return readDensitySphericalHarmonic(strm, converter);
-        }
-        if(fields[0] == DensityAzimuthalHarmonic::myName()) {
-            return readDensityAzimuthalHarmonic(strm, converter);
-        }
-        if(fields[0] == CompositeDensity::myName()) {
-            // each line is a name of a file with the given component
-            std::vector<PtrDensity> components;
-            while(std::getline(strm, buffer).good() && !strm.eof())
-                components.push_back(readDensity(buffer, converter));
-            return PtrDensity(new CompositeDensity(components));
-        }
-    }
-    throw std::runtime_error("readDensity: cannot find valid density coefficients in file "+fileName);
-}
-
-PtrPotential readPotential(const std::string& fileName, const units::ExternalUnits& converter)
-{
-    if(fileName.empty()) {
-        throw std::runtime_error("readPotential: empty file name");
-    }
-    std::ifstream strm(fileName.c_str(), std::ios::in);
-    if(!strm) {
-        throw std::runtime_error("readPotential: cannot read from file "+fileName);
-    }
-    // check header
-    std::string buffer;
-    bool ok = std::getline(strm, buffer).good();
-    if(ok && buffer.size()<256) {  // to avoid parsing a binary file as a text
-        std::vector<std::string> fields;
-        fields = utils::splitString(buffer, "# \t");
-        if(fields[0] == Multipole::myName()) {
-            return readPotentialMultipole(strm, converter);
-        }
-        if(fields[0] == CylSpline::myName()) {
-            return readPotentialCylSpline(strm, converter);
-        }
-        if(fields[0] == Composite::myName()) {
-            // each line is a name of a file with the given component
-            std::string::size_type idx = fileName.find_last_of('/');
-            // extract the path from the filename, and append it to all dependent filenames
-            std::string prefix = idx != std::string::npos ? fileName.substr(0, idx+1) : "";
-            std::vector<PtrPotential> components;
-            while(std::getline(strm, buffer).good() && !strm.eof())
-                components.push_back(readPotential(prefix+buffer, converter));
-            return PtrPotential(new Composite(components));
-        }
-    }
-    throw std::runtime_error("readPotential: cannot find valid potential coefficients in file "+fileName);
-}
-
-///@}
-/// \name Routines for storing various Density and Potential classes into a stream
-//        ------------------------------------------------------------------------
-///@{
-namespace {
-
-void writeSphericalHarmonics(std::ostream& strm,
-    const std::vector<double> &radii,
-    const std::vector< std::vector<double> > &coefs)
-{
-    assert(coefs.size()>0);
-    int lmax = static_cast<int>(sqrt(coefs.size() * 1.0)-1);
-    for(int l=0; l<=lmax; l++)
-        for(int m=-l; m<=l; m++)
-            strm << "\tl="<<l<<",m="<<m;  // header line
-    strm << '\n';
-    for(unsigned int n=0; n<radii.size(); n++) {
-        strm << utils::pp(radii[n], 15);
-        for(unsigned int i=0; i<coefs.size(); i++)
-            strm << '\t' + (n>=coefs[i].size() || coefs[i][n] == 0 ? "0" :
-                utils::pp(coefs[i][n], i==0 ? /*higher precision for l=0 coef*/22 : 15));
-        strm << '\n';
-    }
-}
-
-void writeAzimuthalHarmonics(std::ostream& strm,
-    const std::vector<double>& gridR,
-    const std::vector<double>& gridz,
-    const std::vector< math::Matrix<double> >& data)
-{
-    int mmax = (static_cast<int>(data.size())-1)/2;
-    assert(mmax>=0);
-    for(int mm=0; mm<static_cast<int>(data.size()); mm++)
-        if(data[mm].rows()*data[mm].cols()>0) {
-            strm << (-mmax+mm) << "\t#m\n#R(row)\\z(col)";
-            for(unsigned int iz=0; iz<gridz.size(); iz++)
-                strm << "\t" + utils::pp(gridz[iz], 15);
-            strm << "\n";
-            for(unsigned int iR=0; iR<gridR.size(); iR++) {
-                strm << utils::pp(gridR[iR], 15);
-                for(unsigned int iz=0; iz<gridz.size(); iz++)
-                    strm << "\t"  + utils::pp(data[mm](iR, iz), 15);
-                strm << "\n";
-            }
-        }
-}
-
-void writePotentialMultipole(std::ostream& strm, const Multipole& potMul,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> radii;
-    std::vector< std::vector<double> > Phi, dPhi;
-    potMul.getCoefs(radii, Phi, dPhi);
-    assert(Phi.size() > 0 && Phi[0].size() == radii.size() && dPhi[0].size() == Phi[0].size());
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, radii);
-    for(unsigned int i=0; i<Phi.size(); i++) {
-        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
-        math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhi[i]);
-    }
-    int lmax = static_cast<int>(sqrt(Phi.size()*1.0)-1);
-    strm << Multipole::myName() << "\n" << 
-        radii.size() << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n0\t#unused\n#Phi\n#radius";
-    writeSphericalHarmonics(strm, radii, Phi);
-    strm << "\n#dPhi/dr\n#radius";
-    writeSphericalHarmonics(strm, radii, dPhi);
-}
-
-void writePotentialCylSpline(std::ostream& strm, const CylSpline& potential,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> gridR, gridz;
-    std::vector<math::Matrix<double> > Phi, dPhidR, dPhidz;
-    potential.getCoefs(gridR, gridz, Phi, dPhidR, dPhidz);
-    strm << CylSpline::myName() << "\n" <<
-        gridR.size() << "\t#size_R\n" <<
-        gridz.size() << "\t#size_z\n" <<
-        Phi.size()/2 << "\t#m_max\n";
-    strm << "#Phi\n";
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, gridR);
-    math::blas_dmul(1/converter.lengthUnit, gridz);
-    for(unsigned int i=0; i<Phi.size(); i++)
-        math::blas_dmul(1/pow_2(converter.velocityUnit), Phi[i]);
-    writeAzimuthalHarmonics(strm, gridR, gridz, Phi);
-    // write arrays of derivatives if they were provided
-    // (only when the potential uses quintic interpolaiton internally)
-    if(dPhidR.size()>0 && dPhidz.size()>0) {
-        assert(dPhidR.size() == Phi.size() && dPhidz.size() == Phi.size());
-        for(unsigned int i=0; i<dPhidR.size(); i++) {
-            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidR[i]);
-            math::blas_dmul(1/pow_2(converter.velocityUnit)*converter.lengthUnit, dPhidz[i]);
-        }
-        strm << "\n#dPhi/dR\n";
-        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidR);
-        strm << "\n#dPhi/dz\n";
-        writeAzimuthalHarmonics(strm, gridR, gridz, dPhidz);
-    }
-}
-
-void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHarmonic& density,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> radii;
-    std::vector<std::vector<double> > coefs;
-    density.getCoefs(radii, coefs);
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, radii);
-    for(unsigned int i=0; i<coefs.size(); i++)
-        math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
-    int lmax = static_cast<int>(sqrt(coefs.size()*1.0)-1);
-    strm << DensitySphericalHarmonic::myName() << "\n" <<
-        radii.size() << "\t#n_radial\n" << 
-        lmax << "\t#l_max\n0\t#unused\n#rho\n#radius";
-    writeSphericalHarmonics(strm, radii, coefs);
-}
-
-void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHarmonic& density,
-    const units::ExternalUnits& converter)
-{
-    std::vector<double> gridR, gridz;
-    std::vector<math::Matrix<double> > coefs;
-    density.getCoefs(gridR, gridz, coefs);
-    // convert units
-    math::blas_dmul(1/converter.lengthUnit, gridR);
-    math::blas_dmul(1/converter.lengthUnit, gridz);
-    for(unsigned int i=0; i<coefs.size(); i++)
-        math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
-    int mmax = coefs.size()/2;
-    strm << DensityAzimuthalHarmonic::myName() << "\n" <<
-        gridR.size() << "\t#size_R\n" <<
-        gridz.size() << "\t#size_z\n" <<
-        mmax << "\t#m_max\n";
-    strm << "#rho\n";
-    writeAzimuthalHarmonics(strm, gridR, gridz, coefs);
-}
-
-} // end internal namespace
-
-bool writeDensity(const std::string& fileName, const BaseDensity& dens,
-    const units::ExternalUnits& converter)
-{
-    if(fileName.empty())
-        return false;
-    std::ofstream strm(fileName.c_str(), std::ios::out);
-    if(!strm)
-        return false;
-    PotentialType type = getPotentialTypeByName(dens.name());
-    switch(type) {
-    case PT_MULTIPOLE:
-        writePotentialMultipole(strm, dynamic_cast<const Multipole&>(dens), converter);
-        break;
-    case PT_CYLSPLINE:
-        writePotentialCylSpline(strm, dynamic_cast<const CylSpline&>(dens), converter);
-        break;
-    case PT_DENS_CYLGRID:
-        writeDensityAzimuthalHarmonic(strm, dynamic_cast<const DensityAzimuthalHarmonic&>(dens), converter);
-        break;
-    case PT_DENS_SPHHARM:
-        writeDensitySphericalHarmonic(strm, dynamic_cast<const DensitySphericalHarmonic&>(dens), converter);
-        break;
-    case PT_COMPOSITE_DENSITY: {
-        strm << dens.name() << "\n";
-        const CompositeDensity& comp = dynamic_cast<const CompositeDensity&>(dens);
-        std::string::size_type idx = fileName.find_last_of('/');
-        for(unsigned int i=0; i<comp.size(); i++) {
-            std::string fileNameComp = fileName+'_'+utils::toString(i);
-            std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
-            if(writeDensity(fileNameComp, *comp.component(i), converter))
-                strm << fileNameShort << '\n';
-        }
-        break;
-    }
-    case PT_COMPOSITE_POTENTIAL: {
-        strm << dens.name() << "\n";
-        const Composite& comp = dynamic_cast<const Composite&>(dens);
-        std::string::size_type idx = fileName.find_last_of('/');
-        for(unsigned int i=0; i<comp.size(); i++) {
-            std::string fileNameComp = fileName+'_'+utils::toString(i);
-            std::string fileNameShort= idx != std::string::npos ? fileNameComp.substr(idx+1) : fileNameComp;
-            if(writeDensity(fileNameComp, *comp.component(i), converter))
-                strm << fileNameShort << '\n';
-        }
-        break;
-    }
-    default:
-        strm << "Unsupported type: " << dens.name() << "\n";
-        return false;
-    }
-    return strm.good();
-}
-
-///@}
-/// \name Legacy interface for loading GalPot parameters from a text file (deprecated)
-//        ----------------------------------------------------------------------------
-///@{
-
-PtrPotential readGalaxyPotential(const std::string& filename, const units::ExternalUnits& conv) 
-{
-    std::ifstream strm(filename.c_str());
-    if(!strm) 
-        throw std::runtime_error("Cannot open file "+std::string(filename));
-    std::vector<utils::KeyValueMap> kvmap;
-    std::string buffer;
-    std::vector<std::string> fields;
-    bool ok = std::getline(strm, buffer).good();
-    fields  = utils::splitString(buffer, "# \t");
-    int num = utils::toInt(fields[0]);
-    for(int i=0; i<num && ok; i++) {
-        ok &= std::getline(strm, buffer).good();
-        fields = utils::splitString(buffer, "# \t");
-        if(fields.size() >= 5)
-            kvmap.push_back(utils::KeyValueMap(
-                std::string("type=") +  DiskDensity::myName() +
-                " surfaceDensity=" +    fields[0]+
-                " scaleRadius=" +       fields[1]+
-                " scaleHeight=" +       fields[2]+
-                " innerCutoffRadius=" + fields[3]+
-                " modulationAmplitude="+fields[4]));
-        else ok=false;
-    }
-    ok &= std::getline(strm, buffer).good();
-    fields = utils::splitString(buffer, "# \t");
-    num = utils::toInt(fields[0]);
-    for(int i=0; i<num && ok; i++) {
-        ok &= std::getline(strm, buffer).good();
-        fields = utils::splitString(buffer, "# \t");
-        if(fields.size() >= 5)
-            kvmap.push_back(utils::KeyValueMap(
-                std::string("type=") + SpheroidDensity::myName() +
-                " densityNorm="      + fields[0]+
-                " axisRatioZ="       + fields[1]+
-                " gamma="            + fields[2]+
-                " beta="             + fields[3]+
-                " scaleRadius="      + fields[4]+
-                (utils::toDouble(fields[5])!=0 ? " outerCutoffRadius=" + fields[5] : "") ));
-        else ok=false;
-    }
-    return createPotential(kvmap, conv);
-}
-
 ///@}
 /// \name Factory routines for creating instances of Density and Potential classes
 //        ------------------------------------------------------------------------
 ///@{
 
-namespace {
-
 /// create potential expansion of a given type from a set of point masses
-PtrPotential createPotentialFromParticles(const AllParam& param,
+PtrPotential createPotentialExpansionFromParticles(const AllParam& param,
     const particles::ParticleArray<coord::PosCyl>& particles)
 {
     switch(param.potentialType) {
@@ -1171,9 +909,11 @@ PtrPotential createAnalyticPotential(const AllParam& param)
         else
             throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
     case PT_KING:
-        return createKingPotential(param.mass, param.scaleRadius, param.W0, param.trunc); 
+        return createKingPotential(param.mass, param.scaleRadius, param.W0, param.trunc);
+    case PT_UNKNOWN:
+        throw std::invalid_argument("Potential type not specified");
     default:
-        throw std::invalid_argument("Unknown potential type");
+        throw std::invalid_argument("Invalid potential type");
     }
 }
 
@@ -1205,7 +945,7 @@ PtrDensity createAnalyticDensity(const AllParam& param)
     for the provided source density or potential
     (template parameter SourceType==BaseDensity or BasePotential) */
 template<typename SourceType>
-PtrPotential createPotentialExpansion(const AllParam& param, const SourceType& source)
+PtrPotential createPotentialExpansionFromSource(const AllParam& param, const SourceType& source)
 {
     switch(param.potentialType) {
     case PT_MULTIPOLE:
@@ -1219,43 +959,127 @@ PtrPotential createPotentialExpansion(const AllParam& param, const SourceType& s
     }
 }
 
-/** Read potential coefficients from a text file, or create a potential expansion
-    from N-body snapshot contained in a file
-*/
-PtrPotential readPotentialExpansion(const AllParam& param, const units::ExternalUnits& converter)
+/** General routine for creating a potential expansion from the provided INI parameters */
+PtrPotential createPotentialExpansion(
+    const AllParam& param, const utils::KeyValueMap& kvmap, const units::ExternalUnits& converter)
 {
-    if(!utils::fileExists(param.file))
-        throw std::runtime_error("File "+param.file+" does not exist");
+    assert(param.potentialType == PT_MULTIPOLE || param.potentialType == PT_CYLSPLINE);
 
-    // file may contain either coefficients of potential expansion,
-    // in which case the potential type is inferred from the first line of the file,
-    // or an N-body snapshot, in which case the potential type must be specified.
-    try {
-        return readPotential(param.file, converter);
-    }   // if it contained valid coefs, all is fine
-    catch(std::runtime_error&) {}  // ignore error if the file didn't contain valid coefs
+    // dump the content of the INI section into an array of strings, and search for Coefficients
+    std::vector<std::string> lines = kvmap.dumpLines();
+    ptrdiff_t startLine = -1;
+    for(size_t i=0; i<lines.size(); i++) {
+        if(lines[i] == "Coefficients") {
+            startLine = i+1;
+            break;
+        }
+    }
 
-    // otherwise the file is assumed to contain an N-body snapshot
-    if(param.potentialType != PT_MULTIPOLE && param.potentialType != PT_CYLSPLINE)
-        throw std::runtime_error("Must specify the potential expansion type to load an N-body snapshot");
+    // three mutually exclusive alternatives
+    bool haveCoefs  = startLine>=0;
+    bool haveFile   = !param.file.empty();
+    bool haveSource = param.densityType != PT_UNKNOWN;
 
-    const particles::ParticleArrayCar particles = particles::readSnapshot(param.file, converter);
-    if(particles.size()==0)
-        throw std::runtime_error("Error loading N-body snapshot from " + param.file);
+    // option 1: coefficients are provided in the INI file
+    if(haveCoefs && !haveFile && !haveSource) {
+        lines.erase(lines.begin(), lines.begin()+startLine);
+        return param.potentialType == PT_MULTIPOLE ?
+            createMultipoleFromCoefs(lines, param, converter) :
+            createCylSplineFromCoefs(lines, param, converter);
+    }
 
-    PtrPotential poten = createPotentialFromParticles(param, particles);
+    // option 2: N-body snapshot
+    if(haveFile && !haveCoefs && !haveSource) {
+        if(!utils::fileExists(param.file))
+            throw std::runtime_error("File " + param.file + " does not exist");
+        const particles::ParticleArrayCar particles = particles::readSnapshot(param.file, converter);
+        if(particles.size()==0)
+            throw std::runtime_error("Error loading N-body snapshot from " + param.file);
 
-    // store coefficients in a text file,
-    // later may load this file instead for faster initialization
-    writePotential(param.file + getCoefFileExtension(param.potentialType), *poten, converter);
-    return poten;
+        PtrPotential pot = createPotentialExpansionFromParticles(param, particles);
+
+        // store coefficients in a text file,
+        // later may load this file instead for faster initialization
+        try{
+            writePotential(param.file + ".pot", *pot, converter);
+        }
+        catch(std::exception& ex) {  // not a critical error, but worth mentioning
+            utils::msg(utils::VL_MESSAGE, "createPotential", ex.what());
+        }
+        return pot;
+    }
+    
+    // option 3: analytic density or potential model
+    if(haveSource && !haveFile && !haveCoefs) {
+        // create a temporary density or potential model to serve as the source for potential expansion
+        AllParam srcpar(param);
+        srcpar.potentialType = param.densityType;
+        if( param.densityType == PT_DEHNEN ||
+            param.densityType == PT_FERRERS ||
+            param.densityType == PT_MIYAMOTONAGAI )
+        {   // use an analytic potential as the source
+            return createPotentialExpansionFromSource(param, *createAnalyticPotential(srcpar));
+        }
+        else
+        {   // otherwise use analytic density as the source
+            return createPotentialExpansionFromSource(param, *createAnalyticDensity(srcpar));
+        }
+    }
+
+    throw std::invalid_argument(
+        std::string(param.potentialType == PT_MULTIPOLE ? "Multipole" : "CylSpline") +
+        " can be constructed in one of three possible ways: "
+        "by providing an N-body snapshot in file=..., or a source density/potential model "
+        "in density=..., or a table of coefficients (when loading from a file)");
+}
+
+/// create a time-dependent list of potentials
+static PtrPotential createEvolvingPotential(
+    const utils::KeyValueMap& kvmap, const units::ExternalUnits& converter)
+{
+    // dump the content of the INI section into an array of strings, and search for Timestamps
+    std::vector<std::string> lines = kvmap.dumpLines();
+    ptrdiff_t startLine = -1;
+    for(size_t i=0; i<lines.size(); i++) {
+        if(lines[i] == "Timestamps") {
+            startLine = i+1;
+            break;
+        }
+    }
+    if(startLine < 0)
+        throw std::runtime_error(
+            "Evolving potential needs a list of timestamps and filenames after the line 'Timestamps'");
+
+    bool interpLinear = kvmap.getBoolAlt("interpLinear", "linearInterp", false);
+    std::vector<std::string> fields;
+    std::vector<double> times;
+    std::vector<PtrPotential> potentials;
+    // attempt to parse the remaining lines in this INI section
+    // as time stamps and names of corresponding potential files
+    for(size_t index=startLine+1; index<lines.size(); index++) {
+        if(lines[index].empty() || utils::isComment(lines[index][0]))  // commented line
+            continue;
+        fields = utils::splitString(lines[index], " \t");
+        size_t numFields = fields.size();
+        if(numFields < 2 ||
+            !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
+            continue;
+        times.push_back(utils::toDouble(fields[0]) * converter.timeUnit);
+        try {
+            potentials.push_back(potential::readPotential(fields[1], converter));
+        }
+        catch(std::exception& e) {
+            throw std::runtime_error("Error reading the potential from "+fields[1]+": "+e.what());
+        }
+    }
+    return PtrPotential(new Evolving(times, potentials, interpLinear));
 }
 
 /** create and instance of UniformAcceleration potential from the time-dependent values in a file */
 PtrPotential readUniformAcceleration(const std::string& filename, const units::ExternalUnits& converter)
 {
-    //if(param.file.empty())
-    //    throw std::invalid_argument("Need to provide a file name for UniformAcceleration");
+    if(filename.empty())
+        throw std::invalid_argument("Need to provide a file name for UniformAcceleration");
     math::CubicSpline splx, sply, splz;
     readTimeDependentVector(filename,
         /*units*/ converter.timeUnit, converter.velocityUnit / converter.timeUnit /*acceleration*/,
@@ -1307,18 +1131,130 @@ struct Bunch {
 
 }  // end internal namespace
 
-// create elementary density
+//---- public routines ----//
+
+//---- construct a density profile from a cumulative mass profile ----//
+
+std::vector<double> densityFromCumulativeMass(
+    const std::vector<double>& gridr, const std::vector<double>& gridm)
+{
+    unsigned int size = gridr.size();
+    if(size<3 || gridm.size()!=size)
+        throw std::invalid_argument("densityFromCumulativeMass: invalid array sizes");
+    // check monotonicity and convert to log-scaled radial grid
+    std::vector<double> gridlogr(size), gridlogm(size), gridrho(size);
+    for(unsigned int i=0; i<size; i++) {
+        if(!(gridr[i] > 0 && gridm[i] > 0))
+            throw std::invalid_argument("densityFromCumulativeMass: negative input values");
+        if(i>0 && (gridr[i] <= gridr[i-1] || gridm[i] <= gridm[i-1]))
+            throw std::invalid_argument("densityFromCumulativeMass: arrays are not monotonic");
+        gridlogr[i] = log(gridr[i]);
+    }
+    // determine if the cumulative mass approaches a finite limit at large radii,
+    // that is, M = Minf - A * r^B  with A>0, B<0
+    double B = math::findRoot(SlopeFinder(
+        gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
+        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -100, 0, /*tolerance*/1e-6);
+    double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
+    if(B<0) {
+        double A =  (gridm[size-1] - gridm[size-2]) /
+        (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
+        if(A>0) {  // viable extrapolation
+            invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
+            utils::msg(utils::VL_DEBUG, "densityFromCumulativeMass",
+                "Extrapolated total mass=" + utils::toString(1/invMinf) +
+                ", rho(r)~r^" + utils::toString(B-3) + " at large radii" );
+        }
+    }
+    // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),
+    // which has a linear asymptotic behaviour with slope -B as log(r) --> infinity;
+    // if Minf = infinity, this additional term has no effect
+    for(unsigned int i=0; i<size; i++)
+        gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
+    math::CubicSpline spl(gridlogr, gridlogm, true /*enforce monotonicity*/);
+    if(!spl.isMonotonic())
+        throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
+    // compute the density at each point of the input radial grid
+    for(unsigned int i=0; i<size; i++) {
+        double val, der;
+        spl.evalDeriv(gridlogr[i], &val, &der);
+        val = exp(val);
+        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val * invMinf));
+        if(gridrho[i] <= 0)   // shouldn't occur if the spline is (strictly) monotonic
+            throw std::runtime_error("densityFromCumulativeMass: interpolated density is non-positive");
+    }
+    return gridrho;
+}
+
+//------ read a cumulative mass profile from a file ------//
+
+math::LogLogSpline readMassProfile(const std::string& filename)
+{
+    std::ifstream strm(filename.c_str());
+    if(!strm)
+        throw std::runtime_error("readMassProfile: can't read input file " + filename);
+    std::vector<double> radius, mass;
+    const std::string validDigits = "0123456789.-+";
+    while(strm) {
+        std::string str;
+        std::getline(strm, str);
+        std::vector<std::string> elems = utils::splitString(str, " \t,;");
+        if(elems.size() < 2 || validDigits.find(elems[0][0]) == std::string::npos)
+            continue;
+        double r = utils::toDouble(elems[0]),  m = utils::toDouble(elems[1]);
+        if(r<0)
+            throw std::runtime_error("readMassProfile: radii should be positive");
+        if(r==0 && m!=0)
+            throw std::runtime_error("readMassProfile: M(r=0) should be zero");
+        if(r>0) {
+            radius.push_back(r);
+            mass.push_back(m);
+        }
+    }
+    return math::LogLogSpline(radius, densityFromCumulativeMass(radius, mass));
+}
+
+// create elementary density (analytic or from expansion coefs)
 PtrDensity createDensity(
     const utils::KeyValueMap& kvmap,
     const units::ExternalUnits& converter)
 {
     AllParam param = parseParam(kvmap, converter);
-    if(!param.file.empty())
-        return readDensity(param.file, converter);
     // if 'type=...' is not provided but 'density=...' is given, use that value
     if(!kvmap.contains("type") && kvmap.contains("density"))
         param.potentialType = param.densityType;
-    PtrDensity result = createAnalyticDensity(param);
+
+    if(!param.file.empty()) {
+        if(param.potentialType != PT_UNKNOWN)
+            throw std::invalid_argument("createDensity: cannot provide both type and file");
+        return readDensity(param.file, converter);
+    }
+
+    PtrDensity result;
+    // check if this is one of the two density expansions with coefficients provided in the kvmap
+    if(param.potentialType == PT_DENS_SPHHARM || param.potentialType == PT_DENS_CYLGRID) {
+        // dump the content of the INI section into an array of strings, and search for Coefficients
+        std::vector<std::string> lines = kvmap.dumpLines();
+        ptrdiff_t startLine = -1;
+        for(size_t i=0; i<lines.size(); i++) {
+            if(lines[i] == "Coefficients") {
+                startLine = i+1;
+                break;
+            }
+        }
+        if(startLine < 0)
+            throw std::invalid_argument("create" + std::string(
+                param.potentialType == PT_DENS_SPHHARM ? DensitySphericalHarmonic::myName() :
+                DensityAzimuthalHarmonic::myName()) + ": no coefficients provided");
+        lines.erase(lines.begin(), lines.begin()+startLine);
+        result = param.potentialType == PT_DENS_SPHHARM ?
+            createDensitySphericalHarmonicFromCoefs(lines, param, converter) :
+            createDensityAzimuthalHarmonicFromCoefs(lines, param, converter);
+    } else
+        // otherwise it must be one of the analytic density profiles
+        result = createAnalyticDensity(param);
+
+    // check if it needs to be off-centered
     std::string center = kvmap.getString("center");
     if(!center.empty())
         result = createOffset<ShiftedDensity>(center, converter, result);
@@ -1363,24 +1299,16 @@ PtrPotential createPotential(
         Bunch& bunch = bunches[indexBunch];
 
         // Several alternatives are possible, depending on the "type=..." and "file=..." params:
-
-        // 1. if a file name is provided, it contains either the potential expansion coefficients
-        // or specifies a spatially-uniform time-dependent acceleration, or an evolving potential
-        if(!param.file.empty()) {
-            if(param.potentialType == PT_UNIFORMACCELERATION) {
-                bunch.componentsPot.push_back(
-                    readUniformAcceleration(param.file, converter));
-            } else if(param.potentialType == PT_EVOLVING) {
-                bunch.componentsPot.push_back(
-                    readEvolvingPotential(param.file, param.interpLinear, converter));
-            } else {
-                bunch.componentsPot.push_back(
-                    readPotentialExpansion(param, converter));
-            }
+        switch(param.potentialType) {
+        // 1. if a file=... is provided without type=..., then it must refer to another INI file
+        case PT_UNKNOWN: {
+            if(param.file.empty())
+                throw std::invalid_argument("If type=... is not provided, need a file=...");
+            bunch.componentsPot.push_back(readPotential(param.file, converter));
+            break;
         }
         // 2. if the parameters describe a GalPot component, add it to the list of density and
         // possibly potential components
-        else switch(param.potentialType) {
         case PT_DISK: {
             DiskParam dparam = parseDiskParam(param);
             // the two parts of disk profile: DiskAnsatz goes to the list of potentials...
@@ -1407,23 +1335,16 @@ PtrPotential createPotential(
         // is provided, construct the expansion from a temporary analytic den/pot object
         case PT_MULTIPOLE:
         case PT_CYLSPLINE: {
-            // create a temporary density or potential model to serve as the source for potential expansion
-            AllParam srcpar(param);
-            srcpar.potentialType = param.densityType;
-            if( param.densityType == PT_UNKNOWN )
-                throw std::invalid_argument("Multipole or CylSpline need either a density model or a file");
-            if( param.densityType == PT_DEHNEN ||
-                param.densityType == PT_FERRERS ||
-                param.densityType == PT_MIYAMOTONAGAI )
-            {   // use an analytic potential as the source
-                bunch.componentsPot.push_back(
-                    createPotentialExpansion(param, *createAnalyticPotential(srcpar)));
-            }
-            else
-            {   // otherwise use analytic density as the source
-                bunch.componentsPot.push_back(
-                    createPotentialExpansion(param, *createAnalyticDensity(srcpar)));
-            }
+            bunch.componentsPot.push_back(createPotentialExpansion(param, kvmap[i], converter));
+            break;
+        }
+        // 4,5. specifies a spatially-uniform time-dependent acceleration, or an evolving potential
+        case PT_UNIFORMACCELERATION: {
+            bunch.componentsPot.push_back(readUniformAcceleration(param.file, converter));
+            break;
+        }
+        case PT_EVOLVING: {
+            bunch.componentsPot.push_back(createEvolvingPotential(kvmap[i], converter));
             break;
         }
         // 4. the remaining alternative is an elementary potential, or an error
@@ -1474,29 +1395,13 @@ PtrPotential createPotential(
     return createPotential(std::vector<utils::KeyValueMap>(1, kvmap), converter);
 }
 
-// create a potential from INI file
-PtrPotential createPotential(
-    const std::string& iniFileName,
-    const units::ExternalUnits& converter)
-{
-    utils::ConfigFile ini(iniFileName);
-    std::vector<std::string> sectionNames = ini.listSections();
-    std::vector<utils::KeyValueMap> components;
-    for(unsigned int i=0; i<sectionNames.size(); i++)
-        if(utils::stringsEqual(sectionNames[i].substr(0,9), "Potential"))
-            components.push_back(ini.findSection(sectionNames[i]));
-    if(components.size() == 0)
-        throw std::runtime_error("INI file does not contain any [Potential] section");
-    return createPotential(components, converter);
-}
-
 // create a potential expansion from the user-provided source density
 PtrPotential createPotential(
     const utils::KeyValueMap& kvmap,
     const BaseDensity& dens,
     const units::ExternalUnits& converter)
 {
-    PtrPotential result = createPotentialExpansion(parseParam(kvmap, converter), dens);
+    PtrPotential result = createPotentialExpansionFromSource(parseParam(kvmap, converter), dens);
     std::string center = kvmap.getString("center");
     if(!center.empty())
         result = createOffset<Shifted>(center, converter, result);
@@ -1509,7 +1414,7 @@ PtrPotential createPotential(
     const BasePotential& pot,
     const units::ExternalUnits& converter)
 {
-    PtrPotential result = createPotentialExpansion(parseParam(kvmap, converter), pot);
+    PtrPotential result = createPotentialExpansionFromSource(parseParam(kvmap, converter), pot);
     std::string center = kvmap.getString("center");
     if(!center.empty())
         result = createOffset<Shifted>(center, converter, result);
@@ -1522,12 +1427,110 @@ PtrPotential createPotential(
     const particles::ParticleArray<coord::PosCyl>& particles,
     const units::ExternalUnits& converter)
 {
-    PtrPotential result = createPotentialFromParticles(parseParam(kvmap, converter), particles);
+    PtrPotential result = createPotentialExpansionFromParticles(parseParam(kvmap, converter), particles);
     std::string center = kvmap.getString("center");
     if(!center.empty())
         result = createOffset<Shifted>(center, converter, result);
     return result;
 }
 
+// create/read density from an INI file (which may also contain density expansion coefficients)
+PtrDensity readDensity(const std::string& iniFileName, const units::ExternalUnits& converter)
+{
+    if(iniFileName.empty())
+        throw std::runtime_error("Empty file name");
+    utils::ConfigFile ini(iniFileName);
+    std::vector<std::string> sectionNames = ini.listSections();
+    std::vector<PtrDensity> components;
+    for(unsigned int i=0; i<sectionNames.size(); i++)
+        if(utils::stringsEqual(sectionNames[i].substr(0,7), "Density"))
+            components.push_back(createDensity(ini.findSection(sectionNames[i]), converter));
+    if(components.size() == 0)
+        throw std::runtime_error("INI file does not contain any [Density] section");
+    if(components.size() == 1)
+        return components[0];
+    return PtrDensity(new CompositeDensity(components));
+}
+
+// create a potential from INI file (which may also contain coefficients of potential expansions)
+PtrPotential readPotential(const std::string& iniFileName, const units::ExternalUnits& converter)
+{
+    if(iniFileName.empty())
+        throw std::runtime_error("Empty file name");
+    utils::ConfigFile ini(iniFileName);
+    std::vector<std::string> sectionNames = ini.listSections();
+    std::vector<utils::KeyValueMap> components;
+    for(unsigned int i=0; i<sectionNames.size(); i++)
+        if(utils::stringsEqual(sectionNames[i].substr(0,9), "Potential"))
+            components.push_back(ini.findSection(sectionNames[i]));
+    if(components.size() == 0)
+        throw std::runtime_error("INI file does not contain any [Potential] section");
+    return createPotential(components, converter);
+}
+
 ///@}
+/// \name Legacy interface for loading GalPot parameters from a text file (deprecated)
+//        ----------------------------------------------------------------------------
+///@{
+
+PtrPotential readGalaxyPotential(const std::string& filename, const units::ExternalUnits& conv) 
+{
+    std::ifstream strm(filename.c_str());
+    if(!strm) 
+        throw std::runtime_error("Cannot open file "+std::string(filename));
+    std::vector<utils::KeyValueMap> kvmap;
+    std::string buffer;
+    std::vector<std::string> fields;
+    bool ok = std::getline(strm, buffer).good();
+    fields  = utils::splitString(buffer, "# \t");
+    int num = utils::toInt(fields[0]);
+    for(int i=0; i<num && ok; i++) {
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        if(fields.size() >= 5)
+            kvmap.push_back(utils::KeyValueMap(
+                std::string("type=") +  DiskDensity::myName() +
+                " surfaceDensity=" +    fields[0]+
+                " scaleRadius=" +       fields[1]+
+                " scaleHeight=" +       fields[2]+
+                " innerCutoffRadius=" + fields[3]+
+                " modulationAmplitude="+fields[4]));
+        else ok=false;
+    }
+    ok &= std::getline(strm, buffer).good();
+    fields = utils::splitString(buffer, "# \t");
+    num = utils::toInt(fields[0]);
+    for(int i=0; i<num && ok; i++) {
+        ok &= std::getline(strm, buffer).good();
+        fields = utils::splitString(buffer, "# \t");
+        if(fields.size() >= 5)
+            kvmap.push_back(utils::KeyValueMap(
+                std::string("type=") + SpheroidDensity::myName() +
+                " densityNorm="      + fields[0]+
+                " axisRatioZ="       + fields[1]+
+                " gamma="            + fields[2]+
+                " beta="             + fields[3]+
+                " scaleRadius="      + fields[4]+
+                (utils::toDouble(fields[5])!=0 ? " outerCutoffRadius=" + fields[5] : "") ));
+        else ok=false;
+    }
+    return createPotential(kvmap, conv);
+}
+
+///@}
+
+bool writeDensity(const std::string& fileName, const BaseDensity& dens,
+    const units::ExternalUnits& converter)
+{
+    if(fileName.empty())
+        return false;
+    std::ofstream strm(fileName.c_str(), std::ios::out);
+    if(!strm)
+        return false;
+    int counter = 0;
+    if(strm.good())
+        writeAnyDensityOrPotential(strm, dens, converter, counter);
+    return strm.good();
+}
+
 }  // namespace potential

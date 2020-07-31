@@ -159,7 +159,7 @@ int main(int argc, char* argv[])
             pot = potential::Multipole::create(*dens, 0, 0, gridsize, rmin, rmax);
         } else if(utils::fileExists(inputpotential)) {
             // create a (possibly composite) potential from the parameters provided in an INI file
-            pot = potential::createPotential(inputpotential);
+            pot = potential::readPotential(inputpotential);
         } else {
             // the createPotential() routine reads the potential name from the 'type=...' parameter
             args.set("type", inputpotential);
