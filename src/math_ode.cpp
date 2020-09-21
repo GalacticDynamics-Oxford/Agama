@@ -229,7 +229,8 @@ double OdeSolverDOP853::doStep(double dt)
     *k12= k3,
     *k13= k4;
     // use the previously estimated timestep if no overriding value is provided
-    double timeStep = dt!=0 ? dt : nextTimeStep;
+    double sign = std::signbit(dt) ? -1 : +1;
+    double timeStep = dt!=0 ? dt : nextTimeStep*sign;
     // track the number of rejected attempts and the progress in error reduction
     int nbad = 0;
     double preverr = INFINITY;
@@ -304,7 +305,7 @@ double OdeSolverDOP853::doStep(double dt)
                             er9*k9[i] + er10*k10[i] + er11*k11[i] + er12*k12[i]) / sk);
         }
         double den = sqrt(NDIM * (err5 + 0.01 * err3));
-        double err = den==0 ? 0 : err5 * timeStep / den;
+        double err = den==0 ? 0 : err5 * fabs(timeStep) / den;
 
         if(!isFinite(err))
             return 0;   // error, integration must be terminated
@@ -316,7 +317,7 @@ double OdeSolverDOP853::doStep(double dt)
         // or if the length of the timestep was provided to the routine externally
         if(dt!=0 || err <= 1) {
             // adjust the prediction for the next timestep
-            nextTimeStep = timeStep * fmin(finc, safe/fac);
+            nextTimeStep = fabs(timeStep) * fmin(finc, safe/fac);
             break;
         }
         else {
@@ -330,7 +331,7 @@ double OdeSolverDOP853::doStep(double dt)
                     // no improvement likely means that something is wrong with the error estimate
                     // (e.g. one of the variables is nearly zero so that the relative error is huge);
                     // just accept the current step and try to proceed further
-                    nextTimeStep = timeStep;
+                    nextTimeStep = fabs(timeStep);
                     break;
                 }
             } else

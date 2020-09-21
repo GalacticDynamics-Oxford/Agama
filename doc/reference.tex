@@ -1019,7 +1019,8 @@ here \ppp{posvel} contains initial conditions for one or several orbits (a $N\ti
 \ppp{dtype} is the storage data type for trajectories (32-bit or 64-bit float or complex). Note that although the orbit integration always uses 64-bit floats (\Cpp \texttt{double}s) internally, by default the trajectory is stored in 32-bit floats to save memory, with the loss of precision usually being acceptable.\\
 \ppp{lyapunov=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos).\\
 \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling. \\[2mm]
-The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
+The \texttt{result} returned by this routine is one or several arrays, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, it is returned as either a tuple of length 2 (for a single orbit) or an $N\times 2$ array (for $N$ orbits), with the first element of each row $k$ containing a 1d array of times $t_i |_{i=0}^{M_k-1}$ at which the trajectory is stored, and the second element -- a 2d array ($M_k\times6$) containing the trajectory itself. If \texttt{time}$<0$, the integration is carried backward in time, and the array of times is monotonically decreasing (in any case, it goes from the initial moment \texttt{timestart} to \texttt{timestart+time}, whatever their signs are).
+Note that the entire ensemble of orbit is not a single \texttt{numpy} array, but an array of arrays, because each orbit may have a different size.
 For instance, to plot the time evolution of $z$ coordinate of each orbit, one may use\\[1mm]
 \texttt{for times,trj in result: plt.plot(times, trj[:,2])}\\[1mm]
 and to plot the meridional $(R-z)$ cross-section of each orbit, one may use\\[1mm]
@@ -1749,7 +1750,7 @@ A = \sum_{c=1}^{N_\mathrm{cell}} \frac{\mathrm{vol}(\mathcal{V}_c)}{M_c} \sum_{k
 %%%%%%%%%%%%%%
 \begin{figure}
 \begin{center}
-\includegraphics[width=6cm]{EulerAngles.pdf} \hspace{1cm}
+\includegraphics{EulerAngles.pdf} \hspace{1cm}
 \includegraphics{EulerAnglesProjection.pdf}
 \end{center}
 \caption{\textit{Left panel:} specification of rotation of the cartesian coordinate system in terms of Euler angles $\alpha,\beta,\gamma$.\protect\\

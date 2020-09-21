@@ -77,8 +77,9 @@ public:
     virtual void init(const double stateNew[], double timeNew=NAN) = 0;
 
     /** advance the solution by one timestep.
-        \param[in]  dt is the length of the timestep;
-        if 0 then it will be determined automatically by internal accuracy requirements;
+        \param[in]  dt is the length of the timestep (can have any sign);
+        if 0 then it will be determined automatically by internal accuracy requirements
+        (note that the sign matters here: 0 means integrate forward, -0 - backward in time);
         \return the length of the timestep taken, or zero on error
     */
     virtual double doStep(double dt = 0) = 0;

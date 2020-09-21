@@ -68,13 +68,14 @@ StepResult RuntimeTrajectory<CoordT>::processTimestep(
         trajectory[0].second = tend;
     } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
-        ptrdiff_t ibegin = static_cast<ptrdiff_t>((tbegin-t0) / samplingInterval);
-        ptrdiff_t iend   = static_cast<ptrdiff_t>((tend-t0)   / samplingInterval + ROUNDOFF);
+        double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
+        ptrdiff_t ibegin = static_cast<ptrdiff_t>(sign * (tbegin-t0) / samplingInterval);
+        ptrdiff_t iend   = static_cast<ptrdiff_t>(sign * (tend-t0)   / samplingInterval * (1 + ROUNDOFF));
         double dtroundoff = ROUNDOFF * fmax(fabs(tend), fabs(tbegin));
         trajectory.resize(iend + 1);
         for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
-            double tout = samplingInterval * iout + t0;
-            if(tout >= tbegin-dtroundoff && tout <= tend+dtroundoff) {
+            double tout = sign * samplingInterval * iout + t0;
+            if(sign * tout >= sign * tbegin - dtroundoff && sign * tout <= sign * tend + dtroundoff) {
                 double data[6];
                 for(int d=0; d<6; d++)
                     data[d] = solver.getSol(tout, d);
@@ -212,6 +213,8 @@ coord::PosVelT<CoordT> integrate(
     const OrbitIntParams& params,
     const double startTime)
 {
+    if(totalTime==0 || !isFinite(totalTime))  // don't bother
+        return initialConditions;
     math::OdeSolverDOP853 solver(orbitIntegrator, params.accuracy);
     int NDIM = orbitIntegrator.size();
     if(NDIM < 6)
@@ -221,19 +224,20 @@ coord::PosVelT<CoordT> integrate(
     initialConditions.unpack_to(vars);  // first 6 variables are always position/velocity
     solver.init(vars, startTime);
     size_t numSteps = 0;
+    double sign = totalTime>0 ? +1 : -1;   // integrate forward (+1) or backward (-1) in time
     double currentTime = startTime, endTime = totalTime + startTime;
-    while(currentTime < endTime) {
-        if(!(solver.doStep() > 0.)) {
+    while(currentTime*sign < endTime*sign) {
+        if(!(solver.doStep(sign*0.0) * sign > 0.)) {
             // signal of error
             utils::msg(utils::VL_WARNING,
                 "orbit::integrate", "terminated at t="+utils::toString(currentTime));
             break;
         }
         double prevTime = currentTime;
-        currentTime = fmin(solver.getTime(), endTime);
+        currentTime = fmin(solver.getTime()*sign, endTime*sign) * sign;
         for(int d=0; d<NDIM; d++)
             vars[d] = solver.getSol(currentTime, d);
-        bool reinit = false, finish = currentTime >= endTime;
+        bool reinit = false, finish = currentTime*sign >= endTime*sign;
         for(size_t i=0; i<runtimeFncs.size(); i++) {
             switch(runtimeFncs[i]->processTimestep(solver, prevTime, currentTime, vars))
             {

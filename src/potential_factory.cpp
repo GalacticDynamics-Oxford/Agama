@@ -19,6 +19,14 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+/// OS- and filesystem-specific definitions
+#ifdef _WIN32
+#include <direct.h>
+#define DIRECTORY_SEPARATOR '\\'
+#else
+#include <unistd.h>
+#define DIRECTORY_SEPARATOR '/'
+#endif
 
 namespace potential {
 
@@ -390,6 +398,54 @@ SersicParam parseSersicParam(const AllParam& param)
 }
 
 ///@}
+/// \name Filesystem utility
+//        ------------------
+///@{
+
+
+/** Utility class for temporarily changing the working directory to the one containing
+    the given filename, and then returning back to the previous working directory
+    when the instance of this class goes out of scope (either in the normal course of events
+    or after an exception, either way the current working directory will be restored).
+    This class is used when reading/writing INI files containing the potential/density params:
+    if they contain references to other files, those files will be treated as residing alongside
+    the INI file, even if the latter is specified by a filename with a non-trivial path.
+*/
+class DirectoryChanger {
+    std::string oldcwd;
+public:
+    /// check if the input filename contains a nontrivial path;
+    /// if yes, store the current working directory and move to the one contained in the file path;
+    /// throw an exception if it does not exist or could not be moved into.
+    DirectoryChanger(const std::string& filenameWithPath)
+    {
+        std::string::size_type index = filenameWithPath.rfind(DIRECTORY_SEPARATOR);
+        if(index == std::string::npos)
+            return;
+        // otherwise separate the path from the filename
+        const size_t bufsize=32768;
+        oldcwd.resize(bufsize);
+        if(!getcwd(&oldcwd[0], bufsize))
+            throw std::runtime_error("Failed to get the current working directory");  // unlikely
+        std::string newcwd = filenameWithPath.substr(0, index+1);
+        if(chdir(newcwd.c_str()) != 0)
+            throw std::runtime_error("Failed to change the current working directory to "+newcwd);
+        utils::msg(utils::VL_VERBOSE, "DirectoryChanger",
+            "Temporarily changed the current working directory to "+newcwd);
+    }
+    ~DirectoryChanger()
+    {
+        if(!oldcwd.empty()) {
+            if(chdir(oldcwd.c_str()) != 0)
+                // we can't throw an exception from the destructor, so just print a warning
+                utils::msg(utils::VL_WARNING, "DirectoryChanger", "Failed to restore working directory");
+            utils::msg(utils::VL_VERBOSE, "DirectoryChanger",
+                "Restored the current working directory to "+oldcwd);
+        }
+    }
+};
+
+///@}
 /// \name Factory routines for constructing various Density & Potential classes from arrays of strings
 //        --------------------------------------------------------------------------------------------
 ///@{
@@ -712,14 +768,26 @@ void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHar
 }
 
 /// write data (expansion coefs or components) for a single or composite density or potential to a stream
-void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity& dens,
+void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity* dens,
     const units::ExternalUnits& converter, int& counter)
 {
+    // first, check if this is a shifted density/potential
+    const ShiftedDensity* sd = dynamic_cast<const ShiftedDensity*>(dens);
+    if(sd)
+        dens = sd->dens.get();
+    const Shifted* sp = dynamic_cast<const Shifted*>(dens);
+    if(sp)
+        dens = sp->pot.get();
+    // we have no way of storing the shift parameters, but at least inform about the fact
+    bool shifted = sd!=NULL || sp!=NULL;
+
     // check if this is a CompositeDensity
-    const CompositeDensity* cd = dynamic_cast<const CompositeDensity*>(&dens);
+    const CompositeDensity* cd = dynamic_cast<const CompositeDensity*>(dens);
     if(cd) {
+        if(shifted)
+            strm << "#center is not stored\n";
         for(unsigned int i=0; i<cd->size(); i++) {
-            writeAnyDensityOrPotential(strm, *cd->component(i), converter, counter);
+            writeAnyDensityOrPotential(strm, cd->component(i).get(), converter, counter);
             if(i+1<cd->size())
                 strm << '\n';
         }
@@ -727,10 +795,12 @@ void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity& dens,
     }
 
     // check if this is a Composite potential
-    const Composite* cp = dynamic_cast<const Composite*>(&dens);
+    const Composite* cp = dynamic_cast<const Composite*>(dens);
     if(cp) {
+        if(shifted)
+            strm << "#center is not stored\n";
         for(unsigned int i=0; i<cp->size(); i++) {
-            writeAnyDensityOrPotential(strm, *cp->component(i), converter, counter);
+            writeAnyDensityOrPotential(strm, cp->component(i).get(), converter, counter);
             if(i+1<cp->size())
                 strm << '\n';
         }
@@ -738,7 +808,7 @@ void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity& dens,
     }
 
     // otherwise this is an elementary potential or density, so write a section header
-    const BasePotential* pot = dynamic_cast<const BasePotential*>(&dens);
+    const BasePotential* pot = dynamic_cast<const BasePotential*>(dens);
     if(pot)
         strm << "[Potential";
     else
@@ -746,32 +816,34 @@ void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity& dens,
     if(counter>0)
         strm << counter;
     strm << "]\n";
-    strm << "type=" << dens.name() << '\n';
+    strm << "type=" << dens->name() << '\n';
+    if(shifted)
+        strm << "#center is not stored\n";
     counter++;
 
-    const Multipole* mu = dynamic_cast<const Multipole*>(&dens);
+    const Multipole* mu = dynamic_cast<const Multipole*>(dens);
     if(mu) {
         writePotentialMultipole(strm, *mu, converter);
         return;
     }
-    const CylSpline* cy = dynamic_cast<const CylSpline*>(&dens);
+    const CylSpline* cy = dynamic_cast<const CylSpline*>(dens);
     if(cy) {
         writePotentialCylSpline(strm, *cy, converter);
         return;
     }
-    const DensitySphericalHarmonic* sh = dynamic_cast<const DensitySphericalHarmonic*>(&dens);
+    const DensitySphericalHarmonic* sh = dynamic_cast<const DensitySphericalHarmonic*>(dens);
     if(sh) {
         writeDensitySphericalHarmonic(strm, *sh, converter);
         return;
     }
-    const DensityAzimuthalHarmonic* ah = dynamic_cast<const DensityAzimuthalHarmonic*>(&dens);
+    const DensityAzimuthalHarmonic* ah = dynamic_cast<const DensityAzimuthalHarmonic*>(dens);
     if(ah) {
         writeDensityAzimuthalHarmonic(strm, *ah, converter);
         return;
     }
 
     // otherwise don't know how to store this potential
-    strm << "Other parameters are not stored\n";
+    strm << "#other parameters are not stored\n";
 }
 
 ///@}
@@ -807,6 +879,9 @@ static void readTimeDependentVector(
             vely.push_back(utils::toDouble(fields[5]) * valueUnit / timeUnit);
             velz.push_back(utils::toDouble(fields[6]) * valueUnit / timeUnit);
         }
+    }
+    if(posx.size() == 0) {
+        throw std::runtime_error("readTimeDependentVector: no valid entries in "+filename);
     }
     if(velx.size() == posx.size()) {
         // create Hermite splines from values and derivatives at each moment of time
@@ -1056,7 +1131,7 @@ static PtrPotential createEvolvingPotential(
     std::vector<PtrPotential> potentials;
     // attempt to parse the remaining lines in this INI section
     // as time stamps and names of corresponding potential files
-    for(size_t index=startLine+1; index<lines.size(); index++) {
+    for(size_t index=startLine; index<lines.size(); index++) {
         if(lines[index].empty() || utils::isComment(lines[index][0]))  // commented line
             continue;
         fields = utils::splitString(lines[index], " \t");
@@ -1440,6 +1515,9 @@ PtrDensity readDensity(const std::string& iniFileName, const units::ExternalUnit
     if(iniFileName.empty())
         throw std::runtime_error("Empty file name");
     utils::ConfigFile ini(iniFileName);
+    // temporarily change the current directory (if needed) to ensure that the filenames
+    // in the INI file are processed correctly with paths relative to the INI file itself
+    DirectoryChanger dirchanger(iniFileName);
     std::vector<std::string> sectionNames = ini.listSections();
     std::vector<PtrDensity> components;
     for(unsigned int i=0; i<sectionNames.size(); i++)
@@ -1458,6 +1536,9 @@ PtrPotential readPotential(const std::string& iniFileName, const units::External
     if(iniFileName.empty())
         throw std::runtime_error("Empty file name");
     utils::ConfigFile ini(iniFileName);
+    // temporarily change the current directory (if needed) to ensure that the filenames
+    // in the INI file are processed correctly with paths relative to the INI file itself
+    DirectoryChanger dirchanger(iniFileName);
     std::vector<std::string> sectionNames = ini.listSections();
     std::vector<utils::KeyValueMap> components;
     for(unsigned int i=0; i<sectionNames.size(); i++)
@@ -1529,7 +1610,7 @@ bool writeDensity(const std::string& fileName, const BaseDensity& dens,
         return false;
     int counter = 0;
     if(strm.good())
-        writeAnyDensityOrPotential(strm, dens, converter, counter);
+        writeAnyDensityOrPotential(strm, &dens, converter, counter);
     return strm.good();
 }
 

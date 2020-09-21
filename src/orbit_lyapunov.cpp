@@ -7,6 +7,10 @@
 namespace orbit{
 
 namespace{
+
+/// roundoff tolerance in the sampling interval calculation
+const double ROUNDOFF = 1e-15;
+
 /// initialize the deviation vector always with the same sequence (not sure if it's optimal);
 /// the choice below produces comparable and incommensurable values of components, and has a unit norm
 static const double DEV_VEC_INIT[6] =
@@ -60,7 +64,8 @@ RuntimeLyapunov<UseInternalVarEqSolver>::RuntimeLyapunov(
     logDeviationVector(  // alias to either the external or internal arrays that store the deviation vector
         outputLogDeviationVector==NULL ? logDeviationVectorInternal : *outputLogDeviationVector),
     addLogDevVec(0.),    // initially the deviation vector is normalized to unity
-    orbitalPeriod(NAN)   // not known yet - will be assigned on the first timestep
+    orbitalPeriod(NAN),  // not known yet - will be assigned on the first timestep
+    t0(NAN)              // same
 {
     logDeviationVector.clear();
 }
@@ -88,8 +93,11 @@ template<bool UseInternalVarEqSolver>
 StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
     const math::BaseOdeSolver& solver, const double tbegin, const double tend, double vars[])
 {
+    if(t0 != t0)
+        t0 = tbegin;   // record the first ever moment of time
+
     // assign the orbital period on the first timestep
-    if(!isFinite(orbitalPeriod) /*initially it was set to NAN*/) {
+    if(orbitalPeriod != orbitalPeriod /*initially it was set to NAN*/) {
         orbitalPeriod = T_circ(potential, totalEnergy(potential, coord::PosVelCar(vars)));
         if(!isFinite(orbitalPeriod))  // e.g. the orbit is unbound,
             orbitalPeriod = 0;        // so no meaningful Lyapunov exponent can be computed anyway
@@ -123,14 +131,22 @@ StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
 
     // store the deviation vector at regular intervals of time and check its magnitude
     bool needToRescale = false;
-    while(samplingInterval * logDeviationVector.size() <= tend) {
-        double tsamp = samplingInterval * logDeviationVector.size();
-        double devVec[6];   // retrieved either from the internal varEqSolver or from the orbit integrator
-        for(int d=0; d<6; d++)
-            devVec[d] = UseInternalVarEqSolver ? varEqSolver.getSol(tsamp, d) : solver.getSol(tsamp, d+6);
-        double logDevVec = logMagnitude(devVec);
-        logDeviationVector.push_back(logDevVec + addLogDevVec);
-        needToRescale |= logDevVec > 100;
+    
+    double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
+    ptrdiff_t ibegin = static_cast<ptrdiff_t>(sign * (tbegin-t0) / samplingInterval);
+    ptrdiff_t iend   = static_cast<ptrdiff_t>(sign * (tend-t0)   / samplingInterval * (1 + ROUNDOFF));
+    double dtroundoff = ROUNDOFF * fmax(fabs(tend), fabs(tbegin));
+    logDeviationVector.resize(iend + 1);
+    for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
+        double tout = sign * samplingInterval * iout + t0;
+        if(sign * tout >= sign * tbegin - dtroundoff && sign * tout <= sign * tend + dtroundoff) {
+            double devVec[6];   // retrieved either from the internal varEqSolver or from the orbit integrator
+            for(int d=0; d<6; d++)
+                devVec[d] = UseInternalVarEqSolver ? varEqSolver.getSol(tout, d) : solver.getSol(tout, d+6);
+            double logDevVec = logMagnitude(devVec);
+            logDeviationVector[iout] = logDevVec + addLogDevVec;
+            needToRescale |= logDevVec > 100;
+        }
     }
 
     // if the orbit is chaotic, the magnitude of the deviation vector grows exponentially,

@@ -302,6 +302,8 @@ Evolving::Evolving(const std::vector<double> _times,
 {
     if(times.size() != instances.size())
         throw std::length_error("Evolving: input arrays are not equal in length");
+    if(times.size() == 0)
+        throw std::invalid_argument("Evolving: empty list of potentials");
     for(size_t i=1; i<times.size(); i++)
         if(!(times[i] > times[i-1]))
             throw std::invalid_argument("Evolving: Times must be sorted in increasing order");

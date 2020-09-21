@@ -23,7 +23,7 @@ ax = plt.subplots(1, 3, figsize=(15,5))[1]
 
 au = 4.84814e-9  # 1 astronomical unit in kpc
 # work in solar system units: 1 AU, 1 Msun, 1 km/s, 4.74 yr
-print agama.setUnits(length=au, mass=1, velocity=1)
+print(agama.setUnits(length=au, mass=1, velocity=1))
 
 r0 = 1.         # AU
 v0 = 29.784694  # km/s - orbital velocity of Earth

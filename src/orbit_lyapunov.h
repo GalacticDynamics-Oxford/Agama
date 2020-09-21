@@ -96,6 +96,9 @@ class RuntimeLyapunov: public BaseRuntimeFnc, public math::IOde2System {
     /// estimate of the orbital period, used to normalize the [relative] Lyapunov exponent
     double orbitalPeriod;
 
+    /// initial time (recorded at the beginning of the first timestep)
+    double t0;
+
 public:
     /** construct the runtime function:
         \param[in]  potential  is the instance of potential (same as used in the orbit integration);

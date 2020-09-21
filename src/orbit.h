@@ -232,7 +232,7 @@ inline std::vector<std::pair<coord::PosVelT<CoordT>, double> > integrateTraj(
     std::vector<std::pair<coord::PosVelT<CoordT>, double> > output;
     if(samplingInterval > 0)
         // reserve space for the trajectory, including one extra point for the final state
-        output.reserve(totalTime * (1+1e-15) / samplingInterval + 1);
+        output.reserve((totalTime>=0 ? totalTime : -totalTime) * (1+1e-15) / samplingInterval + 1);
     integrate(initialConditions, totalTime,
         OrbitIntegrator<CoordT>(potential),
         RuntimeFncArray(1, PtrRuntimeFnc(new RuntimeTrajectory<CoordT>(samplingInterval, output))),

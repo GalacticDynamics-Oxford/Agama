@@ -240,8 +240,11 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
 
     // print out log(devvec) as a function of time
     size_t size =  trajectory6.size();
-    assert(size == trajectory12.size() && size == logDeviationVector6i.size() &&
-        size == logDeviationVector12i.size() && size == logDeviationVector12o.size());
+    if( size != trajectory12.size() || size != logDeviationVector6i.size() ||
+        size != logDeviationVector12i.size() || size != logDeviationVector12o.size() ) {
+        std::cout << "unequal sizes of output arrays" << err << '\n';
+        return false;
+    }
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         static int testIndex = 0;
         std::ofstream strm(("test_orbit_lyapunov"+utils::toString(testIndex++)+".dat").c_str());

@@ -236,6 +236,13 @@ inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2)
     return *static_cast<DataType*>(PyArray_GETPTR2(static_cast<PyArrayObject*>(arr), ind1, ind2));
 }
 
+/// same as above, but for a 3d array
+template<typename DataType>
+inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2, npy_intp ind3)
+{
+    return *static_cast<DataType*>(PyArray_GETPTR3(static_cast<PyArrayObject*>(arr), ind1, ind2, ind3));
+}
+
 /// convert a Python array of floats to std::vector, or return an empty vector in case of error;
 /// if the argument is a string instead of a proper array (e.g. if it comes from an ini file),
 /// it will be parsed as if it were a python expression, like "numpy.linspace(0.,1.,21)"
@@ -4242,24 +4249,44 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             std::vector<PyObject*> apertures = toPyObjectArray(getItemFromPyDict(namedArgs, "apertures"));
             if(apertures.empty())
                 throw std::invalid_argument("Must provide a list of polygons in 'apertures=...' argument");
+            // two possibilities: either apertures is a single 3d array of shape N_apert x N_vert x 2,
+            // or a list/tuple/array of individual 2d arrays of shapes N_vert,i x 2
             for(size_t a=0; a<apertures.size(); a++) {
                 PyArrayObject* ap_arr =
                     (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, 0);
-                if( ap_arr == NULL ||
-                    PyArray_NDIM(ap_arr) != 2 ||
-                    PyArray_DIM(ap_arr, 0) <= 2 ||
-                    PyArray_DIM(ap_arr, 1) != 2)
-                {
+                if( ap_arr != NULL &&
+                    PyArray_NDIM(ap_arr)  == 2 &&
+                    PyArray_DIM(ap_arr, 0) >= 3 &&
+                    PyArray_DIM(ap_arr, 1) == 2)
+                {   // an element of the list is a 2d array
+                    size_t nv = PyArray_DIM(ap_arr, 0);
+                    math::Polygon poly(nv);
+                    for(size_t v=0; v<nv; v++) {
+                        poly[v].x = pyArrayElem<double>(ap_arr, v, 0) * conv->lengthUnit;
+                        poly[v].y = pyArrayElem<double>(ap_arr, v, 1) * conv->lengthUnit;
+                    }
+                    params.apertures.push_back(poly);
+                } else
+                if( ap_arr != NULL &&
+                    apertures.size() == 1 &&
+                    PyArray_NDIM(ap_arr)  == 3 &&
+                    PyArray_DIM(ap_arr, 1) >= 3 &&
+                    PyArray_DIM(ap_arr, 2) == 2)
+                {   // the entire input is a single 3d array
+                    size_t na = PyArray_DIM(ap_arr, 0), nv = PyArray_DIM(ap_arr, 1);
+                    math::Polygon poly(nv);
+                    for(size_t aa=0; aa<na; aa++) {
+                        for(size_t v=0; v<nv; v++) {
+                            poly[v].x = pyArrayElem<double>(ap_arr, aa, v, 0) * conv->lengthUnit;
+                            poly[v].y = pyArrayElem<double>(ap_arr, aa, v, 1) * conv->lengthUnit;
+                        }
+                        params.apertures.push_back(poly);
+                    }
+                } else {
                     Py_XDECREF(ap_arr);
                     throw std::invalid_argument(
                         "Each element of the list or tuple provided in the 'apertures=...' argument "
                         "must be a Nx2 array defining a polygon on the sky plane, with N>=3 vertices");
-                }
-                size_t nv = PyArray_DIM(ap_arr, 0);
-                params.apertures.push_back(math::Polygon(nv));
-                for(size_t v=0; v<nv; v++) {
-                    params.apertures.back()[v].x = pyArrayElem<double>(ap_arr, v, 0) * conv->lengthUnit;
-                    params.apertures.back()[v].y = pyArrayElem<double>(ap_arr, v, 1) * conv->lengthUnit;
                 }
                 Py_DECREF(ap_arr);
             }
@@ -4699,7 +4726,7 @@ static const char* docstringOrbit =
     "  trajsize (optional):  if given, turns on the recording of trajectory for each orbit "
     "(should be either a single integer or an array of integers with length N). "
     "The trajectory of each orbit is stored either at every timestep of the integrator "
-    "(if trajsize=0) or at regular intervals of time (`dt=time/(trajsize-1)`, "
+    "(if trajsize=0) or at regular intervals of time (`dt=abs(time)/(trajsize-1)`, "
     "so that the number of points is `trajsize`; the last stored point is always at the end of "
     "integration period, and if trajsize>1, the first point is the initial conditions). "
     "Both time and trajsize may differ between orbits.\n"
@@ -4830,11 +4857,6 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             timestart[i] = pyArrayElem<double>(timestart_arr, i) * conv->timeUnit;
     Py_DECREF(time_arr);
     Py_XDECREF(timestart_arr);
-    for(npy_intp orb=0; orb<numOrbits; orb++)
-        if(timetotal[orb] < 0) {
-            PyErr_SetString(PyExc_ValueError, "Argument 'time' may not be negative");
-            return NULL;
-        }
 
     // check that valid targets were provided
     std::vector<PyObject*> targets_vec = toPyObjectArray(targets_obj);
@@ -4968,7 +4990,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     double trajStep = trajSizes[orb]>0 ?
                         // output at regular intervals of time, unless trajSize=1
                         // (in that case, outputInterval=INFINITY, and we store only the last point)
-                        timetotal[orb] / (trajSizes[orb]-1) :
+                        fabs(timetotal[orb]) / (trajSizes[orb]-1) :
                         0;  // if trajSize==0, this means store trajectory at every integration timestep
                     fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
                 }
