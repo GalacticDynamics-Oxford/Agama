@@ -71,7 +71,7 @@ StepResult RuntimeTrajectory<CoordT>::processTimestep(
         double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
         ptrdiff_t ibegin = static_cast<ptrdiff_t>(sign * (tbegin-t0) / samplingInterval);
         ptrdiff_t iend   = static_cast<ptrdiff_t>(sign * (tend-t0)   / samplingInterval * (1 + ROUNDOFF));
-        double dtroundoff = ROUNDOFF * fmax(fabs(tend), fabs(tbegin));
+        double dtroundoff = ROUNDOFF * fmax(fmax(fabs(tend), fabs(tbegin)), fabs(t0));
         trajectory.resize(iend + 1);
         for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
             double tout = sign * samplingInterval * iout + t0;

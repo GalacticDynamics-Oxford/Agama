@@ -84,7 +84,9 @@ static PyTypeObject
     *DensityTypePtr,
     *PotentialTypePtr,
     *ActionFinderTypePtr,
+    *ActionMapperTypePtr,
     *DistributionFunctionTypePtr,
+    *SelectionFunctionTypePtr,
     *TargetTypePtr;
 
 // forward declaration for a routine that constructs a Python cubic spline object
@@ -130,6 +132,41 @@ public:
 /// \name  Helper routines for type conversions and argument checking
 //  ------------------------------------------------------------------
 ///@{
+
+/// check that a Python object is a callable function that accepts a 2d NxD array and returns
+/// a 1d array of length N with a valid numerical type
+bool checkCallable(PyObject* fnc, int dim)
+{
+    if(PyCallable_Check(fnc) &&
+        // make sure it's not one of the other classes in this module which provide a call interface
+        !PyObject_TypeCheck(fnc, ActionFinderTypePtr) &&
+        !PyObject_TypeCheck(fnc, ActionMapperTypePtr) &&
+        !PyObject_TypeCheck(fnc, DistributionFunctionTypePtr) &&
+        !PyObject_TypeCheck(fnc, SelectionFunctionTypePtr) &&
+        !PyObject_TypeCheck(fnc, TargetTypePtr) )
+    {
+        const int Npoints= 2;  // number of input points
+        npy_intp dims[]  = {Npoints, dim};
+        PyObject* args   = PyArray_ZEROS(2, dims, NPY_DOUBLE, /*fortran order*/0);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+            return false;
+        }
+        bool success = false;
+        if(PyArray_Check(result)) {
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            success  = PyArray_NDIM((PyArrayObject*) result)==1 &&
+                PyArray_DIM((PyArrayObject*) result, 0) == Npoints &&
+                (type==NPY_FLOAT || type==NPY_DOUBLE || type==NPY_BOOL);
+        }
+        Py_DECREF(result);
+        return success;
+    }
+    else
+        return false;  // not a callable
+}
 
 /// return a string representation of a Python object
 std::string toString(PyObject* obj)
@@ -1017,19 +1054,20 @@ public:
         PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
         PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
         Py_DECREF(args);
-        double value;
+        double value = NAN;
         if(result == NULL) {
             PyErr_Print();
             throw std::runtime_error("Call to user-defined density function failed");
         }
-        if(PyArray_Check(result))
-            value = pyArrayElem<double>(result, 0);
+        if(PyArray_Check(result)) {
+            switch(PyArray_TYPE((PyArrayObject*) result)) {
+                case NPY_DOUBLE: value = pyArrayElem<double>(result, 0); break;
+                case NPY_FLOAT:  value = pyArrayElem<float >(result, 0); break;
+                default: ;
+            }
+        }
         else if(PyNumber_Check(result))
             value = PyFloat_AsDouble(result);
-        else {
-            Py_DECREF(result);
-            throw std::runtime_error("Invalid data type returned from user-defined density function");
-        }
         Py_DECREF(result);
         return value * conv->massUnit / pow_3(conv->lengthUnit);
     }
@@ -1058,14 +1096,9 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
     if(PyObject_TypeCheck(dens_obj, DensityTypePtr) && ((DensityObject*)dens_obj)->dens)
         return ((DensityObject*)dens_obj)->dens;
 
-    // otherwise this could be an arbitrary Python function,
-    // but make sure it's not one of the other classes in this module which provide a call interface
-    if(PyCallable_Check(dens_obj) &&
-        !PyObject_TypeCheck(dens_obj, ActionFinderTypePtr) &&
-        !PyObject_TypeCheck(dens_obj, DistributionFunctionTypePtr) &&
-        !PyObject_TypeCheck(dens_obj, TargetTypePtr) )
-    {   // then create a C++ wrapper for this Python function
-        // (don't check if it accepts a single Nx3 array as the argument...)
+    // otherwise this could be an arbitrary Python function
+    if(checkCallable(dens_obj, /*dimension of input*/ 3)) {
+        // then create a C++ wrapper for this Python function
         return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
     }
 
@@ -1404,12 +1437,12 @@ PyObject* Density_elem(PyObject* self, Py_ssize_t index)
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
     // check for various special cases by attempting to dynamic_cast the pointer to a given class:
     // if the object was not an instance of this (or derived) class, this returns NULL
-    
+
     // check if this is a ShiftedDensity
     const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
     if(sd)
         dens = sd->dens;
-    
+
     // check if this is a Shifted potential
     const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
     if(sp)
@@ -1450,7 +1483,7 @@ Py_ssize_t Density_len(PyObject* self)
     const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
     if(sd)
         dens = sd->dens;
-    
+
     // check if this is a Shifted potential
     const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
     if(sp)
@@ -1460,7 +1493,7 @@ Py_ssize_t Density_len(PyObject* self)
     const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
     if(cd)
         return cd->size();
-    
+
     // check if this is a Composite potential
     const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
     if(cp)
@@ -2615,14 +2648,9 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
     // check if this is a Python wrapper for a genuine C++ DF object
     if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr) && ((DistributionFunctionObject*)df_obj)->df)
         return ((DistributionFunctionObject*)df_obj)->df;
-    // otherwise this could be an arbitrary callable Python object,
-    // but make sure it's not one of the other classes in this module which provide a call interface
-    if(PyCallable_Check(df_obj) &&
-        !PyObject_TypeCheck(df_obj, DensityTypePtr) &&
-        !PyObject_TypeCheck(df_obj, ActionFinderTypePtr) &&
-        !PyObject_TypeCheck(df_obj, TargetTypePtr) )
-    {   // then create a C++ wrapper for this Python function
-        // (don't check if it accepts a single Nx3 array as the argument...)
+    // otherwise this could be an arbitrary callable Python object
+    if(checkCallable(df_obj, /*dimensions of input*/ 3)) {
+        // then create a C++ wrapper for this Python function
         return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
     }
     // none succeeded - return an empty pointer
@@ -2862,6 +2890,190 @@ static PyTypeObject DistributionFunctionType = {
 };
 
 
+///@}
+//  ----------------------------------
+/// \name  SelectionFunction class
+//  ----------------------------------
+///@{
+
+static const char* docstringSelectionFunction =
+    "SelectionFunction class represents an arbitrary function of 6 Cartesian phase-space coordinates "
+    "S(x,v) that can be passed to the GalaxyModel class and provides a multiplicative factor "
+    "in various integrals computed by its methods.\n"
+    "The only currently available variant is a function that depends exponentially on the distance "
+    "from a given point x0, normalized by a cutoff radius R0 with a steepness parameter xi: \n"
+    "  S(x) = exp[ -(|x-x0| / R0)^xi ]\n"
+    "Arguments for the constructor:\n"
+    "  point  -- an array of 3 Cartesian coordinates of the point x0;\n"
+    "  radius -- cutoff radius R0 (must be positive; infinity means no cutoff - S=1 everywhere;\n"
+    "  steepness -- cutoff steepness xi, ranges from 0 (no cutoff) to infinity (default value, "
+    "means a sharp transition from S=1 below the cutoff to S=0 above it).\n";
+
+/// \cond INTERNAL_DOCS
+typedef shared_ptr<const galaxymodel::BaseSelectionFunction> PtrSelectionFunction;
+
+/// Python type corresponding to SelectionFunction class
+typedef struct {
+    PyObject_HEAD
+    PtrSelectionFunction sf;
+} SelectionFunctionObject;
+/// \endcond
+
+/// destructor of SelectionFunction class
+void SelectionFunction_dealloc(SelectionFunctionObject* self)
+{
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a selection function at "+
+        utils::toString(self->sf.get()));
+    self->sf.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+/// constructor of SelectionFunction class
+int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObject* namedArgs)
+{
+    PyObject* point_obj = NULL;
+    double radius = NAN, steepness = INFINITY;
+    static const char* keywords[] = {"point", "radius", "steepness", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "Od|d", const_cast<char **>(keywords),
+        &point_obj, &radius, &steepness))
+    {
+        return -1;
+    }
+    std::vector<double> point(toDoubleArray(point_obj));
+    if(point.size() != 3) {
+        PyErr_SetString(PyExc_RuntimeError, "Error in creating SelectionFunction: "
+            "'point' must be an array of 3 numbers");
+        return -1;
+    }
+    try{
+        self->sf.reset(new galaxymodel::SelectionFunctionDistance(
+            convertPos(&point[0]), radius * conv->lengthUnit, steepness));
+        assert(self->sf);
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Created a SelectionFunction at "+utils::toString(self->sf.get()));
+        return 0;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError,
+            (std::string("Error in creating SelectionFunction: ")+e.what()).c_str());
+        return -1;
+    }
+}
+
+/// compute the selection function at one or more points in 6d phase space (x,v)
+class FncSelectionFunction: public BatchFunction {
+    const galaxymodel::BaseSelectionFunction& sf;
+    double* outputBuffer;
+public:
+    FncSelectionFunction(PyObject* input, const galaxymodel::BaseSelectionFunction& _sf) :
+        BatchFunction(/*input length*/ 6, input), sf(_sf)
+    {
+        outputObject = allocateOutput<1>(numPoints, &outputBuffer);
+    }
+    virtual void processPoint(npy_intp indexPoint)
+    {
+        outputBuffer[indexPoint] = sf.value(convertPosVel(&inputBuffer[indexPoint*6]));
+    }
+};
+
+PyObject* SelectionFunction_value(SelectionFunctionObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(self->sf==NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "SelectionFunction object is not properly initialized");
+        return NULL;
+    }
+    if(!noNamedArgs(namedArgs))
+        return NULL;
+    return FncSelectionFunction(args, *self->sf).run(/*chunk*/65536);
+}
+
+/// Helper class for providing a BaseSelectionFunction interface to a user-defined Python function
+/// that returns the value of a selection function at one or more points in x,v space
+class SelectionFunctionWrapper: public galaxymodel::BaseSelectionFunction{
+    OmpDisabler ompDisabler;  ///< OpenMP must be disabled while using Python callback functions
+    PyObject* fnc;            ///< Python object providing the selection function
+public:
+    SelectionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
+    {
+        Py_INCREF(fnc);
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Created a C++ selection function wrapper for Python function "+toString(fnc));
+    }
+    ~SelectionFunctionWrapper()
+    {
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ selection function wrapper for Python function "+toString(fnc));
+        Py_DECREF(fnc);
+    }
+    virtual double value(const coord::PosVelCar& pv) const
+    {
+        double val;
+        evalmany(1, &pv, &val);
+        return val;
+    }
+    virtual void evalmany(const size_t npoints, const coord::PosVelCar points[], double values[]) const
+    {
+        double* posvel = static_cast<double*>(alloca(npoints * 6 * sizeof(double)));
+        for(size_t p=0; p<npoints; p++)
+            unconvertPosVel(points[p], posvel + p*6);
+        npy_intp dims[]  = { (npy_intp)npoints, 6};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+            throw std::runtime_error("Call to user-defined selection function failed");
+        }
+        if( PyArray_Check(result) &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+        {
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            for(size_t p=0; p<npoints; p++) {
+                switch(type) {
+                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
+                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
+                    case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
+                    default: values[p] = NAN;
+                }
+            }
+        }
+        else if(npoints==1 && PyNumber_Check(result)) {
+            // in case of a single input point, the user function might return a single number
+            values[0] = PyFloat_AsDouble(result);
+        }
+        else
+            std::fill(values, values+npoints, NAN);  // sign of error
+        Py_DECREF(result);
+    }
+};
+
+// helper function for creating an instance of C++ BaseSelectionFunction class from a Python object
+PtrSelectionFunction getSelectionFunction(PyObject* sf_obj)
+{
+    if(sf_obj == Py_None || sf_obj == NULL)
+        return PtrSelectionFunction(new galaxymodel::SelectionFunctionTrivial());
+    else if(PyObject_TypeCheck(sf_obj, SelectionFunctionTypePtr) && ((SelectionFunctionObject*)sf_obj)->sf)
+        return ((SelectionFunctionObject*)sf_obj)->sf;
+    else // otherwise it must be a callable Python function accessed through a wrapper class
+        return PtrSelectionFunction(new SelectionFunctionWrapper(sf_obj));
+}
+
+static PyMethodDef SelectionFunction_methods[] = {
+    { NULL, NULL, 0, NULL }  // no named methods
+};
+
+static PyTypeObject SelectionFunctionType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.SelectionFunction",
+    sizeof(SelectionFunctionObject), 0, (destructor)SelectionFunction_dealloc,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    (PyCFunctionWithKeywords)SelectionFunction_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringSelectionFunction,
+    0, 0, 0, 0, 0, 0, SelectionFunction_methods, 0, 0, 0, 0, 0, 0, 0,
+    (initproc)SelectionFunction_init
+};
+
 
 ///@}
 //  -------------------------
@@ -2876,10 +3088,14 @@ static const char* docstringGalaxyModel =
     "at a given point in the ordinary phase space (coordinate/velocity), as well as "
     "methods for drawing samples from the distribution function in the given potential.\n"
     "The constructor takes the following arguments:\n"
-    "  potential - a Potential object;\n"
-    "  df - a DistributionFunction object;\n"
+    "  potential - a Potential object.\n"
+    "  df - a DistributionFunction object.\n"
     "  af (optional) - an ActionFinder object - must be constructed for the same potential; "
     "if not provided, then the action finder is created internally.\n"
+    "  sf (optional) - a SelectionFunction object or a user-defined callable function "
+    "that takes a 2d Nx6 array of phase-space points (x,v in cartesian coordinates) as input, "
+    "and returns a 1d array of N values between 0 and 1, which will be multiplied by the values "
+    "of the DF at corresponding points; if not provided, assumed identically unity.\n"
     "In case of a multicomponent DF, one may compute the moments and projections for each "
     "component separately by providing an optional flag 'separate=True' to the corresponding "
     "methods. This is more efficient than constructing a separate GalaxyModel instance for "
@@ -2894,6 +3110,7 @@ typedef struct {
     PotentialObject* pot_obj;
     DistributionFunctionObject* df_obj;
     ActionFinderObject* af_obj;
+    PyObject* sf_obj;
 } GalaxyModelObject;
 /// \endcond
 
@@ -2902,6 +3119,7 @@ void GalaxyModel_dealloc(GalaxyModelObject* self)
     Py_XDECREF(self->pot_obj);
     Py_XDECREF(self->df_obj);
     Py_XDECREF(self->af_obj);
+    Py_XDECREF(self->sf_obj);
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -2923,19 +3141,18 @@ bool GalaxyModel_isCorrect(GalaxyModelObject* self)
 
 int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"potential", "df", "af", NULL};
-    PyObject *pot_obj = NULL, *df_obj = NULL, *af_obj = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|O", const_cast<char**>(keywords),
-        &pot_obj, &df_obj, &af_obj))
+    static const char* keywords[] = {"potential", "df", "af", "sf", NULL};
+    PyObject *pot_obj = NULL, *df_obj = NULL, *af_obj = NULL, *sf_obj = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|OO", const_cast<char**>(keywords),
+        &pot_obj, &df_obj, &af_obj, &sf_obj))
     {
-        PyErr_SetString(PyExc_TypeError,
-            "GalaxyModel constructor takes two or three arguments: potential, df, [af]");
         return -1;
     }
 
     // check and store the potential
     if(!getPotential(pot_obj)) {
-        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid instance of Potential class");
+        PyErr_SetString(PyExc_TypeError,
+            "Argument 'potential' must be a valid instance of Potential class");
         return -1;
     }
     Py_XDECREF(self->pot_obj);
@@ -2956,7 +3173,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
         self->df_obj = (DistributionFunctionObject*)df_obj;
     } else {
         // it is a Python function that was wrapped in a C++ class,
-        // which now in turn will be wrapped in a new Python DF object
+        // which now in turn will be wrapped in a new Python DF object (isn't that beautiful?)
         self->df_obj = (DistributionFunctionObject*)createDistributionFunctionObject(df);
     }
 
@@ -2982,6 +3199,23 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
         self->af_obj = (ActionFinderObject*)af_obj;
     }
 
+    // sf_obj, if provided, must be a callable object OR an instance of a SelectionFunction class
+    if(sf_obj) {
+        if( !PyObject_TypeCheck(sf_obj, SelectionFunctionTypePtr) &&
+            !checkCallable(sf_obj, /*input dim*/ 6))
+        {
+            PyErr_SetString(PyExc_TypeError,
+                "Argument 'sf' must be either an instance of SelectionFunction class, or "
+                "a callable function that takes an Nx6 array as input and returns an array of N numbers");
+            return -1;
+        }
+    } else {
+        // if not provided, replace by None
+        sf_obj = Py_None;
+    }
+    Py_INCREF(sf_obj);  // increase refcount regardless of whether it's a user-provided function or None
+    self->sf_obj = sf_obj;
+
     assert(GalaxyModel_isCorrect(self));
     return 0;
 }
@@ -2999,8 +3233,10 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
     }
     try{
         // do the sampling
-        galaxymodel::GalaxyModel galmod(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df);
-        particles::ParticleArrayCyl points = galaxymodel::samplePosVel(galmod, numPoints);
+        particles::ParticleArrayCyl points = galaxymodel::samplePosVel(
+            galaxymodel::GalaxyModel(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
+                /*temporary wrapper object*/ *getSelectionFunction(self->sf_obj)),
+            numPoints);
 
         // convert output to NumPy array
         numPoints = points.size();
@@ -3022,25 +3258,33 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 
 /// compute moments of DF at a given 3d point
 class FncGalaxyModelMoments: public BatchFunction {
-    const galaxymodel::GalaxyModel model; // potential + df + action finder
+    PtrSelectionFunction selFunc;         // selection function
+    const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
     double *outputDens, *outputVel, *outputVel2;  // raw buffers for output values
 public:
-    FncGalaxyModelMoments(PyObject* input,
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df,
+    FncGalaxyModelMoments(
+        PyObject* input,
+        GalaxyModelObject* model_obj,
         bool needDens, bool needVel, bool needVel2, bool _separate)
     :
         BatchFunction(/*inputLength*/ 3, input),
-        model(pot, af, df),
+        // if the Python GalaxyModel object contains a selection function,
+        // create a wrapper object for this Python callback function that temporarily disables OpenMP
+        // and will be automatically destroyed at the end of the lifetime of this class
+        // (which only exists during the call of the moments() method of Python GalaxyModel object,
+        // not during the entire lifetime of the GalaxyModel object).
+        // If GalaxyModel.sf == None, create an instance of a trivial selection function,
+        // which does not interfere with OpenMP
+        selFunc(getSelectionFunction(model_obj->sf_obj)),
+        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
         separate(_separate),
-        numComponents(_separate ? df.numValues() : 1),
+        numComponents(_separate ? model.distrFunc.numValues() : 1),
         outputDens(NULL), outputVel(NULL), outputVel2(NULL)
     {
         double* outputBuffers[3];
-        int numVal = separate? df.numValues() : 0;
+        int numVal = separate? model.distrFunc.numValues() : 0;
         if(needDens) {
             if(needVel) {
                 if(needVel2) {
@@ -3121,8 +3365,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOO", const_cast<char**>(keywords),
         &points_obj, &dens_flag, &vel_flag, &vel2_flag, &separate_flag))
         return NULL;
-    return FncGalaxyModelMoments(
-        points_obj, *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
+    return FncGalaxyModelMoments(points_obj, self,
         toBool(dens_flag, true), toBool(vel_flag, false), toBool(vel2_flag, true),
         toBool(separate_flag, false)).
     run(/*chunk*/1);
@@ -3130,24 +3373,25 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
 
 /// compute projected moments of distribution function
 class FncGalaxyModelProjectedMoments: public BatchFunction {
-    const galaxymodel::GalaxyModel model; // potential + df + action finder
+    PtrSelectionFunction selFunc;         // selection function
+    const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
     double* outputBuffers[3];             // raw buffers for output values (3 separate arrays)
 public:
     FncGalaxyModelProjectedMoments(
         PyObject* input,
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df,
+        GalaxyModelObject* model_obj,
         bool _separate)
     :
         BatchFunction(/*inputLength*/ 1, input),
-        model(pot, af, df),
+        selFunc(getSelectionFunction(model_obj->sf_obj)),
+        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
         separate(_separate),
-        numComponents(_separate ? df.numValues() : 1)
+        numComponents(_separate ? model.distrFunc.numValues() : 1)
     {
-        outputObject = allocateOutput<1, 1, 1>(numPoints, outputBuffers, separate? df.numValues() : 0);
+        outputObject = allocateOutput<1, 1, 1>(
+            numPoints, outputBuffers, separate? model.distrFunc.numValues() : 0);
     }
 
     virtual void processPoint(npy_intp ip /*point index*/)
@@ -3185,15 +3429,14 @@ PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args, 
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
         &points_obj, &separate_flag))
         return NULL;
-    return FncGalaxyModelProjectedMoments(
-        points_obj, *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
-        toBool(separate_flag, false)).
+    return FncGalaxyModelProjectedMoments(points_obj, self, toBool(separate_flag, false)).
     run(/*chunk*/1);
 }
 
 /// compute projected distribution function
 class FncGalaxyModelProjectedDF: public BatchFunction {
-    const galaxymodel::GalaxyModel model; // potential + df + action finder
+    PtrSelectionFunction selFunc;         // selection function
+    const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
     const double vz_error;                // optional additional Gaussian error on vz
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
@@ -3201,19 +3444,19 @@ class FncGalaxyModelProjectedDF: public BatchFunction {
 public:
     FncGalaxyModelProjectedDF(
         PyObject* input,
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df,
+        GalaxyModelObject* model_obj,
         double _vz_error,
         bool _separate)
     :
         BatchFunction(/*inputLength*/ 3, input),
-        model(pot, af, df),
+        selFunc(getSelectionFunction(model_obj->sf_obj)),
+        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
         vz_error(_vz_error),
         separate(_separate),
-        numComponents(_separate ? df.numValues() : 1)
+        numComponents(_separate ? model.distrFunc.numValues() : 1)
     {
-        outputObject = allocateOutput<1>(numPoints, &outputBuffer, separate? df.numValues() : 0);
+        outputObject = allocateOutput<1>(
+            numPoints, &outputBuffer, separate? model.distrFunc.numValues() : 0);
     }
 
     virtual void processPoint(npy_intp ip /*point index*/)
@@ -3247,16 +3490,15 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|dO", const_cast<char**>(keywords),
         &points_obj, &vz_error, &separate_flag))
         return NULL;
-    return FncGalaxyModelProjectedDF(
-        points_obj, *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, vz_error,
-        toBool(separate_flag, false)).
+    return FncGalaxyModelProjectedDF(points_obj, self, vz_error, toBool(separate_flag, false)).
     run(/*chunk*/1);
 }
 
 /// compute velocity distribution functions at point(s)
 class FncGalaxyModelVDF: public BatchFunction {
     static const int SIZEGRIDV = 50;      // default size of the velocity grid
-    const galaxymodel::GalaxyModel model; // potential + df + action finder
+    PtrSelectionFunction selFunc;         // selection function
+    const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
     const int ndim;                       // 2 if projected, 3 if not
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
@@ -3267,19 +3509,18 @@ class FncGalaxyModelVDF: public BatchFunction {
 public:
     FncGalaxyModelVDF(
         PyObject* input,
-        const potential::BasePotential& pot,
-        const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df,
+        GalaxyModelObject* model_obj,
         int _ndim,
         PyObject* gridv_obj,
         bool giveDensity,
         bool _separate)
     :
         BatchFunction(/*inputLength*/ _ndim, input),
-        model(pot, af, df),
+        selFunc(getSelectionFunction(model_obj->sf_obj)),
+        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
         ndim(_ndim),
         separate(_separate),
-        numComponents(_separate ? df.numValues() : 1),
+        numComponents(_separate ? model.distrFunc.numValues() : 1),
         sizegridv(toInt(gridv_obj, SIZEGRIDV)), // this may be either the number of nodes in the array
         usergridv(toDoubleArray(gridv_obj)),    // or the array itself (or none of these)
         splvR(NULL), splvz(NULL), splvphi(NULL), outputDensity(NULL)
@@ -3315,14 +3556,14 @@ public:
             npy_intp ndim, dims[2];
             if(numPoints==0 && separate) {
                 ndim = 1;
-                dims[0] = df.numValues();
+                dims[0] = model.distrFunc.numValues();
             } else if(numPoints>0 && !separate) {
                 ndim = 1;
                 dims[0] = numPoints;
             } else /* numPoints>0 &&  separate) */ {
                 ndim = 2;
                 dims[0] = numPoints;
-                dims[1] = df.numValues();
+                dims[1] = model.distrFunc.numValues();
             }
             // create the 1d or 2d arrays of would-be spline objects and a float array of density
             PyObject* arrvR   = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
@@ -3449,8 +3690,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
         return NULL;
     }
 
-    PyObject* result = FncGalaxyModelVDF((PyObject*)points_arr,
-        *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
+    PyObject* result = FncGalaxyModelVDF((PyObject*)points_arr, self,
         ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false)) .
     run(/*chunk*/1);
     Py_DECREF(points_arr);
@@ -3464,6 +3704,8 @@ static PyMemberDef GalaxyModel_members[] = {
       const_cast<char*>("Action finder (read-only)") },
     { const_cast<char*>("df"),  T_OBJECT_EX, offsetof(GalaxyModelObject, df_obj ), READONLY,
       const_cast<char*>("Distribution function (read-only)") },
+    { const_cast<char*>("sf"),  T_OBJECT_EX, offsetof(GalaxyModelObject, sf_obj ), READONLY,
+      const_cast<char*>("Selection function (read-only)") },
     { NULL }
 };
 
@@ -6121,12 +6363,19 @@ PyInit_agama(void)
     if(PyType_Ready(&ActionMapperType) < 0) return NULL;
     Py_INCREFx(&ActionMapperType);
     PyModule_AddObject(mod, "ActionMapper", (PyObject*)&ActionMapperType);
+    ActionMapperTypePtr = &ActionMapperType;
 
     DistributionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DistributionFunctionType) < 0) return NULL;
     Py_INCREFx(&DistributionFunctionType);
     PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
     DistributionFunctionTypePtr = &DistributionFunctionType;
+
+    SelectionFunctionType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&SelectionFunctionType) < 0) return NULL;
+    Py_INCREFx(&SelectionFunctionType);
+    PyModule_AddObject(mod, "SelectionFunction", (PyObject*)&SelectionFunctionType);
+    SelectionFunctionTypePtr = &SelectionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&GalaxyModelType) < 0) return NULL;

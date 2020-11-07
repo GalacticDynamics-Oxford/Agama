@@ -260,12 +260,13 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
         }
     }
 
-    for(int iR=0; iR<gridRsize; iR++) {
+    for(int iR=1; iR<gridRsize; iR++) {
         coord::GradCyl grad;
         coord::HessCyl hess;
         pot.eval(coord::PosCyl(gridR[iR], 0, 0), NULL, &grad, &hess);
-        epicycleRatioVal[iR] = (iR==0 && grad.dR==0) ? 1 : 0.75 + 0.25 * gridR[iR] * hess.dR2 / grad.dR;
+        epicycleRatioVal[iR] = 0.75 + 0.25 * gridR[iR] * hess.dR2 / grad.dR;
     }
+    epicycleRatioVal[0] = epicycleRatioVal[1];
 
     // write out the results for debugging
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {

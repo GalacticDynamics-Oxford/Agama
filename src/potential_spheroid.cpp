@@ -11,10 +11,16 @@ namespace potential{
 
 namespace {  // internal
 
+///< accuracy of integration for computing the total mass or deprojected density
+const double ACCURACY_INT = 1e-6;
+
+/// accuracy of root-finding for computing sersic b parameter
+const double ACCURACY_ROOT = 1e-10;
+
 /** integrand for computing the total mass:  4pi r^2 rho(r) */
-class SpheroidDensityIntegrand: public math::IFunctionNoDeriv {
+class SpheroidMassIntegrand: public math::IFunctionNoDeriv {
 public:
-    SpheroidDensityIntegrand(const SpheroidParam& _params): params(_params) {};
+    SpheroidMassIntegrand(const SpheroidParam& _params): params(_params) {};
 private:
     const SpheroidParam params;
     virtual double value(double x) const {
@@ -37,23 +43,48 @@ public:
     {
         double  r0 = r/params.scaleRadius;
         double rho = params.densityNorm * math::pow(r0, -params.gamma) *
-        math::pow(1 + math::pow(r0, params.alpha), (params.gamma-params.beta) / params.alpha);
-        if(params.outerCutoffRadius<INFINITY)
+            math::pow(1 + math::pow(r0, params.alpha), (params.gamma-params.beta) / params.alpha);
+        if(params.outerCutoffRadius < INFINITY)
             rho *= exp(-math::pow(r/params.outerCutoffRadius, params.cutoffStrength));
         return rho;
     }
 };
 
+/** integrand for computing the total mass:  2pi R Sigma(R) */
+class NukerMassIntegrand: public math::IFunctionNoDeriv {
+public:
+    NukerMassIntegrand(const NukerParam& _params): params(_params) {};
+private:
+    const NukerParam params;
+    virtual double value(double x) const {
+        double Rrel = exp( 1/(1-x) - 1/x );
+        double result =
+        pow_2(Rrel) * (1/pow_2(1-x) + 1/pow_2(x)) *
+        math::pow(Rrel, -params.gamma) *
+        math::pow(0.5 + 0.5*math::pow(Rrel, params.alpha), (params.gamma-params.beta)/params.alpha) *
+        exp(-math::pow(Rrel * params.scaleRadius / params.outerCutoffRadius, params.cutoffStrength));
+        return isFinite(result) ? result : 0;
+    }
+};
+
 /** helper function for computing the deprojected density in the Nuker model */
 class NukerIntegrand: public math::IFunctionNoDeriv {
-    const double alpha, beta, gamma, r;
+    const NukerParam params;
+    const double r;
 public:
-    NukerIntegrand(double _alpha, double _beta, double _gamma, double _r) :
-        alpha(_alpha), beta(_beta), gamma(_gamma), r(_r) {}
+    NukerIntegrand(const NukerParam& _params, double _r) :
+        params(_params), r(_r) {}
     virtual double value(double t) const
     {   // 0<=t<1 is the scaled radial variable
-        double u = sqrt(1 - 2 * t * (1-t)),  R = r * u / (1-t),  Ra = pow(R, alpha);
-        return pow(R, -gamma-1) * pow(1 + Ra, (gamma-beta)/alpha-1) * (gamma + beta * Ra) / u / (1-t);
+        double u = sqrt(1 - 2 * t * (1-t)),  R = r * u / (1-t),  Ra = pow(R, params.alpha),
+        z = params.gamma + params.beta * Ra;
+        if(params.outerCutoffRadius < INFINITY) {
+            double y = pow(R * params.scaleRadius / params.outerCutoffRadius, params.cutoffStrength);
+            z += (1 + Ra) * params.cutoffStrength * y;
+            z *= exp(-y);
+        }
+        return z / u / (1-t) * math::pow(R, -params.gamma-1) *
+            math::pow(1 + Ra, (params.gamma-params.beta)/params.alpha-1);
     }
 };
 
@@ -91,21 +122,25 @@ double SpheroidParam::mass() const
     if(beta<=3 && outerCutoffRadius==INFINITY)
         return INFINITY;
     return 4*M_PI * densityNorm * pow_3(scaleRadius) * axisRatioY * axisRatioZ *
-        ( outerCutoffRadius==0 ?   // have an analytic expression
+        ( outerCutoffRadius==INFINITY ?   // have an analytic expression
         math::gamma((beta-3)/alpha) * math::gamma((3-gamma)/alpha) /
-        math::gamma((beta-gamma)/alpha) / alpha :
-        math::integrateAdaptive(SpheroidDensityIntegrand(*this), 0, 1, 1e-6) );
+        math::gamma((beta-gamma)/alpha) / alpha
+        :  // otherwise integrate numerically
+        math::integrateAdaptive(SpheroidMassIntegrand(*this), 0, 1, ACCURACY_INT) );
 }
 
 double NukerParam::mass() const {
     return 2*M_PI * surfaceDensity * pow_2(scaleRadius) * axisRatioY * axisRatioZ *
+        ( outerCutoffRadius==INFINITY ?   // have an analytic expression
         math::gamma((beta-2)/alpha) * math::gamma((2-gamma)/alpha) /
-        math::gamma((beta-gamma)/alpha) / alpha * pow(2, (beta-gamma)/alpha);
+        math::gamma((beta-gamma)/alpha) / alpha * pow(2, (beta-gamma)/alpha)
+        :  // otherwise integrate numerically
+        math::integrateAdaptive(NukerMassIntegrand(*this), 0, 1, ACCURACY_INT) );
 }
 
 double SersicParam::b() const {
     return math::findRoot(SersicBRootFinder(sersicIndex),
-        fmax(2*sersicIndex-1, 1e-4), 2*sersicIndex, 1e-10);
+        fmax(2*sersicIndex-1, 1e-4), 2*sersicIndex, ACCURACY_ROOT);
 }
 
 double SersicParam::mass() const {
@@ -123,7 +158,7 @@ math::PtrFunction createSpheroidDensity(const SpheroidParam& params)
         throw std::invalid_argument("Spheroid outer cutoff radius must be positive (or infinite)");
     if(!(params.alpha > 0))
         throw std::invalid_argument("Spheroid parameter alpha must be positive");
-    if(params.beta <= 2 && params.outerCutoffRadius == INFINITY)
+    if(!(params.beta  > 2 || params.outerCutoffRadius < INFINITY))
         throw std::invalid_argument("Spheroid outer slope beta must be greater than 2, "
             "or a cutoff radius must be provided");
     if(!(params.gamma < 3))
@@ -143,21 +178,36 @@ math::PtrFunction createNukerDensity(const NukerParam& params)
         throw std::invalid_argument("Nuker axis ratio must be positive");
     if(!(params.alpha > 0))
         throw std::invalid_argument("Nuker parameter alpha must be positive");
-    if(!(params.beta  > 2))
-        throw std::invalid_argument("Nuker outer slope beta must be greater than 2");
+    if(!(params.outerCutoffRadius > 0))
+        throw std::invalid_argument("Nuker outer cutoff radius must be positive (or infinite)");
+    if(!(params.beta  > 2 || params.outerCutoffRadius < INFINITY))
+        throw std::invalid_argument("Nuker outer slope beta must be greater than 2, "
+            "or a cutoff radius must be provided");
     if(!(params.gamma >= 0 && params.gamma < 2))
         throw std::invalid_argument("Nuker inner slope gamma must be between 0 and 2");
 
     // compute the deprojected density on a grid of points in log-scaled radius  y = ln(r/Rscale)
-    const int NPOINTS = 41;
+    int NPOINTS = 41;
     double YMIN = 0.5 / sqrt(1 + pow_2(params.alpha)), YMAX = 15 * sqrt(1 + pow_2(1/params.alpha));
     std::vector<double> gridy = math::createSymmetricGrid(NPOINTS, YMIN, YMAX), gridr, gridrho;
+    if(params.outerCutoffRadius < INFINITY) {
+        // separate grid in y around the cutoff radius, overriding/augmenting the main grid
+        double
+        YCUTOFF = log(params.outerCutoffRadius / params.scaleRadius),
+        YBEGIN  = YCUTOFF - 2.0 / params.cutoffStrength,
+        YEND    = YCUTOFF + 4.0 / params.cutoffStrength;
+        std::vector<double> secondgridy = math::createUniformGrid(25, YBEGIN, YEND);
+        while(!gridy.empty() && gridy.back() > YBEGIN)
+            gridy.pop_back();
+        gridy.insert(gridy.end(), secondgridy.begin(), secondgridy.end());
+        NPOINTS = gridy.size();
+    }
+
     gridr.reserve(NPOINTS); gridrho.reserve(NPOINTS);
     for(int i=0; i<NPOINTS; i++) {
         double r    = exp(gridy[i]);
-        double coef = math::integrateAdaptive(
-            NukerIntegrand(params.alpha, params.beta, params.gamma, r),
-            0, 1, 1e-6) * pow(2, (params.beta - params.gamma) / params.alpha) / M_PI;
+        double coef = math::integrateAdaptive(NukerIntegrand(params, r), 0, 1, ACCURACY_INT) *
+            pow(2, (params.beta - params.gamma) / params.alpha) / M_PI;
         if(coef>0 && coef<INFINITY) {  // avoid numerical issues if the integral failed to converge
             gridr.  push_back(params.scaleRadius * r);
             gridrho.push_back(params.surfaceDensity * coef / params.scaleRadius);
@@ -167,7 +217,8 @@ math::PtrFunction createNukerDensity(const NukerParam& params)
         params.gamma>0 ? -1-params.gamma :
         params.alpha<1 ? -1+params.alpha :
         params.alpha>1 ? 0 : NAN;
-    double rightSlope = -1-params.beta;   // asymptotic power-law slope at large radii
+    double rightSlope =   // asymptotic power-law slope at large radii
+        params.outerCutoffRadius == INFINITY ? -1-params.beta : NAN;
     return math::PtrFunction(new math::LogLogSpline(gridr, gridrho,
         leftSlope * gridrho.front() / gridr.front(),
         rightSlope * gridrho.back() / gridr.back()));
@@ -191,7 +242,7 @@ math::PtrFunction createSersicDensity(const SersicParam& params)
         double y    = YMIN + (YMAX-YMIN) * i / NPOINTS;
         double xmax = n * (YMAX - y);
         if(n>1)xmax = fmin(xmax, MAX_EXP * n / (n-1) );
-        double coef = math::integrateAdaptive(SersicIntegrand(n, b * exp(y)), 0, xmax, 1e-6);
+        double coef = math::integrateAdaptive(SersicIntegrand(n, b * exp(y)), 0, xmax, ACCURACY_INT);
         gridr  [i]  = params.scaleRadius * exp(n * y);
         gridrho[i]  = params.surfaceDensity * b / (M_PI * n * params.scaleRadius) * exp((1-n) * y) * coef;
     }

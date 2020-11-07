@@ -257,7 +257,7 @@ Triaxial models include the \ttt{Logarithmic}, \ttt{Harmonic}, \ttt{Dehnen} \cit
 This class describes general triaxial two-power-law ($\alpha\beta\gamma$) density profiles%
 \footnote{$\alpha$ here corresponds to $1/\alpha$ in the original paper: higher values of $\alpha$ produce sharper transitions between inner and outer asymptotic slopes.}
 \cite{Zhao1996} with an optional exponential cutoff. Many well-known models are special cases of this profile: Dehnen, Plummer, Isochrone, NFW, Gaussian, Einasto, Prugniel--Simien.
-This class only provides the density profile and not the potential, so it needs to be used in conjunction with the \ttt{Multipole} potential solver. Some models are defined in terms of the radial profile of the surface density, from which the 3d density may be reconstructed by deprojection. These include the two-power-law \ttt{Nuker} model and the exponential \ttt{Sersic} model; both provide only the density but not potential, and can also be flattened or triaxial. 
+This class only provides the density profile and not the potential, so it needs to be used in conjunction with the \ttt{Multipole} potential solver. Some models are defined in terms of the radial profile of the surface density, from which the 3d density may be reconstructed by deprojection. These include the two-power-law \ttt{Nuker} model and the exponential \ttt{Sersic} model; both provide only the density but not potential, and can also be flattened or triaxial (note that the deprojected spherical density profile is constructed first, and then it is compressed/stretched along $y$ and $z$ axes). 
 Generalized spherical \ttt{King} models (with an adjustable strength of the outer cutoff, as in \cite{GielesZocchi2015}) provide both the density and the potential.
 A time-dependent potential of two point masses orbiting each other is represented by the \ttt{KeplerBinary} class, and a spatially uniform but time-dependent acceleration field is provided by the \ttt{UniformAcceleration} class.
 
@@ -300,7 +300,7 @@ A related class \ttt{DensityAzimuthalHarmonic} is used to represent an arbitrary
 
 \begin{table}
 \caption{Available density and potential models and their parameters}  \label{tab:PotentialParams}
-\begin{tabular}{l m{5cm} >{\raggedright\arraybackslash}m{7cm}}
+\hspace{-2mm}\begin{tabular}{l m{50mm} >{\raggedright\arraybackslash}m{80mm}}
 Name & Formula & Parameters \\
 \hline
 \multicolumn{3}{c}{Density-only models} \\
@@ -314,7 +314,7 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 \ttt{Spheroid} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
 \ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
 
-\ttt{Nuker} & \mbox{deprojection of $\Sigma={}$} \mbox{$\Sigma_0 \left(\frac{R}{a}\right)^{-\gamma} \Big[ \frac12 + \frac12\big(\frac{R}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Nuker} & \mbox{deprojection of $\Sigma={}$} \mbox{$\Sigma_0 \left(\frac{R}{a}\right)^{-\gamma} \Big[ \frac12 + \frac12\big(\frac{R}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$} $\times \exp\Big[ -\big(\frac{R}{r_\mathrm{cut}}\big)^\xi\Big] $  & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
 
 \ttt{Sersic} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
@@ -328,7 +328,7 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 
 \ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2} or \ppp{scaleHeight}~($b$) \\[2mm]
 
-\ttt{PerfectEllipsoid}\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{PerfectEllipsoid}\!\!\!\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
 \ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{scaleRadius}~($a$) \\[2mm]
 
@@ -384,14 +384,14 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \footnote{Except the \ttt{NFW} profile, in which the total mass is formally infinite, and the parameter $M$ refers to the mass within $\sim 5.3a$, where $a$ is the scale radius. It is related to the so-called virial mass $M_\mathrm{vir}$ and so-called concentration $c$ by $M_\mathrm{vir}=M\,[\ln(1+c)-c/(c+1)]$. Note that one may provide extra parameters \ppp{outerCutoffRadius} and \ppp{cutoffStrength}, in which case the \ppp{type} is implicitly changed to \ttt{Spheroid}, and the total mass will be indeed given by $M$. An NFW profile sharply cut at the virial radius is equivalent to setting \ppp{outerCutoffRadius} to the virial radius ($a\,c$) and \ppp{cutoffStrength} to a very large value (however, this may lead to numerical artifacts).}.
 \item \ppp{scaleRadius} [1] -- the first (sometimes the only) parameter with the dimension of length that defines the profile.
 \item \ppp{scaleHeight} [1] or \ppp{scaleRadius2} -- the second such parameter (e.g., for Miyamoto--Nagai or exponential disk models).
-\item \ppp{outerCutoffRadius} [$\infty$] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} models ($\infty$ means no cutoff).
+\item \ppp{outerCutoffRadius} [$\infty$] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} or \ttt{Nuker} models ($\infty$ means no cutoff).
 \item \ppp{innerCutoffRadius} [0] -- similar parameter for \ttt{Disk} that defines the radius of an inner hole.
 \item \ppp{surfaceDensity} [0] -- normalization of surface density (its value at $R=0$ for the exponential \ttt{Disk} or \ttt{Sersic} profiles, or at $R=$\ppp{scaleRadius} for the \ttt{Nuker} profile).
 \item \ppp{densityNorm} [0] -- value that defines the volume density at the scale radius for the \ttt{Spheroid} profile. Alternatively, instead of this or the previous parameter, one may provide the total mass of the corresponding model (these two parameters have a priority over mass), but this can't be done for infinite-mass models, so the density normalization remains the only option.
 \item \ppp{alpha} [1] -- parameter controlling the steepness of transition between two asymptotic power-law slopes for \ttt{Spheroid} or \ttt{Nuker}.
 \item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{Spheroid} or \ttt{Nuker}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
 \item \ppp{gamma} [1] -- power-law index of the inner density profile: $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{Spheroid} ($\gamma<3$) models, or $\Sigma \propto R^{-\gamma}$ for \ttt{Nuker} model ($0\le \gamma < 2$).
-\item \ppp{cutoffStrength} [2] -- parameter controlling the steepness of the exponential cutoff in \ttt{Spheroid}.
+\item \ppp{cutoffStrength} [2] -- parameter controlling the steepness of the exponential cutoff in \ttt{Spheroid} or \ttt{Nuker} models.
 \item \ppp{sersicIndex} -- shape parameter of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk).
 \item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Nuker}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
 \item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$.
@@ -693,18 +693,19 @@ When the original DF is constructed using the Eddington inversion formula, it is
 This module, residing in the namespace \ttt{galaxymodel::}, broadly encompasses all tasks that involve both a DF and a potential, and additionally an action finder constructed for the given potential and used for transforming $\{\bx,\bv\}$ to $\bJ$.
 As stressed previously, using $\bJ$ as the argument of $f$ has the advantage that the DF may be used with an arbitrary potenial without any modifications (because the possible range of actions does not depend on the potential, unlike, e.g., the possible range of energy).
 
+Various routines described below work with instances of the \ttt{GalaxyModel} class, which is a simple aggregate of a potential, action finder, DF, and a fourth concept -- selection function (SF). The SF is a function of the 6d position/velocity space $S(\bx,\bv)$ with values ranging from 0 to 1, which is multiplied by the value of the DF at the corresponding point in action space $\bJ$. By providing a non-trivial SF to these routines, one may limit the volume of phase space over which the integration is carried. A simple example of a SF is provided by the \ttt{SelectionFunctionSpatial} class: $S(\bx, \bv) = \exp\big[-(|\bx-\bx_0|/R_0)^\xi\big]$, where $\bx_0$ is a fixed point in the coordinate space, $R_0$ is the cutoff radius, and $\xi$ is the cutoff steepness (0 implies no cutoff, $\infty$ -- a sudden transition from $S=1$ inside the sphere of radius $R_0$ to $S=0$ outside this radius, and anything in between -- to a more gradual decay of the SF).
 
 %%%%%%%%%%%%%%
 \subsubsection{Moments of distribution functions}  \label{sec:Moments}
 
 The most basic task is the computation of DF moments (density, velocity dispersion, etc.), defined as
 \begin{align*}
-\rho(\bx) &\equiv \iiint \d ^3v\, f\big(\bJ(\bx,\bv)\big), \\
-\overline{\bv} &\equiv \rho^{-1} \iiint \d ^3v \,\bv\, f\big(\bJ(\bx,\bv)\big), \\
-\overline{v_i v_j} &\equiv \rho^{-1} \iiint \d ^3v \,v_i v_j\, f\big(\bJ(\bx,\bv)\big).
+\rho(\bx) &\equiv \iiint \d ^3v\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
+\overline{\bv} &\equiv \rho^{-1} \iiint \d ^3v \,\bv\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
+\overline{v_i v_j} &\equiv \rho^{-1} \iiint \d ^3v \,v_i v_j\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv).
 \end{align*}
 The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
-This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$); the tensor of second velocity moments is computed in cylindrical coordinates ($R,z,\phi$), and in axisymmetric systems may have at most 4 non-zero components ($\overline{\strut v_R^2}, \overline{\strut v_z^2}, \overline{\strut v_\phi^2}, \overline{\strut v_R v_z}$, the latter is related to the tilt of velocity ellipsoid in the meridional plane).
+This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$); the tensor of second velocity moments is computed in cylindrical coordinates ($R,z,\phi$), and in axisymmetric systems may have at most 4 non-zero components $\big(\overline{\strut v_R^2}, \overline{\strut v_z^2}, \overline{\strut v_\phi^2}, \overline{\strut v_R v_z}\big)$, the latter is related to the tilt of velocity ellipsoid in the meridional plane).
 
 The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ -- this involves an additional integration over $z$:
 \begin{align*}
@@ -714,7 +715,7 @@ The routine \ttt{computeProjectedMoments} calculates the surface density and the
 
 The routine \ttt{computeProjectedDF} calculates the value of the ``projected DF'', marginalized over two velocity components and one coordinate:
 \begin{align*}
-f_\mathrm{proj}(x,y;v_z) \equiv \int_{z=-\infty}^\infty \d z\, \iint \d v_x\, \d v_y\, f\big(\bJ(\bx,\bv)\big) .
+f_\mathrm{proj}(x,y;v_z) \equiv \int_{z=-\infty}^\infty \d z\, \iint \d v_x\, \d v_y\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) .
 \end{align*}
 Currently both of these routines compute the projection along the $z$ axis only; in a future version, this will be generalized to allow for arbitrary orientation.
 
@@ -726,7 +727,7 @@ There are analogous routines for spherical isotropic DFs of the form $f(h)$, def
 
 Instead of just a few DF moments at a given point, one may consider one-dimensional velocity distribution functions (VDFs):
 \begin{align*}
-\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint \d v_2\,\d v_3\, f\big(\bJ(\bx,\bv)\big) ,\\
+\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint \d v_2\,\d v_3\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) ,\\
 \mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int \d x_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
 \end{align*}
 Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$. The projected VDF is identical to the projected DF up to normalization: $\mathfrak{f}_\mathrm{proj}(x,y;v_z) = f_\mathrm{proj}(x,y;v_z) / \Sigma(x,y)$; however, computing the entire VDF at once is more efficient than repeatedly calling \ttt{computeProjectedDF}.
@@ -743,9 +744,9 @@ When the DF consists of several components, and one needs the moments of each DF
 As the DF is a probability distribution function (PDF), it can be sampled with a large number of points to create an \Nbody model of the system. There are two possible ways of doing this:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
 \item Draw samples of actions from $f(\bJ)$, used as a three-dimensional PDF. Then create (possibly several) $\{\bx,\bv\}$ points for each value of actions with a random choice of angles, using the torus mapping approach (Section~\ref{sec:ActionsTorus}). This is performed by the routine \ttt{sampleActions}.
-\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\{\bx,\bv\})\big)$ with the help of an action finder. This is performed by the routine \ttt{samplePosVel}.
+\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv)$ with the help of an action finder. This is performed by the routine \ttt{samplePosVel}.
 \end{itemize}
-Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred. It also has a separate, more efficient implementation for spherical isotropic DFs $f(h)$ in spherical potentials $\Phi(r)$; it is used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
+Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred. It also has a separate, more efficient implementation for spherical isotropic DFs $f(h)$ in spherical potentials $\Phi(r)$ (without a SF); it is used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
 
 There is also a related task for sampling just the density profile $\rho(\bx)$ with particles, without assigning any velocity to them; this may be used to visualize the density model, and is performed by the routine \ttt{sampleDensity} (of course, it does not use any action finder). All these tasks employ the adaptive multidimensional rejection method implemented in \ttt{math::sampleNdim}.
 
@@ -961,8 +962,15 @@ The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an in
 \\[2mm]
 The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the generalized Eddington inversion formula to create $f(E,L)$ and then a spherical action finder to convert it to an action-based form.
 
-\paragraph{GalaxyModel} is the combination of a potential, an action finder, and a DF:\\
-\texttt{gm = agama.GalaxyModel(pot, df)}
+\paragraph{SelectionFunction} class provides an example of a position-dependent selection function (SF) for the \ttt{GalaxyModel} class: $S(\bx, \bv) = \exp\big[-(|\bx-\bx_0|/R_0)^\xi\big]$. This function has 3 parameters: the fiducial point $\bx_0$, cutoff radius $R_0$, and optional cutoff steepness $\xi$ (by default $\xi=\infty$, meaning a sharp transition between $S=1$ at distances smaller than $R_0$ to $S=0$ at larger distances, but one can make it more gradual). In addition, an arbitrary user-defined Python function can be used instead of an instance of \ttt{SelectionFunction} class. The built-in class\\
+\texttt{sf = agama.SelectionFunction(point=(x0,y0,z0), radius=r0, eta=eta))}\\
+is mathematically equivalent to\\
+\texttt{sf = lambda x: numpy.exp( \\
+\mbox{}~~~~-((x[:,0]-x0)**2 + (x[:,1]-y0)**2 + (x[:,2]-z0)**2) / r0**2)**(eta/2))}\\
+but of course, the latter is less computationally efficient due to extra costs in using a Python callback function from the C++ code.
+
+\paragraph{GalaxyModel} is the combination of a potential, an action finder (which can be constructed internally for the given potential, or provided to the constructor if it was already created), a DF, and optionally a SF:\\
+\texttt{gm = agama.GalaxyModel(pot, df [, sf])}
 \textit{\color{Sepia}\ \ \# action finder is constructed automatically} \\[2mm]
 This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF is a user-defined Python function).
 \\[2mm]
@@ -987,7 +995,7 @@ The VDF $\mathfrak{f}_\mathrm{proj}(x,y,v_z)$ is identical (up to numerical and 
 All four of the above methods additionally accept an optional argument \texttt{separate=True}, which produces separate output for each component of a composite DF -- this is more efficient than computing them individually. In this case, output arrays have one extra dimension with length equal to the number of DF components (even when it is 1).
 \\[2mm]
 \texttt{posvel, mass = gm.sample(N)}\\
-draws $N$ equal-mass samples from the DF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (its values are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.
+draws $N$ equal-mass samples from the DF multiplied by the SF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (if the SF is not provided, which means sampling from the entire space, the particle masses are approximately \texttt{df.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.
 \\[2mm]
 One may also sample positions from a given density profile, and then assign velocities using either the spherical anisotropic DF (Section~\ref{sec:DFspherical}) or axisymmetric Jeans equations. This is currently achieved by the \texttt{sample} method of a \ttt{Density} object, which additionally takes an instance of the \ttt{Potential} and optionally the parameters of Jeans equations. Be cautioned that the API will be changed in the future, to harmonize the usage conventions with those used for action-based \ttt{GalaxyModel}s.
 

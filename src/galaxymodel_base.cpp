@@ -16,6 +16,30 @@
 
 namespace galaxymodel{
 
+/** a singleton instance of a trivial selection function */
+const SelectionFunctionTrivial selectionFunctionTrivial;
+
+SelectionFunctionDistance::SelectionFunctionDistance(
+    const coord::PosCar& _point0, double _radius, double _steepness) :
+    point0(_point0), radius(_radius), steepness(_steepness)
+{
+    if(!(radius>0))
+        throw std::invalid_argument("SelectionFunctionDistance: radius must be positive");
+    if(!(steepness>=0))
+        throw std::invalid_argument("SelectionFunctionDistance: steepness must be positive or zero");
+}
+
+double SelectionFunctionDistance::value(const coord::PosVelCar& point) const
+{
+    if(radius==INFINITY || steepness==0)
+        return 1;
+    double d2 = (pow_2(point.x-point0.x) + pow_2(point.y-point0.y) + pow_2(point.z-point0.z)) /
+        pow_2(radius);
+    if(steepness==INFINITY)
+        return d2>1 ? 0 : 1;
+    return exp( -math::pow(d2, 0.5*steepness) );
+}
+
 namespace{   // internal definitions
 
 //------- HELPER ROUTINES -------//
@@ -96,25 +120,28 @@ inline coord::PosVelCyl unscalePosVel(const double vars[],
 
 //------- HELPER CLASSES FOR MULTIDIMENSIONAL INTEGRATION OF DF -------//
 
-/** Base helper class for integrating the distribution function over the position/velocity space.
-    Various tasks in this module boil down to computing the integrals or sampling the values of DF
-    over the (x,v) space, where the DF is expressed in terms of actions.
+/** Base helper class for integrating the distribution function (DF) multiplied by selection
+    function (SF) over the position/velocity space.
+    Various tasks in this module boil down to computing the integrals or sampling the values of
+    DF*SF over the (x,v) space, where the DF is expressed in terms of actions.
     This involves the following steps:
     1) scaled variables in N-dimensional unit cube are transformed to the actual (x,v);
-    2) x,v are transformed to actions (J);
-    3) the value(s) of DF f(J) is computed (for a multicomponent DF, one may either use the
+    2) the selection function s(x,v) is evaluated, and if it turns out to be zero,
+    no further work is done;
+    3) x,v are transformed to actions (J);
+    4) the value(s) of DF f(J) is computed (for a multicomponent DF, one may either use the
     sum of all components, or treat them separately, depending on the flag 'separate');
-    4) one or more quantities that are products of f(J) times something
+    5) one or more quantities that are products of f(J)*SF(x,v) times something
     (e.g., velocity components) are returned to the integration or sampling routines.
     These tasks differ in the first and the last steps, and also in the number of dimensions
     that the integration/sampling is carried over. This diversity is handled by the class
     hierarchy descending from DFIntegrandNdim, where the base class performs the steps 2 and 3,
     and the derived classes implement virtual methods `unscaleVars()` and `outputValues()`,
-    which are responsible for the steps 1 and 4, respectively.
+    which are responsible for the steps 1 and 5, respectively.
     The derived classes also specify the dimensions of integration space (numVars)
     and the number of simultaneously computed quantities (numValues).
-    The action finder for performing the step 2 and the DF used in the step 3 are provided
-    as members of the GalaxyModel structure.
+    The selection function at step 2, action finder at the step 3, and DF at the step 4
+    are provided as members of the GalaxyModel structure.
 */
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
@@ -123,67 +150,85 @@ public:
         dflen(separate ? model.distrFunc.numValues() : 1)
     {}
 
-    /** compute one or more moments of distribution function. */
-    virtual void eval(const double vars[], double values[]) const
+    // evaluate a single input point
+    virtual void eval(const double vars[], double values[]) const {
+        evalmany(1, vars, values);
+    }
+
+    // evaluate the integrand for many input points at once
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
     {
+        // 0. allocate various temporary arrays on the stack - no need to delete them manually
+        size_t numvars = numVars(), numvalues = numValues();
+        // jacobian of coordinate transformation at each point
+        double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+        // values of selection function at each point
+        double* sf  = static_cast<double*>(alloca(npoints * sizeof(double)));
+        // x,v points in cylindrical coords (unscaled from the input variables)
+        coord::PosVelCyl* posvelcyl = static_cast<coord::PosVelCyl*>(
+            alloca(npoints * sizeof(coord::PosVelCyl)));
+        // same points transformed to cartesian coords
+        coord::PosVelCar* posvelcar = static_cast<coord::PosVelCar*>(
+            alloca(npoints * sizeof(coord::PosVelCar)));
         // value(s) of distribution function - more than one for a multicomponent DF treated separately
-        // (array allocated on the stack, no need to delete it manually)
         double* dfval = static_cast<double*>(alloca(dflen * sizeof(double)));
-        std::fill(dfval, dfval+dflen, 0);  // initialize with zeroes (remain so in case of errors)
-        // 1. get the position/velocity components in cylindrical coordinates
-        double jac;   // jacobian of variable transformation
-        coord::PosVelCyl posvel = unscaleVars(vars, &jac);
-        if(jac == 0) {  // we can't compute actions, but pretend that DF*jac is zero
-            outputValues(posvel, dfval, values);
-            return;
+
+        // 1. get the position/velocity components in both cylindrical and cartesian coordinates
+        // for all input points
+        for(size_t p=0; p<npoints; p++) {
+            posvelcyl[p] = unscaleVars(/*input point*/ vars + p*numvars, /*output jacobian*/ jac + p);
+            posvelcar[p] = toPosVelCar(posvelcyl[p]);
         }
 
+        // 2. evaluate the selection function for all input points at once
         try{
-            // 2. determine the actions
-            actions::Actions act = model.actFinder.actions(posvel);
-
-            // 3. compute the value of distribution function times the jacobian
-            // FIXME: in some cases the Fudge action finder may fail and produce
-            // zero values of Jr,Jz instead of very large ones, which may lead to
-            // unrealistically high DF values. We therefore ignore these points
-            // entirely, but the real problem is with the action finder, not here.
-            bool valid = true;
-            if(isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0)) {
-                if(dflen>1)
-                    // the values are stored separately for each component of a composite DF
-                    model.distrFunc.eval(act, dfval);
-                else
-                    // store a single value for an ordinary DF, or in the case of a composite DF,
-                    // the sum of all its components
-                    dfval[0] = model.distrFunc.value(act);
-                // multiply by jacobian, check for possibly invalid values and replace them with zeroes
-                for(unsigned int i=0; i<dflen; i++) {
-                    if(!isFinite(dfval[i])) {
-                        valid = false;
-                        dfval[i] = 0;
-                    } else
-                        dfval[i] *= jac;
-                }
-            }
-            if(!valid)
-                throw std::runtime_error("DF is not finite");
+            model.selFunc.evalmany(npoints, posvelcar, /*output*/ sf);
         }
         catch(std::exception& e) {
             // dump out the error at the highest debug logging level
-            if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-                utils::msg(utils::VL_VERBOSE, "DFIntegrandNdim", std::string(e.what()) +
-                    " at R="+utils::toString(posvel.R)  +", z="   +utils::toString(posvel.z)+
-                    ", phi="+utils::toString(posvel.phi)+", vR="  +utils::toString(posvel.vR)+
-                    ", vz=" +utils::toString(posvel.vz) +", vphi="+utils::toString(posvel.vphi));
-            }
-            // ignore the error and proceed as if the DF was zero (keep the initially assigned zero)
+            if(utils::verbosityLevel >= utils::VL_VERBOSE)
+                utils::msg(utils::VL_VERBOSE, "DFIntegrandNdim", std::string(e.what()));
+            std::fill(sf, sf+npoints, 0);
         }
 
-        // 4. output the value(s) to the integration routine
-        outputValues(posvel, dfval, values);
+        // the remaining steps are performed one point at a time
+        for(size_t p=0; p<npoints; p++) {
+            std::fill(dfval, dfval+dflen, 0);  // initialize with zeroes (remain so in case of errors)
+            double mult = jac[p] * sf[p];      // overall weight of this point (jacobian * sel.fnc.)
+            if(mult > 0 && isFinite(mult)) {
+                // 3. determine the actions
+                actions::Actions act = model.actFinder.actions(posvelcyl[p]);
+                
+                // 4. compute the value of distribution function times the jacobian
+                // FIXME: in some cases the Fudge action finder may fail and produce
+                // zero values of Jr,Jz instead of very large ones, which may lead to
+                // unrealistically high DF values. We therefore ignore these points
+                // entirely, but the real problem is with the action finder, not here.
+                if(isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0)) {
+                    if(dflen>1)
+                        // the values are stored separately for each component of a composite DF
+                        model.distrFunc.eval(act, dfval);
+                    else
+                        // store a single value for an ordinary DF, or in the case of a composite DF,
+                        // the sum of all its components
+                        dfval[0] = model.distrFunc.value(act);
+                    // multiply by jacobian and selection function,
+                    // check for possibly invalid DF values and replace them with zeroes
+                    for(unsigned int i=0; i<dflen; i++) {
+                        if(!isFinite(dfval[i])) {
+                            dfval[i] = 0;
+                        } else
+                            dfval[i] *= mult;
+                    }
+                }
+            }
+
+            // 5. output the value(s) to the integration routine
+            outputValues(posvelcyl[p], dfval, values + p*numvalues);
+        }
     }
 
-    /** convert from scaled variables used in the integration routine 
+    /** convert from scaled variables used in the integration routine
         to the actual position/velocity point.
         \param[in]  vars  is the array of scaled variables;
         \param[out] jac (optional)  is the jacobian of transformation, if NULL it is not computed;
@@ -818,7 +863,8 @@ particles::ParticleArrayCyl sampleActions(
             ang.thetar   = 2*M_PI*math::random();
             ang.thetaz   = 2*M_PI*math::random();
             ang.thetaphi = 2*M_PI*math::random();
-            points.add(torus.map(actions::ActionAngles(actions[t], ang)), pointMass);
+            coord::PosVelCyl point = torus.map(actions::ActionAngles(actions[t], ang));
+            points.add(point, pointMass * model.selFunc.value(toPosVelCar(point)));
             if(actsOutput!=NULL)
                 actsOutput->push_back(actions[t]);
         }

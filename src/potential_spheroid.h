@@ -43,18 +43,21 @@ struct SpheroidParam{
     { static const char* text = "Spheroid"; return text; }
 };
 
-/** Parameters describing a Nuker density profile.
+/** Parameters describing a Nuker density profile with an optional exponential cutoff.
     In the spherical case, the projected density is given by
     \f$
     \Sigma(R) = \Sigma_0  (R/R_0)^{-\gamma} ( 1/2 + 1/2 (R/R_0)^\alpha )^{(\gamma-\beta) / \alpha}
+    \exp[ -(R/R_{cut})^\xi],
     \f$,
     where R_0 is the scale radius, Sigma_0 is the surface density at this radius,
     gamma is the slope of the surface density profile at R --> 0  (0 <= gamma < 2),
-    beta  is the slope at R --> infinity  (beta > 2),
-    alpha is the steepness of transition between these asymptotic regimes  (alpha > 0).
+    beta  is the slope at R --> infinity  (in absence of a cutoff, beta > 2 is required),
+    alpha is the steepness of transition between these asymptotic regimes  (alpha > 0),
+    R_cut is the optional cutoff radius (by default set to infinity),
+    xi    is the cutoff strength.
     The 3d density profile is obtained by deprojecting this expression and interpolating the result.
-    Similarly to the Spheroid profile, it has asymptotic power-law behaviour at large and small r:
-    the outer asymptotic slope is  beta+1,  i.e.  rho ~ r^{-(beta+1)},
+    Similarly to the Spheroid profile, it has asymptotic power-law behaviour at large and small r
+    (in absence of a cutoff):  the outer asymptotic slope is  beta+1,  i.e.  rho ~ r^{-(beta+1)},
     and the inner slope is gamma+1  when gamma>0, or  1-alpha  when 0<alpha<1,  or 0 when alpha>1.
     In non-spherical cases, the flattening with constant axis ratios is applied to the 3d density,
     so that equidensity surfaces are concentric ellipsoids.
@@ -62,6 +65,8 @@ struct SpheroidParam{
 struct NukerParam{
     double surfaceDensity;      ///< surface density at scale radius Sigma_0
     double scaleRadius;         ///< transition radius R_0
+    double outerCutoffRadius;   ///< outer cut-off radius r_{cut}
+    double cutoffStrength;      ///< steepness of the exponential cutoff xi
     double alpha;               ///< steepness of transition alpha
     double beta;                ///< outer power slope beta
     double gamma;               ///< inner power slope gamma
@@ -69,7 +74,7 @@ struct NukerParam{
     double axisRatioZ;          ///< axis ratio q (z/x)
     /// set up default values for all parameters (NAN means no default)
     NukerParam() :
-        surfaceDensity(0), scaleRadius(1),
+        surfaceDensity(0), scaleRadius(1), outerCutoffRadius(INFINITY), cutoffStrength(2),
         alpha(NAN), beta(NAN), gamma(NAN), axisRatioY(1), axisRatioZ(1)
     {}
     double mass() const;        ///< return the total mass of a density profile with these parameters

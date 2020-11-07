@@ -15,6 +15,9 @@ except:  # otherwise load the shared library from the parent folder
     sys.path += ['../']
     import agama
 
+# set some non-trivial dimensional units to test the correctness of unit conversion within the library
+agama.setUnits(length=1, mass=1e5, velocity=1)
+
 # user-defined density profile should be a function with a single argument --
 # a 2d array Mx3, evaluating the density simultaneously at M points,
 # i.e., it should operate with columns of the input array x[:,0], x[:,1], etc.
@@ -37,7 +40,7 @@ pot_orig = agama.Potential(type="Plummer", mass=mass, scaleradius=radius)
 
 # potential approximation computed from the user-supplied density profile
 MyPlummer = makeUserDensity(mass, radius)
-pot_appr = agama.Potential(type="Multipole", density=MyPlummer)
+pot_appr  = agama.Potential(type="Multipole", density=MyPlummer)
 
 pot0_orig = pot_orig.potential(0,0,0)
 pot0_appr = pot_appr.potential(0,0,0)
@@ -63,25 +66,25 @@ df_orig = agama.DistributionFunction( \
 # this proxy class provides the totalMass() method
 # that the user-defined Python function itself does not have
 mass_orig = df_orig.totalMass()
-mass_my = agama.DistributionFunction(MyDF).totalMass()
-print("DF mass=%.8g  (orig value=%.8g)" % (mass_my, mass_orig))
+mass_user = agama.DistributionFunction(MyDF).totalMass()
+print("DF mass=%.8g  (orig value=%.8g)" % (mass_user, mass_orig))
 
 # GalaxyModel objects constructed from the C++ DF and from the Python function
 # (without the need of a proxy object; in fact, GalaxyModel.df is itself a proxy object)
 gm_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig)
-gm_my   = agama.GalaxyModel(df=MyDF, potential=pot_appr)
-# note that different potentials were used for gm_orig and gm_my, so the results may slightly disagree
+gm_user = agama.GalaxyModel(df=MyDF,    potential=pot_appr)
+# note that different potentials were used for gm_orig and gm_user, so the results may slightly disagree
 
 # DF moments (density and velocity dispersion) computed from the C++ DF object
 dens_orig, veldisp_orig = gm_orig.moments(point=(1,0,0))
 print("original DF at r=1: density=%.8g, sigma_r=%.8g, sigma_t=%.8g" % \
-    ( dens_orig, veldisp_orig[0], veldisp_orig[1] ))
+    ( dens_orig, veldisp_orig[0]**0.5, veldisp_orig[1]**0.5 ))
 
 # DF moments computed from the Python distribution function
-dens_my, veldisp_my = gm_my.moments(point=(1,0,0))
+dens_user, veldisp_user = gm_user.moments(point=(1,0,0))
 print("user-def DF at r=1: density=%.8g, sigma_r=%.8g, sigma_t=%.8g" % \
-    ( dens_my, veldisp_my[0], veldisp_my[1] ))
-# gm_my.df.totalMass()  will give the same result as mass_my
+    ( dens_user, veldisp_user[0]**0.5, veldisp_user[1]**0.5 ))
+# gm_user.df.totalMass()  will give the same result as mass_user
 
 # manually compute the moments of DF (more specifically, only the density),
 # by providing the user-defined function to the integrateNdim routine.
@@ -112,8 +115,25 @@ def my_moments(potential, df, point):
 dens_manual = my_moments(pot_appr, MyDF, (1,0,0))
 print("manually computed : density=%.8g" % dens_manual)
 
-if abs(pot0_orig-pot0_appr)<1e-6  and  abs(mass_orig-mass_my)<1e-6  and \
-    abs(dens_orig-dens_my)<1e-6   and  abs(dens_my-dens_manual)<1e-6:
+# spatial selection function for the GalaxyModel class, defining a spherical region
+# centered at (0,1,2) with a radius 3 and an infinitely sharp cutoff
+def MySF(x):
+    return (x[:,0]-0)**2 + (x[:,1]-1)**2 + (x[:,2]-2)**2 < 3**2
+
+# same concept implemented by a built-in C++ object accessible via the Python interface
+sf_orig = agama.SelectionFunction(point=(0,1,2), radius=3)
+
+# test the equivalence of the two selection functions by sampling from a restricted spatial region
+xv_orig, m_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=sf_orig).sample(100000)
+xv_user, m_user = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=MySF   ).sample(100000)
+meanxv_orig = numpy.mean(xv_orig, axis=0)
+meanxv_user = numpy.mean(xv_user, axis=0)
+
+if (abs(pot0_orig-pot0_appr)<1e-6  and  abs(mass_orig-mass_user)  <1e-6  and
+    abs(dens_orig-dens_user)<1e-6  and  abs(dens_user-dens_manual)<1e-6  and
+    all(abs(meanxv_orig-meanxv_user)<0.01)  and  abs(m_orig[0]/m_user[0]-1)<0.01  and
+    # test the equivalence of the two selection functions by directly comparing their output at points
+    all(MySF(xv_user).astype(float) == sf_orig(xv_user))):
     print("\033[1;32mALL TESTS PASSED\033[0m")
 else:
     print("\033[1;31mSOME TESTS FAILED\033[0m")

@@ -1,7 +1,7 @@
 /** \file    galaxymodel_base.h
     \brief   A complete galaxy model and associated routines (computation of moments, sampling)
     \date    2015-2020
-    \author  Eugene Vasiliev, Payel Das
+    \author  Eugene Vasiliev, Payel Das, James Binney
 */
 #pragma once
 #include "potential_base.h"
@@ -12,9 +12,49 @@
 /// A complete galaxy model (potential, action finder and distribution function) and associated routines
 namespace galaxymodel{
 
-/** Data-only structure defining a galaxy model: 
-    a combination of potential, action finder, and distribution function.
-    Its purpose is to temporarily bind together the three common ingredients that are passed
+/** Base class for selection functions that depend on (x,v);
+    the value of the distribution function is multiplied by the selection function in all
+    operations provided by this module.
+*/
+class BaseSelectionFunction {
+public:
+    virtual ~BaseSelectionFunction() {}
+    /// return a value in the range [0..1]
+    virtual double value(const coord::PosVelCar& point) const = 0;
+    /// evaluate the function at several input points at once (could be more efficient than one-by-one)
+    virtual void evalmany(const size_t npoints, const coord::PosVelCar points[], double values[]) const {
+        // default implementation is a simple sequential loop
+        for(size_t p=0; p<npoints; p++)
+            values[p] = value(points[p]);
+    }
+};
+
+/** A trivial selection function that is identically unity */
+class SelectionFunctionTrivial: public BaseSelectionFunction {
+public:
+    SelectionFunctionTrivial() {}
+    virtual double value(const coord::PosVelCar& /*point*/) const { return 1; }
+};
+
+/** A single instance of the trivial selection function used as a default ingredient in GalaxyModel */
+extern const SelectionFunctionTrivial selectionFunctionTrivial;
+
+/** A rather simple selection function that depends on the distance from a given point x0:
+    S(x) = exp[ - (|x-x0|/R0)^xi ],
+    where R0 is the cutoff radius and xi is the cutoff steepness
+*/
+class SelectionFunctionDistance: public BaseSelectionFunction {
+    const coord::PosCar point0;
+    const double radius, steepness;
+public:
+    SelectionFunctionDistance(const coord::PosCar& point0, double radius, double steepness);
+    virtual double value(const coord::PosVelCar& point) const;
+};
+
+
+/** Data-only structure defining a galaxy model:
+    a combination of potential, action finder, distribution function, and selection function.
+    Its purpose is to temporarily bind together the four common ingredients that are passed
     to various functions; however, as it only keeps references and not shared pointers, 
     it should not generally be used for a long-term storage.
 */
@@ -23,13 +63,16 @@ public:
     const potential::BasePotential&     potential;  ///< gravitational potential
     const actions::BaseActionFinder&    actFinder;  ///< action finder for the given potential
     const df::BaseDistributionFunction& distrFunc;  ///< distribution function expressed in terms of actions
+    const BaseSelectionFunction&        selFunc;    ///< selection function sf(x,v)
 
-    /** Create an instance of the galaxy model from the three ingredients */
+    /** Create an instance of the galaxy model from the four ingredients
+        (with a trivial selection function by default, if nothing else is provided) */
     GalaxyModel(
         const potential::BasePotential& pot,
         const actions::BaseActionFinder& af,
-        const df::BaseDistributionFunction& df) :
-    potential(pot), actFinder(af), distrFunc(df) {}
+        const df::BaseDistributionFunction& df,
+        const BaseSelectionFunction& sf = selectionFunctionTrivial) :
+    potential(pot), actFinder(af), distrFunc(df), selFunc(sf) {}
 };
 
 
@@ -201,26 +244,31 @@ void computeProjection(
     const int maxNumEval=1e5);
 
 
-/** Generate N-body samples of the distribution function 
+/** Generate N-body samples of the distribution function multiplied by the selection function
     by sampling in action/angle space:
     sample actions directly from DF and angles uniformly from [0:2pi]^3,
     then use torus machinery to convert from action/angles to position/velocity.
+    Note that this routine is not able to sample uniformly weighted particles in the case
+    of a non-trivial selection function; instead, it samples uniformly in the action/angle space,
+    and then multiplies the weight of each output point by the value of the selection function,
+    retaining even points with zero weight.
     \param[in]  model  is the galaxy model;
     \param[in]  numPoints  is the required number of samples;
     \param[out] actions (optional) will be filled with values of actions
     corresponding to each point; if not needed may pass NULL as this argument.
     \returns    a new array of particles (position/velocity/mass)
-    sampled from the distribution function;
+    sampled from the distribution function.
 */
 particles::ParticleArrayCyl sampleActions(
     const GalaxyModel& model, const size_t numPoints,
     std::vector<actions::Actions>* actions=NULL);
 
 
-/** Generate N-body samples of the distribution function 
+/** Generate N-body samples of the distribution function multiplied by the selection function
     by sampling in position/velocity space:
     use action finder to compute the actions corresponding to the given point,
-    and evaluate the value of DF at the given actions.
+    and evaluate the value of DF times SF at the given actions.
+    The output points have uniform weights.
     \param[in]  model  is the galaxy model;
     \param[in]  numPoints  is the required number of samples;
     \returns    a new array of particles (position/velocity/mass)

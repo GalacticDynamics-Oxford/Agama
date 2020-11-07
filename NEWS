@@ -1,6 +1,12 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+November 2020:
+Added a concept of SelectionFunction to the GalaxyModel class (C++ and Python).
+
+September 2020:
+Allow to integrate orbits backward in time.
+
 July 2020:
 Added an extra time argument for the density and potential interfaces, and modified the orbit
 integration routine to use a time-dependent potential. Also modified storage format for

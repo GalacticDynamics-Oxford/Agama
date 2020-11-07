@@ -1353,7 +1353,7 @@ double Multipole::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 
 double Multipole::enclosedMass(double radius) const
 {
-    if(radius == 0)
+    if(radius <= 1e-100)
         return 0;  // TODO: this may not be correct for a potential of a point mass!
     // use the l=0 harmonic term of dPhi/dr to estimate the spherically-averaged enclosed mass
     if(radius == INFINITY)

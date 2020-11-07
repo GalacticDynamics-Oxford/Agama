@@ -310,7 +310,7 @@ std::string pp(double num, unsigned int width)
     if(num==0) {
         result.resize(width, '0');
         if(width>1 && sign) result[0] = '-';
-        if(width>sign?2:1) result[1+sign] = '.';
+        if(width>(sign?2:1)) result[1+sign] = '.';
         return result;
     }
     if(num!=num || num==INFINITY || num==-INFINITY) {

@@ -81,8 +81,6 @@ ax[0].plot(o3[:,0], o3[:,1])
 ax[1].plot(t3*tu, o3[:,0], c='r')
 ax[1].plot(t3*tu, o3[:,1], c='r', dashes=[3,2])
 ax[2].plot(t3*tu, E3, label='KeplerOrbit potential in inertial frame')
-
-#print p2.potential(1,0,0,t=tmax), p3.potential(1,0,0,t=tmax)
 ax[0].plot(0.001, 0, 'o', ms=12, c='k', markerfacecolor='none')
 ax[0].plot(0.001, 0, 'o', ms=2, c='k')
 ax[0].plot(-.999, 0, 'o', ms=10, c='k', markerfacecolor='none')

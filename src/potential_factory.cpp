@@ -364,12 +364,14 @@ SpheroidParam parseSpheroidParam(const AllParam& param)
 NukerParam parseNukerParam(const AllParam& param)
 {
     NukerParam nparam;
-    nparam.axisRatioY  = param.axisRatioY;
-    nparam.axisRatioZ  = param.axisRatioZ;
-    nparam.alpha       = param.alpha;
-    nparam.beta        = param.beta;
-    nparam.gamma       = param.gamma;
-    nparam.scaleRadius = param.scaleRadius;
+    nparam.axisRatioY        = param.axisRatioY;
+    nparam.axisRatioZ        = param.axisRatioZ;
+    nparam.alpha             = param.alpha;
+    nparam.beta              = param.beta;
+    nparam.gamma             = param.gamma;
+    nparam.scaleRadius       = param.scaleRadius;
+    nparam.outerCutoffRadius = param.outerCutoffRadius;
+    nparam.cutoffStrength    = param.cutoffStrength;
     if(isFinite(param.surfaceDensity))
         nparam.surfaceDensity = param.surfaceDensity;
     else {  // alternative: specify the total model mass instead of surface density normalization
