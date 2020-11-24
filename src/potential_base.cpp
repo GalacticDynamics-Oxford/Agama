@@ -162,13 +162,41 @@ class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
 public:
     SurfaceDensityIntegrand(const BaseDensity& _dens, double _X, double _Y, const double* _rotmatrix) :
         dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
-    virtual double value(double s) const {
+    virtual double value(double s) const
+    {
         // unscale the input scaled coordinate, which lies in the range (0..1);
         double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
         double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
         double XYZ[3] = {X, Y, Z}, xyz[3];
         coord::transformVector(rotmatrix, XYZ, xyz);
         return dZds!=0 ? dens.density(coord::PosCar(xyz[0], xyz[1], xyz[2])) * dZds : 0;
+    }
+};
+
+inline double nan2num(double x) { return isFinite(x) ? x : 0; }
+
+class ProjectedForceIntegrand: public math::IFunctionNdim {
+    const BasePotential& pot; ///< the density model
+    const double X, Y, R;     ///< coordinates in the image plane
+    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+public:
+    ProjectedForceIntegrand(const BasePotential& _pot, double _X, double _Y, const double* _rotmatrix) :
+        pot(_pot), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return 2; }
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double s = vars[0], t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
+        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
+        double XYZ[3] = {X, Y, Z}, xyz[3];
+        coord::transformVector(rotmatrix, XYZ, xyz);
+        coord::GradCar grad;
+        pot.eval(coord::PosCar(xyz[0], xyz[1], xyz[2]), NULL, &grad);
+        values[0] = nan2num((grad.dx * rotmatrix[0] + grad.dy * rotmatrix[3] + grad.dz * rotmatrix[6]) * dZds);
+        values[1] = nan2num((grad.dx * rotmatrix[1] + grad.dy * rotmatrix[4] + grad.dz * rotmatrix[7]) * dZds);
     }
 };
 
@@ -219,6 +247,23 @@ double surfaceDensity(const BaseDensity& dens, double X, double Y, double alpha,
     tmp = mat[2]; mat[2] = mat[6]; mat[6] = tmp;
     tmp = mat[5]; mat[5] = mat[7]; mat[7] = tmp;
     return math::integrateAdaptive(SurfaceDensityIntegrand(dens, X, Y, mat), 0, 1, EPSREL_DENSITY_INT);
+}
+
+void projectedForce(const BasePotential& pot, double X, double Y,
+    double alpha, double beta, double gamma, double& fX, double& fY)
+{
+    double mat[9], tmp;
+    coord::makeRotationMatrix(alpha, beta, gamma, mat);
+    // the matrix corresponds to the transformation from intrinsic to observed coords,
+    // but we need the opposite transformation, so we transpose it
+    tmp = mat[1]; mat[1] = mat[3]; mat[3] = tmp;
+    tmp = mat[2]; mat[2] = mat[6]; mat[6] = tmp;
+    tmp = mat[5]; mat[5] = mat[7]; mat[7] = tmp;
+    double xlower[1] = {0}, xupper[1] = {1}, result[2];
+    math::integrateNdim(ProjectedForceIntegrand(pot, X, Y, mat), xlower, xupper, EPSREL_DENSITY_INT,
+        /*maxNumEval*/ 10000, result);
+    fX = result[0];
+    fY = result[1];
 }
 
 }  // namespace potential

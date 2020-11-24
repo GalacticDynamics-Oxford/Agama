@@ -21,7 +21,7 @@
 #include <cmath>
 
 const double eps=1e-5;     // accuracy of energy conservation
-const double epsrot=2e-4;  // accuracy of comparison between inertial and rotating frames
+const double epsrot=5e-4;  // accuracy of comparison between inertial and rotating frames
 const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 const double Omega=2.718;  // rotation frequency (arbitrary)
 

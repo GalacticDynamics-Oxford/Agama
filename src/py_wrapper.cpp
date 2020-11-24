@@ -98,34 +98,57 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
 //  ---------------------------------------------------
 ///@{
 
+#ifdef _OPENMP
+/// the original number of OpenMP threads when no OmpDisabler classes are instantiated
+int ompMaxThreads = -1;
+/// number of times the OmpDisabler is instantiated - only when the last one is released,
+/// we restore the original number of threads
+int ompDisablerCount = 0;
+
 /// This is a lock-type object that temporarily switches off OpenMP parallelization
 /// during its existence; this is needed when a Python callback function is provided
 /// to the C++ library, because it is not possible to call Python routines concurrently.
-/// It remembers the OpenMP setting for the maximum number of threads that was effective
-/// at the moment of construction, and restores it upon destruction.
+/// When this class is first instantiated, it remembers the OpenMP setting for the maximum
+/// number of threads in a global variable, and each subsequently created instance of
+/// this class increments the instance count.
+/// Conversely, when an instance of this class is destroyed, it decrements the instance count,
+/// and when it reaches zero, restores the original number of OpenMP threads.
 /// If OpenMP is not used, this is a no-op.
 class OmpDisabler {
-#ifdef _OPENMP
-    int origMaxThreads;  ///< the value effective before this object was constructed
 public:
     OmpDisabler()
     {
-        origMaxThreads = omp_get_max_threads();
-        utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now disabled "
-            "(original max # of threads was "+utils::toString(origMaxThreads)+")");
-        omp_set_num_threads(1);
+        if(ompDisablerCount==0) {
+            ompMaxThreads = omp_get_max_threads();
+            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now disabled "
+                "(original max # of threads was "+utils::toString(ompMaxThreads)+")");
+            omp_set_num_threads(1);
+        } else {
+            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is disabled "+
+                utils::toString(ompDisablerCount+1)+" times");
+        }
+        ompDisablerCount++;  // keep track of the number of times this class is instantiated
     }
     ~OmpDisabler()
     {
-        utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now enabled "
-            "(max # of threads is "+utils::toString(origMaxThreads)+")");
-        omp_set_num_threads(origMaxThreads);
+        ompDisablerCount--;
+        if(ompDisablerCount<0) {   // this could not happen unless a quantum fluke occurred
+            utils::msg(utils::VL_MESSAGE, "Agama",
+                "OmpDisabler destroyed more times than it was created\n");
+        } else if(ompDisablerCount==0) {
+            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now enabled "
+                "(max # of threads is "+utils::toString(ompMaxThreads)+")");
+            omp_set_num_threads(ompMaxThreads);
+        } else {
+            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is still disabled "+
+                utils::toString(ompDisablerCount)+" times");
+        }
     }
-#else
-public:
-    OmpDisabler() {}
-#endif
 };
+
+#else  // no OpenMP - nothing happens
+class OmpDisabler {};
+#endif
 
 ///@}
 //  ------------------------------------------------------------------
@@ -1250,7 +1273,7 @@ PyObject* Density_density(PyObject* self, PyObject* args, PyObject* namedArgs)
     double time = 0;
     if(!getOptionalNamedArg(namedArgs, "t", time))
         return NULL;
-    return FncDensityDensity(args, *((DensityObject*)self)->dens, time).run(/*chunk*/256);
+    return FncDensityDensity(args, *((DensityObject*)self)->dens, time).run(/*chunk*/1024);
 }
 
 /// compute the surface density for an array of points
@@ -1300,7 +1323,7 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
         &points_obj, &alpha, &beta, &gamma))
         return NULL;
     return FncDensitySurfaceDensity(points_obj, *((DensityObject*)self)->dens, alpha, beta, gamma).
-        run(/*chunk*/16);
+        run(/*chunk*/64);
 }
 
 PyObject* Density_totalMass(PyObject* self)
@@ -1857,7 +1880,7 @@ PyObject* Potential_potential(PyObject* self, PyObject* args, PyObject* namedArg
     double time = 0;
     if(!getOptionalNamedArg(namedArgs, "t", time))
         return NULL;
-    return FncPotentialPotential(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
+    return FncPotentialPotential(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
 }
 
 /// compute the force and optionally its derivatives
@@ -1903,7 +1926,7 @@ PyObject* Potential_force(PyObject* self, PyObject* args, PyObject* namedArgs) {
     double time = 0;
     if(!getOptionalNamedArg(namedArgs, "t", time))
         return NULL;
-    return FncPotentialForce<false>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
+    return FncPotentialForce<false>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
 }
 
 PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedArgs) {
@@ -1912,7 +1935,59 @@ PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedAr
     double time = 0;
     if(!getOptionalNamedArg(namedArgs, "t", time))
         return NULL;
-    return FncPotentialForce<true>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/256);
+    return FncPotentialForce<true>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
+}
+
+/// compute the projected force for an array of points
+class FncPotentialProjectedForce: public BatchFunction {
+    const potential::BasePotential& pot;
+    const double alpha, beta, gamma;
+    double* outputBuffer;
+public:
+    FncPotentialProjectedForce(PyObject* input, const potential::BasePotential& _pot,
+        double _alpha, double _beta, double _gamma)
+    :
+        BatchFunction(/*input length*/ 2, input),
+        pot(_pot), alpha(_alpha), beta(_beta), gamma(_gamma)
+    {
+        outputObject = allocateOutput<2>(numPoints, &outputBuffer);
+    }
+    virtual void processPoint(npy_intp indexPoint)
+    {
+        double fX, fY;
+        projectedForce(pot,
+            /*X*/ inputBuffer[indexPoint*2  ] * conv->lengthUnit,
+            /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit,
+            alpha, beta, gamma,
+            /*output*/ fX, fY);
+        outputBuffer[indexPoint*2+0] = -fX / pow_2(conv->velocityUnit);
+        outputBuffer[indexPoint*2+1] = -fY / pow_2(conv->velocityUnit);
+    }
+};
+
+PyObject* Potential_projectedForce(PyObject* self, PyObject* args, PyObject* namedArgs)
+{
+    // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
+    // namedArgs may be empty or contain three rotation angles
+    static const char* keywords1[] = {"point", "alpha", "beta", "gamma", NULL};
+    static const char* keywords2[] = {"X","Y", "alpha", "beta", "gamma", NULL};
+    PyObject *points_obj = NULL;
+    double X = 0, Y = 0, alpha = 0, beta = 0, gamma = 0;
+    if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)==2 &&
+        PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|ddd", const_cast<char**>(keywords2),
+        &X, &Y, &alpha, &beta, &gamma))
+    {   // shortcut and alternative syntax for just a single point x,y
+        double fX, fY;
+        projectedForce(*((PotentialObject*)self)->pot,
+            X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma, /*output*/ fX, fY);
+        return Py_BuildValue("(dd)", -fX / pow_2(conv->velocityUnit), -fY / pow_2(conv->velocityUnit));
+    }
+    // default syntax is a single first argument for the array of points
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|ddd", const_cast<char**>(keywords1),
+        &points_obj, &alpha, &beta, &gamma))
+        return NULL;
+    return FncPotentialProjectedForce(points_obj, *((PotentialObject*)self)->pot, alpha, beta, gamma).
+        run(/*chunk*/64);
 }
 
 /// compute the radius of a circular orbit as a function of energy or Lz
@@ -2107,6 +2182,16 @@ static PyMethodDef Potential_methods[] = {
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
       "or if the input was an array of N points, then both items in the tuple are 2d arrays "
       "with sizes Nx3 and Nx6, respectively"},
+    { "projectedForce", (PyCFunction)Potential_projectedForce, METH_VARARGS | METH_KEYWORDS,
+      "Compute projected force (integral of the force along the line of sight, computed "
+      "analogously to surface density) at a given point or array of points\n"
+      "Arguments: \n"
+      "  X,Y (two floats) or point (a Nx2 array of floats): coordinates in the image plane.\n"
+      "  alpha, beta, gamma (optional, default 0): three angles specifying the orientation "
+      "of the image plane in the intrinsic coordinate system of the model; "
+      "in particular, beta is the inclination angle.\n"
+      "Returns: a tuple of two float (for a single point) or a Nx2 array of floats - the X and Y "
+      "components of force integrated along the line of sight Z perpendicular to the image plane."},
     { "Rcirc", (PyCFunction)Potential_Rcirc, METH_VARARGS | METH_KEYWORDS,
       "Find the radius of a circular orbit in the equatorial plane corresponding to "
       "either the given z-component of angular momentum L or energy E; "
@@ -2815,7 +2900,7 @@ PyObject* DistributionFunction_value(DistributionFunctionObject* self, PyObject*
     }
     if(!noNamedArgs(namedArgs))
         return NULL;
-    return FncDistributionFunction(args, *self->df).run(/*chunk*/256);
+    return FncDistributionFunction(args, *self->df).run(/*chunk*/1024);
 }
 
 PyObject* DistributionFunction_totalMass(PyObject* self)
