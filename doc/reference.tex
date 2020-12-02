@@ -886,8 +886,6 @@ The density framework can be augmented with user-defined \Python functions that 
 \texttt{fnc1~~=~~lambda~~x:  3/(4*numpy.pi) * (1 + numpy.sum(x**2, axis=1))**-2.5}\\
 \texttt{def fnc2(x):  return 3/(4*numpy.pi) * (1 + numpy.sum(x**2, axis=1))**-2.5}\\
 You may create an instance of \ttt{Density} class wrapping a user-defined \Python callback function:\\
-\texttt{densfnc = agama.Density(fnc1)}\\
-However, in this case \textit{all} routines in the \Cpp library work in a single-thread mode during the lifetime of this instance (if it was created as a local variable in a function, it will be destroyed upon return from the function, or it could be explicitly destroyed by the \texttt{del densfnc} statement). Thus it is advisable to construct temporary instances which only exist during the execution of a single statement, e.g.,\\
 \texttt{print(agama.Density(fnc1).totalMass())}\\
 Alternatively, one may directly pass the \Python callback function whenever a \ttt{Density} object is expected, such as the \ttt{Potential} and \ttt{DistributionFunction} constructors, without creating a wrapper instance of \texttt{Density} class: \\
 \texttt{pot1 = agama.Potential(type="Multipole", density=fnc1)}
@@ -960,7 +958,7 @@ where \ppp{type} may be one of the following: \ppp{DoublePowerLaw}, \ppp{QuasiIs
 or from a list of existing \ttt{DistributionFunction} objects, creating a composite DF:\\[1mm]
 \texttt{dfcomp = agama.DistributionFunction(df1, df2, myfnc)}
 \\[2mm]
-Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row). Note that such a user-defined \Python function disables OpenMP parallelization throughout the library during its existence (in this example, during the existence of the composite DF \texttt{dfcomp}).
+Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).
 \\[2mm]
 The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\Sigma,\sigma$.
 \\[2mm]
@@ -976,7 +974,7 @@ but of course, the latter is less computationally efficient due to extra costs i
 \paragraph{GalaxyModel} is the combination of a potential, an action finder (which can be constructed internally for the given potential, or provided to the constructor if it was already created), a DF, and optionally a SF:\\
 \texttt{gm = agama.GalaxyModel(pot, df [, sf])}
 \textit{\color{Sepia}\ \ \# action finder is constructed automatically} \\[2mm]
-This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF is a user-defined Python function).
+This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF or SF are user-defined Python functions).
 \\[2mm]
 \texttt{dens, meanvel, vel2 = gm.moments(points, dens=True, vel=True, vel2=True)}\\
 computes the density $\rho$, mean $v_\phi$, and six second moments of the velocity $\overline{v^2_{ij}}$ at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations.

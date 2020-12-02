@@ -63,7 +63,7 @@ namespace{   // internal definitions
     \return  three components of velocity in cylindrical coordinates.
 */
 inline coord::VelCyl unscaleVelocity(
-    const double vars[], const double vesc, const double zeta, double* jac=0)
+    const double vars[], const double vesc, const double zeta, double* jac=NULL)
 {
     double sintheta, costheta, sinphi, cosphi,
     eta = sqrt(1/zeta-1) + 1,
@@ -104,7 +104,7 @@ inline void getVesc(
     If needed, also provide the jacobian of transformation.
 */
 inline coord::PosVelCyl unscalePosVel(const double vars[], 
-    const potential::BasePotential& pot, double* jac=0)
+    const potential::BasePotential& pot, double* jac=NULL)
 {
     // 1. determine the position from the first three scaled variables
     double jacPos=0;
@@ -164,14 +164,17 @@ public:
         double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
         // values of selection function at each point
         double* sf  = static_cast<double*>(alloca(npoints * sizeof(double)));
+        // values of distribution function (possibly several components) at each point
+        double* df  = static_cast<double*>(alloca(npoints * dflen * sizeof(double)));
         // x,v points in cylindrical coords (unscaled from the input variables)
         coord::PosVelCyl* posvelcyl = static_cast<coord::PosVelCyl*>(
             alloca(npoints * sizeof(coord::PosVelCyl)));
         // same points transformed to cartesian coords
         coord::PosVelCar* posvelcar = static_cast<coord::PosVelCar*>(
             alloca(npoints * sizeof(coord::PosVelCar)));
-        // value(s) of distribution function - more than one for a multicomponent DF treated separately
-        double* dfval = static_cast<double*>(alloca(dflen * sizeof(double)));
+        // values of actions at all input points where sel.fnc is not zero
+        actions::Actions* act = static_cast<actions::Actions*>(
+            alloca(npoints * sizeof(actions::Actions)));
 
         // 1. get the position/velocity components in both cylindrical and cartesian coordinates
         // for all input points
@@ -185,46 +188,67 @@ public:
             model.selFunc.evalmany(npoints, posvelcar, /*output*/ sf);
         }
         catch(std::exception& e) {
-            // dump out the error at the highest debug logging level
-            if(utils::verbosityLevel >= utils::VL_VERBOSE)
-                utils::msg(utils::VL_VERBOSE, "DFIntegrandNdim", std::string(e.what()));
+            if(utils::verbosityLevel >= utils::VL_WARNING)
+                utils::msg(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
             std::fill(sf, sf+npoints, 0);
         }
 
-        // the remaining steps are performed one point at a time
+        // 3. evaluate actions at points where sel.fnc. is not zero:
+        // store actions contiguously for this subset of points,
+        // so that they could be passed to the DF all at once
+        size_t nselected = 0;          // number of selected points
         for(size_t p=0; p<npoints; p++) {
-            std::fill(dfval, dfval+dflen, 0);  // initialize with zeroes (remain so in case of errors)
-            double mult = jac[p] * sf[p];      // overall weight of this point (jacobian * sel.fnc.)
+            double mult = jac[p] * sf[p];  // overall weight of this point (jacobian * sel.fnc.)
             if(mult > 0 && isFinite(mult)) {
-                // 3. determine the actions
-                actions::Actions act = model.actFinder.actions(posvelcyl[p]);
-                
-                // 4. compute the value of distribution function times the jacobian
+                actions::Actions acts = model.actFinder.actions(posvelcyl[p]);
                 // FIXME: in some cases the Fudge action finder may fail and produce
                 // zero values of Jr,Jz instead of very large ones, which may lead to
                 // unrealistically high DF values. We therefore ignore these points
                 // entirely, but the real problem is with the action finder, not here.
-                if(isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0)) {
-                    if(dflen>1)
-                        // the values are stored separately for each component of a composite DF
-                        model.distrFunc.eval(act, dfval);
-                    else
-                        // store a single value for an ordinary DF, or in the case of a composite DF,
-                        // the sum of all its components
-                        dfval[0] = model.distrFunc.value(act);
-                    // multiply by jacobian and selection function,
-                    // check for possibly invalid DF values and replace them with zeroes
-                    for(unsigned int i=0; i<dflen; i++) {
-                        if(!isFinite(dfval[i])) {
-                            dfval[i] = 0;
-                        } else
-                            dfval[i] *= mult;
-                    }
-                }
+                if(isFinite(acts.Jr + acts.Jz + acts.Jphi) && (acts.Jr!=0 || acts.Jz!=0)) {
+                    act[nselected] = acts;
+                    nselected++;
+                } else  // otherwise this output point is ignored and will be overwritten next time
+                    sf[p] = 0;
             }
+        }
+        // check if there are any points selected at all
+        if(nselected==0) {
+            // fast track, output an array of zeros of appropriate length
+            std::fill(values, values + npoints*numvalues, 0);
+            return;
+        }
 
-            // 5. output the value(s) to the integration routine
-            outputValues(posvelcyl[p], dfval, values + p*numvalues);
+        // 4. evaluate the DF for the entire selected subset of points at once
+        try{
+            model.distrFunc.evalmany(nselected, act, /*separate*/ dflen!=1, /*output*/ df);
+        }
+        catch(std::exception& e) {
+            if(utils::verbosityLevel >= utils::VL_WARNING)
+                utils::msg(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
+            std::fill(sf, df + npoints * dflen, 0);  // quietly replace output with zeroes
+        }
+
+        // 5. perform actual calculation of output values for each [valid and selected] input point
+        for(size_t p=0, s=0; p<npoints; p++) {  // p indexes all input points, s - only selected ones
+            double mult = jac[p] * sf[p];       // overall weight of this point (jacobian * sel.fnc.)
+            if(mult > 0 && isFinite(mult)) {
+                double* dfval = df + s * dflen; // array of df values at this selected point
+                // multiply by jacobian and selection function,
+                // check for possibly invalid DF values and replace them with zeroes
+                for(unsigned int i=0; i<dflen; i++) {
+                    if(!isFinite(dfval[i])) {
+                        dfval[i] = 0;
+                    } else
+                        dfval[i] *= mult;
+                }
+                // output the value(s) to the integration routine
+                outputValues(posvelcyl[p], dfval, values + p*numvalues);
+                s++;  // increment the index of selected points, for which the DF values were computed
+            } else {
+                // ignore this point and output zeroes
+                std::fill(values + p*numvalues, values + (p+1)*numvalues, 0);
+            }
         }
     }
 
@@ -234,7 +258,7 @@ public:
         \param[out] jac (optional)  is the jacobian of transformation, if NULL it is not computed;
         \return  the position and velocity in cylindrical coordinates.
     */
-    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const = 0;
+    virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=NULL) const = 0;
 
     /** output the value(s) computed at a given point to the integration routine.
         \param[in]  point  is the position/velocity point;
@@ -886,7 +910,8 @@ particles::ParticleArrayCyl samplePosVel(
     particles::ParticleArrayCyl points;
     points.data.reserve(result.rows());
     for(size_t i=0; i<result.rows(); i++) {
-        double scaledvars[6] = {result(i,0), result(i,1), result(i,2),
+        double scaledvars[6] = {
+            result(i,0), result(i,1), result(i,2),
             result(i,3), result(i,4), result(i,5)};
         // transform from scaled vars (array of 6 numbers) to real pos/vel
         points.add(fnc.unscaleVars(scaledvars), pointMass);

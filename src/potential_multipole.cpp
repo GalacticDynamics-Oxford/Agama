@@ -856,7 +856,7 @@ void computePotentialCoefsSph(const BasePotential &src,
     std::vector< std::vector<double> > &dPhi)
 {
     std::vector< std::vector<double> > *coefs[2] = {&Phi, &dPhi};
-    computeSphHarmCoefs<BasePotential>(src, ind, gridRadii, /*parallel*/ false, /*output*/ coefs);
+    computeSphHarmCoefs<BasePotential>(src, ind, gridRadii, /*parallel*/ true, /*output*/ coefs);
 }
 
 // potential coefs from density:

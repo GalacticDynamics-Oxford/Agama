@@ -70,7 +70,7 @@ void ComponentWithDisklikeDF::update(
 static void updateActionFinder(SelfConsistentModel& model)
 {
     // update the action finder after the potential has been reinitialized
-    std::cout << "done\nUpdating action finder..."<<std::flush;
+    std::cout << "Updating action finder..."<<std::flush;
     if(isSpherical(*model.totalPotential))
         model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
     else
@@ -161,6 +161,7 @@ void updateTotalPotential(SelfConsistentModel& model)
     else
         model.totalPotential.reset(new potential::Composite(compPot));
 
+    std::cout << "done" << std::endl;
     // finally, create the action finder for the new potential
     updateActionFinder(model);
 }

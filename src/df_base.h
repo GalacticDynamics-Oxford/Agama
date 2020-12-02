@@ -31,15 +31,34 @@ public:
     */
     virtual double totalMass(const double reqRelError=1e-6, const int maxNumEval=1e6,
         double* error=NULL, int* numEval=NULL) const;
-
-    /** Value of distribution function for the given set of actions J */
-    virtual double value(const actions::Actions &J) const=0;
-
+    
     /** Number of components in the case of a multi-component DF */
     virtual unsigned int numValues() const { return 1; }
 
-    /** Compute values of all components for the given actions */
-    virtual void eval(const actions::Actions &J, double values[]) const { *values = value(J); }
+    /** Value of distribution function for the given set of actions J:
+        in case than numValues>1, return a single value - the sum of all components */
+    virtual double value(const actions::Actions &J) const=0;
+
+    /** Vectorized evaluation of the DF for several input points at once, possibly reporting
+        multiple values for a single point (if numValues>1 and separate output is requested).
+        \param[in]  npoints - size of the input array of actions;
+        \param[in]  J - array of actions of length npoints;
+        \param[in]  separate - if numValues>1, this flag indicates whether to output a sum of
+        all components (if separate is false) or each of them separately (if true);
+        \param[out] values - output array that will be filled with DF values as follows:
+        if separate is false, the length of output is npoints, and each element of the output
+        array corresponds exactly to one input point;
+        if separate is true, the length of output is npoints * numValues, and
+        values[p * numValues + c] contains the value of c-th component at p-th input point.
+    */
+    virtual void evalmany(const size_t npoints, const actions::Actions J[],
+        bool /*separate*/, double values[]) const
+    {
+        // default implementation for a single-component DF does not make a distinction between
+        // separate or combined evaluation, and just loops over input points one by one
+        for(size_t p=0; p<npoints; p++)
+            values[p] = value(J[p]);
+    }
 };
 
 

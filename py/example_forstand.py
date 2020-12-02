@@ -183,8 +183,7 @@ if command == 'MOCK':
     # convert the N-body model (which was set up in N-body units with G=1) to observational units defined at the beginning of this script
     rscale = 30.0   # [REQ] 1 length unit of the N-body snapshot corresponds to this many length units of this script (arcseconds)
     mscale = 4e10   # [REQ] 1 mass unit of the snapshot corresponds to this many mass units of this script (solar masses)
-    G      = -agama.Potential(type='Plummer').potential(0,0,0)  # numerical value of G in current units
-    vscale = (G * mscale / rscale)**0.5  # same for the N-body velocity unit => km/s
+    vscale = (agama.G * mscale / rscale)**0.5  # same for the N-body velocity unit => km/s
     posvel[:, 0:3] *= rscale
     posvel[:, 3:6] *= vscale
     mass *= mscale

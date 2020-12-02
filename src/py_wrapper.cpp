@@ -78,6 +78,8 @@
 /// classes and routines for the Python interface
 namespace pygama {  // internal namespace
 
+PyObject* thismodule;  // PyObject corresponding to this extension module
+
 // some forward declarations:
 // pointers to several Python type descriptors, which will be initialized at module startup
 static PyTypeObject
@@ -92,65 +94,42 @@ static PyTypeObject
 // forward declaration for a routine that constructs a Python cubic spline object
 PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
 
-
-//  ---------------------------------------------------
-/// \name  Helper class to manage the OpenMP behaviour
-//  ---------------------------------------------------
-///@{
-
-#ifdef _OPENMP
-/// the original number of OpenMP threads when no OmpDisabler classes are instantiated
-int ompMaxThreads = -1;
-/// number of times the OmpDisabler is instantiated - only when the last one is released,
-/// we restore the original number of threads
-int ompDisablerCount = 0;
-
-/// This is a lock-type object that temporarily switches off OpenMP parallelization
-/// during its existence; this is needed when a Python callback function is provided
-/// to the C++ library, because it is not possible to call Python routines concurrently.
-/// When this class is first instantiated, it remembers the OpenMP setting for the maximum
-/// number of threads in a global variable, and each subsequently created instance of
-/// this class increments the instance count.
-/// Conversely, when an instance of this class is destroyed, it decrements the instance count,
-/// and when it reaches zero, restores the original number of OpenMP threads.
-/// If OpenMP is not used, this is a no-op.
-class OmpDisabler {
+/** Lock-type class that temporarily disables warnings that numpy produces on floating-point
+    overflows or other invalid values.
+    The reason for doing this is that such warnings involve subtle interference with GIL
+    when executed in a multi-threading context, leading to deadlocks if a user-defined Python
+    function is accessed from multiple threads (even after being protected by an OpenMP critical
+    section). The instance of this class is created (and hence warnings are suppressed)
+    whenever a user-defined callback function is instantiated, and the previous warning settings
+    are restored once such a function is deallocated.
+*/
+class NumpyWarningsDisabler {
+    PyObject *seterr, *prevSettings;  ///< pointer to the function and its previous settings
 public:
-    OmpDisabler()
+    NumpyWarningsDisabler() : seterr(NULL), prevSettings(NULL)
     {
-        if(ompDisablerCount==0) {
-            ompMaxThreads = omp_get_max_threads();
-            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now disabled "
-                "(original max # of threads was "+utils::toString(ompMaxThreads)+")");
-            omp_set_num_threads(1);
-        } else {
-            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is disabled "+
-                utils::toString(ompDisablerCount+1)+" times");
-        }
-        ompDisablerCount++;  // keep track of the number of times this class is instantiated
+        PyObject* numpy = PyImport_AddModule("numpy");
+        if(!numpy) return;
+        seterr = PyObject_GetAttrString(numpy, "seterr");
+        if(!seterr) return;
+        // store the dictionary corresponding to current settings of numpy warnings subsystem
+        prevSettings = PyObject_CallFunction(seterr, const_cast<char*>("s"), "ignore");
+        if(!prevSettings) { printf("Failed to suppress numpy warnings\n"); }
+        /*else { printf("Ignoring numpy warnings\n"); }*/
     }
-    ~OmpDisabler()
+    ~NumpyWarningsDisabler()
     {
-        ompDisablerCount--;
-        if(ompDisablerCount<0) {   // this could not happen unless a quantum fluke occurred
-            utils::msg(utils::VL_MESSAGE, "Agama",
-                "OmpDisabler destroyed more times than it was created\n");
-        } else if(ompDisablerCount==0) {
-            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is now enabled "
-                "(max # of threads is "+utils::toString(ompMaxThreads)+")");
-            omp_set_num_threads(ompMaxThreads);
-        } else {
-            utils::msg(utils::VL_DEBUG, "Agama", "OpenMP is still disabled "+
-                utils::toString(ompDisablerCount)+" times");
-        }
+        if(!seterr || !prevSettings) return;
+        // restore the previous settings of numpy warnings subsystem
+        PyObject* args = PyTuple_New(0);
+        PyObject* result = PyObject_Call(seterr, args, prevSettings);
+        Py_DECREF(args);
+        if(!result) { printf("Failed to restore numpy warnings\n"); }
+        /*else printf("Restored numpy warnings\n");*/
+        Py_XDECREF(result);
     }
 };
 
-#else  // no OpenMP - nothing happens
-class OmpDisabler {};
-#endif
-
-///@}
 //  ------------------------------------------------------------------
 /// \name  Helper routines for type conversions and argument checking
 //  ------------------------------------------------------------------
@@ -495,6 +474,7 @@ static const char* docstringSetUnits =
     "(note that the latter three are not all independent).\n"
     "Their values specify the units in terms of "
     "'Solar mass', 'Kiloparsec', 'km/s' and 'Megayear', correspondingly.\n"
+    "The numerical value of the gravitational constant in these units is stored as agama.G\n"
     "Example: standard GADGET units are defined as\n"
     "    setUnits(mass=1e10, length=1, velocity=1)\n";
 
@@ -535,6 +515,15 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             "You must specify exactly two out of three units: length, time and velocity");
         return NULL;
     }
+    double G = units::Grav *
+        (conv->massUnit * unit.to_Msun * units::Msun) /
+        pow_2(conv->velocityUnit * unit.to_kms * units::kms) /
+        (conv->lengthUnit * unit.to_Kpc * units::Kpc);
+    // store the numerical value of G as a module attribute (constant)
+    PyObject* PyG = PyFloat_FromDouble(G);
+    if(!PyDict_SetItemString(PyModule_GetDict(thismodule), "G", PyG))
+        PyErr_Print();
+    Py_DECREF(PyG);
     utils::msg(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
         "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
@@ -545,10 +534,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         "velocity unit: "+utils::toString(conv->velocityUnit * unit.to_kms)+ " km/s, "
         "time unit: "    +utils::toString(conv->timeUnit     * unit.to_Myr)+ " Myr, "
         "mass unit: "    +utils::toString(conv->massUnit     * unit.to_Msun)+" Msun, "
-        "gravitational constant: "+utils::toString(units::Grav *
-            (conv->massUnit * unit.to_Msun * units::Msun) /
-            pow_2(conv->velocityUnit * unit.to_kms * units::kms) /
-            (conv->lengthUnit * unit.to_Kpc * units::Kpc) ) ).c_str());
+        "gravitational constant: "+utils::toString(G) ).c_str());
 }
 
 /// description of resetUnits function
@@ -562,6 +548,11 @@ static const char* docstringResetUnits =
 PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
 {
     conv.reset(new units::ExternalUnits());
+    // reset the module attribute G to unity
+    PyObject* PyG = PyFloat_FromDouble(1.0);
+    if(!PyDict_SetItemString(PyModule_GetDict(thismodule), "G", PyG))
+        PyErr_Print();
+    Py_DECREF(PyG);
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -1046,7 +1037,7 @@ typedef struct {
 /// Helper class for providing a BaseDensity interface
 /// to a Python function that returns density at one or several point
 class DensityWrapper: public potential::BaseDensity{
-    OmpDisabler ompDisabler;
+    NumpyWarningsDisabler lock;
     PyObject* fnc;
     coord::SymmetryType sym;
     std::string fncname;
@@ -1070,28 +1061,39 @@ public:
         return densityCar(toPosCar(pos), 0); }
     virtual double densitySph(const coord::PosSph &pos, double /*time*/) const {
         return densityCar(toPosCar(pos), 9); }
-    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const {
-        double xyz[3];
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
+    {
+        double xyz[3], value = NAN;
         unconvertPos(pos, xyz);
         npy_intp dims[]  = {1, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        double value = NAN;
-        if(result == NULL) {
-            PyErr_Print();
-            throw std::runtime_error("Call to user-defined density function failed");
-        }
-        if(PyArray_Check(result)) {
-            switch(PyArray_TYPE((PyArrayObject*) result)) {
-                case NPY_DOUBLE: value = pyArrayElem<double>(result, 0); break;
-                case NPY_FLOAT:  value = pyArrayElem<float >(result, 0); break;
-                default: ;
+        PyObject *result = NULL;
+        bool typeerror   = false;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+        {
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+            Py_DECREF(args);
+            if(result == NULL) {
+                PyErr_Print();
+            } else if(PyArray_Check(result)) {
+                switch(PyArray_TYPE((PyArrayObject*) result)) {
+                    case NPY_DOUBLE: value = pyArrayElem<double>(result, 0); break;
+                    case NPY_FLOAT:  value = pyArrayElem<float >(result, 0); break;
+                    default: typeerror = true;
+                }
             }
+            else if(PyNumber_Check(result))
+                value = PyFloat_AsDouble(result);
+            else
+                typeerror = true;
+            Py_XDECREF(result);
         }
-        else if(PyNumber_Check(result))
-            value = PyFloat_AsDouble(result);
-        Py_DECREF(result);
+        if(result == NULL)
+            throw std::runtime_error("Call to user-defined density function failed");
+        else if(typeerror)
+            throw std::runtime_error("Invalid data type returned from user-defined density function");
         return value * conv->massUnit / pow_3(conv->lengthUnit);
     }
 };
@@ -2682,10 +2684,10 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
 }
 
 /// Helper class for providing a BaseDistributionFunction interface
-/// to a Python function that returns the value of df at a point in action space
+/// to a Python function that returns the value of DF at a point in action space
 class DistributionFunctionWrapper: public df::BaseDistributionFunction{
-    OmpDisabler ompDisabler;
-    PyObject* fnc;
+    NumpyWarningsDisabler lock;
+    PyObject* fnc;   ///< Python object providing the __call__ interface to evaluate the DF
 public:
     DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
@@ -2699,28 +2701,58 @@ public:
             "Deleted a C++ df wrapper for Python function "+toString(fnc));
         Py_DECREF(fnc);
     }
+    // non-vectorized form
     virtual double value(const actions::Actions &J) const {
-        double act[3];
-        unconvertActions(J, act);
-        npy_intp dims[]  = {1, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        double value;
-        if(result == NULL) {
-            PyErr_Print();
+        double val;
+        evalmany(1, &J, /*separate*/ false, &val);
+        return val;
+    }
+    // vectorized form is the one that actually does the work
+    virtual void evalmany(const size_t npoints, const actions::Actions J[], bool, double values[]) const
+    {
+        double* act = static_cast<double*>(alloca(npoints * 3 * sizeof(double)));
+        for(size_t p=0; p<npoints; p++)
+            unconvertActions(J[p], act + p*3);
+        double mult = conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
+        PyObject* result = NULL;
+        bool typeerror   = false;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+        {
+            npy_intp dims[]  = { (npy_intp)npoints, 3};
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+            Py_DECREF(args);
+            if(result == NULL) {
+                PyErr_Print();
+            } else if(PyArray_Check(result) &&
+                PyArray_NDIM((PyArrayObject*)result) == 1 &&
+                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            {
+                int type = PyArray_TYPE((PyArrayObject*) result);
+                for(size_t p=0; p<npoints; p++) {
+                    switch(type) {
+                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
+                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
+                        default: values[p] = NAN; typeerror = true;
+                    }
+                }
+            }
+            else if(npoints==1 && PyNumber_Check(result)) {
+                // in case of a single input point, the user function might return a single number
+                values[0] = PyFloat_AsDouble(result) * mult;
+            }
+            else {
+                typeerror = true;
+            }
+            Py_XDECREF(result);
+        }
+        if(result == NULL)
             throw std::runtime_error("Call to user-defined distribution function failed");
-        }
-        if(PyArray_Check(result))
-            value = pyArrayElem<double>(result, 0);  // TODO: ensure that it's an array of doubles?
-        else if(PyNumber_Check(result))
-            value = PyFloat_AsDouble(result);
-        else {
-            Py_DECREF(result);
-            throw std::runtime_error("Invalid data type returned from user-defined distribution function");
-        }
-        Py_DECREF(result);
-        return value * conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
+        else if(typeerror)
+            throw std::runtime_error(
+                "Invalid data type returned from user-defined distribution function");
     }
 };
 
@@ -3075,8 +3107,8 @@ PyObject* SelectionFunction_value(SelectionFunctionObject* self, PyObject* args,
 /// Helper class for providing a BaseSelectionFunction interface to a user-defined Python function
 /// that returns the value of a selection function at one or more points in x,v space
 class SelectionFunctionWrapper: public galaxymodel::BaseSelectionFunction{
-    OmpDisabler ompDisabler;  ///< OpenMP must be disabled while using Python callback functions
-    PyObject* fnc;            ///< Python object providing the selection function
+    NumpyWarningsDisabler lock;
+    PyObject* fnc;    ///< Python object providing the selection function
 public:
     SelectionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
@@ -3098,38 +3130,49 @@ public:
     }
     virtual void evalmany(const size_t npoints, const coord::PosVelCar points[], double values[]) const
     {
-        double* posvel = static_cast<double*>(alloca(npoints * 6 * sizeof(double)));
+        double* posvel   = static_cast<double*>(alloca(npoints * 6 * sizeof(double)));
         for(size_t p=0; p<npoints; p++)
             unconvertPosVel(points[p], posvel + p*6);
-        npy_intp dims[]  = { (npy_intp)npoints, 6};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        if(result == NULL) {
-            PyErr_Print();
-            throw std::runtime_error("Call to user-defined selection function failed");
-        }
-        if( PyArray_Check(result) &&
-            PyArray_NDIM((PyArrayObject*)result) == 1 &&
-            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+        PyObject *result = NULL;
+        bool typeerror   = false;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
         {
-            int type = PyArray_TYPE((PyArrayObject*) result);
-            for(size_t p=0; p<npoints; p++) {
-                switch(type) {
-                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
-                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
-                    case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
-                    default: values[p] = NAN;
+            npy_intp dims[]  = { (npy_intp)npoints, 6};
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+            Py_DECREF(args);
+            if(result == NULL) {
+                PyErr_Print();
+            } else if(PyArray_Check(result) &&
+                PyArray_NDIM((PyArrayObject*)result) == 1 &&
+                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            {
+                int type = PyArray_TYPE((PyArrayObject*) result);
+                for(size_t p=0; p<npoints; p++) {
+                    switch(type) {
+                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
+                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
+                        case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
+                        default: values[p] = NAN; typeerror = true;
+                    }
                 }
             }
+            else if(npoints==1 && PyNumber_Check(result)) {
+                // in case of a single input point, the user function might return a single number
+                values[0] = PyFloat_AsDouble(result);
+            }
+            else {
+                typeerror = true;
+            }
+            Py_XDECREF(result);
         }
-        else if(npoints==1 && PyNumber_Check(result)) {
-            // in case of a single input point, the user function might return a single number
-            values[0] = PyFloat_AsDouble(result);
-        }
-        else
-            std::fill(values, values+npoints, NAN);  // sign of error
-        Py_DECREF(result);
+        if(result == NULL)
+            throw std::runtime_error("Call to user-defined selection function failed");
+        else if(typeerror)
+            throw std::runtime_error("Invalid data type returned from user-defined selection function");
+        // otherwise return the result in values[]
     }
 };
 
@@ -3216,7 +3259,8 @@ bool GalaxyModel_isCorrect(GalaxyModelObject* self)
     }
     if( !self->pot_obj|| !self->pot_obj->pot ||
         !self->af_obj || !self->af_obj->af ||
-        !self->df_obj || !self->df_obj->df)
+        !self->df_obj || !self->df_obj->df ||
+        !self->sf_obj)
     {
         PyErr_SetString(PyExc_RuntimeError, "GalaxyModel is not properly initialized");
         return false;
@@ -3285,6 +3329,7 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
     }
 
     // sf_obj, if provided, must be a callable object OR an instance of a SelectionFunction class
+    Py_XDECREF(self->sf_obj);
     if(sf_obj) {
         if( !PyObject_TypeCheck(sf_obj, SelectionFunctionTypePtr) &&
             !checkCallable(sf_obj, /*input dim*/ 6))
@@ -4721,7 +4766,7 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
 #ifdef _OPENMP
 #pragma omp critical(PythonAPI)
 #endif
-            {
+            {   // this is a simple memory access operation, so probably shouldn't be guarded by lock..
                 for(npy_intp i=0; i<size; i++)
                     pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
             }
@@ -6140,37 +6185,45 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 
 /// wrapper for user-provided Python functions into the C++ compatible form
 class FncWrapper: public math::IFunctionNdim {
-    OmpDisabler ompDisabler;  // prevent parallel execution by setting OpenMP # of threads to 1
+    NumpyWarningsDisabler lock;
     const unsigned int nvars;
     PyObject* fnc;
 public:
     FncWrapper(unsigned int _nvars, PyObject* _fnc): nvars(_nvars), fnc(_fnc) {}
 
     /// vectorized evaluation of Python function for several points at once
-    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const {
-        npy_intp dims[]  = { (npy_intp)npoints, nvars};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
-        if(result == NULL) {
-            PyErr_Print();
-            throw std::runtime_error("Exception occurred inside integrand");
-        }
-        if( PyArray_Check(result) &&
-            PyArray_TYPE((PyArrayObject*)result) == NPY_DOUBLE &&
-            PyArray_NDIM((PyArrayObject*)result) == 1 &&
-            PyArray_DIM((PyArrayObject*)result, 0) == (npy_intp)npoints)
+    /// (making sure it invokes Python callback from a single thread at a time)
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
+    {
+        PyObject* result = NULL;
+        bool typeerror   = false;
+#pragma omp critical(PythonAPI)
         {
-            for(size_t i=0; i<npoints; i++)
-                values[i] = pyArrayElem<double>(result, i);
-        } else if(PyNumber_Check(result) && npoints==1)
-            // in case of a single input point, may return a single number
-            values[0] = PyFloat_AsDouble(result);
-        else {
-            Py_DECREF(result);
-            throw std::runtime_error("Invalid data type returned from user-defined function");
+            npy_intp dims[]  = { (npy_intp)npoints, nvars};
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+            Py_DECREF(args);
+            if(result == NULL) {
+                PyErr_Print();
+            }
+            if( PyArray_Check(result) &&
+                PyArray_TYPE((PyArrayObject*)result) == NPY_DOUBLE &&
+                PyArray_NDIM((PyArrayObject*)result) == 1 &&
+                PyArray_DIM((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            {
+                for(size_t i=0; i<npoints; i++)
+                    values[i] = pyArrayElem<double>(result, i);
+            } else if(PyNumber_Check(result) && npoints==1)
+                // in case of a single input point, may return a single number
+                values[0] = PyFloat_AsDouble(result);
+            else
+                typeerror = true;
+            Py_XDECREF(result);
         }
-        Py_DECREF(result);
+        if(result == NULL)
+            throw std::runtime_error("Exception occurred inside integrand");
+        else if(typeerror)
+            throw std::runtime_error("Invalid data type returned from user-defined function");
     }
     /// same for one point (not used by integration/sampling routines, but required by the interface)
     virtual void eval(const double vars[], double values[]) const {
@@ -6270,9 +6323,15 @@ PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     int maxNumEval=100000, numEval=-1;
     PyObject *callback=NULL, *lower_obj=NULL, *upper_obj=NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOdi", const_cast<char**>(keywords),
-        &callback, &lower_obj, &upper_obj, &eps, &maxNumEval) ||
-        !PyCallable_Check(callback) || eps<=0 || maxNumEval<=0)
+        &callback, &lower_obj, &upper_obj, &eps, &maxNumEval))
+        return NULL;
+    if(!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "fnc must be callable");
+        return NULL;
+    }
+    if(eps<=0 || maxNumEval<=0)
     {
+        PyErr_SetString(PyExc_ValueError, "toler and maxeval must be positive");
         return NULL;
     }
     std::vector<double> xlow, xupp;
@@ -6323,7 +6382,14 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "Oi|OO", const_cast<char**>(keywords),
         &callback, &numSamples, &lower_obj, &upper_obj) ||
         !PyCallable_Check(callback) || numSamples<=0)
+        return NULL;
+    if(!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "fnc must be callable");
+        return NULL;
+    }
+    if(numSamples<=0)
     {
+        PyErr_SetString(PyExc_ValueError, "nsamples must be positive");
         return NULL;
     }
     std::vector<double> xlow, xupp;
@@ -6421,75 +6487,77 @@ PyInit_agama(void)
         module_methods,        /* m_methods */
     };
 
-    PyObject* mod = PyModule_Create(&moduledef);
-    if(!mod) return NULL;
-    PyModule_AddStringConstant(mod, "__version__", AGAMA_VERSION);
+    PyEval_InitThreads();
+    thismodule = PyModule_Create(&moduledef);
+    if(!thismodule) return NULL;
+    PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);
+    PyModule_AddObject(thismodule, "G", PyFloat_FromDouble(1.0));
     conv.reset(new units::ExternalUnits());
 
     DensityType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DensityType) < 0) return NULL;
     Py_INCREFx(&DensityType);
-    PyModule_AddObject(mod, "Density", (PyObject*)&DensityType);
+    PyModule_AddObject(thismodule, "Density", (PyObject*)&DensityType);
     DensityTypePtr = &DensityType;
 
     PotentialType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&PotentialType) < 0) return NULL;
     Py_INCREFx(&PotentialType);
-    PyModule_AddObject(mod, "Potential", (PyObject*)&PotentialType);
+    PyModule_AddObject(thismodule, "Potential", (PyObject*)&PotentialType);
     PotentialTypePtr = &PotentialType;
 
     ActionFinderType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ActionFinderType) < 0) return NULL;
     Py_INCREFx(&ActionFinderType);
-    PyModule_AddObject(mod, "ActionFinder", (PyObject*)&ActionFinderType);
+    PyModule_AddObject(thismodule, "ActionFinder", (PyObject*)&ActionFinderType);
     ActionFinderTypePtr = &ActionFinderType;
 
     ActionMapperType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ActionMapperType) < 0) return NULL;
     Py_INCREFx(&ActionMapperType);
-    PyModule_AddObject(mod, "ActionMapper", (PyObject*)&ActionMapperType);
+    PyModule_AddObject(thismodule, "ActionMapper", (PyObject*)&ActionMapperType);
     ActionMapperTypePtr = &ActionMapperType;
 
     DistributionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DistributionFunctionType) < 0) return NULL;
     Py_INCREFx(&DistributionFunctionType);
-    PyModule_AddObject(mod, "DistributionFunction", (PyObject*)&DistributionFunctionType);
+    PyModule_AddObject(thismodule, "DistributionFunction", (PyObject*)&DistributionFunctionType);
     DistributionFunctionTypePtr = &DistributionFunctionType;
 
     SelectionFunctionType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&SelectionFunctionType) < 0) return NULL;
     Py_INCREFx(&SelectionFunctionType);
-    PyModule_AddObject(mod, "SelectionFunction", (PyObject*)&SelectionFunctionType);
+    PyModule_AddObject(thismodule, "SelectionFunction", (PyObject*)&SelectionFunctionType);
     SelectionFunctionTypePtr = &SelectionFunctionType;
 
     GalaxyModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&GalaxyModelType) < 0) return NULL;
     Py_INCREFx(&GalaxyModelType);
-    PyModule_AddObject(mod, "GalaxyModel", (PyObject*)&GalaxyModelType);
+    PyModule_AddObject(thismodule, "GalaxyModel", (PyObject*)&GalaxyModelType);
 
     ComponentType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&ComponentType) < 0) return NULL;
     Py_INCREFx(&ComponentType);
-    PyModule_AddObject(mod, "Component", (PyObject*)&ComponentType);
+    PyModule_AddObject(thismodule, "Component", (PyObject*)&ComponentType);
 
     SelfConsistentModelType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&SelfConsistentModelType) < 0) return NULL;
     Py_INCREFx(&SelfConsistentModelType);
-    PyModule_AddObject(mod, "SelfConsistentModel", (PyObject*)&SelfConsistentModelType);
+    PyModule_AddObject(thismodule, "SelfConsistentModel", (PyObject*)&SelfConsistentModelType);
 
     TargetType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&TargetType) < 0) return NULL;
     Py_INCREFx(&TargetType);
-    PyModule_AddObject(mod, "Target", (PyObject*)&TargetType);
+    PyModule_AddObject(thismodule, "Target", (PyObject*)&TargetType);
     TargetTypePtr = &TargetType;
 
     CubicSplineType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&CubicSplineType) < 0) return NULL;
     Py_INCREFx(&CubicSplineType);
-    PyModule_AddObject(mod, "CubicSpline", (PyObject*)&CubicSplineType);
+    PyModule_AddObject(thismodule, "CubicSpline", (PyObject*)&CubicSplineType);
 
-    import_array1(mod);  // needed for NumPy to work properly
-    return mod;
+    import_array1(thismodule);  // needed for NumPy to work properly
+    return thismodule;
 }
 // ifdef HAVE_PYTHON
 #endif

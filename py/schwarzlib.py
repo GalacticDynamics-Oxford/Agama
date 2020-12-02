@@ -82,9 +82,7 @@ def makeDensityLogHalo(rcore, vcirc, rcutoff=None):
     but a cutoff at large radii (by default, rcutoff=100*rcore).
     '''
     if rcutoff is None: rcutoff = 100*rcore
-    # find out the numerical value of gravitational constant in the current unit system
-    G = -_agama.Potential(type='Plummer').potential(0,0,0)
-    rho0 = (vcirc/rcore)**2 / (4*_numpy.pi*G)
+    rho0 = (vcirc/rcore)**2 / (4*_numpy.pi*_agama.G)
     return _agama.Density(
         dict(type='spheroid', alpha=2, beta=2, gamma=-2, densitynorm=  rho0, scaleradius=rcore, outercutoffradius=rcutoff),
         dict(type='spheroid', alpha=2, beta=4, gamma= 0, densitynorm=3*rho0, scaleradius=rcore, outercutoffradius=rcutoff) )
@@ -98,9 +96,7 @@ def makeDensityNFWHalo(rscale, vcirc, rcutoff=None):
     by a Spheroid model with the same density profile in the inner part, but a cutoff at large radii.
     '''
     if rcutoff is None: rcutoff = 100*rscale
-    # find out the numerical value of gravitational constant in the current unit system
-    G = -_agama.Potential(type='Plummer').potential(0,0,0)
-    rho0 = (vcirc/rscale/0.465)**2 / (4*_numpy.pi*G)
+    rho0 = (vcirc/rscale/0.465)**2 / (4*_numpy.pi*_agama.G)
     return _agama.Density(type='spheroid', alpha=1, beta=3, gamma=1, densitynorm=rho0, scaleradius=rscale, outercutoffradius=rcutoff)
 
 

@@ -116,8 +116,8 @@ public:
     virtual unsigned int numValues() const { return 1; }
 };
 
-double BaseDistributionFunction::totalMass(const double reqRelError, const int maxNumEval,
-    double* error, int* numEval) const
+double BaseDistributionFunction::totalMass(
+    const double reqRelError, const int maxNumEval, double* error, int* numEval) const
 {
     double xlower[3] = {0, 0, 0};  // boundaries of integration region in scaled coordinates
     double xupper[3] = {1, 1, 1};
