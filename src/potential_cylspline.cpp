@@ -1063,9 +1063,11 @@ CylSpline::CylSpline(
             if(m!=0)  // no z-rotation symmetry because m!=0 coefs are non-zero
                 mysym &= ~coord::ST_ZROTATION;
             if(m<0)
-                mysym &= ~(coord::ST_YREFLECTION | coord::ST_REFLECTION);
+                mysym &= ~coord::ST_YREFLECTION;
             if((m<0) ^ (m%2 != 0))
-                mysym &= ~(coord::ST_XREFLECTION | coord::ST_REFLECTION);
+                mysym &= ~coord::ST_XREFLECTION;
+            if(m%2 != 0)
+                mysym &= ~coord::ST_REFLECTION;
         }
     }
     sym = static_cast<coord::SymmetryType>(mysym);

@@ -191,7 +191,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
 // return the type of symmetry by its name, or ST_DEFAULT if unavailable
 coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
 {
-    if(symmetryName.empty()) 
+    if(symmetryName.empty())
         return coord::ST_DEFAULT;
     // compare only the first letter, case-insensitive
     switch(tolower(symmetryName[0])) {
@@ -203,11 +203,11 @@ coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
         case 'n': return coord::ST_NONE;
     }
     // otherwise it could be an integer constant representing the numerical value of sym.type
-    int sym = utils::toInt(symmetryName);
-    if(sym==0 && symmetryName!="0") {  // it wasn't a valid number either
-        utils::msg(utils::VL_WARNING, "getSymmetryTypeByName", "Invalid symmetry type: " + symmetryName);
-        sym = coord::ST_DEFAULT;
-    }
+    int sym = -1;
+    try{ sym = utils::toInt(symmetryName); }
+    catch(std::exception&) { sym = -1; }  // parse error - it wasn't a valid number either
+    if(sym<0 || sym>static_cast<int>(coord::ST_SPHERICAL))
+        throw std::runtime_error("Invalid symmetry type: " + symmetryName);
     return static_cast<coord::SymmetryType>(sym);
 }
 

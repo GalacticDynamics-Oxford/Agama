@@ -46,10 +46,14 @@ void KeyValueMap::add(const char* line)
         if(contains(key))
             throw std::runtime_error("KeyValueMap: duplicate value for parameter "+key);
         items.push_back(std::pair<std::string, std::string>(key, buffer));
-    } else
+    } else {
         // line without '=' or starting with a comment is not a key-value pair:
-        // store with empty key (non-retrievable via get methods), but will be kept when writing
-        items.push_back(std::pair<std::string, std::string>("", buffer));
+        // store with empty key (non-retrievable via get methods), but will be kept when writing.
+        // remove trailing line endings, but keep spaces/tabs
+        indx = buffer.find_first_of("\n\r");
+        items.push_back(std::pair<std::string, std::string>("",
+            indx==std::string::npos ? buffer : buffer.substr(0, indx)));
+    }
 }
 
 bool KeyValueMap::contains(const std::string& key) const

@@ -119,7 +119,7 @@ double OrbitIntegratorRot::getAccuracyFactor(const double time, const double x[]
 {
     double Epot = potential.value(coord::PosCar(x[0], x[1], x[2]), time);
     double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
-    return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    return fmin(1, fmax(fabs(Epot + Ekin), 1e-4*Ekin) / fmax(fabs(Epot), Ekin));
 }
 
 template<>

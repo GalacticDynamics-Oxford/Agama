@@ -519,11 +519,12 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         (conv->massUnit * unit.to_Msun * units::Msun) /
         pow_2(conv->velocityUnit * unit.to_kms * units::kms) /
         (conv->lengthUnit * unit.to_Kpc * units::Kpc);
-    // store the numerical value of G as a module attribute (constant)
-    PyObject* PyG = PyFloat_FromDouble(G);
-    if(!PyDict_SetItemString(PyModule_GetDict(thismodule), "G", PyG))
-        PyErr_Print();
-    Py_DECREF(PyG);
+    // store the numerical value of G as a module attribute (update the existing constant)
+    PyObject* PyG = PyDict_GetItemString(PyModule_GetDict(thismodule), "G");
+    if(PyG && PyFloat_CheckExact(PyG))
+        PyFloat_AS_DOUBLE(PyG) = G;
+    else
+        printf("Warning, agama.G has wrong type and its value cannot be updated\n");
     utils::msg(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
         "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
@@ -549,10 +550,11 @@ PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
 {
     conv.reset(new units::ExternalUnits());
     // reset the module attribute G to unity
-    PyObject* PyG = PyFloat_FromDouble(1.0);
-    if(!PyDict_SetItemString(PyModule_GetDict(thismodule), "G", PyG))
-        PyErr_Print();
-    Py_DECREF(PyG);
+    PyObject* PyG = PyDict_GetItemString(PyModule_GetDict(thismodule), "G");
+    if(PyG && PyFloat_CheckExact(PyG))
+        PyFloat_AS_DOUBLE(PyG) = 1.0;
+    else
+        printf("Warning, agama.G has wrong type and its value cannot be updated\n");
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -1133,7 +1135,7 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
 
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
 // (forward declaration, the function will be defined later)
-potential::PtrPotential getPotential(PyObject* pot_obj);
+potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
 
 // create a Python Potential object and initialize it with an existing instance of C++ potential class
 // (forward declaration, the function will come later)
@@ -1627,24 +1629,30 @@ static const char* docstringPotential =
     "or an array of particles.\n"
     DOCSTRING_DENSITY_PARAMS
     "Parameters for potential expansions:\n"
-    "  density=...   the density model for a potential expansion.\n  It may be a string "
-    "with the name of density profile (most of the elementary potentials listed above "
-    "can be used as density models, except those with infinite mass; "
+    "  density=...   the density model for a potential expansion.\n"
+    "  It may be a string with the name of density profile (most of the elementary potentials "
+    "listed above can be used as density models, except those with infinite mass; "
     "in addition, there are other density models without a corresponding potential).\n"
     "  Alternatively, it may be an object providing an appropriate interface -- "
     "either an instance of Density or Potential class, or a user-defined function "
-    "'my_density(xyz)' returning the value of density computed simultaneously at N points, "
+    "`my_density(xyz)` returning the value of density computed simultaneously at N points, "
     "where xyz is a Nx3 array of points in cartesian coordinates (even if N=1, it's a 2d array).\n"
+    "  potential=...   instead of density, one may provide a potential source for the expansion. "
+    "This argument shoud be either an instance of Potential class, or a user-defined function "
+    "`my_potential(xyz)` returning the value of potential at N point, where xyz is a Nx3 array of "
+    "points in cartesian coordinates. In the latter case, one needs to specify the grid parameters "
+    "explicitly.\n"
     "  file='...'   the name of another INI file with potential parameters and/or "
     "coefficients of a Multipole/CylSpline potential expansion, or an N-body snapshot file "
     "that will be used to compute the coefficients of such expansion.\n"
-    "  particles=(coords, mass)   array of point masses to be used in construction "
-    "of a potential expansion (an alternative to density='...' or file='...' options): "
+    "  particles=(coords, mass)   array of point masses to be used in construction of a "
+    "potential expansion (an alternative to density=..., potential=... or file='...' options): "
     "should be a tuple with two arrays - coordinates and mass, where the first one is "
     "a two-dimensional Nx3 array and the second one is a one-dimensional array of length N.\n"
     "  symmetry='...'   assumed symmetry for potential expansion constructed from "
-    "an N-body snapshot (possible options, in order of decreasing symmetry: "
-    "'Spherical', 'Axisymmetric', 'Triaxial', 'Bisymmetric', 'Reflection', 'None', "
+    "an N-body snapshot or from a user-defined density or potential function. "
+    "Possible options, in order of decreasing symmetry: "
+    "'Spherical', 'Axisymmetric', 'Triaxial' (default), 'Bisymmetric', 'Reflection', 'None', "
     "or a numerical code; only the case-insensitive first letter matters).\n"
     "  gridSizeR=...   number of radial grid points in Multipole and CylSpline potentials.\n"
     "  gridSizeZ=...   number of grid points in z-direction for CylSpline potential.\n"
@@ -1697,6 +1705,96 @@ typedef struct {
 } PotentialObject;
 /// \endcond
 
+/// Helper class for providing a _limited_ BasePotential interface
+/// to a Python function that returns the value of a potential at one or several point
+/// (note that this is not a fully functional potential, since the 2nd derivatives are not provided!
+/// however, 1st derivatives are estimated by finite differences).
+class PotentialWrapper: public potential::BasePotentialCar{
+    NumpyWarningsDisabler lock;
+    PyObject* fnc;
+    coord::SymmetryType sym;
+    std::string fncname;
+public:
+    PotentialWrapper(PyObject* _fnc, coord::SymmetryType _sym): fnc(_fnc), sym(_sym)
+    {
+        Py_INCREF(fnc);
+        fncname = toString(fnc);
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Created a C++ potential wrapper for Python function "+fncname);
+    }
+    ~PotentialWrapper()
+    {
+        utils::msg(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ potential wrapper for Python function "+fncname);
+        Py_DECREF(fnc);
+    }
+    virtual coord::SymmetryType symmetry() const { return sym; }
+    virtual const char* name() const { return fncname.c_str(); };
+    virtual double densityCyl(const coord::PosCyl &/*pos*/, double /*time*/) const { return NAN; }
+    virtual double densitySph(const coord::PosSph &/*pos*/, double /*time*/) const { return NAN; }
+    virtual double densityCar(const coord::PosCar &/*pos*/, double /*time*/) const { return NAN; }
+    virtual double totalMass() const { return NAN; }
+    virtual void evalCar(const coord::PosCar &pos,
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
+    {
+        double xyz[3*7], value[7];
+        unconvertPos(pos, xyz);
+        // if 1st derivatives are needed, they will be estimated by finite differencing with this stepsize
+        double eps = fmax(sqrt(pow_2(xyz[0])+pow_2(xyz[1])+pow_2(xyz[2])) * ROOT3_DBL_EPSILON,
+            16*DBL_EPSILON);
+        for(int d=0; d<6; d++) {
+            xyz[d*3+3] = xyz[0];
+            xyz[d*3+4] = xyz[1];
+            xyz[d*3+5] = xyz[2];
+            xyz[d*3+3+d/2] += d%2 ? -eps : eps;
+        }
+        npy_intp dims[]  = {deriv ? 7 : 1, 3};
+        PyObject *result = NULL;
+        bool typeerror   = false;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+        {
+            PyObject* args = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+            Py_DECREF(args);
+            if(result == NULL) {
+                PyErr_Print();
+            } else if(PyArray_Check(result) && PyArray_NDIM((PyArrayObject*)result)==1 &&
+                PyArray_DIM((PyArrayObject*)result, 0)==dims[0])
+            {
+                for(int i=0; i<dims[0]; i++) {
+                    switch(PyArray_TYPE((PyArrayObject*) result)) {
+                        case NPY_DOUBLE: value[i] = pyArrayElem<double>(result, i); break;
+                        case NPY_FLOAT:  value[i] = pyArrayElem<float >(result, i); break;
+                        default: typeerror = true;
+                    }
+                }
+            }
+            else if(PyNumber_Check(result) && dims[0]==1)
+                value[0] = PyFloat_AsDouble(result);
+            else
+                typeerror = true;
+            Py_XDECREF(result);
+        }
+        if(result == NULL)
+            throw std::runtime_error("Call to user-defined potential function failed");
+        else if(typeerror)
+            throw std::runtime_error("Invalid data type returned from user-defined potential function");
+        if(potential)
+            *potential = value[0] * pow_2(conv->velocityUnit);
+        if(deriv) {
+            deriv->dx = (value[1]-value[2]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
+            deriv->dy = (value[3]-value[4]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
+            deriv->dz = (value[5]-value[6]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
+        }
+        // 2nd derivatives are _not_ computed, so this is not a fully functional potential class
+        if(deriv2) {
+            deriv2->dx2 = deriv2->dy2 = deriv2->dz2 = deriv2->dxdy = deriv2->dxdz = deriv2->dydz = NAN;
+        }
+    }
+};
+
 /// destructor of the Potential class
 void Potential_dealloc(PotentialObject* self)
 {
@@ -1728,12 +1826,23 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
 }
 
 /// extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
-potential::PtrPotential getPotential(PyObject* pot_obj)
+potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
 {
-    if(pot_obj == NULL || !PyObject_TypeCheck(pot_obj, PotentialTypePtr) ||
-        !((PotentialObject*)pot_obj)->pot)
-        return potential::PtrPotential();    // empty pointer
-    return ((PotentialObject*)pot_obj)->pot; // pointer to an existing instance of C++ Potential class
+    if(pot_obj == NULL)
+        return potential::PtrPotential();
+    
+    // check if this is a Python wrapper class for a C++ Potential object (PotentialType)
+    if(PyObject_TypeCheck(pot_obj, PotentialTypePtr) && ((PotentialObject*)pot_obj)->pot)
+        return ((PotentialObject*)pot_obj)->pot;
+    
+    // otherwise this could be an arbitrary Python function
+    if(checkCallable(pot_obj, /*dimension of input*/ 3)) {
+        // then create a C++ wrapper for this Python function
+        return potential::PtrPotential(new PotentialWrapper(pot_obj, sym));
+    }
+    
+    // none of the above succeeded -- return an empty pointer
+    return potential::PtrPotential();
 }
 
 /// attempt to construct an elementary potential from the parameters provided in dictionary
@@ -1758,9 +1867,10 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
     // check if the list of arguments contains a density object
     // or a string specifying the name of density model
     PyObject* dens_obj = getItemFromPyDict(args, "density");
+    PyObject* pot_obj  = getItemFromPyDict(args, "potential");
+    if(int(params.contains("file")) + int(dens_obj!=NULL) + int(pot_obj!=NULL) > 1)
+        throw std::invalid_argument("Arguments 'file', 'density', 'potential' are mutually exclusive");
     if(dens_obj) {
-        if(params.contains("file"))
-            throw std::invalid_argument("Cannot provide both 'file' and 'density' arguments");
         potential::PtrDensity dens = getDensity(dens_obj,
             potential::getSymmetryTypeByName(toString(getItemFromPyDict(args, "symmetry"))));
         if(dens) {
@@ -1774,6 +1884,22 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
                 "'density' argument should be the name of density profile "
                 "or an object that provides an appropriate interface (e.g., an instance of "
                 "Density or Potential class, or a user-defined function of 3 coordinates)");
+        }
+    }
+    // check if the list of parameters contains a potential object
+    if(pot_obj) {
+        potential::PtrPotential pot = getPotential(pot_obj,
+            potential::getSymmetryTypeByName(toString(getItemFromPyDict(args, "symmetry"))));
+        if(pot) {
+            /// attempt to construct a potential expansion from a user-provided density model
+            if(params.getString("type").empty())
+                throw std::invalid_argument("'type' argument must be provided");
+            params.unset("potential");
+            return potential::createPotential(params, *pot, *conv);
+        } else {
+            throw std::invalid_argument(
+                "'potential' argument should be an object that provides an appropriate interface "
+                "(e.g., an instance of Potential class, or a user-defined function of 3 coordinates)");
         }
     }
     return potential::createPotential(params, *conv);

@@ -17,6 +17,7 @@ except:  # otherwise load the shared library from the parent folder
 
 # set some non-trivial dimensional units to test the correctness of unit conversion within the library
 agama.setUnits(length=1, mass=1e5, velocity=1)
+# note that the value of the gravitational constant in these units is stored as agama.G
 
 # user-defined density profile should be a function with a single argument --
 # a 2d array Mx3, evaluating the density simultaneously at M points,
@@ -42,9 +43,24 @@ pot_orig = agama.Potential(type="Plummer", mass=mass, scaleradius=radius)
 MyPlummer = makeUserDensity(mass, radius)
 pot_appr  = agama.Potential(type="Multipole", density=MyPlummer)
 
+# we can also provide a user-defined function that computes the potential
+# at a given array of points as the source to the Multipole or CylSpline potential.
+# for simplicity, use the fixed parameters here instead of a factory routine.
+def MyPlummerPot(x):
+    return -agama.G * mass / (numpy.sum(x**2, axis=1) + radius**2)**0.5
+
+# in this case, the Multipole potential will be constructed from the values
+# provided by the user function at a given grid of points, whose parameters
+# need to be specified explicitly (for built-in models or N-body snapshots,
+# the grids are constructed automatically by analyzing the density profile,
+# but our user-defined function only provides the potential, not the density).
+pot_app2 = agama.Potential(type="Multipole", potential=MyPlummerPot,
+    symmetry="spherical", rmin=1e-3, rmax=1e3)
+
 pot0_orig = pot_orig.potential(0,0,0)
 pot0_appr = pot_appr.potential(0,0,0)
-print("Phi_appr(0)=%.8g  (true value=%.8g)" % (pot0_appr, pot0_orig))
+pot0_app2 = pot_app2.potential(0,0,0)
+print("Phi_appr(0)=%.8g, Phi_app2(0)=%.8g  (true value=%.8g)" % (pot0_appr, pot0_app2, pot0_orig))
 print("rho_appr(1)=%.8g  (true value=%.8g,  user value=%.8g)" % \
     ( pot_appr.density(1,0,0), pot_orig.density(1,0,0), MyPlummer(numpy.array([[1,0,0]])) ))
 
@@ -129,9 +145,13 @@ xv_user, m_user = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=MySF   ).
 meanxv_orig = numpy.mean(xv_orig, axis=0)
 meanxv_user = numpy.mean(xv_user, axis=0)
 
-if (abs(pot0_orig-pot0_appr)<1e-6  and  abs(mass_orig-mass_user)  <1e-6  and
-    abs(dens_orig-dens_user)<1e-6  and  abs(dens_user-dens_manual)<1e-6  and
-    all(abs(meanxv_orig-meanxv_user)<0.01)  and  abs(m_orig[0]/m_user[0]-1)<0.01  and
+if (abs(pot0_orig-pot0_appr)<1e-6  and
+    abs(pot0_orig-pot0_app2)<1e-6  and
+    abs(mass_orig-mass_user)<1e-6  and
+    abs(dens_orig-dens_user)<1e-6  and
+    abs(dens_user-dens_manual)<1e-6  and
+    all(abs(meanxv_orig-meanxv_user)<0.01)
+    and  abs(m_orig[0]/m_user[0]-1)<0.01  and
     # test the equivalence of the two selection functions by directly comparing their output at points
     all(MySF(xv_user).astype(float) == sf_orig(xv_user))):
     print("\033[1;32mALL TESTS PASSED\033[0m")

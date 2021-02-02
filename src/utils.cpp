@@ -188,8 +188,11 @@ bool CtrlBreakHandler::triggered() { return ctrlBreakTriggered; }
 /* ----------- string/number conversion and parsing routines ----------------- */
 
 int toInt(const char* val) {
-    double result = toDouble(val);  // to allow input values such as "1e5"
-    if(!isFinite(result))
+    if(*val == '\0')
+        return 0;
+    char* end;
+    double result = strtod(val, &end);  // to allow input values such as "1e5"
+    if(end == val || !isFinite(result))  // could not parse a single character
         throw std::invalid_argument("Parse error: \"" + std::string(val) +
             "\" does not contain a valid integer number");
     if(result >= (double)std::numeric_limits<int>::max())
