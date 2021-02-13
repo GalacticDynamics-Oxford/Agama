@@ -138,17 +138,23 @@ VerbosityLevel verbosityLevel = initVerbosityLevel();
 std::string stacktrace()
 {
 #ifdef HAVE_STACKTRACE
-    const int MAXFRAMES = 256;
-    void* tmp[MAXFRAMES];     // temporary storage for stack frames
-    int numframes = backtrace(tmp, MAXFRAMES);
-    // convert this information into strings with function signatures and offsets
-    char** lines = backtrace_symbols(tmp, numframes);  // this array should be freed later
-    // represent these strings in a more user-friendly way (demangle identifier names)
-    std::string result = "Stack trace ("+toString(numframes)+
-        " functions, starting from the most recent one):\n";
-    for(int i=1; i<numframes; i++)
-        result += demangleName(lines[i]) + '\n';
-    free(lines);
+    std::string result;
+#ifdef _OPENMP
+#pragma omp critical(StackTrace)
+#endif
+    {
+        const int MAXFRAMES = 256;
+        void* tmp[MAXFRAMES];     // temporary storage for stack frames
+        int numframes = backtrace(tmp, MAXFRAMES);
+        // convert this information into strings with function signatures and offsets
+        char** lines = backtrace_symbols(tmp, numframes);  // this array should be freed later
+        // represent these strings in a more user-friendly way (demangle identifier names)
+        result = "Stack trace ("+toString(numframes)+
+            " functions, starting from the most recent one):\n";
+        for(int i=1; i<numframes; i++)
+            result += demangleName(lines[i]) + '\n';
+        free(lines);
+    }
     return result;
 #else
     return "Stack trace not available\n";

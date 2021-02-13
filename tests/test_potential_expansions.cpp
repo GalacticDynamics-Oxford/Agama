@@ -90,8 +90,8 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
             double v1, v2, d1, d2;
             p1.eval(coord::toPosCar(point), &v1, &g1);
             p2.eval(coord::toPosCar(point), &v2, &g2);
-            d1 = fmax(0, p1.density(point));
-            d2 = fmax(0, p2.density(point));
+            d1 = fmax(0, fabs(p1.density(point)));
+            d2 = fmax(0, fabs(p2.density(point)));
             weightedDifP += pow_2((v1-v2) / v2) * pow_2(point.r) * d2;
             weightedDifF += (pow_2(g1.dx-g2.dx)+pow_2(g1.dy-g2.dy)+pow_2(g1.dz-g2.dz)) /
                 (pow_2(g2.dx)+pow_2(g2.dy)+pow_2(g2.dz)) * pow_2(point.r) * d2;
@@ -137,8 +137,8 @@ bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDen
             double r     = pow(10., logR+dlogR*n/nptbin);
             double costh = math::random()*2-1;
             coord::PosCyl point( r*sqrt(1-pow_2(costh)), r*costh, math::random()*2*M_PI);
-            double d1 = fmax(0, p1.density(point));
-            double d2 = fmax(0, p2.density(point));
+            double d1 = fmax(0, fabs(p1.density(point)));
+            double d2 = fmax(0, fabs(p2.density(point)));
             weightedDif += d1==0 && d2==0 ? 0 :
                 pow_2((d1-d2) / fmax(d1, d2)) * pow_2(r) * d2;
             weight += pow_2(r) * d2;
@@ -338,6 +338,7 @@ int main() {
     const potential::NFW test1_NFWSph(1., 1.);                           // spherical cuspy Navarro-Frenk-White
     const potential::Dehnen test1_Dehnen0Sph (1., 10., 0.0);             // spherical cored Dehnen
     const potential::Dehnen test2_Dehnen0Tri (1., 1.0, 0.0, 0.8, 0.5);   // triaxial cored Dehnen
+    const potential::Dehnen test2_Dehnen0Trin(-1, 1.0, 0.0, 0.8, 0.5);   // same but with negative mass
     const potential::Dehnen test3_Dehnen15Tri(3., 5.0, 1.5, 0.8, 0.5);   // triaxial cuspy Dehnen
     const potential::MiyamotoNagai test4_MNAxi(1., 3.0, 0.5);            // axisymmetric Miyamoto-Nagai
     const potential::DiskParam test5_ExpdiskParam(1., 5., 0.5, 0, 0);    // double-exponential disk params
@@ -359,6 +360,9 @@ int main() {
     ok &= testAverageError(
         *potential::DensitySphericalHarmonic::create(test2_Dehnen0Tri, 10, 10, 30, 1e-2, 1e3),
         test2_Dehnen0Tri, 0.005);
+    ok &= testAverageError(
+        *potential::DensitySphericalHarmonic::create(test2_Dehnen0Trin, 10, 10, 30, 1e-2, 1e3),
+        test2_Dehnen0Trin, 0.005);
     ok &= testAverageError(
         *potential::DensityAzimuthalHarmonic::create(test2_Dehnen0Tri, 10, 30, 1e-2, 1e3, 30, 1e-2, 1e3),
         test2_Dehnen0Tri, 0.005);
@@ -412,15 +416,21 @@ int main() {
     std::cout << "--- Triaxial Dehnen gamma=0 ---\n";
     PtrPotential test2m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 8, 6, 20);
+    PtrPotential test2mn = potential::Multipole::create( // same but for negative mass (prevent log-scaling)
+        static_cast<const potential::BaseDensity&>(test2_Dehnen0Trin), 8, 6, 20);
     clock_t clock = std::clock();
     PtrPotential test2c = potential::CylSpline::create(  // from density via integration
         static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 6, 20, 0., 0., 20, 0., 0.);
     std::cout << (std::clock()-clock)*1.0/CLOCKS_PER_SEC << " seconds to create CylSpline\n";
     PtrPotential test2d = potential::CylSpline::create(  // directly from potential
         test2_Dehnen0Tri, 6, 20, 0., 0., 20, 0., 0.);
+    PtrPotential test2dn = potential::CylSpline::create( // same but for negative mass (exclude log-scaling)
+        test2_Dehnen0Trin, 6, 20, 0., 0., 20, 0., 0.);
     PtrPotential test2c_clone = writeRead(*test2c);
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
+    ok &= testAverageError(*test2mn,test2_Dehnen0Trin,0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
+    ok &= testAverageError(*test2dn,test2_Dehnen0Trin,0.04);  // no log-scaling => somewhat worse error
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2c, *test2c_clone, 3e-4);
 

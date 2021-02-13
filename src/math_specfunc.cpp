@@ -20,14 +20,14 @@
 namespace math {
 
 // if any GSL function triggers an error, it will be stored in this variable (defined in math_core.cpp)
-extern std::string exceptionText;
+extern bool exceptionFlag;
 
 // call a GSL function and return NAN in case of an error;
 // the error message is recorded in math::exceptionText and may be later examined by the caller
 #define CALL_FUNCTION_OR_NAN(x) \
-    exceptionText.clear(); \
+    exceptionFlag = false; \
     double _result = x; \
-    return exceptionText.empty() ? _result : NAN;
+    return !exceptionFlag ? _result : NAN;
 
 double erfinv(const double x)
 {
@@ -55,9 +55,9 @@ double erfinv(const double x)
 
 double hypergeom2F1(const double a, const double b, const double c, const double x)
 {
-    exceptionText.clear();
+    exceptionFlag = false;
     double _result = NAN;
-    if(-1.<=x && x<1.)
+    if(-1.<=x && x<1)
         _result = gsl_sf_hyperg_2F1(a, b, c, x);
     // extension for 2F1 into the range x<-1 which is not provided by GSL; code from Heiko Bauke
     else if(x<-1.) {
@@ -67,7 +67,7 @@ double hypergeom2F1(const double a, const double b, const double c, const double
         else
             _result = std::pow(1.-x, -b) * gsl_sf_hyperg_2F1(c-a, b, c, x/(x-1.));
     }  // otherwise (x>=1) not a real-valued function
-    return exceptionText.empty() ? _result : NAN;
+    return !exceptionFlag ? _result : NAN;
 }
 
 // ------ approximations for specific instances of hypergeometric function ------ //

@@ -38,6 +38,9 @@ static const double EPS2_SOFTENING = 1e-12;
 /// relative accuracy of potential computation (integration tolerance parameter)
 static const double EPSREL_POTENTIAL_INT = 1e-6;
 
+/// eliminate Fourier terms whose relative amplitude is less than this number
+static const double EPS_COEF = 1e-10;
+
 // ------- Fourier expansion of density or potential ------- //
 // The routine 'computeFourierCoefs' can work with both density and potential classes,
 // computes the azimuthal Fourier expansion for either density (in the first case),
@@ -89,6 +92,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     }
     std::string errorMsg;
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    bool stop = false;
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -100,7 +104,8 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
 #pragma omp for schedule(dynamic)
 #endif
         for(int n=0; n<numPoints; n++) {
-            if(cbrk.triggered()) continue;
+            if(stop) continue;
+            if(cbrk.triggered()) stop = true;
             int iR = n % sizeR;  // index in radial grid
             int iz = n / sizeR;  // index in vertical direction
             try{
@@ -109,16 +114,23 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
                         coord::PosCyl(gridR[iR], gridz[iz], trans.phi(i)), &values[i], 2*mmax+1);
                 for(int q=0; q<NQuantities; q++) {
                     trans.transform(&values[q*(2*mmax+1)], &coefs_m[0]);
+                    // eliminate Fourier terms smaller than EPS_COEF * sum(all m terms)
+                    double norm = 0;
+                    for(unsigned int i=0; i<numHarmonicsComputed; i++)
+                        norm += fabs(coefs_m[indices[i] + (useSine ? mmax : 0)]);
                     for(unsigned int i=0; i<numHarmonicsComputed; i++) {
                         int m = indices[i];
+                        double val = coefs_m[useSine ? m+mmax : m];
                         coefs[q]->at(m+mmax)(iR, iz) =
-                            iR==0 && m!=0 ? 0 :   // at R=0, all non-axisymmetric harmonics must vanish
-                            coefs_m[useSine ? m+mmax : m] / (m==0 ? 2*M_PI : M_PI);
+                            // at R=0, all non-axisymmetric harmonics must vanish
+                            (iR==0 && m!=0) || (fabs(val) < norm * EPS_COEF) ? 0 :
+                            val / (m==0 ? 2*M_PI : M_PI);
                     }
                 }
             }
             catch(std::exception& e) {
                 errorMsg = e.what();
+                stop = true;
             }
         }
     }
@@ -289,11 +301,13 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
     int numPoints = sizeR * sizez;
     std::string errorMsg;
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    bool stop = false;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ind=0; ind<numPoints; ind++) {  // combined index variable
-        if(cbrk.triggered()) continue;
+        if(stop) continue;
+        if(cbrk.triggered()) stop = true;
         unsigned int iR = ind % sizeR;
         unsigned int iz = ind / sizeR;
         try{
@@ -317,6 +331,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
         }
         catch(std::exception& e) {
             errorMsg = e.what();
+            stop = true;
         }
     }
     if(cbrk.triggered())
@@ -380,12 +395,14 @@ void computePotentialCoefsFromParticles(
     int numPoints = sizeR * sizez;
     std::string errorMsg;
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    bool stop = false;
     // parallelize the loop over the nodes of 2d grid, not the inner loop over particles
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ind=0; ind<numPoints; ind++) {
-        if(cbrk.triggered()) continue;
+        if(stop) continue;
+        if(cbrk.triggered()) stop = true;
         unsigned int iR = ind % sizeR;
         unsigned int iz = ind / sizeR;
         try{
@@ -410,6 +427,7 @@ void computePotentialCoefsFromParticles(
         }
         catch(std::exception& e) {
             errorMsg = e.what();
+            stop = true;
         }
     }
     if(cbrk.triggered())
@@ -605,9 +623,9 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
                     val(iR, iz) = value;
                 sum += fabs(value);
             }
-        if(sum>0) {
+        int m = mm-mmax;
+        if(sum>0 || m==0) {
             spl[mm].reset(new math::CubicSpline2d(gridR, gridz, val));
-            int m = mm-mmax;
             if(m!=0)  // no z-rotation symmetry because m!=0 coefs are non-zero
                 mysym &= ~coord::ST_ZROTATION;
             if(m<0)
@@ -885,14 +903,14 @@ PtrPotential CylSpline::create(const BaseDensity& src, int mmax,
         gridz = math::mirrorGrid(gridz);
     std::vector< math::Matrix<double> > Phi, dPhidR, dPhidz;
     if(useDerivs)
-        computePotentialCoefsCyl(src, mmax, gridR, gridz, Phi, dPhidR, dPhidz);
+        computePotentialCoefsCyl(src, mmax, gridR, gridz, /*output*/ Phi, dPhidR, dPhidz);
     else
-        computePotentialCoefsCyl(src, mmax, gridR, gridz, Phi);
+        computePotentialCoefsCyl(src, mmax, gridR, gridz, /*output*/ Phi);
     return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
 PtrPotential CylSpline::create(const BasePotential& src, int mmax,
-    unsigned int gridSizeR, double Rmin, double Rmax, 
+    unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax)
 {
     chooseGridRadii(src, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax);
@@ -908,7 +926,7 @@ PtrPotential CylSpline::create(const BasePotential& src, int mmax,
     // to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle;
     int mmaxFourier = isZRotSymmetric(src) ? 0 : std::max<int>(mmax, MMIN_AZIMUTHAL_FOURIER);
-    computeFourierCoefs<BasePotential, 3>(src, mmaxFourier, gridR, gridz, coefs);
+    computePotentialCoefsCyl(src, mmaxFourier, gridR, gridz, /*output*/ Phi, dPhidR, dPhidz);
     if(mmaxFourier > (int)mmax) {
         // remove extra coefs: (mmaxFourier-mmax) from both heads and tails of arrays
         for(int q=0; q<3; q++) {
@@ -935,9 +953,9 @@ PtrPotential CylSpline::create(
         gridz = math::mirrorGrid(gridz);
     std::vector< math::Matrix<double> > Phi, dPhidR, dPhidz;
     if(useDerivs)
-        computePotentialCoefsCyl(points, sym, mmax, gridR, gridz, Phi, dPhidR, dPhidz);
+        computePotentialCoefsCyl(points, sym, mmax, gridR, gridz, /*output*/ Phi, dPhidR, dPhidz);
     else
-        computePotentialCoefsCyl(points, sym, mmax, gridR, gridz, Phi);
+        computePotentialCoefsCyl(points, sym, mmax, gridR, gridz, /*output*/ Phi);
     return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
@@ -949,13 +967,13 @@ CylSpline::CylSpline(
     const std::vector< math::Matrix<double> > &dPhidz)
 {
     unsigned int sizeR = gridR_orig.size(), sizez = gridz_orig.size(), sizez_orig = sizez;
+    int mmax  = (Phi.size()-1)/2;  // index of the m=0 term
     // use quintic splines if derivs are provided, otherwise cubic
     haveDerivs = dPhidR.size() > 0 && dPhidz.size() > 0;
     if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE ||
-        gridR_orig[0]!=0 || Phi.size()%2 == 0 ||
+        gridR_orig[0]!=0 || Phi.size()%2 == 0 || Phi[mmax].size() == 0 ||
         (haveDerivs && (Phi.size() != dPhidR.size() || Phi.size() != dPhidz.size())) )
-        throw std::invalid_argument("CylSpline: incorrect grid size");
-    int mmax  = (Phi.size()-1)/2;
+        throw std::invalid_argument("CylSpline: incorrect grid or coefs array size");
     spl.resize(2*mmax+1);
     int mysym = coord::ST_AXISYMMETRIC;
     bool zsym = true;
@@ -1006,7 +1024,7 @@ CylSpline::CylSpline(
         // and then to negative ones (contained in Phi[0]..Phi[mmax-1]).
         // This is done to ensure that we first consider the m=0 term,
         // whose amplitude is used to normalize the other terms.
-        int mm = (im+mmax) % (2*mmax+1);
+        int mm = (im+mmax) % (2*mmax+1), m = mm-mmax;
         if(Phi[mm].rows() == 0 && Phi[mm].cols() == 0)
             continue;
         if((   Phi[mm].rows() != sizeR ||    Phi[mm].cols() != sizez_orig) || (haveDerivs && 
@@ -1020,23 +1038,31 @@ CylSpline::CylSpline(
                 double z = gridz_orig[iz];
                 nontrivial |= Phi[mm](iR, iz) != 0;
                 unsigned int iz1 = zsym ? sizez_orig-1+iz : iz;  // index in the internal 2d grid
-                // values of potential and its derivatives are represented as scaled 2d functions:
-                // the amplitude is optionally log-scaled for the m=0 term,
-                // and divided by the value of the m=0 term for the other terms,
-                // and the derivatives additionally transformed to the asinh-scaled coordinates.
+                // values of potential and its derivatives are represented as (optionally) scaled
+                // 2d functions, and the derivatives are transformed to the asinh-scaled coordinates
                 double dRdRscaled = sqrt(R*R + Rscale*Rscale), dzdzscaled = sqrt(z*z + Rscale*Rscale);
-                if(mm == mmax) {  // this corresponds to the m=0 term
-                    val(iR,iz1) = logScaling ? log(-Phi[mm](iR,iz)) : Phi[mm](iR,iz);
-                    if(haveDerivs) {
-                        derR(iR,iz1) = dPhidR[mm](iR,iz) * dRdRscaled / (logScaling ? Phi[mm](iR,iz) : 1);
-                        derz(iR,iz1) = dPhidz[mm](iR,iz) * dzdzscaled / (logScaling ? Phi[mm](iR,iz) : 1);
+                if(logScaling) {
+                    // if the potential is everywhere negative, the m=0 term is log-scaled,
+                    // and other terms are normalized by the value of the m=0 term
+                    if(m == 0) {
+                        val(iR,iz1) = log(-Phi[mm](iR,iz));
+                        if(haveDerivs) {
+                            derR(iR,iz1) = dRdRscaled * dPhidR[mm](iR,iz) / Phi[mm](iR,iz);
+                            derz(iR,iz1) = dzdzscaled * dPhidz[mm](iR,iz) / Phi[mm](iR,iz);
+                        }
+                    } else {   // normalize by the m=0 term contained in the [mmax] array element
+                        double v0 = Phi[mmax](iR,iz), vm = Phi[mm](iR,iz) / v0;
+                        val(iR,iz1) = vm;
+                        if(haveDerivs) {
+                            derR(iR,iz1) = dRdRscaled * (dPhidR[mm](iR,iz) - vm * dPhidR[mmax](iR,iz)) / v0;
+                            derz(iR,iz1) = dzdzscaled * (dPhidz[mm](iR,iz) - vm * dPhidz[mmax](iR,iz)) / v0;
+                        }
                     }
-                } else {   // normalize by the m=0 term contained in the [mmax] array element
-                    double v0 = Phi[mmax](iR,iz), vm = Phi[mm](iR,iz) / v0;
-                    val(iR,iz1) = vm;
+                } else {   // no scaling
+                    val(iR,iz1) = Phi[mm](iR,iz);
                     if(haveDerivs) {
-                        derR(iR,iz1) = (dPhidR[mm](iR,iz) - vm * dPhidR[mmax](iR,iz)) * dRdRscaled / v0;
-                        derz(iR,iz1) = (dPhidz[mm](iR,iz) - vm * dPhidz[mmax](iR,iz)) * dzdzscaled / v0;
+                        derR(iR,iz1) = dRdRscaled * dPhidR[mm](iR,iz);
+                        derz(iR,iz1) = dzdzscaled * dPhidz[mm](iR,iz);
                     }
                 }
                 if(zsym) {
@@ -1048,18 +1074,17 @@ CylSpline::CylSpline(
                 }
             }
         }
-        if(mm == mmax) {  // store the values and derivatives of the scaled m=0 term
+        if(m == 0) {  // store the values and derivatives of the scaled m=0 term
             val0  = val;
             derR0 = derR;
             derz0 = derz;
         }
-        if(nontrivial || mm==mmax) {  // only construct splines if they are not identically zero or m=0
-            spl[mm] = haveDerivs ? 
+        if(nontrivial || m==0) {  // only construct splines if they are not identically zero or m=0
+            spl[mm] = haveDerivs ?
                 math::PtrInterpolator2d(new math::QuinticSpline2d(gridR, gridz, val, derR, derz)) :
                 math::PtrInterpolator2d(new math::CubicSpline2d(gridR, gridz, val,
                     /*regularize*/false, /*dPhi/dR at R=0*/0, /*other derivs unspecified*/NAN, NAN, NAN));
             // check if this non-trivial harmonic breaks any symmetry
-            int m = mm-mmax;
             if(m!=0)  // no z-rotation symmetry because m!=0 coefs are non-zero
                 mysym &= ~coord::ST_ZROTATION;
             if(m<0)
@@ -1136,8 +1161,11 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
         return;
     }
 
-    // total scaled potential, gradient and hessian in scaled coordinates
-    double Phi = 1;   // this is the value of the m=0 term scaled by itself, i.e. unity
+    // total scaled potential, gradient and hessian in scaled coordinates:
+    // if using log-scaling, the values of m!=0 coefs are multiplied by the value of the m=0 term,
+    // which we do at the very end, so initialize the sum with the value of the m=0 term
+    // scaled by itself, i.e. unity; otherwise we simply sum up all m terms without any scaling
+    double Phi = logScaling ? 1 : Phi0;
     coord::GradCyl grad;
     coord::HessCyl hess;
     grad.dR  = grad.dz  = grad.dphi  = 0;
@@ -1182,24 +1210,43 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
         }
     }
 
-    // unscale both amplitude of all quantities and their coordinate derivatives
-    if(val)
-        *val = Phi0 * Phi;
-    if(der) {
-        der->dR   = (Phi0 * grad.dR + dPhi0dR * Phi) * dRscaleddR;
-        der->dz   = (Phi0 * grad.dz + dPhi0dz * Phi) * dzscaleddz;
-        der->dphi =  Phi0 * grad.dphi;
-    }
-    if(der2) {
-        der2->dR2 = (Phi0 * hess.dR2 + 2 * dPhi0dR * grad.dR + d2Phi0dR2 * Phi) *
-            pow_2(dRscaleddR)  +  (Phi0 * grad.dR + dPhi0dR * Phi) * d2RscaleddR2;
-        der2->dz2 = (Phi0 * hess.dz2 + 2 * dPhi0dz * grad.dz + d2Phi0dz2 * Phi) *
-            pow_2(dzscaleddz)  +  (Phi0 * grad.dz + dPhi0dz * Phi) * d2zscaleddz2;
-        der2->dRdz = (Phi0 * hess.dRdz + dPhi0dR * grad.dz + + dPhi0dz * grad.dR + d2Phi0dRdz * Phi) *
-            dRscaleddR * dzscaleddz;
-        der2->dRdphi = (Phi0 * hess.dRdphi + dPhi0dR * grad.dphi) * dRscaleddR;
-        der2->dzdphi = (Phi0 * hess.dzdphi + dPhi0dz * grad.dphi) * dzscaleddz;
-        der2->dphi2  =  Phi0 * hess.dphi2;
+    if(logScaling) {
+        // unscale both amplitude of all quantities and their coordinate derivatives
+        if(val)
+            *val = Phi0 * Phi;
+        if(der) {
+            der->dR   = (Phi0 * grad.dR + dPhi0dR * Phi) * dRscaleddR;
+            der->dz   = (Phi0 * grad.dz + dPhi0dz * Phi) * dzscaleddz;
+            der->dphi =  Phi0 * grad.dphi;
+        }
+        if(der2) {
+            der2->dR2 = (Phi0 * hess.dR2 + 2 * dPhi0dR * grad.dR + d2Phi0dR2 * Phi) *
+                pow_2(dRscaleddR)  +  (Phi0 * grad.dR + dPhi0dR * Phi) * d2RscaleddR2;
+            der2->dz2 = (Phi0 * hess.dz2 + 2 * dPhi0dz * grad.dz + d2Phi0dz2 * Phi) *
+                pow_2(dzscaleddz)  +  (Phi0 * grad.dz + dPhi0dz * Phi) * d2zscaleddz2;
+            der2->dRdz = (Phi0 * hess.dRdz + dPhi0dR * grad.dz + dPhi0dz * grad.dR + d2Phi0dRdz * Phi) *
+                dRscaleddR * dzscaleddz;
+            der2->dRdphi = (Phi0 * hess.dRdphi + dPhi0dR * grad.dphi) * dRscaleddR;
+            der2->dzdphi = (Phi0 * hess.dzdphi + dPhi0dz * grad.dphi) * dzscaleddz;
+            der2->dphi2  =  Phi0 * hess.dphi2;
+        }
+    } else {
+        // unscale just the derivatives according to the coordinate transformation
+        if(val)
+            *val = Phi;
+        if(der) {
+            der->dR   = (grad.dR + dPhi0dR) * dRscaleddR;
+            der->dz   = (grad.dz + dPhi0dz) * dzscaleddz;
+            der->dphi = grad.dphi;
+        }
+        if(der2) {
+            der2->dR2 = (hess.dR2 + d2Phi0dR2) * pow_2(dRscaleddR) + (grad.dR + dPhi0dR) * d2RscaleddR2;
+            der2->dz2 = (hess.dz2 + d2Phi0dz2) * pow_2(dzscaleddz) + (grad.dz + dPhi0dz) * d2zscaleddz2;
+            der2->dRdz = (hess.dRdz + d2Phi0dRdz) * dRscaleddR * dzscaleddz;
+            der2->dRdphi = hess.dRdphi * dRscaleddR;
+            der2->dzdphi = hess.dzdphi * dzscaleddz;
+            der2->dphi2  = hess.dphi2;
+        }
     }
 }
 
@@ -1236,41 +1283,54 @@ void CylSpline::getCoefs(
     for(unsigned int mm=0; mm<=2*mmax; mm++) {
         if(!spl[mm])
             continue;
-        Phi   [mm]=math::Matrix<double>(sizeR, sizez);
+        Phi[mm]=math::Matrix<double>(sizeR, sizez);
         if(haveDerivs) {
             dPhidR[mm]=math::Matrix<double>(sizeR, sizez);
             dPhidz[mm]=math::Matrix<double>(sizeR, sizez);
         }
     }
-    for(unsigned int iR=0; iR<sizeR; iR++)
+    for(unsigned int iR=0; iR<sizeR; iR++) {
         for(unsigned int iz=0; iz<sizez; iz++) {
             double Rscaled = scaledR[iR];     // coordinates in the internal scaled coords array
             double zscaled = scaledz[iz+iz0];
             double dRscaleddR = 1 / sqrt(pow_2(gridR[iR]) + pow_2(Rscale));
             double dzscaleddz = 1 / sqrt(pow_2(gridz[iz]) + pow_2(Rscale));
-            // first retrieve the m=0 harmonic (and un-log-scale it if necessary);
-            // the derivatives are taken w.r.t. scaled R and z
-            double Phi0, dPhi0dR, dPhi0dz;
-            spl[mmax]->evalDeriv(Rscaled, zscaled, &Phi0, &dPhi0dR, &dPhi0dz);
             if(logScaling) {
+                // first retrieve the m=0 harmonic and un-log-scale it;
+                // the derivatives are taken w.r.t. scaled R and z
+                double Phi0, dPhi0dR, dPhi0dz;
+                spl[mmax]->evalDeriv(Rscaled, zscaled, &Phi0, &dPhi0dR, &dPhi0dz);
                 Phi0 = -exp(Phi0);
                 dPhi0dR *= Phi0;
                 dPhi0dz *= Phi0;
-            }
-            // then loop over all harmonics, scale the amplitude by that of the m=0 term,
-            // and convert the derivatives from scaled to real R and z
-            for(unsigned int mm=0; mm<=2*mmax; mm++) {
-                if(!spl[mm])
-                    continue;
-                double val=1, derR=0, derz=0;
-                if(mm!=mmax)  // [mmax] is the m=0 term, "scaled by itself", i.e. identically unity
-                    spl[mm]->evalDeriv(Rscaled, zscaled, &val, &derR, &derz);
-                Phi   [mm](iR,iz) =  Phi0 * val;
-                if(haveDerivs) {
-                    dPhidR[mm](iR,iz) = (Phi0 * derR + dPhi0dR * val) * dRscaleddR;
-                    dPhidz[mm](iR,iz) = (Phi0 * derz + dPhi0dz * val) * dzscaleddz;
+                // then loop over all harmonics, scaling the amplitude by that of the m=0 term,
+                // and convert the derivatives from scaled to real R and z
+                for(unsigned int mm=0; mm<=2*mmax; mm++) {
+                    if(!spl[mm])
+                        continue;
+                    double val=1, derR=0, derz=0;
+                    if(mm!=mmax)  // [mmax] is the m=0 term, "scaled by itself", i.e. identically unity
+                        spl[mm]->evalDeriv(Rscaled, zscaled, &val, &derR, &derz);
+                    Phi[mm](iR,iz) = Phi0 * val;
+                    if(haveDerivs) {
+                        dPhidR[mm](iR,iz) = (Phi0 * derR + dPhi0dR * val) * dRscaleddR;
+                        dPhidz[mm](iR,iz) = (Phi0 * derz + dPhi0dz * val) * dzscaleddz;
+                    }
+                }
+            } else {
+                // the no-scaling case is simpler - just convert the derivatives for each term
+                for(unsigned int mm=0; mm<=2*mmax; mm++) {
+                    if(!spl[mm])
+                        continue;
+                    double derR, derz;
+                    spl[mm]->evalDeriv(Rscaled, zscaled, &Phi[mm](iR,iz), &derR, &derz);
+                    if(haveDerivs) {
+                        dPhidR[mm](iR,iz) = derR * dRscaleddR;
+                        dPhidz[mm](iR,iz) = derz * dzscaleddz;
+                    }
                 }
             }
+        }
     }
 }
 

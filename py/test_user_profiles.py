@@ -61,8 +61,9 @@ pot0_orig = pot_orig.potential(0,0,0)
 pot0_appr = pot_appr.potential(0,0,0)
 pot0_app2 = pot_app2.potential(0,0,0)
 print("Phi_appr(0)=%.8g, Phi_app2(0)=%.8g  (true value=%.8g)" % (pot0_appr, pot0_app2, pot0_orig))
-print("rho_appr(1)=%.8g  (true value=%.8g,  user value=%.8g)" % \
-    ( pot_appr.density(1,0,0), pot_orig.density(1,0,0), MyPlummer(numpy.array([[1,0,0]])) ))
+print("rho_appr(1)=%.8g, rho_app2(1)=%.8g  (true value=%.8g,  user value=%.8g)" %
+    ( pot_appr.density(1,0,0), pot_app2.density(1,0,0), pot_orig.density(1,0,0),
+    MyPlummer(numpy.array([[1,0,0]])) ))
 
 # user-defined distribution function, again it must be a function of a single argument --
 # a 2d array Mx3, where the columns are Jr,Jz,Jphi, and rows are M independent points

@@ -1095,7 +1095,11 @@ public:
         if(result == NULL)
             throw std::runtime_error("Call to user-defined density function failed");
         else if(typeerror)
-            throw std::runtime_error("Invalid data type returned from user-defined density function");
+            throw std::runtime_error("Invalid data type returned by user-defined density function");
+        else if(!isFinite(value))
+            throw std::runtime_error("Invalid value (" + utils::toString(value) +
+                ") returned by user-defined density function at point (" +
+                utils::toString(xyz[0]) + ',' + utils::toString(xyz[1]) + ',' + utils::toString(xyz[2]) + ')');
         return value * conv->massUnit / pow_3(conv->lengthUnit);
     }
 };
@@ -1640,8 +1644,8 @@ static const char* docstringPotential =
     "  potential=...   instead of density, one may provide a potential source for the expansion. "
     "This argument shoud be either an instance of Potential class, or a user-defined function "
     "`my_potential(xyz)` returning the value of potential at N point, where xyz is a Nx3 array of "
-    "points in cartesian coordinates. In the latter case, one needs to specify the grid parameters "
-    "explicitly.\n"
+    "points in cartesian coordinates. In the latter case, one should explicitly specify "
+    "the grid parameters and the symmetry type.\n"
     "  file='...'   the name of another INI file with potential parameters and/or "
     "coefficients of a Multipole/CylSpline potential expansion, or an N-body snapshot file "
     "that will be used to compute the coefficients of such expansion.\n"
@@ -1730,25 +1734,44 @@ public:
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual const char* name() const { return fncname.c_str(); };
-    virtual double densityCyl(const coord::PosCyl &/*pos*/, double /*time*/) const { return NAN; }
-    virtual double densitySph(const coord::PosSph &/*pos*/, double /*time*/) const { return NAN; }
-    virtual double densityCar(const coord::PosCar &/*pos*/, double /*time*/) const { return NAN; }
-    virtual double totalMass() const { return NAN; }
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
     {
-        double xyz[3*7], value[7];
+        const int NPOINTS = 21;   // number of points in the 3d finite-difference stencil
+        const double OFFSETS[NPOINTS][3] = {  // offsets in units of stepsize h
+            { 0, 0, 0},   // function value at the point
+            {-2, 0, 0},   // 4-point stencil in x  for df/dx, d2f/dx2
+            {-1, 0, 0},
+            { 1, 0, 0},
+            { 2, 0, 0},
+            { 0,-2, 0},   // 4-point in y
+            { 0,-1, 0},
+            { 0, 1, 0},
+            { 0, 2, 0},
+            { 0, 0,-2},   // 4-point in z
+            { 0, 0,-1},
+            { 0, 0, 1},
+            { 0, 0, 2},
+            {-1,-1,-1},   // 8 corners of unit cube for mixed second derivs
+            {-1, 1,-1},
+            { 1,-1,-1},
+            { 1, 1,-1},
+            {-1,-1, 1},
+            {-1, 1, 1},
+            { 1,-1, 1},
+            { 1, 1, 1} };
+        double xyz[3*NPOINTS], val[NPOINTS];
         unconvertPos(pos, xyz);
         // if 1st derivatives are needed, they will be estimated by finite differencing with this stepsize
-        double eps = fmax(sqrt(pow_2(xyz[0])+pow_2(xyz[1])+pow_2(xyz[2])) * ROOT3_DBL_EPSILON,
-            16*DBL_EPSILON);
-        for(int d=0; d<6; d++) {
-            xyz[d*3+3] = xyz[0];
-            xyz[d*3+4] = xyz[1];
-            xyz[d*3+5] = xyz[2];
-            xyz[d*3+3+d/2] += d%2 ? -eps : eps;
+        double eps = fmax(sqrt(pow_2(xyz[0])+pow_2(xyz[1])+pow_2(xyz[2])) * 5e-4 /* ~DBLEPS^(1/5) */,
+            SQRT_DBL_EPSILON);
+        int npoints = deriv2 ? NPOINTS : deriv ? 13 : 1;
+        for(int d=1; d<npoints; d++) {
+            xyz[d*3+0] = xyz[0] + OFFSETS[d][0] * eps;
+            xyz[d*3+1] = xyz[1] + OFFSETS[d][1] * eps;
+            xyz[d*3+2] = xyz[2] + OFFSETS[d][2] * eps;
         }
-        npy_intp dims[]  = {deriv ? 7 : 1, 3};
+        npy_intp dims[]  = {npoints, 3};
         PyObject *result = NULL;
         bool typeerror   = false;
 #ifdef _OPENMP
@@ -1765,14 +1788,14 @@ public:
             {
                 for(int i=0; i<dims[0]; i++) {
                     switch(PyArray_TYPE((PyArrayObject*) result)) {
-                        case NPY_DOUBLE: value[i] = pyArrayElem<double>(result, i); break;
-                        case NPY_FLOAT:  value[i] = pyArrayElem<float >(result, i); break;
+                        case NPY_DOUBLE: val[i] = pyArrayElem<double>(result, i); break;
+                        case NPY_FLOAT:  val[i] = pyArrayElem<float >(result, i); break;
                         default: typeerror = true;
                     }
                 }
             }
             else if(PyNumber_Check(result) && dims[0]==1)
-                value[0] = PyFloat_AsDouble(result);
+                val[0] = PyFloat_AsDouble(result);
             else
                 typeerror = true;
             Py_XDECREF(result);
@@ -1780,17 +1803,27 @@ public:
         if(result == NULL)
             throw std::runtime_error("Call to user-defined potential function failed");
         else if(typeerror)
-            throw std::runtime_error("Invalid data type returned from user-defined potential function");
+            throw std::runtime_error("Invalid data type returned by user-defined potential function");
+        else if(!isFinite(val[0]))
+            throw std::runtime_error("Invalid value (" + utils::toString(val[0]) +
+                ") returned by user-defined potential function at point (" +
+                utils::toString(xyz[0]) + ',' + utils::toString(xyz[1]) + ',' + utils::toString(xyz[2]) + ')');
         if(potential)
-            *potential = value[0] * pow_2(conv->velocityUnit);
-        if(deriv) {
-            deriv->dx = (value[1]-value[2]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
-            deriv->dy = (value[3]-value[4]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
-            deriv->dz = (value[5]-value[6]) / (2*eps) * pow_2(conv->velocityUnit) / conv->lengthUnit;
+            *potential = val[0] * pow_2(conv->velocityUnit);
+        if(deriv) {  // 4-point rule for 1st derivs, accuracy O(h^4)
+            double mul = 1./12 / eps * pow_2(conv->velocityUnit) / conv->lengthUnit;
+            deriv->dx = (val[1] - val[4] - 8*val[2] + 8*val[3]) * mul;
+            deriv->dy = (val[5] - val[8] - 8*val[6] + 8*val[7]) * mul;
+            deriv->dz = (val[9] - val[12]- 8*val[10]+ 8*val[11])* mul;
         }
-        // 2nd derivatives are _not_ computed, so this is not a fully functional potential class
-        if(deriv2) {
-            deriv2->dx2 = deriv2->dy2 = deriv2->dz2 = deriv2->dxdy = deriv2->dxdz = deriv2->dydz = NAN;
+        if(deriv2) {  // 5-point rule for d2f/dx_i^2 (4th order), and 8-point for mixed derivs (2nd order)
+            double mul = 1./12 / pow_2(eps) * pow_2(conv->velocityUnit / conv->lengthUnit);
+            deriv2->dx2 = (-val[1] + 16*val[2] - 30*val[0] + 16*val[3] - val[4]) * mul;
+            deriv2->dy2 = (-val[5] + 16*val[6] - 30*val[0] + 16*val[7] - val[8]) * mul;
+            deriv2->dz2 = (-val[9] + 16*val[10]- 30*val[0] + 16*val[11]- val[12])* mul;
+            deriv2->dxdy= (val[13]-val[14]-val[15]+val[16]+val[17]-val[18]-val[19]+val[20]) * mul*1.5;
+            deriv2->dxdz= (val[13]-val[15]-val[17]+val[19]+val[14]-val[16]-val[18]+val[20]) * mul*1.5;
+            deriv2->dydz= (val[13]-val[17]-val[14]+val[18]+val[15]-val[19]-val[16]+val[20]) * mul*1.5;
         }
     }
 };
@@ -1830,17 +1863,17 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
 {
     if(pot_obj == NULL)
         return potential::PtrPotential();
-    
+
     // check if this is a Python wrapper class for a C++ Potential object (PotentialType)
     if(PyObject_TypeCheck(pot_obj, PotentialTypePtr) && ((PotentialObject*)pot_obj)->pot)
         return ((PotentialObject*)pot_obj)->pot;
-    
+
     // otherwise this could be an arbitrary Python function
     if(checkCallable(pot_obj, /*dimension of input*/ 3)) {
         // then create a C++ wrapper for this Python function
         return potential::PtrPotential(new PotentialWrapper(pot_obj, sym));
     }
-    
+
     // none of the above succeeded -- return an empty pointer
     return potential::PtrPotential();
 }
@@ -1913,23 +1946,24 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
     if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
         return potential::readPotential(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
     bool onlyPot = true, onlyDict = true;
+    std::vector<potential::PtrPotential> components;
+    std::vector<utils::KeyValueMap> paramsArr;
     // first check the types of tuple elements
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-        onlyPot &= PyObject_TypeCheck(PyTuple_GET_ITEM(tuple, i), PotentialTypePtr) &&
-             ((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot;  // an existing Potential object
-        onlyDict &= PyDict_Check(PyTuple_GET_ITEM(tuple, i));      // a dictionary with param=value pairs
+        potential::PtrPotential pi = getPotential(PyTuple_GET_ITEM(tuple, i), /*symmetry*/ coord::ST_NONE);
+        if(pi)  // an existing Potential object or a user-defined function that provides this interface
+            components.push_back(pi);
+        else
+            onlyPot = false;
+        if(PyDict_Check(PyTuple_GET_ITEM(tuple, i)))  // a dictionary with param=value pairs
+            paramsArr.push_back(convertPyDictToKeyValueMap(PyTuple_GET_ITEM(tuple, i)));
+        else
+            onlyDict = false;
     }
     if(onlyPot) {
-        std::vector<potential::PtrPotential> components;
-        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-            components.push_back(((PotentialObject*)PyTuple_GET_ITEM(tuple, i))->pot);
-        }
-        return potential::PtrPotential(new potential::Composite(components));
+        return components.size()==1 ? components[0] :
+            potential::PtrPotential(new potential::Composite(components));
     } else if(onlyDict) {
-        std::vector<utils::KeyValueMap> paramsArr;
-        for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-            paramsArr.push_back(convertPyDictToKeyValueMap(PyTuple_GET_ITEM(tuple, i)));
-        }
         return potential::createPotential(paramsArr, *conv);
     } else
         throw std::invalid_argument("Unnamed arguments should contain "

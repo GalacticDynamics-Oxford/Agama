@@ -5,8 +5,7 @@
 */
 #pragma once
 
-// most of the functions here return NAN in case of invalid arguments or out-of-range results;
-// the error message is stored in the string variable math::exceptionText
+// most of the functions here return NAN in case of invalid arguments or out-of-range results
 namespace math {
 
 /** Gegenbauer (ultraspherical) polynomial:  \f$ C_n^{(\lambda)}(x) \f$ */

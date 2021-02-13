@@ -34,11 +34,13 @@ static const int MAX_INTEGR_POINTS = 1000;
 
 /// stores the exception text to be propagated through external C code that does not support exceptions
 std::string exceptionText;
+/// when an exception occurs, this flag is set and the text is stored in exceptionText
+bool exceptionFlag = false;
 
 #define CALL_FUNCTION_OR_THROW(x) \
-    exceptionText.clear(); \
+    exceptionFlag = false; \
     x; \
-    if(!exceptionText.empty()) throw std::runtime_error(exceptionText);
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
 
 /// callback function invoked by GSL in case of error; stores the error text in a global variable
 /// (not thread-safe! assumed that these events don't occur often)
@@ -48,10 +50,13 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
         gsl_errno == GSL_ETOL ||
         gsl_errno == GSL_EROUND ||
         gsl_errno == GSL_ESING ||
-        gsl_errno == GSL_EDIVERGE )
+        gsl_errno == GSL_EDIVERGE ||
+        gsl_errno == GSL_EMAXITER)
         return;  // do nothing
-    if(exceptionText.empty())
-        exceptionText = (
+    if(exceptionFlag)   // if the flag is already raised, do nothing
+        return;
+    exceptionFlag = true;
+    exceptionText = (
         gsl_errno == GSL_ERANGE || gsl_errno == GSL_EOVRFLW ? "GSL range error" :
         gsl_errno == GSL_EDOM ? "GSL domain error" :
         gsl_errno == GSL_EINVAL ? "GSL invalid argument error" :
@@ -73,6 +78,7 @@ double functionWrapper(double x, void* param)
         return static_cast<IFunction*>(param)->value(x);
     }
     catch(std::exception& e){
+        exceptionFlag = true;
         exceptionText = e.what();
         return NAN;
     }
@@ -425,11 +431,11 @@ double Gaussian::integrate(double x1, double x2, int n) const
         case 7: val = (48 + y1 * y1 * (24 + y1 * y1 * (6 + y1 * y1))) * e1
                     - (48 + y2 * y2 * (24 + y2 * y2 * (6 + y2 * y2))) * e2; break;
         default: {  // general case
-            exceptionText.clear();
+            exceptionFlag = false;
             double v0 = gsl_sf_gamma(0.5*(n+1));
             double v1 = (v0 - gsl_sf_gamma_inc(0.5*(n+1), 0.5*y1*y1)) * (y1>0 || n%2==1 ? 1 : -1);
             double v2 = (v0 - gsl_sf_gamma_inc(0.5*(n+1), 0.5*y2*y2)) * (y2>0 || n%2==1 ? 1 : -1);
-            if(exceptionText.empty())
+            if(!exceptionFlag)
                 val = pow(M_SQRT2, n-1) * (v2 - v1);
         }
     }
@@ -803,11 +809,11 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     double xroot = NAN;
     gsl_min_fminimizer_set_with_values(minser, &F, xinit, yinit, xlower, ylower, xupper, yupper);
     iter=0;
-    exceptionText.clear();
+    exceptionFlag = false;
     while(iter < MAXITER && fabs(xlower-xupper) > abstoler) {
         iter++;
         gsl_min_fminimizer_iterate(minser);
-        if(!exceptionText.empty()) {
+        if(exceptionFlag) {
             xroot = NAN;
             break;
         }
