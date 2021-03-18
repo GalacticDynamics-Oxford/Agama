@@ -103,131 +103,78 @@ void restrictSphHarmCoefs(int lmax, int mmax, std::vector<std::vector<double> >&
 // functions, and computes the sph-harm expansion for either density (in the first case),
 // potential and its r-derivative (in the second case), or all values returned by the function
 // (in the third case). To avoid code duplication, the function that actually retrieves
-// the relevant quantity is separated into a dedicated routine `storeValue`,
-// which stores one or more values for each input point.
-// The `computeSphHarmCoefsSph` routine is templated on the type of input data.
-
-template<class BaseDensityOrPotential>
-void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[]);
-
-template<>
-inline void storeValue(const BaseDensity& src, const coord::PosCyl& pos, double values[])
-{
-    *values = src.density(pos);
-}
-
-template<>
-inline void storeValue(const BasePotential& src, const coord::PosCyl& pos, double values[])
-{
-    coord::GradCyl grad;
-    src.eval(pos, values, &grad);
-    double rinv = 1. / sqrt(pow_2(pos.R) + pow_2(pos.z));
-    values[1] = grad.dR * pos.R * rinv + grad.dz * pos.z * rinv;
-}
-
-template<>
-inline void storeValue(const math::IFunctionNdim& src, const coord::PosCyl& pos, double values[])
-{
-    double point[3] = {pos.R, pos.z, pos.phi};
-    src.eval(point, values);
-}
+// the relevant quantity is separated into a dedicated templated routine `collectValues`,
+// which stores one or more values for each input point, depending on the source function.
+// The routhe `computeSphHarmCoefsSph` is templated on the type of source function.
 
 // number of quantities computed at each point
-template<class BaseDensityOrPotential> int numQuantities(const BaseDensityOrPotential& src);
-template<> int numQuantities(const BaseDensity&)   { return 1; }
-template<> int numQuantities(const BasePotential&) { return 2; }
-template<> int numQuantities(const math::IFunctionNdim& src) { return src.numValues(); }
+template<class BaseDensityOrPotential> int numQuantitiesAtPoint(const BaseDensityOrPotential& src);
+template<> int numQuantitiesAtPoint(const BaseDensity&)   { return 1; }
+template<> int numQuantitiesAtPoint(const BasePotential&) { return 2; }
+//template<> int numQuantitiesAtPoint(const math::IFunctionNdim& src) { return src.numValues(); }
 
-// collect the values of input quantities at a 3d grid in (r,theta,phi)
 template<class BaseDensityOrPotential>
-inline std::vector<double> collectValuesSerial(const BaseDensityOrPotential& src,
-    const math::SphHarmTransformForward& trans, const std::vector<double>& radii)
+void collectValues(const BaseDensityOrPotential& src, const std::vector<coord::PosCyl>& points,
+   /*output*/ double values[]);
+
+template<>
+inline void collectValues(const BaseDensity& src, const std::vector<coord::PosCyl>& points,
+    /*output*/ double values[])
 {
-    int numValues        = numQuantities(src);
+    src.evalmanyDensityCyl(points.size(), &points[0], values);   // vectorized evaluation at many point
+}
+
+template<>
+inline void collectValues(const BasePotential& src, const std::vector<coord::PosCyl>& points,
+    /*output*/ double values[])
+{
+    coord::GradCyl grad;
+    for(size_t i=0; i<points.size(); i++) {
+        src.eval(points[i], &values[i*2], &grad);
+        double rinv = 1. / sqrt(pow_2(points[i].R) + pow_2(points[i].z));
+        values[i*2+1] = grad.dR * points[i].R * rinv + grad.dz * points[i].z * rinv;
+    }
+}
+
+// compute the spherical-harmonic coefficients for density or potential at the given radial grid
+template<class BaseDensityOrPotential>
+void computeSphHarmCoefs(const BaseDensityOrPotential& src,
+    const math::SphHarmIndices& ind, const std::vector<double>& radii,
+    /*output*/ std::vector< std::vector<double> > * coefs[])
+{
+    unsigned int numPointsRadius = radii.size();
+    if(numPointsRadius<1)
+        throw std::invalid_argument("computeSphHarmCoefs: radial grid size too small");
+    // 0th step: initialize sph-harm transform
+    const math::SphHarmTransformForward trans(ind);
+    
+    // 1st step: prepare the 3d grid of points in (r,theta,phi) where the input quantities are needed
+    int numQuantities    = numQuantitiesAtPoint(src);  // 1 for density, 2 for potential
     int numSamplesAngles = trans.size();  // size of array of density values at each r
     int numSamplesRadii  = radii.size();
-    std::vector<double> values(numSamplesAngles * numSamplesRadii * numValues);
+    int numPoints        = numSamplesAngles * numSamplesRadii;
+    std::vector<coord::PosCyl> points(numPoints);
     for(int indR=0; indR<numSamplesRadii; indR++) {
         for(int indA=0; indA<numSamplesAngles; indA++) {
             double rad  = radii[indR];
             double z    = rad * trans.costheta(indA);
             double R    = sqrt(rad*rad - z*z);
             double phi  = trans.phi(indA);
-            storeValue(src, coord::PosCyl(R, z, phi),
-                &values[(indR * numSamplesAngles + indA) * numValues]);
+            points[indR * numSamplesAngles + indA] = coord::PosCyl(R, z, phi);
         }
     }
-    return values;
-}
 
-// same as above, but OpenMP-parallelizing the loop;
-// this variant is primarily used in the context of DF-based self-consistent modelling,
-// when the density (0th moment of the DF) is computed by expensive integration
-template<class BaseDensityOrPotential>
-inline std::vector<double> collectValuesParallel(const BaseDensityOrPotential& src,
-    const math::SphHarmTransformForward& trans, const std::vector<double>& radii)
-{
-    int numValues        = numQuantities(src);
-    int numSamplesAngles = trans.size();  // size of array of density values at each r
-    int numSamplesTotal  = numSamplesAngles * radii.size();
-    std::vector<double> values(numSamplesTotal * numValues);
-    std::string errorMsg;
-    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
-    bool stop = false;
-    // loop over radii and angular directions, using a combined index variable for better load balancing
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
-    for(int n=0; n<numSamplesTotal; n++) {
-        if(stop) continue;
-        if(cbrk.triggered()) stop = true;
-        try{
-            int indR    = n / numSamplesAngles;  // index in radial grid
-            int indA    = n % numSamplesAngles;  // combined index in angular direction (theta,phi)
-            double rad  = radii[indR];
-            double z    = rad * trans.costheta(indA);
-            double R    = sqrt(rad*rad - z*z);
-            double phi  = trans.phi(indA);
-            storeValue(src, coord::PosCyl(R, z, phi),
-                &values[(indR * numSamplesAngles + indA) * numValues]);
-        }
-        catch(std::exception& e) {
-            errorMsg = e.what();
-            stop = true;
-        }
-    }
-    if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
-    if(!errorMsg.empty())
-        throw std::runtime_error("Error in computeSphHarmCoefs: "+errorMsg);
-    return values;
-}
+    // 2nd step: collect the values of input quantities at this 3d grid (specific to each src type)
+    std::vector<double> values(numPoints * numQuantities);
+    collectValues(src, points, &values[0]);
 
-template<class BaseDensityOrPotential>
-void computeSphHarmCoefs(const BaseDensityOrPotential& src, 
-    const math::SphHarmIndices& ind, const std::vector<double>& radii, bool parallel,
-    std::vector< std::vector<double> > * coefs[])
-{
-    unsigned int numPointsRadius = radii.size();
-    if(numPointsRadius<1)
-        throw std::invalid_argument("computeSphHarmCoefs: radial grid size too small");
-    //  initialize sph-harm transform
-    const math::SphHarmTransformForward trans(ind);
-
-    // 1st step: collect the values of input quantities at a 3d grid in (r,theta,phi)
-    std::vector<double> values = parallel ?
-        collectValuesParallel(src, trans, radii) :
-        collectValuesSerial  (src, trans, radii);
-
-    // 2nd step: transform these values to spherical-harmonic expansion coefficients at each radius
+    // 3rd step: transform these values to spherical-harmonic expansion coefficients at each radius
     std::vector<double> shcoefs(ind.size());
-    int numValues        = numQuantities(src);
-    int numSamplesAngles = trans.size();  // size of array of density values at each r
-    for(int q=0; q<numValues; q++) {
+    for(int q=0; q<numQuantities; q++) {
         coefs[q]->assign(ind.size(), std::vector<double>(numPointsRadius));
         for(unsigned int indR=0; indR<numPointsRadius; indR++) {
-            trans.transform(&values[indR * numSamplesAngles * numValues + q],
-                &shcoefs.front(), numValues);
+            trans.transform(&values[indR * numSamplesAngles * numQuantities + q],
+                &shcoefs.front(), /*stride*/ numQuantities);
             math::eliminateNearZeros(shcoefs, EPS_COEF);
             for(unsigned int c=0; c<ind.size(); c++)
                 coefs[q]->at(c)[indR] = shcoefs[c];
@@ -744,9 +691,10 @@ void computeDensityCoefsSph(const BaseDensity& src,
     std::vector< std::vector<double> > &output)
 {
     std::vector< std::vector<double> > *coefs = &output;
-    computeSphHarmCoefs<BaseDensity>(src, ind, gridRadii, /*parallel*/ true, /*output*/ &coefs);
+    computeSphHarmCoefs<BaseDensity>(src, ind, gridRadii, /*output*/ &coefs);
 }
 
+#if 0
 // density coefs from a multicomponent density
 void computeDensityCoefsSph(const math::IFunctionNdim& src,
     const math::SphHarmIndices& ind,
@@ -762,6 +710,7 @@ void computeDensityCoefsSph(const math::IFunctionNdim& src,
     computeSphHarmCoefs<math::IFunctionNdim>(src, ind, gridRadii, /*parallel*/ true,
         /*output*/ &coefRefs.front());
 }
+#endif
 
 // density coefs from N-body snapshot
 void computeDensityCoefsSph(
@@ -868,7 +817,7 @@ void computePotentialCoefsSph(const BasePotential &src,
     std::vector< std::vector<double> > &dPhi)
 {
     std::vector< std::vector<double> > *coefs[2] = {&Phi, &dPhi};
-    computeSphHarmCoefs<BasePotential>(src, ind, gridRadii, /*parallel*/ true, /*output*/ coefs);
+    computeSphHarmCoefs<BasePotential>(src, ind, gridRadii, /*output*/ coefs);
 }
 
 // potential coefs from density:
@@ -913,7 +862,9 @@ void computePotentialCoefsSph(const BaseDensity& dens,
     // the computation of potential by 1d integration in radius is typically quite cheap by itself;
     // if the density computation is expensive, then one should construct an intermediate
     // DensitySphericalHarmonic interpolator and pass it to this routine.
-    std::vector<double> densValues(trans.size());
+    unsigned int npoints = trans.size();
+    std::vector<coord::PosCyl> points(npoints);  // points of angular grid at a given radius
+    std::vector<double> densValues(npoints);     // density values at these points
     std::vector<double> tmpCoefs(ind.size());
     for(int k=0; k<=gridSizeR; k++) {
         double rkminus1 = (k>0 ? gridRadii[k-1] : 0);
@@ -930,9 +881,10 @@ void computePotentialCoefsSph(const BaseDensity& dens,
                 gridRadii.back() / glnodes[s];
 
             // collect the values of density at all points of angular grid at the given radius
-            for(unsigned int i=0; i<densValues.size(); i++)
-                densValues[i] = dens.density(coord::PosCyl(
-                    r * sqrt(1-pow_2(trans.costheta(i))), r * trans.costheta(i), trans.phi(i)));
+            for(unsigned int i=0; i<npoints; i++)
+                points[i] = coord::PosCyl(
+                    r * sqrt(1-pow_2(trans.costheta(i))), r * trans.costheta(i), trans.phi(i));
+            dens.evalmanyDensityCyl(npoints, &points[0], &densValues[0]);  // vectorized evaluation
 
             // compute density SH coefs
             trans.transform(&densValues.front(), &tmpCoefs.front());
@@ -1381,7 +1333,7 @@ double Multipole::enclosedMass(double radius) const
     std::vector< std::vector<double> > *coefs[2] = {&Phi, &dPhi};
     computeSphHarmCoefs<BasePotential>(pot, ind,
         /*a single point in radius*/ std::vector<double>(1, radius),
-        /*parallel*/ false, /*output*/ coefs);
+        /*output*/ coefs);
     return pow_2(radius) * dPhi[0][0];
 }
 

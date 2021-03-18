@@ -186,11 +186,11 @@ public:
             density.evalDeriv(r, &rho, &drhodr, &d2rhodr2);
         } else {    // use finite differences to obtain the derivatives of the original function
             double dr= STEP_DERIV * r,
-            rhom2    = density(r-dr*2),
-            rhom1    = density(r-dr),
-            rhop1    = density(r+dr),
-            rhop2    = density(r+dr*2);
-            rho      = density(r);
+            rhom2    = fmax(0, density(r-dr*2)),
+            rhom1    = fmax(0, density(r-dr)),
+            rhop1    = fmax(0, density(r+dr)),
+            rhop2    = fmax(0, density(r+dr*2));
+            rho      = fmax(0, density(r));
             drhodr   = (2./3 * (rhop1 - rhom1) - 1./12 * (rhop2 - rhom2) ) / dr;
             d2rhodr2 = (4./3 * (rhop1 + rhom1) - 1./12 * (rhop2 + rhom2) - 2.5 * rho) / pow_2(dr);
         }
@@ -208,28 +208,32 @@ public:
         }
         // convert the radial derivatives of (augmented) density to derivatives w.r.t. Phi
         drhodPhi     = drhodr / dPhidr;
-        d2rhodPhi2   = (d2rhodr2 - d2Phidr2 * drhodr / dPhidr) / pow_2(dPhidr);
+        d2rhodPhi2   = (d2rhodr2 - d2Phidr2 / dPhidr * drhodr) / pow_2(dPhidr);
     }
 
-    /// the auxiliary function whose second derivative represents the log-curvature of rho(Phi)
+    /// the auxiliary function whose second derivative represents the log-curvature of rho(Phi),
+    /// passed to createInterpolationGrid to set up a grid in log(r)
     virtual void evalDeriv(const double logr, double* val, double* der, double* der2) const
     {
         double r=exp(logr), Phi, dPhidr, d2Phidr2, rho, drhodPhi, d2rhodPhi2;
         eval(r,  /*output*/ Phi, dPhidr, d2Phidr2, rho, drhodPhi, d2rhodPhi2);
-        double Y = 1 / (1-Phi/Phi0);  // ranges from 0 infinity
-        double Z = dPhidr * r * ( (2-Y) / Phi + drhodPhi / rho );
+        double logrho = rho>0 ? log(rho) : 0,
+            dlogrho   = rho>0 ? drhodPhi / rho : 0,
+            d2logrho  = rho>0 ? d2rhodPhi2 / rho - pow_2(dlogrho) : 0,
+            Y = 1 / (1-Phi/Phi0),  // ranges from 0 infinity
+            Z = dPhidr * r * ( (2-Y) / Phi + dlogrho );
         if(val)
-            *val = log(-Phi / Y * rho);
+            *val = log(-Phi / Y) + logrho;
         if(der)
             *der = Z;
         if(der2) {
-            if(Phi < Phi0 * (1-MIN_REL_DIFFERENCE) || rho <= 0)
+            if(Phi < Phi0 * (1-MIN_REL_DIFFERENCE))
                 // in case of a finite potential at r=0,
                 // we avoid approaching too close to 0 to avoid roundoff errors in Phi
                 *der2 = 0;
             else
-                *der2 = Z + r * r * ( d2Phidr2 * ( (2-Y) / Phi + drhodPhi / rho) +
-                    (d2rhodPhi2/rho - pow_2(drhodPhi/rho) - (2-2*Y+Y*Y) / pow_2(Phi)) * pow_2(dPhidr) );
+                *der2 = Z + r * r * ( d2Phidr2 * ( (2-Y) / Phi + dlogrho) +
+                    (d2logrho - (2-2*Y+Y*Y) / pow_2(Phi)) * pow_2(dPhidr) );
         }
     }
 

@@ -3129,17 +3129,18 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         else
             roughnessMatrix = Matrix<double>(computeOverlapMatrix<3>(
                 grid, numBasisFnc, /*GLORDER*/ 2, /*2nd deriv*/ bsplineNaturalCubicDerivs<2>));
-        // rescale the roughness matrix to make it invariant w.r.t. the extent of the grid:
+        // rescale the roughness matrix to make it invariant w.r.t. the extent of the grid (xmax-xmin):
         // the characteristic magnitude value of B-spline K-th derivatives is (xmax-xmin)^-K,
         // hence the integrals of  [B^(K)]^2  are proportional to  (xmax-xmin)^(1-2K);
         // additional balancing factors make the characteristic value of smoothing parameter 'lambda'
         // roughly independent of the number of data points and of the use of 2nd vs 3rd deriv
-        double norm = pow( xmax-xmin, der3 ? 5 : 3) / numData * (der3 ? 1 : 0.01);
+        double norm = pow( xmax-xmin, der3 ? 5 : 3) / numData * (der3 ? 1./numNodes : 1);
         blas_dmul(norm, roughnessMatrix);
     } else {
         assert(N==1);
-        // no roughness penalty is possible for N=1
-        roughnessMatrix = Matrix<double>(numBasisFnc, numBasisFnc, 0.);
+        // in this case, the penalty matrix contains integrals of 1st derivatives
+        roughnessMatrix = Matrix<double>(computeOverlapMatrix<1,1>(grid));
+        blas_dmul((xmax-xmin) * numNodes / numData, roughnessMatrix);
     }
 
     // quick scan to analyze the weights
@@ -3571,37 +3572,27 @@ std::vector<double> splineLogDensity(const std::vector<double> &grid,
     const SplineLogDensityFitter<N> fitter(grid, xvalues,
         weights.empty()? std::vector<double>(xvalues.size(), 1./xvalues.size()) : weights,
         options, params);
-    if(N==1) { // find the best-fit amplitudes without any smoothing
-        std::vector<double> result(params.ampl);
-        int numIter = findRootNdimDeriv(fitter, &params.ampl[0], EPS_AMPL, MAX_NUM_ITER, &result[0]);
-        if(numIter>0)  // check for convergence
-            params.ampl = result;
-        utils::msg(utils::VL_VERBOSE, "splineLogDensity",
-            "#iter="+utils::toString(numIter)+", logL="+utils::toString(fitter.logL(result))+
-            ", CV="+utils::toString(fitter.logLcv(result))+(numIter<=0 ? " did not converge" : ""));
-    } else {
-        // Find the value of lambda and corresponding amplitudes that maximize the cross-validation score.
-        // Normally lambda is a small number ( << 1), but it ranges from 0 to infinity,
-        // so the root-finder uses a scaling transformation, such that scaledLambda=1
-        // corresponds to lambda=0 and scaledLambda=0 -- to lambda=infinity.
-        // However, we don't use the entire interval from 0 to infinity, to avoid singularities:
-        const double MINSCALEDLAMBDA = 0.12422966;  // corresponds to lambda = 1000, rather arbitrary
-        const double MAXSCALEDLAMBDA = 0.971884607; // corresponds to lambda = 1e-15
-        // Since the minimizer first computes the function at the left endpoint of the interval
-        // and then at the right endpoint, this leads to first performing an oversmoothed fit
-        // (large lambda), which should yield a reasonable 'gaussian' first approximation,
-        // then a fit with almost no smoothing, which starts with an already more reasonable
-        // initial guess and thus has a better chance to converge.
-        const SplineLogDensityLambdaFinder<N> finder(fitter, params);
-        findMin(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, NAN, EPS_LAMBDA);
-        if(smoothing>0) {
-            // target value of log-likelihood is allowed to be worse than
-            // the best value for the case of no smoothing by an amount
-            // that is proportional to the expected rms variation of logL
-            params.best = smoothing * fitter.logLrms(params.ampl);
-            params.targetLogL = fitter.logL(params.ampl) - params.best;
-            findRoot(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, EPS_LAMBDA);
-        }
+    // Find the value of lambda and corresponding amplitudes that maximize the cross-validation score.
+    // Normally lambda is a small number ( << 1), but it ranges from 0 to infinity,
+    // so the root-finder uses a scaling transformation, such that scaledLambda=1
+    // corresponds to lambda=0 and scaledLambda=0 -- to lambda=infinity.
+    // However, we don't use the entire interval from 0 to infinity, to avoid singularities:
+    const double MINSCALEDLAMBDA = 0.12422966;  // corresponds to lambda = 1000, rather arbitrary
+    const double MAXSCALEDLAMBDA = 0.971884607; // corresponds to lambda = 1e-15
+    // Since the minimizer first computes the function at the left endpoint of the interval
+    // and then at the right endpoint, this leads to first performing an oversmoothed fit
+    // (large lambda), which should yield a reasonable 'gaussian' first approximation,
+    // then a fit with almost no smoothing, which starts with an already more reasonable
+    // initial guess and thus has a better chance to converge.
+    const SplineLogDensityLambdaFinder<N> finder(fitter, params);
+    findMin(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, NAN, EPS_LAMBDA);
+    if(smoothing>0) {
+        // target value of log-likelihood is allowed to be worse than
+        // the best value for the case of no smoothing by an amount
+        // that is proportional to the expected rms variation of logL
+        params.best = smoothing * fitter.logLrms(params.ampl);
+        params.targetLogL = fitter.logL(params.ampl) - params.best;
+        findRoot(finder, MINSCALEDLAMBDA, MAXSCALEDLAMBDA, EPS_LAMBDA);
     }
     return fitter.getInterpolatedFunctionValues(params.ampl);
 }

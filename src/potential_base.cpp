@@ -1,16 +1,84 @@
 #include "potential_base.h"
 #include "math_core.h"
 #include <cmath>
+#include <alloca.h>
 
 namespace potential{
+    
+namespace{  // internal
 
 /// relative accuracy of density computation by integration
-static const double EPSREL_DENSITY_INT = 1e-4;
+const double EPSREL_DENSITY_INT = 1e-4;
+
+/// max. number of density evaluations for multidimensional integration
+const size_t MAX_NUM_EVAL_INT = 10000;
 
 /// at large r, the density computed from potential derivatives is subject to severe cancellation errors;
 /// if the result is smaller than this fraction of the absolute value of each term, we return zero
 /// (otherwise its relative accuracy is too low and its derivative cannot be reliably estimated)
-static const double EPSREL_DENSITY_DER = DBL_EPSILON / ROOT3_DBL_EPSILON;
+const double EPSREL_DENSITY_DER = DBL_EPSILON / ROOT3_DBL_EPSILON;
+
+inline double nan2num(double x) { return isFinite(x) ? x : 0; }
+
+/// helper class for finding the radius that encloses the given mass
+class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
+    const BaseDensity& dens;
+    const double m;
+public:
+    RadiusByMassRootFinder(const BaseDensity& _dens, double _m) :
+        dens(_dens), m(_m) {}
+    virtual double value(double r) const {
+        return dens.enclosedMass(r) - m;
+    }
+};
+
+/// helper class for integrating the density along the line of sight
+class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
+    const BaseDensity& dens;  ///< the density model
+    const double X, Y, R;     ///< coordinates in the image plane
+    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+public:
+    SurfaceDensityIntegrand(const BaseDensity& _dens, double _X, double _Y, const double* _rotmatrix) :
+        dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+    virtual double value(double s) const
+    {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
+        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
+        double XYZ[3] = {X, Y, Z}, xyz[3];
+        coord::transformVector(rotmatrix, XYZ, xyz);
+        return nan2num(dens.density(coord::PosCar(xyz[0], xyz[1], xyz[2])) * dZds);
+    }
+};
+
+/// helper class for integrating the force along the line of sight
+class ProjectedForceIntegrand: public math::IFunctionNdim {
+    const BasePotential& pot; ///< the density model
+    const double X, Y, R;     ///< coordinates in the image plane
+    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+public:
+    ProjectedForceIntegrand(const BasePotential& _pot, double _X, double _Y, const double* _rotmatrix) :
+        pot(_pot), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return 2; }
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double s = vars[0], t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
+        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
+        double XYZ[3] = {X, Y, Z}, xyz[3];
+        coord::transformVector(rotmatrix, XYZ, xyz);
+        coord::GradCar grad;
+        pot.eval(coord::PosCar(xyz[0], xyz[1], xyz[2]), NULL, &grad);
+        values[0] = nan2num((grad.dx * rotmatrix[0] + grad.dy * rotmatrix[3] + grad.dz * rotmatrix[6]) * dZds);
+        values[1] = nan2num((grad.dx * rotmatrix[1] + grad.dy * rotmatrix[4] + grad.dz * rotmatrix[7]) * dZds);
+    }
+};
+
+}  // internal ns
+
 
 // -------- Computation of density from Laplacian in various coordinate systems -------- //
 
@@ -63,15 +131,6 @@ double BasePotential::densitySph(const coord::PosSph &pos, double time) const
     return result / (4*M_PI);
 }
 
-double BasePotentialSphericallySymmetric::enclosedMass(const double radius) const
-{
-    if(radius==INFINITY)
-        return totalMass();
-    double dPhidr;
-    evalDeriv(radius, NULL, &dPhidr);
-    return pow_2(radius)*dPhidr;
-}
-
 // ---------- Integration of density by volume ---------- //
 
 // scaling transformation for integration over volume
@@ -84,21 +143,32 @@ coord::PosCyl unscaleCoords(const double vars[], double* jac)
     if(jac)
         *jac = (r<1e-100 || r>1e100) ? 0 :  // if near r=0 or infinity, set jacobian to zero
             4*M_PI * pow_2(r) * drds;
-    return coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
+    return r == INFINITY ? coord::PosCyl(INFINITY, 0, 0) :  // avoid possible indeterminacy INF*0
+        coord::PosCyl( r * sqrt(1-pow_2(costheta)), r * costheta, vars[2] * 2*M_PI);
 }
 
 /// helper class for integrating density over volume
-void DensityIntegrandNdim::eval(const double vars[], double values[]) const 
+void DensityIntegrandNdim::evalmany(const size_t npoints, const double vars[], double values[]) const
 {
-    double scvars[3] = {vars[0], vars[1], axisym ? 0. : vars[2]};
-    double jac;         // jacobian of coordinate scaling
-    const coord::PosCyl pos = unscaleVars(scvars, &jac);
-    if(jac!=0)
-        values[0] = dens.density(pos) * jac;
-    else                // we're almost at infinity or nearly at zero (in both cases,
-        values[0] = 0;  // the result is negligibly small, but difficult to compute accurately)
-    if(nonnegative && values[0]<0)
-        values[0] = 0;  // a non-negative result is required sometimes, e.g., for density sampling
+    // 0. allocate various temporary arrays on the stack - no need to delete them manually
+    // positions in cylindrical coords (unscaled from the input variables)
+    coord::PosCyl* pos = static_cast<coord::PosCyl*>(alloca(npoints * sizeof(coord::PosCyl)));
+    // jacobian of coordinate transformation at each point
+    double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+    // 1. unscale the input variables
+    for(size_t i=0, numvars=numVars(); i<npoints; i++) {
+        double scvars[3] = {vars[i*numvars], vars[i*numvars + 1], axisym ? 0. : vars[i*numvars + 2]};
+        pos[i] = unscaleCoords(scvars, /*output*/ &jac[i]);
+    }
+    // 2. compute the density for all these points at once
+    dens.evalmanyDensityCyl(npoints, pos, values);
+    // 3. multiply by jacobian and post-process if needed
+    for(size_t i=0; i<npoints; i++) {
+        if(jac[i] == 0 || (nonnegative && values[i]<0))
+            values[i] = 0;  // a non-negative result is required sometimes, e.g., for density sampling
+        else
+            values[i] *= jac[i];
+    }
 }
 
 double BaseDensity::enclosedMass(const double r) const
@@ -110,10 +180,17 @@ double BaseDensity::enclosedMass(const double r) const
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {math::scale(math::ScalingSemiInf(), r), 1, 1};
     double result, error;
-    const int maxNumEval = 10000;
     math::integrateNdim(DensityIntegrandNdim(*this),
-        xlower, xupper, EPSREL_DENSITY_INT, maxNumEval, &result, &error);
+        xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL_INT, &result, &error);
     return result;
+}
+
+double BasePotential::enclosedMass(const double r) const
+{
+    if(r==0) return 0;
+    if(r==INFINITY)
+        return totalMass();
+    return sphericalAverage<AV_DRS>(*this, r) * r*r;  // approximate G M(<r) = r^2 dPhi/dr
 }
 
 double BaseDensity::totalMass() const
@@ -141,66 +218,6 @@ double BaseDensity::totalMass() const
         massEst = INFINITY;   // total mass seems to be infinite
     return massEst;
 }
-
-namespace{  // internal
-
-class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
-    const BaseDensity& dens;
-    const double m;
-public:
-    RadiusByMassRootFinder(const BaseDensity& _dens, double _m) :
-        dens(_dens), m(_m) {}
-    virtual double value(double r) const {
-        return dens.enclosedMass(r) - m;
-    }
-};
-
-class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
-    const BaseDensity& dens;  ///< the density model
-    const double X, Y, R;     ///< coordinates in the image plane
-    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
-public:
-    SurfaceDensityIntegrand(const BaseDensity& _dens, double _X, double _Y, const double* _rotmatrix) :
-        dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
-    virtual double value(double s) const
-    {
-        // unscale the input scaled coordinate, which lies in the range (0..1);
-        double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
-        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
-        double XYZ[3] = {X, Y, Z}, xyz[3];
-        coord::transformVector(rotmatrix, XYZ, xyz);
-        return dZds!=0 ? dens.density(coord::PosCar(xyz[0], xyz[1], xyz[2])) * dZds : 0;
-    }
-};
-
-inline double nan2num(double x) { return isFinite(x) ? x : 0; }
-
-class ProjectedForceIntegrand: public math::IFunctionNdim {
-    const BasePotential& pot; ///< the density model
-    const double X, Y, R;     ///< coordinates in the image plane
-    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
-public:
-    ProjectedForceIntegrand(const BasePotential& _pot, double _X, double _Y, const double* _rotmatrix) :
-        pot(_pot), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
-
-    virtual unsigned int numVars()   const { return 1; }
-    virtual unsigned int numValues() const { return 2; }
-
-    virtual void eval(const double vars[], double values[]) const
-    {
-        // unscale the input scaled coordinate, which lies in the range (0..1);
-        double s = vars[0], t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
-        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
-        double XYZ[3] = {X, Y, Z}, xyz[3];
-        coord::transformVector(rotmatrix, XYZ, xyz);
-        coord::GradCar grad;
-        pot.eval(coord::PosCar(xyz[0], xyz[1], xyz[2]), NULL, &grad);
-        values[0] = nan2num((grad.dx * rotmatrix[0] + grad.dy * rotmatrix[3] + grad.dz * rotmatrix[6]) * dZds);
-        values[1] = nan2num((grad.dx * rotmatrix[1] + grad.dy * rotmatrix[4] + grad.dz * rotmatrix[7]) * dZds);
-    }
-};
-
-}  // internal ns
 
 double getRadiusByMass(const BaseDensity& dens, const double mass) {
     return math::findRoot(RadiusByMassRootFinder(dens, mass), math::ScalingSemiInf(), EPSREL_DENSITY_INT);
@@ -239,29 +256,22 @@ double getInnerDensitySlope(const BaseDensity& dens) {
 
 double surfaceDensity(const BaseDensity& dens, double X, double Y, double alpha, double beta, double gamma)
 {
-    double mat[9], tmp;
-    coord::makeRotationMatrix(alpha, beta, gamma, mat);
-    // the matrix corresponds to the transformation from intrinsic to observed coords,
-    // but we need the opposite transformation, so we transpose it
-    tmp = mat[1]; mat[1] = mat[3]; mat[3] = tmp;
-    tmp = mat[2]; mat[2] = mat[6]; mat[6] = tmp;
-    tmp = mat[5]; mat[5] = mat[7]; mat[7] = tmp;
+    double mat[9];
+    // the rotation matrix corresponds to the transformation from intrinsic to observed coords,
+    // but we need the opposite transformation, so we construct a transposed matrix
+    // by using negative rotation angles in the inverse order
+    coord::makeRotationMatrix(-gamma, -beta, -alpha, mat);
     return math::integrateAdaptive(SurfaceDensityIntegrand(dens, X, Y, mat), 0, 1, EPSREL_DENSITY_INT);
 }
 
 void projectedForce(const BasePotential& pot, double X, double Y,
     double alpha, double beta, double gamma, double& fX, double& fY)
 {
-    double mat[9], tmp;
-    coord::makeRotationMatrix(alpha, beta, gamma, mat);
-    // the matrix corresponds to the transformation from intrinsic to observed coords,
-    // but we need the opposite transformation, so we transpose it
-    tmp = mat[1]; mat[1] = mat[3]; mat[3] = tmp;
-    tmp = mat[2]; mat[2] = mat[6]; mat[6] = tmp;
-    tmp = mat[5]; mat[5] = mat[7]; mat[7] = tmp;
+    double mat[9];
+    coord::makeRotationMatrix(-gamma, -beta, -alpha, mat);
     double xlower[1] = {0}, xupper[1] = {1}, result[2];
     math::integrateNdim(ProjectedForceIntegrand(pot, X, Y, mat), xlower, xupper, EPSREL_DENSITY_INT,
-        /*maxNumEval*/ 10000, result);
+        /*maxNumEval*/ MAX_NUM_EVAL_INT, result);
     fX = result[0];
     fY = result[1];
 }

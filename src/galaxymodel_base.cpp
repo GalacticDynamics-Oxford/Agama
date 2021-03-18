@@ -10,11 +10,54 @@
 #include "utils.h"
 #include <cmath>
 #include <algorithm>
+#include <utility>
 #include <stdexcept>
 #include <cassert>
 #include <alloca.h>
 
 namespace galaxymodel{
+
+// parallelized loop over input points with precautions against exceptions or keyboard interrupt
+template<typename CoordT>
+void computeDensityParallel(const potential::BaseDensity& density,
+    const size_t npoints, const coord::PosT<CoordT> pos[], /*output*/ double values[])
+{
+    std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    bool stop = false;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for(int i=0; i<(int)npoints; i++) {
+        if(stop) continue;
+        if(cbrk.triggered()) stop = true;
+        try{
+            values[i] = density.density(pos[i]);
+        }
+        catch(std::exception& e) {
+            errorMsg = e.what();
+            stop = true;
+        }
+    }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
+    if(!errorMsg.empty())
+        throw std::runtime_error("Error in DensityFromDF: "+errorMsg);
+}
+
+void DensityFromDF::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    double values[], double) const {
+    computeDensityParallel(*this, npoints, pos, values);
+}
+void DensityFromDF::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    double values[], double) const {
+    computeDensityParallel(*this, npoints, pos, values);
+}
+void DensityFromDF::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    double values[], double) const {
+    computeDensityParallel(*this, npoints, pos, values);
+}
+
 
 /** a singleton instance of a trivial selection function */
 const SelectionFunctionTrivial selectionFunctionTrivial;
@@ -145,7 +188,7 @@ inline coord::PosVelCyl unscalePosVel(const double vars[],
 */
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
-    explicit DFIntegrandNdim(const GalaxyModel& _model, bool separate) :
+    DFIntegrandNdim(const GalaxyModel& _model, bool separate) :
         model(_model),
         dflen(separate ? model.distrFunc.numValues() : 1)
     {}
@@ -368,8 +411,8 @@ private:
 /** helper class for integrating the distribution function over the entire 6d phase space */
 class DFIntegrand6dim: public DFIntegrandNdim {
 public:
-    DFIntegrand6dim(const GalaxyModel& _model) :
-        DFIntegrandNdim(_model, false) {}
+    DFIntegrand6dim(const GalaxyModel& _model, bool separate) :
+        DFIntegrandNdim(_model, separate) {}
 
     /// input variables define 6 components of position and velocity, suitably scaled
     virtual coord::PosVelCyl unscaleVars(const double vars[], double* jac=0) const
@@ -387,7 +430,6 @@ private:
         values[0] = dfval[0];
     }
 };
-
 
 /// this will be redesigned
 class DFIntegrandProjection: public math::IFunctionNdim {
@@ -659,7 +701,6 @@ std::vector<double> solveForAmplitudes(const math::BsplineInterpolator1d<N>& bsp
     return sol;
 }
 
-
 }  // unnamed namespace
 
 //------- DRIVER ROUTINES -------//
@@ -859,6 +900,21 @@ void computeProjection(const GalaxyModel& model,
 }
 
 
+void computeTotalMass(
+    const GalaxyModel& model,
+    double* result,
+    double* error,
+    bool separate,
+    const double reqRelError,
+    const int maxNumEval)
+{
+    DFIntegrand6dim fnc(model, separate);
+    double xlower[6] = {0,0,0,0,0,0}; // boundaries of integration region in scaled coordinates
+    double xupper[6] = {1,1,1,1,1,1};
+    math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result, error);
+}
+
+
 particles::ParticleArrayCyl sampleActions(
     const GalaxyModel& model, const size_t nSamp, std::vector<actions::Actions>* actsOutput)
 {
@@ -900,7 +956,7 @@ particles::ParticleArrayCyl sampleActions(
 particles::ParticleArrayCyl samplePosVel(
     const GalaxyModel& model, const size_t numSamples)
 {
-    DFIntegrand6dim fnc(model);
+    DFIntegrand6dim fnc(model, /*separate*/ false);
     math::Matrix<double> result;      // sampled scaled coordinates/velocities
     double totalMass, errorMass;      // total normalization of the DF and its estimated error
     double xlower[6] = {0,0,0,0,0,0}; // boundaries of sampling region in scaled coordinates
@@ -939,7 +995,7 @@ particles::ParticleArray<coord::PosCyl> sampleDensity(
         double scaledvars[3] = {result(i,0), result(i,1), 
             fnc.axisym ? math::random() : result(i,2)};
         // transform from scaled coordinates to the real ones, and store the point into the array
-        points.add(fnc.unscaleVars(scaledvars), pointMass);
+        points.add(potential::unscaleCoords(scaledvars), pointMass);
     }
     return points;
 }

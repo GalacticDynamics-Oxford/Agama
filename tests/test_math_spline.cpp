@@ -456,7 +456,10 @@ bool testPenalizedSplineDensity()
         math::splineLogDensity<3>(grid, xvalues, weights, OPTIONS));  // optimally smoothed cubic
     math::CubicSpline spl3p(grid,
         math::splineLogDensity<3>(grid, xvalues, weights, OPTIONS, SMOOTHING));  // penalized cubic
-    double logLtrue=0, logL1=0, logL3o=0, logL3p=0, logL3s=0;
+    math::CubicSpline spl3t(grid,
+        math::splineLogDensity<3>(grid, xvalues, weights,
+        math::FitOptions( OPTIONS | math::FO_PENALTY_3RD_DERIV)));  // with penalty for 3rd deriv
+    double logLtrue=0, logL1=0, logL3o=0, logL3p=0, logL3t=0, logL3s=0;
     for(unsigned int i=0; i<xvalues.size(); i++) {
         // evaluate the likelihood of the sampled points against the true underlying density
         // and against all approximations
@@ -464,22 +467,25 @@ bool testPenalizedSplineDensity()
         logL1    += weights[i] * spl1(xvalues[i]);
         logL3o   += weights[i] * spl3o(xvalues[i]);
         logL3p   += weights[i] * spl3p(xvalues[i]);
+        logL3t   += weights[i] * spl3t(xvalues[i]);
         logL3s   += weights[i] * spltrue(xvalues[i]);
     }
     ok &= fabs(logLtrue-logL1) < 3*D && fabs(logLtrue-logL3o) < 3*D &&
-         fabs(logLtrue-logL3p) < 3*D && fabs(logL3o-logL3p-SMOOTHING*D) < 0.5*D;
+         fabs(logLtrue-logL3p) < 3*D && fabs(logLtrue-logL3t) < 3*D &&
+         fabs(logL3o-logL3p-SMOOTHING*D) < 0.5*D;
     std::cout << "Log-likelihood: true density = " << logLtrue <<
         ", its cubic spline approximation = " << logL3s <<
         ", linear B-spline estimate = " << logL1 <<
         ", optimally smoothed cubic B-spline estimate = " << logL3o <<
-        ", more heavily smoothed cubic = " << logL3p << '\n';
+        ", more heavily smoothed cubic = " << logL3p <<
+        ", 3rd-derivative smoothed cubic = " << logL3t << '\n';
     if(OUTPUT) {
         std::ofstream strm("test_math_spline_logdens.dat");
         for(int j=0; j<NCHECK; j++) {
             double x = testgrid[j];
             double kernval = log(kernelDensity(x, xvalues, weights));
             strm << x << '\t' << spl1(x) << '\t' << spl3o(x) << '\t' << spl3p(x) << '\t' <<
-                kernval << '\t' << truedens[j] << '\t' << spltrue(x) << '\n';
+                spl3t(x) << '\t' << kernval << '\t' << truedens[j] << '\t' << spltrue(x) << '\n';
         }
     }
     return ok;

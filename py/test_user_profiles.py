@@ -1,7 +1,8 @@
 #!/usr/bin/python
 
 """
-Demonstrates the use of user-defined Python routines for density and distribution function.
+Demonstrates the use of user-defined Python routines for density, potential, distribution
+and selection functions.
 Note that whenever such objects are used, this turns off OpenMP parallelization in the C++ library,
 because the Python callback functions cannot be used in a multi-threaded context;
 however, these callback functions are designed to handle possibly many points simultaneously
@@ -84,13 +85,16 @@ df_orig = agama.DistributionFunction( \
 # that the user-defined Python function itself does not have
 mass_orig = df_orig.totalMass()
 mass_user = agama.DistributionFunction(MyDF).totalMass()
-print("DF mass=%.8g  (orig value=%.8g)" % (mass_user, mass_orig))
+print("Integration in the 3d action space: DF mass=%.8g  (orig value=%.8g)" % (mass_user, mass_orig))
 
 # GalaxyModel objects constructed from the C++ DF and from the Python function
 # (without the need of a proxy object; in fact, GalaxyModel.df is itself a proxy object)
 gm_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig)
 gm_user = agama.GalaxyModel(df=MyDF,    potential=pot_appr)
 # note that different potentials were used for gm_orig and gm_user, so the results may slightly disagree
+mass_gm_orig = gm_orig.totalMass()
+mass_gm_user = gm_user.totalMass()
+print("Integration in the 6d phase space:  DF mass=%.8g  (orig value=%.8g)" % (mass_gm_user, mass_gm_orig))
 
 # DF moments (density and velocity dispersion) computed from the C++ DF object
 dens_orig, veldisp_orig = gm_orig.moments(point=(1,0,0))
@@ -140,19 +144,31 @@ def MySF(x):
 # same concept implemented by a built-in C++ object accessible via the Python interface
 sf_orig = agama.SelectionFunction(point=(0,1,2), radius=3)
 
-# test the equivalence of the two selection functions by sampling from a restricted spatial region
-xv_orig, m_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=sf_orig).sample(100000)
-xv_user, m_user = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=MySF   ).sample(100000)
+# test the equivalence of the two selection functions by computing the integral of DF * SF
+# or sampling this product in a restricted spatial region
+gm_sf_orig = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=sf_orig)
+gm_sf_user = agama.GalaxyModel(df=df_orig, potential=pot_orig, sf=MySF)
+mass_gm_sf_orig = gm_sf_orig.totalMass()
+mass_gm_sf_user = gm_sf_user.totalMass()
+print("Total DF mass in a limited spatial region:  original=%.6g, user=%.6g" %
+    (mass_gm_sf_orig, mass_gm_sf_user))
+xv_orig, m_orig = gm_sf_orig.sample(100000)
+xv_user, m_user = gm_sf_user.sample(100000)
 meanxv_orig = numpy.mean(xv_orig, axis=0)
 meanxv_user = numpy.mean(xv_user, axis=0)
+print("Total DF mass by sampling from this region: original=%.6g, user=%.6g" %
+    (numpy.sum(m_orig), numpy.sum(m_user)))
 
-if (abs(pot0_orig-pot0_appr)<1e-6  and
-    abs(pot0_orig-pot0_app2)<1e-6  and
-    abs(mass_orig-mass_user)<1e-6  and
-    abs(dens_orig-dens_user)<1e-6  and
+if (abs(pot0_orig-pot0_appr)<1e-6    and
+    abs(pot0_orig-pot0_app2)<1e-6    and
+    abs(mass_orig-mass_user)<1e-6    and
+    abs(mass_orig-mass_gm_orig)<5e-3 and
+    abs(mass_user-mass_gm_user)<5e-3 and
+    abs(dens_orig-dens_user)<1e-6    and
     abs(dens_user-dens_manual)<1e-6  and
-    all(abs(meanxv_orig-meanxv_user)<0.01)
-    and  abs(m_orig[0]/m_user[0]-1)<0.01  and
+    abs(mass_gm_sf_orig-numpy.sum(m_orig))<1e-2 and
+    all(abs(meanxv_orig-meanxv_user)<0.01) and
+    abs(m_orig[0]/m_user[0]-1)<0.01  and
     # test the equivalence of the two selection functions by directly comparing their output at points
     all(MySF(xv_user).astype(float) == sf_orig(xv_user))):
     print("\033[1;32mALL TESTS PASSED\033[0m")

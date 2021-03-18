@@ -596,34 +596,36 @@ std::vector<double> TargetDensityCylindrical<N>::computeDensityProjection(
     return result;
 }
 
-template<int N>
-std::string TargetDensityCylindrical<N>::coefName(unsigned int index) const
+template<> std::string TargetDensityCylindrical<0>::coefName(unsigned int index) const
 {
     if(index >= numValues())
         throw std::out_of_range("TargetDensityCylindrical: index out of range");
     unsigned int gridRsize = gridR.size(), gridzsize = gridz.size();
-    if(N==0) {
-        unsigned int
-        indR  = index % gridRsize,
-        indmz = index / gridRsize,
-        indz  = indmz % gridzsize,
-        m     = indmz / gridzsize * 2;
-        double R = 0.5 * (gridR[indR] + (indR>0 ? gridR[indR-1] : 0.));
-        double z = 0.5 * (gridz[indz] + (indz>0 ? gridz[indz-1] : 0.));
-        return "R=" + utils::toString(R) + ", z=" + utils::toString(z) + ", m=" + utils::toString(m);
-    } else if(N==1) {
-        // # of meridional-plane elements for m=0 is larger than for higher m
-        unsigned int
-        m0size = (gridRsize+1) * (gridzsize+1),
-        msize  =  gridRsize    * (gridzsize+1),
-        m      = index < m0size ? 0 : ((index-m0size) / msize + 1) * 2,
-        indz   = index < m0size ? index / (gridRsize+1) : (index-m0size) / gridRsize % (gridzsize+1),
-        indR   = index < m0size ? index % (gridRsize+1) : (index-m0size) % gridRsize + 1;
-        return "R=" + utils::toString(indR==0 ? 0. : gridR.at(indR-1)) +
-             ", z=" + utils::toString(indz==0 ? 0. : gridz.at(indz-1)) +
-             ", m=" + utils::toString(m);
-    }
-    assert(!"TargetDensityCylindrical: unimplemented N");
+    unsigned int
+    indR  = index % gridRsize,
+    indmz = index / gridRsize,
+    indz  = indmz % gridzsize,
+    m     = indmz / gridzsize * 2;
+    double R = 0.5 * (gridR[indR] + (indR>0 ? gridR[indR-1] : 0.));
+    double z = 0.5 * (gridz[indz] + (indz>0 ? gridz[indz-1] : 0.));
+    return "R=" + utils::toString(R) + ", z=" + utils::toString(z) + ", m=" + utils::toString(m);
+}
+
+template<> std::string TargetDensityCylindrical<1>::coefName(unsigned int index) const
+{
+    if(index >= numValues())
+        throw std::out_of_range("TargetDensityCylindrical: index out of range");
+    unsigned int gridRsize = gridR.size(), gridzsize = gridz.size();
+    // # of meridional-plane elements for m=0 is larger than for higher m
+    unsigned int
+    m0size = (gridRsize+1) * (gridzsize+1),
+    msize  =  gridRsize    * (gridzsize+1),
+    m      = index < m0size ? 0 : ((index-m0size) / msize + 1) * 2,
+    indz   = index < m0size ? index / (gridRsize+1) : (index-m0size) / gridRsize % (gridzsize+1),
+    indR   = index < m0size ? index % (gridRsize+1) : (index-m0size) % gridRsize + 1;
+    return "R=" + utils::toString(indR==0 ? 0. : gridR.at(indR-1)) +
+         ", z=" + utils::toString(indz==0 ? 0. : gridz.at(indz-1)) +
+         ", m=" + utils::toString(m);
 }
 
 template<> const char* TargetDensityCylindrical<0>::name() const { return "DensityCylindricalTopHat"; }

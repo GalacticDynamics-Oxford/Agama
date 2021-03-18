@@ -46,112 +46,122 @@ static const double EPS_COEF = 1e-10;
 // computes the azimuthal Fourier expansion for either density (in the first case),
 // or potential and its R- and z-derivatives (in the second case).
 // To avoid code duplication, the function that actually retrieves the relevant quantity
-// is separated into a dedicated routine 'storeValue', which stores either one or three
-// values for each input point. The 'computeFourierCoefs' routine is templated on both
-// the type of input data and the number of quantities stored for each point.
+// is separated into a dedicated routine 'collectValues', which stores either one or three
+// values for each input point, depending on the source function. The routine 'computeFourierCoefs'
+// is templated on the type of source function (BaseDensity or BasePotential).
+
+// number of quantities computed at each point
+template<class BaseDensityOrPotential> int numQuantitiesAtPoint(const BaseDensityOrPotential& src);
+template<> int numQuantitiesAtPoint(const BaseDensity&)   { return 1; }
+template<> int numQuantitiesAtPoint(const BasePotential&) { return 3; }
 
 template<class BaseDensityOrPotential>
-void storeValue(const BaseDensityOrPotential& src, const coord::PosCyl& pos, double values[], int numVal);
+void collectValues(const BaseDensityOrPotential& src, const std::vector<coord::PosCyl>& points,
+    /*output*/ double values[]);
 
 template<>
-inline void storeValue(const BaseDensity& src, const coord::PosCyl& pos, double values[], int) {
-    *values = src.density(pos);
+inline void collectValues(const BaseDensity& src, const std::vector<coord::PosCyl>& points,
+    /*output array of length points.size()*/ double values[])
+{
+    src.evalmanyDensityCyl(points.size(), &points[0], values);   // vectorized evaluation at many point
 }
 
 template<>
-inline void storeValue(const BasePotential& src, const coord::PosCyl& pos, double values[], int numVal) {
+inline void collectValues(const BasePotential& src, const std::vector<coord::PosCyl>& points,
+    /*output array of length 3*points.size()*/ double values[])
+{
     coord::GradCyl grad;
-    src.eval(pos, values, &grad);
-    values[numVal]   = grad.dR;
-    values[numVal*2] = grad.dz;
+    for(size_t i=0, count=points.size(); i<count; i++) {
+        src.eval(points[i], &values[i*3], &grad);
+        values[i*3+1] = grad.dR;
+        values[i*3+2] = grad.dz;
+    }
 }
 
-template<class BaseDensityOrPotential, int NQuantities>
+// compute the coefficients of Fourier expansion of the source function (density or potential)
+// at the 2d grid of points
+template<class BaseDensityOrPotential>
 void computeFourierCoefs(const BaseDensityOrPotential &src,
     const unsigned int mmax,
     const std::vector<double> &gridR,
     const std::vector<double> &gridz,
     std::vector< math::Matrix<double> >* coefs[])
 {
-    unsigned int sizeR = gridR.size(), sizez = gridz.size();
+    size_t sizeR = gridR.size(), sizez = gridz.size();
     if(sizeR<CYLSPLINE_MIN_GRID_SIZE || sizez<CYLSPLINE_MIN_GRID_SIZE)
         throw std::invalid_argument("computeFourierCoefs: incorrect grid size");
     if(!isZReflSymmetric(src) && gridz[0]==0)
         throw std::invalid_argument("computeFourierCoefs: input density is not symmetric "
             "under z-reflection, the grid in z must cover both positive and negative z");
+
+    // 0th step: set up the Fourier transform
     int mmin = isYReflSymmetric(src) ? 0 : -static_cast<int>(mmax);
     bool useSine = mmin<0;
     math::FourierTransformForward trans(mmax, useSine);
     std::vector<int> indices = math::getIndicesAzimuthal(mmax, src.symmetry());
-    unsigned int numHarmonicsComputed = indices.size();
-    int numPoints = sizeR * sizez;
-    for(int q=0; q<NQuantities; q++) {
+    size_t numHarmonicsComputed = indices.size(), sizephi = trans.size();
+    int numPoints = sizeR * sizez * sizephi;
+    int numQuantities = numQuantitiesAtPoint(src);  // 1 for density, 3 for potential
+    for(int q=0; q<numQuantities; q++) {
         coefs[q]->resize(mmax*2+1);
-        for(unsigned int i=0; i<numHarmonicsComputed; i++)
-            coefs[q]->at(indices[i]+mmax)=math::Matrix<double>(sizeR, sizez);
+        for(size_t i=0; i<numHarmonicsComputed; i++)
+            coefs[q]->at(indices[i]+mmax) = math::Matrix<double>(sizeR, sizez);
     }
-    std::string errorMsg;
-    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
-    bool stop = false;
 
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {
-        // thread-local variables
-        std::vector<double> values((2*mmax+1) * NQuantities), coefs_m(2*mmax+1);
-#ifdef _OPENMP
-#pragma omp for schedule(dynamic)
-#endif
-        for(int n=0; n<numPoints; n++) {
-            if(stop) continue;
-            if(cbrk.triggered()) stop = true;
-            int iR = n % sizeR;  // index in radial grid
-            int iz = n / sizeR;  // index in vertical direction
-            try{
-                for(unsigned int i=0; i<trans.size(); i++)
-                    storeValue<BaseDensityOrPotential>(src,
-                        coord::PosCyl(gridR[iR], gridz[iz], trans.phi(i)), &values[i], 2*mmax+1);
-                for(int q=0; q<NQuantities; q++) {
-                    trans.transform(&values[q*(2*mmax+1)], &coefs_m[0]);
-                    // eliminate Fourier terms smaller than EPS_COEF * sum(all m terms)
-                    double norm = 0;
-                    for(unsigned int i=0; i<numHarmonicsComputed; i++)
-                        norm += fabs(coefs_m[indices[i] + (useSine ? mmax : 0)]);
-                    for(unsigned int i=0; i<numHarmonicsComputed; i++) {
-                        int m = indices[i];
-                        double val = coefs_m[useSine ? m+mmax : m];
-                        coefs[q]->at(m+mmax)(iR, iz) =
-                            // at R=0, all non-axisymmetric harmonics must vanish
-                            (iR==0 && m!=0) || (fabs(val) < norm * EPS_COEF) ? 0 :
-                            val / (m==0 ? 2*M_PI : M_PI);
-                    }
+    // 1st step: prepare the 3d grid of points in (R,z,phi) where the input quantities are needed
+    std::vector<coord::PosCyl> points(numPoints);
+    for(size_t iR=0; iR<sizeR; iR++)
+        for(size_t iz=0; iz<sizez; iz++)
+            for(size_t iphi=0; iphi<sizephi; iphi++)
+                points[(iR * sizez + iz) * sizephi + iphi] =
+                    coord::PosCyl(gridR[iR], gridz[iz], trans.phi(iphi));
+
+    // 2nd step: collect the values of input quantities at this 3d grid (specific to each src type)
+    std::vector<double> values(numPoints * numQuantities);
+    collectValues(src, points, &values[0]);
+    
+    // 3rd step: transform these values to Fourier expansion coefficients at each (R,z)
+    std::vector<double> coefs_m(2*mmax+1);
+    for(size_t iR=0; iR<sizeR; iR++)
+        for(size_t iz=0; iz<sizez; iz++)
+            for(int q=0; q<numQuantities; q++) {
+                trans.transform(&values[((iR * sizez + iz) * sizephi) * numQuantities + q],
+                    &coefs_m[0], /*stride*/ numQuantities);
+                // eliminate Fourier terms smaller than EPS_COEF * sum(all m terms)
+                double norm = 0;
+                for(unsigned int i=0; i<numHarmonicsComputed; i++)
+                    norm += fabs(coefs_m[indices[i] + (useSine ? mmax : 0)]);
+                for(unsigned int i=0; i<numHarmonicsComputed; i++) {
+                    int m = indices[i];
+                    double val = coefs_m[useSine ? m+mmax : m];
+                    coefs[q]->at(m+mmax)(iR, iz) =
+                        // at R=0, all non-axisymmetric harmonics must vanish
+                        (iR==0 && m!=0) || (fabs(val) < norm * EPS_COEF) ? 0 :
+                        val / (m==0 ? 2*M_PI : M_PI);
                 }
             }
-            catch(std::exception& e) {
-                errorMsg = e.what();
-                stop = true;
-            }
-        }
-    }
-    if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
-    if(!errorMsg.empty())
-        throw std::runtime_error("Error in computeFourierCoefs: "+errorMsg);
 }
 
 // ------- Computation of potential from density ------- //
 // The routines below solve the Poisson equation by computing the Fourier harmonics
 // of potential via direct 2d integration over (R,z) plane. 
-// If the input density is axisymmetric, then the value of density at phi=0 is taken,
+// If the input density is axisymmetric, then the values of density at phi=0 is taken,
 // otherwise the density must first be Fourier-transformed itself and represented
 // as an instance of DensityAzimuthalHarmonic class, which provides the member function
-// returning the value of m-th harmonic at the given (R,z).
+// returning the value of m-th harmonic at the given point (R,z).
 
-inline double density_rho_m(const BaseDensity& dens, int m, double R, double z) {
-    if(dens.name() == DensityAzimuthalHarmonic::myName())  // quickly compare char* pointers, not strings
-        return static_cast<const DensityAzimuthalHarmonic&>(dens).rho_m(m, R, z);
-    return m==0 ? dens.density(coord::PosCyl(R, z, 0)) : 0;
+inline void density_rho_m(const BaseDensity& dens, int m, size_t npoints, const coord::PosCyl pos[],
+    /*output array of length npoints*/ double rho[])
+{
+    if(dens.name() == DensityAzimuthalHarmonic::myName()) {  // quickly compare char* pointers, not strings
+        for(size_t p=0; p<npoints; p++)
+            rho[p] = static_cast<const DensityAzimuthalHarmonic&>(dens).rho_m(m, pos[p].R, pos[p].z);
+    } else {  // use the input density directly in the axisymmetric case
+        if(m==0)
+            dens.evalmanyDensityCyl(npoints, pos, rho);
+        else
+            std::fill(rho, rho+npoints, 0);  // m!=0 harmonics are zero in the axisymmetric case
+    }
 }
 
 // Routine that computes the contribution to the m-th harmonic of potential at location (R0,z0)
@@ -161,7 +171,7 @@ inline double density_rho_m(const BaseDensity& dens, int m, double R, double z) 
 // a continuous density distribution, and in ComputePotentialCoefsFromPoints to obtain
 // the potential from a discrete point mass collection.
 void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, double z0,
-    double mass, bool useDerivs, double values[])
+    double mass, bool useDerivs, /*output array - add to it*/double values[])
 {
     // the contribution to the potential is given by
     // rho * \int_0^\infty dk J_m(k R) J_m(k R0) exp(-k|z-z0|)
@@ -171,21 +181,21 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
         double u  = t / (2*R*R0);   // u >= 1
         double dQ = 0, Q = math::legendreQ(math::abs(m)-0.5, u, useDerivs ? &dQ : NULL);
         if(!isFinite(Q+dQ)) return;
-        values[0]+= -sq * mass * Q;
+        values[0] += -sq * mass * Q;
         if(useDerivs) {
             // only soften the derivative, because it diverges as 1/|u-1|,
             // but the infinite contributions from z>z0 and z<z0 should nearly cancel anyway
             // when one approaches the singularity
             dQ = math::sign(dQ) / sqrt( 1/pow_2(dQ) + EPS2_SOFTENING);
-            values[1]+= -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
-            values[2]+= -sq * mass * dQ * (z0-z) / (R*R0);
+            values[1] += -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
+            values[2] += -sq * mass * dQ * (z0-z) / (R*R0);
         }
     } else      // degenerate case
     if(m==0) {  // here only m=0 harmonic survives;
-        double s  = 1 / sqrt(t + EPS2_SOFTENING); // actually the integration never reaches R=0 anyway
-        values[0]+= -mass * s;
+        double s = 1 / sqrt(t + EPS2_SOFTENING); // actually the integration never reaches R=0 anyway
+        values[0] += -mass * s;
         if(useDerivs)
-            values[2]+=  mass * s * (z0-z) / t;
+            values[2] += mass * s * (z0-z) / t;
     }
 }
 
@@ -199,47 +209,56 @@ public:
         jac0(2*M_PI * log(1 + Rmax/Rmin) * Rmin * log(1 + zmax/zmin) * zmin)
     {}
 
-    // evaluate the function at a given (R,z) point (scaled)
-    virtual void eval(const double pos[], double values[]) const
+    // evaluate the integrand at a single input point
+    virtual void eval(const double vars[], double values[]) const {
+        evalmany(1, vars, values);
+    }
+
+    // vectorized evaluation at several input points (scaled R,z)
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
     {
-        for(unsigned int c=0; c<numValues(); c++)
-            values[c] = 0;
-#if 0
-        // unscale input coordinates
-        const double s = pos[0];
-        const double r = exp( 1/(1-s) - 1/s );
-        if(r<1e-100 || r>1e100)
-            return;  // scaled coords point at 0 or infinity
-        double sintheta, costheta;
-        math::sincos(M_PI/2 * pow_2(pos[1]), sintheta, costheta);
-        const double R = r*costheta;
-        const double z = r*sintheta;
-        if(R > Rmax || fabs(z) > zmax)
-            return;  // point is outside the grid
-        const double jac = pow_2(M_PI*r) * R * (1/pow_2(1-s) + 1/pow_2(s)) * 2*pos[1];
-#else
-        const double pR = pow(1 + Rmax/Rmin, pos[0]), R = Rmin * (pR - 1);
-        const double pz = pow(1 + zmax/zmin, pos[1]), z = zmin * (pz - 1);
-        const double jac= jac0 * R * pR * pz;
-#endif
+        // 1st step: unscale input coordinates
+        coord::PosCyl* pos = static_cast<coord::PosCyl*>(alloca(npoints * sizeof(coord::PosCyl)));
+        double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+        for(size_t p=0; p<npoints; p++) {
+            const double pR = pow(1 + Rmax/Rmin, vars[p*2+0]), R = Rmin * (pR - 1);
+            const double pz = pow(1 + zmax/zmin, vars[p*2+1]), z = zmin * (pz - 1);
+            jac[p] = jac0 * R * pR * pz;
+            pos[p] = coord::PosCyl(R, z, /*phi*/0);
+        }
 
-        // get the values of density at (R,z) and (R,-z):
-        // here the density evaluation may be a computational bottleneck,
-        // so in the typical case of z-reflection symmetry we save on using
-        // the same value of density for both positive and negative z1.
-        double rho = jac * density_rho_m(dens, m, R, z);
-        computePotentialHarmonicAtPoint(m, R, z, R0, z0, rho, useDerivs, values);
-        if(!isZReflSymmetric(dens))
-            rho = jac * density_rho_m(dens, m, R,-z);
-        computePotentialHarmonicAtPoint(m, R,-z, R0, z0, rho, useDerivs, values);
+        // 2nd step: collect the values of m-th harmonic of the density at these points
+        double* rhoplus = static_cast<double*>(alloca(npoints * sizeof(double)));
+        density_rho_m(dens, m, npoints, pos, /*output*/ rhoplus);
+        for(size_t p=0; p<npoints; p++)
+            pos[p].z = -pos[p].z;
+        // in the typical case of z-reflection symmetry we save effort by reusing
+        // the same values of density at (R,z) and (R,-z)
+        double* rhominus = rhoplus;
+        if(!isZReflSymmetric(dens)) {
+            rhominus = static_cast<double*>(alloca(npoints * sizeof(double)));
+            density_rho_m(dens, m, npoints, pos, /*output*/ rhominus);
+        }
 
-        // workaround for the n-dimensional quadrature routine: it seems to be unable 
+        // 3rd step: compute the potential and its derivs at these points
+        size_t nvalues = numValues();
+        std::fill(values, values + npoints * nvalues, 0);
+        for(size_t p=0; p<npoints; p++) {
+            computePotentialHarmonicAtPoint(m, pos[p].R, /*z was reflected*/ -pos[p].z, R0, z0,
+                rhoplus [p] * jac[p], useDerivs, /*output*/values + p * nvalues);
+            computePotentialHarmonicAtPoint(m, pos[p].R, /*z was reflected*/ +pos[p].z, R0, z0,
+                rhominus[p] * jac[p], useDerivs, /*output*/values + p * nvalues);
+        }
+        
+        // workaround for the n-dimensional quadrature routine: it seems to be unable
         // to properly handle cases when one of components of the integrand is identically zero,
         // that's why we output 1 instead, and zero it out later
         if(useDerivs && R0==0)
-            values[1] = 1;
+            for(size_t p=0; p<npoints; p++)
+                values[p * nvalues + 1] = 1;
         if(useDerivs && isZReflSymmetric(dens) && z0==0)
-            values[2] = 1;
+            for(size_t p=0; p<npoints; p++)
+                values[p * nvalues + 2] = 1;
     }
     virtual unsigned int numVars() const { return 2; }
     virtual unsigned int numValues() const { return useDerivs ? 3 : 1; }
@@ -448,7 +467,7 @@ void computeDensityCoefsCyl(const BaseDensity& src,
     std::vector< math::Matrix<double> > &output)
 {
     std::vector< math::Matrix<double> > *coefs = &output;
-    computeFourierCoefs<BaseDensity, 1>(src, mmax, gridR, gridz, &coefs);
+    computeFourierCoefs<BaseDensity>(src, mmax, gridR, gridz, &coefs);
     // the value at R=0,z=0 might be undefined, in which case we take it from nearby points
     for(unsigned int iz=0; iz<gridz.size(); iz++)
         if(gridz[iz] == 0 && !isFinite(output[mmax](0, iz))) {
@@ -470,7 +489,7 @@ void computePotentialCoefsCyl(const BasePotential &src,
     std::vector< math::Matrix<double> > &dPhidz)
 {
     std::vector< math::Matrix<double> > *coefs[3] = {&Phi, &dPhidR, &dPhidz};
-    computeFourierCoefs<BasePotential, 3>(src, mmax, gridR, gridz, coefs);
+    computeFourierCoefs<BasePotential>(src, mmax, gridR, gridz, coefs);
     // assign potential derivatives at R=0 or z=0 to zero, depending on the symmetry
     for(unsigned int iz=0; iz<gridz.size(); iz++) {
         if(gridz[iz] == 0 && isZReflSymmetric(src)) {

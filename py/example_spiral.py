@@ -46,7 +46,7 @@ def createSpiralPotential(numberOfArms, surfaceDensity, scaleRadius, scaleHeight
         R = (xyz[:,0]**2 + xyz[:,1]**2)**0.5
         z = xyz[:,2]
         phi = numpy.arctan2(xyz[:,1], xyz[:,0])
-        prefac = -4*numpy.pi * surfaceDensity * numpy.exp(-R / scaleRadius)
+        prefac = -4*numpy.pi * agama.G * surfaceDensity * numpy.exp(-R / scaleRadius)
         gamma  = numberOfArms * (phi - numpy.log(R / scaleRadius) / numpy.tan(pitchAngle) - phi0)
         Phi = numpy.zeros(len(R))
         for n in range(1,4):
@@ -73,6 +73,7 @@ def createSpiralPotential(numberOfArms, surfaceDensity, scaleRadius, scaleHeight
     # the change in the pitch angle of the spiral with one grid cell
     gridSizeR = max(25, numpy.log(10.0 / 0.01) / numpy.tan(pitchAngle) * numberOfArms))
 
+agama.setUnits(length=1, velocity=1, mass=1)  # some arbitrary units - everything is scale-invariant here
 numberOfArms    = 3
 pitchAngle      = numpy.pi/8
 scaleRadius     = 1.0

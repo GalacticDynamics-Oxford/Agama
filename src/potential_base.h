@@ -80,6 +80,32 @@ public:
     */
     virtual double totalMass() const;
 
+    /** Vectorized evaluation of the density for several input points at once.
+        \param[in]  npoints - size of the input array;
+        \param[in]  pos - array of positions in the given coordinate system, with length npoints;
+        \param[out] values - output array of length npoints that will be filled with density values;
+        \param[in]  time (optional, default 0) - time at which the density is computed.
+    */
+    virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+        /*output*/ double values[], /*input*/ double t=0) const
+    {
+        // default implementation just loops over input points one by one
+        for(size_t p=0; p<npoints; p++)
+            values[p] = densityCar(pos[p], t);
+    }
+    virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+        /*output*/ double values[], /*input*/ double t=0) const
+    {
+        for(size_t p=0; p<npoints; p++)
+            values[p] = densityCyl(pos[p], t);
+    }
+    virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+        /*output*/ double values[], /*input*/ double t=0) const
+    {
+        for(size_t p=0; p<npoints; p++)
+            values[p] = densitySph(pos[p], t);
+    }
+
 protected:
 
     /** evaluate density at the position specified in cartesian coordinates */
@@ -146,6 +172,9 @@ public:
         eval(point, &val, NULL, NULL, time);
         return val;
     }
+
+    /** estimate the mass enclosed within a given radius from the radial component of force */
+    virtual double enclosedMass(const double radius) const;
 
 protected:
     /** evaluate potential and up to two its derivatives in cartesian coordinates;
@@ -277,9 +306,6 @@ public:
     using BasePotential::value;
 
     virtual coord::SymmetryType symmetry() const { return coord::ST_SPHERICAL; }
-
-    /** find the mass enclosed within a given radius from the radial component of force */
-    virtual double enclosedMass(const double radius) const;
 
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const {
@@ -454,19 +480,19 @@ public:
     DensityIntegrandNdim(const BaseDensity& _dens, bool _nonnegative = false) :
         dens(_dens), axisym(isZRotSymmetric(_dens)), nonnegative(_nonnegative) {}
 
-    /// integrand for the density at a given point (R,z,phi) with appropriate coordinate scaling
-    virtual void eval(const double vars[], double values[]) const;
+    /// evaluate the integrand for the density at one input point (scaled R,z,phi)
+    virtual void eval(const double vars[], double values[]) const {
+        evalmany(1, vars, values);
+    }
+
+    /// evaluate the integrand for many input points (scaled R,z,phi) at once
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const;
 
     /// dimensions of integration: only integrate in phi if density is not axisymmetric
     virtual unsigned int numVars() const { return axisym ? 2 : 3; }
 
     /// output a single value (the density)
     virtual unsigned int numValues() const { return 1; }
-
-    /// convert from scaled variables to the real position;
-    /// optionally compute the jacobian of transformation if jac!=NULL
-    inline coord::PosCyl unscaleVars(const double vars[], double* jac=NULL) const {
-        return unscaleCoords(vars, jac); }
 
     const BaseDensity& dens;  ///< the density model to be integrated over
     const bool axisym;        ///< flag determining if the density is axisymmetric
@@ -477,8 +503,9 @@ public:
 enum AverageMode {
     AV_RHO,  ///< density
     AV_PHI,  ///< potential
-    AV_DR,   ///< potential derivative by cylindrical radius R
-    AV_DZ    ///< potential derivative by z
+    AV_DRS,  ///< potential derivative by spherical radius r
+    AV_DRC,  ///< potential derivative by cylindrical radius R
+    AV_DZ,   ///< potential derivative by z
 };
 
 template<AverageMode mode, class T>
@@ -487,7 +514,12 @@ template<> inline double azimuthalAverageValue<AV_RHO>(const BaseDensity& fnc, c
 { return fnc.density(pos); }
 template<> inline double azimuthalAverageValue<AV_PHI>(const BasePotential& fnc, const coord::PosCyl& pos)
 { return fnc.value(pos); }
-template<> inline double azimuthalAverageValue<AV_DR>(const BasePotential& fnc, const coord::PosCyl& pos) {
+template<> inline double azimuthalAverageValue<AV_DRS>(const BasePotential& fnc, const coord::PosCyl& pos) {
+    coord::GradSph grad;
+    fnc.eval(toPosSph(pos), NULL, &grad);
+    return grad.dr;
+}
+template<> inline double azimuthalAverageValue<AV_DRC>(const BasePotential& fnc, const coord::PosCyl& pos) {
     coord::GradCyl grad;
     fnc.eval(pos, NULL, &grad);
     return grad.dR;
@@ -510,7 +542,7 @@ inline double azimuthalAverage(const T& fnc, double R, double z)
 {
     if(isAxisymmetric(fnc))  // nothing to average
         return azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, 0));
-    const int nphi = 8;  // number of equally-spaced points in phi
+    const int nphi = 8;  // number of equally-spaced points in phi is 2*nphi+1 over 2pi
     double result  = 0.;
     for(int i=0; i<=nphi; i++) {
         double phi = i*M_PI/(nphi+0.5);
@@ -537,12 +569,15 @@ inline double sphericalAverage(const T& fnc, double r)
 {
     if(isSpherical(fnc))  // nothing to average - just a single value
         return azimuthalAverageValue<mode>(fnc, coord::PosCyl(r, 0, 0));
-    static double   // nodes and weights of Gauss-Legendre quadrature with 9 points in cos(theta)
-    costh [5] = {0, 0.3242534234, 0.6133714327, 0.8360311073, 0.9681602395},
-    sinth [5] = {1, 0.9459702519, 0.7897945844, 0.5486820460, 0.2503312819},
-    weight[5] = {0.08255983875, 0.1561735385, 0.1303053482, 0.09032408035, 0.04063719418};
+    const double   // nodes and weights of Gauss-Radau quadrature with 8 points in cos(theta)=0..1
+    costh [8] = {0, 0.0562625605369222, 0.1802406917368924, 0.3526247171131696,
+        0.5471536263305554, 0.7342101772154106, 0.8853209468390958, 0.9775206135612875},
+    sinth [8] = {1, 0.9984160076249926, 0.9836225358551961, 0.9357648256270681,
+        0.8370322031996875, 0.6789222456756852, 0.4649804523718464, 0.2108398682952634},
+    weight[8] = {0.0078125, 0.04633953870074772, 0.07603265516169632, 0.09412938634727970,
+        0.09789304186312342, 0.08675369890862478, 0.06241197533246655, 0.02862720368606458};
     double result = 0.;
-    for(int i=0; i<5; i++) {
+    for(int i=0; i<8; i++) {
         double v = azimuthalAverage<mode>(fnc, r*sinth[i],  r*costh[i]) * weight[i];
         result  += v;
         if(i!=0 && !isZReflSymmetric(fnc))

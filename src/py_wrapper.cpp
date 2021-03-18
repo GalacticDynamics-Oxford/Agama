@@ -832,8 +832,16 @@ public:
 
         // fast-track for a single input point
         if(numPoints <= 1) {
-            processPoint(0);
+            try{
+                processPoint(0);
+            }
+            catch(std::exception& ex) {
+                Py_DECREF(outputObject);
+                outputObject = NULL;
+                PyErr_SetString(PyExc_RuntimeError, ex.what());
+            }
         } else {
+            std::string error;  // store the exception that may occur in the processPoint() function
             utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 #ifdef _OPENMP
             if(chunk==0 || numPoints <= abs(chunk))
@@ -842,34 +850,63 @@ public:
             if(true)
 #endif
             {
-                // no parallelization if the number of points is too small (e.g., just one)
-                for(npy_intp ind=0; ind<numPoints; ind++) {
-                    if(cbrk.triggered()) continue;
-                    processPoint(ind);
+                try{
+                    // no parallelization if the number of points is too small (e.g., just one)
+                    for(npy_intp ind=0; ind<numPoints; ind++) {
+                        if(cbrk.triggered()) continue;
+                        processPoint(ind);
+                    }
+                }
+                catch(std::exception& ex)
+                {
+                    error = ex.what();
                 }
             }
 #ifdef _OPENMP
             else {
+                bool stop = false;   // the loop is terminated once this flag is raised
                 // parallel loop over input array
                 if(chunk < 0) {
+                    // pre-determined split of work across threads
 #pragma omp parallel for schedule(static)
                     for(npy_intp ind=0; ind<numPoints; ind++) {
-                        if(cbrk.triggered()) continue;
-                        processPoint(ind);
+                        if(cbrk.triggered() || stop) continue;
+                        try{
+                            processPoint(ind);
+                        }
+                        catch(std::exception& ex)
+                        {
+                            error = ex.what();
+                            stop = true;
+                        }
                     }
                 } else /*chunk > 0*/ {
+                    // dynamical load balancing - the code below is identical but the pragma is different
 #pragma omp parallel for schedule(dynamic, chunk)
                     for(npy_intp ind=0; ind<numPoints; ind++) {
-                        if(cbrk.triggered()) continue;
-                        processPoint(ind);
+                        if(cbrk.triggered() || stop) continue;
+                        try{
+                            processPoint(ind);
+                        }
+                        catch(std::exception& ex)
+                        {
+                            error = ex.what();
+                            stop = true;
+                        }
                     }
                 }
             }
 #endif
+            // check for any exceptional circumstances
             if(cbrk.triggered()) {
                 Py_DECREF(outputObject);
                 outputObject = NULL;
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+            }
+            if(!error.empty()) {
+                Py_DECREF(outputObject);
+                outputObject = NULL;
+                PyErr_SetString(PyExc_RuntimeError, error.c_str());
             }
         }
         return outputObject;
@@ -1059,48 +1096,89 @@ public:
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual const char* name() const { return fncname.c_str(); };
-    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const {
-        return densityCar(toPosCar(pos), 0); }
-    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const {
-        return densityCar(toPosCar(pos), 9); }
-    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
+    // first come the evaluation functions for a single input point in all coordinate systems
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const {
+        return densityCar(toPosCar(pos), time); }
+    virtual double densitySph(const coord::PosSph &pos, double time) const {
+        return densityCar(toPosCar(pos), time); }
+    virtual double densityCar(const coord::PosCar &pos, double time) const {
+        double result;
+        evalmanyDensityCar(1, &pos, &result, time);  // call the vectorized function for one input point
+        return result;
+    }
+    // next come vectorized evaluation functions in the 'non-native' coordinate systems
+    virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+        /*output*/ double values[], /*input*/ double time) const
     {
-        double xyz[3], value = NAN;
-        unconvertPos(pos, xyz);
-        npy_intp dims[]  = {1, 3};
-        PyObject *result = NULL;
+        if(npoints==1) {  // fast track
+            coord::PosCar poscar = toPosCar(pos[0]);
+            evalmanyDensityCar(1, &poscar, values, time);
+        } else {
+            std::vector<coord::PosCar> poscar(npoints);
+            for(size_t i=0; i<npoints; i++)
+                poscar[i] = toPosCar(pos[i]);
+            evalmanyDensityCar(npoints, &poscar[0], values, time);  // the actual evaluation function
+        }
+    }
+    virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+        /*output*/ double values[], /*input*/ double time) const
+    {
+        if(npoints==1) {  // fast track
+            coord::PosCar poscar = toPosCar(pos[0]);
+            evalmanyDensityCar(1, &poscar, values, time);
+        } else {
+            std::vector<coord::PosCar> poscar(npoints);
+            for(size_t i=0; i<npoints; i++)
+                poscar[i] = toPosCar(pos[i]);
+            evalmanyDensityCar(npoints, &poscar[0], values, time);  // the actual evaluation function
+        }
+    }
+    // and finally here is the actual vectorized evaluation function in cartesian coordinates
+    virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+        /*output*/ double values[], /*input*/ double /*time*/) const
+    {
+        std::vector<double> xyz(3*npoints);
+        for(size_t p=0; p<npoints; p++)
+            unconvertPos(pos[p], &xyz[p*3]);
+        double mult = conv->massUnit / pow_3(conv->lengthUnit);
+        PyObject* result = NULL;
         bool typeerror   = false;
 #ifdef _OPENMP
 #pragma omp critical(PythonAPI)
 #endif
         {
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
+            npy_intp dims[]  = { (npy_intp)npoints, 3};
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, &xyz[0]);
             result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
             Py_DECREF(args);
             if(result == NULL) {
                 PyErr_Print();
-            } else if(PyArray_Check(result)) {
-                switch(PyArray_TYPE((PyArrayObject*) result)) {
-                    case NPY_DOUBLE: value = pyArrayElem<double>(result, 0); break;
-                    case NPY_FLOAT:  value = pyArrayElem<float >(result, 0); break;
-                    default: typeerror = true;
+            } else if(PyArray_Check(result) &&
+                PyArray_NDIM((PyArrayObject*)result) == 1 &&
+                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            {
+                int type = PyArray_TYPE((PyArrayObject*) result);
+                for(size_t p=0; p<npoints; p++) {
+                    switch(type) {
+                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
+                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
+                        default: values[p] = NAN; typeerror = true;
+                    }
                 }
             }
-            else if(PyNumber_Check(result))
-                value = PyFloat_AsDouble(result);
-            else
+            else if(npoints==1 && PyNumber_Check(result)) {
+                // in case of a single input point, the user function might return a single number
+                values[0] = PyFloat_AsDouble(result) * mult;
+            }
+            else {
                 typeerror = true;
+            }
             Py_XDECREF(result);
         }
         if(result == NULL)
             throw std::runtime_error("Call to user-defined density function failed");
         else if(typeerror)
             throw std::runtime_error("Invalid data type returned by user-defined density function");
-        else if(!isFinite(value))
-            throw std::runtime_error("Invalid value (" + utils::toString(value) +
-                ") returned by user-defined density function at point (" +
-                utils::toString(xyz[0]) + ',' + utils::toString(xyz[1]) + ',' + utils::toString(xyz[2]) + ')');
-        return value * conv->massUnit / pow_3(conv->lengthUnit);
     }
 };
 
@@ -1321,10 +1399,16 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
         PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|ddd", const_cast<char**>(keywords2),
         &X, &Y, &alpha, &beta, &gamma))
     {   // shortcut and alternative syntax for just a single point x,y
-        return Py_BuildValue("d",
-            surfaceDensity(*((DensityObject*)self)->dens,
-                X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma) /
-            (conv->massUnit / pow_2(conv->lengthUnit)) );
+        try{
+            return Py_BuildValue("d",
+                surfaceDensity(*((DensityObject*)self)->dens,
+                    X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma) /
+                (conv->massUnit / pow_2(conv->lengthUnit)) );
+        }
+        catch(std::exception& e) {
+            PyErr_SetString(PyExc_RuntimeError, e.what());
+            return NULL;
+        }
     }
     // default syntax is a single first argument for the array of points
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|ddd", const_cast<char**>(keywords1),
@@ -1334,10 +1418,13 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
         run(/*chunk*/64);
 }
 
-PyObject* Density_totalMass(PyObject* self)
+PyObject* Density_totalMass(PyObject* self, PyObject* args)
 {
+    double radius = INFINITY;
+    if(PyTuple_Size(args) == 1 && !PyArg_ParseTuple(args, "d", &radius))
+        return NULL;
     try{
-        return Py_BuildValue("d", ((DensityObject*)self)->dens->totalMass() / conv->massUnit);
+        return Py_BuildValue("d", ((DensityObject*)self)->dens->enclosedMass(radius) / conv->massUnit);
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError,
@@ -1588,9 +1675,9 @@ static PyMethodDef Density_methods[] = {
       "Returns: a tuple of two arrays: "
       "a 2d array of size Nx3 (in case of positions only) or Nx6 (in case of velocity assignment), "
       "and a 1d array of N point masses." },
-    { "totalMass", (PyCFunction)Density_totalMass, METH_NOARGS,
-      "Return the total mass of the density model\n"
-      "No arguments\n"
+    { "totalMass", (PyCFunction)Density_totalMass, METH_VARARGS,
+      "Return the total mass of the density model (if called without arguments), "
+      "or the mass enclosed within a given radius (if called with a single argument).\n"
       "Returns: float number" },
     { NULL }
 };
@@ -1709,10 +1796,9 @@ typedef struct {
 } PotentialObject;
 /// \endcond
 
-/// Helper class for providing a _limited_ BasePotential interface
+/// Helper class for providing a BasePotential interface
 /// to a Python function that returns the value of a potential at one or several point
-/// (note that this is not a fully functional potential, since the 2nd derivatives are not provided!
-/// however, 1st derivatives are estimated by finite differences).
+/// (with 1st and 2nd derivatives estimated by finite differences).
 class PotentialWrapper: public potential::BasePotentialCar{
     NumpyWarningsDisabler lock;
     PyObject* fnc;
@@ -1804,10 +1890,11 @@ public:
             throw std::runtime_error("Call to user-defined potential function failed");
         else if(typeerror)
             throw std::runtime_error("Invalid data type returned by user-defined potential function");
-        else if(!isFinite(val[0]))
+        /*else if(!isFinite(val[0]))
             throw std::runtime_error("Invalid value (" + utils::toString(val[0]) +
                 ") returned by user-defined potential function at point (" +
                 utils::toString(xyz[0]) + ',' + utils::toString(xyz[1]) + ',' + utils::toString(xyz[2]) + ')');
+        */
         if(potential)
             *potential = val[0] * pow_2(conv->velocityUnit);
         if(deriv) {  // 4-point rule for 1st derivs, accuracy O(h^4)
@@ -1919,16 +2006,18 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
                 "Density or Potential class, or a user-defined function of 3 coordinates)");
         }
     }
-    // check if the list of parameters contains a potential object
+    // check if the list of parameters contains a potential object or a user-defined function
     if(pot_obj) {
         potential::PtrPotential pot = getPotential(pot_obj,
             potential::getSymmetryTypeByName(toString(getItemFromPyDict(args, "symmetry"))));
         if(pot) {
-            /// attempt to construct a potential expansion from a user-provided density model
-            if(params.getString("type").empty())
-                throw std::invalid_argument("'type' argument must be provided");
-            params.unset("potential");
-            return potential::createPotential(params, *pot, *conv);
+            if(!params.getString("type").empty()) {
+                // attempt to construct a potential expansion from a user-provided potential model
+                params.unset("potential");
+                return potential::createPotential(params, *pot, *conv);
+            } else
+                // keep the potential as is (a user-defined function)
+                return pot;
         } else {
             throw std::invalid_argument(
                 "'potential' argument should be an object that provides an appropriate interface "
@@ -1942,7 +2031,7 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
 /// or dictionaries with potential parameters
 potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 {
-    // if we have one string parameter, it could be the name of an INI file or a coefs file
+    // if we have one string parameter, it could be the name of an INI file
     if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
         return potential::readPotential(PyString_AsString(PyTuple_GET_ITEM(tuple, 0)), *conv);
     bool onlyPot = true, onlyDict = true;
@@ -1975,18 +2064,14 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
         // check if we have only a tuple of potential components as arguments
-        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 &&
-            (namedArgs==NULL || PyDict_Size(namedArgs)==0))
+        Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
+        if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
             self->pot = Potential_initFromTuple(args);
-        else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+        else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             self->pot = Potential_initFromDict(namedArgs);
         else {
-            utils::msg(utils::VL_WARNING, "Agama",
-                "Received "+utils::toString((int)PyTuple_Size(args))+" positional arguments "+
-                (namedArgs==NULL ? "and no named arguments" :
-                "and "+utils::toString((int)PyDict_Size(namedArgs))+" named arguments"));
-            throw std::invalid_argument(
-                "Invalid parameters passed to the constructor, type help(Potential) for details");
+            throw std::invalid_argument("Invalid parameters passed to the constructor "
+                "(cannot mix positional and named arguments), type help(Potential) for details");
         }
         assert(self->pot);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
@@ -2139,10 +2224,16 @@ PyObject* Potential_projectedForce(PyObject* self, PyObject* args, PyObject* nam
         PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|ddd", const_cast<char**>(keywords2),
         &X, &Y, &alpha, &beta, &gamma))
     {   // shortcut and alternative syntax for just a single point x,y
-        double fX, fY;
-        projectedForce(*((PotentialObject*)self)->pot,
-            X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma, /*output*/ fX, fY);
-        return Py_BuildValue("(dd)", -fX / pow_2(conv->velocityUnit), -fY / pow_2(conv->velocityUnit));
+        try{
+            double fX, fY;
+            projectedForce(*((PotentialObject*)self)->pot,
+                X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma, /*output*/ fX, fY);
+            return Py_BuildValue("(dd)", -fX / pow_2(conv->velocityUnit), -fY / pow_2(conv->velocityUnit));
+        }
+        catch(std::exception& e) {
+            PyErr_SetString(PyExc_RuntimeError, e.what());
+            return NULL;
+        }
     }
     // default syntax is a single first argument for the array of points
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|ddd", const_cast<char**>(keywords1),
@@ -2674,7 +2765,7 @@ static const char* docstringActionMapper =
 /// Python type corresponding to ActionMapper class
 typedef struct {
     PyObject_HEAD
-    const actions::BaseActionMapper* am;  // C++ object for action mapper
+    shared_ptr<const actions::BaseActionMapper> am;  // C++ object for action mapper
     double Jr, Jz, Jphi;              // triplet of actions provided at the construction (in physical units)
     double Omegar, Omegaz, Omegaphi;  // frequencies corresponding to these actions (in physical units)
 } ActionMapperObject;
@@ -2682,8 +2773,8 @@ typedef struct {
 
 void ActionMapper_dealloc(ActionMapperObject* self)
 {
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am));
-    delete self->am;
+    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am.get()));
+    self->am.reset();
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -2705,11 +2796,11 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
         return -1;
     }
     try{
-        double act[3] = {self->Jr, self->Jz, self->Jphi};  // values of actions in physical units
-        const actions::Actions J = convertActions(act);    // same in internal units
-        self->am = tol==tol ?
+        double act[3] = {self->Jr, self->Jz, self->Jphi};   // values of actions in physical units
+        const actions::Actions J = convertActions(act);     // same in internal units
+        self->am.reset( tol==tol ?
             new actions::ActionMapperTorus(*pot, J, tol) :  // use the provided value of tol
-            new actions::ActionMapperTorus(*pot, J);        // use the default value
+            new actions::ActionMapperTorus(*pot, J) );      // use the default value
         // store the frequencies converted to physical units
         actions::Frequencies freq;
         self->am->map(actions::ActionAngles(J, actions::Angles(0, 0, 0)), &freq);
@@ -2717,7 +2808,7 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
         self->Omegaz   = freq.Omegaz   * conv->lengthUnit / conv->velocityUnit;
         self->Omegaphi = freq.Omegaphi * conv->lengthUnit / conv->velocityUnit;
         utils::msg(utils::VL_DEBUG, "Agama", "Created an ActionMapperTorus at "+
-            utils::toString(self->am));
+            utils::toString(self->am.get()));
         return 0;
     }
     catch(std::exception& e) {
@@ -2761,7 +2852,7 @@ PyObject* ActionMapper_value(ActionMapperObject* self, PyObject* args, PyObject*
         return NULL;
     double act[3] = {self->Jr, self->Jz, self->Jphi};  // values of actions in physical units
     return FncActionMapper(args, *self->am, convertActions(act)) .
-    run(/*chunk*/ 0 /*disable parallelization: Torus is not thread-safe*/);
+        run(/*chunk*/ 0 /*disable parallelization: Torus is not thread-safe*/);
 }
 
 static PyMemberDef ActionMapper_members[] = {
@@ -3510,6 +3601,32 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
     return 0;
 }
 
+/// compute the total mass within the selection region
+PyObject* GalaxyModel_totalMass(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!GalaxyModel_isCorrect(self))
+        return NULL;
+    static const char* keywords[] = {"separate", NULL};
+    PyObject *separate_flag = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|O", const_cast<char**>(keywords),
+        &separate_flag))
+        return NULL;
+    bool separate = toBool(separate_flag, false);
+    PtrSelectionFunction selFunc(getSelectionFunction(self->sf_obj));
+    const galaxymodel::GalaxyModel model(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selFunc);
+    int numVal = separate? model.distrFunc.numValues() : 1;
+    std::vector<double> val(numVal), err(numVal);
+    try{
+        computeTotalMass(model, &val[0], &err[0], separate);
+        math::blas_dmul(1./conv->massUnit, val);
+        return separate ? toPyArray(val) : Py_BuildValue("d", val[0]);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in totalMass(): ")+e.what()).c_str());
+        return NULL;
+    }
+}
+
 /// generate samples in position/velocity space
 PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 {
@@ -3540,8 +3657,7 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
         return Py_BuildValue("NN", posvel_arr, mass_arr);
     }
     catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in sample(): ")+e.what()).c_str());
+        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in sample(): ")+e.what()).c_str());
         return NULL;
     }
 }
@@ -4005,6 +4121,18 @@ static PyMemberDef GalaxyModel_members[] = {
     "will have one extra dimension of size equal to the number of DF components Ncomp (possibly 1).\n"
 
 static PyMethodDef GalaxyModel_methods[] = {
+    { "totalMass", (PyCFunction)GalaxyModel_totalMass, METH_VARARGS | METH_KEYWORDS,
+      "Compute the total mass of the distribution function.\n"
+      "Arguments:\n"
+      DOCSTRING_SEPARATE
+      "Returns:\n"
+      "  Integral of the DF multiplied by selection function over the entire space "
+      "allowed by the latter; if the selection function is trivial (identically 1), "
+      "the result should match df.totalMass() up to integration errors, but is much more "
+      "expensive to compute, since the integration is carried over the 6d position/velocity "
+      "space rather than the 3d action space. The sum of masses returned by the sample() method "
+      "should also be equal to totalMass up to integration errors. "
+      "If separate is True, the return value is an array of length Ncomp." },
     { "sample", (PyCFunction)GalaxyModel_sample_posvel, METH_VARARGS,
       "Sample distribution function in the given potential by N particles.\n"
       "Arguments:\n"
@@ -4073,7 +4201,7 @@ static PyMethodDef GalaxyModel_methods[] = {
       "Also keep in mind that the interpolated values may be negative, especially at the wings of "
       "distribution, and that by default the spline is linearly extrapolated beyond its domain; "
       "to extrapolate as zero use `f(v, ext=False)` when evaluating the spline function.\n"
-      "The VDFs are normalized such that the integral of f(v_k) d v_k  over the interval "
+      "  The VDFs are normalized such that the integral of f(v_k) d v_k  over the interval "
       "(-v_escape, v_escape) is unity for each component v_k. \n"
       "If dens==True, the last element is the value of density or an array of such values for "
       "each input point and DF component.\n" },
@@ -6365,14 +6493,19 @@ public:
             Py_DECREF(args);
             if(result == NULL) {
                 PyErr_Print();
-            }
-            if( PyArray_Check(result) &&
-                PyArray_TYPE((PyArrayObject*)result) == NPY_DOUBLE &&
+            } else if(PyArray_Check(result) &&
                 PyArray_NDIM((PyArrayObject*)result) == 1 &&
-                PyArray_DIM((PyArrayObject*)result, 0) == (npy_intp)npoints)
+                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
             {
-                for(size_t i=0; i<npoints; i++)
-                    values[i] = pyArrayElem<double>(result, i);
+                int type = PyArray_TYPE((PyArrayObject*) result);
+                for(size_t p=0; p<npoints; p++) {
+                    switch(type) {
+                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
+                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
+                        case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
+                        default: values[p] = NAN; typeerror = true;
+                    }
+                }
             } else if(PyNumber_Check(result) && npoints==1)
                 // in case of a single input point, may return a single number
                 values[0] = PyFloat_AsDouble(result);

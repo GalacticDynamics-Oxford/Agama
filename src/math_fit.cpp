@@ -352,9 +352,12 @@ int findRootNdimDeriv(const IFunctionNdimDeriv& F, const double xinit[],
     bool carryon = true, converged = false;
     while(fnc.error.empty() && carryon && !converged) {   // iterate
 #ifdef HAVE_EIGEN
-        carryon  = solver.solveOneStep(vars) == Eigen::HybridNonLinearSolverSpace::Running;
+        Eigen::HybridNonLinearSolverSpace::Status sta = solver.solveOneStep(vars);
+        carryon  = sta == Eigen::HybridNonLinearSolverSpace::Running ||
+                   sta == Eigen::HybridNonLinearSolverSpace::NotMakingProgressJacobian;  // try harder!
 #else
-        carryon  = gsl_multiroot_fdfsolver_iterate(solver) == GSL_SUCCESS;
+        int sta  = gsl_multiroot_fdfsolver_iterate(solver);
+        carryon  = sta == GSL_SUCCESS || sta == GSL_ENOPROGJ;
 #endif
         carryon &= fnc.numCalls < maxNumIter;
         // test for convergence

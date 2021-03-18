@@ -613,14 +613,29 @@ def sampleOrbitLibrary(nbody, orbits, weights):
 
 class GalpyPotential(_agama.Potential):
     '''
-    Class that implements a Galpy interface to Agama potentials.
-    It can be used as a regular galpy potential class, although for the orbit integration
-    or action computation, the native Agama counterparts are preferred.
+    Class that implements a Galpy interface to Agama potentials, or an Agama interface to Galpy potentials
+    (depending on what is passed as input to the constructor). It can be used in two regimes:
+    (1) if the single input argument is an instance of galpy.potential.Potential, or a list of such objects,
+    then create a wrapper for this potential passed to the constructor of agama.Potential.
+    (2) in all other cases, the input arguments (named or unnamed) are passed directly
+    to the constructor of agama.Potential (which can be initialized in various ways).
+    In both cases, the class provides methods inherited from both
+    agama.Potential and galpy.potential.Potential, and therefore can be used in all contexts
+    within both libraries (e.g., orbit integration, computation of actions, plotting, etc.).
+    Of course, the efficiency depends on whether this is a native Agama potential
+    (in which case the routines from agama work at native speed, while those from galpy
+    access the potential through wrapper functions) or a native Galpy potential
+    (in which case its methods are directly called from galpy, but Agama routines access it
+    through a wrapper, and in particular, forces and density are computed by finite differences;
+    also in this case, no information about the symmetry of the potential is provided to Agama,
+    and hence its axisymmetric action finder cannot be used).
     '''
     def __init__(self,*args,**kwargs):
         '''
-        Initialize a potential from parameters provided in an INI file
-        or as named arguments to the constructor.
+        Initialize a potential either from an existing galpy potential,
+        or in one of the possible ways of constructing an agama potential
+        (e.g., another instance of agama.Potential, or the name of an INI file
+        with potential parameters, or named arguments to the constructor).
         Arguments are the same as for regular agama.Potential (see below);
         an extra keyword 'normalize=...' has the same meaning as in Galpy:
         if True, normalize such that vc(1.,0.)=1., or,
@@ -633,82 +648,216 @@ class GalpyPotential(_agama.Potential):
         from galpy.potential import Potential
         GalpyPotential.__bases__ = (Potential, _agama.Potential)
         Potential.__init__(self, amp=1.)
-        normalize=False
-        for key, value in kwargs.items():
-            if key=='normalize':
-                normalize=value
-                del kwargs[key]
-        _agama.Potential.__init__(self, *args, **kwargs)   # construct a regular Agama potential
-        if normalize or (isinstance(normalize,(int,float)) and not isinstance(normalize,bool)):
-            self.normalize(normalize)
-        self.hasC= False
-        self.hasC_dxdv=False
+
+        # if the input is a native Galpy potential (or a list of potentials),
+        # create a wrapper for this potential provided as a constructor for the agama.Potential class,
+        # so that it can be used in various contexts within the Agama library
+        if (len(args)==1 and
+            (isinstance(args[0], Potential) or isinstance(args[0], list)) and
+            (not kwargs or len(kwargs)==1 and 'symmetry' in kwargs) ):
+            pot = args[0]
+            sym = kwargs['symmetry'] if len(kwargs)==1 else None
+            if isinstance(pot, Potential):   # input is a native galpy potential
+                # check if the input potential supports vectorized input
+                try:
+                    pot(_numpy.ones(2), _numpy.ones(2), _numpy.ones(2))  # input two points in one call
+                    # if this works, define a vectorized wrapper
+                    def wrapper(x):
+                        return pot((x[:,0]**2 + x[:,1]**2)**0.5, x[:,2], _numpy.arctan2(x[:,1], x[:,0]) )
+                except Exception:
+                    # define a non-vectorized wrapper
+                    def wrapper(arr):
+                        return _numpy.array([pot((x**2+y**2)**0.5, z, _numpy.arctan2(y, x)) for x,y,z in arr])
+                _agama.Potential.__init__(self, potential=wrapper, symmetry=sym)
+                # replace the methods by those of the input potential
+                self._evaluate = pot._evaluate
+                self._dens     = pot._dens
+                self._Rforce   = pot._Rforce
+                self._zforce   = pot._zforce
+                self._R2deriv  = pot._R2deriv
+                self._z2deriv  = pot._z2deriv
+                self._Rzderiv  = pot._Rzderiv
+                if hasattr(pot, '_phiforce') : self._phiforce  = pot._phiforce
+                if hasattr(pot, '_phi2deriv'): self._phi2deriv = pot._phi2deriv
+                if hasattr(pot, '_Rphideriv'): self._Rphideriv = pot._Rphideriv
+                if hasattr(pot, '_zphideriv'): self._zphideriv = pot._zphideriv
+                self._amp = pot._amp
+            else:   # same as above, but for a list of potentials
+                import galpy.potential as gp
+                # check if the input potentials support vectorized input
+                try:
+                    gp.evaluatePotentials(pot, _numpy.ones(2), _numpy.ones(2), _numpy.ones(2))
+                    # if this works, define a vectorized wrapper
+                    def wrapper(x):
+                        return gp.evaluatePotentials(pot,
+                            (x[:,0]**2 + x[:,1]**2)**0.5, x[:,2], _numpy.arctan2(x[:,1], x[:,0]) )
+                except Exception:
+                    # define a non-vectorized wrapper
+                    def wrapper(arr):
+                        return _numpy.array([gp.evaluatePotentials(pot,
+                            (x**2+y**2)**0.5, z, _numpy.arctan2(y, x)) for x,y,z in arr])
+                _agama.Potential.__init__(self, potential=wrapper, symmetry=sym)
+                # replace the evaluation methods by native galpy counterparts
+                self._evaluate = lambda R,z,phi=0.,t=0.: gp.evaluatePotentials(pot, R, z, phi, t)
+                self._dens     = lambda R,z,phi=0.,t=0.: gp.evaluateDensities (pot, R, z, phi, t)
+                self._Rforce   = lambda R,z,phi=0.,t=0.: gp.evaluateRforces   (pot, R, z, phi, t)
+                self._zforce   = lambda R,z,phi=0.,t=0.: gp.evaluatezforces   (pot, R, z, phi, t)
+                self._phiforce = lambda R,z,phi=0.,t=0.: gp.evaluatephiforces (pot, R, z, phi, t)
+                self._R2deriv  = lambda R,z,phi=0.,t=0.: gp.evaluateR2derivs  (pot, R, z, phi, t)
+                self._z2deriv  = lambda R,z,phi=0.,t=0.: gp.evaluatez2derivs  (pot, R, z, phi, t)
+                self._phi2deriv= lambda R,z,phi=0.,t=0.: gp.evaluatephi2derivs(pot, R, z, phi, t)
+                self._Rzderiv  = lambda R,z,phi=0.,t=0.: gp.evaluateRzderivs  (pot, R, z, phi, t)
+                self._Rphideriv= lambda R,z,phi=0.,t=0.: gp.evaluateRphiderivs(pot, R, z, phi, t)
+                self._zphideriv= lambda R,z,phi=0.,t=0.: gp.evaluatezphiderivs(pot, R, z, phi, t)
+
+        else:  # input is not a galpy potential - interpret it as the input arguments for agama.Potential
+            normalize=False
+            for key in list(kwargs):
+                if key=='normalize':
+                    normalize=kwargs[key]
+                    del kwargs[key]
+            _agama.Potential.__init__(self, *args, **kwargs)   # construct a regular Agama potential
+            if normalize or (isinstance(normalize,(int,float)) and not isinstance(normalize,bool)):
+                self.normalize(normalize)
 
     __init__.__doc__ += '\n' + _agama.Potential.__doc__  # extend the docstring of the constructor
 
-    def _coord(self,R,z,phi):
+    def _cyl2car(self, R, z, phi, full_output=False):
         '''convert input cylindrical coordinates to a Nx3 array in cartesian coords'''
         if phi is None: phi=0.
-        return _numpy.array((R*_numpy.cos(phi), R*_numpy.sin(phi), z)).T
-
-    def _evaluate(self,R,z,phi=0.,t=0.):
-        '''evaluate the potential at cylindrical coordinates R,z,phi'''
-        return self.potential(self._coord(R,z,phi))
-
-    def _Rforce(self,R,z,phi=0.,t=0.):
-        '''evaluate the radial force for this potential: -dPhi/dR'''
-        coord=self._coord(R,z,phi)
-        force=_numpy.array(self.force(coord))
-        return (force.T[0]*coord.T[0] + force.T[1]*coord.T[1]) / R
-
-    def _zforce(self,R,z,phi=0.,t=0.):
-        '''evaluate the vertical force for this potential: -dPhi/dz'''
-        return _numpy.array(self.force(self._coord(R,z,phi))).T[2]
-
-    def _phiforce(self,R,z,phi=0.,t=0.):
-        '''evaluate the azimuthal force for this potential: -dPhi/dphi'''
-        coord=self._coord(R,z,phi)
-        force=_numpy.array(self.force(coord))
-        return force.T[1]*coord.T[0] - force.T[0]*coord.T[1]
+        cphi = _numpy.cos(phi)
+        sphi = _numpy.sin(phi)
+        out  = _numpy.array((R*cphi, R*sphi, z)).T
+        if full_output: return out, cphi, sphi
+        else: return out
 
     def _dens(self,R,z,phi=0.,t=0.):
         '''evaluate the density for this potential'''
-        return self.density(self._coord(R,z,phi))
+        return self.density(self._cyl2car(R,z,phi),t=t)
 
-    def _2deriv(self,R,z,phi):
-        '''evaluate the potential derivatives in cartesian coordinates'''
-        coord=self._coord(R,z,phi)
-        force,deriv=self.forceDeriv(coord)
-        return coord.T, _numpy.array(force).T, _numpy.array(deriv).T
+    def _evaluate(self,R,z,phi=0.,t=0.):
+        '''evaluate the potential at cylindrical coordinates R,z,phi'''
+        return self.potential(self._cyl2car(R,z,phi),t=t)
+
+    def _Rforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the radial force for this potential: -dPhi/dR'''
+        coord, cphi, sphi = self._cyl2car(R,z,phi,True)
+        force = self.force(coord,t=t)
+        return force.T[0]*cphi + force.T[1]*sphi
+
+    def _zforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the vertical force for this potential: -dPhi/dz'''
+        return self.force(self._cyl2car(R, z, phi),t=t).T[2]
+
+    def _phiforce(self,R,z,phi=0.,t=0.):
+        '''evaluate the azimuthal force for this potential: -dPhi/dphi'''
+        coord = self._cyl2car(R, z, phi)
+        force = self.force(coord,t=t)
+        return force.T[1]*coord.T[0] - force.T[0]*coord.T[1]
 
     def _R2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second radial derivative for this potential: d2Phi / dR^2'''
-        coord,force,deriv=self._2deriv(R,z,phi)
-        return -(deriv[0]*coord[0]**2 + deriv[1]*coord[1]**2 +
-               2*deriv[3]*coord[0]*coord[1]) / R**2
+        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
+        deriv=self.forceDeriv(coord,t=t)[1]
+        return -(deriv[0]*cphi**2 + deriv[1]*sphi**2 + 2*deriv[3]*cphi*sphi)
 
     def _z2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second vertical derivative for this potential: d2Phi / dz^2'''
-        return -_numpy.array(self.forceDeriv(self._coord(R,z,phi))[1]).T[2]
+        return -_numpy.array(self.forceDeriv(self._cyl2car(R,z,phi),t=t)[1]).T[2]
 
     def _phi2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second azimuthal derivative for this potential: d2Phi / dphi^2'''
-        coord,force,deriv=self._2deriv(R,z,phi)
+        coord=self._cyl2car(R,z,phi)
+        force,deriv=self.forceDeriv(coord,t=t)
         return -(deriv[0]*coord[1]**2 + deriv[1]*coord[0]**2 -
                2*deriv[3]*coord[0]*coord[1] - force[0]*coord[0] - force[1]*coord[1])
 
     def _Rzderiv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed R,z derivative for this potential: d2Phi / dR dz'''
-        coord,force,deriv=self._2deriv(R,z,phi)
-        return -(deriv[5]*coord[0] + deriv[4]*coord[1]) / R
+        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
+        deriv=self.forceDeriv(coord,t=t)[1]
+        return -(deriv[5]*cphi + deriv[4]*sphi)
 
     def _Rphideriv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed R,phi derivative for this potential: d2Phi / dR dphi'''
-        coord,force,deriv=self._2deriv(R,z,phi)
-        return -((deriv[1]-deriv[0])*coord[1]*coord[0] + deriv[3]*(coord[0]**2-coord[1]**2)
-            - force[0]*coord[1] + force[1]*coord[0]) / R
+        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
+        force,deriv=self.forceDeriv(coord,t=t)
+        return -((deriv[1]-deriv[0])*coord[1]*cphi + deriv[3]*(coord[0]*cphi-coord[1]*sphi)
+            - force[0]*sphi + force[1]*cphi)
 
     def _zphideriv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed z,phi derivative for this potential: d2Phi / dz dphi'''
-        coord,force,deriv=self._2deriv(R,z,phi)
+        coord=self._cyl2car(R,z,phi)
+        force,deriv=self.forceDeriv(coord,t=t)
         return -(deriv[4]*coord[0] - deriv[5]*coord[1])
+
+
+### ------------------
+### interface for gala
+
+class GalaPotential(_agama.Potential):
+    '''
+    Class that implements a Gala interface to Agama potentials, or an Agama interface to Gala potentials
+    (depending on what is passed as input to the constructor). It can be used in two regimes:
+    (1) if the single input argument is an instance of gala.potential.PotentialBase,
+    then create a wrapper for this potential passed to the constructor of agama.Potential.
+    (2) in all other cases, the input arguments (named or unnamed) are passed directly
+    to the constructor of agama.Potential (which can be initialized in various ways).
+    In both cases, the class provides methods inherited from both
+    agama.Potential and gala.potential.PotentialBase, and therefore can be used in all contexts
+    within both libraries (e.g., orbit integration, computation of actions, plotting, etc.).
+    Of course, the efficiency depends on whether this is a native Agama potential
+    (in which case the routines from agama work at native speed, while those from gala
+    access the potential through wrapper functions) or a native gala potential
+    (in which case its methods are directly called from gala, but Agama routines access it
+    through a wrapper, and in particular, forces and density are computed by finite differences;
+    also in this case, no information about the symmetry of the potential is provided to Agama,
+    and hence its axisymmetric action finder cannot be used).
+    '''
+    def __init__(self,*args,**kwargs):
+        '''
+        Initialize a potential either from an existing gala potential,
+        or in one of the possible ways of constructing an agama potential
+        (e.g., another instance of agama.Potential, or the name of an INI file
+        with potential parameters, or named arguments to the constructor).
+        Arguments are the same as for regular agama.Potential (see below).
+        '''
+        # import gala only when needed to use this class
+        from gala.potential import PotentialBase
+        GalaPotential.__bases__ = (PotentialBase, _agama.Potential)
+
+        # if the input is a native Gala potential,
+        # create a wrapper for this potential provided as a constructor for the agama.Potential class,
+        # so that it can be used in various contexts within the Agama library
+        if (len(args)==1 and isinstance(args[0], PotentialBase) and
+            (not kwargs or len(kwargs)==1 and 'symmetry' in kwargs) ):
+            pot = args[0]
+            sym = kwargs['symmetry'] if len(kwargs)==1 else None
+            try: PotentialBase.__init__(self, units=pot.units)
+            except TypeError: PotentialBase.__init__(self, dict(), units=pot.units)
+            _agama.Potential.__init__(self, potential=lambda x: pot._energy(x, _numpy.zeros(1)), symmetry=sym)
+            # replace the methods by those of the input potential, to avoid back-and-forth conversions
+            self._density  = pot._density
+            self._energy   = pot._energy
+            self._gradient = pot._gradient
+            self._hessian  = pot._hessian
+            self.__name__  = 'GalaPotential wrapper for %s' % pot.__repr__()
+        else:  # input is not a gala potential - interpret it as the input arguments for agama.Potential
+            # check if units are provided
+            units = None
+            for key in list(kwargs):
+                if key=='units':
+                    units = kwargs[key]
+                    del kwargs[key]
+            try: PotentialBase.__init__(self, units=units)
+            except TypeError: PotentialBase.__init__(self, dict(), units=units)
+            _agama.Potential.__init__(self, *args, **kwargs)
+            self._energy  = lambda q,t=0.: self.potential(q, t=t)
+            self._density = lambda q,t=0.: _agama.Potential.density(self, q, t=t)
+            self._gradient= lambda q,t=0.: -self.force(q, t=t)
+            self._hessian = lambda q,t=0.: -self.forceDeriv(q, t=t)[1][:,(0,3,5,3,1,4,5,4,2)].reshape(-1,3,3)
+            self.__name__ = 'GalaPotential wrapper for %s' % self.name()
+
+    agamadensity = _agama.Potential.density
+    def __repr__(self): return self.__name__
+    __init__.__doc__ += '\n' + _agama.Potential.__doc__  # extend the docstring of the constructor

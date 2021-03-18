@@ -1205,11 +1205,11 @@ enum FitOptions {
     should enclose all sample points; otherwise some sample points may be left out of the grid,
     since the estimated ln(P(x)) is linearly extrapolated beyond the grid boundary(-ies).
 
-    Optionally the fitting procedure may employ regularization to smooth out fluctuations in
-    the estimate, at the expense of somewhat worse fit to the data (this is only possible for N>1).
+    By default, the fitting procedure finds the optimal value of the regularization parameter that
+    maximizes the cross-validation score (smoothing out fluctuations in the estimate), and one may
+    increase the smoothing at the expense of somewhat worse fit to the data.
 
-    \tparam  N is the degree of B-splines
-    (implemented for 1 or 3, smoothing is possible only for N>1).
+    \tparam  N is the degree of B-splines (implemented only for 1 or 3).
     In the case N=1, basis functions are triangular-shaped blocks spanning two grid segments,
     and in the case N=3, we use a modified set of B-splines with natural boundary conditions.
 
@@ -1219,8 +1219,9 @@ enum FitOptions {
     \param[in]  weights  are the weights w[i] of samples; should be non-negative.
     If not provided (empty array), all weights are assumed to be equal to 1.0/xvalues.size().
     \param[in]  options  is a bit field specifying several parameters for the fitting procedure:
-    the choice between second and third derivative in the penalty term, and
-    the extent of the domain for the estimated density beyond each of the two grid endpoints:
+    the choice between second and third derivative in the penalty term
+    (only for N=3; the N=1 case always uses first derivatives),
+    and the extent of the domain for the estimated density beyond each of the two grid endpoints:
     if FO_INFINTE_LEFT bit is set, the function ln(P(x)) is assumed to be defined
     for all x<knots[0] and will be linearly extrapolated to the left of the first grid node
     (obviously it will be declining towards x=-infinity); in this case input samples may
@@ -1229,7 +1230,7 @@ enum FitOptions {
     that appear to the left of the boundary are ignored in the fit.
     The same applies to FO_INFINITE_RIGHT bit and the last grid node.
     \param[in]  smoothing  is the parameter defining the tradeoff between smoothness
-    and accuracy of approximation (makes sense only for N>1).
+    and accuracy of approximation.
     Best-fit parameters (amplitudes) of a model without smoothing correspond to the absolute
     maximum likelihood of samples, but typically the model exhibits unpleasant fluctuations
     trying to over-fit the existing samples. To cope with overfitting, there are two methods.

@@ -386,7 +386,7 @@ coord::PosVelSphMod derivPointFromActions(
     p.pphi= (p.pphi- p0.pphi)/EPS;
     return p;
 }
-    
+
 /// construct the interpolating spline for scaled radial action W = Jr / (Lcirc-L)
 /// as a function of E and L/Lcirc
 math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& pot)
@@ -453,9 +453,14 @@ math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& 
 
     // derivative dW/dX at Y=1 is computed by constructing an auxiliary 1d spline for W(X)|Y=1
     // and differentiating it
-    math::CubicSpline intWatY1(gridX, gridWatY1);
-    for(int iE=0; iE<sizeE; iE++)
-        intWatY1.evalDeriv(gridX[iE], NULL, &gridWdX(iE, sizeL-1));
+    try{
+        math::CubicSpline intWatY1(gridX, gridWatY1);
+        for(int iE=0; iE<sizeE; iE++)
+            intWatY1.evalDeriv(gridX[iE], NULL, &gridWdX(iE, sizeL-1));
+    }
+    catch(std::exception& e) {
+        errorMessage = e.what();
+    }
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
         std::ofstream strm("ActionFinderSpherical.log");
@@ -501,10 +506,10 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
     math::ScalingQui scaling(0, 1);
     for(int i=0; i<sizeQ; i++)
         gridQ[i] = math::unscale(scaling, i / (sizeQ-1.));
-    
+
     // value of X=scaledE and its derivatives w.r.t. P and Q
     math::Matrix<double> gridX(sizeP, sizeQ), gridXdP(sizeP, sizeQ), gridXdQ(sizeP, sizeQ);
-    
+
     std::string errorMessage;  // store the error text in case of an exception in the openmp block
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -559,7 +564,7 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
     }
     if(!errorMessage.empty())
         throw std::runtime_error("ActionFinderSpherical: "+errorMessage);
-    
+
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {   // debugging output
         std::ofstream strm("ActionFinderSphericalEnergy.log");
         strm << "# P=ln(Jr+L)   \tQ=L/(Jr+L)     \tX=scaledE      \tdX/dP          \tdX/dQ          \n";
@@ -575,7 +580,7 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
             strm<<"\n";
         }
     }
-    
+
     //return math::CubicSpline2d(gridP, gridQ, gridX);
     return math::QuinticSpline2d(gridP, gridQ, gridX, gridXdP, gridXdQ);
 }

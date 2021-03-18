@@ -1066,7 +1066,7 @@ std::vector<Triplet> SparseMatrix<NumT>::values() const
     result.reserve(sp->nz);
     size_t col = 0;
     for(size_t k=0; k<sp->nz; k++) {
-        while(col < sp->size2 && sp->p[col+1] <= static_cast<int>(k))
+        while(col < static_cast<size_t>(sp->size2) && static_cast<size_t>(sp->p[col+1]) <= k)
             col++;
         result.push_back(Triplet(sp->i[k], col, sp->data[k]));
     }

@@ -244,6 +244,29 @@ void computeProjection(
     const int maxNumEval=1e5);
 
 
+/** Compute the total mass represented by the DF in the region determined by the selection function
+    (if the latter is trivial, the mass should be equivalent to df.totalMass()
+    up to integration errors, but is much more computationally heavy because this involves
+    integration over 6d phase space and action computation for every point allowed by the SF).
+    \param[in]  model  is the galaxy model.
+    \param[out] result  will contain the integral(s) of DF * SF over the entire 6d phase space.
+    \param[out] error  will contain the error estimate of the mass.
+    \param[in]  separate    whether to compute moments separately for each element of
+    a multicomponent DF; in this case, the output arrays should have length equal to df.numValues().
+    \param[in]  reqRelError is the required relative error in the integral.
+    \param[in]  maxNumEval  is the maximum number of evaluations in integral.
+    Note that if the SF is very localized, the integration may terminate early with a zero result,
+    if it is not able to locate the region where the SF is nonzero.
+*/
+void computeTotalMass(
+    const GalaxyModel& model,
+    double* result,
+    double* error=NULL,
+    bool separate=false,
+    const double reqRelError=1e-3,
+    const int maxNumEval=1e6);
+
+
 /** Generate N-body samples of the distribution function multiplied by the selection function
     by sampling in action/angle space:
     sample actions directly from DF and angles uniformly from [0:2pi]^3,
@@ -314,6 +337,14 @@ private:
         computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, false, relError, maxNumEval);
         return result;
     }
+
+    /// vectorized computation of density in an OpenMP-parallelized loop
+    virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+        /*output*/ double values[], /*input*/ double t=0) const;
+    virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+        /*output*/ double values[], /*input*/ double t=0) const;
+    virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+        /*output*/ double values[], /*input*/ double t=0) const;
 };
 
 }  // namespace

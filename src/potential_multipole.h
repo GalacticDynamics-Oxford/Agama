@@ -291,6 +291,7 @@ void computeDensityCoefsSph(
     std::vector< std::vector<double> > &coefs,
     double smoothing = 1.0);
 
+#if 0
 /** Compute spherical-harmonic expansion coefficients for a multi-component density.
     It is similar to the eponymous routine for an ordinary density model, except that
     it simultaneously collects the values of all components at each point in a 3d grid.
@@ -310,6 +311,7 @@ void computeDensityCoefsSph(const math::IFunctionNdim& dens,
     const math::SphHarmIndices& ind,
     const std::vector<double>& gridRadii,
     std::vector< std::vector< std::vector<double> > > &coefs);
+#endif
 
 
 /** Compute spherical-harmonic potential expansion coefficients,
