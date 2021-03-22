@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2020
+    \date   2014-2021
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -1715,7 +1715,7 @@ static const char* docstringPotential =
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
     "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
     "PerfectEllipsoid, Disk, Spheroid, Nuker, Sersic, King, KeplerBinary, UniformAcceleration;\n"
-    "    or one of the expansion types:  Multipole or CylSpline - "
+    "    or one of the expansion types:  BasisSet, Multipole, CylSpline - "
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
     DOCSTRING_DENSITY_PARAMS
@@ -1756,7 +1756,14 @@ static const char* docstringPotential =
     "coefficient) in Multipole.\n"
     "  mmax=...   order of azimuthal-harmonic expansion (max.index of Fourier coefficient in "
     "phi angle) in Multipole and CylSpline.\n"
-    "  smoothing=...   amount of smoothing in Multipole initialized from an N-body snapshot.\n\n"
+    "  smoothing=...   amount of smoothing in Multipole initialized from an N-body snapshot.\n"
+    "  nmax=...   order of radial expansion in BasisSet (the number of basis functions is nmax+1).\n"
+    "  eta=...    shape parameter of basis functions in BasisSet (default is 1.0, corresponding "
+    "to the Hernquist-Ostriker basis set, but values up to 2.0 typically provide better accuracy "
+    "for cuspy density profiles; the minimum value is 0.5, corresponding to the Clutton-Brock "
+    "basis set.\n"
+    "  r0=...     scale radius of basis functions in BasisSet; if not provided, will be assigned "
+    "automatically to the half-mass radius, unless the model has infinite mass.\n\n"
     "Most of these parameters have reasonable default values; the only necessary ones are "
     "`type`, and for a potential expansion, `density` or `file` or `particles`.\n"
     "If the parameters of the potential (including the coefficients of a potential expansion) are"

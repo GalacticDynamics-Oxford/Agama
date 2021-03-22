@@ -8,12 +8,6 @@
 // most of the functions here return NAN in case of invalid arguments or out-of-range results
 namespace math {
 
-/** Gegenbauer (ultraspherical) polynomial:  \f$ C_n^{(\lambda)}(x) \f$ */
-double gegenbauer(const int n, double lambda, double x);
-
-/** Array of Gegenbauer (ultraspherical) polynomials for n=0,1,...,nmax */
-void gegenbauerArray(const int nmax, double lambda, double x, double* result);
-
 /** Inverse error function (defined for -1<x<1) */
 double erfinv(const double x);
 

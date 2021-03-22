@@ -1,11 +1,13 @@
 /** \file    potential_multipole.h
     \brief   density and potential approximations based on spherical-harmonic expansion
     \author  Eugene Vasiliev
-    \date    2010-2016
+    \date    2010-2021
 
-    This module provides representation of arbitrary density and potential profiles
+    This module provides tools for representing arbitrary density and potential profiles
     in terms of spherical-harmonic (or multipole) expansion, with coefficients being
-    interpolated in radius.
+    interpolated in radius, and a related class for representing the potential in terms
+    of a basis-set expansion (still spherical-harmonic in angles, but with a separate
+    set of basis functions for the radial part).
 
     Mathematical background for spherical-harmonic transformation is provided in
     math_sphharm.h; in brief, the transformation is defined by two order parameters --
@@ -56,14 +58,10 @@ class DensitySphericalHarmonic: public BaseDensity {
 public:
     /** Construct the object from the provided density model and grid parameters.
         Arguments have the same meaning as for Multipole::create(), but the grid radii must be
-        provided explicitly (not determined automatically);
-        additional argument 'accurateIntegration' allows to use a higher-than-requested
-        angular expansion order (related to the number of points in theta and phi where the density
-        is evaluated) to improve the integration accuracy in the spherical-harmonic transformation;
-        on the other hand, only the requested number of terms are retained in the interpolator.
+        provided explicitly (not determined automatically).
     */
     static PtrDensity create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin, double rmax, bool accurateIntegration=true);
+        unsigned int gridSizeR, double rmin, double rmax);
 
     /** Construct the density interpolator from an N-body snapshot.
         \param[in]  particles  is the array of particles.
@@ -160,7 +158,7 @@ private:
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
-    
+
     /// re-implement the density computation to avoid cancellation errors at large radii,
     /// by using only the U-terms which have non-zero Laplacian
     virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const;
@@ -252,6 +250,78 @@ private:
 };
 
 
+/// Basis-set expansion for potentials using the Zhao(1996) basis set
+class BasisSet: public BasePotentialSph{
+public:
+    /** create the potential from the analytic density or potential model.
+        This is not a constructor but a static member function returning a shared pointer
+        to the newly created potential.
+        \param[in]  src        is the input density or potential model;
+        \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
+        \param[in]  mmax       is the order of expansion in azimuth (phi);
+        \param[in]  nmax       is the order of radial expansion (number of terms is nmax+1);
+        \param[in]  eta        is the shape parameter of basis functions;
+        \param[in]  r0         is the scale radius of basis functions (0 means auto-detect).
+    */
+    static PtrPotential create(const BaseDensity& src, int lmax, int mmax,
+        unsigned int nmax, double eta=1.0, double r0=0.);
+
+    /** create the potential from an N-body snapshot.
+        \param[in]  particles  is the array of particles.
+        \param[in]  sym  is the assumed symmetry of the input snapshot,
+        which defines the list of spherical harmonics to compute and to ignore
+        (e.g. if it is set to coord::ST_TRIAXIAL, all negative or odd l,m terms are zeros).
+        \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
+        \param[in]  mmax       is the order of expansion in azimuth (phi);
+        \param[in]  nmax       is the order of radial expansion (number of terms is nmax+1);
+        \param[in]  eta        is the shape parameter of basis functions;
+        \param[in]  r0         is the scale radius of basis functions (0 means auto-detect).
+    */
+    static PtrPotential create(
+        const particles::ParticleArray<coord::PosCyl> &particles,
+        coord::SymmetryType sym, int lmax, int mmax,
+        unsigned int nmax, double eta=1.0, double r0=0.);
+
+    /** construct the potential from the set of basis-set expansion coefficients.
+        \param[in]  eta  is the shape parameter of basis functions
+        (0.5 for Clutton-Brock, 1 for Hernquist-Ostriker, values between 1 and 2 provide best results),
+        the 0th order function has the 'Spheroid' (Zhao) double-power-law density profile with
+        transition steepness alpha=1/eta, outer slope beta=3+1/eta, and inner slope gamma=2-1/eta;
+        \param[in]  r0   is the scale radius of basis functions
+        (typically should be comparable to half-mass radius);
+        \param[in]  coef is the array of coefficients
+        (first dimension is the number of spherical-harmonic coefficients (lmax+1)^2,
+        second dimension is the number of radial basis functions nmax+1).
+    */
+    BasisSet(double eta, double r0, const std::vector<std::vector<double> > &coefs);
+
+    /** return the array of basis-set expansion coefficients.
+        \param[out] eta   will contain the shape parameter of basis functions;
+        \param[out] r0    will contain the scale radius of basis functions;
+        \param[out] coefs will contain the coefficients.
+    */
+    void getCoefs(double& eta, double& r0, std::vector<std::vector<double> > &coefs) const;
+
+    virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
+    virtual const char* name() const { return myName(); }
+    static const char* myName() { static const char* text = "BasisSet"; return text; }
+
+private:
+    const math::SphHarmIndices ind;  ///< indexing scheme for sph.-harm. coefficients
+
+    const double eta;  ///< shape parameter of basis functions
+
+    const double r0;   ///< scale radius of basis functions
+
+    const std::vector<std::vector<double> > coefs;  ///< arrays of expansion coefficients
+
+    virtual void evalSph(const coord::PosSph &pos,
+        double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double /*time*/) const;
+
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const;
+};
+
+
 /** Compute spherical-harmonic density expansion coefficients at the given radii.
     First it collects the values of density at a 3d grid in radii and angles,
     then applies sph.-harm. transform at each radius.
@@ -270,7 +340,7 @@ private:
 void computeDensityCoefsSph(const BaseDensity& dens,
     const math::SphHarmIndices& ind,
     const std::vector<double>& gridRadii,
-    std::vector< std::vector<double> > &coefs);
+    /*output*/ std::vector< std::vector<double> > &coefs);
 
 
 /** Compute the coefficients of spherical-harmonic density expansion
@@ -288,8 +358,9 @@ void computeDensityCoefsSph(
     const particles::ParticleArray<coord::PosCyl> &particles,
     const math::SphHarmIndices &ind,
     const std::vector<double> &gridRadii,
-    std::vector< std::vector<double> > &coefs,
+    /*output*/ std::vector< std::vector<double> > &coefs,
     double smoothing = 1.0);
+
 
 #if 0
 /** Compute spherical-harmonic expansion coefficients for a multi-component density.
@@ -332,8 +403,8 @@ void computeDensityCoefsSph(const math::IFunctionNdim& dens,
 void computePotentialCoefsSph(const BaseDensity &dens, 
     const math::SphHarmIndices &ind,
     const std::vector<double> &gridRadii,
-    std::vector< std::vector<double> > &Phi,
-    std::vector< std::vector<double> > &dPhi);
+    /*output*/ std::vector< std::vector<double> > &Phi,
+    /*output*/ std::vector< std::vector<double> > &dPhi);
 
 
 /** Same as above, but compute coefficients from the potential directly,
@@ -341,7 +412,39 @@ void computePotentialCoefsSph(const BaseDensity &dens,
 void computePotentialCoefsSph(const BasePotential& pot,
     const math::SphHarmIndices& ind,
     const std::vector<double> &gridRadii,
-    std::vector< std::vector<double> > &Phi,
-    std::vector< std::vector<double> > &dPhi);
+    /*output*/ std::vector< std::vector<double> > &Phi,
+    /*output*/ std::vector< std::vector<double> > &dPhi);
+
+
+/** Compute the coefficients of the basis-set potential expansion from the given density profile.
+    \param[in]  dens is the input density profile.
+    \param[in]  ind  is the coefficient indexing scheme (defines the order of angular expansion
+    and its symmetries).
+    \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
+    \param[in]  eta  is the shape parameter of basis functions.
+    \param[in]  r0   is the scale radius of basis functions.
+    \param[out] coef will contain the array of coefficients, will be resized as needed.
+*/
+void computePotentialCoefsBSE(
+    const BaseDensity& dens,
+    const math::SphHarmIndices& ind,
+    unsigned int nmax, double eta, double r0,
+    /*output*/ std::vector< std::vector<double> > &coefs);
+
+
+/** Compute the coefficients of the basis-set potential expansion from an N-body snapshot.
+    \param[in]  particles  is the array of particles.
+    \param[in]  ind  is the coefficient indexing scheme (defines the order of angular expansion
+    and its symmetries).
+    \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
+    \param[in]  eta  is the shape parameter of basis functions.
+    \param[in]  r0   is the scale radius of basis functions.
+    \param[out] coef will contain the array of coefficients, will be resized as needed.
+*/
+void computePotentialCoefsBSE(
+    const particles::ParticleArray<coord::PosCyl> &particles,
+    const math::SphHarmIndices &ind,
+    unsigned int nmax, double eta, double r0,
+    /*output*/ std::vector< std::vector<double> > &coefs);
 
 }  // namespace

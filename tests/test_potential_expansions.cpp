@@ -399,8 +399,10 @@ int main() {
 
     // spherical, cuspy and infinite
     std::cout << "--- Spherical NFW ---\n";
-    PtrPotential test1n = potential::Multipole::create(test1_NFWSph, 0, 0, 20, 1e-3, 1e3);
-    ok &= testAverageError(*test1n, test1_NFWSph, 0.001);
+    PtrPotential test1nb = potential::BasisSet::create(test1_NFWSph, 0, 0, 32, 4.0, 2.0);
+    ok &= testAverageError(*test1nb, test1_NFWSph, 0.1);
+    PtrPotential test1nm = potential::Multipole::create(test1_NFWSph, 0, 0, 20, 1e-3, 1e3);
+    ok &= testAverageError(*test1nm, test1_NFWSph, 0.001);
 
     // spherical, cored
     std::cout << "--- Spherical Dehnen gamma=0 ---\n";
@@ -409,11 +411,14 @@ int main() {
         static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 20, 0., 0., 20, 0., 0.);
     PtrPotential test1m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 0, 20);
+    PtrPotential test1b = potential::BasisSet::create(test1_Dehnen0Sph, 0, 0, 16, 1.0);
+    ok &= testAverageError(*test1b, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1m, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1c, test1_Dehnen0Sph, 0.02);
 
     // mildly triaxial, cored
     std::cout << "--- Triaxial Dehnen gamma=0 ---\n";
+    PtrPotential test2b = potential::BasisSet::create(test2_Dehnen0Tri, 8, 6, 20, 1.0);
     PtrPotential test2m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 8, 6, 20);
     PtrPotential test2mn = potential::Multipole::create( // same but for negative mass (prevent log-scaling)
@@ -426,19 +431,25 @@ int main() {
         test2_Dehnen0Tri, 6, 20, 0., 0., 20, 0., 0.);
     PtrPotential test2dn = potential::CylSpline::create( // same but for negative mass (exclude log-scaling)
         test2_Dehnen0Trin, 6, 20, 0., 0., 20, 0., 0.);
+    PtrPotential test2b_clone = writeRead(*test2b);
     PtrPotential test2c_clone = writeRead(*test2c);
+    ok &= testAverageError(*test2b, test2_Dehnen0Tri, 0.02);
+    ok &= testAverageError(*test2b, *test2b_clone, 1e-9);
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
     ok &= testAverageError(*test2mn,test2_Dehnen0Trin,0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2dn,test2_Dehnen0Trin,0.04);  // no log-scaling => somewhat worse error
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
-    ok &= testAverageError(*test2c, *test2c_clone, 3e-4);
+    ok &= testAverageError(*test2c, *test2c_clone, 1e-3);
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
+    PtrPotential test3b = potential::BasisSet::create(test3_Dehnen15Tri, 6, 6, 20, 2.0, 0.5);
+    ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.2);
     PtrPotential test3m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test3_Dehnen15Tri), 6, 6, 20);
     PtrPotential test3m_clone = writeRead(*test3m);
+    //ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, *test3m_clone, 1e-9);
 
@@ -451,14 +462,17 @@ int main() {
 
     // mildly triaxial, created from N-body samples
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";
+    PtrPotential test6b = potential::BasisSet ::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
+    PtrPotential test6m = potential::Multipole::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
     PtrPotential test6c = potential::CylSpline::create(test6_points,
         coord::ST_TRIAXIAL, 6, 20, 0., 0., 20, 0., 0.);
-    PtrPotential test6m = potential::Multipole::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
-    ok &= testAverageError(*test6m, test6_Dehnen05Tri, 1.0);
-    ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.5);
+    ok &= testAverageError(*test6b, test6_Dehnen05Tri, 1.0);
+    ok &= testAverageError(*test6m, test6_Dehnen05Tri, 0.5);
+    ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.0);
 
     std::cout << "--- Testing the accuracy of representation of an off-centered constant-density sphere ---"
         "\n--- Ideally all mass should be contained within the sphere radius, <r>=3/4, <r^2>=3/5 ---\n";
+    ok &= testBlob(*potential::BasisSet ::create(test7d, 8, 8, 20, 0.5,  1.0), test7d);
     ok &= testBlob(*potential::Multipole::create(test7x, 8, 8, 40, 0.05, 2.0), test7x);
     ok &= testBlob(*potential::Multipole::create(test7y, 8, 8, 40, 0.05, 2.0), test7y);
     ok &= testBlob(*potential::Multipole::create(test7z, 8, 8, 40, 0.05, 2.0), test7z);

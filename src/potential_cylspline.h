@@ -1,7 +1,7 @@
 /** \file    potential_cylspline.h
     \brief   density and potential approximations based on 2d spline in cylindrical coordinates
     \author  Eugene Vasiliev
-    \date    2014-2016
+    \date    2014-2021
 
     The classes and routines in this file deal with a generic way of representing
     an arbitrary density or potential profile as a 1d expansion + 2d interpolation:
@@ -41,15 +41,11 @@ public:
     /** Construct the density interpolator from the input density profile.
         This is a static member function returning a pointer to a newly created object.
         The arguments have the same meaning as for `CylSpline::create`, but the grid extent
-        (min/max) must be provided explicitly, i.e. is not determined automatically;
-        additional argument 'accurateIntegration' allows to use a higher-than-requested
-        expansion order (= the number of equally-spaced points in phi) to improve the accuracy
-        of Fourier integration over angle for a non-axisymmetric model;
-        on the other hand, only the requested number of terms are retained in the interpolator.
+        (min/max) must be provided explicitly, i.e. is not determined automatically.
     */
     static PtrDensity create(const BaseDensity& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax, 
-        unsigned int gridSizez, double zmin, double zmax, bool accurateIntegration=true);
+        unsigned int gridSizez, double zmin, double zmax);
 
     /** construct the object from the array of coefficients */
     DensityAzimuthalHarmonic(

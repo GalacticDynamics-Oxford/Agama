@@ -61,14 +61,13 @@ def test(gpot, Gpot, Apot, test_hessian=False):
     #5. test orbit integration using both gala and agama routines with either potential
     # create some initial conditions for orbits:
     # take the positions and assign velocity to be comparable to circular velocity at each point
-    ic = numpy.hstack((points,
-        numpy.random.normal(size=points.shape) * Apot.circular_velocity(points.T)[:,None]))
+    ic = numpy.hstack((points, numpy.random.normal(size=points.shape) * Apot.circular_velocity(points.T)[:,None]))
     t0 = time.time()
-    g_orb_g = gpot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator)
+    g_orb_g = gpot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator, Integrator_kwargs=dict(rtol=1e-8,atol=0))
     t1 = time.time()
-    g_orb_G = Gpot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator)
+    g_orb_G = Gpot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator, Integrator_kwargs=dict(rtol=1e-8,atol=0))
     t2 = time.time()
-    g_orb_A = Apot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator)
+    g_orb_A = Apot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator, Integrator_kwargs=dict(rtol=1e-8,atol=0))
     t3 = time.time()
     a_orb_G = numpy.dstack(agama.orbit(potential=Gpot, ic=ic, time=1000, trajsize=101, dtype=float)[:,1])
     t4 = time.time()
@@ -86,7 +85,7 @@ def test(gpot, Gpot, Apot, test_hessian=False):
     g_orb_A = g_orb_A.xyz.reshape(3, len(g_orb_A.t), len(ic))
     a_orb_G = numpy.swapaxes(a_orb_G*lu, 0, 1)[0:3]  # now the shape is 3 x nsteps x norbits
     a_orb_A = numpy.swapaxes(a_orb_A*lu, 0, 1)[0:3]
-    maxrad  = numpy.max(numpy.sum(a_orb_A**2, axis=0)**0.5)  # normalization factor for relative deviations in position
+    maxrad  = numpy.max(numpy.sum(a_orb_A**2, axis=0)**0.5, axis=0)  # normalization factor for relative deviations in position
     print("gala  orbits G vs A: %.3g" % numpy.max(numpy.sum(abs(g_orb_G - g_orb_A), axis=0) / maxrad))
     print("agama orbits G vs A: %.3g" % numpy.max(numpy.sum(abs(a_orb_G - a_orb_A), axis=0) / maxrad))
     print("gala vs agama: %.3g"       % numpy.max(numpy.sum(abs(g_orb_G - a_orb_G), axis=0) / maxrad))
@@ -117,4 +116,4 @@ Apot6=agama.GalaPotential(
     dict(type='dehnen', mass=1.71e9, scaleradius=0.07),  # nucleus
     dict(type='nfw',    mass=5.4e11, scaleradius=15.62), # halo
     units=Gpot6.units)
-test(gpot6, Gpot6, Apot6, test_hessian=True)
+test(gpot6, Gpot6, Apot6, test_hessian=False)

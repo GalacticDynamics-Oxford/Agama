@@ -246,14 +246,6 @@ double legendreQ(const double n, const double x, double* deriv)
     return F;
 }
 
-double gegenbauer(const int n, double lambda, double x) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_gegenpoly_n(n, lambda, x) )
-}
-
-void gegenbauerArray(const int nmax, double lambda, double x, double* result_array) {
-    gsl_sf_gegenpoly_array(nmax, lambda, x, result_array);
-}
-
 double factorial(const unsigned int n) {
      CALL_FUNCTION_OR_NAN( gsl_sf_fact(n) )
 }

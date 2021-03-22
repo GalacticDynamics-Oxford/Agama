@@ -131,19 +131,20 @@ void trigMultiAngle(const double phi, const unsigned int m, const bool needSine,
 {
     if(m<1)
         return;
-    // note that the recurrence relation below is not suitable for large m due to loss of accuracy,
-    // but for our purposes this should suffice;
-    // a more accurate expression is given in section 5.4 of Num.Rec.3rd ed.
-    double sinphi, cosphi;
+    // accurate recurrence relation from section 5.4 of Num.Rec.3rd ed.
+    double alpha, beta, sinphi, cosphi, sinphi1=0, cosphi1=1;
     sincos(phi, sinphi, cosphi);
-    outputArray[0] = cosphi;
-    for(unsigned int k=1; k<m; k++)
-        outputArray[k] = 2 * cosphi * outputArray[k-1] - (k>1 ? outputArray[k-2] : 1);
-    if(!needSine)
-        return;
-    outputArray[m] = sinphi;
-    for(unsigned int k=m+1; k<m*2; k++)
-        outputArray[k] = 2 * cosphi * outputArray[k-1] - (k>m+1 ? outputArray[k-2] : 0);
+    sincos(phi/2, alpha, beta);
+    alpha *= alpha*2;
+    beta = sinphi;
+    for(unsigned int k=0; k<m; k++) {
+        cosphi = cosphi1 - (alpha * cosphi1 + beta * sinphi1);
+        sinphi = sinphi1 - (alpha * sinphi1 - beta * cosphi1);
+        outputArray[k] = cosphi;
+        if(needSine) outputArray[k+m] = sinphi;
+        cosphi1 = cosphi;
+        sinphi1 = sinphi;
+    }
 }
 
 // ------ indexing scheme for spherical harmonics, encoding its symmetry properties ------ //

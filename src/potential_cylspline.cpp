@@ -23,7 +23,11 @@ static const unsigned int CYLSPLINE_MIN_GRID_SIZE = 2;
 /// minimum number of terms in Fourier expansion used to compute coefficients
 /// of a non-axisymmetric density or potential model (it may be larger than
 /// the requested number of output terms, to improve the accuracy of integration)
-static const unsigned int MMIN_AZIMUTHAL_FOURIER = 16;
+static const unsigned int MMIN_FOURIER = 16;
+
+/// the number of additional Fourier terms used to compute coefficients on top of
+/// the requested number of output terms (again to improve the accuracy of integration)
+static const unsigned int MADD_FOURIER = 8;
 
 /// order of multipole extrapolation outside the grid
 static const int LMAX_EXTRAPOLATION = 8;
@@ -576,7 +580,7 @@ void computePotentialCoefsCyl(
 
 PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax, 
-    unsigned int gridSizez, double zmin, double zmax, bool accurateIntegration)
+    unsigned int gridSizez, double zmin, double zmax)
 {
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
         gridSizez<CYLSPLINE_MIN_GRID_SIZE || zmin<=0 || zmax<=zmin)
@@ -589,8 +593,7 @@ PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
     // to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle:
     // the number of output harmonics remains the same, but the accuracy of approximation increases.
-    int mmaxFourier = isZRotSymmetric(src) ? 0 :
-        accurateIntegration ? std::max<int>(mmax, MMIN_AZIMUTHAL_FOURIER) : mmax;
+    int mmaxFourier = isZRotSymmetric(src) ? 0 : std::max<int>(mmax+MADD_FOURIER, MMIN_FOURIER);
     computeDensityCoefsCyl(src, mmaxFourier, gridR, gridz, coefs);
     if(mmaxFourier > (int)mmax) {
         // remove extra coefs: (mmaxFourier-mmax) from both heads and tails of arrays
@@ -944,7 +947,7 @@ PtrPotential CylSpline::create(const BasePotential& src, int mmax,
     std::vector< math::Matrix<double> > *coefs[3] = {&Phi, &dPhidR, &dPhidz};
     // to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle;
-    int mmaxFourier = isZRotSymmetric(src) ? 0 : std::max<int>(mmax, MMIN_AZIMUTHAL_FOURIER);
+    int mmaxFourier = isZRotSymmetric(src) ? 0 : std::max<int>(mmax+MADD_FOURIER, MMIN_FOURIER);
     computePotentialCoefsCyl(src, mmaxFourier, gridR, gridz, /*output*/ Phi, dPhidR, dPhidz);
     if(mmaxFourier > (int)mmax) {
         // remove extra coefs: (mmaxFourier-mmax) from both heads and tails of arrays

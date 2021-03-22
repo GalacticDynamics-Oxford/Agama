@@ -37,9 +37,12 @@ void ComponentWithSpheroidalDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    density = potential::DensitySphericalHarmonic::create(
+    std::vector<double> gridr = math::createExpGrid(gridSizeR, rmin, rmax);
+    std::vector<std::vector<double> > coefs;
+    computeDensityCoefsSph(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        lmax, mmax, gridSizeR, rmin, rmax, false /*use exactly the requested order*/);
+        math::SphHarmIndices(lmax, mmax, /*symmetry*/coord::ST_TRIAXIAL), gridr, /*output*/coefs);
+    density.reset(new potential::DensitySphericalHarmonic(gridr, coefs));
 }
 
 ComponentWithDisklikeDF::ComponentWithDisklikeDF(
@@ -59,9 +62,13 @@ void ComponentWithDisklikeDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    density = potential::DensityAzimuthalHarmonic::create(
+    std::vector<double> gridR = math::createNonuniformGrid(gridSizeR, Rmin, Rmax, true);
+    std::vector<double> gridz = math::createNonuniformGrid(gridSizez, zmin, zmax, true);
+    std::vector< math::Matrix<double> > coefs;
+    computeDensityCoefsCyl(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, false /*respect the expansion order*/);
+        mmax, gridR, gridz, /*output*/coefs);
+    density.reset(new potential::DensityAzimuthalHarmonic(gridR, gridz, coefs));
 }
 
 

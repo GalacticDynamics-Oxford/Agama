@@ -5,7 +5,7 @@ from .py import schwarzlib         # also import this submodule, but do not merg
 try:
     from .py import agamacolormaps # initialize submodule and register some custom colormaps for matplotlib
     del agamacolormaps             # remove submodule from the namespace
-except Exception as e: print(e)    # no error in case this fails
+except: pass                       # no error in case this fails
 del agama                          # remove the C++ library from the root namespace
 del py.pygama                      # and the same for the Python extension submodule
 del py.schwarzlib

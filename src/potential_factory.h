@@ -208,7 +208,7 @@ PtrDensity readDensity(
     \param[in] iniFileName is the name of an INI file that contains one or more sections
     with potential parameters, named as [Potential], [Potential1], ...
     These sections may contain references to other files with potential parameters (file=...),
-    or parameters of analytic potential models, or coefficients of Multipole or CylSpline
+    or parameters of analytic potential models, or coefficients of BasisSet, Multipole or CylSpline
     potential expansions previously stored by writePotential().
     \param[in] converter is the unit converter for transforming the dimensional quantities
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
@@ -222,15 +222,15 @@ PtrPotential readPotential(
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 
-/** Write density or potential expansion coefficients to a text file.
+/** Write density or potential expansion coefficients to a text (INI) file.
     The potential must be one of the following expansion classes: 
-    `BasisSetExp`, `SplineExp`, `CylSpline`, `Multipole`,
+    `BasisSet`, `Multipole`, `CylSpline`,
     or the density may be `DensitySphericalHarmonic` or `DensityAzimuthalHarmonic`.
     The coefficients stored in a file may be later loaded by `readPotential()` or
     `readDensity()` routines.
-    If the potential or density is composite, each component is saved into a separate file
-    with suffixes "_0", "_1", etc. attached to the name, and the list of these files is
-    stored in the main file.
+    For a composite potential or density, all components are stored in the same file
+    one after another, under separate sections [Potential], [Potential1], etc.
+    For potential/density types not in the above list, only the name is stored (no parameters).
     \param[in] fileName is the output file;
     \param[in] density is the reference to density or potential object;
     \param[in] converter is the unit converter for transforming the density or potential

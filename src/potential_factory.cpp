@@ -62,6 +62,7 @@ enum PotentialType {
     PT_DENS_CYLGRID, ///< `DensityAzimuthalHarmonic`
 
     // generic potential expansions
+    PT_BASISSET,     ///< radial basis-set expansion: `BasisSet`
     PT_MULTIPOLE,    ///< spherical-harmonic expansion:  `Multipole`
     PT_CYLSPLINE,    ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
 
@@ -128,6 +129,9 @@ struct AllParam
     unsigned int lmax;       ///< number of angular terms in spherical-harmonic expansion
     unsigned int mmax;       ///< number of angular terms in azimuthal-harmonic expansion
     double smoothing;        ///< amount of smoothing in Multipole initialized from an N-body snapshot
+    unsigned int nmax;       ///< order of radial expansion for BasisSet (actual number of terms is nmax+1)
+    double eta;              ///< shape parameters of basis functions for BasisSet (0.5-CB, 1.0-HO, etc.)
+    double r0;               ///< scale radius of the basis functions for BasisSet
     std::string file;        ///< name of file with coordinates of points, or coefficients of expansion
     std::string center;      ///< coordinates of the center offset or the name of a file with these offsets
     /// default constructor initializes the fields to some reasonable values
@@ -141,7 +145,7 @@ struct AllParam
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.)
+        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0)
     {};
     /// convert to KeplerBinaryParams
     operator KeplerBinaryParams() const
@@ -172,6 +176,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, NukerParam   ::myName())) return PT_NUKER;
     if(utils::stringsEqual(name, SersicParam  ::myName())) return PT_SERSIC;
     if(utils::stringsEqual(name, DiskDensity  ::myName())) return PT_DISK;
+    if(utils::stringsEqual(name, BasisSet     ::myName())) return PT_BASISSET;
     if(utils::stringsEqual(name, Multipole    ::myName())) return PT_MULTIPOLE;
     if(utils::stringsEqual(name, CylSpline    ::myName())) return PT_CYLSPLINE;
     if(utils::stringsEqual(name, MiyamotoNagai::myName())) return PT_MIYAMOTONAGAI;
@@ -242,12 +247,12 @@ namespace{
 AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits& conv)
 {
     AllParam param;
-    param.potentialType       = getPotentialTypeByName(kvmap.getString("Type"));
-    param.densityType         = getPotentialTypeByName(kvmap.getString("Density"));
-    param.symmetryType        = getSymmetryTypeByName (kvmap.getString("Symmetry"));
-    param.file                = kvmap.getString("File");
+    param.potentialType       = getPotentialTypeByName(kvmap.getString("type"));
+    param.densityType         = getPotentialTypeByName(kvmap.getString("density"));
+    param.symmetryType        = getSymmetryTypeByName (kvmap.getString("symmetry"));
+    param.file                = kvmap.getString("file");
     param.center              = kvmap.getString("center");
-    param.mass                = kvmap.getDouble("Mass", param.mass)
+    param.mass                = kvmap.getDouble("mass", param.mass)
                               * conv.massUnit;
     param.surfaceDensity      = kvmap.getDoubleAlt("surfaceDensity", "Sigma0", param.surfaceDensity)
                               * conv.massUnit / pow_2(conv.lengthUnit);
@@ -293,6 +298,10 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.lmax                = kvmap.getInt(   "lmax", param.lmax);
     param.mmax                = kvmap.contains( "mmax") ? kvmap.getInt("mmax") : param.lmax;
     param.smoothing           = kvmap.getDouble("smoothing", param.smoothing);
+    param.nmax                = kvmap.getInt(   "nmax", param.nmax);
+    param.eta                 = kvmap.getDouble("eta",  param.eta);
+    param.r0                  = kvmap.getDouble("r0",   param.r0)
+                              * conv.lengthUnit;
 
     // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity or a cutoff radius is provided,
     // replace it with an equivalent Spheroid model, because the dedicated potential models
@@ -304,7 +313,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         param.alpha = type == PT_PLUMMER ? 2 : 1;
         param.beta  = type == PT_PLUMMER ? 5 : 3;
         param.gamma = type == PT_PLUMMER ? 0 : 1;
-        if(param.outerCutoffRadius==0) {
+        if(param.outerCutoffRadius==INFINITY) {
             param.densityNorm = (type == PT_PLUMMER ? 0.75 : 0.25) / M_PI * param.mass /
                 (pow_3(param.scaleRadius) * param.axisRatioY * param.axisRatioZ);
         } else
@@ -453,17 +462,17 @@ public:
 ///@{
 
 /// parse the array of spherical-harmonic coefficients
-/// for the Multipole potential or the DensitySphericalHarmonic
-bool parseSphericalHarmonics(std::vector<std::string>& lines, const AllParam& params,
+/// for Multipole or BasisSet potentials or DensitySphericalHarmonic
+bool parseSphericalHarmonics(std::vector<std::string>& lines, const AllParam& params, size_t numLines,
     /*output*/ std::vector<double>& gridr, std::vector< std::vector<double> > &coefs)
 {
-    if(lines.size() < params.gridSizeR+1)
+    if(lines.size() < numLines+1)
         return false;
     unsigned int numTerms = pow_2(params.lmax+1);
-    coefs.assign(numTerms, std::vector<double>(params.gridSizeR));
-    gridr.resize(params.gridSizeR);
+    coefs.assign(numTerms, std::vector<double>(numLines));
+    gridr.resize(numLines);  // numLines is either nmax+1 (for BasisSet) or gridSizeR (for others)
     std::vector<std::string> fields;
-    for(unsigned int n=0; n<params.gridSizeR; n++) {
+    for(unsigned int n=0; n<numLines; n++) {
         fields = utils::splitString(lines[n+1], " \t");
         if(fields.size() != numTerms+1)
             return false;
@@ -472,7 +481,7 @@ bool parseSphericalHarmonics(std::vector<std::string>& lines, const AllParam& pa
             coefs[ind][n] = utils::toDouble(fields[ind+1]);
     }
     // remove the parsed lines from the array
-    lines.erase(lines.begin(), lines.begin()+params.gridSizeR+1);
+    lines.erase(lines.begin(), lines.begin()+numLines+1);
     return true;
 }
 
@@ -524,6 +533,27 @@ bool parseAzimuthalHarmonics(std::vector<std::string>& lines, const AllParam& pa
     return true;
 }
 
+/// parse the array of coefficients and create a BasisSet potential
+PtrPotential createBasisSetFromCoefs(std::vector<std::string>& lines,
+    const AllParam& params, const units::ExternalUnits& converter)
+{
+    std::vector< std::vector<double> > coefs;
+    std::vector< double > indices;
+    bool ok = lines.size() >= params.nmax+3 &&
+        lines[0] == "#Phi" && lines[1].size()>1 && lines[1][0] == '#';
+    if(ok) {
+        lines.erase(lines.begin());
+        ok &= parseSphericalHarmonics(lines, params, params.nmax+1, /*output*/ indices, coefs);
+        for(size_t i=0; i<indices.size(); i++)
+            ok &= indices[i] == i;  // should be a sequence of integers from 0 to nmax inclusive
+    }
+    if(!ok)
+        throw std::runtime_error("Error loading BasisSet potential");
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(pow_2(converter.velocityUnit), coefs[i]);
+    return PtrPotential(new BasisSet(params.eta, params.r0, coefs));
+}
+
 /// parse the array of coefficients and create a Multipole potential
 PtrPotential createMultipoleFromCoefs(std::vector<std::string>& lines,
     const AllParam& params, const units::ExternalUnits& converter)
@@ -536,9 +566,9 @@ PtrPotential createMultipoleFromCoefs(std::vector<std::string>& lines,
         lines[params.gridSizeR+4].size()>1 && lines[params.gridSizeR+4][0] == '#';
     if(ok) {
         lines.erase(lines.begin());
-        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefsPhi);
+        ok &= parseSphericalHarmonics(lines, params, params.gridSizeR, /*output*/ gridr, coefsPhi);
         lines.erase(lines.begin(), lines.begin()+2);
-        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefsdPhi);
+        ok &= parseSphericalHarmonics(lines, params, params.gridSizeR, /*output*/ gridr, coefsdPhi);
     }
     if(!ok || coefsPhi.size() != coefsdPhi.size())
         throw std::runtime_error("Error loading Multipole potential");
@@ -600,7 +630,7 @@ PtrDensity createDensitySphericalHarmonicFromCoefs(std::vector<std::string>& lin
         lines[0] == "#rho" && lines[1].size()>1 && lines[1][0] == '#';
     if(ok) {
         lines.erase(lines.begin());
-        ok &= parseSphericalHarmonics(lines, params, /*output*/ gridr, coefs);
+        ok &= parseSphericalHarmonics(lines, params, params.gridSizeR, /*output*/ gridr, coefs);
     }
     if(!ok)
         throw std::runtime_error(std::string("Error loading ") + DensitySphericalHarmonic::myName());
@@ -679,6 +709,26 @@ void writeAzimuthalHarmonics(std::ostream& strm,
                 strm << "\n";
             }
         }
+}
+
+void writePotentialBasisSet(std::ostream& strm, const BasisSet& pot,
+    const units::ExternalUnits& converter)
+{
+    double eta, r0;
+    std::vector< std::vector<double> > coefs;
+    pot.getCoefs(eta, r0, coefs);
+    assert(coefs.size() > 0 && coefs[0].size() > 0);
+    // convert units
+    r0 /= converter.lengthUnit;
+    for(unsigned int i=0; i<coefs.size(); i++)
+        math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
+    strm << "nmax=" << (coefs[0].size()-1) << "\n";
+    strm << "lmax=" << static_cast<int>(sqrt(coefs.size()*1.0)-1) << "\n";
+    strm << "eta="  << utils::toString(eta,15) << "\n";
+    strm << "r0="   << utils::toString(r0, 15) << "\n";
+    strm << "symmetry=" << getSymmetryNameByType(pot.symmetry()) << "\n";
+    strm << "Coefficients\n#Phi\n";
+    writeSphericalHarmonics(strm, math::createUniformGrid(coefs[0].size(), 0, coefs[0].size()-1), coefs);
 }
 
 void writePotentialMultipole(std::ostream& strm, const Multipole& pot,
@@ -823,6 +873,11 @@ void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity* dens,
         strm << "#center is not stored\n";
     counter++;
 
+    const BasisSet* bs = dynamic_cast<const BasisSet*>(dens);
+    if(bs) {
+        writePotentialBasisSet(strm, *bs, converter);
+        return;
+    }
     const Multipole* mu = dynamic_cast<const Multipole*>(dens);
     if(mu) {
         writePotentialMultipole(strm, *mu, converter);
@@ -928,6 +983,9 @@ PtrPotential createPotentialExpansionFromParticles(const AllParam& param,
     const particles::ParticleArray<coord::PosCyl>& particles)
 {
     switch(param.potentialType) {
+    case PT_BASISSET:
+        return BasisSet::create(particles, param.symmetryType, param.lmax, param.mmax,
+            param.nmax, param.eta, param.r0);
     case PT_MULTIPOLE:
         return Multipole::create(particles, param.symmetryType, param.lmax, param.mmax,
             param.gridSizeR, param.rmin, param.rmax, param.smoothing);
@@ -1025,6 +1083,9 @@ template<typename SourceType>
 PtrPotential createPotentialExpansionFromSource(const AllParam& param, const SourceType& source)
 {
     switch(param.potentialType) {
+    case PT_BASISSET:
+        return BasisSet::create(source, param.lmax, param.mmax,
+            param.nmax, param.eta, param.r0);
     case PT_MULTIPOLE:
         return Multipole::create(source, param.lmax, param.mmax,
             param.gridSizeR, param.rmin, param.rmax);
@@ -1040,7 +1101,9 @@ PtrPotential createPotentialExpansionFromSource(const AllParam& param, const Sou
 PtrPotential createPotentialExpansion(
     const AllParam& param, const utils::KeyValueMap& kvmap, const units::ExternalUnits& converter)
 {
-    assert(param.potentialType == PT_MULTIPOLE || param.potentialType == PT_CYLSPLINE);
+    assert(param.potentialType == PT_BASISSET  ||
+           param.potentialType == PT_MULTIPOLE ||
+           param.potentialType == PT_CYLSPLINE);
 
     // dump the content of the INI section into an array of strings, and search for Coefficients
     std::vector<std::string> lines = kvmap.dumpLines();
@@ -1060,9 +1123,11 @@ PtrPotential createPotentialExpansion(
     // option 1: coefficients are provided in the INI file
     if(haveCoefs && !haveFile && !haveSource) {
         lines.erase(lines.begin(), lines.begin()+startLine);
-        return param.potentialType == PT_MULTIPOLE ?
-            createMultipoleFromCoefs(lines, param, converter) :
-            createCylSplineFromCoefs(lines, param, converter);
+        switch(param.potentialType) {
+            case PT_BASISSET:  return createBasisSetFromCoefs (lines, param, converter);
+            case PT_MULTIPOLE: return createMultipoleFromCoefs(lines, param, converter);
+            default:           return createCylSplineFromCoefs(lines, param, converter);
+        }
     }
 
     // option 2: N-body snapshot
@@ -1104,7 +1169,8 @@ PtrPotential createPotentialExpansion(
     }
 
     throw std::invalid_argument(
-        std::string(param.potentialType == PT_MULTIPOLE ? "Multipole" : "CylSpline") +
+        std::string(param.potentialType == PT_BASISSET  ? "BasisSet" :
+                    param.potentialType == PT_MULTIPOLE ? "Multipole" : "CylSpline") +
         " can be constructed in one of three possible ways: "
         "by providing an N-body snapshot in file=..., or a source density/potential model "
         "in density=..., or a table of coefficients (when loading from a file)");
@@ -1410,6 +1476,7 @@ PtrPotential createPotential(
         }
         // 3. if the potential type is one of the expansions and a source density/potential
         // is provided, construct the expansion from a temporary analytic den/pot object
+        case PT_BASISSET:
         case PT_MULTIPOLE:
         case PT_CYLSPLINE: {
             bunch.componentsPot.push_back(createPotentialExpansion(param, kvmap[i], converter));

@@ -14,10 +14,24 @@ namespace potential {
 // internal definitions
 namespace{
 
+/// the integration over the two angles theta, phi is carried out using the Gauss-Legendre grid
+/// in cos(theta) and a uniformly spaced grid in phi - this is the optimal choice for
+/// the spherical-harmonic transform, as it gives exact results as long as the order of expansion
+/// is smaller than the number of points in the grid. However, when computing the expansion
+/// coefficients for input density or potential models that are not band-limited to the given
+/// number of harmonic coefficients, it is advantageous to increase the number of grid points
+/// beyond the lower limit, to improve the accuracy of integration, then perform the sph.-harm.
+/// transform, and then discard the coefficients above the requested output limit.
+/// The extra margin is controlled by the two parameters below.
+
 /// minimum number of terms in sph.-harm. expansion used to compute coefficients
 /// of a non-spherical density or potential model (it may be larger than
 /// the requested number of output terms, to improve the accuracy of integration)
 static const int LMIN_SPHHARM = 16;
+
+/// the number of additional sph.-harm. terms used to compute coefficients on top of
+/// the requested number of output terms (again to improve the accuracy of integration)
+static const int LADD_SPHHARM = 8;
 
 /// choice between using 1d splines in radius for each (l,m) or 2d splines in (r,theta) for each m
 /// is controlled by the order of expansion in theta:
@@ -540,51 +554,6 @@ void fourierTransformAzimuth(const math::SphHarmIndices& ind, const double phi,
     }
 }
 
-/** transform sph.-harm. coefs of potential (C_lm) and its first (dC_lm) and second (d2C_lm)
-    derivatives w.r.t. arbitrary function of radius to the value, gradient and hessian of 
-    potential in spherical coordinates (w.r.t. the same function of radius).
-*/
-void sphHarmTransformInverseDeriv(
-    const math::SphHarmIndices& ind, const coord::PosCyl& pos,
-    const double C_lm[], const double dC_lm[], const double d2C_lm[],
-    double *val, coord::GradSph *grad, coord::HessSph *hess)
-{
-    // temporary storage for coefficients - allocated on the stack, automatically freed
-    const int numQuantities = hess!=NULL ? 6 : grad!=NULL ? 3 : 1;  // number of quantities in C_m
-    int sizeC = 6 * (2*ind.mmax+1), sizeP = ind.lmax+1;
-    double*   C_m  = static_cast<double*>(alloca((sizeC + 3*sizeP) * sizeof(double)));
-    double*   P_lm = C_m + sizeC;
-    double*  dP_lm = numQuantities>=3 ? P_lm + sizeP   : NULL;
-    double* d2P_lm = numQuantities==6 ? P_lm + sizeP*2 : NULL;
-    const double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
-    const int nm = ind.mmax - ind.mmin() + 1;  // number of azimuthal harmonics in C_m array
-    for(int mm=0; mm<nm; mm++) {
-        int m = mm + ind.mmin();
-        int lmin = ind.lmin(m);
-        if(lmin > ind.lmax)
-            continue;
-        double mul = m==0 ? 2*M_SQRTPI : 2*M_SQRTPI*M_SQRT2;  // extra factor sqrt{2} for m!=0 trig fncs
-        for(int q=0; q<numQuantities; q++)
-            C_m[mm + q*nm] = 0;
-        int absm = abs(m);
-        math::sphHarmArray(ind.lmax, absm, tau, P_lm, dP_lm, d2P_lm);
-        for(int l=lmin; l<=ind.lmax; l+=ind.step) {
-            unsigned int c = ind.index(l, m), p = l-absm;
-            C_m[mm] += P_lm[p] * C_lm[c] * mul;
-            if(numQuantities>=3) {
-                C_m[mm + nm  ] +=  P_lm[p] * dC_lm[c] * mul;   // dPhi_m/dr
-                C_m[mm + nm*2] += dP_lm[p] *  C_lm[c] * mul;   // dPhi_m/dtheta
-            }
-            if(numQuantities==6) {
-                C_m[mm + nm*3] +=   P_lm[p] * d2C_lm[c] * mul; // d2Phi_m/dr2
-                C_m[mm + nm*4] +=  dP_lm[p] *  dC_lm[c] * mul; // d2Phi_m/drdtheta
-                C_m[mm + nm*5] += d2P_lm[p] *   C_lm[c] * mul; // d2Phi_m/dtheta2
-            }
-        }
-    }
-    fourierTransformAzimuth(ind, pos.phi, C_m, val, grad, hess);
-}
-
 /** optimized version of sphHarmTransformInverseDeriv for the case lmax=2, mmin=0, step=2,
     processing only the {l=0,m=0}, {l=2,m=0} and optionally {l=2,m=2} terms (a common special case)
 */
@@ -650,6 +619,55 @@ void sphHarmTransformInverseDeriv2(
             hess->dphi2     +=   Phi2    * -4*cp;
         }
     }
+}
+
+/** transform sph.-harm. coefs of potential (C_lm) and its first (dC_lm) and second (d2C_lm)
+    derivatives w.r.t. arbitrary function of radius to the value, gradient and hessian of 
+    potential in spherical coordinates (w.r.t. the same function of radius).
+*/
+void sphHarmTransformInverseDeriv(
+    const math::SphHarmIndices& ind, const coord::PosCyl& pos,
+    const double C_lm[], const double dC_lm[], const double d2C_lm[],
+    double *val, coord::GradSph *grad, coord::HessSph *hess)
+{
+    if(ind.lmax==2 && ind.mmin()==0 && ind.step==2) {  // an optimized special case
+        sphHarmTransformInverseDeriv2(ind, pos, C_lm, dC_lm, d2C_lm, val, grad, hess);
+        return;
+    }
+    // temporary storage for coefficients - allocated on the stack, automatically freed
+    const int numQuantities = hess!=NULL ? 6 : grad!=NULL ? 3 : 1;  // number of quantities in C_m
+    int sizeC = 6 * (2*ind.mmax+1), sizeP = ind.lmax+1;
+    double*   C_m  = static_cast<double*>(alloca((sizeC + 3*sizeP) * sizeof(double)));
+    double*   P_lm = C_m + sizeC;
+    double*  dP_lm = numQuantities>=3 ? P_lm + sizeP   : NULL;
+    double* d2P_lm = numQuantities==6 ? P_lm + sizeP*2 : NULL;
+    const double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+    const int nm = ind.mmax - ind.mmin() + 1;  // number of azimuthal harmonics in C_m array
+    for(int mm=0; mm<nm; mm++) {
+        int m = mm + ind.mmin();
+        int lmin = ind.lmin(m);
+        if(lmin > ind.lmax)
+            continue;
+        double mul = m==0 ? 2*M_SQRTPI : 2*M_SQRTPI*M_SQRT2;  // extra factor sqrt{2} for m!=0 trig fncs
+        for(int q=0; q<numQuantities; q++)
+            C_m[mm + q*nm] = 0;
+        int absm = abs(m);
+        math::sphHarmArray(ind.lmax, absm, tau, P_lm, dP_lm, d2P_lm);
+        for(int l=lmin; l<=ind.lmax; l+=ind.step) {
+            unsigned int c = ind.index(l, m), p = l-absm;
+            C_m[mm] += P_lm[p] * C_lm[c] * mul;
+            if(numQuantities>=3) {
+                C_m[mm + nm  ] +=  P_lm[p] * dC_lm[c] * mul;   // dPhi_m/dr
+                C_m[mm + nm*2] += dP_lm[p] *  C_lm[c] * mul;   // dPhi_m/dtheta
+            }
+            if(numQuantities==6) {
+                C_m[mm + nm*3] +=   P_lm[p] * d2C_lm[c] * mul; // d2Phi_m/dr2
+                C_m[mm + nm*4] +=  dP_lm[p] *  dC_lm[c] * mul; // d2Phi_m/drdtheta
+                C_m[mm + nm*5] += d2P_lm[p] *   C_lm[c] * mul; // d2Phi_m/dtheta2
+            }
+        }
+    }
+    fourierTransformAzimuth(ind, pos.phi, C_m, val, grad, hess);
 }
 
 // transform potential derivatives from {ln(r), theta} to {R, z}
@@ -739,7 +757,6 @@ void computeDensityCoefsSph(
     std::vector<double> particleRadii;
     computeSphericalHarmonicsFromParticles(particles, ind, particleRadii, harmonics);
     size_t nbody = particleRadii.size();
-    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 
     // convert the radii to log-radii and store particle masses in the {l=0,m=0} harmonic
     for(size_t i=0; i<nbody; i++) {
@@ -785,6 +802,7 @@ void computeDensityCoefsSph(
     math::SplineApprox fitter(gridLogRadii, particleRadii, /*weights*/harmonics[0]);
     double edf = 2 + (gridSizeR-2) / (smoothing+1);
     std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
     bool stop = false;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -959,7 +977,7 @@ void computePotentialCoefsSph(const BaseDensity& dens,
 // static factory methods
 PtrDensity DensitySphericalHarmonic::create(
     const BaseDensity& dens, int lmax, int mmax, 
-    unsigned int gridSizeR, double rmin, double rmax, bool accurateIntegration)
+    unsigned int gridSizeR, double rmin, double rmax)
 {
     if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || rmin<=0 || rmax<=rmin)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of min/max grid radii");
@@ -967,10 +985,8 @@ PtrDensity DensitySphericalHarmonic::create(
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
     // to improve accuracy of SH coefficient computation, we increase the order of expansion
     // that determines the number of integration points in angles
-    int lmax_tmp =     isSpherical(dens) ? 0 :
-        accurateIntegration? std::max<int>(lmax, LMIN_SPHHARM) : lmax;
-    int mmax_tmp = isZRotSymmetric(dens) ? 0 :
-        accurateIntegration? std::max<int>(mmax, LMIN_SPHHARM) : mmax;
+    int lmax_tmp =     isSpherical(dens) ? 0 : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int mmax_tmp = isZRotSymmetric(dens) ? 0 : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
     std::vector<std::vector<double> > coefs;
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
     computeDensityCoefsSph(dens,
@@ -1131,7 +1147,7 @@ public:
     virtual const char* name() const { return "MultipoleInterp1d"; };
 private:
     /// indexing scheme for sph.-harm. coefficients
-    math::SphHarmIndices ind;
+    const math::SphHarmIndices ind;
     /// interpolation splines in log(r) for each {l,m} sph.-harm. component of potential
     std::vector<math::QuinticSpline> spl;
     /// whether to perform log-scaling on the l=0 component
@@ -1154,7 +1170,7 @@ public:
     virtual const char* name() const { return "MultipoleInterp2d"; }
 private:
     /// indexing scheme for sph.-harm. coefficients
-    math::SphHarmIndices ind;
+    const math::SphHarmIndices ind;
     /// 2d interpolation splines in meridional plane for each azimuthal harmonic (m) component
     std::vector<math::QuinticSpline2d> spl;
     /// whether to perform log-scaling on the m=0 component
@@ -1188,11 +1204,11 @@ PtrPotential createMultipole(
     if(isSpherical(src))
         lmax = 0;   // don't waste effort on computing non-spherical harmonic terms
     else
-        lmax_tmp = std::max<int>(lmax, LMIN_SPHHARM);
+        lmax_tmp = std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
     if(isZRotSymmetric(src))
         mmax = 0;   // similarly for non-axisymmetric harmonic terms
     else
-        mmax_tmp = std::max<int>(mmax, LMIN_SPHHARM);
+        mmax_tmp = std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
     std::vector<std::vector<double> > Phi, dPhi;
     computePotentialCoefsSph(src,
         math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()),
@@ -1562,12 +1578,8 @@ void MultipoleInterp1d::evalCyl(const coord::PosCyl &pos,
                     Phi_lm[c] *= Phi_lm[0];
                 }
             }
-        if(ind.lmax==2 && ind.mmin()==0 && ind.step==2)   // an optimized special case
-            sphHarmTransformInverseDeriv2(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
-                needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
-        else
-            sphHarmTransformInverseDeriv(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
-                needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
+        sphHarmTransformInverseDeriv(ind, pos, Phi_lm, dPhi_lm, d2Phi_lm, potential,
+            needGrad ? &gradSph : NULL, needHess ? &hessSph : NULL);
     }
     if(needGrad)
         transformDerivsSphToCyl(pos, gradSph, hessSph, grad, hess);
@@ -1834,6 +1846,352 @@ void MultipoleInterp2d::evalCyl(const coord::PosCyl &pos,
         der2.d2thetadRdz = pow_2(der.dthetadR) - pow_2(der.drdR) * r * rplusRinv;
         der2.d2thetadz2  = -der2.d2thetadR2 - der.dthetadR * rplusRinv;
         *hess = toHess(trGrad, trHess, der, der2);
+    }
+}
+
+
+//------ Basis-set potential ------//
+
+void computePotentialCoefsBSE(
+    const BaseDensity& dens,
+    const math::SphHarmIndices& ind,
+    unsigned int nmax, double eta, double r0,
+    /*output*/ std::vector< std::vector<double> > &coefs)
+{
+    // 1st step: prepare the radial grid for integration of density weighted with basis functions
+    const unsigned int BSE_MIN_NPOINTS = 33;
+    size_t gridSize = std::max<unsigned int>(BSE_MIN_NPOINTS, nmax*2+1);
+    std::vector<double> gridxi(gridSize), weights(gridSize),
+        gridr(gridSize), gridPhi(gridSize), gridmul(gridSize);
+    math::prepareIntegrationTableGL(-1, 1, gridSize, &gridxi[0], &weights[0]);
+    for(size_t i=0; i<gridSize; i++) {
+        double s1eta = (1+gridxi[i]) / (1-gridxi[i]),
+        s  = math::pow(s1eta, eta),
+        zi = math::pow(s1eta+1, -eta);
+        gridr[i] = r0 * s;
+        gridPhi[i] = -zi * 8*M_PI * eta * pow_3(gridr[i]) / (1 - pow_2(gridxi[i])) * weights[i];
+        gridmul[i] = s * zi * zi;  // the previous array is multiplied by this one to the power l
+    }
+
+    // 2nd step: collect the values of spherical-harmonic coefficients of density at the radial grid
+    std::vector< std::vector<double> > sphCoefs;
+    std::vector< std::vector<double> > *coefRefs = &sphCoefs;
+    computeSphHarmCoefs(dens, ind, gridr, &coefRefs);
+
+    // 3rd step: compute the integrals in scaled radius for each radial basis function and angular harmonic
+    coefs.assign(ind.size(), std::vector<double>(nmax+1, 0.));
+    std::vector<double> Inl(nmax+1);
+    for(int l=0; l<=ind.lmax; l++) {
+        int mmax = std::min<int>(l, ind.mmax), mmin = ind.mmin()==0 ? 0 : -mmax;
+        // precompute common factors at the given l
+        double w = 0.5 + eta * (2*l+1);
+        double prefac = - M_PI/2 / eta * pow(1./16, w) * exp(math::lngamma(2 * w) - 2*math::lngamma(w));
+        Inl[0] = prefac / w * (4 * w * w - 1);
+        for(unsigned int n=1; n<=nmax; n++) {
+            prefac *= (2 * w + n - 1) / n;
+            Inl[n] = prefac / (n + w) * (4 * pow_2(n + w) - 1);
+        }
+        // loop over points in the radial grid, accumulating radial integrals for each nlm term
+        for(size_t i=0; i<gridSize; i++) {
+            double P=0, Q=1, N;  // prev, current and next Gegenbauer polynomials
+            for(unsigned int n=0; n<=nmax; n++) {
+                double Pnl = gridPhi[i] / Inl[n] * Q;
+                // update the recurrence relation for Gegenbauer polynomials
+                N = (2*w - 1 + n) * (gridxi[i] * Q - P) / (n+1) + gridxi[i] * Q;
+                P = Q;
+                Q = N;
+                for(int m=mmin; m<=mmax; m++)  // multiply by lm-th harmonic of density at i-th radius
+                    coefs[ind.index(l, m)][n] += Pnl * sphCoefs[ind.index(l, m)][i];
+            }
+            // update the l-dependent prefactor in the nl-th basis function of potential
+            gridPhi[i] *= gridmul[i];
+        }
+    }
+}
+
+void computePotentialCoefsBSE(
+    const particles::ParticleArray<coord::PosCyl> &particles,
+    const math::SphHarmIndices &ind,
+    unsigned int nmax, double eta, double r0,
+    /*output*/ std::vector< std::vector<double> > &coefs)
+{
+    // 1st step: prepare auxiliary array of normalization factors Inl for each n,l
+    std::vector<double> Inl((nmax+1) * (ind.lmax+1));   // indexing scheme: Inl[ l * (nmax+1) + n]
+    for(int l=0; l<=ind.lmax; l++) {
+        double w = 0.5 + eta * (2*l+1);
+        double prefac = - M_PI/2 / eta * pow(1./16, w) * exp(math::lngamma(2 * w) - 2*math::lngamma(w));
+        int n0 = l * (nmax+1);
+        Inl[n0] = prefac / w * (4 * w * w - 1);
+        for(unsigned int n=1; n<=nmax; n++) {
+            prefac *= (2 * w + n - 1) / n;
+            Inl[n0 + n] = prefac / (n + w) * (4 * pow_2(n + w) - 1);
+        }
+    }
+
+    // 2nd step: compute the spherical-harmonic coefficients at each particle's radius
+    std::vector<std::vector<double> > harmonics(ind.size());
+    std::vector<double> particleRadii;
+    computeSphericalHarmonicsFromParticles(particles, ind, particleRadii, harmonics);
+    ptrdiff_t nbody = particleRadii.size();
+
+    // 3rd step: compute the radial basis-set expansion coefs for each angular harmonic
+    int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
+    bool oddl = (ind.symmetry() & coord::ST_REFLECTION) != coord::ST_REFLECTION;  // use odd l?
+
+    coefs.assign(ind.size(), std::vector<double>(nmax+1, 0.));
+    std::string errorMsg;
+    utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
+    bool stop = false;
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+        // thread-local temporary arrays for expansion coefs
+        std::vector<std::vector<double> > thread_coefs(ind.size(), std::vector<double>(nmax+1, 0.));
+#ifdef _OPENMP
+#pragma omp for schedule(static)
+#endif
+        for(ptrdiff_t i=0; i<nbody; i++) {
+            if(stop) continue;
+            if(cbrk.triggered()) stop = true;
+            try{
+                double r = sqrt(pow_2(particles.point(i).R) + pow_2(particles.point(i).z)),
+                s = r / r0,
+                s1eta = math::pow(s, 1/eta),
+                xi = (s1eta-1) / (s1eta+1),
+                zi = math::pow(s1eta+1, -eta),
+                Phi = -zi * particles.mass(i),
+                mul = s * zi * zi;
+                for(int l=0; l<=ind.lmax; l++) {
+                    if(l>0) Phi *= mul;
+                    if(l%2==1 && !oddl)
+                        continue;   // no odd-l terms present
+                    int mmax = std::min<int>(l, ind.mmax),
+                    cmin = ind.index(l, ind.mmin()==0 ? 0 : -mmax),
+                    cmax = ind.index(l, mmax);
+                    // loop over radial basis functions
+                    double P=0, Q=1, N;  // prev, current and next Gegenbauer polynomials
+                    for(unsigned int n=0; n<=nmax; n++) {
+                        double Pnl = Phi / Inl[l * (nmax+1) + n] * Q;
+                        // update the recurrence relation for Gegenbauer polynomials
+                        N = (eta * (4*l+2) + n) * (xi * Q - P) / (n+1) + xi * Q;
+                        P = Q;
+                        Q = N;
+                        for(int c=cmin; c<=cmax; c+=mstep)
+                            if(!harmonics[c].empty())
+                                thread_coefs[c][n] += Pnl * harmonics[c][i];
+                    }
+                }
+            }
+            catch(std::exception& e) {
+                errorMsg = e.what();
+                stop = true;
+            }
+        }
+        // reduction step: add the coefficients collected in this thread to the global array
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            for(int m=ind.mmin(); m<=ind.mmax; m++)
+                for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step)
+                    math::blas_daxpy(1, thread_coefs[ind.index(l, m)], coefs[ind.index(l, m)]);
+        }
+    }
+    if(cbrk.triggered())
+        throw std::runtime_error("Keyboard interrupt");
+    if(!errorMsg.empty())
+        throw std::runtime_error("computeDensityCoefsBSE: " + errorMsg);
+}
+
+PtrPotential BasisSet::create(const BaseDensity& src,
+    int lmax, int mmax, unsigned int nmax, double eta, double r0)
+{
+    if(lmax<0 || mmax<0 || mmax>lmax || nmax>256 /*a really high upper limit!*/)
+        throw std::invalid_argument("BasisSet: invalid choice of expansion order");
+    if(!(eta>=0.5))
+        throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
+    // if r0 is not provided, assign a plausible value automatically (half-mass radius)
+    if(!(r0>0)) {
+        double totalMass = src.totalMass();
+        r0 = isFinite(totalMass) ? getRadiusByMass(src, 0.5 * totalMass) : NAN;
+        if(!isFinite(r0) || r0<=0)
+            throw std::runtime_error("BasisSet: cannot determine the scale radius of basis functions");
+    }
+    if(isSpherical(src))
+        lmax = 0;
+    if(isZRotSymmetric(src))
+        mmax = 0;
+    // to improve accuracy of SH coefficient computation, we may increase the order of expansion
+    // that determines the number of integration points in angles
+    int lmax_tmp=0, mmax_tmp=0;
+    if(isSpherical(src))
+        lmax = 0;   // don't waste effort on computing non-spherical harmonic terms
+    else
+        lmax_tmp = std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
+    if(isZRotSymmetric(src))
+        mmax = 0;   // similarly for non-axisymmetric harmonic terms
+    else
+        mmax_tmp = std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
+    std::vector<std::vector<double> > coefs;
+    computePotentialCoefsBSE(src,
+        math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()), nmax, eta, r0, /*output*/coefs);
+    // resize the coefficients back to the requested order
+    restrictSphHarmCoefs(lmax, mmax, coefs);
+    return PtrPotential(new BasisSet(eta, r0, coefs));
+}
+
+PtrPotential BasisSet::create(const particles::ParticleArray<coord::PosCyl> &particles,
+    coord::SymmetryType sym, int lmax, int mmax, unsigned int nmax, double eta, double r0)
+{
+    if(lmax<0 || mmax<0 || mmax>lmax || nmax>256 /*a really high upper limit!*/)
+        throw std::invalid_argument("BasisSet: invalid choice of expansion order");
+    if(!(eta>=0.5))
+        throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
+    // if r0 is not provided, assign a plausible value automatically
+    if(!(r0>0)) {
+        std::vector<double> radii;
+        radii.reserve(particles.size());
+        for(size_t i=0, size=particles.size(); i<size; i++) {
+            if(particles.mass(i) != 0)   // only consider particles with non-zero mass
+                radii.push_back(sqrt(pow_2(particles.point(i).R) + pow_2(particles.point(i).z)));
+        }
+        size_t nbody = radii.size();
+        if(nbody==0)
+            throw std::runtime_error("BasisSet: no particles provided as input");
+        // take the radius enclosing half of all particles as a proxy for the half-mass radius
+        std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
+        r0 = radii[nbody/2];
+    }
+    std::vector<std::vector<double> > coefs;
+    computePotentialCoefsBSE(particles,
+        math::SphHarmIndices(lmax, mmax, sym), nmax, eta, r0, /*output*/coefs);
+    return PtrPotential(new BasisSet(eta, r0, coefs));
+}
+
+BasisSet::BasisSet(double _eta, double _r0, const std::vector<std::vector<double> > &_coefs) :
+    ind(getIndicesFromCoefs(_coefs)), eta(_eta), r0(_r0), coefs(_coefs)
+{
+    if(!(eta>=0.5))
+        throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
+    if(!(r0>0))
+        throw std::invalid_argument("BasisSet: scale radius for basis functions should be positive");
+    if(coefs.empty() || coefs[0].empty())
+        throw std::invalid_argument("BasisSet: invalid coefficients array");
+}
+
+void BasisSet::getCoefs(double& _eta, double& _r0, std::vector<std::vector<double> > &_coefs) const
+{
+    _eta = eta;
+    _r0  = r0;
+    _coefs = coefs;
+}
+
+double BasisSet::densitySph(const coord::PosSph &pos, double /*time*/) const
+{
+    double sintheta, costheta,
+    s = pos.r/r0,
+    s1eta = math::pow(s, 1/eta),
+    xi = (s1eta-1) / (s1eta+1),
+    zi = math::pow(s1eta+1, -eta);
+    math::sincos(pos.theta, sintheta, costheta);
+
+    int nmax = coefs[0].size()-1;
+    int ncoefs = pow_2(ind.lmax + 1);
+    int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
+    double* rho_lm = static_cast<double*>(alloca(ncoefs * sizeof(double)));
+    std::fill( rho_lm, rho_lm + ncoefs, 0);
+
+    double B = 1./(16*M_PI) * zi/r0 / pow_2(eta * pos.r) * (1-xi*xi);  // density basis function
+    for(int l=0; l<=ind.lmax; l++) {
+        if(l>0) B *= zi*zi*s;
+        if(l%2==1 && (ind.symmetry() & coord::ST_REFLECTION) == coord::ST_REFLECTION)
+            continue;   // no odd-l terms present
+        int mmax = std::min<int>(l, ind.mmax),
+            cmin = ind.index(l, ind.mmin()==0 ? 0 : -mmax),
+            cmax = ind.index(l, mmax);
+        double P=0, Q=1, A = (2*l+1) * eta;  // prev and current Gegenbauer polynomials, and an aux coef
+        for(int n=0; n<=nmax; n++) {
+            double Pnl = Q * B * (A+n) * (A+n+1);
+            // update the recurrence relation for Gegenbauer polynomials
+            double N = (2*A + n) * (xi * Q - P) / (n+1) + xi * Q;  // next Gegenbauer polynomial
+            P = Q;
+            Q = N;
+            for(int c=cmin; c<=cmax; c+=mstep)
+                rho_lm[c] += Pnl * coefs[c][n];
+        }
+    }
+
+    return math::sphHarmTransformInverse(ind, rho_lm, /*tau*/ costheta / (sintheta + 1), pos.phi);
+}
+
+void BasisSet::evalSph(const coord::PosSph &pos,
+    double* potential, coord::GradSph* grad, coord::HessSph* hess, double /*time*/) const
+{
+    bool needGrad = grad!=NULL || hess!=NULL;
+    bool needHess = hess!=NULL;
+    double
+    s = pos.r/r0,
+    s1eta = math::pow(s, 1/eta),
+    xi = (s1eta-1) / (s1eta+1),
+    zi = math::pow(s1eta+1, -eta);
+
+    // temporary array created on the stack, without dynamic memory allocation
+    int nmax = coefs[0].size()-1;
+    int ncoefs = pow_2(ind.lmax + 1);
+    int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
+    double*   Phi_lm = static_cast<double*>(alloca(3 * ncoefs * sizeof(double)));
+    double*  dPhi_lm = Phi_lm + ncoefs;    // part of the temporary array
+    double* d2Phi_lm = Phi_lm + ncoefs*2;
+    std::fill( Phi_lm, Phi_lm + ncoefs*3, 0);
+
+    double si = 0.5/eta / pos.r;
+    double B = -zi/r0;   // potential basis function (updated as we loop over l)
+    for(int l=0; l<=ind.lmax; l++) {
+        if(l>0) B *= zi*zi*s;
+        if(l%2==1 && (ind.symmetry() & coord::ST_REFLECTION) == coord::ST_REFLECTION)
+            continue;   // no odd-l terms present
+        int mmax = std::min<int>(l, ind.mmax),
+            cmin = ind.index(l, ind.mmin()==0 ? 0 : -mmax),
+            cmax = ind.index(l, mmax);
+        double P=0, Q=1,   // previous and current Gegenbauer polynomials
+        A = (2*l+1) * eta, // auxiliary coefficient
+        D = B * si,        // (part of) the basis function for potential derivative
+        E = D * (A * xi - eta), // coef in the derivative
+        F = D * si * (xi*xi-1), // various parts of the second derivative
+        G = D * si * 4*eta,
+        H = G * eta * (l * (l+1) - (2*l+1) * xi + 1);
+        for(int n=0; n<=nmax; n++) {
+            double     N = (2*A + n) * (xi * Q - P);  // (part of) the next Gegenbauer polynomial
+            double   Pnl = Q * B;
+            double  dPnl = Q * E - N * D;
+            double d2Pnl = Q * (F * (A+n) * (A+n+1) + H) + N * G;
+            // update the recurrence relation for Gegenbauer polynomials
+            P = Q;
+            Q = N / (n+1) + xi * Q;
+            for(int c=cmin; c<=cmax; c+=mstep) {
+                Phi_lm  [c] +=   Pnl * coefs[c][n];
+                dPhi_lm [c] +=  dPnl * coefs[c][n];
+                if(needHess)
+                    d2Phi_lm[c] += d2Pnl * coefs[c][n];
+            }
+        }
+    }
+
+    if(ind.lmax == 0) {   // fast track in the spherical case
+        if(potential)
+            *potential = Phi_lm[0];
+        if(needGrad) {
+            grad->dr = dPhi_lm[0];
+            grad->dtheta = grad->dphi = 0;
+        }
+        if(needHess) {
+            hess->dr2 = d2Phi_lm[0];
+            hess->dtheta2 = hess->dphi2 = hess->drdtheta = hess->drdphi = hess->dthetadphi = 0;
+        }
+    } else {
+        sphHarmTransformInverseDeriv(ind, toPosCyl(pos), Phi_lm, dPhi_lm, d2Phi_lm,
+            /*output*/ potential, grad, hess);
     }
 }
 
