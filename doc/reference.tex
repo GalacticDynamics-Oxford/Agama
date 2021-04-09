@@ -37,6 +37,7 @@
 \newcommand{\bX}{\boldsymbol{X}}
 \newcommand{\bY}{\boldsymbol{Y}}
 \newcommand{\bZ}{\boldsymbol{Z}}
+\newcommand{\bV}{\boldsymbol{V}}
 \newcommand{\bJ}{\boldsymbol{J}}
 \newcommand{\bt}{\boldsymbol{\theta}}
 \newcommand{\scE}{\mathscr E}
@@ -206,6 +207,7 @@ There are several built-in coordinate systems: \ttt{Car}tesian, \ttt{Cyl}indrica
 
 Templated classes include position, velocity, a combination of the two, an abstract interface \ttt{IScalarFunction} for a scalar function evaluated in a particular coordinate system, gradient and hessian of a scalar function, and coefficients for coordinate transformations from one system to the other. Templated functions convert these objects from one coordinate system to the other: for instance, \ttt{toPosVelCyl} converts the position and velocity from any source coordinate system into cylindrical coordinates; these routines should be called explicitly, to make the code self-documenting. An even more powerful family of functions \ttt{evalAndConvert} take the position in one (output) coordinate system and a scalar function defined in the other (evaluation) system, calls the function with transformed coordinates, and perform the transformation of gradient and hessian back to the output system. The primary use of these routines is in the potential framework (Section~\ref{sec:Potential}) -- each potential defines a method for computing it in the optimal system, and uses the conversion routines to provide the remaining ones. Another use is for transformation of probability distributions, which involve Jacobian matrices of coordinate conversions. In the future, we may add other coordinate systems (e.g., heliocentric) into the same framework.
 
+Some routines (e.g., in the \ttt{galaxymodel::} namespace, Sections~\ref{sec:Moments}, \ref{sec:Schwarzschild}) can use an ``observed'' coordinate system $XYZ$ that is arbitrarily oriented with respect to the ``intrinsic'' coordinate system $xyz$ of the model, parametrized by three Euler rotation angles (see Section~\ref{sec:CoordinateDetails} for details and illustrations).
 
 %%%%%%%%%%%%%%
 \subsubsection{Particles}  \label{sec:Particles}
@@ -406,7 +408,7 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{binary_ecc} [0] -- orbital eccentricity $e$ of the \ttt{KeplerBinary} potential ($0\le e \le 1$).
 \item \ppp{binary_phase} [0] -- orbital phase $\phi_0$ of the \ttt{KeplerBinary} at time $t=0$. The positions of two point masses at time $t$ are given by $x_1 = a\,\frac{q}{1+q}\, (\cos\eta-e),\; y_1 = a\,\frac{q}{1+q}\,\sqrt{1-e^2}\,\sin\eta$ for the first one and $x_2=-x_1/q,\; y_2=-y_1/q$ for the second one, where the eccentric anomaly $\eta(t)$ is the solution of Kepler's equation: $\eta - e\,\sin\eta = \Omega t + \phi_0$, and $\Omega \equiv \sqrt{m/a^3}$ is the orbital frequency.
 \end{itemize}
-Parameters defining the potential expansions (default values in brackets are all sensible and only occasionally need to be changed):
+Parameters defining the density or potential expansions (default values in brackets are all sensible and only occasionally need to be changed):
 \begin{itemize}
 \item \ppp{gridSizeR} [25] -- the number of grid nodes in spherical (\ttt{Multipole}) or cylindrical (\ttt{CylSpline}) radius; in the latter case this includes the 0th node at $R=0$. 
 \item \ppp{gridSizeZ} [25] -- same for the grid in $z$ direction in \ttt{CylSpline}, including the $z=0$ node.
@@ -664,7 +666,7 @@ In addition, one needs to provide one-dimensional functions representing the rad
 
 The DF is traditionally expressed in terms of $E,L$, and in this form can only be used in the same potential $\Phi$ as it was constructed in. However, it can be put on equal grounds with other action-based DFs, which are manifestly independent of potential, using the following approach.
 An instance of \ttt{ActionFinderSpherical} class, constructed for the original potential $\Phi$, is attached to the instance of a \ttt{QuasiSpherical} DF. To compute the value of DF at the given triplet of actions $\bJ$, we map them to $E,L$ using this original spherical action finder, and then feed these values to the DF. Crucially, in this form the actions $\bJ(\bx,\bv \;|\;\tilde\Phi)$ may be computed in any other potential $\tilde\Phi$ (not necessarily spherical), not just the original $\Phi$. This corresponds to the DF being adiabatically transformed from the original potential to the new one, without changing its dependence on actions.
-This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula or its anisotropic generalization in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. The resulting DF is then viewed as a function of actions only. In subsequent iterations, the potential is no longer spherical, but the density and anisotropiy profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
+This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula or its anisotropic generalization in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. The resulting DF is then viewed as a function of actions only. In subsequent iterations, the potential is no longer spherical, but the density and anisotropy profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
 
 
 %%%%%%%%%%%%%%
@@ -703,44 +705,53 @@ Various routines described below work with instances of the \ttt{GalaxyModel} cl
 %%%%%%%%%%%%%%
 \subsubsection{Moments of distribution functions}  \label{sec:Moments}
 
-The most basic task is the computation of DF moments (density, velocity dispersion, etc.), defined as
-\begin{align*}
-\rho(\bx) &\equiv \iiint \d ^3v\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
-\overline{\bv} &\equiv \rho^{-1} \iiint \d ^3v \,\bv\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
-\overline{v_i v_j} &\equiv \rho^{-1} \iiint \d ^3v \,v_i v_j\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv).
-\end{align*}
-The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bx$ by numerically integrating $f$ over $\bv$; the DF may be single- or multi-component. 
-This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$); the tensor of second velocity moments is computed in cylindrical coordinates ($R,z,\phi$), and in axisymmetric systems may have at most 4 non-zero components $\big(\overline{\strut v_R^2}, \overline{\strut v_z^2}, \overline{\strut v_\phi^2}, \overline{\strut v_R v_z}\big)$, the latter is related to the tilt of velocity ellipsoid in the meridional plane).
+Routines in this group make a distinction between the ``intrinsic'' coordinate system $xyz$ of the model and the ``observed'' coordinate system $XYZ$, whose orientation with respect to $xyz$ is parametrized by three Euler angles $\alpha,\beta,\gamma$, or equivalently by an orthogonal rotation matrix $\mathsf R$ (Section~\ref{sec:CoordinateDetails}). The position $\bX$, velocity $\bV$ or other vectors in the observed system are related to $\bx,\,\bv$ in the intrinsic system by $\bX = \mathsf R\,\bx$, etc. When all three angles are zero, the two systems coincide; generally, $\beta$ is the most useful angle, specifying the inclination. The $Z$ axis in the observed coordinate systems is the line of sight, and some of the routines come in two variants -- computing the intrinsic quantities at the given point $\{X,Y,Z\}$ or projected quantities at $\{X,Y\}$ integrated by $Z$. Naturally, adding another dimension of integration increases the cost by an order of magnitude.
 
-The routine \ttt{computeProjectedMoments} calculates the surface density and the line-of-sight velocity dispersion at the given cylindrical radius $R$ -- this involves an additional integration over $z$:
+When the DF consists of several components, and one needs the moments of each DF component separately, it is more efficient to compute them in a single operation, since the most expensive task -- conversion from $\bx,\bv$ to $\bJ$ -- is shared between all components. All three routines described below have an additional argument \ppp{separate}, which provides this option if set to \texttt{true}.
+
+\paragraph{DF moments} (density, velocity dispersion, etc.) are defined as the DF integrated over the velocity, weighted by the SF and various combinations of velocity components:
 \begin{align*}
-\Sigma(R) \equiv \int_{z=-\infty}^\infty \d z\, \rho(R,z), \qquad
-\sigma_\mathrm{los} \equiv \frac{1}{\Sigma(R)} \int_{z=-\infty}^\infty \d z\, \rho(R,z)\, v_z^2 .
+\rho(\bX) &\equiv \iiint \d ^3V\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
+\overline{\bV} &\equiv \rho^{-1} \iiint \d ^3V \,\bV\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv), \\
+\mathsf{V} \equiv \overline{V_i V_j} &\equiv \rho^{-1} \iiint \d ^3V \,V_i V_j\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv).
+\end{align*}
+The routine \ttt{computeMoments} calculates any combination of these quantities at the given point $\bX$ by numerically integrating $f$ over $\bv$ and transforming the result to the observed frame; the DF may be single- or multi-component. 
+This is not a cheap operation, as the integration requires $\gtrsim 10^3$ evaluation of DF and hence calls to the action finder; the computation of density is the major cost in self-consistent modelling (Section~\ref{sec:SCM}). The first moment of velocity may have only one non-zero component ($\overline{v_\phi}$) in the intrinsic coordinate system, but possibly all three components of $\overline{\bV}$ can be nonzero in the observed system. Likewise, the symmetric tensor of second velocity moments $\mathsf{V}$ can be diagonalized (and in axisymmetric systems one of its principal axes is aligned with the $\phi$ coordinate, while the other two lie in the meridional plane), but all six components of $\mathsf{V}$ are reported and can be non-zero for a general orientation of the observed system. The first and second velocity moments at a fixed 3d point in the two coordinate systems are related by the rotation matrix $\mathsf{R}$: $\bV = \mathsf{R}\,\bv$, $\mathsf{V} = \mathsf{R}\,\mathsf{v}\,\mathsf{R}^T$.
+
+A variant of this routine computes the projected moments (surface density $\Sigma$, mean sky-plane velocities $\overline{v_X}, \overline{v_Y}$, mean line-of-sight velocity $\overline{v_Z}$ and the full tensor of second moments) by integrating the corresponding intrinsic moments along the line of sight $Z$:
+\begin{align*}
+\Sigma(X,Y) \equiv \int_{Z=-\infty}^\infty \d Z\, \rho(X,Y,Z), \qquad
+\overline{V_Z} \equiv \frac{1}{\Sigma(X,Y)} \int_{Z=-\infty}^\infty \d Z\, \rho(X,Y,Z)\, V_Z, \quad\mbox{etc.}
+\end{align*}
+These moments cannot be easily transformed to another rotated frame $X'Y'Z'$, since the direction of integration axis also changes.
+
+\paragraph{Velocity distribution functions}  \label{sec:VDF} offer a more detailed description of model kinematics. The one-dimensional VDFs in each of the three orthogonal directions $V_k$ ($k\in\{X,Y,Z\}$ are the axes of the observed coordinate system) are defined as the DF$\times$SF integrated over the other two velocity axes, and optionally along $Z$ for the projected variant:
+\begin{align*}
+\mathfrak{f}(\bX;\,V_1) &\equiv \frac{1}{\rho(\bX)} \iint \d V_2\,\d V_3\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) ,\\
+\mathfrak{f}_\mathrm{proj}(X,Y;\,V_k) &\equiv \frac{1}{\Sigma(X,Y)} \int \d Z\, \rho(X,Y,Z)\;\mathfrak{f}(X,Y,Z;\,V_k) .
 \end{align*}
 
-The routine \ttt{computeProjectedDF} calculates the value of the ``projected DF'', marginalized over two velocity components and one coordinate:
+VDFs in each dimension (intrinsic or projected) are represented as B-splines of degree $N$: $\mathfrak{f}^{(k)}(V_k) = \sum_{j=1}^{N_\mathrm{basis}} A_j^{(k)} B_j^{(k)}(V_k)$, where the basis functions $B_j^{(k)}$ are defined by the nodes of the grid in velocity space. The grid(s) may be provided by the user (separately for each of the three velocity axes) or constructed automatically to cover the entire available range of velocity from $-v_\mathrm{esc}$ to $v_\mathrm{esc}\equiv \sqrt{-2\Phi(\bx)}$ with a specified number of points, typically $\sim 50$. The VDFs are normalized so that $\int_{-v_\mathrm{esc}}^{v_\mathrm{esc}} \mathfrak{f}(V_k)\,dV_k = 1$, and the density $\rho$ or the surface density $\Sigma$ is computed as a by-product. To determine the coefficients of expansion $A_j^{(k)}$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,V_k)\,B_j^{(k)}(V_k)\,dV_k$, and solving the resulting linear system (Section~\ref{sec:MathBasisSetDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(V)$ may attain negative values, but on average better approximates the true VDF.
+The VDFs or projected VDFs are constructed by the routine \ttt{computeVelocityDistribution<N>}, $N=0,1,3$ and returned as three sets of B-spline coefficients $A_j^{(k)}$, $k\in\{X,Y,Z\}$; in the recommended case $N=3$ these can be converted into a conventional cubic spline interpolator (Section~\ref{sec:MathSplineDetails}).
+
+\paragraph{Projected DF}  \label{sec:ProjectedDF} provides another mechanism for integrating the DF over velocity and along the line of sight, which is most useful when some of the velocity components in the observed coordinate system have known values $\bV_\mathrm{\!\!obs}$ with some measurement uncertainties $\epsilon_{\bV}$:
 \begin{align*}
-f_\mathrm{proj}(x,y;v_z) \equiv \int_{z=-\infty}^\infty \d z\, \iint \d v_x\, \d v_y\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) .
+&f_\mathrm{proj}(X, Y, \bV_\mathrm{\!\!obs}, \epsilon_{\bV}) \equiv \int_{Z=-\infty}^\infty \d Z\, \iiint \d^3V\, \prod_{k=1}^3 \mathcal E(V_k;\,V_{\mathrm{obs},k}, \epsilon_{V,k})\;
+f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) ,\\
+&\mbox{where}\quad \mathcal E(V_k;\,V_{\mathrm{obs},k}, \epsilon_{V,k}) \equiv
+\left\{ \begin{array}{ll} \displaystyle \frac{1}{\sqrt{2\pi}\,\epsilon_{V,k}}\, \exp\left[-\frac{1}{2} \frac{(V_k-V_{\mathrm{obs},k})^2}{\epsilon_{V,k}^2} \right] &\quad\mbox{when }\epsilon_{V,k}\mbox{ is finite}, \\[6mm]
+\displaystyle 1 & \quad\mbox{when }\epsilon_{V,k}=\infty \end{array} \right.
 \end{align*}
-Currently both of these routines compute the projection along the $z$ axis only; in a future version, this will be generalized to allow for arbitrary orientation.
+In other words, for every velocity component that has a measured value $V_{\mathrm{obs},k}$ with a finite uncertainty $\epsilon_{V,k}$, the DF is convolved with a Gaussian of the appropriate width (or not convolved at all if the uncertainty is zero), while for an infinite uncertainty (in absence of any measurement), the DF is integrated over the entire available velocity range. The case of infinite uncertainty is essentially the limiting case of a large uncertainty $\epsilon_{V,k} \gg v_\mathrm{esc}$ (the argument of the exponent is nearly constant over the entire available velocity range), but the different normalization convention ensures that the result does not vanish. The routine \ttt{computeProjectedDF} is most useful for evaluating the likelihood of a model against a set of discrete kinematic tracers (e.g., stars with measured line-of-sight velocities and/or proper motions in any combination), regardless of whether the measurement uncertainties are negligible, small or large compared to the characteristic velocity range of the model. The only limitation is that the uncertainties of the two velocity components in the image plane $\epsilon_{V_X},\, \epsilon_{V_Y}$ should both be either finite or infinite (which is driven by computational convenience as well as practical considerations -- the two components of the proper motion are simultaneously known or not).
+
+The various quantities computed by these three routines satisfy the following relations, which should hold up to integration errors ($\lesssim 10^{-3}$):
+\begin{itemize}
+\item The surface density $\Sigma(X,Y)$ and the 3d density $\rho(\bX)$ are reported by projected and non-projected variants of \ttt{computeMoments} and \ttt{computeVelocityDistribution}, respectively. Of course, the latter case is much more expensive, and the density comes out as a by-product of normalizing the VDFs. Moreover, \ttt{computeProjectedDF} with all three velocity uncertainties $\epsilon_{V,k}$ set to infinity is also equivalent to $\Sigma(X,Y)$, with a computational cost comparable to \ttt{computeMoments}, but using different internal scaling transformations of the integrand.
+\item Mean velocity $\overline{\bV}$ and diagonal elements of the tensor of second velocity moments $\mathsf{V}$ can be obtained by integrating the VDF multiplied by the corresponding power of velocity, e.g., $\overline{V_k^2} = \int_{-v_\mathrm{esc}}^{v_\mathrm{esc}} \mathfrak{f}(V_k)\,V_k^2\,dV_k$, both in the projected and non-projected variants. Non-diagonal elements of $\mathsf{V}$ cannot be recovered from the VDF (which also implies that VDFs computed in different orientations of the observed coordinate systems cannot be easily transformed into each other).
+\item The value of the interpolated projected VDF $\mathfrak{f}_\mathrm{proj}^{(k)}(X,Y;\;V_{\mathrm{obs},k})$ multiplied by the surface density $\Sigma(X,Y)$ is equivalent to the projected DF computed for the given value of the $k$-th velocity component $V_{\mathrm{obs},k}$ (with zero uncertainty $\epsilon_{V,k}$) and infinite uncertaintes for the remaining two components. Constructing the entire VDF is significantly more expensive than computing the projected DF for a single value of velocity, but is more efficient than repeated calls to \ttt{computeProjectedDF} if one needs to evaluate the VDF many times for different values of $V_{\mathrm{obs},k}$. The spline-interpolated VDF can also be cheaply and accurately convolved with a Gaussian function, producing an equivalent result to a projected DF with a finite uncertainty $\epsilon_{V,k}$.
+\end{itemize}
 
 There are analogous routines for spherical isotropic DFs of the form $f(h)$, defined in \texttt{galaxymodel_spherical.h} and used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
-
-
-%%%%%%%%%%%%%%
-\subsubsection{Velocity distribution functions}  \label{sec:VDF}
-
-Instead of just a few DF moments at a given point, one may consider one-dimensional velocity distribution functions (VDFs):
-\begin{align*}
-\mathfrak{f}(\bx;v_1) &\equiv \frac{1}{\rho(\bx)} \iint \d v_2\,\d v_3\, f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv) ,\\
-\mathfrak{f}_\mathrm{proj}(x_1,x_2;v_k) &\equiv \frac{1}{\Sigma(x_1,x_2)} \int \d x_3\, \rho(x_1,x_2,x_3)\,\mathfrak{f}(x_1,x_2,x_3;v_k) .
-\end{align*}
-Currently this is only implemented in cylindrical coordinates: $\bx=\{R,z,\phi\}, \bv=\{v_R,v_z,v_\phi\}$. The projected VDF is identical to the projected DF up to normalization: $\mathfrak{f}_\mathrm{proj}(x,y;v_z) = f_\mathrm{proj}(x,y;v_z) / \Sigma(x,y)$; however, computing the entire VDF at once is more efficient than repeatedly calling \ttt{computeProjectedDF}.
-
-VDFs in each dimension are represented as B-splines of degree $N$: $\mathfrak{f}(\bx, v_k) = \sum_{\alpha=1}^{N_\mathrm{basis}} A_\alpha B_\alpha(v_k)$, where $B_\alpha$ are defined by the nodes of the grid in velocity space (provided by the user, but typically covering the entire available range of velocity with $\sim 50-100$ points). To compute the coefficients of expansion $A_\alpha$, we follow the finite-element approach by integrating the DF weighted with each basis function to obtain $f(\dots,v_k)\,B_\alpha(v_k)\,dv_k$, and solving the resulting linear system (Section~\ref{sec:MathSplineDetails}). Thus all three VDFs are computed at once in the course of a single 3-dimensional integration (or 4-dimensional for projected VDFs), which is, however, rather expensive (typically $\sim 10^6$ function evaluations). The simplest case $N=0$ corresponds to a familiar velocity histogram, but a more accurate one is given by $N=1$ (linear interpolation) or $N=3$ (cubic spline); note that in the latter case, the interpolated $\mathfrak{f}(v)$ may attain negative values, but on average better approximates the true VDF.
-The VDFs or projected VDFs are computed by the routine \ttt{computeVelocityDistribution<N>}.
-
-When the DF consists of several components, and one needs the moments of each DF component separately, it is more efficient to compute them in a single operation, since the most expensive task -- conversion from $\bx,\bv$ to $\bJ$ -- is shared between all components. All four routines described above have an additional argument \ppp{separate}, which provides this option if set to \texttt{true}.
 
 
 %%%%%%%%%%%%%%
@@ -749,7 +760,7 @@ When the DF consists of several components, and one needs the moments of each DF
 As the DF is a probability distribution function (PDF), it can be sampled with a large number of points to create an \Nbody model of the system. There are two possible ways of doing this:
 \begin{itemize}  \setlength{\parskip}{2pt} \setlength{\itemsep}{2pt}
 \item Draw samples of actions from $f(\bJ)$, used as a three-dimensional PDF. Then create (possibly several) $\{\bx,\bv\}$ points for each value of actions with a random choice of angles, using the torus mapping approach (Section~\ref{sec:ActionsTorus}). This is performed by the routine \ttt{sampleActions}.
-\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating $f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv)$ with the help of an action finder. This is performed by the routine \ttt{samplePosVel}.
+\item Draw samples directly from the six-dimensional $\{\bx,\bv\}$ space, evaluating the product $f\big(\bJ(\bx,\bv)\big)\,S(\bx,\bv)$ with the help of an action finder. This is performed by the routine \ttt{samplePosVel}.
 \end{itemize}
 Both approaches should in principle deliver an equivalent discrete representation of the model, but may have a different cost; generally, the second one is preferred. It also has a separate, more efficient implementation for spherical isotropic DFs $f(h)$ in spherical potentials $\Phi(r)$ (without a SF); it is used by the \texttt{mkspherical} tool (Section~\ref{sec:mkspherical}).
 
@@ -861,8 +872,8 @@ The shared library \texttt{agama.so} can be used directly as a \Python extension
 \footnote{for the most common implementation of \Python interpreter, named \texttt{CPython} -- not to be confused with \texttt{Cython}, which is a distinct compiled language. The \Python interface layer in \Agama relies solely on the \Python C API, and does not use any third-party libraries such as \texttt{swig} or \texttt{boost::python}.}. Both \Python 2.6--2.7 and \Python 3.x are supported, but the library must be compiled separately for either version. In addition, there are a few auxiliary routines written in \Python (they reside in \texttt{py/pygama.py}). To simplify the usage, the package initialization (\texttt{__init__.py}) imports everything from both \texttt{agama.so} and \texttt{py/pygama.py} into a single namespace, which is what you get by writing \texttt{import agama} in your \Python script%
 \footnote{note that if the file \texttt{agama.so} is found in the current directory, it will have a priority over the \Python modules stored in \texttt{site-packages} or other standard locations specified by \texttt{PYTHONPATH}. Thus in this case \texttt{import agama} will only load the \Cpp extension module but not the auxiliary \Python routines, possibly leading to obscure complaints about missing attributes of the module.}.
 
-The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction}, \ttt{Target} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
-Additionally, density and DF objects may also be represented by an arbitrary user-defined Python function -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation. Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
+The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction}, \ttt{SelectionFunction}, \ttt{Target} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
+Additionally, density, potential, DF and SF objects may also be represented by arbitrary user-defined Python functions -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation. Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
 \footnote{this restriction is due to the global interpreter lock mechanism in \texttt{CPython}, precluding its simultaneous access from multiple threads.}.
 
 Below follows a brief overview of the classes and routines provided by the \Python interface.
@@ -880,25 +891,30 @@ Another possibility is to construct a spherically-symmetric density model from a
 \texttt{r = numpy.logspace(-3,3)}\\
 \texttt{M = (r / (r+1))**2}\\
 \texttt{d = agama.Density(cumulMass=numpy.column_stack((r, M)) )}\\[2mm]
-In this case the \ttt{Density} object is internally represented by a \ttt{DensitySphericalHarmonic} \Cpp class. Both this class and \ttt{DensityAzimuthalHarmonic} are also utilized in the iterative self-consistent modelling framework (Section~\ref{sec:SCM}); such density can be written out to a text file and loaded back by\\
+In this case the \ttt{Density} object is internally represented by a \ppp{DensitySphericalHarmonic} \Cpp class. Both this class and \ppp{DensityAzimuthalHarmonic} are also utilized in the iterative self-consistent modelling framework (Section~\ref{sec:SCM}); such density expansions can be written out to a text file and loaded back by\\
 \texttt{d.export("hernquist_model.ini")}\\
 \texttt{d = agama.Density("hernquist_model.ini")}\\[2mm]
 The \ttt{Density} class provides only a couple of methods: first of all, the computation of the density itself -- the argument is a single point or a $N\times3$ array of $N$ points (the \Python interface always deals with cartesian coordinates to avoid confusion):\\
 \texttt{print(d.density(1,0,0))}\\
 \texttt{print(d.density([[1,0,0],[2,3,4]]))}\\
 To compute a time-dependent density at an arbitrary moment of time, provide an extra \texttt{t=...} argument to the \texttt{density} method (note that all other methods still evaluate it only at time 0).\\[2mm]
-\texttt{surfaceDensity(points [, alpha, beta, gamma])} computes the integral of density along the line of sight at a 2d point (or an array of points) in the image plane, using an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles $\alpha, \beta, \gamma$ (Section~\ref{sec:CoordinateDetails}).\\[2mm]
-Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model. If called with a single argument, \texttt{totalMass(radius)} estimates the mass enclosed within the given \texttt{radius}.\\[1mm]
+\texttt{projectedDensity(points [, alpha, beta, gamma])} computes the surface density (integral of density along the line of sight) at a 2d point (or an array of points) in the image plane, using an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles $\alpha, \beta, \gamma$ (Section~\ref{sec:CoordinateDetails}).\\[2mm]
+Another useful method is \texttt{totalMass()}, with an obvious role; the mass may well be infinite, e.g., for a \ppp{type="NFW"} model. If called with a single argument, \texttt{totalMass(radius)} estimates the mass enclosed within the given \texttt{radius}.\\[2mm]
 Finally, the density profile may be sampled with particles, producing two arrays -- coordinates ($N\times3$) and masses ($N$): \\
 \texttt{pos, mass = d.sample(10000)}\\[2mm]
 The density framework can be augmented with user-defined \Python functions that return the density at a given point (or, rather, an array of points). Such a function must be a free function (not a class method) or a lambda expression, accepting one argument, which should be treated as a $N\times3$ array of points (even when $N=1$). This function would typically be called from the \Cpp code with more than one input point, to reduce overhead from switching between \Cpp and \Python. The following two equivalent examples define a spherical Plummer model:\\
 \texttt{fnc1~~=~~lambda~~x:  3/(4*numpy.pi) * (1 + numpy.sum(x**2, axis=1))**-2.5}\\
-\texttt{def fnc2(x):  return 3/(4*numpy.pi) * (1 + numpy.sum(x**2, axis=1))**-2.5}\\
-You may create an instance of \ttt{Density} class wrapping a user-defined \Python callback function:\\
-\texttt{print(agama.Density(fnc1).totalMass())}\\
-Alternatively, one may directly pass the \Python callback function whenever a \ttt{Density} object is expected, such as the \ttt{Potential} and \ttt{DistributionFunction} constructors, without creating a wrapper instance of \texttt{Density} class: \\
-\texttt{pot1 = agama.Potential(type="Multipole", density=fnc1)}\\
-Remember that the callback function must return finite values for any input point used by the code -- pay special attention to possible indeterminacies, e.g., at $R=0$! (If the density is singular at origin, it may still be used in the \ppp{Multipole} potential, but not in \ppp{CylSpline}).
+\texttt{def fnc2(x):  return 3/(4*numpy.pi) * (1 + numpy.sum(x**2, axis=1))**-2.5}\\[2mm]
+One may create an instance of \ttt{Density} class wrapping a user-defined \Python callback function, optionally specifying its symmetry level explicitly (by default a triaxial symmetry is assumed):\\
+\texttt{print(agama.Density(fnc1).projectedDensity(1,2))}\\
+\texttt{print(agama.Density(density=fnc1, symmetry="s").totalMass())}\\[2mm]
+Alternatively, one may directly pass the \Python callback function whenever a \ttt{Density} object is expected, such as the \ttt{Potential} and \ttt{DistributionFunction} constructors, without creating a wrapper instance of \ttt{Density} class: \\
+\texttt{pot1 = agama.Potential(type="Multipole", density=fnc1)}\\[2mm]
+In case that the density is expensive but needs to be evaluated many times (e.g., to compute surface density), it may be approximated with either \ppp{DensitySphericalHarmonic} or \ppp{DensityAzimuthalHarmonic} interpolators (their applicability is similar to \ppp{Multipole} or \ppp{CylSpline} potentials, respectively): \\
+\texttt{dsh = agama.Density(type="DensitySphericalHarmonic", density=fnc1, \\
+\mbox{}~~~~symmetry="s", lmax=0, gridSizeR=25, rmin=0.01, rmax=100)}\\
+This is most useful to represent a density generated by a DF -- the same idea is used in the iterative self-consistent modelling framework (Section~\ref{sec:SCM}), and a pure-\Python reimplementation of this workflow is illustrated in \hyperref[sec:ExampleSCM]{one of the test programs}.\\[2mm]
+Remember that the callback function must return finite values for any input point used by the code -- pay special attention to possible indeterminacies, e.g., at $R=0$! (If the density is singular at origin, it may still be used in the \ppp{Multipole} potential or \ppp{DensitySphericalHarmonic} density, but not in \ppp{CylSpline} / \ppp{DensityAzimuthalHarmonic}).
 
 \paragraph{Potential} \label{sec:PythonPotential} class is inherited from \ttt{Density} and provides access to the entire hierarchy of \Cpp potentials. It can be constructed in a variety of ways: \\
 \texttt{p = agama.Potential(type="...", mass=..., otherParameters=...)}\\
@@ -929,7 +945,7 @@ Another way of creating a composite potential is to provide a list of \texttt{di
 This is equivalent to providing all these parameters in separate sections of an INI file and then constructing the potential from this file.\\[2mm]
 If we examine the potential created in the last line,\\
 \texttt{print(potgal)}  \textit{\color{Sepia} \ \ \# CompositePotential: DiskAnsatz, Multipole}\\
-it becomes apparent that some rearrangement took place behind the stage. Indeed, in the case when the potential is constructed from several sets of parameters (but \textit{not} from several existing potential instances), the code attempts to optimize the efficiency by using the \hyperref[sec:PotentialGalpot]{\textsc{GalPot}} approach. In this example, the \ppp{Disk} density profile was split into two parts -- the \ttt{DiskAnsatz} potential class and the residual density profile; other spheroidal density components (\ppp{Sersic} and \ppp{NFW}) were combined with this residual profile, and used to initialize a single instance of \ttt{Multipole} potential. This is advantageous if one needs to evaluate the potential many times (e.g., in action computation), but makes it difficult to examine the contribution of each mass component separately. In order to do so, we may instead create another potential used only for visualization:\\
+it becomes apparent that some rearrangement took place behind the stage. Indeed, in the case when the potential is constructed from several sets of parameters (but \textit{not} from several existing potential instances), the code attempts to optimize the efficiency by using the \hyperref[sec:PotentialGalpot]{\textsc{GalPot}} approach. In this example, the \ppp{Disk} density profile was split into two parts -- the \ppp{DiskAnsatz} potential class and the residual density profile; other spheroidal density components (\ppp{Sersic} and \ppp{NFW}) were combined with this residual profile, and used to initialize a single instance of \ppp{Multipole} potential. This is advantageous if one needs to evaluate the potential many times (e.g., in action computation), but makes it difficult to examine the contribution of each mass component separately. In order to do so, we may instead create another potential used only for visualization:\\
 \texttt{potvis~= agama.Potential(agama.Potential(disk_par), }\\
 \texttt{\mbox{}~~~~agama.Potential(bulge_par), agama.Potential(halo_par))}\\[2mm]
 An instance of \ttt{Potential} class provides the same methods as the \ttt{Density} class (and may be used in all places where a density instance is needed), plus the following ones:\\[2mm]
@@ -948,7 +964,7 @@ An instance of \ttt{Potential} class provides the same methods as the \ttt{Densi
 Plotting the rotation curve of the above constructed potential and all its components:\\
 \texttt{plt.plot(r, numpy.sqrt(-r*potvis.force(points)[:,0]))}\\
 \texttt{for pot in potvis: plt.plot(r, numpy.sqrt(-r*pot.force(points)[:,0]))}\\[2mm]
-\texttt{projectedForce(points [, alpha, beta, gamma])} computes the integral of the force along the line of sight, similar to \texttt{surfaceDensity}. The input parameters are the 2d point (or an array of points) $X,Y$ in the image plane, whose orientation with respect to the intrinsic model coordinates is specified by Euler angles $\alpha, \beta, \gamma$ (Section~\ref{sec:CoordinateDetails}), and the output contains the $X,Y$ components of force integrated along the $Z$ axis.\\[2mm]
+\texttt{projectedForce(points [, alpha, beta, gamma])} computes the integral of the force along the line of sight, similar to \texttt{projectedDensity}. The input parameters are the 2d point (or an array of points) $X,Y$ in the image plane, whose orientation with respect to the intrinsic model coordinates is specified by Euler angles $\alpha, \beta, \gamma$ (Section~\ref{sec:CoordinateDetails}), and the output contains the $X,Y$ components of force integrated along the $Z$ axis.\\[2mm]
 \texttt{Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{Tcirc(points)}.\\[2mm]
 \texttt{Rcirc(E=...)} or \texttt{Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum.\\[2mm]
 \texttt{Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$.\\[2mm]
@@ -957,7 +973,7 @@ Plotting the rotation curve of the above constructed potential and all its compo
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
 \texttt{af = agama.ActionFinder(pot, [interp=True|False])}\\
-where the optional second argument chooses between the interpolated (faster, less accurate) and non-interpolated version of St\"ackel fudge. If the potential is spherical, the underlying \Cpp implementation will use the \ttt{ActionFinderSpherical} class, otherwise the \ttt{ActionFinderAxisymFudge} class (interpolated or not).\\
+where the optional second argument chooses between the interpolated (faster, less accurate) and non-interpolated version of St\"ackel fudge. If the potential is spherical, the underlying \Cpp implementation will use the \ppp{ActionFinderSpherical} class, otherwise the \ppp{ActionFinderAxisymFudge} class (interpolated or not).\\
 This class has only one method \texttt{__call__()}, computing actions, and optionally angles and frequencies, for the given 6d position/velocity point or an $N\times6$ array of points:\\[1mm]
 \texttt{act = af(points)}
 \textit{\color{Sepia}\ \ \# 0th column is $J_r$, 1st -- $J_z$, 2nd -- $J_\phi$} \\
@@ -993,36 +1009,31 @@ but of course, the latter is less computationally efficient due to extra costs i
 \paragraph{GalaxyModel} is the combination of a potential, an action finder (which can be constructed internally for the given potential, or provided to the constructor if it was already created), a DF, and optionally a SF:\\
 \texttt{gm = agama.GalaxyModel(pot, df [, af][, sf=sf])}\\[2mm]
 %\textit{\color{Sepia}\ \ \# action finder is constructed automatically} \\[2mm]
-This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF or SF are user-defined Python functions).
+This class provides methods for computing DF moments and drawing position/velocity samples from it. These operations are rather expensive, and if the input consists of several points, the computation is internally parallelized using \texttt{OpenMP} (except when the DF or SF are user-defined Python functions). In all examples below, the input may contain a single point (with the dimension $D$ depending on the function), or an $N\times D$ array of several points. The input point and the output quantities are given in the ``observed'' coordinate system $XYZ$, which may be arbitrarily oriented with respect to the ``intrinsic'' coordinate system $xyz$ of the model, as specified by the three Euler rotation angles \texttt{alpha}, \texttt{beta}, \texttt{gamma} (Section~\ref{sec:CoordinateDetails}). When all three angles are zero (default), both coordinate systems coincide. The inclination angle \texttt{beta} is the most useful of these parameters.
 \\[2mm]
-\texttt{dens, meanvel, vel2 = gm.moments(points, dens=True, vel=True, vel2=True)}\\
-computes the density $\rho$, mean $v_\phi$, and six second moments of the velocity $\overline{v^2_{ij}}$ at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations.
+\texttt{dens, meanvel, vel2 = gm.moments(points, dens=True, vel=True, vel2=True, \dots)}\\
+computes the density $\rho$, mean velocity $\overline V$, and six second moments of the velocity $\overline{V_i V_j}$ at the provided point(s) (Section~\ref{sec:Moments}); one may choose which of these quantities are needed, eliminating unnecessary computations (by default only \texttt{dens} and \texttt{vel2} are computed). This method comes in two variants: the first version computes the moments at the given 3d point with Cartesian coordinates $\{X,Y,Z\}$ in the observed coordinate system, and the second one computes the projected moments at the given 2d point $\{X,Y\}$, additionally integrating along the line of sight $Z$. Thus \texttt{points} should be either a triplet/pair of numbers for a single point, or an $N\times3\,/\,N\times2$ array of points. The velocity moments also refer to the observed coordinate system.
 \\[2mm]
-\texttt{Sigma, rmsheight, sigmaz = gm.projectedMoments(R)}\\
-computes the projected quantites in the equatorial plane (surface density $\Sigma(R)$, r.m.s. height, and vertical velocity dispersion).
-\\[2mm]
-\texttt{fproj = gm.projectedDF([x,y,v_z])}\\
-computes the projected DF (integrated over $v_x,v_y$ and $z$).\\[2mm]
-\texttt{fvr, fvz, fvphi = gm.vdf(points [, gridv])}\\
-\texttt{fvr, fvz, fvphi, dens = gm.vdf(points, dens=True [, gridv=...])}\\
-constructs normalized 1d velocity distribution functions at the given point(s) (Section~\ref{sec:VDF}), represented by cubic spline interpolators. One may compute either the full VDFs at the given 3d point(s), or the projected VDFs additionally integrated over the $z$ axis; the choice depends on the shape of the \texttt{points} array (3 or 2 columns, respectively). If the optional argument \texttt{dens=True} is provided, the output additionally contains the 3d density $\rho$ or the surface density $\Sigma$.
+\texttt{fproj = gm.projectedDF(points, \dots)}\\
+computes the projected DF integrated along the line of sight $Z$ and optionally over some or all of the velocity components, weighted with Gaussian measurement uncertainties. A single \texttt{point} is specified by 8 numbers: $X$, $Y$ coordinates, three velocity components $V_X,\,V_Y,\,V_Z$, and three corresponding velocity uncertainties $\epsilon_{\bV}$, all in the observed coordinate system. The uncertainties can range from zero to infinity inclusive: a zero uncertainty means no integration along this velocity axis, an infinite uncertainty means the integration over the entire available range of velocity, and a finite uncertainty invokes a convolution with a Gaussian, as explained in the \hyperref[sec:ProjectedDF]{corresponding section}.\\[2mm]
+\texttt{fVX, fVY, fVZ = gm.vdf(points [, gridv], \dots)}\\
+\texttt{fVX, fVY, fVZ, dens = gm.vdf(points, dens=True [, gridv=...], \dots)}\\
+constructs normalized 1d \hyperref[sec:VDF]{velocity distribution functions} at the given point(s), represented by cubic spline interpolators. One may compute either the full VDFs at the given 3d point(s), or the projected VDFs additionally integrated over the $Z$ axis; the choice again depends on the shape of the \texttt{points} array (3 or 2 coordinates per point, respectively). If the optional argument \texttt{dens=True} is provided, the output additionally contains the 3d density $\rho$ or the surface density $\Sigma$.
 The optional argument \texttt{gridv} specifies the grid in velocity space used to represent the spline (if given as an array) or the size of this grid (if given as an integer). If not provided, the default is to cover the range $\pm v_\mathrm{escape}$ with 50 points. The grid needs not be too dense -- a 3rd degree interpolating spline provides a substantially higher level of detail than an equivalently spaced histogram.
 One may plot the velocity distribution as a smooth function on a denser grid:\\[1mm]
 \texttt{v_esc = numpy.sqrt(-2 * pot.potential(point))\\
 gridv = numpy.linspace(-v_esc, v_esc, 200)\\
-plt.plot(gridv, fvr(gridv))} \\[1mm]
-The VDF $\mathfrak{f}_\mathrm{proj}(x,y,v_z)$ is identical (up to numerical and interpolation errors) to the projected DF $f_\mathrm{proj}(x,y,v_z)$ divided by $\Sigma(x,y)$, but is more efficient when one needs to evaluate it for multiple values of $v_z$.
-\\[2mm]
+plt.plot(gridv, fVX(gridv))} \\[2mm]
 \texttt{mass = gm.totalMass()}\\
 computes the total mass of the DF inside the spatial region delineated by the SF. If the latter is trivial, the result should be identical to \texttt{df.totalMass()} up to integation errors, but is naturally much more expensive to compute, because it involves integration over the 6d phase space with actions computed at each point, rather than integration over the 3d action space. Note that if the SF is very localized, the integration routine may fail to find the region where the SF is nonzero and will incorrectly return a zero result; more generally, the accuracy may be rather poor in case of sharp selection boundaries.\\[2mm]
-All five of the above methods additionally accept an optional argument \texttt{separate=True}, which produces separate output for each component of a composite DF -- this is more efficient than computing them individually. In this case, output arrays have one extra dimension with length equal to the number of DF components (even when it is 1).
+All four of the above methods additionally accept an optional argument \texttt{separate=True}, which produces separate output for each component of a composite DF -- this is more efficient than computing them individually. In this case, output arrays have one extra dimension with length equal to the number of DF components (even when it is 1).
 \\[2mm]
 \texttt{posvel, mass = gm.sample(N)}\\
 draws $N$ equal-mass samples from the DF multiplied by the SF (Section~\ref{sec:Nbody}); the result is an $N\times6$ array of position/velocity points and a 1d array of masses (the particle masses approximately equal \texttt{gm.totalMass()/N}, but here the total mass is computed by the sampling routine). This routine is used for constructing an $N$-body representation of the DF-based model.
 \\[2mm]
 One may also sample positions from a given density profile, and then assign velocities using either the spherical anisotropic DF (Section~\ref{sec:DFspherical}) or axisymmetric Jeans equations. This is currently achieved by the \texttt{sample} method of a \ttt{Density} object, which additionally takes an instance of the \ttt{Potential} and optionally the parameters of Jeans equations. Be cautioned that the API will be changed in the future, to harmonize the usage conventions with those used for action-based \ttt{GalaxyModel}s.
 
-\paragraph{SelfConsistentModel} is the driver class for performing iterative self-consistent modelling (Section~\ref{sec:SCM}). It is initialized with a list of arguments determining the parameters of the two potential expansions (\ttt{Multipole} and \ttt{CylSpline}) that are constructed in the process. To run the model, one needs to add one or more components; the list of components may be changed between iterations.\\
+\paragraph{SelfConsistentModel} is the driver class for performing iterative self-consistent modelling (Section~\ref{sec:SCM}). It is initialized with a list of arguments determining the parameters of the two potential expansions (\ppp{Multipole} and \ppp{CylSpline}) that are constructed in the process. To run the model, one needs to add one or more components; the list of components may be changed between iterations.\\
 \texttt{params = dict(rminSph=1e-3, rmaxSph=1e3, sizeRadialSph=40, lmaxAngularSph=0)}\\
 \texttt{scm = agama.SelfConsistentModel(**params)}
 
@@ -1036,7 +1047,8 @@ performs one iteration of the modelling procedure, recomputing the density of al
 \texttt{comp.getDensity()}\\
 returns the density of this component; \\[2mm]
 \texttt{scm.potential}\\ is the instance of the total potential, which may be combined with the DF of each component into a \ttt{GalaxyModel} object, and used to compute other DF moments or construct an $N$-body model:\\
-\texttt{posvel, mass = agama.GalaxyModel(scm.potential, df).sample(10000)}
+\texttt{posvel, mass = agama.GalaxyModel(scm.potential, df).sample(10000)}\\[2mm]
+The \ttt{Component} and \ttt{SelfConsistentModel} classes are further illustrated by several \hyperref[sec:ExampleSCM]{example scripts}.
 
 \paragraph{Target} class represents one of several possible targets in Schwarzschild models. It is initialized by providing \ppp{type="..."} and other parameters depending on the target type (see Section~\ref{sec:SchwarzschildDetails}). This object can be used in two contexts: either as an argument for the \texttt{orbit} routine, collecting the contribution of each orbit to each constraint in the target, or as a function applied to a \ttt{Density} or \ttt{GalaxyModel} object or an $N$-body snapshot, returning the array of constraints computed from this object.
 
@@ -1203,7 +1215,7 @@ The \Agama framework itself is indeed just a ``library'', not a ``program'', but
 
 \paragraph{example_gala} is a \Python program illustrating the \ttt{GalaPotential} class, which provides a common interface for potentials from \Agama and \Gala, and the equivalent methods for orbit integration.
 
-\paragraph{example_basis_set} is a \Python program comparing the \ttt{BasisSet} potential expansion with equivalent classes from \Galpy and \Gala, which both implement a special case of it (the Hernquist--Ostriker basis set). The coefficients of expansion can be converted from the formats used in these libraries to the input file for the native and more computationally efficient \ttt{BasisSet} potential.
+\paragraph{example_basis_set} is a \Python program comparing the \ppp{BasisSet} potential expansion with equivalent classes from \Galpy and \Gala, which both implement a special case of it (the Hernquist--Ostriker basis set). The coefficients of expansion can be converted from the formats used in these libraries to the input file for the native and more computationally efficient \ppp{BasisSet} potential.
 
 \paragraph{example_amuse} illustrates the use of \Agama to provide an external potential in an $N$-body simulation performed within the \Amuse framework.
 
@@ -1211,13 +1223,13 @@ The \Agama framework itself is indeed just a ``library'', not a ``program'', but
 
 \paragraph{example_time_dependent_potential} is a \Python script illustrating various ways of constructing time-dependent potentials and integrating test-particle orbits.
 
-\paragraph{example_spiral} \label{sec:ExampleSpiral} is a \Python script illustrating the use of a user-defined potential model (a three-arm spiral) for orbit integration: the \Python function defining the potential can be used directly, but it is rather inefficient, and the preferred way is to construct a \ttt{CylSpline} approximation for it. See also \textbf{test\_user\_profiles.py} for other examples of providing user-defined \Python functions representing density, distribution function and selection function concepts to various routines within the library.
+\paragraph{example_spiral} \label{sec:ExampleSpiral} is a \Python script illustrating the use of a user-defined potential model (a three-arm spiral) for orbit integration: the \Python function defining the potential can be used directly, but it is rather inefficient, and the preferred way is to construct a \ppp{CylSpline} approximation for it. See also \textbf{test\_user\_profiles.py} for other examples of providing user-defined \Python functions representing density, distribution function and selection function concepts to various routines within the library.
 
 \paragraph{example_deprojection} is an interactive \Python plotting script illustrating the projection and deprojection of triaxial ellipsoidal bodies viewed at different orientations.
 
 \paragraph{example_smoothing_spline} is a \Python program showing the use of penalized smoothing splines for fitting a curve to noisy data (\ttt{splineApprox}) and for estimating 1d probability distributions from discrete samples (\ttt{splineLogDensity}).
 
-\paragraph{example_actions_nbody} shows how to determine the actions for particles from an \Nbody snapshot taken from a simulation of a disk+halo system. It first reads the snapshot and constructs two potential approximations -- \ttt{Multipole} for the halo component and \ttt{CylSpline} for the disk component -- from the particles themselves. Then it computes the actions for each particle and writes them to another file. This program exists both in \Cpp and \Python variants that perform the same task.
+\paragraph{example_actions_nbody} shows how to determine the actions for particles from an \Nbody snapshot taken from a simulation of a disk+halo system. It first reads the snapshot and constructs two potential approximations -- \ppp{Multipole} for the halo component and \ppp{CylSpline} for the disk component -- from the particles themselves. Then it computes the actions for each particle and writes them to another file. This program exists both in \Cpp and \Python variants that perform the same task.
 
 \paragraph{example_torus} is a \Python script illustrating the use of the \ttt{ActionMapper} class to construct an orbit, comparing it to a numerically integrated trajectory.
 
@@ -1227,13 +1239,14 @@ The \Python equivalent of this program additionally determines the confidence in
 A more elaborate \Python program \texttt{gc_runfit} determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
 This program is designed to work with the mock data from the \href{http://astrowiki.ph.surrey.ac.uk/dokuwiki/doku.php?id=tests:sphtri:spherical}{Gaia Challenge} test suite \cite{Read2021}, but can be easily adapted to other situations.
 
-\paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ttt{QuasiSpherical} DF and approximate it with a \ttt{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
+\paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ppp{QuasiSpherical} DF and approximate it with a \ppp{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
 
-\paragraph{example_self_consistent_model} \label{sec:ExampleSCM} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ttt{QuasiIsothermal} DF for the disk; the \ttt{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
+\paragraph{example_self_consistent_model} \label{sec:ExampleSCM} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ppp{QuasiIsothermal} DF for the disk; the \ppp{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
 
 There are a couple of closely related \Python programs:\\
 \textbf{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
-\textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.
+\textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.\\
+\textbf{test_self_consistent_model} illustrates the iterative self-consistent modelling workflow by reimplementing the \ttt{Component} and \ttt{SelfConsistentModel} classes in pure \Python and testing their equivalence to the \Cpp classes. The same approach can be used in other contexts besides self-consistent modelling, as a means of producing the density profile corresponding to the given DF -- essentially, computing the zeroth moment of the DF at a small number of points ($\sim 100$) and then interpolating it into the entire 3d space as \ppp{DensitySphericalHarmonic} or \ppp{DensityCylindricalHarmonic}. This could be useful if one needs to evaluate it at many points -- for instance, to compute the integrals of density over some finite volume (equivalent to a spatial selection function) or the surface density.
 
 \paragraph{example_schwarzschild_triaxial} and \;\;\textbf{example_schwarzschild_flattened_rotating}\;\;\\ are two \Python scripts illustrating the basic steps in Schwarzschild orbit-superposition  modelling. The first one creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot. The second one creates a flattened rotating S\'ersic model with a central black hole, again converts it into an $N$-body snapshot, and plots various diagnostic information.
 
@@ -1816,7 +1829,7 @@ First, we define several commonly used coordinate systems (or \textit{representa
 Second, we define rotations of coordinate basis.
 Consider a right-handed Cartesian reference frame defined by basis vectors (axes) $\bx,\by,\bz$, and a rotated frame with the same origin defined by basis vectors $\bX,\bY,\bZ$. The relative orientation of two frames can be specified by Euler angles (see Figure~\ref{fig:EulerAngles}).
 The same point has coordinates $x,y,z$ in the original frame and $X,Y,Z$ in the rotated frame.
-The transformation between these coordinates (passive rotation) is given by the following orthogonal rotation matrix $\mathsf R$, produced by the routine \texttt{makeRotationMatrix}:
+The transformation between these coordinates (passive rotation) is given by the following orthogonal rotation matrix $\mathsf R$, encapsulated in a \Cpp class \texttt{coord::Orientation} or produced by the Python routine \texttt{makeRotationMatrix}:
 \begin{equation}
 \left( \begin{array}{c} X \\ \,Y \\ Z \end{array} \right) = \mathsf R 
 \left( \begin{array}{c} x \\   y \\ z \end{array} \right) , \qquad

@@ -1,6 +1,6 @@
 /** \file    galaxymodel_base.h
     \brief   A complete galaxy model and associated routines (computation of moments, sampling)
-    \date    2015-2020
+    \date    2015-2021
     \author  Eugene Vasiliev, Payel Das, James Binney
 */
 #pragma once
@@ -76,138 +76,160 @@ public:
 };
 
 
-/** Compute density, first-order, and second-order moments of velocity in cylindrical coordinates;
-    if some of them are not needed, pass NULL as the corresponding argument, and it will not be 
-    computed. In case of a multicomponent DF and if the flag 'separate' is set to true,
-    the output values are provided separately for each component, so the corresponding non-NULL
-    arguments must point to arrays of length df.numValues().
-    \param[in]  model  is the galaxy model (potential + DF + action finder);
-    \param[in]  point  is the position at which the quantities should be computed;
-    \param[out] density  will contain the integral of DF over all velocities;
-    \param[out] velocityFirstMoment  will contain the mean streaming velocity <v_phi>;
-    \param[out] velocitySecondMoment will contain the tensor of mean squared velocity components;
-    \param[out] densityErr  will contain the error estimate of density;
-    \param[out] velocityFirstMomentErr  will contain the error estimate of 1st velocity moment;
-    \param[out] velocitySecondMomentErr will contain the error estimate of 2nd velocity moment;
+/** Compute density, first-order, and second-order moments of velocity in Cartesian coordinates
+    either at the given 3d input point X,Y,Z (when the input point is coord::PosCar)
+    or projected (integrated along Z) at the point X,Y (when the input is coord::PosProj).
+    The 'observed' coordinate system XYZ may be arbitrarily oriented with respect to the 'intrinsic'
+    coordinate system xyz of the model; in the projected case, Z is the line of sight.
+    The output consists of the density (or projected density), three components of mean velocity,
+    and the tensor of second moments of velocity (intrinsic or projected) in any combination:
+    if some of these values are not needed, pass NULL as the corresponding argument, and
+    they will not be computed.
+    In case of a multicomponent DF and if the flag 'separate' is set to true, the output values
+    are provided separately for each component, so the corresponding non-NULL arguments must point
+    to arrays of length df.numValues().
+    \param[in]  model  is the galaxy model (potential + DF + action finder).
+    \param[in]  point  is the position at which the quantities should be computed.
+    \param[out] density  will contain the integral of DF over all velocities (and optionally by Z.
+    \param[out] velocityFirstMoment  will contain the mean velocity.
+    \param[out] velocitySecondMoment will contain the tensor of mean squared velocity components.
     \param[in]  separate    whether to compute moments separately for each element of
-    a multicomponent DF; in this case, the output arrays should have length equal to df.numValues();
-    \param[in]  reqRelError is the required relative error in the integral;
+    a multicomponent DF; in this case, the output arrays should have length equal to df.numValues().
+    \param[in]  orientation  is the triplet of Euler angles specifying the orientation of
+    the 'observed' coordinate system XYZ with respect to 'intrinsic' model coordinates xyz;
+    in particular, beta is the inclination angle, alpha is irrelevant for axisymmetric systems,
+    and when all three angles are zero, XYZ coincides with xyz.
+    \param[in]  reqRelError is the required relative error in the integral.
     \param[in]  maxNumEval  is the maximum number of evaluations in integral.
 */
 void computeMoments(
     const GalaxyModel& model,
-    const coord::PosCyl& point,
+    const coord::PosCar& point,   // variant of the function for intrinsic moments at a 3d point
+    // output arrays - one element per DF component
     double density[],
-    double velocityFirstMoment[],
-    coord::Vel2Cyl velocitySecondMoment[],
-    double densityErr[]=NULL,
-    double velocityFirstMomentErr[]=NULL,
-    coord::Vel2Cyl velocitySecondMomentErr[]=NULL,
-    const bool separate=false,
-    const double reqRelError=1e-3,
-    const int maxNumEval=1e5);
-
-
-/** Compute the projected moments of distribution function:
-    surface density, scale height, and line-of-sight velocity dispersion at a given projected radius.
-    TODO: generalize to allow an arbitrary orientation of the projection.
-    \param[in]  model  is the galaxy model;
-    \param[in]  R is the cylindrical radius;
-    \param[out] surfaceDensity if not NULL will contain the computed surface density;
-    \param[out] rmsHeight if not NULL, will contain the rms height;
-    \param[out] rmsVel if not NULL, will contain the rms line-of-sight velocity;
-    \param[out] surfaceDensityErr if not NULL, will contain the error estimate for density;
-    \param[out] rmsHeightErr if not NULL, will contain the error estimate for rms height;
-    \param[out] rmsVelErr if not NULL, will contain the error estimate for rms velocity;
-    \param[in]  separate    whether to compute moments separately for each element of
-    a multicomponent DF; in this case, the output arrays should have length equal to df.numValues();
-    \param[in]  reqRelError is the required relative error in the integral;
-    \param[in]  maxNumEval  is the maximum number of evaluations in integral;
-*/
-void computeProjectedMoments(
-    const GalaxyModel& model,
-    const double R,
-    double surfaceDensity[],
-    double rmsHeight[],
-    double rmsVel[],
-    double surfaceDensityErr[]=NULL,
-    double rmsHeightErr[]=NULL,
-    double rmsVelErr[]=NULL,
+    coord::VelCar velocityFirstMoment[],
+    coord::Vel2Car velocitySecondMoment[],
+    // optional input parameters
     bool separate=false,
-    const double reqRelError=1e-3,
-    const int maxNumEval=1e5);
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-3,
+    int maxNumEval=1e5);
+
+void computeMoments(
+    const GalaxyModel& model,
+    const coord::PosProj& point,   // variant of the function for projected moments at a 2d point
+    // output arrays - one element per DF component
+    double density[],
+    coord::VelCar velocityFirstMoment[],
+    coord::Vel2Car velocitySecondMoment[],
+    // optional input parameters
+    bool separate=false,
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-3,
+    int maxNumEval=1e5);
 
 
 /** Compute the value of 'projected distribution function' at the given point
-    specified by two coordinates in the sky plane and line-of-sight velocity.
-    TODO: generalize to allow an arbitrary orientation of the projection.
-    \param[in]  model  is the galaxy model;
-    \param[in]  R is the cylindrical radius;
-    \param[in]  vz is the line-of-sight velocity;
+    specified by two coordinates in the sky plane (X,Y) and possibly some velocity components.
+    The DF is integrated along the line of sight (Z) and all three velocity components -
+    either across the entire range of available velocity, or over the Gaussian uncertainties.
+    The orientation of the 'observational' coordinate system XYZ with respect to the 'intrinsic'
+    coordinate system xyz of the model is specified by three Euler angles alpha, beta, gamma.
+    The input point has precisely known X,Y coordinates, unknown Z (i.e. the DF is integrated over Z),
+    and three velocity components vX,vY,vZ that may be known precisely, imprecisely (with some
+    uncertainty), or not at all (with infinite uncertainty).
+    When a given velocity component is not known precisely, the DF is integrated over the
+    available range of this component, weighted with the Gaussian the measurement uncertainty
+    (unless it is infinite, in which case the weight factor is identically unity).
+    Thus the uncertainties on each velocity component can be anywhere between 0 and INFINITY
+    (including endpoints), with the only restriction that vX,vY uncertainties can be either
+    both finite or both infinite.
+    Note that in the case of a finite but relatively very large uncertainty compared to the
+    available range of velocities in the model, the result is almost identical to the case
+    of infinite uncertainty, but differs in normalization:  e.g., when vZ_error >> vZ,
+    projectedDF(..., vZ, vZ_error) =
+    projectedDF(...,  0, INFINITY) * exp(-0.5 * (vZ/vZ_error)^2) / sqrt(2*pi) / vZ_error.
+    When all three velocity uncertainties are infinite, the result is the surface density.
+    \param[in]  model  is the galaxy model.
+    \param[in]  point  specifies the two coordinates in the 'observed' coordinate system.
+    \param[in]  vel  are the three velocity components in the 'observed' coordinate system.
+    \param[in]  velerr  are their respective uncertainties;
+    note that if the uncertainty is INFINITY, the corresponding velocity value is irrelevant.
     \param[out] result  will contain the values of projected DF (a single value if separate==false,
-    otherwise an array of length df.numValues() - should be allocated by the caller);
-    \param[in]  vz_error is the assumed velocity error (assumed Gaussian):
-    if nonzero, then the DF is additionally convolved with the error function;
+    otherwise an array of length df.numValues() - should be allocated by the caller).
     \param[in]  separate    whether to compute moments separately for each element of
-    a multicomponent DF; in this case, the result array should have length equal to df.numValues();
-    \param[in]  reqRelError is the required relative error in the integral;
-    \param[in]  maxNumEval  is the maximum number of evaluations in integral;
+    a multicomponent DF; in this case, the result array should have length equal to df.numValues().
+    \param[in]  orientation  is the triplet of Euler angles specifying the orientation of
+    the 'observed' coordinate system with respect to 'intrinsic' model coordinates;
+    in particular, beta is the inclination angle, and alpha is irrelevant for axisymmetric systems.
+    \param[in]  reqRelError is the required relative error in the integral.
+    \param[in]  maxNumEval  is the maximum number of evaluations in integral.
+    \throws  std::invalid_argument  if the combination of velocity uncertainties is unsupported,
+    or any exception that occurs during the integration.
 */
 void computeProjectedDF(
     const GalaxyModel& model,
-    const double R, const double vz,
-    double result[],
-    const double vz_error=0,
+    const coord::PosProj& point,
+    const coord::VelCar& vel,
+    const coord::VelCar& velerr,
+    /*output*/ double result[],
+    // optional input arguments
     bool separate=false,
-    const double reqRelError=1e-3,
-    const int maxNumEval=1e5);
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-3,
+    int maxNumEval=1e5);
 
 
-/** Compute the velocity distribution functions (VDF) in three directions in cylindrical coordinates
-    at the given point in space.
+/** Compute the velocity distribution functions (VDF) in three directions at the given point in space.
+    The input point and the orthogonal velocity axes are specified in the 'observed' Cartesian
+    coordinate system XYZ, which may be arbitrarily oriented with respect to the 'intrinsic'
+    coordinate system xyz of the model.
     The VDF is represented as a weighted sum of B-splines of degree N:
     0 means histogramming, 1 - linear interpolation, 3 - cubic interpolation.
     Higher degrees not only result in a smoother VDF, but also are easier to compute:
     the integration over the velocity space is carried out for all B-splines simultaneously,
     and the smoother are the basis functions, the easier is it for the quadrature to achieve
     the target level of accuracy.
-    TODO: generalize to allow an arbitrary orientation of the velocity ellipsoid.
     \tparam     N is the degree of B-splines (0, 1 or 3).
     \param[in]  model  is the galaxy model.
     \param[in]  point  is the position at which the VDF are computed.
-    \param[in]  projected  determines whether to integrate over z:
-    if true, then only two coordinates (R,phi) of the input point is used, and the VDF is averaged
-    over z (i.e., represents the distribution of line-of-sight velocities and proper motions),
+    \param[in]  projected  determines whether to integrate over Z:
+    if true, then only two coordinates (X,Y) of the input point is used, and the VDF is averaged
+    over Z (i.e., represents the distribution of line-of-sight velocities and proper motions),
     otherwise the VDF is computed for the given 3d point.
-    \param[in]  gridVR  is the array of grid nodes for the V_R velocity component,
+    \param[in]  gridvX  is the array of grid nodes for the v_X velocity component,
     which define the set of basis functions for interpolation.
     The nodes must be sorted in increasing order, and typically should range from -V_escape to V_escape.
-    A suitable array can be created by `math::createUniformGrid(numNodes, -V_escape, V_escape)`.
-    \param[in]  gridVz  is the same thing for the VDF of V_z.
-    \param[in]  gridVphi  is the same thing for V_phi.
-    \param[out] density  will contain the density at the given point (it is used to normalize the
-    amplitudes of the interpolator, and comes for free during integration anyway).
+    A convenience overloaded version of this routine creates a suitable grid automatically.
+    \param[in]  gridvY  is the same thing for the VDF of v_Y.
+    \param[in]  gridvZ  is the same thing for v_Z (the line-of-sight component).
+    \param[out] density  will contain the density at the given point XYZ (if projected==false)
+    or the surface density at the point XY (if projected==true): it is used to normalize the
+    amplitudes of the interpolator, and comes for free during integration anyway.
     If the flag separate==false, this will be a single value, otherwise an array of densities of
     each element of a multicomponent DF (should be allocated by the caller); same convention is
     used for other output arrays.
-    \param[out] amplVR  should point to a vector (if separate==false) or an array of df.numValues()
+    \param[out] amplvX  should point to a vector (if separate==false) or an array of df.numValues()
     vectors (if separate==true), which will be filled with amplitudes for constructing an interpolated
-    VDF for the V_R component, namely:
+    VDF for the v_X component, namely:
     ~~~~
-    math::BsplineInterpolator1d interp(gridVR);
-    double f_of_v = interp.interpolate(v, amplVR);  // amplVR was obtained from this routine
+    math::BsplineInterpolator1d<N> interp(gridvX);
+    double f_of_v = interp.interpolate(v, amplvX);  // amplvX was obtained from this routine
     ~~~~
-    The number of elements in amplVR is gridVR.size() + N - 1;
-    for N=0 they are essentially the heights of the histogram bars between gridVR[i] and gridVR[i+1],
-    and for N=1 the values of amplVR at each node of gridVR coincide with the interpolated f(v);
+    The number of elements in amplvX is gridvX.size() + N - 1;
+    for N=0 they are essentially the heights of the histogram bars between gridvX[i] and gridvX[i+1],
+    and for N=1 the values of amplvX at each node of gridvX coincide with the interpolated f(v);
     however for higher N the correspondence is not so obvious.
     The VDF is normalized such that \f$  \int_{-V_{escape}}^{V_{escape}} f(v) dv = 1  \f$
-    (if the provided interval specified by gridVR is smaller than V_escape, this integral may
-    be lower than unity).
-    \param[out] amplVz  will contain the amplitudes for the V_z component.
-    \param[out] amplVphi  will contain the amplitudes for the V_phi component.
+    (if the provided interval specified by gridvX is smaller than V_escape, the integral
+    over the extend ot gridvX will be smaller than unity).
+    \param[out] amplvY  will contain the amplitudes for the v_Y component.
+    \param[out] amplvZ  will contain the amplitudes for the v_Z component.
     \param[in]  separate    whether to compute moments separately for each element of
     a multicomponent DF; in this case, the output arrays should have length equal to df.numValues().
+    \param[in]  orientation specifies the orientation of the observed coordinate system XYZ
+    with respect to the intrinsic system xyz of the model, parametrized by three Euler angles;
+    the default zero values of these angles make XYZ coincide with xyz.
     \param[in]  reqRelError is the required relative error in the integrals.
     \param[in]  maxNumEval  is the maximum number of evaluations for all integral together.
     \throw  std::invalid_argument if the input arrays are incorrect.
@@ -215,20 +237,81 @@ void computeProjectedDF(
 template <int N>
 void computeVelocityDistribution(
     const GalaxyModel& model,
-    const coord::PosCyl& point,
-    bool projected,
-    const std::vector<double>& gridVR,
-    const std::vector<double>& gridVz,
-    const std::vector<double>& gridVphi,
+    const coord::PosCar& point,   // variant of the function for intrinsic vdf at a 3d point
+    const std::vector<double>& gridvX,
+    const std::vector<double>& gridvY,
+    const std::vector<double>& gridvZ,
     // output arrays - one element per DF component (if separate==true), otherwise just one element
     double density[],
-    std::vector<double> amplVR[],
-    std::vector<double> amplVz[],
-    std::vector<double> amplVphi[],
+    std::vector<double> amplvX[],
+    std::vector<double> amplvY[],
+    std::vector<double> amplvZ[],
     // optional input parameters
-    const bool separate=false,
-    const double reqRelError=1e-2,
-    const int maxNumEval=1e6);
+    bool separate=false,
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-2,
+    int maxNumEval=1e6);
+
+template <int N>
+void computeVelocityDistribution(
+    const GalaxyModel& model,
+    const coord::PosProj& point,   // variant of the function for projected vdf at a 2d point
+    const std::vector<double>& gridvX,
+    const std::vector<double>& gridvY,
+    const std::vector<double>& gridvZ,
+    // output arrays - one element per DF component (if separate==true), otherwise just one element
+    double density[],
+    std::vector<double> amplvX[],
+    std::vector<double> amplvY[],
+    std::vector<double> amplvZ[],
+    // optional input parameters
+    bool separate=false,
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-2,
+    int maxNumEval=1e6);
+
+
+/** A convenience overloaded version of the routine that automatically initializes the velocity
+    grids so that they cover the range [-v_escape, +v_escape] with the given number of points.
+    Arguments have the same meaning as for the actual computeVelocityDistribution() routine;
+    \param[in]  gridsize  is the size of velocity grid (equal for all three components);
+    \param[out] gridv  will be initialized by this routine.
+*/
+template <int N>
+void computeVelocityDistribution(
+    const GalaxyModel& model,
+    const coord::PosCar& point,   // variant of the function for intrinsic vdf at a 3d point
+    size_t gridsize,
+    // velocity grid will be initialized by this routine
+    std::vector<double>& gridv,
+    // output arrays - one element per DF component (if separate==true), otherwise just one element
+    double density[],
+    std::vector<double> amplvX[],
+    std::vector<double> amplvY[],
+    std::vector<double> amplvZ[],
+    // optional input parameters
+    bool separate=false,
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-2,
+    int maxNumEval=1e6);
+
+template <int N>
+void computeVelocityDistribution(
+    const GalaxyModel& model,
+    const coord::PosProj& point,   // variant of the function for projected vdf at a 2d point
+    size_t gridsize,
+    // velocity grid will be initialized by this routine
+    std::vector<double>& gridv,
+    // output arrays - one element per DF component (if separate==true), otherwise just one element
+    double density[],
+    std::vector<double> amplvX[],
+    std::vector<double> amplvY[],
+    std::vector<double> amplvZ[],
+    // optional input parameters
+    bool separate=false,
+    const coord::Orientation& orientation=coord::Orientation(),
+    double reqRelError=1e-2,
+    int maxNumEval=1e6);
 
 
 /** this will be redesigned */
@@ -239,9 +322,8 @@ void computeProjection(
     const double Ylim[2],
     const double transformMatrix[9],
     double* result,
-    double* error=NULL,
-    const double reqRelError=1e-3,
-    const int maxNumEval=1e5);
+    double reqRelError=1e-3,
+    int maxNumEval=1e5);
 
 
 /** Compute the total mass represented by the DF in the region determined by the selection function
@@ -250,7 +332,6 @@ void computeProjection(
     integration over 6d phase space and action computation for every point allowed by the SF).
     \param[in]  model  is the galaxy model.
     \param[out] result  will contain the integral(s) of DF * SF over the entire 6d phase space.
-    \param[out] error  will contain the error estimate of the mass.
     \param[in]  separate    whether to compute moments separately for each element of
     a multicomponent DF; in this case, the output arrays should have length equal to df.numValues().
     \param[in]  reqRelError is the required relative error in the integral.
@@ -260,11 +341,12 @@ void computeProjection(
 */
 void computeTotalMass(
     const GalaxyModel& model,
+    // output
     double* result,
-    double* error=NULL,
+    // optional input
     bool separate=false,
-    const double reqRelError=1e-3,
-    const int maxNumEval=1e6);
+    double reqRelError=1e-3,
+    int maxNumEval=1e6);
 
 
 /** Generate N-body samples of the distribution function multiplied by the selection function
@@ -282,7 +364,7 @@ void computeTotalMass(
     \returns    a new array of particles (position/velocity/mass)
     sampled from the distribution function.
 */
-particles::ParticleArrayCyl sampleActions(
+particles::ParticleArrayCar sampleActions(
     const GalaxyModel& model, const size_t numPoints,
     std::vector<actions::Actions>* actions=NULL);
 
@@ -297,7 +379,7 @@ particles::ParticleArrayCyl sampleActions(
     \returns    a new array of particles (position/velocity/mass)
     sampled from the distribution function;
 */
-particles::ParticleArrayCyl samplePosVel(
+particles::ParticleArrayCar samplePosVel(
     const GalaxyModel& model, const size_t numPoints);
 
 
@@ -325,18 +407,18 @@ private:
     double       relError;    ///< requested relative error of density computation
     unsigned int maxNumEval;  ///< max # of DF evaluations per one density calculation
 
-    virtual double densityCar(const coord::PosCar &pos, double time) const {
-        return densityCyl(toPosCyl(pos), time); }
-
-    virtual double densitySph(const coord::PosSph &pos, double time) const {
-        return densityCyl(toPosCyl(pos), time); }
-
     /// compute the density as the integral of DF over velocity at a given position
-    virtual double densityCyl(const coord::PosCyl &point, double /*time*/) const {
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const {
         double result;
-        computeMoments(model, point, &result, NULL, NULL, NULL, NULL, NULL, false, relError, maxNumEval);
+        computeMoments(model, pos, &result, NULL, NULL, false, coord::Orientation(), relError, maxNumEval);
         return result;
     }
+
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const {
+        return densityCar(toPosCar(pos), time); }
+
+    virtual double densitySph(const coord::PosSph &pos, double time) const {
+        return densityCar(toPosCar(pos), time); }
 
     /// vectorized computation of density in an OpenMP-parallelized loop
     virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],

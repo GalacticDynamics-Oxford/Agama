@@ -36,6 +36,23 @@ PtrDensity createDensity(
     const utils::KeyValueMap& params,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
+/** Create an instance of density expansion (DensitySphericalHarmonic or DensityAzimuthalHarmonic)
+    from the user-provided density model, with parameters contained in the key-value map.
+    \param[in] params is the list of parameters, including grid sizes and harmonic expansion orders,
+    ("type=..." should specify one of the two available density expansions);
+    \param[in] dens   is the density model which will be approximated by evaluating its values
+    at the specified grid points and constructing the interpolated expansion;
+    \param[in] converter (optional) is the unit converter for transforming dimensional quantities
+    in parameters (essentially the grid node placement) into internal units;
+    \return    a new instance of PtrDensity on success.
+    \throw     std::invalid_argument if the requested density is not of an expansion type,
+    or any density-specific exception on failure (if some parameters are missing or invalid).
+*/
+PtrDensity createDensity(
+    const utils::KeyValueMap& params,
+    const BaseDensity& dens,
+    const units::ExternalUnits& converter = units::ExternalUnits());
+
 /** Create an instance of potential according to the parameters contained in the key-value map.
     \param[in] params is the list of parameters (should contain either "file=..." or "type=...");
     \param[in] converter is the unit converter for transforming the dimensional quantities 
@@ -54,7 +71,7 @@ PtrPotential createPotential(
     ("type=..." should specify one of the potential expansions);
     \param[in] dens   is the density model which will serve as the source to the potential;
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
-    in parameters (essentially the grid sizes) into internal units;
+    in parameters (essentially the grid node placement) into internal units;
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument if the requested potential is not of an expansion type,
     or any potential-specific exception on failure (if some parameters are missing or invalid).

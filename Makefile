@@ -121,6 +121,7 @@ TESTSRCS  = test_math_core.cpp \
             test_df_spherical.cpp \
             test_density_grid.cpp \
             test_losvd.cpp \
+            test_galaxymodel.cpp \
             example_actions_nbody.cpp \
             example_df_fit.cpp \
             example_doublepowerlaw.cpp \
@@ -149,8 +150,10 @@ $(LIBNAME):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local
 
 # for each executable file, first make sure that the exe/ folder exists,
 # and create a symlink named agama.so pointing to ../agama.so in that folder if needed
+# (if this was an actual file and not a symlink, then delete it first and then create a symlink)
 $(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
 	@mkdir -p $(EXEDIR)
+	@[ -f $(EXEDIR)/$(LIBNAME) -a ! -L $(EXEDIR)/$(LIBNAME) ] && rm $(EXEDIR)/$(LIBNAME) || true
 	@[ -L $(EXEDIR)/$(LIBNAME) ] || ln -s ../$(LIBNAME) $(EXEDIR)/$(LIBNAME)
 	$(LINK) -o "$@" "$<" $(CXXFLAGS) $(LIBNAME) $(EXE_FLAGS)
 
@@ -165,7 +168,7 @@ $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc Makefile.local
 	$(CXX) -c $(CXXFLAGS) $(COMPILE_FLAGS) -o "$@" "$<"
 
 clean:
-	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME)
+	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME) $(EXEDIR)/$(LIBNAME)
 
 # run tests (both C++ and python)
 test:

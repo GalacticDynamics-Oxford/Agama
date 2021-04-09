@@ -429,36 +429,40 @@ inline bool isSpherical(const BaseDensity& dens) {
     return isSpherical(dens.symmetry()); }
 
 
-/** Compute the surface density, i.e., the integral of rho(X,Y,Z) dZ, with Z being the distance along
-    the line of sight, and the orientation of the observer's coordinate system X,Y,Z relative to the
-    intrinsic coordinate system x,y,z of the density profile is specified by the Euler rotation angles.
-    \param[in] dens  is the density profile;
+/** Compute the projected (surface) density, i.e., the integral of rho(X,Y,Z) dZ,
+    with Z being the distance along the line of sight,
+    and the orientation of the observer's coordinate system X,Y,Z relative to the intrinsic
+    coordinate system x,y,z of the density profile is specified by the Euler rotation angles.
+    \param[in] dens  is the density profile.
     \param[in] X,Y are the coordinates in the observer's system
-    (still centered on the object but possibly rotated);
-    \param[in] alpha, beta, gamma are the Euler rotation angles defining the orientation of
-    the observer's coordinate system X,Y,Z; if all three are zero, then X,Y,Z coincide with x,y,z.
+    (still centered on the object but possibly rotated).
+    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
+    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
+    if all three are zero, then X,Y,Z coincide with x,y,z.
     \return  the integral \f$ \Sigma(X,Y) = \int_{-\infty}^{+\infty} \rho(X,Y,Z) dZ  \f$.
 */
-double surfaceDensity(const BaseDensity& dens, double X, double Y,
-    double alpha=0, double beta=0, double gamma=0);
+double projectedDensity(const BaseDensity& dens, double X, double Y,
+    const coord::Orientation& orientation);
 
 /** Compute the projected force, i.e., the integrals of f_{X,Y}(X,Y,Z) dZ,
     where f_{X,Y} are the two components of potential gradient dPhi/dX, dPhi/dY,
     Z is the distance along the line of sight,
     and the orientation of the observer's coordinate system X,Y,Z relative to the intrinsic
     coordinate system x,y,z of the potential model is specified by the Euler rotation angles.
-    \param[in] pot  is the potential profile;
+    \param[in] pot  is the potential model.
     \param[in] X,Y are the coordinates in the observer's system
-    (still centered on the object but possibly rotated);
-    \param[in] alpha, beta, gamma are the Euler rotation angles defining the orientation of
-    the observer's coordinate system X,Y,Z; if all three are zero, then X,Y,Z coincide with x,y,z.
+    (still centered on the object but possibly rotated)
+    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
+    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
+    if all three are zero, then X,Y,Z coincide with x,y,z.
     \param[out] fX  will contain the integral
-    \f$ \int_{-\infty}^{+\infty} \partial\Phi(X,Y,Z) / \partial X dZ  \f$;
+    \f$ \int_{-\infty}^{+\infty} \partial\Phi(X,Y,Z) / \partial X dZ  \f$.
     \param[out] fY  will contain a similar integral for the Y-component of potential gradient;
     note that fZ is always zero and hence does not need to be computed.
 */
 void projectedForce(const BasePotential& pot, double X, double Y,
-    double alpha, double beta, double gamma, double& fX, double& fY);
+    const coord::Orientation& orientation, double& fX, double& fY);
+
 
 /** Find (spherical) radius corresponding to the given enclosed mass */
 double getRadiusByMass(const BaseDensity& dens, const double enclosedMass);

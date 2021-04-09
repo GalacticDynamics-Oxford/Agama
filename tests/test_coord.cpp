@@ -273,6 +273,29 @@ bool test_prolmod()
     return samepos && samegrad && samepv && equalPosVel(psm, psm1, eps);
 }
 
+// test of rotation matrices and their inverse
+bool testRotation()
+{
+    const coord::Orientation orientation(1.47, 2.58, 3.69);
+    double xyz[3] = {1, 2, -3}, rot[3], inv[3];
+    orientation.toRotated(xyz, rot);
+    orientation.fromRotated(rot, inv);
+    coord::Vel2Car a, b, c;
+    a.vx2  = 2.34; a.vy2  =  3.45; a.vz2  =  4.56;
+    a.vxvy = 1.23; a.vxvz = -0.98; a.vyvz = -2.34;
+    b = orientation.toRotated(a);
+    c = orientation.fromRotated(b);
+    return math::fcmp(xyz[0], inv[0], eps) == 0
+        && math::fcmp(xyz[1], inv[1], eps) == 0
+        && math::fcmp(xyz[2], inv[2], eps) == 0
+        && math::fcmp(a.vx2 , c.vx2 , eps) == 0
+        && math::fcmp(a.vy2 , c.vy2 , eps) == 0
+        && math::fcmp(a.vz2 , c.vz2 , eps) == 0
+        && math::fcmp(a.vxvy, c.vxvy, eps) == 0
+        && math::fcmp(a.vxvz, c.vxvz, eps) == 0
+        && math::fcmp(a.vyvz, c.vyvz, eps) == 0;
+}
+
 template<typename CS> bool isNotNan(const coord::PosT<CS>& p);
 template<> bool isNotNan(const coord::PosCar& p) { return p.x==p.x && p.y==p.y && p.z==p.z; }
 template<> bool isNotNan(const coord::PosCyl& p) { return p.R==p.R && p.phi==p.phi && p.z==p.z; }
@@ -334,6 +357,8 @@ int main() {
     if(!passed) std::cout << "ProlMod <=> Cyl failed\n";
     passed &= test_inf();
     if(!passed) std::cout << "Coordinate conversion at infinity failed\n";
+    passed &= testRotation();
+    if(!passed) std::cout << "Rotation test failed\n";
 
     std::cout << " ======= Testing conversion of position/velocity points =======\n";
     for(int n=0; n<numtestpoints; n++) {

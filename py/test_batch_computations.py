@@ -81,15 +81,15 @@ testFail('dens.density(1,0)')                  # too few numbers
 testFail('dens.density(1,0,0,0)')              # too many numbers
 testFail('dens.density([1,0,0],0')             # not an array at all
 
-testCond('isFloat(dens.surfaceDensity( 1,0 ))')             # may give either two numbers...
-testCond('isFloat(dens.surfaceDensity((1,0)))')             # ...or an array (tuple, list) of two numbers...
-testCond('isFloat(dens.surfaceDensity([1,0]))')             # ...for a single input point
-testCond('dens.surfaceDensity([1,0],0,0,0) > 0')            # first argument is an array, remaining are angles
-testFail('dens.surfaceDensity( 1,0, 0,0,0) > 0')            # in this case, cannot replace the array with just two numbers
-testCond('dens.surfaceDensity( 1,0, alpha=0,beta=0) > 0')   # but can do when using named arguments for angles
-testCond('dens.surfaceDensity([1,0],gamma=0,beta=0) > 0')   # or when using an array for the point plus named args for angles
-testCond('dens.surfaceDensity([[1,0]],0,0).shape == (1,)')  # if the input is a 2d array (even with one row), output is a 1d array
-testCond('dens.surfaceDensity([[1,0],[2,0]]).shape == (2,)')  # N input points (Nx2 array) => 1d array of length N
+testCond('isFloat(dens.projectedDensity( 1,0 ))')             # may give either two numbers...
+testCond('isFloat(dens.projectedDensity((1,0)))')             # ...or an array (tuple, list) of two numbers...
+testCond('isFloat(dens.projectedDensity([1,0]))')             # ...for a single input point
+testCond('dens.projectedDensity([1,0],0,0,0) > 0')            # first argument is an array, remaining are angles
+testFail('dens.projectedDensity( 1,0, 0,0,0) > 0')            # in this case, cannot replace the array with just two numbers
+testCond('dens.projectedDensity( 1,0, alpha=0,beta=0) > 0')   # but can do when using named arguments for angles
+testCond('dens.projectedDensity([1,0],gamma=0,beta=0) > 0')   # or when using an array for the point plus named args for angles
+testCond('dens.projectedDensity([[1,0]],0,0).shape == (1,)')  # if the input is a 2d array (even with one row), output is a 1d array
+testCond('dens.projectedDensity([[1,0],[2,0]]).shape == (2,)')# N input points (Nx2 array) => 1d array of length N
 
 # Potential class methods
 testCond('isFloat(pots.potential(1,0,0))')
@@ -170,7 +170,7 @@ testCond('len(df2)==2 and df2[0](1,2,3) == df1(1,2,3)')  # df2 is a composite DF
 testCond('isTuple(gms1.moments([1,2,3], dens=True, vel=True, vel2=True), 3)')    # three outputs per point, as requested
 testCond('isTuple(gms2.moments([1,2,3], dens=True, vel=False,vel2=True), 2)')    # only two requested here
 testCond('isFloat(gmf1.moments([1,2,3], dens=True, vel=False,vel2=False))')      # only one output (density), and it is a scalar value
-testCond('isFloat(gmf1.moments([1,2,3], dens=False,vel=True, vel2=False))')      # same for velocity
+testCond('isArray(gmf1.moments([1,2,3], dens=False,vel=True, vel2=False),(3,))') # one output (3 components of velocity)
 testCond('isArray(gms1.moments([1,2,3], dens=False,vel=False,vel2=True), (6,))') # one output (elements of dispersion tensor) - 1d array of length 6
 testCond('isArray(gms1.moments([[1,2,3]],dens=True,vel=False,vel2=False),(1,))') # input is an array of points with length 1, and so is the output
 testCond('isArray(gms2.moments([[1,2,3],[4,5,6],[7,8,9]], dens=True, vel=False, vel2=True)[1], (3,6))')  # N input points => dispersion tensor has shape Nx6
@@ -179,13 +179,13 @@ testCond('isArray(gms1.moments([[1,2,3],[4,5,6],[7,8,9]], dens=False,vel=False, 
 testCond('isArray(gms1.moments([1,2,3], dens=True, vel=False,vel2=False, separate=True), (1,))')  # single point, single output, but composite DF with C=1 => 1d array of length C
 # check that separately computed moments of a composite DF (df2) agree with the moments of its 0th component (df1)
 testCond('numpy.isclose(gms1.moments([1,2,3],dens=1,vel=0,vel2=0), gms2.moments([1,2,3],dens=1,vel=0,vel2=0,separate=True)[0], 1e-4)')
+# projected moments (input point(s) have only X,Y coordinates)
+testCond('isTuple(gms1.moments([1,0], dens=True, vel=True, vel2=True), 3)')  # same as before, but for the projected case  => output: a tuple of three numbers
+testCond('isArray(gms1.moments([[1,0],[2,0],[3,0],[4,0]], dens=True, vel=False, vel2=False), (4,))')  # input: array of N points, only one output array (density) with N elements
+testCond('isArray(gms2.moments([[1,0],[2,0],[3,0],[4,0]], dens=True, vel=False, vel2=False, separate=True), (4,2))')  # when separate=True, output arrays have one extra dimension of size C
 
-testCond('isTuple(gms1.projectedMoments(1), 3)')  # input: one number per point => output: a tuple of three numbers
-testCond('isArray(gms1.projectedMoments([1,2,3,4])[0], (4,))')  # input: array of N points => output: a tuple of three arrays of length N
-testCond('isArray(gms2.projectedMoments([1,2,3,4], separate=True)[1], (4,2))')  # when separate=True, output arrays have one extra dimension of size C
-
-testCond('isFloat(gms1.projectedDF([1,2,0]))')  # input: a triplet of numbers per point (x,y,v_z) => output: one number per point
-testCond('isArray(gms2.projectedDF([[1,2,3],[4,5,6],[7,8,9]], separate=True), (3,2))')  # when separate=True, output for N points and C components is a 2d array (NxC)
+testCond('isFloat(gms1.projectedDF([1,2,0,0,0,0,0,0]))')  # input: 8 numbers per point (x,y,vx,vy,vz,vxerr,vyerr,vzerr) => output: one number per point
+testCond('isArray(gms2.projectedDF(numpy.random.random(size=(4,8)), separate=True), (4,2))')  # when separate=True, output for N points and C components is a 2d array (NxC)
 
 testCond('isTuple(gms1.vdf([1,2,3]), 3)')             # input: one point in 3d(xyz) => output 3 spline objects
 testCond('isArray(gms1.vdf([[1,2],[3,4]])[0], (2,))') # input: two points in 2d(xy) => output a tuple of 3 arrays with splines
@@ -194,12 +194,12 @@ testCond('isArray(gms1.vdf([1,2,3])[0]([1,2,3,4,5]), (5,))')  # spline objects a
 testCond('isArray(gms2.vdf([[1,2,3],[4,5,6],[7,8,9]], separate=True)[0], (3,2))')  # when invoked for N points with separate=True, output arrays are NxC
 # when vdf() is invoked with dens=True, the computed 3d density should agree with the one produced by moments()
 testCond('numpy.isclose(gms1.vdf([1,2,3], dens=True)[3], gms1.moments([1,2,3])[0], 1e-3)')
-# and similarly for the case of 2d input (projected VDF): projected density should agree with projectedMoments()
-testCond('numpy.isclose(gms1.vdf([1,0], dens=True)[3], gms1.projectedMoments([1])[0], 1e-3)')
+# and similarly for the case of 2d input (projected VDF): projected density should agree with projected moments()
+testCond('numpy.isclose(gms1.vdf([1,0], dens=True)[3], gms1.moments([1,0])[0], 1e-3)')
 # finally check that the projected VDF in v_z agrees with the output of projectedDF() after multiplying the former by the projected density
 vz = numpy.linspace(0, 0.5*(-2*pots.potential(1,0,0))**0.5, 4)  # grid in v_z from 0 to half the escape velocity
-xyvz = numpy.column_stack((vz*0+1, vz*0, vz))  # input points for projectedDF()
-testCond('numpy.allclose(gms1.vdf([1,0])[1](vz) * gms1.projectedMoments(1)[0], gms1.projectedDF(xyvz), 1e-2)')
+xyv = numpy.column_stack((vz*0+1, vz*0, vz*0, vz*0, vz, vz+numpy.inf, vz+numpy.inf, vz*0))  # input points for projectedDF()
+testCond('numpy.allclose(gms1.vdf([1,0])[2](vz) * gms1.moments([1,0])[0], gms1.projectedDF(xyv), 1e-2)')
 
 if allok:
     print("\033[1;32mALL TESTS PASSED\033[0m")

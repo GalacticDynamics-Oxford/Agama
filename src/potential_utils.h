@@ -110,6 +110,24 @@ double innerSlope(const math::IFunction& potential, double* Phi0=NULL, double* c
 void findPlanarOrbitExtent(const BasePotential& potential, double E, double L,
     double& R1, double& R2);
 
+/** Find the two points Z1,Z2 where the potential Phi(X,Y,Z) equals the target value E.
+    The line of sight is specified by two coordinates in the X,Y plane of the 'observed'
+    coordinate system and its orientation with respect to the 'intrinsic' coordinates of the potential.
+    \param[in]  potential  is the instance of potential (with arbitrary symmetry);
+    \param[in]  E  is the required target value of the potential;
+    \param[in]  X,Y  are two coordinates in the 'observed' reference frame, with the third coordinate Z
+    (the line of sight) being the one searched for.
+    \param[in] orientation  specifies the orientation of the XYZ (observed) coordinate system
+    with respect to xyz (intrinsic coorinate system for the potential).
+    \param[out] Zm  will contain the value of Z corresponding to the minimum of the potential.
+    \param[out] Z1,Z2  will contain the two roots of Phi(X,Y,Z)=E, such that Z1 <= Zm <= Z2,
+    or NAN if the potential is everywhere higher than E.
+*/
+void findRoots(const BasePotential& potential, double E,
+    double X, double Y, const coord::Orientation& orientation,
+    /*output*/ double &Zm, double &Z1, double &Z2);
+
+
 /** Create a grid in radius suitable for interpolation of various quantities depending on the potential.
     The grid spacing is determined by the variation of the logarithmic derivative of the potential
     (becomes more sparse when the potential approaches an asymptotic power-law regime).

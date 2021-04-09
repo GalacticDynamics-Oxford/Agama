@@ -29,7 +29,7 @@ def createModel(iniFileName):
     sec_den = dict()   # list of density components
     sec_pot = dict()   # same for potential
     sec_comp= dict()   # list of model components (each one may include several density objects)
-    Omega   = None
+    Omega   = 0
     for s in sec:
         if s.lower().startswith('density'):
             sec_den [s.lower()]  = dict(ini.items(s))

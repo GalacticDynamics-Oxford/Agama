@@ -62,7 +62,7 @@ int32_t get_gravity_at_point(/*input*/ double * /*eps*/, double *x, double *y, d
     if(!core.ptrPot) return -1;
     for(int i=0; i<npoints; i++) {
         coord::GradCar grad;
-        core.ptrPot->eval(coord::PosCar(x[i], y[i], z[i]), NULL, &grad);
+        core.ptrPot->eval(coord::PosCar(x[i], y[i], z[i]), NULL, &grad, NULL, /*time*/ core.paramsRaga.timeCurr);
         ax[i]=-grad.dx;
         ay[i]=-grad.dy;
         az[i]=-grad.dz;
@@ -76,7 +76,7 @@ int32_t get_potential_at_point(/*input*/double * /*eps*/, double *x, double *y, 
 {
     if(!core.ptrPot) return -1;
     for(int i=0; i<npoints; i++) {
-        p[i]=core.ptrPot->value(coord::PosCar(x[i], y[i], z[i]));
+        p[i]=core.ptrPot->value(coord::PosCar(x[i], y[i], z[i]), /*time*/ core.paramsRaga.timeCurr);
     }
     return 0;
 }
@@ -118,6 +118,10 @@ int32_t synchronize_model() { MSG return 0; }
 int32_t evolve_model(double time)
 {
     MSGS(time)
+    if(core.particles.size() == 0) {   // no need to evolve anything, just set the current time
+        core.paramsRaga.timeCurr = time;
+        return 0;
+    }
     try {
         while(core.paramsRaga.timeCurr < time) {
             double timestep = time - core.paramsRaga.timeCurr;
@@ -263,7 +267,7 @@ int32_t get_acceleration(int32_t index, /*output*/ double *ax, double *ay, doubl
 {
     if(index >= (int32_t)core.particles.size()) return -1;
     coord::GradCar grad;
-    core.ptrPot->eval(core.particles[index].first, NULL, &grad);
+    core.ptrPot->eval(core.particles[index].first, NULL, &grad, NULL, /*time*/ core.paramsRaga.timeCurr);
     *ax=-grad.dx;
     *ay=-grad.dy;
     *az=-grad.dz;
@@ -275,7 +279,7 @@ int32_t set_acceleration(int32_t, double, double, double) { return -1; /*NOT SUP
 int32_t get_potential(int32_t index, /*output*/ double* potential)
 {
     if(index >= (int32_t)core.particles.size()) return -1;
-    *potential = core.ptrPot->value(core.particles[index].first);
+    *potential = core.ptrPot->value(core.particles[index].first, /*time*/ core.paramsRaga.timeCurr);
     return 0;
 }
 

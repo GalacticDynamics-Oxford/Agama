@@ -246,9 +246,9 @@ int main(int argc, char* argv[])
 #pragma omp parallel for
 #endif
     for(int i=0; i<s; i++) {
-        coord::Vel2Cyl vel2;
-        computeMoments(mod, coord::PosCyl(rad[i],0,0), &rho[i], NULL, &vel2, NULL, NULL, NULL);
-        sigR[i] = sqrt(vel2.vR2);
+        coord::Vel2Car vel2;
+        computeMoments(mod, coord::PosCar(rad[i],0,0), &rho[i], NULL, &vel2);
+        sigR[i] = sqrt(vel2.vx2);
         sigT[i] = sqrt(vel2.vz2);
         rho[i] *= totalMass / dfMass;
     }

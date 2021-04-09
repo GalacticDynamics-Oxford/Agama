@@ -31,7 +31,8 @@ def writeRotationCurve(filename, potentials):
 def writeSurfaceDensityProfile(filename, model):
     print("Writing surface density profile")
     radii = numpy.hstack(([1./8, 1./4], numpy.linspace(0.5, 16, 32), numpy.linspace(18, 30, 7)))
-    Sigma = model.projectedMoments(radii, separate=True)[0] * 1e-6  # convert from Msun/Kpc^2 to Msun/pc^2
+    xy    = numpy.column_stack((radii, radii*0))
+    Sigma = model.moments(xy, dens=True, vel=False, vel2=False, separate=True) * 1e-6  # convert from Msun/Kpc^2 to Msun/pc^2
     numpy.savetxt(filename, numpy.column_stack((radii, Sigma)), fmt="%.6g", delimiter="\t", \
         header="Radius[Kpc]\tsurfaceDensity[Msun/pc^2]")
 
@@ -52,11 +53,11 @@ def writeVelocityDistributions(filename, model):
     v_max = 360.0    # km/s
     gridv = numpy.linspace(-v_max, v_max, 75) # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvR, splvz, splvphi = model.vdf(point, gridv)
+    splvx, splvy, splvz = model.vdf(point, gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 201)
-    numpy.savetxt(filename, numpy.column_stack((gridv, splvR(gridv), splvz(gridv), splvphi(gridv))),
-        fmt="%.6g", delimiter="\t", header="V\tf(V_R)\tf(V_z)\tf(V_phi) [1/(km/s)]")
+    numpy.savetxt(filename, numpy.column_stack((gridv, splvx(gridv), splvy(gridv), splvz(gridv))),
+        fmt="%.6g", delimiter="\t", header="V\tf(V_x)\tf(V_y)\tf(V_z) [1/(km/s)]")
 
 # display some information after each iteration
 def printoutInfo(model, iteration):

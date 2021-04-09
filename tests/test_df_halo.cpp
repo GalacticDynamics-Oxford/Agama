@@ -21,29 +21,8 @@
 #include "debug_utils.h"
 #include "utils.h"
 
-const double reqRelError = 1e-5;
-const int maxNumEval = 1e5;
 const char* errmsg = "\033[1;31m **\033[0m";
 std::string histograms;
-
-bool testTotalMass(const galaxymodel::GalaxyModel& galmod, double massExact)
-{
-    std::cout << "\033[1;33mTesting " << galmod.potential.name() << "\033[0m\n";
-    // Calculate the total mass
-    double err;
-    int numEval;
-    double mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval, &err, &numEval);
-    if(err > mass*0.01) {
-        std::cout << "Mass=" << mass << " +- " << utils::pp(err,7) <<
-        " in " << numEval << " DF evaluations\n";
-        mass = galmod.distrFunc.totalMass(reqRelError, maxNumEval*10, &err, &numEval);
-    }
-    bool ok = math::fcmp(mass, massExact, 0.05) == 0; // 5% relative error allowed because ar!=az
-    std::cout <<
-        "Mass=" << mass << " +- " << utils::pp(err,7) << " in " << numEval << " DF evaluations"
-        " (analytic value=" << massExact << (ok?"":errmsg) <<")\n";
-    return ok;
-}
 
 // return a random number or 0 or 1, to test all possibilities including the boundary cases
 inline double rnd(int i) { return (i<=1) ? i*1. : math::random(); }
@@ -93,65 +72,53 @@ bool testDFmoments(const galaxymodel::GalaxyModel& galmod, const coord::PosVelCy
         "f(E)=" << dfExact << " for energy E=" << energy << (dfok?"":errmsg) <<"\n";
 
     // compute density and velocity moments
-    double density, densityErr;
-    double velocityFirstMoment, velocityFirstMomentErr;
-    coord::Vel2Cyl velocitySecondMoment, velocitySecondMomentErr;
-    computeMoments(galmod, point,
-        &density,    &velocityFirstMoment,    &velocitySecondMoment,
-        &densityErr, &velocityFirstMomentErr, &velocitySecondMomentErr,
-        false, reqRelError, maxNumEval);
-    bool densok = math::fcmp(density, densExact, 0.05) == 0;
+    double dens;
+    coord::VelCar  vel;
+    coord::Vel2Car vel2;
+    computeMoments(galmod, toPosCar(point), &dens, &vel, &vel2);
+    bool densok = math::fcmp(dens, densExact, 0.01) == 0;
     bool sigmaok =
-        math::fcmp(velocitySecondMoment.vR2,   sigmaExact, 0.05) == 0 &&
-        math::fcmp(velocitySecondMoment.vz2,   sigmaExact, 0.05) == 0 &&
-        math::fcmp(velocitySecondMoment.vphi2, sigmaExact, 0.05) == 0;
+        math::fcmp(vel2.vx2, sigmaExact, 0.05) == 0 &&
+        math::fcmp(vel2.vy2, sigmaExact, 0.05) == 0 &&
+        math::fcmp(vel2.vz2, sigmaExact, 0.05) == 0;
 
     // compute velocity distributions
-    double vmax = sqrt(-2*galmod.potential.value(point));
-    std::vector<double> gridVR   = math::createUniformGrid(41, -vmax, vmax);
-    std::vector<double> gridVz   = math::createUniformGrid(41, -vmax, vmax);
-    std::vector<double> gridVphi = math::createUniformGrid(41, -vmax, vmax);
-    std::vector<double> amplVR, amplVz, amplVphi/*, projVR, projVz, projVphi*/;
+    std::vector<double> gridv, amplvX, amplvY, amplvZ;  // will be initialized by the routine
     double densvdf;
-    const int ORDER = 3;
-    math::BsplineInterpolator1d<ORDER> intVR(gridVR), intVz(gridVz), intVphi(gridVphi);
-    galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, false,
-        gridVR, gridVz, gridVphi, &densvdf, &amplVR, &amplVz, &amplVphi);
-    // skip the projected ones for the moment -- they are more expensive
-    //galaxymodel::computeVelocityDistribution<ORDER>(galmod, point, true,
-    //    gridVR, gridVz, gridVphi, projVR, projVz, projVphi, false, /*accuracy*/1e-2, /*maxNumEval*/1e6);
+    const int ORDER = 3, GRIDSIZE = 41;
+    galaxymodel::computeVelocityDistribution<ORDER>(galmod, toPosCar(point),
+        GRIDSIZE, /*output*/gridv, &densvdf, &amplvX, &amplvY, &amplvZ);
+    math::BsplineInterpolator1d<ORDER> interp(gridv);
+    double vmax = interp.xmax();
     // output the profiles
     for(int i=-100; i<=100; i++) {
         double v = i*vmax/100;
         histograms +=
         utils::pp(v, 9)+'\t'+
-        utils::pp(intVR.  interpolate(v, amplVR),   9)+' '+
-        utils::pp(intVz.  interpolate(v, amplVz),   9)+' '+
-        utils::pp(intVphi.interpolate(v, amplVphi), 9)+'\n';
-        //utils::pp(intVR.  interpolate(v, projVR),   9)+' '+
-        //utils::pp(intVz.  interpolate(v, projVz),   9)+' '+
-        //utils::pp(intVphi.interpolate(v, projVphi), 9)+'\n';
+        utils::pp(interp.interpolate(v, amplvX), 9)+' '+
+        utils::pp(interp.interpolate(v, amplvY), 9)+' '+
+        utils::pp(interp.interpolate(v, amplvZ), 9)+'\n';
     }
     histograms+='\n';
     // compute the dispersions from the VDF (integrate with the weight factor v^2)
-    double sigmaR  = intVR.  integrate(-vmax, vmax, amplVR, 2 /*power index for the weighting*/);
-    double sigmaz  = intVz.  integrate(-vmax, vmax, amplVz, 2);
-    double sigmaphi= intVphi.integrate(-vmax, vmax, amplVphi, 2);
+    double sigmaX = interp.integrate(-vmax, vmax, amplvX, 2 /*power index for the weighting*/);
+    double sigmaY = interp.integrate(-vmax, vmax, amplvY, 2);
+    double sigmaZ = interp.integrate(-vmax, vmax, amplvZ, 2);
     // they should agree with the velocity moments computed above
-    bool densvdfok = math::fcmp(densvdf, density, 2e-5) == 0;
+    bool densvdfok = math::fcmp(densvdf, dens, 5e-5) == 0;
     bool sigmavdfok=
-        math::fcmp(sigmaR,   velocitySecondMoment.vR2,   2e-5) == 0 &&
-        math::fcmp(sigmaz,   velocitySecondMoment.vz2,   2e-5) == 0 &&
-        math::fcmp(sigmaphi, velocitySecondMoment.vphi2, 2e-5) == 0;
+        math::fcmp(sigmaX, vel2.vx2, 1e-4) == 0 &&
+        math::fcmp(sigmaY, vel2.vy2, 1e-4) == 0 &&
+        math::fcmp(sigmaZ, vel2.vz2, 1e-4) == 0;
 
     std::cout <<
-        "density=" << density << " +- " << utils::pp(densityErr,7) << (densvdfok?"":errmsg) <<
+        "density=" << dens << " = " << densvdf << (densvdfok?"":errmsg) <<
         "  compared to analytic value " << densExact << (densok?"":errmsg) <<"\n"
-        "mean velocity  vphi=" << velocityFirstMoment << " +- " << utils::pp(velocityFirstMomentErr, 7) << "\n"
+        "mean velocity  vphi=" << vel.vy << "\n"
         "velocity dispersion"
-        "  vR2="    << velocitySecondMoment.vR2    << " +- " << utils::pp(velocitySecondMomentErr.vR2,  7) <<
-        ", vz2="    << velocitySecondMoment.vz2    << " +- " << utils::pp(velocitySecondMomentErr.vz2,  7) <<
-        ", vphi2="  << velocitySecondMoment.vphi2  << " +- " << utils::pp(velocitySecondMomentErr.vphi2,7) <<
+        "  vx2=" << vel2.vx2 << " = " << sigmaX <<
+        ", vy2=" << vel2.vy2 << " = " << sigmaY <<
+        ", vz2=" << vel2.vz2 << " = " << sigmaZ <<
         (sigmavdfok?"":errmsg) <<
         "   compared to analytic value " << sigmaExact << (sigmaok?"":errmsg) <<"\n";
     return dfok && densok && sigmaok && densvdfok && sigmavdfok;
@@ -185,7 +152,7 @@ int main(){
     bool ok = true;
     ok &= testActionSpaceScaling(df::ActionSpaceScalingTriangLog());
     ok &= testActionSpaceScaling(df::ActionSpaceScalingRect(0.765432,0.234567));
-    if(!ok) std::cout << "Scaling transformation in action space failed\n";
+    if(!ok) std::cout << "Scaling transformation in action space failed" << errmsg <<"\n";
 
     // test double-power-law distribution function in a spherical Hernquist potential
     // NB: parameters obtained by fitting (example_df_fit.cpp)
@@ -198,15 +165,14 @@ int main(){
     paramDPL.coefJzIn  = (3-paramDPL.coefJrIn)/2;
     paramDPL.coefJrOut = 1.0;
     paramDPL.coefJzOut = 1.0;
-    paramDPL.norm      = 2.7;
+    paramDPL.norm      = 1.0;
     paramDPL.rotFrac   = 0.5;  // add some rotation (odd-Jphi component),
     paramDPL.Jphi0     = 0.7;  // it shouldn't affect the even-order moments
-    const potential::Dehnen potH(1., 1., 1., 1., 1.);        // potential
-    const actions::ActionFinderSpherical actH(potH);         // action finder
-    const df::DoublePowerLaw dfH(paramDPL);                  // distribution function
-    const galaxymodel::GalaxyModel galmodH(potH, actH, dfH); // all together - the mighty triad
-
-    ok &= testTotalMass(galmodH, 1.);
+    paramDPL.norm /= df::DoublePowerLaw(paramDPL).totalMass(); // normalize the total mass to unity
+    const potential::Dehnen potH(1., 1., 1., 1., 1.);          // potential
+    const actions::ActionFinderSpherical actH(potH);           // action finder
+    const df::DoublePowerLaw dfH(paramDPL);                    // distribution function
+    const galaxymodel::GalaxyModel galmodH(potH, actH, dfH);   // all together - the mighty triad
 
     for(int i=0; i<NUM_POINTS_H; i++) {
         const coord::PosVelCyl point(testPointsH[i]);
@@ -218,22 +184,27 @@ int main(){
 
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream strm("test_df_halo.dat");
-        strm << "#v       \tf(v_R)    f(v_z)    f(v_phi)\n";
+        strm << "#v       \tf(v_x)    f(v_y)    f(v_z)\n";
         strm << histograms;
     }
 
     // test the model with a central core: the introduction of a core shouldn't change
     // the overall normalization, at least when the coefficients in the linear combination
     // of actions are the same in the inner and outer part of the halo, and there is no exp-cutoff
+    std::cout << "\033[1mTesting total mass in cored vs. non-cored models\033[0m\n";
     paramDPL.coefJrOut = paramDPL.coefJrIn;
     paramDPL.coefJzOut = paramDPL.coefJzIn;
-    paramDPL.norm = 2.28;
-    // first compute the total mass for a model without core
-    ok &= testTotalMass(galaxymodel::GalaxyModel(potH, actH, df::DoublePowerLaw(paramDPL)), 1.);
-    // then set up a sizable core, create another DF and repeat the mass computation
+    // first normalize the mass of a non-cored model to unity
+    paramDPL.norm /= df::DoublePowerLaw(paramDPL).totalMass();
+    // set up a sizable core, create another DF and repeat the mass computation
     paramDPL.Jcore = 0.8;
-    ok &= testTotalMass(galaxymodel::GalaxyModel(potH, actH, df::DoublePowerLaw(paramDPL)), 1.);
-
+    double massCore = df::DoublePowerLaw(paramDPL).totalMass();
+    std::cout << "Mass of a cored model: " << utils::pp(massCore,8) << ", non-cored: 1";
+    if(math::fcmp(massCore, 1.0, 1e-5)!=0) {
+        std::cout << ", difference: " << utils::toString(massCore-1., 3) << errmsg << "\n";
+        ok = false;
+    } else
+        std::cout << "\n";
 
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";

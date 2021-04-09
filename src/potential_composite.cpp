@@ -1,6 +1,17 @@
 #include "potential_composite.h"
 #include "math_core.h"
 #include <stdexcept>
+#include <alloca.h>
+
+// utility snippet for allocating temporary storage either on stack (if small) or on heap otherwise
+#define ALLOC(NPOINTS, TYPE, NAME) \
+    std::vector< TYPE > tmparray; \
+    TYPE* NAME; \
+    if(NPOINTS * sizeof(TYPE) > 65536) { \
+        tmparray.resize(NPOINTS); \
+        NAME = &tmparray[0]; \
+    } else \
+    NAME = static_cast<TYPE*>(alloca(NPOINTS * sizeof(TYPE)));
 
 namespace potential{
 
@@ -190,17 +201,55 @@ double CompositeDensity::densityCar(const coord::PosCar &pos, double time) const
         sum += components[i]->density(pos, time);
     return sum;
 }
+
 double CompositeDensity::densityCyl(const coord::PosCyl &pos, double time) const {
     double sum=0;
     for(unsigned int i=0; i<components.size(); i++) 
         sum += components[i]->density(pos, time);
     return sum;
 }
+
 double CompositeDensity::densitySph(const coord::PosSph &pos, double time) const {
     double sum=0;
     for(unsigned int i=0; i<components.size(); i++) 
         sum += components[i]->density(pos, time);
     return sum;
+}
+
+void CompositeDensity::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensityCar(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensityCar(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
+}
+
+void CompositeDensity::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensityCyl(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensityCyl(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
+}
+
+void CompositeDensity::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensitySph(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensitySph(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
 }
 
 double CompositeDensity::totalMass() const {
@@ -217,6 +266,44 @@ coord::SymmetryType CompositeDensity::symmetry() const {
     return static_cast<coord::SymmetryType>(sym);
 }
 
+void ShiftedDensity::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++) {
+        poscar[i] = pos[i];
+        poscar[i].x -= centerx(time);
+        poscar[i].y -= centery(time);
+        poscar[i].z -= centerz(time);
+    }
+    dens->evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void ShiftedDensity::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++) {
+        poscar[i] = toPosCar(pos[i]);
+        poscar[i].x -= centerx(time);
+        poscar[i].y -= centery(time);
+        poscar[i].z -= centerz(time);
+    }
+    dens->evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void ShiftedDensity::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++) {
+        poscar[i] = toPosCar(pos[i]);
+        poscar[i].x -= centerx(time);
+        poscar[i].y -= centery(time);
+        poscar[i].z -= centerz(time);
+    }
+    dens->evalmanyDensityCar(npoints, poscar, values, time);
+}
 
 Composite::Composite(const std::vector<PtrPotential>& _components) :
     BasePotential(), components(_components), componentTypes(components.size())

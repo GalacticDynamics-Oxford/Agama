@@ -153,20 +153,19 @@ if __name__ == "__main__":
     R   = agama.nonuniformGrid(60, 0.01*Rdisk, 10.0*Rdisk)
     xyz = numpy.column_stack((R, R*0, R*0))
     print("Computing surface density")
-    Sigma,rmsh,rmsv   = modelDisk.projectedMoments(R)
+    Sigma = modelDisk.moments(xyz[:,0:2], vel2=False)  # projected density moment
     print("Computing 3d density and velocity dispersion")
     rho,vel,sigma = modelDisk.moments(xyz, dens=True, vel=True, vel2=True)
     force, deriv = model.potential.forceDeriv(xyz)
     kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/R)
     ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma
     numpy.savetxt("disk_plane",
-        numpy.column_stack((R, Sigma, rho, rmsh, sigma[:,0]**0.5, (sigma[:,2]-vel**2)**0.5, \
-        sigma[:,1]**0.5, vel, ToomreQ)),
-        header="R Sigma rho(R,z=0) height sigma_R sigma_phi sigma_z v_phi ToomreQ", fmt="%.6g")
+        numpy.column_stack((R, Sigma, rho, sigma[:,0]**0.5, (sigma[:,1]-vel[:,1]**2)**0.5,
+        sigma[:,2]**0.5, vel[:,1], ToomreQ)),
+        header="R Sigma rho(R,z=0) sigma_R sigma_phi sigma_z v_phi ToomreQ", fmt="%.6g")
     ax[0].plot(R, Sigma / (Sigma0 * numpy.exp(-R/Rdisk)), 'r-', label=r'$\Sigma$')
     ax[0].plot(R, rho   / (Sigma0 * numpy.exp(-R/Rdisk) * 0.25/Hdisk), 'g-', label=r'$\rho_{z=0}$')
     ax[0].plot(R, sigma[:,0]**0.5 / (sigmar0 * numpy.exp(-R/rsigmar)), 'b-', label=r'$\sigma_r$')
-    ax[0].plot(R, rmsh / (1.8*Hdisk), 'm-', label=r'$h$')
     ax[0].set_xscale("log")
     ax[0].set_xlabel("R")
     ax[0].set_ylim(0,2)
@@ -197,17 +196,17 @@ if __name__ == "__main__":
     v_max = 0.75 * (-2 * (model.potential.potential(0,0,0)-model.potential[0].potential(0,0,0)))**0.5
     gridv = numpy.linspace(-v_max, v_max, 80)  # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvR, splvz, splvphi = modelDisk.vdf(xyz, gridv)
+    splvR, splvphi, splvz = modelDisk.vdf(xyz, gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 251)
     for i,p in enumerate(xyz):
         numpy.savetxt("veldist_R="+str(p[0])+"_z="+str(p[2]),
-            numpy.column_stack((gridv, splvR[i](gridv), splvz[i](gridv), splvphi[i](gridv))),
-            fmt="%.6g", delimiter="\t", header="V\tf(V_R)\tf(V_z)\tf(V_phi) [1/(km/s)]")
+            numpy.column_stack((gridv, splvR[i](gridv), splvphi[i](gridv), splvz[i](gridv))),
+            fmt="%.6g", delimiter="\t", header="V\tf(V_R)\tf(V_phi)\tf(V_z) [1/(km/s)]")
         if i<len(ax)-2:
             ax[i+2].plot(gridv, splvR  [i](gridv), 'r-', label='$f(v_R)$')
-            ax[i+2].plot(gridv, splvz  [i](gridv), 'g-', label='$f(v_z)$')
-            ax[i+2].plot(gridv, splvphi[i](gridv), 'b-', label='$f(v_\phi)$')
+            ax[i+2].plot(gridv, splvphi[i](gridv), 'g-', label='$f(v_\phi)$')
+            ax[i+2].plot(gridv, splvz  [i](gridv), 'b-', label='$f(v_z)$')
             ax[i+2].set_xlabel('v')
             ax[i+2].set_yscale('log')
             ax[i+2].legend(loc='upper left', frameon=False)

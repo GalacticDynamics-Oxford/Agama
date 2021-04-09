@@ -265,6 +265,32 @@ template<> double unscale(const ScalingSemiInf& scaling, double s, double* duds)
     }
 }
 
+// u in (-inf,+inf) with a characteristic scale >= u0
+template<> double unscale(const ScalingDoubleInf& scaling, double s, double* duds) {
+    double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
+    if(duds)
+        *duds = scaling.u0 + (u==0 ? 0 : u * (1/pow_2(0.5-t) + 1/pow_2(t)));
+    return scaling.u0 * (s-0.5) + u * sign(s-0.5);
+}
+
+template<> double scale(const ScalingDoubleInf& scaling, double u) {
+    if(u==0) return 0.5;
+    if(u== INFINITY) return 1.0;
+    if(u==-INFINITY) return 0.0;
+    if(scaling.u0==0)
+        return 0.5 + 0.5 * scale(ScalingInf(), log(fabs(u)) * 0.5) * sign(u);
+    // unfortunately, this transformation does not have an analytic inversion when u0>0..
+    double sprev=-1,
+    s = 0.5 + 0.5 * scale(ScalingInf(), log(fmax(fabs(u), scaling.u0*0.5)) * 0.5) * sign(u);
+    // Newton iterations
+    while(fabs(sprev-s) > 1e-15) {
+        sprev = s;
+        double duds, u1 = unscale(scaling, s, &duds);
+        s += (u-u1) / duds;
+    }
+    return s;
+}
+
 // u in [uleft, uright], trivial linear transformation
 template<> double scale(const ScalingLin& scaling, double u) {
     return (u - scaling.uleft) / (scaling.uright - scaling.uleft);
@@ -416,18 +442,20 @@ double Gaussian::integrate(double x1, double x2, int n) const
     // not easy at all...
     double y1 = x1 / sigma, y2 = x2 / sigma;  // first, normalize the input
     double e1 = exp(-0.5*y1*y1), e2 = exp(-0.5*y2*y2);
-    double f1 = gsl_sf_erf(y1/M_SQRT2) * (M_SQRTPI/M_SQRT2);  // note: erf from cmath is not accurate!
-    double f2 = gsl_sf_erf(y2/M_SQRT2) * (M_SQRTPI/M_SQRT2);
+    double deltaf = fmin(y1, y2) >= 7.0 || fmax(y1, y2) <= -7.0 ?
+        e1 / y1 * (1 - 1/pow_2(y1)) - e2 / y2 * (1 - 1/pow_2(y2)) :    // asymptotic expansion
+        // note: erf from cmath is not accurate, using erf from GSL!
+        (gsl_sf_erf(y2/M_SQRT2) - gsl_sf_erf(y1/M_SQRT2)) * (M_SQRTPI/M_SQRT2);
     double val= NAN;
     switch(n) {
-        case 0: val = f2 - f1;  break;
+        case 0: val = deltaf;  break;
         case 1: val = e1 - e2;  break;
-        case 2: val = y1 * e1 - y2 * e2  +  f2 - f1;  break;
+        case 2: val = y1 * e1 - y2 * e2  +  deltaf;  break;
         case 3: val = (2 + y1 * y1) * e1  -  (2 + y2 * y2) * e2;  break;
-        case 4: val = y1 * (3 + y1 * y1) * e1  -  y2 * (3 + y2 * y2) * e2  +  3 * (f2 - f1);  break;
+        case 4: val = y1 * (3 + y1 * y1) * e1  -  y2 * (3 + y2 * y2) * e2  +  3 * deltaf;  break;
         case 5: val = (8 + y1 * y1 * (4 + y1 * y1)) * e1  -  (8 + y2 * y2 * (4 + y2 * y2)) * e2;  break;
         case 6: val = y1 * (15 + y1 * y1 * (5 + y1 * y1)) * e1
-                    - y2 * (15 + y2 * y2 * (5 + y2 * y2)) * e2  +  15 * (f2 - f1);  break;
+                    - y2 * (15 + y2 * y2 * (5 + y2 * y2)) * e2  +  15 * deltaf;  break;
         case 7: val = (48 + y1 * y1 * (24 + y1 * y1 * (6 + y1 * y1))) * e1
                     - (48 + y2 * y2 * (24 + y2 * y2 * (6 + y2 * y2))) * e2; break;
         default: {  // general case

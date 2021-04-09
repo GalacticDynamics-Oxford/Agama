@@ -58,12 +58,12 @@ struct LOSVDParams {
 */
 template<int N>
 class TargetLOSVD: public BaseTarget {
-    double transformMatrix[9];  ///< rotation matrix for transforming intrinsic to projected coords
+    const coord::Orientation orientation; ///< transforming between intrinsic and observed coords
     const math::BsplineInterpolator1d<N> bsplx, bsply, bsplv;  ///< basis-set interpolators
     math::Matrix<double> apertureConvolutionMatrix;  ///< spatial convolution and rebinning matrix
     math::Matrix<double> velocityConvolutionMatrix;  ///< velocity convolution matrix
-    const coord::SymmetryType symmetry;  ///< symmetry of the potential and the orbital shape
-    bool symmetricGrids;                 ///< whether the input grids are reflection-symmetric
+    const coord::SymmetryType symmetry;   ///< symmetry of the potential and the orbital shape
+    bool symmetricGrids;                  ///< whether the input grids are reflection-symmetric
 public:
     /// construct the grid with given parameters
     /// \throw std::invalid_argument if the parameters are incorrect

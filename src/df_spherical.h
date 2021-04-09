@@ -85,7 +85,7 @@ math::LogLogSpline fitSphericalIsotropicDF(
     using the Eddington formula, it is better to use the class `QuasiSphericalCOM`, which performs
     both tasks (constructing the DF and computing its value as a function of actions) with lower
     overhead costs (it only performs the conversion J => E, but not E => h).
-    On the other hand, his wrapper class should be used if one already has a DF in the form f(h).
+    On the other hand, this wrapper class should be used if one already has a DF in the form f(h).
 */
 class QuasiSphericalIsotropic: public BaseDistributionFunction{
     const math::LogLogSpline df;              ///< one-dimensional function of spherical phase volume h

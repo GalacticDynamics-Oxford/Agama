@@ -8,6 +8,9 @@
 // most of the functions here return NAN in case of invalid arguments or out-of-range results
 namespace math {
 
+/** Error function */
+double erf(const double x);
+
 /** Inverse error function (defined for -1<x<1) */
 double erfinv(const double x);
 
@@ -46,7 +49,7 @@ double digamma(const int x);
     to obtain higher accuracy for a larger cost, pass true as the last argument */
 double ellintK(const double k, bool accurate=false);
 
-/** Complete elliptic integrals of the second kind K(k) = E(pi/2, k) */
+/** Complete elliptic integrals of the second kind E(k) = E(pi/2, k) */
 double ellintE(const double k, bool accurate=false);
 
 /** Incomplete elliptic integrals of the first kind:

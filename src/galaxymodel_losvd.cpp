@@ -173,6 +173,10 @@ public:
 
 template<int N>
 TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
+    orientation(
+        // for axisymmetric systems, alpha has no effect; setting it to 0 simplifies bisymmetrization
+        isAxisymmetric(params.symmetry) ? 0 : params.alpha,
+        params.beta, params.gamma),
     bsplx(params.gridx), bsply(params.gridy), bsplv(params.gridv),
     apertureConvolutionMatrix(params.apertures.size(), bsplx.numValues() * bsply.numValues(), 0.),
     symmetry(params.symmetry), symmetricGrids(true)
@@ -194,13 +198,6 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
         symmetricGrids &= math::fcmp(bsply.xvalues()[i], -bsply.xvalues()[size-1-i], 1e-12) == 0;
     for(unsigned int i=0, size=bsplv.xvalues().size(); i<size/2; i++)
         symmetricGrids &= math::fcmp(bsplv.xvalues()[i], -bsplv.xvalues()[size-1-i], 1e-12) == 0;
-
-    // construct the projection matrix for transforming the position/velocity in the
-    // intrinsic 3d coordinate system into image plane coordinates and line-of-sight velocity
-    coord::makeRotationMatrix(
-        // for axisymmetric systems, alpha has no effect; setting it to 0 simplifies bisymmetrization
-        isAxisymmetric(symmetry) ? 0 : params.alpha,
-        params.beta, params.gamma, /*output*/ transformMatrix);
 
     // construct the spatial rebinning matrix
     math::Matrix<double> apertureMatrix(numApertures, numBasisFnc, 0.);
@@ -319,10 +316,10 @@ void TargetLOSVD<N>::addPoint(const double point[6], double _mult, double* datac
     math::PRNGState state = math::hash(point, 6);
     if(isSpherical(symmetry)) {
         // if spherically-symmetric, randomize the orientation of the point on the 2d sphere
-        double rotmat[9];
-        math::getRandomRotationMatrix(/*output*/ rotmat, /*input/output*/ &state);
-        coord::transformVector(rotmat, point+0, pt+0);  // position
-        coord::transformVector(rotmat, point+3, pt+3);  // velocity
+        coord::Orientation rot;
+        math::getRandomRotationMatrix(/*output*/ rot.mat, /*input/output*/ &state);
+        rot.toRotated(point+0, pt+0);  // position
+        rot.toRotated(point+3, pt+3);  // velocity
     } else if(isAxisymmetric(symmetry)) {
         // if symmetric w.r.t rotation in phi, rotate the point about z axis by a random angle
         double ang = math::random(/*input/output*/ &state) * 2*M_PI, sa, ca;
@@ -341,9 +338,9 @@ void TargetLOSVD<N>::addPoint(const double point[6], double _mult, double* datac
 
     // impose various additional symmetries by adding more than one point to the datacube
     double
-    X0 = transformMatrix[0] * pt[0], X1 = transformMatrix[1] * pt[1], X2 = transformMatrix[2] * pt[2],
-    Y0 = transformMatrix[3] * pt[0], Y1 = transformMatrix[4] * pt[1], Y2 = transformMatrix[5] * pt[2],
-    V01= transformMatrix[6] * pt[3]   +   transformMatrix[7] * pt[4], V2 = transformMatrix[8] * pt[5];
+    X0 = orientation.mat[0] * pt[0], X1 = orientation.mat[1] * pt[1], X2 = orientation.mat[2] * pt[2],
+    Y0 = orientation.mat[3] * pt[0], Y1 = orientation.mat[4] * pt[1], Y2 = orientation.mat[5] * pt[2],
+    V01= orientation.mat[6] * pt[3]   +   orientation.mat[7] * pt[4], V2 = orientation.mat[8] * pt[5];
 
     // 0. when have mirror symmetry (x,y,z <-> -x,-y,-z), and the datacube grids are symmetric,
     // no need to add the mirror point, because the symmetrization will be done afterwards
@@ -438,8 +435,8 @@ void TargetLOSVD<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* 
         double Xlim[2] = { bsplx.xvalues()[indx], bsplx.xvalues()[indx+1] };
         double Ylim[2] = { bsply.xvalues()[indy], bsply.xvalues()[indy+1] };
         std::vector<double> result(fnc.numValues());
-        computeProjection(model, fnc, Xlim, Ylim, transformMatrix,
-            &result[0], NULL, EPSREL_PIXEL_MASS, MAX_NUM_EVAL_LOSVD_DF);
+        computeProjection(model, fnc, Xlim, Ylim, orientation.mat,
+            &result[0], EPSREL_PIXEL_MASS, MAX_NUM_EVAL_LOSVD_DF);
         // add the computed integrals to the output array
 #ifdef _OPENMP
 #pragma omp critical
@@ -462,7 +459,7 @@ std::vector<double> TargetLOSVD<N>::computeDensityProjection(const potential::Ba
 {
     // 1st stage: compute the integrals of surface density, weighted by the B-spline basis functions,
     // over each pixel of the regular 2d grid in the image plane (projections onto the B-spline basis)
-    ApertureMassIntegrand<N> fnc(density, transformMatrix, bsplx, bsply);
+    ApertureMassIntegrand<N> fnc(density, orientation.mat, bsplx, bsply);
     std::vector<double> pixelMasses(bsplx.numValues() * bsply.numValues());
     int numPixels = (bsplx.xvalues().size()-1) * (bsply.xvalues().size()-1);
     // loop over pixels of the 2d B-spline grid in the image plane
@@ -556,15 +553,15 @@ void TargetKinemShell<N>::computeDFProjection(const GalaxyModel& model, StorageN
         int i=n/GLORDER, k=n%GLORDER;  // decompose the combined index into the grid segment and offset
         double r = bspl.xvalues()[i] * (1-glnodes[k]) + bspl.xvalues()[i+1] * glnodes[k];
         double dens;
-        coord::Vel2Cyl vel2;
-        computeMoments(model, coord::PosCyl(r,0,0), &dens, NULL, &vel2);
+        coord::Vel2Car vel2;
+        computeMoments(model, coord::PosCar(r,0,0), &dens, NULL, &vel2);
         double mult = dens * glweights[k] * 4*M_PI*r*r * (bspl.xvalues()[i+1] - bspl.xvalues()[i]);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
         {
-            bspl.addPoint(&r, mult * vel2.vR2, datacube.data());
-            bspl.addPoint(&r, mult * (vel2.vz2 + vel2.vphi2), datacube.data() + bspl.numValues());
+            bspl.addPoint(&r, mult *  vel2.vx2, datacube.data());
+            bspl.addPoint(&r, mult * (vel2.vy2 + vel2.vz2), datacube.data() + bspl.numValues());
         }
     }
     finalizeDatacube(datacube, output);

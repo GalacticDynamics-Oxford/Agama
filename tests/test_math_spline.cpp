@@ -563,7 +563,7 @@ bool testGaussianIntegral(double x1, double x2, double sigma, int n)
     double intnum = math::integrate(math::FncProduct(math::Monomial(n), gauss), x1, x2, 1e-12);
     // analytic integration provided by the IFunctionIntegral interface
     double intan  = gauss.integrate(x1, x2, n);
-    return fabs(intnum-intan) <= fabs(intan) * 1e-12;
+    return fabs(intnum-intan) <= fmax(1.5e-15, fabs(intan) * 1e-12);
 }
 
 template<int N>
@@ -601,8 +601,10 @@ bool testFiniteElement()
 {
     // test the analytic integration provided by the IFunctionIntegral interface of math::Gaussian
     if( !testGaussianIntegral( 1.0, 2.0, 0.5, 0) ||
+        !testGaussianIntegral( 3.5, 4.0, 0.5, 0) ||
         !testGaussianIntegral( 0.2, 2.0, 0.6, 1) ||
         !testGaussianIntegral(-3.0, 2.0, 0.7, 2) ||
+        !testGaussianIntegral(-6.0,-5.0, 0.7, 2) ||
         !testGaussianIntegral(-1.0,-3.0, 0.8, 3) ||
         !testGaussianIntegral( 1.0,-2.0, 0.9, 4) ||
         !testGaussianIntegral(-1.0, 2.0, 0.3, 5) ||

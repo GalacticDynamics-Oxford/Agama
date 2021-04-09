@@ -23,14 +23,11 @@ public:
         over the entire 6d phase space).
         Derived classes may return an analytically computed value if available,
         and the default implementation performs multidimension integration numerically.
-        \param[in]  reqRelError - relative tolerance;
-        \param[in]  maxNumEval - maximum number of evaluations of DF during integration;
-        \param[out] error (optional) if not NULL, store the estimate of the error;
-        \param[out] numEval (optional) if not NULL, store the actual number of DF evaluations.
+        \param[in]  reqRelError - relative tolerance.
+        \param[in]  maxNumEval - maximum number of evaluations of DF during integration.
         \returns    total mass
     */
-    virtual double totalMass(const double reqRelError=1e-6, const int maxNumEval=1e6,
-        double* error=NULL, int* numEval=NULL) const;
+    virtual double totalMass(const double reqRelError=1e-6, const int maxNumEval=1e6) const;
     
     /** Number of components in the case of a multi-component DF */
     virtual unsigned int numValues() const { return 1; }
@@ -115,10 +112,9 @@ double totalEntropy(const BaseDistributionFunction& DF,
     \param[out] totalMass (optional) if not NULL, will store the Monte Carlo estimate 
     of the integral of the distribution function (i.e., the same quantity as computed by 
     BaseDistributionFunction::totalMass(), but calculated with a different method).
-    \param[out] totalMassErr (optional) if not NULL, will store the error estimate of the integral.
     \returns    the array of actions sampled from the DF.
 */
 std::vector<actions::Actions> sampleActions(const BaseDistributionFunction& DF,
-    const std::size_t numSamples, double* totalMass=NULL, double* totalMassErr=NULL);
+    const std::size_t numSamples, double* totalMass=NULL);
 
 }  // namespace df

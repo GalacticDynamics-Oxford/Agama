@@ -27,11 +27,18 @@ public:
 
     unsigned int size() const { return components.size(); }
     PtrDensity component(unsigned int index) const { return components.at(index); }
+
 private:
     std::vector<PtrDensity> components;
     virtual double densityCar(const coord::PosCar &pos, double time) const;
     virtual double densityCyl(const coord::PosCyl &pos, double time) const;
     virtual double densitySph(const coord::PosSph &pos, double time) const;
+    virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
+    virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
+    virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
 };
 
 
@@ -107,6 +114,13 @@ private:
 
     virtual double densitySph(const coord::PosSph &pos, double time) const
     { return densityCar(toPosCar(pos), time); }
+
+    virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
+    virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
+    virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+        /*output*/ double values[], /*input*/ double time=0) const;
 };
 
 

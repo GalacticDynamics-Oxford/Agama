@@ -880,7 +880,7 @@ void evalAndConvertSph(const math::IFunction& F,
 
 //------ 3x3 matrix representing a [passive] rotation specified by Euler angles ------//
 
-void makeRotationMatrix(double alpha, double beta, double gamma, double mat[9])
+Orientation::Orientation(double alpha, double beta, double gamma)
 {
     double sa, ca, sb, cb, sc, cc;
     math::sincos(alpha, sa, ca);

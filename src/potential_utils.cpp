@@ -174,6 +174,38 @@ inline double refineRoot(const math::IFunction& pot, double R, double E, double 
     return fabs(dR) < 0.25*R ? R+dR : R;  // precaution to avoid unpredictably large corrections
 }
 
+/// helper class for finding the minimum or a given value of the potential along the line of sight
+class PotentialFinder: public math::IFunctionNoDeriv {
+    const BasePotential& pot; ///< the potential
+    const double E;           ///< required value of the potential when solving for Phi(X,Y,Z)=E
+    const double X, Y;        ///< coordinates in the image plane
+    const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
+    const math::ScalingDoubleInf scaling;  ///< scaling transformation for Z
+public:
+    PotentialFinder(const BasePotential& _pot, double _E,
+        double _X, double _Y, const coord::Orientation& _orientation)
+    :
+        pot(_pot), E(_E), X(_X), Y(_Y), orientation(_orientation), scaling(sqrt(X*X+Y*Y)) {}
+    virtual double value(double s) const
+    {
+        double Z=unscale(scaling, s);
+        if(fabs(Z)==INFINITY)
+            return pot.value(coord::PosCar(INFINITY,0,0)) - E;
+        return pot.value(orientation.fromRotated(coord::PosCar(X, Y, Z))) - E;
+    }
+    void findRoots(double& Zm, double& Z1, double& Z2) const
+    {
+        double s = math::findMin(*this, 0, 1, 0.5, ACCURACY_ROOT);
+        Zm = unscale(scaling, s);
+        if(value(s) > 0) {   // even the minimum value exceeds the target - no roots
+            Z1 = Z2 = NAN;
+        } else {   // two roots on the intervals -infinity..Z(s) and Z(s)..+infinity
+            Z1 = unscale(scaling, math::findRoot(*this, 0, s, ACCURACY_ROOT));
+            Z2 = unscale(scaling, math::findRoot(*this, s, 1, ACCURACY_ROOT));
+        }
+    }
+};
+
 /// Scaling transformations for energy: the input energy ranges from Phi0 to 0,
 /// the output scaled variable - from -inf to +inf. Here Phi0=Phi(0) may be finite or -inf.
 /// The goal is to avoid cancellation errors when Phi0 is finite and E --> Phi0 --
@@ -410,6 +442,13 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
                 R2 = math::findRoot(fnc, Rcirc, (1+ACCURACY_ROOT) * R_max(potential, E), ACCURACY_ROOT);
         }
     }
+}
+
+void findRoots(const BasePotential& pot, double E,
+    double X, double Y, const coord::Orientation& orientation,
+    /*output*/ double &Zm, double &Z1, double &Z2)
+{
+    PotentialFinder(pot, E, X, Y, orientation).findRoots(Zm, Z1, Z2);
 }
 
 // -------- Same tasks implemented as an interpolation interface -------- //

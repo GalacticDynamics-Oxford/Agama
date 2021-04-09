@@ -4,8 +4,8 @@ This example illustrates the use of Schwarzschild method to construct a triaxial
 """
 import agama, numpy
 
-# density profile
-den = agama.Density(type='Dehnen', axisRatioY=0.8, axisRatioZ=0.6, scaleRadius=1, mass=1, gamma=1)
+# Hernquist density profile
+den = agama.Density(type='Spheroid', axisRatioY=0.8, axisRatioZ=0.6, scaleRadius=1, mass=1, gamma=1, beta=4)
 
 # potential corresponding to this density
 pot = agama.Potential(type='Multipole', lmax=8, mmax=6, density=den)
@@ -69,7 +69,7 @@ if not status:
     print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices), max(trajsizes)))
     trajs[indices] = agama.orbit(potential=pot, ic=initcond[indices], time=inttimes[indices], \
         trajsize=trajsizes)
-    status,result = agama.sampleOrbitLibrary(nbody,trajs[:,1],weights)
+    status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
     if not status: print("Failed to produce output N-body model")
 agama.writeSnapshot("schwarzschild_model_nbody.txt", result,'t')   # one could also use numpy.savetxt
 

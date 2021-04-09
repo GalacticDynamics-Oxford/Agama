@@ -278,10 +278,14 @@ template<typename Scaling> bool testScaling(const Scaling& scaling)
     for(int i=0; i<1000; i++) {
         double s = math::random() * 0.7, duds;
         double u = math::unscale(scaling, s, &duds);
-        double duds_fd = (math::unscale(scaling, s + SQRT_DBL_EPSILON) -
-            math::unscale(scaling, s - SQRT_DBL_EPSILON)) / (2 * SQRT_DBL_EPSILON);
+        double duds_fd = (
+            math::unscale(scaling, s - 2*SQRT_DBL_EPSILON) -
+            math::unscale(scaling, s - 1*SQRT_DBL_EPSILON) * 8 +
+            math::unscale(scaling, s + 1*SQRT_DBL_EPSILON) * 8 -
+            math::unscale(scaling, s + 2*SQRT_DBL_EPSILON) ) / (12 * SQRT_DBL_EPSILON);
         double S = math::scale(scaling, u);
-        if(S!=0)  // skip values which are rounded to the boundary because of the loss of precision
+        if(S!=0 && u!=0)
+            // skip values which are rounded to the boundary because of the loss of precision
             maxerr = fmax(maxerr, fabs(S-s));
         if(isFinite(duds_fd + duds))
             maxder = fmax(maxder, fabs(duds_fd - duds) / fmax(fabs(duds), 1));
@@ -304,6 +308,12 @@ int main()
     std::cout << " Inf0";
     ok &= testScaling(math::ScalingSemiInf());
     std::cout << " Inf";
+    ok &= testScaling(math::ScalingDoubleInf());
+    std::cout << " DInf0";
+    ok &= testScaling(math::ScalingDoubleInf(1e-10));
+    std::cout << " DInf-";
+    ok &= testScaling(math::ScalingDoubleInf(1e+10));
+    std::cout << " DInf+";
     ok &= testScaling(math::ScalingInf());
     std::cout << " Lin";
     ok &= testScaling(math::ScalingLin(-10.98, -2.345));

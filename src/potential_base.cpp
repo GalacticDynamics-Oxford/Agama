@@ -4,7 +4,7 @@
 #include <alloca.h>
 
 namespace potential{
-    
+
 namespace{  // internal
 
 /// relative accuracy of density computation by integration
@@ -17,8 +17,6 @@ const size_t MAX_NUM_EVAL_INT = 10000;
 /// if the result is smaller than this fraction of the absolute value of each term, we return zero
 /// (otherwise its relative accuracy is too low and its derivative cannot be reliably estimated)
 const double EPSREL_DENSITY_DER = DBL_EPSILON / ROOT3_DBL_EPSILON;
-
-inline double nan2num(double x) { return isFinite(x) ? x : 0; }
 
 /// helper class for finding the radius that encloses the given mass
 class RadiusByMassRootFinder: public math::IFunctionNoDeriv {
@@ -33,32 +31,33 @@ public:
 };
 
 /// helper class for integrating the density along the line of sight
-class SurfaceDensityIntegrand: public math::IFunctionNoDeriv {
+class ProjectedDensityIntegrand: public math::IFunctionNoDeriv {
     const BaseDensity& dens;  ///< the density model
     const double X, Y, R;     ///< coordinates in the image plane
-    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+    const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
 public:
-    SurfaceDensityIntegrand(const BaseDensity& _dens, double _X, double _Y, const double* _rotmatrix) :
-        dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+    ProjectedDensityIntegrand(const BaseDensity& _dens, double _X, double _Y,
+        const coord::Orientation& _orientation)
+    :
+        dens(_dens), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), orientation(_orientation) {}
     virtual double value(double s) const
     {
         // unscale the input scaled coordinate, which lies in the range (0..1);
-        double t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
-        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
-        double XYZ[3] = {X, Y, Z}, xyz[3];
-        coord::transformVector(rotmatrix, XYZ, xyz);
-        return nan2num(dens.density(coord::PosCar(xyz[0], xyz[1], xyz[2])) * dZds);
+        double dZds, Z = unscale(math::ScalingDoubleInf(R), s, &dZds);
+        return nan2num(dens.density(orientation.fromRotated(coord::PosCar(X, Y, Z))) * dZds);
     }
 };
 
 /// helper class for integrating the force along the line of sight
 class ProjectedForceIntegrand: public math::IFunctionNdim {
-    const BasePotential& pot; ///< the density model
+    const BasePotential& pot; ///< the potential
     const double X, Y, R;     ///< coordinates in the image plane
-    const double* rotmatrix;  ///< rotation matrix for conversion between intrinsic and observed coords
+    const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
 public:
-    ProjectedForceIntegrand(const BasePotential& _pot, double _X, double _Y, const double* _rotmatrix) :
-        pot(_pot), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), rotmatrix(_rotmatrix) {}
+    ProjectedForceIntegrand(const BasePotential& _pot, double _X, double _Y,
+        const coord::Orientation& _orientation)
+    :
+        pot(_pot), X(_X), Y(_Y), R(sqrt(X*X+Y*Y)), orientation(_orientation) {}
 
     virtual unsigned int numVars()   const { return 1; }
     virtual unsigned int numValues() const { return 2; }
@@ -66,14 +65,13 @@ public:
     virtual void eval(const double vars[], double values[]) const
     {
         // unscale the input scaled coordinate, which lies in the range (0..1);
-        double s = vars[0], t = fabs(s-0.5), u = exp(1/(0.5-t)-1/t);
-        double Z = R*(s-0.5) + u*math::sign(s-0.5), dZds = R + u * (1/pow_2(0.5-t) + 1/pow_2(t));
-        double XYZ[3] = {X, Y, Z}, xyz[3];
-        coord::transformVector(rotmatrix, XYZ, xyz);
-        coord::GradCar grad;
-        pot.eval(coord::PosCar(xyz[0], xyz[1], xyz[2]), NULL, &grad);
-        values[0] = nan2num((grad.dx * rotmatrix[0] + grad.dy * rotmatrix[3] + grad.dz * rotmatrix[6]) * dZds);
-        values[1] = nan2num((grad.dx * rotmatrix[1] + grad.dy * rotmatrix[4] + grad.dz * rotmatrix[7]) * dZds);
+        double dZds, Z = unscale(math::ScalingDoubleInf(R), vars[0], &dZds);
+        coord::GradCar grad;  // gradient in the intrinsic system
+        pot.eval(orientation.fromRotated(coord::PosCar(X, Y, Z)), NULL, &grad);
+        double grad_int[3] = {grad.dx, grad.dy, grad.dz}, grad_obs[3];
+        orientation.toRotated(grad_int, grad_obs);
+        values[0] = nan2num(grad_obs[0] * dZds);
+        values[1] = nan2num(grad_obs[1] * dZds);
     }
 };
 
@@ -254,24 +252,19 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     return gamma1;
 }
 
-double surfaceDensity(const BaseDensity& dens, double X, double Y, double alpha, double beta, double gamma)
+double projectedDensity(const BaseDensity& dens, double X, double Y,
+    const coord::Orientation& orientation)
 {
-    double mat[9];
-    // the rotation matrix corresponds to the transformation from intrinsic to observed coords,
-    // but we need the opposite transformation, so we construct a transposed matrix
-    // by using negative rotation angles in the inverse order
-    coord::makeRotationMatrix(-gamma, -beta, -alpha, mat);
-    return math::integrateAdaptive(SurfaceDensityIntegrand(dens, X, Y, mat), 0, 1, EPSREL_DENSITY_INT);
+    return math::integrateAdaptive(ProjectedDensityIntegrand(dens, X, Y, orientation),
+        0, 1, EPSREL_DENSITY_INT);
 }
 
 void projectedForce(const BasePotential& pot, double X, double Y,
-    double alpha, double beta, double gamma, double& fX, double& fY)
+    const coord::Orientation& orientation, double& fX, double& fY)
 {
-    double mat[9];
-    coord::makeRotationMatrix(-gamma, -beta, -alpha, mat);
     double xlower[1] = {0}, xupper[1] = {1}, result[2];
-    math::integrateNdim(ProjectedForceIntegrand(pot, X, Y, mat), xlower, xupper, EPSREL_DENSITY_INT,
-        /*maxNumEval*/ MAX_NUM_EVAL_INT, result);
+    math::integrateNdim(ProjectedForceIntegrand(pot, X, Y, orientation),
+        xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, result);
     fX = result[0];
     fY = result[1];
 }

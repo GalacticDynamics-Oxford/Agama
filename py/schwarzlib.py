@@ -1104,7 +1104,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                 c = scipy.interpolate.Rbf(aval/anorm, bval/bnorm, chi2-min(chi2), function='thin_plate')(a/anorm, b/bnorm)
             else: raise ValueError('Invalid interpolation method')
             # 1-sigma, 2-sigma, 3-sigma, etc. confidence intervals for a 2-dof chi2 distribution
-            cntr  = _numpy.array([2.295,6.180,11.82,19.33,28.74,40.08,53.38,68.64,85.87,105.0,126.2,149.4,174.5,201.7,230.8,262.0,295.1,330.2,367.3,406.4,10000])
+            cntr = _numpy.array([2.30,6.18,11.83] + [x**2 + _numpy.log(x**2*_numpy.pi/2) + 2*x**-2 for x in range(4,33)])
             ax.contourf(a, b, c, cntr, cmap='hell_r', vmin=0, vmax=deltaChi2lim, alpha=0.75)
             ax.clabel(ax.contour(a, b, c, cntr, cmap='Blues_r', vmin=0, vmax=deltaChi2lim), fmt='%.0f', fontsize=10, inline=1)
         except Exception as e:

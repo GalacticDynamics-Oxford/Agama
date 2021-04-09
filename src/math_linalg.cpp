@@ -850,6 +850,16 @@ template<typename NumT>
 inline NumT* xnew(size_t size) {
     return size==0 ? NULL : new NumT[size]; }
 }
+
+// if any GSL function triggers an error, it will be stored in these variables (defined in math_core.cpp)
+extern bool exceptionFlag;
+extern std::string exceptionText;
+    
+#define CALL_FUNCTION_OR_THROW(x) \
+    exceptionFlag = false; \
+    x; \
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
+
 //------ dense matrix ------//
 
 // default constructor
@@ -981,11 +991,13 @@ SparseMatrix<NumT>::SparseMatrix(size_t nRows, size_t nCols, const std::vector<T
     if(nRows*nCols==0)
         return;  // no allocation in case of zero matrix
     size_t size = values.size();
+    exceptionFlag = false;
     gsl_spmatrix* sp  = gsl_spmatrix_alloc_nzmax(nRows, nCols, size, GSL_SPMATRIX_TRIPLET);
     for(size_t k=0; k<size; k++)
         gsl_spmatrix_set(sp, values[k].i, values[k].j, values[k].v);
     impl = gsl_spmatrix_compcol(sp);
     gsl_spmatrix_free(sp);
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
 }
 
 // copy constructor from sparse matrix
@@ -996,8 +1008,10 @@ SparseMatrix<NumT>::SparseMatrix(const SparseMatrix<NumT>& srcObj) :
     if(rows()*cols() == 0)
         return;
     const gsl_spmatrix* src = static_cast<const gsl_spmatrix*>(srcObj.impl);
+    exceptionFlag = false;
     gsl_spmatrix* dest = gsl_spmatrix_alloc_nzmax(src->size1, src->size2, src->nz, GSL_SPMATRIX_CCS);
     gsl_spmatrix_memcpy(dest, src);
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
     impl = dest;
 }
 
@@ -1010,6 +1024,7 @@ SparseMatrix<NumT>::SparseMatrix(const BandMatrix<NumT>& src) :
     if(nRows == 0)
         return;
     size_t size = src.size();
+    exceptionFlag = false;
     gsl_spmatrix* sp  = gsl_spmatrix_alloc_nzmax(nRows, nRows, size, GSL_SPMATRIX_TRIPLET);
     for(size_t k=0; k<size; k++) {
         size_t row, col;
@@ -1018,6 +1033,7 @@ SparseMatrix<NumT>::SparseMatrix(const BandMatrix<NumT>& src) :
     }
     impl = gsl_spmatrix_compcol(sp);
     gsl_spmatrix_free(sp);
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
 }
 
 template<typename NumT>
@@ -1231,6 +1247,7 @@ template<> void blas_daxpy(double alpha, const SparseMatrix<double>& X, SparseMa
 #ifdef HAVE_GSL_SPARSE
     const gsl_spmatrix* spX = static_cast<const gsl_spmatrix*>(X.impl);
     gsl_spmatrix* spY = static_cast<gsl_spmatrix*>(Y.impl), *tmpX = NULL;
+    exceptionFlag = false;
     if(alpha!=1) {  // allocate a temporary sparse matrix for X*alpha
         tmpX = gsl_spmatrix_alloc_nzmax(spX->size1, spX->size2, spX->nz, GSL_SPMATRIX_CCS);
         gsl_spmatrix_memcpy(tmpX, spX);
@@ -1244,6 +1261,7 @@ template<> void blas_daxpy(double alpha, const SparseMatrix<double>& X, SparseMa
     Y.impl = result;
     if(alpha!=1)
         gsl_spmatrix_free(tmpX);
+    if(exceptionFlag) throw std::runtime_error(exceptionText);
 #else
     const size_t size = X.rows() * X.cols();
     for(size_t k=0; k<size; k++)
@@ -1265,7 +1283,8 @@ template<> void blas_dmul(double alpha, SparseMatrix<double>& Y)
 template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const Matrix<double>& A,
     const std::vector<double>& X, double beta, std::vector<double>& Y)
 {
-    gsl_blas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, MatC(A), VecC(X), beta, Vec(Y));
+    CALL_FUNCTION_OR_THROW(
+    gsl_blas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, MatC(A), VecC(X), beta, Vec(Y)) )
 }
 
 template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const SparseMatrix<double>& A,
@@ -1274,25 +1293,29 @@ template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const SparseMat
     if(A.impl == NULL)
         throw std::length_error("blas_dgemv: empty matrix");
 #ifdef HAVE_GSL_SPARSE
-    gsl_spblas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, static_cast<const gsl_spmatrix*>(A.impl),
-        VecC(X), beta, Vec(Y));
+    CALL_FUNCTION_OR_THROW(
+        gsl_spblas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, static_cast<const gsl_spmatrix*>(A.impl),
+        VecC(X), beta, Vec(Y)) )
 #else
+    CALL_FUNCTION_OR_THROW(
     gsl_blas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha,
-        MatC(static_cast<const double*>(A.impl), A.rows(), A.cols()), VecC(X), beta, Vec(Y));
+        MatC(static_cast<const double*>(A.impl), A.rows(), A.cols()), VecC(X), beta, Vec(Y)) )
 #endif
 }
 
 void blas_dtrmv(CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_DIAG Diag,
     const Matrix<double>& A, std::vector<double>& X)
 {
-    gsl_blas_dtrmv((CBLAS_UPLO_t)Uplo, (CBLAS_TRANSPOSE_t)TransA, (CBLAS_DIAG_t)Diag, MatC(A), Vec(X));
+    CALL_FUNCTION_OR_THROW(
+    gsl_blas_dtrmv((CBLAS_UPLO_t)Uplo, (CBLAS_TRANSPOSE_t)TransA, (CBLAS_DIAG_t)Diag, MatC(A), Vec(X)) )
 }
 
 template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
     double alpha, const Matrix<double>& A, const Matrix<double>& B, double beta, Matrix<double>& C)
 {
-    gsl_blas_dgemm((CBLAS_TRANSPOSE_t)TransA, (CBLAS_TRANSPOSE_t)TransB, 
-        alpha, MatC(A), MatC(B), beta, Mat(C));
+    CALL_FUNCTION_OR_THROW(
+    gsl_blas_dgemm((CBLAS_TRANSPOSE_t)TransA, (CBLAS_TRANSPOSE_t)TransB,
+        alpha, MatC(A), MatC(B), beta, Mat(C)) )
 }
 
 template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
@@ -1332,8 +1355,9 @@ template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
 void blas_dtrsm(CBLAS_SIDE Side, CBLAS_UPLO Uplo, CBLAS_TRANSPOSE TransA, CBLAS_DIAG Diag,
     double alpha, const Matrix<double>& A, Matrix<double>& B)
 {
-    gsl_blas_dtrsm((CBLAS_SIDE_t)Side, (CBLAS_UPLO_t)Uplo, (CBLAS_TRANSPOSE_t)TransA, (CBLAS_DIAG_t)Diag, 
-        alpha, MatC(A), Mat(B));
+    CALL_FUNCTION_OR_THROW(
+    gsl_blas_dtrsm((CBLAS_SIDE_t)Side, (CBLAS_UPLO_t)Uplo, (CBLAS_TRANSPOSE_t)TransA, (CBLAS_DIAG_t)Diag,
+        alpha, MatC(A), Mat(B)) )
 }
 
 // ----- Linear algebra routines ----- //
@@ -1352,7 +1376,13 @@ struct LUDecompImpl {
         }
         int dummy;
         gsl_matrix_memcpy(LU, MatC(data, rows, cols));
+        exceptionFlag = false;
         gsl_linalg_LU_decomp(LU, perm, &dummy);
+        if(exceptionFlag) {
+            gsl_permutation_free(perm);
+            gsl_matrix_free(LU);
+            throw std::runtime_error(exceptionText);
+        }
     }
     LUDecompImpl(const LUDecompImpl& src) {
         LU = gsl_matrix_alloc(src.LU->size1, src.LU->size2);
@@ -1398,8 +1428,9 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
     if(rhs.size() != static_cast<const LUDecompImpl*>(impl)->LU->size1)
         throw std::length_error("LUDecomp: incorrect size of RHS vector");
     std::vector<double> result(rhs.size());
+    CALL_FUNCTION_OR_THROW(
     gsl_linalg_LU_solve(static_cast<const LUDecompImpl*>(impl)->LU,
-        static_cast<const LUDecompImpl*>(impl)->perm, VecC(rhs), Vec(result));
+        static_cast<const LUDecompImpl*>(impl)->perm, VecC(rhs), Vec(result)) )
     return result;
 }
 
@@ -1411,12 +1442,11 @@ CholeskyDecomp::CholeskyDecomp(const Matrix<double>& M) :
     if(!L)
         throw std::bad_alloc();
     gsl_matrix_memcpy(L, MatC(M));
-    try{
-        gsl_linalg_cholesky_decomp(L);
-    }
-    catch(std::domain_error&) {
+    exceptionFlag = false;
+    gsl_linalg_cholesky_decomp(L);
+    if(exceptionFlag) {
         gsl_matrix_free(L);
-        throw std::domain_error("CholeskyDecomp failed");
+        throw std::domain_error(exceptionText);
     }
     impl=L;
 }
@@ -1457,7 +1487,8 @@ std::vector<double> CholeskyDecomp::solve(const std::vector<double>& rhs) const
     if(rhs.size() != static_cast<const gsl_matrix*>(impl)->size1)
         throw std::length_error("CholeskyDecomp: incorrect size of RHS vector");
     std::vector<double> result(rhs.size());
-    gsl_linalg_cholesky_solve(static_cast<const gsl_matrix*>(impl), VecC(rhs), Vec(result));
+    CALL_FUNCTION_OR_THROW(
+    gsl_linalg_cholesky_solve(static_cast<const gsl_matrix*>(impl), VecC(rhs), Vec(result)) )
     return result;
 }
 
@@ -1477,9 +1508,11 @@ SVDecomp::SVDecomp(const Matrix<double>& M) :
     std::vector<double> temp(M.cols());
     if(M.rows() >= M.cols()*5) {   // use a modified algorithm for very 'elongated' matrices
         Matrix<double> tempmat(M.cols(), M.cols());
-        gsl_linalg_SV_decomp_mod(Mat(sv->U), Mat(tempmat), Mat(sv->V), Vec(sv->S), Vec(temp));
+        CALL_FUNCTION_OR_THROW(
+        gsl_linalg_SV_decomp_mod(Mat(sv->U), Mat(tempmat), Mat(sv->V), Vec(sv->S), Vec(temp)) )
     } else
-        gsl_linalg_SV_decomp(Mat(sv->U), Mat(sv->V), Vec(sv->S), Vec(temp));
+        CALL_FUNCTION_OR_THROW(
+        gsl_linalg_SV_decomp(Mat(sv->U), Mat(sv->V), Vec(sv->S), Vec(temp)) )
     // chop off excessively small singular values which may destabilize solution of linear system
     double minSV = sv->S[0] * 1e-15 * std::max<size_t>(sv->S.size(), 10);
     for(size_t k=0; k<sv->S.size(); k++)
@@ -1506,7 +1539,8 @@ std::vector<double> SVDecomp::solve(const std::vector<double>& rhs) const
     if(rhs.size() != sv->U.rows())
         throw std::length_error("SVDecomp: incorrect size of RHS vector");
     std::vector<double> result(sv->U.cols());
-    gsl_linalg_SV_solve(MatC(sv->U), MatC(sv->V), VecC(sv->S), VecC(rhs), Vec(result));
+    CALL_FUNCTION_OR_THROW(
+    gsl_linalg_SV_solve(MatC(sv->U), MatC(sv->V), VecC(sv->S), VecC(rhs), Vec(result)) )
     return result;
 }
 

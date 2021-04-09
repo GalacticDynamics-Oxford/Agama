@@ -17,6 +17,7 @@
 #include "galaxymodel_losvd.h"
 #include "math_core.h"
 #include "math_random.h"
+#include "math_specfunc.h"
 #include "utils.h"
 #include <iostream>
 #include <fstream>
@@ -24,43 +25,6 @@
 
 // whether to produce an output file and a plotting script for gnuplot
 const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
-
-// stdlib erf is not defined for negative arguments?
-inline double Erf(double x) { return erf(fabs(x)) * (x>0. ? 1. : -1.); }
-
-// test of rotation matrices and their inverse
-bool testRotInv(const double mat[9], const double xyz[])
-{
-    const double eps=1e-12;  // accuracy of comparison
-    double vec[3], invvec[3], invmat[9];
-    coord::transformVector(mat, xyz, vec);
-    // inverse of an orthogonal matrix is just its transpose
-    invmat[0] = mat[0];
-    invmat[1] = mat[3];
-    invmat[2] = mat[6];
-    invmat[3] = mat[1];
-    invmat[4] = mat[4];
-    invmat[5] = mat[7];
-    invmat[6] = mat[2];
-    invmat[7] = mat[5];
-    invmat[8] = mat[8];
-    coord::transformVector(invmat, vec, invvec);
-    return math::fcmp(xyz[0], invvec[0], eps) == 0
-        && math::fcmp(xyz[1], invvec[1], eps) == 0
-        && math::fcmp(xyz[2], invvec[2], eps) == 0;
-}
-
-bool testRotation(const double xyz[])
-{
-    double mat[9];
-    math::getRandomRotationMatrix(mat);
-    if(!testRotInv(mat, xyz))
-        return false;
-    coord::makeRotationMatrix(math::random(), math::random(), math::random(), mat);
-    if(!testRotInv(mat, xyz))
-        return false;
-    return true;
-}
 
 int main()
 {
@@ -119,8 +83,8 @@ int main()
             double y = (points[p].y-posy) * cos(angle) - (points[p].x-posx) * sin(angle);
             for(size_t g=0; g<numPsf; g++) {
                 expected[a] += 0.25 * psf[g].ampl *
-                    (Erf((x+size1) / M_SQRT2 / psf[g].width) - Erf((x-size1) / M_SQRT2 / psf[g].width)) *
-                    (Erf((y+size2) / M_SQRT2 / psf[g].width) - Erf((y-size2) / M_SQRT2 / psf[g].width));
+                    (math::erf((x+size1) / M_SQRT2 / psf[g].width) - math::erf((x-size1) / M_SQRT2 / psf[g].width)) *
+                    (math::erf((y+size2) / M_SQRT2 / psf[g].width) - math::erf((y-size2) / M_SQRT2 / psf[g].width));
             }
         }
     }
@@ -196,13 +160,6 @@ int main()
             strm << " + " << psf[i].ampl << "/" << psf[i].width <<
                 "/sqrt(2*pi) * exp(-0.5*(x/" << psf[i].width << ")**2)";
         strm << "\n";
-    }
-
-    // auxiliary test: rotation matrices
-    double pointrot[3] = {1., 2., -3.};
-    if(!testRotation(pointrot)) {
-        ok = false;
-        std::cout << "Rotation test failed \033[1;31m**\033[0m\n";
     }
 
     if(ok)

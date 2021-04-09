@@ -130,6 +130,15 @@ struct ScalingSemiInf {
     ScalingSemiInf(double _u0=+0.0) : u0(_u0) {}
 };
 
+/// transform the interval  -inf <= u <= +inf  to 0 <= s <= 1,  in the case where
+/// the order of magnitude of u is unknown, but is no smaller than u0 (which can even be zero):
+/// for 0.5 <= s <= 1,  u = u0 * (s-0.5) + exp( 1 / (0.5-s) - 1 / (s-0.5) )  >= 0,
+/// and for 0 <= s <= 0.5, the same expression is applied to 1-s and its sign is then reversed.
+struct ScalingDoubleInf {
+    double u0;  ///< should be >=0
+    ScalingDoubleInf(double _u0=0.0) : u0(_u0) {}
+};
+
 /// trivial linear rescaling of the interval  uleft <= u <= uright  to  0 <= s <= 1
 struct ScalingLin {
     double uleft, uright;
@@ -339,7 +348,7 @@ inline double findRoot(const IFunction& F, const Scaling& scaling, double relTol
     \param[in] relToler  determines the accuracy of localization of the minimum,
     relative to the range |x2-x1|.
     \return  the point where F(x) attains a (local) minimum, or one of the endpoints of the interval;
-    if the function produces an infinite value, return NAN.
+    if the function produces a non-finite value, return NAN.
     \throw  std::invalid_argument if the endpoints are not finite or relToler is not positive.
 */
 double findMin(const IFunction& F, double x1, double x2, double xinit, double relToler);
@@ -352,8 +361,9 @@ double findMin(const IFunction& F, double x1, double x2, double xinit, double re
     and implicitly the interval of the un-scaled variable x.
     \param[in]  xinit  is the optional initial guess point in unscaled coordinates (use NaN if not known);
     \param[in]  relToler  determines the accuracy of localization in the scaled variable s.
-    \return  the point x (un-scaled) where the input function reaches a (local) minimum.
-    \throw   std::invalid_argument if the endpoints are not finite or relToler is not positive.
+    \return  the point x (un-scaled) where the input function reaches a (local) minimum,
+    or NAN if the function returned an invalid value.
+    \throw   std::invalid_argument if relToler is not positive.
 */
 template<typename Scaling>
 inline double findMin(const IFunction& F, const Scaling& scaling, double xinit, double relToler)

@@ -78,13 +78,13 @@ void writeSurfaceDensityProfile(const std::string& filename, const galaxymodel::
         radii.push_back(r * intUnits.from_Kpc);
     int nr = radii.size();
     int nc = model.distrFunc.numValues();  // number of DF components
-    std::vector<double> surfDens(nr*nc), rmsHeight(nr*nc), rmsVel(nr*nc);
+    std::vector<double> surfDens(nr*nc);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ir=0; ir<nr; ir++) {
-        computeProjectedMoments(model, radii[ir], &surfDens[ir*nc], &rmsHeight[ir*nc], &rmsVel[ir*nc],
-            NULL, NULL, NULL, /*separate*/ true);
+        computeMoments(model, coord::PosProj(radii[ir],0),  /*projected*/
+            &surfDens[ir*nc], NULL, NULL, /*separate*/ true);
     }
 
     std::ofstream strm(filename.c_str());
@@ -113,8 +113,8 @@ void writeVerticalDensityProfile(const std::string& filename, const galaxymodel:
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ih=0; ih<nh; ih++) {
-        computeMoments(model, coord::PosCyl(R,heights[ih],0), &dens[ih*nc], NULL, NULL,
-            NULL, NULL, NULL, /*separate*/ true);
+        computeMoments(model, coord::PosCar(R,0,heights[ih]),
+            &dens[ih*nc], NULL, NULL, /*separate*/ true);
     }
 
     std::ofstream strm(filename.c_str());
@@ -130,32 +130,31 @@ void writeVerticalDensityProfile(const std::string& filename, const galaxymodel:
 /// print velocity distributions at the given point to a file
 void writeVelocityDistributions(const std::string& filename, const galaxymodel::GalaxyModel& model)
 {
-    const coord::PosCyl point(solarRadius * intUnits.from_Kpc, 0.1 * intUnits.from_Kpc, 0);
+    const coord::PosCar point(solarRadius * intUnits.from_Kpc, 0, 0.1 * intUnits.from_Kpc);
     std::cout << "Writing velocity distributions at "
-        "(R=" << point.R * intUnits.to_Kpc << ", z=" << point.z * intUnits.to_Kpc << ")\n";
+        "(x=" << point.x * intUnits.to_Kpc << ", z=" << point.z * intUnits.to_Kpc << ")\n";
     // create grids in velocity space
     double v_max = 360 * intUnits.from_kms;
-    std::vector<double> gridvR   = math::createUniformGrid(75, -v_max, v_max);
-    std::vector<double> gridvz   = gridvR;  // for simplicity use the same grid for all three dimensions
-    std::vector<double> gridvphi = gridvR;
-    std::vector<double> amplvR, amplvz, amplvphi;
+    // for simplicity use the same grid for all three dimensions
+    std::vector<double> gridv = math::createUniformGrid(75, -v_max, v_max);
+    std::vector<double> amplvx, amplvy, amplvz;
     double density;
     // compute the distributions
     const int ORDER = 3;
-    math::BsplineInterpolator1d<ORDER> intvR(gridvR), intvz(gridvz), intvphi(gridvphi);
-    galaxymodel::computeVelocityDistribution<ORDER>(model, point, false /*not projected*/,
-        gridvR, gridvz, gridvphi, /*output*/ &density, &amplvR, &amplvz, &amplvphi);
+    math::BsplineInterpolator1d<ORDER> interp(gridv);
+    galaxymodel::computeVelocityDistribution<ORDER>(model, point,
+        gridv, gridv, gridv, /*output*/ &density, &amplvx, &amplvy, &amplvz);
 
     std::ofstream strm(filename.c_str());
-    strm << "# V\tf(V_R)\tf(V_z)\tf(V_phi) [1/(km/s)]\n";
+    strm << "# V\tf(V_x)\tf(V_y)\tf(V_z) [1/(km/s)]\n";
     for(int i=-100; i<=100; i++) {
         double v = i*v_max/100;
         // unit conversion: the VDF has a dimension 1/V, so that \int f(V) dV = 1;
         // therefore we need to multiply it by 1/velocityUnit
         strm << utils::toString(v * intUnits.to_kms)+'\t'+
-            utils::toString(intvR.  interpolate(v, amplvR)   / intUnits.to_kms)+'\t'+
-            utils::toString(intvz.  interpolate(v, amplvz)   / intUnits.to_kms)+'\t'+
-            utils::toString(intvphi.interpolate(v, amplvphi) / intUnits.to_kms)+'\n';
+            utils::toString(interp.interpolate(v, amplvx) / intUnits.to_kms)+'\t'+
+            utils::toString(interp.interpolate(v, amplvy) / intUnits.to_kms)+'\t'+
+            utils::toString(interp.interpolate(v, amplvz) / intUnits.to_kms)+'\n';
     }
 }
 

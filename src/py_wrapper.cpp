@@ -75,6 +75,16 @@
 #define PyInt_AsLong PyLong_AsLong
 #endif
 
+/// utility snippet for allocating temporary storage either on stack (if small) or on heap otherwise
+#define ALLOC(NPOINTS, TYPE, NAME) \
+    std::vector< TYPE > tmparray; \
+    TYPE* NAME; \
+    if(NPOINTS * sizeof(TYPE) > 65536) { \
+        tmparray.resize(NPOINTS); \
+        NAME = &tmparray[0]; \
+    } else \
+    NAME = static_cast<TYPE*>(alloca(NPOINTS * sizeof(TYPE)));
+
 /// classes and routines for the Python interface
 namespace pygama {  // internal namespace
 
@@ -524,7 +534,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(PyG && PyFloat_CheckExact(PyG))
         PyFloat_AS_DOUBLE(PyG) = G;
     else
-        printf("Warning, agama.G has wrong type and its value cannot be updated\n");
+        PyErr_WarnEx(NULL, "agama.G has wrong type and its value cannot be updated", 1);
     utils::msg(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
         "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
@@ -554,7 +564,7 @@ PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
     if(PyG && PyFloat_CheckExact(PyG))
         PyFloat_AS_DOUBLE(PyG) = 1.0;
     else
-        printf("Warning, agama.G has wrong type and its value cannot be updated\n");
+        PyErr_WarnEx(NULL, "agama.G has wrong type and its value cannot be updated", 1);
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -565,6 +575,14 @@ inline coord::PosCar convertPos(const double input[]) {
         input[0] * conv->lengthUnit,
         input[1] * conv->lengthUnit,
         input[2] * conv->lengthUnit);
+}
+
+/// helper function for converting velocity to internal units
+inline coord::VelCar convertVel(const double input[]) {
+    return coord::VelCar(
+        input[0] * conv->velocityUnit,
+        input[1] * conv->velocityUnit,
+        input[2] * conv->velocityUnit);
 }
 
 /// helper function for converting position/velocity to internal units
@@ -1061,9 +1079,21 @@ static const char* docstringDensity =
     "INI sections whose name starts with Density, e.g., [Density], [Density1], ...\n"
     "Finally, one may create a composite density from several Density objects by providing them as "
     "unnamed arguments to the constructor:  densum = Density(den1, den2, den3)\n\n"
-    "An instance of Potential class may be used in all contexts when a Density object is required;\n"
-    "moreover, an arbitrary Python object with a method 'density(x,y,z)' that returns a single value "
-    "may also be used in these contexts (i.e., an object presenting a Density interface).";
+    "An instance of Potential class may be used in all contexts when a Density object is required.\n"
+    "One may also construct a Density wrapper around a user-defined Python function that takes "
+    "an array of Nx3 points in cartesian coordinates and returns the density values at these N points. "
+    "Such a function can be provided as an unnamed argument, or as a 'density' argument, possibly "
+    "with an additional argument 'symmetry' specifying the symmetry properties of the model "
+    "(default is triaxial).\n"
+    "Finally, if this user-defined function is expected to be used in heavy computations, "
+    "it may be more efficient to approximate it by a native density interpolator class: "
+    "DensitySphericalHarmonic (for spheroidal profiles that are not too flattened) or "
+    "DensityAzimuthalHarmonic (for possibly strongly flattened models with a finite central density). "
+    "In this case, the 'type' argument must specify either of these two expansion types, "
+    "the 'density' argument should contain the user-defined function, and additional arguments "
+    "should specify the grid parameters (rmin, rmax, gridSizeR; for azimuthal-harmonic expansion - "
+    "additionally zmin, zmax, gridSizeZ) and angular expansion orders (lmax, mmax for spherical, "
+    "or mmax for azimuthal harmonics), plus optionally the symmetry level may be provided explicitly.";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Density class
@@ -1114,7 +1144,7 @@ public:
             coord::PosCar poscar = toPosCar(pos[0]);
             evalmanyDensityCar(1, &poscar, values, time);
         } else {
-            std::vector<coord::PosCar> poscar(npoints);
+            ALLOC(npoints, coord::PosCar, poscar)
             for(size_t i=0; i<npoints; i++)
                 poscar[i] = toPosCar(pos[i]);
             evalmanyDensityCar(npoints, &poscar[0], values, time);  // the actual evaluation function
@@ -1127,7 +1157,7 @@ public:
             coord::PosCar poscar = toPosCar(pos[0]);
             evalmanyDensityCar(1, &poscar, values, time);
         } else {
-            std::vector<coord::PosCar> poscar(npoints);
+            ALLOC(npoints, coord::PosCar, poscar)
             for(size_t i=0; i<npoints; i++)
                 poscar[i] = toPosCar(pos[i]);
             evalmanyDensityCar(npoints, &poscar[0], values, time);  // the actual evaluation function
@@ -1137,9 +1167,9 @@ public:
     virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
         /*output*/ double values[], /*input*/ double /*time*/) const
     {
-        std::vector<double> xyz(3*npoints);
+        ALLOC(3*npoints, double, xyz)
         for(size_t p=0; p<npoints; p++)
-            unconvertPos(pos[p], &xyz[p*3]);
+            unconvertPos(pos[p], xyz + p*3);
         double mult = conv->massUnit / pow_3(conv->lengthUnit);
         PyObject* result = NULL;
         bool typeerror   = false;
@@ -1148,7 +1178,7 @@ public:
 #endif
         {
             npy_intp dims[]  = { (npy_intp)npoints, 3};
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, &xyz[0]);
+            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
             result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
             Py_DECREF(args);
             if(result == NULL) {
@@ -1279,10 +1309,27 @@ potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
 /// attempt to construct a density from key=value parameters
 potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 {
+    // check if the input is a cumulative mass profile
     PyObject* cumulmass = getItemFromPyDict(namedArgs, "cumulmass");
     if(cumulmass)
         return Density_initFromCumulMass(cumulmass);
+    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
     utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
+    if(dens_obj && !PyString_Check(dens_obj)) {   // if it's not a name, it must be a density object
+        potential::PtrDensity dens = getDensity(dens_obj,
+            potential::getSymmetryTypeByName(params.getString("symmetry")));
+        if(!dens)
+            throw std::invalid_argument("Argument 'density' must be either a string, "
+                "or an instance of Density class, or a function providing that interface");
+        // if no 'type' is provided, keep the user-provided density as it is
+        // (this is almost equivalent to passing it as an unnamed argument,
+        // except that here the user has the opportunity to specify the symmetry)
+        if(!params.contains("type"))
+            return dens;
+        // otherwise 'type' must specify a density expansion approximating the input density
+        params.unset("density");
+        return potential::createDensity(params, *dens, *conv);
+    }
     if(!params.contains("type") && !params.contains("density") && !params.contains("file"))
         throw std::invalid_argument("Should provide the name of density model "
             "in type='...' or density='...', or the file name to load in file='...' arguments");
@@ -1310,19 +1357,18 @@ potential::PtrDensity Density_initFromTuple(PyObject* tuple)
         potential::PtrDensity(new potential::CompositeDensity(components));
 }
 
-/// constructor of Density class
+/// generic constructor of Density class
 int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
-        // check if we have only a tuple of density components as arguments
-        if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 &&
-            (namedArgs==NULL || PyDict_Size(namedArgs)==0))
+        Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
+        if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
             self->dens = Density_initFromTuple(args);
-        else if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+        else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             self->dens = Density_initFromDict(namedArgs);
         else {
-            throw std::invalid_argument(
-                "Invalid parameters passed to the constructor, type help(Density) for details");
+            throw std::invalid_argument("Invalid parameters passed to the constructor "
+                "(cannot mix positional and named arguments), type help(Density) for details");
         }
         assert(self->dens);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
@@ -1362,32 +1408,32 @@ PyObject* Density_density(PyObject* self, PyObject* args, PyObject* namedArgs)
     return FncDensityDensity(args, *((DensityObject*)self)->dens, time).run(/*chunk*/1024);
 }
 
-/// compute the surface density for an array of points
-class FncDensitySurfaceDensity: public BatchFunction {
+/// compute the projected (surface) density for an array of points
+class FncDensityProjectedDensity: public BatchFunction {
     const potential::BaseDensity& dens;
-    const double alpha, beta, gamma;
+    const coord::Orientation orientation;
     double* outputBuffer;
 public:
-    FncDensitySurfaceDensity(PyObject* input, const potential::BaseDensity& _dens,
-        double _alpha, double _beta, double _gamma)
+    FncDensityProjectedDensity(PyObject* input, const potential::BaseDensity& _dens,
+        double alpha, double beta, double gamma)
     :
         BatchFunction(/*input length*/ 2, input),
-        dens(_dens), alpha(_alpha), beta(_beta), gamma(_gamma)
+        dens(_dens), orientation(alpha, beta, gamma)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            surfaceDensity(dens,
+            projectedDensity(dens,
                 /*X*/ inputBuffer[indexPoint*2  ] * conv->lengthUnit,
                 /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit,
-                alpha, beta, gamma) /
+                orientation) /
             (conv->massUnit / pow_2(conv->lengthUnit));
     }
 };
 
-PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* Density_projectedDensity(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
     // namedArgs may be empty or contain three rotation angles
@@ -1401,8 +1447,9 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
     {   // shortcut and alternative syntax for just a single point x,y
         try{
             return Py_BuildValue("d",
-                surfaceDensity(*((DensityObject*)self)->dens,
-                    X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma) /
+                projectedDensity(*((DensityObject*)self)->dens,
+                    X * conv->lengthUnit, Y * conv->lengthUnit,
+                    coord::Orientation(alpha, beta, gamma)) /
                 (conv->massUnit / pow_2(conv->lengthUnit)) );
         }
         catch(std::exception& e) {
@@ -1414,7 +1461,7 @@ PyObject* Density_surfaceDensity(PyObject* self, PyObject* args, PyObject* named
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|ddd", const_cast<char**>(keywords1),
         &points_obj, &alpha, &beta, &gamma))
         return NULL;
-    return FncDensitySurfaceDensity(points_obj, *((DensityObject*)self)->dens, alpha, beta, gamma).
+    return FncDensityProjectedDensity(points_obj, *((DensityObject*)self)->dens, alpha, beta, gamma).
         run(/*chunk*/64);
 }
 
@@ -1635,7 +1682,7 @@ static PyMethodDef Density_methods[] = {
       "Compute density at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array; optionally t=... (time)\n"
       "Returns: float or array of floats" },
-    { "surfaceDensity", (PyCFunction)Density_surfaceDensity, METH_VARARGS | METH_KEYWORDS,
+    { "projectedDensity", (PyCFunction)Density_projectedDensity, METH_VARARGS | METH_KEYWORDS,
       "Compute surface density at a given point or array of points\n"
       "Arguments: \n"
       "  X,Y (two floats) or point (a Nx2 array of floats): coordinates in the image plane.\n"
@@ -1973,15 +2020,15 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
 }
 
 /// attempt to construct an elementary potential from the parameters provided in dictionary
-potential::PtrPotential Potential_initFromDict(PyObject* args)
+potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
 {
     // check if the list of arguments contains an array of particles
-    PyObject* particles_obj = getItemFromPyDict(args, "particles");
+    PyObject* particles_obj = getItemFromPyDict(namedArgs, "particles");
     if(particles_obj) {
-        Py_INCREF(particles_obj);               // keep the object but remove it from the dictionary,
-        delItemFromPyDict(args, "particles");   // to avoid parsing it as a string
+        Py_INCREF(particles_obj);                   // keep the object but remove it from the dictionary,
+        delItemFromPyDict(namedArgs, "particles");  // to avoid parsing it as a string
     }
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(args);
+    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
     if(particles_obj) {
         if(params.contains("file"))
             throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");
@@ -1993,13 +2040,13 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
     }
     // check if the list of arguments contains a density object
     // or a string specifying the name of density model
-    PyObject* dens_obj = getItemFromPyDict(args, "density");
-    PyObject* pot_obj  = getItemFromPyDict(args, "potential");
+    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
+    PyObject* pot_obj  = getItemFromPyDict(namedArgs, "potential");
     if(int(params.contains("file")) + int(dens_obj!=NULL) + int(pot_obj!=NULL) > 1)
         throw std::invalid_argument("Arguments 'file', 'density', 'potential' are mutually exclusive");
     if(dens_obj) {
         potential::PtrDensity dens = getDensity(dens_obj,
-            potential::getSymmetryTypeByName(toString(getItemFromPyDict(args, "symmetry"))));
+            potential::getSymmetryTypeByName(toString(getItemFromPyDict(namedArgs, "symmetry"))));
         if(dens) {
             /// attempt to construct a potential expansion from a user-provided density model
             if(params.getString("type").empty())
@@ -2016,7 +2063,7 @@ potential::PtrPotential Potential_initFromDict(PyObject* args)
     // check if the list of parameters contains a potential object or a user-defined function
     if(pot_obj) {
         potential::PtrPotential pot = getPotential(pot_obj,
-            potential::getSymmetryTypeByName(toString(getItemFromPyDict(args, "symmetry"))));
+            potential::getSymmetryTypeByName(params.getString("symmetry")));
         if(pot) {
             if(!params.getString("type").empty()) {
                 // attempt to construct a potential expansion from a user-provided potential model
@@ -2070,7 +2117,6 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
 {
     try{
-        // check if we have only a tuple of potential components as arguments
         Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
         if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
             self->pot = Potential_initFromTuple(args);
@@ -2195,14 +2241,14 @@ PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedAr
 /// compute the projected force for an array of points
 class FncPotentialProjectedForce: public BatchFunction {
     const potential::BasePotential& pot;
-    const double alpha, beta, gamma;
+    const coord::Orientation orientation;
     double* outputBuffer;
 public:
     FncPotentialProjectedForce(PyObject* input, const potential::BasePotential& _pot,
-        double _alpha, double _beta, double _gamma)
+        double alpha, double beta, double gamma)
     :
         BatchFunction(/*input length*/ 2, input),
-        pot(_pot), alpha(_alpha), beta(_beta), gamma(_gamma)
+        pot(_pot), orientation(alpha, beta, gamma)
     {
         outputObject = allocateOutput<2>(numPoints, &outputBuffer);
     }
@@ -2212,7 +2258,7 @@ public:
         projectedForce(pot,
             /*X*/ inputBuffer[indexPoint*2  ] * conv->lengthUnit,
             /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit,
-            alpha, beta, gamma,
+            orientation,
             /*output*/ fX, fY);
         outputBuffer[indexPoint*2+0] = -fX / pow_2(conv->velocityUnit);
         outputBuffer[indexPoint*2+1] = -fY / pow_2(conv->velocityUnit);
@@ -2234,7 +2280,8 @@ PyObject* Potential_projectedForce(PyObject* self, PyObject* args, PyObject* nam
         try{
             double fX, fY;
             projectedForce(*((PotentialObject*)self)->pot,
-                X * conv->lengthUnit, Y * conv->lengthUnit, alpha, beta, gamma, /*output*/ fX, fY);
+                X * conv->lengthUnit, Y * conv->lengthUnit, coord::Orientation(alpha, beta, gamma),
+                /*output*/ fX, fY);
             return Py_BuildValue("(dd)", -fX / pow_2(conv->velocityUnit), -fY / pow_2(conv->velocityUnit));
         }
         catch(std::exception& e) {
@@ -3622,9 +3669,9 @@ PyObject* GalaxyModel_totalMass(GalaxyModelObject* self, PyObject* args, PyObjec
     PtrSelectionFunction selFunc(getSelectionFunction(self->sf_obj));
     const galaxymodel::GalaxyModel model(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selFunc);
     int numVal = separate? model.distrFunc.numValues() : 1;
-    std::vector<double> val(numVal), err(numVal);
+    std::vector<double> val(numVal);
     try{
-        computeTotalMass(model, &val[0], &err[0], separate);
+        computeTotalMass(model, &val[0], separate);
         math::blas_dmul(1./conv->massUnit, val);
         return separate ? toPyArray(val) : Py_BuildValue("d", val[0]);
     }
@@ -3647,7 +3694,7 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
     }
     try{
         // do the sampling
-        particles::ParticleArrayCyl points = galaxymodel::samplePosVel(
+        particles::ParticleArrayCar points = galaxymodel::samplePosVel(
             galaxymodel::GalaxyModel(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
                 /*temporary wrapper object*/ *getSelectionFunction(self->sf_obj)),
             numPoints);
@@ -3658,7 +3705,7 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
         PyObject* posvel_arr = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
         for(int i=0; i<numPoints; i++) {
-            unconvertPosVel(coord::toPosVelCar(points.point(i)), &pyArrayElem<double>(posvel_arr, i, 0));
+            unconvertPosVel(points.point(i), &pyArrayElem<double>(posvel_arr, i, 0));
             pyArrayElem<double>(mass_arr, i) = points.mass(i) / conv->massUnit;
         }
         return Py_BuildValue("NN", posvel_arr, mass_arr);
@@ -3669,20 +3716,25 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
     }
 }
 
-/// compute moments of DF at a given 3d point
+/// compute moments of DF at a given 2d or 3d point
 class FncGalaxyModelMoments: public BatchFunction {
     PtrSelectionFunction selFunc;         // selection function
     const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
+    const int ndim;                       // 2 if projected, 3 if not
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
+    const coord::Orientation orientation; // conversion between observed and intrinsic coords
     double *outputDens, *outputVel, *outputVel2;  // raw buffers for output values
 public:
     FncGalaxyModelMoments(
         PyObject* input,
         GalaxyModelObject* model_obj,
-        bool needDens, bool needVel, bool needVel2, bool _separate)
+        int _ndim,
+        bool needDens, bool needVel, bool needVel2,
+        bool _separate,
+        double alpha, double beta, double gamma)
     :
-        BatchFunction(/*inputLength*/ 3, input),
+        BatchFunction(/*inputLength*/ _ndim, input),
         // if the Python GalaxyModel object contains a selection function,
         // create a wrapper object for this Python callback function that temporarily disables OpenMP
         // and will be automatically destroyed at the end of the lifetime of this class
@@ -3692,8 +3744,10 @@ public:
         // which does not interfere with OpenMP
         selFunc(getSelectionFunction(model_obj->sf_obj)),
         model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
+        ndim(_ndim),
         separate(_separate),
         numComponents(_separate ? model.distrFunc.numValues() : 1),
+        orientation(alpha, beta, gamma),
         outputDens(NULL), outputVel(NULL), outputVel2(NULL)
     {
         double* outputBuffers[3];
@@ -3701,10 +3755,10 @@ public:
         if(needDens) {
             if(needVel) {
                 if(needVel2) {
-                    outputObject = allocateOutput<1, 1, 6>(numPoints, outputBuffers, numVal);
+                    outputObject = allocateOutput<1, 3, 6>(numPoints, outputBuffers, numVal);
                     outputVel2   = outputBuffers[2];
                 } else {
-                    outputObject = allocateOutput<1, 1   >(numPoints, outputBuffers, numVal);
+                    outputObject = allocateOutput<1, 3   >(numPoints, outputBuffers, numVal);
                 }
                 outputVel = outputBuffers[1];
             } else {  // no needVel
@@ -3719,10 +3773,10 @@ public:
         } else {  // no needDens
             if(needVel) {
                 if(needVel2) {
-                    outputObject = allocateOutput<   1, 6>(numPoints, outputBuffers, numVal);
+                    outputObject = allocateOutput<   3, 6>(numPoints, outputBuffers, numVal);
                     outputVel2   = outputBuffers[1];
                 } else {
-                    outputObject = allocateOutput<   1   >(numPoints, outputBuffers, numVal);
+                    outputObject = allocateOutput<   3   >(numPoints, outputBuffers, numVal);
                 }
                 outputVel = outputBuffers[0];
             } else {  // no needVel
@@ -3738,19 +3792,27 @@ public:
 
     virtual void processPoint(npy_intp ip /*point index*/)
     {
-        const coord::PosCar point = convertPos(&inputBuffer[ip * 3]);
-        double *dens = outputDens ? &outputDens[ip * numComponents] : NULL;
-        double *vel  = outputVel  ? &outputVel [ip * numComponents] : NULL;
+        double *dens = outputDens ? &outputDens[ip * numComponents    ] : NULL;
+        double *vel  = outputVel  ? &outputVel [ip * numComponents * 3] : NULL;
         double *vel2 = outputVel2 ? &outputVel2[ip * numComponents * 6] : NULL;
         try{
-            computeMoments(model, coord::toPosCyl(point), dens, vel, (coord::Vel2Cyl*)vel2,
-                NULL, NULL, NULL, separate);
+            if(ndim==2)
+                computeMoments(model, coord::PosProj(
+                    inputBuffer[ip * ndim    ] * conv->lengthUnit,
+                    inputBuffer[ip * ndim + 1] * conv->lengthUnit),
+                    dens, (coord::VelCar*)vel, (coord::Vel2Car*)vel2,
+                    separate, orientation);
+            else // ndim==3
+                computeMoments(model, convertPos(&inputBuffer[ip * ndim]),
+                    dens, (coord::VelCar*)vel, (coord::Vel2Car*)vel2,
+                    separate, orientation);
             // convert units in the output arrays
             for(unsigned int ic=0; ic<numComponents; ic++) {
                 if(dens)
-                    dens[ic] /= conv->massUnit / pow_3(conv->lengthUnit);
+                    dens[ic] /= conv->massUnit / math::pow(conv->lengthUnit, ndim);
                 if(vel)
-                    vel [ic] /= conv->velocityUnit;
+                    for(int d=0; d<3; d++)
+                        vel[ic] /= conv->velocityUnit;
                 if(vel2)
                     for(int d=0; d<6; d++)
                         vel2[ic * 6 + d] /= pow_2(conv->velocityUnit);
@@ -3760,10 +3822,13 @@ public:
             if(dens)
                 std::fill(dens, dens + numComponents, NAN);
             if(vel)
-                std::fill(vel,  vel  + numComponents, NAN);
+                std::fill(vel,  vel  + numComponents * 3, NAN);
             if(vel2)
                 std::fill(vel2, vel2 + numComponents * 6, NAN);
-            utils::msg(utils::VL_WARNING, "GalaxyModel.moments", ex.what());
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+            PyErr_WarnEx(NULL, (std::string("GalaxyModel.moments: ")+ex.what()).c_str(), 1);
         }
     }
 };
@@ -3772,101 +3837,69 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
-    static const char* keywords[] = {"point", "dens", "vel", "vel2", "separate", NULL};
+    static const char* keywords[] = {"point", "dens", "vel", "vel2", "separate",
+        "alpha", "beta", "gamma", NULL};
     PyObject *points_obj = NULL, *dens_flag = NULL, *vel_flag = NULL, *vel2_flag = NULL,
         *separate_flag = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOO", const_cast<char**>(keywords),
-        &points_obj, &dens_flag, &vel_flag, &vel2_flag, &separate_flag))
+    double alpha = 0, beta = 0, gamma = 0;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOOddd", const_cast<char**>(keywords),
+        &points_obj, &dens_flag, &vel_flag, &vel2_flag, &separate_flag, &alpha, &beta, &gamma))
         return NULL;
-    return FncGalaxyModelMoments(points_obj, self,
-        toBool(dens_flag, true), toBool(vel_flag, false), toBool(vel2_flag, true),
-        toBool(separate_flag, false)).
-    run(/*chunk*/1);
-}
-
-/// compute projected moments of distribution function
-class FncGalaxyModelProjectedMoments: public BatchFunction {
-    PtrSelectionFunction selFunc;         // selection function
-    const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
-    const bool separate;                  // whether to consider each DF component separately
-    const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
-    double* outputBuffers[3];             // raw buffers for output values (3 separate arrays)
-public:
-    FncGalaxyModelProjectedMoments(
-        PyObject* input,
-        GalaxyModelObject* model_obj,
-        bool _separate)
-    :
-        BatchFunction(/*inputLength*/ 1, input),
-        selFunc(getSelectionFunction(model_obj->sf_obj)),
-        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
-        separate(_separate),
-        numComponents(_separate ? model.distrFunc.numValues() : 1)
-    {
-        outputObject = allocateOutput<1, 1, 1>(
-            numPoints, outputBuffers, separate? model.distrFunc.numValues() : 0);
-    }
-
-    virtual void processPoint(npy_intp ip /*point index*/)
-    {
-        try{
-            computeProjectedMoments(model, inputBuffer[ip] * conv->lengthUnit,
-                /*surfaceDensity*/ &(outputBuffers[0][ip * numComponents]),
-                /*rmsHeight*/      &(outputBuffers[1][ip * numComponents]),
-                /*rmsVelocity*/    &(outputBuffers[2][ip * numComponents]),
-                NULL, NULL, NULL, separate);
-            // convert units in the output arrays
-            for(unsigned int ic=0; ic<numComponents; ic++) {
-                outputBuffers[0][ip * numComponents + ic] /= conv->massUnit / pow_2(conv->lengthUnit);
-                outputBuffers[1][ip * numComponents + ic] /= conv->lengthUnit;
-                outputBuffers[2][ip * numComponents + ic] /= conv->velocityUnit;
-            }
-        }
-        catch(std::exception& ex) {
-            for(unsigned int ic=0; ic<numComponents; ic++) {
-                outputBuffers[0][ip * numComponents + ic] =
-                outputBuffers[1][ip * numComponents + ic] =
-                outputBuffers[2][ip * numComponents + ic] = NAN;
-            }
-            utils::msg(utils::VL_WARNING, "GalaxyModel.projectedMoments", ex.what());
+    bool dens = toBool(dens_flag, true), vel = toBool(vel_flag, false), vel2 = toBool(vel2_flag, true);
+    
+    // retrieve the input point(s) and check the array dimensions
+    PyArrayObject *points_arr =
+        (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    npy_intp npoints = 0;  // # of points at which the moments should be computed
+    npy_intp ndim    = 0;  // dimensions of points: 2 for projected moments at (x,y), 3 for (x,y,z)
+    if(points_arr) {
+        if(PyArray_NDIM(points_arr) == 1) {
+            ndim    = PyArray_DIM(points_arr, 0);
+            npoints = 1;
+        } else if(PyArray_NDIM(points_arr) == 2) {
+            ndim    = PyArray_DIM(points_arr, 1);
+            npoints = PyArray_DIM(points_arr, 0);
         }
     }
-};
+    if(npoints==0 || !(ndim==2 || ndim==3)) {
+        Py_XDECREF(points_arr);
+        PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a 2d/3d point or an array of points");
+        return NULL;
+    }
 
-PyObject* GalaxyModel_projectedMoments(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
-{
-    if(!GalaxyModel_isCorrect(self))
-        return NULL;
-    static const char* keywords[] = {"point", "separate", NULL};
-    PyObject *points_obj = NULL, *separate_flag = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
-        &points_obj, &separate_flag))
-        return NULL;
-    return FncGalaxyModelProjectedMoments(points_obj, self, toBool(separate_flag, false)).
+    // warn about changed output order
+    if(vel || vel2)
+        PyErr_WarnEx(NULL, "The order of output velocity components in moments() is changed - "
+            "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
+
+    PyObject* result = FncGalaxyModelMoments((PyObject*)points_arr, self,
+        ndim, dens, vel, vel2, toBool(separate_flag, false), alpha, beta, gamma) .
     run(/*chunk*/1);
+    Py_DECREF(points_arr);
+    return result;
 }
 
 /// compute projected distribution function
 class FncGalaxyModelProjectedDF: public BatchFunction {
     PtrSelectionFunction selFunc;         // selection function
     const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
-    const double vz_error;                // optional additional Gaussian error on vz
     const bool separate;                  // whether to consider each DF component separately
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
+    const coord::Orientation orientation; // conversion between observed and intrinsic coords
     double* outputBuffer;                 // raw buffer for output values
 public:
     FncGalaxyModelProjectedDF(
         PyObject* input,
         GalaxyModelObject* model_obj,
-        double _vz_error,
-        bool _separate)
+        bool _separate,
+        double alpha, double beta, double gamma)
     :
-        BatchFunction(/*inputLength*/ 3, input),
+        BatchFunction(/*inputLength*/ 8, input),
         selFunc(getSelectionFunction(model_obj->sf_obj)),
         model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
-        vz_error(_vz_error),
         separate(_separate),
-        numComponents(_separate ? model.distrFunc.numValues() : 1)
+        numComponents(_separate ? model.distrFunc.numValues() : 1),
+        orientation(alpha, beta, gamma)
     {
         outputObject = allocateOutput<1>(
             numPoints, &outputBuffer, separate? model.distrFunc.numValues() : 0);
@@ -3875,11 +3908,13 @@ public:
     virtual void processPoint(npy_intp ip /*point index*/)
     {
         try{
-            computeProjectedDF(model,
-                /*R*/ sqrt(pow_2(inputBuffer[ip*3]) + pow_2(inputBuffer[ip*3+1])) * conv->lengthUnit,
-                /*vz*/ inputBuffer[ip*3+2] * conv->velocityUnit,
+            computeProjectedDF(model, coord::PosProj(
+                inputBuffer[ip*8  ] * conv->lengthUnit,
+                inputBuffer[ip*8+1] * conv->lengthUnit),
+                /*vel*/    convertVel(&inputBuffer[ip*8+2]),
+                /*velerr*/ convertVel(&inputBuffer[ip*8+5]),
                 /*output*/ &outputBuffer[ip * numComponents],
-                vz_error * conv->velocityUnit, separate);
+                separate, orientation);
             // convert units in the output array
             for(unsigned int ic=0; ic<numComponents; ic++)
                 outputBuffer[ip * numComponents + ic] /=
@@ -3888,7 +3923,10 @@ public:
         catch(std::exception& ex) {
             for(unsigned int ic=0; ic<numComponents; ic++)
                 outputBuffer[ip * numComponents + ic] = NAN;
-            utils::msg(utils::VL_WARNING, "GalaxyModel.projectedDF", ex.what());
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+            PyErr_WarnEx(NULL, (std::string("GalaxyModel.projectedDF: ")+ex.what()).c_str(), 1);
         }
     }
 };
@@ -3897,14 +3935,40 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
-    static const char* keywords[] = {"point", "vz_error", "separate", NULL};
+    static const char* keywords[] = {"point", "separate", "alpha", "beta", "gamma", NULL};
     PyObject *points_obj = NULL, *separate_flag = NULL;
-    double vz_error = 0;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|dO", const_cast<char**>(keywords),
-        &points_obj, &vz_error, &separate_flag))
+    double alpha=0, beta=0, gamma=0;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|Oddd", const_cast<char**>(keywords),
+        &points_obj, &separate_flag, &alpha, &beta, &gamma))
         return NULL;
-    return FncGalaxyModelProjectedDF(points_obj, self, vz_error, toBool(separate_flag, false)).
+
+    // retrieve the input point(s) and check the array dimensions
+    PyArrayObject *points_arr =
+    (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    npy_intp npoints = 0;  // # of points at which the projectedDF should be computed
+    npy_intp ndim    = 0;  // dimensions of points (should be 8)
+    if(points_arr) {
+        if(PyArray_NDIM(points_arr) == 1) {
+            ndim    = PyArray_DIM(points_arr, 0);
+            npoints = 1;
+        } else if(PyArray_NDIM(points_arr) == 2) {
+            ndim    = PyArray_DIM(points_arr, 1);
+            npoints = PyArray_DIM(points_arr, 0);
+        }
+    }
+    if(npoints==0 || ndim!=8) {
+        Py_XDECREF(points_arr);
+        PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a point or an array of points "
+            "with 8 numbers per point: X, Y, vX, vY, vZ, vX_error, vY_error, vZ_error");
+        return NULL;
+    }
+
+    PyObject* result = FncGalaxyModelProjectedDF(
+        points_obj, self, toBool(separate_flag, false), alpha, beta, gamma).
     run(/*chunk*/1);
+    Py_DECREF(points_arr);
+    return result;
+
 }
 
 /// compute velocity distribution functions at point(s)
@@ -3917,7 +3981,8 @@ class FncGalaxyModelVDF: public BatchFunction {
     const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
     const int sizegridv;                  // default or user-provided size of velocity grid
     std::vector<double> usergridv;        // user-provided velocity grid (overrides sizegridv if set)
-    PyObject **splvR, **splvz, **splvphi; // raw buffers of the output arrays to store spline objects
+    const coord::Orientation orientation; // conversion between observed and intrinsic coords
+    PyObject **splvX, **splvY, **splvZ;   // raw buffers of the output arrays to store spline objects
     double* outputDensity;                // raw buffer of the output array to store density (if needed)
 public:
     FncGalaxyModelVDF(
@@ -3926,7 +3991,8 @@ public:
         int _ndim,
         PyObject* gridv_obj,
         bool giveDensity,
-        bool _separate)
+        bool _separate,
+        double alpha, double beta, double gamma)
     :
         BatchFunction(/*inputLength*/ _ndim, input),
         selFunc(getSelectionFunction(model_obj->sf_obj)),
@@ -3936,7 +4002,8 @@ public:
         numComponents(_separate ? model.distrFunc.numValues() : 1),
         sizegridv(toInt(gridv_obj, SIZEGRIDV)), // this may be either the number of nodes in the array
         usergridv(toDoubleArray(gridv_obj)),    // or the array itself (or none of these)
-        splvR(NULL), splvz(NULL), splvphi(NULL), outputDensity(NULL)
+        orientation(alpha, beta, gamma),
+        splvX(NULL), splvY(NULL), splvZ(NULL), outputDensity(NULL)
     {
         if(numPoints<0) return;  // error in parsing input
 
@@ -3959,12 +4026,12 @@ public:
             // HACK: assign the pointers to output arrays to the elements of the tuple;
             // in processPoint(), these pointers (currently assigned to Py_None)
             // will be replaced with newly created Python spline objects
-            splvR   = (PyObject**)&((PyTupleObject*)outputObject)->ob_item;  // 0th element
-            splvz   = splvR+1;  // next (1st) element
-            splvphi = splvz+1;  // next (2nd) element
+            splvX = (PyObject**)&((PyTupleObject*)outputObject)->ob_item;  // 0th element
+            splvY = splvX+1;  // next (1st) element
+            splvZ = splvY+1;  // next (2nd) element
             if(giveDensity)
                 // get the address of the floating-point value in the last (3rd) tuple element
-                outputDensity = &((PyFloatObject*)*(splvphi+1))->ob_fval;
+                outputDensity = &((PyFloatObject*)*(splvZ+1))->ob_fval;
         } else {
             npy_intp ndim, dims[2];
             if(numPoints==0 && separate) {
@@ -3979,59 +4046,81 @@ public:
                 dims[1] = model.distrFunc.numValues();
             }
             // create the 1d or 2d arrays of would-be spline objects and a float array of density
-            PyObject* arrvR   = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
-            PyObject* arrvz   = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
-            PyObject* arrvphi = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
+            PyObject* arrvX = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
+            PyObject* arrvY = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
+            PyObject* arrvZ = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
             PyObject* arrdens = giveDensity? PyArray_SimpleNew(ndim, dims, NPY_DOUBLE) : NULL;
-            if(!arrvR || !arrvz || !arrvphi || (giveDensity && !arrdens)) {
-                Py_XDECREF(arrvR);
-                Py_XDECREF(arrvz);
-                Py_XDECREF(arrvphi);
+            if(!arrvX || !arrvY || !arrvZ || (giveDensity && !arrdens)) {
+                Py_XDECREF(arrvX);
+                Py_XDECREF(arrvY);
+                Py_XDECREF(arrvZ);
                 Py_XDECREF(arrdens);
                 return;
             }
             // the returned value will be a tuple of 3 or 4 arrays
             outputObject = giveDensity ?
-                Py_BuildValue("NNNN", arrvR, arrvz, arrvphi, arrdens) :
-                Py_BuildValue("NNN",  arrvR, arrvz, arrvphi);
+                Py_BuildValue("NNNN", arrvX, arrvY, arrvZ, arrdens) :
+                Py_BuildValue("NNN",  arrvX, arrvY, arrvZ);
             // obtain raw buffers for the arrays of objects
-            splvR   = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvR));
-            splvz   = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvz));
-            splvphi = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvphi));
+            splvX = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvX));
+            splvY = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvY));
+            splvZ = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvZ));
             if(giveDensity)
                 outputDensity = static_cast<double*>(PyArray_DATA((PyArrayObject*)arrdens));
             // initialize the arrays with Nones, will be replaced in processPoint()
             for(npy_intp ind=0, size=std::max<int>(1, numPoints) * numComponents; ind<size; ind++) {
-                splvR  [ind] = Py_None;  Py_INCREF(Py_None);
-                splvz  [ind] = Py_None;  Py_INCREF(Py_None);
-                splvphi[ind] = Py_None;  Py_INCREF(Py_None);
+                splvX[ind] = Py_None;  Py_INCREF(Py_None);
+                splvY[ind] = Py_None;  Py_INCREF(Py_None);
+                splvZ[ind] = Py_None;  Py_INCREF(Py_None);
             }
         }
     }
 
     virtual void processPoint(npy_intp ip /*point index*/)
     {
-        const coord::PosCyl point = coord::toPosCyl(coord::PosCar(
+        const coord::PosCar point(
             inputBuffer[ip * ndim    ] * conv->lengthUnit,
             inputBuffer[ip * ndim + 1] * conv->lengthUnit,
-            ndim==3 ? inputBuffer[ip * ndim + 2] * conv->lengthUnit : 0));
-        // create a default grid in velocity space (if not provided by the user) in internal units
-        std::vector<double> gridv(usergridv);
-        if(gridv.empty()) {
-            double v_max = sqrt(-2*model.potential.value(point));
-            gridv = math::createUniformGrid(sizegridv, -v_max, v_max);
-        }
+            ndim==3 ? inputBuffer[ip * ndim + 2] * conv->lengthUnit : 0);
         // output storage
         std::vector<double> density(numComponents);
         std::vector< std::vector<double> >
-            amplvR(numComponents), amplvz(numComponents), amplvphi(numComponents);
+            amplvX(numComponents), amplvY(numComponents), amplvZ(numComponents);
 
         try{
             // compute the distributions
             const int ORDER = 3;   // degree of VDF (cubic spline)
-            galaxymodel::computeVelocityDistribution<ORDER>(
-                model, point, /*projected*/ ndim==2,  gridv, gridv, gridv,
-                /*output*/ &density[0], &amplvR[0], &amplvz[0], &amplvphi[0], separate);
+            std::vector<double> gridv(usergridv);
+            if(gridv.empty()) {
+                // create a default grid in velocity space (if not provided by the user)
+                if(ndim==2) // projected
+                    galaxymodel::computeVelocityDistribution<ORDER>(model, coord::PosProj(
+                        inputBuffer[ip * ndim    ] * conv->lengthUnit,
+                        inputBuffer[ip * ndim + 1] * conv->lengthUnit),
+                        sizegridv, /*output*/ gridv,
+                        /*output*/ &density[0], &amplvX[0], &amplvY[0], &amplvZ[0],
+                        /*other params*/ separate, orientation);
+                else  // ndim==3
+                    galaxymodel::computeVelocityDistribution<ORDER>(model,
+                        convertPos(&inputBuffer[ip * ndim]),
+                        sizegridv, /*output*/ gridv,
+                        /*output*/ &density[0], &amplvX[0], &amplvY[0], &amplvZ[0],
+                        /*other params*/ separate, orientation);
+            } else { // use the provided velocity grid
+                if(ndim==2)
+                    galaxymodel::computeVelocityDistribution<ORDER>(model, coord::PosProj(
+                        inputBuffer[ip * ndim    ] * conv->lengthUnit,
+                        inputBuffer[ip * ndim + 1] * conv->lengthUnit),
+                        gridv, gridv, gridv,
+                        /*output*/ &density[0], &amplvX[0], &amplvY[0], &amplvZ[0],
+                        /*other params*/ separate, orientation);
+                else  // ndim==3
+                    galaxymodel::computeVelocityDistribution<ORDER>(model,
+                        convertPos(&inputBuffer[ip * ndim]),
+                        gridv, gridv, gridv,
+                        /*output*/ &density[0], &amplvX[0], &amplvY[0], &amplvZ[0],
+                        /*other params*/ separate, orientation);
+            }
 
             // convert the units for the abscissae (velocity)
             math::blas_dmul(1/conv->velocityUnit, gridv);
@@ -4050,23 +4139,26 @@ public:
             {
                 for(unsigned int ic=0; ic<numComponents; ic++) {
                     // convert the units for the ordinates (f(v) ~ 1/velocity)
-                    math::blas_dmul(conv->velocityUnit, amplvR[ic]);
-                    math::blas_dmul(conv->velocityUnit, amplvz[ic]);
-                    math::blas_dmul(conv->velocityUnit, amplvphi[ic]);
+                    math::blas_dmul(conv->velocityUnit, amplvX[ic]);
+                    math::blas_dmul(conv->velocityUnit, amplvY[ic]);
+                    math::blas_dmul(conv->velocityUnit, amplvZ[ic]);
                     // release the elements of output arrays (Py_None objects)
-                    Py_XDECREF(splvR  [ip * numComponents + ic]);
-                    Py_XDECREF(splvz  [ip * numComponents + ic]);
-                    Py_XDECREF(splvphi[ip * numComponents + ic]);
+                    Py_XDECREF(splvX[ip * numComponents + ic]);
+                    Py_XDECREF(splvY[ip * numComponents + ic]);
+                    Py_XDECREF(splvZ[ip * numComponents + ic]);
                     // and replace them with newly created spline objects
-                    splvR  [ip * numComponents + ic] = createCubicSpline(gridv, amplvR[ic]);
-                    splvz  [ip * numComponents + ic] = createCubicSpline(gridv, amplvz[ic]);
-                    splvphi[ip * numComponents + ic] = createCubicSpline(gridv, amplvphi[ic]);
+                    splvX[ip * numComponents + ic] = createCubicSpline(gridv, amplvX[ic]);
+                    splvY[ip * numComponents + ic] = createCubicSpline(gridv, amplvY[ic]);
+                    splvZ[ip * numComponents + ic] = createCubicSpline(gridv, amplvZ[ic]);
                 }
             }
         }
         catch(std::exception& ex) {
-            // leave PyNone as the elements of output arrays
-            utils::msg(utils::VL_WARNING, "GalaxyModel.vdf", ex.what());
+            // leave PyNone as the elements of output arrays and issue a warning
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+            PyErr_WarnEx(NULL, (std::string("GalaxyModel.vdf: ")+ex.what()).c_str(), 1);
         }
     }
 };
@@ -4075,11 +4167,12 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
-    static const char* keywords[] = {"point", "gridv", "dens", "separate", NULL};
+    static const char* keywords[] = {"point", "gridv", "dens", "separate", "alpha", "beta", "gamma", NULL};
     PyObject *points_obj = NULL, *gridv_obj = NULL, *dens_flag = NULL, *separate_flag = NULL;
+    double alpha=0, beta=0, gamma=0;
     if(!PyArg_ParseTupleAndKeywords(
-        args, namedArgs, "O|OOO", const_cast<char**>(keywords),
-        &points_obj, &gridv_obj, &dens_flag, &separate_flag))
+        args, namedArgs, "O|OOOddd", const_cast<char**>(keywords),
+        &points_obj, &gridv_obj, &dens_flag, &separate_flag, &alpha, &beta, &gamma))
         return NULL;
 
     // retrieve the input point(s) and check the array dimensions
@@ -4098,13 +4191,16 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     }
     if(npoints==0 || !(ndim==2 || ndim==3)) {
         Py_XDECREF(points_arr);
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'point' should be a 2d/3d point or an array of points");
+        PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a 2d/3d point or an array of points");
         return NULL;
     }
 
+    // warn about changed output order
+    PyErr_WarnEx(NULL, "The order of output velocity components in vdf() is changed - "
+        "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
+
     PyObject* result = FncGalaxyModelVDF((PyObject*)points_arr, self,
-        ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false)) .
+        ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false), alpha, beta, gamma) .
     run(/*chunk*/1);
     Py_DECREF(points_arr);
     return result;
@@ -4126,6 +4222,11 @@ static PyMemberDef GalaxyModel_members[] = {
     "  separate (boolean, default False) -- " \
     "whether to treat each element of a multicomponent DF separately: if set, the output arrays " \
     "will have one extra dimension of size equal to the number of DF components Ncomp (possibly 1).\n"
+#define DOCSTRING_ANGLES \
+    "  alpha, beta, gamma -- three Euler angles specifying the orientation of the 'observed' XYZ " \
+    "cordinate system with respect to the 'intrinsic' model coordinates " \
+    "(by default they are all zero, meaning that the two systems coincide); " \
+    "in particular, beta is the inclination angle.\n"
 
 static PyMethodDef GalaxyModel_methods[] = {
     { "totalMass", (PyCFunction)GalaxyModel_totalMass, METH_VARARGS | METH_KEYWORDS,
@@ -4148,47 +4249,60 @@ static PyMethodDef GalaxyModel_methods[] = {
       "  A tuple of two arrays: position/velocity (2d array of size Nx6) "
       "and mass (1d array of length N)." },
     { "moments", (PyCFunction)GalaxyModel_moments, METH_VARARGS | METH_KEYWORDS,
-      "Compute moments of distribution function in the given potential.\n"
+      "Compute moments or projected moments of distribution function in the given potential.\n"
       "Arguments:\n"
-      "  point -- a single point (triplet of numbers) or an array of shape (Npoints, 3) containing "
-      "the positions in cartesian coordinates at which the moments need to be computed.\n"
+      "  point -- a single point (X,Y,Z) in case of intrinsic moments or (X,Y) in case of projected "
+      "moments or an array of shape (Npoints, 2 or 3) with the Cartesian coordinates "
+      "in the 'observed' coordinate system XYZ, which may be arbitrarily oriented with respect to "
+      "the 'intrinsic' coordinate system xyz of the model. "
+      "The projected moments are additionally integrated along the line of sight Z.\n"
       "  dens (boolean, default True)  -- flag telling whether the density (0th moment) "
       "needs to be computed.\n"
       "  vel  (boolean, default False) -- same for streaming velocity (1st moment).\n"
       "  vel2 (boolean, default True)  -- same for 2nd moment of velocity.\n"
       DOCSTRING_SEPARATE
+      DOCSTRING_ANGLES
       "Returns:\n"
-      "  For each input point, return the requested moments (one value for density, one for "
-      "mean v_phi, and 6 components of the 2nd moment tensor: RR, zz, phiphi, Rz, Rphi, zphi). "
-      "The shapes of output arrays are { Npoints, Npoints, (Npoints, 6) } if separate==False, or "
-      "{ (Npoints, Ncomp), (Npoints, Ncomp), (Npoints, Ncomp, 6) } if separate==True.\n" },
-    { "projectedMoments", (PyCFunction)GalaxyModel_projectedMoments, METH_VARARGS | METH_KEYWORDS,
-      "Compute projected moments of distribution function in the given potential.\n"
-      "Arguments:\n"
-      "  point -- a single value or a 1d array of length Npoints, containing cylindrical radii "
-      "at which to compute moments.\n"
-      DOCSTRING_SEPARATE
-      "Returns:\n"
-      "  A tuple of three floats or arrays: surface density, rms height (z), and rms line-of-sight "
-      "velocity (v_z) at each input radius (1d arrays if separate is False, otherwise 2d arrays "
-      "of shape (Npoints, Ncomp).\n" },
+      "  For each input point, return the requested moments (one value for density, three for "
+      "mean velocity, and 6 components of the 2nd moment tensor: XX, YY, ZZ, XY, XZ, YZ). "
+      "The shapes of output arrays are { Npoints, (Npoints, 3), (Npoints, 6) } if separate==False, "
+      "or { (Npoints, Ncomp), (Npoints, Ncomp, 3), (Npoints, Ncomp, 6) } if separate==True.\n" },
     { "projectedDF", (PyCFunction)GalaxyModel_projectedDF, METH_VARARGS | METH_KEYWORDS,
-      "Compute projected distribution function (integrated over z-coordinate and x- and y-velocities)\n"
+      "Compute the projected distribution function "
+      "(integrated over the Z coordinate and optionally some velocity components).\n"
+      "The input point is given by X,Y coordinates in the 'observed' coordinate system, "
+      "whose orientation with respect to the 'intrinsic' coordinate system of the model "
+      "is specified by three Euler rotation angles.\n"
+      "The three velocity components in the observed system - vX,vY,vZ - may be known precisely, "
+      "or with some uncertainty, which may be even infinite. In the case of nonzero uncertainty, "
+      "the DF is integrated over the corresponding velocity component, weighted with a Gaussian "
+      "function centered on the given value and with the given width. When the uncertainty is "
+      "infinite, the integration is carried over the entire available velocity range without "
+      "any weight function (and in this case, the provided value of the velocity is ignored).\n"
+      "The case of a finite but very large uncertainty is almost equivalent to the infinite "
+      "uncertainty, but differs in normalization: if vZerr >> vZ, \n"
+      "projectedDF([..., vZ, ..., vZerr]) = \n"
+      "projectedDF([...,  0, ...,  inf ]) * exp( -0.5 * (vZ/vZerr)**2 ) / sqrt(2*pi) / vZerr .\n"
+      "The uncertainties may be specified independently for each component, with the only "
+      "restriction that the vX,vY uncertainties may be either both finite or both infinite.\n"
+      "When all three uncertainties are infinite, the result is equivalent to projected density.\n"
       "Named arguments:\n"
-      "  point -- a single point (triplet of numbers) or an array of shape (Npoints, 3) containing "
-      "the x,y- components of position in cartesian coordinates and z-component of velocity.\n"
-      "  vz_error -- optional error on z-component of velocity "
-      "(DF will be convolved with a Gaussian of this width if it is non-zero).\n"
+      "  point -- a single point (8 numbers) or an array of shape (Npoints, 8) containing "
+      "the X,Y components of position in the 'observed' cartesian coordinate system, "
+      "vX,vY,vZ components of velocity, and the corresponding velocity uncertainties, "
+      "which may range from zero to infinity including boundaries.\n"
       DOCSTRING_SEPARATE
+      DOCSTRING_ANGLES
       "Returns:\n"
-      "  The value of projected DF (integrated over the missing components of position and velocity) "
-      "at each point; if separate is True, an array of shape (Npoints, Ncomp)." },
+      "  The value of projected DF at each point; "
+      "if separate is True, an array of shape (Npoints, Ncomp)." },
     { "vdf", (PyCFunction)GalaxyModel_vdf, METH_VARARGS | METH_KEYWORDS,
       "Compute the velocity distribution functions in three directions at one or several "
-      "points in 3d (x,y,z), or projected velocity distributions at the given 2d points (x,y), "
-      "integrated over z.\n"
+      "points in 3d (X,Y,Z), or projected velocity distributions at the given 2d points (X,Y), "
+      "integrated over Z, where the 'observed' coordinate system XYZ may be arbitrarily oriented "
+      "relative to the 'intrinsic' coordinate system xyz of the model.\n"
       "Arguments:\n"
-      "  point -- a single point (x,y,z) in case of intrinsic VDF or (x,y) in case of projected VDF, "
+      "  point -- a single point (X,Y,Z) in case of intrinsic VDF or (X,Y) in case of projected VDF, "
       "or an array of shape (Npoints, 2 or 3) with the positions in cartesian coordinates.\n"
       "  gridv -- (optional, default 50) the size of the grid in the velocity space, or an array "
       "specifying the grid itself (should be monotonically increasing and have at least 2 elements). "
@@ -4198,17 +4312,16 @@ static PyMethodDef GalaxyModel_methods[] = {
       "  dens -- (optional, default False) if this flag is set, the output will also contain "
       "the density at each input point, which comes for free during computations.\n"
       DOCSTRING_SEPARATE
+      DOCSTRING_ANGLES
       "Returns:\n"
       "  A tuple of length 3 (if dens==False) or 4 otherwise. \n"
       "The first three elements are functions (in case of one input point and separate==False), "
       "or arrays of functions with length Npoints or shape (Npoints, Ncomp), which represent "
-      "spline-interpolated VDFs f(v_R), f(v_z), f(v_phi) at each input point and each DF component. "
-      "Note that the points are specified in cartesian coordinates but the VDFs are given in "
-      "terms of velocity components in cylindrical coordinates. "
-      "Also keep in mind that the interpolated values may be negative, especially at the wings of "
+      "spline-interpolated VDFs f(vX), f(vY), f(vZ) at each input point and each DF component. "
+      "Keep in mind that the interpolated values may be negative, especially at the wings of "
       "distribution, and that by default the spline is linearly extrapolated beyond its domain; "
       "to extrapolate as zero use `f(v, ext=False)` when evaluating the spline function.\n"
-      "  The VDFs are normalized such that the integral of f(v_k) d v_k  over the interval "
+      "The VDFs are normalized such that the integral of f(v_k) d v_k  over the interval "
       "(-v_escape, v_escape) is unity for each component v_k. \n"
       "If dens==True, the last element is the value of density or an array of such values for "
       "each input point and DF component.\n" },

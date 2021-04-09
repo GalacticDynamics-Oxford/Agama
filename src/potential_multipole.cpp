@@ -571,24 +571,18 @@ void sphHarmTransformInverseDeriv2(
     cc  = ct * ct, cs = ct * st, ss = st * st,
     Y20       = (3*C2 * cc - C2),
     dY20      = -6*C2 * cs,
-    d2Y20     =-12*C2 * cc + 6*C2,
-    Phi0      =   Y20 *   C_lm[i20] +   C_lm[i00],
-    dPhi0dr   =   Y20 *  dC_lm[i20] +  dC_lm[i00],
-    dPhi0dt   =  dY20 *   C_lm[i20],
-    d2Phi0dr2 =   Y20 * d2C_lm[i20] + d2C_lm[i00],
-    d2Phi0drt =  dY20 *  dC_lm[i20],
-    d2Phi0dt2 = d2Y20 *   C_lm[i20];
+    d2Y20     =-12*C2 * cc + 6*C2;
     if(val)
-        *val = Phi0;
+        *val          =   Y20 *   C_lm[i20] +   C_lm[i00];
     if(grad) {
-        grad->dr      = dPhi0dr;
-        grad->dtheta  = dPhi0dt;
+        grad->dr      =   Y20 *  dC_lm[i20] +  dC_lm[i00];
+        grad->dtheta  =  dY20 *   C_lm[i20];
         grad->dphi    = 0;
     }
     if(hess) {
-        hess->dr2     = d2Phi0dr2;
-        hess->drdtheta= d2Phi0drt;
-        hess->dtheta2 = d2Phi0dt2;
+        hess->dr2     =   Y20 * d2C_lm[i20] + d2C_lm[i00];
+        hess->drdtheta=  dY20 *  dC_lm[i20];
+        hess->dtheta2 = d2Y20 *   C_lm[i20];
         hess->drdphi  = hess->dthetadphi = hess->dphi2 = 0;
     }
     if(ind.mmax == 2) {

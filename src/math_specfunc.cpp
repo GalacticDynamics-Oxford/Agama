@@ -29,12 +29,20 @@ extern bool exceptionFlag;
     double _result = x; \
     return !exceptionFlag ? _result : NAN;
 
+double erf(const double x)
+{
+    if(x == -INFINITY) return -1;
+    if(x == +INFINITY) return +1;
+    // note: erf from <cmath> is not accurate enough, at least in some versions of standard library!
+    return gsl_sf_erf(x);
+}
+
 double erfinv(const double x)
 {
-    if(x < -1 || x > 1)
-        return NAN;
-    if(x == 0)
-        return 0;
+    if(x < -1 || x > 1) return NAN;
+    if(x == -1) return -INFINITY;
+    if(x == +1) return +INFINITY;
+    if(x ==  0) return 0;
     double z;   // first approximation
     if(fabs(x)<=0.7) {
         double x2 = x*x;
@@ -47,7 +55,7 @@ double erfinv(const double x)
             (1 + (1.6370678 * y + 3.5438892) * y);
         if(x<0) z = -z;
     }
-    // improve by Halley iteration (note: erf from <cmath> is not accurate enough!)
+    // improve by Halley iteration
     double f = gsl_sf_erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
     z -= f*fp / (fp*fp - 0.5*f*fpp);
     return z;

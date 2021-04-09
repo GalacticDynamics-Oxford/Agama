@@ -121,6 +121,8 @@ double SpheroidParam::mass() const
 {
     if(beta<=3 && outerCutoffRadius==INFINITY)
         return INFINITY;
+    if(gamma>=3 || alpha <= 0)
+        return NAN;
     return 4*M_PI * densityNorm * pow_3(scaleRadius) * axisRatioY * axisRatioZ *
         ( outerCutoffRadius==INFINITY ?   // have an analytic expression
         math::gamma((beta-3)/alpha) * math::gamma((3-gamma)/alpha) /
@@ -130,6 +132,8 @@ double SpheroidParam::mass() const
 }
 
 double NukerParam::mass() const {
+    if(gamma>=2 || alpha <= 0)
+        return NAN;
     return 2*M_PI * surfaceDensity * pow_2(scaleRadius) * axisRatioY * axisRatioZ *
         ( outerCutoffRadius==INFINITY ?   // have an analytic expression
         math::gamma((beta-2)/alpha) * math::gamma((2-gamma)/alpha) /

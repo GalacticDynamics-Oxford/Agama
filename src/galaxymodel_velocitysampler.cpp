@@ -162,8 +162,10 @@ particles::ParticleArrayCar assignVelocity(
             double Mtotal = dens.totalMass();
             double rmin = getRadiusByMass(dens, Mtotal * MIN_MASS_FRAC);
             double rmax = getRadiusByMass(dens, Mtotal * (1-MIN_MASS_FRAC));
-            if(!isFinite(rmin+rmax))
+            if(!isFinite(Mtotal))
                 throw std::runtime_error("assignVelocity(): density model has infinite mass");
+            if(!isFinite(rmin+rmax))
+                throw std::runtime_error("assignVelocity(): cannot determine min/max grid radii");
             sphDens = potential::DensitySphericalHarmonic::create(dens,
                 /*lmax*/0, /*mmax*/0, /*gridSizeR*/50, rmin, rmax);
             fncDens.reset(new potential::DensityWrapper(*sphDens));

@@ -1404,6 +1404,31 @@ PtrDensity createDensity(
     return result;
 }
 
+// create a density expansion approximating the input density model
+PtrDensity createDensity(
+    const utils::KeyValueMap& kvmap,
+    const BaseDensity& dens,
+    const units::ExternalUnits& converter)
+{
+    AllParam param = parseParam(kvmap, converter);
+    if(param.potentialType == PT_DENS_SPHHARM) {
+        std::vector<double> gridr = math::createExpGrid(param.gridSizeR, param.rmin, param.rmax);
+        std::vector<std::vector<double> > coefs;
+        computeDensityCoefsSph(dens,
+            math::SphHarmIndices(param.lmax, param.mmax, param.symmetryType), gridr, /*output*/coefs);
+        return PtrDensity(new DensitySphericalHarmonic(gridr, coefs));
+    } else if(param.potentialType == PT_DENS_CYLGRID) {
+        std::vector<double>
+            gridR = math::createNonuniformGrid(param.gridSizeR, param.rmin, param.rmax, true),
+            gridz = math::createNonuniformGrid(param.gridSizez, param.zmin, param.zmax, true);
+        std::vector< math::Matrix<double> > coefs;
+        computeDensityCoefsCyl(dens, param.mmax, gridR, gridz, /*output*/coefs);
+        return PtrDensity(new potential::DensityAzimuthalHarmonic(gridR, gridz, coefs));
+    } else
+        throw std::invalid_argument(
+            "createDensity: type must specify one of the density expansion classes");
+}
+
 // universal routine for creating a potential from several components
 PtrPotential createPotential(
     const std::vector<utils::KeyValueMap>& kvmap,

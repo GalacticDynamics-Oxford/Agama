@@ -248,6 +248,14 @@ template<> struct PosT<ProlMod>{
 };
 typedef struct PosT<ProlMod> PosProlMod;
 
+/** projected position (two Cartesian coordinates on the sky plane) */
+struct PosProj{
+    double X, Y;
+    PosProj() {};
+    PosProj(double _X, double _Y) : X(_X), Y(_Y) {};
+    explicit PosProj(const PosCar& pos) : X(pos.x), Y(pos.y) {};  // discard the z component
+};
+
 ///@}
 /// \name   Primitive data types: velocity in different coordinate systems
 ///@{
@@ -925,7 +933,8 @@ template<typename CoordT> double Lz(const PosVelT<CoordT> &p);
 /// \section 3d rotations
 ///@{
 
-/** construct a 3d rotation matrix specified by Euler angles.
+/** 3d rotational transformation between two Cartesian coordinate systems with the same origin,
+    parametrized by three Euler angles.
     Let (x,y,z) be the source reference frame, and (X,Y,Z) be the rotated target frame.
     The first rotation by angle alpha about the z axis creates an intermediate reference frame
     (x',y',z'), where the axis x' points along the line of nodes of the overall transformation.
@@ -946,19 +955,117 @@ template<typename CoordT> double Lz(const PosVelT<CoordT> &p);
     and the coordinates of this point change accordingly (passive rotation).
     The inverse rotation is produced by a triplet of angles (-gamma,-beta,-alpha),
     and its rotation matrix is simply the transpose of the forward rotation matrix.
-    \param[in]  alpha, beta, gamma are three Euler rotation angles.
-    \param[out] mat  will contain 9 elements of a 3x3 rotation matrix in row-major order.
 */
-void makeRotationMatrix(double alpha, double beta, double gamma, double mat[9]);
+class Orientation {
+public:
+    double mat[9];  ///< the rotation matrix R
 
-/** transform a 3d vector in cartesian coordinates using the rotation matrix */
-inline void transformVector(const double mat[9], const double vec[3], double result[3])
-{
-    result[0] = mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2];
-    result[1] = mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2];
-    result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
-}
+    /** Construct the rotation matrix: the Euler angles alpha, beta, gamma describe the sequence
+        of elementary rotations needed to transform the coordinates from the 'original' system
+        to the 'rotated' one (in particular, beta is the inclination angle).
+        When all three angles are zero (default initialization), the two systems coincide. */
+    explicit Orientation(double alpha=0, double beta=0, double gamma=0);
 
-///@}    
+    /** check if the orientation is face-on (i.e. inclination is zero or pi, or |cos(beta)|==1) */
+    bool isFaceOn() const { return mat[8]==1 || mat[8]==-1; }
+
+    /** transform the coordinates of a point from the 'original' to the 'rotated' system
+        (the point remains geometrically fixed, only the reference frame changes) */
+    void toRotated(const double vec[3], double result[3]) const
+    {
+        result[0] = mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2];
+        result[1] = mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2];
+        result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
+    }
+
+    /** transform the coordinates of a point from the 'rotated' to the 'original' reference frame */
+    void fromRotated(const double vec[3], double result[3]) const
+    {
+        // the inverse transformation uses the transposed rotation matrix
+        result[0] = mat[0] * vec[0] + mat[3] * vec[1] + mat[6] * vec[2];
+        result[1] = mat[1] * vec[0] + mat[4] * vec[1] + mat[7] * vec[2];
+        result[2] = mat[2] * vec[0] + mat[5] * vec[1] + mat[8] * vec[2];
+    }
+
+    /** transform the position in cartesian coordinates from the 'original' to the 'rotated' frame
+        (convenience overload for PosCar) */
+    PosCar toRotated(const PosCar& pos) const
+    {
+        double vec[3] = {pos.x, pos.y, pos.z}, result[3];
+        toRotated(vec, result);
+        return coord::PosCar(result[0], result[1], result[2]);
+    }
+    
+    /** transform the position in cartesian coordinates from the 'rotated' to the 'original' frame
+        (convenience overload for PosCar) */
+    PosCar fromRotated(const PosCar& pos) const
+    {
+        double vec[3] = {pos.x, pos.y, pos.z}, result[3];
+        fromRotated(vec, result);
+        return coord::PosCar(result[0], result[1], result[2]);
+    }
+    
+    /** transform the velocity in cartesian coordinates from the 'original' to the 'rotated' frame
+        (convenience overload for VelCar) */
+    VelCar toRotated(const VelCar& vel) const
+    {
+        double vec[3] = {vel.vx, vel.vy, vel.vz}, result[3];
+        toRotated(vec, result);
+        return coord::VelCar(result[0], result[1], result[2]);
+    }
+    
+    /** transform the velocity in cartesian coordinates from the 'rotated' to the 'original' frame
+        (convenience overload for VelCar) */
+    VelCar fromRotated(const VelCar& vel) const
+    {
+        double vec[3] = {vel.vx, vel.vy, vel.vz}, result[3];
+        fromRotated(vec, result);
+        return coord::VelCar(result[0], result[1], result[2]);
+    }
+
+    /** transform the second moment of velocity in cartesian coordinates
+        from the 'original' to the 'rotated' frame */
+    Vel2Car toRotated(const Vel2Car& vel2) const
+    {
+        double
+        vel2x[3] = {vel2.vx2,  vel2.vxvy, vel2.vxvz}, res2x[3],
+        vel2y[3] = {vel2.vxvy, vel2.vy2,  vel2.vyvz}, res2y[3],
+        vel2z[3] = {vel2.vxvz, vel2.vyvz, vel2.vz2 }, res2z[3];
+        toRotated(vel2x, res2x);
+        toRotated(vel2y, res2y);
+        toRotated(vel2z, res2z);
+        Vel2Car result;
+        result.vx2  = mat[0] * res2x[0] + mat[1] * res2y[0] + mat[2] * res2z[0];
+        result.vy2  = mat[3] * res2x[1] + mat[4] * res2y[1] + mat[5] * res2z[1];
+        result.vz2  = mat[6] * res2x[2] + mat[7] * res2y[2] + mat[8] * res2z[2];
+        result.vxvy = mat[3] * res2x[0] + mat[4] * res2y[0] + mat[5] * res2z[0];
+        result.vyvz = mat[6] * res2x[1] + mat[7] * res2y[1] + mat[8] * res2z[1];
+        result.vxvz = mat[0] * res2x[2] + mat[1] * res2y[2] + mat[2] * res2z[2];
+        return result;
+    }
+        
+    /** transform the second moment of velocity in cartesian coordinates
+        from the 'rotated' to the 'original' frame */
+    Vel2Car fromRotated(const Vel2Car& vel2) const
+    {
+        double
+        vel2x[3] = {vel2.vx2,  vel2.vxvy, vel2.vxvz}, res2x[3],
+        vel2y[3] = {vel2.vxvy, vel2.vy2,  vel2.vyvz}, res2y[3],
+        vel2z[3] = {vel2.vxvz, vel2.vyvz, vel2.vz2 }, res2z[3];
+        fromRotated(vel2x, res2x);
+        fromRotated(vel2y, res2y);
+        fromRotated(vel2z, res2z);
+        Vel2Car result;
+        result.vx2  = mat[0] * res2x[0] + mat[3] * res2y[0] + mat[6] * res2z[0];
+        result.vy2  = mat[1] * res2x[1] + mat[4] * res2y[1] + mat[7] * res2z[1];
+        result.vz2  = mat[2] * res2x[2] + mat[5] * res2y[2] + mat[8] * res2z[2];
+        result.vxvy = mat[1] * res2x[0] + mat[4] * res2y[0] + mat[7] * res2z[0];
+        result.vyvz = mat[2] * res2x[1] + mat[5] * res2y[1] + mat[8] * res2z[1];
+        result.vxvz = mat[0] * res2x[2] + mat[3] * res2y[2] + mat[6] * res2z[2];
+        return result;
+    }
+};
+
+///@}
 
 }  // namespace coord
