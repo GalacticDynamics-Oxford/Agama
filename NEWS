@@ -102,6 +102,10 @@ Some of this functionality is not yet ported to Agama.
 -----------
 API Changes
 
+May 2021:
+[C++]  interface for orbit integration is redesigned to decouple the internal representation
+from the input/output, which is now always served in Cartesian coordinates
+
 April 2021:
 [C++, Python]  interface for computing DF moments has been reorganized to deal with arbitrary
 orientations and unified the treatment of projection along the line of sight.

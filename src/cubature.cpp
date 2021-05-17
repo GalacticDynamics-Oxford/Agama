@@ -1008,7 +1008,8 @@ static int rulecubature(rule *r, unsigned fdim,
      numEval += r->num_points;
      
      while (numEval < maxEval || !maxEval) {
-	  if (converged(fdim, regions.ee, reqAbsError, reqRelError, norm))
+	  if (converged(fdim, regions.ee, reqAbsError, reqRelError, norm) &&
+	      numEval > r->num_points)
 	       break;
 
 	  if (parallel) { /* maximize potential parallelism */

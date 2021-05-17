@@ -7,17 +7,15 @@
 
 namespace raga {
 
-orbit::StepResult RuntimePotential::processTimestep(
-    const math::BaseOdeSolver& sol, const double tbegin, const double tend, double[])
+bool RuntimePotential::processTimestep(double tbegin, double tend)
 {
     double t;
     while(t = outputTimestep * (outputIter - outputFirst + 1),
         t>tbegin && t<=tend && outputIter != outputLast)
     {
-        (outputIter++)->first = toPosCyl(
-            coord::PosCar(sol.getSol(t, 0), sol.getSol(t, 1), sol.getSol(t, 2)));
+        (outputIter++)->first = toPosCyl(orbint.getSol(t));
     }
-    return orbit::SR_CONTINUE;
+    return true;
 }
 
 
@@ -34,12 +32,13 @@ RagaTaskPotential::RagaTaskPotential(
     utils::msg(utils::VL_DEBUG, "RagaTaskPotential", "Potential update is enabled");
 }
 
-orbit::PtrRuntimeFnc RagaTaskPotential::createRuntimeFnc(unsigned int index)
+void RagaTaskPotential::createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int index)
 {
-    return orbit::PtrRuntimeFnc(new RuntimePotential(
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new RuntimePotential(
+        orbint,
         episodeLength / params.numSamplesPerEpisode,
         particleTrajectories.data.begin() + params.numSamplesPerEpisode * index,
-        particleTrajectories.data.begin() + params.numSamplesPerEpisode * (index+1) ));
+        particleTrajectories.data.begin() + params.numSamplesPerEpisode * (index+1) )));
 }
 
 void RagaTaskPotential::startEpisode(double timeStart, double length)

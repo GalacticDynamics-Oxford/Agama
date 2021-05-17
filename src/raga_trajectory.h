@@ -7,8 +7,9 @@
     as N-body snapshots.
 
     To simplify matters, the output is only possible between episodes,
-    hence the corresponding runtime function does nothing (the positions/velocities
-    of particles are taken from the global `particles' array at the end of an episode).
+    hence there is no corresponding runtime function (it would do nothing anyway),
+    and the positions/velocities of particles are taken from the global `particles' array
+    at the end of an episode.
     It may be possible to store the output more frequently, recording trajectories of particles
     during the episode, hence the name of the task; however, this is considered impractical.
 */
@@ -18,14 +19,6 @@
 #include <string>
 
 namespace raga {
-
-/** Does nothing */
-class RuntimeTrajectory: public orbit::BaseRuntimeFnc {
-public:
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver&, const double, const double, double[])
-        { return orbit::SR_CONTINUE; }
-};
 
 /** Global parameters of this task */
 struct ParamsTrajectory {
@@ -54,7 +47,7 @@ public:
     RagaTaskTrajectory(
         const ParamsTrajectory& params,
         const particles::ParticleArrayAux& particles);
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator&, unsigned int) {}  // does nothing
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "SnapshotOutput "; }

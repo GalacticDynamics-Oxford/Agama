@@ -399,9 +399,9 @@ template<> PosVelCar toPosVel(const PosVelSph& p) {
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
-    const double R=p.r*sintheta, vmer=p.vr*sintheta + p.vtheta*costheta;
-    const double vx=vmer*cosphi - p.vphi*sinphi;
-    const double vy=vmer*sinphi + p.vphi*cosphi;
+    const double R=p.r*sintheta, vR=p.vr*sintheta + p.vtheta*costheta;
+    const double vx=vR*cosphi - p.vphi*sinphi;
+    const double vy=vR*sinphi + p.vphi*cosphi;
     const double vz=p.vr*costheta - p.vtheta*sintheta;
     return PosVelCar(R*cosphi, R*sinphi, p.r*costheta, vx, vy, vz); 
 }

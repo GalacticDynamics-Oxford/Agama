@@ -13,44 +13,37 @@
 
 namespace raga {
 
-orbit::StepResult RuntimeRelaxation::processTimestep(
-    const math::BaseOdeSolver& sol, const double tbegin, const double tend, double currentState[6])
+bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
 {
     // 1. collect samples of phase volume corresponding to particle energy
     // taken at regular intervals of time
     double timestep = tend-tbegin, tsamp;
-    double data[6];
     while(tsamp = outputTimestep * (outputIter - outputFirst + 1),
         tsamp>tbegin && tsamp<=tend && outputIter != outputLast)
     {
-        for(int d=0; d<6; d++)
-            data[d] = sol.getSol(tsamp, d);
-        double E = totalEnergy(potentialSph, coord::PosVelCar(data));
+        double E = totalEnergy(potentialSph, orbint.getSol(tsamp));
         *(outputIter++) = relaxationModel.phasevol(E);
     }
 
     // 2. simulate the two-body relaxation
 
-    // 2a. obtain the position, velocity and potential at the middle of the timestep
-    tsamp = (tbegin+tend) * 0.5;
-    for(int d=0; d<6; d++)
-        data[d] = sol.getSol(tsamp, d);
-    coord::PosVelCar posvel(data);
+    // 2a. obtain the position, velocity and potential at the end of the timestep
+    coord::PosVelCar posvel = orbint.getSol(tend);
     double vel = sqrt(pow_2(posvel.vx) + pow_2(posvel.vy) + pow_2(posvel.vz));
     if(vel==0)  // can't do anything meaningful for a non-moving particle
-        return orbit::SR_CONTINUE;
+        return true;
     double Phi = potentialSph.value(posvel);
     double E   = Phi + 0.5 * pow_2(vel);
 
-    // 2b. compute the diffusion coefs at the middle of the timestep
+    // 2b. compute the diffusion coefs at the end of the timestep
     double dvpar, dv2par, dv2per;
     relaxationModel.evalLocal(Phi, E, mass, dvpar, dv2par, dv2per);
     if(!isFinite(dvpar+dv2par+dv2per) || dv2par<0 || dv2per<0) {
-        utils::msg(utils::VL_WARNING, FUNCNAME,
-            "Cannot compute diffusion coefficients at t="+utils::toString(tsamp)+
-            ", r="+utils::toString(sqrt(pow_2(data[0])+pow_2(data[1])+pow_2(data[2])))+
+        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation",
+            "Cannot compute diffusion coefficients at t="+utils::toString(tend)+
+            ", r="+utils::toString(sqrt(pow_2(posvel.x)+pow_2(posvel.y)+pow_2(posvel.z)))+
             ", Phi="+utils::toString(Phi,10)+", E="+utils::toString(E,10));
-        return orbit::SR_CONTINUE;
+        return true;
     }
 
     // 2c. scale the diffusion coefs
@@ -59,7 +52,7 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
     dv2per *= coulombLog;
     double dEdt = dvpar + 0.5 * (dv2par + dv2per);
     if(dEdt * timestep < -0.5 * pow_2(vel))
-        utils::msg(utils::VL_WARNING, FUNCNAME,
+        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation",
             "Energy perturbation is larger than its value: "
             "Phi="+utils::toString(Phi)+", v="+utils::toString(vel)+
             "; dt="+utils::toString(timestep)+", dE="+utils::toString(dEdt * timestep) );
@@ -67,6 +60,8 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
     // 2d. assign the random (gaussian) velocity perturbation
     // initialize the PRNG state vector, using the current position-velocity
     // as the source of "randomness", with an unique seed for each orbit
+    double data[6];
+    posvel.unpack_to(data);
     math::PRNGState state = math::hash(data, 6, seed);
     double rand1, rand2;  // two normally distributed numbers
     math::getNormalRandomNumbers(/*output*/ rand1, rand2, /*PRNGState*/ &state);
@@ -77,15 +72,18 @@ orbit::StepResult RuntimeRelaxation::processTimestep(
     double uper[3];  // unit vector perpendicular to velocity
     double vmag =    // magnitude of the current velocity vector
         math::getRandomPerpendicularVector(
-        /*input:  3 components of velocity*/ currentState+3,
+        /*input:  3 components of velocity*/ data+3,
         /*output: a random unit vector*/ uper,
         /*input/output: PRNG seed*/ &state);
     for(int d=0; d<3; d++)
-        currentState[d+3] +=
+        data[d+3] +=
             // first term is the component of unit vector parallel to v: v[d]/|v|
-            (currentState[d+3] / vmag) * deltavpar +
+            (data[d+3] / vmag) * deltavpar +
             uper[d] * deltavper;
-    return orbit::SR_REINIT;
+
+    // 2f. update the internal state of the orbit integrator with the new velocity
+    orbint.init(coord::PosVelCar(data));
+    return true;  // integration may continue
 }
 
 //----- RagaTaskRelaxation -----//
@@ -281,9 +279,10 @@ RagaTaskRelaxation::RagaTaskRelaxation(
         "Initialized with ln Lambda="+utils::toString(params.coulombLog));
 }
 
-orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
+void RagaTaskRelaxation::createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int index)
 {
-    return orbit::PtrRuntimeFnc(new RuntimeRelaxation(
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new RuntimeRelaxation(
+        orbint,
         *ptrPotSph,
         *ptrRelaxationModel,
         params.coulombLog,
@@ -294,7 +293,7 @@ orbit::PtrRuntimeFnc RagaTaskRelaxation::createRuntimeFnc(unsigned int index)
         particle_h.begin() + params.numSamplesPerEpisode * index,
         particle_h.begin() + params.numSamplesPerEpisode * (index+1),
         index  // seed for the orbit-local PRNG
-    ));
+    )));
 }
 
 void RagaTaskRelaxation::startEpisode(double timeStart, double length)

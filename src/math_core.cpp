@@ -962,21 +962,23 @@ void prepareIntegrationTableGL(double x1, double x2, int N, double* nodes, doubl
 // ------- multidimensional integration ------- //
 namespace {
 #ifdef HAVE_CUBA
+#warning "Cuba is not recommended, use the built-in Cubature library instead"
 // wrapper for the Cuba library
 struct CubaParams {
     const IFunctionNdim& F; ///< the original function
+    int numVars, numValues; ///< number of input and output dimensions
     const double* xlower;   ///< lower limits of integration
     const double* xupper;   ///< upper limits of integration
     std::string error;      ///< store error message in case of exception
     CubaParams(const IFunctionNdim& _F, const double* _xlower, const double* _xupper) :
-        F(_F), xlower(_xlower), xupper(_xupper) {}
+        F(_F), numVars(F.numVars()), numValues(F.numValues()), xlower(_xlower), xupper(_xupper) {}
 };
 
 int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
     const int *fdim, double fval[], void *v_param, const int *npoints)
 {
     CubaParams* param = static_cast<CubaParams*>(v_param);
-    assert(*ndim == (int)param->F.numVars() && *fdim == (int)param->F.numValues());
+    assert(*ndim == param->numVars && *fdim == param->numValues);
     try {
         // un-scale the input point(s) from [0:1]^N to the original range:
         // allocate a temporary array for un-scaled values on the stack (no need to free it)
@@ -1010,17 +1012,18 @@ int integrandNdimWrapperCuba(const int *ndim, const double xscaled[],
 // wrapper for the Cubature library
 struct CubatureParams {
     const IFunctionNdim& F; ///< the original function
+    int numVars, numValues; ///< number of input and output dimensions
     int numEval;            ///< count the number of function evaluations
     std::string error;      ///< store error message in case of exception
     explicit CubatureParams(const IFunctionNdim& _F) :
-        F(_F), numEval(0) {}
+        F(_F), numVars(F.numVars()), numValues(F.numValues()), numEval(0) {}
 };
 
 int integrandNdimWrapperCubature(unsigned int ndim, unsigned int npoints, const double *xval,
     void *v_param, unsigned int fdim, double *fval)
 {
     CubatureParams* param = static_cast<CubatureParams*>(v_param);
-    assert(ndim == param->F.numVars() && fdim == param->F.numValues());
+    assert((int)ndim == param->numVars && (int)fdim == param->numValues);
     try {
         param->F.evalmany(npoints, xval, fval);
         param->numEval += npoints;
@@ -1052,6 +1055,10 @@ void integrateNdim(const IFunctionNdim& F, const double xlower[], const double x
 {
     const unsigned int numVars = F.numVars();
     const unsigned int numValues = F.numValues();
+    if(numVars==0)
+        throw std::runtime_error("integrateNdim: number of dimensions must be positive");
+    if(numVars>10)
+        throw std::runtime_error("integrateNdim: more than 10 dimensions is not supported");
     const double absToler = 0;  // the only possible way to stay invariant under scaling transformations
     // storage for errors: in the case that user doesn't need them, allocate a temp.array on the stack,
     // which will be automatically freed on exit (NOTE: this assumes that numValues is not too large!)

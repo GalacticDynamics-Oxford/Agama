@@ -85,6 +85,7 @@ public:
     const double I3;            ///< third integral
     AxisymFunctionBase(const coord::PosVelProlSph& _point, double _E, double _Lz, double _I3) :
         point(_point), E(_E), Lz(_Lz), I3(_I3) {};
+    virtual unsigned int numDerivs() const { return 2; }
 };
 
 // ------ SPECIALIZED functions for Staeckel action finder -------
@@ -103,7 +104,6 @@ public:
         the argument tau is replaced by tau+gamma >= 0. */
     virtual void evalDeriv(const double tauplusgamma, 
         double* value=0, double* deriv=0, double* deriv2=0) const;
-    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** compute integrals of motion in the Staeckel potential of an oblate perfect ellipsoid, 
@@ -167,7 +167,6 @@ public:
         For numerical convenience, tau is replaced by x=tau+gamma. */
     virtual void evalDeriv(const double tauplusgamma, 
         double* value=0, double* deriv=0, double* deriv2=0) const;
-    virtual unsigned int numDerivs() const { return 2; }
 };
 
 /** compute true (E, Lz) and approximate (Ilambda, Inu) integrals of motion in an arbitrary 
@@ -229,7 +228,7 @@ void AxisymFunctionFudge::evalDeriv(const double tau,
     poten.eval(posCyl, &Phi, der || der2? &gradCyl : NULL, der2? &hessCyl : NULL);
     const double tauminusdelta = tau - point.coordsys.Delta2;
     if(val)
-        *val = (tauminusdelta!=0 ? (E * tau- I - Phi * mult) * tauminusdelta : 0) - pow_2(Lz)/2 * tau;
+        *val = (tauminusdelta!=0 ? (E * tau - I - Phi * mult) * tauminusdelta : 0) - pow_2(Lz)/2 * tau;
     if(der || der2) {
         coord::GradProlSph gradProl = coord::toGrad<coord::Cyl, coord::ProlSph> (gradCyl, coordDeriv);
         double dPhidtau = (tau >= point.coordsys.Delta2) ? gradProl.dlambda : gradProl.dnu;
@@ -264,7 +263,11 @@ public:
     enum { nplus1, nminus1 } n;         ///< power of p: +1 or -1
     enum { azero, aminus1, aminus2 } a; ///< power of (tau-delta): 0, -1, -2
     enum { czero, cminus1 } c;          ///< power of tau: 0 or -1
-    explicit AxisymIntegrand(const AxisymFunctionBase& d) : fnc(d) {};
+    double nu_max, dfdnu_at_nu_max;     ///< upper limit for nu and the fnc derivative at this point
+    explicit AxisymIntegrand(const AxisymFunctionBase& d, double _nu_max) : fnc(d), nu_max(_nu_max)
+    {
+        fnc.evalDeriv(nu_max, NULL, &dfdnu_at_nu_max);
+    }
 
     /** integrand for the expressions for actions and their derivatives 
         (e.g.Sanders 2012, eqs. A1, A4-A12).  It uses the auxiliary function to compute momentum,
@@ -274,8 +277,7 @@ public:
         assert(tau>=0);
         const coord::ProlSph& CS = fnc.point.coordsys;
         const double tauminusdelta = tau - CS.Delta2;
-        const double p2 = fnc(tau) / 
-            (2*pow_2(tauminusdelta)*tau);
+        const double ft = fnc(tau), p2 = ft / (2*pow_2(tauminusdelta)*tau);
         if(p2<0)
             return 0;
         double result = sqrt(p2);
@@ -283,8 +285,12 @@ public:
             result = 1/result;
         if(a==aminus1)
             result /= tauminusdelta;
-        else if(a==aminus2)
+        else if(a==aminus2) {
             result /= pow_2(tauminusdelta);
+            if(tauminusdelta<0)
+                // subtract the singular component that will be integrated analytically and added later
+                result += sqrt(2 * nu_max / dfdnu_at_nu_max / (tau-nu_max)) / tauminusdelta;
+        }
         if(c==cminus1)
             result /= tau;
         if(!isFinite(result))
@@ -485,7 +491,7 @@ AxisymActionDerivatives computeActionDerivatives(
     const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
 {
     AxisymActionDerivatives der;
-    AxisymIntegrand integrand(fnc);
+    AxisymIntegrand integrand(fnc, lim.nu_max);
     math::ScaledIntegrand<math::ScalingCub>
         transf_l(math::ScalingCub(lim.lambda_min, lim.lambda_max), integrand),
         transf_n(math::ScalingCub(lim.nu_min,     lim.nu_max),     integrand);
@@ -510,7 +516,12 @@ AxisymActionDerivatives computeActionDerivatives(
     der.dJrdLz = -fnc.Lz * (lim.lambda_min==lim.lambda_max ? 
         integrand.limitingIntegralValue(lim.lambda_min) :
         math::integrateGL(transf_l, 0, 1, lim.integrOrder) ) / (4*M_PI);
-    der.dJzdLz = -fnc.Lz * math::integrateGL(transf_n, 0, 1, lim.integrOrder) / (2*M_PI);
+    // the following integral is split into the analytically computed singular part
+    // and the remaining regular part integrated numerically
+    double delta_minus_nu_max = fnc.point.coordsys.Delta2 - lim.nu_max;
+    double singpart = 2 * sqrt(-2 * lim.nu_max / integrand.dfdnu_at_nu_max / delta_minus_nu_max ) *
+        atan(sqrt(lim.nu_max / delta_minus_nu_max));
+    der.dJzdLz = -fnc.Lz * (math::integrateGL(transf_n, 0, 1, lim.integrOrder) + singpart) / (2*M_PI);
     return der;
 }
 
@@ -554,7 +565,7 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     const double signldot = fnc.point.lambdadot >= 0 ? +1 : -1;
     const double signndot = fnc.point.nudot * fnc.point.nu >= 0 ? +1 : -1;
     AxisymGenFuncDerivatives der;
-    AxisymIntegrand integrand(fnc);
+    AxisymIntegrand integrand(fnc, lim.nu_max);
     math::ScaledIntegrand<math::ScalingCub>
         transf_l(math::ScalingCub(lim.lambda_min, lim.lambda_max), integrand),
         transf_n(math::ScalingCub(lim.nu_min,     lim.nu_max),     integrand);
@@ -576,9 +587,15 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     // derivatives w.r.t. Lz
     integrand.a = AxisymIntegrand::aminus2;
     integrand.c = AxisymIntegrand::czero;
+    // the integral over nu is split into the analytically computed singular part
+    // and the remaining regular part integrated numerically
+    double delta_minus_nu_max = fnc.point.coordsys.Delta2 - lim.nu_max;
+    double singpart = 2 * sqrt(-2 * lim.nu_max / integrand.dfdnu_at_nu_max / delta_minus_nu_max ) *
+        (atan(sqrt( lim.nu_max / delta_minus_nu_max)) -
+         atan(sqrt((lim.nu_max - fabs(fnc.point.nu)) / delta_minus_nu_max)));
     der.dSdLz = fnc.Lz==0 ? 0 : fnc.point.phi +
-        signldot * -fnc.Lz * math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
-      + signndot * -fnc.Lz * math::integrateGL(transf_n, 0, yn, lim.integrOrder) / 4;
+        signldot * -fnc.Lz *  math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
+      + signndot * -fnc.Lz * (math::integrateGL(transf_n, 0, yn, lim.integrOrder) + singpart) / 4;
     return der;
 }
 
@@ -587,7 +604,7 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
 Actions computeActions(const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
 {
     Actions acts;
-    AxisymIntegrand integrand(fnc);
+    AxisymIntegrand integrand(fnc, lim.nu_max);
     math::ScaledIntegrand<math::ScalingCub>
         transf_l(math::ScalingCub(lim.lambda_min, lim.lambda_max), integrand),
         transf_n(math::ScalingCub(lim.nu_min,     lim.nu_max),     integrand);

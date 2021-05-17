@@ -286,24 +286,24 @@ double digamma(const int x) {
     CALL_FUNCTION_OR_NAN( gsl_sf_psi_int(x) )
 }
 
-double ellintK(const double k, bool accurate) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Kcomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
+double ellintK(const double k) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Kcomp(k, GSL_PREC_DOUBLE) )
 }
 
-double ellintE(const double k, bool accurate) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Ecomp(k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
+double ellintE(const double k) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_Ecomp(k, GSL_PREC_DOUBLE) )
 }
 
-double ellintF(const double phi, const double k, bool accurate) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_F(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
+double ellintF(const double phi, const double k) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_F(phi, k, GSL_PREC_DOUBLE) )
 }
 
-double ellintE(const double phi, const double k, bool accurate) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_E(phi, k, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
+double ellintE(const double phi, const double k) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_E(phi, k, GSL_PREC_DOUBLE) )
 }
 
-double ellintP(const double phi, const double k, const double n, bool accurate) {
-    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_P(phi, k, n, accurate ? GSL_PREC_DOUBLE : GSL_PREC_SINGLE) )
+double ellintP(const double phi, const double k, const double n) {
+    CALL_FUNCTION_OR_NAN( gsl_sf_ellint_P(phi, k, n, GSL_PREC_DOUBLE) )
 }
 
 double besselJ(const int n, const double x) {

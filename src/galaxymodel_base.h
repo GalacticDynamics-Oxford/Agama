@@ -320,7 +320,7 @@ void computeProjection(
     const math::IFunctionNdim& spatialSelection,
     const double Xlim[2],
     const double Ylim[2],
-    const double transformMatrix[9],
+    const coord::Orientation& orientation,
     double* result,
     double reqRelError=1e-3,
     int maxNumEval=1e5);

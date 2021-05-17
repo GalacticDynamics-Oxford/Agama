@@ -50,13 +50,13 @@ void Ferrers::evalCar(const coord::PosCar &pos,
     double X2 = pow_2(pos.x), Y2 = pow_2(pos.y), Z2 = pow_2(pos.z);
     double m2 = X2/(a*a) + Y2/(b*b) + Z2/(c*c);
     double r2 = X2+Y2+Z2;
+    if(r2 == INFINITY) {
+        if(potential) *potential = 0;
+        if(grad) grad->dx = grad->dy = grad->dz = 0;
+        if(hess) hess->dx2 = hess->dy2 = hess->dz2 = hess->dxdy = hess->dydz = hess->dxdz = 0;
+        return;
+    }
     if(r2 > pow_2(10*a)) {
-        if(r2 == INFINITY) {
-            if(potential) *potential = 0;
-            if(grad) grad->dx = grad->dy = grad->dz = 0;
-            if(hess) hess->dx2 = hess->dy2 = hess->dz2 = hess->dxdy = hess->dydz = hess->dxdz = 0;
-            return;
-        }
         // use spherical-harmonic expansion up to l=2 beyond 10 scale radii,
         // to speed up (and increase the accuracy)
         double Moverr = (32*M_PI/105) * rho0 * a*b*c / sqrt(r2);

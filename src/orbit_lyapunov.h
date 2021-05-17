@@ -1,7 +1,7 @@
 /** \file    orbit_lyapunov.h
     \brief   Analysis of chaotic properties of orbits using the Lyapunov exponent
     \author  Eugene Vasiliev
-    \date    2009-2018
+    \date    2009-2021
 */
 #pragma once
 #include "orbit.h"
@@ -43,37 +43,23 @@ double calcLyapunovExponent(const std::vector<double>& logDeviationVector,
     Hence the evolution of the deviation vector is described by a linear ODE with time-dependent
     coefficients, which are themselves functions of the original orbit.
 
-    We have two alternative approaches for numerical solution of the deviation equation:
+    There are two alternative approaches for numerical solution of the deviation equation:
     - incorporate it together with the equations for the orbit itself into one ODE system with
     12 variables, and evolve it using the standard ODE solver;
-    - follow the 6d orbit itself with the standard ODE solver, and use another specialized ODE solver
-    for the variational equation, feeding it with the potential derivatives computed along the original
-    orbit.
+    - follow the 6d orbit itself with the standard ODE solver, and use another specialized
+    ODE solver for the variational equation, feeding it with the potential derivatives computed
+    along the original orbit.
     The first approach is straightforward, but has a disadvantage that the original ODE system
     is modified (hence orbits computed with or without the variational equation will be different).
     In particular, it typically leads to shorter timesteps and hence longer integration time.
-    The second approach, by contrast, is transparent for the orbit integrator, but requires a few more
-    potential evaluations per timestep to compute the Hessian; in the present implementation,
-    it transforms the 6d variational equation into three second-order ODEs, but this is not possible
-    in a rotating frame.
-    Both approaches are implemented in this class, the choice is controlled by the template parameter.
-    When using the first approach, the orbit integrator must also be changed to `OrbitIntegratorVarEq`
-    or a similar one providing the variational equation for the second half of the 12d solution vector.
-
-    \tparam  UseInternalVarEqSolver determines the approach for dealing with variational equation:
-    if false, it must be solved by the orbit integrator (providing a 12d solution vector),
-    if true,  an internal ODE integrator for the var.eq. is used with any orbit integrator.
+    The second approach, by contrast, is transparent for the orbit integrator, but requires
+    a few more potential evaluations per timestep to compute the Hessian.
+    This class implements the second approach, with the 6d variational equation transformed into
+    three coupled second-order linear ODEs with variable coefficients.
 */
-template<bool UseInternalVarEqSolver>
 class RuntimeLyapunov: public BaseRuntimeFnc, public math::IOde2System {
     /// the internal solver for the variational equation (different from the ODE solver for the orbit)
     math::Ode2SolverGL4<3> varEqSolver;  ///< - use the 8th-order method with 4 points per timestep
-
-    /// the ODE solver for the orbit, providing the position as a function of time
-    const math::BaseOdeSolver* orbitSolver;
-
-    /// the potential in which the orbit is computed (its Hessian is used in the variational equation)
-    const potential::BasePotential& potential;
 
     /// time interval between recorded samples of the log-magnitude of the deviation vector
     const double samplingInterval;
@@ -101,18 +87,18 @@ class RuntimeLyapunov: public BaseRuntimeFnc, public math::IOde2System {
 
 public:
     /** construct the runtime function:
-        \param[in]  potential  is the instance of potential (same as used in the orbit integration);
+        \param[in]  orbint  is the orbit integrator that this function is attached to.
         \param[in]  samplingInterval  determines the frequency of recording the magnitude
-        of the deviation vector (should be ~ 0.1 times the orbital period);
+        of the deviation vector (should be ~ 0.1 times the orbital period).
         \param[in,out] outputLyapunovExponent  is the reference to an external variable that will
         store the estimated largest Lyapunov exponent when the orbit integration is finished and
-        this object is destroyed;
+        this object is destroyed.
         \param[in,out] outputLogDeviationVector  is the optional pointer to an external variable
         that will store the logarithm of the magnitude of the recorded deviation vector, sampled
-        at equal intervals; if not provided, this information is stored and used internally and
-        is not accessible from outside.
+        at equal intervals; if not provided, this information will be stored and used internally
+        and hence not accessible from outside.
     */
-    RuntimeLyapunov(const potential::BasePotential& potential, double samplingInterval,
+    RuntimeLyapunov(BaseOrbitIntegrator& orbint, double samplingInterval,
         double& outputLyapunovExponent, std::vector<double>* outputLogDeviationVector = NULL);
 
     /** estimate the Lyapunov exponent from the data stored during orbit integration,
@@ -121,45 +107,14 @@ public:
         outputLyapunovExponent = calcLyapunovExponent(logDeviationVector, samplingInterval, orbitalPeriod);
     }
 
-    /** follow the evolution of the deviation vector during one timestep and record its magnitude:
-        if UseInternalVarEqSolver = true, this evolution is performed by this routine,
-        otherwise it was done by the orbit integrator, and this routine only occasionally rescales
-        the dev.vector to avoid overflows (returning SR_REINIT), otherwise returns SR_CONTINUE as usual. */
-    virtual StepResult processTimestep(
-        const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
+    /** follow the evolution of the deviation vector during one timestep and record its magnitude */
+    virtual bool processTimestep(double tbegin, double tend);
 
     /// implements the IOde2System interface (needed for the internal variational equation solver) 
-    virtual void eval(const double t, double mat[]) const;
+    virtual void eval(const double t, double a[], double b[]) const;
+
+    /// size of the deviation vector (3 positions and 3 velocities)
     virtual unsigned int size() const { return 6; }
-};
-
-
-/** The function providing the RHS of the differential equation dX/dt = f(X)
-    for the orbit computed in the given potential, optionally rotating about the z axis
-    with a constant pattern speed Omega, and one deviation vector computed along with the orbit.
-    X is a 12-dimensional vector:
-    first 6 components are the ordinary position and velocity in cartesian coordinates,
-    and the rest are the corresponding components of the deviation vector,
-    which measures the distance between the orbit and its infinitesimally close counterpart.
-    The evolution of the deviation vector is described by the variational equation,
-    which contains second derivatives of the potential computed along the original orbit.
-    This class may be provided to the `orbit::integrate()` routine along with an instance of
-    a RuntimeLyapunov runtime function that analyzes the evolution of the deviation vector.
-*/
-class OrbitIntegratorVarEq: public math::IOdeSystem {
-    /// gravitational potential in which the orbit is computed
-    const potential::BasePotential& potential;
-    /// angular frequency (pattern speed) of the rotating frame
-    const double Omega;
-public:
-    OrbitIntegratorVarEq(const potential::BasePotential& _potential, double _Omega=0) :
-        potential(_potential), Omega(_Omega) {}
-
-    /// compute the time derivative of the position/velocity vector and the deviation vector at time t
-    virtual void eval(const double t, const double x[], double dxdt[]) const;
-
-    /** The size of the position/velocity vector plus the deviation vector */
-    virtual unsigned int size() const { return 12; }
 };
 
 }  // namespace

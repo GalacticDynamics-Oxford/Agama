@@ -77,9 +77,9 @@ public:
             return;
         }
         double x=sqrt((E+1)/2);
-        double elE=math::ellintE(x, true);
-        double elK=math::ellintK(x, true);
-        double elP=math::ellintP(M_PI/2, x, -1-E, true);
+        double elE=math::ellintE(x);
+        double elK=math::ellintK(x);
+        double elP=math::ellintP(M_PI/2, x, -1-E);
         if(h)
             *h = 4*M_PI*M_PI/(9*E) *  ( elK * (3-34*E-8*E*E) + elE * (16*E*E-6) - elP * (36*E*E+3) );
         if(g)

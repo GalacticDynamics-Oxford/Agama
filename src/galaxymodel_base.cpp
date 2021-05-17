@@ -89,75 +89,87 @@ namespace{   // internal definitions
 //------- HELPER ROUTINES -------//
 
 /** convert from scaled velocity variables to the actual velocity.
-    \param[in]  vars are the scaled variables: chi, psi, phi/(2*Pi),
-    where the magnitude of the velocity is v = v_esc * g(chi, zeta), g is some scaling function,
-    and the two angles {theta(psi), phi} specify the orientation of velocity vector 
+    \param[in]  pos  is the position (the orientation of velocity basis matches the radius vector).
+    \param[in]  velvars are the scaled velocity-space variables from unit cube: s, u, w
+    where the magnitude of the velocity is v = v_esc * g(s, zeta), g is some scaling function,
+    and the two angles {psi(u), chi(w)} specify the orientation of velocity vector
     in spherical coordinates centered at a given point.
-    \param[in]  vesc is the maximum magnutude of velocity (equal to the escape velocity).
+    \param[in]  vesc is the maximum magnutude of velocity (equal to the escape velocity at pos).
     \param[in]  zeta is the scaling factor for the velocity magnitude -
     the ratio of circular to escape velocity at the given radius.
-    The non-trivial transformation is needed to accurately handle distribution functions of
-    cold disks at large radii, which are very strongly peaked near {v_R,v_z,v_phi} = {0,0,v_circ}.
-    To improve the robustness of integration, we make sure that a large proportion of unit cube
-    in scaled variables maps onto a relatively small region around this circular velocity:
-    the scaling function g(chi) is nearly horizontal for a large range of chi when its value
-    is close to zeta, and the angle theta = pi * psi^2, i.e. again a large range of psi maps
-    onto a small region of theta near zero, where the velocity is directed nearly azimuthally.
+    The non-trivial transformations are needed to accurately handle distribution functions of
+    cold disks at large radii, which are very strongly peaked near {v_R,v_z,v_phi} = {0,0,v_circ},
+    or strongly radially anisotropic haloes, concentrated at v_r >> v_theta, v_phi.
+    To reduce the chance of missing a dominant part of velocity space during the integration,
+    we make sure that a large proportion of unit cube in scaled variables maps onto 
+    relatively small regions where these cold DFs could be concentrated:
+    1) the scaled velocity magnitude v/v_esc = g(p) is nearly horizontal in a large range of chi
+    where its value is close to zeta (i.e. v is close to circular velocity);
+    2) the two angles psi, chi specifying the orientation of the velocity vector
+    are mapped from the scaled variables u, w using an "undulating" transformation
+    psi / pi = u - k * sin(4 pi u) / (4 pi),  and similarly for chi / (2pi) as a function of w,
+    with k ~ 0.9 creating nearly horizontal stretches around  psi or xi ~ 0, 0.5 and 1,
+    corresponding to the velocity oriented parallel to one of the three principal axes
+    of spherical velocity coordinates v_r, v_theta, v_phi.
     \param[out] jac will contain the jacobian of transformation.
-    \return  three components of velocity in cylindrical coordinates.
+    \return  three components of velocity in spherical coordinates.
 */
-inline coord::VelCyl unscaleVelocity(
-    const double vars[], const double vesc, const double zeta, double &jac)
+coord::PosVelCar unscaleVelocity(const coord::PosCar& pos,
+    const double velvars[], const double vesc, const double zeta, double &jac)
 {
-    double sintheta, costheta, sinphi, cosphi,
-    eta = sqrt(1/zeta-1) + 1,
-    chi = vars[0] * eta - 1,
-    vel = vesc * zeta * (1 + math::sign(chi) * pow_2(chi));
-    math::sincos(M_PI * pow_2(vars[1]), sintheta, costheta);
-    math::sincos(2*M_PI * vars[2], sinphi, cosphi);
-    jac = nan2num(8*M_PI*M_PI * vars[1] * zeta * fabs(chi) * eta * vesc * pow_2(vel) * sintheta);
-    return coord::VelCyl(vel * sintheta * cosphi, vel * sintheta * sinphi, vel * costheta);
+    double s = velvars[0], u = velvars[1], w = velvars[2],
+    s0  = 0.6*zeta + 0.2,
+    ks  = 0.9,
+    vel = vesc * (s + ks * 0.5 / M_PI * (sin(2*M_PI*(s0-s)) - sin(2*M_PI*s0))),
+    sinu, cosu, sinw, cosw, sinpsi, cospsi, sinchi, coschi;
+    math::sincos(4*M_PI * u, sinu, cosu);
+    math::sincos(4*M_PI * w, sinw, cosw);
+    double ku = 0.6, kw = 0.3 * s*(2-s),
+    psi =   M_PI * (u - ku/(4*M_PI) * sinu),
+    chi = 2*M_PI * (w - kw/(4*M_PI) * sinw);
+    math::sincos(psi, sinpsi, cospsi);
+    math::sincos(chi, sinchi, coschi);
+    jac = nan2num(2*M_PI*M_PI *
+                  (1 - ku * cosu) * sinpsi *
+                  (1 - kw * cosw) *
+                  (1 - ks * cos(2*M_PI*(s-s0))) *
+                  vesc * pow_2(vel));
+    // components of velocity in spherical coordinates
+    double vr = vel * sinpsi * coschi, vtheta = vel * sinpsi * sinchi, vphi = vel * cospsi;
+
+    // convert velocity to cartesian coords at the given position
+    double r = sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z), R = sqrt(pos.x*pos.x + pos.y*pos.y),
+    sintheta = r>0 ? R/r : 1, costheta = r>0 ? pos.z/r : 0,
+    sinphi = R>0 ? pos.y/R : 0, cosphi = R>0 ? pos.x/R : 1,
+    vR = vr * sintheta + vtheta * costheta,
+    vx = vR * cosphi   - vphi   * sinphi,
+    vy = vR * sinphi   + vphi   * cosphi,
+    vz = vr * costheta - vtheta * sintheta;
+    return coord::PosVelCar(pos, coord::VelCar(vx, vy, vz));
 }
 
 /** compute the escape velocity and the ratio of circular to escape velocity
     at a given position in the given ponential */
 inline void getVesc(
-    const coord::PosCyl& pos, const potential::BasePotential& poten, double& vesc, double& zeta)
+    const coord::PosCar& pos, const potential::BasePotential& poten, double& vesc, double& zeta)
 {
-    if(pow_2(pos.R) + pow_2(pos.z) == INFINITY) {
+    if(pow_2(pos.x) + pow_2(pos.y) + pow_2(pos.z) == INFINITY) {
         vesc = 0.;
         zeta = 0.5;
         return;
     }
     double Phi;
-    coord::GradCyl grad;
+    coord::GradCar grad;
     poten.eval(pos, &Phi, &grad);
     vesc = sqrt(-2. * Phi);
-    zeta = math::clip(sqrt(grad.dR * pos.R) / vesc, 0.1, 0.9);
+    zeta = math::clip(sqrt(grad.dx * pos.x + grad.dy * pos.y + grad.dz * pos.z) / vesc, 0.2, 0.8);
     if(!isFinite(vesc)) {
         throw std::invalid_argument("Error in computing moments: escape velocity is undetermined at "
-            "R="+utils::toString(pos.R)+", z="+utils::toString(pos.z)+", phi="+utils::toString(pos.phi)+
-            " (Phi="+utils::toString(Phi)+")");
+            "("+utils::toString(pos.x)+","+utils::toString(pos.y)+","+utils::toString(pos.z)+
+            ") where Phi="+utils::toString(Phi));
     }
 }
 
-/** convert from scaled position/velocity coordinates to the real ones.
-    The coordinates in cylindrical system are scaled in the same way as for 
-    the density integration; the velocity magnitude is scaled with local escape velocity.
-*/
-inline coord::PosVelCyl unscalePosVel(const double vars[], 
-    const potential::BasePotential& pot, double& jac)
-{
-    // 1. determine the position from the first three scaled variables
-    double jacPos;
-    const coord::PosCyl pos = potential::unscaleCoords(vars, &jacPos);
-    // 2. determine the velocity from the second three scaled vars
-    double vesc, zeta, jacVel;
-    getVesc(pos, pot, vesc, zeta);
-    const coord::VelCyl vel = unscaleVelocity(vars+3, vesc, zeta, jacVel);
-    jac = nan2num(jacPos * jacVel);
-    return coord::PosVelCyl(pos, vel);
-}
 
 //------- HELPER CLASSES FOR MULTIDIMENSIONAL INTEGRATION OF DF -------//
 
@@ -405,8 +417,8 @@ public:
             // when they have infinite uncertainties, this means integrating vX,vY over a circle
             // |vXY| = sqrt(vX^2+vY^2) <= sqrt(Vescape^2 - vZ^2)
             assert(dimvX==1 && dimvY==2);  // the two dimensions of integration in the vX,vY plane
-            double sinphi, cosphi;
-            math::sincos(2*M_PI*vars[2], sinphi, cosphi);
+            double sinphi, cosphi, addphi = atan2(Y, X);
+            math::sincos(2*M_PI*vars[2] + addphi, sinphi, cosphi);
             vX = vXYmax * vars[1] * cosphi;
             vY = vXYmax * vars[1] * sinphi;
             jac *= pow_2(vXYmax) * 2*M_PI * vars[1];
@@ -458,7 +470,14 @@ public:
     /// input variables define 6 components of position and velocity, suitably scaled
     virtual coord::PosVelCar unscaleVars(const double vars[], double& jac) const
     {
-        return toPosVelCar(unscalePosVel(vars, model.potential, jac));
+        // 1. determine the position from the first three scaled variables
+        const coord::PosCar pos = toPosCar(potential::unscaleCoords(vars, &jac));
+        // 2. determine the velocity (in spherical coordinates) from the second three scaled vars
+        double vesc, zeta, jacvel;
+        getVesc(pos, model.potential, vesc, zeta);
+        coord::PosVelCar posvel = unscaleVelocity(pos, /*vel*/ &vars[3], vesc, zeta, /*output*/jacvel);
+        jac *= jacvel;
+        return posvel;
     }
 
 private:
@@ -473,175 +492,100 @@ private:
 };
 
 
-/// this will be redesigned
-class DFIntegrandProjection: public math::IFunctionNdim {
-    const GalaxyModel& model;
-    const math::IFunctionNdim& fnc;  ///< spatial selection function
-    const double* mat;               ///< orthogonal matrix for coordinate transformation
-public:
-    DFIntegrandProjection(const GalaxyModel& _model,
-        const math::IFunctionNdim& _fnc, const double* _transformMatrix) :
-    model(_model), fnc(_fnc), mat(_transformMatrix) {}
-
-    virtual unsigned int numVars()   const { return 6; }
-    virtual unsigned int numValues() const { return fnc.numValues(); }
-
-    virtual void eval(const double vars[], double values[]) const
-    {
-        try{
-            double X = vars[0], Y = vars[1], W = 2*vars[2]-1, Z, jac;  // W is scaled Z:
-            if(W<0) {
-                Z   = -exp(1/(1+W) + 1/W);
-                jac = -Z * (1/pow_2(1+W) + 1/pow_2(W)) * 2;  // dZ/dW
-            } else if(W>0) {
-                Z   =  exp(1/(1-W) - 1/W);
-                jac =  Z * (1/pow_2(1-W) + 1/pow_2(W)) * 2;
-            } else {
-                Z = jac = 0;
-            }
-
-            // transform the position from observed to intrinsic frame
-            const coord::PosCyl pos(coord::toPosCyl(coord::PosCar(
-                mat[0] * X + mat[3] * Y + mat[6] * Z,
-                mat[1] * X + mat[4] * Y + mat[7] * Z,
-                mat[2] * X + mat[5] * Y + mat[8] * Z) ) );
-
-            // construct the full position/velocity in intrinsic frame
-            double vesc, zeta, jacVel;
-            getVesc(pos, model.potential, vesc, zeta);
-            const coord::PosVelCyl posvel(pos, unscaleVelocity(vars+3, vesc, zeta, jacVel));
-            jac = nan2num(jac * jacVel);
-
-            // transform the velocity back to observed frame
-            coord::VelCar velrot(toPosVelCar(posvel));
-            const double posvelrot[6] = { X, Y, Z,
-                mat[0] * velrot.vx + mat[1] * velrot.vy + mat[2] * velrot.vz,
-                mat[3] * velrot.vx + mat[4] * velrot.vy + mat[5] * velrot.vz,
-                mat[6] * velrot.vx + mat[7] * velrot.vy + mat[8] * velrot.vz };
-
-            // query the spatial selection function
-            fnc.eval(posvelrot, values);
-
-            // check if there are any nonzero values reported by fnc
-            // [skipped for the moment]
-
-            // 2. determine the actions
-            actions::Actions act = model.actFinder.actions(posvel);
-
-            // 3. compute the value of distribution function times the jacobian
-            // FIXME: in some cases the Fudge action finder may fail and produce
-            // zero values of Jr,Jz instead of very large ones, which may lead to
-            // unrealistically high DF values. We therefore ignore these points
-            // entirely, but the real problem is with the action finder, not here.
-            double dfval = isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0) ?
-                model.distrFunc.value(act) * jac : 0.;
-
-            if(!isFinite(dfval))
-                dfval = 0;
-
-            // 4. output the value(s) to the integration routine
-            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
-                values[i] *= dfval;
-        }
-        catch(std::exception& e) {
-            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
-                values[i] = 0;
-        }
-    }
-};
-
-
-/// two variants of input position in Cartesian coordinates: 3d or 2d (projected)
-template<bool Projected> struct PosT;  // helper class for overcoming the lack of template typedef
-template<> struct PosT<false> { typedef coord::PosCar  Type; };  // 3d point
-template<> struct PosT<true > { typedef coord::PosProj Type; };  // 2d point
-
-/** helper class for integrating the distribution function over velocity at a fixed position (X,Y,Z)
+/** helper class for conversion of scaled variables (three components of velocity and -
+    in the projected case - also the Z-component of position in the observed coord.sys.),
+    used in integrating the distribution function over velocity at a fixed position (X,Y,Z)
     or at a point in X,Y space integrated along Z [common functionality for moments() and vdf() ].
     \tparam Projected distinguishes intrinsic (3d point) and projected (2d point) variants.
 */
-template<bool Projected>
-class DFIntegrandOverVelocity: public DFIntegrandNdim {
-protected:
-    const typename PosT<Projected>::Type point;  ///< point in observed coord.system (3d or 2d)
-    const coord::Orientation& orientation;       ///< conversion between intrinsic and observed coords
+template<bool Projected> struct Scaling;
+
+// non-projected variant
+template<> struct Scaling<false> {
+    typedef coord::PosCar  Type;
+    const coord::PosCar pos;    ///< 3d point in the intrinsic coordinate system of the model
     const bool symmetrizevRvz;  ///< if the DF is invariant w.r.t {v_R,v_z <-> -v_R,v_z}, use only v_z>=0
-public:
-    DFIntegrandOverVelocity(const GalaxyModel& _model, bool separate,
-        const typename PosT<Projected>::Type _point, const coord::Orientation& _orientation)
+    double vesc, zeta;          ///< escape speed and the ratio of circular to escape speed
+
+    Scaling(const potential::BasePotential& pot,
+        const coord::PosCar& obspos, const coord::Orientation& orientation)
     :
-        DFIntegrandNdim(_model, separate),
-        point(_point),
-        orientation(_orientation),
+        pos(orientation.fromRotated(obspos)),
+        symmetrizevRvz(true) // this holds for any axisymmetric system and possibly even more generally
+    {
+        getVesc(pos, pot, vesc, zeta);
+    }
+
+    /// non-projected: input variables are three velocity components
+    coord::PosVelCar unscale(const double vars[], double &jac) const
+    {
+        // if symmetrizevRvz, scan only half of the (v_R, v_z) plane
+        double scaledvel[3] = {vars[0], vars[1], symmetrizevRvz ? 0.25 + vars[2] * 0.5 : vars[2]};
+        return unscaleVelocity(pos, scaledvel, vesc, zeta, jac);
+    }
+};
+
+// projected variant
+template<> struct Scaling<true> {
+    typedef coord::PosProj  Type;
+    const potential::BasePotential& pot;    ///< potential of the model
+    const coord::PosProj obspos;            ///< 2d point in the observed coordinate system
+    const coord::Orientation& orientation;  ///< conversion between intrinsic and observed coords
+    const bool symmetrizevRvz;  ///< if the DF is invariant w.r.t {v_R,v_z <-> -v_R,v_z}, use only v_z>=0
+
+    Scaling(const potential::BasePotential& _pot,
+        const coord::PosProj& _obspos, const coord::Orientation& _orientation)
+    :
+        pot(_pot), obspos(_obspos), orientation(_orientation),
         symmetrizevRvz(true) // this holds for any axisymmetric system and possibly even more generally
     {}
 
-    /// dimension of the input array (3 scaled velocity components and optionally scaled Z coordinate)
-    virtual unsigned int numVars()   const { return Projected ? 4 : 3; }
+    /// projected: input variables are scaled Z-coordinate and all three velocity components
+    coord::PosVelCar unscale(const double vars[], double &jac) const
+    {
+        double Z;
+        if(orientation.isFaceOn()) {
+            // integrating over the half-space Z>=0 using the following transformation
+            Z = math::unscale(math::ScalingSemiInf(), vars[0], &jac);
+            jac *= 2;   // factor of 2 compensates that we integrate over half-space only
+        } else {
+            // integrating over the entire range of Z using a different transformation
+            Z = math::unscale(math::ScalingDoubleInf(
+                /*R*/ sqrt(pow_2(obspos.X) + pow_2(obspos.Y))), vars[0], &jac);
+        }
+        coord::PosCar pos = orientation.fromRotated(coord::PosCar(obspos.X, obspos.Y, Z));
+        double scaledvel[3] = {vars[1], vars[2], symmetrizevRvz ? 0.25 + vars[3] * 0.5 : vars[3]};
 
-    virtual coord::PosVelCar unscaleVars(const double vars[], double &jac) const;
+        // determine the velocity in the intrinsic coordinate system from the three scaled vars
+        double vesc, zeta, jacvel;
+        getVesc(pos, pot, vesc, zeta);
+        coord::PosVelCar posvel = unscaleVelocity(pos, scaledvel, vesc, zeta, jacvel);
+        jac *= jacvel;
+        return posvel;
+    }
 };
-
-/// non-projected: input variables are three velocity components
-template<>
-coord::PosVelCar DFIntegrandOverVelocity<false>::unscaleVars(const double vars[], double &jac) const
-{
-    double dZds=1;
-    coord::PosCyl pos = toPosCyl(orientation.fromRotated(point));
-    double scaledvel[3] = {vars[0], vars[1], vars[2]};
-    if(symmetrizevRvz) {      // another hack: scan only half of the (v_R, v_z) plane
-        scaledvel[2] *= 0.5;  // limit v_z (in the intrinsic coords) to nonnegative half-space
-    }
-    double vesc, zeta, jacVel;
-    getVesc(pos, model.potential, vesc, zeta);
-    const coord::VelCyl vel = unscaleVelocity(scaledvel, vesc, zeta, jacVel);
-    jac = nan2num(dZds * jacVel);
-    return toPosVelCar(coord::PosVelCyl(pos, vel));
-}
-
-/// projected: input variables are scaled z-coordinate and all three velocity components
-template<>
-coord::PosVelCar DFIntegrandOverVelocity<true>::unscaleVars(const double vars[], double &jac) const
-{
-    double Z, dZds=1;
-    if(orientation.isFaceOn()) {
-        // integrating over the half-space Z>=0 using the following transformation
-        Z = unscale(math::ScalingSemiInf(), vars[0], &dZds);
-        dZds *= 2;   // factor of 2 compensates that we integrate over half-space only
-    } else {
-        // integrating over the entire range of Z using a different transformation
-        Z = unscale(math::ScalingDoubleInf(
-            /*R*/ sqrt(pow_2(point.X) + pow_2(point.Y))), vars[0], &dZds);
-    }
-    coord::PosCyl pos = toPosCyl(orientation.fromRotated(coord::PosCar(point.X, point.Y, Z)));
-    double scaledvel[3] = {vars[1], vars[2], vars[3]};
-    if(symmetrizevRvz) {      // another hack: scan only half of the (v_R, v_z) plane
-        scaledvel[2] *= 0.5;  // limit v_z (in the intrinsic coords) to nonnegative half-space
-    }
-    double vesc, zeta, jacVel;
-    getVesc(pos, model.potential, vesc, zeta);
-    const coord::VelCyl vel = unscaleVelocity(scaledvel, vesc, zeta, jacVel);
-    jac = nan2num(dZds * jacVel);
-    return toPosVelCar(coord::PosVelCyl(pos, vel));
-}
 
 
 /** helper class for integrating the distribution function over velocity
     and optionally along the line of sight (if the template parameter Projected==true) */
 template<bool Projected>
-class DFIntegrandMoments: public DFIntegrandOverVelocity<Projected> {
-    using DFIntegrandOverVelocity<Projected>::dflen;
-    using DFIntegrandOverVelocity<Projected>::orientation;
-    using DFIntegrandOverVelocity<Projected>::symmetrizevRvz;
+class DFIntegrandMoments: public DFIntegrandNdim {
+    const coord::Orientation& orientation;
+    const Scaling<Projected> scaling;
     const bool needVel, needVel2;
 public:
-    DFIntegrandMoments(const GalaxyModel& _model, bool separate,
-        const typename PosT<Projected>::Type& point, const coord::Orientation& orientation,
+    DFIntegrandMoments(const GalaxyModel& model, bool separate,
+        const typename Scaling<Projected>::Type& obspoint, const coord::Orientation& _orientation,
         bool _needVel, bool _needVel2)
     :
-        DFIntegrandOverVelocity<Projected>(_model, separate, point, orientation),
+        DFIntegrandNdim(model, separate),
+        orientation(_orientation),
+        scaling(model.potential, obspoint, orientation),
         needVel(_needVel), needVel2(_needVel2)
     {}
+    
+    /// dimension of the input array (3 scaled velocity components and optionally scaled Z coordinate)
+    virtual unsigned int numVars()   const { return Projected ? 4 : 3; }
 
     /// dimension of the output array
     virtual unsigned int numValues() const { return dflen * (1 + 4*needVel + 6*needVel2); }
@@ -654,6 +598,11 @@ public:
         vel2.vxvy += vel.vx * vel.vy;
         vel2.vxvz += vel.vx * vel.vz;
         vel2.vyvz += vel.vy * vel.vz;
+    }
+
+    // input variables are scaled z-coordinate (if projected) and all three velocity components
+    virtual coord::PosVelCar unscaleVars(const double vars[], double &jac) const {
+        return scaling.unscale(vars, jac);
     }
 
     // output the value(s) of DF, multiplied by various combinations of velocity components
@@ -671,7 +620,7 @@ public:
             VEL2.vxvz = 0;
             VEL2.vyvz = 0;
         }
-        if(symmetrizevRvz) {
+        if(scaling.symmetrizevRvz) {
             // add a contribution from {R,z,-vR,-vz}
             double R2 = pow_2(pv.x) + pow_2(pv.y),
             costwophi = R2==0 ? 1 : (pow_2(pv.x) - pow_2(pv.y)) / R2,
@@ -702,7 +651,7 @@ public:
 
         for(unsigned int ic=0; ic<dflen; ic++) {  // loop over components of DF
             values[ic] = dfval[ic];
-            double val = dfval[ic] * (symmetrizevRvz ? 0.5 : 1);
+            double val = dfval[ic] * (scaling.symmetrizevRvz ? 0.5 : 1);
             unsigned int im=1;  // index of the output moment, increases with each stored value
             if(needVel) {
                 values[ic + dflen * (im++)] = val *  V;
@@ -754,27 +703,36 @@ public:
 
 /** Helper class for constructing velocity distribution (intrinsic or projected) */
 template <int N, bool Projected>
-class DFIntegrandVelDist: public DFIntegrandOverVelocity<Projected> {
-    using DFIntegrandOverVelocity<Projected>::dflen;
-    using DFIntegrandOverVelocity<Projected>::orientation;
-    using DFIntegrandOverVelocity<Projected>::symmetrizevRvz;
+class DFIntegrandVelDist: public DFIntegrandNdim {
+    const coord::Orientation& orientation;
+    const Scaling<Projected> scaling;
     const math::BsplineInterpolator1d<N> bsplvX, bsplvY, bsplvZ; ///< B-splines for each vel. component
     const unsigned int NX, NY, NZ, Ntotal;  ///< number of B-spline coefficients in each vel. component
 public:
-    DFIntegrandVelDist(const GalaxyModel& _model, bool separate,
-        const typename PosT<Projected>::Type& point, const coord::Orientation& orientation,
+    DFIntegrandVelDist(const GalaxyModel& model, bool separate,
+        const typename Scaling<Projected>::Type& point, const coord::Orientation& _orientation,
         const std::vector<double>& gridvX,
         const std::vector<double>& gridvY,
         const std::vector<double>& gridvZ)
     :
-        DFIntegrandOverVelocity<Projected>(_model, separate, point, orientation),
+        DFIntegrandNdim(model, separate),
+        orientation(_orientation),
+        scaling(model.potential, point, orientation),
         bsplvX(gridvX), bsplvY(gridvY), bsplvZ(gridvZ),
         NX(bsplvX.numValues()), NY(bsplvY.numValues()), NZ(bsplvZ.numValues()),
         Ntotal(1 + NX + NY + NZ)
     {}
+    
+    /// dimension of the input array (3 scaled velocity components and optionally scaled Z coordinate)
+    virtual unsigned int numVars()   const { return Projected ? 4 : 3; }
 
     /// total number of B-spline coefficients times the number of DF components
     virtual unsigned int numValues() const { return dflen * Ntotal; }
+    
+    // input variables are scaled z-coordinate (if projected) and all three velocity components
+    virtual coord::PosVelCar unscaleVars(const double vars[], double &jac) const {
+        return scaling.unscale(vars, jac);
+    }
 
     /// output the weighted integrals over basis functions
     virtual void outputValues(const coord::PosVelCar& pv, const double dfval[], double values[]) const
@@ -787,7 +745,7 @@ public:
             iX = bsplvX.nonzeroComponents(VEL.vx, 0, valvX),
             iY = bsplvY.nonzeroComponents(VEL.vy, 0, valvY),
             iZ = bsplvZ.nonzeroComponents(VEL.vz, 0, valvZ);
-        double mult = symmetrizevRvz ? 0.5 : 1.0;
+        double mult = scaling.symmetrizevRvz ? 0.5 : 1.0;
         for(unsigned int ic=0; ic<dflen; ic++) {  // loop over DF components
             values[ic * Ntotal] = dfval[ic];
             for(int ib=0; ib<=N; ib++) {  // loop over nonzero basis functions
@@ -796,7 +754,7 @@ public:
                 values[ic * Ntotal + 1 + ib + iZ + NX + NY]+= dfval[ic] * valvZ[ib] * mult;
             }
         }
-        if(!symmetrizevRvz) return;
+        if(!scaling.symmetrizevRvz) return;
         /// we scan only half of the (v_R, v_z) plane, and add the same contributions to (-v_R, -v_z),
         /// since the actions and hence the value of f(J) do not change with this inversion
         double R2 = pow_2(pv.x) + pow_2(pv.y),
@@ -840,6 +798,76 @@ public:
                 math::blas_dmul(1/density[ic], amplvY[ic]);
                 math::blas_dmul(1/density[ic], amplvZ[ic]);
             }
+        }
+    }
+};
+
+
+/// this will be redesigned
+class DFIntegrandProjection: public math::IFunctionNdim {
+    const GalaxyModel& model;
+    const math::IFunctionNdim& fnc;  ///< spatial selection function in the observed coords
+    const coord::Orientation& orientation;
+public:
+    DFIntegrandProjection(const GalaxyModel& _model,
+        const math::IFunctionNdim& _fnc, const coord::Orientation& _orientation)
+    :
+        model(_model), fnc(_fnc), orientation(_orientation) {}
+
+    virtual unsigned int numVars()   const { return 6; }
+    virtual unsigned int numValues() const { return fnc.numValues(); }
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        try{
+            Scaling<true> scaling(model.potential,
+                coord::PosProj(/*X*/vars[0], /*Y*/vars[1]), orientation);
+            double jac;
+            coord::PosVelCar posvel = scaling.unscale(/*Z and velocity components*/ &vars[2], jac);
+            // process two symmetric velocity orientations and halve their contributions to the integral
+            if(scaling.symmetrizevRvz) jac *= 0.5;
+
+            // 2. determine the actions and the DF value times the jacobian
+            actions::Actions act = model.actFinder.actions(toPosVelCyl(posvel));
+            // FIXME: safety measure for zero actions reported by Fudge
+            double dfval = isFinite(act.Jr + act.Jz + act.Jphi) && (act.Jr!=0 || act.Jz!=0) ?
+                model.distrFunc.value(act) * jac : 0.;
+            if(!isFinite(dfval))
+                dfval = 0;
+
+            // transform the position/velocity back to the observed frame
+            double posvelobs[6];
+            orientation.toRotated(posvel).unpack_to(posvelobs);
+            // if the Z coordinate is very large, the inverse transformation might not
+            // accurately recover the input X,Y coordinates - put them back manually
+            posvelobs[0] = vars[0];
+            posvelobs[1] = vars[1];
+
+            // query the spatial selection function (in the observed frame)
+            double* fncval = static_cast<double*>(alloca(fnc.numValues() * sizeof(double)));
+            fnc.eval(posvelobs, fncval);
+            
+            // output the values of df * sf to the integration routine
+            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
+                values[i] = dfval * fncval[i];
+            
+            if(!scaling.symmetrizevRvz) return;
+
+            // add a contribution of the symmetric point with -vR, -vz (in the intrinsic coordinates)
+            double R2 = pow_2(posvel.x) + pow_2(posvel.y),
+            costwophi = R2==0 ? 1 : (pow_2(posvel.x) - pow_2(posvel.y)) / R2,
+            sintwophi = R2==0 ? 0 : 2 * posvel.x * posvel.y / R2;
+            double vel[3] = { -posvel.vx * costwophi - posvel.vy * sintwophi,
+                -posvel.vx * sintwophi + posvel.vy * costwophi, -posvel.vz };
+            orientation.toRotated(vel, &posvelobs[3]);  // replace the velocity in posvelobs
+
+            fnc.eval(posvelobs, fncval);
+            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
+                values[i] += dfval * fncval[i];
+        }
+        catch(std::exception& e) {
+            for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
+                values[i] = 0;
         }
     }
 };
@@ -1026,6 +1054,10 @@ template void computeVelocityDistribution<1>(const GalaxyModel&, const coord::Po
     const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
     double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
+template void computeVelocityDistribution<2>(const GalaxyModel&, const coord::PosCar&,
+    const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
+    double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
+    bool, const coord::Orientation&, double, int);
 template void computeVelocityDistribution<3>(const GalaxyModel&, const coord::PosCar&,
     const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
     double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
@@ -1036,6 +1068,10 @@ template void computeVelocityDistribution<0>(const GalaxyModel&, const coord::Po
     double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
 template void computeVelocityDistribution<1>(const GalaxyModel&, const coord::PosProj&,
+    const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
+    double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
+    bool, const coord::Orientation&, double, int);
+template void computeVelocityDistribution<2>(const GalaxyModel&, const coord::PosProj&,
     const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
     double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
@@ -1050,6 +1086,9 @@ template void computeVelocityDistribution<0>(const GalaxyModel&, const coord::Po
 template void computeVelocityDistribution<1>(const GalaxyModel&, const coord::PosCar&, size_t,
     std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
+template void computeVelocityDistribution<2>(const GalaxyModel&, const coord::PosCar&, size_t,
+    std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
+    bool, const coord::Orientation&, double, int);
 template void computeVelocityDistribution<3>(const GalaxyModel&, const coord::PosCar&, size_t,
     std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
@@ -1060,6 +1099,9 @@ template void computeVelocityDistribution<0>(const GalaxyModel&, const coord::Po
 template void computeVelocityDistribution<1>(const GalaxyModel&, const coord::PosProj&, size_t,
     std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
+template void computeVelocityDistribution<2>(const GalaxyModel&, const coord::PosProj&, size_t,
+    std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
+    bool, const coord::Orientation&, double, int);
 template void computeVelocityDistribution<3>(const GalaxyModel&, const coord::PosProj&, size_t,
     std::vector<double>&, double[], std::vector<double>[], std::vector<double>[], std::vector<double>[],
     bool, const coord::Orientation&, double, int);
@@ -1068,13 +1110,13 @@ template void computeVelocityDistribution<3>(const GalaxyModel&, const coord::Po
 void computeProjection(const GalaxyModel& model,
     const math::IFunctionNdim& spatialSelection,
     const double Xlim[2], const double Ylim[2],
-    const double transformMatrix[9],
+    const coord::Orientation& orientation,
     double* result,
     double reqRelError, int maxNumEval)
 {
     const double xlower[6] = {Xlim[0], Ylim[0], 0, 0, 0, 0};
     const double xupper[6] = {Xlim[1], Ylim[1], 1, 1, 1, 1};
-    DFIntegrandProjection fnc(model, spatialSelection, transformMatrix);
+    DFIntegrandProjection fnc(model, spatialSelection, orientation);
     math::integrateNdim(fnc, xlower, xupper, reqRelError, maxNumEval, result);
 }
 

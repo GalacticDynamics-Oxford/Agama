@@ -1,7 +1,7 @@
 /** \file    math_ode.h
     \brief   ODE integration classes
     \author  Eugene Vasiliev
-    \date    2008-2018
+    \date    2008-2021
 
     This module implements classes for integration of ordinary differential equation systems.
 
@@ -46,18 +46,20 @@ public:
 
 /** Prototype of a function that is used in integration of second-order
     linear ordinary differential equation systems with variable coefficients:
-    d2x(t) / dt2 = c(t) x(t), where x is an N-dimensional vector and c is a N by N matrix. */
+    d2x(t) / dt2 = a(t) x(t) + b(t) dx(t)/dt,
+    where x is an N-dimensional vector and a, b are N by N matrices. */
 class IOde2System {
 public:
     IOde2System() {};
     virtual ~IOde2System() {};
 
     /** Compute the matrix c in the r.h.s. of the differential equation: 
-        \param[in]  t    is the integration variable (time),
-        \param[out] mat  should point to an existing array of length N^2,
-        which will be filled with the flattened (row-major) matrix c: mat[i*N+j] = c_{ij}
+        \param[in]  t  is the integration variable (time).
+        \param[out] a  should point to an existing array of length N^2,
+        which will be filled with the flattened (row-major) matrix a: mat[i*N+j] = a_{ij}.
+        \param[out] b  same for the matrix b.
     */
-    virtual void eval(double t, double mat[]) const = 0;
+    virtual void eval(double t, double a[], double b[]) const = 0;
 
     /** Return the size of ODE system (2N variables - vectors x and dx/dt) */
     virtual unsigned int size() const = 0;
@@ -90,7 +92,7 @@ public:
     /** return the time to which the integration has proceeded so far */
     inline double getTime() const { return time; }
 
-    /** return the interpolated solution
+    /** return the interpolated solution.
         \param[in]  t  is the moment of time, which should lie within the last completed timestep;
         \param[in]  ind  is the index of the component of the solution vector;
         \return  the interpolated solution at the given time.
@@ -185,6 +187,7 @@ public:
 
 private:
     double state[NDIM*2], p[NDIM], q[NDIM], r[NDIM];
+    bool newstep;   // whether the extrapolation coefs are known from the previous step
 };
 
 /** Implicit method with 4 Gauss-Legendre collocation points;
@@ -199,6 +202,7 @@ public:
 
 private:
     double state[NDIM*2], p[NDIM], q[NDIM], r[NDIM], s[NDIM];
+    bool newstep;   // whether the extrapolation coefs are known from the previous step
 };
 
 }  // namespace

@@ -291,6 +291,9 @@ public:
     /// whether to use the interpolated action finder (faster but less accurate)
     bool useActionInterpolation;
 
+    /// whether to print out progress report messages
+    bool verbose;
+
     /** parameters of grid for computing the multipole expansion of the combined
         density profile of spheroidal components;
         in general, these parameters should encompass the range of analogous parameters 
@@ -316,6 +319,7 @@ public:
     /// assign default values
     SelfConsistentModel() :
         useActionInterpolation(true),
+        verbose(true),
         lmaxAngularSph(0), mmaxAngularSph(0), sizeRadialSph(25), rminSph(0), rmaxSph(0),
         mmaxAngularCyl(0), sizeRadialCyl(20), RminCyl(0), RmaxCyl(0),
         sizeVerticalCyl(20), zminCyl(0), zmaxCyl(0)

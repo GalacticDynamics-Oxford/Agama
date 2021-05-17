@@ -38,8 +38,8 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     potential::Isochrone pot(M, b);
     orbit::OrbitIntParams params;
     params.accuracy = 1e-15;
-    std::vector< std::pair<coord::PosVelCyl, double> > traj = orbit::integrateTraj(
-        initial_conditions, total_time, timestep, pot, params);
+    std::vector< std::pair<coord::PosVelCar, double> > traj = orbit::integrateTraj(
+        toPosVelCar(initial_conditions), total_time, timestep, pot, /*Omega*/0, params);
     actions::ActionFinderSpherical actGrid(pot);  // interpolation-based action finder/mapper
     actions::ActionStat statI, statS, statF, statG;
     actions::ActionAngles aaI, aaF, aaS, aaG;
@@ -61,7 +61,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     double ifd = 1e-5;
     int numWarnings = 0;
     for(size_t i=0; i<traj.size(); i++) {
-        coord::PosVelCyl &point = traj[i].first;
+        coord::PosVelCyl point = toPosVelCyl(traj[i].first);
         statE.add(totalEnergy(pot, point));
         point.phi = math::wrapAngle(point.phi);
         aaI = actions::actionAnglesIsochrone(M, b,  point, &frI);

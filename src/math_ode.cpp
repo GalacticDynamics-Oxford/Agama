@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <alloca.h>
 
+#include <cstdio>
 namespace math{
 
 /* ----------------- ODE integrators ------------- */
@@ -416,6 +417,7 @@ void Ode2SolverGL3<NDIM>::init(const double stateNew[], double timeNew)
     }
     if(timeNew==timeNew)
         time = timeNew;
+    newstep = true;
 }
 
 template<int NDIM>
@@ -447,6 +449,15 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     su2 = 0.5 *  h2 * h2,
     sv2 = su2 * (h2 / 3 - h0),
     sw2 = su2 * (h2 / 3 * (0.5 * h2 - h0 - h1) + h0 * h1),
+    du0 = h0,
+    dv0 = h0  * -h0 / 2,
+    dw0 = h0  * h0 * (h1 / 2 - h0 / 6),
+    du1 = h1,
+    dv1 = h1  * (h1 / 2 - h0),
+    dw1 = h1  * h1 * (h0 / 2 - h1 / 6),
+    du2 = h2,
+    dv2 = h2  * (h2 / 2 - h0),
+    dw2 = h2  * (h2 * (h2 / 3 - h1 / 2 - h0 / 2) + h0 * h1),
     mvu = 1 / (h1 - h0),
     mwu = 1 / (h2 - h0) / (h2 - h1),
     mwv = 1 / (h2 - h1),
@@ -457,13 +468,14 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     mqw = 1./6 * (2 - h0 - h1),
     mrw = 1./12;
 
-    // collect the values of the matrix C in the RHS of the ODE at the collocation points h_k,
+    // collect the values of the matrices A and B in the RHS of the ODE at the collocation points h_k,
     // corresponding to times  t_0 + h_k * dt, where 0<=h<=1 is the time normalized to timestep;
-    // values of C(h_k) are stored as flattened arrays in row-major order
-    double c0[NDIM * NDIM], c1[NDIM * NDIM], c2[NDIM * NDIM];
-    odeSystem.eval(time + dt * h0, c0);
-    odeSystem.eval(time + dt * h1, c1);
-    odeSystem.eval(time + dt * h2, c2);
+    // values of A(h_k) and B(h_k) are stored as flattened arrays in row-major order
+    double a0[NDIM * NDIM], a1[NDIM * NDIM], a2[NDIM * NDIM];
+    double b0[NDIM * NDIM], b1[NDIM * NDIM], b2[NDIM * NDIM];
+    odeSystem.eval(time + dt * h0, a0, b0);
+    odeSystem.eval(time + dt * h1, a1, b1);
+    odeSystem.eval(time + dt * h2, a2, b2);
 
     // The second derivative of d-th component x_d is approximated by a quadratic polynomial in h,
     // with coefficients u_d, v_d, w_d to be determined:
@@ -480,18 +492,20 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     // then use the relation [*] to update u, v, and w - it is written in such a way that
     // for each point h_k we update only one of these coefs (h0 -> u, h1 -> v, h2 -> w);
     // the updated coefs are then used for the next point h_{k+1}, and then the whole iteration
-    // cycle is repeated a few times (we find that three is enough).
+    // cycle is repeated a few times (three seems to be enough).
 
-    // approximate values of x at the current iteration and the current collocation point h_k
-    double xh[NDIM];
+    // approximate values of x and xdot at the current iteration and the current collocation point h_k
+    double xh[NDIM], dh[NDIM];
+    // values of xdot at the beginning of the current timestep
+    const double *d0 = &state[NDIM];
     // pre-computed values of x_prev[d] + x_prev'[d] * dt * h_{0,1,2}
     double x0[NDIM], x1[NDIM], x2[NDIM];
     // polynomial coefficients to be calculated
     double u[NDIM], v[NDIM], w[NDIM];
     for(int d=0; d<NDIM; d++) {
-        x0[d] = state[d] + state[d+NDIM] * dt * h0;
-        x1[d] = state[d] + state[d+NDIM] * dt * h1;
-        x2[d] = state[d] + state[d+NDIM] * dt * h2;
+        x0[d] = state[d] + d0[d] * dt * h0;
+        x1[d] = state[d] + d0[d] * dt * h1;
+        x2[d] = state[d] + d0[d] * dt * h2;
         // predict the polynomial coefs in x'' from the previous timestep
         double Q = dt*q[d], R = dt2*r[d];
         u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R;
@@ -500,39 +514,45 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     }
 
     // iteratively find the coefficients u_d, v_d, w_d for each component of vector x
-    const int NUMITER = 3;
+    const int NUMITER = newstep ? 6 : 3;
     for(int i=0; i<NUMITER; i++) {
         // consider each collocation point h_k in turn, and use it to update u, v, w (one by one)
 
         // h_0 is used for calculating u
-        // first predict the values of x at time h_0
-        for(int d=0; d<NDIM; d++)
+        // first predict the values of x and xdot at time h_0
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x0[d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d]);
+            dh[d] = d0[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d]);
+        }
         // then compute the RHS at time h_0 and calculate u
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;  // second derivative of d-th component (RHS of the ODE) at the current point
             for(int j=0; j<NDIM; j++)
-                rhs += c0[d * NDIM + j] * xh[j];
+                rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
             u[d] = rhs;
         }
 
         // h_1 is used for calculating v
-        for(int d=0; d<NDIM; d++)
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x1[d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d]);
+            dh[d] = d0[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d]);
+        }
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;
             for(int j=0; j<NDIM; j++)
-                rhs += c1[d * NDIM + j] * xh[j];
+                rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
             v[d] = (rhs - u[d]) * mvu;
         }
 
         // finally, h_2 is used for calculating w
-        for(int d=0; d<NDIM; d++)
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x2[d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d]);
+            dh[d] = d0[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d]);
+        }
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;
             for(int j=0; j<NDIM; j++)
-                rhs += c2[d * NDIM + j] * xh[j];
+                rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
             w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
         }
     }
@@ -549,11 +569,12 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
         p[d] = P;
         q[d] = Q * idt;
         r[d] = R * idt2;
-        state[d]      += (    P - 2 * Q + 3 * R) * dt2 + state[d+NDIM] * dt;
+        state[d]      += (    P - 2 * Q + 3 * R) * dt2 + d0[d] * dt;
         state[d+NDIM] += (2 * P - 3 * Q + 4 * R) * dt;
     }
 
     time += dt;
+    newstep = false;
 }
 
 template<int NDIM>
@@ -574,7 +595,7 @@ void Ode2SolverGL4<NDIM>::init(const double stateNew[], double timeNew)
     }
     if(timeNew==timeNew)
         time = timeNew;
-
+    newstep = true;
 }
 
 template<int NDIM>
@@ -613,6 +634,22 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
     sv3 = su3 *(h3/3 - h0),
     sw3 = su3 *(h3/3 * (h3/2 - h0 - h1) + h0*h1),
     sz3 = su3 *(h3 * (h3 * (h3*0.6-h0-h1-h2)/6 + (h0*h1+h1*h2+h0*h2)/3) - h0*h1*h2),
+    du0 = h0,
+    dv0 = h0  * -h0 / 2,
+    dw0 = h0  * h0 * (h1 / 2 - h0 / 6),
+    dz0 = h0  * h0 * (h0 * (-h0 / 12 + h1 / 6 + h2 / 6) - h1 * h2 / 2),
+    du1 = h1,
+    dv1 = h1  * (h1 / 2 - h0),
+    dw1 = h1  * h1 * (h0 / 2 - h1 / 6),
+    dz1 = h1  * h1 * (h1 * (-h1 / 12 + h0 / 6 + h2 / 6) - h0 * h2 / 2),
+    du2 = h2,
+    dv2 = h2  * (h2 / 2 - h0),
+    dw2 = h2  * (h2 * (h2 / 3 - h1 / 2 - h0 / 2) + h0 * h1),
+    dz2 = h2  *  h2 * (h2 * (-h2 / 12 + h0 / 6 + h1 / 6) - h0 * h1 / 2),
+    du3 = h3,
+    dv3 = h3  * (h3 / 2 - h0),
+    dw3 = h3  * (h3 * (h3 / 3 - h1 / 2 - h0 / 2) + h0 * h1),
+    dz3 = h3  * (h3 * (h0*h1/2 + h0*h2/2 + h1*h2/2 - h3 * (h0/3 + h1/3 + h2/3 - h3/4)) - h0*h1*h2),
     mvu = 1 / (h1 - h0),
     mwu = 1 / (h2 - h0) / (h2 - h1),
     mwv = 1 / (h2 - h1),
@@ -630,32 +667,34 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
     mrz = 1./12 * (3 - h0 - h1 - h2),
     msz = 1./20;
 
-    // collect the values of the matrix C in the RHS of the ODE at the collocation points h_k,
+    // collect the values of the matrices A and B in the RHS of the ODE at the collocation points h_k,
     // corresponding to times  t_0 + h_k * dt, where 0<=h<=1 is the time normalized to timestep;
-    // values of C(h_k) are stored as flattened arrays in row-major order
-    double c0[NDIM * NDIM], c1[NDIM * NDIM], c2[NDIM * NDIM], c3[NDIM * NDIM];
-    odeSystem.eval(time + dt * h0, c0);
-    odeSystem.eval(time + dt * h1, c1);
-    odeSystem.eval(time + dt * h2, c2);
-    odeSystem.eval(time + dt * h3, c3);
+    // values of A(h_k) and B(h_k) are stored as flattened arrays in row-major order
+    double a0[NDIM * NDIM], a1[NDIM * NDIM], a2[NDIM * NDIM], a3[NDIM * NDIM];
+    double b0[NDIM * NDIM], b1[NDIM * NDIM], b2[NDIM * NDIM], b3[NDIM * NDIM];
+    odeSystem.eval(time + dt * h0, a0, b0);
+    odeSystem.eval(time + dt * h1, a1, b1);
+    odeSystem.eval(time + dt * h2, a2, b2);
+    odeSystem.eval(time + dt * h3, a3, b3);
 
-    // The second derivative of d-th component x_d is approximated by a quadratic polynomial in h,
-    // with coefficients u_d, v_d, w_d to be determined:
-    // x_d''(h) = u_d + (h-h0) * (v_d + (h-h1) * (w_d + (h-h2) * z_d)
+    // The second derivative of d-th component x_d is approximated by a cubic polynomial in h,
+    // with coefficients u_d, v_d, w_d, z_d to be determined:
+    // x_d''(h) = u_d + (h-h0) * (v_d + (h-h1) * (w_d + (h-h2) * z_d))
     // the procedure is analogous to the 6-th order method.
 
-    // approximate values of x at the current iteration and the current collocation point h_k
-    double xh[NDIM];
+    // approximate values of x and xdot at the current iteration and the current collocation point h_k
+    double xh[NDIM], dh[NDIM];
+    // value of xdot at the beginning of the current timestep (alias)
+    const double *d0 = &state[NDIM];
     // pre-computed values of x_prev[d] + x_prev'[d] * dt * h_{0,1,2,3}
     double x0[NDIM], x1[NDIM], x2[NDIM], x3[NDIM];
     // polynomial coefficients to be calculated
     double u[NDIM], v[NDIM], w[NDIM], z[NDIM];
     for(int d=0; d<NDIM; d++) {
-        double xdotdt = state[d+NDIM] * dt;
-        x0[d] = state[d] + xdotdt * h0;
-        x1[d] = state[d] + xdotdt * h1;
-        x2[d] = state[d] + xdotdt * h2;
-        x3[d] = state[d] + xdotdt * h3;
+        x0[d] = state[d] + d0[d] * dt * h0;
+        x1[d] = state[d] + d0[d] * dt * h1;
+        x2[d] = state[d] + d0[d] * dt * h2;
+        x3[d] = state[d] + d0[d] * dt * h3;
         // predict the polynomial coefs in x'' from the previous timestep
         double Q = dt*q[d], R = dt2*r[d], S = dt3*s[d];
         u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R + 20*h0*h0*h0 * S;
@@ -665,49 +704,57 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
     }
 
     // iteratively find the coefficients u_d, v_d, w_d, z_d for each component of vector x
-    const int NUMITER = 3;
+    const int NUMITER = newstep ? 8 : 4;
     for(int i=0; i<NUMITER; i++) {
         // consider each collocation point h_k in turn, and use it to update u, v, w, z (one by one)
 
         // h_0 is used for calculating u
-        // first predict the values of x at time h_0
-        for(int d=0; d<NDIM; d++)
+        // first predict the values of x and xdot at time h_0
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x0[d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d] + sz0 * z[d]);
+            dh[d] = d0[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d] + dz0 * z[d]);
+        }
         // then compute the RHS at time h_0 and calculate u
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;  // second derivative of d-th component (RHS of the ODE) at the current point
             for(int j=0; j<NDIM; j++)
-                rhs += c0[d * NDIM + j] * xh[j];
+                rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
             u[d] = rhs;
         }
 
         // h_1 is used for calculating v
-        for(int d=0; d<NDIM; d++)
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x1[d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d] + sz1 * z[d]);
+            dh[d] = d0[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d] + dz1 * z[d]);
+        }
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;
             for(int j=0; j<NDIM; j++)
-                rhs += c1[d * NDIM + j] * xh[j];
+                rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
             v[d] = (rhs - u[d]) * mvu;
         }
 
         // h_2 is used for calculating w
-        for(int d=0; d<NDIM; d++)
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x2[d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d] + sz2 * z[d]);
+            dh[d] = d0[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d] + dz2 * z[d]);
+        }
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;
             for(int j=0; j<NDIM; j++)
-                rhs += c2[d * NDIM + j] * xh[j];
+                rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
             w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
         }
 
         // finally, h_3 is used for calculating z
-        for(int d=0; d<NDIM; d++)
+        for(int d=0; d<NDIM; d++) {
             xh[d] = x3[d] + dt2 * (su3 * u[d] + sv3 * v[d] + sw3 * w[d] + sz3 * z[d]);
+            dh[d] = d0[d] + dt  * (du3 * u[d] + dv3 * v[d] + dw3 * w[d] + dz3 * z[d]);
+        }
         for(int d=0; d<NDIM; d++) {
             double rhs = 0;
             for(int j=0; j<NDIM; j++)
-                rhs += c3[d * NDIM + j] * xh[j];
+                rhs += a3[d * NDIM + j] * xh[j] + b3[d * NDIM + j] * dh[j];
             z[d] = (rhs - u[d]) * mzu - v[d] * mzv - w[d] * mzw;
         }
     }
@@ -726,14 +773,15 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
         q[d] = Q * idt;
         r[d] = R * idt2;
         s[d] = S * idt3;
-        state[d]      += (    P - 2 * Q + 3 * R - 4 * S) * dt2 + state[d+NDIM] * dt;
+        state[d]      += (    P - 2 * Q + 3 * R - 4 * S) * dt2 + d0[d] * dt;
         state[d+NDIM] += (2 * P - 3 * Q + 4 * R - 5 * S) * dt;
     }
 
     time += dt;
+    newstep = false;
 }
 
-// compile the following template instantiation
+// compile the template instantiation for 1d,2d and 3d systems only
 template class Ode2SolverGL3<1>;
 template class Ode2SolverGL3<2>;
 template class Ode2SolverGL3<3>;

@@ -44,17 +44,18 @@ typedef particles::ParticleArray<coord::PosCyl>::ArrayType ParticleArrayType;
 class RuntimePotential: public orbit::BaseRuntimeFnc {
 public:
     RuntimePotential(
+        orbit::BaseOrbitIntegrator& orbint,
         double _outputTimestep,
         const ParticleArrayType::iterator& _outputFirst,
         const ParticleArrayType::iterator& _outputLast)
     :
+        BaseRuntimeFnc(orbint),
         outputTimestep(_outputTimestep),
         outputFirst(_outputFirst),
         outputLast (_outputLast),
         outputIter (_outputFirst)
     {}
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
+    virtual bool processTimestep(double tbegin, double tend);
 private:
     /// interval between taking samples from the trajectory (counting from the beginning of the episode)
     const double outputTimestep;
@@ -109,7 +110,7 @@ public:
         const ParamsPotential& params,
         const particles::ParticleArrayAux& particles,
         potential::PtrPotential& ptrPot);
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "PotentialUpdate"; }

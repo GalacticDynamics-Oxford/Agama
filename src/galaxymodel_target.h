@@ -121,8 +121,9 @@ class RuntimeFncTarget: public orbit::BaseRuntimeFnc {
     static const int NUM_SAMPLES_PER_STEP = 10;
 
 public:
-    RuntimeFncTarget(const BaseTarget& _target, StorageNumT* _output) :
-        target(_target), output(_output), datacube(target.newDatacube()), time(0.) {}
+    RuntimeFncTarget(orbit::BaseOrbitIntegrator& orbint, const BaseTarget& _target, StorageNumT* _output) :
+        BaseRuntimeFnc(orbint), target(_target), output(_output),
+        datacube(target.newDatacube()), time(0.) {}
 
     /// finalize data collection, normalize the array by the total integration time,
     /// and convert to the numerical type used in the output storage
@@ -138,8 +139,7 @@ public:
     /// collect the data returned by the function for each point sub-sampled from the trajectory
     /// on the current timestep, and add it to the temporary storage array,
     /// weighted by the duration of the substep
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver& solver, const double tbegin, const double tend, double[])
+    virtual bool processTimestep(double tbegin, double tend)
     {
         time += tend-tbegin;
         double substep = (tend-tbegin) / NUM_SAMPLES_PER_STEP;  // duration of each sub-step
@@ -147,11 +147,10 @@ public:
         for(int s=0; s<NUM_SAMPLES_PER_STEP; s++) {
             double tsubstep = tbegin + substep * (s+0.5);  // equally-spaced samples in time
             double point[6];  // position and velocity in cartesian coordinates at the current sub-step
-            for(int c=0; c<6; c++)
-                point[c] = solver.getSol(tsubstep, c);
+            orbint.getSol(tsubstep).unpack_to(point);
             target.addPoint(point, substep, dataptr);
         }
-        return orbit::SR_CONTINUE;
+        return true;
     }
 };
 

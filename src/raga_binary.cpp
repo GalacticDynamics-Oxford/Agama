@@ -24,32 +24,28 @@ const double ACCURACY_ROOT = 1e-4;
 const double MAX_ECC = 0.999;
 
 /** Helper class to find the exact moment of crossing the critical radius */
-class EncounterFinder: public math::IFunctionNoDeriv {
-    const math::BaseOdeSolver& sol;
+class EncounterFinder: public math::IFunction {
+    const orbit::BaseOrbitIntegrator& orbint;
     const double r2crit;
 public:
-    EncounterFinder(const math::BaseOdeSolver& _sol, const double _r2crit) :
-        sol(_sol), r2crit(_r2crit)  {}
+    EncounterFinder(const orbit::BaseOrbitIntegrator& _orbint, const double _r2crit) :
+        orbint(_orbint), r2crit(_r2crit)  {}
     
     /// return the difference between the radius at the given time and the critical radius (both squared)
-    virtual double value(const double time) const {
-        return pow_2(sol.getSol(time, 0)) + pow_2(sol.getSol(time, 1)) + pow_2(sol.getSol(time, 2)) - r2crit;
+    virtual void evalDeriv(const double time, double* val, double* der, double*) const {
+        coord::PosVelCar pos = orbint.getSol(time);
+        if(val)
+            *val = pow_2(pos.x) + pow_2(pos.y) + pow_2(pos.z) - r2crit;
+        if(der)
+            *der = 2 * pos.x * pos.vx + 2 * pos.y * pos.vy + 2 * pos.z * pos.vz;
     }
+    virtual unsigned int numDerivs() const { return 1; }
 };
-
-/// helper function to find the total energy in the time-dependent potential
-inline double totalEnergy(double time,
-    const potential::BasePotential& pot, const potential::KeplerBinaryParams& bh, double posvel[6])
-{
-    const coord::PosCar pos(posvel[0], posvel[1], posvel[2]);
-    return pot.value(pos, time) + bh.potential(pos, time) +
-        0.5 * (pow_2(posvel[3]) + pow_2(posvel[4]) + pow_2(posvel[5]));
-}
 
 /// compute the change in L_z due to the torque from the stellar potential for the orbit segment
 /// on the interval of time [t1:t2] provided by the ODE solver
-double computeLztorque(
-    const potential::BasePotential& potential, const math::BaseOdeSolver& sol, double t1, double t2)
+double computeLztorque(const potential::BasePotential& potential,
+    const orbit::BaseOrbitIntegrator& orbint, double t1, double t2)
 {
     if(isZRotSymmetric(potential))
         return 0;
@@ -57,8 +53,7 @@ double computeLztorque(
     static const double delta = 0.211324865; // (1-sqrt(1./3))/2
     double ta = t1 * delta + t2 * (1-delta), tb = t2 * delta + t1 * (1-delta);
     coord::GradCar ga, gb;
-    coord::PosCar pa(sol.getSol(ta, 0), sol.getSol(ta, 1), sol.getSol(ta, 2));
-    coord::PosCar pb(sol.getSol(tb, 0), sol.getSol(tb, 1), sol.getSol(tb, 2));
+    coord::PosCar pa = orbint.getSol(ta), pb = orbint.getSol(tb);
     potential.eval(pa, NULL, &ga);
     potential.eval(pb, NULL, &gb);
     double torque = 0.5 * (t2-t1) * (pa.x * ga.dy - pa.y * ga.dx  +  pb.x * gb.dy - pb.y * gb.dx);
@@ -71,20 +66,18 @@ double computeLztorque(
 }
 }  // internal ns
 
-orbit::StepResult RuntimeBinary::processTimestep(
-    const math::BaseOdeSolver& sol, const double tbegin, const double tend, double [])
+bool RuntimeBinary::processTimestep(double tbegin, double tend)
 {
+    // position/velocity at the beginning and the end of encounter,
+    // initially assigned to the beginning/end of timestep
+    coord::PosVelCar ptbegin = orbint.getSol(tbegin), ptend = orbint.getSol(tend);
+
     // first determine whether the particle experiences an encounter during this timestep
-    double ptbegin[6], ptend[6];  // position/velocity at the beginning and the end of encounter
-    for(int d=0; d<6; d++) {      // initially assigned to the beginning/end of timestep
-        ptbegin[d] = sol.getSol(tbegin, d);
-        ptend  [d] = sol.getSol(tend, d);
-    }
-    double r2begin = pow_2(ptbegin[0]) + pow_2(ptbegin[1]) + pow_2(ptbegin[2]);
-    double r2end   = pow_2(ptend  [0]) + pow_2(ptend  [1]) + pow_2(ptend  [2]);
+    double r2begin = pow_2(ptbegin.x) + pow_2(ptbegin.y) + pow_2(ptbegin.z);
+    double r2end   = pow_2(ptend  .x) + pow_2(ptend  .y) + pow_2(ptend  .z);
     double r2crit  = pow_2(bh.sma * BINARY_ENCOUNTER_RADIUS);
     if(r2begin >= r2crit && r2end >= r2crit)  // the entire timestep is outside the critical radius:
-        return orbit::SR_CONTINUE;            // no further action required
+        return true;                          // no further action required
 
     // if during the timestep the particle spends some time inside the critical radius,
     // we need to determine exactly the time when it enters and exits the sphere with this radius
@@ -94,16 +87,14 @@ orbit::StepResult RuntimeBinary::processTimestep(
     // if the particle has crossed the critical radius during the timestep,
     // we need to find the exact time this happened
     if((r2end < r2crit) ^ (r2begin < r2crit)) {
-        double tcross = math::findRoot(EncounterFinder(sol, r2crit), tbegin, tend, ACCURACY_ROOT);
+        double tcross = math::findRoot(EncounterFinder(orbint, r2crit), tbegin, tend, ACCURACY_ROOT);
         assert(tcross >= tbegin && tcross <= tend);
         if(r2begin >= r2crit) {
             tbeginEnc = tcross;
-            for(int d=0; d<6; d++)
-                ptbegin[d] = sol.getSol(tcross, d);
+            ptbegin   = orbint.getSol(tcross);
         } else {
-            tendEnc = tcross;
-            for(int d=0; d<6; d++)
-                ptend[d] = sol.getSol(tcross, d);
+            tendEnc   = tcross;
+            ptend     = orbint.getSol(tcross);
         }
     }
     
@@ -120,30 +111,27 @@ orbit::StepResult RuntimeBinary::processTimestep(
 
     // compute the changes in particle energy and z-component of angular momentum during the time
     // that it spends inside the critical radius (it may be the entire timestep or its fraction)
-    double Ebegin  = totalEnergy(tbeginEnc, pot, bh, ptbegin);
-    double Eend    = totalEnergy(tendEnc,   pot, bh, ptend);
-    double Lzbegin = ptbegin[0] * ptbegin[4] - ptbegin[1] * ptbegin[3];
-    double Lzend   = ptend  [0] * ptend  [4] - ptend  [1] * ptend  [3];
+    double Ebegin  = totalEnergy(potstars, ptbegin, tbeginEnc) + bh.potential(ptbegin, tbeginEnc);
+    double Eend    = totalEnergy(potstars, ptend,   tendEnc)   + bh.potential(ptend,   tendEnc);
+    double Lzbegin = Lz(ptbegin);
+    double Lzend   = Lz(ptend);
     // if the stellar potential itself is non-axisymmetric, the z-component of angular momentum
     // also changes due to the torque from the stellar potential, and we need to take this into account
-    double Lztorque = computeLztorque(pot, sol, tbeginEnc, tendEnc);
+    double Lztorque = computeLztorque(potstars, orbint, tbeginEnc, tendEnc);
 
     // if the encounter started during the current timestep,
     // we add a new record to the list of encounters for this orbit,
     // otherwise we update the most recent encounter record
-    if(newEncounter) {
-        double Lbegin = sqrt(pow_2(ptbegin[1] * ptbegin[5] - ptbegin[2] * ptbegin[4]) +
-            pow_2(Lzbegin) + pow_2(ptbegin[2] * ptbegin[3] - ptbegin[0] * ptbegin[5]) );
-        encountersList.push_back(BinaryEncounterData(tbeginEnc, Ebegin, Lbegin));
-    }
+    if(newEncounter)
+        encountersList.push_back(BinaryEncounterData(tbeginEnc, Ebegin, Ltotal(ptbegin)));
     BinaryEncounterData& enc = encountersList.back();
     enc.Tlength += tendEnc - tbeginEnc;
     enc.deltaE  += Eend  - Ebegin;
     enc.deltaLz += Lzend - Lzbegin - Lztorque;
-    enc.costheta = ptend[5] / sqrt(pow_2(ptend[3]) + pow_2(ptend[4]) + pow_2(ptend[5]));
-    enc.phi      = atan2(ptend[4], ptend[3]);
+    enc.costheta = ptend.vz / sqrt(pow_2(ptend.vx) + pow_2(ptend.vy) + pow_2(ptend.vz));
+    enc.phi      = atan2(ptend.vy, ptend.vx);
 
-    return orbit::SR_CONTINUE;
+    return true;
 }
 
 
@@ -164,9 +152,10 @@ RagaTaskBinary::RagaTaskBinary(
         ", eccentricity=" + utils::toString(bh.ecc));        
 }
 
-orbit::PtrRuntimeFnc RagaTaskBinary::createRuntimeFnc(unsigned int particleIndex)
+void RagaTaskBinary::createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex)
 {
-    return orbit::PtrRuntimeFnc(new RuntimeBinary(*ptrPot, bh, encounters[particleIndex]));
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new RuntimeBinary(
+        orbint, *ptrPot, bh, encounters[particleIndex])));
 }
 
 void RagaTaskBinary::startEpisode(double timeStart, double length)

@@ -109,36 +109,51 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
     The reason for doing this is that such warnings involve subtle interference with GIL
     when executed in a multi-threading context, leading to deadlocks if a user-defined Python
     function is accessed from multiple threads (even after being protected by an OpenMP critical
-    section). The instance of this class is created (and hence warnings are suppressed)
+    section). An instance of this class is created (and hence warnings are suppressed if this
+    is the first such instance, or are kept suppressed if there is more than one instance)
     whenever a user-defined callback function is instantiated, and the previous warning settings
-    are restored once such a function is deallocated.
+    are restored once all such functions are deallocated.
 */
 class NumpyWarningsDisabler {
     PyObject *seterr, *prevSettings;  ///< pointer to the function and its previous settings
+    static int numInstances;          ///< count the number of times this class is instantiated
 public:
     NumpyWarningsDisabler() : seterr(NULL), prevSettings(NULL)
     {
-        PyObject* numpy = PyImport_AddModule("numpy");
-        if(!numpy) return;
-        seterr = PyObject_GetAttrString(numpy, "seterr");
-        if(!seterr) return;
-        // store the dictionary corresponding to current settings of numpy warnings subsystem
-        prevSettings = PyObject_CallFunction(seterr, const_cast<char*>("s"), "ignore");
-        if(!prevSettings) { printf("Failed to suppress numpy warnings\n"); }
-        /*else { printf("Ignoring numpy warnings\n"); }*/
+        // disable warnings on the first call only (and keep disabled for any subsequent calls
+        // while at least one disabler object exists in nature)
+        if(numInstances==0) {
+            PyObject* numpy = PyImport_AddModule("numpy");
+            if(!numpy) return;
+            seterr = PyObject_GetAttrString(numpy, "seterr");
+            if(!seterr) return;
+            // store the dictionary corresponding to current settings of numpy warnings subsystem
+            prevSettings = PyObject_CallFunction(seterr, const_cast<char*>("s"), "ignore");
+            if(!prevSettings) { printf("Failed to suppress numpy warnings\n"); }
+        }
+        numInstances++;
+        utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Ignoring numpy warnings " +
+            utils::toString(numInstances) + " times\n");
     }
     ~NumpyWarningsDisabler()
     {
-        if(!seterr || !prevSettings) return;
-        // restore the previous settings of numpy warnings subsystem
-        PyObject* args = PyTuple_New(0);
-        PyObject* result = PyObject_Call(seterr, args, prevSettings);
-        Py_DECREF(args);
-        if(!result) { printf("Failed to restore numpy warnings\n"); }
-        /*else printf("Restored numpy warnings\n");*/
-        Py_XDECREF(result);
+        utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Finished ignoring numpy warnings " +
+            utils::toString(numInstances) + " times\n");
+        numInstances--;
+        // if this was the last instance of this class, finally restore the warnings handler
+        if(numInstances==0) {
+            if(!seterr || !prevSettings) return;
+            // restore the previous settings of numpy warnings subsystem
+            PyObject* args = PyTuple_New(0);
+            PyObject* result = PyObject_Call(seterr, args, prevSettings);
+            Py_DECREF(args);
+            if(!result) { printf("Failed to restore numpy warnings\n"); }
+            else { utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Restored numpy warnings\n"); }
+            Py_XDECREF(result);
+        }
     }
 };
+int NumpyWarningsDisabler::numInstances = 0;
 
 //  ------------------------------------------------------------------
 /// \name  Helper routines for type conversions and argument checking
@@ -1668,6 +1683,26 @@ Py_ssize_t Density_len(PyObject* self)
     return -1;
 }
 
+// compare two Python Density objects "by value" (check if they represent the same C++ object)
+PyObject* Density_compare(PyObject* self, PyObject* other, int op)
+{
+    bool equal = ((DensityObject*)self)->dens == ((DensityObject*)other)->dens;
+    switch (op) {
+        case Py_EQ:
+            return PyBool_FromLong(equal);
+        case Py_NE:
+            return PyBool_FromLong(!equal);
+        default:
+            PyErr_SetString(PyExc_TypeError, "Invalid comparison");
+            return NULL;
+    }
+}
+
+long Density_hash(PyObject *self)
+{
+    return (long) ((DensityObject*)self)->dens.get();  // use the pointer value as a hash
+}
+
 // indexing scheme is shared by both Density and Potential python classes
 static PySequenceMethods Density_sequence_methods = {
     Density_len, 0, 0, Density_elem,
@@ -1733,9 +1768,9 @@ static PyTypeObject DensityType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Density",
     sizeof(DensityObject), 0, (destructor)Density_dealloc,
-    0, 0, 0, 0, 0, 0, &Density_sequence_methods, 0, 0, 0, Density_name, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, &Density_sequence_methods, 0, Density_hash, 0, Density_name, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDensity,
-    0, 0, 0, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, Density_compare, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Density_init
 };
 
@@ -3812,7 +3847,7 @@ public:
                     dens[ic] /= conv->massUnit / math::pow(conv->lengthUnit, ndim);
                 if(vel)
                     for(int d=0; d<3; d++)
-                        vel[ic] /= conv->velocityUnit;
+                        vel[ic * 3 + d] /= conv->velocityUnit;
                 if(vel2)
                     for(int d=0; d<6; d++)
                         vel2[ic * 6 + d] /= pow_2(conv->velocityUnit);
@@ -3915,10 +3950,15 @@ public:
                 /*velerr*/ convertVel(&inputBuffer[ip*8+5]),
                 /*output*/ &outputBuffer[ip * numComponents],
                 separate, orientation);
-            // convert units in the output array
+            // convert units in the output array:
+            // the dimension of the result is surface density divided by velocity to the power K,
+            // where K is the number of velocity components with finite uncertainty
+            double dim = conv->massUnit / pow_2(conv->lengthUnit);
+            for(unsigned int d=0; d<3; d++)
+                if(isFinite(inputBuffer[ip*8+5+d]))
+                    dim /= conv->velocityUnit;
             for(unsigned int ic=0; ic<numComponents; ic++)
-                outputBuffer[ip * numComponents + ic] /=
-                    conv->massUnit / pow_2(conv->lengthUnit) / conv->velocityUnit;
+                outputBuffer[ip * numComponents + ic] /= dim;
         }
         catch(std::exception& ex) {
             for(unsigned int ic=0; ic<numComponents; ic++)
@@ -4591,6 +4631,7 @@ typedef struct {
     ActionFinderObject* af;
     /// members of galaxymodel::SelfConsistentModel structure listed here
     bool useActionInterpolation;  ///< whether to use the interpolated action finder
+    bool verbose;                 ///< whether to print out progress report messages
     double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
     unsigned int sizeRadialSph;   ///< number of grid points in radius
     unsigned int lmaxAngularSph;  ///< maximum order of angular-harmonic expansion (l_max)
@@ -4621,6 +4662,7 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     self->pot         = NULL;
     self->af          = NULL;
     self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), false);
+    self->verbose     =   toBool(getItemFromPyDict(namedArgs, "verbose"), true);
     self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
     self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -2);
     self->sizeRadialSph  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
@@ -4656,6 +4698,7 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
         model.components.push_back(((ComponentObject*)elem)->comp);
     }
     model.useActionInterpolation = self->useActionInterpolation;
+    model.verbose = self->verbose;
     model.rminSph = self->rminSph * conv->lengthUnit;
     model.rmaxSph = self->rmaxSph * conv->lengthUnit;
     model.sizeRadialSph = self->sizeRadialSph;
@@ -4707,6 +4750,8 @@ static PyMemberDef SelfConsistentModel_members[] = {
     { const_cast<char*>("useActionInterpolation"), T_BOOL,
       offsetof(SelfConsistentModelObject, useActionInterpolation), 0,
       const_cast<char*>("Whether to use interpolated action finder (faster but less accurate)") },
+    { const_cast<char*>("verbose"), T_BOOL, offsetof(SelfConsistentModelObject, verbose), 0,
+      const_cast<char*>("Whether to print out progress report messages") },
     { const_cast<char*>("rminSph"), T_DOUBLE, offsetof(SelfConsistentModelObject, rminSph), 0,
       const_cast<char*>("Spherical radius of innermost grid node for Multipole potential") },
     { const_cast<char*>("rmaxSph"), T_DOUBLE, offsetof(SelfConsistentModelObject, rmaxSph), 0,
@@ -5568,6 +5613,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
         return NULL;
 
+    // unit-convert the pattern speed
+    Omega /= conv->timeUnit;
+
     // ensure that a potential object was provided
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
@@ -5742,29 +5790,27 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     volatile npy_intp numComplete = 0;
     volatile time_t tprint = time(NULL), tbegin = tprint;
     if(!fail) {
-        unique_ptr<const math::IOdeSystem> orbitIntegrator(
-            haveLyap && Omega!=0 ?
-            (const math::IOdeSystem*) new orbit::OrbitIntegratorVarEq(*pot, Omega / conv->timeUnit) :
-            (const math::IOdeSystem*) new orbit::OrbitIntegratorRot  (*pot, Omega / conv->timeUnit) );
-
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
         for(npy_intp orb = 0; orb < numOrbits; orb++) {
             if(fail || cbrk.triggered()) continue;
+            // temporary place for storing the trajectory before subsequent unit-conversion
+            std::vector< std::pair<coord::PosVelCar, double> > traj;
             try{
-                std::vector< std::pair<coord::PosVelCar, double> > traj;  // stores the trajectory
+                // instance of the orbit integrator for the current orbit
+                orbit::OrbitIntegrator<coord::Car> orbint(*pot, Omega, params);
 
                 // construct runtime functions for each target that store the collected data
                 // in the respective row of each target's matrix,
                 // plus optionally the trajectory and Lyapunov exponent recording functions
-                orbit::RuntimeFncArray fncs(numTargets + haveTraj + haveLyap);
                 for(size_t t=0; t<numTargets; t++) {
                     PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
                     galaxymodel::StorageNumT* output = singleOrbit ?
                         &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, 0) :
                         &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, 0);
-                    fncs[t].reset(new galaxymodel::RuntimeFncTarget(*targets[t], output));
+                    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
+                        new galaxymodel::RuntimeFncTarget(orbint, *targets[t], output)));
                 }
                 if(haveTraj) {
                     double trajStep = trajSizes[orb]>0 ?
@@ -5772,119 +5818,24 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         // (in that case, outputInterval=INFINITY, and we store only the last point)
                         fabs(timetotal[orb]) / (trajSizes[orb]-1) :
                         0;  // if trajSize==0, this means store trajectory at every integration timestep
-                    fncs[numTargets].reset(new orbit::RuntimeTrajectory<coord::Car>(trajStep, traj));
+                    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
+                        new orbit::RuntimeTrajectory(orbint, trajStep, traj)));
                 }
                 if(haveLyap) {
                     double samplingInterval = 0.1 * T_circ(*pot, totalEnergy(*pot, initCond.at(orb)));
                     PyObject* elem = PyTuple_GET_ITEM(result, numTargets + haveTraj);  // output array
-                    double& output = singleOrbit ?
+                    double& lyap = singleOrbit ?
                         pyArrayElem<double>(elem, 0) :
                         pyArrayElem<double>(elem, orb, 0);
-                    if(Omega == 0)  // UseInternalVarEqSolver
-                        fncs[numTargets + haveTraj].reset(
-                            new orbit::RuntimeLyapunov<true> (*pot, samplingInterval, output));
-                    else
-                        fncs[numTargets + haveTraj].reset(
-                            new orbit::RuntimeLyapunov<false>(*pot, samplingInterval, output));
+                    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
+                        new orbit::RuntimeLyapunov(orbint, samplingInterval, lyap)));
                 }
 
                 // integrate the orbit
-                orbit::integrate(initCond.at(orb), timetotal[orb], *orbitIntegrator,
-                    fncs, params, timestart[orb]);
-
-                // finish the runtime functions
-                fncs.clear();
-
-                // convert the units for matrices produced by targets
-                for(size_t t=0; t<numTargets; t++) {
-                    galaxymodel::StorageNumT mult = conv->massUnit / unitConversionFactors[t];
-                    PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
-                    npy_intp size = targets[t]->numCoefs();
-                    if(singleOrbit)
-                        for(npy_intp index=0; index<size; index++)
-                            pyArrayElem<galaxymodel::StorageNumT>(storage_arr, index) *= mult;
-                    else
-                        for(npy_intp index=0; index<size; index++)
-                            pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, index) *= mult;
-                }
-
-                // if the trajectory was recorded, store it in the corresponding item of the output tuple
-                if(haveTraj) {
-                    const npy_intp size = traj.size();
-                    npy_intp dims[] = {size, traj_dtype==NPY_CFLOAT || traj_dtype==NPY_CDOUBLE ? 3 : 6};
-                    PyObject *time_arr, *traj_arr;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-                    {   // avoid concurrent non-readonly access to Python C API
-                        time_arr = PyArray_SimpleNew(1, dims,
-                            traj_dtype==NPY_FLOAT || traj_dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
-                        traj_arr = PyArray_SimpleNew(2, dims, traj_dtype);
-                    }
-                    if(!time_arr || !traj_arr) {
-                        fail = true;
-                        continue;
-                    }
-
-                    // convert the units and numerical type
-                    for(npy_intp index=0; index<size; index++) {
-                        double point[6];
-                        unconvertPosVel(traj[index].first, point);
-                        // time array
-                        if(traj_dtype == NPY_DOUBLE || traj_dtype == NPY_CDOUBLE)
-                            pyArrayElem<double>(time_arr, index) = traj[index].second / conv->timeUnit;
-                        else
-                            pyArrayElem<float>(time_arr, index) =
-                                static_cast<float>(traj[index].second / conv->timeUnit);
-                        // trajectory array
-                        switch(traj_dtype) {
-                            case NPY_DOUBLE:
-                                for(int c=0; c<6; c++)
-                                    pyArrayElem<double>(traj_arr, index, c) = point[c];
-                                break;
-                            case NPY_FLOAT:
-                                for(int c=0; c<6; c++)
-                                    pyArrayElem<float>(traj_arr, index, c) = static_cast<float>(point[c]);
-                                break;
-                            case NPY_CDOUBLE:
-                                for(int c=0; c<3; c++)
-                                    pyArrayElem<std::complex<double> >(traj_arr, index, c) =
-                                        std::complex<double>(point[c+0], point[c+3]);
-                                break;
-                            case NPY_CFLOAT:
-                                for(int c=0; c<3; c++) {
-                                    pyArrayElem<std::complex<float> >(traj_arr, index, c) =
-                                        std::complex<float>(point[c+0], point[c+3]);
-                                }
-                                break;
-                            default: {}  // shouldn't happen, we checked dtype beforehand
-                        }
-                    }
-
-                    // store these arrays in the corresponding element of the output tuple
-                    PyObject* elem = PyTuple_GET_ITEM(result, numTargets);
-                    if(singleOrbit) {
-                        pyArrayElem<PyObject*>(elem, 0) = time_arr;
-                        pyArrayElem<PyObject*>(elem, 1) = traj_arr;
-                    } else {
-                        pyArrayElem<PyObject*>(elem, orb, 0) = time_arr;
-                        pyArrayElem<PyObject*>(elem, orb, 1) = traj_arr;
-                    }
-                }
-
-                // status update
-#ifdef _OPENMP
-#pragma omp atomic
-#endif
-                ++numComplete;
-                if(numOrbits != 1) {
-                    time_t tnow = time(NULL);
-                    if(difftime(tnow, tprint)>=1.) {
-                        tprint = tnow;
-                        printf("%li/%li orbits complete\r", (long int)numComplete, (long int)numOrbits);
-                        fflush(stdout);
-                    }
-                }
+                orbint.init(initCond[orb], timestart[orb]);
+                orbint.run(timetotal[orb]);
+                // finalize the output of runtime functions - they are destroyed along with orbint,
+                // performing any necessary procedures before going out of scope
             }
             catch(std::exception& e) {
 #ifdef _OPENMP
@@ -5892,6 +5843,98 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #endif
                 PyErr_SetString(PyExc_RuntimeError, (std::string("Error in orbit(): ")+e.what()).c_str());
                 fail = true;
+            }
+            // remaining procedures are trivial and should not raise exceptions
+
+            // convert the units for matrices produced by targets
+            for(size_t t=0; t<numTargets; t++) {
+                galaxymodel::StorageNumT mult = conv->massUnit / unitConversionFactors[t];
+                PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
+                npy_intp size = targets[t]->numCoefs();
+                if(singleOrbit)
+                    for(npy_intp index=0; index<size; index++)
+                        pyArrayElem<galaxymodel::StorageNumT>(storage_arr, index) *= mult;
+                else
+                    for(npy_intp index=0; index<size; index++)
+                        pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, index) *= mult;
+            }
+
+            // if the trajectory was recorded, store it in the corresponding item of the output tuple
+            if(haveTraj) {
+                const npy_intp size = traj.size();
+                npy_intp dims[] = {size, traj_dtype==NPY_CFLOAT || traj_dtype==NPY_CDOUBLE ? 3 : 6};
+                PyObject *time_arr, *traj_arr;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+                {   // avoid concurrent non-readonly access to Python C API
+                    time_arr = PyArray_SimpleNew(1, dims,
+                        traj_dtype==NPY_FLOAT || traj_dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
+                    traj_arr = PyArray_SimpleNew(2, dims, traj_dtype);
+                }
+                if(!time_arr || !traj_arr) {
+                    fail = true;
+                    continue;
+                }
+
+                // convert the units and numerical type
+                for(npy_intp index=0; index<size; index++) {
+                    double point[6];
+                    unconvertPosVel(traj[index].first, point);
+                    // time array
+                    if(traj_dtype == NPY_DOUBLE || traj_dtype == NPY_CDOUBLE)
+                        pyArrayElem<double>(time_arr, index) = traj[index].second / conv->timeUnit;
+                    else
+                        pyArrayElem<float>(time_arr, index) =
+                            static_cast<float>(traj[index].second / conv->timeUnit);
+                    // trajectory array
+                    switch(traj_dtype) {
+                        case NPY_DOUBLE:
+                            for(int c=0; c<6; c++)
+                                pyArrayElem<double>(traj_arr, index, c) = point[c];
+                            break;
+                        case NPY_FLOAT:
+                            for(int c=0; c<6; c++)
+                                pyArrayElem<float>(traj_arr, index, c) = static_cast<float>(point[c]);
+                            break;
+                        case NPY_CDOUBLE:
+                            for(int c=0; c<3; c++)
+                                pyArrayElem<std::complex<double> >(traj_arr, index, c) =
+                                    std::complex<double>(point[c+0], point[c+3]);
+                            break;
+                        case NPY_CFLOAT:
+                            for(int c=0; c<3; c++) {
+                                pyArrayElem<std::complex<float> >(traj_arr, index, c) =
+                                    std::complex<float>(point[c+0], point[c+3]);
+                            }
+                            break;
+                        default: {}  // shouldn't happen, we checked dtype beforehand
+                    }
+                }
+
+                // store these arrays in the corresponding element of the output tuple
+                PyObject* elem = PyTuple_GET_ITEM(result, numTargets);
+                if(singleOrbit) {
+                    pyArrayElem<PyObject*>(elem, 0) = time_arr;
+                    pyArrayElem<PyObject*>(elem, 1) = traj_arr;
+                } else {
+                    pyArrayElem<PyObject*>(elem, orb, 0) = time_arr;
+                    pyArrayElem<PyObject*>(elem, orb, 1) = traj_arr;
+                }
+            }
+
+            // status update
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+            ++numComplete;
+            if(numOrbits != 1) {
+                time_t tnow = time(NULL);
+                if(difftime(tnow, tprint)>=1.) {
+                    tprint = tnow;
+                    printf("%li/%li orbits complete\r", (long int)numComplete, (long int)numOrbits);
+                    fflush(stdout);
+                }
             }
         }
     }

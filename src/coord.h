@@ -1023,6 +1023,28 @@ public:
         return coord::VelCar(result[0], result[1], result[2]);
     }
 
+    /** transform the position and velocity from the 'original' to the 'rotated' frame
+        (convenience overload for PosVelCar) */
+    PosVelCar toRotated(const PosVelCar& posvel) const
+    {
+        double vec[6], result[6];
+        posvel.unpack_to(vec);
+        toRotated(vec,   result);
+        toRotated(vec+3, result+3);
+        return PosVelCar(result);
+    }
+
+    /** transform the position and velocity from the 'rotated' to the 'original' frame
+        (convenience overload for PosVelCar) */
+    PosVelCar fromRotated(const PosVelCar& posvel) const
+    {
+        double vec[6], result[6];
+        posvel.unpack_to(vec);
+        fromRotated(vec,   result);
+        fromRotated(vec+3, result+3);
+        return PosVelCar(result);
+    }
+
     /** transform the second moment of velocity in cartesian coordinates
         from the 'original' to the 'rotated' frame */
     Vel2Car toRotated(const Vel2Car& vel2) const

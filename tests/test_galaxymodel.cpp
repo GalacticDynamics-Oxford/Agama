@@ -252,9 +252,9 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     galaxymodel::computeMoments(model, posproj, &densprojrot, &velprojrot, &vel2projrot, false, ori);
     if(spherical) {
         ok &= test(densproj, densprojrot, 2e-4, "projected moments() density in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vx2, vel2projrot.vx2, 2e-4, "projected moments() velocity vx^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vy2, vel2projrot.vy2, 2e-4, "projected moments() velocity vy^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vz2, vel2projrot.vz2, 2e-4, "projected moments() velocity vz^2 in rotated vs. non-rotated frame");
+        ok &= test(vel2proj.vx2, vel2projrot.vx2, 3e-4, "projected moments() velocity vx^2 in rotated vs. non-rotated frame");
+        ok &= test(vel2proj.vy2, vel2projrot.vy2, 3e-4, "projected moments() velocity vy^2 in rotated vs. non-rotated frame");
+        ok &= test(vel2proj.vz2, vel2projrot.vz2, 3e-4, "projected moments() velocity vz^2 in rotated vs. non-rotated frame");
         // mixed moments - all together for simplicity
         ok &= test(vel2proj.vxvy + vel2proj.vxvz + vel2proj.vyvz + vel2true,
                    vel2projrot.vxvy + vel2projrot.vxvz + vel2projrot.vyvz + vel2true,
@@ -496,9 +496,9 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     ok &= test(vdfp.integrate(vmin, vmax, amplvZrot, 1) + velnorm, velprojrot.vz + velnorm, 1e-4, "projected vdf() mean vz vs. projected moments(), rotated");
 
     // the dispersion of VDF matches the second moment returned by computeMoments()
-    ok &= test(vdfp.integrate(vmin, vmax, amplvXrot, 2), vel2projrot.vx2, 2e-4, "projected vdf() mean vx^2 vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvYrot, 2), vel2projrot.vy2, 2e-4, "projected vdf() mean vy^2 vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZrot, 2), vel2projrot.vz2, 2e-4, "projected vdf() mean vz^2 vs. projected moments(), rotated");
+    ok &= test(vdfp.integrate(vmin, vmax, amplvXrot, 2), vel2projrot.vx2, 3e-4, "projected vdf() mean vx^2 vs. projected moments(), rotated");
+    ok &= test(vdfp.integrate(vmin, vmax, amplvYrot, 2), vel2projrot.vy2, 3e-4, "projected vdf() mean vy^2 vs. projected moments(), rotated");
+    ok &= test(vdfp.integrate(vmin, vmax, amplvZrot, 2), vel2projrot.vz2, 3e-4, "projected vdf() mean vz^2 vs. projected moments(), rotated");
 
     // values of interpolated VDF should match those computed by projectedDF
     // marginalized over vX,vY when considering f_z(v_Z), or over vY,vZ when considering f_x(v_X)

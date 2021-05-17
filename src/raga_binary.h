@@ -51,22 +51,23 @@ typedef std::vector<BinaryEncounterData> BinaryEncounterList;
 
 /** Runtime function responsible for tracking the encounters with the binary black hole */
 class RuntimeBinary: public orbit::BaseRuntimeFnc {
-    const potential::BasePotential& pot;     ///< stellar potential
+    const potential::BasePotential& potstars;///< stellar potential
     const potential::KeplerBinaryParams& bh; ///< parameters of the binary BH
     BinaryEncounterList& encountersList;     ///< place for storing the information about encounters
 public:
     RuntimeBinary(
-        const potential::BasePotential& _pot,
+        orbit::BaseOrbitIntegrator& orbint,
+        const potential::BasePotential& _potstars,
         const potential::KeplerBinaryParams& _bh,
         BinaryEncounterList& _encountersList)
     :
-        pot(_pot),
+        BaseRuntimeFnc(orbint),
+        potstars(_potstars),
         bh(_bh),
         encountersList(_encountersList)
     {}
 
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
+    virtual bool processTimestep(double tbegin, double tend);
 };
 
 /** Fixed global parameters for handling the evolution of binary supermassive black hole */
@@ -93,7 +94,7 @@ public:
         const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
         potential::KeplerBinaryParams& bh);
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "BinaryBH     "; }

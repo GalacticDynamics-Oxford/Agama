@@ -17,38 +17,38 @@ namespace{
 */
 class PericenterFinder: public math::IFunctionNoDeriv {
     const potential::KeplerBinaryParams& bh;
-    const math::BaseOdeSolver& sol;
+    const orbit::BaseOrbitIntegrator& orbint;
     const int bhindex;
 public:
     PericenterFinder(const potential::KeplerBinaryParams& _bh,
-        const math::BaseOdeSolver& _sol, const int _bhindex) :
-        bh(_bh), sol(_sol), bhindex(_bhindex)  {}
+        const orbit::BaseOrbitIntegrator& _orbint, const int _bhindex) :
+        bh(_bh), orbint(_orbint), bhindex(_bhindex)  {}
 
     /// return the time derivative of the squared distance to the given black hole
     virtual double value(const double time) const
     {
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
         bh.keplerOrbit(time, bhX, bhY, bhVX, bhVY);
+        coord::PosVelCar pv = orbint.getSol(time);
         return
-            (sol.getSol(time, 0)-bhX[bhindex]) * (sol.getSol(time, 3)-bhVX[bhindex]) +
-            (sol.getSol(time, 1)-bhY[bhindex]) * (sol.getSol(time, 4)-bhVY[bhindex]) +
-             sol.getSol(time, 2) * sol.getSol(time, 5);
+            (pv.x - bhX[bhindex]) * (pv.vx - bhVX[bhindex]) +
+            (pv.y - bhY[bhindex]) * (pv.vy - bhVY[bhindex]) +
+             pv.z * pv.vz;
     }
 };
 
 } // anonymous namespace
 
-orbit::StepResult RuntimeLosscone::processTimestep(
-    const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[])
+bool RuntimeLosscone::processTimestep(double tbegin, double tend)
 {
     // first check if this particle has already been captured
     // (actually then the orbit integration should have been terminated, so this check is redundant)
     if(output->tcapt >= 0)
-        return orbit::SR_TERMINATE;
+        return false;
 
     int numBH = bh.sma>0 ? 2 : 1;
     for(int b=0; b<numBH; b++) {
-        const PericenterFinder pf(bh, sol, b);
+        const PericenterFinder pf(bh, orbint, b);
 
         // if this is the first timestep, need to compute d(r^2)/dt at the beginning
         // of the timestep, otherwise copy the stored value from the previous timestep
@@ -76,10 +76,8 @@ orbit::StepResult RuntimeLosscone::processTimestep(
         // compute the pericenter distance
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
         bh.keplerOrbit(tperi, bhX, bhY, bhVX, bhVY);
-        double posvel[6];
-        for(int d=0; d<6; d++)
-            posvel[d] = sol.getSol(tperi, d);
-        double rperi = sqrt(pow_2(posvel[0]-bhX[b]) + pow_2(posvel[1]-bhY[b]) + pow_2(posvel[2]));
+        coord::PosVelCar posvel = orbint.getSol(tperi);
+        double rperi = sqrt(pow_2(posvel.x-bhX[b]) + pow_2(posvel.y-bhY[b]) + pow_2(posvel.z));
 
         // compare it with the capture radius
         if(rperi > captureRadius[b])
@@ -89,21 +87,20 @@ orbit::StepResult RuntimeLosscone::processTimestep(
         output->tcapt   = tperi;
         double Mbh      = bh.mass * (numBH==1 ? 1 : (b==0 ? 1 : bh.q) / (1 + bh.q));
         output->E       = -Mbh / rperi +
-            0.5 * (pow_2(posvel[3]-bhVX[b]) + pow_2(posvel[4]-bhVY[b]) + pow_2(posvel[5]));
+            0.5 * (pow_2(posvel.vx-bhVX[b]) + pow_2(posvel.vy-bhVY[b]) + pow_2(posvel.vz));
         output->rperi   = rperi;
         output->rcapt   = captureRadius[b];
         output->indexBH = b;
 
         // store the position/velocity at the moment of capture
-        for(int i=0; i<6; i++)
-            vars[i] = posvel[i];
+        orbint.init(posvel, tperi);
 
         // inform the ODE integrator that this particle is no more...
-        return orbit::SR_TERMINATE;
+        return false;
     }
 
     // if the particle wasn't captured, continue as usual
-    return orbit::SR_CONTINUE;
+    return true;
 }
 
 
@@ -123,7 +120,7 @@ RagaTaskLosscone::RagaTaskLosscone(
         ", accreted mass fraction=" + utils::toString(params.captureMassFraction));
 }
 
-orbit::PtrRuntimeFnc RagaTaskLosscone::createRuntimeFnc(unsigned int particleIndex)
+void RagaTaskLosscone::createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex)
 {
     double Mbh0 = bh.sma==0 ? bh.mass / (1 + bh.q) : bh.mass;
     double Mbh1 = bh.sma==0 ? bh.mass / (1 + bh.q) * bh.q : 0;
@@ -135,8 +132,8 @@ orbit::PtrRuntimeFnc RagaTaskLosscone::createRuntimeFnc(unsigned int particleInd
             particles.point(particleIndex).stellarRadius *
             pow(Mbh1 / particles.point(particleIndex).stellarMass, 1./3) ) };
 
-    return orbit::PtrRuntimeFnc(new RuntimeLosscone(
-        bh, captures.begin() + particleIndex, captureRadius));
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new RuntimeLosscone(
+        orbint, bh, captures.begin() + particleIndex, captureRadius)));
 }
 
 void RagaTaskLosscone::startEpisode(double timeStart, double length)

@@ -60,8 +60,9 @@ class BaseRagaTask {
 public:
     virtual ~BaseRagaTask() {}
 
-    /** Create an instance of a runtime function for the given particle */
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex) = 0;
+    /** Create an instance of a runtime function for the given particle
+        and attach it to the orbit integrator for that particle */
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex) = 0;
 
     /** Prepare for the upcoming episode that begins at timeStart and lasts for episodeLength */
     virtual void startEpisode(double timeStart, double episodeLength) = 0;

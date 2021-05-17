@@ -85,6 +85,7 @@ namespace raga {
 class RuntimeRelaxation: public orbit::BaseRuntimeFnc {
 public:
     RuntimeRelaxation(
+        orbit::BaseOrbitIntegrator& orbint,
         const potential::BasePotential& _potentialSph,
         const galaxymodel::SphericalIsotropicModelLocal& _relaxationModel,
         double _coulombLog,
@@ -94,6 +95,7 @@ public:
         const std::vector<double>::iterator& _outputLast,
         unsigned int _seed)
     :
+        BaseRuntimeFnc(orbint),
         potentialSph(_potentialSph),
         relaxationModel(_relaxationModel),
         coulombLog(_coulombLog),
@@ -104,8 +106,7 @@ public:
         outputIter (_outputFirst),
         seed(_seed)
     {}
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
+    virtual bool processTimestep(double tbegin, double tend);
 private:
     /** The spherically-symmetric approximation to the actual total potential,
         including the central black hole (in case of a binary BH, it is represented by
@@ -183,7 +184,7 @@ public:
         const particles::ParticleArrayAux& particles,
         const potential::PtrPotential& ptrPot,
         const potential::KeplerBinaryParams& bh);
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "Relaxation     "; }

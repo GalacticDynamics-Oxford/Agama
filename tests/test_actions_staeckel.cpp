@@ -35,13 +35,15 @@ const bool output=utils::verbosityLevel >= utils::VL_VERBOSE;  // whether to cre
 const char* err=" \033[1;31m**\033[0m\n";
 const char* exc=" \033[1;33mCAUGHT EXCEPTION\033[0m\n";
 
-template<typename CoordT>
-bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
+bool test(const potential::OblatePerfectEllipsoid& potential,
     const actions::ActionFinderAxisymFudge& actfinder,
-    const coord::PosVelT<CoordT>& initial_conditions,
-    const double total_time, const double timestep)
+    const coord::PosVelCar& initial_conditions,
+    const char* title)
 {
-    std::vector<std::pair<coord::PosVelT<CoordT>, double> > traj = orbit::integrateTraj(
+    const double total_time=100.;
+    const double timestep=1./8;
+    std::cout << "\033[1;37m   ===== "<<title<<" =====\033[0m\n";
+    std::vector<std::pair<coord::PosVelCar, double> > traj = orbit::integrateTraj(
         initial_conditions, total_time, timestep, potential);
     actions::ActionStat stats, statf, stati;
     actions::Angles angf;
@@ -51,14 +53,14 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
         std::ostringstream s;
         double x[6];
         initial_conditions.unpack_to(x);
-        s<<"ActionsStaeckel_"<<CoordT::name()<<'_'<<
+        s<<"ActionsStaeckel_"<<
             x[0]<<'_'<<x[1]<<'_'<<x[2]<<'_'<<x[3]<<'_'<<x[4]<<'_'<<x[5];
         strm.open(s.str().c_str());
     }
     // two estimates of focal distance: from the trajectory
     // (sensible unless z==0 everywhere, in which case its value doesn't matter anyway)
     // and from the interpolator
-    std::vector<coord::PosT<CoordT> > trajpoints(traj.size());
+    std::vector<coord::PosCar> trajpoints(traj.size());
     for(size_t i=0; i<traj.size(); i++)
         trajpoints[i] = traj[i].first;
     double ifd_p = actions::estimateFocalDistancePoints(potential, trajpoints);
@@ -119,20 +121,17 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     bool oki  = stati.rms.Jr<epsi&& stati.rms.Jz<epsi&& stati.rms.Jphi<eps && !exi
         && fabs(stats.avg.Jr-stati.avg.Jr)<epsint
         && fabs(stats.avg.Jz-stati.avg.Jz)<epsint;
-    std::string csname(CoordT::name());
-    csname += ',';
-    csname.resize(12, ' ');
-    std::cout << csname << " Exact"
+    std::cout << "Exact"
     ":  Jr="  << utils::pp(stats.avg.Jr,  9) <<" +- "<< utils::pp(stats.rms.Jr,  7) <<
     ",  Jz="  << utils::pp(stats.avg.Jz,  9) <<" +- "<< utils::pp(stats.rms.Jz,  7) <<
     ",  Jphi="<< utils::pp(stats.avg.Jphi,9) <<" +- "<< utils::pp(stats.rms.Jphi,7) <<
     (exs ? exc : !oks ? err : "\n");
-    std::cout << csname << " Fudge"
+    std::cout << "Fudge"
     ":  Jr="  << utils::pp(statf.avg.Jr,  9) <<" +- "<< utils::pp(statf.rms.Jr,  7) <<
     ",  Jz="  << utils::pp(statf.avg.Jz,  9) <<" +- "<< utils::pp(statf.rms.Jz,  7) <<
     ",  Jphi="<< utils::pp(statf.avg.Jphi,9) <<" +- "<< utils::pp(statf.rms.Jphi,7) <<
     (exf ? exc : !okf ? err : "\n");
-    std::cout << csname << " Inter"
+    std::cout << "Inter"
     ":  Jr="  << utils::pp(stati.avg.Jr,  9) <<" +- "<< utils::pp(stati.rms.Jr,  7) <<
     ",  Jz="  << utils::pp(stati.avg.Jz,  9) <<" +- "<< utils::pp(stati.rms.Jz,  7) <<
     ",  Jphi="<< utils::pp(stati.avg.Jphi,9) <<" +- "<< utils::pp(stati.rms.Jphi,7) <<
@@ -140,33 +139,19 @@ bool test_oblate_staeckel(const potential::OblatePerfectEllipsoid& potential,
     return oks && okf && oki;
 }
 
-bool test_three_cs(const potential::PtrOblatePerfectEllipsoid& potential,
-    const actions::ActionFinderAxisymFudge& actfinder,
-    const coord::PosVelCar& initcond, const char* title)
-{
-    const double total_time=100.;
-    const double timestep=1./8;
-    bool ok=true;
-    std::cout << "\033[1;37m   ===== "<<title<<" =====\033[0m\n";
-    ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelCar(initcond), total_time, timestep);
-    ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelCyl(initcond), total_time, timestep);
-    ok &= test_oblate_staeckel(*potential, actfinder, coord::toPosVelSph(initcond), total_time, timestep);
-    return ok;
-}
-
 int main() {
     potential::PtrOblatePerfectEllipsoid pot(new potential::OblatePerfectEllipsoid(1.0, axis_a, axis_c));
     const actions::ActionFinderAxisymFudge af(pot, true);
     bool allok=true;
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1   ), "ordinary case");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0  , 0.2, 0.3486), "thin orbit (Jr~0)");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4097), "tube orbit in x-z plane near separatrix");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4096), "box orbit in x-z plane near separatrix");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0. ,1e-8, 0.4097), "orbit with Jphi<<J_z");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-4  ), "almost in-plane orbit (Jz~0)");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 0.    ), "exactly in-plane orbit (Jz=0)");
-    allok &= test_three_cs(pot, af, coord::PosVelCar(1, 0. , 0. , 0. ,.296, 0.    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0.3, 0.1, 0.1, 0.4, 0.1   ), "ordinary case");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0  , 0.2, 0.3486), "thin orbit (Jr~0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4732), "thin orbit in x-z plane (Jr~0, Jphi=0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4097), "tube orbit in x-z plane near separatrix");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.4096), "box orbit in x-z plane near separatrix");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. ,1e-8, 0.4097), "orbit with Jphi<<J_z");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-4  ), "almost in-plane orbit (Jz~0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 0.    ), "exactly in-plane orbit (Jz=0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. ,.296, 0.    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
     if(allok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

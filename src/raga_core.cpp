@@ -135,15 +135,14 @@ void RagaCore::doEpisode(double episodeLength)
     for(ptrdiff_t ip=0; ip<nbody; ip++) {
         ptrdiff_t index = particleOrder[ip].second;
         if(particles.mass(index) != 0) {   // run only non-zero-mass particles
-            orbit::RuntimeFncArray timestepFncs(numtasks);
+            orbit::OrbitIntegrator<coord::Car> orbint(*ptrTotalPot, /*Omega*/0, orbitIntParams);
             for(int task=0; task<numtasks; task++)
-                timestepFncs[task] = tasks[task]->createRuntimeFnc(index);
+                tasks[task]->createRuntimeFnc(orbint, index);
+            orbint.init(particles.point(index));
+            coord::PosVelCar endposvel = orbint.run(episodeLength);
             particles[index].first = particles::ParticleAux(
                 /* replace the initial position/velocity with that at the end of the episode */
-                orbit::integrate(
-                    particles.point(index), episodeLength,
-                    orbit::OrbitIntegrator<coord::Car>(*ptrTotalPot),
-                    timestepFncs, orbitIntParams),
+                endposvel,
                 /* keep the original extended particle attributes */
                 particles.point(index).stellarMass,
                 particles.point(index).stellarRadius);

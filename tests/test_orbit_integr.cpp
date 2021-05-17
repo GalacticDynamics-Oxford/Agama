@@ -1,5 +1,5 @@
 /** \file    test_orbit_integr.cpp
-    \date    2015-2018
+    \date    2015-2021
     \author  Eugene Vasiliev
 
     Test orbit integration in various potentials and coordinate systems.
@@ -20,99 +20,151 @@
 #include <sstream>
 #include <cmath>
 
-const double eps=1e-5;     // accuracy of energy conservation
-const double epsrot=5e-4;  // accuracy of comparison between inertial and rotating frames
-const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
-const double Omega=2.718;  // rotation frequency (arbitrary)
+const double epsE   = 3e-6;  // accuracy of energy conservation
+const double epsL   = 1e-7;  // accuracy of energy conservation
+const double epsCS  = 1e-3;  // accuracy of comparison of orbits in different coordinate systems
+const double epsrot = 1e-3;  // accuracy of comparison between inertial and rotating frames
+const bool output   = utils::verbosityLevel >= utils::VL_VERBOSE;
+const double Omega  = 2.718; // rotation frequency (arbitrary)
 
-template<typename CoordT> bool isCartesian() { return false; }
-template<> bool isCartesian<coord::Car>() { return true; }
+inline double difposvel(const coord::PosVelCar& a, const coord::PosVelCar& b) {
+    return sqrt(
+        pow_2(a.x -b.x ) + pow_2(a.y -b.y ) + pow_2(a.z -b.z ) +
+        pow_2(a.vx-b.vx) + pow_2(a.vy-b.vy) + pow_2(a.vz-b.vz));
+}
 
 template<typename CoordT>
-bool test_potential(const potential::BasePotential& potential,
-    const coord::PosVelT<CoordT>& initial_conditions)
+bool test_coordsys(const potential::BasePotential& potential,
+    const coord::PosVelCar& initial_conditions, double total_time,
+    std::vector< std::pair<coord::PosVelCar, double> > &traj)
 {
-    double total_time = 10.0 * T_circ(potential, totalEnergy(potential, initial_conditions));
-    if(!isFinite(total_time))
-        total_time = 100.0;
-    double timestep = 0.01999999999999 * total_time;
-    // whether compare the result of orbit integration in rotating and inertial frames
-    bool checkRot = isCartesian<CoordT>() && isAxisymmetric(potential);
-    std::cout << potential.name()<<"  "<<CoordT::name()<<" ("<<initial_conditions<<
-        "Torb: "<<T_circ(potential, totalEnergy(potential, initial_conditions))<<")\n";
-    double ic[6];
-    initial_conditions.unpack_to(ic);
-    std::vector< std::pair<coord::PosVelT<CoordT>, double> > traj, trajFull;
-    std::vector< std::pair<coord::PosVelCar, double> > trajRot;
-    orbit::RuntimeFncArray fncs(2);
+    std::string name = CoordT::name();
+    name.resize(12, ' ');
+    std::cout << name;
+    double timestep = 0.02 * total_time;
+    double init_time = -0.25 * total_time;
+    std::vector< std::pair<coord::PosVelCar, double> > trajFull, trajRot;
+    orbit::OrbitIntParams params(/*accuracy*/ 1e-8, /*maxNumSteps*/10000);
+    orbit::OrbitIntegrator<CoordT> orbint(potential, /*Omega*/0, params);
     // record the orbit at regular intervals of time
-    fncs[0] = orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory<CoordT>(timestep, /*output*/ traj));
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
+        orbint, timestep, /*output*/ traj)));
     // record the orbit at each timestep of the ODE integrator
-    fncs[1] = orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory<CoordT>(0, trajFull));
-    orbit::integrate(initial_conditions, total_time, orbit::OrbitIntegrator<CoordT>(potential), fncs,
-        orbit::OrbitIntParams(/*accuracy*/ 1e-8, /*maxNumSteps*/10000));
+    orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
+        orbint, 0, trajFull)));
+    // run the orbit
+    orbint.init(initial_conditions, init_time);
+    orbint.run(total_time);
+    // whether compare the result of orbit integration in rotating and inertial frames
+    bool checkRot = isAxisymmetric(potential);
     if(checkRot) {
-        fncs[0] = orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory<coord::Car>(timestep, trajRot));
-        fncs.resize(1);
-        orbit::integrate(initial_conditions, total_time, orbit::OrbitIntegratorRot(potential, Omega), fncs);
+        orbit::OrbitIntegrator<CoordT> orbrot(potential, Omega, params);
+        orbrot.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
+            orbrot, timestep, trajRot)));
+        orbrot.init(initial_conditions, init_time);
+        orbrot.run(total_time/2);  // check that a continuation of the orbit integration
+        orbrot.run(total_time/2);  // gives the same result as a single run for a longer time
         if(trajRot.size() != traj.size()) {
-            std::cout << "\033[1;34mRotating frame inconsistent\033[0m\n";
+            std::cout << "\033[1;34mOrbit in the rotating frame has different length\033[0m\n";
             return false;
         }
     }
     math::Averager avgE, avgL;
-    bool okrot = true;
+    double difrot = 0;
     for(size_t i=0; i<traj.size(); i++) {
         avgE.add(totalEnergy(potential, traj[i].first));
         avgL.add(Lz(traj[i].first));
         if(checkRot) {
-            double angle = traj[i].second*Omega, cosa = cos(angle), sina = sin(angle);
-            double rxv[6];
-            trajRot[i].first.unpack_to(rxv);
-            double pointRot[6] = {
-                rxv[0] * cosa - rxv[1] * sina, rxv[1] * cosa + rxv[0] * sina, rxv[2],
-                rxv[3] * cosa - rxv[4] * sina, rxv[4] * cosa + rxv[3] * sina, rxv[5] };
-            if(Lz(traj[i].first)!=0)
-                okrot &= equalPosVel(coord::PosVelT<CoordT>(pointRot), traj[i].first, epsrot);
+            double angle = (traj[i].second-init_time)*Omega, cosa = cos(angle), sina = sin(angle);
+            coord::PosVelCar& rxv = trajRot[i].first;  // cartesian coords in the rotating frame
+            coord::PosVelCar ixv(  // converted to the inertial frame
+                rxv.x  * cosa - rxv.y  * sina, rxv.y  * cosa + rxv.x  * sina, rxv.z,
+                rxv.vx * cosa - rxv.vy * sina, rxv.vy * cosa + rxv.vx * sina, rxv.vz);
+            difrot = fmax(difrot, difposvel(ixv, traj[i].first));
         }
     }
     if(output) {
         std::ostringstream s;
         double x[6];
         initial_conditions.unpack_to(x);
-        s<<"Orbit_"<<potential.name()<<'_'<<CoordT::name()<<'_'<<
-            x[0]<<'_'<<x[1]<<'_'<<x[2]<<'_'<<x[3]<<'_'<<x[4]<<'_'<<x[5];
-        std::ofstream strm(s.str().c_str());
+        std::ofstream strm((std::string("Orbit_") + potential.name() + '_' + CoordT::name() + '_' +
+            utils::toString(x[0]) + '_' + utils::toString(x[1]) + '_' + utils::toString(x[2]) + '_' +
+            utils::toString(x[3]) + '_' + utils::toString(x[4]) + '_' + utils::toString(x[5]) ).c_str());
         for(size_t i=0; i<trajFull.size(); i++) {
-            double xv[6];
-            coord::toPosVelCar(trajFull[i].first).unpack_to(xv);
+            coord::PosVelCar& xv = trajFull[i].first;
             strm << utils::pp(trajFull[i].second, 18) <<"  " <<
-                utils::pp(xv[0], 18) <<' '<< utils::pp(xv[1], 18) <<' '<< utils::pp(xv[2], 18) <<"  "<<
-                utils::pp(xv[3], 18) <<' '<< utils::pp(xv[4], 18) <<' '<< utils::pp(xv[5], 18) <<"   "<<
-                utils::pp(totalEnergy(potential, trajFull[i].first), 18) << ' '<<
-                utils::pp(Lz(trajFull[i].first), 18) << '\n';
+            utils::pp(xv.x , 18) <<' '<< utils::pp(xv.y , 18) <<' '<< utils::pp(xv.z , 18) <<"  " <<
+            utils::pp(xv.vx, 18) <<' '<< utils::pp(xv.vy, 18) <<' '<< utils::pp(xv.vz, 18) <<"   "<<
+            utils::pp(totalEnergy(potential, trajFull[i].first), 18) << ' '<<
+            utils::pp(Lz(trajFull[i].first), 18) << '\n';
         }
     }
-    bool completed = traj.back().second > 0.999999*total_time;
-    // if Lz==0 initially and the potential is axisymmetric, it must stay so for the entire orbit
-    bool Lzok = isAxisymmetric(potential) && Lz(initial_conditions)==0 ? avgL.mean()==0 : true;
-    bool ok = avgE.disp()<eps*eps && (avgL.disp()<eps*eps || !isAxisymmetric(potential));
-    if(completed)
-        std::cout << trajFull.size()-1 << " steps,  ";
+    bool ok = traj.back().second > 0.999999 * (total_time + init_time);
+    if(ok)
+        std::cout << trajFull.size()-1 << " steps";
     else {
         std::cout << "\033[1;31mCRASHED\033[0m after " << trajFull.size()-1 <<
-            " steps at time " << trajFull.back().second << ",  ";
-        ok=false;
+            " steps at time " << trajFull.back().second;
     }
-    if(!okrot) {
-        std::cout << "\033[1;34mROTATING FRAME FAILED\033[0m,  ";
+    std::cout << ", E=" << avgE.mean() << " +- " << sqrt(avgE.disp());
+    if(avgE.disp() > epsE*epsE) {
+        std::cout << " \033[1;31m**\033[0m";
         ok = false;
     }
-    std::cout << "E=" <<avgE.mean() <<" +- "<<sqrt(avgE.disp())<<
-        ",  Lz="<<avgL.mean()<<" +- "<<sqrt(avgL.disp())<<
-        (Lzok ? "" : " \033[1;35m!!\033[0m") <<
-        (ok? "" : " \033[1;31m**\033[0m") << "\n";
-    return ok && Lzok;
+    if(isAxisymmetric(potential)) {
+        std::cout << ", Lz=" << avgL.mean() << " +- " << sqrt(avgL.disp());
+        if(avgL.disp() > epsL*epsL || (Lz(initial_conditions)==0 && fabs(avgL.mean()) > 2e-15)) {
+            std::cout << " \033[1;35m**\033[0m";
+            ok = false;
+        }
+    }
+    if(checkRot) {
+        std::cout << ", |rot-nonrot|=" << difrot;
+        if(difrot > epsrot) {
+            std::cout << " \033[1;34m**\033[0m";
+            ok = false;
+        }
+    }
+    std::cout << "\n";
+    return ok;
+}
+
+bool test_potential(const potential::BasePotential& potential,
+    const coord::PosVelCar& initial_conditions)
+{
+    double total_time = 10.0 * T_circ(potential, totalEnergy(potential, initial_conditions));
+    if(!isFinite(total_time))
+        total_time = 100.0;
+    std::cout << "\033[1;37m" << potential.name() << "\033[0m, ic=(" << initial_conditions <<
+        "), Torb=" << T_circ(potential, totalEnergy(potential, initial_conditions)) << "\n";
+
+    std::vector< std::pair<coord::PosVelCar, double> > trajCar, trajCyl, trajSph;
+    bool ok = true;
+    ok &= test_coordsys<coord::Car>(potential, initial_conditions, total_time, trajCar);
+    ok &= test_coordsys<coord::Cyl>(potential, initial_conditions, total_time, trajCyl);
+    ok &= test_coordsys<coord::Sph>(potential, initial_conditions, total_time, trajSph);
+    if(trajCar.size() == trajCyl.size() && trajCar.size() == trajSph.size()) {
+        double maxdifcyl=0, maxdifsph=0;
+        for(size_t i=0; i<trajCar.size(); i++) {
+            maxdifcyl = fmax(maxdifcyl, difposvel(trajCar[i].first, trajCyl[i].first));
+            maxdifsph = fmax(maxdifsph, difposvel(trajCar[i].first, trajSph[i].first));
+        }
+        std::cout << "|Car-Cyl|=" << maxdifcyl;
+        if(maxdifcyl > epsCS) {
+            std::cout << " \033[1;31m**\033[0m";
+            ok = false;
+        }
+        std::cout << ", |Car-Sph|=" << maxdifsph;
+        if(maxdifsph > epsCS) {
+            std::cout << " \033[1;31m**\033[0m";
+            ok = false;
+        }
+        std::cout << "\n";
+    } else {
+        std::cout << "\033[1;33mOrbit lengths differ between coordinate systems\033[0m\n";
+        ok = false;
+    }
+    return ok;
 }
 
 potential::PtrPotential make_galpot(const char* params)
@@ -128,19 +180,13 @@ potential::PtrPotential make_galpot(const char* params)
     return gp;
 }
 
-const char* galpot_params[] = {
-"2\n"
-"1e10 3 0.3 0 0\n"
-"2e9 3.5 0.9 0 0\n"
-"2\n"
-"1e12 0.5 0 1.8 0.075 2.1\n"
-"1e8 1 1 3 17 0\n", 
+const char* galpot_params =
 "3\n"  // test various types of discs
 "1e10 1 -0.1 0 0\n"   // vertically isothermal
 "2e9  3 0    0 0\n"   // vertically thin
 "5e9  2 0.2 0.4 0.3\n"// with inner hole and wiggles
 "1\n"
-"1e12 0.8 1 2 0.04 10\n"  };// log density profile with cutoff
+"1e12 0.8 1 2 0.04 10\n";
 
 const int NUMPOT=8;
 const char* potential_params[NUMPOT] = {
@@ -150,30 +196,19 @@ const char* potential_params[NUMPOT] = {
     "type=NFW, mass=20.0, scaleRadius=2.5",
     "type=MiyamotoNagai, mass=5.0, scaleRadius=2.0, scaleHeight=0.2",
     "type=Logarithmic, v0=1.0, scaleRadius=0.2, axisRatioY=0.8, axisRatioZ=0.5",
-    "type=Ferrers, mass=0.4, scaleRadius=0.5, axisRatioY=0.7, axisRatioZ=0.5",
+    "type=Ferrers, mass=0.7, scaleRadius=1.4, axisRatioY=0.7, axisRatioZ=0.5",
     "type=Dehnen, mass=2.0, gamma=0.8, scaleRadius=1.0, axisRatioY=0.7, axisRatioZ=0.5" };
 
 /// define test suite in terms of points for various coord systems
-const int numtestpoints=5;
-const double posvel_car[numtestpoints][6] = {
+const int NUMPOINTS=7;
+const double posvel_car[NUMPOINTS][6] = {
     {1, 2, 3, 0.4, 0.3, 0.2},   // ordinary point
-    {0,-1, 2, 0,   0.2,-0.5},   // point in y-z plane 
+    {0,-1, 2, 0,   0.2,-0.5},   // point in y-z plane
     {2, 0,-1, 0,  -0.3, 0.4},   // point in x-z plane
-    {0, 0, 1, 0,   0,   0.5},   // point along z axis
-    {0, 0, 0,-0.4,-0.2,-0.1}};  // point at origin with nonzero velocity
-const double posvel_cyl[numtestpoints][6] = {   // order: R, z, phi
-    {1, 2, 3, 0.4, 0.2, 0.3},   // ordinary point
-    {2,-1, 0,-0.3, 0.4, 0  },   // point in x-z plane
-    {0, 2, 0, 0,  -0.5, 0  },   // point along z axis, vphi must be zero
-    {0,-1, 2, 0.5, 0.3, 0  },   // point along z axis, vphi must be zero, but vR is non-zero
-    {0, 0, 0, 0.3,-0.5, 0  }};  // point at origin with nonzero velocity in R and z
-const double posvel_sph[numtestpoints][6] = {   // order: R, theta, phi
-    {1, 2, 3, 0.4, 0.3, 0.2},   // ordinary point
-    {2, 1, 0,-0.3, 0.4, 0  },   // point in x-z plane
-    {1, 0, 0,-0.5, 0,   0  },   // point along z axis, vphi must be zero
-    {1,3.14159, 2, 0.5, 0.3, 1e-4},   // point almost along z axis, vphi must be small, but vtheta is non-zero
-    {0, 2,-1, 0.5, 0,   0  }};  // point at origin with nonzero velocity in R
-
+    {0, 0, 1, 0,   0,   0.5},   // point along z axis and only vz!=0 (1d orbit)
+    {0, 0, 1, 0.2,-0.3, 0.4},   // point along z axis, but with all three velocity components !=0
+    {1e-6,0,-1,0.3,1e-4,0.5},   // point nearly on z axis but with nonzero Lz
+    {0, 0, 0, 0.2,-0.3, 0.6}};  // point at origin with nonzero velocity
 
 // test the routines identical to those in orbit.cpp, which normalize the coordinates/velocities
 // in cylindrical and spherical systems to the standard range (r>0, 0<theta<pi)
@@ -241,16 +276,12 @@ int main() {
     std::vector<potential::PtrPotential> pots;
     for(int p=0; p<NUMPOT; p++)
         pots.push_back(potential::createPotential(utils::KeyValueMap(potential_params[p])));
-    pots.push_back(make_galpot(galpot_params[0]));
-    pots.push_back(make_galpot(galpot_params[1]));
+    pots.push_back(make_galpot(galpot_params));
     bool allok = true;
     allok &= test_normalize_range();
     for(unsigned int ip=0; ip<pots.size(); ip++) {
-        for(int ic=0; ic<numtestpoints; ic++) {
+        for(int ic=0; ic<NUMPOINTS; ic++)
             allok &= test_potential(*pots[ip], coord::PosVelCar(posvel_car[ic]));
-            allok &= test_potential(*pots[ip], coord::PosVelCyl(posvel_cyl[ic]));
-            allok &= test_potential(*pots[ip], coord::PosVelSph(posvel_sph[ic]));
-        }
     }
     if(allok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";

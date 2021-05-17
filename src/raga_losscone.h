@@ -72,10 +72,12 @@ class RuntimeLosscone: public orbit::BaseRuntimeFnc {
 
 public:
     RuntimeLosscone(
+        orbit::BaseOrbitIntegrator& orbint,
         const potential::KeplerBinaryParams& _bh,
         const std::vector<CaptureData>::iterator& _output,
         const double _captureRadius[])
     :
+        BaseRuntimeFnc(orbint),
         bh(_bh),
         output(_output)
     {
@@ -84,8 +86,7 @@ public:
         captureRadius[1] = _captureRadius[1];
     }
 
-    virtual orbit::StepResult processTimestep(
-        const math::BaseOdeSolver& sol, const double tbegin, const double tend, double vars[]);
+    virtual bool processTimestep(double tbegin, double tend);
 };
 
 /** Fixed global parameters of the loss-cone module */
@@ -118,7 +119,7 @@ public:
         const ParamsLosscone& params,
         particles::ParticleArrayAux& particles,
         potential::KeplerBinaryParams& bh);
-    virtual orbit::PtrRuntimeFnc createRuntimeFnc(unsigned int particleIndex);
+    virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
     virtual const char* name() const { return "LossCone       "; }

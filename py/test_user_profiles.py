@@ -130,7 +130,7 @@ def my_moments(potential, df, point):
         return df(actions) * jacobian           # and return the values of DF times the jacobian
     # integration region: |v| from 0 to escape velocity, theta and phi are angles of spherical coords
     v_esc = (-2*potential.potential(point))**0.5
-    result, error, neval = agama.integrateNdim(integrand, [0,0,0], [v_esc, numpy.pi, 2*numpy.pi], toler=1e-5)
+    result, error, neval = agama.integrateNdim(integrand, [0,0,0], [v_esc, numpy.pi, 2*numpy.pi], toler=1e-6)
     return result
 
 dens_manual = my_moments(pot_appr, MyDF, (1,0,0))
@@ -165,10 +165,10 @@ if (abs(pot0_orig-pot0_appr)<1e-6    and
     abs(mass_orig-mass_gm_orig)<5e-3 and
     abs(mass_user-mass_gm_user)<5e-3 and
     abs(dens_orig-dens_user)<1e-6    and
-    abs(dens_user-dens_manual)<2e-6  and
+    abs(dens_user-dens_manual)<1e-6  and
     abs(mass_gm_sf_orig-numpy.sum(m_orig))<1e-2 and
-    all(abs(meanxv_orig-meanxv_user)<0.01) and
-    abs(m_orig[0]/m_user[0]-1)<0.01  and
+    all(abs(meanxv_orig-meanxv_user)<0.005) and
+    abs(m_orig[0]/m_user[0]-1)<0.001 and
     # test the equivalence of the two selection functions by directly comparing their output at points
     all(MySF(xv_user).astype(float) == sf_orig(xv_user))):
     print("\033[1;32mALL TESTS PASSED\033[0m")

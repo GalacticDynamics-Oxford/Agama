@@ -77,13 +77,15 @@ void ComponentWithDisklikeDF::update(
 static void updateActionFinder(SelfConsistentModel& model)
 {
     // update the action finder after the potential has been reinitialized
-    std::cout << "Updating action finder..."<<std::flush;
+    if(model.verbose)
+        std::cout << "Updating action finder..."<<std::flush;
     if(isSpherical(*model.totalPotential))
         model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
     else
         model.actionFinder.reset(
         new actions::ActionFinderAxisymFudge(model.totalPotential, model.useActionInterpolation));
-    std::cout << "done" << std::endl;
+    if(model.verbose)
+        std::cout << "done" << std::endl;
 }
 
 void doIteration(SelfConsistentModel& model)
@@ -99,9 +101,11 @@ void doIteration(SelfConsistentModel& model)
         // update the density of each component (this may be a no-op if the component is 'dead',
         // i.e. provides only a fixed density or potential, but does not possess a DF) -- 
         // the implementation is at the discretion of each component individually.
-        std::cout << "Computing density for component "<<index<<"..."<<std::flush;
+        if(model.verbose)
+            std::cout << "Computing density for component "<<index<<"..."<<std::flush;
         model.components[index]->update(*model.totalPotential, *model.actionFinder);
-        std::cout << "done"<<std::endl;
+        if(model.verbose)
+            std::cout << "done"<<std::endl;
     }
 
     // now update the overall potential and reinit the action finder
@@ -110,7 +114,8 @@ void doIteration(SelfConsistentModel& model)
 
 void updateTotalPotential(SelfConsistentModel& model)
 {
-    std::cout << "Updating potential..."<<std::flush;
+    if(model.verbose)
+        std::cout << "Updating potential..."<<std::flush;
 
     // temporary array of density and potential objects from components
     std::vector<PtrDensity> compDensSph;
@@ -168,7 +173,8 @@ void updateTotalPotential(SelfConsistentModel& model)
     else
         model.totalPotential.reset(new potential::Composite(compPot));
 
-    std::cout << "done" << std::endl;
+    if(model.verbose)
+        std::cout << "done" << std::endl;
     // finally, create the action finder for the new potential
     updateActionFinder(model);
 }

@@ -13,7 +13,7 @@ namespace galaxymodel{
 namespace {  // internal
 
 /// relative tolerance for computing the pixel masses multiplied by B-spline basis functions
-static const double EPSREL_PIXEL_MASS = 1e-4;
+static const double EPSREL_PIXEL_MASS = 1e-3;
 
 /// max number of density evaluations per each pixel in the above integrals
 static const int MAX_NUM_EVAL_PIXEL_MASS = 1e4;
@@ -435,7 +435,7 @@ void TargetLOSVD<N>::computeDFProjection(const GalaxyModel& model, StorageNumT* 
         double Xlim[2] = { bsplx.xvalues()[indx], bsplx.xvalues()[indx+1] };
         double Ylim[2] = { bsply.xvalues()[indy], bsply.xvalues()[indy+1] };
         std::vector<double> result(fnc.numValues());
-        computeProjection(model, fnc, Xlim, Ylim, orientation.mat,
+        computeProjection(model, fnc, Xlim, Ylim, orientation,
             &result[0], EPSREL_PIXEL_MASS, MAX_NUM_EVAL_LOSVD_DF);
         // add the computed integrals to the output array
 #ifdef _OPENMP

@@ -9,7 +9,7 @@ namespace orbit{
 namespace{
 
 /// roundoff tolerance in the sampling interval calculation
-const double ROUNDOFF = 1e-15;
+const double ROUNDOFF = 10*DBL_EPSILON;
 
 /// initialize the deviation vector always with the same sequence (not sure if it's optimal);
 /// the choice below produces comparable and incommensurable values of components, and has a unit norm
@@ -27,38 +27,13 @@ double logMagnitude(const double x[6])
 }  // internal ns
 
 
-void OrbitIntegratorVarEq::eval(const double t, const double x[], double dxdt[]) const
-{
-    coord::GradCar grad;
-    coord::HessCar hess;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, &hess, t);
-    // time derivative of position
-    dxdt[0] = x[3] + Omega * x[1];
-    dxdt[1] = x[4] - Omega * x[0];
-    dxdt[2] = x[5];
-    // time derivative of velocity
-    dxdt[3] = -grad.dx + Omega * x[4];
-    dxdt[4] = -grad.dy - Omega * x[3];
-    dxdt[5] = -grad.dz;
-    // time derivative of position part of the deviation vector
-    dxdt[6] = x[9]  + Omega * x[7];
-    dxdt[7] = x[10] - Omega * x[6];
-    dxdt[8] = x[11];
-    // time derivative of velocity part of the deviation vector
-    dxdt[9] = -hess.dx2  * x[6] - hess.dxdy * x[7] - hess.dxdz * x[8] + Omega * x[10];
-    dxdt[10]= -hess.dxdy * x[6] - hess.dy2  * x[7] - hess.dydz * x[8] - Omega * x[9];
-    dxdt[11]= -hess.dxdz * x[6] - hess.dydz * x[7] - hess.dz2  * x[8];
-}
-
-
-template<bool UseInternalVarEqSolver>
-RuntimeLyapunov<UseInternalVarEqSolver>::RuntimeLyapunov(
-    const potential::BasePotential& _potential, double _samplingInterval,
+RuntimeLyapunov::RuntimeLyapunov(
+    BaseOrbitIntegrator& orbint,
+    double _samplingInterval,
     double& _outputLyapunovExponent, std::vector<double>* outputLogDeviationVector)
 :
+    BaseRuntimeFnc(orbint),
     varEqSolver(*this),
-    orbitSolver(NULL),   // not available yet - will be assigned during each timestep
-    potential(_potential),
     samplingInterval(_samplingInterval),
     outputLyapunovExponent(_outputLyapunovExponent),
     logDeviationVector(  // alias to either the external or internal arrays that store the deviation vector
@@ -70,68 +45,44 @@ RuntimeLyapunov<UseInternalVarEqSolver>::RuntimeLyapunov(
     logDeviationVector.clear();
 }
 
-template<bool UseInternalVarEqSolver>
-void RuntimeLyapunov<UseInternalVarEqSolver>::eval(const double t, double mat[]) const
+void RuntimeLyapunov::eval(const double t, double a[], double b[]) const
 {
-    assert(orbitSolver != NULL && UseInternalVarEqSolver &&
-        "RuntimeLyapunov::eval must be called internally from processTimestep");
-    coord::PosCar pos(orbitSolver->getSol(t, 0), orbitSolver->getSol(t, 1), orbitSolver->getSol(t, 2));
+    coord::PosCar pos = orbint.getSol(t);
     coord::HessCar hess;
-    potential.eval(pos, NULL, NULL, &hess, t);
-    mat[0] = -hess.dx2;
-    mat[1] = -hess.dxdy;
-    mat[2] = -hess.dxdz;
-    mat[3] = -hess.dxdy;
-    mat[4] = -hess.dy2;
-    mat[5] = -hess.dydz;
-    mat[6] = -hess.dxdz;
-    mat[7] = -hess.dydz;
-    mat[8] = -hess.dz2;
+    orbint.potential.eval(pos, NULL, NULL, &hess, t);
+    a[0] = -hess.dx2 + pow_2(orbint.Omega);
+    a[1] = -hess.dxdy;
+    a[2] = -hess.dxdz;
+    a[3] = -hess.dxdy;
+    a[4] = -hess.dy2 + pow_2(orbint.Omega);
+    a[5] = -hess.dydz;
+    a[6] = -hess.dxdz;
+    a[7] = -hess.dydz;
+    a[8] = -hess.dz2;
+    std::fill(b, b+9, 0);
+    b[1] =  2*orbint.Omega;
+    b[3] = -2*orbint.Omega;
 }
 
-template<bool UseInternalVarEqSolver>
-StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
-    const math::BaseOdeSolver& solver, const double tbegin, const double tend, double vars[])
+bool RuntimeLyapunov::processTimestep(double tbegin, double tend)
 {
     if(t0 != t0)
         t0 = tbegin;   // record the first ever moment of time
 
-    // assign the orbital period on the first timestep
+    // 0. assign the orbital period on the first timestep
     if(orbitalPeriod != orbitalPeriod /*initially it was set to NAN*/) {
-        orbitalPeriod = T_circ(potential, totalEnergy(potential, coord::PosVelCar(vars)));
+        orbitalPeriod = T_circ(orbint.potential, totalEnergy(orbint.potential, orbint.getSol(tbegin)));
         if(!isFinite(orbitalPeriod))  // e.g. the orbit is unbound,
             orbitalPeriod = 0;        // so no meaningful Lyapunov exponent can be computed anyway
-        if(UseInternalVarEqSolver) {
-            varEqSolver.init(DEV_VEC_INIT, tbegin);
-            return SR_CONTINUE;
-        } else {
-            // initialize the deviation vector that is stored in the ODE variables of
-            // the orbit integrator, starting from index 6
-            for(int d=0; d<6; d++)
-                vars[d+6] = DEV_VEC_INIT[d];
-            return SR_REINIT;
-        }
+        varEqSolver.init(DEV_VEC_INIT, tbegin);
     }
 
-    if(UseInternalVarEqSolver) {
-        // perform one step of the internal variational equation solver
-        // to compute the evolution of the deviation vector during the current timestep.
-        // varEqSolver calls our 'eval()' method, which needs the access to the orbitSolver
-        // to retrieve the orbit trajectory during this timestep; hence we temporarily initialize
-        // the internal pointer to that solver and then clear it again (not a very satisfactory design...)
-        orbitSolver = &solver;
-        varEqSolver.doStep(tend-tbegin);
-        orbitSolver = NULL;
-    } else {
-        // otherwise the variational equation is solved by the orbit integrator,
-        // with the r.h.s. provided by OrbitIntegratorVarEq or a similar class;
-        // the number of variables must be [at least] 12
-        assert(solver.size() >= 12 && "RuntimeLyapunov: orbit integrator must handle >=12 variables");
-    }
+    // 1. perform one step of the internal variational equation solver
+    // to compute the evolution of the deviation vector during the current timestep
+    varEqSolver.doStep(tend-tbegin);
 
-    // store the deviation vector at regular intervals of time and check its magnitude
+    // 2. store the deviation vector at regular intervals of time and check its magnitude
     bool needToRescale = false;
-    
     double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
     ptrdiff_t ibegin = static_cast<ptrdiff_t>(sign * (tbegin-t0) / samplingInterval);
     ptrdiff_t iend   = static_cast<ptrdiff_t>(sign * (tend-t0)   / samplingInterval * (1 + ROUNDOFF));
@@ -140,35 +91,29 @@ StepResult RuntimeLyapunov<UseInternalVarEqSolver>::processTimestep(
     for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
         double tout = sign * samplingInterval * iout + t0;
         if(sign * tout >= sign * tbegin - dtroundoff && sign * tout <= sign * tend + dtroundoff) {
-            double devVec[6];   // retrieved either from the internal varEqSolver or from the orbit integrator
+            double devVec[6];
             for(int d=0; d<6; d++)
-                devVec[d] = UseInternalVarEqSolver ? varEqSolver.getSol(tout, d) : solver.getSol(tout, d+6);
+                devVec[d] = varEqSolver.getSol(tout, d);
             double logDevVec = logMagnitude(devVec);
             logDeviationVector[iout] = logDevVec + addLogDevVec;
-            needToRescale |= logDevVec > 100;
+            needToRescale |= logDevVec > 300;
         }
     }
 
-    // if the orbit is chaotic, the magnitude of the deviation vector grows exponentially,
+    // 3. if the orbit is chaotic, the magnitude of the deviation vector grows exponentially,
     // and we need to renormalize it every now and then to avoid floating-point overflows
     if(needToRescale) {
         double devVec[6];
         for(int d=0; d<6; d++)
-            devVec[d] = UseInternalVarEqSolver ? varEqSolver.getSol(tend, d) : vars[d+6];
+            devVec[d] = varEqSolver.getSol(tend, d);
         double logDevVec = logMagnitude(devVec), mult = exp(-logDevVec);
         addLogDevVec += logDevVec;
-        if(UseInternalVarEqSolver) {
-            for(int d=0; d<6; d++)
-                devVec[d] *= mult;     // bring it back to unit norm
-            varEqSolver.init(devVec);  // and reinit the internal variational equation solver
-        } else {
-            for(int d=0; d<6; d++)
-                vars[d+6] *= mult;     // bring it back to unit norm
-            return SR_REINIT;          // and reinit the orbit integrator itself
-        }
+        for(int d=0; d<6; d++)
+            devVec[d] *= mult;     // bring it back to unit norm
+        varEqSolver.init(devVec);  // and reinit the internal variational equation solver
     }
 
-    return SR_CONTINUE;
+    return true;
 }
 
 
@@ -213,9 +158,5 @@ double calcLyapunovExponent(const std::vector<double>& logDeviationVector,
     else
         return 0.;  // chaotic behavior not detected, return zero estimate for the Lyapunov exponent
 }
-
-// compile the two template instantiations
-template class RuntimeLyapunov<true>;
-template class RuntimeLyapunov<false>;
 
 }  // namespace orbit

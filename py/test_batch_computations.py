@@ -196,6 +196,8 @@ testCond('isArray(gms2.vdf([[1,2,3],[4,5,6],[7,8,9]], separate=True)[0], (3,2))'
 testCond('numpy.isclose(gms1.vdf([1,2,3], dens=True)[3], gms1.moments([1,2,3])[0], 1e-3)')
 # and similarly for the case of 2d input (projected VDF): projected density should agree with projected moments()
 testCond('numpy.isclose(gms1.vdf([1,0], dens=True)[3], gms1.moments([1,0])[0], 1e-3)')
+# likewise, projectedDF with infinite uncertainties on all three velocity components should give projected density
+testCond('numpy.isclose(gms1.projectedDF([1,0,0,0,0,numpy.inf,numpy.inf,numpy.inf]), gms1.moments([1,0],vel2=False), 1e-3)')
 # finally check that the projected VDF in v_z agrees with the output of projectedDF() after multiplying the former by the projected density
 vz = numpy.linspace(0, 0.5*(-2*pots.potential(1,0,0))**0.5, 4)  # grid in v_z from 0 to half the escape velocity
 xyv = numpy.column_stack((vz*0+1, vz*0, vz*0, vz*0, vz, vz+numpy.inf, vz+numpy.inf, vz*0))  # input points for projectedDF()
