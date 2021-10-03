@@ -1,7 +1,11 @@
 #include "potential_composite.h"
 #include "math_core.h"
 #include <stdexcept>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 // utility snippet for allocating temporary storage either on stack (if small) or on heap otherwise
 #define ALLOC(NPOINTS, TYPE, NAME) \

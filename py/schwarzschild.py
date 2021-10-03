@@ -65,7 +65,7 @@ def createModel(iniFileName):
     if len(pot) == 0:
         raise ValueError("No potential components defined")
     if len(pot) == 1:
-        model.potential = pot.values()[0]
+        model.potential = list(pot.values())[0]
     else:
         model.potential = agama.Potential(*pot.values())
 
@@ -189,7 +189,7 @@ def runComponent(comp, pot):
             indices,trajsizes = particles
             print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices),max(trajsizes)))
             traj[indices] = agama.orbit(potential=pot, ic=comp.ic[indices], \
-                time=comp.inttime[indices], trajsize=trajsizes)
+                time=comp.inttime[indices], trajsize=trajsizes, Omega=comp.Omega)
             status,particles = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
             if not status: print("Failed to produce output N-body model")
         comp.nbodymodel = particles

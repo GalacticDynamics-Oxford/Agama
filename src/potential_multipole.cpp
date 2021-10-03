@@ -7,7 +7,11 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace potential {
 
@@ -589,28 +593,22 @@ void sphHarmTransformInverseDeriv2(
         double sp, cp,
         Y22       =    D2 * ss,
         dY22      =  2*D2 * cs,
-        d2Y22     =  4*D2 * cc - 2*D2,
-        Phi2      =   Y22 *   C_lm[i22],
-        dPhi2dr   =   Y22 *  dC_lm[i22],
-        dPhi2dt   =  dY22 *   C_lm[i22],
-        d2Phi2dr2 =   Y22 * d2C_lm[i22],
-        d2Phi2drt =  dY22 *  dC_lm[i22],
-        d2Phi2dt2 = d2Y22 *   C_lm[i22];
+        d2Y22     =  4*D2 * cc - 2*D2;
         math::sincos(2*pos.phi, sp, cp);
         if(val)
-            *val += Phi2 * cp;
+            *val += Y22 * C_lm[i22] * cp;
         if(grad) {
-            grad->dr     += dPhi2dr *    cp;
-            grad->dtheta += dPhi2dt *    cp;
-            grad->dphi   +=  Phi2   * -2*sp;
+            grad->dr     +=  Y22 *  dC_lm[i22] *    cp;
+            grad->dtheta += dY22 *   C_lm[i22] *    cp;
+            grad->dphi   +=  Y22 *   C_lm[i22] * -2*sp;
         }
         if(hess) {
-            hess->dr2       += d2Phi2dr2 *    cp;
-            hess->drdtheta  += d2Phi2drt *    cp;
-            hess->dtheta2   += d2Phi2dt2 *    cp;
-            hess->drdphi    +=  dPhi2dr  * -2*sp;
-            hess->dthetadphi+=  dPhi2dt  * -2*sp;
-            hess->dphi2     +=   Phi2    * -4*cp;
+            hess->dr2       +=   Y22 * d2C_lm[i22] *    cp;
+            hess->drdtheta  +=  dY22 *  dC_lm[i22] *    cp;
+            hess->dtheta2   += d2Y22 *   C_lm[i22] *    cp;
+            hess->drdphi    +=   Y22 *  dC_lm[i22] * -2*sp;
+            hess->dthetadphi+=  dY22 *   C_lm[i22] * -2*sp;
+            hess->dphi2     +=   Y22 *   C_lm[i22] * -4*cp;
         }
     }
 }
@@ -973,7 +971,7 @@ PtrDensity DensitySphericalHarmonic::create(
     const BaseDensity& dens, int lmax, int mmax, 
     unsigned int gridSizeR, double rmin, double rmax)
 {
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || rmin<=0 || rmax<=rmin)
+    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>0) || !(rmax>rmin))
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of min/max grid radii");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
@@ -996,7 +994,7 @@ PtrDensity DensitySphericalHarmonic::create(
     coord::SymmetryType sym, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax, double smoothing)
 {
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || rmin<0 || (rmax!=0 && rmax<=rmin))
+    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("DensitySphericalHarmonic: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
@@ -1182,7 +1180,7 @@ PtrPotential createMultipole(
     int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax)
 {
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || rmin<0 || (rmax!=0 && rmax<=rmin))
+    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("Multipole: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("Multipole: invalid choice of expansion order");
@@ -1234,7 +1232,7 @@ PtrPotential Multipole::create(
     coord::SymmetryType sym, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax, double smoothing)
 {
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || rmin<0 || (rmax!=0 && rmax<=rmin))
+    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("Multipole: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("Multipole: invalid choice of expansion order");

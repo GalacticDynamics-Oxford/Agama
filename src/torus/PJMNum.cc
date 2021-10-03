@@ -34,7 +34,7 @@ void polint(double *xa, double *ya, const int n,
 	      const double x, double &y, double &dy) 
 {
   int ns=0;
-  double c[n], d[n], dift, dif = fabs(x-xa[0]),ho,hp,w,den;
+  double *c = new double[n], *d = new double[n], dift, dif = fabs(x-xa[0]),ho,hp,w,den;
   for(int i=0;i!=n;i++) {
     if((dift=fabs(x-xa[i]))<dif) {
       ns=i; dif=dift;
@@ -56,6 +56,8 @@ void polint(double *xa, double *ya, const int n,
     dy=(2*(ns+1)<(n-m)) ? c[ns+1] : d[ns--];
     y += dy;
   }
+  delete[] c;
+  delete[] d;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

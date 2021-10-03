@@ -20,8 +20,9 @@
 #include <fstream>
 #include <map>
 /// OS- and filesystem-specific definitions
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include <direct.h>
+#pragma warning(disable:4996)  // prevent deprecation error on chdir and getcwd
 #define DIRECTORY_SEPARATOR '\\'
 #else
 #include <unistd.h>

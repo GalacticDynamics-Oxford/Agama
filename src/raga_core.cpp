@@ -22,9 +22,11 @@ void computeTotalEnergyModel(
     double Etot=0, Esum=0;
     // potential at origin excluding BH
     double stellarPotentialCenter = pot.value(coord::PosCyl(0,0,0));
-    // add the energy of BH in the stellar potential 
-    Etot += bh.mass * stellarPotentialCenter * 0.5;
-    Esum += bh.mass * stellarPotentialCenter;
+    // add the energy of BH in the stellar potential
+    if(bh.mass>0) {
+        Etot += bh.mass * stellarPotentialCenter * 0.5;
+        Esum += bh.mass * stellarPotentialCenter;
+    }
     // add the internal energy of binary BH
     if(bh.sma>0) {
         double Ebin = 0.5 * pow_2(bh.mass) / bh.sma *

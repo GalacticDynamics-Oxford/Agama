@@ -15,10 +15,16 @@
     received from Python are assumed to be in some physical units and converted
     into internal units inside this module, and the output from the Agama library
     routines is converted back to physical units. The physical units are assigned
-    by `setUnits` and `resetUnits` functions.
+    by calling `setUnits` at the beginning of the script; one may also choose to
+    work in N-body units (G=1) and skip the unit conversion entirely.
 
     Type `dir(agama)` in Python to get a list of exported routines and classes,
     and `help(agama.whatever)` to get the usage syntax for each of them.
+
+    In addition to the C++ extension module provided by the shared library agama.so,
+    there is also a native Python part of the agama Python module, provided by
+    py/pygama.py; the routines from this submodule are imported into the main
+    namespace on importing agama.
 */
 #ifdef HAVE_PYTHON
 #include <Python.h>
@@ -73,6 +79,9 @@
 #define PyString_AsString PyUnicode_AsUTF8
 #define PyInt_Check PyLong_Check
 #define PyInt_AsLong PyLong_AsLong
+#define PyInt_FromLong PyLong_FromLong
+#else
+#define Py_hash_t long
 #endif
 
 /// utility snippet for allocating temporary storage either on stack (if small) or on heap otherwise
@@ -103,6 +112,41 @@ static PyTypeObject
 
 // forward declaration for a routine that constructs a Python cubic spline object
 PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
+
+//  -------------------------------
+/// \name  Multi-threading support
+//  -------------------------------
+///@{
+
+static const char* docstringSetNumThreads =
+    "Set the number of OpenMP threads (if the module was compiled with OpenMP support).\n"
+    "A single argument specifies the number of threads in parallellized operations; "
+    "0 means system default (typically equal to the number of processor cores, "
+    "unless explicitly changed, e.g., by the environment variable OMP_NUM_THREADS).\n"
+    "Returns the current setting for the number of threads.";
+
+/// set the number of OpenMP threads
+PyObject* setNumThreads(PyObject* /*self*/, PyObject* arg)
+{
+    if(!PyInt_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Expected one int argument -- the number of threads (0 means system default)");
+        return NULL;
+    }
+#ifdef _OPENMP
+    static int maxThreads = -1;
+    if(maxThreads==-1)  // first time this routine is called, remember the actual max # of threads
+        maxThreads = omp_get_max_threads();
+    int num = PyInt_AsLong(arg);
+    if(num<=0)
+        num = maxThreads;  // restore the original (system-default) max # of threads
+    omp_set_num_threads(num);
+    return PyInt_FromLong(num);
+#else
+    printf("OpenMP not available\n");
+    return PyInt_FromLong(1);
+#endif
+}
 
 /** Lock-type class that temporarily disables warnings that numpy produces on floating-point
     overflows or other invalid values.
@@ -155,6 +199,7 @@ public:
 };
 int NumpyWarningsDisabler::numInstances = 0;
 
+///@}
 //  ------------------------------------------------------------------
 /// \name  Helper routines for type conversions and argument checking
 //  ------------------------------------------------------------------
@@ -491,9 +536,17 @@ static const units::InternalUnits unit(2.7183 * units::Kpc, 3.1416 * units::Myr)
 /// (or remaining at default values (no conversion) if not set explicitly
 static unique_ptr<const units::ExternalUnits> conv;
 
+/// safeguarding variable: it is set to True upon creation of any non-trivial class,
+/// and subsequent calls to setUnits will raise a warning about the dire consequences of
+/// changing the unit conversion on the fly
+static bool unitsWarning = false;
+
 /// description of setUnits function
 static const char* docstringSetUnits =
-    "Inform the library about the physical units that are used in Python code\n"
+    "Inform the library about the physical units that are used in Python code.\n"
+    "Normally this function should be called only once (if at all) at the beginning of a script, "
+    "since changing the unit conversion after creation of instances of Potential, "
+    "DistributionFunction and other classes invalidates their input/output.\n"
     "Arguments should be any three independent physical quantities that define "
     "'mass', 'length', 'velocity' or 'time' scales "
     "(note that the latter three are not all independent).\n"
@@ -501,15 +554,24 @@ static const char* docstringSetUnits =
     "'Solar mass', 'Kiloparsec', 'km/s' and 'Megayear', correspondingly.\n"
     "The numerical value of the gravitational constant in these units is stored as agama.G\n"
     "Example: standard GADGET units are defined as\n"
-    "    setUnits(mass=1e10, length=1, velocity=1)\n";
+    "    setUnits(mass=1e10, length=1, velocity=1)\n"
+    "Calling this function with an empty argument list resets the unit conversion system to "
+    "a trivial one (i.e., no conversion involved and all quantities are assumed to be in "
+    "N-body units, with the gravitational constant equal to 1).\n"
+    "Note that this is NOT equivalent to setUnits(mass=1, length=1, velocity=1).\n";
 
 /// define the unit conversion
 PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"mass", "length", "velocity", "time", NULL};
     double mass = 0, length = 0, velocity = 0, time = 0;
-    if(!onlyNamedArgs(args, namedArgs))
+    bool reset = true;   // if called without any arguments, this means reset units
+    if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0)) {
+        PyErr_SetString(PyExc_ValueError, "setUnits() accepts only named arguments");
         return NULL;
+    }
+    if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+        reset = false;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|dddd", const_cast<char**>(keywords),
         &mass, &length, &velocity, &time))
         return NULL;
@@ -522,7 +584,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             "You may not assign length, velocity and time units simultaneously");
         return NULL;
     }
-    if(mass==0) {
+    if(mass==0 && !reset) {
         PyErr_SetString(PyExc_TypeError, "You must specify mass unit");
         return NULL;
     }
@@ -535,12 +597,17 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     else if(time>0 && velocity>0)
         conv.reset(new units::ExternalUnits(unit,
             velocity*time * units::kms*units::Myr, velocity*units::kms, mass*units::Msun));
+    else if(reset)
+        conv.reset(new units::ExternalUnits());
     else {
         PyErr_SetString(PyExc_TypeError,
             "You must specify exactly two out of three units: length, time and velocity");
         return NULL;
     }
-    double G = units::Grav *
+    if(unitsWarning)
+        PyErr_WarnEx(NULL, "setUnits() called after creating instances of Potential and other "
+            "classes may lead to incorrect scaling of input/output data in their methods", 1);
+    double G = reset ? 1.0 : units::Grav *
         (conv->massUnit * unit.to_Msun * units::Msun) /
         pow_2(conv->velocityUnit * unit.to_kms * units::kms) /
         (conv->lengthUnit * unit.to_Kpc * units::Kpc);
@@ -555,33 +622,39 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
         "time unit: "    +utils::toString(conv->timeUnit)+", "
         "mass unit: "    +utils::toString(conv->massUnit));
-    return Py_BuildValue("s",
-        ("Length unit: " +utils::toString(conv->lengthUnit   * unit.to_Kpc)+ " Kpc, "
-        "velocity unit: "+utils::toString(conv->velocityUnit * unit.to_kms)+ " km/s, "
-        "time unit: "    +utils::toString(conv->timeUnit     * unit.to_Myr)+ " Myr, "
-        "mass unit: "    +utils::toString(conv->massUnit     * unit.to_Msun)+" Msun, "
-        "gravitational constant: "+utils::toString(G) ).c_str());
+    Py_INCREF(Py_None);
+    return Py_None;
 }
 
 /// description of resetUnits function
-static const char* docstringResetUnits =
-    "Reset the unit conversion system to a trivial one "
-    "(i.e., no conversion involved and all quantities are assumed to be in N-body units, "
-    "with the gravitational constant equal to 1.\n"
-    "Note that this is NOT equivalent to setUnits(mass=1, length=1, velocity=1).\n";
+static const char* docstringGetUnits =
+    "Retrieve the current unit conversion settings initialized by setUnits(...).\n"
+    "No arguments.\n"
+    "Returns a dictionary with four elements, listing the current dimensional units: "
+    "length (in kpc), velocity (in km/s), time (in Myr) and mass (in Msun).\n"
+    "If the unit conversion was not initialized or was reset to a trivial one by calling "
+    "setUnits() without arguments, this function return an empty dictionary.\n";
 
-/// reset the unit conversion
-PyObject* resetUnits(PyObject* /*self*/, PyObject* /*args*/)
+/// retrieve the current unit conversion settings
+PyObject* getUnits(PyObject* /*self*/, PyObject* /*args*/)
 {
-    conv.reset(new units::ExternalUnits());
-    // reset the module attribute G to unity
-    PyObject* PyG = PyDict_GetItemString(PyModule_GetDict(thismodule), "G");
-    if(PyG && PyFloat_CheckExact(PyG))
-        PyFloat_AS_DOUBLE(PyG) = 1.0;
-    else
-        PyErr_WarnEx(NULL, "agama.G has wrong type and its value cannot be updated", 1);
-    Py_INCREF(Py_None);
-    return Py_None;
+    PyObject* result = PyDict_New();
+    if(conv->lengthUnit == 1 && conv->velocityUnit == 1 && conv->timeUnit == 1 && conv->massUnit == 1)
+        return result;   // no unit conversion was set up
+    // otherwise populate the dictionary with elements
+    PyObject* length   = PyFloat_FromDouble(conv->lengthUnit   * unit.to_Kpc);
+    PyObject* velocity = PyFloat_FromDouble(conv->velocityUnit * unit.to_kms);
+    PyObject* time     = PyFloat_FromDouble(conv->timeUnit     * unit.to_Myr);
+    PyObject* mass     = PyFloat_FromDouble(conv->massUnit     * unit.to_Msun);
+    PyDict_SetItemString(result, "length",   length);
+    PyDict_SetItemString(result, "velocity", velocity);
+    PyDict_SetItemString(result, "time",     time);
+    PyDict_SetItemString(result, "mass",     mass);
+    Py_DECREF(length);
+    Py_DECREF(velocity);
+    Py_DECREF(time);
+    Py_DECREF(mass);
+    return result;
 }
 
 /// helper function for converting position to internal units
@@ -1388,6 +1461,7 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
         assert(self->dens);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
+        unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
     catch(std::exception& e) {
@@ -1486,7 +1560,8 @@ PyObject* Density_totalMass(PyObject* self, PyObject* args)
     if(PyTuple_Size(args) == 1 && !PyArg_ParseTuple(args, "d", &radius))
         return NULL;
     try{
-        return Py_BuildValue("d", ((DensityObject*)self)->dens->enclosedMass(radius) / conv->massUnit);
+        return Py_BuildValue("d",
+            ((DensityObject*)self)->dens->enclosedMass(radius * conv->lengthUnit) / conv->massUnit);
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError,
@@ -1698,9 +1773,11 @@ PyObject* Density_compare(PyObject* self, PyObject* other, int op)
     }
 }
 
-long Density_hash(PyObject *self)
+Py_hash_t Density_hash(PyObject *self)
 {
-    return (long) ((DensityObject*)self)->dens.get();  // use the pointer value as a hash
+    // use the smart pointer to the underlying C++ object, not the Python object itself,
+    // to establish identity between two Python objects containing the same C++ class instance
+    return _Py_HashPointer(const_cast<void*>(static_cast<const void*>(((DensityObject*)self)->dens.get())));
 }
 
 // indexing scheme is shared by both Density and Potential python classes
@@ -2164,6 +2241,7 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
         assert(self->pot);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
+        unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
     catch(std::exception& e) {
@@ -3238,6 +3316,7 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
         assert(self->df);
         utils::msg(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
             utils::toString(self->df.get()));
+        unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
     catch(std::exception& e) {
@@ -3408,6 +3487,7 @@ int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObje
         assert(self->sf);
         utils::msg(utils::VL_DEBUG, "Agama",
             "Created a SelectionFunction at "+utils::toString(self->sf.get()));
+        unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
     catch(std::exception& e) {
@@ -5139,6 +5219,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
     }
     utils::msg(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
         " target at " + utils::toString(self->target.get()));
+    unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
     return 0;
 }
 
@@ -6036,11 +6117,11 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         if(PyArray_DIM(coord_arr, 1) == 6) {
             particles::writeSnapshot(filename,
                 convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
-                format?: "text", *conv);
+                format ? format : "text", *conv);
         } else {
             particles::writeSnapshot(filename,
                 convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
-                format?: "text", *conv);
+                format ? format : "text", *conv);
         }
         Py_INCREF(Py_None);
         return Py_None;
@@ -6785,8 +6866,7 @@ PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "fnc must be callable");
         return NULL;
     }
-    if(eps<=0 || maxNumEval<=0)
-    {
+    if(eps<=0 || maxNumEval<=0) {
         PyErr_SetString(PyExc_ValueError, "toler and maxeval must be positive");
         return NULL;
     }
@@ -6836,15 +6916,13 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     int numSamples=-1;
     PyObject *callback=NULL, *lower_obj=NULL, *upper_obj=NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "Oi|OO", const_cast<char**>(keywords),
-        &callback, &numSamples, &lower_obj, &upper_obj) ||
-        !PyCallable_Check(callback) || numSamples<=0)
+        &callback, &numSamples, &lower_obj, &upper_obj))
         return NULL;
     if(!PyCallable_Check(callback)) {
         PyErr_SetString(PyExc_TypeError, "fnc must be callable");
         return NULL;
     }
-    if(numSamples<=0)
-    {
+    if(numSamples<=0) {
         PyErr_SetString(PyExc_ValueError, "nsamples must be positive");
         return NULL;
     }
@@ -6875,10 +6953,12 @@ static const char* docstringModule =
 
 /// list of standalone functions exported by the module
 static PyMethodDef module_methods[] = {
+    { "setNumThreads",          (PyCFunction)setNumThreads,
+      METH_O,                       docstringSetNumThreads },
     { "setUnits",               (PyCFunction)setUnits,
       METH_VARARGS | METH_KEYWORDS, docstringSetUnits },
-    { "resetUnits",                          resetUnits,
-      METH_NOARGS,                  docstringResetUnits },
+    { "getUnits",                            getUnits,
+      METH_NOARGS,                  docstringGetUnits },
     { "splineApprox",           (PyCFunction)splineApprox,
       METH_VARARGS | METH_KEYWORDS, docstringSplineApprox },
     { "splineLogDensity",       (PyCFunction)splineLogDensity,

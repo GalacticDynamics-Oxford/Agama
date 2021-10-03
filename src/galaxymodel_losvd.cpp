@@ -211,7 +211,7 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
         outOfBounds |= apOutOfBounds;
     }
     if(outOfBounds)
-        utils::msg(utils::VL_MESSAGE, "TargetLOSVD", "Datacube does not cover all apertures");
+        throw std::invalid_argument("TargetLOSVD: datacube does not cover all apertures");
 
     // ensure that there is at least one PSF, even with a zero width
     std::vector<GaussianPSF> spatialPSF = checkPSF(params.spatialPSF);

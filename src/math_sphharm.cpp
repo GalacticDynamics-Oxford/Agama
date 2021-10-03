@@ -4,7 +4,11 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace math{
 

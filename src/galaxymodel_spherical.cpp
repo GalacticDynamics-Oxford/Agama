@@ -449,7 +449,7 @@ SphericalIsotropicModelLocal::SphericalIsotropicModelLocal(
     const math::IFunction& DF,
     const std::vector<double>& inputgridh)
 :
-    SphericalIsotropicModel(phasevol, df, DF)
+    SphericalIsotropicModel(phasevol, df, DF, inputgridh)
 {
     // 1. determine the range of h that covers the region of interest
     // and construct the grid in X = log[h(Phi)] and Y = log[h(E)/h(Phi)]
@@ -883,6 +883,9 @@ void writeSphericalIsotropicModel(
         '\t' +  utils::pp(aux[i],   14);   // [18] auxiliary quantity
         strm << '\n';
     }
+    // last line provides the totals
+    strm << "# Total mass: " << model.totalMass << ", total energy: " << model.totalEnergy <<
+        ", kinetic energy: " << model.totalEkin << "\n";
 }
 
 }  // namespace galaxymodel

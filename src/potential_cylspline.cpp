@@ -10,7 +10,11 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace potential {
 
@@ -848,7 +852,7 @@ void chooseGridRadii(const BaseDensity& src,
         if(!isFinite(rhalf))
             throw std::invalid_argument(
                 std::string("CylSpline: failed to automatically determine grid extent ") +
-                (isFinite(mass) ? "(total mass is infinite)" : "(cannot compute half-mass radius)"));
+                (mass==INFINITY ? "(total mass is infinite)" : "(cannot compute half-mass radius)"));
         double spacing = 1 + sqrt(10./sqrt(gridSizeR*gridSizez));  // ratio between consecutive grid nodes
         if(Rmax==0)
             Rmax = rhalf * std::pow(spacing,  0.5*gridSizeR);

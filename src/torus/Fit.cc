@@ -1722,10 +1722,11 @@ int PTFit(	            // return:	error flag (see below)
     if(err) cerr << "Point transform not set up before PTFit\n";
     return -1;
   } else {
-    double tmptab[PT.NumberofParameters()];
+    double *tmptab = new double[PT.NumberofParameters()];
     PT.parameters(tmptab);
     if(tmptab[0] != J(1) || tmptab[1] != WDabs(J(2))) {
       if(err) cerr << "Point transform set up wrong before Fit\n";
+      delete[] tmptab;
       return -1;
     }
     Om = Phi->KapNuOm(Phi->RfromLc(J(2))); // Wrong for phi, it'll have to do
@@ -1733,8 +1734,10 @@ int PTFit(	            // return:	error flag (see below)
     if(J(0)==0) {
       SN.cut(0.); // point transform enough. Om_phi wrong, but it'll do
       AP = AngPar(SN,SN,SN);
+      delete[] tmptab;
       return 0;
-    }  
+    }
+    delete[] tmptab;
   }
 
   

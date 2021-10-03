@@ -22,7 +22,7 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
         if(trajectory.empty())
             trajectory.resize(1);
         trajectory[0].first = orbint.getSol(tend);
-        trajectory[1].second = tend;
+        trajectory[0].second = tend;
     } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
         double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time

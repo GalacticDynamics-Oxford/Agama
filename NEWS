@@ -1,6 +1,9 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+September 2021:
+Enable compilation on Windows with MSVC (using the same setup.py script).
+
 April 2021:
 Generalized GalaxyModel methods to arbitrary orientations (with some changes in API),
 switched to Cartesian coordinates and optimized computation costs (1.5-2x speedup).

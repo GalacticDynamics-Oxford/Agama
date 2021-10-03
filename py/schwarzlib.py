@@ -220,8 +220,8 @@ def getBinnedApertures(xcoords, ycoords, bintags):
     binTags = _numpy.unique(bintags)   # list of bin tags (indices)
     xCoords = _numpy.unique(_numpy.round(xcoords*1e6)*1e-6)    # list of possible x coordinates
     yCoords = _numpy.unique(_numpy.round(ycoords*1e6)*1e-6)    # same for y; rounded appropriately
-    xpixel  = xCoords[1]-xCoords[0]    # size of a single pixel (assuming they all are equal)
-    ypixel  = yCoords[1]-yCoords[0]    # same in y direction
+    xpixel  = _numpy.min(xCoords[1:]-xCoords[:-1])    # size of a single pixel (assuming they all are equal)
+    ypixel  = _numpy.min(yCoords[1:]-yCoords[:-1])    # same in y direction
     xcount  = int(round((xCoords[-1]-xCoords[0]) / xpixel)+1)  # total number of pixels in x direction
     ycount  = int(round((yCoords[-1]-yCoords[0]) / ypixel)+1)  # same for y
     if xcount > 10000 or ycount > 10000:
@@ -971,7 +971,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             except AttributeError: pass
         print(text)
         # highlight the selected polygon in all panels (make its boundary thicker)
-        lw = _numpy.ones(len(apertures))
+        lw = _numpy.zeros(len(apertures))
         lw[ind] = 3.
         for p in patchcoll: p.set_linewidths(lw)
 
@@ -1043,8 +1043,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             gv, ge = d.getGHMoments()
             # we use exactly 6 GH moments, even if the data have fewer or more
             if gv.shape[1]<6:
-                gv = _numpy.column_stack((gv, _numpy.zeros((gv.shape[0], 6-gv.shape[1])) ))
-                ge = _numpy.column_stack((ge, _numpy.zeros((ge.shape[0], 6-ge.shape[1])) ))
+                gv = _numpy.column_stack((gv, _numpy.zeros((gv.shape[0], 6-gv.shape[1]))*_numpy.nan ))
+                ge = _numpy.column_stack((ge, _numpy.zeros((ge.shape[0], 6-ge.shape[1]))*_numpy.nan ))
             elif gv.shape[1]>6:
                 gv = gv[:,0:6]
                 ge = ge[:,0:6]
@@ -1140,7 +1140,9 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     patchcoll = []
     panels = []
     for param in panel_params:
-        patches = matplotlib.collections.PatchCollection([matplotlib.patches.Polygon(p, True) for p in apertures], picker=0.0, edgecolor=(0.5,0.5,0.5,0.5))
+        patches = matplotlib.collections.PatchCollection(
+            [matplotlib.patches.Polygon(p, True) for p in apertures],
+            picker=0.0, edgecolor=(0.5,0.5,0.5,0.5), linewidths=0)
         patchcoll.append(patches)
         ax=fig.add_axes(param['extent'])
         ax.add_collection(patches)

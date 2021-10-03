@@ -1,7 +1,11 @@
 #include "potential_base.h"
 #include "math_core.h"
 #include <cmath>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace potential{
 

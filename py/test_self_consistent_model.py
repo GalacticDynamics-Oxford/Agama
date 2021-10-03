@@ -13,7 +13,12 @@ For instance, one may construct a density expansion for the given DF, and subseq
 use its surfaceDensity() method for many input points -- the result is equivalent
 to GalaxyModel.projectedMoments up to integration errors, but is much cheaper to compute.
 '''
-import agama
+# if the module has been installed to the globally known directory, just import it
+try: import agama
+except:  # otherwise load the shared library from the parent folder
+    import sys
+    sys.path += ['../']
+    import agama
 
 class Component:
     '''

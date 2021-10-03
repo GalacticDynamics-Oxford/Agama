@@ -1,9 +1,12 @@
 #include "math_ode.h"
 #include <cmath>
 #include <stdexcept>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
-#include <cstdio>
 namespace math{
 
 /* ----------------- ODE integrators ------------- */

@@ -235,7 +235,8 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
     return;
   }
   bool first=true,firstE=true, either_side=false, es_Jl=false, done=false;
-  int Nt=1024,np=0,norb=0,nE=0,nEmax = 50000,imax, NCheb=10;
+  const int Nt=1024;
+  int np=0,norb=0,nE=0,nEmax = 50000,imax, NCheb=10;
   double time[Nt], tbR[Nt], tbz[Nt], tbr[Nt], tbvr[Nt], tbpth[Nt], tbdrdth[Nt],
     tbir[Nt],tbth[Nt]; // tables from orbit integration
 
@@ -328,7 +329,7 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
   }
 
 
-  double rr[nr], yy[nr];
+  double *rr = new double[nr], *yy = new double[nr];
   rr[0] = 0.;
   yy[0] = 1.;
   for(int i=1;i!=nr-1;i++) { // this nr is new and ~15
@@ -348,7 +349,7 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
   //graph.plot();
 
   // extend zz to all theta<pi/2 and fit to theta*(apoly in theta**2) 
-  double tmpth2[nr], zz[nr];
+  double *tmpth2 = new double[nr], *zz = new double[nr];
   for(int i=0;i!=nr;i++) {
     tmpth2[i] = (i+1.)/double(nr)*thmax*thmax;
     tmp = sqrt(tmpth2[i]);
@@ -382,6 +383,10 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
   delete[] tbth2; 
   delete[] thet;
   delete[] yzfull;
+  delete[] rr;
+  delete[] yy;
+  delete[] tmpth2;
+  delete[] zz;
 }
 
 // various numbers needed for Derivatives() 
@@ -398,13 +403,13 @@ void PoiClosedOrbit::set_parameters(const double* param) {
   int ncx,ncy,ncz;
   Jl = param[0]; Lz = param[1]; thmax = param[2]; omz = param[3];
   ncx = int(param[4]);
-  double chx[ncx];
+  double *chx = new double[ncx];
   for(int i=0;i!=ncx;i++) chx[i] = param[5+i];
   ncy = int(param[5+ncx]);
-  double chy[ncy];
+  double *chy = new double[ncy];
   for(int i=0;i!=ncy;i++) chy[i] = param[6+ncx+i];
   ncz = int(param[6+ncx+ncy]);
-  double chz[ncz];
+  double *chz = new double[ncz];
   for(int i=0;i!=ncz;i++) chz[i] = param[7+ncx+ncy+i];
   xa.setcoeffs(chx,ncx);
   ya.setcoeffs(chy,ncy);
@@ -425,6 +430,9 @@ void PoiClosedOrbit::set_parameters(const double* param) {
   bz = dy1z-2*az*x1;
   cz = y1z - x1*(az*x1 + bz);
 
+  delete[] chx;
+  delete[] chy;
+  delete[] chz;
 }
 
 PoiClosedOrbit::PoiClosedOrbit(Actions J, Cheby ch1, Cheby ch2, Cheby ch3, 

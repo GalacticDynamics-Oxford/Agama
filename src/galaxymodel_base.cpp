@@ -14,7 +14,11 @@
 #include <utility>
 #include <stdexcept>
 #include <cassert>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace galaxymodel{
 
@@ -865,7 +869,7 @@ public:
             for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
                 values[i] += dfval * fncval[i];
         }
-        catch(std::exception& e) {
+        catch(std::exception&) {
             for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
                 values[i] = 0;
         }

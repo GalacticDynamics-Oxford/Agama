@@ -14,6 +14,9 @@
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif
+#ifdef _MSC_VER
+#pragma warning(disable:4996)  // prevent deprecation error on getenv
+#endif
 
 namespace utils {
 
@@ -121,10 +124,15 @@ void defaultmsg(VerbosityLevel level, const char* origin, const std::string &mes
         return;
     std::string msg = verbosityText(level) + 
         (origin==NULL || *origin=='\0' ? "" : "{"+undecorateFunction(origin)+"} ") + message + '\n';
-    if(logfile.is_open())
-        logfile << msg << std::flush;
-    else
-        std::cerr << msg << std::flush;
+#ifdef _OPENMP
+#pragma omp critical(Logging)
+#endif
+    {
+        if(logfile.is_open())
+            logfile << msg << std::flush;
+        else
+            std::cerr << msg << std::flush;
+    }
 }
 
 }  // namespace
@@ -319,7 +327,7 @@ std::string pp(double num, unsigned int width)
     if(num==0) {
         result.resize(width, '0');
         if(width>1 && sign) result[0] = '-';
-        if(width>(sign?2:1)) result[1+sign] = '.';
+        if(width>(sign?2u:1u)) result[1+sign] = '.';
         return result;
     }
     if(num!=num || num==INFINITY || num==-INFINITY) {

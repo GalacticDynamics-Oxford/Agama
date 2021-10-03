@@ -7,7 +7,7 @@
 #ifdef HAVE_EIGEN
 
 // calm down excessively optimizing Intel compiler, which otherwise screws the SVD module
-#if defined(__INTEL_COMPILER) and __INTEL_COMPILER >= 1800
+#if defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 1800)
 #pragma float_control (strict,on)
 #endif
 
@@ -896,7 +896,7 @@ template<typename NumT>
 Matrix<NumT>::Matrix(const SparseMatrix<NumT>& src) :
     IMatrixDense<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
 {
-    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + rows()*cols(), 0);
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + rows()*cols(), static_cast<NumT>(0));
     size_t numelem = src.size();
     for(size_t k=0; k<numelem; k++) {
         size_t i, j;
@@ -912,7 +912,7 @@ Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
     impl(xnew<NumT>(rows()*cols()))
 {
     const ptrdiff_t band = src.bandwidth(), width = band * 2 + 1, nRows = rows();
-    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + pow_2(nRows), 0);
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + pow_2(nRows), static_cast<NumT>(0));
     const NumT* data = &(src(0,0))-band;
     for(ptrdiff_t r=0; r<nRows; r++) {
         ptrdiff_t cl = std::max<ptrdiff_t>(0, r-band);
@@ -927,7 +927,7 @@ template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
     IMatrixDense<NumT>(nRows, nCols), impl(xnew<NumT>(nRows*nCols))
 {
-    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, 0);
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + nRows*nCols, static_cast<NumT>(0));
     size_t numelem = values.size();
     for(size_t k=0; k<numelem; k++) {
         size_t i = values[k].i, j = values[k].j;
@@ -1058,7 +1058,7 @@ NumT SparseMatrix<NumT>::elem(const size_t index, size_t &row, size_t &col) cons
     const gsl_spmatrix* sp = static_cast<const gsl_spmatrix*>(impl);
     matrixRangeCheck(impl != NULL && index < sp->nz);
     row = sp->i[index];
-#if GSL_MAJOR_VERSION == 2 and GSL_MINOR_VERSION < 6
+#if (GSL_MAJOR_VERSION == 2) && (GSL_MINOR_VERSION < 6)
     col = binSearch(index, sp->p, sp->size2+1);
 #else
     col = binSearch(static_cast<int>(index), sp->p, sp->size2+1);  // type of sp->p changed to int*

@@ -32,9 +32,9 @@ else:
 
 ### shows a pretty checkerboard picture - samples drawn from the given function
 try:
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt, time
     plt.ion()
     plt.plot(arr[:,0], arr[:,1], ',')
     plt.draw()
-    plt.pause(10)
+    time.sleep(10)
 except: pass

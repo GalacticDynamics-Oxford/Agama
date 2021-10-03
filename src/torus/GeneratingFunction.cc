@@ -386,7 +386,7 @@ void GenPar::edgetailor(const double a, const int Max)
   //double Smax=0.;
   // make a 2D map and compute |S|max
   char **map = new char* [nn1+2];
-  bool  edge[ntot];
+  bool  *edge = new bool[ntot];
   for(n1=0; n1<nn1+2; n1++) {
     map[n1] = (new char[n2max-n2min+2])-n2min;
     for(n2=n2min; n2<=n2max; n2++)
@@ -418,6 +418,7 @@ void GenPar::edgetailor(const double a, const int Max)
   for(n=0;n!=int((1.-a)*nedge);n++)
     edge[wheres[I[n]]] = false;
 
+  delete[] edge;
   delete[] vals;
   delete[] wheres;
   delete[] I;

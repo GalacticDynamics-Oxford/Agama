@@ -17,9 +17,8 @@
 namespace torus {
 
 double trapzd(double(*func)(double), const double, const double, const int);
-double polint(double*, double*, const int, const double, double&, double&);
-double qromb(double(*func)(double), const double, 
-	     const double, const double = 1.e-6);
+void   polint(double*, double*, const int, const double, double&, double&);
+double qromb(double(*func)(double), const double, const double, const double = 1.e-6);
 double probks(const double);
 void   kstwo(double*, int, double*, int, double&, double&);
 

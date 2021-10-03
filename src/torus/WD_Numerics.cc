@@ -676,7 +676,7 @@ float zbrent(float(*func)(float), const float x1, const float x2,
              const float tol)
 {
     int   iter=0,itmax=100;
-    float a,b,c=0.,d=0.,e=0.,fa,fb,fc,tol1,tolh=0.5f*tol,eps=6.e-8,s,p,q,r,xm;
+    float a,b,c=0.,d=0.,e=0.,fa,fb,fc,tol1,tolh=0.5f*tol,eps=6.e-8f,s,p,q,r,xm;
 
     fa=func(a=x1);
     fb=func(b=x2);
@@ -1098,13 +1098,14 @@ void LUSolution(double **a, const int n, const int *indx, Pdbl b)
 void LUInvert(double **a, double **y, const int n, const int *indx)
 {
     int   i,j;
-    double   col[n];
+    double *col = new double[n];
     for(j=0; j<n; j++) {
         for(i=0; i<n; i++) col[i] = 0.;
         col[j] = 1.;
         LUSolution(a,n,indx,col);
         for(i=0; i<n; i++) y[i][j] = col[i];
     }
+    delete[] col;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1182,7 +1183,7 @@ void CholeskyInvertF(PPflt a, const int n)
 ////////////////////////////////////////////////////////////////////////////////
 int LUDecomposition(PPflt a, const int n, Pint indx, int& d)
 {
-    const float    tiny = 1.e-20;
+    const float    tiny = 1.e-20f;
     int   i,imax,j,k;
     float big, dum, sum;
     Pflt           vv = new float[n];
@@ -1255,13 +1256,14 @@ void LUSolution(const float **a, const int n, const int *indx, Pflt b)
 void LUInvert(const float **a, float **y, const int n, const int *indx)
 {
     int   i,j;
-    float    col[n];
+    float *col = new float[n];
     for(j=0; j<n; j++) {
         for(i=0; i<n; i++) col[i] = 0.f;
         col[j] = 1.f;
         LUSolution(a,n,indx,col);
         for(i=0; i<n; i++) y[i][j] = col[i];
     }
+    delete[] col;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

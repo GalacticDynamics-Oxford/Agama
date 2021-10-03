@@ -437,12 +437,13 @@ inline Torus::Torus(const Torus& T)
     : PhaseSpaceMap(), J(T.J), E(T.E), Fs(T.Fs), Om(T.Om), dc(T.dc)
 {
   if((T.PT)->NumberofParameters()) {
-    double tmp[(T.PT)->NumberofParameters()];
+    double *tmp=new double[(T.PT)->NumberofParameters()];
     (T.PT)->parameters(tmp);
     SetMaps(tmp,
 	    (T.TM)->parameters(),
 	    (T.GF).parameters(),
-	    (T.AM).parameters());
+	      (T.AM).parameters());
+    delete[] tmp;
   }  else
     SetMaps((T.TM)->parameters(),
 	    (T.GF).parameters(),
@@ -455,12 +456,13 @@ inline Torus& Torus::operator= (const Torus& T)
   TM=0;
   J =T.J; E =T.E; Fs=T.Fs; Om=T.Om; dc=T.dc;
   if((T.PT)->NumberofParameters()){
-    double tmp[(T.PT)->NumberofParameters()];
+    double *tmp=new double[(T.PT)->NumberofParameters()];
     (T.PT)->parameters(tmp);
     SetMaps(tmp,
 	    (T.TM)->parameters(),
 	    (T.GF).parameters(),
-	    (T.AM).parameters());
+	      (T.AM).parameters());
+    delete[] tmp;
   }  else {
     SetMaps((T.TM)->parameters(),
 	    (T.GF).parameters(),

@@ -28,7 +28,8 @@
 #include "potential_factory.h"
 #include "math_core.h"
 #include <cstdio>
-#include <stdexcept>
+#include <cstdlib>
+//#include <stdexcept>
 
 namespace{
 
@@ -121,14 +122,14 @@ static void myacc(
             getAcc<float, 2>(time, nbody, active, pos, pot, acc, flag);
         else if(NDIM==3)
             getAcc<float, 3>(time, nbody, active, pos, pot, acc, flag);
-        else throw std::runtime_error("Invalid NDIM");
+        //else throw std::runtime_error("Invalid NDIM");
     } else if(numtype=='d') {
         if(NDIM==2)
             getAcc<double, 2>(time, nbody, active, pos, pot, acc, flag);
         else if(NDIM==3)
             getAcc<double, 3>(time, nbody, active, pos, pot, acc, flag);
-        else throw std::runtime_error("Invalid NDIM");
-    } else   throw std::runtime_error("Invalid NumT");
+        //else throw std::runtime_error("Invalid NDIM");
+    } //else   throw std::runtime_error("Invalid NumT");
 }
 
 }  // end internal namespace
@@ -147,7 +148,7 @@ extern "C" void potential_double(
         getAcc<double, 2, 0, 0>(*time, 1, NULL, pos, pot, acc);
     else if(*ndim==3)
         getAcc<double, 3, 0, 0>(*time, 1, NULL, pos, pot, acc);
-    else throw std::runtime_error("Invalid NDIM");
+    //else throw std::runtime_error("Invalid NDIM");
 }
 
 /// compute potential and acceleration at a single point (float version)
@@ -162,7 +163,7 @@ extern "C" void potential_float(
         getAcc<float, 2, 0, 0>(*time, 1, NULL, pos, pot, acc);
     else if(*ndim==3)
         getAcc<float, 3, 0, 0>(*time, 1, NULL, pos, pot, acc);
-    else throw std::runtime_error("Invalid NDIM");
+    //else throw std::runtime_error("Invalid NDIM");
 }
 
 /// install the potential (older interface)
@@ -171,9 +172,11 @@ extern "C" void inipotential(
     const double*pars,
     const char  *file)
 {
-    if(file==NULL || file[0]==0)
-        throw std::runtime_error("Agama plugin for NEMO: "
+    if(file==NULL || file[0]==0) {
+        fprintf(stderr, "Agama plugin for NEMO: "
             "Should provide the name of INI or potential coefficients file in accfile=...");
+        std::exit(1);
+    }
     mypot = potential::readPotential(file);
     Omega = *npar>=1 ? pars[0] : 0;
     fprintf(stderr, "Agama plugin for NEMO: Created an instance of %s potential", mypot->name());

@@ -8,6 +8,46 @@ and this python module (py/pygama.py) and merges them into a single namespace; h
 '''
 import numpy as _numpy, agama as _agama
 
+### -------------------------
+### unit conversion routines:
+### replace the native functions from the C++ extension module with augmented ones
+### that accepts astropy quantities as input and return astropy quantities as output
+_setUnits = _agama.setUnits
+_getUnits = _agama.getUnits
+def setUnits(**args):
+    if len(args)==0: return _setUnits()
+    rawnumbers = all([isinstance(args[elem], (int, float)) for elem in args])
+    if rawnumbers:  # no need to resort to astropy unit conversion
+        return _setUnits(**args)  # call the setUnits(...) function from the C++ extension module
+    # check if we have astropy installed, and if yes, whether the arguments are Quantities
+    try:
+        import astropy.units as u
+        conv = dict(length=u.kpc, velocity=u.km/u.s, time=u.Myr, mass=u.Msun)
+        for arg in args:
+            if   isinstance(args[arg], u.Quantity):
+                args[arg] = args[arg].to_value(conv[arg])
+            elif isinstance(args[arg], u.UnitBase):
+                args[arg] = args[arg].to(conv[arg])
+    except ImportError: pass
+    _setUnits(**args)  # call the setUnits(...) function from the C++ extension module
+
+setUnits.__doc__ = _setUnits.__doc__ + \
+"If astropy is available, one may provide the input arguments as instances of astropy.Quantity or astropy.Unit"
+
+def getUnits():
+    result = _getUnits()
+    if not result: return result  # empty dict, no conversion needed
+    try:
+        import astropy.units as u
+        conv = dict(length=u.kpc, velocity=u.km/u.s, time=u.Myr, mass=u.Msun)
+        for value in result: result[value] *= conv[value]
+    except ImportError: pass
+    return result
+
+getUnits.__doc__ = _getUnits.__doc__ + \
+"If astropy is available, the returned dict will contain astropy.Quantity instances rather than raw floats"
+
+
 ### --------------------------------------------------------
 ### two routines for constructing non-uniformly spaced grids
 
@@ -157,7 +197,7 @@ def transformCelestialCoords(rotationMatrix, lon, lat,
 
 def getCelestialCoords(x, y, z, vx=None, vy=None, vz=None):
     '''
-    Convert Cartesian coordinates and velocities into longitude, latitude, distance,
+    Convert [Heliocentric] Cartesian coordinates and velocities into longitude, latitude, distance,
     two components of proper motion, and line-of-sight velocity.
     The celestial coordinates are oriented so that the X axis points towards (lon,lat) = (0,0),
     the Y axis - towards (lon,lat) = (pi/2,0), and the Z axis - towards (lat=pi/2).
@@ -189,7 +229,7 @@ def getCelestialCoords(x, y, z, vx=None, vy=None, vz=None):
 
 def getCartesianCoords(lon, lat, dist, pmlon=None, pmlat=None, vlos=None):
     '''
-    Convert celestial coordinates and velocities into Cartesian ones.
+    Convert celestial coordinates and velocities into [Heliocentric] Cartesian ones.
     Arguments:
       lon, lat - spherical coordinates (e.g. RA, DEC) in radians! lat=0 is the equator;
       dist - distance (in arbitrary length units);

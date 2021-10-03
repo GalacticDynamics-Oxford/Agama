@@ -344,9 +344,8 @@ double solveKepler(double ecc, double phase)
         sincos(eta, sineta, coseta);
         double f  = eta - ecc * sineta - phase;
         double df = 1.  - ecc * coseta;
-        deltaeta  = -f/df;
-        // refinement using second derivative (thanks to A.Gurkan)
-        deltaeta  = -f / (df + 0.5 * deltaeta * ecc * sineta);
+        double d2f= ecc * sineta;
+        deltaeta  = -f * df / (df * df - 0.5 * f * d2f);
         eta      += deltaeta;
     } while(fabs(deltaeta) > 1e-5);
     // since the Halley method converges cubically, a correction < 1e-5 at the current iteration

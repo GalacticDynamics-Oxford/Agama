@@ -10,9 +10,14 @@
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
+#ifndef _MSC_VER
+#include <cstdio>
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
-#if not defined(GSL_MAJOR_VERSION) || (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
+#if !defined(GSL_MAJOR_VERSION) || (GSL_MAJOR_VERSION == 1) && (GSL_MINOR_VERSION < 15)
 #error "GSL version is too old (need at least 1.15)"
 #endif
 
@@ -44,7 +49,7 @@ bool exceptionFlag = false;
 
 /// callback function invoked by GSL in case of error; stores the error text in a global variable
 /// (not thread-safe! assumed that these events don't occur often)
-void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_errno)
+static void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
         gsl_errno == GSL_ETOL ||
@@ -66,6 +71,16 @@ void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_err
 
 // a hacky way to initialize our error handler on module startup
 bool gsl_error_handler_set = gsl_set_error_handler(&GSLerrorHandler);
+
+#ifdef _MSC_VER
+// another error handler exclusively for MSVC on Windows to catch unhandled exceptions and display
+// a generic error message (unfortunately no details about the exception are known at this moment)
+static void my_terminate_handler()
+{
+    fprintf(stderr, "Unhandled exception (no further details available)\n");
+}
+std::terminate_handler terminate_handler = std::set_terminate(my_terminate_handler);
+#endif
 
 // ------ math primitives -------- //
 
@@ -218,9 +233,9 @@ ptrdiff_t binSearch(const NumT x, const NumT arr[], size_t size)
 // template instantiations
 template ptrdiff_t binSearch(const double,    const double[],    size_t);
 template ptrdiff_t binSearch(const float,     const float[],     size_t);
-template ptrdiff_t binSearch(const int,       const int[],       size_t);
-template ptrdiff_t binSearch(const long,      const long[],      size_t);
-template ptrdiff_t binSearch(const long long, const long long[], size_t);
+template ptrdiff_t binSearch(const int,       const int[],       size_t);  // 32-bit
+template ptrdiff_t binSearch(const long,      const long[],      size_t);  // 32/64 depending on platform
+template ptrdiff_t binSearch(const long long, const long long[], size_t);  // 64-bit
 template ptrdiff_t binSearch(const unsigned int,       const unsigned int[],       size_t);
 template ptrdiff_t binSearch(const unsigned long,      const unsigned long[],      size_t);
 template ptrdiff_t binSearch(const unsigned long long, const unsigned long long[], size_t);

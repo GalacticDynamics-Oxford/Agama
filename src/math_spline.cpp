@@ -3149,7 +3149,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     for(ptrdiff_t p=0; p<numData; p++) {
         double xval = xvalues[p], weight = weights[p];
         if(!(weight >= 0))
-            throw std::invalid_argument("splineLogDensity: sample weights may not be negative");
+            throw std::invalid_argument("splineLogDensity: sample weights must be non-negative");
         // if the interval is (semi-)finite, samples beyond its boundaries are ignored
         if( (xval < xmin && !infLeft)  ||
             (xval > xmax && !infRight) ||

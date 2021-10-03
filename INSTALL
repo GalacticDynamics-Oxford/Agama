@@ -24,6 +24,9 @@ The setup.py script will determine the supported compilation options, download a
 missing third-party libraries, compile the Agama library itself and the Python interface for it,
 and install it to the user-specific site-packages folder in your current python distribution
 (most likely $HOME/.local/lib/pythonX.Y/site-packages/agama).
+On Windows, the compiler (MSVC) requires a somewhat different treatment, but the setup.py script
+is adapted for this situation (it runs a different build program, nmake, and uses Makefile.msvc
+instead of ordinary Makefile, still creating a Makefile.local automatically during the setup).
 
 In the manual mode, follow these steps:
 
@@ -86,7 +89,9 @@ compiled, or in the site-packages/agama folder where it was installed. This is d
 > python setup.py test
 or
 > make test
-and should take no more than a few minutes, displaying "OK" or "FAILED" for each test program.
+and should take no more than a few minutes, displaying "OK" or "FAILED" for each test program
+(or possibly "UNKNOWN" for a few Python programs that rely on external libraries such as astropy or
+amuse, which is not a critical error).
 Of course one may run these tests individually (C++ programs compiled and placed into exe/ subfolder,
 or python scripts in the py/ subfolder), in which case they print out more information.
 They can also serve as the examples of usage, together with other (non-test) example programs.

@@ -6,7 +6,11 @@
 #include <cassert>
 #include <stdexcept>
 #include <algorithm>
+#ifndef _MSC_VER
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace df {
 
