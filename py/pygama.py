@@ -282,9 +282,9 @@ def getGalacticFromGalactocentric(x, y, z, vx=None, vy=None, vz=None,
     if vx is None:
         return getCelestialCoords(xp, yp, zp)
     else:
-        vxp = vx * costheta + vz * sintheta - galcen_v_sun[0]
-        vyp = vy - galcen_v_sun[1]
-        vzp = vz * costheta - vx * sintheta - galcen_v_sun[2]
+        #vxp = vx * costheta + vz * sintheta - galcen_v_sun[0]
+        #vyp = vy - galcen_v_sun[1]
+        #vzp = vz * costheta - vx * sintheta - galcen_v_sun[2]
         vxp = (vx - galcen_v_sun[0]) * costheta - (vz - galcen_v_sun[2]) * sintheta
         vyp = (vy - galcen_v_sun[1])
         vzp = (vx - galcen_v_sun[0]) * sintheta + (vz - galcen_v_sun[2]) * costheta

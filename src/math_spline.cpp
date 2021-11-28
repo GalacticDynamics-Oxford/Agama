@@ -3863,8 +3863,10 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
     PointNeighborhood fp(fnc, xinit+eps4);
     double d2fm = fm.fder2, d2fp = fp.fder2;
     double d3f0 = (d2f0-d2fm) / eps4, d3fp = (d2fp-d2f0) / eps4;
-    double dx = -eps4;
-    double x  = xinit;
+    // use float instead of double to "coarse-grain" the grid step,
+    // reducing the chance that roundoff errors produce different results on different machines
+    float dx = -eps4;
+    double x = xinit;
     d2fp = d2f0;
     std::vector<double> result(1, xinit);
     // we first scan the range of x from xinit down,

@@ -127,7 +127,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
     // 2nd step: collect the values of input quantities at this 3d grid (specific to each src type)
     std::vector<double> values(numPoints * numQuantities);
     collectValues(src, points, &values[0]);
-    
+
     // 3rd step: transform these values to Fourier expansion coefficients at each (R,z)
     std::vector<double> coefs_m(2*mmax+1);
     for(size_t iR=0; iR<sizeR; iR++)
@@ -152,7 +152,7 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
 
 // ------- Computation of potential from density ------- //
 // The routines below solve the Poisson equation by computing the Fourier harmonics
-// of potential via direct 2d integration over (R,z) plane. 
+// of potential via direct 2d integration over (R,z) plane.
 // If the input density is axisymmetric, then the values of density at phi=0 is taken,
 // otherwise the density must first be Fourier-transformed itself and represented
 // as an instance of DensityAzimuthalHarmonic class, which provides the member function
@@ -257,7 +257,7 @@ public:
             computePotentialHarmonicAtPoint(m, pos[p].R, /*z was reflected*/ +pos[p].z, R0, z0,
                 rhominus[p] * jac[p], useDerivs, /*output*/values + p * nvalues);
         }
-        
+
         // workaround for the n-dimensional quadrature routine: it seems to be unable
         // to properly handle cases when one of components of the integrand is identically zero,
         // that's why we output 1 instead, and zero it out later
@@ -345,7 +345,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
                 int m = indices[i];
                 AzimuthalHarmonicIntegrand fnc(*dens, m,
                     gridR[iR], gridz[iz], gridR[1], zmin, gridR.back(), gridz.back(), useDerivs);
-                math::integrateNdim(fnc, boxmin, boxmax, 
+                math::integrateNdim(fnc, boxmin, boxmax,
                     EPSREL_POTENTIAL_INT, MAX_NUM_EVAL,
                     result, error, &numEval);
                 if(isZReflSymmetric(*dens) && gridz[iz]==0)
@@ -583,7 +583,7 @@ void computePotentialCoefsCyl(
 // -------- public classes: DensityAzimuthalHarmonic --------- //
 
 PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
-    unsigned int gridSizeR, double Rmin, double Rmax, 
+    unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax)
 {
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
@@ -698,7 +698,7 @@ double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos, double /*t
 }
 
 void DensityAzimuthalHarmonic::getCoefs(
-    std::vector<double> &gridR, std::vector<double> &gridz, 
+    std::vector<double> &gridR, std::vector<double> &gridz,
     std::vector< math::Matrix<double> > &coefs) const
 {
     unsigned int mmax = (spl.size()-1)/2;
@@ -837,7 +837,7 @@ PtrPotential determineAsympt(
 
 // Automatically choose reasonable grid extent if it was not provided
 void chooseGridRadii(const BaseDensity& src,
-    unsigned int gridSizeR, double &Rmin, double &Rmax, 
+    unsigned int gridSizeR, double &Rmin, double &Rmax,
     unsigned int gridSizez, double &zmin, double &zmax)
 {
     // if the grid min/max radii is not provided, try to determine automatically
@@ -873,7 +873,7 @@ void chooseGridRadii(const BaseDensity& src,
 }
 
 void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
-    unsigned int gridSizeR, double &Rmin, double &Rmax, 
+    unsigned int gridSizeR, double &Rmin, double &Rmax,
     unsigned int gridSizez, double &zmin, double &zmax)
 {
     if(Rmin!=0 && Rmax!=0 && zmin!=0 && zmax!=0)
@@ -915,7 +915,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
 } // internal namespace
 
 PtrPotential CylSpline::create(const BaseDensity& src, int mmax,
-    unsigned int gridSizeR, double Rmin, double Rmax, 
+    unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax, bool useDerivs)
 {
     // ensure the grid radii are set to some reasonable values
@@ -966,7 +966,7 @@ PtrPotential CylSpline::create(const BasePotential& src, int mmax,
 PtrPotential CylSpline::create(
     const particles::ParticleArray<coord::PosCyl>& points,
     coord::SymmetryType sym, int mmax,
-    unsigned int gridSizeR, double Rmin, double Rmax, 
+    unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax, bool useDerivs)
 {
     chooseGridRadii(points, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax);
@@ -1053,7 +1053,7 @@ CylSpline::CylSpline(
         int mm = (im+mmax) % (2*mmax+1), m = mm-mmax;
         if(Phi[mm].rows() == 0 && Phi[mm].cols() == 0)
             continue;
-        if((   Phi[mm].rows() != sizeR ||    Phi[mm].cols() != sizez_orig) || (haveDerivs && 
+        if((   Phi[mm].rows() != sizeR ||    Phi[mm].cols() != sizez_orig) || (haveDerivs &&
            (dPhidR[mm].rows() != sizeR || dPhidR[mm].cols() != sizez_orig  ||
             dPhidz[mm].rows() != sizeR || dPhidz[mm].cols() != sizez_orig)))
             throw std::invalid_argument("CylSpline: incorrect coefs array size");
@@ -1150,7 +1150,7 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
     // to scale the other terms after we have performed the Fourier transform on all of them
     double Phi0, dPhi0dR, dPhi0dz, d2Phi0dR2, d2Phi0dRdz, d2Phi0dz2;
     spl[mmax]->evalDeriv(Rscaled, zscaled,
-        needPhi  ?   &Phi0     : NULL, 
+        needPhi  ?   &Phi0     : NULL,
         needGrad ?  &dPhi0dR   : NULL,
         needGrad ?  &dPhi0dz   : NULL,
         needHess ? &d2Phi0dR2  : NULL,
@@ -1211,7 +1211,7 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
         coord::GradCyl dPhi_m;
         coord::HessCyl d2Phi_m;
         spl[mm]->evalDeriv(Rscaled, zscaled,
-            needPhi  ?   &Phi_m      : NULL, 
+            needPhi  ?   &Phi_m      : NULL,
             needGrad ?  &dPhi_m.dR   : NULL,
             needGrad ?  &dPhi_m.dz   : NULL,
             needHess ? &d2Phi_m.dR2  : NULL,
@@ -1277,7 +1277,7 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
 }
 
 void CylSpline::getCoefs(
-    std::vector<double> &gridR, std::vector<double> &gridz, 
+    std::vector<double> &gridR, std::vector<double> &gridz,
     std::vector< math::Matrix<double> > &Phi,
     std::vector< math::Matrix<double> > &dPhidR,
     std::vector< math::Matrix<double> > &dPhidz) const

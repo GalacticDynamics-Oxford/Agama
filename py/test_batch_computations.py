@@ -91,6 +91,10 @@ testCond('dens.projectedDensity([1,0],gamma=0,beta=0) > 0')   # or when using an
 testCond('dens.projectedDensity([[1,0]],0,0).shape == (1,)')  # if the input is a 2d array (even with one row), output is a 1d array
 testCond('dens.projectedDensity([[1,0],[2,0]]).shape == (2,)')# N input points (Nx2 array) => 1d array of length N
 
+testCond('isArray(dens.density([[1,2,3],[4,5,6]], t=1), (2,))')     # optional time argument as a single number
+testCond('isArray(dens.density([[1,2,3],[4,5,6]], t=[1,2]), (2,))') # optional time argument as an array of the same length as points
+testFail('dens.density([[1,2,3],[4,5,6],[7,8,9]], t=[1,2]))')       # wrong size of the optional time argument
+
 # Potential class methods
 testCond('isFloat(pots.potential(1,0,0))')
 testCond('isArray(pots.force(  1,0,0  ), (3,))')

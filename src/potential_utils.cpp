@@ -264,26 +264,11 @@ public:
         coord::HessCyl d2Phi;
         pot.eval(coord::PosCyl(r,0,0), &Phi, &dPhi, &d2Phi);
         double expE  = invPhi0 - 1/Phi;
-        double nu2Om = d2Phi.dz2 / dPhi.dR * r;  // ratio of nu^2/Omega^2
-        double dnu2Om=0, d2nu2Om=0;  // 1st and 2nd derivatives of the above ratio w.r.t. log(r)
-        if(der || der2) {
-            // compute these derivatives by finite differences
-            coord::GradCyl dPhiP, dPhiM;
-            coord::HessCyl d2PhiP,d2PhiM;
-            const double delta = 10*ROOT3_DBL_EPSILON;
-            double rP = exp(logr+delta), rM = exp(logr-delta);
-            pot.eval(coord::PosCyl(rP,0,0), NULL, &dPhiP, &d2PhiP);
-            pot.eval(coord::PosCyl(rM,0,0), NULL, &dPhiM, &d2PhiM);
-            double nu2OmP = d2PhiP.dz2 / dPhiP.dR * rP, nu2OmM = d2PhiM.dz2 / dPhiM.dR * rM;
-            dnu2Om = (nu2OmP - nu2OmM) / (2*delta);
-            d2nu2Om= (nu2OmP + nu2OmM - 2*nu2Om) / pow_2(delta);
-            if(fabs(d2nu2Om) < delta)
-                d2nu2Om = 0;
-        }
+        // only the 2nd derivative is needed, use a carefully concocted combination of derivatives
         if(val)
-            *val = log(expE) + 2 * log(-Phi) + 0.5*nu2Om;
+            *val = NAN; //log(expE) + 2 * log(-Phi);  // never used
         if(der)
-            *der = dPhi.dR * r / (Phi * Phi * expE) + 2 * dPhi.dR/Phi*r + 0.5*dnu2Om;
+            *der = 0;  // unused but should be finite
         if(der2) {
             if(invPhi0!=0 && expE < -invPhi0 * MIN_REL_DIFFERENCE)
                 // in case of a finite potential at r=0,
@@ -291,7 +276,7 @@ public:
                 *der2 = 0;
             else
                 *der2 = pow_2(r/Phi) / expE * (dPhi.dR * (1/r - dPhi.dR/Phi * (2 + 1/Phi/expE)) + d2Phi.dR2)
-                + 2 * r/Phi * (d2Phi.dR2*r + dPhi.dR*(1-dPhi.dR/Phi*r)) + 0.5*d2nu2Om;
+                    + 2 * r*r/Phi * (d2Phi.dR2 + d2Phi.dz2 - pow_2(dPhi.dR)/Phi);
         }
     }
     virtual unsigned int numDerivs() const { return 2; }

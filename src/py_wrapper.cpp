@@ -177,12 +177,12 @@ public:
         }
         numInstances++;
         utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Ignoring numpy warnings " +
-            utils::toString(numInstances) + " times\n");
+            utils::toString(numInstances) + " times");
     }
     ~NumpyWarningsDisabler()
     {
         utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Finished ignoring numpy warnings " +
-            utils::toString(numInstances) + " times\n");
+            utils::toString(numInstances) + " times");
         numInstances--;
         // if this was the last instance of this class, finally restore the warnings handler
         if(numInstances==0) {
@@ -192,8 +192,9 @@ public:
             PyObject* result = PyObject_Call(seterr, args, prevSettings);
             Py_DECREF(args);
             if(!result) { printf("Failed to restore numpy warnings\n"); }
-            else { utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Restored numpy warnings\n"); }
+            else { utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Restored numpy warnings"); }
             Py_XDECREF(result);
+            Py_DECREF(seterr);
         }
     }
 };
@@ -476,24 +477,45 @@ inline bool noNamedArgs(PyObject* namedArgs)
     return true;
 }
 
-/// parse a single optional named argument and store its floating-point value in "value",
-/// or raise an exception if the arguments are incorrect
-inline bool getOptionalNamedArg(PyObject* namedArgs, const char* name, double &value)
+/// parse a single optional time argument
+std::vector<double> getOptionalTimeArg(PyObject* namedArgs, npy_intp numPoints)
 {
+    std::vector<double> result;
     if(namedArgs && PyDict_Check(namedArgs)) {
         if(PyDict_Size(namedArgs)==1) {
-            PyObject* arg = PyDict_GetItemString(namedArgs, name);
+            PyObject* arg = PyDict_GetItemString(namedArgs, "t");
             if(arg) {
-                value = toDouble(arg, /*default*/ NAN);
-                if(value == value)
-                    return true;
+                // it may be an array or something that could be converted to an array
+                if(PySequence_Check(arg)) {
+                    PyObject *arr = PyArray_FROM_OTF(arg, NPY_DOUBLE, 0/*no special requirements*/);
+                    if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1 &&
+                        PyArray_DIM((PyArrayObject*)arr, 0) == numPoints)
+                    {
+                        result.reserve(numPoints);
+                        for(npy_intp i=0; i<numPoints; i++)
+                            result.push_back(pyArrayElem<double>(arr, i));
+                    }
+                    Py_XDECREF(arr);
+                } else if(PyNumber_Check(arg)) {
+                    // it may be a single number
+                    double value = PyFloat_AsDouble(arg);
+                    if(!PyErr_Occurred())
+                        result.push_back(value);
+                }
+                if(result.empty()) {
+                    PyErr_SetString(PyExc_RuntimeError, "Argument 'time', if provided, "
+                        "must be a single number or an array of the same length as points");
+                }
+                return result;
             }
         }
-        PyErr_SetString(PyExc_ValueError, ("Only one optional keyword argument "+
-            std::string(name)+"=(number) is allowed").c_str());
-        return false;
-    } else   // otherwise no named arguments -- keep the existing value and have no problem
-        return true;
+        PyErr_SetString(PyExc_ValueError, "Only one optional keyword argument "
+            "time=(number or array of the same length as points) is allowed");
+        return result;
+    } else {  // otherwise no named arguments -- use a single default value (0)
+        result.push_back(0);
+        return result;
+    }
 }
 
 /// find an item in the Python dictionary using case-insensitive key comparison
@@ -588,6 +610,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "You must specify mass unit");
         return NULL;
     }
+    const units::ExternalUnits oldconv(*conv);
     if(length>0 && time>0)
         conv.reset(new units::ExternalUnits(unit,
             length*units::Kpc, length/time * units::Kpc/units::Myr, mass*units::Msun));
@@ -604,7 +627,11 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             "You must specify exactly two out of three units: length, time and velocity");
         return NULL;
     }
-    if(unitsWarning)
+    if(unitsWarning && ( // check if units have changed
+        math::fcmp(oldconv.  lengthUnit, conv->  lengthUnit)!=0 ||
+        math::fcmp(oldconv.velocityUnit, conv->velocityUnit)!=0 ||
+        math::fcmp(oldconv.    massUnit, conv->    massUnit)!=0 ||
+        math::fcmp(oldconv.    timeUnit, conv->    timeUnit)!=0) )
         PyErr_WarnEx(NULL, "setUnits() called after creating instances of Potential and other "
             "classes may lead to incorrect scaling of input/output data in their methods", 1);
     double G = reset ? 1.0 : units::Grav *
@@ -1473,28 +1500,27 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 /// compute the density at one or more points
 class FncDensityDensity: public BatchFunction {
     const potential::BaseDensity& dens;
-    const double time;
+    const std::vector<double> time;
     double* outputBuffer;
 public:
-    FncDensityDensity(PyObject* input, const potential::BaseDensity& _dens, double _time) :
-        BatchFunction(/*input length*/ 3, input), dens(_dens), time(_time * conv->timeUnit)
+    FncDensityDensity(PyObject* input, PyObject* namedArgs, const potential::BaseDensity& _dens) :
+        BatchFunction(/*input length*/ 3, input), dens(_dens), time(getOptionalTimeArg(namedArgs, numPoints))
     {
-        outputObject = allocateOutput<1>(numPoints, &outputBuffer);
+        if(!PyErr_Occurred() && !time.empty())
+            outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])), time) /
+            dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])),
+                time[indexPoint % time.size()] * conv->timeUnit) /
             (conv->massUnit / pow_3(conv->lengthUnit));
     }
 };
 
 PyObject* Density_density(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    double time = 0;
-    if(!getOptionalNamedArg(namedArgs, "t", time))
-        return NULL;
-    return FncDensityDensity(args, *((DensityObject*)self)->dens, time).run(/*chunk*/1024);
+    return FncDensityDensity(args, namedArgs, *((DensityObject*)self)->dens).run(/*chunk*/1024);
 }
 
 /// compute the projected (surface) density for an array of points
@@ -1554,14 +1580,39 @@ PyObject* Density_projectedDensity(PyObject* self, PyObject* args, PyObject* nam
         run(/*chunk*/64);
 }
 
-PyObject* Density_totalMass(PyObject* self, PyObject* args)
+/// compute the enclosed mass at one or more values of radius
+class FncDensityEnclosedMass: public BatchFunction {
+    const potential::BaseDensity& dens;
+    double* outputBuffer;
+public:
+    FncDensityEnclosedMass(PyObject* input, const potential::BaseDensity& _dens) :
+        BatchFunction(/*input length*/ 1, input), dens(_dens)
+    {
+        outputObject = allocateOutput<1>(numPoints, &outputBuffer);
+    }
+    virtual void processPoint(npy_intp indexPoint)
+    {
+        try{
+            outputBuffer[indexPoint] =
+                dens.enclosedMass(inputBuffer[indexPoint] * conv->lengthUnit) / conv->massUnit;
+        }
+        catch(std::exception& e) {
+            printf("Error in enclosedMass(r=%g): %s\n", inputBuffer[indexPoint], e.what());
+            outputBuffer[indexPoint] = NAN;
+        }
+    }
+};
+
+PyObject* Density_enclosedMass(PyObject* self, PyObject* args)
 {
-    double radius = INFINITY;
-    if(PyTuple_Size(args) == 1 && !PyArg_ParseTuple(args, "d", &radius))
-        return NULL;
+    return FncDensityEnclosedMass(args, *((DensityObject*)self)->dens).run(/*chunk*/1);
+}
+
+/// compute the total mass
+PyObject* Density_totalMass(PyObject* self)
+{
     try{
-        return Py_BuildValue("d",
-            ((DensityObject*)self)->dens->enclosedMass(radius * conv->lengthUnit) / conv->massUnit);
+        return PyFloat_FromDouble(((DensityObject*)self)->dens->totalMass() / conv->massUnit);
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError,
@@ -1570,6 +1621,7 @@ PyObject* Density_totalMass(PyObject* self, PyObject* args)
     }
 }
 
+/// export density/potential to a text (ini) file
 PyObject* Density_export(PyObject* self, PyObject* args)
 {
     const char* filename=NULL;
@@ -1586,6 +1638,7 @@ PyObject* Density_export(PyObject* self, PyObject* args)
     }
 }
 
+/// sample the density profile with points
 PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"n", "potential", "beta", "kappa", NULL};
@@ -1610,10 +1663,15 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         // do the sampling of the density profile
         particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(*dens, numPoints);
 
-        // assign the velocities if needed
+        // assign the velocities if needed [deprecated!]
         particles::ParticleArrayCar pointsvel;
-        if(pot)
+        if(pot) {
             pointsvel = galaxymodel::assignVelocity(points, *dens, *pot, beta, kappa);
+            PyErr_WarnEx(PyExc_FutureWarning, "assigning velocity in sample(..., potential=...) "
+                "is deprecated and may be removed in the future; the recommended way is "
+                "to create a DistributionFunction(type='QuasiSpherical', ...) for the given "
+                "density and potential, then use GalaxyModel(potential, df).sample(...)", 1);
+        }
 
         // convert output to NumPy array
         numPoints = points.size();
@@ -1636,6 +1694,7 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
+/// return the name (with some further decorations in case of composite objects)
 PyObject* Density_name(PyObject* self)
 {
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
@@ -1687,6 +1746,7 @@ PyObject* Density_name(PyObject* self)
     return Py_BuildValue("s", name.c_str());
 }
 
+/// return the element of a multi-component density or potential model
 PyObject* Density_elem(PyObject* self, Py_ssize_t index)
 {
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
@@ -1728,6 +1788,7 @@ PyObject* Density_elem(PyObject* self, Py_ssize_t index)
     return NULL;
 }
 
+/// return the length of a multi-component density/potential model
 Py_ssize_t Density_len(PyObject* self)
 {
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
@@ -1758,7 +1819,7 @@ Py_ssize_t Density_len(PyObject* self)
     return -1;
 }
 
-// compare two Python Density objects "by value" (check if they represent the same C++ object)
+/// compare two Python Density objects "by value" (check if they represent the same C++ object)
 PyObject* Density_compare(PyObject* self, PyObject* other, int op)
 {
     bool equal = ((DensityObject*)self)->dens == ((DensityObject*)other)->dens;
@@ -1834,10 +1895,12 @@ static PyMethodDef Density_methods[] = {
       "Returns: a tuple of two arrays: "
       "a 2d array of size Nx3 (in case of positions only) or Nx6 (in case of velocity assignment), "
       "and a 1d array of N point masses." },
-    { "totalMass", (PyCFunction)Density_totalMass, METH_VARARGS,
-      "Return the total mass of the density model (if called without arguments), "
-      "or the mass enclosed within a given radius (if called with a single argument).\n"
+    { "totalMass", (PyCFunction)Density_totalMass, METH_NOARGS,
+      "Return the total mass of the density model.\n"
       "Returns: float number" },
+    { "enclosedMass", Density_enclosedMass, METH_VARARGS,
+      "Return the mass enclosed within a given radius or list of radii.\n"
+      "Returns: a single float number or an array of numbers" },
     { NULL }
 };
 
@@ -2270,18 +2333,20 @@ bool Potential_isCorrect(PyObject* self)
 /// compute the potential at one or more points
 class FncPotentialPotential: public BatchFunction {
     const potential::BasePotential& pot;
-    const double time;
+    const std::vector<double> time;
     double* outputBuffer;
 public:
-    FncPotentialPotential(PyObject* input, const potential::BasePotential& _pot, double _time) :
-        BatchFunction(/*input length*/ 3, input), pot(_pot), time(_time * conv->timeUnit)
+    FncPotentialPotential(PyObject* input, PyObject* namedArgs, const potential::BasePotential& _pot) :
+        BatchFunction(/*input length*/ 3, input), pot(_pot), time(getOptionalTimeArg(namedArgs, numPoints))
     {
-        outputObject = allocateOutput<1>(numPoints, &outputBuffer);
+        if(!PyErr_Occurred() && !time.empty())
+            outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            pot.value(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])), time) /
+            pot.value(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])),
+                time[indexPoint % time.size()] * conv->timeUnit) /
             pow_2(conv->velocityUnit);
     }
 };
@@ -2290,32 +2355,30 @@ PyObject* Potential_potential(PyObject* self, PyObject* args, PyObject* namedArg
 {
     if(!Potential_isCorrect(self))
         return NULL;
-    double time = 0;
-    if(!getOptionalNamedArg(namedArgs, "t", time))
-        return NULL;
-    return FncPotentialPotential(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
+    return FncPotentialPotential(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
 }
 
 /// compute the force and optionally its derivatives
 template<bool DERIV>
 class FncPotentialForce: public BatchFunction {
     const potential::BasePotential& pot;
-    const double time;
+    const std::vector<double> time;
     double* outputBuffers[2];
 public:
-    FncPotentialForce(PyObject* input, const potential::BasePotential& _pot, double _time) :
-        BatchFunction(/*input length*/ 3, input), pot(_pot), time(_time * conv->timeUnit)
+    FncPotentialForce(PyObject* input, PyObject* namedArgs, const potential::BasePotential& _pot) :
+        BatchFunction(/*input length*/ 3, input), pot(_pot), time(getOptionalTimeArg(namedArgs, numPoints))
     {
-        outputObject = DERIV ?
-            allocateOutput<3, 6>(numPoints, outputBuffers) :
-            allocateOutput<3   >(numPoints, outputBuffers);
+        if(!PyErr_Occurred() && !time.empty())
+            outputObject = DERIV ?
+                allocateOutput<3, 6>(numPoints, outputBuffers) :
+                allocateOutput<3   >(numPoints, outputBuffers);
     }
     virtual void processPoint(npy_intp ip /*point index*/)
     {
         const coord::PosCar point = convertPos(&inputBuffer[ip*3]);
         coord::GradCar grad;
         coord::HessCar hess;
-        pot.eval(point, NULL, &grad, DERIV ? &hess : NULL, time);
+        pot.eval(point, NULL, &grad, DERIV ? &hess : NULL, time[ip % time.size()] * conv->timeUnit);
         // unit of force per unit mass is V/T
         const double convF = 1 / (conv->velocityUnit / conv->timeUnit);
         outputBuffers[0][ip*3 + 0] = -grad.dx   * convF;
@@ -2336,19 +2399,13 @@ public:
 PyObject* Potential_force(PyObject* self, PyObject* args, PyObject* namedArgs) {
     if(!Potential_isCorrect(self))
         return NULL;
-    double time = 0;
-    if(!getOptionalNamedArg(namedArgs, "t", time))
-        return NULL;
-    return FncPotentialForce<false>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
+    return FncPotentialForce<false>(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
 }
 
 PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedArgs) {
     if(!Potential_isCorrect(self))
         return NULL;
-    double time = 0;
-    if(!getOptionalNamedArg(namedArgs, "t", time))
-        return NULL;
-    return FncPotentialForce<true>(args, *((PotentialObject*)self)->pot, time).run(/*chunk*/1024);
+    return FncPotentialForce<true>(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
 }
 
 /// compute the projected force for an array of points
