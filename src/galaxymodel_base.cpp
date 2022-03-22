@@ -157,7 +157,7 @@ coord::PosVelCar unscaleVelocity(const coord::PosCar& pos,
 inline void getVesc(
     const coord::PosCar& pos, const potential::BasePotential& poten, double& vesc, double& zeta)
 {
-    if(pow_2(pos.x) + pow_2(pos.y) + pow_2(pos.z) == INFINITY) {
+    if(!isFinite(pow_2(pos.x) + pow_2(pos.y) + pow_2(pos.z))) {
         vesc = 0.;
         zeta = 0.5;
         return;

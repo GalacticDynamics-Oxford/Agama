@@ -19,13 +19,14 @@ def alltest():
             if "ALL TESTS PASSED" in result:
                 print(elapsed+"OK")
                 passed+=1
-            elif "SOME TESTS FAILED" in result:
+            elif "SOME TESTS FAILED" in result or "FAILED TO IMPORT" in result:
                 print(elapsed+"FAILED")
                 failed+=1
             else:
-                print(elapsed+"UNKNOWN")
+                print(elapsed+"UNKNOWN")  # not a failure, nor a success
         except Exception as e:
             print(filler + "NOT STARTED: "+str(e))
+            failed+=1
     print(str(passed)+" TESTS PASSED" + \
         ( ", "+str(failed)+" FAILED" if failed>0 else ", NONE FAILED") +
         ( ", "+str(len(allprogs)-passed-failed)+" UNKNOWN" if passed+failed!=len(allprogs) else "") )

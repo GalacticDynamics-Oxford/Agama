@@ -154,7 +154,8 @@ void Cheby::chebyfit(double * x, double * y, const int np, const int NC)
   double alpha = 2./(x[np-1]-x[0]),
     beta = -(x[np-1]+x[0])/(x[np-1]-x[0]),  // can be done quicker
     Q = alpha/beta,
-    xtmp[50], coeff[3][50-2],bin[50],s11[50+1],dydx, 
+    *xtmp=new double[np], *coeff[3]={new double[np-1], new double[np-2], new double[np-2]},
+    bin[50],s11[50+1],dydx,
     th1,c1,c11,s1, fac, sum,a,b,c,ain0, sum1,sum2,sum3,cmk,betam,//q,
     work[50+2][2], ain[50+1];
 
@@ -255,6 +256,10 @@ void Cheby::chebyfit(double * x, double * y, const int np, const int NC)
     e1[k]*=qk;
     qk *=Q;
   }
+  delete[] xtmp;
+  delete[] coeff[0];
+  delete[] coeff[1];
+  delete[] coeff[2];
 }
 
 ////////////////////////////////////////////////////////////////////////////////

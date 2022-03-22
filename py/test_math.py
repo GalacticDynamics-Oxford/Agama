@@ -6,10 +6,11 @@ Illustrates the multidimensional integration and sampling routines from Agama
 import numpy
 # if the module has been installed to the globally known directory, just import it
 try: import agama
-except:  # otherwise load the shared library from the parent folder
+except ImportError:  # otherwise load the shared library from the parent folder
     import sys
     sys.path += ['../']
-    import agama
+    try: import agama
+    except ImportError as ex: sys.exit("\033[1;31mFAILED TO IMPORT AGAMA: %s\033[0m" % ex)
 
 # the user-defined function must take a single argument which is a 2d array MxN,
 # where N is the dimension of the space and M is the number of points where

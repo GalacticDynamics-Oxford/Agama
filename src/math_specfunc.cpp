@@ -24,10 +24,11 @@ extern bool exceptionFlag;
 
 // call a GSL function and return NAN in case of an error;
 // the error message is recorded in math::exceptionText and may be later examined by the caller
-#define CALL_FUNCTION_OR_NAN(x) \
+#define CALL_FUNCTION_OR_NAN(x) { \
     exceptionFlag = false; \
     double _result = x; \
-    return !exceptionFlag ? _result : NAN;
+    return !exceptionFlag ? _result : NAN; \
+}
 
 double erf(const double x)
 {

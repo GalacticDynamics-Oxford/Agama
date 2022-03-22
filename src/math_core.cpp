@@ -42,10 +42,11 @@ std::string exceptionText;
 /// when an exception occurs, this flag is set and the text is stored in exceptionText
 bool exceptionFlag = false;
 
-#define CALL_FUNCTION_OR_THROW(x) \
+#define CALL_FUNCTION_OR_THROW(x) { \
     exceptionFlag = false; \
     x; \
-    if(exceptionFlag) throw std::runtime_error(exceptionText);
+    if(exceptionFlag) throw std::runtime_error(exceptionText); \
+}
 
 /// callback function invoked by GSL in case of error; stores the error text in a global variable
 /// (not thread-safe! assumed that these events don't occur often)

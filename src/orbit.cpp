@@ -26,9 +26,9 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
     } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
         double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
-        ptrdiff_t ibegin = static_cast<ptrdiff_t>(sign * (tbegin-t0) / samplingInterval);
-        ptrdiff_t iend   = static_cast<ptrdiff_t>(sign * (tend-t0)   / samplingInterval * (1 + ROUNDOFF));
         double dtroundoff = ROUNDOFF * fmax(fmax(fabs(tend), fabs(tbegin)), fabs(t0));
+        ptrdiff_t ibegin = static_cast<ptrdiff_t>((sign * (tbegin-t0) - dtroundoff) / samplingInterval);
+        ptrdiff_t iend   = static_cast<ptrdiff_t>((sign * (tend-t0)   + dtroundoff) / samplingInterval);
         trajectory.resize(iend + 1);
         for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
             double tout = sign * samplingInterval * iout + t0;

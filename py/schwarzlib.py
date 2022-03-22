@@ -183,9 +183,8 @@ def makeVoronoiBins(particles, gridx, gridy, nbins, alpha=0, beta=0, gamma=0, pl
     hist = _numpy.histogram2d(X, Y, bins=(gridx, gridy))[0].reshape(-1)
     xc   = _numpy.repeat(0.5*(gridx[1:]+gridx[:-1]), len(gridy)-1)
     yc   = _numpy.tile  (0.5*(gridy[1:]+gridy[:-1]), len(gridx)-1)
-    snr  = (hist+1)**0.5
     bintags, xNode, yNode, xBar, yBar, sn, nPixels, scale = \
-        voronoi_2d_binning(xc, yc, hist, hist**0.5, (1.*_numpy.sum(hist)/nbins)**0.5, plot=plot, quiet=0)
+        voronoi_2d_binning(xc, yc, hist, (hist+0.1)**0.5, (1.*_numpy.sum(hist)/nbins)**0.5, plot=plot, quiet=0)
     if plot:
         import matplotlib.pyplot as plt
         plt.gcf().axes[0].set_xlim(plt.gcf().axes[0].get_xlim()[::-1])  # invert X axis as per the convention used in Agama

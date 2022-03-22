@@ -458,7 +458,7 @@ utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
 inline bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
 {
     if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0) ||
-        namedArgs==NULL || !PyDict_Check(namedArgs) || PyDict_Size(namedArgs)==0)
+        namedArgs==NULL || !PyDict_Check(namedArgs) /*|| PyDict_Size(namedArgs)==0*/)
     {
         PyErr_SetString(PyExc_TypeError, "function takes only keyword (not positional) arguments");
         return false;
@@ -3309,7 +3309,6 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
         pot = getPotential(pot_obj);
         if(!pot)
             throw std::invalid_argument("Argument 'potential' must be a valid instance of Potential class");
-        PyDict_DelItemString(namedArgs, "potential");
     }
     PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
     potential::PtrDensity dens;

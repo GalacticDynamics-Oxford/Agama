@@ -117,7 +117,7 @@ def makeRotationMatrix(alpha, beta, gamma):
     '''
     sinalpha, sinbeta, singamma = _numpy.sin([alpha, beta, gamma])
     cosalpha, cosbeta, cosgamma = _numpy.cos([alpha, beta, gamma])
-    return _numpy.array([
+    result = _numpy.array([
         [ cosalpha * cosgamma - sinalpha * cosbeta * singamma,
           sinalpha * cosgamma + cosalpha * cosbeta * singamma,
           sinbeta  * singamma ],
@@ -127,6 +127,8 @@ def makeRotationMatrix(alpha, beta, gamma):
         [ sinalpha * sinbeta,
          -cosalpha * sinbeta,
           cosbeta ] ])
+    result[abs(result)<1e-15] = 0  # round small values like sin(pi) to zero
+    return result
 
 
 def makeCelestialRotationMatrix(lon, lat, psi):
@@ -139,9 +141,11 @@ def makeCelestialRotationMatrix(lon, lat, psi):
     '''
     sina, sind, sinp = _numpy.sin([lon, lat, psi])
     cosa, cosd, cosp = _numpy.cos([lon, lat, psi])
-    return _numpy.array([ [    cosa * cosd,         sina * cosd,                sind        ],
+    result = _numpy.array([ [    cosa * cosd,         sina * cosd,                sind        ],
         [-sina * cosp - cosa * sind * sinp,  cosa * cosp - sina * sind * sinp,  cosd * sinp ],
         [ sina * sinp - cosa * sind * cosp, -cosa * sinp - sina * sind * cosp,  cosd * cosp ] ])
+    result[abs(result)<1e-15] = 0
+    return result
 
 
 # the matrix for transforming sky coordinates in the International Celestial Reference System

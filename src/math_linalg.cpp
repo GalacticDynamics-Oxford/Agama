@@ -855,10 +855,11 @@ inline NumT* xnew(size_t size) {
 extern bool exceptionFlag;
 extern std::string exceptionText;
     
-#define CALL_FUNCTION_OR_THROW(x) \
+#define CALL_FUNCTION_OR_THROW(x) { \
     exceptionFlag = false; \
     x; \
-    if(exceptionFlag) throw std::runtime_error(exceptionText);
+    if(exceptionFlag) throw std::runtime_error(exceptionText); \
+}
 
 //------ dense matrix ------//
 
@@ -1510,9 +1511,10 @@ SVDecomp::SVDecomp(const Matrix<double>& M) :
         Matrix<double> tempmat(M.cols(), M.cols());
         CALL_FUNCTION_OR_THROW(
         gsl_linalg_SV_decomp_mod(Mat(sv->U), Mat(tempmat), Mat(sv->V), Vec(sv->S), Vec(temp)) )
-    } else
+    } else {
         CALL_FUNCTION_OR_THROW(
         gsl_linalg_SV_decomp(Mat(sv->U), Mat(sv->V), Vec(sv->S), Vec(temp)) )
+    }
     // chop off excessively small singular values which may destabilize solution of linear system
     double minSV = sv->S[0] * 1e-15 * std::max<size_t>(sv->S.size(), 10);
     for(size_t k=0; k<sv->S.size(); k++)

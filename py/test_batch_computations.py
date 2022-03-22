@@ -11,10 +11,11 @@ of usage scenarios and calling conventions.
 import numpy
 # if the module has been installed to the globally known directory, just import it
 try: import agama
-except:  # otherwise load the shared library from the parent folder
+except ImportError:  # otherwise load the shared library from the parent folder
     import sys
     sys.path += ['../']
-    import agama
+    try: import agama
+    except ImportError as ex: sys.exit("\033[1;31mFAILED TO IMPORT AGAMA: %s\033[0m" % ex)
 
 allok = True
 

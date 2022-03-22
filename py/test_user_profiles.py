@@ -11,10 +11,11 @@ using numpy vectorized math operations, which improves efficiency.
 import numpy
 # if the module has been installed to the globally known directory, just import it
 try: import agama
-except:  # otherwise load the shared library from the parent folder
+except ImportError:  # otherwise load the shared library from the parent folder
     import sys
     sys.path += ['../']
-    import agama
+    try: import agama
+    except ImportError as ex: sys.exit("\033[1;31mFAILED TO IMPORT AGAMA: %s\033[0m" % ex)
 
 # set some non-trivial dimensional units to test the correctness of unit conversion within the library
 agama.setUnits(length=1, mass=1e5, velocity=1)
@@ -130,7 +131,7 @@ def my_moments(potential, df, point):
         return df(actions) * jacobian           # and return the values of DF times the jacobian
     # integration region: |v| from 0 to escape velocity, theta and phi are angles of spherical coords
     v_esc = (-2*potential.potential(point))**0.5
-    result, error, neval = agama.integrateNdim(integrand, [0,0,0], [v_esc, numpy.pi, 2*numpy.pi], toler=1e-6)
+    result, error, neval = agama.integrateNdim(integrand, [0,0,0], [v_esc, numpy.pi, 2*numpy.pi], toler=1e-5)
     return result
 
 dens_manual = my_moments(pot_appr, MyDF, (1,0,0))
@@ -166,7 +167,7 @@ if (abs(pot0_orig-pot0_appr)<1e-6    and
     abs(mass_user-mass_gm_user)<5e-3 and
     abs(dens_orig-dens_user)<1e-6    and
     abs(dens_user-dens_manual)<1e-6  and
-    abs(mass_gm_sf_orig-numpy.sum(m_orig))<1e-2 and
+    abs(mass_gm_sf_orig-numpy.sum(m_orig))<2e-2 and
     all(abs(meanxv_orig-meanxv_user)<0.005) and
     abs(m_orig[0]/m_user[0]-1)<0.001 and
     # test the equivalence of the two selection functions by directly comparing their output at points

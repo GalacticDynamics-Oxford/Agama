@@ -14,10 +14,11 @@ and velocities are in km/s, then the proper motions are in units of km/s/kpc = 0
 import numpy, astropy.coordinates as coord, astropy.units as unit
 # if the module has been installed to the globally known directory, just import it
 try: import agama
-except:  # otherwise load the shared library from the parent folder
+except ImportError:  # otherwise load the shared library from the parent folder
     import sys
     sys.path += ['../']
-    import agama
+    try: import agama
+    except ImportError as ex: sys.exit("\033[1;31mFAILED TO IMPORT AGAMA: %s\033[0m" % ex)
 
 numpy.random.seed(42)         # make experiments repeatable
 unit_angle= unit.radian       # units for celestial coordinates (latitude/longitude) are non-negociable
