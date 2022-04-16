@@ -971,7 +971,7 @@ PtrDensity DensitySphericalHarmonic::create(
     const BaseDensity& dens, int lmax, int mmax, 
     unsigned int gridSizeR, double rmin, double rmax)
 {
-    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>0) || !(rmax>rmin))
+    if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of min/max grid radii");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
@@ -979,8 +979,9 @@ PtrDensity DensitySphericalHarmonic::create(
     // that determines the number of integration points in angles
     int lmax_tmp =     isSpherical(dens) ? 0 : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
     int mmax_tmp = isZRotSymmetric(dens) ? 0 : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
-    std::vector<std::vector<double> > coefs;
+    chooseGridRadii(dens, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
+    std::vector<std::vector<double> > coefs;
     computeDensityCoefsSph(dens,
         math::SphHarmIndices(lmax_tmp, mmax_tmp, dens.symmetry()),
         gridRadii, coefs);

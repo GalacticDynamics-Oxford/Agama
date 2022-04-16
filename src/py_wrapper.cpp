@@ -458,7 +458,7 @@ utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
 inline bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
 {
     if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0) ||
-        namedArgs==NULL || !PyDict_Check(namedArgs) /*|| PyDict_Size(namedArgs)==0*/)
+        namedArgs==NULL || !PyDict_Check(namedArgs))
     {
         PyErr_SetString(PyExc_TypeError, "function takes only keyword (not positional) arguments");
         return false;
@@ -1481,10 +1481,11 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
             self->dens = Density_initFromTuple(args);
         else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             self->dens = Density_initFromDict(namedArgs);
-        else {
-            throw std::invalid_argument("Invalid parameters passed to the constructor "
+        else if(numargs==0)
+            throw std::invalid_argument("Argument list cannot be empty, type help(Density) for details");
+        else
+            throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Density) for details");
-        }
         assert(self->dens);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
@@ -2297,10 +2298,11 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
             self->pot = Potential_initFromTuple(args);
         else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
             self->pot = Potential_initFromDict(namedArgs);
-        else {
-            throw std::invalid_argument("Invalid parameters passed to the constructor "
+        else if(numargs==0)
+            throw std::invalid_argument("Argument list cannot be empty, type help(Potential) for details");
+        else
+            throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Potential) for details");
-        }
         assert(self->pot);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
@@ -2788,7 +2790,7 @@ int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
         &pot_obj, &interp_flag))
     {
-        PyErr_SetString(PyExc_TypeError, "Incorrect parameters for ActionFinder constructor: "
+        PyErr_SetString(PyExc_TypeError, "Incorrect arguments for ActionFinder constructor: "
             "must provide an instance of Potential to work with.");
         return -1;
     }
@@ -3010,8 +3012,8 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O(ddd)|d", const_cast<char**>(keywords),
         &pot_obj, &self->Jr, &self->Jz, &self->Jphi, &tol))
     {
-        //PyErr_SetString(PyExc_ValueError, "Incorrect parameters for ActionMapper constructor: "
-        //    "must provide an instance of Potential and a triplet of actions.");
+        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for ActionMapper constructor: "
+            "must provide an instance of Potential and a triplet of actions.");
         return -1;
     }
     potential::PtrPotential pot = getPotential(pot_obj);
@@ -4017,7 +4019,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
         &points_obj, &dens_flag, &vel_flag, &vel2_flag, &separate_flag, &alpha, &beta, &gamma))
         return NULL;
     bool dens = toBool(dens_flag, true), vel = toBool(vel_flag, false), vel2 = toBool(vel2_flag, true);
-    
+
     // retrieve the input point(s) and check the array dimensions
     PyArrayObject *points_arr =
         (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);

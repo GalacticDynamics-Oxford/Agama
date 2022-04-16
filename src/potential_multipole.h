@@ -56,14 +56,21 @@ namespace potential {
 /** Spherical-harmonic expansion of density with coefficients being spline functions of radius */
 class DensitySphericalHarmonic: public BaseDensity {
 public:
-    /** Construct the object from the provided density model and grid parameters.
-        Arguments have the same meaning as for Multipole::create(), but the grid radii must be
-        provided explicitly (not determined automatically).
+    /** Construct the density interpolator from the provided density profile and grid parameters.
+        This is not a constructor, but a static method returning a shared pointer to
+        the newly created density object.
+        \param[in]  src        is the input density or potential model;
+        \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
+        \param[in]  mmax       is the order of expansion in azimuth (phi);
+        \param[in]  gridSizeR  is the size of logarithmic grid in R;
+        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
     */
     static PtrDensity create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin, double rmax);
+        unsigned int gridSizeR, double rmin = 0, double rmax = 0);
 
     /** Construct the density interpolator from an N-body snapshot.
+        This is not a constructor, but a static method returning a shared pointer to
+        the newly created density object.
         \param[in]  particles  is the array of particles.
         \param[in]  sym  is the assumed symmetry of the input snapshot,
         which defines the list of spherical harmonics to compute and to ignore
@@ -188,6 +195,8 @@ public:
         unsigned int gridSizeR, double rmin = 0., double rmax = 0.);
 
     /** create the potential from an N-body snapshot.
+        This is not a constructor but a static member function returning a shared pointer
+        to the newly created potential.
         \param[in]  particles  is the array of particles.
         \param[in]  sym  is the assumed symmetry of the input snapshot,
         which defines the list of spherical harmonics to compute and to ignore

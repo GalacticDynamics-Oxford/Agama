@@ -520,10 +520,8 @@ math::LogLogSpline fitSphericalIsotropicDF(
             throw std::invalid_argument("fitSphericalIsotropicDF: incorrect input data");
     }
 
-    // 2. create a reasonable grid in log(h), with almost uniform spacing subject to the condition
-    // that each segment contains at least "a few" particles (weakly depending on their total number)
+    // 2. create a reasonable grid in log(h)
     int Nmin = static_cast<int>(fmax(1, log(nbody+1)/log(2)));
-#if 1  /*new, simpler/faster method*/
     std::nth_element(logh.begin(), logh.begin() + Nmin, logh.end());
     double loghmin = logh[Nmin];
     std::nth_element(logh.begin(), logh.end() - Nmin, logh.end());
@@ -531,14 +529,6 @@ math::LogLogSpline fitSphericalIsotropicDF(
     std::vector<double> gridh = math::createUniformGrid(gridSize, loghmin, loghmax);
     utils::msg(utils::VL_DEBUG, "fitSphericalIsotropicDF",
         "Grid in h=["+utils::toString(exp(gridh.front()))+":"+utils::toString(exp(gridh.back()))+"]");
-#else
-    std::vector<double> gridh = math::createAlmostUniformGrid(gridSize+2, logh, Nmin);
-    utils::msg(utils::VL_DEBUG, "fitSphericalIsotropicDF",
-        "Grid in h=["+utils::toString(exp(gridh[1]))+":"+utils::toString(exp(gridh[gridh.size()-2]))+"]"
-        ", particles span h=["+utils::toString(exp(gridh[0]))+":"+utils::toString(exp(gridh.back()))+"]");
-    gridh.erase(gridh.begin());
-    gridh.pop_back();
-#endif
 
     // 3a. perform spline log-density fit, and
     // 3b. initialize a cubic spline for log(f) as a function of log(h)

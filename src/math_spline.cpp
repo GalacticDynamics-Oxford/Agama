@@ -1449,7 +1449,6 @@ std::vector<double> FiniteElement1d<N>::computeConvVector(
         addPointConv<false>(integrNodes[p], fw, kernel, derivOrder, &result.front());
     }
     return result;
-    
 }
 
 template<int N>
@@ -3701,131 +3700,6 @@ std::vector<double> createSymmetricGrid(unsigned int nnodes, double xmin, double
         }
     } else
         return createUniformGrid(nnodes, -xmin * 0.5 * (nnodes-1), xmin * 0.5 * (nnodes-1));
-}
-
-/// creation of a grid with minimum guaranteed number of input points per bin
-namespace{
-void makegrid(std::vector<double>::iterator begin, std::vector<double>::iterator end,
-    double startval, double endval)
-{
-    double step=(endval-startval)/(end-begin-1);
-    while(begin!=end){
-        *begin=startval;
-        startval+=step;
-        ++begin;
-    }
-    *(end-1)=endval;  // exact value
-}
-}
-
-std::vector<double> createAlmostUniformGrid(unsigned int gridsize,
-    const std::vector<double> &srcpoints_unsorted, unsigned int minbin)
-{
-    if(srcpoints_unsorted.size()==0)
-        throw std::invalid_argument("createAlmostUniformGrid: input points array is empty");
-    if(gridsize < 2 || (gridsize-1)*minbin > srcpoints_unsorted.size())
-        throw std::invalid_argument("createAlmostUniformGrid: invalid grid size");
-    std::vector<double> srcpoints(srcpoints_unsorted);
-    std::sort(srcpoints.begin(), srcpoints.end());
-    std::vector<double> grid(gridsize);
-    std::vector<double>::iterator gridbegin=grid.begin(), gridend=grid.end();
-    std::vector<double>::const_iterator srcbegin=srcpoints.begin(), srcend=srcpoints.end();
-    std::vector<double>::const_iterator srciter;
-    std::vector<double>::iterator griditer;
-    bool ok=true, directionBackward=false;
-    int numChangesDirection=0;
-    do{
-        makegrid(gridbegin, gridend, *srcbegin, *(srcend-1));
-        ok=true;
-        // find the index of bin with the largest number of points
-        int largestbin=-1;
-        unsigned int maxptperbin=0;
-        for(srciter=srcbegin, griditer=gridbegin; griditer!=gridend-1; ++griditer) {
-            unsigned int ptperbin=0;
-            while(srciter+ptperbin!=srcend && *(srciter+ptperbin) < *(griditer+1))
-                ++ptperbin;
-            if(ptperbin>maxptperbin) {
-                maxptperbin=ptperbin;
-                largestbin=griditer-grid.begin();
-            }
-            srciter+=ptperbin;
-        }
-        // check that all bins contain at least minbin srcpoints
-        if(!directionBackward) {  // forward scan
-            srciter = srcbegin;
-            griditer = gridbegin;
-            while(ok && griditer!=gridend-1) {
-                unsigned int ptperbin=0;
-                while(srciter+ptperbin!=srcend && *(srciter+ptperbin) < *(griditer+1))
-                    ptperbin++;
-                if(ptperbin>=minbin)  // ok, move to the next one
-                {
-                    ++griditer;
-                    srciter+=ptperbin;
-                } else {  // assign minbin points and decrease the available grid interval from the front
-                    if(griditer-grid.begin() < largestbin) {
-                        // bad bin is closer to the grid front; move gridbegin forward
-                        while(ptperbin<minbin && srciter+ptperbin!=srcend)
-                            ptperbin++;
-                        if(srciter+ptperbin==srcend)
-                            directionBackward=true; // oops, hit the end of array..
-                        else {
-                            srcbegin=srciter+ptperbin;
-                            gridbegin=griditer+1;
-                        }
-                    } else {
-                        directionBackward=true;
-                    }   // will restart scanning from the end of the grid
-                    ok=false;
-                }
-            }
-        } else {  // backward scan
-            srciter = srcend-1;
-            griditer = gridend-1;
-            while(ok && griditer!=gridbegin) {
-                unsigned int ptperbin=0;
-                while(srciter+1-ptperbin!=srcbegin && *(srciter-ptperbin) >= *(griditer-1))
-                    ptperbin++;
-                if(ptperbin>=minbin)  // ok, move to the previous one
-                {
-                    --griditer;
-                    if(srciter+1-ptperbin==srcbegin)
-                        srciter=srcbegin;
-                    else
-                        srciter-=ptperbin;
-                } else {  // assign minbin points and decrease the available grid interval from the back
-                    if(griditer-grid.begin() <= largestbin) {
-                        // bad bin is closer to the grid front; reset direction to forward
-                        directionBackward=false;
-                        numChangesDirection++;
-                        if(numChangesDirection>10) {
-                            utils::msg(utils::VL_DEBUG, "createAlmostUniformGrid",
-                                "grid creation seems not to converge?");
-                            return grid;  // don't run forever but would not fulfill the minbin condition
-                        }
-                    } else {
-                        // move gridend backward
-                        while(ptperbin<minbin && srciter-ptperbin!=srcbegin)
-                            ++ptperbin;
-                        if(srciter-ptperbin==srcbegin) {
-                            directionBackward=false;
-                            numChangesDirection++;
-                            if(numChangesDirection>10) {
-                                utils::msg(utils::VL_WARNING, "createAlmostUniformGrid",
-                                    "grid creation does not seem to converge");
-                                return grid;  // don't run forever but would not fulfill the minbin condition
-                            }
-                        } else {
-                            srcend=srciter-ptperbin+1;
-                            gridend=griditer;
-                        }
-                    }
-                    ok=false;
-                }
-            }
-        }
-    } while(!ok);
-    return grid;
 }
 
 std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)

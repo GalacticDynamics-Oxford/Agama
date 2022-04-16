@@ -141,9 +141,11 @@ def makeDensityModel(params):
 # 4-component stellar density as defined above, plus central mass concentration, plus dark halo
 def makePotentialModel(params):
     # combined 4 components and the CMC represented by a single triaxial CylSpline potential
+    mmax = 12  # order of azimuthal Fourier expansion (higher order means better accuracy,
+    # but values greater than 12 *significantly* slow down the computation!)
     pot_bary = agama.Potential(type='CylSpline',
         density=agama.Density(makeDensityModel(params), makeCMC(0.2e10, 0.25, 0.05, 0.5)),
-        symmetry='t', mmax=8, gridsizeR=25, gridsizez=25, Rmin=0.1, Rmax=40, zmin=0.05, zmax=20)
+        symmetry='t', mmax=mmax, gridsizeR=25, gridsizez=25, Rmin=0.1, Rmax=40, zmin=0.05, zmax=20)
     # flattened axisymmetric dark halo with the Einasto profile
     pot_dark = agama.Potential(type='Multipole',
         density='Spheroid', axisratioz=0.8, gamma=0, beta=0,
@@ -201,6 +203,7 @@ ic[:,4] += 220
 orbits = agama.orbit(potential=pot, ic=ic, time=10., trajsize=1000, Omega=-39.0)[:,1]
 bar_angle = -25.0 * numpy.pi/180  # orientation of the bar w.r.t. the Sun
 sina, cosa = numpy.sin(bar_angle), numpy.cos(bar_angle)
+rmax = 10.0   # plotting range
 cmap = plt.get_cmap('mist')
 for i,o in enumerate(orbits):
     ax[1].plot(o[:,0]*cosa-o[:,1]*sina, o[:,0]*sina+o[:,1]*cosa, color=cmap(i*1.0/numorbits), lw=0.5)
@@ -208,5 +211,18 @@ ax[1].plot(-8.2,0.0, 'ko', ms=5)  # Solar position
 ax[1].text(-8.0,0.0, 'Sun')
 ax[1].set_xlabel('x [kpc]')
 ax[1].set_ylabel('y [kpc]')
+ax[1].set_xlim(-rmax, rmax)
+ax[1].set_ylim(-rmax, rmax)
+
+# overplot the surface density contours
+print('Computing surface density')
+gridr  = numpy.linspace(-rmax, rmax, 101)  # 1d grid
+gridxy = numpy.column_stack((numpy.repeat(gridr, len(gridr)), numpy.tile(gridr, len(gridr))))  # 2d grid
+Sigma  = pot[0].projectedDensity(gridxy, gamma=-bar_angle)  # surface density for a stellar component rotated by bar_angle
+logSigma = 2.5 * numpy.log10(Sigma / numpy.max(Sigma))      # log-scaled to magnitudes per unit square
+# thick lines spaced by one magnitude, thin lines lie halfway between thick ones
+ax[1].contour(gridr, gridr, logSigma.reshape(len(gridr), len(gridr)).T,
+    levels=numpy.linspace(-8,0,17), colors='k', zorder=5, linewidths=[2,1], linestyles='solid')
+
 plt.tight_layout()
 plt.show()

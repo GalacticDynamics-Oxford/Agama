@@ -2,8 +2,8 @@
 '''
 Construct a self-consistent DF-based model of the Milky Way nuclear stellar disk (NSD)
 with an additional non-self-consistent component representing the nuclear star cluster (NSC).
-This model is fitted to the current observational constraints, as detailed in Sormani et al. 2022
-(arXiv:2111.12713).
+This model is fitted to the current observational constraints, as detailed in
+Sormani et al. 2022 (MNRAS/512/1857).
 Authors: Mattia Sormani, Jason Sanders, Eugene Vasiliev
 Date: Feb 2022
 '''

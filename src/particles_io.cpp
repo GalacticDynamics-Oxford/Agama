@@ -448,6 +448,8 @@ ParticleArrayAux readSnapshot(
     {
 #ifdef HAVE_UNSIO
         return readSnapshotUNSIO(fileName, unitConverter);  // NEMO or Gadget
+#else
+        throw std::runtime_error("readSnapshot: compiled without support for reading NEMO or GADGET files");
 #endif
     }
     else if(buffer[0]>=32)
@@ -477,12 +479,14 @@ inline void writeSnapshot(
     {
         writeSnapshotNEMO(fileName, particles, unitConverter, header, time, append);
     }
-#ifdef HAVE_UNSIO
     else if(tolower(fileFormat[0])=='g')
     {
+#ifdef HAVE_UNSIO
         writeSnapshotUNSIO(fileName, particles, unitConverter, header, time, "gadget2");
-    }
+#else
+        throw std::runtime_error("writeSnapshot: compiled without support for writing GADGET files");
 #endif
+    }
     else
         throw std::runtime_error("writeSnapshot: file format not recognized");
 }

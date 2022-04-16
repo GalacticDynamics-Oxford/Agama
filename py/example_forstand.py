@@ -73,6 +73,28 @@ When adapting this script to a particular galaxy with existing observational dat
 start from step 4 (to make sure that the observed kinematic maps look reasonable and
 geometric parameters of the model, such as viewing angles and grids, are correct),
 and then go back to step 3 (run several series of models) before going to step 4 again.
+
+This script is mainly tailored to axisymmetric systems, although the Forstand code is applicable
+in a more general context (e.g., to rotating triaxial barred galaxies).
+The main limitation is the lack of suitable deprojection methods: in this example we use
+the Multi-Gaussian expansion to fit the 2d surface density profile of the N-body snapshot
+and then deproject it into an ellipsoidally stratified 3d density profile.
+In the case of triaxial systems, especially with radially varying axis ratios, this procedure
+is much less reliable and may even fail to produce a reasonable deprojection if the actual
+3d shape is not well described by ellipsoids.
+For triaxial systems, there are two rather than one angle specifying the orientation:
+inclination (beta) and the angle alpha between the major axis and the line of nodes,
+and in the rotating case, the pattern speed Omega is also a free parameter.
+
+The model parameters and corresponding chi^2 values are stored in a single file
+resultsGH.txt (for Gauss-Hermite parametrization of the LOSVD) or
+resultsHist.txt (for histograms), and each model's kinematic maps and orbit distribution
+are also written into separate files.
+In the interactive plotting regime, the likelihood surface is shown as a function of two
+model parameters (in this example, Mbh and M/L), but one may choose another pair of parameters
+by providing different columns of the results file as "aval", "bval" arguments for
+agama.schwarzlib.runPlot(...); the values of remaining parameters should then be fixed and
+specified as command-line arguments.
 '''
 
 import sys, numpy, agama
@@ -101,24 +123,21 @@ intTime   = float(args.get('INTTIME', 100.0))   # [OPT] integration time in unit
 regul     = float(args.get('REGUL', 1. ))       # [OPT] regularization parameter (larger => more uniform orbit weight distribution in models)
 incl      = float(args.get('INCL', 60.0))       # [REQ] inclination angle (0 is face-on, 90 is edge-on) [degrees]
 beta      = incl * numpy.pi/180                 # same in radians
-alpha     = float(args.get('ALPHA', 0.0))       # [REQ] azimuthal angle of viewing direction in the model coordinates (relevant only for non-axisym)
+alpha_deg = float(args.get('ALPHA', 0.0))       # [REQ] azimuthal angle of viewing direction in the model coordinates (relevant only for non-axisym)
+alpha     = alpha_deg * numpy.pi/180            # same in radians
 degree    = int  (args.get('DEGREE', 2))        # [OPT] degree of B-splines  (0 means histograms, 2 or 3 is preferred)
 symmetry  = 'a'                                 # [OPT] symmetry of the model ('s'pherical, 'a'xisymmetric, 't'riaxial)
-command   = args.get('DO', 'run').upper()       # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps
+command   = args.get('DO', '').upper()          # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps
 usehist   = args.get('HIST', 'n')[0] in 'yYtT1' # [OPT] whether to use LOSVD histograms as input (default 'no' is to use GH moments)
 variant   = 'Hist' if usehist else 'GH'         # suffix for disinguishing runs using histogramed LOSVDs or GH moments
 fileResult= 'results%s.txt' % variant           # [OPT] filename for collecting summary results for the entire model grid
 numpy.random.seed(42)  # make things repeatable
-numpy.set_printoptions(precision=4, linewidth=200, suppress=True)
+numpy.set_printoptions(precision=4, linewidth=9999, suppress=True)
 
-### parameters for the density dataset
-densityParams = dict(
-    type  = 'DensityCylindricalLinear',   # [REQ]: variant of density discretization grid; remaining parameters depend on this choice
-    gridr = agama.nonuniformGrid(nnodes=20, xmin=0.2, xmax=100.),  # [REQ] grid in cylindrical radius (TODO: determine automatically?)
-    gridz = agama.nonuniformGrid(nnodes=15, xmin=0.2, xmax=15.0),  # [REQ] grid in vertical coordinate
-    mmax  = 0  # [OPT] number of azimuthal-harmonic coefficients (0 for axisymmetric systems)
-)
-filenameMGE = 'mge.txt'       # [REQ] file with parameters of the MGE model for the surface density profile (if MGE is used)
+# In this example, we use the Multi-Gaussian Expansion to parametrize
+# the surface density profile and deproject it into the 3d density profile,
+# but the code works with any other choice of 3d density model.
+filenameMGE = 'mge_i%.0f.txt' % incl    # [REQ] file with parameters of the MGE model for the surface density profile (if MGE is used)
 
 ### common parameters for kinematic datasets (though in principle they may also differ between them)
 gridv  = numpy.linspace(-500, 500, 26)  # [REQ] the grid in model velocity space (will be multiplied by sqrt(Upsilon) when comparing to data)
@@ -143,9 +162,9 @@ kinemParams1 = dict(          # parameters passed to the constructor of the Targ
     degree   = degree,        # parameters for the internal datacube represented by B-splines:
     gridv    = gridv,         # usually will be identical for all datasets (except gridx,gridy which is determined by apertures)
 )
-filenameVorBin1 = 'voronoi_bins_lr.txt'  # [REQ] Voronoi binning scheme for this dataset
-filenameHist1   = 'kinem_hist_lr.txt'    # [REQ] histogrammed representation of observed LOSVDs
-filenameGH1     = 'kinem_gh_lr.txt'      # [REQ] Gauss-Hermite parametrization of observed LOSVDs (usually only one of these two files is given)
+filenameVorBin1 = 'voronoi_bins_i%.0f_lr.txt' % incl # [REQ] Voronoi binning scheme for this dataset
+filenameHist1   = 'kinem_hist_i%.0f_lr.txt'   % incl # [REQ] histogrammed representation of observed LOSVDs
+filenameGH1     = 'kinem_gh_i%.0f_lr.txt'     % incl # [REQ] Gauss-Hermite parametrization of observed LOSVDs (usually only one of these two files is given)
 
 ### same for the 2nd kinematic dataset [OPT] - may have only one dataset, or as many as needed
 gamma2 = -10.0 * numpy.pi/180
@@ -161,9 +180,9 @@ kinemParams2 = dict(
     degree   = degree,
     gridv    = gridv,
 )
-filenameVorBin2 = 'voronoi_bins_hr.txt'
-filenameHist2   = 'kinem_hist_hr.txt'
-filenameGH2     = 'kinem_gh_hr.txt'
+filenameVorBin2 = 'voronoi_bins_i%.0f_hr.txt' % incl
+filenameHist2   = 'kinem_hist_i%.0f_hr.txt'   % incl
+filenameGH2     = 'kinem_gh_i%.0f_hr.txt'     % incl
 
 
 # generate mock observations from an N-body model ([OPT] - of course this section is not needed when running the script on actual observations)
@@ -178,8 +197,7 @@ if command == 'MOCK':
         mass      = numpy.hstack((snapshot1[1], snapshot2[1]))  # 1d array of N particle masses
         # if your N-body snapshot is contained in a single file, just load it and assign posvel,mass arrays as specified above
     except:
-        print('You need to generate N-body snapshots by running example_self_consistent_model3.py')
-        exit()
+        exit('You need to generate N-body snapshots by running example_self_consistent_model3.py')
     # convert the N-body model (which was set up in N-body units with G=1) to observational units defined at the beginning of this script
     rscale = 30.0   # [REQ] 1 length unit of the N-body snapshot corresponds to this many length units of this script (arcseconds)
     mscale = 4e10   # [REQ] 1 mass unit of the snapshot corresponds to this many mass units of this script (solar masses)
@@ -189,20 +207,21 @@ if command == 'MOCK':
     mass *= mscale
 
     # pre-step ([OPT] - can use only for axisymmetric systems): create several rotated copies of the input snapshot to reduce Poisson noise
-    nrot = 9  # [OPT] number of rotation angles
-    posvel_stack = []
-    print('Creating %d rotated copies of input snapshot' % nrot)
-    for ang in numpy.linspace(0, numpy.pi, nrot):
-        sina, cosa = numpy.sin(ang), numpy.cos(ang)
-        posvel_stack.append( numpy.column_stack((
-            posvel[:,0] * cosa + posvel[:,1] * sina,
-            posvel[:,1] * cosa - posvel[:,0] * sina,
-            posvel[:,2],
-            posvel[:,3] * cosa + posvel[:,4] * sina,
-            posvel[:,4] * cosa - posvel[:,3] * sina,
-            posvel[:,5] )) )
-    posvel = numpy.vstack(posvel_stack)
-    mass   = numpy.tile(mass, nrot) / nrot
+    if symmetry[0] in ['s', 'a']:
+        nrot = 9  # [OPT] number of rotation angles
+        posvel_stack = []
+        print('Creating %d rotated copies of input snapshot' % nrot)
+        for ang in numpy.linspace(0, numpy.pi, nrot+1)[:-1]:
+            sina, cosa = numpy.sin(ang), numpy.cos(ang)
+            posvel_stack.append( numpy.column_stack((
+                posvel[:,0] * cosa + posvel[:,1] * sina,
+                posvel[:,1] * cosa - posvel[:,0] * sina,
+                posvel[:,2],
+                posvel[:,3] * cosa + posvel[:,4] * sina,
+                posvel[:,4] * cosa - posvel[:,3] * sina,
+                posvel[:,5] )) )
+        posvel = numpy.vstack(posvel_stack)
+        mass   = numpy.tile(mass, nrot) / nrot
 
     # 0th step: construct an MGE parametrization of the density (note: this is a commonly used, but not necessarily optimal approach)
     print('Creating MGE')
@@ -301,9 +320,70 @@ densityStars = agama.schwarzlib.makeDensityMGE(mge, distance, arcsec2kpc, beta)
 # note: one may use any alternative method for specifying the density profile of stars, not necessarily MGE
 #densityStars = agama.Density(agama.Density('dens_disk'), agama.Density('dens_bulge'))
 
+### parameters for the density dataset
+# the choice of discretization scheme depends on the morphological type of the galaxy being modelled:
+# for disky systems, DensityCylindrical[TopHat/Linear] is preferred, either in the axisymmetric regime
+# (mmax=0), or more generally with mmax>0;
+# for spheroidal systems, DensityClassic[TopHat/Linear] or DensitySphHarm may be more suitable,
+# and in any case, the choice of radial [and possibly vertical] grid requires careful consideration.
+# Here we do it automatically to ensure that the grid covers almost the entire model
+# and has roughly equal mass in each shell (for spherical) or slab (for cylindrical grids),
+# but this might not be suitable for every case; in particular, one may wish to make the grids
+# denser in the central region to better constrain the 3d density profile near the black hole.
+densityParams = dict(type = (
+    'DensityClassicTopHat',
+    'DensityClassicLinear',
+    'DensitySphHarm',
+    'DensityCylindricalTopHat',
+    'DensityCylindricalLinear')[4])   # [REQ] choose one of these types!
+# use the discrete samples from the density profile to choose the grid parameters
+samples = densityStars.sample(10000)[0]
+if densityParams['type'] == 'DensityClassicTopHat' or densityParams['type'] == 'DensityClassicLinear':
+    # create a grid in elliptical radius with axis ratio chosen to [roughly] match those of the density profile
+    axes = numpy.percentile(numpy.abs(samples), 90, axis=0)  # three principal axes in the outer part of the profile
+    axes/= numpy.exp(numpy.mean(numpy.log(axes)))  # normalize so that the product of three axes is unity
+    ellrad = numpy.sum((samples / axes)**2, axis=1)**0.5
+    # [OPT] make the inner grid segment contain 1% of the total mass
+    # (to better constrain the density near the black hole, though this may need some further tuning),
+    # and the remaining segments contain roughly equal fractions of mass up to 99% of the total mass
+    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(ellrad, numpy.linspace(1, 99, 24)) ])
+    densityParams['axisRatioY'] = axes[1] / axes[0]
+    densityParams['axisRatioZ'] = axes[2] / axes[0]
+    print('%s grid in elliptical radius: %s, axis ratios: y/x=%.3g, z/x=%.3g' %
+        (densityParams['type'], densityParams['gridr'], densityParams['axisRatioY'], densityParams['axisRatioZ']))
+    # [OPT] each shell in the elliptical radius is divided in three equal 'panes'
+    # adjacent to each of the principal axes, and then each pane is further divided
+    # into a square grid of cells with stripsPerPane elements on each side
+    densityParams['stripsPerPane'] = 2
+elif densityParams['type'] == 'DensitySphHarm':
+    # this discretization scheme uses a grid in spherical radius and a spherical-harmonic expansion in angles
+    sphrad = numpy.sum(samples**2, axis=1)**0.5
+    # [OPT] same procedure as above, using roughly equal-mass bins in spherical radius except the innermost one
+    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(sphrad, numpy.linspace(1, 99, 24)) ])
+    # [OPT] order of angular spherical-harmonic expansion in theta and phi (must be even)
+    densityParams['lmax'] = 0 if symmetry[0]=='s' else 8
+    densityParams['mmax'] = 0 if symmetry[0]!='t' else 6
+    print('%s grid in spherical radius: %s, lmax=%i, mmax=%i' %
+        (densityParams['type'], densityParams['gridr'], densityParams['lmax'], densityParams['mmax']))
+elif densityParams['type'] == 'DensityCylindricalTopHat' or densityParams['type'] == 'DensityCylindricalLinear':
+    sampleR = (samples[:,0]**2 + samples[:,1]**2)**0.5
+    samplez = abs(samples[:,2])
+    # [OPT] choose the grids in R and z so that each 'slab' (1d projection along the complementary coordinate)
+    # contains approximately equal mass, though this doesn't guarantee that the 2d cells would be even roughly balanced
+    densityParams['gridR'] = numpy.hstack([0, numpy.percentile(sampleR, numpy.linspace(1, 99, 20)) ])
+    densityParams['gridz'] = numpy.hstack([0, numpy.percentile(samplez, numpy.linspace(1, 99, 15)) ])
+    # [OPT] number of azimuthal-harmonic coefficients (0 for axisymmetric systems)
+    densityParams['mmax']  = 0 if symmetry[0]!='t' else 6
+    print('%s grid in R: %s, z: %s, mmax=%i' %
+        (densityParams['type'], densityParams['gridR'], densityParams['gridz'], densityParams['mmax']))
+
 datasets.append(agama.schwarzlib.DensityDataset(
     density=densityStars,
-    tolerance=0.0,   # [OPT] fractional tolerance (e.g., 0.01) on the values of density constraints; may be 0 -- satisfy them exactly
+    # [OPT] fractional tolerance (e.g., 0.01) on the values of density constraints;
+    # may be 0, requiring to satisfy them exactly, but in this case the solution may be infeasible
+    tolerance=0.0,
+    alpha=alpha,     # the orientation of intrinsic model coordinates w.r.t. the observed ones,
+    beta=beta,       # specified by two Euler angles (used only for plotting the projected density)
     **densityParams  # remaining parameters set above
 ) )
 
@@ -402,7 +482,8 @@ if command == 'RUN':
     # potential of the galaxy, excluding the central BH
     pot_gal   = agama.Potential(type='Multipole',
         density=agama.Density(densityStars, densityHalo),  # all density components together
-        lmax=32, mmax=0, gridSizeR=40)  # mmax=0 means axisymmetry; lmax is set to a large value to accurately represent the disk
+        lmax=32,  # lmax is set to a large value to accurately represent a disky density profile
+        mmax=0 if symmetry[0]!='t' else 6, gridSizeR=40)  # mmax>0 only for triaxial systems
     # potential of the central BH
     pot_bh    = agama.Potential(type='Plummer', mass=Mbh, scaleRadius=1e-4)
     # same for the fiducial BH
@@ -425,16 +506,19 @@ if command == 'RUN':
         densityExtra.sample(int(numOrbits*0.15), potential=pot_fidu)[0] ))
 
     # launch the orbit library and perform fits for several values of Upsilon;
-    agama.schwarzlib.runModel(datasets=datasets, potential=pot_total, ic=ic, intTime=intTime, Upsilon=Upsilon, multstep=multstep, regul=regul,
+    agama.schwarzlib.runModel(datasets=datasets, potential=pot_total, ic=ic,
+        intTime=intTime, Upsilon=Upsilon, multstep=multstep, regul=regul, Omega=Omega,
         # [OPT] prefix - common part of the file name storing LOSVDs of each model in this series;
         # the value of Upsilon is appended to each filename;  here one may adjust the string format or the list of parameters to store
-        filePrefix = 'M%.3g_O%.3g_Rh%.3g_Vh%.3g_N%d_R%.2f_%s' % (Mbh, Omega, rhalo, vhalo, numOrbits, regul, variant),
+        filePrefix = 'M%.3g_O%.3g_Rh%.3g_Vh%.3g_i%.0f_a%.0f_N%d_R%.2f_%s' %
+            (Mbh, Omega, rhalo, vhalo, incl, alpha_deg, numOrbits, regul, variant),
         # [OPT] data stored at the beginning of each line (= a separate model with a given Upsilon) in the results/summary file;
         # usually should contains the same parameters as in filePrefix, but separated by tabs.
         # Keep track of the order of parameters - when reading the results file in the plotting part of this script, the order should be the same.
         # After the linePrefix, each line in the result file will contain the value of Upsilon, values of chi2 for each dataset,
         # regularization penalty, and the name of the file with LOSVD of that model.
-        linePrefix = '\t'.join([ '%.3g' % Mbh, '%.3g' % Omega, '%.3g' % rhalo, '%.3g' % vhalo, '%d' % numOrbits, '%.2f' % regul ]),
+        linePrefix = '\t'.join([ '%.3g' % Mbh, '%.3g' % Omega, '%.3g' % rhalo, '%.3g' % vhalo,
+            '%.0f' % incl, '%.0f' % alpha_deg, '%d' % numOrbits, '%.2f' % regul ]),
         # [OPT] results/summary file
         fileResult = fileResult )
 
@@ -449,20 +533,22 @@ elif command == 'PLOT':
             (tab[:,1].astype(float) == Omega) *
             (tab[:,2].astype(float) == rhalo) *
             (tab[:,3].astype(float) == vhalo) *
-            (tab[:,4].astype(int  ) == numOrbits) *
-            (tab[:,5].astype(float) == regul)
+            (tab[:,4].astype(float) == incl) *
+            (tab[:,5].astype(float) == alpha_deg) *
+            (tab[:,6].astype(int  ) == numOrbits) *
+            (tab[:,7].astype(float) == regul)
         )
         tab = tab[filt]
         if len(tab) == 0:
             print('No models satisfying all criteria are found in %s' % fileResult)
     except:
         print('File not found: %s' % fileResult)
-        tab = numpy.zeros((0,10))
+        tab = numpy.zeros((0,12))
     filenames = tab[:,-1]                 # last column is the filename of LOSVD file for each model
     tab = tab[:,:-1].astype(float)        # remaining columns are numbers
-    Mbh = tab[:,0] * tab[:,6]             # the order of parameters is the same as in linePrefix provided to runModel
-    ML  = tab[:,6]                        # Upsilon is appended as the first column after those provided in linePrefix
-    chi2= numpy.sum(tab[:,8:-1], axis=1)  # chi2 values are stored separately for each dataset, but here we combine all of them except regularization penalty
+    Mbh = tab[:,0] * tab[:,8]             # the order of parameters is the same as in linePrefix provided to runModel
+    ML  = tab[:,8]                        # Upsilon is appended as the first column after those provided in linePrefix
+    chi2= numpy.sum(tab[:,10:-1], axis=1) # chi2 values are stored separately for each dataset, but here we combine all of them except regularization penalty
     # launch interactive plot with [OPT] Mbh vs M/L as the two coordinate axes displayed in chi2 plane (may choose a different pair of parameters)
     agama.schwarzlib.runPlot(datasets=datasets, aval=Mbh, bval=ML, chi2=chi2, filenames=filenames,
         # [OPT] various adjustable parameters for the plots (ranges, names, etc.) - most have reasonable default values
@@ -470,4 +556,4 @@ elif command == 'PLOT':
         v0lim=(-150,150), sigmalim=(40,160), v0err=15.0, sigmaerr=15.0)
 
 else:
-    print('Nothing to do!')
+    exit('Nothing to do!')

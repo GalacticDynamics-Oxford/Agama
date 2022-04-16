@@ -64,8 +64,7 @@
 \title{\vspace*{-14mm}
 \includegraphics[width=8cm]{agama.jpg}\protect\\[5mm]\Agama reference}
 \author{Eugene Vasiliev\\
-%\normalsize\textit{Lebedev Physical Institute, Moscow, Russia}\\
-\normalsize\textit{University of Oxford \& Institute of Astronomy, Cambridge}\\
+\normalsize\textit{Institute of Astronomy, Cambridge}\\
 \normalsize\textrm{email: eugvas@protonmail.com} }
 
 \maketitle
@@ -196,7 +195,7 @@ The second is \ttt{ExternalUnits}, which is used to convert physical quantities 
 
 When the external data follows the convention $G=1$ in whatever units, no conversion is necessary, thus one may provide an \ttt{ExternalUnits} object with a default constructor wherever required (it is usually a default value for this argument); in this case also no \ttt{InternalUnits} need to be defined. The reason for existence of two classes is that neither of them can fulfill both roles: to serve as an arbitrary internal ruler for testing the scale-invariance of calculations, and to have three independent fundamental physical scales (possibly different for various external data sources). In practice, one may create a single global instance of \ttt{ExternalUnits} with a temporary instance of arbitrary \ttt{InternalUnits} as an argument; however, having a separate global instance of the latter class is handy because its conversion constants indicate the direction (to or from physical units).
 
-The \Python interface supports the unit conversion internally: the user may set up a global instance of \ttt{ExternalUnits}, and all dimensional quantities passed to the library will be converted to internal library units and then back to physical units on output. Or, if no such conversion has been set up, all data is assumed to follow the convention $G=1$. In the future, we may adopt an alternative unit handling approach that would be seamlessly integrated with the units subsystem of the \textsc{Astropy} library \cite{Astropy}.
+The \Python interface supports the unit conversion internally: the user may set up a global instance of \ttt{ExternalUnits}, and all dimensional quantities passed to the library will be converted to internal library units and then back to physical units on output. Or, if no such conversion has been set up, all data is assumed to follow the convention $G=1$. In the future, we might adopt an alternative unit handling approach that would be seamlessly integrated with the units subsystem of the \textsc{Astropy} library \cite{Astropy}.
 
 
 %%%%%%%%%%%%%%
@@ -395,8 +394,8 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{alpha} [1] -- parameter controlling the steepness of transition between two asymptotic power-law slopes for \ttt{Spheroid} or \ttt{Nuker}.
 \item \ppp{beta} [4] -- power-law index of the outer density profile for \ttt{Spheroid} or \ttt{Nuker}; should be $>2$ except when there is an outer cutoff, otherwise the potential is unbound.
 \item \ppp{gamma} [1] -- power-law index of the inner density profile: $\rho \propto r^{-\gamma}$ as $r\to 0$ for \ttt{Dehnen} (should be $0\le\gamma\le 2$) or \ttt{Spheroid} ($\gamma<3$) models, or $\Sigma \propto R^{-\gamma}$ for \ttt{Nuker} model ($0\le \gamma < 2$).
-\item \ppp{cutoffStrength} [2] -- parameter $\xi$ controlling the steepness of the exponential cutoff in \ttt{Spheroid} or \ttt{Nuker} models: $\rho \propto \exp\big[-(r/r_\mathrm{cut})^\xi\big]$.
-\item \ppp{sersicIndex} -- shape parameter $n$ of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk). Please note that the meaning of \ppp{scaleRadius} is \textit{not the same} for the two cases: it corresponds to the projected half-light radius for the \ttt{Sersic} profile, but differs from it by a constant factor that depends on $n$ and $b_n(n)$ (see the expressions in Table~\ref{tab:PotentialParams}; $b_n$ is computed automatically). The projected density of the \ttt{Disk} profile matches the S\'ersic profile (after appropriate rescaling of length) only in the face-on orientation, and the flattening is also specified differently (\ppp{q}=$z/x$ for the \ttt{Sersic} profile and \ppp{scaleHeight} for the \ttt{Disk} profile).
+\item \ppp{cutoffStrength} [2] -- parameter $\xi$ controlling the steepness of the exponential cutoff in \ttt{Spheroid} or \ttt{Nuker} models: $\rho \propto \exp\big[-(r/r_\mathrm{cut})^\xi\big]$. It can also be used to create the Einasto profile, in which $\rho(r)\propto \exp\big[-c_n\,(r/r_\mathrm{half})^{1/n}\big]$, where $c_n\approx 3n-1/3+\frac{0.0075}{n-0.05}$ is the root of $2\Gamma(3n,c_n)=\Gamma(3n)$ and $n$ is the Einasto index: in this case set $\gamma=\beta=0$, $\eta=1/n$, $r_\mathrm{cut}=r_\mathrm{half}/c_n^n$ and \ppp{densityNorm}${}=3M / [4\pi\,r_\mathrm{cut}^3\,\Gamma(3n+1)]$.
+\item \ppp{sersicIndex} -- shape parameter $n$ of the \ttt{Sersic} profile (larger values correspond to a models with steeper inner and shallower outer profiles, default is the de Vaucouleur's value of 4), or the same parameter for the \ttt{Disk} profile (default is 1 corresponding to the exponential disk). Please note that the meaning of \ppp{scaleRadius} is \textit{not the same} for the two cases: it corresponds to the projected half-light radius for the \ttt{Sersic} profile, but differs from it by a constant factor that depends on $n$ and $b_n(n)$ (see the expressions in Table~\ref{tab:PotentialParams}; $b_n\approx 2n-1/3$ is computed automatically) for the \ttt{Disk} profile. The projected density of the \ttt{Disk} profile matches the S\'ersic profile (after appropriate rescaling of length) only in the face-on orientation, and the flattening is also specified differently (\ppp{q}=$z/x$ for the \ttt{Sersic} profile and \ppp{scaleHeight} for the \ttt{Disk} profile).
 \item \ppp{p} or \ppp{axisRatioY} [1] -- the axis ratio $y/x$ of equidensity surfaces of constant ellipticity for \ttt{Dehnen}, \ttt{Spheroid}, \ttt{Nuker}, \ttt{Sersic} or \ttt{Ferrers} models, or the analogous quantity for the \ttt{Logarithmic} or \ttt{Harmonic} potentials.
 \item \ppp{q} or \ppp{axisRatioZ} [1] -- the same parameter for $z/x$. Note that if either \ppp{p} or \ppp{q} are different from unity and \ppp{type} is \ttt{Plummer} or \ttt{NFW} (which specify only spherical potential models), \ppp{type} is implicitly changed to \ttt{Spheroid} and the potential is represented by \ttt{Multipole}.
 \item \ppp{W0} -- dimensionless potential depth of generalized \ttt{King} (lowered isothermal) models: $W_0 = [ \Phi(r_t) - \Phi(0) ] / \sigma^2$; larger values correspond to more extended envelopes (larger ratio between the outer truncation radius $r_t$ and the scale radius). In the above expression, the velocity dispersion $\sigma$ is not an independent parameter: the model in dimensionless units is specified by $W_0$ and the truncation strength parameter $g$; the potential, the truncation radius, and the total mass in dimensionless units are all determined by integrating a second-order ODE, and then the length and mass units are rescaled to match the given total mass $M$ and the scale radius (also called King radius or core radius).
@@ -968,7 +967,7 @@ Plotting the rotation curve of the above constructed potential and all its compo
 \texttt{Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{Tcirc(points)}.\\[2mm]
 \texttt{Rcirc(E=...)} or \texttt{Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum.\\[2mm]
 \texttt{Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$.\\[2mm]
-\texttt{Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum in the equatorial plane of an axisymmetric potential; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input).
+\texttt{Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum in the equatorial plane of an axisymmetric potential; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input).\\[2mm]
 \texttt{export(filename)} stores the potential into an INI file, which can be used later to read it back (by passing the filename as the parameter to the constructor). This operation only makes sense for the potential expansions (\ppp{Multipole} or \ppp{CylSpline}); other potentials just store their name but nothing else (and hence are unusable or even incorrectly loaded back!) -- as explained above, due to the rearrangements of constituent parts during the construction of a multicomponent potential, it is not always possible to reconstruct the original parameters from the existing objects. Note that all components of a composite potential are stored in a single file, each one in its own section \texttt{[Potential]}, \texttt{[Potential1]}, etc.
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
@@ -1091,8 +1090,8 @@ In case of success (\texttt{status=True}), the \texttt{result} array contains a 
 
 \paragraph{Unit handling} is optional: if nothing is specified explicitly, the library operates with the natural $N$-body units ($G=1$). However, the user may set up a unit system with three independent basic dimensional units (mass and any two out of three other units: length, velocity and time), and all dimensional quantities in Python will be expressed in these basic units and converted into natural units internally within the library:\\[1mm]
 \texttt{agama.setUnits(mass=1, length=1, velocity=1)}\\[1mm]
-instructs the library to work with the commonly used Galactic units: $1\,M_\odot$, 1\,kpc, 1\,km/s, with the derived unit of time being 0.98~Gyr (this is \textit{not} the same as using no units at all, because $G=4.3\times10^{-6}$ in these units; the numerical value of the gravitational constant is stored as \texttt{agama.G}). Importantly, this setup needs to be performed at the beginning of work, otherwise the values returned by the previously constructed classes and methods (e.g., potentials) would be incorrectly scaled (a warning will be issued if you call \texttt{setUnits} after creating instances of other classes). If the \textsc{Astropy} framework \cite{Astropy} is installed, one may provide instances of \texttt{astropy.Quantity} or \texttt{astropy.Unit} as arguments for \texttt{agama.setUnits}. The function \texttt{agama.getUnits} returns the current units as a dictionary with four items: \texttt{length}, \texttt{velocity}, \texttt{time} and \texttt{mass}, all expressed in the same base units as the arguments of \texttt{setUnits}, namely: kpc, km/s, Myr and $M_\odot$. Again, if \textsc{Astropy} is installed, the returned dictionary will contain \texttt{astropy.Quantity} instances rather than plain numbers.\\
-At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information.
+instructs the library to work with the commonly used Galactic units: $1\,M_\odot$, 1\,kpc, 1\,km/s, with the derived unit of time being 0.98~Gyr (this is \textit{not} the same as using no units at all, because $G=4.3\times10^{-6}$ in these units; the numerical value of the gravitational constant is stored as \texttt{agama.G}). Importantly, this setup needs to be performed at the beginning of work, otherwise the values returned by the previously constructed classes and methods (e.g., potentials) would be incorrectly scaled (a warning will be issued if you call \texttt{setUnits} after creating instances of other classes). If the \textsc{Astropy} framework \cite{Astropy} is installed, one may provide instances of \texttt{astropy.Quantity} or \texttt{astropy.Unit} as arguments for \texttt{agama.setUnits}. The function \texttt{agama.getUnits} returns the current units as a dictionary with four items: \texttt{length}, \texttt{velocity}, \texttt{time} and \texttt{mass}, all expressed in the same base units as the arguments of \texttt{setUnits}, namely: kpc, km/s, Myr and $M_\odot$. Again, if \textsc{Astropy} is installed \textit{and imported}, the returned dictionary will contain \texttt{astropy.Quantity} instances rather than plain numbers.\\
+At the moment there is no way to explicitly attach the units to the dimensional quantities passed to or returned from the library: for instance, \texttt{posvel} would be still a plain \texttt{numpy} array, with the implied convention that the first three columns are expressed in the length unit (e.g., 1~kpc) and the second three columns -- in velocity units (e.g., km/s), but it carries no attributes containing this information. This is a deliberate design choice, as \textsc{Astropy} unit conversion incurs a significant overhead cost for small amounts of data.
 
 \paragraph{Coordinate transformation} routines provide a simple mechanism for converting between Cartesian and celestial coordinates, or between two celestial reference frames. These conversions are a subset of those provided by \textsc{Astropy}, but are faster especially for small-to-medium size inputs, because they operate directly on \texttt{numpy} arrays and work only with a specific choice of units, bypassing the overheads of the comprehensive unit conversion subsystem of the \textsc{Astropy} framework:\\
 \texttt{makeRotationMatrix} constructs a $3\times3$ orthogonal rotation matrix $\mathsf R$ parametrized by Euler angles (Section~\ref{sec:CoordinateDetails}); the coordinates in the rotated frame $\boldsymbol x'$ are related to the original coordinates $\boldsymbol x$ via $\boldsymbol x' = \mathsf R \boldsymbol x$;\\
@@ -1225,6 +1224,10 @@ The \Agama framework itself is indeed just a ``library'', not a ``program'', but
 
 \paragraph{example_spiral} \label{sec:ExampleSpiral} is a \Python script illustrating the use of a user-defined potential model (a three-arm spiral) for orbit integration: the \Python function defining the potential can be used directly, but it is rather inefficient, and the preferred way is to construct a \ppp{CylSpline} approximation for it. See also \textbf{test\_user\_profiles.py} for other examples of providing user-defined \Python functions representing density, distribution function and selection function concepts to various routines within the library.
 
+\paragraph{example_mw_bar_potential} is a \Python script that constructs a smooth analytic density profile and the associated \ppp{CylSpline} potential approximating the made-to-measure model of the Milky Way bar \cite{Portail2017}.
+
+\paragraph{example_poincare} is an interactive \Python program illustrating the Poincar\'e surface of section and orbits in the meridional plane of axisymmetric potentials.
+
 \paragraph{example_deprojection} is an interactive \Python plotting script illustrating the projection and deprojection of triaxial ellipsoidal bodies viewed at different orientations.
 
 \paragraph{example_smoothing_spline} is a \Python program showing the use of penalized smoothing splines for fitting a curve to noisy data (\ttt{splineApprox}) and for estimating 1d probability distributions from discrete samples (\ttt{splineLogDensity}).
@@ -1247,8 +1250,9 @@ This program is designed to work with the mock data from the \href{http://astrow
 
 There are a couple of closely related \Python programs:\\
 \textbf{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
-\textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model.\\
-\textbf{example_mw_nsd} constructs a DF-based self-consistent model of the Milky Way nuclear stellar disk.\\
+\textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model;\\
+\textbf{example_self_consistent_model_flattened} is a slightly more complicated variant that creates a flattened rotating S\'ersic model;\\
+\textbf{example_mw_nsd} constructs a DF-based self-consistent model of the Milky Way nuclear stellar disk \cite{Sormani2022}.\\
 \textbf{test_self_consistent_model} illustrates the iterative self-consistent modelling workflow by reimplementing the \ttt{Component} and \ttt{SelfConsistentModel} classes in pure \Python and testing their equivalence to the \Cpp classes. The same approach can be used in other contexts besides self-consistent modelling, as a means of producing the density profile corresponding to the given DF -- essentially, computing the zeroth moment of the DF at a small number of points ($\sim 100$) and then interpolating it into the entire 3d space as \ppp{DensitySphericalHarmonic} or \ppp{DensityCylindricalHarmonic}. This could be useful if one needs to evaluate it at many points -- for instance, to compute the integrals of density over some finite volume (equivalent to a spatial selection function) or the surface density.
 
 \paragraph{example_schwarzschild_triaxial} and \;\;\textbf{example_schwarzschild_flattened_rotating}\;\;\\ are two \Python scripts illustrating the basic steps in Schwarzschild orbit-superposition  modelling. The first one creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot. The second one creates a flattened rotating S\'ersic model with a central black hole, again converts it into an $N$-body snapshot, and plots various diagnostic information.
@@ -1256,6 +1260,8 @@ There are a couple of closely related \Python programs:\\
 \paragraph{schwarzschild} is a more general \Python program for constructing multicomponent Schwarzschild models and converting them into $N$-body models. It reads all model parameters from an \texttt{ini} file (an example of a three-component axisymmetric disk galaxy model is provided in \texttt{data/schwarzschild_axisym.ini}). This program can be used in the ``theoretical'' context, when the goal is to construct a single equilibrium model with given parameters, not to fit a model to some observational data -- that job is performed by the following program.
 
 \paragraph{example_forstand} is a \Python program illustrating various aspects of observationally-constrained Schwarzschild modelling. It creates mock datasets from $N$-body models, runs a grid of models, and displays results in an interactive plot. This program can serve as a template for user scripts adapted to particular observational datasets.
+
+\paragraph{measureshape} is a \Python program providing a function \texttt{getaxes} (which can be used in other scripts) for measuring the shape and orientation of triaxial ellipsoidal $N$-body snapshots, using the moment of inertia tensor (method E1 in \cite{Zemp2011}).
 
 \phantomsection\label{sec:mkspherical}%
 \paragraph{mkspherical} is a \Cpp program for creating and analyzing spherical isotropic models. These models are defined by a potential $\Phi(r)$ and a distribution function $f(E)$, or rather, $f(h)$, where $h(E)$ is the phase volume (Section~\ref{sec:DFsphericalIsotropic}). These models may or may not be self-consistent, i.e., the potential may be generated by the density profile corresponding to $f(h)$, but also contain other external components (e.g., a central massive black hole). This tool can be used in two distinct modes: (a) creating a spherical model with prescribed properties (given by a built-in density profile, or interpolated from a user-provided table of enclosed mass within a range of radii), using the Eddington inversion formula to compute the distribution function, or (b) analyzing an \Nbody snapshot (constructing smooth spline approximations to the spherical potential, density and isotropic distribution function). The output consists of a text table with several variables ($\Phi$, $\rho$, $f$, etc.) as functions of radius or energy, and/or an \Nbody realization of the model, which may then serve as the initial conditions in a simulation. Note that in the case that a given density and potential cannot be reproduced by a non-negative isotropic DF (e.g., a constant-density core in the Kepler potential), no error is emitted, and instead the DF is replaced with zeros whenever the computed value is negative.
@@ -2533,6 +2539,9 @@ Piffl T., Penoyre Z., Binney J., 2015, MNRAS, 451, 639
 \bibitem{Pynbody}
 Pontzen A., et al., ascl:1305.002
 
+\bibitem{Portail2017}
+Portail M., Gerhard O., Wegg C., Ness M., 2017, MNRAS, 465, 1621
+
 \bibitem{PortegiesZwart2013}
 Portegies Zwart S., McMillan S., van Elteren E., Pelupessy I., de Vries N., 2013, Comput.\ Phys.\ Commun., 184, 3, 456
 
@@ -2569,6 +2578,9 @@ Skokos Ch., 2010, LNP, 790, 63
 \bibitem{Silverman1982}
 Silverman B., 1982, Annals of statistics, 10, 795.
 
+\bibitem{Sormani2022}
+Sormani M., Sanders J., Fritz T., et al., 2022, MNRAS, 512, 1857
+
 \bibitem{SutterAlexandrescu}
 Sutter H., Alexandrescu A., 2004, \textsl{C++ coding standards}, Addison--Wesley
 
@@ -2599,6 +2611,9 @@ Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
 
 \bibitem{VasilievValluri2020}
 Vasiliev E., Valluri M., 2020, ApJ, 889, 39
+
+\bibitem{Zemp2011}
+Zemp M., Gnedin O., Gnedin N., Kravtsov A., 2011, ApJS, 197, 30
 
 \bibitem{Zhao1996}
 Zhao H.-S., 1996, MNRAS, 278, 488

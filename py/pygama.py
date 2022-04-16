@@ -19,33 +19,34 @@ def setUnits(**args):
     rawnumbers = all([isinstance(args[elem], (int, float)) for elem in args])
     if rawnumbers:  # no need to resort to astropy unit conversion
         return _setUnits(**args)  # call the setUnits(...) function from the C++ extension module
-    # check if we have astropy installed, and if yes, whether the arguments are Quantities
-    try:
-        import astropy.units as u
+    # check if we have astropy imported (but *do not* attempt to import it if it wasn't used before),
+    # and if yes, whether the arguments are Quantities
+    import sys
+    if 'astropy.units' in sys.modules:
+        u = sys.modules['astropy.units']
         conv = dict(length=u.kpc, velocity=u.km/u.s, time=u.Myr, mass=u.Msun)
         for arg in args:
             if   isinstance(args[arg], u.Quantity):
                 args[arg] = args[arg].to_value(conv[arg])
             elif isinstance(args[arg], u.UnitBase):
                 args[arg] = args[arg].to(conv[arg])
-    except ImportError: pass
     _setUnits(**args)  # call the setUnits(...) function from the C++ extension module
 
 setUnits.__doc__ = _setUnits.__doc__ + \
-"If astropy is available, one may provide the input arguments as instances of astropy.Quantity or astropy.Unit"
+"If astropy.units is available, one may provide the input arguments as instances of astropy.units.Quantity or astropy.units.Unit"
 
 def getUnits():
     result = _getUnits()
     if not result: return result  # empty dict, no conversion needed
-    try:
-        import astropy.units as u
+    import sys
+    if 'astropy.units' in sys.modules:
+        u = sys.modules['astropy.units']
         conv = dict(length=u.kpc, velocity=u.km/u.s, time=u.Myr, mass=u.Msun)
         for value in result: result[value] *= conv[value]
-    except ImportError: pass
     return result
 
 getUnits.__doc__ = _getUnits.__doc__ + \
-"If astropy is available, the returned dict will contain astropy.Quantity instances rather than raw floats"
+"If astropy.units has been imported, the returned dict will contain astropy.units.Quantity instances rather than raw floats"
 
 
 ### --------------------------------------------------------
@@ -141,7 +142,7 @@ def makeCelestialRotationMatrix(lon, lat, psi):
     '''
     sina, sind, sinp = _numpy.sin([lon, lat, psi])
     cosa, cosd, cosp = _numpy.cos([lon, lat, psi])
-    result = _numpy.array([ [    cosa * cosd,         sina * cosd,                sind        ],
+    result = _numpy.array([ [  cosa * cosd,         sina * cosd,                sind        ],
         [-sina * cosp - cosa * sind * sinp,  cosa * cosp - sina * sind * sinp,  cosd * sinp ],
         [ sina * sinp - cosa * sind * cosp, -cosa * sinp - sina * sind * cosp,  cosd * cosp ] ])
     result[abs(result)<1e-15] = 0

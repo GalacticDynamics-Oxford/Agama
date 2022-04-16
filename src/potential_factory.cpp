@@ -36,7 +36,7 @@ namespace {  // internal definitions and routines
 /// order of the Multipole expansion for the GalPot potential
 static const int GALPOT_LMAX = 32;
 
-/// order of the azimuthal Fourier expansion in case of non-axisymmetric components
+/// [default] order of the azimuthal Fourier expansion in case of non-axisymmetric components
 static const int GALPOT_MMAX = 6;
 
 /// number of radial points in the Multipole potential automatically constructed for GalPot
@@ -286,8 +286,8 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
                               * conv.lengthUnit;
     param.binary_ecc          = kvmap.getDouble("binary_ecc",   param.binary_ecc);
     param.binary_phase        = kvmap.getDouble("binary_phase", param.binary_phase);
-    param.gridSizeR           = kvmap.getInt(   "gridSizeR", param.gridSizeR);
-    param.gridSizez           = kvmap.getInt(   "gridSizeZ", param.gridSizez);
+    param.gridSizeR           = kvmap.getInt   ("gridSizeR", param.gridSizeR);
+    param.gridSizez           = kvmap.getInt   ("gridSizeZ", param.gridSizez);
     param.rmin                = kvmap.getDouble("rmin", param.rmin)
                               * conv.lengthUnit;
     param.rmax                = kvmap.getDouble("rmax", param.rmax)
@@ -296,10 +296,10 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
                               * conv.lengthUnit;
     param.zmax                = kvmap.getDouble("zmax", param.zmax)
                               * conv.lengthUnit;
-    param.lmax                = kvmap.getInt(   "lmax", param.lmax);
-    param.mmax                = kvmap.contains( "mmax") ? kvmap.getInt("mmax") : param.lmax;
+    param.lmax                = kvmap.getInt   ("lmax", param.lmax);
+    param.mmax                = kvmap.contains ("mmax") ? kvmap.getInt("mmax") : param.lmax;
     param.smoothing           = kvmap.getDouble("smoothing", param.smoothing);
-    param.nmax                = kvmap.getInt(   "nmax", param.nmax);
+    param.nmax                = kvmap.getInt   ("nmax", param.nmax);
     param.eta                 = kvmap.getDouble("eta",  param.eta);
     param.r0                  = kvmap.getDouble("r0",   param.r0)
                               * conv.lengthUnit;
@@ -1453,11 +1453,14 @@ PtrPotential createPotential(
     // center offset are grouped into a single bunch of DiskAnsatz+Multipole combinations, but
     // there may be more than one such bunch if the center offsets vary between parameter groups.
 
-    std::vector<Bunch> bunches;   // list of bunches sharing a common center
+    std::vector<Bunch> bunches;     // list of bunches sharing a common center
+    int galpot_mmax = GALPOT_MMAX;  // order of azimuthal expansion for galpot components
 
     // first loop over all parameter groups
     for(unsigned int i=0; i<kvmap.size(); i++) {
         const AllParam param = parseParam(kvmap[i], converter);
+        if(kvmap[i].contains("mmax"))   // manually override the default azimuthal expansion order
+            galpot_mmax = std::max<int>(galpot_mmax, kvmap[i].getInt("mmax"));
 
         // find the "bunch" with the same center, or create a new one
         unsigned int indexBunch = 0;
@@ -1536,7 +1539,7 @@ PtrPotential createPotential(
                 totalDens.reset(new CompositeDensity(bunch->componentsDens));
             bunch->componentsPot.push_back(Multipole::create(*totalDens,
                 isSpherical   (*totalDens) ? 0 : GALPOT_LMAX,
-                isAxisymmetric(*totalDens) ? 0 : GALPOT_MMAX, GALPOT_NRAD));
+                isAxisymmetric(*totalDens) ? 0 : galpot_mmax, GALPOT_NRAD));
         }
         // each bunch either has just one potential component, or produces a composite potential
         PtrPotential bunchPotential = bunch->componentsPot.size()==1 ?

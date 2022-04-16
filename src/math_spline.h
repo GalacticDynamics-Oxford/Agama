@@ -1289,19 +1289,6 @@ std::vector<double> createExpGrid(unsigned int nnodes, double xmin, double xmax)
 */
 std::vector<double> createNonuniformGrid(unsigned int nnodes, double xmin, double xmax, bool zeroelem);
 
-/** create an almost uniform grid enclosing all input points,
-    so that each bin contains at least minbin points from input array.
-    \param[in]  nnodes    is the number of grid nodes (>=2);
-    \param[in]  srcpoints is the input array of points;
-    \param[in]  minbin    is the minimum number of points per bin;
-    \return     the array of grid nodes. 
-    NB: in the present implementation, the algorithm is not very robust 
-    and works well only for nnodes*minbin << srcpoints.size, assuming that 
-    'problematic' bins only are found close to endpoints but not in the middle of the grid.
-*/
-std::vector<double> createAlmostUniformGrid(unsigned int nnodes, 
-    const std::vector<double> &srcpoints, unsigned int minbin);
-
 /** extend the input grid to negative values, by reflecting it about origin.
     \param[in]  input is the vector of N values that should start at zero
                 and be monotonically increasing;

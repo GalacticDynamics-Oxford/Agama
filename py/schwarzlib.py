@@ -183,8 +183,9 @@ def makeVoronoiBins(particles, gridx, gridy, nbins, alpha=0, beta=0, gamma=0, pl
     hist = _numpy.histogram2d(X, Y, bins=(gridx, gridy))[0].reshape(-1)
     xc   = _numpy.repeat(0.5*(gridx[1:]+gridx[:-1]), len(gridy)-1)
     yc   = _numpy.tile  (0.5*(gridy[1:]+gridy[:-1]), len(gridx)-1)
-    bintags, xNode, yNode, xBar, yBar, sn, nPixels, scale = \
-        voronoi_2d_binning(xc, yc, hist, (hist+0.1)**0.5, (1.*_numpy.sum(hist)/nbins)**0.5, plot=plot, quiet=0)
+    bintags, xNode, yNode, xBar, yBar, sn, nPixels, scale = voronoi_2d_binning(
+            xc, yc, hist, (hist+0.1)**0.5, (1.*_numpy.sum(hist)/nbins)**0.5,
+            plot=plot, quiet=False, pixelsize=min(min(gridx[1:]-gridx[:-1]), min(gridy[1:]-gridy[:-1])))
     if plot:
         import matplotlib.pyplot as plt
         plt.gcf().axes[0].set_xlim(plt.gcf().axes[0].get_xlim()[::-1])  # invert X axis as per the convention used in Agama
@@ -398,19 +399,50 @@ class DensityDataset:
     '''
     Class for representing the Target object and constraints for the 3d density profile
     '''
-    def __init__(self, density, tolerance=0, **target_params):
+    def __init__(self, density, tolerance=0, alpha=0, beta=0, gamma=0, **target_params):
         '''
         Arguments:
-          density:   3d density profile of stars
-          tolerance: relative error on density constraints
-          target_params:  all other parameters of the Target object (including type='Density***')
+          density:   3d density profile of stars;
+          tolerance: relative error on density constraints;
+          alpha, beta, gamma: three Euler angles specifying the orientation of the intrinsic model
+              model coordinate system w.r.t. the image plane (*not* used for modelling, only for plotting);
+          target_params:  all other parameters of the Target object (including type='Density***').
         '''
+        # extract some important arguments from the dictionary in a case-insensitive way
+        targetType = None
+        gridr = None
+        gridz = None
+        for k in target_params:
+            if k.upper() == 'TYPE':  targetType = target_params[k]
+            if k.upper() == 'GRIDR': gridr = target_params[k]
+            if k.upper() == 'GRIDZ': gridz = target_params[k]
+        if targetType is None:
+            raise TypeError('DensityDataset should be constructed with a Density*** target type')
         self.target_params = target_params
-        self.target = _agama.Target(**target_params)
-        # 0th constraint is the total mass, with zero tolerance; remaining ones are cell masses; everything normalized to totalMass
-        self.cons_val = _numpy.hstack(( 1, self.target(density) / density.totalMass() ))
+        self.target  = _agama.Target(**target_params)
+        self.density = density
+        self.alpha   = alpha
+        self.beta    = beta
+        self.gamma   = gamma
+        # 0th constraint is the total mass, with zero tolerance; remaining ones are cell masses;
+        # both constraints and their tolerances are normalized to totalMass
+        totalMass = density.totalMass()
+        self.cons_val = _numpy.hstack(( 1, self.target(density) / totalMass ))
         self.cons_err = _numpy.hstack(( 0, abs(self.cons_val[1:]) * tolerance ))
-        print('Fraction of mass in %i density bins: %g' % (len(self.target), sum(self.cons_val[1:])))
+        # constraints with very small (or zero) absolute values are assigned a zero tolerance
+        self.cons_err[self.cons_err < 1e-12 * _numpy.max(abs(self.cons_val[1:]))] = 0.
+        # compute the fraction of total mass of the density model within the extent of the grid;
+        # the method for obtaining this fraction depends on the discretization scheme:
+        if 'DENSITYCLASSIC' in targetType.upper():
+            ncons = len(self.target)   # all constraints describe masses in 3d grid cells
+        elif 'DENSITYCYLINDRICAL' in targetType.upper():
+            ncons = len(gridr) * len(gridz)   # take only the m=0 harmonic term in the array of constraints
+        elif 'DENSITYSPHHARM' == targetType.upper():
+            ncons = len(gridr)   # same but for the l=0,m=0 harmonic term only
+        else:
+            ncons = 0    # unknown discretization scheme, should have failed at the earlier stage
+        print('%s with %i constraints; total mass: %g; fraction of mass in %i density bins: %g' %
+            (targetType, len(self.target), totalMass, ncons, sum(self.cons_val[1:ncons+1])))
 
     def getOrbitMatrix(self, density_matrix, Upsilon):
         '''
@@ -427,8 +459,26 @@ class DensityDataset:
         '''
         # only compute the penalty for constraints that had nonzero associated errors
         use = self.cons_err[1:]!=0
-        dif = ((model_dens[use] - self.cons_val[1:][use]) / self.cons_err[1:][use])**2
-        return _numpy.sum(dif)
+        dif = ((model_dens[use] - self.cons_val[1:][use]) / self.cons_err[1:][use])
+        # print the density constraints which have too large deviations in the solution
+        header_shown = False
+        for i in range(len(self.cons_val)-1):
+            if use[i] and abs(model_dens[i]-self.cons_val[i+1]) > 3*self.cons_err[i+1]:
+                if not header_shown:
+                    print('3d density constraint:                    required        actual   deviation/sigma')
+                    header_shown = True
+                print('%-36s  %12.4g  %12.4g  %8.4f' %
+                (self.target[i], self.cons_val[i+1], model_dens[i], (model_dens[i]-self.cons_val[i+1])/self.cons_err[i+1]))
+        return _numpy.sum(dif**2)
+
+    def projectedDensity(self, gridx, gridy):
+        '''
+        Compute the surface density of the model at a given orientation, using the provided 1d grids
+        in the observed coordinate system (used only in the interactive plotting script)
+        '''
+        xy = _numpy.column_stack((_numpy.repeat(gridx, len(gridy)), _numpy.tile(gridy, len(gridx))))
+        return self.density.projectedDensity(xy, alpha=self.alpha, beta=self.beta, gamma=self.gamma). \
+            reshape(len(gridx), len(gridy))
 
 
 class KinemDatasetGH:
@@ -448,7 +498,10 @@ class KinemDatasetGH:
           target_params:  all other parameters of the Target(type='LOSVD', ...),
             except that when gridx, gridy are not provided, they will be constructed automatically
         '''
-        if not 'gridx' in target_params:
+        gridx = None
+        for k in target_params:
+            if k.upper() == 'GRIDX': gridx = target_params[k]
+        if gridx is None:
             target_params['gridx'], target_params['gridy'] = makeGridForTargetLOSVD(
                 target_params['apertures'], target_params.get('psf', 0))
         self.target_params = target_params
@@ -591,7 +644,10 @@ class KinemDatasetHist:
           target_params:  all other parameters of the Target(type='LOSVD', ...),
             except that when gridx, gridy are not provided, they will be constructed automatically
         '''
-        if not 'gridx' in target_params:
+        gridx = None
+        for k in target_params:
+            if k.upper() == 'GRIDX': gridx = target_params[k]
+        if gridx is None:
             target_params['gridx'], target_params['gridy'] = makeGridForTargetLOSVD(
                 target_params['apertures'], target_params.get('psf', 0))
         self.target_params = target_params
@@ -600,7 +656,6 @@ class KinemDatasetHist:
         self.mod_gridv  = target_params['gridv']
         self.num_bsplines = len(self.mod_gridv) + self.mod_degree - 1
         self.num_aper, self.num_cons = obs_val.shape  # N, M; num_cons = number of histogram bins/coefs
-
         if obs_val.shape != obs_err.shape:
             raise ValueError('obs_val and obs_err must have the same shape')
         # surface density convolved with PSF and integrated over the area of each aperture, normalized to totalMass
@@ -709,7 +764,7 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
       Upsilon:    initial value of M/L for the search
       multstep:   multiplicative increment/decrement for Upsilon during the search
       deltaChi2:  search stops when the chi2 value of the best-fit model is bracketed from both larger and smaller Upsilon values by at least that much
-      filePrefix: common prefix for filenames storing the model LOSVDs and orbit parameters; the value of Upsilon is appended to the filename
+      filePrefix: filename (w/o extension) for storing the model LOSVDs and orbit weights; solutions for all values of Upsilon are stored in one .npz archive
       linePrefix: data written at the beginning of each line in the results file, before the values of Upsilon and chi2 for each dataset are appended
       fileResult: the name of the text file storing the summary information
     Returns: chi2 of the best-fit model in this series (also stores all models in the result file)
@@ -718,7 +773,10 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
     try: len(datasets)   # ok if it is a tuple/list
     except: datasets = (datasets,)  # if not, make it a tuple
     if len(datasets)==0:
-        raise ValueError('Need at least one dataset for the model')
+        raise RuntimeError('Need at least one dataset for the model')
+    numKinemDatasets = sum([hasattr(ds, 'mod_gridv') for ds in datasets])
+    if numKinemDatasets == 0:
+        raise RuntimeError('Running Forstand without any kinematic datasets makes no sense')
 
     # build orbit library
     matrices = _agama.orbit(potential=potential, ic=ic, time=potential.Tcirc(ic) * intTime, Omega=Omega,
@@ -727,7 +785,7 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
     matrices = matrices[:-1]  # matrices corresponding to datasets
     assert(len(matrices) == len(datasets))
 
-    # record various structural properties of orbits
+    # record various structural properties of orbits to be stored in the npz archive
     Rm = _numpy.array([ _numpy.mean( _numpy.sum(t[:,0:3]**2,axis=1)**0.5 ) for t in trajs[:,1] ])  # mean radius of each orbit
     Lz = _numpy.array([ _numpy.mean( t[:,0]*t[:,4]-t[:,1]*t[:,3] ) for t in trajs[:,1] ])
     L2 = _numpy.array([ _numpy.mean((t[:,0]*t[:,4]-t[:,1]*t[:,3])**2 + (t[:,1]*t[:,5]-t[:,2]*t[:,4])**2 + (t[:,2]*t[:,3]-t[:,0]*t[:,5])**2) for t in trajs[:,1] ])
@@ -736,6 +794,15 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
     Lc = 2*_numpy.pi * Rc**2 / potential.Tcirc(E)  # angular momentum of a circular orbit with this energy
     Ci = Lz / L2**0.5  # Lz/L = cos(incl)
     Lr = L2 / Lc**2    # (L/Lc)^2 = 1-ecc^2 (at least for a Kepler orbit)
+
+    archive = dict( #ic=ic,
+        Rmean=Rm.astype(_numpy.float32),
+        circ2=Lr.astype(_numpy.float32),
+        cosincl=Ci.astype(_numpy.float32),
+        Upsilon=[],  # will be populated by the values of M/L explored during the fit
+        weights=[],  # will contain corresponding orbit weights for each M/L
+        LOSVD=[list() for i in range(numKinemDatasets)]  # will contain model LOSVDs for each dataset and each M/L
+    )
 
     def solve(Upsilon):
         '''
@@ -754,9 +821,9 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         mult      = num_dof**0.5   * 10  # may make it somewhat larger, but not too much as it ruins accuracy
 
         # prepare the matrix equation
-        matrix    = [ d.getOrbitMatrix(m, Upsilon).T for d,m in zip(datasets, matrices) ]
-        rhs       = [ d.cons_val/mult for d in datasets ]
-        pen_cons  = [ 2*d.cons_err**-2 for d in datasets ]
+        matrix    = [ ds.getOrbitMatrix(mat, Upsilon).T for ds,mat in zip(datasets, matrices) ]
+        rhs       = [ ds.cons_val/mult for ds in datasets ]
+        pen_cons  = [ 2*ds.cons_err**-2 for ds in datasets ]
         # regularization penalty
         numOrbits = len(ic)
         totalMass = 1.0  # weights are normalized to total mass of unity
@@ -772,48 +839,37 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
             weights = _numpy.ones(numOrbits) * totalMass / numOrbits
 
         # analyze the differences in rhs and print out the results
-        superpositions = [ weights.dot(m) for m in matrices ]
-        penalties = [ d.getPenalty(s, Upsilon) for d,s in zip(datasets, superpositions) ]
+        superpositions = [ weights.dot(mat) for mat in matrices ]
+        penalties = [ ds.getPenalty(sup, Upsilon) for ds,sup in zip(datasets, superpositions) ]
         penReg  = 0.5 * _numpy.sum(weights**2 * pen_reg)
         entropy = -sum(weights * _numpy.log(weights+1e-100)) / totalMass + _numpy.log(totalMass / numOrbits)
         # number of orbits contributing 0.999 of total mass
         numUsed =  sum(_numpy.cumsum(_numpy.sort(weights)) > 0.001 * totalMass)
-        losvd   = []
         penalty = []  # penalties for all datasets and for regularization
         print('%s, Upsilon=%5.3f: results:' % (filePrefix, Upsilon))
-        for d,p,s in zip(datasets, penalties, superpositions):
+        indexKinemDataset = 0   # running index enumerating kinematic datasets
+        for ds, pen, sup in zip(datasets, penalties, superpositions):
             print('Penalty for %i %s constraints: %s %g' %
-                (len(d.cons_val), str(d.target), str(p), _numpy.sum(p)))
-            penalty.append(_numpy.sum(p))
-            try:
-                # note: we assume that gridv is the same for all kinematic datasets!
-                loshdr = 'Degree: %i Grid: %s' % \
-                    (d.mod_degree, '\t'.join(['%.1f' % x for x in d.mod_gridv * Upsilon**0.5]))
-                losvd.extend(s.reshape(d.num_aper, d.num_bsplines) * Upsilon**-0.5)
-            except AttributeError:
-                pass  # not a kinematic dataset
-
+                (len(ds.cons_val), str(ds.target), str(pen), _numpy.sum(pen)))
+            penalty.append(_numpy.sum(pen))
+            if hasattr(ds, 'mod_gridv'):  # kinematic dataset
+                archive['LOSVD'][indexKinemDataset].append(
+                    sup.reshape(ds.num_aper, ds.num_bsplines).astype(_numpy.float32) )
+                indexKinemDataset += 1
+        archive['Upsilon'].append(Upsilon)
+        archive['weights'].append(weights.astype(_numpy.float32))
         print('Penalty for regularization: %7.2f;  entropy: %.3g;  # of useful orbits: %i / %i' %
             (penReg, entropy, numUsed, numOrbits))
 
-        # write out model LOSVD
-        fileNameLOS = filePrefix + '_Y%5.3f.los' % Upsilon
-        _numpy.savetxt(fileNameLOS, _numpy.vstack(losvd), fmt='%.4g', header=loshdr)
-
-        # save the orbit weights and properties (radius, eccentricity, inclination)
-        fileNameORB = filePrefix + '_Y%5.3f.npz' % Upsilon
-        _numpy.savez_compressed(fileNameORB,
-            weights=weights.astype(_numpy.float32),
-            Rm=Rm.astype(_numpy.float32),
-            Lr=Lr.astype(_numpy.float32),
-            Ci=Ci.astype(_numpy.float32))
+        # write out the data collected for all values of Upsilon
+        _numpy.savez_compressed(filePrefix, **archive)
 
         # append results to the summary file
         with open(fileResult, 'a') as fileout:
             fileout.write('\t'.join(
                 [linePrefix, '%5.3f' % Upsilon] +
                 ['%7.2f' % _numpy.sum(p) for p in penalty+[penReg] ] +
-                [fileNameLOS] ) + '\n')
+                ['%s.npz|%i' % (filePrefix, len(archive['Upsilon'])-1)] ) + '\n')
 
         return sum(penalty)  # chi2 for all datasets, excluding regularization penalty
 
@@ -890,30 +946,75 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         '''
         load the model LOSVD file, compute GH moments
         '''
-        modelfilename = filenames[modelIndex]
-        this.modellabel.set_text(modelfilename)
-        this.selected.set_data([aval[modelIndex]], [bval[modelIndex]])
-        # read the model LOSVDs
+        # read the model LOSVDs and weights
         try:
-            with open(modelfilename) as lfile:
-                header = lfile.readline()
-                this.mod_degree= int(re.search('Degree: (\d+)', header).group(1))
-                this.mod_gridv = _numpy.array([float(a) for a in re.search('Grid: (.*)$', header).group(1).split()])
-            this.los_mod = _numpy.loadtxt(modelfilename)
-            this.ghm_mod = _agama.ghMoments(matrix=this.los_mod, gridv=this.mod_gridv, degree=this.mod_degree, ghorder=6)[:,(1,2,6,7,8,9)]
-            dif = _numpy.sum(_numpy.nan_to_num((this.ghm_mod - ghm_val) / ghm_err)**2, axis=0)
-            print('Loaded %s, chi2 for v=%.2f, sigma=%.2f, h3=%.2f, h4=%.2f, h5=%.2f, h6=%.2f, total=%.2f, in file=%.2f' %
-                (modelfilename, dif[0], dif[1], dif[2], dif[3], dif[4], dif[5], sum(dif), chi2[modelIndex]) )
+            archiveFilename, archiveIndex = filenames[modelIndex].split('|')
+            archiveIndex = int(archiveIndex)
+            archive = _numpy.load(archiveFilename)
+            Upsilon = archive['Upsilon'][archiveIndex]
+            this.modellabel.set_text(archiveFilename.replace('.npz','') + '_Y%.3f' % Upsilon)
+            this.selected.set_data([aval[modelIndex]], [bval[modelIndex]])
+            LOSVD = archive['LOSVD']
+            los_mod = []
+            indexKinemDataset = 0
+            num_aper = [0]  # cumulative number of apertures in each kinematic dataset
+            for ds in datasets:
+                if hasattr(ds, 'mod_gridv'):
+                    # assume that all kinematic datasets have the same degree of B-splines and the same gridv!
+                    this.mod_degree = ds.mod_degree
+                    # rescale the default velocity grid and the B-spline amplitudes to the current Upsilon
+                    this.mod_gridv = ds.mod_gridv * Upsilon**0.5
+                    los_mod.append(LOSVD[indexKinemDataset][archiveIndex] * Upsilon**-0.5)
+                    indexKinemDataset += 1
+                    num_aper.append(num_aper[-1] + len(ds.target_params['apertures']))
+            this.los_mod = _numpy.vstack(los_mod)
+            this.ghm_mod = _agama.ghMoments(matrix=this.los_mod, gridv=this.mod_gridv,
+                degree=this.mod_degree, ghorder=6)[:,(1,2,6,7,8,9)]
+            chi2_aper = _numpy.nan_to_num((this.ghm_mod - ghm_val) / ghm_err)**2
+            chi2_ds = _numpy.zeros((indexKinemDataset, 6))
+            for indexKinemDataset in range(len(chi2_ds)):
+                chi2_ds[indexKinemDataset] = _numpy.sum(
+                    chi2_aper[num_aper[indexKinemDataset]:num_aper[indexKinemDataset+1]], axis=0)
+            text = 'Loaded %s, chi2 for ' % filenames[modelIndex]
+            nameGH = ['v', 'sigma', 'h3', 'h4', 'h5', 'h6']
+            for indexGH in range(6):
+                text += '%s=%s, ' % (nameGH[indexGH], '+'.join(['%.2f' % c for c in chi2_ds[:,indexGH]]))
+            text += 'total=%.2f, in file=%.2f' % (_numpy.sum(chi2_ds), chi2[modelIndex])
+            print(text)
+            plotWeights(archive, archiveIndex)
         except Exception as e:
-            print("Can't read %s: %s" % (modelfilename, str(e)))
+            print("Can't read %s: %s" % (filenames[modelIndex], str(e)))
             try: del this.los_mod
             except: pass
             try: del this.ghm_mod
             except: pass
-        try:
-            plotWeights(modelfilename.replace('.los','.npz'))
-        except Exception as e:
-            print(e)
+
+    def plotWeights(archive, archiveIndex):
+        '''
+        plot orbit weight distributions
+        '''
+        R=archive['Rmean']
+        L=archive['circ2']
+        I=archive['cosincl']
+        weights=archive['weights'][archiveIndex]
+        axo.cla()
+        axp.cla()
+        # plot all orbits in gray, and orbits which have significant weight in the model in color with larger points
+        axo.scatter(R, L, s=2, marker='o', color='#E0E0E0', edgecolors='none')
+        axo.scatter(R, L, s=2*weights*len(weights), marker='o', c=I, cmap='mist', vmin=-1, vmax=1, alpha=0.5, edgecolors='none')
+        axp.scatter(R, I, s=2, marker='o', color='#E0E0E0', edgecolors='none')
+        axp.scatter(R, I, s=2*weights*len(weights), marker='o', c=L, cmap='mist', vmin= 0, vmax=1, alpha=0.5, edgecolors='none')
+        axo.set_xscale('log')
+        xlim = _numpy.nanmin(R), _numpy.nanmax(R)
+        axo.set_xlim(xlim)
+        axo.set_ylim(0, 1)
+        axo.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        axo.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
+        axp.set_xscale('log')
+        axp.set_xlim(xlim)
+        axp.set_ylim(-1, 1)
+        axp.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        axp.set_ylabel(' $L_z/L$', labelpad=-5, fontsize=12)
 
     def plotMaps():
         '''
@@ -995,36 +1096,9 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             plotLOSVD()
             fig.canvas.draw()
 
-    def plotWeights(filename):
-        '''
-        plot orbit weight distributions
-        '''
-        orbits = _numpy.load(filename)
-        R=orbits['Rm']
-        L=orbits['Lr']
-        I=orbits['Ci']
-        weights=orbits['weights']
-        axo.cla()
-        axp.cla()
-        # plot all orbits in gray, and orbits which have significant weight in the model in color with larger points
-        axo.scatter(R, L, s=2, marker='o', color='#E0E0E0', edgecolors='none')
-        axo.scatter(R, L, s=2*weights*len(weights), marker='o', c=I, cmap='mist', vmin=-1, vmax=1, alpha=0.5, edgecolors='none')
-        axp.scatter(R, I, s=2, marker='o', color='#E0E0E0', edgecolors='none')
-        axp.scatter(R, I, s=2*weights*len(weights), marker='o', c=L, cmap='mist', vmin= 0, vmax=1, alpha=0.5, edgecolors='none')
-        axo.set_xscale('log')
-        axo.set_xlim(0.02, 200)
-        axo.set_ylim(0, 1)
-        axo.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        axo.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
-        axp.set_xscale('log')
-        axp.set_xlim(0.02, 200)
-        axp.set_ylim(-1, 1)
-        axp.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        axp.set_ylabel(' $L_z/L$', labelpad=-5, fontsize=12)
-
 
     # main section of the runPlot routine
-    fig = matplotlib.pyplot.figure(figsize=(24,10))
+    fig = matplotlib.pyplot.figure(figsize=(18,8))
     fig.canvas.mpl_connect('pick_event', onclick)
 
     # parse and combine all kinematic datasets
@@ -1049,13 +1123,27 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                 ge = ge[:,0:6]
             ghm_val.extend(gv)
             ghm_err.extend(ge)
-        except: pass  # not the right type of dataset
+        except: pass  # not a kinematic dataset
     ghm_val = _numpy.vstack(ghm_val)
     ghm_err = _numpy.vstack(ghm_err)
     if xlim is None: xlim = (min([_numpy.amin(p[:,0]) for p in apertures]), max([_numpy.amax(p[:,0]) for p in apertures]))
     if ylim is None: ylim = (min([_numpy.amin(p[:,1]) for p in apertures]), max([_numpy.amax(p[:,1]) for p in apertures]))
     if vlim is None: vlim = (min(ghm_val[:,0] - ghm_val[:,1] * 3.0), max(ghm_val[:,0] + ghm_val[:,1] * 3.0))
     plot_gridv = _numpy.linspace(vlim[0], vlim[1], 201)
+
+    # compute projected density on a square but non-uniform grid (denser towards the center),
+    # and only within the extent of the kinematic datasets
+    gridmax = max(abs(xlim[0]), abs(xlim[1]), abs(ylim[0]), abs(ylim[1]))
+    gridmin = gridmax * 1e-3
+    gridpix = _agama.symmetricGrid(101, gridmin, gridmax)
+    plot_gridx = gridpix[(gridpix>=xlim[0]) * (gridpix<=xlim[1])]
+    plot_gridy = gridpix[(gridpix>=ylim[0]) * (gridpix<=ylim[1])]
+    projectedDensityMag = _numpy.zeros((len(plot_gridx), len(plot_gridy)))
+    for d in datasets:
+        if hasattr(d, 'projectedDensity'):
+            projectedDensity = d.projectedDensity(plot_gridx, plot_gridy)
+            # convert to stellar magnitudes per unit surface
+            projectedDensityMag = -2.5 * _numpy.log10(projectedDensity / _numpy.max(projectedDensity)) - 0.01
 
     # parameters of kinematic maps; the default ranges are taken from the input data,
     # but the user may adjust the range of data values and errors
@@ -1064,12 +1152,12 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     if v0err    is None: v0err   = max(ghm_err[:,0])
     if sigmaerr is None: sigmaerr= max(ghm_err[:,1])
     panel_params = [
-        dict(title='$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.20, 0.55, 0.19, 0.45]),
-        dict(title='$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.20, 0.05, 0.19, 0.45]),
-        dict(title='$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.40, 0.55, 0.19, 0.45]),
-        dict(title='$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.40, 0.05, 0.19, 0.45]),
-        dict(title='$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.60, 0.55, 0.19, 0.45]),
-        dict(title='$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.60, 0.05, 0.19, 0.45]),
+        dict(title='$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.23, 0.56, 0.165, 0.43]),
+        dict(title='$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.23, 0.06, 0.165, 0.43]),
+        dict(title='$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.56, 0.165, 0.43]),
+        dict(title='$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.06, 0.165, 0.43]),
+        dict(title='$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.56, 0.165, 0.43]),
+        dict(title='$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.06, 0.165, 0.43]),
     ]
 
     # collect the data for plotting the observed LOSVDs in each aperture
@@ -1082,7 +1170,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     ##### likelihood surface #####
     if len(aval)>0:
         print('%i models available' % len(aval))
-        ax = fig.add_axes([0.02, 0.55, 0.17, 0.45])
+        ax = fig.add_axes([0.03, 0.56, 0.165, 0.43])
         modelgrid = ax.plot(aval, bval, 'o', c='g', ms=5, picker=5, mew=0, alpha=0.75)[0]
         this.selected  = ax.plot([_numpy.nan], [_numpy.nan], marker='o', c='r', ms=8, mew=0)[0]
         this.modellabel= ax.text(0.01, 0.01, '', color='r', ha='left', va='bottom', transform=ax.transAxes, fontsize=10)
@@ -1112,24 +1200,24 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         modelgrid = None
 
     ##### four buttons determining which map to display #####
-    radioplot = fig.add_axes([0.02, 0.4, 0.17, 0.1])
+    radioplot = fig.add_axes([0.03, 0.4, 0.165, 0.1])
     radioplot.set_axis_off()
     buttons = [
-        matplotlib.patches.Rectangle((-0.46, 0.05), 0.45,0.4, color='#60f080', picker=True, ec='k'),
-        matplotlib.patches.Rectangle(( 0.01, 0.05), 0.45,0.4, color='#ffe000', picker=True, ec='k'),
-        matplotlib.patches.Rectangle((-0.46,-0.45), 0.45,0.4, color='#80a0ff', picker=True, ec='k'),
-        matplotlib.patches.Rectangle(( 0.01,-0.45), 0.45,0.4, color='#ff80a0', picker=True, ec='k') ]
+        matplotlib.patches.Rectangle((-0.50, 0.05), 0.49,0.4, color='#60f080', picker=True, ec='k'),
+        matplotlib.patches.Rectangle(( 0.01, 0.05), 0.49,0.4, color='#ffe000', picker=True, ec='k'),
+        matplotlib.patches.Rectangle((-0.50,-0.45), 0.49,0.4, color='#80a0ff', picker=True, ec='k'),
+        matplotlib.patches.Rectangle(( 0.01,-0.45), 0.49,0.4, color='#ff80a0', picker=True, ec='k') ]
     for b in buttons: radioplot.add_artist(b)
-    radioplot.text(-0.25, 0.25, 'data',      ha='center', va='center')
-    radioplot.text( 0.25, 0.25, 'data err',  ha='center', va='center')
-    radioplot.text(-0.25,-0.25, 'model',     ha='center', va='center')
-    radioplot.text( 0.25,-0.25, 'model err', ha='center', va='center')
+    radioplot.text(-0.255, 0.25, 'data',      ha='center', va='center')
+    radioplot.text( 0.255, 0.25, 'data err',  ha='center', va='center')
+    radioplot.text(-0.255,-0.25, 'model',     ha='center', va='center')
+    radioplot.text( 0.255,-0.25, 'model err', ha='center', va='center')
     radioplot.set_xlim(-0.5,0.5)
     radioplot.set_ylim(-0.5,0.5)
     this.mode = buttons[0]
 
     ##### LOSVD in the selected aperture #####
-    losvdplot = fig.add_axes([0.02, 0.05, 0.17, 0.35])
+    losvdplot = fig.add_axes([0.03, 0.06, 0.165, 0.34])
     losvdplot.set_yticklabels([])
     losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
     losvdplot.set_xlabel('v')
@@ -1145,32 +1233,37 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         patchcoll.append(patches)
         ax=fig.add_axes(param['extent'])
         ax.add_collection(patches)
+        ax.text(0.02, 0.98, param['title'], fontsize=16, transform=ax.transAxes, ha='left', va='top')
+        # plot the surface density profile by contours spaced by a factor 2.5 (i.e. one stellar magnitude)
+        # and a total dynamical range of 10 magnitudes, i.e. a factor of 10^4
+        ax.contour(plot_gridx, plot_gridy, projectedDensityMag.T,
+            levels=_numpy.linspace(0, 10, 11), cmap='Greys_r', vmin=0, vmax=11)
         ax.set_xlim(xlim[1], xlim[0])  # note the inverted X axis!
         ax.set_ylim(ylim[0], ylim[1])
-        ax.text(0.02, 0.98, param['title'], fontsize=16, transform=ax.transAxes, ha='left', va='top')
         panels.append(ax)
 
     plotMaps()
     # add colorbars to data maps
     for patch, param in zip(patchcoll, panel_params):
-        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.03, param['extent'][2], 0.01])
-        fig.colorbar(patch, cax=cax, orientation='horizontal')
+        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.035, param['extent'][2], 0.01])
+        fig.colorbar(patch, cax=cax, orientation='horizontal', ticks=matplotlib.ticker.MaxNLocator(6))
     # make sure that pan/zoom is synchronized between kinematic maps
     for p in panels[1:]:
         p.get_shared_x_axes().join(*panels)
         p.get_shared_y_axes().join(*panels)
     # enforce a correct aspect ratio for kinematic maps
     for p in panels:
-        p.set_aspect('equal')#, 'datalim')
+        #p.set_aspect('equal')
+        p.axis('equal')
 
     ##### two panels with orbit weights #####
-    axo=fig.add_axes([0.82, 0.05, 0.18, 0.45])
-    axa=fig.add_axes([0.995,0.15,0.005,0.25])  # colorbar showing the third variable
+    axo=fig.add_axes([0.83, 0.06, 0.165, 0.43])
+    axa=fig.add_axes([0.995,0.15, 0.005, 0.25])  # colorbar showing the third variable
     axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,-1,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
     axa.set_xticks([])
     axa.set_ylabel('$L_z/L$', fontsize=10, labelpad=-10)
-    axp=fig.add_axes([0.82, 0.55, 0.18, 0.45])
-    axa=fig.add_axes([0.995,0.65,0.005,0.25])  # colorbar
+    axp=fig.add_axes([0.83, 0.56, 0.165, 0.43])
+    axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
     axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
     axa.set_xticks([])
     axa.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)

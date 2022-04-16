@@ -129,8 +129,6 @@ particles::ParticleArrayCar assignVelocity(
     const potential::BasePotential& pot,
     const double beta, const double kappa)
 {
-    /// fraction of mass enclosed by the innermost radial grid point or excluded by the outermost one
-    static const double MIN_MASS_FRAC  = 1e-4;
     /// type of velocity sampling procedure
     enum SamplingMethod {
         SD_EDDINGTON, ///< assign velocities from the Eddington DF
@@ -159,6 +157,9 @@ particles::ParticleArrayCar assignVelocity(
         if(isSpherical(dens)) {
             fncDens.reset(new potential::DensityWrapper(dens));
         } else {
+#if 0
+            /// fraction of mass enclosed by the innermost radial grid point or excluded by the outermost one
+            static const double MIN_MASS_FRAC  = 1e-4;
             double Mtotal = dens.totalMass();
             double rmin = getRadiusByMass(dens, Mtotal * MIN_MASS_FRAC);
             double rmax = getRadiusByMass(dens, Mtotal * (1-MIN_MASS_FRAC));
@@ -166,6 +167,9 @@ particles::ParticleArrayCar assignVelocity(
                 throw std::runtime_error("assignVelocity(): density model has infinite mass");
             if(!isFinite(rmin+rmax))
                 throw std::runtime_error("assignVelocity(): cannot determine min/max grid radii");
+#else
+            double rmin=0, rmax=0;  // automatically determine suitable grid radii
+#endif
             sphDens = potential::DensitySphericalHarmonic::create(dens,
                 /*lmax*/0, /*mmax*/0, /*gridSizeR*/50, rmin, rmax);
             fncDens.reset(new potential::DensityWrapper(*sphDens));
