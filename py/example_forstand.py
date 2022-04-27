@@ -60,9 +60,11 @@ To run a complete example of constructing a grid of Schwarzschild models, do the
     example_forstand.py do=run Mbh=...
     (of course, one may also adjust many other parameters, including hist=[true/false])
     Each series of models has the same gravitational potential, scaled by several values of M/L;
-    the LOSVD and the orbit properties of each model are written into separate files,
+    the LOSVD and the orbit properties of each model series are written into separate .npz files,
     and the summary of all models (grid of parameters and chi2 values) are stored in a single file
     results***.txt (*** is either GH or Hist).
+    For each series of models with a given potential, the one with a M/L that gives the lowest chi2
+    is converted into an N-body representation and written into a separate text file.
     The true value of Mbh is 1e8, and M/L is 1; it makes sense to explore at least a few series of
     models with Mbh ranging from 0 to ~3-5 times the true value.
 
@@ -88,8 +90,8 @@ and in the rotating case, the pattern speed Omega is also a free parameter.
 
 The model parameters and corresponding chi^2 values are stored in a single file
 resultsGH.txt (for Gauss-Hermite parametrization of the LOSVD) or
-resultsHist.txt (for histograms), and each model's kinematic maps and orbit distribution
-are also written into separate files.
+resultsHist.txt (for histograms), and the kinematic maps and orbit distribution of each series
+of models with the same potential and varying M/L are stored in a separate .npz archive.
 In the interactive plotting regime, the likelihood surface is shown as a function of two
 model parameters (in this example, Mbh and M/L), but one may choose another pair of parameters
 by providing different columns of the results file as "aval", "bval" arguments for
@@ -127,6 +129,8 @@ alpha_deg = float(args.get('ALPHA', 0.0))       # [REQ] azimuthal angle of viewi
 alpha     = alpha_deg * numpy.pi/180            # same in radians
 degree    = int  (args.get('DEGREE', 2))        # [OPT] degree of B-splines  (0 means histograms, 2 or 3 is preferred)
 symmetry  = 'a'                                 # [OPT] symmetry of the model ('s'pherical, 'a'xisymmetric, 't'riaxial)
+nbody     = int  (args.get('NBODY', 100000))    # [OPT] number of particles for the N-body representation of the best-fit model
+nbodyFormat = args.get('NBODYFORMAT', 'text')   # [OPT] format for storing N-body snapshots (text/nemo/gadget)
 command   = args.get('DO', '').upper()          # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps
 usehist   = args.get('HIST', 'n')[0] in 'yYtT1' # [OPT] whether to use LOSVD histograms as input (default 'no' is to use GH moments)
 variant   = 'Hist' if usehist else 'GH'         # suffix for disinguishing runs using histogramed LOSVDs or GH moments
@@ -346,7 +350,7 @@ if densityParams['type'] == 'DensityClassicTopHat' or densityParams['type'] == '
     # [OPT] make the inner grid segment contain 1% of the total mass
     # (to better constrain the density near the black hole, though this may need some further tuning),
     # and the remaining segments contain roughly equal fractions of mass up to 99% of the total mass
-    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(ellrad, numpy.linspace(1, 99, 24)) ])
+    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(ellrad, tuple(numpy.linspace(1, 99, 24))) ])
     densityParams['axisRatioY'] = axes[1] / axes[0]
     densityParams['axisRatioZ'] = axes[2] / axes[0]
     print('%s grid in elliptical radius: %s, axis ratios: y/x=%.3g, z/x=%.3g' %
@@ -359,7 +363,7 @@ elif densityParams['type'] == 'DensitySphHarm':
     # this discretization scheme uses a grid in spherical radius and a spherical-harmonic expansion in angles
     sphrad = numpy.sum(samples**2, axis=1)**0.5
     # [OPT] same procedure as above, using roughly equal-mass bins in spherical radius except the innermost one
-    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(sphrad, numpy.linspace(1, 99, 24)) ])
+    densityParams['gridr'] = numpy.hstack([0, numpy.percentile(sphrad, tuple(numpy.linspace(1, 99, 24))) ])
     # [OPT] order of angular spherical-harmonic expansion in theta and phi (must be even)
     densityParams['lmax'] = 0 if symmetry[0]=='s' else 8
     densityParams['mmax'] = 0 if symmetry[0]!='t' else 6
@@ -370,8 +374,8 @@ elif densityParams['type'] == 'DensityCylindricalTopHat' or densityParams['type'
     samplez = abs(samples[:,2])
     # [OPT] choose the grids in R and z so that each 'slab' (1d projection along the complementary coordinate)
     # contains approximately equal mass, though this doesn't guarantee that the 2d cells would be even roughly balanced
-    densityParams['gridR'] = numpy.hstack([0, numpy.percentile(sampleR, numpy.linspace(1, 99, 20)) ])
-    densityParams['gridz'] = numpy.hstack([0, numpy.percentile(samplez, numpy.linspace(1, 99, 15)) ])
+    densityParams['gridR'] = numpy.hstack([0, numpy.percentile(sampleR, tuple(numpy.linspace(1, 99, 20))) ])
+    densityParams['gridz'] = numpy.hstack([0, numpy.percentile(samplez, tuple(numpy.linspace(1, 99, 15))) ])
     # [OPT] number of azimuthal-harmonic coefficients (0 for axisymmetric systems)
     densityParams['mmax']  = 0 if symmetry[0]!='t' else 6
     print('%s grid in R: %s, z: %s, mmax=%i' %
@@ -456,42 +460,43 @@ else:
     ) )
 
 
+# create a dark halo according to the provided parameters (type, scale radius and circular velocity)
+if rhalo>0 and vhalo>0:
+    if   halotype.upper() == 'LOG':
+        densityHalo = agama.schwarzlib.makeDensityLogHalo(rhalo, vhalo)
+    elif halotype.upper() == 'NFW':
+        densityHalo = agama.schwarzlib.makeDensityNFWHalo(rhalo, vhalo)
+    else:
+        raise ValueError('Invalid halo type')
+else:
+    densityHalo = agama.Density(type='Plummer', mass=0, scaleRadius=1)  # no halo
+
+# additional density component for constructing the initial conditions:
+# create more orbits at small radii to better resolve the kinematics around the central black hole
+densityExtra = agama.Density(type='Dehnen', scaleradius=1)
+
+# fiducialMbh: Mbh used to construct initial conditions (may differ from Mbh used to integrate orbits;
+# the idea is to keep fiducialMbh fixed between runs with different Mbh, so that the initial conditions
+# for the orbit library are the same, compensating one source of noise in chi2 due to randomness)
+fiducialMbh = densityStars.totalMass() * 0.01
+
+# potential of the galaxy, excluding the central BH
+pot_gal   = agama.Potential(type='Multipole',
+    density=agama.Density(densityStars, densityHalo),  # all density components together
+    lmax=32,  # lmax is set to a large value to accurately represent a disky density profile
+    mmax=0 if symmetry[0]!='t' else 6, gridSizeR=40)  # mmax>0 only for triaxial systems
+# potential of the central BH
+pot_bh    = agama.Potential(type='Plummer', mass=Mbh, scaleRadius=1e-4)
+# same for the fiducial BH
+pot_bhfidu= agama.Potential(type='Plummer', mass=fiducialMbh, scaleRadius=1e-4)
+# total potential of the model (used to integrate the orbits)
+pot_total = agama.Potential(pot_gal, pot_bh)
+# total potential used to generate initial conditions only
+pot_fidu  = agama.Potential(pot_gal, pot_bhfidu)
+
+
 ### finally, decide what to do
 if command == 'RUN':
-
-    # create a dark halo according to the provided parameters (type, scale radius and circular velocity)
-    if rhalo>0 and vhalo>0:
-        if   halotype.upper() == 'LOG':
-            densityHalo = agama.schwarzlib.makeDensityLogHalo(rhalo, vhalo)
-        elif halotype.upper() == 'NFW':
-            densityHalo = agama.schwarzlib.makeDensityNFWHalo(rhalo, vhalo)
-        else:
-            raise ValueError('Invalid halo type')
-    else:
-        densityHalo = agama.Density(type='Plummer', mass=0, scaleRadius=1)  # no halo
-
-    # additional density component for constructing the initial conditions:
-    # create more orbits at small radii to better resolve the kinematics around the central black hole
-    densityExtra = agama.Density(type='Dehnen', scaleradius=1)
-
-    # fiducialMbh: Mbh used to construct initial conditions (may differ from Mbh used to integrate orbits;
-    # the idea is to keep fiducialMbh fixed between runs with different Mbh, so that the initial conditions
-    # for the orbit library are the same, compensating one source of noise in chi2 due to randomness)
-    fiducialMbh = densityStars.totalMass() * 0.01
-
-    # potential of the galaxy, excluding the central BH
-    pot_gal   = agama.Potential(type='Multipole',
-        density=agama.Density(densityStars, densityHalo),  # all density components together
-        lmax=32,  # lmax is set to a large value to accurately represent a disky density profile
-        mmax=0 if symmetry[0]!='t' else 6, gridSizeR=40)  # mmax>0 only for triaxial systems
-    # potential of the central BH
-    pot_bh    = agama.Potential(type='Plummer', mass=Mbh, scaleRadius=1e-4)
-    # same for the fiducial BH
-    pot_bhfidu= agama.Potential(type='Plummer', mass=fiducialMbh, scaleRadius=1e-4)
-    # total potential of the model (used to integrate the orbits)
-    pot_total = agama.Potential(pot_gal, pot_bh)
-    # total potential used to generate initial conditions only
-    pot_fidu  = agama.Potential(pot_gal, pot_bhfidu)
 
     # prepare initial conditions - use the same total potential independent of the actual Mbh
     # [OPT]: choose the sampling method: isotropic IC drawn from Eddington DF are created by
@@ -520,7 +525,9 @@ if command == 'RUN':
         linePrefix = '\t'.join([ '%.3g' % Mbh, '%.3g' % Omega, '%.3g' % rhalo, '%.3g' % vhalo,
             '%.0f' % incl, '%.0f' % alpha_deg, '%d' % numOrbits, '%.2f' % regul ]),
         # [OPT] results/summary file
-        fileResult = fileResult )
+        fileResult = fileResult,
+        # [OPT] parameters for the N-body snapshot representing the best-fit model
+        nbody = nbody, nbodyFormat = nbodyFormat )
 
 elif command == 'PLOT':
 
@@ -553,7 +560,7 @@ elif command == 'PLOT':
     agama.schwarzlib.runPlot(datasets=datasets, aval=Mbh, bval=ML, chi2=chi2, filenames=filenames,
         # [OPT] various adjustable parameters for the plots (ranges, names, etc.) - most have reasonable default values
         alabel='Mbh', blabel='M/L', alim=(0, 4e8), blim=(0.9, 1.1), vlim=(-500,500),
-        v0lim=(-150,150), sigmalim=(40,160), v0err=15.0, sigmaerr=15.0)
+        v0lim=(-150,150), sigmalim=(40,160), v0err=15.0, sigmaerr=15.0, potential=pot_total)
 
 else:
     exit('Nothing to do!')

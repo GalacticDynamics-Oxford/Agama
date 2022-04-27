@@ -1685,10 +1685,10 @@ int PTFit(	            // return:	error flag (see below)
 {
 
   const    int    Ni0 = 10;            // max. No of iteration in 0. fit
-  const    double  ta0 = 5.e-5,        // threshold for deletion of Sn
+  const    double  //ta0 = 5.e-5,        // threshold for deletion of Sn
     tb0 = 3.e-3;   	               // threshold for creation of Sn
   const    double BIG = 1.e10,         // tolerance on H if otherwise undefined
-    off0 = 0.002,   	  	       // threshold for setting Sn=0
+    //off0 = 0.002,   	  	       // threshold for setting Sn=0
     l0  = 1./128., 	  	       // default start value of lambda
     //tl0 = 3.e-7,   	  	       // tolerance for dchisq of 0. fit
     tl1 = 3.e-7,   	  	       // tolerance for dchisq of 1. & 2. fit
@@ -1703,7 +1703,7 @@ int PTFit(	            // return:	error flag (see below)
   int    ngA;
   double  tailorparam = (J(0) > J(1) && J(1))? J(0)/J(1) : 
                        (J(1) > J(0) && J(0))? J(1)/J(0) : 1;
-  double ta = ta0*tailorparam, tb = tb0*tailorparam, off = off0*tailorparam;
+  double /*ta = ta0*tailorparam,*/ tb = tb0*tailorparam /*, off = off0*tailorparam*/;
 
   double l,dH,dO,dOp,odJ;
   
@@ -1848,7 +1848,7 @@ int PTFit(	            // return:	error flag (see below)
   if(err) cerr<<" dJ="<<d(0)<<" --> 2. Fit: tailor set of Sn, max. "
 	      <<Ni2<<" iterations.\n";
   double tmp = 1./double(SN.NumberofTerms());
-  ta *= tmp;    tb *= tmp;    off *= tmp;
+  /*ta *= tmp;*/    tb *= tmp;    /*off *= tmp;*/
   oSN = SN;
   odJ = d(0);
   vec4 TP = TM.parameters();

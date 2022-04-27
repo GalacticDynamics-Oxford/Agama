@@ -285,7 +285,7 @@ def getBinnedApertures(xcoords, ycoords, bintags):
         if edges>=1000:
             raise ValueError('Lost in the way for bin '+str(b))
         polygons.append( _numpy.array(vertices) )
-    return _numpy.array(polygons)
+    return _numpy.array(polygons, dtype=object)
 
 
 def writeApertures(filename, polygons):
@@ -426,8 +426,8 @@ class DensityDataset:
         self.gamma   = gamma
         # 0th constraint is the total mass, with zero tolerance; remaining ones are cell masses;
         # both constraints and their tolerances are normalized to totalMass
-        totalMass = density.totalMass()
-        self.cons_val = _numpy.hstack(( 1, self.target(density) / totalMass ))
+        self.totalMass = density.totalMass()
+        self.cons_val = _numpy.hstack(( 1, self.target(density) / self.totalMass ))
         self.cons_err = _numpy.hstack(( 0, abs(self.cons_val[1:]) * tolerance ))
         # constraints with very small (or zero) absolute values are assigned a zero tolerance
         self.cons_err[self.cons_err < 1e-12 * _numpy.max(abs(self.cons_val[1:]))] = 0.
@@ -442,7 +442,7 @@ class DensityDataset:
         else:
             ncons = 0    # unknown discretization scheme, should have failed at the earlier stage
         print('%s with %i constraints; total mass: %g; fraction of mass in %i density bins: %g' %
-            (targetType, len(self.target), totalMass, ncons, sum(self.cons_val[1:ncons+1])))
+            (targetType, len(self.target), self.totalMass, ncons, sum(self.cons_val[1:ncons+1])))
 
     def getOrbitMatrix(self, density_matrix, Upsilon):
         '''
@@ -750,7 +750,8 @@ class KinemDatasetHist:
 
 
 def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
-    Upsilon=1.0, regul=1.0, multstep=2**(1./10), deltaChi2=100.0, filePrefix='', linePrefix='', fileResult='results.dat'):
+    Upsilon=1.0, regul=1.0, multstep=2**(1./10), deltaChi2=100.0,
+    filePrefix='', linePrefix='', fileResult='results.dat', nbody=False, nbodyFormat='text'):
     '''
     Construct the orbit library for the given potential and datasets/constraints,
     and solve the optimization problem multiple times with varying values of mass-to-light ratio.
@@ -767,6 +768,8 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
       filePrefix: filename (w/o extension) for storing the model LOSVDs and orbit weights; solutions for all values of Upsilon are stored in one .npz archive
       linePrefix: data written at the beginning of each line in the results file, before the values of Upsilon and chi2 for each dataset are appended
       fileResult: the name of the text file storing the summary information
+      nbody:      if provided, create an N-body representation of the best-fit orbit superposition model in this series, sampled by the given number of particles and written into {filePrefix}_Y{best-fit Upsilon}.nbody
+      nbodyformat: format for saving the N-body model (text, nemo or gadget)
     Returns: chi2 of the best-fit model in this series (also stores all models in the result file)
     '''
 
@@ -779,7 +782,10 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         raise RuntimeError('Running Forstand without any kinematic datasets makes no sense')
 
     # build orbit library
-    matrices = _agama.orbit(potential=potential, ic=ic, time=potential.Tcirc(ic) * intTime, Omega=Omega,
+    ic = ic.astype(_numpy.float32)
+    inttime = (potential.Tcirc(ic) * intTime).astype(_numpy.float32)
+    inttime[_numpy.isnan(inttime)] = _numpy.nanmax(inttime)
+    matrices = _agama.orbit(potential=potential, ic=ic, time=inttime, Omega=Omega,
         targets=[d.target for d in datasets], trajsize=1000)
     trajs    = matrices[-1]   # list of orbit trajectories
     matrices = matrices[:-1]  # matrices corresponding to datasets
@@ -795,7 +801,7 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
     Ci = Lz / L2**0.5  # Lz/L = cos(incl)
     Lr = L2 / Lc**2    # (L/Lc)^2 = 1-ecc^2 (at least for a Kepler orbit)
 
-    archive = dict( #ic=ic,
+    archive = dict( ic=ic, inttime=inttime,
         Rmean=Rm.astype(_numpy.float32),
         circ2=Lr.astype(_numpy.float32),
         cosincl=Ci.astype(_numpy.float32),
@@ -803,6 +809,11 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         weights=[],  # will contain corresponding orbit weights for each M/L
         LOSVD=[list() for i in range(numKinemDatasets)]  # will contain model LOSVDs for each dataset and each M/L
     )
+
+    # placeholder for data shared between subroutines
+    class this:
+        bestweights = None
+        bestchi = _numpy.inf
 
     def solve(Upsilon):
         '''
@@ -871,6 +882,11 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
                 ['%7.2f' % _numpy.sum(p) for p in penalty+[penReg] ] +
                 ['%s.npz|%i' % (filePrefix, len(archive['Upsilon'])-1)] ) + '\n')
 
+        if sum(penalty) < this.bestchi:
+            this.bestchi = sum(penalty)
+            this.bestweights = weights * datasets[0].totalMass * _agama.G
+            this.Upsilon = Upsilon
+
         return sum(penalty)  # chi2 for all datasets, excluding regularization penalty
 
     # Solve the optimization problem multiple times with different values of mass-to-light ratio,
@@ -891,6 +907,20 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
             Upsb /= multstep
             chib = solve(Upsb)
             best = min(best, chib)
+
+    if nbody:
+        status,particles = _agama.sampleOrbitLibrary(nbody, trajs, this.bestweights)
+        if not status:
+            indices,trajsizes = particles
+            print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices),max(trajsizes)))
+            trajs[indices] = _agama.orbit(potential=potential, ic=ic[indices],
+                time=inttime[indices], Omega=Omega, trajsize=trajsizes)
+            status,particles = _agama.sampleOrbitLibrary(nbody, trajs, this.bestweights)
+            if not status: print(particles)
+        _agama.writeSnapshot(filePrefix+'_Y%.3f.nbody' % this.Upsilon,
+            (_numpy.hstack((particles[0][:,0:3], particles[0][:,3:6]*this.Upsilon**0.5)), particles[1]*this.Upsilon),
+            nbodyFormat)
+
     return best
 
 
@@ -901,7 +931,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     xlim=None, ylim=None,                       # ranges for x,y coordinates on kinematic maps
     v0lim=None, sigmalim=None, hlim=(-0.1,0.1), # ranges for color axes on kinematic maps for v0,sigma,h3..h6
     v0err=None, sigmaerr=None, herr=0.1,        # ranges for color axes on maps of errors in  v0,sigma,h3..h6
-    vlim=None                                   # range of the velocity axis for the LOSVD plot
+    vlim=None,                                  # range of the velocity axis for the LOSVD plot
+    potential=None                              # gravitational potential of the model (used to re-integrate the orbit selected for visualization)
     ):
     '''
     Show an interactive plot with several panels:
@@ -910,7 +941,9 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
       differences between model and data, normalized by data errors (model err);
       the measurements are provided in spatial regions (apertures) which can be examined
       interactively.
-    - line-of-sight velocity distribution in the selected aperture on the map.
+    - line-of-sight velocity distribution of the data and the model (if loaded)
+      in the selected aperture on the map (when clicking on the map), or alternatively
+      the 3d shape of the selected orbit (when clicking on the orbit weight plots).
     - two-dimensional plot of Delta chi^2 contours in a grid of models (the difference in
       fit quality between the best-fit model and all other models); one can pick the model
       from the grid and load its kinematic maps.
@@ -937,7 +970,9 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
       vlim:  velocity range for the LOSVD plot (autodetect if not provided).
     '''
 
-    import re, scipy.interpolate, matplotlib, matplotlib.pyplot
+    import re, scipy.interpolate, matplotlib, matplotlib.pyplot, traceback
+    try: from mpl_toolkits import mplot3d
+    except: pass
 
     # placeholder for data shared between subroutines
     class this: pass
@@ -950,7 +985,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         try:
             archiveFilename, archiveIndex = filenames[modelIndex].split('|')
             archiveIndex = int(archiveIndex)
-            archive = _numpy.load(archiveFilename)
+            try: archive = _numpy.load(archiveFilename, allow_pickle=True, encoding='latin1')
+            except TypeError: archive = _numpy.load(archiveFilename)  # older version of numpy
             Upsilon = archive['Upsilon'][archiveIndex]
             this.modellabel.set_text(archiveFilename.replace('.npz','') + '_Y%.3f' % Upsilon)
             this.selected.set_data([aval[modelIndex]], [bval[modelIndex]])
@@ -978,16 +1014,17 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             text = 'Loaded %s, chi2 for ' % filenames[modelIndex]
             nameGH = ['v', 'sigma', 'h3', 'h4', 'h5', 'h6']
             for indexGH in range(6):
-                text += '%s=%s, ' % (nameGH[indexGH], '+'.join(['%.2f' % c for c in chi2_ds[:,indexGH]]))
+                chi2str = '+'.join(['%.2f' % c for c in chi2_ds[:,indexGH]])
+                chi2labels[indexGH].set_text('$\chi^2=%s$' % chi2str)
+                text += '%s=%s, ' % (nameGH[indexGH], chi2str)
             text += 'total=%.2f, in file=%.2f' % (_numpy.sum(chi2_ds), chi2[modelIndex])
             print(text)
             plotWeights(archive, archiveIndex)
-        except Exception as e:
-            print("Can't read %s: %s" % (filenames[modelIndex], str(e)))
-            try: del this.los_mod
-            except: pass
-            try: del this.ghm_mod
-            except: pass
+        except:
+            traceback.print_exc()
+            print("Can't read %s" % filenames[modelIndex])
+            if hasattr(this, 'los_mod'): del this.los_mod
+            if hasattr(this, 'ghm_mod'): del this.ghm_mod
 
     def plotWeights(archive, archiveIndex):
         '''
@@ -997,24 +1034,46 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         L=archive['circ2']
         I=archive['cosincl']
         weights=archive['weights'][archiveIndex]
-        axo.cla()
-        axp.cla()
-        # plot all orbits in gray, and orbits which have significant weight in the model in color with larger points
-        axo.scatter(R, L, s=2, marker='o', color='#E0E0E0', edgecolors='none')
-        axo.scatter(R, L, s=2*weights*len(weights), marker='o', c=I, cmap='mist', vmin=-1, vmax=1, alpha=0.5, edgecolors='none')
-        axp.scatter(R, I, s=2, marker='o', color='#E0E0E0', edgecolors='none')
-        axp.scatter(R, I, s=2*weights*len(weights), marker='o', c=L, cmap='mist', vmin= 0, vmax=1, alpha=0.5, edgecolors='none')
-        axo.set_xscale('log')
-        xlim = _numpy.nanmin(R), _numpy.nanmax(R)
-        axo.set_xlim(xlim)
-        axo.set_ylim(0, 1)
-        axo.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        axo.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
-        axp.set_xscale('log')
-        axp.set_xlim(xlim)
-        axp.set_ylim(-1, 1)
-        axp.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        axp.set_ylabel(' $L_z/L$', labelpad=-5, fontsize=12)
+        if this.axo is None:  # create axes on the first call
+            this.axo=fig.add_axes([0.83, 0.06, 0.165, 0.43])
+            axa=fig.add_axes([0.995,0.15, 0.005, 0.25])  # colorbar showing the third variable
+            axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,-1,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
+            axa.set_xticks([])
+            axa.set_ylabel('$L_z/L$', fontsize=10, labelpad=-10)
+            this.axp=fig.add_axes([0.83, 0.56, 0.165, 0.43])
+            axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
+            axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
+            axa.set_xticks([])
+            axa.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
+            this.axp.get_shared_x_axes().join(this.axo, this.axp)
+        this.axo.set_xscale('linear')
+        this.axo.cla()
+        this.axp.cla()
+        # plot orbits which have significant weight in the model in color with larger points, and all other orbits in gray
+        use = _numpy.isfinite(L+I) * (weights > 0.1 * _numpy.mean(weights))
+        this.axo.scatter(R[~use], L[~use], s=2, marker='o', color='#E0E0E0', edgecolors='none')
+        this.sco = this.axo.scatter(R[use], L[use], s=2*weights[use]*len(weights),
+            marker='o', picker=3, c=I[use], cmap='mist', vmin=-1, vmax=1, alpha=0.5, edgecolors='none')
+        this.axp.scatter(R[~use], I[~use], s=2, marker='o', color='#E0E0E0', edgecolors='none')
+        this.scp = this.axp.scatter(R[use], I[use], s=2*weights[use]*len(weights),
+            marker='o', picker=3, c=L[use], cmap='mist', vmin= 0, vmax=1, alpha=0.5, edgecolors='none')
+        # selected orbit (none initially)
+        this.oro = this.axo.plot(_numpy.nan, _numpy.nan, 'xk')[0]
+        this.orp = this.axp.plot(_numpy.nan, _numpy.nan, 'xk')[0]
+        xlim = _numpy.percentile(R[_numpy.isfinite(R)], [0.1,99.9])
+        this.axo.set_xscale('log')
+        this.axo.set_xlim(xlim)
+        this.axo.set_ylim(0, 1)
+        this.axo.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        this.axo.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
+        this.axp.set_xscale('log')
+        this.axp.set_xlim(xlim)
+        this.axp.set_ylim(-1, 1)
+        this.axp.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        this.axp.set_ylabel(' $L_z/L$', labelpad=-5, fontsize=12)
+        this.ic = archive['ic'][use]
+        this.inttime = archive['inttime'][use]
+        this.weights = weights[use]
 
     def plotMaps():
         '''
@@ -1028,8 +1087,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                 if this.mode == buttons[0]:
                     data = ghm_val[:,p]
                 else:
-                    try: data = this.ghm_mod[:,p]
-                    except AttributeError: data = ghm_val[:,0]*0
+                    if hasattr(this, 'ghm_mod'): data = this.ghm_mod[:,p]
+                    else: data = ghm_val[:,0]*0
                 patch.set_array(data)
                 patch.set_clim(panel_params[p]['data_range'])
             elif this.mode == buttons[1]:
@@ -1038,8 +1097,10 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                 patch.set_clim(0, panel_params[p]['error_range'])
             elif this.mode == buttons[3]:
                 patch.set_cmap('RdBu_r')
-                try: patch.set_array((this.ghm_mod[:,p] - ghm_val[:,p]) / ghm_err[:,p])
-                except AttributeError: patch.set_array(ghm_val[:,0]*0)
+                if hasattr(this, 'ghm_mod'):
+                    patch.set_array((this.ghm_mod[:,p] - ghm_val[:,p]) / ghm_err[:,p])
+                else:
+                    patch.set_array(ghm_val[:,0]*0)
                 patch.set_clim([-3,3])
             else: raise ValueError('Unknown mode')
 
@@ -1047,33 +1108,82 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         '''
         plot the data and model LOSVDs in the currently selected aperture
         '''
-        try: ind = this.ind_aper
-        except AttributeError: return
-        losvdplot.cla()
-        losvdplot.fill_between(plot_gridv, obs_losvd[0,ind], obs_losvd[2,ind], facecolor='r', alpha=0.33, lw=0)
+        if this.ind_aper is None: return
+        ind = this.ind_aper
+        # orbit plot and LOSVD plot are mutually exclusive - if the orbit plot is shown, first remove it
+        if this.orbitplot is not None:
+            fig.delaxes(this.orbitplot)
+            this.orbitplot = None
+        if this.losvdplot is None:
+            this.losvdplot = fig.add_axes([0.03, 0.06, 0.165, 0.34])
+            this.losvdplot.set_yticklabels([])
+            this.losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
+            this.losvdplot.set_xlabel('v')
+            this.losvdplot.set_ylabel('f(v)')
+        this.losvdplot.cla()
+        this.losvdplot.fill_between(plot_gridv, obs_losvd[0,ind], obs_losvd[2,ind], facecolor='r', alpha=0.33, lw=0)
         # plot the model LOSVD
-        try: losvdplot.plot(plot_gridv, _agama.bsplineInterp(this.mod_degree, this.mod_gridv, this.los_mod[ind], plot_gridv), 'k')[0].set_dashes([5,2])
-        except AttributeError: pass
-        losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
-        losvdplot.set_yticklabels([])
-        losvdplot.set_xlabel('v')
-        losvdplot.set_ylabel('f(v)')
+        if hasattr(this, 'los_mod'):
+            this.losvdplot.plot(plot_gridv, _agama.bsplineInterp(this.mod_degree, this.mod_gridv, this.los_mod[ind], plot_gridv), 'k')[0].set_dashes([5,2])
+        this.losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
+        this.losvdplot.set_yticklabels([])
+        this.losvdplot.set_xlabel('v')
+        this.losvdplot.set_ylabel('f(v)')
         # print some useful info
         coefs = ['v0', 'sigma', 'h3', 'h4', 'h5', 'h6']
         text  = 'Aperture #%i centered at x=%.3f, y=%.3f: ' % (ind, _numpy.mean(apertures[ind][:,0]), _numpy.mean(apertures[ind][:,1]))
         for i in range(6):
             text += '%s=%.3f +- %.3f ' % (coefs[i], ghm_val[ind,i], ghm_err[ind,i])
-            try:
+            if hasattr(this, 'ghm_mod'):
                 err = (this.ghm_mod[ind,i]-ghm_val[ind,i]) / ghm_err[ind,i]
                 if err < -1.:  text += '[\033[1;31m %.3f \033[0m] ' % this.ghm_mod[ind,i]
                 elif err> 1.:  text += '[\033[1;34m %.3f \033[0m] ' % this.ghm_mod[ind,i]
                 else: text += '[ %.3f ] ' % this.ghm_mod[ind,i]
-            except AttributeError: pass
         print(text)
         # highlight the selected polygon in all panels (make its boundary thicker)
         lw = _numpy.zeros(len(apertures))
         lw[ind] = 3.
         for p in patchcoll: p.set_linewidths(lw)
+
+    def plotOrbit(indOrbit):
+        '''
+        show the 3d plot of the selected orbit, re-integrating it in the provided potential
+        (the orbits computed during the model construction are not stored to save space).
+        note that the provided potential might not be the same as the one originally used for this orbit
+        (for instance, the BH mass can be different); at the moment, there is no simple way to ensure
+        that orbits are recreated exactly, so this plot serves only as a rough illustration.
+        '''
+        # in case of more than one point under cursor, pick a random one with probability proportional to orbit weight
+        prob = _numpy.cumsum(this.weights[indOrbit])
+        prob /= prob[-1]
+        indSel = indOrbit[_numpy.searchsorted(prob, _numpy.random.random())]
+        this.oro.set_data(this.sco.get_offsets()[indSel])
+        this.orp.set_data(this.scp.get_offsets()[indSel])
+        print('Selected orbit #%i' % indSel +
+            (' from a list of %i orbits' % len(indOrbit) if len(indOrbit)>1 else ''))
+        if potential is None: return
+        # LOSVD plot and orbit plot are mutually exclusive - if the LOSVD plot is shown, first remove it
+        if this.losvdplot is not None:
+            fig.delaxes(this.losvdplot)
+            this.losvdplot = None
+            this.ind_aper  = None
+        if this.orbitplot is None:
+            try:
+                this.orbitplot = fig.add_axes([0.03, 0.06, 0.165, 0.34], projection='3d')
+            except:
+                traceback.print_exc()
+                return
+        this.orbitplot.cla()
+        this.orbitplot.set_xlabel('x')
+        this.orbitplot.set_ylabel('y')
+        this.orbitplot.set_zlabel('z')
+        try:
+            orb = _agama.orbit(potential=potential, ic=this.ic[indSel], time=this.inttime[indSel], trajsize=2000)[1]
+            this.orbitplot.plot(orb[:,0], orb[:,1], orb[:,2], color='k', lw=0.5)
+            #if hasattr(this.orbitplot, 'set_box_aspect'):  # matplotlib>=3.3
+            #    this.orbitplot.set_box_aspect((1, 1, 1))   # doesn't help...
+        except Exception as e: print(e)
+        return
 
     def onclick(event):
         '''
@@ -1083,18 +1193,22 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             loadModel(event.ind[0])
             plotMaps()
             plotLOSVD()
-            fig.canvas.draw()
+            fig.canvas.draw_idle()
+            return
+        if event.artist == this.sco or event.artist == this.scp:
+            plotOrbit(event.ind)
+            fig.canvas.draw_idle()
             return
         if event.artist in buttons:
             this.mode = event.artist
             plotMaps()
-            fig.canvas.draw()
+            fig.canvas.draw_idle()
             return
         has_poly, ind_poly = event.artist.contains(event.mouseevent)
         if has_poly:
             this.ind_aper = ind_poly['ind'][-1]
             plotLOSVD()
-            fig.canvas.draw()
+            fig.canvas.draw_idle()
 
 
     # main section of the runPlot routine
@@ -1107,8 +1221,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     obs_gridv = []
     ghm_val   = []
     ghm_err   = []
-    for d in datasets:
-        try:
+    for d in datasets:  # loop over kinematic datasets only
+        if hasattr(d, 'getGHMoments'):
             sing = _numpy.sin(d.target_params['gamma'])
             cosg = _numpy.cos(d.target_params['gamma'])
             for i,a in enumerate(d.target_params['apertures']):
@@ -1123,13 +1237,19 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                 ge = ge[:,0:6]
             ghm_val.extend(gv)
             ghm_err.extend(ge)
-        except: pass  # not a kinematic dataset
     ghm_val = _numpy.vstack(ghm_val)
     ghm_err = _numpy.vstack(ghm_err)
     if xlim is None: xlim = (min([_numpy.amin(p[:,0]) for p in apertures]), max([_numpy.amax(p[:,0]) for p in apertures]))
     if ylim is None: ylim = (min([_numpy.amin(p[:,1]) for p in apertures]), max([_numpy.amax(p[:,1]) for p in apertures]))
     if vlim is None: vlim = (min(ghm_val[:,0] - ghm_val[:,1] * 3.0), max(ghm_val[:,0] + ghm_val[:,1] * 3.0))
     plot_gridv = _numpy.linspace(vlim[0], vlim[1], 201)
+
+    # collect the data for plotting the observed LOSVDs in each aperture
+    obs_losvd = []
+    for d in datasets:
+        if hasattr(d, 'getLOSVD'):
+            obs_losvd.append(d.getLOSVD(plot_gridv))
+    obs_losvd = _numpy.hstack(obs_losvd)
 
     # compute projected density on a square but non-uniform grid (denser towards the center),
     # and only within the extent of the kinematic datasets
@@ -1160,12 +1280,67 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         dict(title='$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.06, 0.165, 0.43]),
     ]
 
-    # collect the data for plotting the observed LOSVDs in each aperture
-    obs_losvd = []
-    for d in datasets:
-        try: obs_losvd.append(d.getLOSVD(plot_gridv))
-        except AttributeError:  pass  # not the right type of dataset
-    obs_losvd = _numpy.hstack(obs_losvd)
+    ##### four buttons determining which map to display #####
+    radioplot = fig.add_axes([0.03, 0.4, 0.165, 0.1])
+    radioplot.set_axis_off()
+    buttons = [
+        matplotlib.patches.Rectangle((-0.50, 0.05), 0.49,0.4, color='#60f080', picker=True, ec='k'),
+        matplotlib.patches.Rectangle(( 0.01, 0.05), 0.49,0.4, color='#ffe000', picker=True, ec='k'),
+        matplotlib.patches.Rectangle((-0.50,-0.45), 0.49,0.4, color='#80a0ff', picker=True, ec='k'),
+        matplotlib.patches.Rectangle(( 0.01,-0.45), 0.49,0.4, color='#ff80a0', picker=True, ec='k') ]
+    for b in buttons:
+        radioplot.add_artist(b)
+    radioplot.text(-0.255, 0.25, 'data',      ha='center', va='center')
+    radioplot.text( 0.255, 0.25, 'data err',  ha='center', va='center')
+    radioplot.text(-0.255,-0.25, 'model',     ha='center', va='center')
+    radioplot.text( 0.255,-0.25, 'model err', ha='center', va='center')
+    radioplot.set_xlim(-0.5,0.5)
+    radioplot.set_ylim(-0.5,0.5)
+    this.mode = buttons[0]
+
+    ##### LOSVD in the selected aperture #####
+    this.losvdplot = None
+    this.ind_aper  = None
+
+    ##### 3d plot of the selected orbit #####
+    this.orbitplot = None
+
+    ##### two panels with orbit weights #####
+    this.axo = this.axp = this.sco = this.scp = None
+
+    ##### maps of v,sigma and higher Gauss-Hermite moments #####
+    patchcoll = []
+    panels = []
+    chi2labels = []
+    for param in panel_params:
+        patches = matplotlib.collections.PatchCollection(
+            [matplotlib.patches.Polygon(p, True) for p in apertures],
+            picker=0.0, edgecolor=(0.5,0.5,0.5,0.5), linewidths=0)
+        patchcoll.append(patches)
+        ax=fig.add_axes(param['extent'])
+        ax.add_collection(patches)
+        ax.text(0.02, 0.98, param['title'], fontsize=16, transform=ax.transAxes, ha='left', va='top')
+        chi2labels.append(ax.text(0.98, 0.98, '', fontsize=12, transform=ax.transAxes, ha='right', va='top'))
+        # plot the surface density profile by contours spaced by a factor 2.5 (i.e. one stellar magnitude)
+        # and a total dynamical range of 10 magnitudes, i.e. a factor of 10^4
+        ax.contour(plot_gridx, plot_gridy, projectedDensityMag.T,
+            levels=_numpy.linspace(0, 10, 11), cmap='Greys_r', vmin=0, vmax=11)
+        ax.set_xlim(xlim[1], xlim[0])  # note the inverted X axis!
+        ax.set_ylim(ylim[0], ylim[1])
+        panels.append(ax)
+
+    plotMaps()
+    # add colorbars to data maps
+    for patch, param in zip(patchcoll, panel_params):
+        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.035, param['extent'][2], 0.01])
+        fig.colorbar(patch, cax=cax, orientation='horizontal', ticks=matplotlib.ticker.MaxNLocator(6))
+    # make sure that pan/zoom is synchronized between kinematic maps
+    for p in panels[1:]:
+        p.get_shared_x_axes().join(*panels)
+        p.get_shared_y_axes().join(*panels)
+    # enforce a correct aspect ratio for kinematic maps
+    for p in panels:
+        p.set_aspect('equal')
 
     ##### likelihood surface #####
     if len(aval)>0:
@@ -1194,79 +1369,10 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             cntr = _numpy.array([2.30,6.18,11.83] + [x**2 + _numpy.log(x**2*_numpy.pi/2) + 2*x**-2 for x in range(4,33)])
             ax.contourf(a, b, c, cntr, cmap='hell_r', vmin=0, vmax=deltaChi2lim, alpha=0.75)
             ax.clabel(ax.contour(a, b, c, cntr, cmap='Blues_r', vmin=0, vmax=deltaChi2lim), fmt='%.0f', fontsize=10, inline=1)
-        except Exception as e:
-            print(e)
+        except:
+            traceback.print_exc()
     else:
         modelgrid = None
-
-    ##### four buttons determining which map to display #####
-    radioplot = fig.add_axes([0.03, 0.4, 0.165, 0.1])
-    radioplot.set_axis_off()
-    buttons = [
-        matplotlib.patches.Rectangle((-0.50, 0.05), 0.49,0.4, color='#60f080', picker=True, ec='k'),
-        matplotlib.patches.Rectangle(( 0.01, 0.05), 0.49,0.4, color='#ffe000', picker=True, ec='k'),
-        matplotlib.patches.Rectangle((-0.50,-0.45), 0.49,0.4, color='#80a0ff', picker=True, ec='k'),
-        matplotlib.patches.Rectangle(( 0.01,-0.45), 0.49,0.4, color='#ff80a0', picker=True, ec='k') ]
-    for b in buttons: radioplot.add_artist(b)
-    radioplot.text(-0.255, 0.25, 'data',      ha='center', va='center')
-    radioplot.text( 0.255, 0.25, 'data err',  ha='center', va='center')
-    radioplot.text(-0.255,-0.25, 'model',     ha='center', va='center')
-    radioplot.text( 0.255,-0.25, 'model err', ha='center', va='center')
-    radioplot.set_xlim(-0.5,0.5)
-    radioplot.set_ylim(-0.5,0.5)
-    this.mode = buttons[0]
-
-    ##### LOSVD in the selected aperture #####
-    losvdplot = fig.add_axes([0.03, 0.06, 0.165, 0.34])
-    losvdplot.set_yticklabels([])
-    losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
-    losvdplot.set_xlabel('v')
-    losvdplot.set_ylabel('f(v)')
-
-    ##### maps of v,sigma and higher Gauss-Hermite moments #####
-    patchcoll = []
-    panels = []
-    for param in panel_params:
-        patches = matplotlib.collections.PatchCollection(
-            [matplotlib.patches.Polygon(p, True) for p in apertures],
-            picker=0.0, edgecolor=(0.5,0.5,0.5,0.5), linewidths=0)
-        patchcoll.append(patches)
-        ax=fig.add_axes(param['extent'])
-        ax.add_collection(patches)
-        ax.text(0.02, 0.98, param['title'], fontsize=16, transform=ax.transAxes, ha='left', va='top')
-        # plot the surface density profile by contours spaced by a factor 2.5 (i.e. one stellar magnitude)
-        # and a total dynamical range of 10 magnitudes, i.e. a factor of 10^4
-        ax.contour(plot_gridx, plot_gridy, projectedDensityMag.T,
-            levels=_numpy.linspace(0, 10, 11), cmap='Greys_r', vmin=0, vmax=11)
-        ax.set_xlim(xlim[1], xlim[0])  # note the inverted X axis!
-        ax.set_ylim(ylim[0], ylim[1])
-        panels.append(ax)
-
-    plotMaps()
-    # add colorbars to data maps
-    for patch, param in zip(patchcoll, panel_params):
-        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.035, param['extent'][2], 0.01])
-        fig.colorbar(patch, cax=cax, orientation='horizontal', ticks=matplotlib.ticker.MaxNLocator(6))
-    # make sure that pan/zoom is synchronized between kinematic maps
-    for p in panels[1:]:
-        p.get_shared_x_axes().join(*panels)
-        p.get_shared_y_axes().join(*panels)
-    # enforce a correct aspect ratio for kinematic maps
-    for p in panels:
-        #p.set_aspect('equal')
-        p.axis('equal')
-
-    ##### two panels with orbit weights #####
-    axo=fig.add_axes([0.83, 0.06, 0.165, 0.43])
-    axa=fig.add_axes([0.995,0.15, 0.005, 0.25])  # colorbar showing the third variable
-    axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,-1,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
-    axa.set_xticks([])
-    axa.set_ylabel('$L_z/L$', fontsize=10, labelpad=-10)
-    axp=fig.add_axes([0.83, 0.56, 0.165, 0.43])
-    axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
-    axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
-    axa.set_xticks([])
-    axa.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
 
     # start the interactive plot
     matplotlib.pyplot.show()

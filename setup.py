@@ -133,12 +133,14 @@ def createMakefile():
     COMPILE_FLAGS = []
     # additional compilation/linking flags for example programs only (not the shared library)
     EXE_FLAGS = []
+    for LINK_FLAG in LINK_FLAGS:   # add paths to libraries to the linking flags for executable programs
+        if LINK_FLAG.startswith('-L'): EXE_FLAGS.append(LINK_FLAG)
 
     # check if a given test code compiles with given flags
     def runCompiler(code='int main(){}\n', flags='', dest=None):
         with open('test.cpp', 'w') as f: f.write(code)
         if dest is None: dest='test.out'
-        cmd = '%s %s test.cpp %s %s %s' % (CC, ' '.join(CXXFLAGS), COMPILE_OUT_FLAG, dest, flags)
+        cmd = '%s %s test.cpp %s %s %s' % (CC, ' '.join(CXXFLAGS+EXE_FLAGS), COMPILE_OUT_FLAG, dest, flags)
         print(cmd)
         result = subprocess.call(cmd, shell=True)
         os.remove('test.cpp')
@@ -402,6 +404,16 @@ PyInit_agamatest(void) {
         if sub.returncode==0 and tryPythonCode(PYTHON_SO_FLAGS):
             return PYTHON_SO_FLAGS, []
 
+        # check if the error is due to ARM/x86_64 incompatibility on Apple M1
+        import platform
+        uname = platform.uname()
+        if uname[0] == 'Darwin' and 'ARM64' in uname[3]:
+            raise CompileError("If you see an error 'ld: symbol(s) not found for architecture arm64', " +
+                "it may be because you are running a x86_64 version of Python " +
+                "on an ARM (Apple Silicon/M1) machine, and the Python extension module " +
+                "compiled for the ARM architecture is incompatible with the Python interpreter. " +
+                "The solution is to install a native ARM Python version, e.g. from conda-forge: " +
+                "https://docs.conda.io/en/latest/miniconda.html")
         # if none of the above combinations worked, give up...
         raise CompileError("Could not compile test program which uses libpython" +
             sysconfig.get_config_var('VERSION'))

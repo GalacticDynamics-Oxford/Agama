@@ -1541,14 +1541,23 @@ PtrPotential createPotential(
                 isSpherical   (*totalDens) ? 0 : GALPOT_LMAX,
                 isAxisymmetric(*totalDens) ? 0 : galpot_mmax, GALPOT_NRAD));
         }
-        // each bunch either has just one potential component, or produces a composite potential
-        PtrPotential bunchPotential = bunch->componentsPot.size()==1 ?
-            bunch->componentsPot[0] :
-            PtrPotential(new Composite(bunch->componentsPot));
-        // finally, if there is a nontrivial center offset, wrap the bunch into a Shifted potential
-        if(!bunch->center.empty())
-            bunchPotential = createOffset<Shifted>(bunch->center, converter, bunchPotential);
-        bunchPotentials.push_back(bunchPotential);
+        // three possibilities:
+        // - if a bunch has just one potential component, use it directly;
+        // - if it has several components, but its center is empty, use all components individually;
+        // - otherwise wrap all components with a common center into a single Shifted Composite potential
+        if(bunch->center.empty()) {
+            // add all components with no offset individually to the overall list
+            for(std::vector<PtrPotential>::iterator comp = bunch->componentsPot.begin();
+                comp != bunch->componentsPot.end(); ++comp)
+                bunchPotentials.push_back(*comp);
+        } else {
+            // if the bunch has more than one component, first create a temporary composite potential
+            PtrPotential bunchPotential = bunch->componentsPot.size()==1 ?
+                bunch->componentsPot[0] :
+                PtrPotential(new Composite(bunch->componentsPot));
+            // and then wrap the whole bunch (or its only component) into a Shifted potential
+            bunchPotentials.push_back(createOffset<Shifted>(bunch->center, converter, bunchPotential));
+        }
     }
 
     // finally, return either the potential of a single bunch,
