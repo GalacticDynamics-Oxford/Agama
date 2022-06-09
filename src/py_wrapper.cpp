@@ -488,12 +488,13 @@ std::vector<double> getOptionalTimeArg(PyObject* namedArgs, npy_intp numPoints)
                 // it may be an array or something that could be converted to an array
                 if(PySequence_Check(arg)) {
                     PyObject *arr = PyArray_FROM_OTF(arg, NPY_DOUBLE, 0/*no special requirements*/);
-                    if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1 &&
-                        PyArray_DIM((PyArrayObject*)arr, 0) == numPoints)
-                    {
-                        result.reserve(numPoints);
-                        for(npy_intp i=0; i<numPoints; i++)
-                            result.push_back(pyArrayElem<double>(arr, i));
+                    if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1) {
+                        npy_intp size = PyArray_DIM((PyArrayObject*)arr, 0);
+                        if(size==1 || size==numPoints) {
+                            result.reserve(size);
+                            for(npy_intp i=0; i<size; i++)
+                                result.push_back(pyArrayElem<double>(arr, i));
+                        }
                     }
                     Py_XDECREF(arr);
                 } else if(PyNumber_Check(arg)) {
@@ -6344,25 +6345,25 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     xpenl = toDoubleArray(xpenl_obj);
-    if(!xpenl.empty() && (int)xpenl.size() != nCol) {
+    if(xpenl_obj && (int)xpenl.size() != nCol) {
         PyErr_SetString(PyExc_TypeError, "Argument 'xpenl', if provided, must be a 1d array "
             "with length matching the number of columns in 'matrix'");
         return NULL;
     }
     xpenq = toDoubleArray(xpenq_obj);
-    if(!xpenq.empty() && (int)xpenq.size() != nCol) {
+    if(xpenq_obj && (int)xpenq.size() != nCol) {
         PyErr_SetString(PyExc_TypeError, "Argument 'xpenq', if provided, must be a 1d array "
             "with length matching the number of columns in 'matrix'");
         return NULL;
     }
     xmin = toDoubleArray(xmin_obj);
-    if(!xmin.empty() && (int)xmin.size() != nCol) {
+    if(xmin_obj && (int)xmin.size() != nCol) {
         PyErr_SetString(PyExc_TypeError, "Argument 'xmin', if provided, must be a 1d array "
             "with length matching the number of columns in 'matrix'");
         return NULL;
     }
     xmax = toDoubleArray(xmax_obj);
-    if(!xmax.empty() && (int)xmax.size() != nCol) {
+    if(xmax_obj && (int)xmax.size() != nCol) {
         PyErr_SetString(PyExc_TypeError, "Argument 'xmax', if provided, must be a 1d array "
             "with length matching the number of columns in 'matrix'");
         return NULL;

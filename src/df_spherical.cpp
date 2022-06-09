@@ -156,7 +156,7 @@ public:
         if(!(sqrt(sumRelErr2 / nfit) < 1e-3))   // the fit is not acceptable
             return;
 
-        rmin = gridr[nfit];   // will use analytic approximation to rho(Phi) below this radius
+        rmin = gridr[nfit-1];   // will use analytic approximation to rho(Phi) below this radius
         utils::msg(utils::VL_DEBUG, "SphericalDF",
             "Augmented density rho=" + utils::toString(coefs[0], 12) +
             (coefs[1]>=0 ? "+" : "") + utils::toString(coefs[1], 12) + "*x" +
@@ -321,7 +321,7 @@ void createSphericalDF(
         double num = prefact * rho * (derivOrder==1 ? slope : slope*(1-slope) / Phi);
         // the integrand is d^(n)
         slope -= derivOrder;
-        for(unsigned int j=0; j<gridsize; j++) {
+        for(unsigned int j=gridsize-3; j<gridsize; j++) {
             double factor = j==gridsize-1 ?
                 math::gamma(1-fracpow) * (slope < 100 ?
                     // the exact expression with gamma functions overflows at large slope
@@ -330,7 +330,8 @@ void createSphericalDF(
                     pow(slope, fracpow-1) * (1 + (1-fracpow) * (fracpow-2) / slope) ) :
                 // all other grid nodes except the last one will have contributions from other segments,
                 // which are anyway much larger than this last segment, so it doesn't hurt even if it
-                // cannot be computed accurately (e.g. for extreme values of slope)
+                // cannot be computed accurately (e.g. for extreme values of slope);
+                // for this reason and to save effort, we limit the loop to the last three nodes only
                 math::hypergeom2F1(fracpow, 1+slope, 2+slope, gridPhi.back() / gridPhi[j]) / (1+slope);
             if(isFinite(factor))
                 gridf[j] = num * factor / pow(-gridPhi[j], fracpow);

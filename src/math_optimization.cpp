@@ -809,7 +809,8 @@ std::vector<double> quadraticOptimizationSolveApprox(
     if( rhs.size()!=numConstraints ||
         (!consPenaltyLin.empty()  && consPenaltyLin. size()!=numConstraints) ||
         (!consPenaltyQuad.empty() && consPenaltyQuad.size()!=numConstraints) ||
-        (!L.empty() && L.size()!=numVariables) )
+        (!L.empty() && L.size()!=numVariables) ||
+        (Q.rows()>0 && Q.rows()!=numVariables) || (Q.rows()!=Q.cols()) )
         throw std::invalid_argument("quadraticOptimizationSolveApprox: invalid size of input arrays");
 
     // check which constraints are 'loose', i.e. penalty is not infinite,
@@ -873,7 +874,7 @@ std::vector<double> quadraticOptimizationSolveApprox(
     // assemble (or add to) a dense numVar*numVar matrix of quadratic penalties,
     // and add extra terms to the vector of linear penalties
     if(!consPenaltyQuad.empty() && !havePenLin &&
-        (numConstraints*2 >= numVariables || Q.size() == Q.cols() * Q.rows()))
+        ((Q.rows() > 0 && Q.size() == Q.cols() * Q.rows()) || numConstraints*2 >= numVariables))
     {
         std::vector<NumT> Ladd(numVariables);
         if(!L.empty())
@@ -929,12 +930,12 @@ template std::vector<double> linearOptimizationSolveApprox(const IMatrix<double>
     const std::vector<double>&, const std::vector<double>&, const std::vector<double>&,
     const std::vector<double>&, const std::vector<double>&);
 
-template std::vector<double> quadraticOptimizationSolveApprox(const IMatrix<float>&, 
+template std::vector<double> quadraticOptimizationSolveApprox(const IMatrix<float>&,
     const std::vector<float>&, const std::vector<float>&, const IMatrix<float>&,
     const std::vector<float>&, const std::vector<float>&,
     const std::vector<float>&, const std::vector<float>&);
 
-template std::vector<double> quadraticOptimizationSolveApprox(const IMatrix<double>&, 
+template std::vector<double> quadraticOptimizationSolveApprox(const IMatrix<double>&,
     const std::vector<double>&, const std::vector<double>&, const IMatrix<double>&,
     const std::vector<double>&, const std::vector<double>&,
     const std::vector<double>&, const std::vector<double>&);

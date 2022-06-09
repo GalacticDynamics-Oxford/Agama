@@ -1060,7 +1060,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         # selected orbit (none initially)
         this.oro = this.axo.plot(_numpy.nan, _numpy.nan, 'xk')[0]
         this.orp = this.axp.plot(_numpy.nan, _numpy.nan, 'xk')[0]
-        xlim = _numpy.percentile(R[_numpy.isfinite(R)], [0.1,99.9])
+        xlim = _numpy.percentile(R[_numpy.isfinite(R)], [0.1,99.5])
         this.axo.set_xscale('log')
         this.axo.set_xlim(xlim)
         this.axo.set_ylim(0, 1)

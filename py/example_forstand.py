@@ -315,7 +315,7 @@ datasets = []
 
 # read the input MGE file, skipping the first three lines as comments, deproject it and construct the Density object
 try:
-    mge = numpy.loadtxt(filenameMGE, skiprows=3)   # [REQ] file with MGE parametrization of surface density profile
+    mge = numpy.loadtxt(filenameMGE)   # [REQ] file with MGE parametrization of surface density profile
 except:
     print('%s not found; you need to generate the mock data first, as explained at the beginning of this file' % filenameMGE)
     exit()

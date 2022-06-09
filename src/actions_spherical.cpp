@@ -654,8 +654,12 @@ ActionAngles actionAnglesSpherical(
         return ActionAngles(acts, Angles(NAN, NAN, NAN));
     }
     Frequencies freq;
-    freq.Omegar = M_PI / integr<MODE_OMEGAR>(potential::PotentialWrapper(pot), E, L, R1, R2);
-    freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
+    if(R2 > R1 * (1 + 1e-8)) {  // normal case
+        freq.Omegar = M_PI / integr<MODE_OMEGAR>(potential::PotentialWrapper(pot), E, L, R1, R2);
+        freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
+    } else {  // degenerate case of a purely circular orbit
+        epicycleFreqs(pot, point.R, freq.Omegar, freq.Omegaz, freq.Omegaphi);
+    }
     freq.Omegaphi = freq.Omegaz * math::sign(point.vphi);
     if(freqout)  // freak out only if requested
         *freqout = freq;
@@ -715,8 +719,10 @@ ActionAngles ActionFinderSpherical::actionAngles(
 
 double ActionFinderSpherical::E(const Actions& acts) const
 {
+    if(acts.Jr!=acts.Jr)
+        return 0;   // Jr=NAN when energy is non-negative
     if(acts.Jr<0 || acts.Jz<0)
-        throw std::invalid_argument("ActionFinderSpherical: input actions are negative");
+        throw std::invalid_argument("ActionFinderSpherical: input actions cannot be negative");
     double L = acts.Jz + fabs(acts.Jphi);  // total angular momentum
 #ifdef INTERPOLATE_ENERGY
     double scaledE, der,

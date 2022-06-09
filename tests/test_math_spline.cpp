@@ -956,14 +956,16 @@ bool test1dSpline()
     errClampedVal  = sqrt(errClampedVal / NPOINTS);
     errHermiteVal  = sqrt(errHermiteVal / NPOINTS);
     errQuinticVal  = sqrt(errQuinticVal / NPOINTS);
+    errQuiCubeVal  = sqrt(errQuiCubeVal / NPOINTS);
     errBsplineDer  = sqrt(errBsplineDer / NPOINTS);
     errClampedDer  = sqrt(errClampedDer / NPOINTS);
     errHermiteDer  = sqrt(errHermiteDer / NPOINTS);
     errQuinticDer  = sqrt(errQuinticDer / NPOINTS);
+    errQuiCubeDer  = sqrt(errQuiCubeDer / NPOINTS);
     errClampedDer2 = sqrt(errClampedDer2/ NPOINTS);
     errHermiteDer2 = sqrt(errHermiteDer2/ NPOINTS);
     errQuinticDer2 = sqrt(errQuinticDer2/ NPOINTS);
-    errQuiCubeVal  = sqrt(errQuiCubeVal / NPOINTS);
+    errQuiCubeDer2 = sqrt(errQuiCubeDer2/ NPOINTS);
 
     std::cout << "RMS error in linear interpolator: " + utils::pp(errLinearVal, 8) +
         ", in ordinary cubic spline: " + utils::pp(errNaturalVal, 8) +
@@ -1024,9 +1026,11 @@ bool test1dSpline()
     testCond(errClampedDer < 4.5e-3, "error in clamped cubic spline derivative is too large") &&
     testCond(errHermiteDer < 3.5e-3, "error in hermite cubic spline derivative is too large") &&
     testCond(errQuinticDer < 1.4e-3, "error in quintic spline derivative is too large") &&
+    testCond(errQuiCubeDer < 1.3e-2, "error in quintic-from-cubic derivative is too large") &&
     testCond(errClampedDer2< 0.085,  "error in clamped cubic spline 2nd derivative is too large")   &&
     testCond(errHermiteDer2< 0.075,  "error in hermite cubic spline 2nd derivative is too large")   &&
     testCond(errQuinticDer2< 0.035,  "error in quintic spline 2nd derivative is too large") &&
+    testCond(errQuiCubeDer2< 0.25 ,  "error in quintic-from-cubic 2nd derivative is too large") &&
     testCond(okintcla, "integral of clamped spline is incorrect") &&
     testCond(okintnat, "integral of natural spline is incorrect") &&
     testCond(okintnum, "integral of B-spline is incorrect") &&

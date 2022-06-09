@@ -595,16 +595,18 @@ def ghInterp(ampl, center, width, coefs, x):
     return _numpy.squeeze(result * norm)
 
 
-def sampleOrbitLibrary(nbody, orbits, weights):
+def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
     '''
     Construct an N-body snapshot from an orbit library
     Arguments:
       nbody:    the required number of particles in the output snapshot.
       orbits:   an array of trajectories returned by the `orbit()` routine.
       weights:  an array of orbit weights, returned by the `solveOpt()` routine.
+      returnIndices: if True, return the index of the parent orbit for each particle.
     Returns: a tuple of two elements: the flag indicating success or failure, and the result.
-    In case of success, the result is a tuple of two arrays: particle coordinates/velocities
-    (2d Nx6 array) and particle masses (1d array of length N).
+    In case of success, the result is a tuple of two or three arrays:
+    particle coordinates/velocities (2d Nx6 array), particle masses (1d array of length N),
+    and optionally the indices of orbits from which particles were drawn (1d array of length N).
     In case of failure (when some of the orbits, usually with high weights, had fewer points
     recorded from their trajectories during orbit integration than is needed to represent them
     in the N-body snapshot), the result is a different tuple of two arrays:
@@ -635,7 +637,7 @@ def sampleOrbitLibrary(nbody, orbits, weights):
         raise ValueError("'orbits' must be an array of numpy arrays with the same length as 'weights'")
     orbitLengths = _numpy.array([len(o) for o in orbits])
     # index of first output point for each orbit
-    outPointIndex = _numpy.hstack((0, cumulMass / totalMass * nbody )).astype(int)
+    outPointIndex = _numpy.hstack((0, _numpy.round( cumulMass / totalMass * nbody ))).astype(int)
     # number of output points to sample from each orbit
     pointsToSample = outPointIndex[1:] - outPointIndex[:-1]
     # indices of orbits whose length of recorded trajectory is less than the required number of samples
@@ -649,8 +651,14 @@ def sampleOrbitLibrary(nbody, orbits, weights):
         # copy a random [non-repeating] selection of points from this orbit into the output array
         posvel[outPointIndex[orb] : outPointIndex[orb+1]] = \
             orbits[orb][_numpy.random.choice(orbitLengths[orb], pointsToSample[orb], replace=False)]
-    # return a success flag and a tuple of posvel, mass
-    return True, (posvel, _numpy.ones(nbody, dtype=orbits[0].dtype) * totalMass / nbody)
+    # return a success flag and a tuple of posvel, mass, and possibly orbit indices
+    result = (posvel, _numpy.ones(nbody, dtype=orbits[0].dtype) * totalMass / nbody)
+    if returnIndices:
+        orbitIndices = _numpy.zeros(nbody, dtype=int)
+        for orb in range(numOrbits):
+            orbitIndices[outPointIndex[orb] : outPointIndex[orb+1]] = orb
+        result += (orbitIndices,)
+    return True, result
 
 
 ### -------------------

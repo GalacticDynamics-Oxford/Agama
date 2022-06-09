@@ -306,8 +306,7 @@ inline void reallyAddPoint(const math::BsplineInterpolator1d<N>& bsplx,
 }
 }
 
-/*
-    Add a point sampled from the orbit during the current timestep to the datacube,
+/*  Add a point sampled from the orbit during the current timestep to the datacube,
     performing various symmetrization procedures depending on the properties of the potential.
     \param[in]  point  is a 6d pos/vel point on the actual orbit;
     \param[in]  _mult  is its weight (interval of time associated with this orbital segment);
@@ -367,13 +366,28 @@ void TargetLOSVD<N>::addPoint(const double point[6], double _mult, double* datac
     Y0 = orientation.mat[3] * pt[0], Y1 = orientation.mat[4] * pt[1], Y2 = orientation.mat[5] * pt[2],
     V01= orientation.mat[6] * pt[3]   +   orientation.mat[7] * pt[4], V2 = orientation.mat[8] * pt[5];
 
-    // A. when have mirror symmetry (x,y,z <-> -x,-y,-z), and the datacube grids are symmetric,
+    // 0. when have mirror symmetry (x,y,z <-> -x,-y,-z), and the datacube grids are symmetric,
     // no need to add the mirror point, because the symmetrization will be done afterwards
     // (it also corresponds to X,Y,V <-> -X,-Y,-V, i.e. point-symmetry of the kinematic dataset)
     bool addMirrorPoint = isReflSymmetric(symmetry) && !symmetricGrids;
     if(addMirrorPoint) mult *= 0.5;
 
-    // B. in an axisymmetric system, also ensure a symmetry w.r.t. change of inclination angle
+    // 1. symmetrization w.r.t. z,vz <=> -z,-vz: this is applicable to boxes and short-axis tubes,
+    // but will enforce long-axis tubes in non-axisymmetric potentials to have no net rotation,
+    // thereby eliminating the possibility of kinematic twists. OTOH for rotating barred potentials,
+    // un-symmetrized LAT are tilted w.r.t. the principal plane, so would break the triaxial
+    // symmetry of the density profile. A proper solution is to decouple spatial and kinematic
+    // symmetrization and make the latter dependent on the orbit type (i.e. LAT would be flipped
+    // in x,vx, whereas SAT -- in z,vz), but since the orbit type is not known in advance before
+    // it is completed, this would require storing several differently symmetrized datacubes and
+    // combining some of them at the end of the orbit integration after determining the orbit class.
+    // For now, we forfeit the possibility of modelling kinematic twists in triaxial systems and
+    // always add a copy of input point at x,y,-z,vx,vy,-vz (it projects to different X,Y,V than
+    // the original point).
+    bool flipZ = isBisymmetric(symmetry);
+    if(flipZ) mult *= 0.5;
+
+    // 2. in an axisymmetric system, also ensure a symmetry w.r.t. change of inclination angle
     // beta <-> pi-beta, or flipping the observed datacube about the line of nodes - together with
     // the point-symmetry of step 0, this corresponds to fourfold (bi-symmetrization) of image plane.
     // it's equivalent to flipping the signs of 1,4 and 8-th elements of transformMatrix, or X1,Y1,V2;
@@ -381,16 +395,32 @@ void TargetLOSVD<N>::addPoint(const double point[6], double _mult, double* datac
     if(isAxisymmetric(symmetry)) mult *= 0.5;
 
     if(true) {
-        if(true)                      //  x,  y,  z
-            reallyAddPoint(bsplx, bsply, bsplv, X0+X1+X2, Y0+Y1+Y2, V01+V2, mult, datacube);
-        if(isAxisymmetric(symmetry))  //  x', y', z'
-            reallyAddPoint(bsplx, bsply, bsplv, X0-X1+X2, Y0-Y1+Y2, V01-V2, mult, datacube);
+        if(true) {
+            if(true)                      //  x,  y,  z
+                reallyAddPoint(bsplx, bsply, bsplv, X0+X1+X2, Y0+Y1+Y2, V01+V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  //  x', y', z'
+                reallyAddPoint(bsplx, bsply, bsplv, X0-X1+X2, Y0-Y1+Y2, V01-V2, mult, datacube);
+        }
+        if(flipZ) {
+            if(true)                      //  x,  y, -z
+                reallyAddPoint(bsplx, bsply, bsplv, X0+X1-X2, Y0+Y1-Y2, V01-V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  //  x', y',-z'
+                reallyAddPoint(bsplx, bsply, bsplv, X0-X1-X2, Y0-Y1-Y2, V01+V2, mult, datacube);
+        }
     }
     if(addMirrorPoint) {  // only if grids are not symmetric but we do need to point-symmetrize
-        if(true)                      // -x, -y, -z
-            reallyAddPoint(bsplx, bsply, bsplv,-X0-X1-X2,-Y0-Y1-Y2,-V01-V2, mult, datacube);
-        if(isAxisymmetric(symmetry))  // -x',-y',-z'
-            reallyAddPoint(bsplx, bsply, bsplv,-X0+X1-X2,-Y0+Y1-Y2,-V01+V2, mult, datacube);
+        if(true) {
+            if(true)                      // -x, -y, -z
+                reallyAddPoint(bsplx, bsply, bsplv,-X0-X1-X2,-Y0-Y1-Y2,-V01-V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  // -x',-y',-z'
+                reallyAddPoint(bsplx, bsply, bsplv,-X0+X1-X2,-Y0+Y1-Y2,-V01+V2, mult, datacube);
+        }
+        if(flipZ) {
+            if(true)                      // -x, -y,  z
+                reallyAddPoint(bsplx, bsply, bsplv,-X0-X1+X2,-Y0-Y1+Y2,-V01+V2, mult, datacube);
+            if(isAxisymmetric(symmetry))  // -x',-y', z'
+                reallyAddPoint(bsplx, bsply, bsplv,-X0+X1+X2,-Y0+Y1+Y2,-V01-V2, mult, datacube);
+        }
     }
 }
 
