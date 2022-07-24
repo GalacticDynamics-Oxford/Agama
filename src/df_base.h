@@ -28,7 +28,7 @@ public:
         \returns    total mass
     */
     virtual double totalMass(const double reqRelError=1e-6, const int maxNumEval=1e6) const;
-    
+
     /** Number of components in the case of a multi-component DF */
     virtual unsigned int numValues() const { return 1; }
 

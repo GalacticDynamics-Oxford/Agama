@@ -141,7 +141,7 @@ public:
         const math::BsplineInterpolator1d<N>& _bsply,
         const math::BsplineInterpolator1d<N>& _bsplv) :
     bsplx(_bsplx), bsply(_bsply), bsplv(_bsplv)  {}
-    
+
     /// input variables are cartesian position and velocity in the observationally-aligned frame
     virtual unsigned int numVars() const { return 6; }
 

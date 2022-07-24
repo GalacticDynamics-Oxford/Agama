@@ -36,7 +36,7 @@ shared library and example programs. If you only need this, you may run python s
 # if it is loaded mid-way into the installation, things may get wrong, so we import it beforehand
 try: import setuptools
 except: pass
-import os, sys, subprocess, zipfile, distutils, distutils.core, distutils.dir_util, distutils.file_util
+import os, sys, platform, subprocess, zipfile, distutils, distutils.core, distutils.dir_util, distutils.file_util
 try:        from urllib.request import urlretrieve  # Python 3
 except ImportError: from urllib import urlretrieve  # Python 2
 from distutils import sysconfig
@@ -49,6 +49,8 @@ ROOT_DIR   = os.getcwd()  # the directory from which the script was called
 EXTRAS_DIR = 'extras'     # this directory will store any third-party libraries installed in the process
 compiler = new_compiler() # determine the default compiler and its flags
 MSVC = compiler.compiler_type == 'msvc'
+uname = platform.uname()
+MACOS = uname[0] == 'Darwin'
 
 # retrieve a system configuration variable with the given key, or return an empty string (instead of None)
 def get_config_var(key):
@@ -193,7 +195,7 @@ def createMakefile():
         '#pragma omp parallel\n{std::cout<<\'*\';}\nstd::cout << "\\n";\n}\n'
     if runCompiler(code=OMP_CODE, flags=OMP_FLAGS):
         CXXFLAGS += [OMP_FLAG]
-    elif sys.platform == 'darwin':
+    elif MACOS:
         # on MacOS the clang compiler pretends not to support OpenMP, but in fact it does so
         # if we insist (libomp.so/dylib or libgomp.so must be present in the system for this to work);
         # in some Anaconda installations, though, linking to the system-default libomp.dylib
@@ -201,8 +203,8 @@ def createMakefile():
         CONDA_EXE = os.environ.get('CONDA_EXE')
         if CONDA_EXE is not None and os.path.isfile(CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')) \
             and runCompiler(code=OMP_CODE, flags=CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib') +
-            ' -Xpreprocessor ' + OMP_FLAGS):
-            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
+            ' -Xpreprocessor ' + OMP_FLAGS + ' -I'+CONDA_EXE.replace('bin/conda', 'include/')):
+            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG, '-I'+CONDA_EXE.replace('bin/conda', 'include/')]
             LINK_FLAGS += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
             EXE_FLAGS  += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
         elif runCompiler(code=OMP_CODE, flags='-lgomp -Xpreprocessor '+OMP_FLAGS):
@@ -222,23 +224,28 @@ def createMakefile():
     if not MSVC and runCompiler(flags=CXX11_FLAG):
         CXXFLAGS += [CXX11_FLAG]
 
-    # [1d]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
+    # [1d]: on MacOS, set the machine architecture explicitly to avoid mismatch between x86_64 and arm64 on the newer M1 platform
+    if MACOS:
+        ARCH_FLAG = '-arch '+uname[4]  # could be x86_64 or arm64
+        if runCompiler(flags=ARCH_FLAG):
+            CXXFLAGS += [ARCH_FLAG]
+
+    # [1e]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
     ARCH_FLAG = '-march=native'
-    ARCH_CODE = 'int main(int c, char** v) { double x=c*3.14; return x==42; }\n'
     if not MSVC:
-        if runCompiler(code=ARCH_CODE, flags=ARCH_FLAG):
+        if runCompiler(flags=ARCH_FLAG):
             CXXFLAGS += [ARCH_FLAG]
         else:
             ARCH_FLAG = '-march=core2'  # try a less ambitious option
-            if runCompiler(code=ARCH_CODE, flags=ARCH_FLAG):
+            if runCompiler(flags=ARCH_FLAG):
                 CXXFLAGS += [ARCH_FLAG]
 
-    # [1e]: special treatment for Intel compiler to restore determinism in OpenMP-parallelized loops
+    # [1f]: special treatment for Intel compiler to restore determinism in OpenMP-parallelized loops
     INTEL_FLAG = '-qno-opt-dynamic-align'
     if not MSVC and runCompiler(code='#ifndef __INTEL_COMPILER\n#error\n#endif\nint main(){}\n', flags=INTEL_FLAG):
         CXXFLAGS += [INTEL_FLAG]
 
-    # [1f]: remove a couple of low-importance warnings that are unavoidably generated
+    # [1g]: remove a couple of low-importance warnings that are unavoidably generated
     # by the Python C API conventions (only if they are supported by the compiler)
     for WARNING_FLAG in ['-Wno-missing-field-initializers', '-Wno-cast-function-type']:
         if not MSVC and runCompiler(flags='-Werror '+WARNING_FLAG):
@@ -364,8 +371,9 @@ PyInit_agamatest(void) {
     def findPythonLib():
         # try linking against the static python library libpython**.a, if this does not succeed,
         # try the shared library libpython**.so** or libpython**.dylib
+        PY_VERSION = sysconfig.get_config_var('VERSION')
         for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']] +
-            ['libpython%s.a' % sysconfig.get_config_var('VERSION'), 'libpython%s.so' % sysconfig.get_config_var('VERSION')] ):
+            ['libpython%s.a' % PY_VERSION, 'libpython%s.so' % PY_VERSION, 'libpython%s.dylib' % PY_VERSION] ):
             for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR']]):
                 # obtain full path to the python library
                 PYTHON_LIB_FILEPATH = os.path.join(PYTHON_LIB_PATH, PYTHON_LIB_FILENAME)
@@ -405,9 +413,8 @@ PyInit_agamatest(void) {
             return PYTHON_SO_FLAGS, []
 
         # check if the error is due to ARM/x86_64 incompatibility on Apple M1
-        import platform
-        uname = platform.uname()
-        if uname[0] == 'Darwin' and 'ARM64' in uname[3]:
+        # (this should be fixed by [1d] - specifying "-arch x86_64" or "-arch arm64" instead of "-march=native" ?)
+        if MACOS and 'ARM64' in uname[3]:
             raise CompileError("If you see an error 'ld: symbol(s) not found for architecture arm64', " +
                 "it may be because you are running a x86_64 version of Python " +
                 "on an ARM (Apple Silicon/M1) machine, and the Python extension module " +
@@ -691,7 +698,7 @@ distutils.core.setup(
     version          = '1.0',
     description      = 'Action-based galaxy modelling architecture',
     author           = 'Eugene Vasiliev',
-    author_email     = 'eugvas@lpi.ru',
+    author_email     = 'eugvas@protonmail.com',
     license          = 'GPL,MIT,BSD',
     url              = 'https://github.com/GalacticDynamics-Oxford/Agama',
     download_url     = 'https://github.com/GalacticDynamics-Oxford/Agama/archive/master.zip',

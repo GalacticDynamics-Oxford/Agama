@@ -32,7 +32,6 @@
 #include "raga_base.h"
 #include "particles_base.h"
 #include "potential_analytic.h"
-#include <string>
 
 namespace raga {
 
@@ -97,7 +96,7 @@ public:
     virtual void createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int particleIndex);
     virtual void startEpisode(double timeStart, double episodeLength);
     virtual void finishEpisode();
-    virtual const char* name() const { return "BinaryBH     "; }
+    virtual const char* name() const { return "BinaryBH       "; }
 
 private:
     /// fixed parameters of this task

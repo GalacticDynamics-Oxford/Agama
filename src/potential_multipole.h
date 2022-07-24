@@ -99,8 +99,8 @@ public:
         const std::vector< std::vector<double> > &coefs);
 
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "DensitySphericalHarmonic"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "DensitySphericalHarmonic"; }
 
     /** return the radii of spline nodes and the array of density expansion coefficients */
     void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray) const;
@@ -155,8 +155,7 @@ public:
         const std::vector<double>& U,
         const std::vector<double>& W);
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "PowerLaw"; return text; }
+    virtual std::string name() const { return "PowerLaw"; }
 private:
     const math::SphHarmIndices ind; ///< indexing scheme for sph.-harm.coefficients
     double r0sq;                    ///< reference radius, squared
@@ -235,8 +234,8 @@ public:
         std::vector<std::vector<double> > &dPhi) const;
 
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Multipole"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Multipole"; }
     virtual double enclosedMass(const double radius) const;
 
 private:
@@ -298,7 +297,7 @@ public:
         transition steepness alpha=1/eta, outer slope beta=3+1/eta, and inner slope gamma=2-1/eta;
         \param[in]  r0   is the scale radius of basis functions
         (typically should be comparable to half-mass radius);
-        \param[in]  coef is the array of coefficients
+        \param[in] coefs is the array of coefficients
         (first dimension is the number of spherical-harmonic coefficients (lmax+1)^2,
         second dimension is the number of radial basis functions nmax+1).
     */
@@ -312,8 +311,8 @@ public:
     void getCoefs(double& eta, double& r0, std::vector<std::vector<double> > &coefs) const;
 
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "BasisSet"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "BasisSet"; }
 
 private:
     const math::SphHarmIndices ind;  ///< indexing scheme for sph.-harm. coefficients
@@ -432,7 +431,7 @@ void computePotentialCoefsSph(const BasePotential& pot,
     \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
     \param[in]  eta  is the shape parameter of basis functions.
     \param[in]  r0   is the scale radius of basis functions.
-    \param[out] coef will contain the array of coefficients, will be resized as needed.
+    \param[out] coefs  will contain the array of coefficients, will be resized as needed.
 */
 void computePotentialCoefsBSE(
     const BaseDensity& dens,
@@ -448,7 +447,7 @@ void computePotentialCoefsBSE(
     \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
     \param[in]  eta  is the shape parameter of basis functions.
     \param[in]  r0   is the scale radius of basis functions.
-    \param[out] coef will contain the array of coefficients, will be resized as needed.
+    \param[out] coefs  will contain the array of coefficients, will be resized as needed.
 */
 void computePotentialCoefsBSE(
     const particles::ParticleArray<coord::PosCyl> &particles,

@@ -256,7 +256,7 @@ public:
         return static_cast<coord::SymmetryType>(coord::ST_SPHERICAL*(x==0&&y==0&&z==0) |
         coord::ST_XREFLECTION*(x==0) | coord::ST_YREFLECTION*(y==0) | coord::ST_ZREFLECTION*(z==0));
     }
-    virtual const char* name() const { return "Blob"; };
+    virtual std::string name() const { return "Blob"; };
     virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
     { return (pow_2(pos.x-x) + pow_2(pos.y-y) + pow_2(pos.z-z) < pow_2(r)) ? 3/(4*M_PI*pow_3(r)) : 0; }
     virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const

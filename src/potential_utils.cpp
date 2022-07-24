@@ -365,7 +365,7 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
     if(!isAxisymmetric(potential))
         throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
     double Phi0, coef, slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
-    
+
     if(slope>0  &&  E >= Phi0  &&  E < Phi0 * (1-MIN_REL_DIFFERENCE)) {
         // accurate treatment at origin to avoid roundoff errors when Phi -> Phi(r=0),
         // assuming a power-law asymptotic behavior of potential at r->0

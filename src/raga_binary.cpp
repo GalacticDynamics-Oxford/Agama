@@ -30,7 +30,7 @@ class EncounterFinder: public math::IFunction {
 public:
     EncounterFinder(const orbit::BaseOrbitIntegrator& _orbint, const double _r2crit) :
         orbint(_orbint), r2crit(_r2crit)  {}
-    
+
     /// return the difference between the radius at the given time and the critical radius (both squared)
     virtual void evalDeriv(const double time, double* val, double* der, double*) const {
         coord::PosVelCar pos = orbint.getSol(time);
@@ -97,7 +97,7 @@ bool RuntimeBinary::processTimestep(double tbegin, double tend)
             ptend     = orbint.getSol(tcross);
         }
     }
-    
+
     // the encounter has started during this timestep
     // if the particle was outside the critical radius at the beginning, but moved in,
     // or if this is the first timestep in the entire episode and it was already inside rcrit
@@ -280,7 +280,7 @@ void RagaTaskBinary::finishEpisode()
         "hardening rate=" + utils::toString(H) + '+' + utils::toString(Hgw) +
         ", new a=" + utils::toString(bh.sma) +
         ", ecc=" + utils::toString(bh.ecc));
-    
+
     // record the new parameters to the output file
     if(!params.outputFilename.empty()) {
         std::ofstream strm(params.outputFilename.c_str(), std::ios_base::app);

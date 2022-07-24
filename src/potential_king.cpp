@@ -154,7 +154,7 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
         rho[i]    *= 9./4/M_PI * mass / pow_3(scaleRadius) / totalMass;
     }
 }
-    
+
 }  // internal ns
 
 // driver functions
@@ -162,7 +162,7 @@ PtrDensity createKingDensity(double mass, double scaleRadius, double W0, double 
 {
     std::vector<double> radii, phi, dphidr, rho;
     createKingModel(mass, scaleRadius, W0, trunc, /*output*/ radii, phi, dphidr, rho);
-    
+
     // create the interpolated density
     return PtrDensity(new DensitySphericalHarmonic(radii,
         std::vector<std::vector<double> >(1, rho)));

@@ -163,7 +163,7 @@ public:
 
     /// angular frequency (pattern speed) of the rotating frame (accessible to runtime functions)
     const double Omega;
-    
+
     /// initialize the object for the given potential, pattern speed, and other integration params
     BaseOrbitIntegrator(const potential::BasePotential& _potential, double _Omega,
         const OrbitIntParams& params)

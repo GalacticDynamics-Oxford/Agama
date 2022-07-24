@@ -14,8 +14,8 @@ class Plummer: public BasePotentialSphericallySymmetric{
 public:
     Plummer(double _mass, double _scaleRadius) :
         mass(_mass), scaleRadius(_scaleRadius) {}
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Plummer"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Plummer"; }
     virtual double enclosedMass(const double radius) const;
     virtual double totalMass() const { return mass; }
 private:
@@ -37,8 +37,8 @@ class Isochrone: public BasePotentialSphericallySymmetric{
 public:
     Isochrone(double _mass, double _scaleRadius) :
         mass(_mass), scaleRadius(_scaleRadius) {}
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Isochrone"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Isochrone"; }
     virtual double totalMass() const { return mass; }
 private:
     const double mass;         ///< total mass  (M)
@@ -53,8 +53,8 @@ class NFW: public BasePotentialSphericallySymmetric{
 public:
     NFW(double _mass, double _scaleRadius) :
         mass(_mass), scaleRadius(_scaleRadius) {}
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "NFW"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "NFW"; }
     virtual double totalMass() const { return INFINITY; }
 private:
     const double mass;         ///< normalization factor  (M);  equals to mass enclosed within ~5.3r_s
@@ -62,6 +62,8 @@ private:
 
     virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const
+    { return (1./4/M_PI) * mass / pos.r / pow_2(pos.r + scaleRadius); }
 };
 
 /** Axisymmetric Miyamoto-Nagai potential:
@@ -71,8 +73,8 @@ public:
     MiyamotoNagai(double _mass, double _scaleRadiusA, double _scaleRadiusB) :
         mass(_mass), scaleRadiusA(_scaleRadiusA), scaleRadiusB(_scaleRadiusB) {};
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "MiyamotoNagai"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "MiyamotoNagai"; }
     virtual double totalMass() const { return mass; }
 private:
     const double mass;         ///< total mass  (M)
@@ -92,8 +94,8 @@ public:
         p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
     virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Logarithmic"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Logarithmic"; }
     virtual double totalMass() const { return INFINITY; }
 private:
     const double sigma2;       ///< squared asymptotic circular velocity (sigma)
@@ -113,8 +115,8 @@ public:
         Omega2(pow_2(Omega)), p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
     virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Harmonic"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Harmonic"; }
     virtual double totalMass() const { return INFINITY; }
 private:
     const double Omega2;       ///< squared oscillation frequency (Omega)
@@ -158,8 +160,8 @@ struct KeplerBinaryParams {
 class KeplerBinary: public BasePotentialCar {
 public:
     KeplerBinary(const KeplerBinaryParams& _params) : params(_params) {}
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "KeplerBinary"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "KeplerBinary"; }
     virtual coord::SymmetryType symmetry() const
     { return (params.sma==0 || params.q==0 ? coord::ST_SPHERICAL : coord::ST_NONE); }
     virtual double totalMass() const { return params.mass; }

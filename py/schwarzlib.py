@@ -1060,7 +1060,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         # selected orbit (none initially)
         this.oro = this.axo.plot(_numpy.nan, _numpy.nan, 'xk')[0]
         this.orp = this.axp.plot(_numpy.nan, _numpy.nan, 'xk')[0]
-        xlim = _numpy.percentile(R[_numpy.isfinite(R)], [0.1,99.5])
+        xlim = _numpy.percentile(R[_numpy.isfinite(R)], [0.1,99.9])
         this.axo.set_xscale('log')
         this.axo.set_xlim(xlim)
         this.axo.set_ylim(0, 1)
@@ -1349,7 +1349,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         modelgrid = ax.plot(aval, bval, 'o', c='g', ms=5, picker=5, mew=0, alpha=0.75)[0]
         this.selected  = ax.plot([_numpy.nan], [_numpy.nan], marker='o', c='r', ms=8, mew=0)[0]
         this.modellabel= ax.text(0.01, 0.01, '', color='r', ha='left', va='bottom', transform=ax.transAxes, fontsize=10)
-        ax.text(0.5, 1.0, '$\mathrm{min}\,\chi^2=%.2f$' % min(chi2), color='r', ha='center', va='top', transform=ax.transAxes)
+        ax.text(0.5, 0.99, '$\mathrm{min}\,\chi^2=%.2f$' % min(chi2), color='r', ha='center', va='top', transform=ax.transAxes)
         ax.set_xlabel(alabel, labelpad=0)
         ax.set_ylabel(blabel, labelpad=0)
         if alim is None: alim = (min(aval), max(aval))

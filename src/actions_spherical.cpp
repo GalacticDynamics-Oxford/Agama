@@ -2,7 +2,6 @@
 #include "potential_utils.h"
 #include "math_core.h"
 #include "utils.h"
-#include <string>
 #include <stdexcept>
 #include <algorithm>
 #include <cassert>

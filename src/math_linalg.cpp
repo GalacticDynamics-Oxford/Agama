@@ -854,7 +854,7 @@ inline NumT* xnew(size_t size) {
 // if any GSL function triggers an error, it will be stored in these variables (defined in math_core.cpp)
 extern bool exceptionFlag;
 extern std::string exceptionText;
-    
+
 #define CALL_FUNCTION_OR_THROW(x) { \
     exceptionFlag = false; \
     x; \

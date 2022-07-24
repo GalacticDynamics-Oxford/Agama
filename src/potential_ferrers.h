@@ -17,11 +17,11 @@ namespace potential {
 */
 class Ferrers: public BasePotentialCar {
 public:
-    /// Construct the potential for the following parameters: mass, radius, axis ratios y/x, z/x
+    /// Construct the potential for the following parameters: mass, radius, axis ratios p=y/x, q=z/x
     Ferrers(double _mass, double _R, double _axisRatioY, double _axisRatioZ);
     ~Ferrers() {};
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Ferrers"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Ferrers"; }
     virtual coord::SymmetryType symmetry() const { return coord::ST_TRIAXIAL; }
 private:
     const double a, b, c;       ///< principal axis of ellipsoidal density 

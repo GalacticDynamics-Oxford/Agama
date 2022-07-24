@@ -1594,7 +1594,7 @@ CubicSpline2d::CubicSpline2d(
     fx .resize(fval.size());
     fy .resize(fval.size());
     fxy.resize(fval.size());
-    
+
     std::vector<double> tmpvalues(ysize), tmpderivs;
     // step 1. for each x_i, construct cubic splines for f(x_i, y) in y and assign df/dy at grid nodes
     for(size_t i=0; i<xsize; i++) {

@@ -165,7 +165,7 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
         throw std::invalid_argument("computeSphHarmCoefs: radial grid size too small");
     // 0th step: initialize sph-harm transform
     const math::SphHarmTransformForward trans(ind);
-    
+
     // 1st step: prepare the 3d grid of points in (r,theta,phi) where the input quantities are needed
     int numQuantities    = numQuantitiesAtPoint(src);  // 1 for density, 2 for potential
     int numSamplesAngles = trans.size();  // size of array of density values at each r
@@ -1137,7 +1137,7 @@ public:
         const std::vector<std::vector<double> > &Phi,
         const std::vector<std::vector<double> > &dPhi);
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return "MultipoleInterp1d"; };
+    virtual std::string name() const { return "MultipoleInterp1d"; };
 private:
     /// indexing scheme for sph.-harm. coefficients
     const math::SphHarmIndices ind;
@@ -1160,7 +1160,7 @@ public:
         const std::vector<std::vector<double> > &Phi,
         const std::vector<std::vector<double> > &dPhi);
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
-    virtual const char* name() const { return "MultipoleInterp2d"; }
+    virtual std::string name() const { return "MultipoleInterp2d"; }
 private:
     /// indexing scheme for sph.-harm. coefficients
     const math::SphHarmIndices ind;

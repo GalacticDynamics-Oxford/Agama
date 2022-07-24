@@ -69,7 +69,6 @@
 #include "raga_base.h"
 #include "particles_base.h"
 #include "potential_analytic.h"
-#include <string>
 
 // forward declaration (definitions are in galaxymodel_spherical.h)
 namespace galaxymodel {
@@ -144,7 +143,7 @@ private:
 
     /** pointer to the current array element where the upcoming sample will be placed */
     std::vector<double>::iterator outputIter;
-    
+
     /** seed for the orbit-local pseudo-random number generator */
     unsigned int seed;
 };
@@ -166,7 +165,7 @@ struct ParamsRelaxation {
 
     /// interval between writing out a text file with the spherical model
     double outputInterval;
-    
+
     /// optional header written in the output file
     std::string header;
 

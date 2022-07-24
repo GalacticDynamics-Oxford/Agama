@@ -53,8 +53,8 @@ public:
         const std::vector<double> &gridz,
         const std::vector< math::Matrix<double> > &coefs);
     virtual coord::SymmetryType symmetry() const { return sym; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "DensityAzimuthalHarmonic"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "DensityAzimuthalHarmonic"; }
 
     /** retrieve the values of density expansion coefficients 
         and the nodes of 2d grid used for interpolation */
@@ -192,8 +192,8 @@ public:
         const std::vector< math::Matrix<double> > &dPhidR = std::vector< math::Matrix<double> >(),
         const std::vector< math::Matrix<double> > &dPhidz = std::vector< math::Matrix<double> >() );
 
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "CylSpline"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "CylSpline"; }
     virtual coord::SymmetryType symmetry() const { return sym; };
     virtual double enclosedMass(const double radius) const;
 

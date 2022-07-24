@@ -56,7 +56,7 @@ public:
 private:
     densityfnc dens;
     coord::SymmetryType sym;
-    virtual const char* name() const { return "DensityWrapper"; };
+    virtual std::string name() const { return "DensityWrapper"; };
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const {
         return densityCar(toPosCar(pos), 0); }
@@ -81,7 +81,7 @@ public:
 private:
     potentialfnc pot;
     coord::SymmetryType sym;
-    virtual const char* name() const { return "PotentialWrapper"; };
+    virtual std::string name() const { return "PotentialWrapper"; };
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar*, double /*time*/) const
@@ -148,8 +148,8 @@ extern "C" void agama_initfromparam_(void* c_obj, char* params, long, long len)
 extern "C" void agama_initfrompot_(void* c_obj, char* params, potentialfnc pot, long, long len)
 {
     utils::KeyValueMap param(stdstr(params, len));
-    PotentialWrapper wrapper(pot, potential::getSymmetryTypeByName(param.getString("Symmetry")));
-    potentials.push_back(potential::createPotential(param, wrapper));
+    potentials.push_back(potential::createPotential(param, potential::PtrPotential(
+        new PotentialWrapper(pot, potential::getSymmetryTypeByName(param.getString("Symmetry"))))));
     const potential::BasePotential* ptr = potentials.back().get();
     memcpy(c_obj, &ptr, sizeof(void*));
 }
@@ -158,8 +158,8 @@ extern "C" void agama_initfrompot_(void* c_obj, char* params, potentialfnc pot, 
 extern "C" void agama_initfromdens_(void* c_obj, char* paramstr, densityfnc pot, long, long len)
 {
     utils::KeyValueMap param(stdstr(paramstr, len));
-    DensityWrapper wrapper(pot, potential::getSymmetryTypeByName(param.getString("Symmetry")));
-    potentials.push_back(potential::createPotential(param, wrapper));
+    potentials.push_back(potential::createPotential(param, potential::PtrDensity(
+        new DensityWrapper(pot, potential::getSymmetryTypeByName(param.getString("Symmetry"))))));
     const potential::BasePotential* ptr = potentials.back().get();
     memcpy(c_obj, &ptr, sizeof(void*));
 }

@@ -40,7 +40,7 @@ struct SpheroidParam{
     {}
     double mass() const;        ///< return the total mass of a density profile with these parameters
     static const char* myName() ///< the name of the density model in potential_factory routines
-    { static const char* text = "Spheroid"; return text; }
+    { return "Spheroid"; }
 };
 
 /** Parameters describing a Nuker density profile with an optional exponential cutoff.
@@ -79,7 +79,7 @@ struct NukerParam{
     {}
     double mass() const;        ///< return the total mass of a density profile with these parameters
     static const char* myName() ///< the name of the density model in potential_factory routines
-    { static const char* text = "Nuker"; return text; }
+    { return "Nuker"; }
 };
 
 /** Parameters describing a Sersic density profile.
@@ -111,7 +111,7 @@ struct SersicParam{
     double b() const;      ///< compute the numerical coefficient b as a function of n
     double mass() const;   ///< return the total mass of a density profile with these parameters
     static const char* myName() ///< the name of the density model in potential_factory routines
-    { static const char* text = "Sersic"; return text; }
+    { return "Sersic"; }
 };
 
 /// helper routine to construct a one-dimensional function describing a double-power-law profile
@@ -150,10 +150,10 @@ public:
 
     virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
-    virtual const char* name() const { return myName(); }
     /// the name reported by the density model is always 'Spheroid',
     /// regardless of whether it was initialized from SersicParam or NukerParam or SpheroidParam
-    static const char* myName() { return SpheroidParam::myName(); }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return SpheroidParam::myName(); }
 private:
     const double p2, q2;    ///< squared axis ratios p=y/x, q=z/x
     math::PtrFunction rho;  ///< one-dimensional density as a function of elliptical radius

@@ -158,7 +158,7 @@ if __name__ == "__main__":
     rho,vel,sigma = modelDisk.moments(xyz, dens=True, vel=True, vel2=True)
     force, deriv = model.potential.forceDeriv(xyz)
     kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/R)
-    ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma
+    ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma / agama.G
     numpy.savetxt("disk_plane",
         numpy.column_stack((R, Sigma, rho, sigma[:,0]**0.5, (sigma[:,1]-vel[:,1]**2)**0.5,
         sigma[:,2]**0.5, vel[:,1], ToomreQ)),

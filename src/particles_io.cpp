@@ -422,7 +422,7 @@ void writeSnapshotUNSIO(
 }
 
 #endif
-    
+
 }  // internal namespace
 
 

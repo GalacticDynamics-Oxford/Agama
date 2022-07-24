@@ -11,13 +11,13 @@ const double ACCURACY_ROOT = 1e-6;
 
 // Ferrers n=2 potential
 
-Ferrers::Ferrers(double _mass, double _R, double _q, double _p):
-    BasePotentialCar(), a(_R), b(_R*_q), c(_R*_p), mass(_mass), rho0( mass*105./(32*M_PI*a*b*c) )
+Ferrers::Ferrers(double _mass, double _R, double _p, double _q):
+    BasePotentialCar(), a(_R), b(_R*_p), c(_R*_q), mass(_mass), rho0( mass*105./(32*M_PI*a*b*c) )
 {
-    if(_R<=0)
+    if(!(_R > 0))
         throw std::invalid_argument("Ferrers potential: scale radius should be positive");
-    if(_q>=1 || _p>=_q || _q<=0 || _p<=0)
-        throw std::invalid_argument("Ferrers potential: axis ratios must be strictly less than unity");
+    if(!(1 > _p && _p > _q && _q > 0))
+        throw std::invalid_argument("Ferrers potential: axis ratios must satisfy 0 < q < p < 1");
     computeW(0, W0);
 }
 

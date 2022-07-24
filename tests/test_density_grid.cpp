@@ -1,3 +1,9 @@
+/** \name   test_density_grid.cpp
+    \author Eugene Vasiliev
+    \date   2017
+
+    Test the spatial density discretization scheme for Schwarzschild modelling
+*/
 #include "galaxymodel_densitygrid.h"
 #include "potential_ferrers.h"
 #include "utils.h"

@@ -21,7 +21,7 @@ void Plummer::evalDeriv(double r,
 double Plummer::densitySph(const coord::PosSph &pos, double /*time*/) const
 {
     double invrsq = 1. / (pow_2(pos.r) + pow_2(scaleRadius));
-    return 0.75/M_PI * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
+    return (3./4/M_PI) * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
 }
 
 double Plummer::enclosedMass(double r) const
@@ -50,17 +50,19 @@ void NFW::evalDeriv(double r,
 {
     double rrel = r / scaleRadius;
     double ln_over_r = r==INFINITY ? 0 :
-        rrel > 1e-3 ? log(1 + rrel) / r :
+        rrel > 7e-4 ? log(1 + rrel) / r :
         // accurate asymptotic expansion at r->0
-        (1 - 0.5 * rrel * (1 - 2./3 * rrel * (1 - 3./4 * rrel))) / scaleRadius;
+        (1 + rrel * (-1./2 + rrel * (1./3 + rrel * (-1./4)))) / scaleRadius;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)
-        *deriv = mass * (r==0 ? 0.5 / pow_2(scaleRadius) :
-            (ln_over_r - 1/(r+scaleRadius)) / r );
+        *deriv = mass * (rrel > 7e-4 ?
+            (ln_over_r - 1/(r+scaleRadius)) / r :
+            (1./2 + rrel * (-2./3 + rrel * 3./4)) / pow_2(scaleRadius));
     if(deriv2)
-        *deriv2 = -mass * (r==0 ? 2./3 / pow_3(scaleRadius) :
-            (2*ln_over_r - (2*scaleRadius + 3*r) / pow_2(scaleRadius+r) ) / pow_2(r) );
+        *deriv2 = -mass * (rrel > 7e-4 ?
+            (2*ln_over_r - (2*scaleRadius + 3*r) / pow_2(scaleRadius+r) ) / pow_2(r) :
+            (2./3 - rrel * 3./2) / pow_3(scaleRadius) );
 }
 
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,

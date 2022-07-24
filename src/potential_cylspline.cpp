@@ -161,10 +161,11 @@ void computeFourierCoefs(const BaseDensityOrPotential &src,
 inline void density_rho_m(const BaseDensity& dens, int m, size_t npoints, const coord::PosCyl pos[],
     /*output array of length npoints*/ double rho[])
 {
-    if(dens.name() == DensityAzimuthalHarmonic::myName()) {  // quickly compare char* pointers, not strings
+    const DensityAzimuthalHarmonic* densazi = dynamic_cast<const DensityAzimuthalHarmonic*>(&dens);
+    if(densazi) {  // dynamic_cast successful
         for(size_t p=0; p<npoints; p++)
-            rho[p] = static_cast<const DensityAzimuthalHarmonic&>(dens).rho_m(m, pos[p].R, pos[p].z);
-    } else {  // use the input density directly in the axisymmetric case
+            rho[p] = densazi->rho_m(m, pos[p].R, pos[p].z);
+    } else {  // dynamic_cast failed - assume the input density is already axisymmetric
         if(m==0)
             dens.evalmanyDensityCyl(npoints, pos, rho);
         else
@@ -308,7 +309,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &src,
     // as the Fourier expansion of density trivially has only one harmonic;
     // also, if the input density is already a Fourier expansion, use it directly.
     // Otherwise, we need to create a temporary DensityAzimuthalHarmonic interpolating object.
-    if(!isZRotSymmetric(src) && src.name() != DensityAzimuthalHarmonic::myName()) {
+    if(!isZRotSymmetric(src) && !dynamic_cast<const DensityAzimuthalHarmonic*>(&src)) {
         double Rmax = gridR.back() * 2;
         double Rmin = gridR[1] * 0.01;
         double zmax = gridz.back() * 2;

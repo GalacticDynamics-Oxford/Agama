@@ -192,11 +192,10 @@ void computeProjectedDF(
     the target level of accuracy.
     \tparam     N is the degree of B-splines (0, 1 or 3).
     \param[in]  model  is the galaxy model.
-    \param[in]  point  is the position at which the VDF are computed.
-    \param[in]  projected  determines whether to integrate over Z:
-    if true, then only two coordinates (X,Y) of the input point is used, and the VDF is averaged
-    over Z (i.e., represents the distribution of line-of-sight velocities and proper motions),
-    otherwise the VDF is computed for the given 3d point.
+    \param[in]  point  is the position at which the VDF are computed (either a 3d or a 2d point).
+    In the first variant (when point is coord::PosCar), the VDF is computed at the given 3d point,
+    in the second one (when point is coord::PosProj), the VDF is further integrated over the Z axis
+    (line of sight) and represents the distribution of line-of-sight and sky-plane velocities.
     \param[in]  gridvX  is the array of grid nodes for the v_X velocity component,
     which define the set of basis functions for interpolation.
     The nodes must be sorted in increasing order, and typically should range from -V_escape to V_escape.
@@ -399,8 +398,7 @@ public:
         model(_model), relError(_relError), maxNumEval(_maxNumEval) {}
 
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { return "DensityFromDF"; }
+    virtual std::string name() const { return "DensityFromDF"; }
     virtual double enclosedMass(const double) const { return NAN; } /// should never be used -- too slow
 private:
     const GalaxyModel model;  ///< aggregate of potential, action finder and DF

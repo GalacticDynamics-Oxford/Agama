@@ -270,43 +270,14 @@ coord::SymmetryType CompositeDensity::symmetry() const {
     return static_cast<coord::SymmetryType>(sym);
 }
 
-void ShiftedDensity::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
-    /*output*/ double values[], /*input*/ double time) const
+std::string CompositeDensity::name() const
 {
-    ALLOC(npoints, coord::PosCar, poscar)
-    for(size_t i=0; i<npoints; i++) {
-        poscar[i] = pos[i];
-        poscar[i].x -= centerx(time);
-        poscar[i].y -= centery(time);
-        poscar[i].z -= centerz(time);
+    std::string name = "CompositeDensity{ ";
+    for(unsigned int i=0; i<components.size(); i++) {
+        if(i>0) name += ", ";
+        name += components[i]->name();
     }
-    dens->evalmanyDensityCar(npoints, poscar, values, time);
-}
-
-void ShiftedDensity::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
-    /*output*/ double values[], /*input*/ double time) const
-{
-    ALLOC(npoints, coord::PosCar, poscar)
-    for(size_t i=0; i<npoints; i++) {
-        poscar[i] = toPosCar(pos[i]);
-        poscar[i].x -= centerx(time);
-        poscar[i].y -= centery(time);
-        poscar[i].z -= centerz(time);
-    }
-    dens->evalmanyDensityCar(npoints, poscar, values, time);
-}
-
-void ShiftedDensity::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
-    /*output*/ double values[], /*input*/ double time) const
-{
-    ALLOC(npoints, coord::PosCar, poscar)
-    for(size_t i=0; i<npoints; i++) {
-        poscar[i] = toPosCar(pos[i]);
-        poscar[i].x -= centerx(time);
-        poscar[i].y -= centery(time);
-        poscar[i].z -= centerz(time);
-    }
-    dens->evalmanyDensityCar(npoints, poscar, values, time);
+    return name + " }";
 }
 
 Composite::Composite(const std::vector<PtrPotential>& _components) :
@@ -351,37 +322,88 @@ void Composite::evalSph(const coord::PosSph &pos,
         components, componentTypes, pos, potential, deriv, deriv2, time);
 }
 
-double Composite::densityCar(const coord::PosCar &pos, double time) const {
+double Composite::densityCar(const coord::PosCar &pos, double time) const
+{
     double sum=0;
     for(unsigned int i=0; i<components.size(); i++)
         sum += components[i]->density(pos, time);
     return sum;
 }
-double Composite::densityCyl(const coord::PosCyl &pos, double time) const {
+double Composite::densityCyl(const coord::PosCyl &pos, double time) const
+{
     double sum=0;
     for(unsigned int i=0; i<components.size(); i++)
         sum += components[i]->density(pos, time);
     return sum;
 }
-double Composite::densitySph(const coord::PosSph &pos, double time) const {
+double Composite::densitySph(const coord::PosSph &pos, double time) const
+{
     double sum=0;
     for(unsigned int i=0; i<components.size(); i++)
         sum += components[i]->density(pos, time);
     return sum;
 }
 
-double Composite::totalMass() const {
+void Composite::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensityCar(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensityCar(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
+}
+
+void Composite::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensityCyl(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensityCyl(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
+}
+
+void Composite::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    components[0]->evalmanyDensitySph(npoints, pos, values, time);
+    ALLOC(npoints, double, tmpvalues)
+    for(unsigned int i=1; i<components.size(); i++) {
+        components[i]->evalmanyDensitySph(npoints, pos, tmpvalues, time);
+        for(size_t p=0; p<npoints; p++)
+            values[p] += tmpvalues[p];
+    }
+}
+
+double Composite::totalMass() const
+{
     double sum = 0;
     for(unsigned int i=0; i<components.size(); i++)
         sum += components[i]->totalMass();
     return sum;
 }
 
-coord::SymmetryType Composite::symmetry() const {
+coord::SymmetryType Composite::symmetry() const
+{
     int sym = static_cast<int>(coord::ST_SPHERICAL);
     for(unsigned int index=0; index<components.size(); index++)
         sym &= static_cast<int>(components[index]->symmetry());
     return static_cast<coord::SymmetryType>(sym);
+}
+
+std::string Composite::name() const
+{
+    std::string name = "CompositePotential{ ";
+    for(unsigned int i=0; i<components.size(); i++) {
+        if(i>0) name += ", ";
+        name += components[i]->name();
+    }
+    return name + " }";
 }
 
 
@@ -395,9 +417,12 @@ Evolving::Evolving(const std::vector<double> _times,
         throw std::length_error("Evolving: input arrays are not equal in length");
     if(times.size() == 0)
         throw std::invalid_argument("Evolving: empty list of potentials");
-    for(size_t i=1; i<times.size(); i++)
+    sym = instances[0]->symmetry();
+    for(size_t i=1; i<times.size(); i++) {
         if(!(times[i] > times[i-1]))
-            throw std::invalid_argument("Evolving: Times must be sorted in increasing order");
+            throw std::invalid_argument("Evolving: times must be sorted in increasing order");
+        sym = static_cast<coord::SymmetryType>(sym & instances[i]->symmetry());
+    }
 }
 
 void Evolving::evalCar(const coord::PosCar &pos,
@@ -412,7 +437,8 @@ void Evolving::evalCar(const coord::PosCar &pos,
         double pot;
         coord::GradCar grad;
         coord::HessCar hess;
-        instances[index+1]->eval(pos, potential? &pot : NULL, deriv? &grad : NULL, deriv2? &hess : NULL);
+        instances[index+1]->eval(pos,
+            potential? &pot : NULL, deriv? &grad : NULL, deriv2? &hess : NULL, time);
         if(potential)
             *potential = weight * (*potential) + (1-weight) * pot;
         if(deriv)
@@ -427,10 +453,341 @@ double Evolving::densityCar(const coord::PosCar &pos, double time) const
     ptrdiff_t index;
     double weight;
     searchInterp(time, times, interpLinear, /*output*/ index, weight);
-    double result = instances[index]->density(pos);
+    double result = instances[index]->density(pos, time);
     if(weight!=1)
-        result = weight * result + (1-weight) * instances[index+1]->density(pos);
+        result = weight * result + (1-weight) * instances[index+1]->density(pos, time);
     return result;
+}
+
+//--------- Modifier classes --------//
+
+// common function for evaluating density in the given coordinate system,
+// shared between Shifted<BaseDensity> and Shifted<BasePotential>
+template<typename CoordT>
+inline void evalmanyShifted(const BaseDensity& dens,
+    const double centerx, const double centery, const double centerz,
+    const size_t npoints, const coord::PosT<CoordT> pos[],
+    /*output*/ double values[], /*input*/ double time)
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++) {
+        poscar[i] = toPosCar(pos[i]);
+        poscar[i].x -= centerx;
+        poscar[i].y -= centery;
+        poscar[i].z -= centerz;
+    }
+    dens.evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void Shifted<BaseDensity>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*dens, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+void Shifted<BaseDensity>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*dens, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+void Shifted<BaseDensity>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*dens, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+void Shifted<BasePotential>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*pot, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+void Shifted<BasePotential>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*pot, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+void Shifted<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyShifted(*pot, centerx(time), centery(time), centerz(time), npoints, pos, values, time); }
+
+
+// common function for evaluating density in the given coordinate system,
+// shared between Tilted<BaseDensity> and Tilted<BasePotential>
+template<typename CoordT>
+inline void evalmanyTilted(const BaseDensity& dens, const coord::Orientation& orientation,
+    const size_t npoints, const coord::PosT<CoordT> pos[],
+    /*output*/ double values[], /*input*/ double time)
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++)
+        poscar[i] = orientation.toRotated(toPosCar(pos[i]));
+    dens.evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void Tilted<BaseDensity>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*dens, orientation, npoints, pos, values, time); }
+
+void Tilted<BaseDensity>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*dens, orientation, npoints, pos, values, time); }
+
+void Tilted<BaseDensity>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*dens, orientation, npoints, pos, values, time); }
+
+void Tilted<BasePotential>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*pot, orientation, npoints, pos, values, time); }
+
+void Tilted<BasePotential>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*pot, orientation, npoints, pos, values, time); }
+
+void Tilted<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{ evalmanyTilted(*pot, orientation, npoints, pos, values, time); }
+
+
+double Rotating<BaseDensity>::densityCar(const coord::PosCar &pos, double time) const
+{
+    double sa, ca;
+    math::sincos(angle(time), sa, ca);
+    return dens->density(coord::PosCar(pos.x * ca + pos.y * sa, pos.y * ca - pos.x * sa, pos.z), time);
+}
+
+void Rotating<BaseDensity>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    double sa, ca;
+    math::sincos(angle(time), sa, ca);
+    for(size_t i=0; i<npoints; i++)
+        poscar[i] = coord::PosCar(pos[i].x * ca + pos[i].y * sa, pos[i].y * ca - pos[i].x * sa, pos[i].z);
+    dens->evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void Rotating<BaseDensity>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCyl, poscyl)
+    double ang = angle(time);
+    for(size_t i=0; i<npoints; i++)
+        poscyl[i] = coord::PosCyl(pos[i].R, pos[i].z, pos[i].phi - ang);
+    dens->evalmanyDensityCyl(npoints, poscyl, values, time);
+}
+
+void Rotating<BaseDensity>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosSph, possph)
+    double ang = angle(time);
+    for(size_t i=0; i<npoints; i++)
+        possph[i] = coord::PosSph(pos[i].r, pos[i].theta, pos[i].phi - ang);
+    dens->evalmanyDensitySph(npoints, possph, values, time);
+}
+
+double Rotating<BasePotential>::densityCar(const coord::PosCar &pos, double time) const
+{
+    double sa, ca;
+    math::sincos(angle(time), sa, ca);
+    return pot->density(coord::PosCar(pos.x * ca + pos.y * sa, pos.y * ca - pos.x * sa, pos.z), time);
+}
+
+void Rotating<BasePotential>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCar, poscar)
+    double sa, ca;
+    math::sincos(angle(time), sa, ca);
+    for(size_t i=0; i<npoints; i++)
+        poscar[i] = coord::PosCar(pos[i].x * ca + pos[i].y * sa, pos[i].y * ca - pos[i].x * sa, pos[i].z);
+    pot->evalmanyDensityCar(npoints, poscar, values, time);
+}
+
+void Rotating<BasePotential>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosCyl, poscyl)
+    double ang = angle(time);
+    for(size_t i=0; i<npoints; i++)
+        poscyl[i] = coord::PosCyl(pos[i].R, pos[i].z, pos[i].phi - ang);
+    pot->evalmanyDensityCyl(npoints, poscyl, values, time);
+}
+
+void Rotating<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    ALLOC(npoints, coord::PosSph, possph)
+    double ang = angle(time);
+    for(size_t i=0; i<npoints; i++)
+        possph[i] = coord::PosSph(pos[i].r, pos[i].theta, pos[i].phi - ang);
+    pot->evalmanyDensitySph(npoints, possph, values, time);
+}
+
+void Rotating<BasePotential>::evalCar(const coord::PosCar &pos,
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const
+{
+    double sa, ca;
+    coord::GradCar derivrot;
+    coord::HessCar deriv2rot;
+    math::sincos(angle(time), sa, ca);
+    pot->eval(coord::PosCar(pos.x * ca + pos.y * sa, pos.y * ca - pos.x * sa, pos.z),
+        potential, deriv ? &derivrot : NULL, deriv2 ? &deriv2rot : NULL, time);
+    if(deriv) {
+        deriv->dx = derivrot.dx * ca - derivrot.dy * sa;
+        deriv->dy = derivrot.dy * ca + derivrot.dx * sa;
+        deriv->dz = derivrot.dz;
+    }
+    if(deriv2) {
+        deriv2->dx2 = ca*ca * deriv2rot.dx2 + sa*sa * deriv2rot.dy2 - 2*ca*sa * deriv2rot.dxdy;
+        deriv2->dy2 = sa*sa * deriv2rot.dx2 + ca*ca * deriv2rot.dy2 + 2*ca*sa * deriv2rot.dxdy;
+        deriv2->dxdy= ca*sa * (deriv2rot.dx2 - deriv2rot.dy2) + (ca*ca-sa*sa) * deriv2rot.dxdy;
+        deriv2->dxdz= ca * deriv2rot.dxdz - sa * deriv2rot.dydz;
+        deriv2->dydz= ca * deriv2rot.dydz + sa * deriv2rot.dxdz;
+        deriv2->dz2 = deriv2rot.dz2;
+    }
+}
+
+void Rotating<BasePotential>::evalCyl(const coord::PosCyl &pos,
+    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const
+{
+    pot->eval(coord::PosCyl(pos.R, pos.z, pos.phi - angle(time)), potential, deriv, deriv2, time);
+}
+
+void Rotating<BasePotential>::evalSph(const coord::PosSph &pos,
+    double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const
+{
+    pot->eval(coord::PosSph(pos.r, pos.theta, pos.phi - angle(time)), potential, deriv, deriv2, time);
+}
+
+
+void Scaled<BaseDensity>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++)
+        poscar[i] = coord::PosCar(pos[i].x * s, pos[i].y * s, pos[i].z * s);
+    dens->evalmanyDensityCar(npoints, poscar, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BaseDensity>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosCyl, poscyl)
+    for(size_t i=0; i<npoints; i++)
+        poscyl[i] = coord::PosCyl(pos[i].R * s, pos[i].z * s, pos[i].phi);
+    dens->evalmanyDensityCyl(npoints, poscyl, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BaseDensity>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosSph, possph)
+    for(size_t i=0; i<npoints; i++)
+        possph[i] = coord::PosSph(pos[i].r * s, pos[i].theta, pos[i].phi);
+    dens->evalmanyDensitySph(npoints, possph, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BasePotential>::evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosCar, poscar)
+    for(size_t i=0; i<npoints; i++)
+        poscar[i] = coord::PosCar(pos[i].x * s, pos[i].y * s, pos[i].z * s);
+    pot->evalmanyDensityCar(npoints, poscar, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BasePotential>::evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosCyl, poscyl)
+    for(size_t i=0; i<npoints; i++)
+        poscyl[i] = coord::PosCyl(pos[i].R * s, pos[i].z * s, pos[i].phi);
+    pot->evalmanyDensityCyl(npoints, poscyl, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
+    /*output*/ double values[], /*input*/ double time) const
+{
+    double s = 1 / scale(time), as3 = pow_3(s) * ampl(time);
+    ALLOC(npoints, coord::PosSph, possph)
+    for(size_t i=0; i<npoints; i++)
+        possph[i] = coord::PosSph(pos[i].r * s, pos[i].theta, pos[i].phi);
+    pot->evalmanyDensitySph(npoints, possph, values, time);
+    for(size_t i=0; i<npoints; i++)
+        values[i] *= as3;
+}
+
+void Scaled<BasePotential>::evalCar(const coord::PosCar &pos,
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const
+{
+    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
+    pot->eval(coord::PosCar(pos.x * s, pos.y * s, pos.z * s), potential, deriv, deriv2, time);
+    if(potential)  *potential *= as1;
+    if(deriv)  {
+        deriv->dx *= as2;
+        deriv->dy *= as2;
+        deriv->dz *= as2;
+    }
+    if(deriv2) {
+        deriv2->dx2  *= as3;
+        deriv2->dy2  *= as3;
+        deriv2->dz2  *= as3;
+        deriv2->dxdy *= as3;
+        deriv2->dxdz *= as3;
+        deriv2->dydz *= as3;
+    }
+}
+
+void Scaled<BasePotential>::evalCyl(const coord::PosCyl &pos,
+    double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const
+{
+    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
+    pot->eval(coord::PosCyl(pos.R * s, pos.z * s, pos.phi), potential, deriv, deriv2, time);
+    if(potential)  *potential *= as1;
+    if(deriv)  {
+        deriv->dR   *= as2;
+        deriv->dz   *= as2;
+        deriv->dphi *= as1;
+    }
+    if(deriv2) {
+        deriv2->dR2    *= as3;
+        deriv2->dz2    *= as3;
+        deriv2->dphi2  *= as1;
+        deriv2->dRdz   *= as3;
+        deriv2->dRdphi *= as2;
+        deriv2->dzdphi *= as2;
+    }
+}
+
+void Scaled<BasePotential>::evalSph(const coord::PosSph &pos,
+    double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const
+{
+    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
+    pot->eval(coord::PosSph(pos.r * s, pos.theta, pos.phi), potential, deriv, deriv2, time);
+    if(potential)  *potential *= as1;
+    if(deriv)  {
+        deriv->dr *= as2;
+        deriv->dtheta *= as1;
+        deriv->dphi *= as1;
+    }
+    if(deriv2) {
+        deriv2->dr2        *= as3;
+        deriv2->dtheta2    *= as1;
+        deriv2->dphi2      *= as1;
+        deriv2->drdtheta   *= as2;
+        deriv2->drdphi     *= as2;
+        deriv2->dthetadphi *= as1;
+    }
 }
 
 } // namespace potential

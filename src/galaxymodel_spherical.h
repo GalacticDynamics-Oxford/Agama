@@ -40,7 +40,6 @@
 #include "particles_base.h"
 #include "potential_utils.h"
 #include "math_random.h"
-#include <string>
 
 namespace galaxymodel{
 
@@ -70,7 +69,7 @@ public:
     I0, ///< \f$ I_0 = \int_E^0 F(E') dE'               = \int_{h(E)}^\infty F(h') / g(h') dh' \f$
     Kg, ///< \f$ K_g = \int_{\Phi(0)}^E f(E') g(E') dE' = \int_0^{h(E)} f(h') dh' \f$
     Kh; ///< \f$ K_h = \int_{\Phi(0)}^E F(E') h(E') dE' = \int_0^{h(E)} F(h') h' / g(h') dh' \f$
-    
+
     /// total mass, total energy, and kinetic energy of the model
     double totalMass, totalEnergy, totalEkin;
 
@@ -151,7 +150,7 @@ public:
 
     /** draw a sample from the velocity distribution at the radius corresponding to the given potential;
         \param[in]  Phi  is the potential which defines the position and the escape speed;
-        \param[in/out]  state  is the random-number generator state (NULL means system default) */
+        \param[in,out]  state  is the random-number generator state (NULL means system default) */
     double sampleVelocity(double Phi, math::PRNGState* state=NULL) const;
 };
 

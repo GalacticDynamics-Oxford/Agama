@@ -5,6 +5,7 @@
 */
 #pragma once
 #include "coord.h"
+#include <string>
 
 /** Classes and auxiliary routines related to creation and manipulation of 
     density models and gravitational potential models.
@@ -62,11 +63,8 @@ public:
     /// returns the symmetry type of this density or potential
     virtual coord::SymmetryType symmetry() const = 0;
 
-    /** return the name of density or potential model;
-        this also serves as a unique pointer that distinguishes between different classes,
-        so the derived classes should return a pointer to a static const char* variable.
-    */
-    virtual const char* name() const = 0;
+    /// return the name of density or potential model
+    virtual std::string name() const = 0;
 
     /** estimate the mass enclosed within a given spherical radius;
         default implementation integrates density over volume, but derived classes
@@ -87,23 +85,23 @@ public:
         \param[in]  time (optional, default 0) - time at which the density is computed.
     */
     virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
-        /*output*/ double values[], /*input*/ double t=0) const
+        /*output*/ double values[], /*input*/ double time=0) const
     {
         // default implementation just loops over input points one by one
         for(size_t p=0; p<npoints; p++)
-            values[p] = densityCar(pos[p], t);
+            values[p] = densityCar(pos[p], time);
     }
     virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],
-        /*output*/ double values[], /*input*/ double t=0) const
+        /*output*/ double values[], /*input*/ double time=0) const
     {
         for(size_t p=0; p<npoints; p++)
-            values[p] = densityCyl(pos[p], t);
+            values[p] = densityCyl(pos[p], time);
     }
     virtual void evalmanyDensitySph(const size_t npoints, const coord::PosSph pos[],
-        /*output*/ double values[], /*input*/ double t=0) const
+        /*output*/ double values[], /*input*/ double time=0) const
     {
         for(size_t p=0; p<npoints; p++)
-            values[p] = densitySph(pos[p], t);
+            values[p] = densitySph(pos[p], time);
     }
 
 protected:
@@ -340,7 +338,7 @@ public:
 class FunctionToPotentialWrapper: public BasePotentialSphericallySymmetric{
     const math::IFunction &fnc;  ///< function representing the radial dependence of potential
 public:
-    virtual const char* name() const { return "FunctionToPotentialWrapper"; }
+    virtual std::string name() const { return "FunctionToPotentialWrapper"; }
     virtual void evalDeriv(double r,
         double* val=NULL, double* deriv=NULL, double* deriv2=NULL) const {
         fnc.evalDeriv(r, val, deriv, deriv2); }
@@ -360,7 +358,7 @@ class FunctionToDensityWrapper: public BaseDensity{
     { return fnc(pos.r); }
 public:
     virtual coord::SymmetryType symmetry() const { return coord::ST_SPHERICAL; }
-    virtual const char* name() const { return "FunctionToDensityWrapper"; }
+    virtual std::string name() const { return "FunctionToDensityWrapper"; }
     explicit FunctionToDensityWrapper(const math::IFunction &f) : fnc(f) {}
 };
 

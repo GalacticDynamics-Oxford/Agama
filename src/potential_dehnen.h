@@ -12,8 +12,8 @@ namespace potential {
 class Dehnen: public BasePotentialCar {
 public:
     Dehnen(double _mass, double _scalerad, double _gamma, double _axisRatioY=1., double _axisRatioZ=1.);
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Dehnen"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Dehnen"; }
     virtual coord::SymmetryType symmetry() const { 
         return (axisRatioY==1 ?
             (axisRatioZ==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL); }

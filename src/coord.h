@@ -920,7 +920,7 @@ void evalAndConvertSph(const math::IFunction& F,
     HessT<outputCS>* deriv2=NULL);
 
 ///@}
-/// \section Miscellaneous routines
+/// \name  Miscellaneous routines
 ///@{
 
 /// compute the total angular momentum for a point in the given coordinate system CoordT
@@ -930,7 +930,7 @@ template<typename CoordT> double Ltotal(const PosVelT<CoordT> &p);
 template<typename CoordT> double Lz(const PosVelT<CoordT> &p);
 
 ///@}
-/// \section 3d rotations
+/// \name  3d rotations
 ///@{
 
 /** 3d rotational transformation between two Cartesian coordinate systems with the same origin,
@@ -995,7 +995,7 @@ public:
         toRotated(vec, result);
         return coord::PosCar(result[0], result[1], result[2]);
     }
-    
+
     /** transform the position in cartesian coordinates from the 'rotated' to the 'original' frame
         (convenience overload for PosCar) */
     PosCar fromRotated(const PosCar& pos) const
@@ -1004,7 +1004,7 @@ public:
         fromRotated(vec, result);
         return coord::PosCar(result[0], result[1], result[2]);
     }
-    
+
     /** transform the velocity in cartesian coordinates from the 'original' to the 'rotated' frame
         (convenience overload for VelCar) */
     VelCar toRotated(const VelCar& vel) const
@@ -1013,7 +1013,7 @@ public:
         toRotated(vec, result);
         return coord::VelCar(result[0], result[1], result[2]);
     }
-    
+
     /** transform the velocity in cartesian coordinates from the 'rotated' to the 'original' frame
         (convenience overload for VelCar) */
     VelCar fromRotated(const VelCar& vel) const
@@ -1065,7 +1065,7 @@ public:
         result.vxvz = mat[0] * res2x[2] + mat[1] * res2y[2] + mat[2] * res2z[2];
         return result;
     }
-        
+
     /** transform the second moment of velocity in cartesian coordinates
         from the 'rotated' to the 'original' frame */
     Vel2Car fromRotated(const Vel2Car& vel2) const
@@ -1086,6 +1086,71 @@ public:
         result.vxvz = mat[0] * res2x[2] + mat[3] * res2y[2] + mat[6] * res2z[2];
         return result;
     }
+
+    /** transform the gradient in cartesian coordinates from the 'original' to the 'rotated' frame */
+    GradCar toRotated(const GradCar& grad) const
+    {
+        double vec[3] = {grad.dx, grad.dy, grad.dz}, res[3];
+        toRotated(vec, res);
+        coord::GradCar result;
+        result.dx = res[0];
+        result.dy = res[1];
+        result.dz = res[2];
+        return result;
+    }
+
+    /** transform the gradient in cartesian coordinates from the 'rotated' to the 'original' frame */
+    GradCar fromRotated(const GradCar& grad) const
+    {
+        double vec[3] = {grad.dx, grad.dy, grad.dz}, res[3];
+        fromRotated(vec, res);
+        coord::GradCar result;
+        result.dx = res[0];
+        result.dy = res[1];
+        result.dz = res[2];
+        return result;
+    }
+
+    /** transform the hessian in cartesian coordinates from the 'original' to the 'rotated' frame */
+    HessCar toRotated(const HessCar& hess) const
+    {
+        double
+        hessx[3] = {hess.dx2,  hess.dxdy, hess.dxdz}, resx[3],
+        hessy[3] = {hess.dxdy, hess.dy2,  hess.dydz}, resy[3],
+        hessz[3] = {hess.dxdz, hess.dydz, hess.dz2 }, resz[3];
+        toRotated(hessx, resx);
+        toRotated(hessy, resy);
+        toRotated(hessz, resz);
+        HessCar result;
+        result.dx2  = mat[0] * resx[0] + mat[1] * resy[0] + mat[2] * resz[0];
+        result.dy2  = mat[3] * resx[1] + mat[4] * resy[1] + mat[5] * resz[1];
+        result.dz2  = mat[6] * resx[2] + mat[7] * resy[2] + mat[8] * resz[2];
+        result.dxdy = mat[3] * resx[0] + mat[4] * resy[0] + mat[5] * resz[0];
+        result.dydz = mat[6] * resx[1] + mat[7] * resy[1] + mat[8] * resz[1];
+        result.dxdz = mat[0] * resx[2] + mat[1] * resy[2] + mat[2] * resz[2];
+        return result;
+    }
+
+    /** transform the hessian in cartesian coordinates from the 'rotated' to the 'original' frame */
+    HessCar fromRotated(const HessCar& hess) const
+    {
+        double
+        hessx[3] = {hess.dx2,  hess.dxdy, hess.dxdz}, resx[3],
+        hessy[3] = {hess.dxdy, hess.dy2,  hess.dydz}, resy[3],
+        hessz[3] = {hess.dxdz, hess.dydz, hess.dz2 }, resz[3];
+        fromRotated(hessx, resx);
+        fromRotated(hessy, resy);
+        fromRotated(hessz, resz);
+        HessCar result;
+        result.dx2  = mat[0] * resx[0] + mat[3] * resy[0] + mat[6] * resz[0];
+        result.dy2  = mat[1] * resx[1] + mat[4] * resy[1] + mat[7] * resz[1];
+        result.dz2  = mat[2] * resx[2] + mat[5] * resy[2] + mat[8] * resz[2];
+        result.dxdy = mat[1] * resx[0] + mat[4] * resy[0] + mat[7] * resz[0];
+        result.dydz = mat[2] * resx[1] + mat[5] * resy[1] + mat[8] * resz[1];
+        result.dxdz = mat[0] * resx[2] + mat[3] * resy[2] + mat[6] * resz[2];
+        return result;
+    }
+
 };
 
 ///@}

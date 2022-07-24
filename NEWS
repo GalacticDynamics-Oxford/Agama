@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+June 2022:
+Added a general framework for time-dependent density/potential modifiers
+(shift, tilt, rotation, modulation in amplitude).
+
 September 2021:
 Enable compilation on Windows with MSVC (using the same setup.py script).
 
@@ -105,6 +109,11 @@ Some of this functionality is not yet ported to Agama.
 -----------
 API Changes
 
+June 2022:
+[C++] redesigned the potential_factory routines to deal with general modifiers,
+with some changes in the types of input density/potential objects passed to createDensity/Potential
+routines (smart pointers instead of references)
+
 May 2021:
 [C++]  interface for orbit integration is redesigned to decouple the internal representation
 from the input/output, which is now always served in Cartesian coordinates
@@ -140,4 +149,3 @@ the type of returned array changed to also contain timestamps for each point.
 March 2019:
 [C++, Python]  QuasiIsotropic DF renamed to QuasiSpherical, because it can now represent
 anisotropic spherical systems.
-

@@ -8,7 +8,6 @@
 #include "potential_base.h"
 #include "galaxymodel_target.h"
 #include <vector>
-#include <string>
 
 namespace galaxymodel{
 

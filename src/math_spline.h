@@ -524,6 +524,7 @@ public:
         `computeConvMatrix()` and the vector of amplitudes of the B-spline interpolator.
         \param[in]  fncValues   is the array of pre-computed values of input function f(x)
         at the grid of points returned by `integrPoints()`.
+        \param[in]  kernel      is the convolution kernel K.
         \param[in]  derivOrder  is the order `D` of derivatives of basis functions (0 <= D <= N).
         \return  the vector c_n  of length `interp.numValues()` (number of basis functions).
         \throw   std::length_error if the length of fncValues differs from integrNodes.

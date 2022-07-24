@@ -254,6 +254,8 @@ std::string toString(PyObject* obj)
             return utils::toString(value, 18);  // keep full precision in the string
         PyErr_Clear();   // otherwise something went wrong in conversion, carry on..
     }
+    // if the input is a tuple/list/array, serialize its elements into a comma-separated string
+    // (note that this flattens multidimensional arrays, may need to rethink this behaviour..)
     if(PySequence_Check(obj)) {
         Py_ssize_t size = PySequence_Size(obj);
         std::string str;
@@ -654,7 +656,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     return Py_None;
 }
 
-/// description of resetUnits function
+/// description of getUnits function
 static const char* docstringGetUnits =
     "Retrieve the current unit conversion settings initialized by setUnits(...).\n"
     "No arguments.\n"
@@ -1171,8 +1173,14 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "  densityNorm=...   normalization of density profile (Spheroid).\n" \
     "  W0=...  dimensionless central potential in King models.\n" \
     "  trunc=...  truncation strength in King models.\n" \
-    "  center=...  offset of the potential from origin - can be either " \
-    "a triplet of numbers, or a file name with time-dependent offsets.\n"
+    "  center=...  offset of the potential from origin, can be either " \
+    "a triplet of numbers, or a file name with time-dependent offsets.\n" \
+    "  orientation=...  orientation of the principal axes of the model w.r.t. " \
+    "the external coordinate system, specified as a triplet of Euler angles.\n" \
+    "  rotation=...  angle of rotation of the model about its z axis, " \
+    "can be a single number or a file name with a time-dependent angle.\n" \
+    "  scale=...  modification of mass and size scales of the model, " \
+    "given either as two numbers or a file with time-dependent scaling factors.\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -1196,17 +1204,19 @@ static const char* docstringDensity =
     "Finally, one may create a composite density from several Density objects by providing them as "
     "unnamed arguments to the constructor:  densum = Density(den1, den2, den3)\n\n"
     "An instance of Potential class may be used in all contexts when a Density object is required.\n"
+    "One may create a modified version of an existing Density object, by passing it as a `density` "
+    "argument together with one or more modifier parameters (center, orientation, rotation and scale).\n"
     "One may also construct a Density wrapper around a user-defined Python function that takes "
     "an array of Nx3 points in cartesian coordinates and returns the density values at these N points. "
-    "Such a function can be provided as an unnamed argument, or as a 'density' argument, possibly "
-    "with an additional argument 'symmetry' specifying the symmetry properties of the model "
+    "Such a function can be provided as an unnamed argument, or as a `density` argument, possibly "
+    "with an additional argument `symmetry` specifying the symmetry properties of the model "
     "(default is triaxial).\n"
-    "Finally, if this user-defined function is expected to be used in heavy computations, "
+    "If this user-defined function is expected to be used in heavy computations, "
     "it may be more efficient to approximate it by a native density interpolator class: "
     "DensitySphericalHarmonic (for spheroidal profiles that are not too flattened) or "
     "DensityAzimuthalHarmonic (for possibly strongly flattened models with a finite central density). "
-    "In this case, the 'type' argument must specify either of these two expansion types, "
-    "the 'density' argument should contain the user-defined function, and additional arguments "
+    "In this case, the `type` argument must specify either of these two expansion types, "
+    "the `density` argument should contain the user-defined function, and additional arguments "
     "should specify the grid parameters (rmin, rmax, gridSizeR; for azimuthal-harmonic expansion - "
     "additionally zmin, zmax, gridSizeZ) and angular expansion orders (lmax, mmax for spherical, "
     "or mmax for azimuthal harmonics), plus optionally the symmetry level may be provided explicitly.";
@@ -1241,7 +1251,7 @@ public:
         Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
-    virtual const char* name() const { return fncname.c_str(); };
+    virtual std::string name() const { return fncname; };
     // first come the evaluation functions for a single input point in all coordinate systems
     virtual double densityCyl(const coord::PosCyl &pos, double time) const {
         return densityCar(toPosCar(pos), time); }
@@ -1437,14 +1447,10 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
         if(!dens)
             throw std::invalid_argument("Argument 'density' must be either a string, "
                 "or an instance of Density class, or a function providing that interface");
-        // if no 'type' is provided, keep the user-provided density as it is
-        // (this is almost equivalent to passing it as an unnamed argument,
-        // except that here the user has the opportunity to specify the symmetry)
-        if(!params.contains("type"))
-            return dens;
-        // otherwise 'type' must specify a density expansion approximating the input density
         params.unset("density");
-        return potential::createDensity(params, *dens, *conv);
+        // create a density expansion (if params['type'] is provided) or use the input density directly,
+        // and add any relevant modifiers on top of it (if corresponding params are provided)
+        return potential::createDensity(params, dens, *conv);
     }
     if(!params.contains("type") && !params.contains("density") && !params.contains("file"))
         throw std::invalid_argument("Should provide the name of density model "
@@ -1699,74 +1705,16 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 /// return the name (with some further decorations in case of composite objects)
 PyObject* Density_name(PyObject* self)
 {
-    potential::PtrDensity dens = ((DensityObject*)self)->dens;
-    std::string name(dens->name());
-
-    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
-    // if the object was not an instance of this (or derived) class, this returns NULL
-
-    // check if this is a ShiftedDensity
-    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
-    if(sd) {
-        dens = sd->dens;
-        name = "Shifted " + name;
-    }
-
-    // check if this is a Shifted potential
-    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
-    if(sp) {
-        dens = sp->pot;
-        name = "Shifted " + name;
-    }
-
-    // check if this is a CompositeDensity
-    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
-    if(cd) {
-        name += ": ";
-        for(unsigned int i=0; i<cd->size(); i++) {
-            if(i>0) name += ", ";
-            potential::PtrDensity comp = cd->component(i);
-            // this can again be a ShiftedDensity, in which case we add further details
-            if(dynamic_cast<const potential::ShiftedDensity*>(comp.get())) name += "Shifted ";
-            name += comp->name();
-        }
-    }
-
-    // check if this is a Composite potential
-    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
-    if(cp) {
-        name += ": ";
-        for(unsigned int i=0; i<cp->size(); i++) {
-            if(i>0) name += ", ";
-            potential::PtrPotential comp = cp->component(i);
-            // this can again be a Shifted potential, in which case we add further details
-            if(dynamic_cast<const potential::Shifted*>(comp.get())) name += "Shifted ";
-            name += comp->name();
-        }
-    }
-
-    return Py_BuildValue("s", name.c_str());
+    return Py_BuildValue("s", ((DensityObject*)self)->dens->name().c_str());
 }
 
-/// return the element of a multi-component density or potential model
+/// return the element of a multi-component or otherwise modified density or potential model
 PyObject* Density_elem(PyObject* self, Py_ssize_t index)
 {
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
-    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
-    // if the object was not an instance of this (or derived) class, this returns NULL
 
-    // check if this is a ShiftedDensity
-    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
-    if(sd)
-        dens = sd->dens;
-
-    // check if this is a Shifted potential
-    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
-    if(sp)
-        dens = sp->pot;
-
-    // check if this is a CompositeDensity
-    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
+    const potential::BaseComposite<potential::BaseDensity>* cd =
+        dynamic_cast<const potential::BaseComposite<potential::BaseDensity>* >(dens.get());
     if(cd) {
         if(index<0 || index >= (Py_ssize_t)cd->size()) {
             PyErr_SetString(PyExc_IndexError, "Density component index out of range");
@@ -1775,8 +1723,8 @@ PyObject* Density_elem(PyObject* self, Py_ssize_t index)
         return createDensityObject(cd->component(index));
     }
 
-    // check if this is a Composite potential
-    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
+    const potential::BaseComposite<potential::BasePotential>* cp =
+        dynamic_cast<const potential::BaseComposite<potential::BasePotential>* >(dens.get());
     if(cp) {
         if(index<0 || index >= (Py_ssize_t)cp->size()) {
             PyErr_SetString(PyExc_IndexError, "Potential component index out of range");
@@ -1794,31 +1742,19 @@ PyObject* Density_elem(PyObject* self, Py_ssize_t index)
 Py_ssize_t Density_len(PyObject* self)
 {
     potential::PtrDensity dens = ((DensityObject*)self)->dens;
-    // check for various special cases by attempting to dynamic_cast the pointer to a given class:
-    // if the object was not an instance of this (or derived) class, this returns NULL
 
-    // check if this is a ShiftedDensity
-    const potential::ShiftedDensity* sd = dynamic_cast<const potential::ShiftedDensity*>(dens.get());
-    if(sd)
-        dens = sd->dens;
-
-    // check if this is a Shifted potential
-    const potential::Shifted* sp = dynamic_cast<const potential::Shifted*>(dens.get());
-    if(sp)
-        dens = sp->pot;
-
-    // check if this is a CompositeDensity
-    const potential::CompositeDensity* cd = dynamic_cast<const potential::CompositeDensity*>(dens.get());
+    const potential::BaseComposite<potential::BaseDensity>* cd =
+        dynamic_cast<const potential::BaseComposite<potential::BaseDensity>* >(dens.get());
     if(cd)
         return cd->size();
 
-    // check if this is a Composite potential
-    const potential::Composite* cp = dynamic_cast<const potential::Composite*>(dens.get());
+    const potential::BaseComposite<potential::BasePotential>* cp =
+        dynamic_cast<const potential::BaseComposite<potential::BasePotential>* >(dens.get());
     if(cp)
         return cp->size();
 
-    // otherwise it's not a composite thing (but we can't throw an exception, so just return -1)
-    return -1;
+    // otherwise it's not a composite thing (but we can't throw an exception, so just return 0)
+    return 0;
 }
 
 /// compare two Python Density objects "by value" (check if they represent the same C++ object)
@@ -1993,6 +1929,9 @@ static const char* docstringPotential =
     "If the parameters of the potential (including the coefficients of a potential expansion) are"
     "loaded from a file, then the `type` argument should not be provided, and the argument name "
     "`file=` may be omitted (i.e., may provide only the filename as an unnamed string argument).\n"
+    "One may create a modified version of an existing Potential object, by passing it as "
+    "a `potential` argument together with one or more modifier parameters "
+    "(center, orientation, rotation and scale); in this case, `type` should be empty.\n"
     "Examples:\n\n"
     ">>> pot_halo = Potential(type='Dehnen', mass=1e12, gamma=1, scaleRadius=100, p=0.8, q=0.6)\n"
     ">>> pot_disk = Potential(type='MiyamotoNagai', mass=5e10, scaleRadius=5, scaleHeight=0.5)\n"
@@ -2001,6 +1940,7 @@ static const char* docstringPotential =
     ">>> pot_from_snapshot = Potential(type='Multipole', file='snapshot.dat')\n"
     ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses))\n"
     ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2)\n"
+    ">>> pot_shifted = Potential(potential=pot_composite, center=[1.0,2.0,3.0]\n"
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
     ">>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
     "outerCutoffRadius=150, axisRatioZ=0.8)\n"
@@ -2014,7 +1954,7 @@ static const char* docstringPotential =
     "The numerical values in the above examples are given in solar masses and kiloparsecs; "
     "a call to `setUnits` should precede the construction of potentials in this approach. "
     "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
-    "(this is the default regime and is restored by `resetUnits`).\n";
+    "(this is the default regime and is restored by calling `setUnits()` without arguments).\n";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Potential class, which is inherited from Density
@@ -2050,7 +1990,7 @@ public:
         Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
-    virtual const char* name() const { return fncname.c_str(); };
+    virtual std::string name() const { return fncname; };
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
     {
@@ -2225,11 +2165,11 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
         potential::PtrDensity dens = getDensity(dens_obj,
             potential::getSymmetryTypeByName(toString(getItemFromPyDict(namedArgs, "symmetry"))));
         if(dens) {
-            /// attempt to construct a potential expansion from a user-provided density model
+            // attempt to construct a potential expansion from a user-provided density model
             if(params.getString("type").empty())
                 throw std::invalid_argument("'type' argument must be provided");
             params.unset("density");
-            return potential::createPotential(params, *dens, *conv);
+            return potential::createPotential(params, dens, *conv);
         } else if(!PyString_Check(dens_obj)) {
             throw std::invalid_argument(
                 "'density' argument should be the name of density profile "
@@ -2242,13 +2182,10 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
         potential::PtrPotential pot = getPotential(pot_obj,
             potential::getSymmetryTypeByName(params.getString("symmetry")));
         if(pot) {
-            if(!params.getString("type").empty()) {
-                // attempt to construct a potential expansion from a user-provided potential model
-                params.unset("potential");
-                return potential::createPotential(params, *pot, *conv);
-            } else
-                // keep the potential as is (a user-defined function)
-                return pot;
+            // attempt to construct a potential expansion from a user-provided potential model
+            // or use the input potential itself, and possibly add modifiers on top of the result
+            params.unset("potential");
+            return potential::createPotential(params, pot, *conv);
         } else {
             throw std::invalid_argument(
                 "'potential' argument should be an object that provides an appropriate interface "
@@ -4041,10 +3978,10 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
         return NULL;
     }
 
-    // warn about changed output order
-    if(vel || vel2)
-        PyErr_WarnEx(NULL, "The order of output velocity components in moments() is changed - "
-            "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
+    // [no longer] warn about changed output order
+    //if(vel || vel2)
+    //    PyErr_WarnEx(NULL, "The order of output velocity components in moments() is changed - "
+    //        "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
 
     PyObject* result = FncGalaxyModelMoments((PyObject*)points_arr, self,
         ndim, dens, vel, vel2, toBool(separate_flag, false), alpha, beta, gamma) .
@@ -4374,9 +4311,9 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
         return NULL;
     }
 
-    // warn about changed output order
-    PyErr_WarnEx(NULL, "The order of output velocity components in vdf() is changed - "
-        "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
+    // [no longer] warn about changed output order
+    //PyErr_WarnEx(NULL, "The order of output velocity components in vdf() is changed - "
+    //    "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
 
     PyObject* result = FncGalaxyModelVDF((PyObject*)points_arr, self,
         ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false), alpha, beta, gamma) .

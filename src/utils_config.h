@@ -60,7 +60,7 @@ public:
 
     /// return a boolean value from the map
     bool getBool(const std::string& key, bool defaultValue=false) const;
-    
+
     /// return a boolean value from either of the two variants of key
     bool getBoolAlt(const std::string& key1, const std::string& key2,
         bool defaultValue=false) const;

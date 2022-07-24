@@ -112,6 +112,7 @@ TESTSRCS  = test_math_core.cpp \
             test_orbit_lyapunov.cpp \
             test_potentials.cpp \
             test_potential_expansions.cpp \
+            test_potential_modifiers.cpp \
             test_actions_isochrone.cpp \
             test_actions_spherical.cpp \
             test_actions_staeckel.cpp \
@@ -126,6 +127,7 @@ TESTSRCS  = test_math_core.cpp \
             example_df_fit.cpp \
             example_doublepowerlaw.cpp \
             example_self_consistent_model.cpp \
+            example_self_consistent_model_mw.cpp \
             mkspherical.cpp \
             phaseflow.cpp \
             raga.cpp \

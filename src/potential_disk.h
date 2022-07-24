@@ -138,8 +138,8 @@ public:
         radialFnc(_radialFnc), verticalFnc(_verticalFnc) {}
 
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "Disk"; return text; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "Disk"; }
 private:
     math::PtrFunction radialFnc;     ///< function describing radial dependence of surface density
     math::PtrFunction verticalFnc;   ///< function describing vertical density profile
@@ -161,8 +161,7 @@ public:
     DiskAnsatz(const math::PtrFunction& _radialFnc, const math::PtrFunction& _verticalFnc) :
         radialFnc(_radialFnc), verticalFnc(_verticalFnc) {};
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
-    virtual const char* name() const { return myName(); }
-    static const char* myName() { static const char* text = "DiskAnsatz"; return text; }
+    virtual std::string name() const { return "DiskAnsatz"; }
     virtual double totalMass() const { return 0; }  // all the mass is contained in the residual density
 private:
     math::PtrFunction radialFnc;     ///< function describing radial dependence of surface density

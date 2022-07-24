@@ -587,7 +587,7 @@ public:
         scaling(model.potential, obspoint, orientation),
         needVel(_needVel), needVel2(_needVel2)
     {}
-    
+
     /// dimension of the input array (3 scaled velocity components and optionally scaled Z coordinate)
     virtual unsigned int numVars()   const { return Projected ? 4 : 3; }
 
@@ -726,13 +726,13 @@ public:
         NX(bsplvX.numValues()), NY(bsplvY.numValues()), NZ(bsplvZ.numValues()),
         Ntotal(1 + NX + NY + NZ)
     {}
-    
+
     /// dimension of the input array (3 scaled velocity components and optionally scaled Z coordinate)
     virtual unsigned int numVars()   const { return Projected ? 4 : 3; }
 
     /// total number of B-spline coefficients times the number of DF components
     virtual unsigned int numValues() const { return dflen * Ntotal; }
-    
+
     // input variables are scaled z-coordinate (if projected) and all three velocity components
     virtual coord::PosVelCar unscaleVars(const double vars[], double &jac) const {
         return scaling.unscale(vars, jac);
@@ -850,11 +850,11 @@ public:
             // query the spatial selection function (in the observed frame)
             double* fncval = static_cast<double*>(alloca(fnc.numValues() * sizeof(double)));
             fnc.eval(posvelobs, fncval);
-            
+
             // output the values of df * sf to the integration routine
             for(unsigned int i=0, count=fnc.numValues(); i<count; i++)
                 values[i] = dfval * fncval[i];
-            
+
             if(!scaling.symmetrizevRvz) return;
 
             // add a contribution of the symmetric point with -vR, -vz (in the intrinsic coordinates)
