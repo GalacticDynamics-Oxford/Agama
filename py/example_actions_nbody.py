@@ -16,24 +16,25 @@
 
     An equivalent example in C++ is located in tests folder.
 """
-import agama, numpy, time
+import agama, numpy
+try: from time import clock  # older Python
+except ImportError: from time import process_time as clock  # Python 3.3+
 
 #1. set units (in Msun, Kpc, km/s)
 agama.setUnits(mass=1, length=1, velocity=1)
 
 #2. get in N-body snapshots: columns 0 to 2 are position, 3 to 5 are velocity, 6 is mass
-tbegin = time.clock()
+tbegin = clock()
 try:
     diskParticles = numpy.loadtxt("model_stars_final")
     haloParticles = numpy.loadtxt("model_dm_final")
 except:
-    print("Input snapshot files are not available; " \
+    exit("Input snapshot files are not available; " \
         "you may create them by running example_self_consistent_model.py")
-    exit()
 
 print("%g s to load %d disk particles (total mass=%g Msun) " \
     "and %d halo particles (total mass=%g Msun)" % \
-    ( time.clock()-tbegin, \
+    ( clock()-tbegin, \
     diskParticles.shape[0], numpy.sum(diskParticles[:,6]), \
     haloParticles.shape[0], numpy.sum(haloParticles[:,6]) ) )
 
@@ -47,20 +48,20 @@ try:
 
 except:
     # 3b: these files don't exist on the first run, so we have to create the potentials
-    tbegin  = time.clock()
+    tbegin  = clock()
     haloPot = agama.Potential( \
         type="Multipole", particles=(haloParticles[:,0:3], haloParticles[:,6]), \
         symmetry='a', gridsizeR=20, lmax=2)
     print("%f s to init %s potential for the halo; value at origin=%f (km/s)^2" % \
-        ((time.clock()-tbegin), haloPot.name(), haloPot.potential(0,0,0)))
-    tbegin  = time.clock()
+        ((clock()-tbegin), haloPot.name(), haloPot.potential(0,0,0)))
+    tbegin  = clock()
     # manually specify the spatial grid for the disk potential,
     # although one may rely on the automatic choice of these parameters (as we did for the halo)
     diskPot = agama.Potential( \
         type="CylSpline", particles=(diskParticles[:,0:3], diskParticles[:,6]), \
         gridsizer=20, gridsizez=20, mmax=0, Rmin=0.2, Rmax=100, Zmin=0.05, Zmax=50)
     print("%f s to init %s potential for the disk; value at origin=%f (km/s)^2" % \
-        ((time.clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
+        ((clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
 
     # save the potentials into text files; on the next call may load them instead of re-computing
     diskPot.export("model_stars_final.pot")
@@ -70,13 +71,13 @@ except:
 totalPot  = agama.Potential(diskPot, haloPot)
 
 #4. compute actions for disk particles
-tbegin    = time.clock()
+tbegin    = clock()
 actFinder = agama.ActionFinder(totalPot)
-print("%f s to init action finder" % (time.clock()-tbegin))
+print("%f s to init action finder" % (clock()-tbegin))
 
-tbegin    = time.clock()
+tbegin    = clock()
 actions   = actFinder(diskParticles[:,0:6])
-print("%f s to compute actions for %i particles" % (time.clock()-tbegin,  diskParticles.shape[0]))
+print("%f s to compute actions for %i particles" % (clock()-tbegin,  diskParticles.shape[0]))
 
 #5. write out data
 Rz        = numpy.vstack(

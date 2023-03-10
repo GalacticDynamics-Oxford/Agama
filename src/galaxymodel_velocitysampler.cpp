@@ -33,7 +33,9 @@ particles::ParticleArrayCar assignVelocityEdd(
         int numAttempts = 0;  // prevent a lockup in troubled cases
         do {
             v = sphModel.sampleVelocity(Phi, &state);
-        } while(Phi + 0.5*v*v > 0 && ++numAttempts<100);
+        } while(Phi + 0.5*v*v >= 0 && ++numAttempts<100);
+        if(numAttempts>=100)  // something went wrong
+            v = 0;
         double vec[3], sinphi, cosphi;
         math::getRandomUnitVector(vec, &state);
         math::sincos(point.phi, sinphi, cosphi);

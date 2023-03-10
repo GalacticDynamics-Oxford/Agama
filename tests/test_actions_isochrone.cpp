@@ -255,7 +255,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statS.avg.Jr,  14)<<" +- "<<utils::pp(statS.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statS.avg.Jz,  14)<<" +- "<<utils::pp(statS.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statS.avg.Jphi, 6)<<" +- "<<utils::pp(statS.rms.Jphi, 7)<<
-    //",  rmserrInverse="<<utils::pp(sqrt(errSinv/traj.size()),7) <<
+    ",  rmserrInverse="<<utils::pp(sqrt(errSinv/traj.size()),7) <<
     (dispS_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_sph?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<std::endl;
 
@@ -286,7 +286,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statG.avg.Jr,  14)<<" +- "<<utils::pp(statG.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statG.avg.Jz,  14)<<" +- "<<utils::pp(statG.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statG.avg.Jphi, 6)<<" +- "<<utils::pp(statG.rms.Jphi, 7)<<
-    //",  rmserrInverse="<<utils::pp(sqrt(errGinv/traj.size()),7) <<
+    ",  rmserrInverse="<<utils::pp(sqrt(errGinv/traj.size()),7) <<
     (dispG_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_grid?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<
     (deriv_grid_ok?"":" \033[1;31mDERIVS INCONSISTENT\033[0m ")<<std::endl;

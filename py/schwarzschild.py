@@ -142,7 +142,8 @@ def runComponent(comp, pot):
         result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime,
             Omega=comp.Omega, targets=comp.targets)
         traj = None
-    if type(result) == numpy.array: result = (result,)
+    if isinstance(result, numpy.array):  # in case that only one output was requested (e.g. trajectory),
+        result = (result,)               # the orbit() function returns it rather than a tuple of one element
     # targets[0] is density, targets[1], if provided, is kinematics
     matrix = list()
     rhs    = list()

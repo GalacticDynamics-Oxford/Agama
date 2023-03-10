@@ -938,9 +938,9 @@ static void readTimeDependentArray(
     std::ifstream strm(str.c_str(), std::ios::in);
     if(!strm)
         throw std::runtime_error("readTimeDependentArray<" + utils::toString(K) + ">: "
-            "input string must contain " + utils::toString(K) + " values or the name of a file with " +
-            utils::toString(K+1) +" or " + utils::toString(2*K+1) + " columns "
-            "(timestamps, values and optionally their time derivatives)");
+            "input string (" + str + ") must contain " + utils::toString(K) + " values "
+            "or the name of a file with " + utils::toString(K+1) + " or " + utils::toString(2*K+1) +
+            " columns (timestamps, values and optionally their time derivatives)");
     std::string buffer;
     std::vector<double> time, val[K], der[K];
     while(std::getline(strm, buffer) && !strm.eof()) {
@@ -1201,7 +1201,7 @@ PtrPotential createPotentialExpansion(const AllParam& param, const utils::KeyVal
         // store coefficients in a text file,
         // later may load this file instead for faster initialization
         try{
-            writePotential(param.file + ".pot", *pot, param.converter);
+            writePotential(param.file + ".ini", *pot, param.converter);
         }
         catch(std::exception& ex) {  // not a critical error, but worth mentioning
             utils::msg(utils::VL_MESSAGE, "createPotential", ex.what());

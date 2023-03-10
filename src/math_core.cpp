@@ -668,6 +668,10 @@ double findRoot(const IFunction& fnc,
 
     if((fa < 0.0 && fb < 0.0) || (fa > 0.0 && fb > 0.0) || !isFinite(fa+fb))
         return NAN;   // endpoints do not bracket root
+    if(fa==0)
+        return (fb==0) ? 0.5 * (a+b) : a;
+    if(fb==0)
+        return b;
     /*  b  is the current estimate of the root,
         c  is the counter-point (i.e. f(b) * f(c) < 0, and |f(b)| < |f(c)| ),
         a  is the previous estimate of the root:  either

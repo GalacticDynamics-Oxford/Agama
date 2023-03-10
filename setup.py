@@ -215,8 +215,13 @@ def createMakefile():
             CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
             LINK_FLAGS += ['-lomp']
             EXE_FLAGS  += ['-lomp']
+        elif runCompiler(code=OMP_CODE, flags='-lomp -L/usr/local/opt/libomp/lib -I/usr/local/opt/libomp/include -Xpreprocessor '+OMP_FLAGS):
+            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG, '-I/usr/local/opt/libomp/include']
+            LINK_FLAGS += ['-lomp -L/usr/local/opt/libomp/lib']
+            EXE_FLAGS  += ['-lomp -L/usr/local/opt/libomp/lib']
         elif not ask("Warning, OpenMP is not supported\n"+
-            "If you're compiling on MacOS with clang, you'd better install another compiler such as GCC\n"+
+            "If you're compiling on MacOS with clang, you'd better install another compiler such as GCC, "
+            "or if you're using homebrew, install libomp via 'brew install libomp' and retry running this setup script\n"+
             "Do you want to continue without OpenMP? [Y/N] "): exit(1)
 
     # [1c]: test if C++11 is supported (optional)
@@ -374,7 +379,7 @@ PyInit_agamatest(void) {
         PY_VERSION = sysconfig.get_config_var('VERSION')
         for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']] +
             ['libpython%s.a' % PY_VERSION, 'libpython%s.so' % PY_VERSION, 'libpython%s.dylib' % PY_VERSION] ):
-            for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR']]):
+            for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR', 'srcdir']]):
                 # obtain full path to the python library
                 PYTHON_LIB_FILEPATH = os.path.join(PYTHON_LIB_PATH, PYTHON_LIB_FILENAME)
                 # check if the file exists at all at the given location
@@ -397,6 +402,10 @@ PyInit_agamatest(void) {
                         RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options and try again
                         if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
                             return PYTHON_SO_FLAGS + RPATH, []
+                        if MACOS:  # another attempt with a hardcoded path
+                            RPATH = ['-Wl,-rpath,/Library/Developer/CommandLineTools/Library/Frameworks/']
+                            if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
+                                return PYTHON_SO_FLAGS + RPATH, []
                         if "-undefined dynamic_lookup" in sysconfig.get_config_var('LDSHARED'):
                             print("Trying the last resort solution")
                             PYTHON_SO_FLAGS = ['-undefined dynamic_lookup'] + PYTHON_LIB_EXTRA
@@ -454,7 +463,7 @@ PyInit_agamatest(void) {
             filename = 'gsl.tar.gz'
             dirname  = 'gsl-2.7'
             try:
-                urlretrieve('ftp://ftp.gnu.org/gnu/gsl/gsl-2.7.tar.gz', filename)
+                urlretrieve('https://ftp.gnu.org/gnu/gsl/gsl-2.7.tar.gz', filename)
                 if os.path.isfile(filename):
                     say("Unpacking GSL\n")
                     subprocess.call(['tar', '-zxf', filename])    # unpack the archive

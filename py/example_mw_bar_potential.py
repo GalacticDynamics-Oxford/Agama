@@ -10,7 +10,7 @@ but is not very realistic further out.
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
 
-Reference: Sormani et al.(submitted)
+Reference: Sormani et al. 2022 (MNRAS Letters/514/L5).
 
 Authors: Mattia Sormani, Eugene Vasiliev
 '''

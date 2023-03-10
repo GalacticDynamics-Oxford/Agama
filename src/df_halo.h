@@ -39,7 +39,8 @@ DoublePowerLawParam() :  ///< set default values for all fields (NAN means that 
          (1 + (J_0 /h(J))^\eta )^{\Gamma / \eta}
          (1 + (g(J)/ J_0)^\eta )^{-B / \eta }
          \exp[ - (g(J) / J_{cutoff})^\zeta ]
-         ( [J_{core} / h(J)]^2 - \beta J_{core} / h(J) + 1)^{\Gamma/2}   \f$,  where
+         ( [J_{core} / h(J)]^2 - \beta J_{core} / h(J) + 1)^{-\Gamma/2}
+         [1 + \kappa \tanh(J_\phi / J_{\phi,0}) ]   \f$,  where
     \f$  g(J) = g_r J_r + g_z J_z + g_\phi |J_\phi|  \f$,
     \f$  h(J) = h_r J_r + h_z J_z + h_\phi |J_\phi|  \f$.
     Gamma is the power-law slope of DF at small J (slopeIn), and Beta -- at large J (slopeOut),

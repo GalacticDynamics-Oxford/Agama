@@ -248,6 +248,14 @@ std::string toString(PyObject* obj)
         return "";
     if(PyString_Check(obj))
         return std::string(PyString_AsString(obj));
+#if PY_MAJOR_VERSION==2
+    if(PyUnicode_Check(obj)) {
+        PyObject* str = PyUnicode_AsUTF8String(obj);
+        std::string result(PyString_AsString(str));
+        Py_DECREF(str);
+        return result;
+    }
+#endif
     if(PyNumber_Check(obj)) {
         double value = PyFloat_AsDouble(obj);
         if(!PyErr_Occurred())
@@ -7019,7 +7027,7 @@ PyInit_agama(void)
         module_methods,        /* m_methods */
     };
 
-    PyEval_InitThreads();
+    //PyEval_InitThreads();  // seems it's not needed
     thismodule = PyModule_Create(&moduledef);
     if(!thismodule) return NULL;
     PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);
