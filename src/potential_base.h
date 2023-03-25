@@ -1,7 +1,7 @@
 /** \file    potential_base.h
     \brief   Base density and potential classes
     \author  Eugene Vasiliev
-    \date    2009-2015
+    \date    2009-2023
 */
 #pragma once
 #include "coord.h"
@@ -362,35 +362,113 @@ public:
     explicit FunctionToDensityWrapper(const math::IFunction &f) : fnc(f) {}
 };
 
-/** A wrapper class providing a IFunction interface to a potential:
-    it evaluates the potential and its derivatives at the given point along x-axis
+// classes for on-the-fly symmetrization
+template<class BaseDensityOrPotential> class Sphericalized;
+template<class BaseDensityOrPotential> class Axisymmetrized;
+
+/** Wrapper class for on-the-fly spherical averaging of a given density profile.
+    It can be used to represent a BaseDensity instance as a 1d IFunctionNoDeriv.
+    If the underlying density is already spherical, it does no extra work,
+    otherwise it averages the underlying density over two spherical angles,
+    using a hard-coded fixed-order quadrature rule (so the error is worse for more strongly
+    flattened models, but is usually below 1e-3).
+    This class should be instantiated only as a temporary object;
+    use the `DensitySphericalHarmonic` class with lmax=0 to create a regular spherically-averaged
+    version of an arbitrary density profile, which is more efficient to evaluate repeatedly.
 */
-class PotentialWrapper: public math::IFunction {
-    const BasePotential& potential;
+template<> class Sphericalized<BaseDensity>: public BaseDensity, public math::IFunctionNoDeriv {
+    const BaseDensity& dens;
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
+    { return value(toPosSph(pos).r); }
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const
+    { return value(toPosSph(pos).r); }
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const
+    { return value(pos.r); }
 public:
-    virtual void evalDeriv(const double R, double *val=NULL, double *der=NULL, double *der2=NULL) const {
+    Sphericalized(const BaseDensity& _dens);
+    virtual coord::SymmetryType symmetry() const { return coord::ST_SPHERICAL; }
+    virtual std::string name() const
+    { return isSpherical(dens.symmetry()) ? dens.name() : "Sphericalized " + dens.name(); }
+    virtual double value(double r) const;
+};
+
+/** Wrapper class for on-the-fly spherical averaging of a given potential profile.
+    It can be used to represent a BasePotential instance as a 1d IFunction with two derivatives.
+    If the underlying potential is already spherical, it does no extra work,
+    otherwise it averages the underlying potential and its derivatives over two spherical angles,
+    using a hard-coded fixed-order quadrature rule (so the error is worse for more strongly
+    flattened models, but is usually below 1e-3).
+    This class should be instantiated only as a temporary object;
+    use the `Multipole` class with lmax=0 to create a regular spherically-averaged
+    version of an arbitrary potential profile, which is more efficient to evaluate repeatedly.
+*/
+template<> class Sphericalized<BasePotential>: public BasePotentialSphericallySymmetric {
+    const BasePotential& pot;
+public:
+    Sphericalized(const BasePotential& _pot);
+    virtual std::string name() const
+    { return isSpherical(pot.symmetry()) ? pot.name() : "Sphericalized " + pot.name(); }
+    virtual void evalDeriv(double r, double* val=NULL, double* der=NULL, double* der2=NULL) const;
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const;
+};
+
+/** Wrapper class for on-the-fly azimuthal averaging of a given density profile.
+    If the underlying density is already Z-rotation symmetric, it does no extra work,
+    otherwise it averages the underlying density over the phi angle,
+    using a regularly spaced fixed-order quadrature.
+    This class should be instantiated only as a temporary object;
+    use the `DensityAzimuthalHarmonic` or `DensitySphericalHarmonic` classes with mmax=0
+    to create a regular axisymmetrized version of an arbitrary density profile,
+    which is more efficient to evaluate repeatedly.
+*/
+template<> class Axisymmetrized<BaseDensity>: public BaseDensity {
+    const BaseDensity& dens;
+    virtual double densityCar(const coord::PosCar &pos, double /*time*/) const
+    { return densityCyl(toPosCyl(pos), /*time*/ 0); }
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const;
+    virtual double densitySph(const coord::PosSph &pos, double /*time*/) const
+    { return densityCyl(toPosCyl(pos), /*time*/ 0); }
+public:
+    Axisymmetrized(const BaseDensity& _dens);
+    virtual coord::SymmetryType symmetry() const
+    { return static_cast<coord::SymmetryType>(dens.symmetry() | coord::ST_ZROTATION); }
+    virtual std::string name() const
+    { return isZRotSymmetric(dens.symmetry()) ? dens.name() : "Axisymmetrized " + dens.name(); }
+};
+
+/** Wrapper class for on-the-fly azimuthal averaging of a given potential profile.
+    It can be used to represent a BasePotential instance as a 1d IFunction with two derivatives,
+    evaluating the azimuthally-averaged potential in the equatorial plane.
+    If the underlying potential is already Z-rotation symmetric, it does no extra work,
+    otherwise it averages the underlying potential and its derivatives over the phi angle,
+    using a regularly spaced fixed-order quadrature.
+    This class should be instantiated only as a temporary object;
+    use the `CylSpline` or `Multipole` classes with mmax=0 to create a regular axisymmetrized
+    version of an arbitrary potential profile, which is more efficient to evaluate repeatedly.
+*/
+template<> class Axisymmetrized<BasePotential>: public BasePotentialCyl, public math::IFunction {
+    const BasePotential& pot;
+    virtual void evalCyl(const coord::PosCyl &pos,
+        double* value, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
+    virtual double densityCyl(const coord::PosCyl &pos, double /*time*/) const;
+public:
+    Axisymmetrized(const BasePotential& _pot);
+    virtual coord::SymmetryType symmetry() const
+    { return static_cast<coord::SymmetryType>(pot.symmetry() | coord::ST_ZROTATION); }
+    virtual std::string name() const
+    { return isZRotSymmetric(pot.symmetry()) ? pot.name() : "Axisymmetrized " + pot.name(); }
+    // IFunction interface: evaluate the potential and its radial derivatives in the equatorial plane
+    virtual void evalDeriv(const double R, double *val=NULL, double *der=NULL, double *der2=NULL) const
+    {
         coord::GradCyl grad;
         coord::HessCyl hess;
-        potential.eval(coord::PosCyl(R,0,0), val, der? &grad : 0, der2? &hess : 0);
+        evalCyl(coord::PosCyl(R,0,0), val, der? &grad : 0, der2? &hess : 0, 0);
         if(der)
             *der = grad.dR;
         if(der2)
             *der2 = hess.dR2;
     }
     virtual unsigned int numDerivs() const { return 2; }
-    explicit PotentialWrapper(const BasePotential &p) : potential(p) {};
-};
-
-/** A wrapper class providing a IFunction interface to a spherically-symmetric density,
-    which is evaluated at a given point along x-axis
-*/
-class DensityWrapper: public math::IFunctionNoDeriv {
-    const BaseDensity& density;
-public:
-    virtual double value(const double r) const {
-        return density.density(coord::PosCyl(r, 0, 0));
-    }
-    explicit DensityWrapper(const BaseDensity &d) : density(d) {};
 };
 
 ///@}
@@ -408,23 +486,23 @@ inline double totalEnergy(const BasePotential& potential, const coord::PosVelSph
 {  return potential.value(p, time) + 0.5*(pow_2(p.vr)+pow_2(p.vtheta)+pow_2(p.vphi)); }
 
 
-// duplication of the symmetry testing functionlets from coord:: namespace
+// duplication of the symmetry testing functions from coord:: namespace
 inline bool isXReflSymmetric(const BaseDensity& dens) {
-    return isXReflSymmetric(dens.symmetry()); }
+    return  isXReflSymmetric(dens.symmetry()); }
 inline bool isYReflSymmetric(const BaseDensity& dens) {
-    return isYReflSymmetric(dens.symmetry()); }
+    return  isYReflSymmetric(dens.symmetry()); }
 inline bool isZReflSymmetric(const BaseDensity& dens) {
-    return isZReflSymmetric(dens.symmetry()); }
+    return  isZReflSymmetric(dens.symmetry()); }
 inline bool isReflSymmetric(const BaseDensity& dens) {
-    return isReflSymmetric(dens.symmetry()); }
+    return  isReflSymmetric(dens.symmetry()); }
 inline bool isZRotSymmetric(const BaseDensity& dens) {
-    return isZRotSymmetric(dens.symmetry()); }
+    return  isZRotSymmetric(dens.symmetry()); }
 inline bool isTriaxial(const BaseDensity& dens) {
-    return isTriaxial(dens.symmetry()); }
+    return  isTriaxial(dens.symmetry()); }
 inline bool isAxisymmetric(const BaseDensity& dens) {
-    return isAxisymmetric(dens.symmetry()); }
+    return  isAxisymmetric(dens.symmetry()); }
 inline bool isSpherical(const BaseDensity& dens) {
-    return isSpherical(dens.symmetry()); }
+    return  isSpherical(dens.symmetry()); }
 
 
 /** Compute the projected (surface) density, i.e., the integral of rho(X,Y,Z) dZ,
@@ -501,93 +579,6 @@ public:
     const bool nonnegative;   ///< flag determining whether to return zero if density was negative
 };
 
-/// list of quantities that may be spherically- or azimuthally-averaged
-enum AverageMode {
-    AV_RHO,  ///< density
-    AV_PHI,  ///< potential
-    AV_DRS,  ///< potential derivative by spherical radius r
-    AV_DRC,  ///< potential derivative by cylindrical radius R
-    AV_DZ,   ///< potential derivative by z
-};
-
-template<AverageMode mode, class T>
-double azimuthalAverageValue(const T& fnc, const coord::PosCyl& pos);
-template<> inline double azimuthalAverageValue<AV_RHO>(const BaseDensity& fnc, const coord::PosCyl& pos)
-{ return fnc.density(pos); }
-template<> inline double azimuthalAverageValue<AV_PHI>(const BasePotential& fnc, const coord::PosCyl& pos)
-{ return fnc.value(pos); }
-template<> inline double azimuthalAverageValue<AV_DRS>(const BasePotential& fnc, const coord::PosCyl& pos) {
-    coord::GradSph grad;
-    fnc.eval(toPosSph(pos), NULL, &grad);
-    return grad.dr;
-}
-template<> inline double azimuthalAverageValue<AV_DRC>(const BasePotential& fnc, const coord::PosCyl& pos) {
-    coord::GradCyl grad;
-    fnc.eval(pos, NULL, &grad);
-    return grad.dR;
-}
-template<> inline double azimuthalAverageValue<AV_DZ>(const BasePotential& fnc, const coord::PosCyl& pos) {
-    coord::GradCyl grad;
-    fnc.eval(pos, NULL, &grad);
-    return grad.dz;
-}
-
-/** compute a simple azimuthal average of a given quantity (quick and dirty, no error control)
-    \tparam mode  is the quantity (density, potential or its derivative)
-    \tparam T     is BaseDensity or BasePotential
-    \param[in]  fnc is the instance of density or potential
-    \param[in]  R,z is the point in the meridional plane where the average should be computed
-    \return  the averaged value
-*/
-template<AverageMode mode, class T>
-inline double azimuthalAverage(const T& fnc, double R, double z)
-{
-    if(isAxisymmetric(fnc))  // nothing to average
-        return azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, 0));
-    const int nphi = 8;  // number of equally-spaced points in phi is 2*nphi+1 over 2pi
-    double result  = 0.;
-    for(int i=0; i<=nphi; i++) {
-        double phi = i*M_PI/(nphi+0.5);
-        double v = azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, phi));
-        result  += v;
-        if(i==0) continue;
-        if(!isYReflSymmetric(fnc))  // a different value for the lower half-plane
-            v    = azimuthalAverageValue<mode>(fnc, coord::PosCyl(R, z, -phi));
-        result  += v;
-    }
-    return result / (2*nphi+1);
-}
-
-/** compute a simple spherical average of a given quantity (very primitive,
-    using a hard-coded fixed low order quadrature rule - intended for quick-and-dirty estimates)
-    \tparam mode  is the quantity (density, potential or its derivative)
-    \tparam T     is BaseDensity or BasePotential
-    \param[in]  fnc is the instance of density or potential
-    \param[in]  r is the spherical radius at which the average should be computed
-    \return  the averaged value
-*/
-template<AverageMode mode, class T>
-inline double sphericalAverage(const T& fnc, double r)
-{
-    if(isSpherical(fnc))  // nothing to average - just a single value
-        return azimuthalAverageValue<mode>(fnc, coord::PosCyl(r, 0, 0));
-    const double   // nodes and weights of Gauss-Radau quadrature with 8 points in cos(theta)=0..1
-    costh [8] = {0, 0.0562625605369222, 0.1802406917368924, 0.3526247171131696,
-        0.5471536263305554, 0.7342101772154106, 0.8853209468390958, 0.9775206135612875},
-    sinth [8] = {1, 0.9984160076249926, 0.9836225358551961, 0.9357648256270681,
-        0.8370322031996875, 0.6789222456756852, 0.4649804523718464, 0.2108398682952634},
-    weight[8] = {0.0078125, 0.04633953870074772, 0.07603265516169632, 0.09412938634727970,
-        0.09789304186312342, 0.08675369890862478, 0.06241197533246655, 0.02862720368606458};
-    double result = 0.;
-    for(int i=0; i<8; i++) {
-        double v = azimuthalAverage<mode>(fnc, r*sinth[i],  r*costh[i]) * weight[i];
-        result  += v;
-        if(i!=0 && !isZReflSymmetric(fnc))
-            v    = azimuthalAverage<mode>(fnc, r*sinth[i], -r*costh[i]) * weight[i];
-        result  += v;
-    }
-    return result;
-}
-
 ///@}
+
 }  // namespace potential

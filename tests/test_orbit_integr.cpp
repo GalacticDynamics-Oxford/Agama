@@ -1,5 +1,5 @@
 /** \file    test_orbit_integr.cpp
-    \date    2015-2021
+    \date    2015-2023
     \author  Eugene Vasiliev
 
     Test orbit integration in various potentials and coordinate systems.
@@ -22,7 +22,7 @@
 
 const double epsE   = 3e-6;  // accuracy of energy conservation
 const double epsL   = 1e-7;  // accuracy of energy conservation
-const double epsCS  = 1e-3;  // accuracy of comparison of orbits in different coordinate systems
+const double epsCS  = 2e-3;  // accuracy of comparison of orbits in different coordinate systems
 const double epsrot = 1e-3;  // accuracy of comparison between inertial and rotating frames
 const bool output   = utils::verbosityLevel >= utils::VL_VERBOSE;
 const double Omega  = 2.718; // rotation frequency (arbitrary)
@@ -33,17 +33,81 @@ inline double difposvel(const coord::PosVelCar& a, const coord::PosVelCar& b) {
         pow_2(a.vx-b.vx) + pow_2(a.vy-b.vy) + pow_2(a.vz-b.vz));
 }
 
+void convertOrbitToSpline(const std::vector< std::pair<coord::PosVelCar, double> > &traj,
+    math::QuinticSpline& splx, math::QuinticSpline& sply, math::QuinticSpline& splz)
+{
+    size_t n=traj.size();
+    std::vector<double> t(n), x(n), y(n), z(n), vx(n), vy(n), vz(n);
+    for(size_t i=0; i<n; i++) {
+        t[i] = traj[i].second;
+        x[i] = traj[i].first.x;
+        vx[i]= traj[i].first.vx;
+        y[i] = traj[i].first.y;
+        vy[i]= traj[i].first.vy;
+        z[i] = traj[i].first.z;
+        vz[i]= traj[i].first.vz;
+    }
+    splx = math::QuinticSpline(t, x, vx);
+    sply = math::QuinticSpline(t, y, vy);
+    splz = math::QuinticSpline(t, z, vz);
+}
+
+class DistanceFromPointToOrbit: public math::IFunctionNoDeriv {
+    const double x1, y1, z1;
+    const math::IFunction &x2, &y2, &z2;
+public:
+    DistanceFromPointToOrbit(double _x1, double _y1, double _z1,
+        const math::IFunction &_x2, const math::IFunction &_y2, const math::IFunction &_z2) :
+        x1(_x1), y1(_y1), z1(_z1), x2(_x2), y2(_y2), z2(_z2) {}
+    virtual double value(double t) const {
+        return sqrt(pow_2(x1-x2(t)) + pow_2(y1-y2(t)) + pow_2(z1-z2(t)));
+    }
+};
+
+// To compare two orbits, we may look at the distance between points recorded at the same time,
+// but this is not very robust: because the orbit energy is not exactly conserved during integration,
+// the two orbits at a fixed time gradually drift apart due to accumulated phase differences.
+// Instead we look at how close the orbits are in space after accounting for a possible time
+// difference, i.e., for each point on orbit1 find the closest distance to point on orbit2,
+// even if it is achieved at a slightly different time.
+double maxDistanceBetweenOrbits(
+    const std::vector< std::pair<coord::PosVelCar, double> > &traj1,
+    const std::vector< std::pair<coord::PosVelCar, double> > &traj2)
+{
+    math::QuinticSpline x2, y2, z2;
+    convertOrbitToSpline(traj2, x2, y2, z2);
+    const std::vector<double> &t2 = x2.xvalues();
+    // loop over all timestamps on orbit 1 except the boundary points,
+    // and for each timestamp, find the minimum distance from orbit2 to the point in orbit1
+    double maxdist = 0;
+    for(size_t i1=1, i2=0; i1<traj1.size()-1; i1++) {
+        while(i2 < t2.size() && t2[i2] < traj1[i1].second)
+            i2++;
+        // determine the interval for searching the minimum distance: +- one timestep on either orbit
+        double tlow = fmin(traj1[i1-1].second, t2[i2>0 ? i2-1 : 0]);
+        double tupp = fmax(traj1[i1+1].second, t2[i2]);
+        double tnearest = math::findMin(DistanceFromPointToOrbit(
+            traj1[i1].first.x, traj1[i1].first.y, traj1[i1].first.z, x2, y2, z2),
+            tlow, tupp, traj1[i1].second, /*tolerance*/ 1e-12);
+        maxdist = fmax(maxdist, sqrt(
+            pow_2(traj1[i1].first.x - x2(tnearest)) +
+            pow_2(traj1[i1].first.y - y2(tnearest)) +
+            pow_2(traj1[i1].first.z - z2(tnearest)) ));
+    }
+    return maxdist;
+}
+
 template<typename CoordT>
 bool test_coordsys(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions, double total_time,
-    std::vector< std::pair<coord::PosVelCar, double> > &traj)
+    std::vector< std::pair<coord::PosVelCar, double> > &trajFull)
 {
     std::string name = CoordT::name();
     name.resize(12, ' ');
     std::cout << name;
-    double timestep = 0.02 * total_time;
+    double timestep = 0.002 * total_time;
     double init_time = -0.25 * total_time;
-    std::vector< std::pair<coord::PosVelCar, double> > trajFull, trajRot;
+    std::vector< std::pair<coord::PosVelCar, double> > traj, trajRot;
     orbit::OrbitIntParams params(/*accuracy*/ 1e-8, /*maxNumSteps*/10000);
     orbit::OrbitIntegrator<CoordT> orbint(potential, /*Omega*/0, params);
     // record the orbit at regular intervals of time
@@ -51,10 +115,11 @@ bool test_coordsys(const potential::BasePotential& potential,
         orbint, timestep, /*output*/ traj)));
     // record the orbit at each timestep of the ODE integrator
     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
-        orbint, 0, trajFull)));
+        orbint, 0, /*output*/ trajFull)));
     // run the orbit
     orbint.init(initial_conditions, init_time);
     orbint.run(total_time);
+    
     // whether compare the result of orbit integration in rotating and inertial frames
     bool checkRot = isAxisymmetric(potential);
     if(checkRot) {
@@ -62,41 +127,52 @@ bool test_coordsys(const potential::BasePotential& potential,
         orbrot.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
             orbrot, timestep, trajRot)));
         orbrot.init(initial_conditions, init_time);
-        orbrot.run(total_time/2);  // check that a continuation of the orbit integration
-        orbrot.run(total_time/2);  // gives the same result as a single run for a longer time
+        if(name.substr(0,3) != "Sph" || Lz(initial_conditions) != 0) {
+            // check that a continuation of the orbit integration gives the same result
+            // as a single run for a longer time; note that the first half of the integration
+            // has run up to a time >= requested end time of the first half, we need to reinitialize
+            // the internal state of the solver at this precise moment of time and then continue.
+            // However, this does not work well in the case of integration in a spherical system
+            // when Lz=0, because the reinitialization introduces a tiny but nonzero Lz, and
+            // the integration grinds to a halt near pericenter, that's why this check is skipped.
+            orbrot.run(total_time/2);
+            orbrot.init(trajRot.back().first, init_time+total_time/2);
+            orbrot.run(total_time/2);
+        } else {
+            orbrot.run(total_time);
+        }
         if(trajRot.size() != traj.size()) {
             std::cout << "\033[1;34mOrbit in the rotating frame has different length\033[0m\n";
             return false;
+        } else {
+            // convert the orbit back into non-rotating frame
+            for(size_t i=0; i<traj.size(); i++) {
+                double angle = (traj[i].second-init_time)*Omega, cosa = cos(angle), sina = sin(angle);
+                coord::PosVelCar& xv = trajRot[i].first;  // cartesian coords in the rotating frame
+                xv = coord::PosVelCar(  // converted to the inertial frame
+                    xv.x  * cosa - xv.y  * sina, xv.y  * cosa + xv.x  * sina, xv.z,
+                    xv.vx * cosa - xv.vy * sina, xv.vy * cosa + xv.vx * sina, xv.vz);
+            }
         }
     }
     math::Averager avgE, avgL;
-    double difrot = 0;
+    double difrot = checkRot ? maxDistanceBetweenOrbits(traj, trajRot) : 0;
     for(size_t i=0; i<traj.size(); i++) {
         avgE.add(totalEnergy(potential, traj[i].first));
         avgL.add(Lz(traj[i].first));
-        if(checkRot) {
-            double angle = (traj[i].second-init_time)*Omega, cosa = cos(angle), sina = sin(angle);
-            coord::PosVelCar& rxv = trajRot[i].first;  // cartesian coords in the rotating frame
-            coord::PosVelCar ixv(  // converted to the inertial frame
-                rxv.x  * cosa - rxv.y  * sina, rxv.y  * cosa + rxv.x  * sina, rxv.z,
-                rxv.vx * cosa - rxv.vy * sina, rxv.vy * cosa + rxv.vx * sina, rxv.vz);
-            difrot = fmax(difrot, difposvel(ixv, traj[i].first));
-        }
     }
     if(output) {
-        std::ostringstream s;
-        double x[6];
-        initial_conditions.unpack_to(x);
         std::ofstream strm((std::string("Orbit_") + potential.name() + '_' + CoordT::name() + '_' +
-            utils::toString(x[0]) + '_' + utils::toString(x[1]) + '_' + utils::toString(x[2]) + '_' +
-            utils::toString(x[3]) + '_' + utils::toString(x[4]) + '_' + utils::toString(x[5]) ).c_str());
+            utils::toString(initial_conditions.x) + '_' + utils::toString(initial_conditions.y) + '_' +
+            utils::toString(initial_conditions.z) + '_' + utils::toString(initial_conditions.vx)+ '_' +
+            utils::toString(initial_conditions.vy)+ '_' + utils::toString(initial_conditions.vz) ).
+            c_str());
         for(size_t i=0; i<trajFull.size(); i++) {
-            coord::PosVelCar& xv = trajFull[i].first;
-            strm << utils::pp(trajFull[i].second, 18) <<"  " <<
+            const coord::PosVelCar& xv = trajFull[i].first;
+            strm << utils::pp(trajFull[i].second, 18) << "  " <<
             utils::pp(xv.x , 18) <<' '<< utils::pp(xv.y , 18) <<' '<< utils::pp(xv.z , 18) <<"  " <<
             utils::pp(xv.vx, 18) <<' '<< utils::pp(xv.vy, 18) <<' '<< utils::pp(xv.vz, 18) <<"   "<<
-            utils::pp(totalEnergy(potential, trajFull[i].first), 18) << ' '<<
-            utils::pp(Lz(trajFull[i].first), 18) << '\n';
+            utils::pp(totalEnergy(potential, xv), 18) << ' '<< utils::pp(Lz(xv), 18) << '\n';
         }
     }
     bool ok = traj.back().second > 0.999999 * (total_time + init_time);
@@ -125,6 +201,10 @@ bool test_coordsys(const potential::BasePotential& potential,
             ok = false;
         }
     }
+    if(traj.size() != round(total_time / timestep) + 1) {
+        std::cout << "\033[1;33m[incorrect length]\033[0m\n";
+        ok = false;
+    }
     std::cout << "\n";
     return ok;
 }
@@ -143,27 +223,19 @@ bool test_potential(const potential::BasePotential& potential,
     ok &= test_coordsys<coord::Car>(potential, initial_conditions, total_time, trajCar);
     ok &= test_coordsys<coord::Cyl>(potential, initial_conditions, total_time, trajCyl);
     ok &= test_coordsys<coord::Sph>(potential, initial_conditions, total_time, trajSph);
-    if(trajCar.size() == trajCyl.size() && trajCar.size() == trajSph.size()) {
-        double maxdifcyl=0, maxdifsph=0;
-        for(size_t i=0; i<trajCar.size(); i++) {
-            maxdifcyl = fmax(maxdifcyl, difposvel(trajCar[i].first, trajCyl[i].first));
-            maxdifsph = fmax(maxdifsph, difposvel(trajCar[i].first, trajSph[i].first));
-        }
-        std::cout << "|Car-Cyl|=" << maxdifcyl;
-        if(maxdifcyl > epsCS) {
-            std::cout << " \033[1;31m**\033[0m";
-            ok = false;
-        }
-        std::cout << ", |Car-Sph|=" << maxdifsph;
-        if(maxdifsph > epsCS) {
-            std::cout << " \033[1;31m**\033[0m";
-            ok = false;
-        }
-        std::cout << "\n";
-    } else {
-        std::cout << "\033[1;33mOrbit lengths differ between coordinate systems\033[0m\n";
+    double maxdifcyl = maxDistanceBetweenOrbits(trajCar, trajCyl);
+    double maxdifsph = maxDistanceBetweenOrbits(trajCar, trajSph);
+    std::cout << "|Car-Cyl|=" << maxdifcyl;
+    if(maxdifcyl > epsCS) {
+        std::cout << " \033[1;31m**\033[0m";
         ok = false;
     }
+    std::cout << ", |Car-Sph|=" << maxdifsph;
+    if(maxdifsph > epsCS) {
+        std::cout << " \033[1;31m**\033[0m";
+        ok = false;
+    }
+    std::cout << "\n";
     return ok;
 }
 

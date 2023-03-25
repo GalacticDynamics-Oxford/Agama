@@ -17,7 +17,7 @@ class AgamaInterfaceTests(TestWithMPI):
         r=(x*x+y*y+z*z)**0.5
         instance = Agama(type="Dehnen",
             mass=M|generic_unit_system.mass, scaleRadius=a|generic_unit_system.length,
-            channel_type="sockets")
+            channel_type="sockets", redirection="none")
         result=instance.get_potential_at_point(
             0.|generic_unit_system.length,
             x |generic_unit_system.length,
@@ -38,7 +38,7 @@ class AgamaInterfaceTests(TestWithMPI):
         scalea=7.654321|units.parsec
         converter=nbody_system.nbody_to_si(scaleM, scalea)
         instance = Agama(converter, type="Dehnen", mass=M*scaleM, scaleradius=a*scalea,
-            channel_type="sockets")
+            channel_type="sockets", redirection="none")
         result=instance.get_gravity_at_point(
             0.|generic_unit_system.length, x*scalea, y*scalea, z*scalea)
         scale=M/(r+a)**2 *scaleM/scalea**2*constants.G
@@ -48,7 +48,8 @@ class AgamaInterfaceTests(TestWithMPI):
     def test2(self):
         seed(1)
         particles=new_plummer_model(10000)
-        instance = Agama(type="Multipole", particles=particles, channel_type="sockets")
+        instance = Agama(type="Multipole", particles=particles, symmetry="none",
+            channel_type="sockets", redirection="none")
         result=instance.get_potential_at_point(
             0.|generic_unit_system.length,
             0.|generic_unit_system.length,
@@ -61,7 +62,8 @@ class AgamaInterfaceTests(TestWithMPI):
         scaleR=5.6 |units.parsec
         converter=nbody_system.nbody_to_si(scaleM,scaleR)
         particles=new_plummer_model(20000, convert_nbody=converter)
-        instance = Agama(converter, type="Multipole", particles=particles, channel_type="sockets")
+        instance = Agama(converter, type="Multipole", particles=particles, symmetry="none",
+            channel_type="sockets", redirection="none")
         x=3.|units.parsec
         y=4.|units.parsec
         z=5.|units.parsec

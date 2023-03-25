@@ -286,8 +286,9 @@ void createSphericalDF(
     } else {
         // 2c. input grid in potential was provided, convert it to the grid in radius
         gridr.resize(gridPhi.size());
+        potential::FunctionToPotentialWrapper pw(potential);
         for(size_t i=0; i<gridPhi.size(); i++)
-            gridr[i] = potential::R_max(potential, gridPhi[i]);
+            gridr[i] = potential::R_max(pw, gridPhi[i]);
     }
 
     size_t gridsize = gridPhi.size();

@@ -118,8 +118,8 @@ template<> class DF<Plummer>: public df::QuasiSpherical {
 public:
     const double beta, an;
 
-    DF<Plummer>(double _beta=0, double r_a=INFINITY) : 
-        QuasiSpherical(potential::PotentialWrapper(potential::Plummer(1,1))),
+    DF<Plummer>(double _beta=0, double r_a=INFINITY) :
+        QuasiSpherical(potential::Sphericalized<potential::BasePotential>(potential::Plummer(1,1))),
         beta(_beta), an(1/r_a/r_a)
     {}
 
@@ -153,7 +153,7 @@ public:
     const double beta, prefact;
 
     DF<Hernquist>(double _beta=0, double /*r_a*/=INFINITY) :
-        QuasiSpherical(potential::PotentialWrapper(potential::Dehnen(1,1,1,1,1))),
+        QuasiSpherical(potential::Sphericalized<potential::BasePotential>(potential::Dehnen(1,1,1,1,1))),
         beta(_beta),
         prefact(pow(2., beta-2.5) * math::gamma(5-2*beta) /
             (M_PI*M_PI*M_SQRTPI * math::gamma(1-beta) * math::gamma(3.5-beta)) )
@@ -289,14 +289,16 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
     const Phasevol<Model> truePhasevol;
     const DF<Model> trueDF(beta, r_a);
     const df::QuasiSphericalCOM comDF(
-        (potential::DensityWrapper(pot)), (potential::PotentialWrapper(pot)), beta, r_a);
+        (potential::Sphericalized<potential::BaseDensity>(pot)),
+        (potential::Sphericalized<potential::BasePotential>(pot)), beta, r_a);
     double mass = comDF.totalMass();
 
     const potential::Interpolator interp(pot);
-    const potential::PhaseVolume phasevol((potential::PotentialWrapper(pot)));
+    const potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(pot)));
     const math::LogLogSpline intRho= createInterpolatedDensity(pot);
     const math::LogLogSpline velDisp = galaxymodel::createJeansSphModel(
-        potential::DensityWrapper(pot), potential::PotentialWrapper(pot), beta);
+        potential::Sphericalized<potential::BaseDensity>(pot),
+        potential::Sphericalized<potential::BasePotential>(pot), beta);
 
     math::PtrFunction splDF, fitDF1, fitDF2;
     shared_ptr<const galaxymodel::SphericalIsotropicModelLocal> model;

@@ -85,7 +85,7 @@ pot_spiral = createSpiralPotential(numberOfArms, surfaceDensityS, scaleRadius, s
 pot_disk = agama.Potential(type='disk', surfaceDensity=surfaceDensityD, scaleRadius=scaleRadius,
     scaleHeight=-scaleHeight)  # minus sign means the isothermal (sech^2) vertical profile
 pot_total = agama.Potential(pot_disk, pot_spiral)
-pot_spiral.export('example_spiral.pot')
+pot_spiral.export('example_spiral.ini')
 
 # illustration: compute the density of the axisymmetric and the perturbed disks in the equatorial plane
 import matplotlib, matplotlib.pyplot as plt

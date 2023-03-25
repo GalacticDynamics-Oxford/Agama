@@ -15,6 +15,7 @@ raga::RagaCore core;  // the mighty thing...
 }
 #define MSG        { if(utils::verbosityLevel >= utils::VL_DEBUG) std::cout << "-{Agama} " << __FUNCTION__ << "\n"; }
 #define MSGS(text) { if(utils::verbosityLevel >= utils::VL_DEBUG) std::cout << "-{Agama} " << __FUNCTION__ << ": " << text << "\n"; }
+#define MSGE(text) { std::cout << "!{Agama} " << __FUNCTION__ << ": " << text << "\n"; }
 
 /// set the number of OpenMP threads
 int32_t set_num_threads(int32_t num_threads)
@@ -35,7 +36,7 @@ int32_t set_params(int argc, char** argv)
         return 0;
     }
     catch(std::exception& e) {
-        MSGS(e.what())
+        MSGE(e.what())
         return -1;
     }
 }
@@ -101,7 +102,7 @@ int32_t commit_particles()
         core.initPotentialFromParticles();
     }
     catch(std::exception& e) {
-        MSGS(e.what())
+        MSGE(e.what())
         return -1;
     }
     return 0;
@@ -134,7 +135,7 @@ int32_t evolve_model(double time)
         return 0;
     }
     catch(std::exception& e) {
-        MSGS(e.what())
+        MSGE(e.what())
         return -1;
     }
 }

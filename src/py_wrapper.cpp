@@ -143,7 +143,7 @@ PyObject* setNumThreads(PyObject* /*self*/, PyObject* arg)
     omp_set_num_threads(num);
     return PyInt_FromLong(num);
 #else
-    printf("OpenMP not available\n");
+    PyErr_WarnEx(NULL, "OpenMP not available\n", 1);
     return PyInt_FromLong(1);
 #endif
 }
@@ -187,6 +187,11 @@ public:
         // if this was the last instance of this class, finally restore the warnings handler
         if(numInstances==0) {
             if(!seterr || !prevSettings) return;
+            // the preceding code might have raised an exception,
+            // in which case we need to temporarily store it elsewhere before calling numpy.seterr,
+            // and then restore the exception to be propagated further
+            PyObject *type, *value, *traceback;
+            PyErr_Fetch(&type, &value, &traceback);
             // restore the previous settings of numpy warnings subsystem
             PyObject* args = PyTuple_New(0);
             PyObject* result = PyObject_Call(seterr, args, prevSettings);
@@ -195,6 +200,8 @@ public:
             else { utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Restored numpy warnings"); }
             Py_XDECREF(result);
             Py_DECREF(seterr);
+            // restore the exception that might have been raised by the preceding code
+            PyErr_Restore(type, value, traceback);
         }
     }
 };
@@ -1216,18 +1223,18 @@ static const char* docstringDensity =
     "argument together with one or more modifier parameters (center, orientation, rotation and scale).\n"
     "One may also construct a Density wrapper around a user-defined Python function that takes "
     "an array of Nx3 points in cartesian coordinates and returns the density values at these N points. "
-    "Such a function can be provided as an unnamed argument, or as a `density` argument, possibly "
-    "with an additional argument `symmetry` specifying the symmetry properties of the model "
-    "(default is triaxial).\n"
+    "Such a function can be provided as an unnamed argument, or as a `density` argument followed by "
+    "`symmetry` (in the first case, the symmetry remains unknown and some methods will not work).\n"
     "If this user-defined function is expected to be used in heavy computations, "
     "it may be more efficient to approximate it by a native density interpolator class: "
     "DensitySphericalHarmonic (for spheroidal profiles that are not too flattened) or "
     "DensityAzimuthalHarmonic (for possibly strongly flattened models with a finite central density). "
     "In this case, the `type` argument must specify either of these two expansion types, "
-    "the `density` argument should contain the user-defined function, and additional arguments "
-    "should specify the grid parameters (rmin, rmax, gridSizeR; for azimuthal-harmonic expansion - "
-    "additionally zmin, zmax, gridSizeZ) and angular expansion orders (lmax, mmax for spherical, "
-    "or mmax for azimuthal harmonics), plus optionally the symmetry level may be provided explicitly.";
+    "the `density` argument should contain the user-defined function, "
+    "the `symmetry` argument describes its degree of symmetry, "
+    "and optional additional arguments may specify the grid parameters "
+    "(rmin, rmax, gridSizeR; for azimuthal-harmonic expansion - additionally zmin, zmax, gridSizeZ) "
+    "and angular expansion orders (lmax, mmax for spherical, or mmax for azimuthal harmonics).";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Density class
@@ -1242,15 +1249,18 @@ typedef struct {
 class DensityWrapper: public potential::BaseDensity{
     NumpyWarningsDisabler lock;
     PyObject* fnc;
-    coord::SymmetryType sym;
-    std::string fncname;
+    const coord::SymmetryType sym;
+    const std::string fncname;
 public:
-    DensityWrapper(PyObject* _fnc, coord::SymmetryType _sym): fnc(_fnc), sym(_sym)
+    DensityWrapper(PyObject* _fnc, coord::SymmetryType _sym):
+        fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
         Py_INCREF(fnc);
-        fncname = toString(fnc);
         utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ density wrapper for Python function "+fncname);
+            "Created a C++ density wrapper for Python function " + fncname +
+            " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
+        if(isUnknown(sym))
+            PyErr_WarnEx(NULL, "symmetry is not provided, some methods will not be available", 1);
     }
     ~DensityWrapper()
     {
@@ -1359,7 +1369,7 @@ void Density_dealloc(DensityObject* self)
 }
 
 /// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error
-potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL)
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_UNKNOWN)
 {
     if(dens_obj == NULL)
         return potential::PtrDensity();
@@ -1371,7 +1381,7 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
 
     // otherwise this could be an arbitrary Python function
     if(checkCallable(dens_obj, /*dimension of input*/ 3)) {
-        // then create a C++ wrapper for this Python function
+        // then create a C++ wrapper for this Python function with the prescribed symmetry
         return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
     }
 
@@ -1381,7 +1391,7 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coo
 
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
 // (forward declaration, the function will be defined later)
-potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym=coord::ST_TRIAXIAL);
+potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym=coord::ST_UNKNOWN);
 
 // create a Python Potential object and initialize it with an existing instance of C++ potential class
 // (forward declaration, the function will come later)
@@ -1679,14 +1689,14 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         // do the sampling of the density profile
         particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(*dens, numPoints);
 
-        // assign the velocities if needed [deprecated!]
+        // assign the velocities if needed
         particles::ParticleArrayCar pointsvel;
         if(pot) {
             pointsvel = galaxymodel::assignVelocity(points, *dens, *pot, beta, kappa);
-            PyErr_WarnEx(PyExc_FutureWarning, "assigning velocity in sample(..., potential=...) "
+            /*PyErr_WarnEx(PyExc_FutureWarning, "assigning velocity in sample(..., potential=...) "
                 "is deprecated and may be removed in the future; the recommended way is "
                 "to create a DistributionFunction(type='QuasiSpherical', ...) for the given "
-                "density and potential, then use GalaxyModel(potential, df).sample(...)", 1);
+                "density and potential, then use GalaxyModel(potential, df).sample(...)", 1);*/
         }
 
         // convert output to NumPy array
@@ -1713,7 +1723,8 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 /// return the name (with some further decorations in case of composite objects)
 PyObject* Density_name(PyObject* self)
 {
-    return Py_BuildValue("s", ((DensityObject*)self)->dens->name().c_str());
+    return Py_BuildValue("s", (((DensityObject*)self)->dens->name() + " (symmetry: " +
+        potential::getSymmetryNameByType(((DensityObject*)self)->dens->symmetry()) + ")").c_str());
 }
 
 /// return the element of a multi-component or otherwise modified density or potential model
@@ -1834,9 +1845,12 @@ static PyMethodDef Density_methods[] = {
       "again assumed to be constant: beta = 1 - sigma_z^2 / sigma_R^2. "
       "If not provided, this means using the Eddington method (spherical isotropic velocity "
       "distribution function, but not necessarily Gaussian as assumed in the Jeans approach).\n"
-      "  kappa - the degree of net rotation (controls the decomposition of <v_phi^2> - total second "
-      "moment of azimuthal velocity - into the mean streaming velocity <v_phi> and the velocity "
-      "dispersion sigma_phi). kappa=0 means no net rotation, kappa=1 corresponds to sigma_phi=sigma_R). "
+      "  kappa - the degree of net rotation in the axisymmetric Jeans model "
+      "(controls the decomposition of <v_phi^2> - total second moment of azimuthal velocity - "
+      "into the mean streaming velocity <v_phi> and the velocity dispersion sigma_phi). "
+      "kappa=0 means no net rotation, kappa=1 corresponds to maximum rotation"
+      "(sigma_phi = 1/2 kappa_epi / Omega_epi * sigma_R, where kappa_epi and Omega_epi are "
+      "radial and azimuthal epicyclic frequencies).\n"
       "If this argument is provided, this triggers the use of the axisymmetric Jeans method.\n"
       "Returns: a tuple of two arrays: "
       "a 2d array of size Nx3 (in case of positions only) or Nx6 (in case of velocity assignment), "
@@ -1899,8 +1913,7 @@ static const char* docstringPotential =
     "  potential=...   instead of density, one may provide a potential source for the expansion. "
     "This argument shoud be either an instance of Potential class, or a user-defined function "
     "`my_potential(xyz)` returning the value of potential at N point, where xyz is a Nx3 array of "
-    "points in cartesian coordinates. In the latter case, one should explicitly specify "
-    "the grid parameters and the symmetry type.\n"
+    "points in cartesian coordinates. \n"
     "  file='...'   the name of another INI file with potential parameters and/or "
     "coefficients of a Multipole/CylSpline potential expansion, or an N-body snapshot file "
     "that will be used to compute the coefficients of such expansion.\n"
@@ -1908,10 +1921,10 @@ static const char* docstringPotential =
     "potential expansion (an alternative to density=..., potential=... or file='...' options): "
     "should be a tuple with two arrays - coordinates and mass, where the first one is "
     "a two-dimensional Nx3 array and the second one is a one-dimensional array of length N.\n"
-    "  symmetry='...'   assumed symmetry for potential expansion constructed from "
-    "an N-body snapshot or from a user-defined density or potential function. "
+    "  symmetry='...'   assumed symmetry for potential expansion constructed from an N-body "
+    "snapshot or from a user-defined density or potential function (required in these cases). "
     "Possible options, in order of decreasing symmetry: "
-    "'Spherical', 'Axisymmetric', 'Triaxial' (default), 'Bisymmetric', 'Reflection', 'None', "
+    "'Spherical', 'Axisymmetric', 'Triaxial', 'Bisymmetric', 'Reflection', 'None', "
     "or a numerical code; only the case-insensitive first letter matters).\n"
     "  gridSizeR=...   number of radial grid points in Multipole and CylSpline potentials.\n"
     "  gridSizeZ=...   number of grid points in z-direction for CylSpline potential.\n"
@@ -1946,8 +1959,9 @@ static const char* docstringPotential =
     ">>> pot_composite = Potential(pot_halo, pot_disk)\n"
     ">>> pot_from_ini  = Potential('my_potential.ini')\n"
     ">>> pot_from_snapshot = Potential(type='Multipole', file='snapshot.dat')\n"
-    ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses))\n"
-    ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2)\n"
+    ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses), symmetry='t')\n"
+    ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2, "
+    "symmetry='s')\n"
     ">>> pot_shifted = Potential(potential=pot_composite, center=[1.0,2.0,3.0]\n"
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
     ">>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
@@ -1981,15 +1995,18 @@ typedef struct {
 class PotentialWrapper: public potential::BasePotentialCar{
     NumpyWarningsDisabler lock;
     PyObject* fnc;
-    coord::SymmetryType sym;
-    std::string fncname;
+    const coord::SymmetryType sym;
+    const std::string fncname;
 public:
-    PotentialWrapper(PyObject* _fnc, coord::SymmetryType _sym): fnc(_fnc), sym(_sym)
+    PotentialWrapper(PyObject* _fnc, coord::SymmetryType _sym):
+        fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
         Py_INCREF(fnc);
-        fncname = toString(fnc);
         utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ potential wrapper for Python function "+fncname);
+            "Created a C++ potential wrapper for Python function " + fncname +
+            " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
+        if(isUnknown(sym))
+            PyErr_WarnEx(NULL, "symmetry is not provided, some methods will not be available", 1);
     }
     ~PotentialWrapper()
     {
@@ -2136,7 +2153,7 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
 
     // otherwise this could be an arbitrary Python function
     if(checkCallable(pot_obj, /*dimension of input*/ 3)) {
-        // then create a C++ wrapper for this Python function
+        // then create a C++ wrapper for this Python function with the prescribed symmetry
         return potential::PtrPotential(new PotentialWrapper(pot_obj, sym));
     }
 
@@ -2215,7 +2232,7 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
     std::vector<utils::KeyValueMap> paramsArr;
     // first check the types of tuple elements
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-        potential::PtrPotential pi = getPotential(PyTuple_GET_ITEM(tuple, i), /*symmetry*/ coord::ST_NONE);
+        potential::PtrPotential pi = getPotential(PyTuple_GET_ITEM(tuple, i));
         if(pi)  // an existing Potential object or a user-defined function that provides this interface
             components.push_back(pi);
         else
@@ -2550,10 +2567,6 @@ PyObject* Potential_Rperiapo(PyObject* self, PyObject* args)
 {
     if(!Potential_isCorrect(self) || args==NULL || !PyTuple_Check(args))
         return NULL;
-    if(!isAxisymmetric(*((PotentialObject*)self)->pot)) {
-        PyErr_SetString(PyExc_ValueError, "Potential must be axisymmetric");
-        return NULL;
-    }
     const char* err = "Input must be a pair of values (E,L), "
         "or an Nx2 array of E,L values, or a Nx6 array of position/velocity values";
 
@@ -2618,27 +2631,31 @@ static PyMethodDef Potential_methods[] = {
       "Returns: a tuple of two float (for a single point) or a Nx2 array of floats - the X and Y "
       "components of force integrated along the line of sight Z perpendicular to the image plane."},
     { "Rcirc", (PyCFunction)Potential_Rcirc, METH_VARARGS | METH_KEYWORDS,
-      "Find the radius of a circular orbit in the equatorial plane corresponding to "
-      "either the given z-component of angular momentum L or energy E; "
-      "the potential is assumed to be axisymmetric (all quantities are evaluated along x axis)\n"
+      "Find the radius of a circular orbit corresponding to either the given z-component "
+      "of angular momentum L or energy E; the potential is averaged over phi angle if not already "
+      "axisymmetric (all quantities are evaluated in the equatorial plane)\n"
       "Arguments:\n"
       "  L=... (a single number or an array of numbers) - the values of angular momentum;\n"
       "  E=... (same) - the values of energy; the arguments are mutually exclusive, "
       "and L is the default one if no name is provided\n"
       "Returns: a single number or an array of numbers - the radii of corresponding orbits\n" },
     { "Tcirc", Potential_Tcirc, METH_O,
-      "Compute the period of a circular orbit for the given energy (a) or the (x,v) point (b)\n"
+      "Compute the period of a circular orbit for the given energy (a) or the (x,v) point (b); "
+      "in either case, the orbit lies in the equatorial plane, and the potential is averaged over "
+      "phi angle if not already axisymmetric\n"
       "Arguments:\n"
       "  (a) a single value of energy or an array of N such values, or\n"
       "  (b) a single point (6 numbers - position and velocity) or a Nx6 array of points\n"
       "Returns: a single value or N values of orbital periods\n" },
     { "Rmax", Potential_Rmax, METH_O,
-      "Find the maximum radius accessible to the given energy (i.e. the root of Phi(Rmax,0,0)=E)\n"
+      "Find the maximum radius accessible to the given energy (i.e. the root of Phi(Rmax,0,0)=E); "
+      "the potential is averaged over phi angle if not already axisymmetric\n"
       "Arguments: a single number or an array of numbers - the values of energy\n"
       "Returns: corresponding values of radii\n" },
     { "Rperiapo", Potential_Rperiapo, METH_VARARGS,
-      "Compute the peri/apocenter radii of a planar orbit (in the x,y plane) with the given "
-      "energy E and angular momentum L_z (the potential is assumed to be axisymmetric).\n"
+      "Compute the peri/apocenter radii of a planar orbit with the given energy E and "
+      "angular momentum L_z. The orbit lies in the equatorial plane, and the potential is averaged "
+      "over phi angle if not already axisymmetric.\n"
       "If E is outside the valid range, both radii are NAN, and if L is incompatible with E "
       "(exceeds the value of circular angular momentum), both radii are set to Rcirc(E).\n"
       "Arguments:\n"

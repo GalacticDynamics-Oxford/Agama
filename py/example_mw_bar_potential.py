@@ -30,7 +30,7 @@ def makeDisk(**params):
         return (surfaceDensity / (4*scaleHeight) *
             numpy.exp( - (R/scaleRadius)**sersicIndex - innerCutoffRadius/(R+1e-100)) /
             numpy.cosh( (abs(xyz[:,2]) / scaleHeight)**verticalSersicIndex ) )
-    return agama.Density(density)
+    return agama.Density(density=density, symmetry='a')
 
 # Modification of equation 9 of Coleman et al. 2020 (https://arxiv.org/abs/1911.04714)
 def makeXBar(**params):
@@ -55,7 +55,7 @@ def makeXBar(**params):
         am = ( ((xyz[:,0] - c * xyz[:,2]) / xc)**2 + (xyz[:,1] / yc)**2 )**(0.5)
         return (densityNorm / numpy.cosh(a**m) * numpy.exp( -(r/outerCutoffRadius)**2) *
             (1 + alpha * (numpy.exp(-ap**n) + numpy.exp(-am**n) ) ) )
-    return agama.Density(density)
+    return agama.Density(density=density, symmetry='t')
 
 # Modification of equation 9 of Wegg et al. 2015 (https://arxiv.org/pdf/1504.01401.pdf)
 def makeLongBar(**params):
@@ -74,14 +74,14 @@ def makeLongBar(**params):
         a = ( (abs(xyz[:,0]) / x0)**cperp + (abs(xyz[:,1]) / y0)**cperp )**(1/cperp)
         return densityNorm / numpy.cosh(xyz[:,2] / scaleHeight)**2 * numpy.exp(-a**cpar
             -(R/outerCutoffRadius)**outerCutoffStrength - (innerCutoffRadius/R)**innerCutoffStrength)
-    return agama.Density(density)
+    return agama.Density(density=density, symmetry='t')
 
 # additional central mass concentration as described in sec.7.3 of Portail et al.(2017)
 def makeCMC(mass, scaleRadius, scaleHeight, axisRatioY):
     norm = mass / (4 * numpy.pi * scaleRadius**2 * scaleHeight * axisRatioY)
-    return agama.Density(lambda xyz:
+    return agama.Density(density=lambda xyz:
         norm * numpy.exp(-(xyz[:,0]**2 + (xyz[:,1]/axisRatioY)**2)**0.5 / scaleRadius
-            - abs(xyz[:,2]) / scaleHeight) )
+            - abs(xyz[:,2]) / scaleHeight), symmetry='t' )
 
 # create the total density profile with 4 component from the provided array of unnamed parameters
 def makeDensityModel(params):
@@ -145,7 +145,7 @@ def makePotentialModel(params):
     # but values greater than 12 *significantly* slow down the computation!)
     pot_bary = agama.Potential(type='CylSpline',
         density=agama.Density(makeDensityModel(params), makeCMC(0.2e10, 0.25, 0.05, 0.5)),
-        symmetry='t', mmax=mmax, gridsizeR=25, gridsizez=25, Rmin=0.1, Rmax=40, zmin=0.05, zmax=20)
+        mmax=mmax, gridsizeR=25, gridsizez=25, Rmin=0.1, Rmax=40, zmin=0.05, zmax=20)
     # flattened axisymmetric dark halo with the Einasto profile
     pot_dark = agama.Potential(type='Multipole',
         density='Spheroid', axisratioz=0.8, gamma=0, beta=0,

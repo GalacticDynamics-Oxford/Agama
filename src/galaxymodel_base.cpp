@@ -257,7 +257,7 @@ public:
                 // zero values of Jr,Jz instead of very large ones, which may lead to
                 // unrealistically high DF values. We therefore ignore these points
                 // entirely, but the real problem is with the action finder, not here.
-                if(isFinite(acts.Jr + acts.Jz + acts.Jphi) && acts.Jr!=0 && acts.Jz!=0) {
+                if(isFinite(acts.Jr + acts.Jz + acts.Jphi) && (acts.Jr!=0 || acts.Jz!=0)) {
                     act[nselected] = acts;
                     nselected++;
                 } else  // otherwise this output point is ignored and will be overwritten next time

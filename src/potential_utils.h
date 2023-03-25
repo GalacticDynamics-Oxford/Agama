@@ -9,77 +9,51 @@
 
 namespace potential{
 
-/** Compute the circular velocity at a given radius (v_circ^2 = r * dPhi/dr )
-    in a spherically-symmetric potential represented by a 1d function */
-double v_circ(const math::IFunction& potential, double r);
+/** Compute the circular velocity \$ v_{circ} = \sqrt{R d\Phi/dR} \$ 
+    at the given cylindrical radius R in the equatorial plane;
+    the potential is axisymmetrized if necessary.
+*/
+double v_circ(const BasePotential& potential, double R);
 
-/** Compute the circular velocity at a given (cylindrical) radius R in equatorial plane
-    (convenience overload; the potential should be axisymmetric for this to make sense) */
-inline double v_circ(const BasePotential& potential, double R)
-{
-    return v_circ(PotentialWrapper(potential), R);
-}
+/** Compute the cylindrical radius of a circular orbit in the equatorial plane
+    for a given value of energy; the potential is axisymmetrized if necessary.
+*/
+double R_circ(const BasePotential& potential, double E);
 
-/** Compute the radius of a circular orbit with the given energy
-    in a spherically-symmetric potential represented by a 1d function */
-double R_circ(const math::IFunction& potential, double E);
-
-/** Compute the cylindrical radius of a circular orbit in equatorial plane for a given value of energy
-    (convenience overload; the potential should be axisymmetric - evaluated along x axis) */
-inline double R_circ(const BasePotential& potential, double E)
-{
-    return R_circ(PotentialWrapper(potential), E);
-}
-
-/** Compute the characteristic orbital period as a function of energy */
+/** Compute the characteristic orbital period 2 pi R_circ / v_circ as a function of energy;
+    the potential is axisymmetrized if necessary.
+*/
 inline double T_circ(const BasePotential& potential, double E)
 {
     double R = R_circ(potential, E);
     return R / v_circ(potential, R) * 2*M_PI;
 }
 
-/** Compute the angular momentum of a circular orbit with the given energy
-    in a spherically-symmetric potential represented by a 1d function */
-inline double L_circ(const math::IFunction& potential, double E)
+/** Compute the angular momentum of a circular orbit in the equatorial plane
+    for the given value of energy; the potential is axisymmetrized if necessary.
+*/
+inline double L_circ(const BasePotential& potential, double E)
 {
     double R = R_circ(potential, E);
     return R * v_circ(potential, R);
 }
 
-/** Compute the angular momentum of a circular orbit in equatorial plane for a given value of energy
-    (convenience overload; the potential should be axisymmetric) */
-inline double L_circ(const BasePotential& potential, double E)
-{
-    return L_circ(PotentialWrapper(potential), E);
-}
+/** Compute cylindrical radius of an orbit in the equatorial plane for a given value of
+    z-component of angular momentum; the potential is axisymmetrized if necessary.
+*/
+double R_from_Lz(const BasePotential& potential, double Lz);
 
-/** Compute the radius of a circular orbit with the given angular momentum
-    in a spherical potential represented by a 1d function */
-double R_from_L(const math::IFunction& potential, double L);
-
-/** Compute cylindrical radius of an orbit in equatorial plane for a given value of
-    z-component of angular momentum (convenience overload; the potential should be axisymmetric) */
-inline double R_from_Lz(const BasePotential& potential, double Lz)
-{
-    return R_from_L(PotentialWrapper(potential), Lz);
-}
-
-/** Compute the radius corresponding to the given value of potential represented by a 1d function */
-double R_max(const math::IFunction& potential, double Phi);
-
-/** Compute the distance along x axis corresponding to the given value of potential
-    (convenience overload) */
-inline double R_max(const BasePotential& potential, double Phi)
-{
-    return R_max(PotentialWrapper(potential), Phi);
-}
+/** Compute the radius of a radial orbit in the equatorial plane with the given energy,
+    i.e. the root of Phi(R)=E; the potential is axisymmetrized if necessary.
+*/
+double R_max(const BasePotential& potential, double Phi);
 
 /** Compute epicycle frequencies for a circular orbit in the equatorial plane with radius R.
-    \param[in]  potential is the instance of potential (must have axial symmetry)
-    \param[in]  R     is the cylindrical radius 
-    \param[out] kappa is the epicycle frequency of radial oscillations
-    \param[out] nu    is the frequency of vertical oscillations
-    \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R)
+    \param[in]  potential is the instance of potential (axisymmetrized if necessary);
+    \param[in]  R     is the cylindrical radius;
+    \param[out] kappa is the epicycle frequency of radial oscillations;
+    \param[out] nu    is the frequency of vertical oscillations;
+    \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R).
 */
 void epicycleFreqs(const BasePotential& potential, const double R,
     double& kappa, double& nu, double& Omega);
@@ -95,15 +69,14 @@ void epicycleFreqs(const BasePotential& potential, const double R,
 */
 double innerSlope(const math::IFunction& potential, double* Phi0=NULL, double* coef=NULL);
 
-/** Find the minimum and maximum radii of an orbit in the equatorial plane
-    with given energy and angular momentum (which are the roots of equation
-    \f$  2 (E - \Phi(R,z=0)) - L^2/R^2 = 0  \f$ ).
-    \param[in]  potential  is the instance of axisymmetric potential;
+/** Find the minimum and maximum radii of an orbit in the equatorial plane with a given
+    energy and angular momentum; for an axisymmetric potential, these are the roots of
+    \f$  2 (E - \Phi(R,z=0)) - L^2/R^2 = 0  \f$.
+    \param[in]  potential  is the instance of potential (axisymmetrized if necessary);
     \param[in]  E is the total energy of the orbit;
     \param[in]  L is the angular momentum of the orbit;
     \param[out] R1 will contain the pericenter radius;
     \param[out] R2 will contain the apocenter radius;
-    \throw std::invalid_argument if the potential is not axisymmetric;
     \return NAN for both output parameters in case of other errors (e.g., if the energy is
     outside the allowed range); if L is greater than Lcirc(E), return Rcirc(E) for both R1,R2.
 */

@@ -100,7 +100,7 @@ bool testPotential(const potential::BasePotential& potential)
         std::ofstream strm;
         if(output) {
             std::string filename = std::string("test_pot_" )+potential.name();
-            writePotential(filename+".pot", potential);
+            writePotential(filename+".ini", potential);
             // gnuplot script for plotting the results
             strm.open((filename+".plt").c_str());
             strm << "set term pdf enhanced size 15cm,10cm\nset output '"+filename+".pdf'\n"

@@ -1,3 +1,9 @@
+/** \file    test_potential_expansions.cpp
+    \date    2015-2023
+    \author  Eugene Vasiliev
+
+    Test density/potential expansions (Multipole, CylSpline, BasisSet, DensitySphericalHarmonic, DensityAzimuthalHarmonic)
+*/
 #include "galaxymodel_base.h"
 #include "math_random.h"
 #include "math_sphharm.h"
@@ -9,6 +15,7 @@
 #include "potential_disk.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
+#include "potential_utils.h"
 #include "utils.h"
 #include "utils_config.h"
 #include "debug_utils.h"
@@ -62,7 +69,7 @@ PtrPotential createFromFile(
     params.set("lmax", 6);
     PtrPotential newpot = potential::createPotential(params);
     std::remove(fileName.c_str());
-    std::remove((fileName+".pot").c_str());
+    std::remove((fileName+".ini").c_str());
     return newpot;
 }
 
@@ -158,22 +165,25 @@ bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDen
 bool testDensSH()
 {
     const potential::Dehnen dens(1., 1., 1.2, 0.8, 0.5);
-    std::vector<double> radii1 = math::createExpGrid(51, 0.01, 100);
-    // twice denser grid: every other node coincides with that of the first grid
-    std::vector<double> radii2 = math::createExpGrid(101,0.01, 100);
+    std::vector<double> radii1, radii2;
     std::vector<std::vector<double> > coefs1, coefs2;
-    computeDensityCoefsSph(dens, math::SphHarmIndices(8, 6, dens.symmetry()), radii1, coefs1);
-    potential::DensitySphericalHarmonic dens1(radii1, coefs1);
+    potential::PtrDensity dens1 = potential::DensitySphericalHarmonic::create(dens,
+        /*lmax*/ 8, /*mmax*/ 6, /*gridSizeR*/ 51, /*rmin*/ 0.01, /*rmax*/ 100);
+    dynamic_cast<const potential::DensitySphericalHarmonic&>(*dens1).getCoefs(radii1, coefs1);
     // creating a sph-harm expansion from another s-h expansion:
-    // should produce identical results if the location of radial grid points 
-    // (partly) coincides with the first one, and the order of expansions lmax,mmax
-    // are at least as large as the original ones (the extra coefs will be zero).
-    computeDensityCoefsSph(dens1, math::SphHarmIndices(10, 8, dens1.symmetry()), radii2, coefs2);
-    potential::DensitySphericalHarmonic dens2(radii2, coefs2);
-    bool ok = true;
+    // should produce identical results if the location of radial grid points
+    // (partly) coincides with the first one, and the requested order of expansions lmax,mmax
+    // are at least as large as the original ones (the extra coefs will be zero and thus eliminated).
+    // Here we use a twice denser grid: every other node coincides with that of the first grid
+    potential::PtrDensity dens2 = potential::DensitySphericalHarmonic::create(*dens1,
+        /*lmax*/10, /*mmax*/ 8, /*gridSizeR*/101, /*rmin*/ 0.01, /*rmax*/ 100);
+    dynamic_cast<const potential::DensitySphericalHarmonic&>(*dens2).getCoefs(radii2, coefs2);
     // check that the two sets of coefs are identical at equal radii
+    bool ok = radii1.size() == 51 && radii2.size() == 101 && coefs1.size() == coefs2.size();
     for(unsigned int c=0; c<coefs2.size(); c++)
         for(unsigned int k=0; k<radii1.size(); k++) {
+            if(fabs(radii1[k]/radii2[k*2]-1) > 1e-15)
+                ok = false;
             if(c<coefs1.size() && fabs(coefs1[c][k] - coefs2[c][k*2]) > 1e-13) {
                 std::cout << "r=" << radii1[k]      << ", C1["<<c<<"]=" <<
                 utils::toString(coefs1[c][k  ], 15) << ", C2["<<c<<"]=" <<
@@ -192,8 +202,8 @@ bool testDensSH()
         for(double theta=0; theta<M_PI/2; theta+=0.31) 
             for(double phi=0; phi<M_PI; phi+=0.31) {
                 coord::PosSph point(radii1[k], theta, phi);
-                double d1 = dens1.density(point);
-                double d2 = dens2.density(point);
+                double d1 = dens1->density(point);
+                double d2 = dens2->density(point);
                 if(fabs(d1-d2) / fabs(d1) > 1e-12) { // two SH expansions should give the same result
                     std::cout << point << "dens1=" << utils::toString(d1, 15) <<
                     " dens2=" << utils::toString(d2, 15) << "\033[1;31m **\033[0m\n";
@@ -246,9 +256,70 @@ bool checkSH(const math::SphHarmIndices& ind)
     return true;
 }
 
+// a wrapper class for manually tweaking the symmetry level
+class SPotential: public potential::BasePotentialCar {
+    const potential::BasePotential& pot;
+    const coord::SymmetryType sym;
+public:
+    SPotential(const potential::BasePotential& _pot, const coord::SymmetryType _sym) :
+        pot(_pot), sym(_sym) {}
+    virtual coord::SymmetryType symmetry() const { return sym; }
+    virtual std::string name() const { return pot.name(); };
+    virtual void evalCar(const coord::PosCar &pos,
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const
+    { pot.eval(pos, potential, deriv, deriv2, time); }
+};
+
+bool checkEqual(const potential::BasePotential& pot1, const potential::BasePotential& pot2,
+    const coord::PosCyl& pos, double eps=1e-14)
+{
+    double d1 = pot1.density(pos), d2 = pot2.density(pos), p1, p2;
+    coord::GradCyl grad1, grad2;
+    coord::HessCyl hess1, hess2;
+    pot1.eval(pos, &p1, &grad1, &hess1);
+    pot2.eval(pos, &p2, &grad2, &hess2);
+    return fabs(d1/d2-1) < eps && fabs(p1/p2-1) < eps &&
+        equalGrad(grad1, grad2, eps) && equalHess(hess1, hess2, eps);
+}
+
+// test the correctness of helper routines that compute sphericalized and axisymmetrized Phi/rho
+bool testAngularAverage(const potential::BasePotential& pot)
+{
+   if(!isAxisymmetric(pot))
+       return false;   // shouldn't occur - this test is designed for axisymmetric or spherical pot
+    const coord::PosCyl pos(1.2, 3.4, 5.6);
+    bool ok = true;
+    // create versions with different assigned symmetry
+    const SPotential potn(pot, coord::ST_NONE);
+    const SPotential poty(pot, coord::ST_YREFLECTION);
+    const SPotential potz(pot, coord::ST_ZREFLECTION);
+    const SPotential pott(pot, coord::ST_TRIAXIAL);
+    const SPotential potr(pot, coord::ST_ZROTATION);
+    const SPotential pota(pot, coord::ST_AXISYMMETRIC);
+    ok &= checkEqual(potential::Axisymmetrized<potential::BasePotential>(potn), pot, pos);
+    ok &= checkEqual(potential::Axisymmetrized<potential::BasePotential>(poty), pot, pos);
+    if(isSpherical(pot)) {
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(potn), pot, pos);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(poty), pot, pos);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(potz), pot, pos);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(pott), pot, pos);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(potr), pot, pos);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(pota), pot, pos);
+    } else {
+        // check that sphericalAverage is exact for band-limited SH potentials up to lmax=14:
+        // create such a potential (BasisSet) and then create its sphericalized version
+        potential::PtrPotential psh = potential::BasisSet::create(pot, 14, 0, 10, 1, 1);
+        potential::PtrPotential psh0= potential::BasisSet::create(*psh, 0, 0, 10, 1, 1);
+        ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(*psh), *psh0, pos, 1e-13);
+    }
+    if(!ok)
+        std::cout << "Average over angles failed \033[1;31m **\033[0m\n";
+    return ok;
+}
+
 // a simple density profile that is constant within a sphere of given radius,
 // which may be offset from the origin
-class DensityBlob: public potential::BaseDensity{
+class DensityBlob: public potential::BaseDensity {
 public:
     double r, x, y, z;
     DensityBlob(double _r, double _x, double _y, double _z) : r(_r), x(_x), y(_y), z(_z) {}
@@ -353,6 +424,9 @@ int main() {
     const DensityBlob test7y(1., 0.0, 0.7, 0.0);   // same for y-axis
     const DensityBlob test7z(1., 0.0, 0.0, 0.8);   // same for z-axis
     const DensityBlob test7d(1., 0.3, 0.4, 0.5);   // shifted diagonally
+
+    ok &= testAngularAverage(test1_NFWSph);
+    ok &= testAngularAverage(test4_MNAxi);
 
     // 3b. test the approximating density profiles
     std::cout << "--- Testing accuracy of density profile interpolators: "

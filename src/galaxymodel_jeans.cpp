@@ -106,6 +106,10 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
 {
     if(!(beta < 1.))
         throw std::invalid_argument("JeansAxi: beta_m should be less than unity");
+    // axisymmetrized versions of density and potential
+    // (if the input functions are already axisymmetric, this adds no extra cost)
+    potential::Axisymmetrized<potential::BaseDensity>   axiDens(dens);
+    potential::Axisymmetrized<potential::BasePotential> axiPot (pot);
     // construct a suitable grid in R,z
     double Mtotal = dens.totalMass();
     double rmin = getRadiusByMass(dens, Mtotal * MIN_MASS_FRAC);
@@ -145,12 +149,13 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
                     z = gridz[gridzsize-1] / glnodes[k];
                     w = gridz[gridzsize-1] / pow_2(glnodes[k]) * glweights[k];
                 }
-                double rho    = potential::azimuthalAverage<potential::AV_RHO>(dens, R, z);
-                double dPhidz = potential::azimuthalAverage<potential::AV_DZ> (pot,  R, z);
-                result += rho * dPhidz * w;
+                double rho = axiDens.density(coord::PosCyl(R, z, 0));
+                coord::GradCyl grad;
+                axiPot.eval(coord::PosCyl(R, z, 0), NULL, &grad);
+                result += rho * grad.dz * w;
             }
             rhosigmaz2(iR, iz) = result;
-            rhoval(iR, iz)     = potential::azimuthalAverage<potential::AV_RHO>(dens, R, gridz[iz]);
+            rhoval(iR, iz)     = axiDens.density(coord::PosCyl(R, gridz[iz], 0));
         }
     }
 
@@ -189,11 +194,12 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
         std::vector<double> pointrho(femzsize), pointrhs(femzsize);
         // collect values of two functions at integration points
         for(int kz=0; kz<femzsize; kz++) {
-            double z      = femzpoints[kz];
-            double rho    = potential::azimuthalAverage<potential::AV_RHO>(dens, R, z);
-            double dPhidz = potential::azimuthalAverage<potential::AV_DZ> (pot,  R, z);
-            pointrho[kz]  = rho;
-            pointrhs[kz]  = -rho * dPhidz * femzweights[kz];  // multiply by dz/dt
+            double z     = femzpoints[kz];
+            double rho   = axiDens.density(coord::PosCyl(R, z, 0));
+            coord::GradCyl grad;
+            axiPot.eval(coord::PosCyl(R, z, 0), NULL, &grad);
+            pointrho[kz] = rho;
+            pointrhs[kz] = -rho * grad.dz * femzweights[kz];  // multiply by dz/dt
         }
         // construct FEM representations of both rho and  rhs = -rho dPhi/dt
         std::vector<double> projrhs = femz.computeProjVector(pointrhs);
@@ -250,12 +256,12 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
             // compute  d (rho sigma_z^2) / dR  using simple-minded finite-differences
             int iR1 = std::max(0, iR-1), iR2 = std::min(iR+1, gridRsize-1);
             double derR   = (rhosigmaz2(iR2, iz) - rhosigmaz2(iR1, iz)) / (gridR[iR2] - gridR[iR1]);
-            double rho    = rhoval(iR, iz);
-            double Phi    = potential::azimuthalAverage<potential::AV_PHI>(pot,  R, z);
-            double dPhidR = potential::azimuthalAverage<potential::AV_DRC>(pot,  R, z);
+            double rho    = rhoval(iR, iz), Phi;
+            coord::GradCyl grad;
+            axiPot.eval(coord::PosCyl(R, z, 0), &Phi, &grad);
             double vesc2  = -Phi;   // half the squared escape velocity - maximum allowed sigma^2
             vphi2(iR, iz) = math::clip(
-                bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * dPhidR,  0., vesc2 );
+                bcoef * (R * derR + rhosigmaz2(iR, iz)) / rho + R * grad.dR,  0., vesc2 );
             vz2  (iR, iz) = math::clip(rhosigmaz2(iR, iz) / rho,  0., vesc2);
         }
     }
@@ -263,7 +269,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     for(int iR=1; iR<gridRsize; iR++) {
         coord::GradCyl grad;
         coord::HessCyl hess;
-        pot.eval(coord::PosCyl(gridR[iR], 0, 0), NULL, &grad, &hess);
+        axiPot.eval(coord::PosCyl(gridR[iR], 0, 0), NULL, &grad, &hess);
         epicycleRatioVal[iR] = 0.75 + 0.25 * gridR[iR] * hess.dR2 / grad.dR;
     }
     epicycleRatioVal[0] = epicycleRatioVal[1];

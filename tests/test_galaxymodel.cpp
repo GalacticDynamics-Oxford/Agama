@@ -559,12 +559,16 @@ int main()
 
     std::cout << "\033[1m  Spherical isotropic Plummer model  \033[0m\n";
     ok &= test(galaxymodel::GalaxyModel(pot, af,
-        df::QuasiSphericalCOM(potential::DensityWrapper((pot)), potential::PotentialWrapper((pot)))),
+        df::QuasiSphericalCOM(
+            potential::Sphericalized<potential::BaseDensity>(pot),
+            potential::Sphericalized<potential::BasePotential>(pot))),
         "SphIso", /*havetruedens*/ true, /*havetruevel*/ true, /*isotropic*/ true, /*spherical*/ true);
 
     std::cout << "\033[1m  Spherical anisotropic Plummer model  \033[0m\n";
     ok &= test(galaxymodel::GalaxyModel(pot, af,
-        df::QuasiSphericalCOM(potential::DensityWrapper((pot)), potential::PotentialWrapper((pot)), -0.3, INFINITY*0.8)),
+        df::QuasiSphericalCOM(
+            potential::Sphericalized<potential::BaseDensity>(pot),
+            potential::Sphericalized<potential::BasePotential>(pot), -0.3, INFINITY*0.8)),
         "SphAniso", /*havetruedens*/ true, /*havetruevel*/ false, /*isotropic*/ false, /*spherical*/ true);
 
     df::DoublePowerLawParam param;

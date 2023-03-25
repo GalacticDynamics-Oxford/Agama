@@ -109,6 +109,27 @@ Some of this functionality is not yet ported to Agama.
 -----------
 API Changes
 
+March 2023:
+[C++] redesigned the workflow for on-the-fly symmetrization of density and potential models,
+introducing new wrapper classes Sphericalized/Axisymmetrized<BaseDensity/BasePotential>,
+which replace the earlier Density/PotentialWrapper. The latter assumed that the potential is
+spherical or axisymmetric, while the new classes perform angular averaging on demand
+(at the time of evaluation) in contexts such as computation of Lcirc(E), Rperi/apo(E,L),
+construction of QuasiSpherical DFs, etc., which were previously restricted to spherical or
+axisymmetric models and are now performed on sphericalized/axisymmetrized versions of input
+density and potential models (of course, the results are only approximate in the case that the
+input models lacked the required symmetry, but this is usually the physically sensible outcome).
+This is a simpler and non-tunable alternative to the construction of proper expansion classes
+such as Multipole; the latter take some time to create but are more efficient to evaluate.
+[Python] user-defined density/potential functions now have *no* default symmetry, triggering
+an error in any more-or-less complex operation such as computation of total mass or construction
+of expansions - one needs to specify the symmetry explicitly. The rationale is that these
+operations are significantly more efficient in typical cases of triaxial or axisymmetric models,
+but may not assume any symmetry (other than None) by default, otherwise the result would be
+incorrect; therefore, users should provide this information explicitly.
+[C++,Python] added the argument "fixOrder" for density and potential expansions constructed from
+other input profiles (i.e., not from N-body snapshots).
+
 June 2022:
 [C++] redesigned the potential_factory routines to deal with general modifiers,
 with some changes in the types of input density/potential objects passed to createDensity/Potential

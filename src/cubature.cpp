@@ -1008,9 +1008,11 @@ static int rulecubature(rule *r, unsigned fdim,
      numEval += r->num_points;
      
      while (numEval < maxEval || !maxEval) {
-	  if (converged(fdim, regions.ee, reqAbsError, reqRelError, norm) &&
-	      numEval > r->num_points)
-	       break;
+          // modification - tighten error tolerance on the first iteration (before any refinement)
+          // to prevent premature exit in case that the error estimate happens to be unrealistically small
+          if (converged(fdim, regions.ee, reqAbsError,
+               numEval > r->num_points ? reqRelError : 1e-12, norm))
+            break;
 
 	  if (parallel) { /* maximize potential parallelism */
 	       /* adapted from I. Gladwell, "Vectorization of one

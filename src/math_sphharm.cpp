@@ -160,6 +160,8 @@ SphHarmIndices::SphHarmIndices(int _lmax, int _mmax, coord::SymmetryType _sym) :
 {
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("SphHarmIndices: incorrect indexing scheme requested");
+    if(isUnknown(sym))
+        throw std::invalid_argument("SphHarmIndices: symmetry is not specified");
     // consistency check: if three plane symmetries are present, mirror symmetry is implied
     if(isXReflSymmetric(sym) && isYReflSymmetric(sym) && isZReflSymmetric(sym) && !isReflSymmetric(sym))
         throw std::invalid_argument("SphHarmIndices: invalid symmetry requested");
@@ -229,6 +231,10 @@ SphHarmIndices getIndicesFromCoefs(const std::vector<double> &C)
 
 std::vector<int> getIndicesAzimuthal(int mmax, coord::SymmetryType sym)
 {
+    if(isUnknown(sym))
+        throw std::invalid_argument("getIndicesAzimuthal: symmetry is not specified");
+    if(mmax<0)
+        throw std::invalid_argument("getIndicesAzimuthal: mmax should be non-negative");
     std::vector<int> result(1, 0);  // m=0 is always present
     if((sym & coord::ST_ZROTATION) == coord::ST_ZROTATION)
         return result;  // in this case all m!=0 indices are zero

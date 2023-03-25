@@ -47,7 +47,7 @@ namespace coord {
 ///@{
 
 /** defines the symmetry properties of a function in three-dimensional space */
-enum SymmetryType{ 
+enum SymmetryType{
     ST_NONE         = 0, ///< no symmetry whatsoever
     // basic symmetries:
     ST_XREFLECTION  = 1, ///< change of sign in x (flip about yz plane)
@@ -56,6 +56,8 @@ enum SymmetryType{
     ST_REFLECTION   = 8, ///< mirror reflection about origin (change of sign of all coordinates simultaneously)
     ST_ZROTATION    =16, ///< rotation about z axis
     ST_ROTATION     =32, ///< rotation about arbitrary axis
+    // special flag indicating lack of information
+    ST_UNKNOWN      =64, ///< unspecified - decided automatically
     // composite symmetries:
     /// bisymmetric: a combination of z-reflection and a mirror symmetry about origin,
     /// resulting in a mirror symmetry in xy-plane - change of sign in x and y simultaneously;
@@ -70,7 +72,6 @@ enum SymmetryType{
     ST_TRIAXIAL     = ST_XREFLECTION | ST_YREFLECTION | ST_ZREFLECTION | ST_REFLECTION, 
     ST_AXISYMMETRIC = ST_TRIAXIAL | ST_ZROTATION,    ///< axial symmetry combined with plane symmetry
     ST_SPHERICAL    = ST_AXISYMMETRIC | ST_ROTATION, ///< spherical symmetry
-    ST_DEFAULT      = ST_TRIAXIAL   ///< default choice when no symmetry is specified
 };
 
 /** test for symmetry w.r.t.change of sign in x */
@@ -117,6 +118,11 @@ inline bool isAxisymmetric(const SymmetryType sym) {
 /** test for spherical symmetry */
 inline bool isSpherical(const SymmetryType sym) {
     return (sym & ST_SPHERICAL) == ST_SPHERICAL;
+}
+
+/** test for unknown/invalid symmetry */
+inline bool isUnknown(const SymmetryType sym) {
+    return sym<0 || sym>ST_SPHERICAL;
 }
 
 ///@}

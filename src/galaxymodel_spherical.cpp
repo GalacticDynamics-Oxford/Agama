@@ -709,9 +709,11 @@ void difCoefEnergy(const SphericalIsotropicModel& model, double E, double m,
     DeltaE2 = 32*M_PI*M_PI * (I0 * h + Kh) / g;
 }
 
-double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFunction& pot, double E)
+double difCoefLosscone(const SphericalIsotropicModel& model,
+    const potential::BasePotential& pot, double E)
 {
-    double h = model.phasevol(E), rmax = potential::R_max(pot, E), g, dgdh;
+    double h = model.phasevol(E), g, dgdh;
+    double rmax = R_max(pot, E);
     model.phasevol.E(h, /*output*/ &g, &dgdh);
     // we are computing the orbit-averaged diffusion coefficient  < Delta v_per^2 >,
     // by integrating it over the radial range covered by the orbit.
@@ -730,7 +732,7 @@ double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFuncti
     const double *glnodes = math::GLPOINTS[GLORDER], *glweights = math::GLWEIGHTS[GLORDER];
     for(int ir=0; ir<GLORDER; ir++) {
         // the outermost integral in scaled radial variable:  r/rmax 
-        double r = glnodes[ir] * rmax, Phi = pot(r);
+        double r = glnodes[ir] * rmax, Phi = pot.value(coord::PosCyl(r, 0, 0));
         double w = 8*M_PI*M_PI * rmax / g * pow_2(r) * glweights[ir];
         for(int iE=0; iE<GLORDER; iE++) {
             // the innermost integral in scaled energy variable:  (E'-Phi) / (E-Phi)
@@ -753,13 +755,16 @@ void writeSphericalIsotropicModel(
     const std::string& fileName,
     const std::string& header,
     const math::IFunction& df,
-    const math::IFunction& pot,
+    const potential::BasePotential& pot,
     const std::vector<double>& inputgridh,
     const std::vector<double>& aux)
 {
+    if(!isSpherical(pot))
+        throw std::invalid_argument("writeSphericalIsotropicModel: potential must be spherical");
     if(!aux.empty() && aux.size() != inputgridh.size())
         throw std::runtime_error("writeSphericalIsotropicModel: "
             "aux, if provided, should match gridh in length");
+
     // construct a suitable grid in h, if not provided
     std::vector<double> gridh(inputgridh);
     if(gridh.empty()) {
@@ -773,8 +778,8 @@ void writeSphericalIsotropicModel(
         throw std::runtime_error("writeSphericalIsotropicModel: gridh is too small");
 
     // construct the corresponding grid in E and r
-    potential::PhaseVolume phasevol(pot);
-    double Phi0 = pot(0);
+    potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(pot)));
+    double Phi0 = pot.value(coord::PosCyl(0, 0, 0));
     std::vector<double> gridr, gridPhi, gridg;
     for(size_t i=0; i<gridh.size(); ) {
         double g, Phi = phasevol.E(gridh[i], &g);
@@ -782,7 +787,7 @@ void writeSphericalIsotropicModel(
         if(Phi > (gridPhi.empty()? Phi0 : gridPhi.back()) * (1-MIN_VALUE_ROUNDOFF)) {
             gridPhi.push_back(Phi);
             gridg.  push_back(g);
-            gridr.  push_back(potential::R_max(pot, Phi));
+            gridr.  push_back(R_max(pot, Phi));
             i++;
         } else {
             gridh.erase(gridh.begin()+i);
@@ -811,7 +816,8 @@ void writeSphericalIsotropicModel(
     double mult = 16*M_PI*M_PI * model.totalMass;  // common factor for diffusion coefs
 
     // determine the central mass (check if it appears to be non-zero)
-    double coef, slope = potential::innerSlope(pot, NULL, &coef);
+    double coef, slope = potential::innerSlope(
+        potential::Sphericalized<potential::BasePotential>(pot), NULL, &coef);
     double Mbh = fabs(slope + 1.) < 1e-3 ? -coef : 0;
 
     // prepare for integrating the density in radius to obtain enclosed mass
@@ -853,8 +859,8 @@ void writeSphericalIsotropicModel(
         DeltaE2  = mult *  (I0 * h + Kh) / g * 2.,
         FluxM    =-mult * ((I0 * h + Kh) * g * dfdh + Kg * f),
         FluxE    = E * FluxM - mult * ( -(I0 * h + Kh) * f + Kg * I0),
-        rcirc    = potential::R_circ(pot, E),
-        Lcirc    = rcirc * potential::v_circ(pot, rcirc),
+        rcirc    = R_circ(pot, E),
+        Lcirc    = rcirc * v_circ(pot, rcirc),
         Tradial  = g / (4*M_PI*M_PI * pow_2(Lcirc)),
         veldisp  = gridVelDisp[i],
         veldproj = gridProjVelDisp[i],

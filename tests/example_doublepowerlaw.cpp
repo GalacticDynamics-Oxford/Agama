@@ -209,11 +209,12 @@ int main(int argc, char* argv[])
     }
 
     // construct the mapping between energy and phase volume
-    potential::PhaseVolume phasevol((potential::PotentialWrapper(*pot)));
+    potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(*pot)));
 
     // compute the distribution function from the density (using the Eddington inversion formula)
     math::LogLogSpline eddf = df::createSphericalIsotropicDF(
-        potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot));
+        potential::Sphericalized<potential::BaseDensity>(*dens),
+        potential::Sphericalized<potential::BasePotential>(*pot));
     df::QuasiSphericalIsotropic dfsph(eddf, *pot);
 
     double bestparams[NPARAMS] = {0.0, 1.0, 6.0, 1.0, 1.0, 1.0, 20.0, 2.0};

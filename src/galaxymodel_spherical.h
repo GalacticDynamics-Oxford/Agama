@@ -181,7 +181,8 @@ void difCoefEnergy(const SphericalIsotropicModel& model, double E, double m,
     \f$  D = 8\pi^2 g^{-1}(E)  \int_0^{r_{max}(E)}  dr  \langle \Delta v_\bot^2 \rangle  r^2 / v  \f$.
     The returned value should be multiplied by  \f$ m_\star \ln\Lambda \f$.
 */
-double difCoefLosscone(const SphericalIsotropicModel& model, const math::IFunction& pot, double E);
+double difCoefLosscone(const SphericalIsotropicModel& model,
+    const potential::BasePotential& pot, double E);
 
 
 /** Generate N-body samples of the spherical isotropic distribution function in the given potential.
@@ -271,7 +272,7 @@ void writeSphericalIsotropicModel(
     const std::string& fileName,
     const std::string& header,
     const math::IFunction& df,
-    const math::IFunction& pot,
+    const potential::BasePotential& pot,
     const std::vector<double>& gridh = std::vector<double>(),
     const std::vector<double>& aux   = std::vector<double>());
 

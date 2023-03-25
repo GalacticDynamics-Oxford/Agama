@@ -776,7 +776,8 @@ public:
         // initialize the potential and the phase volume
         currPot = computePotential(Mbh, selfGravity? &initDens : NULL,
             /*rmin-autodetect*/ 0., /*rmax*/ 0., /*diagnostic output*/ Phi0);
-        phasevol.reset(new potential::PhaseVolume(potential::PotentialWrapper(*currPot)));
+        phasevol.reset(new potential::PhaseVolume(
+            potential::Sphericalized<potential::BasePotential>(*currPot)));
     }
 };
 
@@ -826,7 +827,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
         std::vector<double> gridh(data->gridh), initf;
         df::createSphericalIsotropicDF(
             *components[comp].initDensity,
-            potential::PotentialWrapper(*data->currPot),
+            potential::Sphericalized<potential::BasePotential>(*data->currPot),
             /*input/output*/ gridh, /*output*/ initf);
         initDF[comp].reset(new math::LogLogSpline(gridh, initf));  // interpolated f(h)
 
@@ -889,7 +890,7 @@ std::vector<double> FokkerPlanckSolver::drainTime(unsigned int comp) const {
 math::PtrFunction   FokkerPlanckSolver::df(unsigned int comp) const {
     return impl->getInterpolatedFunction(data->gridf.at(comp)); }
 math::PtrFunction FokkerPlanckSolver::potential() const {
-    return math::PtrFunction(new potential::PotentialWrapper(*data->currPot)); }
+    return math::PtrFunction(new potential::Sphericalized<potential::BasePotential>(*data->currPot)); }
 potential::PtrPhaseVolume FokkerPlanckSolver::phaseVolume() const { return data->phasevol; }
 
 void FokkerPlanckSolver::setMbh(double Mbh)
@@ -949,7 +950,8 @@ void FokkerPlanckSolver::reinitPotential(double deltat)
             }
             nextPot.reset(new potential::Multipole(gridr, Phi, dPhi));
             // set up the phase volume mapping for the extrapolated potential
-            nextPhasevol.reset(new potential::PhaseVolume(potential::PotentialWrapper(*nextPot)));
+            nextPhasevol.reset(new potential::PhaseVolume(
+                potential::Sphericalized<potential::BasePotential>(*nextPot)));
         }
 
         // convert the grid in radius into the grid in energy
@@ -973,7 +975,8 @@ void FokkerPlanckSolver::reinitPotential(double deltat)
             /*rmin-autodetect*/ 0, /*rmax*/ 0, /*diagnostic output, ignored*/ data->Phi0);
     }
     // reinit the mapping between energy and phase volume
-    data->phasevol.reset(new potential::PhaseVolume(potential::PotentialWrapper(*data->currPot)));
+    data->phasevol.reset(new potential::PhaseVolume(
+        potential::Sphericalized<potential::BasePotential>(*data->currPot)));
     // recompute the energy associated with each basis function
     data->gridEnergy = impl->projVector(FncEnergy(*data->phasevol));
 }
@@ -1057,7 +1060,7 @@ void FokkerPlanckSolver::reinitAdvDifCoefs()
         std::vector<double> gridLC(gridSize);
         for(unsigned int i=0; i<gridSize; i++) {
             gridLC[i] = data->coulombLog * galaxymodel::difCoefLosscone(
-                model, potential::PotentialWrapper(*data->currPot), data->phasevol->E(data->gridh[i]));
+                model, *data->currPot, data->phasevol->E(data->gridh[i]));
         }
 
         // construct interpolator for the angular-momentum diffusion coef

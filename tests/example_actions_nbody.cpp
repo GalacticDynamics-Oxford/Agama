@@ -60,8 +60,8 @@ int main() {
     potential::PtrPotential haloPot, diskPot;
     try{
         // #3a. Try to load the potentials from previously saved text files
-        diskPot = potential::readPotential("model_stars_final.pot", extUnits);
-        haloPot = potential::readPotential("model_dm_final.pot", extUnits);
+        diskPot = potential::readPotential("model_stars_final.ini", extUnits);
+        haloPot = potential::readPotential("model_dm_final.ini", extUnits);
     }
     catch(std::exception&) {
         // #3b. These files do not exist on the first run, so we need to
@@ -87,8 +87,8 @@ int main() {
             "value at origin=" << diskPot->value(coord::PosCar(0,0,0)) * pow_2(unit.to_kms) << " (km/s)^2\n";
 
         // (optional) store the potential coefs into a file and next time load them back to speed up process
-        writePotential("model_stars_final.pot", *diskPot, extUnits);
-        writePotential("model_dm_final.pot", *haloPot, extUnits);
+        writePotential("model_stars_final.ini", *diskPot, extUnits);
+        writePotential("model_dm_final.ini", *haloPot, extUnits);
     }
 
     // #3c. Combine the two components

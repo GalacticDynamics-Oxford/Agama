@@ -42,10 +42,16 @@ public:
         This is a static member function returning a pointer to a newly created object.
         The arguments have the same meaning as for `CylSpline::create`, but the grid extent
         (min/max) must be provided explicitly, i.e. is not determined automatically.
+        The input density values are taken at the nodes of 2d grid in (R,z) and
+        nphi distinct values of phi, where nphi=mmaxFourier+1 if the density is
+        reflection-symmetric in y, or nphi=2*mmaxFourier+1 otherwise.
+        The order of this internal Fourier expansion mmaxFourier will be fixed to mmax
+        if fixOrder==true, otherwise will be higher than mmax to improve accuracy.
     */
     static PtrDensity create(const BaseDensity& src, int mmax,
-        unsigned int gridSizeR, double Rmin, double Rmax, 
-        unsigned int gridSizez, double zmin, double zmax);
+        unsigned int gridSizeR, double Rmin, double Rmax,
+        unsigned int gridSizez, double zmin, double zmax,
+        bool fixOrder=false);
 
     /** construct the object from the array of coefficients */
     DensityAzimuthalHarmonic(
@@ -103,11 +109,8 @@ public:
         and solves Poisson equation to find the potential azimuthal harmonic coefficients;
         the second one takes a potential model and computes these coefs directly.
         In both cases, if the input model is not axisymmetric, its angular Fourier expansion
-        is constructed up to a possibly higher-than-requested order, to improve the accuracy
-        of coefficient computation (recall that the number of points sampled in angular
-        direction equals the order of expansion plus one, and this is sufficient for
-        a lossless invertible transformation of a band-limited function only -- which is 
-        usually not the case).
+        with order mmaxFourier will be used to compute the harmonics, where mmaxFourier is
+        fixed to mmax if fixOrder==true, otherwise will be higher to improve accuracy.
         A third variant takes an N-body snapshot as input (discussed separately).
         If the grid extent (R/z min/max) is not specified (left as zeros), it is determined
         automatically from the requirement to enclose almost all of the model mass and have
@@ -122,16 +125,22 @@ public:
                     and the outermost node; if the source model is not symmetric w.r.t.
                     z-reflection, a mirrored extension of the grid to negative z will be created);
                     zero values mean auto-detect;
+        \param[in]  fixOrder   determines whether to limit the order of the internal Fourier
+                    expansion of the input density to mmax; if false (default), use a larger
+                    number of points for the integration in phi to improve the accuracy,
+                    and then truncate the result back to mmax;
         \param[in]  useDerivs  specifies whether to compute potential derivatives from density.
     */
     static PtrPotential create(const BaseDensity& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
-        unsigned int gridSizez, double zmin, double zmax, bool useDerivs=true);
+        unsigned int gridSizez, double zmin, double zmax,
+        bool fixOrder=false, bool useDerivs=true);
 
     /** Same as above, but taking a potential model as an input. */
     static PtrPotential create(const BasePotential& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
-        unsigned int gridSizez, double zmin, double zmax);
+        unsigned int gridSizez, double zmin, double zmax,
+        bool fixOrder=false);
 
     /** Create the potential from an N-body snapshot.
         \param[in] particles  is the array of particles.
@@ -139,7 +148,7 @@ public:
         which defines the list of angular harmonics to compute and to ignore
         (e.g. if it is set to coord::ST_TRIAXIAL, all negative or odd m terms are zeros).
         \param[in] mmax  is the order of angular expansion (if the symmetry includes
-        coord::ST_ZROTATION flag, it doesn't make sense to have mmax>0).
+        coord::ST_ZROTATION flag, mmax will be set to zero).
         \param[in]  gridSizeR  is the number of grid nodes in cylindrical radius (semi-logarithmic);
         \param[in]  Rmin, Rmax give the radial grid extent (first non-zero node and
         the outermost node); zero values mean that they will be determined automatically from
@@ -233,102 +242,5 @@ private:
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;
 };
-
-
-/** Compute the coefficients of azimuthal Fourier expansion of density profile,
-    used for constructing a DensityAzimuthalHarmonic object.
-    The input density values are taken at the nodes of 2d grid in (R,z) specified by
-    two one-dimensional arrays, gridR and gridz, and nphi distinct values of phi, 
-    where nphi=mmax+1 if the density is reflection-symmetric in y, or nphi=2*mmax+1 otherwise.
-    The total number of density evaluations is gridR.size() * gridz.size() * nphi.
-    The output array contains 2*mmax+1 elements, but the terms that are identically zero
-    under the given symmetry of the input density model are not computed and not stored
-    (i.e. contain empty matrices); the non-empty terms have dimension gridR.size() * gridz.size().
-*/
-void computeDensityCoefsCyl(const BaseDensity &dens,
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &coefs);
-
-/** Compute the coefficients of azimuthal Fourier expansion of potential by
-    taking the values and derivatives of the source potential at nodes of 2d grid in (R,z)
-    and equally-spaced nodes in phi (same as for `computeDensityCoefsCyl`).
-    The input and output array conventions match those of the constructor of `CylSpline`;
-    the output arrays will be resized as needed.
-*/
-void computePotentialCoefsCyl(const BasePotential &pot, 
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &Phi,
-    std::vector< math::Matrix<double> > &dPhidR,
-    std::vector< math::Matrix<double> > &dPhidz);
-
-/** Compute the coefficients of azimuthal Fourier expansion of potential and its
-    derivatives from the given density profile, used for creating a CylSpline object.
-    Unlike the overloaded function that accepts `BasePotential` as input,
-    this one takes `BaseDensity` and thus solves the Poisson equation
-    in cylindrical coordinates, by creating a Fourier expansion of density
-    in azimuthal angle (phi) and using 2d numerical integration to compute
-    the values and derivatives of each Fourier component of potential 
-    at the nodes of 2d grid in R,z plane. This is a rather costly calculation.
-    The input and output array conventions match those of the constructor
-    of `CylSpline`; the output arrays will be resized as needed.
-*/
-void computePotentialCoefsCyl(const BaseDensity& dens, 
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &Phi,
-    std::vector< math::Matrix<double> > &dPhidR,
-    std::vector< math::Matrix<double> > &dPhidz);
-
-/** Compute the coefficients of azimuthal Fourier expansion of potential
-    from the given density profile, used for creating a CylSpline object.
-    An overloaded function that does not compute derivatives.
-*/
-void computePotentialCoefsCyl(const BaseDensity& dens, 
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &Phi);
-
-/** Compute the coefficients of azimuthal Fourier expansion of potential and
-    its derivatives from an N-body snapshot.
-    \param[in] particles  is the array of particles.
-    \param[in] sym  is the assumed symmetry of the input snapshot,
-    which defines the list of angular harmonics to compute and to ignore
-    (e.g. if it is set to coord::ST_TRIAXIAL, all negative or odd m terms are zeros).
-    \param[in] mmax  is the order of angular expansion (if the symmetry includes
-    coord::ST_ZROTATION flag, it doesn't make sense to have mmax>0).
-    \param[in] gridR is the grid in cylindrical radius, which must start at 0.
-    \param[in] gridz is the grid in vertical dimension - under coord::ST_ZREFLECTION
-    symmetry it must start at 0, otherwise must cover both positive and negative z.
-    \param[out] Phi, dPhidR, dPhidz  will contain the arrays of computed coefficients
-    for potential and its derivatives at the nodes of 2d grid for each angular harmonic,
-    with the same convention as used in the constructor of `CylSpline`;
-    will be resized as needed.
-*/
-void computePotentialCoefsCyl(
-    const particles::ParticleArray<coord::PosCyl>& particles,
-    coord::SymmetryType sym,
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &Phi,
-    std::vector< math::Matrix<double> > &dPhidR,
-    std::vector< math::Matrix<double> > &dPhidz);
-
-/** Compute the coefficients of azimuthal Fourier expansion of potential
-    from an N-body snapshot (same as above, but without derivatives).
-*/
-void computePotentialCoefsCyl(
-    const particles::ParticleArray<coord::PosCyl>& particles,
-    coord::SymmetryType sym,
-    const unsigned int mmax,
-    const std::vector<double> &gridR,
-    const std::vector<double> &gridz,
-    std::vector< math::Matrix<double> > &Phi);
 
 }  // namespace

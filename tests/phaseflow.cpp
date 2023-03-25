@@ -144,7 +144,7 @@ void exportTable(const std::string& filename, const std::string& header, const d
             fullfilename += "_"+utils::toString(comp); /* numerical suffix */
         galaxymodel::writeSphericalIsotropicModel(fullfilename, header,
         /*f(h)*/      *fp.df(comp),
-        /*potential*/ *fp.potential(),
+        /*potential*/ potential::FunctionToPotentialWrapper(*fp.potential()),
         /*gridh*/      fp.gridh(),
         /*drain time*/ fp.drainTime(comp));
     }
@@ -190,7 +190,7 @@ galaxymodel::FokkerPlanckComponent initComponent(const utils::KeyValueMap& args)
         // DensityWrapper only contains a reference to a BaseDensity object, therefore we need
         // to keep the actual density object alive until the FokkerPlanckSolver is constructed -
         // this is why there is a global array of PtrDensity pointers
-        comp.initDensity.reset(new potential::DensityWrapper(*densities.back()));
+        comp.initDensity.reset(new potential::Sphericalized<potential::BaseDensity>(*densities.back()));
     }
     comp.Mstar                  = args.getDouble("Mstar", comp.Mstar);
     comp.captureRadius          = args.getDouble("captureRadius", comp.captureRadius);

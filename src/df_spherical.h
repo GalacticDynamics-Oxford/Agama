@@ -15,9 +15,9 @@ namespace df{
     of density and potential profiles (which need not be related through the Poisson equation),
     using the Eddington inversion formula.
     \param[in]  density   is any one-dimensional function returning rho(r); may be constructed
-    from a spherically-symmetric `BaseDensity` object using the wrapper class `DensityWrapper`.
+    from any `BaseDensity` object using the `Sphericalized<BaseDensity>` wrapper class.
     \param[in]  potential  is any one-dimensional function representing the spherically-symmetric
-    potential (may be constructed using the `PotentialWrapper` class).
+    potential (may be constructed using the `Sphericalized<BasePotential>` wrapper class).
     \param[in,out]  gridh  is the array of phase volumes at which the DF is defined;
     if this array is empty on input, a plausible grid will be created automatically,
     but in any case it may later be modified by this routine, to eliminate negative DF values.
@@ -93,7 +93,7 @@ class QuasiSphericalIsotropic: public BaseDistributionFunction{
     const actions::ActionFinderSpherical af;  ///< correspondence between (Jr,L) and E
 public:
     QuasiSphericalIsotropic(const math::LogLogSpline& _df, const potential::BasePotential& potential) :
-        df(_df), pv(potential::PotentialWrapper(potential)), af(potential) {}
+        df(_df), pv(potential::Sphericalized<potential::BasePotential>(potential)), af(potential) {}
 
     virtual double value(const actions::Actions &J) const
     {
@@ -149,12 +149,13 @@ class QuasiSphericalCOM: public QuasiSpherical {
     const math::LogLogSpline df;
 public:
     /** construct the DF for the provided density/potential pair and anisotropy parameters:
-        \param[in]  density    is the spherically-symmetric density profile specified by a
-        function of one variable; one may use potential::DensityWrapper(density) to express 
-        an instance of BaseDensity-derived class as a function of one variable for this routine;
+        \param[in]  density    is the spherically-symmetric density profile specified by a function
+        of one variable; one may use `potential::Sphericalized<potential::BaseDensity>(density)`
+        to represent an instance of BaseDensity-derived class as a 1d function;
         \param[in]  potential  is the total spherical potential specified by a 1d function
         (doesn't need to be related to density via the Poisson equation); again, one may use
-        potential::PotentialWrapper(pot) to express a BasePotential-derived class as a 1d function;
+        `potential::Sphericalized<potential::BasePotential>(pot)` to convert a BasePotential-derived
+        class into a function of one variable;
         \param[in]  beta0      is the value of anisotropy coefficient at r-->0, should be -1/2<=beta0<=1
         \param[in]  r_a        is the Osipkov-Merritt anisotropy radius (may be infinite).
     */

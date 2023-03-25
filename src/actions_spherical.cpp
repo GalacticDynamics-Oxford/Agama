@@ -208,7 +208,8 @@ public:
             return +Jr;   // right boundary is at infinity, return a safely positive value for E=0
         double R1, R2, E=unscaleE(scaledE, invPhi0);
         findPlanarOrbitExtent(pot, E, L, R1, R2);
-        return integr<MODE_JR>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI - Jr;
+        return integr<MODE_JR>(potential::Sphericalized<potential::BasePotential>(pot),
+            E, L, R1, R2) / M_PI - Jr;
     }
 };
 
@@ -273,7 +274,8 @@ Actions computeActions(const coord::PosVelCyl& point, const potential::BasePoten
         act.Jr = NAN;
     } else {
         findPlanarOrbitExtent(pot, E, L, R1, R2);
-        act.Jr = integr<MODE_JR>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
+        act.Jr = integr<MODE_JR>(potential::Sphericalized<potential::BasePotential>(pot),
+            E, L, R1, R2) / M_PI;
     }
     return act;
 }
@@ -626,13 +628,13 @@ coord::PosVelCyl mapSpherical(
     double R1, R2;
     findPlanarOrbitExtent(pot, E, L, R1, R2);
     Frequencies freq;
-    freq.Omegar = M_PI / integr<MODE_OMEGAR>(potential::PotentialWrapper(pot), E, L, R1, R2);
-    freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
+    potential::Sphericalized<potential::BasePotential> sphPot(pot);
+    freq.Omegar = M_PI / integr<MODE_OMEGAR>(sphPot, E, L, R1, R2);
+    freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(sphPot, E, L, R1, R2) / M_PI;
     freq.Omegaphi = freq.Omegaz * math::sign(aa.Jphi);
     if(freqout)  // freak out only if requested
         *freqout = freq;
-    return toPosVelCyl(mapPointFromActionAngles(
-        aa, potential::PotentialWrapper(pot), E, L, R1, R2, freq.Omegar, freq.Omegaz));
+    return toPosVelCyl(mapPointFromActionAngles(aa, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz));
 }
 
 
@@ -653,9 +655,10 @@ ActionAngles actionAnglesSpherical(
         return ActionAngles(acts, Angles(NAN, NAN, NAN));
     }
     Frequencies freq;
+    potential::Sphericalized<potential::BasePotential> sphPot(pot);
     if(R2 > R1 * (1 + 1e-8)) {  // normal case
-        freq.Omegar = M_PI / integr<MODE_OMEGAR>(potential::PotentialWrapper(pot), E, L, R1, R2);
-        freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(potential::PotentialWrapper(pot), E, L, R1, R2) / M_PI;
+        freq.Omegar = M_PI / integr<MODE_OMEGAR>(sphPot, E, L, R1, R2);
+        freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(sphPot, E, L, R1, R2) / M_PI;
     } else {  // degenerate case of a purely circular orbit
         epicycleFreqs(pot, point.R, freq.Omegar, freq.Omegaz, freq.Omegaphi);
     }
@@ -663,8 +666,7 @@ ActionAngles actionAnglesSpherical(
     if(freqout)  // freak out only if requested
         *freqout = freq;
     // may wish to add a special case of Jr==0 (output the epicyclic frequencies, but no angles?)
-    Angles angs  = computeAngles(point, potential::PotentialWrapper(pot),
-        E, L, R1, R2, freq.Omegar, freq.Omegaz);
+    Angles angs  = computeAngles(point, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz);
     return ActionAngles(acts, angs);
 }
 

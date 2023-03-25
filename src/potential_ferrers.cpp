@@ -9,6 +9,9 @@ namespace potential {
 /// relative accuracy of root-finder for lambda
 const double ACCURACY_ROOT = 1e-6;
 
+/// max. radius (in units of scale radii) beyond which to use an asymptotic quadrupole expansion
+const double MAX_RADIUS = 10.0;
+
 // Ferrers n=2 potential
 
 Ferrers::Ferrers(double _mass, double _R, double _p, double _q):
@@ -56,9 +59,8 @@ void Ferrers::evalCar(const coord::PosCar &pos,
         if(hess) hess->dx2 = hess->dy2 = hess->dz2 = hess->dxdy = hess->dydz = hess->dxdz = 0;
         return;
     }
-    if(r2 > pow_2(10*a)) {
-        // use spherical-harmonic expansion up to l=2 beyond 10 scale radii,
-        // to speed up (and increase the accuracy)
+    if(r2 > pow_2(MAX_RADIUS * a)) {
+        // use spherical-harmonic expansion up to l=2 at large radii to speed up computation
         double Moverr = (32*M_PI/105) * rho0 * a*b*c / sqrt(r2);
         if(potential)
             *potential = -Moverr *

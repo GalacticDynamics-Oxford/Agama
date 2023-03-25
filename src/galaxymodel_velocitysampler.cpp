@@ -144,48 +144,27 @@ particles::ParticleArrayCar assignVelocity(
         kappa!=kappa ? SD_JEANSSPH  : SD_JEANSAXI;
 
     if(method == SD_EDDINGTON || method == SD_JEANSSPH) {
-        // sphericalized versions of density and potential (temporary objects created if needed)
-        potential::PtrDensity sphDens;
-        potential::PtrPotential sphPot;
-        // wrapper functions for the original or the sphericalized density/potential
-        math::PtrFunction fncDens;
-        math::PtrFunction fncPot;
-        if(isSpherical(pot)) {
-            fncPot.reset(new potential::PotentialWrapper(pot));
-        } else {
-            sphPot = potential::Multipole::create(pot, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50);
-            fncPot.reset(new potential::PotentialWrapper(*sphPot));
-        }
-        if(isSpherical(dens)) {
-            fncDens.reset(new potential::DensityWrapper(dens));
-        } else {
-#if 0
-            /// fraction of mass enclosed by the innermost radial grid point or excluded by the outermost one
-            static const double MIN_MASS_FRAC  = 1e-4;
-            double Mtotal = dens.totalMass();
-            double rmin = getRadiusByMass(dens, Mtotal * MIN_MASS_FRAC);
-            double rmax = getRadiusByMass(dens, Mtotal * (1-MIN_MASS_FRAC));
-            if(!isFinite(Mtotal))
-                throw std::runtime_error("assignVelocity(): density model has infinite mass");
-            if(!isFinite(rmin+rmax))
-                throw std::runtime_error("assignVelocity(): cannot determine min/max grid radii");
-#else
-            double rmin=0, rmax=0;  // automatically determine suitable grid radii
-#endif
-            sphDens = potential::DensitySphericalHarmonic::create(dens,
-                /*lmax*/0, /*mmax*/0, /*gridSizeR*/50, rmin, rmax);
-            fncDens.reset(new potential::DensityWrapper(*sphDens));
-        }
+        // sphericalized versions of density and potential
+        // (if the input functions are already spherical, this adds no extra cost)
+        potential::Sphericalized<potential::BaseDensity>   sphDens(dens);
+        potential::Sphericalized<potential::BasePotential> sphPot (pot);
         if(method == SD_EDDINGTON) {
-            const potential::PhaseVolume phasevol(*fncPot);
-            const math::LogLogSpline df = df::createSphericalIsotropicDF(*fncDens, *fncPot);
+            utils::msg(utils::VL_DEBUG, "assignVelocity", "Using Eddington DF for " +
+                sphDens.name() + " in " + sphPot.name());
+            const potential::PhaseVolume phasevol(sphPot);
+            const math::LogLogSpline df = df::createSphericalIsotropicDF(sphDens, sphPot);
             const SphericalIsotropicModelLocal model(phasevol, df, df);
             return assignVelocityEdd(pointCoords, pot, model);
         } else if(method == SD_JEANSSPH) {
-            math::LogLogSpline model = createJeansSphModel(*fncDens, *fncPot, beta);
+            utils::msg(utils::VL_DEBUG, "assignVelocity", "Using spherical Jeans for " +
+                sphDens.name() + " in " + sphPot.name());
+            math::LogLogSpline model = createJeansSphModel(sphDens, sphPot, beta);
             return assignVelocityJeansSph(pointCoords, pot, model, beta);
         }
     } else if(method == SD_JEANSAXI) {
+        utils::msg(utils::VL_DEBUG, "assignVelocity", "Using axisymmetric Jeans for " +
+            potential::Axisymmetrized<potential::BaseDensity>  (dens).name() + " in " +
+            potential::Axisymmetrized<potential::BasePotential>(pot) .name() );
         JeansAxi model(dens, pot, beta, kappa);
         return assignVelocityJeansAxi(pointCoords, pot, model);
     }

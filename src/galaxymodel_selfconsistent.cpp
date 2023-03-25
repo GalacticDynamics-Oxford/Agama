@@ -37,12 +37,9 @@ void ComponentWithSpheroidalDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    std::vector<double> gridr = math::createExpGrid(gridSizeR, rmin, rmax);
-    std::vector<std::vector<double> > coefs;
-    computeDensityCoefsSph(
+    density = potential::DensitySphericalHarmonic::create(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        math::SphHarmIndices(lmax, mmax, /*symmetry*/coord::ST_TRIAXIAL), gridr, /*output*/coefs);
-    density.reset(new potential::DensitySphericalHarmonic(gridr, coefs));
+        lmax, mmax, gridSizeR, rmin, rmax, /*fixOrder*/true);
 }
 
 ComponentWithDisklikeDF::ComponentWithDisklikeDF(
@@ -62,13 +59,9 @@ void ComponentWithDisklikeDF::update(
     const potential::BasePotential& totalPotential,
     const actions::BaseActionFinder& actionFinder)
 {
-    std::vector<double> gridR = math::createNonuniformGrid(gridSizeR, Rmin, Rmax, true);
-    std::vector<double> gridz = math::createNonuniformGrid(gridSizez, zmin, zmax, true);
-    std::vector< math::Matrix<double> > coefs;
-    computeDensityCoefsCyl(
+    density = potential::DensityAzimuthalHarmonic::create(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        mmax, gridR, gridz, /*output*/coefs);
-    density.reset(new potential::DensityAzimuthalHarmonic(gridR, gridz, coefs));
+        mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, /*fixOrder*/true);
 }
 
 
@@ -161,9 +154,10 @@ void updateTotalPotential(SelfConsistentModel& model)
         totalDensityDisk = compDensDisk[0];
 
     if(totalDensityDisk != NULL)
-        compPot.push_back(potential::CylSpline::create(*totalDensityDisk, model.mmaxAngularCyl,
+        compPot.push_back(potential::CylSpline::create(*totalDensityDisk,
+            model.mmaxAngularCyl,
             model.sizeRadialCyl,   model.RminCyl, model.RmaxCyl,
-            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl, true /*use derivs*/));
+            model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl));
 
     // now check if the total potential is elementary or composite
     if(compPot.size()==0)

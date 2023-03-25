@@ -397,6 +397,7 @@ public:
     DensityFromDF(const GalaxyModel& _model, double _relError, unsigned int _maxNumEval) :
         model(_model), relError(_relError), maxNumEval(_maxNumEval) {}
 
+    // in the current version, action finders are only implemented for axisymmetric potentials
     virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
     virtual std::string name() const { return "DensityFromDF"; }
     virtual double enclosedMass(const double) const { return NAN; } /// should never be used -- too slow

@@ -41,9 +41,9 @@ radius = 1.5
 # original density/potential model using a C++ object
 pot_orig = agama.Potential(type="Plummer", mass=mass, scaleradius=radius)
 
-# potential approximation computed from the user-supplied density profile
+# potential approximation constructed from the user-supplied density profile
 MyPlummer = makeUserDensity(mass, radius)
-pot_appr  = agama.Potential(type="Multipole", density=MyPlummer)
+pot_appr  = agama.Potential(type="Multipole", density=MyPlummer, symmetry='s')
 
 # we can also provide a user-defined function that computes the potential
 # at a given array of points as the source to the Multipole or CylSpline potential.
@@ -51,13 +51,11 @@ pot_appr  = agama.Potential(type="Multipole", density=MyPlummer)
 def MyPlummerPot(x):
     return -agama.G * mass / (numpy.sum(x**2, axis=1) + radius**2)**0.5
 
-# in this case, the Multipole potential will be constructed from the values
-# provided by the user function at a given grid of points, whose parameters
-# need to be specified explicitly (for built-in models or N-body snapshots,
-# the grids are constructed automatically by analyzing the density profile,
-# but our user-defined function only provides the potential, not the density).
-pot_app2 = agama.Potential(type="Multipole", potential=MyPlummerPot,
-    symmetry="spherical", rmin=1e-3, rmax=1e3)
+# one may construct an agama.Potential wrapper around the user-defined function
+pot_user = agama.Potential(potential=MyPlummerPot, symmetry='s')
+
+# or create a Multipole approximation for the user-defined potential function
+pot_app2 = agama.Potential(type="Multipole", potential=MyPlummerPot, symmetry='s')
 
 pot0_orig = pot_orig.potential(0,0,0)
 pot0_appr = pot_appr.potential(0,0,0)

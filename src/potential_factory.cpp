@@ -148,11 +148,12 @@ struct AllParam: public ModifierParams
     unsigned int nmax;       ///< order of radial expansion for BasisSet (actual number of terms is nmax+1)
     double eta;              ///< shape parameters of basis functions for BasisSet (0.5-CB, 1.0-HO, etc.)
     double r0;               ///< scale radius of the basis functions for BasisSet
+    bool fixOrder;           ///< whether to limit the internal SH density expansion to the output order
     std::string file;        ///< name of a file with coordinates of points, or coefficients of expansion
     /// default constructor initializes the fields to some reasonable values
     AllParam(const units::ExternalUnits& converter) :
         ModifierParams(converter),
-        potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_DEFAULT),
+        potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_UNKNOWN),
         mass(1.), surfaceDensity(NAN), densityNorm(NAN),
         scaleRadius(1.), scaleHeight(1.), innerCutoffRadius(0.), outerCutoffRadius(INFINITY),
         v0(1.), Omega(1.),
@@ -161,7 +162,7 @@ struct AllParam: public ModifierParams
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0)
+        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0), fixOrder(false)
     {}
     /// convert to KeplerBinaryParams
     operator KeplerBinaryParams() const
@@ -207,11 +208,11 @@ PotentialType getPotentialTypeByName(const std::string& name)
 
 } // internal namespace
 
-// return the type of symmetry by its name, or ST_DEFAULT if unavailable
+// return the type of symmetry by its name, or ST_UNKNOWN if unavailable
 coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
 {
-    if(symmetryName.empty())
-        return coord::ST_DEFAULT;
+    if(symmetryName.empty())  // empty value is valid and means "unknown"
+        return coord::ST_UNKNOWN;
     // compare only the first letter, case-insensitive
     switch(tolower(symmetryName[0])) {
         case 's': return coord::ST_SPHERICAL;
@@ -222,10 +223,11 @@ coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
         case 'n': return coord::ST_NONE;
     }
     // otherwise it could be an integer constant representing the numerical value of sym.type
-    int sym = -1;
+    int sym = coord::ST_UNKNOWN;
     try{ sym = utils::toInt(symmetryName); }
-    catch(std::exception&) { sym = -1; }  // parse error - it wasn't a valid number either
-    if(sym<0 || sym>static_cast<int>(coord::ST_SPHERICAL))
+    catch(std::exception&) { sym = coord::ST_UNKNOWN; }  // parse error - it wasn't a valid number
+    // a non-empty value was provided, but is not a valid one - now that's an error
+    if(isUnknown(coord::SymmetryType(sym)))
         throw std::runtime_error("Invalid symmetry type: " + symmetryName);
     return static_cast<coord::SymmetryType>(sym);
 }
@@ -234,6 +236,7 @@ coord::SymmetryType getSymmetryTypeByName(const std::string& symmetryName)
 std::string getSymmetryNameByType(coord::SymmetryType type)
 {
     switch(type) {
+        case coord::ST_UNKNOWN:      return "Unknown";
         case coord::ST_NONE:         return "None";
         case coord::ST_REFLECTION:   return "Reflection";
         case coord::ST_BISYMMETRIC:  return "Bisymmetric";
@@ -318,6 +321,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.eta                 = kvmap.getDouble("eta",  param.eta);
     param.r0                  = kvmap.getDouble("r0",   param.r0)
                               * conv.lengthUnit;
+    param.fixOrder            = kvmap.getBool  ("fixOrder", param.fixOrder);
 
     // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity or a cutoff radius is provided,
     // replace it with an equivalent Spheroid model, because the dedicated potential models
@@ -1144,14 +1148,14 @@ PtrPotential createPotentialExpansionFromSource(
     switch(param.potentialType) {
     case PT_BASISSET:
         return BasisSet::create(*source, param.lmax, param.mmax,
-            param.nmax, param.eta, param.r0);
+            param.nmax, param.eta, param.r0, param.fixOrder);
     case PT_MULTIPOLE:
         return Multipole::create(*source, param.lmax, param.mmax,
-            param.gridSizeR, param.rmin, param.rmax);
+            param.gridSizeR, param.rmin, param.rmax, param.fixOrder);
     case PT_CYLSPLINE:
         return CylSpline::create(*source, param.mmax,
             param.gridSizeR, param.rmin, param.rmax,
-            param.gridSizez, param.zmin, param.zmax);
+            param.gridSizez, param.zmin, param.zmax, param.fixOrder);
     default: throw std::invalid_argument("Unknown potential expansion type");
     }
 }
@@ -1226,9 +1230,9 @@ PtrPotential createPotentialExpansion(const AllParam& param, const utils::KeyVal
         }
     }
 
-    throw std::invalid_argument(
-        std::string(param.potentialType == PT_BASISSET  ? "BasisSet" :
-                    param.potentialType == PT_MULTIPOLE ? "Multipole" : "CylSpline") +
+    throw std::invalid_argument( (
+        param.potentialType == PT_BASISSET  ? BasisSet::myName() :
+        param.potentialType == PT_MULTIPOLE ? Multipole::myName() : CylSpline::myName()) +
         " can be constructed in one of three possible ways: "
         "by providing an N-body snapshot in file=..., or a source density/potential model "
         "in density=..., or a table of coefficients (when loading from a file)");
@@ -1441,18 +1445,14 @@ PtrDensity createDensity(
     AllParam param = parseParam(kvmap, converter);
     PtrDensity result;
     if(param.potentialType == PT_DENS_SPHHARM) {
-        std::vector<double> gridr = math::createExpGrid(param.gridSizeR, param.rmin, param.rmax);
-        std::vector<std::vector<double> > coefs;
-        computeDensityCoefsSph(*dens,
-            math::SphHarmIndices(param.lmax, param.mmax, param.symmetryType), gridr, /*output*/coefs);
-        result = PtrDensity(new DensitySphericalHarmonic(gridr, coefs));
+        result = DensitySphericalHarmonic::create(*dens, param.lmax, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax,
+            param.fixOrder);
     } else if(param.potentialType == PT_DENS_CYLGRID) {
-        std::vector<double>
-            gridR = math::createNonuniformGrid(param.gridSizeR, param.rmin, param.rmax, true),
-            gridz = math::createNonuniformGrid(param.gridSizez, param.zmin, param.zmax, true);
-        std::vector< math::Matrix<double> > coefs;
-        computeDensityCoefsCyl(*dens, param.mmax, gridR, gridz, /*output*/coefs);
-        result = PtrDensity(new potential::DensityAzimuthalHarmonic(gridR, gridz, coefs));
+        result = DensityAzimuthalHarmonic::create(*dens, param.mmax,
+            param.gridSizeR, param.rmin, param.rmax,
+            param.gridSizez, param.zmin, param.zmax,
+            param.fixOrder);
     } else if(param.potentialType == PT_UNKNOWN)
         result = dens;   // if not creating an expansion, use the input density and add modifiers
     else

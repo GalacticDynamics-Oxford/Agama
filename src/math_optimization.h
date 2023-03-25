@@ -26,7 +26,7 @@ namespace math{
     \throw   std::invalid_argument if the sizes of input vectors/matrices are inconsistent,
     or std::runtime_error if the problem has no solution or the solver reports any other error.
     \tparam  NumT  is the numerical type of the input arrays (float or double).
-    \note    This routine is not thread-safe.
+    \note    This routine cannot be called from multiple threads simultaneously.
 */
 template<typename NumT>
 std::vector<double> linearOptimizationSolve(
@@ -60,7 +60,7 @@ std::vector<double> linearOptimizationSolve(
     or std::runtime_error if the problem has no solution, the solver is not available or
     in case of any other error reported by the solver.
     \tparam  NumT  is the numerical type of the input arrays (float or double).
-    \note    This routine is not thread-safe.
+    \note    This routine cannot be called from multiple threads simultaneously.
 */
 template<typename NumT>
 std::vector<double> quadraticOptimizationSolve(

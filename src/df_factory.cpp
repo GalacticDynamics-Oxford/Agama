@@ -163,7 +163,9 @@ PtrDistributionFunction createDistributionFunction(
         double beta0 = kvmap.getDoubleAlt("beta", "beta0", 0);
         double r_a   = kvmap.getDoubleAlt("anisotropyRadius", "r_a", INFINITY) * converter.lengthUnit;
         return PtrDistributionFunction(new QuasiSphericalCOM(
-            potential::DensityWrapper(*density), potential::PotentialWrapper(*potential), beta0, r_a));
+            potential::Sphericalized<potential::BaseDensity>  (*density),
+            potential::Sphericalized<potential::BasePotential>(*potential),
+            beta0, r_a));
     }
     else
         throw std::invalid_argument("Unknown type of distribution function");

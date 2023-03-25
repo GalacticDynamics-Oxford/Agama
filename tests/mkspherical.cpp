@@ -204,7 +204,7 @@ int main(int argc, char* argv[])
     }
 
     // construct the mapping between energy and phase volume
-    potential::PhaseVolume phasevol((potential::PotentialWrapper(*pot)));
+    potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(*pot)));
 
     // compute the distribution function either from the density (using the Eddington inversion formula),
     // or from the input N-body snapshot (using the same approach as for density estimation,
@@ -214,7 +214,8 @@ int main(int argc, char* argv[])
     // not in N-body units, or the real DF is not isotropic)
     math::LogLogSpline df = inputsnap.empty() || !extractdf ?
         df::createSphericalIsotropicDF(
-            potential::DensityWrapper(*dens), potential::PotentialWrapper(*pot)) :
+            potential::Sphericalized<potential::BaseDensity>(*dens),
+            potential::Sphericalized<potential::BasePotential>(*pot)) :
         fitSphericalIsotropicDF(bodies, *pot, phasevol, gridsize);
 
     // combine all command-line arguments to form the output snapshot header
@@ -224,14 +225,14 @@ int main(int argc, char* argv[])
     // generate an N-body representation of the spherical model
     if(!outputtab.empty()) {
         galaxymodel::writeSphericalIsotropicModel(
-            outputtab, header, df, potential::PotentialWrapper(*pot));
+            outputtab, header, df, potential::Sphericalized<potential::BasePotential>(*pot));
     }
 
     if(!outputsnap.empty()) {
         // generate the samples
         math::randomize(seed);
         particles::ParticleArraySph bodies = galaxymodel::samplePosVel(
-            potential::PotentialWrapper(*pot), df, mbh? nbody-1 : nbody);
+            potential::Sphericalized<potential::BasePotential>(*pot), df, mbh? nbody-1 : nbody);
         if(mbh)  // add the central black hole as the 0th particle
             bodies.data.insert(bodies.data.begin(),
                 particles::ParticleArraySph::ElemType(coord::PosVelSph(0,0,0,0,0,0), mbh));

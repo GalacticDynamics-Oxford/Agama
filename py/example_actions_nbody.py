@@ -17,8 +17,8 @@
     An equivalent example in C++ is located in tests folder.
 """
 import agama, numpy
-try: from time import clock  # older Python
-except ImportError: from time import process_time as clock  # Python 3.3+
+try: from time import process_time as clock  # Python 3.3+
+except ImportError: from time import clock   # older Python
 
 #1. set units (in Msun, Kpc, km/s)
 agama.setUnits(mass=1, length=1, velocity=1)
@@ -43,8 +43,8 @@ print("%g s to load %d disk particles (total mass=%g Msun) " \
 
 try:
     #3a. try to load potentials from previously stored text files instead of computing them
-    diskPot = agama.Potential("model_stars_final.pot")
-    haloPot = agama.Potential("model_dm_final.pot")
+    diskPot = agama.Potential("model_stars_final.ini")
+    haloPot = agama.Potential("model_dm_final.ini")
 
 except:
     # 3b: these files don't exist on the first run, so we have to create the potentials
@@ -59,13 +59,13 @@ except:
     # although one may rely on the automatic choice of these parameters (as we did for the halo)
     diskPot = agama.Potential( \
         type="CylSpline", particles=(diskParticles[:,0:3], diskParticles[:,6]), \
-        gridsizer=20, gridsizez=20, mmax=0, Rmin=0.2, Rmax=100, Zmin=0.05, Zmax=50)
+        gridsizer=20, gridsizez=20, symmetry='a', Rmin=0.2, Rmax=100, Zmin=0.05, Zmax=50)
     print("%f s to init %s potential for the disk; value at origin=%f (km/s)^2" % \
         ((clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
 
     # save the potentials into text files; on the next call may load them instead of re-computing
-    diskPot.export("model_stars_final.pot")
-    haloPot.export("model_dm_final.pot")
+    diskPot.export("model_stars_final.ini")
+    haloPot.export("model_dm_final.ini")
 
 #3c. combine the two potentials into a single composite one
 totalPot  = agama.Potential(diskPot, haloPot)

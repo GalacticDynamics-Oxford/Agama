@@ -224,6 +224,7 @@ potential::PtrPotential createSphericalPotential(
 
 // prepare the relaxation model (diffusion coefficients) for the spherical potential
 galaxymodel::PtrSphericalIsotropicModelLocal createAndWriteRelaxationModel(
+    const potential::PhaseVolume& phasevol,
     const potential::BasePotential& sphPot,
     std::vector<double>& particle_h,
     std::vector<double>& particle_m,
@@ -232,9 +233,6 @@ galaxymodel::PtrSphericalIsotropicModelLocal createAndWriteRelaxationModel(
     const std::string& filename,
     const std::string& header)
 {
-    // establish the correspondence between phase volume <=> energy
-    potential::PhaseVolume phasevol((potential::PotentialWrapper(sphPot)));
-
     // eliminate particles with zero mass or positive energy
     eliminateBadSamples(particle_h, particle_m, stellar_m);
 
@@ -253,8 +251,7 @@ galaxymodel::PtrSphericalIsotropicModelLocal createAndWriteRelaxationModel(
 
     // write out the model to a text file, if needed
     if(!filename.empty())
-        galaxymodel::writeSphericalIsotropicModel(
-             filename, header, df, potential::PotentialWrapper(sphPot));
+        galaxymodel::writeSphericalIsotropicModel(filename, header, df, sphPot);
 
     // compute diffusion coefficients
     return  galaxymodel::PtrSphericalIsotropicModelLocal(
@@ -302,8 +299,9 @@ void RagaTaskRelaxation::startEpisode(double timeStart, double length)
     if(!ptrRelaxationModel) {
         // create the sphericalized version of the true potential (including the central BH)
         ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
+        // establish the correspondence between phase volume <=> energy
+        potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(*ptrPotSph)));
         // compute the values of phase volume h for each particle
-        potential::PhaseVolume phasevol((potential::PotentialWrapper(*ptrPotSph)));
         ptrdiff_t nbody = particles.size();
         std::vector<double> particle_m(nbody);
         std::vector<double> stellar_m (nbody);
@@ -315,7 +313,7 @@ void RagaTaskRelaxation::startEpisode(double timeStart, double length)
         }
         // create the relaxation model and write it to a file (if needed)
         ptrRelaxationModel = createAndWriteRelaxationModel(
-            *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
+            phasevol, *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
             params.outputFilename.empty() ? "" : params.outputFilename + utils::toString(timeStart),
             params.header);
         prevOutputTime = timeStart;
@@ -351,8 +349,9 @@ void RagaTaskRelaxation::finishEpisode()
 
     // create a new relaxation model for the sphericalized version of the current potential
     ptrPotSph = createSphericalPotential(*ptrPot, bh.mass);
+    potential::PhaseVolume phasevol((potential::Sphericalized<potential::BasePotential>(*ptrPotSph)));
     ptrRelaxationModel = createAndWriteRelaxationModel(
-        *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
+        phasevol, *ptrPotSph, particle_h, particle_m, stellar_m, params.gridSizeDF,
         outputFilename, params.header);
 }
 

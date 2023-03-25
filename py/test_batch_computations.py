@@ -140,7 +140,6 @@ testCond('isArray(pots.Rperiapo(numpy.random.random(size=(5,2))), (5,2))')  # a 
 testCond('isArray(pots.Rperiapo(numpy.random.random(size=(5,6))), (5,2))')  # or a 2d array of (x,v) with shape Nx6 => Nx2
 testFail('isArray(pots.Rperiapo(numpy.random.random(size=(5,3))), (5,2))')  # invalid shape of input
 testCond('numpy.all(numpy.isnan(pots.Rperiapo([[Phi0*2, 1],[0, 1]])))')     # bad (but valid shape) input => NAN
-testFail('pott.Rperiapo(1,1)')  # this method should only work for axisymmetric potentials
 
 # ActionFinder class methods
 testCond('isArray(actf([1,2,3,4,5,6]), (3,))')  # 1d array of length 6 is a single point (x,v) => output array of 3 actions

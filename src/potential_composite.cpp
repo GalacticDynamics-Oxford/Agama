@@ -265,8 +265,12 @@ double CompositeDensity::totalMass() const {
 
 coord::SymmetryType CompositeDensity::symmetry() const {
     int sym = static_cast<int>(coord::ST_SPHERICAL);
-    for(unsigned int index=0; index<components.size(); index++)
-        sym &= static_cast<int>(components[index]->symmetry());
+    for(unsigned int index=0; index<components.size(); index++) {
+        coord::SymmetryType csym = components[index]->symmetry();
+        if(isUnknown(csym))
+            return csym;  // contagious value, overrides all other variants
+        sym &= csym;
+    }
     return static_cast<coord::SymmetryType>(sym);
 }
 
@@ -391,8 +395,12 @@ double Composite::totalMass() const
 coord::SymmetryType Composite::symmetry() const
 {
     int sym = static_cast<int>(coord::ST_SPHERICAL);
-    for(unsigned int index=0; index<components.size(); index++)
-        sym &= static_cast<int>(components[index]->symmetry());
+    for(unsigned int index=0; index<components.size(); index++) {
+        coord::SymmetryType csym = components[index]->symmetry();
+        if(isUnknown(csym))
+            return csym;  // contagious value, overrides all other variants
+        sym &= csym;
+    }
     return static_cast<coord::SymmetryType>(sym);
 }
 
@@ -421,7 +429,11 @@ Evolving::Evolving(const std::vector<double> _times,
     for(size_t i=1; i<times.size(); i++) {
         if(!(times[i] > times[i-1]))
             throw std::invalid_argument("Evolving: times must be sorted in increasing order");
-        sym = static_cast<coord::SymmetryType>(sym & instances[i]->symmetry());
+        coord::SymmetryType isym = instances[i]->symmetry();
+        if(isUnknown(isym) || isUnknown(sym))
+            sym = coord::ST_UNKNOWN;  // contagious value
+        else
+            sym = static_cast<coord::SymmetryType>(sym & isym);
     }
 }
 
@@ -541,6 +553,18 @@ void Tilted<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord
     /*output*/ double values[], /*input*/ double time) const
 { evalmanyTilted(*pot, orientation, npoints, pos, values, time); }
 
+coord::SymmetryType Tilted<BaseDensity>::symmetry() const {
+    coord::SymmetryType sym = dens->symmetry();
+    return isUnknown(sym) || isSpherical(sym) ? sym :
+        static_cast<coord::SymmetryType>(sym & coord::ST_REFLECTION);
+}
+
+coord::SymmetryType Tilted<BasePotential>::symmetry() const {
+    coord::SymmetryType sym = pot->symmetry();
+    return isUnknown(sym) || isSpherical(sym) ? sym :
+        static_cast<coord::SymmetryType>(sym & coord::ST_REFLECTION);
+}
+
 
 double Rotating<BaseDensity>::densityCar(const coord::PosCar &pos, double time) const
 {
@@ -652,6 +676,18 @@ void Rotating<BasePotential>::evalSph(const coord::PosSph &pos,
     double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const
 {
     pot->eval(coord::PosSph(pos.r, pos.theta, pos.phi - angle(time)), potential, deriv, deriv2, time);
+}
+
+coord::SymmetryType Rotating<BaseDensity>::symmetry() const {
+    coord::SymmetryType sym = dens->symmetry();
+    return isUnknown(sym) || isZRotSymmetric(sym) ? sym :
+        static_cast<coord::SymmetryType>(sym & coord::ST_BISYMMETRIC);
+}
+
+coord::SymmetryType Rotating<BasePotential>::symmetry() const {
+    coord::SymmetryType sym = pot->symmetry();
+    return isUnknown(sym) || isZRotSymmetric(sym) ? sym :
+        static_cast<coord::SymmetryType>(sym & coord::ST_BISYMMETRIC);
 }
 
 

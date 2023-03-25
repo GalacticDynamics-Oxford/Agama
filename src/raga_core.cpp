@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "utils_config.h"
 #include "potential_multipole.h"
+#include "potential_cylspline.h"
 #include "potential_factory.h"
 #include "potential_composite.h"
 #include "math_core.h"
@@ -264,21 +265,24 @@ void RagaCore::init(const utils::KeyValueMap& config)
     {   // create a user-defined potential
         paramsRaga.initPotentialExternal = true;
         if(particles.size() > 0) {
-            try {
+            std::string type = config.getString("type");
+            if( utils::stringsEqual(type, potential::Multipole::myName()) ||
+                utils::stringsEqual(type, potential::BasisSet ::myName()) ||
+                utils::stringsEqual(type, potential::CylSpline::myName()) )
+            {
                 // if potential type is Multipole or CylSpline, construct it from the input particles
-                ptrPot = potential::createPotential(config, particles);
-                utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+std::string(ptrPot->name())+
+                utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+
                     " potential from "+utils::toString(particles.size())+" particles and erasing them");
+                ptrPot = potential::createPotential(config, particles);
                 particles.data.clear();
-            }
-            catch(std::exception&) {
+            } else {
+                utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+
+                    " potential ignoring "+utils::toString(particles.size())+" particles");
                 ptrPot = potential::createPotential(config);
-                utils::msg(utils::VL_MESSAGE, "Raga", "Creating analytic potential ignoring "+
-                   utils::toString(particles.size())+" particles");
             }
         } else {
+            utils::msg(utils::VL_MESSAGE, "Raga", "Creating analytic potential");
             ptrPot = potential::createPotential(config);
-            utils::msg(utils::VL_MESSAGE, "Raga", "Creating analytic potential - no particles");
         }
     } else {
         // create a self-consistent potential from the input snapshot, if it was provided

@@ -43,14 +43,15 @@ static const double GLRATIO = 2.0;
 
 /** helper class to find the root of  Phi(R) = E */
 class RmaxRootFinder: public math::IFunction {
-    const math::IFunction& poten;
+    const Axisymmetrized<BasePotential> pot;
     const double E;
 public:
-    RmaxRootFinder(const math::IFunction& _poten, double _E) : poten(_poten), E(_E) {}
+    RmaxRootFinder(const BasePotential& _pot, double _E) : pot(_pot), E(_E) {}
     virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* =0) const
     {
-        double Phi, dPhidR, R = exp(logR);
-        poten.evalDeriv(R, &Phi, &dPhidR);
+        double Phi, R = exp(logR);
+        coord::GradCyl grad;
+        pot.eval(coord::PosCyl(R, 0, 0), &Phi, deriv? &grad : NULL);
         if(val) {
             *val = Phi - E;
             if(!isFinite(*val)) {  // take special measures
@@ -63,7 +64,7 @@ public:
             }
         }
         if(deriv)
-            *deriv = dPhidR * R;
+            *deriv = grad.dR * R;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
@@ -72,16 +73,18 @@ public:
     (i.e. the radius R of a circular orbit with the given energy E).
 */
 class RcircRootFinder: public math::IFunction {
-    const math::IFunction& poten;
+    const Axisymmetrized<BasePotential> pot;
     const double E;
 public:
-    RcircRootFinder(const math::IFunction& _poten, double _E) : poten(_poten), E(_E) {}
-    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const
+    RcircRootFinder(const BasePotential& _pot, double _E) : pot(_pot), E(_E) {}
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* =0) const
     {
-        double Phi, dPhidR, d2PhidR2, R = exp(logR);
-        poten.evalDeriv(R, &Phi, &dPhidR, &d2PhidR2);
+        double Phi, R = exp(logR);
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        pot.eval(coord::PosCyl(R, 0, 0), &Phi, &grad, deriv? &hess : NULL);
         if(val) {
-            double v = 0.5 * R * dPhidR;
+            double v = 0.5 * R * grad.dR;
             *val = Phi - E + (isFinite(v) ? v : 0);
             if(!isFinite(*val)) {  // special cases
                 if(E==-INFINITY)
@@ -93,9 +96,7 @@ public:
             }
         }
         if(deriv)
-            *deriv = (1.5 * dPhidR + 0.5 * R * d2PhidR2) * R;
-        if(deriv2)
-            *deriv2 = NAN;
+            *deriv = (1.5 * grad.dR + 0.5 * R * hess.dR2) * R;
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
@@ -104,40 +105,40 @@ public:
     (i.e. the radius R of a circular orbit with the given angular momentum L).
 */
 class RfromLRootFinder: public math::IFunction {
-    const math::IFunction& poten;
+    const Axisymmetrized<BasePotential> pot;
     const double L2;
 public:
-    RfromLRootFinder(const math::IFunction& _poten, double _L) : poten(_poten), L2(_L*_L) {}
-    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* deriv2=0) const
+    RfromLRootFinder(const BasePotential& _pot, double _L) : pot(_pot), L2(_L*_L) {}
+    virtual void evalDeriv(const double logR, double* val=0, double* deriv=0, double* =0) const
     {
-        double dPhidR, d2PhidR2, R = exp(logR);
-        poten.evalDeriv(R, NULL, &dPhidR, &d2PhidR2);
-        double F = pow_3(R) * dPhidR; // Lz^2(R)
+        double R = exp(logR);
+        coord::GradCyl grad;
+        coord::HessCyl hess;
+        pot.eval(coord::PosCyl(R, 0, 0), NULL, &grad, deriv? &hess : NULL);
+        double F = pow_3(R) * grad.dR; // Lz^2(R)
         if(val)
             *val = isFinite(F) ? F - L2 :
             // this may fail if R --> 0 or R --> infinity,
             // in these cases replace it with a finite number of a correct sign
             R < 1 ? -L2 : +L2;
         if(deriv)
-            *deriv = pow_3(R) * (3*dPhidR + R*d2PhidR2);
-        if(deriv2)
-            *deriv2 = NAN;
+            *deriv = pow_3(R) * (3*grad.dR + R*hess.dR2);
     }
     virtual unsigned int numDerivs() const { return 1; }
 };
 
 /** Helper function for finding the roots of (effective) potential in R direction */
 class RPeriApoRootFinder: public math::IFunction {
-    const BasePotential& potential;
+    const BasePotential& pot;
     const double E, halfL2;
 public:
-    RPeriApoRootFinder(const BasePotential& p, double _E, double L) :
-        potential(p), E(_E), halfL2(L*L/2) {};
+    RPeriApoRootFinder(const BasePotential& _pot, double _E, double L) :
+        pot(_pot), E(_E), halfL2(L*L/2) {};
     virtual unsigned int numDerivs() const { return 1; }
     virtual void evalDeriv(const double R, double* val=0, double* der=0, double* =0) const {
         double Phi=0;
         coord::GradCyl grad;
-        potential.eval(coord::PosCyl(R,0,0), &Phi, der? &grad : NULL);
+        pot.eval(coord::PosCyl(R,0,0), &Phi, der? &grad : NULL);
         if(val)
             *val = (R>0 ? (E-Phi)*R*R : 0) - halfL2;
         if(der)
@@ -302,20 +303,20 @@ std::vector<double> createInterpolationGrid(const BasePotential& potential, doub
     return grid;
 }
 
-double v_circ(const math::IFunction& potential, double radius)
+double v_circ(const BasePotential& potential, double R)
 {
-    if(radius==0)
-        return isFinite(potential.value(0)) ? 0 : INFINITY;
-    double dPhidr;
-    potential.evalDeriv(radius, NULL, &dPhidr);
-    return sqrt(radius * dPhidr);
+    if(R==0)
+        return isFinite(potential.value(coord::PosCyl(0, 0, 0))) ? 0 : INFINITY;
+    coord::GradCyl grad;
+    Axisymmetrized<BasePotential>(potential).eval(coord::PosCyl(R, 0, 0), NULL, &grad);
+    return sqrt(R * grad.dR);
 }
 
-double R_circ(const math::IFunction& potential, double energy) {
-    return exp(math::findRoot(RcircRootFinder(potential, energy), math::ScalingInf(), ACCURACY_ROOT));
+double R_circ(const BasePotential& potential, double E) {
+    return exp(math::findRoot(RcircRootFinder(potential, E), math::ScalingInf(), ACCURACY_ROOT));
 }
 
-double R_from_L(const math::IFunction& potential, double L) {
+double R_from_Lz(const BasePotential& potential, double L) {
     if(L==0)
         return 0;
     if(fabs(L) == INFINITY)
@@ -323,19 +324,16 @@ double R_from_L(const math::IFunction& potential, double L) {
     return exp(math::findRoot(RfromLRootFinder(potential, L), math::ScalingInf(), ACCURACY_ROOT));
 }
 
-double R_max(const math::IFunction& potential, double energy) {
-    return exp(math::findRoot(RmaxRootFinder(potential, energy), math::ScalingInf(), ACCURACY_ROOT));
+double R_max(const BasePotential& potential, double E) {
+    return exp(math::findRoot(RmaxRootFinder(potential, E), math::ScalingInf(), ACCURACY_ROOT));
 }
 
 void epicycleFreqs(const BasePotential& potential, const double R,
     double& kappa, double& nu, double& Omega)
 {
-    if(!isZRotSymmetric(potential))
-        throw std::invalid_argument("Potential is not axisymmetric, "
-            "no meaningful definition of circular orbit is possible");
     coord::GradCyl grad;
     coord::HessCyl hess;
-    potential.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
+    Axisymmetrized<BasePotential>(potential).eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
     double gradR_over_R = (R==0 && grad.dR==0) ? hess.dR2 : grad.dR/R;
     // no attempt to check if the expressions under sqrt are non-negative - 
     // they could well be for a physically plausible potential of a flat disk with an inner hole
@@ -362,9 +360,8 @@ double innerSlope(const math::IFunction& potential, double* Phi0, double* coef)
 
 void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, double& R1, double& R2)
 {
-    if(!isAxisymmetric(potential))
-        throw std::invalid_argument("findPlanarOrbitExtent only works for axisymmetric potentials");
-    double Phi0, coef, slope = innerSlope(PotentialWrapper(potential), &Phi0, &coef);
+    Axisymmetrized<BasePotential> axipot(potential);
+    double Phi0, coef, slope = innerSlope(axipot, &Phi0, &coef);
 
     if(slope>0  &&  E >= Phi0  &&  E < Phi0 * (1-MIN_REL_DIFFERENCE)) {
         // accurate treatment at origin to avoid roundoff errors when Phi -> Phi(r=0),
@@ -400,7 +397,7 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
         double Phi;
         coord::GradCyl grad;
         coord::HessCyl hess;
-        potential.eval(coord::PosCyl(Rcirc, 0, 0), &Phi, &grad, &hess);
+        axipot.eval(coord::PosCyl(Rcirc, 0, 0), &Phi, &grad, &hess);
         double Lcirc = Rcirc * sqrt(Rcirc * grad.dR);
         if(L >= Lcirc || (!isFinite(Lcirc) && Rcirc <= 1./HUGE_NUMBER))
         {
@@ -414,11 +411,11 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
             R1 = Rcirc * (1-offset);
             R2 = Rcirc * (1+offset);
             // root polishing to improve the accuracy of peri/apocenter radii determination
-            R1 = fmin(Rcirc, refineRoot(PotentialWrapper(potential), R1, E, L));
-            R2 = fmax(Rcirc, refineRoot(PotentialWrapper(potential), R2, E, L));
+            R1 = fmin(Rcirc, refineRoot(axipot, R1, E, L));
+            R2 = fmax(Rcirc, refineRoot(axipot, R2, E, L));
         } else {
             // normal case
-            RPeriApoRootFinder fnc(potential, E, L);
+            RPeriApoRootFinder fnc(axipot, E, L);
             R1 = math::findRoot(fnc, 0, Rcirc, ACCURACY_ROOT);
             R2 = math::findRoot(fnc, Rcirc, 3*Rcirc, ACCURACY_ROOT);
             // for a reasonable potential, 2*Rcirc is actually an upper limit,

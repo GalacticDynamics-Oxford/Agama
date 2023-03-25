@@ -1356,8 +1356,6 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         if blim is None: blim = (min(bval), max(bval))
         anorm = alim[1]-alim[0]
         bnorm = blim[1]-blim[0]
-        ax.set_xlim(alim[0], alim[1])
-        ax.set_ylim(blim[0]-0.05*bnorm, blim[1]+0.05*bnorm)
         try:
             a, b  = _numpy.meshgrid(_numpy.linspace(alim[0], alim[1], 201), _numpy.linspace(blim[0], blim[1], 201))
             if interp=='linear' or interp=='cubic':
@@ -1369,8 +1367,19 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             cntr = _numpy.array([2.30,6.18,11.83] + [x**2 + _numpy.log(x**2*_numpy.pi/2) + 2*x**-2 for x in range(4,33)])
             ax.contourf(a, b, c, cntr, cmap='hell_r', vmin=0, vmax=deltaChi2lim, alpha=0.75)
             ax.clabel(ax.contour(a, b, c, cntr, cmap='Blues_r', vmin=0, vmax=deltaChi2lim), fmt='%.0f', fontsize=10, inline=1)
+            # marginalized chi^2 as a function of the variable on the horizontal axis
+            axmarg = ax.twinx()
+            cmarg = -2*_numpy.log(_numpy.sum( _numpy.exp(-0.5*_numpy.where(c==c, c, _numpy.inf)), axis=0))
+            axmarg.plot(a[0], cmarg-_numpy.nanmin(cmarg), color='r')
+            axmarg.set_ylim(0, deltaChi2lim)
+            yticks = _numpy.hstack([_numpy.linspace(0, deltaChi2lim, 6)[:-1], deltaChi2lim*0.95])
+            axmarg.set_yticks(yticks)
+            axmarg.set_yticklabels(['%.0f' % yy for yy in yticks[:-1]] + ['$\Delta\chi^2$'])
+            axmarg.tick_params(colors='r')
         except:
             traceback.print_exc()
+        ax.set_xlim(alim[0], alim[1])
+        ax.set_ylim(blim[0]-0.05*bnorm, blim[1]+0.05*bnorm)
     else:
         modelgrid = None
 

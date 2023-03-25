@@ -28,7 +28,7 @@ if __name__ in ('__main__', '__plot__'):
     particles.radius = stellarevol.particles.radius
     if useRaga:
         cluster = Agama(converter, redirection='none', number_of_workers=8,
-        updatepotential=True, coulombLog=5.0,
+        updatepotential=True, coulombLog=5.0, symmetry='s',
         filelog='raga_multimass_plummer.log', fileoutputpotential='raga_multimass_plummer.pot',
         fileoutputrelaxation='raga_multimass_plummer.rel', fileoutput='raga_multimass_plummer.out', fileoutputformat='nemo',
         outputinterval=1. | units.Myr,
@@ -44,7 +44,7 @@ if __name__ in ('__main__', '__plot__'):
     channel_from_gravity_to_framework = cluster.particles.new_channel_to(particles)
 
     # evolve and make plots
-    times = numpy.linspace(0,25,51) | units.Myr
+    times = numpy.linspace(0,20,21) | units.Myr
 
     print("Start evolution")
     for i,t in enumerate(times):

@@ -174,7 +174,8 @@ public:
         dens(_dens), centerx(_centerx), centery(_centery), centerz(_centerz) {}
 
     virtual double totalMass() const { return dens->totalMass(); }
-    virtual coord::SymmetryType symmetry() const { return coord::ST_NONE; }  // in general...
+    virtual coord::SymmetryType symmetry() const
+    { return isUnknown(dens->symmetry()) ? coord::ST_UNKNOWN : coord::ST_NONE; }  // in general...
     virtual std::string name() const { return myName() + " " + dens->name(); }
     static std::string myName() { return "Shifted"; }
     virtual unsigned int size() const { return 1; }
@@ -187,8 +188,7 @@ private:
     /// time-dependent offsets of the potential center from origin
     const math::CubicSpline centerx, centery, centerz;
 
-    virtual double densityCar(const coord::PosCar &pos, double time) const
-    {
+    virtual double densityCar(const coord::PosCar &pos, double time) const {
         return dens->density(
             coord::PosCar(pos.x-centerx(time), pos.y-centery(time), pos.z-centerz(time)), time);
     }
@@ -219,7 +219,8 @@ public:
         pot(_pot), centerx(_centerx), centery(_centery), centerz(_centerz) {}
 
     virtual double totalMass() const { return pot->totalMass(); }
-    virtual coord::SymmetryType symmetry() const { return coord::ST_NONE; }  // in general...
+    virtual coord::SymmetryType symmetry() const
+    { return isUnknown(pot->symmetry()) ? coord::ST_UNKNOWN : coord::ST_NONE; }  // in general...
     virtual std::string name() const { return Shifted<BaseDensity>::myName() + " " + pot->name(); }
     virtual unsigned int size() const { return 1; }
     virtual PtrPotential component(unsigned int) const { return pot; }
@@ -238,8 +239,7 @@ private:
             potential, deriv, deriv2, time);
     }
 
-    virtual double densityCar(const coord::PosCar &pos, double time) const
-    {
+    virtual double densityCar(const coord::PosCar &pos, double time) const {
         return pot->density(
             coord::PosCar(pos.x-centerx(time), pos.y-centery(time), pos.z-centerz(time)), time);
     }
@@ -268,8 +268,7 @@ public:
 
     virtual double totalMass() const { return dens->totalMass(); }
     virtual double enclosedMass(const double radius) const { return dens->enclosedMass(radius); }
-    virtual coord::SymmetryType symmetry() const
-    { return coord::SymmetryType(dens->symmetry() & coord::ST_REFLECTION); }
+    virtual coord::SymmetryType symmetry() const;
     virtual std::string name() const { return myName() + " " + dens->name(); }
     static std::string myName() { return "Tilted"; }
     virtual unsigned int size() const { return 1; }
@@ -308,8 +307,7 @@ public:
 
     virtual double totalMass() const { return pot->totalMass(); }
     virtual double enclosedMass(const double radius) const { return pot->enclosedMass(radius); }
-    virtual coord::SymmetryType symmetry() const
-    { return coord::SymmetryType(pot->symmetry() & coord::ST_REFLECTION); }
+    virtual coord::SymmetryType symmetry() const;
     virtual std::string name() const { return Tilted<BaseDensity>::myName() + " " + pot->name(); }
     virtual unsigned int size() const { return 1; }
     virtual PtrPotential component(unsigned int) const { return pot; }  // should check if index==0?
@@ -357,8 +355,7 @@ public:
 
     virtual double totalMass() const { return dens->totalMass(); }
     virtual double enclosedMass(const double radius) const { return dens->enclosedMass(radius); }
-    virtual coord::SymmetryType symmetry() const
-    { return coord::SymmetryType(dens->symmetry() & coord::ST_BISYMMETRIC); }
+    virtual coord::SymmetryType symmetry() const;
     virtual std::string name() const { return myName() + " " + dens->name(); }
     static std::string myName() { return "Rotating"; }
     virtual unsigned int size() const { return 1; }
@@ -395,8 +392,7 @@ public:
 
     virtual double totalMass() const { return pot->totalMass(); }
     virtual double enclosedMass(const double radius) const { return pot->enclosedMass(radius); }
-    virtual coord::SymmetryType symmetry() const
-    { return coord::SymmetryType(pot->symmetry() & coord::ST_BISYMMETRIC); }
+    virtual coord::SymmetryType symmetry() const;
     virtual std::string name() const { return Rotating<BaseDensity>::myName() + " " + pot->name(); }
     virtual unsigned int size() const { return 1; }
     virtual PtrPotential component(unsigned int) const { return pot; }

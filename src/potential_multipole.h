@@ -59,20 +59,28 @@ public:
     /** Construct the density interpolator from the provided density profile and grid parameters.
         This is not a constructor, but a static method returning a shared pointer to
         the newly created density object.
-        \param[in]  src        is the input density or potential model;
+        \param[in]  src        is the input density model;
+        \param[in]  sym        is the symmetry of the resulting density expansion
+        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
-        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
+        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect;
+        \param[in]  fixOrder   whether to limit the order of the internal sph.-harm. expansion
+        of the input density to the output order; if false (default), it may be higher
+        (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrDensity create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin = 0, double rmax = 0);
+    static PtrDensity create(
+        const BaseDensity& src,
+        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        unsigned int gridSizeR, double rmin = 0, double rmax = 0,
+        bool fixOrder = false);
 
     /** Construct the density interpolator from an N-body snapshot.
         This is not a constructor, but a static method returning a shared pointer to
         the newly created density object.
         \param[in]  particles  is the array of particles.
-        \param[in]  sym  is the assumed symmetry of the input snapshot,
+        \param[in]  sym        is the assumed symmetry of the input snapshot,
         which defines the list of spherical harmonics to compute and to ignore
         (e.g. if it is set to coord::ST_TRIAXIAL, all negative or odd l,m terms are zeros).
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
@@ -181,17 +189,28 @@ public:
         and solves Poisson equation to find the potential sph.-harm. coefficients;
         the second one takes a potential model and computes these coefs directly.
         \param[in]  src        is the input density or potential model;
+        \param[in]  sym        is the symmetry of the resulting potential expansion
+        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
-        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
+        \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect;
+        \param[in]  fixOrder   whether to limit the order of the internal sph.-harm. expansion
+        of the input density to the output order; if false (default), it may be higher
+        (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrPotential create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin = 0., double rmax = 0.);
+    static PtrPotential create(
+        const BaseDensity& src,
+        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        unsigned int gridSizeR, double rmin = 0, double rmax = 0,
+        bool fixOrder = false);
 
     /** same as above, but takes a potential model as an input */
-    static PtrPotential create(const BasePotential& src, int lmax, int mmax,
-        unsigned int gridSizeR, double rmin = 0., double rmax = 0.);
+    static PtrPotential create(
+        const BasePotential& src,
+        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        unsigned int gridSizeR, double rmin = 0, double rmax = 0,
+        bool fixOrder = false);
 
     /** create the potential from an N-body snapshot.
         This is not a constructor but a static member function returning a shared pointer
@@ -264,31 +283,39 @@ public:
     /** create the potential from the analytic density or potential model.
         This is not a constructor but a static member function returning a shared pointer
         to the newly created potential.
-        \param[in]  src        is the input density or potential model;
-        \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
-        \param[in]  mmax       is the order of expansion in azimuth (phi);
-        \param[in]  nmax       is the order of radial expansion (number of terms is nmax+1);
-        \param[in]  eta        is the shape parameter of basis functions;
-        \param[in]  r0         is the scale radius of basis functions (0 means auto-detect).
+        \param[in]  src   is the input density or potential model;
+        \param[in]  sym   is the symmetry of the resulting potential expansion;
+        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
+        \param[in]  lmax  is the order of sph.-harm. expansion in polar angle (theta);
+        \param[in]  mmax  is the order of expansion in azimuth (phi);
+        \param[in]  nmax  is the order of radial expansion (number of terms is nmax+1);
+        \param[in]  eta   is the shape parameter of basis functions;
+        \param[in]  r0    is the scale radius of basis functions (0 means auto-detect);
+        \param[in]  fixOrder  whether to limit the order of the internal sph.-harm. expansion
+        of the input density to the output order; if false (default), it may be higher
+        (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrPotential create(const BaseDensity& src, int lmax, int mmax,
-        unsigned int nmax, double eta=1.0, double r0=0.);
+    static PtrPotential create(
+        const BaseDensity& src,
+        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        unsigned int nmax, double eta=1.0, double r0=0.0,
+        bool fixOrder=false);
 
     /** create the potential from an N-body snapshot.
         \param[in]  particles  is the array of particles.
         \param[in]  sym  is the assumed symmetry of the input snapshot,
         which defines the list of spherical harmonics to compute and to ignore
         (e.g. if it is set to coord::ST_TRIAXIAL, all negative or odd l,m terms are zeros).
-        \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
-        \param[in]  mmax       is the order of expansion in azimuth (phi);
-        \param[in]  nmax       is the order of radial expansion (number of terms is nmax+1);
-        \param[in]  eta        is the shape parameter of basis functions;
-        \param[in]  r0         is the scale radius of basis functions (0 means auto-detect).
+        \param[in]  lmax  is the order of sph.-harm. expansion in polar angle (theta);
+        \param[in]  mmax  is the order of expansion in azimuth (phi);
+        \param[in]  nmax  is the order of radial expansion (number of terms is nmax+1);
+        \param[in]  eta   is the shape parameter of basis functions;
+        \param[in]  r0    is the scale radius of basis functions (0 means auto-detect).
     */
     static PtrPotential create(
         const particles::ParticleArray<coord::PosCyl> &particles,
         coord::SymmetryType sym, int lmax, int mmax,
-        unsigned int nmax, double eta=1.0, double r0=0.);
+        unsigned int nmax, double eta=1.0, double r0=0.0);
 
     /** construct the potential from the set of basis-set expansion coefficients.
         \param[in]  eta  is the shape parameter of basis functions
@@ -328,131 +355,5 @@ private:
 
     virtual double densitySph(const coord::PosSph &pos, double /*time*/) const;
 };
-
-
-/** Compute spherical-harmonic density expansion coefficients at the given radii.
-    First it collects the values of density at a 3d grid in radii and angles,
-    then applies sph.-harm. transform at each radius.
-    The first step is OpenMP-parallelized, so that it may be efficiently used
-    for an input density profile that is expensive to compute.
-    \param[in]  dens - the input density profile.
-    \param[in]  ind  - indexing scheme for spherical-harmonic coefficients,
-                which determines the order of expansion and its symmetry properties.
-    \param[in]  gridRadii - the array of radial points for the output coefficients;
-                must form an increasing sequence and start from r>0.
-    \param[out] coefs - the array of sph.-harm. coefficients:
-                coefs[c][k] is the value of c-th coefficient (where c is a single index 
-                combining both l and m) at the radius r_k; will be resized as needed.
-    \throws std::invalid_argument if gridRadii are not correct or any error occurs in the computation.
-*/
-void computeDensityCoefsSph(const BaseDensity& dens,
-    const math::SphHarmIndices& ind,
-    const std::vector<double>& gridRadii,
-    /*output*/ std::vector< std::vector<double> > &coefs);
-
-
-/** Compute the coefficients of spherical-harmonic density expansion
-    from an N-body snapshot.
-    \param[in] particles  is the array of particles.
-    \param[in] ind   is the coefficient indexing scheme (defines the order of expansion
-    and its symmetries).
-    \param[in] gridRadii is the grid in spherical radius.
-    \param[in] smoothing is the amount of smoothing applied in penalized spline fitting procedure.
-    \param[out] coefs  will contain the arrays of computed sph.-harm. coefficients
-    that can be provided to the constructor of `DensitySphericalHarmonic` class;
-    will be resized as needed.
-*/
-void computeDensityCoefsSph(
-    const particles::ParticleArray<coord::PosCyl> &particles,
-    const math::SphHarmIndices &ind,
-    const std::vector<double> &gridRadii,
-    /*output*/ std::vector< std::vector<double> > &coefs,
-    double smoothing = 1.0);
-
-
-#if 0
-/** Compute spherical-harmonic expansion coefficients for a multi-component density.
-    It is similar to the eponymous routine for an ordinary density model, except that
-    it simultaneously collects the values of all components at each point in a 3d grid.
-    \param[in]  dens - the input multi-component density interface:
-    the function should take a triplet of cylindrical coordinates (R,z,phi) as input,
-    and provide the values of all numValues() density components as output.
-    \param[in]  ind  - indexing scheme for spherical-harmonic coefficients,
-    which determines the order of expansion and its symmetry properties.
-    \param[in]  gridRadii - the array of radial points for the output coefficients;
-    must form an increasing sequence and start from r>0.
-    \param[out] coefs - the array of sph.-harm. coefficients:
-    coefs[i][c][k] is the value of c-th coefficient (where c is a single index combining
-    both l and m) at the radius r_k for the i-th component; will be resized as needed.
-    \throws std::invalid_argument if gridRadii are not correct or any error occurs in the computation.
-*/
-void computeDensityCoefsSph(const math::IFunctionNdim& dens,
-    const math::SphHarmIndices& ind,
-    const std::vector<double>& gridRadii,
-    std::vector< std::vector< std::vector<double> > > &coefs);
-#endif
-
-
-/** Compute spherical-harmonic potential expansion coefficients,
-    by first creating a sph.-harm.representation of the density profile,
-    and then solving the Poisson equation.
-    \param[in]  dens - the input density profile.
-    \param[in]  ind  - indexing scheme for spherical-harmonic coefficients,
-                which determines the order of expansion and its symmetry properties.
-    \param[in]  gridRadii - the array of radial points for the output coefficients;
-                must form an increasing sequence and start from r>0.
-    \param[out] Phi  - the array of sph.-harm. coefficients for the potential:
-                Phi[c][k] is the value of c-th coefficient (where c is a single index 
-                combining both l and m) at the radius r_k; will be resized as needed.
-    \param[out] dPhi - the array of radial derivatives of each sph.-harm. term:
-                dPhi_{l,m}(r) = d(Phi_{l,m})/dr; will be resized as needed.
-    \throws std::invalid_argument if gridRadii are not correct.
-*/
-void computePotentialCoefsSph(const BaseDensity &dens, 
-    const math::SphHarmIndices &ind,
-    const std::vector<double> &gridRadii,
-    /*output*/ std::vector< std::vector<double> > &Phi,
-    /*output*/ std::vector< std::vector<double> > &dPhi);
-
-
-/** Same as above, but compute coefficients from the potential directly,
-    without solving Poisson equation */
-void computePotentialCoefsSph(const BasePotential& pot,
-    const math::SphHarmIndices& ind,
-    const std::vector<double> &gridRadii,
-    /*output*/ std::vector< std::vector<double> > &Phi,
-    /*output*/ std::vector< std::vector<double> > &dPhi);
-
-
-/** Compute the coefficients of the basis-set potential expansion from the given density profile.
-    \param[in]  dens is the input density profile.
-    \param[in]  ind  is the coefficient indexing scheme (defines the order of angular expansion
-    and its symmetries).
-    \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
-    \param[in]  eta  is the shape parameter of basis functions.
-    \param[in]  r0   is the scale radius of basis functions.
-    \param[out] coefs  will contain the array of coefficients, will be resized as needed.
-*/
-void computePotentialCoefsBSE(
-    const BaseDensity& dens,
-    const math::SphHarmIndices& ind,
-    unsigned int nmax, double eta, double r0,
-    /*output*/ std::vector< std::vector<double> > &coefs);
-
-
-/** Compute the coefficients of the basis-set potential expansion from an N-body snapshot.
-    \param[in]  particles  is the array of particles.
-    \param[in]  ind  is the coefficient indexing scheme (defines the order of angular expansion
-    and its symmetries).
-    \param[in]  nmax is the order or radial expansion (number of basis functions is nmax+1).
-    \param[in]  eta  is the shape parameter of basis functions.
-    \param[in]  r0   is the scale radius of basis functions.
-    \param[out] coefs  will contain the array of coefficients, will be resized as needed.
-*/
-void computePotentialCoefsBSE(
-    const particles::ParticleArray<coord::PosCyl> &particles,
-    const math::SphHarmIndices &ind,
-    unsigned int nmax, double eta, double r0,
-    /*output*/ std::vector< std::vector<double> > &coefs);
 
 }  // namespace

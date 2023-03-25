@@ -21,7 +21,33 @@ It has several modes of operation:
     mean radius vs. normalized squared total angular momentum [L/Lcirc(E)]^2, or
     mean radius vs. orbit inclination Lz/L; the size of symbols indicates orbit weights.
 
-3.  Prepare mock data for running the first two tasks.
+3.  Display some diagnostic plots useful for assessing the overall setup before running any models:
+    projected and 3d density profiles along major and minor axes, location and masses of spatial bins,
+    circular-velocity curve of the potential, and the observed values of v0 and sigma.
+    The surface density and especially the deprojected 3d density help to check the photometric model;
+    they should be smooth and have a sensible shape. In the 3d density plot, we also show the nodes of
+    the spatial discretization grid, which should cover the region of interest, especially the central
+    cusp (if we are interested in measuring Mbh, we need to have at least a few bins in the density
+    profile within the expected radius of influence).
+    The top right panel shows the values of density constraints (essentially, cell masses);
+    ideally they should be quite uniform (with the exception of the innermost ones, which may be
+    smaller if the grid is deliberately made finer in the central region). If the dynamical range
+    spans more than 3-4 orders of magnitude, there is a risk that the smallest bins don't get any
+    suitable orbits passing through them, so these density constraints would be impossible to satisfy,
+    and the model either will be infeasible (if the density tolerance is set to zero) or will have
+    a large and unpredictably varying penalty for violating these density constraints, which is also
+    bad. In these cases one would need to adjust the grid parameters or even change the density
+    discretization scheme to a different kind (e.g. classic instead of cylindrical, or vice versa).
+    The bottom right panel shows the circular-velocity curve (split between mass components)
+    for the model with the currently chosen parameters (Mbh, stellar M/L, etc.). For comparison,
+    the values of kinematic constraints (v0 and sigma) in all bins are plotted against radius.
+    In a thin and cold disk observed edge-on, the maximum value of |v0| should be close to the
+    amplitude of the total circular velocity, but in general it will be smaller by some factor.
+    This plot may be used to get a rough idea about the expected M/L: the amplitude of Vcirc in
+    the potential is scaled by sqrt(Upsilon), where Upsilon (provided as a command-line argument)
+    is the starting value for scanning the M/L axis automatically performed by the code.
+
+4.  Prepare mock data for running the first two tasks.
     For this, one needs an N-body snapshot - in this example it should be produced by running
     a separate script  example_self_consistent_model3.py, which creates a three-component galaxy model
     (disk + bulge + DM halo) with a central black hole.
@@ -56,7 +82,12 @@ To run a complete example of constructing a grid of Schwarzschild models, do the
     The models could be run on either of these alternative datasets, the choice is controlled
     by the command-line argument  hist=[y/n]  (the mock data are always generated for both cases).
 
-3.  Now run several series of models with different values of Mbh:
+3.  Examine the model setup by running
+    example_forstand.py do=test
+    (this is less relevant for the mock dataset, but could be quite helpful when working
+    with real data, to check if the parameters are sensible, or to diagnose possible problems).
+
+4.  Now run several series of models with different values of Mbh:
     example_forstand.py do=run Mbh=...
     (of course, one may also adjust many other parameters, including hist=[true/false])
     Each series of models has the same gravitational potential, scaled by several values of M/L;
@@ -68,7 +99,7 @@ To run a complete example of constructing a grid of Schwarzschild models, do the
     The true value of Mbh is 1e8, and M/L is 1; it makes sense to explore at least a few series of
     models with Mbh ranging from 0 to ~3-5 times the true value.
 
-4.  Finally, one may explore the grid of models for all values of Mbh and M/L by running
+5.  Finally, one may explore the grid of models for all values of Mbh and M/L by running
     example_forstand.py do=plot [hist=... and other params]
 
 When adapting this script to a particular galaxy with existing observational datasets,
@@ -110,10 +141,10 @@ for arg in sys.argv[1:]:
     arglist.append([nameval[0].upper(), nameval[1]])
 args = dict(arglist)
 
-distance  = float(args.get('DISTANCE', 20626))  # [REQ] assumed distance [kpc]
+distance  = float(args.get('DISTANCE', 20626.5))# [REQ] assumed distance [kpc]
 arcsec2kpc= distance * numpy.pi / 648000        # conversion factor (number of kiloparsecs in one arcsecond)
 agama.setUnits(mass=1, length=arcsec2kpc, velocity=1)  # [OPT] units: mass = 1 Msun, length = 1", velocity = 1 km/s
-Mbh       = float(args.get('MBH', 0))           # [REQ] mass of the central black hole  [Msun]
+Mbh       = float(args.get('MBH', 1e8))         # [REQ] mass of the central black hole  [Msun]
 Omega     = float(args.get('OMEGA', 0))         # [REQ] pattern speed (relevant only for non-axisymmetric models) [km/s/length_unit]
 halotype  =       args.get('HALOTYPE', 'nfw')   # [OPT] halo type: 'LOG' or 'NFW'
 vhalo     = float(args.get('VHALO', 190))       # [OPT] asymptotic (LOG) or peak (NFW) circular velocity of the halo [km/s]
@@ -129,13 +160,15 @@ alpha_deg = float(args.get('ALPHA', 0.0))       # [REQ] azimuthal angle of viewi
 alpha     = alpha_deg * numpy.pi/180            # same in radians
 degree    = int  (args.get('DEGREE', 2))        # [OPT] degree of B-splines  (0 means histograms, 2 or 3 is preferred)
 symmetry  = 'a'                                 # [OPT] symmetry of the model ('s'pherical, 'a'xisymmetric, 't'riaxial)
+addnoise  = bool (args.get('ADDNOISE', True))   # [OPT] whether to add a realistic amount of noise in generating mock datacubes
+seed      = int  (args.get('SEED', 0))          # [OPT] random seed (different values will create different realizations of the initial conditions for the orbit library)
 nbody     = int  (args.get('NBODY', 100000))    # [OPT] number of particles for the N-body representation of the best-fit model
 nbodyFormat = args.get('NBODYFORMAT', 'text')   # [OPT] format for storing N-body snapshots (text/nemo/gadget)
-command   = args.get('DO', '').upper()          # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps
+command   = args.get('DO', '').upper()          # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps, 'TEST' - show diagnostic plots, 'MOCK' - create mock maps
 usehist   = args.get('HIST', 'n')[0] in 'yYtT1' # [OPT] whether to use LOSVD histograms as input (default 'no' is to use GH moments)
 variant   = 'Hist' if usehist else 'GH'         # suffix for disinguishing runs using histogramed LOSVDs or GH moments
 fileResult= 'results%s.txt' % variant           # [OPT] filename for collecting summary results for the entire model grid
-numpy.random.seed(42)  # make things repeatable
+numpy.random.seed(42)                           # [OPT] make things repeatable when generating mock data (*not* related to the seed for the orbit library)
 numpy.set_printoptions(precision=4, linewidth=9999, suppress=True)
 
 # In this example, we use the Multi-Gaussian Expansion to parametrize
@@ -206,6 +239,8 @@ if command == 'MOCK':
     rscale = 30.0   # [REQ] 1 length unit of the N-body snapshot corresponds to this many length units of this script (arcseconds)
     mscale = 4e10   # [REQ] 1 mass unit of the snapshot corresponds to this many mass units of this script (solar masses)
     vscale = (agama.G * mscale / rscale)**0.5  # same for the N-body velocity unit => km/s
+    print('Scaling N-body model to physical units: 1 length unit = %g arcsec = %g kpc, 1 velocity unit = %g km/s, 1 mass unit = %g Msun' %
+        (rscale, rscale * arcsec2kpc, vscale, mscale))
     posvel[:, 0:3] *= rscale
     posvel[:, 3:6] *= vscale
     mass *= mscale
@@ -234,6 +269,9 @@ if command == 'MOCK':
         header='MGE file\nsurface_density  width  axis_ratio\n[Msun/pc^2]   [arcsec]')
 
     # 1st step: construct Voronoi bins for kinematic datasets
+    # Low-resolution dataset with a FoV 1x1' and pixel size 1" (comparable to ground-based IFU such as SAURON)
+    # Note: make sure that the pixel size passed to makeVoronoiBins is rounded to at most 4 significant digits,
+    # since this is the precision with which we save it later; otherwise the subsequent reading of Voronoi bins will fail
     print('Creating Voronoi bins')
     xc, yc, bintags = agama.schwarzlib.makeVoronoiBins(
         posvel,
@@ -245,7 +283,7 @@ if command == 'MOCK':
         gamma = gamma1
     )
     # save the binning scheme to text file
-    numpy.savetxt(filenameVorBin1, numpy.column_stack((xc, yc, bintags)), fmt='%7.3f %7.3f %7d')
+    numpy.savetxt(filenameVorBin1, numpy.column_stack((xc, yc, bintags)), fmt='%8.4f %8.4f %7d')
 
     # 2st step: construct the LOSVD target and apply it to the N-body snapshot
     print('Computing LOSVDs of input snapshot')
@@ -256,6 +294,13 @@ if command == 'MOCK':
     # assign errors/noise on the computed values from the Poisson noise estimate of B-spline amplitudes
     particlemass = numpy.mean(mass)
     noisecube    = (numpy.maximum(datacube, particlemass) * particlemass)**0.5
+    # this would be a fair estimate of noise if it were uncorrelated between spatial and velocity bins;
+    # however, in practice the actual discreteness noise is considerably lower than this estimate.
+    # in order to make it more realistic, we may increase the formal uncertainties by a factor of 2-3
+    # and then add actual uncorrelated Gaussian noise to the datacube.
+    if addnoise:
+        noisecube *= 3.0
+        datacube  += numpy.random.normal(size=datacube.shape) * noisecube
 
     # 3rd step: convert the B-spline LOSVDs to GH moments
     print('Computing Gauss-Hermite moments and their error estimates')
@@ -276,7 +321,8 @@ if command == 'MOCK':
     # save the interleaved values and error estimates of the B-spline amplitudes in each aperture to a text file
     numpy.savetxt(filenameHist1, numpy.dstack((hist_val, hist_err)).reshape(len(apertures), -1), fmt='%9.3g')
 
-    # repeat for the 2nd (HR) dataset)
+    # repeat for the 2nd dataset
+    # High-resolution dataset similar to AO-assisted IFU such as NIFS (2x2", pixel size 0.1")
     print('Same steps for the 2nd dataset')
     xc, yc, bintags = agama.schwarzlib.makeVoronoiBins(
         posvel,
@@ -287,13 +333,16 @@ if command == 'MOCK':
         beta  = beta,
         gamma = gamma2
     )
-    numpy.savetxt(filenameVorBin2, numpy.column_stack((xc, yc, bintags)), fmt='%7.3f %7.3f %7d')
+    numpy.savetxt(filenameVorBin2, numpy.column_stack((xc, yc, bintags)), fmt='%8.4f %8.4f %7d')
 
     apertures    = agama.schwarzlib.getBinnedApertures(xc, yc, bintags)
     gridx, gridy = agama.schwarzlib.makeGridForTargetLOSVD(apertures, psf2)
     target       = agama.Target(apertures=apertures, gridx=gridx, gridy=gridy, **kinemParams2)
     datacube     = target((posvel, mass)).reshape(len(apertures), -1)
     noisecube    = (numpy.maximum(datacube, particlemass) * particlemass)**0.5
+    # same remark about noise here, but because of much smaller bin sizes, the uncertainties are already realistically large
+    if addnoise:
+        datacube += numpy.random.normal(size=datacube.shape) * noisecube
 
     ghm_val, ghm_err = agama.schwarzlib.ghMomentsErrors(degree=degree, gridv=gridv, values=datacube, errors=noisecube, ghorder=ghorder)
     numpy.savetxt(filenameGH2, numpy.dstack((ghm_val, ghm_err))[:,ind,:].reshape(len(apertures), -1), fmt='%8.3f',
@@ -313,7 +362,9 @@ datasets = []
 
 ### 0: photometry => 3d density profile and its discretization scheme for a density Target
 
-# read the input MGE file, skipping the first three lines as comments, deproject it and construct the Density object
+# read the input MGE file, skipping the first three lines as comments, deproject it and construct the Density object.
+# Instead of MGE, one may use any other parametric density profile, e.g. one or more Sersic components with parameters
+# determined by photometric fitting software such as Galfit
 try:
     mge = numpy.loadtxt(filenameMGE)   # [REQ] file with MGE parametrization of surface density profile
 except:
@@ -321,8 +372,7 @@ except:
     exit()
 
 densityStars = agama.schwarzlib.makeDensityMGE(mge, distance, arcsec2kpc, beta)
-# note: one may use any alternative method for specifying the density profile of stars, not necessarily MGE
-#densityStars = agama.Density(agama.Density('dens_disk'), agama.Density('dens_bulge'))
+#densityStars = agama.Density(agama.Density('dens_disk'), agama.Density('dens_bulge'))  # true profiles of this mock dataset
 
 ### parameters for the density dataset
 # the choice of discretization scheme depends on the morphological type of the galaxy being modelled:
@@ -395,8 +445,8 @@ datasets.append(agama.schwarzlib.DensityDataset(
 ### 1: 1st kinematic dataset
 
 # read the Voronoi binning scheme and convert it to polygons (aperture boundaries)
-vorbin    = numpy.loadtxt(filenameVorBin1)
-apertures = agama.schwarzlib.getBinnedApertures(xcoords=vorbin[:,0], ycoords=vorbin[:,1], bintags=vorbin[:,2])
+vorbin1    = numpy.loadtxt(filenameVorBin1)
+apertures1 = agama.schwarzlib.getBinnedApertures(xcoords=vorbin1[:,0], ycoords=vorbin1[:,1], bintags=vorbin1[:,2])
 # note that when using real observational data, the coordinate system in the image plane is usually
 # right-handed, with Y pointing up and X pointing right. This is different from the convention used
 # in Agama, where X points left. Therefore, one will need to invert the X axis of the observed dataset:
@@ -407,55 +457,55 @@ if usehist:
     # [REQ] read the input kinematic data in the form of histograms;
     # if using the mock data as produced by this script, each line contains both values and errors for each velocity bin
     # in a given aperture, but when using data coming from other sources, may need to adjust the order of columns below
-    kindat = numpy.loadtxt(filenameHist1)
+    kindat1 = numpy.loadtxt(filenameHist1)
     datasets.append(agama.schwarzlib.KinemDatasetHist(
         density   = densityStars,
         tolerance = 0.01,              # [REQ] relative error in fitting aperture mass constraints
-        obs_val   = kindat[:, 0::2],   # [REQ] values of velocity histograms
-        obs_err   = kindat[:, 1::2],   # [REQ] errors in these values
+        obs_val   = kindat1[:, 0::2],  # [REQ] values of velocity histograms
+        obs_err   = kindat1[:, 1::2],  # [REQ] errors in these values
         obs_degree= hist_degree,
         obs_gridv = hist_gridv,
-        apertures = apertures,
+        apertures = apertures1,
         **kinemParams1
     ) )
 else:
     # [REQ] read the input kinematic data (V, sigma, higher Gauss-Hermite moments);
     # if using the mock data produced by this script, each line contains interleaved values and errors of v,sigma,h3...h6,
     # but when using data coming from other sources, may need to adjust the order of columns below
-    kindat = numpy.loadtxt(filenameGH1)
+    kindat1 = numpy.loadtxt(filenameGH1)
     datasets.append(agama.schwarzlib.KinemDatasetGH(
         density   = densityStars,
         tolerance = 0.01,              # [REQ] relative error in fitting aperture mass constraints
-        ghm_val   = kindat[:, 0::2],   # [REQ] values of v,sigma,h3,h4...
-        ghm_err   = kindat[:, 1::2],   # [REQ] errors in the same order
-        apertures = apertures,
+        ghm_val   = kindat1[:, 0::2],  # [REQ] values of v,sigma,h3,h4...
+        ghm_err   = kindat1[:, 1::2],  # [REQ] errors in the same order
+        apertures = apertures1,
         **kinemParams1
     ) )
 
 
 ### 2: [OPT] same for the 2nd kinematic dataset (and similarly for all subsequent ones)
-vorbin    = numpy.loadtxt(filenameVorBin2)
-apertures = agama.schwarzlib.getBinnedApertures(xcoords=vorbin[:,0], ycoords=vorbin[:,1], bintags=vorbin[:,2])
+vorbin2     = numpy.loadtxt(filenameVorBin2)
+apertures2  = agama.schwarzlib.getBinnedApertures(xcoords=vorbin2[:,0], ycoords=vorbin2[:,1], bintags=vorbin2[:,2])
 if usehist:
-    kindat = numpy.loadtxt(filenameHist2)
+    kindat2 = numpy.loadtxt(filenameHist2)
     datasets.append(agama.schwarzlib.KinemDatasetHist(
         density   = densityStars,
         tolerance = 0.01,
-        obs_val   = kindat[:, 0::2],
-        obs_err   = kindat[:, 1::2],
+        obs_val   = kindat2[:, 0::2],
+        obs_err   = kindat2[:, 1::2],
         obs_degree= hist_degree,
         obs_gridv = hist_gridv,
-        apertures = apertures,
+        apertures = apertures2,
         **kinemParams2
     ) )
 else:
-    kindat = numpy.loadtxt(filenameGH2)
+    kindat2 = numpy.loadtxt(filenameGH2)
     datasets.append(agama.schwarzlib.KinemDatasetGH(
         density   = densityStars,
         tolerance = 0.01,
-        ghm_val   = kindat[:, 0::2],
-        ghm_err   = kindat[:, 1::2],
-        apertures = apertures,
+        ghm_val   = kindat2[:, 0::2],
+        ghm_err   = kindat2[:, 1::2],
+        apertures = apertures2,
         **kinemParams2
     ) )
 
@@ -501,14 +551,16 @@ if command == 'RUN':
     # prepare initial conditions - use the same total potential independent of the actual Mbh
     # [OPT]: choose the sampling method: isotropic IC drawn from Eddington DF are created by
     #   density.sample(numorbits, potential)
-    # while IC with preferential rotation (for disky models) are constructed from Jeans eqns by
+    # while IC with preferential rotation (for disky models) are constructed from axisymmetric Jeans eqns by
     #   density.sample(numorbits, potential, beta={0-0.5}, kappa={1 or -1, depending on sign of rotation})
-    # Here we add together two sets of IC - the majority of orbits sampled with Jeans eqns,
-    # plus a small fraction additionally sampled from the central region to improve coverage
+    # Here we add together two sets of IC - the majority of orbits sampled with axisymmetric Jeans eqns,
+    # plus a small fraction additionally sampled from the central region to improve coverage.
+    # Different values of the 'seed' parameter will create initial conditions with different number of orbits,
+    # which effectively makes a completely new random sample, and then the number is truncated back to numOrbits.
     ic = numpy.vstack((
-        densityStars.sample(int(numOrbits*0.85), potential=pot_fidu, beta=0.3, kappa=1)[0],
-        #densityStars.sample(int(numOrbits*0.85), potential=pot_fidu)[0],
+        densityStars.sample(int(numOrbits*0.85)+seed, potential=pot_fidu, beta=0.3, kappa=1)[0][:-seed],
         densityExtra.sample(int(numOrbits*0.15), potential=pot_fidu)[0] ))
+
 
     # launch the orbit library and perform fits for several values of Upsilon;
     agama.schwarzlib.runModel(datasets=datasets, potential=pot_total, ic=ic,
@@ -528,6 +580,83 @@ if command == 'RUN':
         fileResult = fileResult,
         # [OPT] parameters for the N-body snapshot representing the best-fit model
         nbody = nbody, nbodyFormat = nbodyFormat )
+
+elif command == 'TEST':
+
+    # plot various diagnostics to check if the parameters of the model are reasonable
+    import matplotlib.pyplot as plt
+    ax = plt.subplots(2, 2, figsize=(12,8), dpi=100)[1].reshape(-1)
+    # radial range of these plots is somewhat arbitrary, but should encompass the extent of kinematic data (may need adjustment)
+    gridrmajor = numpy.logspace(numpy.log10(0.05), numpy.log10(200))
+    gridrminor = numpy.logspace(numpy.log10(0.05), numpy.log10(100))
+    # surface density along the major and minor axes
+    Sigmamajor = densityStars.projectedDensity(numpy.column_stack((gridrmajor, gridrmajor*0)), beta=beta, alpha=alpha)
+    Sigmaminor = densityStars.projectedDensity(numpy.column_stack((gridrminor*0, gridrminor)), beta=beta, alpha=alpha)
+    ax[0].loglog(gridrmajor, Sigmamajor, color='b', label='$\Sigma(R)$ major')
+    ax[0].loglog(gridrminor, Sigmaminor, color='r', label='$\Sigma(R)$ minor')
+    ax[0].set_xlabel('projected radius')
+    ax[0].set_ylabel('surface density')
+    ax[0].legend(loc='lower left', frameon=False)
+    ax[0].set_xlim(min(gridrmajor), max(gridrmajor))
+    ax[0].set_ylim(min(Sigmamajor), max(Sigmamajor))
+
+    # deprojected 3d density along the major (x) and minor (z) axes
+    rhomajor = densityStars.density(numpy.column_stack((gridrmajor, gridrmajor*0, gridrmajor*0)))
+    rhominor = densityStars.density(numpy.column_stack((gridrminor*0, gridrminor*0, gridrminor)))
+    ax[2].loglog(gridrmajor, rhomajor, color='b', label=r'$\rho(R,z=0)$')
+    ax[2].loglog(gridrminor, rhominor, color='r', label=r'$\rho(R=0,z)$')
+    ax[2].set_xlabel('radius')
+    ax[2].set_ylabel('3d density')
+    ax[2].legend(loc='lower left', frameon=False)
+    ax[2].set_xlim(min(gridrmajor), max(gridrmajor))
+    ax[2].set_ylim(min(rhomajor)/5, max(rhomajor))
+    # also show the location of nodes of the 3d density discretization grid
+    if 'gridR' in densityParams: gridnodesmajor = densityParams['gridR']
+    if densityParams['type'] == 'DensityCylindricalTopHat' or densityParams['type'] == 'DensityCylindricalLinear':
+        ax[2].plot(densityParams['gridR'], numpy.interp(densityParams['gridR'], gridrmajor, rhomajor), 'b|', ms=6)
+        ax[2].plot(densityParams['gridz'], numpy.interp(densityParams['gridz'], gridrminor, rhominor), 'r|', ms=6)
+    else:
+        if 'axisRatioZ' in densityParams:   # elliptical grid in DensityClassic[TopHat/Linear]
+            multX = (densityParams['axisRatioY'] * densityParams['axisRatioZ'])**(-1./3)  # scaling along the X (major) axis
+            multZ =  densityParams['axisRatioZ'] * multX                                  # scaling along the Z (minor) axis
+        else:
+            multX = multZ = 1
+        ax[2].plot(densityParams['gridr']*multX, numpy.interp(densityParams['gridr']*multX, gridrmajor, rhomajor), 'b|', ms=6)
+        ax[2].plot(densityParams['gridr']*multZ, numpy.interp(densityParams['gridr']*multZ, gridrminor, rhominor), 'r|', ms=6)
+
+    # values of discretized density constraints: this is rather technical, but a large spread in values
+    # (more than a few orders of magnitude) may present trouble for the solution - then one would need
+    # to change some grid parameters, so that the distribution of cell masses is more uniform
+    ax[1].plot(datasets[0].cons_val[1:])
+    ax[1].set_xlabel('constraint index')
+    ax[1].set_ylabel('density constraint value')
+    ax[1].set_yscale('log')
+
+    # plot observed parameters of GH expansion v0 and sigma against radius
+    if not usehist:
+        aperture_radii1 = numpy.array([numpy.mean(ap[:,0]**2+ap[:,1]**2)**0.5  for ap in apertures1])
+        aperture_radii2 = numpy.array([numpy.mean(ap[:,0]**2+ap[:,1]**2)**0.5  for ap in apertures2])
+        ax[3].scatter(aperture_radii1, abs(kindat1[:,0]), label='v', c='y', linewidths=0)
+        ax[3].scatter(aperture_radii1, kindat1[:,2],  label='sigma', c='c', linewidths=0)
+        ax[3].scatter(aperture_radii2, abs(kindat2[:,0]), c='y', marker='x')
+        ax[3].scatter(aperture_radii2, kindat2[:,2],      c='c', marker='x')
+    # plot circular-velocity curves of each potential component
+    for name, pot in [
+        ['stars', agama.Potential(type='Multipole', density=densityStars, mmax=0, lmax=32)],
+        ['halo',  agama.Potential(type='Multipole', density=densityHalo)],
+        ['BH',    pot_bh],
+        ['total', pot_total] ]:
+        vcirc = (-gridrmajor * pot.force(numpy.column_stack((gridrmajor, gridrmajor*0, gridrmajor*0)))[:,0] * Upsilon)**0.5
+        ax[3].plot(gridrmajor, vcirc, label=name)
+    ax[3].legend(loc='upper left', scatterpoints=1, ncol=2 if usehist else 3, frameon=False)
+    ax[3].set_xscale('log')
+    ax[3].set_xlim(min(gridrmajor), max(gridrmajor))
+    ax[3].set_ylim(0, max(vcirc)*1.25)
+    ax[3].set_xlabel('radius')
+    ax[3].set_ylabel('circular velocity')
+
+    plt.tight_layout()
+    plt.show()
 
 elif command == 'PLOT':
 
