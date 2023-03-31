@@ -1,5 +1,5 @@
 
-import numpy, agama, gala, time; from timeit import timeit
+import numpy, agama, gala.potential, time; from timeit import timeit
 numpy.set_printoptions(linewidth=100, precision=8)
 numpy.random.seed(42)
 
@@ -29,17 +29,19 @@ Apot5=agama.GalaPotential(type='harmonic', omega=1.0)
 # some random test points
 points=numpy.random.normal(size=(5,3))  # positions
 pointv=numpy.random.normal(size=(20,6))  # positions and velocities
+
 def test(gpot, Gpot, Apot, test_hessian=False):
     '''
     gpot is the native gala potential;
     Gpot is the same one accessed through wrapper;
     Apot is the equivalent native agama potential
     '''
-    print("\nTesting G=%s and A=%s" % (repr(Gpot), repr(Apot)))
+    print("\nTesting G=%s and A=%s" % (Gpot, Apot))
     #0. retrieve dimensional factors for converting the output of agama-related methods
     # to the potential's unit system (assuming it is identical for both potentials)
     lu = Gpot.units['length']
     pu = Gpot.units['energy'] / Gpot.units['mass']
+    vu = Gpot.units['length'] / Gpot.units['time']
     fu = Gpot.units['length'] / Gpot.units['time']**2
     du = Gpot.units['mass'] / Gpot.units['length']**3
     #1. test that the values of potential coincide, using both interfaces
@@ -61,7 +63,7 @@ def test(gpot, Gpot, Apot, test_hessian=False):
     #5. test orbit integration using both gala and agama routines with either potential
     # create some initial conditions for orbits:
     # take the positions and assign velocity to be comparable to circular velocity at each point
-    ic = numpy.hstack((points, numpy.random.normal(size=points.shape) * Apot.circular_velocity(points.T)[:,None]))
+    ic = numpy.hstack((points, numpy.random.normal(size=points.shape) * Apot.circular_velocity(points.T)[:,None] / vu))
     t0 = time.time()
     g_orb_g = gpot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator, Integrator_kwargs=dict(rtol=1e-8,atol=0))
     t1 = time.time()
@@ -116,4 +118,5 @@ Apot6=agama.GalaPotential(
     dict(type='dehnen', mass=1.71e9, scaleradius=0.07),  # nucleus
     dict(type='nfw',    mass=5.4e11, scaleradius=15.62), # halo
     units=Gpot6.units)
+
 test(gpot6, Gpot6, Apot6, test_hessian=False)

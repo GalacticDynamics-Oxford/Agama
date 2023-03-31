@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+March 2023:
+Added an option for representing the result of orbit integration as an interpolator
+(class agama.Orbit in Python).
+
 June 2022:
 Added a general framework for time-dependent density/potential modifiers
 (shift, tilt, rotation, modulation in amplitude).

@@ -61,9 +61,9 @@ def writeVelocityDistributions(filename, model):
 
 # display some information after each iteration
 def printoutInfo(model, iteration):
-    densDisk = model.components[0].getDensity()
-    densBulge= model.components[1].getDensity()
-    densHalo = model.components[2].getDensity()
+    densDisk = model.components[0].density
+    densBulge= model.components[1].density
+    densHalo = model.components[2].density
     pt0 = (solarRadius, 0, 0)
     pt1 = (solarRadius, 0, 1)
     print("Disk total mass=%g Msun, rho(Rsolar,z=0)=%g, rho(Rsolar,z=1kpc)=%g Msun/pc^3" % \
@@ -176,10 +176,10 @@ if __name__ == "__main__":
     # first create a representation of density profiles without velocities
     # (just for demonstration), by drawing samples from the density distribution
     print("Writing N-body sampled density profile for the dark matter halo")
-    agama.writeSnapshot("dens_dm_final", model.components[2].getDensity().sample(800000), format)
+    agama.writeSnapshot("dens_dm_final", model.components[2].density.sample(800000), format)
     print("Writing N-body sampled density profile for the stellar bulge, disk and halo")
     # recall that component[0] contains stellar disks and stellar halo, and component[1] - bulge
-    densStars = agama.Density(model.components[0].getDensity(), model.components[1].getDensity())
+    densStars = agama.Density(model.components[0].density, model.components[1].density)
     agama.writeSnapshot("dens_stars_final", densStars.sample(200000), format)
 
     # now create genuinely self-consistent models of all components,
@@ -195,4 +195,4 @@ if __name__ == "__main__":
     # from the axisymmetric Jeans equation with equal velocity dispersions in R,z,phi
     print("Writing an N-body model for the gas disk")
     agama.writeSnapshot("model_gas_final", \
-        model.components[3].getDensity().sample(24000, potential=model.potential, beta=0, kappa=1), format)
+        model.components[3].density.sample(24000, potential=model.potential, beta=0, kappa=1), format)

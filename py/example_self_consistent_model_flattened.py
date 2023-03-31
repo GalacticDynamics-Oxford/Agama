@@ -51,7 +51,7 @@ for i in range(5):
     print('Iteration %i, Phi(0)=%g, Mass=%g' % \
         (i, scm.potential.potential(0,0,0), scm.potential.totalMass()))
     # for a fair comparison, show the spherically-averaged density profile
-    sphDensity = agama.Density(type='DensitySphericalHarmonic', density=comp.getDensity(), lmax=0)
+    sphDensity = agama.Density(type='DensitySphericalHarmonic', density=comp.density, lmax=0)
     ax[0].plot(r, sphDensity.density(xyz), label='Iteration #'+str(i))
 
 ax[0].legend(loc='lower left', frameon=False)
@@ -64,7 +64,7 @@ ax[0].set_xlim(min(r), max(r))
 
 # save the final density/potential profile and create an N-body snapshot
 print('Creating N-body model')
-comp.getDensity().export('flattened_sersic_density.ini')
+comp.density.export('flattened_sersic_density.ini')
 scm.potential.export('flattened_sersic_potential.ini')
 xv, m = agama.GalaxyModel(scm.potential, df).sample(1000000)
 agama.writeSnapshot('flattened_sersic_nbody.nemo', (xv, m), 'nemo')
@@ -74,7 +74,8 @@ print('Determining shape')
 r = numpy.logspace(-2, 1, 16)
 xyz = numpy.column_stack((r, r*0, r*0))
 from measureshape import getaxes
-ax[1].plot(r, [getaxes(xv[:,0:3], m, rmax)[0] for rmax in r])
+axes = numpy.array([getaxes(xv[:,0:3], m, rmax)[0] for rmax in r])
+ax[1].plot(r, axes[:,2] / (axes[:,0]*axes[:,1])**0.5)  # minor over major axis ratio
 ax[1].set_xlabel('r')
 ax[1].set_ylabel(r'$z/R$')
 ax[1].set_xscale('log')
@@ -82,6 +83,7 @@ ax[1].set_ylim(0, 1)
 ax[1].set_xlim(min(r), max(r))
 
 print('Computing kinematic profiles')
+gm = agama.GalaxyModel(scm.potential, df, scm.af)
 rho, meanv, vel2 = gm.moments(xyz, dens=True, vel=True, vel2=True)
 vcirc = (-r * scm.potential.force(xyz)[:,0])**0.5
 ax[2].plot(r, vcirc, label='$v_{\sf circ}$')

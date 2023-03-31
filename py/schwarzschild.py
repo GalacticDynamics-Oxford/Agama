@@ -120,12 +120,8 @@ def createModel(iniFileName):
         comp = type('Component', (), \
             {"density": density, "ic": ic, "weightprior": weightprior, \
              "inttime": inttime, "targets": targets, "Omega": Omega} )
-        if 'trajsize' in value:  comp.trajsize = int(value['trajsize'])
         if 'beta'     in value:  comp.beta     = float(value['beta'])
-        if 'nbody'    in value:
-            comp.nbody = int(value['nbody'])
-            if not 'trajsize' in value:
-                raise ValueError("No trajectory will be stored in "+name+", cannot create Nbody model")
+        if 'nbody'    in value:  comp.nbody    = int(value['nbody'])
         model.components[name] = comp
     return model
 
@@ -134,16 +130,15 @@ def runComponent(comp, pot):
     run the orbit integration, optimization, and construction of an N-body model
     for a given component of the Schwarzschild model
     """
-    if hasattr(comp, 'trajsize'):
+    if hasattr(comp, 'nbody'):  # record orbit trajectories
         result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime,
-            Omega=comp.Omega, targets=comp.targets, trajsize=comp.trajsize)
+            Omega=comp.Omega, targets=comp.targets, dtype=object)
         traj = result[-1]
     else:
         result = agama.orbit(potential=pot, ic=comp.ic, time=comp.inttime,
             Omega=comp.Omega, targets=comp.targets)
-        traj = None
-    if isinstance(result, numpy.array):  # in case that only one output was requested (e.g. trajectory),
-        result = (result,)               # the orbit() function returns it rather than a tuple of one element
+    if isinstance(result, numpy.ndarray):  # in case that only one output was requested (e.g. trajectory),
+        result = (result,)                 # the orbit() function returns it rather than a tuple of one element
     # targets[0] is density, targets[1], if provided, is kinematics
     matrix = list()
     rhs    = list()
@@ -185,22 +180,14 @@ def runComponent(comp, pot):
 
     # create an N-body model if needed
     if hasattr(comp, 'nbody'):
-        status,particles = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
-        if not status:
-            indices,trajsizes = particles
-            print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices),max(trajsizes)))
-            traj[indices] = agama.orbit(potential=pot, ic=comp.ic[indices], \
-                time=comp.inttime[indices], trajsize=trajsizes, Omega=comp.Omega)
-            status,particles = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
-            if not status: print("Failed to produce output N-body model")
+        status, particles = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
+        if not status: raise RuntimeError("Failed to produce output N-body model")
         comp.nbodymodel = particles
 
     # output
     comp.weights = weights
     comp.densitydata = result[0]
     if len(comp.targets) >= 2:  comp.kinemdata = result[1]
-    if not traj is None:  comp.traj = traj
-    #return comp
 
 if __name__ == '__main__':
     # read parameters from the INI file
@@ -215,10 +202,8 @@ if __name__ == '__main__':
         print("Running "+name)
         runComponent(comp, model.potential)
         print("Done with "+name)
-        if hasattr(comp, 'nbody'):
-            # export N-body model and save the trajectories into a numpy binary file
+        if hasattr(comp, 'nbody'):  # export N-body model
             agama.writeSnapshot("model_"+name+".nbody", comp.nbodymodel)
-            numpy.save("model_"+name+".traj", comp.traj)
         # write out the complete model as a numpy binary archive
         args = {'ic': comp.ic, 'inttime': comp.inttime, 'weights': comp.weights}
         if hasattr(comp, 'densitydata'):  args['densitydata'] = comp.densitydata

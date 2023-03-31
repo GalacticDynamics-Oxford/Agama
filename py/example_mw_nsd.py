@@ -11,7 +11,7 @@ Date: Feb 2022
 import numpy, agama, matplotlib.pyplot as plt
 
 def plotVcirc(model, iteration):
-    rhos   = (model.components[0].getDensity(), model.components[1].getDensity())
+    rhos   = (model.components[0].density, model.components[1].density)
     pots   = (  # recompute potentials of both components separately, using a multipole Poisson solver
         agama.Potential(type='Multipole', lmax=6,  density=rhos[0], rmin=1e-4, rmax=0.1),
         agama.Potential(type='Multipole', lmax=12, density=rhos[1], rmin=1e-3, rmax=1.0))
@@ -42,8 +42,8 @@ def plotModel(model, df):
     gridz  = numpy.linspace(0, 0.25, 51)
     gridxz = numpy.column_stack((numpy.tile(gridx, len(gridz)), numpy.repeat(gridz, len(gridx))))
     gridxyz= numpy.column_stack((numpy.tile(gridx, len(gridz)), numpy.zeros(len(gridx)*len(gridz)), numpy.repeat(gridz, len(gridx))))
-    nsc = model.components[0].getDensity()
-    nsd = model.components[1].getDensity()
+    nsc = model.components[0].density
+    nsd = model.components[1].density
     rho_nsd = nsd.density(gridxyz).reshape(len(gridz), len(gridx))
     Sig_nsd = nsd.projectedDensity(gridxz, beta=numpy.pi/2).reshape(len(gridz), len(gridx))
     plt.figure(figsize=(20,15))

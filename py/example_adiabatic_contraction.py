@@ -64,7 +64,7 @@ def contraction(pot_dm, pot_bar, method='C20', beta_dm=0.0, rmin=1e-2, rmax=1e4)
 
     # create a cubic spline interpolator in log-log space
     valid_r = dens_contracted>0  # make sure the input for log-spline is positive
-    dens_contracted_interp = agama.CubicSpline(numpy.log(gridr[valid_r]), numpy.log(dens_contracted[valid_r]), reg=True)
+    dens_contracted_interp = agama.Spline(numpy.log(gridr[valid_r]), numpy.log(dens_contracted[valid_r]), reg=True)
     # convert the grid-based density profile into a full-fledged potential
     contracted_pot = agama.Potential(type="Multipole", symmetry="spherical", rmin=rmin, rmax=rmax,
         density=lambda xyz: numpy.exp(dens_contracted_interp(numpy.log(numpy.sum(xyz**2, axis=1))*0.5)) )

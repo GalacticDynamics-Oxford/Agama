@@ -384,6 +384,9 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
     const size_t numPoints = xval.size();
     if(fval.size() != numPoints)
         throw std::length_error("CubicSpline: input arrays are not equal in length");
+    if(numPoints < 2)
+        return std::vector<double>(numPoints,
+            isFinite(derivLeft) ? derivLeft : isFinite(derivRight) ? derivRight : 0);
 
     // construct and solve the linear system for first derivatives
     std::vector<double> rhs(numPoints);
@@ -427,11 +430,14 @@ std::vector<double> constructCubicSpline(const std::vector<double>& xval,
 }
 
 // compute the 2nd derivative at each grid node from the condition that the 3rd derivative
-// is continuous at all interior nodes, and zero at the boundary nodes.
+// is continuous at all interior nodes, and the 4th derivative is zero at the boundary nodes
+// (this differs from Dehnen's original pspline, where the 3rd derivative was set to zero at boundary)
 std::vector<double> constructQuinticSpline(const std::vector<double>& xval,
     const std::vector<double>& fval, const std::vector<double>& fder)
 {
     size_t numPoints = xval.size();
+    if(numPoints < 2)
+        return std::vector<double>(numPoints, 0);
     BandMatrix<double>  mat(numPoints, 1, 0.);
     std::vector<double> rhs(numPoints);
     for(size_t i = 0; i < numPoints; i++) {
@@ -448,9 +454,7 @@ std::vector<double> constructQuinticSpline(const std::vector<double>& xval,
             rhs[i]   += (20 * (fval[i+1] - fval[i]) * hi - 12 * fder[i] - 8 * fder[i+1]) * hi * hi;
         }
     }
-#if 1
-    // alternative boundary conditions: 4th derivative is zero at boundary nodes --
-    // seems to give a better overall accuracy, and is different from the original Dehnen's pspline
+    // boundary conditions: 4th derivative is zero at boundary nodes
     double hi = 1 / (xval[1] - xval[0]);
     mat(0,1)  = -2*hi;  // above
     rhs[0]    = (30 * (fval[1] - fval[0]) * hi - 14 * fder[1] - 16 * fder[0]) * hi * hi;
@@ -458,7 +462,6 @@ std::vector<double> constructQuinticSpline(const std::vector<double>& xval,
     mat(numPoints-1,numPoints-2) = -2*hi;  // below
     rhs[numPoints-1]   = ( -30 * (fval[numPoints-1] - fval[numPoints-2]) * hi
         + 14 * fder[numPoints-2] + 16 * fder[numPoints-1]) * hi * hi;
-#endif
     return solveBand(mat, rhs);
 }
 
@@ -583,6 +586,16 @@ inline void evalQuinticSplines(
     }
 }
 
+inline void fillNaN(double* val, double* der, double* der2)
+{
+    if(val)
+        *val = NAN;
+    if(der)
+        *der = NAN;
+    if(der2)
+        *der2= NAN;
+}
+
 //---- Auxiliary spline construction routines ----//
 
 /// apply the slope-limiting prescription of Hyman(1983) to the first derivatives of a previously
@@ -592,6 +605,8 @@ inline void regularizeSpline(const std::vector<double>& xval, const double fval[
     // slightly reduce the maximum slope to make the interpolator strictly monotonic when possible
     const double THREE = 3 - 3e-15;
     size_t numPoints = xval.size();
+    if(numPoints<2)
+        return;
     for(size_t i=0; i<numPoints; i++) {
         if(i==0 || i==numPoints-1) {  // boundary points
             size_t k = i==0 ? i : numPoints-2;
@@ -675,8 +690,6 @@ BaseInterpolator1d::BaseInterpolator1d(
 :
     xval(xvalues), fval(fvalues)
 {
-    if(xval.size() < 2)
-        throw std::length_error("BaseInterpolator1d: number of nodes should be >=2");
     checkFiniteAndMonotonic(xval, "BaseInterpolator1d", "x");
     checkFinite1d(fval, "BaseInterpolator1d", "fvalues");
 }
@@ -692,11 +705,16 @@ LinearInterpolator::LinearInterpolator(
 
 void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
 {
-    int i = std::max<int>(0, std::min<int>(xval.size()-2, binSearch(x, &xval[0], xval.size())));
+    int size = xval.size();
+    if(size == 0) {
+        fillNaN(value, deriv, deriv2);
+        return;
+    }
+    int i = std::max<int>(0, std::min<int>(size-2, binSearch(x, &xval[0], size)));
     if(value)
-        *value = linearInterp(x, xval[i], xval[i+1], fval[i], fval[i+1]);
+        *value = size>1 ? linearInterp(x, xval[i], xval[i+1], fval[i], fval[i+1]) : fval[0];
     if(deriv)
-        *deriv = (fval[i+1]-fval[i]) / (xval[i+1]-xval[i]);
+        *deriv = size>1 ? (fval[i+1]-fval[i]) / (xval[i+1]-xval[i]) : 0;
     if(deriv2)
         *deriv2 = 0;
 }
@@ -754,15 +772,17 @@ CubicSpline::CubicSpline(
     checkFinite1d(fder, "CubicSpline", "function derivatives");
 }
 
-void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
+void CubicSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
 {
     int size = xval.size();
-    if(size == 0)
-        throw std::length_error("Empty spline");
+    if(size == 0) {
+        fillNaN(value, deriv, deriv2);
+        return;
+    }
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
-        if(val)
-            *val   = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
+        if(value)
+            *value = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
             // if der==0, will give correct result even for infinite x
         if(deriv)
             *deriv = fder[0];
@@ -771,8 +791,8 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
         return;
     }
     if(index >= size-1) {
-        if(val)
-            *val   = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
+        if(value)
+            *value = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
         if(deriv)
             *deriv = fder[size-1];
         if(deriv2)
@@ -781,15 +801,13 @@ void CubicSpline::evalDeriv(const double x, double* val, double* deriv, double* 
     }
     evalCubicSplines<1> (x, xval[index], xval[index+1],
         &fval[index], &fval[index+1], &fder[index], &fder[index+1],
-        /*output*/ val, deriv, deriv2);
+        /*output*/ value, deriv, deriv2);
 }
 
 bool CubicSpline::isMonotonic() const
 {
-    if(fval.empty())
-        throw std::length_error("Empty spline");
     bool ismonotonic=true;
-    for(unsigned int index=0; ismonotonic && index < xval.size()-1; index++) {
+    for(unsigned int index=0; ismonotonic && index+1 < xval.size(); index++) {
         const double
         dx = xval[index+1] - xval[index],
         dy = fval[index+1] - fval[index],
@@ -825,10 +843,10 @@ double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) 
         return 0;
     if(x1>x2)
         return integrate(x2, x1, f);
-    if(fval.empty())
-        throw std::length_error("Empty spline");
-    double result = 0;
     unsigned int size = xval.size();
+    if(size==0)
+        return NAN;
+    double result = 0;
     if(x1 <= xval[0]) {    // spline is linearly extrapolated at x<xval[0]
         double X2 = fmin(x2, xval[0]);
         result +=
@@ -883,15 +901,17 @@ QuinticSpline::QuinticSpline(
     fder2 = constructQuinticSpline(xval, fval, fder);
 }
 
-void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double* deriv2) const
+void QuinticSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
 {
     int size = xval.size();
-    if(size == 0)
-        throw std::length_error("Empty spline");
+    if(size == 0) {
+        fillNaN(value, deriv, deriv2);
+        return;
+    }
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
-        if(val)
-            *val   = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
+        if(value)
+            *value = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
         if(deriv)
             *deriv = fder[0];
         if(deriv2)
@@ -899,8 +919,8 @@ void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double
         return;
     }
     if(index >= size-1) {
-        if(val)
-            *val   = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
+        if(value)
+            *value = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
         if(deriv)
             *deriv = fder[size-1];
         if(deriv2)
@@ -909,7 +929,7 @@ void QuinticSpline::evalDeriv(const double x, double* val, double* deriv, double
     }
     evalQuinticSplines<1> (x, xval[index], xval[index+1],
         &fval[index], &fval[index+1], &fder[index], &fder[index+1], &fder2[index], &fder2[index+1],
-        /*output*/ val, deriv, deriv2);
+        /*output*/ value, deriv, deriv2);
 }
 
 
@@ -1075,8 +1095,10 @@ LogLogSpline::LogLogSpline(
 void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
 {
     int size = xval.size();
-    if(size == 0)
-        throw std::length_error("Empty spline");
+    if(size == 0) {
+        fillNaN(value, deriv, deriv2);
+        return;
+    }
     int index = binSearch(x, &xval[0], size);
     double logx = log(x);
 

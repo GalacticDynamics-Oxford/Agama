@@ -515,6 +515,71 @@ bool test_integral(const math::CubicSpline& f, double x1, double x2)
     // the larger error in the last case is apparently due to roundoff errors
 }
 
+bool testEmptySplines()
+{
+    std::vector<double> empty;
+    math::LinearInterpolator eLinear(empty, empty);
+    math::CubicSpline eCubic(empty, empty);
+    math::CubicSpline eHermite(empty, empty, empty);
+    math::LogLogSpline eLogLog(empty, empty);
+    math::QuinticSpline eQuintic(empty, empty, empty);
+    double tmpval=0, tmpder=0, tmpder2=0;
+    bool ok = true;
+    eLinear.evalDeriv(0, &tmpval, &tmpder, &tmpder2);
+    ok &= !(tmpval==tmpval || tmpder==tmpder || tmpder2==tmpder2);   // expected to be NaN
+    eCubic.evalDeriv(0, &tmpval, &tmpder, &tmpder2);
+    ok &= !(tmpval==tmpval || tmpder==tmpder || tmpder2==tmpder2);
+    eHermite.evalDeriv(0, &tmpval, &tmpder, &tmpder2);
+    ok &= !(tmpval==tmpval || tmpder==tmpder || tmpder2==tmpder2);
+    eLogLog.evalDeriv(0, &tmpval, &tmpder, &tmpder2);
+    ok &= !(tmpval==tmpval || tmpder==tmpder || tmpder2==tmpder2);
+    eQuintic.evalDeriv(0, &tmpval, &tmpder, &tmpder2);
+    ok &= !(tmpval==tmpval || tmpder==tmpder || tmpder2==tmpder2);
+    return ok;
+}
+
+bool testLength1Splines()
+{
+    double delta = 0.25;  // all floats in this test are exactly representable
+    std::vector<double> x(1, 0.625), val(1, 0.5), der(1, -1.5);
+    math::LinearInterpolator oLinear(x, val);
+    math::CubicSpline oCubic(x, val, true, der[0], 999 /*derivRight - should be ignored*/);
+    math::CubicSpline oHermite(x, val, der);
+    math::LogLogSpline oLogLog(x, val);
+    math::QuinticSpline oQuintic(x, val, der);
+    double tmpval=0, tmpder=0, tmpder2=0;
+    bool ok = true;
+
+    // linear and log-log should produce a constant, since they have no information about the derivative
+    oLinear.evalDeriv(x[0] + delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0]) && (tmpder == 0) && (tmpder2 == 0);
+    oLinear.evalDeriv(x[0] - delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0]) && (tmpder == 0) && (tmpder2 == 0);
+
+    oLogLog.evalDeriv(x[0] + delta, &tmpval, &tmpder, &tmpder2);
+    ok &= math::fcmp(tmpval, val[0]) == 0 && (tmpder == 0) && (tmpder2 == 0);
+    oLogLog.evalDeriv(x[0] - delta, &tmpval, &tmpder, &tmpder2);
+    ok &= math::fcmp(tmpval, val[0]) == 0 && (tmpder == 0) && (tmpder2 == 0);
+
+    // other ones should extrapolate linearly given the derivative at a single point
+    oCubic.evalDeriv(x[0] + delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] + delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+    oCubic.evalDeriv(x[0] - delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] - delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+
+    oHermite.evalDeriv(x[0] + delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] + delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+    oHermite.evalDeriv(x[0] - delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] - delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+
+    oQuintic.evalDeriv(x[0] + delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] + delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+    oQuintic.evalDeriv(x[0] - delta, &tmpval, &tmpder, &tmpder2);
+    ok &= (tmpval == val[0] - delta * der[0]) && (tmpder == der[0]) && (tmpder2 == 0);
+
+    return ok;
+}
+
 bool testLogScaledSplines()
 {
     const int NNODES=41;
@@ -747,12 +812,11 @@ std::string evalSpline(const math::IFunction& fnc)
 bool test1dSpline()
 {
     std::cout << "\033[1;33m1d interpolation\033[0m\n";
+
     const int NNODES  = 20;
     const int NSUBINT = 50;
     std::vector<double> yvalues(NNODES), yderivs(NNODES);
     std::vector<double> xnodes = math::createUniformGrid(NNODES, XMIN1D, XMAX1D);
-    //for(int i=0; i<NNODES; i++)   // this would create a denser grid towards the endpoints
-    //    xnodes[i] = XMIN1D + (XMAX1D-XMIN1D) * pow_2(i/(NNODES-1.))*(3-2*i/(NNODES-1.));
     testfnc1d fnc;   // the original function that we are approximating
     for(int i=0; i<NNODES; i++)
         fnc.evalDeriv(xnodes[i], &yvalues[i], &yderivs[i]);
@@ -1008,6 +1072,8 @@ bool test1dSpline()
     bool okfem = testFiniteElement();
 
     bool ok =
+    testCond(testEmptySplines(), "empty splines failed") &&
+    testCond(testLength1Splines(), "length-1 splines failed") &&
     testCond(oknat, "natural cubic spline values at grid nodes are inexact") &&
     testCond(okcla, "clamped cubic spline values at grid nodes are inexact") &&
     testCond(okher, "hermite cubic spline values or derivatives at grid nodes are inexact") &&

@@ -61,14 +61,14 @@ class SphericalModel:
         LogRadii = numpy.log(GridRadii[good_elems])
 
         # initialize an interpolating spline for 3d density (log-log scaled)
-        spl_rho  = agama.CubicSpline(LogRadii, rho_grid)
+        spl_rho  = agama.Spline(LogRadii, rho_grid)
         # check and correct endpoint log-slopes, if necessary
         slopein  = spl_rho(LogRadii[0], 1)
         slopeout = spl_rho(LogRadii[-1],1)
         SlopeIn  = max(-2.0, min(0.0, slopein))
         SlopeOut = min(-3.5, slopeout)
         print("Density slope: inner=%f [%f], outer=%f [%f]" % (SlopeIn, slopein, SlopeOut, slopeout))
-        self.spl_rho = agama.CubicSpline(LogRadii, rho_grid, left=SlopeIn, right=SlopeOut)
+        self.spl_rho = agama.Spline(LogRadii, rho_grid, left=SlopeIn, right=SlopeOut)
 
     def surface_density(self, R):
         ''' Return surface density Sigma(R) '''

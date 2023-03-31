@@ -1,7 +1,7 @@
 /** \file   py_wrapper.cpp
     \brief  Python wrapper for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2021
+    \date   2014-2023
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -108,7 +108,9 @@ static PyTypeObject
     *ActionMapperTypePtr,
     *DistributionFunctionTypePtr,
     *SelectionFunctionTypePtr,
-    *TargetTypePtr;
+    *TargetTypePtr,
+    *SplineTypePtr,
+    *OrbitTypePtr;
 
 // forward declaration for a routine that constructs a Python cubic spline object
 PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
@@ -350,6 +352,7 @@ bool toBool(PyObject* obj, bool defaultValue=false)
 }
 
 /// a convenience function for accessing an element of a PyArrayObject with the given data type
+/// \return  a reference to the element, allowing one to modify it in-place
 template<typename DataType>
 inline DataType& pyArrayElem(void* arr, npy_intp ind)
 {
@@ -1425,7 +1428,7 @@ PyObject* createDensityObject(const potential::PtrDensity& dens)
     // now we may safely assign a new value to the smart pointer
     dens_obj->dens = dens;
     utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
-        std::string(dens->name())+" density at "+utils::toString(dens.get()));
+        dens->name()+" density at "+utils::toString(dens.get()));
     return (PyObject*)dens_obj;
 }
 
@@ -1500,6 +1503,10 @@ potential::PtrDensity Density_initFromTuple(PyObject* tuple)
 /// generic constructor of Density class
 int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->dens) {
+        PyErr_SetString(PyExc_RuntimeError, "Density object cannot be reinitialized");
+        return -1;
+    }
     try{
         Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
         if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
@@ -1682,7 +1689,7 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
     potential::PtrPotential pot = getPotential(pot_obj);  // if not NULL, will assign velocity as well
     if(pot_obj!=NULL && !pot) {
         PyErr_SetString(PyExc_TypeError,
-            "'potential' must be a valid instance of Potential class");
+            "'potential' must be a valid Potential object");
         return NULL;
     }
     try{
@@ -1720,9 +1727,13 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
-/// return the name (with some further decorations in case of composite objects)
+/// return the density or potential name and symmetry
 PyObject* Density_name(PyObject* self)
 {
+    if(!((DensityObject*)self)->dens) {
+        PyErr_SetString(PyExc_RuntimeError, "Density is not initialized properly");
+        return NULL;
+    }
     return Py_BuildValue("s", (((DensityObject*)self)->dens->name() + " (symmetry: " +
         potential::getSymmetryNameByType(((DensityObject*)self)->dens->symmetry()) + ")").c_str());
 }
@@ -1804,10 +1815,6 @@ static PySequenceMethods Density_sequence_methods = {
 };
 
 static PyMethodDef Density_methods[] = {
-    { "name", (PyCFunction)Density_name, METH_NOARGS,
-      "Return the name of the density or potential model\n"
-      "No arguments\n"
-      "Returns: string" },
     { "density", (PyCFunction)Density_density, METH_VARARGS | METH_KEYWORDS,
       "Compute density at a given point or array of points\n"
       "Arguments: a triplet of floats (x,y,z) or a 2d Nx3 array; optionally t=... (time)\n"
@@ -1868,7 +1875,7 @@ static PyTypeObject DensityType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Density",
     sizeof(DensityObject), 0, (destructor)Density_dealloc,
-    0, 0, 0, 0, 0, 0, &Density_sequence_methods, 0, Density_hash, 0, Density_name, 0, 0, 0,
+    0, 0, 0, 0, Density_name, 0, &Density_sequence_methods, 0, Density_hash, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDensity,
     0, 0, Density_compare, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Density_init
@@ -2136,8 +2143,8 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
     // same hack as in 'createDensityObject()'
     new (&(pot_obj->pot)) potential::PtrPotential;
     pot_obj->pot = pot;
-    utils::msg(utils::VL_DEBUG, "Agama",
-        "Created a Python wrapper for "+std::string(pot->name())+" potential");
+    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
+        pot->name()+" potential at " + utils::toString(pot.get()));
     return (PyObject*)pot_obj;
 }
 
@@ -2255,6 +2262,10 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
 /// the generic constructor of Potential object
 int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->pot) {
+        PyErr_SetString(PyExc_RuntimeError, "Potential object cannot be reinitialized");
+        return -1;
+    }
     try{
         Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
         if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
@@ -2672,7 +2683,7 @@ static PyTypeObject PotentialType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Potential",
     sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
-    0, 0, 0, 0, 0, 0, /*sic!*/ &Density_sequence_methods, 0, 0, 0, /*sic!*/ Density_name, 0, 0, 0,
+    0, 0, 0, 0, /*sic!*/ Density_name, 0, /*sic!*/ &Density_sequence_methods, 0, 0, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE /*allow it to be subclassed*/, docstringPotential,
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, /*parent class*/ &DensityType, 0, 0, 0, 0,
     (initproc)Potential_init
@@ -2746,8 +2757,12 @@ actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, 
 }
 
 /// constructor of ActionFinder class
-int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
+int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->af) {
+        PyErr_SetString(PyExc_RuntimeError, "ActionFinder object cannot be reinitialized");
+        return -1;
+    }
     static const char* keywords[] = {"potential", "interp", NULL};
     PyObject* pot_obj=NULL, *interp_flag=NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
@@ -2759,11 +2774,11 @@ int ActionFinder_init(PyObject* self, PyObject* args, PyObject* namedArgs)
     }
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
-        PyErr_SetString(PyExc_TypeError, "Argument must be a valid instance of Potential class");
+        PyErr_SetString(PyExc_TypeError, "Argument must be a valid Potential object");
         return -1;
     }
     try{
-        ((ActionFinderObject*)self)->af = createActionFinder(pot, toBool(interp_flag, false));
+        self->af = createActionFinder(pot, toBool(interp_flag, false));
         return 0;
     }
     catch(std::exception& e) {
@@ -2851,7 +2866,7 @@ static PyTypeObject ActionFinderType = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringActionFinder,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ActionFinder_init
+    (initproc)ActionFinder_init
 };
 
 
@@ -2910,7 +2925,7 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
         PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid instance of Potential class");
+            "Argument 'potential' must be a valid Potential object");
         return NULL;
     }
     if(!isAxisymmetric(*pot)) {
@@ -2969,6 +2984,10 @@ void ActionMapper_dealloc(ActionMapperObject* self)
 
 int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->am) {
+        PyErr_SetString(PyExc_RuntimeError, "ActionMapper object cannot be reinitialized");
+        return -1;
+    }
     static const char* keywords[] = {"potential", "actions", "tol", NULL};
     PyObject* pot_obj=NULL;
     double tol=NAN;
@@ -2981,7 +3000,7 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
     }
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
-        PyErr_SetString(PyExc_TypeError, "First argument must be a valid instance of Potential class");
+        PyErr_SetString(PyExc_TypeError, "First argument must be a valid Potential object");
         return -1;
     }
     try{
@@ -3224,7 +3243,8 @@ PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
     // same hack as in 'createDensityObject()'
     new (&(df_obj->df)) df::PtrDistributionFunction;
     df_obj->df = df;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for distribution function");
+    utils::msg(utils::VL_DEBUG, "Agama",
+        "Created a Python wrapper for distribution function at " + utils::toString(df.get()));
     return (PyObject*)df_obj;
 }
 
@@ -3273,7 +3293,7 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
     if(pot_obj!=NULL) {
         pot = getPotential(pot_obj);
         if(!pot)
-            throw std::invalid_argument("Argument 'potential' must be a valid instance of Potential class");
+            throw std::invalid_argument("Argument 'potential' must be a valid Potential object");
     }
     PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
     potential::PtrDensity dens;
@@ -3317,6 +3337,10 @@ df::PtrDistributionFunction DistributionFunction_initFromTuple(PyObject* tuple)
 /// the generic constructor of DistributionFunction object
 int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->df) {
+        PyErr_SetString(PyExc_RuntimeError, "DistributionFunction object cannot be reinitialized");
+        return -1;
+    }
     try{
         // check if we have only a tuple of DF components as arguments
         if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0 &&
@@ -3488,6 +3512,10 @@ void SelectionFunction_dealloc(SelectionFunctionObject* self)
 /// constructor of SelectionFunction class
 int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->sf) {
+        PyErr_SetString(PyExc_RuntimeError, "SelectionFunction object cannot be reinitialized");
+        return -1;
+    }
     PyObject* point_obj = NULL;
     double radius = NAN, steepness = INFINITY;
     static const char* keywords[] = {"point", "radius", "steepness", NULL};
@@ -3711,6 +3739,10 @@ bool GalaxyModel_isCorrect(GalaxyModelObject* self)
 
 int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->pot_obj || self->df_obj) {
+        PyErr_SetString(PyExc_RuntimeError, "GalaxyModel object cannot be reinitialized");
+        return -1;
+    }
     static const char* keywords[] = {"potential", "df", "af", "sf", NULL};
     PyObject *pot_obj = NULL, *df_obj = NULL, *af_obj = NULL, *sf_obj = NULL;
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|OO", const_cast<char**>(keywords),
@@ -3721,22 +3753,18 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
 
     // check and store the potential
     if(!getPotential(pot_obj)) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid instance of Potential class");
+        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return -1;
     }
-    Py_XDECREF(self->pot_obj);
     Py_INCREF(pot_obj);
     self->pot_obj = (PotentialObject*)pot_obj;
 
     // check and store the DF
     df::PtrDistributionFunction df = getDistributionFunction(df_obj);
     if(!df) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'df' must be a valid instance of DistributionFunction class");
+        PyErr_SetString(PyExc_TypeError, "Argument 'df' must be a valid DistributionFunction object");
         return -1;
     }
-    Py_XDECREF(self->df_obj);
     if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr))
     {   // it is a true Python DF object
         Py_INCREF(df_obj);
@@ -3757,7 +3785,6 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
             "corresponding to the given potential");
         return -1;
     }
-    Py_XDECREF(self->af_obj);
     if(af_obj==NULL) {  // no action finder provided - create one internally
         PyObject *args = Py_BuildValue("(O)", pot_obj);
         self->af_obj = (ActionFinderObject*)PyObject_CallObject((PyObject*)ActionFinderTypePtr, args);
@@ -3770,7 +3797,6 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
     }
 
     // sf_obj, if provided, must be a callable object OR an instance of a SelectionFunction class
-    Py_XDECREF(self->sf_obj);
     if(sf_obj) {
         if( !PyObject_TypeCheck(sf_obj, SelectionFunctionTypePtr) &&
             !checkCallable(sf_obj, /*input dim*/ 6))
@@ -4536,22 +4562,24 @@ void Component_dealloc(ComponentObject* self)
 
 int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->comp) {
+        PyErr_SetString(PyExc_RuntimeError, "Component object cannot be reinitialized");
+        return -1;
+    }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
     // check if a potential object was provided
     PyObject* pot_obj = getItemFromPyDict(namedArgs, "potential");
     potential::PtrPotential pot = getPotential(pot_obj);
     if(pot_obj!=NULL && !pot) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid instance of Potential class");
+        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return -1;
     }
     // check if a density object was provided
     PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
     potential::PtrDensity dens = getDensity(dens_obj);
     if(dens_obj!=NULL && !dens) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'density' must be a valid Density instance");
+        PyErr_SetString(PyExc_TypeError, "Argument 'density' must be a valid Density object");
         return -1;
     }
     // check if a df object was provided
@@ -4559,7 +4587,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
     df::PtrDistributionFunction df = getDistributionFunction(df_obj);
     if(df_obj!=NULL && !df) {
         PyErr_SetString(PyExc_TypeError,
-            "Argument 'df' must be a valid instance of DistributionFunction class");
+            "Argument 'df' must be a valid DistributionFunction object");
         return -1;
     }
     // check if a 'disklike' flag was provided
@@ -4676,16 +4704,27 @@ PyObject* Component_getDensity(ComponentObject* self)
     return Py_None;
 }
 
+static PyGetSetDef Component_properties[] = {
+    { const_cast<char*>("potential"), (getter)Component_getPotential, NULL,
+      const_cast<char*>("Potential associated with a static component, or None"), NULL },
+    { const_cast<char*>("density"), (getter)Component_getDensity, NULL,
+      const_cast<char*>("Density object representing the fixed density profile "
+      "for a static component (or None if it has only a potential profile), "
+      "or the density profile from the previous iteration of the self-consistent "
+      "modelling procedure for a DF-based component"), NULL },
+    { NULL }
+};
+
 static PyMethodDef Component_methods[] = {
     { "getPotential", (PyCFunction)Component_getPotential, METH_NOARGS,
       "Return a Potential object associated with a static component, or None.\n"
-      "No arguments.\n" },
+      "Deprecated - use the 'potential' property instead.\n" },
     { "getDensity", (PyCFunction)Component_getDensity, METH_NOARGS,
       "Return a Density object representing the fixed density profile for a static component "
       "(or None if it has only a potential profile), "
       "or the density profile from the previous iteration of the self-consistent "
       "modelling procedure for a DF-based component.\n"
-      "No arguments.\n" },
+      "Deprecated - use the 'density' property instead.\n" },
     { NULL }
 };
 
@@ -4693,9 +4732,9 @@ static PyTypeObject ComponentType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Component",
     sizeof(ComponentObject), 0, (destructor)Component_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Component_name, 0, 0, 0,
+    0, 0, 0, 0, Component_name, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringComponent,
-    0, 0, 0, 0, 0, 0, Component_methods, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, Component_methods, 0, Component_properties, 0, 0, 0, 0, 0,
     (initproc)Component_init
 };
 
@@ -4727,10 +4766,10 @@ static const char* docstringSelfConsistentModel =
 /// Python type corresponding to SelfConsistentModel class
 typedef struct {
     PyObject_HEAD
-    PyObject* components;
-    PotentialObject* pot;
-    ActionFinderObject* af;
+    PyObject* components;         ///< Python list of Component objects
     /// members of galaxymodel::SelfConsistentModel structure listed here
+    potential::PtrPotential pot;  ///< current potential (initially may be empty)
+    actions::PtrActionFinder af;  ///< corresponding action finder (may be empty initially)
     bool useActionInterpolation;  ///< whether to use the interpolated action finder
     bool verbose;                 ///< whether to print out progress report messages
     double rminSph, rmaxSph;      ///< range of radii for the logarithmic grid
@@ -4746,22 +4785,39 @@ typedef struct {
 void SelfConsistentModel_dealloc(SelfConsistentModelObject* self)
 {
     Py_XDECREF(self->components);
-    Py_XDECREF(self->pot);
-    Py_XDECREF(self->af);
+    self->pot.reset();
+    self->af.reset();
     Py_TYPE(self)->tp_free(self);
 }
 
 int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, PyObject* namedArgs)
 {
-    Py_XDECREF(self->components);
-    Py_XDECREF(self->pot);
-    Py_XDECREF(self->af);
+    if(self->components) {
+        PyErr_SetString(PyExc_RuntimeError, "SelfConsistentModel object cannot be reinitialized");
+        return -1;
+    }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
-    // allocate a new empty list of components, but not potential or action finder
-    self->components  = PyList_New(0);
-    self->pot         = NULL;
-    self->af          = NULL;
+    // allocate a new empty list of components
+    PyObject* comp_obj= getItemFromPyDict(namedArgs, "components");
+    if(comp_obj!=NULL) {
+        if(PyList_Check(comp_obj)) {
+            self->components = comp_obj;
+            Py_INCREF(comp_obj);
+        } else {
+            PyErr_SetString(PyExc_TypeError, "Argument 'components' must be a list");
+            return -1;
+        }
+    } else {
+        self->components  = PyList_New(0);
+    }
+    // check if a potential object was provided
+    PyObject* pot_obj = getItemFromPyDict(namedArgs, "potential");
+    self->pot = getPotential(pot_obj);
+    if(pot_obj!=NULL && !self->pot) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
+        return -1;
+    }
     self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), false);
     self->verbose     =   toBool(getItemFromPyDict(namedArgs, "verbose"), true);
     self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
@@ -4808,46 +4864,73 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
     model.RmaxCyl = self->RmaxCyl * conv->lengthUnit;
     model.zminCyl = self->zminCyl * conv->lengthUnit;
     model.zmaxCyl = self->zmaxCyl * conv->lengthUnit;
-    model.sizeRadialCyl = self->sizeRadialCyl;
+    model.sizeRadialCyl   = self->sizeRadialCyl;
     model.sizeVerticalCyl = self->sizeVerticalCyl;
-    if(self->pot!=NULL) {
-        if(PyObject_TypeCheck(self->pot, &PotentialType))
-            model.totalPotential = ((PotentialObject*)self->pot)->pot;
-        else {
-            PyErr_SetString(PyExc_TypeError,
-                "SelfConsistentModel.potential must be an instance of Potential class");
-            return NULL;
-        }
-    }
-    if(self->af!=NULL && PyObject_TypeCheck(self->af, &ActionFinderType))
-        model.actionFinder = ((ActionFinderObject*)self->af)->af;
-    PyObject* result = NULL;
+    model.totalPotential  = self->pot;   // may be empty - will be automatically initialized if so
+    model.actionFinder    = self->af;    // same
     try {
         doIteration(model);
+        // retrieve the updated potential and action finder
+        self->pot = model.totalPotential;
+        self->af  = model.actionFinder;
         Py_INCREF(Py_None);
-        result = Py_None;
+        return Py_None;
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError,
             (std::string("Error in SelfConsistentModel.iterate(): ")+e.what()).c_str());
+        return NULL;
     }
-    // update the total potential and action finder by copying the C++ smart pointers into
-    // Python objects; old Python objects are released (and destroyed if no one else uses them)
-    Py_XDECREF(self->pot);
-    Py_XDECREF(self->af);
-    self->pot = (PotentialObject*)createPotentialObject(model.totalPotential);
-    self->af  = (ActionFinderObject*)createActionFinderObject(model.actionFinder);
-    return result;  // None on success, NULL on error
+}
+
+PyObject* SelfConsistentModel_getComponents(SelfConsistentModelObject* self, void*)
+{
+    Py_INCREF(self->components);
+    return self->components;
+}
+
+int SelfConsistentModel_setComponents(SelfConsistentModelObject* self, PyObject* comp_obj, void*)
+{
+    if(!PyList_Check(comp_obj)) {
+        PyErr_SetString(PyExc_TypeError, "SelfConsistentModel.components must be a list");
+        return -1;
+    }
+    self->components = comp_obj;
+    Py_INCREF(self->components);
+    return 0;
+}
+
+PyObject* SelfConsistentModel_getPotential(SelfConsistentModelObject* self, void*)
+{
+    if(self->pot)
+        return createPotentialObject(self->pot);
+    Py_INCREF(Py_None);  // otherwise the potential is not yet initialized
+    return Py_None;
+}
+
+int SelfConsistentModel_setPotential(SelfConsistentModelObject* self, PyObject* pot_obj, void*)
+{
+    potential::PtrPotential pot = getPotential(pot_obj);
+    if(!pot) {
+        PyErr_SetString(PyExc_TypeError,
+            "SelfConsistentModel.potential must be a valid Potential object");
+        return -1;
+    }
+    if(self->pot != pot)
+        self->af.reset();  // invalidate the action finder because the potential has changed
+    self->pot = pot;
+    return 0;
+}
+
+PyObject* SelfConsistentModel_getActionFinder(SelfConsistentModelObject* self, void*)
+{
+    if(self->af)
+        return createActionFinderObject(self->af);
+    Py_INCREF(Py_None);  // otherwise the action finder is not yet initialized or invalidated
+    return Py_None;
 }
 
 static PyMemberDef SelfConsistentModel_members[] = {
-    { const_cast<char*>("components"), T_OBJECT_EX, offsetof(SelfConsistentModelObject, components), 0,
-      const_cast<char*>("List of Component objects (may be modified by the user, but should be "
-      "non-empty and contain only instances of Component class upon a call to 'iterate()' method)") },
-    { const_cast<char*>("potential"), T_OBJECT, offsetof(SelfConsistentModelObject, pot), 0,
-      const_cast<char*>("Total potential of the model") },
-    { const_cast<char*>("af"), T_OBJECT, offsetof(SelfConsistentModelObject, af), READONLY,
-      const_cast<char*>("Action finder associated with the total potential (read-only)") },
     { const_cast<char*>("useActionInterpolation"), T_BOOL,
       offsetof(SelfConsistentModelObject, useActionInterpolation), 0,
       const_cast<char*>("Whether to use interpolated action finder (faster but less accurate)") },
@@ -4876,6 +4959,19 @@ static PyMemberDef SelfConsistentModel_members[] = {
     { NULL }
 };
 
+static PyGetSetDef SelfConsistentModel_properties[] = {
+    { const_cast<char*>("components"),
+      (getter)SelfConsistentModel_getComponents, (setter)SelfConsistentModel_setComponents,
+      const_cast<char*>("List of Component objects (may be modified by the user, but should be non-empty "
+      "and contain only instances of Component class upon a call to 'iterate()' method)"), NULL },
+    { const_cast<char*>("potential"),
+      (getter)SelfConsistentModel_getPotential, (setter)SelfConsistentModel_setPotential,
+      const_cast<char*>("Total potential of the model, or None if not yet initialized"), NULL },
+    { const_cast<char*>("af"), (getter)SelfConsistentModel_getActionFinder, NULL,
+      const_cast<char*>("Action finder associated with the total potential (read-only)"), NULL },
+    { NULL }
+};
+
 static PyMethodDef SelfConsistentModel_methods[] = {
     { "iterate", (PyCFunction)SelfConsistentModel_iterate, METH_NOARGS,
       "Perform one iteration of self-consistent modelling procedure, "
@@ -4889,9 +4985,9 @@ static PyTypeObject SelfConsistentModelType = {
     "agama.SelfConsistentModel",
     sizeof(SelfConsistentModelObject), 0, (destructor)SelfConsistentModel_dealloc,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringSelfConsistentModel,
-    0, 0, 0, 0, 0, 0, SelfConsistentModel_methods, SelfConsistentModel_members, 0, 0, 0, 0, 0, 0,
-    (initproc)SelfConsistentModel_init
+    Py_TPFLAGS_DEFAULT, docstringSelfConsistentModel, 0, 0, 0, 0, 0, 0,
+    SelfConsistentModel_methods, SelfConsistentModel_members, SelfConsistentModel_properties,
+    0, 0, 0, 0, 0, (initproc)SelfConsistentModel_init
 };
 
 
@@ -5063,6 +5159,10 @@ void Target_dealloc(TargetObject* self)
 
 int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
 {
+    if(self->target) {
+        PyErr_SetString(PyExc_RuntimeError, "Target object cannot be reinitialized");
+        return -1;
+    }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
     PyObject* type_obj = getItemFromPyDict(namedArgs, "type");
@@ -5342,9 +5442,9 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
     return result;
 }
 
-PyObject* Target_name(TargetObject* self)
+PyObject* Target_name(PyObject* self)
 {
-    return Py_BuildValue("s", self->target->name());
+    return Py_BuildValue("s", ((TargetObject*)self)->target->name());
 }
 
 PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
@@ -5374,8 +5474,8 @@ static PyTypeObject TargetType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Target",
     sizeof(TargetObject), 0, (destructor)Target_dealloc,
-    0, 0, 0, 0, 0, 0, &Target_sequence_methods, 0, 0,
-    (PyCFunctionWithKeywords)Target_value, (reprfunc)Target_name, 0, 0, 0,
+    0, 0, 0, 0, Target_name, 0, &Target_sequence_methods, 0, 0,
+    (PyCFunctionWithKeywords)Target_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringTarget,
     0, 0, 0, 0, 0, 0, Target_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Target_init
@@ -5629,10 +5729,751 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 
 ///@}
-//  ---------------------------------
-/// \name  Orbit integration routine
-//  ---------------------------------
+//  -----------------------------------------
+/// \name  Spline class and related routines
+//  -----------------------------------------
 ///@{
+
+static const char* docstringSpline =
+    "Cubic or quintic spline (depending on whether derivatives are provided as input).\n"
+    "Arguments:\n"
+    "    x (array of floats) -- grid nodes in x, must be sorted in increasing order.\n"
+    "    y (array of floats) -- values of spline at grid nodes, same length as x.\n"
+    "    der (array of floats, optional) -- array of spline derivatives at each node "
+    "(same length as x); if provided, a quintic spline is constructed, "
+    "and no other optional arguments are accepted.\n"
+    "    left (float, optional) -- derivative at the leftmost endpoint for a cubic spline; "
+    "if not provided or is NAN, a natural boundary condition is used "
+    "(i.e., second derivative is zero).\n"
+    "    right (float, optional) -- derivative at the rightmost endpoint for a cubic spline, "
+    "same default behaviour.\n"
+    "    reg (boolean, default False) -- apply a regularization filter for a cubic spline "
+    "to reduce overshooting in the case of sharp discontinuities in input data "
+    "and preserve monotonic trend of input points (in this case, the provided left/right "
+    "endpoint derivatives may not be respected).\n\n"
+    "Values of the spline and up to its second derivative are computed using the () "
+    "operator with the first argument being a single x-point or an array of points, "
+    "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
+    "and the optional third argument (ext=...) specifies the value returned for "
+    "points outside the definition region; if the latter is not provided, "
+    "the spline is linearly extrapolated outside its definition region "
+    "(unless the spline is empty, in which case the result is always NaN).\n"
+    "A Spline object has a length equal to the number of nodes in x, and its [] operator "
+    "returns the value of x at the given node.\n";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Spline class
+typedef struct {
+    PyObject_HEAD
+    math::PtrInterpolator1d spl;
+} SplineObject;
+/// \endcond
+
+void Spline_dealloc(SplineObject* self)
+{
+    if(utils::verbosityLevel >= utils::VL_DEBUG) {
+        const math::CubicSpline* splcub = dynamic_cast<const math::CubicSpline*>(self->spl.get());
+        const math::QuinticSpline* splqui = dynamic_cast<const math::QuinticSpline*>(self->spl.get());
+        if(splcub)
+            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size "+
+                utils::toString(splcub->xvalues().size())+" at "+utils::toString(splcub));
+        else if(splqui)
+            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a quintic spline of size "+
+                utils::toString(splqui->xvalues().size())+" at "+utils::toString(splqui));
+        else if(!self->spl.get())  // pointer remains NULL when constructor failed
+            utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty spline");
+        else  // shouldn't happen
+            printf("Corrupted Spline object at %p is being deallocated\n", self->spl.get());
+    }
+    self->spl.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline object cannot be reinitialized");
+        return -1;
+    }
+    PyObject* x_obj=NULL;
+    PyObject* y_obj=NULL;
+    PyObject* d_obj=NULL;
+    double derivLeft=NAN, derivRight=NAN;  // undefined by default
+    int regularize=0;
+    static const char* keywords[] = {"x","y","der","left","right","reg",NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oddi", const_cast<char **>(keywords),
+        &x_obj, &y_obj, &d_obj, &derivLeft, &derivRight, &regularize))
+    {
+        PyErr_SetString(PyExc_TypeError, "Spline: "
+            "must provide two arrays of equal length >= 2 (input x and y points), "
+            "optionally an array of derivatives for a quintic spline (same length), "
+            "or alternatively optional parameters for a cubic spline: "
+            "one or both endpoint derivatives (left, right), or a regularization flag (reg)");
+        return -1;
+    }
+    std::vector<double>
+        xvalues(toDoubleArray(x_obj)),
+        yvalues(toDoubleArray(y_obj)),
+        dvalues(toDoubleArray(d_obj));
+    if(xvalues.size() != yvalues.size() ||
+        (d_obj && dvalues.size() != xvalues.size()))
+    {
+        PyErr_SetString(PyExc_TypeError, "Spline: input does not contain valid arrays");
+        return -1;
+    }
+    if(d_obj && (derivLeft==derivLeft || derivRight==derivRight || regularize)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Spline: argument 'der' cannot be used together with 'left', 'right' or 'reg'");
+        return -1;
+    }
+    try {
+        std::string kind;
+        if(!d_obj) {
+            self->spl.reset(new math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight));
+            if(derivLeft==derivLeft || derivRight==derivRight)
+                kind += "clamped ";
+            if(regularize)
+                kind += "regularized ";
+            kind += "cubic";
+        } else {
+            self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
+            kind = "quintic";
+        }
+        utils::msg(utils::VL_DEBUG, "Agama", "Created a "+kind+" spline of size "+
+            utils::toString(xvalues.size())+" at "+utils::toString(self->spl.get()));
+        return 0;
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return -1;
+    }
+}
+
+inline double splEval(const math::IFunction& spl, double x, int der)
+{
+    double result;
+    switch(der) {
+        case 0: return spl.value(x);
+        case 1: spl.evalDeriv(x, NULL, &result); return result;
+        case 2: spl.evalDeriv(x, NULL, NULL, &result); return result;
+        default: return NAN;  // shouldn't occur
+    }
+}
+
+PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!self->spl) {  // shouldn't happen
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
+        return NULL;
+    }
+    static const char* keywords[] = {"x","der","ext",NULL};
+    PyObject* ptx=NULL;
+    int der=0;
+    PyObject* extrapolate_obj=NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iO", const_cast<char **>(keywords),
+        &ptx, &der, &extrapolate_obj))
+        return NULL;
+    if(der<0 || der>2) {
+        PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 2nd");
+        return NULL;
+    }
+    // check if we should extrapolate the spline (default behaviour),
+    // or replace the output with the given value if it's out of range (if ext=... argument was given)
+    double extrapolate_val = extrapolate_obj == NULL ? 0 : toDouble(extrapolate_obj);
+    double xmin = self->spl->xmin(), xmax = self->spl->xmax();
+
+    // if the input is a single value, just do it
+    if(PyFloat_Check(ptx) || PyInt_Check(ptx) || PyLong_Check(ptx)) {
+        double x = PyFloat_AsDouble(ptx);
+        if(PyErr_Occurred())
+            return NULL;
+        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
+            return Py_BuildValue("O", extrapolate_obj);
+        else
+            return Py_BuildValue("d", splEval(*self->spl, x, der) );
+    }
+    // otherwise the input should be an array, and the output will be an array of the same shape
+    PyArrayObject *arr = (PyArrayObject*)
+        PyArray_FROM_OTF(ptx, NPY_DOUBLE, NPY_ARRAY_OUT_ARRAY | NPY_ARRAY_ENSURECOPY);
+    if(arr == NULL) {
+        PyErr_SetString(PyExc_TypeError, "Argument must be either float, list or numpy array");
+        return NULL;
+    }
+
+    // replace elements of the copy of input array with computed values
+    npy_intp size = PyArray_SIZE(arr);
+    for(int i=0; i<size; i++) {
+        // reference to the array element to be replaced
+        double& x = static_cast<double*>(PyArray_DATA(arr))[i];
+        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
+            x = extrapolate_val;
+        else
+            x = splEval(*self->spl, x, der);
+    }
+    return PyArray_Return(arr);
+}
+
+PyObject* Spline_name(SplineObject* self)
+{
+    const math::CubicSpline*   splcub = dynamic_cast<const math::CubicSpline*>  (self->spl.get());
+    const math::QuinticSpline* splqui = dynamic_cast<const math::QuinticSpline*>(self->spl.get());
+    if(!splcub && !splqui) {  // shouldn't happen
+        PyErr_SetString(PyExc_RuntimeError, "Spline is not properly initialized");
+        return NULL;
+    }
+    const std::vector<double>& xvalues = self->spl->xvalues();
+    std::string result = splcub ? "Cubic" : "Quintic";
+    result += " spline with " + utils::toString(xvalues.size()) + " nodes";
+    if(!xvalues.empty())
+        result += " on [" + utils::toString(xvalues.front(), 18) +
+            ":" + utils::toString(xvalues.back(), 18) + "]";
+    return Py_BuildValue("s", result.c_str());
+}
+
+PyObject* Spline_elem(SplineObject* self, Py_ssize_t index)
+{
+    if(!self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline is not properly initialized");
+        return NULL;
+    }
+    if(index >= 0 && index < (Py_ssize_t)self->spl->xvalues().size())
+        return Py_BuildValue("d", self->spl->xvalues()[index]);
+    else {
+        PyErr_SetString(PyExc_IndexError, "Spline node index out of range");
+        return NULL;
+    }
+}
+
+Py_ssize_t Spline_len(SplineObject* self)
+{
+    return self->spl ? self->spl->xvalues().size() : -1;
+}
+
+static PySequenceMethods Spline_sequence_methods = {
+    (lenfunc)Spline_len, 0, 0, (ssizeargfunc)Spline_elem,
+};
+
+static PyMethodDef Spline_methods[] = {
+    { NULL, NULL, 0, NULL }  // no named methods
+};
+
+static PyTypeObject SplineType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Spline",
+    sizeof(SplineObject), 0, (destructor)Spline_dealloc,
+    0, 0, 0, 0, (reprfunc)Spline_name, 0, &Spline_sequence_methods, 0, 0,
+    (PyCFunctionWithKeywords)Spline_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringSpline,
+    0, 0, 0, 0, 0, 0, Spline_methods, 0, 0, 0, 0, 0, 0, 0,
+    (initproc)Spline_init
+};
+
+/// Construct a Python cubic spline object from the provided x and y arrays
+PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y)
+{
+    // allocate a new Python Spline object
+    SplineObject* spl_obj = PyObject_New(SplineObject, &SplineType);
+    if(!spl_obj)
+        return NULL;
+    // initialize the smart pointer with zero before (re-)assigning a value to it
+    new (&(spl_obj->spl)) math::PtrFunction;
+    spl_obj->spl.reset(new math::CubicSpline(x, y));
+    if(utils::verbosityLevel >= utils::VL_DEBUG)
+        utils::msg(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
+            utils::toString(x.size())+" at "+utils::toString(spl_obj->spl.get()));
+    return (PyObject*)spl_obj;
+}
+
+
+static const char* docstringSplineApprox =
+    "splineApprox constructs a smoothing cubic spline from a set of points.\n"
+    "It approximates a large set of (x,y) points by a smooth curve with "
+    "a moderate number of knots.\n"
+    "Arguments:\n"
+    "    knots -- array of nodes of the grid that will be used to represent "
+    "the smoothing spline; must be sorted in order of increase. "
+    "The knots should preferrably encompass the range of x values of all points, "
+    "and each interval between knots should contain at least one points; "
+    "however, both these conditions are not obligatory.\n"
+    "    x -- x-coordinates of points (1d array), "
+    "should preferrably be in the range covered by knots, ordering does not matter.\n"
+    "    y -- y-coordinates of points, same length as x.\n"
+    "    w -- (1d array of the same length as x, optional) are weights of "
+    "each input point used in least-square fitting, assumed uniform if omitted.\n"
+    "    smooth -- (float or None) is the parameter controlling the tradeoff "
+    "between smoothness and approximation error; None means no additional smoothing "
+    "(beyond the one resulting from discreteness of the spacing of knots), "
+    "zero (default, recommended) means optimal smoothing, and any value larger than zero "
+    "results in oversmoothing; values around unity usually yield a reasonable extra suppression "
+    "of noise without significantly increasing the rms error in the approximation.\n"
+    "Returns: a Spline object.\n";
+
+PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"knots","x","y","w","smooth",NULL};
+    PyObject* k_obj=NULL;
+    PyObject* x_obj=NULL;
+    PyObject* y_obj=NULL;
+    PyObject* w_obj=NULL;
+    PyObject* s_obj=NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OOO|OO", const_cast<char **>(keywords),
+        &k_obj, &x_obj, &y_obj, &w_obj, &s_obj))
+    {
+        PyErr_SetString(PyExc_TypeError, "splineApprox: "
+            "must provide an array of grid nodes and two arrays of equal length (input x and y points), "
+            "optionally an array of weights and a smoothing factor(float or None)");
+        return NULL;
+    }
+    std::vector<double>
+        knots  (toDoubleArray(k_obj)),
+        xvalues(toDoubleArray(x_obj)),
+        yvalues(toDoubleArray(y_obj)),
+        weights(toDoubleArray(w_obj));
+    if(xvalues.empty() || yvalues.empty() || knots.empty()) {
+        PyErr_SetString(PyExc_TypeError, "Input does not contain valid arrays");
+        return NULL;
+    }
+    if(knots.size() < 2 || xvalues.size() != yvalues.size()) {
+        PyErr_SetString(PyExc_ValueError,
+            "Arguments must be an array of grid nodes (at least 2) "
+            "and two arrays of equal length (x and y)");
+        return NULL;
+    }
+    if(!weights.empty() && weights.size() != xvalues.size()) {
+        PyErr_SetString(PyExc_ValueError,
+            "Length of the array of weights must be the same as the number of x and y points");
+        return NULL;
+    }
+    double smoothfactor;
+    if(s_obj == NULL)
+        smoothfactor = 0.;
+    else if(s_obj == Py_None)
+        smoothfactor = NAN;
+    else if(PyNumber_Check(s_obj))
+        smoothfactor = PyFloat_AsDouble(s_obj);
+    else {
+        PyErr_SetString(PyExc_TypeError, "Argument 'smooth' must be a float or None");
+        return NULL;
+    }
+    try{
+        math::SplineApprox spl(knots, xvalues, weights);
+        std::vector<double> amplitudes;
+        if(smoothfactor >= 0)
+            amplitudes = spl.fitOversmooth(yvalues, smoothfactor);
+        else if(smoothfactor < 0)  // undocumented: fit with EDF = -smoothfactor
+            amplitudes = spl.fit(yvalues, -smoothfactor);
+        else  // if smooth=None, fit without any smoothing (EDF = numKnots)
+            amplitudes = spl.fit(yvalues, knots.size());
+        return createCubicSpline(knots, amplitudes);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+}
+
+
+static const char* docstringSplineLogDensity =
+    "splineLogDensity performs a non-parametric density estimate  "
+    "from a set of sample points.\n"
+    "Let rho(x) be an arbitrary density distribution over a finite or infinite "
+    "interval, and let {x_i, w_i} be a set of sample points and weights, "
+    "drawn from this distribution.\n"
+    "This routine reconstructs log(rho(x)) approximated as a cubic spline defined "
+    "by the given grid of nodes X_k, using a penalized density estimation approach.\n"
+    "Arguments:\n"
+    "    knots -- array of nodes of the grid that will be used to represent "
+    "the smoothing spline; must be sorted in order of increase. "
+    "Ideally, the knots should encompass all or most of the sample points "
+    "and be spaced such that each segment contains at least a few samples.\n"
+    "    x -- coordinates of sample points (1d array), ordering does not matter.\n"
+    "    w (optional) -- weights of sample points (1d array with the same length as x); "
+    "by default set all weights to 1/len(x).\n"
+    "    infLeft (boolean, default False) specifies whether the density is assumed to "
+    "extend to x=-infinity (True) or is taken to be zero for all x<knots[0] (False). "
+    "In the former case, any points to the left of the first knot are ignored during "
+    "the estimate, while in the latter case they are taken into account; "
+    "note that log(rho(x)) is linearly extrapolated for x<knots[0], so it will "
+    "obviously be declining towards -infinity for the integral over rho(x) to be finite.\n"
+    "    infRight (boolean, default False) is the same option for extrapolating "
+    "the estimated density to x>knots[-1].\n"
+    "    der3 (boolean, default False) determines how the roughness penalty is computed: "
+    "using 2nd derivative (False) or 3rd derivative (True). This choice determines the class "
+    "of functions that have zero penalty and are the limiting cases for infinitely large smoothing: "
+    "the latter choice implies a pure Gaussian, and the former - an exponential function, which is, "
+    "however, only attainable on (semi-)finite intervals, when there is no extrapolation.\n"
+    "    smooth (float, default 0) -- optional extra smoothing.\n"
+    "Returns: a Spline object representing log(rho(x)).\n";
+
+PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    static const char* keywords[] = {"knots","x","w","infLeft","infRight","der3","smooth",NULL};
+    PyObject* k_obj=NULL;
+    PyObject* x_obj=NULL;
+    PyObject* w_obj=NULL;
+    int infLeft=0, infRight=0, der3=0;  // should rather be bool, but python doesn't handle it in arg list
+    double smooth=0;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiiid", const_cast<char **>(keywords),
+        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &der3, &smooth))
+    {
+        PyErr_SetString(PyExc_TypeError, "splineLogDensity: "
+            "must provide an array of grid nodes and two arrays of equal length "
+            "(x coordinates of input points and their weights)");
+        return NULL;
+    }
+    std::vector<double>
+        knots  (toDoubleArray(k_obj)),
+        xvalues(toDoubleArray(x_obj)),
+        weights;
+    if(w_obj)
+        weights = toDoubleArray(w_obj);
+    else
+        weights.assign(xvalues.size(), 1./xvalues.size());
+    if(xvalues.empty() || weights.empty() || knots.empty()) {
+        PyErr_SetString(PyExc_TypeError, "Input does not contain valid arrays");
+        return NULL;
+    }
+    if(knots.size() < 2|| xvalues.size() != weights.size()) {
+        PyErr_SetString(PyExc_ValueError,
+            "Arguments must be an array of grid nodes (at least 2) "
+            "and two arrays of equal length (x and w), "
+            "plus optionally two boolean parameters (infLeft, infRight)");
+        return NULL;
+    }
+    if(!(smooth>=0)) {
+        PyErr_SetString(PyExc_ValueError, "smooth factor must be non-negative");
+        return NULL;
+    }
+    try{
+        std::vector<double> amplitudes = math::splineLogDensity<3>(knots, xvalues, weights,
+            math::FitOptions(
+            (infLeft ? math::FO_INFINITE_LEFT : 0) |
+            (infRight? math::FO_INFINITE_RIGHT: 0) |
+            (der3    ? math::FO_PENALTY_3RD_DERIV: 0)),
+            smooth );
+        return createCubicSpline(knots, amplitudes);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+}
+
+
+///@}
+//  ---------------------------------------------------------------------------------------
+/// \name  Orbit integration routine and associated container class for storing its output
+//  ---------------------------------------------------------------------------------------
+///@{
+
+/// docstring of the helper class Orbit
+static const char* docstringOrbitClass =
+    "Result of orbit integration represented as three spline interpolators.\n"
+    "This class cannot be instantiated directly, but can be returned by the agama.orbit() routine "
+    "when the requested output dtype is 'object'.\n"
+    "The () operator returns an array of 6 phase-space coordinates of the orbit at a given time, "
+    "or a 2d array of shape Nx6 if the input is an array of times. "
+    "If the time is outside the range spanned by the orbit, the result is filled with NaN.\n"
+    "An Orbit object has a length equal to the number of points in the originally recorded "
+    "trajectory, and its [] operator returns the value of time at the given point.\n";
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Orbit class
+typedef struct {
+    PyObject_HEAD
+    PyObject *x, *y, *z;  ///< quintic spline interpolators
+    double Omega;         ///< angular frequency of the rotating frame (needed for correct velocities)
+    bool reversed;        ///< whether the orbit is reversed in time (needed for correct indexing)
+} OrbitObject;
+/// \endcond
+
+void Orbit_dealloc(OrbitObject* self)
+{
+    Py_XDECREF(self->x);
+    Py_XDECREF(self->y);
+    Py_XDECREF(self->z);
+    Py_TYPE(self)->tp_free(self);
+}
+
+int Orbit_init(OrbitObject* /*self*/, PyObject* /*args*/, PyObject* /*namedArgs*/)
+{
+    PyErr_SetString(PyExc_TypeError, "Instances of Orbit class cannot be created from Python");
+    return -1;
+}
+
+PyObject* Orbit_value(OrbitObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!noNamedArgs(namedArgs))
+        return NULL;
+    if( !self->x || !PyObject_TypeCheck(self->x, SplineTypePtr) || !((SplineObject*)(self->x))->spl ||
+        !self->y || !PyObject_TypeCheck(self->y, SplineTypePtr) || !((SplineObject*)(self->y))->spl ||
+        !self->z || !PyObject_TypeCheck(self->z, SplineTypePtr) || !((SplineObject*)(self->z))->spl )
+    {
+        PyErr_SetString(PyExc_RuntimeError, "Orbit is not properly initialized");
+        return NULL;
+    }
+    const math::BaseInterpolator1d
+        &splx = *((SplineObject*)(self->x))->spl,
+        &sply = *((SplineObject*)(self->y))->spl,
+        &splz = *((SplineObject*)(self->z))->spl;
+    if(PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "Function takes a single argument");
+        return NULL;
+    }
+    PyObject* t_obj = PyTuple_GET_ITEM(args, 0);
+    PyArrayObject *t_arr = NULL, *result = NULL;
+    npy_intp size = 1;
+    double t = NAN;
+    if(PyFloat_Check(t_obj) || PyInt_Check(t_obj) || PyLong_Check(t_obj)) {
+        t = PyFloat_AsDouble(t_obj);
+        if(PyErr_Occurred())
+            return NULL;
+        npy_intp dims[1] = {6};
+        result = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    } else {
+        t_arr = (PyArrayObject*)PyArray_FROM_OTF(t_obj, NPY_DOUBLE, 0);
+        if(!t_arr || PyArray_NDIM(t_arr) != 1) {
+            PyErr_SetString(PyExc_TypeError, "Input should be a single number or a 1d array");
+            Py_XDECREF(t_arr);
+            return NULL;
+        }
+        size = PyArray_DIM(t_arr, 0);
+        npy_intp dims[2] = {size, 6};
+        result = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
+    }
+    if(!result) {
+        Py_XDECREF(t_arr);
+        return NULL;
+    }
+
+    double* data = static_cast<double*>(PyArray_DATA(result));
+    double tmin = splx.xmin(), tmax = splx.xmax();  // NaN if the spline is empty
+    for(int i=0; i<size; i++) {
+        if(t_arr)  // pick up the next element of the input array of times
+            t = pyArrayElem<double>(t_arr, i);
+        else {}    // otherwise it was a single number and is already assigned
+        if(t >= tmin && t <= tmax) {
+            // splines provide the trajectory in the inertial frame,
+            // need to transform the output to the rotated (but not *rotating*) frame
+            double ca=1, sa=0, xi, vxi, yi, vyi;
+            splx.evalDeriv(t, &xi, &vxi);
+            sply.evalDeriv(t, &yi, &vyi);
+            splz.evalDeriv(t, data + i*6 + 2, data + i*6 + 5);
+            if(self->Omega != 0)
+                math::sincos(self->Omega * t, sa, ca);
+            data[i*6 + 0] =  xi * ca +  yi * sa;
+            data[i*6 + 1] =  yi * ca -  xi * sa;
+            data[i*6 + 3] = vxi * ca + vyi * sa;
+            data[i*6 + 4] = vyi * ca - vxi * sa;
+        } else {  // no extrapolation outside the time interval spanned by the orbit
+            for(int c=0; c<6; c++)
+                data[i*6+c] = NAN;
+        }
+    }
+    Py_XDECREF(t_arr);
+    return PyArray_Return(result);
+}
+
+PyObject* Orbit_name(OrbitObject* self)
+{
+    if(!self->x || !PyObject_TypeCheck(self->x, SplineTypePtr) || !((SplineObject*)(self->x))->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Orbit is not properly initialized");
+        return NULL;
+    }
+    const std::vector<double> &xvalues = ((SplineObject*)(self->x))->spl->xvalues();
+    std::string result = "Orbit with " + utils::toString(xvalues.size()) + " nodes";
+    if(!xvalues.empty())
+        result += " on t=[" + utils::toString(xvalues.front(), 18) +
+        ":" + utils::toString(xvalues.back(), 18) + "]";
+    return Py_BuildValue("s", result.c_str());
+}
+
+PyObject* Orbit_elem(OrbitObject* self, Py_ssize_t index)
+{
+    if(!self->x || !PyObject_TypeCheck(self->x, SplineTypePtr) || !((SplineObject*)(self->x))->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Orbit is not properly initialized");
+        return NULL;
+    }
+
+    Py_ssize_t size = ((SplineObject*)(self->x))->spl->xvalues().size();
+    if(index >= 0 && index < size)
+        return Py_BuildValue("d",
+            ((SplineObject*)(self->x))->spl->xvalues()[self->reversed ? size-1-index : index]);
+    else {
+        PyErr_SetString(PyExc_IndexError, "Orbit timestamp index out of range");
+        return NULL;
+    }
+}
+
+Py_ssize_t Orbit_len(OrbitObject* self)
+{
+    if(!self->x || !PyObject_TypeCheck(self->x, SplineTypePtr) || !((SplineObject*)(self->x))->spl)
+        return -1;
+    return ((SplineObject*)(self->x))->spl->xvalues().size();
+}
+
+static PySequenceMethods Orbit_sequence_methods = {
+    (lenfunc)Orbit_len, 0, 0, (ssizeargfunc)Orbit_elem,
+};
+
+static PyMethodDef Orbit_methods[] = {
+    { NULL, NULL, 0, NULL }  // no named methods
+};
+
+static PyMemberDef Orbit_members[] = {
+    { const_cast<char*>("x"), T_OBJECT_EX, offsetof(OrbitObject, x), READONLY,
+      const_cast<char*>("interpolator for the x coordinate") },
+    { const_cast<char*>("y"), T_OBJECT_EX, offsetof(OrbitObject, y), READONLY,
+      const_cast<char*>("interpolator for the y coordinate") },
+    { const_cast<char*>("z"), T_OBJECT_EX, offsetof(OrbitObject, z), READONLY,
+      const_cast<char*>("interpolator for the z coordinate") },
+    { const_cast<char*>("Omega"), T_DOUBLE, offsetof(OrbitObject, Omega), READONLY,
+      const_cast<char*>("angular frequency of the rotating frame") },
+    { const_cast<char*>("reversed"), T_BOOL, offsetof(OrbitObject, reversed), READONLY,
+      const_cast<char*>("whether the orbit was integrated backward in time") },
+    { NULL }
+};
+
+static PyTypeObject OrbitType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Orbit",
+    sizeof(OrbitObject), 0, (destructor)Orbit_dealloc,
+    0, 0, 0, 0, (reprfunc)Orbit_name, 0, &Orbit_sequence_methods, 0, 0,
+    (PyCFunctionWithKeywords)Orbit_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringOrbitClass,
+    0, 0, 0, 0, 0, 0, Orbit_methods, Orbit_members, 0, 0, 0, 0, 0, 0,
+    (initproc)Orbit_init
+};
+
+/// Construct an array of timestamps and trajectory points or a Python Orbit object.
+/// \param[in]  dtype  is NPY_FLOAT, NPY_DOUBLE, NPY_CFLOAT, NPY_CDOUBLE or NPY_OBJECT;
+/// \param[in]  traj   is the orbit (array of times and phase-space coordinates);
+/// \param[in]  Omega  is the angular frequency for integration in the rotating frame
+/// (needed because in this case v != dx/dt, so the derivatives for the splines need adjustment);
+/// \param[in/out]  output  is the pointer to the first element of the output storage.
+/// If dtype==NPY_OBJECT, the output array contains one PyObject* element per orbit,
+/// which will be filled with a newly created instance of Orbit class encapsulating
+/// the interpolators for the trajectory (unit-converted).
+/// In other cases, the output array will be populated with two new PyObject* elements per orbit:
+/// the numpy array of timestamps and another numpy array of phase-space points.
+/// \return  true on success, false if failed to allocate arrays.
+bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, double> > &traj,
+    double Omega, /*output*/ PyObject* output[])
+{
+    npy_intp size = traj.size();
+    if(dtype == NPY_OBJECT) {
+        // create an Orbit object containing three spline interpolators
+        OrbitObject* orbit = NULL;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+        {   // avoid concurrent non-readonly access to Python C API
+            orbit = (OrbitObject*)PyObject_New(PyObject, &OrbitType);
+            if(orbit) {
+                // allocate three new Python Spline objects
+                orbit->x = PyObject_New(PyObject, &SplineType);
+                orbit->y = PyObject_New(PyObject, &SplineType);
+                orbit->z = PyObject_New(PyObject, &SplineType);
+                // make sure the smart pointers are initialized with zero before re-assigning them
+                if(orbit->x)
+                    new (&(((SplineObject*)orbit->x)->spl)) math::PtrFunction;
+                if(orbit->y)
+                    new (&(((SplineObject*)orbit->y)->spl)) math::PtrFunction;
+                if(orbit->z)
+                    new (&(((SplineObject*)orbit->z)->spl)) math::PtrFunction;
+                if(!orbit->x || !orbit->y || !orbit->z) {
+                    Py_DECREF(orbit);  // this also XDECREFs and deletes all three Spline objects
+                    orbit = NULL;
+                }
+            }
+        }  // end critical session, the remaining operations are thread-safe
+        if(!orbit)
+            return false;
+        std::vector<double> t(size), x(size), vx(size), y(size), vy(size), z(size), vz(size);
+        orbit->Omega = Omega * conv->timeUnit;  // frequency is in user units
+        // if the orbit is integrated backward in time, we need to reverse the order of points
+        orbit->reversed = size>1 && traj[1].second < traj[0].second;
+        for(npy_intp index=0; index<size; index++) {
+            double point[6];
+            unconvertPosVel(traj[orbit->reversed ? size-1-index : index].first, point);
+            t [index] = traj[orbit->reversed ? size-1-index : index].second / conv->timeUnit;
+            // if the orbit was provided in the rotating frame, transform it to a non-rotating one
+            // to construct the interpolators, and transform their output back to rotated frame
+            double ca, sa;
+            math::sincos(orbit->Omega * t[index], sa, ca);
+            x [index] = point[0] * ca - point[1] * sa;
+            y [index] = point[1] * ca + point[0] * sa;
+            z [index] = point[2];
+            vx[index] = point[3] * ca - point[4] * sa;
+            vy[index] = point[4] * ca + point[3] * sa;
+            vz[index] = point[5];
+        }
+        try{
+            ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
+            ((SplineObject*)orbit->y)->spl.reset(new math::QuinticSpline(t, y, vy));
+            ((SplineObject*)orbit->z)->spl.reset(new math::QuinticSpline(t, z, vz));
+        }
+        catch(std::exception& e) {
+            Py_DECREF(orbit);
+            PyErr_SetString(PyExc_RuntimeError, e.what());
+            return false;
+        }
+        *output = (PyObject*)orbit;   // place the pointer for the newly created Orbit
+    } else {   // dtype is anything but NPY_OBJECT
+        npy_intp dims[] = {size, dtype==NPY_CFLOAT || dtype==NPY_CDOUBLE ? 3 : 6};
+        PyObject *time_obj = NULL, *traj_obj = NULL;
+#ifdef _OPENMP
+#pragma omp critical(PythonAPI)
+#endif
+        {
+            time_obj = PyArray_SimpleNew(1, dims,
+                dtype==NPY_FLOAT || dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
+            traj_obj = PyArray_SimpleNew(2, dims, dtype);
+        }  // end critical section
+        if(!time_obj || !traj_obj)
+            return false;
+
+        for(npy_intp index=0; index<size; index++) {
+            // convert the time array
+            if(dtype == NPY_FLOAT || dtype == NPY_CFLOAT)
+                pyArrayElem<float>(time_obj, index) =
+                    static_cast<float>(traj[index].second / conv->timeUnit);
+            else
+                pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
+            // convert the units and numerical type of the trajectory array
+            double point[6];
+            unconvertPosVel(traj[index].first, point);
+            switch(dtype) {
+                case NPY_DOUBLE:
+                    for(int c=0; c<6; c++)
+                        pyArrayElem<double>(traj_obj, index, c) = point[c];
+                    break;
+                case NPY_FLOAT:
+                    for(int c=0; c<6; c++)
+                        pyArrayElem<float>(traj_obj, index, c) = static_cast<float>(point[c]);
+                    break;
+                case NPY_CDOUBLE:
+                    for(int c=0; c<3; c++)
+                        pyArrayElem<std::complex<double> >(traj_obj, index, c) =
+                            std::complex<double>(point[c+0], point[c+3]);
+                    break;
+                case NPY_CFLOAT:
+                    for(int c=0; c<3; c++) {
+                        pyArrayElem<std::complex<float> >(traj_obj, index, c) =
+                            std::complex<float>(point[c+0], point[c+3]);
+                    }
+                    break;
+                default:
+                    assert(!"incorrect dtype");  // shouldn't happen, we checked dtype beforehand
+            }
+        }
+        // in this case, the output array has two elements per orbit
+        output[0] = time_obj;
+        output[1] = traj_obj;
+    }
+    return true;
+}
+
 
 /// description of orbit function
 static const char* docstringOrbit =
@@ -5656,20 +6497,13 @@ static const char* docstringOrbit =
     "(if trajsize=0) or at regular intervals of time (`dt=abs(time)/(trajsize-1)`, "
     "so that the number of points is `trajsize`; the last stored point is always at the end of "
     "integration period, and if trajsize>1, the first point is the initial conditions). "
+    "If dtype=object and trajsize is not provided explicitly, this is equivalent to setting trajsize=0. "
     "Both time and trajsize may differ between orbits.\n"
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.\n"
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
-    "  dtype (optional, default 'f32'):  storage data type for trajectories. "
-    "The choice is between 32-bit and 64-bit float or complex: "
-    "'float' or 'double' means 6 64-bit floats (3 positions and 3 velocities); "
-    "'float32' (default) means 6 32-bit floats; "
-    "'complex' or 'complex128' or 'c16' means 3 128-bit complex values (pairs of 64-bit floats), "
-    "with velocity in the imaginary part; and 'complex64' or 'c8' means 3 64-bit complex values. "
-    "The time array is also 32-bit or 64-bit, in agreement with the trajectory. "
-    "The choice of dtype only affects trajectories; arrays returned by each target always "
-    "contain 32-bit floats.\n"
+    "  dtype (optional, default 'float32'):  storage data type for trajectories (see below).\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
     "plus an extra one for trajectories if trajsize>0, plus another one for Lyapunov exponents "
@@ -5678,21 +6512,46 @@ static const char* docstringOrbit =
     "and C is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
     "These data storage arrays should be provided to the `solveOpt()` routine. \n"
-    "  Trajectory output is represented as a Nx2 array (or, in case of a single orbit, a 1d array "
-    "of length 2), with elements being NumPy arrays themselves: "
-    "each row stands for one orbit, the first element in each row is a 1d array of length "
-    "`trajsize` containing the timestamps, and the second is a 2d array of size `trajsize`x6 "
-    "containing the position+velocity at corresponding timestamps.\n"
-    "  Lyapunov exponent is a single number for each orbit, or a 1d array for several orbits.\n"
+    "  Lyapunov exponent is a single number for one orbit, or a 1d array for several orbits.\n"
+    "  Trajectory output can be requested in two alternative formats: arrays or Orbit objects.\n"
+    "In the first case, the output is a Nx2 array (or, in case of a single orbit, a 1d array "
+    "of length 2), with elements being objects themselves: "
+    "each row stands for one orbit, the first element in each row is a 1d array of length `trajsize` "
+    "containing the timestamps, and the second is a 2d array of phase-space coordinates "
+    "at the corresponding timestamps, in the format depending on dtype:\n"
+    "'float' or 'double' means 6 64-bit floats (3 positions and 3 velocities) in each row;\n"
+    "'float32' (default) means 6 32-bit floats;\n"
+    "'complex' or 'complex128' or 'c16' means 3 128-bit complex values (pairs of 64-bit floats), "
+    "with velocity in the imaginary part; and 'complex64' or 'c8' means 3 64-bit complex values.\n"
+    "The time array is also 32-bit or 64-bit, in agreement with the trajectory. "
+    "The choice of dtype only affects trajectories; arrays returned by each target always "
+    "contain 32-bit floats.\n"
+    "In the second case (dtype=object), the output is a 1d array of length N containing instances "
+    "of a special class agama.Orbit, or just an Orbit object for a single orbit. "
+    "The agama.Orbit class can only be returned by the orbit() routine and cannot be instantiated "
+    "directly. It provides interpolated trajectory at any time within the range spanned by the orbit: "
+    "its () operator takes one argument (a single value of time or an array of times), "
+    "and returns one or more 6d phase-space coordinates at the requested times. "
+    "It also exposes a sequence interface: len(orbit) returns the number of timestamps "
+    "in the interpolator, and orbit[i] returns the i-th timestamp, so that the full 6d trajectory "
+    "at these timestamps can be reconstructed by applying the () operator to the orbit object itself. "
+    "Although such interpolator may be constructed from a regularly-spaced orbit, it makes more "
+    "sense to leave trajsize=0 in this case, i.e., record the trajectory at every timestep "
+    "of the orbit integrator. This is the default behaviour, and trajsize needs not be specified "
+    "explicitly when setting dtype=object.\n\n"
     "Examples:\n"
     "# compute a single orbit and output the trajectory in a 2d array of size 1001x6:\n"
-    ">>> times,points = orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
+    ">>> times,traj = agama.orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
+    "# record the same orbit at its 'natural' timestep and represent it as an agama.Orbit object:\n"
+    ">>> orbit = agama.orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, dtype=object)\n"
+    ">>> traj_recorded = orbit(orbit)       # produces a 2d array of size len(orbit) x 6\n"
+    ">>> traj_interpolated = orbit(times)   # produces an array of size 1001x6 very close to traj\n"
     "# integrate a bunch of orbits with initial conditions taken from a Nx6 array `initcond`, "
     "for a time equivalent to 50 periods for each orbit, collecting the data for two targets "
     "`target1` and `target2` and also storing their trajectories in a Nx2 array of "
     "time and position/velocity arrays:\n"
-    ">>> stor1, stor2, trajectories = orbit(potential=mypot, ic=initcond, time=50*mypot.Tcirc(initcond), "
-    "trajsize=500, targets=(target1, target2))";
+    ">>> stor1, stor2, trajectories = agama.orbit(potential=mypot, ic=initcond, "
+    "time=50*mypot.Tcirc(initcond), trajsize=500, targets=(target1, target2))";
 
 /// run a single orbit or the entire orbit library for a Schwarzschild model
 PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
@@ -5704,7 +6563,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     orbit::OrbitIntParams params;
     double Omega = 0.;
     int haveLyap = 0;
-    int traj_dtype = NPY_FLOAT;
+    int dtype = NPY_FLOAT;
     PyObject *ic_obj = NULL, *time_obj = NULL, *timestart_obj = NULL, *pot_obj = NULL,
         *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL;
     static const char* keywords[] =
@@ -5722,7 +6581,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
         PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid instance of Potential class");
+            "Argument 'potential' must be a valid Potential object");
         return NULL;
     }
 
@@ -5803,9 +6662,23 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         unitConversionFactors.push_back(((TargetObject*)targets_vec[t])->unitDFProjection);
     }
 
-    // check if trajectory needs to be recorded
+    // determine the output datatype for trajectory
+    if(dtype_obj != NULL && dtype_obj != Py_None) {
+        PyArray_Descr* dtype_descr = NULL;
+        dtype = PyArray_DescrConverter2(dtype_obj, &dtype_descr) ? dtype_descr->type_num : NPY_NOTYPE;
+        Py_XDECREF(dtype_descr);
+        if( dtype !=  NPY_FLOAT && dtype !=  NPY_DOUBLE &&
+            dtype != NPY_CFLOAT && dtype != NPY_CDOUBLE && dtype != NPY_OBJECT )
+        {
+            PyErr_SetString(PyExc_TypeError,
+                "Argument 'dtype' should correspond to 32/64-bit float/complex or object");
+            return NULL;
+        }
+    }
+
+    // check if trajectory needs to be recorded: in this case the output tuple contains one extra item
     std::vector<int> trajSizes;
-    bool haveTraj = trajsize_obj!=NULL;  // in this case the output tuple contains one extra item
+    bool haveTraj = trajsize_obj != NULL;
     if(haveTraj) {
         PyArrayObject *trajsize_arr =
             (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_FORCECAST);
@@ -5827,39 +6700,36 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 "with the same length as the number of points in the initial conditions");
             return NULL;
         }
-
-        // determine the output datatype
-        if(dtype_obj != NULL && dtype_obj != Py_None) {
-            PyArray_Descr* dtype = NULL;
-            traj_dtype = PyArray_DescrConverter2(dtype_obj, &dtype) ? dtype->type_num : NPY_NOTYPE;
-            Py_XDECREF(dtype);
-            if( traj_dtype !=  NPY_FLOAT && traj_dtype !=  NPY_DOUBLE &&
-                traj_dtype != NPY_CFLOAT && traj_dtype != NPY_CDOUBLE )
-            {
-                PyErr_SetString(PyExc_TypeError,
-                    "Argument 'dtype' should correspond to 32- or 64-bit float or complex");
-                return NULL;
-            }
-        }
+    }
+    // for convenience, if dtype is set to 'object' and trajsize is not provided explicitly,
+    // this is equivalent to setting trajsize=0, i.e. recording orbits at their 'natural' timestep
+    if(dtype == NPY_OBJECT && !haveTraj) {
+        trajSizes.assign(numOrbits, 0);
+        haveTraj = true;
     }
 
     // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
     haveLyap = haveLyap ? 1 : 0;
 
-    // the output is a tuple with the following items:
+    // the output is one or more Numpy arrays:
     // each target corresponds to a NumPy array where the collected information for all orbits is stored,
-    // plus optionally a list containing the trajectories of all orbits if they are requested
+    // plus optionally an array containing the trajectories of all orbits if they are requested,
+    // plus optionally an array of Lyapunov exponents if requested.
+    // We first allocate and keep these arrays in a std::vector, then convert it into a tuple
+    // at the end, once the data is ready: at this stage, zero-dimension arrays are converted to scalars.
+    // The vector result_numCols contains the number of entries per orbit for each output array.
     if(numTargets + haveTraj + haveLyap == 0) {
-        PyErr_SetString(PyExc_RuntimeError, "No output is requested");
+        PyErr_SetString(PyExc_RuntimeError, "No output is requested: "
+            "if you just need the trajectory, provide trajsize=... for array output "
+            "or dtype=object for Orbit object output");
         return NULL;
     }
-    PyObject* result = PyTuple_New(numTargets + haveTraj + haveLyap);
-    if(!result)
-        return NULL;
+    std::vector<PyArrayObject*> result_arrays(numTargets + haveTraj + haveLyap);
+    std::vector<npy_intp> result_numCols(result_arrays.size());
 
     // allocate the arrays for storing the information for each target,
-    // and optionally for the output trajectory(ies) - the last item in the output tuple;
-    // the latter one is a Nx2 array of Python objects
+    // and optionally for the output trajectory(ies) and/or Lyapunov exponents.
+    // the array of trajectories is an array of shape (N,) or (N,2) of Python objects
     volatile bool fail = false;  // error flag (e.g., insufficient memory)
     for(size_t t=0; !fail && t < numTargets + haveTraj + haveLyap; t++) {
         npy_intp numCols;
@@ -5868,21 +6738,24 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             numCols  = targets[t]->numCoefs();
             datatype = STORAGE_NUM_T;
         } else if(haveTraj && t == numTargets) {  // trajectory storage
-            numCols  = 2;
+            // one element per orbit when the output dtype is Orbit objects,
+            // otherwise two elements per orbit (time and trajectory arrays)
+            numCols  = dtype == NPY_OBJECT ? 1 : 2;
             datatype = NPY_OBJECT;
         } else {                                  // Lyapunov exponent
             numCols  = 1;
             datatype = NPY_DOUBLE;
         }
-        npy_intp size[2] = {numOrbits, numCols};
+        result_numCols[t] = numCols;
         // if there is only a single orbit, the output array is 1-dimensional,
-        // otherwise 2-dimensional (numOrbits rows, numCols columns)
-        PyObject* storage_arr = singleOrbit ?
-            PyArray_SimpleNew(1, &size[1], datatype) :
-            PyArray_SimpleNew(2, size, datatype);
-        if(storage_arr)
-            PyTuple_SetItem(result, t, storage_arr);
-        else fail = true;
+        // otherwise 2-dimensional (numOrbits rows, numCols columns);
+        // but if numCols==1, the dimension of the output array is further reduced by one
+        npy_intp size[2] = {numOrbits, numCols};
+        result_arrays[t] = (PyArrayObject*)( singleOrbit ?
+            PyArray_SimpleNew(1 - (numCols==1), &size[1], datatype) :
+            PyArray_SimpleNew(2 - (numCols==1), size, datatype) );
+        if(!result_arrays[t])
+            fail = true;
     }
 
     // set up signal handler to stop the integration on a keyboard interrupt
@@ -5907,10 +6780,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // in the respective row of each target's matrix,
                 // plus optionally the trajectory and Lyapunov exponent recording functions
                 for(size_t t=0; t<numTargets; t++) {
-                    PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
-                    galaxymodel::StorageNumT* output = singleOrbit ?
-                        &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, 0) :
-                        &pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, 0);
+                    galaxymodel::StorageNumT* output = static_cast<galaxymodel::StorageNumT*>(
+                        PyArray_DATA(result_arrays[t])) + orb * result_numCols[t];
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new galaxymodel::RuntimeFncTarget(orbint, *targets[t], output)));
                 }
@@ -5925,12 +6796,11 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
                 if(haveLyap) {
                     double samplingInterval = 0.1 * T_circ(*pot, totalEnergy(*pot, initCond.at(orb)));
-                    PyObject* elem = PyTuple_GET_ITEM(result, numTargets + haveTraj);  // output array
-                    double& lyap = singleOrbit ?
-                        pyArrayElem<double>(elem, 0) :
-                        pyArrayElem<double>(elem, orb, 0);
+                    double* output = static_cast<double*>(
+                        PyArray_DATA(result_arrays[numTargets + haveTraj])) +
+                        orb * result_numCols[numTargets + haveTraj];
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
-                        new orbit::RuntimeLyapunov(orbint, samplingInterval, lyap)));
+                        new orbit::RuntimeLyapunov(orbint, samplingInterval, *output)));
                 }
 
                 // integrate the orbit
@@ -5951,78 +6821,21 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             // convert the units for matrices produced by targets
             for(size_t t=0; t<numTargets; t++) {
                 galaxymodel::StorageNumT mult = conv->massUnit / unitConversionFactors[t];
-                PyObject* storage_arr = PyTuple_GET_ITEM(result, t);
-                npy_intp size = targets[t]->numCoefs();
-                if(singleOrbit)
-                    for(npy_intp index=0; index<size; index++)
-                        pyArrayElem<galaxymodel::StorageNumT>(storage_arr, index) *= mult;
-                else
-                    for(npy_intp index=0; index<size; index++)
-                        pyArrayElem<galaxymodel::StorageNumT>(storage_arr, orb, index) *= mult;
+                galaxymodel::StorageNumT* output = static_cast<galaxymodel::StorageNumT*>(
+                    PyArray_DATA(result_arrays[t])) + orb * result_numCols[t];
+                for(npy_intp index=0; index<result_numCols[t]; index++)
+                    output[index] *= mult;
             }
 
             // if the trajectory was recorded, store it in the corresponding item of the output tuple
             if(haveTraj) {
-                const npy_intp size = traj.size();
-                npy_intp dims[] = {size, traj_dtype==NPY_CFLOAT || traj_dtype==NPY_CDOUBLE ? 3 : 6};
-                PyObject *time_arr, *traj_arr;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-                {   // avoid concurrent non-readonly access to Python C API
-                    time_arr = PyArray_SimpleNew(1, dims,
-                        traj_dtype==NPY_FLOAT || traj_dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
-                    traj_arr = PyArray_SimpleNew(2, dims, traj_dtype);
-                }
-                if(!time_arr || !traj_arr) {
+                // pointer to the beginning of storage for the given orbit (one or two PyObject* items)
+                PyObject** output = static_cast<PyObject**>(
+                    PyArray_DATA(result_arrays[numTargets])) +
+                    orb * result_numCols[numTargets];
+                // store the orbit in the output array in the form depending on dtype
+                if(!createOrbit(dtype, traj, Omega, output))
                     fail = true;
-                    continue;
-                }
-
-                // convert the units and numerical type
-                for(npy_intp index=0; index<size; index++) {
-                    double point[6];
-                    unconvertPosVel(traj[index].first, point);
-                    // time array
-                    if(traj_dtype == NPY_DOUBLE || traj_dtype == NPY_CDOUBLE)
-                        pyArrayElem<double>(time_arr, index) = traj[index].second / conv->timeUnit;
-                    else
-                        pyArrayElem<float>(time_arr, index) =
-                            static_cast<float>(traj[index].second / conv->timeUnit);
-                    // trajectory array
-                    switch(traj_dtype) {
-                        case NPY_DOUBLE:
-                            for(int c=0; c<6; c++)
-                                pyArrayElem<double>(traj_arr, index, c) = point[c];
-                            break;
-                        case NPY_FLOAT:
-                            for(int c=0; c<6; c++)
-                                pyArrayElem<float>(traj_arr, index, c) = static_cast<float>(point[c]);
-                            break;
-                        case NPY_CDOUBLE:
-                            for(int c=0; c<3; c++)
-                                pyArrayElem<std::complex<double> >(traj_arr, index, c) =
-                                    std::complex<double>(point[c+0], point[c+3]);
-                            break;
-                        case NPY_CFLOAT:
-                            for(int c=0; c<3; c++) {
-                                pyArrayElem<std::complex<float> >(traj_arr, index, c) =
-                                    std::complex<float>(point[c+0], point[c+3]);
-                            }
-                            break;
-                        default: {}  // shouldn't happen, we checked dtype beforehand
-                    }
-                }
-
-                // store these arrays in the corresponding element of the output tuple
-                PyObject* elem = PyTuple_GET_ITEM(result, numTargets);
-                if(singleOrbit) {
-                    pyArrayElem<PyObject*>(elem, 0) = time_arr;
-                    pyArrayElem<PyObject*>(elem, 1) = traj_arr;
-                } else {
-                    pyArrayElem<PyObject*>(elem, orb, 0) = time_arr;
-                    pyArrayElem<PyObject*>(elem, orb, 1) = traj_arr;
-                }
             }
 
             // status update
@@ -6048,19 +6861,25 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         fail = true;
     }
     if(fail) {
-        Py_XDECREF(result);
+        for(size_t t=0; t<result_arrays.size(); t++)
+            Py_XDECREF(result_arrays[t]);
         return NULL;
     }
 
     // return a tuple of storage matrices (numpy-compatible) and/or a list of orbit trajectories,
-    // but if this tuple only contains one element, return simply this element
-    if(PyTuple_Size(result) == 1) {
-        PyObject* item = PyTuple_GET_ITEM(result, 0);
-        Py_INCREF(item);
-        Py_DECREF(result);
-        return item;
-    } else
-        return result;
+    // but if this tuple only contains one element, return simply this element.
+    // Moreover, in case of a single orbit, some of the output arrays may be 0-dimensional,
+    // and should be converted to corresponding scalar types
+    if(result_arrays.size() == 1) {
+        return PyArray_Return(result_arrays[0]);
+    } else {
+        PyObject* result_tuple = PyTuple_New(result_arrays.size());
+        if(!result_tuple)
+            return NULL;
+        for(size_t t=0; t<result_arrays.size(); t++)
+            PyTuple_SET_ITEM(result_tuple, t, PyArray_Return(result_arrays[t]));
+        return result_tuple;
+    }
 }
 
 
@@ -6152,6 +6971,7 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
 }
+
 
 ///@}
 //  ----------------------------
@@ -6357,375 +7177,6 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     return toPyArray(result);
-}
-
-
-///@}
-//  ----------------------------------------------
-/// \name  CubicSpline class and related routines
-//  ----------------------------------------------
-///@{
-
-static const char* docstringCubicSpline =
-    "Cubic spline with natural or clamped boundary conditions.\n"
-    "Arguments:\n"
-    "    x (array of floats) -- grid nodes in x (at least two), "
-    "must be sorted in increasing order.\n"
-    "    y (array of floats) -- values of spline at grid nodes, "
-    "same length as x.\n"
-    "    left (float, optional) -- derivative at the leftmost endpoint; "
-    "if not provided or is NAN, a natural boundary condition is used "
-    "(i.e., second derivative is zero).\n"
-    "    right (float, optional) -- derivative at the rightmost endpoint, "
-    "same default behaviour.\n"
-    "    reg (boolean, default False) -- apply a regularization filter to "
-    "reduce overshooting in the case of sharp discontinuities in input data "
-    "and preserve monotonic trend of input points.\n"
-    "    der (array of floats, optional) -- array of spline derivatives at each node; "
-    "if provided, must have the same length as x, and is mutually exclusive with other "
-    "optional arguments; in this case, a Hermite cubic spline is constructed.\n\n"
-    "Values of the spline and up to its second derivative are computed using the () "
-    "operator with the first argument being a single x-point or an array of points, "
-    "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
-    "and the optional third argument (ext=...) specifies the value returned for "
-    "points outside the definition region; if the latter is not provided, "
-    "the spline is linearly extrapolated outside its definition region.";
-
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to CubicSpline class
-typedef struct {
-    PyObject_HEAD
-    math::CubicSpline spl;
-} CubicSplineObject;
-/// \endcond
-
-void CubicSpline_dealloc(PyObject* self)
-{
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size "+
-        utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
-        utils::toString(&((CubicSplineObject*)self)->spl));
-    // dirty hack: manually call the destructor for an object that was
-    // constructed not in a normal way, but rather with a placement new operator
-    ((CubicSplineObject*)self)->spl.~CubicSpline();
-    Py_TYPE(self)->tp_free(self);
-}
-
-int CubicSpline_init(PyObject* self, PyObject* args, PyObject* namedArgs)
-{
-    // "dirty hack" (see above) to construct a C++ object in an already allocated chunk of memory
-    new (&(((CubicSplineObject*)self)->spl)) math::CubicSpline;
-    PyObject* x_obj=NULL;
-    PyObject* y_obj=NULL;
-    PyObject* d_obj=NULL;
-    double derivLeft=NAN, derivRight=NAN;  // undefined by default
-    int regularize=0;
-    static const char* keywords[] = {"x","y","left","right","reg","der",NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|ddiO", const_cast<char **>(keywords),
-        &x_obj, &y_obj, &derivLeft, &derivRight, &regularize, &d_obj))
-    {
-        PyErr_SetString(PyExc_TypeError, "CubicSpline: "
-            "must provide two arrays of equal length (input x and y points), "
-            "optionally one or both endpoint derivatives (left, right), "
-            "a regularization flag (reg), or alternatively an array of derivatives (der)");
-        return -1;
-    }
-    std::vector<double>
-        xvalues(toDoubleArray(x_obj)),
-        yvalues(toDoubleArray(y_obj)),
-        dvalues(toDoubleArray(d_obj));
-    if(xvalues.size() != yvalues.size() || xvalues.size() < 2 ||
-        (!dvalues.empty() && dvalues.size() != xvalues.size()))
-    {
-        PyErr_SetString(PyExc_TypeError, "CubicSpline: input does not contain valid arrays");
-        return -1;
-    }
-    if(!dvalues.empty() && (derivLeft==derivLeft || derivRight==derivRight || regularize)) {
-        PyErr_SetString(PyExc_TypeError,
-            "CubicSpline: argument 'der' cannot be used together with 'left', 'right' or 'reg'");
-        return -1;
-    }
-    try {
-        ((CubicSplineObject*)self)->spl = dvalues.empty() ?
-            math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight) :
-            math::CubicSpline(xvalues, yvalues, dvalues);
-        utils::msg(utils::VL_DEBUG, "Agama", "Created a cubic spline of size "+
-            utils::toString(((CubicSplineObject*)self)->spl.xvalues().size())+" at "+
-            utils::toString(&((CubicSplineObject*)self)->spl));
-        return 0;
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        return -1;
-    }
-}
-
-inline double splEval(const math::CubicSpline& spl, double x, int der)
-{
-    double result;
-    switch(der) {
-        case 0: return spl.value(x);
-        case 1: spl.evalDeriv(x, NULL, &result); return result;
-        case 2: spl.evalDeriv(x, NULL, NULL, &result); return result;
-        default: return NAN;  // shouldn't occur
-    }
-}
-
-PyObject* CubicSpline_value(PyObject* self, PyObject* args, PyObject* namedArgs)
-{
-    if(self==NULL || ((CubicSplineObject*)self)->spl.empty()) {
-        PyErr_SetString(PyExc_RuntimeError, "CubicSpline object is not properly initialized");
-        return NULL;
-    }
-    const math::CubicSpline& spl = ((CubicSplineObject*)self)->spl;
-    static const char* keywords[] = {"x","der","ext",NULL};
-    PyObject* ptx=NULL;
-    int der=0;
-    PyObject* extrapolate_obj=NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iO", const_cast<char **>(keywords),
-        &ptx, &der, &extrapolate_obj))
-        return NULL;
-    if(der<0 || der>2) {
-        PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 2nd");
-        return NULL;
-    }
-    // check if we should extrapolate the spline (default behaviour),
-    // or replace the output with the given value if it's out of range (if ext=... argument was given)
-    double extrapolate_val = extrapolate_obj == NULL ? 0 : toDouble(extrapolate_obj);
-    double xmin = spl.xmin(), xmax = spl.xmax();
-
-    // if the input is a single value, just do it
-    if(PyFloat_Check(ptx) || PyInt_Check(ptx) || PyLong_Check(ptx)) {
-        double x = PyFloat_AsDouble(ptx);
-        if(PyErr_Occurred())
-            return NULL;
-        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
-            return Py_BuildValue("O", extrapolate_obj);
-        else
-            return Py_BuildValue("d", splEval(spl, x, der) );
-    }
-    // otherwise the input should be an array, and the output will be an array of the same shape
-    PyArrayObject *arr = (PyArrayObject*)
-        PyArray_FROM_OTF(ptx, NPY_DOUBLE, NPY_ARRAY_OUT_ARRAY | NPY_ARRAY_ENSURECOPY);
-    if(arr == NULL) {
-        PyErr_SetString(PyExc_TypeError, "Argument must be either float, list or numpy array");
-        return NULL;
-    }
-
-    // replace elements of the copy of input array with computed values
-    npy_intp size = PyArray_SIZE(arr);
-    for(int i=0; i<size; i++) {
-        // reference to the array element to be replaced
-        double& x = static_cast<double*>(PyArray_DATA(arr))[i];
-        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
-            x = extrapolate_val;
-        else
-            x = splEval(spl, x, der);
-    }
-    return PyArray_Return(arr);
-}
-
-static PyMethodDef CubicSpline_methods[] = {
-    { NULL, NULL, 0, NULL }  // no named methods
-};
-
-static PyTypeObject CubicSplineType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    "agama.CubicSpline",
-    sizeof(CubicSplineObject), 0, CubicSpline_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, CubicSpline_value, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringCubicSpline,
-    0, 0, 0, 0, 0, 0, CubicSpline_methods, 0, 0, 0, 0, 0, 0, 0,
-    CubicSpline_init
-};
-
-/// Construct a Python cubic spline object from the provided x and y arrays
-PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y)
-{
-    // allocate a new Python CubicSpline object
-    CubicSplineObject* spl_obj = PyObject_New(CubicSplineObject, &CubicSplineType);
-    if(!spl_obj)
-        return NULL;
-    // same dirty hack to construct a C++ object in already allocated memory
-    new (&(spl_obj->spl)) math::CubicSpline(x, y);
-    utils::msg(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
-        utils::toString(spl_obj->spl.xvalues().size())+" at "+
-        utils::toString(&(spl_obj->spl)));
-    return (PyObject*)spl_obj;
-}
-
-
-static const char* docstringSplineApprox =
-    "splineApprox constructs a smoothing cubic spline from a set of points.\n"
-    "It approximates a large set of (x,y) points by a smooth curve with "
-    "a moderate number of knots.\n"
-    "Arguments:\n"
-    "    knots -- array of nodes of the grid that will be used to represent "
-    "the smoothing spline; must be sorted in order of increase. "
-    "The knots should preferrably encompass the range of x values of all points, "
-    "and each interval between knots should contain at least one points; "
-    "however, both these conditions are not obligatory.\n"
-    "    x -- x-coordinates of points (1d array), "
-    "should preferrably be in the range covered by knots, ordering does not matter.\n"
-    "    y -- y-coordinates of points, same length as x.\n"
-    "    w -- (1d array of the same length as x, optional) are weights of "
-    "each input point used in least-square fitting, assumed uniform if omitted.\n"
-    "    smooth -- (float or None) is the parameter controlling the tradeoff "
-    "between smoothness and approximation error; None means no additional smoothing "
-    "(beyond the one resulting from discreteness of the spacing of knots), "
-    "zero (default, recommended) means optimal smoothing, and any value larger than zero "
-    "results in oversmoothing; values around unity usually yield a reasonable extra suppression "
-    "of noise without significantly increasing the rms error in the approximation.\n"
-    "Returns: a CubicSpline object.\n";
-
-PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    static const char* keywords[] = {"knots","x","y","w","smooth",NULL};
-    PyObject* k_obj=NULL;
-    PyObject* x_obj=NULL;
-    PyObject* y_obj=NULL;
-    PyObject* w_obj=NULL;
-    PyObject* s_obj=NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OOO|OO", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &y_obj, &w_obj, &s_obj))
-    {
-        PyErr_SetString(PyExc_TypeError, "splineApprox: "
-            "must provide an array of grid nodes and two arrays of equal length (input x and y points), "
-            "optionally an array of weights and a smoothing factor(float or None)");
-        return NULL;
-    }
-    std::vector<double>
-        knots  (toDoubleArray(k_obj)),
-        xvalues(toDoubleArray(x_obj)),
-        yvalues(toDoubleArray(y_obj)),
-        weights(toDoubleArray(w_obj));
-    if(xvalues.empty() || yvalues.empty() || knots.empty()) {
-        PyErr_SetString(PyExc_TypeError, "Input does not contain valid arrays");
-        return NULL;
-    }
-    if(knots.size() < 2 || xvalues.size() != yvalues.size()) {
-        PyErr_SetString(PyExc_ValueError,
-            "Arguments must be an array of grid nodes (at least 2) "
-            "and two arrays of equal length (x and y)");
-        return NULL;
-    }
-    if(!weights.empty() && weights.size() != xvalues.size()) {
-        PyErr_SetString(PyExc_ValueError,
-            "Length of the array of weights must be the same as the number of x and y points");
-        return NULL;
-    }
-    double smoothfactor;
-    if(s_obj == NULL)
-        smoothfactor = 0.;
-    else if(s_obj == Py_None)
-        smoothfactor = NAN;
-    else if(PyNumber_Check(s_obj))
-        smoothfactor = PyFloat_AsDouble(s_obj);
-    else {
-        PyErr_SetString(PyExc_TypeError, "Argument 'smooth' must be a float or None");
-        return NULL;
-    }
-    try{
-        math::SplineApprox spl(knots, xvalues, weights);
-        std::vector<double> amplitudes;
-        if(smoothfactor >= 0)
-            amplitudes = spl.fitOversmooth(yvalues, smoothfactor);
-        else if(smoothfactor < 0)  // undocumented: fit with EDF = -smoothfactor
-            amplitudes = spl.fit(yvalues, -smoothfactor);
-        else  // if smooth=None, fit without any smoothing (EDF = numKnots)
-            amplitudes = spl.fit(yvalues, knots.size());
-        return createCubicSpline(knots, amplitudes);
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
-    }
-}
-
-
-static const char* docstringSplineLogDensity =
-    "splineLogDensity performs a non-parametric density estimate  "
-    "from a set of sample points.\n"
-    "Let rho(x) be an arbitrary density distribution over a finite or infinite "
-    "interval, and let {x_i, w_i} be a set of sample points and weights, "
-    "drawn from this distribution.\n"
-    "This routine reconstructs log(rho(x)) approximated as a cubic spline defined "
-    "by the given grid of nodes X_k, using a penalized density estimation approach.\n"
-    "Arguments:\n"
-    "    knots -- array of nodes of the grid that will be used to represent "
-    "the smoothing spline; must be sorted in order of increase. "
-    "Ideally, the knots should encompass all or most of the sample points "
-    "and be spaced such that each segment contains at least a few samples.\n"
-    "    x -- coordinates of sample points (1d array), ordering does not matter.\n"
-    "    w (optional) -- weights of sample points (1d array with the same length as x); "
-    "by default set all weights to 1/len(x).\n"
-    "    infLeft (boolean, default False) specifies whether the density is assumed to "
-    "extend to x=-infinity (True) or is taken to be zero for all x<knots[0] (False). "
-    "In the former case, any points to the left of the first knot are ignored during "
-    "the estimate, while in the latter case they are taken into account; "
-    "note that log(rho(x)) is linearly extrapolated for x<knots[0], so it will "
-    "obviously be declining towards -infinity for the integral over rho(x) to be finite.\n"
-    "    infRight (boolean, default False) is the same option for extrapolating "
-    "the estimated density to x>knots[-1].\n"
-    "    der3 (boolean, default False) determines how the roughness penalty is computed: "
-    "using 2nd derivative (False) or 3rd derivative (True). This choice determines the class "
-    "of functions that have zero penalty and are the limiting cases for infinitely large smoothing: "
-    "the latter choice implies a pure Gaussian, and the former - an exponential function, which is, "
-    "however, only attainable on (semi-)finite intervals, when there is no extrapolation.\n"
-    "    smooth (float, default 0) -- optional extra smoothing.\n"
-    "Returns: a CubicSpline object representing log(rho(x)).\n";
-
-PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    static const char* keywords[] = {"knots","x","w","infLeft","infRight","der3","smooth",NULL};
-    PyObject* k_obj=NULL;
-    PyObject* x_obj=NULL;
-    PyObject* w_obj=NULL;
-    int infLeft=0, infRight=0, der3=0;  // should rather be bool, but python doesn't handle it in arg list
-    double smooth=0;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oiiid", const_cast<char **>(keywords),
-        &k_obj, &x_obj, &w_obj, &infLeft, &infRight, &der3, &smooth))
-    {
-        PyErr_SetString(PyExc_TypeError, "splineLogDensity: "
-            "must provide an array of grid nodes and two arrays of equal length "
-            "(x coordinates of input points and their weights)");
-        return NULL;
-    }
-    std::vector<double>
-        knots  (toDoubleArray(k_obj)),
-        xvalues(toDoubleArray(x_obj)),
-        weights;
-    if(w_obj)
-        weights = toDoubleArray(w_obj);
-    else
-        weights.assign(xvalues.size(), 1./xvalues.size());
-    if(xvalues.empty() || weights.empty() || knots.empty()) {
-        PyErr_SetString(PyExc_TypeError, "Input does not contain valid arrays");
-        return NULL;
-    }
-    if(knots.size() < 2|| xvalues.size() != weights.size()) {
-        PyErr_SetString(PyExc_ValueError,
-            "Arguments must be an array of grid nodes (at least 2) "
-            "and two arrays of equal length (x and w), "
-            "plus optionally two boolean parameters (infLeft, infRight)");
-        return NULL;
-    }
-    if(!(smooth>=0)) {
-        PyErr_SetString(PyExc_ValueError, "smooth factor must be non-negative");
-        return NULL;
-    }
-    try{
-        std::vector<double> amplitudes = math::splineLogDensity<3>(knots, xvalues, weights,
-            math::FitOptions(
-            (infLeft ? math::FO_INFINITE_LEFT : 0) |
-            (infRight? math::FO_INFINITE_RIGHT: 0) |
-            (der3    ? math::FO_PENALTY_3RD_DERIV: 0)),
-            smooth );
-        return createCubicSpline(knots, amplitudes);
-    }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
-    }
 }
 
 
@@ -7108,10 +7559,17 @@ PyInit_agama(void)
     PyModule_AddObject(thismodule, "Target", (PyObject*)&TargetType);
     TargetTypePtr = &TargetType;
 
-    CubicSplineType.tp_new = PyType_GenericNew;
-    if(PyType_Ready(&CubicSplineType) < 0) return NULL;
-    Py_INCREFx(&CubicSplineType);
-    PyModule_AddObject(thismodule, "CubicSpline", (PyObject*)&CubicSplineType);
+    SplineType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&SplineType) < 0) return NULL;
+    Py_INCREFx(&SplineType);
+    PyModule_AddObject(thismodule, "Spline", (PyObject*)&SplineType);
+    SplineTypePtr = &SplineType;
+
+    OrbitType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&OrbitType) < 0) return NULL;
+    Py_INCREFx(&OrbitType);
+    // deliberately not adding this class to the module
+    OrbitTypePtr = &OrbitType;
 
     import_array1(thismodule);  // needed for NumPy to work properly
     return thismodule;

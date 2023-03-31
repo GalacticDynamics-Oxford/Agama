@@ -47,18 +47,27 @@ def init_axes(arg=None):
     plt.draw()
 
 def run_orbit(ic):
-    color = numpy.random.random(size=3)*0.8 #plt.get_cmap('mist')(numpy.random.random())
-    time, orbit = agama.orbit(ic=ic, potential=pot, time=100*pot.Tcirc(ic), trajsize=20000)
-    x = orbit[:,0] if Lz==0 else (orbit[:,0]**2+orbit[:,1]**2)**0.5
-    vx= orbit[:,3] if Lz==0 else (orbit[:,0]*orbit[:,3]+orbit[:,1]*orbit[:,4])/x
-    z = orbit[:,2]
-    vz= orbit[:,5]
-    splx = agama.CubicSpline(time, x, der=vx)
-    splz = agama.CubicSpline(time, z, der=vz)
-    hits = (z[:-1]<=0) * (z[1:]>0)  # segments which contain points in the surface of section
-    tcross = numpy.array([ scipy.optimize.brentq(splz, time[i], time[i+1]) for i in numpy.where(hits)[0] ])
-    axorb.plot(x[:10000], z[:10000], color=color, lw=0.5, alpha=0.5)
-    axpss.plot(splx(tcross), splx(tcross,1), 'o', color=color, mew=0, ms=1.5)
+    color = numpy.random.random(size=3)*0.8
+    # create an orbit represented by a spline interpolator
+    orbit = agama.orbit(ic=ic, potential=pot, time=100*pot.Tcirc(ic), dtype=object)
+    traj = orbit(orbit)  # get recorded trajectory
+    def zfnc(t):
+        return orbit(t)[2]
+    # find exact crossing time on segments which contain points in the surface of section (z going from negative to positive)
+    timecross = numpy.array([
+        scipy.optimize.brentq(zfnc, orbit[i], orbit[i+1])
+        for i in numpy.where((traj[:-1,2]<=0) * (traj[1:,2]>0))[0]
+    ])
+    trajcross = orbit(timecross)
+    if Lz==0:
+        axorb.plot(traj[:,0], traj[:,2], color=color, lw=0.5, alpha=0.5)
+        axpss.plot(trajcross[:,0], trajcross[:,3], 'o', color=color, mew=0, ms=1.5)
+    else:
+        # orbit in the R,z plane, and SoS in the R, v_R plane
+        axorb.plot((traj[:,0]**2 + traj[:,1]**2)**0.5, traj[:,2], color=color, lw=0.5, alpha=0.5)
+        R = (trajcross[:,0]**2 + trajcross[:,1]**2)**0.5   
+        vR= (trajcross[:,0]*trajcross[:,3] + trajcross[:,1]*trajcross[:,4]) / R
+        axpss.plot(R, vR, 'o', color=color, mew=0, ms=1.5)
 
 def add_point(event):
     if event.inaxes is not axpss or event.button != 3: return

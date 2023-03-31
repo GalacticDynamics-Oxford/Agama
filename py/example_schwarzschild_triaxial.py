@@ -24,8 +24,10 @@ initcond,weightprior = den.sample(5000, potential=pot)
 inttimes = 50*pot.Tcirc(initcond)
 # integrate all orbits, storing the recorded data corresponding to each target
 # in the data1 and data2 arrays, and the trajectories - in trajs
+# (by specifying dtype=object, orbits are represented by instances of agama.Orbit
+# providing interpolated trajectories recorded at each timestep of the ODE integrator)
 data1, data2, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, \
-    trajsize=101, targets=[target1,target2])
+    dtype=object, targets=[target1,target2])
 
 # assemble the matrix equation which contains three blocks:
 # total mass, discretized density, and velocity anisotropy
@@ -64,21 +66,19 @@ nbody=100000
 status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
 if not status:
     # this may occur if there was not enough recorded trajectory points for some high-weight orbits:
-    # in this case their indices and the required numbers of points are returned in the result tuple
+    # in this case their indices and the required numbers of points are returned in the result tuple.
+    # This cannot happen if orbits are represented by interpolator objects rather than pre-recorded arrays.
     indices,trajsizes = result
     print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices), max(trajsizes)))
     trajs[indices] = agama.orbit(potential=pot, ic=initcond[indices], time=inttimes[indices], \
         trajsize=trajsizes)
     status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
     if not status: print("Failed to produce output N-body model")
-agama.writeSnapshot("schwarzschild_model_nbody.txt", result,'t')   # one could also use numpy.savetxt
+agama.writeSnapshot("schwarzschild_model_nbody.txt", result, 'text')   # one could also use numpy.savetxt
 
 # also store the entire Schwarzschild model in a numpy binary archive
 numpy.savez_compressed("schwarzschild_model_data", ic=initcond, inttime=inttimes, weight=weights, \
     data1=data1, data2=data2, cons1=rhs1)
-
-# store trajectories in a numpy binary file
-numpy.save("schwarzschild_model_traj", trajs)
 
 # store the orbit initial conditions and weights in a text file
 numpy.savetxt("schwarzschild_model_orbits", \

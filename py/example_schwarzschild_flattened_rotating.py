@@ -44,8 +44,8 @@ initcond,_ = potstars.sample(10000, potential=pot, beta=beta, kappa=kappa)
 # integration time is 100 orbital periods
 inttimes = 100*pot.Tcirc(initcond)
 
-# integrate all orbits, storing the recorded density data and trajectories
-data, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, trajsize=100, targets=target)
+# integrate all orbits, storing the recorded density data and trajectories represented by interpolator objects
+data, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, dtype=object, targets=target)
 
 # assemble the matrix equation which contains two blocks:
 # total mass, discretized density
@@ -66,7 +66,8 @@ nbody=100000
 status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
 if not status:
     # this may occur if there was not enough recorded trajectory points for some high-weight orbits:
-    # in this case their indices and the required numbers of points are returned in the result tuple
+    # in this case their indices and the required numbers of points are returned in the result tuple.
+    # This cannot happen if orbits are represented by interpolator objects rather than pre-recorded arrays.
     indices,trajsizes = result
     print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices), max(trajsizes)))
     trajs[indices] = agama.orbit(potential=pot, ic=initcond[indices], time=inttimes[indices], \

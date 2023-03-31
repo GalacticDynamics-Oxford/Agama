@@ -107,6 +107,7 @@ namespace math{
 class IFunction;
 class IFunctionNdim;
 class IFunctionNdimAdd;
+class BaseInterpolator1d;
 class BaseInterpolator2d;
 
 /// shared pointer to a function class
@@ -115,6 +116,8 @@ typedef shared_ptr<const IFunction> PtrFunction;
 typedef shared_ptr<const IFunctionNdim> PtrFunctionNdim;
 /// shared pointer to a N-dimensional accumulator function
 typedef shared_ptr<const IFunctionNdimAdd> PtrFunctionNdimAdd;
+/// shared pointer to a generic 1d interpolation class
+typedef shared_ptr<const BaseInterpolator1d> PtrInterpolator1d;
 /// shared pointer to a generic 2d interpolation class
 typedef shared_ptr<const BaseInterpolator2d> PtrInterpolator2d;
 

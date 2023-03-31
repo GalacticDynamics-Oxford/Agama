@@ -435,7 +435,7 @@ datasets.append(agama.schwarzlib.DensityDataset(
     density=densityStars,
     # [OPT] fractional tolerance (e.g., 0.01) on the values of density constraints;
     # may be 0, requiring to satisfy them exactly, but in this case the solution may be infeasible
-    tolerance=0.0,
+    tolerance=0.01,
     alpha=alpha,     # the orientation of intrinsic model coordinates w.r.t. the observed ones,
     beta=beta,       # specified by two Euler angles (used only for plotting the projected density)
     **densityParams  # remaining parameters set above
@@ -558,7 +558,7 @@ if command == 'RUN':
     # Different values of the 'seed' parameter will create initial conditions with different number of orbits,
     # which effectively makes a completely new random sample, and then the number is truncated back to numOrbits.
     ic = numpy.vstack((
-        densityStars.sample(int(numOrbits*0.85)+seed, potential=pot_fidu, beta=0.3, kappa=1)[0][:-seed],
+        densityStars.sample(int(numOrbits*0.85)+seed, potential=pot_fidu, beta=0.3, kappa=1)[0][seed:],
         densityExtra.sample(int(numOrbits*0.15), potential=pot_fidu)[0] ))
 
 

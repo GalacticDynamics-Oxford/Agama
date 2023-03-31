@@ -786,15 +786,19 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
     inttime = (potential.Tcirc(ic) * intTime).astype(_numpy.float32)
     inttime[_numpy.isnan(inttime)] = _numpy.nanmax(inttime)
     matrices = _agama.orbit(potential=potential, ic=ic, time=inttime, Omega=Omega,
-        targets=[d.target for d in datasets], trajsize=1000)
+        targets=[d.target for d in datasets], dtype=object)
     trajs    = matrices[-1]   # list of orbit trajectories
     matrices = matrices[:-1]  # matrices corresponding to datasets
     assert(len(matrices) == len(datasets))
 
     # record various structural properties of orbits to be stored in the npz archive
-    Rm = _numpy.array([ _numpy.mean( _numpy.sum(t[:,0:3]**2,axis=1)**0.5 ) for t in trajs[:,1] ])  # mean radius of each orbit
-    Lz = _numpy.array([ _numpy.mean( t[:,0]*t[:,4]-t[:,1]*t[:,3] ) for t in trajs[:,1] ])
-    L2 = _numpy.array([ _numpy.mean((t[:,0]*t[:,4]-t[:,1]*t[:,3])**2 + (t[:,1]*t[:,5]-t[:,2]*t[:,4])**2 + (t[:,2]*t[:,3]-t[:,0]*t[:,5])**2) for t in trajs[:,1] ])
+    Rm, Lz, L2 = _numpy.zeros((3, len(trajs)))
+    for iorb, orb in enumerate(trajs):
+        # construct regularly-spaced trajectory from the interpolator
+        t = orb(_numpy.linspace(0.0005, 0.9995, 1000) * (orb[-1]-orb[0]) + orb[0])
+        Rm[iorb] = _numpy.mean(_numpy.sum(t[:,0:3]**2,axis=1)**0.5)   # mean radius of each orbit
+        Lz[iorb] = _numpy.mean( t[:,0]*t[:,4]-t[:,1]*t[:,3])
+        L2[iorb] = _numpy.mean((t[:,0]*t[:,4]-t[:,1]*t[:,3])**2 + (t[:,1]*t[:,5]-t[:,2]*t[:,4])**2 + (t[:,2]*t[:,3]-t[:,0]*t[:,5])**2)
     E  = potential.potential(ic[:,0:3]) + _numpy.sum(ic[:,3:6]**2, axis=1) * 0.5  # total energy of each orbit
     Rc = potential.Rcirc(E=E)                      # radius of a circular orbit with the given energy
     Lc = 2*_numpy.pi * Rc**2 / potential.Tcirc(E)  # angular momentum of a circular orbit with this energy
@@ -909,17 +913,13 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
             best = min(best, chib)
 
     if nbody:
-        status,particles = _agama.sampleOrbitLibrary(nbody, trajs, this.bestweights)
-        if not status:
-            indices,trajsizes = particles
-            print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices),max(trajsizes)))
-            trajs[indices] = _agama.orbit(potential=potential, ic=ic[indices],
-                time=inttime[indices], Omega=Omega, trajsize=trajsizes)
-            status,particles = _agama.sampleOrbitLibrary(nbody, trajs, this.bestweights)
-            if not status: print(particles)
-        _agama.writeSnapshot(filePrefix+'_Y%.3f.nbody' % this.Upsilon,
-            (_numpy.hstack((particles[0][:,0:3], particles[0][:,3:6]*this.Upsilon**0.5)), particles[1]*this.Upsilon),
-            nbodyFormat)
+        status, particles = _agama.sampleOrbitLibrary(nbody, trajs, this.bestweights)
+        if status:
+            _agama.writeSnapshot(filePrefix+'_Y%.3f.nbody' % this.Upsilon,
+                (_numpy.hstack((particles[0][:,0:3], particles[0][:,3:6]*this.Upsilon**0.5)), particles[1]*this.Upsilon),
+                nbodyFormat)
+        else:
+            print("Failed to produce an N-body model: %s" % particles)
 
     return best
 
@@ -1178,7 +1178,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         this.orbitplot.set_ylabel('y')
         this.orbitplot.set_zlabel('z')
         try:
-            orb = _agama.orbit(potential=potential, ic=this.ic[indSel], time=this.inttime[indSel], trajsize=2000)[1]
+            orb = _agama.orbit(potential=potential, ic=this.ic[indSel], time=this.inttime[indSel], trajsize=0)[1]
             this.orbitplot.plot(orb[:,0], orb[:,1], orb[:,2], color='k', lw=0.5)
             #if hasattr(this.orbitplot, 'set_box_aspect'):  # matplotlib>=3.3
             #    this.orbitplot.set_box_aspect((1, 1, 1))   # doesn't help...
@@ -1356,6 +1356,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         if blim is None: blim = (min(bval), max(bval))
         anorm = alim[1]-alim[0]
         bnorm = blim[1]-blim[0]
+        ax.set_xlim(alim[0], alim[1])
+        ax.set_ylim(blim[0]-0.05*bnorm, blim[1]+0.05*bnorm)
         try:
             a, b  = _numpy.meshgrid(_numpy.linspace(alim[0], alim[1], 201), _numpy.linspace(blim[0], blim[1], 201))
             if interp=='linear' or interp=='cubic':
@@ -1368,18 +1370,14 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             ax.contourf(a, b, c, cntr, cmap='hell_r', vmin=0, vmax=deltaChi2lim, alpha=0.75)
             ax.clabel(ax.contour(a, b, c, cntr, cmap='Blues_r', vmin=0, vmax=deltaChi2lim), fmt='%.0f', fontsize=10, inline=1)
             # marginalized chi^2 as a function of the variable on the horizontal axis
-            axmarg = ax.twinx()
             cmarg = -2*_numpy.log(_numpy.sum( _numpy.exp(-0.5*_numpy.where(c==c, c, _numpy.inf)), axis=0))
-            axmarg.plot(a[0], cmarg-_numpy.nanmin(cmarg), color='r')
-            axmarg.set_ylim(0, deltaChi2lim)
-            yticks = _numpy.hstack([_numpy.linspace(0, deltaChi2lim, 6)[:-1], deltaChi2lim*0.95])
-            axmarg.set_yticks(yticks)
-            axmarg.set_yticklabels(['%.0f' % yy for yy in yticks[:-1]] + ['$\Delta\chi^2$'])
-            axmarg.tick_params(colors='r')
+            ax.plot(a[0], (cmarg-_numpy.nanmin(cmarg))/deltaChi2lim, color='r', transform=ax.get_xaxis_transform())
+            for itick in range(5):
+                ax.text(1.01, itick/5.0, '%.0f' % (itick/5.0*deltaChi2lim), color='r',
+                    clip_on=False, ha='left', va='center', transform=ax.transAxes)
+            ax.text(1.0, 0.95, '$\Delta\chi^2$', color='r', clip_on=False, ha='left', va='center', transform=ax.transAxes)
         except:
             traceback.print_exc()
-        ax.set_xlim(alim[0], alim[1])
-        ax.set_ylim(blim[0]-0.05*bnorm, blim[1]+0.05*bnorm)
     else:
         modelgrid = None
 

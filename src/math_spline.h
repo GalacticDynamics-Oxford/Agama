@@ -97,7 +97,8 @@ public:
     BaseInterpolator1d() {};
 
     /** Initialize a 1d interpolator from the values provided for x and f(x);
-        x should be at least of length 2 and monotonically increasing.
+        x should be monotonically increasing (zero-length and single-element arrays are acceptable).
+        All interpolators return NaN when empty (initialized by default or with zero-length arrays).
     */
     BaseInterpolator1d(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
 

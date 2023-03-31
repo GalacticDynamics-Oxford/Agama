@@ -53,7 +53,7 @@ except:
         type="Multipole", particles=(haloParticles[:,0:3], haloParticles[:,6]), \
         symmetry='a', gridsizeR=20, lmax=2)
     print("%f s to init %s potential for the halo; value at origin=%f (km/s)^2" % \
-        ((clock()-tbegin), haloPot.name(), haloPot.potential(0,0,0)))
+        ((clock()-tbegin), haloPot, haloPot.potential(0,0,0)))
     tbegin  = clock()
     # manually specify the spatial grid for the disk potential,
     # although one may rely on the automatic choice of these parameters (as we did for the halo)
@@ -61,7 +61,7 @@ except:
         type="CylSpline", particles=(diskParticles[:,0:3], diskParticles[:,6]), \
         gridsizer=20, gridsizez=20, symmetry='a', Rmin=0.2, Rmax=100, Zmin=0.05, Zmax=50)
     print("%f s to init %s potential for the disk; value at origin=%f (km/s)^2" % \
-        ((clock()-tbegin), diskPot.name(), diskPot.potential(0,0,0)))
+        ((clock()-tbegin), diskPot, diskPot.potential(0,0,0)))
 
     # save the potentials into text files; on the next call may load them instead of re-computing
     diskPot.export("model_stars_final.ini")

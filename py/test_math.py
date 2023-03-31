@@ -3,7 +3,7 @@
 """
 Illustrates the multidimensional integration and sampling routines from Agama
 """
-import numpy
+import numpy, sys
 # if the module has been installed to the globally known directory, just import it
 try: import agama
 except ImportError:  # otherwise load the shared library from the parent folder
@@ -26,16 +26,15 @@ print("N-dimensional integration: result=%f +- %f (exact value: %f)" % (valI, er
 arr,valS,errS,_ = agama.sampleNdim(fnc, 50000, [-1,1], [0,2])
 print("N-dimensional sampling: result=%f +- %f" % (valS, errS))
 
+### shows a pretty checkerboard picture - samples drawn from the given function
+if len(sys.argv)>1:
+    import matplotlib.pyplot as plt, time
+    plt.plot(arr[:,0], arr[:,1], ',')
+    plt.show()
+else:
+    print("Run the script with a non-empty command-line argument to show a plot")
+
 if abs(valI-exact)<errI and abs(valS-exact)<errS and errI<1e-3 and errS<1e-3:
     print("\033[1;32mALL TESTS PASSED\033[0m")
 else:
     print("\033[1;31mSOME TESTS FAILED\033[0m")
-
-### shows a pretty checkerboard picture - samples drawn from the given function
-try:
-    import matplotlib.pyplot as plt, time
-    plt.ion()
-    plt.plot(arr[:,0], arr[:,1], ',')
-    plt.draw()
-    time.sleep(10)
-except: pass

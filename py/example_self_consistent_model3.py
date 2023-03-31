@@ -29,9 +29,9 @@ def writeRotationCurve(filename, potentials, names):
 
 # print some diagnostic information after each iteration
 def printoutInfo(model, iteration):
-    densDisk = model.components[0].getDensity()
-    densBulge= model.components[1].getDensity()
-    densHalo = model.components[2].getDensity()
+    densDisk = model.components[0].density
+    densBulge= model.components[1].density
+    densHalo = model.components[2].density
     pt0 = (2.0, 0, 0)
     pt1 = (2.0, 0, 0.25)
     pt2 = (0.0, 0, 2.0)
@@ -120,11 +120,11 @@ if __name__ == "__main__":
     # first create a representation of density profiles without velocities
     # (just for demonstration), by drawing samples from the density distribution
     print("Sampling disk density")
-    agama.writeSnapshot("dens_disk_final",  model.components[0].getDensity().sample(160000), format)
+    agama.writeSnapshot("dens_disk_final",  model.components[0].density.sample(160000), format)
     print("Sampling bulge density")
-    agama.writeSnapshot("dens_bulge_final", model.components[1].getDensity().sample(40000), format)
+    agama.writeSnapshot("dens_bulge_final", model.components[1].density.sample(40000), format)
     print("Sampling halo density")
-    agama.writeSnapshot("dens_halo_final",  model.components[2].getDensity().sample(800000), format)
+    agama.writeSnapshot("dens_halo_final",  model.components[2].density.sample(800000), format)
 
     # now create genuinely self-consistent models of both components,
     # by drawing positions and velocities from the DF in the given (self-consistent) potential

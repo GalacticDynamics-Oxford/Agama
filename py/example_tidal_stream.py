@@ -56,7 +56,7 @@ df_host = agama.DistributionFunction(type='quasispherical', potential=pot_host)
 grid_r  = numpy.logspace(-1, 2, 16)  # grid from 0.1 to 100 kpc
 grid_sig= agama.GalaxyModel(pot_host, df_host).moments(
     numpy.column_stack((grid_r, grid_r*0, grid_r*0)), dens=False, vel=False, vel2=True)[:,0]**0.5
-logspl  = agama.CubicSpline(numpy.log(grid_r), numpy.log(grid_sig))  # log-scaled spline
+logspl  = agama.Spline(numpy.log(grid_r), numpy.log(grid_sig))  # log-scaled spline
 sigma   = lambda r: numpy.exp(logspl(numpy.log(r)))   # and the un-scaled interpolator
 
 # initial potential of the satellite (a single Dehnen component with a Gaussian cutoff)
@@ -145,7 +145,7 @@ while time < tend:
     # compute the trajectories of all particles moving in the combined potential of the host galaxy and the moving satellite
     r_xv = numpy.vstack(agama.orbit(ic=r_xv, potential=pot_total, time=tupd, timestart=time, trajsize=1)[:,1])
     # update the potential of the satellite (using a spherical monopole approximation)
-    pot_sat = agama.Potential(type='multipole', particles=(r_xv[:,0:3] - r_center[0:3], mass), lmax=0)
+    pot_sat = agama.Potential(type='multipole', particles=(r_xv[:,0:3] - r_center[0:3], mass), symmetry='s')
     # determine which particles remain bound to the satellite
     r_bound = pot_sat.potential(r_xv[:,0:3] - r_center[0:3]) + 0.5 * numpy.sum((r_xv[:,3:6] - r_center[3:6])**2, axis=1) < 0
     r_mass.append(numpy.sum(mass[r_bound]))
