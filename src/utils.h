@@ -88,7 +88,8 @@ public:
 /** split a string into several items.
     \param[in]  src -- string to be split;
     \param[in]  delim -- array of characters used as delimiters;
-    \return  an array of strings
+    \return  an array of non-empty strings
+    (if string contained nothing but delimiters, the returned array has zero length).
 */
 std::vector<std::string> splitString(const std::string& src, const std::string& delim);
 

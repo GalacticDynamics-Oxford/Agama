@@ -60,8 +60,6 @@ public:
         This is not a constructor, but a static method returning a shared pointer to
         the newly created density object.
         \param[in]  src        is the input density model;
-        \param[in]  sym        is the symmetry of the resulting density expansion
-        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
@@ -72,7 +70,7 @@ public:
     */
     static PtrDensity create(
         const BaseDensity& src,
-        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
@@ -189,8 +187,6 @@ public:
         and solves Poisson equation to find the potential sph.-harm. coefficients;
         the second one takes a potential model and computes these coefs directly.
         \param[in]  src        is the input density or potential model;
-        \param[in]  sym        is the symmetry of the resulting potential expansion
-        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
@@ -201,14 +197,14 @@ public:
     */
     static PtrPotential create(
         const BaseDensity& src,
-        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
     /** same as above, but takes a potential model as an input */
     static PtrPotential create(
         const BasePotential& src,
-        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
@@ -284,8 +280,6 @@ public:
         This is not a constructor but a static member function returning a shared pointer
         to the newly created potential.
         \param[in]  src   is the input density or potential model;
-        \param[in]  sym   is the symmetry of the resulting potential expansion;
-        (if set to coord::ST_UNKNOWN, it will be taken from the input density model);
         \param[in]  lmax  is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax  is the order of expansion in azimuth (phi);
         \param[in]  nmax  is the order of radial expansion (number of terms is nmax+1);
@@ -297,7 +291,7 @@ public:
     */
     static PtrPotential create(
         const BaseDensity& src,
-        /*coord::SymmetryType sym,*/ int lmax, int mmax,
+        int lmax, int mmax,
         unsigned int nmax, double eta=1.0, double r0=0.0,
         bool fixOrder=false);
 

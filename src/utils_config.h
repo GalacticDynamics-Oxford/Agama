@@ -133,6 +133,7 @@ public:
     /// \param[in]  secName  is the section name; if it did not exist, first create an empty section.
     /// \return a non-const reference to a section: it may be used to modify the values in the ini file
     KeyValueMap& findSection(const std::string& secName);
+    const KeyValueMap& findSection(const std::string& secName) const;
 
 private:
     /// name of the INI file

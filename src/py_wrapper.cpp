@@ -216,7 +216,7 @@ int NumpyWarningsDisabler::numInstances = 0;
 ///@{
 
 /// check that a Python object is a callable function that accepts a 2d NxD array and returns
-/// a 1d array of length N with a valid numerical type
+/// a 1d array of length N with a valid numerical type, but is *not* any of the agama classes
 bool checkCallable(PyObject* fnc, int dim)
 {
     if(PyCallable_Check(fnc) &&
@@ -271,17 +271,19 @@ std::string toString(PyObject* obj)
             return utils::toString(value, 18);  // keep full precision in the string
         PyErr_Clear();   // otherwise something went wrong in conversion, carry on..
     }
-    // if the input is a tuple/list/array, serialize its elements into a comma-separated string
-    // (note that this flattens multidimensional arrays, may need to rethink this behaviour..)
-    if(PySequence_Check(obj)) {
+    // if the input is a tuple/list/array, recursively serialize its elements into
+    // a comma-separated string surrounded by brackets;
+    // multidimensional arrays appear as nested sequences of brackets, e.g. [[1,2],[3,4]]
+    if(PySequence_Check(obj)) {   // sequence but not an array
         Py_ssize_t size = PySequence_Size(obj);
-        std::string str;
+        std::string str = "[";
         for(Py_ssize_t i=0; i<size; i++) {
             if(i>0) str += ",";
             PyObject* elem = PySequence_GetItem(obj, i);
             str += toString(elem);
             Py_XDECREF(elem);
         }
+        str += "]";
         return str;
     }
     PyObject* s = PyObject_Str(obj);
@@ -1192,13 +1194,14 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "  W0=...  dimensionless central potential in King models.\n" \
     "  trunc=...  truncation strength in King models.\n" \
     "  center=...  offset of the potential from origin, can be either " \
-    "a triplet of numbers, or a file name with time-dependent offsets.\n" \
+    "a triplet of numbers, or an array of time-dependent offsets " \
+    "(t,x,y,z, and optionally vx,vy,vz) provided directly or as a file name.\n" \
     "  orientation=...  orientation of the principal axes of the model w.r.t. " \
     "the external coordinate system, specified as a triplet of Euler angles.\n" \
     "  rotation=...  angle of rotation of the model about its z axis, " \
-    "can be a single number or a file name with a time-dependent angle.\n" \
+    "can be a single number or an array / file with a time-dependent angle.\n" \
     "  scale=...  modification of mass and size scales of the model, " \
-    "given either as two numbers or a file with time-dependent scaling factors.\n"
+    "given either as two numbers or an array / file with time-dependent scaling factors.\n"
 
 /// description of Density class
 static const char* docstringDensity =
@@ -1226,8 +1229,9 @@ static const char* docstringDensity =
     "argument together with one or more modifier parameters (center, orientation, rotation and scale).\n"
     "One may also construct a Density wrapper around a user-defined Python function that takes "
     "an array of Nx3 points in cartesian coordinates and returns the density values at these N points. "
-    "Such a function can be provided as an unnamed argument, or as a `density` argument followed by "
-    "`symmetry` (in the first case, the symmetry remains unknown and some methods will not work).\n"
+    "Such a function can be provided as a single positional argument or as a `density` argument, "
+    "followed by `symmetry` (if the latter is not given, the symmetry remains unknown "
+    "and some methods will not work).\n"
     "If this user-defined function is expected to be used in heavy computations, "
     "it may be more efficient to approximate it by a native density interpolator class: "
     "DensitySphericalHarmonic (for spheroidal profiles that are not too flattened) or "
@@ -1237,7 +1241,14 @@ static const char* docstringDensity =
     "the `symmetry` argument describes its degree of symmetry, "
     "and optional additional arguments may specify the grid parameters "
     "(rmin, rmax, gridSizeR; for azimuthal-harmonic expansion - additionally zmin, zmax, gridSizeZ) "
-    "and angular expansion orders (lmax, mmax for spherical, or mmax for azimuthal harmonics).";
+    "and angular expansion orders (lmax, mmax for spherical, or mmax for azimuthal harmonics).\n"
+    "Examples:\n\n"
+    ">>> dens_disk = Density(type='Disk', scaleRadius=3, scaleHeight=-0.3, sersicIndex=1.5)\n"
+    ">>> dens_param= dict(type='Spheroid', scaleradius=2, axisratioZ=0.5, gamma=0, alpha=2)\n"
+    ">>> dens_func = lambda xyz: 1/(numpy.sum(xyz**4, axis=1) + 1)\n"
+    ">>> dens_user = Density([dens_param, dens_func], symmetry='t')\n"
+    ">>> dens_appr = Density(type='DensitySphericalHarmonic', density=(dens_param, dens_func), "
+    "symmetry='t', lmax=8)\n";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Density class
@@ -1372,25 +1383,8 @@ void Density_dealloc(DensityObject* self)
 }
 
 /// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error
-potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_UNKNOWN)
-{
-    if(dens_obj == NULL)
-        return potential::PtrDensity();
-
-    // check if this is a Python wrapper class for a C++ Density object (DensityType)
-    // or a Python class PotentiaType, which is a subclass of DensityType
-    if(PyObject_TypeCheck(dens_obj, DensityTypePtr) && ((DensityObject*)dens_obj)->dens)
-        return ((DensityObject*)dens_obj)->dens;
-
-    // otherwise this could be an arbitrary Python function
-    if(checkCallable(dens_obj, /*dimension of input*/ 3)) {
-        // then create a C++ wrapper for this Python function with the prescribed symmetry
-        return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
-    }
-
-    // none of the above succeeded -- return an empty pointer
-    return potential::PtrDensity();
-}
+// (forward declaration, the function will be defined later)
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym=coord::ST_UNKNOWN);
 
 // extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
 // (forward declaration, the function will be defined later)
@@ -1480,7 +1474,7 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 }
 
 /// attempt to construct a composite density from a tuple of Density objects
-potential::PtrDensity Density_initFromTuple(PyObject* tuple)
+potential::PtrDensity Density_initFromTuple(PyObject* tuple, coord::SymmetryType sym=coord::ST_UNKNOWN)
 {
     // if we have one string parameter, it could be the file name
     if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
@@ -1490,7 +1484,7 @@ potential::PtrDensity Density_initFromTuple(PyObject* tuple)
         PyObject* item = PyTuple_GET_ITEM(tuple, i);
         potential::PtrDensity comp = PyDict_Check(item) ?
             Density_initFromDict(item) :
-            getDensity(item);   // Density or Potential or a user-defined function
+            getDensity(item, sym);   // Density or Potential or a user-defined function
         if(!comp)
             throw std::invalid_argument("Unnamed arguments should contain only valid Density objects, "
                 "or functions providing that interface, or dictionaries with density parameters");
@@ -1509,16 +1503,24 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
     }
     try{
         Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
-        if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
+        Py_ssize_t numnamed= namedArgs!=NULL && PyDict_Check(namedArgs) ? PyDict_Size(namedArgs) : 0;
+        if(numargs>0 && numnamed==0)
             self->dens = Density_initFromTuple(args);
-        else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+        else if(numargs==0 && numnamed>0)
             self->dens = Density_initFromDict(namedArgs);
         else if(numargs==0)
             throw std::invalid_argument("Argument list cannot be empty, type help(Density) for details");
-        else
+        else if(numargs==1 && numnamed==1) {
+            // an exception to the rule below: may provide one positional argument (a user-defined
+            // function, but *not* an instance of Density) and one required named argument "symmetry"
+            PyObject* arg = PyTuple_GET_ITEM(args, 0);
+            PyObject* namedArg = getItemFromPyDict(namedArgs, "symmetry");
+            if(namedArg && !PyObject_TypeCheck(arg, DensityTypePtr))
+                self->dens = getDensity(arg, potential::getSymmetryTypeByName(toString(namedArg)));
+        }
+        if(!self->dens)
             throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Density) for details");
-        assert(self->dens);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -1528,6 +1530,41 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_RuntimeError, (std::string("Error in creating density: ")+e.what()).c_str());
         return -1;
     }
+}
+
+/// extract a pointer to C++ Density class from a Python object, or return an empty pointer on error
+potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
+{
+    if(dens_obj == NULL)
+        return potential::PtrDensity();
+
+    // check if this is a Python wrapper class for a C++ Density object (DensityType)
+    // or a Python class PotentiaType, which is a subclass of DensityType
+    if(PyObject_TypeCheck(dens_obj, DensityTypePtr) && ((DensityObject*)dens_obj)->dens)
+        return ((DensityObject*)dens_obj)->dens;
+
+    // otherwise this could be an arbitrary Python function
+    if(checkCallable(dens_obj, /*dimension of input*/ 3)) {
+        // then create a C++ wrapper for this Python function with the prescribed symmetry
+        return potential::PtrDensity(new DensityWrapper(dens_obj, sym));
+    }
+
+    // otherwise this may be a tuple, list or another sequence containing Density-like objects
+    if(PySequence_Check(dens_obj)) {
+        PyObject* tuple = PySequence_Tuple(dens_obj);
+        try{
+            potential::PtrDensity result = Density_initFromTuple(tuple, sym);
+            Py_XDECREF(tuple);
+            return result;
+        }
+        catch(std::exception &e) {
+            Py_XDECREF(tuple);
+            utils::msg(utils::VL_WARNING, "Agama", e.what());
+        }
+    }
+
+    // none of the above succeeded -- return an empty pointer
+    return potential::PtrDensity();
 }
 
 /// compute the density at one or more points
@@ -1967,13 +2004,13 @@ static const char* docstringPotential =
     ">>> pot_from_ini  = Potential('my_potential.ini')\n"
     ">>> pot_from_snapshot = Potential(type='Multipole', file='snapshot.dat')\n"
     ">>> pot_from_particles = Potential(type='Multipole', particles=(coords, masses), symmetry='t')\n"
-    ">>> pot_user = Potential(type='Multipole', density=lambda x: (numpy.sum(x**2,axis=1)+1)**-2, "
-    "symmetry='s')\n"
+    ">>> pot_user = Potential(lambda x: -(numpy.sum(x**2, axis=1) + 1)**-0.5, symmetry='s')\n"
     ">>> pot_shifted = Potential(potential=pot_composite, center=[1.0,2.0,3.0]\n"
     ">>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)\n"
     ">>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, "
     "outerCutoffRadius=150, axisRatioZ=0.8)\n"
-    ">>> pot_exp = Potential(type='Multipole', density=Density(halo_par), "
+    ">>> dens_func= lambda xyz: 1e8 / (numpy.sum((xyz/10.)**4, axis=1) + 1)\n"
+    ">>> pot_exp  = Potential(type='Multipole', density=(halo_par, dens_func), symmetry='t', "
     "gridSizeR=20, Rmin=1, Rmax=500, lmax=4)\n"
     ">>> pot_galpot = Potential(disk_par, halo_par)\n\n"
     "The latter example illustrates the use of GalPot components (exponential disks and spheroids) "
@@ -1981,7 +2018,8 @@ static const char* docstringPotential =
     "and a special variant of disk potential, but may also be combined with any other components "
     "if needed.\n"
     "The numerical values in the above examples are given in solar masses and kiloparsecs; "
-    "a call to `setUnits` should precede the construction of potentials in this approach. "
+    "a call to `setUnits(length=1, mass=1, velocity=1)` should precede the construction "
+    "of potentials in this approach. "
     "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
     "(this is the default regime and is restored by calling `setUnits()` without arguments).\n";
 
@@ -2148,26 +2186,6 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
     return (PyObject*)pot_obj;
 }
 
-/// extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
-potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
-{
-    if(pot_obj == NULL)
-        return potential::PtrPotential();
-
-    // check if this is a Python wrapper class for a C++ Potential object (PotentialType)
-    if(PyObject_TypeCheck(pot_obj, PotentialTypePtr) && ((PotentialObject*)pot_obj)->pot)
-        return ((PotentialObject*)pot_obj)->pot;
-
-    // otherwise this could be an arbitrary Python function
-    if(checkCallable(pot_obj, /*dimension of input*/ 3)) {
-        // then create a C++ wrapper for this Python function with the prescribed symmetry
-        return potential::PtrPotential(new PotentialWrapper(pot_obj, sym));
-    }
-
-    // none of the above succeeded -- return an empty pointer
-    return potential::PtrPotential();
-}
-
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
 {
@@ -2229,7 +2247,7 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
 
 /// attempt to construct a composite potential from a tuple of Potential objects
 /// or dictionaries with potential parameters
-potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
+potential::PtrPotential Potential_initFromTuple(PyObject* tuple, coord::SymmetryType sym=coord::ST_UNKNOWN)
 {
     // if we have one string parameter, it could be the name of an INI file
     if(PyTuple_Size(tuple) == 1 && PyString_Check(PyTuple_GET_ITEM(tuple, 0)))
@@ -2239,17 +2257,20 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
     std::vector<utils::KeyValueMap> paramsArr;
     // first check the types of tuple elements
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
-        potential::PtrPotential pi = getPotential(PyTuple_GET_ITEM(tuple, i));
-        if(pi)  // an existing Potential object or a user-defined function that provides this interface
-            components.push_back(pi);
-        else
-            onlyPot = false;
-        if(PyDict_Check(PyTuple_GET_ITEM(tuple, i)))  // a dictionary with param=value pairs
-            paramsArr.push_back(convertPyDictToKeyValueMap(PyTuple_GET_ITEM(tuple, i)));
-        else
+        PyObject* item = PyTuple_GET_ITEM(tuple, i);
+        if(PyDict_Check(item))  // a dictionary with param=value pairs
+            paramsArr.push_back(convertPyDictToKeyValueMap(item));
+        else {
             onlyDict = false;
+            // could be an existing Potential object or a compatible user-defined function
+            potential::PtrPotential comp = getPotential(item, sym);
+            if(comp)
+                components.push_back(comp);
+            else
+                onlyPot = false;
+        }
     }
-    if(onlyPot) {
+    if(onlyPot && !components.empty()) {
         return components.size()==1 ? components[0] :
             potential::PtrPotential(new potential::Composite(components));
     } else if(onlyDict) {
@@ -2268,16 +2289,24 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
     }
     try{
         Py_ssize_t numargs = args!=NULL && PyTuple_Check(args) ? PyTuple_Size(args) : 0;
-        if(numargs>0 && (namedArgs==NULL || PyDict_Size(namedArgs)==0))
+        Py_ssize_t numnamed= namedArgs!=NULL && PyDict_Check(namedArgs) ? PyDict_Size(namedArgs) : 0;
+        if(numargs>0 && numnamed==0)
             self->pot = Potential_initFromTuple(args);
-        else if(numargs==0 && namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
+        else if(numargs==0 && numnamed>0)
             self->pot = Potential_initFromDict(namedArgs);
         else if(numargs==0)
             throw std::invalid_argument("Argument list cannot be empty, type help(Potential) for details");
-        else
+        else if(numargs==1 && numnamed==1) {
+            // an exception to the rule below: may provide one positional argument (a user-defined
+            // function, but *not* an instance of Potential) and one required named argument "symmetry"
+            PyObject* arg = PyTuple_GET_ITEM(args, 0);
+            PyObject* namedArg = getItemFromPyDict(namedArgs, "symmetry");
+            if(namedArg && !PyObject_TypeCheck(arg, PotentialTypePtr))
+                self->pot = getPotential(arg, potential::getSymmetryTypeByName(toString(namedArg)));
+        }
+        if(!self->pot)
             throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Potential) for details");
-        assert(self->pot);
         utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -2287,6 +2316,40 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_RuntimeError, (std::string("Error in creating potential: ")+e.what()).c_str());
         return -1;
     }
+}
+
+/// extract a pointer to C++ Potential class from a Python object, or return an empty pointer on error
+potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
+{
+    if(pot_obj == NULL)
+        return potential::PtrPotential();
+
+    // check if this is a Python wrapper class for a C++ Potential object (PotentialType)
+    if(PyObject_TypeCheck(pot_obj, PotentialTypePtr) && ((PotentialObject*)pot_obj)->pot)
+        return ((PotentialObject*)pot_obj)->pot;
+
+    // otherwise this could be an arbitrary Python function
+    if(checkCallable(pot_obj, /*dimension of input*/ 3)) {
+        // then create a C++ wrapper for this Python function with the prescribed symmetry
+        return potential::PtrPotential(new PotentialWrapper(pot_obj, sym));
+    }
+
+    // otherwise this may be a tuple, list or another sequence containing Potential-like objects
+    if(PySequence_Check(pot_obj)) {
+        PyObject* tuple = PySequence_Tuple(pot_obj);
+        try{
+            potential::PtrPotential result = Potential_initFromTuple(tuple, sym);
+            Py_XDECREF(tuple);
+            return result;
+        }
+        catch(std::exception &e) {
+            Py_XDECREF(tuple);
+            utils::msg(utils::VL_WARNING, "Agama", e.what());
+        }
+    }
+
+    // none of the above succeeded -- return an empty pointer
+    return potential::PtrPotential();
 }
 
 // this check seems to be unnecessary, but let it remain for historical reasons
@@ -2518,7 +2581,7 @@ PyObject* Potential_Tcirc(PyObject* self, PyObject* arg)
         result = FncPotentialTcirc<false>(arr, *((PotentialObject*)self)->pot).run(/*chunk*/64);
     else
         PyErr_SetString(PyExc_TypeError,
-            "Input must be a Nx1 array of energy values or a Nx6 array of position/velocity values");
+            "Input must be a 1d array of energy values or a 2d Nx6 array of position/velocity values");
     Py_DECREF(arr);
     return result;
 }
@@ -3217,21 +3280,7 @@ public:
 
 /// extract a pointer to C++ DistributionFunction class from a Python object,
 /// or return an empty pointer on error
-df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
-{
-    if(df_obj == NULL)
-        return df::PtrDistributionFunction();
-    // check if this is a Python wrapper for a genuine C++ DF object
-    if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr) && ((DistributionFunctionObject*)df_obj)->df)
-        return ((DistributionFunctionObject*)df_obj)->df;
-    // otherwise this could be an arbitrary callable Python object
-    if(checkCallable(df_obj, /*dimensions of input*/ 3)) {
-        // then create a C++ wrapper for this Python function
-        return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
-    }
-    // none succeeded - return an empty pointer
-    return df::PtrDistributionFunction();
-}
+df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj);
 
 /// create a Python DistributionFunction object from an existing instance of C++ DF class
 PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
@@ -3369,6 +3418,38 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
             (std::string("Error in creating distribution function: ")+e.what()).c_str());
         return -1;
     }
+}
+
+/// extract a pointer to C++ DistributionFunction class from a Python object,
+/// or return an empty pointer on error
+df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
+{
+    if(df_obj == NULL)
+        return df::PtrDistributionFunction();
+    // check if this is a Python wrapper for a genuine C++ DF object
+    if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr) && ((DistributionFunctionObject*)df_obj)->df)
+        return ((DistributionFunctionObject*)df_obj)->df;
+    // otherwise this could be an arbitrary callable Python object
+    if(checkCallable(df_obj, /*dimensions of input*/ 3)) {
+        // then create a C++ wrapper for this Python function
+        return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
+    }
+    // otherwise this may be a tuple, list or another sequence of DistributionFunction-like objects
+    if(PySequence_Check(df_obj)) {
+        PyObject* tuple = PySequence_Tuple(df_obj);
+        try{
+            df::PtrDistributionFunction result = DistributionFunction_initFromTuple(tuple);
+            Py_XDECREF(tuple);
+            return result;
+        }
+        catch(std::exception &e) {
+            Py_XDECREF(tuple);
+            utils::msg(utils::VL_WARNING, "Agama", e.what());
+        }
+    }
+    
+    // none succeeded - return an empty pointer
+    return df::PtrDistributionFunction();
 }
 
 /// compute the distribution function at one or more points in action space

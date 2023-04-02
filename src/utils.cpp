@@ -429,7 +429,6 @@ std::vector<std::string> splitString(const std::string& src, const std::string& 
     std::string str(src);
     std::string::size_type indx=str.find_first_not_of(delim);
     if(indx==std::string::npos) {
-        result.push_back("");   // ensure that result contains at least one element
         return result;
     }
     if(indx>0)  // remove unnecessary delimiters at the beginning
@@ -438,6 +437,7 @@ std::vector<std::string> splitString(const std::string& src, const std::string& 
         indx=str.find_first_of(delim);
         if(indx==std::string::npos)
             indx=str.size();
+        assert(indx>0);   // each element in the result array should be non-empty
         result.push_back(str.substr(0, indx));
         str=str.erase(0, indx);
         indx=str.find_first_not_of(delim);

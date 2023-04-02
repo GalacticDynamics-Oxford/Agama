@@ -164,11 +164,6 @@ struct AllParam: public ModifierParams
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
         lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0), fixOrder(false)
     {}
-    /// convert to KeplerBinaryParams
-    operator KeplerBinaryParams() const
-    {
-        return KeplerBinaryParams(mass, binary_q, binary_sma, binary_ecc, binary_phase);
-    }
 };
 
 ///@}
@@ -432,6 +427,13 @@ SersicParam parseSersicParam(const AllParam& param)
         sparam.surfaceDensity = param.mass / sparam.mass();
     }
     return sparam;
+}
+
+/// pick up the parameters for KeplerBinary potential
+KeplerBinaryParams parseKeplerBinaryParam(const AllParam& param)
+{
+    return KeplerBinaryParams(param.mass, param.binary_q, param.binary_sma, param.binary_ecc,
+        param.binary_phase);
 }
 
 ///@}
@@ -915,6 +917,18 @@ void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity* dens,
 //        ------------------------------------------------
 ///@{
 
+inline bool isPairOfBrackets(char c1, char c2) { return (c1=='[' && c2==']') || (c1=='(' && c2==')'); }
+
+inline std::string errorTimeDependentArray(int K, const std::string& str)
+{
+    return "readTimeDependentArray<" + utils::toString(K) + ">: "
+    "input string \"" + str + "\" must be one of the following: "
+    "(a) a sequence of " + utils::toString(K) + " comma- or space-separated values, "
+    "(b) a 2d array with " + utils::toString(K+1) + " or " + utils::toString(K*2+1) + " columns, "
+    "(c) the name of a file with this number of columns "
+    "(timestamps, values and optionally their time derivatives)";
+}
+
 /** parse a single string with K values or read a file with a time-dependent K-dimensional vector:
     each line contains the timestamp and K or 2*K values, interpreted as K components of the vector
     (applying the unit conversion) and optionally their time derivatives at the given moment of time.
@@ -927,26 +941,81 @@ static void readTimeDependentArray(
     const std::string& str, /*units:*/ double timeUnit, double valueUnit,
     /*output*/ math::CubicSpline spl[K])
 {
-    // try to interpret the string as an array of K numbers
     std::vector<std::string> fields = utils::splitString(str, ",; \t");
+    if(fields.empty())
+        throw std::runtime_error("readTimeDependentArray<" + utils::toString(K) + ">: "
+            "empty input string");
+
+    std::vector<double> time, val[K], der[K];
+
+    // try to interpret the string as an array of K numbers
+    // separated by spaces or commas and optionally enclosed in round or square brackets
     if(fields.size() == K) {
         try {
-            for(int k=0; k<K; k++)
-                spl[k] = math::constantInterp<math::CubicSpline>(utils::toDouble(fields[k]) * valueUnit);
+            // input string might be enclosed in a single pair of round or square brackets - remove them
+            if(isPairOfBrackets(fields.front().front(), fields.back().back())) {
+                fields.front() = fields.front().substr(1);
+                fields.back () = fields.back ().substr(0, fields.back().size()-1);
+            }
+            for(int k=0; k<K; k++) {
+                spl[k] = math::CubicSpline(std::vector<double>(1, 0.),
+                    std::vector<double>(1, utils::toDouble(fields[k]) * valueUnit));
+            }
             return;
         }
         // if the conversion failed, continue and try to interpret the input string as a file name
         catch(std::exception&) {}
     }
 
+    // otherwise the string might be a serialized 2d array like [[1,2,3],[4,5,6]]
+    // enclosed in round or square brackets
+    if( (fields.size() % (K+1) == 0 || fields.size() % (2*K+1) == 0) &&
+        isPairOfBrackets(fields.front().front(), fields.back().back()) )
+    {
+        // remove the outermost pair of brackets
+        fields.front() = fields.front().substr(1);
+        fields.back () = fields.back ().substr(0, fields.back().size()-1);
+        // check that each group of (K+1) or (K*2+1) items is enclosed in brackets
+        bool Kplus1 = true, K2plus1 = true;
+        for(size_t l=0; l<fields.size() / (K+1); l++)
+            Kplus1  &= isPairOfBrackets(fields[l *  (K+1) ].front(), fields[(l+1) *  (K+1)  - 1].back());
+        for(size_t l=0; l<fields.size() / (K*2+1); l++)
+            K2plus1 &= isPairOfBrackets(fields[l * (K*2+1)].front(), fields[(l+1) * (K*2+1) - 1].back());
+        if(Kplus1) {
+            for(size_t l=0; l<fields.size() / (K+1); l++) {
+                // strip the opening bracket in the first column (time)
+                time.push_back(utils::toDouble(fields[l * (K+1)].substr(1)) * timeUnit);
+                // don't bother stripping the closing bracket, as toDouble() will stop parsing
+                // the string once it encounters a non-numerical character
+                for(int k=0; k<K; k++)
+                    val[k].push_back(utils::toDouble(fields[l * (K+1) + k+1]) * valueUnit);
+            }
+            // create natural cubic splines from just the values (and regularize)
+            for(int k=0; k<K; k++)
+                spl[k] = math::CubicSpline(time, val[k], true);
+            return;
+        }
+        if(K2plus1) {
+            for(size_t l=0; l<fields.size() / (K*2+1); l++) {
+                time.push_back(utils::toDouble(fields[l * (K*2+1)].substr(1)) * timeUnit);
+                for(int k=0; k<K; k++) {
+                    val[k].push_back(utils::toDouble(fields[l * (K*2+1) + k+1]) * valueUnit);
+                    der[k].push_back(utils::toDouble(fields[l * (K*2+1) + k+1 + K]) *
+                        valueUnit / timeUnit);
+                }
+            }
+            // create Hermite splines from values and derivatives at each moment of time
+            for(int k=0; k<K; k++)
+                spl[k] = math::CubicSpline(time, val[k], der[k]);
+            return;
+        }
+        throw std::runtime_error(errorTimeDependentArray(K, str));
+    }
+
     std::ifstream strm(str.c_str(), std::ios::in);
     if(!strm)
-        throw std::runtime_error("readTimeDependentArray<" + utils::toString(K) + ">: "
-            "input string (" + str + ") must contain " + utils::toString(K) + " values "
-            "or the name of a file with " + utils::toString(K+1) + " or " + utils::toString(2*K+1) +
-            " columns (timestamps, values and optionally their time derivatives)");
+        throw std::runtime_error(errorTimeDependentArray(K, str));
     std::string buffer;
-    std::vector<double> time, val[K], der[K];
     while(std::getline(strm, buffer) && !strm.eof()) {
         if(!buffer.empty() && utils::isComment(buffer[0]))  // commented line
             continue;
@@ -964,7 +1033,7 @@ static void readTimeDependentArray(
     }
     if(val[0].size() == 0)
         throw std::runtime_error("readTimeDependentArray<" + utils::toString(K) + ">: "
-            "no valid entries in file "+str);
+            "no valid entries in file \"" + str + "\"");
     if(der[0].size() == val[0].size()) {
         // create Hermite splines from values and derivatives at each moment of time
         for(int k=0; k<K; k++)
@@ -975,7 +1044,7 @@ static void readTimeDependentArray(
             spl[k] = math::CubicSpline(time, val[k], true);
     } else
         throw std::runtime_error("readTimeDependentArray<" + utils::toString(K) + ">: "
-            "file should contain either " + utils::toString(K+1) + " or " +
+            "file \"" + str + "\" should contain either " + utils::toString(K+1) + " or " +
             utils::toString(2*K+1) + " columns");
 }
 
@@ -1024,8 +1093,12 @@ void applyModifiers(
         obj.reset(new Rotating<BaseDensityOrPotential>(obj, rotation));
     }
     if(!param.orientation.empty()) {
-        // string should contain three Euler angles (space and/or comma-separated)
-        std::vector<std::string> fields = utils::splitString(param.orientation, ",; \t");
+        // string should contain three Euler angles
+        // (space and/or comma-separated, possibly surrounded by square or round brackets)
+        std::vector<std::string> fields = utils::splitString(
+            isPairOfBrackets(param.orientation.front(), param.orientation.back()) ?
+            param.orientation.substr(1, param.orientation.size()-2) :  // strip brackets
+            param.orientation, ",; \t");
         if(fields.size() != 3)
             throw std::invalid_argument("'orientation' must specify three Euler angles");
         obj.reset(new Tilted<BaseDensityOrPotential>(obj,
@@ -1076,7 +1149,7 @@ PtrPotential createAnalyticPotential(const AllParam& param)
     case PT_HARMONIC:
         return PtrPotential(new Harmonic(param.Omega, param.axisRatioY, param.axisRatioZ));
     case PT_KEPLERBINARY:
-        return PtrPotential(new KeplerBinary(param));
+        return PtrPotential(new KeplerBinary(parseKeplerBinaryParam(param)));
     case PT_MIYAMOTONAGAI:
         return PtrPotential(new MiyamotoNagai(param.mass, param.scaleRadius, param.scaleHeight));
     case PT_DEHNEN:
@@ -1670,7 +1743,7 @@ PtrDensity readDensity(const std::string& iniFileName, const units::ExternalUnit
 {
     if(iniFileName.empty())
         throw std::runtime_error("Empty file name");
-    utils::ConfigFile ini(iniFileName);
+    const utils::ConfigFile ini(iniFileName);
     // temporarily change the current directory (if needed) to ensure that the filenames
     // in the INI file are processed correctly with paths relative to the INI file itself
     DirectoryChanger dirchanger(iniFileName);
@@ -1691,7 +1764,7 @@ PtrPotential readPotential(const std::string& iniFileName, const units::External
 {
     if(iniFileName.empty())
         throw std::runtime_error("Empty file name");
-    utils::ConfigFile ini(iniFileName);
+    const utils::ConfigFile ini(iniFileName);
     // temporarily change the current directory (if needed) to ensure that the filenames
     // in the INI file are processed correctly with paths relative to the INI file itself
     DirectoryChanger dirchanger(iniFileName);

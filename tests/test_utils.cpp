@@ -13,7 +13,7 @@
 #include <iomanip>
 #include <cmath>
 
-bool test_number_conversion()
+bool testNumberConversion()
 {
     // this should pass, ignoring whitespace and trailing non-numeric characters
     try{ if(math::fcmp(utils::toDouble(" -9.e99x y"), -9e99, 1e-15) != 0) return false; }
@@ -93,6 +93,21 @@ bool test_number_conversion()
     return ok;
 }
 
+bool testSplitString()
+{
+    std::vector<std::string> fields;
+    fields = utils::splitString("", "|");
+    if(!fields.empty())
+        return false;
+    fields = utils::splitString(" \t \t ", " \t");
+    if(!fields.empty())
+        return false;
+    fields = utils::splitString(" item1 item2 \t item3\t\t", "\t ");
+    if(! (fields.size()==3 && fields[0]=="item1" && fields[1]=="item2" && fields[2]=="item3"))
+        return false;    
+    return true;
+}
+
 std::string readFile(const char* filename)
 {   // read the file into a single string
     std::ifstream in(filename);
@@ -102,7 +117,7 @@ std::string readFile(const char* filename)
     return result;
 }
 
-bool test_ini_file()
+bool testIniFile()
 {
     // an assorted selection of traps to be parsed as an INI file
     const char* iniFile =
@@ -196,7 +211,7 @@ bool test_ini_file()
 int main()
 {
     std::cout << "Test string formatting and INI file routines\n";
-    if(test_number_conversion() && test_ini_file())
+    if(testNumberConversion() && testSplitString() && testIniFile())
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else
         std::cout << "\033[1;31mSOME TESTS FAILED\033[0m\n";

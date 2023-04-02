@@ -23,7 +23,7 @@ However, the third approach is even more general, and can be used with an arbitr
 of potentials (not necessarily point masses) moving on different trajectories.
 On the other hand, the second approach can create non-uniformly rotating arbitrary potentials.
 """
-import agama, numpy, os, matplotlib.pyplot as plt
+import agama, numpy, matplotlib.pyplot as plt
 
 ax = plt.subplots(1, 3, figsize=(15,5))[1]
 
@@ -59,10 +59,11 @@ def JacobiEnergy(pot, orb):
 # and integrate the test-particle orbit in the rotating frame, in which Sun&Earth are stationary.
 # the potential is initialized as two components with different 'modifier' parameters
 # (in this case, center=... creates a Shifted modifier on top of the potential,
-# and we provide just a triplet of numbers to establish a constant shift).
+# and we provide just a triplet of numbers to establish a constant shift;
+# it could be a string or a list/array).
 p1 = agama.Potential(
     dict(type='plummer', mass=0.999, scaleradius=0, center="0.001,0,0"),  # Sun
-    dict(type='plummer', mass=0.001, scaleradius=0, center="-.999,0,0"))  # Earth (a very massive one)
+    dict(type='plummer', mass=0.001, scaleradius=0, center=[-.999,0,0]))  # Earth (a very massive one)
 t1, o1 = agama.orbit(potential=p1, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, Omega=om)
 E1 = JacobiEnergy(p1, o1)
 ax[0].plot(o1[:,0], o1[:,1], c='b')
@@ -72,10 +73,6 @@ ax[2].plot(t1*tu, E1, c='b', label='Two fixed point masses in rotating frame')
 
 # variant 2: same setup, but now make the potential of the two point masses rotate
 # in the inertial frame, and integrate the orbit of the test particle in this frame.
-# the rotation is specified as the angle as a function of time
-# (changing linearly in this case, so we only need two timestamps,
-# and it is extrapolated linearly beyond the end of the specified time interval).
-numpy.savetxt('tmp_rotation', [[0, 0], [1, om]])
 # If the original potential is a simple built-in model (e.g., type='Plummer'),
 # one could construct both the potential and the modifier in one expression:
 # p2 = agama.Potential(type=..., mass=..., rotation=...)
@@ -90,10 +87,10 @@ numpy.savetxt('tmp_rotation', [[0, 0], [1, om]])
 # shifted by a constant offset each, but this does not create a two-body orbit.
 # Therefore, we use the most general approach: first create a composite potential
 # of two fixed point masses, both shifted from origin (reuse the potential from variant 1),
-# and then wrap it into a 'Rotating' modifier by providing the file with the rotation angles
-p2 = agama.Potential(potential=p1, rotation='tmp_rotation')
-# clean up (the potential is already created and the file is no longer needed)
-os.remove('tmp_rotation')
+# and then wrap it into a 'Rotating' modifier by providing an array with the rotation angle
+# as a function of time (changing linearly in this case, so we only need two timestamps,
+# and it is extrapolated linearly beyond the end of the specified time interval).
+p2 = agama.Potential(potential=p1, rotation=[[0, 0], [1, om]])
 # integrate the orbit of a test particle in the inertial frame, but using a rotating potential
 t2, o2 = agama.orbit(potential=p2, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501)
 o2 = convertToCorotatingFrame(t2, o2)   # transform the orbit back into the corotating frame
@@ -105,17 +102,13 @@ ax[2].plot(t2*tu, E2, c='g', label='Two rotating point masses in inertial frame'
 
 # variant 3: same setup, but now make the two point masses move on pre-computed circular orbits,
 # and integrate the orbit of the test particle in the inertial frame
-tt = numpy.linspace(0, tmax, 10001)
-numpy.savetxt('tmp_center1', numpy.column_stack((tt, numpy.cos(om*tt)*0.001, numpy.sin(om*tt)*0.001, 0*tt)), '%g')
-numpy.savetxt('tmp_center2', numpy.column_stack((tt, numpy.cos(om*tt)*-.999, numpy.sin(om*tt)*-.999, 0*tt)), '%g')
-# this time we create a composite potential in which each component has a different
-# time-dependent shift, which is provided in a separate text file;
+tt = numpy.linspace(0, tmax, 5001)
+center1 = numpy.column_stack((tt, numpy.cos(om*tt)*0.001, numpy.sin(om*tt)*0.001, 0*tt))
+center2 = numpy.column_stack((tt, numpy.cos(om*tt)*-.999, numpy.sin(om*tt)*-.999, 0*tt))
+# this time we create a composite potential in which each component has a different time-dependent shift
 p3 = agama.Potential(
-    dict(type='plummer', mass=0.999, scaleradius=0, center="tmp_center1"),
-    dict(type='plummer', mass=0.001, scaleradius=0, center="tmp_center2"))
-# clean up (the potential is already created and the files are no longer needed)
-os.remove('tmp_center1')
-os.remove('tmp_center2')
+    dict(type='plummer', mass=0.999, scaleradius=0, center=center1),
+    dict(type='plummer', mass=0.001, scaleradius=0, center=center2) )
 t3,o3 = agama.orbit(potential=p3, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501)
 o3 = convertToCorotatingFrame(t3, o3)   # transform the orbit back into the corotating frame
 E3 = JacobiEnergy(p3, o3)

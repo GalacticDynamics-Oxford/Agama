@@ -49,6 +49,14 @@ getUnits.__doc__ = _getUnits.__doc__ + \
 "If astropy.units has been imported, the returned dict will contain astropy.units.Quantity instances rather than raw floats"
 
 
+# a deprecated alias to the now-renamed class
+def CubicSpline(*args, **kwargs):
+    """Deprecated alias for agama.Spline"""
+    import warnings
+    warnings.warn("CubicSpline has been renamed to Spline", DeprecationWarning, 2)
+    return _agama.Spline(*args, **kwargs)
+
+
 ### --------------------------------------------------------
 ### two routines for constructing non-uniformly spaced grids
 
@@ -635,7 +643,15 @@ def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
         orbits = orbits[:,1]  # take only the trajectories (1st column), not timestamps (0th column)
     if orbits.shape != (numOrbits,):
         raise ValueError("'orbits' must be an array of numpy arrays with the same length as 'weights'")
-    orbitLengths = _numpy.array([len(o) for o in orbits])
+    # check the number of available samples from each orbit
+    orbitLengths = _numpy.zeros(numOrbits, int)
+    for iorb, orb in enumerate(orbits):
+        length = len(orb)
+        # an orbit could be an instance of agama.Orbit class, but since it is not exported by the C++ module,
+        # we cannot check its type directly; instead, if it is callable and has a length>1, it is assumed to be
+        # and instance of Orbit that can produce an unlimited number of samples
+        if callable(orb) and length>1: length = nbody
+        orbitLengths[iorb] = length
     # index of first output point for each orbit
     outPointIndex = _numpy.hstack((0, _numpy.round( cumulMass / totalMass * nbody ))).astype(int)
     # number of output points to sample from each orbit
@@ -646,17 +662,25 @@ def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
     if len(badOrbitIndices) > 0:
         return False, (badOrbitIndices, pointsToSample[badOrbitIndices])
     # otherwise scan the array of orbits and sample appropriate number of points from each trajectory
-    posvel = _numpy.zeros((nbody, 6), dtype=orbits[0].dtype)
-    for orb in range(numOrbits):
-        # copy a random [non-repeating] selection of points from this orbit into the output array
-        posvel[outPointIndex[orb] : outPointIndex[orb+1]] = \
-            orbits[orb][_numpy.random.choice(orbitLengths[orb], pointsToSample[orb], replace=False)]
+    dtype = float if callable(orbits[0]) else orbits[0].dtype
+    posvel = _numpy.zeros((nbody, 6), dtype=dtype)
+    for iorb, orb in enumerate(orbits):
+        if pointsToSample[iorb] == 0: continue
+        if callable(orb):
+            # if the orbit is a callable function, it is assumed to be an instance of agama.Orbit class
+            # that can produce any required number of points on the trajectory for the given array of times
+            tmin, tmax = orb[0], orb[-1]   # interval of time spanned by the orbit
+            samples = orb(_numpy.random.random(size=pointsToSample[iorb]) * (tmax-tmin) + tmin)
+        else:
+            # copy a random [non-repeating] selection of points from this orbit into the output array
+            samples = orb[_numpy.random.choice(orbitLengths[iorb], pointsToSample[iorb], replace=False)]
+        posvel[outPointIndex[iorb] : outPointIndex[iorb+1]] = samples
     # return a success flag and a tuple of posvel, mass, and possibly orbit indices
-    result = (posvel, _numpy.ones(nbody, dtype=orbits[0].dtype) * totalMass / nbody)
+    result = (posvel, _numpy.ones(nbody, dtype=dtype) * totalMass / nbody)
     if returnIndices:
         orbitIndices = _numpy.zeros(nbody, dtype=int)
-        for orb in range(numOrbits):
-            orbitIndices[outPointIndex[orb] : outPointIndex[orb+1]] = orb
+        for iorb in range(numOrbits):
+            orbitIndices[outPointIndex[iorb] : outPointIndex[iorb+1]] = iorb
         result += (orbitIndices,)
     return True, result
 
@@ -710,6 +734,7 @@ class GalpyPotential(_agama.Potential):
             (not kwargs or len(kwargs)==1 and 'symmetry' in kwargs) ):
             pot = args[0]
             sym = kwargs['symmetry'] if len(kwargs)==1 else None
+            self.__name__ = 'GalpyPotential wrapper for ' + pot.__repr__()
             if isinstance(pot, Potential):   # input is a native galpy potential
                 # check if the input potential supports vectorized input
                 try:
@@ -772,8 +797,10 @@ class GalpyPotential(_agama.Potential):
             _agama.Potential.__init__(self, *args, **kwargs)   # construct a regular Agama potential
             if normalize or (isinstance(normalize,(int,float)) and not isinstance(normalize,bool)):
                 self.normalize(normalize)
+            self.__name__ = 'GalpyPotential wrapper for ' + _agama.Potential.__repr__(self)
 
     __init__.__doc__ += '\n' + _agama.Potential.__doc__  # extend the docstring of the constructor
+    def __repr__(self): return self.__name__
 
     def _cyl2car(self, R, z, phi, full_output=False):
         '''convert input cylindrical coordinates to a Nx3 array in cartesian coords'''
@@ -894,7 +921,7 @@ class GalaPotential(_agama.Potential):
             self._energy   = pot._energy
             self._gradient = pot._gradient
             self._hessian  = pot._hessian
-            self.__name__  = 'GalaPotential wrapper for %s' % pot.__repr__()
+            self.__name__  = 'GalaPotential wrapper for ' + pot.__repr__()
         else:  # input is not a gala potential - interpret it as the input arguments for agama.Potential
             # check if units are provided
             units = None
@@ -909,8 +936,9 @@ class GalaPotential(_agama.Potential):
             self._density = lambda q,t=0.: _agama.Potential.density(self, q, t=t)
             self._gradient= lambda q,t=0.: -self.force(q, t=t)
             self._hessian = lambda q,t=0.: -self.forceDeriv(q, t=t)[1][:,(0,3,5,3,1,4,5,4,2)].reshape(-1,3,3)
-            self.__name__ = 'GalaPotential wrapper for %s' % self.name()
+            self.__name__ = 'GalaPotential wrapper for ' + _agama.Potential.__repr__(self)
 
     agamadensity = _agama.Potential.density
     def __repr__(self): return self.__name__
+    def __str__ (self): return self.__name__
     __init__.__doc__ += '\n' + _agama.Potential.__doc__  # extend the docstring of the constructor

@@ -312,5 +312,14 @@ KeyValueMap& ConfigFile::findSection(const std::string& sec)
     sections.push_back(std::pair<std::string, KeyValueMap>(sec, KeyValueMap()));
     return sections.back().second;
 }
+    
+const KeyValueMap& ConfigFile::findSection(const std::string& sec) const
+{
+    for(unsigned int is=0; is<sections.size(); is++)
+        if(stringsEqual(sections[is].first, sec))
+            return sections[is].second;
+    // not found
+    throw std::runtime_error("ConfigFile: section does not exist");
+}
 
 }  // namespace utils

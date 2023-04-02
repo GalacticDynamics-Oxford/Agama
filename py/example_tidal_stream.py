@@ -106,13 +106,12 @@ def orbitDF(ic, time, timestart, trajsize, mass):
 # simulate the evolution of the disrupting satellite using two methods:
 # "restricted N-body" (r_ prefix) and "full N-body" (if available, f_ prefix)
 
-r_mass = [initmass]
-r_traj = [r_center]
-r_xv   = xv.copy()
-time   = 0.0   # current simulation time
-times_t= [time]
-times_u= [time]
-orbitfile= 'satellite_orbit.txt'  # temp file name for storing the trajectory
+r_mass   = [initmass]
+r_traj   = [r_center]
+r_xv     = xv.copy()
+time     = 0.0   # current simulation time
+times_t  = [time]
+times_u  = [time]
 f_center = r_center.copy()
 f_mass   = [initmass]
 f_traj   = [f_center]
@@ -140,8 +139,8 @@ while time < tend:
     r_traj.extend(orbit_center[1:])
     r_center = orbit_center[-1]  # current position and velocity of satellite CoM
     # initialize the time-dependent total potential (host + moving sat) on this time interval
-    numpy.savetxt(orbitfile, numpy.column_stack((time_center, orbit_center)))
-    pot_total = agama.Potential(pot_host, agama.Potential(potential=pot_sat, center=orbitfile))
+    pot_total = agama.Potential(pot_host,
+        agama.Potential(potential=pot_sat, center=numpy.column_stack((time_center, orbit_center))))
     # compute the trajectories of all particles moving in the combined potential of the host galaxy and the moving satellite
     r_xv = numpy.vstack(agama.orbit(ic=r_xv, potential=pot_total, time=tupd, timestart=time, trajsize=1)[:,1])
     # update the potential of the satellite (using a spherical monopole approximation)
@@ -238,7 +237,6 @@ while time < tend:
         plt.draw()
         plt.pause(.01)
 
-os.remove(orbitfile)
 if plot:
     plt.ioff()
 plt.show()

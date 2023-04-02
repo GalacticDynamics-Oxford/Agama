@@ -588,14 +588,6 @@ private:
 };
 
 
-/** Convenience function for creating an interpolator from a single constant value */
-template<typename InterpT>
-InterpT constantInterp(double val) {
-    std::vector<double> t(2), v(2, val);
-    t[1]=1;
-    return InterpT(t, v);
-}
-
 ///@}
 /// \name Two-dimensional interpolation
 ///@{
