@@ -44,6 +44,8 @@ public:
 /// f0 =   \int_{-\infty}^{\infty} f(x) dx                          (overall normalization)
 /// f1 =  (\int_{-\infty}^{\infty} f(x) x dx) / f0                  (mean x)
 /// f2 = ((\int_{-\infty}^{\infty} f(x) x^2 dx) / f0 - f1^2)^{1/2}  (standard deviation of x)
+/// Note: this routine may fail to find the region of non-zero input function
+/// if it is significantly offset from origin
 std::vector<double> computeClassicMoments(const IFunction& fnc)
 {
     double result[3], zlower[1]={0.0}, zupper[1]={+1.0};
@@ -56,6 +58,21 @@ std::vector<double> computeClassicMoments(const IFunction& fnc)
     return moments;
 }
 
+
+/// same as above, but for a function f(x) that is a B-spline of degree N
+/// (robust w.r.t. shifts from origin, unlike the above function)
+template<int N>
+std::vector<double> computeClassicMoments(const BsplineWrapper<N>& fnc)
+{
+    std::vector<double> moments(3);
+    for(int m=0; m<=2; m++)
+        moments[m] = fnc.bspl.integrate(fnc.bspl.xmin(), fnc.bspl.xmax(), fnc.ampl, m);
+    if(moments[0] != 0) {
+        moments[1] /= moments[0];
+        moments[2] = sqrt(fmax(0, moments[2] / moments[0] - pow_2(moments[1])));
+    }
+    return moments;
+}
 
 /** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
     When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
@@ -336,7 +353,7 @@ GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<N>& fnc,
     if(order<2)
         throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
     if(!isFinite(ampl + center + width)) {
-        std::vector<double> params = computeClassicMoments(fnc);
+        std::vector<double> params = computeClassicMoments<N>(fnc);
         const unsigned int fitorder = 2;
         params.resize(fitorder+1);
         nonlinearMultiFit(GaussHermiteFitter<N>(fitorder, fnc),

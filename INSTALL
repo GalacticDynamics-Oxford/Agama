@@ -9,14 +9,17 @@ There are two alternative ways of building and installing the library:
 In the automatic mode, go to the root folder of the archive (containing setup.py) and run
   python setup.py install --user
 (or python3 with the same arguments), and follow the instructions.
+(Note that the '--user' argument appears to be unnecessary for Anaconda).
 The setup script may ask permission for downloading/installing additional third-party
 libraries (most importantly, GSL); if the installation needs to be fully automated,
 one may add '--yes' to the command-line arguments to skip the confirmation questions.
-One can also install with pip: in the same folder, you may run
+Note that starting from Python 3.10, running "setup.py install" is deprecated;
+the suggested alternative, which can be used with earlier versions as well, is to use pip:
+in the same folder, you may run
   pip install --user ./
 or even without unpacking, just run
   pip install --user agama.zip
-or install from the PyPI repository:
+or install from the PyPI repository (which downloads the latest commit archive from github):
   pip install --user agama
 Note that pip hides most of the messages printed during installation, but the questions
 requiring user input should nevertheless appear on the screen.
@@ -27,6 +30,8 @@ and install it to the user-specific site-packages folder in your current python 
 On Windows, the compiler (MSVC) requires a somewhat different treatment, but the setup.py script
 is adapted for this situation (it runs a different build program, nmake, and uses Makefile.msvc
 instead of ordinary Makefile, still creating a Makefile.local automatically during the setup).
+Before running the setup script from Windows terminal, one needs to initialize the command-line
+build tools by running "vcvarsall.bat".
 
 In the manual mode, follow these steps:
 

@@ -27,9 +27,12 @@ unit_vlos = unit.km / unit.s  # velocity units may be selected arbitrarily, whil
 unit_pm   = unit_angle * unit_vlos / unit_dist  # unit of PM follows from the previous two choices
 
 def test(ra, dec, dist, pmra, pmdec, vlos):
-    icrs = coord.ICRS(ra=ra*unit_angle, dec=dec*unit_angle, distance=dist*unit_dist,
-        pm_ra_cosdec=pmra*unit_pm, pm_dec=pmdec*unit_pm, radial_velocity=vlos*unit_vlos)
-    gsky = icrs.transform_to(coord.Galactic)
+    kwargs = dict(ra=ra*unit_angle, dec=dec*unit_angle, distance=dist*unit_dist,
+            pm_ra_cosdec=pmra*unit_pm, pm_dec=pmdec*unit_pm, radial_velocity=vlos*unit_vlos)
+    try:
+        gsky = coord.SkyCoord(frame='icrs', **kwargs).transform_to(coord.Galactic)
+    except ValueError:  # old version of astropy
+        gsky = coord.ICRS(**kwargs).transform_to(coord.Galactic)
     l, b, pml, pmb = agama.transformCelestialCoords(agama.fromICRStoGalactic, ra, dec, pmra, pmdec)
     # check the (near-)equivalence of Astropy and our celestial coordinate transformations
     diff_astropy_sky = numpy.amax([
@@ -52,12 +55,15 @@ def test(ra, dec, dist, pmra, pmdec, vlos):
     # to Galactic sky coordinates; by default, these two frames in Astropy are not quite consistent with
     # each other in a natural way, and some manual adjustments are needed to ensure that this conversion
     # follows the expectations (e.g., that x=y=z=0 corresponds to l=0,b=0).
-    gsky = coord.Galactocentric(
-        galcen_distance=8.122*unit_dist, z_sun=0.0208*unit_dist, roll=-3.01077232808e-5*unit.degree,
+    kwargs = dict(galcen_distance=8.122*unit_dist, z_sun=0.0208*unit_dist, roll=-3.01077232808e-5*unit.degree,
         galcen_v_sun=coord.CartesianDifferential([12.9,245.6,7.78]*unit_vlos),
         galcen_coord=coord.ICRS(ra=266.4049882865447*unit.degree, dec=-28.93617776179147*unit.degree),
         x=X*unit_dist, y=Y*unit_dist, z=Z*unit_dist,
-        v_x=VX*unit_vlos, v_y=VY*unit_vlos, v_z=VZ*unit_vlos).transform_to(coord.Galactic)
+        v_x=VX*unit_vlos, v_y=VY*unit_vlos, v_z=VZ*unit_vlos)
+    try:
+        gsky = coord.SkyCoord(frame='galactocentric', **kwargs).transform_to(coord.Galactic)
+    except ValueError:  # old version of astropy
+        gsky = coord.Galactocentric(**kwargs).transform_to(coord.Galactic)
     diff_astropy_galactocentric = numpy.amax([
     abs(gsky.l.to_value(unit_angle) - l % (2*numpy.pi)),
     abs(gsky.b.to_value(unit_angle) - b),

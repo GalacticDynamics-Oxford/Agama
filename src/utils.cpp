@@ -367,7 +367,13 @@ std::string pp(double num, unsigned int width)
             return result;
         }
         // otherwise we may have encountered the situation of rounding up
-        // a number 9.x to 10. and exceeding the width
+        // a number such as 9.x to 10. or 99.x to 100. and exceeding the width:
+        // in this case a fixed-point format is still preferable to exponential, so try it
+        len = snprintf(buf, MAXWIDTH, "%-#.*f", std::max<int>(width-3-expon, 0), num);
+        if(len == (int)width) {
+            result += buf;
+            return result;
+        }
     }
 
     // expected length of the exponent part of the string if we choose exponential notation

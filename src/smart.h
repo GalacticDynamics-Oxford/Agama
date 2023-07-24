@@ -83,7 +83,7 @@ be used inside the constructor, but not any longer.
 */
 
 #pragma once
-// We use different definitions for the two smart pointer classes,
+// We use different definitions for the smart pointer classes,
 // depending on whether we have C++11 support or not;
 // in the latter case it is replaced with std::tr1::, but if that is not available either,
 // one may substitute it with the boost implementations.
@@ -93,13 +93,11 @@ be used inside the constructor, but not any longer.
 // have a C++11 compatible compiler
 #include <memory>
 using std::shared_ptr;
-using std::unique_ptr;
 #else
 // have an old-style compiler, hopefully with std::tr1::shared_ptr available
 // (otherwise will have to replace it with boost::shared_ptr)
 #include <tr1/memory>
 using std::tr1::shared_ptr;
-#define unique_ptr std::auto_ptr
 #endif
 
 namespace math{

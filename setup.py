@@ -2,12 +2,13 @@ helpstr="""
 Installation script for the Agama library.
 It could be run just as any regular python program,
 > python setup.py install --user
-(here --user allows it to be installed without admin privilegies),
+(here --user allows it to be installed without admin privilegies, but should not be used with
+anaconda, which has its own environment),
 or via pip:
 > pip install --user .
 (here . means that it should take the files from the current folder);
-the former approach is more verbose (this could be amended by providing -q flag to setup.py);
-the latter one (with pip) might fail on older systems.
+the former approach is more verbose (this could be amended by providing -q flag to setup.py),
+but is deprecated starting from Python 3.10; the latter one (with pip) might fail on older systems.
 
 The setup script recognizes some environment variables:
 CXX  will set the compiler;
@@ -19,7 +20,7 @@ The setup script will attempt to download and compile the required GSL library (
 and the optional Eigen, CVXOPT and UNSIO libraries
 (asking the user for a confirmation, unless command-line arguments include --yes or --assume-yes).
 Eigen is header-only so it is only downloaded; UNSIO is downloaded and compiled;
-CVXOPT is a python library, so it will be installed by calling "pip install --user cvxopt"
+CVXOPT is a python library, so it will be installed by calling "pip install [--user] cvxopt"
 (you might wish to manually install it if your preferred options are different).
 The optional GLPK library is ignored if not found (it is superseded by CVXOPT for all practical
 purposes).
@@ -196,33 +197,74 @@ def createMakefile():
     if runCompiler(code=OMP_CODE, flags=OMP_FLAGS):
         CXXFLAGS += [OMP_FLAG]
     elif MACOS:
-        # on MacOS the clang compiler pretends not to support OpenMP, but in fact it does so
-        # if we insist (libomp.so/dylib or libgomp.so must be present in the system for this to work);
-        # in some Anaconda installations, though, linking to the system-default libomp.dylib
-        # leads to conflicts with libiomp5.dylib, so we first try to link to the latter explicitly.
-        CONDA_EXE = os.environ.get('CONDA_EXE')
-        if CONDA_EXE is not None and os.path.isfile(CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')) \
-            and runCompiler(code=OMP_CODE, flags=CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib') +
-            ' -Xpreprocessor ' + OMP_FLAGS + ' -I'+CONDA_EXE.replace('bin/conda', 'include/')):
-            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG, '-I'+CONDA_EXE.replace('bin/conda', 'include/')]
-            LINK_FLAGS += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
-            EXE_FLAGS  += [CONDA_EXE.replace('bin/conda', 'lib/libiomp5.dylib')]
-        elif runCompiler(code=OMP_CODE, flags='-lgomp -Xpreprocessor '+OMP_FLAGS):
-            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
-            LINK_FLAGS += ['-lgomp']
-            EXE_FLAGS  += ['-lgomp']
-        elif runCompiler(code=OMP_CODE, flags='-lomp -Xpreprocessor '+OMP_FLAGS):
-            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
-            LINK_FLAGS += ['-lomp']
-            EXE_FLAGS  += ['-lomp']
-        elif runCompiler(code=OMP_CODE, flags='-lomp -L/usr/local/opt/libomp/lib -I/usr/local/opt/libomp/include -Xpreprocessor '+OMP_FLAGS):
-            CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG, '-I/usr/local/opt/libomp/include']
-            LINK_FLAGS += ['-lomp -L/usr/local/opt/libomp/lib']
-            EXE_FLAGS  += ['-lomp -L/usr/local/opt/libomp/lib']
-        elif not ask("Warning, OpenMP is not supported\n"+
+        OMP_H_FOUND = False
+        OMP_LIB_FOUND = False
+        # On MacOS the clang compiler pretends not to support OpenMP, but in fact it does so if we insist.
+        # libomp.so/dylib or libgomp.so or libiomp5.dylib must be present in the system for this to work.
+        # In some Anaconda installations, though, linking to the system-default libomp.dylib leads to conflicts
+        # with Intel's libiomp5.dylib from Anaconda, so we first try to link to the latter explicitly.
+        CONDA_ROOT = os.environ.get('CONDA_EXE')  # full path to conda executable; None if not running from within anaconda
+        if isinstance(CONDA_ROOT, str) and os.path.isfile(CONDA_ROOT):
+            CONDA_ROOT = CONDA_ROOT.replace('/bin/conda', '')  # now points to the root folder of Anaconda installation
+        else:
+            CONDA_ROOT = None
+        CONDA_PREFIX = os.environ.get('CONDA_PREFIX')  # currently selected conda environment folder (or None)
+        if CONDA_PREFIX == CONDA_ROOT:
+            CONDA_PREFIX = None  # staying in the base conda environment, no need to check the same folder twice
+        if not (
+            (isinstance(CONDA_ROOT, str) and os.path.realpath(CONDA_ROOT) in os.path.realpath(sys.executable)) or
+            (isinstance(CONDA_PREFIX, str) and os.path.realpath(CONDA_PREFIX) in os.path.realpath(sys.executable)) ):
+            CONDA_ROOT = CONDA_PREFIX = None  # we are currently not running python from Anaconda, so forget about it
+        print('CONDA_ROOT=%r, CONDA_PREFIX=%r' % (CONDA_ROOT, CONDA_PREFIX))
+        HOMEBREW_PREFIX = subprocess.Popen('brew --prefix', shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
+        if not os.path.isdir(HOMEBREW_PREFIX):  # should be /usr/local on Intel or /opt/homebrew on ARM
+            HOMEBREW_PREFIX = None
+        # first find the include path to omp.h (not using any OpenMP-specific code yet)
+        OMP_H_FOUND = runCompiler(code='#include <omp.h>\nint main(){}\n')
+        if not OMP_H_FOUND:   # omp.h not found in a known default location
+            # search in a few standard directories that may need to be explicitly added to include path
+            OMP_INCLUDE_PATHS = []
+            if CONDA_PREFIX:
+                OMP_INCLUDE_PATHS += [CONDA_PREFIX+'/include']
+            if CONDA_ROOT:
+                OMP_INCLUDE_PATHS += [CONDA_ROOT+'/include']
+            if HOMEBREW_PREFIX:
+                OMP_INCLUDE_PATHS += [HOMEBREW_PREFIX+'/opt/libomp/include']
+            if os.path.isdir('/opt/local/include/libomp'):  # macports
+                OMP_INCLUDE_PATHS += ['/opt/local/include/libomp']
+            for OMP_INCLUDE_PATH in OMP_INCLUDE_PATHS:
+                if os.path.isfile(OMP_INCLUDE_PATH+'/omp.h') \
+                    and runCompiler(code='#include <omp.h>\nint main(){}\n', flags='-I'+OMP_INCLUDE_PATH):
+                    CXXFLAGS += ['-I'+OMP_INCLUDE_PATH]
+                    OMP_H_FOUND = True
+                    break
+        # then find the location of OpenMP dynamic library
+        if OMP_H_FOUND:
+            OMP_LIB_PATHS = []
+            # first try Anaconda's libiomp5 if possible
+            if CONDA_PREFIX and os.path.isfile(CONDA_PREFIX+'/lib/libiomp5.dylib'):
+                OMP_LIB_PATHS += [CONDA_PREFIX+'/lib/libiomp5.dylib']
+            if CONDA_ROOT and os.path.isfile(CONDA_ROOT+'/lib/libiomp5.dylib'):
+                OMP_LIB_PATHS += [CONDA_ROOT+'/lib/libiomp5.dylib']
+            # then look for libgomp or libomp under default system-wide paths
+            OMP_LIB_PATHS += ['-lgomp', '-lomp']
+            if HOMEBREW_PREFIX:
+                OMP_LIB_PATHS += ['-L'+HOMEBREW_PREFIX+'/opt/libomp/lib -lomp']
+            if os.path.isdir('/opt/local/lib/libomp'):  # macports
+                OMP_LIB_PATHS += ['-L/opt/local/lib/libomp -lomp']
+            for OMP_LIB_PATH in OMP_LIB_PATHS:
+                if runCompiler(code=OMP_CODE, flags=OMP_LIB_PATH + ' -Xpreprocessor '+OMP_FLAGS):
+                    CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
+                    LINK_FLAGS += [OMP_LIB_PATH]
+                    EXE_FLAGS  += [OMP_LIB_PATH]
+                    OMP_LIB_FOUND = True
+                    break
+        if not OMP_LIB_FOUND and not ask("Warning, OpenMP is not supported\n"+
             "If you're compiling on MacOS with clang, you'd better install another compiler such as GCC, "
             "or if you're using homebrew, install libomp via 'brew install libomp' and retry running this setup script\n"+
-            "Do you want to continue without OpenMP? [Y/N] "): exit(1)
+            "Do you want to continue without OpenMP? [Y/N] "):
+            exit(1)
 
     # [1c]: test if C++11 is supported (optional)
     CXX11_FLAG = '-std=c++11'
@@ -277,7 +319,7 @@ def createMakefile():
 #include "Python.h"
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include "numpy/arrayobject.h"
-void bla() {PyRun_SimpleString("import sys;print(sys.prefix);");}
+void bla() {PyRun_SimpleString("import sys, os; print('sys.prefix='+os.path.realpath(sys.prefix));");}
 void run() {Py_Initialize();bla();Py_Finalize();}
 PyMODINIT_FUNC
 """
@@ -336,8 +378,9 @@ PyInit_agamatest(void) {
         os.remove(PYTEST_EXE_NAME)
         os.remove(PYTEST_LIB_NAME)
         # check if the results (reported library path prefix) are the same as we have in this script
-        sysprefix = os.path.realpath(sys.prefix)
-        if os.path.realpath(resultexe) != sysprefix or os.path.realpath(resultpy) != sysprefix:
+        # (test for substring because the output may contain additional messages)
+        sysprefix = 'sys.prefix=' + os.path.realpath(sys.prefix)
+        if sysprefix not in resultexe  or  sysprefix not in resultpy:
             print("Test program doesn't seem to use the same version of Python, "+\
                 "or the library path is reported incorrectly: \n"+\
                 "Expected: "+sysprefix+"\n"+\
@@ -402,16 +445,18 @@ PyInit_agamatest(void) {
                         RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options and try again
                         if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
                             return PYTHON_SO_FLAGS + RPATH, []
-                        if MACOS:  # another attempt with a hardcoded path
-                            RPATH = ['-Wl,-rpath,/Library/Developer/CommandLineTools/Library/Frameworks/']
-                            if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
-                                return PYTHON_SO_FLAGS + RPATH, []
+                        # another attempt with a hardcoded path
+                        MACOS_RPATH = '/Library/Developer/CommandLineTools/Library/Frameworks/'
+                        if os.path.isdir(MACOS_RPATH) and tryPythonCode(PYTHON_SO_FLAGS + ['-Wl,-rpath,'+MACOS_RPATH]):
+                            return PYTHON_SO_FLAGS + ['-Wl,-rpath,'+MACOS_RPATH], []
                         if "-undefined dynamic_lookup" in sysconfig.get_config_var('LDSHARED'):
-                            print("Trying the last resort solution")
+                            print("Trying the last resort solution")  # relevant for Anaconda installations
                             PYTHON_SO_FLAGS = ['-undefined dynamic_lookup'] + PYTHON_LIB_EXTRA
                             PYTHON_EXE_FLAGS = RPATH + [PYTHON_LIB_FILEPATH]
                             if tryPythonCode(PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS):
                                 return PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS
+                            if tryPythonCode(PYTHON_SO_FLAGS + RPATH, PYTHON_EXE_FLAGS):
+                                return PYTHON_SO_FLAGS + RPATH, PYTHON_EXE_FLAGS
 
         # if the above efforts did not succeed, try the options suggested by python-config
         PYTHON_CONFIG = 'python%s-config --ldflags' % sysconfig.get_config_var('VERSION')
@@ -428,8 +473,7 @@ PyInit_agamatest(void) {
                 "it may be because you are running a x86_64 version of Python " +
                 "on an ARM (Apple Silicon/M1) machine, and the Python extension module " +
                 "compiled for the ARM architecture is incompatible with the Python interpreter. " +
-                "The solution is to install a native ARM Python version, e.g. from conda-forge: " +
-                "https://docs.conda.io/en/latest/miniconda.html")
+                "The solution is to install a native ARM Python version (e.g., Anaconda 2022.05 or newer)")
         # if none of the above combinations worked, give up...
         raise CompileError("Could not compile test program which uses libpython" +
             sysconfig.get_config_var('VERSION'))
@@ -494,9 +538,10 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say("Downloading GSL\n")
             filename = 'gsl.zip'
-            dirname  = 'gsl-532847499424f4c04ef44ec4801f3219d223ede2'
+            archivename = 'de1c175ee239ea0f243bf72016bad2e53338e830'
+            dirname = 'gsl-' + commitname
             try:
-                urlretrieve('https://github.com/BrianGladman/gsl/archive/532847499424f4c04ef44ec4801f3219d223ede2.zip', filename)
+                urlretrieve('https://github.com/BrianGladman/gsl/archive/%s.zip' % archivename, filename)
                 if os.path.isfile(filename):
                     say("Unpacking GSL\n")
                     zipf = zipfile.ZipFile(filename, 'r')  # unpack the archive
@@ -541,9 +586,9 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say('Downloading Eigen\n')
             filename = 'Eigen.zip'
-            dirname  = 'eigen-git-mirror-3.3.7'
+            dirname  = 'eigen-3.4.0'
             try:
-                urlretrieve('https://github.com/eigenteam/eigen-git-mirror/archive/3.3.7.zip', filename)
+                urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip', filename)
                 if os.path.isfile(filename):
                     say("Unpacking Eigen\n")
                     zipf = zipfile.ZipFile(filename, 'r')
@@ -561,38 +606,45 @@ PyInit_agamatest(void) {
             os.chdir(ROOT_DIR)
 
     # [5a]: test if CVXOPT is present (optional); install if needed
+    skip_cvxopt = False
     try:
         import cvxopt  # import the python module
-    except:  # import error or some other problem, might be corrected
+    except ImportError:
         if ask("CVXOPT library (needed only for Schwarzschild modelling) is not found\n"
             "Should we try to install it now? [Y/N] "):
             try:
-                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', 'cvxopt'])
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'cvxopt'] +
+                    (['--user'] if '--user' in sys.argv else []))
             except Exception as e:
                 say("Failed to install CVXOPT: "+str(e)+"\n")
+                skip_cvxopt = True
+        else:
+            skip_cvxopt = True
 
     # [5b]: if the cvxopt module is available in Python, make sure that we also have C header files
-    try:
-        import cvxopt   # if this fails, skip cvxopt altogether
-        if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n',
-            flags=' '.join(['-c', PYTHON_INC, NUMPY_INC] + COMPILE_FLAGS)):
-            COMPILE_FLAGS += ['-DHAVE_CVXOPT']
-        else:
-            # download the C header file if it does not appear to be present in a default location
-            distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
-            say('Downloading CVXOPT header files\n')
-            try:
-                urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/cvxopt.h',
-                    EXTRAS_DIR+'/include/cvxopt.h')
-                urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/blas_redefines.h',
-                    EXTRAS_DIR+'/include/blas_redefines.h')
-            except: pass  # problems in downloading, skip it
-            if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
-                os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
-                COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
+    if not skip_cvxopt:
+        try:
+            import cvxopt   # if this fails, skip cvxopt altogether
+            if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n',
+                flags=' '.join(COMPILE_FLAGS + LINK_FLAGS)):
+                COMPILE_FLAGS += ['-DHAVE_CVXOPT']
             else:
-                say("Failed to download CVXOPT header files, this feature will not be available\n")
-    except: pass  # cvxopt wasn't available
+                # download the C header file if it does not appear to be present in a default location
+                distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
+                say('Downloading CVXOPT header files\n')
+                try:
+                    urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/cvxopt.h',
+                        EXTRAS_DIR+'/include/cvxopt.h')
+                    urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/blas_redefines.h',
+                        EXTRAS_DIR+'/include/blas_redefines.h')
+                except: pass  # problems in downloading, skip it
+                if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
+                    os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
+                    COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
+                else:
+                    say("Failed to download CVXOPT header files, this feature will not be available\n")
+        except Exception as e:
+            say("Could not use CVXOPT due to exception: %s\n" % e)
 
     # [6]: test if GLPK is present (optional - ignored if not found)
     if not MSVC and runCompileShared('#include <glpk.h>\nvoid run() { glp_create_prob(); }\n',
@@ -701,6 +753,9 @@ for opt in ['-y','--yes','--assume-yes']:
         forceYes = True
         sys.argv.remove(opt)
 if forceYes: say('Assuming yes answers to all interactive questions\n')
+
+if sys.version_info[0]==3 and sys.version_info[1]>=10 and 'install' in sys.argv:
+    say('If you are scared by a deprecation warning about running "setup.py install", try "pip install ." instead\n')
 
 distutils.core.setup(
     name             = 'agama',

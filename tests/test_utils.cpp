@@ -39,8 +39,8 @@ bool testNumberConversion()
     bool ok=true;
     const int NUM = 50;
     double values[NUM] = {0, NAN, INFINITY, -INFINITY, 1., 
-        9.4999999999999, 9.95, 0.95000000000001, 9.5e8, 9.96e9, 9.5e-5};
-    for(int i=11; i<NUM; i++) {
+       9.5e-5, 0.95000000000001, 9.4999999999999, 9.95, 999.5, 9999.5, 9.5e8, 9.96e9};
+    for(int i=13; i<NUM; i++) {
         double val = math::random();
         int type   = (int)(math::random()*8);
         if(type & 1)

@@ -83,7 +83,9 @@ def nonuniformGrid(nnodes, xmin, xmax=None):
         if abs(A)<1e-8: return nnodes-ratio + 0.5*A*nnodes*(nnodes-1)  # Taylor expansion
         else: return (_numpy.exp(A*(nnodes-1))-1) / (_numpy.exp(A)-1) - ratio
     A = scipy.optimize.brentq(fnc, _numpy.log(1-1./ratio), _numpy.log(ratio)/(nnodes-2))
-    return xmin * (_numpy.exp(A * _numpy.linspace(0, nnodes-1, nnodes))-1) / (_numpy.exp(A)-1)
+    result = xmin * (_numpy.exp(A * _numpy.linspace(0, nnodes-1, nnodes))-1) / (_numpy.exp(A)-1)
+    result[-1] = xmax  # put the last point exactly at xmax, avoiding roundoff errors
+    return result
 
 
 def symmetricGrid(nnodes, xmin, xmax=None):

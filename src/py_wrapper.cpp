@@ -579,7 +579,7 @@ static const units::InternalUnits unit(2.7183 * units::Kpc, 3.1416 * units::Myr)
 
 /// external units that are used in the calling code, set by the user,
 /// (or remaining at default values (no conversion) if not set explicitly
-static unique_ptr<const units::ExternalUnits> conv;
+static shared_ptr<const units::ExternalUnits> conv;
 
 /// safeguarding variable: it is set to True upon creation of any non-trivial class,
 /// and subsequent calls to setUnits will raise a warning about the dire consequences of
@@ -1698,9 +1698,12 @@ PyObject* Density_export(PyObject* self, PyObject* args)
     if(!PyArg_ParseTuple(args, "s", &filename))
         return NULL;
     try{
-        writeDensity(filename, *((DensityObject*)self)->dens, *conv);  // this can also export a potential
-        Py_INCREF(Py_None);
-        return Py_None;
+        if(writeDensity(filename, *((DensityObject*)self)->dens, *conv)) {  // this can also export a potential
+            Py_INCREF(Py_None);
+            return Py_None;
+        }
+        PyErr_SetString(PyExc_RuntimeError, "Error writing file");
+        return NULL;
     }
     catch(std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, (std::string("Error writing file: ")+e.what()).c_str());
@@ -2710,8 +2713,7 @@ static PyMethodDef Potential_methods[] = {
       "axisymmetric (all quantities are evaluated in the equatorial plane)\n"
       "Arguments:\n"
       "  L=... (a single number or an array of numbers) - the values of angular momentum;\n"
-      "  E=... (same) - the values of energy; the arguments are mutually exclusive, "
-      "and L is the default one if no name is provided\n"
+      "  E=... (same) - the values of energy; the arguments are mutually exclusive.\n"
       "Returns: a single number or an array of numbers - the radii of corresponding orbits\n" },
     { "Tcirc", Potential_Tcirc, METH_O,
       "Compute the period of a circular orbit for the given energy (a) or the (x,v) point (b); "
@@ -5754,7 +5756,7 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     srcrow[b] = ndim == 1 ?
                         pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
                         pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
-                unique_ptr<math::GaussHermiteExpansion> ghexp;
+                shared_ptr<math::GaussHermiteExpansion> ghexp;
                 switch(degree) {
                     case 0: ghexp.reset(new math::GaussHermiteExpansion(
                         math::BsplineWrapper<0>(math::BsplineInterpolator1d<0>(gridv), srcrow),

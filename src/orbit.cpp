@@ -56,7 +56,7 @@ coord::PosVelCar BaseOrbitIntegrator::run(const double totalTime)
     double sign = totalTime>0 ? +1 : -1;   // integrate forward (+1) or backward (-1) in time
     double currentTime = solver.getTime(), endTime = totalTime + currentTime;
     while(true) {
-        if(!(solver.doStep(sign*0.0) * sign > 0.)) {
+        if(!(solver.doStep(sign>0 ? +0.0 : -0.0) * sign > 0.)) {
             // signal of error
             utils::msg(utils::VL_WARNING,
                 "OrbitIntegrator::integrate", "terminated at t="+utils::toString(currentTime));

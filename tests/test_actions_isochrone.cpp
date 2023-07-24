@@ -45,7 +45,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     actions::ActionAngles aaI, aaF, aaS, aaG;
     actions::Frequencies frI, frF, frS, frG, frIinv, frSinv;
     math::Averager statfrIr, statfrIz, statH, statE;
-    double errSinv=0, errGinv=0;
+    //double errSinv=0, errGinv=0;
     actions::Angles aoldF(0,0,0), aoldI(0,0,0), aoldS(0,0,0);
     bool anglesMonotonic= true;   // angle determination is reasonable
     bool reversible_iso = true;   // forward-reverse transform for isochrone gives the original point
@@ -102,8 +102,8 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
             math::fcmp(frS.Omegar, frSinv.Omegar, epss) == 0 &&
             math::fcmp(frS.Omegaz, frSinv.Omegaz, epss) == 0 &&
             math::fcmp(frS.Omegaphi, frSinv.Omegaphi, epss) == 0;
-        errSinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
-        pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
+        //errSinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
+        //pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
 
         // inverse transformation for interpolated spherical action finder, with derivatives
         actions::DerivAct<coord::SphMod> der_sph;
@@ -112,8 +112,8 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
             math::fcmp(frG.Omegar, frSinv.Omegar, epsi) == 0 &&
             math::fcmp(frG.Omegaz, frSinv.Omegaz, epsi) == 0 &&
             math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epsi) == 0;
-        errGinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
-        pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
+        //errGinv+=pow_2(pinv.R-point.R)+pow_2(pinv.z-point.z)+pow_2(pinv.phi-point.phi)+
+        //pow_2(pinv.vR-point.vR)+pow_2(pinv.vz-point.vz)+pow_2(pinv.vphi-point.vphi);
 
         // inverse transformation for Isochrone with derivs
         actions::DerivAct<coord::SphMod> ac;
@@ -255,7 +255,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statS.avg.Jr,  14)<<" +- "<<utils::pp(statS.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statS.avg.Jz,  14)<<" +- "<<utils::pp(statS.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statS.avg.Jphi, 6)<<" +- "<<utils::pp(statS.rms.Jphi, 7)<<
-    ",  rmserrInverse="<<utils::pp(sqrt(errSinv/traj.size()),7) <<
+    //",  rmserrInverse="<<utils::pp(sqrt(errSinv/traj.size()),7) <<
     (dispS_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_sph?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<std::endl;
 
@@ -286,7 +286,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ":  Jr="  <<utils::pp(statG.avg.Jr,  14)<<" +- "<<utils::pp(statG.rms.Jr,   7)<<
     ",  Jz="  <<utils::pp(statG.avg.Jz,  14)<<" +- "<<utils::pp(statG.rms.Jz,   7)<<
     ",  Jphi="<<utils::pp(statG.avg.Jphi, 6)<<" +- "<<utils::pp(statG.rms.Jphi, 7)<<
-    ",  rmserrInverse="<<utils::pp(sqrt(errGinv/traj.size()),7) <<
+    //",  rmserrInverse="<<utils::pp(sqrt(errGinv/traj.size()),7) <<
     (dispG_ok?"":" \033[1;31m**\033[0m")<<
     (reversible_grid?"":" \033[1;31mNOT INVERTIBLE\033[0m ")<<
     (deriv_grid_ok?"":" \033[1;31mDERIVS INCONSISTENT\033[0m ")<<std::endl;
