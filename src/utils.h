@@ -50,8 +50,19 @@ extern MsgType* msg;
 */
 extern VerbosityLevel verbosityLevel;
 
+/** a hacky way of implementing "lazy logging": if the LEVEL argument is above verbosityLevel,
+    not only the message is discarded, but even the other arguments (ORIGIN, MESSAGE)
+    are not evaluated, saving effort of assembling a log message that is never used.
+    The weird construction "do {...} while(false)" enables the usage of this macro as if it were
+    a proper function call, i.e. with a trailing semicolon (also in conditional statements).
+*/
+#define FILTERMSG(LEVEL, ORIGIN, MESSAGE) \
+    do{ if(LEVEL <= utils::verbosityLevel) { utils::msg(LEVEL, ORIGIN, MESSAGE); } } while(false)
+
+
 /** return a textual representation of the stack trace */
 std::string stacktrace();
+
 
 /** Helper class for monitoring the Control-Break signal.
     In a computationally heavy section of code, one may set up a custom signal handler
@@ -82,6 +93,7 @@ public:
     ~CtrlBreakHandler();     ///< restores the previous signal handler
     static bool triggered(); ///< returns true if the Ctrl-Break signal was received, false otherwise
 };
+
 
 /*------------- string functions ------------*/
 

@@ -15,7 +15,7 @@ def getDensityParamsMGE(mass, Sx, Sy, Sz):
     return a dictionary containing parameters for creating agama.Density object
     corresponding to a single Gaussian component of an MGE
     '''
-    return dict( \
+    return dict(
         density = 'Spheroid',
         axisRatioY  = Sy/Sx,
         axisRatioZ  = Sz/Sx,
@@ -277,7 +277,7 @@ def getBinnedApertures(xcoords, ycoords, bintags):
                 raise ValueError("Can't construct boundary polygon for bin "+str(b))
                 break
             else:
-                vertices.append( \
+                vertices.append(
                     ( xpixel * (cx+minx-0.5) + xCoords[0], ypixel * (cy+miny-0.5) + yCoords[0] ))
             if cx+minx == ix[0] and cy+miny == iy[0]:
                 break   # reached the initial point
@@ -477,8 +477,8 @@ class DensityDataset:
         in the observed coordinate system (used only in the interactive plotting script)
         '''
         xy = _numpy.column_stack((_numpy.repeat(gridx, len(gridy)), _numpy.tile(gridy, len(gridx))))
-        return self.density.projectedDensity(xy, alpha=self.alpha, beta=self.beta, gamma=self.gamma). \
-            reshape(len(gridx), len(gridy))
+        return (self.density.projectedDensity(xy, alpha=self.alpha, beta=self.beta, gamma=self.gamma).
+            reshape(len(gridx), len(gridy)))
 
 
 class KinemDatasetGH:
@@ -579,10 +579,10 @@ class KinemDatasetGH:
         Returns: the error-weighted penalty (chi^2) separately for each GH term
           (including the aperture mass as the 0th element) summed over all apertures.
         '''
-        ghm_mod   = _agama.ghMoments(
+        ghm_mod   = (_agama.ghMoments(
             degree=self.mod_degree, gridv=self.mod_gridv * Upsilon**0.5,
-            matrix=model_losvd * Upsilon**-0.5, ghorder=self.num_cons). \
-            reshape(self.num_aper,  self.num_cons+4)
+            matrix=model_losvd * Upsilon**-0.5, ghorder=self.num_cons).
+            reshape(self.num_aper,  self.num_cons+4))
         # keep only the columns v,sigma,h_3...h_M
         ghm_mod   = _numpy.column_stack(( ghm_mod[:,(1,2)], ghm_mod[:,6:] ))
         # add the penalty for aperture mass, if the tolerance was not zero
@@ -695,10 +695,10 @@ class KinemDatasetHist:
         The B-splines of model LOSVDs are converted into the amplitudes of histograms in the observational velocity grid.
         '''
         num_orbits = len(kinem_matrix)
-        return kinem_matrix. \
-            reshape(num_orbits, self.num_aper, self.num_bsplines). \
-            dot(self._getConvMatrix(Upsilon)). \
-            reshape(num_orbits, self.num_aper * (self.num_cons+1))
+        return (kinem_matrix.
+            reshape(num_orbits, self.num_aper, self.num_bsplines).
+            dot(self._getConvMatrix(Upsilon)).
+            reshape(num_orbits, self.num_aper * (self.num_cons+1)))
 
     def getPenalty(self, model_losvd, Upsilon):
         '''
@@ -711,9 +711,9 @@ class KinemDatasetHist:
         Returns: the error-weighted penalty (chi^2) separately for each bin in the histogram
           (including the aperture mass as the 0th element) summed over all apertures.
         '''
-        cons_mod = model_losvd.reshape(self.num_aper, self.num_bsplines). \
-            dot(self._getConvMatrix(Upsilon)). \
-            reshape(-1)
+        cons_mod = (model_losvd.reshape(self.num_aper, self.num_bsplines).
+            dot(self._getConvMatrix(Upsilon)).
+            reshape(-1))
         use   = self.cons_err != 0
         error = _numpy.zeros(self.num_aper * (self.num_cons+1))
         error[use] = ( (cons_mod[use] - self.cons_val[use]) / self.cons_err[use] )**2
@@ -1015,7 +1015,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             nameGH = ['v', 'sigma', 'h3', 'h4', 'h5', 'h6']
             for indexGH in range(6):
                 chi2str = '+'.join(['%.2f' % c for c in chi2_ds[:,indexGH]])
-                chi2labels[indexGH].set_text('$\chi^2=%s$' % chi2str)
+                chi2labels[indexGH].set_text(r'$\chi^2=%s$' % chi2str)
                 text += '%s=%s, ' % (nameGH[indexGH], chi2str)
             text += 'total=%.2f, in file=%.2f' % (_numpy.sum(chi2_ds), chi2[modelIndex])
             print(text)
@@ -1044,7 +1044,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
             axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
             axa.set_xticks([])
-            axa.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
+            axa.set_ylabel(r'$[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
             this.axp.get_shared_x_axes().join(this.axo, this.axp)
         this.axo.set_xscale('linear')
         this.axo.cla()
@@ -1064,13 +1064,13 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         this.axo.set_xscale('log')
         this.axo.set_xlim(xlim)
         this.axo.set_ylim(0, 1)
-        this.axo.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        this.axo.set_ylabel(' $[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
+        this.axo.set_xlabel(r'$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        this.axo.set_ylabel(r'$[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
         this.axp.set_xscale('log')
         this.axp.set_xlim(xlim)
         this.axp.set_ylim(-1, 1)
-        this.axp.set_xlabel('$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
-        this.axp.set_ylabel(' $L_z/L$', labelpad=-5, fontsize=12)
+        this.axp.set_xlabel(r'$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
+        this.axp.set_ylabel(r'$L_z/L$', labelpad=-5, fontsize=12)
         this.ic = archive['ic'][use]
         this.inttime = archive['inttime'][use]
         this.weights = weights[use]
@@ -1272,12 +1272,12 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     if v0err    is None: v0err   = max(ghm_err[:,0])
     if sigmaerr is None: sigmaerr= max(ghm_err[:,1])
     panel_params = [
-        dict(title='$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.23, 0.56, 0.165, 0.43]),
-        dict(title='$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.23, 0.06, 0.165, 0.43]),
-        dict(title='$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.56, 0.165, 0.43]),
-        dict(title='$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.06, 0.165, 0.43]),
-        dict(title='$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.56, 0.165, 0.43]),
-        dict(title='$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.06, 0.165, 0.43]),
+        dict(title=r'$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.23, 0.56, 0.165, 0.43]),
+        dict(title=r'$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.23, 0.06, 0.165, 0.43]),
+        dict(title=r'$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.56, 0.165, 0.43]),
+        dict(title=r'$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.06, 0.165, 0.43]),
+        dict(title=r'$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.56, 0.165, 0.43]),
+        dict(title=r'$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.06, 0.165, 0.43]),
     ]
 
     ##### four buttons determining which map to display #####
@@ -1349,7 +1349,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         modelgrid = ax.plot(aval, bval, 'o', c='g', ms=5, picker=5, mew=0, alpha=0.75)[0]
         this.selected  = ax.plot([_numpy.nan], [_numpy.nan], marker='o', c='r', ms=8, mew=0)[0]
         this.modellabel= ax.text(0.01, 0.01, '', color='r', ha='left', va='bottom', transform=ax.transAxes, fontsize=10)
-        ax.text(0.5, 0.99, '$\mathrm{min}\,\chi^2=%.2f$' % min(chi2), color='r', ha='center', va='top', transform=ax.transAxes)
+        ax.text(0.5, 0.99, r'$\mathrm{min}\,\chi^2=%.2f$' % min(chi2), color='r', ha='center', va='top', transform=ax.transAxes)
         ax.set_xlabel(alabel, labelpad=0)
         ax.set_ylabel(blabel, labelpad=0)
         if alim is None: alim = (min(aval), max(aval))
@@ -1375,7 +1375,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             for itick in range(5):
                 ax.text(1.01, itick/5.0, '%.0f' % (itick/5.0*deltaChi2lim), color='r',
                     clip_on=False, ha='left', va='center', transform=ax.transAxes)
-            ax.text(1.0, 0.95, '$\Delta\chi^2$', color='r', clip_on=False, ha='left', va='center', transform=ax.transAxes)
+            ax.text(1.0, 0.95, r'$\Delta\chi^2$', color='r', clip_on=False, ha='left', va='center', transform=ax.transAxes)
         except:
             traceback.print_exc()
     else:

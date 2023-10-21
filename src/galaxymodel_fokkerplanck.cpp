@@ -840,7 +840,7 @@ FokkerPlanckSolver::FokkerPlanckSolver(
     }
 
     // create a new grid, uniform in log(h)
-    utils::msg(utils::VL_DEBUG, "FokkerPlanckSolver", "Grid in h=[" + 
+    FILTERMSG(utils::VL_DEBUG, "FokkerPlanckSolver", "Grid in h=[" + 
         utils::toString(hmin) + ":" + utils::toString(hmax) + "], " + utils::toString(gridSize) + " nodes");
     data->gridh = math::createExpGrid(gridSize, hmin, hmax);
 

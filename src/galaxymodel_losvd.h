@@ -65,8 +65,9 @@ class TargetLOSVD: public BaseTarget {
     const coord::SymmetryType symmetry;   ///< symmetry of the potential and the orbital shape
     bool symmetricGrids;                  ///< whether the input grids are reflection-symmetric
 public:
-    /// construct the grid with given parameters
-    /// \throw std::invalid_argument if the parameters are incorrect
+    /// construct the grid with given parameters.
+    /// \throw std::invalid_argument if the parameters are incorrect.
+    /// \note OpenMP-parallelized loop over params.apertures and over internal arrays.
     TargetLOSVD(const LOSVDParams& params);
 
     virtual const char* name() const;
@@ -101,11 +102,13 @@ public:
     /// into the array of basis function amplitudes for the LOSVD in each aperture
     virtual void finalizeDatacube(math::Matrix<double> &datacube, StorageNumT* output) const;
 
-    /// compute the array of LOSVD in each apertures from a DF-based model
+    /// compute the array of LOSVD in each apertures from a DF-based model.
+    /// \note OpenMP-parallelized loop over the 2d grid in the image plane X,Y.
     virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
 
     /// compute the normalizations of the LOSVD (total mass in each aperture, i.e., integral of
-    /// surface density over the aperture, convolved with the spatial PSF)
+    /// surface density over the aperture, convolved with the spatial PSF).
+    /// \note OpenMP-parallelized loop over the 2d grid in the image plane X,Y.
     virtual std::vector<double> computeDensityProjection(const potential::BaseDensity& density) const;
 };
 
@@ -125,8 +128,11 @@ public:
     virtual void addPoint(const double point[6], double mult, double output[]) const;
     virtual unsigned int numVars() const { return 6; }
     virtual unsigned int numValues() const { return bspl.numValues() * 2; }
-    /// compute the velocity dispersion profile from a DF-based model
+
+    /// compute the velocity dispersion profile from a DF-based model.
+    /// \note OpenMP-parallelized loop over the radial grid.
     virtual void computeDFProjection(const GalaxyModel& model, StorageNumT* output) const;
+
     /// this does not make sense for this target - throws a std::runtime_error
     virtual std::vector<double> computeDensityProjection(const potential::BaseDensity&) const;
 };

@@ -182,7 +182,6 @@ if __name__ == "__main__":
             components=[Component(df=df_comp1, **params_comp1), Component(df=df_comp2, **params_comp2)],
             potential=potential_init,
             **params_scm)
-        print(dir(model)); print(dir(model.components[0]))
         for it in range(5):
             model.iterate()
         return agama.GalaxyModel(model.potential, df_comp1, model.af).moments([1,0.5,0.3])

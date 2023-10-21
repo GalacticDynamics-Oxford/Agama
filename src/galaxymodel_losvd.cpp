@@ -183,8 +183,10 @@ TargetLOSVD<N>::TargetLOSVD(const LOSVDParams& params) :
 {
     const size_t
         numApertures = params.apertures.size(),
-        numBasisFncX = bsplx.numValues(),  numBasisFncY = bsply.numValues(),
-        numBasisFnc  = numBasisFncX * numBasisFncY,  numBasisFncX2 = pow_2(numBasisFncX);
+        numBasisFncX = bsplx.numValues(),
+        numBasisFncY = bsply.numValues(),
+        numBasisFnc  = numBasisFncX * numBasisFncY,
+        numBasisFncX2= pow_2(numBasisFncX);
 
     if(numApertures <= 0)
         throw std::invalid_argument("TargetLOSVD: no apertures defined");

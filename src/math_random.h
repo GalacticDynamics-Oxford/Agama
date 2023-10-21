@@ -70,9 +70,9 @@ void getRandomPermutation(size_t count, size_t output[], /*input/output*/ PRNGSt
     \param[in]  base   is the base of the sequence, must be a prime number;
     if one needs an N-dimensional vector of ostensibly independent quasirandom numbers,
     one may call this function N times with different prime numbers as bases.
-    \return  a number between 0 and 1.
-    \note that that the numbers get increasingly more correlated as the base increases,
+    Keep in mind that the numbers get increasingly more correlated as the base increases,
     thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
+    \return  a number between 0 and 1.
 */
 double quasiRandomHalton(size_t index, unsigned int base);
 

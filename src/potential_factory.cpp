@@ -469,7 +469,7 @@ public:
         std::string newcwd = filenameWithPath.substr(0, index+1);
         if(chdir(newcwd.c_str()) != 0)
             throw std::runtime_error("Failed to change the current working directory to "+newcwd);
-        utils::msg(utils::VL_VERBOSE, "DirectoryChanger",
+        FILTERMSG(utils::VL_VERBOSE, "DirectoryChanger",
             "Temporarily changed the current working directory to "+newcwd);
     }
     ~DirectoryChanger()
@@ -477,8 +477,9 @@ public:
         if(!oldcwd.empty()) {
             if(chdir(oldcwd.c_str()) != 0)
                 // we can't throw an exception from the destructor, so just print a warning
-                utils::msg(utils::VL_WARNING, "DirectoryChanger", "Failed to restore working directory");
-            utils::msg(utils::VL_VERBOSE, "DirectoryChanger",
+                FILTERMSG(utils::VL_WARNING, "DirectoryChanger",
+                    "Failed to restore working directory to "+oldcwd);
+            FILTERMSG(utils::VL_VERBOSE, "DirectoryChanger",
                 "Restored the current working directory to "+oldcwd);
         }
     }
@@ -1411,9 +1412,9 @@ std::vector<double> densityFromCumulativeMass(
         (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
         if(A>0) {  // viable extrapolation
             invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
-            utils::msg(utils::VL_DEBUG, "densityFromCumulativeMass",
+            FILTERMSG(utils::VL_DEBUG, "densityFromCumulativeMass",
                 "Extrapolated total mass=" + utils::toString(1/invMinf) +
-                ", rho(r)~r^" + utils::toString(B-3) + " at large radii" );
+                ", rho(r)~r^" + utils::toString(B-3) + " at large radii");
         }
     }
     // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),

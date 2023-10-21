@@ -212,6 +212,7 @@ public:
     /** reinitialize the density profile by recomputing the values of density at a set of 
         grid points in the meridional plane, and then constructing a spherical-harmonic
         density expansion from these values.
+        \note OpenMP-parallelized loop over points in r,theta when computing density by integration.
     */
     virtual void update(const potential::BasePotential& pot, const actions::BaseActionFinder& af);
 
@@ -249,6 +250,7 @@ public:
 
     /** reinitialize the density profile by recomputing the values of density at a set of 
         grid points in the meridional plane, and then constructing a density interpolator.
+        \note OpenMP-parallelized loop over points in R,z when computing density by integration.
     */
     virtual void update(const potential::BasePotential& pot, const actions::BaseActionFinder& af);
 private:
@@ -335,6 +337,7 @@ void updateTotalPotential(SelfConsistentModel& model);
 /** Main iteration step: recompute the densities of all components, and then call 
     `updateTotalPotential`; if no potential is present at the beginning, it is initialized
     by a call to the same `updateTotalPotential` before recomputing the densities.
+    \note OpenMP-parallelized loops in Component***::update().
 */
 void doIteration(SelfConsistentModel& model);
 

@@ -29,7 +29,7 @@ RagaTaskPotential::RagaTaskPotential(
     ptrPot(_ptrPot),
     prevOutputTime(-INFINITY)
 {
-    utils::msg(utils::VL_DEBUG, "RagaTaskPotential", "Potential update is enabled");
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskPotential", "Potential update is enabled");
 }
 
 void RagaTaskPotential::createRuntimeFnc(orbit::BaseOrbitIntegrator& orbint, unsigned int index)
@@ -76,7 +76,7 @@ void RagaTaskPotential::finishEpisode()
     }
     // shrink the array to retain only valid samples
     particleTrajectories.data.erase(dest, particleTrajectories.data.end());
-    utils::msg(utils::VL_DEBUG, "RagaTaskPotential",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskPotential",
         "Retained "+utils::toString(particleTrajectories.size())+" samples");
 
     // update the potential

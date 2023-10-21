@@ -28,7 +28,7 @@ unit_pm   = unit_angle * unit_vlos / unit_dist  # unit of PM follows from the pr
 
 def test(ra, dec, dist, pmra, pmdec, vlos):
     kwargs = dict(ra=ra*unit_angle, dec=dec*unit_angle, distance=dist*unit_dist,
-            pm_ra_cosdec=pmra*unit_pm, pm_dec=pmdec*unit_pm, radial_velocity=vlos*unit_vlos)
+        pm_ra_cosdec=pmra*unit_pm, pm_dec=pmdec*unit_pm, radial_velocity=vlos*unit_vlos)
     try:
         gsky = coord.SkyCoord(frame='icrs', **kwargs).transform_to(coord.Galactic)
     except ValueError:  # old version of astropy

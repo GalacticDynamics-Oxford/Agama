@@ -122,7 +122,10 @@ template<> inline void getCornerIndicesCylindrical<1>(
 void BaseTargetDensity::computeDFProjection(const GalaxyModel& model, StorageNumT* output) const
 {
     std::vector<double> result =
-        //TODO: this routine should be OpenMP-parallelized in each of the descendant classes
+        // TODO: this routine should be OpenMP-parallelized in each of the descendant classes
+        // update: DensityFromDF is itself parallelized when using evalmanyDensity***,
+        // but in the current implementations of computeDensityProjection, the input density
+        // is queried one point at a time - this needs to be replaced with evalmany...
         computeDensityProjection(DensityFromDF(model, EPSREL_DENSITY_INT, MAX_NUM_EVAL));
     for(size_t i=0; i<result.size(); i++)
         output[i] = static_cast<StorageNumT>(result[i]);

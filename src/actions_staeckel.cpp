@@ -466,7 +466,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
         || fabs(fnc.point.nu) > lim.nu_max
         || fnc.point.lambda   < lim.lambda_min
         || fnc.point.lambda   > lim.lambda_max))
-        utils::msg(utils::VL_WARNING, "findIntegrationLimitsAxisym", "failed at lambda="+
+        FILTERMSG(utils::VL_WARNING, "findIntegrationLimitsAxisym", "failed at lambda="+
             utils::toString(fnc.point.lambda)+", nu="+utils::toString(fnc.point.nu)+", E="+
             utils::toString(fnc.E)+", Lz="+utils::toString(fnc.Lz)+", I3="+utils::toString(fnc.I3));
 
@@ -724,7 +724,7 @@ void createGridFocalDistance(
     int sizeE = gridE.size(), sizeL = gridL.size(), sizeEL = (sizeE-1) * (sizeL-1);
     grid2dD = math::Matrix<double>(sizeE, sizeL);
     grid2dR = math::Matrix<double>(sizeE, sizeL);
-    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+    std::string errorMessage;  // store the error text in case of an exception in the OpenMP block
     // loop over the grid in E and L (combined index for better load balancing)
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
@@ -780,7 +780,7 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
     // convert the grid in radius into the grid in energy and xi=scaledE
     std::vector<double> gridE(sizeE), gridEscaled(sizeE);
     for(int i=0; i<sizeE; i++) {
-        gridE[i] = interp.value(gridR[i]);
+        gridE[i] = pot->value(coord::PosCyl(gridR[i], 0, 0));
         gridEscaled[i] = scaleE(gridE[i], invPhi0);
     }
 
@@ -838,7 +838,7 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
     std::vector<double> grid3dJz(sizeE * sizeL * sizeI);  // same for Jz
 
     int sizeEL = (sizeE-1) * (sizeL-1);
-    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+    std::string errorMessage;  // store the error text in case of an exception in the OpenMP block
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
@@ -912,7 +912,7 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
                 grid3dJz[index] = Omega / nu    *    gridI[iI];
             }
         } else {
-            utils::msg(utils::VL_WARNING, "ActionFinderAxisymFudge",
+            FILTERMSG(utils::VL_WARNING, "ActionFinderAxisymFudge",
                 "cannot compute epicyclic frequencies at R="+utils::toString(Rc));
             // simply repeat the values from the previous row
             for(int iI=0; iI<sizeI; iI++) {

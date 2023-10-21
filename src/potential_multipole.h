@@ -1,7 +1,7 @@
 /** \file    potential_multipole.h
     \brief   density and potential approximations based on spherical-harmonic expansion
     \author  Eugene Vasiliev
-    \date    2010-2021
+    \date    2010-2023
 
     This module provides tools for representing arbitrary density and potential profiles
     in terms of spherical-harmonic (or multipole) expansion, with coefficients being
@@ -86,6 +86,7 @@ public:
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
         \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
         \param[in]  smoothing  is the amount of smoothing applied during penalized spline fitting.
+        \note OpenMP-parallelized loops over particles and over expansion coefficients.
     */
     static PtrDensity create(
         const particles::ParticleArray<coord::PosCyl> &particles,
@@ -220,6 +221,7 @@ public:
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
         \param[in]  rmin, rmax give the radial grid extent; 0 means auto-detect.
         \param[in]  smoothing  is the amount of smoothing applied during penalized spline fitting.
+        \note OpenMP-parallelized loops over particles and over expansion coefficients.
     */
     static PtrPotential create(
         const particles::ParticleArray<coord::PosCyl> &particles,
@@ -305,6 +307,7 @@ public:
         \param[in]  nmax  is the order of radial expansion (number of terms is nmax+1);
         \param[in]  eta   is the shape parameter of basis functions;
         \param[in]  r0    is the scale radius of basis functions (0 means auto-detect).
+        \note OpenMP-parallelized loop over particles.
     */
     static PtrPotential create(
         const particles::ParticleArray<coord::PosCyl> &particles,

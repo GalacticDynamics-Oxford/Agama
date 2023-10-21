@@ -787,7 +787,7 @@ double findRoot(const IFunction& fnc,
         }
         if(numIter >= MAXITER) {
             converged = true;  // not quite ready, but can't loop forever
-            utils::msg(utils::VL_WARNING, "findRoot", "max # of iterations exceeded: "
+            FILTERMSG(utils::VL_WARNING, "findRoot", "max # of iterations exceeded: "
                 "x="+utils::toString(b,15)+" +- "+utils::toString(fabs(b-c))+
                 " on interval ["+utils::toString(xlower,15)+":"+utils::toString(xupper,15)+
                 "], req.toler.="+utils::toString(abstoler));
@@ -915,10 +915,10 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
 // this routine is intended to be fast, so only works with pre-computed integration tables
 double integrateGL(const IFunction& fnc, double x1, double x2, int N)
 {
-    if(x1==x2)
-        return 0;
     if(N < 1 || N > MAX_GL_ORDER)
         throw std::invalid_argument("integrateGL: order is too high (not implemented)");
+    if(x1==x2)
+        return 0;
     // use pre-computed tables of points and weights (they are not available for every N,
     // so take the closest implemented one with at least the requested number of points)
     while(GLPOINTS[N] == NULL) N++;
@@ -927,6 +927,31 @@ double integrateGL(const IFunction& fnc, double x1, double x2, int N)
     for(int i=0; i<N; i++)
         result += weights[i] * fnc(x2 * points[i] + x1 * (1-points[i]));
     return result * (x2-x1);
+}
+
+// a variant of the same routine for computing several integrals simultaneously on the same interval
+void integrateGL(const IFunctionNdim& fnc, double x1, double x2, int N, double result[])
+{
+    if(fnc.numVars() != 1)
+        throw std::invalid_argument("integrateGL: function should have numVars()=1");
+    if(N < 1 || N > MAX_GL_ORDER)
+        throw std::invalid_argument("integrateGL: order is too high (not implemented)");
+    int M = fnc.numValues();
+    for(int k=0; k<M; k++)
+        result[k] = 0;
+    if(x1==x2)
+        return;
+    // use pre-computed tables of points and weights (they are not available for every N,
+    // so take the closest implemented one with at least the requested number of points)
+    while(GLPOINTS[N] == NULL) N++;
+    const double *points = GLPOINTS[N], *weights = GLWEIGHTS[N];
+    double* values = (double*) alloca(M * sizeof(double));  // temp. array allocated on stack
+    for(int i=0; i<N; i++) {
+        double x = x2 * points[i] + x1 * (1-points[i]);
+        fnc.eval(&x, values);
+        for(int k=0; k<M; k++)
+            result[k] += weights[i] * (x2-x1) * values[k];
+    }
 }
 
 // compute the node and weight of k-th node in the Gauss-Legendre quadrature rule with n points (0<=k<n)

@@ -39,7 +39,7 @@ bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
     double dvpar, dv2par, dv2per;
     relaxationModel.evalLocal(Phi, E, mass, dvpar, dv2par, dv2per);
     if(!isFinite(dvpar+dv2par+dv2per) || dv2par<0 || dv2per<0) {
-        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation",
+        FILTERMSG(utils::VL_WARNING, "RagaTaskRelaxation",
             "Cannot compute diffusion coefficients at t="+utils::toString(tend)+
             ", r="+utils::toString(sqrt(pow_2(posvel.x)+pow_2(posvel.y)+pow_2(posvel.z)))+
             ", Phi="+utils::toString(Phi,10)+", E="+utils::toString(E,10));
@@ -52,7 +52,7 @@ bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
     dv2per *= coulombLog;
     double dEdt = dvpar + 0.5 * (dv2par + dv2per);
     if(dEdt * timestep < -0.5 * pow_2(vel))
-        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation",
+        FILTERMSG(utils::VL_WARNING, "RagaTaskRelaxation",
             "Energy perturbation is larger than its value: "
             "Phi="+utils::toString(Phi)+", v="+utils::toString(vel)+
             "; dt="+utils::toString(timestep)+", dE="+utils::toString(dEdt * timestep) );
@@ -103,7 +103,7 @@ public:
         spl.evalDeriv(xin, &fin, &slopein);
         slopein *= xin / fin;
         if(!(slopein >= minslope)) {
-            utils::msg(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of f(h) "
+            FILTERMSG(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of f(h) "
                 "from "+utils::toString(slopein)+" to "+utils::toString(minslope)+
                 " to keep Etotal finite");
             slopein = minslope;
@@ -169,7 +169,7 @@ void eliminateBadSamples(std::vector<double>& particle_h,
     particle_h.erase(dest_h, particle_h.end());
     particle_m.erase(dest_m, particle_m.end());
     stellar_m .erase(dest_s, stellar_m.end());
-    utils::msg(utils::VL_DEBUG, "RagaTaskRelaxation",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskRelaxation",
         "Retained "+utils::toString((unsigned int)particle_h.size())+" samples");
 }
 
@@ -201,7 +201,7 @@ potential::PtrPotential createSphericalPotential(
     double slope = (ratio - 1) / lnr1r0 * 2;  // this approximately holds if s is near 0
     if(slope < MINSLOPE) {
         // modify the derivative at the innermost grid point to correct the slope
-        utils::msg(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of the potential "
+        FILTERMSG(utils::VL_WARNING, "RagaTaskRelaxation", "Adjusted the inner slope of the potential "
             "from "+utils::toString(slope)+" to "+utils::toString(MINSLOPE)+" to keep Phi(0) finite");
         ratio = MINSLOPE * 0.5 * lnr1r0 + 1;
         dPhi[0][0] = (Phi[0][1] - Phi[0][0]) / (ratio * rad[0] * lnr1r0);
@@ -272,7 +272,7 @@ RagaTaskRelaxation::RagaTaskRelaxation(
     bh(_bh),
     prevOutputTime(-INFINITY)
 {
-    utils::msg(utils::VL_DEBUG, "RagaTaskRelaxation",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskRelaxation",
         "Initialized with ln Lambda="+utils::toString(params.coulombLog));
 }
 

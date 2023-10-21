@@ -21,7 +21,7 @@ void Plummer::evalDeriv(double r,
 double Plummer::densitySph(const coord::PosSph &pos, double /*time*/) const
 {
     double invrsq = 1. / (pow_2(pos.r) + pow_2(scaleRadius));
-    return (3./4/M_PI) * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
+    return 3./4/M_PI * mass * pow_2(scaleRadius * invrsq) * sqrt(invrsq);
 }
 
 double Plummer::enclosedMass(double r) const
@@ -43,6 +43,13 @@ void Isochrone::evalDeriv(double r,
         *deriv = -pot * r / (rb * brb);
     if(deriv2)
         *deriv2 = pot * (2*pow_2(r / (rb * brb)) - pow_2(scaleRadius / (rb * brb)) * (1 + scaleRadius / rb));
+}
+
+double Isochrone::densitySph(const coord::PosSph &pos, double /*time*/) const
+{
+    double rb  = sqrt(pow_2(pos.r) + pow_2(scaleRadius));
+    double brb = scaleRadius + rb;
+    return 1./4/M_PI * mass * scaleRadius * (3 * scaleRadius * brb + 2 * pow_2(pos.r)) / pow_3(rb * brb);
 }
 
 void NFW::evalDeriv(double r,
@@ -89,6 +96,15 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
         deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);
         deriv2->dRdphi = deriv2->dzdphi = deriv2->dphi2 = 0;
     }
+}
+
+double MiyamotoNagai::densityCyl(const coord::PosCyl &pos, double /*time*/) const
+{
+    double zb   = sqrt(pow_2(pos.z) + pow_2(scaleRadiusB));
+    double azb2 = pow_2(scaleRadiusA + zb);
+    return 1./4/M_PI * mass * pow_2(scaleRadiusB) *
+        (scaleRadiusA * pow_2(pos.R) + (scaleRadiusA + 3*zb) * azb2) /
+        (pow_3(zb) * sqrt(pow_2(pos.R) + azb2) * pow_2(pow_2(pos.R) + azb2));
 }
 
 void Logarithmic::evalCar(const coord::PosCar &pos,

@@ -567,7 +567,7 @@ SphericalIsotropicModelLocal::SphericalIsotropicModelLocal(
                 } else {
                     // this procedure sometimes fails, since hypergeom2F1 is not very robust;
                     // in this case we simply keep the values computed by numerical integration
-                    utils::msg(utils::VL_WARNING, "SphericalIsotropicModelLocal",
+                    FILTERMSG(utils::VL_WARNING, "SphericalIsotropicModelLocal",
                         "Can't compute asymptotic value");
                 }
             }
@@ -576,7 +576,7 @@ SphericalIsotropicModelLocal::SphericalIsotropicModelLocal(
             double J1overJ0 = J1acc / J0acc / dv;
             double J3overJ0 = J3acc / J0acc / pow_3(dv);
             if(j1overJ0<=0 || J1overJ0<=0 || J3overJ0<=0 || !isFinite(j1overJ0+J1overJ0+J3overJ0)) {
-                utils::msg(utils::VL_WARNING, "SphericalIsotropicModelLocal", "Invalid value"
+                FILTERMSG(utils::VL_WARNING, "SphericalIsotropicModelLocal", "Invalid value"
                     "  J0="+utils::toString(J0acc)+
                     ", j1="+utils::toString(j1acc)+
                     ", J1="+utils::toString(J1acc)+
@@ -649,7 +649,7 @@ void SphericalIsotropicModelLocal::evalLocal(
     dv2par =  mult * (I0 + J3);
     dv2per =  mult * (I0 * 2 + J1 * 3 - J3);
     /*if(loghPhi<X)
-        utils::msg(utils::VL_WARNING, "SphericalIsotropicModelLocal",
+        FILTERMSG(utils::VL_WARNING, "SphericalIsotropicModelLocal",
         "Extrapolating to small h: log(h(Phi))="+utils::toString(loghPhi)+
         ", log(h(E))="+utils::toString(loghE)+
         ", I0="+utils::toString(I0)+", J0="+utils::toString(J0));*/

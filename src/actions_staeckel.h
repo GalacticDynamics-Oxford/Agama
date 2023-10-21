@@ -111,6 +111,8 @@ public:
         interpolators for actions (if interpolate==true).
         \throw std::invalid_argument exception if the potential is not axisymmetric
         or std::runtime_error in case of other problems in initialization.
+        \note OpenMP-parallelized loops over the grid in E,L for locating shell orbits,
+        and optionally for constructing the action interpolator (if requested).
     */
     ActionFinderAxisymFudge(const potential::PtrPotential& potential, bool interpolate = false);
 

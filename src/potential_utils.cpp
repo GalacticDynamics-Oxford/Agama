@@ -515,7 +515,7 @@ Interpolator::Interpolator(const BasePotential& potential) :
                 "Interpolator: energy or angular momentum of a circular orbit are not monotonic "
                 "with radius at R=" + utils::toString(R) + '\n' + utils::stacktrace());
         if(!(nu2Om>=0))  // not a critical error, but possibly a sign of problems
-            utils::msg(utils::VL_WARNING, "Interpolator",
+            FILTERMSG(utils::VL_WARNING, "Interpolator",
                 "Vertical epicyclic frequency is negative at R=" + utils::toString(R));
 
         // estimate the outer asymptotic behaviour

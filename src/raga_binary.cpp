@@ -60,7 +60,7 @@ double computeLztorque(const potential::BasePotential& potential,
     if(isFinite(torque))
         return torque;
     else {
-        utils::msg(utils::VL_WARNING, "RuntimeBinary", "Cannot compute torque due to stellar potential");
+        FILTERMSG(utils::VL_WARNING, "RuntimeBinary", "Cannot compute torque due to stellar potential");
         return 0;
     }
 }
@@ -147,7 +147,7 @@ RagaTaskBinary::RagaTaskBinary(
     bh(_bh),
     firstEpisode(true)
 {
-    utils::msg(utils::VL_DEBUG, "RagaTaskBinary",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskBinary",
         "Initial semimajor axis=" + utils::toString(bh.sma) +
         ", eccentricity=" + utils::toString(bh.ecc));        
 }

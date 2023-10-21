@@ -58,7 +58,7 @@ coord::PosVelCar BaseOrbitIntegrator::run(const double totalTime)
     while(true) {
         if(!(solver.doStep(sign>0 ? +0.0 : -0.0) * sign > 0.)) {
             // signal of error
-            utils::msg(utils::VL_WARNING,
+            FILTERMSG(utils::VL_WARNING,
                 "OrbitIntegrator::integrate", "terminated at t="+utils::toString(currentTime));
             break;
         }

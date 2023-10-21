@@ -49,7 +49,7 @@ public:
     DensityWrapper(densityfnc _dens, coord::SymmetryType _sym) :
         dens(_dens), sym(_sym)
     {
-        utils::msg(utils::VL_DEBUG, "FortranWrapper",
+        FILTERMSG(utils::VL_DEBUG, "FortranWrapper",
             "Created a C++ wrapper for a Fortran density routine at "+
             utils::toString((void*)dens));
     }
@@ -74,7 +74,7 @@ public:
     PotentialWrapper(potentialfnc _pot, coord::SymmetryType _sym) :
         pot(_pot), sym(_sym)
     {
-        utils::msg(utils::VL_DEBUG, "FortranWrapper",
+        FILTERMSG(utils::VL_DEBUG, "FortranWrapper",
             "Created a C++ wrapper for a Fortran potential routine at "+
             utils::toString((void*)pot));
     }

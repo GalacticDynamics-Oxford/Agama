@@ -1114,7 +1114,8 @@ public:
     /** construct the object for grid=X, xvalues=x, weights=w in the above formulation.
         Grid nodes must be sorted in ascending order.
         Data points do not necessarily need to lie within the grid boundaries;
-        the fitted function will be linearly extrapolated outside the grid. 
+        the fitted function will be linearly extrapolated outside the grid.
+        \note OpenMP-parallelized loop over xvalues.
     */
     SplineApprox(
         const std::vector<double>& grid,
@@ -1241,6 +1242,7 @@ enum FitOptions {
     the values at grid nodes.
     \throw  std::invalid_argument exception if samples have negative weights,
     or their total weight is not positive, or grid points are invalid.
+    \note OpenMP-parallelized loop over xvalues & weights.
 */
 template<int N>
 std::vector<double> splineLogDensity(

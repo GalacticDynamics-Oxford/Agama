@@ -191,7 +191,7 @@ def compare(ic, inttime, numsteps):
     dt = time.time()
     g_act = g_actfinder(gg_orb[:,0],gg_orb[:,1],gg_orb[:,2],gg_orb[:,3],gg_orb[:,4],fixed_quad=True)
     print('Time to compute actions in galpy: %.4g s' % (time.time()-dt))
-    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' % \
+    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' %
         (numpy.mean(g_act[0]), numpy.std(g_act[0]), numpy.mean(g_act[2]), numpy.std(g_act[2])))
 
     ### use the agama action routine for the same value of Delta as in galpy (explicity specify focal distance):
@@ -199,7 +199,7 @@ def compare(ic, inttime, numsteps):
     dt = time.time()
     c_act = agama.actions(point=a_orb_a_hybrid, potential=a_pot_hybrid, fd=delta)
     print('Time to compute actions in agama using galpy-estimated focal distance: %.4g s' % (time.time()-dt))
-    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' % \
+    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' %
         (numpy.mean(c_act[:,0]), numpy.std(c_act[:,0]), numpy.mean(c_act[:,1]), numpy.std(c_act[:,1])))
 
     ### use the agama action finder (initialized at the beginning) that automatically determines
@@ -207,14 +207,14 @@ def compare(ic, inttime, numsteps):
     dt = time.time()
     a_act = a_actfinder(a_orb_a_hybrid)   # use the focal distance estimated by action finder
     print('Time to compute actions in agama using pre-initialized focal distance: %.4g s' % (time.time()-dt))
-    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' % \
+    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' %
         (numpy.mean(a_act[:,0]), numpy.std(a_act[:,0]), numpy.mean(a_act[:,1]), numpy.std(a_act[:,1])))
 
     ### use the interpolated agama action finder (initialized at the beginning) - less accurate but faster
     dt = time.time()
     i_act = i_actfinder(a_orb_a_hybrid)
     print('Time to compute actions in agama with interpolated action finder: %.4g s' % (time.time()-dt))
-    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' % \
+    print('Jr = %.6g +- %.4g, Jz = %.6g +- %.4g' %
         (numpy.mean(i_act[:,0]), numpy.std(i_act[:,0]), numpy.mean(i_act[:,1]), numpy.std(i_act[:,1])))
 
     ### plot Jr vs Jz
@@ -231,11 +231,11 @@ def compare(ic, inttime, numsteps):
     plt.axes([0.06, 0.06, 0.92, 0.43])
     plt.plot(times, g_act[0],   c='b', label='galpy')
     plt.plot(times, g_act[2],   c='b')
-    plt.plot(times, c_act[:,0], c='g', label='agama, $\Delta=%.4f$'%delta, dashes=[4,2])
+    plt.plot(times, c_act[:,0], c='g', label=r'agama, $\Delta=%.4f$'%delta, dashes=[4,2])
     plt.plot(times, c_act[:,1], c='g', dashes=[4,2])
-    plt.plot(times, a_act[:,0], c='r', label='agama, $\Delta=$auto')
+    plt.plot(times, a_act[:,0], c='r', label=r'agama, $\Delta=$auto')
     plt.plot(times, a_act[:,1], c='r')
-    plt.plot(times, i_act[:,0], c='c', label='agama, interpolated')
+    plt.plot(times, i_act[:,0], c='c', label=r'agama, interpolated')
     plt.plot(times, i_act[:,1], c='c')
     plt.text(0, c_act[0,0], '$J_r$', fontsize=16)
     plt.text(0, c_act[0,1], '$J_z$', fontsize=16)

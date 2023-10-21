@@ -465,9 +465,27 @@ double integrateAdaptive(const IFunction& F, double x1, double x2, double relTol
     \param[in] F  is the input function;
     \param[in] x1 is the lower end of the interval;
     \param[in] x2 is the upper end of the interval;
-    \param[in] N  is the number of points in Gauss-Legendre quadrature, must be <= MAX_GL_ORDER
+    \param[in] N  is the number of points in Gauss-Legendre quadrature, must be <= MAX_GL_ORDER;
+               if a rule with the requested order N is not available,
+               N is increased to the nearest available one.
+    \return  the value of the integral.
+    \throw  std::invalid_argument if N < 1 or N > MAX_GL_ORDER.
 */
 double integrateGL(const IFunction& F, double x1, double x2, int N);
+
+/** integrate a 1d function that provides M>=1 values on a finite interval,
+    using a built-in fixed-order Gauss-Legendre rule without error estimate.
+    \param[in]  F  is the input function;
+    \param[in]  x1 is the lower end of the interval;
+    \param[in]  x2 is the upper end of the interval;
+    \param[in]  N  is the number of points in Gauss-Legendre quadrature, must be <= MAX_GL_ORDER;
+                if a rule with the requested order N is not available,
+                N is increased to the nearest available one.
+    \param[out] result  is an array of length  M = F.numValues()  that will contain the integrals;
+                should be preallocated by the calling code.
+    \throw  std::invalid_argument if N < 1 or N > MAX_GL_ORDER, or if F.numVariables() != 1.
+*/
+void integrateGL(const IFunctionNdim& F, double x1, double x2, int N, double result[]);
 
 /** prepare a table for Gauss-Legendre integration of one or many functions on the same interval.
     The integral is approximated by a weighted sum of function values over the array of points:
@@ -479,7 +497,7 @@ double integrateGL(const IFunction& F, double x1, double x2, int N);
     \param[in]  x2  is the upper end of interval;
     \param[in]  N   is the number of points in the tables;
     \param[out] coords   points to the array that will be filled with coordinates of the points
-    (it should be allocated before the call to this routine);
+                (it should be allocated before the call to this routine);
     \param[out] weights  will be filled with weights (array should be allocated beforehand).
 */
 void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, double* weights);
@@ -489,7 +507,8 @@ const int MAX_GL_TABLE = 20;
 /// built-in GL integration tables are available for some (but not every) N up to MAX_GL_ORDER
 const int MAX_GL_ORDER = 33;
 
-/// list of all built-in integration rules:  points and weights
+/// list of all built-in integration rules:  points and weights;
+/// if a rule is not available, the corresponding pointer is NULL.
 extern const double * const GLPOINTS [MAX_GL_ORDER+1];
 extern const double * const GLWEIGHTS[MAX_GL_ORDER+1];
 
@@ -497,14 +516,16 @@ extern const double * const GLWEIGHTS[MAX_GL_ORDER+1];
 /** N-dimensional integration (aka cubature).
     It computes the integral of a vector-valued function (each component is treated independently).
     The dimensions of integration volume and the length of result array are provided by 
-    F.numVars() and F.numValues(), respectively. Integration boundaries should be finite.
+    F.numVars() and F.numValues(), respectively;
+    the result and (if needed) error arrays should be preallocated by the calling code.
+    Integration boundaries should be finite.
     \param[in]  F  is the input function of N variables that produces a vector of M values,
-    \param[in]  xlower  is the lower boundary of integration volume (vector of length N);
-    \param[in]  xupper  is the upper boundary of integration volume (vector of length N);
+    \param[in]  xlower  is the lower boundary of integration volume (array of length N);
+    \param[in]  xupper  is the upper boundary of integration volume (array of length N);
     \param[in]  relToler  is the required relative error in each of the computed component of F;
     \param[in]  maxNumEval  is the upper limit on the number of function calls;
-    \param[out] result  is the vector of length M, containing the values of integral for each component;
-    \param[out] error  is the vector of length M, containing error estimates of the computed values,
+    \param[out] result  is an array of length M, containing the values of integral for each component;
+    \param[out] error  is an array of length M, containing error estimates of the computed values,
                 if this argument is set to NULL then no error information is stored;
     \param[out] numEval  is the actual number of function calls
                 (if set to NULL, this information is not stored).

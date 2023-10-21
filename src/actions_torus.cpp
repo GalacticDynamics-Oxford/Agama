@@ -60,7 +60,7 @@ ActionMapperTorus::ActionMapperTorus(const potential::BasePotential& poten, cons
     int result = torus->AutoFit(act, &potwrap, tol, 600, 150, 12, 3, 16, 200, 12,
         utils::verbosityLevel >= utils::VL_VERBOSE);
     if(result!=0) {
-        utils::msg(utils::VL_WARNING, "Torus", "Not converged: "+utils::toString(result));
+        FILTERMSG(utils::VL_WARNING, "Torus", "Not converged: "+utils::toString(result));
         //torus->show(std::cout);
     }
 }

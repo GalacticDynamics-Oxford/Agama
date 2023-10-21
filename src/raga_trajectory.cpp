@@ -16,7 +16,7 @@ RagaTaskTrajectory::RagaTaskTrajectory(
     particles(_particles),
     prevOutputTime(-INFINITY)
 {
-    utils::msg(utils::VL_DEBUG, "RagaTaskTrajectory",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskTrajectory",
         "Output interval="+utils::toString(params.outputInterval));
 }
 

@@ -328,7 +328,7 @@ Angles computeAngles(const coord::PosVelCyl& point,
     \param[in]  Omegar, Omegaz are the corresponding frequencies (computed elsewhere);
     \returns    the point (position+velocity)
 */
-coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
+coord::PosVelCyl mapPointFromActionAngles(const ActionAngles &aa,
     const math::IFunction &potential, const double E, const double L,
     const double R1, const double R2, const double Omegar, const double Omegaz)
 {
@@ -348,45 +348,17 @@ coord::PosVelSphMod mapPointFromActionAngles(const ActionAngles &aa,
     double sini     = sqrt(1 - pow_2(aa.Jphi / L)); // inclination angle of the orbital plane
     double costheta = sini * sinpsi;                // z/r
     double sintheta = sqrt(1 - pow_2(costheta));    // R/r is always non-negative
+    double R        = r * sintheta;
+    double vtheta   = L * sini * cospsi / R;
     // finally, output position/velocity
-    coord::PosVelSphMod point;
-    point.r    = r;
-    point.pr   = vr;
-    point.tau  = costheta / (1+sintheta);
-    point.ptau = L * sini * cospsi * (1/sintheta + 1);
-    point.phi  = math::wrapAngle(aa.thetaphi + (chi-aa.thetaz) * math::sign(aa.Jphi));
-    point.pphi = aa.Jphi;
-    return point;
+    return coord::PosVelCyl(R,
+        r * costheta,  // z
+        math::wrapAngle(aa.thetaphi + (chi-aa.thetaz) * math::sign(aa.Jphi)),  // phi
+        vr * sintheta - vtheta * costheta,  // vR
+        vr * costheta + vtheta * sintheta,  // vz
+        aa.Jphi != 0 ? aa.Jphi / R : 0);    // vphi
 }
 
-/** Compute the derivatives of pos/vel w.r.t. actions by finite differencing.
-    \param[in]  aa  are the actions and angles at a point slightly offset from the original one;
-    \param[in]  p0  is the original point;
-    \param[in]  EPS is the magnitude of offset (in either of the three actions);
-    \param[in]  af  is the instance of interpolated action finder (used to compute frequencies);
-    \param[in]  pot is the interpolated potential;
-    \param[in]  E   is the energy slightly offset from the original one;
-    \param[in]  R1,R2  are the peri/apocenter radii, again slightly offset (all computed elsewhere);
-    \return  the derivative of position/velocity point by the action that had this offset.
-*/
-coord::PosVelSphMod derivPointFromActions(
-    const ActionAngles &aa, const coord::PosVelSphMod &p0, double EPS,
-    const ActionFinderSpherical& af, const potential::Interpolator2d &pot,
-    const double E, const double R1, const double R2)
-{
-    double Omegar, Omegaz, L = aa.Jz + fabs(aa.Jphi);
-    af.Jr(E, L, &Omegar, &Omegaz);
-    double Ra,Rb;
-    pot.findPlanarOrbitExtent(E, L, Ra, Rb);
-    coord::PosVelSphMod p = mapPointFromActionAngles(aa, pot, E, L, R1, R2, Omegar, Omegaz);
-    p.r   = (p.r   - p0.r   )/EPS;
-    p.pr  = (p.pr  - p0.pr  )/EPS;
-    p.tau = (p.tau - p0.tau )/EPS;
-    p.ptau= (p.ptau- p0.ptau)/EPS;
-    p.phi = (p.phi - p0.phi )/EPS;
-    p.pphi= (p.pphi- p0.pphi)/EPS;
-    return p;
-}
 
 /// construct the interpolating spline for scaled radial action W = Jr / (Lcirc-L)
 /// as a function of E and L/Lcirc
@@ -414,7 +386,7 @@ math::QuinticSpline2d createActionInterpolator(const potential::Interpolator2d& 
     math::Matrix<double> gridW(sizeE, sizeL), gridWdX(sizeE, sizeL), gridWdY(sizeE, sizeL);
     std::vector<double> gridWatY1(sizeE);  // last column of the W matrix (values at Y=1 and any X)
 
-    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+    std::string errorMessage;  // store the error text in case of an exception in the OpenMP block
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -511,7 +483,7 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
     // value of X=scaledE and its derivatives w.r.t. P and Q
     math::Matrix<double> gridX(sizeP, sizeQ), gridXdP(sizeP, sizeQ), gridXdQ(sizeP, sizeQ);
 
-    std::string errorMessage;  // store the error text in case of an exception in the openmp block
+    std::string errorMessage;  // store the error text in case of an exception in the OpenMP block
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -523,7 +495,7 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
             double Lc = Rc  * sqrt( Rc * dPhi);  // exp(P) = Jr+L
             gridP[iP] = log(Lc);
             for(int iQ=0; iQ<sizeQ; iQ++) {
-                double L = Lc * gridQ[iQ], Jr = Lc * (1-gridQ[iQ]);                
+                double L = Lc * gridQ[iQ], Jr = Lc * (1-gridQ[iQ]);
                 // radius of a circular orbit with angular momentum equal to L
                 double Rcirc = iQ<sizeQ-1 ? pot.R_from_Lz(L) : Rc;
                 // initial guess (more precisely, lower bound) for Hamiltonian
@@ -634,7 +606,7 @@ coord::PosVelCyl mapSpherical(
     freq.Omegaphi = freq.Omegaz * math::sign(aa.Jphi);
     if(freqout)  // freak out only if requested
         *freqout = freq;
-    return toPosVelCyl(mapPointFromActionAngles(aa, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz));
+    return mapPointFromActionAngles(aa, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz);
 }
 
 
@@ -759,12 +731,7 @@ double ActionFinderSpherical::E(const Actions& acts) const
 #endif
 }
 
-coord::PosVelSphMod ActionFinderSpherical::map(
-    const ActionAngles& aa,
-    Frequencies* freq,
-    DerivAct<coord::SphMod>* derivAct,
-    DerivAng<coord::SphMod>*,
-    coord::PosVelSphMod*) const
+coord::PosVelCyl ActionFinderSpherical::map(const ActionAngles& aa, Frequencies* freq) const
 {
     if(aa.Jr<0 || aa.Jz<0)
         throw std::invalid_argument("mapSpherical: input actions are negative");
@@ -783,32 +750,7 @@ coord::PosVelSphMod ActionFinderSpherical::map(
     double R1, R2;
     pot.findPlanarOrbitExtent(E, L, R1, R2);
     // map the point from action/angles and frequencies
-    coord::PosVelSphMod p0 = mapPointFromActionAngles(aa, pot, E, L, R1, R2, Omegar, Omegaz);
-    if(derivAct) {
-        // use the fact that dE/dJr = Omega_r, dE/dJz = Omega_z, etc, and find dR{1,2}/dJ{r,z}
-        double dPhidR;
-        pot.evalDeriv(R1, NULL, &dPhidR);
-        double factR1 = pow_2(L) / pow_3(R1) - dPhidR;
-        pot.evalDeriv(R2, NULL, &dPhidR);
-        double factR2 = pow_2(L) / pow_3(R2) - dPhidR;
-        double dR1dJr = -Omegar / factR1;
-        double dR2dJr = -Omegar / factR2;
-        double dR1dJz = (L / pow_2(R1) - Omegaz) / factR1;
-        double dR2dJz = (L / pow_2(R2) - Omegaz) / factR2;
-        // compute the derivs using finite-difference (silly approach, no error control)
-        double EPS= 1e-8;   // no proper scaling attempted!! (TODO - do it properly or not at all)
-        derivAct->dbyJr = derivPointFromActions(
-            ActionAngles(Actions(aa.Jr + EPS, aa.Jz, aa.Jphi), aa), p0, EPS, *this, pot,
-            E + EPS * Omegar, R1 + EPS * dR1dJr, R2 + EPS * dR2dJr);
-        derivAct->dbyJz = derivPointFromActions(
-            ActionAngles(Actions(aa.Jr, aa.Jz + EPS, aa.Jphi), aa), p0, EPS, *this, pot,
-            E + EPS * Omegaz, R1 + EPS * dR1dJz, R2 + EPS * dR2dJz);
-        derivAct->dbyJphi = derivPointFromActions(
-            ActionAngles(Actions(aa.Jr, aa.Jz, aa.Jphi + EPS), aa), p0, EPS, *this, pot,
-            E + EPS * Omegaphi, R1 + EPS * dR1dJz * math::sign(aa.Jphi),
-            R2 + EPS * dR2dJz * math::sign(aa.Jphi));  // dX/dJphi = dX/dJz*sign(Jphi)
-    }
-    return p0;
+    return mapPointFromActionAngles(aa, pot, E, L, R1, R2, Omegar, Omegaz);
 }
 
 }  // namespace actions

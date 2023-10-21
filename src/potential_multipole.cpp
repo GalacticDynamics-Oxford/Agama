@@ -245,6 +245,7 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
 // C_lm(particle_k) = coefs[SphHarmIndices::index(l,m)][k].
 // This saves memory, since only the arrays for harmonic coefficients allowed
 // by the indexing scheme are allocated and returned.
+// \note OpenMP-parallelized loop over particles.
 void computeSphericalHarmonicsFromParticles(
     const particles::ParticleArray<coord::PosCyl> &particles,
     const math::SphHarmIndices &ind,
@@ -311,7 +312,7 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
     double& rmin, double& rmax)
 {
     if(rmax!=0 && rmin!=0) {
-        utils::msg(utils::VL_DEBUG, "Multipole",
+        FILTERMSG(utils::VL_DEBUG, "Multipole",
             "User-defined grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
         return;
     }
@@ -402,7 +403,7 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
                 rmin = rad[i];
         }
     }
-    utils::msg(utils::VL_DEBUG, "Multipole",
+    FILTERMSG(utils::VL_DEBUG, "Multipole",
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"] ");
 }
 
@@ -441,7 +442,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
         std::nth_element(radii.begin(), radii.end() - Nmin, radii.end());
         rmax = std::min(radii[nbody-Nmin], rhalf * std::pow(spacing, 0.5*gridSizeR));
     }
-    utils::msg(utils::VL_DEBUG, "Multipole",
+    FILTERMSG(utils::VL_DEBUG, "Multipole",
         "Grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]"
         ", particles span r=["+utils::toString(prmin)+":"+utils::toString(prmax)+"]");
 }
@@ -529,7 +530,7 @@ PtrPotential initAsympt(const std::vector<double>& radii,
         // that of the l=0 one; this is enforced in the constructor of PowerLawMultipole,
         // but the slope should already have been adjusted before computing the coefs U and W.
         if(l==0)
-            utils::msg(utils::VL_DEBUG, "Multipole",
+            FILTERMSG(utils::VL_DEBUG, "Multipole",
                 std::string("Power-law index of ")+(inner?"inner":"outer")+
                 " density profile: "+utils::toString(S[c]-2));
     }
@@ -776,6 +777,8 @@ void computeDensityCoefsSph(const math::IFunctionNdim& src,
     \param[in] smoothing is the amount of smoothing applied in penalized spline fitting procedure.
     \param[out] coefs will contain the arrays of computed sph.-harm. coefficients that are
     passed to the constructor of `DensitySphericalHarmonic` class; will be resized as needed.
+    \note OpenMP-parallelized loop over expansion coefficients (penalized spline fitting),
+    and also used parallelized loop over particles in computeSphericalHarmonicsFromParticles().
 */
 void computeDensityCoefsFromParticles(
     const particles::ParticleArray<coord::PosCyl> &particles,
@@ -818,7 +821,7 @@ void computeDensityCoefsFromParticles(
         spl0.evalDeriv(gridLogRadii.back(),  NULL, &outerSlope);
         innerSlope -= 3;  // we have computed the log of density of particles in log(r),
         outerSlope -= 3;  // which is equal to the true density multiplied by 4 pi r^3
-        utils::msg(utils::VL_DEBUG, "Multipole",
+        FILTERMSG(utils::VL_DEBUG, "Multipole",
             "Power-law index of density profile: inner="+utils::toString(innerSlope)+
             ", outer="+utils::toString(outerSlope));
     }
@@ -1956,6 +1959,7 @@ void computePotentialCoefsBSE(
     \param[in]  eta  is the shape parameter of basis functions.
     \param[in]  r0   is the scale radius of basis functions.
     \param[out] coefs  will contain the array of coefficients, will be resized as needed.
+    \note OpenMP-parallelized loop over particles.
 */
 void computePotentialCoefsBSE(
     const particles::ParticleArray<coord::PosCyl> &particles,
@@ -2113,6 +2117,10 @@ PtrPotential BasisSet::create(
         std::nth_element(radii.begin(), radii.begin() + nbody/2, radii.end());
         r0 = radii[nbody/2];
     }
+    if(isSpherical(sym))
+        lmax = 0;
+    if(isZRotSymmetric(sym))
+        mmax = 0;
     std::vector<std::vector<double> > coefs;
     computePotentialCoefsBSE(particles,
         math::SphHarmIndices(lmax, mmax, sym), nmax, eta, r0, /*output*/coefs);

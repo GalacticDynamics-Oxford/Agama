@@ -277,7 +277,7 @@ ConfigFile::~ConfigFile()
     if(modified && !fileName.empty() && sections.size()>0) {  // need to save ini file
         std::ofstream strm(fileName.c_str());
         if(!strm) {  // sad but true, we can't do anything else but ignore the problem
-            msg(VL_WARNING, "ConfigFile", "Cannot write file "+fileName);
+            FILTERMSG(VL_WARNING, "ConfigFile", "Cannot write file "+fileName);
             return;
         }
         for(unsigned int is=0; is<sections.size(); is++) {

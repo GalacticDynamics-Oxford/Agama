@@ -247,7 +247,7 @@ double Sampler::computeResult()
     // maximum allowed value of f(x)*w(x) is the weight of one output sample
     // (integValue/numOutputSamples); if it is larger, we need to do another iteration
     double refineFactor = maxSampleWeight * numOutputSamples / integValue;
-    utils::msg(utils::VL_VERBOSE, "sampleNdim",
+    FILTERMSG(utils::VL_VERBOSE, "sampleNdim",
         "Integral value= " + utils::toString(volume * integValue) +
         " +- " + utils::toString(volume * integError) +
         " using " + utils::toString(numPoints) + " points"
@@ -266,16 +266,16 @@ void Sampler::evalFncLoop(PointEnum firstPointIndex, PointEnum lastPointIndex)
     std::string errorMsg;
     // compute the function values for a block of points at once;
     // operations on different blocks may be OpenMP-parallelized
-    const unsigned int block = 1024;
-    PointEnum nblocks = (lastPointIndex - firstPointIndex - 1) / block + 1;
+    const unsigned int blocksize = 1024;
+    PointEnum nblocks = (lastPointIndex - firstPointIndex - 1) / blocksize + 1;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(PointEnum b=0; b<nblocks; b++) {
         if(badValueOccured)
             continue;
-        PointEnum pointIndex = firstPointIndex + b*block;
-        PointEnum npoints = std::min<PointEnum>(block, lastPointIndex - pointIndex);
+        PointEnum pointIndex = firstPointIndex + b * blocksize;
+        PointEnum npoints = std::min<PointEnum>(blocksize, lastPointIndex - pointIndex);
         try {
             fnc.evalmany(npoints, &pointCoords[pointIndex * Ndim], &fncValues[pointIndex]);
         }
@@ -552,7 +552,7 @@ void Sampler::run()
             addPointsToCell( cellsQueue[queueIndex].first,
                 numPointsExisting + (queueIndex==0 ? 0 : cellsQueue[queueIndex-1].second),
                 numPointsExisting + cellsQueue[queueIndex].second);
-        utils::msg(utils::VL_VERBOSE, "sampleNdim", "Iteration #" + utils::toString(nIter) +
+        FILTERMSG(utils::VL_VERBOSE, "sampleNdim", "Iteration #" + utils::toString(nIter) +
             ": #cells=" + utils::toString(cells.size()) +
             ", #refined cells=" + utils::toString(cellsQueue.size()) +
             ", #new points=" + utils::toString(cellsQueue.back().second) );

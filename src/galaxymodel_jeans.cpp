@@ -117,7 +117,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     if(!isFinite(rmin+rmax))
         throw std::runtime_error("JeansAxi: cannot construct grid (Mtotal=" + utils::toString(Mtotal) +
             ", rmin=" + utils::toString(rmin) + ", rmax=" + utils::toString(rmax) + ")");
-    utils::msg(utils::VL_DEBUG, "JeansAxi", "Created grid in R,z: [" +
+    FILTERMSG(utils::VL_DEBUG, "JeansAxi", "Created grid in R,z: [" +
         utils::toString(rmin) + ":" + utils::toString(rmax) + "]");
     std::vector<double> gridR = math::createNonuniformGrid(NPOINTS_GRID, rmin, rmax, true);
     std::vector<double> gridz = gridR;  // for simplicity

@@ -319,7 +319,7 @@ ParticleArrayAux readSnapshotUNSIO(const std::string& fileName,
 { 
     uns::CunsIn input(fileName.c_str(), "all", "all");
     if(input.isValid() && input.snapshot->nextFrame("")) {
-        utils::msg(utils::VL_DEBUG, "readSnapshotUNSIO",
+        FILTERMSG(utils::VL_DEBUG, "readSnapshotUNSIO",
             "input snapshot file "+fileName+" of type "+input.snapshot->getInterfaceType());
         float *pos=NULL, *vel=NULL, *mass=NULL, *aux=NULL, *eps=NULL;
         int nbodyp, nbodyv, nbodym, nbodya, nbodye;

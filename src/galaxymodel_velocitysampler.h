@@ -39,6 +39,7 @@ class JeansAxi;                      // another forward declaration
     (or their sphericalized versions);
     \return  an array of particles with the same coordinates and masses, but having velocities
     sampled from the DF of the spherical model at the corresponding particle's radius.
+    \note OpenMP-parallelized loop over particles.
 */
 particles::ParticleArrayCar assignVelocityEdd(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
@@ -56,6 +57,7 @@ particles::ParticleArrayCar assignVelocityEdd(
     \return  an array of particles with the same coordinates and masses, but having velocities
     sampled from a Gaussian distribution with the dispersion provided by the Jeans model
     at the corresponding particle's radius.
+    \note OpenMP-parallelized loop over particles.
 */
 particles::ParticleArrayCar assignVelocityJeansSph(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
@@ -77,6 +79,7 @@ particles::ParticleArrayCar assignVelocityJeansSph(
     sampled from a triaxial Gaussian distribution at each particle's radius,
     with mean v_phi determined by kappa, and the velocity dispersion tensor aligned with cylindrical
     coordinates is provided by the Jeans model.
+    \note OpenMP-parallelized loop over particles.
 */
 particles::ParticleArrayCar assignVelocityJeansAxi(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
@@ -106,6 +109,7 @@ particles::ParticleArrayCar assignVelocityJeansAxi(
     (0 means no net rotation, 1 is close to maximum - gives sigma_R = sigma_phi).
     \return  the array of particle positions, velocities and masses.
     \throw  std::runtime_error or any other exception in case of problems.
+    \note OpenMP-parallelized loop over particles in all three methods.
 */
 particles::ParticleArrayCar assignVelocity(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,

@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+October 2023:
+Redesigned the parallelization strategy in the Python interface, making it more robust
+when involving (nested) calls to user-defined Python callback functions
+
 March 2023:
 Added an option for representing the result of orbit integration as an interpolator
 (class agama.Orbit in Python).

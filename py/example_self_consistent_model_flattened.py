@@ -48,7 +48,7 @@ ax[0].plot(r, dens.density(xyz), label='Init density', color='lightgray', lw=3, 
 # perform several iterations of self-consistent modelling procedure
 for i in range(5):
     scm.iterate()
-    print('Iteration %i, Phi(0)=%g, Mass=%g' % \
+    print('Iteration %i, Phi(0)=%g, Mass=%g' %
         (i, scm.potential.potential(0,0,0), scm.potential.totalMass()))
     # for a fair comparison, show the spherically-averaged density profile
     sphDensity = agama.Density(type='DensitySphericalHarmonic', density=comp.density, lmax=0)
@@ -74,8 +74,7 @@ print('Determining shape')
 r = numpy.logspace(-2, 1, 16)
 xyz = numpy.column_stack((r, r*0, r*0))
 from measureshape import getaxes
-axes = numpy.array([getaxes(xv[:,0:3], m, rmax)[0] for rmax in r])
-ax[1].plot(r, axes[:,2] / (axes[:,0]*axes[:,1])**0.5)  # minor over major axis ratio
+ax[1].plot(r, [getaxes(xv[:,0:3], m, rmax)[0] for rmax in r])
 ax[1].set_xlabel('r')
 ax[1].set_ylabel(r'$z/R$')
 ax[1].set_xscale('log')
@@ -83,14 +82,13 @@ ax[1].set_ylim(0, 1)
 ax[1].set_xlim(min(r), max(r))
 
 print('Computing kinematic profiles')
-gm = agama.GalaxyModel(scm.potential, df, scm.af)
 rho, meanv, vel2 = gm.moments(xyz, dens=True, vel=True, vel2=True)
 vcirc = (-r * scm.potential.force(xyz)[:,0])**0.5
-ax[2].plot(r, vcirc, label='$v_{\sf circ}$')
-ax[2].plot(r, meanv[:,1], label='$\overline{v_\phi}$')
-ax[2].plot(r,  vel2[:,0]**0.5, label='$\sigma_R$')
-ax[2].plot(r, (vel2[:,1]-meanv[:,1]**2)**0.5, label='$\sigma_\phi$')
-ax[2].plot(r,  vel2[:,2]**0.5, label='$\sigma_z$')
+ax[2].plot(r, vcirc, label=r'$v_{\sf circ}$')
+ax[2].plot(r, meanv[:,1], label=r'$\overline{v_\phi}$')
+ax[2].plot(r,  vel2[:,0]**0.5, label=r'$\sigma_R$')
+ax[2].plot(r, (vel2[:,1]-meanv[:,1]**2)**0.5, label=r'$\sigma_\phi$')
+ax[2].plot(r,  vel2[:,2]**0.5, label=r'$\sigma_z$')
 ax[2].set_xlabel('r')
 ax[2].set_ylabel(r'velocity')
 ax[2].set_xscale('log')

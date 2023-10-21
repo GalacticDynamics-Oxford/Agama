@@ -114,7 +114,7 @@ RagaTaskLosscone::RagaTaskLosscone(
     bh(_bh),
     totalNumCaptured(0)
 {
-    utils::msg(utils::VL_DEBUG, "RagaTaskLosscone",
+    FILTERMSG(utils::VL_DEBUG, "RagaTaskLosscone",
         std::string(bh.sma==0 ? "One black hole" : "Two black holes") +
         ", c=" + utils::toString(params.speedOfLight) +
         ", accreted mass fraction=" + utils::toString(params.captureMassFraction));

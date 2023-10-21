@@ -142,7 +142,7 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
     double totalMass = -dphidr.back() * pow_2(radii.back());  // total mass in dimensionless units
     double phiadd = totalMass / radii.back();
 
-    utils::msg(utils::VL_DEBUG, "createKingModel",
+    FILTERMSG(utils::VL_DEBUG, "createKingModel",
            "W0=" + utils::toString(W0) + ", g=" + utils::toString(trunc) +
            " => concentration c=log10(rtrunc/rscale)=" + utils::toString(log10(radii.back())) +
            ", sigma=" + utils::toString(sqrt(phi[0] * mass / scaleRadius / totalMass / W0)) );

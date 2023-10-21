@@ -171,7 +171,7 @@ void findCrossingPointR(
     traj.clear();
     while(!finished) {
         if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE) { // signal of error
-            utils::msg(utils::VL_WARNING, "estimateFocalDistanceShellOrbit",
+            FILTERMSG(utils::VL_WARNING, "estimateFocalDistanceShellOrbit",
                 "Failed to compute orbit for E="+utils::toString(E,16)+
                 ", Lz="+utils::toString(Lz,16)+", R="+utils::toString(R0,16));
             timeCross  = 0;
@@ -266,7 +266,7 @@ double estimateFocalDistanceShellOrbit(
         // something went wrong; use a backup solution
         if(!isFinite(Rshell))
             Rshell = 0.5 * (Rmin+Rmax);
-        utils::msg(utils::VL_WARNING, "estimateFocalDistanceShellOrbit",
+        FILTERMSG(utils::VL_WARNING, "estimateFocalDistanceShellOrbit",
             "Could not find a thin orbit for E="+utils::toString(E,16)+", Lz="+utils::toString(Lz,16)+
             " - assuming Rthin="+utils::toString(Rshell,16));
         // if we don't have a proper orbit, make a short vertical step out of the z=0 plane

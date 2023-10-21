@@ -207,6 +207,19 @@ vz = numpy.linspace(0, 0.5*(-2*pots.potential(1,0,0))**0.5, 4)  # grid in v_z fr
 xyv = numpy.column_stack((vz*0+1, vz*0, vz*0, vz*0, vz, vz+numpy.inf, vz+numpy.inf, vz*0))  # input points for projectedDF()
 testCond('numpy.allclose(gms1.vdf([1,0])[2](vz) * gms1.moments([1,0])[0], gms1.projectedDF(xyv), 1e-2)')
 
+# test that zero-length inputs are acceptable and produce zero-length outputs of appropriate shape
+arr0x3 = numpy.zeros(shape=(0,3))
+arr0x8 = numpy.zeros(shape=(0,8))
+arr0x1 = []
+testCond('isArray(pots.density(arr0x3), (0,))')
+testCond('isArray(pots.enclosedMass(arr0x1), (0,))')
+testCond('isArray(gms2.moments(arr0x3, separate=False)[0], (0,)) and isArray(gms2.moments(arr0x3, separate=False)[1], (0,6))')
+testCond('isArray(gms2.moments(arr0x3, separate=True)[0], (0,2)) and isArray(gms2.moments(arr0x3, separate=True)[1], (0,2,6))')
+testCond('isArray(gms2.projectedDF(arr0x8, separate=False), (0,))')
+testCond('isArray(gms2.projectedDF(arr0x8, separate=True), (0,2))')
+testCond('isArray(gms2.vdf(arr0x3, separate=False)[0], (0,))')
+testCond('isArray(gms2.vdf(arr0x3, separate=True)[0], (0,2))')
+
 if allok:
     print("\033[1;32mALL TESTS PASSED\033[0m")
 else:

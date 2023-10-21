@@ -419,7 +419,8 @@ private:
     virtual double densitySph(const coord::PosSph &pos, double time) const {
         return densityCar(toPosCar(pos), time); }
 
-    /// vectorized computation of density in an OpenMP-parallelized loop
+    /// functions for computing the density for an array of points in three coordinate systems.
+    /// \note OpenMP-parallelized loop over points.
     virtual void evalmanyDensityCar(const size_t npoints, const coord::PosCar pos[],
         /*output*/ double values[], /*input*/ double t=0) const;
     virtual void evalmanyDensityCyl(const size_t npoints, const coord::PosCyl pos[],

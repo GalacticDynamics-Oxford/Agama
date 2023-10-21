@@ -240,8 +240,7 @@ public:
             model.selFunc.evalmany(npoints, posvel, /*output*/ sf);
         }
         catch(std::exception& e) {
-            if(utils::verbosityLevel >= utils::VL_WARNING)
-                utils::msg(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
+            FILTERMSG(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
             std::fill(sf, sf+npoints, 0);
         }
 
@@ -276,8 +275,7 @@ public:
             model.distrFunc.evalmany(nselected, act, /*separate*/ dflen!=1, /*output*/ df);
         }
         catch(std::exception& e) {
-            if(utils::verbosityLevel >= utils::VL_WARNING)
-                utils::msg(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
+            FILTERMSG(utils::VL_WARNING, "DFIntegrandNdim", std::string(e.what()));
             std::fill(sf, df + npoints * dflen, 0);  // quietly replace output with zeroes
         }
 

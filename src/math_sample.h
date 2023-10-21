@@ -30,7 +30,9 @@ namespace math{
     \param[out] integral (optional) if not NULL, will store the Monte Carlo estimate of the integral
                 of F over the given region (this could be compared with the exact value, if known,
                 to estimate the bias/error in sampling scheme);
-    \param[out] interror (optional) if not NULL, will store the error estimate of the integral;
+    \param[out] interror (optional) if not NULL, will store the error estimate of the integral.
+    \note OpenMP-parallelized loop over blocks of points, the provided function is called from
+    multiple threads with one block of 1024 points in each call.
  */
 void sampleNdim(const IFunctionNdim& F, const double xlower[], const double xupper[],
     const size_t numSamples,

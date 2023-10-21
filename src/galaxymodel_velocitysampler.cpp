@@ -149,20 +149,20 @@ particles::ParticleArrayCar assignVelocity(
         potential::Sphericalized<potential::BaseDensity>   sphDens(dens);
         potential::Sphericalized<potential::BasePotential> sphPot (pot);
         if(method == SD_EDDINGTON) {
-            utils::msg(utils::VL_DEBUG, "assignVelocity", "Using Eddington DF for " +
+            FILTERMSG(utils::VL_DEBUG, "assignVelocity", "Using Eddington DF for " +
                 sphDens.name() + " in " + sphPot.name());
             const potential::PhaseVolume phasevol(sphPot);
             const math::LogLogSpline df = df::createSphericalIsotropicDF(sphDens, sphPot);
             const SphericalIsotropicModelLocal model(phasevol, df, df);
             return assignVelocityEdd(pointCoords, pot, model);
         } else if(method == SD_JEANSSPH) {
-            utils::msg(utils::VL_DEBUG, "assignVelocity", "Using spherical Jeans for " +
+            FILTERMSG(utils::VL_DEBUG, "assignVelocity", "Using spherical Jeans for " +
                 sphDens.name() + " in " + sphPot.name());
             math::LogLogSpline model = createJeansSphModel(sphDens, sphPot, beta);
             return assignVelocityJeansSph(pointCoords, pot, model, beta);
         }
     } else if(method == SD_JEANSAXI) {
-        utils::msg(utils::VL_DEBUG, "assignVelocity", "Using axisymmetric Jeans for " +
+        FILTERMSG(utils::VL_DEBUG, "assignVelocity", "Using axisymmetric Jeans for " +
             potential::Axisymmetrized<potential::BaseDensity>  (dens).name() + " in " +
             potential::Axisymmetrized<potential::BasePotential>(pot) .name() );
         JeansAxi model(dens, pot, beta, kappa);

@@ -548,7 +548,7 @@ def bsplineIntegrals(degree, grid, power=0):
 
 
 def bsplineMatrix(degree1, grid1, degree2=None, grid2=None):
-    '''
+    r'''
     Compute the matrix of inner products of B-spline functions:
     M_{ij} = \int_{xmin}^{xmax} B1_i(x) B2_j(x) dx,
     where B1(x) and B2(x) are two (possibly identical) basis sets of B-splines of degree(s),

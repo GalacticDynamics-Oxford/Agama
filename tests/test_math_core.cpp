@@ -10,10 +10,15 @@
 #include <cmath>
 int numEval=0;
 
-class test1: public math::IFunctionNoDeriv{
+class test1: public math::IFunctionNoDeriv, public math::IFunctionNdim{
     virtual double value(double x) const{
         return 1/sqrt(1-x*x);
     }
+    virtual void eval(const double x[], double val[]) const{
+        val[0] = value(x[0]);
+    }
+    virtual unsigned int numVars() const { return 1; }
+    virtual unsigned int numValues() const { return 1; }
 };
 
 class test2: public math::IFunctionNoDeriv{
@@ -34,7 +39,7 @@ public:
     virtual unsigned int numDerivs() const { return nd; }
 };
 
-class test4: public math::IFunction{
+class test4: public math::IFunction, public math::IFunctionNdim{
 public:
     int nd;
     test4(int nder) : nd(nder) {};
@@ -43,14 +48,10 @@ public:
         *val = x-1+1e-3/sqrt(x);
         if(der) *der = 1-0.5e-3/pow(x,1.5);
     }
-    virtual unsigned int numDerivs() const { return nd; }
-};
-
-class test4Ndim: public math::IFunctionNdim{
-public:
     virtual void eval(const double x[], double val[]) const{
-        val[0] = test4(0)(x[0]);
+        evalDeriv(x[0], val);
     }
+    virtual unsigned int numDerivs() const { return nd; }
     virtual unsigned int numVars() const { return 1; }
     virtual unsigned int numValues() const { return 1; }
 };
@@ -351,10 +352,14 @@ int main()
 
     // integration routines
     const double toler = 1e-6;
-    double exact = (M_PI*2/3), error=0, result;
+    double exact = (M_PI*2/3), error=0, result, result1;
     test1 t1;
+    result = math::integrateGL(t1, -1, 1./2, math::MAX_GL_ORDER);
+    math::integrateGL(t1, -1., 1./2, math::MAX_GL_ORDER, &result1);  // same but using IFunctionNdim interface
+    std::cout << "Int1: fixed GL="<<result<<" (delta="<<(result-exact)<<", neval="<<math::MAX_GL_ORDER;
+    ok &= (fabs(1-result/exact)<0.03 && fabs(result-result1)<1e-15) || err();
     result = math::integrate(t1, -1, 1./2, toler, &error, &numEval);
-    std::cout << "Int1: naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
+    std::cout << "), naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
     ok &= (fabs(1-result/exact)<2e-3 && fabs(result-exact)<error) || err();
     result = math::integrateAdaptive(t1, -1, 1./2, toler, &error, &numEval);
     std::cout << "), adaptive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
@@ -449,7 +454,7 @@ int main()
     double xinit[] = {0.5};
     double xstep[] = {0.1};
     double xresult[1];
-    int numIter = findMinNdim(test4Ndim(), xinit, xstep, toler, 100, xresult);
+    int numIter = findMinNdim(test4(0), xinit, xstep, toler, 100, xresult);
     std::cout << "N-dimensional minimization (N=1) of the same function: minimum at x="<<xresult[0]<<
         " is "<<test4(0)(xresult[0])<<" (delta="<<(xresult[0]-exact)<<
         "; neval="<<numEval<<", nIter="<<numIter<<")\n";

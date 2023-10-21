@@ -25,7 +25,8 @@ def writeRotationCurve(filename, potentials, names):
     xyz   = numpy.column_stack((radii, radii*0, radii*0))
     vcomp2= numpy.column_stack([-potential.force(xyz)[:,0] * radii for potential in potentials])
     vtot2 = numpy.sum(vcomp2, axis=1)
-    numpy.savetxt(filename, numpy.column_stack((radii, vtot2**0.5, vcomp2**0.5)), fmt="%.6g", header="radius\tVcTotal\t"+"\t".join(names))
+    numpy.savetxt(filename, numpy.column_stack((radii, vtot2**0.5, vcomp2**0.5)),
+        fmt="%.6g", header="radius\tVcTotal\t"+"\t".join(names))
 
 # print some diagnostic information after each iteration
 def printoutInfo(model, iteration):
@@ -35,11 +36,11 @@ def printoutInfo(model, iteration):
     pt0 = (2.0, 0, 0)
     pt1 = (2.0, 0, 0.25)
     pt2 = (0.0, 0, 2.0)
-    print("Disk  total mass=%g, rho(R=2,z=0)=%g, rho(R=2,z=0.25)=%g" % \
+    print("Disk  total mass=%g, rho(R=2,z=0)=%g, rho(R=2,z=0.25)=%g" %
         (densDisk.totalMass(), densDisk.density(pt0), densDisk.density(pt1)))
-    print("Bulge total mass=%g, rho(R=0.5,z=0)=%g" % \
+    print("Bulge total mass=%g, rho(R=0.5,z=0)=%g" %
         (densBulge.totalMass(), densBulge.density(0.4, 0, 0)))
-    print("Halo  total mass=%g, rho(R=2,z=0)=%g, rho(R=0,z=2)=%g" % \
+    print("Halo  total mass=%g, rho(R=2,z=0)=%g, rho(R=0,z=2)=%g" %
         (densHalo.totalMass(), densHalo.density(pt0), densHalo.density(pt2)))
     # report only the potential of stars+halo, excluding the potential of the central BH (0th component)
     pot0 = model.potential.potential(0,0,0) - model.potential[0].potential(0,0,0)
@@ -99,7 +100,7 @@ if __name__ == "__main__":
     dfBulge = agama.DistributionFunction(type='QuasiSpherical', potential=model.potential, density=densityBulge)
     dfHalo  = agama.DistributionFunction(type='QuasiSpherical', potential=model.potential, density=densityHalo)
 
-    print("\033[1;33m**** STARTING ITERATIVE MODELLING ****\033[0m\nMasses (computed from DF): " \
+    print("\033[1;33m**** STARTING ITERATIVE MODELLING ****\033[0m\nMasses (computed from DF): "
         "Mdisk=%g, Mbulge=%g, Mhalo=%g" % (dfDisk.totalMass(), dfBulge.totalMass(), dfHalo.totalMass()))
 
     # replace the initially static SCM components with the DF-based ones
@@ -129,14 +130,14 @@ if __name__ == "__main__":
     # now create genuinely self-consistent models of both components,
     # by drawing positions and velocities from the DF in the given (self-consistent) potential
     print("Sampling disk DF")
-    agama.writeSnapshot("model_disk_final", \
+    agama.writeSnapshot("model_disk_final",
         agama.GalaxyModel(potential=model.potential, df=dfDisk,  af=model.af).sample(1600000), format)
     print("Sampling bulge DF")
-    agama.writeSnapshot("model_bulge_final", \
+    agama.writeSnapshot("model_bulge_final",
         agama.GalaxyModel(potential=model.potential, df=dfBulge, af=model.af).sample(400000), format)
     print("Sampling halo DF")
     # note: use a 10x larger particle mass for halo than for bulge/disk
-    agama.writeSnapshot("model_halo_final", \
+    agama.writeSnapshot("model_halo_final",
         agama.GalaxyModel(potential=model.potential, df=dfHalo,  af=model.af).sample(3000000), format)
 
     # the remaining part computes and plots various diagnostics
@@ -204,9 +205,9 @@ if __name__ == "__main__":
             numpy.column_stack((gridv, splvR[i](gridv), splvphi[i](gridv), splvz[i](gridv))),
             fmt="%.6g", delimiter="\t", header="V\tf(V_R)\tf(V_phi)\tf(V_z) [1/(km/s)]")
         if i<len(ax)-2:
-            ax[i+2].plot(gridv, splvR  [i](gridv), 'r-', label='$f(v_R)$')
-            ax[i+2].plot(gridv, splvphi[i](gridv), 'g-', label='$f(v_\phi)$')
-            ax[i+2].plot(gridv, splvz  [i](gridv), 'b-', label='$f(v_z)$')
+            ax[i+2].plot(gridv, splvR  [i](gridv), 'r-', label=r'$f(v_R)$')
+            ax[i+2].plot(gridv, splvphi[i](gridv), 'g-', label=r'$f(v_\phi)$')
+            ax[i+2].plot(gridv, splvz  [i](gridv), 'b-', label=r'$f(v_z)$')
             ax[i+2].set_xlabel('v')
             ax[i+2].set_yscale('log')
             ax[i+2].legend(loc='upper left', frameon=False)

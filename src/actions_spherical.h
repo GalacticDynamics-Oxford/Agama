@@ -22,6 +22,7 @@ Actions actionsSpherical(
     const potential::BasePotential& potential,
     const coord::PosVelCyl& point);
 
+
 /** Compute actions, angles and frequencies in a spherical potential.
     \param[in]  potential is the arbitrary spherical potential;
     \param[in]  point     is the position/velocity point;
@@ -59,19 +60,16 @@ coord::PosVelCyl mapSpherical(
 
 /** Class for performing transformations between action/angle and coordinate/momentum for
     an arbitrary spherical potential, using 2d interpolation tables */
-class ActionFinderSpherical: public BaseActionFinder, public BaseToyMap<coord::SphMod> {
+class ActionFinderSpherical: public BaseActionFinder, public BaseActionMapper {
 public:
-    /// Initialize the internal interpolation tables; the potential itself is not used later on
+    /// Initialize the internal interpolation tables; the potential itself is not used later on.
+    /// \note OpenMP-parallelized loop over the radial grid in construction Interpolator2d
+    /// from the input potential, and two other parallelized loops using this interpolator.
     explicit ActionFinderSpherical(const potential::BasePotential& potential);
 
     virtual Actions actions(const coord::PosVelCyl& point) const;
     virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const;
-    virtual coord::PosVelSphMod map(
-        const ActionAngles& actAng,
-        Frequencies* freq=NULL,
-        DerivAct<coord::SphMod>* derivAct=NULL,
-        DerivAng<coord::SphMod>* derivAng=NULL,
-        coord::PosVelSphMod* derivParam=NULL) const;
+    virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const;
 
     /** return the interpolated value of radial action as a function of energy and angular momentum;
         also return the frequencies in Omegar and Omegaz if these arguments are not NULL */
@@ -86,6 +84,7 @@ private:
     const math::QuinticSpline2d intE;     ///< interpolator for E(Jr,L)
 };
 
-typedef ActionFinderSpherical ToyMapSpherical;
+// this class performs the conversion in both directions
+typedef ActionFinderSpherical ActionMapperSpherical;
 
 }  // namespace actions

@@ -50,7 +50,7 @@ def createModel(iniFileName):
     for name,value in sec_pot.items():
         if 'density' in value:
             listdens = list()
-            for den_str in filter(None, re.split('[,\s]', value['density'].lower())):
+            for den_str in filter(None, re.split(r'[,\s]', value['density'].lower())):
                 if den_str in sec_den:
                     listdens.append(den[den_str])
             if len(listdens) == 1:
@@ -87,7 +87,7 @@ def createModel(iniFileName):
         if not 'density' in value:
             raise ValueError("Component "+name+" does not have an associated density")
         listdens = list()
-        for den_str in filter(None, re.split('[,\s]', value['density'].lower())):
+        for den_str in filter(None, re.split(r'[,\s]', value['density'].lower())):
             if den_str in sec_den:
                 listdens.append(den[den_str])
             elif den_str in sec_pot:
@@ -102,8 +102,8 @@ def createModel(iniFileName):
         print("Creating density target for "+name)
         targets.append(agama.Target(**value))
         if 'kinemgrid' in value:
-            options = { "type": 'KinemShell', \
-                "gridr":  value['kinemgrid'], \
+            options = { "type": 'KinemShell',
+                "gridr":  value['kinemgrid'],
                 "degree": int(value['kinemdegree']) }
             print("Creating kinematic target for "+name)
             targets.append(agama.Target(**options))
@@ -117,8 +117,8 @@ def createModel(iniFileName):
         if 'inttime' in value:
             inttime = float(value['inttime']) * model.potential.Tcirc(ic)
         else: raise ValueError("No integration time defined in "+name)
-        comp = type('Component', (), \
-            {"density": density, "ic": ic, "weightprior": weightprior, \
+        comp = type('Component', (),
+            {"density": density, "ic": ic, "weightprior": weightprior,
              "inttime": inttime, "targets": targets, "Omega": Omega} )
         if 'beta'     in value:  comp.beta     = float(value['beta'])
         if 'nbody'    in value:  comp.nbody    = int(value['nbody'])
@@ -172,10 +172,10 @@ def runComponent(comp, pot):
         norm  = 1e-4 * abs(rhs[t]) + 1e-8
         for c, d in enumerate(delta):
             if abs(d) > norm[c]:
-                print("Constraint %i:%i not satisfied: %s, val=%.4g, dif=%.4g" % \
+                print("Constraint %i:%i not satisfied: %s, val=%.4g, dif=%.4g" %
                 (t, c, comp.targets[t][c], rhs[t][c], d))
-    print("Entropy: %f, # of useful orbits: %i / %i" %\
-        ( -sum(weights * numpy.log(weights+1e-100)) / mass + numpy.log(avgweight), \
+    print("Entropy: %f, # of useful orbits: %i / %i" %
+        ( -sum(weights * numpy.log(weights+1e-100)) / mass + numpy.log(avgweight),
         len(numpy.where(weights >= avgweight)[0]), len(comp.ic)))
 
     # create an N-body model if needed
@@ -211,6 +211,6 @@ if __name__ == '__main__':
         try: numpy.savez_compressed("model_"+name+".data", **args)
         except Exception as e: print(e)
         # write out the initial conditions and weights as a text file
-        numpy.savetxt("model_"+name+".orb", \
-            numpy.column_stack((comp.ic, comp.weights, comp.weightprior, comp.inttime)), \
+        numpy.savetxt("model_"+name+".orb",
+            numpy.column_stack((comp.ic, comp.weights, comp.weightprior, comp.inttime)),
             header='x y z vx vy vz weight prior inttime', fmt="%8g")

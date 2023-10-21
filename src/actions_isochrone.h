@@ -42,20 +42,27 @@ coord::PosVelCyl mapIsochrone(
     const double isochroneMass, const double isochroneRadius,
     const ActionAngles& actAng, Frequencies* freq=NULL);
 
-/** Class for performing action/angle to coordinate/momentum transformation using 
-    the Isochrone mapping expressed in modified spherical coordinates */
-class ToyMapIsochrone: public BaseToyMap<coord::SphMod>{
+
+/** Class for performing transformations between action/angle and coordinate/momentum for
+    an isochrone potential (a trivial wrapper for the corresponding standalone functions) */
+class ActionFinderIsochrone: public BaseActionFinder, public BaseActionMapper {
 public:
-    const double M;  ///< total mass of isochrone potential
-    const double b;  ///< scale radius of isochrone potential (may be zero in the Kepler case)
-    ToyMapIsochrone(double isochroneMass, double isochroneRadius):
-        M(isochroneMass), b(isochroneRadius) {};
-    virtual coord::PosVelSphMod map(
-        const ActionAngles& actAng,
-        Frequencies* freq=NULL,
-        DerivAct<coord::SphMod>* derivAct=NULL,
-        DerivAng<coord::SphMod>* derivAng=NULL,
-        coord::PosVelSphMod* derivParam=NULL) const;
+    ActionFinderIsochrone(double _mass, double _radius): mass(_mass), radius(_radius) {}
+
+    virtual Actions actions(const coord::PosVelCyl& point) const
+    { return actionsIsochrone(mass, radius, point); }
+
+    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const
+    { return actionAnglesIsochrone(mass, radius, point, freq); }
+
+    virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const
+    { return mapIsochrone (mass, radius, actAng, freq); }
+
+private:
+    const double mass, radius;  ///< parameters of the isochrone potential
 };
+
+// this class performs the conversion in both directions
+typedef ActionFinderIsochrone ActionMapperIsochrone;
 
 }  // namespace actions

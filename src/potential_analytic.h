@@ -40,11 +40,13 @@ public:
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "Isochrone"; }
     virtual double totalMass() const { return mass; }
+    double getRadius() const { return scaleRadius; }
 private:
     const double mass;         ///< total mass  (M)
     const double scaleRadius;  ///< scale radius of the Isochrone model  (b)
     virtual void evalDeriv(double r,
         double* potential, double* deriv, double* deriv2) const;
+    virtual double densitySph(const coord::PosSph &pos, double time) const;
 };
 
 /** Spherical Navarro-Frenk-White potential:
@@ -83,6 +85,7 @@ private:
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const;
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const;
 };
 
 /** Triaxial logarithmic potential:

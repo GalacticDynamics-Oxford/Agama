@@ -90,7 +90,9 @@ public:
 
     void initPotentialFromParticles();
 
-    /** perform one complete episode */
+    /** perform one complete episode.
+        \note OpenMP-parallelized loop over particle orbits.
+    */
     void doEpisode(double episodeLength);
 };
 

@@ -454,7 +454,8 @@ static PyObject* kkt_getsolve(PyObject* /*self*/, PyObject* args)
     }
 
     // in the following fragment of code we don't call any Python C API functions,
-    // so may temporarily release GIL and let Python do its own business for a while
+    // so may temporarily release GIL and let Python do its own business for a while.
+    // \note OpenMP-parallelized loop over internal arrays.
     Py_BEGIN_ALLOW_THREADS
 
     // multiply the matrix of coefficients A by a diagonal matrix S^{-1/2}, storing the result in Ascaled

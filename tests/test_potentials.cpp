@@ -269,12 +269,6 @@ const char* test_galpot_params[] = {
 "1e10 0.5 2.5 2.5 1 0\n"
 };
 
-/*const int numtestpoints=3;
-const double init_cond[numtestpoints][6] = {
-  {1, 0.5, 0.2, 0.1, 0.2, 0.3},
-  {2, 0, 0, 0, 0, 0},
-  {0, 0, 1, 0, 0, 0} };
-*/
 /// define test suite in terms of points for various coord systems
 const int numtestpoints=5;
 const double posvel_car[numtestpoints][6] = {
@@ -309,6 +303,7 @@ int main() {
     addPot(pots, "type=Logarithmic, mass=1, scaleRadius=0.01, p=0.8, q=0.5");
     addPot(pots, "type=Ferrers, mass=1, scaleRadius=0.9, p=0.8, q=0.5");
     addPot(pots, "type=Dehnen, mass=2, scaleRadius=1, gamma=1.5");
+    addPot(pots, "type=PerfectEllipsoid, q=0.6");
     addPot(pots, "type=Multipole, density=Spheroid, densityNorm=1e5, scaleRadius=1.234e-5, "
         "gamma=-2.0, beta=2.99, alpha=2.5, gridSizeR=64");
     addPot(pots, "density=Disk, surfaceDensity=1, scaleRadius=2, scaleHeight=-0.2, "

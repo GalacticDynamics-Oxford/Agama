@@ -130,6 +130,9 @@ public:
                     number of points for the integration in phi to improve the accuracy,
                     and then truncate the result back to mmax;
         \param[in]  useDerivs  specifies whether to compute potential derivatives from density.
+        \note OpenMP-parallelized loop over nodes of a 2d grid in R,z when integrating the density
+        (the latter is the input density when it is axisymmetric, otherwise an internally created
+        instance of DensityAzimuthalHarmonic).
     */
     static PtrPotential create(const BaseDensity& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
@@ -161,6 +164,7 @@ public:
         \param[in]  useDerivs  specifies whether to compute potential derivatives
         and construct a quintic spline, or skip it and construct a cubic spline
         (due to noisy nature of N-body models, higher order does not necessarily imply more accuracy).
+        \note OpenMP-parallelized loop over nodes of a 2d grid in R,z.
     */
     static PtrPotential create(
         const particles::ParticleArray<coord::PosCyl>& particles,

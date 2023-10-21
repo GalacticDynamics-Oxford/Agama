@@ -9,8 +9,10 @@
     that Python is aware of (e.g., through the PYTHONPATH= environment variable).
 
     Currently this module provides access to potential classes, orbit integration
-    routine, action finders, distribution functions, self-consistent models,
-    N-dimensional integration and sampling routines, and smoothing splines.
+    routine, action finders and mappers, distribution functions, self-consistent
+    and Schwarzachild orbit-superposition models, N-dimensional integration and
+    sampling routines, spline-related tools, linear and quadratic optimization,
+    and N-body snapshot handling.
     Unit conversion is also part of the calling convention: the quantities
     received from Python are assumed to be in some physical units and converted
     into internal units inside this module, and the output from the Agama library
@@ -38,6 +40,7 @@
 #include "omp.h"
 #endif
 // include almost everything from Agama!
+#include "actions_isochrone.h"
 #include "actions_spherical.h"
 #include "actions_staeckel.h"
 #include "actions_torus.h"
@@ -53,6 +56,7 @@
 #include "math_sample.h"
 #include "math_spline.h"
 #include "particles_io.h"
+#include "potential_analytic.h"
 #include "potential_composite.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
@@ -150,64 +154,64 @@ PyObject* setNumThreads(PyObject* /*self*/, PyObject* arg)
 #endif
 }
 
-/** Lock-type class that temporarily disables warnings that numpy produces on floating-point
-    overflows or other invalid values.
-    The reason for doing this is that such warnings involve subtle interference with GIL
-    when executed in a multi-threading context, leading to deadlocks if a user-defined Python
-    function is accessed from multiple threads (even after being protected by an OpenMP critical
-    section). An instance of this class is created (and hence warnings are suppressed if this
-    is the first such instance, or are kept suppressed if there is more than one instance)
-    whenever a user-defined callback function is instantiated, and the previous warning settings
-    are restored once all such functions are deallocated.
+#ifdef _OPENMP
+/** Lock-type class for temporarily releasing Python's GIL.
+    An instance of this class releases GIL in the constructor and reacquires it in the destructor,
+    following the RAII idiom:
+    \code
+    {   // open a block
+        PyReleaseGIL unlock;
+        ..do something..
+    }   // destructor is called on exiting the block
+    \endcode
+
+    This procedure is recommended but _optional_ when the "do something" code performs some
+    lengthy computation or IO operation without calling any Python C API function.
+    In the case that Python C API is needed inside such a block, the GIL may be reacquired
+    with the help of the PyAcquireGIL class. Note that the latter procedure can be performed
+    even without releasing GIL (in which case it is a no-op).
+    It becomes _necessary_ when the code contains OpenMP-parallelized fragments, which themselves
+    contain Python C API calls. In this case these calls still need to be protected by PyAcquireGIL,
+    but a prior GIL release is required, since the GIL may need to be acquired in a different thread.
+
+    We need to use this class whenever we call pure C++ routines that may involve OpenMP-parallelized
+    loops and that receive pointers to Density/Potential/DistributionFunction/SelectionFunction
+    objects that may possibly contain Python callback functions.
+    The BatchFunction::run() method covers most of these cases, but we also need to take care of
+    a few more situations when a call to some constructor (e.g. ActionFinder) or a method may
+    receive a pointer to a Python callback function.
+    Finding all such cases is a rather delicate task!
 */
-class NumpyWarningsDisabler {
-    PyObject *seterr, *prevSettings;  ///< pointer to the function and its previous settings
-    static int numInstances;          ///< count the number of times this class is instantiated
+class PyReleaseGIL {
+    PyThreadState* const state;
 public:
-    NumpyWarningsDisabler() : seterr(NULL), prevSettings(NULL)
-    {
-        // disable warnings on the first call only (and keep disabled for any subsequent calls
-        // while at least one disabler object exists in nature)
-        if(numInstances==0) {
-            PyObject* numpy = PyImport_AddModule("numpy");
-            if(!numpy) return;
-            seterr = PyObject_GetAttrString(numpy, "seterr");
-            if(!seterr) return;
-            // store the dictionary corresponding to current settings of numpy warnings subsystem
-            prevSettings = PyObject_CallFunction(seterr, const_cast<char*>("s"), "ignore");
-            if(!prevSettings) { printf("Failed to suppress numpy warnings\n"); }
-        }
-        numInstances++;
-        utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Ignoring numpy warnings " +
-            utils::toString(numInstances) + " times");
-    }
-    ~NumpyWarningsDisabler()
-    {
-        utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Finished ignoring numpy warnings " +
-            utils::toString(numInstances) + " times");
-        numInstances--;
-        // if this was the last instance of this class, finally restore the warnings handler
-        if(numInstances==0) {
-            if(!seterr || !prevSettings) return;
-            // the preceding code might have raised an exception,
-            // in which case we need to temporarily store it elsewhere before calling numpy.seterr,
-            // and then restore the exception to be propagated further
-            PyObject *type, *value, *traceback;
-            PyErr_Fetch(&type, &value, &traceback);
-            // restore the previous settings of numpy warnings subsystem
-            PyObject* args = PyTuple_New(0);
-            PyObject* result = PyObject_Call(seterr, args, prevSettings);
-            Py_DECREF(args);
-            if(!result) { printf("Failed to restore numpy warnings\n"); }
-            else { utils::msg(utils::VL_DEBUG, "WarningsDisabler", "Restored numpy warnings"); }
-            Py_XDECREF(result);
-            Py_DECREF(seterr);
-            // restore the exception that might have been raised by the preceding code
-            PyErr_Restore(type, value, traceback);
-        }
-    }
+    PyReleaseGIL() : state(PyEval_SaveThread()) {}
+    ~PyReleaseGIL() { PyEval_RestoreThread(state); }
 };
-int NumpyWarningsDisabler::numInstances = 0;
+
+/** A counterpart to the PyReleaseGIL class, whose purpose is the opposite
+    (see the description above).
+    The usage pattern follows the same RAII idiom, creating an instance of PyAcquireGIL class
+    in a block that contains calls to Python C API.
+    Note that it is allowed to create multiple instances of this class in nested code blocks,
+    regardless of whether the enclosing scope is run under PyReleaseGIL or not -
+    if the current thread already holds GIL, it is a no-op.
+*/
+class PyAcquireGIL {
+    const PyGILState_STATE state;
+public:
+    PyAcquireGIL() : state(PyGILState_Ensure()) {}
+    ~PyAcquireGIL() { PyGILState_Release(state); }
+};
+#else
+// no-ops
+struct PyReleaseGIL {
+    PyReleaseGIL() {}
+};
+struct PyAcquireGIL {
+    PyAcquireGIL() {}
+};
+#endif
 
 ///@}
 //  ------------------------------------------------------------------
@@ -664,10 +668,19 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // store the numerical value of G as a module attribute (update the existing constant)
     PyObject* PyG = PyDict_GetItemString(PyModule_GetDict(thismodule), "G");
     if(PyG && PyFloat_CheckExact(PyG))
-        PyFloat_AS_DOUBLE(PyG) = G;
+        // hack: directly manipulate the member variable in the internal representation
+        // of the Python float object. This goes against the idea of immutability of numbers,
+        // but ensures that the content of this variable is updated synchronously everywhere.
+        // The alternative is to create a _new_ module-level variable with the same name and
+        // a new value, which replaces the old one. Unfortunately, this only works if agama.so
+        // is imported directly, not when its classes, methods and variables are imported into
+        // another module (as happens in the __init__.py file): in the latter case,
+        // the previously imported variable and the newly created one become different entities
+        // (get out of sync), and the first, user-facing one is not updated.
+        ((PyFloatObject*)PyG)->ob_fval = G;
     else
         PyErr_WarnEx(NULL, "agama.G has wrong type and its value cannot be updated", 1);
-    utils::msg(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
+    FILTERMSG(utils::VL_DEBUG, "Agama",   // internal unit conversion factors not for public eye
         "length unit: "  +utils::toString(conv->lengthUnit)+", "
         "velocity unit: "+utils::toString(conv->velocityUnit)+", "
         "time unit: "    +utils::toString(conv->timeUnit)+", "
@@ -877,25 +890,25 @@ protected:
     double inputPointScalar;    // a single scalar input point or
     PyArrayObject* inputArray;  // a temp.array for all other cases (only one of these two is used)
     const double* inputBuffer;  // pointer to the temp.variable or to the temp.array
-    npy_intp numPoints;         // number of input points - 0 means a single point, -1 is error
+    npy_intp numPoints;         // number of input points: -1 means a single point, -2 is error
     PyObject* outputObject;     // the Python object returned by the run() method;
                                 // it must be initialized by constructors of derived classes
 public:
     /** Constructor of the base class only analyzes the input object, determines the number
         of input points and ensures that the length of each point equals inputLength.
         \param[in]  inputLength  is the required length of each input point (M);
-        \param[in]  inputObject  is the Python object (scalar, tuple, list or array) 
+        \param[in]  inputObject  is the Python object (scalar, tuple, list or array)
         containing one or more points.
         When the inputObject is parsed successfully, the member variable inputBuffer points to the
         raw buffer containing the single scalar point or the first element of the input array;
-        numPoints contains either the number of input points (N), or 0 indicating a single point
+        numPoints contains either the number of input points (N), or -1 indicating a single point
         (this is different from an input array containing one point, because the dimensionality
         of output arrays is increased for an input array).
         Constructors of derived classes must additionally allocate the outputObject member variable
-        (unless numPoints<0, indicating an error in parsing the input).
+        (unless numPoints<-1, indicating an error in parsing the input).
     */
     BatchFunction(int inputLength, PyObject* inputObject) :
-        inputPointScalar(NAN), inputArray(NULL), inputBuffer(NULL), numPoints(-1), outputObject(NULL)
+        inputPointScalar(NAN), inputArray(NULL), inputBuffer(NULL), numPoints(-2), outputObject(NULL)
     {
         if(inputObject == NULL) {
             PyErr_SetString(PyExc_TypeError, "No input data provided");
@@ -912,7 +925,7 @@ public:
             inputPointScalar = PyFloat_AsDouble(inputObject);
             if(!PyErr_Occurred()) {  // successful
                 inputBuffer = &inputPointScalar;
-                numPoints = 0;   // means a single input point and not an array of length 1
+                numPoints = -1;   // means a single input point and not an array of length 1
                 return;
             }
             PyErr_Clear();   // clear any conversion errors and try the more general approach
@@ -926,7 +939,9 @@ public:
         }
 
         if(PyArray_NDIM(inputArray) == 1 && PyArray_DIM(inputArray, 0) == inputLength) {
-            numPoints = 0;    // 1d array of size inputLength - a single point
+            numPoints = -1;
+            // 1d array of size inputLength means a single point and is indicated by numPoints=-1,
+            // to distinguish it from a 2d array of size 1*inputLength
         } else if(
             (PyArray_NDIM(inputArray) == 1 && inputLength == 1) ||
             (PyArray_NDIM(inputArray) == 2 && PyArray_DIM(inputArray, 1) == inputLength))
@@ -960,6 +975,17 @@ public:
     */
     virtual void processPoint(npy_intp pointIndex) = 0;
 
+    /** Vectorized form of this function, which is the one actually used by the run() method.
+        The default implementation simply loops over points one by one,
+        but derived classes may reimplement it more efficiently 
+        by delegating the vectorized computation to the underlying code.
+    */
+    virtual void processManyPoints(npy_intp beginIndex, npy_intp endIndex)
+    {
+        for(npy_intp pointIndex=beginIndex; pointIndex<endIndex; pointIndex++)
+            processPoint(pointIndex);
+    }
+
     /** The driver routine that loops over the input array and calls processPoint() for each item.
         \param[in] chunk  determines the OpenMP parallelization strategy:
         If chunk==0 or the number of points N is less than |chunk|, no threads are created at all;
@@ -971,11 +997,14 @@ public:
         this is more effective when the computational cost may vary widely between points, and hence
         some threads may finish their work earlier and start the next chunk immediately.
         However, it involves a larger scheduling overhead, so the chunks shouldn't be too small
-        (depending on the cost of processing a single point).
+        (depending on the cost of processing a single point: if it is high, chunk=1 is best choice).
         \return  the Python object (outputObject) containing the results, or NULL in case of errors
         during initialization (indicated by outputObject==NULL).
         If the user triggers a keyboard interrupt during computations, the loop is terminated and
         NULL is returned as well.
+        \note OpenMP-parallelized loop is executed after releasing GIL, and the processPoint()
+        methods of derived classes need to acquire GIL if necessary (even if the loop is not
+        parallelized, this does not hurt).
     */
     PyObject* run(int chunk)
     {
@@ -986,8 +1015,11 @@ public:
             return NULL;
         }
 
-        // fast-track for a single input point
-        if(numPoints <= 1) {
+        if(numPoints == 0) {
+            // nothing to do
+        }
+        else if(numPoints == 1 || numPoints == -1) {
+            // fast-track for a single input point (numPoints==-1) or an array of length one
             try{
                 processPoint(0);
             }
@@ -997,7 +1029,7 @@ public:
                 PyErr_SetString(PyExc_RuntimeError, ex.what());
             }
         } else {
-            std::string error;  // store the exception that may occur in the processPoint() function
+            std::string errorMessage;      // store the exception that may occur in processPoint()
             utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
 #ifdef _OPENMP
             if(chunk==0 || numPoints <= abs(chunk))
@@ -1008,45 +1040,50 @@ public:
             {
                 try{
                     // no parallelization if the number of points is too small (e.g., just one)
-                    for(npy_intp ind=0; ind<numPoints; ind++) {
-                        if(cbrk.triggered()) continue;
-                        processPoint(ind);
-                    }
+                    processManyPoints(0, numPoints);
                 }
                 catch(std::exception& ex)
                 {
-                    error = ex.what();
+                    errorMessage = ex.what();
                 }
             }
 #ifdef _OPENMP
             else {
+                // OpenMP-parallelized loops need to run GIL-free;
+                // any code in the processPoint() method that uses Python C API
+                // will need to re-acquire GIL for its own thread (via PyAcquireGIL)
+                PyReleaseGIL unlock;
                 bool stop = false;   // the loop is terminated once this flag is raised
+                npy_intp blockSize = abs(chunk), numBlocks = (numPoints-1) / blockSize + 1;
+
                 // parallel loop over input array
                 if(chunk < 0) {
                     // pre-determined split of work across threads
 #pragma omp parallel for schedule(static)
-                    for(npy_intp ind=0; ind<numPoints; ind++) {
+                    for(npy_intp indBlock=0; indBlock<numBlocks; indBlock++) {
                         if(cbrk.triggered() || stop) continue;
                         try{
-                            processPoint(ind);
+                            processManyPoints(indBlock * blockSize,
+                                std::min( (indBlock+1) * blockSize, numPoints));
                         }
                         catch(std::exception& ex)
                         {
-                            error = ex.what();
+                            errorMessage = ex.what();
                             stop = true;
                         }
                     }
                 } else /*chunk > 0*/ {
                     // dynamical load balancing - the code below is identical but the pragma is different
-#pragma omp parallel for schedule(dynamic, chunk)
-                    for(npy_intp ind=0; ind<numPoints; ind++) {
+#pragma omp parallel for schedule(dynamic, 1)
+                    for(npy_intp indBlock=0; indBlock<numBlocks; indBlock++) {
                         if(cbrk.triggered() || stop) continue;
                         try{
-                            processPoint(ind);
+                            processManyPoints(indBlock * blockSize,
+                                std::min( (indBlock+1) * blockSize, numPoints));
                         }
                         catch(std::exception& ex)
                         {
-                            error = ex.what();
+                            errorMessage = ex.what();
                             stop = true;
                         }
                     }
@@ -1058,15 +1095,31 @@ public:
                 Py_DECREF(outputObject);
                 outputObject = NULL;
                 PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
-            }
-            if(!error.empty()) {
+            } else if(!errorMessage.empty()) {
                 Py_DECREF(outputObject);
                 outputObject = NULL;
-                PyErr_SetString(PyExc_RuntimeError, error.c_str());
+                PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
             }
         }
         return outputObject;
     }
+};
+
+/** Vectorized form of the above class, whose descendants natively implement
+    the vectorized method processManyPoints().
+*/
+class BatchFunctionVectorized: public BatchFunction {
+public:
+    BatchFunctionVectorized(int inputLength, PyObject* inputObject) :
+        BatchFunction(inputLength, inputObject) {}
+
+    // implement single-point call via vectorized call
+    virtual void processPoint(npy_intp pointIndex) {
+        processManyPoints(pointIndex, pointIndex+1);
+    }
+
+    // this one needs to be actually implemented in derived classes
+    virtual void processManyPoints(npy_intp beginIndex, npy_intp endIndex) = 0;
 };
 
 /** Helper routine for allocating an output array for a class derived from BatchFunction.
@@ -1074,7 +1127,7 @@ public:
     if DIM>1, the last dimension of the output array will have length DIM,
     otherwise the array has one dimension fewer.
     \param[in]  numPoints is the first dimension of the output array (the number of input points N);
-    if numPoints==0, this means a single input point, and the output array has one dimension fewer.
+    if numPoints==-1, this means a single input point, and the output array has one dimension fewer.
     \param[out]  buffer  is the pointer to a pointer (double*), which will contain the raw buffer
     of the output object (a Python float or a NumPy array); the data should be stored in this buffer.
     \param[in]  C (optional) length of the intermediate dimension of the output array
@@ -1091,11 +1144,11 @@ public:
 template<int DIM>
 PyObject* allocateOutput(npy_intp numPoints, double* buffer[1]=NULL, int C=0)
 {
-    if(numPoints<0)
+    if(numPoints < -1)
         return NULL;
     PyObject* output = NULL;
     if(C==0) {
-        if(numPoints == 0 && DIM == 1) {
+        if(numPoints == -1 && DIM == 1) {
             // output is a single float
             output = PyFloat_FromDouble(NAN);   // allocate a python float with some initial value
             if(buffer)  // get the pointer to the raw float value, which will be modified later
@@ -1104,13 +1157,13 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[1]=NULL, int C=0)
         }
         // otherwise output is a 1d or a 2d array
         npy_intp dims[] = {numPoints, DIM};
-        if(numPoints == 0)
+        if(numPoints == -1)  // output is a single row
             output = PyArray_SimpleNew(1, &dims[1], NPY_DOUBLE);
         else
             output = PyArray_SimpleNew(DIM == 1 ? 1 : 2, dims, NPY_DOUBLE);
-    } else {
+    } else {  // add an intermediate dimension C
         npy_intp dims[] = {numPoints, C, DIM};
-        if(numPoints == 0)
+        if(numPoints == -1)
             output = PyArray_SimpleNew(DIM == 1 ? 1 : 2, &dims[1], NPY_DOUBLE);
         else
             output = PyArray_SimpleNew(DIM == 1 ? 2 : 3, &dims[0], NPY_DOUBLE);
@@ -1261,7 +1314,6 @@ typedef struct {
 /// Helper class for providing a BaseDensity interface
 /// to a Python function that returns density at one or several point
 class DensityWrapper: public potential::BaseDensity{
-    NumpyWarningsDisabler lock;
     PyObject* fnc;
     const coord::SymmetryType sym;
     const std::string fncname;
@@ -1270,7 +1322,7 @@ public:
         fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
         Py_INCREF(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
+        FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ density wrapper for Python function " + fncname +
             " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
         if(isUnknown(sym))
@@ -1278,8 +1330,8 @@ public:
     }
     ~DensityWrapper()
     {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ density wrapper for Python function "+fncname);
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ density wrapper for Python function " + fncname);
         Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
@@ -1329,40 +1381,35 @@ public:
         for(size_t p=0; p<npoints; p++)
             unconvertPos(pos[p], xyz + p*3);
         double mult = conv->massUnit / pow_3(conv->lengthUnit);
-        PyObject* result = NULL;
+        PyAcquireGIL lock;
         bool typeerror   = false;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+        npy_intp dims[]  = { (npy_intp)npoints, 3};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+        } else if(PyArray_Check(result) &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
         {
-            npy_intp dims[]  = { (npy_intp)npoints, 3};
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-            Py_DECREF(args);
-            if(result == NULL) {
-                PyErr_Print();
-            } else if(PyArray_Check(result) &&
-                PyArray_NDIM((PyArrayObject*)result) == 1 &&
-                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
-            {
-                int type = PyArray_TYPE((PyArrayObject*) result);
-                for(size_t p=0; p<npoints; p++) {
-                    switch(type) {
-                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
-                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
-                        default: values[p] = NAN; typeerror = true;
-                    }
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            for(size_t p=0; p<npoints; p++) {
+                switch(type) {
+                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
+                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
+                    default: values[p] = NAN; typeerror = true;
                 }
             }
-            else if(npoints==1 && PyNumber_Check(result)) {
-                // in case of a single input point, the user function might return a single number
-                values[0] = PyFloat_AsDouble(result) * mult;
-            }
-            else {
-                typeerror = true;
-            }
-            Py_XDECREF(result);
         }
+        else if(npoints==1 && PyNumber_Check(result)) {
+            // in case of a single input point, the user function might return a single number
+            values[0] = PyFloat_AsDouble(result) * mult;
+        }
+        else {
+            typeerror = true;
+        }
+        Py_XDECREF(result);
         if(result == NULL)
             throw std::runtime_error("Call to user-defined density function failed");
         else if(typeerror)
@@ -1374,10 +1421,10 @@ public:
 void Density_dealloc(DensityObject* self)
 {
     if(self->dens)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->dens->name())+
-            " density at "+utils::toString(self->dens.get()));
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->dens->name()) +
+            " density at " + utils::toString(self->dens.get()));
     else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty density");
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty density");
     self->dens.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -1421,8 +1468,8 @@ PyObject* createDensityObject(const potential::PtrDensity& dens)
     new (&(dens_obj->dens)) potential::PtrDensity;
     // now we may safely assign a new value to the smart pointer
     dens_obj->dens = dens;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
-        dens->name()+" density at "+utils::toString(dens.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created a Python wrapper for " +
+        dens->name() + " density at " + utils::toString(dens.get()));
     return (PyObject*)dens_obj;
 }
 
@@ -1490,6 +1537,7 @@ potential::PtrDensity Density_initFromTuple(PyObject* tuple, coord::SymmetryType
                 "or functions providing that interface, or dictionaries with density parameters");
         components.push_back(comp);
     }
+    // the constructor of composite density does not involve OpenMP, so we may skip releasing GIL
     return components.size()==1 ? components[0] :
         potential::PtrDensity(new potential::CompositeDensity(components));
 }
@@ -1521,7 +1569,7 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
         if(!self->dens)
             throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Density) for details");
-        utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
@@ -1559,7 +1607,7 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
         }
         catch(std::exception &e) {
             Py_XDECREF(tuple);
-            utils::msg(utils::VL_WARNING, "Agama", e.what());
+            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
         }
     }
 
@@ -1568,23 +1616,38 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
 }
 
 /// compute the density at one or more points
-class FncDensityDensity: public BatchFunction {
+class FncDensityDensity: public BatchFunctionVectorized {
     const potential::BaseDensity& dens;
     const std::vector<double> time;
     double* outputBuffer;
 public:
     FncDensityDensity(PyObject* input, PyObject* namedArgs, const potential::BaseDensity& _dens) :
-        BatchFunction(/*input length*/ 3, input), dens(_dens), time(getOptionalTimeArg(namedArgs, numPoints))
+        BatchFunctionVectorized(/*input length*/ 3, input),
+        dens(_dens), time(getOptionalTimeArg(namedArgs, numPoints))
     {
         if(!PyErr_Occurred() && !time.empty())
             outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
-    virtual void processPoint(npy_intp indexPoint)
+    virtual void processManyPoints(npy_intp indexStart, npy_intp indexEnd)
     {
-        outputBuffer[indexPoint] =
-            dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])),
-                time[indexPoint % time.size()] * conv->timeUnit) /
-            (conv->massUnit / pow_3(conv->lengthUnit));
+        npy_intp npoints = indexEnd - indexStart;
+        if(time.size() == 1) {
+            // a single value of time - may call the vectorized form of density method
+            ALLOC(npoints, coord::PosCar, points)
+            for(npy_intp i=0; i<npoints; i++)
+                points[i] = convertPos(&inputBuffer[(i + indexStart) * 3]);
+            dens.evalmanyDensityCar(npoints, points, &outputBuffer[indexStart],
+                time[0] * conv->timeUnit);
+            for(npy_intp indexPoint=indexStart; indexPoint<indexEnd; indexPoint++)
+                outputBuffer[indexPoint] /= conv->massUnit / pow_3(conv->lengthUnit);
+        } else {
+            // different values of time for each point - have to loop manually
+            for(npy_intp indexPoint=indexStart; indexPoint<indexEnd; indexPoint++)
+                outputBuffer[indexPoint] =
+                    dens.density(coord::PosCar(convertPos(&inputBuffer[indexPoint*3])),
+                        time[indexPoint % time.size()] * conv->timeUnit) /
+                    (conv->massUnit / pow_3(conv->lengthUnit));
+        }
     }
 };
 
@@ -1631,7 +1694,7 @@ PyObject* Density_projectedDensity(PyObject* self, PyObject* args, PyObject* nam
         &X, &Y, &alpha, &beta, &gamma))
     {   // shortcut and alternative syntax for just a single point x,y
         try{
-            return Py_BuildValue("d",
+            return PyFloat_FromDouble(
                 projectedDensity(*((DensityObject*)self)->dens,
                     X * conv->lengthUnit, Y * conv->lengthUnit,
                     coord::Orientation(alpha, beta, gamma)) /
@@ -1667,7 +1730,9 @@ public:
                 dens.enclosedMass(inputBuffer[indexPoint] * conv->lengthUnit) / conv->massUnit;
         }
         catch(std::exception& e) {
-            printf("Error in enclosedMass(r=%g): %s\n", inputBuffer[indexPoint], e.what());
+            PyAcquireGIL lock;  // need to get hold of GIL to issue the following warning
+            PyErr_WarnEx(NULL, ("Error in enclosedMass(r=" +
+                utils::toString(inputBuffer[indexPoint]) + "): " + e.what()).c_str(), 1);
             outputBuffer[indexPoint] = NAN;
         }
     }
@@ -1733,17 +1798,22 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     try{
-        // do the sampling of the density profile
-        particles::ParticleArray<coord::PosCyl> points = galaxymodel::sampleDensity(*dens, numPoints);
-
-        // assign the velocities if needed
+        particles::ParticleArray<coord::PosCyl> points;
         particles::ParticleArrayCar pointsvel;
-        if(pot) {
-            pointsvel = galaxymodel::assignVelocity(points, *dens, *pot, beta, kappa);
-            /*PyErr_WarnEx(PyExc_FutureWarning, "assigning velocity in sample(..., potential=...) "
-                "is deprecated and may be removed in the future; the recommended way is "
-                "to create a DistributionFunction(type='QuasiSpherical', ...) for the given "
-                "density and potential, then use GalaxyModel(potential, df).sample(...)", 1);*/
+        {   // no-GIL block: both sampleDensity and assignVelocity contain OpenMP-parallelized code
+            PyReleaseGIL unlock;
+
+            // do the sampling of the density profile
+            points = galaxymodel::sampleDensity(*dens, numPoints);
+
+            // assign the velocities if needed
+            if(pot) {
+                pointsvel = galaxymodel::assignVelocity(points, *dens, *pot, beta, kappa);
+                /*PyErr_WarnEx(PyExc_FutureWarning, "assigning velocity in sample(..., potential=...) "
+                    "is deprecated and may be removed in the future; the recommended way is "
+                    "to create a DistributionFunction(type='QuasiSpherical', ...) for the given "
+                    "density and potential, then use GalaxyModel(potential, df).sample(...)", 1);*/
+            }
         }
 
         // convert output to NumPy array
@@ -2041,7 +2111,6 @@ typedef struct {
 /// to a Python function that returns the value of a potential at one or several point
 /// (with 1st and 2nd derivatives estimated by finite differences).
 class PotentialWrapper: public potential::BasePotentialCar{
-    NumpyWarningsDisabler lock;
     PyObject* fnc;
     const coord::SymmetryType sym;
     const std::string fncname;
@@ -2050,7 +2119,7 @@ public:
         fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
         Py_INCREF(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
+        FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ potential wrapper for Python function " + fncname +
             " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
         if(isUnknown(sym))
@@ -2058,8 +2127,8 @@ public:
     }
     ~PotentialWrapper()
     {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ potential wrapper for Python function "+fncname);
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ potential wrapper for Python function " + fncname);
         Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
@@ -2104,10 +2173,9 @@ public:
         npy_intp dims[]  = {npoints, 3};
         PyObject *result = NULL;
         bool typeerror   = false;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+        // open a critical section for accessing Python C API
         {
+            PyAcquireGIL lock;
             PyObject* args = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
             result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
             Py_DECREF(args);
@@ -2163,10 +2231,10 @@ public:
 void Potential_dealloc(PotentialObject* self)
 {
     if(self->pot)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted "+std::string(self->pot->name())+
-        " potential at "+utils::toString(self->pot.get()));
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->pot->name()) +
+        " potential at " + utils::toString(self->pot.get()));
     else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty potential");
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty potential");
     self->pot.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -2184,8 +2252,8 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
     // same hack as in 'createDensityObject()'
     new (&(pot_obj->pot)) potential::PtrPotential;
     pot_obj->pot = pot;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for "+
-        pot->name()+" potential at " + utils::toString(pot.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created a Python wrapper for " +
+        pot->name() + " potential at " + utils::toString(pot.get()));
     return (PyObject*)pot_obj;
 }
 
@@ -2222,6 +2290,9 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
             if(params.getString("type").empty())
                 throw std::invalid_argument("'type' argument must be provided");
             params.unset("density");
+            // the constructor of a potential expansion may be evaluating the input density
+            // in an OpenMP-parallelized loop, so we need to release GIL beforehand
+            PyReleaseGIL unlock;
             return potential::createPotential(params, dens, *conv);
         } else if(!PyString_Check(dens_obj)) {
             throw std::invalid_argument(
@@ -2238,6 +2309,9 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
             // attempt to construct a potential expansion from a user-provided potential model
             // or use the input potential itself, and possibly add modifiers on top of the result
             params.unset("potential");
+            // possibly passing a user-defined python function to the potential construction routine
+            // that may be evaluating it in an OpenMP-parallelized loop, so need to release GIL
+            PyReleaseGIL unlock;
             return potential::createPotential(params, pot, *conv);
         } else {
             throw std::invalid_argument(
@@ -2274,6 +2348,8 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple, coord::Symmetry
         }
     }
     if(onlyPot && !components.empty()) {
+        // possibly passing a user-defined Python function to the constructor of Composite potential,
+        // but it does not invoke any OpenMP code, so we do not need to release GIL
         return components.size()==1 ? components[0] :
             potential::PtrPotential(new potential::Composite(components));
     } else if(onlyDict) {
@@ -2310,7 +2386,7 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
         if(!self->pot)
             throw std::invalid_argument("Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Potential) for details");
-        utils::msg(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
@@ -2347,7 +2423,7 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
         }
         catch(std::exception &e) {
             Py_XDECREF(tuple);
-            utils::msg(utils::VL_WARNING, "Agama", e.what());
+            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
         }
     }
 
@@ -2786,8 +2862,7 @@ typedef struct {
 /// destructor of ActionFinder class
 void ActionFinder_dealloc(ActionFinderObject* self)
 {
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action finder at "+
-        utils::toString(self->af.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action finder at " + utils::toString(self->af.get()));
     self->af.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -2802,7 +2877,7 @@ PyObject* createActionFinderObject(actions::PtrActionFinder af)
     // same trickery as in 'createDensityObject()'
     new (&(af_obj->af)) actions::PtrActionFinder;
     af_obj->af = af;
-    utils::msg(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
         utils::toString(af.get()));
     return (PyObject*)af_obj;
 }
@@ -2810,14 +2885,25 @@ PyObject* createActionFinderObject(actions::PtrActionFinder af)
 /// create a spherical or non-spherical action finder
 actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, bool interpolate)
 {
+    // ActionFinder constructors have OpenMP-parallelized loops, which might call back a Python
+    // function if the potential contains one, so we need to release GIL beforehand
+    PyReleaseGIL unlock;
     assert(pot);
-    actions::PtrActionFinder af = isSpherical(*pot) ?
-        actions::PtrActionFinder(new actions::ActionFinderSpherical(*pot)) :
-        actions::PtrActionFinder(new actions::ActionFinderAxisymFudge(pot, interpolate));
-    utils::msg(utils::VL_DEBUG, "Agama",
-        "Created " +
-        std::string(isSpherical(*pot) ? "Spherical" : interpolate ? "Interpolated Fudge" : "Fudge") +
-        " action finder for " + pot->name() + " potential at " + utils::toString(af.get()));
+    actions::PtrActionFinder af;
+    std::string type;
+    const potential::Isochrone* isoPot = dynamic_cast<const potential::Isochrone*>(pot.get());
+    if(isoPot) {
+        af.reset(new actions::ActionFinderIsochrone(isoPot->totalMass(), isoPot->getRadius()));
+        type = "Isochrone";
+    } else if(isSpherical(*pot)) {
+        af.reset(new actions::ActionFinderSpherical(*pot));
+        type = "Spherical";
+    } else {
+        af.reset(new actions::ActionFinderAxisymFudge(pot, interpolate));
+        type = interpolate ? "Interpolated Fudge" : "Fudge";
+    }
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + type + " action finder for " + pot->name() +
+        " potential at " + utils::toString(af.get()));
     return af;
 }
 
@@ -2843,6 +2929,8 @@ int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedA
         return -1;
     }
     try{
+        // this routine receives a potential that may contain Python callback functions,
+        // but it takes care of GIL release internally
         self->af = createActionFinder(pot, toBool(interp_flag, false));
         return 0;
     }
@@ -3042,7 +3130,7 @@ typedef struct {
 
 void ActionMapper_dealloc(ActionMapperObject* self)
 {
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted an action mapper at "+utils::toString(self->am.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action mapper at " + utils::toString(self->am.get()));
     self->am.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -3071,17 +3159,33 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
     try{
         double act[3] = {self->Jr, self->Jz, self->Jphi};   // values of actions in physical units
         const actions::Actions J = convertActions(act);     // same in internal units
-        self->am.reset( tol==tol ?
+        std::string type;
+        const potential::Isochrone* isoPot = dynamic_cast<const potential::Isochrone*>(pot.get());
+        if(isoPot) {
+            // specialize for the case of isochrone potential
+            self->am.reset(new actions::ActionMapperIsochrone(isoPot->totalMass(), isoPot->getRadius()));
+            type = "Isochrone";
+        } else if(isSpherical(*pot)) {
+            // avoid the use of Torus in favour of the spherical mapper;
+            // however, this class is not used in the most efficient way
+            // (it can map arbitrary values of actions, not just the ones provided at initialization)
+            PyReleaseGIL unlock;  // because the constructor contains an OpenMP-parallelized loop
+            self->am.reset(new actions::ActionMapperSpherical(*pot));
+            type = "Spherical";
+        } else {
+            self->am.reset( tol==tol ?
             new actions::ActionMapperTorus(*pot, J, tol) :  // use the provided value of tol
             new actions::ActionMapperTorus(*pot, J) );      // use the default value
+            type = "Torus";
+        }
         // store the frequencies converted to physical units
         actions::Frequencies freq;
         self->am->map(actions::ActionAngles(J, actions::Angles(0, 0, 0)), &freq);
         self->Omegar   = freq.Omegar   * conv->lengthUnit / conv->velocityUnit;   // inverse frequency unit
         self->Omegaz   = freq.Omegaz   * conv->lengthUnit / conv->velocityUnit;
         self->Omegaphi = freq.Omegaphi * conv->lengthUnit / conv->velocityUnit;
-        utils::msg(utils::VL_DEBUG, "Agama", "Created an ActionMapperTorus at "+
-            utils::toString(self->am.get()));
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + type + " action mapper for " + pot->name() +
+            " potential at " + utils::toString(self->am.get()));
         return 0;
     }
     catch(std::exception& e) {
@@ -3201,7 +3305,7 @@ typedef struct {
 /// destructor of DistributionFunction class
 void DistributionFunction_dealloc(DistributionFunctionObject* self)
 {
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a distribution function at "+
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted a distribution function at " +
         utils::toString(self->df.get()));
     self->df.reset();
     Py_TYPE(self)->tp_free(self);
@@ -3210,19 +3314,18 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
 /// Helper class for providing a BaseDistributionFunction interface
 /// to a Python function that returns the value of DF at a point in action space
 class DistributionFunctionWrapper: public df::BaseDistributionFunction{
-    NumpyWarningsDisabler lock;
     PyObject* fnc;   ///< Python object providing the __call__ interface to evaluate the DF
 public:
     DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
         Py_INCREF(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ df wrapper for Python function "+toString(fnc));
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Created a C++ df wrapper for Python function " + toString(fnc));
     }
     ~DistributionFunctionWrapper()
     {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ df wrapper for Python function "+toString(fnc));
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ df wrapper for Python function " + toString(fnc));
         Py_DECREF(fnc);
     }
     // non-vectorized form
@@ -3234,44 +3337,39 @@ public:
     // vectorized form is the one that actually does the work
     virtual void evalmany(const size_t npoints, const actions::Actions J[], bool, double values[]) const
     {
-        double* act = static_cast<double*>(alloca(npoints * 3 * sizeof(double)));
+        ALLOC(3*npoints, double, act)
         for(size_t p=0; p<npoints; p++)
             unconvertActions(J[p], act + p*3);
         double mult = conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
-        PyObject* result = NULL;
+        PyAcquireGIL lock;
         bool typeerror   = false;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+        npy_intp dims[]  = { (npy_intp)npoints, 3};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+        } else if(PyArray_Check(result) &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
         {
-            npy_intp dims[]  = { (npy_intp)npoints, 3};
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-            Py_DECREF(args);
-            if(result == NULL) {
-                PyErr_Print();
-            } else if(PyArray_Check(result) &&
-                PyArray_NDIM((PyArrayObject*)result) == 1 &&
-                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
-            {
-                int type = PyArray_TYPE((PyArrayObject*) result);
-                for(size_t p=0; p<npoints; p++) {
-                    switch(type) {
-                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
-                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
-                        default: values[p] = NAN; typeerror = true;
-                    }
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            for(size_t p=0; p<npoints; p++) {
+                switch(type) {
+                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
+                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p) * mult; break;
+                    default: values[p] = NAN; typeerror = true;
                 }
             }
-            else if(npoints==1 && PyNumber_Check(result)) {
-                // in case of a single input point, the user function might return a single number
-                values[0] = PyFloat_AsDouble(result) * mult;
-            }
-            else {
-                typeerror = true;
-            }
-            Py_XDECREF(result);
         }
+        else if(npoints==1 && PyNumber_Check(result)) {
+            // in case of a single input point, the user function might return a single number
+            values[0] = PyFloat_AsDouble(result) * mult;
+        }
+        else {
+            typeerror = true;
+        }
+        Py_XDECREF(result);
         if(result == NULL)
             throw std::runtime_error("Call to user-defined distribution function failed");
         else if(typeerror)
@@ -3294,7 +3392,7 @@ PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
     // same hack as in 'createDensityObject()'
     new (&(df_obj->df)) df::PtrDistributionFunction;
     df_obj->df = df;
-    utils::msg(utils::VL_DEBUG, "Agama",
+    FILTERMSG(utils::VL_DEBUG, "Agama",
         "Created a Python wrapper for distribution function at " + utils::toString(df.get()));
     return (PyObject*)df_obj;
 }
@@ -3367,6 +3465,9 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
     else if(utils::stringsEqual(type, "Interp3"))
         return DistributionFunction_initInterpolated<3>(namedArgs);
 #endif
+    // DF constructor may be calling user-defined Python potential & density functions
+    // from multiple threads, so we need to release GIL beforehand
+    PyReleaseGIL unlock;
     return df::createDistributionFunction(params, pot.get(), dens.get(), *conv);  // any other DF type
 }
 
@@ -3410,7 +3511,7 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
                 "or a tuple of existing DistributionFunction objects to create a composite DF");
         }
         assert(self->df);
-        utils::msg(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
             utils::toString(self->df.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
@@ -3446,7 +3547,7 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
         }
         catch(std::exception &e) {
             Py_XDECREF(tuple);
-            utils::msg(utils::VL_WARNING, "Agama", e.what());
+            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
         }
     }
     
@@ -3455,19 +3556,25 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 }
 
 /// compute the distribution function at one or more points in action space
-class FncDistributionFunction: public BatchFunction {
+class FncDistributionFunction: public BatchFunctionVectorized {
     const df::BaseDistributionFunction& df;
     double* outputBuffer;
 public:
     FncDistributionFunction(PyObject* input, const df::BaseDistributionFunction& _df) :
-        BatchFunction(/*input length*/ 3, input), df(_df)
+        BatchFunctionVectorized(/*input length*/ 3, input), df(_df)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
-    virtual void processPoint(npy_intp indexPoint)
+    virtual void processManyPoints(npy_intp indexStart, npy_intp indexEnd)
     {
-        outputBuffer[indexPoint] = df.value(convertActions(&inputBuffer[indexPoint*3])) /
-            (conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit));  // DF dimension: M L^-3 V^-3
+        npy_intp npoints = indexEnd - indexStart;
+        ALLOC(npoints, actions::Actions, act)
+        for(npy_intp i=0; i<npoints; i++)
+            act[i] = convertActions(&inputBuffer[(i + indexStart) * 3]);
+        df.evalmany(npoints, act, /*separate*/false, &outputBuffer[indexStart]);
+        for(npy_intp indexPoint=indexStart; indexPoint<indexEnd; indexPoint++)
+            outputBuffer[indexPoint] /=  // DF dimension: M L^-3 V^-3
+                conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
     }
 };
 
@@ -3586,7 +3693,7 @@ typedef struct {
 /// destructor of SelectionFunction class
 void SelectionFunction_dealloc(SelectionFunctionObject* self)
 {
-    utils::msg(utils::VL_DEBUG, "Agama", "Deleted a selection function at "+
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted a selection function at " +
         utils::toString(self->sf.get()));
     self->sf.reset();
     Py_TYPE(self)->tp_free(self);
@@ -3617,7 +3724,7 @@ int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObje
         self->sf.reset(new galaxymodel::SelectionFunctionDistance(
             convertPos(&point[0]), radius * conv->lengthUnit, steepness));
         assert(self->sf);
-        utils::msg(utils::VL_DEBUG, "Agama",
+        FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a SelectionFunction at "+utils::toString(self->sf.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
@@ -3630,18 +3737,22 @@ int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObje
 }
 
 /// compute the selection function at one or more points in 6d phase space (x,v)
-class FncSelectionFunction: public BatchFunction {
+class FncSelectionFunction: public BatchFunctionVectorized {
     const galaxymodel::BaseSelectionFunction& sf;
     double* outputBuffer;
 public:
     FncSelectionFunction(PyObject* input, const galaxymodel::BaseSelectionFunction& _sf) :
-        BatchFunction(/*input length*/ 6, input), sf(_sf)
+        BatchFunctionVectorized(/*input length*/ 6, input), sf(_sf)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
-    virtual void processPoint(npy_intp indexPoint)
+    virtual void processManyPoints(npy_intp indexStart, npy_intp indexEnd)
     {
-        outputBuffer[indexPoint] = sf.value(convertPosVel(&inputBuffer[indexPoint*6]));
+        npy_intp npoints = indexEnd - indexStart;
+        ALLOC(npoints, coord::PosVelCar, points)
+        for(npy_intp i=0; i<npoints; i++)
+            points[i] = convertPosVel(&inputBuffer[(i + indexStart) * 6]);
+        sf.evalmany(npoints, points, &outputBuffer[indexStart]);
     }
 };
 
@@ -3653,25 +3764,24 @@ PyObject* SelectionFunction_value(SelectionFunctionObject* self, PyObject* args,
     }
     if(!noNamedArgs(namedArgs))
         return NULL;
-    return FncSelectionFunction(args, *self->sf).run(/*chunk*/65536);
+    return FncSelectionFunction(args, *self->sf).run(/*chunk*/1024);
 }
 
 /// Helper class for providing a BaseSelectionFunction interface to a user-defined Python function
 /// that returns the value of a selection function at one or more points in x,v space
 class SelectionFunctionWrapper: public galaxymodel::BaseSelectionFunction{
-    NumpyWarningsDisabler lock;
     PyObject* fnc;    ///< Python object providing the selection function
 public:
     SelectionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
         Py_INCREF(fnc);
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Created a C++ selection function wrapper for Python function "+toString(fnc));
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Created a C++ selection function wrapper for Python function " + toString(fnc));
     }
     ~SelectionFunctionWrapper()
     {
-        utils::msg(utils::VL_DEBUG, "Agama",
-            "Deleted a C++ selection function wrapper for Python function "+toString(fnc));
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Deleted a C++ selection function wrapper for Python function " + toString(fnc));
         Py_DECREF(fnc);
     }
     virtual double value(const coord::PosVelCar& pv) const
@@ -3682,44 +3792,39 @@ public:
     }
     virtual void evalmany(const size_t npoints, const coord::PosVelCar points[], double values[]) const
     {
-        double* posvel   = static_cast<double*>(alloca(npoints * 6 * sizeof(double)));
+        ALLOC(6*npoints, double, posvel)
         for(size_t p=0; p<npoints; p++)
             unconvertPosVel(points[p], posvel + p*6);
-        PyObject *result = NULL;
+        PyAcquireGIL lock;
         bool typeerror   = false;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+        npy_intp dims[]  = { (npy_intp)npoints, 6};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+        } else if(PyArray_Check(result) &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
         {
-            npy_intp dims[]  = { (npy_intp)npoints, 6};
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-            Py_DECREF(args);
-            if(result == NULL) {
-                PyErr_Print();
-            } else if(PyArray_Check(result) &&
-                PyArray_NDIM((PyArrayObject*)result) == 1 &&
-                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
-            {
-                int type = PyArray_TYPE((PyArrayObject*) result);
-                for(size_t p=0; p<npoints; p++) {
-                    switch(type) {
-                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
-                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
-                        case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
-                        default: values[p] = NAN; typeerror = true;
-                    }
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            for(size_t p=0; p<npoints; p++) {
+                switch(type) {
+                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
+                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
+                    case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
+                    default: values[p] = NAN; typeerror = true;
                 }
             }
-            else if(npoints==1 && PyNumber_Check(result)) {
-                // in case of a single input point, the user function might return a single number
-                values[0] = PyFloat_AsDouble(result);
-            }
-            else {
-                typeerror = true;
-            }
-            Py_XDECREF(result);
         }
+        else if(npoints==1 && PyNumber_Check(result)) {
+            // in case of a single input point, the user function might return a single number
+            values[0] = PyFloat_AsDouble(result);
+        }
+        else {
+            typeerror = true;
+        }
+        Py_XDECREF(result);
         if(result == NULL)
             throw std::runtime_error("Call to user-defined selection function failed");
         else if(typeerror)
@@ -3912,12 +4017,18 @@ PyObject* GalaxyModel_totalMass(GalaxyModelObject* self, PyObject* args, PyObjec
         return NULL;
     bool separate = toBool(separate_flag, false);
     PtrSelectionFunction selFunc(getSelectionFunction(self->sf_obj));
-    const galaxymodel::GalaxyModel model(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selFunc);
+    const galaxymodel::GalaxyModel model(
+        *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selFunc);
     int numVal = separate? model.distrFunc.numValues() : 1;
     std::vector<double> val(numVal);
     try{
-        computeTotalMass(model, &val[0], separate);
-        math::blas_dmul(1./conv->massUnit, val);
+        // this routine receives pointers to potential, DF and SF possibly containing user-defined
+        // Python functions, and although it is not OpenMP-parallelized, we release GIL just in case..
+        {
+            PyReleaseGIL unlock;
+            computeTotalMass(model, &val[0], separate);
+            math::blas_dmul(1./conv->massUnit, val);
+        }
         return separate ? toPyArray(val) : Py_BuildValue("d", val[0]);
     }
     catch(std::exception& e) {
@@ -3938,12 +4049,21 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
         return NULL;
     }
     try{
-        // do the sampling
-        particles::ParticleArrayCar points = galaxymodel::samplePosVel(
-            galaxymodel::GalaxyModel(*self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df,
-                /*temporary wrapper object*/ *getSelectionFunction(self->sf_obj)),
-            numPoints);
+        particles::ParticleArrayCar points;
+        // temporary wrapper object for the selection function (or a trivial one if not provided)
+        PtrSelectionFunction selfnc = getSelectionFunction(self->sf_obj);
 
+        // do the sampling while releasing GIL, since the sampling routine is OpenMP-parallelized
+        // and may call back user-defined Python functions from multiple threads simultaneously,
+        // which would then re-acquire GIL in their own respective threads
+        {
+            PyReleaseGIL unlock;
+            points = galaxymodel::samplePosVel(galaxymodel::GalaxyModel(
+                *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selfnc),
+                numPoints);
+        }
+
+        // remaining operations use Python C API and thus should be performed under GIL.
         // convert output to NumPy array
         numPoints = points.size();
         npy_intp dims[] = {numPoints, 6};
@@ -4070,9 +4190,7 @@ public:
                 std::fill(vel,  vel  + numComponents * 3, NAN);
             if(vel2)
                 std::fill(vel2, vel2 + numComponents * 6, NAN);
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+            PyAcquireGIL lock;  // need to get hold of GIL to issue the following warning
             PyErr_WarnEx(NULL, (std::string("GalaxyModel.moments: ")+ex.what()).c_str(), 1);
         }
     }
@@ -4095,8 +4213,8 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
     // retrieve the input point(s) and check the array dimensions
     PyArrayObject *points_arr =
         (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    npy_intp npoints = 0;  // # of points at which the moments should be computed
-    npy_intp ndim    = 0;  // dimensions of points: 2 for projected moments at (x,y), 3 for (x,y,z)
+    npy_intp npoints = -1;  // # of points at which the moments should be computed
+    npy_intp ndim    = -1;  // dimensions of points: 2 for projected moments at (x,y), 3 for (x,y,z)
     if(points_arr) {
         if(PyArray_NDIM(points_arr) == 1) {
             ndim    = PyArray_DIM(points_arr, 0);
@@ -4106,7 +4224,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
             npoints = PyArray_DIM(points_arr, 0);
         }
     }
-    if(npoints==0 || !(ndim==2 || ndim==3)) {
+    if(npoints<0 || !(ndim==2 || ndim==3)) {
         Py_XDECREF(points_arr);
         PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a 2d/3d point or an array of points");
         return NULL;
@@ -4118,7 +4236,7 @@ PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject*
     //        "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
 
     PyObject* result = FncGalaxyModelMoments((PyObject*)points_arr, self,
-        ndim, dens, vel, vel2, toBool(separate_flag, false), alpha, beta, gamma) .
+        ndim, dens, vel, vel2, toBool(separate_flag, false), alpha, beta, gamma).
     run(/*chunk*/1);
     Py_DECREF(points_arr);
     return result;
@@ -4173,9 +4291,7 @@ public:
         catch(std::exception& ex) {
             for(unsigned int ic=0; ic<numComponents; ic++)
                 outputBuffer[ip * numComponents + ic] = NAN;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+            PyAcquireGIL lock;  // need to get hold of GIL to issue the following warning
             PyErr_WarnEx(NULL, (std::string("GalaxyModel.projectedDF: ")+ex.what()).c_str(), 1);
         }
     }
@@ -4195,8 +4311,8 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
     // retrieve the input point(s) and check the array dimensions
     PyArrayObject *points_arr =
     (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    npy_intp npoints = 0;  // # of points at which the projectedDF should be computed
-    npy_intp ndim    = 0;  // dimensions of points (should be 8)
+    npy_intp npoints = -1;  // # of points at which the projectedDF should be computed
+    npy_intp ndim    = -1;  // dimensions of points (should be 8)
     if(points_arr) {
         if(PyArray_NDIM(points_arr) == 1) {
             ndim    = PyArray_DIM(points_arr, 0);
@@ -4206,7 +4322,7 @@ PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObj
             npoints = PyArray_DIM(points_arr, 0);
         }
     }
-    if(npoints==0 || ndim!=8) {
+    if(npoints<0 || ndim!=8) {
         Py_XDECREF(points_arr);
         PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a point or an array of points "
             "with 8 numbers per point: X, Y, vX, vY, vZ, vX_error, vY_error, vZ_error");
@@ -4255,8 +4371,6 @@ public:
         orientation(alpha, beta, gamma),
         splvX(NULL), splvY(NULL), splvZ(NULL), outputDensity(NULL)
     {
-        if(numPoints<0) return;  // error in parsing input
-
         // parse the input arguments for the user-defined velocity grid (if any)
         if(sizegridv<2 || (!usergridv.empty() && usergridv.size()<2)) {
             PyErr_SetString(PyExc_TypeError, "argument 'gridv', if provided, must be either "
@@ -4267,7 +4381,7 @@ public:
 
         // output is a tuple of 3 or 4 (if giveDensity==true) Python objects:
         // either individual spline objects, or 1d/2d arrays of such objects.
-        if(numPoints==0 && !separate) {
+        if(numPoints==-1 && !separate) {
             // one input point, no separate output for DF components:
             // temporarily initialize the tuple with 3(4) Nones, will be replaced in processPoint()
             outputObject = giveDensity ?
@@ -4284,16 +4398,19 @@ public:
                 outputDensity = &((PyFloatObject*)*(splvZ+1))->ob_fval;
         } else {
             npy_intp ndim, dims[2];
-            if(numPoints==0 && separate) {
+            if(numPoints==-1 && separate) {
                 ndim = 1;
                 dims[0] = model.distrFunc.numValues();
-            } else if(numPoints>0 && !separate) {
+            } else if(numPoints>=0 && !separate) {
                 ndim = 1;
                 dims[0] = numPoints;
-            } else /* numPoints>0 &&  separate) */ {
+            } else if(numPoints>=0 &&  separate) {
                 ndim = 2;
                 dims[0] = numPoints;
                 dims[1] = model.distrFunc.numValues();
+            } else {
+                // the only remaining possibility is numPoints<-1, indicating an error in parsing input
+                return;
             }
             // create the 1d or 2d arrays of would-be spline objects and a float array of density
             PyObject* arrvX = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
@@ -4318,7 +4435,8 @@ public:
             if(giveDensity)
                 outputDensity = static_cast<double*>(PyArray_DATA((PyArrayObject*)arrdens));
             // initialize the arrays with Nones, will be replaced in processPoint()
-            for(npy_intp ind=0, size=std::max<int>(1, numPoints) * numComponents; ind<size; ind++) {
+            npy_intp size = (numPoints==-1 ? 1 : numPoints) * numComponents;
+            for(npy_intp ind=0; ind<size; ind++) {
                 splvX[ind] = Py_None;  Py_INCREF(Py_None);
                 splvY[ind] = Py_None;  Py_INCREF(Py_None);
                 splvZ[ind] = Py_None;  Py_INCREF(Py_None);
@@ -4383,10 +4501,8 @@ public:
 
             // create and store Python spline objects in the output arrays
             // (protect from concurrent access to Python API from multiple threads)
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
             {
+                PyAcquireGIL lock;
                 for(unsigned int ic=0; ic<numComponents; ic++) {
                     // convert the units for the ordinates (f(v) ~ 1/velocity)
                     math::blas_dmul(conv->velocityUnit, amplvX[ic]);
@@ -4405,9 +4521,7 @@ public:
         }
         catch(std::exception& ex) {
             // leave PyNone as the elements of output arrays and issue a warning
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
+            PyAcquireGIL lock;  // need to get hold of GIL before calling this function
             PyErr_WarnEx(NULL, (std::string("GalaxyModel.vdf: ")+ex.what()).c_str(), 1);
         }
     }
@@ -4428,8 +4542,8 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     // retrieve the input point(s) and check the array dimensions
     PyArrayObject *points_arr =
         (PyArrayObject*) PyArray_FROM_OTF(points_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    npy_intp npoints = 0;  // # of points at which the VDFs should be computed
-    npy_intp ndim    = 0;  // dimensions of points: 2 for projected VDF at (x,y), 3 for (x,y,z)
+    npy_intp npoints = -1;  // # of points at which the VDFs should be computed
+    npy_intp ndim    = -1;  // dimensions of points: 2 for projected VDF at (x,y), 3 for (x,y,z)
     if(points_arr) {
         if(PyArray_NDIM(points_arr) == 1) {
             ndim    = PyArray_DIM(points_arr, 0);
@@ -4439,7 +4553,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
             npoints = PyArray_DIM(points_arr, 0);
         }
     }
-    if(npoints==0 || !(ndim==2 || ndim==3)) {
+    if(npoints<0 || !(ndim==2 || ndim==3)) {
         Py_XDECREF(points_arr);
         PyErr_SetString(PyExc_TypeError, "Argument 'point' should be a 2d/3d point or an array of points");
         return NULL;
@@ -4450,7 +4564,7 @@ PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* nam
     //    "now it is vX,vY,vZ instead of vR(=vX),vZ,vphi(=vY) in earlier versions", 1);
 
     PyObject* result = FncGalaxyModelVDF((PyObject*)points_arr, self,
-        ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false), alpha, beta, gamma) .
+        ndim, gridv_obj, toBool(dens_flag, false), toBool(separate_flag, false), alpha, beta, gamma).
     run(/*chunk*/1);
     Py_DECREF(points_arr);
     return result;
@@ -4634,10 +4748,10 @@ typedef struct {
 void Component_dealloc(ComponentObject* self)
 {
     if(self->comp)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->name) + " at " +
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->name) + " at " +
             utils::toString(self->comp.get()));
     else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty component");
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty component");
     self->comp.reset();
     // self->name is either NULL or points to a constant string that does not require deallocation
     Py_TYPE(self)->tp_free(self);
@@ -4698,7 +4812,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
                 self->comp.reset(new galaxymodel::ComponentStatic(dens, disklike, pot));
                 self->name = disklike ? "Static disklike component" : "Static spheroidal component";
             }
-            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
+            FILTERMSG(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -4723,7 +4837,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithSpheroidalDF(
                 df, dens, lmax, mmax, gridSize, rmin, rmax));
             self->name = "Spheroidal component";
-            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
+            FILTERMSG(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -4750,7 +4864,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             self->comp.reset(new galaxymodel::ComponentWithDisklikeDF(
                 df, dens, mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax));
             self->name = "Disklike component";
-            utils::msg(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
+            FILTERMSG(utils::VL_DEBUG, "Agama", "Created a " + std::string(self->name) + " at "+
                 utils::toString(self->comp.get()));
             return 0;
         }
@@ -4903,8 +5017,9 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     }
     self->useActionInterpolation = toBool(getItemFromPyDict(namedArgs, "useActionInterpolation"), false);
     self->verbose     =   toBool(getItemFromPyDict(namedArgs, "verbose"), true);
-    self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -2);
-    self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -2);
+    // default values for the grid parameters are invalid, forcing the user to set them explicitly
+    self->rminSph     = toDouble(getItemFromPyDict(namedArgs, "rminSph"), -1);
+    self->rmaxSph     = toDouble(getItemFromPyDict(namedArgs, "rmaxSph"), -1);
     self->sizeRadialSph  = toInt(getItemFromPyDict(namedArgs, "sizeRadialSph"), -1);
     self->lmaxAngularSph = toInt(getItemFromPyDict(namedArgs, "lmaxAngularSph"), -1);
     self->RminCyl     = toDouble(getItemFromPyDict(namedArgs, "RminCyl"), -1);
@@ -4952,7 +5067,11 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
     model.totalPotential  = self->pot;   // may be empty - will be automatically initialized if so
     model.actionFinder    = self->af;    // same
     try {
-        doIteration(model);
+        {   // this operation contains OpenMP-parallelized loops, which may be calling back
+            // user-defined Python potentials or DFs, so we need to release GIL
+            PyReleaseGIL unlock;
+            doIteration(model);
+        }
         // retrieve the updated potential and action finder
         self->pot = model.totalPotential;
         self->af  = model.actionFinder;
@@ -5232,10 +5351,10 @@ typedef struct {
 void Target_dealloc(TargetObject* self)
 {
     if(self->target)
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
             " target at " + utils::toString(self->target.get()));
     else
-        utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty target");
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty target");
     self->target.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -5421,7 +5540,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             (std::string("Error in creating a Target object: ")+e.what()).c_str());
         return -1;
     }
-    utils::msg(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
         " target at " + utils::toString(self->target.get()));
     unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
     return 0;
@@ -5444,7 +5563,12 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
         // check if we have a density object as input
         potential::PtrDensity dens = getDensity(arg);
         if(dens) {
-            std::vector<double> result = self->target->computeDensityProjection(*dens);
+            std::vector<double> result;
+            {
+                // this operation contains OpenMP-parallelized loops, so we need to release GIL
+                PyReleaseGIL unlock;
+                result = self->target->computeDensityProjection(*dens);
+            }
             math::blas_dmul(1./self->unitDensityProjection, result);
             return toPyArray(result);
         }
@@ -5452,16 +5576,19 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
         // otherwise we may have a GalaxyModel object as input
         if(PyObject_IsInstance(arg, (PyObject*) &GalaxyModelType)) {
             std::vector<galaxymodel::StorageNumT> result(self->target->numCoefs());
-            self->target->computeDFProjection(galaxymodel::GalaxyModel(
-                *((GalaxyModelObject*)arg)->pot_obj->pot,
-                *((GalaxyModelObject*)arg)->af_obj->af,
-                *((GalaxyModelObject*)arg)->df_obj->df),
-                &result[0]);
+            {   // same remark here
+                PyReleaseGIL unlock;
+                self->target->computeDFProjection(galaxymodel::GalaxyModel(
+                    *((GalaxyModelObject*)arg)->pot_obj->pot,
+                    *((GalaxyModelObject*)arg)->af_obj->af,
+                    *((GalaxyModelObject*)arg)->df_obj->df),
+                    &result[0]);
+            }
             math::blas_dmul(1./self->unitDFProjection, result);
             return toPyArray(result);
         }
 
-        // otherwise this must be a particle object
+        // otherwise this must be a particle object, which will be processed further down
         if(!PyTuple_Check(arg) || PyTuple_Size(arg)!=2) {
             PyErr_SetString(PyExc_TypeError, errorstr);
             return NULL;
@@ -5482,7 +5609,9 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
     PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
     if(!result)
         return NULL;
-    bool fail = false;
+    std::string errorMessage;
+    // the loop below is parallelized, but it does not involve any Python C API functions,
+    // so we do not need to release GIL (although we could...)
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -5501,24 +5630,17 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 self->target->addPoint(xv, particles.mass(i), datacube.data());
             }
             self->target->finalizeDatacube(datacube, &tmpresult[0]);
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-            {   // this is a simple memory access operation, so probably shouldn't be guarded by lock..
-                for(npy_intp i=0; i<size; i++)
-                    pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
-            }
+            // this is a simple memory access operation, so does not need to be guarded by lock..
+            for(npy_intp i=0; i<size; i++)
+                pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
         }
         catch(std::exception& e) {
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-            PyErr_SetString(PyExc_RuntimeError, e.what());
-            fail = true;
+            errorMessage = e.what();
         }
     }
 
-    if(fail) {
+    if(!errorMessage.empty()) {
+        PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
         Py_DECREF(result);
         return NULL;
     }
@@ -5693,10 +5815,14 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
 
     volatile bool fail = false;
+    std::string errorMessage;
     utils::CtrlBreakHandler cbrk;
     // the procedure is different depending on whether the parameters of GH expansion are provided or not
     if(gh_arr) {
-        // compute the GH moments for known (provided) parameters of expansion (amplitude,center,width)
+        // compute the GH moments for known (provided) parameters of expansion (amplitude,center,width).
+        // Note that although this loop is OpenMP-parallelized, it does not involve any calls
+        // to Python C API, nor it involves any operations that may invoke Python callback functions,
+        // so we do not need to release GIL (same applies to the other loop further down).
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -5729,14 +5855,10 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
             }
             catch(std::exception& e) {
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-                PyErr_SetString(PyExc_RuntimeError, e.what());
+                errorMessage = e.what();
                 fail = true;
             }
             if(cbrk.triggered()) {
-                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
                 fail = true;
             }
         }
@@ -5789,14 +5911,10 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         static_cast<galaxymodel::StorageNumT>(dstrow[m]);
             }
             catch(std::exception& e) {
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-                PyErr_SetString(PyExc_RuntimeError, e.what());
+                errorMessage = e.what();
                 fail = true;
             }
             if(cbrk.triggered()) {
-                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
                 fail = true;
             }
         }
@@ -5804,6 +5922,10 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     Py_XDECREF(gh_arr);
     Py_DECREF(mat_arr);
     if(fail) {
+        if(cbrk.triggered())
+            PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
+        else if(!errorMessage.empty())
+            PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
         Py_DECREF(output_arr);
         return NULL;
     }
@@ -5858,11 +5980,11 @@ void Spline_dealloc(SplineObject* self)
         const math::CubicSpline* splcub = dynamic_cast<const math::CubicSpline*>(self->spl.get());
         const math::QuinticSpline* splqui = dynamic_cast<const math::QuinticSpline*>(self->spl.get());
         if(splcub)
-            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size "+
-                utils::toString(splcub->xvalues().size())+" at "+utils::toString(splcub));
+            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size " +
+                utils::toString(splcub->xvalues().size()) + " at " + utils::toString(splcub));
         else if(splqui)
-            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a quintic spline of size "+
-                utils::toString(splqui->xvalues().size())+" at "+utils::toString(splqui));
+            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a quintic spline of size " +
+                utils::toString(splqui->xvalues().size()) + " at " + utils::toString(splqui));
         else if(!self->spl.get())  // pointer remains NULL when constructor failed
             utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty spline");
         else  // shouldn't happen
@@ -5922,7 +6044,7 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
             self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
             kind = "quintic";
         }
-        utils::msg(utils::VL_DEBUG, "Agama", "Created a "+kind+" spline of size "+
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created a "+kind+" spline of size "+
             utils::toString(xvalues.size())+" at "+utils::toString(self->spl.get()));
         return 0;
     }
@@ -6061,9 +6183,8 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
     // initialize the smart pointer with zero before (re-)assigning a value to it
     new (&(spl_obj->spl)) math::PtrFunction;
     spl_obj->spl.reset(new math::CubicSpline(x, y));
-    if(utils::verbosityLevel >= utils::VL_DEBUG)
-        utils::msg(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
-            utils::toString(x.size())+" at "+utils::toString(spl_obj->spl.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
+        utils::toString(x.size())+" at "+utils::toString(spl_obj->spl.get()));
     return (PyObject*)spl_obj;
 }
 
@@ -6439,7 +6560,8 @@ static PyTypeObject OrbitType = {
 /// the interpolators for the trajectory (unit-converted).
 /// In other cases, the output array will be populated with two new PyObject* elements per orbit:
 /// the numpy array of timestamps and another numpy array of phase-space points.
-/// \return  true on success, false if failed to allocate arrays.
+/// \return  true on success, false if failed to allocate arrays
+/// (in this case, PyErr_SetString is called to report the error)
 bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, double> > &traj,
     double Omega, /*output*/ PyObject* output[])
 {
@@ -6447,10 +6569,8 @@ bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, doubl
     if(dtype == NPY_OBJECT) {
         // create an Orbit object containing three spline interpolators
         OrbitObject* orbit = NULL;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
         {   // avoid concurrent non-readonly access to Python C API
+            PyAcquireGIL lock;
             orbit = (OrbitObject*)PyObject_New(PyObject, &OrbitType);
             if(orbit) {
                 // allocate three new Python Spline objects
@@ -6495,6 +6615,11 @@ bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, doubl
             ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
             ((SplineObject*)orbit->y)->spl.reset(new math::QuinticSpline(t, y, vy));
             ((SplineObject*)orbit->z)->spl.reset(new math::QuinticSpline(t, z, vz));
+            FILTERMSG(utils::VL_DEBUG, "Agama", "Created three quintic splines of size " +
+                utils::toString(x.size()) +
+                " at "+utils::toString(((SplineObject*)orbit->x)->spl.get()) +
+                ", "  +utils::toString(((SplineObject*)orbit->y)->spl.get()) +
+                ", "  +utils::toString(((SplineObject*)orbit->z)->spl.get()));
         }
         catch(std::exception& e) {
             Py_DECREF(orbit);
@@ -6505,10 +6630,8 @@ bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, doubl
     } else {   // dtype is anything but NPY_OBJECT
         npy_intp dims[] = {size, dtype==NPY_CFLOAT || dtype==NPY_CDOUBLE ? 3 : 6};
         PyObject *time_obj = NULL, *traj_obj = NULL;
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-        {
+        {   // access to Python C API for one thread at a time
+            PyAcquireGIL lock;
             time_obj = PyArray_SimpleNew(1, dims,
                 dtype==NPY_FLOAT || dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
             traj_obj = PyArray_SimpleNew(2, dims, dtype);
@@ -6847,7 +6970,12 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // finally, run the orbit integration
     volatile npy_intp numComplete = 0;
     volatile time_t tprint = time(NULL), tbegin = tprint;
+    std::string errorMessage;
     if(!fail) {
+        // the GIL must be released when running an OpenMP-parallelized loop
+        // in which we may call Python C API functions from different threads;
+        // these functions will temporarily re-acquire GIL in their respective threads
+        PyReleaseGIL unlock;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
@@ -6893,10 +7021,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // performing any necessary procedures before going out of scope
             }
             catch(std::exception& e) {
-#ifdef _OPENMP
-#pragma omp critical(PythonAPI)
-#endif
-                PyErr_SetString(PyExc_RuntimeError, (std::string("Error in orbit(): ")+e.what()).c_str());
+                errorMessage = std::string("Error in orbit(): ")+e.what();
                 fail = true;
             }
             // remaining procedures are trivial and should not raise exceptions
@@ -6942,10 +7067,13 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(cbrk.triggered()) {
         PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
         fail = true;
+        errorMessage = "";  // prevent replacing KeyboardInterrupt with RuntimeError below
     }
     if(fail) {
         for(size_t t=0; t<result_arrays.size(); t++)
             Py_XDECREF(result_arrays[t]);
+        if(!errorMessage.empty())
+            PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
         return NULL;
     }
 
@@ -6993,7 +7121,11 @@ PyObject* readSnapshot(PyObject* /*self*/, PyObject* arg)
         // we do not perform any unit conversion on the particle coordinates/masses:
         // they are read 'as is' from the file, and any such conversion will take place when
         // feeding them to other routines, such as constructing the potential or integrating orbits
-        particles::ParticleArrayAux snap = particles::readSnapshot(name);
+        particles::ParticleArrayAux snap;
+        {
+            PyReleaseGIL unlock;  // temporary release GIL during IO operations as a goodwill measure
+            snap = particles::readSnapshot(name);
+        }
         npy_intp size[] = { static_cast<npy_intp>(snap.size()), 6 };
         PyObject* posvel_arr = PyArray_SimpleNew(2, size, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, size, NPY_DOUBLE);
@@ -7037,14 +7169,19 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         // determine whether we have only 3 coordinates, or additionally 3 velocities
         PyArrayObject *coord_arr, *mass_arr;
         convertParticlesStep1(particles_obj, /*create arrays*/ coord_arr, mass_arr);
-        if(PyArray_DIM(coord_arr, 1) == 6) {
-            particles::writeSnapshot(filename,
-                convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
-                format ? format : "text", *conv);
-        } else {
-            particles::writeSnapshot(filename,
-                convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
-                format ? format : "text", *conv);
+        {
+            // the remaining operations do not create or modify any Python-managed variables,
+            // so we may temporarily release GIL for the duration of the IO operation
+            PyReleaseGIL unlock;
+            if(PyArray_DIM(coord_arr, 1) == 6) {
+                particles::writeSnapshot(filename,
+                    convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
+                    format ? format : "text", *conv);
+            } else {
+                particles::writeSnapshot(filename,
+                    convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
+                    format ? format : "text", *conv);
+            }
         }
         Py_INCREF(Py_None);
         return Py_None;
@@ -7272,7 +7409,6 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 /// wrapper for user-provided Python functions into the C++ compatible form
 class FncWrapper: public math::IFunctionNdim {
-    NumpyWarningsDisabler lock;
     const unsigned int nvars;
     PyObject* fnc;
 public:
@@ -7282,36 +7418,33 @@ public:
     /// (making sure it invokes Python callback from a single thread at a time)
     virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
     {
-        PyObject* result = NULL;
+        PyAcquireGIL lock;
         bool typeerror   = false;
-#pragma omp critical(PythonAPI)
+        npy_intp dims[]  = { (npy_intp)npoints, nvars};
+        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
+        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        Py_DECREF(args);
+        if(result == NULL) {
+            PyErr_Print();
+        } else if(PyArray_Check(result) &&
+            PyArray_NDIM((PyArrayObject*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
         {
-            npy_intp dims[]  = { (npy_intp)npoints, nvars};
-            PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-            Py_DECREF(args);
-            if(result == NULL) {
-                PyErr_Print();
-            } else if(PyArray_Check(result) &&
-                PyArray_NDIM((PyArrayObject*)result) == 1 &&
-                PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
-            {
-                int type = PyArray_TYPE((PyArrayObject*) result);
-                for(size_t p=0; p<npoints; p++) {
-                    switch(type) {
-                        case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
-                        case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
-                        case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
-                        default: values[p] = NAN; typeerror = true;
-                    }
+            int type = PyArray_TYPE((PyArrayObject*) result);
+            for(size_t p=0; p<npoints; p++) {
+                switch(type) {
+                    case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
+                    case NPY_FLOAT:  values[p] = pyArrayElem<float >(result, p); break;
+                    case NPY_BOOL:   values[p] = pyArrayElem<bool  >(result, p); break;
+                    default: values[p] = NAN; typeerror = true;
                 }
-            } else if(PyNumber_Check(result) && npoints==1)
-                // in case of a single input point, may return a single number
-                values[0] = PyFloat_AsDouble(result);
-            else
-                typeerror = true;
-            Py_XDECREF(result);
-        }
+            }
+        } else if(PyNumber_Check(result) && npoints==1)
+            // in case of a single input point, may return a single number
+            values[0] = PyFloat_AsDouble(result);
+        else
+            typeerror = true;
+        Py_XDECREF(result);
         if(result == NULL)
             throw std::runtime_error("Exception occurred inside integrand");
         else if(typeerror)
@@ -7430,8 +7563,8 @@ PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     double result, error;
     try{
-        FncWrapper fnc(xlow.size(), callback);
-        math::integrateNdim(fnc, &xlow.front(), &xupp.front(), eps, maxNumEval, &result, &error, &numEval);
+        math::integrateNdim(FncWrapper(xlow.size(), callback),
+            &xlow.front(), &xupp.front(), eps, maxNumEval, &result, &error, &numEval);
     }
     catch(std::exception& e) {
         if(!PyErr_Occurred())    // set our own error string if it hadn't been set by Python
@@ -7486,10 +7619,13 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     double result, error;
     try{
-        FncWrapper fnc(xlow.size(), callback);
         size_t numEval=0;
         math::Matrix<double> samples;
-        math::sampleNdim(fnc, &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
+        {   // run in a no-GIL block since sampleNdim is OpenMP-parallelized
+            PyReleaseGIL unlock;
+            math::sampleNdim(FncWrapper(xlow.size(), callback),
+                &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
+        }
         return Py_BuildValue("Nddi", toPyArray(samples), result, error, numEval);
     }
     catch(std::exception& e) {
@@ -7500,7 +7636,6 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 ///@}
-
 
 
 static const char* docstringModule =
@@ -7578,7 +7713,9 @@ PyInit_agama(void)
         module_methods,        /* m_methods */
     };
 
-    //PyEval_InitThreads();  // seems it's not needed
+#if (PY_MAJOR_VERSION*0x100 + PY_MINOR_VERSION) < 0x307
+    PyEval_InitThreads();  // this is not needed starting from Python 3.7
+#endif
     thismodule = PyModule_Create(&moduledef);
     if(!thismodule) return NULL;
     PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);

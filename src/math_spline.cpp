@@ -2864,7 +2864,7 @@ void SplineApprox::Impl::computeAmplitudes(const FitData &fitData, double lambda
     RSS = fmax(0, fitData.ynorm2 - 2*wTz + blas_dnrm2(tempv)); // should be nonnegative by definition
     EDF = computeEDF(singValues, lambda);  // equivalent degrees of freedom
     /*
-    utils::msg(utils::VL_VERBOSE, "SplineApprox",
+    FILTERMSG(utils::VL_VERBOSE, "SplineApprox",
         "lambda="+utils::toString(lambda,10)+
         ", RSS="+utils::toString(RSS,10)+
         ", EDF="+utils::toString(EDF,10)+
@@ -2898,7 +2898,7 @@ void SplineApprox::Impl::solveForAmplitudesWithGCV(const std::vector<double> &yv
     double lambda = findMin(SplineGCVRootFinder(*this, fitData, 0),
         /*log-scaling for lambda*/ scaling, /*no initial guess*/ NAN, /*accuracy*/ EPS_LAMBDA);
     if(lambda!=lambda) {
-        utils::msg(utils::VL_DEBUG, "SplineApprox", "Can't find optimal smoothing parameter lambda");
+        FILTERMSG(utils::VL_DEBUG, "SplineApprox", "Can't find optimal smoothing parameter lambda");
         lambda = 0;  // no smoothing in case of weird problems
     }
     computeAmplitudes(fitData, lambda, ampl, RSS, EDF);
@@ -3032,6 +3032,9 @@ struct SplineLogFitParams {
 template<int N>
 class SplineLogDensityFitter: public IFunctionNdimDeriv {
 public:
+    /** Initialize the internal vectors and matrices.
+        \note OpenMP-parallelized loop over xvalues & weights.
+    */
     SplineLogDensityFitter(
         const std::vector<double>& xvalues, const std::vector<double>& weights,
         const std::vector<double>& grid, FitOptions options,
@@ -3315,11 +3318,10 @@ double SplineLogDensityFitter<N>::logLrms(const std::vector<double>& ampl) const
     double GdG0[2];
     logG(&ampl[0], NULL, NULL, GdG0);
     double rms = sumWeights * sqrt((GdG0[1] - pow_2(GdG0[0])) / numData);
-    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        double avg = sumWeights * (GdG0[0] + log(sumWeights) - logG(&ampl[0]));
-        utils::msg(utils::VL_VERBOSE, "splineLogDensity",
-            "Expected log L="+utils::toString(avg)+" +- "+utils::toString(rms));
-    }
+    FILTERMSG(utils::VL_VERBOSE, "splineLogDensity",
+        "Expected log L=" + utils::toString(
+            sumWeights * (GdG0[0] + log(sumWeights) - logG(&ampl[0]))) +  // average logL
+        " +- " + utils::toString(rms));
     return rms;
 }
 
@@ -3364,7 +3366,7 @@ double SplineLogDensityFitter<N>::logLcv(const std::vector<double>& ampl) const
         val += fmin(add, 0);  // (this shouldn't occur under normal circumstances)
     }
     catch(std::exception&) {  // CholeskyDecomp may fail if the fit did not converge, i.e. gradient != 0
-        utils::msg(utils::VL_WARNING, "splineLogDensity", "Hessian is not positive-definite");
+        FILTERMSG(utils::VL_WARNING, "splineLogDensity", "Hessian is not positive-definite");
         val -= 1e10;   // this will never be a good fit
     }
     return val;
@@ -3557,12 +3559,10 @@ private:
         bool converged= numIter>0;  // check for convergence (numIter positive)
         double logL   = fitter.logL(result);
         double logLcv = fitter.logLcv(result);
-        if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-            utils::msg(utils::VL_VERBOSE, "splineLogDensity",
-                "lambda="+utils::toString(params.lambda)+", #iter="+utils::toString(numIter)+
-                ", logL= "+utils::toString(logL)+", CV="+utils::toString(logLcv)+
-                (!converged ? " did not converge" : params.best < logLcv ? " improved" : ""));
-        }
+        FILTERMSG(utils::VL_VERBOSE, "splineLogDensity",
+            "lambda="+utils::toString(params.lambda)+", #iter="+utils::toString(numIter)+
+            ", logL= "+utils::toString(logL)+", CV="+utils::toString(logLcv)+
+            (!converged ? " did not converge" : params.best < logLcv ? " improved" : ""));
         if(useCV) {  // we are searching for the highest cross-validation score
             if( params.best < logLcv && converged) {
                 // update the best-fit params and the starting point for fitting
@@ -3737,7 +3737,7 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
     double xlow=xmax, xupp=-xmax;
     for(int k=0; k<NUMTRIAL; k++) {
         PointNeighborhood f0(fnc, XINIT[k]);
-        //utils::msg(utils::VL_VERBOSE, "createInterpolationGrid", "x=" + utils::toString(XINIT[k]) +
+        //FILTERMSG(utils::VL_VERBOSE, "createInterpolationGrid", "x=" + utils::toString(XINIT[k]) +
         //    ", f=" + utils::toString(f0.f0,18) + ", f''=" + utils::toString(f0.fder2));
         if(isFinite(f0.fder2)) {
             if(fabs(f0.fder2) > eps) {
@@ -3801,7 +3801,7 @@ std::vector<double> createInterpolationGrid(const IFunction& fnc, double eps)
             d3fp = d3f;
         }
     }
-    utils::msg(utils::VL_DEBUG, "createInterpolationGrid", "Grid: [" +
+    FILTERMSG(utils::VL_DEBUG, "createInterpolationGrid", "Grid: [" +
         utils::toString(result.front()) + ":" + utils::toString(result.back()) + "], " +
         utils::toString(result.size()) + " nodes");
     return result;

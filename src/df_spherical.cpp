@@ -157,7 +157,7 @@ public:
             return;
 
         rmin = gridr[nfit-1];   // will use analytic approximation to rho(Phi) below this radius
-        utils::msg(utils::VL_DEBUG, "SphericalDF",
+        FILTERMSG(utils::VL_DEBUG, "SphericalDF",
             "Augmented density rho=" + utils::toString(coefs[0], 12) +
             (coefs[1]>=0 ? "+" : "") + utils::toString(coefs[1], 12) + "*x" +
             (coefs[2]>=0 ? "+" : "") + utils::toString(coefs[2], 12) + "*x^2" +
@@ -313,7 +313,7 @@ void createSphericalDF(
         double slope = Phi / rho * drhodPhi;
         if(rho == 0)
             slope = 0;  // prevent 0/0 indeterminacy
-        utils::msg(utils::VL_DEBUG, "SphericalDF",
+        FILTERMSG(utils::VL_DEBUG, "SphericalDF",
             "Augmented density is ~ |Phi|^"+utils::toString(slope)+" at large r");
 
         // 3c. the general case when we do actually need the Abel inversion.
@@ -484,7 +484,7 @@ void createSphericalIsotropicDF(
         double slopeIn  = valIn ==0 ?  0  :  gridh.front() / valIn  * derIn;
         double slopeOut = valOut==0 ?  0  :  gridh.back()  / valOut * derOut;
         if(slopeIn > -1 && (slopeOut < -1 || valOut==0)) {
-            utils::msg(utils::VL_DEBUG, "createSphericalIsotropicDF",
+            FILTERMSG(utils::VL_DEBUG, "createSphericalIsotropicDF",
                 "f(h) " + (valIn>0 ? "~ h^" + utils::toString(slopeIn) : "is zero") + " at small h "
                 "and " + (valOut>0 ? "~ h^" + utils::toString(slopeOut): "is zero") + " at large h");
 
@@ -529,7 +529,7 @@ math::LogLogSpline fitSphericalIsotropicDF(
     std::nth_element(logh.begin(), logh.end() - Nmin, logh.end());
     double loghmax = logh[nbody-Nmin];
     std::vector<double> gridh = math::createUniformGrid(gridSize, loghmin, loghmax);
-    utils::msg(utils::VL_DEBUG, "fitSphericalIsotropicDF",
+    FILTERMSG(utils::VL_DEBUG, "fitSphericalIsotropicDF",
         "Grid in h=["+utils::toString(exp(gridh.front()))+":"+utils::toString(exp(gridh.back()))+"]");
 
     // 3a. perform spline log-density fit, and
@@ -558,7 +558,7 @@ math::LogLogSpline fitSphericalIsotropicDF(
     }
 
     // debugging output
-    utils::msg(utils::VL_DEBUG, "fitSphericalIsotropicDF",
+    FILTERMSG(utils::VL_DEBUG, "fitSphericalIsotropicDF",
         "f(h) ~ h^" + utils::toString(derLeft)  + " at small h"
         " and ~ h^" + utils::toString(derRight) + " at large h");
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {

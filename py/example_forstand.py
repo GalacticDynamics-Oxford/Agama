@@ -592,8 +592,8 @@ elif command == 'TEST':
     # surface density along the major and minor axes
     Sigmamajor = densityStars.projectedDensity(numpy.column_stack((gridrmajor, gridrmajor*0)), beta=beta, alpha=alpha)
     Sigmaminor = densityStars.projectedDensity(numpy.column_stack((gridrminor*0, gridrminor)), beta=beta, alpha=alpha)
-    ax[0].loglog(gridrmajor, Sigmamajor, color='b', label='$\Sigma(R)$ major')
-    ax[0].loglog(gridrminor, Sigmaminor, color='r', label='$\Sigma(R)$ minor')
+    ax[0].loglog(gridrmajor, Sigmamajor, color='b', label=r'$\Sigma(R)$ major')
+    ax[0].loglog(gridrminor, Sigmaminor, color='r', label=r'$\Sigma(R)$ minor')
     ax[0].set_xlabel('projected radius')
     ax[0].set_ylabel('surface density')
     ax[0].legend(loc='lower left', frameon=False)

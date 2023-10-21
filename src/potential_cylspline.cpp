@@ -318,6 +318,7 @@ private:
     This is a rather costly calculation.
     The output is either one (if useDerivs==false) or three vectors of matrices,
     will be resized as needed.
+    \note OpenMP-parallelized loop over the 2d grid in R,z.
 */
 void computePotentialCoefsFromDensity(const BaseDensity &dens,
     int mmax,
@@ -590,7 +591,7 @@ PtrPotential determineAsympt(
             avg.add(Phi[mmax](indR[p], indz[p]) * sqrt(pow_2(points[p].R) + pow_2(points[p].z)) / r0);
         W.assign(ncoefs, 0);
         W[0] = avg.mean();
-        utils::msg(utils::VL_WARNING, "CylSpline",
+        FILTERMSG(utils::VL_WARNING, "CylSpline",
             "Failed to determine extrapolation coefficients, set W0=" + utils::toString(W[0]));
     }
     math::eliminateNearZeros(W);
@@ -629,7 +630,7 @@ void chooseGridRadii(const BaseDensity& src,
         zmax=Rmax;
     if(zmin==0)
         zmin=Rmin;
-    utils::msg(utils::VL_DEBUG, "CylSpline",
+    FILTERMSG(utils::VL_DEBUG, "CylSpline",
         "Grid in R=["+utils::toString(Rmin)+":"+utils::toString(Rmax)+
              "], z=["+utils::toString(zmin)+":"+utils::toString(zmax)+"]");
 }
@@ -669,7 +670,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
         zmax=Rmax;
     if(zmin==0)
         zmin=Rmin;
-    utils::msg(utils::VL_DEBUG, "CylSpline",
+    FILTERMSG(utils::VL_DEBUG, "CylSpline",
         "Grid in R=["+utils::toString(Rmin)+":"+utils::toString(Rmax)+
              "], z=["+utils::toString(zmin)+":"+utils::toString(zmax)+"]");
 }

@@ -176,7 +176,9 @@ private:
 class Interpolator2d: public Interpolator {
 public:
     /** Create internal interpolation tables for the given potential,
-        which itself is not used afterwards */
+        which itself is not used afterwards.
+        \note OpenMP-parallelized loop over the energy grid.
+    */
     explicit Interpolator2d(const BasePotential& potential);
 
     /** Compute parameters of an orbit in the equatorial plane with the given energy and ang.momentum.

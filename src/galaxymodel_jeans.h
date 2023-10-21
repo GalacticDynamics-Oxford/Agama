@@ -59,6 +59,7 @@ public:
         (models with maximum streaming motion, so that the azimuthal velocity dispersion is
         sigma_phi = 1/2 kappa / Omega * sigma_R, as in the epicyclic approximation).
         \throw  an exception in case of invalid parameters or problems in constructing the model.
+        \note OpenMP-parallelized loop over the radial grid.
     */
     JeansAxi(const potential::BaseDensity &density, const potential::BasePotential &potential,
         double beta_m, double kappa);

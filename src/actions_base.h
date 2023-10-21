@@ -120,7 +120,7 @@ public:
         \param[in]  actAng are the action/angles;
         \param[out] freq   are the frequencies;
         \param[out] derivAct are the derivatives of pos/vel w.r.t three actions;
-        \param[out] derivAng are the derivatives of pos/vel w.r.t three actions;
+        \param[out] derivAng are the derivatives of pos/vel w.r.t three angles;
         \param[out] derivParam are the derivatives of pos/vel w.r.t the parameters of toy potential:
                     if not NULL, must point to an array of length `numParams()`;
         \return     pos/vel coordinates.
@@ -131,6 +131,9 @@ public:
         DerivAct<CoordT>* derivAct=NULL,
         DerivAng<CoordT>* derivAng=NULL,
         coord::PosVelT<CoordT>* derivParam=NULL) const = 0;
+
+    /// The number of free parameters in the toy potential
+    virtual unsigned int numParams() const = 0;
 };
 
 /** Base class for point transformations that map canonically conjugate coordinate/momentum
