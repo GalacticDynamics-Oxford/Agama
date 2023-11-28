@@ -10,10 +10,7 @@
 #include <cmath>
 int numEval=0;
 
-class test1: public math::IFunctionNoDeriv, public math::IFunctionNdim{
-    virtual double value(double x) const{
-        return 1/sqrt(1-x*x);
-    }
+class Integrand: public math::IFunctionNoDeriv, public math::IFunctionNdim{
     virtual void eval(const double x[], double val[]) const{
         val[0] = value(x[0]);
     }
@@ -21,11 +18,38 @@ class test1: public math::IFunctionNoDeriv, public math::IFunctionNdim{
     virtual unsigned int numValues() const { return 1; }
 };
 
-class test2: public math::IFunctionNoDeriv{
+class TestInt1: public Integrand{
     virtual double value(double x) const{
-        return pow(1-x*x*x*x,-2./3);
+        return (3./2/M_PI) / sqrt(1-x*x);
     }
 };
+
+class TestInt2: public Integrand{
+    virtual double value(double x) const{
+        // normalization is some combination of gamma and hypergeometric functions
+        return pow(1-x*x*x*x,-2./3) / 2.2744542874349;
+    }
+};
+
+class TestInt3: public Integrand{
+    virtual double value(double x) const{
+        return 33*M_PI * x * sin(33*M_PI * x*x);
+    }
+};
+
+class TestInt4: public Integrand{
+    virtual double value(double x) const{
+        return 1/(1.001-x) / log(1001);
+    }
+};
+
+class TestInt5: public Integrand{
+    const double a=0.4, b=0.01;
+    virtual double value(double x) const{
+        return 1 / (pow_2(x-a) + pow_2(b)) * b / (atan(a/b) + atan((1-a)/b));
+    }
+};
+
 
 class test3: public math::IFunction{
 public:
@@ -269,7 +293,7 @@ private:
 };
 
 bool err() {
-    std::cout << "\033[1;31m **\033[0m\n";
+    std::cout << "\033[1;31m **\033[0m";
     return false;
 }
 
@@ -294,6 +318,55 @@ template<typename Scaling> bool testScaling(const Scaling& scaling)
     if(maxerr > 1e-15 || maxder > 1e-7)
         return err();
     return true;
+}
+
+bool testIntegration(const Integrand& fnc, double a, double b,
+    double tolerNaiveGL, double tolerNaiveGK, double tolerAdapt,
+    double tolerScaledGL, double tolerScaledGK)
+{
+    const int GLORDER_NAIVE = math::MAX_GL_ORDER, GLORDER_SCALED = 15;
+    const double exact = 1.0;
+    bool ok = true;
+    double result, resultN, error, errorN;
+    int numEval;
+    math::ScaledIntegrand<math::ScalingCub> sfnc(math::ScalingCub(-1, 1), fnc);
+
+    result = math::integrateGL(fnc, a, b, GLORDER_NAIVE);
+    // same but using IFunctionNdim interface
+    math::integrateGL(fnc, a, b, GLORDER_NAIVE, &resultN);
+    std::cout << "fixed GL=" << result <<
+        " (delta=" << (result-exact) << ", neval=" << GLORDER_NAIVE;
+    ok &= (fabs(1-result/exact) < tolerNaiveGL && fabs(result-resultN) < 1e-15) || err();
+
+    result = math::integrate(fnc, a, b, tolerNaiveGK, &error, &numEval);
+    std::cout << "), naive=" << result << " +- " << error <<
+        " (delta=" << (result-exact) << ", neval=" << numEval;
+    ok &= (fabs(1-result/exact) < tolerNaiveGK && fabs(result-exact) < error) || err();
+
+    result = math::integrateAdaptive(fnc, a, b, tolerAdapt, &error, &numEval);
+    std::cout << "), adaptive=" << result << " +- " << error <<
+        " (delta=" << (result-exact) << ", neval=" << numEval;
+    ok &= (fabs(1-result/exact) < tolerAdapt && fabs(result-exact) < error) || err();
+
+    math::integrateNdim(fnc, &a, &b, tolerAdapt, 100000, &resultN, &errorN, &numEval);
+    std::cout << "), adaptiveNdim=" << resultN << " +- " << errorN <<
+        " (delta=" << (resultN-exact) << ", neval=" << numEval;
+    ok &= (fabs(1-resultN/exact) < tolerAdapt && fabs(resultN-exact) < error) || err();
+
+    result = math::integrateGL(sfnc, math::scale(sfnc.scaling, a), math::scale(sfnc.scaling, b),
+        GLORDER_SCALED);
+    std::cout << "), scaledGL=" << result <<
+        " (delta=" << (result-exact) << ", neval=" << GLORDER_SCALED;
+    ok &= (fabs(1-result/exact) < tolerScaledGL) || err();
+
+    result = math::integrate(sfnc, math::scale(sfnc.scaling, a), math::scale(sfnc.scaling, b),
+        tolerScaledGK, &error, &numEval);
+    std::cout << "), scaled=" << result << " +- " << error <<
+        " (delta=" << (result-exact) << ", neval=" << numEval;
+    ok &= (fabs(1-result/exact) < tolerScaledGK && fabs(result-exact) < error) || err();
+
+    std::cout << ")\n";
+    return ok;
 }
 
 int main()
@@ -351,47 +424,16 @@ int main()
     std::cout << "\n";
 
     // integration routines
-    const double toler = 1e-6;
-    double exact = (M_PI*2/3), error=0, result, result1;
-    test1 t1;
-    result = math::integrateGL(t1, -1, 1./2, math::MAX_GL_ORDER);
-    math::integrateGL(t1, -1., 1./2, math::MAX_GL_ORDER, &result1);  // same but using IFunctionNdim interface
-    std::cout << "Int1: fixed GL="<<result<<" (delta="<<(result-exact)<<", neval="<<math::MAX_GL_ORDER;
-    ok &= (fabs(1-result/exact)<0.03 && fabs(result-result1)<1e-15) || err();
-    result = math::integrate(t1, -1, 1./2, toler, &error, &numEval);
-    std::cout << "), naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<2e-3 && fabs(result-exact)<error) || err();
-    result = math::integrateAdaptive(t1, -1, 1./2, toler, &error, &numEval);
-    std::cout << "), adaptive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<toler && fabs(result-exact)<error) || err();
-    math::ScaledIntegrand<math::ScalingCub> t1s(math::ScalingCub(-1, 1), t1);
-    result = math::integrate(t1s, math::scale(t1s.scaling, -1), math::scale(t1s.scaling, 0.5),
-        toler, &error, &numEval);
-    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<1e-12 && fabs(result-exact)<fmax(error,1e-12)) || err();
-    result = math::integrateGL(t1s, math::scale(t1s.scaling, -1), math::scale(t1s.scaling, 0.5), 13);
-    std::cout<<"), scaled GL="<<result<<" (delta="<<(result-exact)<<", neval=13)\n";
-    ok &= (fabs(1-result/exact)<1e-12) || err();
-
-    exact = 2.274454287;
-    test2 t2;
-    result = math::integrate(t2, -1, 2./3, toler, &error, &numEval);
-    std::cout << "Int2: naive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<2e-2 && fabs(result-exact)<error) || err();
-    result = math::integrateAdaptive(t2, -1, 2./3, toler*15, &error, &numEval);
-    std::cout << "), adaptive="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<1e-5 && fabs(result-exact)<error) || err();
-    math::ScaledIntegrand<math::ScalingCub> t2s(math::ScalingCub(-1, 1), t2);
-    result = math::integrate(t2s, math::scale(t2s.scaling, -1), math::scale(t2s.scaling, 2./3),
-        toler, &error, &numEval);
-    std::cout<<"), scaled="<<result<<" +- "<<error<<" (delta="<<(result-exact)<<", neval="<<numEval;
-    ok &= (fabs(1-result/exact)<2e-4 && fabs(result-exact)<error) || err();
-    result = math::integrateGL(t2s, math::scale(t2s.scaling, -1), math::scale(t2s.scaling, 2./3), 20);
-    std::cout<<"), scaled GL="<<result<<" (delta="<<(result-exact)<<", neval=20)\n";
-    ok &= (fabs(1-result/exact)<1e-2) || err();
+    std::cout << "Integration in several variants\n";
+    ok &= testIntegration(TestInt1(), -1, 0.5, 0.02, 0.002,1e-4, 1e-9, 1e-9);
+    ok &= testIntegration(TestInt2(), -1,2./3, 0.04, 0.02, 1e-4, 0.01, 2e-3);
+    ok &= testIntegration(TestInt3(),  0, 1.0, 20.0, 0.01, 1e-4, 0.50, 1e-3);
+    ok &= testIntegration(TestInt4(),  0, 1.0, 0.02, 0.001,1e-4, 2e-3, 1e-3);
+    ok &= testIntegration(TestInt5(),  0, 1.0, 0.50, 0.05, 1e-4, 0.80, 0.20);
 
     // root-finding
-    exact=0.3;
+    const double toler = 1e-6;
+    double exact=0.3, error=0, result;
     numEval=0;
     result = math::findRoot(test3(0), 0, 0.8, toler);
     std::cout << "Root3="<<result<<" (delta="<<(result-exact)<<"; neval="<<numEval<<")\n";

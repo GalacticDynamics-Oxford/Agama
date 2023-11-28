@@ -81,6 +81,7 @@
 #if PY_MAJOR_VERSION >= 3
 #define PyString_Check PyUnicode_Check
 #define PyString_AsString PyUnicode_AsUTF8
+#define PyString
 #define PyInt_Check PyLong_Check
 #define PyInt_AsLong PyLong_AsLong
 #define PyInt_FromLong PyLong_FromLong
@@ -124,35 +125,103 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
 //  -------------------------------
 ///@{
 
+/// Class and context manager for setting the number of OpenMP threads;
+/// this used to be a standalone function, but it could not be used as a context manager,
+/// so is now a class with all work done in the constructor (the name still begins with lowercase)
 static const char* docstringSetNumThreads =
     "Set the number of OpenMP threads (if the module was compiled with OpenMP support).\n"
     "A single argument specifies the number of threads in parallellized operations; "
     "0 means system default (typically equal to the number of processor cores, "
     "unless explicitly changed, e.g., by the environment variable OMP_NUM_THREADS).\n"
-    "Returns the current setting for the number of threads.";
+    "One can use a context manager to temporarily change the number of threads in a code block, "
+    "for instance, setting it to 1 when calling some Agama routines with user-defined Python "
+    "callback functions, which effectively disable parallelization anyway - it makes sense "
+    "to do it explicitly to avoid thread-switching overheads:\n"
+    "    with setNumThreads(1):\n"
+    "        # call some Agama routines\n";
 
-/// set the number of OpenMP threads
-PyObject* setNumThreads(PyObject* /*self*/, PyObject* arg)
+typedef struct {
+    PyObject_HEAD
+    int prevNumThreads;
+    int currNumThreads;
+} setNumThreadsObject;
+
+int setNumThreads_init(setNumThreadsObject* self, PyObject* arg, PyObject* /*namedArgs*/)
 {
-    if(!PyInt_Check(arg)) {
+    if(!self)
+        return -1;
+    if(!PyArg_ParseTuple(arg, "i", &self->currNumThreads)) {
         PyErr_SetString(PyExc_TypeError,
             "Expected one int argument -- the number of threads (0 means system default)");
-        return NULL;
+        return -1;
+    }
+    if(self->currNumThreads < 0) {
+        PyErr_SetString(PyExc_ValueError,
+            "Number of threads must be non-negative (0 means system default)");
+        return -1;
     }
 #ifdef _OPENMP
+    self->prevNumThreads = omp_get_max_threads();
     static int maxThreads = -1;
-    if(maxThreads==-1)  // first time this routine is called, remember the actual max # of threads
-        maxThreads = omp_get_max_threads();
-    int num = PyInt_AsLong(arg);
-    if(num<=0)
-        num = maxThreads;  // restore the original (system-default) max # of threads
-    omp_set_num_threads(num);
-    return PyInt_FromLong(num);
+    if(maxThreads == -1)  // first time this routine is called, remember the actual max # of threads
+        maxThreads = self->prevNumThreads;
+    if(self->currNumThreads == 0)
+        self->currNumThreads = maxThreads;  // restore the original (system-default) max # of threads
+    omp_set_num_threads(self->currNumThreads);
 #else
     PyErr_WarnEx(NULL, "OpenMP not available\n", 1);
-    return PyInt_FromLong(1);
 #endif
+    return 0;
 }
+
+PyObject* setNumThreads_enter(PyObject* self)
+{
+    // nothing to do - all work done in the init function
+    Py_INCREF(self);
+    return self;
+}
+
+PyObject* setNumThreads_exit(setNumThreadsObject* self, PyObject* /*arg*/)
+{
+#ifdef _OPENMP
+    // restore the previous number of threads saved by the init function
+    omp_set_num_threads(self->prevNumThreads);
+#else
+    (void)self;
+#endif
+    Py_INCREF(Py_False);
+    return Py_False;
+}
+
+PyObject* setNumThreads_repr(setNumThreadsObject* self)
+{
+    return Py_BuildValue("s", utils::toString(self->currNumThreads).c_str());
+}
+
+static PyMethodDef setNumThreads_methods[] = {
+  { "__enter__", (PyCFunction)setNumThreads_enter, METH_NOARGS, "enter context manager" },
+  { "__exit__",  (PyCFunction)setNumThreads_exit,  METH_VARARGS, "exit context manager" },
+  { NULL }
+};
+
+static PyMemberDef setNumThreads_members[] = {
+  { const_cast<char*>("prevNumThreads"), T_INT, offsetof(setNumThreadsObject, prevNumThreads), READONLY,
+    const_cast<char*>("previous number of OpenMP threads (before calling setNumThreads)") },
+  { const_cast<char*>("currNumThreads"), T_INT, offsetof(setNumThreadsObject, currNumThreads), READONLY,
+    const_cast<char*>("current number of OpenMP threads (after calling setNumThreads)") },
+  { NULL }
+};
+
+static PyTypeObject setNumThreadsType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.setNumThreads",
+    sizeof(setNumThreadsObject), 0, 0,
+    0, 0, 0, 0, (reprfunc)setNumThreads_repr, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringSetNumThreads,
+    0, 0, 0, 0, 0, 0, setNumThreads_methods, setNumThreads_members, 0, 0, 0, 0, 0, 0,
+    (initproc)setNumThreads_init
+};
+
 
 #ifdef _OPENMP
 /** Lock-type class for temporarily releasing Python's GIL.
@@ -3249,7 +3318,7 @@ static PyMemberDef ActionMapper_members[] = {
 };
 
 static PyMethodDef ActionMapper_methods[] = {
-    { NULL, NULL, 0, NULL }  // no named methods
+    { NULL }  // no named methods
 };
 
 static PyTypeObject ActionMapperType = {
@@ -3646,7 +3715,7 @@ static PyMethodDef DistributionFunction_methods[] = {
       "over the entire phase space of actions)\n"
       "No arguments\n"
       "Returns: float number" },
-    { NULL, NULL, 0, NULL }
+    { NULL }
 };
 
 static PyTypeObject DistributionFunctionType = {
@@ -3845,7 +3914,7 @@ PtrSelectionFunction getSelectionFunction(PyObject* sf_obj)
 }
 
 static PyMethodDef SelectionFunction_methods[] = {
-    { NULL, NULL, 0, NULL }  // no named methods
+    { NULL }  // no named methods
 };
 
 static PyTypeObject SelectionFunctionType = {
@@ -6159,7 +6228,7 @@ static PySequenceMethods Spline_sequence_methods = {
 };
 
 static PyMethodDef Spline_methods[] = {
-    { NULL, NULL, 0, NULL }  // no named methods
+    { NULL }  // no named methods
 };
 
 static PyTypeObject SplineType = {
@@ -6521,7 +6590,7 @@ static PySequenceMethods Orbit_sequence_methods = {
 };
 
 static PyMethodDef Orbit_methods[] = {
-    { NULL, NULL, 0, NULL }  // no named methods
+    { NULL }  // no named methods
 };
 
 static PyMemberDef Orbit_members[] = {
@@ -7643,8 +7712,8 @@ static const char* docstringModule =
 
 /// list of standalone functions exported by the module
 static PyMethodDef module_methods[] = {
-    { "setNumThreads",          (PyCFunction)setNumThreads,
-      METH_O,                       docstringSetNumThreads },
+    //{ "setNumThreads",          (PyCFunction)setNumThreads,
+    //  METH_O,                       docstringSetNumThreads },
     { "setUnits",               (PyCFunction)setUnits,
       METH_VARARGS | METH_KEYWORDS, docstringSetUnits },
     { "getUnits",                            getUnits,
@@ -7721,6 +7790,11 @@ PyInit_agama(void)
     PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);
     PyModule_AddObject(thismodule, "G", PyFloat_FromDouble(1.0));
     conv.reset(new units::ExternalUnits());
+
+    setNumThreadsType.tp_new = PyType_GenericNew;
+    if(PyType_Ready(&setNumThreadsType) < 0) return NULL;
+    Py_INCREFx(&setNumThreadsType);
+    PyModule_AddObject(thismodule, "setNumThreads", (PyObject*)&setNumThreadsType);
 
     DensityType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&DensityType) < 0) return NULL;

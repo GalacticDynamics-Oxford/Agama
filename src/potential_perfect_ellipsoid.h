@@ -1,7 +1,7 @@
 /** \file    potential_perfect_ellipsoid.h
-    \brief   Potential for Oblate Perfect Ellipsoid model
+    \brief   Potential for the axisymmetric Perfect Ellipsoid model
     \author  Eugene Vasiliev
-    \date    2015
+    \date    2015-2023
 */
 #pragma once
 #include "potential_base.h"
@@ -27,7 +27,7 @@ public:
     const coord::ProlSph& coordsys() const { return coordSys; }
 
     virtual std::string name() const { return myName(); }
-    static std::string myName() { return "PerfectEllipsoid"; }
+    static std::string myName() { return "OblatePerfectEllipsoid"; }
     virtual double totalMass() const { return mass; }
 
     /** evaluates the function G(tau) and up to two its derivatives,
@@ -51,7 +51,7 @@ private:
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const {
         coord::evalAndConvert<coord::ProlSph, coord::Cyl>
-            (*this, pos, coordSys, potential, deriv, deriv2, time);
+            (*this, pos, potential, deriv, deriv2, time, coordSys);
     }
     virtual void evalSph(const coord::PosSph &pos,
         double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const {
@@ -66,6 +66,40 @@ private:
         double time=0) const;
 
     virtual unsigned int numDerivs() const { return 2; }
+};
+
+
+/** Axisymmetric Staeckel potential with the perfect ellipsoidal density profile,
+    can be oblate, prolate or spherical.
+*/
+class PerfectEllipsoid: public BasePotentialCyl {
+public:
+    PerfectEllipsoid(double _mass, double _scaleRadiusA, double _scaleRadiusB) :
+        mass(_mass), scaleRadiusA(_scaleRadiusA), scaleRadiusB(_scaleRadiusB)
+    {}
+
+    virtual coord::SymmetryType symmetry() const {
+        return scaleRadiusA == scaleRadiusB ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "PerfectEllipsoid"; }
+    virtual double totalMass() const { return mass; }
+private:
+    const double mass;            ///< total mass  (M)
+    const double scaleRadiusA;    ///< scale radius along the R axis
+    const double scaleRadiusB;    ///< scale radius along the Z axis
+
+    /** evaluate potential and up to two its derivatives in cylindrical coordinates,
+        either by delegating the actual work to evalUniSph in the universal spheroidal coordinates,
+        or by using analytic approximations in the vicinity of focal points. */
+    virtual void evalCyl(const coord::PosCyl &pos,
+        double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const;
+
+    /** the function that does the actual computation in axisymmetric spheroidal coordinates */
+    void evalAxi(const coord::PosAxi& pos,
+        double* potential, coord::GradAxi* deriv, coord::HessAxi* deriv2) const;
+
+    /** exact expression for the density */
+    virtual double densityCyl(const coord::PosCyl &pos, double time) const;
 };
 
 }  // namespace potential

@@ -150,6 +150,7 @@ struct AllParam: public ModifierParams
     double r0;               ///< scale radius of the basis functions for BasisSet
     bool fixOrder;           ///< whether to limit the internal SH density expansion to the output order
     std::string file;        ///< name of a file with coordinates of points, or coefficients of expansion
+    double lengthUnit;       ///< dimensional length unit for Logarithmic (taken from ExternalUnits)
     /// default constructor initializes the fields to some reasonable values
     AllParam(const units::ExternalUnits& converter) :
         ModifierParams(converter),
@@ -162,7 +163,7 @@ struct AllParam: public ModifierParams
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
         gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0), fixOrder(false)
+        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0), fixOrder(false), lengthUnit(1)
     {}
 };
 
@@ -195,7 +196,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, "King"))                  return PT_KING;
     if(utils::stringsEqual(name, Evolving     ::myName())) return PT_EVOLVING;
     if(utils::stringsEqual(name, UniformAcceleration     ::myName())) return PT_UNIFORMACCELERATION;
-    if(utils::stringsEqual(name, OblatePerfectEllipsoid  ::myName())) return PT_PERFECTELLIPSOID;
+    if(utils::stringsEqual(name, PerfectEllipsoid        ::myName())) return PT_PERFECTELLIPSOID;
     if(utils::stringsEqual(name, DensitySphericalHarmonic::myName())) return PT_DENS_SPHHARM;
     if(utils::stringsEqual(name, DensityAzimuthalHarmonic::myName())) return PT_DENS_CYLGRID;
     return PT_INVALID;
@@ -317,6 +318,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     param.r0                  = kvmap.getDouble("r0",   param.r0)
                               * conv.lengthUnit;
     param.fixOrder            = kvmap.getBool  ("fixOrder", param.fixOrder);
+    param.lengthUnit          = conv.lengthUnit;
 
     // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity or a cutoff radius is provided,
     // replace it with an equivalent Spheroid model, because the dedicated potential models
@@ -1146,7 +1148,7 @@ PtrPotential createAnalyticPotential(const AllParam& param)
     switch(param.potentialType) {
     case PT_LOG:
         return PtrPotential(new Logarithmic(
-            param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ));
+            param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ, param.lengthUnit));
     case PT_HARMONIC:
         return PtrPotential(new Harmonic(param.Omega, param.axisRatioY, param.axisRatioZ));
     case PT_KEPLERBINARY:
@@ -1175,11 +1177,11 @@ PtrPotential createAnalyticPotential(const AllParam& param)
         else
             throw std::invalid_argument("Non-spherical Navarro-Frenk-White is not supported");
     case PT_PERFECTELLIPSOID:
-        if(param.axisRatioY==1 && param.axisRatioZ<1)
-            return PtrPotential(new OblatePerfectEllipsoid(
+        if(param.axisRatioY==1)
+            return PtrPotential(new PerfectEllipsoid(
                 param.mass, param.scaleRadius, param.scaleRadius*param.axisRatioZ)); 
         else
-            throw std::invalid_argument("May only create oblate axisymmetric Perfect Ellipsoid model");
+            throw std::invalid_argument("Non-axisymmetric Perfect Ellipsoid is not supported");
     case PT_KING:
         return createKingPotential(param.mass, param.scaleRadius, param.W0, param.trunc);
     case PT_UNKNOWN:

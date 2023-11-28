@@ -945,12 +945,16 @@ void integrateGL(const IFunctionNdim& fnc, double x1, double x2, int N, double r
     // so take the closest implemented one with at least the requested number of points)
     while(GLPOINTS[N] == NULL) N++;
     const double *points = GLPOINTS[N], *weights = GLWEIGHTS[N];
-    double* values = (double*) alloca(M * sizeof(double));  // temp. array allocated on stack
+    // temp. arrays allocated on stack
+    double* scpoints = (double*) alloca(N * sizeof(double));  // scaled points
+    double* values   = (double*) alloca(N * M * sizeof(double));
+    for(int i=0; i<N; i++)
+        scpoints[i] = x2 * points[i] + x1 * (1-points[i]);
+    // vectorized evaluation of function at all points
+    fnc.evalmany(N, scpoints, values);
     for(int i=0; i<N; i++) {
-        double x = x2 * points[i] + x1 * (1-points[i]);
-        fnc.eval(&x, values);
         for(int k=0; k<M; k++)
-            result[k] += weights[i] * (x2-x1) * values[k];
+            result[k] += weights[i] * (x2-x1) * values[i * M + k];
     }
 }
 

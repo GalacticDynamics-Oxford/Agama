@@ -6,15 +6,12 @@
 
 namespace coord{
 
-ProlSph::ProlSph(double Delta) : 
+ProlSph::ProlSph(double Delta) :
     Delta2(Delta*Delta)
 {
     if(Delta<=0)
         throw std::invalid_argument("Invalid parameters for Prolate Spheroidal coordinate system");
 }
-
-PosT<ProlMod>::PosT(double _rho, double _tau, double _phi, const ProlMod& coordsys) :
-    rho(_rho), tau(_tau), phi(_phi), chi(sqrt(pow_2(_rho) + pow_2(coordsys.D))) {}
 
 //--------  angular momentum functions --------//
 
@@ -27,42 +24,55 @@ template<> double Ltotal(const PosVelCyl& p) {
 template<> double Ltotal(const PosVelSph& p) {
     return sqrt(pow_2(p.vtheta) + pow_2(p.vphi)) * p.r;
 }
-template<> double Lz(const PosVelCar& p) { volatile double a = p.x * p.vy, b = p.y * p.vx; return a-b; }
+template<> double Ltotal(const PosVelAxi& p) {
+    return Ltotal(toPosVelCyl(p));
+}
+
+template<> double Lz(const PosVelCar& p) { return p.x * p.vy - p.y * p.vx; }
 template<> double Lz(const PosVelCyl& p) { return p.R * p.vphi; }
-template<> double Lz(const PosVelSph& p) { return p.r * sin(p.theta) * p.vphi; }
+template<> double Lz(const PosVelSph& p) {
+    double sintheta, costheta;
+    math::sincos(p.theta, sintheta, costheta);  // this gives exactly sintheta=0 for theta=M_PI
+    return p.r * sintheta * p.vphi;
+}
+template<> double Lz(const PosVelAxi& p) {
+    double chi = p.cs.Delta2>=0 ? p.rho : sqrt(pow_2(p.rho) - p.cs.Delta2);
+    double sinnu = 1 / sqrt(1 + pow_2(p.cotnu));
+    return p.vphi * chi * sinnu;
+}
 
 // multiply two numbers, replacing {anything including INFINITY} * 0 with 0
 inline double mul(double x, double y) { return y==0 ? 0 : x*y; }
 
 //--------  position conversion functions ---------//
 
-template<> PosCar toPos(const PosCyl& p) {
+template<> PosCar toPos(const PosCyl& p, const Car) {
     double sinphi, cosphi;
     math::sincos(p.phi, sinphi, cosphi);
     return PosCar(mul(p.R, cosphi), mul(p.R, sinphi), p.z);
 }
-template<> PosCar toPos(const PosSph& p) {
+template<> PosCar toPos(const PosSph& p, const Car) {
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
     return PosCar(mul(p.r, sintheta*cosphi), mul(p.r, sintheta*sinphi), mul(p.r, costheta));
 }
-template<> PosCyl toPos(const PosCar& p) {
+template<> PosCyl toPos(const PosCar& p, const Cyl) {
     return PosCyl(sqrt(pow_2(p.x) + pow_2(p.y)), p.z, atan2(p.y, p.x));
 }
-template<> PosCyl toPos(const PosSph& p) {
+template<> PosCyl toPos(const PosSph& p, const Cyl) {
     double sintheta, costheta;
     math::sincos(p.theta, sintheta, costheta);
     return PosCyl(mul(p.r, sintheta), mul(p.r, costheta), p.phi);
 }
-template<> PosSph toPos(const PosCar& p) {
-    return PosSph(sqrt(pow_2(p.x)+pow_2(p.y)+pow_2(p.z)), 
+template<> PosSph toPos(const PosCar& p, const Sph) {
+    return PosSph(sqrt(pow_2(p.x)+pow_2(p.y)+pow_2(p.z)),
         atan2(sqrt(pow_2(p.x) + pow_2(p.y)), p.z), atan2(p.y, p.x));
 }
-template<> PosSph toPos(const PosCyl& p) {
+template<> PosSph toPos(const PosCyl& p, const Sph) {
     return PosSph(sqrt(pow_2(p.R) + pow_2(p.z)), atan2(p.R, p.z), p.phi);
 }
-template<> PosCyl toPos(const PosProlSph& p) {
+template<> PosCyl toPos(const PosProlSph& p, const Cyl) {
     if(fabs(p.nu)>p.coordsys.Delta2 || p.lambda<p.coordsys.Delta2)
         throw std::invalid_argument("Incorrect ProlSph coordinates");
     const double R = sqrt( (p.lambda-p.coordsys.Delta2) * (1 - fabs(p.nu) / p.coordsys.Delta2) );
@@ -70,16 +80,17 @@ template<> PosCyl toPos(const PosProlSph& p) {
     return PosCyl(R, z, p.phi);
 }
 // declare an instantiation which will be defined later
-template<> PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
-    PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2);
-template<> PosProlSph toPos(const PosCyl& from, const ProlSph& cs) {
-    return toPosDeriv<Cyl,ProlSph>(from, cs, NULL, NULL);
+template<> PosProlSph toPosDeriv(const PosCyl& from,
+    PosDerivT<Cyl, ProlSph>* derivs, PosDeriv2T<Cyl, ProlSph>* derivs2, const ProlSph cs);
+template<> PosProlSph toPos(const PosCyl& from, const ProlSph cs) {
+    return toPosDeriv<Cyl,ProlSph>(from, NULL, NULL, cs);
 }
+
 
 //-------- position conversion with derivatives --------//
 
 template<>
-PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, Cyl>* deriv2) 
+PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, Cyl>* deriv2, const Cyl)
 {
     const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
     if(R==0) {
@@ -111,12 +122,11 @@ PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, C
 }
 
 template<>
-PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, Sph>* deriv2) {
+PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, Sph>* deriv2, const Sph)
+{
     const double x2=pow_2(p.x), y2=pow_2(p.y), z2=pow_2(p.z);
     const double R2=x2+y2, R=sqrt(R2);
     const double r2=R2+z2, r=sqrt(r2), invr=1/r;
-//    if(R==0)
-//        throw std::runtime_error("PosDeriv Car=>Sph: R=0, degenerate case!");
     if(deriv!=NULL) {
         deriv->drdx=p.x*invr;
         deriv->drdy=p.y*invr;
@@ -153,7 +163,8 @@ PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, S
 }
 
 template<>
-PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2) {
+PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, Car>* deriv2, const Car)
+{
     double sinphi, cosphi;
     math::sincos(p.phi, sinphi, cosphi);
     const double x=mul(p.R, cosphi), y=mul(p.R, sinphi);
@@ -173,10 +184,9 @@ PosCar toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Car>* deriv, PosDeriv2T<Cyl, C
 }
 
 template<>
-PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, Sph>* deriv2) {
+PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, Sph>* deriv2, const Sph)
+{
     const double r = sqrt(pow_2(p.R) + pow_2(p.z));
-//    if(r==0)
-//        throw std::runtime_error("PosDeriv Cyl=>Sph: r=0, degenerate case!");
     const double rinv= 1./r;
     const double costheta=p.z*rinv, sintheta=p.R*rinv;
     if(deriv!=NULL) {
@@ -197,7 +207,8 @@ PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, S
 }
 
 template<>
-PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, Car>* deriv2) {
+PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, Car>* deriv2, const Car)
+{
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
@@ -230,7 +241,8 @@ PosCar toPosDeriv(const PosSph& p, PosDerivT<Sph, Car>* deriv, PosDeriv2T<Sph, C
 }
 
 template<>
-PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, Cyl>* deriv2) {
+PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, Cyl>* deriv2, const Cyl)
+{
     double sintheta, costheta;
     math::sincos(p.theta, sintheta, costheta);
     const double R=mul(p.r, sintheta), z=mul(p.r, costheta);
@@ -250,7 +262,7 @@ PosCyl toPosDeriv(const PosSph& p, PosDerivT<Sph, Cyl>* deriv, PosDeriv2T<Sph, C
 }
 
 template<>
-PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2T<ProlSph, Cyl>* deriv2)
+PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2T<ProlSph, Cyl>* deriv2, const Cyl)
 {
     const double absnu = fabs(p.nu);
     const double sign = p.nu>=0 ? 1 : -1;
@@ -278,8 +290,7 @@ PosCyl toPosDeriv(const PosProlSph& p, PosDerivT<ProlSph, Cyl>* deriv, PosDeriv2
 }
 
 template<>
-PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
-    PosDerivT<Cyl, ProlSph>* deriv, PosDeriv2T<Cyl, ProlSph>* deriv2)
+PosProlSph toPosDeriv(const PosCyl& from, PosDerivT<Cyl, ProlSph>* deriv, PosDeriv2T<Cyl, ProlSph>* deriv2, const ProlSph cs)
 {
     // lambda and nu are roots "t" of equation  R^2/(t-Delta^2) + z^2/t = 1
     double R2     = pow_2(from.R), z2 = pow_2(from.z);
@@ -327,182 +338,270 @@ PosProlSph toPosDeriv(const PosCyl& from, const ProlSph& cs,
 }
 
 template<>
-PosCyl toPosDeriv(const PosProlMod& p, PosDerivT<ProlMod, Cyl>* deriv, PosDeriv2T<ProlMod, Cyl>* deriv2)
+PosCyl toPosDeriv(const PosAxi& p,
+    PosDerivT<Axi, Cyl> *deriv, PosDeriv2T<Axi, Cyl> *deriv2, const Cyl)
 {
-    double sinv = (1 - pow_2(p.tau)) / (1 + pow_2(p.tau));
-    double cosv = 2 * p.tau / (1 + pow_2(p.tau));
+    double
+        eta      = sqrt(pow_2(p.rho) + fabs(p.cs.Delta2)),
+        chi      = p.cs.Delta2 >= 0  ?  p.rho  :    eta,
+        psi      = p.cs.Delta2 >= 0  ?    eta  :  p.rho,
+        sinnu    = 1 / sqrt(1 + pow_2(p.cotnu)),
+        cosnu    = sinnu!=0 ? p.cotnu * sinnu : (p.cotnu>0 ? 1 : -1),
+        R        = mul(chi, sinnu),
+        z        = mul(psi, cosnu),
+        dchidrho = p.cs.Delta2 >= 0  ?  1  :  p.rho / chi,
+        dpsidrho = p.cs.Delta2 <= 0  ?  1  :  p.rho / psi;
     if(deriv) {
-        deriv->dRdrho = sinv;
-        deriv->dRdtau =-p.rho * cosv * (1+sinv);
-        deriv->dzdrho = p.rho * cosv / p.chi;
-        deriv->dzdtau = p.chi * sinv * (1+sinv);
+        deriv->dRdrho = dchidrho * sinnu;
+        deriv->dRdnu  = chi * cosnu;
+        deriv->dzdrho = dpsidrho * cosnu;
+        deriv->dzdnu  =-psi * sinnu;
     }
     if(deriv2) {
-        deriv2->d2Rdrho2    = 0;
-        deriv2->d2Rdtau2    = p.rho * pow_2(1+sinv) * (1-2*sinv);
-        deriv2->d2Rdrhodtau = -cosv * (1+sinv);
-        deriv2->d2zdrho2    = (pow_2(p.chi) - pow_2(p.rho)) / pow_3(p.chi) * cosv;
-        deriv2->d2zdtau2    = -p.chi * cosv * (1+sinv) * (1+2*sinv);
-        deriv2->d2zdrhodtau = p.rho / p.chi * sinv * (1+sinv);
+        deriv2->d2Rdrho2   = p.cs.Delta2 >= 0  ?  0  : -p.cs.Delta2 / pow_3(chi) * sinnu;
+        deriv2->d2Rdrhodnu = dchidrho * cosnu;
+        deriv2->d2Rdnu2    = -R;
+        deriv2->d2zdrho2   = p.cs.Delta2 <= 0  ?  0  :  p.cs.Delta2 / pow_3(psi) * cosnu;
+        deriv2->d2zdrhodnu = -dpsidrho * sinnu;
+        deriv2->d2zdnu2    = -z;
     }
-    return PosCyl( p.rho * sinv, p.chi * cosv, p.phi);
+    return coord::PosCyl(R, z, p.phi);
 }
 
-// fragment of code shared between toPosDeriv(Cyl=>ProlMod) and toPosVel(ProlMod=>Cyl)
-inline void derivCyl2ProlMod(double rho, double chi, double sinv, double cosv,
-    PosDerivT<Cyl, ProlMod>& deriv)
+// common fragment shared between toPosDeriv<Cyl, Axi> and toPosVel<Cyl, Axi>
+inline void getPosAxi(const PosCyl& p, const Axi cs,
+    double& chi, double& psi, double& cosnu, double& sinnu)
 {
-    double invdet= 1 / (pow_2(rho*cosv) + pow_2(chi*sinv)); // 1 / (rho^2 + (D*sinv)^2)
-    deriv.drhodR = invdet * chi * sinv * chi;
-    deriv.drhodz = invdet * rho * cosv * chi;
-    deriv.dtaudR =-invdet * rho * cosv / (1 + sinv);
-    deriv.dtaudz = invdet * chi * sinv / (1 + sinv);
+    double r2 = pow_2(p.R) + pow_2(p.z);
+    double sum = 0.5 * (r2 + cs.Delta2);
+    double dif = 0.5 * (r2 - cs.Delta2);
+    // these branches select the more accurate way of computing quantities without cancellation,
+    // but formally any choice is mathematically correct
+    double det = cs.Delta2 >= 0 ?
+        sqrt(pow_2(dif) + mul(pow_2(p.R), cs.Delta2)):
+        sqrt(pow_2(sum) - mul(pow_2(p.z), cs.Delta2));
+    // 2*det = (chi * cosnu)^2 + (psi * sinnu)^2 = chi^2 + D^2 sinnu^2 = psi^2 - D^2 cosnu^2
+    if(det == INFINITY) {
+        chi = psi = INFINITY;
+        if(p.R == INFINITY) { cosnu = 0; sinnu = 1; }
+        else { cosnu = p.z > 0 ? 1 : -1; sinnu = 0; }
+        return;
+    }
+    if(sum >= 0) {
+        psi   = sqrt(det + sum);
+        cosnu = p.z!=0 ? p.z / psi : 0;
+    } else {  // implies Delta^2 < 0, r < |Delta|
+        cosnu = sqrt((det - sum) / -cs.Delta2) * (p.z>=0 ? 1 : -1);
+        psi   = p.z / cosnu;
+    }
+    if(dif >= 0) {
+        chi   = sqrt(det + dif);
+        sinnu = p.R!=0 ? p.R / chi : 0;
+    } else {  // implies Delta^2 > 0, r < Delta
+        sinnu = sqrt((det - dif) / cs.Delta2);
+        chi   = p.R / sinnu;
+    }
 }
 
 template<>
-PosProlMod toPosDeriv(const PosCyl& p, const ProlMod& cs,
-    PosDerivT<Cyl, ProlMod>* deriv, PosDeriv2T<Cyl, ProlMod>* deriv2)
+PosAxi toPosDeriv(const PosCyl& p,
+    PosDerivT<Cyl, Axi> *deriv, PosDeriv2T<Cyl, Axi> *deriv2, const Axi cs)
 {
-    double r2  = pow_2(p.R) + pow_2(p.z);
-    double sum = 0.5 * (r2 + pow_2(cs.D));
-    double dif = 0.5 * (r2 - pow_2(cs.D));
-    double det = p.z==0 || cs.D==0 ? sum : sqrt(pow_2(dif) + pow_2(p.R*cs.D));
-    double chi = sqrt(det + sum);
-    double cosv= p.z / chi;
-    double rho, sinv;  // accurate treatment to avoid cancellation
-    if(dif >= 0) {
-        rho  = sqrt(det + dif);
-        sinv = p.R!=0 ? p.R / rho : 0;
+    double rho, eta, chi, psi, cosnu, sinnu;
+    getPosAxi(p, cs, chi, psi, cosnu, sinnu);
+    // this branch, by contrast, critically distinguishes between prolate and oblate cases;
+    // rho = min(chi, psi) and eta = max(chi, psi)
+    if(cs.Delta2 >= 0) {
+        rho = chi;
+        eta = psi;
     } else {
-        sinv = sqrt(det - dif) / cs.D;
-        rho  = p.R / sinv;
+        eta = chi;
+        rho = psi;
     }
-    if(deriv)
-        derivCyl2ProlMod(rho, chi, sinv, cosv, *deriv);
+    double M = 1 / (pow_2(chi * cosnu) + pow_2(psi * sinnu));  // = 1 / (2*det)
+    if(deriv) {
+        deriv->drhodR = M * psi * sinnu * eta;
+        deriv->drhodz = M * chi * cosnu * eta;
+        deriv->dnudR  = M * chi * cosnu;
+        deriv->dnudz  =-M * psi * sinnu;
+    }
     if(deriv2) {
-        assert(!"Deriv2 Cyl=>ProlMod not implemented");
+        double common = pow_2(chi * chi * cosnu) + pow_2(psi * psi * sinnu) - 3 * pow_2(chi * psi);
+        deriv2->d2rhodR2 = pow_2(M) * psi * (
+            chi * eta * pow_2(cosnu) * (1 - 4*M * cs.Delta2 * pow_2(sinnu)) +
+            (cs.Delta2 >= 0 ? 0 : cs.Delta2 * pow_2(sinnu) ) );
+        deriv2->d2rhodz2 = pow_2(M) * chi * (
+            psi * eta * pow_2(sinnu) * (1 + 4*M * cs.Delta2 * pow_2(cosnu)) -
+            (cs.Delta2 <= 0 ? 0 : cs.Delta2 * pow_2(cosnu) ) );
+        deriv2->d2rhodRdz= pow_2(M) * cosnu * sinnu * eta * (pow_2(rho) + M * common);
+        deriv2->d2nudR2  = pow_3(M) * cosnu * sinnu * common;
+        deriv2->d2nudz2  = -deriv2->d2nudR2;
+        deriv2->d2nudRdz = pow_3(M) * psi * chi *
+            (pow_2(psi * sinnu) * (3 - 2*pow_2(sinnu)) - pow_2(chi * cosnu) * (3 - 2*pow_2(cosnu)));
     }
-    return PosProlMod(rho, cosv / (1 + sinv), p.phi, chi);
+    return PosAxi(rho, cosnu / sinnu, p.phi, cs);
+}
+
+// shortcuts for coordinate conversions without derivatives
+template<> PosCyl toPos(const PosAxi& from, const Cyl) {
+    return toPosDeriv<Axi, Cyl>(from, NULL);
+}
+
+template<> PosAxi toPos(const PosCyl& from, const Axi cs) {
+    return toPosDeriv<Cyl, Axi>(from, NULL, NULL, cs);
 }
 
 //--------  position+velocity conversion functions  ---------//
 
-template<> PosVelCar toPosVel(const PosVelCyl& p) {
+template<> PosVelCar toPosVel(const PosVelCyl& p, const Car) {
     double sinphi, cosphi;
     math::sincos(p.phi, sinphi, cosphi);
-    const double vx=p.vR*cosphi-p.vphi*sinphi;
-    const double vy=p.vR*sinphi+p.vphi*cosphi;
-    return PosVelCar(p.R*cosphi, p.R*sinphi, p.z, vx, vy, p.vz);
+    const double vx = p.vR * cosphi - p.vphi * sinphi;
+    const double vy = p.vR * sinphi + p.vphi * cosphi;
+    return PosVelCar(p.R * cosphi, p.R * sinphi, p.z, vx, vy, p.vz);
 }
 
-template<> PosVelCar toPosVel(const PosVelSph& p) {
+template<> PosVelCar toPosVel(const PosVelSph& p, const Car) {
     double sintheta, costheta, sinphi, cosphi;
     math::sincos(p.theta, sintheta, costheta);
     math::sincos(p.phi, sinphi, cosphi);
-    const double R=p.r*sintheta, vR=p.vr*sintheta + p.vtheta*costheta;
-    const double vx=vR*cosphi - p.vphi*sinphi;
-    const double vy=vR*sinphi + p.vphi*cosphi;
-    const double vz=p.vr*costheta - p.vtheta*sintheta;
-    return PosVelCar(R*cosphi, R*sinphi, p.r*costheta, vx, vy, vz); 
+    const double R = p.r * sintheta, vR = p.vr * sintheta + p.vtheta * costheta;
+    const double vx = vR * cosphi - p.vphi * sinphi;
+    const double vy = vR * sinphi + p.vphi * cosphi;
+    const double vz = p.vr * costheta - p.vtheta * sintheta;
+    return PosVelCar(R * cosphi, R * sinphi, p.r * costheta, vx, vy, vz);
 }
 
-template<> PosVelCyl toPosVel(const PosVelCar& p) {
-    const double R=sqrt(pow_2(p.x)+pow_2(p.y));
+template<> PosVelCyl toPosVel(const PosVelCar& p, const Cyl) {
+    const double R=sqrt(pow_2(p.x) + pow_2(p.y));
     if(R==0)  // determine phi from vy/vx rather than y/x
-        return PosVelCyl(R, p.z, atan2(p.vy, p.vx), sqrt(pow_2(p.vx)+pow_2(p.vy)), p.vz, 0);
-    const double cosphi=p.x/R, sinphi=p.y/R;
-    const double vR  = p.vx*cosphi+p.vy*sinphi;
-    const double vphi=-p.vx*sinphi+p.vy*cosphi;
+        return PosVelCyl(R, p.z, atan2(p.vy, p.vx), sqrt(pow_2(p.vx) + pow_2(p.vy)), p.vz, 0);
+    const double cosphi = p.x / R, sinphi = p.y / R;
+    const double vR   = p.vx * cosphi + p.vy * sinphi;
+    const double vphi =-p.vx * sinphi + p.vy * cosphi;
     return PosVelCyl(R, p.z, atan2(p.y, p.x), vR, p.vz, vphi);
 }
 
-template<> PosVelCyl toPosVel(const PosVelSph& p) {
+template<> PosVelCyl toPosVel(const PosVelSph& p, const Cyl) {
     double sintheta, costheta;
     math::sincos(p.theta, sintheta, costheta);
-    const double R=p.r*sintheta, z=p.r*costheta;
-    const double vR=p.vr*sintheta+p.vtheta*costheta;
-    const double vz=p.vr*costheta-p.vtheta*sintheta;
+    const double R  = p.r  * sintheta, z = p.r * costheta;
+    const double vR = p.vr * sintheta + p.vtheta * costheta;
+    const double vz = p.vr * costheta - p.vtheta * sintheta;
     return PosVelCyl(R, z, p.phi, vR, vz, p.vphi);
 }
 
-template<> PosVelCyl toPosVel(const PosVelSphMod& p) {
-    const double costheta = 2*p.tau / (1+pow_2(p.tau));
-    const double sintheta = (1-pow_2(p.tau)) / (1+pow_2(p.tau));
-    const double R  = p.r  * sintheta, z = p.r*costheta;
-    const double vR = p.pr * sintheta - p.ptau / p.r * p.tau;
-    const double vz = p.pr * costheta + p.ptau / p.r * (1-pow_2(p.tau)) * 0.5;
-    return PosVelCyl(R, z, p.phi, vR, vz, p.pphi!=0 ? p.pphi/R : 0);
-}
-
-template<> PosVelSphMod toPosVel(const PosVelCyl& p) {
-    const double r   = sqrt(pow_2(p.R) + pow_2(p.z));
-    const double tau = p.z / (p.R + r);
-    const double pr  = (p.R * p.vR + p.z * p.vz) / r;
-    const double ptau= (p.R * p.vz - p.z * p.vR) * (1 + p.R/r);
-    return PosVelSphMod(r, tau, p.phi, pr, ptau, p.vphi*p.R);
-}
-
-template<> PosVelSph toPosVel(const PosVelCar& p) {
-    const double R2=pow_2(p.x)+pow_2(p.y), R=sqrt(R2);
-    const double r2=R2+pow_2(p.z), r=sqrt(r2), invr=1/r;
-    if(R==0) {
-        const double vR=sqrt(pow_2(p.vx)+pow_2(p.vy));
-        const double phi=atan2(p.vy, p.vx);
-        if(p.z==0) 
-            return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(vR*vR+p.vz*p.vz), 0, 0);
-        return PosVelSph(r, p.z>0?0:M_PI, phi, p.vz*(p.z>0?1:-1), vR*(p.z>0?1:-1), 0);
+template<> PosVelSph toPosVel(const PosVelCar& p, const Sph) {
+    const double R2 = pow_2(p.x) + pow_2(p.y), R = sqrt(R2), invR = 1/R;
+    const double r2 = R2 + pow_2(p.z), r = sqrt(r2), invr = 1/r;
+    if(R==0) {  // point along the z axis - determine phi from velocity rather than position
+        const double vR = sqrt(pow_2(p.vx) + pow_2(p.vy));
+        const double phi = atan2(p.vy, p.vx);
+        if(p.z==0)  // point at origin - an even more special case
+            return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(pow_2(vR) + pow_2(p.vz)), 0, 0);
+        return PosVelSph(r, p.z>=0 ? 0 : M_PI, phi,
+            p.vz * (p.z>=0 ? 1 : -1), vR * (p.z>=0 ? 1 : -1), 0);
     }
-    const double temp   = p.x*p.vx+p.y*p.vy;
-    const double vr     = (temp+p.z*p.vz)*invr;
-    const double vtheta = (temp*p.z/R-p.vz*R)*invr;
-    const double vphi   = (p.x*p.vy-p.y*p.vx)/R;
+    const double temp   = p.x * p.vx + p.y * p.vy;
+    const double vr     = (temp + p.z * p.vz) * invr;
+    const double vtheta = (temp * p.z * invR - p.vz * R) * invr;
+    const double vphi   = (p.x * p.vy - p.y * p.vx) * invR;
     return PosVelSph(r, atan2(R, p.z), atan2(p.y, p.x), vr, vtheta, vphi);
 }
 
-template<> PosVelSph toPosVel(const PosVelCyl& p) {
-    const double r=sqrt(pow_2(p.R)+pow_2(p.z));
+template<> PosVelSph toPosVel(const PosVelCyl& p, const Sph) {
+    const double r=sqrt(pow_2(p.R) + pow_2(p.z));
     if(r==0) {
-        return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(p.vR*p.vR+p.vz*p.vz), 0, 0);
+        return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(pow_2(p.vR) + pow_2(p.vz)), 0, 0);
     }
-    const double rinv= 1./r;
-    const double costheta=p.z*rinv, sintheta=p.R*rinv;
-    const double vr=p.vR*sintheta+p.vz*costheta;
-    const double vtheta=p.vR*costheta-p.vz*sintheta;
+    const double invr = 1./r;
+    const double costheta = p.z * invr, sintheta = p.R * invr;
+    const double vr = p.vR * sintheta + p.vz * costheta;
+    const double vtheta = p.vR * costheta - p.vz * sintheta;
     return PosVelSph(r, atan2(p.R, p.z), p.phi, vr, vtheta, p.vphi);
 }
 
-template<> PosVelProlSph toPosVel(const PosVelCyl& from, const ProlSph& cs) {
+template<> PosVelProlSph toPosVel(const PosVelCyl& from, const ProlSph cs) {
     PosDerivT<Cyl, ProlSph> derivs;
-    const PosProlSph pprol = toPosDeriv<Cyl, ProlSph> (from, cs, &derivs);
+    const PosProlSph pprol = toPosDeriv<Cyl, ProlSph> (from, &derivs, NULL, cs);
     double lambdadot = derivs.dlambdadR*from.vR + derivs.dlambdadz*from.vz;
     double nudot     = derivs.dnudR    *from.vR + derivs.dnudz    *from.vz;
     double phidot    = from.vphi!=0 ? from.vphi/from.R : 0;
     return PosVelProlSph(pprol, lambdadot, nudot, phidot);
 }
 
-template<> PosVelProlMod toPosVel(const PosVelCyl& p, const ProlMod& cs) {
-    const PosProlMod pprol = toPosDeriv<Cyl, ProlMod>(p, cs, NULL);
-    PosDerivT<ProlMod, Cyl> derivs;  // need derivs of _inverse_ transformation
-    toPosDeriv<ProlMod, Cyl>(pprol, &derivs);
-    double prho = derivs.dRdrho * p.vR + derivs.dzdrho * p.vz;
-    double ptau = derivs.dRdtau * p.vR + derivs.dzdtau * p.vz;
-    double pphi = p.vphi * p.R;
-    return PosVelProlMod(pprol, VelProlMod(prho, ptau, pphi));
+template<> PosVelAxi toPosVel(const PosVelCyl& pc, const Axi cs) {
+    if(cs.Delta2 == 0) {  // shortcut for the spherical case
+        if(pc.R == 0 && pc.z == 0) {
+            // degenerate case - cannot determine nu  from the position alone, use velocity instead
+            double vel   = sqrt(pow_2(pc.vR) + pow_2(pc.vz));
+            double cotnu = vel>0 ? pc.vz / pc.vR : 0;
+            return PosVelAxi(PosAxi(0, cotnu, pc.phi, cs), VelAxi(vel, 0, pc.vphi));
+        }
+        double rho  = sqrt(pow_2(pc.R) + pow_2(pc.z));
+        double cosnu= pc.z / rho, sinnu = pc.R / rho;
+        double vrho = sinnu * pc.vR + cosnu * pc.vz;
+        double vnu  = cosnu * pc.vR - sinnu * pc.vz;
+        return PosVelAxi(PosAxi(rho, cosnu / sinnu, pc.phi, cs), VelAxi(vrho, vnu, pc.vphi));
+    }
+    double chi, psi, cosnu, sinnu;
+    getPosAxi(pc, cs, chi, psi, cosnu, sinnu);
+    double
+    rho  = cs.Delta2 >= 0  ? chi : psi,
+    den  = 1 / sqrt(pow_2(chi * cosnu) + pow_2(psi * sinnu)),
+    sinxi= den != INFINITY ? den * psi * sinnu : 1.0,
+    cosxi= den != INFINITY ? den * chi * cosnu : 0.0,
+    vrho = sinxi * pc.vR + cosxi * pc.vz,
+    vnu  = cosxi * pc.vR - sinxi * pc.vz;
+    return PosVelAxi(PosAxi(rho, cosnu / sinnu, pc.phi, cs), VelAxi(vrho, vnu, pc.vphi));
 }
 
-template<> PosVelCyl toPosVel(const PosVelProlMod& p) {
-    double sinv = (1 - pow_2(p.tau)) / (1 + pow_2(p.tau));
-    double cosv = 2 * p.tau / (1 + pow_2(p.tau));
-    PosDerivT<Cyl, ProlMod> derivs;  // need derivs of _inverse_ transformation
-    derivCyl2ProlMod(p.rho, p.chi, sinv, cosv, derivs);
-    return PosVelCyl(p.rho * sinv, p.chi * cosv, p.phi,
-        derivs.drhodR * p.prho + derivs.dtaudR * p.ptau,
-        derivs.drhodz * p.prho + derivs.dtaudz * p.ptau,
-        p.pphi / (p.rho * sinv));
+template<> PosVelCyl toPosVel(const PosVelAxi& ps, const Cyl) {
+    double
+    sinnu = 1 / sqrt(1 + pow_2(ps.cotnu)),
+    cosnu = sinnu!=0 ? ps.cotnu * sinnu : (ps.cotnu>0 ? 1 : -1);
+    if(ps.cs.Delta2 == 0) {  // shortcut for the spherical case
+        if(ps.rho == 0)  // assume that vnu = 0
+            return PosVelCyl(0, 0, ps.phi, ps.vrho * sinnu, ps.vrho * cosnu, ps.vphi);
+        double R  = ps.rho  * sinnu, z = ps.rho * cosnu;
+        double vR = ps.vrho * sinnu + ps.vnu * cosnu;
+        double vz = ps.vrho * cosnu - ps.vnu * sinnu;
+        return PosVelCyl(R, z, ps.phi, vR, vz, ps.vphi);
+    }
+    double
+    eta  = sqrt(pow_2(ps.rho) + fabs(ps.cs.Delta2)),
+    chi  = ps.cs.Delta2 >= 0  ?  ps.rho  :     eta,
+    psi  = ps.cs.Delta2 >= 0  ?     eta  :  ps.rho,
+    R    = chi * sinnu,
+    z    = psi * cosnu,
+    den  = 1 / sqrt(pow_2(chi * cosnu) + pow_2(psi * sinnu)),
+    sinxi= den != INFINITY ? den * psi * sinnu : 1.0,
+    cosxi= den != INFINITY ? den * chi * cosnu : 0.0,
+    vR   = sinxi * ps.vrho + cosxi * ps.vnu,
+    vz   = cosxi * ps.vrho - sinxi * ps.vnu;
+    return PosVelCyl(R, z, ps.phi, vR, vz, ps.vphi);
+}
+
+void PosVelSph::momenta(double& pr, double& ptheta, double& pphi) const
+{
+    pr     = vr;
+    ptheta = vtheta*r;
+    pphi   = Lz(*this);
+}
+
+void PosVelAxi::momenta(double& prho, double& pnu, double& pphi) const
+{
+    double
+    sinnu= 1 / sqrt(1 + pow_2(cotnu)),
+    eta  = sqrt(pow_2(rho) + fabs(cs.Delta2)),
+    chi  = cs.Delta2 >= 0  ?  rho  :  eta,
+    mul  = sqrt(pow_2(chi) + cs.Delta2 * pow_2(sinnu));
+    prho = (cs.Delta2 == 0 ? 1 : mul / eta) * vrho;
+    pnu  = mul * vnu;
+    pphi = chi * sinnu * vphi;
 }
 
 //-------- implementations of functions that convert gradients --------//
-// note: the code below is machine-generated
 
 template<>
 GradCar toGrad(const GradCyl& src, const PosDerivT<Car, Cyl>& deriv) {
@@ -543,18 +642,18 @@ GradCyl toGrad(const GradSph& src, const PosDerivT<Cyl, Sph>& deriv) {
 template<>
 GradSph toGrad(const GradCar& src, const PosDerivT<Sph, Car>& deriv) {
     GradSph dest;
-    dest.dr = src.dx*deriv.dxdr + src.dy*deriv.dydr + src.dz*deriv.dzdr;
+    dest.dr     = src.dx*deriv.dxdr     + src.dy*deriv.dydr     + src.dz*deriv.dzdr;
     dest.dtheta = src.dx*deriv.dxdtheta + src.dy*deriv.dydtheta + src.dz*deriv.dzdtheta;
-    dest.dphi = src.dx*deriv.dxdphi + src.dy*deriv.dydphi;
+    dest.dphi   = src.dx*deriv.dxdphi   + src.dy*deriv.dydphi;
     return dest;
 }
 
 template<>
 GradSph toGrad(const GradCyl& src, const PosDerivT<Sph, Cyl>& deriv) {
     GradSph dest;
-    dest.dr = src.dR*deriv.dRdr + src.dz*deriv.dzdr;
+    dest.dr     = src.dR*deriv.dRdr     + src.dz*deriv.dzdr;
     dest.dtheta = src.dR*deriv.dRdtheta + src.dz*deriv.dzdtheta;
-    dest.dphi = src.dphi;
+    dest.dphi   = src.dphi;
     return dest;
 }
 
@@ -577,49 +676,44 @@ GradProlSph toGrad(const GradCyl& src, const PosDerivT<ProlSph, Cyl>& deriv) {
 }
 
 template<>
-GradCyl toGrad(const GradProlMod& src, const PosDerivT<Cyl, ProlMod>& deriv) {
+GradCyl toGrad(const GradAxi& src, const PosDerivT<Cyl, Axi>& deriv) {
     GradCyl dest;
-    dest.dR   = src.drho*deriv.drhodR + src.dtau*deriv.dtaudR;
-    dest.dz   = src.drho*deriv.drhodz + src.dtau*deriv.dtaudz;
+    dest.dR   = src.drho*deriv.drhodR + src.dnu*deriv.dnudR;
+    dest.dz   = src.drho*deriv.drhodz + src.dnu*deriv.dnudz;
     dest.dphi = src.dphi;
     return dest;
 }
 
 template<>
-GradProlMod toGrad(const GradCyl& src, const PosDerivT<ProlMod, Cyl>& deriv) {
-    GradProlMod dest;
+GradAxi toGrad(const GradCyl& src, const PosDerivT<Axi, Cyl>& deriv) {
+    GradAxi dest;
     dest.drho = src.dR*deriv.dRdrho + src.dz*deriv.dzdrho;
-    dest.dtau = src.dR*deriv.dRdtau + src.dz*deriv.dzdtau;
+    dest.dnu  = src.dR*deriv.dRdnu  + src.dz*deriv.dzdnu;
     dest.dphi = src.dphi;
     return dest;
 }
 
 //-------- implementations of functions that convert hessians --------//
-// note: the code below is machine-generated and is not intended to be human-readable
 
 template<>
 HessCar toHess(const GradCyl& srcGrad, const HessCyl& srcHess,
     const PosDerivT<Car, Cyl>& deriv, const PosDeriv2T<Car, Cyl>& deriv2) {
     HessCar dest;
-    dest.dx2 = 
-        (srcHess.dR2*deriv.dRdx + srcHess.dRdphi*deriv.dphidx)*deriv.dRdx + 
-        (srcHess.dRdphi*deriv.dRdx + srcHess.dphi2*deriv.dphidx)*deriv.dphidx + 
-        srcGrad.dR*deriv2.d2Rdx2 + srcGrad.dphi*deriv2.d2phidx2;
-    dest.dxdy = 
-        (srcHess.dR2*deriv.dRdy + srcHess.dRdphi*deriv.dphidy)*deriv.dRdx + 
-        (srcHess.dRdphi*deriv.dRdy + srcHess.dphi2*deriv.dphidy)*deriv.dphidx + 
-        srcGrad.dR*deriv2.d2Rdxdy + srcGrad.dphi*deriv2.d2phidxdy;
-    dest.dxdz = 
-        srcHess.dRdz*deriv.dRdx + 
-        srcHess.dzdphi*deriv.dphidx;
-    dest.dy2 = 
-        (srcHess.dR2*deriv.dRdy + srcHess.dRdphi*deriv.dphidy)*deriv.dRdy + 
-        (srcHess.dRdphi*deriv.dRdy + srcHess.dphi2*deriv.dphidy)*deriv.dphidy + 
-        srcGrad.dR*deriv2.d2Rdy2 + srcGrad.dphi*deriv2.d2phidy2;
-    dest.dydz = 
-        srcHess.dRdz*deriv.dRdy + 
-        srcHess.dzdphi*deriv.dphidy;
-    dest.dz2 = srcHess.dz2;
+    dest.dx2 =
+        (srcHess.dR2   *deriv.dRdx + srcHess.dRdphi*deriv.dphidx) * deriv.dRdx +
+        (srcHess.dRdphi*deriv.dRdx + srcHess.dphi2 *deriv.dphidx) * deriv.dphidx +
+        srcGrad.dR*deriv2.d2Rdx2   + srcGrad.dphi*deriv2.d2phidx2;
+    dest.dxdy =
+        (srcHess.dR2   *deriv.dRdy + srcHess.dRdphi*deriv.dphidy) * deriv.dRdx +
+        (srcHess.dRdphi*deriv.dRdy + srcHess.dphi2 *deriv.dphidy) * deriv.dphidx +
+        srcGrad.dR*deriv2.d2Rdxdy  + srcGrad.dphi*deriv2.d2phidxdy;
+    dest.dy2 =
+        (srcHess.dR2   *deriv.dRdy + srcHess.dRdphi*deriv.dphidy) * deriv.dRdy +
+        (srcHess.dRdphi*deriv.dRdy + srcHess.dphi2 *deriv.dphidy) * deriv.dphidy +
+        srcGrad.dR*deriv2.d2Rdy2   + srcGrad.dphi*deriv2.d2phidy2;
+    dest.dxdz = srcHess.dRdz*deriv.dRdx + srcHess.dzdphi*deriv.dphidx;
+    dest.dydz = srcHess.dRdz*deriv.dRdy + srcHess.dzdphi*deriv.dphidy;
+    dest.dz2  = srcHess.dz2;
     return dest;
 }
 
@@ -627,35 +721,35 @@ template<>
 HessCar toHess(const GradSph& srcGrad, const HessSph& srcHess,
     const PosDerivT<Car, Sph>& deriv, const PosDeriv2T<Car, Sph>& deriv2) {
     HessCar dest;
-    dest.dx2 = 
-        (srcHess.dr2*deriv.drdx + srcHess.drdtheta*deriv.dthetadx + srcHess.drdphi*deriv.dphidx)*deriv.drdx + 
-        (srcHess.drdtheta*deriv.drdx + srcHess.dtheta2*deriv.dthetadx + srcHess.dthetadphi*deriv.dphidx)*deriv.dthetadx + 
-        (srcHess.drdphi*deriv.drdx + srcHess.dthetadphi*deriv.dthetadx + srcHess.dphi2*deriv.dphidx)*deriv.dphidx + 
-        srcGrad.dr*deriv2.d2rdx2 + srcGrad.dtheta*deriv2.d2thetadx2 + srcGrad.dphi*deriv2.d2phidx2;
-    dest.dxdy = 
-        (srcHess.dr2*deriv.drdy + srcHess.drdtheta*deriv.dthetady + srcHess.drdphi*deriv.dphidy)*deriv.drdx + 
-        (srcHess.drdtheta*deriv.drdy + srcHess.dtheta2*deriv.dthetady + srcHess.dthetadphi*deriv.dphidy)*deriv.dthetadx + 
-        (srcHess.drdphi*deriv.drdy + srcHess.dthetadphi*deriv.dthetady + srcHess.dphi2*deriv.dphidy)*deriv.dphidx + 
-        srcGrad.dr*deriv2.d2rdxdy + srcGrad.dtheta*deriv2.d2thetadxdy + srcGrad.dphi*deriv2.d2phidxdy;
-    dest.dxdz = 
-        (srcHess.dr2*deriv.drdz + srcHess.drdtheta*deriv.dthetadz)*deriv.drdx + 
-        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2*deriv.dthetadz)*deriv.dthetadx + 
-        (srcHess.drdphi*deriv.drdz + srcHess.dthetadphi*deriv.dthetadz)*deriv.dphidx + 
-        srcGrad.dr*deriv2.d2rdxdz + srcGrad.dtheta*deriv2.d2thetadxdz;
-    dest.dy2 = 
-        (srcHess.dr2*deriv.drdy + srcHess.drdtheta*deriv.dthetady + srcHess.drdphi*deriv.dphidy)*deriv.drdy + 
-        (srcHess.drdtheta*deriv.drdy + srcHess.dtheta2*deriv.dthetady + srcHess.dthetadphi*deriv.dphidy)*deriv.dthetady + 
-        (srcHess.drdphi*deriv.drdy + srcHess.dthetadphi*deriv.dthetady + srcHess.dphi2*deriv.dphidy)*deriv.dphidy + 
-        srcGrad.dr*deriv2.d2rdy2 + srcGrad.dtheta*deriv2.d2thetady2 + srcGrad.dphi*deriv2.d2phidy2;
-    dest.dydz = 
-        (srcHess.dr2*deriv.drdz + srcHess.drdtheta*deriv.dthetadz)*deriv.drdy + 
-        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2*deriv.dthetadz)*deriv.dthetady + 
-        (srcHess.drdphi*deriv.drdz + srcHess.dthetadphi*deriv.dthetadz)*deriv.dphidy + 
-        srcGrad.dr*deriv2.d2rdydz + srcGrad.dtheta*deriv2.d2thetadydz;
-    dest.dz2 = 
-        (srcHess.dr2*deriv.drdz + srcHess.drdtheta*deriv.dthetadz)*deriv.drdz + 
-        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2*deriv.dthetadz)*deriv.dthetadz + 
-        srcGrad.dr*deriv2.d2rdz2 + srcGrad.dtheta*deriv2.d2thetadz2;
+    dest.dx2 =
+        (srcHess.dr2     *deriv.drdx + srcHess.drdtheta  *deriv.dthetadx + srcHess.drdphi    *deriv.dphidx) * deriv.drdx +
+        (srcHess.drdtheta*deriv.drdx + srcHess.dtheta2   *deriv.dthetadx + srcHess.dthetadphi*deriv.dphidx) * deriv.dthetadx +
+        (srcHess.drdphi  *deriv.drdx + srcHess.dthetadphi*deriv.dthetadx + srcHess.dphi2     *deriv.dphidx) * deriv.dphidx +
+        srcGrad.dr*deriv2.d2rdx2     + srcGrad.dtheta*deriv2.d2thetadx2  + srcGrad.dphi*deriv2.d2phidx2;
+    dest.dxdy =
+        (srcHess.dr2     *deriv.drdy + srcHess.drdtheta  *deriv.dthetady + srcHess.drdphi    *deriv.dphidy) * deriv.drdx +
+        (srcHess.drdtheta*deriv.drdy + srcHess.dtheta2   *deriv.dthetady + srcHess.dthetadphi*deriv.dphidy) * deriv.dthetadx +
+        (srcHess.drdphi  *deriv.drdy + srcHess.dthetadphi*deriv.dthetady + srcHess.dphi2     *deriv.dphidy) * deriv.dphidx +
+        srcGrad.dr*deriv2.d2rdxdy    + srcGrad.dtheta*deriv2.d2thetadxdy + srcGrad.dphi*deriv2.d2phidxdy;
+    dest.dxdz =
+        (srcHess.dr2     *deriv.drdz + srcHess.drdtheta  *deriv.dthetadz) * deriv.drdx +
+        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2   *deriv.dthetadz) * deriv.dthetadx +
+        (srcHess.drdphi  *deriv.drdz + srcHess.dthetadphi*deriv.dthetadz) * deriv.dphidx +
+        srcGrad.dr*deriv2.d2rdxdz    + srcGrad.dtheta*deriv2.d2thetadxdz;
+    dest.dy2 =
+        (srcHess.dr2     *deriv.drdy + srcHess.drdtheta  *deriv.dthetady + srcHess.drdphi    *deriv.dphidy) * deriv.drdy +
+        (srcHess.drdtheta*deriv.drdy + srcHess.dtheta2   *deriv.dthetady + srcHess.dthetadphi*deriv.dphidy) * deriv.dthetady +
+        (srcHess.drdphi  *deriv.drdy + srcHess.dthetadphi*deriv.dthetady + srcHess.dphi2     *deriv.dphidy) * deriv.dphidy +
+        srcGrad.dr*deriv2.d2rdy2     + srcGrad.dtheta*deriv2.d2thetady2  + srcGrad.dphi*deriv2.d2phidy2;
+    dest.dydz =
+        (srcHess.dr2     *deriv.drdz + srcHess.drdtheta  *deriv.dthetadz) * deriv.drdy +
+        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2   *deriv.dthetadz) * deriv.dthetady +
+        (srcHess.drdphi  *deriv.drdz + srcHess.dthetadphi*deriv.dthetadz) * deriv.dphidy +
+        srcGrad.dr*deriv2.d2rdydz    + srcGrad.dtheta*deriv2.d2thetadydz;
+    dest.dz2 =
+        (srcHess.dr2     *deriv.drdz + srcHess.drdtheta  *deriv.dthetadz) * deriv.drdz +
+        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2   *deriv.dthetadz) * deriv.dthetadz +
+        srcGrad.dr*deriv2.d2rdz2     + srcGrad.dtheta*deriv2.d2thetadz2;
     return dest;
 }
 
@@ -663,22 +757,19 @@ template<>
 HessCyl toHess(const GradCar& srcGrad, const HessCar& srcHess,
     const PosDerivT<Cyl, Car>& deriv, const PosDeriv2T<Cyl, Car>& deriv2) {
     HessCyl dest;
-    dest.dR2 = 
-        (srcHess.dx2*deriv.dxdR + srcHess.dxdy*deriv.dydR)*deriv.dxdR + 
-        (srcHess.dxdy*deriv.dxdR + srcHess.dy2*deriv.dydR)*deriv.dydR;
-    dest.dRdz = 
-        srcHess.dxdz*deriv.dxdR + 
-        srcHess.dydz*deriv.dydR;
-    dest.dRdphi = 
-        (srcHess.dx2*deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdR + 
-        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2*deriv.dydphi)*deriv.dydR + 
+    dest.dR2 =
+        (srcHess.dx2 *deriv.dxdR + srcHess.dxdy*deriv.dydR) * deriv.dxdR +
+        (srcHess.dxdy*deriv.dxdR + srcHess.dy2 *deriv.dydR) * deriv.dydR;
+    dest.dRdz = srcHess.dxdz*deriv.dxdR + srcHess.dydz*deriv.dydR;
+    dest.dRdphi =
+        (srcHess.dx2 *deriv.dxdphi + srcHess.dxdy*deriv.dydphi) * deriv.dxdR +
+        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2 *deriv.dydphi) * deriv.dydR +
         srcGrad.dx*deriv2.d2xdRdphi + srcGrad.dy*deriv2.d2ydRdphi;
     dest.dz2 = srcHess.dz2;
-    dest.dzdphi = 
-        (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi);
-    dest.dphi2 = 
-        (srcHess.dx2*deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdphi + 
-        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2*deriv.dydphi)*deriv.dydphi + 
+    dest.dzdphi = (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi);
+    dest.dphi2 =
+        (srcHess.dx2 *deriv.dxdphi + srcHess.dxdy*deriv.dydphi) * deriv.dxdphi +
+        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2 *deriv.dydphi) * deriv.dydphi +
         srcGrad.dx*deriv2.d2xdphi2 + srcGrad.dy*deriv2.d2ydphi2;
     return dest;
 }
@@ -687,25 +778,21 @@ template<>
 HessCyl toHess(const GradSph& srcGrad, const HessSph& srcHess,
     const PosDerivT<Cyl, Sph>& deriv, const PosDeriv2T<Cyl, Sph>& deriv2) {
     HessCyl dest;
-    dest.dR2 = 
-        (srcHess.dr2*deriv.drdR + srcHess.drdtheta*deriv.dthetadR)*deriv.drdR + 
-        (srcHess.drdtheta*deriv.drdR + srcHess.dtheta2*deriv.dthetadR)*deriv.dthetadR + 
+    dest.dR2 =
+        (srcHess.dr2     *deriv.drdR + srcHess.drdtheta*deriv.dthetadR) * deriv.drdR +
+        (srcHess.drdtheta*deriv.drdR + srcHess.dtheta2 *deriv.dthetadR) * deriv.dthetadR +
         srcGrad.dr*deriv2.d2rdR2 + srcGrad.dtheta*deriv2.d2thetadR2;
-    dest.dRdz = 
-        (srcHess.dr2*deriv.drdz + srcHess.drdtheta*deriv.dthetadz)*deriv.drdR + 
-        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2*deriv.dthetadz)*deriv.dthetadR + 
+    dest.dRdz =
+        (srcHess.dr2     *deriv.drdz + srcHess.drdtheta*deriv.dthetadz) * deriv.drdR +
+        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2 *deriv.dthetadz) * deriv.dthetadR +
         srcGrad.dr*deriv2.d2rdRdz + srcGrad.dtheta*deriv2.d2thetadRdz;
-    dest.dRdphi = 
-        srcHess.drdphi*deriv.drdR + 
-        srcHess.dthetadphi*deriv.dthetadR;
-    dest.dz2 = 
-        (srcHess.dr2*deriv.drdz + srcHess.drdtheta*deriv.dthetadz)*deriv.drdz + 
-        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2*deriv.dthetadz)*deriv.dthetadz + 
+    dest.dz2 =
+        (srcHess.dr2     *deriv.drdz + srcHess.drdtheta*deriv.dthetadz) * deriv.drdz +
+        (srcHess.drdtheta*deriv.drdz + srcHess.dtheta2 *deriv.dthetadz) * deriv.dthetadz +
         srcGrad.dr*deriv2.d2rdz2 + srcGrad.dtheta*deriv2.d2thetadz2;
-    dest.dzdphi = 
-        srcHess.drdphi*deriv.drdz + 
-        srcHess.dthetadphi*deriv.dthetadz;
-    dest.dphi2 = srcHess.dphi2;
+    dest.dRdphi = srcHess.drdphi*deriv.drdR + srcHess.dthetadphi*deriv.dthetadR;
+    dest.dzdphi = srcHess.drdphi*deriv.drdz + srcHess.dthetadphi*deriv.dthetadz;
+    dest.dphi2  = srcHess.dphi2;
     return dest;
 }
 
@@ -713,33 +800,33 @@ template<>
 HessSph toHess(const GradCar& srcGrad, const HessCar& srcHess,
     const PosDerivT<Sph, Car>& deriv, const PosDeriv2T<Sph, Car>& deriv2) {
     HessSph dest;
-    dest.dr2 = 
-        (srcHess.dx2*deriv.dxdr + srcHess.dxdy*deriv.dydr + srcHess.dxdz*deriv.dzdr)*deriv.dxdr + 
-        (srcHess.dxdy*deriv.dxdr + srcHess.dy2*deriv.dydr + srcHess.dydz*deriv.dzdr)*deriv.dydr + 
-        (srcHess.dxdz*deriv.dxdr + srcHess.dydz*deriv.dydr + srcHess.dz2*deriv.dzdr)*deriv.dzdr;
-    dest.drdtheta = 
-        (srcHess.dx2*deriv.dxdtheta + srcHess.dxdy*deriv.dydtheta + srcHess.dxdz*deriv.dzdtheta)*deriv.dxdr + 
-        (srcHess.dxdy*deriv.dxdtheta + srcHess.dy2*deriv.dydtheta + srcHess.dydz*deriv.dzdtheta)*deriv.dydr + 
-        (srcHess.dxdz*deriv.dxdtheta + srcHess.dydz*deriv.dydtheta + srcHess.dz2*deriv.dzdtheta)*deriv.dzdr + 
+    dest.dr2 =
+        (srcHess.dx2 *deriv.dxdr + srcHess.dxdy*deriv.dydr + srcHess.dxdz*deriv.dzdr) * deriv.dxdr +
+        (srcHess.dxdy*deriv.dxdr + srcHess.dy2 *deriv.dydr + srcHess.dydz*deriv.dzdr) * deriv.dydr +
+        (srcHess.dxdz*deriv.dxdr + srcHess.dydz*deriv.dydr + srcHess.dz2 *deriv.dzdr) * deriv.dzdr;
+    dest.drdtheta =
+        (srcHess.dx2 *deriv.dxdtheta + srcHess.dxdy*deriv.dydtheta + srcHess.dxdz*deriv.dzdtheta) * deriv.dxdr +
+        (srcHess.dxdy*deriv.dxdtheta + srcHess.dy2 *deriv.dydtheta + srcHess.dydz*deriv.dzdtheta) * deriv.dydr +
+        (srcHess.dxdz*deriv.dxdtheta + srcHess.dydz*deriv.dydtheta + srcHess.dz2 *deriv.dzdtheta) * deriv.dzdr +
         srcGrad.dx*deriv2.d2xdrdtheta + srcGrad.dy*deriv2.d2ydrdtheta + srcGrad.dz*deriv2.d2zdrdtheta;
-    dest.drdphi = 
-        (srcHess.dx2*deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdr + 
-        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2*deriv.dydphi)*deriv.dydr + 
-        (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi)*deriv.dzdr + 
+    dest.drdphi =
+        (srcHess.dx2 *deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdr +
+        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2 *deriv.dydphi)*deriv.dydr +
+        (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi)*deriv.dzdr +
         srcGrad.dx*deriv2.d2xdrdphi + srcGrad.dy*deriv2.d2ydrdphi;
-    dest.dtheta2 = 
-        (srcHess.dx2*deriv.dxdtheta + srcHess.dxdy*deriv.dydtheta + srcHess.dxdz*deriv.dzdtheta)*deriv.dxdtheta + 
-        (srcHess.dxdy*deriv.dxdtheta + srcHess.dy2*deriv.dydtheta + srcHess.dydz*deriv.dzdtheta)*deriv.dydtheta + 
-        (srcHess.dxdz*deriv.dxdtheta + srcHess.dydz*deriv.dydtheta + srcHess.dz2*deriv.dzdtheta)*deriv.dzdtheta + 
+    dest.dtheta2 =
+        (srcHess.dx2 *deriv.dxdtheta + srcHess.dxdy*deriv.dydtheta + srcHess.dxdz*deriv.dzdtheta) * deriv.dxdtheta +
+        (srcHess.dxdy*deriv.dxdtheta + srcHess.dy2 *deriv.dydtheta + srcHess.dydz*deriv.dzdtheta) * deriv.dydtheta +
+        (srcHess.dxdz*deriv.dxdtheta + srcHess.dydz*deriv.dydtheta + srcHess.dz2 *deriv.dzdtheta) * deriv.dzdtheta +
         srcGrad.dx*deriv2.d2xdtheta2 + srcGrad.dy*deriv2.d2ydtheta2 + srcGrad.dz*deriv2.d2zdtheta2;
-    dest.dthetadphi = 
-        (srcHess.dx2*deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdtheta + 
-        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2*deriv.dydphi)*deriv.dydtheta + 
-        (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi)*deriv.dzdtheta + 
+    dest.dthetadphi =
+        (srcHess.dx2 *deriv.dxdphi + srcHess.dxdy*deriv.dydphi) * deriv.dxdtheta +
+        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2 *deriv.dydphi) * deriv.dydtheta +
+        (srcHess.dxdz*deriv.dxdphi + srcHess.dydz*deriv.dydphi) * deriv.dzdtheta +
         srcGrad.dx*deriv2.d2xdthetadphi + srcGrad.dy*deriv2.d2ydthetadphi;
-    dest.dphi2 = 
-        (srcHess.dx2*deriv.dxdphi + srcHess.dxdy*deriv.dydphi)*deriv.dxdphi + 
-        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2*deriv.dydphi)*deriv.dydphi + 
+    dest.dphi2 =
+        (srcHess.dx2 *deriv.dxdphi + srcHess.dxdy*deriv.dydphi) * deriv.dxdphi +
+        (srcHess.dxdy*deriv.dxdphi + srcHess.dy2 *deriv.dydphi) * deriv.dydphi +
         srcGrad.dx*deriv2.d2xdphi2 + srcGrad.dy*deriv2.d2ydphi2;
     return dest;
 }
@@ -748,44 +835,85 @@ template<>
 HessSph toHess(const GradCyl& srcGrad, const HessCyl& srcHess,
     const PosDerivT<Sph, Cyl>& deriv, const PosDeriv2T<Sph, Cyl>& deriv2) {
     HessSph dest;
-    dest.dr2 = 
-        (srcHess.dR2*deriv.dRdr + srcHess.dRdz*deriv.dzdr)*deriv.dRdr + 
-        (srcHess.dRdz*deriv.dRdr + srcHess.dz2*deriv.dzdr)*deriv.dzdr;
-    dest.drdtheta = 
-        (srcHess.dR2*deriv.dRdtheta + srcHess.dRdz*deriv.dzdtheta)*deriv.dRdr + 
-        (srcHess.dRdz*deriv.dRdtheta + srcHess.dz2*deriv.dzdtheta)*deriv.dzdr + 
+    dest.dr2 =
+        (srcHess.dR2 *deriv.dRdr + srcHess.dRdz*deriv.dzdr) * deriv.dRdr +
+        (srcHess.dRdz*deriv.dRdr + srcHess.dz2 *deriv.dzdr) * deriv.dzdr;
+    dest.drdtheta =
+        (srcHess.dR2 *deriv.dRdtheta + srcHess.dRdz*deriv.dzdtheta) * deriv.dRdr +
+        (srcHess.dRdz*deriv.dRdtheta + srcHess.dz2 *deriv.dzdtheta) * deriv.dzdr +
         srcGrad.dR*deriv2.d2Rdrdtheta + srcGrad.dz*deriv2.d2zdrdtheta;
-    dest.drdphi = 
-        srcHess.dRdphi*deriv.dRdr + 
-        srcHess.dzdphi*deriv.dzdr;
-    dest.dtheta2 = 
-        (srcHess.dR2*deriv.dRdtheta + srcHess.dRdz*deriv.dzdtheta)*deriv.dRdtheta + 
-        (srcHess.dRdz*deriv.dRdtheta + srcHess.dz2*deriv.dzdtheta)*deriv.dzdtheta + 
+    dest.dtheta2 =
+        (srcHess.dR2 *deriv.dRdtheta + srcHess.dRdz*deriv.dzdtheta) * deriv.dRdtheta +
+        (srcHess.dRdz*deriv.dRdtheta + srcHess.dz2 *deriv.dzdtheta) * deriv.dzdtheta +
         srcGrad.dR*deriv2.d2Rdtheta2 + srcGrad.dz*deriv2.d2zdtheta2;
-    dest.dthetadphi = 
-        srcHess.dRdphi*deriv.dRdtheta + 
-        srcHess.dzdphi*deriv.dzdtheta;
-    dest.dphi2 = srcHess.dphi2;
+    dest.drdphi     = srcHess.dRdphi*deriv.dRdr     + srcHess.dzdphi*deriv.dzdr;
+    dest.dthetadphi = srcHess.dRdphi*deriv.dRdtheta + srcHess.dzdphi*deriv.dzdtheta;
+    dest.dphi2      = srcHess.dphi2;
     return dest;
 }
 
+//TODO// remove
 template<>
 HessCyl toHess(const GradProlSph& srcGrad, const HessProlSph& srcHess,
     const PosDerivT<Cyl, ProlSph>& deriv, const PosDeriv2T<Cyl, ProlSph>& deriv2) {
     HessCyl dest;
-    dest.dR2 = 
-        (srcHess.dlambda2*deriv.dlambdadR + srcHess.dlambdadnu*deriv.dnudR)*deriv.dlambdadR + 
-        (srcHess.dlambdadnu*deriv.dlambdadR + srcHess.dnu2*deriv.dnudR)*deriv.dnudR + 
+    dest.dR2 =
+        (srcHess.dlambda2*deriv.dlambdadR + srcHess.dlambdadnu*deriv.dnudR)*deriv.dlambdadR +
+        (srcHess.dlambdadnu*deriv.dlambdadR + srcHess.dnu2*deriv.dnudR)*deriv.dnudR +
         srcGrad.dlambda*deriv2.d2lambdadR2 + srcGrad.dnu*deriv2.d2nudR2;
-    dest.dRdz = 
-        (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadR + 
-        (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudR + 
+    dest.dRdz =
+        (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadR +
+        (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudR +
         srcGrad.dlambda*deriv2.d2lambdadRdz + srcGrad.dnu*deriv2.d2nudRdz;
-    dest.dz2 = 
-        (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadz + 
-        (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudz + 
+    dest.dz2 =
+        (srcHess.dlambda2*deriv.dlambdadz + srcHess.dlambdadnu*deriv.dnudz)*deriv.dlambdadz +
+        (srcHess.dlambdadnu*deriv.dlambdadz + srcHess.dnu2*deriv.dnudz)*deriv.dnudz +
         srcGrad.dlambda*deriv2.d2lambdadz2 + srcGrad.dnu*deriv2.d2nudz2;
-    dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;  // assuming no dependence on phi
+    dest.dRdphi = dest.dzdphi = dest.dphi2 = 0;  //TODO// assuming no dependence on phi
+    return dest;
+}
+
+template<>
+HessCyl toHess(const GradAxi& srcGrad, const HessAxi& srcHess,
+    const PosDerivT<Cyl, Axi>& deriv, const PosDeriv2T<Cyl, Axi>& deriv2) {
+    HessCyl dest;
+    dest.dR2 =
+        (srcHess.drho2  *deriv.drhodR + srcHess.drhodnu*deriv.dnudR) * deriv.drhodR +
+        (srcHess.drhodnu*deriv.drhodR + srcHess.dnu2   *deriv.dnudR) * deriv.dnudR  +
+        srcGrad.drho *deriv2.d2rhodR2 + srcGrad.dnu * deriv2.d2nudR2;
+    dest.dRdz =
+        (srcHess.drho2  *deriv.drhodz + srcHess.drhodnu*deriv.dnudz) * deriv.drhodR +
+        (srcHess.drhodnu*deriv.drhodz + srcHess.dnu2   *deriv.dnudz) * deriv.dnudR  +
+        srcGrad.drho *deriv2.d2rhodRdz+ srcGrad.dnu * deriv2.d2nudRdz;
+    dest.dz2 =
+        (srcHess.drho2  *deriv.drhodz + srcHess.drhodnu*deriv.dnudz) * deriv.drhodz +
+        (srcHess.drhodnu*deriv.drhodz + srcHess.dnu2   *deriv.dnudz) * deriv.dnudz  +
+        srcGrad.drho *deriv2.d2rhodz2 + srcGrad.dnu * deriv2.d2nudz2;
+    dest.dRdphi = srcHess.drhodphi*deriv.drhodR + srcHess.dnudphi*deriv.dnudR;
+    dest.dzdphi = srcHess.drhodphi*deriv.drhodz + srcHess.dnudphi*deriv.dnudz;
+    dest.dphi2  = srcHess.dphi2;
+    return dest;
+}
+
+template<>
+HessAxi toHess(const GradCyl& srcGrad, const HessCyl& srcHess,
+    const PosDerivT<Axi, Cyl>& deriv, const PosDeriv2T<Axi, Cyl>& deriv2) {
+    HessAxi dest;
+    dest.drho2 =
+        (srcHess.dR2 *deriv.dRdrho + srcHess.dRdz*deriv.dzdrho) * deriv.dRdrho +
+        (srcHess.dRdz*deriv.dRdrho + srcHess.dz2 *deriv.dzdrho) * deriv.dzdrho +
+        srcGrad.dR*deriv2.d2Rdrho2 + srcGrad.dz*deriv2.d2zdrho2;
+    dest.drhodnu =
+        (srcHess.dR2 *deriv.dRdnu + srcHess.dRdz*deriv.dzdnu) * deriv.dRdrho +
+        (srcHess.dRdz*deriv.dRdnu + srcHess.dz2 *deriv.dzdnu) * deriv.dzdrho +
+        srcGrad.dR*deriv2.d2Rdrhodnu + srcGrad.dz*deriv2.d2zdrhodnu;
+    dest.dnu2 =
+        (srcHess.dR2 *deriv.dRdnu + srcHess.dRdz*deriv.dzdnu) * deriv.dRdnu +
+        (srcHess.dRdz*deriv.dRdnu + srcHess.dz2 *deriv.dzdnu) * deriv.dzdnu +
+        srcGrad.dR*deriv2.d2Rdnu2 + srcGrad.dz*deriv2.d2zdnu2;
+    dest.drhodphi = srcHess.dRdphi*deriv.dRdrho + srcHess.dzdphi*deriv.dzdrho;
+    dest.dnudphi  = srcHess.dRdphi*deriv.dRdnu  + srcHess.dzdphi*deriv.dzdnu;
+    dest.dphi2    = srcHess.dphi2;
     return dest;
 }
 
@@ -813,7 +941,7 @@ void evalAndConvertSph(const math::IFunction& F,
     }
     if(deriv2) {
         double der_over_r=der/r, dd=der2-der_over_r;
-        if(r==0) { 
+        if(r==0) {
             dd=0;
             if(der==0) der_over_r=der2;
         }

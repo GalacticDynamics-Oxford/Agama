@@ -18,6 +18,10 @@ const double EPSREL_DENSITY_INT = 1e-4;
 /// max. number of density evaluations for multidimensional integration
 const size_t MAX_NUM_EVAL_INT = 10000;
 
+/// if defined, use the integrateNdim routine for computing the projected density;
+/// it takes a somewhat larger number of evaluations, but performs vectorized calls to density()
+#define PROJ_DENSITY_VECTORIZED
+
 /// at large r, the density computed from potential derivatives is subject to severe cancellation errors;
 /// if the result is smaller than this fraction of the absolute value of each term, we return zero
 /// (otherwise its relative accuracy is too low and its derivative cannot be reliably estimated)
@@ -36,7 +40,7 @@ public:
 };
 
 /// helper class for integrating the density along the line of sight
-class ProjectedDensityIntegrand: public math::IFunctionNoDeriv {
+class ProjectedDensityIntegrand: public math::IFunctionNoDeriv, public math::IFunctionNdim {
     const BaseDensity& dens;  ///< the density model
     const double X, Y, R;     ///< coordinates in the image plane
     const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
@@ -51,6 +55,24 @@ public:
         double dZds, Z = unscale(math::ScalingDoubleInf(R), s, &dZds);
         return nan2num(dens.density(orientation.fromRotated(coord::PosCar(X, Y, Z))) * dZds);
     }
+    virtual void eval(const double vars[], double values[]) const {
+        values[0] = value(vars[0]);
+    }
+    // vectorized version of the integrand
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
+    {
+        coord::PosCar* points = static_cast<coord::PosCar*>(alloca(npoints * sizeof(coord::PosCar)));
+        double* dZds = static_cast<double*>(alloca(npoints * sizeof(double)));
+        for(size_t i=0; i<npoints; i++) {
+            double Z = unscale(math::ScalingDoubleInf(R), vars[i], &dZds[i]);
+            points[i] = orientation.fromRotated(coord::PosCar(X, Y, Z));
+        }
+        dens.evalmanyDensityCar(npoints, points, values);
+        for(size_t i=0; i<npoints; i++)
+            values[i] = nan2num(values[i] * dZds[i]);
+    }
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return 1; }
 };
 
 /// helper class for integrating the force along the line of sight
@@ -265,8 +287,16 @@ double getInnerDensitySlope(const BaseDensity& dens) {
 double projectedDensity(const BaseDensity& dens, double X, double Y,
     const coord::Orientation& orientation)
 {
+#ifndef PROJ_DENSITY_VECTORIZED
     return math::integrateAdaptive(ProjectedDensityIntegrand(dens, X, Y, orientation),
         0, 1, EPSREL_DENSITY_INT);
+#else
+    // use integrateNdim as the adaptive integration engine with vectorization
+    double xlower[1] = {0}, xupper[1] = {1}, result;
+    math::integrateNdim(ProjectedDensityIntegrand(dens, X, Y, orientation),
+        xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, &result);
+    return result;
+#endif
 }
 
 void projectedForce(const BasePotential& pot, double X, double Y,

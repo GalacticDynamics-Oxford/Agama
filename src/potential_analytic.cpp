@@ -112,19 +112,19 @@ void Logarithmic::evalCar(const coord::PosCar &pos,
 {
     double m2 = coreRadius2 + pow_2(pos.x) + pow_2(pos.y)/p2 + pow_2(pos.z)/q2;
     if(potential)
-        *potential = 0.5 * sigma2 * log(m2);
+        *potential = 0.5 * v0squared * log(m2 / lengthUnit2);
     if(deriv) {
-        deriv->dx = pos.x * sigma2/m2;
-        deriv->dy = pos.y * sigma2/m2/p2;
-        deriv->dz = pos.z * sigma2/m2/q2;
+        deriv->dx = pos.x * v0squared/m2;
+        deriv->dy = pos.y * v0squared/m2/p2;
+        deriv->dz = pos.z * v0squared/m2/q2;
     }
     if(deriv2) {
-        deriv2->dx2 = sigma2 * (1/m2    - 2 * pow_2(pos.x / m2));
-        deriv2->dy2 = sigma2 * (1/m2/p2 - 2 * pow_2(pos.y / (m2 * p2)));
-        deriv2->dz2 = sigma2 * (1/m2/q2 - 2 * pow_2(pos.z / (m2 * q2)));
-        deriv2->dxdy=-sigma2 * pos.x * pos.y * 2 / (pow_2(m2) * p2);
-        deriv2->dydz=-sigma2 * pos.y * pos.z * 2 / (pow_2(m2) * p2 * q2);
-        deriv2->dxdz=-sigma2 * pos.z * pos.x * 2 / (pow_2(m2) * q2);
+        deriv2->dx2 = v0squared * (1/m2    - 2 * pow_2(pos.x / m2));
+        deriv2->dy2 = v0squared * (1/m2/p2 - 2 * pow_2(pos.y / (m2 * p2)));
+        deriv2->dz2 = v0squared * (1/m2/q2 - 2 * pow_2(pos.z / (m2 * q2)));
+        deriv2->dxdy=-v0squared * pos.x * pos.y * 2 / (pow_2(m2) * p2);
+        deriv2->dydz=-v0squared * pos.y * pos.z * 2 / (pow_2(m2) * p2 * q2);
+        deriv2->dxdz=-v0squared * pos.z * pos.x * 2 / (pow_2(m2) * q2);
     }
 }
 

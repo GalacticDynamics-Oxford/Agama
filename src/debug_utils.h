@@ -24,7 +24,12 @@ inline bool equalPos(const PosCyl& p1, const PosCyl& p2, const double eps) {
         fabs(p1.phi-p2.phi) <= M_PI*eps; }
 inline bool equalPos(const PosSph& p1, const PosSph& p2, const double eps) {
     return fabs(p1.r-p2.r) <= eps * fabs(p1.r) &&
-        fabs(p1.theta-p2.theta) <= M_PI/2*eps && fabs(p1.phi-p2.phi) <= M_PI*eps; }
+        fabs(p1.theta-p2.theta) <= M_PI/2*eps &&
+        fabs(p1.phi-p2.phi) <= M_PI*eps; }
+inline bool equalPos(const PosAxi& p1, const PosAxi& p2, const double eps) {
+    return fabs(p1.rho-p2.rho) <= eps * fabs(p1.rho) &&
+        fabs(atan(p1.cotnu)-atan(p2.cotnu)) <= M_PI*eps &&
+        fabs(p1.phi-p2.phi) <= M_PI*eps; }
 
 inline bool equalVel(const VelCar& p1, const VelCar& p2, const double eps) {
     return pow_2(p2.vx-p2.vx) + pow_2(p1.vy-p2.vy) + pow_2(p1.vz-p2.vz) <= 
@@ -35,18 +40,13 @@ inline bool equalVel(const VelCyl& p1, const VelCyl& p2, const double eps) {
 inline bool equalVel(const VelSph& p1, const VelSph& p2, const double eps) {
     return pow_2(p2.vr-p2.vr) + pow_2(p1.vtheta-p2.vtheta) + pow_2(p1.vphi-p2.vphi) <= 
         pow_2(eps) * (pow_2(p1.vr) + pow_2(p1.vtheta) + pow_2(p1.vphi)); }
+inline bool equalVel(const VelAxi& p1, const VelAxi& p2, const double eps) {
+    return pow_2(p2.vrho-p2.vrho) + pow_2(p1.vnu-p2.vnu) + pow_2(p1.vphi-p2.vphi) <=
+        pow_2(eps) * (pow_2(p1.vrho) + pow_2(p1.vnu) + pow_2(p1.vphi)); }
 
 template<typename CoordT>
 bool equalPosVel(const PosVelT<CoordT>& p1, const PosVelT<CoordT>& p2, const double eps) {
     return equalPos(p1, p2, eps) && equalVel(p1, p2, eps); }
-
-inline bool equalPosVel(const PosVelSphMod& p1, const PosVelSphMod& p2, const double eps) {
-    return fabs(p1.r-p2.r)<eps*(1+fabs(p1.r))
-        && fabs(p1.tau-p2.tau)<eps*(1+fabs(p1.tau))
-        && fabs(p1.phi-p2.phi)<eps*(1+fabs(p1.phi))
-        && fabs(p2.pr-p2.pr)<eps*(1+fabs(p1.pr))
-        && fabs(p1.ptau-p2.ptau)<eps*(1+fabs(p1.ptau))
-        && fabs(p1.pphi-p2.pphi)<eps*(1+fabs(p1.pphi)); }
 
 inline bool equalGrad(const GradCar& g1, const GradCar& g2, const double eps) {
     return math::fcmp(g1.dx,g2.dx,eps)==0 && math::fcmp(g1.dy,g2.dy,eps)==0 && math::fcmp(g1.dz,g2.dz,eps)==0; }
@@ -79,8 +79,8 @@ inline std::ostream& operator<< (std::ostream& s, const coord::PosSph& p) {
     s << "r: "<<p.r <<"  theta: "<<p.theta <<"  phi: "<<p.phi<< "   ";
     return s;
 }
-inline std::ostream& operator<< (std::ostream& s, const coord::PosSphMod& p) {
-    s << "r: "<<p.r <<"  theta: "<<p.tau <<"  phi: "<<p.phi<< "   ";
+inline std::ostream& operator<< (std::ostream& s, const coord::PosAxi& p) {
+    s << "rho: "<<p.rho <<"  cotnu: "<<p.cotnu <<"  phi: "<<p.phi<< "   ";
     return s;
 }
 
@@ -99,9 +99,9 @@ inline std::ostream& operator<< (std::ostream& s, const coord::PosVelSph& p) {
         "vr: "<<p.vr <<"  vtheta: "<<p.vtheta <<"  vphi: "<<p.vphi<< "   ";
     return s;
 }
-inline std::ostream& operator<< (std::ostream& s, const coord::PosVelSphMod& p) {
-    s << "r: "<< p.r << "  tau: "<< p.tau << "  phi: "<< p.phi<< "  "
-        "pr: "<<p.pr <<"  ptau: "<<p.ptau <<"  pphi: "<<p.pphi<< "   ";
+inline std::ostream& operator<< (std::ostream& s, const coord::PosVelAxi& p) {
+    s << "rho: "<< p.rho << "  cotnu: "<< p.cotnu << "  phi: "<< p.phi<< "  "
+        "vrho: "<<p.vrho << "  vnu: "  << p.vnu   <<"  vphi: "<<p.vphi<< "   ";
     return s;
 }
 

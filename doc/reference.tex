@@ -215,7 +215,7 @@ Particle arrays in different coordinate systems can be implicitly converted to e
 
 \Agama provides routines for storing and loading particle arrays in files (\ttt{readSnapshot} and \ttt{writeSnapshot}), with several file formats available, depending on compilation options. Text files are built-in, and support for \Nemo and \textsc{Gadget} binary formats is provided through the \textsc{Unsio} library (optional).
 
-Particle arrays are also used in constructing a potential expansion (\ttt{Multipole} or \ttt{CylSpline}) from an \Nbody snapshot, and created by routines from the \texttt{galaxymodel} module (Section~\ref{sec:GalaxyModel}), e.g., by sampling from a distribution function.
+Particle arrays are also used in constructing a potential expansion (\ttt{Multipole}, \ttt{BasisSet} or \ttt{CylSpline}) from an \Nbody snapshot, and created by routines from the \texttt{galaxymodel} module (Section~\ref{sec:GalaxyModel}), e.g., by sampling from a distribution function.
 
 The particle array type and input/output routines belong to the \ttt{particles::} name\-space.
 
@@ -928,14 +928,15 @@ The shared library \texttt{agama.so} can be used directly as a \Python extension
 
 The \ttt{Density}, \ttt{Potential}, \ttt{DistributionFunction}, \ttt{SelectionFunction}, \ttt{Target} classes serve as universal proxies to the underlying hierarchy of \Cpp classes, and their constructors take a variety of named arguments covering all possible variants (including those requiring a more complicated setup in the \Cpp code).
 Additionally, density, potential, DF and SF objects may also be represented by arbitrary user-defined Python functions -- this can be used in all contexts where a corresponding interface is needed, e.g., in constructing a potential expansion from a density profile, or in computing DF moments, which greatly increases the flexibility of the \Python interface. Most routines or methods that operate on individual points in \Cpp (such as action finders or potentials) can accept \texttt{numpy} arrays in \Python, which again leads to a more concise code with nearly the same efficiency as a pure \Cpp implementation. Moreover, operations on such arrays are internally OpenMP-parallelized in the \Python extension module, except if they include callbacks to user-defined \Python functions%
-\footnote{this restriction is due to the global interpreter lock (GIL) mechanism in \texttt{CPython}, precluding its simultaneous access from multiple threads.}. One may query or adjust the number of OpenMP threads by calling \texttt{agama.setNumThreads(N)}.
+\footnote{this restriction is due to the global interpreter lock (GIL) mechanism in \texttt{CPython}, precluding its simultaneous access from multiple threads.}. One may adjust the number of OpenMP threads by calling \texttt{agama.setNumThreads(N)}, either for the entire script, or in a context manager to temporarily change it -- most usefully, to avoid unnecessary thread-switching overheads when using user-defined callback functions:\\
+\texttt{with agama.setNumThreads(1): do_something_with_user_callbacks()}
 
 Below follows a brief overview of the classes and routines provided by the \Python interface.
 As usual, writing \texttt{help(agama.Whatever)} brings up a complete description of the class or routine and its arguments. Moreover, there are several test and example programs demonstrating various aspects of usage of the \Python interface to \Agama; some of them have exact \Cpp equivalents.
 
 \paragraph{Density} class instances can be constructed with the following syntax: \\
 \texttt{d = agama.Density(type="...", mass=..., scaleRadius=..., otherParameters=...)}\\
-using the parameters listed in Section~\ref{sec:PotentialFactory}; argument names are case-insensitive, as are the names of density models. 
+using the parameters listed in Section~\ref{sec:PotentialFactory}; argument names are case-insensitive, as are the names of density models. Note that the list of parameters relevant for a specific model depends on the \texttt{type} argument, but no error will be issued if other parameters are provided (they will simply be ignored).
 Alternatively, to combine several density objects \texttt{d1}, \texttt{d2}, etc., one may list them as the unnamed arguments of the constructor (these could be proper Density objects, dictionaries with density parameters, or user-defined functions providing the Density interface, see below):\\
 \texttt{comp = agama.Density(d1, dict(type="Plummer", mass=42), d2)}\\[2mm]
 Elements of such composite density objects can be accessed by index or iterated over:\\
@@ -2717,5 +2718,7 @@ Zemp M., Gnedin O., Gnedin N., Kravtsov A., 2011, ApJS, 197, 30
 Zhao H.-S., 1996, MNRAS, 278, 488
 
 \end{thebibliography}
+
+\vspace{-3mm}\noindent \Agama logo is designed by Tatiana Morozova.
 
 \end{document}

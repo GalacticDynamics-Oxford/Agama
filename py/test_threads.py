@@ -31,7 +31,10 @@ def mypotfnc(x):
         agama.sampleNdim(lambda x: numpy.ones(len(x)), 2000, [0,0,0], [1,1,1])
     return -(numpy.sum(x**2, axis=1) + 1)**-0.5
 
-if __name__ == '__main__':
+# it is sufficient to use only 2 threads to test the correctness of running in a multi-threaded context;
+# more will only slow things down (in fact, when using user-defined Python callbacks, it is advisable
+# to call setNumThreads(1), possibly in a "with" statement around the code block, as shown below)
+with agama.setNumThreads(2):
     plumpot = agama.Potential(type='Plummer')
     plumden = plumpot
     userpot = agama.Potential(mypotfnc, symmetry='s')

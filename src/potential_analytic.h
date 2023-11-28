@@ -89,22 +89,29 @@ private:
 };
 
 /** Triaxial logarithmic potential:
-    \f$  \Phi(r) = (1/2) \sigma^2 \ln[ r_c^2 + x^2 + (y/p)^2 + (z/q)^2 ]  \f$. */
+    \f$  \Phi(r) = (1/2) v_0^2 \ln[ (r_c^2 + x^2 + (y/p)^2 + (z/q)^2) / L^2 ]  \f$,
+    where  v_0  is the asymptotic circular velocity,
+    r_c  is the core radius,  p and q  are the axis ratios,
+    and L  is the length unit that makes the expression under the logarithm dimensionless.
+*/
 class Logarithmic: public BasePotentialCar{
 public:
-    Logarithmic(double sigma, double coreRadius=0, double axisRatioYtoX=1, double axisRatioZtoX=1) :
-        sigma2(pow_2(sigma)), coreRadius2(pow_2(coreRadius)),
-        p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)) {}
+    Logarithmic(double v0, double coreRadius=0, double axisRatioYtoX=1, double axisRatioZtoX=1,
+        double lengthUnit=1) :
+        v0squared(pow_2(v0)), coreRadius2(pow_2(coreRadius)),
+        p2(pow_2(axisRatioYtoX)), q2(pow_2(axisRatioZtoX)), lengthUnit2(pow_2(lengthUnit))
+    {}
     virtual coord::SymmetryType symmetry() const {
         return p2==1 ? (q2==1 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) : coord::ST_TRIAXIAL; }
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "Logarithmic"; }
     virtual double totalMass() const { return INFINITY; }
 private:
-    const double sigma2;       ///< squared asymptotic circular velocity (sigma)
+    const double v0squared;    ///< squared asymptotic circular velocity (v_0)
     const double coreRadius2;  ///< squared core radius (r_c)
     const double p2;           ///< squared y/x axis ratio (p)
     const double q2;           ///< squared z/x axis ratio (q)
+    const double lengthUnit2;  ///< squared length unit (L)
 
     virtual void evalCar(const coord::PosCar &pos,
         double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;

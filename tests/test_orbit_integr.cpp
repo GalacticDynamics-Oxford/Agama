@@ -119,7 +119,7 @@ bool test_coordsys(const potential::BasePotential& potential,
     // run the orbit
     orbint.init(initial_conditions, init_time);
     orbint.run(total_time);
-    
+
     // whether compare the result of orbit integration in rotating and inertial frames
     bool checkRot = isAxisymmetric(potential);
     if(checkRot) {
@@ -189,7 +189,7 @@ bool test_coordsys(const potential::BasePotential& potential,
     }
     if(isAxisymmetric(potential)) {
         std::cout << ", Lz=" << avgL.mean() << " +- " << sqrt(avgL.disp());
-        if(avgL.disp() > epsL*epsL || (Lz(initial_conditions)==0 && fabs(avgL.mean()) > 2e-15)) {
+        if(avgL.disp() > epsL*epsL || (Lz(initial_conditions)==0 && fabs(avgL.mean()) > 4e-15)) {
             std::cout << " \033[1;35m**\033[0m";
             ok = false;
         }

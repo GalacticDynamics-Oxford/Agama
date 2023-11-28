@@ -184,6 +184,7 @@ while time < tend:
                 f_center = numpy.median(f_xv[use], axis=0)
                 f_bound = f_pot + 0.5 * numpy.sum((f_xv[:,3:6] - f_center[3:6])**2, axis=1) < 0
                 if numpy.sum(f_bound)<=1 or all(f_center==prev_f_center): break
+                use = f_bound * (numpy.sum((f_xv[:,0:3] - f_center[0:3])**2, axis=1) < Rmax**2)
                 prev_f_center = f_center
 
             f_traj.append(f_center)
