@@ -265,7 +265,7 @@ private:
 class LogLogSpline: public BaseInterpolator1d {
 public:
     /// empty constructor
-    LogLogSpline() {}
+    LogLogSpline() : nonnegative(true) {}
 
     /** Construct a natural or clamped cubic spline from the function values
         and optionally two endpoint derivatives.

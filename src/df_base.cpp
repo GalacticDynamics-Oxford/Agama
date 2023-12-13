@@ -79,7 +79,7 @@ void ActionSpaceScalingRect::toScaled(const actions::Actions &acts, double vars[
 }
 
 /// helper class for computing the integral of distribution function f
-/// or f * ln(f)  if LogTerm==true, in scaled coords in action space.
+/// or -f * ln(f)  if LogTerm==true, in scaled coords in action space.
 template <bool LogTerm>
 class DFIntegrandNdim: public math::IFunctionNdim {
 public:
@@ -100,7 +100,7 @@ public:
             if(!isFinite(val))
                 val = 0;
             if(LogTerm && val>0)
-                val *= log(val);
+                val *= -log(val);
             values[0] = val * jac * TWO_PI_CUBE;   // integral over three angles
         } else {
             // we're (almost) at zero or infinity in terms of magnitude of J

@@ -404,7 +404,7 @@ double OdeSolverDOP853::getSol(double t, unsigned int i) const
 
 template<int NDIM>
 Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem) :
-    BaseOde2Solver(_odeSystem)
+    BaseOde2Solver(_odeSystem), newstep(true)
 {
     if(odeSystem.size() != NDIM * 2)
         throw std::invalid_argument("Ode2SolverGL3: invalid size of the ODE system");
@@ -582,7 +582,7 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
 
 template<int NDIM>
 Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem) :
-    BaseOde2Solver(_odeSystem)
+    BaseOde2Solver(_odeSystem), newstep(true)
 {
     if(odeSystem.size() != NDIM * 2)
         throw std::invalid_argument("Ode2SolverGL4: invalid size of the ODE system");

@@ -821,7 +821,7 @@ void computeDensityCoefsFromParticles(
         spl0.evalDeriv(gridLogRadii.back(),  NULL, &outerSlope);
         innerSlope -= 3;  // we have computed the log of density of particles in log(r),
         outerSlope -= 3;  // which is equal to the true density multiplied by 4 pi r^3
-        FILTERMSG(utils::VL_DEBUG, "Multipole",
+        utils::msg(utils::VL_DEBUG, "Multipole",
             "Power-law index of density profile: inner="+utils::toString(innerSlope)+
             ", outer="+utils::toString(outerSlope));
     }

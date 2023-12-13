@@ -116,15 +116,17 @@ private:
     /// array of function values at sampling points  (size: Npoints)
     std::vector<double> fncValues;
 
+#ifdef USE_QRNG
+    /// offset (seed value) of the quasi-random number generator,
+    /// assigned randomly to avoid repetition when the same sampling routine is called twice
+    const size_t qrngOffset;
+#endif
+
     /// estimate of the integral of f(x) over H, divided by the volume
     double integValue;
 
     /// estimate of the error in the integral, divided by the volume
     double integError;
-
-    /// offset (seed value) of the quasi-random number generator,
-    /// assigned randomly to avoid repetition when the same sampling routine is called twice
-    const size_t qrngOffset;
 
     /** list of cells that need to be populated with more points on this iteration:
         the first element of the pair is the index of the cell,
@@ -205,7 +207,11 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     xupper(_xupper, _xupper+Ndim),
     numOutputSamples(_numOutputSamples),
     cells(1),  // create the root cell
-    qrngOffset(random() * 1e6)  // starting value for the quasi-random number sequence
+#ifdef USE_QRNG
+    qrngOffset(random() * 1e6),  // starting value for the quasi-random number sequence
+#endif
+    integValue(0),
+    integError(0)
 {
 #ifdef USE_QRNG
     if(Ndim > MAX_PRIMES)  // this is only a limitation of the quasi-random number generator
@@ -350,6 +356,7 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     double *cellXlower = static_cast<double*>(alloca(2*Ndim * sizeof(double)));
     double *cellXupper = cellXlower+Ndim;
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
+    math::PRNGState state = lastPointIndex;     // initial seed for the PRNG
 #ifdef USE_QRNG
     // Assign point coordinates using quasi-random numbers, but randomize the sequence of these numbers.
     // These quasi-random numbers, or low-discrepancy sequences, have a property that each element of
@@ -377,7 +384,6 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
         // the permutation list is small enough to be allocated on the stack (no need to free explicitly)
         // (should be the case for all subsequent calls to this routine)
         perm = static_cast<size_t*>(alloca(count * sizeof(size_t)));
-    math::PRNGState state = lastPointIndex;     // initial seed for the PRNG
     getRandomPermutation(count, perm, &state);  // assign the actual permutation list, no matter where it's stored
 #endif
     PointEnum nextPointInList = cells[cellIndex].headPointIndex;  // or -1 if the cell was empty

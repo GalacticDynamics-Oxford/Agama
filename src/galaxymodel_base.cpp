@@ -444,8 +444,8 @@ public:
         }
 
         // finally, transform the velocity from observed to intrinsic coordinate system
-        coord::VelCar vel = orientation.fromRotated(coord::VelCar(vX, vY, vZ));
-        return coord::PosVelCar(pos, vel);
+        coord::VelCar newvel = orientation.fromRotated(coord::VelCar(vX, vY, vZ));
+        return coord::PosVelCar(pos, newvel);
     }
 
     virtual unsigned int numVars()   const {

@@ -415,7 +415,7 @@ void writeSnapshotUNSIO(
     uns::CunsOut output(fileName.c_str(), type);
     bool result = true;
     if(isFinite(time))
-        result &= output.snapshot->setData("time", static_cast<float>(time));
+        result &= (bool)output.snapshot->setData("time", static_cast<float>(time));
     result &= writeParticlesUNSIO<ParticleT>(*output.snapshot, points, conv);
     if(!result) 
         throw std::runtime_error("writeSnapshotUNSIO: cannot write to file "+fileName);

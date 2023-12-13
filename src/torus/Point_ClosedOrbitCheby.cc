@@ -280,9 +280,9 @@ void PoiClosedOrbit::set_parameters(Potential *Phi, const Actions J) {
     // find Jl, having set up chebyshev functions to do so.
     psi =   new double[imax];
     psisq = new double[imax];
-    tbth2 =   new double[imax];
+    tbth2 = new double[imax];
     for(int i=0; i!=imax; i++){
-      tbth2[i]   = tbth[i]*tbth[i];
+      tbth2[i] = tbth[i]*tbth[i];
       psi[i]   = (tbth[i] >= thmax)? Pih : asin(tbth[i]/thmax);
       psisq[i] = psi[i] * psi[i];
     }

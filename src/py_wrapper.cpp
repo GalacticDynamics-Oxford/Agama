@@ -81,7 +81,6 @@
 #if PY_MAJOR_VERSION >= 3
 #define PyString_Check PyUnicode_Check
 #define PyString_AsString PyUnicode_AsUTF8
-#define PyString
 #define PyInt_Check PyLong_Check
 #define PyInt_AsLong PyLong_AsLong
 #define PyInt_FromLong PyLong_FromLong
@@ -3675,6 +3674,23 @@ PyObject* DistributionFunction_totalMass(PyObject* self)
     }
 }
 
+PyObject* DistributionFunction_totalEntropy(PyObject* self)
+{
+    if(((DistributionFunctionObject*)self)->df==NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "DistributionFunction object is not properly initialized");
+        return NULL;
+    }
+    try{
+        double val = totalEntropy(*((DistributionFunctionObject*)self)->df);
+        return Py_BuildValue("d", val / conv->massUnit);
+    }
+    catch(std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError,
+            (std::string("Error in DistributionFunction.totalEntropy(): ")+e.what()).c_str());
+        return NULL;
+    }
+}
+
 PyObject* DistributionFunction_elem(PyObject* self, Py_ssize_t index)
 {
     if(((DistributionFunctionObject*)self)->df==NULL) {
@@ -3712,6 +3728,11 @@ static PySequenceMethods DistributionFunction_sequence_methods = {
 static PyMethodDef DistributionFunction_methods[] = {
     { "totalMass", (PyCFunction)DistributionFunction_totalMass, METH_NOARGS,
       "Return the total mass of the model (integral of the distribution function "
+      "over the entire phase space of actions)\n"
+      "No arguments\n"
+      "Returns: float number" },
+    { "totalEntropy", (PyCFunction)DistributionFunction_totalEntropy, METH_NOARGS,
+      "Return the total entropy of the model (integral of -f*ln(f) "
       "over the entire phase space of actions)\n"
       "No arguments\n"
       "Returns: float number" },
@@ -4466,15 +4487,15 @@ public:
                 // get the address of the floating-point value in the last (3rd) tuple element
                 outputDensity = &((PyFloatObject*)*(splvZ+1))->ob_fval;
         } else {
-            npy_intp ndim, dims[2];
+            npy_intp ndims, dims[2];
             if(numPoints==-1 && separate) {
-                ndim = 1;
+                ndims = 1;
                 dims[0] = model.distrFunc.numValues();
             } else if(numPoints>=0 && !separate) {
-                ndim = 1;
+                ndims = 1;
                 dims[0] = numPoints;
             } else if(numPoints>=0 &&  separate) {
-                ndim = 2;
+                ndims = 2;
                 dims[0] = numPoints;
                 dims[1] = model.distrFunc.numValues();
             } else {
@@ -4482,10 +4503,10 @@ public:
                 return;
             }
             // create the 1d or 2d arrays of would-be spline objects and a float array of density
-            PyObject* arrvX = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
-            PyObject* arrvY = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
-            PyObject* arrvZ = PyArray_SimpleNew(ndim, dims, NPY_OBJECT);
-            PyObject* arrdens = giveDensity? PyArray_SimpleNew(ndim, dims, NPY_DOUBLE) : NULL;
+            PyObject* arrvX = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
+            PyObject* arrvY = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
+            PyObject* arrvZ = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
+            PyObject* arrdens = giveDensity? PyArray_SimpleNew(ndims, dims, NPY_DOUBLE) : NULL;
             if(!arrvX || !arrvY || !arrvZ || (giveDensity && !arrdens)) {
                 Py_XDECREF(arrvX);
                 Py_XDECREF(arrvY);
@@ -7712,8 +7733,6 @@ static const char* docstringModule =
 
 /// list of standalone functions exported by the module
 static PyMethodDef module_methods[] = {
-    //{ "setNumThreads",          (PyCFunction)setNumThreads,
-    //  METH_O,                       docstringSetNumThreads },
     { "setUnits",               (PyCFunction)setUnits,
       METH_VARARGS | METH_KEYWORDS, docstringSetUnits },
     { "getUnits",                            getUnits,

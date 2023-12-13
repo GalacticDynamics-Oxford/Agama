@@ -52,12 +52,12 @@ class Cheby {
     //! Fit Chebyshev polynomial with NC coefficients to y(x), defined at np points.
     /*!
       if NC undefined on input (i.e.=0), then NChb unchanged.
-      \param y values to fit
       \param x values at which y is defined
+      \param y values to fit
       \param np number of values of x & y
       \param NC number of Chebyshev coefficients (default: leave unchanged)
     */
-  void      chebyfit    (double *y, double *x, const int np, const int NC=0);
+  void      chebyfit    (double *x, double *y, const int np, const int NC=0);
   // y,x,np,NC
   // fit Chebyshev polynomial with NC coefficients to y(x), defined at np points
   // if NC undefined on input (i.e.=0), then NChb unchanged.

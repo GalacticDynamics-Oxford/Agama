@@ -44,6 +44,7 @@ Cheby::Cheby() {
   NChb = 0;
   s =  0;
   e1 = 0;
+  tabsize = 0;
 }
 
 

@@ -466,7 +466,7 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
         || fabs(fnc.point.nu) > lim.nu_max
         || fnc.point.lambda   < lim.lambda_min
         || fnc.point.lambda   > lim.lambda_max))
-        FILTERMSG(utils::VL_WARNING, "findIntegrationLimitsAxisym", "failed at lambda="+
+        utils::msg(utils::VL_WARNING, "findIntegrationLimitsAxisym", "failed at lambda="+
             utils::toString(fnc.point.lambda)+", nu="+utils::toString(fnc.point.nu)+", E="+
             utils::toString(fnc.E)+", Lz="+utils::toString(fnc.Lz)+", I3="+utils::toString(fnc.I3));
 
