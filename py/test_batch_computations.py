@@ -60,7 +60,7 @@ pots = agama.Potential(type='dehnen', gamma=0)  # spherical potential
 potf = agama.Potential(type='plummer', q=0.75)  # flattened potential
 pott = agama.Potential(type='plummer', p=0.75, q=0.5)  # triaxial potential
 actf = agama.ActionFinder(potf)
-actm = agama.ActionMapper(potf, [1,1,1])
+actm = agama.ActionMapper(potf)
 df0  = agama.DistributionFunction(type='quasispherical', density=pots, potential=pots, r_a=2.0)
 df1  = agama.DistributionFunction(type='quasispherical', density=dens, potential=pots, beta0=-0.2)
 df2  = agama.DistributionFunction(df1, df0)     # composite DF with two components
@@ -144,19 +144,21 @@ testCond('numpy.all(numpy.isnan(pots.Rperiapo([[Phi0*2, 1],[0, 1]])))')     # ba
 # ActionFinder class methods
 testCond('isArray(actf([1,2,3,4,5,6]), (3,))')  # 1d array of length 6 is a single point (x,v) => output array of 3 actions
 testFail('actf( 1,2,3,4,5,6 )')                 # must be an array and not just 6 numbers
-testCond('isTuple(actf([1,2,3,4,5,6], angles=True), 3)')        # extra argument angles=True produces a tuple of length 3
+testCond('isTuple(actf([1,2,3,4,5,6], frequencies=True), 2)')   # extra argument frequencies=True produces a tuple of two arrays (actions and frequencies)
+testCond('isTuple(actf([1,2,3,4,5,6], angles=True), 3)')        # extra argument angles=True implies frequencies=True and produces a tuple of length 3
 testCond('isArray(actf([1,2,3,4,5,6], angles=True)[0], (3,))')  # with actions, angles and frequencies,
 testCond('isArray(actf([1,2,3,4,5,6], angles=True)[1], (3,))')  # each of them being an array of length 3 (for a single point)
 testCond('isArray(actf([1,2,3,4,5,6], angles=True)[2], (3,))')
+testCond('isArray(actf([1,2,3,4,5,6], actions=False, frequencies=True), (3,))')  # when only frequencies but no actions are requested, the output is just an array of length 3 freqs (for a single point)
 testCond('isArray(actf(numpy.random.random(size=(5,6))), (5,3))')  # when the input has N points (Nx6 array), output is Nx3,
 testCond('isArray(actf(numpy.random.random(size=(5,6)), angles=True)[2], (5,3))')  # or three arrays of shape Nx3 if angles=True
 testFail('agama.ActionFinder(pott)')  # should not work for non-axisymmetric potentials
 
 # ActionMapper class methods
-testCond('isArray(actm(1,2,3), (6,))')             # action mapper takes 3 angles as input, and produces 1d array of length 6 (x,v)
-testCond('isArray(actm([1,2,3],[4,5,6]), (2,6))')  # N input points => 2d output array (Nx6)
-testCond('isArray(actm(numpy.random.random(size=(100,3))), (100,6))')
-testFail('agama.ActionMapper(pott, [1,2,3])')     # should not work for non-axisymmetric potentials
+testCond('isArray(actm([1,2,3,1,2,3]), (6,))')  # 1d array of length 6 (3 actions + 3 angles for a single point) => output 1d array of length 6 (x,v)
+testFail('actm( 1,2,3,4,5,6 )')                 # must be an array and not just 6 numbers
+testCond('isArray(actm(numpy.random.random(size=(10,6))), (10,6))')  # N input points => 2d output array (Nx6)
+testFail('agama.ActionMapper(pott)')  # should not work for non-axisymmetric potentials
 
 # standalone action finder routine
 testCond('isArray(agama.actions(pots, [1,2,3,4,5,6]), (3,))')   # input: potential, one or more points (x,v) => 3 actions per point

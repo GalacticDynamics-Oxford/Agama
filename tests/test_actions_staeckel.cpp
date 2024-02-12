@@ -46,7 +46,8 @@ bool test(const potential::OblatePerfectEllipsoid& potential,
     std::vector<std::pair<coord::PosVelCar, double> > traj = orbit::integrateTraj(
         initial_conditions, total_time, timestep, potential);
     actions::ActionStat stats, statf, stati;
-    actions::Angles angf;
+    actions::Actions act;
+    actions::Angles  ang;
     bool exs=false, exf=false, exi=false;
     std::ofstream strm;
     if(output) {
@@ -68,30 +69,24 @@ bool test(const potential::OblatePerfectEllipsoid& potential,
     for(size_t i=0; i<traj.size(); i++) {
         const coord::PosVelCyl pc = coord::toPosVelCyl(traj[i].first);
         try {
-            actions::ActionAngles a = actions::actionAnglesAxisymStaeckel(potential, pc);
-            stats.add(a);
+            actions::evalAxisymStaeckel(potential, pc, &act);
+            stats.add(act);
         }
         catch(std::exception &e) {
             if(!exs) std::cout << "Exception in Staeckel at i="<<i<<": "<<e.what()<<"\n";
             exs=true;
         }
         try {
-            actions::ActionAngles a = actions::actionAnglesAxisymFudge(potential, pc, ifd_p);
-            statf.add(a);
-            if(1 || i==0) angf=a;  // 1 to disable unwrapping
-            else {
-                angf.thetar   = math::unwrapAngle(a.thetar, angf.thetar);
-                angf.thetaz   = math::unwrapAngle(a.thetaz, angf.thetaz);
-                angf.thetaphi = math::unwrapAngle(a.thetaphi, angf.thetaphi);
-            }
+            actions::evalAxisymFudge(potential, pc, &act, &ang, NULL, ifd_p);
+            statf.add(act);
             if(output) {
                 const coord::PosVelProlSph pp = coord::toPosVel<coord::Cyl,coord::ProlSph>
                     (pc, potential.coordsys());
                 strm << i*timestep<<"   "<<
                     pc.phi<<" "<<pc.vphi<<" "<<pp.lambda<<" "<<pp.nu<<" "<<
                     pp.lambdadot<<" "<<pp.nudot<<"  "<<
-                    angf.thetar<<" "<<angf.thetaz<<" "<<angf.thetaphi<<"  "<<
-                    utils::pp(a.Jr,12)<<" "<<utils::pp(a.Jz,12)<<"  ";
+                    ang.thetar<<" "<<ang.thetaz<<" "<<ang.thetaphi<<"  "<<
+                    utils::pp(act.Jr,12)<<" "<<utils::pp(act.Jz,12)<<"  ";
             }
         }
         catch(std::exception &e) {

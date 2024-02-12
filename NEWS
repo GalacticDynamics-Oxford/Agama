@@ -1,6 +1,11 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+February 2024:
+Improved flexibility of transformations between position/velocity and action/angle
+spaces, allowing one to explicitly choose which quantities need to be computed;
+redesigned ActionMapperTorus to create multiple tori on demand and cache them.
+
 October 2023:
 Redesigned the parallelization strategy in the Python interface, making it more robust
 when involving (nested) calls to user-defined Python callback functions
@@ -117,6 +122,25 @@ Some of this functionality is not yet ported to Agama.
 -----------
 API Changes
 
+February 2024:
+[C++,Python]
+Redesigned the ActionFinder interface, allowing one to request any combination of
+action/angle/frequency, and skip computation of unneeded quantities.
+The interface remains mostly backward-compatible, but actionAngles() has been removed.
+[C++]
+Created the factory for action finders/mappers, choosing the optimal implementation
+depending on the potential (Isochrone / generic spherical / axisymmetric).
+Redesigned ActionMapperTorus to maintain multiple instances of Torus objects, one for each
+unique triplet of actions; these are created on demand and cached. It is still not thread-safe.
+[Python]
+ActionFinder and ActionMapper use the optimal implementation depending on the potential.
+Changed the ActionMapper interface, now its constructor only needs the potential,
+whereas the call method takes the combination of actions and angles for one or more points.
+If the potential is an Isochrone or a generic spherical one, it will use more efficient
+underlying implementations, enabling parallel computations. Otherwise (for an axisymmetric
+potential) it still uses Torus, but creates and caches new instances of Torus on-the-fly
+for each unique input triplet of actions, rather than fixing actions at the construction.
+
 March 2023:
 [C++] redesigned the workflow for on-the-fly symmetrization of density and potential models,
 introducing new wrapper classes Sphericalized/Axisymmetrized<BaseDensity/BasePotential>,
@@ -140,8 +164,8 @@ other input profiles (i.e., not from N-body snapshots).
 
 June 2022:
 [C++] redesigned the potential_factory routines to deal with general modifiers,
-with some changes in the types of input density/potential objects passed to createDensity/Potential
-routines (smart pointers instead of references)
+with some changes in the types of input density/potential objects passed to
+createDensity/Potential routines (smart pointers instead of references)
 
 May 2021:
 [C++]  interface for orbit integration is redesigned to decouple the internal representation
@@ -155,7 +179,7 @@ projectedMoments has been removed (incorporated into moments);
 vdf (velocity distribution, intrinsic or projected) also switched to Cartesian coordinates;
 projectedDF extensively redesigned and its functionality extended to work with different
 combinations of measurement uncertainties in each of the three velocity components.
-Also renamed surfaceDensity to projectedDensity for consistency with projectedForce and projectedDF.
+Renamed surfaceDensity to projectedDensity for consistency with projectedForce and projectedDF.
 
 July 2020:
 [C++] modified the format for storing potential expansion coefficients to unify it with

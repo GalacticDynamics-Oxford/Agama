@@ -1,7 +1,6 @@
 #include "galaxymodel_base.h"
 #include "galaxymodel_selfconsistent.h"
-#include "actions_staeckel.h"
-#include "actions_spherical.h"
+#include "actions_factory.h"
 #include "potential_composite.h"
 #include "potential_multipole.h"
 #include "potential_cylspline.h"
@@ -72,11 +71,8 @@ static void updateActionFinder(SelfConsistentModel& model)
     // update the action finder after the potential has been reinitialized
     if(model.verbose)
         std::cout << "Updating action finder..."<<std::flush;
-    if(isSpherical(*model.totalPotential))
-        model.actionFinder.reset(new actions::ActionFinderSpherical(*model.totalPotential));
-    else
-        model.actionFinder.reset(
-        new actions::ActionFinderAxisymFudge(model.totalPotential, model.useActionInterpolation));
+    model.actionFinder = actions::createActionFinder(
+        model.totalPotential, model.useActionInterpolation);
     if(model.verbose)
         std::cout << "done" << std::endl;
 }

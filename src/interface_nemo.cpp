@@ -1,4 +1,4 @@
-/** \file   nemo_wrapper.cpp
+/** \file   interface_nemo.cpp
     \author Eugene Vasiliev
     \date   2014-2020
     \brief  Wrapper for AGAMA potentials to be used in NEMO

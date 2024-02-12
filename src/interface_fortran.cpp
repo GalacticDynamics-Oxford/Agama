@@ -1,4 +1,4 @@
-/** \name   fortran_wrapper.cpp
+/** \name   interface_fortran.cpp
     \brief  Fortran interface to potentials of AGAMA library
     \author Eugene Vasiliev
     \date   2015-2016

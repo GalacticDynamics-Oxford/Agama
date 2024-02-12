@@ -85,8 +85,8 @@ bool test_actions(const potential::BasePotential& potential,
             pow_2(point.z * point.vphi) +
             pow_2(point.R * point.vz - point.z * point.vR) +
             pow_2(point.vz) * coordsys.Delta2 );
-        actions::Actions acF = actions::actionsAxisymFudge(potential, point, fd);
-        actions::Actions acI = actfinder.actions(point);
+        actions::Actions acF, acI = actfinder.actions(point);
+        actions::evalAxisymFudge(potential, point, &acF, NULL, NULL, fd);
         /*strm << utils::pp(point.R, 8)+' '+utils::pp(point.z, 8)+' '+
             utils::pp(pprol.lambda, 8)+' '+utils::pp(pprol.nu, 8)+' '+
             utils::pp(I3, 8)+' '+

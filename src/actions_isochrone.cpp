@@ -1,71 +1,65 @@
 #include "actions_isochrone.h"
 #include "math_core.h"
 #include "math_specfunc.h"
-#include <stdexcept>
+#include "utils.h"
 #include <cmath>
 
 namespace actions{
 
-Actions actionsIsochrone(
-    const double M, const double b,
-    const coord::PosVelCyl& point)
-{
-    double L = Ltotal(point);
-    double E = -M / (b + sqrt(b*b + pow_2(point.R) + pow_2(point.z))) +
-        0.5 * (pow_2(point.vR) + pow_2(point.vz) + pow_2(point.vphi));
-    Actions acts;
-    acts.Jphi = Lz(point);
-    acts.Jz   = point.z==0 && point.vz==0 ? 0 : fmax(0, L - fabs(acts.Jphi));
-    // note: the expression below may suffer from loss of precision when E -> Phi(0)!
-    acts.Jr   = fmax(0, M / sqrt(-2*E) - 0.5 * (L + sqrt(L*L + 4*M*b)) );
-    return acts;
-}
-
-ActionAngles actionAnglesIsochrone(
-    const double M, const double b,
-    const coord::PosVelCyl& pointCyl,
-    Frequencies* freq)
+void evalIsochrone(
+    const double M, const double b, const coord::PosVelCyl& pointCyl,
+    Actions* act, Angles* ang, Frequencies* freq)
 {
     coord::PosVelSph point(toPosVelSph(pointCyl));
-    ActionAngles aa;
-    double rb   = sqrt(b*b +pow_2(point.r));
-    double L    = Ltotal(point);
-    double L1   = sqrt(L*L + 4*M*b);
-    double J0   = M / sqrt(2*M / (b+rb) - pow_2(point.vr) - pow_2(point.vtheta) - pow_2(point.vphi));
-    double j0invsq = M*b / pow_2(J0);
-    // J0 is related to total energy via  J0 = M / sqrt(-2*E)
-    aa.Jphi     = Lz(pointCyl);
-    aa.Jz       = pointCyl.z==0 && pointCyl.vz==0 ? 0 : fmax(0, L - fabs(aa.Jphi));
-    aa.Jr       = fmax(0, J0 - 0.5 * (L + L1));   // note: loss of precision is possible!
-    double ecc  = sqrt(pow_2(1-j0invsq) - pow_2(L/J0));
-    double fac1 = (1 + ecc - j0invsq) * J0 / L;
-    double fac2 = (1 + ecc + j0invsq) * J0 / L1;
-    // below are quantities that depend on position along the orbit
-    double k1   = point.r * point.vr;
-    double k2   = J0 - M * rb / J0;
-    double eta  = atan2(k1, k2);                         // eccentric anomaly
-    double sineta     = k1 / sqrt(k1*k1 + k2*k2);        // sin(eta)
-    double tanhalfeta = eta==0 ? 0 : -k2/k1 + 1/sineta;  // tan(eta/2)
-    double psi  = atan2(pointCyl.z * L,  -pointCyl.R * point.vtheta * point.r);
-    double chi  = atan2(pointCyl.z * point.vphi, -point.vtheta * point.r);
-    aa.thetar   = math::wrapAngle(eta - sineta * ecc );
-    aa.thetaz   = math::wrapAngle(psi + 0.5 * (1 + L/L1) * (aa.thetar - (eta<0 ? 2*M_PI : 0))
-                - atan(fac1 * tanhalfeta) - atan(fac2 * tanhalfeta) * L/L1 );
-    aa.thetaphi = math::wrapAngle(point.phi - chi + math::sign(aa.Jphi) * aa.thetaz);
-    if(aa.Jz == 0)  // in this case the value of theta_z is meaningless
-        aa.thetaz = 0;
+    double rb = sqrt(b*b +pow_2(point.r));
+    double L  = Ltotal(point);
+    double L1 = sqrt(L*L + 4*M*b);
+    double Lz = pointCyl.R * pointCyl.vphi;
+    double E  = -M / (b+rb) + 0.5 * (pow_2(point.vr) + pow_2(point.vtheta) + pow_2(point.vphi));
+    double J0 = M / sqrt(-2*E);
+    if(act) {
+        act->Jphi = Lz;
+        act->Jz   = pointCyl.z==0 && pointCyl.vz==0 ? 0 : fmax(0, L - fabs(Lz));
+        act->Jr   = E>=0 ? NAN : fmax(0, J0 - 0.5 * (L + L1));   // note: possible loss of precision!
+    }
+    if(ang) {
+        double j0invsq = M*b / pow_2(J0);
+        double ecc  = sqrt(pow_2(1-j0invsq) - pow_2(L/J0));
+        double fac1 = (1 + ecc - j0invsq) * J0 / L;
+        double fac2 = (1 + ecc + j0invsq) * J0 / L1;
+        // below are quantities that depend on position along the orbit
+        double k1   = point.r * point.vr;
+        double k2   = J0 - M * rb / J0;
+        double psi  = atan2(pointCyl.z * L,  -pointCyl.R * point.vtheta * point.r);
+        double chi  = atan2(pointCyl.z * point.vphi, -point.vtheta * point.r);
+        double eta  = atan2(k1, k2);                         // eccentric anomaly
+        double sineta     = k1 / sqrt(k1*k1 + k2*k2);        // sin(eta)
+        double tanhalfeta = eta==0 ? 0 : -k2/k1 + 1/sineta;  // tan(eta/2)
+        ang->thetar   = math::wrapAngle(eta - sineta * ecc );
+        ang->thetaz   = math::wrapAngle(psi + 0.5 * (1 + L/L1) * (ang->thetar - (eta<0 ? 2*M_PI : 0))
+                      - atan(fac1 * tanhalfeta) - atan(fac2 * tanhalfeta) * L/L1 );
+        ang->thetaphi = math::wrapAngle(point.phi - chi + math::sign(Lz) * ang->thetaz);
+        if(pointCyl.z==0 && pointCyl.vz==0)  // if Jz=0, the value of theta_z is meaningless
+            ang->thetaz = 0;
+        if(E>=0)
+            ang->thetar = ang->thetaz = ang->thetaphi = NAN;
+    }
     if(freq) {
         freq->Omegar   = pow_2(M) / pow_3(J0);
         freq->Omegaz   = freq->Omegar * 0.5 * (1 + L/L1);
-        freq->Omegaphi = math::sign(aa.Jphi) * freq->Omegaz;
+        freq->Omegaphi = math::sign(Lz) * freq->Omegaz;
     }
-    return aa;
 }
 
 coord::PosVelCyl mapIsochrone(
     const double M, const double b,
     const ActionAngles& aa, Frequencies* freq)
 {
+    if(aa.Jr<0 || aa.Jz<0) {
+        if(freq)
+            freq->Omegar = freq->Omegaz = freq->Omegaphi = NAN;
+        return coord::PosVelCyl(NAN, NAN, NAN, NAN, NAN, NAN);
+    }
     double signJphi = math::sign(aa.Jphi);
     double absJphi  = signJphi * aa.Jphi;
     double L    = aa.Jz + absJphi;
@@ -110,6 +104,11 @@ coord::PosVelCyl mapIsochrone(
         freq->Omegaphi = freq->Omegaz * signJphi;
     }
     return point;
+}
+
+std::string ActionFinderIsochrone::name() const
+{
+    return "Isochrone(mass=" + utils::toString(mass) + ", radius=" + utils::toString(radius) + ")";
 }
 
 }  // namespace actions

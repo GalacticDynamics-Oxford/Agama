@@ -8,39 +8,33 @@
 
 namespace actions{
 
-/** Compute actions in a spherical Isochrone potential specified by total mass and scale radius.
-    \param[in]  isochroneMass   is the total mass associated with the potential;
-    \param[in]  isochroneRadius is the scale radius of the potential;
-    \param[in]  point  is the position/velocity point;
-    \return     actions, with Jr=NAN if the energy is positive.
+/** Compute any combination of actions, angles and frequencies
+    in a spherical Isochrone potential specified by its total mass and scale radius.
+    \param[in]  isochroneMass   is the total mass associated with the potential.
+    \param[in]  isochroneRadius is the scale radius of the potential.
+    \param[in]  point  is the position/velocity point.
+    \param[out] act    if not NULL, will contain computed actions (Jr=NAN if E>=0).
+    \param[out] ang    if not NULL, will contain corresponding angles (NAN if E>=0).
+    \param[out] freq   if not NULL, will contain corresponding frequencies (NAN if E>=0).
 */
-Actions actionsIsochrone(
-    const double isochroneMass, const double isochroneRadius,
-    const coord::PosVelCyl& point);
-
-/** Compute actions, angles and frequencies in a spherical Isochrone potential
-    specified by total mass and scale radius.
-    \param[in]  isochroneMass   is the total mass associated with the potential;
-    \param[in]  isochroneRadius is the scale radius of the potential;
-    \param[in]  point  is the position/velocity point;
-    \param[out] freq   if not NULL, store the frequencies for these actions.
-    \return     actions and angles, with Jr=angles=NAN if the energy is positive.
-*/
-ActionAngles actionAnglesIsochrone(
+void evalIsochrone(
     const double isochroneMass, const double isochroneRadius,
     const coord::PosVelCyl& point,
+    Actions* act=NULL,
+    Angles* ang=NULL,
     Frequencies* freq=NULL);
 
 /** Compute position/velocity from actions/angles in a spherical Isochrone potential.
-    \param[in]  isochroneMass   is the total mass associated with the potential;
-    \param[in]  isochroneRadius is the scale radius of the potential;
+    \param[in]  isochroneMass   is the total mass associated with the potential.
+    \param[in]  isochroneRadius is the scale radius of the potential.
     \param[in]  actAng  is the action/angle point
     \param[out] freq    if not NULL, store the frequencies for these actions.
-    \return     position and velocity point
+    \return     position and velocity point; NAN if Jr<0 or Jz<0.
 */
 coord::PosVelCyl mapIsochrone(
     const double isochroneMass, const double isochroneRadius,
-    const ActionAngles& actAng, Frequencies* freq=NULL);
+    const ActionAngles& actAng,
+    Frequencies* freq=NULL);
 
 
 /** Class for performing transformations between action/angle and coordinate/momentum for
@@ -49,11 +43,11 @@ class ActionFinderIsochrone: public BaseActionFinder, public BaseActionMapper {
 public:
     ActionFinderIsochrone(double _mass, double _radius): mass(_mass), radius(_radius) {}
 
-    virtual Actions actions(const coord::PosVelCyl& point) const
-    { return actionsIsochrone(mass, radius, point); }
+    virtual std::string name() const;
 
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const
-    { return actionAnglesIsochrone(mass, radius, point, freq); }
+    virtual void eval(const coord::PosVelCyl& point,
+        Actions* act=NULL, Angles* ang=NULL, Frequencies* freq=NULL) const
+    { evalIsochrone(mass, radius, point, act, ang, freq); }
 
     virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const
     { return mapIsochrone (mass, radius, actAng, freq); }

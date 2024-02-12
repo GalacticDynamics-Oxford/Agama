@@ -1,7 +1,7 @@
-/** \file   py_wrapper.cpp
-    \brief  Python wrapper for the Agama library
+/** \file   interface_python.cpp
+    \brief  Python interface for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2023
+    \date   2014-2024
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -40,10 +40,7 @@
 #include "omp.h"
 #endif
 // include almost everything from Agama!
-#include "actions_isochrone.h"
-#include "actions_spherical.h"
-#include "actions_staeckel.h"
-#include "actions_torus.h"
+#include "actions_factory.h"
 #include "df_factory.h"
 #include "galaxymodel_base.h"
 #include "galaxymodel_densitygrid.h"
@@ -60,6 +57,7 @@
 #include "potential_composite.h"
 #include "potential_factory.h"
 #include "potential_multipole.h"
+#include "potential_utils.h"
 #include "orbit.h"
 #include "orbit_lyapunov.h"
 #include "units.h"
@@ -598,13 +596,13 @@ std::vector<double> getOptionalTimeArg(PyObject* namedArgs, npy_intp numPoints)
                         result.push_back(value);
                 }
                 if(result.empty()) {
-                    PyErr_SetString(PyExc_RuntimeError, "Argument 'time', if provided, "
+                    PyErr_SetString(PyExc_ValueError, "Argument 'time', if provided, "
                         "must be a single number or an array of the same length as points");
                 }
                 return result;
             }
         }
-        PyErr_SetString(PyExc_ValueError, "Only one optional keyword argument "
+        PyErr_SetString(PyExc_TypeError, "Only one optional keyword argument "
             "time=(number or array of the same length as points) is allowed");
         return result;
     } else {  // otherwise no named arguments -- use a single default value (0)
@@ -684,7 +682,7 @@ PyObject* setUnits(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     double mass = 0, length = 0, velocity = 0, time = 0;
     bool reset = true;   // if called without any arguments, this means reset units
     if((args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)>0)) {
-        PyErr_SetString(PyExc_ValueError, "setUnits() accepts only named arguments");
+        PyErr_SetString(PyExc_TypeError, "setUnits() accepts only named arguments");
         return NULL;
     }
     if(namedArgs!=NULL && PyDict_Check(namedArgs) && PyDict_Size(namedArgs)>0)
@@ -1340,7 +1338,7 @@ static const char* docstringDensity =
     "  cumulmass=...  which should contain a table with two columns: radius and enclosed mass, "
     "both strictly positive and monotonically increasing.\n"
     "One may also load density expansion coefficients that were previously written to a text file "
-    "using the `export()` method, by providing the file name as an argument. "
+    "using the `export()` method, by providing the file name as a single unnamed argument. "
     "Such a file may contain any number of density components, each one in a separate "
     "INI sections whose name starts with Density, e.g., [Density], [Density1], ...\n"
     "Finally, one may create a composite density from several Density objects by providing them as "
@@ -2905,19 +2903,30 @@ static PyTypeObject PotentialType = {
 //  --------------------------
 ///@{
 
+/// common fragment of docstring for the ActionFinder class and the standalone actions routine
+#define DOCSTRING_ACTIONS \
+    "  actions (bool, default True) - whether to compute actions.\n" \
+    "  angles (bool, default False) - whether to compute angles (extra work).\n" \
+    "  frequencies (bool, default is taken from the \"angles\" argument) - " \
+    "whether to compute frequencies (extra work).\n" \
+    "Returns:\n" \
+    "  each requested quantity (actions, angles, frequencies) is a triplet of floats " \
+    "when the input is a single point, otherwise an array of Nx3 floats; the order is " \
+    "Jr, Jz, Jphi for actions and similarly for other quantities (thetas and Omegas).\n" \
+    "  If only one quantity is requested (e.g., just actions), it is returned directly, " \
+    "otherwise a tuple of several arrays is returned (e.g., actions and angles)."
+
 static const char* docstringActionFinder =
     "ActionFinder object is created for a given potential (provided as the first argument "
     "to the constructor); if the potential is axisymmetric, there is a further option to use "
     "interpolation tables for actions (optional second argument 'interp=...', False by default), "
     "which speeds up computation of actions (but not frequencies and angles) at the expense of "
     "a somewhat lower accuracy.\n"
-    "The () operator computes actions for a given position/velocity point, or array of points.\n"
-    "Arguments: a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets, "
-    "and optionally an 'angles=True' argument if frequencies and angles are also needed "
-    "(requires extra computations).\n"
-    "Returns: if angles are not computed, a single Nx3 array of floats "
-    "(for each point: Jr, Jz, Jphi); in the opposite case, a tuple of three Nx3 arrays: "
-    "actions, angles, and frequencies (in the same order - r,z,phi).";
+    "The () operator computes any combination of actions, angles and frequencies "
+    "for a given position/velocity point or an array of points.\n"
+    "Arguments:\n"
+    "  point - a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets.\n"
+    DOCSTRING_ACTIONS;
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to ActionFinder class
@@ -2930,7 +2939,8 @@ typedef struct {
 /// destructor of ActionFinder class
 void ActionFinder_dealloc(ActionFinderObject* self)
 {
-    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action finder at " + utils::toString(self->af.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action finder at " +
+        utils::toString(self->af.get()));
     self->af.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -2948,31 +2958,6 @@ PyObject* createActionFinderObject(actions::PtrActionFinder af)
     FILTERMSG(utils::VL_DEBUG, "Agama", "Created a Python wrapper for action finder at "+
         utils::toString(af.get()));
     return (PyObject*)af_obj;
-}
-
-/// create a spherical or non-spherical action finder
-actions::PtrActionFinder createActionFinder(const potential::PtrPotential& pot, bool interpolate)
-{
-    // ActionFinder constructors have OpenMP-parallelized loops, which might call back a Python
-    // function if the potential contains one, so we need to release GIL beforehand
-    PyReleaseGIL unlock;
-    assert(pot);
-    actions::PtrActionFinder af;
-    std::string type;
-    const potential::Isochrone* isoPot = dynamic_cast<const potential::Isochrone*>(pot.get());
-    if(isoPot) {
-        af.reset(new actions::ActionFinderIsochrone(isoPot->totalMass(), isoPot->getRadius()));
-        type = "Isochrone";
-    } else if(isSpherical(*pot)) {
-        af.reset(new actions::ActionFinderSpherical(*pot));
-        type = "Spherical";
-    } else {
-        af.reset(new actions::ActionFinderAxisymFudge(pot, interpolate));
-        type = interpolate ? "Interpolated Fudge" : "Fudge";
-    }
-    FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + type + " action finder for " + pot->name() +
-        " potential at " + utils::toString(af.get()));
-    return af;
 }
 
 /// constructor of ActionFinder class
@@ -2997,9 +2982,12 @@ int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedA
         return -1;
     }
     try{
-        // this routine receives a potential that may contain Python callback functions,
-        // but it takes care of GIL release internally
-        self->af = createActionFinder(pot, toBool(interp_flag, false));
+        // ActionFinder constructors have OpenMP-parallelized loops, which might call back a Python
+        // function if the potential contains one, so we need to release GIL beforehand
+        PyReleaseGIL unlock;
+        self->af = actions::createActionFinder(pot, toBool(interp_flag, false));
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + self->af->name() + " action finder at " +
+            utils::toString(self->af.get()));
         return 0;
     }
     catch(std::exception& e) {
@@ -3009,53 +2997,92 @@ int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedA
     }
 }
 
-/// unit conversion functions shared between action finder and standalone action routine
-void formatActions(const actions::Actions& act, double* outputActions)
-{
-    // unit of action is V*L
-    const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
-    outputActions[0] = act.Jr   * convA;
-    outputActions[1] = act.Jz   * convA;
-    outputActions[2] = act.Jphi * convA;
-}
-
-void formatActionsAnglesFreqs(const actions::ActionAngles& actang, const actions::Frequencies& freq,
-    double* outputActions, double* outputAngles, double* outputFreqs)
-{
-    formatActions(actang, outputActions);
-    outputAngles[0] = actang.thetar;
-    outputAngles[1] = actang.thetaz;
-    outputAngles[2] = actang.thetaphi;
-    // unit of frequency is V/L
-    const double convF = conv->lengthUnit / conv->velocityUnit;
-    outputFreqs[0] = freq.Omegar   * convF;
-    outputFreqs[1] = freq.Omegaz   * convF;
-    outputFreqs[2] = freq.Omegaphi * convF;
-}
-
-/// compute the actions and optionally angles and frequencies, using an action finder
-template<bool ANGLES>
+/// batch function for computing any combination of actions, angles and frequencies;
+/// this base class performs allocation, unit conversion and storage, while the two derived classes
+/// implement the actual computation for the cases of action finder or standalone routines.
 class FncActions: public BatchFunction {
-    const actions::BaseActionFinder& af;
+    const bool needAct, needAng, needFreq;
     double* outputBuffers[3];
 public:
-    FncActions(PyObject* input, const actions::BaseActionFinder& _af) :
-        BatchFunction(/*input length*/ 6, input), af(_af)
+    FncActions(PyObject* input, bool _needAct, bool _needAng, bool _needFreq) :
+        BatchFunction(/*input length*/ 6, input),
+        needAct(_needAct), needAng(_needAng), needFreq(_needFreq)
     {
-        outputObject = ANGLES ?
-            allocateOutput<3, 3, 3>(numPoints, outputBuffers) :  // actions, angles, frequencies
-            allocateOutput<3      >(numPoints, outputBuffers);   // just actions
+        int numOutputs = int(needAct) + int(needAng) + int(needFreq);
+        switch(numOutputs) {
+            case 3:  outputObject = allocateOutput<3, 3, 3>(numPoints, outputBuffers); break;
+            case 2:  outputObject = allocateOutput<3, 3   >(numPoints, outputBuffers); break;
+            case 1:  outputObject = allocateOutput<3      >(numPoints, outputBuffers); break;
+            default: outputObject = Py_None; Py_INCREF(Py_None);
+        }
     }
+
+    // actual implementation uses either a standalone action function or an action finder
+    virtual void eval(const coord::PosVelCyl& point,
+        actions::Actions* act, actions::Angles* ang, actions::Frequencies* freq) const = 0;
+
     virtual void processPoint(npy_intp indexPoint)
     {
-        const coord::PosVelCyl point = coord::toPosVelCyl(convertPosVel(&inputBuffer[indexPoint*6]));
-        if(ANGLES) {
-            actions::Frequencies freq;
-            actions::ActionAngles actang = af.actionAngles(point, &freq);
-            formatActionsAnglesFreqs(actang, freq, /*output actions*/ &outputBuffers[0][indexPoint*3],
-                /*angles*/ &outputBuffers[1][indexPoint*3],  /*freq*/ &outputBuffers[2][indexPoint*3]);
-        } else
-            formatActions(af.actions(point), /*output actions*/ &outputBuffers[0][indexPoint*3]);
+        actions::Actions act;
+        actions::Angles ang;
+        actions::Frequencies freq;
+        eval(coord::toPosVelCyl(convertPosVel(&inputBuffer[indexPoint*6])),
+            needAct? &act : NULL, needAng? &ang : NULL, needFreq? &freq : NULL);
+        // unit-convert and store output values
+        int numOut = 0;
+        if(needAct) {
+            // unit of action is V*L
+            const double convA = 1 / (conv->velocityUnit * conv->lengthUnit);
+            outputBuffers[numOut][indexPoint*3 + 0] = act.Jr   * convA;
+            outputBuffers[numOut][indexPoint*3 + 1] = act.Jz   * convA;
+            outputBuffers[numOut][indexPoint*3 + 2] = act.Jphi * convA;
+            numOut++;
+        }
+        if(needAng) {
+            outputBuffers[numOut][indexPoint*3 + 0] = ang.thetar;
+            outputBuffers[numOut][indexPoint*3 + 1] = ang.thetaz;
+            outputBuffers[numOut][indexPoint*3 + 2] = ang.thetaphi;
+            numOut++;
+        }
+        if(needFreq) {
+            // unit of frequency is V/L
+            const double convF = conv->lengthUnit / conv->velocityUnit;
+            outputBuffers[numOut][indexPoint*3 + 0] = freq.Omegar   * convF;
+            outputBuffers[numOut][indexPoint*3 + 1] = freq.Omegaz   * convF;
+            outputBuffers[numOut][indexPoint*3 + 2] = freq.Omegaphi * convF;
+            numOut++;
+        }
+    }
+};
+
+/// specialization for the case of action finder
+class FncActionsFinder: public FncActions {
+    const actions::BaseActionFinder& af;
+public:
+    FncActionsFinder(PyObject* input, bool needAct, bool needAng, bool needFreq,
+        const actions::BaseActionFinder& _af) :
+    FncActions(input, needAct, needAng, needFreq), af(_af) {}
+
+    virtual void eval(const coord::PosVelCyl& point,
+        actions::Actions* act, actions::Angles* ang, actions::Frequencies* freq) const
+    {
+        af.eval(point, act, ang, freq);
+    }
+};
+
+/// specialization for the standalone action routine
+class FncActionsStandalone: public FncActions {
+    const potential::BasePotential& pot;
+    double fd;   // focal distance
+public:
+    FncActionsStandalone(PyObject* input, bool needAct, bool needAng, bool needFreq,
+        const potential::BasePotential& _pot, double _fd) :
+    FncActions(input, needAct, needAng, needFreq), pot(_pot), fd(_fd * conv->lengthUnit) {}
+
+    virtual void eval(const coord::PosVelCyl& point,
+        actions::Actions* act, actions::Angles* ang, actions::Frequencies* freq) const
+    {
+        actions::eval(pot, point, act, ang, freq, fd);
     }
 };
 
@@ -3065,98 +3092,74 @@ PyObject* ActionFinder_value(PyObject* self, PyObject* args, PyObject* namedArgs
         PyErr_SetString(PyExc_RuntimeError, "ActionFinder object is not properly initialized");
         return NULL;
     }
-    static const char* keywords[] = {"point", "angles", NULL};
-    PyObject *points_obj = NULL, *angles = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
-        &points_obj, &angles))
+    static const char* keywords[] = {"point", "actions", "angles", "frequencies", NULL};
+    PyObject *points_obj = NULL, *needAct_flag = NULL, *needAng_flag = NULL, *needFreq_flag = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOO", const_cast<char**>(keywords),
+        &points_obj, &needAct_flag, &needAng_flag, &needFreq_flag))
     {
         PyErr_SetString(PyExc_TypeError,
-            "Must provide an array of points and optionally the 'angles=True/False' flag");
+            "Must provide an array of points and optionally boolean flags specifying "
+            "which quantities to compute (actions, angles and/or frequencies)");
         return NULL;
     }
-    if(toBool(angles))
-        return FncActions<true >(points_obj, *((ActionFinderObject*)self)->af).run(/*chunk*/64);
-    else
-        return FncActions<false>(points_obj, *((ActionFinderObject*)self)->af).run(/*chunk*/64);
+    bool needAct  = toBool(needAct_flag, true);
+    bool needAng  = toBool(needAng_flag, false);
+    bool needFreq = toBool(needFreq_flag, needAng);
+    return FncActionsFinder(points_obj, needAct, needAng, needFreq, *((ActionFinderObject*)self)->af) .
+        run(/*chunk*/64);
+}
+
+PyObject* ActionFinder_name(PyObject* self)
+{
+    if(!((ActionFinderObject*)self)->af) {
+        PyErr_SetString(PyExc_RuntimeError, "ActionFinder object is not properly initialized");
+        return NULL;
+    }
+    return Py_BuildValue("s", ((ActionFinderObject*)self)->af->name().c_str());
 }
 
 static PyTypeObject ActionFinderType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.ActionFinder",
     sizeof(ActionFinderObject), 0, (destructor)ActionFinder_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
+    0, 0, 0, 0, ActionFinder_name, 0, 0, 0, 0, ActionFinder_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringActionFinder,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     (initproc)ActionFinder_init
 };
 
 
-/// compute the actions and optionally angles and frequencies, using a standalone routine
-template<bool ANGLES>
-class FncActionsStandalone: public BatchFunction {
-    const potential::BasePotential& pot;
-    double fd;   // focal distance
-    double* outputBuffers[3];
-public:
-    FncActionsStandalone(PyObject* input, const potential::BasePotential& _pot, double _fd) :
-        BatchFunction(/*input length*/ 6, input), pot(_pot), fd(_fd * conv->lengthUnit)
-    {
-        outputObject = ANGLES ?
-            allocateOutput<3, 3, 3>(numPoints, outputBuffers) :  // actions, angles, frequencies
-            allocateOutput<3      >(numPoints, outputBuffers);   // just actions
-    }
-    virtual void processPoint(npy_intp indexPoint)
-    {
-        const coord::PosVelCyl point = coord::toPosVelCyl(convertPosVel(&inputBuffer[indexPoint*6]));
-        if(ANGLES) {
-            actions::Frequencies freq;
-            actions::ActionAngles actang = isSpherical(pot) ?
-                actions::actionAnglesSpherical  (pot, point, &freq) :
-                actions::actionAnglesAxisymFudge(pot, point, fd, &freq);
-            formatActionsAnglesFreqs(actang, freq, /*output actions*/ &outputBuffers[0][indexPoint*3],
-                /*angles*/ &outputBuffers[1][indexPoint*3],  /*freq*/ &outputBuffers[2][indexPoint*3]);
-        } else
-            formatActions(isSpherical(pot) ?
-                actions::actionsSpherical  (pot, point) :
-                actions::actionsAxisymFudge(pot, point, fd),
-                /*output actions*/ &outputBuffers[0][indexPoint*3]);
-    }
-};
-
 static const char* docstringActions =
-    "Compute actions for a given position/velocity point, or array of points\n"
-    "Arguments: \n"
-    "    potential - Potential object that defines the gravitational potential.\n"
-    "    point - a sextet of floats (x,y,z,vx,vy,vz) or array of such sextets.\n"
-    "    fd (float) - focal distance for the prolate spheroidal coordinate system "
+    "Compute actions for a given position/velocity point, or array of points.\n"
+    "Arguments:\n"
+    "  potential - Potential object that defines the gravitational potential.\n"
+    "  point - a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets.\n"
+    "  fd (float, default 0) - focal distance for the prolate spheroidal coordinate system "
     "(not necessary if the potential is spherical).\n"
-    "    angles (boolean, default False) - whether to compute angles and frequencies as well.\n"
-    "Returns: if angles are not computed, a single Nx3 array of floats "
-    "(for each point: Jr, Jz, Jphi); in the opposite case, a tuple of three Nx3 arrays: "
-    "actions, angles, and frequencies (in the same order - r,z,phi).";
+    DOCSTRING_ACTIONS;
 
 PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"potential", "point", "fd", "angles", NULL};
+    static const char* keywords[] = {"potential", "point", "fd", "actions", "angles", "frequencies",
+        NULL};
     double fd = 0;
-    PyObject *pot_obj = NULL, *points_obj = NULL, *angles_flag = NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdO", const_cast<char**>(keywords),
-        &pot_obj, &points_obj, &fd, &angles_flag) || fd<0)
+    PyObject *pot_obj = NULL, *points_obj = NULL,
+        *needAct_flag = NULL, *needAng_flag = NULL, *needFreq_flag = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOdOOO", const_cast<char**>(keywords),
+        &pot_obj, &points_obj, &fd, &needAct_flag, &needAng_flag, &needFreq_flag))
+    {
         return NULL;
+    }
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid Potential object");
+        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return NULL;
     }
-    if(!isAxisymmetric(*pot)) {
-        PyErr_SetString(PyExc_ValueError, "Potential must be axisymmetric");
-        return NULL;
-    }
-    if(toBool(angles_flag))
-        return FncActionsStandalone<true >(points_obj, *pot, fd).run(/*chunk*/64);
-    else
-        return FncActionsStandalone<false>(points_obj, *pot, fd).run(/*chunk*/64);
+    bool needAct  = toBool(needAct_flag, true);
+    bool needAng  = toBool(needAng_flag, false);
+    bool needFreq = toBool(needFreq_flag, needAng);
+    return FncActionsStandalone(points_obj, needAct, needAng, needFreq, *pot, fd) .
+        run(/*chunk*/64);
 }
 
 
@@ -3167,38 +3170,42 @@ PyObject* actions(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 ///@{
 
 static const char* docstringActionMapper =
-    "ActionMapper performs an inverse operation to ActionFinder, namely, compute the position and velocity "
-    "from actions and angles. Currently it is using the Torus Machine, but both the implementation "
-    "and the interface may change in the future.\n"
-    "The object is created for a given axisymmetric potential and a triplet of actions (Jr,Jz,Jphi).\n"
-    "The () operator computes the positions and velocities for one or more triplets of angles "
-    "(theta_r,theta_z,theta_phi), returning a sextet of floats (x,y,z,vx,vy,vz) for a single point "
-    "or an Nx6 array of such sextets.\n"
-    "Member variables (read-only):\n"
-    "    Jr, Jz, Jphi: the actions provided at construction;\n"
-    "    Omegar, Omegaz, Omegaphi: the corresponding frequencies.\n"
+    "ActionMapper performs an inverse operation to ActionFinder, namely, compute the position "
+    "and velocity (and optionally frequencies) from actions and angles.\n"
+    "It performs exact mapping for spherical potentials and approximate mapping "
+    "(using the Torus Machine) for axisymmetric potentials.\n"
+    "The object is created for a given potential; an optional parameter 'tol' specifies "
+    "the accuracy of torus construction.\n"
+    "The () operator computes the positions and velocities for one or more combinations of "
+    "actions and angles (Jr, Jz, Jphi, theta_r, theta_z, theta_phi), "
+    "returning a sextet of floats (x,y,z,vx,vy,vz) for a single input point, "
+    "or an Nx6 array of such sextets in case the input is a Nx6 array of action/angle points.\n"
+    "If an optional argument 'frequencies' is True, it additionally returns a second array "
+    "containing a triplet of frequencies (Omega_r, Omega_z, Omega_phi) for a single input point, "
+    "or an Nx3 array of such triplets when the input contains more than one point.\n"
     "Example:\n"
-    "    am = agama.ActionMapper(pot, [1.0, 2.0, 3.0])   # create an action mapper\n"
-    "    xv = am([ [3.0,2.0,1.0], [4.0,5.0,6.0] ])       # construct two phase-space points\n"
-    "    af = agama.ActionFinder(pot)                    # create an inverse action finder\n"
-    "    J,theta,Omega = af(xv, angles=True)             # compute actions, angles and frequencies\n"
-    "    print(Omega, am.Omegar, am.Omegaz, am.Omegaphi) # should be approximately equal\n"
-    "    print(J, am.Jr, am.Jz, am.Jphi)                 # same here\n"
-    "    print(theta)                                    # and here (nearly equal to the provided values)\n";
+    "    am = agama.ActionMapper(pot)   # create an action mapper\n"
+    "    af = agama.ActionFinder(pot)   # create an inverse action finder\n"
+    "    aa = [ [1., 2., 3., 4., 5., 6], [6., 5., 4., 3., 2., 1.] ]   # two action/angle points\n"
+    "    xv, Om = am(aa)   # map these to two position/velocity points and two frequency triplets\n"
+    "    J,theta,Omega = af(xv, angles=True, frequencies=True)   # convert from x,v to act,ang,freq\n"
+    "    print(Om, Omega)  # frequencies of forward and inverse mappings should be roughly equal\n"
+    "    print(J, aa[:,0:3])   # computed actions should also approximately match the input values\n"
+    "    print(theta, aa[:,3:6])   # and same for angles\n";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to ActionMapper class
 typedef struct {
     PyObject_HEAD
-    shared_ptr<const actions::BaseActionMapper> am;  // C++ object for action mapper
-    double Jr, Jz, Jphi;              // triplet of actions provided at the construction (in physical units)
-    double Omegar, Omegaz, Omegaphi;  // frequencies corresponding to these actions (in physical units)
+    actions::PtrActionMapper am;  // C++ object for action mapper
+    bool useTorus;  // whether the mapper uses Torus (not thread-safe) or another implementation
 } ActionMapperObject;
 /// \endcond
 
 void ActionMapper_dealloc(ActionMapperObject* self)
 {
-    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action mapper at " + utils::toString(self->am.get()));
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an action mapper at " +
+        utils::toString(self->am.get()));
     self->am.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -3209,14 +3216,14 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
         PyErr_SetString(PyExc_RuntimeError, "ActionMapper object cannot be reinitialized");
         return -1;
     }
-    static const char* keywords[] = {"potential", "actions", "tol", NULL};
+    static const char* keywords[] = {"potential", "tol", NULL};
     PyObject* pot_obj=NULL;
     double tol=NAN;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O(ddd)|d", const_cast<char**>(keywords),
-        &pot_obj, &self->Jr, &self->Jz, &self->Jphi, &tol))
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|d", const_cast<char**>(keywords),
+        &pot_obj, &tol))
     {
-        PyErr_SetString(PyExc_ValueError, "Incorrect arguments for ActionMapper constructor: "
-            "must provide an instance of Potential and a triplet of actions.");
+        PyErr_SetString(PyExc_TypeError, "Incorrect arguments for ActionMapper constructor: "
+            "must provide an instance of Potential and optionally the accuracy parameter 'tol'.");
         return -1;
     }
     potential::PtrPotential pot = getPotential(pot_obj);
@@ -3225,35 +3232,14 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
         return -1;
     }
     try{
-        double act[3] = {self->Jr, self->Jz, self->Jphi};   // values of actions in physical units
-        const actions::Actions J = convertActions(act);     // same in internal units
-        std::string type;
-        const potential::Isochrone* isoPot = dynamic_cast<const potential::Isochrone*>(pot.get());
-        if(isoPot) {
-            // specialize for the case of isochrone potential
-            self->am.reset(new actions::ActionMapperIsochrone(isoPot->totalMass(), isoPot->getRadius()));
-            type = "Isochrone";
-        } else if(isSpherical(*pot)) {
-            // avoid the use of Torus in favour of the spherical mapper;
-            // however, this class is not used in the most efficient way
-            // (it can map arbitrary values of actions, not just the ones provided at initialization)
-            PyReleaseGIL unlock;  // because the constructor contains an OpenMP-parallelized loop
-            self->am.reset(new actions::ActionMapperSpherical(*pot));
-            type = "Spherical";
-        } else {
-            self->am.reset( tol==tol ?
-            new actions::ActionMapperTorus(*pot, J, tol) :  // use the provided value of tol
-            new actions::ActionMapperTorus(*pot, J) );      // use the default value
-            type = "Torus";
-        }
-        // store the frequencies converted to physical units
-        actions::Frequencies freq;
-        self->am->map(actions::ActionAngles(J, actions::Angles(0, 0, 0)), &freq);
-        self->Omegar   = freq.Omegar   * conv->lengthUnit / conv->velocityUnit;   // inverse frequency unit
-        self->Omegaz   = freq.Omegaz   * conv->lengthUnit / conv->velocityUnit;
-        self->Omegaphi = freq.Omegaphi * conv->lengthUnit / conv->velocityUnit;
-        FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + type + " action mapper for " + pot->name() +
-            " potential at " + utils::toString(self->am.get()));
+        PyReleaseGIL unlock;  // the action mapper constructor may have an OpenMP-parallelized loop
+        self->am = tol == tol ?
+            actions::createActionMapper(pot, tol) :  // use the provided value of tol
+            actions::createActionMapper(pot);        // use the default value
+        // if the potential is non-spherical, the underlying implementation uses Torus
+        self->useTorus = !isSpherical(*pot);
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + self->am->name() + " action mapper at " +
+            utils::toString(self->am.get()));
         return 0;
     }
     catch(std::exception& e) {
@@ -3266,67 +3252,87 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
 /// compute the position/velocity from angles
 class FncActionMapper: public BatchFunction {
     const actions::BaseActionMapper& am;
-    const actions::Actions act;
-    double* outputBuffer;
+    bool needFreq;
+    double* outputBuffers[2];
 public:
-    FncActionMapper(PyObject* input, const actions::BaseActionMapper& _am, const actions::Actions& _act) :
-        BatchFunction(/*input length*/ 3, input), am(_am), act(_act)
+    FncActionMapper(PyObject* input, const actions::BaseActionMapper& _am, bool _needFreq) :
+        BatchFunction(/*input length*/ 6, input),
+        am(_am), needFreq(_needFreq)
     {
-        outputObject = allocateOutput<6>(numPoints, &outputBuffer);
+        outputObject = needFreq ?
+            allocateOutput<6, 3>(numPoints, outputBuffers) :
+            allocateOutput<6   >(numPoints, outputBuffers);
     }
     virtual void processPoint(npy_intp ip /*point index*/)
     {
         try{
-            coord::PosVelCyl point = am.map(actions::ActionAngles(act,
-                actions::Angles(inputBuffer[ip*3+0], inputBuffer[ip*3+1], inputBuffer[ip*3+2]) ));
-            unconvertPosVel(toPosVelCar(point), &outputBuffer[ip*6]);
+            actions::Frequencies freq;
+            // unit of action is V*L
+            const double convA = conv->velocityUnit * conv->lengthUnit;
+            coord::PosVelCyl point = am.map(actions::ActionAngles(
+                actions::Actions(
+                    inputBuffer[ip*6 + 0] * convA,
+                    inputBuffer[ip*6 + 1] * convA,
+                    inputBuffer[ip*6 + 2] * convA),
+                actions::Angles(
+                    inputBuffer[ip*6 + 3],
+                    inputBuffer[ip*6 + 4],
+                    inputBuffer[ip*6 + 5]) ),
+                needFreq? &freq : NULL);
+            unconvertPosVel(toPosVelCar(point), &outputBuffers[0][ip*6]);
+            if(needFreq) {
+                // unit of frequency is V/L
+                const double convF = conv->lengthUnit / conv->velocityUnit;
+                outputBuffers[1][ip*3 + 0] = freq.Omegar   * convF;
+                outputBuffers[1][ip*3 + 1] = freq.Omegaz   * convF;
+                outputBuffers[1][ip*3 + 2] = freq.Omegaphi * convF;
+            }
         }
-        catch(std::exception& ) {
-            std::fill(&outputBuffer[ip*6], &outputBuffer[ip*6+6], NAN);
+        catch(std::exception& ex) {
+            FILTERMSG(utils::VL_DEBUG, "Agama", ex.what());
+            std::fill(&outputBuffers[0][ip*6], &outputBuffers[0][ip*6+6], NAN);
+            if(needFreq)
+                std::fill(&outputBuffers[1][ip*3], &outputBuffers[1][ip*3+3], NAN);
         }
     }
 };
 
-PyObject* ActionMapper_value(ActionMapperObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* ActionMapper_value(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    if(self->am==NULL) {
+    if(((ActionMapperObject*)self)->am==NULL) {
         PyErr_SetString(PyExc_RuntimeError, "ActionMapper object is not properly initialized");
         return NULL;
     }
-    if(!noNamedArgs(namedArgs))
+    static const char* keywords[] = {"point", "frequencies", NULL};
+    PyObject *points_obj = NULL, *needFreq_flag = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
+        &points_obj, &needFreq_flag))
+    {
         return NULL;
-    double act[3] = {self->Jr, self->Jz, self->Jphi};  // values of actions in physical units
-    return FncActionMapper(args, *self->am, convertActions(act)) .
-        run(/*chunk*/ 0 /*disable parallelization: Torus is not thread-safe*/);
+    }
+    bool needFreq = toBool(needFreq_flag, false);
+    return FncActionMapper(points_obj, *((ActionMapperObject*)self)->am, needFreq) .
+        run(/*chunk*/ ((ActionMapperObject*)self)->useTorus ?
+            0  /* disable parallelization: Torus is not thread-safe */ :
+            64 /* otherwise parallelize normally */);
 }
 
-static PyMemberDef ActionMapper_members[] = {
-    { const_cast<char*>("Jr"),       T_DOUBLE, offsetof(ActionMapperObject, Jr),       READONLY,
-        const_cast<char*>("radial action (read-only)") },
-    { const_cast<char*>("Jz"),       T_DOUBLE, offsetof(ActionMapperObject, Jz),       READONLY,
-        const_cast<char*>("vertical action (read-only)") },
-    { const_cast<char*>("Jphi"),     T_DOUBLE, offsetof(ActionMapperObject, Jphi),     READONLY,
-        const_cast<char*>("azimuthal action (read-only)") },
-    { const_cast<char*>("Omegar"),   T_DOUBLE, offsetof(ActionMapperObject, Omegar),   READONLY,
-        const_cast<char*>("radial frequency (read-only)") },
-    { const_cast<char*>("Omegaz"),   T_DOUBLE, offsetof(ActionMapperObject, Omegaz),   READONLY,
-        const_cast<char*>("vertical frequency (read-only)") },
-    { const_cast<char*>("Omegaphi"), T_DOUBLE, offsetof(ActionMapperObject, Omegaphi), READONLY,
-        const_cast<char*>("azimuthal frequency (read-only)") },
-    { NULL }
-};
-
-static PyMethodDef ActionMapper_methods[] = {
-    { NULL }  // no named methods
-};
+PyObject* ActionMapper_name(PyObject* self)
+{
+    if(!((ActionMapperObject*)self)->am) {
+        PyErr_SetString(PyExc_RuntimeError, "ActionMapper object is not properly initialized");
+        return NULL;
+    }
+    return Py_BuildValue("s", ((ActionMapperObject*)self)->am->name().c_str());
+}
 
 static PyTypeObject ActionMapperType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.ActionMapper",
     sizeof(ActionMapperObject), 0, (destructor)ActionMapper_dealloc,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, (PyCFunctionWithKeywords)ActionMapper_value, 0, 0, 0, 0,
+    0, 0, 0, 0, ActionMapper_name, 0, 0, 0, 0, (PyCFunctionWithKeywords)ActionMapper_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringActionMapper,
-    0, 0, 0, 0, 0, 0, ActionMapper_methods, ActionMapper_members, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     (initproc)ActionMapper_init
 };
 
@@ -3618,7 +3624,7 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
             FILTERMSG(utils::VL_WARNING, "Agama", e.what());
         }
     }
-    
+
     // none succeeded - return an empty pointer
     return df::PtrDistributionFunction();
 }
@@ -4190,13 +4196,6 @@ public:
         double alpha, double beta, double gamma)
     :
         BatchFunction(/*inputLength*/ _ndim, input),
-        // if the Python GalaxyModel object contains a selection function,
-        // create a wrapper object for this Python callback function that temporarily disables OpenMP
-        // and will be automatically destroyed at the end of the lifetime of this class
-        // (which only exists during the call of the moments() method of Python GalaxyModel object,
-        // not during the entire lifetime of the GalaxyModel object).
-        // If GalaxyModel.sf == None, create an instance of a trivial selection function,
-        // which does not interfere with OpenMP
         selFunc(getSelectionFunction(model_obj->sf_obj)),
         model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
         ndim(_ndim),

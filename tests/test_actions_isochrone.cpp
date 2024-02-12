@@ -42,7 +42,8 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         toPosVelCar(initial_conditions), total_time, timestep, pot, /*Omega*/0, params);
     actions::ActionFinderSpherical actGrid(pot);  // interpolation-based action finder/mapper
     actions::ActionStat statI, statS, statF, statG;
-    actions::ActionAngles aaI, aaF, aaS, aaG;
+    actions::Actions acI, acF, acS, acG;
+    actions::Angles  anI, anF, anS, anG;
     actions::Frequencies frI, frF, frS, frG, frIinv, frSinv;
     math::Averager statfrIr, statfrIz, statH, statE;
     actions::Angles aoldF(0,0,0), aoldI(0,0,0), aoldS(0,0,0);
@@ -60,54 +61,54 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         coord::PosVelCyl point = toPosVelCyl(traj[i].first);
         statE.add(totalEnergy(pot, point));
         point.phi = math::wrapAngle(point.phi);
-        aaI = actions::actionAnglesIsochrone(M, b,  point, &frI);
-        aaF = actions::actionAnglesAxisymFudge(pot, point, ifd, &frF);
-        aaS = actions::actionAnglesSpherical(pot, point, &frS);
-        aaG = actGrid. actionAngles(point, &frG);
-        statH.add(actions::computeHamiltonianSpherical(pot, aaI));  // find H(J)
-        statI.add(aaI);
-        statF.add(aaF);
-        statS.add(aaS);
-        statG.add(aaG);
+        actions::evalIsochrone(M, b, point, &acI, &anI, &frI);
+        actions::evalSpherical(pot,  point, &acS, &anS, &frS);
+        actions::evalAxisymFudge(pot,point, &acF, &anF, &frF, ifd);
+        actGrid.eval(point, &acG, &anG, &frG);
+        statH.add(actions::computeHamiltonianSpherical(pot, acI));  // find H(J)
+        statI.add(acI);
+        statF.add(acF);
+        statS.add(acS);
+        statG.add(acG);
         statfrIr.add(frI.Omegar);
         statfrIz.add(frI.Omegaz);
         actions::Angles anewF, anewI, anewS;
-        anewF.thetar   = math::unwrapAngle(aaF.thetar,   aoldF.thetar);
-        anewF.thetaz   = math::unwrapAngle(aaF.thetaz,   aoldF.thetaz);
-        anewF.thetaphi = math::unwrapAngle(aaF.thetaphi, aoldF.thetaphi);
-        anewI.thetar   = math::unwrapAngle(aaI.thetar,   aoldI.thetar);
-        anewI.thetaz   = math::unwrapAngle(aaI.thetaz,   aoldI.thetaz);
-        anewI.thetaphi = math::unwrapAngle(aaI.thetaphi, aoldI.thetaphi);
-        anewS.thetar   = math::unwrapAngle(aaS.thetar,   aoldS.thetar);
-        anewS.thetaz   = math::unwrapAngle(aaS.thetaz,   aoldS.thetaz);
-        anewS.thetaphi = math::unwrapAngle(aaS.thetaphi, aoldS.thetaphi);
+        anewF.thetar   = math::unwrapAngle(anF.thetar,   aoldF.thetar);
+        anewF.thetaz   = math::unwrapAngle(anF.thetaz,   aoldF.thetaz);
+        anewF.thetaphi = math::unwrapAngle(anF.thetaphi, aoldF.thetaphi);
+        anewI.thetar   = math::unwrapAngle(anI.thetar,   aoldI.thetar);
+        anewI.thetaz   = math::unwrapAngle(anI.thetaz,   aoldI.thetaz);
+        anewI.thetaphi = math::unwrapAngle(anI.thetaphi, aoldI.thetaphi);
+        anewS.thetar   = math::unwrapAngle(anS.thetar,   aoldS.thetar);
+        anewS.thetaz   = math::unwrapAngle(anS.thetaz,   aoldS.thetaz);
+        anewS.thetaphi = math::unwrapAngle(anS.thetaphi, aoldS.thetaphi);
         anglesMonotonic &= i==0 || (
             anewI.thetar >= aoldI.thetar && anewS.thetar >= aoldS.thetar &&
-           (anewF.thetar >= aoldF.thetar || aaF.Jr<1e-10) &&
+           (anewF.thetar >= aoldF.thetar || acF.Jr<1e-10) &&
             anewI.thetaz >= aoldI.thetaz && anewS.thetaz >= aoldS.thetaz &&
             anewF.thetaz >= aoldF.thetaz &&
-            math::sign(aaI.Jphi) * anewI.thetaphi >= math::sign(aaI.Jphi) * aoldI.thetaphi &&
-            math::sign(aaS.Jphi) * anewS.thetaphi >= math::sign(aaS.Jphi) * aoldS.thetaphi &&
-            math::sign(aaF.Jphi) * anewF.thetaphi >= math::sign(aaF.Jphi) * aoldF.thetaphi);
+            math::sign(acI.Jphi) * anewI.thetaphi >= math::sign(acI.Jphi) * aoldI.thetaphi &&
+            math::sign(acS.Jphi) * anewS.thetaphi >= math::sign(acS.Jphi) * aoldS.thetaphi &&
+            math::sign(acF.Jphi) * anewF.thetaphi >= math::sign(acF.Jphi) * aoldF.thetaphi);
         aoldI = anewI;
         aoldS = anewS;
         aoldF = anewF;
         // inverse transformation for spherical potential
-        coord::PosVelCyl pinv = actions::mapSpherical(pot, aaS, &frSinv);
+        coord::PosVelCyl pinv = actions::mapSpherical(pot, actions::ActionAngles(acS, anS), &frSinv);
         reversible_sph &= equalPosVel(pinv, point, epss) && 
             math::fcmp(frS.Omegar, frSinv.Omegar, epss) == 0 &&
             math::fcmp(frS.Omegaz, frSinv.Omegaz, epss) == 0 &&
             math::fcmp(frS.Omegaphi, frSinv.Omegaphi, epss) == 0;
 
         // inverse transformation for interpolated spherical action finder
-        pinv = actGrid.map(aaG, &frSinv);
+        pinv = actGrid.map(actions::ActionAngles(acG, anG), &frSinv);
         reversible_grid &= equalPosVel(pinv, point, epsi) &&
             math::fcmp(frG.Omegar, frSinv.Omegar, epsi) == 0 &&
             math::fcmp(frG.Omegaz, frSinv.Omegaz, epsi) == 0 &&
             math::fcmp(frG.Omegaphi, frSinv.Omegaphi, epsi) == 0;
 
         // inverse transformation for Isochrone
-        coord::PosVelCyl pp = actions::mapIsochrone(M, b, aaI, &frIinv);
+        coord::PosVelCyl pp = actions::mapIsochrone(M, b, actions::ActionAngles(acI, anI), &frIinv);
         reversible_iso &= equalPosVel(pp, point, epst) &&
             math::fcmp(frI.Omegar,   frIinv.Omegar,   epst) == 0 &&
             math::fcmp(frI.Omegaz,   frIinv.Omegaz,   epst) == 0 &&
@@ -115,10 +116,10 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
         if(output) {
             strm << i*timestep<<"   "<<point.R<<" "<<point.z<<" "<<point.phi<<"  "<<
                 toPosVelCyl(pp).R<<" "<<toPosVelCyl(pp).z<<" "<<pp.phi<<"   "<<
-                aaI.thetar<<" "<<aaI.thetaz<<" "<<aaI.thetaphi<<"  "<<
-                aaS.thetar<<" "<<aaS.thetaz<<" "<<aaS.thetaphi<<"  "<<
-                aaG.thetar<<" "<<aaG.thetaz<<" "<<aaG.thetaphi<<"  "<<
-                aaF.thetar<<" "<<aaF.thetaz<<" "<<aaF.thetaphi<<"  "<<
+                anI.thetar<<" "<<anI.thetaz<<" "<<anI.thetaphi<<"  "<<
+                anS.thetar<<" "<<anS.thetaz<<" "<<anS.thetaphi<<"  "<<
+                anG.thetar<<" "<<anG.thetaz<<" "<<anG.thetaphi<<"  "<<
+                anF.thetar<<" "<<anF.thetaz<<" "<<anF.thetaphi<<"  "<<
             "\n";
         }
     }
@@ -252,7 +253,7 @@ bool test_isochrone(const coord::PosVelCyl& initial_conditions, const char* titl
     ",  act+ang="<<utils::pp(npoints*ncycles/t_fudge_ang, 5)<<std::endl;
 #endif
 
-    std::cout << 
+    std::cout <<
     "Hamiltonian H(J)="<<utils::pp(statH.mean(), 14)<<" +- "<<utils::pp(sqrt(statH.disp()), 7)<<
     ",  H(x,v)="<<utils::pp(statE.mean(), 14)<<" +- "<<utils::pp(sqrt(statE.disp()), 7)<<
     (HofJ_ok?"":" \033[1;31m**\033[0m") <<
@@ -280,10 +281,11 @@ void test_sph_iso()
         for(double ll=0; ll<1; ll+=1./128) {
             double L = Lc * pow_2(sin(M_PI/2*ll));
             double Omegar, Omegaz, Jr= af.Jr(E, L, &Omegar, &Omegaz);
+            actions::Actions as, ai;
             actions::Frequencies fi, fs;
             coord::PosVelCyl point(r, 0, 0, sqrt(vc*vc-pow_2(L/r)), 0, L/r);
-            actions::Actions as = actions::actionAnglesSpherical(*pot, point, &fs);
-            actions::Actions ai = actions::actionAnglesIsochrone(M, b, point, &fi);
+            actions::evalSpherical(*pot, point, &as, NULL, &fs);
+            actions::evalIsochrone(M, b, point, &ai, NULL, &fi);
             strm << E << ' ' << L/Lc << ' ' <<
                 ai.Jr/(Lc-L) << ' ' << as.Jr/(Lc-L) << ' ' << Jr/(Lc-L) << ' ' <<
                 fi.Omegar << ' ' << fs.Omegar << ' ' << Omegar << ' ' <<

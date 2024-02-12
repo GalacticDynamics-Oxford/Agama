@@ -31,10 +31,12 @@
 #include "WD_Vector.h"
 #include "WD_Matrix.h"
 #include "Potential.h"
-#include "PJMCoords.h"
 #include "Fit.h"
 
 namespace torus{
+
+typedef Vector<double,6> GCY;
+
 /**
 \brief Class combining everything. Can fit a Torus with Actions J in a 
 given Potential. Then gives position and velocity given angles. Lots 

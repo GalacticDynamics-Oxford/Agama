@@ -60,11 +60,13 @@ bool testPotential(const potential::BasePotential& pot)
             intp.findPlanarOrbitExtent(E, L, R1i, R2i);
             // test the accuracy of action interpolation
             coord::PosVelCyl point(r, 0, 0, sqrt(fmax(0, r*grad.dR - pow_2(L/r))), 0, L/r);
-            double as = actions::actionsSpherical(pot, point).Jr;
+            actions::Actions acs;
+            actions::evalSpherical(pot, point, &acs);
+            double as = acs.Jr;
             double ai = af.Jr(E, L);
             // test the accuracy of computing energy from actions
-            double Es=actions::computeHamiltonianSpherical(pot, actions::Actions(Jr, L, 0));
-            double Ei=af.E(actions::Actions(Jr, L, 0));
+            double Es = actions::computeHamiltonianSpherical(pot, actions::Actions(Jr, L, 0));
+            double Ei = af.E(actions::Actions(Jr, L, 0));
             errR.add((R1s-R1i)/r * wl * wr);
             errR.add((R2s-R2i)/r * wl * wr);
             errJ.add((as-ai)/Lc  * wl * wr);

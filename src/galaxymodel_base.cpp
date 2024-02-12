@@ -1154,12 +1154,13 @@ particles::ParticleArrayCar sampleActions(
     assert(nAct == actions.size());
     double pointMass = totalMass / (nAct*nAng);
 
-    // next sample angles from each torus
+    // next sample angles from each torus in the above action sample
+    potential::PtrPotential pot, xpot(pot, &model.potential);
+    actions::ActionMapperTorus torus(xpot);
     particles::ParticleArrayCar points;
     if(actsOutput!=NULL)
         actsOutput->clear();
     for(size_t t=0; t<nAct && points.size()<nSamp; t++) {
-        actions::ActionMapperTorus torus(model.potential, actions[t]);
         for(size_t a=0; a<nAng; a++) {
             actions::Angles ang;
             ang.thetar   = 2*M_PI*math::random();

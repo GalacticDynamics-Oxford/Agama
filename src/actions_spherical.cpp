@@ -25,17 +25,16 @@ static const double ACCURACY_INTERP2 = 1e-4;
 static const unsigned int GRID_SIZE_L = 25;
 
 /// minimum order of Gauss-Legendre quadrature for actions, frequencies and angles
-static const unsigned int INTEGR_ORDER = 10;
+static const unsigned int INTEGR_ORDER = 8;
 
 /** order of Gauss-Legendre quadrature for actions, frequencies and angles:
     use a higher order for more eccentric orbits, as indicated by the ratio
-    of pericenter to apocenter radii (R1/R2) */
+    of pericenter to apocenter radii (R1/R2).
+    The heuristic recipe below keeps the accuracy at a nearly constant level down to R1/R2=0.001 */
 inline unsigned int integrOrder(double R1overR2) {
     if(R1overR2==0)
         return math::MAX_GL_ORDER;
-    int log2;  // base-2 logarithm of R1/R2
-    frexp(R1overR2, &log2);
-    return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - log2);
+    return std::min<int>(math::MAX_GL_ORDER, INTEGR_ORDER - 4/M_LN2 * log(R1overR2));
 }
 
 
@@ -114,7 +113,8 @@ public:
         if(mode==MODE_JR)     return vr;
         if(mode==MODE_OMEGAR) return 1/vr;
         if(mode==MODE_OMEGAZ) return L/(r*r*vr) - 1/(sqrt(pow_2(r/R1)-1)*r);
-        // in the latter case, a singular term with analytic antiderivative is subtracted from the integrand
+        // in the latter case, a singular term with analytic antiderivative
+        // is subtracted from the integrand
         assert(!"Invalid mode in action integrand");
         return 0;
     }
@@ -129,23 +129,27 @@ public:
     \tparam mode      determines the quantity to compute:
     MODE_JR     ->    \int_{R1}^{R}  v_r(E,L,r) dr,
     MODE_OMEGAR ->    \int 1 / v_r dr,
-    MODE_OMEGAZ ->    \int L / (v_r * r^2) dr,  in the latter case the integrand is split into two parts,
-    one of them can be integrated analytically, and the other does not diverge as L->0,r->0.
+    MODE_OMEGAZ ->    \int L / (v_r * r^2) dr,  in the latter case the integrand is split into
+    two parts, one of them can be integrated analytically, and the other does not diverge as L->0,r->0.
     \return the value of integral.
 */
 template<Operation mode>
 inline double integr(const math::IFunction& poten,
     double E, double L, double R1, double R2, double R=NAN)
 {
-    if(R!=R) R=R2;               // default upper limit for integration
+    if(R1==R2)
+        return 0;
+    if(R!=R)
+        R=R2;                   // default upper limit for integration
     R = math::clip(R, R1, R2);  // roundoff errors might cause R to be outside the allowed interval
     Integrand<mode> integrand(poten, E, L, R1);
     math::ScalingCub scaling(R1, R2);
     double add = 0;  // part of the integral that is computed analytically
     if(mode==MODE_OMEGAZ) {
         if(R1==0) {
-            // "add" is (half) the change in angle phi for a purely radial orbit (Pi/2 for potentials
-            // that are regular at origin, or larger for singular potentials, up to Pi in the Kepler case)
+            // "add" is (half) the change in angle phi for a purely radial orbit
+            // (Pi/2 for potentials that are regular at origin,
+            // or larger for singular potentials, up to Pi in the Kepler case)
             double slope = potential::innerSlope(poten);
             add = M_PI / (2 + fmin(slope, 0));
         } else
@@ -249,40 +253,9 @@ public:
     virtual unsigned int numDerivs() const { return 1; }
 };
 
-/** Compute actions and other orbit parameters for the given point and potential.
-    This routine is shared between `actionsSpherical` and `actionsAnglesSpherical`,
-    and in addition to actions, outputs other quantities that may be later used elsewhere.
-    \param[in]  point  is the input point;
-    \param[in]  potential  is the gravitational potential;
-    \param[out] E  is the total energy;
-    \param[out] L  is the angular momentum;
-    \param[out] R1, R2  are the peri/apocenter radii;
-    \return  the values of actions (or NAN in Jr if the energy is positive).
-*/
-Actions computeActions(const coord::PosVelCyl& point, const potential::BasePotential& pot,
-    double &E, double &L, double &R1, double &R2)
-{
-    if(!isSpherical(pot))
-        throw std::invalid_argument("actionsSpherical can only deal with spherical potentials");
-    Actions act;
-    E = totalEnergy(pot, point);
-    L = Ltotal(point);
-    act.Jphi = Lz(point);
-    // avoid roundoff errors if Jz is close to 0 or exactly 0
-    act.Jz = point.z==0 && point.vz==0 ? 0 : fmax(0, L - fabs(act.Jphi));
-    if(E>=0) {
-        act.Jr = NAN;
-    } else {
-        findPlanarOrbitExtent(pot, E, L, R1, R2);
-        act.Jr = integr<MODE_JR>(potential::Sphericalized<potential::BasePotential>(pot),
-            E, L, R1, R2) / M_PI;
-    }
-    return act;
-}
-
 /** Compute angles for the given point.
-    This routine is shared between the standalone function `actionAnglesSpherical`
-    and the member function `actionAngles` of the interpolated action finder.
+    This routine is shared between the standalone function `evalSpherical`
+    and the member function `eval` of the interpolated action finder.
     \param[in]  point is the input point;
     \param[in]  potential is the original or interpolated potential;
     \param[in]  E is the total energy;
@@ -304,7 +277,8 @@ Angles computeAngles(const coord::PosVelCyl& point,
     ang.thetar = integr<MODE_OMEGAR>(potential, E, L, R1, R2, r) * Omegar;
     double thr = ang.thetar;
     double thz = integr<MODE_OMEGAZ>(potential, E, L, R1, R2, r);
-    if(point.R * point.vR + point.z * point.vz < 0) {  // v_r<0 - we're on the second half of radial period
+    if(point.R * point.vR + point.z * point.vz < 0) {
+        // v_r<0 - we're on the second half of radial period
         ang.thetar = 2*M_PI - ang.thetar;
         thz        = -thz;
         thr        = ang.thetar - 2*M_PI;
@@ -518,7 +492,8 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
                         /*lower limit is Elow, which translates to*/ math::scale(scaling, X),
                         /*upper limit on scaledE is infinity, which corresponds to*/ 1, ACCURACY_JR);
                     if(zroot==zroot) {
-                        // only if the root-finder was successful, otherwise leave Elow=Ecirc as for Jr=0
+                        // only if the root-finder was successful,
+                        // otherwise leave Elow=Ecirc as for Jr=0
                         X = math::unscale(scaling, zroot);
                         double E = unscaleE(X, invPhi0, /*output*/ &dEdX);
                         // once again compute the radial action _and_frequencies_ for the given energy
@@ -564,7 +539,7 @@ math::QuinticSpline2d createEnergyInterpolator(const potential::Interpolator2d& 
 double computeHamiltonianSpherical(const potential::BasePotential& potential, const Actions& acts)
 {
     if(acts.Jr<0 || acts.Jz<0)
-        throw std::invalid_argument("computeHamiltonianSpherical: input actions are negative");
+        return NAN;
     double L = acts.Jz + fabs(acts.Jphi);  // total angular momentum
     // radius of a circular orbit with this angular momentum
     double rcirc = R_from_Lz(potential, L);
@@ -593,8 +568,6 @@ coord::PosVelCyl mapSpherical(
 {
     if(!isSpherical(pot))
         throw std::invalid_argument("mapSpherical: potential must be spherically symmetric");
-    if(aa.Jr<0 || aa.Jz<0)
-        throw std::invalid_argument("mapSpherical: input actions are negative");
     double E = computeHamiltonianSpherical(pot, aa);
     double L = aa.Jz + fabs(aa.Jphi);  // total angular momentum
     double R1, R2;
@@ -609,47 +582,57 @@ coord::PosVelCyl mapSpherical(
     return mapPointFromActionAngles(aa, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz);
 }
 
-
-Actions actionsSpherical(
-    const potential::BasePotential& potential, const coord::PosVelCyl& point)
+void evalSpherical(const potential::BasePotential& pot, const coord::PosVelCyl& point,
+    Actions* act, Angles* ang, Frequencies* freqout)
 {
-    double E, L, R1, R2;
-    return computeActions(point, potential, E, L, R1, R2);
-}
-
-ActionAngles actionAnglesSpherical(
-    const potential::BasePotential& pot, const coord::PosVelCyl& point, Frequencies* freqout)
-{
-    double E, L, R1, R2;
-    Actions acts = computeActions(point, pot, E, L, R1, R2);
-    if(!isFinite(acts.Jr)) { // E>=0
-        if(freqout) freqout->Omegar = freqout->Omegaz = freqout->Omegaphi = NAN;
-        return ActionAngles(acts, Angles(NAN, NAN, NAN));
+    if(!isSpherical(pot))
+        throw std::invalid_argument("evalSpherical can only deal with spherical potentials");
+    double E  = totalEnergy(pot, point);
+    double Lz = point.R * point.vphi;
+    double Lx2plusLy2 = pow_2(point.z * point.vphi) + pow_2(point.R * point.vz - point.z * point.vR);
+    double L  = sqrt(Lz * Lz + Lx2plusLy2);
+    if(act) {
+        act->Jr = NAN;  // temporary assignment - will be replaced by the correct value unless E>=0
+        act->Jz = Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
+        act->Jphi = Lz;
     }
-    Frequencies freq;
+    if(E>=0) {
+        if(ang)
+            ang->thetar = ang->thetaz = ang->thetaphi = NAN;
+        if(freqout)
+            freqout->Omegar = freqout->Omegaz = freqout->Omegaphi = NAN;
+        return;
+    }
+    double R1, R2;   // peri/apocenter radii
+    findPlanarOrbitExtent(pot, E, L, R1, R2);
     potential::Sphericalized<potential::BasePotential> sphPot(pot);
-    if(R2 > R1 * (1 + 1e-8)) {  // normal case
-        freq.Omegar = M_PI / integr<MODE_OMEGAR>(sphPot, E, L, R1, R2);
-        freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(sphPot, E, L, R1, R2) / M_PI;
-    } else {  // degenerate case of a purely circular orbit
-        epicycleFreqs(pot, point.R, freq.Omegar, freq.Omegaz, freq.Omegaphi);
+    if(act)
+        act->Jr = integr<MODE_JR>(sphPot, E, L, R1, R2) / M_PI;
+    // if angles are requested, frequencies need to be computed as well
+    if(ang || freqout) {
+        Frequencies freq;
+        if(R2 > R1 * (1 + 1e-8)) {  // normal case
+            freq.Omegar = M_PI / integr<MODE_OMEGAR>(sphPot, E, L, R1, R2);
+            freq.Omegaz = freq.Omegar * integr<MODE_OMEGAZ>(sphPot, E, L, R1, R2) / M_PI;
+        } else {  // degenerate case of a purely circular orbit
+            epicycleFreqs(pot, point.R, freq.Omegar, freq.Omegaz, /*ignored*/ freq.Omegaphi);
+        }
+        freq.Omegaphi = freq.Omegaz * math::sign(point.vphi);
+        if(freqout)  // freak out only if requested
+            *freqout = freq;
+        if(ang)
+            *ang = computeAngles(point, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz);
     }
-    freq.Omegaphi = freq.Omegaz * math::sign(point.vphi);
-    if(freqout)  // freak out only if requested
-        *freqout = freq;
-    // may wish to add a special case of Jr==0 (output the epicyclic frequencies, but no angles?)
-    Angles angs  = computeAngles(point, sphPot, E, L, R1, R2, freq.Omegar, freq.Omegaz);
-    return ActionAngles(acts, angs);
 }
-
 
 ActionFinderSpherical::ActionFinderSpherical(const potential::BasePotential& potential) :
     invPhi0(1. / potential.value(coord::PosCyl(0,0,0))),
     pot(potential),
-    intJr(createActionInterpolator(pot))
+    intJr(createActionInterpolator(pot)),
 #ifdef INTERPOLATE_ENERGY
-    ,intE(createEnergyInterpolator(pot, intJr))
+    intE(createEnergyInterpolator(pot, intJr)),
 #endif
+    myName("Spherical(potential=" + potential.name() + ")")
 {}
 
 double ActionFinderSpherical::Jr(double E, double L, double *Omegar, double *Omegaz) const
@@ -659,43 +642,44 @@ double ActionFinderSpherical::Jr(double E, double L, double *Omegar, double *Ome
     return computeJr(E, X, dEdX, L, pot, intJr, /*optional output*/ Omegar, Omegaz);
 }
 
-Actions ActionFinderSpherical::actions(const coord::PosVelCyl& point) const
+void ActionFinderSpherical::eval(const coord::PosVelCyl& point,
+    Actions* act, Angles* ang, Frequencies* freq) const
 {
     Actions acts;
     double E  = pot.value(sqrt(pow_2(point.R) + pow_2(point.z))) + 
         0.5 * (pow_2(point.vR) + pow_2(point.vz) + pow_2(point.vphi));
-    double L  = Ltotal(point);
-    acts.Jphi = Lz(point);
-    acts.Jz   = point.z==0 && point.vz==0 ? 0 : fmax(0, L - fabs(acts.Jphi));
-    acts.Jr   = E<=0 ? Jr(E, L) : NAN;
-    return acts;
-}
-
-ActionAngles ActionFinderSpherical::actionAngles(
-    const coord::PosVelCyl& point, Frequencies* freq) const
-{
-    Actions acts;
-    double E  = pot.value(sqrt(pow_2(point.R) + pow_2(point.z))) + 
-        0.5 * (pow_2(point.vR) + pow_2(point.vz) + pow_2(point.vphi));
-    double L  = Ltotal(point);
-    double Omegar, Omegaz;
-    acts.Jphi = Lz(point);
-    acts.Jz   = point.z==0 && point.vz==0 ? 0 : fmax(0, L - fabs(acts.Jphi));
-    acts.Jr   = Jr(E, L, &Omegar, &Omegaz);
-    if(freq)
-        *freq = Frequencies(Omegar, Omegaz, Omegaz * math::sign(acts.Jphi));
-    double R1, R2;
-    pot.findPlanarOrbitExtent(E, L, R1, R2);
-    Angles angs = computeAngles(point, pot, E, L, R1, R2, Omegar, Omegaz);
-    return ActionAngles(acts, angs);
+    double Lz = point.R * point.vphi;
+    double Lx2plusLy2 = pow_2(point.z * point.vphi) + pow_2(point.R * point.vz - point.z * point.vR);
+    double L  = sqrt(Lz * Lz + Lx2plusLy2);
+    double Omegar, Omegaz, Jr, R1, R2;
+    if(freq || ang)
+        Jr = this->Jr(E, L, &Omegar, &Omegaz);
+    else
+        Jr = this->Jr(E, L);
+    if(act) {
+        act->Jr = Jr;
+        act->Jz = Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
+        act->Jphi = Lz;
+    }
+    if(ang) {
+        if(E>=0)
+            ang->thetar = ang->thetaz = ang->thetaphi = NAN;
+        else {
+            pot.findPlanarOrbitExtent(E, L, R1, R2);
+            *ang = computeAngles(point, pot, E, L, R1, R2, Omegar, Omegaz);
+        }
+    }
+    if(freq) {
+        freq->Omegar = Omegar;
+        freq->Omegaz = Omegaz;
+        freq->Omegaphi = Omegaz * math::sign(Lz);
+    }
 }
 
 double ActionFinderSpherical::E(const Actions& acts) const
 {
-    if(acts.Jr!=acts.Jr)
-        return 0;   // Jr=NAN when energy is non-negative
     if(acts.Jr<0 || acts.Jz<0)
-        throw std::invalid_argument("ActionFinderSpherical: input actions cannot be negative");
+        return NAN;
     double L = acts.Jz + fabs(acts.Jphi);  // total angular momentum
 #ifdef INTERPOLATE_ENERGY
     double scaledE, der,
@@ -733,8 +717,11 @@ double ActionFinderSpherical::E(const Actions& acts) const
 
 coord::PosVelCyl ActionFinderSpherical::map(const ActionAngles& aa, Frequencies* freq) const
 {
-    if(aa.Jr<0 || aa.Jz<0)
-        throw std::invalid_argument("mapSpherical: input actions are negative");
+    if(aa.Jr<0 || aa.Jz<0) {
+        if(freq)
+            freq->Omegar = freq->Omegaz = freq->Omegaphi = NAN;
+        return coord::PosVelCyl(NAN, NAN, NAN, NAN, NAN, NAN);
+    }
     double E = this->E(aa);
     double L = aa.Jz + fabs(aa.Jphi);  // total angular momentum
     // compute the frequencies

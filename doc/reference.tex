@@ -64,7 +64,7 @@
 \title{\vspace*{-14mm}
 \includegraphics[width=8cm]{agama.jpg}\protect\\[5mm]\Agama reference}
 \author{Eugene Vasiliev\\
-\normalsize\textit{Institute of Astronomy, Cambridge}\\
+%\normalsize\textit{Institute of Astronomy, Cambridge}\\
 \normalsize\textrm{email: eugvas@protonmail.com} }
 
 \maketitle
@@ -524,17 +524,20 @@ In a spherical or axisymmetric potential, the most convenient choice for actions
 %The corresponding angles are defined such that $\theta_r=0$ corresponds to the pericenter, $\theta_z=0$ -- to the passage through the $x-y$ plane with positive vertical velocity, and $\theta_\phi=0$ -- to [?]. 
 
 The \ttt{actions::} namespace introduces several concepts: \ttt{Actions} and \ttt{Angles} are the triplet of action and angle variables, \ttt{ActionAngles} is their combination, \ttt{Frequencies} is the triplet of frequencies $\boldsymbol{\Omega}\equiv \D H/\D \bJ$ (derivatives of Hamiltonian w.r.t.\ actions). 
-The transformation from $\{\bx,\bv\}$ to $\{\bJ,\bt\}$ is provided by action finders, and the inverse transformation -- by action mappers. There are several distinct methods discussed later in this section, and they may exist as standalone routines and/or instances of classes derived from the \ttt{BaseActionFinder} and \ttt{BaseActionMapper} classes. The action finder routines exist in two variants: computing only the actions (the most common usage), or in addition the angles and frequencies (more expensive).
+The transformation from $\{\bx,\bv\}$ to $\{\bJ,\bt\}$ is provided by action finders, and the inverse transformation -- by action mappers. There are several distinct methods discussed later in this section, and they may exist as standalone routines and/or instances of classes derived from the \ttt{BaseActionFinder} and \ttt{BaseActionMapper} classes. The action finder routines can output any combination of actions, angles and frequencies, skipping the computation of unneeded quantities.
 
 The following sections describe the methods suitable for specific cases of spherical or axisymmetric potentials (see \cite{SandersBinney2016} for a review and comparison of various approaches).
 At present, \Agama does not contain any methods for action/angle computation in non\--axi\-sym\-met\-ric potentials, but they may be added in the future within the same general framework.
+The file \texttt{action_factory.h} provides driver routines for computing actions and creating action finder/mapper instances, which automatically choose the appropriate implementation among the ones described below, depending on the potential.
 
 
 %%%%%%%%%%%%%%
 \subsubsection{Isochrone mapping}  \label{sec:ActionsIsochrone}
 
 The spherical isochrone potential, specified by two parameters (mass $M$ and scale radius $b$) admits analytic expressions for the transformation between $\{\bx,\bv\}$ and $\{\bJ,\bt\}$ in both directions. These expression are given, e.g., in Eqs.~3.225--3.241 of \cite{BinneyTremaine}.
-The standalone routines providing these transformations, optionally with partial derivatives of $\{\bx,\bv\}$ w.r.t.\ $\bJ, M, b$, are located in \texttt{actions_isochrone.h}.
+The standalone routines \ttt{evalIsochrone}/\ttt{mapIsochrone} providing these transformations, %, optionally with partial derivatives of $\{\bx,\bv\}$ w.r.t.\ $\bJ, M, b$, 
+and the corresponding wrapper class \ttt{ActionFinderIsochrone},
+are located in \texttt{actions_isochrone.h}.
 
 
 %%%%%%%%%%%%%%
@@ -545,21 +548,21 @@ In a more general case of an arbitrary spherical potential, the radial action is
 J_r = \frac{1}{\pi} \int_{r_\mathrm{min}}^{r_\mathrm{max}} \sqrt{2[E-\Phi(r)] - L^2/r^2}\;\d r,
 \end{align*}
 where $r_\mathrm{min,max}(E,L)$ are the roots of the expression under the radical.
-The standalone routines in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the helper class \ttt{potential::Interpolator2d}) and $J_r(E,L)$, the inverse mapping $E(J_r,L)$ also provided via an interpolation table, and the complete inverse mapping $\{\bJ,\bt\} \Rightarrow \{\bx,\bv\}$.
+The standalone routines \ttt{evalSpherical}/\ttt{mapSpherical} in \texttt{actions_spherical.h} perform the action/angle transformation in both directions, using numerical root-finding and integration functions in each invocation. If one needs to compute actions for many points ($\gtrsim 10^3$) in the same potential, it is more efficient to construct an instance of \ttt{ActionFinderSpherical} class that provides high-accuracy interpolation from the pre-computed 2d tables for $r_\mathrm{min,max}(E,L)$ (using the helper class \ttt{potential::Interpolator2d}) and $J_r(E,L)$, the inverse mapping $E(J_r,L)$ also provided via an interpolation table, and the complete inverse mapping $\{\bJ,\bt\} \Rightarrow \{\bx,\bv\}$.
 
 
 %%%%%%%%%%%%%%
 \subsubsection{St\"ackel approximation}  \label{sec:ActionsStaeckel}
 
-In a still more general axisymmetric case, the action/angle variables can be exactly computed for a special class of St\"ackel potentials, in which the motion is fully integrable and separable in a prolate spheroidal coordinate system. This computation is performed by the standalone routines \ttt{actionsAxisymStaeckel} and \ttt{actionAnglesAxisymStaeckel} in \mbox{\texttt{actions_staeckel.h}}, which operate on an instance of \ttt{potential::OblatePerfectEllipsoid} class (the only example of a St\"ackel potential in \Agama). The procedure consists of several steps: numerically find the extent of oscillations in the meridional plane in both coordinates $\lambda, \nu$ of the prolate spheroidal system; numerically compute the 1d integrals for $J_\lambda, J_\nu$ (which correspond to $J_r, J_z$); and if necessary, find the frequencies and angles (again by 1d numerical integration).
+In a still more general axisymmetric case, the action/angle variables can be exactly computed for a special class of St\"ackel potentials, in which the motion is fully integrable and separable in a prolate spheroidal coordinate system. This computation is performed by the standalone routine \ttt{evalAxisymStaeckel} in \mbox{\texttt{actions_staeckel.h}}, which operates on an instance of \ttt{potential::OblatePerfectEllipsoid} class (the only example of a St\"ackel potential in \Agama). The procedure consists of several steps: numerically find the extent of oscillations in the meridional plane in both coordinates $\lambda, \nu$ of the prolate spheroidal system; numerically compute the 1d integrals for $J_\lambda, J_\nu$ (which correspond to $J_r, J_z$); and if necessary, find the frequencies and angles (again by 1d numerical integration).
 
 For the most interesting practical case of a non-St\"ackel axisymmetric potential, the actions can only be approximated under the assumption that the motion is integrable and is locally well described by a St\"ackel potential. This is the essence of the ``St\"ackel fudge'' approach \cite{Binney2012}. In a nutshell, it pretends that the potential \textit{is} of a St\"ackel form (without explicitly constructing it), computes the would-be integrals of motion in this presumed potential, and then performs essentially the same steps as the routines for the genuine St\"ackel potential. Actions computed in this way are approximate, in the sense that even for a regular (non-chaotic) motion, they are not exactly conserved along the orbit; the variation of $\bJ$ is smallest for nearly-circular orbits close to the equatorial plane, but typically remains $\lesssim 1-10\%$ even for rather eccentric orbits that stray far from the plane (note that the method does not provide any error estimate). However, if the actual orbit is chaotic or belongs to one of minor resonant families, the variation of estimated actions along the orbit is rather large because the method does not account for resonant motion.
 
 In order to proceed, the St\"ackel approximation requires the parameter of the prolate spheroidal coordinate system -- the focal distance $\Delta$; the accuracy (variation of estimated actions along the orbit) strongly depends on its value. Importantly, we do not need to have a single value of $\Delta$ for the entire system, but may use the most suitable value for the given set of integrals of motion (depending on $\{\bx,\bv\}$).
-The \ttt{ActionFinderAxisymFudge} class pre-computes a table of best-fit values of $\Delta$ as a function of $E,L_z$ (this takes a couple of seconds) and uses interpolation to obtain a suitable value at any point, which is then fed into the routines that compute the actions.
+The \ttt{ActionFinderAxisymFudge} class pre-computes a table of best-fit values of $\Delta$ as a function of $E,L_z$ (this takes a couple of seconds) and uses interpolation to obtain a suitable value at any point, which is then fed into the standalone routine \ttt{evalAxisymFudge} that compute the actions, angles and/or frequencies.
 This is the main workhorse for many higher-level tasks in the \Agama library.
 
-A variation of this approach is to pre-compute the actions $J_r,J_z$ as functions of three integrals of motion (one of them being approximate) on a suitable grid, and then use a 3d interpolation to obtain the values of actions at any point. The construction of such interpolation table takes another couple of seconds, and the evaluation of actions through interpolation is $\sim 10\times$ faster than using the St\"ackel approximation directly. However, the accuracy of this approach is somewhat worse (not because of interpolation, but due to the approximate nature of the third integral); nevertheless, it is still sufficient in many contexts.
+A variation of this approach is to pre-compute the actions $J_r,J_z$ as functions of three integrals of motion (one of them being approximate) on a suitable grid, and then use a 3d interpolation to obtain the values of actions at any point. The construction of such interpolation table takes another couple of seconds, and the evaluation of actions through interpolation is $\sim 10\times$ faster than using the St\"ackel approximation directly. However, the accuracy of this approach is somewhat worse (not because of interpolation, but due to the approximate nature of the third integral); nevertheless, it is still sufficient in many contexts. It is implemented in the same \ttt{ActionFinderAxisymFudge} class with the parameter \texttt{interpolate=true}.
 
 More technical details are provided in Section~\ref{sec:ActionsStaeckelDetails}.
 
@@ -567,7 +570,8 @@ More technical details are provided in Section~\ref{sec:ActionsStaeckelDetails}.
 %%%%%%%%%%%%%%
 \subsubsection{Torus mapping}  \label{sec:ActionsTorus}
 
-The transformation from $\{\bJ, \bt\}$ to $\{\bx,\bv\}$ in an arbitrary axisymmetric potential is performed using the Torus mapping approach \cite{BinneyMcMillan2016}. An instance of \ttt{ActionMapperTorus} class is constructed for any choice of $\bJ$ and allows to perform this mapping for multiple values of $\bt$; however, the cost of torus construction is rather high, and it may not always succeed (depending on the properties of potential and required accuracy). The code is adapted from the original \textsc{TorusMapper} package, with several modifications enabling the use of an arbitrary potential and a more efficient angle mapping approach; however, it does not quite comply to the coding standards adopted in \Agama (Section~\ref{sec:DeveloperGuide}) and in the future will be replaced by a fresh implementation. 
+The transformation from $\{\bJ, \bt\}$ to $\{\bx,\bv\}$ in an arbitrary axisymmetric potential is performed using the Torus mapping approach \cite{BinneyMcMillan2016}. A single torus is constructed for a given triplet of actions $\bJ$, which takes some time and might not always succeed (depending on the properties of the potential and the required accuracy); the subsequent mapping for any values of angles $\bt$ is relatively fast.
+The class \ttt{ActionMapperTorus} implements the torus construction ``on-the-fly'', with each unique triplet of actions producing a new torus, which is then cached and reused in subsequent calls that use the same $\bJ$ but different $\bt$. The torus code is adapted from the original \textsc{TorusMapper} package, with several modifications enabling the use of an arbitrary potential and a more efficient angle mapping approach; however, it does not quite comply to the coding standards adopted in \Agama (Section~\ref{sec:DeveloperGuide}) and in the future might be replaced by a fresh implementation. 
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1039,19 +1043,23 @@ Plotting the rotation curve of the above constructed potential and all its compo
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
 \texttt{af = agama.ActionFinder(pot, [interp=True|False])}\\
-where the optional second argument chooses between the interpolated (faster, less accurate) and non-interpolated version of St\"ackel fudge. If the potential is spherical, the underlying \Cpp implementation will use the \ppp{ActionFinderSpherical} class, otherwise the \ppp{ActionFinderAxisymFudge} class (interpolated or not).\\
-This class has only one method \texttt{__call__} (i.e., can be applied as a function), computing actions, and optionally angles and frequencies, for the given 6d position/velocity point or an $N\times6$ array of points:\\[1mm]
+where the optional second argument chooses between the interpolated (faster, less accurate) and non-interpolated version of St\"ackel fudge. If the potential is an \ppp{Isochrone} or an arbitrary spherical potential, the underlying \Cpp implementation will use the specialized \ppp{ActionFinderIsochrone} or \ppp{ActionFinderSpherical} classes, otherwise the \ppp{ActionFinder\-AxisymFudge} class (interpolated or not).\\
+This class has only one method \texttt{__call__} (i.e., can be applied as a function), computing any combination of actions, angles and/or frequencies, for the given 6d position/velocity point or an $N\times6$ array of points:\\[1mm]
 \texttt{act = af(points)}
 \textit{\color{Sepia}\ \ \# 0th column is $J_r$, 1st -- $J_z$, 2nd -- $J_\phi$} \\
-\texttt{act, ang, freq = af(points, angles=True)}\\[2mm]
-There is also a standalone routine \texttt{actions}, which may be used without constructing an instance of action finder:\\[1mm]
-\texttt{agama.actions(points, potential [, fd=focal_distance] [, angles=True])}\\[1mm]
+\texttt{act, ang, freq = af(points, angles=True, frequencies=True)}\\[2mm]
+There is also a standalone routine \texttt{actions} performing the same task, which may be used without constructing an instance of action finder:\\[1mm]
+\texttt{agama.actions(points, potential [, fd=focal_distance]}\\
+\texttt{\mbox{}~~~~[, actions=True] [, angles=False] [, frequencies=False])}\\[1mm]
 for a non-spherical potential one needs to provide the focal distance $\Delta$ (the \ttt{ActionFinder} class retrieves it from an internally constructed interpolation table).
 
-\paragraph{ActionMapper} class performs the inverse operation -- transform from actions/angles to position/velocity coordinates. Currently it uses the Torus machinery (Section~\ref{sec:ActionsTorus}), and needs to be constructed for a given potential \textit{and} the triplet of actions:\\[1mm]
-\texttt{am = agama.ActionMapper(pot, (Jr, Jz, Jphi))}\\[2mm]
-When applied to one or more triplets of angles, it returns the corresponding $\bx,\bv$:\\[1mm]
-\texttt{xv = am([[theta_r1, theta_z1, theta_phi1], [theta_r2, theta_z2, theta_phi2]])}
+\paragraph{ActionMapper} class performs the inverse operation -- transform from actions/angles to position/velocity coordinates. Depending on the potential, it will use either the Isochrone, a generic spherical mapping, or Torus machinery (Section~\ref{sec:ActionsTorus}) for axisymmetric potentials.\\[1mm]
+\texttt{am = agama.ActionMapper(pot)}\\[2mm]
+When applied to one or more sextets of actions and angles, it returns the corresponding $\bx,\bv$, and optionally frequencies in a separate array:\\[1mm]
+\texttt{xv, freq = am([[J_r1, J_z1, J_phi1, theta_r1, theta_z1, theta_phi1],}\\
+\texttt{\mbox{}~~~~~~~~~~~~~~~[J_r2, J_z2, J_phi2, theta_r2, theta_z2, theta_phi2]],}\\
+\texttt{\mbox{}~~~~~~~~~~~~~~frequencies=True)}\\[1mm]
+Note that in the case of Torus mapping, each unique triplet of actions will trigger the construction of a new torus (a non-negligible computation cost), whereas mapping many angles for a single value of actions is relatively cheap. Previously constructed tori are cached for subsequent calls. The Torus mapping is not thread-safe and thus not OpenMP-parallelized; Spherical and Isochrone mapping are free of these limitations.
 
 \paragraph{DistributionFunction} class provides the \Python interface to the hierarchy of \Cpp DF classes. It is constructed either from a list of keyword arguments,\\[1mm]
 \texttt{df = agama.DistributionFunction(type="...", [mass=..., other params])}\\[1mm]

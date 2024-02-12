@@ -28,7 +28,7 @@ print("N-dimensional sampling: result=%f +- %f" % (valS, errS))
 
 ### shows a pretty checkerboard picture - samples drawn from the given function
 if len(sys.argv)>1:
-    import matplotlib.pyplot as plt, time
+    import matplotlib.pyplot as plt
     plt.plot(arr[:,0], arr[:,1], ',')
     plt.show()
 else:

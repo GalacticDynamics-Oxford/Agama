@@ -39,7 +39,8 @@ bool test_actions(const potential::BasePotential& poten,
     actions::ActionStat acts;
     actions::AngleStat  angs;
     actions::Frequencies freq;
-    actions::Angles angles;
+    actions::Actions newactions;
+    actions::Angles angles, newangles;
     angles.thetar = angles.thetaz = angles.thetaphi = 0;
     coord::PosVelCyl xv = mapper.map(actions::ActionAngles(actions, angles), &freq);  // obtain the values of frequencies
     double fr0 = fmax(freq.Omegar, fmax(freq.Omegaz, freq.Omegaphi));
@@ -48,12 +49,12 @@ bool test_actions(const potential::BasePotential& poten,
         angles.thetaz   = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 2*M_PI * freq.Omegaz/fr0 );
         angles.thetaphi = math::wrapAngle( i*NUM_ANGLE_PERIODS/NUM_ANGLE_SAMPLES * 2*M_PI * freq.Omegaphi/fr0 );
         xv = mapper.map(actions::ActionAngles(actions, angles));
-        actions::ActionAngles aa = finder.actionAngles(xv);
-        angs.add(i*1.0, aa);
-        acts.add(aa);
+        finder.eval(xv, &newactions, &newangles);
+        angs.add(i*1.0, newangles);
+        acts.add(newactions);
         if(output)
             std::cout << "Point: " << xv << "Energy: "<<totalEnergy(poten, xv)<<
-            "\nOrig:  " << actions << angles << "\nFudge: " << aa << "\n";
+            "\nOrig:  " << actions << angles << "\nFudge: " << newactions << newangles << "\n";
     }
     acts.finish();
     angs.finish();
@@ -114,7 +115,7 @@ int main(int argc, const char* argv[]) {
     acts.Jr   = Jr   * unit.from_Kpc_kms;
     acts.Jz   = Jz   * unit.from_Kpc_kms;
     acts.Jphi = Jphi * unit.from_Kpc_kms;
-    actions::ActionMapperTorus mapper(*pot, acts);
+    actions::ActionMapperTorus mapper(pot);
     actions::ActionFinderAxisymFudge finder(pot, false);
     allok &= test_actions(*pot, finder, mapper, acts);
     if(allok)

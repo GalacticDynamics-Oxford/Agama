@@ -505,7 +505,7 @@ void prepareIntegrationTableGL(double x1, double x2, int N, double* coords, doub
 /// built-in GL integration tables are available for every N up to MAX_GL_TABLE
 const int MAX_GL_TABLE = 20;
 /// built-in GL integration tables are available for some (but not every) N up to MAX_GL_ORDER
-const int MAX_GL_ORDER = 33;
+const int MAX_GL_ORDER = 40;
 
 /// list of all built-in integration rules:  points and weights;
 /// if a rule is not available, the corresponding pointer is NULL.

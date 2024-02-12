@@ -46,7 +46,7 @@ double R_from_Lz(const BasePotential& potential, double Lz);
 /** Compute the radius of a radial orbit in the equatorial plane with the given energy,
     i.e. the root of Phi(R)=E; the potential is axisymmetrized if necessary.
 */
-double R_max(const BasePotential& potential, double Phi);
+double R_max(const BasePotential& potential, double E);
 
 /** Compute epicycle frequencies for a circular orbit in the equatorial plane with radius R.
     \param[in]  potential is the instance of potential (axisymmetrized if necessary);

@@ -5,6 +5,7 @@
 */
 #pragma once
 #include "coord.h"
+#include <string>
 
 /** Classes and routines for transformations between position/velocity and action/angle phase spaces */
 namespace actions {
@@ -57,18 +58,35 @@ template <typename CoordT> struct DerivAng {
 };
 
 
-/** Base class for action finders, which convert position/velocity pair to action/angle pair */
+/** Base class for action finders, which convert position/velocity pair to an action/angle pair */
 class BaseActionFinder{
 public:
     BaseActionFinder() {};
     virtual ~BaseActionFinder() {};
 
-    /** Evaluate actions for a given position/velocity point in cylindrical coordinates */
-    virtual Actions actions(const coord::PosVelCyl& point) const = 0;
+    /** Return the name of the particular implementation of the action finder */
+    virtual std::string name() const = 0;
 
-    /** Evaluate actions and angles for a given position/velocity point in cylindrical coordinates;
-        if the output argument freq!=NULL, also store the frequencies */
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const = 0;
+    /** Evaluate any combination of actions, angles and frequencies for the given phase-space point.
+        \param[in]  point  is a position/velocity point in cylindrical coordinates.
+        \param[out] act  if not NULL, will compute and store actions in this variable.
+        \param[out] ang  if not NULL, will compute and store angles in this variable.
+        \param[out] freq if not NULL, will compute and store frequencies in this variable.
+        In case of unbound orbit, at least radial action/angle/frequency and possibly other ones
+        should contain NAN; the method does not throw exceptions.
+    */
+    virtual void eval(const coord::PosVelCyl& point,
+        Actions* act=NULL, Angles* ang=NULL, Frequencies* freq=NULL) const = 0;
+
+    /** Evaluate actions (a shortcut).
+        \param[in]  point  is a position/velocity point in cylindrical coordinates.
+        \return  a triplet of actions.
+    */
+    Actions actions(const coord::PosVelCyl& point) const {
+        Actions act;
+        eval(point, &act);
+        return act;
+    }
 
 private:
     /// disable copy constructor and assignment operator
@@ -76,75 +94,26 @@ private:
     BaseActionFinder& operator= (const BaseActionFinder&);
 };
 
-/** Base class for action/angle mappers, which convert action/angle variables to position/velocity point */
+/** Base class for action/angle mappers, which convert action/angle variables
+    to a position/velocity point */
 class BaseActionMapper{
 public:
     BaseActionMapper() {};
     virtual ~BaseActionMapper() {};
 
-    /** Map a point in action/angle space to a position/velocity in physical space;
-        if the output argument freq!=NULL, also store the frequencies */
+    /** return the name of the particular implementation of the action mapper */
+    virtual std::string name() const = 0;
+
+    /** Map a point in action/angle space to a position/velocity in physical space.
+        \param[in]  actAng is a combination of actions and angles.
+        \param[out] freq  if not NULL, store frequencies in this variable.
+    */
     virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const = 0;
+
 private:
     /// disable copy constructor and assignment operator
     BaseActionMapper(const BaseActionMapper&);
     BaseActionMapper& operator= (const BaseActionMapper&);
-};
-
-/** Base class for canonical maps in action/angle space, which transform from one set of a/a
-    variables to another one */
-class BaseCanonicalMap{
-public:
-    BaseCanonicalMap() {};
-    virtual ~BaseCanonicalMap() {};
-
-    virtual unsigned int numParams() const = 0;
-
-    /** Map a point in action/angle space to a point in another action/angle space */
-    virtual ActionAngles map(const ActionAngles& actAng) const = 0;
-private:
-    /// disable copy constructor and assignment operator
-    BaseCanonicalMap(const BaseCanonicalMap&);
-    BaseCanonicalMap& operator= (const BaseCanonicalMap&);
-};
-
-/** Base class for toy maps used in torus machinery, which provide conversion from action/angle
-    to coordinate/momentum variables, and also provide the derivatives of this transformation */
-template <typename CoordT>
-class BaseToyMap{
-public:
-    virtual ~BaseToyMap() {};
-
-    /** Convert from action/angles to position/velocity, optionally computing the derivatives;
-        if any of the output arguments is NULL, it is not computed.
-        \param[in]  actAng are the action/angles;
-        \param[out] freq   are the frequencies;
-        \param[out] derivAct are the derivatives of pos/vel w.r.t three actions;
-        \param[out] derivAng are the derivatives of pos/vel w.r.t three angles;
-        \param[out] derivParam are the derivatives of pos/vel w.r.t the parameters of toy potential:
-                    if not NULL, must point to an array of length `numParams()`;
-        \return     pos/vel coordinates.
-    */
-    virtual coord::PosVelT<CoordT> map(
-        const ActionAngles& actAng,
-        Frequencies* freq=NULL,
-        DerivAct<CoordT>* derivAct=NULL,
-        DerivAng<CoordT>* derivAng=NULL,
-        coord::PosVelT<CoordT>* derivParam=NULL) const = 0;
-
-    /// The number of free parameters in the toy potential
-    virtual unsigned int numParams() const = 0;
-};
-
-/** Base class for point transformations that map canonically conjugate coordinate/momentum
-    in some intrinsic coord system into position/velocity in cylindrical coordinates */
-template <typename CoordT>
-class BasePointTransform{
-public:
-    virtual ~BasePointTransform() {};
-    /** convert from coordinate/momentum in the intrinsic template coordinate system
-        to position/velocity in cylindrical coordinates */
-    virtual coord::PosVelCyl map(const coord::PosVelT<CoordT> &point) const = 0;
 };
 
 }  // namespace action

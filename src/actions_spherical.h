@@ -11,55 +11,47 @@
 
 namespace actions {
 
-/** Compute actions in a given spherical potential.
-    \param[in]  potential is the arbitrary spherical potential;
-    \param[in]  point     is the position/velocity point;
-    \return     actions for the given point, or Jr=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if the potential is not spherical
-    or some other error occurs.
+/** Compute any combination of actions, angles and frequencies in a given spherical potential.
+    \param[in]  potential is an arbitrary spherical potential.
+    \param[in]  point  is the position/velocity point.
+    \param[out] act    if not NULL, will contain computed actions (Jr=NAN if E>=0).
+    \param[out] ang    if not NULL, will contain corresponding angles (NAN if E>=0).
+    \param[out] freq   if not NULL, will contain corresponding frequencies (NAN if E>=0).
+    \throw      std::invalid_argument exception if the potential is not spherical.
 */
-Actions actionsSpherical(
-    const potential::BasePotential& potential,
-    const coord::PosVelCyl& point);
-
-
-/** Compute actions, angles and frequencies in a spherical potential.
-    \param[in]  potential is the arbitrary spherical potential;
-    \param[in]  point     is the position/velocity point;
-    \param[out] freq      if not NULL, output the frequencies in this variable;
-    \return     actions and angles for the given point, or Jr=NAN if the energy is positive;
-    \throw      std::invalid_argument exception if the potential is not spherical
-    or some other error occurs.
-*/ 
-ActionAngles actionAnglesSpherical(
+void evalSpherical(
     const potential::BasePotential& potential,
     const coord::PosVelCyl& point,
+    Actions* act=NULL,
+    Angles* ang=NULL,
     Frequencies* freq=NULL);
 
 
 /** Compute the total energy for an orbit in a spherical potential from the given values of actions.
-    \param[in]  potential  is the arbitrary spherical potential;
-    \param[in]  acts       are the actions;
-    \return     the value of Hamiltonian (total energy) corresponding to the given actions;
-    \throw      std::invalid_argument exception if the potential is not spherical
-    or Jr/Jz actions are negative.
+    \param[in]  potential  is the arbitrary spherical potential.
+    \param[in]  acts       are the actions.
+    \return     the value of Hamiltonian (total energy) corresponding to the given actions,
+                or NAN if input actions Jr or Jz are negative.
+    \throw      std::invalid_argument exception if the potential is not spherical.
 */
 double computeHamiltonianSpherical(const potential::BasePotential& potential, const Actions& acts);
 
 
 /** Compute position/velocity from actions/angles in an arbitrary spherical potential.
-    \param[in]  potential   is the instance of a spherical potential;
-    \param[in]  actAng  is the action/angle point
+    \param[in]  potential   is the instance of a spherical potential.
+    \param[in]  actAng  is the combination of actions and angles.
     \param[out] freq    if not NULL, store the frequencies for these actions.
-    \return     position and velocity point
+    \return     position and velocity point (NAN if input actions Jr or Jz are negative).
+    \throw      std::invalid_argument exception if the potential is not spherical.
 */
 coord::PosVelCyl mapSpherical(
     const potential::BasePotential &potential,
-    const ActionAngles &actAng, Frequencies* freq=NULL);
+    const ActionAngles &actAng,
+    Frequencies* freq=NULL);
 
 
-/** Class for performing transformations between action/angle and coordinate/momentum for
-    an arbitrary spherical potential, using 2d interpolation tables */
+/** Class for performing bidirectional transformations between action/angle and coordinate/momentum
+    for an arbitrary spherical potential, using 2d interpolation tables */
 class ActionFinderSpherical: public BaseActionFinder, public BaseActionMapper {
 public:
     /// Initialize the internal interpolation tables; the potential itself is not used later on.
@@ -67,8 +59,11 @@ public:
     /// from the input potential, and two other parallelized loops using this interpolator.
     explicit ActionFinderSpherical(const potential::BasePotential& potential);
 
-    virtual Actions actions(const coord::PosVelCyl& point) const;
-    virtual ActionAngles actionAngles(const coord::PosVelCyl& point, Frequencies* freq=NULL) const;
+    virtual std::string name() const { return myName; }
+
+    virtual void eval(const coord::PosVelCyl& point,
+        Actions* act=NULL, Angles* ang=NULL, Frequencies* freq=NULL) const;
+
     virtual coord::PosVelCyl map(const ActionAngles& actAng, Frequencies* freq=NULL) const;
 
     /** return the interpolated value of radial action as a function of energy and angular momentum;
@@ -82,6 +77,7 @@ private:
     const potential::Interpolator2d pot;  ///< interpolator for potential and peri/apocenter radii
     const math::QuinticSpline2d intJr;    ///< interpolator for Jr(E,L)
     const math::QuinticSpline2d intE;     ///< interpolator for E(Jr,L)
+    const std::string myName;             ///< store the name of this action finder/mapper
 };
 
 // this class performs the conversion in both directions

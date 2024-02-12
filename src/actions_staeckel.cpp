@@ -484,8 +484,8 @@ AxisymIntLimits findIntegrationLimitsAxisym(const AxisymFunctionBase& fnc)
 
 /** Compute the derivatives of actions (Jr, Jz, Jphi) over integrals of motion (E, Lz, I3),
     using the expressions A4-A9 in Sanders(2012).
-    A possible improvement in efficiency may be obtained by saving the values of potential
-    taken along the same integration path when computing the actions, and re-using them in this routine.
+    TODO: improve efficiency by saving the values of potential taken along the same
+    integration path when computing the actions, and re-using them in this routine.
 */
 AxisymActionDerivatives computeActionDerivatives(
     const AxisymFunctionBase& fnc, const AxisymIntLimits& lim)
@@ -556,7 +556,7 @@ AxisymIntDerivatives computeIntDerivatives(
 
 /** Compute the derivatives of generating function S over integrals of motion (E, Lz, I3),
     using the expressions A10-A12 in Sanders(2012).  These quantities do depend on angles.
-    A possible improvement is to compute all three integrals for each of two directions at once,
+    TODO: improve efficiency by computing all three integrals for each of two directions at once,
     saving on repetitive potential evaluations along the same paths.
 */
 AxisymGenFuncDerivatives computeGenFuncDerivatives(
@@ -633,81 +633,63 @@ Angles computeAngles(const AxisymIntDerivatives& derI, const AxisymGenFuncDeriva
     return angs;
 }
 
-/** The sequence of operations needed to compute both actions and angles.
+/** Compute any combination of actions, angles and frequencies in an axisymmetric potential.
     Note that for a given orbit, only the derivatives of the generating function depend
     on the angles (assuming that the actions are constant); in principle, this may be used
     to skip the computation of the matrix of integral derivatives (not presently implemented).
-    \param[in]  fnc  is the instance of `AxisymFunctionStaeckel` or `AxisymFunctionFudge`;
-    \param[in]  lim  are the limits of motion in auxiliary coordinate system;
-    \param[out] freq if not NULL, store frequencies of motion in this variable
+    \param[in]  fnc  is the instance of `AxisymFunctionStaeckel` or `AxisymFunctionFudge`.
+    \param[out] act  if not NULL, store actions in this variable.
+    \param[out] ang  if not NULL, store angles in this variable.
+    \param[out] freq if not NULL, store frequencies in this variable.
 */
-ActionAngles computeActionAngles(
-    const AxisymFunctionBase& fnc, const AxisymIntLimits& lim, Frequencies* freq)
+void evalAxisym(const AxisymFunctionBase& fnc,
+    Actions* act, Angles* ang, Frequencies* freq)
 {
-    Actions acts = computeActions(fnc, lim);
-    AxisymIntDerivatives derI = computeIntDerivatives(fnc, lim);
-    AxisymGenFuncDerivatives derS = computeGenFuncDerivatives(fnc, lim);
-    bool addPiToThetaZ = fnc.point.nudot<0 && acts.Jz!=0;
-    Angles angs = computeAngles(derI, derS, addPiToThetaZ);
-    if(freq!=NULL)
-        *freq = derI;  // store frequencies which are the first row of the derivatives matrix
-    return ActionAngles(acts, angs);
+    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0) {
+        if(act)
+            *act = Actions(NAN, NAN, fnc.Lz);
+        if(ang)
+            ang->thetar = ang->thetaz = ang->thetaphi = NAN;
+        if(freq)
+            freq->Omegar = freq->Omegaz = freq->Omegaphi = NAN;
+        return;
+    }
+    const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
+    if(act)
+        *act = computeActions(fnc, lim);
+    if(ang || freq) {
+        AxisymIntDerivatives derI = computeIntDerivatives(fnc, lim);
+        if(freq)  // store frequencies which are the first row of the derivatives matrix
+            *freq = derI;
+        if(ang) {
+            AxisymGenFuncDerivatives derS = computeGenFuncDerivatives(fnc, lim);
+            bool addPiToThetaZ = fnc.point.nudot<0 && fnc.Lz!=0;
+            *ang = computeAngles(derI, derS, addPiToThetaZ);
+        }
+    }
 }
 
 }  // internal namespace
 
 // -------- THE DRIVER ROUTINES --------
 
-Actions actionsAxisymStaeckel(const potential::OblatePerfectEllipsoid& potential,
-    const coord::PosVelCyl& point)
+void evalAxisymStaeckel(
+    const potential::OblatePerfectEllipsoid& potential, const coord::PosVelCyl& point,
+    Actions* act, Angles* ang, Frequencies* freq)
 {
-    const AxisymFunctionStaeckel fnc = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
-    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0)
-        return Actions(NAN, NAN, fnc.Lz);
-    const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActions(fnc, lim);
+    evalAxisym(findIntegralsOfMotionOblatePerfectEllipsoid(potential, point), act, ang, freq);
 }
 
-ActionAngles actionAnglesAxisymStaeckel(const potential::OblatePerfectEllipsoid& potential,
-    const coord::PosVelCyl& point, Frequencies* freq)
-{
-    const AxisymFunctionStaeckel fnc = findIntegralsOfMotionOblatePerfectEllipsoid(potential, point);
-    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0)
-        return ActionAngles(Actions(NAN, NAN, fnc.Lz), Angles(NAN, NAN, NAN));
-    const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActionAngles(fnc, lim, freq);
-}
-
-Actions actionsAxisymFudge(const potential::BasePotential& potential,
-    const coord::PosVelCyl& point, double focalDistance)
+void evalAxisymFudge(
+    const potential::BasePotential& potential, const coord::PosVelCyl& point,
+    Actions* act, Angles* ang, Frequencies* freq, double focalDistance)
 {
     if(!isAxisymmetric(potential))
         throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
     if(focalDistance<=0)
         focalDistance = fmax(point.R, 1.) * 1e-4;   // this is a temporary workaround!
-    const coord::ProlSph coordsys(focalDistance);
-    const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
-    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0)
-        return Actions(NAN, NAN, fnc.Lz);
-    const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActions(fnc, lim);
-}
-
-ActionAngles actionAnglesAxisymFudge(const potential::BasePotential& potential, 
-    const coord::PosVelCyl& point, double focalDistance, Frequencies* freq)
-{
-    if(!isAxisymmetric(potential))
-        throw std::invalid_argument("Fudge approximation only works for axisymmetric potentials");
-    if(focalDistance<=0)
-        focalDistance = fmax(point.R, 1.) * 1e-4;   // this is a temporary workaround!
-    const coord::ProlSph coordsys(focalDistance);
-    const AxisymFunctionFudge fnc = findIntegralsOfMotionAxisymFudge(potential, point, coordsys);
-    if(!isFinite(fnc.E+fnc.I3+fnc.Lz) || fnc.E>=0) {
-        if(freq) freq->Omegar = freq->Omegaz = freq->Omegaphi = NAN;
-        return ActionAngles(Actions(NAN, NAN, fnc.Lz), Angles(NAN, NAN, NAN));
-    }
-    const AxisymIntLimits lim = findIntegrationLimitsAxisym(fnc);
-    return computeActionAngles(fnc, lim, freq);
+    evalAxisym(findIntegralsOfMotionAxisymFudge(potential, point, coord::ProlSph(focalDistance)),
+        act, ang, freq);
 }
 
 
@@ -969,14 +951,13 @@ ActionFinderAxisymFudge::ActionFinderAxisymFudge(
     intJz   = math::CubicSpline3d(gridEscaled, gridLscaled, gridIscaled, grid3dJz, true);
 }
 
-Actions ActionFinderAxisymFudge::actions(const coord::PosVelCyl& point) const
+void ActionFinderAxisymFudge::eval(const coord::PosVelCyl& point,
+    Actions* act, Angles* ang, Frequencies* freq) const
 {
     // step 0. find the two classical integrals of motion
-    double Phi   = pot->value(point);
-    double E     = Phi + 0.5 * (pow_2(point.vR) + pow_2(point.vz) + pow_2(point.vphi));
-    double Lz    = coord::Lz(point);
-    if(E>=0)
-        return Actions(NAN, NAN, Lz);
+    double Phi = pot->value(point);
+    double E   = Phi + 0.5 * (pow_2(point.vR) + pow_2(point.vz) + pow_2(point.vphi));
+    double Lz  = coord::Lz(point);
 
     // step 1. find the focal distance d from the interpolator
     double Lcirc = interp.L_circ(E);
@@ -989,20 +970,30 @@ Actions ActionFinderAxisymFudge::actions(const coord::PosVelCyl& point) const
     double chi   = math::scale(scaling, Lzrel);
     double fd    = fmax(0, interpD.value(xi, chi));   // focal distance
 
-    // if we are not using the 3d interpolation, then compute the actions by the direct method
-    if(intJr.empty())
-        return actionsAxisymFudge(*pot, point, fd);
+    // if we are not using the 3d interpolation or if angles or frequencies are requested,
+    // then compute the actions by the direct method
+    // (TODO: frequencies can also be obtained from interpolator?)
+    if(intJr.empty() || ang || freq) {
+        evalAxisymFudge(*pot, point, act, ang, freq, fd);
+        return;
+    }
+    if(!act)
+        return;
 
+    // otherwise compute (only) actions using the 3d interpolator.
     // step 2. find the third (approximate) integral of motion
     double Rcirc = interp.R_from_Lz(Lcirc);   // radius of a circular orbit with the given E
-    if(Rcirc == 0)  // degenerate case
-        return Actions(0, 0, 0);
+    if(Rcirc == 0) { // degenerate case
+        *act = Actions(0, 0, 0);
+        return;
+    }
     if(fd==0) fd = Rcirc*1e-4;
     coord::ProlSph coordsys(fd);
     const coord::PosProlSph pprol = coord::toPos<coord::Cyl, coord::ProlSph>(point, coordsys);
 
     // the third coordinate in the 3d interpolation grid is I3/I3max,
-    // where I3max(E, Lz) is the maximum possible value of I3, computed from the radius of a shell orbit
+    // where I3max(E, Lz) is the maximum possible value of I3,
+    // computed from the radius of a shell orbit
     double Rshell= fmax(0, interpR.value(xi, chi)) * Rcirc;
     double PhiS  = interp.value(Rshell);
     double lamS  = pow_2(Rshell) + fd*fd;  // lambda(Rshell,z=0)
@@ -1023,7 +1014,7 @@ Actions ActionFinderAxisymFudge::actions(const coord::PosVelCyl& point) const
     double psi   = math::scale(scaling, math::clip(I3 / I3max, 0., 1.));
     double Jrrel = fmax(0, intJr.value(xi, chi, psi));
     double Jzrel = fmax(0, intJz.value(xi, chi, psi));
-    return Actions(Lcirc * (1-Lzrel) * Jrrel, Lcirc * (1-Lzrel) * Jzrel, Lz);
+    *act = Actions(Lcirc * (1-Lzrel) * Jrrel, Lcirc * (1-Lzrel) * Jzrel, Lz);
 }
 
 double ActionFinderAxisymFudge::focalDistance(const coord::PosVelCyl& point) const
@@ -1035,6 +1026,12 @@ double ActionFinderAxisymFudge::focalDistance(const coord::PosVelCyl& point) con
     double xi    = math::clip(scaleE(E, invPhi0), interpD.xmin(), interpD.xmax());
     double chi   = math::scale(math::ScalingCub(0, 1), Lzrel);
     return fmax(0, interpD.value(xi, chi));
+}
+
+std::string ActionFinderAxisymFudge::name() const
+{
+    return "AxisymmetricFudge(" + std::string(intJr.empty() ? "" : "interpolated, ") +
+        "potential=" + pot->name() + ")";
 }
 
 }  // namespace actions

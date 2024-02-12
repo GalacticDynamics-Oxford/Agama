@@ -144,25 +144,21 @@ typedef shared_ptr<const PhaseVolume>   PtrPhaseVolume;
 namespace actions{
 
 class BaseActionFinder;
+class BaseActionMapper;
+
 /// shared pointer to an action finder object
 typedef shared_ptr<const BaseActionFinder> PtrActionFinder;
+/// shared pointer to an action mapper object
+typedef shared_ptr<const BaseActionMapper> PtrActionMapper;
 
 }  // namespace actions
-
-
-namespace torus {
-
-class Torus;
-/// shared pointer to a torus object
-typedef shared_ptr<Torus> PtrTorus;
-
-}  // namespace Torus
 
 
 namespace df{
 
 class BaseDistributionFunction;
 class BaseActionSpaceScaling;
+
 /// shared pointer to a distribution function object
 typedef shared_ptr<const BaseDistributionFunction> PtrDistributionFunction;
 /// shared pointer to a scaling transformation of the action space

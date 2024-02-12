@@ -27,7 +27,10 @@ TORUSDIR  = src/torus
 
 # sources of the main library
 SOURCES   = \
-            py_wrapper.cpp \
+            interface_c.cpp \
+            interface_fortran.cpp \
+            interface_nemo.cpp \
+            interface_python.cpp \
             math_core.cpp \
             math_fit.cpp \
             math_gausshermite.cpp \
@@ -41,6 +44,7 @@ SOURCES   = \
             math_sphharm.cpp \
             math_spline.cpp \
             particles_io.cpp \
+            actions_factory.cpp \
             actions_focal_distance_finder.cpp \
             actions_isochrone.cpp \
             actions_spherical.cpp \
@@ -84,8 +88,6 @@ SOURCES   = \
             raga_trajectory.cpp  \
             utils.cpp \
             utils_config.cpp \
-            fortran_wrapper.cpp \
-            nemo_wrapper.cpp \
 
 # ancient Torus code
 TORUSSRC  = CHB.cc \
@@ -93,7 +95,6 @@ TORUSSRC  = CHB.cc \
             Fit2.cc \
             GeneratingFunction.cc \
             Orb.cc \
-            PJMCoords.cc \
             PJMNum.cc \
             Point_ClosedOrbitCheby.cc \
             Point_None.cc \
@@ -209,13 +210,13 @@ $(AMUSE_WORKER_INIT):
 	@mkdir -p $(AMUSE_WORKER_DIR)
 	echo>>$(AMUSE_WORKER_DIR)/__init__.py
 
-$(AMUSE_WORKER): py/amuse_interface.py $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(AMUSE_WORKER_INIT)
-	cp py/amuse_interface.py $(AMUSE_INTERFACE)
+$(AMUSE_WORKER): py/interface_amuse.py $(SRCDIR)/interface_amuse.cpp $(OBJECTS) $(TORUSOBJ) $(AMUSE_WORKER_INIT)
+	cp py/interface_amuse.py $(AMUSE_INTERFACE)
 	cp py/example_amuse.py   $(AMUSE_WORKER_DIR)
 	cp py/test_amuse.py      $(AMUSE_WORKER_DIR)
 	-$(AMUSE_DIR)/build.py --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
 	-$(AMUSE_DIR)/build.py --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
-	-$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/amuse_wrapper.cpp $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)
+	-$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/interface_amuse.cpp $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)
 
 else
 amuse:
