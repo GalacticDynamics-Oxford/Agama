@@ -147,6 +147,7 @@ int main() {
     allok &= test(*pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 1e-4  ), "almost in-plane orbit (Jz~0)");
     allok &= test(*pot, af, coord::PosVelCar(1, 0.3, 0. , 0.1, 0.4, 0.    ), "exactly in-plane orbit (Jz=0)");
     allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. ,.296, 0.    ), "almost circular in-plane orbit (Jz=0,Jr~0)");
+    allok &= test(*pot, af, coord::PosVelCar(1, 0. , 0. , 0. , 0. , 0.    ), "exactly radial in-plane orbit (Jz=0,Jphi=0)");
     if(allok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";
     else

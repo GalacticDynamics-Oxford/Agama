@@ -377,12 +377,12 @@ void findPlanarOrbitExtent(const BasePotential& potential, double E, double L, d
             return;
         }
         double Lcirc = Rcirc * (slope==0 ? sqrt(coef) : sqrt(coef*slope) * std::pow(Rcirc, 0.5*slope));
-        if(L >= Lcirc) {
-            R1 = R2 = Rcirc;
-        } else {
+        if(L < Lcirc) {
             RPeriApoRootFinderPowerLaw fnc(slope, pow_2(L / Lcirc));
             R1 = Rcirc * fmin(1., math::findRoot(fnc, 0, 1, ACCURACY_ROOT));
             R2 = Rcirc * fmax(1., math::findRoot(fnc, 1, 2, ACCURACY_ROOT));
+        } else {
+            R1 = R2 = Rcirc;
         }
     } else {  // normal scenario when we don't suffer from roundoff errors 
         double Rcirc = R_circ(potential, E);

@@ -68,6 +68,8 @@ bool RuntimeLyapunov::processTimestep(double tbegin, double tend)
 {
     if(t0 != t0)
         t0 = tbegin;   // record the first ever moment of time
+    if(tbegin == tend)
+        return true;   // nothing to do (timestep is likely too small)
 
     // 0. assign the orbital period on the first timestep
     if(orbitalPeriod != orbitalPeriod /*initially it was set to NAN*/) {

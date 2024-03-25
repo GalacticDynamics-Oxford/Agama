@@ -43,20 +43,19 @@ def makeDensityMGE(tab, distance, length_unit, beta):
     arcsec2kpc = distance * _numpy.pi / 648000   # conversion factor from arcseconds to kpc
     if 1 - min(tab[:,2])**2 > _numpy.sin(beta)**2:
         raise ValueError('Deprojection is impossible for the given inclination')
-    # construct a Density object from each component, and finally the total composite density
-    components = [
-        _agama.Density(**getDensityParamsMGE(
-            # for each Gaussian, the central surface density Sigma0 (1st column) expressed in Msun/pc^2
-            # is converted to the total mass  M = 2 pi Sigma0 [pc/"]^2 L^2 q,
-            # where L is the major axis length in arcsec (2nd column), q is the axis ratio (3rd column),
-            # and an extra conversion factor is needed to transform from 1/pc^2 to 1/"^2
-            # (why did ever anyone think of providing the input in these mixed-up units?)
-            mass = 2*_numpy.pi * t[0] * (1000*arcsec2kpc * t[1])**2 * t[2],
-            # convert scale radii in arcseconds into the model length units
-            Sx   = t[1] * arcsec2kpc / length_unit,
-            Sy   = t[1] * arcsec2kpc / length_unit,   # two axes are identical
-            Sz   = t[1] * arcsec2kpc / length_unit * (1 - (1-t[2]**2) / _numpy.sin(beta)**2)**0.5)  # third is smaller
-        ) for t in tab]
+    # construct the total composite density from the list of parameters of each component
+    components = [getDensityParamsMGE(
+        # for each Gaussian, the central surface density Sigma0 (1st column) expressed in Msun/pc^2
+        # is converted to the total mass  M = 2 pi Sigma0 [pc/"]^2 L^2 q,
+        # where L is the major axis length in arcsec (2nd column), q is the axis ratio (3rd column),
+        # and an extra conversion factor is needed to transform from 1/pc^2 to 1/"^2
+        # (why did ever anyone think of providing the input in these mixed-up units?)
+        mass = 2*_numpy.pi * t[0] * (1000*arcsec2kpc * t[1])**2 * t[2],
+        # convert scale radii in arcseconds into the model length units
+        Sx   = t[1] * arcsec2kpc / length_unit,
+        Sy   = t[1] * arcsec2kpc / length_unit,   # two axes are identical
+        Sz   = t[1] * arcsec2kpc / length_unit * (1 - (1-t[2]**2) / _numpy.sin(beta)**2)**0.5)  # third is smaller
+        for t in tab]
     return _agama.Density(*components)
 
 
@@ -1358,6 +1357,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         bnorm = blim[1]-blim[0]
         ax.set_xlim(alim[0], alim[1])
         ax.set_ylim(blim[0]-0.05*bnorm, blim[1]+0.05*bnorm)
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%g'))
+        ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%g'))
         try:
             a, b  = _numpy.meshgrid(_numpy.linspace(alim[0], alim[1], 201), _numpy.linspace(blim[0], blim[1], 201))
             if interp=='linear' or interp=='cubic':

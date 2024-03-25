@@ -281,7 +281,7 @@ void computeSphericalHarmonicsFromParticles(
             try{
                 const coord::PosCyl& pos = particles.point(i);
                 double r   = sqrt(pow_2(pos.R) + pow_2(pos.z));
-                double tau = pos.z / (r + pos.R);
+                double tau = pos.z == 0 ? 0 : pos.z / (r + pos.R);
                 particleRadii[i] = r;
                 math::trigMultiAngle(pos.phi, ind.mmax, needSine, trig+1 /* start from m=1 */);
                 for(int m=0; m<=ind.mmax; m++) {
@@ -611,7 +611,7 @@ void sphHarmTransformInverseDeriv2(
     static const int i00 = ind.index(0,0), i20 = ind.index(2,0), i22 = ind.index(2,2);
     static const double C2 = sqrt(1.25), D2 = sqrt(3.75);
     const double 
-    tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R),
+    tau = pos.z == 0 ? 0 : pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R),
     ct  =      2 * tau  / (1 + tau*tau),  // cos(theta)
     st  = (1 - tau*tau) / (1 + tau*tau),  // sin(theta)
     cc  = ct * ct, cs = ct * st, ss = st * st,
@@ -675,7 +675,7 @@ void sphHarmTransformInverseDeriv(
     double*   P_lm = C_m + sizeC;
     double*  dP_lm = numQuantities>=3 ? P_lm + sizeP   : NULL;
     double* d2P_lm = numQuantities==6 ? P_lm + sizeP*2 : NULL;
-    const double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+    const double tau = pos.z == 0 ? 0 : pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
     const int nm = ind.mmax - ind.mmin() + 1;  // number of azimuthal harmonics in C_m array
     for(int mm=0; mm<nm; mm++) {
         int m = mm + ind.mmin();
@@ -1165,7 +1165,7 @@ double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos, double /*t
             if(logScaling)
                 coefs[c] *= coefs[0];
         }
-    double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+    double tau = pos.z == 0 ? 0 : pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
     return math::sphHarmTransformInverse(ind, coefs, tau, pos.phi);
 }
 
@@ -1485,7 +1485,7 @@ double PowerLawMultipole::densityCyl(const coord::PosCyl &pos, double /*time*/) 
     if(lmax == 0) {  // fast track - just return the l=0 coef
         return 0.25/M_PI / r0sq * rho_lm[0];
     } else {  // perform inverse spherical-harmonic transform
-        double tau = pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
+        double tau = pos.z == 0 ? 0 : pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
         return 0.25/M_PI / r0sq * math::sphHarmTransformInverse(ind, rho_lm, tau, pos.phi);
     }
 }

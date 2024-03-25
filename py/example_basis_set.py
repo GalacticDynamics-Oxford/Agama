@@ -163,7 +163,7 @@ def testGalpy():
             numpy.sum( acc_galpy_native**2, axis=1)**0.5 ) )
 
 def testGala():
-    try: import gala
+    try: import gala.potential
     except ImportError:
         print('gala not available, skipping test')
         return

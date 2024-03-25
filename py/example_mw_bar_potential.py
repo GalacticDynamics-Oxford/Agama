@@ -7,6 +7,7 @@ and an axisymmetric disk. In addition, there is a 'central mass concentration' (
 and a flattened axisymmetric dark halo, which is represented by a separate Multipole potential.
 This potential model is a good fit for the central region of the Galaxy (within ~5kpc),
 but is not very realistic further out.
+A better variant of the entire Milky Way potential is provided by example_mw_potential_hunter24.py
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
 

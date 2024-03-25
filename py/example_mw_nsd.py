@@ -127,7 +127,12 @@ if __name__ == '__main__':
         sizeRadialCyl  = 25,
         zminCyl        = 0.005,
         zmaxCyl        = 1.0,
-        sizeVerticalCyl= 25)
+        sizeVerticalCyl= 25,
+        RminSph        = 0.0001,
+        RmaxSph        = 0.1,
+        sizeRadialSph  = 25,
+        lmaxAngularSph = 8
+    )
 
     # construct a two component model: NSD + NSC
     # NSD -> generated self-consistently
@@ -142,10 +147,8 @@ if __name__ == '__main__':
     density_NSD_init = agama.Density(d1,d2)
 
     # add both NSC and NSD components as static density profiles for the moment:
-    # assign both of them to a single CylSpline potential solver by setting disklike=True
-    # and thus avoid creating an additional Multipole potential, which is typically used
-    # for spheroidal components - this reduces computational cost by roughly a half
-    model.components.append(agama.Component(density=density_NSC_init, disklike=True))
+    # assign NSC and SMBH to the Multipole potential, and NSD to the CylSpline
+    model.components.append(agama.Component(density=density_NSC_init, disklike=False))
     model.components.append(agama.Component(density=density_NSD_init, disklike=True))
 
     # compute the initial guess for the potential

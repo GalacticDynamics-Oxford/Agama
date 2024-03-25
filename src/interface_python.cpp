@@ -1666,14 +1666,18 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
     // otherwise this may be a tuple, list or another sequence containing Density-like objects
     if(PySequence_Check(dens_obj)) {
         PyObject* tuple = PySequence_Tuple(dens_obj);
-        try{
-            potential::PtrDensity result = Density_initFromTuple(tuple, sym);
-            Py_XDECREF(tuple);
-            return result;
-        }
-        catch(std::exception &e) {
-            Py_XDECREF(tuple);
-            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+        if(tuple) {
+            try{
+                potential::PtrDensity result = Density_initFromTuple(tuple, sym);
+                Py_DECREF(tuple);
+                return result;
+            }
+            catch(std::exception &e) {
+                Py_DECREF(tuple);
+                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+            }
+        } else {
+            PyErr_Clear();
         }
     }
 
@@ -2482,14 +2486,18 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
     // otherwise this may be a tuple, list or another sequence containing Potential-like objects
     if(PySequence_Check(pot_obj)) {
         PyObject* tuple = PySequence_Tuple(pot_obj);
-        try{
-            potential::PtrPotential result = Potential_initFromTuple(tuple, sym);
-            Py_XDECREF(tuple);
-            return result;
-        }
-        catch(std::exception &e) {
-            Py_XDECREF(tuple);
-            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+        if(tuple) {
+            try{
+                potential::PtrPotential result = Potential_initFromTuple(tuple, sym);
+                Py_DECREF(tuple);
+                return result;
+            }
+            catch(std::exception &e) {
+                Py_DECREF(tuple);
+                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+            }
+        } else {
+            PyErr_Clear();
         }
     }
 
@@ -3603,25 +3611,32 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 {
     if(df_obj == NULL)
         return df::PtrDistributionFunction();
+
     // check if this is a Python wrapper for a genuine C++ DF object
     if(PyObject_TypeCheck(df_obj, DistributionFunctionTypePtr) && ((DistributionFunctionObject*)df_obj)->df)
         return ((DistributionFunctionObject*)df_obj)->df;
+
     // otherwise this could be an arbitrary callable Python object
     if(checkCallable(df_obj, /*dimensions of input*/ 3)) {
         // then create a C++ wrapper for this Python function
         return df::PtrDistributionFunction(new DistributionFunctionWrapper(df_obj));
     }
+
     // otherwise this may be a tuple, list or another sequence of DistributionFunction-like objects
     if(PySequence_Check(df_obj)) {
         PyObject* tuple = PySequence_Tuple(df_obj);
-        try{
-            df::PtrDistributionFunction result = DistributionFunction_initFromTuple(tuple);
-            Py_XDECREF(tuple);
-            return result;
-        }
-        catch(std::exception &e) {
-            Py_XDECREF(tuple);
-            FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+        if(tuple) {
+            try{
+                df::PtrDistributionFunction result = DistributionFunction_initFromTuple(tuple);
+                Py_DECREF(tuple);
+                return result;
+            }
+            catch(std::exception &e) {
+                Py_DECREF(tuple);
+                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+            }
+        } else {
+            PyErr_Clear();
         }
     }
 
@@ -3703,27 +3718,25 @@ PyObject* DistributionFunction_elem(PyObject* self, Py_ssize_t index)
         PyErr_SetString(PyExc_RuntimeError, "DistributionFunction object is not properly initialized");
         return NULL;
     }
-    try{
-        const df::CompositeDF& df =
-            dynamic_cast<const df::CompositeDF&>(*((DistributionFunctionObject*)self)->df);
-        if(index<0 || index >= (Py_ssize_t)df.numValues()) {
-            PyErr_SetString(PyExc_IndexError, "DistributionFunction component index out of range");
-            return NULL;
-        }
-        return createDistributionFunctionObject(df.component(index));
+    const df::CompositeDF* df_comp =
+        dynamic_cast<const df::CompositeDF*>(((DistributionFunctionObject*)self)->df.get());
+    if(!df_comp) {
+        PyErr_SetString(PyExc_TypeError, "DistributionFunction is not a composite object");
+        return NULL;
     }
-    catch(std::bad_cast&) {  // DF is not composite - return a single element
-        if(index != 0) {
-            PyErr_SetString(PyExc_TypeError, "DistributionFunction has a single component");
-            return NULL;
-        }
-        Py_INCREF(self);
-        return self;
+    if(index<0 || index >= (Py_ssize_t)df_comp->numValues()) {
+        PyErr_SetString(PyExc_IndexError, "DistributionFunction component index out of range");
+        return NULL;
     }
+    return createDistributionFunctionObject(df_comp->component(index));
 }
 
 Py_ssize_t DistributionFunction_len(PyObject* self)
 {
+    const df::CompositeDF* df_comp =
+        dynamic_cast<const df::CompositeDF*>(((DistributionFunctionObject*)self)->df.get());
+    if(!df_comp)
+        return 0;
     return ((DistributionFunctionObject*)self)->df->numValues();
 }
 
@@ -7258,19 +7271,14 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         // determine whether we have only 3 coordinates, or additionally 3 velocities
         PyArrayObject *coord_arr, *mass_arr;
         convertParticlesStep1(particles_obj, /*create arrays*/ coord_arr, mass_arr);
-        {
-            // the remaining operations do not create or modify any Python-managed variables,
-            // so we may temporarily release GIL for the duration of the IO operation
-            PyReleaseGIL unlock;
-            if(PyArray_DIM(coord_arr, 1) == 6) {
-                particles::writeSnapshot(filename,
-                    convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
-                    format ? format : "text", *conv);
-            } else {
-                particles::writeSnapshot(filename,
-                    convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
-                    format ? format : "text", *conv);
-            }
+        if(PyArray_DIM(coord_arr, 1) == 6) {
+            particles::writeSnapshot(filename,
+                convertParticlesStep2<coord::PosVelCar>(coord_arr, mass_arr),  // pos+vel
+                format ? format : "text", *conv);
+        } else {
+            particles::writeSnapshot(filename,
+                convertParticlesStep2<coord::PosCar>(coord_arr, mass_arr),  // only pos
+                format ? format : "text", *conv);
         }
         Py_INCREF(Py_None);
         return Py_None;

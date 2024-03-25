@@ -1,0 +1,118 @@
+diff -u -r -N gadget4-master/Makefile gadget4-agama/Makefile
+--- gadget4-master/Makefile	2024-03-19 18:08:53.000000000 +0000
++++ gadget4-agama/Makefile	2024-03-19 18:15:17.000000000 +0000
+@@ -446,6 +446,9 @@
+ 
+ LIBS = $(MATH_LIBS) $(HDF5_LIBS) $(GSL_LIBS) $(FFTW_LIBS) $(HWLOC_LIBS) $(VTUNE_LIBS) $(TEST_LIBS) $(MAPS_LIBS) $(SHMEM_LIBS)
+ 
++ifeq (EXTERNALGRAVITY_AGAMA, $(findstring EXTERNALGRAVITY_AGAMA, $(CONFIGVARS)))
++LIBS += agama.so
++endif
+ 
+ SUBDIRS := $(addprefix $(BUILD_DIR)/,$(SUBDIRS))
+ OBJS := $(addprefix $(BUILD_DIR)/,$(OBJS)) $(BUILD_DIR)/compile_time_info.o $(BUILD_DIR)/compile_time_info_hdf5.o $(BUILD_DIR)/version.o
+diff -u -r -N gadget4-master/Template-Config.sh gadget4-agama/Template-Config.sh
+--- gadget4-master/Template-Config.sh	2024-03-19 18:06:29.000000000 +0000
++++ gadget4-agama/Template-Config.sh	2024-03-19 18:16:24.000000000 +0000
+@@ -33,6 +33,7 @@
+ #ALLOW_DIRECT_SUMMATION                       # allows calculation of direct summation gravity force if only a tiny number of particles as active 
+ #EXTERNALGRAVITY                              # switches on inclusion of external gravitational potential
+ #EXTERNALGRAVITY_STATICHQ                     # example for a simple external potential due to a Hernquist halo
++#EXTERNALGRAVITY_AGAMA                        # external potential provided by the Agama package and described by parameters in agama_potential.ini
+ 
+ #--------------------------------------- TreePM Options
+ 
+diff -u -r -N gadget4-master/documentation/04_config-options.md gadget4-agama/documentation/04_config-options.md
+--- gadget4-master/documentation/04_config-options.md	2024-01-21 12:29:33.000000000 +0000
++++ gadget4-agama/documentation/04_config-options.md	2024-03-19 18:20:34.000000000 +0000
+@@ -369,6 +369,13 @@
+ 
+ -------
+ 
++**EXTERNALGRAVITY_AGAMA**
++
++Activates an external potential provided by the Agama package,
++with parameters given in the file agama_potential.ini
++
++-------
++
+ 
+ TreePM Options                                             {#treepm}
+ ==============
+diff -u -r -N gadget4-master/src/gravity/grav_external.cc gadget4-agama/src/gravity/grav_external.cc
+--- gadget4-master/src/gravity/grav_external.cc	2024-01-21 12:29:33.000000000 +0000
++++ gadget4-agama/src/gravity/grav_external.cc	2024-03-20 09:08:00.000000000 +0000
+@@ -33,6 +33,13 @@
+ #include "../system/system.h"
+ #include "../time_integration/timestep.h"
+ 
++#ifdef EXTERNALGRAVITY_AGAMA
++void* agama_potential = NULL;
++extern "C" {
++double agama_evalPotential(const void* potential, const double pos[3], double time, double deriv[3], double deriv2[6]);
++}
++#endif
++
+ void sim::gravity_external(void)
+ {
+ #ifdef PERIODIC
+@@ -70,6 +77,21 @@
+ #endif
+       }
+ #endif
++
++#ifdef EXTERNALGRAVITY_AGAMA
++      {
++        vector<double> pos;
++        Sp.nearest_image_intpos_to_pos(Sp.P[target].IntPos, intpos_center, pos.da);
++        double deriv[3];
++#if defined(EVALPOTENTIAL) || defined(OUTPUT_POTENTIAL)
++        Sp.P[target].ExtPotential +=
++#endif
++        agama_evalPotential(agama_potential, &pos.da[0], All.Time, deriv, NULL);
++        Sp.P[target].GravAccel.da[0] -= deriv[0];
++        Sp.P[target].GravAccel.da[1] -= deriv[1];
++        Sp.P[target].GravAccel.da[2] -= deriv[2];
++      }
++#endif
+     }
+ }
+ 
+diff -u -r -N gadget4-master/src/main/begrun.cc gadget4-agama/src/main/begrun.cc
+--- gadget4-master/src/main/begrun.cc	2024-01-21 12:29:33.000000000 +0000
++++ gadget4-agama/src/main/begrun.cc	2024-03-20 09:08:47.000000000 +0000
+@@ -49,6 +49,14 @@
+ #include "../time_integration/driftfac.h"
+ #include "../time_integration/timestep.h"
+ 
++#ifdef EXTERNALGRAVITY_AGAMA
++extern void* agama_potential;
++extern "C" {
++const char* agama_getError();
++void* agama_createPotential(const char* params);
++}
++#endif
++
+ /*!
+  *  This file contains various functions to initialize a simulation run. In
+  *  particular, the parameter file is read in and parsed and global variables
+@@ -243,6 +251,19 @@
+     }
+ #endif
+ 
++#ifdef EXTERNALGRAVITY_AGAMA
++  if(All.G != 1) {
++    mpi_printf("BEGRUN: G=%g != 1, this is not supported when using external potential from Agama\n", All.G);
++    exit(1);
++  }
++  agama_potential = agama_createPotential("file=agama_potential.ini");
++  if(!agama_potential) {
++    mpi_printf("BEGRUN: Cannot initialize Agama potential, halting.\n%s\n", agama_getError());
++    exit(1);
++  }
++  mpi_printf("BEGRUN: Initialized Agama potential.\n");
++#endif
++
+   Logs.open_logfiles();
+ 
+   All.TimeLastRestartFile = Logs.CPUThisRun;

@@ -593,7 +593,7 @@ void evalSpherical(const potential::BasePotential& pot, const coord::PosVelCyl& 
     double L  = sqrt(Lz * Lz + Lx2plusLy2);
     if(act) {
         act->Jr = NAN;  // temporary assignment - will be replaced by the correct value unless E>=0
-        act->Jz = Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
+        act->Jz = L==0 ? 0 : Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
         act->Jphi = Lz;
     }
     if(E>=0) {
@@ -658,7 +658,7 @@ void ActionFinderSpherical::eval(const coord::PosVelCyl& point,
         Jr = this->Jr(E, L);
     if(act) {
         act->Jr = Jr;
-        act->Jz = Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
+        act->Jz = L==0 ? 0 : Lx2plusLy2 / (L + fabs(Lz));  // a roundoff-safe way of computing L - |Lz|
         act->Jphi = Lz;
     }
     if(ang) {

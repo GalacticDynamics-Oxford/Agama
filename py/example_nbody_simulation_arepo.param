@@ -1,0 +1,105 @@
+%----  Relevant files
+InitCondFile                            IC.snap
+OutputDir                               output
+SnapshotFileBase                        snapshot
+OutputListFilename                      none
+ResubmitOn                              0
+ResubmitCommand                         none
+
+%---- File formats
+ICFormat                                2
+SnapFormat                              2
+
+%---- CPU-time limits in seconds
+TimeLimitCPU                            1800
+CpuTimeBetRestartFile                   7200
+
+%----- Memory alloction
+MaxMemSize                              2000
+
+%---- Characteristics of run
+TimeBegin                               0.0    % Begin of the simulation
+TimeMax                                 0.25   % End of the simulation
+
+%---- Basic code options that set the type of simulation
+ComovingIntegrationOn                   0
+PeriodicBoundariesOn                    0
+CoolingOn                               0
+StarformationOn                         0
+
+%---- Cosmological parameters (unused)
+Omega0                                  0.0
+OmegaLambda                             0.0
+OmegaBaryon                             0.0
+HubbleParam                             1.0
+BoxSize                                 0
+
+%---- Output frequency and output parameters
+OutputListOn                            0
+TimeBetSnapshot                         0.001953125
+TimeOfFirstSnapshot                     0
+TimeBetStatistics                       0.03125
+NumFilesPerSnapshot                     1
+NumFilesWrittenInParallel               1
+
+%---- Accuracy of time integration
+TypeOfTimestepCriterion                 0
+ErrTolIntAccuracy                       0.1
+CourantFac                              0.15
+MaxSizeTimestep                         0.001953125
+MinSizeTimestep                         0
+
+%---- Tree algorithm, force accuracy, domain update frequency
+TypeOfOpeningCriterion                  1
+ErrTolTheta                             0.5
+ErrTolForceAcc                          0.005
+MultipleDomains                         8
+TopNodeFactor                           2.5
+ActivePartFracForNewDomainDecomp        0.01
+ 
+%---- Initial density estimate
+DesNumNgb                               64
+MaxNumNgbDeviation                      4
+
+%---- System of units
+UnitLength_in_cm                        3.085678e21   %  1.0 kpc/h
+UnitMass_in_g                           4.624e38      %  232500/h solar masses
+UnitVelocity_in_cm_per_s                1e5           %  1 km/sec
+GravityConstantInternal                 1             %  AGAMA plugin only works in natural N-body units
+
+%---- Gravitational softening lengths
+SofteningComovingType0                  0
+SofteningComovingType1                  0.001
+SofteningComovingType2                  0
+SofteningComovingType3                  0
+SofteningComovingType4                  0
+SofteningComovingType5                  0
+
+SofteningMaxPhysType0                   0
+SofteningMaxPhysType1                   0.001
+SofteningMaxPhysType2                   0
+SofteningMaxPhysType3                   0
+SofteningMaxPhysType4                   0
+SofteningMaxPhysType5                   0
+
+SofteningTypeOfPartType0                0
+SofteningTypeOfPartType1                1
+SofteningTypeOfPartType2                1
+SofteningTypeOfPartType3                1
+SofteningTypeOfPartType4                1
+SofteningTypeOfPartType5                1
+
+GasSoftFactor                           2.5
+
+%----- Mesh regularization options
+CellShapingSpeed                        0.5
+CellShapingFactor                       1.0
+
+%---- Treatment of empty space and temperature limits
+InitGasTemp                             0
+MinGasTemp                              0
+MinimumDensityOnStartUp                 0
+LimitUBelowThisDensity                  0
+LimitUBelowCertainDensityToThisValue    0
+MinEgySpec                              0
+

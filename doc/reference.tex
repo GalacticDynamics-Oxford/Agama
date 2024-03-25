@@ -45,6 +45,8 @@
 \newcommand{\dvpar}{\langle \Delta v_\| \rangle}
 \newcommand{\dvsqpar}{\langle \Delta v^2_\| \rangle}
 \newcommand{\dvsqper}{\langle \Delta v^2_\bot \rangle}
+\let\oldparagraph\paragraph
+\renewcommand{\paragraph}[1]{\vspace{-2mm}\oldparagraph{#1}}
 \DeclareMathOperator{\trig}{trig}
 \hyphenation{Schwarz-schild}
 \hypersetup{
@@ -364,7 +366,7 @@ Name & Formula & Parameters \\
 \begin{table}
 \caption{Density and potential expansion types}  \label{tab:ExpansionParams}
 \begin{tabular}{l l p{7cm}}
-Name (density) & name (potential) & parameters \\
+Name (density) & Name (potential) & Parameters \\
 \hline
 --- & \ttt{BasisSet} & \ppp{nmax}, \ppp{eta}, \ppp{r0}, \ppp{lmax}, \ppp{mmax}, \ppp{symmetry}, \ppp{fixOrder} \\
 \ttt{DensitySphericalHarmonic} & \ttt{Multipole} & \ppp{gridSizeR}, \ppp{rmin}, \ppp{rmax}, \ppp{lmax}, \ppp{mmax}, \ppp{symmetry}, \ppp{fixOrder}\\
@@ -375,7 +377,7 @@ Name (density) & name (potential) & parameters \\
 \begin{table}
 \caption{Density and potential modifiers}  \label{tab:PotentialModifiers}
 \begin{tabular}{l l l l} %p{11cm}}
-Name & parameter & description (see Section~\ref{sec:PotentialModifiers}) & result \\
+Name & Parameter & Description (see Section~\ref{sec:PotentialModifiers}) & Result \\
 \hline
 \ttt{Shifted} & \ppp{center} & 3 numbers or a file with $\boldsymbol{x}_0(t)$ & $\Phi(\boldsymbol x-\boldsymbol x_0)$\\
 \ttt{Tilted} & \ppp{orientation} & three Euler angles $\alpha,\beta,\gamma\Rightarrow$ rotation matrix $\mathsf{R}$ & $\Phi(\mathsf{R}_{\alpha\beta\gamma}\, \boldsymbol x)$ \\
@@ -480,7 +482,7 @@ All potential and density classes provide functions for evaluating them at an ar
 %
 \ppp{scale} varies the mass normalization $A(t)$ and spatial scale $S(t)$ with time: $\widetilde\Phi(\boldsymbol x,\,t) = A(t)\,S^{-1}(t)\; \Phi\big( S(t)\,\boldsymbol x,\,t\big)$. The factor $S^{-1}$ ensures that when changing the spatial scale $S$, the total mass remains the same (unless, of course, adjusted by $A$). A \ttt{Scaled} model retains its original symmetry.\\
 %
-The parameters of these transformations can be constant or time-dependent, except \ppp{orientation}, whose triplet of Euler angles is kept fixed. For the other three modifiers, if the corresponding parameter is a single (for \ppp{rotation}), two (for \ppp{scale}), or three (for \ppp{center}) space- or comma-separated numbers, it is fixed in time, otherwise it is interpreted as a 2d table describing the time-dependent variation of this parameter, or the name of a text file containing such a table. A text file should contain timestamps in the first column, and the value(s) of the parameter in the remaining columns, and will be converted into a regularized cubic spline (linearly extrapolated beyond the endpoints of the specified time interval). To extrapolate as a constant, make the next-to-last point identical to the last point. The file may contain not only values but also time derivatives of the parameter (e.g., have 7 columns for \ppp{center}: $t, x, y, z, \dot x, \dot y, \dot z$), in which case a Hermite spline will be constructed (it is extrapolated with a slope that is explicitly set by the derivative at the endpoint). Instead of a text file, the same table can be provided directly in the corresponding parameter, serialized as follows (example given for the rotation modifier): \texttt{[[t1,a1],[t2,a2],[t3,a3]]}. This is most useful when constructing the potential from the \Python interface and providing a nested list or a 2d \texttt{numpy} array directly.\\
+The parameters of these transformations can be constant or time-dependent, except \ppp{orientation}, whose triplet of Euler angles is kept fixed. For the other three modifiers, if the corresponding parameter is a single (for \ppp{rotation}), two (for \ppp{scale}), or three (for \ppp{center}) space- or comma-separated numbers, it is fixed in time, otherwise it is interpreted as a 2d table describing the time-dependent variation of this parameter, or the name of a text file containing such a table. A text file should contain timestamps in the first column, and the value(s) of the parameter in the remaining columns, and will be converted into a regularized cubic spline (linearly extrapolated beyond the endpoints of the specified time interval). To extrapolate as a constant, make the next-to-last point identical to the last point. The file may contain not only values but also time derivatives of the parameter (e.g., have 7 columns for \ppp{center}: $t, x, y, z, \dot x, \dot y, \dot z$), in which case a Hermite spline will be constructed (it is extrapolated with a slope that is explicitly set by the derivative at the endpoint). Instead of a text file, the same table can be provided directly in the corresponding parameter, serialized as follows (example given for the rotation modifier): \texttt{[[t1,a1],[t2,a2],[t3,a3]]}. This is most useful when constructing the potential from the \Python interface and providing a nested list or a 2d \texttt{numpy} array directly. For example, a common case of a constant rotation frequency $\Omega$ with an initial phase $\phi_0$ may be specified as \ppp{rotation}\texttt{=[[0,phi0],[1,phi0+Omega]]}.\\
 %
 If a section of the INI file or a \ttt{KeyValueMap} object prescribes multiple modifiers, they will be applied in the following, most natural order (regardless of their order of appearance in the INI file): the underlying potential is modulated in amplitude and size, then made rotating about its $z$ axis, then its principal axes are tilted w.r.t.\ the external inertial reference frame (in which it will be evaluated), and finally the origin of the potential is shifted. For instance, one can make the potential spin about an arbitrary axis, not just $z$, by providing both \ppp{rotation} and \ppp{orientation}. Evaluating this multiply-modified potential or its derivatives unfolds the chain of modifiers in the reverse order to their creation, i.e., the input point is shifted, tilted, rotated and scaled, then fed into the underlying potential, and the result is propagated back through this sequence of transformations.\\
 %
@@ -1218,19 +1220,13 @@ There is an example program showing all these modes of operation.
 
 
 %%%%%%%%%%%
-\subsection{\Amuse plugin}  \label{sec:Amuse}
+\subsection{\texttt{C} interface}  \label{sec:C}
 
-\Amuse \cite{PortegiesZwart2013} is a heterogeneous framework for performing and analyzing \Nbody simulations using a uniform approach to a variety of third-party codes. The core of the framework and the user scripts are written in \Python, while the community modules are written in various programming languages and interact with each other using a standartized interface.
-
-\Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. One may construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin. This application is illustrated in the example script \texttt{py/example_amuse.py}.
-
-Moreover, the stellar-dynamical simulation code \Raga (described in a separate document \texttt{readme_raga.pdf}) can be used from within \Amuse, as well as a standalone program (see \hyperref[sec:raga]{below}).
-
-The \Amuse plugin is built automatically if the environment variable \texttt{\$AMUSE_DIR} is defined, and the interface is provided by the class \texttt{amuse.community.agama.interface.Agama}.
+There is also a minimalistic \texttt{C} interface, with similar functionality as the \Fortran interface (see the header file \texttt{interface_c.h} for details). One may question why it is needed at all, given that the core of the library is written in \Cpp, which is ``not too different'' from pure \texttt{C}. However, most of the functionality is implemented in terms of objects, which are not directly available to the \texttt{C} code. This interface provides routines for constructing density or potential instances (represented by opaque pointers) from a given array of parameters or from an INI file, evaluating the density, potential and its derivatives, and evaluating actions, angles and frequencies, either directly for the given potential and phase-space point, or mediated by an action finder. The \texttt{C} interface also serves as the basis for the \texttt{Julia} interface, which is currently in the development stage.
 
 
 %%%%%%%%%%%
-\subsection{\Galpy plugin}  \label{sec:Galpy}
+\subsection{Interoperability with \Galpy}  \label{sec:Galpy}
 
 \Galpy \cite{Bovy2015} is a \Python-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action computation, distribution functions and more. 
 The interface between the two libraries is provided by the ``chimera'' wrapper class \ttt{agama.GalpyPotential}, which is a subclass of both \ttt{agama.Potential} and \ttt{galpy.potential.Potential}, and thus can act as a regular potential in each of the two frameworks. Internally, it can represent either a native \Agama potential or a native \Galpy potential -- the choice is determined by the arguments supplied to the constructor. If one passes an instance of a \Galpy potential, or a list of such instances (which is the approached used to represent a composite potential in \Galpy), then the wrapper object is built around the \Galpy potential; the routines from \Agama access it in the same way as any other user-defined potential model (see \hyperref[sec:PythonPotential]{example}) -- in particular, the derivatives are computed by finite differences. In all other cases, the arguments to the constructor are interpreted in the same way as for the \ttt{agama.Potential} class, and initialize a native \Agama potential object, which behaves in exactly the same way as an instance of \ttt{agama.Potential} when used with the classes and routines from \Agama, but also provides the interface methods for \Galpy. The same functionality (e.g., computation of acceleration) is thus provided by two similar methods: the \Agama-native method \texttt{force(x)} outputs three components of force per unit mass for a single point or an array of points in Cartesian coordinates, while the \Galpy-native \texttt{Rforce(R,z[,phi])} outputs the component of acceleration along the cylindrical radius for a single point or an array of points specified in cylindrical coordinates.
@@ -1241,10 +1237,22 @@ An example, comparing the native \Galpy orbit integrator and action finder with 
 
 
 %%%%%%%%%%%
-\subsection{\Gala plugin}  \label{sec:Gala}
+\subsection{Interoperability with \Gala}  \label{sec:Gala}
 
 \Gala \cite{Gala} is another \Python/\texttt{Cython}-based framework for galaxy modelling, similar in scope to \Agama. It includes a collection of gravitational potentials, routines for orbit integration, action computation, and is well integrated with \textsc{Astropy} unit and coordinate subsystems.
 The interaction between \Agama and \Gala is organized in a similar way as with \Galpy, namely, through a ``chimera'' wrapper class \ttt{agama.GalaPotential}, which is a subclass of both \ttt{agama.Potential} and \ttt{gala.potential.PotentialBase}, and provides both interfaces regardless of the internal representation. It can be initialized either from a native \Gala potential, in which case the routines from \Agama will access it in the same way as a custom \Python function representing a potential model (in particular, derivatives are computed by finite differences), or in any of the possible ways to initialize a native \Agama potential (e.g., providing a list of named arguments, or a filename, or another instance of \ttt{agama.Potential}), in which case it behaves identically to the wrapped object in all contexts within \Agama. In the second case, one may also provide an additional argument \texttt{units=...} with the same meaning as used within \Gala. If initialized with units, or when encapsulating a \Gala potential with units, the methods inherited from \ttt{gala.potential.PotentialBase} (\texttt{density}, \texttt{energy}, \texttt{gradient}) will automatically convert units in input arguments and output values, but the methods from \ttt{agama.Potential} do not perform such conversions (note that due to name clash, the \Agama-native method for computing density is renamed to \texttt{agamadensity}). Performance-wise, the same considerations apply here as for the \Galpy interface: namely, a wrapper object hosting a  native \Agama potential behaves identically to it in \Agama, but a wrapper object hosting a native \Gala potential will be only accessed from that library via its \Python interface, and hence built-in \Gala classes written in \texttt{Cython} will suffer a performance penalty. An example of usage is provided in \texttt{py/example_gala.py}.
+
+
+%%%%%%%%%%%
+\subsection{\Amuse plugin}  \label{sec:Amuse}
+
+\Amuse \cite{PortegiesZwart2013} is a heterogeneous framework for performing and analyzing \Nbody simulations using a uniform approach to a variety of third-party codes. The core of the framework and the user scripts are written in \Python, while the community modules are written in various programming languages and interact with each other using a standartized interface.
+
+\Agama may be used to provide an external potential to any \Nbody simulation running within \Amuse. One may construct a potential using either any of the built-in models, or a potential approximation constructed from an array of point masses provided from the \Amuse script. This potential presents a \ttt{GravityFieldInterface} allowing it to be used as a part of the \texttt{Bridge} coupling scheme in the simulation. For instance, one may study the evolution of a globular cluster that orbits a parent galaxy, by following the internal dynamics of stars in the cluster with an \Nbody code, while the galaxy is represented by a static potential using this plugin. This application is illustrated in the example script \texttt{py/example_amuse.py}.
+
+Moreover, the stellar-dynamical simulation code \Raga (described in a separate document \texttt{readme_raga.pdf}) can be used from within \Amuse, as well as a standalone program (see \hyperref[sec:raga]{below}).
+
+The \Amuse plugin is built automatically if the environment variable \texttt{\$AMUSE_DIR} is defined, and the interface is provided by the class \texttt{amuse.community.agama.interface.Agama}.
 
 
 %%%%%%%%%%%
@@ -1260,7 +1268,7 @@ For instance, this adds an extra potential in a \textsc{gyrfalcON}  simulation:\
 \texttt{gyrfalcON infile outfile accname=agama accfile=mypot.ini [accpars=1.0] \dots}\\[2mm]
 where the last optional argument specifies a pattern speed $\Omega=1.0$. All units in the INI or coefs file here should follow the convention $G=1$.
 
-As an example, consider the evolution of an $N$-body model of a Plummer sphere of mass $m=0.1$ and radius $a=0.1$ (satellite), which moves on a nearly-circular orbit inside a larger Plummer sphere of mass $M=1$ and radius $A=1$ (host galaxy), represented by a smooth external potential. First create the satellite:\\[2mm]
+As an example, consider the evolution of an \Nbody model of a Plummer sphere of mass $m=0.1$ and radius $a=0.1$ (satellite), which moves on a nearly-circular orbit inside a larger Plummer sphere of mass $M=1$ and radius $A=1$ (host galaxy), represented by a smooth external potential. First create the satellite:\\[2mm]
 \texttt{mkplum out=sat.nemo nbody=10000 r_s=0.1 mass=0.1}\\[2mm]
 Put it on an orbit with radius $R=1$ and initial velocity approximately equal to the circular velocity of the external potential at this radius $V=0.6$:\\[2mm]
 \texttt{snapshift sat.nemo sat_shift.nemo rshift=-1,0,0 vshift=0,-0.6,0}\\[2mm]
@@ -1278,7 +1286,7 @@ We can model the same situation in the reference frame that is centered not on t
 \texttt{numpy.savetxt("center.txt", numpy.column_stack((t, x, y, z)))\\
 ax,ay,az = -w**2*x, -w**2*y, 0*z}\textit{\color{Sepia} \ \ \ \# components of centrifugal acceleration}\\
 \texttt{numpy.savetxt("accel.txt", numpy.column_stack((t, ax, ay, az)))}\\[2mm]
-And add the following lines to \texttt{pot.ini}:\\[2mm]
+And add the following lines to \texttt{pot.ini} (the first line refers to the previous potential section, remaining ones add a second section):\\[2mm]
 \texttt{center=center.txt}\\
 \texttt{[Potential 1]\\
 type=UniformAcceleration\\
@@ -1292,7 +1300,18 @@ awk \char13 \{print \$2-cos(0.6*\$1),\$3-sin(0.6*\$1),\$4;\}\char13\ | \textback
 tabtos - sat_out3.nemo nbody=10000 block1=x,y,z}
 \vspace{2mm}
 
-In general, the non-inertial acceleration needs not correspond to the second derivative of the offset of the potential center -- one could imagine running the simulation in an inertial frame (hence zero acceleration), but forcing the external potential to dance around in some unpredictable way. Finally, the INI file may contain multiple sections, each one could have its own fixed or time-dependent offset (center), or represent an \ttt{Evolving} sequence of potentials\dots The possibilities are boundless!
+In general, the non-inertial acceleration needs not correspond to the second derivative of the offset of the potential center -- one could imagine running the simulation in an inertial frame (hence zero acceleration), but forcing the external potential to dance around in some unpredictable way. Finally, the INI file may contain multiple sections, each one could have its own fixed or time-dependent offset (center), or represent an \ttt{Evolving} sequence of potentials\dots The possibilities are boundless!\\
+A more elaborate illustration is provided in the script \textbf{example_nbody_simulation.py}
+
+
+%%%%%%%%%%%
+\subsection{\textsc{Arepo} and \textsc{Gadget4} plugins}  \label{sec:GadgetArepo}
+
+\textsc{Arepo} \cite{Springel2010} and \textsc{Gadget4} \cite{Springel2021} are two hydrodynamical and gravitational \Nbody simulation codes sharing a common ancestry. \Agama can be used to provide an external gravitational potential for both codes in a similar way as for \textsc{gyrfalcON}. However, the design of these codes does not support ``plugins'' in the traditional sense (external modules that can be loaded dynamically); instead, one needs to introduce some modifications of the source code and recompile them. 
+
+In both cases, the potential is specified in the INI file \texttt{agama_potential.ini} (the name is hardcoded in the source code), and its use is turned on by a macro \texttt{EXTERNALGRAVITY_AGAMA} in the file \texttt{config.sh} during the compilation. It can be used instead of or in addition to the self-gravity in the simulation. One limitation is that the simulation must be using units in which $G=1$ (specified by the \texttt{GravityConstantInternal} parameter), because there is no mechanism for passing dimensional units to the potential constructor in the \texttt{C} interface (which is used for the coupling). The external potential is unlikely to be useful for cosmological simulations, and only works in physical (not comoving) coordinates. In case of hydrodynamical simulations in the moving-mesh code \textsc{Arepo}, the simulation box extends from zero to some \texttt{BoxSize}, so is not centered on zero; one can shift the \textsc{Agama} potential by half box length, using the parameter \ttt{center=...} in the INI file.
+
+A \Python script \texttt{example_nbody_simulation.py} demonstrates the use of \Agama to provide an external potential for \Nbody simulations conducted with \textsc{gyrfalcON}, \textsc{Arepo} or \textsc{Gadget4}; the latter two codes are patched before compilation.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1316,13 +1335,16 @@ The \Agama framework itself is indeed just a ``library'', not a ``program'', but
 
 \paragraph{example_time_dependent_potential} is a \Python script illustrating various ways of constructing time-dependent potentials (a star-planet system) and integrating test-particle orbits.
 
-\paragraph{example_lmc_mw_interaction} is a more elaborate illustration of time-dependent potentials. Given two extended massive galaxies (Milky Way and the Large Magellanic Cloud), we first compute their past trajectories in the common center-of-mass frame. Then we create a composite total potential in the reference frame associated with the Milky Way center, which contains the Milky Way itself, the moving LMC, and the acceleration caused by the non-inertial frame. Finally, we compute trajectories of a large number of tracer stars in the Milky Way halo in this evolving potential, and display the perturbations in their spatial and kinematic distribution caused by the LMC.
+\paragraph{example_lmc_mw_interaction} is a more elaborate illustration of time-dependent potentials, adapted from \cite{Vasiliev2021}. Given two extended massive galaxies (Milky Way and the Large Magellanic Cloud), we first compute their past trajectories in the common center-of-mass frame. Then we create a composite total potential in the reference frame associated with the Milky Way center, which contains the Milky Way itself, the moving LMC, and the acceleration caused by the non-inertial frame. Finally, we compute trajectories of a large number of tracer stars in the Milky Way halo in this evolving potential, and display the perturbations in their spatial and kinematic distribution caused by the LMC. 
 
 \paragraph{example_spiral} \label{sec:ExampleSpiral} is a \Python script illustrating the use of a user-defined potential model (a three-arm spiral) for orbit integration: the \Python function defining the potential can be used directly, but it is rather inefficient, and the preferred way is to construct a \ppp{CylSpline} approximation for it. See also \textbf{test\_user\_profiles.py} for other examples of providing user-defined \Python functions representing density, distribution function and selection function concepts to various routines within the library.
 
-\paragraph{example_mw_bar_potential} is a \Python script that constructs a smooth analytic density profile and the associated \ppp{CylSpline} potential approximating the made-to-measure model of the Milky Way bar \cite{Portail2017}.
+\paragraph{example_mw_bar_potential} is a \Python script that constructs a smooth analytic density profile \cite{Sormani2022b} and the associated \ppp{CylSpline} potential approximating the made-to-measure model of the Milky Way bar \cite{Portail2017}.
+\textbf{example_mw_potential_hunter24} provides an updated variant of this potential \cite{Hunter2024} with the same bar, but different disk and halo models, which have been fitted to the recent observational constraints.
 
-\paragraph{example_tidal_stream} is a \Python program demonstrating two approaches for simulating a sinking and tidally disrupting satellite galaxy. In the first approach, it is modelled with the $N$-body code \textsc{gyrfalcON} (using a \Python interface to it, \textsc{pyfalcON}), and in the second one, as a collection of particles orbiting in a smooth potential of the satellite, which itself moves in the host galaxy and is periodically updated to account for the mass loss (this method is similar to the \textsc{Raga} code \hyperref[sec:raga]{discussed below}). In both cases, the host galaxy is represented by another analytic potential and the dynamical friction on the satellite is imposed manually.
+\paragraph{example_tidal_stream} is a \Python program demonstrating two approaches for simulating a sinking and tidally disrupting satellite galaxy. In the first approach, it is modelled with the $N$-body code \textsc{gyrfalcON} (using a \Python interface to it, \textsc{pyfalcON}), and in the second one (restricted \Nbody simulation), as a collection of particles orbiting in a smooth potential of the satellite, which itself moves in the host galaxy and is periodically updated to account for the mass loss (this method is similar to the \textsc{Raga} code \hyperref[sec:raga]{discussed below}). In both cases, the host galaxy is represented by another analytic potential and the dynamical friction on the satellite is imposed manually.
+
+\paragraph{example_nbody_simulation} is a \Python script for launching an \Nbody simulation of a star cluster (or a satellite galaxy) in the Milky Way-like potential of the host system, provided by \Agama as an external potential to one of the following codes: \textsc{gyrfalcON}, \textsc{Arepo} or \textsc{Gadget4}, as well as a restricted \Nbody simulation similar to the previous script. It creates initial conditions (a simple Plummer model), downloads and compiles the simulation code (if necessary), launches it, and shows the result. Of course, these simulations can be run without a driver \Python script, by feeding in appropriate initial conditions and parameter files directly to the codes -- the files produced by this script could serve as templates.
 
 \paragraph{example_poincare} is an interactive \Python program illustrating the Poincar\'e surface of section and orbits in the meridional plane of axisymmetric potentials.
 
@@ -1351,7 +1373,7 @@ There are a couple of closely related programs (the first one is \Cpp, the rest 
 \textbf{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
 \textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model;\\
 \textbf{example_self_consistent_model_flattened} is a slightly more complicated variant that creates a flattened rotating S\'ersic model;\\
-\textbf{example_mw_nsd} constructs a DF-based self-consistent model of the Milky Way nuclear stellar disk \cite{Sormani2022}.\\
+\textbf{example_mw_nsd} constructs a DF-based self-consistent model of the Milky Way nuclear stellar disk \cite{Sormani2022a}.\\
 \textbf{test_self_consistent_model} illustrates the iterative self-consistent modelling workflow by reimplementing the \ttt{Component} and \ttt{SelfConsistentModel} classes in pure \Python and testing their equivalence to the \Cpp classes. The same approach can be used in other contexts besides self-consistent modelling, as a means of producing the density profile corresponding to the given DF -- essentially, computing the zeroth moment of the DF at a small number of points ($\sim 100$) and then interpolating it into the entire 3d space as \ppp{DensitySphericalHarmonic} or \ppp{DensityCylindricalHarmonic}. This could be useful if one needs to evaluate it at many points -- for instance, to compute the integrals of density over some finite volume (equivalent to a spatial selection function) or the surface density.
 
 \paragraph{example_schwarzschild_triaxial} and \;\;\textbf{example_schwarzschild_flattened_rotating}\;\;\\ are two \Python scripts illustrating the basic steps in Schwarzschild orbit-superposition  modelling. The first one creates a self-consistent triaxial model with a Dehnen density profile, and then converts it into an $N$-body snapshot. The second one creates a flattened rotating S\'ersic model with a central black hole, again converts it into an $N$-body snapshot, and plots various diagnostic information.
@@ -2597,6 +2619,9 @@ Hairer E., N{\o}rsett S., Wanner G., 1993, \textsl{Solving ordinary differential
 \bibitem{HernquistOstriker1992}
 Hernquist L., Ostriker J., 1992, ApJ, 386, 375
 
+\bibitem{Hunter2024}
+Hunter G., Sormani M., Beckmann J., et al., 2024, submitted
+
 \bibitem{Hyman}
 Hyman J., 1983, J.~Sci.~Stat.~Comput., 4, 645
 
@@ -2685,8 +2710,17 @@ Skokos Ch., 2010, LNP, 790, 63
 \bibitem{Silverman1982}
 Silverman B., 1982, Annals of statistics, 10, 795.
 
-\bibitem{Sormani2022}
+\bibitem{Sormani2022a}
 Sormani M., Sanders J., Fritz T., et al., 2022, MNRAS, 512, 1857
+
+\bibitem{Sormani2022b}
+Sormani M., Gerhard O., Portail M., Vasiliev E., Clarke J., 2022, MNRAS, 514, L5
+
+\bibitem{Springel2010}
+Springel V., 2010, MNRAS, 401, 791
+
+\bibitem{Springel2021}
+Springel V., Pakmor R., Zier O., Reinecke M., 2021, MNRAS, 506, 2871
 
 \bibitem{SutterAlexandrescu}
 Sutter H., Alexandrescu A., 2004, \textsl{C++ coding standards}, Addison--Wesley
@@ -2718,6 +2752,9 @@ Vasiliev E., Athanassoula E., 2015, MNRAS, 450, 2842
 
 \bibitem{VasilievValluri2020}
 Vasiliev E., Valluri M., 2020, ApJ, 889, 39
+
+\bibitem{Vasiliev2021}
+Vasiliev E., Belokurov V., Erkal D., 2021, MNRAS, 501, 2279
 
 \bibitem{Zemp2011}
 Zemp M., Gnedin O., Gnedin N., Kravtsov A., 2011, ApJS, 197, 30

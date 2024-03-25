@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+March 2024:
+Developed a plugin (or, rather, patch) for N-body codes Arepo and Gadget4
+that allows them to use an external potential provided by Agama in the simulation.
+
 February 2024:
 Improved flexibility of transformations between position/velocity and action/angle
 spaces, allowing one to explicitly choose which quantities need to be computed;
