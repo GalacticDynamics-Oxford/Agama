@@ -46,8 +46,8 @@ public:
 
 /** Prototype of a function that is used in integration of second-order
     linear ordinary differential equation systems with variable coefficients:
-    d2x(t) / dt2 = a(t) x(t) + b(t) dx(t)/dt,
-    where x is an N-dimensional vector and a, b are N by N matrices. */
+    d2x(t) / dt2 = A(t) x(t) + B(t) dx(t)/dt,
+    where x is an N-dimensional vector, and A, B are NxN matrices. */
 class IOde2System {
 public:
     IOde2System() {};
@@ -66,7 +66,7 @@ public:
 };
 
 
-/** basic class for numerical integrators of ODE systems */
+/** Base class for numerical integrators of ODE systems */
 class BaseOdeSolver {
 public:
     BaseOdeSolver(const IOdeSystem& _odeSystem):
@@ -134,14 +134,16 @@ private:
 };
 
 
-/** basic class for numerical integrators of second-order linear ODE systems:
-    x''(t) = C(t) x(t),  where x is a N-dimensional vector and C is a NxN matrix.
-    It is intended for solving the variational equation during orbit integration.
+/** Base class for numerical integrators of second-order linear ODE systems:
+    d2x(t) / dt2 = A(t) x(t) + B(t) dx(t)/dt,
+    where x is a N-dimensional vector, and A, C are NxN matrices.
+    It is intended for solving the variational equation during orbit integration,
+    and may evolve K >= 1 independent vectors x_k simultaneously.
 */
 class BaseOde2Solver {
 public:
-    BaseOde2Solver(const IOde2System& _odeSystem):
-        odeSystem(_odeSystem), time(0) {};
+    BaseOde2Solver(const IOde2System& _odeSystem, unsigned int _numVectors):
+        odeSystem(_odeSystem), numVectors(_numVectors), time(0) {};
 
     virtual ~BaseOde2Solver() {};
 
@@ -152,21 +154,25 @@ public:
     /** advance the solution by one timestep of length dt */
     virtual void doStep(double dt) = 0;
 
-    /** report the number of variables in the ODE system (both x and dx/dt, i.e. 2N) */
-    inline unsigned int size() const { return odeSystem.size(); }
+    /** report the number of variables in the ODE system (both x and dx/dt, i.e. 2N) * numVectors */
+    inline unsigned int size() const { return odeSystem.size() * numVectors; }
 
-    /** return the interpolated solution
+    /** return the interpolated solution.
         \param[in]  t  is the moment of time, which must lie within current timestep interval;
         \param[in]  ind  is the index of the component of the solution vector:
         0 <= ind < N corresponds to x, N <= ind < 2N - to dx/dt;
+        if numVectors>1, then the independent solution vectors are stored sequentially,
+        i.e. 0 <= ind < 2N correspond to the 0th vector, 2N <= ind < 4N - to the 1st, etc.
         \return  the interpolated solution at the given time.
-        \throw  std::out_of_range if the index is not in the range (0 .. 2N-1)
+        \throw  std::out_of_range if the index is not in the range (0 .. 2N*numVectors-1)
     */
     virtual double getSol(double t, unsigned int ind) const = 0;
 
 protected:
     /// object providing the r.h.s. of the ODE
     const IOde2System& odeSystem;
+    /// number of independent vectors being evolved
+    const unsigned int numVectors;
     /// current value of integration variable (time), incremented after each timestep
     double time;
 };
@@ -174,34 +180,37 @@ protected:
 
 /** Implicit method with 3 Gauss-Legendre collocation points;
     the order of solution is 6, the order of interpolation is 5 for x, 4 for dx/dt.
-    \tparam NDIM is the size of vector x (hence the size of the entire ODE system is 2 NDIM);
-    only the cases NDIM=1,2,3 are compiled.
+    \tparam NDIM is the size of vector x (hence the size of the entire ODE system is
+    2 NDIM * numVectors); only the cases NDIM=1,2,3 are compiled.
 */
 template<int NDIM>
 class Ode2SolverGL3: public BaseOde2Solver {
 public:
-    Ode2SolverGL3(const IOde2System& _odeSystem);
+    Ode2SolverGL3(const IOde2System& _odeSystem, unsigned int numVectors=1);
     virtual void init(const double stateNew[], double timeNew=NAN);
     virtual void doStep(double dt);
     virtual double getSol(double t, unsigned int ind) const;
 
 private:
-    double state[NDIM*2], p[NDIM], q[NDIM], r[NDIM];
+    std::vector<double> state;
     bool newstep;   // whether the extrapolation coefs are known from the previous step
 };
 
 /** Implicit method with 4 Gauss-Legendre collocation points;
-    the order of solution is 8, the order of interpolation is 6 for x, 5 for dx/dt */
+    the order of solution is 8, the order of interpolation is 6 for x, 5 for dx/dt
+    \tparam NDIM is the size of vector x (hence the size of the entire ODE system is
+    2 NDIM * numVectors); only the cases NDIM=1,2,3 are compiled.
+*/
 template<int NDIM>
 class Ode2SolverGL4: public BaseOde2Solver {
 public:
-    Ode2SolverGL4(const IOde2System& _odeSystem);
+    Ode2SolverGL4(const IOde2System& _odeSystem, unsigned int numVectors=1);
     virtual void init(const double stateNew[], double timeNew=NAN);
     virtual void doStep(double dt);
     virtual double getSol(double t, unsigned int ind) const;
 
 private:
-    double state[NDIM*2], p[NDIM], q[NDIM], r[NDIM], s[NDIM];
+    std::vector<double> state;
     bool newstep;   // whether the extrapolation coefs are known from the previous step
 };
 

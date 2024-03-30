@@ -66,7 +66,7 @@ SOURCES   = \
             galaxymodel_spherical.cpp \
             galaxymodel_velocitysampler.cpp \
             orbit.cpp \
-            orbit_lyapunov.cpp \
+            orbit_variational.cpp \
             potential_analytic.cpp \
             potential_base.cpp \
             potential_composite.cpp \
@@ -110,7 +110,7 @@ TESTSRCS  = test_math_core.cpp \
             test_units.cpp \
             test_utils.cpp \
             test_orbit_integr.cpp \
-            test_orbit_lyapunov.cpp \
+            test_orbit_variational.cpp \
             test_potentials.cpp \
             test_potential_expansions.cpp \
             test_potential_modifiers.cpp \

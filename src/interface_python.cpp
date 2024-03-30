@@ -59,7 +59,7 @@
 #include "potential_multipole.h"
 #include "potential_utils.h"
 #include "orbit.h"
-#include "orbit_lyapunov.h"
+#include "orbit_variational.h"
 #include "units.h"
 #include "utils.h"
 #include "utils_config.h"
@@ -6656,16 +6656,21 @@ static PyTypeObject OrbitType = {
 /// \param[in]  traj   is the orbit (array of times and phase-space coordinates);
 /// \param[in]  Omega  is the angular frequency for integration in the rotating frame
 /// (needed because in this case v != dx/dt, so the derivatives for the splines need adjustment);
+/// \param[in]  outputTime  is a flag indicating whether to create both time and trajectory arrays
+/// (when true) or just the trajectory (when false, this is used for deviation vectors);
+/// applies only to dtype!=NPY_OBJECT.
+/// \param[in]  normFactor  is the additional multiplicative factor in unit conversion for dev.vectors
 /// \param[in/out]  output  is the pointer to the first element of the output storage.
 /// If dtype==NPY_OBJECT, the output array contains one PyObject* element per orbit,
 /// which will be filled with a newly created instance of Orbit class encapsulating
 /// the interpolators for the trajectory (unit-converted).
-/// In other cases, the output array will be populated with two new PyObject* elements per orbit:
-/// the numpy array of timestamps and another numpy array of phase-space points.
+/// In other cases, the output array will be populated with one (if outputTime==false) or two
+/// new PyObject* elements per orbit: the numpy array of timestamps (only if outputTime==true)
+/// and another numpy array of phase-space points.
 /// \return  true on success, false if failed to allocate arrays
 /// (in this case, PyErr_SetString is called to report the error)
-bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, double> > &traj,
-    double Omega, /*output*/ PyObject* output[])
+bool createOrbit(int dtype, const orbit::Trajectory &traj,
+    double Omega, bool outputTime, double normFactor, /*output*/ PyObject* output[])
 {
     npy_intp size = traj.size();
     if(dtype == NPY_OBJECT) {
@@ -6706,12 +6711,12 @@ bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, doubl
             // to construct the interpolators, and transform their output back to rotated frame
             double ca, sa;
             math::sincos(orbit->Omega * t[index], sa, ca);
-            x [index] = point[0] * ca - point[1] * sa;
-            y [index] = point[1] * ca + point[0] * sa;
-            z [index] = point[2];
-            vx[index] = point[3] * ca - point[4] * sa;
-            vy[index] = point[4] * ca + point[3] * sa;
-            vz[index] = point[5];
+            x [index] = normFactor * (point[0] * ca - point[1] * sa);
+            y [index] = normFactor * (point[1] * ca + point[0] * sa);
+            z [index] = normFactor *  point[2];
+            vx[index] = normFactor * (point[3] * ca - point[4] * sa);
+            vy[index] = normFactor * (point[4] * ca + point[3] * sa);
+            vz[index] = normFactor *  point[5];
         }
         try{
             ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
@@ -6734,50 +6739,61 @@ bool createOrbit(int dtype, const std::vector< std::pair<coord::PosVelCar, doubl
         PyObject *time_obj = NULL, *traj_obj = NULL;
         {   // access to Python C API for one thread at a time
             PyAcquireGIL lock;
-            time_obj = PyArray_SimpleNew(1, dims,
-                dtype==NPY_FLOAT || dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
+            if(outputTime)
+                time_obj = PyArray_SimpleNew(1, dims,
+                    dtype==NPY_FLOAT || dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
             traj_obj = PyArray_SimpleNew(2, dims, dtype);
+            if((outputTime && !time_obj) || !traj_obj) {
+                Py_XDECREF(time_obj);
+                Py_XDECREF(traj_obj);
+                return false;
+            }
         }  // end critical section
-        if(!time_obj || !traj_obj)
-            return false;
 
         for(npy_intp index=0; index<size; index++) {
-            // convert the time array
-            if(dtype == NPY_FLOAT || dtype == NPY_CFLOAT)
-                pyArrayElem<float>(time_obj, index) =
-                    static_cast<float>(traj[index].second / conv->timeUnit);
-            else
-                pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
+            if(outputTime) {
+                // convert the time array
+                if(dtype == NPY_FLOAT || dtype == NPY_CFLOAT)
+                    pyArrayElem<float>(time_obj, index) =
+                        static_cast<float>(traj[index].second / conv->timeUnit);
+                else
+                    pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
+            }
             // convert the units and numerical type of the trajectory array
             double point[6];
             unconvertPosVel(traj[index].first, point);
             switch(dtype) {
                 case NPY_DOUBLE:
                     for(int c=0; c<6; c++)
-                        pyArrayElem<double>(traj_obj, index, c) = point[c];
+                        pyArrayElem<double>(traj_obj, index, c) = normFactor * point[c];
                     break;
                 case NPY_FLOAT:
                     for(int c=0; c<6; c++)
-                        pyArrayElem<float>(traj_obj, index, c) = static_cast<float>(point[c]);
+                        pyArrayElem<float>(traj_obj, index, c) =
+                            static_cast<float>(normFactor * point[c]);
                     break;
                 case NPY_CDOUBLE:
                     for(int c=0; c<3; c++)
                         pyArrayElem<std::complex<double> >(traj_obj, index, c) =
-                            std::complex<double>(point[c+0], point[c+3]);
+                            std::complex<double>(normFactor * point[c+0], normFactor * point[c+3]);
                     break;
                 case NPY_CFLOAT:
                     for(int c=0; c<3; c++) {
                         pyArrayElem<std::complex<float> >(traj_obj, index, c) =
-                            std::complex<float>(point[c+0], point[c+3]);
+                            std::complex<float>(normFactor * point[c+0], normFactor * point[c+3]);
                     }
                     break;
                 default:
                     assert(!"incorrect dtype");  // shouldn't happen, we checked dtype beforehand
             }
         }
-        // in this case, the output array has two elements per orbit
-        output[0] = time_obj;
-        output[1] = traj_obj;
+        // in this case, the output array has one or two elements per orbit
+        if(outputTime) {
+            output[0] = time_obj;
+            output[1] = traj_obj;
+        } else {
+            output[0] = traj_obj;
+        }
     }
     return true;
 }
@@ -6807,6 +6823,8 @@ static const char* docstringOrbit =
     "integration period, and if trajsize>1, the first point is the initial conditions). "
     "If dtype=object and trajsize is not provided explicitly, this is equivalent to setting trajsize=0. "
     "Both time and trajsize may differ between orbits.\n"
+    "  der (optional, default False):  whether to compute the evolution of deviation vectors "
+    "(derivatives of the orbit w.r.t. the initial conditions).\n"
     "  lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is "
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.\n"
@@ -6814,16 +6832,17 @@ static const char* docstringOrbit =
     "  dtype (optional, default 'float32'):  storage data type for trajectories (see below).\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
-    "plus an extra one for trajectories if trajsize>0, plus another one for Lyapunov exponents "
-    "if lyapunov=True). \n"
+    "plus an extra one for trajectories if trajsize>0, plus another one for deviation vectors "
+    "if der=True, plus another one for Lyapunov exponents if lyapunov=True). \n"
     "  Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, "
     "and C is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
     "These data storage arrays should be provided to the `solveOpt()` routine. \n"
     "  Lyapunov exponent is a single number for one orbit, or a 1d array for several orbits.\n"
-    "  Trajectory output can be requested in two alternative formats: arrays or Orbit objects.\n"
-    "In the first case, the output is a Nx2 array (or, in case of a single orbit, a 1d array "
-    "of length 2), with elements being objects themselves: "
+    "  Trajectory output and deviation vectors can be requested in two alternative formats: "
+    "arrays or Orbit objects.\n"
+    "In the first case, the output of the trajectory is a Nx2 array (or, in case of a single orbit, "
+    "a 1d array of length 2), with elements being objects themselves: "
     "each row stands for one orbit, the first element in each row is a 1d array of length `trajsize` "
     "containing the timestamps, and the second is a 2d array of phase-space coordinates "
     "at the corresponding timestamps, in the format depending on dtype:\n"
@@ -6846,7 +6865,16 @@ static const char* docstringOrbit =
     "Although such interpolator may be constructed from a regularly-spaced orbit, it makes more "
     "sense to leave trajsize=0 in this case, i.e., record the trajectory at every timestep "
     "of the orbit integrator. This is the default behaviour, and trajsize needs not be specified "
-    "explicitly when setting dtype=object.\n\n"
+    "explicitly when setting dtype=object.\n"
+    "The output for deviation vectors, if they are requested, follows the same format as for "
+    "the trajectory, except that there are 6 such vectors for each orbit. "
+    "Thus, if dtype=object, each orbit produces an array of 6 agama.Orbit objects, each one "
+    "representing a single deviation vector; for other dtypes, the output for one orbit consists of "
+    "6 arrays of shape `trajsize`*6 (for dtype='float' or 'double'), or `trajsize`*3 "
+    "(for dtype='complex' or 'complex128'), each one representing a single deviation vector "
+    "sampled at the same timestamps as the trajectory. "
+    "in case of N>1 orbits, the output is an array of shape Nx6 filled with agama.Orbit objects "
+    "or 2d arrays of deviation vectors.\n\n"
     "Examples:\n"
     "# compute a single orbit and output the trajectory in a 2d array of size 1001x6:\n"
     ">>> times,traj = agama.orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
@@ -6859,7 +6887,12 @@ static const char* docstringOrbit =
     "`target1` and `target2` and also storing their trajectories in a Nx2 array of "
     "time and position/velocity arrays:\n"
     ">>> stor1, stor2, trajectories = agama.orbit(potential=mypot, ic=initcond, "
-    "time=50*mypot.Tcirc(initcond), trajsize=500, targets=(target1, target2))";
+    "time=50*mypot.Tcirc(initcond), trajsize=500, targets=(target1, target2))\n"
+    "# compute a single orbit and its deviation vectors v0..v5, storing only the final values "
+    "at t=tend, and estimate the Lyapunov exponent (if it is positive, the magnitude of deviation "
+    "vectors grows exponentially with time, otherwise grows linearly):\n"
+    ">>> (time,endpoint), (v0,v1,v2,v3,v4,v5), lyap = agama.orbit(potential=mypot, "
+    "ic=[x,y,z,vx,vy,vz], time=100, trajsize=1, der=True, lyapunov=True)";
 
 /// run a single orbit or the entire orbit library for a Schwarzschild model
 PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
@@ -6870,17 +6903,30 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // parse input arguments
     orbit::OrbitIntParams params;
     double Omega = 0.;
+    int haveDer  = 0;
     int haveLyap = 0;
     int dtype = NPY_FLOAT;
     PyObject *ic_obj = NULL, *time_obj = NULL, *timestart_obj = NULL, *pot_obj = NULL,
         *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL;
     static const char* keywords[] =
         {"ic", "time", "timestart", "potential", "targets", "trajsize",
-         "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiddiO", const_cast<char**>(keywords),
+         "der", "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiiddiO", const_cast<char**>(keywords),
         &ic_obj, &time_obj, &timestart_obj, &pot_obj, &targets_obj, &trajsize_obj,
-        &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
+        &haveDer, &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
         return NULL;
+
+    // check if deviation vectors are needed (if yes, the output contains yet another array)
+    if(haveDer != 0 && haveDer != 1) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'der' must be a boolean or an int 0/1");
+        return NULL;
+    }
+
+    // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
+    if(haveLyap != 0 && haveLyap != 1) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'lyapunov' must be a boolean");
+        return NULL;
+    }
 
     // unit-convert the pattern speed
     Omega /= conv->timeUnit;
@@ -7016,30 +7062,35 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         haveTraj = true;
     }
 
-    // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
-    haveLyap = haveLyap ? 1 : 0;
-
     // the output is one or more Numpy arrays:
     // each target corresponds to a NumPy array where the collected information for all orbits is stored,
     // plus optionally an array containing the trajectories of all orbits if they are requested,
+    // plus optionally an array containing the deviation vectors of all orbits if requested,
     // plus optionally an array of Lyapunov exponents if requested.
     // We first allocate and keep these arrays in a std::vector, then convert it into a tuple
     // at the end, once the data is ready: at this stage, zero-dimension arrays are converted to scalars.
     // The vector result_numCols contains the number of entries per orbit for each output array.
-    if(numTargets + haveTraj + haveLyap == 0) {
+    size_t numOutputs = numTargets + haveTraj + haveLyap + haveDer;
+    if(numOutputs == 0) {
         PyErr_SetString(PyExc_RuntimeError, "No output is requested: "
             "if you just need the trajectory, provide trajsize=... for array output "
             "or dtype=object for Orbit object output");
         return NULL;
     }
-    std::vector<PyArrayObject*> result_arrays(numTargets + haveTraj + haveLyap);
+    if(haveDer && !haveTraj) {
+        PyErr_SetString(PyExc_RuntimeError, "Derivatives are requested, "
+            "but the trajectory itself is not: provide trajsize=... for array output "
+            "or dtype=object for Orbit object output");
+        return NULL;
+    }
+    std::vector<PyArrayObject*> result_arrays(numOutputs);
     std::vector<npy_intp> result_numCols(result_arrays.size());
 
     // allocate the arrays for storing the information for each target,
     // and optionally for the output trajectory(ies) and/or Lyapunov exponents.
     // the array of trajectories is an array of shape (N,) or (N,2) of Python objects
     volatile bool fail = false;  // error flag (e.g., insufficient memory)
-    for(size_t t=0; !fail && t < numTargets + haveTraj + haveLyap; t++) {
+    for(size_t t=0; !fail && t < numOutputs; t++) {
         npy_intp numCols;
         int datatype;
         if(t < numTargets) {                      // ordinary target objects
@@ -7050,10 +7101,15 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             // otherwise two elements per orbit (time and trajectory arrays)
             numCols  = dtype == NPY_OBJECT ? 1 : 2;
             datatype = NPY_OBJECT;
-        } else {                                  // Lyapunov exponent
+        } else if(haveDer && t == numTargets + haveTraj) {  // deviation vectors storage
+            // 6 dev vectors per orbit, stored as arrays or Orbit objects
+            numCols  = 6;
+            datatype = NPY_OBJECT;
+        } else if(haveLyap && t == numTargets + haveTraj + haveDer) {  // Lyapunov exponent
             numCols  = 1;
             datatype = NPY_DOUBLE;
-        }
+        } else
+            assert(!"Counting error in allocating output arrays");  // shouldn't happen
         result_numCols[t] = numCols;
         // if there is only a single orbit, the output array is 1-dimensional,
         // otherwise 2-dimensional (numOrbits rows, numCols columns);
@@ -7083,8 +7139,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #endif
         for(npy_intp orb = 0; orb < numOrbits; orb++) {
             if(fail || cbrk.triggered()) continue;
-            // temporary place for storing the trajectory before subsequent unit-conversion
-            std::vector< std::pair<coord::PosVelCar, double> > traj;
+            // thread-local temporary place for storing the trajectory and deviation vectors
+            // before subsequent unit-conversion
+            orbit::Trajectory traj, deviationVectors[6];
             try{
                 // instance of the orbit integrator for the current orbit
                 orbit::OrbitIntegrator<coord::Car> orbint(*pot, Omega, params);
@@ -7107,13 +7164,18 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new orbit::RuntimeTrajectory(orbint, trajStep, traj)));
                 }
-                if(haveLyap) {
-                    double samplingInterval = 0.1 * T_circ(*pot, totalEnergy(*pot, initCond.at(orb)));
-                    double* output = static_cast<double*>(
-                        PyArray_DATA(result_arrays[numTargets + haveTraj])) +
-                        orb * result_numCols[numTargets + haveTraj];
+                if(haveLyap || haveDer) {
+                    double trajStep = !trajSizes.empty() && trajSizes[orb]>0 ?
+                        fabs(timetotal[orb]) / (trajSizes[orb]-1) :  // same timestep as for the orbit
+                        0;  // store at every integration timestep
+                    double* outputLyap = haveLyap ?
+                        static_cast<double*>(
+                        PyArray_DATA(result_arrays[numTargets + haveTraj + haveDer])) +
+                        orb * result_numCols[numTargets + haveTraj + haveDer] :
+                        NULL;  // Lyapunov exponent will not be computed if not requested
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
-                        new orbit::RuntimeLyapunov(orbint, samplingInterval, *output)));
+                        new orbit::RuntimeVariational(orbint, trajStep,
+                            haveDer ? deviationVectors : NULL, outputLyap)));
                 }
 
                 // integrate the orbit
@@ -7144,8 +7206,26 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     PyArray_DATA(result_arrays[numTargets])) +
                     orb * result_numCols[numTargets];
                 // store the orbit in the output array in the form depending on dtype
-                if(!createOrbit(dtype, traj, Omega, output))
+                if(!createOrbit(dtype, traj, Omega, /*outputTime*/true, /*normFactor*/1, output))
                     fail = true;
+            }
+
+            // if deviation vectors were recorded, store them in the corresponding item of the output
+            if(haveDer) {
+                // pointer to the beginning of storage for the given orbit (six PyObject* items)
+                PyObject** output = static_cast<PyObject**>(
+                    PyArray_DATA(result_arrays[numTargets + haveTraj])) +
+                    orb * result_numCols[numTargets + haveTraj];
+                // store the deviation vectors in the output array in the form depending on dtype
+                for(int vec=0; vec<6; vec++, output++) {
+                    // since the deviation vectors are components of the Jacobian of mapping
+                    // between the initial conditions and the current point on the orbit,
+                    // their dimensions should be scaled by position (first 3 vectors) or velocity
+                    double normFactor = vec<3 ? conv->lengthUnit : conv->velocityUnit;
+                    if(!createOrbit(dtype, deviationVectors[vec], Omega,
+                        /*outputTime*/false, normFactor, output))
+                        fail = true;
+                }
             }
 
             // status update

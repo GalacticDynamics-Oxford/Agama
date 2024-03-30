@@ -1,16 +1,18 @@
-/** \file    example_lyapunov.cpp
+/** \file    test_orbit_variational.cpp
     \author  Eugene Vasiliev
-    \date    2008-2021
+    \date    2008-2024
 
-    This example demonstrates how to augment the orbit integration in AGAMA with
-    the computation of the (largest) Lyapunov exponent, which is a measure of orbit chaoticity.
+    This example demonstrates how to augment the orbit integration in AGAMA with the simultaneous
+    integration of the variational equation, which describes the evolution of deviation vectors
+    (infinitesimally small perturbations of the initial conditions of the orbit).
+    It enables the computation of the (largest) Lyapunov exponent, which measures the orbit chaoticity.
     The task is divided into three routines:
     - the class that provides the right-hand side of the differential equation;
     - the routine that computes and stores the orbit and the magnitude of the deviation vector;
     - the routine that estimates the Lyapunov exponent from the time evolution of the dev.vec.
 */
 #include "orbit.h"
-#include "orbit_lyapunov.h"
+#include "orbit_variational.h"
 #include "potential_factory.h"
 #include "potential_utils.h"
 #include "utils.h"
@@ -216,7 +218,7 @@ void OrbitIntegratorVarEq<coord::Car>::eval(const double time, const double x[],
     dxdt[3] = -grad.dx + Omega * x[4];
     dxdt[4] = -grad.dy - Omega * x[3];
     dxdt[5] = -grad.dz;
-    // remaining part follows the evolution of the deviation vector for RuntimeLyapunov
+    // remaining part follows the evolution of the deviation vector for RuntimeVariational
     // time derivative of position part of the deviation vector
     dxdt[6] = x[9]  + Omega * x[7];
     dxdt[7] = x[10] - Omega * x[6];
@@ -271,8 +273,8 @@ void integrateOrbitVarEq(
     const double samplingInterval,
     const potential::BasePotential& potential,
     const double Omega,
-    std::vector<std::pair<coord::PosVelCar, double> >& trajectory,
-    std::vector<double>& logDevVec)
+    orbit::Trajectory& trajectory,
+    std::vector< std::pair<double, double> >& logDevVec)
 {
     OrbitIntegratorVarEq<CoordT> orbitIntegrator(potential, Omega);
     math::OdeSolverDOP853 solver(orbitIntegrator/*, accuracy*/);
@@ -305,7 +307,8 @@ void integrateOrbitVarEq(
                 trajectory[iout].first = toPosVelCar(coord::PosVelT<CoordT>(vars));
                 trajectory[iout].second= tout;
                 double logDV = log(devVec2) * 0.5;
-                logDevVec [iout] = logDV + addLogDevVec;
+                logDevVec [iout].first = tout;
+                logDevVec [iout].second= logDV + addLogDevVec;
                 needToRescale |= logDV > 300;
             }
         }
@@ -332,23 +335,24 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
     double orbitalPeriod = potential::T_circ(*pot, totalEnergy(*pot, initCond));  // characteristic time
     double timeTotal = 2000. * orbitalPeriod;       // integration time in orbital periods
     double samplingInterval = 0.1 * orbitalPeriod;  // store output with sufficient temporal resolution
-    std::vector< std::pair<coord::PosVelCar, double> >
-        trajectory6,                                // from standard 6-dimensional ODE integrator
-        trajectory12car,                            // from 12-dimensional ODE integrator (orbit+var.eq.)
-        trajectory12cyl;                            // same in cylindrical coords
-    std::vector<double> logDeviationVector6;        // from the internal var.eq.solver in the 6d case
-    std::vector<double> logDeviationVector12car;    // from the var.eq. solved by the 12d orbit integrator
-    std::vector<double> logDeviationVector12cyl;    // same in cylindrical coords
-    double lyap6, lyap12car, lyap12cyl;             // Lyapunov exp. estimated from these three arrays
-    orbit::OrbitIntParams par6(1e-9);               // accuracy requirements are different for 6d and 12d,
+    orbit::Trajectory
+        trajectory6,                     // from standard 6-dimensional ODE integrator
+        trajectory12car,                 // from 12-dimensional ODE integrator (orbit+var.eq.)
+        trajectory12cyl,                 // same in cylindrical coords
+        deviationVectors[6];             // deviation vectors reported by the 6d var.eq.solver
+    std::vector< std::pair<double, double> >
+        logDeviationVector12car,         // from the var.eq. solved by the 12d orbit integrator
+        logDeviationVector12cyl;         // same in cylindrical coords
+    double lyap6, lyap12car, lyap12cyl;  // Lyapunov exp. estimated from these three arrays
+    orbit::OrbitIntParams par6(1e-9);    // accuracy requirements are different for 6d and 12d,
     // chosen so that the number of timesteps taken by the ODE integrators are approximately equal
 
-    // 6d ODE system with the variational equation solved by another specialized solver
-    // attached to the RuntimeLyapunov function
+    // 6d ODE system with the variational equation solved by another specialized solver attached
+    // to the RuntimeVariational function, which also outputs the evolution of all 6 deviation vectors
     {
         orbit::OrbitIntegrator<coord::Car> orbint(*pot, Omega, par6);
-        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeLyapunov(
-            orbint, samplingInterval, /*output*/ lyap6, &logDeviationVector6)));
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeVariational(
+            orbint, samplingInterval, /*output*/ deviationVectors, &lyap6)));
         orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
             orbint, samplingInterval, trajectory6)));
         orbint.init(initCond);
@@ -356,18 +360,58 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         // finalize the runtime functions (compute Lyapunov exponent from stored data) once they go out of scope
     }
 
+    // compare the evolution of deviation vectors (i.e. infinitesimally small perturbations
+    // of the original trajectory) to six orbits with slightly perturbed initial conditions;
+    // this comparison makes sense only on intervals shorter than the time it takes to grow
+    // the small initial perturbations to a macroscopically large amplitude, which is determined below
+    const double DEV_INIT = 1e-10, DEV_MAX = 1e-5, TOLERANCE = 1e-4;
+    double timeFollow = timeTotal;
+    for(int vec=0; vec<6; vec++) {
+        for(size_t s=0; s<deviationVectors[vec].size(); s++) {
+            const coord::PosVelCar& pv = deviationVectors[vec][s].first;
+            double mag = sqrt(pow_2(pv.x) + pow_2(pv.y) + pow_2(pv.z) +
+                pow_2(pv.vx) + pow_2(pv.vy) + pow_2(pv.vz));
+            if(mag > DEV_MAX / DEV_INIT) {
+                timeFollow = fmin(timeFollow, deviationVectors[vec][s].second);
+                break;
+            }
+        }
+    }
+    // now follow 6 slightly perturbed orbits for a timeFollow interval
+    double maxDifference = 0;
+    for(int vec=0; vec<6; vec++) {
+        coord::PosVelCar initCondPerturb = initCond;
+        combine(initCondPerturb, deviationVectors[vec][0].first, 1, DEV_INIT);
+        orbit::Trajectory trajectory6perturb = orbit::integrateTraj(
+            initCondPerturb, timeFollow, samplingInterval, *pot, Omega, par6);
+        for(size_t i=0; i<trajectory6perturb.size(); i++) {
+            // expected pos/vel from the evolution of this deviation vector
+            coord::PosVelCar pointExpected = trajectory6[i].first;
+            combine(pointExpected, deviationVectors[vec][i].first, 1, DEV_INIT);
+            const coord::PosVelCar& pointActual = trajectory6perturb[i].first;
+            double difference = sqrt(
+                pow_2(pointExpected.x  - pointActual.x)  +
+                pow_2(pointExpected.y  - pointActual.y)  +
+                pow_2(pointExpected.z  - pointActual.z)  +
+                pow_2(pointExpected.vx - pointActual.vx) +
+                pow_2(pointExpected.vy - pointActual.vy) +
+                pow_2(pointExpected.vz - pointActual.vz));
+            maxDifference = fmax(maxDifference, difference);
+        }
+    }
+
     // 12d ODE system with the variational equation solved directly by the ODE integrator
     integrateOrbitVarEq<coord::Car>(
         initCond, timeTotal, samplingInterval, *pot, Omega, trajectory12car, logDeviationVector12car);
-    lyap12car = orbit::calcLyapunovExponent(logDeviationVector12car, samplingInterval, orbitalPeriod);
+    lyap12car = orbit::calcLyapunovExponent(logDeviationVector12car, orbitalPeriod);
     integrateOrbitVarEq<coord::Cyl>(
         initCond, timeTotal, samplingInterval, *pot, Omega, trajectory12cyl, logDeviationVector12cyl);
-    lyap12cyl = orbit::calcLyapunovExponent(logDeviationVector12cyl, samplingInterval, orbitalPeriod);
+    lyap12cyl = orbit::calcLyapunovExponent(logDeviationVector12cyl, orbitalPeriod);
 
     // print out log(devvec) as a function of time
-    size_t size =  trajectory6.size();
+    size_t size = trajectory6.size();
     if( size != trajectory12car.size() || size != trajectory12cyl.size() ||
-        size != logDeviationVector6.size() ||
+        size != deviationVectors[0].size() ||
         size != logDeviationVector12car.size() || size != logDeviationVector12cyl.size() )
     {
         std::cout << "unequal sizes of output arrays" << err << '\n';
@@ -379,6 +423,16 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         strm << "#time\tx(6) y(6) z(6)\txcar(12) ycar(12) zcar(12)\txcyl(12) ycyl(12) zcyl(12)\t"
             "lnw6 lnw12car lnw12cyl\n";
         for(size_t i=0; i<size; i++) {
+            double logDeviationVector6 = -INFINITY;
+            for(int vec=0; vec<6; vec++) {
+                const coord::PosVelCar& p = deviationVectors[vec][i].first;
+                // avoid (or rather, delay) overflow in computing the norm
+                const double mul = 1e-150;
+                double norm = 0.5 * log(
+                    pow_2(p.x  * mul) + pow_2(p.y  * mul) + pow_2(p.z  * mul) +
+                    pow_2(p.vx * mul) + pow_2(p.vy * mul) + pow_2(p.vz * mul)) - log(mul);
+                logDeviationVector6 = fmax(logDeviationVector6, norm);
+            }
             strm << /*time*/ trajectory6[i].second << '\t' <<
             trajectory6    [i].first.x << ' ' <<
             trajectory6    [i].first.y << ' ' <<
@@ -389,9 +443,9 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
             trajectory12cyl[i].first.x << ' ' <<
             trajectory12cyl[i].first.y << ' ' <<
             trajectory12cyl[i].first.z << '\t'<<
-            logDeviationVector6    [i] << ' ' <<
-            logDeviationVector12car[i] << ' ' <<
-            logDeviationVector12cyl[i] << '\n';
+            logDeviationVector6        << ' ' <<
+            logDeviationVector12car[i].second << ' ' <<
+            logDeviationVector12cyl[i].second << '\n';
         }
     }
     double
@@ -404,8 +458,8 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         ";  orbital period: "  << orbitalPeriod <<
         ";  energy error: 6d=" << Eend6-Einit <<
         " 12d(car)=" << Eend12car-Einit << " 12d(cyl)=" << Eend12cyl-Einit <<
-        ";  Lyapunov exponent: "
-        " 6d=" << lyap6 << " 12d(car)=" << lyap12car << " 12d(cyl)=" << lyap12cyl;
+        ";  max.deviation from linearized orbit during time " << timeFollow << " is " << maxDifference <<
+        ";  Lyapunov exponent:  6d=" << lyap6 << " 12d(car)=" << lyap12car << " 12d(cyl)=" << lyap12cyl;
 
     // check if various estimators of the Lyapunov exponent are in agreement
     // (the ones based on the internally evolved var.eq. are not expected to work in rotating frame,
@@ -413,6 +467,7 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
     bool ok = expectChaotic ?
         (lyap6 >  0 && lyap12car >  0 && lyap12cyl >  0) :
         (lyap6 == 0 && lyap12car == 0 && lyap12cyl == 0);
+    ok &= maxDifference < TOLERANCE;
     if(ok)
         std::cout << '\n';
     else

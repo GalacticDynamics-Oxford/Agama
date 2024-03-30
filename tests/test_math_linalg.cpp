@@ -15,29 +15,32 @@ int main()
 {
     bool ok=true;
 
-    const unsigned int NR=600, NV=10000;  // matrix size, # of nonzero values
+    const unsigned int NR=600, NC=700, NV=10000;  // matrix size (Nrows<Ncols), # of nonzero values
     const unsigned int MIN_CLOCKS = CLOCKS_PER_SEC;
     std::vector<math::Triplet> spdata;
     // init matrix content
     for(unsigned int k=0; k<NV; k++) {
         unsigned int i = static_cast<unsigned int>(math::random()*NR);
-        unsigned int j = static_cast<unsigned int>(math::random()*NR);
+        unsigned int j = static_cast<unsigned int>(math::random()*NC);
         double v = math::random();
         spdata.push_back(math::Triplet(i, j, v));
     }
-    math::SparseMatrix<double> spmat(NR, NR, spdata);
+    math::SparseMatrix<double> spmat(NR, NC, spdata);
     math::Matrix<double> mat(spmat);
+    math::Matrix<double> tmat((math::TransposedMatrix<double>(spmat)));
     {   // not used, just check that it compiles
-        math::SparseMatrix<float> spmat(NR, NR, spdata);
+        math::SparseMatrix<float> spmat(NR, NC, spdata);
         math::SparseMatrix<float> spmat1 = spmat;
-        math::Matrix<float> mat(NR, NR, spdata);
+        math::Matrix<float> mat(NR, NC, spdata);
         math::Matrix<float> mat1 = mat;
     }
 
     // init rhs
-    std::vector<double> rhs(NR), sol, mul(NR);
+    std::vector<double> rhs(NR), chs(NC), sol, mul(NR), cul(NC);
     for(unsigned int i=0; i<NR; i++)
         rhs[i] = math::random();
+    for(unsigned int i=0; i<NC; i++)
+        chs[i] = math::random();
 
     {   // band-matrix operations
         bool okband = true;
@@ -111,6 +114,38 @@ int main()
         }
     }
 
+    {   // check size compatibility
+        bool okdim = true;
+        sol.resize(NC);
+        math::Matrix<double> product(NR, NR);
+        math::SparseMatrix<double> spproduct(NR, NR);
+        try{
+            // should fail: matrices are not aligned
+            math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, mat, mat, 0, product);
+            std::cout << "DD ";
+            okdim = false;
+        }
+        catch(...) {}
+        try{
+            // should fail: matrices are not aligned
+            math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, spmat, spmat, 0, spproduct);
+            std::cout << "SS ";
+            okdim = false;
+        }
+        catch(...) {}
+        try{
+            // should fail: matrices are aligned, but the result matrix has wrong size
+            math::blas_dgemm(math::CblasTrans, math::CblasNoTrans, 1, spmat, spmat, 0, spproduct);
+            std::cout << "StS ";
+            okdim = false;
+        }
+        catch(...) {}
+        if(!okdim) {
+            std::cout << "matrix multiplication did not fail where it should.";
+            ok &= test(false);
+        }
+    }
+
     // test matrix multiplication: construct positive-definite matrix M M^T + diag(1)
     math::SparseMatrix<double> spdmat(NR, NR);
     clock_t tbegin=std::clock();
@@ -136,7 +171,14 @@ int main()
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
         std::cout << " s, rmserr=" << norm;
-        ok &= test(norm < 1e-10);
+        bool sizeok = true;
+        try{
+            math::LUDecomp lu(spmat);
+            std::cout << " Nonsquare matrix incorrectly accepted";
+            sizeok = false;
+        }
+        catch(...) {}
+        ok &= test(sizeok && norm < 1e-10);
     }
 
     {   // dense LU
@@ -150,7 +192,14 @@ int main()
         math::blas_daxpy(-1, rhs, mul);
         double norm = sqrt(math::blas_dnrm2(mul) / NR);
         std::cout << " s, rmserr=" << norm;
-        ok &= test(norm < 1e-10);
+        bool sizeok = true;
+        try{
+            math::LUDecomp lu(mat);
+            std::cout << " Nonsquare matrix incorrectly accepted";
+            sizeok = false;
+        }
+        catch(...) {}
+        ok &= test(sizeok && norm < 1e-10);
     }
 
     {   // Cholesky
@@ -172,36 +221,104 @@ int main()
         math::blas_daxpy(-1, dmat, M);
         double norm2 = sqrt(math::blas_dnrm2(M)) / NR;
         std::cout << ", |M - L L^T| = " << norm2;
-        ok &= test(norm < 1e-10 && norm2 < 1e-15);
+        bool sizeok = true;
+        try{
+            math::CholeskyDecomp ch(mat);
+            std::cout << " Nonsquare matrix incorrectly accepted";
+            sizeok = false;
+        }
+        catch(...) {}
+        ok &= test(sizeok && norm < 1e-10 && norm2 < 1e-15);
     }
 
-    {   // SVD
+    {   // QR, two ways: "mat" is wide (rows < columns), "tmat" is tall (opposite)
+        clock_t tbegin=std::clock();
+        math::Matrix<double> Q, R;
+        for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++) {
+            // underdetermined system: more variables (NC) than equations (NR)
+            math::QRDecomp qr(mat), qr1=qr;
+            sol = math::QRDecomp(qr1).solve(rhs);
+            qr.QR(Q, R);
+        }
+        std::cout << "QR       : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
+        math::blas_dgemv(math::CblasNoTrans, 1, mat, sol, 0, mul);
+        math::blas_daxpy(-1, rhs, mul);
+        double normu = sqrt(math::blas_dnrm2(mul) / NR);
+        std::cout << " s, rmserr=" << normu << std::flush;
+        // check that Q R = original matrix
+        math::Matrix<double> M(NR, NC);
+        math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, Q, R, 0, M);
+        math::blas_daxpy(-1, mat, M);
+        double norm2u = sqrt(math::blas_dnrm2(M)) / NR;
+        std::cout << ", |M - Q R| = " << norm2u;
+        ok &= Q.rows() == Q.cols() && R.rows() == mat.rows() && R.cols() == mat.cols();
+        
+        // overdetermined system: more equations (NC) than variables (NR)
+        math::QRDecomp qr(tmat);
+        sol = qr.solve(chs);
+        qr.QR(Q, R);
+        math::blas_dgemv(math::CblasNoTrans, 1, tmat, sol, 0, cul);
+        math::blas_daxpy(-1, chs, cul);
+        double normo = sqrt(math::blas_dnrm2(cul) / NC);  // expected to be macroscopically large
+        // check that Q R = original matrix
+        M = math::Matrix<double>(NC, NR);
+        math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, Q, R, 0, M);
+        math::blas_daxpy(-1, tmat, M);
+        double norm2o = sqrt(math::blas_dnrm2(M)) / NR;
+        std::cout << " and " << norm2o;
+        ok &= Q.rows() == Q.cols() && R.rows() == tmat.rows() && R.cols() == tmat.cols();
+        ok &= test(normu < 1e-12 && norm2u < 1e-15 && normo > 0.01 && norm2o < 1e-15);
+    }
+
+    {   // SVD, two ways: "tmat" is tall (rows > columns), "dmat" is square
         clock_t tbegin=std::clock();
         math::Matrix<double> U, V;
         std::vector <double> vS;
         for(niter=0; !niter || std::clock()-tbegin < MIN_CLOCKS; niter++) {
-            math::SVDecomp sv(dmat), sv1=sv;
-            sol = math::SVDecomp(sv1).solve(rhs);
+            // overdetermined system: more equations (NC) than variables (NR)
+            math::SVDecomp sv(tmat), sv1=sv;
+            sol = math::SVDecomp(sv1).solve(chs);
             U = sv.U();
             V = sv.V();
             vS= sv.S();
         }
         std::cout << "Sing.val.: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
-        math::blas_dgemv(math::CblasNoTrans, 1, dmat, sol, 0, mul);
-        math::blas_daxpy(-1, rhs, mul);
-        double norm = sqrt(math::blas_dnrm2(mul) / NR);
-        std::cout << " s, rmserr=" << norm << std::flush;
+        math::blas_dgemv(math::CblasNoTrans, 1, tmat, sol, 0, cul);
+        math::blas_daxpy(-1, chs, cul);
+        double normo = sqrt(math::blas_dnrm2(cul) / NC);
+        std::cout << " s, rmserr=" << normo << std::flush;
         // check that U S V^T = original matrix
         math::Matrix<double> S(NR, NR, 0);
         for(unsigned int k=0; k<NR; k++)  S(k, k) = vS[k];
-        math::Matrix<double> tmp(NR, NR);
+        math::Matrix<double> tmp(NC, NR);
+        math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, U, S, 0, tmp);
+        S = math::Matrix<double>(NC, NR);
+        math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, tmp, V, 0, S);
+        math::blas_daxpy(-1, tmat, S);
+        double norm2o = sqrt(math::blas_dnrm2(S)) / NR;
+        std::cout << ", |M - U S V^T| = " << norm2o << '\n';
+
+        // square matrix
+        math::SVDecomp sv(dmat);
+        sol = math::SVDecomp(sv).solve(rhs);
+        U = sv.U();
+        V = sv.V();
+        vS= sv.S();
+        std::cout << "SV, again: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter);
+        math::blas_dgemv(math::CblasNoTrans, 1, dmat, sol, 0, mul);
+        math::blas_daxpy(-1, rhs, mul);
+        double norms = sqrt(math::blas_dnrm2(mul) / NR);
+        std::cout << " s, rmserr=" << norms << std::flush;
+        // check that U S V^T = original matrix
+        S = math::Matrix<double>(NR, NR, 0);
+        for(unsigned int k=0; k<NR; k++)  S(k, k) = vS[k];
+        tmp = math::Matrix<double>(NR, NR);
         math::blas_dgemm(math::CblasNoTrans, math::CblasNoTrans, 1, U, S, 0, tmp);
         math::blas_dgemm(math::CblasNoTrans, math::CblasTrans, 1, tmp, V, 0, S);
         math::blas_daxpy(-1, dmat, S);
-        double norm2 = sqrt(math::blas_dnrm2(S)) / NR;
-        std::cout << ", |M - U S V^T| = " << norm2 << ", cond.number = " <<
-            vS.front() / vS.back();
-        ok &= test(norm < 1e-9 && norm2 < 1e-9);  // quite a loose tolerance, indulging the Intel compiler
+        double norm2s = sqrt(math::blas_dnrm2(S)) / NR;
+        std::cout << ", |M - U S V^T| = " << norm2s;
+        ok &= test(norms < 1e-13 && norm2s < 1e-13 && normo > 0.01 && norm2o < 1e-13);
     }
 
     {   // tridiagonal systems
@@ -229,7 +346,7 @@ int main()
         math::blas_dgemv(math::CblasNoTrans, 1., spmat, sol, 0., prod);
         math::blas_daxpy(-1, rhs, prod);
         norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
+        std::cout << "Sparse LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
     }
@@ -264,7 +381,7 @@ int main()
         prod = rhs;
         math::blas_dgemv(math::CblasNoTrans, 1., spmat, sol, -1., prod);
         norm = sqrt(math::blas_dnrm2(prod) / NR);
-        std::cout << "SparseLU : " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
+        std::cout << "Sparse LU: " << ((std::clock()-tbegin)*1.0/CLOCKS_PER_SEC/niter) <<
             " s, rmserr=" << norm;
         ok &= test(norm < 1e-15);
     }

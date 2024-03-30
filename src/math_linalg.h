@@ -1,6 +1,6 @@
 /** \file   math_linalg.h
     \brief  linear algebra routines
-    \date   2015-2017
+    \date   2015-2024
     \author Eugene Vasiliev
 
     This module defines the matrix class and the interface for linear algebra routines.
@@ -284,6 +284,9 @@ struct Matrix: public IMatrixDense<NumT> {
     /// copy constructor from a band matrix
     explicit Matrix(const BandMatrix<NumT>& src);
 
+    /// copy constructor from anything matrix-like (least specialized)
+    explicit Matrix(const IMatrix<NumT>& src);
+
     /// create a matrix from a list of triplets (row,column,value)
     Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values);
 
@@ -494,10 +497,10 @@ public:
 };
 
 
-/** Cholesky decomposition of a symmetric positive-definite matrix M
+/** Cholesky decomposition of a symmetric positive-definite square matrix M
     into a product of L L^T, where L is a lower triangular matrix.
     Once constructed, it be used for solving a linear system `M x = rhs` multiple times with
-    different rhs; the cost of construction is roughty twice lower than LUDecomp.
+    different rhs; the cost of construction is roughly twice lower than LUDecomp.
 */
 class CholeskyDecomp {
     void* impl;  ///< opaque implementation details
@@ -523,6 +526,32 @@ public:
     Matrix<double> L() const;
 
     /// Solve the matrix equation `M x = rhs` for x, using the Cholesky decomposition of matrix M
+    std::vector<double> solve(const std::vector<double>& rhs) const;
+};
+
+
+class QRDecomp {
+    void* impl;  ///< opaque implementation details
+public:
+    QRDecomp() : impl(NULL) {}
+    QRDecomp(const QRDecomp& src);
+    QRDecomp& operator=(QRDecomp src) {
+        swap(*this, src);
+        return *this;
+    }
+    friend void swap(QRDecomp& first, QRDecomp& second) {
+        using std::swap;
+        swap(first.impl, second.impl);
+    }
+    ~QRDecomp();
+
+    /// Construct a decomposition for the given matrix M
+    explicit QRDecomp(const Matrix<double>& M);
+
+    /// retrieve the orthogonal matrix Q and the upper triangular matrix R from the decomposition
+    void QR(Matrix<double>& Q, Matrix<double>& R) const;
+
+    /// Solve the matrix equation `M x = rhs` for x, using the QR of matrix M:
     std::vector<double> solve(const std::vector<double>& rhs) const;
 };
 

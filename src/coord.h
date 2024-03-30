@@ -618,7 +618,7 @@ template<> struct PosDeriv2T<Axi, Cyl>{
 };
 
 ///@}
-/// \name   Convenience arithmetic routines for gradients/hessians in various coordinate systems
+/// \name   Convenience arithmetic routines for data types in various coordinate systems
 ///@{
 
 /// clear the content of a gradient
@@ -628,6 +628,10 @@ void clear(GradT<CoordT>& grad);
 /// clear the content of a hessian
 template<typename CoordT>
 void clear(HessT<CoordT>& hess);
+
+/// linear combination of two position/velocity points:  A := a*A + b*B
+template<typename CoordT>
+void combine(PosVelT<CoordT>& A, const PosVelT<CoordT>& B, double a=1, double b=1);
 
 /// linear combination of two gradients:  A := a*A + b*B
 template<typename CoordT>
@@ -657,6 +661,17 @@ inline void clear(HessCyl& hess)
 template<>
 inline void clear(HessSph& hess)
 { hess.dr2 = hess.dtheta2 = hess.dphi2 = hess.drdtheta = hess.drdphi = hess.dthetadphi = 0; }
+
+template<>
+inline void combine(PosVelCar& A, const PosVelCar& B, double a, double b)
+{
+    A.x  = a * A.x  + b * B.x;
+    A.y  = a * A.y  + b * B.y;
+    A.z  = a * A.z  + b * B.z;
+    A.vx = a * A.vx + b * B.vx;
+    A.vy = a * A.vy + b * B.vy;
+    A.vz = a * A.vz + b * B.vz;
+}
 
 template<>
 inline void combine(GradCar& A, const GradCar& B, double a, double b)

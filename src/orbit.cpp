@@ -33,14 +33,14 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
         for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
             double tout = sign * samplingInterval * iout + t0;
             if(sign * tout >= sign * tbegin - dtroundoff && sign * tout <= sign * tend + dtroundoff)
-                trajectory[iout] = std::pair<coord::PosVelCar, double>(orbint.getSol(tout), tout);
+                trajectory[iout] = Trajectory::value_type(orbint.getSol(tout), tout);
         }
     } else {
         // store trajectory at every integration timestep
         if(trajectory.empty())  // add the initial point
-            trajectory.push_back(std::pair<coord::PosVelCar, double>(orbint.getSol(tbegin), tbegin));
+            trajectory.push_back(Trajectory::value_type(orbint.getSol(tbegin), tbegin));
         // add the current point (at the end of the timestep)
-        trajectory.push_back(std::pair<coord::PosVelCar, double>(orbint.getSol(tend), tend));
+        trajectory.push_back(Trajectory::value_type(orbint.getSol(tend), tend));
     }
     return true;
 }
@@ -172,7 +172,8 @@ void OrbitIntegrator<coord::Car>::eval(const double time, const double x[], doub
     if(Omega)
         math::sincos(Omega * time, sa, ca);
     // it appears to be more efficient to perform the integration in an inertial frame,
-    // and rotate the potential instead
+    // and rotate the potential instead (same as adding the Rotating modifier to the potential,
+    // but storing the resulting orbit in the rotating frame)
     coord::GradCar grad;
     potential.eval(coord::PosCar(x[0]*ca + x[1]*sa, x[1]*ca - x[0]*sa, x[2]), NULL, &grad, NULL, time);
     // time derivative of position

@@ -1,4 +1,5 @@
 #include "math_ode.h"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #ifndef _MSC_VER
@@ -403,9 +404,11 @@ double OdeSolverDOP853::getSol(double t, unsigned int i) const
 /** Numerical solution of linear second-order ODE systems */
 
 template<int NDIM>
-Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem) :
-    BaseOde2Solver(_odeSystem), newstep(true)
+Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem, unsigned int _numVectors) :
+    BaseOde2Solver(_odeSystem, _numVectors), state(5 * NDIM * numVectors), newstep(true)
 {
+    if(numVectors <= 0)
+        throw std::invalid_argument("Ode2SolverGL3: invalid number of vectors");
     if(odeSystem.size() != NDIM * 2)
         throw std::invalid_argument("Ode2SolverGL3: invalid size of the ODE system");
 }
@@ -413,11 +416,9 @@ Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem) :
 template<int NDIM>
 void Ode2SolverGL3<NDIM>::init(const double stateNew[], double timeNew)
 {
-    for(int d=0; d<NDIM; d++) {
-        state[d] = stateNew[d];
-        state[d+NDIM] = stateNew[d+NDIM];
-        p[d] = q[d] = r[d] = 0;
-    }
+    state.assign(5*NDIM * numVectors, 0);
+    for(unsigned int v=0; v<numVectors; v++)
+        std::copy(stateNew + v * 2*NDIM, stateNew + (v+1) * 2*NDIM, state.begin() + v * 5*NDIM);
     if(timeNew==timeNew)
         time = timeNew;
     newstep = true;
@@ -427,11 +428,19 @@ template<int NDIM>
 double Ode2SolverGL3<NDIM>::getSol(double t, unsigned int i) const
 {
     double T = t - time;  // expected to be <=0, i.e. interpolating on the previous timestep
-    if(i < (unsigned int)NDIM)  // i-th component of x(t)
-        return state[i] + T * (state[i+NDIM] + T * (p[i] + T * (q[i] + T * r[i])));
-    else if(i < (unsigned int)NDIM*2)  // (i-NDIM)'th component of dx(t)/dt
-        return state[i] + T * (2*p[i-NDIM] + T * (3*q[i-NDIM] + T * 4*r[i-NDIM]));
-    throw std::out_of_range("Ode2Solver: element index out of range");
+    unsigned int vec = i / (2*NDIM);  // index of the requested vector
+    if(vec >= numVectors)
+        throw std::out_of_range("Ode2SolverGL3: element index out of range");
+    i -= vec * 2*NDIM;          // index of the requested element in the given vector
+    if(T==0)  // fast track: no interpolation needed, just copy the element of the state vector
+        return state[vec * 5*NDIM + i];
+    unsigned int d = i % NDIM;  // index of the requested dimension in either position or velocity
+    const double *x = &state[vec * 5*NDIM + d], *xdot = x+NDIM,  // state vector (pos, vel)
+        *p = xdot+NDIM, *q = p+NDIM, *r = q+NDIM;  // higher-order interpolation coefficients
+    if(i == d)  // d-th component of x(t)
+        return (*x) + T * ((*xdot) + T * ((*p) + T * ((*q) + T * (*r))));
+    else        // d-th component of dx(t)/dt
+        return (*xdot) + T * (2 * (*p) + T * (3 * (*q) + T * 4 * (*r)));
 }
 
 template<int NDIM>
@@ -497,93 +506,104 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     // the updated coefs are then used for the next point h_{k+1}, and then the whole iteration
     // cycle is repeated a few times (three seems to be enough).
 
+    // storage for temporary arrays defined below
+    const int tempSize = NDIM * 8;
+    double *temp = static_cast<double*>(alloca(tempSize * sizeof(double)));
     // approximate values of x and xdot at the current iteration and the current collocation point h_k
-    double xh[NDIM], dh[NDIM];
-    // values of xdot at the beginning of the current timestep
-    const double *d0 = &state[NDIM];
+    double *xh = temp, *dh = temp + NDIM;
     // pre-computed values of x_prev[d] + x_prev'[d] * dt * h_{0,1,2}
-    double x0[NDIM], x1[NDIM], x2[NDIM];
+    double *x0 = temp + 2*NDIM, *x1 = temp + 3*NDIM, *x2 = temp + 4*NDIM;
     // polynomial coefficients to be calculated
-    double u[NDIM], v[NDIM], w[NDIM];
-    for(int d=0; d<NDIM; d++) {
-        x0[d] = state[d] + d0[d] * dt * h0;
-        x1[d] = state[d] + d0[d] * dt * h1;
-        x2[d] = state[d] + d0[d] * dt * h2;
-        // predict the polynomial coefs in x'' from the previous timestep
-        double Q = dt*q[d], R = dt2*r[d];
-        u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R;
-        v[d] = 6  * Q + 12*(h0+h1) * R;
-        w[d] = 12 * R;
+    double *u = temp + 5*NDIM, *v = temp + 6*NDIM, *w = temp + 7*NDIM;
+
+    // process each vector independently
+    for(unsigned int vec=0; vec<numVectors; vec++) {
+        // values of x and xdot at the beginning of the current timestep
+        double *x = &state[vec * 5*NDIM], *xdot = x + NDIM;
+        // values of higher-order interpolation coefficients at the beginning of the timestep
+        double *p = xdot + NDIM, *q = p + NDIM, *r = q + NDIM;
+        for(int d=0; d<NDIM; d++) {
+            x0[d] = x[d] + xdot[d] * dt * h0;
+            x1[d] = x[d] + xdot[d] * dt * h1;
+            x2[d] = x[d] + xdot[d] * dt * h2;
+            // predict the polynomial coefs in x'' from the previous timestep
+            double Q = dt*q[d], R = dt2*r[d];
+            u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R;
+            v[d] = 6  * Q + 12*(h0+h1) * R;
+            w[d] = 12 * R;
+        }
+
+        // iteratively find the coefficients u_d, v_d, w_d for each component of vector x
+        const int NUMITER = newstep ? 6 : 3;
+        for(int i=0; i<NUMITER; i++) {
+            // consider each collocation point h_k in turn, and use it to update u, v, w (one by one)
+
+            // h_0 is used for calculating u
+            // first predict the values of x and xdot at time h_0
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x0  [d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d]);
+                dh[d] = xdot[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d]);
+            }
+            // then compute the RHS at time h_0 and calculate u
+            for(int d=0; d<NDIM; d++) {
+                // second derivative of d'th component (RHS of the ODE) at the current point
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
+                u[d] = rhs;
+            }
+
+            // h_1 is used for calculating v (third derivative of d'th component)
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x1  [d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d]);
+                dh[d] = xdot[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d]);
+            }
+            for(int d=0; d<NDIM; d++) {
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
+                v[d] = (rhs - u[d]) * mvu;
+            }
+
+            // finally, h_2 is used for calculating w (fourth derivative)
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x2  [d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d]);
+                dh[d] = xdot[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d]);
+            }
+            for(int d=0; d<NDIM; d++) {
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
+                w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
+            }
+        }
+
+        // now that the coefficients u, v, w are known,
+        // compute the new values of x_d, xdot_d at the end of timestep (h=1)
+        // and the coefficients p, q, r for interpolating the solution at any moment of time
+        // inside the completed timestep
+        for(int d=0; d<NDIM; d++) {
+            double
+            P = mpw * w[d] + mpv * v[d] + mpu * u[d],
+            Q = mqw * w[d] + mqv * v[d],
+            R = mrw * w[d];
+            p[d] = P;
+            q[d] = Q * idt;
+            r[d] = R * idt2;
+            x[d]    += (    P - 2 * Q + 3 * R) * dt2 + xdot[d] * dt;
+            xdot[d] += (2 * P - 3 * Q + 4 * R) * dt;
+        }
     }
-
-    // iteratively find the coefficients u_d, v_d, w_d for each component of vector x
-    const int NUMITER = newstep ? 6 : 3;
-    for(int i=0; i<NUMITER; i++) {
-        // consider each collocation point h_k in turn, and use it to update u, v, w (one by one)
-
-        // h_0 is used for calculating u
-        // first predict the values of x and xdot at time h_0
-        for(int d=0; d<NDIM; d++) {
-            xh[d] = x0[d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d]);
-            dh[d] = d0[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d]);
-        }
-        // then compute the RHS at time h_0 and calculate u
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;  // second derivative of d-th component (RHS of the ODE) at the current point
-            for(int j=0; j<NDIM; j++)
-                rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
-            u[d] = rhs;
-        }
-
-        // h_1 is used for calculating v
-        for(int d=0; d<NDIM; d++) {
-            xh[d] = x1[d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d]);
-            dh[d] = d0[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d]);
-        }
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;
-            for(int j=0; j<NDIM; j++)
-                rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
-            v[d] = (rhs - u[d]) * mvu;
-        }
-
-        // finally, h_2 is used for calculating w
-        for(int d=0; d<NDIM; d++) {
-            xh[d] = x2[d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d]);
-            dh[d] = d0[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d]);
-        }
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;
-            for(int j=0; j<NDIM; j++)
-                rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
-            w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
-        }
-    }
-
-    // now that the coefficients u, v, w are known,
-    // compute the new values of x_d, x_d' at the end of timestep (h=1)
-    // and the coefficients p, q, r for interpolating the solution at any moment of time
-    // inside the completed timestep
-    for(int d=0; d<NDIM; d++) {
-        double
-        P = mpw * w[d] + mpv * v[d] + mpu * u[d],
-        Q = mqw * w[d] + mqv * v[d],
-        R = mrw * w[d];
-        p[d] = P;
-        q[d] = Q * idt;
-        r[d] = R * idt2;
-        state[d]      += (    P - 2 * Q + 3 * R) * dt2 + d0[d] * dt;
-        state[d+NDIM] += (2 * P - 3 * Q + 4 * R) * dt;
-    }
-
     time += dt;
     newstep = false;
 }
 
 template<int NDIM>
-Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem) :
-    BaseOde2Solver(_odeSystem), newstep(true)
+Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem, unsigned int _numVectors) :
+    BaseOde2Solver(_odeSystem, _numVectors), newstep(true)
 {
+    if(numVectors <= 0)
+        throw std::invalid_argument("Ode2SolverGL4: invalid number of vectors");
     if(odeSystem.size() != NDIM * 2)
         throw std::invalid_argument("Ode2SolverGL4: invalid size of the ODE system");
 }
@@ -591,11 +611,9 @@ Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem) :
 template<int NDIM>
 void Ode2SolverGL4<NDIM>::init(const double stateNew[], double timeNew)
 {
-    for(int d=0; d<NDIM; d++) {
-        state[d] = stateNew[d];
-        state[d+NDIM] = stateNew[d+NDIM];
-        p[d] = q[d] = r[d] = s[d] = 0;
-    }
+    state.assign(6*NDIM * numVectors, 0);
+    for(unsigned int v=0; v<numVectors; v++)
+        std::copy(stateNew + v * 2*NDIM, stateNew + (v+1) * 2*NDIM, state.begin() + v * 6*NDIM);
     if(timeNew==timeNew)
         time = timeNew;
     newstep = true;
@@ -605,11 +623,19 @@ template<int NDIM>
 double Ode2SolverGL4<NDIM>::getSol(double t, unsigned int i) const
 {
     double T = t - time;  // expected to be <=0, i.e. interpolating on the previous timestep
-    if(i < (unsigned int)NDIM)  // i-th component of x(t)
-        return state[i] + T * (state[i+NDIM] + T * (p[i] + T * (q[i] + T * (r[i] + T * s[i]))));
-    else if(i < (unsigned int)NDIM*2)  // (i-NDIM)'th component of dx(t)/dt
-        return state[i] + T * (2*p[i-NDIM] + T * (3*q[i-NDIM] + T * (4*r[i-NDIM] + T * 5*s[i-NDIM])));
-    throw std::out_of_range("Ode2Solver: element index out of range");
+    unsigned int vec = i / (2*NDIM);  // index of the requested vector
+    if(vec >= numVectors)
+        throw std::out_of_range("Ode2SolverGL4: element index out of range");
+    i -= vec * 2*NDIM;          // index of the requested element in the given vector
+    if(T==0)  // fast track: no interpolation needed, just copy the element of the state vector
+        return state[vec * 6*NDIM + i];
+    unsigned int d = i % NDIM;  // index of the requested dimension in either position or velocity
+    const double *x = &state[vec * 6*NDIM + d], *xdot = x+NDIM,  // state vector (pos, vel)
+        *p = xdot+NDIM, *q = p+NDIM, *r = q+NDIM, *s = r+NDIM;   // higher-order interpolation coefs
+    if(i == d)  // d-th component of x(t)
+        return (*x) + T * ((*xdot) + T * ((*p) + T * ((*q) + T * ((*r) + T * (*s)))));
+    else        // d-th component of dx(t)/dt
+        return (*xdot) + T * (2 * (*p) + T * (3 * (*q) + T * 4 * ((*r) + T * 5 * (*s))));
 }
 
 template<int NDIM>
@@ -685,99 +711,109 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
     // x_d''(h) = u_d + (h-h0) * (v_d + (h-h1) * (w_d + (h-h2) * z_d))
     // the procedure is analogous to the 6-th order method.
 
+    // storage for temporary arrays defined below
+    const int tempSize = NDIM * 10;
+    double *temp = static_cast<double*>(alloca(tempSize * sizeof(double)));
     // approximate values of x and xdot at the current iteration and the current collocation point h_k
-    double xh[NDIM], dh[NDIM];
-    // value of xdot at the beginning of the current timestep (alias)
-    const double *d0 = &state[NDIM];
+    double *xh = temp, *dh = temp + NDIM;
     // pre-computed values of x_prev[d] + x_prev'[d] * dt * h_{0,1,2,3}
-    double x0[NDIM], x1[NDIM], x2[NDIM], x3[NDIM];
+    double *x0 = temp + 2*NDIM, *x1 = temp + 3*NDIM, *x2 = temp + 4*NDIM, *x3 = temp + 5*NDIM;
     // polynomial coefficients to be calculated
-    double u[NDIM], v[NDIM], w[NDIM], z[NDIM];
-    for(int d=0; d<NDIM; d++) {
-        x0[d] = state[d] + d0[d] * dt * h0;
-        x1[d] = state[d] + d0[d] * dt * h1;
-        x2[d] = state[d] + d0[d] * dt * h2;
-        x3[d] = state[d] + d0[d] * dt * h3;
-        // predict the polynomial coefs in x'' from the previous timestep
-        double Q = dt*q[d], R = dt2*r[d], S = dt3*s[d];
-        u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R + 20*h0*h0*h0 * S;
-        v[d] = 6  * Q + 12*(h0+h1) * R + 20*(h0*h0+h0*h1+h1*h1) * S;
-        w[d] = 12 * R + 20*(h0+h1+h2) * S,
-        z[d] = 20 * S;
-    }
+    double *u = temp + 6*NDIM, *v = temp + 7*NDIM, *w = temp + 8*NDIM, *z = temp + 9*NDIM;
 
-    // iteratively find the coefficients u_d, v_d, w_d, z_d for each component of vector x
-    const int NUMITER = newstep ? 8 : 4;
-    for(int i=0; i<NUMITER; i++) {
-        // consider each collocation point h_k in turn, and use it to update u, v, w, z (one by one)
-
-        // h_0 is used for calculating u
-        // first predict the values of x and xdot at time h_0
+    // process each vector independently
+    for(unsigned int vec=0; vec<numVectors; vec++) {
+        // values of x and xdot at the beginning of the current timestep
+        double *x = &state[vec * 6*NDIM], *xdot = x + NDIM;
+        // values of higher-order interpolation coefficients at the beginning of the timestep
+        double *p = xdot + NDIM, *q = p + NDIM, *r = q + NDIM, *s = r + NDIM;
         for(int d=0; d<NDIM; d++) {
-            xh[d] = x0[d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d] + sz0 * z[d]);
-            dh[d] = d0[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d] + dz0 * z[d]);
-        }
-        // then compute the RHS at time h_0 and calculate u
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;  // second derivative of d-th component (RHS of the ODE) at the current point
-            for(int j=0; j<NDIM; j++)
-                rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
-            u[d] = rhs;
+            x0[d] = x[d] + xdot[d] * dt * h0;
+            x1[d] = x[d] + xdot[d] * dt * h1;
+            x2[d] = x[d] + xdot[d] * dt * h2;
+            x3[d] = x[d] + xdot[d] * dt * h3;
+            // predict the polynomial coefs in x'' from the previous timestep
+            double Q = dt*q[d], R = dt2*r[d], S = dt3*s[d];
+            u[d] = 2  * p[d] + 6*h0 * Q + 12*h0*h0 * R + 20*h0*h0*h0 * S;
+            v[d] = 6  * Q + 12*(h0+h1) * R + 20*(h0*h0+h0*h1+h1*h1) * S;
+            w[d] = 12 * R + 20*(h0+h1+h2) * S,
+            z[d] = 20 * S;
         }
 
-        // h_1 is used for calculating v
-        for(int d=0; d<NDIM; d++) {
-            xh[d] = x1[d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d] + sz1 * z[d]);
-            dh[d] = d0[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d] + dz1 * z[d]);
-        }
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;
-            for(int j=0; j<NDIM; j++)
-                rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
-            v[d] = (rhs - u[d]) * mvu;
+        // iteratively find the coefficients u_d, v_d, w_d, z_d for each component of vector x
+        const int NUMITER = newstep ? 8 : 4;
+        for(int i=0; i<NUMITER; i++) {
+            // consider each collocation point h_k in turn, and use it to update u, v, w, z (one by one)
+
+            // h_0 is used for calculating u
+            // first predict the values of x and xdot at time h_0
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x0  [d] + dt2 * (su0 * u[d] + sv0 * v[d] + sw0 * w[d] + sz0 * z[d]);
+                dh[d] = xdot[d] + dt  * (du0 * u[d] + dv0 * v[d] + dw0 * w[d] + dz0 * z[d]);
+            }
+            // then compute the RHS at time h_0 and calculate u
+            for(int d=0; d<NDIM; d++) {
+                // second derivative of d-th component (RHS of the ODE) at the current point
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a0[d * NDIM + j] * xh[j] + b0[d * NDIM + j] * dh[j];
+                u[d] = rhs;
+            }
+
+            // h_1 is used for calculating v
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x1  [d] + dt2 * (su1 * u[d] + sv1 * v[d] + sw1 * w[d] + sz1 * z[d]);
+                dh[d] = xdot[d] + dt  * (du1 * u[d] + dv1 * v[d] + dw1 * w[d] + dz1 * z[d]);
+            }
+            for(int d=0; d<NDIM; d++) {
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a1[d * NDIM + j] * xh[j] + b1[d * NDIM + j] * dh[j];
+                v[d] = (rhs - u[d]) * mvu;
+            }
+
+            // h_2 is used for calculating w
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x2  [d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d] + sz2 * z[d]);
+                dh[d] = xdot[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d] + dz2 * z[d]);
+            }
+            for(int d=0; d<NDIM; d++) {
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
+                w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
+            }
+
+            // finally, h_3 is used for calculating z
+            for(int d=0; d<NDIM; d++) {
+                xh[d] = x3  [d] + dt2 * (su3 * u[d] + sv3 * v[d] + sw3 * w[d] + sz3 * z[d]);
+                dh[d] = xdot[d] + dt  * (du3 * u[d] + dv3 * v[d] + dw3 * w[d] + dz3 * z[d]);
+            }
+            for(int d=0; d<NDIM; d++) {
+                double rhs = 0;
+                for(int j=0; j<NDIM; j++)
+                    rhs += a3[d * NDIM + j] * xh[j] + b3[d * NDIM + j] * dh[j];
+                z[d] = (rhs - u[d]) * mzu - v[d] * mzv - w[d] * mzw;
+            }
         }
 
-        // h_2 is used for calculating w
+        // now that the coefficients u, v, w, z are known,
+        // compute the new values of x_d, x_d' at the end of timestep (h=1)
+        // and the coefficients p, q, r, s for interpolating the solution at any moment of time
+        // inside the completed timestep
         for(int d=0; d<NDIM; d++) {
-            xh[d] = x2[d] + dt2 * (su2 * u[d] + sv2 * v[d] + sw2 * w[d] + sz2 * z[d]);
-            dh[d] = d0[d] + dt  * (du2 * u[d] + dv2 * v[d] + dw2 * w[d] + dz2 * z[d]);
+            double
+            P = mpz * z[d] + mpw * w[d] + mpv * v[d] + mpu * u[d],
+            Q = mqz * z[d] + mqw * w[d] + mqv * v[d],
+            R = mrz * z[d] + mrw * w[d],
+            S = msz * z[d];
+            p[d] = P;
+            q[d] = Q * idt;
+            r[d] = R * idt2;
+            s[d] = S * idt3;
+            x[d]    += (    P - 2 * Q + 3 * R - 4 * S) * dt2 + xdot[d] * dt;
+            xdot[d] += (2 * P - 3 * Q + 4 * R - 5 * S) * dt;
         }
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;
-            for(int j=0; j<NDIM; j++)
-                rhs += a2[d * NDIM + j] * xh[j] + b2[d * NDIM + j] * dh[j];
-            w[d] = (rhs - u[d]) * mwu - v[d] * mwv;
-        }
-
-        // finally, h_3 is used for calculating z
-        for(int d=0; d<NDIM; d++) {
-            xh[d] = x3[d] + dt2 * (su3 * u[d] + sv3 * v[d] + sw3 * w[d] + sz3 * z[d]);
-            dh[d] = d0[d] + dt  * (du3 * u[d] + dv3 * v[d] + dw3 * w[d] + dz3 * z[d]);
-        }
-        for(int d=0; d<NDIM; d++) {
-            double rhs = 0;
-            for(int j=0; j<NDIM; j++)
-                rhs += a3[d * NDIM + j] * xh[j] + b3[d * NDIM + j] * dh[j];
-            z[d] = (rhs - u[d]) * mzu - v[d] * mzv - w[d] * mzw;
-        }
-    }
-
-    // now that the coefficients u, v, w, z are known,
-    // compute the new values of x_d, x_d' at the end of timestep (h=1)
-    // and the coefficients p, q, r, s for interpolating the solution at any moment of time
-    // inside the completed timestep
-    for(int d=0; d<NDIM; d++) {
-        double
-        P = mpz * z[d] + mpw * w[d] + mpv * v[d] + mpu * u[d],
-        Q = mqz * z[d] + mqw * w[d] + mqv * v[d],
-        R = mrz * z[d] + mrw * w[d],
-        S = msz * z[d];
-        p[d] = P;
-        q[d] = Q * idt;
-        r[d] = R * idt2;
-        s[d] = S * idt3;
-        state[d]      += (    P - 2 * Q + 3 * R - 4 * S) * dt2 + d0[d] * dt;
-        state[d+NDIM] += (2 * P - 3 * Q + 4 * R - 5 * S) * dt;
     }
 
     time += dt;

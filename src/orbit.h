@@ -78,6 +78,9 @@ public:
 /** Shared pointer to a runtime function */
 typedef shared_ptr<BaseRuntimeFnc> PtrRuntimeFnc;
 
+/** Array of pairs: position/velocity in cartesian coordinates and timestamp */
+typedef std::vector< std::pair<coord::PosVelCar, double> > Trajectory;
+
 /** Runtime function that records the orbit trajectory either at every integration timestep,
     or at regular intervals of time (unrelated to the internal timestep of the orbit integrator).
 */
@@ -92,13 +95,13 @@ class RuntimeTrajectory: public BaseRuntimeFnc {
     /// if samplingInterval is zero, then the trajectory is stored at the end of every timestep,
     /// otherwise at regular intervals of time, and if samplingInterval is infinity, then only
     /// a single (last point) is recorded, otherwise 0th point contains the initial conditions.
-    std::vector< std::pair<coord::PosVelCar, double> >& trajectory;
+    Trajectory& trajectory;
 
     double t0;  ///< initial time (recorded at the beginning of the first timestep)
 
 public:
     RuntimeTrajectory(BaseOrbitIntegrator& orbint,
-        double _samplingInterval, std::vector<std::pair<coord::PosVelCar, double> >& _trajectory)
+        double _samplingInterval, Trajectory& _trajectory)
     :
         BaseRuntimeFnc(orbint), samplingInterval(_samplingInterval), trajectory(_trajectory), t0(NAN)
     {}
@@ -269,7 +272,7 @@ template<> void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, do
                 an array of pairs of position/velocity points and associated moments of time.
     \throw      an exception if something goes wrong.
 */
-inline std::vector<std::pair<coord::PosVelCar, double> > integrateTraj(
+inline Trajectory integrateTraj(
     const coord::PosVelCar& initialConditions,
     const double totalTime,
     const double samplingInterval,
@@ -278,7 +281,7 @@ inline std::vector<std::pair<coord::PosVelCar, double> > integrateTraj(
     const OrbitIntParams& params = OrbitIntParams(),
     const double startTime = 0)
 {
-    std::vector<std::pair<coord::PosVelCar, double> > output;
+    Trajectory output;
     if(samplingInterval > 0)
         // reserve space for the trajectory, including one extra point for the final state
         output.reserve((totalTime>=0 ? totalTime : -totalTime) * (1+1e-15) / samplingInterval + 1);

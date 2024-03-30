@@ -405,6 +405,21 @@ Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
     }
 }
 
+// copy constructor from anything matrix-like (same as from sparse matrix)
+template<typename NumT>
+Matrix<NumT>::Matrix(const IMatrix<NumT>& src) :
+    IMatrixDense<NumT>(src.rows(), src.cols()),
+    impl(new typename Type<Matrix<NumT> >::T(src.rows(), src.cols()))
+{
+    mat(*this).fill(0);
+    size_t numelem = src.size();
+    for(size_t k=0; k<numelem; k++) {
+        size_t i, j;
+        NumT v = src.elem(k, i, j);
+        mat(*this)(i, j) = v;
+    }
+}
+
 // constructor from triplets
 template<typename NumT>
 Matrix<NumT>::Matrix(size_t nRows, size_t nCols, const std::vector<Triplet>& values) :
@@ -722,11 +737,18 @@ typedef Eigen::PartialPivLU< Type< Matrix<double> >::T> LUDecompImpl;
 typedef Eigen::SparseLU< Type< SparseMatrix<double> >::T> SparseLUDecompImpl;
 
 LUDecomp::LUDecomp(const Matrix<double>& M) :
-    sparse(false), impl(new LUDecompImpl(mat(M))) {}
+    sparse(false), impl(NULL)
+{
+    if(M.rows() != M.cols())
+        throw std::runtime_error("LUDecomp needs a square matrix");
+    impl = new LUDecompImpl(mat(M));
+}
 
 LUDecomp::LUDecomp(const SparseMatrix<double>& M) :
     sparse(true), impl(NULL)
 {
+    if(M.rows() != M.cols())
+        throw std::runtime_error("LUDecomp needs a square matrix");
     SparseLUDecompImpl* LU = new SparseLUDecompImpl();
     LU->compute(mat(M));
     if(LU->info() != Eigen::Success) {
@@ -765,12 +787,14 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
 
 
 /// Cholesky decomposition for dense matrices
-
 typedef Eigen::LLT< Type< Matrix<double> >::T, Eigen::Lower> CholeskyDecompImpl;
 
 CholeskyDecomp::CholeskyDecomp(const Matrix<double>& M) :
-    impl(new CholeskyDecompImpl(mat(M))) 
+    impl(NULL)
 {
+    if(M.rows() != M.cols())
+        throw std::runtime_error("CholeskyDecomp needs a square matrix");
+    impl = new CholeskyDecompImpl(mat(M));
     if(static_cast<const CholeskyDecompImpl*>(impl)->info() != Eigen::Success)
         throw std::domain_error("CholeskyDecomp failed");
 }
@@ -795,6 +819,36 @@ std::vector<double> CholeskyDecomp::solve(const std::vector<double>& rhs) const 
         throw std::runtime_error("CholeskyDecomp not initialized");
     return toStdVector(static_cast<const CholeskyDecompImpl*>(impl)->solve(toEigenVector(rhs)));
 }
+
+
+/// QR decomposition for dense matrices
+typedef Eigen::HouseholderQR< Type< Matrix<double> >::T> QRDecompImpl;
+
+QRDecomp::QRDecomp(const Matrix<double>& M) :
+    impl(new QRDecompImpl(mat(M))) {}
+
+QRDecomp::~QRDecomp() { delete static_cast<QRDecompImpl*>(impl); }
+
+QRDecomp::QRDecomp(const QRDecomp& src) :
+    impl(new QRDecompImpl(*static_cast<const QRDecompImpl*>(src.impl))) {}
+
+void QRDecomp::QR(Matrix<double>& Q, Matrix<double>& R) const
+{
+    if(!impl)
+        throw std::runtime_error("QRDecomp not initialized");
+    const Type< Matrix<double> >::T& mQR = static_cast<const QRDecompImpl*>(impl)->matrixQR();
+    Q = Matrix<double>(mQR.rows(), mQR.rows());
+    R = Matrix<double>(mQR.rows(), mQR.cols());
+    mat(Q) = static_cast<const QRDecompImpl*>(impl)->householderQ();
+    mat(R) = static_cast<const QRDecompImpl*>(impl)->matrixQR().triangularView<Eigen::Upper>();
+}
+
+std::vector<double> QRDecomp::solve(const std::vector<double>& rhs) const {
+    if(!impl)
+        throw std::runtime_error("QRDecomp not initialized");
+    return toStdVector(static_cast<const QRDecompImpl*>(impl)->solve(toEigenVector(rhs)));
+}
+
 
 /// Singular-value decomposition for dense matrices
 #if EIGEN_VERSION_AT_LEAST(3,3,0)
@@ -920,6 +974,20 @@ Matrix<NumT>::Matrix(const BandMatrix<NumT>& src) :
         ptrdiff_t cr = std::min<ptrdiff_t>(nRows-1, r+band);
         for(ptrdiff_t c = cl, m = r*width + cl-r+band; c <= cr; c++, m++)
             static_cast<NumT*>(impl)[r*nRows+c] = data[m];
+    }
+}
+
+// copy constructor from anything matrix-like (same as from sparse matrix)
+template<typename NumT>
+Matrix<NumT>::Matrix(const IMatrix<NumT>& src) :
+    IMatrixDense<NumT>(src.rows(), src.cols()), impl(xnew<NumT>(rows()*cols()))
+{
+    std::fill(static_cast<NumT*>(impl), static_cast<NumT*>(impl) + rows()*cols(), static_cast<NumT>(0));
+    size_t numelem = src.size();
+    for(size_t k=0; k<numelem; k++) {
+        size_t i, j;
+        NumT v = src.elem(k, i, j);
+        static_cast<NumT*>(impl)[i*cols()+j] = v;
     }
 }
 
@@ -1295,7 +1363,7 @@ template<> void blas_dgemv(CBLAS_TRANSPOSE TransA, double alpha, const SparseMat
         throw std::length_error("blas_dgemv: empty matrix");
 #ifdef HAVE_GSL_SPARSE
     CALL_FUNCTION_OR_THROW(
-        gsl_spblas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, static_cast<const gsl_spmatrix*>(A.impl),
+    gsl_spblas_dgemv((CBLAS_TRANSPOSE_t)TransA, alpha, static_cast<const gsl_spmatrix*>(A.impl),
         VecC(X), beta, Vec(Y)) )
 #else
     CALL_FUNCTION_OR_THROW(
@@ -1320,7 +1388,8 @@ template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
 }
 
 template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
-    double alpha, const SparseMatrix<double>& A, const SparseMatrix<double>& B, double beta, SparseMatrix<double>& C)
+    double alpha, const SparseMatrix<double>& A, const SparseMatrix<double>& B,
+    double beta, SparseMatrix<double>& C)
 {
     if(A.impl == NULL || B.impl == NULL || C.impl == NULL)
         throw std::length_error("blas_dgemv: empty matrix");
@@ -1340,16 +1409,18 @@ template<> void blas_dgemm(CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
         gsl_spmatrix_transpose_memcpy(trB, spB);
         spB = trB;
     }
-    gsl_spblas_dgemm(alpha, spA, spB, static_cast<gsl_spmatrix*>(C.impl));
+    CALL_FUNCTION_OR_THROW(
+    gsl_spblas_dgemm(alpha, spA, spB, static_cast<gsl_spmatrix*>(C.impl)) )
     if(TransA != CblasNoTrans)
         gsl_spmatrix_free(trA);
     if(TransB != CblasNoTrans)
         gsl_spmatrix_free(trB);
 #else
+    CALL_FUNCTION_OR_THROW(
     gsl_blas_dgemm((CBLAS_TRANSPOSE_t)TransA, (CBLAS_TRANSPOSE_t)TransB, alpha,
         MatC(static_cast<const double*>(A.impl), A.rows(), A.cols()),
         MatC(static_cast<const double*>(B.impl), B.rows(), B.cols()),
-        beta, Mat(static_cast <double*>(C.impl), C.rows(), C.cols()));
+        beta, Mat(static_cast <double*>(C.impl), C.rows(), C.cols())) )
 #endif
 }
 
@@ -1368,6 +1439,8 @@ struct LUDecompImpl {
     gsl_matrix* LU;
     gsl_permutation* perm;
     LUDecompImpl(const double* data, size_t rows, size_t cols) {
+        if(rows!=cols)
+            throw std::length_error("LUDecomp needs a square matrix");
         LU = gsl_matrix_alloc(rows, cols);
         perm = gsl_permutation_alloc(rows);
         if(!LU || !perm) {
@@ -1439,6 +1512,8 @@ std::vector<double> LUDecomp::solve(const std::vector<double>& rhs) const
 CholeskyDecomp::CholeskyDecomp(const Matrix<double>& M) :
     impl(NULL)
 {
+    if(M.rows()!=M.cols())
+        throw std::length_error("CholeskyDecomp needs a square matrix");
     gsl_matrix* L = gsl_matrix_alloc(M.rows(), M.cols());
     if(!L)
         throw std::bad_alloc();
@@ -1493,6 +1568,56 @@ std::vector<double> CholeskyDecomp::solve(const std::vector<double>& rhs) const
     return result;
 }
 
+/// QR decomposition implementation for GSL
+struct QRDecompImpl {
+    Matrix<double> mat;
+    std::vector<double> vec;
+};
+
+QRDecomp::QRDecomp(const Matrix<double>& M) :
+    impl(new QRDecompImpl())
+{
+    QRDecompImpl* qr = static_cast<QRDecompImpl*>(impl);
+    qr->mat = M;
+    qr->vec.resize(std::min(M.cols(), M.rows()));
+    CALL_FUNCTION_OR_THROW(gsl_linalg_QR_decomp(Mat(qr->mat), Vec(qr->vec)) )
+}
+
+QRDecomp::~QRDecomp() { delete static_cast<QRDecompImpl*>(impl); }
+
+QRDecomp::QRDecomp(const QRDecomp& src) :
+    impl(new QRDecompImpl(*static_cast<const QRDecompImpl*>(src.impl))) {}
+
+void QRDecomp::QR(Matrix<double>& Q, Matrix<double>& R) const
+{
+    if(!impl)
+        throw std::runtime_error("QRDecomp not initialized");
+    QRDecompImpl* qr = static_cast<QRDecompImpl*>(impl);
+    Q = Matrix<double>(qr->mat.rows(), qr->mat.rows());
+    R = Matrix<double>(qr->mat.rows(), qr->mat.cols());
+    gsl_linalg_QR_unpack(MatC(qr->mat), VecC(qr->vec), Mat(Q), Mat(R));
+}
+
+std::vector<double> QRDecomp::solve(const std::vector<double>& rhs) const
+{
+    if(!impl)
+        throw std::runtime_error("QRDecomp not initialized");
+    const QRDecompImpl* qr = static_cast<const QRDecompImpl*>(impl);
+    if(rhs.size() != qr->mat.rows())
+        throw std::length_error("QRDecomp: incorrect size of RHS vector");
+    std::vector<double> result(rhs);
+    // compute result = Q^T rhs
+    gsl_linalg_QR_QTvec(MatC(qr->mat), VecC(qr->vec), Vec(result));
+    // if the matrix is non-square, select the upper left corner as R
+    size_t size = std::min(qr->mat.cols(), qr->mat.rows());
+    gsl_matrix_const_view R = gsl_matrix_const_submatrix (MatC(qr->mat), 0, 0, size, size);
+    // solve R x = result, storing x in-place
+    gsl_blas_dtrsv((CBLAS_UPLO_t)CblasUpper, (CBLAS_TRANSPOSE_t)CblasNoTrans,
+        (CBLAS_DIAG_t)CblasNonUnit, &(R.matrix), Vec(result));
+    result.resize(qr->mat.cols());
+    return result;
+}
+
 /// singular-value decomposition implementation for GSL
 struct SVDecompImpl {
     Matrix<double> U, V;
@@ -1504,7 +1629,7 @@ SVDecomp::SVDecomp(const Matrix<double>& M) :
 {
     SVDecompImpl* sv = static_cast<SVDecompImpl*>(impl);
     sv->U = M;
-    sv->V=Matrix<double>(M.cols(), M.cols());
+    sv->V = Matrix<double>(M.cols(), M.cols());
     sv->S.resize(M.cols());
     std::vector<double> temp(M.cols());
     if(M.rows() >= M.cols()*5) {   // use a modified algorithm for very 'elongated' matrices
