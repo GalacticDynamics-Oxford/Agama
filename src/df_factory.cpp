@@ -15,7 +15,8 @@
 namespace df {
 
 void CompositeDF::evalmany(
-    const size_t npoints, const actions::Actions J[], bool separate, double values[]) const
+    const size_t npoints, const actions::Actions J[], bool separate,
+    /*output*/ double values[], DerivByActions derivs[]) const
 {
     // the "separate" flag indicates whether to store values for each component separately
     // or sum them up; each component produces a single value for each input point, even if
@@ -25,7 +26,7 @@ void CompositeDF::evalmany(
     if(ncomp == 1) {
         // fast track: for a single DF component, it does not matter whether separate is true or false,
         // and we simply output a single value per input point
-        components[0]->evalmany(npoints, J, /*separate*/false, values);
+        components[0]->evalmany(npoints, J, /*separate*/false, values, derivs);
         return;
     }
 
@@ -36,16 +37,36 @@ void CompositeDF::evalmany(
     // (if separate is true). In both cases we need a temporary storage, which is allocated
     // on the stack (hence no need to deallocate it explicitly)
     double* compval = static_cast<double*>(alloca(npoints * sizeof(double)));
-    if(!separate)  // fill the output array with zeros and then add one component at a time
+    DerivByActions* compder = derivs?
+        static_cast<DerivByActions*>(alloca(npoints * sizeof(DerivByActions))) :
+        NULL;
+    if(!separate) {  // fill the output array with zeros and then add one component at a time
         std::fill(values, values+npoints, 0);
+        if(derivs) {
+            DerivByActions zero;
+            zero.dbyJr = zero.dbyJz = zero.dbyJphi = 0;
+            std::fill(derivs, derivs+npoints, zero);
+        }
+    }
     for(unsigned int c=0; c<ncomp; c++) {
-        components[c]->evalmany(npoints, J, /*separate*/ false, /*output*/ compval);
+        components[c]->evalmany(npoints, J, /*separate*/ false, /*output*/ compval, compder);
         if(separate) {
             for(size_t p=0; p<npoints; p++)
                 values[p*ncomp+c] = compval[p];
+            if(derivs) {
+                for(size_t p=0; p<npoints; p++)
+                    derivs[p*ncomp+c] = compder[p];
+            }
         } else {
             for(size_t p=0; p<npoints; p++)
                 values[p] += compval[p];
+            if(derivs) {
+                for(size_t p=0; p<npoints; p++) {
+                    derivs[p].dbyJr   += compder[p].dbyJr;
+                    derivs[p].dbyJz   += compder[p].dbyJz;
+                    derivs[p].dbyJphi += compder[p].dbyJphi;
+                }
+            }
         }
     }
 }
@@ -88,9 +109,9 @@ QuasiIsothermalParam parseQuasiIsothermalParam(
     par.coefJr  = kvmap.getDouble("coefJr",  par.coefJr);
     par.coefJz  = kvmap.getDouble("coefJz",  par.coefJz);
     par.Jmin    = kvmap.getDouble("Jmin",    par.Jmin)    * conv.lengthUnit * conv.velocityUnit;
-    par.beta    = kvmap.getDouble("beta",    par.beta);
-    par.Tsfr    = kvmap.getDouble("Tsfr",    par.Tsfr);  // dimensionless! in units of galaxy age
-    par.sigmabirth = kvmap.getDouble("sigmabirth", par.sigmabirth);  // dimensionless ratio
+    par.qJr     = kvmap.getDouble("qJr",     par.qJr);
+    par.qJz     = kvmap.getDouble("qJz",     par.qJz);
+    par.qJphi   = kvmap.getDouble("qJphi",   par.qJphi);
     return par;
 }
 
@@ -103,13 +124,13 @@ ExponentialParam parseExponentialParam(
     par.Jr0    = kvmap.getDouble("Jr0",    par.Jr0)    * conv.lengthUnit * conv.velocityUnit;
     par.Jz0    = kvmap.getDouble("Jz0",    par.Jz0)    * conv.lengthUnit * conv.velocityUnit;
     par.Jphi0  = kvmap.getDouble("Jphi0",  par.Jphi0)  * conv.lengthUnit * conv.velocityUnit;
-    par.addJden= kvmap.getDouble("addJden")* conv.lengthUnit * conv.velocityUnit;
-    par.addJvel= kvmap.getDouble("addJvel")* conv.lengthUnit * conv.velocityUnit;
+    par.addJden= kvmap.getDouble("addJden",par.addJden)* conv.lengthUnit * conv.velocityUnit;
+    par.addJvel= kvmap.getDouble("addJvel",par.addJvel)* conv.lengthUnit * conv.velocityUnit;
     par.coefJr = kvmap.getDouble("coefJr", par.coefJr);
     par.coefJz = kvmap.getDouble("coefJz", par.coefJz);
-    par.beta   = kvmap.getDouble("beta",   par.beta);
-    par.Tsfr   = kvmap.getDouble("Tsfr",   par.Tsfr);  // dimensionless! in units of Hubble time
-    par.sigmabirth = kvmap.getDouble("sigmabirth", par.sigmabirth);  // dimensionless ratio
+    par.qJr    = kvmap.getDouble("qJr",    par.qJr);
+    par.qJz    = kvmap.getDouble("qJz",    par.qJz);
+    par.qJphi  = kvmap.getDouble("qJphi",  par.qJphi);
     return par;
 }
 

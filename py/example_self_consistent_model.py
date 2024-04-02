@@ -34,7 +34,7 @@ def writeSurfaceDensityProfile(filename, model):
     xy    = numpy.column_stack((radii, radii*0))
     Sigma = model.moments(xy, dens=True, vel=False, vel2=False, separate=True) * 1e-6  # convert from Msun/Kpc^2 to Msun/pc^2
     numpy.savetxt(filename, numpy.column_stack((radii, Sigma)), fmt="%.6g", delimiter="\t", \
-        header="Radius[Kpc]\tsurfaceDensity[Msun/pc^2]")
+        header="Radius[Kpc]\tThinDisk\tThickDisk\tStellarHalo:SurfaceDensity[Msun/pc^2]")
 
 # print vertical density profile for several sub-components of the stellar DF
 def writeVerticalDensityProfile(filename, model):
@@ -43,12 +43,25 @@ def writeVerticalDensityProfile(filename, model):
     xyz   = numpy.column_stack((height*0 + solarRadius, height*0, height))
     dens  = model.moments(xyz, dens=True, vel=False, vel2=False, separate=True) * 1e-9  # convert from Msun/Kpc^3 to Msun/pc^3
     numpy.savetxt(filename, numpy.column_stack((height, dens)), fmt="%.6g", delimiter="\t", \
-        header="z[Kpc]\tThinDisk\tThickDisk\tStellarHalo[Msun/pc^3]")
+        header="z[Kpc]\tThinDisk\tThickDisk\tStellarHalo:Density[Msun/pc^3]")
+
+# print velocity dispersion profiles in the equatorial plane as functions of radius to a file
+def writeVelocityDispersionProfile(filename, model):
+    print("Writing velocity dispersion profile")
+    radii = numpy.hstack(([1./8, 1./4], numpy.linspace(0.5, 16, 32), numpy.linspace(18, 30, 7)))
+    xyz   = numpy.column_stack((radii, radii*0, radii*0))
+    vel, vel2 = model.moments(xyz, dens=False, vel=True, vel2=True, separate=True)
+    vel2[:,:,1] -= vel[:,:,1]**2
+    numpy.savetxt(filename, numpy.column_stack((radii, numpy.dstack((vel2[:,:,0:3]**0.5, vel[:,:,1:2])).reshape(len(radii),-1))),
+        fmt="%.6g", delimiter="\t", header="Radius[Kpc]\t"
+        "ThinDisk:sigma_r\tsigma_phi\tsigma_z\tv_phi\t"
+        "ThickDisk:sigma_r\tsigma_phi\tsigma_z\tv_phi\t"
+        "StellarHalo:sigma_r\tsigma_phi\tsigma_z\tv_phi[km/s]")
 
 # print velocity distributions at the given point to a file
 def writeVelocityDistributions(filename, model):
     point = (solarRadius, 0, 0.1)
-    print("Writing velocity distributions at (R=%g, z=%g)" % (point[0], point[2]))
+    print("Writing velocity distributions at (x=%g, z=%g)" % (point[0], point[2]))
     # create grids in velocity space for computing the spline representation of VDF
     v_max = 360.0    # km/s
     gridv = numpy.linspace(-v_max, v_max, 75) # use the same grid for all dimensions
@@ -165,9 +178,10 @@ if __name__ == "__main__":
     # output various profiles (only for stellar components)
     print("\033[1;33mComputing density profiles and velocity distribution\033[0m")
     modelStars = agama.GalaxyModel(model.potential, dfStellar, model.af)
-    writeSurfaceDensityProfile ("model_stars_final.surfdens", modelStars)
-    writeVerticalDensityProfile("model_stars_final.vertical", modelStars)
-    writeVelocityDistributions ("model_stars_final.veldist",  modelStars)
+    writeSurfaceDensityProfile    ("model_stars_final.surfdens", modelStars)
+    writeVerticalDensityProfile   ("model_stars_final.vertical", modelStars)
+    writeVelocityDispersionProfile("model_stars_final.veldisp",  modelStars)
+    writeVelocityDistributions    ("model_stars_final.veldist",  modelStars)
 
     # export model to an N-body snapshot
     print("\033[1;33mCreating an N-body representation of the model\033[0m")

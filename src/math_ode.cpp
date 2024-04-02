@@ -497,7 +497,8 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     // x_d(h)   = x_d(0)  + dt * h * x_d'(0) + dt^2 * (su(h) * u_d + sv(h) * v_d + sw(h) * w_d),
     // where pu, pv, pw, su, sv, sw are known polynomials of h
     // (pre-computed for all collocation points h_k and for the final point h=1).
-    // The RHS of our ODE prescribes that x_d''(h_k) = \sum_{j=1}^{NDIM} C_{dj}(h_k) x_j(h_k).
+    // The RHS of our ODE prescribes that
+    // x_d''(h_k) = \sum_{j=1}^{NDIM} A_{dj}(h_k) x_j(h_k) + B_{dj}(h_k) x_j'(h_j).
     // We iteratively recompute the coefficients u,v,w:
     // first evaluate x_d(h_k) with the current values of these coefs at the given point h_k,
     // then compute the rhs x_d''(h_k),

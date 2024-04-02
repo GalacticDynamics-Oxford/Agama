@@ -171,6 +171,8 @@ testCond('isFloat(df2([1,2,3]))')          # equivalent input
 testCond('isArray(df1([[1,2,3]]), (1,))')  # input: Nx3 array (here N=1) => output is a 1d array of length N
 testCond('isArray(df2(numpy.random.random(size=(17,3))), (17,))')  # same but N>1
 testCond('len(df2)==2 and df2[0](1,2,3) == df1(1,2,3)')  # df2 is a composite DF with two components, and the first one is df1
+testCond('len(df1([1,2,3], der=True))==2')  # DF derivatives w.r.t. actions are reported in the second element of the output tuple
+testCond('isArray(df1([1,2,3], der=True)[1], (3,)) and isArray(df1(numpy.random.random(size=(7,3)), der=True)[1], (7,3))')  # derivs array has the same shape as input actions
 
 # GalaxyModel class members
 testCond('isTuple(gms1.moments([1,2,3], dens=True, vel=True, vel2=True), 3)')    # three outputs per point, as requested

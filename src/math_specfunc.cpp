@@ -327,6 +327,13 @@ double lambertW(const double x, bool Wminus1branch) {
     CALL_FUNCTION_OR_NAN( Wminus1branch ? gsl_sf_lambert_Wm1(x) : gsl_sf_lambert_W0(x) )
 }
 
+double qexp(const double x, double q) {
+    if(fabs(q) > 1e-7)
+        return math::pow(1 + q*x, 1/q);
+    else  // asymptotic expansion for small q, including the limiting case q=0
+        return exp(x) * (q!=0 ? 1 + q*x*x * (-0.5 + q*x * (1./3 + 1./8*x)) : 1);
+}
+
 double solveKepler(double ecc, double phase)
 {
     phase -= 2*M_PI * floor(1/(2*M_PI) * phase);

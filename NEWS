@@ -1,6 +1,9 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+April 2024:
+Implemented computation of DF derivatives w.r.t. actions
+
 March 2024:
 Implemented computation of orbit derivatives w.r.t. initial conditions
 (variational equation).

@@ -64,9 +64,9 @@ public:
     */
     DoublePowerLaw(const DoublePowerLawParam &params);
 
-    /** return value of DF for the given set of actions.
-        \param[in] J are the actions  */
-    virtual double value(const actions::Actions &J) const;
+    /** compute the value of DF for the given set of actions, and optionally its derivatives */
+    virtual void evalDeriv(const actions::Actions &J,
+        /*output*/ double *value, DerivByActions *deriv=NULL) const;
 };
 
 ///@}

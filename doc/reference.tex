@@ -70,7 +70,7 @@
 \normalsize\textrm{email: eugvas@protonmail.com} }
 
 \maketitle
-\vspace*{-10mm}
+\vspace*{-15mm}
 \tableofcontents
 \newpage
 
@@ -507,9 +507,8 @@ peri- and apocenter radii of an orbit with given $E,L$ in the $z=0$ plane, etc. 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Orbit integration and analysis}  \label{sec:Orbits}
 
-Orbits of particles in a [possibly time-dependent] potential are computed using the class  \ttt{orbit::OrbitIntegrator}, specifically its method \ttt{run}, in any of the three standard coordinate systems, plus optionally a rotating reference frame. It solves the coupled system of ordinary differential equations (ODEs) for time derivatives of position and velocity, using one of the available methods derived from \ttt{math::BaseOdeSolver}; currently we provide only the 8th order Runge--Kutta with adaptive timestep \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have quite similar performance in the appropriate range of tolerance parameters, thus we have only kept one at the moment.
-
-Note that in the of a rotating reference frame (with angular frequency $\Omega$ directed along $z$ axis), the velocity (both in the initial conditions and in the output trajectory) is still specified in an inertial frame that is instantaneously aligned with the rotating frame at the corresponding moment of time (i.e., has the same value independently of the pattern speed). For instance, an orbit trapped into a 1:1 corotation resonance with a bar would have a fixed position in the rotating frame, but a nonzero azimuthal velocity. The equations of motion are $\dot\bx = \bv - \boldsymbol\Omega\times\bx, \dot\bv = -\nabla\Phi - \boldsymbol\Omega\times\bv$. On the other hand, if a \ttt{Rotating} modifier is applied to the potential itself and the orbit integration is performed in the inertial reference frame, then the trajectory is also stored in the inertial frame. This setup is more general since the angle of rotation may vary arbitrarily (not just linearly with time, as in the case of a constant angular frequency), but extra steps would be needed to convert the trajectory into the instantenously corotating frame.
+Orbits of particles in a [possibly time-dependent] potential are computed using the class  \ttt{orbit::OrbitIntegrator}, specifically its method \ttt{run}, in any of the three standard coordinate systems, plus optionally a rotating reference frame (see Section~\ref{sec:OrbitDetails} for details). 
+Note that in the of a rotating reference frame (with angular frequency $\Omega$ directed along $z$ axis), the velocity (both in the initial conditions and in the output trajectory) is still specified in an inertial frame that is instantaneously aligned with the rotating frame at the corresponding moment of time (i.e., has the same value independently of the pattern speed). For instance, an orbit trapped into a 1:1 corotation resonance with a bar would have a fixed position in the rotating frame, but a nonzero azimuthal velocity. On the other hand, if a \ttt{Rotating} modifier is applied to the potential itself and the orbit integration is performed in the inertial reference frame, then the trajectory is also stored in the inertial frame. This setup is more general since the angle of rotation may vary arbitrarily (not just linearly with time, as in the case of a constant angular frequency), but extra steps would be needed to convert the trajectory into the instantenously corotating frame.
 
 There are various tasks that can be performed during orbit integration, using classes derived from \ttt{orbit::BaseRuntimeFnc}. The simplest one (\ttt{orbit::RuntimeTrajectory}) is the recording of the trajectory either at every timestep of the ODE solver, or at regular intervals of time, which are unrelated to the internal solver timestep (that is, the  position and velocity at any time are obtained by interpolation provided by the solver -- so-called dense output feature). More complicated tasks involve storage of some other kind of information, e.g., in the context of Schwarzschild modelling, or in some cases, even modifying the orbit itself (random perturbations mimicking the effect of two-body relaxation in the Monte Carlo code \textsc{Raga}).
 
@@ -590,49 +589,63 @@ There is also a ``DF factory'' routine \ttt{createDistributionFunction} for cons
 
 Importantly, the DF formulated in terms of actions does not depend on the potential. However, some models use the concept of epicyclic frequencies to compute the value of $f(\bJ)$. These frequencies are represented by a special proxy class \ttt{potential::Interpolator}, which is constructed from a given potential, but then serves as an independent entity (essentially an array of arbitrary functions of one variable), so that $f(\bJ)$ has the same value in any other potential. This is important in the context of iterative construction of self-consistent models (Section~\ref{sec:SCM}).
 
+All built-in DF classes provide analytic derivatives $\partial f/\partial \bJ$.
 
 %%%%%%%%%%%%%%
 \subsubsection{Disky components}  \label{sec:DFdisk}
 
 There are two classes of disk DFs in \Agama: the first, \ttt{QuasiIsothermal}, expresses the DF in terms of auxiliary functions that are related to a particular potential, while the second, \ttt{Exponential}, is written in an entirely self-contained form. We describe them in turn.
 
-Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks \cite{Dehnen1999} expressed in terms of actions \cite{BinneyMcMillan2011} is provided by the \ttt{QuasiIsothermal} class. The DF for a single population is given by
+Stars on nearly-circular (cold) orbits in a disk are often described by a Schwarzschild or Shu DF, which have Maxwellian velocity distribution with different dispersions in each direction. A generalization for warm disks \cite{Dehnen1999} expressed in terms of actions \cite{BinneyMcMillan2011} is provided by the \ttt{QuasiIsothermal} class, which represents the following DF:
 \begin{align*}
-f(\bJ) &= \frac{\tilde\Sigma\,\Omega}{2\pi^2\,\kappa^2} \times
-\frac{\kappa}{\tilde\sigma_r^2} \exp\left(-\frac{\kappa\,J_r}{\tilde\sigma_r^2}\right) \times
-\frac{\nu}   {\tilde\sigma_z^2} \exp\left(-\frac{\nu\,   J_z}{\tilde\sigma_z^2}\right) \times
-\left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0, \\
-\exp\left( \frac{2\Omega\,J_\phi}{\tilde\sigma_r^2} \right) & \mbox{if }J_\phi<0, \end{array} \right. \\
-\tilde\Sigma(R_c)  &\equiv \Sigma_0 \exp( -R_c / R_\mathrm{disk} ) , \qquad\quad
-\tilde\sigma_r^2(R_c) \equiv \sigma_{r,0}^2 \exp( -2R_c / R_{\sigma,r} ) + \sigma_\mathrm{min}^2,\\
-\tilde\sigma_z^2(R_c)&\equiv 2\,h_\mathrm{disk}^2\,\nu^2(R_c)  + \sigma_\mathrm{min}^2
-\quad\mbox{or}\quad
-\tilde\sigma_z^2(R_c) \equiv \sigma_{z,0}^2 \exp( -2R_c / R_{\sigma,z} )  + \sigma_\mathrm{min}^2.
+f(\bJ) &= \frac{\Omega}{2\pi^2\,\kappa^2}\; \frac{\Sigma_0}{1-q_{J_\phi}}\,
+\exp_q\left(-\frac{R_\mathrm{c}}{R_\mathrm{disk}},\; -q_{J_\phi}\right) \\  &\times 
+\frac{\kappa}{(1-q_{J_r})\;\tilde\sigma_r^2} 
+\exp_q\left(-\frac{K(\bJ)}{\tilde\sigma_r^2},\; -q_{J_r}\right) \times
+\frac{\nu}   {(1-q_{J_z})\;\tilde\sigma_z^2} 
+\exp_q\left(-\frac{\nu\,   J_z}{\tilde\sigma_z^2},\; -q_{J_z}\right), \\
+&K(\bJ) \equiv  \left\{ \begin{array}{ll}
+\kappa\,J_r & \mbox{if }J_\phi\ge 0, \\
+\kappa\,J_r - 2\Omega\,J_\phi & \mbox{if }J_\phi<0, \end{array} \right.\\
+&R_\mathrm{c}=R_\mathrm{c}(\hat J), \qquad \hat J\equiv \sqrt{\tilde J^2 + J_\mathrm{min}^2}, \quad
+\tilde J \equiv |J_\phi| + k_r J_r + k_z J_z, \\
+&\tilde\sigma_r^2(R_\mathrm{c}) \equiv
+\sigma_{r,0}^2 \exp( -2R_\mathrm{c} / R_{\sigma,r} ) + \sigma_\mathrm{min}^2,\\
+&\tilde\sigma_z^2(R_\mathrm{c}) \equiv
+\sigma_{z,0}^2 \exp( -2R_\mathrm{c} / R_{\sigma,z} )  + \sigma_\mathrm{min}^2  \quad\mbox{or}\quad 
+\tilde\sigma_z^2(R_\mathrm{c}) \equiv 
+2\,h_\mathrm{disk}^2\,\nu^2(R_\mathrm{c})  + \sigma_\mathrm{min}^2, \\
+&\exp_q(x,\, q) \equiv \left\{ \begin{array}{ll}
+\exp(x) & \mbox{if }q=0, \\
+(1+qx)^{1/q} & \mbox{if }-1<q<0 . \end{array} \right.
 \end{align*}
 
-To construct such a DF, one needs to provide an instance of potential, which is used to initalize the mappings between actions and the radius of a circular orbit $R_c$ as a function of $z$-component of angular momentum, and the epicyclic frequencies $\kappa, \nu, \Omega$ as functions of radius. Other parameters listed in the  \ttt{QuasiIsothermalParam} structure are:
+In these expressions, $R_\mathrm{c}(L_z)$ is the radius of a circular orbit as a function of the $z$-component of angular momentum, but evaluated at an argument $\hat J(\boldsymbol J)$. The epicyclic frequencies $\kappa, \nu, \Omega$ and the two quantities with a dimension of squared velocity $\tilde\sigma_r^2, \tilde\sigma_z^2$ are, in turn, evaluated at a radius $R_\mathrm{c}$. The function $\exp_q(-x,-q)$ is a generalization of the usual exponent $\exp(-x)$, which is identical to it when $q=0$, but falls off more slowly when $0<q<1$.
+To construct such a DF, one needs to provide an instance of potential, which is used to initalize the function $R_\mathrm{c}(L_z)$ and the epicyclic frequencies $\kappa, \nu, \Omega$ as functions of radius. Other parameters listed in the \ttt{QuasiIsothermalParam} structure are:
 \begin{itemize}
 \item \ppp{Sigma0} is the overall normalization of the surface density profile $\Sigma_0$; alternatively, one may provide the total \ppp{mass}, from which the normalization will be computed automatically.
-\item \ppp{coefJr} [1], \ppp{coefJz} [0.25] are the dimensionless coefficients $k_r,k_z\sim \mathcal{O}(1)$ in the linear combination of the actions $\tilde J \equiv |J_\phi| + k_r J_r + k_z J_z$, which is used as the argument of $R_c$ instead of the angular momentum. The reason for this is that $\tilde J$ better corresponds to the average radius of a given orbit than $J_\phi$ alone: for instance, a star with $J_\phi\approx 0$ does not in reality stay close to origin if the other two actions are large.
-Actually, we use $R_c(\hat J)$, where $\hat J \equiv (\tilde J^2 + J_\mathrm{min}^2)^{1/2}$, and $J_\mathrm{min}$ is introduced to prevent a pathological behaviour of DF in the case of a cuspy potential, when epicyclic frequencies tend to infinity as $R_c \to 0$.
+\item \ppp{coefJr} [1], \ppp{coefJz} [0.25] are the dimensionless coefficients $k_r,k_z\sim \mathcal{O}(1)$ in the linear combination of the actions $\tilde J \equiv |J_\phi| + k_r J_r + k_z J_z$. This $\tilde J$ is then summed in quadrature with $J_\mathrm{min}$ to form $\hat J$, which is used as the argument of $R_\mathrm{c}$ instead of the angular momentum. The reason for this is that $\tilde J$ better corresponds to the average radius of a given orbit than $J_\phi$ alone: for instance, a star with $J_\phi\approx 0$ does not in reality stay close to origin if the other two actions are large. 
+\item \ppp{Jmin} [0] is the lower limit $J_\mathrm{min}$ imposed on the argument of the circular radius function $R_\mathrm{c}(\hat J)$. It is introduced to prevent a pathological behaviour of DF in the case of a cuspy potential, when epicyclic frequencies tend to infinity as $R_\mathrm{c} \to 0$.
 \item \ppp{Rdisk} sets the scale length of the disk $R_\mathrm{disk}$.
 \item \ppp{Hdisk} if provided, determines the scale height of the disk $h_\mathrm{disk}$ and the vertical velocity dispersion, which are related through the vertical epicyclic frequency $\nu$. 
 \item Alternatively, \ppp{sigmaz0} and \ppp{Rsigmaz} can be used instead of \ppp{Hdisk} to make the vertical velocity dispersion profile close to an exponential function of radius, with central value $\sigma_{z,0}$ and radial scale length $R_{\sigma,z}$; this choice has been used historically for quasi-isothermal DFs \cite{BinneyMcMillan2011,Bovy2015}, but it does not generally produce constant-scaleheight disk profiles.
 \item \ppp{sigmar0} and \ppp{Rsigmar} control the radial velocity dispersion profile, which is nearly exponental with central value $\sigma_{r,0}$ and radial scale $R_{\sigma,r}$. Typically $R_{\sigma,r}, R_{\sigma,z} \sim 2\,R_\mathrm{disk}$.
 \item \ppp{sigmamin} [0] is the minimum value of velocity dispersion $\sigma_\mathrm{min}$, added in quadrature to both $\tilde\sigma_r$ and $\tilde\sigma_z$; it is introduced to avoid the pathological situation when the velocity dispersion drop so rapidly with radius that the value of DF at $J_r=J_z=0$ actually increases indefinitely at large $J_\phi$. A reasonable lower limit could be $(0.02\, .. \, 0.05)\sigma_0$.
-\item \ppp{Jmin} [0] is the lower limit $J_\mathrm{min}$ imposed on the argument of the circular radius function $R_c(\hat J)$.
+\item \ppp{qJphi} [0] is responsible for the shape of the radial profile of the surface density: the default value of zero creates nearly-exponential profiles, whereas a positive value makes it less steeply declining with radius.
+\item \ppp{qJr} [0], \ppp{qJz} [0] play a similar role for the velocity distributions in: they should be approximately isothermal when these parameters are zero, and have fat tails when they are positive.
 \end{itemize}
-As stressed above, both epicyclic frequencies and $R_c(\hat J)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. If these two potentials are close enough, then this DF produces density profiles and velocity dispersions that approximately correspond to the exponential disks: the surface density $\Sigma(R)$ is close to exponentially declining with central value $\Sigma_0$ and radial scale length $R_\mathrm{disk}$, the vertical profile is roughly isothermal with scale height $h_\mathrm{disk}$, and the radial velocity dispersion is similar to $\tilde\sigma_r$, although the actual profiles are somewhat different from the tilded functions.
+As stressed above, both epicyclic frequencies and $R_c(\hat J)$ are merely one-dimensional functions that are once initialized from an actual potential, but no longer need to be related to the potential in which the DF is later used. If these two potentials are close enough, then this DF produces density profiles and velocity dispersions that approximately correspond to the exponential disks (at least when the $q_{\dots}$ coefficients are zero): the surface density $\Sigma(R)$ is close to exponentially declining with central value $\Sigma_0$ and radial scale length $R_\mathrm{disk}$, the vertical profile is roughly isothermal with scale height $h_\mathrm{disk}$, and the radial velocity dispersion is similar to $\tilde\sigma_r$, although the actual profiles are somewhat different from the tilded functions.
 
 If the potential has a nearly flat rotation curve with circular velocity $v_\circ$, then $R_c(\tilde J) \approx \tilde J/v_\circ$, and epicyclic frequencies are $\propto v_\circ^2 / \tilde J$. This motivates the introduction of another family of disk-like DFs, which has a similar functional form, but does not itself contain any reference to the potential, simplifying the construction of self-consistent models (Section~\ref{sec:SCM}). It is represented by the \ttt{Exponential} class:
 \begin{align*}
-f(\bJ) &= \frac{M}{(2\pi)^3}\, \frac{J_d}{J_{\phi,0}^2}\, \exp\bigg(-\frac{J_d}{J_{\phi,0}}\bigg) \times
-\frac{J_v}{J_{r,0}^2} \exp\bigg(-\frac{J_v\,J_r}{J_{r,0}^2}\bigg) \times
-\frac{J_v}{J_{z,0}^2} \exp\bigg(-\frac{J_v\,J_z}{J_{z,0}^2}\bigg) \\
-&\times \left\{ \begin{array}{ll}  1 & \mbox{if }J_\phi\ge 0, \\
-\exp\left(\frac{J_v\,J_\phi}{J_{r,0}^2} \right) & \mbox{if }J_\phi<0, \end{array} \right. \qquad
-J_d \equiv \sqrt{\tilde J^2 + J_{d,0}^2}, \quad
-J_v \equiv \sqrt{\tilde J^2 + J_{v,0}^2}
+f(\bJ) &= \frac{M}{(2\pi)^3}\, \frac{J_\mathrm{d}}{J_{\phi,0}^2}\,
+\exp_q\bigg(-\frac{J_\mathrm{d}}{J_{\phi,0}},\; -q_{J_\phi}\bigg) \\ &\times
+\frac{J_\mathrm{v}}{J_{r,0}^2} \exp_q\bigg(-\frac{J_\mathrm{v}\,K(\bJ)}{J_{r,0}^2},\; -q_{J_r}\bigg) \times
+\frac{J_\mathrm{v}}{J_{z,0}^2} \exp_q\bigg(-\frac{J_\mathrm{v}\,J_z   }{J_{z,0}^2},\; -q_{J_z}\bigg) \\
+&K(\bJ) \equiv \left\{ \begin{array}{ll}  J_r & \mbox{if }J_\phi\ge 0, \\
+J_r-J_\phi & \mbox{if }J_\phi<0, \end{array} \right. \qquad
+J_\mathrm{d} \equiv \sqrt{\tilde J^2 + J_\mathrm{d,0}^2}, \quad
+J_\mathrm{v} \equiv \sqrt{\tilde J^2 + J_\mathrm{v,0}^2}
 \end{align*}
 Its parameters listed in the \ttt{ExponentialParam} structure are:
 \begin{itemize}
@@ -641,26 +654,9 @@ Its parameters listed in the \ttt{ExponentialParam} structure are:
 \item \ppp{Jz0} controls the scale height and vertical velocity dispersion: $J_{z,0} \sim h_\mathrm{disk}v_\circ \sim R\,\sigma_z(R)$.
 \item \ppp{Jr0} plays a similar role for the radial velocity dispersion and the extent of radial excursion $\Delta R$ of a typical orbit: $J_{r,0} \sim \Delta R\,v_\circ \sim R\,\sigma_r(R)$.
 \item \ppp{coefJr} [1], \ppp{coefJz} [0.25] are the coefficients $k_r$, $k_z$ in the linear combination of actions $\tilde J \equiv |J_\phi| + k_r J_r + k_z J_z$.
-\item \ppp{addJden} [0] and \ppp{addJvel} [0] are the lower limits $J_{d,0}$ and $J_{v,0}$ for the arguments of the exponential functions, which are introduced to tweak the behaviour of density and velocity dispersion profiles, correspondingly, in the limit of small actions. Their role is similar to $J_\mathrm{min}$ for the QuasiIsothermal model: since the rotation curves of realistic potentials cannot be flat all the way down to the center, the unmodified DF would produce too low density and too high velocity dispersions at small radii, which is compensated by these additional parameters. Their values should typically be of order $J_{d,0} \sim J_{r,0}$ and $J_{v,0} \sim J_{\phi,0}$.
+\item \ppp{addJden} [0] and \ppp{addJvel} [0] are the lower limits $J_\mathrm{d,0}$ and $J_\mathrm{v,0}$ for the arguments of the $q$-exponential functions, which are introduced to tweak the behaviour of density and velocity dispersion profiles, correspondingly, in the limit of small actions. Their role is similar to $J_\mathrm{min}$ for the \ttt{QuasiIsothermal} model: since the rotation curves of realistic potentials cannot be flat all the way down to the center, the unmodified DF would produce too low density and too high velocity dispersions at small radii, which is compensated by these additional parameters. Their values should typically be of order $J_\mathrm{d,0} \sim J_\mathrm{r,0}$ and $J_\mathrm{v,0} \sim J_\mathrm{\phi,0}$.
+\item \ppp{qJr}, \ppp{qJz}, \ppp{qJphi} play the same role (creating fat tails) as in the \ttt{QuasiIsothermal} model.
 \end{itemize}
-
-One can generalize either of these models to the continuous distribution of populations with different velocity dispersions, by introducing three additional dimensionless parameters. It is commonly assumed that the velocity dispersion of a coeval population of stars increases with time. Let $\tau\in[0..1]$ be the age of the star normalized to the galaxy age (youngest stars have $\tau=0$ and oldest -- $\tau=1$). Let $\sigma_0$, $\sigma_1$ be the radial or vertical velocity dispersion of youngest and oldest stars, correspondingly, and denote their ratio as $\xi\equiv \sigma_0/\sigma_1 \le 1$ (\ppp{sigmabirth}). The commonly adopted relation between age and velocity dispersion \cite{AumerBinney2009} is $\sigma(\tau) = \sigma_1 \big[\tau + (1-\tau)\xi^{1/\beta} \big]^\beta$, with $\beta\simeq 0.33$ (\ppp{beta}). Assume further that the star formation rate declines exponentially with characteristic timescale $\tau_\mathrm{SFR}$ (\ppp{Tsfr}, again normalized to the galaxy age), so that the number of stars increases with look-back time $\tau$ as $\exp(\tau/\tau_\mathrm{SFR})$. Then the value of the DF needs to be integrated over stars of all ages, weighted by the number of stars at each age and substituting $\tilde\sigma_r, \tilde\sigma_z$ by the age-scaled values:
-\begin{align*}
-\bar f(\bJ) = \frac{\int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})\,
-f\big[ \bJ \,|\, \sigma(\tau) \big] }{\int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})}
-\end{align*}
-The \ttt{QuasiIsothermal} DF is then computed as
-\begin{align*}
-\bar f(\bJ) &= \frac{\tilde\Sigma\,\Omega\,\nu}
-{2\pi^2\,\kappa\,\tilde\sigma_{r,1}^2\,\tilde\sigma_{z,1}^2}
-\frac{ \displaystyle \int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR})\,
-\frac{1}{\lambda^4} \exp\left(-\frac{1}{\lambda^2}
-\left[ \frac{\kappa\,J_r}{\tilde\sigma_{r,1}^2} + \frac{\nu\,J_z}{\tilde\sigma_{z,1}^2} +
-\mathrm{max}\bigg\{0, -\frac{2\Omega\,J_\phi}{\tilde\sigma_{r,1}^2}\bigg\} \right]\right)}
-{ \int_0^1 \d \tau\, \exp(\tau/\tau_\mathrm{SFR}) } ,\\
-\lambda &\equiv \sigma(\tau)/\sigma_1 = \big[\tau + (1-\tau)\xi^{1/\beta}\big]^\beta ,
-\end{align*}
-where the auxiliary functions $\tilde\sigma_r,\tilde\sigma_z$ now refer to the oldest stars. A similar modification applies to the \ttt{Exponential} DF, except that the age-dependent parameters are the scale actions $J_{r,0}, J_{z,0}$, not the velocity dispersions.
 
 
 %%%%%%%%%%%%%%
@@ -1074,9 +1070,10 @@ or from a list of existing \ttt{DistributionFunction} objects, creating a compos
 \\[2mm]
 Similarly to the \ttt{Density} class, one may provide a custom \Python function \texttt{myfnc} which returns the DF value at the given triplet of actions $\{J_r,J_z,J_\phi\}$ (again the calling convention is to process a 2d array of such triplets, even if with one row).
 \\[2mm]
-The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\Sigma,\sigma$.
+The \ppp{QuasiIsothermal} DF (Section~\ref{sec:DFdisk}) additionally needs an instance of \ttt{Potential} to initialize the auxiliary functions $R_c(J)$, $\kappa,\nu,\Omega,\sigma$.
 \\[2mm]
-The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the generalized Eddington inversion formula to create $f(E,L)$ and then a spherical action finder to convert it to an action-based form.
+The \ppp{QuasiSpherical} DF (Section~\ref{sec:DFspherical}) is constructed from the provided instances of \ttt{Density} and \ttt{Potential}, using the generalized Eddington inversion formula to create $f(E,L)$ and then a spherical action finder to convert it to an action-based form.\\[2mm]
+The DF object applied to a triplet of actions or an array of shape $N\times3$ returns the values of the DF (summed together if the DF is composite). If called with an optional argument \texttt{der=True}, it additionally returns derivatives of the DF w.r.t.\ actions.
 
 \paragraph{SelectionFunction} class provides an example of a position-dependent selection function (SF) for the \ttt{GalaxyModel} class: $S(\bx, \bv) = \exp\big[-(|\bx-\bx_0|/R_0)^\xi\big]$. This function has 3 parameters: the fiducial point $\bx_0$, cutoff radius $R_0$, and optional cutoff steepness $\xi$ (by default $\xi=\infty$, meaning a sharp transition between $S=1$ at distances smaller than $R_0$ to $S=0$ at larger distances, but one can make it more gradual). In addition, an arbitrary user-defined Python function can be used instead of an instance of \ttt{SelectionFunction} class. The built-in class\\
 \texttt{sf = agama.SelectionFunction(point=(x0,y0,z0), radius=r0, steepness=xi))}\\
@@ -1146,7 +1143,7 @@ here \ppp{posvel} contains initial conditions for one or several orbits (a $N\ti
 \ppp{der}\texttt{=True} turns on the computation of deviation vectors (derivatives of the trajectory w.r.t.\ the initial conditions).\\
 \ppp{lyapunov}\texttt{=True} additionally estimates the Lyapunov exponent for each orbit (an indicator of chaos) using the fastest growing deviation vector.\\
 \ppp{targets=...} optionally lists \ttt{Target} objects for Schwarzschild modelling. \\[2mm]
-The \texttt{result} returned by this routine is one or a tuple of several items, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, this adds another item in the output tuple, as detailed below. When \texttt{der=True}, the deviation vectors are stored in another array in the output tuple. Finally, when \texttt{lyapunov=True}, yet another array of length $N$ is appended to the output tuple, which contains the estimates of Lyapunov exponents for each orbit. If the output consists of a single item (typically, trajectory), it is returned directly instead of a length-1 tuple.\\
+The \texttt{result} returned by this routine is one or a tuple of several items, depending on the requested output. For each \ttt{Target}, a $N\times K$ array is produced with the contribution of each orbit to each of $K$ constraints in the given target. When the output trajectory is requested by providing the argument \ppp{trajsize}, this adds another item in the output tuple, as detailed below. When \ppp{der}\texttt{=True}, the deviation vectors are stored in another array in the output tuple. Finally, when \ppp{lyapunov}\texttt{=True}, yet another array of length $N$ is appended to the output tuple, which contains the estimates of Lyapunov exponents for each orbit. If the output consists of a single item (typically, trajectory), it is returned directly instead of a length-1 tuple.\\[1mm]
 Trajectories can be provided in one of the two alternative formats: as arrays of timestamps and phase-space points, or as interpolator objects.\\
 In the first case, each orbit $k$ produces two arrays: timestamps (1d array of length $M_k$, which may be different for each orbit) and corresponding position/velocity points (2d array of size $M_k \times 6$ when \ppp{dtype} is \texttt{float32} or \texttt{float64}, or combining position and velocity into real and imaginary parts of a complex number when \ppp{dtype} is \texttt{complex64} or \texttt{complex128}, so that the array has shape $M_k \times 3$). The points can be recorded after every timestep of the ODE integrator (typically meaning a denser sampling near the pericenter) -- this regime is triggered by setting \ppp{trajsize}=0 (this is not the same as not setting it at all, in which case the trajectory is not recorded). Alternatively, one may request the output points to be regularly spaced in time at intervals \texttt{time}/(\texttt{trajsize}-1), by setting \ppp{trajsize}${}=M_k\ge$1. If \ppp{trajsize}=1, only the final point is stored, otherwise both the initial and the final point are stored in the first and the last array elements. If \ppp{time}$<0$, the integration is carried backward in time, and the array of times is monotonically decreasing (in any case, it goes from the initial moment \ppp{timestart} to \ppp{timestart+time}, whatever their signs are).
 In case of $N>1$ orbits, the output item is a 2d array of shape $N\times 2$, with its elements being arrays themselves (1d arrays of timestamps in the first column and 2d arrays of trajectories in the second); since the lengths of these arrays may differ between orbits, the overall result may not be possible to represent as a regular 3d array. Although the orbit integration is always performed in double precision (\Cpp \texttt{double}, equivalent to \Python \texttt{float}), by default the output format is single precision (\texttt{numpy.float32}) to save memory (with 7 digits of precision usually being enough).\\
@@ -1161,15 +1158,15 @@ Plot the time evolution of $z$ coordinate of each orbit:\\[1mm]
 \mbox{}~~~~times = numpy.linspace(trj[0], trj[-1], 1000)\\
 \mbox{}~~~~plot(times, trj(times)[:,2])\ \ \ }\textit{\color{Sepia}\# again regularly spaced} \\[1mm]
 Plot the meridional $(R-z)$ cross-section of each orbit:\\[1mm]
-\texttt{for trj in result1[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}\\[1mm]
-When the computation of deviation vectors is requested by the argument \texttt{der=True}, they are provided in the same format as the trajectory itself. There are six deviation vectors per orbit, so if \ppp{dtype}\texttt{=object}, they are stored as six \ttt{agama.Orbit} objects, otherwise as six arrays of shape $M_k\times$3 or 6. A matrix formed by column-stacking the deviation vectors at a given point on the orbit represents the Jacobian $\mathsf{J}(t)$ of mapping between the initial conditions $\boldsymbol w^{(0)}$ and the current point $\boldsymbol w(t)$: $J_{ij} = \partial w_i(t)/\partial w_j^{(0)}$:\\[1mm]
+\texttt{for trj in result1[:,1]: plt.plot((trj[:,0]**2 + trj[:,1]**2)**0.5, trj[:,2])}\\[2mm]
+When the computation of deviation vectors is requested by the argument \texttt{der=True}, they are provided in the same format as the trajectory itself. There are six deviation vectors per orbit, so if \ppp{dtype}\texttt{=object}, they are stored as six \ttt{Orbit} objects, otherwise as six arrays of shape $M_k\times$3 or 6. A matrix formed by column-stacking the deviation vectors at a given point on the orbit represents the Jacobian $\mathsf{J}(t)$ of mapping between the initial conditions $\boldsymbol w^{(0)}$ and the current point $\boldsymbol w(t)$: $J_{ij} = \partial w_i(t)/\partial w_j^{(0)}$:\\[1mm]
 \texttt{delta = numpy.random.normal(size=6)*1e-8\ \ }\textit{\color{Sepia}\# small offset in initial conditions}\\
 \texttt{(time,orbit0), der = agama.orbit(potential=pot, ic=posvel[0], time=int_time,\\
 \mbox{}~~~~trajsize=trajsize, dtype=float, der=True)\ \ }\textit{\color{Sepia}\# original orbit and dev.vectors}\\
 \texttt{(time,orbit1) = agama.orbit(potential=pot, ic=posvel[0]+delta, time=int_time,\\
 \mbox{}~~~~trajsize=trajsize, dtype=float)\ \ }\textit{\color{Sepia}\# slightly perturbed orbit}\\
 \texttt{jac = numpy.dstack(der)\ \ }\textit{\color{Sepia}\# shape: (trajsize,6,6); jac[i] is the Jacobian matrix at time[i]}\\
-\texttt{linear_dif = numpy.einsum('ijk,k->ij', jac, delta)}\\
+\texttt{linear_dif = numpy.einsum('ijk,k->ij', jac, delta)\ \ }\textit{\color{Sepia}\# same as jac.dot(delta)}\\
 \texttt{actual_dif = orbit1-orbit0}\\
 \texttt{print(numpy.max(abs(actual_dif)))\ \ }\textit{\color{Sepia}\# max difference between nearby orbits}\\
 \texttt{print(numpy.max(abs(actual_dif-linear_dif)))\ \ }\textit{\color{Sepia}\# error in linear prediction should be much smaller than the actual difference, as long as both stay small (no chaotic divergence)}
@@ -2131,6 +2128,70 @@ Figure~\ref{fig:PotentialAccuracy1} demonstrates that the accuracy of both appro
 Figure~\ref{fig:PotentialAccuracy2} illustrates that each of the two potential expansions has its weak points: \ttt{Multipole} is not suitable for strongly flattened systems and \ttt{CylSpline} performs poorly in systems with density cusps; but for most density profiles at least one of them should deliver a good accuracy.
 
 \phantomsection\label{sec:DensityAzimuthalHarmonic} A separate class \ttt{DensityAzimuthalHarmonic} serves the same task as \ttt{Density\-Spherical\-Harmonic}: provides an interpolated density model that is initialized from the values of source density at nodes of a 2d grid in $R,z$ plane (for an axisymmetric model) or 3d grid in $R,z,\phi$ (in general). The density is represented as a Fourier expansion in $\phi$, with each term being a 2d cubic spline in $\tilde R, \tilde z$ coordinates (scaled in the same way as in \ttt{CylSpline}). Interpolated density is zero outside the grid. This class serves as a counterpart to \ttt{DensitySphericalHarmonic} in the context of DF-based self-consistent models for disk-like components: the values of density at grid nodes are computed by (expensive) integration of DF over velocities, and density in the entire space, necessary for computing the potential, is given by the interpolator.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Orbit integration and the variational equation}  \label{sec:OrbitDetails}
+
+The orbit integration can be performed in all three standard coordinate systems (Cartesian, Cylindrical and Spherical), although only the Cartesian system is used in practice (in particular, by the \ttt{orbit} routine from the \Python interface). In the reference frame that rotates with an angular frequency $\boldsymbol\Omega$, the Hamiltonian equations of motion for $\boldsymbol{w} \equiv \{\bx, \bv\}$ are
+\begin{subequations}
+\begin{align}
+\frac{\d\bx}{\d t} &= \bv - \boldsymbol\Omega \times \bx, \\
+\frac{\d\bv}{\d t} &= -\frac{\partial\Phi(\bx)}{\partial\bx} - \boldsymbol\Omega \times \bv.
+\end{align}
+\end{subequations}
+
+This ODE system is integrated using one of the available methods derived from the base class \ttt{math::BaseOdeSolver}; currently we provide only the 8th order Runge--Kutta with adaptive timestep (Dormand--Prince, \textsc{dop853}) \cite{DOP853}. Other possibilities previously implemented in \cite{Vasiliev2013} include 15th order Gauss--Radau scheme \cite{IAS15}, 4th order Hermite method \cite{Hermite}, and several methods from \textsc{Odeint} package \cite{odeint}, including Bulirsch--Stoer and various Runge--Kutta schemes. However, in practice all of them have quite similar performance in the appropriate range of tolerance parameters, thus we have only kept \textsc{dop853} at the moment. 
+This method has been slightly modified as follows. In the original method, each timestep has 12 Runge--Kutta stages (thus evaluates the forces that many times), plus another 3 force evaluations are needed to construct a 8th-order interpolator for the solution within the current timestep (so-called dense output feature). In our modification, these three evaluations are eliminated, at the expense of degrading the interpolation to 7th order, which is more than sufficient in practice. This reduces the number of force evaluations by 20\% per accepted step. However, in the adaptive-timestep integrator, a significant fraction of timesteps ($\sim1/3$) are rejected and repeated with a reduced step; rejected steps still cost 11 force evaluations, but would not incur the 3 additional evaluations for the dense output in the original method, so the total savings are closer to 15\%.
+
+The variational equation describes the evolution of infinitesimally small perturbations of initial conditions $\delta\boldsymbol{w} \equiv \{\delta\bx, \delta\bv\}$ along the orbit:
+\begin{subequations}
+\begin{align}
+\frac{\d\,\delta\bx}{\d t} &= \delta\bv - \boldsymbol\Omega \times \delta\bx, \\
+\frac{\d\,\delta\bv}{\d t} &= -\frac{\partial^2\Phi(\bx)}{\partial\bx^2}\,\delta\bx - \boldsymbol\Omega \times \delta\bv.
+\end{align}
+We note that these equations describe a Hamiltonian system with a simple quadratic but time-dependent Hamiltonian (indirectly through the original trajectory):
+\begin{align}
+\hat H(\delta\bx, \delta\bv, t) = \frac{1}{2}\delta\bx^T\; \frac{\D^2\Phi(\bx)}{\D\bx^2}\bigg|_{\bx=\bx(t)} \delta\bx + \frac{1}{2}\delta\bv^2 .
+\end{align}
+Alternatively, they can be expressed as a second-order linear ODE with variable coefficients for $\delta\bx$:
+\begin{align}
+\frac{\d^2\delta\bx(t)}{\d t^2} = \mathsf{A(t)}\,\delta\bx(t) + \mathsf{B(t)}\,\frac{\d\, \delta\bx(t)}{\d t}, 
+\end{align}
+where the matrices $\mathsf{A}$ and $\mathsf{B}$, in the standard case of rotation about $z$ axis $\boldsymbol\Omega\equiv \{0, 0, \Omega\}$, are
+\begin{align}
+A_{ij}(t) = -\frac{\D^2 \Phi(\bx)}{\D x_i\;\D x_j} \bigg|_{\bx=\bx(t)} - 
+\left( \begin{array}{ccc} \Omega^2 & 0 & 0 \\ 0 & \Omega^2 & 0 \\ 0 & 0 & 0 \end{array} \right), \qquad
+B_{ij} = \left( \begin{array}{ccc} 0 & 2\Omega & 0 \\ -2\Omega & 0 & 0 \\ 0 & 0 & 0 \end{array} \right).
+\end{align}
+\end{subequations}
+
+Although one may follow the evolution of the deviation vector $\delta\boldsymbol{w}$ simultaneously with the trajectory $\boldsymbol{w}$ itself, using the same ODE integrator extended to 12 dimensions, this has two disadvantages: first, it makes no use of the linear character of the variational equation, and second, it would change the timestepping of the ODE solver compared to the case of integrating just the trajectory. If the orbit is chaotic, it will eventually look very different when integrated with or without the deviation vector, which is undesirable. Thus for the variational equation, we use an independent ODE solver derived from the base class \ttt{math::BaseOde2Solver}, which is specialized to the linear second-order ODE case. The main ODE solver integrates only the orbit and provides a high-accuracy interpolated solution $\bx(t)$ within the current timestep, and the attached variational equation solver uses it to evolve $\delta\bx$ on the same timestep.
+
+There are two implementations based on the same principle, but with a different order: 6th-order method with 3 Hessian evaluations per timestep, and 8th-order method with 4 evaluations.
+In the 6th-order method, the second time derivative of $\delta\bx$ is approximated by a quadratic polynomial on the current timestep $t_s..t_{s+1}$, using a normalized time variable $h\equiv (t-t_s)/(t_{s+1}-t_s)$:
+\begin{subequations}
+\begin{align}  \label{eq:ode2a}
+\ddot{\delta\bx}(h) \equiv \frac{\d^2\delta\bx}{\d t^2} =
+\boldsymbol{c}_0 + (h-h_0) \big( \boldsymbol{c}_1 + (h-h_1)\,\boldsymbol{c}_2 \big),
+\end{align}
+and therefore $\dot{\delta\bx}(h)$ and $\delta\bx(h)$ are respectively third- and fourth-order polynomials in $h$. Here $h_k$ are some fixed time moments within the current timestep, and the coefficients $\boldsymbol{c}_k$ are to be determined. First, we record the $D\times D$ matrices $\mathsf{A}(t)$ and $\mathsf{B}(t)$ at times $t_s + (t_{s+1}-t_s)\,h_k$, $k=0,1,2$ -- this is the only time the original trajectory is referenced and the potential derivatives are evaluated. We then recall that for each $h_k$,
+\begin{align}  \label{eq:ode2b}
+\ddot{\delta x}_i(h_k) = \sum\nolimits_{j=1}^D \big[ A_{ij}(h_k)\,\delta x_j(h_k) + B_{ij}(h_k)\,\dot{\delta x_j}(h_k) \big],
+\end{align}
+\end{subequations}
+where both left- and right-hand sides are linear combinations of the unknown coefficients $\boldsymbol{c}_k$. This linear algebraic system is most easily solved by iterations. At each iteration, we compute the values of $\delta\bx(h_0)$ and $\dot{\delta\bx}(h_0)$ on the right-hand side of (\ref{eq:ode2b}), using the current values of $\boldsymbol{c}_0, \boldsymbol{c}_1, \boldsymbol{c}_2$. From (\ref{eq:ode2a}) we see that this provides the updated value for $\boldsymbol{c}_0$ only, since the other terms in brackets are zero for $h=h_0$. Then we use the newly computed value of $\boldsymbol{c}_0$ and the values of $\boldsymbol{c}_1, \boldsymbol{c}_2$ from the previous iteration to construct $\delta\bx(h_1)$ and $\dot{\delta\bx}(h_1)$ on the right-hand side of (\ref{eq:ode2b}), and then update $\boldsymbol{c}_1$ from (\ref{eq:ode2a}) as $\boldsymbol{c}_1 = (\ddot{\delta\bx}(h_1) - \boldsymbol{c}_0) / (h_1-h_0)$. Finally, the same procedure is repeated for the point $h_2$ to update $\boldsymbol{c}_2$. The whole sequence is then iterated several times; we stress again that the matrices $\mathsf{A}(h_k)$ and $\mathsf{B}(h_k)$, which contain the expensive-to-compute Hessian of the potential, are fixed throughout this process. Finally, after the coefficients $\boldsymbol{c}_k$ have been determined with sufficient precision, the values of $\delta\bx$ and $\dot{\delta\bx}$ at $h=1$ (end of the timestep) are computed and stored. 
+
+By choosing the three intermediate points $h_k$ to be the nodes of the Gauss--Legendre quadrature, the whole scheme provides 6th order accuracy for $\delta\bx$ at the timestep boundaries, while the interpolated solution within each timestep has 5th order accuracy for $\delta\bx$ and 4th order for $\dot{\delta\bx}$.
+The same approach is used to construct a scheme with four intermediate points $h_k$ per timestep, in which $\ddot{\delta\bx}$, $\dot{\delta\bx}$ and $\delta\bx$ are respectively cubic, quartic and quintinc polynomials, $\delta\bx$ at the end of the timestep has 8th order accuracy, and the interpolated solution within the timestep has 6th order for $\delta\bx$ and 5th order for $\dot{\delta\bx}$. This latter scheme is used in practice to integrate the variational equation for one or more deviation vectors $\boldsymbol{w}$ (note that the matrices $\mathsf{A}$, $\mathsf{B}$ containing the potential derivatives are only evaluated four times per timestep, irrespective of the number of independent deviation vectors). Note, however, that the high order of the scheme is only guaranteed for sufficiently smooth Hessians; this condition is not satisfied by the two commonly used potential expansions represented by quintic splines (\ppp{Multipole} and \ppp{CylSpline}), whose Hessians have only one continuous derivative.
+
+The class \ttt{orbit::RuntimeVariational} uses the above described method to follow one or six deviation vectors $\delta\boldsymbol{w}_d$ during orbit integration. These vectors are initially chosen to be orthogonal and unit-normalized, so that the matrix $\mathsf W(t)$ assembled from these column-vectors is the Jacobian $\mathsf J$ of the mapping between the orbital initial conditions $\boldsymbol{w}^{(0)}$ and the current point on the trajectory $\boldsymbol{w}(t)$: $J_{kd} = \D w_k(t) / \D w_d^{(0)}$. For a regular orbit, deviation vectors grow linearly with time, and the basis remains sufficiently non-degenerate. However, if an orbit is chaotic, all vectors eventually start to grow exponentially and become more and more aligned with each other (note that the determinant of the Jacobian remains unity, since the phase volume is conserved for any Hamiltonian system). The eigenvalues of the Jacobian 
+
+One may periodically orthogonalize the set of deviation vectors, using the QR factorization of $\mathsf W(t_1)$ at some time $t_1$ as $\mathsf W(t_1) = \mathsf Q^{(1)}\, \mathsf R^{(1)}$, where $\mathsf Q^{(1)}$ is an orthogonal matrix with values of order unity, and $\mathsf R^{(1)}$ is an upper triangular matrix with a large condition number (the ratio of maximal to minimal value on the main diagonal). The matrix $\mathsf W^{(1)}(t_1) \equiv \mathsf Q^{(1)}$ then replaces the original set of deviation vectors, and their evolution is followed until the matrix $\mathsf W^{(1)}(t)$ again becomes too large at some time $t_2$, at which point another orthogonalization is performed: $\mathsf W^{(1)}(t_2) = \mathsf Q^{(2)}\, \mathsf R^{(2)}$. The matrix $\mathsf W^{(2)}(t_2) \equiv \mathsf Q^{(2)}$ again replaces the previous deviation vectors, and the process continues as long as needed. At any point, the Jacobian can be reconstructed as $\mathsf J (t) = \mathsf W^{(N)}(t) \, \mathsf R^{(N)}\, \mathsf R^{(N-1)}\, \dots\, \mathsf R^{(1)}$. Note that the product of upper triangular matrices $\mathsf R \equiv \prod_{n=1}^N \mathsf R^{(n)}$ is still an upper triangular matrix and can be updated after each orthogonalization step. Its condition number keeps growing with each step and may well exceed $10^{16}$ (but is still limited by the overall dynamical range of \texttt{double}, roughly $10^{300}$). To prevent overflow, one may further renormalize $\mathsf R$ as $\exp(\Lambda)\, \hat{\mathsf R}$, where the largest diagonal element of $\hat{\mathsf R}$ is 1, and the smallest may eventually underflow to zero.
+
+The full spectrum of Lyapunov exponents can be determined from the diagonal elements of the matrix $\mathsf R$ in the limit $t\to \infty$. However, in practice we are mostly interested in the largest of them, which indicates whether the orbit is chaotic or not. Since for a chaotic orbit all deviation vectors eventually become exponentially growing with the same rate, it is sufficient to follow the evolution of only one vector, renormalizing its magnitude to avoid overflow, but without the need for orthogonalization. On the other hand, if we are interested in the full Jacobian matrix $\mathsf J$, we need to follow all six vectors. Even in this case there is still no particular advantage in carrying out the orthogonalization procedure, since the reconstructed Jacobian matrix will be fully degenerate (all deviation vectors will be equal to within floating-point precision) when the difference between the largest and the second-largest diagonal element of $\mathsf R$ exceeds $10^{16}$, thus losing any extra dynamic range contained in $\mathsf R$. Therefore, the orthogonalization procedure is not used by default.
+
+Finally, the (largest) Lyapunov exponent is determined from the time evolution of the norm of the largest (or the only) deviation vector $|\boldsymbol{w}|$ as follows. Assuming that $|\boldsymbol w| \approx A\,t + B\,\exp\big(\lambda t / T_\mathrm{orb}\big)$, where the first term describes the phase mixing for regular orbits, and the optional second term becomes dominant for chaotic orbits at large times, we fit a linear regression $\ln\big(|\boldsymbol{w}(t)|\big) \approx \ln t + C + \lambda t / T_\mathrm{orb}$. If the linear term $\lambda t / T_\mathrm{orb}$ is significantly different from zero (that is, exceeds the other terms by at least 2 at the end of the time interval), $\lambda$ is reported as the Lyapunov exponent normalized to the orbital period $T_\mathrm{orb}$, otherwise the evidence for chaotic behaviour is considered insufficient and $\lambda=0$ is reported.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

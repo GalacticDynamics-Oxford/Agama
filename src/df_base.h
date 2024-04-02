@@ -10,6 +10,12 @@
 /** Classes for dealing with action-base distribution functions */
 namespace df{
 
+/** Derivatives of the DF with respect to actions */
+struct DerivByActions {
+    double dbyJr, dbyJz, dbyJphi;
+};
+
+
 /** Base class defining the action-based distribution function (DF) */
 class BaseDistributionFunction{
 public:
@@ -32,9 +38,22 @@ public:
     /** Number of components in the case of a multi-component DF */
     virtual unsigned int numValues() const { return 1; }
 
-    /** Value of distribution function for the given set of actions J:
+    /** Evaluate the distribution function and optionally its derivatives w.r.t. actions,
+        to be implemented in the derived classes.
+        \param[in] J - a triplet of actions.
+        \param[out] value - pointer to the variable that will store the DF value (non-NULL).
+        \param[out] der (optional) - if not NULL, will store the DF derivatives w.r.t. actions.
+    */
+    virtual void evalDeriv(const actions::Actions &J,
+        /*output*/ double* value, DerivByActions *der=NULL) const=0;
+
+    /** Shortcut for getting the value of distribution function for the given set of actions J:
         in case than numValues>1, return a single value - the sum of all components */
-    virtual double value(const actions::Actions &J) const=0;
+    double value(const actions::Actions &J) const {
+        double result;
+        evalDeriv(J, &result);
+        return result;
+    }
 
     /** Vectorized evaluation of the DF for several input points at once, possibly reporting
         multiple values for a single point (if numValues>1 and separate output is requested).
@@ -47,14 +66,17 @@ public:
         array corresponds exactly to one input point;
         if separate is true, the length of output is npoints * numValues, and
         values[p * numValues + c] contains the value of c-th component at p-th input point.
+        \param[out] derivs (optional) - if not NULL, should point to an array that will be 
+        filled with DF derivatives in the same order as values (i.e., npoints if separate=false,
+        or npoints * numValues if separate=true).
     */
     virtual void evalmany(const size_t npoints, const actions::Actions J[],
-        bool /*separate*/, double values[]) const
+        bool /*separate*/, double values[], DerivByActions derivs[]=NULL) const
     {
         // default implementation for a single-component DF does not make a distinction between
         // separate or combined evaluation, and just loops over input points one by one
         for(size_t p=0; p<npoints; p++)
-            values[p] = value(J[p]);
+            evalDeriv(J[p], values+p, derivs? derivs+p : NULL);
     }
 };
 

@@ -25,20 +25,32 @@ public:
     PtrDistributionFunction component(unsigned int index) const { return components.at(index); }
 
     /// the value of a composite DF is simply the sum of values of all its components
-    virtual double value(const actions::Actions &J) const {
-        double sum=0;
-        for(unsigned int c=0; c<components.size(); c++)
-            sum += components[c]->value(J);
-        return sum;
+    virtual void evalDeriv(const actions::Actions &J,
+        /*output*/ double* value, DerivByActions *deriv=NULL) const
+    {
+        *value = 0;
+        double val;
+        DerivByActions der;
+        if(deriv)
+            deriv->dbyJr = deriv->dbyJz = deriv->dbyJphi = 0;
+        for(unsigned int c=0; c<components.size(); c++) {
+            components[c]->evalDeriv(J, &val, deriv ? &der : NULL);
+            *value += val;
+            if(deriv) {
+                deriv->dbyJr   += der.dbyJr;
+                deriv->dbyJz   += der.dbyJz;
+                deriv->dbyJphi += der.dbyJphi;
+            }
+        }
     }
 
     /** Compute values of all components for an array of input points in action space:
         if separate is true, store all DF components at a given input point contiguously
         in the output array, otherwise store just a single value (a sum of all components)
-        for each input point.
+        for each input point; similar storage scheme for derivatives if they are requested.
     */
     virtual void evalmany(const size_t npoints, const actions::Actions J[], bool separate,
-        double values[]) const;
+        /*output*/ double values[], DerivByActions derivs[]=NULL) const;
 
 private:
     std::vector<PtrDistributionFunction> components;

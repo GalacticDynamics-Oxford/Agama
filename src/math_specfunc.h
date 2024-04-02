@@ -79,6 +79,9 @@ double besselK(const int n, const double x);
     the second one is selected by setting the second argument to true */
 double lambertW(const double x, bool Wminus1branch=false);
 
+/** The "generalized exponential" function (1 + q*x)^(1/q), which tends to exp(x) in the limit q->0 */
+double qexp(const double x, const double q=0);
+
 /** solve the Kepler equation:  phase = eta - ecc * sin(eta)  for eta (eccentric anomaly) */
 double solveKepler(double ecc, double phase);
 

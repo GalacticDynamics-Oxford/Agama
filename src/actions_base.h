@@ -16,8 +16,8 @@ struct Actions {
     double Jz;       ///< vertical action or its analog, [0..infinity)
     double Jphi;     ///< azimuthal action (equal to the z-component of angular momentum in
                      ///< axisymmetric case, can have any value)
-    Actions() {};
-    Actions(double _Jr, double _Jz, double _Jphi) : Jr(_Jr), Jz(_Jz), Jphi(_Jphi) {};
+    Actions() {}
+    Actions(double _Jr, double _Jz, double _Jphi) : Jr(_Jr), Jz(_Jz), Jphi(_Jphi) {}
 };
 
 /** Angles in arbitrary potential */
@@ -25,14 +25,14 @@ struct Angles {
     double thetar;   ///< phase angle of radial motion
     double thetaz;   ///< phase angle of vertical motion
     double thetaphi; ///< phase angle of azimuthal motion
-    Angles() {};
-    Angles(double tr, double tz, double tphi) : thetar(tr), thetaz(tz), thetaphi(tphi) {};
+    Angles() {}
+    Angles(double tr, double tz, double tphi) : thetar(tr), thetaz(tz), thetaphi(tphi) {}
 };
 
 /** A combination of both actions and angles */
 struct ActionAngles: Actions, Angles {
-    ActionAngles() {};
-    ActionAngles(const Actions& acts, const Angles& angs) : Actions(acts), Angles(angs) {};
+    ActionAngles() {}
+    ActionAngles(const Actions& acts, const Angles& angs) : Actions(acts), Angles(angs) {}
 };
 
 /** Frequencies of motion (Omega = dH/dJ) */
@@ -40,29 +40,16 @@ struct Frequencies {
     double Omegar;    ///< frequency of radial motion, dH/dJr
     double Omegaz;    ///< frequency of vertical motion, dH/dJz
     double Omegaphi;  ///< frequency of azimuthal motion, dH/dJphi
-    Frequencies() {};
-    Frequencies(double omr, double omz, double omphi) : Omegar(omr), Omegaz(omz), Omegaphi(omphi) {};
-};
-
-/** Derivatives of coordinate/momentum variables w.r.t actions:
-    each of three member fields stores the derivative of 6 pos/vel elements by the given action,
-    in an inverted notation:  e.g.,  d(v_phi)/d(J_z) = dbyJz.vphi */
-template <typename CoordT> struct DerivAct {
-    coord::PosVelT<CoordT> dbyJr, dbyJz, dbyJphi;
-};
-
-/** Derivatives of coordinate/momentum variables w.r.t angles:
-    each of three member fields stores the derivative of 6 pos/vel elements by the given angle */
-template <typename CoordT> struct DerivAng {
-    coord::PosVelT<CoordT> dbythetar, dbythetaz, dbythetaphi;
+    Frequencies() {}
+    Frequencies(double omr, double omz, double omphi) : Omegar(omr), Omegaz(omz), Omegaphi(omphi) {}
 };
 
 
 /** Base class for action finders, which convert position/velocity pair to an action/angle pair */
 class BaseActionFinder{
 public:
-    BaseActionFinder() {};
-    virtual ~BaseActionFinder() {};
+    BaseActionFinder() {}
+    virtual ~BaseActionFinder() {}
 
     /** Return the name of the particular implementation of the action finder */
     virtual std::string name() const = 0;
@@ -98,8 +85,8 @@ private:
     to a position/velocity point */
 class BaseActionMapper{
 public:
-    BaseActionMapper() {};
-    virtual ~BaseActionMapper() {};
+    BaseActionMapper() {}
+    virtual ~BaseActionMapper() {}
 
     /** return the name of the particular implementation of the action mapper */
     virtual std::string name() const = 0;

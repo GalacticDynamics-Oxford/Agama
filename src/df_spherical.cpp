@@ -437,7 +437,7 @@ math::LogLogSpline createSphericalDF(
 {
     std::vector<double> gridPhi, gridf;
     createSphericalDF(density, potential, beta0, r_a, /*output*/ gridPhi, gridf);
-    // construct a log-log-scaled spline interpolator for f(P), where  P = 1/Phi0 - 1/E.
+    // construct a log-log-scaled spline interpolator for f(P), where  P = 1/Phi0 - 1/Q.
     // Both f and P will be converted to log-scaled values by LogLogSpline,
     // so we need to provide the un-log-scaled coordinate, reusing the gridPhi array for P.
     double invPhi0 = 1/potential(0);
@@ -587,15 +587,26 @@ QuasiSphericalCOM::QuasiSphericalCOM(
     df(createSphericalDF(density, potential, beta0, r_a))
 {}
 
-double QuasiSphericalCOM::value(double E, double L, double Lz) const
+void QuasiSphericalCOM::evalDeriv(const ClassicalIntegrals& ints,
+    double *value, DerivByClassicalIntegrals *deriv) const
 {
-    double Q = E + 0.5 * pow_2(L/r_a), P = invPhi0 - 1./Q;
+    double Q = ints.E + 0.5 * pow_2(ints.L/r_a), P = invPhi0 - 1./Q, dfdP = 0;
     if(Q>=0)
-        return 0;     // DF is zero for Q>=0, which may happen even for a valid combination of E and L
-    if(L<0 || fabs(Lz)>L || P<0)
-        return NAN;   // invalid range - this shouldn't happen in normal circumstances, so be picky here
+        *value = 0;  // DF is zero for Q>=0, which may happen even for a valid combination of E and L
+    else
+        df.evalDeriv(P, value, deriv ? &dfdP : NULL);
     // note that we don't (and cannot) check that L <= Lcirc(E)
-    return df(P) * (beta0==0 ? 1 : math::pow(L, -2*beta0));
+    double Lpow = math::pow(ints.L, -2*beta0);
+    *value *= Lpow;
+    if(deriv) {
+        double dfdQ = Q<0 ? dfdP / pow_2(Q) : 0;
+        deriv->dbyE = Lpow * dfdQ;
+        deriv->dbyL = Lpow * dfdQ * ints.L / pow_2(r_a) + (beta0 ? -2*beta0 * (*value) / ints.L : 0);
+        deriv->dbyLz = 0;
+    }
+    // check for invalid range - this shouldn't happen in normal circumstances, so be picky here
+    if(ints.L<0 || fabs(ints.Lz)>ints.L || P<0)
+        *value = NAN;
 }
 
 }  // namespace df

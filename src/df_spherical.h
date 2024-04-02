@@ -95,12 +95,36 @@ public:
     QuasiSphericalIsotropic(const math::LogLogSpline& _df, const potential::BasePotential& potential) :
         df(_df), pv(potential::Sphericalized<potential::BasePotential>(potential)), af(potential) {}
 
-    virtual double value(const actions::Actions &J) const
+    virtual void evalDeriv(const actions::Actions &J, double *f,
+        DerivByActions *deriv=NULL) const
     {
-        return df(pv(af.E(J)));
+        if(deriv) {
+            // derivatives are obtained by a simple application of the chain rule
+            double Omegar, Omegaz, E = af.E(J), L = J.Jz + (J.Jphi>=0 ? J.Jphi : -J.Jphi);
+            af.Jr(E, L, &Omegar, &Omegaz);
+            double Omegaphi = J.Jphi>=0 ? Omegaz : -Omegaz;
+            double h, dhdE, dfdh;
+            pv.evalDeriv(E, &h, &dhdE);
+            df.evalDeriv(h,  f, &dfdh);
+            deriv->dbyJr   = dfdh * dhdE * Omegar;  // Omega_r = dE/dJ_r, etc.
+            deriv->dbyJz   = dfdh * dhdE * Omegaz;
+            deriv->dbyJphi = dfdh * dhdE * Omegaphi;
+        } else
+            *f = df(pv(af.E(J)));
     }
 };
 
+
+/// a triplet of classical integrals of motion in a spherical potential:
+/// energy E, total angular momentum L (non-negative), and z-component of angular momentum Lz
+struct ClassicalIntegrals{
+    double E, L, Lz;
+};
+
+/// derivatives of the DF expressed in terms of classical integrals
+struct DerivByClassicalIntegrals{
+    double dbyE, dbyL, dbyLz;
+};
 
 /** Parent class for spherical (an)isotropic distribution functions expressed in terms of E,L,Lz.
     These functions are constructed for a given potential-density pair using a suitable inversion
@@ -130,14 +154,33 @@ public:
         af(potential::FunctionToPotentialWrapper(potential)) {}
     virtual ~QuasiSpherical() {}
 
-    /** convert actions to E,L,Lz and compute the DF */
-    virtual double value(const actions::Actions &J) const
+    /** convert actions to E,L,Lz, then compute the DF and optionally its derivatives w.r.r. J */
+    virtual void evalDeriv(const actions::Actions &J, double *value,
+        DerivByActions *deriv=NULL) const
     {
-        return value(af.E(J), /*L*/ J.Jz + (J.Jphi>=0 ? J.Jphi : -J.Jphi), /*Lz*/ J.Jphi);
+        double signJphi = J.Jphi >=0 ? 1 : -1;
+        ClassicalIntegrals ints;
+        DerivByClassicalIntegrals d;
+        ints.E  = af.E(J);
+        ints.L  = J.Jz + J.Jphi * signJphi;
+        ints.Lz = J.Jphi;
+        evalDeriv(ints, /*output*/ value, deriv ? &d : NULL);
+        if(deriv) {
+            double Omegar, Omegaz;
+            af.Jr(ints.E, ints.L, &Omegar, &Omegaz);
+            double Omegaphi = Omegaz * signJphi;
+            deriv->dbyJr   = d.dbyE * Omegar;  // Omega_r = dE/dJ_r, etc.
+            deriv->dbyJz   = d.dbyE * Omegaz   + d.dbyL;
+            deriv->dbyJphi = d.dbyE * Omegaphi + d.dbyL * signJphi + d.dbyLz;
+        }
     }
 
-    /** value of distribution function for the given E, L, Lz - implemented in derived classes */
-    virtual double value(double E, double L, double Lz) const=0;
+    /** compute the value of distribution function for the given E, L, Lz,
+        and optionally its derivatives w.r.t. the classical integrals
+        (to be implemented in derived classes)
+    */
+    virtual void evalDeriv(const ClassicalIntegrals& ints,
+        double *value, DerivByClassicalIntegrals *der=NULL) const=0;
 };
 
 
@@ -162,9 +205,10 @@ public:
     QuasiSphericalCOM(const math::IFunction& density, const math::IFunction& potential,
         double beta0=0, double r_a=INFINITY);
 
-    using QuasiSpherical::value;  // bring both overloaded functions into scope
+    using QuasiSpherical::evalDeriv;  // bring both overloaded functions into scope
 
-    virtual double value(double E, double L, double Lz) const;
+    virtual void evalDeriv(const ClassicalIntegrals& ints,
+        double *value, DerivByClassicalIntegrals *deriv=NULL) const;
 };
 
 }  // namespace

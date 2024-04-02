@@ -83,12 +83,12 @@ void writeSurfaceDensityProfile(const std::string& filename, const galaxymodel::
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int ir=0; ir<nr; ir++) {
-        computeMoments(model, coord::PosProj(radii[ir],0),  /*projected*/
+        computeMoments(model, coord::PosProj(radii[ir],0),
             &surfDens[ir*nc], NULL, NULL, /*separate*/ true);
     }
 
     std::ofstream strm(filename.c_str());
-    strm << "# Radius[Kpc]\tsurfaceDensity[Msun/pc^2]\n";
+    strm << "# Radius[Kpc]\tThinDisk\tThickDisk\tStellarHalo:SurfaceDensity[Msun/pc^2]\n";
     for(int ir=0; ir<nr; ir++) {
         strm << radii[ir] * intUnits.to_Kpc;
         for(int ic=0; ic<nc; ic++)
@@ -118,7 +118,7 @@ void writeVerticalDensityProfile(const std::string& filename, const galaxymodel:
     }
 
     std::ofstream strm(filename.c_str());
-    strm << "# z[Kpc]\tThinDisk\tThickDisk\tStellarHalo[Msun/pc^3]\n";
+    strm << "# z[Kpc]\tThinDisk\tThickDisk\tStellarHalo:Density[Msun/pc^3]\n";
     for(int ih=0; ih<nh; ih++) {
         strm << heights[ih] * intUnits.to_Kpc;
         for(int ic=0; ic<nc; ic++)
@@ -127,6 +127,41 @@ void writeVerticalDensityProfile(const std::string& filename, const galaxymodel:
     }
 }
 
+/// print velocity dispersion profiles in the equatorial plane as functions of radius to a file
+void writeVelocityDispersionProfile(const std::string& filename, const galaxymodel::GalaxyModel& model)
+{
+    std::cout << "Writing velocity dispersion profile\n";
+    std::vector<double> radii;
+    // convert radii to internal units
+    for(double r=1./8; r<=30; r<1 ? r*=2 : r<16 ? r+=0.5 : r+=2)
+        radii.push_back(r * intUnits.from_Kpc);
+    int nr = radii.size();
+    int nc = model.distrFunc.numValues();  // number of DF components
+    std::vector<coord::VelCar>  vel (nr*nc);
+    std::vector<coord::Vel2Car> vel2(nr*nc);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for(int ir=0; ir<nr; ir++) {
+        computeMoments(model, coord::PosCar(radii[ir],0,0),
+            NULL, &vel[ir*nc], &vel2[ir*nc], /*separate*/ true);
+    }
+
+    std::ofstream strm(filename.c_str());
+    strm << "# Radius[Kpc]\tThinDisk:sigma_r\tsigma_phi\tsigma_z\tv_phi\t"
+    "ThickDisk:sigma_r\tsigma_phi\tsigma_z\tv_phi\t"
+    "StellarHalo:sigma_r\tsigma_phi\tsigma_z\tv_phi[km/s]\n";
+    for(int ir=0; ir<nr; ir++) {
+        strm << radii[ir] * intUnits.to_Kpc;
+        for(int ic=0; ic<nc; ic++)
+            strm << '\t' <<
+                sqrt(vel2[ir*nc+ic].vx2) * intUnits.to_kms << '\t' <<
+                sqrt(vel2[ir*nc+ic].vy2-pow_2(vel[ir*nc+ic].vy)) * intUnits.to_kms << '\t' <<
+                sqrt(vel2[ir*nc+ic].vz2) * intUnits.to_kms << '\t' <<
+                vel[ir*nc+ic].vy * intUnits.to_kms;
+        strm << '\n';
+    }
+}
 /// print velocity distributions at the given point to a file
 void writeVelocityDistributions(const std::string& filename, const galaxymodel::GalaxyModel& model)
 {
@@ -335,9 +370,10 @@ int main()
     // output various profiles (only for stellar components)
     std::cout << "\033[1;33mComputing density profiles and velocity distribution\033[0m\n";
     galaxymodel::GalaxyModel modelStars(*model.totalPotential, *model.actionFinder, *dfStellar);
-    writeSurfaceDensityProfile ("model_stars_final.surfdens", modelStars);
-    writeVerticalDensityProfile("model_stars_final.vertical", modelStars);
-    writeVelocityDistributions ("model_stars_final.veldist",  modelStars);
+    writeSurfaceDensityProfile    ("model_stars_final.surfdens", modelStars);
+    writeVerticalDensityProfile   ("model_stars_final.vertical", modelStars);
+    writeVelocityDispersionProfile("model_stars_final.veldisp",  modelStars);
+    writeVelocityDistributions    ("model_stars_final.veldist",  modelStars);
 
     // export model to an N-body snapshot
     std::cout << "\033[1;33mCreating an N-body representation of the model\033[0m\n";

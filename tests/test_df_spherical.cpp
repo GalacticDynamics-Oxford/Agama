@@ -124,7 +124,7 @@ public:
     {}
 
     // the energy-dependent part of DF
-    inline double df(double E, double beta, double an) const {
+    inline double dfE(double E, double beta, double an) const {
         if(E<=-1 || E>=0)
             return NAN;
         double E2=E*E;
@@ -138,11 +138,12 @@ public:
         return NAN;  // no simple expression for an arbitrary beta and r_a (see An&Evans 2006)
     }
 
-    using QuasiSpherical::value;
-
     // interface for anisotropic DF as a function of (E,L)
-    virtual double value(double E, double L, double /*Lz*/) const {
-        return df(E + 0.5 * L*L*an, beta, an) * (beta==0 ? 1 : math::pow(L, -2*beta));
+    virtual void evalDeriv(const df::ClassicalIntegrals& ints,
+        double *value, df::DerivByClassicalIntegrals* /*deriv*/ =NULL) const
+    {
+        *value = dfE(ints.E + 0.5 * pow_2(ints.L)*an, beta, an) *
+            (beta==0 ? 1 : math::pow(ints.L, -2*beta));
     }
 };
 
@@ -160,7 +161,7 @@ public:
     {}
 
     // the energy-dependent part of DF
-    inline double df(double E, double beta) const {
+    inline double dfE(double E, double beta) const {
         if(E<=-1 || E>=0)
             return NAN;
         if(beta==0) {   // special case of isotropic model
@@ -178,11 +179,11 @@ public:
         return prefact * math::hypergeom2F1(5-2*beta, 1-2*beta, 3.5-beta, -E) * pow(-E, 2.5-beta);
     }
 
-    using QuasiSpherical::value;
-
     // interface for anisotropic DF as a function of (E,L)
-    virtual double value(double E, double L, double /*Lz*/) const {
-        return df(E, beta) * (beta==0 ? 1 : math::pow(L, -2*beta));
+    virtual void evalDeriv(const df::ClassicalIntegrals& ints,
+        double *value, df::DerivByClassicalIntegrals* /*deriv*/ =NULL) const
+    {
+        *value = dfE(ints.E, beta) * (beta==0 ? 1 : math::pow(ints.L, -2*beta));
     }
 };
 
@@ -196,7 +197,12 @@ public:
         phasevol(_phasevol), df(_df) {}
 
     virtual double value(const double h) const {
-        return df.value(phasevol.E(h), 0, 0);
+        double value;
+        df::ClassicalIntegrals ints;
+        ints.E = phasevol.E(h);
+        ints.L = ints.Lz = 0;
+        df.evalDeriv(ints, &value);
+        return value;
     }
 };
 
@@ -310,22 +316,6 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
     for(unsigned int i=0; i<gridr.size(); i++)
         gridPhi[i] = pot.value(coord::PosCyl(gridr[i], 0, 0));
 
-    // compute the moments of anisotropic DF using the general-purpose action-based GalaxyModel
-    std::vector<double> gmRho(gridr.size()), gmSigmaR(gridr.size()), gmSigmaT(gridr.size());
-    /*
-    actions::ActionFinderSpherical af(pot);
-    galaxymodel::GalaxyModel gm(pot, af, comDF);
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic,1)
-#endif
-    for(int i=0; i<static_cast<int>(gridr.size()); i++) {
-        coord::Vel2Cyl sigma;
-        computeMoments(gm, coord::PosCyl(gridr[i], 0, 0), &gmRho[i], NULL, &sigma);
-        gmSigmaR[i] = sqrt(sigma.vR2);
-        gmSigmaT[i] = sqrt(sigma.vz2);
-        std::cout << '*' << std::flush;
-    }*/
-
     if(isotropic) {
         // only consider the classes and routines dealing with f(h) if the model is isotropic
         DFWrapper dfw(phasevol, trueDF);
@@ -377,12 +367,10 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         "  '' u 2:(abs(1-$17/$16)) w l title 'dPhi/dr,interp', \\\n"
         "  '' u 2:(abs(1-$19/$18)) w l title 'rho(r),interp', \\\n"
         "  '' u 2:(abs(1-$20/$18)) w l title 'rho(r) from M(r)', \\\n"
-        //"  '' u 2:(abs(1-$21/$18)) w l title 'rho(r) from DFanisotr', \\\n"
         "  '' u 2:(abs(1-$21/$18)) w l title 'rho(r) from DFisotr', \\\n"
         "  '' u 2:(abs(1-$22/$18)) w l title 'rho(r) from sph.model'\n";
         strm.close();
         strm. open((filename+".dat").c_str());
-        //strmd.open((filename+"_dc.dat").c_str());
         strm << std::setprecision(16) <<
         "E                  \t"
         "Rcirc(E),true       "
@@ -404,12 +392,9 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         "rho(R),true         "
         "rho(R),interp       "
         "rho(R),LogLogSpline "
-        //"rho(R),momentsDF    "
         "rho(R),fromSphDF    "
         "rho(R),SphModel    \t"
         "sigma_r(R),Jeans    "
-        //"sigma_r,momentsDF   "
-        //"sigma_t*(1-beta)mom "
         "sigma,SphModel     \t"
         "h(E),true           "
         "h(E),PhaseVolume    "
@@ -423,7 +408,6 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         "f(E),fitToSampled2 \t"
         "DiffusionCoefE      "
         "DiffusionCoefEE    \n";
-        //strmd << std::setprecision(15);
     }
 
     for(unsigned int i=0; i<gridr.size(); i++) {
@@ -455,15 +439,18 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
         double truedens = pot.density(coord::PosCyl(r,0,0));
         double intdens  = (intd2Phi + 2*intdPhi/r) / (4*M_PI);
         double spldens  = intRho(gridr[i]);
-        /*double gmdens   = gmRho[i];
-        double gmdispr  = gmSigmaR[i];
-        double gmdisptb = gmSigmaT[i] * (1-beta);*/
         double jeansdisp= velDisp(gridr[i]);
         // since f(E,L=0) is infinite when beta>0, we need to evaluate the DF at some finite value of L
         // and then extract the energy-dependent part of DF
-        double LforDF   = 1e-100;
-        double truef    = trueDF.value(E, LforDF, 0) * pow(LforDF, 2*beta);
-        double comf     = comDF. value(E, LforDF, 0) * pow(LforDF, 2*beta);
+        df::ClassicalIntegrals ints;
+        ints.E = E;
+        ints.L = 1e-100;
+        ints.Lz = 0;
+        double truef, comf;
+        trueDF.evalDeriv(ints, &truef);
+        comDF .evalDeriv(ints, &comf);
+        truef *= pow(ints.L, 2*beta);
+        comf  *= pow(ints.L, 2*beta);
         double splf=0, sphf=0, fitf1=0, fitf2=0, dfdens=0, sphdens=0, sphdisp=0, difE=0, difEE=0;
         if(isotropic) {
             splf   = splDF ->value(trueh);
@@ -524,12 +511,9 @@ bool test(const potential::BasePotential& pot, double beta=0, double r_a=INFINIT
             utils::pp(truedens, 19) + ' ' +
             utils::pp(intdens,  19) + ' ' +
             utils::pp(spldens,  19) + ' ' +
-            //utils::pp(gmdens,   19) + ' ' +
             utils::pp(dfdens,   19) + ' ' +
             utils::pp(sphdens,  19) + '\t'+
             utils::pp(jeansdisp,19) + ' ' +
-            //utils::pp(gmdispr,  19) + ' ' +
-            //utils::pp(gmdisptb, 19) + ' ' +
             utils::pp(sphdisp,  19) + '\t'+
             utils::pp(trueh,    19) + ' ' +
             utils::pp(inth,     19) + ' ' +

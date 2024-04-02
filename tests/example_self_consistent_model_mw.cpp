@@ -64,16 +64,16 @@ struct NewDoublePowerLawParam{
 class NewDoublePowerLaw: public BaseDistributionFunction{
     const NewDoublePowerLawParam par;  ///< parameters of DF
     const double beta;              ///< auxiliary coefficient for the case of a central core
-    public:
+public:
     /** Create an instance of double-power-law distribution function with given parameters
         \param[in] params  are the parameters of DF
         \throws std::invalid_argument exception if parameters are nonsense
     */
-        NewDoublePowerLaw(const NewDoublePowerLawParam &params);
+    NewDoublePowerLaw(const NewDoublePowerLawParam &params);
 
-    /** return value of DF for the given set of actions.
-        \param[in] J are the actions  */
-        virtual double value(const actions::Actions &J) const;
+    /** return value of DF for the given set of actions */
+    virtual void evalDeriv(const actions::Actions &J, double *f,
+        df::DerivByActions *deriv=NULL) const;
 };
 
 /// helper class used in the root-finder to determine the auxiliary coefficient beta for a cored halo
@@ -131,7 +131,7 @@ NewDoublePowerLaw::NewDoublePowerLaw(const NewDoublePowerLawParam &inparams) :
         throw std::invalid_argument("NewDoublePowerLaw: amplitude of odd-Jphi component must be between -1 and 1");
 }
 
-double NewDoublePowerLaw::value(const actions::Actions &J) const
+void NewDoublePowerLaw::evalDeriv(const actions::Actions &J, double *val, df::DerivByActions*) const
 {
     double modJphi=fabs(J.Jphi);
     double L=J.Jz+modJphi;
@@ -144,21 +144,24 @@ double NewDoublePowerLaw::value(const actions::Actions &J) const
     double fac=exp(par.beta*sin(0.5*M_PI*c));
     double hJ=J.Jr/fac + .5*(1+c*xi)*fac*cL;
     double gJ=hJ;
-    double val = par.norm / pow_3(2*M_PI * par.J0) *
+    *val = par.norm / pow_3(2*M_PI * par.J0) *
         math::pow(1 + par.J0 / hJ,  par.slopeIn) *
         math::pow(1 + gJ / par.J0, -par.slopeOut);
     if(par.Jcutoff>0){   // exponential cutoff at large J
         double fac=math::pow(gJ / par.Jcutoff, par.cutoffStrength);
-        if(fac>25) return 0;
-        else val *= exp(-fac);
+        if(fac>25)
+            *val = 0;
+        else
+            *val *= exp(-fac);
     }
     if(par.Jcore>0) {   // central core of nearly-constant f(J) at small J
-        if(hJ==0) return par.norm / pow_3(2*M_PI * par.J0);
-        val *= math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - beta), -0.5*par.slopeIn);
+        if(hJ==0)
+            *val = par.norm / pow_3(2*M_PI * par.J0);
+        else
+            *val *= math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - beta), -0.5*par.slopeIn);
     }
     if(par.rotFrac!=0)  // add the odd part
-        val *= 1 + par.rotFrac * tanh(J.Jphi / par.Jphi0);
-    return val;
+        *val *= 1 + par.rotFrac * tanh(J.Jphi / par.Jphi0);
 }
 
 struct NewExponentialParam{
@@ -177,9 +180,10 @@ struct NewExponentialParam{
 
 class NewExponential: public df::BaseDistributionFunction{
     const NewExponentialParam par;     ///< parameters of the DF
-    public:
-        NewExponential(const NewExponentialParam& params);
-        virtual double value(const actions::Actions &J) const;
+public:
+    NewExponential(const NewExponentialParam& params);
+    virtual void evalDeriv(const actions::Actions &J, double *f,
+        df::DerivByActions *deriv=NULL) const;
 };
 
 NewExponential::NewExponential(const NewExponentialParam& params) :
@@ -193,10 +197,13 @@ NewExponential::NewExponential(const NewExponentialParam& params) :
         throw std::invalid_argument("NewExponential: addJden must be in (0, Jphi0)");
 }
 
-double NewExponential::value(const actions::Actions &J) const
+void NewExponential::evalDeriv(const actions::Actions &J, double *val, df::DerivByActions*) const
 {
     double Jp = J.Jphi<=0 ? 0 : J.Jphi;
-    if(Jp==0) return 0;
+    if(Jp==0) {
+        *val = 0;
+        return;
+    }
     double Jvel = fabs(Jp) + par.addJvel;
     double xr = pow(Jvel/par.Jphi0,par.pr)/par.Jr0;
     double xz = pow(Jvel/par.Jphi0,par.pz)/par.Jz0;
@@ -204,12 +211,10 @@ double NewExponential::value(const actions::Actions &J) const
     double Jden = Jp + par.addJden;
     double xp = Jden / par.Jphi0;
     double fp = par.norm/par.Jphi0 * fabs(J.Jphi) / par.Jphi0 * exp(-xp);
-    double F = fr * fz * fp;
-    if(J.Jphi >= 0)
-        return F;
-    else{
+    *val = fr * fz * fp;
+    if(J.Jphi < 0) {
         double x=J.Jphi/par.addJden;
-        return exp(x*(1-x)) * F;
+        *val *= exp(x*(1-x));
     }
 }
 

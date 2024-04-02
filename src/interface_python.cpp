@@ -3365,16 +3365,22 @@ static const char* docstringDistributionFunction =
     "For some of them, one also needs to provide the potential to initialize the table of epicyclic "
     "frequencies (potential=... argument). For the QuasiSpherical DF one needs to provide "
     "an instance of density profile (density=...) and the potential (if they are the same, then only "
-    "potential=... is needed), and optionally the central value of anisotropy coefficient 'beta0' "
-    "(by default 0) and the anisotropy radius 'r_a' (by default infinity).\n"
+    "potential=... is needed), and optionally the central value of anisotropy coefficient `beta0` "
+    "(by default 0) and the anisotropy radius `r_a` (by default infinity).\n"
     "Other parameters are specific to each DF type.\n"
     "Alternatively, a composite DF may be created from an array of previously constructed DFs:\n"
     ">>> df = DistributionFunction(df1, df2, df3)\n\n"
-    "The () operator computes the value of distribution function for the given triplet of actions.\n"
+    "The () operator computes the value of distribution function for the given triplet of actions, "
+    "or N such values if the input is a 2d array of shape Nx3. When called with an optional argument "
+    "der=True, it returns a 2-tuple with the DF values (array of length N) and its derivatives w.r.t. "
+    "actions (array of shape Nx3).\n"
     "The totalMass() function computes the total mass in the entire phase space.\n\n"
-    "A user-defined Python function that takes a single argument - Nx3 array "
-    "(with columns representing Jr, Jz, Jphi at N>=1 points) and returns an array of length N "
-    "may be provided in all contexts where a DistributionFunction object is required.";
+    "One may provide a user-defined DF function in all contexts where a DistributionFunction object "
+    "is required. This function should take a single positional argument - Nx3 array of actions "
+    "(with columns representing Jr, Jz, Jphi at N>=1 points) and returns an array of length N. "
+    "This function may optionally provide derivatives when called with a named argument der=True, "
+    "and in this case should return a 2-tuple with DF values (array of length N) and derivatives "
+    "(array of shape Nx3).";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to DistributionFunction class
@@ -3411,31 +3417,57 @@ public:
         Py_DECREF(fnc);
     }
     // non-vectorized form
-    virtual double value(const actions::Actions &J) const {
-        double val;
-        evalmany(1, &J, /*separate*/ false, &val);
-        return val;
+    virtual void evalDeriv(const actions::Actions &J,
+        double *val, df::DerivByActions *der=NULL) const
+    {
+        evalmany(1, &J, /*separate*/ false, val, der);
     }
     // vectorized form is the one that actually does the work
-    virtual void evalmany(const size_t npoints, const actions::Actions J[], bool, double values[]) const
+    virtual void evalmany(const size_t npoints, const actions::Actions J[], bool,
+        double values[], df::DerivByActions *deriv=NULL) const
     {
         ALLOC(3*npoints, double, act)
         for(size_t p=0; p<npoints; p++)
             unconvertActions(J[p], act + p*3);
         double mult = conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
+        double mult_der = mult / (conv->velocityUnit * conv->lengthUnit);
         PyAcquireGIL lock;
-        bool typeerror   = false;
-        npy_intp dims[]  = { (npy_intp)npoints, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
+        bool typeerror  = false;
+        npy_intp dims[] = { (npy_intp)npoints, 3};
+        PyObject *args  = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
+        PyObject *result = NULL, *result_der = NULL;
+        if(deriv) {
+            args = Py_BuildValue("(N)", args);
+            PyObject* kw = PyDict_New();
+            PyDict_SetItemString(kw, "der", Py_True);
+            PyObject* tup = PyObject_Call(fnc, args, kw);
+            Py_DECREF(kw);
+            if(tup == NULL) {
+                // do nothing here; the error will be reported further down
+            } else if(PyTuple_Check(tup) && PyTuple_Size(tup) == 2) {
+                result     = PyTuple_GetItem(tup, 0);
+                result_der = PyTuple_GetItem(tup, 1);
+                Py_INCREF(result);
+                Py_INCREF(result_der);
+                Py_DECREF(tup);
+            } else {
+                Py_XDECREF(tup);
+                Py_DECREF(args);
+                throw std::runtime_error("User-defined distribution function should return a tuple "
+                    "of two arrays (DF values and derivatives) when called with 'der=True'");
+            }
+        } else
+            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
         Py_DECREF(args);
+
+        // parse and unit-convert the returned array of DF values
         if(result == NULL) {
             PyErr_Print();
         } else if(PyArray_Check(result) &&
             PyArray_NDIM((PyArrayObject*)result) == 1 &&
             PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
         {
-            int type = PyArray_TYPE((PyArrayObject*) result);
+            int type = PyArray_TYPE((PyArrayObject*)result);
             for(size_t p=0; p<npoints; p++) {
                 switch(type) {
                     case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
@@ -3452,6 +3484,34 @@ public:
             typeerror = true;
         }
         Py_XDECREF(result);
+
+        // if the DF derivatives were requested and returned by the user function, convert them too
+        if(deriv) {
+            if(result_der && PyArray_Check(result_der) &&
+                PyArray_NDIM((PyArrayObject*)result_der) == 2 &&
+                PyArray_DIM ((PyArrayObject*)result_der, 0) == (npy_intp)npoints &&
+                PyArray_DIM ((PyArrayObject*)result_der, 1) == 3)
+            {
+                int type = PyArray_TYPE((PyArrayObject*)result_der);
+                for(size_t p=0; p<npoints; p++) {
+                    switch(type) {
+                        case NPY_DOUBLE:
+                            deriv[p].dbyJr   = pyArrayElem<double>(result_der, p, 0) * mult_der;
+                            deriv[p].dbyJz   = pyArrayElem<double>(result_der, p, 1) * mult_der;
+                            deriv[p].dbyJphi = pyArrayElem<double>(result_der, p, 2) * mult_der;
+                            break;
+                        case NPY_FLOAT:
+                            deriv[p].dbyJr   = pyArrayElem<float> (result_der, p, 0) * mult_der;
+                            deriv[p].dbyJz   = pyArrayElem<float> (result_der, p, 1) * mult_der;
+                            deriv[p].dbyJphi = pyArrayElem<float> (result_der, p, 2) * mult_der;
+                            break;
+                        default:
+                            typeerror = true;
+                    }
+                }
+            } else
+                typeerror = true;
+        }
         if(result == NULL)
             throw std::runtime_error("Call to user-defined distribution function failed");
         else if(typeerror)
@@ -3646,13 +3706,16 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 
 /// compute the distribution function at one or more points in action space
 class FncDistributionFunction: public BatchFunctionVectorized {
+    const bool der;
     const df::BaseDistributionFunction& df;
-    double* outputBuffer;
+    double* outputBuffer[2];
 public:
-    FncDistributionFunction(PyObject* input, const df::BaseDistributionFunction& _df) :
-        BatchFunctionVectorized(/*input length*/ 3, input), df(_df)
+    FncDistributionFunction(PyObject* input, bool _der, const df::BaseDistributionFunction& _df) :
+        BatchFunctionVectorized(/*input length*/ 3, input), der(_der), df(_df)
     {
-        outputObject = allocateOutput<1>(numPoints, &outputBuffer);
+        outputObject = der?
+            allocateOutput<1,3>(numPoints, outputBuffer) :
+            allocateOutput<1>(numPoints, outputBuffer);
     }
     virtual void processManyPoints(npy_intp indexStart, npy_intp indexEnd)
     {
@@ -3660,10 +3723,16 @@ public:
         ALLOC(npoints, actions::Actions, act)
         for(npy_intp i=0; i<npoints; i++)
             act[i] = convertActions(&inputBuffer[(i + indexStart) * 3]);
-        df.evalmany(npoints, act, /*separate*/false, &outputBuffer[indexStart]);
+        df.evalmany(npoints, act, /*separate*/false, &outputBuffer[0][indexStart],
+            der ? (df::DerivByActions*)(&outputBuffer[1][indexStart]) : NULL);
         for(npy_intp indexPoint=indexStart; indexPoint<indexEnd; indexPoint++)
-            outputBuffer[indexPoint] /=  // DF dimension: M L^-3 V^-3
+            outputBuffer[0][indexPoint] /=  // DF dimension: M L^-3 V^-3
                 conv->massUnit / pow_3(conv->velocityUnit * conv->lengthUnit);
+        if(der) {
+            for(npy_intp indexPoint=indexStart*3; indexPoint<indexEnd*3; indexPoint++)
+                outputBuffer[1][indexPoint] /=  // DF deriv dimension: M L^-4 V^-4
+                conv->massUnit / pow_2(pow_2(conv->velocityUnit * conv->lengthUnit));
+        }
     }
 };
 
@@ -3673,9 +3742,16 @@ PyObject* DistributionFunction_value(DistributionFunctionObject* self, PyObject*
         PyErr_SetString(PyExc_RuntimeError, "DistributionFunction object is not properly initialized");
         return NULL;
     }
-    if(!noNamedArgs(namedArgs))
+    PyObject* der_obj = NULL;
+    if(namedArgs && (PyDict_Size(namedArgs) != 1 ||
+        ((der_obj = PyDict_GetItemString(namedArgs, "der")) == NULL)))
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Distribution function must be called either without named arguments, or with der=True");
         return NULL;
-    return FncDistributionFunction(args, *self->df).run(/*chunk*/1024);
+    }
+    bool der = der_obj ? PyObject_IsTrue(der_obj) : false;
+    return FncDistributionFunction(args, der, *self->df).run(/*chunk*/1024);
 }
 
 PyObject* DistributionFunction_totalMass(PyObject* self)
