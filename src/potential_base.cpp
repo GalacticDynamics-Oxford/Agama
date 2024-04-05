@@ -1,7 +1,9 @@
 #include "potential_base.h"
 #include "math_core.h"
+#include "math_linalg.h"
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 #ifndef _MSC_VER
 #include <alloca.h>
 #else
@@ -102,6 +104,90 @@ public:
     }
 };
 
+/// helper class for computing the principal axes of the ellipsoidally-weighted inertia tensor
+class PrincipalAxesIntegrand: public math::IFunctionNdim {
+    const BaseDensity& dens;        ///< the density model
+    const coord::SymmetryType sym;  ///< cached value of its symmetry
+    const double ax, ay, az;        ///< current estimates of principal axes
+    const coord::Orientation& orientation;  ///< orientation of principal axes
+public:
+    PrincipalAxesIntegrand(const BaseDensity& _dens, double axes[],
+        const coord::Orientation& _orientation)
+    :
+        dens(_dens), sym(_dens.symmetry()),
+        ax(axes[0]), ay(axes[1]), az(axes[2]), orientation(_orientation)
+    {}
+
+    virtual void eval(const double vars[], double values[]) const {  // unused
+        evalmany(1, vars, values);
+    }
+
+    // vectorized version of the integrand
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
+    {
+        // The input point(s) are always taken from one octant in the xyz space,
+        // but depending on the symmetry of the density profile, we may need to add mirrored points.
+        // For simplicity, consider only two cases: triaxial (no need to mirror) and anything else.
+        int ncopies = isTriaxial(sym) ? 1 : 8;
+
+        // 0. allocate various temporary arrays on the stack - no need to delete them manually
+        // positions in cylindrical coords (unscaled from the input variables)
+        coord::PosCar* pos = static_cast<coord::PosCar*>(
+             alloca(npoints * ncopies * sizeof(coord::PosCar)));
+        // jacobian of coordinate transformation at each point (all copies of one point share one jac)
+        double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+        // values of density at each point
+        double* val = static_cast<double*>(alloca(npoints * ncopies * sizeof(double)));
+
+        // 1. unscale the input variables and create mirrored copies of each point, if necessary
+        for(size_t i=0; i<npoints; i++) {
+            coord::PosCar postmp = toPosCar(unscaleCoords(&vars[i*3], /*output*/ &jac[i]));
+            postmp.x *= ax;
+            postmp.y *= ay;
+            postmp.z *= az;
+            pos[i*ncopies] = orientation.fromRotated(postmp);
+            if(ncopies == 8) {
+                postmp.z *= -1;
+                pos[i*8+1] = orientation.fromRotated(postmp);
+                postmp.y *= -1;
+                pos[i*8+2] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+3] = orientation.fromRotated(postmp);
+                postmp.x *= -1;
+                pos[i*8+4] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+5] = orientation.fromRotated(postmp);
+                postmp.y *= -1;
+                pos[i*8+6] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+7] = orientation.fromRotated(postmp);
+            }
+        }
+
+        // 2. compute the density for all these points at once
+        dens.evalmanyDensityCar(npoints * ncopies, pos, val);
+
+        // 3. multiply by jacobian and output the density weighted by x_i x_j,
+        // accounting for all mirrored copies of the input point
+        const unsigned int numvals = numValues();
+        std::fill(values, values + npoints * numvals, 0);
+        for(size_t i=0; i < npoints * ncopies; i++) {
+            size_t o = i / ncopies;
+            val[i] *= jac[o];
+            values[o*numvals  ] += nan2num(val[i] * pow_2(pos[i].x));
+            values[o*numvals+1] += nan2num(val[i] * pow_2(pos[i].y));
+            values[o*numvals+2] += nan2num(val[i] * pow_2(pos[i].z));
+            if(numvals==6) {
+                values[o*numvals+3] += nan2num(val[i] * pos[i].x * pos[i].y);
+                values[o*numvals+4] += nan2num(val[i] * pos[i].x * pos[i].z);
+                values[o*numvals+5] += nan2num(val[i] * pos[i].y * pos[i].z);
+            }
+        }
+    }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return isTriaxial(sym) ? 3 : 6; }
+};
+
 }  // internal ns
 
 
@@ -180,13 +266,16 @@ void DensityIntegrandNdim::evalmany(const size_t npoints, const double vars[], d
     coord::PosCyl* pos = static_cast<coord::PosCyl*>(alloca(npoints * sizeof(coord::PosCyl)));
     // jacobian of coordinate transformation at each point
     double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+
     // 1. unscale the input variables
     for(size_t i=0, numvars=numVars(); i<npoints; i++) {
         double scvars[3] = {vars[i*numvars], vars[i*numvars + 1], axisym ? 0. : vars[i*numvars + 2]};
         pos[i] = unscaleCoords(scvars, /*output*/ &jac[i]);
     }
+
     // 2. compute the density for all these points at once
     dens.evalmanyDensityCyl(npoints, pos, values);
+
     // 3. multiply by jacobian and post-process if needed
     for(size_t i=0; i<npoints; i++) {
         if(jac[i] == 0 || (nonnegative && values[i]<0))
@@ -206,9 +295,9 @@ double BaseDensity::enclosedMass(const double r) const
         throw std::runtime_error("symmetry is not provided");
     double xlower[3] = {0, 0, 0};
     double xupper[3] = {math::scale(math::ScalingSemiInf(), r), 1, 1};
-    double result, error;
+    double result;
     math::integrateNdim(DensityIntegrandNdim(*this),
-        xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL_INT, &result, &error);
+        xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL_INT, &result);
     return result;
 }
 
@@ -282,6 +371,95 @@ double getInnerDensitySlope(const BaseDensity& dens) {
     if(fabs(gamma1)<1e-3)
         gamma1=0;
     return gamma1;
+}
+
+void principalAxes(const BaseDensity& dens, double radius,
+    /*output*/ double axes[3], double angles[3])
+{
+    if(isUnknown(dens.symmetry()))
+        throw std::runtime_error("symmetry is not provided");
+    if(isSpherical(dens)) {
+        axes[0] = axes[1] = axes[2] = 1;
+        if(angles)
+            angles[0] = angles[1] = angles[2] = 0;
+        return;
+    }
+    // TODO: need a special treatment of axisymmetric systems
+    double xlower[3] = {0, 0, 0};
+    double xupper[3] = {math::scale(math::ScalingSemiInf(), radius), 0.5, 0.25};
+    double result[6] = {0};
+    coord::Orientation orientation;
+    axes[0] = axes[1] = axes[2] = 1.0;
+    double prev2[3], prev[3]={0};
+    for(int numiter=0, numprev=0; numiter<20; numiter++, numprev++) {
+        for(int i=0; i<3; i++) {
+            prev2[i] = prev[i];
+            prev [i] = axes[i];
+        }
+        math::integrateNdim(PrincipalAxesIntegrand(dens, axes, orientation),
+            xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL_INT, result);
+        double norm = 0;
+        for(int i=0; i<6; i++)
+            norm = fmax(norm, fabs(result[i]));
+        math::Matrix<double> inertia(3, 3);
+        inertia(0, 0) = result[0] / norm;
+        inertia(1, 1) = result[1] / norm;
+        inertia(2, 2) = result[2] / norm;
+        inertia(0, 1) = inertia(1, 0) = result[3] / norm;
+        inertia(0, 2) = inertia(2, 0) = result[4] / norm;
+        inertia(1, 2) = inertia(2, 1) = result[5] / norm;
+        math::SVDecomp svd(inertia);  // equivalent to eigendecomposition for symmetric matrices
+        std::vector<double> S = svd.S();
+        math::Matrix<double> U = svd.U();
+        // U may turn out to have determinant of -1 instead of 1,
+        // in which case we need to flip the sign of one column
+        double detU =
+            U(0,0) * (U(1,1) * U(2,2) - U(1,2) * U(2,1)) +
+            U(0,1) * (U(1,2) * U(2,0) - U(1,0) * U(2,2)) +
+            U(0,2) * (U(1,0) * U(2,1) - U(1,1) * U(2,0));
+        if(detU < 0) {
+            U(0,0) *= -1;
+            U(1,0) *= -1;
+            U(2,0) *= -1;
+        }
+        for(int i=0; i<3; i++) {
+            axes[i] = sqrt(S[i]);
+            for(int j=0; j<3; j++)
+                orientation.mat[j*3+i] = U(i, j);
+        }
+        norm = cbrt(axes[0] * axes[1] * axes[2]);
+        for(int i=0; i<3; i++)
+            axes[i] /= norm;
+        if(fabs(prev[0]-axes[0]) + fabs(prev[1]-axes[1]) + fabs(prev[2]-axes[2]) < EPSREL_DENSITY_INT)
+            break;
+        else if(numprev>=2) {
+            // Aitken's acceleration trick - extrapolate the slowly convergent series
+            double extr[3];
+            for(int i=0; i<3; i++)
+                extr[i] = axes[i] - pow_2(axes[i] - prev[i]) / (axes[i] - 2*prev[i] + prev2[i]);
+            // accept the result only if it keeps axes in the same order (precaution)
+            if(extr[0] >= extr[1] && extr[1] >= extr[2] && extr[2] > 0) {
+                norm = cbrt(extr[0] * extr[1] * extr[2]);
+                for(int i=0; i<3; i++)
+                    axes[i] = extr[i] /= norm;
+                numprev = 0;
+            }
+        }
+    }
+
+    // convert the rotation matrix into Euler angles
+    if(angles) {
+        // this provides angles in the range -pi..pi for alpha & gamma, and 0..pi for beta
+        orientation.toEulerAngles(angles[0], angles[1], angles[2]);
+        // further restrict beta to the range 0..pi/2
+        if(angles[1] > 0.5*M_PI) {
+            angles[1] = M_PI-angles[1];
+            angles[0] = M_PI+angles[0];
+            angles[2] = M_PI-angles[2];
+        }
+        angles[0] = fmod(angles[0]+M_PI, M_PI*2) - M_PI;  // restrict alpha to -pi..pi
+        angles[2] = fmod(angles[2]+M_PI, M_PI);           // restrict gamma to 0..pi
+    }
 }
 
 double projectedDensity(const BaseDensity& dens, double X, double Y,

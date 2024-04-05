@@ -45,7 +45,7 @@ void computeDensityParallel(const potential::BaseDensity& density,
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("Error in DensityFromDF: "+errorMsg);
 }

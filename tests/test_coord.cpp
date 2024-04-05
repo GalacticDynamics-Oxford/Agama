@@ -1,6 +1,6 @@
 /** \name   test_coord.cpp
     \author Eugene Vasiliev
-    \date   2015-2023
+    \date   2015-2024
 
     Test conversion between spherical, cylindrical and cartesian coordinates
     1) positions/velocities,
@@ -11,6 +11,7 @@
 #include "coord.h"
 #include "debug_utils.h"
 #include "utils.h"
+#include "math_random.h"
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -182,6 +183,15 @@ bool test_conv(const coord::PosVelT<srcCS>& srcpoint, const destCS& coordsys=des
     return ok;
 }
 
+// test the equivalence of two angles, ignoring possible offsets of 2pi
+inline bool angles_equal(double a, double b)
+{
+    double sa, ca, sb, cb;
+    math::sincos(a, sa, ca);
+    math::sincos(b, sb, cb);
+    return fabs(sa-sb) < eps && fabs(ca-cb) < eps;
+}
+
 // test of rotation matrices and their inverse
 bool test_rotation()
 {
@@ -194,15 +204,40 @@ bool test_rotation()
     a.vxvy = 1.23; a.vxvz = -0.98; a.vyvz = -2.34;
     b = orientation.toRotated(a);
     c = orientation.fromRotated(b);
-    return math::fcmp(xyz[0], inv[0], eps) == 0
-        && math::fcmp(xyz[1], inv[1], eps) == 0
-        && math::fcmp(xyz[2], inv[2], eps) == 0
-        && math::fcmp(a.vx2 , c.vx2 , eps) == 0
-        && math::fcmp(a.vy2 , c.vy2 , eps) == 0
-        && math::fcmp(a.vz2 , c.vz2 , eps) == 0
-        && math::fcmp(a.vxvy, c.vxvy, eps) == 0
-        && math::fcmp(a.vxvz, c.vxvz, eps) == 0
-        && math::fcmp(a.vyvz, c.vyvz, eps) == 0;
+    bool ok =
+        math::fcmp(xyz[0], inv[0], eps) == 0 &&
+        math::fcmp(xyz[1], inv[1], eps) == 0 &&
+        math::fcmp(xyz[2], inv[2], eps) == 0 &&
+        math::fcmp(a.vx2 , c.vx2 , eps) == 0 &&
+        math::fcmp(a.vy2 , c.vy2 , eps) == 0 &&
+        math::fcmp(a.vz2 , c.vz2 , eps) == 0 &&
+        math::fcmp(a.vxvy, c.vxvy, eps) == 0 &&
+        math::fcmp(a.vxvz, c.vxvz, eps) == 0 &&
+        math::fcmp(a.vyvz, c.vyvz, eps) == 0;
+
+    // test the conversion between Euler angles and rotation matrix in both directions
+    for(int i=0; i<1000; i++) {
+        // a mixture of random angles and various degenerate situations
+        double alpha1, beta1, gamma1,
+            alpha0 = i%4>1 ? M_PI * (math::random()*2-1) : (i%4==0 ? M_PI : -M_PI),
+            beta0  = i%5>1 ? M_PI *  math::random()      : (i%5==0 ? M_PI : 0),
+            gamma0 = i%7>1 ? M_PI * (math::random()*2-1) : (i%7==0 ? M_PI : -M_PI);
+        coord::Orientation ori0(alpha0, beta0, gamma0);
+        ori0.toEulerAngles(alpha1, beta1, gamma1);
+        ok &= fabs(beta0 - beta1) < eps;
+        // in the case of beta==0 or pi, only the sum or the difference of the angles can be recovered
+        if(beta0 == 0)
+            ok &= angles_equal(alpha0 + gamma0, alpha1 + gamma1);
+        else if(beta0 == M_PI)
+            ok &= angles_equal(alpha0 - gamma0, alpha1 - gamma1);
+        else
+            ok &= angles_equal(alpha0, alpha1) && angles_equal(gamma0, gamma1);
+        // in all cases, the rotation matrix reconstructed from the returned angles should be identical
+        coord::Orientation ori1(alpha1, beta1, gamma1);
+        for(int k=0; k<9; k++)
+            ok &= fabs(ori0.mat[k] - ori1.mat[k]) < eps;
+    }
+    return ok;
 }
 
 template<typename CS> bool isNotNan(const coord::PosT<CS>& p);

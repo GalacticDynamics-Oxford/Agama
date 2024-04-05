@@ -534,7 +534,7 @@ void Sampler::run()
     int nIter = 1;
     do{
         if(cbrk.triggered())
-            throw std::runtime_error("Keyboard interrupt");
+            throw std::runtime_error(cbrk.message());
         // Loop over all cells and check if there are enough sample points in the cell;
         // if not, either split the cell in two halves or schedule this cell for adding more points later.
         // The newly added cells (after splitting) are appended to the end of the cell list,

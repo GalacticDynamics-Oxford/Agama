@@ -41,7 +41,8 @@ template<> double Lz(const PosVelAxi& p) {
     return p.vphi * chi * sinnu;
 }
 
-// multiply two numbers, replacing {anything including INFINITY} * 0 with 0
+// multiply two numbers, replacing {anything including INFINITY} * 0 with 0;
+// the same result may be achieved by nan2num(x*y), but with two comparisons instead of one
 inline double mul(double x, double y) { return y==0 ? 0 : x*y; }
 
 //--------  position conversion functions ---------//
@@ -1025,5 +1026,21 @@ Orientation::Orientation(double alpha, double beta, double gamma)
     mat[8] =  cb;
 }
 
+void Orientation::toEulerAngles(double& alpha, double& beta, double& gamma) const
+{
+    // beta is between 0 and pi; sin(beta) >= 0,
+    // and while beta=acos(mat[8]) is mathematically correct, it has poor accuracy
+    // when beta is close to 0 or pi; the alternative formula with atan2 works in all cases.
+    beta  = atan2(sqrt(pow_2(mat[2]) + pow_2(mat[5])), mat[8]);
+    if(mat[2] == 0 && mat[5] == 0 && mat[6] == 0 && mat[7] == 0) {
+        // degenerate case: beta=0 or beta=pi;
+        // in this case we can determine only the sum or the difference of the other two angles
+        alpha = 0;
+        gamma = atan2(mat[1], mat[0]) * (mat[8]>0 ? 1 : -1);
+    } else {
+        gamma = atan2(mat[2], mat[5]);
+        alpha = atan2(mat[6],-mat[7]);
+    }
+}
 
 }  // namespace coord

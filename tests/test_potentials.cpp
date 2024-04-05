@@ -1,6 +1,6 @@
 /** \name   test_potentials.cpp
     \author Eugene Vasiliev
-    \date   2015-2018
+    \date   2015-2024
 
     Test various aspects of potential evaluation and associated utility functions
     (finding peri/apocenter radii, circular orbits, 1d interpolations of these quantities)
@@ -11,6 +11,7 @@
 #include "potential_factory.h"
 #include "potential_utils.h"
 #include "utils.h"
+#include "math_random.h"
 #include "debug_utils.h"
 #include <iostream>
 #include <iomanip>
@@ -235,6 +236,75 @@ bool testPotentialAtPoint(const potential::BasePotential& potential,
     return ok;
 }
 
+bool testPrincipalAxes(double radius, double p, double q, double alpha, double beta, double gamma)
+{
+    const coord::PosCar point(0.5, 0.6, 0.7);  // fiducial point for checking the rotated density
+    const std::string params = "type=spheroid gamma=0";
+    potential::PtrDensity den0 = potential::createDensity(utils::KeyValueMap(params +
+        " p=" + utils::toString(p, 16) +
+        " q=" + utils::toString(q, 16) +
+        (alpha+beta+gamma!=0 ? " orientation=" +
+        utils::toString(alpha, 16) + "," +
+        utils::toString(beta , 16) + "," +
+        utils::toString(gamma, 16) : ""), " "));
+    // normalize the range of input angles to alpha=-pi..pi, beta=0..pi/2, gamma=0..pi
+    if(beta > M_PI/2) {
+        beta = M_PI-beta;
+        alpha= M_PI+alpha;
+        gamma= M_PI-gamma;
+    }
+    alpha = fmod(alpha+M_PI, M_PI*2) - M_PI;
+    gamma = fmod(gamma+M_PI, M_PI);
+    potential::PtrDensity den1 = potential::createDensity(utils::KeyValueMap(params +
+        " p=" + utils::toString(p, 16) +
+        " q=" + utils::toString(q, 16) +
+        " orientation=" +
+        utils::toString(alpha, 16) + "," +
+        utils::toString(beta , 16) + "," +
+        utils::toString(gamma, 16), " "));
+    // check that the above alterations of angles do not affect the value of the rotated density
+    double ratio = den1->density(point) / den0->density(point);
+    bool ok = fabs(ratio-1) < 1e-14;
+
+    // determine the axis ratios and angles
+    double axes[3], angles[3];
+    principalAxes(*den0, radius, axes, angles);
+    potential::PtrDensity den2 = potential::createDensity(utils::KeyValueMap(params +
+        " p=" + utils::toString(axes[1]/axes[0], 16) +
+        " q=" + utils::toString(axes[2]/axes[0], 16) +
+        " orientation=" + utils::toString(angles[0], 16) + "," +
+        utils::toString(angles[1], 16) + "," + utils::toString(angles[2], 16), " "));
+    // check that the density constructed with the recovered angles is similar
+    ratio = den2->density(point) / den0->density(point);
+    double
+    difden   = fabs(ratio-1),
+    difp     = fabs(p - axes[1]/axes[0]),
+    difq     = fabs(q - axes[2]/axes[0]),
+    difbeta  = fabs(beta-angles[1]),
+    difalpha = fmin(fabs(alpha-angles[0]), fabs(fabs(alpha-angles[0])-M_PI*2)),
+    difgamma = fmin(fabs(gamma-angles[2]), fabs(fabs(gamma-angles[2])-M_PI)),
+    epsden   = 1e-3,
+    epsaxes  = 2e-4,
+    epsangles= 1e-3;
+    if(output) {
+        std::cout << checkLess(difden, epsden, ok) + "\n"
+            "p: " + utils::pp(p, 10) + " => " + utils::pp(axes[1]/axes[0], 10) +
+            " (dif: " + checkLess(difp, epsaxes, ok) + ")\n"
+            "q: " + utils::pp(q, 10) + " => " + utils::pp(axes[2]/axes[0], 10) +
+            " (dif: " + checkLess(difq, epsaxes, ok) + ")\n"
+            "a: " + utils::pp(alpha, 10) + " => " + utils::pp(angles[0], 10) +
+            " (dif: " + checkLess(difalpha, epsangles, ok) + ")\n"
+            "b: " + utils::pp(beta , 10) + " => " + utils::pp(angles[1], 10) +
+            " (dif: " + checkLess(difbeta , epsangles, ok) + ")\n"
+            "c: " + utils::pp(gamma, 10) + " => " + utils::pp(angles[2], 10) +
+            " (dif: " + checkLess(difgamma, epsangles, ok) + ")\n\n";
+    } else {  // no output, just comparison
+        ok &= (difden < epsden) && (difp < epsaxes) && (difq < epsaxes) &&
+            (difalpha < epsangles) && (difbeta < epsangles) && (difgamma < epsangles);
+    }
+    return ok;
+}
+
 potential::PtrPotential make_galpot(const char* params)
 {
     const char* params_file="test_galpot_params.pot";
@@ -295,6 +365,24 @@ inline void addPot(std::vector<potential::PtrPotential>& pots, const char* param
     pots.push_back(potential::createPotential(utils::KeyValueMap(params))); }
 
 int main() {
+    bool allok=true;
+
+    // test the recovery of shape and orientation
+    allok &= testPrincipalAxes(INFINITY, 0.7, 0.4, 0, 0, 0);
+    for(int i=0; i<100; i++) {
+        allok &= testPrincipalAxes(0.5,   // radius
+            (math::random()*0.4+0.6),     // intermediate axis
+            (math::random()*0.3+0.3),     // minor axis
+            (math::random()*2-1) * M_PI,  // orientation angles: alpha,
+            (math::random()    ) * M_PI,  // beta,
+            (math::random()*2-1) * M_PI); // gamma
+    }
+    /*for(int i=0; i<20; i++) {  // axisymmetric - TODO
+        allok &= testPrincipalAxes(0.5, 1, math::random()*0.49+0.5, 0, 0, 0);
+    }*/
+    if(!allok)
+        std::cout << "\033[1;31mDetermination of principal axes failed\033[0m\n";
+
     std::vector<potential::PtrPotential> pots;
     addPot(pots, "type=Plummer, mass=10, scaleRadius=5");
     addPot(pots, "type=Isochrone, mass=1, scaleRadius=");
@@ -311,7 +399,6 @@ int main() {
     pots.push_back(make_galpot(test_galpot_params[0]));
     pots.push_back(make_galpot(test_galpot_params[1]));
     //pots.push_back(make_galpot(test_galpot_params[2]));
-    bool allok=true;
     std::cout << std::setprecision(10);
     for(unsigned int ip=0; ip<pots.size(); ip++) {
         allok &= testPotential(*pots[ip]);

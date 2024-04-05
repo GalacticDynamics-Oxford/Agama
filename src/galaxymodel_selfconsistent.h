@@ -108,6 +108,9 @@ public:
     */
     virtual potential::PtrPotential getPotential() const = 0;
 
+    /** return the pointer to the DF of this component, or NULL if not applicable */
+    virtual df::PtrDistributionFunction getDF() const = 0;
+
     /** in case the component has an associated density profile, it may be used
         in construction of either multipole (spherical-harmonic) potential expansion,
         or a 'CylSpline' expansion of potential in the meridional plane;
@@ -137,6 +140,7 @@ public:
     virtual void update(const potential::BasePotential&, const actions::BaseActionFinder&) {}
     virtual potential::PtrDensity   getDensity()   const { return density; }
     virtual potential::PtrPotential getPotential() const { return potential; }
+    virtual df::PtrDistributionFunction getDF()    const { return df::PtrDistributionFunction(); }
 private:
     potential::PtrDensity density;     ///< shared pointer to the input density, if provided
     potential::PtrPotential potential; ///< shared pointer to the input potential, if exists
@@ -169,6 +173,9 @@ public:
 
     /** no additional potential component is provided, i.e., an empty pointer is returned */
     virtual potential::PtrPotential getPotential() const { return potential::PtrPotential(); }
+
+    /* return the pointer to the DF */
+    virtual df::PtrDistributionFunction getDF() const { return distrFunc; }
 
 protected:
     /// shared pointer to the action-based distribution function (remains unchanged)

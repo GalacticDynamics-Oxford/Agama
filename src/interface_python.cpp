@@ -633,6 +633,25 @@ bool delItemFromPyDict(PyObject* dict, const char* itemkey)
     return false;
 }
 
+/// convert a C++ exception message to a Python exception
+/// (either a KeyboardInterrupt or a generic RuntimeError)
+void raisePythonException(const char* message, const char* prefix=NULL)
+{
+    PyErr_SetString(
+        message == utils::CtrlBreakHandler::message() ? PyExc_KeyboardInterrupt : PyExc_RuntimeError,
+        prefix ? (std::string(prefix) + message).c_str() : message);
+}
+
+/// convenience overloads
+void raisePythonException(const std::string& message, const char* prefix=NULL)
+{
+    raisePythonException(message.c_str(), prefix);
+}
+void raisePythonException(const std::exception& ex, const char* prefix=NULL)
+{
+    raisePythonException(ex.what(), prefix);
+}
+
 /// NumPy data type corresponding to the storage container type of additive models
 static const int STORAGE_NUM_T =
     sizeof(galaxymodel::StorageNumT) == sizeof(float)  ? NPY_FLOAT  :
@@ -1092,7 +1111,7 @@ public:
             catch(std::exception& ex) {
                 Py_DECREF(outputObject);
                 outputObject = NULL;
-                PyErr_SetString(PyExc_RuntimeError, ex.what());
+                raisePythonException(ex);
             }
         } else {
             std::string errorMessage;      // store the exception that may occur in processPoint()
@@ -1157,14 +1176,12 @@ public:
             }
 #endif
             // check for any exceptional circumstances
-            if(cbrk.triggered()) {
+            if(cbrk.triggered())
+                errorMessage = cbrk.message();
+            if(!errorMessage.empty()) {
                 Py_DECREF(outputObject);
                 outputObject = NULL;
-                PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
-            } else if(!errorMessage.empty()) {
-                Py_DECREF(outputObject);
-                outputObject = NULL;
-                PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
+                raisePythonException(errorMessage.c_str());
             }
         }
         return outputObject;
@@ -1640,8 +1657,8 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in creating density: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating density: ");
         return -1;
     }
 }
@@ -1672,9 +1689,9 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
                 Py_DECREF(tuple);
                 return result;
             }
-            catch(std::exception &e) {
+            catch(std::exception &ex) {
                 Py_DECREF(tuple);
-                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+                FILTERMSG(utils::VL_WARNING, "Agama", ex.what());
             }
         } else {
             PyErr_Clear();
@@ -1770,8 +1787,8 @@ PyObject* Density_projectedDensity(PyObject* self, PyObject* args, PyObject* nam
                     coord::Orientation(alpha, beta, gamma)) /
                 (conv->massUnit / pow_2(conv->lengthUnit)) );
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_RuntimeError, e.what());
+        catch(std::exception& ex) {
+            raisePythonException(ex);
             return NULL;
         }
     }
@@ -1799,10 +1816,10 @@ public:
             outputBuffer[indexPoint] =
                 dens.enclosedMass(inputBuffer[indexPoint] * conv->lengthUnit) / conv->massUnit;
         }
-        catch(std::exception& e) {
+        catch(std::exception& ex) {
             PyAcquireGIL lock;  // need to get hold of GIL to issue the following warning
             PyErr_WarnEx(NULL, ("Error in enclosedMass(r=" +
-                utils::toString(inputBuffer[indexPoint]) + "): " + e.what()).c_str(), 1);
+                utils::toString(inputBuffer[indexPoint]) + "): " + ex.what()).c_str(), 1);
             outputBuffer[indexPoint] = NAN;
         }
     }
@@ -1819,11 +1836,48 @@ PyObject* Density_totalMass(PyObject* self)
     try{
         return PyFloat_FromDouble(((DensityObject*)self)->dens->totalMass() / conv->massUnit);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in Density.totalMass(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in Density.totalMass(): ");
         return NULL;
     }
+}
+
+/// compute the principal axis ratio and orientation at one or more values of radius
+class FncDensityPrincipalAxes: public BatchFunction {
+    const potential::BaseDensity& dens;
+    double* outputBuffer[2];
+public:
+    FncDensityPrincipalAxes(PyObject* input, const potential::BaseDensity& _dens) :
+        BatchFunction(/*input length*/ 1, input), dens(_dens)
+    {
+        outputObject = allocateOutput<3,3>(numPoints, outputBuffer);
+    }
+    virtual void processPoint(npy_intp indexPoint)
+    {
+        try{
+            principalAxes(dens, inputBuffer[indexPoint] * conv->lengthUnit,
+                &outputBuffer[0][indexPoint*3], &outputBuffer[1][indexPoint*3]);
+        }
+        catch(std::exception& ex) {
+            PyAcquireGIL lock;  // need to get hold of GIL to issue the following warning
+            PyErr_WarnEx(NULL, ("Error in principalAxes(r=" +
+                utils::toString(inputBuffer[indexPoint]) + "): " + ex.what()).c_str(), 1);
+            for(int i=0; i<3; i++)
+                outputBuffer[0][indexPoint*3+i] = outputBuffer[1][indexPoint*3+i] = NAN;
+        }
+    }
+};
+
+PyObject* Density_principalAxes(PyObject* self, PyObject* args)
+{
+    if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)==0) {
+        // call with no arguments is equivalent to INFINITY as an argument
+        args = PyFloat_FromDouble(INFINITY);
+        PyObject* result = FncDensityPrincipalAxes(args, *((DensityObject*)self)->dens).run(1);
+        Py_DECREF(args);
+        return result;
+    }
+    return FncDensityPrincipalAxes(args, *((DensityObject*)self)->dens).run(/*chunk*/1);
 }
 
 /// export density/potential to a text (ini) file
@@ -1840,8 +1894,8 @@ PyObject* Density_export(PyObject* self, PyObject* args)
         PyErr_SetString(PyExc_RuntimeError, "Error writing file");
         return NULL;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error writing file: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error writing file: ");
         return NULL;
     }
 }
@@ -1900,9 +1954,8 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         }
         return Py_BuildValue("NN", point_arr, mass_arr);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in sample(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in sample(): ");
         return NULL;
     }
 }
@@ -2001,7 +2054,7 @@ static PyMethodDef Density_methods[] = {
       "Returns: float or array of floats" },
     { "projectedDensity", (PyCFunction)Density_projectedDensity, METH_VARARGS | METH_KEYWORDS,
       "Compute surface density at a given point or array of points\n"
-      "Arguments: \n"
+      "Arguments:\n"
       "  X,Y (two floats) or point (a Nx2 array of floats): coordinates in the image plane.\n"
       "  alpha, beta, gamma (optional, default 0): three angles specifying the orientation "
       "of the image plane in the intrinsic coordinate system of the model; "
@@ -2021,7 +2074,7 @@ static PyMethodDef Density_methods[] = {
       "spherical Jeans -- additionally the velocity anisotropy coefficient 'beta', "
       "axisymmetric Jeans -- additionally the rotation parameter 'kappa', "
       "and 'beta' has a different meaning in this case, but still required.\n"
-      "Arguments: \n"
+      "Arguments:\n"
       "  n - the number of particles (required)\n"
       "  potential - an instance of Potential class providing the total potential "
       "used to assign particle velocities (optional - if not provided, assign only the coordinates)\n"
@@ -2046,8 +2099,23 @@ static PyMethodDef Density_methods[] = {
       "Return the total mass of the density model.\n"
       "Returns: float number" },
     { "enclosedMass", Density_enclosedMass, METH_VARARGS,
-      "Return the mass enclosed within a given radius or list of radii.\n"
+      "Return the mass enclosed within a given radius or a list of radii.\n"
       "Returns: a single float number or an array of numbers" },
+    { "principalAxes", Density_principalAxes, METH_VARARGS,
+      "Determine the length and orientation of principal axes of the density profile "
+      "within a given radius, using the ellipsoidally-weighted moment of inertia.\n"
+      "Arguments: a single value of radius (r) or a list of radii; "
+      "calling with no arguments is equivalent to r=infinity.\n"
+      "Returns: a tuple of two arrays of length 3 (for one input point) or shape (N,3) for N points;\n"
+      "the first one contains axes stretching coefficients (k_X, k_Y, k_Z), sorted in "
+      "decreasing order and normalized so that their product is unity;\n"
+      "the second one contains the Euler angles specifying the orientation of these principal axes "
+      "of the moment of inertia (X,Y,Z) in the original Cartesian system (x,y,z), "
+      "see the definition of these angles in the Agama reference.\n"
+      "The axes are determined iteratively, starting from a spherical region of radius r "
+      "and deforming it into an ellipsoidal region with the same volume, so that the axis ratios "
+      "of this region coincide with the axis ratios of the moment of inertia of the density profile "
+      "within the same ellipsoidal region."},
     { NULL }
 };
 
@@ -2461,8 +2529,8 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in creating potential: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating potential: ");
         return -1;
     }
 }
@@ -2492,9 +2560,9 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
                 Py_DECREF(tuple);
                 return result;
             }
-            catch(std::exception &e) {
+            catch(std::exception &ex) {
                 Py_DECREF(tuple);
-                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+                FILTERMSG(utils::VL_WARNING, "Agama", ex.what());
             }
         } else {
             PyErr_Clear();
@@ -2646,8 +2714,8 @@ PyObject* Potential_projectedForce(PyObject* self, PyObject* args, PyObject* nam
                 /*output*/ fX, fY);
             return Py_BuildValue("(dd)", -fX / pow_2(conv->velocityUnit), -fY / pow_2(conv->velocityUnit));
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_RuntimeError, e.what());
+        catch(std::exception& ex) {
+            raisePythonException(ex);
             return NULL;
         }
     }
@@ -2998,9 +3066,8 @@ int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedA
             utils::toString(self->af.get()));
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in ActionFinder initialization: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in ActionFinder initialization: ");
         return -1;
     }
 }
@@ -3250,9 +3317,8 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
             utils::toString(self->am.get()));
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in ActionMapper initialization: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in ActionMapper initialization: ");
         return -1;
     }
 }
@@ -3658,9 +3724,8 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in creating distribution function: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating distribution function: ");
         return -1;
     }
 }
@@ -3691,9 +3756,9 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
                 Py_DECREF(tuple);
                 return result;
             }
-            catch(std::exception &e) {
+            catch(std::exception &ex) {
                 Py_DECREF(tuple);
-                FILTERMSG(utils::VL_WARNING, "Agama", e.what());
+                FILTERMSG(utils::VL_WARNING, "Agama", ex.what());
             }
         } else {
             PyErr_Clear();
@@ -3764,9 +3829,8 @@ PyObject* DistributionFunction_totalMass(PyObject* self)
         double val = ((DistributionFunctionObject*)self)->df->totalMass();
         return Py_BuildValue("d", val / conv->massUnit);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in DistributionFunction.totalMass(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in DistributionFunction.totalMass(): ");
         return NULL;
     }
 }
@@ -3781,9 +3845,8 @@ PyObject* DistributionFunction_totalEntropy(PyObject* self)
         double val = totalEntropy(*((DistributionFunctionObject*)self)->df);
         return Py_BuildValue("d", val / conv->massUnit);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in DistributionFunction.totalEntropy(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in DistributionFunction.totalEntropy(): ");
         return NULL;
     }
 }
@@ -3816,6 +3879,29 @@ Py_ssize_t DistributionFunction_len(PyObject* self)
     return ((DistributionFunctionObject*)self)->df->numValues();
 }
 
+/// compare two Python DistributionFunction objects "by value" (check if they represent the same C++ object)
+PyObject* DistributionFunction_compare(PyObject* self, PyObject* other, int op)
+{
+    bool equal = ((DistributionFunctionObject*)self)->df == ((DistributionFunctionObject*)other)->df;
+    switch (op) {
+        case Py_EQ:
+            return PyBool_FromLong(equal);
+        case Py_NE:
+            return PyBool_FromLong(!equal);
+        default:
+            PyErr_SetString(PyExc_TypeError, "Invalid comparison");
+            return NULL;
+    }
+}
+
+Py_hash_t DistributionFunction_hash(PyObject *self)
+{
+    // use the smart pointer to the underlying C++ object, not the Python object itself,
+    // to establish identity between two Python objects containing the same C++ class instance
+    return _Py_HashPointer(const_cast<void*>(static_cast<const void*>
+        (((DistributionFunctionObject*)self)->df.get())));
+}
+
 static PySequenceMethods DistributionFunction_sequence_methods = {
     DistributionFunction_len, 0, 0, DistributionFunction_elem,
 };
@@ -3838,10 +3924,10 @@ static PyTypeObject DistributionFunctionType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.DistributionFunction",
     sizeof(DistributionFunctionObject), 0, (destructor)DistributionFunction_dealloc,
-    0, 0, 0, 0, 0, 0, &DistributionFunction_sequence_methods, 0, 0,
+    0, 0, 0, 0, 0, 0, &DistributionFunction_sequence_methods, 0, DistributionFunction_hash,
     (PyCFunctionWithKeywords)DistributionFunction_value, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT, docstringDistributionFunction,
-    0, 0, 0, 0, 0, 0, DistributionFunction_methods, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, DistributionFunction_compare, 0, 0, 0, DistributionFunction_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)DistributionFunction_init
 };
 
@@ -3914,9 +4000,8 @@ int SelectionFunction_init(SelectionFunctionObject* self, PyObject* args, PyObje
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in creating SelectionFunction: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating SelectionFunction: ");
         return -1;
     }
 }
@@ -4216,8 +4301,8 @@ PyObject* GalaxyModel_totalMass(GalaxyModelObject* self, PyObject* args, PyObjec
         }
         return separate ? toPyArray(val) : Py_BuildValue("d", val[0]);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in totalMass(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in totalMass(): ");
         return NULL;
     }
 }
@@ -4260,8 +4345,8 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
         }
         return Py_BuildValue("NN", posvel_arr, mass_arr);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in sample(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in sample(): ");
         return NULL;
     }
 }
@@ -4994,9 +5079,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
                 utils::toString(self->comp.get()));
             return 0;
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_RuntimeError,
-                (std::string("Error in creating a static component: ")+e.what()).c_str());
+        catch(std::exception& ex) {
+            raisePythonException(ex, "Error in creating a static component: ");
             return -1;
         }
     } else if(disklike == 0) {   // spheroidal component
@@ -5019,9 +5103,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
                 utils::toString(self->comp.get()));
             return 0;
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_RuntimeError,
-                (std::string("Error in creating a spheroidal component: ")+e.what()).c_str());
+        catch(std::exception& ex) {
+            raisePythonException(ex, "Error in creating a spheroidal component: ");
             return -1;
         }
     } else {   // disk-like component
@@ -5046,9 +5129,8 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
                 utils::toString(self->comp.get()));
             return 0;
         }
-        catch(std::exception& e) {
-            PyErr_SetString(PyExc_RuntimeError,
-                (std::string("Error in creating a disklike component: ")+e.what()).c_str());
+        catch(std::exception& ex) {
+            raisePythonException(ex, "Error in creating a disklike component: ");
             return -1;
         }
     }
@@ -5074,7 +5156,17 @@ PyObject* Component_getDensity(ComponentObject* self)
     potential::PtrDensity dens = self->comp->getDensity();
     if(dens)
         return createDensityObject(dens);
-    // otherwise no density is available (e.g. for a static component)
+    // otherwise no density is available (e.g. for a static component specified by the potential)
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* Component_getDF(ComponentObject* self)
+{
+    df::PtrDistributionFunction df = self->comp->getDF();
+    if(df)
+        return createDistributionFunctionObject(df);
+    // otherwise no df is available (e.g. for a static component)
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -5087,6 +5179,9 @@ static PyGetSetDef Component_properties[] = {
       "for a static component (or None if it has only a potential profile), "
       "or the density profile from the previous iteration of the self-consistent "
       "modelling procedure for a DF-based component"), NULL },
+    { const_cast<char*>("df"), (getter)Component_getDF, NULL,
+      const_cast<char*>("DistributionFunction object associated with a DF-based component, "
+      "or None for a static component"), NULL },
     { NULL }
 };
 
@@ -5256,9 +5351,8 @@ PyObject* SelfConsistentModel_iterate(SelfConsistentModelObject* self)
         Py_INCREF(Py_None);
         return Py_None;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in SelfConsistentModel.iterate(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in SelfConsistentModel.iterate(): ");
         return NULL;
     }
 }
@@ -5713,9 +5807,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
         if(!self->target)  // none of the above variants worked
             throw std::invalid_argument("Unknown type='...' argument");
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError,
-            (std::string("Error in creating a Target object: ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating a Target object: ");
         return -1;
     }
     FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
@@ -5777,8 +5870,8 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
             return NULL;
         }
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 
@@ -5808,17 +5901,30 @@ PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 self->target->addPoint(xv, particles.mass(i), datacube.data());
             }
             self->target->finalizeDatacube(datacube, &tmpresult[0]);
-            // this is a simple memory access operation, so does not need to be guarded by lock..
-            for(npy_intp i=0; i<size; i++)
-                pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
+            // now sum up the thread-local intermediate matrices elementwise,
+            // but in such a way that the order is always the same, to ensure that
+            // the result is also deterministic (floating-point summation is not commutative)
+#ifdef _OPENMP
+#pragma omp for ordered schedule(static)
+            for(int t=0; t<omp_get_num_threads(); t++)
+#endif
+            {
+#ifdef _OPENMP
+#pragma omp ordered
+#endif
+                {
+                    for(npy_intp i=0; i<size; i++)
+                        pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
+                }
+            }
         }
-        catch(std::exception& e) {
-            errorMessage = e.what();
+        catch(std::exception& ex) {
+            errorMessage = ex.what();
         }
     }
 
     if(!errorMessage.empty()) {
-        PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
+        raisePythonException(errorMessage);
         Py_DECREF(result);
         return NULL;
     }
@@ -5835,8 +5941,8 @@ PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
     try{
         return Py_BuildValue("s", self->target->coefName(index).c_str());
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_IndexError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 }
@@ -6032,11 +6138,12 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                             static_cast<galaxymodel::StorageNumT>(dstrow[m]);
                 }
             }
-            catch(std::exception& e) {
-                errorMessage = e.what();
+            catch(std::exception& ex) {
+                errorMessage = ex.what();
                 fail = true;
             }
             if(cbrk.triggered()) {
+                errorMessage = cbrk.message();
                 fail = true;
             }
         }
@@ -6088,11 +6195,12 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+4) + m) ) =
                         static_cast<galaxymodel::StorageNumT>(dstrow[m]);
             }
-            catch(std::exception& e) {
-                errorMessage = e.what();
+            catch(std::exception& ex) {
+                errorMessage = ex.what();
                 fail = true;
             }
             if(cbrk.triggered()) {
+                errorMessage = cbrk.message();
                 fail = true;
             }
         }
@@ -6100,10 +6208,7 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     Py_XDECREF(gh_arr);
     Py_DECREF(mat_arr);
     if(fail) {
-        if(cbrk.triggered())
-            PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
-        else if(!errorMessage.empty())
-            PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
+        raisePythonException(errorMessage);
         Py_DECREF(output_arr);
         return NULL;
     }
@@ -6226,8 +6331,8 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
             utils::toString(xvalues.size())+" at "+utils::toString(self->spl.get()));
         return 0;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return -1;
     }
 }
@@ -6448,8 +6553,8 @@ PyObject* splineApprox(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             amplitudes = spl.fit(yvalues, knots.size());
         return createCubicSpline(knots, amplitudes);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 }
@@ -6535,8 +6640,8 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
             smooth );
         return createCubicSpline(knots, amplitudes);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 }
@@ -6804,9 +6909,9 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
                 ", "  +utils::toString(((SplineObject*)orbit->y)->spl.get()) +
                 ", "  +utils::toString(((SplineObject*)orbit->z)->spl.get()));
         }
-        catch(std::exception& e) {
+        catch(std::exception& ex) {
             Py_DECREF(orbit);
-            PyErr_SetString(PyExc_RuntimeError, e.what());
+            raisePythonException(ex);
             return false;
         }
         *output = (PyObject*)orbit;   // place the pointer for the newly created Orbit
@@ -7260,8 +7365,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // finalize the output of runtime functions - they are destroyed along with orbint,
                 // performing any necessary procedures before going out of scope
             }
-            catch(std::exception& e) {
-                errorMessage = std::string("Error in orbit(): ")+e.what();
+            catch(std::exception& ex) {
+                errorMessage = ex.what();
                 fail = true;
             }
             // remaining procedures are trivial and should not raise exceptions
@@ -7323,15 +7428,13 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         printf("%li orbits complete (%.4g orbits/s)\n", (long int)numComplete,
             numComplete * 1. / difftime(time(NULL), tbegin));
     if(cbrk.triggered()) {
-        PyErr_SetObject(PyExc_KeyboardInterrupt, NULL);
         fail = true;
-        errorMessage = "";  // prevent replacing KeyboardInterrupt with RuntimeError below
+        errorMessage = cbrk.message();
     }
     if(fail) {
         for(size_t t=0; t<result_arrays.size(); t++)
             Py_XDECREF(result_arrays[t]);
-        if(!errorMessage.empty())
-            PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
+        raisePythonException(errorMessage, "Error in orbit(): ");
         return NULL;
     }
 
@@ -7398,8 +7501,8 @@ PyObject* readSnapshot(PyObject* /*self*/, PyObject* arg)
         }
         return Py_BuildValue("NN", posvel_arr, mass_arr);
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 }
@@ -7439,8 +7542,8 @@ PyObject* writeSnapshot(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         Py_INCREF(Py_None);
         return Py_None;
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
+    catch(std::exception& ex) {
+        raisePythonException(ex);
         return NULL;
     }
 }
@@ -7645,8 +7748,8 @@ PyObject* solveOpt(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     matrix, rhs, xpenl, math::BandMatrix<double>(xpenq), rpenl, rpenq, xmin, xmax);
         }
     }
-    catch(std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, (std::string("Error in solveOpt(): ")+e.what()).c_str());
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in solveOpt(): ");
         return NULL;
     }
     return toPyArray(result);
@@ -7819,9 +7922,9 @@ PyObject* integrateNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         math::integrateNdim(FncWrapper(xlow.size(), callback),
             &xlow.front(), &xupp.front(), eps, maxNumEval, &result, &error, &numEval);
     }
-    catch(std::exception& e) {
+    catch(std::exception& ex) {
         if(!PyErr_Occurred())    // set our own error string if it hadn't been set by Python
-            PyErr_SetString(PyExc_RuntimeError, e.what());
+            raisePythonException(ex);
         return NULL;
     }
     return Py_BuildValue("ddi", result, error, numEval);
@@ -7881,9 +7984,9 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         }
         return Py_BuildValue("Nddi", toPyArray(samples), result, error, numEval);
     }
-    catch(std::exception& e) {
+    catch(std::exception& ex) {
         if(!PyErr_Occurred())    // set our own error string if it hadn't been set by Python
-            PyErr_SetString(PyExc_RuntimeError, e.what());
+            raisePythonException(ex);
         return NULL;
     }
 }
@@ -7963,12 +8066,14 @@ PyInit_agama(void)
         -1,                    /* m_size */
         module_methods,        /* m_methods */
     };
+    import_array1(NULL);  // needed for NumPy to work properly
 
 #if (PY_MAJOR_VERSION*0x100 + PY_MINOR_VERSION) < 0x307
     PyEval_InitThreads();  // this is not needed starting from Python 3.7
 #endif
     thismodule = PyModule_Create(&moduledef);
-    if(!thismodule) return NULL;
+    if(!thismodule)
+        return NULL;
     PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);
     PyModule_AddObject(thismodule, "G", PyFloat_FromDouble(1.0));
     conv.reset(new units::ExternalUnits());
@@ -8047,7 +8152,6 @@ PyInit_agama(void)
     // deliberately not adding this class to the module
     OrbitTypePtr = &OrbitType;
 
-    import_array1(thismodule);  // needed for NumPy to work properly
     return thismodule;
 }
 // ifdef HAVE_PYTHON

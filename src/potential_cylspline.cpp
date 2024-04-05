@@ -377,7 +377,7 @@ void computePotentialCoefsFromDensity(const BaseDensity &dens,
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computePotentialCoefsCyl: "+errorMsg);
 }
@@ -490,7 +490,7 @@ void computePotentialCoefsFromParticles(
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("Error in computePotentialCoefsFromParticles: "+errorMsg);
 }

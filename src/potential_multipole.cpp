@@ -301,7 +301,7 @@ void computeSphericalHarmonicsFromParticles(
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("computeSphericalHarmonicsFromParticles: " + errorMsg);
 }
@@ -865,7 +865,7 @@ void computeDensityCoefsFromParticles(
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("Multipole: " + errorMsg);
 }
@@ -2051,7 +2051,7 @@ void computePotentialCoefsBSE(
         }
     }
     if(cbrk.triggered())
-        throw std::runtime_error("Keyboard interrupt");
+        throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("computeDensityCoefsBSE: " + errorMsg);
 }

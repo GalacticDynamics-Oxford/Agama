@@ -964,6 +964,7 @@ The \ttt{Density} class provides only a couple of methods: first of all, the com
 To compute a time-dependent density at an arbitrary moment of time, provide an extra \texttt{t=...} argument to the \texttt{density} method (note that all other methods still evaluate it only at time 0). \texttt{t} could be a single number or an array of the same length as points, in which case each the density at each point is evaluated at its own time.\\[2mm]
 \texttt{projectedDensity(points [, alpha, beta, gamma])} computes the surface density (integral of density along the line of sight) at a 2d point (or an array of points) in the image plane, using an arbitrarily rotated coordinate system, whose orientation is specified by Euler angles $\alpha, \beta, \gamma$ (Section~\ref{sec:CoordinateDetails}).\\[2mm]
 Another useful method is \texttt{totalMass}, with an obvious role; the mass may well be infinite, e.g., for \ppp{NFW} or \ppp{Logarithmic} models. Likewise, \texttt{enclosedMass(radius)} estimates the mass enclosed within the given \texttt{radius} (a single value or an array of radii).\\[2mm]
+The \texttt{principalAxes} method determines the shape and orientation of the density profile.\\[2mm]
 Finally, the density profile may be sampled with particles, producing two arrays -- coordinates ($N\times3$) and masses ($N$): \\
 \texttt{pos, mass = d.sample(10000)}\\[2mm]
 The density framework can be augmented with user-defined \Python functions that return the density at a given point (or, rather, an array of points). Such a function must be a free function (not a class method) or a lambda expression, accepting one argument, which should be treated as a $N\times3$ array of points (even when $N=1$). This function would typically be called from the \Cpp code with more than one input point, to reduce overhead from switching between \Cpp and \Python. The following two equivalent examples define a spherical Plummer model:\\
@@ -1126,9 +1127,11 @@ modifies the list of components in the SCM.\\[2mm]
 \texttt{scm.iterate()}\\
 performs one iteration of the modelling procedure, recomputing the density of all components with DFs and then reinitializing the total potential.\\[2mm]
 \texttt{comp1.density}\\
-(a read-only property) contains the most recently updated density of this component (it would give \texttt{None} for \texttt{comp3}, which instead has a \texttt{potential} property); \\[2mm]
+(a read-only property) contains the most recently updated density of this component (it would give \texttt{None} for \texttt{comp3}, which instead has a \texttt{potential} property). \\[2mm]
+\texttt{comp1.df}\\
+(a read-only property) returns the DF associated with the component, or \texttt{None} for a static component.\\[2mm]
 \texttt{scm.potential}\\ is the instance of the total potential, which may be combined with the DF of each component into a \ttt{GalaxyModel} object, and used to compute other DF moments or construct an $N$-body model:\\
-\texttt{posvel, mass = agama.GalaxyModel(scm.potential, df).sample(10000)}\\[2mm]
+\texttt{posvel, mass = agama.GalaxyModel(scm.potential, comp1.df).sample(10000)}\\[2mm]
 The \ttt{Component} and \ttt{SelfConsistentModel} classes are further illustrated by several \hyperref[sec:ExampleSCM]{example scripts}.
 
 \paragraph{Target} class represents one of several possible targets in Schwarzschild models. It is initialized by providing \ppp{type="..."} and other parameters depending on the target type (see Section~\ref{sec:SchwarzschildDetails}). This object can be used in two contexts: either as an argument for the \texttt{orbit} routine, collecting the contribution of each orbit to each constraint in the target, or as a function applied to a \ttt{Density} or \ttt{GalaxyModel} object or an $N$-body snapshot, returning the array of constraints computed from this object.

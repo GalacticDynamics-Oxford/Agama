@@ -92,6 +92,7 @@ public:
     CtrlBreakHandler();      ///< sets up a custom signal handler
     ~CtrlBreakHandler();     ///< restores the previous signal handler
     static bool triggered(); ///< returns true if the Ctrl-Break signal was received, false otherwise
+    static std::string message() { return "Keyboard interrupt"; }  ///< standardized exception message
 };
 
 

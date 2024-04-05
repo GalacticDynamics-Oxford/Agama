@@ -957,10 +957,18 @@ public:
         When all three angles are zero (default initialization), the two systems coincide. */
     explicit Orientation(double alpha=0, double beta=0, double gamma=0);
 
-    /** check if the orientation is face-on (i.e. inclination is zero or pi, or |cos(beta)|==1) */
+    /** Check if the orientation is face-on (i.e. inclination is zero or pi, or |cos(beta)|==1) */
     bool isFaceOn() const { return mat[8]==1 || mat[8]==-1; }
 
-    /** transform the coordinates of a point from the 'original' to the 'rotated' system
+    /** Convert the rotation matrix into Euler angles,
+        normalized to the range alpha, gamma: [-pi..pi], beta: [0..pi].
+        When beta=0 or beta=pi, only one of the remaining angles can be determined uniquely,
+        so alpha is set to zero and gamma conveys the information about orientation.
+        In any case, a rotation matrix reconstructed from these angles should coincide
+        with the original matrix up to floating-point errors. */
+    void toEulerAngles(double& alpha, double& beta, double& gamma) const;
+
+    /** Transform the coordinates of a point from the 'original' to the 'rotated' system
         (the point remains geometrically fixed, only the reference frame changes) */
     void toRotated(const double vec[3], double result[3]) const
     {
@@ -969,7 +977,7 @@ public:
         result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
     }
 
-    /** transform the coordinates of a point from the 'rotated' to the 'original' reference frame */
+    /** Transform the coordinates of a point from the 'rotated' to the 'original' reference frame */
     void fromRotated(const double vec[3], double result[3]) const
     {
         // the inverse transformation uses the transposed rotation matrix
@@ -978,7 +986,7 @@ public:
         result[2] = mat[2] * vec[0] + mat[5] * vec[1] + mat[8] * vec[2];
     }
 
-    /** transform the position in cartesian coordinates from the 'original' to the 'rotated' frame
+    /** Transform the position in cartesian coordinates from the 'original' to the 'rotated' frame
         (convenience overload for PosCar) */
     PosCar toRotated(const PosCar& pos) const
     {
@@ -987,7 +995,7 @@ public:
         return coord::PosCar(result[0], result[1], result[2]);
     }
 
-    /** transform the position in cartesian coordinates from the 'rotated' to the 'original' frame
+    /** Transform the position in cartesian coordinates from the 'rotated' to the 'original' frame
         (convenience overload for PosCar) */
     PosCar fromRotated(const PosCar& pos) const
     {
@@ -996,7 +1004,7 @@ public:
         return coord::PosCar(result[0], result[1], result[2]);
     }
 
-    /** transform the velocity in cartesian coordinates from the 'original' to the 'rotated' frame
+    /** Transform the velocity in cartesian coordinates from the 'original' to the 'rotated' frame
         (convenience overload for VelCar) */
     VelCar toRotated(const VelCar& vel) const
     {
@@ -1005,7 +1013,7 @@ public:
         return coord::VelCar(result[0], result[1], result[2]);
     }
 
-    /** transform the velocity in cartesian coordinates from the 'rotated' to the 'original' frame
+    /** Transform the velocity in cartesian coordinates from the 'rotated' to the 'original' frame
         (convenience overload for VelCar) */
     VelCar fromRotated(const VelCar& vel) const
     {
@@ -1014,7 +1022,7 @@ public:
         return coord::VelCar(result[0], result[1], result[2]);
     }
 
-    /** transform the position and velocity from the 'original' to the 'rotated' frame
+    /** Transform the position and velocity from the 'original' to the 'rotated' frame
         (convenience overload for PosVelCar) */
     PosVelCar toRotated(const PosVelCar& posvel) const
     {
@@ -1025,7 +1033,7 @@ public:
         return PosVelCar(result);
     }
 
-    /** transform the position and velocity from the 'rotated' to the 'original' frame
+    /** Transform the position and velocity from the 'rotated' to the 'original' frame
         (convenience overload for PosVelCar) */
     PosVelCar fromRotated(const PosVelCar& posvel) const
     {
@@ -1036,7 +1044,7 @@ public:
         return PosVelCar(result);
     }
 
-    /** transform the second moment of velocity in cartesian coordinates
+    /** Transform the second moment of velocity in cartesian coordinates
         from the 'original' to the 'rotated' frame */
     Vel2Car toRotated(const Vel2Car& vel2) const
     {
@@ -1057,7 +1065,7 @@ public:
         return result;
     }
 
-    /** transform the second moment of velocity in cartesian coordinates
+    /** Transform the second moment of velocity in cartesian coordinates
         from the 'rotated' to the 'original' frame */
     Vel2Car fromRotated(const Vel2Car& vel2) const
     {
@@ -1078,7 +1086,7 @@ public:
         return result;
     }
 
-    /** transform the gradient in cartesian coordinates from the 'original' to the 'rotated' frame */
+    /** Transform the gradient in cartesian coordinates from the 'original' to the 'rotated' frame */
     GradCar toRotated(const GradCar& grad) const
     {
         double vec[3] = {grad.dx, grad.dy, grad.dz}, res[3];
@@ -1090,7 +1098,7 @@ public:
         return result;
     }
 
-    /** transform the gradient in cartesian coordinates from the 'rotated' to the 'original' frame */
+    /** Transform the gradient in cartesian coordinates from the 'rotated' to the 'original' frame */
     GradCar fromRotated(const GradCar& grad) const
     {
         double vec[3] = {grad.dx, grad.dy, grad.dz}, res[3];
@@ -1102,7 +1110,7 @@ public:
         return result;
     }
 
-    /** transform the hessian in cartesian coordinates from the 'original' to the 'rotated' frame */
+    /** Transform the hessian in cartesian coordinates from the 'original' to the 'rotated' frame */
     HessCar toRotated(const HessCar& hess) const
     {
         double
@@ -1122,7 +1130,7 @@ public:
         return result;
     }
 
-    /** transform the hessian in cartesian coordinates from the 'rotated' to the 'original' frame */
+    /** Transform the hessian in cartesian coordinates from the 'rotated' to the 'original' frame */
     HessCar fromRotated(const HessCar& hess) const
     {
         double

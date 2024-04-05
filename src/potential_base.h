@@ -537,7 +537,27 @@ double projectedDensity(const BaseDensity& dens, double X, double Y,
     note that fZ is always zero and hence does not need to be computed.
 */
 void projectedForce(const BasePotential& pot, double X, double Y,
-    const coord::Orientation& orientation, double& fX, double& fY);
+    const coord::Orientation& orientation, /*output*/ double& fX, double& fY);
+
+
+/** Determine the length and orientation of principal axes of the density profile
+    within a given radius, using the ellipsoidally-weighted moment of inertia.
+    The coefficients of axis stretching kx,ky,kz are determined iteratively,
+    using the [modified] moment of inertia tensor
+    \f$  T_ij = \iiint d^3x \rho(x) x_i x_j  \f$,
+    where the integration is performed over the ellipsoidal region with axes
+    [kx*radius, ky*radius, kz*radius], such that the principal axes of this ellipsoid
+    have a ratio kx:ky:kz, and the orientation of the ellipsoid is also adjusted iteratively.
+    \param[in] dens  is the density profile.
+    \param[in] radius  is the sphericalized radius at which to measure the shape,
+    equal to the geometric mean of three axes of the actual ellipsoidal region.
+    \param[out] axes  will contain the three dimensionless coefficients of axis stretching,
+    kx,ky,kz (in decreasing order), with the product of three coefficients equal to unity.
+    \param[out] angles  if not NULL, will contain the three Euler rotation angles
+    describing the orientation of the ellipsoid.
+*/
+void principalAxes(const BaseDensity& dens, double radius,
+    /*output*/ double axes[3], double angles[3]=NULL);
 
 
 /** Find (spherical) radius corresponding to the given enclosed mass */
