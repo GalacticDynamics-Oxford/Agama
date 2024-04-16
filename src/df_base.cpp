@@ -8,7 +8,7 @@ namespace df{
 
 /// convert from scaled variables to the actual actions to be passed to DF
 /// if jac!=NULL, store the value of jacobian of transformation in this variable
-actions::Actions ActionSpaceScalingTriangLog::toActions(const double vars[], double* jac) const
+actions::Actions ActionSpaceScalingTriangLog::toActions(const double vars[3], double* jac) const
 {
     const double u = vars[0], v = vars[1], w = vars[2];
     if(u<0 || u>1 || v<0 || v>1 || w<0 || w>1)

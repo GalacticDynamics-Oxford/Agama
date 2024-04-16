@@ -1,7 +1,7 @@
 /** \file    math_spline.h
     \brief   spline interpolation and penalized spline approximation
     \author  Eugene Vasiliev, Walter Dehnen
-    \date    2011-2018
+    \date    2011-2024
 
 This module implements various interpolation and smoothing algorithms in 1,2,3 dimensions.
 
@@ -91,16 +91,35 @@ namespace math{
 /// \name One-dimensional interpolation
 
 /** Generic one-dimensional interpolator class */
-class BaseInterpolator1d: public IFunction {
+class BaseInterpolator1d: public IFunction, public IFunctionIntegral {
 public:
     /** empty constructor is required for the class to be used in std::vector and alike places */
     BaseInterpolator1d() {};
 
-    /** Initialize a 1d interpolator from the values provided for x and f(x);
-        x should be monotonically increasing (zero-length and single-element arrays are acceptable).
+    /** Partially initialize a 1d interpolator from the provided grid in x, which should be
+        monotonically increasing (zero-length and single-element arrays are acceptable).
         All interpolators return NaN when empty (initialized by default or with zero-length arrays).
     */
-    BaseInterpolator1d(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
+    BaseInterpolator1d(const std::vector<double>& xvalues);
+
+    /** return the integral of the interpolator function times x^n on the interval [x1..x2];
+        the interpolator is set to zero outside the interval xmin..xmax.
+    */
+    using IFunctionIntegral::integrate;
+
+    /** return the integral of the interpolator function S times another function F(x)
+        on the interval [x1..x2], i.e. \f$  \int_{x1}^{x2} S(y) F(y) dy  \f$;
+        the function F is specified by the interface that provides the integral
+        \f$  \int_{y1}^{y2} F(y) * y^n dy  \f$  on any interval y1..y2 for any integer n>=0.
+        The interpolator S is set to zero outside the interval xmin..xmax, unlike the evalDeriv()
+        method, which may (or may not) return a linearly extrapolated value.
+    */
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const = 0;
+
+    /** compute the convolution of the interpolator S with the provided kernel K, i.e.
+        \f$ \int_{xmin}^{xmax} S(y) K(x-y) dy \f$;  S is set to zero outside the range of xvalues.
+    */
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const = 0;
 
     /** return the number of derivatives that the interpolator provides */
     virtual unsigned int numDerivs() const { return 2; }
@@ -112,14 +131,13 @@ public:
     double xmax() const { return xval.size()? xval.back() : NAN; }
 
     /** check if the spline is initialized */
-    bool empty() const { return fval.empty(); }
+    bool empty() const { return xval.empty(); }
 
     /** return the array of spline nodes */
     const std::vector<double>& xvalues() const { return xval; }
 
 protected:
     std::vector<double> xval;  ///< grid nodes
-    std::vector<double> fval;  ///< values of function at grid nodes
 };
 
 
@@ -134,6 +152,15 @@ public:
         location is outside the definition interval, a linear extrapolation is performed.
     */
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+
+    virtual double integrate(double x1, double x2, int n=0) const;
+
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
+
+private:
+    std::vector<double> fval;  ///< values of the interpolator at grid nodes
 };
 
 
@@ -163,7 +190,7 @@ public:
     This procedure also manifestly violates the linear nature of the interpolator,
     hence it is not used by default.
 */
-class CubicSpline: public BaseInterpolator1d, public IFunctionIntegral {
+class CubicSpline: public BaseInterpolator1d {
 public:
     CubicSpline() : BaseInterpolator1d() {};
 
@@ -208,19 +235,21 @@ public:
     */
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
-    /** return the integral of spline function times x^n on the interval [x1..x2] */
     virtual double integrate(double x1, double x2, int n=0) const;
 
     /** return the integral of spline function times another function f(x) on the interval [x1..x2];
         the other function is specified by the interface that provides the integral
         of f(x) * x^n for 0<=n<=3 */
-    double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
 
     /** check if the spline is everywhere monotonic on the given interval */
     bool isMonotonic() const;
 
 private:
-    std::vector<double> fder;  ///< first derivatives of interpolated function at grid nodes
+    std::vector<double> fval;  ///< values of the interpolator at grid nodes
+    std::vector<double> fder;  ///< first derivatives of the interpolator at grid nodes
 };
 
 
@@ -250,9 +279,16 @@ public:
     */
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
+    virtual double integrate(double x1, double x2, int n=0) const;
+
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
+
 private:
-    std::vector<double> fder;  ///< first  derivatives of function at grid nodes
-    std::vector<double> fder2; ///< second derivatives of function at grid nodes
+    std::vector<double> fval;  ///< values of the interpolator at grid nodes
+    std::vector<double> fder;  ///< first  derivatives of the interpolator at grid nodes
+    std::vector<double> fder2; ///< second derivatives of the interpolator at grid nodes
 };
 
 
@@ -261,8 +297,10 @@ private:
     Input x values must be strictly positive; however, input f values may contain zero or
     negative elements - these points will be excluded from log-spline construction and
     interpolated without log-scaling when evaluating the function.
+    This class is not derived from BaseInterpolator1d, since it does not fully implement its
+    interface (i.e., does not provide integration and convolution methods).
 */
-class LogLogSpline: public BaseInterpolator1d {
+class LogLogSpline: public IFunction {
 public:
     /// empty constructor
     LogLogSpline() : nonnegative(true) {}
@@ -288,7 +326,18 @@ public:
 
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
 
+    /** return the number of derivatives that the interpolator provides */
+    virtual unsigned int numDerivs() const { return 2; }
+
+    /** return the lower end of definition interval */
+    double xmin() const { return xval.size()? xval.front() : NAN; }
+
+    /** return the upper end of definition interval */
+    double xmax() const { return xval.size()? xval.back() : NAN; }
+
 private:
+    std::vector<double> xval;     ///< grid nodes
+    std::vector<double> fval;     ///< values of the original function at grid nodes
     std::vector<double> fder;     ///< first derivatives of the original function at grid nodes
     std::vector<double> logxval;  ///< log-scaled coordinate
     std::vector<double> logfval;  ///< log-scaled function values
@@ -422,14 +471,16 @@ private:
 
 
 /** simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
-    and presents an IFunction interface for the interpolator */
+    and presents a BaseInterpolator1d interface */
 template<int N>
-class BsplineWrapper: public IFunction {
+class BsplineWrapper: public BaseInterpolator1d {
 public:
     const BsplineInterpolator1d<N> bspl;
     const std::vector<double> ampl;
     BsplineWrapper(const BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
-        bspl(_bspl), ampl(_ampl) {}
+        bspl(_bspl), ampl(_ampl) { xval = bspl.xvalues(); }
+    BsplineWrapper(const std::vector<double>& _xval, const std::vector<double>& _ampl) :
+        bspl(_xval), ampl(_ampl) { xval = _xval; }
 
     virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
     {
@@ -441,7 +492,11 @@ public:
             *deriv2= bspl.interpolate(x, ampl, 2);
     }
 
-    virtual unsigned int numDerivs() const { return 2; }
+    virtual double integrate(double x1, double x2, int n=0) const;
+
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
 };
 
 

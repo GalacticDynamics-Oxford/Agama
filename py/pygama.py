@@ -530,9 +530,13 @@ def _bsplineGaussLegendre(grid):
 def bsplineInterp(degree, grid, ampl, x):
     '''
     Compute interpolated values of B-spline expansion of given degree over the given grid and ampitudes,
-    for the input point or an array of points x
+    for the input point or an array of points x.
+    The function is inefficient for large arrays, and an equivalent result could be obtained using either
+    (1) scipy.interpolate.splev(x, (extgrid, ampl, degree), ext=1),  where
+        extgrid = numpy.hstack((numpy.repeat(grid[0], degree), grid, numpy.repeat(grid[-1], degree))),  or
+    (2) agama.Spline(grid, ampl=ampl)(x)  (in this case degree is inferred as len(ampl)-len(grid)+1).
     '''
-    if isinstance(x, (int,float,_numpy.float)):
+    if _numpy.size(x) == 1:
         return            _numpy.dot(_bsplines(degree, grid, x), ampl)
     return _numpy.array([ _numpy.dot(_bsplines(degree, grid, X), ampl) for X in x])
 
@@ -541,7 +545,7 @@ def bsplineIntegrals(degree, grid, power=0):
     '''
     Compute the vector of integrals of B-spline basis functions, optionally multiplied by x^power.
     To obtain the integral of a function represented by amplitudes of its a B-spline expansion,
-    multiply this vector by the array of amplitudes and sum the result
+    multiply this vector by the array of amplitudes and sum the result.
     '''
     return _numpy.sum(_numpy.vstack([ _bsplines(degree, grid, x) * x**power * w
         for x, w in zip(*_bsplineGaussLegendre(grid)) ]), axis=0)

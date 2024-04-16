@@ -1,10 +1,3 @@
-/**
-    \file    math_spline.cpp
-    \brief   implements math_spline.h
-    \author  Eugene Vasiliev, Walter Dehnen
-    \date    2011-2018
-*/
-
 #include "math_spline.h"
 #include "math_core.h"
 #include "math_fit.h"
@@ -350,28 +343,20 @@ BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots)
 
 /** compute the coefficients c of a polynomial of degree N from its values at N+1 points:
     P(x) = c_0 + c_1 x + c_2 x^2 + ... + c_N x^N;  P(x_i) = y_i, i=0..N
+    Adapted from the implementation of the algorithm of Bjorck & Pereyra (1970) by John Burkardt.
+    NB: the alternative version given in Numerical Recipes has *much* worse accuracy!
 */
 template<int N>
 void vandermonde(/*input*/ const double x[], const double y[], /*output*/ double c[])
 {
-    double s[N+1];  // temporary storage
     for(int i=0; i<=N; i++)
-        s[i] = c[i] = 0.0;
-    s[N]= -x[0];
-    for(int i=1; i<=N; i++) {
-        for(int j=N-i; j<N; j++)
-            s[j] -= x[i] * s[j+1];
-        s[N] -= x[i];
-    }
-    for(int j=0; j<=N; j++) {
-        double p = N+1, q = 1;
-        for(int k=N; k>0; k--)
-            p = k * s[k] + x[j] * p;
-        for(int k=N; k>=0; k--) {
-            c[k] += y[j] / p * q;
-            q = s[k] + x[j] * q;
-        }
-    }
+        c[i] = y[i];
+    for(int i=0; i<N; i++)
+        for(int j=N; j>i; j--)
+            c[j] = (c[j] - c[j-1]) / (x[j] - x[j-i-1]);
+    for(int i=N-1; i>=0; i--)
+        for(int j=i; j<N; j++)
+            c[j] -= x[i] * c[j+1];
 }
 
 //---- spline construction routines ----//
@@ -596,6 +581,138 @@ inline void fillNaN(double* val, double* der, double* der2)
         *der2= NAN;
 }
 
+/// Compute the integral of a product of a piecewise-polynomial interpolator S with another function F.
+/// \tparam N is the degree of the polynomial interpolation for S.
+/// \tparam CONV selects one of the two modes of operation:
+/// if CONV=false:  \f$ \int_{x1}^{x2} S( y ) F(y) dy \f$,
+/// if CONV=true:   \f$ \int_{x1}^{x2} S(x-y) F(y) dy \f$.
+/// \param[in] S  is the interpolator.
+/// \param[in] F  is the interface that provides definite integrals \f$ \int_{x1}^{x2} F(y) y^n dy \f$.
+/// \param[in] a, b:  the meaning depends on CONV:
+/// if CONV=false:  a=x1, b=x2  are the limits of integration,
+/// if CONV=true:   a=x  is the point at which the convolution is computed, b is ignored,
+/// and x1,x2 are given by xmin(), xmax() methods of the interpolator.
+/// The integration is performed analytically on each segment of the interpolation grid,
+/// by decomposing the interpolator into N+1 monomials and retrieving the integrals of F(y) y^n dy.
+template<int N, bool CONV>
+double integratePiecewise(const BaseInterpolator1d& S, const IFunctionIntegral& F,
+    double a, double b=NAN)
+{
+    const std::vector<double>& xval = S.xvalues();
+    size_t size = xval.size();
+    if(size<2)
+        return 0;
+    double x1, x2, x;
+    bool flipSign = false;
+    // indices of the first and the last point in xvalues to be considered:
+    // xval[i1] <= x1 <= x2 <= xval[i2],  where x1 and x2 are adjusted from input values if needed
+    int i1, i2;
+    if(CONV) {
+        x  = a;
+        x1 = xval.front();
+        x2 = xval.back();
+        i1 = 0;
+        i2 = size-1;
+    } else {
+        if(a <= b) {
+            x1 = fmax(a, xval[0]);
+            x2 = fmin(b, xval[size-1]);
+        } else {
+            flipSign = true;
+            x1 = fmax(b, xval[0]);
+            x2 = fmin(a, xval[size-1]);
+        }
+        if(x1>=x2)
+            return 0;
+        i1 = binSearch(x1, &xval.front(), size);
+        i2 = binSearch(x2, &xval.front(), size)+1;
+        if(x2==xval[i2-1])
+            i2--;
+        assert(0<=i1 && i1<i2 && i2<(int)size);
+    }
+
+    // first determine the range of segments where the function is non-negligible,
+    // and cache the precomputed values of  \int_{x_i}^{x_{i+1}} F(t) dt, where t is defined below
+    double* I0 = static_cast<double*>(alloca((i2-i1) * sizeof(double)));
+    double sum = 0;
+    for(int i=i1; i<i2; i++) {
+        double t1 = CONV ? x-xval[i+1] : std::max(x1, xval[i]);
+        double t2 = CONV ? x-xval[i]   : std::min(x2, xval[i+1]);
+        I0[i-i1] = F.integrate(t1, t2, 0);
+        sum += I0[i];
+    }
+
+    double result = 0;
+    for(int i=i1; i<i2; i++) {
+        if(fabs(I0[i-i1]) < fabs(sum) * DBL_EPSILON)  // ignore the contribution of this segment
+            continue;
+        // decompose the interpolator S into N+1 monomials in t on the interval y1..y2,
+        // where t=y if CONV=false or t=x-y if CONV=true.
+        // (1) collect the values of S at N+1 distinct (equally spaced) points on this interval
+        double y1 = xval[i], y2 = xval[i+1];
+        double t[N+1], v[N+1], c[N+1];
+        for(int k=0; k<=N; k++) {
+            double yk = y1 + (k+0.5) / (N+1) * (y2-y1);
+            t[k] = CONV ? x - yk : yk;
+            v[k] = S(yk);
+        }
+        // (2) determine the coefficients c_n in front of each monomial t^n
+        vandermonde<N>(t, v, c);
+        // (3) for each monomial, compute the integral  c_n F(t) t^n,
+        // reusing the cached values for n=0
+        double t1 = CONV ? x-y2 : std::max(x1, y1), t2 = CONV ? x-y1 : std::min(x2, y2);
+        for(int n=0; n<=N; n++) {
+            double In = n==0 ? I0[i-i1] : F.integrate(t1, t2, n);
+            result += In * c[n];
+        }
+    }
+    return flipSign ? -result : result;
+}
+
+/// Compute the integral of a product of a piecewise-polynomial interpolator S with a monomial y^n.
+/// \tparam N is the degree of the polynomial interpolation for S.
+/// \param[in] S  is the interpolator.
+/// \param[in] n  is the degree of the monomial.
+/// \param[in] x1, x2  are the limits of integration.
+/// Integration is performed exactly (up to machine precision), using the Gauss-Legendre quadrature
+/// of a sufficient order on each segment of the interpolation grid.
+template<int N>
+double integratePiecewise(const BaseInterpolator1d& S, int n, double x1, double x2)
+{
+    // the lowest-order Gauss-Legendre rule that is exact for the given N+n
+    int GLORDER = (N+n)/2 + 1;
+    if(GLORDER > MAX_GL_TABLE)  // unlikely to happen, but here is a fallback (less accurate) option
+        return integratePiecewise<N, false>(S, Monomial(n), x1, x2);
+    const std::vector<double>& xval = S.xvalues();
+    size_t size = xval.size();
+    if(size<2)
+        return 0;
+    bool flipSign = x1 > x2;
+    if(flipSign)
+        std::swap(x1, x2);
+    x1 = fmax(x1, xval[0]);
+    x2 = fmin(x2, xval[size-1]);
+    if(x1>=x2)
+        return 0;
+    // indices of the first and the last point in xvalues to be considered:
+    // xval[i1] <= x1 <= x2 <= xval[i2],  where x1 and x2 are adjusted from input values if needed
+    int i1 = binSearch(x1, &xval.front(), size);
+    int i2 = binSearch(x2, &xval.front(), size)+1;
+    if(x2==xval[i2-1])
+        i2--;
+    assert(0<=i1 && i1<i2 && i2<(int)size);
+    double result = 0;
+    // on each segment, use the fixed-order GL quadrature
+    for(int i=i1; i<i2; i++) {
+        double y1 = fmax(xval[i], x1), y2 = fmin(xval[i+1], x2);
+        for(int k=0; k<GLORDER; k++) {
+            double y = y1 + GLPOINTS[GLORDER][k] * (y2-y1);
+            result += S(y) * pow(y, n) * (y2-y1) * GLWEIGHTS[GLORDER][k];
+        }
+    }
+    return flipSign ? -result : result;
+}
+
 //---- Auxiliary spline construction routines ----//
 
 /// apply the slope-limiting prescription of Hyman(1983) to the first derivatives of a previously
@@ -685,22 +802,21 @@ inline void checkFinite2d(const std::vector<double>& arr, const size_t ysize,
 }  // internal namespace
 
 
-BaseInterpolator1d::BaseInterpolator1d(
-    const std::vector<double>& xvalues, const std::vector<double>& fvalues)
-:
-    xval(xvalues), fval(fvalues)
+BaseInterpolator1d::BaseInterpolator1d(const std::vector<double>& xvalues) :
+    xval(xvalues)
 {
     checkFiniteAndMonotonic(xval, "BaseInterpolator1d", "x");
-    checkFinite1d(fval, "BaseInterpolator1d", "fvalues");
 }
+
 
 LinearInterpolator::LinearInterpolator(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues)
 :
-    BaseInterpolator1d(xvalues, fvalues)
+    BaseInterpolator1d(xvalues), fval(fvalues)
 {
     if(fval.size() != xval.size())
         throw std::length_error("LinearInterpolator: input arrays are not equal in length");
+    checkFinite1d(fval, "LinearInterpolator", "fvalues");
 }
 
 void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
@@ -719,6 +835,21 @@ void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv,
         *deriv2 = 0;
 }
 
+double LinearInterpolator::integrate(double x1, double x2, int n) const
+{
+    return integratePiecewise<1>(*this, n, x1, x2);
+}
+
+double LinearInterpolator::integrate(double x1, double x2, const IFunctionIntegral& f) const
+{
+    return integratePiecewise<1, false>(*this, f, x1, x2);
+}
+
+double LinearInterpolator::convolve(double x, const IFunctionIntegral& kernel) const
+{
+    return integratePiecewise<1, true>(*this, kernel, x);
+}
+
 
 //-------------- CUBIC SPLINE --------------//
 
@@ -727,8 +858,9 @@ CubicSpline::CubicSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     bool regularize, double derivLeft, double derivRight)
 :
-    BaseInterpolator1d(xvalues, fvalues)
+    BaseInterpolator1d(xvalues), fval(fvalues)
 {
+    checkFinite1d(fval, "CubicSpline", "fvalues");
     size_t numPoints = xval.size();
     int degree = fval.size() - numPoints + 1;
     if(degree == 2 || degree == 3) {
@@ -765,10 +897,11 @@ CubicSpline::CubicSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     const std::vector<double>& fderivs)
 :
-    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
+    BaseInterpolator1d(xvalues), fval(fvalues), fder(fderivs)
 {
     if(fval.size() != xval.size() || fder.size() != xval.size())
         throw std::length_error("CubicSpline: input arrays are not equal in length");
+    checkFinite1d(fval, "CubicSpline", "fvalues");
     checkFinite1d(fder, "CubicSpline", "function derivatives");
 }
 
@@ -833,58 +966,21 @@ bool CubicSpline::isMonotonic() const
     return ismonotonic;
 }
 
-double CubicSpline::integrate(double x1, double x2, int n) const {
-    return integrate(x1, x2, Monomial(n));
+double CubicSpline::integrate(double x1, double x2, int n) const
+{
+    return integratePiecewise<3>(*this, n, x1, x2);
 }
 
 double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) const
 {
-    if(x1==x2)
-        return 0;
-    if(x1>x2)
-        return integrate(x2, x1, f);
-    unsigned int size = xval.size();
-    if(size==0)
-        return NAN;
-    double result = 0;
-    if(x1 <= xval[0]) {    // spline is linearly extrapolated at x<xval[0]
-        double X2 = fmin(x2, xval[0]);
-        result +=
-            f.integrate(x1, X2, 0) * (fval[0] - fder[0] * xval[0]) +
-            f.integrate(x1, X2, 1) * fder[0];
-        if(x2<=xval[0])
-            return result;
-        x1 = xval[0];
-    }
-    if(x2 >= xval[size-1]) {    // same for x>xval[end]
-        double X1 = fmax(x1, xval[size-1]);
-        result +=
-            f.integrate(X1, x2, 0) * (fval[size-1] - fder[size-1] * xval[size-1]) +
-            f.integrate(X1, x2, 1) * fder[size-1];
-        if(x1>=xval[size-1])
-            return result;
-        x2 = xval[size-1];
-    }
-    unsigned int i1 = binSearch(x1, &xval.front(), size);
-    unsigned int i2 = binSearch(x2, &xval.front(), size);
-    for(unsigned int i=i1; i<=i2; i++) {
-        double x  = xval[i];
-        double h  = xval[i+1] - x;
-        double a  = fval[i];
-        double b  = fder[i];
-        double d  = (-12 * (fval[i+1] - a) / h + 6 * (fder[i+1] + b)) / pow_2(h);
-        double c  = -0.5 * h * d + (fder[i+1] - b) / h;
-        // spline(x) = fval[i] + dx * (b + dx * (c/2 + dx*d/6)), where dx = x-xval[i]
-        double X1 = i==i1 ? x1 : x;
-        double X2 = i==i2 ? x2 : xval[i+1];
-        result   +=
-            f.integrate(X1, X2, 0) * (a - x * (b - 1./2 * x * (c - 1./3 * x * d))) +
-            f.integrate(X1, X2, 1) * (b - x * (c - 1./2 * x * d)) +
-            f.integrate(X1, X2, 2) * (c - x * d) / 2 +
-            f.integrate(X1, X2, 3) * d / 6;
-    }
-    return result;
+    return integratePiecewise<3, false>(*this, f, x1, x2);
 }
+
+double CubicSpline::convolve(double x, const IFunctionIntegral& kernel) const
+{
+    return integratePiecewise<3, true>(*this, kernel, x);
+}
+
 
 // ------ Quintic spline ------- //
 
@@ -892,11 +988,12 @@ QuinticSpline::QuinticSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     const std::vector<double>& fderivs)
 :
-    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
+    BaseInterpolator1d(xvalues), fval(fvalues), fder(fderivs)
 {
     size_t numPoints = xval.size();
     if(fval.size() != numPoints || fder.size() != numPoints)
         throw std::length_error("QuinticSpline: input arrays are not equal in length");
+    checkFinite1d(fval, "QuinticSpline", "fvalues");
     checkFinite1d(fder, "QuinticSpline", "function derivatives");
     fder2 = constructQuinticSpline(xval, fval, fder);
 }
@@ -932,6 +1029,21 @@ void QuinticSpline::evalDeriv(const double x, double* value, double* deriv, doub
         /*output*/ value, deriv, deriv2);
 }
 
+double QuinticSpline::integrate(double x1, double x2, int n) const
+{
+    return integratePiecewise<5>(*this, n, x1, x2);
+}
+
+double QuinticSpline::integrate(double x1, double x2, const IFunctionIntegral& f) const
+{
+    return integratePiecewise<5, false>(*this, f, x1, x2);
+}
+
+double QuinticSpline::convolve(double x, const IFunctionIntegral& kernel) const
+{
+    return integratePiecewise<5, true>(*this, kernel, x);
+}
+
 
 // ------ Doubly-log-scaled spline ------ //
 
@@ -939,7 +1051,7 @@ LogLogSpline::LogLogSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     double derivLeft, double derivRight)
 :
-    BaseInterpolator1d(xvalues, fvalues)
+    xval(xvalues), fval(fvalues)
 {
     size_t numPoints = fval.size();
     if(numPoints != xval.size())
@@ -1019,7 +1131,7 @@ LogLogSpline::LogLogSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     const std::vector<double>& fderivs)
 :
-    BaseInterpolator1d(xvalues, fvalues), fder(fderivs)
+    xval(xvalues), fval(fvalues), fder(fderivs)
 {
     size_t numPoints = fval.size();
     if(numPoints != xval.size() || numPoints != fder.size())
@@ -1323,6 +1435,29 @@ template class BsplineInterpolator1d<0>;
 template class BsplineInterpolator1d<1>;
 template class BsplineInterpolator1d<2>;
 template class BsplineInterpolator1d<3>;
+
+template<int N>
+double BsplineWrapper<N>::integrate(double x1, double x2, int n) const
+{
+    return integratePiecewise<N>(*this, n, x1, x2);
+}
+
+template<int N>
+double BsplineWrapper<N>::integrate(double x1, double x2, const IFunctionIntegral& f) const
+{
+    return integratePiecewise<N, false>(*this, f, x1, x2);
+}
+
+template<int N>
+double BsplineWrapper<N>::convolve(double x, const IFunctionIntegral& kernel) const
+{
+    return integratePiecewise<N, true>(*this, kernel, x);
+}
+
+template class BsplineWrapper<0>;
+template class BsplineWrapper<1>;
+template class BsplineWrapper<2>;
+template class BsplineWrapper<3>;
 
 
 // ------ Finite-element features of B-splines ------ //

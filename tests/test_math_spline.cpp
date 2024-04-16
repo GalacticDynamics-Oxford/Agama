@@ -43,6 +43,8 @@ class testfncsin: public math::IFunctionIntegral {
             case 1: return -cos(x)*x+sin(x);
             case 2: return  cos(x)*(2-x*x) + 2*x*sin(x);
             case 3: return  cos(x)*x*(6-x*x) + 3*sin(x)*(x*x-2);
+            case 4: return -cos(x)*(24-x*x*(12-x*x)) + 4*x*sin(x)*(x*x-6);
+            case 5: return -cos(x)*x*(120-x*x*(20-x*x)) + 5*sin(x)*(24-x*x*(12-x*x));
             default: return NAN;
         }
     }
@@ -185,7 +187,7 @@ public:
 double testfncorig(double x) { return tanh((2-fabs(x-4))/0.5)*0.5+0.5; }
 
 /** A normalized asymmetric exponential convolution kernel centered at origin with a scale sigma:
-    \f$   f(x) = \exp( -x/sigma ) / \sigma  \f$  if x>=0,  otherwise 0
+    \f$   f(x) = \exp( x/sigma ) / \sigma  \f$  if x<=0,  otherwise 0
 */
 class ExpKernel: public math::IFunction, public math::IFunctionIntegral {
     const double sigma;
@@ -193,13 +195,13 @@ public:
     ExpKernel(double _sigma) : sigma(_sigma) {}
 
     /* Compute the value and up to two derivatives of the function */
-    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const
+    virtual void evalDeriv(double x, /*output*/ double *val, double *der, double *der2) const
     {
-        double v = x >= 0 ? exp(-x/sigma) / sigma : 0;
+        double v = x <= 0 ? exp(x/sigma) / sigma : 0;
         if(val)
             *val = v;
         if(der)
-            *der = -v/sigma;
+            *der = v/sigma;
         if(der2)
             *der2 = v/pow_2(sigma);
     }
@@ -208,21 +210,21 @@ public:
     /** Compute the value of integral of the function times x^n on the interval [x1..x2] */
     virtual double integrate(double x1, double x2, int n=0) const
     {
-        double v1 = x1 >=0 ? math::gammainc(n+1, x1/sigma) : math::gamma(n+1);
-        double v2 = x2 >=0 ? math::gammainc(n+1, x2/sigma) : math::gamma(n+1);
-        return (v1-v2) * math::pow(sigma, n);
+        double v1 = x1 <=0 ? math::gammainc(n+1, -x1/sigma) : math::gamma(n+1);
+        double v2 = x2 <=0 ? math::gammainc(n+1, -x2/sigma) : math::gamma(n+1);
+        return (v2-v1) * math::pow(-sigma, n);
     }
 };
 
-// convolution kernel multiplied by the original function
+// convolution of two functions
 class Convolved: public math::IFunctionNoDeriv {
-    const double y;
-    const math::IFunction& conv;
+    const double x;
+    const math::IFunction &F, &G;
 public:
-    Convolved(double _y, const math::IFunction& _conv): y(_y), conv(_conv) {}
-    virtual double value(const double x) const {
-        //return 1/(M_SQRT2 * M_SQRTPI) * invwidth * exp(-0.5 * pow_2(x * invwidth)) * testfncorig(y-x);
-        return testfncorig(y-x) * conv(x);
+    Convolved(double _x, const math::IFunction& _F, const math::IFunction& _G) :
+        x(_x), F(_F), G(_G) {}
+    virtual double value(const double y) const {
+        return F(y) * G(x-y);
     }
 };
 
@@ -494,25 +496,30 @@ bool testPenalizedSplineDensity()
 //-------- test cubic and quintic splines ---------//
 
 // test the integration of a spline function
-bool test_integral(const math::CubicSpline& f, double x1, double x2)
+bool test_integral(const math::BaseInterpolator1d& f, double x1, double x2)
 {
+    // in case that the input interval is larger than the range of xvalues for the interpolator,
+    // set the limits of the "external" integration to the interpolator boundaries
+    // (otherwise it would include the region where the interpolator is linearly extrapolated,
+    // but its integral is still evaluated as if it were zero).
+    double ex1 = x1<x2 ? fmax(x1, f.xmin()) : fmin(x1, f.xmax());
+    double ex2 = x1<x2 ? fmin(x2, f.xmax()) : fmax(x2, f.xmin());
     double result_int = f.integrate(x1, x2);
-    double result_ext = math::integrateAdaptive(f, x1, x2, 1e-13);
+    double result_ext = math::integrateAdaptive(f, ex1, ex2, 1e-13);
     double error1 = fabs((result_int-result_ext) / result_ext);
     std::cout << "Ordinary intergral on [" + utils::pp(x1,10) +':'+ utils::pp(x2,10) +
         "]: result=" + utils::pp(result_int,8) + ", error=" + utils::pp(error1,8) + '\n';
     result_int = f.integrate(x1, x2, testfncsin());
-    result_ext = math::integrateAdaptive(testfncintsin(f), x1, x2, 1e-13);
+    result_ext = math::integrateAdaptive(testfncintsin(f), ex1, ex2, 1e-13);
     double error2 = fabs((result_int-result_ext) / result_ext);
     std::cout << "Weighted intergral on [" + utils::pp(x1,10) +':'+ utils::pp(x2,10) +
         "]: result=" + utils::pp(result_int,8) + ", error=" + utils::pp(error2,8) + '\n';
     result_int = f.integrate(x1, x2, f);
-    result_ext = math::integrateAdaptive(squaredfnc(f), x1, x2, 1e-13);
+    result_ext = math::integrateAdaptive(squaredfnc(f), ex1, ex2, 1e-13);
     double error3 = fabs((result_int-result_ext) / result_ext);
     std::cout << "Integral of f(x)^2 on [" + utils::pp(x1,10) +':'+ utils::pp(x2,10) +
         "]: result=" + utils::pp(result_int,8) + ", error=" + utils::pp(error3,8) + '\n';
-    return error1 < 1e-13 && error2 < 1e-13 && error3 < 3e-12;
-    // the larger error in the last case is apparently due to roundoff errors
+    return error1 < 1e-13 && error2 < 1e-13 && error3 < 1e-13;
 }
 
 bool testEmptySplines()
@@ -631,6 +638,17 @@ bool testGaussianIntegral(double x1, double x2, double sigma, int n)
     return fabs(intnum-intan) <= fmax(1.5e-15, fabs(intan) * 1e-12);
 }
 
+template<class Kernel>
+bool testSplineConvolution(const math::BaseInterpolator1d& fnc, const double x, const Kernel& kernel)
+{
+    // numerical integration
+    double intnum = math::integrateAdaptive(Convolved(x, fnc, kernel), fnc.xmin(), fnc.xmax(), 1e-13);
+    // analytic integration
+    double intan  = fnc.convolve(x, kernel);
+    double reldif = intan/intnum - 1;
+    return fabs(reldif) < 1e-13;
+}
+
 template<int N>
 double getAmplFiniteElement(const math::FiniteElement1d<N>& fe, const math::IFunctionIntegral& kernel,
     /*output*/ std::vector<double>& ampl, std::vector<double>& convampl, std::vector<double>& conv2ampl)
@@ -718,7 +736,8 @@ bool testFiniteElement()
     for(int i=0; i<NTEST; i++) {
         double x = XMIN + (XMAX-XMIN) / (NTEST-1) * i,
         origfnc  = testfncorig(x),
-        convfnc  = math::integrateAdaptive(Convolved(x, ExpKernel(SIGMA)), x-XMAX, x-XMIN, 1e-6),
+        convfnc  = math::integrateAdaptive(
+            Convolved(x, ExpKernel(SIGMA), math::FncWrapper(testfncorig)), x-XMAX, x-XMIN, 1e-6),
         fem0     = fe0.interp.interpolate(x, am0),
         femconv0 = fe0.interp.interpolate(x, cam0),
         fem2conv0= fe0.interp.interpolate(x, tam0),
@@ -809,6 +828,23 @@ std::string evalSpline(const math::IFunction& fnc)
     return utils::pp(1.0 * iter * NPOINTS * CLOCKS_PER_SEC / (std::clock()-clk), 6);
 }
 
+std::string evalConv(const math::BaseInterpolator1d& fnc, const math::IFunctionIntegral& kernel)
+{
+    const int NPOINTS = 100;
+    clock_t clk = std::clock();
+    int iter=0;
+    // run for a fixed wall-clock time (don't check it too often, though), but variable # of iterations
+    for(; iter%100!=99 || std::clock()-clk < MIN_CLOCKS; iter++) {
+        for(int i=0; i<=NPOINTS; i++) {
+            double x = i * (XMAX1D-XMIN1D) / NPOINTS + XMIN1D;
+            fnc.convolve(x, kernel);
+        }
+    }
+    double result = 1.0 * iter * NPOINTS * CLOCKS_PER_SEC / (std::clock()-clk);
+    return result<1e6 ? utils::toString(int(result)) : utils::pp(result, 6);
+}
+
+
 bool test1dSpline()
 {
     std::cout << "\033[1;33m1d interpolation\033[0m\n";
@@ -877,6 +913,10 @@ bool test1dSpline()
     // 12. cubic spline initialized from amplitudes of a 2nd degree B-spline created at step 10
     math::CubicSpline fCubicDeriv(xnodes, amplBsplineDeriv);
 
+    // 13. a small degree-2 B-spline approximating a standard Gaussian
+    std::vector<double> xnodes2 = math::createUniformGrid(4, -3, 3), ampl2(5); ampl2[2]=0.5;
+    math::BsplineWrapper<2> bsplGaussian(xnodes2, ampl2);
+
     // output file
     std::ofstream strm;
 
@@ -888,7 +928,18 @@ bool test1dSpline()
            errClampedDer2=0, errHermiteDer2=0, errQuiCubeDer2=0, errQuinticDer2=0,
            errBsplineEquivClamped=0, errClampedEquivBspline=0,
            errBsplineQuad=0, errCubicEquivBsplineQuad = 0;
-    bool oknat = true, okcla = true, okher = true, okqui = true;
+    bool oknat = true, okcla = true, okher = true, okqui = true, okcon = true;
+
+    okcon &= testSplineConvolution(fLinear , 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fClamped, 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fQuintic, 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(math::BsplineWrapper<2>(
+           fBsplineDeriv, amplBsplineDeriv), 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fQuintic, 2.5, bsplGaussian);
+    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(1.0));
+    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(1.0));
+    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(0.1));
+    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(0.1));
 
     // loop through the range of x covering the input grid,
     // using points both at grid nodes and inside grid segments
@@ -1044,7 +1095,8 @@ bool test1dSpline()
     // test the integration functions
     const double X1 = (xnodes[0]+xnodes[1])/2, X2 = xnodes[xnodes.size()-2]-0.1;
     bool okintcla = test_integral(fClamped, X1, X2);
-    bool okintnat = test_integral(fNatural, -1.234567, xnodes.back()+1.);
+    bool okintnat = test_integral(fNatural, -1.234567, xnodes.back()+1);
+    bool okintqui = test_integral(fQuintic, xnodes.back()+1, -1.234567);
     double intClamped = fClamped.integrate(X1, X2);
     double intBspline = fBspline.interp.integrate(X1, X2, amplBsplineEquivClamped);
     double intNumeric = math::integrateAdaptive(fClamped, X1, X2, 1e-14);
@@ -1099,10 +1151,12 @@ bool test1dSpline()
     testCond(errQuiCubeDer2< 0.25 ,  "error in quintic-from-cubic 2nd derivative is too large") &&
     testCond(okintcla, "integral of clamped spline is incorrect") &&
     testCond(okintnat, "integral of natural spline is incorrect") &&
+    testCond(okintqui, "integral of quintic spline is incorrect") &&
     testCond(okintnum, "integral of B-spline is incorrect") &&
     testCond(oklogspl, "log-scaled splines failed") &&
     testCond(okmon, "monotonicity analysis failed") &&
-    testCond(okfem, "finite-element failed");
+    testCond(okfem, "finite-element failed") &&
+    testCond(okcon, "analytic convolution of splines failed");
 
     //----------- test the performance of 1d spline calculation -------------//
     std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fNatural) + ", 1st deriv: " +
@@ -1111,6 +1165,13 @@ bool test1dSpline()
     evalSpline<1>(fQuintic) + ", 2nd deriv: " + evalSpline<2>(fQuintic) + " eval/s\n";
     std::cout << "B-spline of degree N=3:   " +
     evalSpline<0>(math::BsplineWrapper<3>(fBspline.interp, amplBsplineOrig)) + " eval/s\n";
+    math::Gaussian unitGaussian(1.0), tinyGaussian(0.001);
+    std::cout << "Linear interp. w/convol.: " + evalConv(fLinear , bsplGaussian) + ", " +
+    evalConv(fLinear , unitGaussian) +  ", "  + evalConv(fLinear , tinyGaussian) + " eval/s\n";
+    std::cout << "Cubic   spline w/convol.: " + evalConv(fNatural, bsplGaussian) + ", " +
+    evalConv(fNatural, unitGaussian) +  ", "  + evalConv(fNatural, tinyGaussian) + " eval/s\n";
+    std::cout << "Quintic spline w/convol.: " + evalConv(fQuintic, bsplGaussian) + ", " +
+    evalConv(fQuintic, unitGaussian) +  ", "  + evalConv(fQuintic, tinyGaussian) + " eval/s\n";
     return ok;
 }
 

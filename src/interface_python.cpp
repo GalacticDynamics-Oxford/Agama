@@ -117,6 +117,13 @@ static PyTypeObject
 // forward declaration for a routine that constructs a Python cubic spline object
 PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<double>& y);
 
+// an annoying feature in Python C API is the use of different types to refer to the same object,
+// which triggers a warning about breaking strict aliasing rules, unless compiled
+// with -fno-strict-aliasing. To avoid this, we use a dirty typecast.
+void* forget_about_type(void* x) { return x; }
+#define Py_INCREFx(x) Py_INCREF(forget_about_type(x))
+
+
 //  -------------------------------
 /// \name  Multi-threading support
 //  -------------------------------
@@ -186,7 +193,7 @@ PyObject* setNumThreads_exit(setNumThreadsObject* self, PyObject* /*arg*/)
 #else
     (void)self;
 #endif
-    Py_INCREF(Py_False);
+    Py_INCREFx(Py_False);
     return Py_False;
 }
 
@@ -2111,7 +2118,7 @@ static PyMethodDef Density_methods[] = {
       "decreasing order and normalized so that their product is unity;\n"
       "the second one contains the Euler angles specifying the orientation of these principal axes "
       "of the moment of inertia (X,Y,Z) in the original Cartesian system (x,y,z), "
-      "see the definition of these angles in the Agama reference.\n"
+      "see the definition of these angles in the appendix of the Agama reference documentation.\n"
       "The axes are determined iteratively, starting from a spherical region of radius r "
       "and deforming it into an ellipsoidal region with the same volume, so that the axis ratios "
       "of this region coincide with the axis ratios of the moment of inertia of the density profile "
@@ -4851,8 +4858,9 @@ static PyMemberDef GalaxyModel_members[] = {
     "will have one extra dimension of size equal to the number of DF components Ncomp (possibly 1).\n"
 #define DOCSTRING_ANGLES \
     "  alpha, beta, gamma -- three Euler angles specifying the orientation of the 'observed' XYZ " \
-    "cordinate system with respect to the 'intrinsic' model coordinates " \
+    "cordinate system with respect to the 'intrinsic' model coordinates xyz " \
     "(by default they are all zero, meaning that the two systems coincide); " \
+    "see the illustration in the appendix of the Agama reference documentation; " \
     "in particular, beta is the inclination angle.\n"
 
 static PyMethodDef GalaxyModel_methods[] = {
@@ -6223,13 +6231,22 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 ///@{
 
 static const char* docstringSpline =
-    "Cubic or quintic spline (depending on whether derivatives are provided as input).\n"
+    "A common interface to cubic or quintic splines, and B-splines of degree 0 to 3.\n"
+    "If the object is constructed from the values at grid points, and optionally one or both "
+    "endpoint derivatives, it will be a natural or clamped cubic spline, which has two continuous "
+    "derivatives (unless reg=True, which may reduce oscillations in the interpolated function "
+    "at the expense of having only one continuous derivative).\n"
+    "If it is constructed from the values and derivatives at all grid points, it will be "
+    "a quintic spline with three continuous derivatives.\n"
+    "If it is constructed from the amplitudes of B-spline basis functions (N+D-1 values, "
+    "where N is the number of grid points and D=0..3 is the degree of B-splines), it will be "
+    "a B-spline of degree D, which has D-1 continuous derivatives.\n"
     "Arguments:\n"
     "    x (array of floats) -- grid nodes in x, must be sorted in increasing order.\n"
-    "    y (array of floats) -- values of spline at grid nodes, same length as x.\n"
+    "    y (array of floats, optional) -- values of spline at grid nodes, same length as x.\n"
     "    der (array of floats, optional) -- array of spline derivatives at each node "
     "(same length as x); if provided, a quintic spline is constructed, "
-    "and no other optional arguments are accepted.\n"
+    "and no other optional arguments except `y` are accepted.\n"
     "    left (float, optional) -- derivative at the leftmost endpoint for a cubic spline; "
     "if not provided or is NAN, a natural boundary condition is used "
     "(i.e., second derivative is zero).\n"
@@ -6238,14 +6255,24 @@ static const char* docstringSpline =
     "    reg (boolean, default False) -- apply a regularization filter for a cubic spline "
     "to reduce overshooting in the case of sharp discontinuities in input data "
     "and preserve monotonic trend of input points (in this case, the provided left/right "
-    "endpoint derivatives may not be respected).\n\n"
+    "endpoint derivatives may not be respected).\n"
+    "    ampl (array of floats, optional) -- if provided _instead of_ `y`, a B-spline of degree D "
+    "is constructed, where len(ampl) = len(x) + D - 1; D should be between 0 and 3.\n\n"
     "Values of the spline and up to its second derivative are computed using the () "
-    "operator with the first argument being a single x-point or an array of points, "
+    "operator with the first argument being a single x-point or an array of points of any shape, "
     "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
-    "and the optional third argument (ext=...) specifies the value returned for "
-    "points outside the definition region; if the latter is not provided, "
-    "the spline is linearly extrapolated outside its definition region "
+    "and the optional third argument (ext=...) specifies the value returned for points "
+    "outside the definition region; if the latter is not provided, cubic and quintic splines "
+    "are linearly extrapolated outside its definition region, while B-splines are set to zero "
     "(unless the spline is empty, in which case the result is always NaN).\n"
+    "If an extra argument conv=... is provided to the () operator, the result is an analytic "
+    "convolution of the spline with a given kernel. This could be another instance of Spline "
+    "or a Gaussian kernel specified by its width; in the latter case the argument can be "
+    "a single number or an array of numbers with the same shape as x. "
+    "In computing the convolution, the spline is set to zero outside its definition region, "
+    "unlike the extrapolation performed for its value or derivative.\n"
+    "The return value of the () operator is a single number if the input `x` is a single number, "
+    "or has the same shape as `x` if the latter is an array.\n"
     "A Spline object has a length equal to the number of nodes in x, and its [] operator "
     "returns the value of x at the given node.\n";
 
@@ -6254,25 +6281,15 @@ static const char* docstringSpline =
 typedef struct {
     PyObject_HEAD
     math::PtrInterpolator1d spl;
+    std::string name;
 } SplineObject;
 /// \endcond
 
 void Spline_dealloc(SplineObject* self)
 {
-    if(utils::verbosityLevel >= utils::VL_DEBUG) {
-        const math::CubicSpline* splcub = dynamic_cast<const math::CubicSpline*>(self->spl.get());
-        const math::QuinticSpline* splqui = dynamic_cast<const math::QuinticSpline*>(self->spl.get());
-        if(splcub)
-            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a cubic spline of size " +
-                utils::toString(splcub->xvalues().size()) + " at " + utils::toString(splcub));
-        else if(splqui)
-            utils::msg(utils::VL_DEBUG, "Agama", "Deleted a quintic spline of size " +
-                utils::toString(splqui->xvalues().size()) + " at " + utils::toString(splqui));
-        else if(!self->spl.get())  // pointer remains NULL when constructor failed
-            utils::msg(utils::VL_DEBUG, "Agama", "Deleted an empty spline");
-        else  // shouldn't happen
-            printf("Corrupted Spline object at %p is being deallocated\n", self->spl.get());
-    }
+    FILTERMSG(utils::VL_DEBUG, "Agama",
+        self->spl.get() ? "Deleted a " + self->name + " at " + utils::toString(self->spl.get()) :
+        "Deleted an empty spline");
     self->spl.reset();
     Py_TYPE(self)->tp_free(self);
 }
@@ -6286,27 +6303,32 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
     PyObject* x_obj=NULL;
     PyObject* y_obj=NULL;
     PyObject* d_obj=NULL;
+    PyObject* a_obj=NULL;
     double derivLeft=NAN, derivRight=NAN;  // undefined by default
     int regularize=0;
-    static const char* keywords[] = {"x","y","der","left","right","reg",NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "OO|Oddi", const_cast<char **>(keywords),
-        &x_obj, &y_obj, &d_obj, &derivLeft, &derivRight, &regularize))
+    static const char* keywords[] = {"x", "y", "der", "ampl", "left", "right", "reg", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOddi", const_cast<char **>(keywords),
+        &x_obj, &y_obj, &d_obj, &a_obj, &derivLeft, &derivRight, &regularize) ||
+        !((y_obj==NULL) ^ (a_obj==NULL)))
     {
         PyErr_SetString(PyExc_TypeError, "Spline: "
-            "must provide two arrays of equal length >= 2 (input x and y points), "
-            "optionally an array of derivatives for a quintic spline (same length), "
-            "or alternatively optional parameters for a cubic spline: "
-            "one or both endpoint derivatives (left, right), or a regularization flag (reg)");
+            "must provide the array `x` of grid nodes, and either the array of spline values `y` "
+            "or the array of B-spline amplitudes `ampl`");
         return -1;
     }
     std::vector<double>
         xvalues(toDoubleArray(x_obj)),
         yvalues(toDoubleArray(y_obj)),
-        dvalues(toDoubleArray(d_obj));
-    if(xvalues.size() != yvalues.size() ||
-        (d_obj && dvalues.size() != xvalues.size()))
-    {
+        dvalues(toDoubleArray(d_obj)),
+        avalues(toDoubleArray(a_obj));
+    size_t size = xvalues.size();
+    if(y_obj && (yvalues.size() != size || (d_obj && dvalues.size() != size))) {
         PyErr_SetString(PyExc_TypeError, "Spline: input does not contain valid arrays");
+        return -1;
+    }
+    if(a_obj && (d_obj || derivLeft==derivLeft || derivRight==derivRight || regularize)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Spline: argument 'ampl' cannot be used together with any other optional arguments");
         return -1;
     }
     if(d_obj && (derivLeft==derivLeft || derivRight==derivRight || regularize)) {
@@ -6315,20 +6337,38 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
         return -1;
     }
     try {
-        std::string kind;
-        if(!d_obj) {
+        new(&(self->name)) std::string;  // initialize with an empty string
+        if(a_obj) {
+            int D = (int)(avalues.size()) + 1 - size;
+            switch(D) {
+                case 0: self->spl.reset(new math::BsplineWrapper<0>(xvalues, avalues)); break;
+                case 1: self->spl.reset(new math::BsplineWrapper<1>(xvalues, avalues)); break;
+                case 2: self->spl.reset(new math::BsplineWrapper<2>(xvalues, avalues)); break;
+                case 3: self->spl.reset(new math::BsplineWrapper<3>(xvalues, avalues)); break;
+                default:
+                    PyErr_SetString(PyExc_TypeError,
+                        "Spline: incorrect size of the array of B-spline amplitudes");
+                    return -1;
+            }
+            self->name = "degree " + utils::toString(D) + " B-spline";
+        } else if(!d_obj) {
             self->spl.reset(new math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight));
             if(derivLeft==derivLeft || derivRight==derivRight)
-                kind += "clamped ";
+                self->name += "clamped ";
             if(regularize)
-                kind += "regularized ";
-            kind += "cubic";
+                self->name += "regularized ";
+            self->name += "cubic spline";
         } else {
             self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
-            kind = "quintic";
+            self->name = "quintic spline";
         }
-        FILTERMSG(utils::VL_DEBUG, "Agama", "Created a "+kind+" spline of size "+
-            utils::toString(xvalues.size())+" at "+utils::toString(self->spl.get()));
+        self->name += " with " + utils::toString(size) + " nodes";
+        if(!xvalues.empty())
+            self->name += " on [" + utils::toString(xvalues.front(), 18) +
+                ":" + utils::toString(xvalues.back(), 18) + "]";
+        self->name[0] -= 32;  // capitalize the first letter of the name
+        FILTERMSG(utils::VL_DEBUG, "Agama",
+            "Created a "+self->name+" at "+utils::toString(self->spl.get()));
         return 0;
     }
     catch(std::exception& ex) {
@@ -6354,17 +6394,28 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
         return NULL;
     }
-    static const char* keywords[] = {"x","der","ext",NULL};
+    static const char* keywords[] = {"x", "der", "ext", "conv", NULL};
     PyObject* ptx=NULL;
     int der=0;
     PyObject* extrapolate_obj=NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iO", const_cast<char **>(keywords),
-        &ptx, &der, &extrapolate_obj))
+    PyObject* conv_obj=NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iOO", const_cast<char **>(keywords),
+        &ptx, &der, &extrapolate_obj, &conv_obj))
         return NULL;
     if(der<0 || der>2) {
         PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 2nd");
         return NULL;
     }
+    if(conv_obj && (der!=0 || extrapolate_obj)) {
+        PyErr_SetString(PyExc_ValueError, "`conv` cannot be used together with `der` or `ext`");
+        return NULL;
+    }
+
+    // `conv` may be another instance of Spline
+    math::PtrInterpolator1d conv;
+    if(conv_obj && PyObject_TypeCheck(conv_obj, SplineTypePtr) && ((SplineObject*)conv_obj)->spl)
+        conv = ((SplineObject*)conv_obj)->spl;
+
     // check if we should extrapolate the spline (default behaviour),
     // or replace the output with the given value if it's out of range (if ext=... argument was given)
     double extrapolate_val = extrapolate_obj == NULL ? 0 : toDouble(extrapolate_obj);
@@ -6375,11 +6426,22 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
         double x = PyFloat_AsDouble(ptx);
         if(PyErr_Occurred())
             return NULL;
-        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
-            return Py_BuildValue("O", extrapolate_obj);
-        else
-            return Py_BuildValue("d", splEval(*self->spl, x, der) );
+        if(conv_obj) {
+            if(conv)
+                return PyFloat_FromDouble(self->spl->convolve(x, *conv));
+            double sigma = PyFloat_AsDouble(conv_obj);
+            if(PyErr_Occurred())
+                return NULL;
+            return PyFloat_FromDouble(self->spl->convolve(x, math::Gaussian(sigma)));
+        }
+        if(extrapolate_obj!=NULL && (x<xmin || x>xmax)) {
+            Py_INCREF(extrapolate_obj);
+            return extrapolate_obj;
+        } else {
+            return PyFloat_FromDouble(splEval(*self->spl, x, der));
+        }
     }
+
     // otherwise the input should be an array, and the output will be an array of the same shape
     PyArrayObject *arr = (PyArrayObject*)
         PyArray_FROM_OTF(ptx, NPY_DOUBLE, NPY_ARRAY_OUT_ARRAY | NPY_ARRAY_ENSURECOPY);
@@ -6387,35 +6449,54 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "Argument must be either float, list or numpy array");
         return NULL;
     }
+    npy_intp size = PyArray_SIZE(arr);
+
+    // if `conv` is provided, it must be a single number or an array of the same shape as input `x`,
+    // or another instance of Spline (in this case, the variable 'conv' is already initialized)
+    PyArrayObject *sigma_arr = NULL;
+    npy_intp sigma_size = 0;
+    if(conv_obj && !conv) {
+        sigma_arr = (PyArrayObject*)PyArray_FROM_OTF(conv_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+        bool shape_ok = sigma_arr!=NULL;
+        if(shape_ok && ((sigma_size = PyArray_SIZE(sigma_arr)) != 1)) {
+            shape_ok &= sigma_size == size && PyArray_NDIM(arr) == PyArray_NDIM(sigma_arr);
+            for(int d=0; shape_ok && d<PyArray_NDIM(arr); d++)
+                shape_ok &= PyArray_DIMS(arr)[d] == PyArray_DIMS(sigma_arr)[d];
+        }
+        if(!shape_ok) {
+            Py_XDECREF(sigma_arr);
+            Py_DECREF(arr);
+            PyErr_SetString(PyExc_TypeError, "Argument `sigma`, if provided, "
+                "must be a single number or an array with the same shape as `x`");
+            return NULL;
+        }
+    }
 
     // replace elements of the copy of input array with computed values
-    npy_intp size = PyArray_SIZE(arr);
     for(int i=0; i<size; i++) {
         // reference to the array element to be replaced
         double& x = static_cast<double*>(PyArray_DATA(arr))[i];
-        if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
+        if(conv) {
+            x = self->spl->convolve(x, *conv);
+        }
+        else if(sigma_arr) {
+            double sigma = static_cast<double*>(PyArray_DATA(sigma_arr))[sigma_size==1 ? 0 : i];
+            x = sigma==0 ?
+                (x>=xmin && x<=xmax ? self->spl->value(x) : 0) :
+                self->spl->convolve(x, math::Gaussian(sigma));
+        }
+        else if(extrapolate_obj!=NULL && (x<xmin || x>xmax))
             x = extrapolate_val;
         else
             x = splEval(*self->spl, x, der);
     }
+    Py_XDECREF(sigma_arr);
     return PyArray_Return(arr);
 }
 
 PyObject* Spline_name(SplineObject* self)
 {
-    const math::CubicSpline*   splcub = dynamic_cast<const math::CubicSpline*>  (self->spl.get());
-    const math::QuinticSpline* splqui = dynamic_cast<const math::QuinticSpline*>(self->spl.get());
-    if(!splcub && !splqui) {  // shouldn't happen
-        PyErr_SetString(PyExc_RuntimeError, "Spline is not properly initialized");
-        return NULL;
-    }
-    const std::vector<double>& xvalues = self->spl->xvalues();
-    std::string result = splcub ? "Cubic" : "Quintic";
-    result += " spline with " + utils::toString(xvalues.size()) + " nodes";
-    if(!xvalues.empty())
-        result += " on [" + utils::toString(xvalues.front(), 18) +
-            ":" + utils::toString(xvalues.back(), 18) + "]";
-    return Py_BuildValue("s", result.c_str());
+    return Py_BuildValue("s", self->name.c_str());
 }
 
 PyObject* Spline_elem(SplineObject* self, Py_ssize_t index)
@@ -8026,12 +8107,6 @@ static PyMethodDef module_methods[] = {
     { NULL }
 };
 
-
-// an annoying feature in Python C API is the use of different types to refer to the same object,
-// which triggers a warning about breaking strict aliasing rules, unless compiled
-// with -fno-strict-aliasing. To avoid this, we use a dirty typecast.
-void* forget_about_type(void* x) { return x; }
-#define Py_INCREFx(x) Py_INCREF(forget_about_type(x))
 
 } // end internal namespace
 using namespace pygama;

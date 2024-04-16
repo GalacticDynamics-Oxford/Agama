@@ -898,6 +898,11 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
 {
     if(x1==x2)
         return 0;
+    // one would think that the integration routine should give the same result (with negative sign)
+    // when x1>x2, but apparently it does not work correctly in that case, so we treat it manually
+    bool flipSign = x1 > x2;
+    if(flipSign)
+        std::swap(x1, x2);
     gsl_function F;
     F.function = functionWrapper;
     F.params = const_cast<IFunction*>(&fnc);
@@ -909,7 +914,7 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
     gsl_integration_cquad_workspace_free(ws);
     if(numEval!=NULL)
         *numEval = neval;
-    return result;
+    return flipSign ? -result : result;
 }
 
 // this routine is intended to be fast, so only works with pre-computed integration tables

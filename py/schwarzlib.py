@@ -305,7 +305,7 @@ def readApertures(filename):
         return _numpy.array([
             _numpy.array([float(a) for a in b.split()]).reshape(-1,2)
             for b in dfile.read().split('\n\n')
-        ])
+        ], dtype=object)
 
 
 def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pixelmult=1.0):
