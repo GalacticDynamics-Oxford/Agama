@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+May 2024:
+Implemented analytic convolution of 1d interpolators and determination of their
+roots and extrema.
+
 April 2024:
 Implemented computation of DF derivatives w.r.t. actions
 

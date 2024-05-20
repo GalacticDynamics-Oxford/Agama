@@ -1688,7 +1688,7 @@ potential::PtrDensity getDensity(PyObject* dens_obj, coord::SymmetryType sym)
     }
 
     // otherwise this may be a tuple, list or another sequence containing Density-like objects
-    if(PySequence_Check(dens_obj)) {
+    if(PySequence_Check(dens_obj) && !PyString_Check(dens_obj)) {
         PyObject* tuple = PySequence_Tuple(dens_obj);
         if(tuple) {
             try{
@@ -2559,7 +2559,7 @@ potential::PtrPotential getPotential(PyObject* pot_obj, coord::SymmetryType sym)
     }
 
     // otherwise this may be a tuple, list or another sequence containing Potential-like objects
-    if(PySequence_Check(pot_obj)) {
+    if(PySequence_Check(pot_obj) && !PyString_Check(pot_obj)) {
         PyObject* tuple = PySequence_Tuple(pot_obj);
         if(tuple) {
             try{
@@ -3755,7 +3755,7 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
     }
 
     // otherwise this may be a tuple, list or another sequence of DistributionFunction-like objects
-    if(PySequence_Check(df_obj)) {
+    if(PySequence_Check(df_obj) && !PyString_Check(df_obj)) {
         PyObject* tuple = PySequence_Tuple(df_obj);
         if(tuple) {
             try{
@@ -5224,7 +5224,7 @@ static PyTypeObject ComponentType = {
 ///@{
 
 static const char* docstringSelfConsistentModel =
-    "A class for performing self-consistent modelling procedure.\n"
+    "A class for performing iterative self-consistent modelling procedure.\n"
     "A full model consists of one or more instances of Component class "
     "representing either static density or potential profiles, or distribution function-based "
     "components with iteratively recomputed density profiles, plus the overall potential "
@@ -5964,7 +5964,7 @@ static PySequenceMethods Target_sequence_methods = {
     (lenfunc)Target_len, 0, 0, (ssizeargfunc)Target_elem,
 };
 static PyMethodDef Target_methods[] = {
-    { NULL }
+    { NULL }  // no named methods
 };
 
 static PyTypeObject TargetType = {
@@ -6174,20 +6174,16 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 shared_ptr<math::GaussHermiteExpansion> ghexp;
                 switch(degree) {
                     case 0: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<0>(math::BsplineInterpolator1d<0>(gridv), srcrow),
-                        ghorder));
+                        math::BsplineWrapper<0>(gridv, srcrow), ghorder));
                         break;
                     case 1: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<1>(math::BsplineInterpolator1d<1>(gridv), srcrow),
-                        ghorder));
+                        math::BsplineWrapper<1>(gridv, srcrow), ghorder));
                         break;
                     case 2: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<2>(math::BsplineInterpolator1d<2>(gridv), srcrow),
-                        ghorder));
+                        math::BsplineWrapper<2>(gridv, srcrow), ghorder));
                         break;
                     case 3: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<3>(math::BsplineInterpolator1d<3>(gridv), srcrow),
-                        ghorder));
+                        math::BsplineWrapper<3>(gridv, srcrow), ghorder));
                         break;
                     default:  // shouldn't occur, we've checked degree beforehand
                         assert(!"Invalid B-spline degree");
@@ -6258,13 +6254,13 @@ static const char* docstringSpline =
     "endpoint derivatives may not be respected).\n"
     "    ampl (array of floats, optional) -- if provided _instead of_ `y`, a B-spline of degree D "
     "is constructed, where len(ampl) = len(x) + D - 1; D should be between 0 and 3.\n\n"
-    "Values of the spline and up to its second derivative are computed using the () "
+    "Values of the spline and up to its third derivative are computed using the () "
     "operator with the first argument being a single x-point or an array of points of any shape, "
-    "the optional second argument (der=...) is the derivative index (0, 1, or 2), "
+    "the optional second argument (der=...) is the derivative index (0, 1, 2 or 3), "
     "and the optional third argument (ext=...) specifies the value returned for points "
     "outside the definition region; if the latter is not provided, cubic and quintic splines "
-    "are linearly extrapolated outside its definition region, while B-splines are set to zero "
-    "(unless the spline is empty, in which case the result is always NaN).\n"
+    "are linearly extrapolated outside its definition region (unless the spline is empty, "
+    "in which case the result is always NaN), while B-splines return NaN.\n"
     "If an extra argument conv=... is provided to the () operator, the result is an analytic "
     "convolution of the spline with a given kernel. This could be another instance of Spline "
     "or a Gaussian kernel specified by its width; in the latter case the argument can be "
@@ -6337,7 +6333,7 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
         return -1;
     }
     try {
-        new(&(self->name)) std::string;  // initialize with an empty string
+        new (&(self->name)) std::string;  // initialize with an empty string
         if(a_obj) {
             int D = (int)(avalues.size()) + 1 - size;
             switch(D) {
@@ -6362,10 +6358,6 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
             self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
             self->name = "quintic spline";
         }
-        self->name += " with " + utils::toString(size) + " nodes";
-        if(!xvalues.empty())
-            self->name += " on [" + utils::toString(xvalues.front(), 18) +
-                ":" + utils::toString(xvalues.back(), 18) + "]";
         self->name[0] -= 32;  // capitalize the first letter of the name
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a "+self->name+" at "+utils::toString(self->spl.get()));
@@ -6377,13 +6369,14 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
     }
 }
 
-inline double splEval(const math::IFunction& spl, double x, int der)
+inline double splEval(const math::BaseInterpolator1d& spl, double x, int der)
 {
     double result;
     switch(der) {
         case 0: return spl.value(x);
         case 1: spl.evalDeriv(x, NULL, &result); return result;
         case 2: spl.evalDeriv(x, NULL, NULL, &result); return result;
+        case 3: spl.evalDeriv(x, NULL, NULL, NULL, &result); return result;
         default: return NAN;  // shouldn't occur
     }
 }
@@ -6402,8 +6395,8 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|iOO", const_cast<char **>(keywords),
         &ptx, &der, &extrapolate_obj, &conv_obj))
         return NULL;
-    if(der<0 || der>2) {
-        PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 2nd");
+    if(der<0 || der>3) {
+        PyErr_SetString(PyExc_ValueError, "Can only compute derivatives up to 3rd");
         return NULL;
     }
     if(conv_obj && (der!=0 || extrapolate_obj)) {
@@ -6494,15 +6487,54 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
     return PyArray_Return(arr);
 }
 
+PyObject* Spline_roots(SplineObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
+        return NULL;
+    }
+    static const char* keywords[] = {"y", "x1", "x2", NULL};
+    double y = 0, x1 = NAN, x2 = NAN;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|ddd", const_cast<char **>(keywords),
+        &y, &x1, &x2))
+        return NULL;
+    return toPyArray(self->spl->roots(y, x1, x2));
+}
+
+PyObject* Spline_extrema(SplineObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
+        return NULL;
+    }
+    static const char* keywords[] = {"x1", "x2", NULL};
+    double x1 = NAN, x2 = NAN;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|dd", const_cast<char **>(keywords), &x1, &x2))
+        return NULL;
+    return toPyArray(self->spl->extrema(x1, x2));
+}
+
 PyObject* Spline_name(SplineObject* self)
 {
-    return Py_BuildValue("s", self->name.c_str());
+    if(!self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
+        return NULL;
+    }
+    size_t size = self->spl->xvalues().size();
+    std::string result = self->name;
+    if(result.empty())  // shouldn't happen; all spline creation methods also initialize the name
+        result = "Unknown spline";
+    result += " with " + utils::toString(size) + " nodes";
+    if(size)
+        result += " on [" + utils::toString(self->spl->xmin(), 16) +
+            ":" + utils::toString(self->spl->xmax(), 16) + "]";
+    return Py_BuildValue("s", result.c_str());
 }
 
 PyObject* Spline_elem(SplineObject* self, Py_ssize_t index)
 {
     if(!self->spl) {
-        PyErr_SetString(PyExc_RuntimeError, "Spline is not properly initialized");
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
         return NULL;
     }
     if(index >= 0 && index < (Py_ssize_t)self->spl->xvalues().size())
@@ -6523,7 +6555,21 @@ static PySequenceMethods Spline_sequence_methods = {
 };
 
 static PyMethodDef Spline_methods[] = {
-    { NULL }  // no named methods
+    { "roots", (PyCFunction)Spline_roots, METH_VARARGS | METH_KEYWORDS,
+      "Return all points on the given interval at which the spline attains the given value y.\n"
+      "Arguments:\n"
+      "  y - the required value (default: 0);\n"
+      "  x1 - left boundary of the interval (default: leftmost point of the spline grid);\n"
+      "  x2 - right boundary of the interval (default: rightmost point of the spline grid).\n"
+      "Returns: an array (possibly empty) of all roots in order of increase." },
+    { "extrema", (PyCFunction)Spline_extrema, METH_VARARGS | METH_KEYWORDS,
+      "Return all points on the given interval at which the spline has a local minimum or maximum "
+      "(i.e. its derivative crosses zero).\n"
+      "Arguments:\n"
+      "  x1 - left boundary of the interval (default: leftmost point of the spline grid);\n"
+      "  x2 - right boundary of the interval (default: rightmost point of the spline grid).\n"
+      "Returns: an array of all extrema in order of increase, including the two endpoints." },
+    { NULL }
 };
 
 static PyTypeObject SplineType = {
@@ -6547,6 +6593,8 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
     // initialize the smart pointer with zero before (re-)assigning a value to it
     new (&(spl_obj->spl)) math::PtrFunction;
     spl_obj->spl.reset(new math::CubicSpline(x, y));
+    new (&(spl_obj->name)) std::string;  // initialize with an empty string
+    spl_obj->name = "Cubic spline";
     FILTERMSG(utils::VL_DEBUG, "Agama", "Constructed a cubic spline of size "+
         utils::toString(x.size())+" at "+utils::toString(spl_obj->spl.get()));
     return (PyObject*)spl_obj;
@@ -6851,8 +6899,8 @@ PyObject* Orbit_name(OrbitObject* self)
     const std::vector<double> &xvalues = ((SplineObject*)(self->x))->spl->xvalues();
     std::string result = "Orbit with " + utils::toString(xvalues.size()) + " nodes";
     if(!xvalues.empty())
-        result += " on t=[" + utils::toString(xvalues.front(), 18) +
-        ":" + utils::toString(xvalues.back(), 18) + "]";
+        result += " on t=[" + utils::toString(xvalues.front(), 16) +
+            ":" + utils::toString(xvalues.back(), 16) + "]";
     return Py_BuildValue("s", result.c_str());
 }
 
@@ -6947,12 +6995,18 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
                 orbit->y = PyObject_New(PyObject, &SplineType);
                 orbit->z = PyObject_New(PyObject, &SplineType);
                 // make sure the smart pointers are initialized with zero before re-assigning them
-                if(orbit->x)
+                if(orbit->x) {
                     new (&(((SplineObject*)orbit->x)->spl)) math::PtrFunction;
-                if(orbit->y)
+                    new (&(((SplineObject*)orbit->x)->name)) std::string;
+                }
+                if(orbit->y) {
                     new (&(((SplineObject*)orbit->y)->spl)) math::PtrFunction;
-                if(orbit->z)
+                    new (&(((SplineObject*)orbit->y)->name)) std::string;
+                }
+                if(orbit->z) {
                     new (&(((SplineObject*)orbit->z)->spl)) math::PtrFunction;
+                    new (&(((SplineObject*)orbit->z)->name)) std::string;
+                }
                 if(!orbit->x || !orbit->y || !orbit->z) {
                     Py_DECREF(orbit);  // this also XDECREFs and deletes all three Spline objects
                     orbit = NULL;
@@ -6984,6 +7038,9 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
             ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
             ((SplineObject*)orbit->y)->spl.reset(new math::QuinticSpline(t, y, vy));
             ((SplineObject*)orbit->z)->spl.reset(new math::QuinticSpline(t, z, vz));
+            ((SplineObject*)orbit->x)->name = "Quintic spline";
+            ((SplineObject*)orbit->y)->name = "Quintic spline";
+            ((SplineObject*)orbit->z)->name = "Quintic spline";
             FILTERMSG(utils::VL_DEBUG, "Agama", "Created three quintic splines of size " +
                 utils::toString(x.size()) +
                 " at "+utils::toString(((SplineObject*)orbit->x)->spl.get()) +

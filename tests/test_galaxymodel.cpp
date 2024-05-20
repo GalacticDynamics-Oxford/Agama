@@ -415,7 +415,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     std::ofstream strm;
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::vector<double> gridvel = math::createUniformGrid(101, vmin, vmax);
-        strm.open("test_galaxymodel_"+name+".dat");
+        strm.open(("test_galaxymodel_"+name+".dat").c_str());
         strm << "#v\tf_x(v)  f_y(v)  f_z(v)\trotated:f_x f_y f_z\n";
         for(size_t i=0; i<gridvel.size(); i++) {
             strm << utils::pp(gridvel[i], 7) + '\t' +
@@ -506,7 +506,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     ok &= test(vdfp.interpolate(vel.vz, amplvZ) * densvdfproj, projdf_noerrz, 1e-3, "projected vdf() f_z(v) vs. projected df(), no error");
 
     // VDF convolved with a narrow Gaussian and re-interpolated back onto the same B-spline basis
-    math::FiniteElement1d<N> fem(gridv);
+    math::FiniteElement1d<N> fem((math::BsplineInterpolator1d<N>(gridv)));
     math::BandMatrix<double> proj = fem.computeProjMatrix();
     math::Matrix<double>     conv = fem.computeConvMatrix(math::Gaussian(smallerrz.vz));
     std::vector<double> vecconv(amplvZ.size());

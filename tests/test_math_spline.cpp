@@ -1,3 +1,9 @@
+/** \name   test_math_spline.cpp
+    \author Eugene Vasiliev
+    \date   2015-2024
+
+    Test the accuracy of various spline-related operations (interpolation in 1d, 2d, 3d; fitting, etc..)
+*/
 #include "math_spline.h"
 #include "math_core.h"
 #include "math_random.h"
@@ -224,7 +230,7 @@ public:
     Convolved(double _x, const math::IFunction& _F, const math::IFunction& _G) :
         x(_x), F(_F), G(_G) {}
     virtual double value(const double y) const {
-        return F(y) * G(x-y);
+        return F(y) * nan2num(G(x-y));
     }
 };
 
@@ -496,7 +502,7 @@ bool testPenalizedSplineDensity()
 //-------- test cubic and quintic splines ---------//
 
 // test the integration of a spline function
-bool test_integral(const math::BaseInterpolator1d& f, double x1, double x2)
+bool testIntegral(const math::BaseInterpolator1d& f, double x1, double x2)
 {
     // in case that the input interval is larger than the range of xvalues for the interpolator,
     // set the limits of the "external" integration to the interpolator boundaries
@@ -520,6 +526,109 @@ bool test_integral(const math::BaseInterpolator1d& f, double x1, double x2)
     std::cout << "Integral of f(x)^2 on [" + utils::pp(x1,10) +':'+ utils::pp(x2,10) +
         "]: result=" + utils::pp(result_int,8) + ", error=" + utils::pp(error3,8) + '\n';
     return error1 < 1e-13 && error2 < 1e-13 && error3 < 1e-13;
+}
+
+bool testExtremaAndRoots()
+{
+    bool ok = true;
+    std::vector<double> x = math::createUniformGrid(5, -1, 3), y(5), d(5), v;
+
+    // pure quartic function in the inner two segments
+    y[0] = y[4] = 47./4;
+    y[1] = y[3] = 3./4;
+    d[4] = 183./8;
+    d[0] = -d[4];
+    d[3] = 3.0;
+    d[1] = -d[3];
+    math::QuinticSpline sq(x, y, d);
+    v = sq.extrema();
+    ok &= testCond(v.size() >= 3 && v[0] == x[0] && v.back() == x[4], "extrema Quintic 1");
+    for(size_t i=1; i+1 < v.size(); i++)  // may have additional spurious extrema near the true minimum
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-7, "extrema Quintic 1");
+    v = sq.roots();
+    ok &= testCond(v.size() >= 1, "roots Quintic 1a");
+    for(size_t i=0; i < v.size(); i++)  // may have additional spurious roots around the true one
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-7, "roots Quintic 1a");
+    v = sq.roots(3./64);
+    ok &= testCond(v.size() == 2 && fabs(v[0]-0.5) <= 2*DBL_EPSILON && fabs(v[1]-1.5) <= 2*DBL_EPSILON,
+        "roots Quintic 1b");
+
+    // pure quintic function in the inner two segments
+    y[4] = 43./2;
+    y[0] = -y[4];
+    y[1] = -y[3];
+    d[0] = d[4] = 195./4;
+    d[1] = d[3] = 15./4;
+    sq = math::QuinticSpline(x, y, d);
+    v = sq.extrema();
+    ok &= testCond(v.size() >= 2 && v[0] == x[0] && v.back() == x[4], "extrema Quintic 2");
+    for(size_t i=1; i+1 < v.size(); i++)  // may have spurious extrema around the inflection point
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-5, "extrema Quintic 2");
+    v = sq.roots();
+    ok &= testCond(v.size() >= 1, "roots Quintic 2");
+    for(size_t i=0; i < v.size(); i++)  // may have additional spurious roots around the true one
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-5, "roots Quintic 2");
+
+    // linear functions: extrema can be located only at grid nodes or endpoints of the interval
+    math::LinearInterpolator sl(x, y);
+    v = sl.extrema(2.5, 0.5);
+    ok &= testCond(v.size() == 2 && v[0] == 0.5 && v[1] == 2.5, "extrema Linear");
+    v = sl.roots(0.375);
+    ok &= testCond(v.size() == 1 && v[0] == 1.5, "roots Linear");
+    math::BsplineWrapper<1> bs1(x, y);
+    v = bs1.extrema(0.5, 2.5);
+    ok &= testCond(v.size() == 2 && v[0] == 0.5 && v[1] == 2.5, "roots B-spline-1");
+    v = bs1.roots(0.375);
+    ok &= testCond(v.size() == 1 && v[0] == 1.5, "roots B-spline-1");
+
+    // oscillating function resembling two periods of a sine, with local maxima
+    // at -0.516... and 1.5, and minima at 0.5 and 2.516...
+    y[0] = y[1] = y[2] = y[3] = y[4] = 0;
+    d[0] = d[4] = 1.25;
+    d[1] = d[3] = -1.0;
+    d[2] = 1.0;
+    sq = math::QuinticSpline(x, y, d);
+    v = sq.extrema(-0.5, 4);
+    ok &= testCond(v.size() == 5 && v[0] == -0.5 &&
+        fabs(v[1]-0.5) <= 2*DBL_EPSILON &&
+        fabs(v[2]-1.5) <= 2*DBL_EPSILON &&
+        v[3] > 2.5 && v[4] == 3, "extrema Quintic 3");
+    v = sq.roots(0.25, 0, 2);
+    ok &= testCond(v.size() == 2 &&
+        fabs(v[0] - (2-1/M_SQRT2)) < 2*DBL_EPSILON &&
+        fabs(v[1] - (1+1/M_SQRT2)) < 2*DBL_EPSILON, "roots Quintic 3");
+
+    // cubic spline function with a flat bottom
+    y[0] = 1.0; y[1] = 0.375; y[2] = y[3] = 0.25; y[4] = 0.5;
+    math::CubicSpline sc(x, y, false, -0.75, 0.75);
+    v = sc.extrema();
+    ok &= testCond(v.size() == 3 && v[0] == x[0] && v[1] == x[2] && v[2] == x[4], "extrema Cubic");
+    v = sc.roots(0.25);
+    ok &= testCond(v.size() >= 1, "roots Cubic");
+    for(size_t i=0; i<v.size(); i++)
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-5 || fabs(v[i] - x[3]) < 1e-5, "roots Cubic");
+
+    // same, but using B-splines
+    y.resize(7);
+    y[0] = 1.0; y[1] = 1.0; y[2] = 0.25; y[3] = 0.25; y[4] = 0.25; y[5] = 0.25; y[6] = 0.5;
+    math::BsplineWrapper<3> bs3(x, y);
+    v = bs3.extrema();
+    ok &= testCond(v.size() == 3 && v[0] == x[0] && v[1] == x[2] && v[2] == x[4], "extrema B-spline-3");
+    v = bs3.roots(0.25);
+    ok &= testCond(v.size() >= 1, "roots B-spline-3");
+    for(size_t i=0; i<v.size(); i++)
+        ok &= testCond(fabs(v[i] - x[2]) < 1e-5 || fabs(v[i] - x[3]) < 1e-5, "roots B-spline-3");
+
+    // for a degree-0 B-spline, roots can be found only at grid nodes, and extrema - at grid nodes
+    // or endpoints of the interval
+    y.resize(4);
+    math::BsplineWrapper<0> bs0(x, y);
+    v = bs0.extrema(2.5, -0.5);
+    ok &= testCond(v.size() == 2 && v[0] == -0.5 && v[1] == x[2], "extrema B-spline-0");
+    v = bs0.roots(0.5);
+    ok &= testCond(v.size() == 1 && v[0] == x[2], "roots B-spline-0");
+
+    return ok;
 }
 
 bool testEmptySplines()
@@ -716,10 +825,10 @@ bool testFiniteElement()
     const double SIGMA= 0.5;
     std::vector<double> xnodes = math::createUniformGrid(NNODES, XMIN, XMAX);
     ExpKernel kernel(SIGMA);
-    math::FiniteElement1d<0> fe0(xnodes);
-    math::FiniteElement1d<1> fe1(xnodes);
-    math::FiniteElement1d<2> fe2(xnodes);
-    math::FiniteElement1d<3> fe3(xnodes);
+    math::FiniteElement1d<0> fe0((math::BsplineInterpolator1d<0>(xnodes)));
+    math::FiniteElement1d<1> fe1((math::BsplineInterpolator1d<1>(xnodes)));
+    math::FiniteElement1d<2> fe2((math::BsplineInterpolator1d<2>(xnodes)));
+    math::FiniteElement1d<3> fe3((math::BsplineInterpolator1d<3>(xnodes)));
     std::vector<double> am0, cam0, tam0, am1, cam1, tam1, am2, cam2, tam2, am3, cam3, tam3;
     double
     zam0 = getAmplFiniteElement(fe0, kernel, am0, cam0, tam0),
@@ -844,6 +953,11 @@ std::string evalConv(const math::BaseInterpolator1d& fnc, const math::IFunctionI
     return result<1e6 ? utils::toString(int(result)) : utils::pp(result, 6);
 }
 
+inline bool testnan(const math::IFunction& fnc) {
+    double result = fnc(NAN);
+    return result != result;
+}
+
 
 bool test1dSpline()
 {
@@ -883,7 +997,7 @@ bool test1dSpline()
     // 7-8: 1d cubic B-spline represented as a sum over basis functions;
     // this class only stores the x-grid and presents a method for computing the interpolant
     // for any array of amplitudes passed as a parameter -- we will use two different ones:
-    math::FiniteElement1d<3> fBspline(xnodes);  // contains math::BsplineInterpolator1d<3>
+    math::FiniteElement1d<3> fBspline((math::BsplineInterpolator1d<3>(xnodes)));
 
     // 7. compute the amplitudes from another cubic spline, which results in an equivalent
     // representation in terms of B-splines
@@ -928,18 +1042,7 @@ bool test1dSpline()
            errClampedDer2=0, errHermiteDer2=0, errQuiCubeDer2=0, errQuinticDer2=0,
            errBsplineEquivClamped=0, errClampedEquivBspline=0,
            errBsplineQuad=0, errCubicEquivBsplineQuad = 0;
-    bool oknat = true, okcla = true, okher = true, okqui = true, okcon = true;
-
-    okcon &= testSplineConvolution(fLinear , 4.5, ExpKernel(1.5));
-    okcon &= testSplineConvolution(fClamped, 4.5, ExpKernel(1.5));
-    okcon &= testSplineConvolution(fQuintic, 4.5, ExpKernel(1.5));
-    okcon &= testSplineConvolution(math::BsplineWrapper<2>(
-           fBsplineDeriv, amplBsplineDeriv), 4.5, ExpKernel(1.5));
-    okcon &= testSplineConvolution(fQuintic, 2.5, bsplGaussian);
-    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(1.0));
-    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(1.0));
-    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(0.1));
-    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(0.1));
+    bool oknat = true, okcla = true, okher = true, okqui = true;
 
     // loop through the range of x covering the input grid,
     // using points both at grid nodes and inside grid segments
@@ -1094,13 +1197,15 @@ bool test1dSpline()
 
     // test the integration functions
     const double X1 = (xnodes[0]+xnodes[1])/2, X2 = xnodes[xnodes.size()-2]-0.1;
-    bool okintcla = test_integral(fClamped, X1, X2);
-    bool okintnat = test_integral(fNatural, -1.234567, xnodes.back()+1);
-    bool okintqui = test_integral(fQuintic, xnodes.back()+1, -1.234567);
+    bool okintcla = testIntegral(fClamped, X1, X2);
+    bool okintnat = testIntegral(fNatural, -1.234567, xnodes.back()+1);
+    bool okintqui = testIntegral(fQuintic, xnodes.back()+1, -1.234567);
     double intClamped = fClamped.integrate(X1, X2);
     double intBspline = fBspline.interp.integrate(X1, X2, amplBsplineEquivClamped);
     double intNumeric = math::integrateAdaptive(fClamped, X1, X2, 1e-14);
-    bool okintnum = fabs(intClamped-intNumeric) < 1e-13 && fabs(intClamped-intBspline) < 1e-13;
+    double intBsplGaussian = bsplGaussian.integrate(xnodes2.front(), xnodes2.back());
+    bool okintnum = fabs(intClamped-intNumeric) < 1e-13 && fabs(intClamped-intBspline) < 1e-13 &&
+        fabs(intBsplGaussian-1) < 1e-14;
     // check that the amplitudes of the cubic B-spline that represents the antiderivative
     // of the quadratic B-spline representing the derivative of the original spline
     // are the same as the amplitudes of the original spline (up to a constant term - the 0th amplitude)
@@ -1113,15 +1218,40 @@ bool test1dSpline()
     bool oklogspl = testLogScaledSplines();
 
     // test monotonicity filter
-    std::vector<double> xx(5), yy(5);  // a semi-monotonic sequence of values with a sharp jump
-    xx[0] = 1.2;  xx[1] = 1.6;  xx[2] = 1.8;  xx[3] = 2.2;  xx[4] = 2.5;
-    yy[0] = 0.4;  yy[1] = 0.5;  yy[2] = 1.0;  yy[3] = 1.1;  yy[4] = 1.1;
-    math::CubicSpline splmon(xx, yy, true);
-    math::CubicSpline splnon(xx, yy, false);
-    bool okmon = splmon.isMonotonic() && !splnon.isMonotonic();
+    bool okmon;
+    {
+        std::vector<double> xx(5), yy(5);  // a semi-monotonic sequence of values with a sharp jump
+        xx[0] = 1.2;  xx[1] = 1.6;  xx[2] = 1.8;  xx[3] = 2.2;  xx[4] = 2.5;
+        yy[0] = 0.4;  yy[1] = 0.5;  yy[2] = 1.0;  yy[3] = 1.1;  yy[4] = 1.1;
+        math::CubicSpline splmon(xx, yy, true);
+        math::CubicSpline splnon(xx, yy, false);
+        okmon = splmon.extrema().size()==2 && splnon.extrema().size()>2;
+    }
 
     // test finite-element approximation and convolution
     bool okfem = testFiniteElement();
+
+    // test analytic convolution
+    bool okcon = true;
+    okcon &= testSplineConvolution(fLinear , 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fClamped, 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fQuintic, 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(math::BsplineWrapper<2>(
+        xnodes, amplBsplineDeriv), 4.5, ExpKernel(1.5));
+    okcon &= testSplineConvolution(fQuintic, 2.5, bsplGaussian);
+    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(1.0));
+    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(1.0));
+    okcon &= testSplineConvolution(fClamped, 2.5, math::Gaussian(0.1));
+    okcon &= testSplineConvolution(fQuintic, 2.5, math::Gaussian(0.1));
+    // convolution with a Gaussian of zero width (delta function) should return the value of f(x)
+    okcon &= fabs(fLinear (2.34) - fLinear .convolve(2.34, math::Gaussian(0))) < 1e-15;
+    okcon &= fabs(fQuintic(3.45) - fQuintic.convolve(3.45, math::Gaussian(0))) < 1e-15;
+    okcon &= fabs(bsplGaussian(0.4) - bsplGaussian.convolve(0.4, math::Gaussian(0))) < 1e-15;
+
+    // check that splines return NaN when the input is NaN
+    bool oknan = testnan(fLinear) && testnan(fNatural) && testnan(fQuintic) && testnan(bsplGaussian);
+
+    bool okroots = testExtremaAndRoots();
 
     bool ok =
     testCond(testEmptySplines(), "empty splines failed") &&
@@ -1156,7 +1286,9 @@ bool test1dSpline()
     testCond(oklogspl, "log-scaled splines failed") &&
     testCond(okmon, "monotonicity analysis failed") &&
     testCond(okfem, "finite-element failed") &&
-    testCond(okcon, "analytic convolution of splines failed");
+    testCond(okcon, "analytic convolution of splines failed") &&
+    testCond(okroots, "finding extrema and roots failed") &&
+    testCond(oknan, "splines do not return NAN when they should");
 
     //----------- test the performance of 1d spline calculation -------------//
     std::cout << "Cubic   spline w/o deriv: " + evalSpline<0>(fNatural) + ", 1st deriv: " +
@@ -1164,7 +1296,7 @@ bool test1dSpline()
     std::cout << "Quintic spline w/o deriv: " + evalSpline<0>(fQuintic) + ", 1st deriv: " +
     evalSpline<1>(fQuintic) + ", 2nd deriv: " + evalSpline<2>(fQuintic) + " eval/s\n";
     std::cout << "B-spline of degree N=3:   " +
-    evalSpline<0>(math::BsplineWrapper<3>(fBspline.interp, amplBsplineOrig)) + " eval/s\n";
+    evalSpline<0>(math::BsplineWrapper<3>(xnodes, amplBsplineOrig)) + " eval/s\n";
     math::Gaussian unitGaussian(1.0), tinyGaussian(0.001);
     std::cout << "Linear interp. w/convol.: " + evalConv(fLinear , bsplGaussian) + ", " +
     evalConv(fLinear , unitGaussian) +  ", "  + evalConv(fLinear , tinyGaussian) + " eval/s\n";
@@ -1246,6 +1378,15 @@ bool test2dSpline()
         }
     }
     if(!ok) std::cout << "Values or derivs at grid nodes are inconsistent\n";
+
+    double
+        nanl = lin2d.value(NAN, yval[0]),
+        nanc = cub2d.value(NAN, yval[0]),
+        nanq = qui2d.value(NAN, yval[0]);
+    if(nanl==nanl || nanc==nanc || nanq==nanq) {
+        std::cout << "2d splines do not return NAN when they should\n";
+        ok = false;
+    }
 
     std::ofstream strm;
     if(OUTPUT) { // output for Gnuplot splot routine
@@ -1370,6 +1511,16 @@ bool test3dSpline()
         }
     }
     if(!ok) std::cout << "Values or derivs at grid nodes are inconsistent\n";
+
+    point[0] = NAN;
+    double
+        nanl = lin3d.value(NAN, yval[0], zval[0]),
+        nanc = spl3d.value(NAN, yval[0], zval[0]),
+        nanb = bcub3d.interpolate(point, cval3d);
+    if(nanl==nanl || nanc==nanc || nanb==nanb) {
+        std::cout << "3d splines do not return NAN when they should\n";
+        ok = false;
+    }
 
     // test accuracy of approximation
     double sumsqerr_l=0, sumsqerr_c=0, sumsqerr_s=0;

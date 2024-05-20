@@ -1,3 +1,9 @@
+/** \name   test_math_linalg.cpp
+    \author Eugene Vasiliev
+    \date   2015-2024
+
+    Test the accuracy and performance of various linear algebra operations (matrix decompositions, linear equations, etc...)
+*/
 #include "math_core.h"
 #include "math_random.h"
 #include "math_linalg.h"

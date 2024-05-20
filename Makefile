@@ -2,6 +2,10 @@
 # machine-specific settings such as include paths and #defines are in Makefile.local
 include Makefile.local
 
+# this file is shared between Makefile (Linux/MacOS) and Makefile.msvc (Windows)
+# and contains the list of source files and folders
+include Makefile.list
+
 # some OS-dependent wizardry needed to ensure that the executables are linked to
 # the shared library using a relative path, so that it will be looked for in the same
 # folder as the executables (a symlink is created as exe/agama.so -> agama.so).
@@ -17,123 +21,6 @@ else
 # on Linux we need to pass this flag to every compiled executable in the exe/ subfolder
 EXE_FLAGS += -Wl,-rpath,'$$ORIGIN'
 endif
-
-# set up folder names
-SRCDIR    = src
-OBJDIR    = obj
-EXEDIR    = exe
-TESTSDIR  = tests
-TORUSDIR  = src/torus
-
-# sources of the main library
-SOURCES   = \
-            interface_c.cpp \
-            interface_fortran.cpp \
-            interface_nemo.cpp \
-            interface_python.cpp \
-            math_core.cpp \
-            math_fit.cpp \
-            math_gausshermite.cpp \
-            math_geometry.cpp \
-            math_linalg.cpp \
-            math_ode.cpp \
-            math_optimization.cpp \
-            math_random.cpp \
-            math_sample.cpp \
-            math_specfunc.cpp \
-            math_sphharm.cpp \
-            math_spline.cpp \
-            particles_io.cpp \
-            actions_factory.cpp \
-            actions_focal_distance_finder.cpp \
-            actions_isochrone.cpp \
-            actions_spherical.cpp \
-            actions_staeckel.cpp \
-            actions_torus.cpp \
-            coord.cpp \
-            cubature.cpp \
-            df_base.cpp \
-            df_disk.cpp \
-            df_factory.cpp \
-            df_halo.cpp \
-            df_spherical.cpp \
-            galaxymodel_base.cpp \
-            galaxymodel_densitygrid.cpp \
-            galaxymodel_fokkerplanck.cpp \
-            galaxymodel_jeans.cpp \
-            galaxymodel_losvd.cpp \
-            galaxymodel_selfconsistent.cpp \
-            galaxymodel_spherical.cpp \
-            galaxymodel_velocitysampler.cpp \
-            orbit.cpp \
-            orbit_variational.cpp \
-            potential_analytic.cpp \
-            potential_base.cpp \
-            potential_composite.cpp \
-            potential_cylspline.cpp \
-            potential_dehnen.cpp \
-            potential_disk.cpp \
-            potential_factory.cpp \
-            potential_ferrers.cpp \
-            potential_king.cpp \
-            potential_multipole.cpp \
-            potential_perfect_ellipsoid.cpp \
-            potential_spheroid.cpp \
-            potential_utils.cpp \
-            raga_core.cpp   \
-            raga_binary.cpp  \
-            raga_losscone.cpp \
-            raga_potential.cpp \
-            raga_relaxation.cpp \
-            raga_trajectory.cpp  \
-            utils.cpp \
-            utils_config.cpp \
-
-# ancient Torus code
-TORUSSRC  = CHB.cc \
-            Fit.cc \
-            Fit2.cc \
-            GeneratingFunction.cc \
-            Orb.cc \
-            PJMNum.cc \
-            Point_ClosedOrbitCheby.cc \
-            Point_None.cc \
-            Torus.cc \
-            Toy_Isochrone.cc \
-            WD_Numerics.cc \
-
-# test and example programs
-TESTSRCS  = test_math_core.cpp \
-            test_math_linalg.cpp \
-            test_math_spline.cpp \
-            test_coord.cpp \
-            test_units.cpp \
-            test_utils.cpp \
-            test_orbit_integr.cpp \
-            test_orbit_variational.cpp \
-            test_potentials.cpp \
-            test_potential_expansions.cpp \
-            test_potential_modifiers.cpp \
-            test_actions_isochrone.cpp \
-            test_actions_spherical.cpp \
-            test_actions_staeckel.cpp \
-            test_actions_torus.cpp \
-            test_action_finder.cpp \
-            test_df_halo.cpp \
-            test_df_spherical.cpp \
-            test_density_grid.cpp \
-            test_losvd.cpp \
-            test_galaxymodel.cpp \
-            example_actions_nbody.cpp \
-            example_df_fit.cpp \
-            example_doublepowerlaw.cpp \
-            example_self_consistent_model.cpp \
-            example_self_consistent_model_mw.cpp \
-            mkspherical.cpp \
-            phaseflow.cpp \
-            raga.cpp \
-
-TESTFORTRAN = test_fortran.f
 
 LIBNAME  = agama.so
 OBJECTS  = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES))

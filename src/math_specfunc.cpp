@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cassert>
 #include <stdexcept>
-#include <gsl/gsl_sf_erf.h>
 #include <gsl/gsl_sf_gegenbauer.h>
 #include <gsl/gsl_sf_hyperg.h>
 #include <gsl/gsl_sf_gamma.h>
@@ -30,12 +29,24 @@ extern bool exceptionFlag;
     return !exceptionFlag ? _result : NAN; \
 }
 
-double erf(const double x)
+double erf(double xx)
 {
-    if(x == -INFINITY) return -1;
-    if(x == +INFINITY) return +1;
-    // note: erf from <cmath> is not accurate enough, at least in some versions of standard library!
-    return gsl_sf_erf(x);
+    // note: erf from <cmath> is not accurate enough, at least in some versions of standard library,
+    // whereas the one from GSL is too slow. This one is fast and should be accurate to machine precision.
+    double x = xx>=0 ? xx : -xx;
+    if(x >= 6)
+        return xx>0 ? 1 : -1;
+    double coef = x<=1 ?
+        (1 + x * (1.1819872144928538 + x * (0.71431605350552105 + x *
+        (0.24307301039438656 + x * (0.046377180766266783 + x * 0.0039203315598425230))))) /
+        (1 + x * (2.3103663815883269 + x * (2.3212853468498850 + x * (1.3042494330881013 + x *
+        (0.43475925241505070 + x * (0.082155448430511544 + x * 0.0069509962985487110))))))
+    : /* x>1 */
+        (0.99999988128286680 + x * (1.3880993103643025 + x * (0.94660090636459344 + x *
+        (0.37193392527165884 + x * (0.083848202518174942 + x * 0.0088622939090319692))))) /
+        (1 + x * (2.5164772417854029 + x * (2.7861475430536739 + x * (1.7515208175152142 + x *
+        (0.66715178052942912 + x * (0.14861294386339330 + x * 0.015708138463035560))))));
+    return (xx>=0 ? 1 : -1) * (1 - exp(-x*x) * coef);
 }
 
 double erfinv(const double x)
@@ -52,12 +63,12 @@ double erfinv(const double x)
     }
     else {
         double y = sqrt(-log((1-fabs(x))/2));
-        z = (((1.641345311 * y + 3.429567803) * y - 1.62490649) * y - 1.970840454) / 
+        z = (((1.641345311 * y + 3.429567803) * y - 1.62490649) * y - 1.970840454) /
             (1 + (1.6370678 * y + 3.5438892) * y);
         if(x<0) z = -z;
     }
     // improve by Halley iteration
-    double f = gsl_sf_erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
+    double f = math::erf(z) - x, fp = 2/M_SQRTPI * exp(-z*z), fpp = -2*z*fp;
     z -= f*fp / (fp*fp - 0.5*f*fpp);
     return z;
 }
@@ -222,7 +233,7 @@ double hypergeom_m(int m, double x, double* deriv)
         double xA4 = x + A[4] + A[5] / xA6;
         double xA2 = x + A[2] + A[3] / xA4;
         if(deriv!=NULL)
-            *deriv =-A[1] / pow_2(xA2) * (1 - A[3] / pow_2(xA4) * 
+            *deriv =-A[1] / pow_2(xA2) * (1 - A[3] / pow_2(xA4) *
                 (1 - A[5] / pow_2(xA6) * (1 - A[7] / pow_2(xA8) ) ) );
         return A[0] + A[1] / xA2;
     }

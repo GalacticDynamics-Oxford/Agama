@@ -875,8 +875,15 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         print('Penalty for regularization: %7.2f;  entropy: %.3g;  # of useful orbits: %i / %i' %
             (penReg, entropy, numUsed, numOrbits))
 
+        # workaround for newer versions of numpy, which refuse to save a "ragged" (non-rectangular) array
+        # unless its dtype is explicitly set to "object"
+        LOSVD_list = archive['LOSVD']
+        archive['LOSVD'] = _numpy.array(LOSVD_list, dtype=object)
+
         # write out the data collected for all values of Upsilon
         _numpy.savez_compressed(filePrefix, **archive)
+
+        archive['LOSVD'] = LOSVD_list
 
         # append results to the summary file
         with open(fileResult, 'a') as fileout:

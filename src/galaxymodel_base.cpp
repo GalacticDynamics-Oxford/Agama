@@ -781,9 +781,9 @@ public:
         std::vector<double> amplvX[], std::vector<double> amplvY[], std::vector<double> amplvZ[]) const
     {
         math::BandMatrix<double>  // matrices for converting collected values into B-spline amplitudes
-            matvX = math::FiniteElement1d<N>(bsplvX.xvalues()).computeProjMatrix(),
-            matvY = math::FiniteElement1d<N>(bsplvY.xvalues()).computeProjMatrix(),
-            matvZ = math::FiniteElement1d<N>(bsplvZ.xvalues()).computeProjMatrix();
+            matvX = math::FiniteElement1d<N>(bsplvX).computeProjMatrix(),
+            matvY = math::FiniteElement1d<N>(bsplvY).computeProjMatrix(),
+            matvZ = math::FiniteElement1d<N>(bsplvZ).computeProjMatrix();
 
         // loop over elements of a multicomponent DF
         for(unsigned int ic=0; ic<dflen; ic++) {
@@ -873,6 +873,8 @@ public:
         }
     }
 };
+
+void emptyDeleter(const potential::BasePotential*) {}
 
 }  // unnamed namespace
 
@@ -1154,9 +1156,13 @@ particles::ParticleArrayCar sampleActions(
     assert(nAct == actions.size());
     double pointMass = totalMass / (nAct*nAng);
 
-    // next sample angles from each torus in the above action sample
-    potential::PtrPotential pot, xpot(pot, &model.potential);
-    actions::ActionMapperTorus torus(xpot);
+    // next sample angles from each torus in the above action sample.
+    // hack: ActionMapperTorus needs a shared pointer PtrPotential, but we have only a raw pointer
+    // to the potential in the GalaxyModel struct. If we create a PtrPotential with this raw pointer,
+    // it will get deleted when PtrPotential goes out of scope. To prevent this, we pass an additional
+    // argument specifying a no-op deleter.
+    potential::PtrPotential pot(&model.potential, emptyDeleter);
+    actions::ActionMapperTorus torus(pot);
     particles::ParticleArrayCar points;
     if(actsOutput!=NULL)
         actsOutput->clear();

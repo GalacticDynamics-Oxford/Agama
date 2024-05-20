@@ -13,12 +13,13 @@
 #include <malloc.h>
 #endif
 
+/// choose between pseudo-random (PRNG) and quasi-random (QRNG) number generators:
+/// the latter is generally preferred, but can be disabled if necessary (e.g. in Makefile.local)
+//#define DISABLE_QRNG
+
 namespace math{
 
 namespace {  // internal namespace for Sampler class
-
-/// choose between pseudo-random (PRNG) and quasi-random (QRNG) number generators in the sampling routine
-#define USE_QRNG
 
 /// maximum number of points initially sampled from the root cell
 static const int maxInitSamples = 1048576;
@@ -116,10 +117,10 @@ private:
     /// array of function values at sampling points  (size: Npoints)
     std::vector<double> fncValues;
 
-#ifdef USE_QRNG
-    /// offset (seed value) of the quasi-random number generator,
-    /// assigned randomly to avoid repetition when the same sampling routine is called twice
-    const size_t qrngOffset;
+#ifndef DISABLE_QRNG
+    /// random offsets in each coordinate, added (mod 1) to the values returned by the quasi-random
+    /// number generator, to avoid repetition when the same sampling routine is called twice
+    std::vector<double> offsets;
 #endif
 
     /// estimate of the integral of f(x) over H, divided by the volume
@@ -165,6 +166,11 @@ private:
     */
     void getCellBoundaries(CellEnum cellIndex, double xlower[], double xupper[]) const;
 
+#if 0
+    /** determine the index of the leaf cell that contains the given point */
+    CellEnum getCellIndex(PointEnum pointIndex) const;
+#endif
+
     /** assign coordinates to the new points inside the given cell;
         \param[in]  cellIndex  is the cell that the new points will belong to;
         \param[in]  firstPointIndex  is the index of the first new point in the pointCoords array;
@@ -207,16 +213,18 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     xupper(_xupper, _xupper+Ndim),
     numOutputSamples(_numOutputSamples),
     cells(1),  // create the root cell
-#ifdef USE_QRNG
-    qrngOffset(random() * 1e6),  // starting value for the quasi-random number sequence
+#ifndef DISABLE_QRNG
+    offsets(Ndim),
 #endif
     integValue(0),
     integError(0)
 {
-#ifdef USE_QRNG
+#ifndef DISABLE_QRNG
     if(Ndim > MAX_PRIMES)  // this is only a limitation of the quasi-random number generator
         throw std::runtime_error("sampleNdim: more than "+utils::toString(MAX_PRIMES)+
             " dimensions is not supported");
+    for(int d=0; d<Ndim; d++)
+        offsets[d] = random();
 #endif
     volume = 1;
     for(int d=0; d<Ndim; d++) {
@@ -333,6 +341,28 @@ void Sampler::getCellBoundaries(CellEnum cellIndex, double cellXlower[], double 
     }
 }
 
+#if 0
+Sampler::CellEnum Sampler::getCellIndex(PointEnum pointIndex) const
+{
+    double *relcoord = static_cast<double*>(alloca(Ndim * sizeof(double)));
+    for(int d=0; d<Ndim; d++) {
+        relcoord[d] = (pointCoords[pointIndex * Ndim + d] - xlower[d]) / (xupper[d] - xlower[d]);
+    }
+    CellEnum cellIndex = 0;
+    while(cells[cellIndex].childIndex > 0) {
+        int d = cells[cellIndex].splitDim;
+        if(relcoord[d] < 0.5) {
+            cellIndex = cells[cellIndex].childIndex;
+            relcoord[d] *= 2;
+        } else {
+            cellIndex = cells[cellIndex].childIndex + 1;
+            relcoord[d] = relcoord[d] * 2 - 1;
+        }
+    }
+    return cellIndex;
+}
+#endif
+
 void Sampler::addCellToQueue(CellEnum cellIndex)
 {
     // get the number of samples in the cell (same number of new samples will be added)
@@ -357,7 +387,7 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     double *cellXupper = cellXlower+Ndim;
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
     math::PRNGState state = lastPointIndex;     // initial seed for the PRNG
-#ifdef USE_QRNG
+#ifndef DISABLE_QRNG
     // Assign point coordinates using quasi-random numbers, but randomize the sequence of these numbers.
     // These quasi-random numbers, or low-discrepancy sequences, have a property that each element of
     // the sequence is reasonably distant from any other element (very close pairs are less likely than
@@ -392,8 +422,9 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
         for(int d=0; d<Ndim; d++) {
             pointCoords[ pointIndex * Ndim + d ] = cellXlower[d] +
                 (cellXupper[d] - cellXlower[d]) *
-#ifdef USE_QRNG
-                quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex] + qrngOffset, PRIMES[d]);
+#ifndef DISABLE_QRNG
+                fmod(quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex], PRIMES[d]) +
+                     offsets[d], 1);
 #else
                 random(&state);
 #endif
@@ -491,19 +522,28 @@ void Sampler::decideHowToSplitCell(CellEnum cellIndex)
 
 void Sampler::processCell(CellEnum cellIndex)
 {
-    double maxFncValueCell = 0;
+    // keep track of the top two function values in the cell;
+    // the difference between the largest and the second-largest is used
+    // to estimate the possible largest value when even more samples are taken
+    double largestFncValueCell = 0, secondLargestFncValueCell = 0;
     size_t numPointsInCell = 0;
     for(PointEnum pointIndex = cells[cellIndex].headPointIndex;
         pointIndex >= 0;
         pointIndex = nextPoint[pointIndex])
     {
         numPointsInCell++;
-        maxFncValueCell = std::max(maxFncValueCell, fncValues[pointIndex]);
+        double fncValue = fncValues[pointIndex];
+        if(fncValue > largestFncValueCell) {
+            secondLargestFncValueCell = largestFncValueCell;
+            largestFncValueCell = fncValue;
+        } else if(fncValue > secondLargestFncValueCell)
+            secondLargestFncValueCell = fncValue;
     }
     if(numPointsInCell==0)
         return;  // this is a non-leaf cell
 
-    double refineFactor = maxFncValueCell * cells[cellIndex].weight * numOutputSamples / integValue;
+    double refineFactor = cells[cellIndex].weight * numOutputSamples / integValue *
+        (largestFncValueCell * 2 - secondLargestFncValueCell);
 
     if(refineFactor < 1)
         return;
@@ -561,7 +601,7 @@ void Sampler::run()
         FILTERMSG(utils::VL_VERBOSE, "sampleNdim", "Iteration #" + utils::toString(nIter) +
             ": #cells=" + utils::toString(cells.size()) +
             ", #refined cells=" + utils::toString(cellsQueue.size()) +
-            ", #new points=" + utils::toString(cellsQueue.back().second) );
+            ", #new points=" + utils::toString(cellsQueue.back().second));
         // now compute the function values for the newly added samples (also in parallel)
         evalFncLoop(numPointsExisting, numPointsOverall);
         // estimate the integral value and check if we have enough samples

@@ -29,9 +29,8 @@ public:
     GaussHermiteExpansion(const IFunction& fnc,
         unsigned int order, double gamma=NAN, double center=NAN, double sigma=NAN);
 
-    /// same as the above constructor, but specialized to the case of a B-spline input function
-    template<int N>
-    GaussHermiteExpansion(const BsplineWrapper<N>& fnc,
+    /// same as the above constructor, but specialized to the case of a piecewise-polynomial function
+    GaussHermiteExpansion(const BaseInterpolator1d& fnc,
         unsigned int order, double gamma=NAN, double center=NAN, double sigma=NAN);
 
     /// evaluate the expansion at the given point

@@ -258,12 +258,24 @@ public:
 class FncProduct: public IFunction {
     const IFunction &f1, &f2;  ///< references to two functions
 public:
-    FncProduct(const IFunction& fnc1, const IFunction& fnc2) :
-        f1(fnc1), f2(fnc2) {}
+    FncProduct(const IFunction& fnc1, const IFunction& fnc2) : f1(fnc1), f2(fnc2) {}
     virtual unsigned int numDerivs() const {
         return f1.numDerivs() < f2.numDerivs() ? f1.numDerivs() : f2.numDerivs();
     }
     virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const;
+};
+
+/** A simple "modifier" shifting the original function in both x and y */
+class FncShifted: public IFunction {
+    const IFunction &fnc;  ///< reference to the original function
+    double dx, dy;         ///< offsets: newf(x) = oldf(x - dx) - dy
+public:
+    FncShifted(const IFunction& _fnc, double _dx, double _dy) : fnc(_fnc), dx(_dx), dy(_dy) {}
+    virtual unsigned int numDerivs() const { return fnc.numDerivs(); }
+    virtual void evalDeriv(const double x, /*output*/ double *val, double *der, double *der2) const {
+        fnc.evalDeriv(x-dx, val, der, der2);
+        if(val) *val -= dy;
+    }
 };
 
 /** Doubly-log-scaled function: return log(f(exp(logx))) and up to two derivatives w.r.t log(x) */
@@ -308,6 +320,32 @@ public:
 ///@}
 /// \name  ----- root-finding and minimization routines -----
 ///@{
+
+/** find the root of the simplest linear equation a1*x + a0 = 0.
+    \return the number of roots (0 or 1) and store the root in the result array.
+*/
+inline int solveLinear(double a1, double a0, /*output*/ double result[1])
+{
+    if(a1==0 && a0!=0)
+        return 0;
+    result[0] = a1!=0 ? -a0/a1 : 0;
+    return 1;
+}
+
+/** find real roots of a quadratic equation  a2*x^2 + a1*x + a0 = 0.
+    \return the number of distinct roots (0, 1 or 2) and store the roots in the result array.
+*/
+int solveQuadratic(double a2, double a1, double a0, /*output*/ double result[2]);
+
+/** find real roots of a cubic equation  a3*x^3 + a2*x^2 + a1*x + a0 = 0.
+    \return the number of distinct roots (0, 1, 2 or 3) and store the roots in the result array.
+*/
+int solveCubic(double a3, double a2, double a1, double a0, /*output*/ double result[3]);
+
+/** find real roots of a quartic equation  a4*x^4 + a3*x^3 + a2*x^2 + a1*x + a0 = 0.
+    \return the number of distinct roots (0, 1, 2, 3 or 4) and store the roots in the result array.
+*/
+int solveQuartic(double a4, double a3, double a2, double a1, double a0, /*output*/ double result[4]);
 
 /** find a root of a function F(x) on the finite interval [x1,x2].
     Function values at the endpoints of the interval must be finite and have opposite signs

@@ -1,11 +1,11 @@
 #include "math_core.h"
 #include "math_glquadrature.h"
+#include "math_specfunc.h"
 #include "utils.h"
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_min.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_version.h>
-#include <gsl/gsl_sf_erf.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <stdexcept>
 #include <cassert>
@@ -345,6 +345,7 @@ template<> double unscale(const ScalingCub& scaling, double s, double* duds) {
 }
 
 namespace{
+
 /// fast approximation for cubic root of a number 0<x<1, accurate to better than 1%
 inline double fastcbrt(double x)
 {
@@ -357,6 +358,7 @@ inline double fastcbrt(double x)
     }
     return ldexp(m, ex / 3);   // m * 2 ^ (ex [integer_divide_by] 3) 
 }
+
 }
 
 // u in [uleft, uright], quintic transformation
@@ -460,8 +462,7 @@ double Gaussian::integrate(double x1, double x2, int n) const
     double e1 = exp(-0.5*y1*y1), e2 = exp(-0.5*y2*y2);
     double deltaf = fmin(y1, y2) >= 7.0 || fmax(y1, y2) <= -7.0 ?
         e1 / y1 * (1 - 1/pow_2(y1)) - e2 / y2 * (1 - 1/pow_2(y2)) :    // asymptotic expansion
-        // note: erf from cmath is not accurate, using erf from GSL!
-        (gsl_sf_erf(y2/M_SQRT2) - gsl_sf_erf(y1/M_SQRT2)) * (M_SQRTPI/M_SQRT2);
+        (math::erf(y2/M_SQRT2) - math::erf(y1/M_SQRT2)) * (M_SQRTPI/M_SQRT2);
     double val= NAN;
     switch(n) {
         case 0: val = deltaf;  break;
@@ -614,6 +615,196 @@ void hermiteDerivs(double x0, double x1, double x2, double f0, double f1, double
 
 
 // ------ root finder and minimization routines ------//
+
+namespace {  // internal
+
+/// polish the root of a degree-N polynomial using the Halley method, one or more iterations if needed
+template<int N>
+inline double polishRoot(const double a[N+1], double x)
+{
+    for(int k=0; k<=N; k++) {
+        double X = fabs(x);
+        double f = a[N], df = a[N] * N, d2f = a[N] * N * (N-1), e = 0.5 * fabs(a[N]);
+        for(int i=N-1; i>=0; i--) {
+            f = x * f + a[i];
+            e = X * e + fabs(f);
+            if(i>=1)
+                df = x * df + a[i] * i;
+            if(i>=2)
+                d2f = x * d2f + a[i] * i * (i-1);
+        }
+        e = (e - 0.5 * fabs(f)) * DBL_EPSILON;
+        if(fabs(f) <= e)
+            break;  // can't get any better than the roundoff error
+        double dx = -f * df / (df * df - 0.5 * f * d2f);  // Halley's method
+        x += dx;
+        if(fabs(dx) < X * SQRT_DBL_EPSILON)
+            break;  // next iteration would make the correction smaller than roundoff error
+    }
+    return x;
+}
+
+inline bool swapIfNeeded(double& x1, double& x2)
+{
+    if(x1 > x2) {
+        std::swap(x1, x2);
+        return true;
+    }
+    return false;
+}
+
+}  // internal ns
+
+int solveQuadratic(double a2, double a1, double a0, /*output*/ double result[2])
+{
+    if(a2==0)
+        return solveLinear(a1, a0, result);
+    double d = a1*a1 - 4*a0*a2;
+    if(!(d>=0))
+        return 0;
+    if(d==0) {
+        result[0] = -0.5*a1/a2;
+        return 1;
+    }
+    double t = -0.5 * (a1 + (a1>=0 ? 1 : -1) * sqrt(d));
+    double r1 = t / a2, r2 = a0 / t;
+    result[0] = r1<r2 ? r1 : r2;
+    result[1] = r1<r2 ? r2 : r1;
+    return 2;
+}
+
+int solveCubic(double a3, double a2, double a1, double a0, /*output*/ double result[3])
+{
+    if(a3==0)
+        return solveQuadratic(a2, a1, a0, result);
+    // first reduce the equation to a depressed cubic: t^3 + 3 Q t - 2 R = 0
+    double inva3 = 1 / a3;
+    double s = -1./3 * a2 * inva3;
+    double Q =  1./3 * a1 * inva3 - pow_2(s);
+    double R = pow_3(s) - 0.5 * (s * a1 + a0) * inva3;
+    if(Q==0 && R==0) {
+        result[0] = s;
+        return 1;
+    }
+    double D = pow_3(Q) + pow_2(R);
+    int nroots;
+    if(fabs(D) <= 2 * DBL_EPSILON * pow_2(R)) {
+        nroots = 2;
+        // one double root and one single root; implies Q<0
+        result[0] = s + R / Q;
+        result[1] = s - R / Q * 2;
+    } else if(D>0) {  // one real root
+        nroots = 1;
+        double a = (R>=0 ? 1 : -1) * cbrt(fabs(R) + sqrt(D));
+        double b = -Q / a;
+        result[0] = a + b + s;
+    } else {  // otherwise three real roots; implies Q<0
+        nroots = 3;
+        double a = sqrt(-Q);
+        double phi = 1./3 * acos(R / pow_3(a));
+        result[0] = 2*a * cos(phi + M_PI * 2./3) + s;
+        result[1] = 2*a * cos(phi + M_PI * 4./3) + s;
+        result[2] = 2*a * cos(phi) + s;
+    }
+
+    // polish the roots
+    double a[4] = {a0, a1, a2, a3};
+    for(int p=0; p<nroots; p++)
+        result[p] = polishRoot<3>(a, result[p]);
+
+    // sort the roots
+    switch(nroots) {
+        case 2:
+            swapIfNeeded(result[0], result[1]);
+            break;
+        case 3:
+            swapIfNeeded(result[0], result[1]);
+            swapIfNeeded(result[0], result[2]);
+            swapIfNeeded(result[1], result[2]);
+            break;
+        default: ;
+    }
+    return nroots;
+}
+
+int solveQuartic(double a4, double a3, double a2, double a1, double a0, /*output*/ double result[4])
+{
+    if(a4==0)
+        return solveCubic(a3, a2, a1, a0, result);
+    // set the leading coefficient to unity
+    double inva4 = 1 / a4;
+    double a[5] = {a0 * inva4, a1 * inva4, a2 * inva4, a3 * inva4, 1.0};
+    // resolvent cubic
+    double b2 = -a[2], b1 = a[1]*a[3] - 4*a[0], b0 = (4*a[2] - a[3]*a[3]) * a[0] - a[1]*a[1];
+    int nroots = solveCubic(1, b2, b1, b0, result);
+    // may use any root of the above equation - pick up the one that gives nonnegative discriminants
+    // and is computed most accurately (unfortunately this still seems to fail occasionally
+    // in the case of multiple roots or when the quartic function has nearly symmetric minima)
+    double w = NAN, m = NAN, z = NAN, minerr = INFINITY;
+    for(int p=0; p<nroots; p++) {
+        double absw = fabs(result[p]);
+        double absc = fmax(fmax(fmax(absw, fabs(b2)) * absw, fabs(b1)) * absw, fabs(b0));
+        double derc = b1 + result[p] * (b2 * 2 + result[p] * 3);
+        double errw = fmax(absc / fabs(derc), absw) * DBL_EPSILON * 2;
+        double errm2z2 = errw * fmax(1, 0.5 * absw);
+        if(errm2z2 <= minerr) {
+            minerr = errm2z2;
+            double m2 = 0.25 * a[3] * a[3] - a[2] + result[p];
+            double z2 = 0.25 * pow_2(result[p]) - a[0];
+            if(m2 >= 0 && z2 >= 0) {
+                w = result[p];
+                m = sqrt(m2);
+                z = sqrt(z2);  // z = (0.25 * a[3] * w - 0.5 * a[1]) / m;
+            }
+        }
+    }
+    if(w != w)
+        return 0;
+    if(a[3] * w < 2 * a[1])
+        z = -z;
+    nroots = 0;
+    nroots += solveQuadratic(1, 0.5*a[3] - m, 0.5*w - z, result);
+    nroots += solveQuadratic(1, 0.5*a[3] + m, 0.5*w + z, result + nroots);
+
+    // polish the roots
+    for(int p=0; p<nroots; p++)
+        result[p] = polishRoot<4>(a, result[p]);
+
+    // sort the roots
+    switch(nroots) {
+        case 2:
+            swapIfNeeded(result[0], result[1]);
+            break;
+        case 3:
+            swapIfNeeded(result[0], result[1]);
+            swapIfNeeded(result[0], result[2]);
+            swapIfNeeded(result[1], result[2]);
+            break;
+        case 4:
+            // the first and the second pairs of roots should already be sorted by solveQuadratic,
+            // but polishing may exchange their order, so we sort them again anyway
+            swapIfNeeded(result[0], result[1]);
+            swapIfNeeded(result[2], result[3]);
+            // the remaining three comparisons are always necessary
+            swapIfNeeded(result[0], result[2]);
+            swapIfNeeded(result[1], result[3]);
+            swapIfNeeded(result[1], result[2]);
+            break;
+        default: ;
+    }
+
+    // remove duplicated roots (NB: seems to be ineffective for multiple roots,
+    // the distance between them is usually much larger than DBL_EPSILON)
+    for(int p=1; p<nroots; p++) {
+        if(result[p] - result[p-1] <= 2 * DBL_EPSILON * fabs(result[p])) {
+            for(int q=p; q<nroots-1; q++)
+                result[q] = result[q+1];
+            nroots--;
+        }
+    }
+
+    return nroots;
+}
 
 namespace {  // internal
 /// used in hybrid root-finder to predict the root location by Hermite interpolation:
@@ -814,8 +1005,7 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
 {
     if(reltoler<=0)
         throw std::invalid_argument("findMin: relative tolerance must be positive");
-    if(xlower>xupper)
-        std::swap(xlower, xupper);
+    swapIfNeeded(xlower, xupper);
     double ylower = fnc(xlower);
     double yupper = fnc(xupper);
     if(xinit == xinit) {
@@ -900,9 +1090,7 @@ double integrateAdaptive(const IFunction& fnc, double x1, double x2, double relt
         return 0;
     // one would think that the integration routine should give the same result (with negative sign)
     // when x1>x2, but apparently it does not work correctly in that case, so we treat it manually
-    bool flipSign = x1 > x2;
-    if(flipSign)
-        std::swap(x1, x2);
+    bool flipSign = swapIfNeeded(x1, x2);
     gsl_function F;
     F.function = functionWrapper;
     F.params = const_cast<IFunction*>(&fnc);

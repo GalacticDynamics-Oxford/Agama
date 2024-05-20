@@ -103,7 +103,7 @@ int main()
     galaxymodel::TargetLOSVD<DEGREE> lgrid(params);
 
     // compute integrals over basis functions of the velocity grid
-    math::FiniteElement1d<DEGREE> velfem(params.gridv);
+    math::FiniteElement1d<DEGREE> velfem(math::BsplineInterpolator1d<DEGREE>(params.gridv));
     std::vector<double> velint = velfem.computeProjVector(
         std::vector<double>(velfem.integrPoints().size(), 1.));
 

@@ -40,7 +40,7 @@ math::Matrix<double> getConvolutionMatrix(
     const math::BsplineInterpolator1d<N> &bspl, const GaussianPSF &psf)
 {
     size_t size = bspl.numValues();
-    math::FiniteElement1d<N> fem(bspl.xvalues());
+    math::FiniteElement1d<N> fem(bspl);
     // matrix P - integrals of products of basis functions
     math::BandMatrix<double> proj = fem.computeProjMatrix();
     // matrix C is the convolution matrix if the PSF width is positive, otherwise equal to P

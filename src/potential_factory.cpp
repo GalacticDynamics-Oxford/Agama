@@ -956,7 +956,7 @@ static void readTimeDependentArray(
     if(fields.size() == K) {
         try {
             // input string might be enclosed in a single pair of round or square brackets - remove them
-            if(isPairOfBrackets(fields.front().front(), fields.back().back())) {
+            if(isPairOfBrackets(fields.front()[0], fields.back()[fields.back().size()-1])) {
                 fields.front() = fields.front().substr(1);
                 fields.back () = fields.back ().substr(0, fields.back().size()-1);
             }
@@ -973,7 +973,7 @@ static void readTimeDependentArray(
     // otherwise the string might be a serialized 2d array like [[1,2,3],[4,5,6]]
     // enclosed in round or square brackets
     if( (fields.size() % (K+1) == 0 || fields.size() % (2*K+1) == 0) &&
-        isPairOfBrackets(fields.front().front(), fields.back().back()) )
+        isPairOfBrackets(fields.front()[0], fields.back()[fields.back().size()-1]) )
     {
         // remove the outermost pair of brackets
         fields.front() = fields.front().substr(1);
@@ -981,9 +981,11 @@ static void readTimeDependentArray(
         // check that each group of (K+1) or (K*2+1) items is enclosed in brackets
         bool Kplus1 = true, K2plus1 = true;
         for(size_t l=0; l<fields.size() / (K+1); l++)
-            Kplus1  &= isPairOfBrackets(fields[l *  (K+1) ].front(), fields[(l+1) *  (K+1)  - 1].back());
+            Kplus1  &= isPairOfBrackets(fields[l * (K+1)][0],
+                fields[(l+1) * (K+1) - 1][fields[(l+1) * (K+1) - 1].size() - 1]);
         for(size_t l=0; l<fields.size() / (K*2+1); l++)
-            K2plus1 &= isPairOfBrackets(fields[l * (K*2+1)].front(), fields[(l+1) * (K*2+1) - 1].back());
+            K2plus1 &= isPairOfBrackets(fields[l * (K*2+1)][0],
+                fields[(l+1) * (K*2+1) - 1][fields[(l+1) * (K*2+1) - 1].size() - 1]);
         if(Kplus1) {
             for(size_t l=0; l<fields.size() / (K+1); l++) {
                 // strip the opening bracket in the first column (time)
@@ -1099,7 +1101,7 @@ void applyModifiers(
         // string should contain three Euler angles
         // (space and/or comma-separated, possibly surrounded by square or round brackets)
         std::vector<std::string> fields = utils::splitString(
-            isPairOfBrackets(param.orientation.front(), param.orientation.back()) ?
+            isPairOfBrackets(param.orientation[0], param.orientation[param.orientation.size() - 1]) ?
             param.orientation.substr(1, param.orientation.size()-2) :  // strip brackets
             param.orientation, ",; \t");
         if(fields.size() != 3)
@@ -1380,6 +1382,14 @@ struct Bunch {
     int galpot_lmax, galpot_mmax;
     // constructor
     Bunch(const ModifierParams& _modifiers) : modifiers(_modifiers), galpot_lmax(-1), galpot_mmax(-1) {}
+#if __cplusplus < 201103L
+    // a default assignment operator is not created pre-C++11, so needs to be provided explicitly,
+    // but it appears to be unused anyway
+    Bunch& operator=(const Bunch& src) {
+        assert(!"should not be called");
+        return *this;
+    }
+#endif
 };
 
 }  // end internal namespace
@@ -1425,7 +1435,7 @@ std::vector<double> densityFromCumulativeMass(
     for(unsigned int i=0; i<size; i++)
         gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
     math::CubicSpline spl(gridlogr, gridlogm, true /*enforce monotonicity*/);
-    if(!spl.isMonotonic())
+    if(spl.extrema().size() > 2)  // should be only two, at both endpoints
         throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
     // compute the density at each point of the input radial grid
     for(unsigned int i=0; i<size; i++) {

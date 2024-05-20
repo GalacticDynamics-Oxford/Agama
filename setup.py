@@ -615,6 +615,12 @@ PyInit_agamatest(void) {
             try:
                 subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'cvxopt'] +
                     (['--user'] if '--user' in sys.argv else []))
+                # check if the module was successfully installed and can be imported;
+                # but we have to do this in a new python process, since the current one
+                # may not be able to retry importing a module that once failed
+                result = subprocess.run(sys.executable + ' -c "import cvxopt"', shell=True, stderr=subprocess.PIPE)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.decode().strip())
             except Exception as e:
                 say("Failed to install CVXOPT: "+str(e)+"\n")
                 skip_cvxopt = True
@@ -623,28 +629,24 @@ PyInit_agamatest(void) {
 
     # [5b]: if the cvxopt module is available in Python, make sure that we also have C header files
     if not skip_cvxopt:
-        try:
-            import cvxopt   # if this fails, skip cvxopt altogether
-            if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n',
-                flags=' '.join(COMPILE_FLAGS + LINK_FLAGS)):
-                COMPILE_FLAGS += ['-DHAVE_CVXOPT']
+        if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n',
+            flags=' '.join(COMPILE_FLAGS + LINK_FLAGS)):
+            COMPILE_FLAGS += ['-DHAVE_CVXOPT']
+        else:
+            # download the C header file if it does not appear to be present in a default location
+            distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
+            say('Downloading CVXOPT header files\n')
+            try:
+                urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/cvxopt.h',
+                    EXTRAS_DIR+'/include/cvxopt.h')
+                urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/blas_redefines.h',
+                    EXTRAS_DIR+'/include/blas_redefines.h')
+            except: pass  # problems in downloading, skip it
+            if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
+                os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
+                COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
             else:
-                # download the C header file if it does not appear to be present in a default location
-                distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
-                say('Downloading CVXOPT header files\n')
-                try:
-                    urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/cvxopt.h',
-                        EXTRAS_DIR+'/include/cvxopt.h')
-                    urlretrieve('https://raw.githubusercontent.com/cvxopt/cvxopt/master/src/C/blas_redefines.h',
-                        EXTRAS_DIR+'/include/blas_redefines.h')
-                except: pass  # problems in downloading, skip it
-                if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
-                    os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
-                    COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
-                else:
-                    say("Failed to download CVXOPT header files, this feature will not be available\n")
-        except Exception as e:
-            say("Could not use CVXOPT due to exception: %s\n" % e)
+                say("Failed to download CVXOPT header files, this feature will not be available\n")
 
     # [6]: test if GLPK is present (optional - ignored if not found)
     if not MSVC and runCompileShared('#include <glpk.h>\nvoid run() { glp_create_prob(); }\n',

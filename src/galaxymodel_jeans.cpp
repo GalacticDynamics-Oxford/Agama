@@ -174,7 +174,7 @@ JeansAxi::JeansAxi(const potential::BaseDensity &dens, const potential::BasePote
     // we first represent the relevant quantities -- rho  and  d(rho sigma_z^2) = -rho dPhi/dz --
     // as B-spline interpolants in scaled z coordinate, using the finite-element framework,
     // and then integrate the interpolant to obtain  rho sigma_z^2
-    const math::FiniteElement1d<2> femz(gridfemz);
+    const math::FiniteElement1d<2> femz((math::BsplineInterpolator1d<2>(gridfemz)));
     std::vector<double> femzpoints = femz.integrPoints();    // obtain the integration points in `t`
     const int femzsize = femzpoints.size();
     std::vector<double> femzweights(femzsize, 1.);

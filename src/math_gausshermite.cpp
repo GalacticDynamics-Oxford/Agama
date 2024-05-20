@@ -59,14 +59,13 @@ std::vector<double> computeClassicMoments(const IFunction& fnc)
 }
 
 
-/// same as above, but for a function f(x) that is a B-spline of degree N
+/// same as above, but for a function f(x) that is a piecewise-polynomial
 /// (robust w.r.t. shifts from origin, unlike the above function)
-template<int N>
-std::vector<double> computeClassicMoments(const BsplineWrapper<N>& fnc)
+std::vector<double> computeClassicMoments(const BaseInterpolator1d& fnc)
 {
     std::vector<double> moments(3);
     for(int m=0; m<=2; m++)
-        moments[m] = fnc.bspl.integrate(fnc.bspl.xmin(), fnc.bspl.xmax(), fnc.ampl, m);
+        moments[m] = fnc.integrate(fnc.xmin(), fnc.xmax(), m);
     if(moments[0] != 0) {
         moments[1] /= moments[0];
         moments[2] = sqrt(fmax(0, moments[2] / moments[0] - pow_2(moments[1])));
@@ -128,12 +127,11 @@ inline std::vector<double> computeGaussHermiteMoments(const IFunction& fnc,
 }
 
 
-/// compute the coefficients of GH expansion for a function f(x) that is a B-spline of degree N
-template<int N>
-inline std::vector<double> computeGaussHermiteMoments(const BsplineWrapper<N>& fnc,
+/// compute the coefficients of GH expansion for a function f(x) that is a piecewise-polynomial
+inline std::vector<double> computeGaussHermiteMoments(const BaseInterpolator1d& fnc,
     unsigned int order, double ampl, double center, double width)
 {
-    const std::vector<double>& grid = fnc.bspl.xvalues();
+    const std::vector<double>& grid = fnc.xvalues();
     const int NnodesGL = 4;  // number of nodes per segment of the B-spline grid
     const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
     std::vector<double> hpoly(order+1);    // temp.storage for Hermite polynomials
@@ -244,23 +242,21 @@ public:
 };
 
 /** Another helper class performing the same task (Levenberg-Marquardt fitting) but specialized
-    to the case of input function represented by a B-spline interpolator.
+    to the case of input function represented by a piecewise-polynomial function (e.g., a B-spline).
     The difference lies in the method for computing the integral  \int |f(x)-g(x)|^2 dx:
     for a general function, we use a fixed uniform grid in the scaled variable y (argument of the
     exponent in GH expansion), while for a B-spline we use a fixed grid in the unscaled variable x
     tailored to the B-spline grid, to improve the integration accuracy for a non-smooth f(x).
-    \tparam N is the degree of B-spline
 */
-template<int N>
-class GaussHermiteFitter: public IFunctionNdimDeriv {
+class GaussHermiteFitterInterp: public IFunctionNdimDeriv {
     const unsigned int order;  ///< order of GH expansion
     /// nodes and weights of integration grid for B-spline, and function values at these points
     std::vector<double> nodes, weights, fvalues;
 public:
-    GaussHermiteFitter(unsigned int _order, const BsplineWrapper<N>& fnc) :
+    GaussHermiteFitterInterp(unsigned int _order, const BaseInterpolator1d& fnc) :
         order(_order)
     {
-        const std::vector<double>& grid = fnc.bspl.xvalues();
+        const std::vector<double>& grid = fnc.xvalues();
         const int NnodesGL = 3;  // integration points per one segment of B-spline grid
         const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
         nodes.  resize((grid.size()-1) * NnodesGL);
@@ -343,20 +339,19 @@ GaussHermiteExpansion::GaussHermiteExpansion(const IFunction& fnc,
     moments = computeGaussHermiteMoments(fnc, order, Ampl, Center, Width);
 }
 
-// constructor specialized to B-spline functions - same as above, just with a different implementations
-// of GaussHermiteFitter and computeGaussHermiteMoments
-template<int N>
-GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<N>& fnc,
+// constructor specialized to piecewise-polynomial functions - same as above, just with a different
+// implementations of GaussHermiteFitter, computeClassicMoments and computeGaussHermiteMoments
+GaussHermiteExpansion::GaussHermiteExpansion(const BaseInterpolator1d& fnc,
     unsigned int order, double ampl, double center, double width) :
     Ampl(ampl), Center(center), Width(width)
 {
     if(order<2)
         throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
     if(!isFinite(ampl + center + width)) {
-        std::vector<double> params = computeClassicMoments<N>(fnc);
+        std::vector<double> params = computeClassicMoments(fnc);
         const unsigned int fitorder = 2;
         params.resize(fitorder+1);
-        nonlinearMultiFit(GaussHermiteFitter<N>(fitorder, fnc),
+        nonlinearMultiFit(GaussHermiteFitterInterp(fitorder, fnc),
             /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
         Ampl   = params[0];
         Center = params[1];
@@ -364,13 +359,6 @@ GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<N>& fnc,
     }
     moments = computeGaussHermiteMoments(fnc, order, Ampl, Center, Width);
 }
-
-// explicit template instantiations
-template GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<0>&, unsigned int, double, double, double);
-template GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<1>&, unsigned int, double, double, double);
-template GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<2>&, unsigned int, double, double, double);
-template GaussHermiteExpansion::GaussHermiteExpansion(const BsplineWrapper<3>&, unsigned int, double, double, double);
-
 
 double GaussHermiteExpansion::value(const double x) const
 {

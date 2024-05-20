@@ -41,11 +41,13 @@ PtrActionFinder createActionFinder(const potential::PtrPotential& pot, bool inte
     if(isSpherical(*pot))
        return PtrActionFinder(new actions::ActionFinderSpherical(*pot));
 
+#if __cplusplus >= 201103L   // aliasing constructor for shared pointers only works in C++11
     const potential::OblatePerfectEllipsoid* potPE =
         dynamic_cast<const potential::OblatePerfectEllipsoid*>(pot.get());
     if(potPE)
         return PtrActionFinder(new actions::ActionFinderAxisymStaeckel(
             potential::PtrOblatePerfectEllipsoid(pot, potPE)));
+#endif
 
     return PtrActionFinder(new actions::ActionFinderAxisymFudge(pot, interpolate));
 }

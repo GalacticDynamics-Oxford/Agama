@@ -234,6 +234,7 @@ inline void unscaleE(const double scaledE, const double invPhi0,
     E           = 1 / (invPhi0 - expE);
     dEdscaledE  = E * E * expE;
     d2EdscaledE2= E * dEdscaledE * (invPhi0 + expE);
+    // d3EdscaledE3 = dEdscaledE * (1 + 6 * dEdscaledE * invPhi0)
 }
 
 /// same as above, but for two separate values of E1 and E2;
@@ -550,7 +551,8 @@ Interpolator::Interpolator(const BasePotential& potential) :
     RofPhi = math::QuinticSpline(gridPhi, gridLogR, gridPhider);
 }
 
-void Interpolator::evalDeriv(const double R, double* val, double* deriv, double* deriv2) const
+void Interpolator::evalDeriv(
+    const double R, double* val, double* deriv, double* deriv2, double* deriv3) const
 {
     double logR = log(R);
     if(logR > PhiofR.xvalues().back() && coefOut!=0)
@@ -563,18 +565,31 @@ void Interpolator::evalDeriv(const double R, double* val, double* deriv, double*
             *deriv = (-Phi + coefOut * Rs) / R;
         if(deriv2)
             *deriv2 = (2 * Phi + coefOut * Rs * (slopeOut-2) ) / pow_2(R);
+        if(deriv3)
+            *deriv3 = (-6 * Phi + coefOut * Rs * (pow_2(slopeOut-2) + 2)) / pow_3(R);
         return;
     }
-    double scaledPhi, dscaledPhidlogR, Phival, dPhidscaledPhi, dummy;
-    PhiofR.evalDeriv(logR, &scaledPhi, deriv2!=0||deriv!=0? &dscaledPhidlogR : NULL, deriv2);
-    unscaleE(scaledPhi, invPhi0, Phival, dPhidscaledPhi, dummy);
+    double scaledPhi, dscaledPhi_dlogR, d2scaledPhi_dlogR2, d3scaledPhi_dlogR3;
+    PhiofR.evalDeriv(logR, &scaledPhi,
+        deriv3 || deriv2 || deriv ? &dscaledPhi_dlogR : NULL,
+        deriv3 || deriv2 ? &d2scaledPhi_dlogR2 : NULL,
+        deriv3 ? &d3scaledPhi_dlogR3 : NULL);
+    double Phival, dPhi_dscaledPhi, d2Phi_dscaledPhi2;
+    unscaleE(scaledPhi, invPhi0, Phival, dPhi_dscaledPhi, d2Phi_dscaledPhi2);
     if(val)
         *val    = Phival;
     if(deriv)
-        *deriv  = dPhidscaledPhi * dscaledPhidlogR / R;
+        *deriv  = dPhi_dscaledPhi * dscaledPhi_dlogR / R;
     if(deriv2)
-        *deriv2 = (*deriv2 - dscaledPhidlogR * (1 + (1 - 2 * Phival * invPhi0) * dscaledPhidlogR) )
-            * dPhidscaledPhi / pow_2(R);
+        *deriv2 = ( dPhi_dscaledPhi * (d2scaledPhi_dlogR2 - dscaledPhi_dlogR) +
+            d2Phi_dscaledPhi2 * pow_2(dscaledPhi_dlogR) ) / pow_2(R);
+    if(deriv3) {
+        double d3Phi_dscaledPhi3 = dPhi_dscaledPhi * (1 + 6 * dPhi_dscaledPhi * invPhi0);
+        *deriv3 =
+            (dPhi_dscaledPhi  * (d3scaledPhi_dlogR3 - d2scaledPhi_dlogR2 * 3 + dscaledPhi_dlogR * 2) +
+            d2Phi_dscaledPhi2 * (d2scaledPhi_dlogR2 -  dscaledPhi_dlogR) * 3 * dscaledPhi_dlogR +
+            d3Phi_dscaledPhi3 * pow_3(dscaledPhi_dlogR) ) / pow_3(R);
+    }
 }
 
 double Interpolator::innerSlope(double* Phi0, double* coef) const
@@ -693,14 +708,23 @@ double Interpolator::R_circ(const double E, double* deriv) const
     return Rcirc;
 }
 
-void Interpolator::epicycleFreqs(double R, double& kappa, double& nu, double& Omega) const
+void Interpolator::epicycleFreqs(double R,
+    double& kappa, double& nu, double& Omega, double derivs[3]) const
 {
-    double dPhi, d2Phi;
-    evalDeriv(R, NULL, &dPhi, &d2Phi);
-    double dPhidR_over_R = R>0 || dPhi!=0 ? dPhi/R : d2Phi;  // correct limit at r->0 if dPhi/dr->0 too
-    kappa = sqrt(d2Phi + 3*dPhidR_over_R);
-    Omega = sqrt(dPhidR_over_R);
-    nu    = sqrt(freqNu(log(R)) * dPhidR_over_R);  // nu^2 = Omega^2 * spline-interpolated fnc
+    double dPhi_dR, d2Phi_dR2, d3Phi_dR3, nu2_over_Omega2, dnu2_over_Omega2_dlogR;
+    evalDeriv(R, NULL, &dPhi_dR, &d2Phi_dR2, derivs ? &d3Phi_dR3 : NULL);
+    freqNu.evalDeriv(log(R), &nu2_over_Omega2, derivs ? &dnu2_over_Omega2_dlogR : NULL);
+    // correct limit at r->0 if dPhi/dr->0 too
+    double dPhi_dR_over_R = R>0 || dPhi_dR!=0 ? dPhi_dR/R : d2Phi_dR2;
+    kappa = sqrt(d2Phi_dR2 + 3 * dPhi_dR_over_R);
+    nu    = sqrt(nu2_over_Omega2 * dPhi_dR_over_R);  // nu^2 = Omega^2 * spline-interpolated fnc
+    Omega = sqrt(dPhi_dR_over_R);
+    if(derivs) {
+        derivs[0] = 0.5 * ( d3Phi_dR3 + 3 * (d2Phi_dR2 - dPhi_dR_over_R) / R) / kappa;
+        derivs[1] = 0.5 * ((d2Phi_dR2 - dPhi_dR_over_R) * nu2_over_Omega2 +
+            dPhi_dR_over_R * dnu2_over_Omega2_dlogR) / nu / R;
+        derivs[2] = 0.5 * ( d2Phi_dR2 - dPhi_dR_over_R) / Omega / R;
+    }
 }
 
 

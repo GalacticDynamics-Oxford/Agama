@@ -118,7 +118,7 @@ std::vector<double> createInterpolationGrid(const BasePotential& potential, doub
     It is applicable to any spherical or axisymmetric potential that tends to zero at infinity,
     is monotonic with radius, and may be regular or singular at origin.
 */
-class Interpolator: public math::IFunction {
+class Interpolator: public math::IFunction3Deriv {
 public:
     /** The potential passed as parameter is only used to initialize the internal
         interpolation tables in the constructor, and is not used afterwards
@@ -127,10 +127,10 @@ public:
 
     /// compute the potential and its derivatives at the given cylindrical radius in the z=0 plane
     virtual void evalDeriv(const double R,
-        double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+        double* val, double* deriv, double* deriv2, double* deriv3) const;
 
-    /// provide up to 2 derivatives of potential
-    virtual unsigned int numDerivs() const { return 2; }
+    /// of course, the more common overload computing up to two derivatives is also available
+    using math::IFunction3Deriv::evalDeriv;
 
     /// return L_circ(E) and optionally its first derivative
     double L_circ(const double E, double* deriv=NULL) const;
@@ -144,13 +144,16 @@ public:
     /// return the radius corresponding to the given potential, optionally with derivative
     double R_max(const double Phi, double* deriv=NULL) const;
 
-    /** return interpolated values of epicyclic frequencies at the given radius
-        \param[in]  R     is the cylindrical radius 
-        \param[out] kappa is the epicycle frequency of radial oscillations
-        \param[out] nu    is the frequency of vertical oscillations
-        \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R)
+    /** return interpolated values of epicyclic frequencies at the given radius.
+        \param[in]  R     is the cylindrical radius.
+        \param[out] kappa is the epicycle frequency of radial oscillations.
+        \param[out] nu    is the frequency of vertical oscillations.
+        \param[out] Omega is the azimuthal angular frequency (essentially v_circ/R).
+        \param[out] derivs  if not NULL, will contain the derivatives of these
+        three quantities with radius.
     */
-    void epicycleFreqs(const double R, double& kappa, double& nu, double& Omega) const;
+    void epicycleFreqs(const double R,
+        double& kappa, double& nu, double& Omega, double derivs[3]=NULL) const;
 
     /** return the slope of potential near r=0 (same as the standalone function `innerSlope`).
         \param[out] Phi0,coef  if not NULL, will contain the extrapolation coefficients;

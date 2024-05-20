@@ -39,8 +39,8 @@ void QuasiIsothermal::evalDeriv(const actions::Actions &J,
     // radius of in-plane motion with the given "characteristic" angular momentum and its derivative
     dRcirc_dJhat,
     Rcirc = freq.R_from_Lz(Jhat, deriv ? &dRcirc_dJhat : NULL),
-    kappa, nu, Omega;   // characteristic epicyclic freqs
-    freq.epicycleFreqs(Rcirc, kappa, nu, Omega);
+    kappa, nu, Omega, der_epifreq[3];   // characteristic epicyclic freqs and their radial derivatives
+    freq.epicycleFreqs(Rcirc, kappa, nu, Omega, deriv ? der_epifreq : NULL);
     double
     // inverse squared radial velocity dispersion is exponential in radius
     invsigmarsq = 1 / (pow_2(par.sigmar0 * exp (-Rcirc / par.Rsigmar) ) + pow_2(par.sigmamin)),
@@ -61,17 +61,10 @@ void QuasiIsothermal::evalDeriv(const actions::Actions &J,
         math::qexp(-argJz, -par.qJz);
 
     if(deriv) {
-        // finite-differencing kappa,nu,Omega for the moment, need to replace by analytic derivatives
-        double EPS=1e-5;  // using a symmetric 2nd order finite-difference scheme with error ~EPS^2
-        double kappa1, nu1, Omega1, kappa2, nu2, Omega2;
-        freq.epicycleFreqs(Rcirc * (1-EPS), kappa1, nu1, Omega1);
-        freq.epicycleFreqs(Rcirc * (1+EPS), kappa2, nu2, Omega2);
         double
-        dlnkappa_dRcirc = (kappa2-kappa1) / (2*Rcirc*EPS * kappa),
-        dlnnu_dRcirc    = (   nu2-   nu1) / (2*Rcirc*EPS * nu),
-        dlnOmega_dRcirc = (Omega2-Omega1) / (2*Rcirc*EPS * Omega);
-        // remaining expressions are analytic derivatives
-        double
+        dlnkappa_dRcirc = der_epifreq[0] / kappa,
+        dlnnu_dRcirc    = der_epifreq[1] / nu,
+        dlnOmega_dRcirc = der_epifreq[2] / Omega,
         dRcirc_dJ = dRcirc_dJhat * Jsum / Jhat,  // multiplied by coefJr,coefJz,coefJphi respectively
         dlnsigmarsq_dRcirc = -2 / par.Rsigmar * (1 - pow_2(par.sigmamin) * invsigmarsq),
         dlnsigmazsq_dRcirc = -(par.Hdisk>0 ?

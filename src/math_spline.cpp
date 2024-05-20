@@ -23,7 +23,6 @@ static const double EPS_LAMBDA = 1e-4;
 /// upper limit on the number of iterations in root-finder for lambda
 static const int MAX_NUM_ITER  = 100;
 
-
 // ------- Some machinery for B-splines ------- //
 
 // prototype of a function that computes values or derivatives of B-spline basis sets
@@ -41,26 +40,28 @@ inline double linInt(const double x, const double grid[], int size, int i1, int 
     }
 }
 
+/// subexpression in b-spline derivatives (inverse distance between grid nodes or 0 if they coincide)
+inline double denom(const double grid[], int size, int i1, int i2)
+{
+    double x1 = grid[i1<0 ? 0 : i1>=size ? size-1 : i1];
+    double x2 = grid[i2<0 ? 0 : i2>=size ? size-1 : i2];
+    return x1==x2 ? 0 : 1 / (x2-x1);
+}
+
 /** Compute the values of B-spline functions used for 1d interpolation.
     For any point inside the grid, at most N+1 basis functions are non-zero out of the entire set
     of (N_grid+N-1) basis functions; this routine reports only the nontrivial ones.
     \tparam N   is the degree of spline basis functions;
-    \param[in]  x  is the input position on the grid;
+    \param[in]  x     is the input position (should be within the grid boundaries);
+    \param[in]  ind   is the index of the grid segment that contains x,
+    and is also the index of the leftmost out of N+1 nontrivial basis functions;
     \param[in]  grid  is the array of grid nodes;
     \param[in]  size  is the length of this array;
-    \param[out] B  are the values of N+1 possibly nonzero basis functions at this point,
-    if the point is outside the grid then all values are zeros;
-    \return  the index of the leftmost out of N+1 nontrivial basis functions.
+    \param[out] B  are the values of N+1 possibly nonzero basis functions at this point.
 */
 template<int N>
-inline int bsplineValues(const double x, const double grid[], int size, double B[])
+inline void bsplineValues(const double x, int ind, const double grid[], int size, double B[])
 {
-    const int ind = binSearch(x, grid, size);
-    if(ind<0 || ind>=size-1) {
-        std::fill(B, B+N+1, 0.);
-        return ind<0 ? 0 : size-2;
-    }
-
     // de Boor's algorithm:
     // 0th degree basis functions are all zero except the one on the grid segment `ind`
     for(int i=0; i<=N; i++)
@@ -74,79 +75,99 @@ inline int bsplineValues(const double x, const double grid[], int size, double B
             B[i] = Bi;
         }
     }
-    return ind;
-}
-
-/// subexpression in b-spline derivatives (inverse distance between grid nodes or 0 if they coincide)
-inline double denom(const double grid[], int size, int i1, int i2)
-{
-    double x1 = grid[std::max(0, std::min(size-1, i1))];
-    double x2 = grid[std::max(0, std::min(size-1, i2))];
-    return x1==x2 ? 0 : 1 / (x2-x1);
 }
 
 /// recursive template definition for B-spline derivatives through B-spline derivatives
 /// of lower degree and order;
-/// the arguments are the same as for `bsplineValues`, and `order` is the order of derivative.
+/// the arguments are the same as for `bsplineValues`, and `Order` is the order of derivative.
 template<int N, int Order>
-inline int bsplineDerivs(const double x, const double grid[], int size, double B[])
+inline void bsplineDerivs(const double x, int ind, const double grid[], int size, double B[])
 {
-    int ind = bsplineDerivs<N-1, Order-1>(x, grid, size, B+1);
+    bsplineDerivs<N-1, Order-1>(x, ind, grid, size, B+1);
     B[0] = 0;
     for(int i=0, j=ind-N; i<=N; i++, j++) {
         B[i] = N * (B[i]   * denom(grid, size, j, j+N)
             + (i<N? B[i+1] * denom(grid, size, j+N+1, j+1) : 0) );
     }
-    return ind;
 }
 
 /// the above recursion terminates when the order of derivative is zero, returning B-spline values;
 /// however, C++ rules do not permit to declare a partial function template specialization
 /// (for arbitrary N and order 0), therefore we use full specializations for several values of N
 template<>
-inline int bsplineDerivs<0,0>(const double x, const double grid[], int size, double B[]) {
-    return bsplineValues<0>(x, grid, size, B);
+inline void bsplineDerivs<0,0>(const double x, int ind, const double grid[], int size, double B[]) {
+    return bsplineValues<0>(x, ind, grid, size, B);
 }
 template<>
-inline int bsplineDerivs<1,0>(const double x, const double grid[], int size, double B[]) {
-    return bsplineValues<1>(x, grid, size, B);
+inline void bsplineDerivs<1,0>(const double x, int ind, const double grid[], int size, double B[]) {
+    return bsplineValues<1>(x, ind, grid, size, B);
 }
 template<>
-inline int bsplineDerivs<2,0>(const double x, const double grid[], int size, double B[]) {
-    return bsplineValues<2>(x, grid, size, B);
+inline void bsplineDerivs<2,0>(const double x, int ind, const double grid[], int size, double B[]) {
+    return bsplineValues<2>(x, ind, grid, size, B);
 }
 template<>
-inline int bsplineDerivs<3,0>(const double x, const double grid[], int size, double B[]) {
-    return bsplineValues<3>(x, grid, size, B);
+inline void bsplineDerivs<3,0>(const double x, int ind, const double grid[], int size, double B[]) {
+    return bsplineValues<3>(x, ind, grid, size, B);
 }
 template<>
-inline int bsplineDerivs<0,1>(const double, const double[], int, double[]) {
+inline void bsplineDerivs<0,1>(const double, int, const double[], int, double[]) {
     assert(!"Should not be called");
-    return 0;
 }
 template<>
-inline int bsplineDerivs<0,2>(const double, const double[], int, double[]) {
+inline void bsplineDerivs<0,2>(const double, int, const double[], int, double[]) {
     assert(!"Should not be called");
-    return 0;
 }
 template<>
-inline int bsplineDerivs<0,3>(const double, const double[], int, double[]) {
+inline void bsplineDerivs<0,3>(const double, int, const double[], int, double[]) {
     assert(!"Should not be called");
-    return 0;
 }
 
-/** Similar to bsplineValues, but uses linear extrapolation outside the grid domain */
+/// convenience function that evaluates B-splines or their derivatives of the given order,
+/// which is specified as an argument rather than a template parameter.
+template<int N>
+inline void bsplineDerivs(int derivOrder, double x, int ind, const double grid[], int size, double B[])
+{
+    switch(derivOrder) {
+        case 0: bsplineValues<N>  (x, ind, grid, size, B); break;
+        case 1: bsplineDerivs<N,1>(x, ind, grid, size, B); break;
+        case 2: bsplineDerivs<N,2>(x, ind, grid, size, B); break;
+        case 3: bsplineDerivs<N,3>(x, ind, grid, size, B); break;
+        default:
+            throw std::invalid_argument("bsplineDerivs: invalid order of derivative");
+    }
+}
+
+/// convenience function that does the same as above, but first determines the grid node index for x
+template<int N, int Order>
+inline int bsplineDerivs(const double x, const double grid[], int size, double B[]) {
+    int ind = binSearch(x, grid, size);
+    if(ind<0 || ind>=size-1) {
+        std::fill(B, B+N+1, x==x ? 0 : NAN);
+        return ind<0 ? 0 : size-2;
+    }
+    bsplineDerivs<N, Order>(x, ind, grid, size, B);
+    return ind;
+}
+
+/// similar to bsplineDerivs, but uses linear extrapolation outside the grid domain
 template<int N>
 inline int bsplineValuesExtrapolated(const double x, const double grid[], int size, double B[])
 {
-    double x0 = clip(x, grid[0], grid[size-1]);
-    int ind = bsplineValues<N>(x0, grid, size, B);
-    if(x != x0) {   // extrapolate using the derivatives
-        double D[N+1];
-        bsplineDerivs<N,1>(x0, grid, size, D);
-        for(int i=0; i<=N; i++)
-            B[i] += D[i] * (x-x0);
+    int ind = binSearch(x, grid, size);
+    if(ind>=0 && ind<size-1) {
+        bsplineValues<N>(x, ind, grid, size, B);
+        return ind;
     }
+    // otherwise x is outside the grid; evaluate both the value and derivative at the endpoint
+    ind = std::max(0, std::min(ind, size-2));
+    double x0 = clip(x, grid[0], grid[size-1]);
+    double D[N+1];
+    bsplineValues<N  >(x0, ind, grid, size, B);
+    bsplineDerivs<N,1>(x0, ind, grid, size, D);
+    // extrapolate using the derivatives
+    for(int i=0; i<=N; i++)
+        B[i] += D[i] * (x-x0);
     return ind;
 }
 
@@ -359,6 +380,33 @@ void vandermonde(/*input*/ const double x[], const double y[], /*output*/ double
             c[j] -= x[i] * c[j+1];
 }
 
+inline bool swapIfNeeded(double& x1, double& x2)
+{
+    if(x1 > x2) {
+        std::swap(x1, x2);
+        return true;
+    }
+    return false;
+}
+
+inline bool isLarger(double x1, double x2, double eps=10*DBL_EPSILON)
+{
+    return x1 >= x2 + std::max(fabs(x1), fabs(x2)) * eps;
+}
+
+inline void fillVals(double* x0, double* x1, double* x2, double* x3=NULL,
+    double y0=NAN, double y1=NAN, double y2=NAN, double y3=NAN)
+{
+    if(x0)
+        *x0 = y0;
+    if(x1)
+        *x1 = y1;
+    if(x2)
+        *x2 = y2;
+    if(x3)
+        *x3 = y3;
+}
+
 //---- spline construction routines ----//
 
 /// compute the first derivatives of a natural or clamped cubic spline from the condition
@@ -452,7 +500,7 @@ std::vector<double> constructQuinticSpline(const std::vector<double>& xval,
 
 //---- spline evaluation routines ----//
 
-/// compute the value, derivative and 2nd derivative of (possibly several, K>=1) cubic spline(s);
+/// compute the value and up to 3 derivatives of (possibly several, K>=1) cubic spline(s);
 /// input arguments contain the value(s) and 1st derivative(s) of these splines
 /// at the boundaries of interval [xl..xh] that contain the point x.
 template<unsigned int K>
@@ -466,7 +514,8 @@ inline void evalCubicSplines(
     const double* dh,  // input:   df_k/dx (xh)
     double* f,         // output:  f_k(x)      if f   != NULL
     double* df,        // output:  df_k/dx     if df  != NULL
-    double* d2f)       // output:  d^2f_k/dx^2 if d2f != NULL
+    double* d2f,       // output:  d^2f_k/dx^2 if d2f != NULL
+    double* d3f=NULL)  // output:  d^3f_k/dx^3 if d3f != NULL
 {
     const double
         h      =  xh - xl,
@@ -493,6 +542,8 @@ inline void evalCubicSplines(
             df[k]  = dl[k] *  df_dl  +  dh[k] *  df_dh  +  dif *  df_dif;
         if(d2f)
             d2f[k] = dl[k] * d2f_dl  +  dh[k] * d2f_dh  +  dif * d2f_dif;
+        if(d3f)
+            d3f[k] = (6 * (dl[k] + dh[k]) - 12 * hi * dif) * hi * hi;
     }
 #else
     tT = t*T;
@@ -504,11 +555,13 @@ inline void evalCubicSplines(
             df[k]  = dl[k] * T  +  dh[k] * t  -  Q * tT;
         if(d2f)
             d2f[k] = (dh[k] - dl[k]  +  Q * (t-T)) * hi;
+        if(d3f)
+            d3f[k] = 2 * Q * hi * hi;
     }
 #endif
 }
 
-/// compute the value, derivative and 2nd derivative of (possibly several, K>=1) quintic spline(s);
+/// compute the value and up to 3 derivatives of (possibly several, K>=1) quintic spline(s);
 /// input arguments contain the value(s), 1st and 2rd derivative(s) of these splines
 /// at the boundaries of interval [xl..xh] that contain the point x.
 template<unsigned int K>
@@ -524,7 +577,8 @@ inline void evalQuinticSplines(
     const double* f2h, // input:   d2f_k(xh)
     double* f,         // output:  f_k(x)      if f   != NULL
     double* df,        // output:  df_k/dx     if df  != NULL
-    double* d2f)       // output:  d^2f_k/dx^2 if d2f != NULL
+    double* d2f,       // output:  d^2f_k/dx^2 if d2f != NULL
+    double* d3f=NULL)  // output:  d^3f_k/dx^3 if d3f != NULL
 {
     if(x==xh) {  // special treatment of x exactly at the rightmost boundary, to avoid rounding errors
         for(unsigned int k=0; k<K; k++) {
@@ -568,17 +622,9 @@ inline void evalQuinticSplines(
             df[k]  =        Pp * fd +      f1l[k] +  Qp * f1d +  dx * f2l[k] +  Rp * f2d;
         if(d2f)
             d2f[k] =       Ppp * fd +               Qpp * f1d +       f2l[k] + Rpp * f2d;
+        if(d3f)
+            d3f[k] = hi*hi * (60*hi-12*Px) * fd + hi*hi * (6-12*t) * f1d + (6*hi-Px) * f2d;
     }
-}
-
-inline void fillNaN(double* val, double* der, double* der2)
-{
-    if(val)
-        *val = NAN;
-    if(der)
-        *der = NAN;
-    if(der2)
-        *der2= NAN;
 }
 
 /// Compute the integral of a product of a piecewise-polynomial interpolator S with another function F.
@@ -599,7 +645,7 @@ double integratePiecewise(const BaseInterpolator1d& S, const IFunctionIntegral& 
     double a, double b=NAN)
 {
     const std::vector<double>& xval = S.xvalues();
-    size_t size = xval.size();
+    const size_t size = xval.size();
     if(size<2)
         return 0;
     double x1, x2, x;
@@ -672,24 +718,22 @@ double integratePiecewise(const BaseInterpolator1d& S, const IFunctionIntegral& 
 /// Compute the integral of a product of a piecewise-polynomial interpolator S with a monomial y^n.
 /// \tparam N is the degree of the polynomial interpolation for S.
 /// \param[in] S  is the interpolator.
-/// \param[in] n  is the degree of the monomial.
 /// \param[in] x1, x2  are the limits of integration.
+/// \param[in] n  is the degree of the monomial.
 /// Integration is performed exactly (up to machine precision), using the Gauss-Legendre quadrature
 /// of a sufficient order on each segment of the interpolation grid.
 template<int N>
-double integratePiecewise(const BaseInterpolator1d& S, int n, double x1, double x2)
+double integratePiecewise(const BaseInterpolator1d& S, double x1, double x2, int n)
 {
     // the lowest-order Gauss-Legendre rule that is exact for the given N+n
     int GLORDER = (N+n)/2 + 1;
     if(GLORDER > MAX_GL_TABLE)  // unlikely to happen, but here is a fallback (less accurate) option
         return integratePiecewise<N, false>(S, Monomial(n), x1, x2);
     const std::vector<double>& xval = S.xvalues();
-    size_t size = xval.size();
+    const int size = xval.size();
     if(size<2)
         return 0;
-    bool flipSign = x1 > x2;
-    if(flipSign)
-        std::swap(x1, x2);
+    bool flipSign = swapIfNeeded(x1, x2);
     x1 = fmax(x1, xval[0]);
     x2 = fmin(x2, xval[size-1]);
     if(x1>=x2)
@@ -700,18 +744,269 @@ double integratePiecewise(const BaseInterpolator1d& S, int n, double x1, double 
     int i2 = binSearch(x2, &xval.front(), size)+1;
     if(x2==xval[i2-1])
         i2--;
-    assert(0<=i1 && i1<i2 && i2<(int)size);
+    assert(0<=i1 && i1<i2 && i2<size);
     double result = 0;
     // on each segment, use the fixed-order GL quadrature
     for(int i=i1; i<i2; i++) {
-        double y1 = fmax(xval[i], x1), y2 = fmin(xval[i+1], x2);
+        const double xleft = fmax(xval[i], x1), dx = fmin(xval[i+1], x2) - xleft;
         for(int k=0; k<GLORDER; k++) {
-            double y = y1 + GLPOINTS[GLORDER][k] * (y2-y1);
-            result += S(y) * pow(y, n) * (y2-y1) * GLWEIGHTS[GLORDER][k];
+            const double x = xleft + GLPOINTS[GLORDER][k] * dx;
+            result += S(x) * pow(x, n) * dx * GLWEIGHTS[GLORDER][k];
         }
     }
     return flipSign ? -result : result;
 }
+
+/// Compute the integral of a product of a B-spline interpolator with a monomial y^n.
+/// This is slightly more efficient than the above generic routine, because it calculates
+/// the values of the B-spline directly and avoids binSearch'ing the grid segment on each call.
+/// \tparam N is the degree of the B-spline interpolation for S.
+/// \param[in] xval  is the interpolator grid defining the B-spline basis.
+/// \param[in] ampl  is the array of amplitudes of B-splines;
+/// should be ampl.size() = xval.size() + N - 1, but no range check performed here.
+/// \param[in] x1, x2  are the limits of integration.
+/// \param[in] n  is the degree of the monomial.
+/// Integration is performed exactly (up to machine precision), using the Gauss-Legendre quadrature
+/// of a sufficient order on each segment of the interpolation grid.
+template<int N>
+double integrateBspline(const std::vector<double>& xval, const std::vector<double>& ampl,
+    double x1, double x2, int n)
+{
+    // B-spline of degree N is a piecewise polynomial of degree N, thus to compute the integral
+    // of B-spline times x^n on each grid segment, it is sufficient to employ a Gauss-Legendre
+    // quadrature rule with the number of nodes = floor((N+n)/2)+1.
+    const int GLORDER = (N+n)/2+1;
+    if(GLORDER >= MAX_GL_TABLE)
+        throw std::runtime_error("integrateBspline: integration order not implemented");
+
+    // find out the min/max indices of grid segments that contain the integration interval
+    bool flipSign = swapIfNeeded(x1, x2);
+    const double* xgrid = &xval.front();
+    const int size = xval.size();
+    int i1 = std::max<int>(binSearch(x1, xgrid, size), 0);
+    int i2 = std::min<int>(binSearch(x2, xgrid, size), size-2);
+
+    // loop over segments
+    double result = 0;
+    for(int i=i1; i<=i2; i++) {
+        const double xleft = fmax(xgrid[i], x1), dx = fmin(xgrid[i+1], x2) - xleft;
+        double bspl[N+1];
+        for(int k=0; k<GLORDER; k++) {
+            const double x = xleft + GLPOINTS[GLORDER][k] * dx;
+            // evaluate the possibly non-zero functions on this segment
+            bsplineValues<N>(x, i, xgrid, size, bspl);
+            // add the contribution of this GL point to the integral of x^n * \sum A_j B_j(x),
+            // where the index j runs from i to i+N
+            double fval = 0;
+            for(int b=0; b<=N; b++)
+                fval += bspl[b] * ampl[b+i];
+            result += fval * pow(x, n) * dx * GLWEIGHTS[GLORDER][k];
+        }
+    }
+    return flipSign ? -result : result;
+}
+
+/// Find the locations of roots or extrema points (i.e. roots of derivatives) of the interpolator S
+/// on the interval x1..x2 (narrowed down to the extent of the interpolation grid if it was broader).
+/// \tparam EXTREMA  is a boolean parameter specifying if this routine is looking for extrema or roots.
+/// \tparam ROOTFNC  is one of the helper classes Roots*** defined below, which provides a method
+/// for finding all roots of the polynomial on the given segment (the roots themselves may lie
+/// outside the segment, in which case they will be discarded by this routine).
+/// \param[in]  S is the instance of a piecewise-polynomial interpolator.
+/// \param[in]  x1, x2  are the endpoints of the interval for searching the roots;
+/// they will be swapped if x2>x1 and narrowed down to the extent of the interpolation grid if needed.
+/// If any of these endpoints is NaN (default value), this means the endpoint of the entire grid.
+/// \param[in]  rootFnc  is the instance of the class providing the method for finding the roots.
+/// \return  the array of roots or extrema points, sorted in increasing order;
+/// for the extrema, the endpoints of the interval (x1,x2) are usually included, although
+/// if the function S is constant near the end of the interval, the last extremum point will be
+/// located at a smaller value of x than the rightmost endpoint.
+template<bool EXTREMA, class ROOTFNC>
+std::vector<double> findRoots(
+    const BaseInterpolator1d& S, double x1, double x2, const ROOTFNC& rootFnc)
+{
+    const std::vector<double>& xval = S.xvalues();
+    const int size = xval.size();
+    std::vector<double> result;
+    if(size==0)
+        return result;
+    swapIfNeeded(x1, x2);
+    x1 = fmax(x1, xval[0]);
+    x2 = fmin(x2, xval[size-1]);
+    double prevValue, sign;
+    if(EXTREMA) {
+        result.push_back(x1);
+        prevValue = S(x1);
+        sign = 0.;
+    }
+    if(x1==x2)
+        return result;
+    // indices of the first and the last point in xvalues to be considered:
+    // xval[i1] <= x1 <= x2 <= xval[i2],  where x1 and x2 are adjusted from input values if needed
+    int i1 = binSearch(x1, &xval.front(), size);
+    int i2 = binSearch(x2, &xval.front(), size);
+    assert(0 <= i1 && i1 <= i2 && i2 <= size-2);
+    for(int i=i1; i<=i2; i++) {
+        double t1 = std::max(x1, xval[i]), t2 = std::min(x2, xval[i+1]);
+        // the interpolator polynomial on this grid segment may have at most 4 roots,
+        // which are measured w.r.t. the left boundary of the segment (xval[i]);
+        // if the root is outside this grid segment, it is ignored
+        double roots[5];
+        int nroots = rootFnc(i, roots);
+        assert(nroots <= 4);
+        for(int k=0; k<nroots; k++)
+            roots[k] += xval[i];
+        // in the case of searching for extrema, add the right boundary x2 of the entire interval
+        // as one of the points to be considered as extrema
+        if(EXTREMA && i==i2)
+            roots[nroots++] = t2;
+        // now loop through the roots and check if they fall within the grid segment
+        for(int k=0; k<nroots; k++) {
+            if(roots[k] >= t1 && roots[k] <= t2 &&
+                (result.empty() || isLarger(roots[k], result.back())))
+            {
+                if(EXTREMA) {
+                    double newValue = S(roots[k]);
+                    // check if the previous value was an inflection point rather than an extremum
+                    if((sign > 0 && newValue > prevValue) || (sign < 0 && newValue < prevValue)) {
+                        // the upward or downward trend continues - replace the previous point
+                        result.back() = roots[k];
+                        prevValue = newValue;
+                    } else if(newValue != prevValue) {
+                        sign = newValue > prevValue ? +1 : -1;
+                        result.push_back(roots[k]);
+                        prevValue = newValue;
+                    }
+                } else
+                    result.push_back(roots[k]);
+            }
+        }
+    }
+    return result;
+}
+
+/// Helper class for finding the roots of a cubic spline or its derivative.
+/// \tparam D is either 0 (the spline itself) or 1 (its derivative).
+template<int D>
+class RootsCubicSpline {
+    const std::vector<double> &xval, &fval, &fder;
+    const double y;
+public:
+    /// The spline is specified by the vectors of x-coordinates, values and derivatives;
+    /// the extra parameter y (used only when looking for roots) is the rhs value of the spline.
+    RootsCubicSpline(const std::vector<double>& _xval, const std::vector<double>& _fval,
+        const std::vector<double>& _fder, double _y=0) :
+        xval(_xval), fval(_fval), fder(_fder), y(_y) {}
+    /// Find the roots of the quadratic (when D=1) or cubic (when D=0) polynomial that is
+    /// representing the spline or its derivative on the grid segment indexed by `index`.
+    /// The roots are measured with respect to the leftmost endpoint of the segment,
+    /// and may lie outside the segment (in which case they will be discarded by the calling routine).
+    /// The roots are stored in the output array, and their number is returned by this method.
+    int operator() (int index, /*output*/ double roots[]) const
+    {
+        const double
+        dx = xval[index+1] - xval[index],
+        dy = fval[index+1] - fval[index],
+        dl = fder[index],
+        dh = fder[index+1],
+        // function on this interval is  a t^3 + b t^2 + c t + fval[index],  where t = x - xval[index]
+        a = (dl + dh - 2 * dy / dx) / pow_2(dx),
+        b = (3 * dy / dx - 2 * dl - dh) / dx,
+        c = dl;
+        if(D==0)
+            return solveCubic(a, b, c, fval[index]-y, roots);
+        else  // D==1, ignore y which is not supposed to be set
+            return solveQuadratic(3*a, 2*b, c, roots);
+    }
+};
+
+/// Helper class for finding the roots of the derivative of a quintic spline,
+/// working in the same way as the previous one.
+class RootsDerivQuinticSpline {
+    const std::vector<double> &xval, &fval, &fder, &fder2;
+public:
+    RootsDerivQuinticSpline(const std::vector<double>& _xval, const std::vector<double>& _fval,
+        const std::vector<double>& _fder, const std::vector<double>& _fder2) :
+        xval(_xval), fval(_fval), fder(_fder), fder2(_fder2) {}
+    int operator() (int index, double roots[]) const
+    {
+        const double
+        dx = xval[index+1] - xval[index],
+        dy = fval[index+1] - fval[index],
+        dl = fder[index],
+        dh = fder[index+1],
+        sl = fder2[index],
+        sh = fder2[index+1],
+        // derivative is proportional to  a t^4 + b t^3 + c t^2 + d t + e,  where t = x - x[index]
+        a = 2.5 * (sh - sl) * dx - 15 * (dh + dl) + 30 * dy / dx,
+        b = ((6 * sl - 4 * sh) * dx + 32 * dl + 28 * dh) * dx - 60 * dy,
+        c = (((1.5 * sh - 4.5 * sl) * dx - 18 * dl - 12 * dh) * dx + 30 * dy) * dx,
+        d = sl * pow_2(pow_2(dx)),
+        e = dl * pow_2(pow_2(dx));
+        return solveQuartic(a, b, c, d, e, roots);
+    }
+};
+
+/// Helper class for finding the roots of a B-spline or its derivative, same principles as above.
+/// \tparam  N  is the degree of the B-spline.
+/// \tparam  D  is either 0 (the value) or 1 (the derivative).
+template<int N, int D>
+class RootsBspline {
+    const std::vector<double> &xval, &ampl;
+    const size_t size;
+    const double y;
+public:
+    RootsBspline(const std::vector<double>& _xval, const std::vector<double>& _ampl, double _y=0) :
+        xval(_xval), ampl(_ampl), size(xval.size()), y(_y) {}
+    int operator() (int index, double roots[]) const
+    {
+        double bspl[N+1], coefs[N+1-D]={0};
+        for(int d=D; d<=N; d++) {
+            bsplineDerivs<N>(d, xval[index], index, &xval[0], size, bspl);
+            for(int i=0; i<=N; i++)
+                coefs[d-D] += bspl[i] * ampl[i+index];
+        }
+        switch(N-D) {
+            case 3: return solveCubic(1./6 * coefs[3], 0.5 * coefs[2], coefs[1], coefs[0]-y, roots);
+            case 2: return solveQuadratic(0.5 * coefs[2], coefs[1], coefs[0]-y, roots);
+            case 1: return solveLinear(coefs[1], coefs[0]-y, roots);
+            default:
+                assert(!"Should not be called");
+                return 0;
+        }
+    }
+};
+
+/// The above mechanism would not work for B-splines of degree 0 or 1, which have discontinuous
+/// derivatives; this routine is used instead, and the extrema can only be located at grid nodes.
+template<int N>
+std::vector<double> findExtremaBspline(
+    const std::vector<double>& xval, const std::vector<double>& ampl, double x1, double x2)
+{
+    assert(N==0 || N==1);
+    const size_t size = xval.size();
+    std::vector<double> result;
+    if(size==0)
+        return result;
+    swapIfNeeded(x1, x2);
+    x1 = fmax(x1, xval[0]);
+    x2 = fmin(x2, xval[size-1]);
+    int i1 = binSearch(x1, &xval.front(), size);
+    int i2 = binSearch(x2, &xval.front(), size);
+    assert(i1 >= 0 && i2 <= (int)size-2);  // ampl.size() is size-1 (for N=0) or size (for N=1)
+    result.push_back(x1);
+    for(int i=i1+1; i<=i2; i++) {
+        double thisVal = ampl[i], prevVal = ampl[i-1];
+        double nextVal = N==0 && i==(int)size-2 ? thisVal : ampl[i+1];
+        if(thisVal != prevVal && (thisVal-prevVal) * (nextVal-thisVal) <= 0) {
+            result.push_back(xval[i]);
+        }
+    }
+    if(N==1 && x2>xval[i2] && ampl[i2+1] != ampl[i2])
+        result.push_back(x2);
+    return result;
+}
+
 
 //---- Auxiliary spline construction routines ----//
 
@@ -819,25 +1114,24 @@ LinearInterpolator::LinearInterpolator(
     checkFinite1d(fval, "LinearInterpolator", "fvalues");
 }
 
-void LinearInterpolator::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
+void LinearInterpolator::evalDeriv(const double x,
+    double* value, double* deriv, double* deriv2, double* deriv3) const
 {
     int size = xval.size();
-    if(size == 0) {
-        fillNaN(value, deriv, deriv2);
+    if(size == 0 || x!=x) {
+        fillVals(value, deriv, deriv2, deriv3);
         return;
     }
     int i = std::max<int>(0, std::min<int>(size-2, binSearch(x, &xval[0], size)));
-    if(value)
-        *value = size>1 ? linearInterp(x, xval[i], xval[i+1], fval[i], fval[i+1]) : fval[0];
-    if(deriv)
-        *deriv = size>1 ? (fval[i+1]-fval[i]) / (xval[i+1]-xval[i]) : 0;
-    if(deriv2)
-        *deriv2 = 0;
+    fillVals(value, deriv, deriv2, deriv3,
+        size>1 ? linearInterp(x, xval[i], xval[i+1], fval[i], fval[i+1]) : fval[0],
+        size>1 ? (fval[i+1]-fval[i]) / (xval[i+1]-xval[i]) : 0,
+        0, 0);
 }
 
 double LinearInterpolator::integrate(double x1, double x2, int n) const
 {
-    return integratePiecewise<1>(*this, n, x1, x2);
+    return integratePiecewise<1>(*this, x1, x2, n);
 }
 
 double LinearInterpolator::integrate(double x1, double x2, const IFunctionIntegral& f) const
@@ -848,6 +1142,16 @@ double LinearInterpolator::integrate(double x1, double x2, const IFunctionIntegr
 double LinearInterpolator::convolve(double x, const IFunctionIntegral& kernel) const
 {
     return integratePiecewise<1, true>(*this, kernel, x);
+}
+
+std::vector<double> LinearInterpolator::roots(double y, double x1, double x2) const
+{
+    return findRoots<false>(*this, x1, x2, RootsBspline<1,0>(xval, fval, y));
+}
+
+std::vector<double> LinearInterpolator::extrema(double x1, double x2) const
+{
+    return findExtremaBspline<1>(xval, fval, x1, x2);
 }
 
 
@@ -864,19 +1168,22 @@ CubicSpline::CubicSpline(
     size_t numPoints = xval.size();
     int degree = fval.size() - numPoints + 1;
     if(degree == 2 || degree == 3) {
+        if(numPoints < 2)
+            throw std::runtime_error("CubicSpline: need at least 2 grid nodes");
         // construct a clamped spline from amplitudes of 2nd or 3rd-degree B-spline
         std::vector<double> ampl = fval;  // temporarily store the amplitudes of B-splines
         fval.assign(numPoints, 0.);
         fder.resize(numPoints);
         for(size_t i=0; i<numPoints; i++) {
             // compute values and first derivatives of B-splines at grid nodes
-            int ind; double val[4], der[4];
+            double val[4] = {0}, der[4] = {0};
+            int ind = std::min(i, numPoints-2);
             if(degree==2) {
-                ind = bsplineValues<2>  (xval[i], &xval[0], numPoints, val);
-                /* */ bsplineDerivs<2,1>(xval[i], &xval[0], numPoints, der);
+                bsplineValues<2>  (xval[i], ind, &xval[0], numPoints, val);
+                bsplineDerivs<2,1>(xval[i], ind, &xval[0], numPoints, der);
             } else {
-                ind = bsplineValues<3>  (xval[i], &xval[0], numPoints, val);
-                /* */ bsplineDerivs<3,1>(xval[i], &xval[0], numPoints, der);
+                bsplineValues<3>  (xval[i], ind, &xval[0], numPoints, val);
+                bsplineDerivs<3,1>(xval[i], ind, &xval[0], numPoints, der);
             }
             for(int p=0; p<=degree; p++) {
                 fval[i] += val[p] * ampl[p+ind];
@@ -905,70 +1212,36 @@ CubicSpline::CubicSpline(
     checkFinite1d(fder, "CubicSpline", "function derivatives");
 }
 
-void CubicSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
+void CubicSpline::evalDeriv(const double x,
+    double* value, double* deriv, double* deriv2, double* deriv3) const
 {
     int size = xval.size();
-    if(size == 0) {
-        fillNaN(value, deriv, deriv2);
+    if(size == 0 || x!=x) {
+        fillVals(value, deriv, deriv2, deriv3);
         return;
     }
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
-        if(value)
-            *value = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
+        fillVals(value, deriv, deriv2, deriv3,
             // if der==0, will give correct result even for infinite x
-        if(deriv)
-            *deriv = fder[0];
-        if(deriv2)
-            *deriv2= 0;
+            fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0])),
+            fder[0], 0, 0);
         return;
     }
     if(index >= size-1) {
-        if(value)
-            *value = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
-        if(deriv)
-            *deriv = fder[size-1];
-        if(deriv2)
-            *deriv2= 0;
+        fillVals(value, deriv, deriv2, deriv3,
+            fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1])),
+            fder[size-1], 0, 0);
         return;
     }
     evalCubicSplines<1> (x, xval[index], xval[index+1],
         &fval[index], &fval[index+1], &fder[index], &fder[index+1],
-        /*output*/ value, deriv, deriv2);
-}
-
-bool CubicSpline::isMonotonic() const
-{
-    bool ismonotonic=true;
-    for(unsigned int index=0; ismonotonic && index+1 < xval.size(); index++) {
-        const double
-        dx = xval[index+1] - xval[index],
-        dy = fval[index+1] - fval[index],
-        dl = fder[index],
-        dh = fder[index+1];
-        if( dl * dh < 0 )   // derivs have opposite signs at two endpoints - clearly non-monotonic
-            ismonotonic = false;
-        else {
-            // derivative is  a * t^2 + b * t + c,  with 0<=t<=1 on the given interval.
-            double a  = 3 * (dl + dh - dy / dx * 2), ba = -1 + (dh - dl) / a,  ca = dl / a,
-            D  = ba * ba - 4 * ca;   // discriminant of the above quadratic equation
-            if(a != 0 && D > 0) {    // need to check roots
-                double x1 = 0.5 * (-ba-sqrt(D));
-                double x2 = 0.5 * (-ba+sqrt(D));
-                if( (x1>0 && x1<1) || (x2>0 && x2<1) )
-                    ismonotonic = false;    // there is a root ( y'=0 ) somewhere on the given interval
-            }  // otherwise there are no roots
-            // note: this is prone to roundoff errors when the spline is semi-monotonic
-            // (i.e. has a zero derivative at some point inside the interval, likely at one of its ends),
-            // which commonly happens after applying the regularization filter
-        }
-    }
-    return ismonotonic;
+        /*output*/ value, deriv, deriv2, deriv3);
 }
 
 double CubicSpline::integrate(double x1, double x2, int n) const
 {
-    return integratePiecewise<3>(*this, n, x1, x2);
+    return integratePiecewise<3>(*this, x1, x2, n);
 }
 
 double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) const
@@ -979,6 +1252,16 @@ double CubicSpline::integrate(double x1, double x2, const IFunctionIntegral& f) 
 double CubicSpline::convolve(double x, const IFunctionIntegral& kernel) const
 {
     return integratePiecewise<3, true>(*this, kernel, x);
+}
+
+std::vector<double> CubicSpline::roots(double y, double x1, double x2) const
+{
+    return findRoots<false>(*this, x1, x2, RootsCubicSpline<0>(xval, fval, fder, y));
+}
+
+std::vector<double> CubicSpline::extrema(double x1, double x2) const
+{
+    return findRoots<true>(*this, x1, x2, RootsCubicSpline<1>(xval, fval, fder));
 }
 
 
@@ -998,40 +1281,35 @@ QuinticSpline::QuinticSpline(
     fder2 = constructQuinticSpline(xval, fval, fder);
 }
 
-void QuinticSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
+void QuinticSpline::evalDeriv(const double x,
+    double* value, double* deriv, double* deriv2, double* deriv3) const
 {
     int size = xval.size();
-    if(size == 0) {
-        fillNaN(value, deriv, deriv2);
+    if(size == 0 || x!=x) {
+        fillVals(value, deriv, deriv2, deriv3);
         return;
     }
     int index = binSearch(x, &xval[0], size);
     if(index < 0) {
-        if(value)
-            *value = fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0]));
-        if(deriv)
-            *deriv = fder[0];
-        if(deriv2)
-            *deriv2= 0;
+        fillVals(value, deriv, deriv2, deriv3,
+            fval[0] + (fder[0]==0 ? 0 : fder[0] * (x-xval[0])),
+            fder[0], 0, 0);
         return;
     }
     if(index >= size-1) {
-        if(value)
-            *value = fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1]));
-        if(deriv)
-            *deriv = fder[size-1];
-        if(deriv2)
-            *deriv2= 0;
+        fillVals(value, deriv, deriv2, deriv3,
+            fval[size-1] + (fder[size-1]==0 ? 0 : fder[size-1] * (x-xval[size-1])),
+            fder[size-1], 0, 0);
         return;
     }
     evalQuinticSplines<1> (x, xval[index], xval[index+1],
         &fval[index], &fval[index+1], &fder[index], &fder[index+1], &fder2[index], &fder2[index+1],
-        /*output*/ value, deriv, deriv2);
+        /*output*/ value, deriv, deriv2, deriv3);
 }
 
 double QuinticSpline::integrate(double x1, double x2, int n) const
 {
-    return integratePiecewise<5>(*this, n, x1, x2);
+    return integratePiecewise<5>(*this, x1, x2, n);
 }
 
 double QuinticSpline::integrate(double x1, double x2, const IFunctionIntegral& f) const
@@ -1042,6 +1320,28 @@ double QuinticSpline::integrate(double x1, double x2, const IFunctionIntegral& f
 double QuinticSpline::convolve(double x, const IFunctionIntegral& kernel) const
 {
     return integratePiecewise<5, true>(*this, kernel, x);
+}
+
+std::vector<double> QuinticSpline::roots(double y, double x1, double x2) const
+{
+    // we cannot determine the roots of a quintic polynomial analytically;
+    // however, it is straightforward to find them numerically to machine precision
+    // on every interval between two extrema or endpoints
+    std::vector<double> extrema = this->extrema(x1, x2);
+    std::vector<double> result;
+    FncShifted fnc(*this, 0, y);
+    for(unsigned int i=1; i<extrema.size(); i++) {
+        double root = findRoot(fnc, extrema[i-1], extrema[i],
+            1e-10 /*the actual accuracy is close to machine precision because of root-polishing*/);
+        if(root == root && (result.empty() || isLarger(root, result.back())))
+            result.push_back(root);
+    }
+    return result;
+}
+
+std::vector<double> QuinticSpline::extrema(double x1, double x2) const
+{
+    return findRoots<true>(*this, x1, x2, RootsDerivQuinticSpline(xval, fval, fder, fder2));
 }
 
 
@@ -1207,8 +1507,8 @@ LogLogSpline::LogLogSpline(
 void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, double* deriv2) const
 {
     int size = xval.size();
-    if(size == 0) {
-        fillNaN(value, deriv, deriv2);
+    if(size == 0 || x!=x) {
+        fillVals(value, deriv, deriv2);
         return;
     }
     int index = binSearch(x, &xval[0], size);
@@ -1268,12 +1568,7 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
             /*output*/ &fvalue, deriv, deriv2);
         // make sure that we don't produce negative interpolated values if the input did not have them
         if(nonnegative && fvalue<=0) {
-            if(value)
-                *value = 0;
-            if(deriv)
-                *deriv = 0;
-            if(deriv2)
-                *deriv2= 0;
+            fillVals(value, deriv, deriv2, NULL, 0, 0, 0, 0);
         } else {  // ordinary case
             if(value)
                 *value = fvalue;
@@ -1282,37 +1577,154 @@ void LogLogSpline::evalDeriv(const double x, double* value, double* deriv, doubl
 }
 
 
-// ------ B-spline interpolator ------ //
+// ------ B-spline interpolator, self-contained ------ //
 
 template<int N>
-BsplineInterpolator1d<N>::BsplineInterpolator1d(const std::vector<double>& xvalues) :
-    numComp(xvalues.size()+N-1), xval(xvalues)
+BsplineWrapper<N>::BsplineWrapper(const std::vector<double>& _xval, const std::vector<double>& _ampl) :
+    BaseInterpolator1d(_xval), ampl(_ampl)
+{
+    if(xval.size()<2)
+        throw std::length_error("BsplineWrapper: number of nodes is too small");
+    if(ampl.size() != xval.size()+N-1)
+        throw std::length_error("BsplineWrapper: invalid size of amplitudes array");
+}
+
+template<int N>
+void BsplineWrapper<N>::evalDeriv(double x,
+    double* value, double* deriv, double* deriv2, double* deriv3) const
+{
+    const int size = xval.size(), ind = binSearch(x, &xval[0], size);
+    if(ind<0 || ind>=size-1) {
+        fillVals(value, deriv, deriv2, deriv3);
+        return;
+    }
+    double bspl[N+1];
+    if(value) {
+        *value = 0;
+        bsplineValues<N>(x, ind, &xval[0], size, bspl);
+        for(int i=0; i<=N; i++)
+            *value += bspl[i] * ampl[i+ind];
+    }
+    if(deriv) {
+        *deriv = 0;
+        if(N>=1) {
+            bsplineDerivs<N,1>(x, ind, &xval[0], size, bspl);
+            for(int i=0; i<=N; i++)
+                *deriv += bspl[i] * ampl[i+ind];
+        }
+    }
+    if(deriv2) {
+        *deriv2 = 0;
+        if(N>=2) {
+            bsplineDerivs<N,2>(x, ind, &xval[0], size, bspl);
+            for(int i=0; i<=N; i++)
+                *deriv2 += bspl[i] * ampl[i+ind];
+        }
+    }
+    if(deriv3) {
+        *deriv3 = 0;
+        if(N>=3) {
+            bsplineDerivs<N,3>(x, ind, &xval[0], size, bspl);
+            for(int i=0; i<=N; i++)
+                *deriv3 += bspl[i] * ampl[i+ind];
+        }
+    }
+}
+
+template<int N>
+double BsplineWrapper<N>::integrate(double x1, double x2, int n) const
+{
+    //return integratePiecewise<N>(*this, x1, x2, n);
+    return integrateBspline<N>(xval, ampl, x1, x2, n);  // more efficient
+}
+
+template<int N>
+double BsplineWrapper<N>::integrate(double x1, double x2, const IFunctionIntegral& f) const
+{
+    return integratePiecewise<N, false>(*this, f, x1, x2);
+}
+
+template<int N>
+double BsplineWrapper<N>::convolve(double x, const IFunctionIntegral& kernel) const
+{
+    return integratePiecewise<N, true>(*this, kernel, x);
+}
+
+template<int N>
+std::vector<double> BsplineWrapper<N>::roots(double y, double x1, double x2) const
+{
+    return findRoots<false>(*this, x1, x2, RootsBspline<N,0>(xval, ampl, y));
+}
+
+template<int N>
+std::vector<double> BsplineWrapper<N>::extrema(double x1, double x2) const
+{
+    return findRoots<true>(*this, x1, x2, RootsBspline<N,1>(xval, ampl));
+}
+
+// the above procedure will not work for the degree 0 B-spline, since it is discontinuous;
+// its roots can only be located at grid nodes
+template<>
+std::vector<double> BsplineWrapper<0>::roots(double y, double x1, double x2) const
+{
+    const size_t size = xval.size();
+    std::vector<double> result;
+    if(size==0)
+        return result;
+    swapIfNeeded(x1, x2);
+    x1 = fmax(x1, xval[0]);
+    x2 = fmin(x2, xval[size-1]);
+    int i1 = binSearch(x1, &xval.front(), size);
+    int i2 = binSearch(x2, &xval.front(), size)+1;
+    for(int i=i1+1; i<i2; i++) {
+        if((ampl[i-1] - y) * (ampl[i] - y) <= 0)
+            result.push_back(xval[i]);
+    }
+    return result;
+}
+
+// likewise, B-splines of degree 0 and 1 use a specialized method for finding the extrema,
+// since their derivatives are discontinuous
+template<>
+std::vector<double> BsplineWrapper<0>::extrema(double x1, double x2) const
+{
+    return findExtremaBspline<0>(xval, ampl, x1, x2);
+}
+
+template<>
+std::vector<double> BsplineWrapper<1>::extrema(double x1, double x2) const
+{
+    return findExtremaBspline<1>(xval, ampl, x1, x2);
+}
+
+template class BsplineWrapper<0>;
+template class BsplineWrapper<1>;
+template class BsplineWrapper<2>;
+template class BsplineWrapper<3>;
+
+
+// ------ B-spline interpolator, non-self-contained ------ //
+
+template<int N>
+BsplineInterpolator1d<N>::BsplineInterpolator1d(const std::vector<double>& _xval) :
+    numComp(_xval.size()+N-1), xval(_xval)
 {
     if(xval.size()<2)
         throw std::length_error("BsplineInterpolator1d: number of nodes is too small");
-    bool monotonic = true;
-    for(unsigned int i=1; i<xval.size(); i++)
-        monotonic &= xval[i-1] < xval[i];
-    if(!monotonic)
-        throw std::invalid_argument("BsplineInterpolator1d: grid nodes must be sorted in ascending order");
+    checkFiniteAndMonotonic(xval, "BsplineInterpolator1d", "x");
 }
 
 template<int N>
 unsigned int BsplineInterpolator1d<N>::nonzeroComponents(
     const double x, const unsigned int derivOrder, double values[]) const
 {
-    if(derivOrder > N) {
-        std::fill(values, values+N+1, 0.);
-        return std::max(0, std::min<int>(numComp-N-1, binSearch(x, &xval[0], xval.size())));
+    const int size = xval.size(), ind = binSearch(x, &xval[0], size);
+    if(ind<0 || ind>=size-1 || derivOrder > N) {
+        std::fill(values, values+N+1, x==x ? 0. : NAN);
+        return ind<0 ? 0 : size-2;
     }
-    switch(derivOrder) {
-        case 0: return bsplineValues<N>  (x, &xval[0], xval.size(), values);
-        case 1: return bsplineDerivs<N,1>(x, &xval[0], xval.size(), values);
-        case 2: return bsplineDerivs<N,2>(x, &xval[0], xval.size(), values);
-        case 3: return bsplineDerivs<N,3>(x, &xval[0], xval.size(), values);
-        default:
-            throw std::invalid_argument("nonzeroComponents: invalid order of derivative");
-    }
+    bsplineDerivs<N>(derivOrder, x, ind, &xval[0], size, values);
+    return ind;
 }
 
 template<int N>
@@ -1323,37 +1735,34 @@ double BsplineInterpolator1d<N>::interpolate(
         throw std::length_error("interpolate: invalid size of amplitudes array");
     if(derivOrder > N)
         return 0;
-    if(derivOrder > 3)
-        throw std::invalid_argument("interpolate: invalid order of derivative");
-    double bspl[N+1];
-    unsigned int leftInd = derivOrder==0 ?
-        bsplineValues<N>  (x, &xval[0], xval.size(), bspl) : derivOrder==1 ?
-        bsplineDerivs<N,1>(x, &xval[0], xval.size(), bspl) : derivOrder==2 ?
-        bsplineDerivs<N,2>(x, &xval[0], xval.size(), bspl) :
-        bsplineDerivs<N,3>(x, &xval[0], xval.size(), bspl);
-    double val=0;
+    double bspl[N+1], val=0;
+    unsigned int ind = nonzeroComponents(x, derivOrder, bspl);
     for(int i=0; i<=N; i++)
-        val += bspl[i] * amplitudes[i+leftInd];
+        val += bspl[i] * amplitudes[i+ind];
     return val;
 }
 
 template<int N>
 void BsplineInterpolator1d<N>::eval(const double* x, double values[]) const
 {
-    std::fill(values, values+numComp, 0.);
+    std::fill(values, values+numComp, *x == *x ? 0. : NAN);
+    const int size = xval.size(), ind = binSearch(*x, &xval[0], size);
+    if(ind<0 || ind>=size-1)
+        return;
     double bspl[N+1];
-    unsigned int leftInd = bsplineValues<N>(*x, &xval[0], xval.size(), bspl);
-    for(int i=0; i<=N; i++)
-        values[i+leftInd] = bspl[i];
+    bsplineValues<N>(*x, ind, &xval[0], size, bspl+ind);
 }
 
 template<int N>
 void BsplineInterpolator1d<N>::addPoint(const double* x, double mult, double values[]) const
 {
+    const int size = xval.size(), ind = binSearch(*x, &xval[0], size);
+    if(ind<0 || ind>=size-1)
+        return;
     double bspl[N+1];
-    unsigned int leftInd = bsplineValues<N>(*x, &xval[0], xval.size(), bspl);
+    bsplineValues<N>(*x, ind, &xval[0], size, bspl);
     for(int i=0; i<=N; i++)
-        values[i+leftInd] += mult * bspl[i];
+        values[i+ind] += mult * bspl[i];
 }
 
 template<int N>
@@ -1383,51 +1792,11 @@ std::vector<double> BsplineInterpolator1d<N>::antideriv(const std::vector<double
 
 template<int N>
 double BsplineInterpolator1d<N>::integrate(double x1, double x2,
-    const std::vector<double> &amplitudes, int n) const
+    const std::vector<double> &ampl, int n) const
 {
-    if(amplitudes.size() != numComp)
+    if(ampl.size() != numComp)
         throw std::length_error("integrate: invalid size of amplitudes array");
-    double sign = 1.;
-    if(x1>x2) {  // swap limits of integration
-        double tmp=x2;
-        x2 = x1;
-        x1 = tmp;
-        sign = -1.;
-    }
-
-    // find out the min/max indices of grid segments that contain the integration interval
-    const double* xgrid = &xval.front();
-    const int Ngrid = xval.size();
-    int i1 = std::max<int>(binSearch(x1, xgrid, Ngrid), 0);
-    int i2 = std::min<int>(binSearch(x2, xgrid, Ngrid), Ngrid-2);
-
-    // B-spline of degree N is a piecewise polynomial of degree N, thus to compute the integral
-    // of B-spline times x^n on each grid segment, it is sufficient to employ a Gauss-Legendre
-    // quadrature rule with the number of nodes = floor((N+n)/2)+1.
-    const int NnodesGL = (N+n)/2+1;
-    if(NnodesGL >= MAX_GL_TABLE)
-        throw std::runtime_error("BsplineInterpolator1d: integration order not implemented");
-    const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
-
-    // loop over segments
-    double result = 0;
-    for(int i=i1; i<=i2; i++) {
-        double X1 = i==i1 ? x1 : xgrid[i];
-        double X2 = i==i2 ? x2 : xgrid[i+1];
-        double bspl[N+1];
-        for(int k=0; k<NnodesGL; k++) {
-            const double x = X1 + (X2 - X1) * glnodes[k];
-            // evaluate the possibly non-zero functions and keep track of the index of the leftmost one
-            int leftInd = bsplineValues<N>(x, xgrid, Ngrid, bspl);
-            // add the contribution of this GL point to the integral of x^n * \sum A_j B_j(x),
-            // where the index j runs from leftInd to leftInd+N
-            double fval = 0;
-            for(int b=0; b<=N; b++)
-                fval += bspl[b] * amplitudes[b+leftInd];
-            result += (X2-X1) * fval * glweights[k] * pow(x, n);
-        }
-    }
-    return result * sign;
+    return integrateBspline<N>(xval, ampl, x1, x2, n);
 }
 
 // force template instantiations for several values of N
@@ -1436,34 +1805,12 @@ template class BsplineInterpolator1d<1>;
 template class BsplineInterpolator1d<2>;
 template class BsplineInterpolator1d<3>;
 
-template<int N>
-double BsplineWrapper<N>::integrate(double x1, double x2, int n) const
-{
-    return integratePiecewise<N>(*this, n, x1, x2);
-}
-
-template<int N>
-double BsplineWrapper<N>::integrate(double x1, double x2, const IFunctionIntegral& f) const
-{
-    return integratePiecewise<N, false>(*this, f, x1, x2);
-}
-
-template<int N>
-double BsplineWrapper<N>::convolve(double x, const IFunctionIntegral& kernel) const
-{
-    return integratePiecewise<N, true>(*this, kernel, x);
-}
-
-template class BsplineWrapper<0>;
-template class BsplineWrapper<1>;
-template class BsplineWrapper<2>;
-template class BsplineWrapper<3>;
-
 
 // ------ Finite-element features of B-splines ------ //
 
 template<int N>
-void FiniteElement1d<N>::setup()
+FiniteElement1d<N>::FiniteElement1d(const BsplineInterpolator1d<N>& _interp) :
+    interp(_interp)
 {
     const std::vector<double>& xnodes = interp.xvalues();
     const unsigned int
@@ -1687,12 +2034,7 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
     if(fval.empty())
         throw std::length_error("Empty 2d interpolator");
     // 2nd derivatives are always zero
-    if(z_xx)
-        *z_xx = 0;
-    if(z_xy)
-        *z_xy = 0;
-    if(z_yy)
-        *z_yy = 0;
+    fillVals(z_xx, z_xy, z_yy, NULL, 0, 0, 0, 0);
     const int
         nx  = xval.size(),
         ny  = yval.size(),
@@ -1705,12 +2047,7 @@ void LinearInterpolator2d::evalDeriv(const double x, const double y,
         iuu = iul + 1;      // xupp,yupp
     // no interpolation outside the 2d grid
     if(xi<0 || xi>=nx-1 || yi<0 || yi>=ny-1) {
-        if(z)
-            *z    = NAN;
-        if(z_x)
-            *z_x  = NAN;
-        if(z_y)
-            *z_y  = NAN;
+        fillVals(z, z_x, z_y);
         return;
     }
     const double
@@ -1814,18 +2151,8 @@ void CubicSpline2d::evalDeriv(const double x, const double y,
         iul = ill + ny,     // xupp,ylow
         iuu = iul + 1;      // xupp,yupp
     if(xi<0 || xi>=nx-1 || yi<0 || yi>=ny-1) {
-        if(z)
-            *z    = NAN;
-        if(z_x)
-            *z_x  = NAN;
-        if(z_y)
-            *z_y  = NAN;
-        if(z_xx)
-            *z_xx = NAN;
-        if(z_xy)
-            *z_xy = NAN;
-        if(z_yy)
-            *z_yy = NAN;
+        fillVals(z, z_x, z_y);
+        fillVals(z_xx, z_xy, z_yy);
         return;
     }
     const double
@@ -2102,18 +2429,8 @@ void QuinticSpline2d::evalDeriv(const double x, const double y,
         iul = ill + ny,     // xupp,ylow
         iuu = iul + 1;      // xupp,yupp
     if(xi<0 || xi>=nx-1 || yi<0 || yi>=ny-1) {
-        if(z)
-            *z    = NAN;
-        if(z_x)
-            *z_x  = NAN;
-        if(z_y)
-            *z_y  = NAN;
-        if(z_xx)
-            *z_xx = NAN;
-        if(z_xy)
-            *z_xy = NAN;
-        if(z_yy)
-            *z_yy = NAN;
+        fillVals(z, z_x, z_y);
+        fillVals(z_xx, z_xy, z_yy);
         return;
     }
     bool der  = z_y!=NULL || z_xy!=NULL;
@@ -2258,8 +2575,9 @@ CubicSpline3d::CubicSpline3d(
             leftInd[d].resize(Ngrid);
             const double* arr = &(nodes[d]->front());
             for(unsigned int n=0; n<Ngrid; n++) {
-                leftInd[d][n] = bsplineValues<3>(arr[n], arr, Ngrid, &values[d](n, 0));
-                bsplineDerivs<3,1>(arr[n], arr, Ngrid, &derivs[d](n, 0));
+                leftInd[d][n] = std::min(n, Ngrid-2);
+                bsplineValues<3  >(arr[n], leftInd[d][n], arr, Ngrid, &values[d](n, 0));
+                bsplineDerivs<3,1>(arr[n], leftInd[d][n], arr, Ngrid, &derivs[d](n, 0));
             }
         }
         for(int xi=0; xi<nx; xi++)
@@ -2460,15 +2778,9 @@ BsplineInterpolator3d<N>::BsplineInterpolator3d(
 {
     if(xval.size()<2 || yval.size()<2 || zval.size()<2)
         throw std::invalid_argument("BsplineInterpolator3d: number of nodes is too small");
-    bool monotonic = true;
-    for(unsigned int i=1; i<xval.size(); i++)
-        monotonic &= xval[i-1] < xval[i];
-    for(unsigned int i=1; i<yval.size(); i++)
-        monotonic &= yval[i-1] < yval[i];
-    for(unsigned int i=1; i<zval.size(); i++)
-        monotonic &= zval[i-1] < zval[i];
-    if(!monotonic)
-        throw std::invalid_argument("BsplineInterpolator3d: grid nodes must be sorted in ascending order");
+    checkFiniteAndMonotonic(xval, "BsplineInterpolator3d", "x");
+    checkFiniteAndMonotonic(yval, "BsplineInterpolator3d", "y");
+    checkFiniteAndMonotonic(zval, "BsplineInterpolator3d", "z");
 }
 
 template<int N>
@@ -2478,7 +2790,14 @@ void BsplineInterpolator3d<N>::nonzeroComponents(const double point[3],
     double weights[3][N+1];
     for(int d=0; d<3; d++) {
         const std::vector<double>& nodes = d==0? xval : d==1? yval : zval;
-        leftIndices[d] = bsplineValues<N>(point[d], &nodes[0], nodes.size(), weights[d]);
+        const int size = nodes.size(), ind = binSearch(point[d], &nodes[0], size);
+        if(ind<0 || ind>=size-1) {
+            std::fill(weights[d], weights[d]+N+1, point[d]==point[d] ? 0. : NAN);
+            leftIndices[d] = ind<0 ? 0 : size-2;
+        } else {
+            bsplineValues<N>(point[d], ind, &nodes[0], size, weights[d]);
+            leftIndices[d] = ind;
+        }
     }
     for(int i=0; i<=N; i++)
         for(int j=0; j<=N; j++)
@@ -2646,11 +2965,15 @@ std::vector<double> createBsplineInterpolator3dArray(const IFunctionNdim& F,
         weights[d] = Matrix<double>(Ngrid+N-1, N+1);
         leftInd[d].resize(Ngrid+N-1);
         const double* arr = &(nodes[d]->front());
-        for(unsigned int n=0; n<Ngrid; n++)
-            leftInd[d][n] = bsplineValues<N>(arr[n], arr, Ngrid, &weights[d](n, 0));
+        for(unsigned int n=0; n<Ngrid; n++) {
+            leftInd[d][n] = std::min(n, Ngrid-2);
+            bsplineValues<N>(arr[n], leftInd[d][n], arr, Ngrid, &weights[d](n, 0));
+        }
         // collect 2nd derivatives at the endpoints
-        leftInd[d][Ngrid]   = bsplineDerivs<N,2>(arr[0],       arr, Ngrid, &weights[d](Ngrid,   0));
-        leftInd[d][Ngrid+1] = bsplineDerivs<N,2>(arr[Ngrid-1], arr, Ngrid, &weights[d](Ngrid+1, 0));
+        leftInd[d][Ngrid]   = 0;
+        leftInd[d][Ngrid+1] = Ngrid-2;
+        bsplineDerivs<N,2>(arr[0],       0,       arr, Ngrid, &weights[d](Ngrid,   0));
+        bsplineDerivs<N,2>(arr[Ngrid-1], Ngrid-2, arr, Ngrid, &weights[d](Ngrid+1, 0));
     }
     // each row of the matrix corresponds to the value of source function at a given grid point,
     // or to its the second derivative at the endpoints of grid which is assumed to be zero
@@ -3570,7 +3893,7 @@ double SplineLogDensityFitter<N>::logG(
             // obtain the values of all nontrivial basis function at this point,
             // and the index of the first of these functions.
             int ind = N==1 ?
-                bsplineValues<1>(x, &grid[0], numNodes, Bspl) :
+                bsplineDerivs<1,0>(x, &grid[0], numNodes, Bspl) :
                 bsplineNaturalCubicValues(x, &grid[0], numNodes, Bspl);
             // sum the contributions to Q(x) from each basis function,
             // weighted with the provided amplitudes;
@@ -3610,9 +3933,9 @@ double SplineLogDensityFitter<N>::logG(
         if(!infinite[p])
             continue;
         double Bspl[N+1], Bder[N+1];
-        int ind;
+        int ind;  // TODO remove grid search
         if(N==1) {
-            ind = bsplineValues<N>(endpoint[p], &grid[0], numNodes, Bspl);
+            ind = bsplineDerivs<1,0>(endpoint[p], &grid[0], numNodes, Bspl);
             bsplineDerivs<1,1>(endpoint[p], &grid[0], numNodes, Bder);
         } else {
             ind = bsplineNaturalCubicValues(endpoint[p], &grid[0], numNodes, Bspl);

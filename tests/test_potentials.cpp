@@ -115,9 +115,9 @@ bool testPotential(const potential::BasePotential& potential)
             "  '' u 2:(abs($7/$5-1)) w l title 'Lcirc(E),interp'\n"
             "plot '' u 2:(abs($10/$2-1)) w l title 'Rmax(E),root', \\\n"
             "  '' u 2:(abs($11/$2-1)) w l title 'Rmax(E),interp'\n"
-            "plot '' u 2:(abs($15/$12-1)) w l title 'Phi(r),interp', \\\n"
-            "  '' u 2:(abs($16/$13-1)) w l title 'dPhi/dr,interp', \\\n"
-            "  '' u 2:(abs($17/$14-1)) w l title 'rho,interp'\n";
+            "plot '' u 2:(abs($16/$12-1)) w l title 'Phi(r),interp', \\\n"
+            "  '' u 2:(abs($17/$13-1)) w l title 'dPhi/dr,interp', \\\n"
+            "  '' u 2:(abs($19/$15-1)) w l title 'rho,interp'\n";
             strm.close();
             strm.open((filename+".dat").c_str());
             strm << std::setprecision(16) << "E\t"
@@ -125,11 +125,13 @@ bool testPotential(const potential::BasePotential& potential)
             "Lc Lc_root(E) Lc_interp(E)\t"
             "Rc_root(Lc) Rc_interp(Lc)\t"
             "Rmax_root(Phi) Rmax_interp(Phi)\t"
-            "Phi dPhi/dR rho Phi_interp dPhi/dr_interp rho_interp\n";
+            "Phi dPhi/dR d2Phi/dR2 rho Phi_interp dPhi/dR_interp d2Phi/dR2_interp rho_interp "
+            "d3Phi/dR3_interp d3Phi/drR3_finite_dif\n";
         }
         potential::Interpolator interp(potential);
         double sumw = 0, errRcR = 0, errRcI = 0, errLcR = 0, errLcI = 0,
-        errRLR = 0, errRLI = 0, errRmR = 0, errRmI = 0, errPhiI = 0, errdPhiI = 0;
+        errRLR = 0, errRLI = 0, errRmR = 0, errRmI = 0,
+        errPhiI = 0, errdPhiI = 0, errd2PhiI = 0, errd3PhiI = 0;
         for(double lr=-7; lr<=9; lr+=.0625) {
             double r = pow(10., lr);
             double Phi;
@@ -146,8 +148,12 @@ bool testPotential(const potential::BasePotential& potential)
             double RLI = interp.R_from_Lz(Lc);
             double RmR = R_max(potential, Phi);
             double RmI = interp.R_max(Phi);
-            double PhiI, dPhiI, d2PhiI;
-            interp.evalDeriv(r, &PhiI, &dPhiI, &d2PhiI);
+            double PhiI, dPhiI, d2PhiI, d3PhiI, d2PhiI_minusdeltar, d2PhiI_plusdeltar;
+            interp.evalDeriv(r, &PhiI, &dPhiI, &d2PhiI, &d3PhiI);
+            const double deltar = r * ROOT3_DBL_EPSILON;
+            interp.evalDeriv(r - deltar, NULL, NULL, &d2PhiI_minusdeltar);
+            interp.evalDeriv(r + deltar, NULL, NULL, &d2PhiI_plusdeltar);
+            double d3PhiIfd = 0.5 * (d2PhiI_plusdeltar - d2PhiI_minusdeltar) / deltar;
             double truedens = (hess.dR2 + 2*grad.dR/r) / (4*M_PI);
             double intdens  = (d2PhiI   + 2*dPhiI  /r) / (4*M_PI);
 
@@ -164,25 +170,30 @@ bool testPotential(const potential::BasePotential& potential)
             errLcI  += weight * pow_2((Lc  - LcI) / (Lc  + LcI) * 2);
             errPhiI += weight * pow_2((Phi - PhiI)/ (Phi + PhiI)* 2);
             errdPhiI+= weight * pow_2((grad.dR - dPhiI) / (grad.dR + dPhiI) * 2);
+            errd2PhiI+=weight * pow_2((hess.dR2-d2PhiI) / (fabs(hess.dR2) + fabs(d2PhiI)) * 2);
+            errd3PhiI+=weight * pow_2((d3PhiIfd-d3PhiI) / (fabs(d3PhiIfd) + fabs(d3PhiI)) * 2);
 
             strm << E << '\t' <<
                 r   << ' ' << RcR << ' ' << RcI << '\t' <<
                 Lc  << ' ' << LcR << ' ' << LcI << '\t' <<
                 RLR << ' ' << RLI << '\t' <<
                 RmR << ' ' << RmI << '\t' <<
-                Phi << ' ' << grad.dR<< ' ' << truedens << ' ' <<
-                PhiI<< ' ' << dPhiI  << ' ' << intdens  << '\n';
+                Phi << ' ' << grad.dR << ' ' << hess.dR2 << ' ' << truedens << '\t' <<
+                PhiI<< ' ' << dPhiI   << ' ' << d2PhiI   << ' ' << intdens  << ' '  <<
+                d3PhiI << ' ' << d3PhiIfd << '\n';
         }
-        errLcR = sqrt(errLcR / sumw);
-        errLcI = sqrt(errLcI / sumw);
-        errRcR = sqrt(errRcR / sumw);
-        errRcI = sqrt(errRcI / sumw);
-        errRmR = sqrt(errRmR / sumw);
-        errRmI = sqrt(errRmI / sumw);
-        errRLR = sqrt(errRLR / sumw);
-        errRLI = sqrt(errRLI / sumw);
-        errPhiI= sqrt(errPhiI/ sumw);
-        errdPhiI=sqrt(errdPhiI/sumw);
+        errLcR  = sqrt(errLcR / sumw);
+        errLcI  = sqrt(errLcI / sumw);
+        errRcR  = sqrt(errRcR / sumw);
+        errRcI  = sqrt(errRcI / sumw);
+        errRmR  = sqrt(errRmR / sumw);
+        errRmI  = sqrt(errRmI / sumw);
+        errRLR  = sqrt(errRLR / sumw);
+        errRLI  = sqrt(errRLI / sumw);
+        errPhiI = sqrt(errPhiI/ sumw);
+        errdPhiI= sqrt(errdPhiI/sumw);
+        errd2PhiI=sqrt(errd2PhiI/sumw);
+        errd3PhiI=sqrt(errd3PhiI/sumw);
         // check if the errors are within design tolerance;
         // for the composite potential (aka GalPot = Multipole + DiskAnsatz) or Multipole
         // we loosen the tolerance limits, as the Multipole potential is intrinsically
@@ -193,16 +204,18 @@ bool testPotential(const potential::BasePotential& potential)
             potential.name() == potential::Multipole::myName() ? 10. :
             potential.name().substr(0,9) == "Composite"        ? 200 : 1.;
         std::cout << "Density-weighted RMS errors"
-        ": Phi(r)="     + checkLess(errPhiI, 1e-10 * tol, ok) +
-        ", dPhi/dr="    + checkLess(errdPhiI,1e-08 * tol, ok) +
-        ", Lc,root(E)=" + checkLess(errLcR,  1e-12,       ok) +
-        ", Lc,int(E)="  + checkLess(errLcI,  1e-08 * tol, ok) +
-        ", Rc,root(E)=" + checkLess(errRcR,  1e-12,       ok) +
-        ", Rc,int(E)="  + checkLess(errRcI,  1e-09 * tol, ok) +
-        ", Rc,root(Lz)="+ checkLess(errRLR,  1e-12,       ok) +
-        ", Rc,int(Lz)=" + checkLess(errRLI,  1e-09 * tol, ok) +
-        ", Rm,root(E)=" + checkLess(errRmR,  2e-12,       ok) +
-        ", Rm,int(E)="  + checkLess(errRmI,  1e-09 * tol, ok) + "\n";
+        ": Phi(r)="     + checkLess(errPhiI,  1e-10 * tol, ok) +
+        ", dPhi/dr="    + checkLess(errdPhiI, 1e-08 * tol, ok) +
+        ", d2Phi/dr2="  + checkLess(errd2PhiI,1e-06 * tol, ok) +
+        ", d3Phi/dr3="  + checkLess(errd3PhiI,1e-06 * tol, ok) +
+        ", Lc,root(E)=" + checkLess(errLcR,   1e-12,       ok) +
+        ", Lc,int(E)="  + checkLess(errLcI,   1e-08 * tol, ok) +
+        ", Rc,root(E)=" + checkLess(errRcR,   1e-12,       ok) +
+        ", Rc,int(E)="  + checkLess(errRcI,   1e-09 * tol, ok) +
+        ", Rc,root(Lz)="+ checkLess(errRLR,   1e-12,       ok) +
+        ", Rc,int(Lz)=" + checkLess(errRLI,   1e-09 * tol, ok) +
+        ", Rm,root(E)=" + checkLess(errRmR,   2e-12,       ok) +
+        ", Rm,int(E)="  + checkLess(errRmI,   1e-09 * tol, ok) + "\n";
     }
     catch(std::exception& e) {
         std::cout << "Cannot create interpolator: "<<e.what()<<"\n";

@@ -50,14 +50,13 @@ def run_orbit(ic):
     color = numpy.random.random(size=3)*0.8
     # create an orbit represented by a spline interpolator
     orbit = agama.orbit(ic=ic, potential=pot, time=100*pot.Tcirc(ic), dtype=object)
-    traj = orbit(orbit)  # get recorded trajectory
-    def zfnc(t):
-        return orbit(t)[2]
-    # find exact crossing time on segments which contain points in the surface of section (z going from negative to positive)
-    timecross = numpy.array([
-        scipy.optimize.brentq(zfnc, orbit[i], orbit[i+1])
-        for i in numpy.where((traj[:-1,2]<=0) * (traj[1:,2]>0))[0]
-    ])
+    # get all crossing points with z=0
+    timecross = orbit.z.roots()
+    # select those at which vz>=0
+    timecross = timecross[orbit.z(timecross, der=1) >= 0]
+    # get recorded trajectory sampled at every timestep...
+    traj = orbit(orbit)
+    # ...and at all crossing times
     trajcross = orbit(timecross)
     if Lz==0:
         axorb.plot(traj[:,0], traj[:,2], color=color, lw=0.5, alpha=0.5)
@@ -65,7 +64,7 @@ def run_orbit(ic):
     else:
         # orbit in the R,z plane, and SoS in the R, v_R plane
         axorb.plot((traj[:,0]**2 + traj[:,1]**2)**0.5, traj[:,2], color=color, lw=0.5, alpha=0.5)
-        R = (trajcross[:,0]**2 + trajcross[:,1]**2)**0.5   
+        R = (trajcross[:,0]**2 + trajcross[:,1]**2)**0.5
         vR= (trajcross[:,0]*trajcross[:,3] + trajcross[:,1]*trajcross[:,4]) / R
         axpss.plot(R, vR, 'o', color=color, mew=0, ms=1.5)
 

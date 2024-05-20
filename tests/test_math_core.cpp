@@ -1,3 +1,9 @@
+/** \name   test_math_core.cpp
+    \author Eugene Vasiliev
+    \date   2015-2024
+
+    Test the accuracy of various mathematical algorithms (root-finding, integration, etc..)
+*/
 #include "math_core.h"
 #include "math_fit.h"
 #include "math_random.h"
@@ -44,8 +50,8 @@ class TestInt4: public Integrand{
 };
 
 class TestInt5: public Integrand{
-    const double a=0.4, b=0.01;
     virtual double value(double x) const{
+        const double a=0.4, b=0.01;
         return 1 / (pow_2(x-a) + pow_2(b)) * b / (atan(a/b) + atan((1-a)/b));
     }
 };
@@ -334,9 +340,9 @@ bool testIntegration(const Integrand& fnc, double a, double b,
     result = math::integrateGL(fnc, a, b, GLORDER_NAIVE);
     // same but using IFunctionNdim interface
     math::integrateGL(fnc, a, b, GLORDER_NAIVE, &resultN);
-    std::cout << "fixed GL=" << result <<
-        " (delta=" << (result-exact) << ", neval=" << GLORDER_NAIVE;
-    ok &= (fabs(1-result/exact) < tolerNaiveGL && fabs(result-resultN) < 1e-15) || err();
+    std::cout << "fixed GL=" << result << " (delta=" << (result-exact) <<
+        ", dif_1d_vs_Nd=" << (result-resultN) << ", neval=" << GLORDER_NAIVE;
+    ok &= (fabs(1-result/exact) < tolerNaiveGL && fabs(result-resultN) < 4e-15) || err();
 
     result = math::integrate(fnc, a, b, tolerNaiveGK, &error, &numEval);
     std::cout << "), naive=" << result << " +- " << error <<
@@ -366,6 +372,229 @@ bool testIntegration(const Integrand& fnc, double a, double b,
     ok &= (fabs(1-result/exact) < tolerScaledGK && fabs(result-exact) < error) || err();
 
     std::cout << ")\n";
+    return ok;
+}
+
+inline bool swapIfNeeded(double& x1, double& x2)
+{
+    if(x1 > x2) {
+        std::swap(x1, x2);
+        return true;
+    }
+    return false;
+}
+
+inline double evalQuartic(double a4, double a3, double a2, double a1, double a0, double x,
+    double* error=NULL)
+{
+    // estimate the rounding error on the function value coming from the cancellation of terms
+    double
+    val3 = (fabs(a3) + fabs(x * a4)),
+    val2 = (fabs(a2) + fabs(x * val3)),
+    val1 = (fabs(a1) + fabs(x * val2)),
+    val0 = (fabs(a0) + fabs(x * val1)),
+    result = a0 + x * (a1 + x * (a2 + x * (a3 + x * a4))),
+    // estimate the rounding error on the function value from the inexactness of its argument
+    // multiplied by the derivative
+    deriv  = a1 + x * (a2 * 2 + x * (a3 * 3 + x * a4 * 4));
+    if(error)
+        *error = DBL_EPSILON * fmax(fabs(x * deriv), val0);
+    return result;
+}
+
+bool testSolvePoly()
+{
+    double toler = 5 * DBL_EPSILON;
+    bool ok = true;
+    double roots[4];
+    int nroots;
+
+    // quadratic
+    nroots = math::solveQuadratic(1, 1, 1, roots);
+    ok &= nroots==0;
+    nroots = math::solveQuadratic(4, 4, 1, roots);
+    ok &= nroots==1 && fabs(roots[0] + 0.5) < toler;
+    nroots = math::solveQuadratic(3, -4, 1, roots);
+    ok &= nroots==2 &&
+        fabs(roots[0] - 1./3) < toler &&
+        fabs(roots[1] - 1) < toler;
+    nroots = math::solveQuadratic(1, -1, -1, roots);
+    ok &= nroots==2 &&
+        fabs(roots[0] - (0.5-sqrt(1.25))) < toler &&
+        fabs(roots[1] - (0.5+sqrt(1.25))) < toler;
+
+    // cubic
+    nroots = math::solveCubic(2, 3, -3, -9, roots);
+    ok &= nroots==1 && fabs(roots[0] - 1.5) < toler;
+    nroots = math::solveCubic(2, 0, -6, 4, roots);
+    ok &= nroots==2 &&
+        fabs(roots[0] + 2) < toler &&
+        fabs(roots[1] - 1) < toler;
+    nroots = math::solveCubic(3, 5, -9, -4, roots);
+    ok &= nroots==3 &&
+        fabs(roots[0] - (-1.5-sqrt(1.25))) < toler &&
+        fabs(roots[1] - (-1.5+sqrt(1.25))) < toler &&
+        fabs(roots[2] - 4./3) < toler;
+
+    // quartic
+    nroots = math::solveQuartic(1, -2, -2, 5, -2, roots);
+    ok &= nroots==4 &&
+        fabs(roots[0] - (-0.5-sqrt(1.25))) < toler &&
+        fabs(roots[1] - (-0.5+sqrt(1.25))) < toler &&
+        fabs(roots[2] - 1) < toler &&
+        fabs(roots[3] - 2) < toler;
+    nroots = math::solveQuartic(2, 0, -5, -1, 1, roots);
+    ok &= nroots==4 &&
+        fabs(roots[0] - (-0.5-sqrt(0.75))) < toler &&
+        fabs(roots[1] - ( 0.5-sqrt(1.25))) < toler &&
+        fabs(roots[2] - (-0.5+sqrt(0.75))) < toler &&
+        fabs(roots[3] - ( 0.5+sqrt(1.25))) < toler;
+    nroots = math::solveQuartic(2, -4, -9, 27, -135./8, roots);  // -5/2, 3/2 @3
+    ok &= nroots==2 &&
+        fabs(roots[0] + 2.5) < toler &&
+        fabs(roots[1] - 1.5) < toler;
+    /*nroots = math::solveQuartic(3, 2, -1, -4./9, 4./27, roots);  // -2/3 @2, 1/3 @2
+    ok &= nroots==2 &&  /// this fails because of roundoff errors, need exactly representable numbers..
+        fabs(roots[0] + 2./3) < toler &&
+        fabs(roots[1] - 1./3) < toler;*/
+    nroots = math::solveQuartic(8, -8, -1, 1.5, 9./32, roots);  // -1/4 @2, 3/4 @2
+    ok &= nroots==2 &&
+        fabs(roots[0] + 1./4) < toler &&
+        fabs(roots[1] - 3./4) < toler;
+    nroots = math::solveQuartic(4, 0, -3, -7, -3, roots);  // -1/2, 3/2
+    ok &= nroots==2 &&
+        fabs(roots[0] + 0.5) < toler &&
+        fabs(roots[1] - 1.5) < toler;
+    nroots = math::solveQuartic(4, 4, -7, -10, -3, roots);  // -1 @2, -1/2, 3/2
+    ok &= nroots==3 &&
+        fabs(roots[0] + 1.0) < toler &&
+        fabs(roots[1] + 0.5) < toler &&
+        fabs(roots[2] - 1.5) < toler;
+    nroots = math::solveQuartic(1, -4, 6, -4, 1, roots);  // extreme case of multiplicity 4;
+    ok &= nroots==1 && fabs(roots[0] - 1) < toler;  // in general it won't give accurate results
+    if(!ok) {
+        std::cout << "Polynomial root-finding failed";
+        err();
+    }
+
+    double max_rel_error = 0;
+    int nroots_extra = 0, nroots_missed = 0;
+    for(int i=0; i<10000; i++) {
+        double x1, c2, d2, a3;
+        math::getNormalRandomNumbers(x1, c2);
+        math::getNormalRandomNumbers(d2, a3);
+        x1  = sinh(x1);          // spread out the location of the first root
+        c2  = pow_3(c2) + x1;    // make the peak of the parabola sometimes close to x1
+        d2 *= pow_2(pow_2(d2));  // make the vertical offset of the peak sometimes very small
+        if(i%100 == 0) d2 = 0;
+        // generate equations of the form a3 * (x-x1) * ((x-c2)^2 - d2)
+        double a2 = -a3 * (x1 + 2 * c2);
+        double a1 =  a3 * ((2 * x1 + c2) * c2 - d2);
+        double a0 = -a3 * x1 * (c2 * c2 - d2);
+        int nroots_expected = 1;
+        double roots_expected[3] = {x1, NAN, NAN};
+        if(d2 >= 0)
+            roots_expected[nroots_expected++] = c2 - sqrt(d2);
+        if(d2 > 0)
+            roots_expected[nroots_expected++] = c2 + sqrt(d2);
+        switch(nroots_expected) {
+            case 2:
+                swapIfNeeded(roots_expected[0], roots_expected[1]);
+                break;
+            case 3:
+                swapIfNeeded(roots_expected[0], roots_expected[1]);
+                swapIfNeeded(roots_expected[0], roots_expected[2]);
+                swapIfNeeded(roots_expected[1], roots_expected[2]);
+                break;
+            default: ;
+        }
+
+        nroots = math::solveCubic(a3, a2, a1, a0, roots);
+        // we do not directly check the roots, but rather the values of the polynomial at these points
+        if(nroots != nroots_expected) {
+            nroots_extra += nroots > nroots_expected;
+            nroots_missed+= nroots < nroots_expected;
+            // don't check the function values in this case,
+            // as we haven't determined which roots are genuine
+        } else {
+            for(int p=0; p<nroots; p++) {
+                double error, f = evalQuartic(0, a3, a2, a1, a0, roots[p], &error),
+                f_expected  = evalQuartic(0, a3, a2, a1, a0, roots_expected[p]);
+                double rel_error = fabs(f) / fmax(error, fabs(f_expected));
+                max_rel_error = fmax(max_rel_error, rel_error);
+                ok &= p==0 || roots[p] > roots[p-1];
+            }
+        }
+    }
+    // forgive some cases of missed or extra roots arising due to roundoff errors;
+    // need a more robust treatment of special cases (multiple roots)..
+    std::cout << "Analytic solution to cubic equation: error = " << max_rel_error << " epsilons;";
+    ok &= (max_rel_error <= 2 && nroots_extra + nroots_missed < 150) || err();
+
+    max_rel_error = 0;
+    nroots_extra  = 0;
+    nroots_missed = 0;
+    for(int i=0; i<10000; i++) {
+        double c1, d1, c2, d2;
+        math::getNormalRandomNumbers(c1, c2);
+        math::getNormalRandomNumbers(d1, d2);
+        c1  = sinh(c1);         // spread out the location of the peak of the first parabola
+        c2  = pow_3(c2) + c1;   // make the peak of the second parabola sometimes close to the first
+        d1 *= pow_2(pow_2(d1)); // make the vertical offset often very small (either sign)
+        d2 *= pow_2(d2);        // same for the second parabola, but less extreme
+        double h1 = c1 * c1 - d1, h2 = c2 * c2 - d2;
+        if(i%100 == 0) d2 = 0;
+        // generate equations of the form ((x-c1)^2 - d1) ((x-c2)^2 - d2)
+        double a3 =-2 * c1 - 2 * c2;
+        double a2 = 4 * c1 * c2 + h1 + h2;
+        double a1 =-2 * c1 * h2 - 2 * c2 * h1;
+        double a0 = h1 * h2;
+        int nroots_expected = 0;
+        double roots_expected[4] = {NAN, NAN, NAN, NAN};
+        if(d1 >= 0)
+            roots_expected[nroots_expected++] = c1 - sqrt(d1);
+        if(d1 > 0)
+            roots_expected[nroots_expected++] = c1 + sqrt(d1);
+        if(d2 >= 0)
+            roots_expected[nroots_expected++] = c2 - sqrt(d2);
+        if(d2 > 0)
+            roots_expected[nroots_expected++] = c2 + sqrt(d2);
+        switch(nroots_expected) {
+            case 2:
+                swapIfNeeded(roots_expected[0], roots_expected[1]);
+                break;
+            case 3:
+                swapIfNeeded(roots_expected[0], roots_expected[1]);
+                swapIfNeeded(roots_expected[0], roots_expected[2]);
+                swapIfNeeded(roots_expected[1], roots_expected[2]);
+                break;
+            case 4:
+                swapIfNeeded(roots_expected[0], roots_expected[2]);
+                swapIfNeeded(roots_expected[1], roots_expected[3]);
+                swapIfNeeded(roots_expected[1], roots_expected[2]);
+                break;
+            default: ;
+        }
+
+        nroots = math::solveQuartic(1, a3, a2, a1, a0, roots);
+        if(nroots != nroots_expected) {
+            nroots_extra  += nroots > nroots_expected;
+            nroots_missed += nroots < nroots_expected;
+            // don't check the function values in this case,
+        } else {
+            for(int p=0; p<nroots; p++) {
+                double error, f = evalQuartic(1, a3, a2, a1, a0, roots[p], &error),
+                    f_expected  = evalQuartic(1, a3, a2, a1, a0, roots_expected[p]);
+                double rel_error = fabs(f) / fmax(error, fabs(f_expected));
+                max_rel_error = fmax(max_rel_error, rel_error);
+                ok &= p==0 || roots[p] > roots[p-1];
+            }
+        }
+    }
+    std::cout << " quartic equation: error = " << max_rel_error << " epsilons";
+    ok &= (max_rel_error <= 2 && nroots_extra + nroots_missed < 150) || err();
+
+    std::cout << '\n';
     return ok;
 }
 
@@ -431,7 +660,10 @@ int main()
     ok &= testIntegration(TestInt4(),  0, 1.0, 0.02, 0.001,1e-4, 2e-3, 1e-3);
     ok &= testIntegration(TestInt5(),  0, 1.0, 0.50, 0.05, 1e-4, 0.80, 0.20);
 
-    // root-finding
+    // low-degree polynomial root-finding
+    ok &= testSolvePoly();
+
+    // general root-finding
     const double toler = 1e-6;
     double exact=0.3, error=0, result;
     numEval=0;

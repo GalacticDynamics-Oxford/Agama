@@ -394,7 +394,7 @@ class FokkerPlanckImplFEM: public FokkerPlanckImpl {
 
 public:
     FokkerPlanckImplFEM(const std::vector<double>& gridh) :
-        fem(convert(gridh, SCALEH)),
+        fem(math::BsplineInterpolator1d<N>(convert(gridh, SCALEH))),
         numPoints(fem.integrPoints().size()),
         auxGridCoords (convert(fem.integrPoints(), UNSCALEH)),
         auxGridWeights(convert(fem.integrPoints(), DHDSCALEH)),

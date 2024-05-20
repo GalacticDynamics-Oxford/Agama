@@ -90,8 +90,8 @@ namespace math{
 ///@{
 /// \name One-dimensional interpolation
 
-/** Generic one-dimensional interpolator class */
-class BaseInterpolator1d: public IFunction, public IFunctionIntegral {
+/** Common interface for one-dimensional piecewise-polynomial interpolators */
+class BaseInterpolator1d: public IFunction3Deriv, public IFunctionIntegral {
 public:
     /** empty constructor is required for the class to be used in std::vector and alike places */
     BaseInterpolator1d() {};
@@ -102,8 +102,21 @@ public:
     */
     BaseInterpolator1d(const std::vector<double>& xvalues);
 
+    /** check if the interpolator is initialized */
+    bool empty() const { return xval.empty(); }
+
+    /** return the array of interpolator nodes */
+    const std::vector<double>& xvalues() const { return xval; }
+
+    /** return the lower end of definition interval */
+    double xmin() const { return xval.empty() ? NAN : xval.front(); }
+
+    /** return the upper end of definition interval */
+    double xmax() const { return xval.empty() ? NAN : xval.back(); }
+
     /** return the integral of the interpolator function times x^n on the interval [x1..x2];
         the interpolator is set to zero outside the interval xmin..xmax.
+        Implemented in the derived classes.
     */
     using IFunctionIntegral::integrate;
 
@@ -121,20 +134,21 @@ public:
     */
     virtual double convolve(double x, const IFunctionIntegral& kernel) const = 0;
 
-    /** return the number of derivatives that the interpolator provides */
-    virtual unsigned int numDerivs() const { return 2; }
+    /** find all local minima and maxima on the given interval x1..x2 (if not specified, this
+        means the entire interpolation grid). Endpoints of the interval are considered as extrema,
+        and the resulting array is sorted in order of increase. 
+        No values are reported outside the interpolation grid (i.e. if x1<xmin(),
+        the first element of the returned array is xmin, not x1).
+    */
+    virtual std::vector<double> extrema(double x1=NAN, double x2=NAN) const = 0;
 
-    /** return the lower end of definition interval */
-    double xmin() const { return xval.size()? xval.front() : NAN; }
-
-    /** return the upper end of definition interval */
-    double xmax() const { return xval.size()? xval.back() : NAN; }
-
-    /** check if the spline is initialized */
-    bool empty() const { return xval.empty(); }
-
-    /** return the array of spline nodes */
-    const std::vector<double>& xvalues() const { return xval; }
+    /** find all locations within the interval x1..x2 (by default the entire interpolation grid)
+        at which the interpolator attains the given value y (by default 0), 
+        sorted in order of increase.
+        No values are reported outside the interpolation grid, even if the interpolator itself
+        may be linearly extrapolated beyond its grid boundaries and cross y somewhere outside.
+    */
+    virtual std::vector<double> roots(double y=0, double x1=NAN, double x2=NAN) const = 0;
 
 protected:
     std::vector<double> xval;  ///< grid nodes
@@ -148,16 +162,22 @@ public:
 
     LinearInterpolator(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
 
+    using BaseInterpolator1d::evalDeriv;
+
     /** compute the value of interpolator and optionally its derivatives at point x; if the input
         location is outside the definition interval, a linear extrapolation is performed.
     */
-    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    virtual void evalDeriv(double x, double* value, double* der, double* der2, double* der3) const;
 
     virtual double integrate(double x1, double x2, int n=0) const;
 
     virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
 
     virtual double convolve(double x, const IFunctionIntegral& kernel) const;
+
+    virtual std::vector<double> extrema(double x1=NAN, double x2=NAN) const;
+
+    virtual std::vector<double> roots(double y=0, double x1=NAN, double x2=NAN) const;
 
 private:
     std::vector<double> fval;  ///< values of the interpolator at grid nodes
@@ -230,22 +250,22 @@ public:
     CubicSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         const std::vector<double>& fderivs);
 
+    using BaseInterpolator1d::evalDeriv;
+
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
     */
-    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    virtual void evalDeriv(double x, double* val, double* der, double* der2, double* der3) const;
 
     virtual double integrate(double x1, double x2, int n=0) const;
 
-    /** return the integral of spline function times another function f(x) on the interval [x1..x2];
-        the other function is specified by the interface that provides the integral
-        of f(x) * x^n for 0<=n<=3 */
     virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
 
     virtual double convolve(double x, const IFunctionIntegral& kernel) const;
 
-    /** check if the spline is everywhere monotonic on the given interval */
-    bool isMonotonic() const;
+    virtual std::vector<double> extrema(double x1=NAN, double x2=NAN) const;
+
+    virtual std::vector<double> roots(double y=0, double x1=NAN, double x2=NAN) const;
 
 private:
     std::vector<double> fval;  ///< values of the interpolator at grid nodes
@@ -274,16 +294,22 @@ public:
     QuinticSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         const std::vector<double>& fderivs);
 
+    using BaseInterpolator1d::evalDeriv;
+
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
     */
-    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const;
+    virtual void evalDeriv(double x, double* val, double* der, double* der2, double* der3) const;
 
     virtual double integrate(double x1, double x2, int n=0) const;
 
     virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
 
     virtual double convolve(double x, const IFunctionIntegral& kernel) const;
+
+    virtual std::vector<double> extrema(double x1=NAN, double x2=NAN) const;
+
+    virtual std::vector<double> roots(double y=0, double x1=NAN, double x2=NAN) const;
 
 private:
     std::vector<double> fval;  ///< values of the interpolator at grid nodes
@@ -298,7 +324,7 @@ private:
     negative elements - these points will be excluded from log-spline construction and
     interpolated without log-scaling when evaluating the function.
     This class is not derived from BaseInterpolator1d, since it does not fully implement its
-    interface (i.e., does not provide integration and convolution methods).
+    interface (i.e., does not provide integration, convolution and root-finding methods).
 */
 class LogLogSpline: public IFunction {
 public:
@@ -347,24 +373,63 @@ private:
 };
 
 
-/** One-dimensional B-spline interpolator class.
+/** One-dimensional B-spline interpolator class, self-contained.
     The value of interpolant is given by a weighted sum of components:
     \f$  f(x) = \sum_n  A_n  B_n(x) ,  0 <= n < numComp  \f$,
     where A_n are the amplitudes and B_n are basis functions, which are piecewise polynomials
     (B-splines) of degree N>=1 that are nonzero on a finite interval between at most N+1 grid
-    points.
+    points. The sum of all basis functions is always unity, and each function is non-negative.
     The interpolation is local - at any point, at most (N+1) basis functions are non-zero.
-    The total number of components numComp = (N_x+N-1), where N_x is the size of the grid.
-    This class does not itself hold the amplitudes of components, it only manages
-    the basis functions for interpolation - e.g., `nonzeroBsplines()` computes the values
-    of all possibly non-zero basis functions at the given point, the method `eval()`
-    implementing IFunctionNdim interface computes the values of all numComp basis functions
+    The total number of components is (N_x+N-1), where N_x is the size of the grid.
+
+    B-spline machinery is provided by two formally unrelated classes:
+    this one (`BsplineWrapper`) implements the BaseInterpolator1d interface and contains both
+    the interpolation grid and the array of amplitudes, and the sister class `BsplineInterpolator1d`
+    only manages the basis functions for interpolation, but does not contain the amplitudes.
+
+    \tparam  N is the degree of 1d B-splines: possible values are
+    N=0 (rectangular histogram), N=1 (linear interpolator), N=2, and N=3 (clamped cubic spline).
+*/
+template<int N>
+class BsplineWrapper: public BaseInterpolator1d {
+public:
+    /** Initialize a 1d interpolator from the provided arrays of grid nodes in x.
+        There is no work done in the constructor apart from checking the validity of parameters.
+        \param[in] xval are the grid nodes sorted in increasing order, must have at least 2 elements.
+        \throw std::invalid_argument if the grid is invalid.
+    */
+    BsplineWrapper(const std::vector<double>& xval, const std::vector<double>& ampl);
+
+    using BaseInterpolator1d::evalDeriv;
+
+    /** compute the value of B-spline and optionally its derivatives at point x;
+        if the point is outside the definition interval, return NaN (no extrapolation).
+    */
+    virtual void evalDeriv(double x, double* value, double* der, double* der2, double* der3) const;
+
+    virtual double integrate(double x1, double x2, int n=0) const;
+
+    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
+
+    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
+
+    virtual std::vector<double> extrema(double x1=NAN, double x2=NAN) const;
+
+    virtual std::vector<double> roots(double y=0, double x1=NAN, double x2=NAN) const;
+
+private:
+    std::vector<double> ampl;   ///< array of B-spline amplitudes
+};
+
+
+/** One-dimensional B-spline interpolator class, non-self-contained.
+    Unlike the sister class `BsplineWrapper`, this one does not contain the amplitudes of components,
+    it only manages the basis functions for interpolation - e.g., `nonzeroBsplines()` computes 
+    the values of all possibly non-zero basis functions at the given point, the method `eval()`
+    implementing IFunctionNdimAdd interface computes the values of all numComp basis functions
     at the given point, and `interpolate()` computes the value of interpolant at the given
     point from the provided array of amplitudes, summing only over the non-trivial B-splines.
-    The sum of all basis functions is always unity, and each function is non-negative.
-    This class holds only the grid nodes and computes the values of basis functions,
-    but does not hold their amplitudes -- these may be provided as the argument to the
-    `interpolate()` function.
+
     \tparam  N is the degree of 1d B-splines: possible values are
     N=0 (rectangular histogram), N=1 (linear interpolator), N=2, and N=3 (clamped cubic spline).
 */
@@ -374,10 +439,10 @@ public:
 
     /** Initialize a 1d interpolator from the provided arrays of grid nodes in x.
         There is no work done in the constructor apart from checking the validity of parameters.
-        \param[in] xvalues are the grid nodes sorted in increasing order, must have at least 2 elements.
+        \param[in] xval are the grid nodes sorted in increasing order, must have at least 2 elements.
         \throw std::invalid_argument if the grid is invalid.
     */
-    explicit BsplineInterpolator1d(const std::vector<double>& xvalues);
+    explicit BsplineInterpolator1d(const std::vector<double>& xval);
 
     /** Compute the values of all potentially non-zero interpolating basis functions or their
         derivatives at the given point, needed to obtain the value of interpolant f(x) at this point.
@@ -470,36 +535,6 @@ private:
 };
 
 
-/** simple wrapper class that binds together a 1d B-spline interpolator and the array of amplitudes
-    and presents a BaseInterpolator1d interface */
-template<int N>
-class BsplineWrapper: public BaseInterpolator1d {
-public:
-    const BsplineInterpolator1d<N> bspl;
-    const std::vector<double> ampl;
-    BsplineWrapper(const BsplineInterpolator1d<N>& _bspl, const std::vector<double>& _ampl) :
-        bspl(_bspl), ampl(_ampl) { xval = bspl.xvalues(); }
-    BsplineWrapper(const std::vector<double>& _xval, const std::vector<double>& _ampl) :
-        bspl(_xval), ampl(_ampl) { xval = _xval; }
-
-    virtual void evalDeriv(double x, double* value=NULL, double* deriv=NULL, double* deriv2=NULL) const
-    {
-        if(value)
-            *value = bspl.interpolate(x, ampl);
-        if(deriv)
-            *deriv = bspl.interpolate(x, ampl, 1);
-        if(deriv2)
-            *deriv2= bspl.interpolate(x, ampl, 2);
-    }
-
-    virtual double integrate(double x1, double x2, int n=0) const;
-
-    virtual double integrate(double x1, double x2, const IFunctionIntegral& f) const;
-
-    virtual double convolve(double x, const IFunctionIntegral& kernel) const;
-};
-
-
 /** Finite-element analysis using one-dimensional B-splines of degree N.
 
     This class provides methods for constructing discretized representations of any function using
@@ -512,17 +547,10 @@ public:
 template<int N>
 class FiniteElement1d {
 public:
-    /** Construct the B-spline interpolator from the provided grid (xvalues)
+    /** Construct the object from the B-spline interpolator
         and initialize the arrays containing the values and derivatives of basis functions
     */
-    explicit FiniteElement1d(const std::vector<double>& xvalues) :
-        interp(xvalues)
-        { setup(); }
-
-    /** Construct the object from an existing B-spline interpolator */
-    explicit FiniteElement1d(const BsplineInterpolator1d<N>& _interp) :
-        interp(_interp)
-        { setup(); }
+    explicit FiniteElement1d(const BsplineInterpolator1d<N>& interp);
 
     /** Compute the projection of a function f(x) onto the basis -- the vector of integrals
         of input function weighted with each of the basis functions B_n or their derivatives:
@@ -639,7 +667,6 @@ private:
     std::vector<double> integrNodes;   ///< nodes of the integration grid
     std::vector<double> integrWeights; ///< weights associated with the nodes of the integration grid
     std::vector<double> bsplValues;    ///< pre-computed values and all derivatives of basis functions
-    void setup();                      ///< common initialization tasks for both constructors
 };
 
 
@@ -844,7 +871,7 @@ public:
         const std::vector<double>& fvalues);
 
     /** Compute the value of the interpolator at the given point;
-        if it is outside the grid boundaries, return NAN.
+        if it is outside the grid boundaries, return NaN.
     */
     double value(double x, double y, double z) const;
 
@@ -893,7 +920,7 @@ public:
         bool regularize=false);
 
     /** Compute the value of the interpolator at the given point;
-        if it is outside the grid boundaries, return NAN.
+        if it is outside the grid boundaries, return NaN.
     */
     double value(double x, double y, double z) const;
 
@@ -976,7 +1003,7 @@ public:
         amplitudes array, which in the case N=1 should contain the values of the original function
         at grid nodes.
         If any of the coordinates of input point falls outside grid boundaries in the respective
-        dimension, all weights are zero.
+        dimension, all weights are zero (except if point is NaN, in which case the result is also NaN).
     */
     void nonzeroComponents(const double point[3], unsigned int leftIndices[3], double values[]) const;
 

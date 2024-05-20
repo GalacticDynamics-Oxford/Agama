@@ -76,9 +76,9 @@ void getRandomPermutation(size_t count, size_t output[], /*input/output*/ PRNGSt
 */
 double quasiRandomHalton(size_t index, unsigned int base);
 
-/** first ten prime numbers, may be used as bases in `quasiRandomHalton` */
+/** first ten prime numbers (reordered), may be used as bases in `quasiRandomHalton` */
 static const int MAX_PRIMES = 10;  // not that there aren't more!
-static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 };
+static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 19, 11, 13, 23, 29, 17 };
 
 /** Construct the initial state of a PRNG from the provided input bitstream.
     The purpose of this function is to produce a predictable but well-mixed output --

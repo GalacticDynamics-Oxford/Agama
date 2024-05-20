@@ -34,6 +34,7 @@
 #include <fstream>
 #include <cmath>
 #include <ctime>
+#include <stdexcept>
 
 namespace df{
 
