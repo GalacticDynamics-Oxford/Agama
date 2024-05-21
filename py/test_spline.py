@@ -98,18 +98,78 @@ def test(kind):
         plt.show()
     return ok
 
-ok = True
-for i in range(10000):
-    ok &= test(0)
-    ok &= test(1)
-    ok &= test(2)
-    ok &= test(3)
-    ok &= test('cubic')
-    ok &= test('regcubic')
-    ok &= test('quintic')
+if len(sys.argv) <= 1:
+    ok = True
+    for i in range(10000):
+        ok &= test(0)
+        ok &= test(1)
+        ok &= test(2)
+        ok &= test(3)
+        ok &= test('cubic')
+        ok &= test('regcubic')
+        ok &= test('quintic')
+    print('Run the script with a non-empty command-line argument to show a plot')
+    if ok:
+        print("\033[1;32mALL TESTS PASSED\033[0m")
+    else:
+        print("\033[1;31mSOME TESTS FAILED\033[0m")
 
-if len(sys.argv) > 1:
+else:  # len(sys.argv) > 1:
     import matplotlib.pyplot as plt
+
+    # a set of plots showing different flavours of cubic and quintic splines approximating a sine function
+    mul = 2*numpy.pi/5
+    off = numpy.pi/8
+    def truefn(x, der=0):
+        if der==0: return  numpy.sin(x*mul+off)
+        if der==1: return  numpy.cos(x*mul+off)*mul
+        if der==2: return -numpy.sin(x*mul+off)*mul**2
+        if der==3: return -numpy.cos(x*mul+off)*mul**3
+    x = numpy.linspace(0, 5, 6)
+    y = truefn(x)
+    d = truefn(x, 1)
+    cubnat = agama.Spline(x, y)
+    cubcla = agama.Spline(x, y, left=d[0], right=d[-1])
+    cubher = agama.Spline(x, y, der=d, quintic=False)
+    quinat = agama.Spline(x, y, quintic=True)
+    quicla = agama.Spline(x, y, left=d[0], right=d[-1], quintic=True)
+    quiher = agama.Spline(x, y, der=d)
+    curves = [truefn, cubnat, cubcla, cubher, quinat, quicla, quiher]
+    colors = ['lightgray', 'brown', 'red', 'darkorange', 'seagreen', 'steelblue', 'blue']
+    dashes = [(8,2), (9999,1), (6,2,2,2), (2,2), (9999,1), (6,2,2,2), (2,2)]
+    labels = ['Original'] + [str(curves[i])[:str(curves[i]).find(' spline')] for i in range(1,7)]
+    ax = plt.subplots(2, 4, figsize=(16, 6), dpi=100)[1]
+    print('\033[1;32mApproximating a sine function with cubic and quintic splines.\033[0m\n'
+        'Top row shows the function and its first three derivatives, bottom row shows the approximation errors.\n'
+        'Different flavours of splines:\n'
+        '"Natural" (solid lines) - constructed from the function values only;\n'
+        '"Clamped" (dash-dotted) - constructed from the function values and first derivatives at both endpoints;\n'
+        '"Hermite cubic" (dotted) - constructed from the function values and first derivatives at all grid points;\n'
+        '"[Standard] quintic" (dotted) - same input, but using quintic interpolation.\n'
+        'By default, if one provides only the function values, a [natural] cubic spline is constructed, '
+        'and if in addition one provides the derivatives at all grid points, a [standard] quintic spline is created, '
+        'which has the best accuracy overall. However, with only the function values, one may also create '
+        'a natural quintic spline, which has a comparable accuracy to the natural cubic spline, but is smoother.\n')
+    t = numpy.linspace(min(x), max(x), 256)
+    for der in range(4):
+        for i in range(7):
+            curve = curves[i](t, der)
+            error = curve - truefn(t, der)
+            ax[0, der].plot(t, curve, color=colors[i], dashes=dashes[i], label=labels[i])
+            if i>0:
+                ax[1, der].plot(t, abs(error+1e-16), color=colors[i], dashes=dashes[i],
+                    label='%3.1e' % numpy.mean(error**2)**0.5)
+        ax[0, der].set_xlim(min(x), max(x))
+        ax[0, der].set_ylim(-mul**(der+1), mul**(der+1))
+        ax[1, der].set_yscale('log')
+        ax[1, der].set_xlim(min(x), max(x))
+        ax[1, der].set_ylim(10**(-7+0.5*der), 10**(-1+0.5*der))
+        ax[0, der].set_title(('function', '1st derivative', '2nd derivative', '3rd derivative')[der])
+        ax[1, der].legend(loc='lower center', fontsize=10, frameon=True, ncol=2)
+    ax[0, 0].legend(loc='lower left', frameon=False, fontsize=10)
+    plt.tight_layout()
+
+    # another plot showing all sorts of splines, their extrema and roots
     xval = numpy.array([-0.5, -0.125, 0.75, 1.25, 1.5])
     cubr = agama.Spline(xval, [-0.5, 1, 1, 0, 0], reg=True)
     quin = agama.Spline(xval, [-0.5, 1-2**-6, 1-2**-6, 0, 0], der=[0, 1, -1, 0, 0])
@@ -120,6 +180,7 @@ if len(sys.argv) > 1:
     splines = (cubr, quin, bsp0, bsp1, bsp2, bsp3)
     colors = ('b', 'g', 'r', 'c', 'm', 'y')
     t = numpy.linspace(min(xval), max(xval), 1001)
+    plt.figure(figsize=(8, 6), dpi=100)
     for spline, color in zip(splines, colors):
         def check(x, exempt):
             return '' if spline==exempt or max(abs(x)) < 2e-14 else '\033[1;31m**\033[0m'  # a fairly lousy tolerance!.. :(
@@ -144,11 +205,5 @@ if len(sys.argv) > 1:
             print('%-21.17g %.3g' % (tr, fr))
         plt.plot(t_root, spline(t_root), '+', ms=5, color=color)
     plt.legend(loc='lower center', frameon=False)
-    plt.show()
-else:
-    print('Run the script with a non-empty command-line argument to show a plot')
 
-if ok:
-    print("\033[1;32mALL TESTS PASSED\033[0m")
-else:
-    print("\033[1;31mSOME TESTS FAILED\033[0m")
+    plt.show()

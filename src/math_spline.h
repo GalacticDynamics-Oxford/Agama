@@ -196,7 +196,7 @@ private:
     - from the amplitudes of a 3rd degree B-spline interpolator: there are Nnodes+2 independent
     basis functions, and the resulting clamped cubic spline is exactly equivalent to the B-spline.
     - from the user-provided values and first derivatives at each grid point:
-    this resulting curve has, in general, only one continuous derivative.
+    this resulting Hermite interpolator has, in general, only one continuous derivative.
     A quintic spline, constructed from the same amount of input data, typically results in
     a much better interpolation accuracy, and has three continuous derivatives.
 
@@ -273,18 +273,50 @@ private:
 };
 
 
-/** Quintic spline (piecewise-quintic polynomial with three continuous derivatives).
+/** Piecewise-quintic spline interpolator with 2-4 continuous derivatives.
     On each grid segment, y(x) is a 5th order polynomial specified by 6 coefficients --
     values and the first two derivatives at two adjacent grid nodes.
-    The 2nd derivatives are initialized from the provided values y(x) and derivatives dy/dx
-    of the function at grid nodes, using the condition that the 3rd derivative is continuous
-    at each node, and the 4th derivative is zero at the boundaries of the grid.
+    There are several possible ways of constructing a quintic spline:
+    - from the function values at the grid points: this results in a natural quintic spline,
+    which has four continuous derivatives at all interior nodes, and vanishing 2nd and 4th
+    derivatives at endpoints. The accuracy of interpolation is comparable to that of the
+    natural cubic spline, however, it provides a greater smoothness.
+    - the same plus first derivatives at one or two endpoint results in a clamped quintic spline,
+    which has the same smoothness properties, but a prescribed first derivative at the endpoint
+    (hence the second derivative is generally not zero).
+    - from the values and first derivatives at all grid points: this is the "standard" quintic
+    spline, which has three continuous derivatives and is superior in interpolation quality
+    to a Hermite cubic interpolator constructed from the same amount of input data.
+    - from the values, first and second derivatives at all grid points:
+    this results in a piecewise-quintic Hermite interpolator, in which the 3rd and 4th derivatives
+    are not necessarily continuous, however, the overall interpolation accuracy is even better
+    (provided, of course, that one can supply exactly computed first and second derivatives as input).
 */
 class QuinticSpline: public BaseInterpolator1d {
 public:
     QuinticSpline() : BaseInterpolator1d() {};
 
-    /** Construct a quintic spline from the provided values of x, f(x) and f'(x).
+    /** Construct a "natural" or "clamped" quintic spline from the provided values of x and f(x),
+        optionally with first derivatives at one or both endpoints.
+        The 1st and 2nd derivatives are determined from the condition that the 3rd and the 4th
+        derivatives are continuous at each interior node.
+        At the endpoints, the 4th derivative is set to zero, and either the 1st derivative
+        is set explicitly by derivLeft/derivRight (clamped), or else the 2nd derivative
+        is set to zero (natural).
+        \param[in]  xvalues  - the array of grid node, should be monotonically increasing.
+        \param[in]  fvalues  - the array of function values at grid nodes, same length as xvalues.
+        \param[in]  derivLeft (optional) - first derivative of the spline at the leftmost grid node;
+        a default value NaN means a natural boundary condition (zero second derivative).
+        \param[in]  derivRight - same for the rightmost grid node.
+        \throw  std::invalid_argument or std::length_error if grid is too small or not monotonic,
+        or the array sizes are incorrect, or they contain invalid values (infinities, NaN).
+    */
+    QuinticSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        double derivLeft=NAN, double derivRight=NAN);
+
+    /** Construct a "standard" quintic spline from the provided values of x, f(x) and f'(x).
+        The 2nd derivatives are initialized from the condition that the 3rd derivative is continuous
+        at each interior node, and the 4th derivative is zero at the endpoints of the grid.
         \param[in]  xvalues  - the array of grid nodes, should be monotonically increasing.
         \param[in]  fvalues  - the array of function values at grid nodes, same length as xvalues.
         \param[in]  fderivs  - the array of function derivatives at grid nodes, same length.
@@ -293,6 +325,14 @@ public:
     */
     QuinticSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
         const std::vector<double>& fderivs);
+
+    /** Construct a piecewise-quintic Hermite interpolator from the provided values of x,
+        f(x), f'(x) and f''(x) at all grid nodes. The higher derivatives may not be continuous
+        between adjacent grid segments, however, the accuracy of interpolation is superior
+        to all other variants (of course, if the exact second derivatives can be provided).
+    */
+    QuinticSpline(const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+        const std::vector<double>& fderivs, const std::vector<double>& fderivs2);
 
     using BaseInterpolator1d::evalDeriv;
 

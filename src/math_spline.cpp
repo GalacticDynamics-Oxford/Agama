@@ -498,6 +498,105 @@ std::vector<double> constructQuinticSpline(const std::vector<double>& xval,
     return solveBand(mat, rhs);
 }
 
+// construct a quintic spline from the values at grid nodes only, optionally with endpoint derivs;
+// initialize both 1st and 2nd derivatives at each grid node from the condition that 3rd and 4th
+// derivatives are continuous at all interior nodes, 4th derivative is zero at the endpoints,
+// and either 2nd derivative is zero at endpoints, or 1st derivative is manually specified.
+void constructQuinticSpline(const std::vector<double>& xval, const std::vector<double>& fval,
+    double derivLeft, double derivRight, std::vector<double>& fder, std::vector<double>& fder2)
+{
+    size_t numPoints = xval.size();
+    if(numPoints < 2) {
+        fder = fder2 = std::vector<double>(numPoints, 0);
+        return;
+    }
+    // rows alternate between the continuity conditions for f''' and f'''' at grid nodes;
+    // columns (i.e. variables to be determined) alternate between f''[i] and f'[i]
+    BandMatrix<double>  mat(numPoints * 2, 3, 0.);
+    std::vector<double> rhs(numPoints * 2);
+    for(size_t i = 0; i < numPoints; i++) {
+        if(i > 0) {
+            double hi = 1 / (xval[i] - xval[i-1]), hi2 = hi * hi, hi3 = hi2 * hi, hi4 = hi2 * hi2;
+            // diagonal block (2x2)
+            mat(i*2+0, i*2+0) +=   3 * hi;
+            mat(i*2+0, i*2+1) += -12 * hi2;
+            mat(i*2+1, i*2+0) +=  -3 * hi2;
+            mat(i*2+1, i*2+1) +=  16 * hi3;
+            // above-diagonal block
+            mat(i*2-2, i*2+0) +=     - hi;
+            mat(i*2-2, i*2+1) +=   8 * hi2;
+            mat(i*2-1, i*2+0) +=  -2 * hi2;
+            mat(i*2-1, i*2+1) +=  14 * hi3;
+            // rhs, two rows
+            rhs[i*2+0] += -20 * (fval[i] - fval[i-1]) * hi3;  // continuity eqn for f'''
+            rhs[i*2+1] +=  30 * (fval[i] - fval[i-1]) * hi4;  // continuity eqn for f''''
+        }
+        if(i < numPoints-1) {
+            double hi = 1 / (xval[i+1] - xval[i]), hi2 = hi * hi, hi3 = hi2 * hi, hi4 = hi2 * hi2;
+            // diagonal block (2x2)
+            mat(i*2+0, i*2+0) +=   3 * hi;
+            mat(i*2+0, i*2+1) +=  12 * hi2;
+            mat(i*2+1, i*2+0) +=   3 * hi2;
+            mat(i*2+1, i*2+1) +=  16 * hi3;
+            // below-diagonal
+            mat(i*2+2, i*2+0) +=     - hi;
+            mat(i*2+2, i*2+1) +=  -8 * hi2;
+            mat(i*2+3, i*2+0) +=   2 * hi2;
+            mat(i*2+3, i*2+1) +=  14 * hi3;
+            // rhs, two rows
+            rhs[i*2+0] +=  20 * (fval[i+1] - fval[i]) * hi3;
+            rhs[i*2+1] +=  30 * (fval[i+1] - fval[i]) * hi4;
+        }
+    }
+    // boundary conditions:
+    // (a) 4th derivatives are zero at boundary nodes - specified above (rows 1 and numPoints-1).
+    // (b) if derivLeft/derivRight are provided, this fixes the 1st derivative,
+    // otherwise the 2nd deriv is set to zero.
+    if(derivLeft == derivLeft) {
+        // matrix row for the 1st derivative has zeros everywhere except column 1,
+        // so it cannot be the 0th row, since the diagonal element (row 0, column 0) would be zero,
+        // and solveBand() does not use any pivoting, hence would fail for a zero diagonal element.
+        // Therefore, we manually exchange rows 0 and 1.
+        for(int i=0; i<4; i++) {
+            mat(0, i) = mat(1, i);
+            mat(1, i) = 0;
+        }
+        rhs[0] = rhs[1];
+        // now row 1 has zeros everywhere except column 1
+        rhs[1] = derivLeft;
+        mat(1, 1) = 1;
+    } else {
+        // equation for the 2nd derivative: 0th row is zero except 0th column, and rhs is zero
+        mat(0, 1) = mat(0, 2) = mat(0, 3) = 0;
+        mat(0, 0) = 1;
+        rhs[0] = 0;
+    }
+    if(derivRight == derivRight) {
+        // exchange the two last rows for the same reason
+        for(int i=0; i<4; i++) {
+            mat(numPoints*2-2, numPoints*2-1-i) = mat(numPoints*2-1, numPoints*2-1-i);
+            mat(numPoints*2-1, numPoints*2-1-i) = 0;
+        }
+        rhs[numPoints*2-2] = rhs[numPoints*2-1];
+        rhs[numPoints*2-1] = derivRight;
+        mat(numPoints*2-1, numPoints*2-1) = 1;
+    } else {
+        mat(numPoints*2-2, numPoints*2-1) = 0;
+        mat(numPoints*2-2, numPoints*2-3) = 0;
+        mat(numPoints*2-2, numPoints*2-4) = 0;
+        mat(numPoints*2-2, numPoints*2-2) = 1;
+        rhs[numPoints*2-2] = 0;
+    }
+
+    std::vector<double> sol = solveBand(mat, rhs);
+    fder .resize(numPoints);
+    fder2.resize(numPoints);
+    for(size_t i = 0; i < numPoints; i++) {
+        fder2[i] = sol[i*2+0];
+        fder [i] = sol[i*2+1];
+    }
+}
+
 //---- spline evaluation routines ----//
 
 /// compute the value and up to 3 derivatives of (possibly several, K>=1) cubic spline(s);
@@ -588,6 +687,10 @@ inline void evalQuinticSplines(
                 df[k]  = f1h[k];
             if(d2f)
                 d2f[k] = f2h[k];
+            if(d3f)
+                d3f[k] = ((60 * (fh[k] -      fl [k])  / (xh - xl) -
+                         ( 36 * f1h[k] + 24 * f1l[k])) / (xh - xl) +
+                         (  9 * f2h[k] - 3  * f2l[k])) / (xh - xl);
         }
         return;
     }
@@ -1267,6 +1370,22 @@ std::vector<double> CubicSpline::extrema(double x1, double x2) const
 
 // ------ Quintic spline ------- //
 
+// construct a "natural" spline from function values only,
+// or a "clamped" spline adding first derivatives at one or both endpoints
+QuinticSpline::QuinticSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    double derivLeft, double derivRight)
+:
+    BaseInterpolator1d(xvalues), fval(fvalues)
+{
+    size_t numPoints = xval.size();
+    if(fval.size() != numPoints)
+        throw std::length_error("QuinticSpline: input arrays are not equal in length");
+    checkFinite1d(fval, "QuinticSpline", "fvalues");
+    constructQuinticSpline(xval, fval, derivLeft, derivRight, fder, fder2);
+}
+
+// construct a "standard" spline from function values and derivatives at all grid nodes
 QuinticSpline::QuinticSpline(
     const std::vector<double>& xvalues, const std::vector<double>& fvalues,
     const std::vector<double>& fderivs)
@@ -1277,8 +1396,23 @@ QuinticSpline::QuinticSpline(
     if(fval.size() != numPoints || fder.size() != numPoints)
         throw std::length_error("QuinticSpline: input arrays are not equal in length");
     checkFinite1d(fval, "QuinticSpline", "fvalues");
-    checkFinite1d(fder, "QuinticSpline", "function derivatives");
+    checkFinite1d(fder, "QuinticSpline", "fderivs");
     fder2 = constructQuinticSpline(xval, fval, fder);
+}
+
+// construct a Hermite spline from function values and first two derivatives at all grid nodes
+QuinticSpline::QuinticSpline(
+    const std::vector<double>& xvalues, const std::vector<double>& fvalues,
+    const std::vector<double>& fderivs, const std::vector<double>& fderivs2)
+:
+    BaseInterpolator1d(xvalues), fval(fvalues), fder(fderivs), fder2(fderivs2)
+{
+    size_t numPoints = xval.size();
+    if(fval.size() != numPoints || fder.size() != numPoints || fder2.size() != numPoints)
+        throw std::length_error("QuinticSpline: input arrays are not equal in length");
+    checkFinite1d(fval, "QuinticSpline", "fvalues");
+    checkFinite1d(fder, "QuinticSpline", "fderivs");
+    checkFinite1d(fder2,"QuinticSpline", "fderivs2");
 }
 
 void QuinticSpline::evalDeriv(const double x,

@@ -6228,32 +6228,60 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
 static const char* docstringSpline =
     "A common interface to cubic or quintic splines, and B-splines of degree 0 to 3.\n"
-    "If the object is constructed from the values at grid points, and optionally one or both "
-    "endpoint derivatives, it will be a natural or clamped cubic spline, which has two continuous "
-    "derivatives (unless reg=True, which may reduce oscillations in the interpolated function "
-    "at the expense of having only one continuous derivative).\n"
-    "If it is constructed from the values and derivatives at all grid points, it will be "
-    "a quintic spline with three continuous derivatives.\n"
-    "If it is constructed from the amplitudes of B-spline basis functions (N+D-1 values, "
-    "where N is the number of grid points and D=0..3 is the degree of B-splines), it will be "
-    "a B-spline of degree D, which has D-1 continuous derivatives.\n"
+    "Cubic and quintic splines are constructed from the coordinates of grid points (x) and "
+    "the spline values at grid points (y), optionally with first derivatives at one or two endpoints "
+    "(left/right) or at all grid points (der); they have 1-2 (cubic) or 3-4 (quintic) continuous "
+    "derivatives, depending on the setup.\n"
+    "B-splines of degree D=0..3 are constructed from the coordinates of grid points "
+    "(x, array of length N) and the amplitudes of basis functions (ampl, array of length N+D-1), "
+    "and have D-1 continuous derivatives.\n"
     "Arguments:\n"
     "    x (array of floats) -- grid nodes in x, must be sorted in increasing order.\n"
-    "    y (array of floats, optional) -- values of spline at grid nodes, same length as x.\n"
-    "    der (array of floats, optional) -- array of spline derivatives at each node "
-    "(same length as x); if provided, a quintic spline is constructed, "
-    "and no other optional arguments except `y` are accepted.\n"
-    "    left (float, optional) -- derivative at the leftmost endpoint for a cubic spline; "
-    "if not provided or is NAN, a natural boundary condition is used "
-    "(i.e., second derivative is zero).\n"
-    "    right (float, optional) -- derivative at the rightmost endpoint for a cubic spline, "
-    "same default behaviour.\n"
-    "    reg (boolean, default False) -- apply a regularization filter for a cubic spline "
-    "to reduce overshooting in the case of sharp discontinuities in input data "
-    "and preserve monotonic trend of input points (in this case, the provided left/right "
-    "endpoint derivatives may not be respected).\n"
-    "    ampl (array of floats, optional) -- if provided _instead of_ `y`, a B-spline of degree D "
-    "is constructed, where len(ampl) = len(x) + D - 1; D should be between 0 and 3.\n\n"
+    "    y (array of floats, optional) -- values of the spline at all grid nodes, same length as x "
+    "(required only for cubic/quintic splines).\n"
+    "    der (array of floats, optional) -- first derivatives at all grid nodes, same length as x "
+    "(may be provided only for cubic/quintic splines, mutually exclusive with `ampl`).\n"
+    "    left (float, optional) -- first derivative at the leftmost endpoint for clamped cubic or "
+    "quintic splines; a default value (NaN) means a natural boundary condition (i.e., zero second "
+    "derivative at the endpoint).\n"
+    "    right (float, optional) -- same for the rightmost endpoint.\n"
+    "    reg (boolean, optional, default False) -- relevant only for natural/clamped cubic splines, "
+    "applies a regularization filter to preserve monotonic trends and reduce overshooting "
+    "in the case of sharp jumps in the input data and; if set to True, the provided left/right "
+    "endpoint derivatives may not be respected, and the second derivative may become discontinuous.\n"
+    "    quintic (boolean, optional) -- disambiguates between cubic and quintic splines. "
+    "The default behaviour, which makes sense in most cases, is to construct a natural or clamped "
+    "cubic spline when only the values `y` are provided, or a 'standard' quintic spline when both "
+    "values `y` and first derivatives `der` are provided. To override this behaviour, one should "
+    "explicitly set `quintic`=False to create a Hermite cubic interpolator from values and derivatives, "
+    "or `quintic`=True to create a natural/clamped quintic spline from values alone.\n"
+    "    ampl (array of floats, optional) -- if provided _instead of_ `y`, this produces a B-spline "
+    "of degree D=0..3, which is determined automatically from len(ampl) = len(x) + D - 1. "
+    "This argument is mutually exclusive with all other optional arguments.\n\n"
+    "The following table summarizes the various kinds of interpolators, their required and optional "
+    "input arguments, and their smoothness properties.\n"
+    "The required input arguments are marked by `+`, optional -- by default values in brackets, "
+    "and `-` indicates that the argument is not acceptable for this configuration.\n"
+    "Derivatives that are continuous are marked by `c`, discontinuous -- by `d`, and zero -- by `0`; "
+    "note that the call operator can return derivatives up to and including third.\n"
+    "type               x   ampl  y    y'   y''  y''' y''''  left/right  reg    quintic\n"
+    "natural* cubic     +    -    +    c    c/d  d    0      (NaN)     (False)  (False)\n"
+    "hermite  cubic     +    -    +    +    d    d    0        -          -     +False\n"
+    "natural* quintic   +    -    +    c    c    c    c      (NaN)        -     +True\n"
+    "standard quintic   +    -    +    +    c    c    d        -          -     (True)\n"
+    "degree-0 B-spline  +    +    d    0    0    0    0        -          -        -\n"
+    "degree-1 B-spline  +    +    c    d    0    0    0        -          -        -\n"
+    "degree-2 B-spline  +    +    c    c    d    0    0        -          -        -\n"
+    "degree-3 B-spline  +    +    c    c    c    d    0        -          -        -\n"
+    "The asterisk after `natural` indicates that one can replace the natural boundary condition "
+    "(zero second derivative at endpoint) with a clamped one (explicitly providing the first "
+    "derivative `left`/`right`) without affecting the smoothness properties of the spline.\n"
+    "The `c/d` in the second derivative of the natural/clamped cubic spline indicates that "
+    "it is normally continuous, except when a regularization filter is applied (`reg`=True), "
+    "in which case it may become discontinuous.\n"
+    "The boolean argument `quintic` needs to be specified explicitly in the two non-default cases "
+    "marked by `+`, otherwise it takes the default value shown in brackets, or is not acceptable "
+    "when constructing a B-spline.\n\n"
     "Values of the spline and up to its third derivative are computed using the () "
     "operator with the first argument being a single x-point or an array of points of any shape, "
     "the optional second argument (der=...) is the derivative index (0, 1, 2 or 3), "
@@ -6264,13 +6292,13 @@ static const char* docstringSpline =
     "If an extra argument conv=... is provided to the () operator, the result is an analytic "
     "convolution of the spline with a given kernel. This could be another instance of Spline "
     "or a Gaussian kernel specified by its width; in the latter case the argument can be "
-    "a single number or an array of numbers with the same shape as x. "
+    "a single number or an array of numbers with the same shape as `x`. "
     "In computing the convolution, the spline is set to zero outside its definition region, "
     "unlike the extrapolation performed for its value or derivative.\n"
     "The return value of the () operator is a single number if the input `x` is a single number, "
     "or has the same shape as `x` if the latter is an array.\n"
-    "A Spline object has a length equal to the number of nodes in x, and its [] operator "
-    "returns the value of x at the given node.\n";
+    "A Spline object has a length equal to the number of nodes in `x`, and its [] operator "
+    "returns the value of `x` at the given node.\n";
 
 /// \cond INTERNAL_DOCS
 /// Python type corresponding to Spline class
@@ -6300,11 +6328,12 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
     PyObject* y_obj=NULL;
     PyObject* d_obj=NULL;
     PyObject* a_obj=NULL;
+    PyObject* q_obj=NULL;
     double derivLeft=NAN, derivRight=NAN;  // undefined by default
     int regularize=0;
-    static const char* keywords[] = {"x", "y", "der", "ampl", "left", "right", "reg", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOddi", const_cast<char **>(keywords),
-        &x_obj, &y_obj, &d_obj, &a_obj, &derivLeft, &derivRight, &regularize) ||
+    static const char* keywords[] = {"x", "y", "der", "ampl", "left", "right", "reg", "quintic", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|OOOddiO", const_cast<char **>(keywords),
+        &x_obj, &y_obj, &d_obj, &a_obj, &derivLeft, &derivRight, &regularize, &q_obj) ||
         !((y_obj==NULL) ^ (a_obj==NULL)))
     {
         PyErr_SetString(PyExc_TypeError, "Spline: "
@@ -6322,7 +6351,7 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "Spline: input does not contain valid arrays");
         return -1;
     }
-    if(a_obj && (d_obj || derivLeft==derivLeft || derivRight==derivRight || regularize)) {
+    if(a_obj && (d_obj || q_obj || derivLeft==derivLeft || derivRight==derivRight || regularize)) {
         PyErr_SetString(PyExc_TypeError,
             "Spline: argument 'ampl' cannot be used together with any other optional arguments");
         return -1;
@@ -6330,6 +6359,12 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
     if(d_obj && (derivLeft==derivLeft || derivRight==derivRight || regularize)) {
         PyErr_SetString(PyExc_TypeError,
             "Spline: argument 'der' cannot be used together with 'left', 'right' or 'reg'");
+        return -1;
+    }
+    // if not specified explicitly, create a quintic spline only when derivatives are provided
+    bool quintic = q_obj ? (bool)PyObject_IsTrue(q_obj) : (bool)d_obj;
+    if(quintic && regularize) {
+        PyErr_SetString(PyExc_TypeError, "Spline: argument 'reg' cannot be used with quintic splines");
         return -1;
     }
     try {
@@ -6347,16 +6382,30 @@ int Spline_init(SplineObject* self, PyObject* args, PyObject* namedArgs)
                     return -1;
             }
             self->name = "degree " + utils::toString(D) + " B-spline";
-        } else if(!d_obj) {
-            self->spl.reset(new math::CubicSpline(xvalues, yvalues, regularize, derivLeft, derivRight));
-            if(derivLeft==derivLeft || derivRight==derivRight)
-                self->name += "clamped ";
-            if(regularize)
-                self->name += "regularized ";
+        } else if(!quintic) {
+            if(d_obj) {
+                self->spl.reset(new math::CubicSpline(xvalues, yvalues, dvalues));
+                self->name += "hermite ";
+            } else {
+                self->spl.reset(new math::CubicSpline(xvalues, yvalues,
+                    regularize, derivLeft, derivRight));
+                if(derivLeft == derivLeft || derivRight == derivRight)
+                    self->name += "clamped ";
+                if(regularize)
+                    self->name += "regularized ";
+            }
             self->name += "cubic spline";
-        } else {
-            self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
-            self->name = "quintic spline";
+        } else /*quintic*/ {
+            if(d_obj) {
+                self->spl.reset(new math::QuinticSpline(xvalues, yvalues, dvalues));
+            } else {
+                self->spl.reset(new math::QuinticSpline(xvalues, yvalues, derivLeft, derivRight));
+                if(derivLeft == derivLeft || derivRight == derivRight)
+                    self->name += "clamped ";
+                else
+                    self->name += "natural ";
+            }
+            self->name += "quintic spline";
         }
         self->name[0] -= 32;  // capitalize the first letter of the name
         FILTERMSG(utils::VL_DEBUG, "Agama",
