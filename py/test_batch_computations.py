@@ -85,12 +85,15 @@ testFail('dens.density([1,0,0],0')             # not an array at all
 testCond('isFloat(dens.projectedDensity( 1,0 ))')             # may give either two numbers...
 testCond('isFloat(dens.projectedDensity((1,0)))')             # ...or an array (tuple, list) of two numbers...
 testCond('isFloat(dens.projectedDensity([1,0]))')             # ...for a single input point
-testCond('dens.projectedDensity([1,0],0,0,0) > 0')            # first argument is an array, remaining are angles
-testFail('dens.projectedDensity( 1,0, 0,0,0) > 0')            # in this case, cannot replace the array with just two numbers
-testCond('dens.projectedDensity( 1,0, alpha=0,beta=0) > 0')   # but can do when using named arguments for angles
-testCond('dens.projectedDensity([1,0],gamma=0,beta=0) > 0')   # or when using an array for the point plus named args for angles
-testCond('dens.projectedDensity([[1,0]],0,0).shape == (1,)')  # if the input is a 2d array (even with one row), output is a 1d array
+testCond('dens.projectedDensity( 1,0, alpha=0,beta=0) > 0')   # can provide an input point as a pair of numbers, plus optional named arguments (angles)
+testCond('dens.projectedDensity([1,0],beta=0,gamma=0) > 0')   # first argument is an array, optional named arguments are angles
+testFail('dens.projectedDensity([1,0],0,0)')                  # angles must be named, not positional
+testFail('dens.projectedDensity([1,0],zeta=0)')               # and of course, named arguments must match the function signature
+testCond('dens.projectedDensity([[1,0]]).shape == (1,)')      # if the input is a 2d array (even with one row), output is a 1d array
 testCond('dens.projectedDensity([[1,0],[2,0]]).shape == (2,)')# N input points (Nx2 array) => 1d array of length N
+testCond('dens.projectedDensity([[1,0],[2,0]],beta=0).shape == (2,)')  # one may specify a single value of angle for all points...
+testCond('dens.projectedDensity([[1,0],[2,0]],beta=(0,0),gamma=0).shape == (2,)')  # or one angle per point (each angle can be a single point or an array independent of others)
+testFail('dens.projectedDensity([[1,0],[2,0]],beta=(0,0,0))') # should fail when the size of the angles array does not match the number of points
 
 testCond('isArray(dens.density([[1,2,3],[4,5,6]], t=1), (2,))')     # optional time argument as a single number
 testCond('isArray(dens.density([[1,2,3],[4,5,6]], t=[1,2]), (2,))') # optional time argument as an array of the same length as points
@@ -106,6 +109,8 @@ testCond('isArray(pots.force([[1,0,0],[2,0,0]]), (2,3))')  # equivalent
 testCond('isTuple(pots.forceDeriv(1,0,0), 2)')
 testCond('isArray(pots.forceDeriv(1,0,0)[0], (3,))')
 testCond('isArray(pots.forceDeriv(1,0,0)[1], (6,))')
+testCond('isArray(pots.projectedForce(1,0), (2,))')  # similar to projectedDensity, but produces two values for each input point consisting of two numbers
+testCond('isArray(pots.projectedForce([[1,0],[2,0],[3,2]],beta=(0,0,0),gamma=0), (3,2))')  # one can specify angles separately for each input point or one for all (or not specify them at all)
 
 testFail('pots.Rcirc(2)')  # need a named argument: E=... or L=...
 testCond('pots.Rcirc(L=0) == 0')  # radius is zero for L==0,
@@ -122,20 +127,20 @@ testFail('pots.Rcirc(E=[[-1,1]])')  # too many dimensions
 
 testCond('isFloat(pots.Tcirc(1))')                  # a single input value is treated as E and produces a single output value
 testCond('isArray(pots.Tcirc([1,2,3,4,5]), (5,))')  # an input array - as an array of E, producing an output array
-testCond('isFloat(pots.Tcirc([1,2,3,4,5,6]))')      # but an array with 6 elements - as x,v (a single point)
+testCond('isArray(pots.Tcirc( 1,2,3,4,5 ), (5,))')  # same when the points are given as a tuple of arguments
+testCond('isFloat(pots.Tcirc([1,2,3,4,5,6]))')      # but an array with 6 elements is treated as x,v (a single point)
 testCond('isArray(pots.Tcirc([[1,2,3,4,5,6],[7,8,9,10,11,numpy.nan]]), (2,))')  # and a 2d array Nx6 - as N points x,v
-testFail('pots.Tcirc(1,2,3,4,5)')  # this function expects a single argument (possibly an array), not a tuple
 
 testCond('abs(pots.Rmax(pots.potential(1.5,0,0))-1.5) < 1e-10')  # Rmax(E=Phi(r)) = r  with high accuracy,
 testCond('pots.Rmax(0) == numpy.inf')                            # infinite for E == 0,
 testCond('all(numpy.isnan(pots.Rmax([Phi0*2, 1])))')             # and NAN for E < Phi(0) or E > 0
-testCond('isArray(pots.Rmax([0,1,numpy.nan]), (3,))')   # output array has the same length as input array / list
-testFail('pots.Rmax( 0,1,2 )')                          # this function also expects only one argument, not a tuple
+testCond('isArray(pots.Rmax([0,1,numpy.nan]), (3,))')            # output array has the same length as input array / list
+testCond('isArray(pots.Rmax( 0,1,2,3 ), (4,))')                  # and several arguments are treated in the same way as a 1d array
 
 testCond('isArray(pots.Rperiapo( -1,1 ), (2,))')        # two numbers are a single point (E,L) => array of two values (Rperi,Rapo)
 testCond('isArray(pots.Rperiapo([-1,1]), (2,))')        # same two numbers as a 1d array of length 2, same output
 testCond('isArray(pots.Rperiapo([1,2,3,4,5,6]), (2,))') # 1d array of length 6 is a single point (x,v), same output
-testFail('isArray(pots.Rperiapo( 1,2,3,4,5,6 ), (2,))') # but not when given as 6 separate arguments, this is not allowed
+testCond('isArray(pots.Rperiapo( 1,2,3,4,5,6 ), (2,))') # same when given as 6 separate arguments
 testCond('isArray(pots.Rperiapo(numpy.random.random(size=(5,2))), (5,2))')  # a 2d array of (E,L) values with shape Nx2 => Nx2
 testCond('isArray(pots.Rperiapo(numpy.random.random(size=(5,6))), (5,2))')  # or a 2d array of (x,v) with shape Nx6 => Nx2
 testFail('isArray(pots.Rperiapo(numpy.random.random(size=(5,3))), (5,2))')  # invalid shape of input
@@ -178,6 +183,7 @@ testCond('isArray(df1([1,2,3], der=True)[1], (3,)) and isArray(df1(numpy.random.
 testCond('isTuple(gms1.moments([1,2,3], dens=True, vel=True, vel2=True), 3)')    # three outputs per point, as requested
 testCond('isTuple(gms2.moments([1,2,3], dens=True, vel=False,vel2=True), 2)')    # only two requested here
 testCond('isFloat(gmf1.moments([1,2,3], dens=True, vel=False,vel2=False))')      # only one output (density), and it is a scalar value
+testCond('isFloat(gmf1.moments( 1,2,3 , dens=True, vel=False,vel2=False))')      # a single input point may be given as three numbers, not an array of length three
 testCond('isArray(gmf1.moments([1,2,3], dens=False,vel=True, vel2=False),(3,))') # one output (3 components of velocity)
 testCond('isArray(gms1.moments([1,2,3], dens=False,vel=False,vel2=True), (6,))') # one output (elements of dispersion tensor) - 1d array of length 6
 testCond('isArray(gms1.moments([[1,2,3]],dens=True,vel=False,vel2=False),(1,))') # input is an array of points with length 1, and so is the output
@@ -191,6 +197,9 @@ testCond('numpy.isclose(gms1.moments([1,2,3],dens=1,vel=0,vel2=0), gms2.moments(
 testCond('isTuple(gms1.moments([1,0], dens=True, vel=True, vel2=True), 3)')  # same as before, but for the projected case  => output: a tuple of three numbers
 testCond('isArray(gms1.moments([[1,0],[2,0],[3,0],[4,0]], dens=True, vel=False, vel2=False), (4,))')  # input: array of N points, only one output array (density) with N elements
 testCond('isArray(gms2.moments([[1,0],[2,0],[3,0],[4,0]], dens=True, vel=False, vel2=False, separate=True), (4,2))')  # when separate=True, output arrays have one extra dimension of size C
+# optional angle arguments
+testCond('isArray(gms1.moments([[1,2,3],[4,5,6]], beta=1, gamma=[1,2], dens=True, vel=False, vel2=False), (2,))')  # each of the orientation angles can be specified as single value for all points or one value per point
+testFail('gms1.moments([1,2,3], beta=[1,2,3])')   # length of the angles array must match the number of input points
 
 testCond('isFloat(gms1.projectedDF([1,2,0,0,0,0,0,0]))')  # input: 8 numbers per point (x,y,vx,vy,vz,vxerr,vyerr,vzerr) => output: one number per point
 testCond('isArray(gms2.projectedDF(numpy.random.random(size=(4,8)), separate=True), (4,2))')  # when separate=True, output for N points and C components is a 2d array (NxC)

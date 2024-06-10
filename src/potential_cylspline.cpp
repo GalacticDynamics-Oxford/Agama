@@ -679,7 +679,8 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
 
 // -------- public classes: DensityAzimuthalHarmonic --------- //
 
-PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
+shared_ptr<const DensityAzimuthalHarmonic> DensityAzimuthalHarmonic::create(
+    const BaseDensity& src, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder)
@@ -716,7 +717,7 @@ PtrDensity DensityAzimuthalHarmonic::create(const BaseDensity& src, int mmax,
         }
     // resize the coefficients back to the requested order
     restrictFourierCoefs<1>(mmax, &coefs);
-    return PtrDensity(new DensityAzimuthalHarmonic(gridR, gridz, coefs));
+    return shared_ptr<const DensityAzimuthalHarmonic>(new DensityAzimuthalHarmonic(gridR, gridz, coefs));
 }
 
 // the actual constructor
@@ -844,7 +845,8 @@ void DensityAzimuthalHarmonic::getCoefs(
 
 // -------- public classes: CylSpline --------- //
 
-PtrPotential CylSpline::create(const BaseDensity& src, int mmax,
+shared_ptr<const CylSpline> CylSpline::create(
+    const BaseDensity& src, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder, bool useDerivs)
@@ -886,10 +888,11 @@ PtrPotential CylSpline::create(const BaseDensity& src, int mmax,
 
     std::vector< math::Matrix<double> > coefs[3]; // Phi, dPhidR, dPhidz
     computePotentialCoefsFromDensity(*dens, mmax, gridR, gridz, useDerivs, /*output*/coefs);
-    return PtrPotential(new CylSpline(gridR, gridz, coefs[0], coefs[1], coefs[2]));
+    return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, coefs[0], coefs[1], coefs[2]));
 }
 
-PtrPotential CylSpline::create(const BasePotential& src, int mmax,
+shared_ptr<const CylSpline> CylSpline::create(
+    const BasePotential& src, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder)
@@ -926,10 +929,10 @@ PtrPotential CylSpline::create(const BasePotential& src, int mmax,
     }
     // resize the coefficients back to the requested order
     restrictFourierCoefs<3>(mmax, coefs);
-    return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
+    return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
-PtrPotential CylSpline::create(
+shared_ptr<const CylSpline> CylSpline::create(
     const particles::ParticleArray<coord::PosCyl>& particles,
     coord::SymmetryType sym, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
@@ -954,7 +957,7 @@ PtrPotential CylSpline::create(
     std::vector<std::pair<double, double> > Rz;
     computeAzimuthalHarmonicsFromParticles(particles, indices, harmonics, Rz);
     computePotentialCoefsFromParticles(indices, harmonics, Rz, gridR, gridz, useDerivs, output);
-    return PtrPotential(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
+    return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
 // the actual constructor

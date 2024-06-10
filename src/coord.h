@@ -184,8 +184,8 @@ template<typename CoordT> struct PosT;
 /// position in cartesian coordinates
 template<> struct PosT<Car>{
     double x, y, z;   ///< three cartesian coordinates
-    PosT<Car>() {}
-    PosT<Car>(double _x, double _y, double _z) : x(_x), y(_y), z(_z) {}
+    PosT() {}
+    PosT(double _x, double _y, double _z) : x(_x), y(_y), z(_z) {}
 };
 /// an alias to templated type specialization of position in cartesian coordinates
 typedef struct PosT<Car> PosCar;
@@ -195,8 +195,8 @@ template<> struct PosT<Cyl>{
     double R;   ///< cylindrical radius = sqrt(x^2+y^2)
     double z;   ///< z coordinate
     double phi; ///< azimuthal angle in x-y plane [0:2pi)
-    PosT<Cyl>() {}
-    PosT<Cyl>(double _R, double _z, double _phi) : R(_R), z(_z), phi(_phi) {}
+    PosT() {}
+    PosT(double _R, double _z, double _phi) : R(_R), z(_z), phi(_phi) {}
 };
 typedef struct PosT<Cyl> PosCyl;
 
@@ -206,8 +206,8 @@ template<> struct PosT<Sph>{
     double theta; ///< polar angle [0:pi] - 0 means along z axis in positive direction,
                   ///< pi is along z in negative direction, pi/2 is in x-y plane
     double phi;   ///< azimuthal angle in x-y plane [0:2pi)
-    PosT<Sph>() {}
-    PosT<Sph>(double _r, double _theta, double _phi) : r(_r), theta(_theta), phi(_phi) {}
+    PosT() {}
+    PosT(double _r, double _theta, double _phi) : r(_r), theta(_theta), phi(_phi) {}
 };
 typedef struct PosT<Sph> PosSph;
 
@@ -220,7 +220,7 @@ template<> struct PosT<ProlSph>{
     double nu;      ///< lies in the range [-delta:delta]; negative for z<0
     double phi;     ///< usual azimuthal angle
     const ProlSph coordsys;  ///< a point means nothing without specifying its coordinate system
-    PosT<ProlSph>(double _lambda, double _nu, double _phi, const ProlSph& _coordsys):
+    PosT(double _lambda, double _nu, double _phi, const ProlSph& _coordsys):
         lambda(_lambda), nu(_nu), phi(_phi), coordsys(_coordsys) {}
 };
 typedef struct PosT<ProlSph> PosProlSph;
@@ -258,7 +258,7 @@ template<> struct PosT<Axi>{
     double cotnu;  ///< cotangent of the analogue of the polar angle theta, [-inf..inf]
     double phi;    ///< usual azimuthal angle
     Axi cs;        ///< coordinate system
-    PosT<Axi>(double _rho, double _cotnu, double _phi, Axi _cs=Axi(0)) :
+    PosT(double _rho, double _cotnu, double _phi, Axi _cs=Axi(0)) :
         rho(_rho), cotnu(_cotnu), phi(_phi), cs(_cs) {}
 };
 typedef struct PosT<Axi> PosAxi;
@@ -281,8 +281,8 @@ template<typename CoordT> struct VelT;
 /// velocity in cartesian coordinates
 template<> struct VelT<Car> {
     double vx, vy, vz;   ///< components of velocity along three cartesian axes
-    VelT<Car>() {}
-    VelT<Car>(double _vx, double _vy, double _vz) : vx(_vx), vy(_vy), vz(_vz) {}
+    VelT() {}
+    VelT(double _vx, double _vy, double _vz) : vx(_vx), vy(_vy), vz(_vz) {}
 };
 /// an alias to templated type specialization of velocity for cartesian coordinates
 typedef struct VelT<Car> VelCar;
@@ -291,8 +291,8 @@ typedef struct VelT<Car> VelCar;
 /// (this is not the same as time derivative of position in these coordinates!)
 template<> struct VelT<Cyl> {
     double vR, vz, vphi;
-    VelT<Cyl>() {}
-    VelT<Cyl>(double _vR, double _vz, double _vphi) : vR(_vR), vz(_vz), vphi(_vphi) {}
+    VelT() {}
+    VelT(double _vR, double _vz, double _vphi) : vR(_vR), vz(_vz), vphi(_vphi) {}
 };
 typedef struct VelT<Cyl> VelCyl;
 
@@ -300,15 +300,15 @@ typedef struct VelT<Cyl> VelCyl;
 /// (this is not the same as time derivative of position in these coordinates!)
 template<> struct VelT<Sph> {
     double vr, vtheta, vphi;
-    VelT<Sph>() {}
-    VelT<Sph>(double _vr, double _vtheta, double _vphi) : vr(_vr), vtheta(_vtheta), vphi(_vphi) {}
+    VelT() {}
+    VelT(double _vr, double _vtheta, double _vphi) : vr(_vr), vtheta(_vtheta), vphi(_vphi) {}
 };
 typedef struct VelT<Sph> VelSph;
 
 /// velocity components (not momenta) in universal spheroidal coordinates
 template<> struct VelT<Axi> {
     double vrho, vnu, vphi;
-    VelT<Axi>(double _vrho, double _vnu, double _vphi) : vrho(_vrho), vnu(_vnu), vphi(_vphi) {}
+    VelT(double _vrho, double _vnu, double _vphi) : vrho(_vrho), vnu(_vnu), vphi(_vphi) {}
 };
 typedef struct VelT<Axi> VelAxi;
 
@@ -346,17 +346,17 @@ template<typename CoordT> struct PosVelT;
 
 /// combined position and velocity in cartesian coordinates
 template<> struct PosVelT<Car>: public PosCar, public VelCar {
-    PosVelT<Car>() {}
+    PosVelT() {}
 
     /// initialize from position and velocity
-    PosVelT<Car>(const PosCar& pos, const VelCar& vel) : PosCar(pos), VelCar(vel) {}
+    PosVelT(const PosCar& pos, const VelCar& vel) : PosCar(pos), VelCar(vel) {}
 
     /// initialize from explicitly given numbers
-    PosVelT<Car>(double _x, double _y, double _z, double _vx, double _vy, double _vz) :
+    PosVelT(double _x, double _y, double _z, double _vx, double _vy, double _vz) :
         PosCar(_x, _y, _z), VelCar(_vx, _vy, _vz) {}
 
     /// initialize from an array of 6 floats (i.e., from a serialized array)
-    PosVelT<Car>(const double p[]) :
+    PosVelT(const double p[]) :
         PosCar(p[0], p[1], p[2]), VelCar(p[3], p[4], p[5]) {}
 
     /// serialize into an array of 6 floating-point numbers
@@ -371,17 +371,17 @@ typedef struct PosVelT<Car> PosVelCar;
 
 /// combined position and velocity in cylindrical coordinates
 template<> struct PosVelT<Cyl>: public PosCyl, public VelCyl {
-    PosVelT<Cyl>() {}
+    PosVelT() {}
 
     /// initialize from position and velocity
-    PosVelT<Cyl>(const PosCyl& pos, const VelCyl& vel) : PosCyl(pos), VelCyl(vel) {}
+    PosVelT(const PosCyl& pos, const VelCyl& vel) : PosCyl(pos), VelCyl(vel) {}
 
     /// initialize from explicitly given numbers
-    PosVelT<Cyl>(double _R, double _z, double _phi, double _vR, double _vz, double _vphi) :
+    PosVelT(double _R, double _z, double _phi, double _vR, double _vz, double _vphi) :
         PosCyl(_R, _z, _phi), VelCyl(_vR, _vz, _vphi) {};
 
     /// initialize from an array of 6 floats (i.e., from a serialized array)
-    PosVelT<Cyl>(const double p[]) :
+    PosVelT(const double p[]) :
         PosCyl(p[0], p[1], p[2]), VelCyl(p[3], p[4], p[5]) {};
 
     /// serialize into an array of 6 floating-point numbers
@@ -395,17 +395,17 @@ typedef struct PosVelT<Cyl> PosVelCyl;
 
 /// combined position and velocity in spherical coordinates
 template<> struct PosVelT<Sph>: public PosSph, public VelSph {
-    PosVelT<Sph>() {}
+    PosVelT() {}
 
     /// initialize from position and velocity
-    PosVelT<Sph>(const PosSph& pos, const VelSph& vel) : PosSph(pos), VelSph(vel) {}
+    PosVelT(const PosSph& pos, const VelSph& vel) : PosSph(pos), VelSph(vel) {}
 
     /// initialize from explicitly given numbers
-    PosVelT<Sph>(double _r, double _theta, double _phi, double _vr, double _vtheta, double _vphi) :
+    PosVelT(double _r, double _theta, double _phi, double _vr, double _vtheta, double _vphi) :
         PosSph(_r, _theta, _phi), VelSph(_vr, _vtheta, _vphi) {};
 
     /// initialize from an array of 6 floats (i.e., from a serialized array)
-    PosVelT<Sph>(const double p[]) :
+    PosVelT(const double p[]) :
         PosSph(p[0], p[1], p[2]), VelSph(p[3], p[4], p[5]) {};
 
     /// serialize into an array of 6 floating-point numbers
@@ -421,7 +421,7 @@ typedef struct PosVelT<Sph> PosVelSph;
 /// TODO: remove once Staeckel Fudge is reimplemented using Axi
 template<> struct PosVelT<ProlSph>: public PosProlSph{
     double lambdadot, nudot, phidot;  ///< time derivatives of position variables
-    PosVelT<ProlSph>(const PosProlSph& pos, double _lambdadot, double _nudot, double _phidot):
+    PosVelT(const PosProlSph& pos, double _lambdadot, double _nudot, double _phidot):
         PosProlSph(pos), lambdadot(_lambdadot), nudot(_nudot), phidot(_phidot) {}
     void unpack_to(double *out) const {
         out[0]=lambda; out[1]=nu; out[2]=phi; out[3]=lambdadot; out[4]=nudot; out[5]=phidot; }
@@ -430,7 +430,7 @@ typedef struct PosVelT<ProlSph> PosVelProlSph;
 
 /// position and velocity in universal spheroidal coordinates
 template<> struct PosVelT<Axi>: public PosAxi, public VelAxi {
-    PosVelT<Axi>(const PosAxi& pos, const VelAxi& vel) : PosAxi(pos), VelAxi(vel) {}
+    PosVelT(const PosAxi& pos, const VelAxi& vel) : PosAxi(pos), VelAxi(vel) {}
 
     /// serialize into an array of 6 floating-point numbers
     void unpack_to(double *out) const {

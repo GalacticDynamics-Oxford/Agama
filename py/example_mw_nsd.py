@@ -46,7 +46,7 @@ def plotModel(model, df):
     nsd = model.components[1].density
     rho_nsd = nsd.density(gridxyz).reshape(len(gridz), len(gridx))
     Sig_nsd = nsd.projectedDensity(gridxz, beta=numpy.pi/2).reshape(len(gridz), len(gridx))
-    plt.figure(figsize=(20,15))
+    plt.figure(figsize=(15,10), dpi=75)
     ax = numpy.array(
         [plt.axes([0.035, 0.81-0.195*i, 0.38, 0.18]) for i in range(5)] +
         [plt.axes([0.425, 0.81-0.195*i, 0.38, 0.18]) for i in range(5)]).reshape(2,5).T
@@ -94,7 +94,7 @@ def plotModel(model, df):
             ax[i,1].text(point[0], point[1], chr(k+65), ha='center', va='center', color='olive')
     gridv = numpy.linspace(-250, 250, 26)   # coarse grid for computing the velocity distribution
     gridV = numpy.linspace(-250, 250, 101)  # fine grid for plotting a smoother spline-interpolated VDF
-    vdfx, vdfz, vdfd = gm.vdf(points, gridv, beta=numpy.pi/2)
+    vdfx, vdfz, vdfd = gm.vdf(points, gridv=gridv, beta=numpy.pi/2)
     for i in range(4):
         ax=plt.axes([0.845, 0.75-0.24*i, 0.15, 0.225])
         ax.plot(gridV, vdfd[i](-gridV), 'b', label='f(v_los)')

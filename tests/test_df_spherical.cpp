@@ -38,7 +38,7 @@ const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 /// analytic expressions for rmax(E) in the Plummer and Hernquist models
 template<> class Rmax<Plummer>: public math::IFunction {
 public:
-    Rmax<Plummer>(){}
+    Rmax(){}
     virtual void evalDeriv(double E, double* Rmax, double* dRmaxdE, double* =NULL) const {
         if(Rmax)
             *Rmax = -sqrt(1-E*E)/E;
@@ -50,7 +50,7 @@ public:
 
 template<> class Rmax<Hernquist>: public math::IFunction {
 public:
-    Rmax<Hernquist>(){}
+    Rmax(){}
     virtual void evalDeriv(double E, double* Rmax, double* dRmaxdE, double* =NULL) const {
         if(Rmax)
             *Rmax = -1/E-1;
@@ -64,7 +64,7 @@ public:
 /// analytic expressions for phase volume and density of states in the Plummer model
 template<> class Phasevol<Plummer>: public math::IFunction {
 public:
-    Phasevol<Plummer>(){}
+    Phasevol(){}
     virtual void evalDeriv(double E, double* h, double* g, double* =NULL) const {
         if(E<-0.99) {  // asymptotic expressions for E -> -1
             double x = E+1;
@@ -91,7 +91,7 @@ public:
 /// analytic expressions for phase volume and density of states in the Hernquist model
 template<> class Phasevol<Hernquist>: public math::IFunction {
 public:
-    Phasevol<Hernquist>(){}
+    Phasevol(){}
     virtual void evalDeriv(double E, double* h, double* g, double* =NULL) const {
         if(E<-0.975) {  // asymptotic expressions for E -> -1
             double x = E+1;
@@ -118,7 +118,7 @@ template<> class DF<Plummer>: public df::QuasiSpherical {
 public:
     const double beta, an;
 
-    DF<Plummer>(double _beta=0, double r_a=INFINITY) :
+    DF(double _beta=0, double r_a=INFINITY) :
         QuasiSpherical(potential::Sphericalized<potential::BasePotential>(potential::Plummer(1,1))),
         beta(_beta), an(1/r_a/r_a)
     {}
@@ -153,7 +153,7 @@ template<> class DF<Hernquist>: public df::QuasiSpherical {
 public:
     const double beta, prefact;
 
-    DF<Hernquist>(double _beta=0, double /*r_a*/=INFINITY) :
+    DF(double _beta=0, double /*r_a*/=INFINITY) :
         QuasiSpherical(potential::Sphericalized<potential::BasePotential>(potential::Dehnen(1,1,1,1,1))),
         beta(_beta),
         prefact(pow(2., beta-2.5) * math::gamma(5-2*beta) /

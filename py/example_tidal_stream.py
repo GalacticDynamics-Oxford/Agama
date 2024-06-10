@@ -235,6 +235,8 @@ while time < tend:
         bx2.set_ylabel('distance')
         cx1.set_ylabel('bound mass')
         cx2.set_ylabel('bound mass')
+        cx1.yaxis.set_label_position('right')
+        cx2.yaxis.set_label_position('right')
         plt.draw()
         plt.pause(.01)
 

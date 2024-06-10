@@ -62,12 +62,12 @@ SOURCES   = \
             potential_perfect_ellipsoid.cpp \
             potential_spheroid.cpp \
             potential_utils.cpp \
-            raga_core.cpp   \
-            raga_binary.cpp  \
+            raga_core.cpp \
+            raga_binary.cpp \
             raga_losscone.cpp \
             raga_potential.cpp \
             raga_relaxation.cpp \
-            raga_trajectory.cpp  \
+            raga_trajectory.cpp \
             utils.cpp \
             utils_config.cpp \
 

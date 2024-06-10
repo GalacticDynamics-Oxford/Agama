@@ -167,17 +167,18 @@ bool testDensSH()
     const potential::Dehnen dens(1., 1., 1.2, 0.8, 0.5);
     std::vector<double> radii1, radii2;
     std::vector<std::vector<double> > coefs1, coefs2;
-    potential::PtrDensity dens1 = potential::DensitySphericalHarmonic::create(dens,
-        /*lmax*/ 8, /*mmax*/ 6, /*gridSizeR*/ 51, /*rmin*/ 0.01, /*rmax*/ 100);
-    dynamic_cast<const potential::DensitySphericalHarmonic&>(*dens1).getCoefs(radii1, coefs1);
+    shared_ptr<const potential::DensitySphericalHarmonic>
+    dens1 = potential::DensitySphericalHarmonic::create(dens,
+        /*lmax*/ 8, /*mmax*/ 6, /*gridSizeR*/ 51, /*rmin*/ 0.01, /*rmax*/ 100),
     // creating a sph-harm expansion from another s-h expansion:
     // should produce identical results if the location of radial grid points
     // (partly) coincides with the first one, and the requested order of expansions lmax,mmax
     // are at least as large as the original ones (the extra coefs will be zero and thus eliminated).
     // Here we use a twice denser grid: every other node coincides with that of the first grid
-    potential::PtrDensity dens2 = potential::DensitySphericalHarmonic::create(*dens1,
+    dens2 = potential::DensitySphericalHarmonic::create(*dens1,
         /*lmax*/10, /*mmax*/ 8, /*gridSizeR*/101, /*rmin*/ 0.01, /*rmax*/ 100);
-    dynamic_cast<const potential::DensitySphericalHarmonic&>(*dens2).getCoefs(radii2, coefs2);
+    dens1->getCoefs(radii1, coefs1);
+    dens2->getCoefs(radii2, coefs2);
     // check that the two sets of coefs are identical at equal radii
     bool ok = radii1.size() == 51 && radii2.size() == 101 && coefs1.size() == coefs2.size();
     for(unsigned int c=0; c<coefs2.size(); c++)

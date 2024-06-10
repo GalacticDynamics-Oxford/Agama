@@ -49,3 +49,6 @@ $(EXEDIR):
 test:
 	cd py
 	python alltest.py
+
+clean:
+	del $(OBJDIR)\*.obj $(EXEDIR)\*.exe $(LIBNAME) $(PYDNAME)

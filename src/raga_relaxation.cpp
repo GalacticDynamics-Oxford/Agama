@@ -180,15 +180,13 @@ potential::PtrPotential createSphericalPotential(
     // obtain the sph.-harm. coefficients of the stellar potential
     std::vector<double> rad;
     std::vector<std::vector<double> > Phi, dPhi;
-    try{
+    const potential::Multipole* potmul = dynamic_cast<const potential::Multipole*>(&potential);
+    if(potmul) {
         // if the potential is an instance of Multipole class, take the coefs directly from it
-        dynamic_cast<const potential::Multipole&>(potential).getCoefs(rad, Phi, dPhi);
-    }
-    catch(std::bad_cast&) {
+        potmul->getCoefs(rad, Phi, dPhi);
+    } else {
         // otherwise construct a temporary instance of Multipole and take the coefs from it
-        dynamic_cast<const potential::Multipole&>(
-            *potential::Multipole::create(potential, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50)
-        ).getCoefs(rad, Phi, dPhi);
+        potential::Multipole::create(potential, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50)->getCoefs(rad, Phi, dPhi);
     }
 
     // safety check: ensure that the potential is finite at origin

@@ -25,16 +25,17 @@ On the other hand, the second approach can create non-uniformly rotating arbitra
 """
 import agama, numpy, matplotlib.pyplot as plt
 
-ax = plt.subplots(1, 3, figsize=(15,5))[1]
+plt.rc('font', size=10)
+ax = plt.subplots(1, 3, figsize=(12,4), dpi=100)[1]
 
 au = 4.84814e-9  # 1 astronomical unit in kpc
 # work in solar system units: 1 AU, 1 Msun, 1 km/s, 4.74 yr
 agama.setUnits(length=au, mass=1, velocity=1)
 
-r0 = 1.         # AU
-v0 = 29.784694  # km/s - orbital velocity of Earth
-om = v0/r0      # Omega - angular frequency of rotation
-tu = 4.7405     # years in one time unit
+r0 = 1.            # AU
+v0 = agama.G**0.5  # ~30 km/s - orbital velocity of Earth
+om = v0/r0         # Omega - angular frequency of rotation
+tu = om/2/numpy.pi # years in one time unit
 ic = [r0, 0, 0, 0, v0, 0]  # initial conditions for the orbit - at the other side of the Sun from Earth
 tmax = 20
 
@@ -64,7 +65,7 @@ def JacobiEnergy(pot, orb):
 p1 = agama.Potential(
     dict(type='plummer', mass=0.999, scaleradius=0, center="0.001,0,0"),  # Sun
     dict(type='plummer', mass=0.001, scaleradius=0, center=[-.999,0,0]))  # Earth (a very massive one)
-t1, o1 = agama.orbit(potential=p1, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, Omega=om)
+t1, o1 = agama.orbit(potential=p1, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, Omega=om, dtype=float)
 E1 = JacobiEnergy(p1, o1)
 ax[0].plot(o1[:,0], o1[:,1], c='b')
 ax[1].plot(t1*tu, o1[:,0], c='b')
@@ -92,7 +93,7 @@ ax[2].plot(t1*tu, E1, c='b', label='Two fixed point masses in rotating frame')
 # and it is extrapolated linearly beyond the end of the specified time interval).
 p2 = agama.Potential(potential=p1, rotation=[[0, 0], [1, om]])
 # integrate the orbit of a test particle in the inertial frame, but using a rotating potential
-t2, o2 = agama.orbit(potential=p2, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501)
+t2, o2 = agama.orbit(potential=p2, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, dtype=float)
 o2 = convertToCorotatingFrame(t2, o2)   # transform the orbit back into the corotating frame
 E2 = JacobiEnergy(p2, o2)
 ax[0].plot(o2[:,0], o2[:,1], c='g')
@@ -102,14 +103,15 @@ ax[2].plot(t2*tu, E2, c='g', label='Two rotating point masses in inertial frame'
 
 # variant 3: same setup, but now make the two point masses move on pre-computed circular orbits,
 # and integrate the orbit of the test particle in the inertial frame
-tt = numpy.linspace(0, tmax, 5001)
-center1 = numpy.column_stack((tt, numpy.cos(om*tt)*0.001, numpy.sin(om*tt)*0.001, 0*tt))
-center2 = numpy.column_stack((tt, numpy.cos(om*tt)*-.999, numpy.sin(om*tt)*-.999, 0*tt))
+tt = numpy.linspace(0, tmax*1.01, 6000)
+sinomt, cosomt = numpy.sin(om*tt), numpy.cos(om*tt)
+center1 = numpy.column_stack((tt, cosomt*0.001, sinomt*0.001, 0*tt, -om*sinomt*0.001, om*cosomt*0.001, 0*tt))
+center2 = numpy.column_stack((tt, cosomt*-.999, sinomt*-.999, 0*tt, -om*sinomt*-.999, om*cosomt*-.999, 0*tt))
 # this time we create a composite potential in which each component has a different time-dependent shift
 p3 = agama.Potential(
     dict(type='plummer', mass=0.999, scaleradius=0, center=center1),
     dict(type='plummer', mass=0.001, scaleradius=0, center=center2) )
-t3,o3 = agama.orbit(potential=p3, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501)
+t3,o3 = agama.orbit(potential=p3, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, dtype=float)
 o3 = convertToCorotatingFrame(t3, o3)   # transform the orbit back into the corotating frame
 E3 = JacobiEnergy(p3, o3)
 ax[0].plot(o3[:,0], o3[:,1], c='r')
@@ -120,7 +122,7 @@ ax[2].plot(t3*tu, E3, c='r', label='Two moving point masses in inertial frame')
 # variant 4: instead of manually creating two point masses and putting them on a Kepler orbit,
 # use a special type of potential, which does just that without any modifiers: KeplerBinary
 p4 = agama.Potential(type='KeplerBinary', mass=1, binary_sma=1.0, binary_q=1./999, binary_ecc=0)
-t4,o4 = agama.orbit(potential=p4, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501)
+t4,o4 = agama.orbit(potential=p4, ic=[r0,0,0,0,v0,0], time=tmax, trajsize=501, dtype=float)
 o4 = convertToCorotatingFrame(t4, o4)   # transform the orbit back into the corotating frame
 E4 = JacobiEnergy(p4, o4)
 ax[0].plot(o4[:,0], o4[:,1], c='y')
@@ -140,7 +142,7 @@ ax[1].set_xlabel('time [yr]')
 ax[1].set_ylabel('X (solid), Y (dashed) [au]')
 ax[2].set_xlabel('time [yr]')
 ax[2].set_ylabel('Jacobi energy [km/s]^2')
-ax[2].legend(loc='upper left', frameon=False, fontsize=10)
+ax[2].legend(loc='upper left', frameon=False, fontsize=8)
 
 print('Potentials used in the orbit integration:\n%s\n%s\n%s\n%s' % (p1, p2, p3, p4))
 plt.tight_layout()

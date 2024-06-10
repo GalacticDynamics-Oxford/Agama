@@ -46,7 +46,7 @@ print('''Initial conditions for a cluster in the galaxy are created, what to do 
 
 def runSingleOrbit():
     o = agama.orbit(potential=g_pot, ic=c_center, time=sim_time, trajsize=500)[1]
-    plt.figure(figsize=(10,10))
+    plt.figure(figsize=(10,10), dpi=75)
     plt.plot(o[:,0], o[:,1], 'k')
     plt.xlim(-2.5, 2.5)
     plt.ylim(-2.5, 2.5)
@@ -55,7 +55,7 @@ def runSingleOrbit():
 
 def runRestrictedNbody():
     plt.ion()
-    plt.figure(figsize=(10,10))
+    plt.figure(figsize=(10,10), dpi=75)
     ax = plt.axes([0.08, 0.08, 0.9, 0.9])
     num_intervals = 32
     num_subint = 16
@@ -242,7 +242,7 @@ def runArepoOrGadget(code):
 
 def showSnapshot(filename):
     pos = agama.readSnapshot(filename)[0]
-    plt.figure(figsize=(10,10))
+    plt.figure(figsize=(10,10), dpi=75)
     plt.axes([0.08, 0.08, 0.9, 0.9])
     plt.scatter(pos[:,0], pos[:,1], c='b', s=2, linewidths=0)
     grid = numpy.linspace(-2.5, 2.5, 101)

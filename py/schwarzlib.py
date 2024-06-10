@@ -1046,12 +1046,11 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,-1,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
             axa.set_xticks([])
             axa.set_ylabel('$L_z/L$', fontsize=10, labelpad=-10)
-            this.axp=fig.add_axes([0.83, 0.56, 0.165, 0.43])
+            this.axp=fig.add_axes([0.83, 0.56, 0.165, 0.43], sharex=this.axo)
             axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
             axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
             axa.set_xticks([])
             axa.set_ylabel(r'$[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
-            this.axp.get_shared_x_axes().join(this.axo, this.axp)
         this.axo.set_xscale('linear')
         this.axo.cla()
         this.axp.cla()
@@ -1218,7 +1217,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
 
 
     # main section of the runPlot routine
-    fig = matplotlib.pyplot.figure(figsize=(18,8))
+    fig = matplotlib.pyplot.figure(figsize=(18,8), dpi=75)
     fig.canvas.mpl_connect('pick_event', onclick)
 
     # parse and combine all kinematic datasets
@@ -1320,10 +1319,17 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     chi2labels = []
     for param in panel_params:
         patches = matplotlib.collections.PatchCollection(
-            [matplotlib.patches.Polygon(p, True) for p in apertures],
+            [matplotlib.patches.Polygon(p, closed=True) for p in apertures],
             picker=0.0, edgecolor=(0.5,0.5,0.5,0.5), linewidths=0)
         patchcoll.append(patches)
-        ax=fig.add_axes(param['extent'])
+        # make sure that pan/zoom is synchronized between kinematic maps
+        if panels:
+            kwargs = dict(sharex=panels[0], sharey=panels[0])
+        else:
+            kwargs = {}
+        # enforce a correct aspect ratio for kinematic maps
+        kwargs['aspect'] = 'equal'
+        ax = fig.add_axes(param['extent'], **kwargs)
         ax.add_collection(patches)
         ax.text(0.02, 0.98, param['title'], fontsize=16, transform=ax.transAxes, ha='left', va='top')
         chi2labels.append(ax.text(0.98, 0.98, '', fontsize=12, transform=ax.transAxes, ha='right', va='top'))
@@ -1340,13 +1346,6 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     for patch, param in zip(patchcoll, panel_params):
         cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.035, param['extent'][2], 0.01])
         fig.colorbar(patch, cax=cax, orientation='horizontal', ticks=matplotlib.ticker.MaxNLocator(6))
-    # make sure that pan/zoom is synchronized between kinematic maps
-    for p in panels[1:]:
-        p.get_shared_x_axes().join(*panels)
-        p.get_shared_y_axes().join(*panels)
-    # enforce a correct aspect ratio for kinematic maps
-    for p in panels:
-        p.set_aspect('equal')
 
     ##### likelihood surface #####
     if len(aval)>0:

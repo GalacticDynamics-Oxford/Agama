@@ -197,7 +197,7 @@ if __name__ == "__main__":
     v_max = 0.75 * (-2 * (model.potential.potential(0,0,0)-model.potential[0].potential(0,0,0)))**0.5
     gridv = numpy.linspace(-v_max, v_max, 80)  # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvR, splvphi, splvz = modelDisk.vdf(xyz, gridv)
+    splvR, splvphi, splvz = modelDisk.vdf(xyz, gridv=gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 251)
     for i,p in enumerate(xyz):

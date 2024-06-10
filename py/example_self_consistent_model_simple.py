@@ -37,7 +37,7 @@ for i in range(10):
     plt.plot(r, scm.potential.density(xyz), label='Iteration #'+str(i))
 
 # save the final density/potential profile
-scm.potential.export("simple_scm.coef_mul")
+scm.potential.export("simple_scm.ini")
 
 # show the results
 plt.legend(loc='lower left')

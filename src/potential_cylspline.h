@@ -48,7 +48,7 @@ public:
         The order of this internal Fourier expansion mmaxFourier will be fixed to mmax
         if fixOrder==true, otherwise will be higher than mmax to improve accuracy.
     */
-    static PtrDensity create(const BaseDensity& src, int mmax,
+    static shared_ptr<const DensityAzimuthalHarmonic> create(const BaseDensity& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false);
@@ -134,13 +134,13 @@ public:
         (the latter is the input density when it is axisymmetric, otherwise an internally created
         instance of DensityAzimuthalHarmonic).
     */
-    static PtrPotential create(const BaseDensity& src, int mmax,
+    static shared_ptr<const CylSpline> create(const BaseDensity& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false, bool useDerivs=true);
 
     /** Same as above, but taking a potential model as an input. */
-    static PtrPotential create(const BasePotential& src, int mmax,
+    static shared_ptr<const CylSpline> create(const BasePotential& src, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false);
@@ -166,7 +166,7 @@ public:
         (due to noisy nature of N-body models, higher order does not necessarily imply more accuracy).
         \note OpenMP-parallelized loop over nodes of a 2d grid in R,z.
     */
-    static PtrPotential create(
+    static shared_ptr<const CylSpline> create(
         const particles::ParticleArray<coord::PosCyl>& particles,
         coord::SymmetryType sym, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,

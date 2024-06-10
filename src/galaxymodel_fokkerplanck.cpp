@@ -172,7 +172,7 @@ potential::PtrPotential computePotential(
     std::vector<std::vector<double> > Phi, dPhi;
     if(modelDensity) {
         // compute the potential from the density, i.e. solve the Poisson equation
-        potential::PtrPotential modelPotential =
+        shared_ptr<const potential::Multipole> modelPotential =
         potential::Multipole::create(potential::FunctionToDensityWrapper(*modelDensity),
             /*lmax*/ 0, /*mmax*/ 0, /*gridsize*/ 100, rmin, rmax);
 
@@ -184,7 +184,7 @@ potential::PtrPotential computePotential(
             return modelPotential;
 
         // otherwise obtain the potential coefficients and later add the black hole contribution
-        dynamic_cast<const potential::Multipole&>(*modelPotential).getCoefs(rad, Phi, dPhi);
+        modelPotential->getCoefs(rad, Phi, dPhi);
     } else {
         if(Mbh == 0)
             throw std::runtime_error(

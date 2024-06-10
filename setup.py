@@ -37,7 +37,7 @@ shared library and example programs. If you only need this, you may run python s
 # if it is loaded mid-way into the installation, things may get wrong, so we import it beforehand
 try: import setuptools
 except: pass
-import os, sys, platform, subprocess, zipfile, distutils, distutils.core, distutils.dir_util, distutils.file_util
+import os, sys, platform, subprocess, ssl, zipfile, distutils, distutils.core, distutils.dir_util, distutils.file_util
 try:        from urllib.request import urlretrieve  # Python 3
 except ImportError: from urllib import urlretrieve  # Python 2
 from distutils import sysconfig
@@ -215,7 +215,7 @@ def createMakefile():
             (isinstance(CONDA_ROOT, str) and os.path.realpath(CONDA_ROOT) in os.path.realpath(sys.executable)) or
             (isinstance(CONDA_PREFIX, str) and os.path.realpath(CONDA_PREFIX) in os.path.realpath(sys.executable)) ):
             CONDA_ROOT = CONDA_PREFIX = None  # we are currently not running python from Anaconda, so forget about it
-        print('CONDA_ROOT=%r, CONDA_PREFIX=%r' % (CONDA_ROOT, CONDA_PREFIX))
+        #print('CONDA_ROOT=%r, CONDA_PREFIX=%r' % (CONDA_ROOT, CONDA_PREFIX))
         HOMEBREW_PREFIX = subprocess.Popen('brew --prefix', shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
         if not os.path.isdir(HOMEBREW_PREFIX):  # should be /usr/local on Intel or /opt/homebrew on ARM
@@ -270,6 +270,11 @@ def createMakefile():
     CXX11_FLAG = '-std=c++11'
     if not MSVC and runCompiler(flags=CXX11_FLAG):
         CXXFLAGS += [CXX11_FLAG]
+    else:
+        # check if we can suppress the following pre-C++11 warning
+        WARNING_FLAG = '-Wno-invalid-offsetof'
+        if runCompiler(flags='-Werror '+WARNING_FLAG):
+            CXXFLAGS += [WARNING_FLAG]
 
     # [1d]: on MacOS, set the machine architecture explicitly to avoid mismatch between x86_64 and arm64 on the newer M1 platform
     if MACOS:
@@ -279,7 +284,7 @@ def createMakefile():
 
     # [1e]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
     ARCH_FLAG = '-march=native'
-    if not MSVC:
+    if not MSVC and not MACOS:
         if runCompiler(flags=ARCH_FLAG):
             CXXFLAGS += [ARCH_FLAG]
         else:
@@ -315,14 +320,22 @@ def createMakefile():
         get_config_var('SYSLIBS').split())
 
     # test code for a shared library (Python extension module)
+    if sys.version_info[0]*0x100 + sys.version_info[1] < 0x303:
+        sys_prefix_var = 'sys.prefix'
+        sys_prefix_val =  sys.prefix
+    else:
+        # starting from version 3.3, sys.prefix may be modified if running in venv,
+        # while base_prefix keeps the original value (directory where the python is installed)
+        sys_prefix_var = 'sys.base_prefix'
+        sys_prefix_val =  sys.base_prefix
     PYTEST_LIB_CODE = """
 #include "Python.h"
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include "numpy/arrayobject.h"
-void bla() {PyRun_SimpleString("import sys, os; print('sys.prefix='+os.path.realpath(sys.prefix));");}
+void bla() {PyRun_SimpleString("import sys, os; print('sys.prefix='+os.path.realpath(%s));");}
 void run() {Py_Initialize();bla();Py_Finalize();}
 PyMODINIT_FUNC
-"""
+""" % sys_prefix_var
     if sys.version_info[0]==2:  # Python 2.6-2.7
         PYTEST_LIB_CODE += """
 initagamatest(void) {
@@ -379,7 +392,7 @@ PyInit_agamatest(void) {
         os.remove(PYTEST_LIB_NAME)
         # check if the results (reported library path prefix) are the same as we have in this script
         # (test for substring because the output may contain additional messages)
-        sysprefix = 'sys.prefix=' + os.path.realpath(sys.prefix)
+        sysprefix = 'sys.prefix=' + os.path.realpath(sys_prefix_val)
         if sysprefix not in resultexe  or  sysprefix not in resultpy:
             print("Test program doesn't seem to use the same version of Python, "+\
                 "or the library path is reported incorrectly: \n"+\
@@ -405,8 +418,8 @@ PyInit_agamatest(void) {
             tryRemove('agamatest.lib')
             tryRemove('agamatest.exp')
             # check if the results (reported library path prefix) are the same as we have in this script
-            sysprefix = os.path.realpath(sys.prefix)
-            if returnpy == 0 and os.path.realpath(resultpy) == sysprefix:  # everything fine
+            sysprefix = 'sys.prefix=' + os.path.realpath(sys.prefix)
+            if returnpy == 0 and sysprefix in resultpy:  # everything fine
                 return PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS
             print("Test program doesn't seem to use the same version of Python, "+\
                 "or the library path is reported incorrectly: \n"+\
@@ -494,6 +507,11 @@ PyInit_agamatest(void) {
     #include <gsl/gsl_integration.h>
     void run() { gsl_integration_cquad_workspace_alloc(10); }
     """
+    # prevent "certificate verify failed" error in urlretrieve
+    try:
+        ssl._create_default_https_context = ssl._create_unverified_context
+    except:
+        pass
     if not MSVC:   # install GSL on Linux/MacOS
         if runCompileShared(GSL_TEST_CODE, flags=' '.join(COMPILE_FLAGS + LINK_FLAGS + ['-lgsl', '-lgslcblas'])):
             # apparently the headers and libraries can be found in some standard location,
@@ -505,9 +523,9 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say("Downloading GSL\n")
             filename = 'gsl.tar.gz'
-            dirname  = 'gsl-2.7'
+            dirname  = 'gsl-2.8'
             try:
-                urlretrieve('https://ftp.gnu.org/gnu/gsl/gsl-2.7.tar.gz', filename)
+                urlretrieve('https://ftp.gnu.org/gnu/gsl/gsl-2.8.tar.gz', filename)
                 if os.path.isfile(filename):
                     say("Unpacking GSL\n")
                     subprocess.call(['tar', '-zxf', filename])    # unpack the archive
@@ -537,11 +555,10 @@ PyInit_agamatest(void) {
             distutils.dir_util.mkpath(EXTRAS_DIR)
             os.chdir(EXTRAS_DIR)
             say("Downloading GSL\n")
-            filename = 'gsl.zip'
-            archivename = 'de1c175ee239ea0f243bf72016bad2e53338e830'
-            dirname = 'gsl-' + commitname
+            dirname  = 'gsl-master'
+            filename = dirname + '.zip'
             try:
-                urlretrieve('https://github.com/BrianGladman/gsl/archive/%s.zip' % archivename, filename)
+                urlretrieve('http://agama.software/files/%s' % filename, filename)
                 if os.path.isfile(filename):
                     say("Unpacking GSL\n")
                     zipf = zipfile.ZipFile(filename, 'r')  # unpack the archive
@@ -586,9 +603,9 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say('Downloading Eigen\n')
             filename = 'Eigen.zip'
-            dirname  = 'eigen-3.4.0'
+            dirname  = 'eigen-3.3.9'
             try:
-                urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip', filename)
+                urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.zip', filename)
                 if os.path.isfile(filename):
                     say("Unpacking Eigen\n")
                     zipf = zipfile.ZipFile(filename, 'r')
@@ -657,7 +674,7 @@ PyInit_agamatest(void) {
         say("GLPK library (optional) is not found, ignored\n")
 
     # [7]: test if UNSIO is present (optional), download and compile if needed
-    if not MSVC and runCompileShared('#include <uns.h>\nvoid run() { }\n',
+    if not MSVC and runCompileShared('#include <uns.h>\nvoid run() { uns::CunsOut("temp", "nemo"); }\n',
         flags=' '.join(COMPILE_FLAGS + LINK_FLAGS + ['-lunsio', '-lnemo'])):
         COMPILE_FLAGS += ['-DHAVE_UNSIO']
         LINK_FLAGS    += ['-lunsio', '-lnemo']
@@ -773,7 +790,7 @@ distutils.core.setup(
     packages         = ['agama'],
     package_dir      = {'agama': '.'},
     package_data     = {'agama': allFiles('data','doc','py','src','tests') +
-        ['Makefile', 'Makefile.local.template', 'Doxyfile', 'INSTALL', 'LICENSE', 'README'] },
+        ['Makefile', 'Makefile.msvc', 'Makefile.list', 'Makefile.local.template', 'Doxyfile', 'INSTALL', 'LICENSE', 'NEWS', 'README'] },
     ext_modules      = [distutils.extension.Extension('', [])],
     cmdclass         = {'build_ext': MyBuildExt, 'test': MyTest},
     zip_safe         = False,

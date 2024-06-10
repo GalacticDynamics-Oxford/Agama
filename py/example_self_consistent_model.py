@@ -66,7 +66,7 @@ def writeVelocityDistributions(filename, model):
     v_max = 360.0    # km/s
     gridv = numpy.linspace(-v_max, v_max, 75) # use the same grid for all dimensions
     # compute the distributions (represented as cubic splines)
-    splvx, splvy, splvz = model.vdf(point, gridv)
+    splvx, splvy, splvz = model.vdf(point, gridv=gridv)
     # output f(v) at a different grid of velocity values
     gridv = numpy.linspace(-v_max, v_max, 201)
     numpy.savetxt(filename, numpy.column_stack((gridv, splvx(gridv), splvy(gridv), splvz(gridv))),

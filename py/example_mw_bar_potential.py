@@ -187,7 +187,7 @@ if __name__ == '__main__':
 
     r=numpy.linspace(0,10,101)
     xyz=numpy.column_stack((r,r*0,r*0))
-    ax=plt.subplots(1, 2, figsize=(16,8))[1]
+    ax=plt.subplots(1, 2, figsize=(12,6), dpi=100)[1]
     ax[0].plot(r, (-r*pot_axi[0].force(xyz)[:,0])**0.5, 'c', label='stars')
     ax[0].plot(r, (-r*pot_axi[1].force(xyz)[:,0])**0.5, 'y', label='halo')
     ax[0].plot(r, (-r*pot_axi   .force(xyz)[:,0])**0.5, 'r', label='total')

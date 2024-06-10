@@ -131,12 +131,14 @@ def testGalpy():
         lambda R,z,phi: densfnc(numpy.array([[R*numpy.cos(phi),R*numpy.sin(phi),z]]))[0],
         N=nmax+1, L=lmax+1, a=r0, phi_order=40)
     pot_galpy_native= galpy.potential.SCFPotential(Acos=Acos, Asin=Asin, a=r0)
+    if hasattr(pot_galpy_native, 'phitorque'):  # renamed from phiforce in newer versions
+        pot_galpy_native.phiforce = pot_galpy_native.phitorque
     t1=time.time()
     print('evaluating agama scf potential initialized from galpy coefficients')
     Acos[:,:,0] *= 0.5; Asin[:,:,0] *= 0.5  # by some strange convention, m=0 terms are doubled in galpy
     pot_agama_galpy = convertCoefsToAgamaPotential(r0, Acos, Asin, 'example_basis_set_galpy.ini')
-    Phi_agama_galpy = pot_agama_galpy. potential(points)
-    acc_agama_galpy = pot_agama_galpy. force(points)
+    Phi_agama_galpy = pot_agama_galpy.potential(points)
+    acc_agama_galpy = pot_agama_galpy.force(points)
     print('evaluating galpy scf potential')
     t2=time.time()
     # need to convert from cylindrical to cartesian coords

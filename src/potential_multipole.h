@@ -68,7 +68,7 @@ public:
         of the input density to the output order; if false (default), it may be higher
         (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrDensity create(
+    static shared_ptr<const DensitySphericalHarmonic> create(
         const BaseDensity& src,
         int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
@@ -88,7 +88,7 @@ public:
         \param[in]  smoothing  is the amount of smoothing applied during penalized spline fitting.
         \note OpenMP-parallelized loops over particles and over expansion coefficients.
     */
-    static PtrDensity create(
+    static shared_ptr<const DensitySphericalHarmonic> create(
         const particles::ParticleArray<coord::PosCyl> &particles,
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0., double smoothing = 1.);
@@ -196,14 +196,14 @@ public:
         of the input density to the output order; if false (default), it may be higher
         (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrPotential create(
+    static shared_ptr<const Multipole> create(
         const BaseDensity& src,
         int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
     /** same as above, but takes a potential model as an input */
-    static PtrPotential create(
+    static shared_ptr<const Multipole> create(
         const BasePotential& src,
         int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
@@ -223,7 +223,7 @@ public:
         \param[in]  smoothing  is the amount of smoothing applied during penalized spline fitting.
         \note OpenMP-parallelized loops over particles and over expansion coefficients.
     */
-    static PtrPotential create(
+    static shared_ptr<const Multipole> create(
         const particles::ParticleArray<coord::PosCyl> &particles,
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0., double rmax = 0., double smoothing = 1.);
@@ -291,7 +291,7 @@ public:
         of the input density to the output order; if false (default), it may be higher
         (use a larger number of grid points in angles) to improve accuracy.
     */
-    static PtrPotential create(
+    static shared_ptr<const BasisSet> create(
         const BaseDensity& src,
         int lmax, int mmax,
         unsigned int nmax, double eta=1.0, double r0=0.0,
@@ -309,7 +309,7 @@ public:
         \param[in]  r0    is the scale radius of basis functions (0 means auto-detect).
         \note OpenMP-parallelized loop over particles.
     */
-    static PtrPotential create(
+    static shared_ptr<const BasisSet> create(
         const particles::ParticleArray<coord::PosCyl> &particles,
         coord::SymmetryType sym, int lmax, int mmax,
         unsigned int nmax, double eta=1.0, double r0=0.0);

@@ -16,14 +16,8 @@ or even throw an exception which propagates up the call stack).
 Ordinary pointers are not objects, but smart pointer wrappers are, and they take care
 of deleting the ordinary pointer when they get out of scope or are manually released.
 
-There are two main types of smart pointers that correspond to different ownership rules:
-exclusive and shared.
-The first model applies to local variables that should not leave the scope of a routine,
-or to class members that are created in the constructor and are owned by the instance of
-this class, therefore must be disposed of when the owner object is destroyed.
-This is represented by `std::unique_ptr`, which is only available in C++11;
-its incomplete analog for older compiler versions is `std::auto_ptr`.
-The second model allows shared ownership of an object by several pointers, ensuring that
+We use only one kind of smart pointers, namely shared_ptr. As implied by its name,
+this classl allows shared ownership of an object by several pointers, ensuring that
 the object under control stays alive as long as there is at least one smart pointer
 that keeps track of it (in other words, it implements reference counting approach).
 This is used to pass around wrapped objects between different parts of code that do not
@@ -31,9 +25,6 @@ have a predetermined execution order or lifetime. For example, an instance of Po
 can be passed to an ActionFinder that makes a copy of the pointer and keeps it as long
 as the action finder itself stays alive, even though the original smart pointer might
 have been deleted long ago.
-This second model is represented by `std::shared_ptr` (or its pre-C++11 namesake
-`std::tr1::shared_ptr`), and is used for the common classes like Density, Potential,
-DistributionFunction or ActionFinder.
 
 A side advantage of shared smart pointers is that they make possible to share
 an object whose exact type is not fully specified (i.e. is a derived class in some
@@ -83,21 +74,14 @@ be used inside the constructor, but not any longer.
 */
 
 #pragma once
-// We use different definitions for the smart pointer classes,
-// depending on whether we have C++11 support or not;
-// in the latter case it is replaced with std::tr1::, but if that is not available either,
-// one may substitute it with the boost implementations.
-// Unfortunately a side effect is a pollution of root namespace...
-
+// If compiled in the C++11 mode, use shared_ptr from the standard library,
+// otherwise use a custom minimalistic implementation bundled with the code.
 #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && (_MSC_VER >= 1600))
 // have a C++11 compatible compiler
 #include <memory>
 using std::shared_ptr;
 #else
-// have an old-style compiler, hopefully with std::tr1::shared_ptr available
-// (otherwise will have to replace it with boost::shared_ptr)
-#include <tr1/memory>
-using std::tr1::shared_ptr;
+#include "shared_ptr.h"
 #endif
 
 namespace math{

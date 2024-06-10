@@ -39,6 +39,10 @@
 #define M_SQRT3  1.73205080756887729352744634151
 #endif
 
+#ifndef M_LN2
+#define M_LN2    0.69314718055994530942
+#endif
+
 #define TWO_PI_CUBE 248.050213442398561403810520537
 
 // a few very basic routines declared in the global namespace

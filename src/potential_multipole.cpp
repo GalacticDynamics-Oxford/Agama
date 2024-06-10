@@ -1001,7 +1001,7 @@ void computePotentialCoefsFromSource(const BaseDensity& dens,
 //------ Spherical-harmonic expansion of density ------//
 
 // static factory methods
-PtrDensity DensitySphericalHarmonic::create(const BaseDensity& src,
+shared_ptr<const DensitySphericalHarmonic> DensitySphericalHarmonic::create(const BaseDensity& src,
     int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
@@ -1027,10 +1027,10 @@ PtrDensity DensitySphericalHarmonic::create(const BaseDensity& src,
         /*output*/ &coefs);
     // resize the coefficients back to the requested order and symmetry
     restrictSphHarmCoefs<1>(lmax, mmax, /*in/out*/ &coefs);
-    return PtrDensity(new DensitySphericalHarmonic(gridRadii, coefs));
+    return shared_ptr<const DensitySphericalHarmonic>(new DensitySphericalHarmonic(gridRadii, coefs));
 }
 
-PtrDensity DensitySphericalHarmonic::create(
+shared_ptr<const DensitySphericalHarmonic> DensitySphericalHarmonic::create(
     const particles::ParticleArray<coord::PosCyl> &particles,
     coord::SymmetryType sym, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax, double smoothing)
@@ -1050,7 +1050,7 @@ PtrDensity DensitySphericalHarmonic::create(
     std::vector<std::vector<double> > coefs;
     computeDensityCoefsFromParticles(particles,
         math::SphHarmIndices(lmax, mmax, sym), gridRadii, coefs, smoothing);
-    return PtrDensity(new DensitySphericalHarmonic(gridRadii, coefs));
+    return shared_ptr<const DensitySphericalHarmonic>(new DensitySphericalHarmonic(gridRadii, coefs));
 }
 
 // the actual constructor
@@ -1219,7 +1219,7 @@ private:
 };
 
 template<class BaseDensityOrPotential>
-PtrPotential createMultipole(const BaseDensityOrPotential& src,
+shared_ptr<const Multipole> createMultipole(const BaseDensityOrPotential& src,
     int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
@@ -1244,24 +1244,24 @@ PtrPotential createMultipole(const BaseDensityOrPotential& src,
         gridRadii, coefs);
     // resize the coefficients back to the requested order and symmetry
     restrictSphHarmCoefs<2>(lmax, mmax, coefs);
-    return PtrPotential(new Multipole(gridRadii, coefs[0], coefs[1]));
+    return shared_ptr<const Multipole>(new Multipole(gridRadii, coefs[0], coefs[1]));
 }
 
 //------ the driver class for multipole potential ------//
 
-PtrPotential Multipole::create(const BaseDensity& src,
+shared_ptr<const Multipole> Multipole::create(const BaseDensity& src,
     int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
 }
 
-PtrPotential Multipole::create(const BasePotential& src,
+shared_ptr<const Multipole> Multipole::create(const BasePotential& src,
     int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
 }
 
-PtrPotential Multipole::create(
+shared_ptr<const Multipole> Multipole::create(
     const particles::ParticleArray<coord::PosCyl> &particles,
     coord::SymmetryType sym, int lmax, int mmax,
     unsigned int gridSizeR, double rmin, double rmax, double smoothing)
@@ -1294,7 +1294,7 @@ PtrPotential Multipole::create(
     gridRadii.insert(gridRadii.begin(), pow_2(gridRadii[0])/gridRadii[1]);
     gridRadii.push_back(pow_2(gridRadii.back())/gridRadii[gridRadii.size()-2]);
     computePotentialCoefsFromSource(dens, ind, gridRadii, coefsPot);
-    return PtrPotential(new Multipole(gridRadii, coefsPot[0], coefsPot[1]));
+    return shared_ptr<const Multipole>(new Multipole(gridRadii, coefsPot[0], coefsPot[1]));
 }
 
 // now the one and only 'proper' constructor
@@ -2058,7 +2058,7 @@ void computePotentialCoefsBSE(
 
 } // end internal namespace
 
-PtrPotential BasisSet::create(const BaseDensity& src,
+shared_ptr<const BasisSet> BasisSet::create(const BaseDensity& src,
     int lmax, int mmax, unsigned int nmax, double eta, double r0, bool fixOrder)
 {
     if(lmax<0 || mmax<0 || mmax>lmax || nmax>256 /*a really high upper limit!*/)
@@ -2088,10 +2088,10 @@ PtrPotential BasisSet::create(const BaseDensity& src,
         nmax, eta, r0, /*output*/coefs);
     // resize the coefficients back to the requested order and symmetry
     restrictSphHarmCoefs<1>(lmax, mmax, &coefs);
-    return PtrPotential(new BasisSet(eta, r0, coefs));
+    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, coefs));
 }
 
-PtrPotential BasisSet::create(
+shared_ptr<const BasisSet> BasisSet::create(
     const particles::ParticleArray<coord::PosCyl> &particles,
     coord::SymmetryType sym, int lmax, int mmax,
     unsigned int nmax, double eta, double r0)
@@ -2124,7 +2124,7 @@ PtrPotential BasisSet::create(
     std::vector<std::vector<double> > coefs;
     computePotentialCoefsBSE(particles,
         math::SphHarmIndices(lmax, mmax, sym), nmax, eta, r0, /*output*/coefs);
-    return PtrPotential(new BasisSet(eta, r0, coefs));
+    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, coefs));
 }
 
 BasisSet::BasisSet(double _eta, double _r0, const std::vector<std::vector<double> > &_coefs) :

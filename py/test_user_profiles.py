@@ -96,12 +96,12 @@ mass_gm_user = gm_user.totalMass()
 print("Integration in the 6d phase space:  DF mass=%.8g  (orig value=%.8g)" % (mass_gm_user, mass_gm_orig))
 
 # DF moments (density and velocity dispersion) computed from the C++ DF object
-dens_orig, veldisp_orig = gm_orig.moments(point=(1,0,0))
+dens_orig, veldisp_orig = gm_orig.moments(1,0,0)
 print("original DF at r=1: density=%.8g, sigma_r=%.8g, sigma_t=%.8g" % \
     ( dens_orig, veldisp_orig[0]**0.5, veldisp_orig[1]**0.5 ))
 
 # DF moments computed from the Python distribution function
-dens_user, veldisp_user = gm_user.moments(point=(1,0,0))
+dens_user, veldisp_user = gm_user.moments(1,0,0)
 print("user-def DF at r=1: density=%.8g, sigma_r=%.8g, sigma_t=%.8g" % \
     ( dens_user, veldisp_user[0]**0.5, veldisp_user[1]**0.5 ))
 # gm_user.df.totalMass()  will give the same result as mass_user

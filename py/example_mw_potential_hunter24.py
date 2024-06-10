@@ -165,7 +165,7 @@ pot_plot = agama.Potential(
 
 r=agama.nonuniformGrid(100, 0.001, 500)
 xyz=numpy.column_stack((r,r*0,r*0))
-ax=plt.subplots(1, 2, figsize=(16,8))[1]
+ax=plt.subplots(1, 2, figsize=(12,6), dpi=100)[1]
 ax[0].plot(r, (-r*pot_axi[0].force(xyz)[:,0])**0.5, 'y', label='spheroidal components (BH, NSC, NSD and halo)')
 ax[0].plot(r, (-r*pot_axi[1].force(xyz)[:,0])**0.5, 'c', label='disky components (bar, stellar and gas disks)')
 ax[0].plot(r, (-r*pot_axi   .force(xyz)[:,0])**0.5, 'r', label='total')

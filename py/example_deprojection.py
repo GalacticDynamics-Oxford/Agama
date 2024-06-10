@@ -188,7 +188,7 @@ def drawproj():
                 edgecolor='b', fill=False, closed=False, linestyle='solid')]
             arrowb += [matplotlib.patches.Polygon(numpy.vstack((Sz*R[0:2,2], 2*R[0:2,2])) *-sign[2] + off,
                 edgecolor='b', fill=False, closed=False, linestyle='dotted')]
-            cax.add_artist(matplotlib.patches.Ellipse(off, getSxp*2, getSyp*2, (pi/2-eta)*180/pi,
+            cax.add_artist(matplotlib.patches.Ellipse(off, getSxp*2, getSyp*2, angle=(pi/2-eta)*180/pi,
                 fill=False, edgecolor='k', clip_on=False))
             cax.text(off[0]+Sx, off[1]+Sx,
                 'alpha=%.9f\nbeta=%.9f\ngamma=%.9f' % (getAlpha*180/pi, getBeta*180/pi, getGamma*180/pi),
